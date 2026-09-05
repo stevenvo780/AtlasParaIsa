@@ -23,6 +23,20 @@ Abre **http://127.0.0.1:3000** e ingresa con esa contraseña. Usa exactamente es
 
 El servicio avanza a diez pasos por segundo y guarda cada paso. Cerrar la pestaña no lo detiene. Al detener el proceso y arrancarlo de nuevo, recupera el último estado confirmado y registra una pausa técnica; no inventa encuentros durante la caída.
 
+## Revisar desde la torre que aloja Docker
+
+Dentro de este contenedor Linux, `npm run preview:local` arranca la aplicación en dos sesiones de tmux propias, con `socat` como terminación HTTPS y un certificado local autofirmado. Requiere `tmux`, `socat` con OpenSSL y `openssl`, además de la compilación. El comando muestra la IP privada del contenedor y el puerto **3443**; el puerto interno del servidor es **3123**. `CARTA_PREVIEW_IP` permite elegir otra IPv4 privada asignada al contenedor.
+
+El navegador de la torre debe aceptar el certificado local. La contraseña se genera una vez y se conserva con permisos privados en `~/.local/state/atlas-para-isa-preview/password`, fuera del repositorio. Se consulta localmente; el comando no la imprime en los logs. El mundo de revisión vive en `~/.local/state/atlas-para-isa-preview/world` y se conserva entre arranques.
+
+```sh
+npm run preview:local
+npm run preview:local -- status
+npm run preview:local -- stop
+```
+
+Este acceso por IP de la red bridge está pensado para la propia torre Linux. No publica un puerto en la LAN ni en Internet. Las sesiones sobreviven al cierre de esta terminal, pero no se acredita reinicio automático del contenedor ni alojamiento definitivo. La persistencia tras recrearlo depende de conservar el directorio indicado.
+
 ## Configuración
 
 | Variable | Valor por defecto | Uso |

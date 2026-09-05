@@ -1,0 +1,13 @@
+{
+  "verifiedAt": "2026-09-05T16:15:01.531Z",
+  "origin": "https://172.26.0.4:3443",
+  "verifiedFrom": "Chromium inside container via its bridge IP",
+  "https": true,
+  "privateLogin": true,
+  "secureHttpOnlyCookie": true,
+  "websocketLive": true,
+  "population": 16,
+  "tick": 619,
+  "browserErrors": 0,
+  "hostBrowserNotVerified": true
+}

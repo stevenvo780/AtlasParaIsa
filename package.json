@@ -15,6 +15,7 @@
     "test:e2e": "playwright test",
     "test:soak": "tsx scripts/soak.ts",
     "test:smoke": "tsx scripts/smoke.ts",
+    "preview:local": "tsx scripts/preview.ts",
     "access": "tsx scripts/access.ts",
     "backup": "tsx scripts/storage.ts backup",
     "restore": "tsx scripts/storage.ts restore",

@@ -2,6 +2,8 @@
 
 Fecha: 5 de septiembre de 2026. Prototipo local con datos sintéticos. No se ha publicado una URL ni configurado alojamiento. La apertura personal y los recuerdos reales siguen pendientes del autor.
 
+Actualización operativa, 16:15 UTC: revisión privada arrancada dentro de `ws-steven` en **https://172.26.0.4:3443**, solicitada por Steven. Se verificaron HTTPS, login, cookie segura/HttpOnly y WebSocket en Chromium desde el contenedor. [Resultado del servicio vivo](../artifacts/live-preview.json) y [captura](../artifacts/live-preview.png). La ruta desde el navegador físico de la torre queda pendiente de su comprobación. El certificado es local autofirmado; los procesos viven en sesiones tmux propias y el mundo en `~/.local/state/atlas-para-isa-preview/world`. El [README](../README.md#revisar-desde-la-torre-que-aloja-docker) documenta arranque y cierre. No hay publicación en Internet ni alojamiento externo contratado.
+
 ## Resultado observable
 
 La aplicación integra una región de 40 × 28 celdas, S e I, catorce vecinos, recursos finitos, cinco recuerdos identificados como ejemplos y una costumbre de compartir aprendida por observación. La cámara, las fichas, la crónica y los tres gestos funcionan en navegador. El servidor mantiene el mundo sin pestañas abiertas, guarda antes de confirmar un gesto y recupera el último paso confirmado al reiniciar.

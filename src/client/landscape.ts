@@ -347,7 +347,7 @@ export class Landscape {
   private effects = { water: 0, vegetation: 0, rain: 0, events: 0, shadows: 0 };
   private actionActive = false;
   private lighting = { shadowX: 4, shadowY: 3, shadowAlpha: .14 };
-  private carriedProducts = new Map<string, Capability>();
+  private carriedProducts = new Map<string, Capability | 'material'>();
   /** Escena completa por frame, también a resolución de arte. */
   private scene: HTMLCanvasElement;
   private sceneCtx: CanvasRenderingContext2D;
@@ -510,7 +510,7 @@ export class Landscape {
     for (const item of world.technology?.items ?? []) {
       if (item.mass <= 0 || this.carriedProducts.has(item.ownerId)) continue;
       const dominant = (Object.entries(item.capacities) as [Capability,number][]).sort((a,b)=>b[1]-a[1])[0];
-      if (dominant) this.carriedProducts.set(item.ownerId,dominant[0]);
+      if (dominant) this.carriedProducts.set(item.ownerId,dominant[1]>.08 ? dominant[0] : 'material');
     }
     this.sceneRevision++;
 
@@ -1182,7 +1182,7 @@ export class Landscape {
     }
     for (const s of sprites) {
       if (s.kind === SpriteKind.Tree) this.drawCachedTree(g, s, t);
-      else if (s.kind === SpriteKind.Hut) this.drawHut(g, s.ax, s.ay, s.seed, world.phase);
+      else if (s.kind === SpriteKind.Hut) this.drawHut(g, s.ax, s.ay, s.seed);
       else if (s.animal) this.drawAnimal(g, s.animal, t);
       else if (s.structure) this.drawStructure(g, s.structure);
       else if (s.tile) this.drawFauna(g, s.tile, t);
@@ -1398,7 +1398,7 @@ export class Landscape {
     ellipse(g, cx - r * .54, cy - r * .2, r * .35, r * .35, css(mix(light,mid,.25)));
   }
 
-  private drawHut(g: CanvasRenderingContext2D, ax: number, ay: number, seed: number, phase: WorldView['phase']): void {
+  private drawHut(g: CanvasRenderingContext2D, ax: number, ay: number, seed: number): void {
     const wide = (seed & 1) === 1;
     const w = wide ? 12 : 10;
     const h = 6;
@@ -1423,9 +1423,6 @@ export class Landscape {
     // Puerta; de noche, un rescoldo cálido.
     const dx = ax - 1;
     px(g, dx, ay - 4, 3, 4, css(P.hutDoor));
-    if (phase === 'night' || phase === 'dusk') {
-      px(g, dx, ay - 2, 3, 2, css(P.hutGlow, phase === 'night' ? 0.85 : 0.45));
-    }
   }
 
   private drawPlaces(
@@ -1540,13 +1537,17 @@ export class Landscape {
     if (product) {
       // One carried-object symbol per owner, present only while a real material batch exists.
       const x = ax - 7, y = baseY - 5;
-      if (product === 'storage') { px(g,x,y,4,4,css(P.soil)); px(g,x+1,y-1,2,1,css(P.soilLight)); }
+      if (product === 'material') { px(g,x,y,4,3,css(P.stoneShade));px(g,x,y,3,1,css(P.stone)); }
+      else if (product === 'storage') { px(g,x,y,4,4,css(P.soil)); px(g,x+1,y-1,2,1,css(P.soilLight)); }
       else if (product === 'insulation' || product === 'binding') { px(g,x,y,4,3,css(P.sand));px(g,x+1,y,1,4,css(P.trunkLight)); }
       else { px(g,x+1,y-3,1,7,css(P.trunkLight));px(g,x,y-4,product === 'cutting'?2:4,3,css(P.stone));px(g,x,y-4,1,2,css(P.paper)); }
     }
     const working = view.working === true || (view.working === undefined && atTarget);
-    const beat = !this.reduceMotion && this.actionActive && !p.moving && working ? Math.floor(t * 3 + p.seed) % 2 : 0;
-    if (view.action === 'hunt') { px(g,ax+5,baseY-13,1,13,css(P.trunkLight));px(g,ax+4,baseY-15,3,3,css(P.stone)); }
+    const previous = this.prevPeople.get(view.id);
+    const consuming = view.action === 'drink' ? previous?.thirst !== undefined && view.thirst !== undefined && previous.thirst > view.thirst
+      : view.action === 'eat' && previous !== undefined && previous.hunger > view.hunger;
+    const beat = !this.reduceMotion && this.actionActive && !p.moving && (working || consuming) ? Math.floor(t * 3 + p.seed) % 2 : 0;
+    if (view.action === 'hunt') { px(g,ax+5+beat,baseY-13+beat*3,1,13,css(P.trunkLight));px(g,ax+4+beat,baseY-15+beat*3,3,3,css(P.stone)); }
     else if (view.action === 'drink') { const lift = p.moving ? 4 : beat; px(g,ax+3,headTop+3+lift,3,3,css(P.waterGleam));px(g,ax+3,headTop+5+lift,3,1,css(P.water)); }
     else if (view.action === 'eat') { px(g,ax+3,headTop+4+beat,2,2,css(P.amber)); px(g,ax+2,headTop+5+beat,2,1,css(P.skin)); }
     else if (view.action === 'build' || view.action === 'repair' || view.action === 'invent' || view.action === 'research' || view.action === 'craft') {

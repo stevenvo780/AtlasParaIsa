@@ -182,7 +182,14 @@ test('render browser: dirty chunks, negative coordinates, selection, bounded cac
       const next = {...water,tick:902,sequence:902,weather:'clear',events:Array.from({length:200},(_,i)=>({id:`accent-${i}`,tick:902,kind:'birth',source:'simulation',x:0,y:0,actors:[],text:'Synthetic fixture',cause:'Synthetic event'}))};
       renderer.update(next); renderer.render(performance.now()); const burst = renderer.getDiagnostics();
       renderer.render(performance.now()+3000); const expired = renderer.getDiagnostics().effects.events;
-      return {first,burst,reducedStable,movingRain,clearRain,expired};
+      const person = {view:{id:'worker',name:'Worker',role:'neighbor',color:'#a4805b',x:0,y:0,action:'drink',thirst:.7,hunger:.5,working:false},x:0,y:0,moving:false,seed:27};
+      const drawPerson = (time:number) => {const canvas=document.createElement('canvas');canvas.width=canvas.height=32;const g=canvas.getContext('2d')!;renderer.drawPerson(g,person,time);return [...g.getImageData(0,0,32,32).data].join(',');};
+      renderer.actionActive=true;renderer.prevPeople.clear();const noDebit=drawPerson(0)===drawPerson(.4);
+      renderer.prevPeople.set('worker',{...person.view,thirst:.8});const debitMoves=drawPerson(0)!==drawPerson(.4);
+      renderer.actionActive=false;const staleStops=drawPerson(0)===drawPerson(.4);
+      renderer.actionActive=true;person.view.action='build';const noWork=drawPerson(0)===drawPerson(.4);
+      person.view.working=true;const workMoves=drawPerson(0)!==drawPerson(.4);
+      return {first,burst,reducedStable,movingRain,clearRain,expired,noDebit,debitMoves,staleStops,noWork,workMoves};
     });
     assert.ok(atmosphere.first.effects.rain > 0 && atmosphere.first.effects.rain <= VISUAL_BUDGET.rain);
     assert.ok(atmosphere.first.effects.water > 0 && atmosphere.first.effects.water <= VISUAL_BUDGET.water);
@@ -191,6 +198,11 @@ test('render browser: dirty chunks, negative coordinates, selection, bounded cac
     assert.equal(atmosphere.clearRain,0,'clear weather draws no falling rain');
     assert.equal(atmosphere.burst.effects.events,VISUAL_BUDGET.events,'event burst cannot exceed the visual bound');
     assert.equal(atmosphere.expired,0,'event accents expire without another snapshot');
+    assert.equal(atmosphere.noDebit,true,'a drink intention without a received debit does not animate consumption');
+    assert.equal(atmosphere.debitMoves,true,'a received thirst reduction animates drinking');
+    assert.equal(atmosphere.staleStops,true,'disconnected consumption cannot run indefinitely');
+    assert.equal(atmosphere.noWork,true,'unconfirmed work does not swing a tool');
+    assert.equal(atmosphere.workMoves,true,'confirmed stationary work moves its tool');
     const travel = await page.evaluate(() => {
       const state = (window as unknown as {renderTest: {renderer: any;world:any}}).renderTest;
       const renderer = state.renderer;

@@ -3,7 +3,7 @@ import { Connection, type ConnectionStatus } from './connection.js';
 import { Landscape, type Selection } from './landscape.js';
 import { icons } from './icons.js';
 import { animalActions, animalColors, componentNames, componentPurpose, speciesNames, speciesPlural } from './life-art.js';
-import { technologyPane } from './technology-art.js';
+import { technologyPane, recipeLabel } from './technology-art.js';
 import './style.css';
 import './game.css';
 
@@ -253,9 +253,10 @@ function inheritedAndLearned(p: PersonView): string {
   const experiences = `<details class="person-detail" data-detail="experiences"><summary>Últimas experiencias <span class="detail-badge">${Math.min(8, p.experiences?.length ?? 0)}</span></summary><p>Registro reciente de esta vida simulada. Conserva el momento y el episodio que lo originó.</p>${p.experiences?.length ? `<ol class="experience-list">${p.experiences.slice(-8).reverse().map(experience => { const cause = world!.events.find(event => event.id === experience.causeId); return `<li><span class="experience-tick">PASO ${experience.tick}</span><p>${esc(experience.text)}</p><small><strong>Qué influyó:</strong> ${esc(cause?.cause ?? 'El episodio causal ya no está en la ventana reciente de la crónica.')}</small></li>`; }).join('')}</ol>` : '<p>Aún no hay experiencias registradas.</p>'}</details>`;
   const technology = world?.technology;
   const products = technology?.items.filter(item=>item.ownerId===p.id) ?? [];
-  const toolkit = products.length ? `<details class="person-detail" data-detail="products"><summary>Objetos que lleva <span class="detail-badge">${products.length}</span></summary>${products.slice(0,8).map(item=>{const recipe=technology?.recipes.find(recipe=>recipe.id===item.recipeId);return `<div class="skill-row"><span>${esc(recipe?.name ?? 'Producto material')}</span><strong>${number(item.mass/1000,2)} u.</strong></div>`;}).join('')}<p>Objetos fabricados que conserva este habitante. Su masa cambia al usarlos o transformarlos.</p></details>` : '';
+  const toolkit = products.length ? `<details class="person-detail" data-detail="products"><summary>Objetos que lleva <span class="detail-badge">${products.length}</span></summary>${products.slice(0,8).map(item=>{const recipe=technology?.recipes.find(recipe=>recipe.id===item.recipeId);return `<div class="skill-row"><span>${esc(recipe ? recipeLabel(recipe) : 'Producto material')}</span><strong>${number(item.mass/1000,2)} u.</strong></div>`;}).join('')}<p>Objetos fabricados que conserva este habitante. Su masa cambia al usarlos o transformarlos.</p></details>` : '';
   const progress = p.working && p.workProgress !== undefined ? `<div class="game-needs task-progress">${meter('Progreso de la tarea',p.workProgress)}</div>` : '';
-  return progress + toolkit + genetics + learned + social + experiences;
+  const body = p.health !== undefined ? `<details class="person-detail" data-detail="vitality"><summary>Salud y ciclo de vida</summary>${meter('Salud',p.health)}${p.vitality !== undefined?meter('Vitalidad',p.vitality):''}<p>Son estados del cuerpo simulado. El alimento, el agua, el descanso y la exposición dejan consecuencias.</p>${p.continuityProtected?'<p class="drawer-note">La continuidad de esta identidad está protegida por la configuración del mundo.</p>':''}</details>` : '';
+  return progress + toolkit + body + genetics + learned + social + experiences;
 }
 function renderInspector(): void {
   if (!world) return;
@@ -282,7 +283,7 @@ function renderInspector(): void {
       const id = selected.id, legacy = world.demography?.recent.find(entry=>entry.id===id);
       el('person-controls').hidden = true; el('person-primary').hidden = true; el('direct-toggle').hidden = true;
       el('inspector-title').textContent = legacy?.name ?? 'Fuera de esta vista';
-      replacePersonCard(legacy ? `<p class="game-reason">Esta vida terminó en el paso ${legacy.diedAt}.</p><p class="drawer-note">${esc(deathCauses[legacy.cause] ?? legacy.cause)}</p><p>Generación ${legacy.generation}. Su historia permanece en la crónica del mundo.</p>` : '<p class="drawer-note">Este habitante ya no aparece en el estado recibido.</p>');
+      replacePersonCard(legacy ? `<p class="game-reason">Esta vida terminó en el paso ${legacy.diedAt}.</p><p class="drawer-note">${esc(deathCauses[legacy.cause] ?? legacy.cause)}</p><p class="drawer-note">Generación ${legacy.generation}. Su historia permanece en la crónica del mundo.</p>` : '<p class="drawer-note">Este habitante ya no aparece en el estado recibido.</p>');
       if (following) { following=false; landscape?.follow(null); } control='inspect'; inspectorSignature='';return;
     }
     const signature = JSON.stringify([p, world.events.map(event => event.id), world.communities, world.blueprints, world.technology?.items.filter(item=>item.ownerId===p.id)]); if (signature === inspectorSignature) return; inspectorSignature = signature;

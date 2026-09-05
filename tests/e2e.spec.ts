@@ -34,6 +34,11 @@ async function fullscreen(page: Page, width: number, height: number): Promise<vo
   const bounds = await page.locator('#landscape').boundingBox(); expect(bounds).toEqual({ x: 0, y: 0, width, height });
   expect(await page.evaluate(() => ({ x: document.documentElement.scrollWidth > innerWidth, y: document.documentElement.scrollHeight > innerHeight }))).toEqual({ x: false, y: false });
 }
+function setFixtureTick(tick: number): void {
+  app.world.tick=tick;
+  // Clock fixtures preserve the V5 identity-age invariant before any real step is run.
+  for (const person of app.world.people) person.demography.age=tick-person.bornAt;
+}
 function observeMessages(page: Page) {
   const gestures: Gesture[] = [], views: WorldView[] = [], errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
@@ -72,7 +77,7 @@ test('desktop full-screen HUD, keyboard population selection and physical neighb
   await page.locator('[data-order="auto"]').click(); await expect(page.locator('#gesture-result')).toContainText('Retoma');
   await page.locator('#landscape').focus(); await page.keyboard.press('ArrowRight'); await expect(page.locator('#follow-toggle')).toHaveAttribute('aria-pressed', 'false');
   await page.locator('[data-close="population"]').click(); await page.locator('#focus-s').click(); await expect(page.locator('#inspector-title')).toBeInViewport();
-  await page.screenshot({ path: 'artifacts/desktop-fullscreen-v4.png' }); expect(observed.errors).toEqual([]);
+  await page.screenshot({ path: 'artifacts/desktop-fullscreen-v5.png' }); expect(observed.errors).toEqual([]);
 });
 
 test('free camera requests signed distant terrain and layers without a finite map edge', async ({ page }) => {
@@ -83,7 +88,7 @@ test('free camera requests signed distant terrain and layers without a finite ma
   await expect.poll(() => observed.views.some(v => (v.originX ?? 0) < -350 && (v.originY ?? 0) > 200 && v.tiles.some(t => t.x < 0))).toBe(true);
   const last = observed.views.at(-1)!; expect(last.infinite).toBe(true); expect(last.width).toBeLessThanOrEqual(96); expect(last.height).toBeLessThanOrEqual(64);
   await page.locator('#landscape').focus(); await page.keyboard.press('ArrowLeft'); await expect(page.locator('#camera-coordinates')).not.toHaveText('-384, 240');
-  await page.locator('[data-close="inspector"]').click(); await page.screenshot({ path: 'artifacts/distant-terrain-v4.png' }); expect(observed.errors).toEqual([]);
+  await page.locator('[data-close="inspector"]').click(); await page.screenshot({ path: 'artifacts/distant-terrain-v5.png' }); expect(observed.errors).toEqual([]);
 });
 
 test('mobile touch: full-screen canvas, one drawer, three gestures, synthetic memories and readable letter', async ({ browser }) => {
@@ -101,13 +106,13 @@ test('mobile touch: full-screen canvas, one drawer, three gestures, synthetic me
     await page.locator('[data-gesture="remember"]').tap(); await expect(page.locator('#memory-preview')).toContainText('no biográfico');
     await expect.poll(() => app.world.tick - app.world.lastGestureTick).toBeGreaterThanOrEqual(30);
     await page.locator('#gesture-send').tap(); await expect(page.locator('#gesture-result')).toContainText('contexto');
-    await page.locator('[data-close="tool"]').tap(); await page.screenshot({ path: 'artifacts/mobile-fullscreen-v4.png' });
-    await page.locator('#focus-s').tap(); await page.screenshot({ path: 'artifacts/mobile-inspector-v4.png' });
+    await page.locator('[data-close="tool"]').tap(); await page.screenshot({ path: 'artifacts/mobile-fullscreen-v5.png' });
+    await page.locator('#focus-s').tap(); await page.screenshot({ path: 'artifacts/mobile-inspector-v5.png' });
     await page.locator('#stats-toggle').tap(); await expect(page.locator('#stats-drawer')).toBeVisible(); await expect(page.locator('#inspector-drawer')).toBeHidden();
     await expect(page.locator('#stats-content')).toContainText('Sed media'); await fullscreen(page, 390, 844);
     const tabSizes = await page.locator('[data-stats]').evaluateAll(buttons => buttons.map(button => { const r = button.getBoundingClientRect(); return { width: r.width, height: r.height }; }));
     expect(tabSizes.every(r => r.width >= 44 && r.height >= 44)).toBe(true);
-    await page.screenshot({ path: 'artifacts/mobile-stats-v4.png' });
+    await page.screenshot({ path: 'artifacts/mobile-stats-v5.png' });
     await page.locator('#stats-tab-land').tap(); await expect(page.locator('#stats-content')).toContainText('regiones activas del servidor');
     await page.locator('#stats-content').evaluate(panel => { panel.scrollTop = panel.scrollHeight; });
     await expect(page.locator('#stats-tab-performance')).toBeInViewport();
@@ -146,19 +151,19 @@ test('world statistics show real scopes, live series and keyboard-operated tabs'
   await expect(page.locator('.history-chart svg')).toHaveCount(2);
   const geometry = await page.locator('.history-chart svg').evaluateAll(charts => charts.map(chart => ({ text: chart.getAttribute('aria-label'), points: chart.querySelector('polyline')?.getAttribute('points') })));
   expect(geometry.every(chart => chart.text?.includes('muestra') && chart.points && !/NaN|Infinity/.test(chart.points))).toBe(true);
-  await page.screenshot({ path: 'artifacts/desktop-stats-v4.png' });
+  await page.screenshot({ path: 'artifacts/desktop-stats-v5.png' });
   await page.locator('#stats-tab-life').focus(); await page.keyboard.press('ArrowRight');
   await expect(page.locator('#stats-tab-land')).toBeFocused(); await expect(page.locator('#stats-tab-land')).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('#stats-content')).toContainText('no todo el territorio posible');
   await expect(page.locator('#stats-content')).toContainText('Agua dulce'); await expect(page.locator('#stats-content')).toContainText('Vida animal');
-  await page.screenshot({ path: 'artifacts/land-stats-v4.png' });
+  await page.screenshot({ path: 'artifacts/land-stats-v5.png' });
   await page.keyboard.press('ArrowRight'); await expect(page.locator('#stats-content')).toContainText('no implica hostilidad');
   await page.keyboard.press('End'); await expect(page.locator('#stats-tab-performance')).toBeFocused();
   await expect(page.locator('#stats-content')).toContainText('CPU por cuadro');
   await expect(page.locator('#stats-content')).toContainText('Los tiempos de dibujo no miden la ocupación de la GPU');
-  await page.screenshot({ path: 'artifacts/performance-v4.png' });
+  await page.screenshot({ path: 'artifacts/performance-v5.png' });
   await page.locator('#stats-content').evaluate(panel => { panel.scrollTop = panel.scrollHeight; });
-  await page.screenshot({ path: 'artifacts/performance-graphics-v4.png' });
+  await page.screenshot({ path: 'artifacts/performance-graphics-v5.png' });
   await page.keyboard.press('Escape'); await expect(page.locator('#stats-drawer')).toBeHidden(); await expect(page.locator('#stats-toggle')).toBeFocused();
   await fullscreen(page, 1440, 900); expect(observed.errors).toEqual([]);
 });
@@ -166,7 +171,7 @@ test('world statistics show real scopes, live series and keyboard-operated tabs'
 test('an engine-born descendant exposes genealogy, causal memories and learned culture without losing keyboard focus', async ({ page }) => {
   // Arrange sufficient local resources and trust, then let one actual server step form a community and birth.
   // The UI receives the resulting real WorldView; no browser-injected person, genealogy or episode.
-  const fixture = app.world; const founders = fixture.people.filter(p => p.role === 'neighbor').slice(0, 3); fixture.tick = 119;
+  const fixture = app.world; const founders = fixture.people.filter(p => p.role === 'neighbor').slice(0, 3); setFixtureTick(119);
   for (const founder of founders) {
     founder.x = 25; founder.y = 8; founder.target = { x: 25, y: 8 }; founder.action = 'rest'; founder.decisionAt = 500;
     founder.hunger = .1; founder.thirst = .1; founder.fatigue = .1; founder.energy = .9; founder.inventory = .3;
@@ -187,13 +192,13 @@ test('an engine-born descendant exposes genealogy, causal memories and learned c
   await page.locator('[data-detail="community"] summary').click(); await expect(page.locator('.person-community')).not.toContainText('Sin comunidad');
   await expect(page.locator('#inhabitant-card meter[aria-label="Sed"]')).toHaveCount(1);
   await page.locator('#inspector-drawer').evaluate(panel => { panel.scrollTop = 240; });
-  await page.screenshot({ path: 'artifacts/genealogy-v4.png' });
+  await page.screenshot({ path: 'artifacts/genealogy-v5.png' });
   const parentId = child.genome.parents[0]!, parent = app.world.people.find(p => p.id === parentId)!;
   await page.locator(`[data-parent="${parentId}"]`).focus(); await page.keyboard.press('Enter');
   await expect(page.locator('#inspector-title')).toHaveText(parent.name);
   await page.locator('#stats-toggle').click(); await page.locator('#stats-tab-communities').click();
   await expect(page.locator('.community-card')).toHaveCount(app.world.communities.length);
-  await page.screenshot({ path: 'artifacts/communities-v4.png' }); expect(observed.errors).toEqual([]);
+  await page.screenshot({ path: 'artifacts/communities-v5.png' }); expect(observed.errors).toEqual([]);
 });
 
 test('drink, hunt and cooperate orders use confirmed protocol and return to autonomy', async ({ page }) => {
@@ -240,7 +245,7 @@ test('drink, hunt and cooperate orders use confirmed protocol and return to auto
   }
   const cooperation = app.world.events.find(event => event.kind === 'cooperation' && event.actors.includes('s'))!; expect(cooperation).toBeTruthy();
   await page.locator('[data-detail="experiences"] summary').click(); await expect(page.locator('.experience-list')).toContainText(cooperation.cause);
-  await page.screenshot({ path: 'artifacts/cooperation-v4.png' });
+  await page.screenshot({ path: 'artifacts/cooperation-v5.png' });
   expect(new Set(observed.gestures.map(gesture => gesture.id)).size).toBe(observed.gestures.length);
   expect(observed.errors).toEqual([]);
 });
@@ -262,7 +267,7 @@ test('V4 mobile animal search, inspection and follow preserve human authority bo
     await expect(page.locator('#inspector-title')).toHaveText('Venado'); await expect(page.locator('#person-controls')).toBeHidden(); await expect(page.locator('#direct-toggle')).toBeHidden();
     await expect(page.locator('#inhabitant-card meter')).toHaveCount(5); await expect(page.locator('#inhabitant-card')).not.toContainText('Últimas experiencias');
     const bounds = await page.locator('#inspector-drawer').boundingBox(); expect(bounds!.x).toBeGreaterThanOrEqual(0); expect(bounds!.y).toBeGreaterThan(0); expect(bounds!.y+bounds!.height).toBeLessThan(844);
-    await page.screenshot({path:'artifacts/animal-inspector-mobile-v4.png'});
+    await page.screenshot({path:'artifacts/animal-inspector-mobile-v5.png'});
     await page.locator('#follow-toggle').tap(); await expect(page.locator('#inspector-drawer')).toBeHidden(); await expect(page.locator('#mode-indicator')).toContainText('Siguiendo a Venado');
     await expect(page.locator('#camera-coordinates')).toHaveText('25, 8');
     for (let i=0;i<25;i++) app.stepOnce(); expect(app.failed).toBe(false);
@@ -277,7 +282,7 @@ test('V4 mobile animal search, inspection and follow preserve human authority bo
 
 test('V5 received daylight, rain and reduced motion preserve the world and camera controls', async ({ page }) => {
   // Prepared server state only; every browser frame still comes from the authenticated projection.
-  app.world.tick = 899;
+  setFixtureTick(899);
   for (const inhabitant of app.world.people) { inhabitant.action = 'rest'; inhabitant.target = {x:inhabitant.x,y:inhabitant.y}; inhabitant.decisionAt = 5000; }
   app.stepOnce(); expect(app.failed).toBe(false);
   const observed = observeMessages(page); await page.setViewportSize({width:1440,height:900}); await page.emulateMedia({reducedMotion:'reduce'}); await enter(page);
@@ -286,7 +291,7 @@ test('V5 received daylight, rain and reduced motion preserve the world and camer
   const day = await phase.evaluate(layer=>getComputedStyle(layer).opacity); await page.screenshot({path:'artifacts/daylight-v5.png'});
   const before = app.world.tick; await page.locator('#landscape').focus(); await page.keyboard.press('ArrowRight');
   expect(app.world.tick).toBe(before); expect(observed.gestures).toHaveLength(0);
-  app.world.tick = 2099; app.world.weather = 'rain'; app.stepOnce(); expect(app.failed).toBe(false);
+  setFixtureTick(2099); app.world.weather = 'rain'; app.stepOnce(); expect(app.failed).toBe(false);
   await expect.poll(()=>observed.views.at(-1)?.tick).toBe(2100);
   await expect.poll(async()=>Number(await phase.evaluate(layer=>getComputedStyle(layer).opacity))).toBeGreaterThan(Number(day)+.3);
   const tick = app.world.tick; await page.screenshot({path:'artifacts/night-rain-v5.png'}); expect(app.world.tick).toBe(tick);
@@ -310,6 +315,7 @@ test('V5 research and immediate craft keep causal work, material balances and ke
   async function command(order:'research'|'craft',done:()=>boolean):Promise<void>{
     const previous=observed.gestures.length;await page.locator(`[data-order="${order}"]`).click();await expect.poll(()=>observed.gestures.length).toBe(previous+1);
     let steps=0;
+    for(let i=0;i<5;i++)app.stepOnce();await expect(page.locator('#gesture-result')).toContainText('Tarea recibida');
     await expect.poll(()=>{for(let i=0;i<5&&!done();i++){if(++steps>150)throw new Error(`${order} no concluyó en 150 pasos reales`);app.stepOnce();}expect(app.failed).toBe(false);return done();},{intervals:[10,20,30]}).toBe(true);
     current().decisionAt=app.world.tick+5000;current().action='rest';
     for(let i=0;i<5;i++)app.stepOnce();
@@ -330,6 +336,24 @@ test('V5 research and immediate craft keep causal work, material balances and ke
   await page.screenshot({path:'artifacts/procedures-v5.png'});
   await expect(page.locator('#stats-content')).not.toContainText('NaN');await fullscreen(page,1440,900);
   expect(observed.gestures.map(gesture=>gesture.order)).toEqual(['research','craft']);expect(observed.errors).toEqual([]);
+});
+
+test('V5 an ended life leaves its cause visible and cannot retain human controls', async ({ page }) => {
+  for (const inhabitant of app.world.people) { inhabitant.action='rest';inhabitant.target={x:inhabitant.x,y:inhabitant.y};inhabitant.decisionAt=5000; }
+  const neighbor = app.world.people.find(person=>person.role==='neighbor')!;
+  const observed=observeMessages(page);await page.setViewportSize({width:1440,height:900});await enter(page);
+  await page.locator('#population-toggle').click();await page.locator(`[data-person="${neighbor.id}"]`).click();await page.locator('[data-close="population"]').click();
+  await page.locator('[data-detail="vitality"] summary').click();await expect(page.locator('#inhabitant-card meter[aria-label="Salud"]')).toHaveCount(1);
+  await page.locator('#follow-toggle').click();await page.locator('#direct-toggle').click();
+  // Prepared terminal injury; removal and its public cause are produced by actual engine steps.
+  const current=app.world.people.find(person=>person.id===neighbor.id)!;current.demography.health=.000001;current.hunger=1;current.thirst=1;current.energy=.02;current.fatigue=.95;
+  for(let i=0;i<5;i++)app.stepOnce();expect(app.failed).toBe(false);
+  expect(app.world.people.some(person=>person.id===neighbor.id)).toBe(false);
+  await expect.poll(()=>observed.views.at(-1)?.demography?.recent.some(entry=>entry.id===neighbor.id)).toBe(true);
+  await expect(page.locator('#inhabitant-card')).toContainText('Esta vida terminó');await expect(page.locator('#person-controls')).toBeHidden();await expect(page.locator('#direct-toggle')).toBeHidden();
+  await expect(page.locator('#follow-toggle')).toHaveAttribute('aria-pressed','false');
+  const commands=observed.gestures.length;await page.locator('#landscape').focus();await page.keyboard.press('d');expect(observed.gestures).toHaveLength(commands);
+  await page.screenshot({path:'artifacts/legacy-v5.png'});expect(observed.errors).toEqual([]);
 });
 
 test('V4 invention, component construction and repair debit real work and materials once', async ({ page }) => {
@@ -357,6 +381,6 @@ test('V4 invention, component construction and repair debit real work and materi
   expect(app.world.structures.find(s=>s.id===structure.id)!.condition).toBeGreaterThan(.7);expect(current().materials.wood).toBe(0);
   for(let i=0;i<5;i++)app.stepOnce();
   await page.locator('#stats-toggle').click();await page.locator('#stats-tab-land').click();await expect(page.locator('#stats-content')).toContainText('Proyectos y construcciones');await page.locator('[data-detail="blueprints"] summary').click();
-  await page.locator('#stats-content').evaluate(panel=>{panel.scrollTop=panel.scrollHeight;});await page.screenshot({path:'artifacts/inventions-v4.png'});
+  await page.locator('#stats-content').evaluate(panel=>{panel.scrollTop=panel.scrollHeight;});await page.screenshot({path:'artifacts/inventions-v5.png'});
   expect(observed.gestures.map(g=>g.order)).toEqual(['invent','build','repair']);expect(new Set(observed.gestures.map(g=>g.id)).size).toBe(3);expect(observed.errors).toEqual([]);
 });

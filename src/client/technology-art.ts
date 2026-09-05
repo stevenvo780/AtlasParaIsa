@@ -7,12 +7,17 @@ const operations: Record<string,string> = {combine:'Unir',separate:'Separar',for
 const capacities: Record<string,string> = {cutting:'Cortar',storage:'Contener',insulation:'Aislar',cultivation:'Cultivar',binding:'Unir',abrasion:'Pulir'};
 const sourceName: Record<string,string> = {wood:'madera',stone:'piedra',water:'agua',raw:'materia prima',product:'producto anterior',residue:'residuo'};
 const shapes: Record<string,string> = {edge:'filo',hollow:'hueco',sheet:'lámina',rod:'vara',granular:'granos'};
+export function recipeLabel(recipe: TechnologyRecipe): string {
+  const serial=recipe.id.replace('recipe-','');
+  return recipe.name===`${recipe.program.steps.map(step=>step.op).join('·').slice(0,70)} ${serial}`
+    ? `${recipe.program.steps.map(step=>operations[step.op] ?? step.op).join(' · ')} ${serial}` : recipe.name;
+}
 
 function recipeCard(recipe: TechnologyRecipe): string {
   const strongest = Object.entries(recipe.capacities).sort((a,b)=>b[1]-a[1]).slice(0,3);
   const inputs = recipe.program.inputs.map(input=>`${esc(n(input.mass/1000,2))} u. de ${esc(sourceName[input.material ?? input.source] ?? input.source)}`).join(' + ');
   const steps = recipe.program.steps.map(step=>`<li><span>${esc(operations[step.op] ?? step.op)}${step.shape ? ` · ${esc(shapes[step.shape] ?? step.shape)}` : ''}</span><small>Intensidad ${esc(n(step.intensity,0))}/4${step.requiredCatalyst ? ` · requiere ${esc(capacities[step.requiredCatalyst] ?? step.requiredCatalyst)}` : step.catalyst ? ` · ayuda: ${esc(capacities[step.catalyst] ?? step.catalyst)}` : ''}</small></li>`).join('');
-  return `<details class="person-detail technology-recipe" data-detail="recipe-${esc(recipe.id)}"><summary>${esc(recipe.name)} <span>G${recipe.generation}</span></summary>
+  return `<details class="person-detail technology-recipe" data-detail="recipe-${esc(recipe.id)}"><summary>${esc(recipeLabel(recipe))} <span>G${recipe.generation}</span></summary>
     <p class="technology-materials">${inputs}</p><ol class="process-steps">${steps}</ol>
     <div class="technology-capacities">${strongest.map(([capacity,value])=>`<span>${esc(capacities[capacity] ?? capacity)}<meter aria-label="${esc(capacities[capacity] ?? capacity)}" min="0" max="1" value="${Math.max(0,Math.min(1,value))}"></meter></span>`).join('')}</div>
     <p>${n(recipe.manufactured,0)} fabricados · ${n(recipe.uses,0)} usos · utilidad observada ${n(recipe.utility,2)}.</p><small>${recipe.parents.length ? `Procede de ${recipe.parents.map(esc).join(', ')}.` : 'Primer procedimiento de esta línea.'}</small></details>`;
@@ -26,7 +31,7 @@ function organizationGraph(analysis: OrganizationAnalysis, technology: Technolog
   const name = (id: string): string => {
     const base=id.split('#')[0]!, recipeId=base.replace(/^(use|recycle):/,'');
     const recipe=technology.recipes.find(recipe=>recipe.id===recipeId);
-    return recipe ? `${base.startsWith('use:')?'Usar · ':base.startsWith('recycle:')?'Reciclar · ':''}${recipe.name}` : `Proceso ${Math.max(0,processes.findIndex(process=>process.id===id))+1}`;
+    return recipe ? `${base.startsWith('use:')?'Usar · ':base.startsWith('recycle:')?'Reciclar · ':''}${recipeLabel(recipe)}` : `Proceso ${Math.max(0,processes.findIndex(process=>process.id===id))+1}`;
   };
   const height = Math.ceil(processes.length/2)*62+12;
   return `<figure class="organization-network"><figcaption>Cómo se conectan los oficios</figcaption><svg viewBox="0 0 280 ${height}" role="img" aria-label="${processes.length} procesos; ${edges.length} dependencias con producción y consumo observados"><defs><marker id="process-arrow" viewBox="0 0 6 6" refX="5" refY="3" markerWidth="4" markerHeight="4" orient="auto"><path d="M0 0L6 3L0 6" fill="#81996a"/></marker></defs>${edges.map(edge=>{const a=positions.get(edge.producerId)!,b=positions.get(edge.consumerId)!;return `<path class="process-edge ${edge.kind==='catalyst'?'is-catalyst':''}" d="M${a.x} ${a.y+10}Q140 ${(a.y+b.y)/2+20} ${b.x} ${b.y-11}" marker-end="url(#process-arrow)"><title>${esc(name(edge.producerId))} → ${esc(name(edge.consumerId))}: ${esc(edge.resourceId)}</title></path>`;}).join('')}${processes.map(process=>{const point=positions.get(process.id)!;return `<g class="process-node ${process.maintained?'is-maintained':''}"><rect x="${point.x-60}" y="${point.y-17}" width="120" height="35" rx="7"/><text x="${point.x}" y="${point.y-2}" text-anchor="middle">${esc(name(process.id).slice(0,18))}</text><text class="process-flux" x="${point.x}" y="${point.y+11}" text-anchor="middle">${n(process.executions,0)} ejecuciones</text><title>${esc(name(process.id))}. ${process.maintained?'Recursos repuestos en la ventana.':process.blockers.map(esc).join(', ') || 'Sin reposición comprobada.'}</title></g>`;}).join('')}</svg><p class="stats-note">Las flechas muestran intercambios observados; el trazo discontinuo indica uso de una herramienta.${analysis.processes.length>12?' Vista de los 12 procesos con más actividad.':''}</p></figure>`;

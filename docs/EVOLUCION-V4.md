@@ -1,6 +1,6 @@
 # Fauna individual, invención y arraigo — V4 en construcción
 
-Solicitado el 5 de septiembre de 2026. El servicio privado sigue en V3 mientras se integra y comprueba esta ampliación. V3 conserva su evidencia en [EVIDENCIA.md](EVIDENCIA.md).
+Solicitado el 5 de septiembre de 2026. El servicio privado sigue en V3 mientras se integra y comprueba esta ampliación. V3 conserva su evidencia histórica en [EVIDENCIA-V3.md](EVIDENCIA-V3.md).
 
 ## Requisitos
 
@@ -28,6 +28,14 @@ Se consultó la preferencia entre comenzar un mundo nuevo con copia íntegra del
 | Interfaz | Animales inspeccionables, componentes visibles, estadísticas, órdenes y rendimiento | Opus cuando haya una necesidad concreta |
 
 Fable propuso conteos canónicos de componentes, restricciones de validez y un conjunto acotado de variaciones. Se comparan utilidad contextual, eficiencia y novedad mediante candidatos no dominados. El score de diseño es una predicción del modelo: la utilidad observada comienza en cero y necesita uso real. Los ensayos fallidos consumen recursos y no aumentan las invenciones aceptadas.
+
+## Integración y resultados preliminares
+
+El motor individual de fauna tiene 32 comprobaciones específicas aprobadas, incluyendo consumo, depredación sin duplicación, huida con contraste, reproducción con costes, memoria y orden de procesamiento. Admite hasta 8192 animales activos, seis por celda y 1024 nuevas decisiones por paso; todos avanzan sus necesidades. Esta cifra es un límite de implementación, no una capacidad acreditada de servidor completo a diez pasos por segundo.
+
+Una sonda autónoma de la semilla 51926, sin órdenes ni cambios de escenario, llegó a 2400 pasos con comunidades, cooperación y nacimientos. Construyó variantes con granero doble, hogar y cisterna; la cisterna recogió agua de lluvia. Algunos diseños permanecieron sin construir. Los valores exactos se fijarán con el artefacto de la integración final: las sondas realizadas durante cambios de código no son un único experimento comparable.
+
+Un quinto frente, cuando quedó libre la rama de fauna, revisa de forma independiente identidades, archivo, conservación de recursos e integración. Las pruebas de navegador y persistencia completa siguen siendo necesarias antes de activar la versión.
 
 ## Comprobaciones para activar V4
 

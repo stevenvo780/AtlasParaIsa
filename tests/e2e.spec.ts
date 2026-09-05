@@ -302,6 +302,40 @@ test('V5 received daylight, rain and reduced motion preserve the world and camer
   await fullscreen(page,1440,900); expect(observed.errors).toEqual([]);
 });
 
+test('V5 a keyboard harvest stores real food once, shows progress and respects the carrying limit', async ({ page }) => {
+  for (const inhabitant of app.world.people) { inhabitant.action='rest';inhabitant.target={x:inhabitant.x,y:inhabitant.y};inhabitant.decisionAt=5000; }
+  const site=app.world.tiles.find(tile=>tile.terrain!=='water'&&tile.x>4&&tile.x<35&&tile.y>3&&tile.y<24&&app.world.people.every(person=>Math.hypot(person.x-tile.x,person.y-tile.y)>5)&&app.world.animals.every(animal=>Math.hypot(animal.x-tile.x,animal.y-tile.y)>5))!;
+  expect(site).toBeDefined();site.food=.8;
+  const actor=app.world.people.find(person=>person.id==='s')!;
+  actor.x=site.x;actor.y=site.y;actor.target={x:site.x,y:site.y};actor.energy=.95;actor.hunger=.2;actor.thirst=.1;actor.fatigue=.1;actor.inventory=.24;actor.work=0;actor.skills.forage=0;
+  const current=()=>app.world.people.find(person=>person.id==='s')!;
+  const currentTile=()=>app.world.tiles.find(tile=>tile.x===site.x&&tile.y===site.y)!;
+  const observed=observeMessages(page);await page.setViewportSize({width:390,height:844});await enter(page);await page.locator('#focus-s').click();
+  const reserve=page.getByRole('meter',{name:'Alimento reservado'});
+  await expect(reserve).toHaveAttribute('value','0.24');await expect(reserve).toHaveAttribute('max','0.25');
+  const button=page.getByRole('button',{name:'Cosechar alimento',exact:true});await button.focus();await expect(button).toBeInViewport();
+  await page.screenshot({path:'artifacts/forage-before-v5.png'});await page.keyboard.press('Enter');
+  await expect.poll(()=>observed.gestures.length).toBe(1);
+  for(let i=0;i<5;i++)app.stepOnce();expect(app.failed).toBe(false);
+  await expect(page.locator('#gesture-result')).toContainText('Tarea recibida');
+  await expect(page.locator('.game-current-action')).toContainText('Cosechando alimento');
+  await expect(page.getByRole('meter',{name:'Progreso de la tarea'})).toBeVisible();
+  await expect(reserve).toHaveAttribute('value','0.24');expect(current().inventory).toBe(.24);
+  let lastFood=currentTile().food, lastHunger=current().hunger, steps=5;
+  await expect.poll(()=>{
+    if(current().inventory<.25){if(++steps>25)throw new Error('La cosecha no concluyó en 25 pasos reales');lastFood=currentTile().food;lastHunger=current().hunger;app.stepOnce();}
+    expect(app.failed).toBe(false);return current().inventory;
+  },{intervals:[10]}).toBe(.25);
+  expect(lastFood-currentTile().food).toBeCloseTo(.01,10);expect(current().hunger).toBeGreaterThanOrEqual(lastHunger);
+  expect(current().command).toBeNull();expect(current().controlMode).toBe('auto');expect(current().work).toBe(0);
+  current().action='rest';current().decisionAt=app.world.tick+5000;
+  for(let i=0;i<5;i++)app.stepOnce();expect(current().inventory).toBe(.25);
+  await expect(reserve).toHaveAttribute('value','0.25');await expect(page.locator('.agency-state')).toContainText('Actuando por su cuenta');
+  await expect(page.getByRole('meter',{name:'Progreso de la tarea'})).toHaveCount(0);
+  await reserve.scrollIntoViewIfNeeded();await page.screenshot({path:'artifacts/forage-after-v5.png'});
+  await fullscreen(page,390,844);expect(observed.gestures[0]).toMatchObject({kind:'command',agentId:'s',order:'forage'});expect(observed.errors).toEqual([]);
+});
+
 test('V5 research and immediate craft keep causal work, material balances and keyboard-readable procedures', async ({ page }) => {
   for (const inhabitant of app.world.people) { inhabitant.action='rest';inhabitant.target={x:inhabitant.x,y:inhabitant.y};inhabitant.decisionAt=5000; }
   const actor = app.world.people.find(person=>person.id==='s')!;

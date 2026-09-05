@@ -182,14 +182,19 @@ test('render browser: dirty chunks, negative coordinates, selection, bounded cac
       const next = {...water,tick:902,sequence:902,weather:'clear',events:Array.from({length:200},(_,i)=>({id:`accent-${i}`,tick:902,kind:'birth',source:'simulation',x:0,y:0,actors:[],text:'Synthetic fixture',cause:'Synthetic event'}))};
       renderer.update(next); renderer.render(performance.now()); const burst = renderer.getDiagnostics();
       renderer.render(performance.now()+3000); const expired = renderer.getDiagnostics().effects.events;
-      const person = {view:{id:'worker',name:'Worker',role:'neighbor',color:'#a4805b',x:0,y:0,action:'drink',thirst:.7,hunger:.5,working:false},x:0,y:0,moving:false,seed:27};
+      const person = {view:{id:'worker',name:'Worker',role:'neighbor',color:'#a4805b',x:0,y:0,action:'drink',thirst:.7,hunger:.5,working:false,foodReserve:0},x:0,y:0,moving:false,seed:27};
       const drawPerson = (time:number) => {const canvas=document.createElement('canvas');canvas.width=canvas.height=32;const g=canvas.getContext('2d')!;renderer.drawPerson(g,person,time);return [...g.getImageData(0,0,32,32).data].join(',');};
       renderer.actionActive=true;renderer.prevPeople.clear();const noDebit=drawPerson(0)===drawPerson(.4);
       renderer.prevPeople.set('worker',{...person.view,thirst:.8});const debitMoves=drawPerson(0)!==drawPerson(.4);
       renderer.actionActive=false;const staleStops=drawPerson(0)===drawPerson(.4);
       renderer.actionActive=true;person.view.action='build';const noWork=drawPerson(0)===drawPerson(.4);
       person.view.working=true;const workMoves=drawPerson(0)!==drawPerson(.4);
-      return {first,burst,reducedStable,movingRain,clearRain,expired,noDebit,debitMoves,staleStops,noWork,workMoves};
+      person.view.action='forage';person.view.working=false;const noHarvest=drawPerson(0)===drawPerson(.4);
+      person.view.working=true;const harvestMoves=drawPerson(0)!==drawPerson(.4);
+      const emptyPouch=drawPerson(0);person.view.foodReserve=.06;const stockVisible=emptyPouch!==drawPerson(0);
+      renderer.reduceMotion=true;const reducedHarvest=drawPerson(0)===drawPerson(.4);
+      renderer.reduceMotion=false;
+      return {first,burst,reducedStable,movingRain,clearRain,expired,noDebit,debitMoves,staleStops,noWork,workMoves,noHarvest,harvestMoves,stockVisible,reducedHarvest};
     });
     assert.ok(atmosphere.first.effects.rain > 0 && atmosphere.first.effects.rain <= VISUAL_BUDGET.rain);
     assert.ok(atmosphere.first.effects.water > 0 && atmosphere.first.effects.water <= VISUAL_BUDGET.water);
@@ -203,6 +208,10 @@ test('render browser: dirty chunks, negative coordinates, selection, bounded cac
     assert.equal(atmosphere.staleStops,true,'disconnected consumption cannot run indefinitely');
     assert.equal(atmosphere.noWork,true,'unconfirmed work does not swing a tool');
     assert.equal(atmosphere.workMoves,true,'confirmed stationary work moves its tool');
+    assert.equal(atmosphere.noHarvest,true,'an unconfirmed harvest intention cannot collect food');
+    assert.equal(atmosphere.harvestMoves,true,'confirmed harvesting reaches toward the ground');
+    assert.equal(atmosphere.stockVisible,true,'pouch contents depend on received food reserve');
+    assert.equal(atmosphere.reducedHarvest,true,'reduced motion freezes the harvesting pose');
     const travel = await page.evaluate(() => {
       const state = (window as unknown as {renderTest: {renderer: any;world:any}}).renderTest;
       const renderer = state.renderer;

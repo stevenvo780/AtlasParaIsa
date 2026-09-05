@@ -23,13 +23,14 @@ const icon = { ...icons,
   water: svg('<path d="M12 2C9 7 5 10 5 15a7 7 0 0 0 14 0c0-5-4-8-7-13Z"/><path d="M8 15a4 4 0 0 0 4 4"/>'),
   hunt: svg('<path d="M5 3c13 0 13 18 0 18L15 12 5 3Zm0 9h17m-3-3 3 3-3 3"/>'),
 };
-const actions: Record<PersonView['action'], string> = { explore: 'Explorando', eat: 'Buscando alimento', drink: 'Buscando agua', hunt: 'Cazando', rest: 'Descansando', approach: 'Acercándose', accompany: 'Acompañando', retreat: 'Buscando espacio', share: 'Compartiendo', gather: 'Recolectando', farm: 'Cultivando', build: 'Construyendo', cooperate: 'Cooperando', invent: 'Investigando un proyecto', repair: 'Reparando', research: 'Probando materiales', craft: 'Fabricando un producto' };
+const actions: Record<PersonView['action'], string> = { explore: 'Explorando', eat: 'Buscando alimento', forage: 'Cosechando alimento', drink: 'Buscando agua', hunt: 'Cazando', rest: 'Descansando', approach: 'Acercándose', accompany: 'Acompañando', retreat: 'Buscando espacio', share: 'Compartiendo', gather: 'Recolectando', farm: 'Cultivando', build: 'Construyendo', cooperate: 'Cooperando', invent: 'Investigando un proyecto', repair: 'Reparando', research: 'Probando materiales', craft: 'Fabricando un producto' };
 const phases = { dawn: 'Amanecer', day: 'Día', dusk: 'Atardecer', night: 'Noche' };
 const terrains = { water: 'Agua', meadow: 'Pradera', soil: 'Tierra', shelter: 'Refugio' };
 const biomes: Record<string, string> = { grassland: 'Praderas', forest: 'Bosque', desert: 'Desierto', mountain: 'Montañas', wetland: 'Humedal', ocean: 'Océano' };
 const deathCauses: Record<string,string> = {starvation:'Falta prolongada de alimento.',dehydration:'Falta prolongada de agua.',exposure:'Desgaste corporal por exposición.',senescence:'Llegó al término de su ciclo de vida simulado.'};
 const orders: { order: Order; title: string; icon: string }[] = [
   { order: 'explore', title: 'Explorar', icon: icon.focus }, { order: 'gather', title: 'Recolectar', icon: icon.bag },
+  { order: 'forage', title: 'Cosechar alimento', icon: icon.leaf },
   { order: 'farm', title: 'Cultivar', icon: icon.leaf }, { order: 'build', title: 'Construir', icon: icon.hammer },
   { order: 'rest', title: 'Descansar', icon: icon.tent }, { order: 'auto', title: 'Autonomía', icon: icon.star },
   { order: 'cooperate', title: 'Cooperar', icon: icon.cooperate },
@@ -241,7 +242,7 @@ function replacePersonCard(html: string): void {
   }
 }
 function inheritedAndLearned(p: PersonView): string {
-  const skillNames: Record<string, string> = { gather: 'Recolección', gathering: 'Recolección', farm: 'Cultivo', farming: 'Cultivo', build: 'Construcción', building: 'Construcción', explore: 'Exploración', exploration: 'Exploración', care: 'Cuidado', cooperate: 'Cooperación', hunt: 'Caza', drink: 'Búsqueda de agua' };
+  const skillNames: Record<string, string> = { gather: 'Recolección', gathering: 'Recolección', forage: 'Cosecha', farm: 'Cultivo', farming: 'Cultivo', build: 'Construcción', building: 'Construcción', explore: 'Exploración', exploration: 'Exploración', care: 'Cuidado', cooperate: 'Cooperación', hunt: 'Caza', drink: 'Búsqueda de agua' };
   const skills = Object.entries(p.skills ?? {}).sort((a, b) => b[1] - a[1]);
   const traitNames: Record<string, string> = { curiosity: 'Curiosidad', sociability: 'Sociabilidad', industriousness: 'Constancia', care: 'Cuidado', resilience: 'Resiliencia' };
   const genome = p.genome;
@@ -255,8 +256,9 @@ function inheritedAndLearned(p: PersonView): string {
   const products = technology?.items.filter(item=>item.ownerId===p.id) ?? [];
   const toolkit = products.length ? `<details class="person-detail" data-detail="products"><summary>Objetos que lleva <span class="detail-badge">${products.length}</span></summary>${products.slice(0,8).map(item=>{const recipe=technology?.recipes.find(recipe=>recipe.id===item.recipeId);return `<div class="skill-row"><span>${esc(recipe ? recipeLabel(recipe) : 'Producto material')}</span><strong>${number(item.mass/1000,2)} u.</strong></div>`;}).join('')}<p>Objetos fabricados que conserva este habitante. Su masa cambia al usarlos o transformarlos.</p></details>` : '';
   const progress = p.working && p.workProgress !== undefined ? `<div class="game-needs task-progress">${meter('Progreso de la tarea',p.workProgress)}</div>` : '';
+  const reserve = p.foodReserve !== undefined ? `<div class="food-reserve"><div><span>${icon.bag} Reserva de alimento</span><strong>${number(p.foodReserve,2)}${p.foodReserveCapacity !== undefined ? ` / ${number(p.foodReserveCapacity,2)}` : ''} u.</strong></div>${p.foodReserveCapacity !== undefined && p.foodReserveCapacity > 0 ? `<meter aria-label="Alimento reservado" min="0" max="${p.foodReserveCapacity}" value="${p.foodReserve}"></meter>` : ''}<p>Unidades de alimento del mundo.</p></div>` : '';
   const body = p.health !== undefined ? `<details class="person-detail" data-detail="vitality"><summary>Salud y ciclo de vida</summary>${meter('Salud',p.health)}${p.vitality !== undefined?meter('Vitalidad',p.vitality):''}<p>Son estados del cuerpo simulado. El alimento, el agua, el descanso y la exposición dejan consecuencias.</p>${p.continuityProtected?'<p class="drawer-note">La continuidad de esta identidad está protegida por la configuración del mundo.</p>':''}</details>` : '';
-  return progress + toolkit + body + genetics + learned + social + experiences;
+  return reserve + progress + toolkit + body + genetics + learned + social + experiences;
 }
 function renderInspector(): void {
   if (!world) return;

@@ -1550,6 +1550,14 @@ export class Landscape {
     if (view.action === 'hunt') { px(g,ax+5+beat,baseY-13+beat*3,1,13,css(P.trunkLight));px(g,ax+4+beat,baseY-15+beat*3,3,3,css(P.stone)); }
     else if (view.action === 'drink') { const lift = p.moving ? 4 : beat; px(g,ax+3,headTop+3+lift,3,3,css(P.waterGleam));px(g,ax+3,headTop+5+lift,3,1,css(P.water)); }
     else if (view.action === 'eat') { px(g,ax+3,headTop+4+beat,2,2,css(P.amber)); px(g,ax+2,headTop+5+beat,2,1,css(P.skin)); }
+    else if (view.action === 'forage') {
+      // Reach toward the ground only during confirmed work; the pouch fills only from received stock.
+      const reach = beat * 3;
+      px(g,ax+3+reach,baseY-6+beat*3,3,1,css(P.skin));
+      px(g,ax+3,baseY-3,4,3,css(P.trunkLight)); px(g,ax+3,baseY-1,4,1,css(P.soil));
+      px(g,ax+4,baseY-4,2,1,css(P.soil));
+      if ((view.foodReserve ?? 0) > 0) { px(g,ax+4,baseY-3,2,1,css(P.amber)); px(g,ax+5,baseY-4,1,1,css(P.grassLight)); }
+    }
     else if (view.action === 'build' || view.action === 'repair' || view.action === 'invent' || view.action === 'research' || view.action === 'craft') {
       const hand = baseY - 6 - beat * 4; px(g,ax+3,hand,3,1,css(P.skin));
       px(g,ax+6,hand-3,1,5,css(P.trunkLight)); px(g,ax+5,hand-4,4,2,css(P.stone));

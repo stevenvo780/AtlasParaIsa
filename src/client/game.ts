@@ -3,6 +3,7 @@ import { Connection, type ConnectionStatus } from './connection.js';
 import { Landscape, type Selection } from './landscape.js';
 import { icons } from './icons.js';
 import { animalActions, animalColors, componentNames, componentPurpose, speciesNames, speciesPlural } from './life-art.js';
+import { technologyPane } from './technology-art.js';
 import './style.css';
 import './game.css';
 
@@ -22,10 +23,11 @@ const icon = { ...icons,
   water: svg('<path d="M12 2C9 7 5 10 5 15a7 7 0 0 0 14 0c0-5-4-8-7-13Z"/><path d="M8 15a4 4 0 0 0 4 4"/>'),
   hunt: svg('<path d="M5 3c13 0 13 18 0 18L15 12 5 3Zm0 9h17m-3-3 3 3-3 3"/>'),
 };
-const actions: Record<PersonView['action'], string> = { explore: 'Explorando', eat: 'Buscando alimento', drink: 'Buscando agua', hunt: 'Cazando', rest: 'Descansando', approach: 'Acercándose', accompany: 'Acompañando', retreat: 'Buscando espacio', share: 'Compartiendo', gather: 'Recolectando', farm: 'Cultivando', build: 'Construyendo', cooperate: 'Cooperando', invent: 'Investigando un proyecto', repair: 'Reparando' };
+const actions: Record<PersonView['action'], string> = { explore: 'Explorando', eat: 'Buscando alimento', drink: 'Buscando agua', hunt: 'Cazando', rest: 'Descansando', approach: 'Acercándose', accompany: 'Acompañando', retreat: 'Buscando espacio', share: 'Compartiendo', gather: 'Recolectando', farm: 'Cultivando', build: 'Construyendo', cooperate: 'Cooperando', invent: 'Investigando un proyecto', repair: 'Reparando', research: 'Probando materiales', craft: 'Fabricando un producto' };
 const phases = { dawn: 'Amanecer', day: 'Día', dusk: 'Atardecer', night: 'Noche' };
 const terrains = { water: 'Agua', meadow: 'Pradera', soil: 'Tierra', shelter: 'Refugio' };
 const biomes: Record<string, string> = { grassland: 'Praderas', forest: 'Bosque', desert: 'Desierto', mountain: 'Montañas', wetland: 'Humedal', ocean: 'Océano' };
+const deathCauses: Record<string,string> = {starvation:'Falta prolongada de alimento.',dehydration:'Falta prolongada de agua.',exposure:'Desgaste corporal por exposición.',senescence:'Llegó al término de su ciclo de vida simulado.'};
 const orders: { order: Order; title: string; icon: string }[] = [
   { order: 'explore', title: 'Explorar', icon: icon.focus }, { order: 'gather', title: 'Recolectar', icon: icon.bag },
   { order: 'farm', title: 'Cultivar', icon: icon.leaf }, { order: 'build', title: 'Construir', icon: icon.hammer },
@@ -33,6 +35,7 @@ const orders: { order: Order; title: string; icon: string }[] = [
   { order: 'cooperate', title: 'Cooperar', icon: icon.cooperate },
   { order: 'drink', title: 'Beber', icon: icon.water }, { order: 'hunt', title: 'Cazar', icon: icon.hunt },
   { order: 'invent', title: 'Inventar', icon: icon.star }, { order: 'repair', title: 'Reparar', icon: icon.hammer },
+  { order: 'research', title: 'Investigar', icon: icon.layers }, { order: 'craft', title: 'Fabricar', icon: icon.hammer },
 ];
 let world: WorldView | null = null;
 let connection: Connection | null = null;
@@ -46,7 +49,7 @@ let pending = false;
 let tool: 'plant' | 'invite' | 'remember' = 'plant';
 let lastVisit: number | null = null;
 let populationSignature = '', inspectorSignature = '', memorySignature = '';
-let statsTab: 'life' | 'land' | 'communities' | 'performance' = 'life';
+let statsTab: 'life' | 'land' | 'communities' | 'technology' | 'performance' = 'life';
 let populationKind: 'people' | 'animals' = 'people';
 let soundContext: AudioContext | null = null;
 let soundTimer: ReturnType<typeof setTimeout> | undefined;
@@ -81,7 +84,7 @@ function enterWorld(): void {
     <aside id="inspector-drawer" class="game-drawer inspector-drawer" hidden aria-label="Inspector de selección"><header><div><p class="eyebrow">MIRAR DE CERCA</p><h2 id="inspector-title">Habitante</h2></div><button class="icon-button" data-close="inspector" aria-label="Cerrar inspector">×</button></header><div id="person-primary" class="control-pair"><button id="follow-toggle" class="button secondary" aria-pressed="false">${icon.eye}Seguir</button><button id="direct-toggle" class="button primary" aria-pressed="false">${icon.hand}Dirigir</button></div><div id="inhabitant-card" tabindex="-1"></div><div id="person-controls"><p id="control-help" class="control-help"></p><div class="order-grid">${orders.map(order => `<button data-order="${order.order}">${order.icon}<span>${order.title}</span></button>`).join('')}</div></div></aside>
     <aside id="layer-drawer" class="game-drawer layer-drawer" hidden aria-label="Capas y coordenadas"><header><div><p class="eyebrow">LEER EL PAISAJE</p><h2>Observar</h2></div><button class="icon-button" data-close="layer" aria-label="Cerrar capas">×</button></header><label for="observation-layer">Capa del mapa<select id="observation-layer"><option value="none">El paisaje</option><option value="moisture">La humedad</option><option value="food">El alimento</option></select></label><p id="layer-explanation" class="drawer-note">Agua, recursos y encuentros cambian las posibilidades.</p><label for="person-select">Ir a un habitante<select id="person-select"></select></label><label for="place-select">Ir a un lugar conocido<select id="place-select"></select></label><form id="tile-form"><fieldset><legend>Recorrer por coordenadas</legend><label for="tile-x">X<input id="tile-x" type="number" min="-9999900" max="9999900" value="0" required></label><label for="tile-y">Y<input id="tile-y" type="number" min="-9999900" max="9999900" value="0" required></label><button class="button primary" type="submit">Ir ${icon.arrow}</button></fieldset></form></aside>
     <aside id="tool-drawer" class="game-drawer tool-drawer" hidden aria-label="Gesto en el mundo"><header><div><p class="eyebrow">CAMBIAR UNA POSIBILIDAD</p><h2 id="gesture-title">Sembrar</h2></div><button class="icon-button" data-close="tool" aria-label="Cerrar gesto">×</button></header><p id="gesture-description" class="drawer-note"></p><div id="memory-choice" hidden><label for="memory-select">Recuerdo disponible<select id="memory-select"></select></label><p id="memory-preview" class="memory-preview"></p></div><p class="target-line">Destino: <strong id="gesture-target">toca una casilla</strong></p><button id="gesture-send" class="button primary" disabled>Sembrar aquí ${icon.arrow}</button></aside>
-    <aside id="stats-drawer" class="game-drawer stats-drawer" hidden aria-label="Vida del mundo y estadísticas"><header><div><p class="eyebrow">LO QUE ESTÁ TOMANDO FORMA</p><h2>Vida del mundo</h2></div><button class="icon-button" data-close="stats" aria-label="Cerrar estadísticas">×</button></header><div class="stats-tabs" role="tablist" aria-label="Vistas de estadísticas"><button id="stats-tab-life" role="tab" data-stats="life" aria-selected="true" aria-controls="stats-content">Vida</button><button id="stats-tab-land" role="tab" data-stats="land" aria-selected="false" aria-controls="stats-content" tabindex="-1">Paisaje</button><button id="stats-tab-communities" role="tab" data-stats="communities" aria-selected="false" aria-controls="stats-content" tabindex="-1">Comunidades</button><button id="stats-tab-performance" role="tab" data-stats="performance" aria-selected="false" aria-controls="stats-content" tabindex="-1">Rendimiento</button></div><div id="stats-content" role="tabpanel" aria-labelledby="stats-tab-life" tabindex="0"><p class="drawer-note">Esperando las medidas del servidor.</p></div></aside>
+    <aside id="stats-drawer" class="game-drawer stats-drawer" hidden aria-label="Vida del mundo y estadísticas"><header><div><p class="eyebrow">LO QUE ESTÁ TOMANDO FORMA</p><h2>Vida del mundo</h2></div><button class="icon-button" data-close="stats" aria-label="Cerrar estadísticas">×</button></header><div class="stats-tabs" role="tablist" aria-label="Vistas de estadísticas"><button id="stats-tab-life" role="tab" data-stats="life" aria-selected="true" aria-controls="stats-content">Vida</button><button id="stats-tab-land" role="tab" data-stats="land" aria-selected="false" aria-controls="stats-content" tabindex="-1">Paisaje</button><button id="stats-tab-communities" role="tab" data-stats="communities" aria-selected="false" aria-controls="stats-content" tabindex="-1">Comunidades</button><button id="stats-tab-technology" role="tab" data-stats="technology" aria-selected="false" aria-controls="stats-content" tabindex="-1">Oficios</button><button id="stats-tab-performance" role="tab" data-stats="performance" aria-selected="false" aria-controls="stats-content" tabindex="-1">Rendimiento</button></div><div id="stats-content" role="tabpanel" aria-labelledby="stats-tab-life" tabindex="0"><p class="drawer-note">Esperando las medidas del servidor.</p></div></aside>
     <section id="return-card" class="return-toast hud-surface" hidden aria-label="Desde tu última visita"></section>
     <div class="game-message-stack"><div id="connection-notice" class="game-notice" role="status">Conectando con el mundo…</div><p id="gesture-result" class="game-result" role="status" aria-live="polite" hidden></p><p id="mode-indicator" class="mode-indicator" hidden></p></div>
     <div class="camera-controls hud-surface" aria-label="Cámara"><button id="zoom-in" class="icon-button" aria-label="Acercar mapa">+</button><button id="zoom-out" class="icon-button" aria-label="Alejar mapa">−</button><button id="map-reset" class="icon-button" aria-label="Volver a S">${icon.focus}</button></div>
@@ -140,7 +143,7 @@ function wire(): void {
   el('inhabitant-card').addEventListener('click', event => { const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-parent]'); if (button) choosePerson(button.dataset.parent!); });
   for (const tab of root.querySelectorAll<HTMLButtonElement>('[data-stats]')) {
     tab.addEventListener('click', () => selectStatsTab(tab.dataset.stats as typeof statsTab));
-    tab.addEventListener('keydown', event => { const names = ['life', 'land', 'communities', 'performance'] as const; const index = names.indexOf(statsTab); let next = index; if (event.key === 'ArrowRight') next = (index + 1) % names.length; else if (event.key === 'ArrowLeft') next = (index + names.length - 1) % names.length; else if (event.key === 'Home') next = 0; else if (event.key === 'End') next = names.length - 1; else return; event.preventDefault(); selectStatsTab(names[next]!); el(`stats-tab-${statsTab}`).focus(); });
+    tab.addEventListener('keydown', event => { const names = ['life', 'land', 'communities', 'technology', 'performance'] as const; const index = names.indexOf(statsTab); let next = index; if (event.key === 'ArrowRight') next = (index + 1) % names.length; else if (event.key === 'ArrowLeft') next = (index + names.length - 1) % names.length; else if (event.key === 'Home') next = 0; else if (event.key === 'End') next = names.length - 1; else return; event.preventDefault(); selectStatsTab(names[next]!); el(`stats-tab-${statsTab}`).focus(); });
   }
   el('letter-button').addEventListener('click', () => el<HTMLDialogElement>('letter-dialog').showModal());
   el('chronicle-button').addEventListener('click', () => { renderJournal(); el<HTMLDialogElement>('chronicle-dialog').showModal(); });
@@ -248,7 +251,11 @@ function inheritedAndLearned(p: PersonView): string {
   const community = world?.communities?.find(group => group.id === p.communityId);
   const social = p.culture ? `<details class="person-detail" data-detail="community"><summary>Cultura y vínculos</summary><div class="person-community"><small>COMUNIDAD ACTUAL</small><strong>${esc(community?.name ?? 'Sin comunidad todavía')}</strong></div>${meter('Compartir', p.culture.sharing)}${meter('Cuidar el entorno', p.culture.stewardship)}${meter('Apertura', p.culture.openness)}<p>Costumbres aprendidas en las interacciones. Pertenecer a otro grupo no implica hostilidad.</p>${p.trust?.length ? `<h4 class="detail-subtitle">Confianza registrada</h4><div class="trust-list">${[...p.trust].sort((a, b) => b.value - a.value).slice(0, 6).map(t => `<span>${esc(world!.people.find(other => other.id === t.id)?.name ?? t.id)}<strong>${number(t.value, 2)}</strong></span>`).join('')}</div><p>Valores del modelo, no una medida de afecto real.</p>` : '<p>Todavía no hay vínculos de confianza registrados.</p>'}</details>` : '';
   const experiences = `<details class="person-detail" data-detail="experiences"><summary>Últimas experiencias <span class="detail-badge">${Math.min(8, p.experiences?.length ?? 0)}</span></summary><p>Registro reciente de esta vida simulada. Conserva el momento y el episodio que lo originó.</p>${p.experiences?.length ? `<ol class="experience-list">${p.experiences.slice(-8).reverse().map(experience => { const cause = world!.events.find(event => event.id === experience.causeId); return `<li><span class="experience-tick">PASO ${experience.tick}</span><p>${esc(experience.text)}</p><small><strong>Qué influyó:</strong> ${esc(cause?.cause ?? 'El episodio causal ya no está en la ventana reciente de la crónica.')}</small></li>`; }).join('')}</ol>` : '<p>Aún no hay experiencias registradas.</p>'}</details>`;
-  return genetics + learned + social + experiences;
+  const technology = world?.technology;
+  const products = technology?.items.filter(item=>item.ownerId===p.id) ?? [];
+  const toolkit = products.length ? `<details class="person-detail" data-detail="products"><summary>Objetos que lleva <span class="detail-badge">${products.length}</span></summary>${products.slice(0,8).map(item=>{const recipe=technology?.recipes.find(recipe=>recipe.id===item.recipeId);return `<div class="skill-row"><span>${esc(recipe?.name ?? 'Producto material')}</span><strong>${number(item.mass/1000,2)} u.</strong></div>`;}).join('')}<p>Objetos fabricados que conserva este habitante. Su masa cambia al usarlos o transformarlos.</p></details>` : '';
+  const progress = p.working && p.workProgress !== undefined ? `<div class="game-needs task-progress">${meter('Progreso de la tarea',p.workProgress)}</div>` : '';
+  return progress + toolkit + genetics + learned + social + experiences;
 }
 function renderInspector(): void {
   if (!world) return;
@@ -270,7 +277,15 @@ function renderInspector(): void {
   }
   el('person-primary').classList.toggle('animal-primary', false);
   if (selected.kind === 'person') {
-    const p = person(); if (!p) return; const signature = JSON.stringify([p, world.events.map(event => event.id), world.communities, world.blueprints]); if (signature === inspectorSignature) return; inspectorSignature = signature;
+    const p = person();
+    if (!p) {
+      const id = selected.id, legacy = world.demography?.recent.find(entry=>entry.id===id);
+      el('person-controls').hidden = true; el('person-primary').hidden = true; el('direct-toggle').hidden = true;
+      el('inspector-title').textContent = legacy?.name ?? 'Fuera de esta vista';
+      replacePersonCard(legacy ? `<p class="game-reason">Esta vida terminó en el paso ${legacy.diedAt}.</p><p class="drawer-note">${esc(deathCauses[legacy.cause] ?? legacy.cause)}</p><p>Generación ${legacy.generation}. Su historia permanece en la crónica del mundo.</p>` : '<p class="drawer-note">Este habitante ya no aparece en el estado recibido.</p>');
+      if (following) { following=false; landscape?.follow(null); } control='inspect'; inspectorSignature='';return;
+    }
+    const signature = JSON.stringify([p, world.events.map(event => event.id), world.communities, world.blueprints, world.technology?.items.filter(item=>item.ownerId===p.id)]); if (signature === inspectorSignature) return; inspectorSignature = signature;
     el('inspector-title').textContent = p.name; el('person-controls').hidden = false; el('person-primary').hidden = false; const source = world.memories.find(m => m.text === p.recentMemory)?.source;
     const color = /^#[\da-f]{3,8}$/i.test(p.color) ? p.color : '#a4805b';
     replacePersonCard(`<div class="game-person-heading"><div class="pixel-portrait ${p.role === 'I' ? 'portrait-i' : ''}" style="--person-color:${color}" aria-hidden="true"><span class="pixel-body"></span></div><div><strong>${esc(p.specialty ?? 'Su camino está tomando forma')}</strong><span class="agency-state ${p.controlMode === 'directed' ? 'is-directed' : ''}">${p.controlMode === 'directed' ? 'Siguiendo una orden' : 'Actuando por su cuenta'}</span></div></div><p class="game-current-action">${actions[p.action]} <span>· ${p.x}, ${p.y}</span></p><p class="game-reason">${esc(p.reason)}</p><div class="game-needs"><h3>Ahora necesita ${esc(p.need.toLocaleLowerCase('es'))}</h3>${meter('Energía', p.energy)}${meter('Hambre', p.hunger)}${p.thirst === undefined ? '' : meter('Sed', p.thirst)}${meter('Cansancio', p.fatigue)}</div><div class="material-pouch"><span>${icon.leaf}<strong>${number(p.materials?.wood)}</strong> madera</span><span>${icon.hammer}<strong>${number(p.materials?.stone)}</strong> piedra</span></div>${personBlueprint(p) ? `<details class="person-detail" data-detail="blueprint"><summary>Proyecto que sabe construir</summary>${blueprintCard(personBlueprint(p)!)}</details>` : ''}${inheritedAndLearned(p)}${p.recentMemory ? `<details class="person-detail memory-detail" data-detail="memory"><summary>Algo que lleva consigo</summary><p>${esc(p.recentMemory)}</p><small>${source === 'sample' ? 'RECUERDO DE PRUEBA · NO ES BIOGRAFÍA' : source === 'approved' ? 'RECUERDO APROBADO' : 'EXPERIENCIA DEL MUNDO SIMULADO'}</small></details>` : ''}`);
@@ -283,7 +298,7 @@ function renderInspector(): void {
 }
 function renderControls(): void {
   const selection = selected;
-  if (!document.getElementById('direct-toggle')) return; const blocked = status !== 'live' || !!world?.paused || pending || !world || selected.kind === 'animal';
+  if (!document.getElementById('direct-toggle')) return; const blocked = status !== 'live' || !!world?.paused || pending || !world || !person() || selected.kind === 'animal';
   el<HTMLButtonElement>('direct-toggle').disabled = blocked; el('direct-toggle').setAttribute('aria-pressed', String(control === 'direct')); el('follow-toggle').setAttribute('aria-pressed', String(following));
   for (const button of root.querySelectorAll<HTMLButtonElement>('[data-order]')) button.disabled = blocked;
   el('mode-indicator').hidden = control !== 'direct' && !following; el('mode-indicator').textContent = control === 'direct' ? `Dirigir a ${person()?.name ?? ''}: toca un destino · WASD mueve una casilla · Esc sale` : `Siguiendo a ${selected.kind === 'animal' ? speciesNames[world?.animals?.find(a => a.id === (selection.kind === 'animal' ? selection.id : ''))?.species ?? 'hare'] : person()?.name ?? ''} · arrastra para liberar la cámara`;
@@ -302,7 +317,7 @@ function renderTool(): void {
   const position = target(); el('gesture-target').textContent = position ? `casilla ${position.x}, ${position.y}` : 'toca una casilla'; const button = el<HTMLButtonElement>('gesture-send'); button.innerHTML = pending ? 'Esperando confirmación…' : `${labels[tool][2]} ${icon.arrow}`; button.disabled = status !== 'live' || !!world?.paused || pending || !position || (tool === 'remember' && !memory);
 }
 function renderJournal(): void {
-  const names: Record<ChronicleEvent['kind'], string> = { ecology: 'Paisaje', meeting: 'Encuentro', care: 'Cuidado', learning: 'Aprendizaje', memory: 'Memoria', gesture: 'Tu gesto', pause: 'Pausa del servidor', discovery: 'Un descubrimiento', settlement: 'Un nuevo lugar', cooperation: 'Cooperación', birth: 'Una nueva vida', animal: 'Vida animal', invention: 'Un proyecto aprendido', community: 'Comunidad', conflict: 'Un desacuerdo', adaptation: 'Adaptación local' };
+  const names: Record<ChronicleEvent['kind'], string> = { ecology: 'Paisaje', meeting: 'Encuentro', care: 'Cuidado', learning: 'Aprendizaje', memory: 'Memoria', gesture: 'Tu gesto', pause: 'Pausa del servidor', discovery: 'Un descubrimiento', settlement: 'Un nuevo lugar', cooperation: 'Cooperación', birth: 'Una nueva vida', death: 'Una vida que terminó', animal: 'Vida animal', invention: 'Un proyecto aprendido', community: 'Comunidad', conflict: 'Un desacuerdo', adaptation: 'Adaptación local' };
   el('journal-events').innerHTML = world?.events.length ? [...world.events].slice(-32).reverse().map(event => `<article class="chronicle-event"><div class="event-label"><span>${names[event.kind]}</span><span>${event.source === 'sample' ? 'Material de prueba' : event.source === 'approved' ? 'Contenido aprobado' : 'Ficción simulada'}</span></div><p>${esc(event.text)}</p><div class="event-cause"><strong>Qué influyó</strong> ${esc(event.cause)}</div><span class="event-tick">Momento ${event.tick} del mundo</span></article>`).join('') : '<p class="quiet-event">Todavía no hay episodios guardados. El mundo también tiene silencios.</p>';
 }
 
@@ -340,6 +355,7 @@ function distribution(data: Record<string, number> | undefined, labels: Record<s
 interface GraphicsDiagnostics {
   fps?: number; frameMs?: number; backend?: string; gpuStatus?: string; gpuLabel?: string;
   visibleAnimals?: number; visibleStructures?: number; visibleTiles?: number; drawCalls?: number; cacheBuilds?: number; cacheEntries?: number; cacheBytes?: number;
+  effects?: Record<string,number>; effectBudget?: Record<string,number>;
 }
 function lifeDynamics(): string {
   const dynamics = world?.stats?.animalDynamics; if (!dynamics) return '';
@@ -355,6 +371,15 @@ function renderStats(): void {
   const panel = document.getElementById('stats-content'); if (!panel || !world) return;
   const stats = world.stats, runtime = world.performance;
   const stamp = `<div class="stats-scope"><span class="scope-dot"></span><span>${status === 'live' && !world.paused ? 'Estado recibido del servidor' : 'Último estado recibido'} · paso ${world.tick}</span></div>`;
+  if (statsTab === 'technology') {
+    const opened = new Set([...panel.querySelectorAll<HTMLDetailsElement>('details[open]')].map(detail=>detail.dataset.detail));
+    const focused = panel.contains(document.activeElement) ? (document.activeElement?.closest('details') as HTMLDetailsElement | null)?.dataset.detail : undefined;
+    const scroll = panel.scrollTop;
+    panel.innerHTML = stamp + technologyPane(world.technology,world.organization);
+    for (const detail of panel.querySelectorAll<HTMLDetailsElement>('details')) { if (opened.has(detail.dataset.detail)) detail.open = true; if (focused && focused === detail.dataset.detail) detail.querySelector('summary')?.focus({preventScroll:true}); }
+    panel.scrollTop = scroll;
+    return;
+  }
   if (statsTab === 'performance') {
     const graphics = (landscape as (Landscape & { getDiagnostics?: () => GraphicsDiagnostics }) | null)?.getDiagnostics?.();
     const gpuLabels: Record<string, string> = { hardware: 'WebGL · adaptador físico reconocido', software: 'Respaldo Canvas2D · adaptador de software', unverified: 'WebGL activo · hardware sin verificar', 'context-lost': 'Contexto perdido · respaldo Canvas2D', active: 'GPU activa', ready: 'GPU preparada', available: 'GPU disponible', pending: 'Consultando GPU', initializing: 'Inicializando GPU', unavailable: 'GPU no disponible', unsupported: 'GPU no compatible', disabled: 'GPU desactivada', failed: 'GPU no disponible', lost: 'Dispositivo perdido', 'device-lost': 'Dispositivo perdido', fallback: 'Respaldo gráfico activo' };

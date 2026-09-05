@@ -11,13 +11,16 @@ const label = (process.env.RENDER_LABEL ?? 'after').replace(/[^a-z0-9-]/gi, '');
 const gpuMode = process.env.RENDER_GPU ?? 'default';
 const animated = process.env.RENDER_SCENE === 'moving';
 const animalCount = Math.max(0, Math.min(8192, Number(process.env.RENDER_ANIMALS ?? 1000) || 0));
-const artifact = `artifacts/render-v4-${label}-${gpuMode}${animated ? '-moving' : ''}`;
+const artifact = `artifacts/render-v5-${label}-${gpuMode}${animated ? '-moving' : ''}`;
 const baselineRef = process.env.RENDER_BASELINE_REF;
 const sourceCommit = execFileSync('git', ['rev-parse', '--verify', `${baselineRef ?? 'HEAD'}^{commit}`], { encoding: 'utf8' }).trim();
 const baseline = baselineRef ? execFileSync('git', ['show', `${sourceCommit}:src/client/landscape.ts`], { encoding: 'utf8' }) : null;
+// A paired baseline must also restore its sprite and GPU modules, not mix generations.
+const baselineModules = baselineRef ? new Map(['landscape.ts', 'life-art.ts', 'gpu-terrain.ts'].map(name => [name, execFileSync('git', ['show', `${sourceCommit}:src/client/${name}`], { encoding: 'utf8' })])) : null;
 const rendererSha256 = createHash('sha256').update(baseline ?? readFileSync('src/client/landscape.ts')).digest('hex');
+const moduleHashes = Object.fromEntries((baselineModules ? [...baselineModules] : ['landscape.ts','life-art.ts','gpu-terrain.ts','visual-state.ts'].map(name=>[name,readFileSync(`src/client/${name}`,'utf8')] as const)).map(([name,source])=>[name,createHash('sha256').update(source).digest('hex')]));
 const flags = gpuMode === 'hardware' ? ['--enable-gpu', '--use-angle=vulkan', '--enable-features=Vulkan', '--disable-vulkan-surface', '--ignore-gpu-blocklist'] : gpuMode === 'disabled' ? ['--disable-webgl'] : [];
-const server = await createServer({ configFile: false, plugins: baseline ? [{ name: 'render-baseline', enforce: 'pre', load(id) { if (id.endsWith('/src/client/landscape.ts')) return baseline; } }] : [], server: { host: '127.0.0.1', port: 0 }, logLevel: 'error' });
+const server = await createServer({ configFile: false, plugins: baselineModules ? [{ name: 'render-baseline', enforce: 'pre', load(id) { for (const [name, source] of baselineModules) if (id.endsWith(`/src/client/${name}`)) return source; } }] : [], server: { host: '127.0.0.1', port: 0 }, logLevel: 'error' });
 await server.listen();
 const browser = await chromium.launch({ headless: true, args: flags });
 try {
@@ -52,7 +55,7 @@ try {
     const species = ['hare','deer','boar','fish','wolf','fox'] as const;
     const animals: NonNullable<WorldView['animals']> = Array.from({length:animalCount},(_,i)=>({id:`animal-probe-${i}`,species:species[i%6]!,x:24+i%40,y:16+Math.floor(i/40)%28,action:i%6===4?'hunt':i%6===0?'flee':'roam',reason:'Cuerpo sintético para medir dibujo',hunger:.4,thirst:.3,energy:.8,fatigue:.1,health:1,generation:0,parents:[],genes:{speed:.7,perception:.5,metabolism:.5,carnivory:i%6>3?.9:.1,waterEfficiency:.5,camouflage:.4},age:1000}));
     const structures: NonNullable<WorldView['structures']> = Array.from({length:12},(_,i)=>({id:`structure-${i}`,x:28+i*2,y:33,blueprintId:`blueprint-${i}`,name:'Construcción sintética',components:['frame','roof',i%2?'cistern':'granary'],condition:i%3?.9:.2,water:i%2?.5:0,food:i%2?0:.4,uses:10,builtAt:0,builderId:null}));
-    const world: WorldView = { version: 4, sequence: 1, tick: 1, day: 1, phase: 'day', weather: 'clear', width: 88, height: 56, originX: 0, originY: 0, tiles, people, animals, structures, places: [], events: [], memories: [], infinite: true };
+    const world: WorldView = { version: 4, sequence: 900, tick: 900, day: 1, phase: 'day', weather: 'clear', width: 88, height: 56, originX: 0, originY: 0, tiles, people, animals, structures, places: [], events: [], memories: [], infinite: true };
     const canvas = document.getElementById('render-probe') as HTMLCanvasElement;
     const selected: unknown[] = [];
     const landscape = new Landscape(canvas, (value: unknown) => selected.push(value));
@@ -72,7 +75,7 @@ try {
     const diagnostics = landscape.getDiagnostics?.() ?? null;
     const stableCounts = { ...counts };
     const changeStart = performance.now();
-    const next = { ...world, sequence: 2, tick: 2, tiles: world.tiles.map(t => t.x === 44 && t.y === 28 ? { ...t, feature: 'stump', vegetation: .15, wood: 0 } : t) };
+    const next = { ...movingWorld, sequence: movingWorld.sequence + 1, tick: movingWorld.tick + 1, tiles: world.tiles.map(t => t.x === 44 && t.y === 28 ? { ...t, feature: 'stump', vegetation: .15, wood: 0 } : t) };
     landscape.update(next); const changedUpdateMs = performance.now() - changeStart;
     await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
     const probe = document.createElement('canvas').getContext('webgl2');
@@ -83,7 +86,7 @@ try {
   }, {animated,animalCount});
   mkdirSync('artifacts', { recursive: true });
   await page.screenshot({ path: `${artifact}.png` });
-  const report = { label, gpuMode, measuredAt: new Date().toISOString(), sourceCommit, rendererSha256, baselineRef: baselineRef ? sourceCommit : null, flags, ...result, errors };
+  const report = { label, gpuMode, measuredAt: new Date().toISOString(), sourceCommit, rendererSha256, moduleHashes, baselineRef: baselineRef ? sourceCommit : null, flags, ...result, errors };
   writeFileSync(`${artifact}.json`, JSON.stringify(report, null, 2) + '\n');
   console.log(JSON.stringify(report, null, 2));
   if (errors.length) process.exitCode = 1;

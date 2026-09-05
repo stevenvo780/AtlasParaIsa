@@ -14,6 +14,8 @@ import { PROTOCOL_VERSION } from '../shared/types.js';
 import type { AnimalView, PersonView, PlaceView, StructureView, Terrain, Tile, Viewport, WorldView } from '../shared/types.js';
 import { BoundedCache, GpuTerrain, type GpuStatus, type TerrainRaster } from './gpu-terrain.js';
 import { animalActions, speciesNames, paintAnimal, paintStructure } from './life-art.js';
+import { animalPose, daylightAt, newEventAccents, VISUAL_BUDGET, EVENT_LIFETIME_MS, type EventAccent } from './visual-state.js';
+import type { Capability } from '../shared/technology.js';
 
 /* ------------------------------------------------------------------ */
 /* Tipos públicos                                                      */
@@ -179,13 +181,6 @@ interface Tint {
   alpha: number;
 }
 
-const PHASE_TINT: Record<WorldView['phase'], Tint> = {
-  dawn: { color: 'rgb(255,201,163)', alpha: 0.3 },
-  day: { color: 'rgb(255,252,242)', alpha: 0.0 },
-  dusk: { color: 'rgb(242,158,120)', alpha: 0.34 },
-  night: { color: 'rgb(92,108,176)', alpha: 0.42 },
-};
-
 const RAIN_TINT: Tint = { color: 'rgb(159,179,189)', alpha: 0.2 };
 
 /* ------------------------------------------------------------------ */
@@ -301,6 +296,8 @@ export interface RenderDiagnostics {
   textureUploads: number; gpuTextureBytes: number;
   terrainBuilds: number; spriteBuilds: number;
   visibleAnimals: number; visibleStructures: number;
+  effects: { water: number; vegetation: number; rain: number; events: number; shadows: number };
+  effectBudget: typeof VISUAL_BUDGET;
 }
 
 interface GroundChunk extends TerrainRaster { signature: number; }
@@ -346,6 +343,11 @@ export class Landscape {
   private sceneRevision = 0;
   private sceneKey = '';
   private ambientKey = '';
+  private eventAccents: EventAccent[] = [];
+  private effects = { water: 0, vegetation: 0, rain: 0, events: 0, shadows: 0 };
+  private actionActive = false;
+  private lighting = { shadowX: 4, shadowY: 3, shadowAlpha: .14 };
+  private carriedProducts = new Map<string, Capability>();
   /** Escena completa por frame, también a resolución de arte. */
   private scene: HTMLCanvasElement;
   private sceneCtx: CanvasRenderingContext2D;
@@ -500,7 +502,16 @@ export class Landscape {
       this.prevAt = this.currAt;
       this.currAt = now;
     }
+    const newAccents = newEventAccents(this.curr, world, now);
+    if (this.curr && world.tick < this.curr.tick) this.eventAccents = [];
+    this.eventAccents = [...this.eventAccents.filter(event => now - event.bornAt < EVENT_LIFETIME_MS), ...newAccents].slice(-VISUAL_BUDGET.events);
     this.curr = world;
+    this.carriedProducts.clear();
+    for (const item of world.technology?.items ?? []) {
+      if (item.mass <= 0 || this.carriedProducts.has(item.ownerId)) continue;
+      const dominant = (Object.entries(item.capacities) as [Capability,number][]).sort((a,b)=>b[1]-a[1])[0];
+      if (dominant) this.carriedProducts.set(item.ownerId,dominant[0]);
+    }
     this.sceneRevision++;
 
     this.rebuildGrid(world);
@@ -550,7 +561,8 @@ export class Landscape {
     return { fps: this.fps, frameMs: this.frameMs, backend: this.gpu.active ? 'webgl2' : 'canvas2d-cached', gpuStatus: this.gpu.status, gpuLabel: this.gpu.label || undefined,
       visibleTiles: this.visibleTiles, drawCalls: this.drawCalls + this.gpu.drawCalls, cacheBuilds: this.cacheBuilds + this.spriteBuilds,
       cacheEntries: this.terrainCache.size + this.spriteCache.size, cacheBytes: this.terrainCache.size * 128 * 128 * 4 + this.spriteCache.size * 32 * 32 * 4,
-      textureUploads: this.gpu.uploads, gpuTextureBytes: this.gpu.textureCount * 128 * 128 * 4, terrainBuilds: this.cacheBuilds, spriteBuilds: this.spriteBuilds, visibleAnimals: this.visibleAnimals, visibleStructures: this.visibleStructures };
+      textureUploads: this.gpu.uploads, gpuTextureBytes: this.gpu.textureCount * 128 * 128 * 4, terrainBuilds: this.cacheBuilds, spriteBuilds: this.spriteBuilds, visibleAnimals: this.visibleAnimals, visibleStructures: this.visibleStructures,
+      effects: { ...this.effects }, effectBudget: VISUAL_BUDGET };
   }
 
   /** Extra pequeño: permite que la barra lateral resalte a quien se elige en una tarjeta. */
@@ -717,7 +729,7 @@ export class Landscape {
       const depth = neighbours / 8;
       const base = mix(P.waterShallow, P.waterDeep, depth * depth);
       px(g, ox, oy, ART, ART, css(base));
-      for (let i = 0; i < 6; i++) {
+      for (let i = 0; i < 2; i++) {
         const rx = ox + Math.floor(rnd(x, y, 10 + i) * ART);
         const ry = oy + Math.floor(rnd(x, y, 40 + i) * ART);
         const up = rnd(x, y, 70 + i) > 0.5;
@@ -729,7 +741,7 @@ export class Landscape {
     if (terrain === 'soil') {
       const base = tile?.biome === 'desert' ? mix(P.sand, P.soilLight, moisture * 0.5) : tile?.biome === 'mountain' ? mix(P.stone, P.stoneShade, 0.35) : mix(P.soilLight, P.soilDark, moisture * 0.7 + 0.1);
       px(g, ox, oy, ART, ART, css(base));
-      for (let i = 0; i < 14; i++) {
+      for (let i = 0; i < 5; i++) {
         const rx = ox + Math.floor(rnd(x, y, 110 + i) * ART);
         const ry = oy + Math.floor(rnd(x, y, 150 + i) * ART);
         const light = rnd(x, y, 190 + i) > 0.55;
@@ -762,15 +774,15 @@ export class Landscape {
     const base = tile?.biome === 'wetland' ? mix(rgb(132, 157, 108), rgb(69, 111, 86), veg * .8) : tile?.biome === 'forest' ? mix(P.sageLow, P.mossHigh, veg * .93) : mix(P.sageLow, P.mossHigh, veg * .72);
     const damp = mix(base, darken(base, 0.1), moisture * 0.35);
     px(g, ox, oy, ART, ART, css(damp));
-    const blades = 10 + Math.round(veg * 10);
+    const blades = 3 + Math.round(veg * 3);
     for (let i = 0; i < blades; i++) {
       const rx = ox + Math.floor(rnd(x, y, 340 + i) * ART);
       const ry = oy + Math.floor(rnd(x, y, 400 + i) * ART);
       const r = rnd(x, y, 460 + i);
       if (r > 0.62) {
-        px(g, rx, ry, 1, 2, css(mix(P.grassLight, damp, 0.35)));
+        px(g, rx, ry, 1, 2, css(mix(P.grassLight, damp, 0.72)));
       } else if (r > 0.3) {
-        px(g, rx, ry, 1, 1, css(mix(P.grassDark, damp, 0.4)));
+        px(g, rx, ry, 2, 1, css(mix(P.grassDark, damp, 0.72)));
       } else {
         px(g, rx, ry, 1, 1, css(lighten(damp, 0.08)));
       }
@@ -1054,6 +1066,11 @@ export class Landscape {
     const world = this.curr;
     if (world && this.groundBaked && this.worldW > 0) {
       const t = now / 1000;
+      this.actionActive = !world.paused && now - this.currAt < Math.max(1200, this.interval * 2);
+      const alpha = this.prev && !this.reduceMotion ? clamp01((now - this.currAt) / this.interval) : 1;
+      const light = daylightAt(this.prev ? this.prev.tick + (world.tick - this.prev.tick) * alpha : world.tick);
+      if (world.weather === 'rain') light.shadowAlpha *= .4;
+      this.lighting = light;
       const people = this.interpolatePeople(now);
       const animals = this.interpolateAnimals(now);
       this.drawScene(world, people, animals, t);
@@ -1072,7 +1089,7 @@ export class Landscape {
       );
       this.drawCalls++;
 
-      this.drawAmbient(world, cw, ch);
+      this.drawAmbient(world, cw, ch, now, light);
       this.drawOverlaysScreen(people, animals);
     }
   }
@@ -1098,6 +1115,7 @@ export class Landscape {
     g.save(); g.translate(-this.originX * ART, -this.originY * ART);
 
     const sprites: Sprite[] = [];
+    this.effects.water = this.effects.vegetation = this.effects.shadows = 0;
     this.visibleTiles = 0;
     this.visibleAnimals = 0; this.visibleStructures = 0;
     const structuredTiles = new Set((world.structures ?? []).map(s => `${s.x},${s.y}`));
@@ -1111,8 +1129,13 @@ export class Landscape {
         const oy = y * ART;
 
         if (tile.terrain === 'water') {
-          if (rnd(x, y, 712) > .6) this.drawRipples(g, x, y, ox, oy, t);
+          if (rnd(x, y, 712) > .6 && this.effects.water < VISUAL_BUDGET.water) { this.drawRipples(g, x, y, ox, oy, t); this.effects.water++; }
         } else {
+          if ((tile.feature === 'pool' || tile.feature === 'spring') && (tile.drinkingWater ?? 0) > .04 && this.effects.water < VISUAL_BUDGET.water) {
+            const shift = this.reduceMotion ? 0 : Math.floor(t * 2 + rnd(x, y, 917) * 4) % 3;
+            px(g, ox + 8 + shift, oy + 10, 2, 1, css(P.waterGleam, .55)); this.effects.water++;
+          }
+          if (tile.feature === 'reeds' || tile.feature === 'flowers') this.drawPlantMovement(g, tile, t);
           if (tile.terrain === 'shelter' && !structuredTiles.has(`${x},${y}`)) {
             sprites.push({
               kind: SpriteKind.Hut,
@@ -1153,6 +1176,10 @@ export class Landscape {
 
     // Y-sort: quien está más al sur tapa a quien está al norte.
     sprites.sort((a, b) => a.sortY - b.sortY);
+    if (this.cam.zoom >= 18) {
+      for (const sprite of sprites) if (this.effects.shadows < VISUAL_BUDGET.shadows && (sprite.kind === SpriteKind.Structure || sprite.kind === SpriteKind.Person)) this.drawCastShadow(g, sprite);
+      for (const sprite of sprites) if (this.effects.shadows < VISUAL_BUDGET.shadows && sprite.kind === SpriteKind.Tree && sprite.seed % 13 === 0) this.drawCastShadow(g, sprite);
+    }
     for (const s of sprites) {
       if (s.kind === SpriteKind.Tree) this.drawCachedTree(g, s, t);
       else if (s.kind === SpriteKind.Hut) this.drawHut(g, s.ax, s.ay, s.seed, world.phase);
@@ -1173,8 +1200,27 @@ export class Landscape {
 
   /* -------------------------- decorado vivo ------------------------ */
 
+  private drawCastShadow(g: CanvasRenderingContext2D, sprite: Sprite): void {
+    const height = sprite.kind === SpriteKind.Tree ? 1 + sprite.size : sprite.kind === SpriteKind.Structure ? 1.5 : .65;
+    const width = sprite.kind === SpriteKind.Person ? 2.5 : 4;
+    const { shadowX, shadowY, shadowAlpha } = this.lighting;
+    g.fillStyle = css(P.shadow, shadowAlpha); g.beginPath();
+    g.moveTo(sprite.ax - width, sprite.ay); g.lineTo(sprite.ax + width, sprite.ay);
+    g.lineTo(sprite.ax + width + shadowX * height, sprite.ay + shadowY * height);
+    g.lineTo(sprite.ax - width + shadowX * height, sprite.ay + shadowY * height); g.closePath(); g.fill();
+    this.effects.shadows++;
+  }
+
+  private drawPlantMovement(g: CanvasRenderingContext2D, tile: Tile, t: number): void {
+    if (this.reduceMotion || (tile.growth ?? tile.vegetation) < .25 || this.effects.vegetation >= VISUAL_BUDGET.vegetation || hash3(tile.x, tile.y, 813) % 3) return;
+    const sway = Math.round(Math.sin(t * .8 + tile.x * .13 + tile.y * .07));
+    const x = tile.x * ART + 8, y = tile.y * ART + 9;
+    px(g, x, y - 3, 1, 4, css(P.reed)); px(g, x + sway, y - 5, 1, 3, css(P.reedLight));
+    this.effects.vegetation++;
+  }
+
   private drawAnimal(g: CanvasRenderingContext2D, animal: RenderAnimal, t: number): void {
-    const pose = this.reduceMotion || animal.view.action === 'rest' ? 0 : Math.floor(t * (animal.moving ? 8 : 2)) % 2;
+    const pose = animalPose(animal.view, animal.moving, t + hash3(animal.view.id.length, animal.view.id.charCodeAt(animal.view.id.length-1), 48) % 13, this.reduceMotion, this.actionActive);
     const key = `animal:${animal.view.species}:${animal.view.action}:${pose}`;
     let art = this.spriteCache.get(key);
     if (!art) { art = document.createElement('canvas'); art.width = art.height = 32; paintAnimal(art.getContext('2d')!, animal.view.species, animal.view.action, pose); this.spriteCache.set(key, art); this.spriteBuilds++; }
@@ -1190,7 +1236,7 @@ export class Landscape {
   }
 
   private drawRipples(g: CanvasRenderingContext2D, x: number, y: number, ox: number, oy: number, t: number): void {
-    const gleam = css(P.waterGleam, 0.4);
+    const gleam = css(P.waterGleam, 0.32);
     for (let i = 0; i < 2; i++) {
       const base = rnd(x, y, 700 + i);
       const py = oy + 3 + Math.floor(rnd(x, y, 740 + i) * 10);
@@ -1275,8 +1321,10 @@ export class Landscape {
   }
 
   private drawCachedTree(g: CanvasRenderingContext2D, sprite: Sprite, t: number): void {
-    const seed = sprite.seed % 12, size = Math.round(sprite.size * 3) / 3;
-    const pose = this.reduceMotion ? 1 : Math.round((Math.sin(t * .7 + seed) + 1));
+    const seed = sprite.seed % 6, size = Math.round(sprite.size * 3) / 3;
+    const moving = !this.reduceMotion && sprite.seed % 11 === 0 && this.effects.vegetation < VISUAL_BUDGET.vegetation;
+    if (moving) this.effects.vegetation++;
+    const pose = moving ? Math.round((Math.sin(t * .65 + sprite.ax * .013 + sprite.ay * .007) + 1)) : 1;
     const feature = sprite.feature ?? 'tree';
     const key = `tree:${feature}:${seed}:${size}:${pose}`;
     let art = this.spriteCache.get(key);
@@ -1286,7 +1334,12 @@ export class Landscape {
       if (feature === 'pine') {
         const height = 8+Math.round(size*12), half = 3+Math.round(size*4);
         ellipse(pen,16,28,half,2,css(P.shadow,.22)); px(pen,15,23,2,4,css(P.trunk));
-        for(let row=0;row<height;row++){const radius=Math.max(1,Math.round(row/height*half));px(pen,16-radius+(pose-1),26-height+row,radius*2,1,css(row%4===0?P.canopyLight:P.canopyDark));}
+        for(let row=0;row<height;row++){
+          const radius=Math.max(1,Math.round(row/height*half)), inset = row % 6 === 5 ? 1 : 0;
+          px(pen,16-radius+inset+(pose-1),26-height+row,(radius-inset)*2,1,css(P.canopyDark));
+          px(pen,16-radius+inset+(pose-1),26-height+row,Math.max(1,radius-1),1,css(row < height * .6 ? P.canopyMid : mix(P.canopyDark,P.canopyMid,.65)));
+        }
+        px(pen,15+(pose-1),26-height,1,3,css(P.canopyLight));
       } else if (feature === 'palm') {
         const height = 5+Math.round(size*8), top = 26-height;
         ellipse(pen,16,28,5,2,css(P.shadow,.2)); px(pen,15,top,2,height,css(P.trunkLight));
@@ -1338,14 +1391,11 @@ export class Landscape {
     const mid = sage ? P.canopySage : P.canopyMid;
     const light = sage ? lighten(P.canopySage, 0.2) : P.canopyLight;
 
-    ellipse(g, cx, cy + r * 0.28, r, r * 0.72, css(dark));
-    ellipse(g, cx - r * 0.18, cy, r * 0.92, r * 0.68, css(mid));
-    ellipse(g, cx - r * 0.34, cy - r * 0.3, r * 0.5, r * 0.36, css(light));
-    for (let i = 0; i < 4; i++) {
-      const a = rnd(seed, i, 1300) * 6.283;
-      const d = r * (0.45 + rnd(seed, i, 1340) * 0.45);
-      px(g, Math.round(cx + Math.cos(a) * d), Math.round(cy + Math.sin(a) * d * 0.7), 1, 1, css(light, 0.8));
-    }
+    ellipse(g, cx, cy + r * .28, r, r * .76, css(dark));
+    ellipse(g, cx - r * .25, cy, r * .75, r * .64, css(mid));
+    ellipse(g, cx + r * .34, cy - r * .14, r * .57, r * .65, css(mid));
+    ellipse(g, cx - r * .16, cy - r * .49, r * .57, r * .5, css(light));
+    ellipse(g, cx - r * .54, cy - r * .2, r * .35, r * .35, css(mix(light,mid,.25)));
   }
 
   private drawHut(g: CanvasRenderingContext2D, ax: number, ay: number, seed: number, phase: WorldView['phase']): void {
@@ -1465,7 +1515,7 @@ export class Landscape {
       const neck = headTop + 4;
       px(g, ax - 4, neck, 8, 2, css(P.amber));
       px(g, ax - 4, neck + 1, 8, 1, css(P.amberDeep));
-      const tail = this.reduceMotion ? 0 : Math.round(Math.sin(t * 2.3 + p.seed) * 1.4);
+      const tail = this.reduceMotion || !p.moving ? 0 : step;
       px(g, ax + 3 + tail, neck + 1, 2, 4, css(P.amber));
       px(g, ax + 3 + tail, neck + 4, 2, 1, css(P.amberDeep));
     } else if (view.role === 'I') {
@@ -1485,19 +1535,42 @@ export class Landscape {
       else if (variant === 1) px(g, ax - 3, headTop - 1, 6, 1, css(darken(body, 0.15)));
       else px(g, ax - 4, baseY - 8, 8, 2, css(darken(body, 0.3)));
     }
+    const atTarget = view.target ? Math.hypot(view.x - view.target.x, view.y - view.target.y) < .5 : false;
+    const product = this.carriedProducts.get(view.id);
+    if (product) {
+      // One carried-object symbol per owner, present only while a real material batch exists.
+      const x = ax - 7, y = baseY - 5;
+      if (product === 'storage') { px(g,x,y,4,4,css(P.soil)); px(g,x+1,y-1,2,1,css(P.soilLight)); }
+      else if (product === 'insulation' || product === 'binding') { px(g,x,y,4,3,css(P.sand));px(g,x+1,y,1,4,css(P.trunkLight)); }
+      else { px(g,x+1,y-3,1,7,css(P.trunkLight));px(g,x,y-4,product === 'cutting'?2:4,3,css(P.stone));px(g,x,y-4,1,2,css(P.paper)); }
+    }
+    const working = view.working === true || (view.working === undefined && atTarget);
+    const beat = !this.reduceMotion && this.actionActive && !p.moving && working ? Math.floor(t * 3 + p.seed) % 2 : 0;
     if (view.action === 'hunt') { px(g,ax+5,baseY-13,1,13,css(P.trunkLight));px(g,ax+4,baseY-15,3,3,css(P.stone)); }
-    else if (view.action === 'drink') { px(g,ax+3,headTop+3,3,3,css(P.waterGleam));px(g,ax+3,headTop+5,3,1,css(P.water)); }
+    else if (view.action === 'drink') { const lift = p.moving ? 4 : beat; px(g,ax+3,headTop+3+lift,3,3,css(P.waterGleam));px(g,ax+3,headTop+5+lift,3,1,css(P.water)); }
+    else if (view.action === 'eat') { px(g,ax+3,headTop+4+beat,2,2,css(P.amber)); px(g,ax+2,headTop+5+beat,2,1,css(P.skin)); }
+    else if (view.action === 'build' || view.action === 'repair' || view.action === 'invent' || view.action === 'research' || view.action === 'craft') {
+      const hand = baseY - 6 - beat * 4; px(g,ax+3,hand,3,1,css(P.skin));
+      px(g,ax+6,hand-3,1,5,css(P.trunkLight)); px(g,ax+5,hand-4,4,2,css(P.stone));
+    } else if (view.action === 'farm' || view.action === 'gather') {
+      const hand = baseY - 6 + beat * 2; px(g,ax+3,hand,3,1,css(P.skin));
+      px(g,ax+6,hand-1,1,7,css(P.trunkLight)); px(g,ax+6,hand+5,4,1,css(P.stoneShade));
+    }
     else if (view.action === 'cooperate' || view.action === 'share') { px(g,ax+3,baseY-6,4,4,css(P.soil));px(g,ax+3,baseY-7,4,1,css(P.grassLight)); }
+    if (working && view.workProgress !== undefined && view.workProgress > 0 && this.cam.zoom >= 18) {
+      px(g,ax-5,baseY+4,10,2,css(P.ink,.65)); px(g,ax-5,baseY+4,Math.max(1,Math.round(clamp01(view.workProgress)*10)),1,css(P.amber));
+    }
   }
 
   /* ------------------------ capas de pantalla ---------------------- */
 
-  private drawAmbient(world: WorldView, cw: number, ch: number): void {
+  private drawAmbient(world: WorldView, cw: number, ch: number, now: number, tint: { color: string; alpha: number }): void {
     const ctx = this.labelCtx;
-    const tint = PHASE_TINT[world.phase];
-    const key = `${world.phase}:${world.weather}`;
+    const key = `${tint.color}:${tint.alpha.toFixed(3)}:${world.weather}:${this.reduceMotion}`;
     if (key !== this.ambientKey) {
       this.ambientKey = key;
+      this.phaseLayer.style.transition = this.reduceMotion ? 'none' : 'background-color 1600ms linear, opacity 1600ms linear';
+      this.rainLayer.style.transition = this.reduceMotion ? 'none' : 'opacity 1000ms linear';
       this.phaseLayer.style.backgroundColor = tint.color; this.phaseLayer.style.opacity = String(tint.alpha);
       this.rainLayer.style.backgroundColor = RAIN_TINT.color; this.rainLayer.style.opacity = world.weather === 'rain' ? String(RAIN_TINT.alpha) : '0';
     }
@@ -1514,6 +1587,42 @@ export class Landscape {
     v.addColorStop(1, 'rgba(24,30,26,0.16)');
     ctx.fillStyle = v;
     ctx.fillRect(0, 0, cw, ch);
+    this.drawRain(world, now);
+    this.drawEventAccents(now);
+  }
+
+  private drawRain(world: WorldView, now: number): void {
+    this.effects.rain = 0;
+    if (world.weather !== 'rain') return;
+    const g = this.labelCtx, count = Math.min(VISUAL_BUDGET.rain, Math.ceil(this.cssW * this.cssH / 12500));
+    const time = this.reduceMotion ? 0 : Math.floor(now / 85) * .085;
+    g.save(); g.scale(this.dpr, this.dpr); g.strokeStyle = 'rgba(211,232,223,.30)'; g.lineWidth = 1; g.beginPath();
+    for (let i = 0; i < count; i++) {
+      const x = (rnd(i, 0, 991) * this.cssW + time * 38) % this.cssW;
+      const y = (rnd(i, 1, 993) * this.cssH + time * 210) % this.cssH;
+      g.moveTo(x, y); g.lineTo(x + 2, y + 8); this.effects.rain++;
+    }
+    g.stroke(); g.restore();
+  }
+
+  private drawEventAccents(now: number): void {
+    this.effects.events = 0;
+    this.eventAccents = this.eventAccents.filter(event => now - event.bornAt < EVENT_LIFETIME_MS);
+    const g = this.labelCtx;
+    g.save(); g.scale(this.dpr, this.dpr);
+    for (const event of this.eventAccents) {
+      const screen = this.worldToScreen(event.x + .5, event.y + .5);
+      if (screen.x < -30 || screen.y < -30 || screen.x > this.cssW + 30 || screen.y > this.cssH + 30) continue;
+      const progress = clamp01((now - event.bornAt) / EVENT_LIFETIME_MS);
+      const radius = this.reduceMotion ? 12 : 10 + progress * 14;
+      g.strokeStyle = `rgba(239,208,136,${(1 - progress) * .8})`; g.lineWidth = 1.5; g.beginPath();
+      g.ellipse(screen.x, screen.y, radius, radius * .46, 0, 0, Math.PI * 2); g.stroke();
+      // Four small marks read as an acknowledgement, not sparks, births or physical light.
+      g.fillStyle = `rgba(249,231,181,${1 - progress})`;
+      for (const side of [-1, 1]) g.fillRect(screen.x + side * radius - 1, screen.y - radius * .5 - 3, 2, 3);
+      this.effects.events++;
+    }
+    g.restore();
   }
 
   /** Selección e insignias: en píxeles de pantalla, para que el texto no se pixele. */

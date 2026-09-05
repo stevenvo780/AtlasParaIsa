@@ -9,6 +9,8 @@ import { createApp } from '../src/server/app.js';
 import { Store } from '../src/server/store.js';
 import type { Gesture, WorldView } from '../src/shared/types.js';
 import { materializeAnimals, syncFauna } from '../src/world/animals.js';
+import { technologyWorkCost } from '../src/world/technology.js';
+import type { TechnologyProgram } from '../src/shared/technology.js';
 
 const password = 'synthetic-browser-test-only';
 let app: ReturnType<typeof createApp>, store: Store, dir: string, origin: string;
@@ -16,7 +18,7 @@ test.beforeEach(async ({}, testInfo) => {
   dir = mkdtempSync(join(tmpdir(), 'carta-browser-')); store = new Store(join(dir, 'world.sqlite'));
   const probe = createServer(); probe.listen(0, '127.0.0.1'); await once(probe, 'listening'); const port = (probe.address() as { port: number }).port;
   await new Promise<void>(resolve => probe.close(() => resolve())); origin = `http://127.0.0.1:${port}`;
-  app = createApp({ store, password, origin, seed: 51926, ...(testInfo.title.startsWith('V4 ') ? { manual: true } : {}), ...(process.env.E2E_STATIC_DIR ? { staticDir: process.env.E2E_STATIC_DIR } : {}) });
+  app = createApp({ store, password, origin, seed: 51926, ...(/^V[45] /.test(testInfo.title) ? { manual: true } : {}), ...(process.env.E2E_STATIC_DIR ? { staticDir: process.env.E2E_STATIC_DIR } : {}) });
   app.server.listen(port, '127.0.0.1'); await once(app.server, 'listening'); mkdirSync('artifacts', { recursive: true });
 });
 test.afterEach(async () => { await app?.close(); store?.close(); if (dir) rmSync(dir, { recursive: true, force: true }); });
@@ -271,6 +273,63 @@ test('V4 mobile animal search, inspection and follow preserve human authority bo
     await page.locator('#population-toggle').tap(); await page.getByRole('button',{name:'Habitantes',exact:true}).tap(); await expect(page.locator('#population-count')).toHaveText(String(app.world.people.length));
     await fullscreen(page,390,844); expect(observed.errors).toEqual([]);
   } finally { await context.close(); }
+});
+
+test('V5 received daylight, rain and reduced motion preserve the world and camera controls', async ({ page }) => {
+  // Prepared server state only; every browser frame still comes from the authenticated projection.
+  app.world.tick = 899;
+  for (const inhabitant of app.world.people) { inhabitant.action = 'rest'; inhabitant.target = {x:inhabitant.x,y:inhabitant.y}; inhabitant.decisionAt = 5000; }
+  app.stepOnce(); expect(app.failed).toBe(false);
+  const observed = observeMessages(page); await page.setViewportSize({width:1440,height:900}); await page.emulateMedia({reducedMotion:'reduce'}); await enter(page);
+  await page.locator('[data-close="inspector"]').click(); await page.locator('#zoom-in').click(); await page.locator('#zoom-in').click();
+  const phase = page.locator('[data-landscape-layer="atmosphere"]').first();
+  const day = await phase.evaluate(layer=>getComputedStyle(layer).opacity); await page.screenshot({path:'artifacts/daylight-v5.png'});
+  const before = app.world.tick; await page.locator('#landscape').focus(); await page.keyboard.press('ArrowRight');
+  expect(app.world.tick).toBe(before); expect(observed.gestures).toHaveLength(0);
+  app.world.tick = 2099; app.world.weather = 'rain'; app.stepOnce(); expect(app.failed).toBe(false);
+  await expect.poll(()=>observed.views.at(-1)?.tick).toBe(2100);
+  await expect.poll(async()=>Number(await phase.evaluate(layer=>getComputedStyle(layer).opacity))).toBeGreaterThan(Number(day)+.3);
+  const tick = app.world.tick; await page.screenshot({path:'artifacts/night-rain-v5.png'}); expect(app.world.tick).toBe(tick);
+  await page.locator('#stats-toggle').click(); await page.locator('#stats-tab-technology').focus(); await page.keyboard.press('Enter');
+  await expect(page.locator('#stats-tab-technology')).toHaveAttribute('aria-selected','true');
+  await expect(page.locator('#stats-content')).toHaveAttribute('aria-labelledby','stats-tab-technology');
+  await page.keyboard.press('End'); await expect(page.locator('#stats-tab-performance')).toBeFocused();
+  await fullscreen(page,1440,900); expect(observed.errors).toEqual([]);
+});
+
+test('V5 research and immediate craft keep causal work, material balances and keyboard-readable procedures', async ({ page }) => {
+  for (const inhabitant of app.world.people) { inhabitant.action='rest';inhabitant.target={x:inhabitant.x,y:inhabitant.y};inhabitant.decisionAt=5000; }
+  const actor = app.world.people.find(person=>person.id==='s')!;
+  actor.materials={wood:12,stone:8};actor.energy=.95;actor.hunger=.1;actor.thirst=.1;actor.fatigue=.1;
+  // A reproducible unfinished experiment is the only prepared technology: no recipe or product exists yet.
+  const program: TechnologyProgram = {inputs:[{source:'raw',material:'stone',mass:1000}],steps:[{op:'form',intensity:4,shape:'edge'},{op:'compress',intensity:2}]};
+  actor.technology.project={kind:'research',program,parents:[],recipeId:null,progress:0,requiredWork:technologyWorkCost(program),energyPaid:0,startedAt:app.world.tick};
+  expect(app.world.technology.recipes).toHaveLength(0);expect(actor.technology.items).toHaveLength(0);
+  const observed=observeMessages(page);await page.setViewportSize({width:1440,height:900});await enter(page);
+  const current=()=>app.world.people.find(person=>person.id==='s')!;
+  async function command(order:'research'|'craft',done:()=>boolean):Promise<void>{
+    const previous=observed.gestures.length;await page.locator(`[data-order="${order}"]`).click();await expect.poll(()=>observed.gestures.length).toBe(previous+1);
+    let steps=0;
+    await expect.poll(()=>{for(let i=0;i<5&&!done();i++){if(++steps>150)throw new Error(`${order} no concluyó en 150 pasos reales`);app.stepOnce();}expect(app.failed).toBe(false);return done();},{intervals:[10,20,30]}).toBe(true);
+    current().decisionAt=app.world.tick+5000;current().action='rest';
+    for(let i=0;i<5;i++)app.stepOnce();
+  }
+  await command('research',()=>app.world.technology.recipes.length===1);
+  expect(current().materials.stone).toBe(7);expect(current().technology.items).toHaveLength(1);
+  expect(observed.views.some(view=>view.people.some(person=>person.id==='s'&&person.working&&Number(person.workProgress)>0))).toBe(true);
+  await command('craft',()=>app.world.technology.ledger.crafted===2);
+  expect(current().materials.stone).toBe(6);expect(current().technology.items).toHaveLength(2);
+  await expect.poll(()=>observed.views.at(-1)?.technology?.dynamics.massError).toBe(0);
+  await page.locator('#stats-toggle').click();await page.locator('#stats-tab-technology').focus();await page.keyboard.press('Enter');
+  await expect(page.locator('#stats-content')).toContainText('La materia se conserva');
+  await expect(page.locator('.technology-recipe')).toHaveCount(1);
+  const summary=page.locator('.technology-recipe summary');await summary.focus();await page.keyboard.press('Enter');
+  await expect(page.locator('.process-steps')).toContainText('Intensidad 4/4');
+  for(let i=0;i<5;i++)app.stepOnce();await expect.poll(()=>observed.views.at(-1)?.tick).toBe(app.world.tick);await expect(summary).toBeFocused();
+  await page.locator('#stats-content').evaluate(panel=>{panel.scrollTop=panel.scrollHeight;});
+  await page.screenshot({path:'artifacts/procedures-v5.png'});
+  await expect(page.locator('#stats-content')).not.toContainText('NaN');await fullscreen(page,1440,900);
+  expect(observed.gestures.map(gesture=>gesture.order)).toEqual(['research','craft']);expect(observed.errors).toEqual([]);
 });
 
 test('V4 invention, component construction and repair debit real work and materials once', async ({ page }) => {

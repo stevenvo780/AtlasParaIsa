@@ -10,16 +10,46 @@ export const animalColors: Record<AnimalView['species'], string> = { hare: '#c8b
 /** A reusable 32px sprite. Only a server position locates the body in the world. */
 export function paintAnimal(g: CanvasRenderingContext2D, species: AnimalView['species'], action: AnimalView['action'], pose: number): void {
   const block = (x: number, y: number, w: number, h: number, color: string) => { g.fillStyle = color; g.fillRect(x, y, w, h); };
-  const coat = animalColors[species], sleep = action === 'rest';
-  block(10, 25, 13, 2, '#14221a30');
-  if (species === 'fish') { block(11, 19, 10, 4, coat); block(8, 18 + pose, 3, 5, '#65a99f'); block(21, 20, 1, 1, '#264e53'); block(14, 17, 3, 2, '#65a99f'); return; }
-  if (species === 'hare') { block(12, 20, 8, 5, coat); block(18, 18, 5, 5, '#deccb3'); block(19, sleep ? 17 : 12 - pose, 2, sleep ? 3 : 7, coat); block(22, sleep ? 18 : 13, 1, sleep ? 2 : 6, coat); block(11, 21, 2, 2, '#f1ead9'); block(21, 19, 1, 1, '#3e392f'); return; }
-  const deer = species === 'deer', boar = species === 'boar', headY = action === 'graze' || action === 'drink' ? 20 : 16;
-  block(10, 19, 12, sleep ? 6 : 5, coat); block(20, headY, 5, 5, coat); block(24, headY + 3, 3, 2, boar ? '#aa9077' : coat); block(23, headY + 1, 1, 1, '#2e342f');
-  if (!sleep) { block(11 + pose, 24, 2, deer ? 4 : 3, '#534b40'); block(20 - pose, 24, 2, deer ? 4 : 3, '#534b40'); }
-  if (deer) { block(21, headY - 5, 1, 5, '#6d5741'); block(24, headY - 5, 1, 5, '#6d5741'); block(20, headY - 4, 6, 1, '#6d5741'); }
-  else if (boar) { block(25, headY + 4, 2, 1, '#f1ead9'); block(9, 18, 2, 3, '#574737'); }
-  else { block(20, headY - 3, 2, 3, coat); block(23, headY - 2, 2, 2, coat); block(6, 20 - pose, 5, 3, coat); block(5, 19 - pose, 3, 2, species === 'fox' ? '#f0e1c5' : '#69737b'); block(24, headY + 4, 2, 1, '#f0e1c5'); }
+  const coat = animalColors[species], sleep = action === 'rest', feeding = action === 'graze' || action === 'drink';
+  const stride = feeding || sleep ? 0 : [0, 1, 0, -1][pose % 4]!;
+  const dip = feeding ? pose % 2 : 0;
+  block(10, 27, 14, 2, '#14221a30');
+  if (species === 'fish') {
+    block(10, 20, 12, 3, '#4d9b9f'); block(12, 19, 9, 4, coat); block(14, 19, 6, 1, '#d1e6d8');
+    block(7, 19 + stride, 3, 5, '#6bb2ab'); block(10, 20, 2, 3, '#77bfb7');
+    block(21, 20, 1, 1, '#264e53'); block(15, 17, 3, 2, '#65a99f'); block(15, 23, 3, 1, '#4a8c94'); return;
+  }
+  if (species === 'hare') {
+    const headY = sleep ? 22 : feeding ? 22 + dip : 18;
+    block(12, 20, 8, 6, '#9d876f'); block(13, 19, 6, 5, coat); block(18, headY, 5, 4, '#deccb3');
+    block(19, headY - (sleep ? 2 : 6), 2, sleep ? 3 : 7, coat); block(22, headY - 5, 1, sleep ? 2 : 6, '#ae9279');
+    block(11, 22, 2, 2, '#f1ead9'); block(21, headY + 1, 1, 1, '#3e392f');
+    if (!sleep) { block(13 - stride, 25, 4, 2, '#deccb3'); block(20 + stride, 25, 2, 2, '#c8b29a'); } return;
+  }
+  const deer = species === 'deer', boar = species === 'boar', fox = species === 'fox';
+  const headY = sleep ? 22 : feeding ? 22 + dip : deer ? 13 : boar ? 20 : 17;
+  const backY = sleep ? 23 : deer ? 18 : boar ? 19 : 20;
+  block(10, backY, 13, sleep ? 4 : 6, coat); block(11, backY, 9, 2, boar ? '#8c7760' : deer ? '#c99a62' : fox ? '#e2a262' : '#a0a7a5');
+  block(12, backY + 4, 9, 2, deer || fox ? '#d9c6a6' : boar ? '#554939' : '#bcc1b8');
+  if (deer && !sleep && !feeding) block(20, 15, 3, 7, coat);
+  block(21, headY, 5, 4, coat); block(25, headY + 2, boar ? 3 : 2, 2, boar ? '#aa9077' : coat);
+  block(24, headY + 1, 1, 1, '#29322d'); block(26, headY + 2, 1, 1, '#3c3a33');
+  if (!sleep) {
+    block(11 + stride, backY + 5, deer ? 1 : 2, deer ? 6 : 3, '#61503d');
+    block(20 - stride, backY + 5, deer ? 1 : 2, deer ? 6 : 3, '#61503d');
+    block(13 - stride, backY + 6, 1, deer ? 5 : 2, '#89755c'); block(22 + stride, backY + 6, 1, deer ? 5 : 2, '#89755c');
+  }
+  if (deer) {
+    block(22, headY - 6, 1, 6, '#715e44'); block(25, headY - 5, 1, 5, '#715e44');
+    block(20, headY - 5, 3, 1, '#715e44'); block(25, headY - 4, 3, 1, '#715e44'); block(20, headY - 2, 3, 1, '#d4af78');
+    block(9, backY + 1, 2, 3, '#ead6b6'); block(15, backY + 2, 1, 1, '#e4c394');
+  } else if (boar) {
+    block(26, headY + 3, 1, 2, '#f1ead9'); block(10, backY - 2, 9, 2, '#574737'); block(21, headY - 2, 2, 2, '#9a8264'); block(8, backY + 2, 2, 1, coat);
+  } else {
+    block(21, headY - 3, 2, 3, coat); block(24, headY - 2, 2, 2, coat); block(22, headY - 2, 1, 1, '#574e47');
+    block(6, backY + 1 - stride, 5, fox ? 4 : 3, coat); block(3, backY - stride, 4, fox ? 3 : 2, fox ? '#f0e1c5' : '#69737b');
+    block(24, headY + 3, 2, 1, '#f0e1c5');
+  }
 }
 
 /** Composition, repeated parts, damage and stock are visible; no arbitrary hut variant. */

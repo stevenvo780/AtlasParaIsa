@@ -4,6 +4,51 @@ import { chromium } from '@playwright/test';
 import { createServer } from 'vite';
 import { existsSync } from 'node:fs';
 import { BoundedCache, classifyRenderer } from '../src/client/gpu-terrain.js';
+import { animalPose, daylightAt, newEventAccents, VISUAL_BUDGET } from '../src/client/visual-state.js';
+import type { WorldView } from '../src/shared/types.js';
+import { technologyPane } from '../src/client/technology-art.js';
+import type { TechnologyView } from '../src/shared/technology.js';
+
+test('visual time presents received daylight continuously and never makes an idle animal walk', () => {
+  for (const boundary of [0, 140, 300, 340, 1300, 1500, 1590, 1800, 1840, 2220, 2400]) {
+    const before = daylightAt(boundary - .001), after = daylightAt(boundary + .001);
+    assert.ok(Math.abs(before.alpha - after.alpha) < .001, `light continuity at ${boundary}`);
+    assert.ok(Number.isFinite(after.shadowX) && Number.isFinite(after.shadowY));
+  }
+  assert.deepEqual(daylightAt(900), daylightAt(3300), 'same model phase repeats exactly');
+  assert.ok(daylightAt(2100).alpha > daylightAt(900).alpha, 'night remains distinct from day');
+  for (const action of ['roam', 'hunt', 'flee', 'rest'] as const) assert.equal(animalPose({action}, false, 4.3, false, true), 0, 'no stepping without position changes');
+  assert.equal(animalPose({action:'graze'}, false, .6, false, true), 1);
+  assert.equal(animalPose({action:'graze'}, false, .6, false, false), 0, 'stale or paused snapshots stop action cycles');
+  assert.equal(animalPose({action:'flee'}, true, .3, true, true), 0, 'reduced motion freezes the gait');
+});
+
+test('event accents acknowledge only newly received located simulation facts and have a hard bound', () => {
+  const previous = {tick:100,events:[]} as unknown as WorldView;
+  const event = {id:'new-birth',tick:101,kind:'birth',source:'simulation',x:0,y:0,actors:[],text:'Synthetic birth',cause:'Synthetic server event'} as const;
+  const next = {...previous,tick:101,events:[{...event,actors:[]}]} as WorldView;
+  assert.deepEqual(newEventAccents(null,next,1000), [], 'initial history never replays');
+  assert.equal(newEventAccents(previous,next,1000).length, 1);
+  assert.deepEqual(newEventAccents(next,next,1001), [], 'same-tick camera response never replays');
+  assert.deepEqual(newEventAccents(previous,{...next,paused:true},1000), []);
+  assert.deepEqual(newEventAccents(next,previous,1000), [], 'recovery to an older world never replays');
+  for (const events of [[{...event,actors:[],source:'sample' as const}], [{...event,actors:[],tick:100}], [{...event,actors:[],tick:102}], [{...event,actors:[],x:undefined}], [{...event,actors:[],kind:'gesture' as const}]]) {
+    assert.deepEqual(newEventAccents(previous,{...next,events},1000), []);
+  }
+  const burst = {...next,events:Array.from({length:300},(_,i)=>({...event,actors:[],id:`event-${i}`}))};
+  assert.equal(newEventAccents(previous,burst,1000).length,VISUAL_BUDGET.events);
+});
+
+test('technology notebook escapes recipe text and bounds expanded history', () => {
+  const technology = {dynamics:{recipes:30,products:1,toolUses:2,generations:3,importedMass:1000,productMass:900,residueMass:100,massError:0,attempts:2,failures:0},recipes:Array.from({length:30},(_,i)=>({id:`recipe-${i}`,name:'<img src=x onerror=alert(1)>',generation:1,program:{inputs:[{source:'raw',material:'wood',mass:1000}],steps:[{op:'form',intensity:.5}]},capacities:{cutting:.5},manufactured:1,uses:2,utility:.2,parents:['<script>bad</script>']}))} as unknown as TechnologyView;
+  const html = technologyPane(technology);
+  assert.ok(!html.includes('<img ') && !html.includes('<script>'));
+  assert.ok(html.includes('&lt;img ') && html.includes('&lt;script&gt;'));
+  assert.equal((html.match(/class="person-detail technology-recipe"/g) ?? []).length,20);
+  assert.ok(html.includes('Los 20 procedimientos más recientes'));
+  assert.ok(!html.includes('NaN') && !html.includes('Infinity'));
+  assert.match(technologyPane(),/Todavía no se recibieron/,'absent projection stays explicitly absent');
+});
 
 test('render cache evicts least-recently-used rasters and releases replaced and destroyed resources once', () => {
   const released: string[] = [];
@@ -124,6 +169,28 @@ test('render browser: dirty chunks, negative coordinates, selection, bounded cac
     assert.equal(life.visible,1,'6000 off-camera animals are culled');
     assert.equal(life.speciesDistinct,6,'each animal species has distinct artwork');
     assert.equal(life.structuresDistinct,9,'components, repetitions, stocks and damage all change the drawn structure');
+    const atmosphere = await page.evaluate(() => {
+      const {renderer,world} = (window as unknown as {renderTest:{renderer:any;world:any}}).renderTest;
+      const water = {...world,tick:900,sequence:900,weather:'rain',people:[],animals:[],events:[],tiles:world.tiles.map((tile:object)=>({...tile,terrain:'water',feature:'none'}))};
+      renderer.reduceMotion = true; renderer.update(water); renderer.focus(0,0); renderer.render(performance.now());
+      const first = renderer.getDiagnostics();
+      const pixels = () => [...renderer.labelCtx.getImageData(0,0,640,480).data].join(',');
+      const frozen = pixels(); renderer.render(performance.now()+5000); const reducedStable = frozen === pixels();
+      renderer.reduceMotion = false; renderer.render(performance.now()+6000); const movingRain = frozen !== pixels();
+      renderer.update({...water,tick:901,sequence:901,weather:'clear'}); renderer.render(performance.now());
+      const clearRain = renderer.getDiagnostics().effects.rain;
+      const next = {...water,tick:902,sequence:902,weather:'clear',events:Array.from({length:200},(_,i)=>({id:`accent-${i}`,tick:902,kind:'birth',source:'simulation',x:0,y:0,actors:[],text:'Synthetic fixture',cause:'Synthetic event'}))};
+      renderer.update(next); renderer.render(performance.now()); const burst = renderer.getDiagnostics();
+      renderer.render(performance.now()+3000); const expired = renderer.getDiagnostics().effects.events;
+      return {first,burst,reducedStable,movingRain,clearRain,expired};
+    });
+    assert.ok(atmosphere.first.effects.rain > 0 && atmosphere.first.effects.rain <= VISUAL_BUDGET.rain);
+    assert.ok(atmosphere.first.effects.water > 0 && atmosphere.first.effects.water <= VISUAL_BUDGET.water);
+    assert.equal(atmosphere.reducedStable,true,'reduced-motion atmosphere is pixel-stable across local time');
+    assert.equal(atmosphere.movingRain,true,'confirmed rain has visible motion');
+    assert.equal(atmosphere.clearRain,0,'clear weather draws no falling rain');
+    assert.equal(atmosphere.burst.effects.events,VISUAL_BUDGET.events,'event burst cannot exceed the visual bound');
+    assert.equal(atmosphere.expired,0,'event accents expire without another snapshot');
     const travel = await page.evaluate(() => {
       const state = (window as unknown as {renderTest: {renderer: any;world:any}}).renderTest;
       const renderer = state.renderer;

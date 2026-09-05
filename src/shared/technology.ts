@@ -70,6 +70,8 @@ export interface TechnologyState {
   checkpoint?: TechnologyCheckpoint;
   /** Durable receipt coverage starts after this serial; pending receipts share the live objects until commit. */
   journal?: TechnologyJournal;
+  /** Resident recipes are a bounded cache when this durable catalogue is present. */
+  catalogue?: TechnologyCatalogueState;
   recipeCounter: number; itemCounter: number; executionCounter: number;
   ledger: { imported: Composition; estateLoss: Composition; work: number; energy: number; fuelMass: number;
     attempts: number; failures: number; crafted: number; toolUses: number; shared: number; recycled: number };
@@ -80,6 +82,21 @@ export interface TechnologyJournal {
   startsAfter: number;
   committedThrough: number;
   pending: TechnologyExecution[];
+}
+export interface TechnologyCatalogueTotals {
+  recipes: number; maxGeneration: number; manufactured: number; uses: number;
+  utility: number; functionalDiversity: number;
+}
+export interface TechnologyCatalogueState {
+  version: 1;
+  /** All definitions through this identity have been committed to the host archive. */
+  committedThrough: number;
+  /** Complete new/modified records, independent of eviction, acknowledged only after COMMIT. */
+  pending: TechnologyRecipe[];
+  totals: TechnologyCatalogueTotals;
+  /** Fixed bitmap of the existing six quantized capability coordinates, not invention names. */
+  functions: number[];
+  memoryCapacity: number;
 }
 export interface TechnologyView {
   recipes: TechnologyRecipe[];

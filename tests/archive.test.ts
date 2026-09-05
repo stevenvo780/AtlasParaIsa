@@ -182,7 +182,7 @@ test('V1 schema migration preserves old snapshots, cells, bodies, experiences an
   try {
     assert.equal((store.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 2);
     const migrated = store.load()!.world;
-    assert.equal(migrated.version, 2); assert.equal(migrated.tick, legacy.tick); assert.equal(migrated.rng, legacy.rng);
+    assert.equal(migrated.version, 3); assert.equal(migrated.tick, legacy.tick); assert.equal(migrated.rng, legacy.rng);
     for (const tile of legacy.tiles) {
       const restored = migrated.tiles.find(t => t.x === tile.x && t.y === tile.y)!;
       for (const [field, value] of Object.entries(tile)) assert.equal(restored[field as keyof typeof restored], value);
@@ -194,7 +194,7 @@ test('V1 schema migration preserves old snapshots, cells, bodies, experiences an
     assert.notEqual(fingerprint(gesture), fingerprint({ ...gesture, agentId: 'i' }));
     assert.notEqual(fingerprint(gesture), fingerprint({ ...gesture, order: 'rest' }));
     store.save(migrated);
-    assert.equal(JSON.parse((store.db.prepare('SELECT body FROM snapshots WHERE slot=0').get() as { body: string }).body).version, 2);
+    assert.equal(JSON.parse((store.db.prepare('SELECT body FROM snapshots WHERE slot=0').get() as { body: string }).body).version, 3);
   } finally { store.close(); }
 });
 
@@ -203,13 +203,13 @@ test('read-only V1 recovery migrates the view without changing schema or creatin
   const path = join(dir, 'legacy.sqlite'); createV1Database(path);
   const store = new Store(path, { readOnly: true });
   try {
-    assert.equal(store.load()!.world.version, 2);
+    assert.equal(store.load()!.world.version, 3);
     assert.equal(store.loadChunk('0,0'), null);
     assert.equal((store.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 1);
     assert.equal(store.db.prepare("SELECT name FROM sqlite_master WHERE name='chunks'").get(), undefined);
     const destination = join(dir, 'recovered.sqlite'); store.previous(destination);
     const recovered = new Store(destination);
-    try { assert.equal(recovered.load()!.world.version, 2); } finally { recovered.close(); }
+    try { assert.equal(recovered.load()!.world.version, 3); } finally { recovered.close(); }
     assert.equal((store.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 1);
   } finally { store.close(); }
 });

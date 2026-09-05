@@ -59,7 +59,7 @@ test('harvest and cultivation consume actual resources; learning ablation preser
   assert.deepEqual(control.people[2]!.values, {}); assert.ok(Object.values(p.values).some(v => v > 0));
   const before = tile.food; tile.vegetation = 0.2; tile.moisture = 0.7;
   stepWorld(w, [{ id: 'farm-1', kind: 'command', agentId: p.id, order: 'farm', x: p.x, y: p.y }]); run(w, 44);
-  assert.equal(p.materials.wood, 0); assert.ok(tile.vegetation > 0.3);
+  assert.equal(p.materials.wood, 0); assert.ok((tile.cultivation ?? 0) > 0.15); assert.ok(tile.vegetation > 0.23);
   assert.ok(tile.food < before + 0.02, 'work does not instantly create a harvest');
 });
 

@@ -2,8 +2,8 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { readFileSync, statSync } from 'node:fs';
 import { resolve, extname, sep } from 'node:path';
 import { WebSocketServer, WebSocket } from 'ws';
-import { createWorld, stepWorld, projectWorld, normalizeViewport } from '../world/index.js';
-import type { Gesture, GestureResult, ServerMessage, Viewport, WorldView } from '../shared/types.js';
+import { createWorld, stepWorld, projectWorld, normalizeViewport, cloneWorld } from '../world/index.js';
+import type { Gesture, GestureResult, ServerMessage, Viewport, WorldView, RuntimeStats } from '../shared/types.js';
 import { Store, fingerprint, GestureConflict, SessionRevoked } from './store.js';
 import { cookie, hashToken, makeToken, passwordVerifier, sessionHash } from './auth.js';
 
@@ -19,7 +19,7 @@ export function parseGesture(value: unknown): Gesture {
   if (typeof g.id !== 'string' || !/^[A-Za-z0-9_-]{8,80}$/.test(g.id) || typeof g.kind !== 'string' || !['plant', 'invite', 'remember', 'command'].includes(g.kind) ||
     !Number.isInteger(g.x) || !Number.isInteger(g.y) || (g.x as number) < -10_000_000 || (g.y as number) < -10_000_000 || (g.x as number) >= 10_000_000 || (g.y as number) >= 10_000_000 ||
     (g.memoryId !== undefined && (typeof g.memoryId !== 'string' || g.memoryId.length > 80)) ||
-    (g.kind === 'command' && (typeof g.agentId !== 'string' || g.agentId.length > 50 || typeof g.order !== 'string' || !['move','explore','gather','farm','build','rest','auto'].includes(g.order))) || (g.kind !== 'command' && (g.agentId !== undefined || g.order !== undefined)) ||
+    (g.kind === 'command' && (typeof g.agentId !== 'string' || g.agentId.length > 50 || typeof g.order !== 'string' || !['move','explore','gather','farm','build','rest','hunt','drink','cooperate','auto'].includes(g.order))) || (g.kind !== 'command' && (g.agentId !== undefined || g.order !== undefined)) ||
     Object.keys(g).some(k => !['id', 'kind', 'x', 'y', 'memoryId', 'agentId', 'order'].includes(k))) throw new HttpError(400, 'La forma o el destino del gesto no es válido.');
   return { id: g.id, kind: g.kind as Gesture['kind'], x: g.x as number, y: g.y as number, ...(g.memoryId === undefined ? {} : { memoryId: g.memoryId as string }), ...(g.kind === 'command' ? { agentId: g.agentId as string, order: g.order as Gesture['order'] } : {}) };
 }
@@ -60,7 +60,13 @@ export function createApp(options: AppOptions) {
   const ws = new WebSocketServer({ noServer: true, maxPayload: 4096, perMessageDeflate: false });
   const staticDir = resolve(options.staticDir ?? 'dist/client');
   const context = { loadChunk: (key: string, atTick: number) => store.loadChunk(key, atTick) };
-  const view = (viewport?: Viewport) => ({ ...projectWorld(world, viewport, context), ...(failed ? { paused: true, pauseReason: 'No se pudo guardar. El mundo está en pausa para proteger lo ya vivido.' } : {}) });
+  const measurements: number[] = [];
+  const runtime: RuntimeStats = { stepMs: 0, p95StepMs: 0, saveMs: 0, projectionMs: 0, snapshotBytes: 0, activeTiles: world.tiles.length, processRssMiB: process.memoryUsage.rss() / 1048576 };
+  const view = (viewport?: Viewport) => {
+    const start = performance.now(), projected = projectWorld(world, viewport, context);
+    runtime.projectionMs = performance.now() - start;
+    return { ...projected, performance: { ...runtime }, ...(failed ? { paused: true, pauseReason: 'No se pudo guardar. El mundo está en pausa para proteger lo ya vivido.' } : {}) };
+  };
   function authorized(req: IncomingMessage) {
     const hash = sessionHash(req);
     if (!hash || !store.sessionValid(hash)) throw new HttpError(401, 'Entra con la contraseña de la carta.');
@@ -121,6 +127,7 @@ export function createApp(options: AppOptions) {
   }
   function stepOnce() {
     if (failed || stopped) return;
+    const stepStarted = performance.now();
     const batch = [...pending.values()];
     const valid: Pending[] = [];
     try {
@@ -129,11 +136,16 @@ export function createApp(options: AppOptions) {
         if (store.sessionValid(item.hash)) valid.push(item);
         else { item.reject(new HttpError(401, 'La sesión terminó antes de aplicar el gesto.')); pending.delete(item.gesture.id); }
       }
-      const draft = structuredClone(world);
+      const draft = cloneWorld(world);
       const results = stepWorld(draft, valid.map(item => item.gesture), context);
       if (results.length !== valid.length) throw new Error('Gesture result count mismatch');
+      const saveStarted = performance.now();
       store.save(draft, valid.map((item, i) => ({ gesture: item.gesture, result: results[i] })), valid.map(item => item.hash));
+      runtime.saveMs = performance.now() - saveStarted;
       world = draft;
+      runtime.stepMs = performance.now() - stepStarted; measurements.push(runtime.stepMs); if (measurements.length > 120) measurements.shift();
+      runtime.p95StepMs = [...measurements].sort((a, b) => a - b)[Math.floor(measurements.length * 0.95)] ?? 0;
+      runtime.activeTiles = world.tiles.length; runtime.processRssMiB = process.memoryUsage.rss() / 1048576; runtime.snapshotBytes = store.lastSnapshotBytes;
       for (let i=0; i<valid.length; i++) { pending.delete(valid[i].gesture.id); valid[i].resolve(results[i]); }
       if (world.tick % 5 === 0 || valid.length) broadcast();
     } catch (error) {

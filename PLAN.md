@@ -1,6 +1,6 @@
 # Una Carta Para Isa — plan unificado
 
-Fecha: 5 de septiembre de 2026. Estado: ampliación procedural implementada y comprobada en revisión privada; cierre personal de la carta, prueba en móvil físico y alojamiento definitivo pendientes.
+Fecha: 5 de septiembre de 2026. Estado: prototipo V3 implementado con ampliación ecológica, genética y social; verificación de integración registrada por separado. Cierre personal de la carta, prueba en móvil físico y alojamiento definitivo pendientes.
 
 El repositorio ya contiene una aplicación local ejecutable. El [README](README.md) reúne los comandos reales de arranque, acceso y recuperación. La experiencia siguiente conserva su alcance de diseño; la implementación actual usa S e I, vecinos ficticios y cinco recuerdos sintéticos identificados, sin importar conversaciones ni atribuirles biografía.
 
@@ -24,19 +24,19 @@ Este texto propone el sentido de la obra; la redacción personal final pertenece
 | Ciencia y filosofía | Reglas explícitas, causas comprobables, necesidades que compiten y memoria que transforma conductas. Las preguntas sobre autonomía, identidad y cuidado aparecen en lo que sucede. |
 | Carta para Isa | S e I son reconocibles; hay recuerdos autorizados y lugares propios; la voz es íntima. Volver tiene significado y ausentarse no genera una obligación de cuidado. |
 
-El alcance ampliado permite recorrer territorio procedural más allá del mapa original, con juego a pantalla completa, control de cualquier habitante, habilidades adquiridas y construcción de lugares compartidos. La extensión se genera según necesidad; la población inicial y la simulación activa tienen límites explícitos.
+El alcance ampliado permite recorrer territorio procedural más allá del mapa original, con juego a pantalla completa, control individual, habilidades adquiridas y construcción de lugares compartidos. V3 conecta agua potable finita, fauna por celdas, suelo vivo, cultivos y huellas con herencia de parámetros y comunidades locales. La extensión se genera según necesidad; solo las regiones próximas a los habitantes avanzan y la población tiene un máximo de 32.
 
 ## La primera entrega
 
 Una URL privada, cómoda en móvil y escritorio, que permita:
 
 1. Leer una apertura breve escrita para Isa y entrar al mundo.
-2. Recorrer territorio procedural con biomas, agua, suelo, vegetación, alimento, madera, piedra y refugios. Sus ciclos afectan a los habitantes y reciben las consecuencias de sus acciones.
-3. Reconocer a S e I y una vecindad pequeña. Como punto de partida de diseño: entre 12 y 24 vecinos, ajustable según legibilidad y rendimiento.
+2. Recorrer territorio procedural con biomas, depósitos visibles de agua, suelo, vegetación, fauna, alimento, madera, piedra y refugios. Cosecha, caza, cultivo, construcción y tránsito dejan consecuencias.
+3. Reconocer a S e I y una vecindad pequeña: catorce vecinos iniciales, con descendientes posibles hasta 32 habitantes totales. La herencia transmite parámetros del modelo; la crianza y el aprendizaje tienen vías separadas.
 4. Observar cómo necesidades, predisposiciones, habilidades y resultados anteriores cambian decisiones y actividades. Los oficios describen una trayectoria de práctica; las etiquetas no asignan tareas.
-5. Ofrecer gestos e invitaciones, o dirigir temporalmente a cualquier habitante para desplazarse, explorar, recolectar, cultivar, construir o descansar; devolverle después la elección autónoma.
+5. Ofrecer gestos e invitaciones, o dirigir temporalmente a cualquier habitante para desplazarse, explorar, recolectar, cultivar, construir, cazar, beber, cooperar o descansar; devolverle después la elección autónoma.
 6. Descubrir una selección pequeña de recuerdos reales aprobados que influya en comportamientos, lugares y voz.
-7. Consultar una crónica breve y encontrar continuidad al regresar. El mundo avanza en el servidor aunque el navegador esté cerrado.
+7. Consultar una crónica breve, estadísticas con alcance explícito y comunidades que comparten recursos, trabajo y conocimientos. Encontrar continuidad al regresar: el mundo avanza en el servidor aunque el navegador esté cerrado.
 
 La primera entrega incluye al menos una costumbre compartida que se forme por repetición e imitación. Así, la sociedad aporta historia propia desde el inicio.
 
@@ -51,10 +51,13 @@ La primera entrega incluye al menos una costumbre compartida que se forme por re
 | Autopoiesis y cognición encarnada | Mantener como inspiración para autorregulación y aprendizaje. No convertirlas en una promesa de vida o conciencia demostrada. |
 | Muerte, pérdida y otras relaciones reales | Conservar la pregunta del autor. El prototipo trabaja con consecuencias reversibles; la forma definitiva requiere su decisión personal. |
 | Descubrimiento de lugares | Incorporado mediante exploración física y crónica. |
-| Sueños, reproducción y generaciones | Fuera del alcance actual; los rasgos iniciales no constituyen evolución genética. |
+| Reproducción y generaciones | Incorporadas en V3 para vecinos ficticios: nacimientos locales con costes y límite de población, genes mendelianos simplificados y plasticidad heredable. Habilidades y recuerdos adquiridos no se heredan como genes. |
+| Sueños | Fuera del alcance actual. |
 | Territorio procedural, asentamientos y control individual | Incorporados al alcance ampliado solicitado. Sin borde del mapa inicial; regiones activas y rango numérico acotados. |
-| Miles de agentes, guerras, gobiernos y mercados complejos | Fuera del alcance actual. |
-| GPU, entrenamiento de modelos, embeddings obligatorios, múltiples servicios y protocolos binarios | Retirar del plan inicial. Una medición o una necesidad concreta podrá justificar cambios técnicos después. |
+| Comunidades, cooperación y disputas | Incorporadas mediante confianza local, semejanza cultural, aportes de materiales, ayuda, enseñanza, trueque y tensión por recursos escasos. Sin violencia ni gobiernos. |
+| Miles de agentes, guerras, gobiernos y mercados complejos | Fuera del alcance actual; el intercambio implementado es un trueque local acotado. |
+| GPU para dibujar | Incorporado compositor WebGL2 con cachés, diagnóstico del dispositivo y alternativa Canvas 2D. La simulación sigue en CPU; no se promete aceleración física en cualquier navegador. |
+| Entrenamiento de modelos, embeddings obligatorios, múltiples servicios y protocolos binarios | Fuera del alcance actual. La simulación no necesita inferencia de un LLM. |
 | Medidores de conciencia, lenguaje cuántico ornamental y aleatoriedad presentada como agencia | Retirar. Sustituirlos por pruebas de causalidad y explicaciones honestas del modelo. |
 | Prohibiciones absolutas de jugar, inspeccionar el mundo o mostrar ciencia | Retirar. La intimidad es compatible con la curiosidad y con controles claros. |
 
@@ -71,12 +74,12 @@ El orden organiza pruebas de extremo a extremo. La persistencia básica se prepa
 
 ### Situación del prototipo
 
-La ampliación añade pantalla de juego completa, cámara libre, biomas procedurales, archivo de regiones, órdenes individuales, habilidades y refugios construidos con recursos y trabajo. Su evidencia se registra en [EVIDENCIA.md](docs/EVIDENCIA.md).
+La ampliación V3 añade ecología celular, fauna finita, sed y depósitos visibles, genes y descendencia, comunidades y cooperación, junto con estadísticas y diagnóstico del renderizado. Conserva cámara libre, archivo de regiones, órdenes individuales y refugios construidos con recursos y trabajo. Las reglas y el protocolo son V3; SQLite conserva esquema V2 y migra estados V1/V2. Su evidencia se registra en [EVIDENCIA.md](docs/EVIDENCIA.md).
 
 | Etapa | Implementado | Cierre pendiente |
 |---|---|---|
-| 1. Mundo y vínculo | Base anterior de 40 × 28; ampliada con regiones de 16 × 16, ecología, dieciséis cuerpos, decisiones locales, vínculo contextual, cámara y gestos. | Comprensión y manejo en el móvil físico destinatario. |
-| 2. Historia propia | Cinco recuerdos sintéticos con efecto contextual, lugares y costumbre transmitida por observación y repetición. Los controles del motor contrastan memoria irrelevante y aprendizaje desactivado. | Selección real de recuerdos, nombres y rasgos revisada por Steven. |
+| 1. Mundo y vínculo | Regiones de 16 × 16, depósitos de agua, recursos modificables, fauna y capa celular; dieciséis cuerpos iniciales, decisiones locales, vínculo contextual, cámara y gestos. | Cierre de integración V3 y comprensión en el móvil físico destinatario. |
+| 2. Historia propia | Recuerdos sintéticos, experiencias de práctica, hábitos por observación, comunidades, ayuda y conflicto reversible; descendientes vecinos con genealogía y aprendizaje propio. | Selección real de recuerdos, nombres y rasgos revisada por Steven; evidencia causal de los mecanismos nuevos. |
 | 3. Continuidad | Servicio persistente, sesión revocable, SQLite transaccional, reconexión, copia y recuperación explícita. | Alojamiento privado autorizado con proceso, HTTPS y disco persistentes; la operación local no acredita un despliegue. |
 | 4. La carta terminada | Interfaz y carta de prueba ejecutables para revisión. | Voz final del autor, revisión íntima, arte y ritmo finales, y recorrido en un teléfono real. |
 

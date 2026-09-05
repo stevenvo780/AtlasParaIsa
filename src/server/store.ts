@@ -5,6 +5,7 @@ import { dirname, resolve } from 'node:path';
 import type { Gesture, GestureResult } from '../shared/types.js';
 import { migrateWorld, type World } from '../world/index.js';
 import { CHUNK_SIZE, MAX_COORDINATE, type Chunk } from '../world/terrain.js';
+import { assertEcosystemTile } from '../world/validation.js';
 
 const checksum = (s: string) => createHash('sha256').update(s).digest('hex');
 // Preserve all V1 gesture identities; only the new command kind extends the tuple.
@@ -43,6 +44,7 @@ function assertChunk(value: unknown, key: string, atTick: number): asserts value
   for (let index = 0; index < chunk.tiles.length; index++) {
     const tile = chunk.tiles[index];
     if (!object(tile) || tile.x !== x0 + index % CHUNK_SIZE || tile.y !== y0 + Math.floor(index / CHUNK_SIZE) || !['water', 'soil', 'meadow', 'shelter'].includes(String(tile.terrain)) || !number(tile.moisture) || !number(tile.vegetation) || !number(tile.food) || (tile.elevation !== undefined && !number(tile.elevation)) || (tile.wood !== undefined && !number(tile.wood, 12)) || (tile.stone !== undefined && !number(tile.stone, 8)) || (tile.biome !== undefined && !['grassland', 'forest', 'desert', 'mountain', 'wetland', 'ocean'].includes(String(tile.biome)))) fail();
+    assertEcosystemTile(tile, false);
   }
   const ids = new Set<string>();
   for (const place of chunk.places) {
@@ -54,6 +56,7 @@ export class GestureConflict extends Error {}
 export class SessionRevoked extends Error {}
 export class Store {
   readonly db: DatabaseSync;
+  lastSnapshotBytes = 0;
   private readonly schemaVersion: number;
   constructor(readonly path: string, options: { readOnly?: boolean } = {}) {
     const existed = path !== ':memory:' && existsSync(path);
@@ -127,6 +130,7 @@ export class Store {
   save(world: World, inputs: { gesture: Gesture; result: GestureResult }[] = [], requiredSessions: string[] = []): void {
     const retired = world.retiredChunks;
     const body = JSON.stringify({ ...world, retiredChunks: [] });
+    this.lastSnapshotBytes = Buffer.byteLength(body);
     this.db.exec('BEGIN IMMEDIATE');
     try {
       // Authorization and commit share a transaction with respect to external revocation.

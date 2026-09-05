@@ -1,6 +1,7 @@
 import type { PlaceView, Tile, Viewport } from '../shared/types.js';
 import { CHUNK_SIZE, MAX_COORDINATE, chunkCoords, chunkKey, generateChunk, generateTile, type Chunk } from './terrain.js';
 import type { World } from './index.js';
+import { initializeEcosystem } from './ecosystem.js';
 
 export interface WorldContext { loadChunk?: (key: string, atTick: number) => Chunk | null; }
 export type ChunkMeta = Omit<Chunk, 'tiles'>;
@@ -23,7 +24,7 @@ export function activate(world: World, x: number, y: number, context: WorldConte
   const chunk = pending >= 0 ? world.retiredChunks.splice(pending, 1)[0]! : context.loadChunk?.(key, world.tick) ?? generateChunk(world.seed, cx, cy);
   const { tiles, ...meta } = chunk;
   world.chunks[key] = meta;
-  world.tiles.push(...tiles);
+  world.tiles.push(...tiles.map(tile => initializeEcosystem(world.seed, tile)));
   for (const place of meta.places) if (!world.places.some(p => p.id === place.id)) world.places.push(place);
 }
 /** Only agent neighborhoods advance ecology. Camera queries never call this function. */
@@ -69,7 +70,7 @@ export function projectTerrain(world: World, viewport?: Viewport, context: World
       for (const place of chunk.places) places.set(place.id, place);
     }
     const index = (y - chunk.cy * CHUNK_SIZE) * CHUNK_SIZE + x - chunk.cx * CHUNK_SIZE;
-    tiles.push({ ...(chunk.tiles[index] ?? generateTile(world.seed, x, y)) });
+    tiles.push(initializeEcosystem(world.seed, chunk.tiles[index] ?? generateTile(world.seed, x, y)));
   }
   return { viewport: v, tiles, places: [...places.values()].filter(p => p.x >= v.x && p.y >= v.y && p.x < v.x + v.width && p.y < v.y + v.height).map(p => ({ ...p })) };
 }

@@ -1,6 +1,6 @@
 # La experiencia y las reglas del mundo
 
-Este documento desarrolla el [plan unificado](../PLAN.md). Describe la propuesta de primera entrega, no funciones ya implementadas.
+Este documento desarrolla el [plan unificado](../PLAN.md) y la experiencia implementada en el prototipo V3. Los ejemplos narrativos siguen siendo posibilidades de diseño. La voz final del autor, la biografía aprobada y la prueba en un teléfono físico continúan pendientes; [EVIDENCIA.md](EVIDENCIA.md) distingue lo comprobado.
 
 ## Entrar, explorar y volver
 
@@ -22,17 +22,23 @@ El modelo ecológico empieza con este ciclo:
 
 **Luz y agua → crecimiento vegetal → alimento → energía y actividad de habitantes → consumo y cambios en el lugar → regeneración condicionada por el entorno.**
 
-Las fuentes y pérdidas se definen explícitamente: la luz aporta energía, la lluvia modifica humedad, desplazarse consume energía y cosechar reduce alimento disponible. La regeneración tiene límites. Ninguna emoción crea recursos ilimitados ni el sistema rescata una escena alterando cantidades a escondidas.
+Las fuentes y pérdidas se definen explícitamente: la luz aporta energía, la lluvia modifica humedad, desplazarse consume energía y cosechar reduce alimento disponible. El agua potable se encuentra en charcos, manantiales, humedales y agua dulce; el suelo húmedo común no se bebe. Los charcos dependen de lluvia y los manantiales tienen recarga limitada. El océano intercambia agua salada con su entorno, sin convertirse en agua potable.
 
-El entorno debe cambiar aunque nadie intervenga. Los habitantes ajustan rutas, actividad y consumo a los recursos disponibles. El primer alcance mantiene un censo estable, sin añadir todavía reproducción, herencia o generaciones.
+Árboles, pinos, palmas, cactus, juncos, bayas, flores, roca y arcilla distinguen los biomas. Recolectar agota existencias; los árboles pueden quedar como tocones y recuperarse lentamente con condiciones adecuadas. La piedra no reaparece. Cultivar modifica suelo y crecimiento; caminar deja huellas que frenan la recuperación vegetal. Una capa celular local influye en fertilidad y crecimiento según sus vecinos, luz y humedad.
+
+Liebres, ciervos, jabalíes y peces son existencias de fauna por celda: pueden desplazarse a una celda vecina, consumir recursos y reproducirse pagando alimento vegetal y agua. Cazar retira una unidad real de esa existencia. No son animales individuales con biografías o genomas. Agotar recursos puede cambiar las rutas y actividades de habitantes y fauna; ninguna emoción fabrica alimento o agua para rescatar una escena.
+
+El mundo empieza con S, I y catorce vecinos. Los vecinos ficticios pueden tener descendencia si disponen de recursos, cercanía, confianza y un lugar compartido; el máximo es 32 habitantes. El censo crece mediante esos nacimientos y no incluye muerte de habitantes. La edad regula la posibilidad de reproducirse, sin simular etapas infantiles completas.
 
 No hacen falta química molecular, hidrodinámica completa ni evolución de especies para comprobar estas dependencias. La primera pregunta experimental es sencilla: **si cambia la disponibilidad de alimento o refugio, ¿cambian las rutas, los encuentros y las decisiones?**
 
 ## Cuerpos y decisiones
 
-Cada habitante percibe una zona limitada. Empieza con energía, hambre y descanso, más preferencias y vínculos locales. S e I tienen además memoria compartida y una necesidad contextual de cercanía o espacio.
+Cada habitante percibe una zona limitada. Empieza con energía, hambre, sed y fatiga, más preferencias y vínculos locales. S e I tienen además memoria compartida y una necesidad contextual de cercanía o espacio.
 
-Las acciones incluyen desplazarse, comer, descansar, explorar, acercarse, acompañar, retirarse, recolectar materiales, cultivar y construir. Cada habitante combina predisposiciones iniciales con habilidades adquiridas y resultados de sus acciones. Una experiencia favorable o desfavorable puede modificar la elección siguiente. Una intención dura lo suficiente para verse; se abandona cuando cambia una causa relevante.
+Las acciones incluyen desplazarse, comer, beber, cazar, descansar, explorar, acercarse, acompañar, retirarse, recolectar materiales, cultivar, construir y cooperar. Cada habitante combina predisposiciones con habilidades adquiridas y resultados de sus acciones. Una experiencia favorable o desfavorable puede modificar la elección siguiente. Una intención dura lo suficiente para verse; se abandona cuando cambia una causa relevante.
+
+Los genes son parámetros de diseño heredables, incluida la rapidez con que se ajustan preferencias. La descendencia recombina un aporte de cada progenitor y empieza sin copiar sus habilidades, hábitos o recuerdos; después aprende de sus propios resultados y de otros. La cultura inicial compartida por crianza se registra por separado del genoma. Esto no atribuye genética ni perfiles psicológicos reales a Steven e Isa.
 
 El circuito completo es:
 
@@ -56,23 +62,27 @@ El prototipo mantiene estas consecuencias reversibles. Si Steven decide incorpor
 
 Los vecinos buscan recursos, descansan y se relacionan mediante reglas locales. Pueden compartir alimento, repetir encuentros y aprender una preferencia observando una acción útil de otro. Tienen identidades sencillas y una memoria reciente pequeña.
 
-La primera forma de cultura será **una costumbre de encuentro o cuidado que se propaga por repetición e imitación**. No nace porque un temporizador declare que existe una tradición. Debe poder rastrearse quién hizo algo, quién lo repitió y cómo cambió el uso de un lugar.
+Una forma de cultura implementada es **una costumbre de encuentro o cuidado que se propaga por repetición e imitación**. No nace porque un temporizador declare que existe una tradición. Se conserva quién actuó, quién observó y qué conducta útil se repitió.
+
+Las comunidades se forman a partir de vínculos cercanos, prácticas compatibles y lugares compartidos. Pueden aportar materiales a una obra, ayudar con trabajo, enseñar una técnica o intercambiar madera y piedra. Estas acciones cambian inventarios, capacidad de trabajo o habilidades y tienen costes. Compartir, cuidar el entorno y mantener apertura hacia otros son prácticas modificables, distintas de los genes. La pertenencia puede revisarse cuando cambian prácticas y vínculos locales; los círculos no son gobiernos ni facciones asignadas a los fundadores.
+
+La escasez compartida puede producir desacuerdo dentro de una comunidad o entre comunidades: dos personas urgidas compiten por la misma fuente todavía disponible. El conflicto añade fatiga y tensión y hace que una ceda un intento; no hay violencia ni robo. La confianza y apertura suficientes pueden dar lugar a turnos con espera real. Pertenecer a grupos distintos no basta para generar una disputa.
 
 La sociedad no necesita girar permanentemente alrededor de la pareja. Puede tener episodios propios; algunos cruzarán la vida de S e I. Por ejemplo, un refugio frecuentado por varios vecinos puede modificar su lugar habitual de reunión.
 
 ## Participación de Isa
 
-Se puede seleccionar cualquier habitante en el mapa o el censo, seguirlo con la cámara y solicitar que vaya a un lugar, explore, recolecte, cultive, construya o descanse. La orden inicia una tarea con trayecto, duración y costes. No anula hambre, cansancio ni obstáculos. «Autónomo» devuelve la selección de tareas al habitante.
+Se puede seleccionar cualquier habitante en el mapa o el censo, seguirlo con la cámara y solicitar que vaya a un lugar, explore, recolecte, cultive, construya, cace, beba, coopere o descanse. La orden inicia una tarea con trayecto, duración y costes. No anula hambre, sed, cansancio ni obstáculos. «Autónomo» devuelve la selección de tareas al habitante.
 
 Los asentamientos empiezan como refugios construidos con recursos y trabajo. El techo mejora posibilidades reales de descanso y encuentro. Los oficios describen práctica adquirida; no asignan destinos biográficos a S, I o los vecinos.
 
-Propuesta inicial: tres gestos, introducidos uno por uno.
+Los tres gestos ambientales disponibles son:
 
 | Gesto | Consecuencia | Límite |
 |---|---|---|
 | Sembrar | Introduce una planta que puede cambiar un pequeño lugar con el tiempo. | Es una entrada explícita al sistema; necesita condiciones de crecimiento y tiene frecuencia limitada. |
-| Llamar | Deja una señal que puede percibirse como invitación. | Los habitantes deciden si responder según su situación; no los teletransporta. |
-| Recordar | Hace disponible un recuerdo aprobado relacionado con la escena. | El contexto determina si influye y cómo; no impone diálogo ni reconciliación. |
+| Invitar | Deja una señal que puede percibirse como invitación. | Los habitantes deciden si responder según su situación; no los teletransporta. |
+| Recordar | Refuerza temporalmente un recuerdo disponible relacionado con la escena; los actuales son sintéticos identificados. | El contexto determina si influye y cómo; no impone diálogo ni reconciliación. |
 
 Los habitantes realizan por sí mismos el cuidado cotidiano. La intervención aporta posibilidades y permite investigar el mundo, sin convertirse en su fuente necesaria de alimento, memoria o afecto.
 
@@ -80,7 +90,7 @@ Crear paisajes alternativos o comparar reglas puede explorarse después en mundo
 
 ## Qué significa aquí científico y filosófico
 
-La profundidad científica se concreta en modelos pequeños, supuestos visibles y comparaciones reproducibles. Una vista opcional de observación puede mostrar humedad, alimento, necesidades o la secuencia de hechos de un episodio, con unidades del modelo y lenguaje sencillo.
+La profundidad científica se concreta en modelos pequeños, supuestos visibles y comparaciones reproducibles. Las capas de observación, las fichas y el panel «Vida del mundo» permiten examinar recursos, necesidades, parentesco, prácticas, confianza e historia reciente. Paisaje y fauna se cuentan en las regiones activas del servidor; la cámara no determina esa muestra. Los acumulados de acciones y la población se presentan aparte.
 
 | Pregunta | Mecánica que permite explorarla |
 |---|---|
@@ -89,6 +99,8 @@ La profundidad científica se concreta en modelos pequeños, supuestos visibles 
 | ¿Cuánto de una identidad es memoria? | Un recuerdo altera una preferencia o una elección posterior. |
 | ¿Cuidar es decidir por alguien? | Una invitación ofrece una posibilidad que puede ser rechazada. |
 | ¿Cómo nace algo colectivo? | Una costumbre aparece por acciones individuales repetidas y aprendidas. |
+| ¿Qué se hereda y qué se aprende? | Genes, habilidades, experiencias y cultura siguen vías separadas que se pueden inspeccionar. |
+| ¿Cuándo cooperar resuelve una carencia? | Ayuda, trueque y turnos cambian costes o acceso a recursos realmente escasos. |
 
 Autopoiesis, cognición encarnada y emergencia son inspiraciones del diseño. El proyecto modela algunos circuitos de mantenimiento, regulación y aprendizaje; no pretende demostrar que el software es un organismo autopoiético, que siente, ni que una teoría obliga a dos personas a morir por separarse.
 
@@ -110,7 +122,7 @@ La voz es breve, concreta y cercana, con tuteo y la cadencia colombiana de la pa
 
 La carta escrita abre la experiencia y puede volver a leerse. Borrador posible de apertura, pendiente de la voz de Steven: «Te hice un mundo pequeño. Dejé en él algo de nuestra historia y espacio para lo que todavía no sabemos».
 
-La dirección visual propuesta es 2D con estética pixel art coherente, paisaje legible y animación corporal expresiva. S e I se distinguen por silueta, color y movimiento; los vecinos conservan identidad sin saturar la pantalla. Se diseña una región bonita y completa antes de producir miles de assets.
+La dirección visual es 2D con estética pixel art, paisaje legible y animación corporal. S e I se distinguen por silueta y color; los vecinos conservan identidad sin saturar la pantalla. Los cambios de recursos, cultivo y tránsito tienen representación en el terreno. El dibujo reutiliza cachés y puede componer el paisaje con WebGL2; Canvas 2D conserva una alternativa. «Rendimiento» informa el backend observado y distingue aceleración identificada, software o dispositivo no verificado, sin prometer hardware en todos los equipos.
 
 La cámara y las fichas funcionan con tacto. Texto legible, contraste, controles amplios, alternativas al color y movimiento reducido forman parte del primer diseño. Sonido y música son opcionales, se activan voluntariamente y no transportan información imprescindible.
 

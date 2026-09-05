@@ -1,4 +1,5 @@
 import type { Biome, PlaceView, Tile } from '../shared/types.js';
+import { initializeEcosystem } from './ecosystem.js';
 
 export const CHUNK_SIZE = 16;
 /** Technical integer-coordinate guard, not the boundary of a generated map. Upper bound is exclusive. */
@@ -97,7 +98,7 @@ export function generateTile(seed: number, x: number, y: number): Tile {
   else if (moisture > 0.56) biome = 'forest';
   else biome = 'grassland';
 
-  if (water) return { x, y, terrain: 'water', biome, elevation: rounded(elevation), moisture: 1, vegetation: 0, food: 0, wood: 0, stone: 0 };
+  if (water) return initializeEcosystem(seed, { x, y, terrain: 'water', biome, elevation: rounded(elevation), moisture: 1, vegetation: 0, food: 0, wood: 0, stone: 0 });
 
   const vegetation = clamp(biome === 'forest' ? 0.62 + moisture * 0.3 + detail * 0.06
     : biome === 'wetland' ? 0.45 + moisture * 0.35 + detail * 0.07
@@ -111,11 +112,11 @@ export function generateTile(seed: number, x: number, y: number): Tile {
   const stone = biome === 'mountain' ? 4 + Math.floor(materials * 5)
     : biome === 'desert' ? Math.floor(materials * 3)
     : Math.floor(materials * 2);
-  return {
+  return initializeEcosystem(seed, {
     x, y, terrain: biome === 'desert' || biome === 'mountain' ? 'soil' : 'meadow', biome,
     elevation: rounded(elevation), moisture: rounded(moisture), vegetation: rounded(vegetation),
     food: rounded(clamp(vegetation * (0.16 + moisture * 0.38) * (0.9 + detail * 0.1))), wood, stone,
-  };
+  });
 }
 
 const LANDMARKS: Record<Biome, readonly string[]> = {

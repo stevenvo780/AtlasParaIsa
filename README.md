@@ -1,6 +1,6 @@
 # Una Carta Para Isa
 
-Un mundo procedural que continúa mientras el navegador está cerrado: seis biomas, recursos, dieciséis habitantes, exploración, construcción, aprendizaje y una costumbre que se aprende observando cuidado. Es un **prototipo reversible** de la carta de Steven para Isa. S e I son nombres provisionales; los catorce vecinos y los cinco recuerdos visibles son material ficticio identificado.
+Un mundo procedural que continúa mientras el navegador está cerrado: seis biomas, agua y recursos agotables, fauna, exploración, construcción, aprendizaje y comunidades. Parte de dieciséis habitantes y permite descendientes de vecinos hasta un máximo de 32. Es un **prototipo reversible V3** de la carta de Steven para Isa. S e I son nombres provisionales; los vecinos y los cinco recuerdos iniciales son material ficticio identificado.
 
 La aplicación local está implementada. La voz final de Steven, los recuerdos reales revisados, la prueba en un teléfono físico y el alojamiento privado siguen pendientes. No se ha publicado ni contratado infraestructura.
 
@@ -19,7 +19,9 @@ npm start
 
 `access init` pide una contraseña de entre 12 y 256 caracteres sin mostrarla en la terminal. Guarda un registro scrypt en `data/access.scrypt`, con permisos privados; no guarda la contraseña legible. Si ya existe una credencial, conserva el archivo y termina sin reemplazarlo.
 
-Abre **http://127.0.0.1:3000** e ingresa con esa contraseña. Usa exactamente ese origen: el servidor comprueba `Host` y el origen de las solicitudes. El paisaje ocupa la pantalla. Arrastra para explorar, usa la rueda para acercarte y selecciona cualquier habitante en el mapa o el censo. Puedes seguirlo, dirigir su destino o pedirle explorar, recolectar, cultivar, construir y descansar; «Autónomo» devuelve sus decisiones. Las fichas explican necesidades, habilidades y materiales. Los gestos son sembrar, invitar y recordar; una invitación aceptada puede ser ignorada por los habitantes.
+Abre **http://127.0.0.1:3000** e ingresa con esa contraseña. Usa exactamente ese origen: el servidor comprueba `Host` y el origen de las solicitudes. El paisaje ocupa la pantalla. Arrastra para explorar, usa la rueda para acercarte y selecciona cualquier habitante en el mapa o el censo. Puedes seguirlo, dirigir su destino o pedirle explorar, recolectar, cultivar, construir, cazar, beber, cooperar y descansar; «Autónomo» devuelve sus decisiones. Las fichas explican necesidades, habilidades, materiales, parentesco, experiencias y relaciones. Los gestos son sembrar, invitar y recordar; una invitación aceptada puede ser ignorada por los habitantes.
+
+«Vida del mundo» reúne población, historia reciente, paisaje, comunidades y rendimiento. Los recursos y la fauna contados corresponden a **regiones activas del servidor**; no son un censo del territorio procedural completo ni solo de lo que mira la cámara. La pestaña de rendimiento distingue tiempos de simulación y guardado, memoria del proceso y medidas gráficas de este navegador.
 
 El servicio avanza a diez pasos por segundo y guarda cada paso. Cerrar la pestaña no lo detiene. Al detener el proceso y arrancarlo de nuevo, recupera el último estado confirmado y registra una pausa técnica; no inventa encuentros durante la caída.
 
@@ -93,7 +95,11 @@ Esta operación retira en la copia las entradas y los hechos posteriores al punt
 
 El mundo se genera por regiones de 16 × 16 celdas con coordenadas positivas y negativas; no conserva el borde de 40 × 28. El límite técnico es ±10 millones de celdas, con extremo superior excluido. La cámara recibe ventanas de hasta 96 × 64. Solo los alrededores de los habitantes avanzan: las regiones archivadas conservan sus cambios y congelan su ecología. El archivo en disco puede crecer con la exploración.
 
-Los mundos V1 se migran preservando sus celdas, cuerpos, recuerdos, entradas y acceso. Los rasgos iniciales son parámetros procedurales; las habilidades y preferencias se adquieren durante la actividad. No hay reproducción ni evolución genética. [CIENCIA.md](docs/CIENCIA.md) explica las referencias y límites.
+Las reglas y el protocolo visible están en **versión 3**; el esquema SQLite permanece en **versión 2**. Los estados V1 y V2 se validan y migran conservando los datos previos, y reciben los campos nuevos reproducibles. Los contadores y series de V3 comienzan en esa migración; no se reconstruyen nacimientos o cooperación anteriores. Las revisiones archivadas se enriquecen al leerlas sin rellenar recursos explícitamente agotados.
+
+Siete pares de genes de diseño permiten recombinación mendeliana simplificada y variación acotada. La tasa de aprendizaje es heredable; las habilidades, preferencias aprendidas y experiencias no se copian al genoma. Los vecinos pueden tener descendencia física con costes y condiciones locales; S e I quedan fuera de esa regla. No hay muerte de habitantes, gobiernos ni un resultado demostrado del efecto Baldwin. [CIENCIA.md](docs/CIENCIA.md) explica las referencias y límites.
+
+El paisaje usa cachés de dibujos y un compositor WebGL2 cuando está disponible, con alternativa Canvas 2D ante indisponibilidad, software detectado o pérdida de contexto. El diagnóstico distingue hardware identificado, software e identidad no verificada. Los FPS y tiempos de dibujo son medidas locales; no acreditan que todos los equipos usen una GPU física ni miden su porcentaje de ocupación.
 
 ## Desarrollo y comprobaciones
 
@@ -110,15 +116,15 @@ Los mundos V1 se migran preservando sus celdas, cuerpos, recuerdos, entradas y a
 
 `SOAK_DAYS` permite entre 3 y 60 días del modelo. Un día equivale a 2400 pasos: **cuatro minutos simulados**. La ejecución acelerada mide el motor y el guardado; no acredita varios días de operación real ni sustituye la prueba en un móvil físico.
 
-Las quince pruebas del motor verificadas durante su implementación incluyen controles emparejados de alimento, refugio, encuentro, recuerdo pertinente/irrelevante y aprendizaje desactivado. La cultura aparece también sin gestos ni escenas preparadas, y la transmisión cambia lo que hacen S e I. Los resultados finales de integración se registran por separado; un comando documentado no equivale a una ejecución aprobada.
+Las pruebas incluyen controles emparejados de alimento, refugio, encuentro, recuerdo pertinente/irrelevante y aprendizaje desactivado, además de ecología, archivo y renderizado. Los resultados y el alcance efectivamente verificado de V3 se registran en [EVIDENCIA.md](docs/EVIDENCIA.md); un mecanismo implementado o un comando documentado no equivalen a una ejecución aprobada.
 
 Para las pruebas de navegador, ejecuta primero `npx playwright install chromium` y `npm run build`. La [evidencia de esta entrega](docs/EVIDENCIA.md) registra los resultados y sus límites.
 
 ## Mapa del proyecto
 
-- `src/world/`: reglas deterministas, generación, cuerpo, memoria y aprendizaje.
+- `src/world/`: reglas deterministas, terreno, ecología, cuerpo, memoria, genética, sociedad y estadísticas.
 - `src/server/`: HTTP/WebSocket, sesión privada, transacciones y continuidad.
-- `src/client/`: Canvas 2D, carta, fichas, crónica y controles accesibles en DOM.
+- `src/client/`: paisaje con cachés y WebGL2/Canvas 2D, carta, fichas, estadísticas, crónica y controles accesibles en DOM.
 - `src/shared/`: contrato de datos visible; el navegador no recibe el estado interno completo.
 - `tests/` y `scripts/`: comprobaciones y operaciones locales.
 

@@ -7,6 +7,7 @@ import { once } from 'node:events';
 import { createServer } from 'node:net';
 import { createApp } from '../src/server/app.js';
 import { Store } from '../src/server/store.js';
+import { assertWorld } from '../src/world/index.js';
 import type { Gesture, WorldView } from '../src/shared/types.js';
 import { materializeAnimals, syncFauna } from '../src/world/animals.js';
 import { technologyWorkCost } from '../src/world/technology.js';
@@ -189,11 +190,12 @@ test('an engine-born descendant exposes genealogy, causal memories and learned c
   const fixture = app.world; const founders = fixture.people.filter(p => p.role === 'neighbor').slice(0, 3); setFixtureTick(119);
   for (const founder of founders) {
     founder.x = 25; founder.y = 8; founder.target = { x: 25, y: 8 }; founder.action = 'rest'; founder.decisionAt = 500;
-    founder.hunger = .1; founder.thirst = .1; founder.fatigue = .1; founder.energy = .9; founder.inventory = .3;
+    founder.hunger = .1; founder.thirst = .1; founder.fatigue = .1; founder.energy = .9; founder.inventory = .25;
     founder.culture = { sharing: .6, stewardship: .6, openness: .6 };
     for (const other of founders) if (other !== founder) founder.bonds[other.id] = .5;
   }
-  app.stepOnce(); expect(app.failed).toBe(false);
+  assertWorld(fixture);
+  app.stepOnce(); expect(app.failed).toBe(false); assertWorld(app.world);
   const child = app.world.people.find(p => p.genome.generation === 1)!; expect(child).toBeTruthy();
   const birth = app.world.events.find(event => event.kind === 'birth' && event.actors.includes(child.id))!; expect(birth).toBeTruthy();
   const observed = observeMessages(page); await page.setViewportSize({ width: 1440, height: 900 }); await enter(page);
@@ -225,6 +227,9 @@ test('an engine-born descendant exposes genealogy, causal memories and learned c
   expect(await page.locator('#inhabitant-card').evaluate(card=>card.scrollTop)).toBeCloseTo(scroll,0);
   await page.keyboard.press('Enter');
   await expect(page.locator(`[data-community-card="${child.communityId}"]`)).toBeFocused();
+  const persisted = store.load()!.world; assertWorld(persisted);
+  expect(persisted.tick).toBe(app.world.tick); expect(app.failed).toBe(false);
+  expect(persisted.people.find(person => person.id === child.id)?.genome).toMatchObject({ generation: 1, parents: child.genome.parents });
   expect(observed.gestures).toHaveLength(0); expect(observed.errors).toEqual([]);
 });
 

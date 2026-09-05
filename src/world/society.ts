@@ -6,6 +6,7 @@ import { tileAt } from './spatial.js';
 import { constructionCost, waterAvailable } from './inventions.js';
 import { CAPABILITIES, MASS_UNIT, materialCapacities, shareTechnology, toolCapacities, transferTechnologyItem } from './technology.js';
 import type { Capability, MaterialBatch, TechnologyProgram } from '../shared/technology.js';
+import { resolveTechnologyRecipe } from './technology-catalogue.js';
 
 type Emit = (event: Omit<ChronicleEvent, 'id' | 'tick'>) => ChronicleEvent;
 export type Culture = NonNullable<PersonView['culture']>;
@@ -32,7 +33,10 @@ export interface Opportunity {
 }
 function practicedRecipeToTeach(world: World, teacher: Person, learner: Person): string | undefined {
   if (!world.learningEnabled) return;
-  return world.technology.recipes.filter(r => teacher.technology.knownRecipes.includes(r.id) && !learner.technology.knownRecipes.includes(r.id) && (teacher.technology.competence[r.id]?.successes ?? 0) > 0)
+  return teacher.technology.knownRecipes.flatMap(id => {
+    if (learner.technology.knownRecipes.includes(id) || (teacher.technology.competence[id]?.successes ?? 0) <= 0) return [];
+    const recipe = resolveTechnologyRecipe(world, id); return recipe ? [recipe] : [];
+  })
     .sort((a, b) => (teacher.technology.competence[b.id]?.benefit ?? 0) - (teacher.technology.competence[a.id]?.benefit ?? 0) || a.id.localeCompare(b.id))[0]?.id;
 }
 /** A request comes from the recipient's active program, or a recipe they actually know
@@ -41,7 +45,7 @@ function requestedPrograms(world: World, person: Person): TechnologyProgram[] {
   if (!['research', 'craft'].includes(person.action)) return [];
   if (person.technology.project) return [person.technology.project.program];
   if (person.action !== 'craft') return [];
-  return world.technology.recipes.filter(r => person.technology.knownRecipes.includes(r.id)).map(r => r.program);
+  return person.technology.knownRecipes.flatMap(id => { const recipe = resolveTechnologyRecipe(world, id); return recipe ? [recipe.program] : []; });
 }
 function processMaterialNeed(world: World, person: Person): { wood: number; stone: number } {
   const deficit = { wood: 0, stone: 0 };
@@ -173,7 +177,7 @@ export function cooperate(world: World, person: Person, emit: Emit): boolean {
   } else if (opportunity.recipeId) {
     if (!practicedRecipeToTeach(world, person, other) || (person.technology.competence[opportunity.recipeId]?.successes ?? 0) <= 0 || !shareTechnology(world, person, other, emit, opportunity.recipeId)) return false;
     helperPaid = true; count(world, 'teaching');
-    const recipe = world.technology.recipes.find(r => r.id === opportunity.recipeId)!;
+    const recipe = resolveTechnologyRecipe(world, opportunity.recipeId)!;
     detail = `Mostró las operaciones practicadas ${recipe.program.steps.map(s => s.op).join(' → ')}; ${other.name} aprendió la receta por esta interacción cercana.`;
   } else {
     const skill = Object.keys(person.skills).filter(key => person.skills[key]! > (other.skills[key] ?? 0) + 0.08).sort((a, b) => person.skills[b]! - person.skills[a]!)[0];

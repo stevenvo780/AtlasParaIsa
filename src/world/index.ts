@@ -1,5 +1,5 @@
 import { PROTOCOL_VERSION, type Action, type ChronicleEvent, type Gesture, type GestureResult, type MemoryView, type PersonView, type PlaceView, type Tile, type WorldView, type Viewport, type Order, type CommunityView, type WorldSample } from '../shared/types.js';
-import { activate, maintainRegions, normalizeViewport, projectTerrain, tileAt, validCoordinate, type ChunkMeta, type WorldContext } from './spatial.js';
+import { activate, bindWorldContext, maintainRegions, normalizeViewport, projectTerrain, tileAt, validCoordinate, worldContext, type ChunkMeta, type WorldContext } from './spatial.js';
 import { chunkKey, generateChunk, proceduralPlaceName, legacyStructures, type Chunk } from './terrain.js';
 import { assertGenome, expressGenome, founderGenome, inheritGenome, type Genome } from './genetics.js';
 import { bond, cooperate, cooperationOpportunity, initialCulture, resourceDispute, updateCommunities, settlementOpportunity, type Culture } from './society.js';
@@ -13,13 +13,14 @@ import { defaultBlueprint, constructionCost, inventionOpportunity, invent, compl
 import type { AnimalDynamics, BlueprintView, StructureView, InventionDynamics } from '../shared/life.js';
 import type { TechnologyKnowledge, TechnologyState } from '../shared/technology.js';
 import type { DemographicState, LegacyRecord } from '../shared/demography.js';
-import { defaultTechnologyState, initialTechnologyKnowledge, technologyOpportunity, researchTechnology, craftTechnology, projectTechnology, assertTechnology, useTool, recordTechnologyBenefit, settleTechnologyEstate, cancelTechnologyProject } from './technology.js';
+import { defaultTechnologyState, initialTechnologyKnowledge, technologyOpportunity, researchTechnology, craftTechnology, projectTechnology, assertTechnology, useTool, recordTechnologyBenefit, settleTechnologyEstate, cancelTechnologyProject, maintainTechnologyMemory } from './technology.js';
+import { catalogueEnabled, resolveTechnologyRecipe } from './technology-catalogue.js';
 import { initialDemography, demographicTraits } from './demography.js';
 import { reproductiveReadiness, familyOpportunity, availableToShare } from './family.js';
-import { advancePopulation, assertPopulation } from './lineage.js';
+import { advancePopulation, assertLegacyRecord, assertPopulation } from './lineage.js';
 import { analyzeTechnologyOrganization } from './technology-organization.js';
 import { captureTechnologyCheckpoint, advanceTechnologyCheckpoint } from './technology-checkpoint.js';
-export { tileAt, normalizeViewport } from './spatial.js';
+export { bindWorldContext, tileAt, normalizeViewport, worldContext } from './spatial.js';
 export type { WorldContext } from './spatial.js';
 
 export const RULES_VERSION = 5;
@@ -625,7 +626,8 @@ function applyGesture(world: World, gesture: Gesture, order: number): GestureRes
 }
 
 /** One fixed 100 ms step. Browser presence and wall-clock time are never inputs. */
-export function stepWorld(world: World, inputs: Gesture[] = [], context: WorldContext = {}): GestureResult[] {
+export function stepWorld(world: World, inputs: Gesture[] = [], context: WorldContext = worldContext(world)): GestureResult[] {
+  bindWorldContext(world, context);
   if (world.technology.checkpoint === undefined) world.technology.checkpoint = captureTechnologyCheckpoint(world.technology, world.people, world.tick, 'migration');
   world.tick++;
   maintainRegions(world, context);
@@ -649,6 +651,7 @@ export function stepWorld(world: World, inputs: Gesture[] = [], context: WorldCo
   advancePopulation(world,{emit:event=>addEvent(world,event),beforeDeath:transferEstate});
   updateCommunities(world, event => addEvent(world, event));
   reproduce(world);
+  if (catalogueEnabled(world.technology)) for (const person of world.people) maintainTechnologyMemory(world, person);
   advanceTechnologyCheckpoint(world.technology, world.people, world.tick);
   recordSample(world);
   return results;
@@ -707,15 +710,19 @@ function fertile(world: World, person: Person): boolean {
 }
 
 /** Flat terrain cells can be copied without the generic structured-clone traversal overhead. */
-export function cloneWorld(world: World): World {
+export function cloneWorld(world: World, context: WorldContext): World;
+export function cloneWorld(world: World): World;
+export function cloneWorld(world: World, context: WorldContext = worldContext(world)): World {
   const draft: World = structuredClone({ ...world, tiles: [] });
   draft.tiles = world.tiles.map(tile => ({ ...tile }));
+  bindWorldContext(draft, { ...worldContext(world), ...(context && typeof context === 'object' ? context : {}) });
   return draft;
 }
 
 /** Explicit allow-list: no PRNG, habit internals, private provenance or session data cross the wire. */
 const organizationViews = new WeakMap<World, { tick: number; executionCounter: number; checkpoint: TechnologyState['checkpoint']; value: NonNullable<WorldView['organization']> }>();
-export function projectWorld(world: World, viewport?: Viewport, context: WorldContext = {}): WorldView {
+export function projectWorld(world: World, viewport?: Viewport, context: WorldContext = worldContext(world)): WorldView {
+  bindWorldContext(world, context);
   const projected = projectTerrain(world, viewport, context), v = projected.viewport;
   let organization=organizationViews.get(world);
   if(!organization||organization.tick!==world.tick||organization.executionCounter!==world.technology.executionCounter||organization.checkpoint!==world.technology.checkpoint) {
@@ -778,10 +785,21 @@ function assertCommon(value: unknown, legacy = false, expectedVersion = RULES_VE
   for (const reminder of world.reminders) if (!object(reminder) || !str(reminder.memoryId, 100) || !integer(reminder.until) || !world.memories.some(m => m.id === reminder.memoryId)) fail();
 }
 
-export function assertWorld(value: unknown, expectedVersion = RULES_VERSION): asserts value is World {
+export function assertWorld(value: unknown, expectedVersion = RULES_VERSION, context?: WorldContext): asserts value is World {
   assertCommon(value, false, expectedVersion);
   const w = value;
+  bindWorldContext(w, context ?? worldContext(w));
   const fail = (): never => { throw new Error('Estado procedural inválido.'); };
+  const identities = new Map<string, Person | LegacyRecord | undefined>();
+  const identity = (id: string): Person | LegacyRecord | undefined => {
+    if (identities.has(id)) return identities.get(id);
+    let person: Person | LegacyRecord | undefined = w.people.find(person => person.id === id) ?? w.legacy?.find(person => person.id === id) ?? w.retiredLegacy?.find(person => person.id === id);
+    if (!person && expectedVersion >= 5) {
+      const archived = worldContext(w).loadLegacy?.(id, w.tick);
+      if (archived) { assertLegacyRecord(archived, w.tick); if (archived.id !== id) fail(); person = archived; }
+    }
+    identities.set(id, person); return person;
+  };
   if (!w.chunks || Array.isArray(w.chunks) || Object.keys(w.chunks).length > 256 || !Array.isArray(w.retiredChunks) || !Number.isSafeInteger(w.discoveredChunks) || w.discoveredChunks < 0 || !Number.isSafeInteger(w.settlementCount) || w.settlementCount < 0 || [w.adaptationEnabled, w.noveltyEnabled, w.shelterBenefitEnabled].some(v => typeof v !== 'boolean')) fail();
   for(const chunk of w.retiredChunks)assertDormantTerrain(chunk,w.tick,expectedVersion>=3);
   const keys = new Set<string>();
@@ -804,7 +822,7 @@ export function assertWorld(value: unknown, expectedVersion = RULES_VERSION): as
     if (expectedVersion >= 3) {
       assertGenome(p.genome);
       if (p.genome.parents.length) {
-        const parents = p.genome.parents.map(id => w.people.find(other => other.id === id) ?? (expectedVersion>=5?w.legacy?.find(other=>other.id===id):undefined));
+        const parents = p.genome.parents.map(id => identity(id));
         if (parents.some(parent => !parent || parent.id === p.id || parent.bornAt >= p.bornAt || ('diedAt' in parent && parent.diedAt < p.bornAt) || parent.genome.generation >= p.genome.generation) || p.genome.generation !== Math.max(...parents.map(parent => parent!.genome.generation)) + 1) fail();
       }
       if (typeof p.thirst !== 'number' || !Number.isFinite(p.thirst) || p.thirst < 0 || p.thirst > 1 || !Number.isSafeInteger(p.bornAt) || p.bornAt < -4800 || p.bornAt > w.tick || !Number.isSafeInteger(p.lastBirth) || p.lastBirth < -2400 || p.lastBirth > w.tick || !Number.isSafeInteger(p.lastSocial) || p.lastSocial < -30 || p.lastSocial > w.tick || !Number.isSafeInteger(p.lastDispute) || p.lastDispute < -180 || p.lastDispute > w.tick || !Number.isSafeInteger(p.lastPracticeMemory) || p.lastPracticeMemory < 0 || p.lastPracticeMemory > w.tick || !numericMap(p.culture, 0, 1, 3) || !['sharing','stewardship','openness'].every(key => typeof p.culture[key as keyof Culture] === 'number') || !numericMap(p.bonds, 0, 1, MAX_POPULATION) || Object.keys(p.bonds).some(id => !w.people.some(other => other.id === id)) || !(p.communityId === null || typeof p.communityId === 'string' && w.communities?.some(c => c.id === p.communityId))) fail();
@@ -831,32 +849,54 @@ export function assertWorld(value: unknown, expectedVersion = RULES_VERSION): as
       const serial=/^descendant-([1-9]\d*)$/.exec(person.id);
       if(person.genome.generation>0&&(!serial||!Number.isSafeInteger(Number(serial[1]))||Number(serial[1])>w.birthCounter)) fail();
     }
-    for (const recipe of w.technology.recipes) if(!w.people.some(p=>p.id===recipe.inventorId)&&!w.legacy.some(p=>p.id===recipe.inventorId&&p.diedAt>=recipe.tick)) fail();
+    const recipeIds = new Set([...w.technology.recipes, ...(w.technology.catalogue?.pending ?? [])].map(recipe => recipe.id));
+    for (const person of w.people) {
+      for (const id of person.technology.knownRecipes) recipeIds.add(id);
+      for (const item of person.technology.items) if (item.recipeId) recipeIds.add(item.recipeId);
+      for (const id of person.technology.project?.parents ?? []) recipeIds.add(id);
+    }
+    for (const inventory of w.technology.checkpoint?.inventories ?? []) for (const item of inventory.items) if (item.recipeId) recipeIds.add(item.recipeId);
+    for (const event of [...w.technology.history, ...(w.technology.journal?.pending ?? [])]) {
+      if (event.recipeId) recipeIds.add(event.recipeId);
+      for (const id of event.parentRecipeIds) recipeIds.add(id);
+      for (const catalyst of event.catalysts) if (catalyst.recipeId) recipeIds.add(catalyst.recipeId);
+    }
+    for (const id of recipeIds) {
+      const recipe = resolveTechnologyRecipe(w, id, { cache: false });
+      if (!recipe) fail();
+      const author = identity(recipe!.inventorId);
+      if (!author || author.bornAt > recipe!.tick || ('diedAt' in author && author.diedAt < recipe!.tick)) fail();
+    }
   }
 }
 
 /** V1/V2 conversion preserves existing fields and initializes only newly introduced mechanisms. */
-export function migrateWorld(value: unknown): World {
+export function migrateWorld(value: unknown, context: WorldContext = {}): World {
   const version = (value as { version?: unknown } | null)?.version;
   if (version === RULES_VERSION) {
-    assertWorld(value);
-    if (value.technology.checkpoint !== undefined) return value;
-    const world = structuredClone(value);
+    assertWorld(value, RULES_VERSION, context);
+    if (value.technology.checkpoint !== undefined) {
+      if (catalogueEnabled(value.technology)) for (const person of value.people) maintainTechnologyMemory(value, person);
+      return value;
+    }
+    const world = cloneWorld(value, context);
     world.technology.checkpoint = captureTechnologyCheckpoint(world.technology, world.people, world.tick, 'migration');
+    if (catalogueEnabled(world.technology)) for (const person of world.people) maintainTechnologyMemory(world, person);
     assertWorld(world); return world;
   }
-  if (version===4) { assertWorld(value,4); const world=structuredClone(value); upgradeV5(world); assertWorld(world); return world; }
+  if (version===4) { assertWorld(value,4,context); const world=cloneWorld(value,context); upgradeV5(world); assertWorld(world); return world; }
   if(version===3) {
-    assertWorld(value,3);
-    const world=structuredClone(value); upgradeV4(world); upgradeV5(world); assertWorld(world); return world;
+    assertWorld(value,3,context);
+    const world=cloneWorld(value,context); upgradeV4(world); upgradeV5(world); assertWorld(world); return world;
   }
   if (version === 2) {
-    assertWorld(value, 2);
-    const world = structuredClone(value);
+    assertWorld(value, 2, context);
+    const world = cloneWorld(value, context);
     upgradeV3(world); upgradeV4(world); upgradeV5(world); assertWorld(world); return world;
   }
   assertCommon(value, true);
   const world = structuredClone(value);
+  bindWorldContext(world, context);
   world.version = RULES_VERSION; world.chunks = {}; world.retiredChunks = [];
   world.discoveredChunks = 6; world.settlementCount = 0;
   world.adaptationEnabled = true; world.noveltyEnabled = true; world.shelterBenefitEnabled = true;

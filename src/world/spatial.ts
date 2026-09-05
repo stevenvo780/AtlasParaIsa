@@ -5,8 +5,22 @@ import { initializeEcosystem } from './ecosystem.js';
 import { materializeAnimals } from './animals.js';
 import type { AnimalView, StructureView } from '../shared/life.js';
 import { projectAnimal } from './animals.js';
+import type { LegacyRecord } from '../shared/demography.js';
+import { bindTechnologyCatalogue, type TechnologyCatalogueReader } from './technology-catalogue.js';
 
-export interface WorldContext { loadChunk?: (key: string, atTick: number) => Chunk | null; }
+export interface WorldContext {
+  loadChunk?: (key: string, atTick: number) => Chunk | null;
+  catalogueReader?: TechnologyCatalogueReader;
+  loadLegacy?: (id: string, atTick: number) => LegacyRecord | null;
+}
+const contexts = new WeakMap<World, WorldContext>();
+/** Host capabilities live outside serialized worlds and never become inhabitants' knowledge. */
+export function bindWorldContext(world: World, context: WorldContext): void {
+  const bound = { ...contexts.get(world), ...context };
+  contexts.set(world, bound);
+  if (world.technology && bound.catalogueReader) bindTechnologyCatalogue(world.technology, bound.catalogueReader);
+}
+export function worldContext(world: World): WorldContext { return contexts.get(world) ?? {}; }
 export type ChunkMeta = Omit<Chunk, 'tiles' | 'animals' | 'structures'>;
 export const validCoordinate = (n: unknown): n is number => typeof n === 'number' && Number.isSafeInteger(n) && n >= -MAX_COORDINATE && n < MAX_COORDINATE;
 const indexes = new WeakMap<World, { tiles: Tile[]; length: number; map: Map<string, Tile> }>();
@@ -18,7 +32,7 @@ export function tileAt(world: World, p: { x: number; y: number }): Tile | undefi
   }
   return index.map.get(`${p.x},${p.y}`);
 }
-export function activate(world: World, x: number, y: number, context: WorldContext = {}): void {
+export function activate(world: World, x: number, y: number, context: WorldContext = worldContext(world)): void {
   if (!validCoordinate(x) || !validCoordinate(y)) return;
   const key = chunkKey(x, y);
   if (world.chunks[key]) return;
@@ -34,7 +48,7 @@ export function activate(world: World, x: number, y: number, context: WorldConte
   for (const place of meta.places) if (!world.places.some(p => p.id === place.id)) world.places.push(place);
 }
 /** Only agent neighborhoods advance ecology. Camera queries never call this function. */
-export function maintainRegions(world: World, context: WorldContext = {}): void {
+export function maintainRegions(world: World, context: WorldContext = worldContext(world)): void {
   const needed = new Set<string>();
   for (const person of world.people) {
     for (const dx of [-8, 0, 8]) for (const dy of [-8, 0, 8]) {
@@ -78,7 +92,7 @@ export function normalizeViewport(value?: Viewport): Viewport {
   if (!validCoordinate(v.x) || !validCoordinate(v.y) || !Number.isInteger(v.width) || !Number.isInteger(v.height) || v.width < 1 || v.width > 96 || v.height < 1 || v.height > 64 || !validCoordinate(v.x + v.width - 1) || !validCoordinate(v.y + v.height - 1)) throw new RangeError('Ventana de mundo inválida (máximo 96 × 64).');
   return { ...v };
 }
-export function projectTerrain(world: World, viewport?: Viewport, context: WorldContext = {}): { viewport: Viewport; tiles: Tile[]; places: PlaceView[]; animals: AnimalView[]; structures: StructureView[] } {
+export function projectTerrain(world: World, viewport?: Viewport, context: WorldContext = worldContext(world)): { viewport: Viewport; tiles: Tile[]; places: PlaceView[]; animals: AnimalView[]; structures: StructureView[] } {
   const v = normalizeViewport(viewport), tiles: Tile[] = [], places = new Map(world.places.map(p => [p.id, p]));
   const archive = new Map<string, Chunk>();
   for (let y = v.y; y < v.y + v.height; y++) for (let x = v.x; x < v.x + v.width; x++) {

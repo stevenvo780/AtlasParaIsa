@@ -1,4 +1,5 @@
 import type { TechnologyCheckpoint, TechnologyKnowledge, TechnologyState } from '../shared/technology.js';
+import { resolveTechnologyRecipe } from './technology-catalogue.js';
 
 export interface TechnologyStockActor { id: string; technology: Pick<TechnologyKnowledge, 'items' | 'residue'>; }
 const materials = ['wood', 'stone', 'water'] as const;
@@ -33,14 +34,20 @@ export function assertTechnologyCheckpoint(state: TechnologyState, tick: number)
     const serial = Number(event.id.slice(8));
     if (serial <= checkpoint.executionCounter ? event.tick > checkpoint.tick : event.tick <= checkpoint.tick) fail();
   }
-  const actorIds = new Set<string>(), itemIds = new Set<string>(), recipeIds = new Set(state.recipes.map(recipe => recipe.id));
+  const actorIds = new Set<string>(), itemIds = new Set<string>();
+  const recipeExisted = (id: string): boolean => {
+    // Resolve the current record, then check only its immutable birth date. A checkpoint
+    // is not a claim about recipe statistics at its historical opening tick.
+    const recipe = resolveTechnologyRecipe({ technology: state, tick }, id, { cache: false });
+    return !!recipe && recipe.tick <= checkpoint.tick;
+  };
   for (const inventory of checkpoint.inventories) {
     if (!inventory || !identifier(inventory.actorId) || actorIds.has(inventory.actorId) || !composition(inventory.residue) ||
       !Array.isArray(inventory.items) || inventory.items.length > state.budgets.maxItems) fail();
     actorIds.add(inventory.actorId);
     for (const item of inventory.items) {
       if (!item || !identifier(item.id) || !/^product-[1-9]\d*$/.test(item.id) || !integer(Number(item.id.slice(8)), state.itemCounter) ||
-        itemIds.has(item.id) || !(item.recipeId === null || recipeIds.has(item.recipeId)) || !composition(item.composition) ||
+        itemIds.has(item.id) || !(item.recipeId === null || recipeExisted(item.recipeId)) || !composition(item.composition) ||
         !integer(item.mass) || item.mass === 0 || item.mass !== materials.reduce((total, material) => total + item.composition[material], 0)) fail();
       itemIds.add(item.id);
     }

@@ -59,7 +59,7 @@ export function createApp(options: AppOptions) {
   const gestureAttempts = new Map<string, { count: number; reset: number }>();
   const ws = new WebSocketServer({ noServer: true, maxPayload: 4096, perMessageDeflate: false });
   const staticDir = resolve(options.staticDir ?? 'dist/client');
-  const context = { loadChunk: (key: string, atTick: number) => store.loadChunk(key, atTick) };
+  const context = store.context;
   const measurements: number[] = [];
   const runtime: RuntimeStats = { stepMs: 0, p95StepMs: 0, saveMs: 0, projectionMs: 0, snapshotBytes: 0, activeTiles: world.tiles.length, processRssMiB: process.memoryUsage.rss() / 1048576 };
   const view = (viewport?: Viewport) => {
@@ -136,7 +136,7 @@ export function createApp(options: AppOptions) {
         if (store.sessionValid(item.hash)) valid.push(item);
         else { item.reject(new HttpError(401, 'La sesión terminó antes de aplicar el gesto.')); pending.delete(item.gesture.id); }
       }
-      const draft = cloneWorld(world);
+      const draft = cloneWorld(world, context);
       const results = stepWorld(draft, valid.map(item => item.gesture), context);
       if (results.length !== valid.length) throw new Error('Gesture result count mismatch');
       const saveStarted = performance.now();

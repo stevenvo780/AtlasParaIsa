@@ -2,6 +2,7 @@ import type { OrganizationAnalysis, OrganizationExecution, OrganizationObservati
 import type { Composition, ResourceMass, TechnologyCheckpoint, TechnologyExecution, TechnologyKnowledge, TechnologyState } from '../shared/technology.js';
 import { analyzeOrganization } from './organization.js';
 import { assertTechnologyCheckpoint, technologyHistoryGap } from './technology-checkpoint.js';
+import { resolveTechnologyRecipe } from './technology-catalogue.js';
 
 export interface TechnologyOrganizationActor { id: string; technology: Pick<TechnologyKnowledge, 'items' | 'residue'>; }
 type Stock = Map<string, number>;
@@ -45,8 +46,9 @@ interface AdaptedObservation { observation: OrganizationObservation; diagnostics
 
 /**
  * Build a bounded material observation from explicit transaction envelopes. The
- * catalogue contains observed stoichiometric realizations, not hypothetical yields
- * inferred from recipe names. This cannot establish delivery between physical sites.
+ * process list contains observed stoichiometric realizations in this receipt window,
+ * not the resident recipe cache or the lifetime archive. Cold definitions only verify
+ * receipts; they cannot extend the observation or establish delivery between sites.
  */
 export function observeTechnologyOrganization(state: TechnologyState, actors: readonly TechnologyOrganizationActor[], tick: number): AdaptedObservation {
   const diagnostics: string[] = [], history = state.history as FlowRecord[];
@@ -101,8 +103,8 @@ export function observeTechnologyOrganization(state: TechnologyState, actors: re
     }
     if (!equals(expected, after)) diagnostics.push(`transaction-resource-mismatch:${event.id}`);
     if (event.success && ['research', 'craft'].includes(event.kind)) {
-      const recipe = state.recipes.find(recipe => recipe.id === event.recipeId);
-      if (!recipe || recipe.signature !== event.programSignature) diagnostics.push(`unverified-recipe:${event.id}`);
+      const recipe = event.recipeId ? resolveTechnologyRecipe({ technology: state, tick }, event.recipeId, { cache: false }) : undefined;
+      if (!recipe || recipe.tick > event.tick || recipe.signature !== event.programSignature) diagnostics.push(`unverified-recipe:${event.id}`);
       else if (recipe.program.steps.filter(step => step.requiredCatalyst).length !== event.catalysts.filter(catalyst => catalyst.required).length) diagnostics.push(`missing-required-catalyst:${event.id}`);
     }
   }

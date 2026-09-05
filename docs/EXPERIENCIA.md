@@ -1,6 +1,6 @@
 # Experiencia, interacción y voz
 
-Este documento desarrolla la interacción y la voz del [plan unificado](../PLAN.md). **V5 está activo en la revisión privada**, con reemplazo generacional observado en dos réplicas de quince días. [REGLAS.md](REGLAS.md) conserva mecánicas y [EVIDENCIA.md](EVIDENCIA.md) los resultados y límites. Las escenas propuestas no garantizan desenlaces ni continuidad indefinida; voz final, biografía aprobada y teléfono físico siguen pendientes.
+Este documento desarrolla la interacción y la voz del [objetivo rector](../PLAN.md#objetivo-rector). **V5 `6d0e53b` está activo en la revisión privada**, con reemplazo generacional observado en dos réplicas de veinticinco días. [REGLAS.md](REGLAS.md) conserva mecánicas y [EVIDENCIA.md](EVIDENCIA.md) los resultados y límites. Las escenas propuestas no garantizan desenlaces ni continuidad indefinida; refactor profundo de interfaz, voz final, biografía aprobada y teléfono físico siguen pendientes.
 
 ## Entrar, explorar y volver
 
@@ -17,6 +17,8 @@ Al regresar se ve primero el presente y después, si hubo cambios relevantes, ha
 El paisaje es una extensión procedural vista desde arriba. Se explora en cualquier dirección mediante regiones generadas según necesidad. Agua, bosques, praderas, desiertos, montañas y humedales ofrecen recursos distintos. Volver a una región recupera sus modificaciones guardadas. No existe el borde rectangular inicial, aunque hay un límite numérico de coordenadas y una cantidad acotada de regiones activas.
 
 Todos los clientes conectados al servicio observan el mismo mundo y pueden intervenir en él. Cada uno mueve su propia cámara; sus órdenes aceptadas afectan a los habitantes compartidos. El servicio continúa alrededor de los habitantes aunque todos cierren el navegador. Las regiones inactivas conservan sus cambios y congelan su ecología hasta reactivarse. Mover la cámara no acelera cultivos ni crea historia.
+
+La renovación de interfaz del objetivo rector sigue pendiente. Deberá organizar exploración, seguimiento, control e inspección alrededor de lo que cada cuerpo y proceso realmente puede hacer. La escala de árboles, habitantes y construcciones, el estado visible del suelo y las animaciones deben ayudar a entender capacidad, consumo, desgaste y cambio ambiental; una forma nueva necesita una función legible, y la historia y las estadísticas deben permitir comprobar su causa. Este criterio amplía la experiencia sin cambiar la voz íntima de la carta.
 
 El modelo ecológico empieza con este ciclo:
 
@@ -90,7 +92,7 @@ Los tres gestos ambientales disponibles son:
 | Invitar | Deja una señal que puede percibirse como invitación. | Los habitantes deciden si responder según su situación; no los teletransporta. |
 | Recordar | Refuerza temporalmente un recuerdo disponible relacionado con la escena; los actuales son sintéticos identificados. | El contexto determina si influye y cómo; no impone diálogo ni reconciliación. |
 
-La intención de diseño es que los habitantes resuelvan el cuidado cotidiano por sus procesos. V5 conserva generaciones nuevas en las dos ventanas de quince días estudiadas, con límites materiales y de catálogo todavía abiertos. La intervención de Isa aporta posibilidades y permite investigar; no debe convertirse en una obligación de rescatar población ni en condición para que el mundo continúe.
+La intención de diseño es que los habitantes resuelvan el cuidado cotidiano por sus procesos. V5 conserva generaciones nuevas en las dos ventanas de veinticinco días estudiadas, con límites materiales y de catálogo todavía abiertos. La intervención de Isa aporta posibilidades y permite investigar; no debe convertirse en una obligación de rescatar población ni en condición para que el mundo continúe.
 
 Crear paisajes alternativos o comparar reglas puede explorarse después en mundos de prueba separados. Esos experimentos no reinician ni sobrescriben la carta persistente.
 

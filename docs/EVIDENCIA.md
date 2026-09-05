@@ -1,8 +1,8 @@
 # Evidencia vigente
 
-Fecha de corte: **5 de septiembre de 2026, 21:08 UTC**. **V5 está activo en la revisión privada**, con mundo nuevo y acceso conservado; el V4 inválido quedó archivado íntegro. Dos réplicas corregidas de quince días conservaron once y veintiún vecinos al final. Es evidencia acotada, no continuidad indefinida; ambas redes tecnológicas conservan límites de catálogo y de observación. La activación no constituye una migración exitosa del estado V4.
+Fecha de corte: **5 de septiembre de 2026**. El servicio privado ejecuta **V5 `6d0e53b`**, con mundo nuevo y acceso conservado; el V4 inválido quedó archivado íntegro. Dos réplicas de veinticinco días conservaron vecinos de octava generación, sin extinción vecinal. Persisten saturación tecnológica y mantenimiento material sin acreditar. Los checkpoints de apertura están integrados en el candidato **`61fb27d`**, todavía sin desplegar; ninguna medición del servicio o de esas réplicas los incluye. La activación V5 no fue una migración exitosa del estado V4.
 
-Este documento conserva resultados y límites; [REGLAS](REGLAS.md) define mecanismos, [CIENCIA](CIENCIA.md) su interpretación y [CONSTRUCCION](CONSTRUCCION.md#siguiente-arquitectura-propuesta-no-implementada) el trabajo futuro. Git conserva los cierres anteriores, sin documentos históricos paralelos.
+Este documento conserva resultados y límites frente al [objetivo rector](../PLAN.md#objetivo-rector); [REGLAS](REGLAS.md) define mecanismos, [CIENCIA](CIENCIA.md) su interpretación y [CONSTRUCCION](CONSTRUCCION.md#arquitectura-de-autonomía-avances-y-trabajo-pendiente) el estado de arquitectura y trabajo pendiente. Git conserva los cierres anteriores, sin documentos históricos paralelos.
 
 ## V5 activo: alcance de la verificación
 
@@ -43,43 +43,44 @@ La ventana de organización **3782–7200** es incompleta por inventarios inicia
 
 Los 28 archivos de aplicación identificados en el artefacto coinciden con el cierre corregido y el experimento largo; se conserva además el hash del script de soak. No mide navegador, doce clientes, máximo de fauna permitido ni varios días reales. El máximo de paso tampoco permite prometer 100 ms constantes. El [soak anterior](../artifacts/soak-v5.json) pertenece a otras reglas de preparación y no se presenta como medición de la versión activa.
 
-## Quince días: reemplazo generacional observado y límites
+## Quince y veinticinco días: continuidad y límites materiales
 
-[evolution-v5-provision.json](../artifacts/evolution-v5-provision.json) registra dos réplicas secuenciales hasta **36000 pasos** cada una, del **20:49:17 al 20:58:56 UTC**. Conserva **32 hashes iguales al inicio y al final** y `sourceUnchanged: true`; esa igualdad no prueba ausencia de cambios transitorios entre las lecturas. No hubo gestos, nacimientos forzados, recargas ni cambio de semilla. Ambas alcanzaron el final sin un paso de extinción vecinal.
+La observación extendida [evolution-v5-extended.json](../artifacts/evolution-v5-extended.json) completó dos réplicas secuenciales hasta **60000 pasos**, veinticinco días del modelo por semilla, del **21:09:33 al 21:21:36 UTC**. Su [registro de ejecución](../artifacts/evolution-v5-extended.execution.json) confirma **salida 0**. Los **32 hashes de fuentes** coinciden al inicio y al final y con el código **`6d0e53b`**. No hubo gestos, nacimientos forzados, recargas ni cambio de semilla.
 
-El experimento usa **mundo mutable, SQLite cada 120 pasos y muestras cada 1200**: 301 guardados por réplica. Sus quince días equivalen a sesenta minutos del modelo, no a quince días reales. La cadencia difiere del servicio, que prepara y confirma cada paso; **esta prueba no mide rendimiento de producción ni latencia de commit por paso**.
+Usó mundo mutable, **SQLite cada 120 pasos y muestras cada 1200**: 501 guardados por réplica. Veinticinco días equivalen a cien minutos del modelo, no a veinticinco días reales. La cadencia difiere del servicio, que prepara y confirma cada paso; esta prueba no mide rendimiento de producción ni latencia de commit por paso.
 
-| Resultado final | Semilla 51926 | Semilla 20260905 |
+| Resultado a veinticinco días | Semilla 51926 | Semilla 20260905 |
 |---|---:|---:|
-| Vecinos vivos / población total | **11 / 13** | **21 / 23** |
-| Nacimientos / muertes | **23 / 26** | **35 / 28** |
+| Vecinos vivos / población total | **30 / 32** | **13 / 15** |
+| Nacimientos / muertes | **51 / 35** | **48 / 49** |
 | Vecinos fundadores vivos | **0** | **0** |
-| Mayor generación humana observada y viva al cierre | **5** | **5** |
-| Causas de muerte | 24 senescencia, 1 deshidratación, 1 exposición | 24 senescencia, 4 exposición |
-| Máxima población muestreada | 32 | 32 |
+| Mayor generación humana observada y viva al cierre | **8** | **8** |
+| Primer paso de extinción vecinal | Ninguno | Ninguno |
+| Causas de muerte | 33 senescencia, 1 deshidratación, 1 exposición | 30 senescencia, **15 deshidratación**, 4 exposición |
 | Recetas / generación tecnológica máxima | **256 / 23** | **256 / 29** |
-| Fabricaciones exitosas observadas durante la réplica | 74 | 78 |
-| Procesos exitosos que consumieron productos previos | 205 | 215 |
-| Usos de herramientas / beneficio observado del modelo | 917 / 173,9548 | 310 / 9,1150 |
+| Usos de herramientas / beneficio observado del modelo | 1019 / 194,7622 | 340 / 19,3427 |
 | Error de masa tecnológica | **0** | **0** |
-| Identidades fallecidas archivadas | 26 | 28 |
+| Identidades fallecidas archivadas / fuera del caché | **35 / 1** | **49 / 8** |
+| Reinicio real en 30000 / carga final / copia iguales | Sí / sí / sí | Sí / sí / sí |
 
-Los vecinos finales pertenecen a generaciones nuevas después de morir todos los fundadores mortales; S e I siguen separados por su protección externa. Esto acredita reemplazo generacional **dentro de estas dos ventanas**, sin demostrar autosostenimiento indefinido, selección natural aislada, transmisión completa de oficios ni autopoiesis. El máximo de 32 vivos sigue vigente. Ambos catálogos alcanzaron las 256 recetas y ese límite sigue deteniendo propuestas nuevas.
+Los vecinos finales pertenecen a generaciones nuevas después de morir todos los fundadores mortales; S e I mantienen su protección externa. Se observa reemplazo generacional dentro de ambas trayectorias, con consecuencias ambientales: **quince muertes por deshidratación en la segunda semilla**. La continuidad observada no elimina esa presión hídrica ni acredita supervivencia indefinida, selección natural aislada o transmisión completa de oficios. Ambos catálogos alcanzaron 256 recetas y ese límite detiene nuevas propuestas.
 
-La comparación conserva las mismas semillas, duración y ausencia de rescates. La base anterior [evolution-v5.json](../artifacts/evolution-v5.json), con 31 hashes iguales al inicio y al final, perdió todos los vecinos. El cambio conjunto de preparación, reserva y acercamiento respalda una mejora del conjunto de reglas; no separa la contribución de cada mecanismo.
+A diferencia de la observación de quince días, la extensión sí dejó **identidades persistidas fuera del caché**. Se comprobaron los archivos y sus hashes en la copia, con igualdad de mundo al reiniciar, cargar y copiar. El observador acumulado no perdió recibos; sigue siendo instrumentación experimental, distinta del búfer reciente del servicio. Las bases temporales se retiraron después de verificarlas. No se probó caída entre commits de 120 pasos.
 
-| Comparación anterior → corregida | Semilla 51926 | Semilla 20260905 |
+Las ventanas de organización a veinticinco días son **26210–60000** y **18217–60000**. La primera permanece incompleta por inventario inicial no observado; la segunda tiene balance verificado. **Ninguna acredita componentes mantenidas.** Un balance de masa global exacto, una ventana equilibrada y una red que repone sus condiciones de funcionamiento son resultados diferentes. La frontera permanece sin modelar y `autopoiesisEstablished` es falso.
+
+La comparación necesaria para evaluar la corrección alimentaria conserva semillas, quince días y ausencia de rescates:
+
+| Resultado a quince días, anterior → corregido | Semilla 51926 | Semilla 20260905 |
 |---|---:|---:|
 | Vecinos vivos al final | **0 → 11** | **0 → 21** |
 | Nacimientos / muertes | 2 / 16 → 23 / 26 | 0 / 14 → 35 / 28 |
 | Mayor generación humana observada | 1 → 5 | 0 → 5 |
 | Primer paso sin vecinos | 30988 → ninguno | 27227 → ninguno |
 
-Las ventanas materiales finales corregidas son **22074–36000** y **17482–36000**, ambas incompletas por inventarios iniciales no observados. El balance de ventana sigue sin verificar y hay **cero componentes mantenidas acreditadas** en ambas. El balance tecnológico global de masa igual a cero no reconstruye esos inventarios. La base anterior tuvo una componente histórica mantenida en una réplica que acabó sin vecinos: un indicador de red favorable no sustituye continuidad demográfica ni disponibilidad actual del conocimiento. La frontera sigue sin modelarse y `autopoiesisEstablished` es falso.
+La [base anterior](../artifacts/evolution-v5.json) conserva 31 hashes iguales entre inicio y final. La [observación corregida de quince días](../artifacts/evolution-v5-provision.json), del 20:49:17 al 20:58:56 UTC, conserva 32 hashes y comprobó reapertura en 18000, carga final y copia. Sus legados cabían íntegros en el caché y sus dos ventanas materiales eran incompletas. El cambio conjunto de preparación, reserva y acercamiento respalda la mejora observada; no separa la contribución de cada mecanismo. La base anterior tuvo una componente histórica mantenida en una réplica que terminó sin vecinos: ese indicador no sustituye continuidad demográfica ni conocimiento disponible al final.
 
-El observador acumulado no perdió recibos ni detectó pares de transferencias incompletos; el servicio conserva solo sus 256 recibos recientes. Ambas réplicas verificaron igualdad al reabrir en **18000**, carga final y copia. Los legados cabían íntegros en el caché: no se observó expulsión de identidades. Las bases del experimento eran temporales y se retiraron después de verificarlas. No se probó una caída entre los commits de 120 pasos.
-
-**Anomalía de ejecución:** el JSON quedó `completed`, contiene ambos pasos finales y el log tiene el pie de finalización; los reinicios y copias anteriores están verificados. Sin embargo, el ejecutor informó **código 143**. La causa es indeterminada y **no se registra como salida limpia del proceso**. El [registro de ejecución](../artifacts/evolution-v5-provision.execution.json) conserva esta discrepancia; no se oculta ni invalida por sí sola los comprobantes guardados.
+**La anomalía del primer experimento corregido de quince días permanece abierta:** su JSON figura `completed`, con ambos pasos finales y comprobantes de reinicio y copia, pero el ejecutor informó **143**, de causa indeterminada. El [registro original](../artifacts/evolution-v5-provision.execution.json) conserva la discrepancia; no se atribuye salida limpia a aquel proceso. La salida **0** corresponde exclusivamente al nuevo experimento de veinticinco días.
 
 ## Interfaz y rendimiento gráfico
 
@@ -100,7 +101,11 @@ Capturas locales actualizadas por la suite del candidato: [escritorio](../artifa
 
 **V5 se activó el 5 de septiembre a las 21:08:00 UTC**, en **https://172.26.0.4:3443**, con la misma credencial existente verificada. Se inició un mundo nuevo autorizado y se conservaron íntegros el mundo y el build V4 en un directorio privado de corte. El mundo anterior estaba en el paso **58807**, con dieciocho habitantes y dos comunidades. Se verificaron los bytes del build archivado y del instalado. [Registro de activación](../artifacts/cutover-v5.json).
 
-La comprobación de Chromium a las **21:08:14 UTC** recibió protocolo **5** y avance **126 → 136**: dieciséis habitantes, todos con otro a siete celdas, dos comunidades de tres y cinco miembros, diecinueve animales visibles y 84 animales en regiones activas. Todavía no había nacimientos ni cooperación en ese comienzo. Pantalla completa **1440 × 900** desde **0,0**, acceso anónimo **401**, contraseña existente válida, inspección de fauna y **cero errores JavaScript**. [Resultado en vivo](../artifacts/live-preview-v5.json), [mundo](../artifacts/live-world-v5.png), [fauna](../artifacts/live-fauna-v5.png), [comunidades](../artifacts/live-communities-v5.png). Es una observación del comienzo, no prueba de varios días reales ni de población estable.
+La comprobación de Chromium a las **21:08:14 UTC** recibió protocolo **5** y avance **126 → 136**: dieciséis habitantes, todos con otro a siete celdas, dos comunidades de tres y cinco miembros, diecinueve animales visibles y 84 animales en regiones activas. Todavía no había nacimientos ni cooperación en ese comienzo. Pantalla completa **1440 × 900** desde **0,0**, acceso anónimo **401**, contraseña existente válida, inspección de fauna y **cero errores JavaScript**. El [JSON original del comienzo](../artifacts/live-preview-v5.json) permanece intacto; no se sustituye por datos posteriores.
+
+El [seguimiento de las 21:21:44 UTC](../artifacts/live-preview-v5-followup.json) registró **8170 → 8197**, **31 habitantes**, tres comunidades, acceso anónimo **401**, la misma contraseña válida, **cero gestos y cero errores JavaScript**. Verificó el hash sin cambios del informe original. Las rutas de [mundo](../artifacts/live-world-v5.png), [fauna](../artifacts/live-fauna-v5.png), [comunidades](../artifacts/live-communities-v5.png) y [rendimiento](../artifacts/live-performance-v5.png) contienen ahora capturas de este seguimiento; sus hashes y procedencia están en el informe nuevo.
+
+La inspección registró una franja vacía mientras la cámara esperaba una región: cobertura recibida **76,36% → 100%** en **973 ms**, con las 1785 celdas pedidas presentes también en vistas posteriores. [Espera](../artifacts/live-viewport-pending-v5.png) y [cámara estabilizada](../artifacts/live-viewport-settled-v5.png) pertenecen a esa observación. Fue un hueco transitorio de respuesta en el recorrido inspeccionado; no se modificaron fuentes para corregirlo ni se acredita ausencia del fenómeno en todos los recorridos. Estos son sondeos puntuales del servicio, no varios días reales de operación.
 
 **No fue una migración exitosa del estado V4.** A las 20:28 UTC, una copia SQLite coherente del mundo anterior pasó `quick_check` y verificación de digests, pero tanto su snapshot **36207** como el anterior **36206** contenían **12,8565 unidades de madera** frente a una cota de doce. V5 lo rechazó antes de migrar y el lector del build V4 también rechazó esa copia. Recuperar aquel punto anterior no resuelve el defecto; conservar un archivo íntegro no lo vuelve recargable. La activación conserva materia e historia archivadas sin aplicar un recorte silencioso para validar. [Informe saneado de compatibilidad](../artifacts/migration-v5.json).
 
@@ -108,7 +113,11 @@ Servidor y TLS usan sesiones propias `carta-isa-world` y `carta-isa-https`; su s
 
 ## Trabajo y pruebas pendientes
 
-La comparación alimentaria, el soak con commit por paso y la activación privada están completados dentro de sus alcances. Una extensión a **veinticinco días con dos semillas** está en ejecución hacia `artifacts/evolution-v5-extended.json`, **sin resultado acreditado al corte**; las fuentes de aplicación permanecen congeladas en `6d0e53b` durante esa observación. Quedan ampliar continuidad, transmisión aprendida, recambio de herramientas y mantenimiento material reciente. Los cambios de archivo e inventarios de apertura siguen fuera de V5 activo: hay un ensayo aislado en `/tmp/atlas-opening-checkpoints`, sin integrar en main. Los siete frentes se mantienen en CONSTRUCCION; el resto conserva estado de propuesta.
+La comparación alimentaria, el soak con commit por paso, la extensión a veinticinco días y la activación están completados dentro de sus alcances. Quedan continuidad fuera de esas trayectorias, transmisión aprendida, recambio de herramientas y mantenimiento material reciente.
+
+El candidato **`61fb27d`** incorpora los checkpoints de inventario desarrollados en `4dfd982`: pasaron **124/124 pruebas afectadas** en worktree aislado, incluidas trece nuevas, typecheck y compilación del servidor. La revisión independiente cerró un defecto de frontera tick/serial y terminó sin P1/P2 pendientes. Tras integrar, typecheck y la suite Node global terminaron con salida 0: **282/282, cero fallos, cancelaciones y omisiones, 129,459 s**, en el [log de checkpoints](../artifacts/node-v5-checkpoints.log). **Todavía no está desplegado.** No se le atribuyen E2E, soak ni réplicas largas adicionales. Sus checkpoints no cambian recursos, decisiones o azar ni reparan retrospectivamente los intervalos desconocidos de los artefactos anteriores.
+
+Archivo SQL de procedimientos/recibos y memoria técnica finita tienen prototipos en la rama aislada `feature/technology-archive`; **no son capacidades integradas ni activas**. CONSTRUCCION conserva el estado de los siete frentes, con apertura física parcialmente integrada y el resto pendiente de integración y evidencia propia.
 
 No se han probado teléfono físico, Safari/iOS, lector de pantalla, varios días reales, doce clientes bajo carga sostenida, miles de habitantes, fallo físico de disco ni cálculo ecológico en GPU. La voz final y los recuerdos reales siguen pendientes. No se acreditan conciencia, autopoiesis biológica, efecto Baldwin ni evolución abierta.
 

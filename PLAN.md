@@ -19,7 +19,7 @@ El avance se juzgará por resultados que puedan fallar:
 - **Memoria y escala:** conocimiento local finito, referencias durables y archivo recuperable sin crecimiento ilimitado de RAM; rendimiento y equivalencia medidos antes de ampliar población o acelerar cálculo.
 - **Experiencia comprensible:** inspección de causas y efectos en el mundo compartido, controles y escala visual coherentes, y revisión íntima y en teléfono físico antes de declarar terminada la carta.
 
-Este es el objetivo del proyecto, con trabajo pendiente; las secciones siguientes distinguen su implementación y evidencia. El gestor de tareas conserva la meta anterior pausada: el intento de crear una nueva fue rechazado por existir una meta sin terminar. Esta síntesis no declara cumplida aquella meta ni supone un cambio efectivo en el gestor.
+Este es el objetivo del proyecto, con trabajo pendiente; las secciones siguientes distinguen su implementación y evidencia.
 
 ## Estado actual
 

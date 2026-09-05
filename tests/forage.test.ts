@@ -109,3 +109,18 @@ test('stored resources cannot bypass mutual trust at the birth boundary', () => 
   near(a.inventory+b.inventory,0.4);
   assertWorld(world); assertWorld(mutual);
 });
+
+test('prepared partners choose the same perceived meeting place and reach it through physical steps', () => {
+  const {world,a,b}=familyScene();
+  a.x=17; a.y=17; b.x=22; b.y=17;
+  for(const p of [a,b]) { p.inventory=0.12; p.target={x:p.x,y:p.y}; }
+  stepWorld(world);
+  assert.equal(a.action,'approach'); assert.equal(b.action,'approach');
+  assert.deepEqual(a.target,{x:17,y:13}); assert.deepEqual(b.target,a.target);
+  assert.equal(a.y,17); assert.equal(b.y,17);
+  for(let n=0;n<119;n++) {
+    const before=world.people.map(p=>({id:p.id,x:p.x,y:p.y})); stepWorld(world);
+    for(const old of before) { const p=world.people.find(p=>p.id===old.id)!; assert.ok(Math.abs(p.x-old.x)+Math.abs(p.y-old.y)<=1); }
+  }
+  assert.equal(world.birthCounter,1);
+});

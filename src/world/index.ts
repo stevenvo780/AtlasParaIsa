@@ -214,14 +214,16 @@ function choose(world: World, person: Person): void {
   const food = nearbyTiles.filter(tile => tile.food > 0.025).sort((a, b) => (distance(person, a) - a.food * 2) - (distance(person, b) - b.food * 2))[0];
   if (food || person.inventory > 0.01 || foodAvailable(world,person)>0) candidates.push({ action: 'eat', target: food ?? person, score: Math.max(0, person.hunger - 0.22) * 2.5 - (food ? distance(person, food) * 0.02 : 0), reason: 'El hambre orienta su camino hacia alimento que puede percibir.' });
   const family = familyOpportunity(world, person);
+  const familyPlace = family ? world.places.filter(place => distance(person,place)<=RADIUS && distance(family.partner,place)<=RADIUS)
+    .sort((a,b) => (distance(person,a)+distance(family.partner,a))-(distance(person,b)+distance(family.partner,b)) || a.id.localeCompare(b.id))[0] : undefined;
   if (family && person.inventory < family.reserveTarget && food) candidates.push({
     action: 'forage', target: food,
     score: 0.85 + person.traits.care * 0.2 + (family.reserveTarget - person.inventory) / family.reserveTarget * 0.4 - distance(person, food) * 0.02,
     reason: `Prepara alimento para una posible crianza con ${family.partner.name}; debe recogerlo del entorno y conservar una reserva.`,
   });
   if (family && person.inventory >= family.reserveTarget && family.partner.inventory >= 0.1) candidates.push({
-    action: 'approach', target: family.partner, score: 0.85 + person.traits.care * 0.2,
-    reason: `Tiene reservas y se acerca a ${family.partner.name}; el vínculo y el cuidado corporal permiten intentar una crianza.`,
+    action: 'approach', target: familyPlace ?? family.partner, score: 0.85 + person.traits.care * 0.2,
+    reason: `Tiene reservas y busca ${familyPlace ? `reunirse con ${family.partner.name} en ${familyPlace.name}` : `acercarse a ${family.partner.name}`}; el vínculo y el cuidado corporal permiten intentar una crianza.`,
   });
   const water = nearbyTiles.filter(t => waterAvailable(world,t) > 0.005).sort((a, b) => distance(person, a) - distance(person, b))[0];
   if (water) candidates.push({ action: 'drink', target: water, score: Math.max(0, person.thirst - 0.18) * 3.1 - distance(person, water) * 0.015, reason: 'La sed orienta su camino hacia una reserva finita de agua dulce.' });

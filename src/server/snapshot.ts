@@ -13,7 +13,7 @@ export function encodeSnapshot(world: World): string {
     if (value === null || typeof value === 'number' && !Number.isFinite(value)) throw new Error('Invalid optional tile value. Snapshot was not written.');
   }
   const tiles = world.tiles.map(t => [t.x,t.y,t.terrain,t.moisture,t.vegetation,t.food,t.biome,t.elevation,t.wood,t.stone,t.feature,t.variety,t.growth,t.fertility,t.cultivation,t.traffic,t.drinkingWater,t.species,t.fauna,t.life]);
-  return JSON.stringify({ ...world, retiredChunks: [], tiles, tileEncoding: ENCODING });
+  return JSON.stringify({ ...world, retiredChunks: [], retiredLegacy: [], tiles, tileEncoding: ENCODING });
 }
 export function decodeSnapshot(body: string): unknown {
   const value: unknown = JSON.parse(body);

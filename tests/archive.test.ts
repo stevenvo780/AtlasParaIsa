@@ -17,6 +17,9 @@ const digest = (body: string): string => createHash('sha256').update(body).diges
 const gesture: Gesture = { id: 'archive-command-01', kind: 'command', x: 20, y: 14, agentId: 's', order: 'move' };
 const resultAt = (tick: number): GestureResult => ({ id: gesture.id, accepted: true, tick, order: 0, message: 'Orden sintética guardada.' });
 
+/** Archive fixtures hold bodies fixed while choosing an explicit historical timestamp. */
+function fixtureTick(world: World, tick: number): void { world.tick=tick; for(const person of world.people) person.demography.age=tick-person.bornAt; }
+
 function archived(world: World, tick: number, food: number): Chunk {
   const chunk = generateChunk(world.seed, -4, 7);
   chunk.discovered = true; chunk.lastTick = tick;
@@ -33,7 +36,7 @@ function fixture(t: { after: (callback: () => void) => void }): { store: Store; 
 
 test('archive versions restore exact edited terrain at the latest permitted world tick', t => {
   const { store } = fixture(t);
-  const world = createWorld(42); world.tick = 11;
+  const world = createWorld(42); fixtureTick(world,11);
   const first = archived(world, 11, 0.12345);
   world.retiredChunks = [first];
   const expected: World = { ...structuredClone(world), retiredChunks: [] };
@@ -43,7 +46,7 @@ test('archive versions restore exact edited terrain at the latest permitted worl
   assert.deepEqual(store.loadChunk(first.key), first);
   assert.deepEqual(JSON.parse((store.db.prepare('SELECT body FROM snapshots WHERE slot=0').get() as { body: string }).body).retiredChunks, []);
 
-  world.tick = 20;
+  fixtureTick(world,20);
   const second = archived(world, 20, 0.0123);
   world.retiredChunks = [second]; store.save(world);
   assert.equal(store.loadChunk(first.key, 10), null);
@@ -58,7 +61,7 @@ test('input failure rolls back archive, world, events and ledger while preservin
   const { store } = fixture(t);
   const world = createWorld(42); store.save(world);
   const before = store.load();
-  const draft = structuredClone(world); draft.tick = 1;
+  const draft = structuredClone(world); fixtureTick(draft,1);
   const chunk = archived(draft, 1, 0.42); draft.retiredChunks = [chunk];
   const eventId = `e${++draft.eventCounter}`;
   draft.events.push({ id: eventId, tick: 1, kind: 'discovery', actors: [], source: 'simulation', text: 'Hallazgo sintético.', cause: 'Escena de rollback del archivo.' });
@@ -80,7 +83,7 @@ test('input failure rolls back archive, world, events and ledger while preservin
 
 test('archive checksum and structural corruption fail closed instead of generating replacement terrain', t => {
   const { store } = fixture(t);
-  const world = createWorld(42); world.tick = 2;
+  const world = createWorld(42); fixtureTick(world,2);
   const chunk = archived(world, 2, 0.1); world.retiredChunks = [chunk]; store.save(world);
   store.db.exec("UPDATE chunks SET body='{}'");
   assert.throws(() => store.loadChunk(chunk.key), /checksum/);
@@ -95,9 +98,9 @@ test('archive checksum and structural corruption fail closed instead of generati
 
 test('backup retains terrain versions and reopening reproduces the archived edits', t => {
   const { store, dir } = fixture(t);
-  const world = createWorld(42); world.tick = 4;
+  const world = createWorld(42); fixtureTick(world,4);
   const first = archived(world, 4, 0.22); world.retiredChunks = [first]; store.save(world);
-  world.tick = 9;
+  fixtureTick(world,9);
   const second = archived(world, 9, 0.33); world.retiredChunks = [second]; store.save(world);
   const destination = join(dir, 'copy.sqlite'); store.backup(destination);
   const copy = new Store(destination, { readOnly: true });
@@ -110,10 +113,10 @@ test('backup retains terrain versions and reopening reproduces the archived edit
 
 test('previous recovery removes future terrain versions and inputs without altering the source', t => {
   const { store, dir } = fixture(t);
-  const world = createWorld(42); world.tick = 10;
+  const world = createWorld(42); fixtureTick(world,10);
   const first = archived(world, 10, 0.22); world.retiredChunks = [first]; store.save(world);
   const previous = structuredClone(world);
-  world.tick = 20;
+  fixtureTick(world,20);
   const second = archived(world, 20, 0.33); world.retiredChunks = [second];
   store.save(world, [{ gesture, result: resultAt(20) }]);
   store.addSession('synthetic-session-hash', Date.now() + 60_000);
@@ -186,7 +189,7 @@ test('V1 schema migration preserves old snapshots, cells, bodies, experiences an
   const path = join(dir, 'legacy.sqlite'); const legacy = createV1Database(path);
   const store = new Store(path);
   try {
-    assert.equal((store.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 2);
+    assert.equal((store.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 3);
     const migrated = store.load()!.world;
     assert.equal(migrated.version, RULES_VERSION); assert.equal(migrated.tick, legacy.tick); assert.equal(migrated.rng, legacy.rng);
     for (const tile of legacy.tiles) {
@@ -246,7 +249,7 @@ test('V3 migration validates first and preserves bodies, culture, resources and 
   const people=source.people as World['people'];people[2]!.skills={build:0.4};people[2]!.bonds.s=0.7;
   const tiles=source.tiles as World['tiles'];tiles[0]!.food=0;tiles[0]!.wood=0;tiles[0]!.drinkingWater=0;tiles[0]!.fauna=0;delete tiles[0]!.species;
   const before=structuredClone(source),migrated=migrateWorld(source);
-  assert.deepEqual(source,before);assert.equal(migrated.version,RULES_VERSION);assert.deepEqual(migrated.people,people);assert.deepEqual(migrated.tiles,tiles);
+  assert.deepEqual(source,before);assert.equal(migrated.version,RULES_VERSION);assert.deepEqual(migrated.people.map(({demography:_demography,technology:_technology,...person})=>person),people.map(({demography:_demography,technology:_technology,...person})=>person));assert.deepEqual(migrated.tiles,tiles);
   assert.equal(migrated.animals.length,tiles.reduce((sum,t)=>sum+(t.fauna??0),0));assert.deepEqual(migrateWorld(source),migrated);
   assert.ok(migrated.structures.every(s=>s.water===0&&s.food===0&&s.components.join(',')==='frame,roof'));
   const corrupt=structuredClone(source);(corrupt.tiles as World['tiles'])[0]!.drinkingWater=NaN;
@@ -257,7 +260,7 @@ test('V3 migration validates first and preserves bodies, culture, resources and 
 
 test('V4 region retirement, storage and return preserve living identities, depleted stock, structures and resources exactly', t => {
   const {store}=fixture(t),world=createWorld(51926),originalPositions=world.people.map(p=>({x:p.x,y:p.y}));
-  world.tick=10;
+  fixtureTick(world,10);
   const origin=world.tiles.filter(tile=>tile.x>=0&&tile.x<16&&tile.y>=0&&tile.y<16);
   for(const tile of origin){tile.fauna=0;delete tile.species;}
   const source=origin.find(t=>t.terrain!=='water'&&t.terrain!=='shelter')!;source.fauna=2;source.species='hare';
@@ -273,18 +276,18 @@ test('V4 region retirement, storage and return preserve living identities, deple
   store.save(world);const resumed=store.load()!.world;
   const beforeCamera=structuredClone(resumed);const view=projectWorld(resumed,{x:0,y:0,width:40,height:28},{loadChunk:(k,t)=>store.loadChunk(k,t)});
   assert.ok(view.animals!.some(a=>a.id===expectedAnimals[0]!.id));assert.equal(view.animals!.some(a=>a.id===removed),false);assert.deepEqual(resumed,beforeCamera);
-  resumed.tick=30000;for(const [i,p] of resumed.people.entries()){Object.assign(p,originalPositions[i]);p.target={x:p.x,y:p.y};}
+  fixtureTick(resumed,30000);for(const [i,p] of resumed.people.entries()){Object.assign(p,originalPositions[i]);p.target={x:p.x,y:p.y};}
   maintainRegions(resumed,{loadChunk:(k,t)=>store.loadChunk(k,t)});
   assert.deepEqual(resumed.tiles.filter(t=>t.x>=0&&t.x<16&&t.y>=0&&t.y<16),expectedTiles);
   assert.deepEqual(resumed.animals.filter(a=>a.x>=0&&a.x<16&&a.y>=0&&a.y<16),expectedAnimals);
   assert.deepEqual(resumed.structures.find(s=>s.id===expectedStructure.id),expectedStructure);assert.equal(resumed.animals.some(a=>a.id===removed),false);
-  const returning=expectedAnimals[0]!;resumed.tick++;stepAnimals(resumed);
+  const returning=expectedAnimals[0]!;fixtureTick(resumed,resumed.tick+1);stepAnimals(resumed);
   assert.equal(resumed.animals.find(a=>a.id===returning.id)!.age,returning.age+1,'dormant time cannot become biological aging or a backlog');
   assertWorld(resumed);
 });
 
 test('empty V4 archives stay empty, while old stock materializes lazily only on activation and malformed life fails closed', t => {
-  const {store}=fixture(t),world=createWorld(51926);world.tick=10;
+  const {store}=fixture(t),world=createWorld(51926);fixtureTick(world,10);
   const legacy=archived(world,10,0);for(const tile of legacy.tiles){tile.fauna=0;delete tile.species;}legacy.tiles[0]!.fauna=2;legacy.tiles[0]!.species='hare';
   world.retiredChunks=[legacy];store.save(world);const before=structuredClone(world);
   const camera={x:legacy.cx*16,y:legacy.cy*16,width:16,height:16};projectWorld(world,camera,{loadChunk:(k,t)=>store.loadChunk(k,t)});assert.deepEqual(world,before);
@@ -296,7 +299,7 @@ test('empty V4 archives stay empty, while old stock materializes lazily only on 
 });
 
 test('a structure counter cannot move backward behind an identity that only exists in an archived region', t=>{
-  const {store}=fixture(t),world=createWorld(51926);world.tick=10;world.structureCounter=7;
+  const {store}=fixture(t),world=createWorld(51926);fixtureTick(world,10);world.structureCounter=7;
   const chunk=archived(world,10,0),tile=chunk.tiles[0]!;tile.terrain='shelter';
   chunk.structures=[{...structuredClone(world.structures[0]!),id:'structure-7',x:tile.x,y:tile.y}];world.retiredChunks=[chunk];store.save(world);
   assert.equal(store.load()!.world.structureCounter,7);
@@ -311,6 +314,6 @@ test('activating another region above the per-step animal budget preserves every
   let remaining=MAX_ACTIVE_ANIMALS;for(const tile of world.tiles){tile.fauna=Math.min(6,remaining);remaining-=tile.fauna;if(tile.fauna)tile.species=tile.terrain==='water'?'fish':'hare';else delete tile.species;}
   world.animals=materializeAnimals(world.seed,world.tiles,world.tick);assert.equal(world.animals.length,MAX_ACTIVE_ANIMALS);
   for(let cx=10;cx<30&&world.animals.length===MAX_ACTIVE_ANIMALS;cx++)activate(world,cx*16,0);
-  assert.ok(world.animals.length>MAX_ACTIVE_ANIMALS);const ages=new Map(world.animals.map(a=>[a.id,a.age]));world.tick++;stepAnimals(world);
+  assert.ok(world.animals.length>MAX_ACTIVE_ANIMALS);const ages=new Map(world.animals.map(a=>[a.id,a.age]));fixtureTick(world,world.tick+1);stepAnimals(world);
   assert.equal(world.animals.length,ages.size);assert.equal(world.animals.reduce((sum,a)=>sum+a.age-ages.get(a.id)!,0),MAX_ACTIVE_ANIMALS);assertWorld(world);
 });

@@ -7,6 +7,8 @@ import { migrateWorld, type World } from '../world/index.js';
 import { CHUNK_SIZE, MAX_COORDINATE, type Chunk } from '../world/terrain.js';
 import { assertEcosystemTile, assertChunkLife } from '../world/validation.js';
 import { decodeSnapshot, encodeSnapshot } from './snapshot.js';
+import type { LegacyRecord } from '../shared/demography.js';
+import { assertLegacyRecord } from '../world/lineage.js';
 
 const checksum = (s: string) => createHash('sha256').update(s).digest('hex');
 // Preserve all V1 gesture identities; only the new command kind extends the tuple.
@@ -20,6 +22,7 @@ const BASE_TABLES: Record<string, string[]> = {
   inputs: ['id', 'fingerprint', 'tick', 'ordinal', 'body', 'result'], sessions: ['hash', 'expires'], metadata: ['key', 'value'],
 };
 const ARCHIVE_SCHEMA = 'CREATE TABLE chunks (key TEXT NOT NULL, tick INTEGER NOT NULL, body TEXT NOT NULL, digest TEXT NOT NULL, PRIMARY KEY (key,tick));';
+const LEGACY_SCHEMA = 'CREATE TABLE legacy (id TEXT PRIMARY KEY, tick INTEGER NOT NULL, body TEXT NOT NULL, digest TEXT NOT NULL); CREATE INDEX legacy_tick ON legacy(tick);';
 
 function coordinatesFromKey(key: string): { cx: number; cy: number } {
   const pieces = typeof key === 'string' ? key.split(',') : [];
@@ -64,26 +67,30 @@ export class Store {
     const existed = path !== ':memory:' && existsSync(path);
     if (path !== ':memory:' && !options.readOnly) mkdirSync(dirname(resolve(path)), { recursive: true, mode: 0o700 });
     this.db = new DatabaseSync(path, { readOnly: options.readOnly ?? false });
-    let schemaVersion = existed ? 0 : 2;
+    let schemaVersion = existed ? 0 : 3;
     try {
       if (existed) {
         const marker = this.db.prepare('PRAGMA application_id').get() as { application_id: number };
         const version = this.db.prepare('PRAGMA user_version').get() as { user_version: number };
-        if (marker.application_id !== 1128354388 || ![1, 2].includes(version.user_version)) throw new Error('Unrecognized database or schema version. Explicit recovery required.');
+        if (marker.application_id !== 1128354388 || ![1, 2, 3].includes(version.user_version)) throw new Error('Unrecognized database or schema version. Explicit recovery required.');
         schemaVersion = version.user_version;
         for (const [table, columns] of Object.entries(BASE_TABLES)) {
           const actual = (this.db.prepare(`PRAGMA table_info(${table})`).all() as SchemaColumn[]).map(row => row.name);
           if (JSON.stringify(actual) !== JSON.stringify(columns)) throw new Error('Database schema is incomplete. Explicit recovery required.');
         }
-        if (schemaVersion === 2) {
+        if (schemaVersion >= 2) {
           const columns = this.db.prepare('PRAGMA table_info(chunks)').all() as SchemaColumn[];
           const primary = columns.filter(c => c.pk > 0).sort((a, b) => a.pk - b.pk).map(c => c.name);
           if (JSON.stringify(columns.map(c => c.name)) !== JSON.stringify(['key', 'tick', 'body', 'digest']) || JSON.stringify(primary) !== JSON.stringify(['key', 'tick'])) throw new Error('Archive schema is incomplete. Explicit recovery required.');
         }
+        if (schemaVersion >= 3) {
+          const columns = this.db.prepare('PRAGMA table_info(legacy)').all() as SchemaColumn[];
+          if (JSON.stringify(columns.map(c=>c.name))!==JSON.stringify(['id','tick','body','digest']) || columns.find(c=>c.name==='id')?.pk!==1) throw new Error('Identity archive schema is incomplete. Explicit recovery required.');
+        }
       }
       if (!options.readOnly) {
         this.db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=3000;');
-        if (!existed || schemaVersion === 1) {
+        if (!existed || schemaVersion < 3) {
           this.db.exec('BEGIN IMMEDIATE');
           try {
             if (!existed) this.db.exec(`
@@ -92,9 +99,10 @@ export class Store {
               CREATE TABLE inputs (id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, tick INTEGER NOT NULL, ordinal INTEGER NOT NULL, body TEXT NOT NULL, result TEXT NOT NULL);
               CREATE TABLE sessions (hash TEXT PRIMARY KEY, expires INTEGER NOT NULL);
               CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);`);
-            this.db.exec(ARCHIVE_SCHEMA);
-            this.db.exec('PRAGMA application_id=1128354388; PRAGMA user_version=2; COMMIT;');
-            schemaVersion = 2;
+            if (!existed || schemaVersion === 1) this.db.exec(ARCHIVE_SCHEMA);
+            this.db.exec(LEGACY_SCHEMA);
+            this.db.exec('PRAGMA application_id=1128354388; PRAGMA user_version=3; COMMIT;');
+            schemaVersion = 3;
           } catch (error) {
             if (this.db.isTransaction) this.db.exec('ROLLBACK');
             throw error;
@@ -117,13 +125,39 @@ export class Store {
     const world = migrateWorld(decodeSnapshot(row.body));
     // A migrated global allocator must remain above every archived identity, too.
     // Otherwise a corrupted counter could allocate an ID already living in a dormant region.
-    if(this.schemaVersion===2) {
+    if(this.schemaVersion>=2) {
       const archived=this.db.prepare("SELECT MAX(CAST(substr(json_extract(s.value,'$.id'),11) AS INTEGER)) AS maximum FROM chunks c, json_each(c.body,'$.structures') s WHERE c.tick<=? AND json_extract(s.value,'$.id') GLOB 'structure-[0-9]*'").get(world.tick) as {maximum:number|null};
       if(archived.maximum!==null&&(!Number.isSafeInteger(archived.maximum)||archived.maximum>world.structureCounter))throw new Error('Archived structure identity exceeds snapshot counter. Explicit recovery required.');
       const animals=this.db.prepare("SELECT DISTINCT json_extract(a.value,'$.id') AS id FROM chunks c, json_each(c.body,'$.animals') a WHERE c.tick<=? AND json_extract(a.value,'$.generation')>0").all(world.tick) as {id:string}[];
       for(const animal of animals){const serial=/^animal-born-\d+-\d+-([1-9]\d*)$/.exec(animal.id);if(serial&&(!Number.isSafeInteger(Number(serial[1]))||Number(serial[1])>world.animalCounter))throw new Error('Archived animal identity exceeds snapshot counter. Explicit recovery required.');}
     }
+    if (this.schemaVersion>=3) {
+      const count=this.db.prepare('SELECT COUNT(*) AS count FROM legacy WHERE tick<=?').get(world.tick) as {count:number};
+      if (count.count!==world.demographyDynamics.deaths) throw new Error('Identity archive count disagrees with snapshot. Explicit recovery required.');
+      for (const record of world.legacy) {
+        const archived=this.loadLegacy(record.id,world.tick);
+        if (!archived || JSON.stringify(archived)!==JSON.stringify(record)) throw new Error('Cached identity disagrees with archive. Explicit recovery required.');
+        this.assertLegacyParents(record,world);
+      }
+      const serial=this.db.prepare("SELECT MAX(CAST(substr(id,12) AS INTEGER)) AS maximum FROM legacy WHERE tick<=? AND id GLOB 'descendant-[0-9]*'").get(world.tick) as {maximum:number|null};
+      if (serial.maximum!==null&&(!Number.isSafeInteger(serial.maximum)||serial.maximum>world.birthCounter)) throw new Error('Archived human identity exceeds snapshot counter. Explicit recovery required.');
+      for (const person of world.people) if(this.loadLegacy(person.id,world.tick)) throw new Error('A deceased identity is present among living inhabitants. Explicit recovery required.');
+    }
     return { world, savedAt: row.saved_at };
+  }
+  loadLegacy(id: string, atTick=Number.MAX_SAFE_INTEGER): LegacyRecord | null {
+    if (typeof id!=='string'||!id.length||id.length>50||!Number.isSafeInteger(atTick)||atTick<0) throw new RangeError('Invalid identity archive lookup.');
+    if (this.schemaVersion<3) return null;
+    const row=this.db.prepare('SELECT body,digest,tick FROM legacy WHERE id=? AND tick<=?').get(id,atTick) as {body:string;digest:string;tick:number}|undefined;
+    if (!row) return null;
+    if (checksum(row.body)!==row.digest) throw new Error('Archived identity checksum mismatch. Explicit recovery required.');
+    const record:unknown=JSON.parse(row.body); assertLegacyRecord(record,atTick);
+    if(record.id!==id||record.diedAt!==row.tick) throw new Error('Archived identity key or date mismatch. Explicit recovery required.');
+    return record;
+  }
+  private assertLegacyParents(record: LegacyRecord, world: World): void {
+    const parents=record.parents.map(id=>world.people.find(p=>p.id===id)??world.retiredLegacy.find(p=>p.id===id)??this.loadLegacy(id,world.tick));
+    if (parents.some(p=>!p||p.id===record.id||p.bornAt>=record.bornAt||('diedAt' in p&&p.diedAt<record.bornAt)||p.genome.generation>=record.generation) || (parents.length&&record.generation!==Math.max(...parents.map(p=>p!.genome.generation))+1)) throw new Error('Archived genealogy is inconsistent. Explicit recovery required.');
   }
   loadChunk(key: string, atTick = Number.MAX_SAFE_INTEGER): Chunk | null {
     coordinatesFromKey(key);
@@ -145,6 +179,14 @@ export class Store {
     try {
       // Authorization and commit share a transaction with respect to external revocation.
       if (requiredSessions.some(hash => !this.sessionValid(hash))) throw new SessionRevoked('Session revoked before commit.');
+      const archiveIdentity=this.db.prepare('INSERT INTO legacy VALUES (?,?,?,?)');
+      for (const record of world.retiredLegacy) {
+        assertLegacyRecord(record,world.tick); this.assertLegacyParents(record,world);
+        const prior=this.loadLegacy(record.id);
+        const archivedBody=JSON.stringify(record);
+        if (prior) { if(JSON.stringify(prior)!==archivedBody) throw new Error('An archived identity cannot be overwritten. Explicit recovery required.'); }
+        else archiveIdentity.run(record.id,record.diedAt,archivedBody,checksum(archivedBody));
+      }
       if (retired.length) {
         const archive = this.db.prepare('INSERT OR REPLACE INTO chunks VALUES (?,?,?,?)');
         for (const chunk of retired) {
@@ -167,6 +209,7 @@ export class Store {
     }
     // A discarded transaction must leave the caller's pending archive queue intact for a retry.
     world.retiredChunks = [];
+    world.retiredLegacy = [];
   }
   result(gesture: Gesture): GestureResult | null {
     const row = this.db.prepare('SELECT fingerprint,result FROM inputs WHERE id=?').get(gesture.id) as { fingerprint: string; result: string } | undefined;
@@ -204,6 +247,7 @@ export class Store {
       recovered.db.prepare('DELETE FROM inputs WHERE tick>?').run(world.tick);
       recovered.db.prepare('DELETE FROM events WHERE tick>?').run(world.tick);
       recovered.db.prepare('DELETE FROM chunks WHERE tick>?').run(world.tick);
+      recovered.db.prepare('DELETE FROM legacy WHERE tick>?').run(world.tick);
       for (const event of recovered.db.prepare('SELECT id FROM events WHERE tick=?').all(world.tick) as {id:string}[]) {
         if (!world.events.some(e => e.id === event.id)) recovered.db.prepare('DELETE FROM events WHERE id=?').run(event.id);
       }

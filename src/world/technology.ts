@@ -394,6 +394,17 @@ function advanceProject(host: TechnologyHost, actor: TechnologyActor, kind: Tech
   return project.progress >= project.requiredWork ? finishProject(host, actor, project, emit) : false;
 }
 export function researchTechnology(host: TechnologyHost, actor: TechnologyActor, emit?: Emit): boolean { return advanceProject(host, actor, 'research', undefined, emit); }
+/** Explicitly abandoning a paid project preserves its spent work, without manufacturing or refunding matter. */
+export function cancelTechnologyProject(host: TechnologyHost, actor: TechnologyActor): boolean {
+  const knowledge=actor.technology,project=knowledge.project;
+  if(!project)return false;
+  const opening=technologyStock(actor);
+  knowledge.project=null;knowledge.attempts++;knowledge.lastAttempt=host.tick;
+  host.technology.ledger.attempts++;host.technology.ledger.failures++;
+  if(project.recipeId) {const practice=knowledge.competence[project.recipeId]??={attempts:0,successes:0,work:0,benefit:0};practice.attempts++;practice.work+=project.progress;}
+  appendExecution(host,{kind:project.kind,actorId:actor.id,recipeId:project.recipeId,programSignature:programSignature(project.program),inputs:[],outputs:[],residueMass:0,energy:project.energyPaid,work:project.progress,success:false,parentRecipeIds:[...project.parents],catalysts:[],benefit:0,balance:{opening,closing:opening,externalInputs:[],externalLoss:[]}});
+  return true;
+}
 export function craftTechnology(host: TechnologyHost, actor: TechnologyActor, recipeId?: string, emit?: Emit): boolean {
   const selected = recipeId ?? actor.technology.project?.recipeId ?? host.technology.recipes
     .filter(r => actor.technology.knownRecipes.includes(r.id) && planWithdrawal(host, actor, r.program))

@@ -74,7 +74,7 @@ export function assertLifeState(world: World): void {
       const serial=/^blueprint-([1-9]\d*)$/.exec(blueprint.id);
       if(!serial||!integer(Number(serial[1]),world.blueprintCounter))fail();
       const parents=blueprint.parents.map(id=>world.blueprints.find(b=>b.id===id)!);
-      if(!parents.length||blueprint.generation!==Math.max(...parents.map(b=>b.generation))+1||parents.some(b=>b.tick>blueprint.tick)||!world.people.some(p=>p.id===blueprint.inventorId))fail();
+      if(!parents.length||blueprint.generation!==Math.max(...parents.map(b=>b.generation))+1||parents.some(b=>b.tick>blueprint.tick)||!(world.people.some(p=>p.id===blueprint.inventorId)||(world.version>=5&&world.legacy?.some(p=>p.id===blueprint.inventorId&&p.diedAt>=blueprint.tick))))fail();
     }
   }
   for(const s of world.structures) if(!ids.has(s.blueprintId)||blueprintSignature(s.components)!==blueprintSignature(world.blueprints.find(b=>b.id===s.blueprintId)!.components))fail();

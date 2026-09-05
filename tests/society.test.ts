@@ -112,10 +112,10 @@ test('resource-dependent birth spends parental reserves, inherits parameters and
   const {w,a,b}=scene();a.x=b.x=17;a.y=b.y=13; a.target=b.target={x:17,y:13};
   group(w,[a,b],'parents');a.bonds[b.id]=0.7;a.inventory=b.inventory=0.2;
   a.skills={hunt:0.9};a.values={'ready:hunt':0.25};a.lastSocial=12; a.experiences=[{tick:0,text:'Only the parent learned this',causeId:'e1',placeId:''}];
-  w.tick=119;const noFood=cloneWorld(w);noFood.people[2]!.inventory=0;stepWorld(noFood);assert.equal(noFood.people.length,16);
-  stepWorld(w);const child=w.people.at(-1)!;assert.equal(w.people.length,17);assert.equal(child.genome.generation,1);assert.equal(child.bornAt,120);
+  w.tick=599;for(const p of w.people)p.demography.age=w.tick-p.bornAt;const noFood=cloneWorld(w);noFood.people[2]!.inventory=0;stepWorld(noFood);assert.equal(noFood.people.length,16);
+  stepWorld(w);const child=w.people.at(-1)!;assert.equal(w.people.length,17);assert.equal(child.genome.generation,1);assert.equal(child.bornAt,600);
   assert.ok(Math.abs(a.inventory+b.inventory+child.inventory-0.34)<1e-12);assert.deepEqual(child.skills,{});assert.deepEqual(child.values,{});assert.deepEqual(child.habits,[]);
-  assert.ok(child.experiences.every(e=>!e.text.includes('Only the parent')));assert.equal(child.lastSocial,120);assert.equal(w.totals.births,1);assertWorld(w);
+  assert.ok(child.experiences.every(e=>!e.text.includes('Only the parent')));assert.equal(child.lastSocial,600);assert.equal(w.totals.births,1);assertWorld(w);
 });
 
 test('learning rate controls acquired preferences, and statistics reflect stock with an explicitly bounded scope', () => {

@@ -10,10 +10,16 @@ import { materializeAnimals, stepAnimals, harvestAt, type Animal } from './anima
 import { advanceNeeds } from './needs.js';
 import { defaultBlueprint, constructionCost, inventionOpportunity, invent, completeConstruction, stepStructures, repairOpportunity, repair, facilityRestQuality, recordFacilityRest, foodAvailable, takeFood, waterAvailable, takeWater, REST_FATIGUE_RATE, REST_ENERGY_RATE } from './inventions.js';
 import type { AnimalDynamics, BlueprintView, StructureView, InventionDynamics } from '../shared/life.js';
+import type { TechnologyKnowledge, TechnologyState } from '../shared/technology.js';
+import type { DemographicState, LegacyRecord } from '../shared/demography.js';
+import { defaultTechnologyState, initialTechnologyKnowledge, technologyOpportunity, researchTechnology, craftTechnology, projectTechnology, assertTechnology, useTool, recordTechnologyBenefit, settleTechnologyEstate, cancelTechnologyProject } from './technology.js';
+import { initialDemography, demographicTraits, updateDemography } from './demography.js';
+import { advancePopulation, assertPopulation } from './lineage.js';
+import { analyzeTechnologyOrganization } from './technology-organization.js';
 export { tileAt, normalizeViewport } from './spatial.js';
 export type { WorldContext } from './spatial.js';
 
-export const RULES_VERSION = 4;
+export const RULES_VERSION = 5;
 export const MAX_POPULATION = 32;
 export const TICKS_PER_DAY = 2400;
 export const MAX_EVENTS = 120;
@@ -42,6 +48,7 @@ export interface Person extends PersonView {
   culture: Culture; communityId: string | null; bonds: Record<string, number>;
   lastInvention?: number;
   home?: { x: number; y: number; quality: number; observedAt: number };
+  technology: TechnologyKnowledge; demography: DemographicState;
 }
 export interface Memory extends MemoryView {
   context: 'partner-tired' | 'shelter-tired' | 'food-hungry' | 'rain-shelter' | 'irrelevant';
@@ -60,6 +67,8 @@ export interface World {
   history: WorldSample[]; totals: Record<string, number>;
   animals: Animal[]; animalCounter: number; animalDynamics: AnimalDynamics;
   blueprints: BlueprintView[]; structures: StructureView[]; blueprintCounter: number; structureCounter: number; inventionDynamics: InventionDynamics;
+  technology: TechnologyState; legacy: LegacyRecord[]; retiredLegacy: LegacyRecord[];
+  demographyDynamics: { deaths: number; causes: Record<LegacyRecord['cause'], number>; foodLost: number; woodLost: number; stoneLost: number };
 }
 
 function random(world: Pick<World, 'rng'>): number {
@@ -115,6 +124,8 @@ export function createWorld(seed = 20260905): World {
     animals: [], animalCounter: 0, animalDynamics: { births: 0, deaths: 0, predations: 0, humanHunts: 0, waterConsumed: 0, plantConsumed: 0 },
     blueprints: [defaultBlueprint()], structures: [], blueprintCounter: 0, structureCounter: 0,
     inventionDynamics: { attempts: 0, accepted: 0, repairs: 0, waterCollected: 0, foodStored: 0, foodTaken: 0 },
+    technology: defaultTechnologyState(), legacy: [], retiredLegacy: [],
+    demographyDynamics: { deaths: 0, causes: { starvation: 0, dehydration: 0, exposure: 0, senescence: 0 }, foodLost: 0, woodLost: 0, stoneLost: 0 },
   };
   for (let cy = 0; cy < 2; cy++) for (let cx = 0; cx < 3; cx++) activate(world, cx * 16, cy * 16);
   for (const place of world.places.slice(0, 3)) {
@@ -141,6 +152,7 @@ export function createWorld(seed = 20260905): World {
       traits, skills: {}, materials: { wood: 0, stone: 0 }, activity: {}, values: {}, visited: [],
       heading: n * 2.399963229728653, command: null, work: 0, lastOutcome: 0, intentContext: 'ready', controlMode: 'auto',
       thirst: 0.15, genome: founderGenome(world.seed, id, traits), bornAt: -4800, lastBirth: -2400, lastSocial: -30, lastDispute: -180, lastPracticeMemory: 0, culture: initialCulture(world.seed, id), communityId: null, bonds: {},
+      technology: initialTechnologyKnowledge(), demography: initialDemography(4800),
     });
   }
   for (const person of world.people) initializePerson(world, person);
@@ -205,7 +217,7 @@ function choose(world: World, person: Person): void {
   const prey = nearbyTiles.filter(t => (t.fauna ?? 0) >= 1).sort((a, b) => distance(person, a) - distance(person, b))[0];
   if (prey && person.inventory < 0.18) candidates.push({ action: 'hunt', target: prey, score: Math.max(0, person.hunger - 0.18) * 2 + person.traits.industriousness * 0.18 + (food && food.food > 0.2 ? 0 : 0.2) - (person.hunger < 0.8 && (prey.fauna ?? 0) <= 1 ? person.culture.stewardship * 0.15 : 0), reason: 'Percibe fauna; cazar cuesta trabajo, retira un animal y proporciona alimento limitado.' });
   const help = cooperationOpportunity(world, person);
-  if (help) candidates.push({ action: 'cooperate', target: help.person, score: help.score, reason: `Puede ${help.kind === 'teach' ? 'enseñar una técnica practicada' : help.kind === 'trade' ? 'intercambiar materiales complementarios' : help.kind === 'assist' ? 'colaborar en una tarea' : 'aportar materiales'} a ${help.person.name}.` });
+  if (help) candidates.push({ action: 'cooperate', target: help.person, score: help.score, reason: `Puede ${help.kind === 'teach' ? 'enseñar una técnica practicada' : help.kind === 'tools' ? 'intercambiar un objeto útil por materia disponible' : help.kind === 'trade' ? 'intercambiar materiales complementarios' : help.kind === 'assist' ? 'colaborar en una tarea' : 'aportar materiales'} con ${help.person.name}.` });
   const shelter = nearbyTiles.filter(tile => tile.terrain === 'shelter').sort((a, b) => distance(person, a) - distance(person, b))[0];
   candidates.push({ action: 'rest', target: shelter ?? person, score: person.fatigue * 1.75 + (1 - person.energy) * 1.2 + (phaseAt(world.tick) === 'night' ? 0.1 : 0), reason: shelter ? 'El cansancio hace valiosa una pausa bajo techo.' : 'Necesita una pausa; no percibe un refugio cercano.' });
   const resource = nearbyTiles.filter(t => ((t.wood ?? 0) >= 1 && person.materials.wood < 12) || ((t.stone ?? 0) >= 1 && person.materials.stone < 8))
@@ -218,6 +230,8 @@ function choose(world: World, person: Person): void {
   if (buildable && person.materials.wood >= cost.wood && person.materials.stone >= cost.stone) candidates.push({ action: 'build', target: buildable, score: 0.5 + workBias * 0.45 + (!shelter ? 0.2 : 0), reason: 'Hay materiales y un lugar habitable; puede construir una receta conocida con trabajo.' });
   const invention = inventionOpportunity(world,person);
   if(invention) candidates.push({action:'invent',...invention});
+  const technology = technologyOpportunity(world,person);
+  if (technology) candidates.push({ action: technology.kind, target: person, score: technology.score, reason: technology.reason });
   const damaged = repairOpportunity(world,person);
   if(damaged) candidates.push({action:'repair',target:damaged,score:0.5+(1-damaged.condition)*0.35+workBias*0.12,reason:'Un edificio utilizado se desgasta; repararlo cuesta material y trabajo y conserva sus funciones.'});
   const farmland = nearbyTiles.filter(t => t.terrain !== 'shelter' && t.moisture > 0.25 && t.vegetation < 0.8).sort((a, b) => distance(person, a) - distance(person, b))[0];
@@ -291,7 +305,7 @@ function choose(world: World, person: Person): void {
 }
 
 function actionLabel(action: Action): string {
-  return ({ explore: 'explorar', eat: 'buscar alimento', drink: 'beber', hunt: 'cazar', rest: 'descansar', approach: 'acercarse', accompany: 'acompañar', retreat: 'tomar espacio', share: 'compartir alimento', gather: 'recolectar', farm: 'cultivar', build: 'construir', cooperate: 'cooperar', invent:'ensayar un diseño', repair:'reparar' })[action];
+  return ({ explore: 'explorar', eat: 'buscar alimento', drink: 'beber', hunt: 'cazar', rest: 'descansar', approach: 'acercarse', accompany: 'acompañar', retreat: 'tomar espacio', share: 'compartir alimento', gather: 'recolectar', farm: 'cultivar', build: 'construir', cooperate: 'cooperar', invent:'ensayar un diseño', repair:'reparar', research:'investigar materiales', craft:'fabricar una técnica aprendida' })[action];
 }
 
 function resourceDistance(person: Person, tile: Tile): number {
@@ -421,7 +435,8 @@ function share(world: World, donor: Person): void {
 
 function bodyAndAction(world: World, person: Person): void {
   const tile = tileAt(world, person)!;
-  advanceNeeds(person, { hunger:0.00027, thirst:0.00045+(tile.biome==='desert'?0.0002:0), energy:0.00007, stressEnergy:0.00015, fatigue:0.00009+(world.weather==='rain'&&tile.terrain!=='shelter'?0.0001:0) });
+  const physiology = demographicTraits(person.genome);
+  advanceNeeds(person, { hunger:0.00027*physiology.foodDemand, thirst:(0.00045+(tile.biome==='desert'?0.0002:0))*physiology.waterDemand, energy:0.00007, stressEnergy:0.00015, fatigue:0.00009+(world.weather==='rain'&&tile.terrain!=='shelter'?0.0001:0) });
   person.closeness = clamp(person.closeness + 0.0001);
   person.socialLoad = clamp(person.socialLoad - 0.0008);
   const emptyFood = person.action === 'eat' && (tileAt(world, person.target)?.food ?? 0) < 0.005 && person.inventory < 0.01 && foodAvailable(world,person)<0.001;
@@ -466,6 +481,15 @@ function bodyAndAction(world: World, person: Person): void {
     if (world.shelterBenefitEnabled) recordFacilityRest(world,person,beforeRest);
   }
   if (person.action === 'share') share(world, person);
+  if (['research','craft'].includes(person.action) && distance(person,person.target)<0.5) {
+    const before = person.technology.attempts;
+    const completed = person.action === 'research' ? researchTechnology(world,person,event=>addEvent(world,event)) : craftTechnology(world,person,undefined,event=>addEvent(world,event));
+    if (person.technology.attempts > before) {
+      outcome(world,person,person.action,completed?0.12:-0.12,completed);
+      if (person.command?.order === person.action) { person.command=null; person.controlMode='auto'; }
+      person.decisionAt=world.tick+1;
+    }
+  }
   if (['gather', 'farm', 'build', 'hunt', 'invent', 'repair'].includes(person.action) && distance(person, person.target) < 0.5) performWork(world, person, current);
   if (person.action === 'cooperate' && distance(person, person.target) <= 1.5) {
     person.work++;
@@ -485,10 +509,22 @@ function performWork(world: World, person: Person, tile: Tile): void {
     const preferred = person.materials.wood < 6 ? 'wood' : 'stone';
     for (const material of [preferred, preferred === 'wood' ? 'stone' : 'wood'] as const) {
       if ((tile[material] ?? 0) < 1 || person.materials[material] >= (material === 'wood' ? 12 : 8)) continue;
-      const amount = harvestMaterial(tile, material, 1); person.materials[material] += amount; count(world, material === 'wood' ? 'woodGathered' : 'stoneGathered', amount); success = amount > 0; break;
+      const capacity=(material==='wood'?12:8)-person.materials[material];
+      const baseline=Math.min(1,capacity,tile[material]??0);
+      const receipt=capacity>1&&(tile[material]??0)>1 ? useTool(world,person,material==='wood'?'cutting':'abrasion') : undefined;
+      const amount = harvestMaterial(tile, material, Math.min(capacity,1+(receipt?.power??0)));
+      person.materials[material] += amount; count(world, material === 'wood' ? 'woodGathered' : 'stoneGathered', amount);
+      recordTechnologyBenefit(world,person,receipt,amount-baseline); success = amount > 0; break;
     }
   } else if (person.action === 'farm' && person.materials.wood >= 1 && tile.terrain !== 'shelter' && tile.moisture > 0.2 && tile.vegetation < 0.9) {
-    if (cultivateTile(tile)) { person.materials.wood--; count(world, 'cultivations'); success = true; }
+    if (cultivateTile(tile)) {
+      person.materials.wood--; count(world, 'cultivations'); success = true;
+      if ((tile.cultivation??0)<1) {
+        const receipt=useTool(world,person,'cultivation'), before=tile.cultivation??0;
+        tile.cultivation=clamp(before+(receipt?.power??0)*0.15);
+        recordTechnologyBenefit(world,person,receipt,tile.cultivation-before);
+      }
+    }
   } else if (person.action === 'hunt' && (tile.fauna ?? 0) >= 1) {
     const food = harvestAt(world,tile,person.id,event=>addEvent(world,event)); const stored = Math.min(0.25 - person.inventory, food * 0.5);
     person.inventory += stored; person.hunger = clamp(person.hunger - (food - stored) * 4.8); if(food>0) count(world, 'hunts'); count(world, 'foodHarvested', food); success = food > 0;
@@ -531,8 +567,9 @@ function applyGesture(world: World, gesture: Gesture, order: number): GestureRes
   if (!validCoordinate(gesture.x) || !validCoordinate(gesture.y)) return result(false, 'Elige un destino dentro del rango de coordenadas.');
   if (gesture.kind === 'command') {
     const person = world.people.find(p => p.id === gesture.agentId);
-    if (!person || !gesture.order || !['move', 'explore', 'gather', 'farm', 'build', 'rest', 'hunt', 'drink', 'cooperate', 'invent', 'repair', 'auto'].includes(gesture.order)) return result(false, 'Habitante u orden desconocida.');
+    if (!person || !gesture.order || !['move', 'explore', 'gather', 'farm', 'build', 'rest', 'hunt', 'drink', 'cooperate', 'invent', 'repair', 'research', 'craft', 'auto'].includes(gesture.order)) return result(false, 'Habitante u orden desconocida.');
     if (distance(person, gesture) > 4096) return result(false, 'El destino de una tarea debe quedar a menos de 4096 celdas.');
+    if(['research','craft'].includes(gesture.order)&&person.technology.project&&person.technology.project.kind!==gesture.order) cancelTechnologyProject(world,person);
     person.command = gesture.order === 'auto' ? null : { order: gesture.order, x: gesture.x, y: gesture.y };
     person.controlMode = person.command ? 'directed' : 'auto'; person.work = 0; person.decisionAt = world.tick;
     addEvent(world, { kind: 'gesture', actors: [person.id], x: person.x, y: person.y, source: 'simulation', text: gesture.order === 'auto' ? `${person.name} vuelve a elegir sus tareas.` : `${person.name} recibió una tarea: ${gesture.order}.`, cause: 'Orden explícita; conserva desplazamiento físico, costes y necesidades.' });
@@ -587,21 +624,42 @@ export function stepWorld(world: World, inputs: Gesture[] = [], context: WorldCo
     }
   }
   encounters(world);
+  advancePopulation(world,{emit:event=>addEvent(world,event),beforeDeath:transferEstate});
   updateCommunities(world, event => addEvent(world, event));
   reproduce(world);
   recordSample(world);
   return results;
 }
 
+function transferEstate(world: World, person: Person): void {
+  cancelTechnologyProject(world,person);
+  const recipients=world.people.filter(other=>other!==person&&other.demography.deathCause===null&&distance(person,other)<=2).sort((a,b)=>distance(person,a)-distance(person,b)||a.id.localeCompare(b.id));
+  let transferred=0;
+  for (const other of recipients) {
+    const food=Math.min(person.inventory,Math.max(0,0.25-other.inventory)); person.inventory-=food; other.inventory+=food; transferred+=food;
+    for (const material of ['wood','stone'] as const) {
+      const amount=Math.min(person.materials[material],Math.max(0,(material==='wood'?12:8)-other.materials[material]));
+      person.materials[material]-=amount; other.materials[material]+=amount; transferred+=amount;
+    }
+  }
+  world.demographyDynamics.foodLost+=person.inventory; world.demographyDynamics.woodLost+=person.materials.wood; world.demographyDynamics.stoneLost+=person.materials.stone;
+  const lost=person.inventory+person.materials.wood+person.materials.stone;
+  person.inventory=0; person.materials={wood:0,stone:0};
+  const estate=settleTechnologyEstate(world,person,recipients);
+  if (transferred>0||estate.transfers.length||lost>0||Object.values(estate.lost).some(n=>n>0)) addEvent(world,{kind:'ecology',actors:[person.id,...recipients.map(p=>p.id)],x:person.x,y:person.y,source:'simulation',text:`Las pertenencias de ${person.name} quedaron a cargo de quienes estaban cerca; el remanente salió de las reservas utilizables.`,cause:`Entrega física a distancia máxima 2 con capacidad limitada; pérdidas registradas de alimento y materias ${lost.toFixed(4)}, tecnológicas ${Object.values(estate.lost).reduce((s,n)=>s+n,0)} unidades de masa. El conocimiento adquirido no se copia.`});
+}
+
 /** Resource-dependent, bounded simulated descendants; learned episodes are not copied into genes. */
 function reproduce(world: World): void {
   if (!world.reproductionEnabled || world.people.length >= MAX_POPULATION || world.tick % 120 !== 0) return;
   for (const a of world.people) {
-    if (a.role !== 'neighbor' || !a.communityId || world.tick - a.bornAt < 4800 || world.tick - a.lastBirth < 2400 || a.hunger > 0.45 || a.thirst > 0.45 || a.energy < 0.6 || a.inventory < 0.1) continue;
-    const b = world.people.find(p => p !== a && p.role === 'neighbor' && p.communityId === a.communityId && distance(a, p) <= 3 && (a.bonds[p.id] ?? 0) >= 0.3 && world.tick - p.bornAt >= 4800 && world.tick - p.lastBirth >= 2400 && p.hunger < 0.45 && p.thirst < 0.45 && p.energy > 0.6 && p.inventory >= 0.1);
+    if (!fertile(world,a) || !a.communityId) continue;
+    const b = world.people.find(p => p !== a && fertile(world,p) && p.communityId === a.communityId && distance(a, p) <= 3 && (a.bonds[p.id] ?? 0) >= 0.3);
     const place = world.places.find(p => distance(a, p) <= 4);
     if (!b || !place) continue;
-    const id = `descendant-${++world.birthCounter}`, genome = inheritGenome(world.seed, id, [a, b]);
+    const serial=world.birthCounter+1, id=`descendant-${serial}`;
+    if(!Number.isSafeInteger(serial)||[...world.people,...world.legacy,...world.retiredLegacy].some(p=>p.id===id)) throw new Error('La identidad de un nacimiento ya existe; no se gastaron reservas.');
+    const genome=inheritGenome(world.seed,id,[a,b]); world.birthCounter=serial;
     const traits = expressGenome(genome);
     const child: Person = { ...structuredClone(a), id, name: `${proceduralPlaceName(world.seed, world.birthCounter, genome.generation).split(' ')[0]} ${world.birthCounter}`.slice(0, 70), role: 'neighbor',
       genome, traits, curiosity: traits.curiosity, sociability: traits.sociability, generosity: traits.care, bornAt: world.tick, lastBirth: world.tick, thirst: 0.15,
@@ -610,6 +668,7 @@ function reproduce(world: World): void {
       command: null, controlMode: 'auto', target: { x: a.x, y: a.y }, action: 'rest', reason: 'Un nuevo habitante aprende en la comunidad que lo sostiene.', work: 0, decisionAt: world.tick + 30, lastOutcome: world.tick, lastPracticeMemory: world.tick, recentMemory: null,
       lastSocial: world.tick, lastDispute: world.tick, lastMeeting: world.tick, lastShared: world.tick, socialLoad: 0, closeness: 0.2, need: 'Aprender', heading: world.birthCounter * 2.399963229728653,
       blueprintId: null, lastInvention: world.tick,
+      technology: initialTechnologyKnowledge(), demography: initialDemography(),
     };
     delete child.home;
     a.inventory -= 0.08; b.inventory -= 0.08; a.energy = clamp(a.energy - 0.08); b.energy = clamp(b.energy - 0.08); a.lastBirth = world.tick; b.lastBirth = world.tick;
@@ -620,6 +679,11 @@ function reproduce(world: World): void {
   }
 }
 
+function fertile(world: World, person: Person): boolean {
+  const traits=demographicTraits(person.genome);
+  return person.role==='neighbor' && person.inventory>=0.1 && world.tick-person.lastBirth>=traits.fertilityCooldown && updateDemography({state:person.demography,traits,hunger:person.hunger,thirst:person.thirst,energy:person.energy,fatigue:person.fatigue},{exposure:0,shelter:0,protected:false},0).offspringEligible;
+}
+
 /** Flat terrain cells can be copied without the generic structured-clone traversal overhead. */
 export function cloneWorld(world: World): World {
   const draft: World = structuredClone({ ...world, tiles: [] });
@@ -628,19 +692,30 @@ export function cloneWorld(world: World): World {
 }
 
 /** Explicit allow-list: no PRNG, habit internals, private provenance or session data cross the wire. */
+const organizationViews = new WeakMap<World, { tick: number; executionCounter: number; value: NonNullable<WorldView['organization']> }>();
 export function projectWorld(world: World, viewport?: Viewport, context: WorldContext = {}): WorldView {
   const projected = projectTerrain(world, viewport, context), v = projected.viewport;
+  let organization=organizationViews.get(world);
+  if(!organization||organization.tick!==world.tick||organization.executionCounter!==world.technology.executionCounter) {
+    organization={tick:world.tick,executionCounter:world.technology.executionCounter,value:analyzeTechnologyOrganization(world.technology,world.people,world.tick)};
+    organizationViews.set(world,organization);
+  }
   return {
     version: PROTOCOL_VERSION, sequence: world.tick, tick: world.tick, day: Math.floor(world.tick / TICKS_PER_DAY) + 1,
     phase: phaseAt(world.tick), weather: world.weather, width: v.width, height: v.height,
     originX: v.x, originY: v.y, infinite: true, activeChunks: Object.keys(world.chunks).length, discoveredChunks: world.discoveredChunks, settlementCount: world.settlementCount,
     tiles: projected.tiles.map(t => ({ x: t.x, y: t.y, terrain: t.terrain, biome: t.biome, elevation: t.elevation, wood: t.wood, stone: t.stone, moisture: Math.round(t.moisture * 1000) / 1000, food: Math.round(t.food * 1000) / 1000, vegetation: Math.round(t.vegetation * 1000) / 1000, feature: t.feature, variety: t.variety, growth: t.growth, fertility: t.fertility, cultivation: t.cultivation, traffic: t.traffic, drinkingWater: t.drinkingWater, species: t.species, fauna: t.fauna, life: t.life })),
     people: world.people.map(p => ({ id: p.id, name: p.name, role: p.role, x: p.x, y: p.y, color: p.color, action: p.action, reason: p.reason, energy: p.energy, hunger: p.hunger, fatigue: p.fatigue, thirst: p.thirst, need: p.need, recentMemory: p.recentMemory, traits: { ...p.traits }, skills: { ...p.skills }, materials: { ...p.materials }, specialty: specialty(p), controlMode: p.controlMode, blueprintId:p.blueprintId??null,
+      target: { x:p.target.x,y:p.target.y }, working: ['gather','farm','build','hunt','invent','repair','research','craft'].includes(p.action) && distance(p,p.target)<0.5,
+      workProgress: ['research','craft'].includes(p.action) ? (p.technology.project ? clamp(p.technology.project.progress/p.technology.project.requiredWork) : 0) : clamp(p.work / (p.action==='build'?constructionCost(world,p).work:p.action==='invent'?60:p.action==='repair'?30:['farm','hunt'].includes(p.action)?Math.ceil(45*(1-(p.skills[p.action]??0)*0.25)):Math.ceil(18*(1-(p.skills[p.action]??0)*0.25)))),
+      health:p.demography.health,vitality:p.demography.vitality,continuityProtected:p.role!=='neighbor',
       genome: { generation: p.genome.generation, parents: [...p.genome.parents], learningRate: p.genome.learningRate, cooperation: p.genome.cooperation, mutations: p.genome.mutations }, age: world.tick - p.bornAt, communityId: p.communityId, culture: { ...p.culture }, trust: Object.entries(p.bonds).map(([id, value]) => ({ id, value })), experiences: p.experiences.map(e => ({ tick: e.tick, text: e.text, causeId: e.causeId })) })),
     places: projected.places.map(p => ({ id: p.id, name: p.name, x: p.x, y: p.y, description: p.description, gatherings: p.gatherings })), events: world.events.map(e => ({ id: e.id, tick: e.tick, kind: e.kind, actors: [...e.actors], ...(e.x === undefined ? {} : { x: e.x }), ...(e.y === undefined ? {} : { y: e.y }), text: e.text, cause: e.cause, source: e.source })),
     memories: world.memories.map(m => ({ id: m.id, title: m.title, text: m.text, source: m.source, placeId: m.placeId })),
     animals: projected.animals, structures: projected.structures, blueprints: world.blueprints.map(b=>({id:b.id,name:b.name,components:[...b.components],generation:b.generation,parents:[...b.parents],inventorId:b.inventorId,tick:b.tick,uses:b.uses,usefulness:b.usefulness,cost:{wood:b.cost.wood,stone:b.cost.stone,work:b.cost.work}})),
     stats: worldStatistics(world), communities: world.communities.map(c => ({ id: c.id, name: c.name, x: c.x, y: c.y, color: c.color, members: [...c.members], culture: { ...c.culture }, formedAt: c.formedAt, cooperation: c.cooperation, disputes: c.disputes })),
+    technology: projectTechnology(world), organization: structuredClone(organization.value),
+    demography: {deaths:world.demographyDynamics.deaths,causes:{...world.demographyDynamics.causes},recent:world.legacy.slice(0,32).map(p=>({id:p.id,name:p.name,generation:p.generation,parents:[...p.parents],bornAt:p.bornAt,diedAt:p.diedAt,cause:p.cause}))},
   };
 }
 
@@ -656,14 +731,14 @@ function assertCommon(value: unknown, legacy = false, expectedVersion = RULES_VE
   const world = value as unknown as World;
   const coord = (n: unknown, max: number) => legacy ? integer(n, max) : validCoordinate(n);
   const land = (p: Point) => legacy ? world.tiles.some(t => t.x === p.x && t.y === p.y && t.terrain !== 'water') : walkable(world, p);
-  if (!list(world.tiles, legacy ? 1120 : 65536) || (legacy && world.tiles.length !== 1120) || !list(world.people, expectedVersion < 3 || legacy ? 16 : MAX_POPULATION) || world.people.length < 16 || !list(world.places, legacy ? 3 : 2048) || (legacy && world.places.length !== 3) || !list(world.events, MAX_EVENTS) || !list(world.memories, 10) || !list(world.invitations, 8) || !list(world.reminders, 8)) fail();
+  if (!list(world.tiles, legacy ? 1120 : 65536) || (legacy && world.tiles.length !== 1120) || !list(world.people, expectedVersion < 3 || legacy ? 16 : MAX_POPULATION) || world.people.length < (expectedVersion>=5&&!legacy?2:16) || !list(world.places, legacy ? 3 : 2048) || (legacy && world.places.length !== 3) || !list(world.events, MAX_EVENTS) || !list(world.memories, 10) || !list(world.invitations, 8) || !list(world.reminders, 8)) fail();
   for (let index = 0; index < world.tiles.length; index++) {
     const tile = world.tiles[index];
     if (!object(tile) || (legacy ? tile.x !== index % 40 || tile.y !== Math.floor(index / 40) : !validCoordinate(tile.x) || !validCoordinate(tile.y)) || !['water', 'soil', 'meadow', 'shelter'].includes(String(tile.terrain)) || !num(tile.moisture) || !num(tile.vegetation) || !num(tile.food)) fail();
   }
   const ids = new Set<string>();
   for (const person of world.people) {
-    if (!object(person) || !str(person.id, 50) || ids.has(person.id) || !str(person.name, 80) || !['S', 'I', 'neighbor'].includes(String(person.role)) || !coord(person.x, 39) || !coord(person.y, 27) || !land(person) || !object(person.target) || !coord(person.target.x, 39) || !coord(person.target.y, 27) || (legacy && !land(person.target)) || !str(person.color, 30) || !['explore', 'eat', 'rest', 'approach', 'accompany', 'retreat', 'share', 'gather', 'farm', 'build', 'hunt', 'drink', 'cooperate', ...(expectedVersion>=4?['invent','repair']:[])].includes(String(person.action)) || !str(person.reason) || !str(person.need, 100) || !(person.recentMemory === null || str(person.recentMemory)) || !integer(person.decisionAt) || !Number.isInteger(person.lastMeeting) || !Number.isInteger(person.lastShared) || !list(person.experiences, MAX_EXPERIENCES) || !list(person.habits, MAX_HABITS)) fail();
+    if (!object(person) || !str(person.id, 50) || ids.has(person.id) || !str(person.name, 80) || !['S', 'I', 'neighbor'].includes(String(person.role)) || !coord(person.x, 39) || !coord(person.y, 27) || !land(person) || !object(person.target) || !coord(person.target.x, 39) || !coord(person.target.y, 27) || (legacy && !land(person.target)) || !str(person.color, 30) || !['explore', 'eat', 'rest', 'approach', 'accompany', 'retreat', 'share', 'gather', 'farm', 'build', 'hunt', 'drink', 'cooperate', ...(expectedVersion>=4?['invent','repair']:[]), ...(expectedVersion>=5?['research','craft']:[])].includes(String(person.action)) || !str(person.reason) || !str(person.need, 100) || !(person.recentMemory === null || str(person.recentMemory)) || !integer(person.decisionAt) || !Number.isInteger(person.lastMeeting) || !Number.isInteger(person.lastShared) || !list(person.experiences, MAX_EXPERIENCES) || !list(person.habits, MAX_HABITS)) fail();
     ids.add(person.id);
     for (const key of ['energy', 'hunger', 'fatigue', 'curiosity', 'sociability', 'generosity', 'closeness', 'socialLoad'] as const) if (!num(person[key])) fail();
     if (!num(person.inventory, 0.25)) fail();
@@ -675,7 +750,7 @@ function assertCommon(value: unknown, legacy = false, expectedVersion = RULES_VE
   }
   if (world.people.filter(p => p.role === 'S').length !== 1 || world.people.filter(p => p.role === 'I').length !== 1) fail();
   for (const place of world.places) if (!object(place) || !str(place.id, 100) || !str(place.name, 200) || !coord(place.x, 39) || !coord(place.y, 27) || !str(place.description) || !integer(place.gatherings, 1_000_000)) fail();
-  for (const event of world.events) if (!object(event) || !str(event.id, 100) || !integer(event.tick, world.tick) || !['ecology', 'meeting', 'care', 'learning', 'memory', 'gesture', 'pause', 'discovery', 'settlement', 'cooperation', 'birth', 'community', 'conflict', 'adaptation', ...(expectedVersion>=4?['animal','invention']:[])].includes(String(event.kind)) || !list(event.actors, MAX_POPULATION) || !event.actors.every(a => str(a, 100)) || !str(event.text) || !str(event.cause) || !['simulation', 'sample', 'approved'].includes(String(event.source)) || (event.x !== undefined && !coord(event.x, 39)) || (event.y !== undefined && !coord(event.y, 27))) fail();
+  for (const event of world.events) if (!object(event) || !str(event.id, 100) || !integer(event.tick, world.tick) || !['ecology', 'meeting', 'care', 'learning', 'memory', 'gesture', 'pause', 'discovery', 'settlement', 'cooperation', 'birth', 'community', 'conflict', 'adaptation', ...(expectedVersion>=4?['animal','invention']:[]), ...(expectedVersion>=5?['death']:[])].includes(String(event.kind)) || !list(event.actors, MAX_POPULATION) || !event.actors.every(a => str(a, 100)) || !str(event.text) || !str(event.cause) || !['simulation', 'sample', 'approved'].includes(String(event.source)) || (event.x !== undefined && !coord(event.x, 39)) || (event.y !== undefined && !coord(event.y, 27))) fail();
   for (const memory of world.memories) if (!object(memory) || !str(memory.id, 100) || !str(memory.title, 200) || !str(memory.text) || !['sample', 'approved'].includes(String(memory.source)) || !world.places.some(p => p.id === memory.placeId) || !['partner-tired', 'shelter-tired', 'food-hungry', 'rain-shelter', 'irrelevant'].includes(String(memory.context)) || !['explore', 'eat', 'rest', 'approach', 'accompany', 'retreat', 'share', 'gather', 'farm', 'build', 'hunt', 'drink', 'cooperate'].includes(String(memory.action)) || !num(memory.weight) || !list(memory.roles, 2) || !memory.roles.every(role => role === 'S' || role === 'I')) fail();
   for (const invitation of world.invitations) if (!object(invitation) || !str(invitation.id, 100) || !coord(invitation.x, 39) || !coord(invitation.y, 27) || !integer(invitation.until)) fail();
   for (const reminder of world.reminders) if (!object(reminder) || !str(reminder.memoryId, 100) || !integer(reminder.until) || !world.memories.some(m => m.id === reminder.memoryId)) fail();
@@ -707,14 +782,14 @@ export function assertWorld(value: unknown, expectedVersion = RULES_VERSION): as
     if (expectedVersion >= 3) {
       assertGenome(p.genome);
       if (p.genome.parents.length) {
-        const parents = p.genome.parents.map(id => w.people.find(other => other.id === id));
-        if (parents.some(parent => !parent || parent.id === p.id || parent.bornAt >= p.bornAt || parent.genome.generation >= p.genome.generation) || p.genome.generation !== Math.max(...parents.map(parent => parent!.genome.generation)) + 1) fail();
+        const parents = p.genome.parents.map(id => w.people.find(other => other.id === id) ?? (expectedVersion>=5?w.legacy?.find(other=>other.id===id):undefined));
+        if (parents.some(parent => !parent || parent.id === p.id || parent.bornAt >= p.bornAt || ('diedAt' in parent && parent.diedAt < p.bornAt) || parent.genome.generation >= p.genome.generation) || p.genome.generation !== Math.max(...parents.map(parent => parent!.genome.generation)) + 1) fail();
       }
       if (typeof p.thirst !== 'number' || !Number.isFinite(p.thirst) || p.thirst < 0 || p.thirst > 1 || !Number.isSafeInteger(p.bornAt) || p.bornAt < -4800 || p.bornAt > w.tick || !Number.isSafeInteger(p.lastBirth) || p.lastBirth < -2400 || p.lastBirth > w.tick || !Number.isSafeInteger(p.lastSocial) || p.lastSocial < -30 || p.lastSocial > w.tick || !Number.isSafeInteger(p.lastDispute) || p.lastDispute < -180 || p.lastDispute > w.tick || !Number.isSafeInteger(p.lastPracticeMemory) || p.lastPracticeMemory < 0 || p.lastPracticeMemory > w.tick || !numericMap(p.culture, 0, 1, 3) || !['sharing','stewardship','openness'].every(key => typeof p.culture[key as keyof Culture] === 'number') || !numericMap(p.bonds, 0, 1, MAX_POPULATION) || Object.keys(p.bonds).some(id => !w.people.some(other => other.id === id)) || !(p.communityId === null || typeof p.communityId === 'string' && w.communities?.some(c => c.id === p.communityId))) fail();
     }
     if (!['ready','hungry','thirsty','tired'].includes(p.intentContext)) fail();
-    if (!p.traits || !['curiosity','sociability','industriousness','care','resilience'].every(k => typeof p.traits[k as keyof typeof p.traits] === 'number') || !numericMap(p.traits, 0, 1, 5) || !numericMap(p.skills, 0, 1, 15) || !numericMap(p.values, -0.3, 0.3, 60) || !numericMap(p.activity, 0, 1_000_000, 15) || !p.materials || !Number.isFinite(p.materials.wood) || p.materials.wood < 0 || p.materials.wood > 12 || !Number.isFinite(p.materials.stone) || p.materials.stone < 0 || p.materials.stone > 8 || !Array.isArray(p.visited) || p.visited.length > 192 || !p.visited.every(k => typeof k === 'string' && /^-?\d+,-?\d+$/.test(k)) || !Number.isFinite(p.heading) || !Number.isSafeInteger(p.work) || p.work < 0 || p.work > (expectedVersion>=4?600:90) || !Number.isSafeInteger(p.lastOutcome) || p.lastOutcome < 0 || p.lastOutcome > w.tick || !['auto','directed'].includes(p.controlMode)) fail();
-    if (p.command !== null && (!p.command || !['move','explore','gather','farm','build','rest','hunt','drink','cooperate',...(expectedVersion>=4?['invent','repair']:[])].includes(p.command.order) || !validCoordinate(p.command.x) || !validCoordinate(p.command.y))) fail();
+    if (!p.traits || !['curiosity','sociability','industriousness','care','resilience'].every(k => typeof p.traits[k as keyof typeof p.traits] === 'number') || !numericMap(p.traits, 0, 1, 5) || !numericMap(p.skills, 0, 1, expectedVersion>=5?18:15) || !numericMap(p.values, -0.3, 0.3, expectedVersion>=5?72:60) || !numericMap(p.activity, 0, 1_000_000, expectedVersion>=5?18:15) || !p.materials || !Number.isFinite(p.materials.wood) || p.materials.wood < 0 || p.materials.wood > 12 || !Number.isFinite(p.materials.stone) || p.materials.stone < 0 || p.materials.stone > 8 || !Array.isArray(p.visited) || p.visited.length > 192 || !p.visited.every(k => typeof k === 'string' && /^-?\d+,-?\d+$/.test(k)) || !Number.isFinite(p.heading) || !Number.isSafeInteger(p.work) || p.work < 0 || p.work > (expectedVersion>=4?600:90) || !Number.isSafeInteger(p.lastOutcome) || p.lastOutcome < 0 || p.lastOutcome > w.tick || !['auto','directed'].includes(p.controlMode)) fail();
+    if (p.command !== null && (!p.command || !['move','explore','gather','farm','build','rest','hunt','drink','cooperate',...(expectedVersion>=4?['invent','repair']:[]), ...(expectedVersion>=5?['research','craft']:[])].includes(p.command.order) || !validCoordinate(p.command.x) || !validCoordinate(p.command.y))) fail();
     if ((p.command === null) !== (p.controlMode === 'auto')) fail();
   }
   if (expectedVersion >= 3) {
@@ -725,23 +800,32 @@ export function assertWorld(value: unknown, expectedVersion = RULES_VERSION): as
       communityIds.add(c.id);
       if (!['sharing','stewardship','openness'].every(key => typeof c.culture[key as keyof Culture] === 'number') || w.people.some(p => p.communityId === c.id && !c.members.includes(p.id))) fail();
     }
-    for (const sample of w.history) if (!numericMap(sample, 0, 1e12, 10) || !['tick','population','energy','hunger','fatigue','thirst','discoveries','settlements','cooperation','births'].every(key => typeof sample[key as keyof WorldSample] === 'number') || !Number.isSafeInteger(sample.tick) || sample.tick > w.tick || !Number.isInteger(sample.population) || sample.population < 16 || sample.population > MAX_POPULATION || [sample.energy,sample.hunger,sample.fatigue,sample.thirst].some(n => n > 1)) fail();
+    for (const sample of w.history) if (!numericMap(sample, 0, 1e12, 10) || !['tick','population','energy','hunger','fatigue','thirst','discoveries','settlements','cooperation','births'].every(key => typeof sample[key as keyof WorldSample] === 'number') || !Number.isSafeInteger(sample.tick) || sample.tick > w.tick || !Number.isInteger(sample.population) || sample.population < (expectedVersion>=5?2:16) || sample.population > MAX_POPULATION || [sample.energy,sample.hunger,sample.fatigue,sample.thirst].some(n => n > 1)) fail();
   }
   if(expectedVersion>=4) assertLifeState(w);
+  if(expectedVersion>=5) {
+    assertPopulation(w); assertTechnology(w);
+    for(const person of [...w.people,...w.legacy,...w.retiredLegacy]) {
+      const serial=/^descendant-([1-9]\d*)$/.exec(person.id);
+      if(person.genome.generation>0&&(!serial||!Number.isSafeInteger(Number(serial[1]))||Number(serial[1])>w.birthCounter)) fail();
+    }
+    for (const recipe of w.technology.recipes) if(!w.people.some(p=>p.id===recipe.inventorId)&&!w.legacy.some(p=>p.id===recipe.inventorId&&p.diedAt>=recipe.tick)) fail();
+  }
 }
 
 /** V1/V2 conversion preserves existing fields and initializes only newly introduced mechanisms. */
 export function migrateWorld(value: unknown): World {
   const version = (value as { version?: unknown } | null)?.version;
   if (version === RULES_VERSION) { assertWorld(value); return value; }
+  if (version===4) { assertWorld(value,4); const world=structuredClone(value); upgradeV5(world); assertWorld(world); return world; }
   if(version===3) {
     assertWorld(value,3);
-    const world=structuredClone(value); upgradeV4(world); assertWorld(world); return world;
+    const world=structuredClone(value); upgradeV4(world); upgradeV5(world); assertWorld(world); return world;
   }
   if (version === 2) {
     assertWorld(value, 2);
     const world = structuredClone(value);
-    upgradeV3(world); upgradeV4(world); assertWorld(world); return world;
+    upgradeV3(world); upgradeV4(world); upgradeV5(world); assertWorld(world); return world;
   }
   assertCommon(value, true);
   const world = structuredClone(value);
@@ -763,7 +847,7 @@ export function migrateWorld(value: unknown): World {
     p.skills = {}; p.values = {}; p.activity = {}; p.materials = { wood: 0, stone: 0 }; p.visited = [];
     p.heading = index * 2.399963229728653; p.command = null; p.work = 0; p.lastOutcome = world.tick; p.intentContext = p.hunger > 0.5 ? 'hungry' : p.fatigue > 0.5 ? 'tired' : 'ready'; p.controlMode = 'auto';
   });
-  upgradeV3(world); upgradeV4(world); assertWorld(world); return world;
+  upgradeV3(world); upgradeV4(world); upgradeV5(world); assertWorld(world); return world;
 }
 function upgradeV3(world: World): void {
   world.version = 3; world.cooperationEnabled = true; world.reproductionEnabled = true;
@@ -773,11 +857,16 @@ function upgradeV3(world: World): void {
   for (const person of world.people) initializePerson(world, person);
 }
 function upgradeV4(world: World): void {
-  world.version=RULES_VERSION;
+  world.version=4;
   world.animals=materializeAnimals(world.seed,world.tiles,world.tick); world.animalCounter=0;
   world.animalDynamics={births:0,deaths:0,predations:0,humanHunts:0,waterConsumed:0,plantConsumed:0};
   world.blueprints=[defaultBlueprint()]; world.blueprintCounter=0; world.structureCounter=0;
   world.structures=legacyStructures(world.tiles,world.tick);
   world.inventionDynamics={attempts:0,accepted:0,repairs:0,waterCollected:0,foodStored:0,foodTaken:0};
   world.retiredChunks=world.retiredChunks.map(chunk=>({...chunk,lifeVersion:4,animals:materializeAnimals(world.seed,chunk.tiles,world.tick),structures:legacyStructures(chunk.tiles,world.tick)}));
+}
+function upgradeV5(world: World): void {
+  world.version=5; world.technology=defaultTechnologyState(); world.legacy=[]; world.retiredLegacy=[];
+  world.demographyDynamics={deaths:0,causes:{starvation:0,dehydration:0,exposure:0,senescence:0},foodLost:0,woodLost:0,stoneLost:0};
+  for (const person of world.people) { person.technology=initialTechnologyKnowledge(); person.demography=initialDemography(world.tick-person.bornAt); }
 }

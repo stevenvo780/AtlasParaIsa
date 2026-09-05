@@ -59,6 +59,9 @@ try {
     society: { communities: world.communities.map(c=>({id:c.id,members:c.members.length,formedAt:c.formedAt,cooperation:c.cooperation})), generations: worldStatistics(world).generations, totals: world.totals, finalWildlife: worldStatistics(world).wildlife, meanThirst: worldStatistics(world).meanThirst, homes:world.people.filter(p=>p.home).length, withNearbyPeers:world.people.filter(p=>world.people.some(q=>q!==p&&Math.hypot(p.x-q.x,p.y-q.y)<=7)).length },
     individualLife: { maximumRegionAnimals:maximumActiveAnimals, physiologyBudgetPerTick:MAX_ACTIVE_ANIMALS, maximumStoredAnimals:MAX_STORED_ANIMALS, dynamics:world.animalDynamics, regionAnimals:world.animals.length },
     inventions: { maximumActiveStructures, dynamics:world.inventionDynamics, activeStructures:world.structures.length, blueprints:world.blueprints.map(b=>({id:b.id,generation:b.generation,components:b.components,uses:b.uses,usefulness:b.usefulness})), builtInnovations:world.structures.filter(s=>s.blueprintId!=='blueprint-base').length },
+    technology: projectWorld(world).technology?.dynamics,
+    organization: projectWorld(world).organization,
+    demography: { ...world.demographyDynamics, cachedIdentities:world.legacy.length, archivedIdentities:(store.db.prepare('SELECT COUNT(*) AS count FROM legacy').get() as {count:number}).count, meanHealth:world.people.reduce((s,p)=>s+p.demography.health,0)/world.people.length, meanVitality:world.people.reduce((s,p)=>s+p.demography.vitality,0)/world.people.length },
     procedural: { discoveredChunks: world.discoveredChunks, settlements: world.settlementCount, maximumActiveChunks, maximumActiveTiles, archivedRegions: archive.regions, archivedVersions: archive.versions },
     phases:[...phases], persistedEvents:Object.fromEntries(events), restartEquality:true, backupEquality:true,
     failures:0, limits:'Accelerated run is not a multi-day wall-clock deployment or a physical-phone test.'

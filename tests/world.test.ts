@@ -180,14 +180,15 @@ test('autonomous population learns and repeats useful care across matched seeds;
   for (const seed of [20260905, 51926, 1]) {
     const natural = createWorld(seed), control = structuredClone(natural);
     control.learningEnabled = false;
-    run(natural, 1200); run(control, 1200);
+    const naturalEvents=new Map(), controlEvents=new Map();
+    for(let tick=0;tick<1200;tick++){stepWorld(natural);stepWorld(control);for(const event of natural.events)naturalEvents.set(event.id,event);for(const event of control.events)controlEvents.set(event.id,event);}
     assert.ok(natural.people.some(p => p.habits.some(h => h.repetitions > 0)), `seed ${seed} must contain learned repetition`);
     assert.ok(natural.people.filter(p => p.role !== 'neighbor').some(p => p.habits.some(h => h.observations >= 2)), `seed ${seed} society must affect the couple`);
-    assert.ok(natural.events.some(e => e.kind === 'learning'));
-    assert.ok(natural.events.some(e => e.kind === 'care' && /Imitación/.test(e.cause)));
-    assert.ok(control.events.some(e => e.kind === 'care'), 'control retains spontaneous sharing');
+    assert.ok([...naturalEvents.values()].some(e => e.kind === 'learning'));
+    assert.ok([...naturalEvents.values()].some(e => e.kind === 'care' && /Imitación/.test(e.cause)));
+    assert.ok([...controlEvents.values()].some(e => e.kind === 'care'), 'control retains spontaneous sharing');
     assert.ok(control.people.every(p => p.habits.length === 0));
-    assert.equal(control.events.some(e => e.kind === 'learning'), false);
+    assert.equal([...controlEvents.values()].some(e => e.kind === 'learning'), false);
     assert.equal(natural.weather, control.weather, 'ecological random draws remain paired');
     assert.equal(natural.rng, control.rng);
   }

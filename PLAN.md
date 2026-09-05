@@ -10,6 +10,8 @@ La revisión privada activa es **V5 `bf6431b`, con SQLite 4 y reglas/protocolo 5
 
 Fecha: 5 de septiembre de 2026. El inicio V5 de las 21:08 creó un mundo nuevo autorizado y conservó el V4 inválido; no fue una migración V4→V5 exitosa. La actualización posterior a SQLite 4 conserva ese mundo V5 sin reiniciarlo. Cierre personal de la carta, móvil físico y alojamiento definitivo pendientes.
 
+El código posterior incorpora un núcleo corporal compartido por acciones humanas y animales, transiciones del suelo basadas en estados locales y una base de catálogo con caché finita. Estas unidades están guardadas y tienen pruebas focales; **todavía no sustituyen la revisión privada**. La integración durable del catálogo ampliado sigue pendiente y los topes actuales permanecen. [EVIDENCIA](docs/EVIDENCIA.md#núcleo-corporal-compartido-en-el-código) identifica commits, controles y límites sin confundirlos con capacidades activas.
+
 V5 conserva vecinos de octava generación en ambas réplicas extendidas, sin rescates y después de morir los fundadores mortales. Persisten el catálogo tecnológico finito y el mantenimiento material sin acreditar; una réplica conserva quince muertes por deshidratación. Reemplazo observado, suite aprobada y capacidad activa son evidencias distintas.
 
 El repositorio ya contiene una aplicación local ejecutable. El [README](README.md) reúne los comandos reales de arranque, acceso y recuperación. La experiencia siguiente conserva su alcance de diseño; la implementación actual usa S e I, vecinos ficticios y cinco recuerdos sintéticos identificados, sin importar conversaciones ni atribuirles biografía.

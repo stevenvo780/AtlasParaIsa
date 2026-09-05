@@ -2,8 +2,8 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { readFileSync, statSync } from 'node:fs';
 import { resolve, extname, sep } from 'node:path';
 import { WebSocketServer, WebSocket } from 'ws';
-import { createWorld, stepWorld, projectWorld } from '../world/index.js';
-import type { Gesture, GestureResult, ServerMessage } from '../shared/types.js';
+import { createWorld, stepWorld, projectWorld, normalizeViewport } from '../world/index.js';
+import type { Gesture, GestureResult, ServerMessage, Viewport, WorldView } from '../shared/types.js';
 import { Store, fingerprint, GestureConflict, SessionRevoked } from './store.js';
 import { cookie, hashToken, makeToken, passwordVerifier, sessionHash } from './auth.js';
 
@@ -16,11 +16,12 @@ type Pending = { gesture: Gesture; hash: string; resolve: (r: GestureResult) => 
 export function parseGesture(value: unknown): Gesture {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new HttpError(400, 'Gesto no válido.');
   const g = value as Record<string, unknown>;
-  if (typeof g.id !== 'string' || !/^[A-Za-z0-9_-]{8,80}$/.test(g.id) || typeof g.kind !== 'string' || !['plant', 'invite', 'remember'].includes(g.kind) ||
-    !Number.isInteger(g.x) || !Number.isInteger(g.y) || (g.x as number) < 0 || (g.y as number) < 0 || (g.x as number) > 255 || (g.y as number) > 255 ||
+  if (typeof g.id !== 'string' || !/^[A-Za-z0-9_-]{8,80}$/.test(g.id) || typeof g.kind !== 'string' || !['plant', 'invite', 'remember', 'command'].includes(g.kind) ||
+    !Number.isInteger(g.x) || !Number.isInteger(g.y) || (g.x as number) < -10_000_000 || (g.y as number) < -10_000_000 || (g.x as number) >= 10_000_000 || (g.y as number) >= 10_000_000 ||
     (g.memoryId !== undefined && (typeof g.memoryId !== 'string' || g.memoryId.length > 80)) ||
-    Object.keys(g).some(k => !['id', 'kind', 'x', 'y', 'memoryId'].includes(k))) throw new HttpError(400, 'La forma o el destino del gesto no es válido.');
-  return { id: g.id, kind: g.kind as Gesture['kind'], x: g.x as number, y: g.y as number, ...(g.memoryId === undefined ? {} : { memoryId: g.memoryId as string }) };
+    (g.kind === 'command' && (typeof g.agentId !== 'string' || g.agentId.length > 50 || typeof g.order !== 'string' || !['move','explore','gather','farm','build','rest','auto'].includes(g.order))) || (g.kind !== 'command' && (g.agentId !== undefined || g.order !== undefined)) ||
+    Object.keys(g).some(k => !['id', 'kind', 'x', 'y', 'memoryId', 'agentId', 'order'].includes(k))) throw new HttpError(400, 'La forma o el destino del gesto no es válido.');
+  return { id: g.id, kind: g.kind as Gesture['kind'], x: g.x as number, y: g.y as number, ...(g.memoryId === undefined ? {} : { memoryId: g.memoryId as string }), ...(g.kind === 'command' ? { agentId: g.agentId as string, order: g.order as Gesture['order'] } : {}) };
 }
 async function body(req: IncomingMessage) {
   if (!req.headers['content-type']?.startsWith('application/json')) throw new HttpError(415, 'Se requiere JSON.');
@@ -53,12 +54,13 @@ export function createApp(options: AppOptions) {
   let stopped = false;
   let failed = false;
   const pending = new Map<string, Pending>();
-  const clients = new Map<WebSocket, { hash: string; alive: boolean; messages: number; window: number }>();
+  const clients = new Map<WebSocket, { hash: string; alive: boolean; messages: number; window: number; viewport?: Viewport; lastView?: WorldView }>();
   const loginAttempts = new Map<string, { count: number; reset: number }>();
   const gestureAttempts = new Map<string, { count: number; reset: number }>();
   const ws = new WebSocketServer({ noServer: true, maxPayload: 4096, perMessageDeflate: false });
   const staticDir = resolve(options.staticDir ?? 'dist/client');
-  const view = () => ({ ...projectWorld(world), ...(failed ? { paused: true, pauseReason: 'No se pudo guardar. El mundo está en pausa para proteger lo ya vivido.' } : {}) });
+  const context = { loadChunk: (key: string, atTick: number) => store.loadChunk(key, atTick) };
+  const view = (viewport?: Viewport) => ({ ...projectWorld(world, viewport, context), ...(failed ? { paused: true, pauseReason: 'No se pudo guardar. El mundo está en pausa para proteger lo ya vivido.' } : {}) });
   function authorized(req: IncomingMessage) {
     const hash = sessionHash(req);
     if (!hash || !store.sessionValid(hash)) throw new HttpError(401, 'Entra con la contraseña de la carta.');
@@ -77,15 +79,25 @@ export function createApp(options: AppOptions) {
   }
   function send(socket: WebSocket, message: ServerMessage) {
     if (socket.readyState !== WebSocket.OPEN) return;
-    if (socket.bufferedAmount > 512 * 1024) { socket.terminate(); return; }
-    if (socket.bufferedAmount > 128 * 1024 && message.type === 'state') return;
+    if (socket.bufferedAmount > 2 * 1024 * 1024) { socket.terminate(); return; }
+    if (socket.bufferedAmount > 256 * 1024 && message.type === 'state') return;
     socket.send(JSON.stringify(message));
   }
   function broadcast() {
-    const message: ServerMessage = { type: 'state', world: view() };
     for (const [socket, client] of clients) {
       if (!store.sessionValid(client.hash)) { socket.close(4001, 'La sesión terminó.'); continue; }
-      send(socket, message);
+      sendView(socket);
+    }
+  }
+  function sendView(socket: WebSocket) {
+    const client = clients.get(socket); if (!client) return;
+    try {
+      const projected = view(client.viewport);
+      client.lastView = projected;
+      send(socket, { type: 'state', world: projected });
+    } catch {
+      // A camera read is not a simulation transaction. Never retry the failing archive in a fallback.
+      send(socket, { type: 'error', message: 'No se pudo leer esa región guardada. Elige otra zona; su estado se conserva para recuperación.' });
     }
   }
   function requestGesture(gesture: Gesture, hash: string): Promise<GestureResult> {
@@ -100,7 +112,7 @@ export function createApp(options: AppOptions) {
       if (fingerprint(existing.gesture) !== fingerprint(gesture)) throw new HttpError(409, 'Ese identificador ya se usó para otro gesto.');
       return existing.promise;
     }
-    rate(gestureAttempts, hash, 12, 10_000);
+    rate(gestureAttempts, hash, 64, 10_000);
     if (pending.size >= 32) throw new HttpError(429, 'Hay varios gestos en camino. Espera un momento.');
     let resolve!: Pending['resolve'], reject!: Pending['reject'];
     const promise = new Promise<GestureResult>((yes, no) => { resolve = yes; reject = no; });
@@ -118,7 +130,7 @@ export function createApp(options: AppOptions) {
         else { item.reject(new HttpError(401, 'La sesión terminó antes de aplicar el gesto.')); pending.delete(item.gesture.id); }
       }
       const draft = structuredClone(world);
-      const results = stepWorld(draft, valid.map(item => item.gesture));
+      const results = stepWorld(draft, valid.map(item => item.gesture), context);
       if (results.length !== valid.length) throw new Error('Gesture result count mismatch');
       store.save(draft, valid.map((item, i) => ({ gesture: item.gesture, result: results[i] })), valid.map(item => item.hash));
       world = draft;
@@ -137,7 +149,8 @@ export function createApp(options: AppOptions) {
       // Do not log snapshots, inputs, or personal content on failure.
       for (const socket of clients.keys()) {
         send(socket, { type: 'error', message: 'No se pudo guardar. El mundo está en pausa.' });
-        send(socket, { type: 'state', world: view() });
+        const previous = clients.get(socket)?.lastView;
+        if (previous) send(socket, { type: 'state', world: { ...previous, paused: true, pauseReason: 'No se pudo confirmar el siguiente paso. Se muestra el último estado recibido.' } });
       }
     }
   }
@@ -173,7 +186,14 @@ export function createApp(options: AppOptions) {
           for (const [socket, client] of clients) if (client.hash === hash) socket.close(4001, 'La sesión terminó.');
           return json(res, 200, { ok: true });
         }
-        if (req.method === 'GET' && url.pathname === '/api/world') return json(res, 200, view());
+        if (req.method === 'GET' && url.pathname === '/api/world') {
+          let viewport: Viewport | undefined;
+          if (url.search) {
+            try { viewport = normalizeViewport({ x: Number(url.searchParams.get('x')), y: Number(url.searchParams.get('y')), width: Number(url.searchParams.get('width')), height: Number(url.searchParams.get('height')) }); }
+            catch { throw new HttpError(400, 'Ventana de cámara no válida.'); }
+          }
+          return json(res, 200, view(viewport));
+        }
         if (req.method === 'POST' && url.pathname === '/api/gesture') {
           const gesture = parseGesture(await body(req));
           return json(res, 200, await requestGesture(gesture, hash));
@@ -211,15 +231,19 @@ export function createApp(options: AppOptions) {
             const info = clients.get(client)!;
             if (!store.sessionValid(hash)) { client.close(4001, 'La sesión terminó.'); return; }
             if (Date.now() - info.window >= 10_000) { info.window = Date.now(); info.messages = 0; }
-            if (++info.messages > 24) { client.close(4008, 'Demasiados mensajes.'); return; }
+            if (++info.messages > 120) { client.close(4008, 'Demasiados mensajes.'); return; }
             if (binary) throw new HttpError(400, 'Se requiere JSON.');
-            const parsed = JSON.parse(data.toString()) as { type?: unknown; gesture?: unknown };
+            const parsed = JSON.parse(data.toString()) as { type?: unknown; gesture?: unknown; viewport?: Viewport };
+            if (parsed?.type === 'viewport') {
+              try { info.viewport = normalizeViewport(parsed.viewport); } catch { throw new HttpError(400, 'Ventana de cámara no válida.'); }
+              sendView(client); return;
+            }
             if (!parsed || parsed.type !== 'gesture') throw new HttpError(400, 'Mensaje desconocido.');
             const result = await requestGesture(parseGesture(parsed.gesture), hash);
             if (store.sessionValid(hash)) send(client, { type: 'result', result });
           } catch (error) { send(client, { type: 'error', message: error instanceof HttpError ? error.message : 'No se pudo aplicar el gesto.' }); }
         });
-        send(client, { type: 'state', world: view() });
+        sendView(client);
       });
     } catch (error) { socket.end(`HTTP/1.1 ${error instanceof HttpError ? error.status : 503} Rejected\r\nConnection: close\r\n\r\n`); }
   });

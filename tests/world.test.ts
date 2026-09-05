@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { assertWorld, createWorld, MAX_EVENTS, MAX_EXPERIENCES, projectWorld, stepWorld, TICKS_PER_DAY, type World } from '../src/world/index.js';
+import { assertWorld, createWorld, tileAt, MAX_EVENTS, MAX_EXPERIENCES, projectWorld, stepWorld, TICKS_PER_DAY, type World } from '../src/world/index.js';
 
 function run(world: World, ticks: number): void { for (let n = 0; n < ticks; n++) stepWorld(world); }
 
@@ -14,7 +14,9 @@ function scene(): World {
     p.target = { x: p.x, y: p.y };
     p.hunger = 0.1; p.energy = 1; p.fatigue = 0.05; p.closeness = 0;
     p.socialLoad = 0; p.inventory = 0.2; p.decisionAt = 0;
-    p.curiosity = 0.5; p.sociability = 0.5; p.generosity = 0;
+    p.curiosity = 0.5; p.sociability = 0.5; p.generosity = 0; p.traits.industriousness = 0;
+    p.values = {}; p.materials = { wood: 0, stone: 0 };
+    p.command = null; p.controlMode = 'auto';
   });
   return world;
 }
@@ -34,32 +36,32 @@ test('same seed, inputs, order and persisted PRNG reproduce the full state', () 
 
 test('water and light cause growth; a dry or dark matched cell cannot produce that growth', () => {
   const wet = scene(); wet.tick = 300;
-  const tile = wet.tiles[14 * wet.width + 20]!;
+  const tile = tileAt(wet, { x: 20, y: 14 })!;
   tile.moisture = 0.8; tile.food = 0.2; tile.vegetation = 0.4;
   const dry = structuredClone(wet), dark = structuredClone(wet);
-  dry.tiles[14 * wet.width + 20]!.moisture = 0;
+  tileAt(dry, { x: 20, y: 14 })!.moisture = 0;
   dark.tick = 1800;
   run(wet, 10); run(dry, 10); run(dark, 10);
-  assert.ok(tile.food > dry.tiles[14 * wet.width + 20]!.food);
-  assert.ok(tile.food > dark.tiles[14 * wet.width + 20]!.food);
-  assert.ok(tile.vegetation > dry.tiles[14 * wet.width + 20]!.vegetation);
+  assert.ok(tile.food > tileAt(dry, { x: 20, y: 14 })!.food);
+  assert.ok(tile.food > tileAt(dark, { x: 20, y: 14 })!.food);
+  assert.ok(tile.vegetation > tileAt(dry, { x: 20, y: 14 })!.vegetation);
 });
 
 test('local food removal changes a hungry person route, and eating consumes the local stock', () => {
   const fed = scene();
   for (const tile of fed.tiles) tile.food = 0;
   const s = fed.people[0]!; s.hunger = 0.8; s.inventory = 0;
-  fed.tiles[s.y * fed.width + s.x]!.food = 0.5;
+  tileAt(fed, s)!.food = 0.5;
   const empty = structuredClone(fed);
-  empty.tiles[s.y * fed.width + s.x]!.food = 0;
+  tileAt(empty, s)!.food = 0;
   stepWorld(fed); stepWorld(empty);
   assert.equal(s.action, 'eat');
   assert.notEqual(empty.people[0]!.action, 'eat');
   assert.ok(s.hunger < empty.people[0]!.hunger);
-  assert.ok(fed.tiles[s.y * fed.width + s.x]!.food < 0.5);
+  assert.ok(tileAt(fed, s)!.food < 0.5);
   const rerouted = structuredClone(empty);
   rerouted.people[0]!.decisionAt = 0;
-  rerouted.tiles[s.y * rerouted.width + s.x + 2]!.food = 0.5;
+  tileAt(rerouted, { x: s.x + 2, y: s.y })!.food = 0.5;
   stepWorld(rerouted);
   assert.equal(rerouted.people[0]!.target.x, s.x + 2);
 });
@@ -199,7 +201,8 @@ test('two actual observations retain provenance after their chronicle events are
   assert.ok(evidence.every(e => e.food === 0.025 && e.recipient === world.people[4]!.id));
   for (let index = 0; index < MAX_EVENTS + 1; index++) {
     run(world, 30);
-    assert.equal(stepWorld(world, [{ id: `prune-${index}`, kind: 'invite', x: 17, y: 13 }])[0]!.accepted, true);
+    const actor = world.people[2]!;
+    assert.equal(stepWorld(world, [{ id: `prune-${index}`, kind: 'invite', x: actor.x, y: actor.y }])[0]!.accepted, true);
   }
   assert.equal(world.events.some(e => e.id === evidence[0]!.eventId), false);
   assert.deepEqual(habit.evidence, evidence);
@@ -220,13 +223,13 @@ test('hungry bodies cannot recover activity energy without food by resting indef
 
 test('gestures validate land, context and cooldown; invitations never teleport and hunger can ignore them', () => {
   const world = scene();
-  const water = world.tiles.find(t => t.terrain === 'water')!;
-  const invalid = stepWorld(world, [{ id: 'outside', kind: 'plant', x: -1, y: 3 }, { id: 'water', kind: 'plant', x: water.x, y: water.y }]);
+  const water = tileAt(world, { x: 16, y: 12 })!; water.terrain = 'water';
+  const invalid = stepWorld(world, [{ id: 'outside', kind: 'plant', x: -10_000_001, y: 3 }, { id: 'water', kind: 'plant', x: water.x, y: water.y }]);
   assert.deepEqual(invalid.map(r => r.accepted), [false, false]);
-  const before = world.tiles[13 * 40 + 17]!.vegetation;
+  const before = tileAt(world, { x: 17, y: 13 })!.vegetation;
   const planted = stepWorld(world, [{ id: 'plant', kind: 'plant', x: 17, y: 13 }, { id: 'fast', kind: 'invite', x: 17, y: 13 }]);
   assert.equal(planted[0]!.accepted, true); assert.equal(planted[1]!.accepted, false);
-  assert.equal(world.tiles[13 * 40 + 17]!.vegetation, Math.min(1, before + 0.12));
+  assert.equal(tileAt(world, { x: 17, y: 13 })!.vegetation, Math.min(1, before + 0.12));
   run(world, 30);
   const s = world.people[0]!; s.hunger = 0.9; s.decisionAt = 0;
   const position = { x: s.x, y: s.y };
@@ -243,7 +246,7 @@ test('six day/night cycles retain bounded bodies, terrain, history and valid lan
   assertWorld(world);
   assert.ok(world.events.length <= MAX_EVENTS);
   assert.ok(world.people.every(p => p.experiences.length <= MAX_EXPERIENCES && p.habits.length <= 3));
-  assert.ok(world.people.every(p => world.tiles[p.y * world.width + p.x]!.terrain !== 'water'));
+  assert.ok(world.people.every(p => tileAt(world, p)!.terrain !== 'water'));
   const view = projectWorld(world);
   assert.equal(view.sequence, world.tick);
   assert.equal('rng' in view, false);

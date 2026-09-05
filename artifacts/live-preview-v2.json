@@ -1,0 +1,19 @@
+{
+  "generatedAt": "2026-09-05T17:15:00.261Z",
+  "origin": "https://172.26.0.4:3443",
+  "version": 2,
+  "tick": 36132,
+  "population": 16,
+  "infinite": true,
+  "viewport": {
+    "x": 0,
+    "y": 0,
+    "width": 1440,
+    "height": 900
+  },
+  "farTerrainCells": 1536,
+  "secureHttpOnlyCookie": true,
+  "websocket": true,
+  "pageErrors": 0,
+  "source": "Actual migrated private preview; Chromium from container; physical tower routing not verified"
+}

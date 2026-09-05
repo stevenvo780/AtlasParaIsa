@@ -1,6 +1,6 @@
 # Una Carta Para Isa — plan unificado
 
-Fecha: 5 de septiembre de 2026. Estado: prototipo reversible implementado; cierre personal de la carta, prueba en móvil físico y alojamiento pendientes.
+Fecha: 5 de septiembre de 2026. Estado: ampliación procedural implementada y comprobada en revisión privada; cierre personal de la carta, prueba en móvil físico y alojamiento definitivo pendientes.
 
 El repositorio ya contiene una aplicación local ejecutable. El [README](README.md) reúne los comandos reales de arranque, acceso y recuperación. La experiencia siguiente conserva su alcance de diseño; la implementación actual usa S e I, vecinos ficticios y cinco recuerdos sintéticos identificados, sin importar conversaciones ni atribuirles biografía.
 
@@ -24,17 +24,17 @@ Este texto propone el sentido de la obra; la redacción personal final pertenece
 | Ciencia y filosofía | Reglas explícitas, causas comprobables, necesidades que compiten y memoria que transforma conductas. Las preguntas sobre autonomía, identidad y cuidado aparecen en lo que sucede. |
 | Carta para Isa | S e I son reconocibles; hay recuerdos autorizados y lugares propios; la voz es íntima. Volver tiene significado y ausentarse no genera una obligación de cuidado. |
 
-La escala inicial será pequeña para poder construir estos tres compromisos completos. La ambición de mundo queda abierta: la población inicial y el mapa finito son decisiones del primer alcance, no una definición permanente de la obra.
+El alcance ampliado permite recorrer territorio procedural más allá del mapa original, con juego a pantalla completa, control de cualquier habitante, habilidades adquiridas y construcción de lugares compartidos. La extensión se genera según necesidad; la población inicial y la simulación activa tienen límites explícitos.
 
 ## La primera entrega
 
 Una URL privada, cómoda en móvil y escritorio, que permita:
 
 1. Leer una apertura breve escrita para Isa y entrar al mundo.
-2. Recorrer una región con agua, suelo, vegetación, alimento y refugios. Sus ciclos afectan a los habitantes y reciben las consecuencias de sus acciones.
+2. Recorrer territorio procedural con biomas, agua, suelo, vegetación, alimento, madera, piedra y refugios. Sus ciclos afectan a los habitantes y reciben las consecuencias de sus acciones.
 3. Reconocer a S e I y una vecindad pequeña. Como punto de partida de diseño: entre 12 y 24 vecinos, ajustable según legibilidad y rendimiento.
-4. Observar necesidades, decisiones diferentes, acercamientos, espacio propio y cuidado; las acciones dejan memoria y cambian lo que sucede después.
-5. Probar unos pocos gestos sobre el entorno y ofrecer invitaciones que los habitantes pueden atender o ignorar.
+4. Observar cómo necesidades, predisposiciones, habilidades y resultados anteriores cambian decisiones y actividades. Los oficios describen una trayectoria de práctica; las etiquetas no asignan tareas.
+5. Ofrecer gestos e invitaciones, o dirigir temporalmente a cualquier habitante para desplazarse, explorar, recolectar, cultivar, construir o descansar; devolverle después la elección autónoma.
 6. Descubrir una selección pequeña de recuerdos reales aprobados que influya en comportamientos, lugares y voz.
 7. Consultar una crónica breve y encontrar continuidad al regresar. El mundo avanza en el servidor aunque el navegador esté cerrado.
 
@@ -50,8 +50,10 @@ La primera entrega incluye al menos una costumbre compartida que se forme por re
 | Historia real como semilla | Empezar con recuerdos seleccionados y revisados. La ingestión de todo el archivo de conversaciones deja de ser un requisito inicial. |
 | Autopoiesis y cognición encarnada | Mantener como inspiración para autorregulación y aprendizaje. No convertirlas en una promesa de vida o conciencia demostrada. |
 | Muerte, pérdida y otras relaciones reales | Conservar la pregunta del autor. El prototipo trabaja con consecuencias reversibles; la forma definitiva requiere su decisión personal. |
-| Discovery, sueños y generaciones | Fuera de la primera entrega. Solo reconsiderarlos si aportan algo que la experiencia ya construida necesita. |
-| Mundo infinito, miles de agentes, guerras, gobiernos y mercados complejos | Fuera del alcance inicial. No se hereda una hoja de ruta obligatoria para implementarlos todos. |
+| Descubrimiento de lugares | Incorporado mediante exploración física y crónica. |
+| Sueños, reproducción y generaciones | Fuera del alcance actual; los rasgos iniciales no constituyen evolución genética. |
+| Territorio procedural, asentamientos y control individual | Incorporados al alcance ampliado solicitado. Sin borde del mapa inicial; regiones activas y rango numérico acotados. |
+| Miles de agentes, guerras, gobiernos y mercados complejos | Fuera del alcance actual. |
 | GPU, entrenamiento de modelos, embeddings obligatorios, múltiples servicios y protocolos binarios | Retirar del plan inicial. Una medición o una necesidad concreta podrá justificar cambios técnicos después. |
 | Medidores de conciencia, lenguaje cuántico ornamental y aleatoriedad presentada como agencia | Retirar. Sustituirlos por pruebas de causalidad y explicaciones honestas del modelo. |
 | Prohibiciones absolutas de jugar, inspeccionar el mundo o mostrar ciencia | Retirar. La intimidad es compatible con la curiosidad y con controles claros. |
@@ -69,9 +71,11 @@ El orden organiza pruebas de extremo a extremo. La persistencia básica se prepa
 
 ### Situación del prototipo
 
+La ampliación añade pantalla de juego completa, cámara libre, biomas procedurales, archivo de regiones, órdenes individuales, habilidades y refugios construidos con recursos y trabajo. Su evidencia se registra en [EVIDENCIA.md](docs/EVIDENCIA.md).
+
 | Etapa | Implementado | Cierre pendiente |
 |---|---|---|
-| 1. Mundo y vínculo | Región 40 × 28, ecología, dieciséis cuerpos, decisiones locales, vínculo contextual, cámara y gestos. | Comprensión y manejo en el móvil físico destinatario. |
+| 1. Mundo y vínculo | Base anterior de 40 × 28; ampliada con regiones de 16 × 16, ecología, dieciséis cuerpos, decisiones locales, vínculo contextual, cámara y gestos. | Comprensión y manejo en el móvil físico destinatario. |
 | 2. Historia propia | Cinco recuerdos sintéticos con efecto contextual, lugares y costumbre transmitida por observación y repetición. Los controles del motor contrastan memoria irrelevante y aprendizaje desactivado. | Selección real de recuerdos, nombres y rasgos revisada por Steven. |
 | 3. Continuidad | Servicio persistente, sesión revocable, SQLite transaccional, reconexión, copia y recuperación explícita. | Alojamiento privado autorizado con proceso, HTTPS y disco persistentes; la operación local no acredita un despliegue. |
 | 4. La carta terminada | Interfaz y carta de prueba ejecutables para revisión. | Voz final del autor, revisión íntima, arte y ritmo finales, y recorrido en un teléfono real. |
@@ -100,7 +104,7 @@ La profundidad vendrá de combinar las reglas y acumular historia. No se añade 
 - [Experiencia, reglas del mundo y carta](docs/EXPERIENCIA.md).
 - [Construcción, persistencia y comprobaciones](docs/CONSTRUCCION.md).
 
-Estos tres archivos sustituyen la documentación anterior como plan de trabajo. El código actual, el README y las comprobaciones de esta implementación describen las capacidades presentes; las afirmaciones históricas de pruebas o despliegue no se trasladan a este prototipo.
+El plan y sus documentos de experiencia, construcción, [reglas](docs/REGLAS.md) y [ciencia](docs/CIENCIA.md) sustituyen la documentación anterior como plan de trabajo. El código actual, el README y las comprobaciones de esta implementación describen las capacidades presentes; las afirmaciones históricas de pruebas o despliegue no se trasladan a este prototipo.
 
 Se revisaron los 44 archivos originales de ideas, conceptos, arquitectura, narrativa, voz, legado, operación, validación y plantillas. Antes de retirarlos se comprobó que coincidían con Git. La versión íntegra de esos documentos permanece en el commit `fe6a3a8c65820bb75be290e7c68faac1625e8d44`; no se conserva otra carpeta de archivo que vuelva a competir con el plan.
 

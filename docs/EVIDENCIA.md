@@ -1,55 +1,76 @@
-# Evidencia de la implementación
+# Evidencia de la ampliación procedural
 
-Fecha: 5 de septiembre de 2026. Prototipo local con datos sintéticos. No se ha publicado una URL ni configurado alojamiento. La apertura personal y los recuerdos reales siguen pendientes del autor.
-
-Actualización operativa, 16:15 UTC: revisión privada arrancada dentro de `ws-steven` en **https://172.26.0.4:3443**, solicitada por Steven. Se verificaron HTTPS, login, cookie segura/HttpOnly y WebSocket en Chromium desde el contenedor. [Resultado del servicio vivo](../artifacts/live-preview.json) y [captura](../artifacts/live-preview.png). La ruta desde el navegador físico de la torre queda pendiente de su comprobación. El certificado es local autofirmado; los procesos viven en sesiones tmux propias y el mundo en `~/.local/state/atlas-para-isa-preview/world`. El [README](../README.md#revisar-desde-la-torre-que-aloja-docker) documenta arranque y cierre. No hay publicación en Internet ni alojamiento externo contratado.
+Fecha: 5 de septiembre de 2026. Revisión privada V2 con datos sintéticos. La voz final del autor, recuerdos reales y prueba en teléfono físico siguen pendientes.
 
 ## Resultado observable
 
-La aplicación integra una región de 40 × 28 celdas, S e I, catorce vecinos, recursos finitos, cinco recuerdos identificados como ejemplos y una costumbre de compartir aprendida por observación. La cámara, las fichas, la crónica y los tres gestos funcionan en navegador. El servidor mantiene el mundo sin pestañas abiertas, guarda antes de confirmar un gesto y recupera el último paso confirmado al reiniciar.
+El paisaje ocupa la pantalla completa y la cámara puede recorrer coordenadas positivas, negativas y lejanas. El terreno se genera por regiones de 16 × 16, con seis biomas, agua, vegetación, alimento, madera y piedra. Los dieciséis habitantes exploran, descubren regiones y construyen refugios mediante recursos y trabajo.
 
-Capturas de la aplicación ejecutándose con el servidor real: [escritorio](../artifacts/desktop.png) y [móvil emulado](../artifacts/mobile.png). El cliente no contiene credenciales, conversaciones originales ni una segunda simulación.
+Se puede seleccionar cualquier habitante, seguirlo y pedirle desplazarse, explorar, recolectar, cultivar, construir o descansar. Las órdenes respetan desplazamiento físico, necesidades y costes; «Autonomía» devuelve la elección de tareas. Las habilidades y especialidades describen práctica adquirida; los valores por contexto cambian con resultados favorables o desfavorables.
+
+Capturas del servidor real de prueba: [escritorio a pantalla completa](../artifacts/desktop-fullscreen.png), [móvil emulado](../artifacts/mobile-fullscreen.png), [inspector móvil](../artifacts/mobile-inspector.png) y [terreno lejano](../artifacts/distant-terrain.png).
 
 ## Comprobaciones ejecutadas
 
-| Gate | Resultado | Evidencia |
+| Comprobación | Resultado | Evidencia |
 |---|---|---|
-| `npm run check` | Tipos, 43 pruebas Node y compilación aprobados; cero fallos y cero skips. | [Salida literal](../artifacts/check.txt). |
-| `npm run test:e2e` | 4/4 pruebas Chromium: escritorio, móvil táctil emulado, desconexión/reconexión/revocación y fallo de guardado con secuencia sin cambios. | [Salida literal](../artifacts/e2e.txt). |
-| `npm run test:smoke` | Arranque del servidor compilado, configuración scrypt, lectura privada, avance sin navegador, reinicio tras `SIGKILL`, sesión persistida, revocación y salida ordenada. | [Resultado](../artifacts/smoke.json). |
-| `npm run test:soak` | 12 000 pasos, cinco ciclos completos, guardado SQLite en cada paso, reapertura y copia exactamente iguales. | [Medición](../artifacts/soak.json). |
+| Tipos y pruebas Node | 77/77, cero fallos y cero skips | [Salida Node](../artifacts/tests-v2.txt) |
+| Compilación Vite y servidor | Aprobada | [Salida](../artifacts/build-v2.txt) |
+| Navegador Chromium | 5/5: pantalla completa, control individual, cámara lejana, móvil, conexión, revocación y pausa | [Salida](../artifacts/e2e-v2.txt) |
+| Servidor compilado | Arranque, autenticación, avance, SIGKILL, recuperación y revocación | [Resultado](../artifacts/smoke.json) |
+| Ejecución prolongada | 7200 pasos y guardado por paso; reinicio y copia idénticos, cero fallos | [Medición V2](../artifacts/soak-v2.json) |
 
-Entorno observado: Node.js 22.22.3, SQLite integrado, TypeScript 7.0.2, Vite 8.2.2, Playwright 1.63.0 y Chromium 153.0.8010.12. La prueba móvil usa un viewport de 390 × 844 con tacto y movimiento reducido; escritorio usa 1440 × 1100. Se comprobó ausencia de desbordamiento horizontal y errores JavaScript en los recorridos visuales.
+Entorno: Node.js 22.22.3, TypeScript 7.0.2, Vite 8.2.2, Playwright 1.63.0 y Chromium 153. Escritorio 1440 × 900; móvil emulado 390 × 844 con tacto y movimiento reducido. No se observaron errores JavaScript ni desbordamiento horizontal en los recorridos.
 
-La ejecución prolongada fue **acelerada**: veinte minutos del modelo en 25,52 segundos de pared. El percentil 95 de paso más commit fue 3,29 ms; el máximo, 57,28 ms; RSS máximo, 151,1 MiB. La proyección mayor medida ocupó 177 618 bytes. Quedaron guardados 166 hechos de cuidado, 34 de aprendizaje, 19 encuentros y 13 cambios ecológicos. Estas mediciones corresponden a este contenedor y esta semilla; no acreditan fiabilidad indefinida ni rendimiento en el teléfono de Isa.
+La ejecución acelerada representó tres días del modelo en 243,26 segundos de pared: 255 regiones descubiertas, 212 refugios, 50 hechos de cuidado y 21 de aprendizaje. Paso y commit tuvieron p95 **62,07 ms**, máximo **640,96 ms** y RSS máximo **190,82 MiB**. El pico supera el presupuesto nominal de 100 ms y puede producir pausas visibles; no se acredita latencia constante.
 
-## Contrastes y fallos corregidos
+La memoria activa alcanzó 62 regiones y 15 872 celdas. El archivo tuvo 375 regiones, 556 revisiones y una base de 35,29 MB. La vista inicial mayor medida fue 202 627 bytes. Una medición independiente de ventanas máximas de 96 × 64 llegó a aproximadamente 928 KB por vista; no fue una prueba de carga de red. La simulación activa es acotada, pero el archivo en disco puede crecer.
 
-Las quince pruebas del mundo incluyen recuerdo pertinente frente a ausencia y recuerdo irrelevante; alimento y refugio presentes frente a agotados; contacto compatible frente a distancia o exploración; y aprendizaje activo frente a desactivado sin retirar la acción de compartir. La sociedad autónoma transmite la costumbre en tres semillas y cambia conductas de S e I. El historial de aprendizaje conserva su procedencia aunque se recorte la crónica visible.
+## Causalidad, recuperación y revisión
 
-Las dieciocho pruebas del servidor cubren rollback conjunto de estado, hechos y entradas; reintentos con el mismo identificador; conflicto de contenido; corrupción de estado y tablas; revocación antes de la transacción; caída del proceso; copias; y bloqueo del destino durante recuperación. Un reintento ya confirmado conserva su resultado si un guardado posterior falla. Las diez pruebas del cliente verifican secuencias, pausas, sesión revocada, confirmaciones, conectividad y respuestas HTTP tardías que no deben perder el gesto siguiente.
+Las pruebas conservan los controles originales de alimento, agua/luz, techo, contacto compatible, recuerdo pertinente frente a ausente e irrelevante, y transmisión social con tres semillas emparejadas. Las ampliaciones comprueban:
 
-La revisión independiente detectó y se corrigieron: carrera del bloqueo de instancia, revocación entre recepción y commit, recreación silenciosa de tablas faltantes, respuesta incorrecta a un reintento durante pausa, pérdida del estado de pausa por secuencia repetida y controles bloqueados después de un rechazo definitivo. El navegador reveló además que desconectarse podía seguir mostrando «En vivo»; la versión comprobada escucha los cambios de conexión y detecta silencio del servidor.
+- Generación independiente del orden, continuidad entre regiones y coordenadas negativas o lejanas.
+- Cámara sin efectos sobre estado, azar, archivo ni descubrimientos.
+- Construcción real seguida de retirada de la región, guardado, reinicio y regreso con recursos, estructura e historia conservados.
+- Costes necesarios de materiales y trabajo; habilidades solo tras resultado útil.
+- Fracaso que cambia una elección autónoma posterior, frente a control con actualización desactivada y los mismos costes.
+- Contexto del aprendizaje capturado antes del resultado; efecto acotado de resiliencia sobre fatiga.
+- Etiqueta de oficio sin efecto causal sobre la decisión.
+- Desplazamiento físico, desvío alrededor de un río y final explícito de órdenes encerradas.
+- Recolección dirigida que alcanza un recurso cercano y completa el trabajo aunque se reevalúe la intención durante el trayecto.
+- Reintentos idempotentes y conflictos si cambia el habitante o la orden.
+- Regiones archivadas con integridad comprobada y recuperación anterior sin incorporar revisiones futuras.
 
-## Trabajo entre modelos
+La migración se probó también con motor y SQLite V1 reales del commit `cb89b21`, tras 1800 pasos: se conservaron las 1120 celdas, los 16 cuerpos, 89 eventos, memorias, intenciones y azar. La región original se completa con celdas procedurales para formar regiones enteras. Las sesiones y huellas de gestos anteriores se conservan.
 
-| Modelo invocado | Aporte comprobado |
+La revisión independiente detectó y se corrigieron atribución del aprendizaje al contexto posterior, metadatos activos insuficientemente validados, proyección de campos desconocidos, orden bloqueada sin terminación y excepción de archivo durante comunicación de una pausa. Sus reproducciones finales pasaron. Un error al leer una región de cámara no pausa la simulación; un fallo al confirmar el mundo conserva el estado guardado y usa una vista ya validada para comunicarlo.
+
+## Revisión privada y conservación del progreso
+
+La aplicación se mantiene en **https://172.26.0.4:3443**, con el acceso privado existente. Se hizo una copia íntegra antes de la ampliación y otra después del cierre ordenado de V1, en el directorio privado de revisión, fuera del repositorio. El último paso V1 antes del cambio fue **34155**.
+
+El certificado es local autofirmado. Los procesos siguen en las sesiones tmux propias `carta-isa-world` y `carta-isa-https`; el mundo queda en `~/.local/state/atlas-para-isa-preview/world`. El lanzador conserva la credencial y corrige el destino explícito del panel tmux al detenerse.
+
+La comprobación del servicio migrado está en [live-preview-v2.json](../artifacts/live-preview-v2.json) y su [captura](../artifacts/live-preview-v2.png). Corresponde a Chromium desde el contenedor; no verifica la ruta desde el navegador físico de la torre. No se contrató alojamiento ni se publicó en Internet.
+
+## Trabajo paralelo
+
+| Participante | Aporte de esta ampliación |
 |---|---|
-| Claude Opus, vía CLI nativo | Propuesta sustancial del renderer Canvas y dirección visual; adaptada y comprobada localmente. |
-| Gemini 3.8 Flash High, vía Antigravity | Revisión causal incorporada: contacto mutuamente compatible, procedencia del aprendizaje y separación del azar ecológico. |
-| Grok 4.6, vía CLI con sesión activa | Casos adversariales de commit, reintento, revocación y recuperación, utilizados para diseñar las pruebas. |
-| Claude Fable 5.1 | Revisión independiente de fallos del servidor; sus conclusiones se contrastaron con reproducciones y pruebas. |
-| Codex y subagentes nativos | Implementación e integración local, correcciones, pruebas, revisión de propuestas y documentación. |
+| Gemini 3.8 Flash High | Propuesta sustancial de ruido global, continuidad y biomas, adaptada y comprobada localmente |
+| Claude Opus | Propuesta sustancial de HUD, controles e interacción, integrada y medida con navegador |
+| Claude Fable | La llamada de esta fase agotó su tiempo sin resultado; no se cuenta como revisión exitosa |
+| Codex y subagentes nativos | Arquitectura, motor, integración, archivo, migración, pruebas, revisión independiente y documentación |
 
-Se enviaron especificaciones técnicas y código del prototipo mediante tareas de texto. No se enviaron recuerdos reales ni credenciales. La simulación entregada no necesita ninguno de estos proveedores para funcionar.
+No se enviaron credenciales ni recuerdos reales a proveedores. El juego funciona sin LLM durante la simulación. Los resultados multimodelo y mediciones de la versión base permanecen en el historial anterior de este documento; no se presentan como ejecuciones nuevas.
 
-La selección se contrastó con los anuncios oficiales de [Gemini 3.8 Flash](https://blog.google/innovation-and-ai/models-and-research/gemini-models/3-8-flash-and-3-8-flash-cyber/) y [Claude Fable 5.1](https://www.anthropic.com/claude/fable), y el catálogo de [Grok](https://docs.x.ai/developers/models); la disponibilidad operativa se verificó con los CLIs de esta sesión.
+## Qué no se probó
 
-## Qué no se probó y qué falta
+- Teléfono físico, Safari/iOS, lector de pantalla y valoración personal de Isa.
+- Alojamiento externo, reinicio automático del contenedor, fallo físico de disco y varios días de operación real.
+- Rendimiento constante de 100 ms, miles de habitantes o almacenamiento ilimitado.
+- Reproducción, herencia, evolución genética, ciudades complejas, gobiernos o mercados.
+- Contenido íntimo real, conciencia, emociones humanas o validación general de una teoría científica.
 
-- Teléfono físico de Isa, Safari/iOS, otros navegadores, lector de pantalla y valoración personal de la experiencia.
-- HTTPS, proxy, disco y proceso persistente en un proveedor real; fallo físico de disco y operación durante días de tiempo real.
-- Apertura escrita por Steven y recuerdos reales aprobados. No hay importación de chats ni biografía real. El retiro de biografía y sus derivados/copias se diseñará antes de incorporar esos datos.
-- Mortalidad, generaciones, mundos infinitos y las demás ampliaciones excluidas por el plan.
-
-Para abrir la aplicación local hay que configurar una contraseña privada con `npm run access -- init` y seguir el [README](../README.md). No se dejó un servicio público ni una contraseña de demostración permanente. Los mundos usados en pruebas se crearon en directorios temporales propios y se retiraron al terminar.
+Los mecanismos y límites están en [REGLAS.md](REGLAS.md) y las fuentes primarias en [CIENCIA.md](CIENCIA.md). Los artefactos V1 se conservan como evidencia histórica, separada de las mediciones V2.

@@ -1,6 +1,6 @@
 # Una Carta Para Isa
 
-Un mundo pequeño que continúa mientras el navegador está cerrado: paisaje, recursos, dieciséis habitantes, decisiones, recuerdos y una costumbre que se aprende observando cuidado. Es un **prototipo reversible** de la carta de Steven para Isa. S e I son nombres provisionales; los catorce vecinos y los cinco recuerdos visibles son material ficticio identificado.
+Un mundo procedural que continúa mientras el navegador está cerrado: seis biomas, recursos, dieciséis habitantes, exploración, construcción, aprendizaje y una costumbre que se aprende observando cuidado. Es un **prototipo reversible** de la carta de Steven para Isa. S e I son nombres provisionales; los catorce vecinos y los cinco recuerdos visibles son material ficticio identificado.
 
 La aplicación local está implementada. La voz final de Steven, los recuerdos reales revisados, la prueba en un teléfono físico y el alojamiento privado siguen pendientes. No se ha publicado ni contratado infraestructura.
 
@@ -19,7 +19,7 @@ npm start
 
 `access init` pide una contraseña de entre 12 y 256 caracteres sin mostrarla en la terminal. Guarda un registro scrypt en `data/access.scrypt`, con permisos privados; no guarda la contraseña legible. Si ya existe una credencial, conserva el archivo y termina sin reemplazarlo.
 
-Abre **http://127.0.0.1:3000** e ingresa con esa contraseña. Usa exactamente ese origen: el servidor comprueba `Host` y el origen de las solicitudes. La cámara permite explorar y volver a S e I; las fichas explican acciones y necesidades. Los gestos son sembrar, invitar y recordar; una invitación aceptada puede ser ignorada por los habitantes.
+Abre **http://127.0.0.1:3000** e ingresa con esa contraseña. Usa exactamente ese origen: el servidor comprueba `Host` y el origen de las solicitudes. El paisaje ocupa la pantalla. Arrastra para explorar, usa la rueda para acercarte y selecciona cualquier habitante en el mapa o el censo. Puedes seguirlo, dirigir su destino o pedirle explorar, recolectar, cultivar, construir y descansar; «Autónomo» devuelve sus decisiones. Las fichas explican necesidades, habilidades y materiales. Los gestos son sembrar, invitar y recordar; una invitación aceptada puede ser ignorada por los habitantes.
 
 El servicio avanza a diez pasos por segundo y guarda cada paso. Cerrar la pestaña no lo detiene. Al detener el proceso y arrancarlo de nuevo, recupera el último estado confirmado y registra una pausa técnica; no inventa encuentros durante la caída.
 
@@ -88,6 +88,12 @@ CARTA_DATA_DIR=./data-previous npm start
 ```
 
 Esta operación retira en la copia las entradas y los hechos posteriores al punto recuperado y revoca las sesiones. Conserva el archivo original. Si la base o el punto anterior no se pueden validar, el comando falla; no genera silenciosamente otro mundo.
+
+## Territorio y continuidad
+
+El mundo se genera por regiones de 16 × 16 celdas con coordenadas positivas y negativas; no conserva el borde de 40 × 28. El límite técnico es ±10 millones de celdas, con extremo superior excluido. La cámara recibe ventanas de hasta 96 × 64. Solo los alrededores de los habitantes avanzan: las regiones archivadas conservan sus cambios y congelan su ecología. El archivo en disco puede crecer con la exploración.
+
+Los mundos V1 se migran preservando sus celdas, cuerpos, recuerdos, entradas y acceso. Los rasgos iniciales son parámetros procedurales; las habilidades y preferencias se adquieren durante la actividad. No hay reproducción ni evolución genética. [CIENCIA.md](docs/CIENCIA.md) explica las referencias y límites.
 
 ## Desarrollo y comprobaciones
 

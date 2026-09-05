@@ -1,0 +1,486 @@
+
+> una-carta-para-isa@0.1.0 test
+> tsx --test tests/*.test.ts
+
+TAP version 13
+# (node:3764333) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: archive versions restore exact edited terrain at the latest permitted world tick
+ok 1 - archive versions restore exact edited terrain at the latest permitted world tick
+  ---
+  duration_ms: 42.912465
+  type: 'test'
+  ...
+# Subtest: input failure rolls back archive, world, events and ledger while preserving the pending caller queue
+ok 2 - input failure rolls back archive, world, events and ledger while preserving the pending caller queue
+  ---
+  duration_ms: 36.759773
+  type: 'test'
+  ...
+# Subtest: archive checksum and structural corruption fail closed instead of generating replacement terrain
+ok 3 - archive checksum and structural corruption fail closed instead of generating replacement terrain
+  ---
+  duration_ms: 13.547695
+  type: 'test'
+  ...
+# Subtest: backup retains terrain versions and reopening reproduces the archived edits
+ok 4 - backup retains terrain versions and reopening reproduces the archived edits
+  ---
+  duration_ms: 23.557163
+  type: 'test'
+  ...
+# Subtest: previous recovery removes future terrain versions and inputs without altering the source
+ok 5 - previous recovery removes future terrain versions and inputs without altering the source
+  ---
+  duration_ms: 50.5267
+  type: 'test'
+  ...
+# Subtest: V1 schema migration preserves old snapshots, cells, bodies, experiences and gesture fingerprints
+ok 6 - V1 schema migration preserves old snapshots, cells, bodies, experiences and gesture fingerprints
+  ---
+  duration_ms: 47.920644
+  type: 'test'
+  ...
+# Subtest: read-only V1 recovery migrates the view without changing schema or creating an archive
+ok 7 - read-only V1 recovery migrates the view without changing schema or creating an archive
+  ---
+  duration_ms: 47.804513
+  type: 'test'
+  ...
+# Subtest: incomplete old schema is not upgraded and an incomplete V2 archive is not silently rebuilt
+ok 8 - incomplete old schema is not upgraded and an incomplete V2 archive is not silently rebuilt
+  ---
+  duration_ms: 37.856294
+  type: 'test'
+  ...
+# (node:3764334) ExperimentalWarning: The MockTimers API is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: same-sequence pause is shown while older state is discarded, including version negotiation
+ok 9 - same-sequence pause is shown while older state is discarded, including version negotiation
+  ---
+  duration_ms: 12.10918
+  type: 'test'
+  ...
+# Subtest: authoritative reconnect can recover a lower sequence and discard older messages thereafter
+ok 10 - authoritative reconnect can recover a lower sequence and discard older messages thereafter
+  ---
+  duration_ms: 1.726267
+  type: 'test'
+  ...
+# Subtest: HTTP fallback preserves the input ID and terminal rejection unlocks the next input
+ok 11 - HTTP fallback preserves the input ID and terminal rejection unlocks the next input
+  ---
+  duration_ms: 1.504535
+  type: 'test'
+  ...
+# Subtest: session revocation close 4001 removes private session
+ok 12 - session revocation close 4001 removes private session
+  ---
+  duration_ms: 0.616556
+  type: 'test'
+  ...
+# Subtest: browser offline is immediate; online resends the original pending input once
+ok 13 - browser offline is immediate; online resends the original pending input once
+  ---
+  duration_ms: 1.304142
+  type: 'test'
+  ...
+# Subtest: a silent connection stops claiming live after eight seconds
+ok 14 - a silent connection stops claiming live after eight seconds
+  ---
+  duration_ms: 1.784438
+  type: 'test'
+  ...
+# Subtest: late HTTP conflict for confirmed A cannot erase pending B
+ok 15 - late HTTP conflict for confirmed A cannot erase pending B
+  ---
+  duration_ms: 1.333763
+  type: 'test'
+  ...
+# Subtest: late HTTP network-error for confirmed A cannot erase pending B
+ok 16 - late HTTP network-error for confirmed A cannot erase pending B
+  ---
+  duration_ms: 0.758677
+  type: 'test'
+  ...
+# Subtest: an unanswered WebSocket handshake times out and reconnects
+ok 17 - an unanswered WebSocket handshake times out and reconnects
+  ---
+  duration_ms: 0.465344
+  type: 'test'
+  ...
+# Subtest: HTTP for confirmed A cannot block the fallback for a newer pending B
+ok 18 - HTTP for confirmed A cannot block the fallback for a newer pending B
+  ---
+  duration_ms: 0.853628
+  type: 'test'
+  ...
+# Subtest: camera requests debounce to the latest bounded absolute viewport and persist on reconnect
+ok 19 - camera requests debounce to the latest bounded absolute viewport and persist on reconnect
+  ---
+  duration_ms: 1.02834
+  type: 'test'
+  ...
+# Subtest: changing the visible region at the same world tick updates the landscape without accepting old ticks
+ok 20 - changing the visible region at the same world tick updates the landscape without accepting old ticks
+  ---
+  duration_ms: 0.463664
+  type: 'test'
+  ...
+# Subtest: far and negative camera windows are pure, bounded, and independent of discovery and weather
+ok 21 - far and negative camera windows are pure, bounded, and independent of discovery and weather
+  ---
+  duration_ms: 123.599534
+  type: 'test'
+  ...
+# Subtest: any inhabitant follows a distant order physically across the old boundary and returns to autonomy
+ok 22 - any inhabitant follows a distant order physically across the old boundary and returns to autonomy
+  ---
+  duration_ms: 86.83446
+  type: 'test'
+  ...
+# Subtest: building needs actual work and spends exactly six wood and three stone once
+ok 23 - building needs actual work and spends exactly six wood and three stone once
+  ---
+  duration_ms: 63.175105
+  type: 'test'
+  ...
+# Subtest: harvest and cultivation consume actual resources; learning ablation preserves actions and costs
+ok 24 - harvest and cultivation consume actual resources; learning ablation preserves actions and costs
+  ---
+  duration_ms: 26.021817
+  type: 'test'
+  ...
+# Subtest: professions are descriptive and urgent bodily needs can suspend user work
+ok 25 - professions are descriptive and urgent bodily needs can suspend user work
+  ---
+  duration_ms: 11.471433
+  type: 'test'
+  ...
+# Subtest: a failed task changes the next autonomous choice; its paired learning control keeps the same costs
+ok 26 - a failed task changes the next autonomous choice; its paired learning control keeps the same costs
+  ---
+  duration_ms: 11.958619
+  type: 'test'
+  ...
+# Subtest: reward stays attached to the pre-outcome need context, and resilience changes exertion only
+ok 27 - reward stays attached to the pre-outcome need context, and resilience changes exertion only
+  ---
+  duration_ms: 18.579284
+  type: 'test'
+  ...
+# Subtest: invalid active metadata is rejected and unknown synthetic provenance never crosses projection
+ok 28 - invalid active metadata is rejected and unknown synthetic provenance never crosses projection
+  ---
+  duration_ms: 9.041619
+  type: 'test'
+  ...
+# Subtest: local navigation walks around a nearby river and explicitly ends an enclosed command
+ok 29 - local navigation walks around a nearby river and explicitly ends an enclosed command
+  ---
+  duration_ms: 69.344626
+  type: 'test'
+  ...
+# Subtest: directed gathering reaches a locally perceived resource and completes work across decision boundaries
+ok 30 - directed gathering reaches a locally perceived resource and completes work across decision boundaries
+  ---
+  duration_ms: 18.377462
+  type: 'test'
+  ...
+# (node:3764337) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: camera archive failure cannot kill or pause a committed simulation; disk-failure fallback performs no archive reads
+ok 31 - camera archive failure cannot kill or pause a committed simulation; disk-failure fallback performs no archive reads
+  ---
+  duration_ms: 127.538452
+  type: 'test'
+  ...
+# (node:3764347) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: access is mandatory, origin is enforced, private projections exclude internal state
+ok 32 - access is mandatory, origin is enforced, private projections exclude internal state
+  ---
+  duration_ms: 159.478459
+  type: 'test'
+  ...
+# Subtest: gestures are atomically recorded and an identical retry returns the original result
+ok 33 - gestures are atomically recorded and an identical retry returns the original result
+  ---
+  duration_ms: 100.625867
+  type: 'test'
+  ...
+# Subtest: no browser connected: server advances and committed chronicle exactly matches visible facts
+ok 34 - no browser connected: server advances and committed chronicle exactly matches visible facts
+  ---
+  duration_ms: 232.997536
+  type: 'test'
+  ...
+# Subtest: transaction failure rolls back world, facts and input IDs together
+ok 35 - transaction failure rolls back world, facts and input IDs together
+  ---
+  duration_ms: 16.322412
+  type: 'test'
+  ...
+# Subtest: save failure halts the world and never acknowledges a discarded gesture
+ok 36 - save failure halts the world and never acknowledges a discarded gesture
+  ---
+  duration_ms: 84.031612
+  type: 'test'
+  ...
+# Subtest: restart restores intention, memory, PRNG and body without retrospective simulation
+ok 37 - restart restores intention, memory, PRNG and body without retrospective simulation
+  ---
+  duration_ms: 58.272567
+  type: 'test'
+  ...
+# Subtest: checksum/schema corruption and missing committed snapshot fail closed
+ok 38 - checksum/schema corruption and missing committed snapshot fail closed
+  ---
+  duration_ms: 2.291363
+  type: 'test'
+  ...
+# Subtest: backup is coherent, validates after reopening, and does not overwrite an existing file
+ok 39 - backup is coherent, validates after reopening, and does not overwrite an existing file
+  ---
+  duration_ms: 17.786536
+  type: 'test'
+  ...
+# Subtest: websocket requires session and exact origin, reconnect returns a current view, revoke closes it
+ok 40 - websocket requires session and exact origin, reconnect returns a current view, revoke closes it
+  ---
+  duration_ms: 81.265464
+  type: 'test'
+  ...
+# Subtest: revocation between queue and commit prevents the gesture
+ok 41 - revocation between queue and commit prevents the gesture
+  ---
+  duration_ms: 83.570667
+  type: 'test'
+  ...
+# Subtest: passwords use salted verification; parser rejects unexpected fields; instance locking is exclusive
+ok 42 - passwords use salted verification; parser rejects unexpected fields; instance locking is exclusive
+  ---
+  duration_ms: 91.225043
+  type: 'test'
+  ...
+# Subtest: revocation immediately before transaction discards the draft without halting the service
+ok 43 - revocation immediately before transaction discards the draft without halting the service
+  ---
+  duration_ms: 67.212875
+  type: 'test'
+  ...
+# Subtest: missing ledger table is corruption, never recreated on reopening
+ok 44 - missing ledger table is corruption, never recreated on reopening
+  ---
+  duration_ms: 6.374713
+  type: 'test'
+  ...
+# Subtest: recover previous checkpoint removes later idempotency and preserves original evidence
+ok 45 - recover previous checkpoint removes later idempotency and preserves original evidence
+  ---
+  duration_ms: 31.909616
+  type: 'test'
+  ...
+# Subtest: actual crash releases instance lock and a new process recovers the committed world and input
+ok 46 - actual crash releases instance lock and a new process recovers the committed world and input
+  ---
+  duration_ms: 78.987792
+  type: 'test'
+  ...
+# Subtest: restore CLI uses a coherent read-only source and revokes restored sessions
+ok 47 - restore CLI uses a coherent read-only source and revokes restored sessions
+  ---
+  duration_ms: 92.426265
+  type: 'test'
+  ...
+# Subtest: previous-checkpoint CLI holds the destination lock throughout recovery
+ok 48 - previous-checkpoint CLI holds the destination lock throughout recovery
+  ---
+  duration_ms: 141.887594
+  type: 'test'
+  ...
+# Subtest: a committed retry remains retrievable during a later storage pause
+ok 49 - a committed retry remains retrievable during a later storage pause
+  ---
+  duration_ms: 122.057829
+  type: 'test'
+  ...
+# Subtest: cell coordinates use floor division across positive and negative chunk boundaries
+ok 50 - cell coordinates use floor division across positive and negative chunk boundaries
+  ---
+  duration_ms: 0.929649
+  type: 'test'
+  ...
+# Subtest: chunks reproduce exactly independent of discovery order; changing the seed changes terrain
+ok 51 - chunks reproduce exactly independent of discovery order; changing the seed changes terrain
+  ---
+  duration_ms: 8.156721
+  type: 'test'
+  ...
+# Subtest: a rebuilt far window has no dependence on intervening exploration or caller mutations
+ok 52 - a rebuilt far window has no dependence on intervening exploration or caller mutations
+  ---
+  duration_ms: 11.977049
+  type: 'test'
+  ...
+# Subtest: direct cells equal chunk cells on both sides of every tested positive, negative and far seam
+ok 53 - direct cells equal chunk cells on both sides of every tested positive, negative and far seam
+  ---
+  duration_ms: 8.0107
+  type: 'test'
+  ...
+# Subtest: elevation varies coherently across neighborhoods without an extra step at chunk seams
+ok 54 - elevation varies coherently across neighborhoods without an extra step at chunk seams
+  ---
+  duration_ms: 12.904728
+  type: 'test'
+  ...
+# Subtest: broad reproducible samples contain six biomes with bounded correlated resources
+ok 55 - broad reproducible samples contain six biomes with bounded correlated resources
+  ---
+  duration_ms: 10.11269
+  type: 'test'
+  ...
+# Subtest: the smooth initial highland keeps legacy places and the initial region usable across seeds
+ok 56 - the smooth initial highland keeps legacy places and the initial region usable across seeds
+  ---
+  duration_ms: 7.177271
+  type: 'test'
+  ...
+# Subtest: landmarks are optional deterministic landscape names with no manufactured history or shelter
+ok 57 - landmarks are optional deterministic landscape names with no manufactured history or shelter
+  ---
+  duration_ms: 4.427574
+  type: 'test'
+  ...
+# Subtest: technical limits are a complete half-open chunk domain; malformed coordinates and seeds fail
+ok 58 - technical limits are a complete half-open chunk domain; malformed coordinates and seeds fail
+  ---
+  duration_ms: 1.221962
+  type: 'test'
+  ...
+# (node:3764359) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: HTTP camera windows require a session, support negative and far origins, and cannot mutate a same-tick world
+ok 59 - HTTP camera windows require a session, support negative and far origins, and cannot mutate a same-tick world
+  ---
+  duration_ms: 121.586573
+  type: 'test'
+  ...
+# Subtest: WebSocket camera messages preserve sequence at one tick, enforce origin/session, and reject invalid bounds
+ok 60 - WebSocket camera messages preserve sequence at one tick, enforce origin/session, and reject invalid bounds
+  ---
+  duration_ms: 77.294145
+  type: 'test'
+  ...
+# Subtest: command retries retain the committed result while changed person or order conflicts
+ok 61 - command retries retain the committed result while changed person or order conflicts
+  ---
+  duration_ms: 106.817077
+  type: 'test'
+  ...
+# Subtest: a constructed and modified region survives physical eviction, restart, read-only camera and reactivation
+ok 62 - a constructed and modified region survives physical eviction, restart, read-only camera and reactivation
+  ---
+  duration_ms: 55.815502
+  type: 'test'
+  ...
+# Subtest: same seed, inputs, order and persisted PRNG reproduce the full state
+ok 63 - same seed, inputs, order and persisted PRNG reproduce the full state
+  ---
+  duration_ms: 1590.004019
+  type: 'test'
+  ...
+# Subtest: water and light cause growth; a dry or dark matched cell cannot produce that growth
+ok 64 - water and light cause growth; a dry or dark matched cell cannot produce that growth
+  ---
+  duration_ms: 28.586173
+  type: 'test'
+  ...
+# Subtest: local food removal changes a hungry person route, and eating consumes the local stock
+ok 65 - local food removal changes a hungry person route, and eating consumes the local stock
+  ---
+  duration_ms: 9.438674
+  type: 'test'
+  ...
+# Subtest: fatigue and a locally available refuge change the chosen action and route
+ok 66 - fatigue and a locally available refuge change the chosen action and route
+  ---
+  duration_ms: 9.537825
+  type: 'test'
+  ...
+# Subtest: a consenting shared pause changes both bodies; distance alone causes no special penalty
+ok 67 - a consenting shared pause changes both bodies; distance alone causes no special penalty
+  ---
+  duration_ms: 9.469374
+  type: 'test'
+  ...
+# Subtest: relevant synthetic memory causes accompaniment; absent and irrelevant controls agree
+ok 68 - relevant synthetic memory causes accompaniment; absent and irrelevant controls agree
+  ---
+  duration_ms: 2785.435993
+  type: 'test'
+  ...
+# Subtest: one person exploring does not receive contact effects from the other approaching
+ok 69 - one person exploring does not receive contact effects from the other approaching
+  ---
+  duration_ms: 7.531015
+  type: 'test'
+  ...
+# Subtest: S and I have provisional differing preferences without random movement overriding intent
+ok 70 - S and I have provisional differing preferences without random movement overriding intent
+  ---
+  duration_ms: 6.197722
+  type: 'test'
+  ...
+# Subtest: observed repeated sharing transmits a custom, with demonstrator and causal source; ablation removes transmission
+ok 71 - observed repeated sharing transmits a custom, with demonstrator and causal source; ablation removes transmission
+  ---
+  duration_ms: 45.667992
+  type: 'test'
+  ...
+# Subtest: autonomous population learns and repeats useful care across matched seeds; no learning in the ablation
+ok 72 - autonomous population learns and repeats useful care across matched seeds; no learning in the ablation
+  ---
+  duration_ms: 3201.193179
+  type: 'test'
+  ...
+# Subtest: two actual observations retain provenance after their chronicle events are pruned
+ok 73 - two actual observations retain provenance after their chronicle events are pruned
+  ---
+  duration_ms: 2486.449473
+  type: 'test'
+  ...
+# Subtest: hungry bodies cannot recover activity energy without food by resting indefinitely
+ok 74 - hungry bodies cannot recover activity energy without food by resting indefinitely
+  ---
+  duration_ms: 42.085356
+  type: 'test'
+  ...
+# Subtest: gestures validate land, context and cooldown; invitations never teleport and hunger can ignore them
+ok 75 - gestures validate land, context and cooldown; invitations never teleport and hunger can ignore them
+  ---
+  duration_ms: 11.837177
+  type: 'test'
+  ...
+# Subtest: six day/night cycles retain bounded bodies, terrain, history and valid land positions
+ok 76 - six day/night cycles retain bounded bodies, terrain, history and valid land positions
+  ---
+  duration_ms: 10620.707179
+  type: 'test'
+  ...
+# Subtest: state validation rejects corruption and incompatible versions instead of resetting
+ok 77 - state validation rejects corruption and incompatible versions instead of resetting
+  ---
+  duration_ms: 6.535474
+  type: 'test'
+  ...
+1..77
+# tests 77
+# suites 0
+# pass 77
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 20951.604085

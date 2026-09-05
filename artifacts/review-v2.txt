@@ -1,0 +1,72 @@
+TAP version 13
+# Subtest: far and negative camera windows are pure, bounded, and independent of discovery and weather
+ok 1 - far and negative camera windows are pure, bounded, and independent of discovery and weather
+  ---
+  duration_ms: 114.773216
+  type: 'test'
+  ...
+# Subtest: any inhabitant follows a distant order physically across the old boundary and returns to autonomy
+ok 2 - any inhabitant follows a distant order physically across the old boundary and returns to autonomy
+  ---
+  duration_ms: 63.529269
+  type: 'test'
+  ...
+# Subtest: building needs actual work and spends exactly six wood and three stone once
+ok 3 - building needs actual work and spends exactly six wood and three stone once
+  ---
+  duration_ms: 62.169326
+  type: 'test'
+  ...
+# Subtest: harvest and cultivation consume actual resources; learning ablation preserves actions and costs
+ok 4 - harvest and cultivation consume actual resources; learning ablation preserves actions and costs
+  ---
+  duration_ms: 25.602703
+  type: 'test'
+  ...
+# Subtest: professions are descriptive and urgent bodily needs can suspend user work
+ok 5 - professions are descriptive and urgent bodily needs can suspend user work
+  ---
+  duration_ms: 11.398563
+  type: 'test'
+  ...
+# Subtest: a failed task changes the next autonomous choice; its paired learning control keeps the same costs
+ok 6 - a failed task changes the next autonomous choice; its paired learning control keeps the same costs
+  ---
+  duration_ms: 12.387973
+  type: 'test'
+  ...
+# Subtest: reward stays attached to the pre-outcome need context, and resilience changes exertion only
+ok 7 - reward stays attached to the pre-outcome need context, and resilience changes exertion only
+  ---
+  duration_ms: 16.286371
+  type: 'test'
+  ...
+# Subtest: invalid active metadata is rejected and unknown synthetic provenance never crosses projection
+ok 8 - invalid active metadata is rejected and unknown synthetic provenance never crosses projection
+  ---
+  duration_ms: 7.452994
+  type: 'test'
+  ...
+# Subtest: local navigation walks around a nearby river and explicitly ends an enclosed command
+ok 9 - local navigation walks around a nearby river and explicitly ends an enclosed command
+  ---
+  duration_ms: 66.795001
+  type: 'test'
+  ...
+# (node:3763239) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: camera archive failure cannot kill or pause a committed simulation; disk-failure fallback performs no archive reads
+ok 10 - camera archive failure cannot kill or pause a committed simulation; disk-failure fallback performs no archive reads
+  ---
+  duration_ms: 103.10462
+  type: 'test'
+  ...
+1..10
+# tests 10
+# suites 0
+# pass 10
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 498.0789

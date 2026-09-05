@@ -33,6 +33,14 @@ Estos módulos no son paquetes publicables ni microservicios. La simulación deb
 
 El motor actual corre a 10 Hz y las intenciones ordinarias duran treinta pasos; el servidor confirma transacciones por paso y publica vistas normalmente cada cinco pasos. Las [reglas implementadas](REGLAS.md) detallan unidades, fuentes, límites y comparaciones causales. Ni el dibujo ni un LLM gobiernan la simulación.
 
+## Territorio procedural y archivo
+
+El generador puro usa ruido interpolado multiescala en coordenadas globales, seis biomas y regiones de 16 × 16. Generar en distinto orden produce las mismas celdas. El rango técnico es `[-10 000 000, 10 000 000)`. Los barrios activos dependen de la población, no de la cámara; las vistas admiten hasta 96 × 64 celdas. La ecología archivada permanece congelada.
+
+SQLite conserva revisiones de regiones por clave y paso, con suma de integridad. Retirar regiones, guardar el estado, confirmar entradas y registrar hechos sucede en una transacción. Un punto anterior lee únicamente revisiones de regiones que ya existían en ese paso. La memoria activa es acotada; el archivo persistente crece con el territorio modificado. El motor sin Store mantiene una cola pendiente que su integrador debe confirmar; no ofrece archivo ilimitado en RAM.
+
+La migración validada desde V1 conserva las 1120 celdas originales, cuerpos, intenciones, memorias, eventos y azar; completa los bordes de las regiones con el generador e inicializa los campos nuevos de manera reproducible. Las sesiones y los resultados confirmados permanecen válidos. Una versión desconocida o corrupta se rechaza.
+
 ## Una única verdad del mundo
 
 El servidor decide qué ocurre. El navegador dibuja, interpola posiciones y envía solicitudes; no ejecuta otra simulación que compita con la primera. Mover una cámara no cambia el estado de los habitantes.
@@ -88,7 +96,7 @@ Esta política evita un sistema de recuperación temporal complejo. La entrega d
 
 ## Conexión e interacción
 
-Un protocolo JSON pequeño basta: estado inicial, actualizaciones de estado, solicitud de gesto, resultado y error comprensible. Para esta escala se empieza enviando vistas completas acotadas; los deltas se incorporan únicamente si el tamaño medido lo exige.
+El protocolo V2 añade ventanas de cámara con origen absoluto y órdenes individuales idempotentes. Ventanas distintas del mismo paso son válidas; una vista antigua no puede sustituir un paso posterior. Un protocolo JSON pequeño basta: estado inicial, actualizaciones de estado, solicitud de gesto, resultado y error comprensible. Para esta escala se empieza enviando vistas completas acotadas; los deltas se incorporan únicamente si el tamaño medido lo exige.
 
 Cada vista lleva versión y secuencia. El cliente descarta vistas antiguas y obtiene una nueva al reconectar. Un cliente lento no puede acumular mensajes sin límite: recibe la vista reciente disponible.
 
@@ -110,6 +118,10 @@ Una vista pública de solo lectura puede añadirse después con su contenido rev
 
 | Comprobación | Evidencia necesaria |
 |---|---|
+| Cámara independiente | Ventanas negativas y lejanas no cambian estado, azar ni descubrimientos. |
+| Archivo de regiones | Modificar, abandonar, guardar, reiniciar y regresar conserva terreno, estructuras y descubrimientos. |
+| Construcción y aprendizaje | Materiales y trabajo necesarios; éxito y fracaso modifican valores, y desactivar la actualización conserva costes y habilidades. |
+| Control individual | Desplazamiento físico más allá del mapa anterior, necesidades urgentes y retorno a autonomía. |
 | Ecología | Agotar un recurso altera crecimiento o rutas; se explican entradas y pérdidas; no aparecen cantidades negativas ni recuperación oculta. |
 | Cuerpo y vínculo | Cambiar una necesidad o una interacción altera una elección y una señal corporal. La distancia por sí sola no determina deterioro afectivo. |
 | Memoria causal | Mismo estado y semilla con y sin una memoria pertinente: cambia una elección prevista. Un recuerdo irrelevante sirve de control y no debe producir ese mismo efecto. |

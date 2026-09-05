@@ -14,7 +14,9 @@ Al regresar se ve primero el presente y después, si hubo cambios relevantes, ha
 
 ## Un mundo que sostiene su actividad
 
-El sustrato inicial es una región finita vista desde arriba, formada por celdas con terreno, humedad y vegetación. Agua, claros, zonas fértiles y refugios permiten distintas rutinas. Una semilla reproducible genera el paisaje inicial; volver a la carta conserva el mismo mundo.
+El paisaje es una extensión procedural vista desde arriba. Se explora en cualquier dirección mediante regiones generadas según necesidad. Agua, bosques, praderas, desiertos, montañas y humedales ofrecen recursos distintos. Volver a una región recupera sus modificaciones guardadas. No existe el borde rectangular inicial, aunque hay un límite numérico de coordenadas y una cantidad acotada de regiones activas.
+
+El servicio continúa alrededor de los habitantes aunque el navegador esté cerrado. Las regiones inactivas conservan sus cambios y congelan su ecología hasta reactivarse. Mover la cámara no acelera cultivos ni crea historia.
 
 El modelo ecológico empieza con este ciclo:
 
@@ -30,7 +32,7 @@ No hacen falta química molecular, hidrodinámica completa ni evolución de espe
 
 Cada habitante percibe una zona limitada. Empieza con energía, hambre y descanso, más preferencias y vínculos locales. S e I tienen además memoria compartida y una necesidad contextual de cercanía o espacio.
 
-Las acciones iniciales pueden ser desplazarse, comer, descansar, explorar, acercarse, acompañar y retirarse. La elección considera necesidades, posibilidades del lugar, historia reciente y preferencias individuales. Una intención dura lo suficiente para verse; se abandona cuando cambia una causa relevante.
+Las acciones incluyen desplazarse, comer, descansar, explorar, acercarse, acompañar, retirarse, recolectar materiales, cultivar y construir. Cada habitante combina predisposiciones iniciales con habilidades adquiridas y resultados de sus acciones. Una experiencia favorable o desfavorable puede modificar la elección siguiente. Una intención dura lo suficiente para verse; se abandona cuando cambia una causa relevante.
 
 El circuito completo es:
 
@@ -59,6 +61,10 @@ La primera forma de cultura será **una costumbre de encuentro o cuidado que se 
 La sociedad no necesita girar permanentemente alrededor de la pareja. Puede tener episodios propios; algunos cruzarán la vida de S e I. Por ejemplo, un refugio frecuentado por varios vecinos puede modificar su lugar habitual de reunión.
 
 ## Participación de Isa
+
+Se puede seleccionar cualquier habitante en el mapa o el censo, seguirlo con la cámara y solicitar que vaya a un lugar, explore, recolecte, cultive, construya o descanse. La orden inicia una tarea con trayecto, duración y costes. No anula hambre, cansancio ni obstáculos. «Autónomo» devuelve la selección de tareas al habitante.
+
+Los asentamientos empiezan como refugios construidos con recursos y trabajo. El techo mejora posibilidades reales de descanso y encuentro. Los oficios describen práctica adquirida; no asignan destinos biográficos a S, I o los vecinos.
 
 Propuesta inicial: tres gestos, introducidos uno por uno.
 
@@ -97,6 +103,8 @@ Un recuerdo puede estar asociado a un lugar, un hábito, una forma de acompañar
 Los chats completos, terceros y detalles íntimos no entran por defecto. Las pruebas usan material sintético identificado. No se anuncian cifras históricas de mensajes ni se atribuyen a Isa confesiones que el sistema haya inventado.
 
 ## Voz, imagen y sonido
+
+El mundo ocupa toda la pantalla de juego. El censo, la ficha y las herramientas se despliegan sobre el paisaje según necesidad; se puede cerrar cada panel y regresar a los habitantes. La pantalla completa del navegador es opcional cuando el dispositivo la permite.
 
 La voz es breve, concreta y cercana, con tuteo y la cadencia colombiana de la pareja. Habla de acciones, lugares y recuerdos, y deja espacio al silencio. S e I pueden tener cadencias distintas, revisadas con el autor. La interfaz usa nombres comprensibles para acciones y estados; no es necesario disfrazar cada botón de poema.
 

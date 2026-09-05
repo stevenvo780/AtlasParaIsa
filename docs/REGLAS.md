@@ -1,6 +1,6 @@
 # Reglas del prototipo
 
-Estas reglas describen el candidato **V5 en corrección / sin validar autonomía prolongada** en `src/world/`, incluida la preparación alimentaria integrada después de las réplicas fallidas. El servicio privado continúa en V4; [EVIDENCIA.md](EVIDENCIA.md) separa qué código fue probado, qué observación falta repetir y qué versión está activa. Las unidades del modelo no tienen equivalencia biológica demostrada ni puntúan el amor. La memoria y las diferencias provisionales de S e I esperan la voz de Steven.
+Estas reglas describen **V5 activo en la revisión privada**, en `src/world/`, incluida la preparación alimentaria local. Dos réplicas de quince días conservaron reemplazo generacional; [EVIDENCIA.md](EVIDENCIA.md) separa el código probado, los límites de esa observación y la activación con mundo nuevo. Las unidades del modelo no tienen equivalencia biológica demostrada ni puntúan el amor. La memoria y las diferencias provisionales de S e I esperan la voz de Steven.
 
 ## Tiempo, paisaje y recursos
 
@@ -63,7 +63,7 @@ El descendiente nace en el lugar de un progenitor y empieza sin habilidades, val
 
 La preparación local de crianza busca una pareja conocida a siete celdas, de la **misma comunidad**, con confianza mutua de al menos 0.3 y aptitud corporal/reproductiva de ambos. Requiere un lugar percibido a siete celdas del actor y a cuatro de al menos uno de los dos. Puede motivar cosechar hasta una reserva objetivo de **0.12**; cuando el actor alcanza ese objetivo y la pareja conserva al menos 0.1, favorece acercarse físicamente. Para reunirse elige entre lugares percibidos por ambos el de menor suma de distancias, con desempate por identidad; si no existe, se acerca a la pareja. No paga costes ni produce un nacimiento por anticipado. Mantiene proximidad para la comprobación periódica sin garantizar su resultado.
 
-Mientras esa oportunidad local existe, compartir conserva la reserva objetivo y utiliza excedentes; hambre del receptor **mayor o igual a 0.8** permite usar esa reserva, siempre que exista la porción real y se respeten las necesidades del donante. La misma comunidad sigue siendo una condición para aislar el efecto de preparar alimento. Esta corrección requiere nueva observación prolongada.
+Mientras esa oportunidad local existe, compartir conserva la reserva objetivo y utiliza excedentes; hambre del receptor **mayor o igual a 0.8** permite usar esa reserva, siempre que exista la porción real y se respeten las necesidades del donante. La misma comunidad sigue siendo una condición. La comparación corregida de quince días conserva generaciones nuevas en ambas semillas; cambiar conjuntamente preparación, reserva y acercamiento no aísla el efecto de cada regla. EVIDENCIA conserva sus resultados y límites.
 
 ### Salud, longevidad y cierre de una vida
 
@@ -186,7 +186,7 @@ Con el mismo estado e iguales entradas, la evolución es reproducible. La explor
 
 El panel «Vida del mundo» separa población, necesidades, acciones y generaciones de los recursos de las regiones activas. Los acumulados registran acciones reales; la serie reciente conserva hasta 96 muestras, una cada 60 pasos. Fauna, agua y biomas no son un censo de todo el territorio procedural ni solo de la cámara. El rendimiento distingue pasos, guardado, proyección y memoria del servidor de cuadros, cachés y dispositivo gráfico de cada navegador; no mide ocupación de GPU.
 
-El candidato usa **reglas y protocolo 5; SQLite, esquema 3**. Migrar un estado V4 válido lo copia, añade tecnología vacía, inicializa salud y vitalidad y conserva su edad `tick − bornAt`; los acumulados nuevos empiezan en cero. No reescribe biografía, crea recetas retroactivas ni rellena ceros de recursos. Leer en modo de solo lectura no cambia el esquema. Un origen fuera de las cotas del modelo se rechaza antes de migrar; no se recorta materia para forzar compatibilidad. El caso privado real está documentado en EVIDENCIA.
+V5 activo usa **reglas y protocolo 5; SQLite, esquema 3**. Migrar un estado V4 válido lo copia, añade tecnología vacía, inicializa salud y vitalidad y conserva su edad `tick − bornAt`; los acumulados nuevos empiezan en cero. No reescribe biografía, crea recetas retroactivas ni rellena ceros de recursos. Leer en modo de solo lectura no cambia el esquema. Un origen fuera de las cotas del modelo se rechaza antes de migrar; no se recorta materia para forzar compatibilidad. La activación privada empezó un mundo nuevo y archivó el V4 inválido, sin migrarlo; EVIDENCIA conserva ese caso.
 
 Las vidas archivadas son inmutables por identidad, con fecha y digest; su lectura aplica el corte temporal del snapshot. Las regiones conservan versiones por clave y paso. Restaurar un estado anterior no puede incorporarle fallecimientos o versiones futuras del archivo. El caché reciente no reemplaza ese historial persistente ni promete disco ilimitado. Los detalles de almacenamiento, validación y recuperación corresponden a [CONSTRUCCION.md](CONSTRUCCION.md); versiones desconocidas o estados corruptos requieren recuperación explícita, sin reiniciar la carta.
 

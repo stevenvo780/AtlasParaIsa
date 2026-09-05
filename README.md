@@ -1,8 +1,8 @@
 # Una Carta Para Isa
 
-Un mundo procedural compartido que continúa mientras el navegador está cerrado: biomas, recursos agotables, animales individuales, exploración, construcción, aprendizaje y comunidades. El candidato **V5 está en corrección / sin validar autonomía prolongada**; añade producción material y ciclo vital, pero las dos réplicas largas terminaron sin vecinos. La revisión privada sigue en V4. [EVIDENCIA.md](docs/EVIDENCIA.md) distingue pruebas, compatibilidad pendiente y servicio activo. S e I son nombres provisionales; los vecinos y los cinco recuerdos iniciales son ficticios.
+Un mundo procedural compartido que continúa mientras el navegador está cerrado: biomas, recursos agotables, animales individuales, exploración, construcción, aprendizaje y comunidades. **V5 está activo en la revisión privada desde el 5 de septiembre, 21:08 UTC**, con producción material, ciclo vital y preparación alimentaria local. Dos réplicas de quince días conservaron reemplazo generacional; no acreditan continuidad indefinida. [EVIDENCIA.md](docs/EVIDENCIA.md) distingue resultados, límites de ejecución y archivo del mundo anterior. S e I son nombres provisionales; los vecinos y los cinco recuerdos iniciales son ficticios.
 
-La aplicación local está implementada. La voz final de Steven, los recuerdos reales revisados, la prueba en un teléfono físico y el alojamiento privado siguen pendientes. No se ha publicado ni contratado infraestructura.
+La aplicación local está implementada y la revisión privada mantiene el acceso existente. La voz final de Steven, los recuerdos reales revisados, la prueba en un teléfono físico y el alojamiento definitivo siguen pendientes. No hay publicación pública ni infraestructura nueva contratada.
 
 ## Arrancar en local
 
@@ -71,7 +71,7 @@ Crea una copia SQLite coherente en una **ruta nueva**. El comando rechaza sobres
 npm run backup -- ./backups/carta-revision-01.sqlite
 ```
 
-El CLI abre el origen en modo de solo lectura, sin migrar el esquema de un servicio anterior. La copia contiene el mundo y sus registros operativos; debe permanecer privada. `access.scrypt` es un archivo separado y no forma parte de la copia SQLite. Copiar una base no acredita que su estado pueda migrarse: la validación del lector puede rechazarla. El caso pendiente de la revisión V4 está en [EVIDENCIA.md](docs/EVIDENCIA.md#servicio-privado-v4-y-compatibilidad-pendiente).
+El CLI abre el origen en modo de solo lectura, sin migrar el esquema de un servicio anterior. La copia contiene el mundo y sus registros operativos; debe permanecer privada. `access.scrypt` es un archivo separado y no forma parte de la copia SQLite. Copiar una base no acredita que su estado pueda migrarse: la validación del lector puede rechazarla. El defecto conservado en el archivo V4 está en [EVIDENCIA.md](docs/EVIDENCIA.md#servicio-privado-v5-y-archivo-v4).
 
 Para restaurar, usa un **directorio de datos nuevo**. Se valida la copia, se revocan sus sesiones y se conserva el mundo de origen:
 
@@ -97,7 +97,7 @@ Esta operación retira en la copia las entradas y los hechos posteriores al punt
 
 El mundo se genera por regiones de 16 × 16 celdas con coordenadas positivas y negativas; no conserva el borde de 40 × 28. El límite técnico es ±10 millones de celdas, con extremo superior excluido. La cámara recibe ventanas de hasta 96 × 64. Solo los alrededores de los habitantes avanzan: las regiones archivadas conservan sus cambios y congelan su ecología. El archivo en disco puede crecer con la exploración.
 
-La fuente V5 usa reglas/protocolo **5** y SQLite **3**; el servicio V4 conserva SQLite **2**. El lector valida el origen antes de migrar. Antes de una actualización, conservar base y build y comprobar compatibilidad en una copia. Actualmente la copia privada V4 fue rechazada por una reserva de madera fuera de cota: no se ha migrado ni actualizado ese servicio. El contrato de archivo y recuperación está en [CONSTRUCCION.md](docs/CONSTRUCCION.md#territorio-procedural-y-archivo); fauna, tecnología y demografía se definen en [REGLAS.md](docs/REGLAS.md).
+V5 activo usa reglas/protocolo **5** y SQLite **3**. El lector valida el origen antes de migrar. Antes de una actualización, conservar base y build y comprobar compatibilidad en una copia. La copia privada V4 fue rechazada por una reserva de madera fuera de cota, también con el lector anterior. Se inició un mundo V5 nuevo autorizado y se conservaron íntegros el mundo y build V4 y el acceso existente; **no fue una migración exitosa de ese estado**. El contrato de archivo y recuperación está en [CONSTRUCCION.md](docs/CONSTRUCCION.md#territorio-procedural-y-archivo); fauna, tecnología y demografía se definen en [REGLAS.md](docs/REGLAS.md).
 
 ## Desarrollo y comprobaciones
 
@@ -115,7 +115,7 @@ La fuente V5 usa reglas/protocolo **5** y SQLite **3**; el servicio V4 conserva 
 
 `SOAK_DAYS` permite entre 3 y 60 días del modelo. Un día equivale a 2400 pasos: **cuatro minutos simulados**. La ejecución acelerada mide el motor y el guardado; no acredita varios días de operación real ni sustituye la prueba en un móvil físico.
 
-El observador multisemilla admite entre 15 y 25 días y de una a 32 semillas distintas. Usa una ruta de salida nueva para conservar comparaciones; los artefactos históricos de esta revisión son `soak-v5.json` y `evolution-v5.json`. No ejecutes compilaciones que reemplacen el build de una revisión activa: valida un candidato en salida y mundo temporales separados. Las fuentes y los artefactos deben corresponder al mismo código.
+El observador multisemilla admite entre 15 y 25 días y de una a 32 semillas distintas. Usa una ruta de salida nueva para conservar comparaciones. Los resultados corregidos están en `soak-v5-provision.json` y `evolution-v5-provision.json`; sus registros `.execution.json` distinguen la salida limpia del soak y la salida 143 de causa indeterminada del ejecutor largo, pese al informe completado y sus reinicios y copias verificados. `soak-v5.json` y `evolution-v5.json` corresponden a la base anterior. La extensión de veinticinco días `evolution-v5-extended.json` está en ejecución, sin resultado acreditado todavía. No ejecutes compilaciones que reemplacen el build de una revisión activa: valida un candidato en salida y mundo temporales separados. Las fuentes y los artefactos deben corresponder al mismo código.
 
 Las pruebas incluyen controles emparejados de alimento, refugio, encuentro, recuerdo pertinente/irrelevante y aprendizaje desactivado, además de fauna individual, invención, ecología, archivo y renderizado. [EVIDENCIA.md](docs/EVIDENCIA.md) registra los resultados de la revisión vigente y Git conserva los anteriores; un mecanismo implementado o un comando documentado no equivalen a una ejecución aprobada.
 

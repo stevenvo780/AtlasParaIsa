@@ -2,7 +2,7 @@
 
 Referencia de alcance: [PLAN.md](../PLAN.md). Referencia de comportamiento: [EXPERIENCIA.md](EXPERIENCIA.md).
 
-Estado del candidato: **V5 en corrección / sin validar autonomía prolongada**, con interfaz WebGL2/Canvas 2D/DOM, HTTP/WebSocket, acceso privado y SQLite. Tecnología, demografía y archivo de identidades tienen pruebas de integración; el reemplazo generacional falló en las dos réplicas largas. El servicio sigue en V4. [README](../README.md) conserva operaciones y [EVIDENCIA](EVIDENCIA.md) los resultados, incluida la migración privada rechazada. Los recuerdos son sintéticos; no hay alojamiento definitivo contratado.
+Estado de la revisión: **V5 activo con mundo nuevo y acceso conservado**, con interfaz WebGL2/Canvas 2D/DOM, HTTP/WebSocket y SQLite. Tecnología, demografía y archivo de identidades tienen pruebas de integración y reemplazo generacional observado durante dos réplicas de quince días; el catálogo finito y las ventanas materiales incompletas siguen limitando la autonomía. [README](../README.md) conserva operaciones y [EVIDENCIA](EVIDENCIA.md) los resultados y el archivo íntegro del V4 rechazado por validación. Los recuerdos son sintéticos; no hay alojamiento definitivo contratado.
 
 ## Arquitectura implementada
 
@@ -154,7 +154,7 @@ El teléfono físico, el alojamiento definitivo y el contenido personal final si
 
 ## Siguiente arquitectura propuesta, no implementada
 
-**Una memoria causal archivada, con conocimiento local finito y producción guiada por necesidades observadas.** Es trabajo futuro, separado de las correcciones alimentarias actuales. Debe permitir nuevas recetas después de llenar la caché y reconstruir ventanas de materiales sin aumentar indefinidamente la RAM. No arregla por sí sola demografía, división del trabajo ni mantenimiento.
+**Una memoria causal archivada, con conocimiento local finito y producción guiada por necesidades observadas.** Es trabajo futuro, separado de V5 activo. Debe permitir nuevas recetas después de llenar la caché y reconstruir ventanas de materiales sin aumentar indefinidamente la RAM. No arregla por sí sola demografía, división del trabajo ni mantenimiento. El frente de inventarios de apertura tiene un ensayo en el worktree `/tmp/atlas-opening-checkpoints`, sin integrar en main, activar ni incluir en las mediciones vigentes; los otros frentes permanecen como propuestas.
 
 La propuesta se elaboró con consulta textual a Gemini mediante Antigravity y revisión posterior del código. La respuesta externa fue evidencia de diseño, sin acceso al repositorio, secretos, base privada ni ejecución. Sus sugerencias se corrigieron: archivar no debe esperar a que desaparezcan todos los conocedores; los programas ya son secuencias planas acotadas, y guardar recibos después del snapshot de forma asíncrona rompería la durabilidad necesaria. Las fuentes conceptuales están en [CIENCIA](CIENCIA.md#investigación-pendiente-diversidad-y-continuidad-causal).
 

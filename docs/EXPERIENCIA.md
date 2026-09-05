@@ -1,6 +1,6 @@
 # Experiencia, interacción y voz
 
-Este documento desarrolla la interacción y la voz del [plan unificado](../PLAN.md). El candidato V5 está **en corrección / sin validar autonomía prolongada** y el servicio privado sigue en V4. [REGLAS.md](REGLAS.md) conserva mecánicas y [EVIDENCIA.md](EVIDENCIA.md) los resultados. Las escenas propuestas no garantizan desenlaces; voz final, biografía aprobada y teléfono físico siguen pendientes.
+Este documento desarrolla la interacción y la voz del [plan unificado](../PLAN.md). **V5 está activo en la revisión privada**, con reemplazo generacional observado en dos réplicas de quince días. [REGLAS.md](REGLAS.md) conserva mecánicas y [EVIDENCIA.md](EVIDENCIA.md) los resultados y límites. Las escenas propuestas no garantizan desenlaces ni continuidad indefinida; voz final, biografía aprobada y teléfono físico siguen pendientes.
 
 ## Entrar, explorar y volver
 
@@ -74,7 +74,7 @@ Un lugar observado con agua, alimento, techo y vínculos puede quedar recordado 
 
 Se puede seleccionar cualquier habitante en el mapa o el censo, seguirlo y solicitar que vaya a un lugar, explore, coseche alimento, recolecte materiales, cultive, construya, ensaye un diseño, repare, investigue, fabrique, cace, beba, coopere o descanse. La tarea tiene trayecto, duración y costes; conserva necesidades y obstáculos. «Autónomo» devuelve la selección al habitante. «Fauna» permite buscar, inspeccionar y seguir animales sin ofrecerles órdenes humanas.
 
-«Cosechar alimento» llena una reserva visible después de trabajo real. Recoger y comer son hechos distintos: la barra de hambre no mejora por guardar comida. Una posible crianza con alguien conocido puede motivar preparación y acercamiento, pero la interfaz no promete un nacimiento. Las nuevas señales se integraron después de las réplicas fallidas; su eficacia para sostener generaciones sigue pendiente de verificación.
+«Cosechar alimento» llena una reserva visible después de trabajo real. Recoger y comer son hechos distintos: la barra de hambre no mejora por guardar comida. Una posible crianza con alguien conocido puede motivar preparación y acercamiento, pero la interfaz no promete un nacimiento. La orden, el progreso, el débito y la capacidad se comprobaron desde navegador; el mundo corregido conserva nuevas generaciones en las dos ventanas autónomas estudiadas. Los resultados no garantizan cada crianza ni una continuidad ilimitada.
 
 «Oficios» permite inspeccionar procedimientos, productos, capacidades y dependencias observadas entre productores y usuarios. Investigar inicia un ensayo con coste y posibilidad de fallo; fabricar ejecuta una técnica conocida con ingredientes presentes. La ficha muestra los objetos que porta cada persona. Los procesos se explican con operaciones comprensibles; un nombre nuevo sin función material no cuenta como invento. La red distingue uso, intercambio y reposición, con su intervalo y evidencia disponible: un ciclo histórico no garantiza actividad presente ni se etiqueta como vida demostrada.
 
@@ -90,7 +90,7 @@ Los tres gestos ambientales disponibles son:
 | Invitar | Deja una señal que puede percibirse como invitación. | Los habitantes deciden si responder según su situación; no los teletransporta. |
 | Recordar | Refuerza temporalmente un recuerdo disponible relacionado con la escena; los actuales son sintéticos identificados. | El contexto determina si influye y cómo; no impone diálogo ni reconciliación. |
 
-La intención de diseño es que los habitantes resuelvan el cuidado cotidiano por sus procesos. El candidato todavía no sostiene el reemplazo generacional en las réplicas largas. La intervención de Isa aporta posibilidades y permite investigar; no debe convertirse en una obligación de rescatar población para ocultar ese fallo.
+La intención de diseño es que los habitantes resuelvan el cuidado cotidiano por sus procesos. V5 conserva generaciones nuevas en las dos ventanas de quince días estudiadas, con límites materiales y de catálogo todavía abiertos. La intervención de Isa aporta posibilidades y permite investigar; no debe convertirse en una obligación de rescatar población ni en condición para que el mundo continúe.
 
 Crear paisajes alternativos o comparar reglas puede explorarse después en mundos de prueba separados. Esos experimentos no reinician ni sobrescriben la carta persistente.
 

@@ -1,6 +1,8 @@
 # Una Carta Para Isa — plan unificado
 
-Fecha: 5 de septiembre de 2026. Estado: diseño, pendiente de implementación.
+Fecha: 5 de septiembre de 2026. Estado: prototipo reversible implementado; cierre personal de la carta, prueba en móvil físico y alojamiento pendientes.
+
+El repositorio ya contiene una aplicación local ejecutable. El [README](README.md) reúne los comandos reales de arranque, acceso y recuperación. La experiencia siguiente conserva su alcance de diseño; la implementación actual usa S e I, vecinos ficticios y cinco recuerdos sintéticos identificados, sin importar conversaciones ni atribuirles biografía.
 
 ## La idea
 
@@ -65,6 +67,17 @@ La primera entrega incluye al menos una costumbre compartida que se forme por re
 
 El orden organiza pruebas de extremo a extremo. La persistencia básica se prepara desde la primera etapa y se endurece en la tercera. Cada etapa deja algo ejecutable; no obliga a desplegar públicamente cada avance.
 
+### Situación del prototipo
+
+| Etapa | Implementado | Cierre pendiente |
+|---|---|---|
+| 1. Mundo y vínculo | Región 40 × 28, ecología, dieciséis cuerpos, decisiones locales, vínculo contextual, cámara y gestos. | Comprensión y manejo en el móvil físico destinatario. |
+| 2. Historia propia | Cinco recuerdos sintéticos con efecto contextual, lugares y costumbre transmitida por observación y repetición. Los controles del motor contrastan memoria irrelevante y aprendizaje desactivado. | Selección real de recuerdos, nombres y rasgos revisada por Steven. |
+| 3. Continuidad | Servicio persistente, sesión revocable, SQLite transaccional, reconexión, copia y recuperación explícita. | Alojamiento privado autorizado con proceso, HTTPS y disco persistentes; la operación local no acredita un despliegue. |
+| 4. La carta terminada | Interfaz y carta de prueba ejecutables para revisión. | Voz final del autor, revisión íntima, arte y ritmo finales, y recorrido en un teléfono real. |
+
+Las pruebas automáticas demuestran propiedades concretas del prototipo; no sustituyen los cierres personales y de experiencia. La carta terminada todavía no se acredita.
+
 ## Lo que sigue siendo una decisión personal
 
 | Decisión | Cómo avanzar mientras se concreta |
@@ -87,7 +100,7 @@ La profundidad vendrá de combinar las reglas y acumular historia. No se añade 
 - [Experiencia, reglas del mundo y carta](docs/EXPERIENCIA.md).
 - [Construcción, persistencia y comprobaciones](docs/CONSTRUCCION.md).
 
-Estos tres archivos sustituyen la documentación anterior como plan de trabajo. Este repositorio contiene documentación: las afirmaciones históricas de implementación, pruebas o despliegue no acreditan capacidades presentes aquí.
+Estos tres archivos sustituyen la documentación anterior como plan de trabajo. El código actual, el README y las comprobaciones de esta implementación describen las capacidades presentes; las afirmaciones históricas de pruebas o despliegue no se trasladan a este prototipo.
 
 Se revisaron los 44 archivos originales de ideas, conceptos, arquitectura, narrativa, voz, legado, operación, validación y plantillas. Antes de retirarlos se comprobó que coincidían con Git. La versión íntegra de esos documentos permanece en el commit `fe6a3a8c65820bb75be290e7c68faac1625e8d44`; no se conserva otra carpeta de archivo que vuelva a competir con el plan.
 

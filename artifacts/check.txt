@@ -1,0 +1,298 @@
+
+> una-carta-para-isa@0.1.0 check
+> npm run typecheck && npm test && npm run build
+
+
+> una-carta-para-isa@0.1.0 typecheck
+> tsc --noEmit
+
+
+> una-carta-para-isa@0.1.0 test
+> tsx --test tests/*.test.ts
+
+TAP version 13
+# (node:3613677) ExperimentalWarning: The MockTimers API is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: same-sequence pause is shown while older state is discarded, including version negotiation
+ok 1 - same-sequence pause is shown while older state is discarded, including version negotiation
+  ---
+  duration_ms: 18.246957
+  type: 'test'
+  ...
+# Subtest: authoritative reconnect can recover a lower sequence and discard older messages thereafter
+ok 2 - authoritative reconnect can recover a lower sequence and discard older messages thereafter
+  ---
+  duration_ms: 1.762927
+  type: 'test'
+  ...
+# Subtest: HTTP fallback preserves the input ID and terminal rejection unlocks the next input
+ok 3 - HTTP fallback preserves the input ID and terminal rejection unlocks the next input
+  ---
+  duration_ms: 1.121611
+  type: 'test'
+  ...
+# Subtest: session revocation close 4001 removes private session
+ok 4 - session revocation close 4001 removes private session
+  ---
+  duration_ms: 0.516635
+  type: 'test'
+  ...
+# Subtest: browser offline is immediate; online resends the original pending input once
+ok 5 - browser offline is immediate; online resends the original pending input once
+  ---
+  duration_ms: 0.891428
+  type: 'test'
+  ...
+# Subtest: a silent connection stops claiming live after eight seconds
+ok 6 - a silent connection stops claiming live after eight seconds
+  ---
+  duration_ms: 0.745957
+  type: 'test'
+  ...
+# Subtest: late HTTP conflict for confirmed A cannot erase pending B
+ok 7 - late HTTP conflict for confirmed A cannot erase pending B
+  ---
+  duration_ms: 2.549025
+  type: 'test'
+  ...
+# Subtest: late HTTP network-error for confirmed A cannot erase pending B
+ok 8 - late HTTP network-error for confirmed A cannot erase pending B
+  ---
+  duration_ms: 0.633986
+  type: 'test'
+  ...
+# Subtest: an unanswered WebSocket handshake times out and reconnects
+ok 9 - an unanswered WebSocket handshake times out and reconnects
+  ---
+  duration_ms: 0.716767
+  type: 'test'
+  ...
+# Subtest: HTTP for confirmed A cannot block the fallback for a newer pending B
+ok 10 - HTTP for confirmed A cannot block the fallback for a newer pending B
+  ---
+  duration_ms: 0.910399
+  type: 'test'
+  ...
+# (node:3613678) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: access is mandatory, origin is enforced, private projections exclude internal state
+ok 11 - access is mandatory, origin is enforced, private projections exclude internal state
+  ---
+  duration_ms: 117.726026
+  type: 'test'
+  ...
+# Subtest: gestures are atomically recorded and an identical retry returns the original result
+ok 12 - gestures are atomically recorded and an identical retry returns the original result
+  ---
+  duration_ms: 97.262347
+  type: 'test'
+  ...
+# Subtest: no browser connected: server advances and committed chronicle exactly matches visible facts
+ok 13 - no browser connected: server advances and committed chronicle exactly matches visible facts
+  ---
+  duration_ms: 251.285347
+  type: 'test'
+  ...
+# Subtest: transaction failure rolls back world, facts and input IDs together
+ok 14 - transaction failure rolls back world, facts and input IDs together
+  ---
+  duration_ms: 7.19859
+  type: 'test'
+  ...
+# Subtest: save failure halts the world and never acknowledges a discarded gesture
+ok 15 - save failure halts the world and never acknowledges a discarded gesture
+  ---
+  duration_ms: 88.970596
+  type: 'test'
+  ...
+# Subtest: restart restores intention, memory, PRNG and body without retrospective simulation
+ok 16 - restart restores intention, memory, PRNG and body without retrospective simulation
+  ---
+  duration_ms: 58.439039
+  type: 'test'
+  ...
+# Subtest: checksum/schema corruption and missing committed snapshot fail closed
+ok 17 - checksum/schema corruption and missing committed snapshot fail closed
+  ---
+  duration_ms: 2.00868
+  type: 'test'
+  ...
+# Subtest: backup is coherent, validates after reopening, and does not overwrite an existing file
+ok 18 - backup is coherent, validates after reopening, and does not overwrite an existing file
+  ---
+  duration_ms: 28.381017
+  type: 'test'
+  ...
+# Subtest: websocket requires session and exact origin, reconnect returns a current view, revoke closes it
+ok 19 - websocket requires session and exact origin, reconnect returns a current view, revoke closes it
+  ---
+  duration_ms: 102.014544
+  type: 'test'
+  ...
+# Subtest: revocation between queue and commit prevents the gesture
+ok 20 - revocation between queue and commit prevents the gesture
+  ---
+  duration_ms: 81.699916
+  type: 'test'
+  ...
+# Subtest: passwords use salted verification; parser rejects unexpected fields; instance locking is exclusive
+ok 21 - passwords use salted verification; parser rejects unexpected fields; instance locking is exclusive
+  ---
+  duration_ms: 96.4849
+  type: 'test'
+  ...
+# Subtest: revocation immediately before transaction discards the draft without halting the service
+ok 22 - revocation immediately before transaction discards the draft without halting the service
+  ---
+  duration_ms: 90.533502
+  type: 'test'
+  ...
+# Subtest: missing ledger table is corruption, never recreated on reopening
+ok 23 - missing ledger table is corruption, never recreated on reopening
+  ---
+  duration_ms: 15.426221
+  type: 'test'
+  ...
+# Subtest: recover previous checkpoint removes later idempotency and preserves original evidence
+ok 24 - recover previous checkpoint removes later idempotency and preserves original evidence
+  ---
+  duration_ms: 42.036579
+  type: 'test'
+  ...
+# Subtest: actual crash releases instance lock and a new process recovers the committed world and input
+ok 25 - actual crash releases instance lock and a new process recovers the committed world and input
+  ---
+  duration_ms: 111.375945
+  type: 'test'
+  ...
+# Subtest: restore CLI uses a coherent read-only source and revokes restored sessions
+ok 26 - restore CLI uses a coherent read-only source and revokes restored sessions
+  ---
+  duration_ms: 107.209214
+  type: 'test'
+  ...
+# Subtest: previous-checkpoint CLI holds the destination lock throughout recovery
+ok 27 - previous-checkpoint CLI holds the destination lock throughout recovery
+  ---
+  duration_ms: 160.476073
+  type: 'test'
+  ...
+# Subtest: a committed retry remains retrievable during a later storage pause
+ok 28 - a committed retry remains retrievable during a later storage pause
+  ---
+  duration_ms: 135.094656
+  type: 'test'
+  ...
+# Subtest: same seed, inputs, order and persisted PRNG reproduce the full state
+ok 29 - same seed, inputs, order and persisted PRNG reproduce the full state
+  ---
+  duration_ms: 178.519929
+  type: 'test'
+  ...
+# Subtest: water and light cause growth; a dry or dark matched cell cannot produce that growth
+ok 30 - water and light cause growth; a dry or dark matched cell cannot produce that growth
+  ---
+  duration_ms: 8.034178
+  type: 'test'
+  ...
+# Subtest: local food removal changes a hungry person route, and eating consumes the local stock
+ok 31 - local food removal changes a hungry person route, and eating consumes the local stock
+  ---
+  duration_ms: 2.968739
+  type: 'test'
+  ...
+# Subtest: fatigue and a locally available refuge change the chosen action and route
+ok 32 - fatigue and a locally available refuge change the chosen action and route
+  ---
+  duration_ms: 4.313002
+  type: 'test'
+  ...
+# Subtest: a consenting shared pause changes both bodies; distance alone causes no special penalty
+ok 33 - a consenting shared pause changes both bodies; distance alone causes no special penalty
+  ---
+  duration_ms: 3.589806
+  type: 'test'
+  ...
+# Subtest: relevant synthetic memory causes accompaniment; absent and irrelevant controls agree
+ok 34 - relevant synthetic memory causes accompaniment; absent and irrelevant controls agree
+  ---
+  duration_ms: 190.547116
+  type: 'test'
+  ...
+# Subtest: one person exploring does not receive contact effects from the other approaching
+ok 35 - one person exploring does not receive contact effects from the other approaching
+  ---
+  duration_ms: 2.574145
+  type: 'test'
+  ...
+# Subtest: S and I have provisional differing preferences without random movement overriding intent
+ok 36 - S and I have provisional differing preferences without random movement overriding intent
+  ---
+  duration_ms: 1.629056
+  type: 'test'
+  ...
+# Subtest: observed repeated sharing transmits a custom, with demonstrator and causal source; ablation removes transmission
+ok 37 - observed repeated sharing transmits a custom, with demonstrator and causal source; ablation removes transmission
+  ---
+  duration_ms: 6.566624
+  type: 'test'
+  ...
+# Subtest: autonomous population learns and repeats useful care across matched seeds; no learning in the ablation
+ok 38 - autonomous population learns and repeats useful care across matched seeds; no learning in the ablation
+  ---
+  duration_ms: 366.320908
+  type: 'test'
+  ...
+# Subtest: two actual observations retain provenance after their chronicle events are pruned
+ok 39 - two actual observations retain provenance after their chronicle events are pruned
+  ---
+  duration_ms: 203.953896
+  type: 'test'
+  ...
+# Subtest: hungry bodies cannot recover activity energy without food by resting indefinitely
+ok 40 - hungry bodies cannot recover activity energy without food by resting indefinitely
+  ---
+  duration_ms: 6.948378
+  type: 'test'
+  ...
+# Subtest: gestures validate land, context and cooldown; invitations never teleport and hunger can ignore them
+ok 41 - gestures validate land, context and cooldown; invitations never teleport and hunger can ignore them
+  ---
+  duration_ms: 2.826327
+  type: 'test'
+  ...
+# Subtest: six day/night cycles retain bounded bodies, terrain, history and valid land positions
+ok 42 - six day/night cycles retain bounded bodies, terrain, history and valid land positions
+  ---
+  duration_ms: 738.768874
+  type: 'test'
+  ...
+# Subtest: state validation rejects corruption and incompatible versions instead of resetting
+ok 43 - state validation rejects corruption and incompatible versions instead of resetting
+  ---
+  duration_ms: 2.457823
+  type: 'test'
+  ...
+1..43
+# tests 43
+# suites 0
+# pass 43
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1806.428112
+
+> una-carta-para-isa@0.1.0 build
+> vite build && tsc -p tsconfig.server.json
+
+vite v8.2.2 building client environment for production...
+transforming...
+✓ 8 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/client/index.html                  0.55 kB │ gzip:  0.33 kB
+dist/client/assets/index-9sHWycgw.css  30.37 kB │ gzip:  7.14 kB
+dist/client/assets/index-CpPcU-rr.js   54.21 kB │ gzip: 19.12 kB
+
+✓ built in 34ms

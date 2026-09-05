@@ -2,11 +2,11 @@
 
 Referencia de alcance: [PLAN.md](../PLAN.md). Referencia de comportamiento: [EXPERIENCIA.md](EXPERIENCIA.md).
 
-Estado actual: este repositorio contiene únicamente el plan y sus documentos. No hay aplicación, dependencias, pruebas ejecutables, autenticación ni despliegue acreditados aquí. Los comandos, versiones y resultados de otros repositorios no se trasladan como capacidades existentes.
+Estado actual: hay un prototipo reversible en TypeScript con interfaz Canvas/DOM, servidor HTTP/WebSocket, autenticación privada, SQLite y pruebas ejecutables. El [README](../README.md) documenta los comandos reales. Los recuerdos son sintéticos; no hay publicación ni alojamiento contratado. Los comandos, versiones y resultados de otros repositorios no se trasladan como capacidades existentes.
 
-## Arquitectura inicial propuesta
+## Arquitectura implementada
 
-Una aplicación web en TypeScript, una simulación en CPU y una base de datos local al servidor. Un mismo servicio puede servir la web, gestionar el acceso y ejecutar el mundo. Se empieza con un solo mundo persistente y una sola instancia de ese servicio.
+Una aplicación web en TypeScript, una simulación en CPU y una base de datos local al servidor. Un mismo servicio sirve la web, gestiona el acceso y ejecuta un mundo persistente. Un bloqueo de proceso protege el directorio del mundo; esta implementación admite una sola instancia activa.
 
 ```text
 Navegador: carta, Canvas 2D, controles y diario en DOM
@@ -16,7 +16,7 @@ Servicio: sesión privada + simulación + proyección visible
 SQLite en almacenamiento persistente: estado + hechos + recuerdos aprobados
 ```
 
-Canvas 2D es el punto de partida. Si medir la escena en el móvil objetivo justifica otra herramienta 2D, se cambia conservando las reglas de simulación. No se fijan versiones heredadas de frameworks; al implementar se eligen versiones compatibles y se guarda el archivo de dependencias.
+Canvas 2D dibuja el paisaje y el DOM presenta carta, fichas y controles. Vite compila el cliente; TypeScript compila el servidor para Node.js. `package-lock.json` fija las dependencias. Se comprobó Node.js 22.22.3 con `node:sqlite`, que en esa versión avisa de su condición experimental. Si medir la escena en el móvil objetivo justifica otra herramienta 2D, se cambia conservando las reglas de simulación.
 
 Organización suficiente dentro de una aplicación:
 
@@ -30,6 +30,8 @@ tests/         escenarios y comprobaciones de continuidad
 ```
 
 Estos módulos no son paquetes publicables ni microservicios. La simulación debe poder ejecutarse sin navegador para probarla. La primera escena puede correr localmente durante el desarrollo; la entrega necesita el servidor para continuar durante la ausencia.
+
+El motor actual corre a 10 Hz y las intenciones ordinarias duran treinta pasos; el servidor confirma transacciones por paso y publica vistas normalmente cada cinco pasos. Las [reglas implementadas](REGLAS.md) detallan unidades, fuentes, límites y comparaciones causales. Ni el dibujo ni un LLM gobiernan la simulación.
 
 ## Una única verdad del mundo
 
@@ -122,7 +124,9 @@ Una vista pública de solo lectura puede añadirse después con su contenido rev
 
 Las comparaciones causales mantienen iguales las demás condiciones. No se llama integración a una diferencia provocada simplemente por eliminar acciones posibles del grupo de control. Para resultados probabilísticos se usan varias semillas emparejadas y se registra el efecto observado, sin convertirlo en una medida de conciencia.
 
-Al existir código se ejecutan comprobaciones de tipos, pruebas de las reglas modificadas y compilación. Antes de entregar se prueba reconexión, reinicio, restauración de copia y una ejecución desatendida que cubra varios ciclos de día y noche. Se registra duración y configuración, consumo de recursos y cualquier fallo; una prueba prolongada no acredita por sí sola fiabilidad indefinida.
+El código incorpora comandos de tipos, pruebas y compilación (`npm run check`), pruebas de navegador (`npm run test:e2e`) y una ejecución acelerada con guardado por paso (`npm run test:soak`). Las quince pruebas del motor comprobadas durante su implementación cubren causalidad, transmisión autónoma en semillas emparejadas, memoria irrelevante, reproducción y cotas. Los resultados finales de integración deben leerse junto a su evidencia de ejecución.
+
+Antes de entregar se comprueban también reconexión, reinicio, restauración de copia y varios ciclos de día y noche. El script de ejecución prolongada registra duración, configuración, recursos y fallos en `artifacts/soak.json`; es una ejecución acelerada, no una estancia equivalente en tiempo real. Una prueba prolongada no acredita por sí sola fiabilidad indefinida. El teléfono físico, el alojamiento privado y el contenido personal final siguen pendientes.
 
 Las escenas con datos íntimos se revisan en privado. Las pruebas con otras personas usan material sintético o aprobado para esa audiencia. La evaluación busca saber si se reconoce a la pareja y se entienden las decisiones, no pedirle a alguien que confirme una emoción predeterminada.
 

@@ -1,0 +1,35 @@
+{
+  "name": "una-carta-para-isa",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.22.0 <23 || >=24"
+  },
+  "scripts": {
+    "dev": "tsx src/server/main.ts",
+    "build": "vite build && tsc -p tsconfig.server.json",
+    "start": "node dist/server/server/main.js",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts",
+    "test:e2e": "playwright test",
+    "test:soak": "tsx scripts/soak.ts",
+    "test:smoke": "tsx scripts/smoke.ts",
+    "access": "tsx scripts/access.ts",
+    "backup": "tsx scripts/storage.ts backup",
+    "restore": "tsx scripts/storage.ts restore",
+    "recover:previous": "tsx scripts/storage.ts previous",
+    "check": "npm run typecheck && npm test && npm run build"
+  },
+  "dependencies": {
+    "ws": "8.21.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@types/node": "22.20.1",
+    "@types/ws": "8.18.1",
+    "tsx": "4.23.13",
+    "typescript": "7.0.2",
+    "vite": "8.2.2"
+  }
+}

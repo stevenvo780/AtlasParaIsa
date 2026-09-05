@@ -1,0 +1,38 @@
+{
+  "generatedAt": "2026-09-05T15:44:10.743Z",
+  "node": "v22.22.3",
+  "mode": "accelerated fixed-step simulation with SQLite commit on every step; no browser",
+  "seed": 51926,
+  "rulesVersion": 1,
+  "population": 16,
+  "ticks": 12000,
+  "modelDays": 5,
+  "modelSeconds": 1200,
+  "wallSeconds": 25.520398901,
+  "cpuSeconds": 16.331951,
+  "stepWithCommitMs": {
+    "p50": 1.8592480000006617,
+    "p95": 3.2909730000010313,
+    "max": 57.28012699999999
+  },
+  "peakRssMiB": 151.07421875,
+  "maximumViewBytes": 177618,
+  "databaseBytes": 745472,
+  "phases": [
+    "dawn",
+    "day",
+    "dusk",
+    "night"
+  ],
+  "persistedEvents": {
+    "memory": 5,
+    "care": 166,
+    "learning": 34,
+    "meeting": 19,
+    "ecology": 13
+  },
+  "restartEquality": true,
+  "backupEquality": true,
+  "failures": 0,
+  "limits": "Accelerated run is not a multi-day wall-clock deployment or a physical-phone test."
+}

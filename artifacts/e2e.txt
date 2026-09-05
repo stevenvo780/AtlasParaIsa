@@ -1,0 +1,18 @@
+
+> una-carta-para-isa@0.1.0 test:e2e
+> playwright test
+
+(node:3618500) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 4 tests using 1 worker
+
+(node:3618564) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:3618564) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+  ✓  1 tests/e2e.spec.ts:29:1 › desktop: private entry, letter, landscape, causal cards, gestures, chronicle, camera and logout (1.3s)
+  ✓  2 tests/e2e.spec.ts:52:1 › mobile touch and reduced motion: no horizontal overflow, all three gestures and readable dialogs (7.2s)
+  ✓  3 tests/e2e.spec.ts:73:1 › offline/reconnect, tab absence and external session revocation remain truthful (488ms)
+  ✓  4 tests/e2e.spec.ts:84:1 › server save error reaches browser even with unchanged world sequence (397ms)
+
+  4 passed (9.8s)

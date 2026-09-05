@@ -1,0 +1,11 @@
+{
+  "generatedAt": "2026-09-05T15:49:20.534Z",
+  "builtEntrypoint": true,
+  "credentialCli": true,
+  "privateHttp": true,
+  "autonomousAdvance": true,
+  "sigkillRestart": true,
+  "persistedSession": true,
+  "revocationCli": true,
+  "gracefulExit": true
+}

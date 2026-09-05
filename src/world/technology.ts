@@ -3,6 +3,8 @@ import type { Capability, Composition, Material, MaterialBatch, MaterialProperti
 import { localRandom } from './genetics.js';
 import { assertTechnologyCheckpoint } from './technology-checkpoint.js';
 import { assertTechnologyJournal, journalTechnologyExecution } from './technology-journal.js';
+import { assertTechnologyCatalogueState, catalogueEnabled, findTechnologyRecipe, hasTechnologyFunction, registerTechnologyRecipe, resolveTechnologyRecipe, technologyCatalogueTotals, technologyMemoryCapacity, updateTechnologyRecipeStats } from './technology-catalogue.js';
+import { pruneTechnologyCompetence, rememberRecipe, technologyProjectPins, touchKnownRecipe } from './technology-memory.js';
 export type * from '../shared/technology.js';
 
 export interface TechnologyActor {
@@ -40,6 +42,27 @@ export function defaultTechnologyState(): TechnologyState {
 }
 export function initialTechnologyKnowledge(): TechnologyKnowledge {
   return { knownRecipes: [], items: [], residue: empty(), attempts: 0, lastAttempt: -120, project: null, learnedFrom: [], competence: {} };
+}
+/** Keep local instructions and practice bounded, including after stock leaves an actor. */
+export function maintainTechnologyMemory(host: TechnologyHost, actor: TechnologyActor): void {
+  const knowledge = actor.technology, capacity = technologyMemoryCapacity(host.technology);
+  if (knowledge.knownRecipes.length > capacity && !rememberRecipe(knowledge, knowledge.knownRecipes.at(-1)!, {
+    capacity, protectedIds: technologyProjectPins(knowledge),
+  }).remembered) throw new Error('Active technology instructions exceed local memory capacity.');
+  pruneTechnologyCompetence(knowledge);
+}
+function knownTechnologyRecipes(host: TechnologyHost, actor: TechnologyActor): TechnologyRecipe[] {
+  // The archive resolves only identities already held locally; its cache is not knowledge.
+  return actor.technology.knownRecipes.flatMap(id => {
+    const recipe = resolveTechnologyRecipe(host, id);
+    return recipe ? [recipe] : [];
+  });
+}
+function inventionRoom(state: TechnologyState): boolean {
+  return state.recipeCounter < Number.MAX_SAFE_INTEGER && (catalogueEnabled(state) || state.recipes.length < state.budgets.maxRecipes);
+}
+function generationLimit(state: TechnologyState): number {
+  return catalogueEnabled(state) ? Number.MAX_SAFE_INTEGER : state.budgets.maxGeneration;
 }
 /** Integer largest-remainder allocation makes wear and splitting conserve every element. */
 export function splitComposition(c: Composition, requested: number): Composition {
@@ -133,12 +156,11 @@ export function applyPhysicalOperation(instruction: OperationInstruction, inputs
   if (mass(composition) < 30 || p.cohesion < 0.08) return fail('no coherent product remains');
   const remaining = mass(composition);
   return { product: { ...structuredClone(inputs[0]!), composition, mass: remaining, initialMass: remaining,
-    properties: p, parentItems: inputs.map(i => i.id), generation: Math.max(...inputs.map(i => i.generation)) + 1 }, residue, success: true, reason: 'physical transformation' };
+    properties: p, parentItems: inputs.map(i => i.id), generation: Math.min(Number.MAX_SAFE_INTEGER, Math.max(...inputs.map(i => i.generation)) + 1) }, residue, success: true, reason: 'physical transformation' };
 }
 export function programSignature(program: TechnologyProgram): string {
   return JSON.stringify([program.inputs.map(i => [i.source, i.material ?? '', i.recipeId ?? '', i.mass]), program.steps.map(s => [s.op, s.intensity, s.shape ?? '', s.material ?? '', s.catalyst ?? '', s.requiredCatalyst ?? ''])]);
 }
-function functionalSignature(capacities: Record<Capability, number>): string { return CAPABILITIES.map(c => Math.floor(capacities[c] * 5)).join(':'); }
 export function validTechnologyProgram(program: TechnologyProgram, state = defaultTechnologyState()): boolean {
   if (!program || !Array.isArray(program.inputs) || !Array.isArray(program.steps) || program.inputs.length < 1 || program.inputs.length > state.budgets.maxInputs || program.steps.length < 1 || program.steps.length > state.budgets.maxSteps) return false;
   return program.inputs.every(i => i && ['raw', 'product', 'residue'].includes(i.source) && Number.isSafeInteger(i.mass) && i.mass >= 30 && i.mass <= state.budgets.maxMassPerInput &&
@@ -227,8 +249,9 @@ export function useTool(host: TechnologyHost, actor: TechnologyActor, capability
   const debris = splitComposition(best.item.composition, wear); subtract(best.item.composition, debris); best.item.mass -= wear; add(actor.technology.residue, debris);
   actor.technology.items = actor.technology.items.filter(i => i.mass > 0);
   const state = host.technology; state.ledger.toolUses++;
-  const recipe = state.recipes.find(r => r.id === best.item.recipeId); if (recipe) recipe.uses++;
+  if (best.item.recipeId) { updateTechnologyRecipeStats(host, best.item.recipeId, { uses: 1 }); touchKnownRecipe(actor.technology, best.item.recipeId); }
   const event = appendExecution(host, { kind: 'use', actorId: actor.id, recipeId: best.item.recipeId, programSignature: '', inputs: [{ resourceId: itemResource(best.item), mass: wear }], outputs: compositionResources(debris, 'residue'), residueMass: wear, energy: 0, work: 0, success: true, parentRecipeIds: [], catalysts: [], benefit: 0, balance: { opening, closing: technologyStock(actor), externalInputs: [], externalLoss: [] } });
+  maintainTechnologyMemory(host, actor);
   return { executionId: event.id, itemId: best.item.id, recipeId: best.item.recipeId, capability, power: best.power * wear / requestedWear, wear };
 }
 export function recordTechnologyBenefit(host: TechnologyHost, actor: TechnologyActor, receipt: ToolReceipt | undefined, actualBenefit: number): void {
@@ -240,8 +263,9 @@ export function recordTechnologyBenefit(host: TechnologyHost, actor: TechnologyA
   const execution = (state.journal?.pending ?? state.history).find(e => e.id === receipt.executionId && e.kind === 'use' && e.actorId === actor.id && e.recipeId === receipt.recipeId);
   if (!execution || execution.benefit > 0) return;
   execution.benefit = actualBenefit;
-  const recipe = host.technology.recipes.find(r => r.id === receipt.recipeId); if (recipe) recipe.utility += actualBenefit;
+  if (receipt.recipeId) updateTechnologyRecipeStats(host, receipt.recipeId, { utility: actualBenefit });
   if (receipt.recipeId) { const practice = actor.technology.competence[receipt.recipeId] ??= { attempts: 0, successes: 0, work: 0, benefit: 0 }; practice.benefit += actualBenefit; }
+  maintainTechnologyMemory(host, actor);
 }
 function randomInstruction(random: () => number): OperationInstruction {
   const op = PHYSICAL_OPERATIONS[Math.floor(random() * PHYSICAL_OPERATIONS.length)]!, instruction: OperationInstruction = { op, intensity: 1 + Math.floor(random() * 4) };
@@ -263,8 +287,8 @@ function localInputs(host: TechnologyHost, actor: TechnologyActor): MaterialRequ
 /** Search only draws from the actor's own learned programs and physically present feedstock. */
 export function proposeTechnologyProgram(host: TechnologyHost, actor: TechnologyActor): { program: TechnologyProgram; parents: string[] } | undefined {
   const state = host.technology, random = localRandom(host.seed, `process:${actor.id}:${actor.technology.attempts}`), available = localInputs(host, actor);
-  if (!available.length || state.recipes.length >= state.budgets.maxRecipes) return;
-  const known = state.recipes.filter(r => actor.technology.knownRecipes.includes(r.id) && r.generation < state.budgets.maxGeneration);
+  if (!available.length || !inventionRoom(state)) return;
+  const known = knownTechnologyRecipes(host, actor).filter(r => r.generation < generationLimit(state));
   const pick = <T>(xs: T[]): T => xs[Math.floor(random() * xs.length)]!;
   let program: TechnologyProgram, parents: string[] = [];
   if (known.length && random() < 0.72) {
@@ -296,17 +320,17 @@ export function proposeTechnologyProgram(host: TechnologyHost, actor: Technology
     if (availableCatalysts.length) last.requiredCatalyst = pick([...availableCatalysts]);
   }
   for (const input of program.inputs) if (input.recipeId && !parents.includes(input.recipeId)) parents.push(input.recipeId);
-  if (parents.some(id => (state.recipes.find(r => r.id === id)?.generation ?? 0) >= state.budgets.maxGeneration)) return;
+  if (parents.some(id => { const recipe = resolveTechnologyRecipe(host, id); return !actor.technology.knownRecipes.includes(id) || !recipe || recipe.generation >= generationLimit(state); })) return;
   return { program, parents: parents.slice(0, 6) };
 }
 export function technologyOpportunity(host: TechnologyHost, actor: TechnologyActor): { kind: 'research' | 'craft'; score: number; reason: string; recipeId?: string } | undefined {
   if (actor.energy < 0.3 || actor.fatigue > 0.72 || Math.max(actor.hunger ?? 0, actor.thirst ?? 0) > 0.78) return;
   if (actor.technology.project) return { kind: actor.technology.project.kind, score: 0.86, reason: 'Continúa un proceso material que ya empezó y pagó.', recipeId: actor.technology.project.recipeId ?? undefined };
   if (host.tick - actor.technology.lastAttempt < 45) return;
-  const powers = toolCapacities(actor), known = host.technology.recipes.filter(r => actor.technology.knownRecipes.includes(r.id));
+  const powers = toolCapacities(actor), known = knownTechnologyRecipes(host, actor);
   const craft = known.filter(r => planWithdrawal(host, actor, r.program) && CAPABILITIES.some(c => r.capacities[c] > Math.max(0.12, powers[c] * 1.35))).sort((a, b) => (actor.technology.competence[b.id]?.benefit ?? 0) - (actor.technology.competence[a.id]?.benefit ?? 0) || (actor.technology.competence[b.id]?.successes ?? 0) - (actor.technology.competence[a.id]?.successes ?? 0) || a.id.localeCompare(b.id))[0];
   if (craft && actor.technology.items.length < host.technology.budgets.maxItems && actor.technology.attempts % 3 !== 0) return { kind: 'craft', recipeId: craft.id, score: 0.58, reason: 'Puede reproducir una técnica aprendida para recuperar una capacidad material.' };
-  if (host.noveltyEnabled === false || host.technology.recipes.length >= host.technology.budgets.maxRecipes || !localInputs(host, actor).length) return;
+  if (host.noveltyEnabled === false || !inventionRoom(host.technology) || !localInputs(host, actor).length) return;
   return { kind: 'research', score: 0.35 + (actor.curiosity ?? 0.5) * 0.3 + (actor.skills.technology ?? 0) * 0.08, reason: 'Prueba una variación o composición de procesos conocidos con materiales presentes; el intento cuesta trabajo y recursos.' };
 }
 function recycleToFit(host: TechnologyHost, actor: TechnologyActor): void {
@@ -315,6 +339,7 @@ function recycleToFit(host: TechnologyHost, actor: TechnologyActor): void {
     const opening = technologyStock(actor); actor.technology.items = actor.technology.items.filter(i => i !== item); add(actor.technology.residue, item.composition); host.technology.ledger.recycled++;
     appendExecution(host, { kind: 'recycle', actorId: actor.id, recipeId: item.recipeId, programSignature: '', inputs: [{ resourceId: itemResource(item), mass: item.mass }], outputs: compositionResources(item.composition, 'residue'), residueMass: item.mass, energy: 0, work: 0, success: true, parentRecipeIds: [], catalysts: [], benefit: 0, balance: { opening, closing: technologyStock(actor), externalInputs: [], externalLoss: [] } });
   }
+  maintainTechnologyMemory(host, actor);
 }
 function emitDiscovery(host: TechnologyHost, actor: TechnologyActor, recipe: TechnologyRecipe, emit?: Emit): void {
   (emit ?? host.emit)?.({ kind: 'invention', actors: [actor.id], x: actor.x, y: actor.y, source: 'simulation',
@@ -323,12 +348,21 @@ function emitDiscovery(host: TechnologyHost, actor: TechnologyActor, recipe: Tec
 }
 function finishProject(host: TechnologyHost, actor: TechnologyActor, project: TechnologyProject, emit?: Emit): boolean {
   const state = host.technology, knowledge = actor.technology;
-  knowledge.attempts++; knowledge.lastAttempt = host.tick; knowledge.project = null; state.ledger.attempts++;
+  const parentRecipes = project.parents.map(id => resolveTechnologyRecipe(host, id));
+  if (parentRecipes.some(parent => !parent) || (project.kind === 'research' && project.parents.some(id => !knowledge.knownRecipes.includes(id)))) {
+    throw new Error('Unknown technology project parent.');
+  }
+  const nextGeneration = 1 + Math.max(0, ...parentRecipes.map(parent => parent!.generation));
+  if (project.kind === 'research' && (!Number.isSafeInteger(nextGeneration) || nextGeneration > generationLimit(state))) {
+    throw new Error('Technology ancestry exceeds the safe generation limit.');
+  }
+  knowledge.attempts++; knowledge.lastAttempt = host.tick; state.ledger.attempts++;
   const opening = technologyStock(actor), plan = planWithdrawal(host, actor, project.program), signature = programSignature(project.program), transactionStart = state.executionCounter;
   if (!plan) {
     state.ledger.failures++;
     if (project.recipeId) { const practice = knowledge.competence[project.recipeId] ??= { attempts: 0, successes: 0, work: 0, benefit: 0 }; practice.attempts++; practice.work += project.progress; }
-    appendExecution(host, { kind: project.kind, actorId: actor.id, recipeId: project.recipeId, programSignature: signature, inputs: [], outputs: [], residueMass: 0, energy: project.energyPaid, work: project.progress, success: false, parentRecipeIds: project.parents, catalysts: [], benefit: 0, balance: { opening, closing: opening, externalInputs: [], externalLoss: [] } }); return false;
+    appendExecution(host, { kind: project.kind, actorId: actor.id, recipeId: project.recipeId, programSignature: signature, inputs: [], outputs: [], residueMass: 0, energy: project.energyPaid, work: project.progress, success: false, parentRecipeIds: project.parents, catalysts: [], benefit: 0, balance: { opening, closing: opening, externalInputs: [], externalLoss: [] } });
+    knowledge.project = null; maintainTechnologyMemory(host, actor); return false;
   }
   withdraw(host, actor, plan);
   let current = plan.inputs, success = true; const residue = empty(), catalysts: TechnologyExecution['catalysts'] = [];
@@ -348,23 +382,26 @@ function finishProject(host: TechnologyHost, actor: TechnologyActor, project: Te
     }
   }
   add(knowledge.residue, residue);
-  let recipe = project.recipeId ? state.recipes.find(r => r.id === project.recipeId) : state.recipes.find(r => r.signature === signature);
+  let recipe = project.recipeId ? resolveTechnologyRecipe(host, project.recipeId) : findTechnologyRecipe(host, signature);
   const output = current[0];
   if (success && output) {
-    if (!recipe && state.recipes.length < state.budgets.maxRecipes) {
-      const capacities = materialCapacities(output), newFunction = !state.recipes.some(r => functionalSignature(r.capacities) === functionalSignature(capacities));
-      const generation = 1 + Math.max(0, ...project.parents.map(id => state.recipes.find(r => r.id === id)?.generation ?? 0));
-      recipe = { id: `recipe-${++state.recipeCounter}`, name: `${project.program.steps.map(s => s.op).join('·').slice(0, 70)} ${state.recipeCounter}`,
-        program: structuredClone(project.program), signature, parents: [...project.parents], generation, inventorId: actor.id, tick: host.tick, x: actor.x, y: actor.y,
+    if (!recipe && inventionRoom(state)) {
+      const capacities = materialCapacities(output), newFunction = !hasTechnologyFunction(host, capacities);
+      recipe = { id: `recipe-${state.recipeCounter + 1}`, name: `${project.program.steps.map(s => s.op).join('·').slice(0, 70)} ${state.recipeCounter + 1}`,
+        program: structuredClone(project.program), signature, parents: [...project.parents], generation: nextGeneration, inventorId: actor.id, tick: host.tick, x: actor.x, y: actor.y,
         novelty: newFunction ? 'both' : 'program', capacities, uses: 0, utility: 0, manufactured: 0 };
-      state.recipes.push(recipe); emitDiscovery(host, actor, recipe, emit);
+      registerTechnologyRecipe(host, recipe); emitDiscovery(host, actor, recipe, emit);
     }
     if (recipe) {
       recycleToFit(host, actor);
       output.id = `product-${++state.itemCounter}`; output.recipeId = recipe.id; output.madeAt = host.tick; output.generation = recipe.generation;
       output.parentItems = [...new Set(plan.inputs.filter(i => i.recipeId).flatMap(i => i.parentItems.length ? i.parentItems : [i.id]))].slice(0, 16);
-      knowledge.items.push(output); if (!knowledge.knownRecipes.includes(recipe.id)) knowledge.knownRecipes.push(recipe.id);
-      recipe.manufactured++; state.ledger.crafted++;
+      knowledge.items.push(output);
+      // The completed paid experiment (or an already learned craft) earns instructions.
+      // Parent pins end with the project, so a full memory cannot stop a discovery.
+      knowledge.project = null;
+      rememberRecipe(knowledge, recipe.id, { capacity: technologyMemoryCapacity(state), protectedIds: [] });
+      updateTechnologyRecipeStats(host, recipe.id, { manufactured: 1 }); state.ledger.crafted++;
     } else { add(knowledge.residue, output.composition); add(residue, output.composition); success = false; }
   }
   if (!success) state.ledger.failures++;
@@ -377,6 +414,7 @@ function finishProject(host: TechnologyHost, actor: TechnologyActor, project: Te
     inputs: [...project.program.inputs.map(i => ({ resourceId: i.source === 'product' ? `recipe:${i.recipeId}` : `${i.source}:${i.material}`, mass: i.mass })), ...plan.fuelInputs], outputs,
     residueMass: mass(residue), energy: project.energyPaid, work: project.progress, success, parentRecipeIds: project.parents,
     catalysts, benefit: 0, nestedExecutionIds: Array.from({ length: state.executionCounter - transactionStart }, (_, n) => `process-${transactionStart + n + 1}`), balance: { opening, closing: technologyStock(actor), externalInputs: compositionResources(plan.imported, 'raw'), externalLoss: compositionResources(plan.fuel, 'spent') } });
+  knowledge.project = null; maintainTechnologyMemory(host, actor);
   return success;
 }
 function advanceProject(host: TechnologyHost, actor: TechnologyActor, kind: TechnologyProject['kind'], recipeId?: string, emit?: Emit): boolean {
@@ -386,12 +424,13 @@ function advanceProject(host: TechnologyHost, actor: TechnologyActor, kind: Tech
     let proposal: { program: TechnologyProgram; parents: string[] } | undefined;
     if (kind === 'research') { if (host.noveltyEnabled === false) return false; proposal = proposeTechnologyProgram(host, actor); }
     else {
-      const recipe = host.technology.recipes.find(r => r.id === recipeId && knowledge.knownRecipes.includes(r.id));
+      const recipe = recipeId && knowledge.knownRecipes.includes(recipeId) ? resolveTechnologyRecipe(host, recipeId) : undefined;
       if (recipe) proposal = { program: structuredClone(recipe.program), parents: [...recipe.parents] };
     }
     if (!proposal || !planWithdrawal(host, actor, proposal.program)) { knowledge.lastAttempt = host.tick; knowledge.attempts++; return false; }
     knowledge.project = { kind, program: proposal.program, parents: proposal.parents, recipeId: kind === 'craft' ? recipeId! : null, progress: 0,
       requiredWork: technologyWorkCost(proposal.program), energyPaid: 0, startedAt: host.tick };
+    for (const id of technologyProjectPins(knowledge)) touchKnownRecipe(knowledge, id);
   }
   const project = knowledge.project;
   if (project.kind !== kind || (kind === 'craft' && recipeId && project.recipeId !== recipeId)) return false;
@@ -411,22 +450,25 @@ export function cancelTechnologyProject(host: TechnologyHost, actor: TechnologyA
   host.technology.ledger.attempts++;host.technology.ledger.failures++;
   if(project.recipeId) {const practice=knowledge.competence[project.recipeId]??={attempts:0,successes:0,work:0,benefit:0};practice.attempts++;practice.work+=project.progress;}
   appendExecution(host,{kind:project.kind,actorId:actor.id,recipeId:project.recipeId,programSignature:programSignature(project.program),inputs:[],outputs:[],residueMass:0,energy:project.energyPaid,work:project.progress,success:false,parentRecipeIds:[...project.parents],catalysts:[],benefit:0,balance:{opening,closing:opening,externalInputs:[],externalLoss:[]}});
+  maintainTechnologyMemory(host, actor);
   return true;
 }
 export function craftTechnology(host: TechnologyHost, actor: TechnologyActor, recipeId?: string, emit?: Emit): boolean {
-  const selected = recipeId ?? actor.technology.project?.recipeId ?? host.technology.recipes
-    .filter(r => actor.technology.knownRecipes.includes(r.id) && planWithdrawal(host, actor, r.program))
+  const selected = recipeId ?? actor.technology.project?.recipeId ?? knownTechnologyRecipes(host, actor)
+    .filter(r => planWithdrawal(host, actor, r.program))
     .sort((a, b) => (actor.technology.competence[b.id]?.benefit ?? 0) - (actor.technology.competence[a.id]?.benefit ?? 0) || (actor.technology.competence[b.id]?.successes ?? 0) - (actor.technology.competence[a.id]?.successes ?? 0) || a.id.localeCompare(b.id))[0]?.id;
   return advanceProject(host, actor, 'craft', selected, emit);
 }
 export function shareTechnology(host: TechnologyHost, teacher: TechnologyActor, learner: TechnologyActor, emit?: Emit, recipeId?: string): boolean {
   if (host.cooperationEnabled === false || host.learningEnabled === false || teacher === learner || teacher.id === learner.id || distance(teacher, learner) > 2 || teacher.energy < 0.05) return false;
-  const recipe = host.technology.recipes.filter(r => (!recipeId || r.id === recipeId) && teacher.technology.knownRecipes.includes(r.id) && !learner.technology.knownRecipes.includes(r.id)).sort((a, b) => (teacher.technology.competence[b.id]?.benefit ?? 0) - (teacher.technology.competence[a.id]?.benefit ?? 0) || a.id.localeCompare(b.id))[0];
+  const recipe = knownTechnologyRecipes(host, teacher).filter(r => (!recipeId || r.id === recipeId) && !learner.technology.knownRecipes.includes(r.id)).sort((a, b) => (teacher.technology.competence[b.id]?.benefit ?? 0) - (teacher.technology.competence[a.id]?.benefit ?? 0) || a.id.localeCompare(b.id))[0];
   if (!recipe) return false;
-  learner.technology.knownRecipes.push(recipe.id); learner.technology.learnedFrom.push({ recipeId: recipe.id, teacherId: teacher.id, tick: host.tick });
-  if (learner.technology.learnedFrom.length > host.technology.budgets.maxRecipes) learner.technology.learnedFrom.shift();
+  if (!rememberRecipe(learner.technology, recipe.id, { capacity: technologyMemoryCapacity(host.technology), protectedIds: technologyProjectPins(learner.technology) }).remembered) return false;
+  learner.technology.learnedFrom.push({ recipeId: recipe.id, teacherId: teacher.id, tick: host.tick });
+  touchKnownRecipe(teacher.technology, recipe.id);
   teacher.energy = clamp(teacher.energy - 0.003); teacher.fatigue = clamp(teacher.fatigue + 0.002);
   host.technology.ledger.energy += 0.003; host.technology.ledger.work += 1; host.technology.ledger.shared++;
+  maintainTechnologyMemory(host, teacher); maintainTechnologyMemory(host, learner);
   (emit ?? host.emit)?.({ kind: 'learning', actors: [teacher.id, learner.id], x: teacher.x, y: teacher.y, source: 'simulation', text: `${teacher.name ?? teacher.id} mostró a ${learner.name ?? learner.id} las operaciones de ${recipe.name}.`, cause: 'Transmisión cercana de una receta realmente conocida; enseñar cuesta energía y no entrega productos ni materias primas.' });
   return true;
 }
@@ -441,6 +483,7 @@ export function transferTechnologyItem(host: TechnologyHost, from: TechnologyAct
   const common = { kind: 'transfer' as const, recipeId: item.recipeId, programSignature: '', residueMass: 0, energy: 0, work: 0, success: true, parentRecipeIds: [], catalysts: [], benefit: 0, transferId };
   appendExecution(host, { ...common, actorId: from.id, counterpartyId: to.id, inputs: resources, outputs: [], balance: { opening: senderOpening, closing: technologyStock(from), externalInputs: [], externalLoss: resources } });
   appendExecution(host, { ...common, actorId: to.id, counterpartyId: from.id, inputs: [], outputs: resources, balance: { opening: receiverOpening, closing: technologyStock(to), externalInputs: resources, externalLoss: [] } });
+  maintainTechnologyMemory(host, from); maintainTechnologyMemory(host, to);
   return true;
 }
 /** Death settles a physical estate before its owner is removed from the active population.
@@ -462,6 +505,7 @@ export function settleTechnologyEstate(host: TechnologyHost, actor: TechnologyAc
     const sent = appendExecution(host, { ...common, actorId: actor.id, counterpartyId: recipient.id, inputs: resources, outputs: [], balance: { opening: senderOpening, closing: technologyStock(actor), externalInputs: [], externalLoss: resources } });
     const received = appendExecution(host, { ...common, actorId: recipient.id, counterpartyId: actor.id, inputs: [], outputs: resources, balance: { opening: receiverOpening, closing: technologyStock(recipient), externalInputs: resources, externalLoss: [] } });
     result.executionIds.push(sent.id, received.id); result.transfers.push({ to: recipient.id, items: items.map(i => i.id), mass: resources.reduce((n, r) => n + r.mass, 0) });
+    maintainTechnologyMemory(host, recipient);
   }
   const opening = technologyStock(actor);
   if (opening.length) {
@@ -471,17 +515,18 @@ export function settleTechnologyEstate(host: TechnologyHost, actor: TechnologyAc
     result.executionIds.push(event.id);
   }
   actor.technology.project = null;
+  maintainTechnologyMemory(host, actor);
   return result;
 }
 export function projectTechnology(host: TechnologyHost): TechnologyView {
   const state = host.technology, all = host.people.flatMap(p => p.technology.items), composition = sum(all.map(i => i.composition)), residue = sum(host.people.map(p => p.technology.residue));
-  const importedMass = mass(state.ledger.imported), productMass = mass(composition), residueMass = mass(residue);
+  const importedMass = mass(state.ledger.imported), productMass = mass(composition), residueMass = mass(residue), totals = technologyCatalogueTotals(host);
   return { recipes: structuredClone(state.recipes), items: host.people.flatMap(p => p.technology.items.map(i => ({ id: i.id, ownerId: p.id, x: p.x, y: p.y, recipeId: i.recipeId, mass: i.mass, generation: i.generation, capacities: materialCapacities(i) }))),
-    dynamics: { attempts: state.ledger.attempts, failures: state.ledger.failures, recipes: state.recipes.length, products: all.length, generations: Math.max(0, ...state.recipes.map(r => r.generation)),
-      toolUses: state.ledger.toolUses, observedUtility: state.recipes.reduce((n, r) => n + r.utility, 0), shared: state.ledger.shared,
+    dynamics: { attempts: state.ledger.attempts, failures: state.ledger.failures, recipes: totals.recipes, products: all.length, generations: totals.maxGeneration,
+      toolUses: state.ledger.toolUses, observedUtility: totals.utility, shared: state.ledger.shared,
       importedMass, productMass, residueMass, massError: importedMass - productMass - residueMass - state.ledger.fuelMass - mass(state.ledger.estateLoss), estateLostMass: mass(state.ledger.estateLoss),
-      work: state.ledger.work, energy: state.ledger.energy, programDiversity: new Set(state.recipes.map(r => r.signature)).size,
-      functionalDiversity: new Set(state.recipes.map(r => functionalSignature(r.capacities))).size,
+      work: state.ledger.work, energy: state.ledger.energy, programDiversity: totals.recipes,
+      functionalDiversity: totals.functionalDiversity,
       reusedProducts: state.history.filter(e => ['research', 'craft'].includes(e.kind) && e.inputs.some(i => i.resourceId.startsWith('recipe:'))).length, historyDropped: state.historyDropped }, budgets: { ...state.budgets } };
 }
 
@@ -496,30 +541,38 @@ export function assertTechnology(host: TechnologyHost): void {
   for (const key of Object.keys(limits) as (keyof typeof limits)[]) if (!integer(state.budgets[key], limits[key]) || state.budgets[key] < 1) fail();
   if (!Array.isArray(state.recipes) || state.recipes.length > state.budgets.maxRecipes || !Array.isArray(state.history) || state.history.length > state.budgets.maxHistory) fail();
   for (const key of ['recipeCounter', 'itemCounter', 'executionCounter', 'historyDropped'] as const) if (!integer(state[key])) fail();
-  if (state.recipeCounter !== state.recipes.length || state.historyDropped + state.history.length !== state.executionCounter || state.ledger.attempts !== state.ledger.crafted + state.ledger.failures) fail();
+  if ((!catalogueEnabled(state) && state.recipeCounter !== state.recipes.length) || state.historyDropped + state.history.length !== state.executionCounter || state.ledger.attempts !== state.ledger.crafted + state.ledger.failures) fail();
+  try { assertTechnologyCatalogueState(host); } catch { fail(); }
   assertTechnologyJournal(state, host.tick);
   for (const [key, value] of Object.entries(state.ledger)) if (!['imported', 'estateLoss'].includes(key) && !(key === 'energy' ? finite(value) : integer(value))) fail();
   const recipeIds = new Set<string>(), signatures = new Set<string>();
-  for (const recipe of state.recipes) {
-    if (!recipe || typeof recipe.id !== 'string' || !/^recipe-\d+$/.test(recipe.id) || Number(recipe.id.slice(7)) > state.recipeCounter || recipeIds.has(recipe.id) || !validTechnologyProgram(recipe.program, state) || recipe.signature !== programSignature(recipe.program) || signatures.has(recipe.signature) || !integer(recipe.generation, state.budgets.maxGeneration) || recipe.generation < 1 || !integer(recipe.tick, host.tick) || !Array.isArray(recipe.parents) || recipe.parents.length > 6 || recipe.parents.some(id => !recipeIds.has(id)) || !integer(recipe.uses) || !finite(recipe.utility) || !integer(recipe.manufactured) || !recipe.capacities || !CAPABILITIES.every(c => finite(recipe.capacities[c], 1))) fail();
-    if (recipe.generation !== 1 + Math.max(0, ...recipe.parents.map(id => state.recipes.find(r => r.id === id)!.generation))) fail();
-    if (typeof recipe.name !== 'string' || recipe.name.length > 100 || typeof recipe.inventorId !== 'string' || recipe.inventorId.length > 100 || !Number.isFinite(recipe.x) || !Number.isFinite(recipe.y) || !['program', 'function', 'both'].includes(recipe.novelty) || new Set(recipe.parents).size !== recipe.parents.length || recipe.program.inputs.some(i => i.source === 'product' && (!recipeIds.has(i.recipeId!) || !recipe.parents.includes(i.recipeId!)))) fail();
+  const getRecipe = (id: string, at = host.tick): TechnologyRecipe | undefined => {
+    if (typeof id !== 'string' || !/^recipe-[1-9]\d*$/.test(id) || !integer(Number(id.slice(7)), state.recipeCounter)) return;
+    const recipe = resolveTechnologyRecipe(host, id, { cache: false });
+    return recipe && recipe.tick <= at ? recipe : undefined;
+  };
+  // Uncommitted definitions remain authoritative even after their display cache entry was evicted.
+  const pendingRecipes = state.catalogue?.pending ?? [], pendingIds = new Set(pendingRecipes.map(recipe => recipe.id));
+  for (const recipe of [...pendingRecipes, ...state.recipes.filter(recipe => !pendingIds.has(recipe.id))]) {
+    if (!recipe || typeof recipe.id !== 'string' || !/^recipe-[1-9]\d*$/.test(recipe.id) || !integer(Number(recipe.id.slice(7)), state.recipeCounter) || recipeIds.has(recipe.id) || !validTechnologyProgram(recipe.program, state) || recipe.signature !== programSignature(recipe.program) || signatures.has(recipe.signature) || !integer(recipe.generation, generationLimit(state)) || recipe.generation < 1 || !integer(recipe.tick, host.tick) || !Array.isArray(recipe.parents) || recipe.parents.length > 6 || recipe.parents.some(id => !getRecipe(id, recipe.tick) || Number(id.slice(7)) >= Number(recipe.id.slice(7))) || !integer(recipe.uses) || !finite(recipe.utility) || !integer(recipe.manufactured) || !recipe.capacities || !CAPABILITIES.every(c => finite(recipe.capacities[c], 1))) fail();
+    if (recipe.generation !== 1 + Math.max(0, ...recipe.parents.map(id => getRecipe(id, recipe.tick)!.generation))) fail();
+    if (typeof recipe.name !== 'string' || recipe.name.length > 100 || typeof recipe.inventorId !== 'string' || recipe.inventorId.length > 100 || !Number.isFinite(recipe.x) || !Number.isFinite(recipe.y) || !['program', 'function', 'both'].includes(recipe.novelty) || new Set(recipe.parents).size !== recipe.parents.length || recipe.program.inputs.some(i => i.source === 'product' && (!getRecipe(i.recipeId!, recipe.tick) || !recipe.parents.includes(i.recipeId!)))) fail();
     recipeIds.add(recipe.id); signatures.add(recipe.signature);
   }
   const itemIds = new Set<string>(); let current = empty();
   for (const actor of host.people) {
     const knowledge = actor.technology;
-    if (!knowledge || !Array.isArray(knowledge.items) || knowledge.items.length > state.budgets.maxItems || !Array.isArray(knowledge.knownRecipes) || knowledge.knownRecipes.length > state.budgets.maxRecipes || new Set(knowledge.knownRecipes).size !== knowledge.knownRecipes.length || knowledge.knownRecipes.some(id => !recipeIds.has(id)) || !composition(knowledge.residue) || !integer(knowledge.attempts) || !Number.isSafeInteger(knowledge.lastAttempt) || knowledge.lastAttempt < -120 || knowledge.lastAttempt > host.tick || !Array.isArray(knowledge.learnedFrom) || knowledge.learnedFrom.length > state.budgets.maxRecipes) fail();
+    if (!knowledge || !Array.isArray(knowledge.items) || knowledge.items.length > state.budgets.maxItems || !Array.isArray(knowledge.knownRecipes) || knowledge.knownRecipes.length > technologyMemoryCapacity(state) || new Set(knowledge.knownRecipes).size !== knowledge.knownRecipes.length || knowledge.knownRecipes.some(id => !getRecipe(id)) || !composition(knowledge.residue) || !integer(knowledge.attempts) || !Number.isSafeInteger(knowledge.lastAttempt) || knowledge.lastAttempt < -120 || knowledge.lastAttempt > host.tick || !Array.isArray(knowledge.learnedFrom) || knowledge.learnedFrom.length > technologyMemoryCapacity(state)) fail();
     add(current, knowledge.residue);
-    for (const learned of knowledge.learnedFrom) if (!recipeIds.has(learned.recipeId) || !knowledge.knownRecipes.includes(learned.recipeId) || !integer(learned.tick, host.tick) || typeof learned.teacherId !== 'string' || learned.teacherId === actor.id) fail();
+    for (const learned of knowledge.learnedFrom) if (!getRecipe(learned.recipeId, learned.tick) || !knowledge.knownRecipes.includes(learned.recipeId) || !integer(learned.tick, host.tick) || typeof learned.teacherId !== 'string' || learned.teacherId === actor.id) fail();
     if (!knowledge.competence || typeof knowledge.competence !== 'object') fail();
-    for (const [id, practice] of Object.entries(knowledge.competence)) if (!recipeIds.has(id) || !practice || !integer(practice.attempts) || !integer(practice.successes, practice.attempts) || !integer(practice.work) || !finite(practice.benefit)) fail();
+    for (const [id, practice] of Object.entries(knowledge.competence)) if (!getRecipe(id) || !practice || !integer(practice.attempts) || !integer(practice.successes, practice.attempts) || !integer(practice.work) || !finite(practice.benefit)) fail();
     for (const item of knowledge.items) {
-      if (!item || typeof item.id !== 'string' || !/^product-\d+$/.test(item.id) || Number(item.id.slice(8)) > state.itemCounter || itemIds.has(item.id) || !composition(item.composition) || item.mass !== mass(item.composition) || !integer(item.mass) || item.mass < 1 || !integer(item.initialMass) || item.initialMass < item.mass || !item.recipeId || !recipeIds.has(item.recipeId) || !integer(item.madeAt, host.tick) || !integer(item.generation, state.budgets.maxGeneration) || !item.properties || !Object.keys(rawProperties(empty())).every(k => finite(item.properties[k as keyof MaterialProperties], 1)) || !Array.isArray(item.parentItems) || item.parentItems.length > 16) fail();
+      if (!item || typeof item.id !== 'string' || !/^product-\d+$/.test(item.id) || Number(item.id.slice(8)) > state.itemCounter || itemIds.has(item.id) || !composition(item.composition) || item.mass !== mass(item.composition) || !integer(item.mass) || item.mass < 1 || !integer(item.initialMass) || item.initialMass < item.mass || !item.recipeId || !getRecipe(item.recipeId, item.madeAt) || !integer(item.madeAt, host.tick) || !integer(item.generation, generationLimit(state)) || item.generation !== getRecipe(item.recipeId, item.madeAt)?.generation || !item.properties || !Object.keys(rawProperties(empty())).every(k => finite(item.properties[k as keyof MaterialProperties], 1)) || !Array.isArray(item.parentItems) || item.parentItems.length > 16) fail();
       add(current, item.composition); itemIds.add(item.id);
     }
     const project = knowledge.project;
-    if (project !== null && (!project || !['research', 'craft'].includes(project.kind) || !validTechnologyProgram(project.program, state) || !integer(project.progress) || project.progress >= project.requiredWork || project.requiredWork !== technologyWorkCost(project.program) || !integer(project.startedAt, host.tick) || !finite(project.energyPaid) || !Array.isArray(project.parents) || project.parents.some(id => !recipeIds.has(id)) || (project.kind === 'research' && project.parents.some(id => !knowledge.knownRecipes.includes(id))) || (project.kind === 'craft' && (!knowledge.knownRecipes.includes(project.recipeId!) || state.recipes.find(r => r.id === project.recipeId)?.signature !== programSignature(project.program) || JSON.stringify(project.parents) !== JSON.stringify(state.recipes.find(r => r.id === project.recipeId)?.parents))))) fail();
+    if (project !== null && (!project || !['research', 'craft'].includes(project.kind) || !validTechnologyProgram(project.program, state) || !integer(project.progress) || project.progress >= project.requiredWork || project.requiredWork !== technologyWorkCost(project.program) || !integer(project.startedAt, host.tick) || !finite(project.energyPaid) || !Array.isArray(project.parents) || project.parents.length > 6 || new Set(project.parents).size !== project.parents.length || project.parents.some(id => !getRecipe(id, project.startedAt)) || (project.kind === 'research' && (project.recipeId !== null || project.parents.some(id => !knowledge.knownRecipes.includes(id)) || project.program.inputs.some(input => input.source === 'product' && !project.parents.includes(input.recipeId!)))) || (project.kind === 'craft' && (!knowledge.knownRecipes.includes(project.recipeId!) || getRecipe(project.recipeId!, project.startedAt)?.signature !== programSignature(project.program) || JSON.stringify(project.parents) !== JSON.stringify(getRecipe(project.recipeId!, project.startedAt)?.parents))))) fail();
   }
   current.wood += state.ledger.fuelMass; add(current, state.ledger.estateLoss);
   if (MATERIALS.some(m => current[m] !== state.ledger.imported[m])) fail();
@@ -532,12 +585,13 @@ export function assertTechnology(host: TechnologyHost): void {
     const total = (rs: ResourceMass[]) => rs.reduce((n, r) => n + r.mass, 0);
     if (total(e.balance.opening) + total(e.balance.externalInputs) !== total(e.balance.closing) + total(e.balance.externalLoss)) fail();
     const serial = Number(e.id.slice(8));
-    if (!/^process-\d+$/.test(e.id) || !integer(serial, state.executionCounter) || serial !== previousSerial + 1 || !['research', 'craft', 'use', 'recycle', 'estate', 'transfer'].includes(e.kind) || typeof e.actorId !== 'string' || e.actorId.length > 100 || !(e.recipeId === null || recipeIds.has(e.recipeId)) || !Array.isArray(e.parentRecipeIds) || e.parentRecipeIds.length > 6 || e.parentRecipeIds.some(id => !recipeIds.has(id)) || !Array.isArray(e.catalysts) || e.catalysts.length > state.budgets.maxSteps || e.catalysts.some(c => typeof c.itemId !== 'string' || !(c.recipeId === null || recipeIds.has(c.recipeId)) || !integer(c.wear) || typeof c.required !== 'boolean' || !/^process-\d+$/.test(c.executionId))) fail();
+    if (!/^process-\d+$/.test(e.id) || !integer(serial, state.executionCounter) || serial !== previousSerial + 1 || !['research', 'craft', 'use', 'recycle', 'estate', 'transfer'].includes(e.kind) || typeof e.actorId !== 'string' || e.actorId.length > 100 || !(e.recipeId === null || getRecipe(e.recipeId, e.tick)) || !Array.isArray(e.parentRecipeIds) || e.parentRecipeIds.length > 6 || e.parentRecipeIds.some(id => !getRecipe(id, e.tick)) || !Array.isArray(e.catalysts) || e.catalysts.length > state.budgets.maxSteps || e.catalysts.some(c => typeof c.itemId !== 'string' || !(c.recipeId === null || getRecipe(c.recipeId, e.tick)) || !integer(c.wear) || typeof c.required !== 'boolean' || !/^process-\d+$/.test(c.executionId))) fail();
     if (e.nestedExecutionIds !== undefined && (!Array.isArray(e.nestedExecutionIds) || e.nestedExecutionIds.length > state.budgets.maxSteps + 1 || new Set(e.nestedExecutionIds).size !== e.nestedExecutionIds.length || e.nestedExecutionIds.some(id => !/^process-\d+$/.test(id) || Number(id.slice(8)) >= serial || !integer(Number(id.slice(8)), state.executionCounter)))) fail();
     if (e.kind === 'transfer' && (typeof e.transferId !== 'string' || !/^transfer-\d+$/.test(e.transferId) || typeof e.counterpartyId !== 'string' || e.counterpartyId === e.actorId)) fail();
     previousSerial = serial;
     executionIds.add(e.id);
   }
-  if (state.recipes.reduce((n, r) => n + r.manufactured, 0) !== state.ledger.crafted || state.recipes.reduce((n, r) => n + r.uses, 0) !== state.ledger.toolUses) fail();
+  const totals = technologyCatalogueTotals(host);
+  if (totals.manufactured !== state.ledger.crafted || totals.uses !== state.ledger.toolUses) fail();
   assertTechnologyCheckpoint(state, host.tick);
 }

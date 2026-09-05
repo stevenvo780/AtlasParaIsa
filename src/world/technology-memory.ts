@@ -14,8 +14,8 @@ const recipeId = (value: unknown): value is string => typeof value === 'string' 
 const fail = (): never => { throw new TypeError('Invalid recipe memory input.'); };
 
 /** Validate the fields read or changed here; physical laws remain the host's responsibility. */
-function assertMemory(knowledge: TechnologyKnowledge, id: string): void {
-  if (!record(knowledge) || !recipeId(id) || !Array.isArray(knowledge.knownRecipes) || knowledge.knownRecipes.length > 256 ||
+function assertMemory(knowledge: TechnologyKnowledge, id?: string): void {
+  if (!record(knowledge) || (id !== undefined && !recipeId(id)) || !Array.isArray(knowledge.knownRecipes) || knowledge.knownRecipes.length > 256 ||
     ![...knowledge.knownRecipes].every(recipeId) || new Set(knowledge.knownRecipes).size !== knowledge.knownRecipes.length ||
     !Array.isArray(knowledge.items) || ![...knowledge.items].every(item => record(item) && (item.recipeId === null || recipeId(item.recipeId))) ||
     !Array.isArray(knowledge.learnedFrom) || !record(knowledge.competence)) fail();
@@ -28,6 +28,19 @@ function assertMemory(knowledge: TechnologyKnowledge, id: string): void {
       practice.successes > practice.attempts || !integer(practice.work) || typeof practice.benefit !== 'number' ||
       !Number.isFinite(practice.benefit) || practice.benefit < 0) fail();
   }
+}
+
+/** Work in progress pins instructions, never grants them to an unfamiliar holder. */
+export function technologyProjectPins(knowledge: TechnologyKnowledge): string[] {
+  const project = knowledge.project;
+  return project ? [...new Set([...(project.recipeId ? [project.recipeId] : []), ...project.parents])] : [];
+}
+
+/** Forget practice once neither instructions, an artifact nor a paid project supports it. */
+export function pruneTechnologyCompetence(knowledge: TechnologyKnowledge): void {
+  assertMemory(knowledge);
+  const supported = new Set([...knowledge.knownRecipes, ...knowledge.items.flatMap(item => item.recipeId ? [item.recipeId] : []), ...technologyProjectPins(knowledge)]);
+  for (const id of Object.keys(knowledge.competence)) if (!supported.has(id)) delete knowledge.competence[id];
 }
 
 /** Refresh instructions already held, oldest first. An unknown ID is never admitted. */

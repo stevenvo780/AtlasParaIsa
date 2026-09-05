@@ -1,6 +1,6 @@
 # Ciencia, modelos y comprobaciones
 
-Estas referencias orientan mecanismos y preguntas del [objetivo rector](../PLAN.md#objetivo-rector). **V5 `6d0e53b` está activo en la revisión privada**, con reemplazo generacional observado en dos ventanas de veinticinco días. La aplicación no reproduce organismos ni acredita sentimientos, conciencia o fidelidad biográfica. Las unidades y fórmulas son decisiones de diseño comprobables. [EVIDENCIA.md](EVIDENCIA.md) conserva la comparación corregida, la extinción anterior y los límites de continuidad y autonomía.
+Estas referencias orientan mecanismos y preguntas del [objetivo rector](../GOAL.md). **V5 `6d0e53b` está activo en la revisión privada**, con reemplazo generacional observado en dos ventanas de veinticinco días. La aplicación no reproduce organismos ni acredita sentimientos, conciencia o fidelidad biográfica. Las unidades y fórmulas son decisiones de diseño comprobables. [EVIDENCIA.md](EVIDENCIA.md) conserva la comparación corregida, la extinción anterior y los límites de continuidad y autonomía.
 
 ## Necesidades y aprendizaje
 

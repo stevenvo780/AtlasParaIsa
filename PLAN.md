@@ -2,24 +2,7 @@
 
 ## Objetivo rector
 
-Construir **un mundo compartido que sea una carta íntima de Steven para Isa**, donde S e I conserven su lugar y puedan surgir historias nuevas. Reglas físicas, biológicas y locales simples y composables, con invariantes comprensibles, deben permitir que sus habitantes descubran usos a partir de propiedades, forma y material; inventen herramientas, estructuras, procesos y cooperaciones con efectos reales; y mantengan, reparen y mejoren sus condiciones de vida sin supervisión cotidiana. La aspiración es ampliar combinaciones y evolución abierta: pueden emerger procedimientos, usos y convenciones dentro de esas reglas, sin suponer que se reescriben solas las leyes físicas ni prometer cómputo infinito, conciencia o autopoiesis por el nombre de un indicador.
-
-La ecología y la fauna tendrán cuerpos, consumo finito y consecuencias sobre el entorno. Biomas y celdas deben mostrar estados comprensibles de suelo, agua y vegetación; árboles con escala y densidad coherentes y construcciones con diversidad estructural y funcional. Las técnicas deberán cambiar posibilidades de cultivo, caza, refugio, transformación ambiental y relación social. El desgaste y la reparación formarán parte de esas consecuencias.
-
-Herencia, memoria y aprendizaje sostendrán reemplazo generacional, transmisión y pérdida de conocimientos, redescubrimiento, cultura, conflictos e instituciones adaptativas. La organización social deberá responder a trabajo, necesidades y dependencias observables, sin asignar de antemano el desenlace de cada comunidad. La identidad personal de la carta y sus recuerdos autorizados permanecerán dentro de ese mundo.
-
-Un backend autoritativo mantendrá el mismo territorio y reloj para todos, independientemente de sus cámaras. La continuidad de regiones lejanas deberá tener una política explícita y verificable. Su escala crecerá con presupuestos medidos de CPU, memoria, disco y red; se evaluarán multinúcleo y las dos GPU disponibles cuando mejoren coste y fidelidad frente al motor de referencia. La interfaz requiere un refactor profundo coherente con las capacidades: explorar, seguir, controlar e inspeccionar causas, historia y estadísticas, con calidad visual y animaciones vinculadas a hechos del servidor.
-
-El avance se juzgará por resultados que puedan fallar:
-
-- **Novedad ejecutable:** procedimientos y combinaciones útiles que no estén enumerados individualmente en el código; apariencia y cantidad de nombres no bastan.
-- **Utilidad causal:** al retirar una herramienta, propiedad, productor o cooperación necesarios cambia el resultado material; al restaurarlos puede recuperarse mediante procesos reales.
-- **Costes y conservación:** extracción, trabajo, energía, transformación, desgaste, residuos y pérdidas explícitos, con reposición comprobada durante varios recambios.
-- **Continuidad social y biológica:** varias semillas y generaciones sin rescates, transmisión aprendida, pérdida del último conocedor y redescubrimiento pagado, distinguidos de herencia genética y supervivencia protegida de S e I.
-- **Memoria y escala:** conocimiento local finito, referencias durables y archivo recuperable sin crecimiento ilimitado de RAM; rendimiento y equivalencia medidos antes de ampliar población o acelerar cálculo.
-- **Experiencia comprensible:** inspección de causas y efectos en el mundo compartido, controles y escala visual coherentes, y revisión íntima y en teléfono físico antes de declarar terminada la carta.
-
-Este es el objetivo del proyecto, con trabajo pendiente; las secciones siguientes distinguen su implementación y evidencia.
+[GOAL.md](GOAL.md) contiene la **meta completa lista para copiar**, sus criterios de aceptación y las condiciones de cierre. Es la única fuente del objetivo del proyecto. Este plan conserva las ideas acumuladas, el alcance, el estado y el orden de trabajo; una capacidad implementada o una prueba aprobada no equivale a completar la meta.
 
 ## Estado actual
 
@@ -164,7 +147,8 @@ Un tema tiene una referencia canónica y los demás documentos la enlazan. No cr
 
 | Referencia canónica | Responsabilidad |
 |---|---|
-| [PLAN.md](PLAN.md) | Visión, ideas acumuladas, alcance y estado de trabajo. |
+| [GOAL.md](GOAL.md) | Objetivo rector listo para copiar, criterios de aceptación y condiciones de cierre. |
+| [PLAN.md](PLAN.md) | Ideas acumuladas, alcance, orden y estado de trabajo. |
 | [README.md](README.md) | Arranque, acceso, operación y recuperación. |
 | [REGLAS.md](docs/REGLAS.md) | Mecánicas, fórmulas, costes, límites y condiciones del modelo implementado. |
 | [CONSTRUCCION.md](docs/CONSTRUCCION.md) | Arquitectura, persistencia, contratos e integración. |

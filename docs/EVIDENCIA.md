@@ -2,7 +2,7 @@
 
 Fecha de corte: **5 de septiembre de 2026**. El servicio privado ejecuta **V5 `6d0e53b`, SQLite 3**, con mundo nuevo y acceso conservado; el V4 inválido quedó archivado íntegro. Dos réplicas de veinticinco días conservaron vecinos de octava generación, sin extinción vecinal. Persisten saturación tecnológica y mantenimiento material sin acreditar. **MAIN `c7796ec`, SQLite 4, es candidato sin desplegar**: archivo, aperturas e índice ecológico de `c3cf1de`, más paisaje e interfaz renovados. Conserva reglas/protocolo 5. Las réplicas largas no incluyen estos cambios. La activación inicial V5 no fue una migración exitosa del estado V4.
 
-Este documento conserva resultados y límites frente al [objetivo rector](../PLAN.md#objetivo-rector); [REGLAS](REGLAS.md) define mecanismos, [CIENCIA](CIENCIA.md) su interpretación y [CONSTRUCCION](CONSTRUCCION.md#arquitectura-de-autonomía-avances-y-trabajo-pendiente) el estado de arquitectura y trabajo pendiente. Git conserva los cierres anteriores, sin documentos históricos paralelos.
+Este documento conserva resultados y límites frente al [objetivo rector](../GOAL.md); [REGLAS](REGLAS.md) define mecanismos, [CIENCIA](CIENCIA.md) su interpretación y [CONSTRUCCION](CONSTRUCCION.md#arquitectura-de-autonomía-avances-y-trabajo-pendiente) el estado de arquitectura y trabajo pendiente. Git conserva los cierres anteriores, sin documentos históricos paralelos.
 
 ## V5 activo: alcance de la verificación
 

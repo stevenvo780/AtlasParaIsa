@@ -1,6 +1,6 @@
 # Cómo construir y comprobar la primera entrega
 
-Referencia de alcance: [objetivo rector de PLAN](../PLAN.md#objetivo-rector). Referencia de comportamiento: [EXPERIENCIA.md](EXPERIENCIA.md).
+Referencia de alcance: [objetivo rector](../GOAL.md). Referencia de comportamiento: [EXPERIENCIA.md](EXPERIENCIA.md).
 
 Estado de la revisión: **V5 `6d0e53b` activo con SQLite 3 y acceso conservado**. **MAIN `c7796ec`, sin desplegar**, incorpora aperturas de inventario, archivo tecnológico en SQLite 4, índice ecológico en CPU y renovación de interfaz y paisaje. Reglas y protocolo siguen en 5. Tecnología y demografía tienen reemplazo generacional observado en dos réplicas de veinticinco días del código activo; catálogo finito y mantenimiento material sin acreditar siguen limitando la autonomía. [README](../README.md) conserva operaciones y [EVIDENCIA](EVIDENCIA.md) pruebas, candidatos y archivo íntegro del V4 inválido. Los recuerdos son sintéticos; no hay alojamiento definitivo contratado.
 

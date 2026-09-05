@@ -1,6 +1,6 @@
 # Experiencia, interacción y voz
 
-Este documento desarrolla la interacción y la voz del [objetivo rector](../PLAN.md#objetivo-rector). **V5 `6d0e53b` está activo en la revisión privada**, con reemplazo generacional observado en dos réplicas de veinticinco días. MAIN incorpora un nuevo cuaderno de navegación y paisaje, todavía sin desplegar; se describen abajo como candidato. [REGLAS.md](REGLAS.md) conserva mecánicas y [EVIDENCIA.md](EVIDENCIA.md) resultados y límites. Las escenas propuestas no garantizan desenlaces ni continuidad indefinida. Calidad final, voz de Steven, biografía aprobada y teléfono físico siguen pendientes.
+Este documento desarrolla la interacción y la voz del [objetivo rector](../GOAL.md). **V5 `6d0e53b` está activo en la revisión privada**, con reemplazo generacional observado en dos réplicas de veinticinco días. MAIN incorpora un nuevo cuaderno de navegación y paisaje, todavía sin desplegar; se describen abajo como candidato. [REGLAS.md](REGLAS.md) conserva mecánicas y [EVIDENCIA.md](EVIDENCIA.md) resultados y límites. Las escenas propuestas no garantizan desenlaces ni continuidad indefinida. Calidad final, voz de Steven, biografía aprobada y teléfono físico siguen pendientes.
 
 ## Entrar, explorar y volver
 

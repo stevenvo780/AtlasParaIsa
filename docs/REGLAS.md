@@ -1,6 +1,6 @@
 # Reglas del prototipo
 
-Estas reglas describen **V5 `6d0e53b` activo en la revisión privada**, incluida la preparación alimentaria local. Las secciones de aperturas y recibos durables identifican el candidato MAIN, todavía sin desplegar; archivo, índice ecológico e interfaz mantienen reglas/protocolo 5. Dos réplicas de veinticinco días conservaron reemplazo generacional; [EVIDENCIA.md](EVIDENCIA.md) separa lo probado, observado y activo. El [objetivo rector](../PLAN.md#objetivo-rector) conserva las capacidades pendientes. Las unidades del modelo no tienen equivalencia biológica demostrada ni puntúan el amor. La memoria y las diferencias provisionales de S e I esperan la voz de Steven.
+Estas reglas describen **V5 `6d0e53b` activo en la revisión privada**, incluida la preparación alimentaria local. Las secciones de aperturas y recibos durables identifican el candidato MAIN, todavía sin desplegar; archivo, índice ecológico e interfaz mantienen reglas/protocolo 5. Dos réplicas de veinticinco días conservaron reemplazo generacional; [EVIDENCIA.md](EVIDENCIA.md) separa lo probado, observado y activo. El [objetivo rector](../GOAL.md) conserva las capacidades pendientes. Las unidades del modelo no tienen equivalencia biológica demostrada ni puntúan el amor. La memoria y las diferencias provisionales de S e I esperan la voz de Steven.
 
 ## Tiempo, paisaje y recursos
 

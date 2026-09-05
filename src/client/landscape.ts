@@ -13,7 +13,7 @@
 import { PROTOCOL_VERSION } from '../shared/types.js';
 import type { AnimalView, PersonView, PlaceView, StructureView, Terrain, Tile, Viewport, WorldView } from '../shared/types.js';
 import { BoundedCache, GpuTerrain, type GpuStatus, type TerrainRaster } from './gpu-terrain.js';
-import { animalActions, speciesNames, paintAnimal, paintStructure } from './life-art.js';
+import { animalActions, speciesNames, paintAnimal, paintStructure, paintTree, treeForm, type TreeForm } from './life-art.js';
 import { animalPose, daylightAt, newEventAccents, VISUAL_BUDGET, EVENT_LIFETIME_MS, type EventAccent } from './visual-state.js';
 import type { Capability } from '../shared/technology.js';
 
@@ -40,7 +40,7 @@ export type SelectHandler = (selection: LandscapeSelection) => void;
 const ART = 16;
 const CHUNK_ART_TILES = 8;
 const TERRAIN_CACHE_LIMIT = 128; // 8 MiB CPU rasters; at most 8 MiB GPU textures.
-const SPRITE_CACHE_LIMIT = 512; // 2 MiB of 32 × 32 RGBA sprites.
+const SPRITE_CACHE_LIMIT = 320; // At most 1.875 MiB of 32 × 48 RGBA sprites.
 const MAX_ZOOM = 84;
 /** Radio de acierto al tocar una persona, en tiles. */
 const PERSON_HIT = 0.65;
@@ -288,6 +288,7 @@ interface Sprite {
   tile?: Tile;
   animal?: RenderAnimal;
   structure?: StructureView;
+  tree?: TreeForm;
 }
 
 export interface RenderDiagnostics {
@@ -296,6 +297,7 @@ export interface RenderDiagnostics {
   textureUploads: number; gpuTextureBytes: number;
   terrainBuilds: number; spriteBuilds: number;
   visibleAnimals: number; visibleStructures: number;
+  bodyCutaways: number;
   effects: { water: number; vegetation: number; rain: number; events: number; shadows: number };
   effectBudget: typeof VISUAL_BUDGET;
 }
@@ -328,7 +330,8 @@ export class Landscape {
   private readonly terrainCache = new BoundedCache<GroundChunk>(TERRAIN_CACHE_LIMIT, (chunk, key) => {
     this.gpu?.drop(key); chunk.canvas.width = chunk.canvas.height = 0;
   });
-  private readonly spriteCache = new BoundedCache<HTMLCanvasElement>(SPRITE_CACHE_LIMIT, canvas => { canvas.width = canvas.height = 0; });
+  private spriteBytes = 0;
+  private readonly spriteCache = new BoundedCache<HTMLCanvasElement>(SPRITE_CACHE_LIMIT, canvas => { this.spriteBytes -= canvas.width * canvas.height * 4; canvas.width = canvas.height = 0; });
   private chunks: GroundChunk[] = [];
   private cacheBuilds = 0;
   private spriteBuilds = 0;
@@ -339,6 +342,7 @@ export class Landscape {
   private visibleTiles = 0;
   private visibleAnimals = 0;
   private visibleStructures = 0;
+  private bodyCutaways = 0;
   private drawCalls = 0;
   private sceneRevision = 0;
   private sceneKey = '';
@@ -378,6 +382,7 @@ export class Landscape {
 
   private layer: OverlayLayer = 'none';
   private selection: LandscapeSelection | null = null;
+  private pickMode: 'ground' | 'inspect' = 'ground';
   private pendingTarget: { x: number; y: number } | null = null;
 
   private dpr = 1;
@@ -556,13 +561,16 @@ export class Landscape {
 
   camera(): { x: number; y: number; zoom: number } { return { ...this.cam }; }
 
+  /** Orders retain geographic targets. Only explicit inspection follows a canopy to its root. */
+  setPickMode(mode: 'ground' | 'inspect'): void { this.pickMode = mode; }
+
   /** CPU submission time, actual RAF rate, and detected backend; not a GPU timer. */
   getDiagnostics(): RenderDiagnostics {
     return { fps: this.fps, frameMs: this.frameMs, backend: this.gpu.active ? 'webgl2' : 'canvas2d-cached', gpuStatus: this.gpu.status, gpuLabel: this.gpu.label || undefined,
       visibleTiles: this.visibleTiles, drawCalls: this.drawCalls + this.gpu.drawCalls, cacheBuilds: this.cacheBuilds + this.spriteBuilds,
-      cacheEntries: this.terrainCache.size + this.spriteCache.size, cacheBytes: this.terrainCache.size * 128 * 128 * 4 + this.spriteCache.size * 32 * 32 * 4,
+      cacheEntries: this.terrainCache.size + this.spriteCache.size, cacheBytes: this.terrainCache.size * 128 * 128 * 4 + this.spriteBytes,
       textureUploads: this.gpu.uploads, gpuTextureBytes: this.gpu.textureCount * 128 * 128 * 4, terrainBuilds: this.cacheBuilds, spriteBuilds: this.spriteBuilds, visibleAnimals: this.visibleAnimals, visibleStructures: this.visibleStructures,
-      effects: { ...this.effects }, effectBudget: VISUAL_BUDGET };
+      bodyCutaways: this.bodyCutaways, effects: { ...this.effects }, effectBudget: VISUAL_BUDGET };
   }
 
   /** Extra pequeño: permite que la barra lateral resalte a quien se elige en una tarjeta. */
@@ -669,7 +677,11 @@ export class Landscape {
       const t = this.tileAt(x, y);
       if (!t) { acc(-1); continue; }
       for (const value of `${t.terrain}:${t.biome ?? ''}:${t.feature ?? ''}`) acc(value.charCodeAt(0));
-      for (const value of [t.moisture, t.vegetation, t.food, t.growth ?? 1, t.cultivation ?? 0, t.traffic ?? 0, t.drinkingWater ?? 0, t.life ?? 0]) acc(Math.round(clamp01(value) * 12));
+      for (const value of [t.moisture, t.vegetation, t.food, t.growth ?? 1, t.fertility ?? .5, t.cultivation ?? 0, t.traffic ?? 0, t.drinkingWater ?? 0, t.life ?? 0]) acc(Math.round(clamp01(value) * 12));
+      // Preserve visible on/off boundaries even when both values share a coarse color bucket.
+      for (const active of [(t.traffic ?? 0) > .12, (t.cultivation ?? 0) > .08, (t.drinkingWater ?? 0) > .04,
+        (t.growth ?? t.vegetation) > .15, (t.growth ?? t.vegetation) > .25, t.vegetation > .04,
+        (t.life ?? 0) > .45, t.vegetation > .25, t.food > .3, t.food > .72]) acc(active ? 1 : 0);
       acc(Math.round((t.wood ?? 0) * 2)); acc(Math.round((t.stone ?? 0) * 2)); acc(t.variety ?? 0);
     }
     return h;
@@ -738,60 +750,37 @@ export class Landscape {
       return;
     }
 
-    if (terrain === 'soil') {
-      const base = tile?.biome === 'desert' ? mix(P.sand, P.soilLight, moisture * 0.5) : tile?.biome === 'mountain' ? mix(P.stone, P.stoneShade, 0.35) : mix(P.soilLight, P.soilDark, moisture * 0.7 + 0.1);
-      px(g, ox, oy, ART, ART, css(base));
-      for (let i = 0; i < 5; i++) {
-        const rx = ox + Math.floor(rnd(x, y, 110 + i) * ART);
-        const ry = oy + Math.floor(rnd(x, y, 150 + i) * ART);
-        const light = rnd(x, y, 190 + i) > 0.55;
-        px(g, rx, ry, 1, 1, css(light ? lighten(base, 0.12) : darken(base, 0.12)));
-      }
-      // Guijarros ocasionales.
-      if (rnd(x, y, 231) > 0.78) {
-        const rx = ox + 3 + Math.floor(rnd(x, y, 232) * 9);
-        const ry = oy + 4 + Math.floor(rnd(x, y, 233) * 8);
-        px(g, rx, ry, 2, 1, css(P.stone));
-        px(g, rx, ry + 1, 2, 1, css(P.stoneShade));
-      }
-      return;
+    // State fields cover the cell itself: resource sprites cannot substitute for the ground.
+    const quantize = (value: number) => Math.round(clamp01(value) * 12) / 12;
+    const fertility = quantize(tile?.fertility ?? .5), dampness = quantize(moisture);
+    const cultivation = quantize(tile?.cultivation ?? 0), traffic = quantize(tile?.traffic ?? 0);
+    const cover = quantize(veg) * (1 - cultivation * .6) * (1 - traffic * .85);
+    const mineral = tile?.biome === 'desert' ? P.sand : tile?.biome === 'mountain' ? P.stoneShade : P.soilLight;
+    const humus = tile?.biome === 'wetland' ? rgb(88, 96, 68) : rgb(110, 91, 62);
+    const soil = darken(mix(mineral, humus, fertility * .65), dampness * .2);
+    const green = tile?.biome === 'wetland' ? rgb(81, 119, 99)
+      : tile?.biome === 'forest' ? rgb(91, 126, 75) : rgb(143, 165, 100);
+    const leaf = mix(green, rgb(180, 171, 113), (1 - dampness) * .45);
+    px(g, ox, oy, ART, ART, css(soil));
+    // Coarse, world-anchored patches cross cell borders; they do not create extra biomass.
+    for (let by = 0; by < ART; by += 4) for (let bx = 0; bx < ART; bx += 4) {
+      const patch = rnd(Math.floor((ox + bx) / 7), Math.floor((oy + by) / 7), 348);
+      const rooted = clamp01(cover * 1.6 - patch * .65) * (terrain === 'shelter' ? .25 : 1);
+      const c = mix(soil, leaf, rooted);
+      px(g, ox + bx, oy + by, 4, 4, css(mix(c, lighten(c, .09), patch)));
     }
-
-    if (terrain === 'shelter') {
-      const base = mix(P.shelterGround, P.soilDark, moisture * 0.35);
-      px(g, ox, oy, ART, ART, css(base));
-      // Suelo pisado: anillo de tierra más clara.
-      ellipse(g, ox + 8, oy + 9, 7, 5, css(lighten(base, 0.1)));
-      for (let i = 0; i < 10; i++) {
-        const rx = ox + Math.floor(rnd(x, y, 260 + i) * ART);
-        const ry = oy + Math.floor(rnd(x, y, 300 + i) * ART);
-        px(g, rx, ry, 1, 1, css(darken(base, 0.12)));
-      }
-      return;
+    const grains = 2 + Math.round(fertility * 3);
+    for (let i = 0; i < grains; i++) {
+      const rx = ox + Math.floor(rnd(x, y, 110 + i + (tile?.variety ?? 0)) * ART);
+      const ry = oy + Math.floor(rnd(x, y, 150 + i) * ART);
+      px(g, rx, ry, 1 + (i % 2), 1, css(darken(soil, .16), .35 + fertility * .25));
     }
-
-    // Pradera: de salvia pálida (poca vegetación) a musgo luminoso (mucha).
-    const base = tile?.biome === 'wetland' ? mix(rgb(132, 157, 108), rgb(69, 111, 86), veg * .8) : tile?.biome === 'forest' ? mix(P.sageLow, P.mossHigh, veg * .93) : mix(P.sageLow, P.mossHigh, veg * .72);
-    const damp = mix(base, darken(base, 0.1), moisture * 0.35);
-    px(g, ox, oy, ART, ART, css(damp));
-    const blades = 3 + Math.round(veg * 3);
+    const blades = Math.round(cover * 4);
     for (let i = 0; i < blades; i++) {
-      const rx = ox + Math.floor(rnd(x, y, 340 + i) * ART);
-      const ry = oy + Math.floor(rnd(x, y, 400 + i) * ART);
-      const r = rnd(x, y, 460 + i);
-      if (r > 0.62) {
-        px(g, rx, ry, 1, 2, css(mix(P.grassLight, damp, 0.72)));
-      } else if (r > 0.3) {
-        px(g, rx, ry, 2, 1, css(mix(P.grassDark, damp, 0.72)));
-      } else {
-        px(g, rx, ry, 1, 1, css(lighten(damp, 0.08)));
-      }
-    }
-    // Florecillas: raras, y sólo donde hay musgo vivo.
-    if (veg > 0.45 && rnd(x, y, 521) > 0.86) {
-      const fx = ox + 2 + Math.floor(rnd(x, y, 522) * 12);
-      const fy = oy + 2 + Math.floor(rnd(x, y, 523) * 12);
-      px(g, fx, fy, 1, 1, css(rnd(x, y, 524) > 0.5 ? P.paper : lighten(P.amber, 0.4)));
+      const rx = ox + 1 + Math.floor(rnd(x, y, 340 + i) * 13);
+      const ry = oy + 2 + Math.floor(rnd(x, y, 400 + i) * 12);
+      px(g, rx, ry, 1, 2, css(mix(leaf, P.grassLight, fertility * .3)));
+      if (cover > .6) px(g, rx + 1, ry + 1, 1, 1, css(darken(leaf, .15)));
     }
   }
 
@@ -802,13 +791,22 @@ export class Landscape {
     if (tile.terrain === 'water') { this.drawReeds(g, x, y, ox, oy, 0); return; }
     const traffic = clamp01(tile.traffic ?? 0);
     if (traffic > .12) {
-      for (let i = 0; i < 5; i++) px(g, ox + 1 + i*3, oy + 8 + Math.round(Math.sin(i + (tile.variety ?? 0)) * 2), 3, Math.max(1, Math.round(traffic * 4)), css(P.soilLight, .25 + traffic * .5));
+      const cx = ox + 8, cy = oy + 9;
+      g.save(); g.strokeStyle = css(P.soilLight, .35 + traffic * .45); g.lineWidth = 1 + Math.round(traffic * 5); g.lineCap = 'round';
+      g.beginPath();
+      for (const [dx, dy] of [[0,-1],[1,0],[0,1],[-1,0]]) if ((this.tileAt(x + dx!, y + dy!)?.traffic ?? 0) > .12) {
+        g.moveTo(cx, cy); g.lineTo(cx + dx! * 8, cy + dy! * 7);
+      }
+      g.stroke(); g.restore();
+      ellipse(g, cx, cy, 2 + traffic * 3, 1 + traffic * 1.4, css(P.soilLight, .35 + traffic * .4));
+      for (let i = 0; i < 3; i++) px(g, ox + 4 + i * 3, oy + 8 + (i + (tile.variety ?? 0)) % 3, 1, 1, css(P.trunkLight, traffic * .45));
     }
     const cultivation = clamp01(tile.cultivation ?? 0);
     if (cultivation > .08) {
-      for (let row = 0; row < 3; row++) {
-        px(g, ox+2, oy+5+row*3, 12, 2, css(P.soilDark, .7));
-        for (let plant = 0; plant < 4; plant++) if (growth > .15) px(g, ox+3+plant*3, oy+4+row*3, 1, 1 + Math.round(growth*2), css(mix(P.reed, P.grassLight, cultivation)));
+      for (let row = 0; row < 2 + Math.round(cultivation * 2); row++) {
+        px(g, ox+2, oy+3+row*3, 12, 2, css(P.soilDark, .5 + cultivation * .4));
+        px(g, ox+2, oy+3+row*3, 12, 1, css(P.trunkLight, .3));
+        for (let plant = 0; plant < 4; plant++) if (growth > .15 && tile.vegetation > .04) px(g, ox+3+plant*3, oy+2+row*3, 1, 1 + Math.round(growth*2), css(mix(P.reed, P.grassLight, clamp01(tile.moisture))));
       }
     }
     const water = clamp01(tile.drinkingWater ?? 0);
@@ -1102,13 +1100,14 @@ export class Landscape {
     const halfH = this.cssH / this.cam.zoom / 2;
     const x0 = Math.max(this.originX, Math.floor(this.cam.x - halfW) - 1);
     const x1 = Math.min(this.originX + this.worldW - 1, Math.ceil(this.cam.x + halfW) + 1);
-    const y0 = Math.max(this.originY, Math.floor(this.cam.y - halfH) - 2);
-    const y1 = Math.min(this.originY + this.worldH - 1, Math.ceil(this.cam.y + halfH) + 2);
+    const y0 = Math.max(this.originY, Math.floor(this.cam.y - halfH) - 3);
+    const y1 = Math.min(this.originY + this.worldH - 1, Math.ceil(this.cam.y + halfH) + 3);
 
     // Pixel-art decoration needs only eight poses/s. Moving people retain full RAF interpolation.
     // With reduced motion, a stationary snapshot costs one cached scene composite per frame.
     const pose = people.some(person => person.moving) || animals.some(animal => animal.moving) ? t : this.reduceMotion ? 0 : Math.floor(t * 8);
-    const sceneKey = `${this.sceneRevision}:${this.layer}:${x0}:${x1}:${y0}:${y1}:${pose}`;
+    const selectedBody = this.selection?.kind === 'animal' ? this.selection.id : '';
+    const sceneKey = `${this.sceneRevision}:${this.layer}:${x0}:${x1}:${y0}:${y1}:${pose}:${selectedBody}`;
     if (sceneKey === this.sceneKey) return;
     this.sceneKey = sceneKey;
     g.clearRect(0, 0, this.scene.width, this.scene.height);
@@ -1147,7 +1146,7 @@ export class Landscape {
               person: null,
             });
           } else if (!structuredTiles.has(`${x},${y}`)) {
-            this.collectTrees(sprites, x, y, ox, oy, clamp01(tile.vegetation));
+            this.collectTrees(sprites, x, y, ox, oy);
           }
         }
         if (world.animals === undefined && tile.species && (tile.fauna ?? 0) > .04) sprites.push({kind: SpriteKind.Fauna, sortY: oy + 11, ax: ox + 8, ay: oy + 11, seed: 0, size: 0, person: null, tile});
@@ -1180,13 +1179,47 @@ export class Landscape {
       for (const sprite of sprites) if (this.effects.shadows < VISUAL_BUDGET.shadows && (sprite.kind === SpriteKind.Structure || sprite.kind === SpriteKind.Person)) this.drawCastShadow(g, sprite);
       for (const sprite of sprites) if (this.effects.shadows < VISUAL_BUDGET.shadows && sprite.kind === SpriteKind.Tree && sprite.seed % 13 === 0) this.drawCastShadow(g, sprite);
     }
+    const inspectedAnimal = selectedBody ? animals.find(a=>a.view.id===selectedBody) : undefined;
+    const revealedBodies = [...people, ...(inspectedAnimal ? [inspectedAnimal] : [])];
+    const coveredPeople = new Set<string>();
+    const behind = (sprite: Sprite, height: number, width: number) => {
+      let intersects = false;
+      for (const body of revealedBodies) {
+        const x = body.x * ART + 8, foot = body.y * ART + 12;
+        if (foot < sprite.ay && Math.abs(x - sprite.ax) < width / 2 + 4
+          && foot + 2 > sprite.ay - height && foot - 14 < sprite.ay - 8) {
+          intersects = true;
+          if ('role' in body.view) coveredPeople.add(body.view.id);
+        }
+      }
+      return intersects;
+    };
     for (const s of sprites) {
-      if (s.kind === SpriteKind.Tree) this.drawCachedTree(g, s, t);
+      if (s.kind === SpriteKind.Tree) {
+        this.drawCachedTree(g, s, t, behind(s, s.tree!.height, s.tree!.width));
+      }
       else if (s.kind === SpriteKind.Hut) this.drawHut(g, s.ax, s.ay, s.seed);
       else if (s.animal) this.drawAnimal(g, s.animal, t);
-      else if (s.structure) this.drawStructure(g, s.structure);
+      else if (s.structure) {
+        const hidden = behind(s, 28, 30);
+        if (hidden) { g.save(); g.globalAlpha = .45; }
+        this.drawStructure(g, s.structure, t);
+        if (hidden) g.restore();
+      }
       else if (s.tile) this.drawFauna(g, s.tile, t);
       else if (s.person) this.drawPerson(g, s.person, t);
+    }
+    this.bodyCutaways = coveredPeople.size;
+    // Restore real bodies within a local cutaway. Contrast must not depend on selecting a person.
+    for (const person of people) if (coveredPeople.has(person.view.id)) {
+      const x = Math.round(person.x * ART + 8), y = Math.round(person.y * ART + 12);
+      g.save(); g.lineJoin = 'round'; g.beginPath();
+      g.moveTo(x - 3, y - 14); g.lineTo(x + 3, y - 14); g.lineTo(x + 3, y - 9);
+      g.lineTo(x + 5, y - 9); g.lineTo(x + 4, y + 1); g.lineTo(x - 4, y + 1);
+      g.lineTo(x - 5, y - 9); g.lineTo(x - 3, y - 9); g.closePath();
+      g.strokeStyle = css(P.ink, .8); g.lineWidth = 3; g.stroke();
+      g.strokeStyle = css(P.paper, .9); g.lineWidth = 1; g.stroke();
+      this.drawPerson(g, person, t); g.restore();
     }
     // Data stays visible over canopy, with people badges preserved above it.
     if (this.layer !== 'none') {
@@ -1201,7 +1234,7 @@ export class Landscape {
   /* -------------------------- decorado vivo ------------------------ */
 
   private drawCastShadow(g: CanvasRenderingContext2D, sprite: Sprite): void {
-    const height = sprite.kind === SpriteKind.Tree ? 1 + sprite.size : sprite.kind === SpriteKind.Structure ? 1.5 : .65;
+    const height = sprite.kind === SpriteKind.Tree ? sprite.size : sprite.kind === SpriteKind.Structure ? 1.8 : .65;
     const width = sprite.kind === SpriteKind.Person ? 2.5 : 4;
     const { shadowX, shadowY, shadowAlpha } = this.lighting;
     g.fillStyle = css(P.shadow, shadowAlpha); g.beginPath();
@@ -1223,16 +1256,34 @@ export class Landscape {
     const pose = animalPose(animal.view, animal.moving, t + hash3(animal.view.id.length, animal.view.id.charCodeAt(animal.view.id.length-1), 48) % 13, this.reduceMotion, this.actionActive);
     const key = `animal:${animal.view.species}:${animal.view.action}:${pose}`;
     let art = this.spriteCache.get(key);
-    if (!art) { art = document.createElement('canvas'); art.width = art.height = 32; paintAnimal(art.getContext('2d')!, animal.view.species, animal.view.action, pose); this.spriteCache.set(key, art); this.spriteBuilds++; }
+    if (!art) { art = document.createElement('canvas'); art.width = art.height = 32; paintAnimal(art.getContext('2d')!, animal.view.species, animal.view.action, pose); this.cacheSprite(key, art); }
     g.save(); g.translate(Math.round(animal.x * ART + 8), Math.round(animal.y * ART + 12)); if (animal.left) g.scale(-1, 1);
     g.drawImage(art, -16, -26); g.restore(); this.drawCalls++;
   }
 
-  private drawStructure(g: CanvasRenderingContext2D, structure: StructureView): void {
-    const key = `structure:${structure.components.join(',')}:${structure.condition < .3 ? 0 : structure.condition < .65 ? 1 : 2}:${Math.ceil(structure.water * 8)}:${Math.ceil(structure.food * 8)}`;
+  private structureRaster(structure: StructureView): HTMLCanvasElement {
+    const materials = this.curr?.blueprints?.find(b => b.id === structure.blueprintId)?.cost;
+    const ground = this.tileAt(structure.x, structure.y);
+    const cisterns = structure.components.filter(c=>c==='cistern').length, granaries = structure.components.filter(c=>c==='granary').length;
+    const waterLevel = clamp(Math.ceil(structure.water / Math.max(1, cisterns) / .6 * 5), 0, 5);
+    const foodLevel = clamp(Math.ceil(structure.food / Math.max(1, granaries) / .7 * 4), 0, 4);
+    const planted = ground && (ground.cultivation ?? 0) > .08 && ground.vegetation > .1 && (ground.growth ?? ground.vegetation) > .15;
+    const key = `structure:${structure.components.slice().sort().join(',')}:${structure.condition < .3 ? 0 : structure.condition < .65 ? 1 : 2}:${waterLevel}:${foodLevel}:${materials?.wood ?? 0}:${materials?.stone ?? 0}:${!!planted}:${(ground?.moisture ?? 0) > .3}`;
     let art = this.spriteCache.get(key);
-    if (!art) { art = document.createElement('canvas'); art.width = art.height = 32; paintStructure(art.getContext('2d')!, structure); this.spriteCache.set(key, art); this.spriteBuilds++; }
+    if (!art) { art = document.createElement('canvas'); art.width = art.height = 32; paintStructure(art.getContext('2d')!, structure, {materials,ground}); this.cacheSprite(key, art); }
+    return art;
+  }
+
+  private drawStructure(g: CanvasRenderingContext2D, structure: StructureView, t = 0): void {
+    const art = this.structureRaster(structure);
     g.drawImage(art, Math.round(structure.x * ART + 8) - 16, Math.round(structure.y * ART + 13) - 29); this.drawCalls++;
+    const previous = this.prev?.structures?.find(s => s.id === structure.id);
+    if (!this.reduceMotion && this.actionActive && this.curr?.weather === 'rain' && previous && structure.water > previous.water
+      && structure.components.includes('cistern') && this.effects.water < VISUAL_BUDGET.water) {
+      const drop = Math.floor(t * 8) % 5;
+      px(g, structure.x * ART + 19, structure.y * ART - 3 + drop, 1, 2, css(P.waterGleam));
+      this.effects.water++;
+    }
   }
 
   private drawRipples(g: CanvasRenderingContext2D, x: number, y: number, ox: number, oy: number, t: number): void {
@@ -1295,60 +1346,50 @@ export class Landscape {
     }
   }
 
-  private collectTrees(sprites: Sprite[], x: number, y: number, ox: number, oy: number, veg: number): void {
-    const tile = this.tileAt(x,y);
-    const feature = tile?.feature;
-    if (feature && feature !== 'tree' && feature !== 'pine' && feature !== 'palm') return;
-    if (!feature && (veg < .42 || rnd(x, y, 1090) > veg*.62)) return;
-    if (feature && (tile?.wood ?? 1) <= .05) return;
-    const growth = clamp01(tile?.growth ?? veg);
-    const count = growth > .9 && (tile?.variety ?? 0) % 5 === 0 ? 2 : 1;
-    for (let i = 0; i < count; i++) {
-      const jx = ox + 3 + Math.floor(rnd(x, y, 1100 + i) * (ART - 6));
-      const jy = oy + 6 + Math.floor(rnd(x, y, 1140 + i) * (ART - 7));
-      const size = clamp(growth * .8 + rnd(x, y, 1180 + i) * .2, .1, 1);
-      sprites.push({
-        kind: SpriteKind.Tree,
-        sortY: jy,
-        ax: jx,
-        ay: jy,
-        seed: hash3(x * 7 + i, y, 1220),
-        size,
-        person: null,
-        feature,
-      });
-    }
+  private collectTrees(sprites: Sprite[], x: number, y: number, ox: number, oy: number): void {
+    const tile = this.tileAt(x, y);
+    if (!tile) return;
+    const sprite = this.treeSprite(tile, ox, oy);
+    if (sprite) sprites.push(sprite);
   }
 
-  private drawCachedTree(g: CanvasRenderingContext2D, sprite: Sprite, t: number): void {
-    const seed = sprite.seed % 6, size = Math.round(sprite.size * 3) / 3;
-    const moving = !this.reduceMotion && sprite.seed % 11 === 0 && this.effects.vegetation < VISUAL_BUDGET.vegetation;
-    if (moving) this.effects.vegetation++;
-    const pose = moving ? Math.round((Math.sin(t * .65 + sprite.ax * .013 + sprite.ay * .007) + 1)) : 1;
-    const feature = sprite.feature ?? 'tree';
-    const key = `tree:${feature}:${seed}:${size}:${pose}`;
+  private treeSprite(tile: Tile, ox = tile.x * ART, oy = tile.y * ART): Sprite | null {
+    const form = treeForm(tile);
+    if (!form) return null;
+    const {x,y} = tile;
+    // One visible woody patch per occupied cell; coordinate/variety jitter is stable while stocks change.
+    const seed = hash3(x, y, 1220 + form.variant * 83);
+    const patch = rnd(Math.floor(x / 3), Math.floor(y / 3), 1141);
+    const ax = ox + 2 + Math.round(rnd(x, y, 1100 + form.variant) * 8 + patch * 3);
+    const ay = oy + 6 + Math.round(rnd(x, y, 1140 + form.variant) * 7);
+    return { kind: SpriteKind.Tree, sortY: ay, ax, ay, seed, size: form.height / ART,
+      person: null, feature: form.kind, tree: form, tile };
+  }
+
+  private cacheSprite(key: string, canvas: HTMLCanvasElement): void {
+    this.spriteBytes += canvas.width * canvas.height * 4;
+    this.spriteCache.set(key, canvas); this.spriteBuilds++;
+  }
+
+  private treeRaster(form: TreeForm, pose: number): HTMLCanvasElement {
+    const key = `tree:${form.kind}:${form.variant}:${form.height}:${form.width}:${form.foliage}:${pose}`;
     let art = this.spriteCache.get(key);
     if (!art) {
-      art = document.createElement('canvas'); art.width = art.height = 32;
-      const pen = art.getContext('2d')!;
-      if (feature === 'pine') {
-        const height = 8+Math.round(size*12), half = 3+Math.round(size*4);
-        ellipse(pen,16,28,half,2,css(P.shadow,.22)); px(pen,15,23,2,4,css(P.trunk));
-        for(let row=0;row<height;row++){
-          const radius=Math.max(1,Math.round(row/height*half)), inset = row % 6 === 5 ? 1 : 0;
-          px(pen,16-radius+inset+(pose-1),26-height+row,(radius-inset)*2,1,css(P.canopyDark));
-          px(pen,16-radius+inset+(pose-1),26-height+row,Math.max(1,radius-1),1,css(row < height * .6 ? P.canopyMid : mix(P.canopyDark,P.canopyMid,.65)));
-        }
-        px(pen,15+(pose-1),26-height,1,3,css(P.canopyLight));
-      } else if (feature === 'palm') {
-        const height = 5+Math.round(size*8), top = 26-height;
-        ellipse(pen,16,28,5,2,css(P.shadow,.2)); px(pen,15,top,2,height,css(P.trunkLight));
-        for(let side=-1;side<=1;side+=2) for(let step=0;step<6;step++) px(pen,16+side*step+(pose-1),top-2+Math.floor(step*step/10),3,2,css(step%2?P.canopyMid:P.canopyLight));
-        px(pen,15,top-5,2,5,css(P.canopyMid));
-      } else this.drawTree(pen,16+(pose-1)*.5,27,seed,size,0);
-      this.spriteCache.set(key, art); this.spriteBuilds++;
+      art = document.createElement('canvas'); art.width = 32; art.height = 48;
+      paintTree(art.getContext('2d')!, form, pose); this.cacheSprite(key, art);
     }
-    g.drawImage(art, Math.round(sprite.ax)-16, Math.round(sprite.ay)-27); this.drawCalls++;
+    return art;
+  }
+
+  private drawCachedTree(g: CanvasRenderingContext2D, sprite: Sprite, t: number, occluded = false): void {
+    const moving = !this.reduceMotion && sprite.seed % 11 === 0 && this.effects.vegetation < VISUAL_BUDGET.vegetation;
+    if (moving) this.effects.vegetation++;
+    const pose = moving ? Math.round(Math.sin(t * .65 + sprite.ax * .013 + sprite.ay * .007) + 1) : 1;
+    const art = this.treeRaster(sprite.tree!, pose);
+    // A cutaway is a viewing aid: the body, stock, position and hit target remain unchanged.
+    if (occluded) { g.save(); g.globalAlpha = .38; }
+    g.drawImage(art, Math.round(sprite.ax) - 16, Math.round(sprite.ay) - 44); this.drawCalls++;
+    if (occluded) g.restore();
   }
 
   /** At most two representatives per occupied cell; stock and migration remain server data. */
@@ -1372,30 +1413,6 @@ export class Landscape {
         else {px(g,x+5,y,2,1,css(P.paper));px(g,x-4,y-1-pose,1,2,css(P.trunk));}
       }
     }
-  }
-
-  /** Copa por capas: base oscura, cuerpo medio, luz alta y motas — nunca un círculo plano. */
-  private drawTree(g: CanvasRenderingContext2D, ax: number, ay: number, seed: number, size: number, t: number): void {
-    const r = 3.2 + size * 4.2;
-    const trunkH = Math.round(3 + size * 4);
-    const sway = this.reduceMotion ? 0 : Math.sin(t * 0.7 + (seed % 100) / 16) * (0.5 + size * 0.7);
-    const sage = (seed & 7) === 0; // algún árbol de hoja salvia rompe el verde
-
-    ellipse(g, ax, ay + 1, r * 0.85, r * 0.32, css(P.shadow, 0.22));
-    px(g, ax - 1, ay - trunkH, 2, trunkH, css(P.trunk));
-    px(g, ax, ay - trunkH, 1, trunkH, css(P.trunkLight));
-
-    const cy = ay - trunkH - r * 0.55;
-    const cx = ax + sway;
-    const dark = sage ? mix(P.canopyDark, P.canopySage, 0.3) : P.canopyDark;
-    const mid = sage ? P.canopySage : P.canopyMid;
-    const light = sage ? lighten(P.canopySage, 0.2) : P.canopyLight;
-
-    ellipse(g, cx, cy + r * .28, r, r * .76, css(dark));
-    ellipse(g, cx - r * .25, cy, r * .75, r * .64, css(mid));
-    ellipse(g, cx + r * .34, cy - r * .14, r * .57, r * .65, css(mid));
-    ellipse(g, cx - r * .16, cy - r * .49, r * .57, r * .5, css(light));
-    ellipse(g, cx - r * .54, cy - r * .2, r * .35, r * .35, css(mix(light,mid,.25)));
   }
 
   private drawHut(g: CanvasRenderingContext2D, ax: number, ay: number, seed: number): void {
@@ -1900,6 +1917,28 @@ export class Landscape {
       this.selection = best;
       this.onSelect(this.selection);
       return;
+    }
+
+    // Tall artwork belongs to its root cell; overlays explicitly inspect the ground beneath it.
+    if (this.pickMode === 'inspect' && this.layer === 'none') {
+      const decorations: { x: number; y: number; foot: number; left: number; top: number; raster: () => HTMLCanvasElement }[] = [];
+      const cellX = Math.floor(w.x), cellY = Math.floor(w.y);
+      for (let y = cellY; y <= cellY + 3; y++) for (let x = cellX - 1; x <= cellX + 1; x++) {
+        const tile = this.tileAt(x, y), sprite = tile ? this.treeSprite(tile) : null;
+        if (sprite) decorations.push({x,y,foot:sprite.ay,left:Math.round(sprite.ax)-16,top:Math.round(sprite.ay)-44,raster:()=>this.treeRaster(sprite.tree!,1)});
+      }
+      for (const structure of world.structures ?? []) {
+        if (Math.abs(structure.x-cellX)>1 || structure.y<cellY || structure.y>cellY+1) continue;
+        decorations.push({x:structure.x,y:structure.y,foot:structure.y*ART+13,left:structure.x*ART-8,top:structure.y*ART-16,raster:()=>this.structureRaster(structure)});
+      }
+      decorations.sort((a,b)=>b.foot-a.foot);
+      for (const decoration of decorations) {
+        const px = Math.floor(w.x*ART-decoration.left), py = Math.floor(w.y*ART-decoration.top);
+        const art = decoration.raster();
+        if (px < 0 || py < 0 || px >= art.width || py >= art.height) continue;
+        if (art.getContext('2d')!.getImageData(px,py,1,1).data[3]! < 96) continue;
+        this.selection = {kind:'tile',x:decoration.x,y:decoration.y}; this.onSelect(this.selection); return;
+      }
     }
 
     const tx = Math.floor(w.x);

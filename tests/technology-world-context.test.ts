@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { assertWorld, bindWorldContext, cloneWorld, createWorld, migrateWorld, projectWorld, stepWorld, worldContext,
   type World, type WorldContext } from '../src/world/index.js';
 import { enableTechnologyCatalogue, resolveTechnologyRecipe } from '../src/world/technology-catalogue.js';
-import { craftTechnology, maintainTechnologyMemory, recordTechnologyBenefit, technologyWorkCost, useTool, type TechnologyProgram } from '../src/world/technology.js';
+import { craftTechnology, maintainTechnologyMemory, projectTechnology, recordTechnologyBenefit, technologyWorkCost, useTool, type TechnologyProgram } from '../src/world/technology.js';
 import { assertTechnologyCheckpoint, captureTechnologyCheckpoint } from '../src/world/technology-checkpoint.js';
 import { observeTechnologyOrganization } from '../src/world/technology-organization.js';
 import { cooperate, cooperationOpportunity } from '../src/world/society.js';
@@ -63,6 +63,20 @@ test('world copies retain their host reader outside snapshot data while plain de
   const migrated = migrateWorld(decoded, context);
   assertWorld(migrated); assert.deepEqual(migrated.people.map(person => person.technology.knownRecipes), remembered);
   assert.equal(Object.keys(migrated).includes('catalogueReader'), false);
+});
+
+test('the technology view copies remembered cold identities and never mistakes an owned artifact for instructions', () => {
+  const { world, maker, reads } = fixture(), before = structuredClone(world.technology), knowledge = structuredClone(maker.technology);
+  reads.length = 0;
+  const view = projectTechnology(world), remembered = view.knowledge!.find(person => person.actorId === maker.id)!;
+  assert.deepEqual(remembered.recipeIds, ['recipe-3', 'recipe-1']);
+  assert.equal(view.recipes.some(recipe => recipe.id === 'recipe-1'), false, 'a remembered identity need not have resident details');
+  assert.ok(view.items.some(item => item.ownerId === maker.id && item.recipeId === 'recipe-2'));
+  assert.equal(remembered.recipeIds.includes('recipe-2'), false, 'possessing the forgotten product does not restore instructions');
+  assert.equal(view.knowledge!.length, world.people.length); assert.deepEqual(reads, []);
+  assert.deepEqual(world.technology, before); assert.deepEqual(maker.technology, knowledge);
+  remembered.recipeIds.push('recipe-999');
+  assert.deepEqual(maker.technology, knowledge); assert.deepEqual(world.technology, before);
 });
 
 test('a cloned world can complete paid cold fabrication using its implicit bound context', () => {

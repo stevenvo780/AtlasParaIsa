@@ -1,0 +1,135 @@
+# Cómo construir y comprobar la primera entrega
+
+Referencia de alcance: [PLAN.md](../PLAN.md). Referencia de comportamiento: [EXPERIENCIA.md](EXPERIENCIA.md).
+
+Estado actual: este repositorio contiene únicamente el plan y sus documentos. No hay aplicación, dependencias, pruebas ejecutables, autenticación ni despliegue acreditados aquí. Los comandos, versiones y resultados de otros repositorios no se trasladan como capacidades existentes.
+
+## Arquitectura inicial propuesta
+
+Una aplicación web en TypeScript, una simulación en CPU y una base de datos local al servidor. Un mismo servicio puede servir la web, gestionar el acceso y ejecutar el mundo. Se empieza con un solo mundo persistente y una sola instancia de ese servicio.
+
+```text
+Navegador: carta, Canvas 2D, controles y diario en DOM
+                     ↕ HTTPS / WebSocket con JSON
+Servicio: sesión privada + simulación + proyección visible
+                     ↕ transacciones
+SQLite en almacenamiento persistente: estado + hechos + recuerdos aprobados
+```
+
+Canvas 2D es el punto de partida. Si medir la escena en el móvil objetivo justifica otra herramienta 2D, se cambia conservando las reglas de simulación. No se fijan versiones heredadas de frameworks; al implementar se eligen versiones compatibles y se guarda el archivo de dependencias.
+
+Organización suficiente dentro de una aplicación:
+
+```text
+src/
+  world/       reglas, agentes, memoria y generación
+  server/      ejecución, guardado, sesión y mensajes
+  client/      escena, carta, diario y controles
+  shared/      tipos de datos que cruzan cliente y servidor
+tests/         escenarios y comprobaciones de continuidad
+```
+
+Estos módulos no son paquetes publicables ni microservicios. La simulación debe poder ejecutarse sin navegador para probarla. La primera escena puede correr localmente durante el desarrollo; la entrega necesita el servidor para continuar durante la ausencia.
+
+## Una única verdad del mundo
+
+El servidor decide qué ocurre. El navegador dibuja, interpola posiciones y envía solicitudes; no ejecuta otra simulación que compita con la primera. Mover una cámara no cambia el estado de los habitantes.
+
+Un paso de simulación sigue un orden estable:
+
+1. Incorporar entradas aceptadas.
+2. Actualizar ambiente, recursos y necesidades.
+3. Construir percepción local y recuperar recuerdos pertinentes.
+4. Elegir o continuar acciones; resolver efectos y encuentros.
+5. Actualizar memoria, hábitos y hechos relevantes.
+6. Guardar el estado correspondiente y publicar una vista coherente.
+
+El tiempo avanza con pasos fijos. Como punto de partida experimental pueden usarse diez pasos por segundo y decisiones menos frecuentes; las frecuencias se ajustan midiendo la escena. El dibujo sigue el ritmo de pantalla. No se construye un scheduler distribuido ni se crean relojes separados para sistemas que todavía no existen.
+
+El generador aleatorio pertenece al estado guardado. Semilla, estado inicial, versión de reglas y entradas con su paso de aplicación y orden dentro del paso permiten repetir una ejecución de prueba. El servidor asigna y guarda esos tiempos y órdenes. Variar una semilla puede producir historias distintas; una misma ejecución debe ser reproducible.
+
+## Los datos necesarios
+
+| Dato | Contenido mínimo |
+|---|---|
+| Mundo | Versión, semilla, estado del generador aleatorio, paso y tiempo simulado, terreno, recursos y habitantes. |
+| Habitante | Identidad, posición, cuerpo, preferencias, intención, relaciones y memoria acotada. |
+| Recuerdo real aprobado | Identificador, referencia privada a su procedencia, texto aprobado, contexto de activación y efecto posible. |
+| Experiencia simulada | Quién actuó, dónde, qué ocurrió y qué preferencia o relación cambió. |
+| Hecho para crónica | Momento simulado, participantes, causa identificable y texto permitido para la audiencia. |
+| Entrada de Isa | Identificador único, gesto, objetivo, paso de aplicación, orden dentro del paso y resultado. |
+
+La base conserva el estado actual coherente y puntos de recuperación. Los hechos de la crónica explican la historia; no hace falta convertir cada cambio numérico en un evento permanente. El registro de entradas con su paso y orden, junto a los puntos de partida, permite repetir escenarios de validación sin adoptar una arquitectura completa de event sourcing.
+
+Los datos de la simulación y sus textos visibles son distintos del archivo original de conversaciones. El navegador recibe una proyección deliberada: paisaje, acciones, necesidades explicables y contenido revisado. No se serializa todo el estado interno por comodidad.
+
+## Memoria y agencia sin dependencia de un LLM
+
+Al principio, recuperar recuerdos significa buscar entre una selección pequeña usando etiquetas de lugar, situación y necesidad. La memoria modifica una preferencia o la evaluación de una acción. La voz usa texto revisado y plantillas que describen hechos.
+
+Las experiencias nuevas refuerzan o debilitan preferencias con límites explícitos. Se conserva una memoria reciente acotada y un resumen de hábitos; no se acumula una copia ilimitada de cada paso.
+
+Si más adelante hace falta variación lingüística, una generación opcional podrá realizar una intención ya decidida. Nunca controlará el movimiento ni detendrá el mundo. Embeddings, modelos locales y servicios de inferencia requieren una carencia demostrada, no son requisitos de la carta.
+
+## Guardado, ausencia y errores
+
+El estado, sus hechos correspondientes y las entradas aplicadas se guardan de forma coherente en transacciones. Una confirmación de gesto persistente solo se envía después de su guardado; repetir su identificador devuelve el mismo resultado, sin aplicar el efecto otra vez.
+
+Se conservan un punto de recuperación anterior y una copia de seguridad. Al arrancar se valida la versión y la integridad del estado antes de avanzar. Un fallo de lectura no crea silenciosamente otro mundo: se conserva la evidencia y se recupera un estado válido mediante una operación explícita.
+
+Hay dos ausencias diferentes:
+
+- **Isa cierra el navegador:** el servidor sigue avanzando y guardando. Su última visita sirve para seleccionar la crónica, no para calcular hambre o afecto.
+- **El servicio se detiene:** la primera versión recupera el último estado confirmado y retoma desde allí. El intervalo de caída queda registrado como pausa; no se inventan encuentros ni se simulan meses retrospectivos para disimularla.
+
+Esta política evita un sistema de recuperación temporal complejo. La entrega debe mostrar con honestidad las pausas técnicas y la reconexión. Si falla el guardado, no se confirman más cambios persistentes: se protege el último estado coherente y se informa la indisponibilidad.
+
+## Conexión e interacción
+
+Un protocolo JSON pequeño basta: estado inicial, actualizaciones de estado, solicitud de gesto, resultado y error comprensible. Para esta escala se empieza enviando vistas completas acotadas; los deltas se incorporan únicamente si el tamaño medido lo exige.
+
+Cada vista lleva versión y secuencia. El cliente descarta vistas antiguas y obtiene una nueva al reconectar. Un cliente lento no puede acumular mensajes sin límite: recibe la vista reciente disponible.
+
+Los gestos se validan en el servidor: sesión autorizada, forma y objetivo válidos, límite de frecuencia e identificador único. La confirmación de recepción distingue entre una entrada inválida y una invitación válida que el habitante no atendió. La interfaz comunica esa diferencia con claridad.
+
+## Acceso, material personal y alojamiento
+
+La primera entrega se diseña privada para Steven e Isa. Una sesión revocable controla lectura y gestos; las credenciales se guardan fuera del repositorio y del código del navegador. Elegir el mecanismo concreto al implementar, sin construir una plataforma de cuentas para dos personas. Un enlace difícil de adivinar no sustituye el control de acceso.
+
+La selección de recuerdos debe indicar qué contenido puede ver esa audiencia. El material original se consulta en su ubicación autorizada y no se copia al repositorio, a logs, a prompts externos ni a la base operativa del mundo. Los textos que entren a la aplicación se revisan; también se revisa el contenido derivado que aparezca en diario o fichas.
+
+Si se retira un recuerdo, se retiran sus derivados accesibles y se evita reintroducirlo al restaurar copias. El mecanismo concreto se documenta al incorporar datos reales. El consentimiento para una carta privada no equivale a autorización para una web pública.
+
+Para entregar se necesita alojamiento con proceso persistente, HTTPS y disco persistente para SQLite. Debe seguir funcionando con el ordenador personal del autor apagado. Proveedor, coste y publicación se concretan con los recursos autorizados; el plan no contrata ni despliega infraestructura.
+
+Una vista pública de solo lectura puede añadirse después con su contenido revisado. No se necesita inicialmente dividir el frontend, el mundo, la base, una bóveda y la voz entre proveedores distintos.
+
+## Comprobaciones que demuestran el producto
+
+| Comprobación | Evidencia necesaria |
+|---|---|
+| Ecología | Agotar un recurso altera crecimiento o rutas; se explican entradas y pérdidas; no aparecen cantidades negativas ni recuperación oculta. |
+| Cuerpo y vínculo | Cambiar una necesidad o una interacción altera una elección y una señal corporal. La distancia por sí sola no determina deterioro afectivo. |
+| Memoria causal | Mismo estado y semilla con y sin una memoria pertinente: cambia una elección prevista. Un recuerdo irrelevante sirve de control y no debe producir ese mismo efecto. |
+| Agencia individual | S e I muestran preferencias diferentes bajo condiciones comparables; las intenciones no son anuladas después por un paseo aleatorio. |
+| Cultura | Una costumbre tiene una cadena de acciones e imitación identificable; desactivar el aprendizaje elimina esa transmisión. |
+| Reproducción de ejecución | Mismo estado inicial, reglas y entradas aplicadas en los mismos pasos y orden producen el mismo estado de simulación, independientemente del dibujo. |
+| Continuidad | Recargar conserva el mundo; cerrar todas las pestañas no detiene el servidor; reiniciar conserva cuerpo, memoria, intención y azar guardados. |
+| Fallos | Estado corrupto no inicia un mundo nuevo; un error de guardado no recibe confirmación exitosa; un gesto reenviado no duplica efectos. |
+| Acceso y privacidad | Una petición sin sesión no lee ni modifica el mundo privado. Bundle, mensajes y logs no incluyen conversaciones originales ni datos personales no aprobados. |
+| Crónica | Cada episodio mostrado corresponde a hechos guardados; no se inventan escenas para llenar una ausencia o una caída. |
+| Móvil y experiencia | En un dispositivo real se puede entrar, leer, explorar, encontrar a S e I y usar gestos sin sonido. Se comprende al menos una causa y una consecuencia. |
+
+Las comparaciones causales mantienen iguales las demás condiciones. No se llama integración a una diferencia provocada simplemente por eliminar acciones posibles del grupo de control. Para resultados probabilísticos se usan varias semillas emparejadas y se registra el efecto observado, sin convertirlo en una medida de conciencia.
+
+Al existir código se ejecutan comprobaciones de tipos, pruebas de las reglas modificadas y compilación. Antes de entregar se prueba reconexión, reinicio, restauración de copia y una ejecución desatendida que cubra varios ciclos de día y noche. Se registra duración y configuración, consumo de recursos y cualquier fallo; una prueba prolongada no acredita por sí sola fiabilidad indefinida.
+
+Las escenas con datos íntimos se revisan en privado. Las pruebas con otras personas usan material sintético o aprobado para esa audiencia. La evaluación busca saber si se reconoce a la pareja y se entienden las decisiones, no pedirle a alguien que confirme una emoción predeterminada.
+
+## Mantener pequeño el proyecto
+
+Terminar una etapa del plan antes de sumar sistemas. Medir rendimiento antes de ampliar población o cambiar renderer. Llevar decisiones y evidencias breves junto al código que se implemente; un fallo corregido no necesita convertirse en otro manifiesto.
+
+No se recuperan automáticamente plantillas de CI, comandos de operación, configuraciones de proveedores ni rutas de otros repositorios. Cuando exista una aplicación, se escriben únicamente los comandos que realmente la construyen, comprueban y ejecutan.
+
+Al informar una entrega, distinguir lo diseñado de lo implementado y de lo observado. Nombrar los archivos cambiados, las comprobaciones ejecutadas y lo que no se probó. Este plan queda listo cuando su alcance es coherente; el producto quedará listo cuando la experiencia completa funcione y la carta tenga la voz de Steven.

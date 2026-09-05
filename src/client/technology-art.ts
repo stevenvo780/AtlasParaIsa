@@ -13,7 +13,7 @@ export function recipeLabel(recipe: TechnologyRecipe): string {
     ? `${recipe.program.steps.map(step=>operations[step.op] ?? step.op).join(' · ')} ${serial}` : recipe.name;
 }
 
-function recipeCard(recipe: TechnologyRecipe): string {
+export function recipeCard(recipe: TechnologyRecipe): string {
   const strongest = Object.entries(recipe.capacities).sort((a,b)=>b[1]-a[1]).slice(0,3);
   const inputs = recipe.program.inputs.map(input=>`${esc(n(input.mass/1000,2))} u. de ${esc(sourceName[input.material ?? input.source] ?? input.source)}`).join(' + ');
   const steps = recipe.program.steps.map(step=>`<li><span>${esc(operations[step.op] ?? step.op)}${step.shape ? ` · ${esc(shapes[step.shape] ?? step.shape)}` : ''}</span><small>Intensidad ${esc(n(step.intensity,0))}/4${step.requiredCatalyst ? ` · requiere ${esc(capacities[step.requiredCatalyst] ?? step.requiredCatalyst)}` : step.catalyst ? ` · ayuda: ${esc(capacities[step.catalyst] ?? step.catalyst)}` : ''}</small></li>`).join('');

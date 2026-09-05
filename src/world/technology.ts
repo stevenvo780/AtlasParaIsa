@@ -13,7 +13,7 @@ type Emit = (event: Omit<ChronicleEvent, 'id' | 'tick'>) => unknown;
 export interface TechnologyHost {
   seed: number; tick: number; people: TechnologyActor[]; technology: TechnologyState;
   tiles?: { x: number; y: number; drinkingWater?: number }[];
-  cooperationEnabled?: boolean; noveltyEnabled?: boolean; emit?: Emit;
+  cooperationEnabled?: boolean; learningEnabled?: boolean; noveltyEnabled?: boolean; emit?: Emit;
 }
 export const MASS_UNIT = 1000;
 export const CAPABILITIES: readonly Capability[] = ['cutting', 'storage', 'insulation', 'cultivation', 'binding', 'abrasion'];
@@ -400,15 +400,28 @@ export function craftTechnology(host: TechnologyHost, actor: TechnologyActor, re
     .sort((a, b) => (actor.technology.competence[b.id]?.benefit ?? 0) - (actor.technology.competence[a.id]?.benefit ?? 0) || (actor.technology.competence[b.id]?.successes ?? 0) - (actor.technology.competence[a.id]?.successes ?? 0) || a.id.localeCompare(b.id))[0]?.id;
   return advanceProject(host, actor, 'craft', selected, emit);
 }
-export function shareTechnology(host: TechnologyHost, teacher: TechnologyActor, learner: TechnologyActor, emit?: Emit): boolean {
-  if (host.cooperationEnabled === false || teacher === learner || teacher.id === learner.id || distance(teacher, learner) > 2 || teacher.energy < 0.05) return false;
-  const recipe = host.technology.recipes.filter(r => teacher.technology.knownRecipes.includes(r.id) && !learner.technology.knownRecipes.includes(r.id)).sort((a, b) => (teacher.technology.competence[b.id]?.benefit ?? 0) - (teacher.technology.competence[a.id]?.benefit ?? 0) || a.id.localeCompare(b.id))[0];
+export function shareTechnology(host: TechnologyHost, teacher: TechnologyActor, learner: TechnologyActor, emit?: Emit, recipeId?: string): boolean {
+  if (host.cooperationEnabled === false || host.learningEnabled === false || teacher === learner || teacher.id === learner.id || distance(teacher, learner) > 2 || teacher.energy < 0.05) return false;
+  const recipe = host.technology.recipes.filter(r => (!recipeId || r.id === recipeId) && teacher.technology.knownRecipes.includes(r.id) && !learner.technology.knownRecipes.includes(r.id)).sort((a, b) => (teacher.technology.competence[b.id]?.benefit ?? 0) - (teacher.technology.competence[a.id]?.benefit ?? 0) || a.id.localeCompare(b.id))[0];
   if (!recipe) return false;
   learner.technology.knownRecipes.push(recipe.id); learner.technology.learnedFrom.push({ recipeId: recipe.id, teacherId: teacher.id, tick: host.tick });
   if (learner.technology.learnedFrom.length > host.technology.budgets.maxRecipes) learner.technology.learnedFrom.shift();
   teacher.energy = clamp(teacher.energy - 0.003); teacher.fatigue = clamp(teacher.fatigue + 0.002);
   host.technology.ledger.energy += 0.003; host.technology.ledger.work += 1; host.technology.ledger.shared++;
   (emit ?? host.emit)?.({ kind: 'learning', actors: [teacher.id, learner.id], x: teacher.x, y: teacher.y, source: 'simulation', text: `${teacher.name ?? teacher.id} mostró a ${learner.name ?? learner.id} las operaciones de ${recipe.name}.`, cause: 'Transmisión cercana de una receta realmente conocida; enseñar cuesta energía y no entrega productos ni materias primas.' });
+  return true;
+}
+/** Move one existing lot; callers settle any agreed raw payment after this atomic check.
+ * Raw inventories remain outside the technology ledger until a process consumes them. */
+export function transferTechnologyItem(host: TechnologyHost, from: TechnologyActor, to: TechnologyActor, itemId: string): boolean {
+  if (host.cooperationEnabled === false || from.id === to.id || !host.people.includes(from) || !host.people.includes(to) || distance(from, to) > 2 || to.technology.items.length >= host.technology.budgets.maxItems) return false;
+  const index = from.technology.items.findIndex(i => i.id === itemId); if (index < 0) return false;
+  const item = from.technology.items[index]!, senderOpening = technologyStock(from), receiverOpening = technologyStock(to);
+  from.technology.items.splice(index, 1); to.technology.items.push(item);
+  const resources = [{ resourceId: itemResource(item), mass: item.mass }], transferId = `transfer-${host.technology.executionCounter + 1}`;
+  const common = { kind: 'transfer' as const, recipeId: item.recipeId, programSignature: '', residueMass: 0, energy: 0, work: 0, success: true, parentRecipeIds: [], catalysts: [], benefit: 0, transferId };
+  appendExecution(host, { ...common, actorId: from.id, counterpartyId: to.id, inputs: resources, outputs: [], balance: { opening: senderOpening, closing: technologyStock(from), externalInputs: [], externalLoss: resources } });
+  appendExecution(host, { ...common, actorId: to.id, counterpartyId: from.id, inputs: [], outputs: resources, balance: { opening: receiverOpening, closing: technologyStock(to), externalInputs: resources, externalLoss: [] } });
   return true;
 }
 /** Death settles a physical estate before its owner is removed from the active population.
@@ -486,7 +499,7 @@ export function assertTechnology(host: TechnologyHost): void {
       add(current, item.composition); itemIds.add(item.id);
     }
     const project = knowledge.project;
-    if (project !== null && (!project || !['research', 'craft'].includes(project.kind) || !validTechnologyProgram(project.program, state) || !integer(project.progress) || project.progress >= project.requiredWork || project.requiredWork !== technologyWorkCost(project.program) || !integer(project.startedAt, host.tick) || !finite(project.energyPaid) || !Array.isArray(project.parents) || project.parents.some(id => !knowledge.knownRecipes.includes(id)) || (project.kind === 'craft' && (!knowledge.knownRecipes.includes(project.recipeId!) || state.recipes.find(r => r.id === project.recipeId)?.signature !== programSignature(project.program))))) fail();
+    if (project !== null && (!project || !['research', 'craft'].includes(project.kind) || !validTechnologyProgram(project.program, state) || !integer(project.progress) || project.progress >= project.requiredWork || project.requiredWork !== technologyWorkCost(project.program) || !integer(project.startedAt, host.tick) || !finite(project.energyPaid) || !Array.isArray(project.parents) || project.parents.some(id => !recipeIds.has(id)) || (project.kind === 'research' && project.parents.some(id => !knowledge.knownRecipes.includes(id))) || (project.kind === 'craft' && (!knowledge.knownRecipes.includes(project.recipeId!) || state.recipes.find(r => r.id === project.recipeId)?.signature !== programSignature(project.program) || JSON.stringify(project.parents) !== JSON.stringify(state.recipes.find(r => r.id === project.recipeId)?.parents))))) fail();
   }
   current.wood += state.ledger.fuelMass; add(current, state.ledger.estateLoss);
   if (MATERIALS.some(m => current[m] !== state.ledger.imported[m])) fail();

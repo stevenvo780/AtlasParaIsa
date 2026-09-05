@@ -4,6 +4,8 @@ import { localRandom } from './genetics.js';
 import { count } from './statistics.js';
 import { tileAt } from './spatial.js';
 import { constructionCost, waterAvailable } from './inventions.js';
+import { CAPABILITIES, MASS_UNIT, materialCapacities, shareTechnology, toolCapacities, transferTechnologyItem } from './technology.js';
+import type { Capability, MaterialBatch, TechnologyProgram } from '../shared/technology.js';
 
 type Emit = (event: Omit<ChronicleEvent, 'id' | 'tick'>) => ChronicleEvent;
 export type Culture = NonNullable<PersonView['culture']>;
@@ -23,7 +25,67 @@ export function bond(world: World, a: Person, b: Person, amount: number): void {
     a.culture[key] = clamp(a.culture[key] + delta); b.culture[key] = clamp(b.culture[key] - delta);
   }
 }
-export interface Opportunity { person: Person; kind: 'supply' | 'assist' | 'teach' | 'trade'; score: number; }
+export interface Opportunity {
+  person: Person; kind: 'supply' | 'assist' | 'teach' | 'trade' | 'tools'; score: number;
+  recipeId?: string; supplyMaterial?: 'wood' | 'stone';
+  exchange?: { itemId: string; material: 'wood' | 'stone'; amount: number };
+}
+function practicedRecipeToTeach(world: World, teacher: Person, learner: Person): string | undefined {
+  if (!world.learningEnabled) return;
+  return world.technology.recipes.filter(r => teacher.technology.knownRecipes.includes(r.id) && !learner.technology.knownRecipes.includes(r.id) && (teacher.technology.competence[r.id]?.successes ?? 0) > 0)
+    .sort((a, b) => (teacher.technology.competence[b.id]?.benefit ?? 0) - (teacher.technology.competence[a.id]?.benefit ?? 0) || a.id.localeCompare(b.id))[0]?.id;
+}
+/** A request comes from the recipient's active program, or a recipe they actually know
+ * while attempting fabrication. The world's catalogue is never a source of desires. */
+function requestedPrograms(world: World, person: Person): TechnologyProgram[] {
+  if (!['research', 'craft'].includes(person.action)) return [];
+  if (person.technology.project) return [person.technology.project.program];
+  if (person.action !== 'craft') return [];
+  return world.technology.recipes.filter(r => person.technology.knownRecipes.includes(r.id)).map(r => r.program);
+}
+function processMaterialNeed(world: World, person: Person): { wood: number; stone: number } {
+  const deficit = { wood: 0, stone: 0 };
+  for (const program of requestedPrograms(world, person)) {
+    const required = { wood: 0, stone: 0 };
+    for (const input of program.inputs) if (input.source === 'raw' && (input.material === 'wood' || input.material === 'stone')) required[input.material] += input.mass / MASS_UNIT;
+    const fuel = program.steps.reduce((n, s) => n + (s.op === 'heat' ? s.intensity * 50 : 0), 0);
+    const scrapUsed = program.inputs.filter(i => i.source === 'residue' && i.material === 'wood').reduce((n, i) => n + i.mass, 0);
+    required.wood += Math.max(0, fuel - Math.max(0, person.technology.residue.wood - scrapUsed)) / MASS_UNIT;
+    for (const material of ['wood', 'stone'] as const) deficit[material] = Math.max(deficit[material], required[material] - person.materials[material]);
+  }
+  return deficit;
+}
+function itemNeed(world: World, person: Person, item: MaterialBatch, excludingItem = false): number {
+  const inventory = excludingItem ? person.technology.items.filter(i => i.id !== item.id) : person.technology.items;
+  const powers = excludingItem ? toolCapacities({ ...person, technology: { ...person.technology, items: inventory } }) : toolCapacities(person);
+  const capacities = materialCapacities(item); let need = 0;
+  for (const program of requestedPrograms(world, person)) {
+    const requiredMass = program.inputs.filter(i => i.source === 'product' && i.recipeId === item.recipeId).reduce((n, i) => n + i.mass, 0);
+    const availableMass = inventory.filter(i => i.recipeId === item.recipeId).reduce((n, i) => n + i.mass, 0);
+    if (requiredMass > availableMass) need = Math.max(need, 0.5 + Math.min(0.3, item.mass / Math.max(1, requiredMass) * 0.3));
+    for (const step of program.steps) if (step.requiredCatalyst && powers[step.requiredCatalyst] < 0.1 && capacities[step.requiredCatalyst] >= 0.1) need = Math.max(need, 0.75);
+  }
+  if (distance(person, person.target) <= 7) {
+    const tile = tileAt(world, person.target); let useful: Capability | undefined;
+    if (person.action === 'gather') {
+      const material = person.materials.wood < 6 ? 'wood' : 'stone';
+      if ((tile?.[material] ?? 0) > 1 && person.materials[material] < (material === 'wood' ? 11 : 7)) useful = material === 'wood' ? 'cutting' : 'abrasion';
+    } else if (person.action === 'farm' && tile && tile.terrain !== 'shelter' && tile.moisture > 0.2 && (tile.cultivation ?? 0) < 1 && person.materials.wood >= 1) useful = 'cultivation';
+    if (useful && capacities[useful] > Math.max(0.12, powers[useful] + 0.12)) need = Math.max(need, capacities[useful] - powers[useful]);
+  }
+  return need;
+}
+function productExchange(world: World, seller: Person, buyer: Person): Opportunity['exchange'] | undefined {
+  if (buyer.technology.items.length >= world.technology.budgets.maxItems) return;
+  const item = seller.technology.items.filter(i => itemNeed(world, buyer, i) > 0 && itemNeed(world, seller, i, true) === 0)
+    .sort((a, b) => itemNeed(world, buyer, b) - itemNeed(world, buyer, a) || a.id.localeCompare(b.id))[0];
+  if (!item) return;
+  const material = (['wood', 'stone'] as const).filter(m => buyer.materials[m] >= 1 && seller.materials[m] <= (m === 'wood' ? 11 : 7))
+    .filter(m => processMaterialNeed(world, { ...buyer, materials: { ...buyer.materials, [m]: buyer.materials[m] - 1 } })[m] <= processMaterialNeed(world, buyer)[m] && !(buyer.action === 'farm' && m === 'wood' && buyer.materials.wood < 2))
+    .sort((a, b) => seller.materials[a] - seller.materials[b] || a.localeCompare(b))[0];
+  if (!material) return;
+  return { itemId: item.id, material, amount: 1 };
+}
 /** A home is an observed useful place, not a birth faction or a movement boundary. */
 export function settlementOpportunity(world: World, person: Person): { target: {x:number;y:number}; score: number; reason: string } | undefined {
   if (!world.cooperationEnabled) return;
@@ -68,20 +130,26 @@ export function cooperationOpportunity(world: World, person: Person): Opportunit
     const openness = other.communityId !== person.communityId && !same ? person.culture.openness : 1;
     const score = 0.22 + person.genome.cooperation * 0.35 + trust * 0.16 + openness * 0.07;
     const cost = constructionCost(world,other);
+    const processNeed = processMaterialNeed(world, other);
+    const supplyMaterial = (['wood', 'stone'] as const).find(m => processNeed[m] > 0 && person.materials[m] >= 1 && other.materials[m] <= (m === 'wood' ? 11 : 7));
+    const recipeId = practicedRecipeToTeach(world, person, other), exchange = productExchange(world, person, other);
+    if (exchange) opportunities.push({ person: other, kind: 'tools', exchange, score: score + 0.24 });
+    if (supplyMaterial) opportunities.push({ person: other, kind: 'supply', supplyMaterial, score: score + 0.22 });
+    if (recipeId) opportunities.push({ person: other, kind: 'teach', recipeId, score: score + 0.06 });
     if (other.action === 'build' && ((other.materials.wood < cost.wood && person.materials.wood > 0) || (other.materials.stone < cost.stone && person.materials.stone > 0))) opportunities.push({ person: other, kind: 'supply', score: score + 0.22 });
     else if ((other.action === 'build' || other.action === 'hunt') && other.work > 0 && other.work < (other.action === 'build' ? cost.work : Math.ceil(45*(1-(other.skills.hunt??0)*0.25))) - 1) opportunities.push({ person: other, kind: 'assist', score: score + 0.16 });
     else if (person.materials.wood >= 2 && person.materials.stone < 2 && other.materials.stone >= 2 && other.materials.wood < 6) opportunities.push({ person: other, kind: 'trade', score: score + 0.08 });
-    else if (Object.entries(person.skills).some(([skill, level]) => level > (other.skills[skill] ?? 0) + 0.08)) opportunities.push({ person: other, kind: 'teach', score });
+    else if (world.learningEnabled && Object.entries(person.skills).some(([skill, level]) => level > (other.skills[skill] ?? 0) + 0.08)) opportunities.push({ person: other, kind: 'teach', score });
   }
   return opportunities.sort((a, b) => b.score - a.score || distance(person, a.person) - distance(person, b.person) || a.person.id.localeCompare(b.person.id))[0];
 }
 export function cooperate(world: World, person: Person, emit: Emit): boolean {
   const opportunity = cooperationOpportunity(world, person);
   if (!opportunity || distance(person, opportunity.person) > 1.5) return false;
-  const other = opportunity.person; let detail = '';
+  const other = opportunity.person; let detail = '', helperPaid = false;
   if (opportunity.kind === 'supply') {
-    const material = other.materials.wood < constructionCost(world,other).wood && person.materials.wood > 0 ? 'wood' : 'stone';
-    if (person.materials[material] < 1 || other.materials[material] >= (material === 'wood' ? 12 : 8)) return false;
+    const material = opportunity.supplyMaterial ?? (other.materials.wood < constructionCost(world,other).wood && person.materials.wood > 0 ? 'wood' : 'stone');
+    if (person.materials[material] < 1 || other.materials[material] > (material === 'wood' ? 11 : 7) || (opportunity.supplyMaterial && processMaterialNeed(world, other)[material] <= 0)) return false;
     person.materials[material]--; other.materials[material]++;
     detail = `Aportó una unidad de ${material === 'wood' ? 'madera' : 'piedra'} al trabajo de ${other.name}.`;
   } else if (opportunity.kind === 'assist') {
@@ -93,13 +161,28 @@ export function cooperate(world: World, person: Person, emit: Emit): boolean {
   } else if (opportunity.kind === 'trade') {
     person.materials.wood--; other.materials.wood++; other.materials.stone--; person.materials.stone++; count(world, 'trade');
     detail = `Intercambiaron una madera por una piedra; ambos resolvieron una carencia.`;
+  } else if (opportunity.kind === 'tools') {
+    const exchange = opportunity.exchange;
+    if (!exchange || other.materials[exchange.material] < exchange.amount || person.materials[exchange.material] + exchange.amount > (exchange.material === 'wood' ? 12 : 8) || productExchange(world, person, other)?.itemId !== exchange.itemId) return false;
+    const item = person.technology.items.find(i => i.id === exchange.itemId);
+    if (!item || itemNeed(world, other, item) <= 0 || itemNeed(world, person, item, true) > 0 || !transferTechnologyItem(world, person, other, item.id)) return false;
+    other.materials[exchange.material] -= exchange.amount; person.materials[exchange.material] += exchange.amount; count(world, 'trade');
+    const capacities = materialCapacities(item), strongest = [...CAPABILITIES].sort((a, b) => capacities[b] - capacities[a])[0]!;
+    const words: Record<Capability, string> = { cutting: 'corte', storage: 'contención', insulation: 'aislamiento', cultivation: 'palanca para cultivo', binding: 'unión', abrasion: 'abrasión' };
+    detail = `Entregó el objeto ${item.id}, con ${item.mass} unidades de masa y capacidad de ${words[strongest]}, a cambio de una unidad de ${exchange.material === 'wood' ? 'madera' : 'piedra'}; resuelve una carencia observable sin duplicar el lote.`;
+  } else if (opportunity.recipeId) {
+    if (!practicedRecipeToTeach(world, person, other) || (person.technology.competence[opportunity.recipeId]?.successes ?? 0) <= 0 || !shareTechnology(world, person, other, emit, opportunity.recipeId)) return false;
+    helperPaid = true; count(world, 'teaching');
+    const recipe = world.technology.recipes.find(r => r.id === opportunity.recipeId)!;
+    detail = `Mostró las operaciones practicadas ${recipe.program.steps.map(s => s.op).join(' → ')}; ${other.name} aprendió la receta por esta interacción cercana.`;
   } else {
     const skill = Object.keys(person.skills).filter(key => person.skills[key]! > (other.skills[key] ?? 0) + 0.08).sort((a, b) => person.skills[b]! - person.skills[a]!)[0];
     if (!skill) return false;
     other.skills[skill] = clamp((other.skills[skill] ?? 0) + Math.min(0.012, (person.skills[skill]! - (other.skills[skill] ?? 0)) * other.genome.learningRate)); count(world, 'teaching');
     detail = `Mostró una técnica practicada de ${skill}; ${other.name} aprendió mediante observación.`;
   }
-  person.lastSocial = world.tick; person.energy = clamp(person.energy - 0.005); person.fatigue = clamp(person.fatigue + 0.004);
+  person.lastSocial = world.tick;
+  if (!helperPaid) { person.energy = clamp(person.energy - 0.005); person.fatigue = clamp(person.fatigue + 0.004); }
   bond(world, person, other, 0.12); count(world, 'cooperation');
   const group = world.communities.find(c => c.id === person.communityId); if (group) group.cooperation++;
   const event = emit({ kind: 'cooperation', actors: [person.id, other.id], x: person.x, y: person.y, source: 'simulation', text: `${person.name} cooperó con ${other.name}. ${detail}`, cause: `Estrategia ${opportunity.kind}; recursos o trabajo transferidos realmente; confianza reforzada y prácticas locales aproximadas.` });

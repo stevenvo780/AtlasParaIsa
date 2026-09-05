@@ -205,8 +205,9 @@ export function technologyStock(actor: TechnologyActor): ResourceMass[] {
 }
 function compositionResources(c: Composition, prefix: string): ResourceMass[] { return MATERIALS.filter(m => c[m]).map(m => ({ resourceId: `${prefix}:${m}`, mass: c[m] })); }
 function appendExecution(host: TechnologyHost, event: Omit<TechnologyExecution, 'id' | 'tick'>): TechnologyExecution {
-  const state = host.technology, execution = { ...event, id: `process-${++state.executionCounter}`, tick: host.tick };
+  const state = host.technology, execution = { ...event, id: `process-${state.executionCounter + 1}`, tick: host.tick };
   journalTechnologyExecution(state, execution);
+  state.executionCounter++;
   state.history.push(execution);
   if (state.history.length > state.budgets.maxHistory) { const removed = state.history.length - state.budgets.maxHistory; state.history.splice(0, removed); state.historyDropped += removed; }
   return execution;

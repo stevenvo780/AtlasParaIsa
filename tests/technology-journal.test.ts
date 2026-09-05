@@ -95,6 +95,14 @@ test('physical corruption in a pending receipt evicted from the visible ring is 
   assert.throws(() => assertTechnology(host), /tecnología física inválido/);
 });
 
+test('a declared missing prefix cannot discard a receipt that the snapshot still retains', () => {
+  const host = scene();
+  markTechnologyJournalCommitted(host.technology);
+  assert.equal(host.technology.historyDropped, 0);
+  host.technology.journal!.startsAfter = host.technology.executionCounter;
+  assert.throws(() => assertTechnologyJournal(host.technology, host.tick), /technology journal coverage/);
+});
+
 test('journal validation rejects gaps, mismatched duplicate observations, time reversal and false watermarks', () => {
   const original = scene(); original.tick++; useMany(original, 5);
   const mutations = [

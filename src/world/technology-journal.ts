@@ -19,7 +19,8 @@ export function assertTechnologyJournal(state: TechnologyState, tick: number): v
     || Object.keys(journal).sort().join(',') !== 'committedThrough,pending,startsAfter,version'
     || journal.version !== 1 || !integer(journal.startsAfter) || !integer(journal.committedThrough)
     || !integer(state.executionCounter) || !integer(state.historyDropped) || !integer(tick)
-    || journal.startsAfter > journal.committedThrough || journal.committedThrough > state.executionCounter
+    || journal.startsAfter > journal.committedThrough || journal.startsAfter > state.historyDropped
+    || journal.committedThrough > state.executionCounter
     || !Array.isArray(journal.pending) || journal.pending.length > MAX_PENDING_TECHNOLOGY_EXECUTIONS
     || journal.pending.length !== state.executionCounter - journal.committedThrough
     || !Array.isArray(state.history) || state.history.length + state.historyDropped !== state.executionCounter) fail();

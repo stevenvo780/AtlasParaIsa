@@ -34,4 +34,5 @@ export function inheritGenome(seed: number, childId: string, parents: { id: stri
 export function assertGenome(genome: unknown): asserts genome is Genome {
   const g = genome as Genome;
   if (!g || !Array.isArray(g.alleles) || g.alleles.length !== GENE_COUNT * 2 || !g.alleles.every(n => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= 1) || !Number.isSafeInteger(g.generation) || g.generation < 0 || !Array.isArray(g.parents) || ![0, 2].includes(g.parents.length) || !g.parents.every(id => typeof id === 'string' && id.length < 50) || !Number.isInteger(g.mutations) || g.mutations < 0 || g.mutations > 14 || !Number.isFinite(g.learningRate) || g.learningRate < 0.04 || g.learningRate > 0.2 || !Number.isFinite(g.cooperation) || g.cooperation < 0 || g.cooperation > 1) throw new Error('Genoma de simulación inválido.');
+  if ((g.generation === 0) !== (g.parents.length === 0) || new Set(g.parents).size !== g.parents.length || g.parents.some(id => !id)) throw new Error('Genealogía de simulación inválida.');
 }

@@ -199,17 +199,36 @@ test('drink, hunt and cooperate orders use confirmed protocol and return to auto
   for (const inhabitant of app.world.people) { inhabitant.action = 'rest'; inhabitant.target = { x: inhabitant.x, y: inhabitant.y }; inhabitant.decisionAt = 5000; }
   const actor = app.world.people.find(p => p.id === 's')!, learner = app.world.people.find(p => p.role === 'neighbor')!;
   for (const inhabitant of [actor, learner]) { inhabitant.x = 25; inhabitant.y = 8; inhabitant.target = { x: 25, y: 8 }; inhabitant.hunger = .3; inhabitant.energy = .9; inhabitant.fatigue = .1; }
-  actor.thirst = .65; actor.skills.gather = .8; learner.skills = {};
-  const resource = app.world.tiles.find(tile => tile.x === 25 && tile.y === 8)!; resource.drinkingWater = 1; resource.species = 'hare'; resource.fauna = 1;
+  actor.thirst = .65; actor.skills.gather = .8; actor.inventory = 0; actor.bonds[learner.id] = .8; learner.skills = {};
+  const resource = app.world.tiles.find(tile => tile.x === 25 && tile.y === 8)!; resource.drinkingWater = 1; resource.species = 'hare'; resource.fauna = 1; resource.growth = .8;
   const observed = observeMessages(page); await enter(page);
   const outcomeKey = { drink: 'waterConsumed', hunt: 'hunts', cooperate: 'cooperation' } as const;
   for (const order of ['drink', 'hunt', 'cooperate'] as const) {
     const baseline = app.world.totals[outcomeKey[order]] ?? 0;
+    // The app swaps its authoritative world after every durable step: re-read, never keep stale refs.
+    const currentActor = () => app.world.people.find(p => p.id === actor.id)!;
+    const currentLearner = () => app.world.people.find(p => p.id === learner.id)!;
+    const currentResource = () => app.world.tiles.find(tile => tile.x === 25 && tile.y === 8)!;
+    const before = { water: currentResource().drinkingWater!, fauna: currentResource().fauna!, thirst: currentActor().thirst,
+      inventory: currentActor().inventory, skill: currentLearner().skills.gather ?? 0, trust: currentActor().bonds[learner.id] ?? 0, tick: app.world.tick };
     await page.locator(`[data-order="${order}"]`).click();
     await expect.poll(() => observed.gestures.some(gesture => gesture.order === order)).toBe(true);
     await expect(page.locator('#gesture-result')).toContainText('Tarea recibida');
     await expect.poll(() => app.world.people.find(p => p.id === 's')!.command?.order).toBe(order);
     await expect.poll(() => app.world.totals[outcomeKey[order]] ?? 0).toBeGreaterThan(baseline);
+    if (order === 'drink') {
+      expect(currentResource().drinkingWater).toBeLessThan(before.water);
+      expect(currentActor().thirst).toBeLessThan(before.thirst);
+    } else if (order === 'hunt') {
+      expect(currentResource().fauna).toBe(before.fauna - 1);
+      expect(currentActor().inventory).toBeGreaterThan(before.inventory);
+    } else {
+      expect(currentLearner().skills.gather).toBeGreaterThan(before.skill);
+      expect(currentActor().bonds[learner.id]).toBeGreaterThan(before.trust);
+      const event = app.world.events.find(item => item.kind === 'cooperation' && item.tick > before.tick && item.actors.includes(actor.id) && item.actors.includes(learner.id));
+      expect(event).toBeTruthy(); expect(event!.cause).toContain('teach');
+      expect(currentLearner().experiences.some(experience => experience.causeId === event!.id)).toBe(true);
+    }
     await page.locator('[data-order="auto"]').click(); await expect(page.locator('#gesture-result')).toContainText('Retoma');
     await expect.poll(() => app.world.people.find(p => p.id === 's')!.controlMode).toBe('auto');
   }

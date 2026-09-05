@@ -51,6 +51,14 @@ test('render browser: dirty chunks, negative coordinates, selection, bounded cac
       const changed = {...world, sequence: 3, tick: 3, tiles: tiles.map(p => p.x===0 && p.y===0 ? {...p, feature: 'stump', wood: 0, growth: .1, vegetation: .1} : p)};
       renderer.update(changed); renderer.render(0);
       const dirty = renderer.getDiagnostics();
+      // A rain pool remains a visible drinking source even when the surrounding desert is dry.
+      const poolPixels = (feature: 'pool' | 'none', drinkingWater: number) => {
+        const art = document.createElement('canvas'); art.width = art.height = 16; const pen = art.getContext('2d')!;
+        renderer.bakeFeatures(pen, { x: 0, y: 0, terrain: 'soil', biome: 'desert', moisture: .25,
+          vegetation: .1, food: 0, growth: .1, feature, drinkingWater });
+        return [...pen.getImageData(0, 0, 16, 16).data];
+      };
+      const wetPool = poolPixels('pool', .5), dryPool = poolPixels('pool', 0), drySoil = poolPixels('none', 0);
       const worldPoint = renderer.worldToScreen(.5,.5);
       canvas.dispatchEvent(new PointerEvent('pointerdown', {pointerId:1,clientX:worldPoint.x,clientY:worldPoint.y,button:0,bubbles:true}));
       canvas.dispatchEvent(new PointerEvent('pointerup', {pointerId:1,clientX:worldPoint.x,clientY:worldPoint.y,button:0,bubbles:true}));
@@ -62,11 +70,15 @@ test('render browser: dirty chunks, negative coordinates, selection, bounded cac
       const lose = gl?.getExtension('WEBGL_lose_context');
       (window as unknown as { renderTest: unknown }).renderTest = { renderer, world, lose };
       if (lose) lose.loseContext();
-      return {first,same,dirty,selected,camera,preserved,glError,canLose:!!lose};
+      return {first,same,dirty,wetPool,dryPool,drySoil,selected,camera,preserved,glError,canLose:!!lose};
     });
     assert.equal(result.same.cacheBuilds, result.first.cacheBuilds, 'unchanged world does not rerasterize terrain or sprites');
     assert.ok(result.dirty.cacheBuilds > result.same.cacheBuilds, 'depletion changes ground artwork');
     assert.ok(result.dirty.cacheBuilds - result.same.cacheBuilds <= 4, 'corner edit invalidates no more than four adjacent chunks');
+    assert.ok(result.wetPool.some((value, index) => index % 4 === 3 && value > 0), 'potable pool is drawn in dry terrain');
+    assert.ok(result.dryPool.some((value, index) => index % 4 === 3 && value > 0), 'depleted pool leaves a visible dry bed');
+    assert.notDeepEqual(result.wetPool, result.dryPool, 'depletion visibly removes the pool water');
+    assert.ok(result.drySoil.every(value => value === 0), 'ordinary dry soil does not invent a water feature');
     assert.deepEqual(result.selected, [{kind:'tile',x:0,y:0}]);
     assert.equal(result.preserved, true, 'drawing never mutates authoritative snapshots');
     assert.equal(result.glError, 0, 'shader, upload and compositing produce no WebGL errors');

@@ -16,7 +16,7 @@ Al regresar se ve primero el presente y después, si hubo cambios relevantes, ha
 
 El paisaje es una extensión procedural vista desde arriba. Se explora en cualquier dirección mediante regiones generadas según necesidad. Agua, bosques, praderas, desiertos, montañas y humedales ofrecen recursos distintos. Volver a una región recupera sus modificaciones guardadas. No existe el borde rectangular inicial, aunque hay un límite numérico de coordenadas y una cantidad acotada de regiones activas.
 
-El servicio continúa alrededor de los habitantes aunque el navegador esté cerrado. Las regiones inactivas conservan sus cambios y congelan su ecología hasta reactivarse. Mover la cámara no acelera cultivos ni crea historia.
+Todos los clientes conectados al servicio observan el mismo mundo y pueden intervenir en él. Cada uno mueve su propia cámara; sus órdenes aceptadas afectan a los habitantes compartidos. El servicio continúa alrededor de los habitantes aunque todos cierren el navegador. Las regiones inactivas conservan sus cambios y congelan su ecología hasta reactivarse. Mover la cámara no acelera cultivos ni crea historia.
 
 El modelo ecológico empieza con este ciclo:
 
@@ -28,7 +28,7 @@ Las fuentes y pérdidas se definen explícitamente: la luz aporta energía, la l
 
 Liebres, ciervos, jabalíes y peces son existencias de fauna por celda: pueden desplazarse a una celda vecina, consumir recursos y reproducirse pagando alimento vegetal y agua. Cazar retira una unidad real de esa existencia. No son animales individuales con biografías o genomas. Agotar recursos puede cambiar las rutas y actividades de habitantes y fauna; ninguna emoción fabrica alimento o agua para rescatar una escena.
 
-El mundo empieza con S, I y catorce vecinos. Los vecinos ficticios pueden tener descendencia si disponen de recursos, cercanía, confianza y un lugar compartido; el máximo es 32 habitantes. El censo crece mediante esos nacimientos y no incluye muerte de habitantes. La edad regula la posibilidad de reproducirse, sin simular etapas infantiles completas.
+El mundo empieza con S, I y catorce vecinos. Los vecinos ficticios pueden tener descendencia si disponen de recursos, cercanía, confianza, una comunidad y un lugar compartidos; no es obligatorio que ese lugar tenga refugio. S e I quedan fuera de esa regla y el máximo es 32 habitantes. El censo crece mediante esos nacimientos y no incluye muerte de habitantes. La edad regula la posibilidad de reproducirse, sin simular etapas infantiles completas.
 
 No hacen falta química molecular, hidrodinámica completa ni evolución de especies para comprobar estas dependencias. La primera pregunta experimental es sencilla: **si cambia la disponibilidad de alimento o refugio, ¿cambian las rutas, los encuentros y las decisiones?**
 
@@ -38,7 +38,7 @@ Cada habitante percibe una zona limitada. Empieza con energía, hambre, sed y fa
 
 Las acciones incluyen desplazarse, comer, beber, cazar, descansar, explorar, acercarse, acompañar, retirarse, recolectar materiales, cultivar, construir y cooperar. Cada habitante combina predisposiciones con habilidades adquiridas y resultados de sus acciones. Una experiencia favorable o desfavorable puede modificar la elección siguiente. Una intención dura lo suficiente para verse; se abandona cuando cambia una causa relevante.
 
-Los genes son parámetros de diseño heredables, incluida la rapidez con que se ajustan preferencias. La descendencia recombina un aporte de cada progenitor y empieza sin copiar sus habilidades, hábitos o recuerdos; después aprende de sus propios resultados y de otros. La cultura inicial compartida por crianza se registra por separado del genoma. Esto no atribuye genética ni perfiles psicológicos reales a Steven e Isa.
+Los genes son siete pares de parámetros de diseño heredables, incluida la rapidez con que se ajustan preferencias. La descendencia recombina un aporte de cada progenitor y empieza sin copiar sus habilidades, hábitos o recuerdos; registra su nacimiento como experiencia propia y después aprende de sus resultados y de otros. La cultura inicial compartida por crianza se registra por separado del genoma. Esto no atribuye genética ni perfiles psicológicos reales a Steven e Isa.
 
 El circuito completo es:
 
@@ -64,9 +64,9 @@ Los vecinos buscan recursos, descansan y se relacionan mediante reglas locales. 
 
 Una forma de cultura implementada es **una costumbre de encuentro o cuidado que se propaga por repetición e imitación**. No nace porque un temporizador declare que existe una tradición. Se conserva quién actuó, quién observó y qué conducta útil se repitió.
 
-Las comunidades se forman a partir de vínculos cercanos, prácticas compatibles y lugares compartidos. Pueden aportar materiales a una obra, ayudar con trabajo, enseñar una técnica o intercambiar madera y piedra. Estas acciones cambian inventarios, capacidad de trabajo o habilidades y tienen costes. Compartir, cuidar el entorno y mantener apertura hacia otros son prácticas modificables, distintas de los genes. La pertenencia puede revisarse cuando cambian prácticas y vínculos locales; los círculos no son gobiernos ni facciones asignadas a los fundadores.
+Las comunidades se forman a partir de vínculos cercanos, prácticas compatibles y lugares compartidos. Pueden aportar materiales a una obra, ayudar con trabajo, enseñar una técnica o intercambiar madera y piedra. Estas acciones cambian inventarios, capacidad de trabajo o habilidades y tienen costes. Compartir, cuidar el entorno y mantener apertura hacia otros son tres prácticas modificables, distintas de los genes. Influyen en compartir alimento, cultivar, conservar fauna escasa y relacionarse con otros; compartir y cuidar el entorno aprenden de consecuencias, mientras el contacto positivo aproxima las tres prácticas. La pertenencia puede revisarse cuando coinciden baja confianza interna, prácticas diferentes y al menos dos contactos cercanos compatibles fuera del grupo; los círculos no son gobiernos ni facciones asignadas a los fundadores.
 
-La escasez compartida puede producir desacuerdo dentro de una comunidad o entre comunidades: dos personas urgidas compiten por la misma fuente todavía disponible. El conflicto añade fatiga y tensión y hace que una ceda un intento; no hay violencia ni robo. La confianza y apertura suficientes pueden dar lugar a turnos con espera real. Pertenecer a grupos distintos no basta para generar una disputa.
+La escasez compartida puede producir desacuerdo dentro de una comunidad o entre comunidades: dos personas urgidas realizan la misma acción sobre la misma fuente todavía disponible, con confianza y apertura insuficientes. El conflicto añade fatiga y tensión y hace que una ceda un intento; no hay violencia ni robo. La confianza o apertura suficientes pueden dar lugar a turnos con una espera de doce pasos del mundo, sin fabricar recursos. Pertenecer a grupos distintos no basta para generar una disputa.
 
 La sociedad no necesita girar permanentemente alrededor de la pareja. Puede tener episodios propios; algunos cruzarán la vida de S e I. Por ejemplo, un refugio frecuentado por varios vecinos puede modificar su lugar habitual de reunión.
 
@@ -122,7 +122,7 @@ La voz es breve, concreta y cercana, con tuteo y la cadencia colombiana de la pa
 
 La carta escrita abre la experiencia y puede volver a leerse. Borrador posible de apertura, pendiente de la voz de Steven: «Te hice un mundo pequeño. Dejé en él algo de nuestra historia y espacio para lo que todavía no sabemos».
 
-La dirección visual es 2D con estética pixel art, paisaje legible y animación corporal. S e I se distinguen por silueta y color; los vecinos conservan identidad sin saturar la pantalla. Los cambios de recursos, cultivo y tránsito tienen representación en el terreno. El dibujo reutiliza cachés y puede componer el paisaje con WebGL2; Canvas 2D conserva una alternativa. «Rendimiento» informa el backend observado y distingue aceleración identificada, software o dispositivo no verificado, sin prometer hardware en todos los equipos.
+La dirección visual es 2D con estética pixel art, paisaje legible y animación corporal. S e I se distinguen por silueta y color; los vecinos conservan identidad sin saturar la pantalla. Los cambios de recursos, cultivo y tránsito tienen representación en el terreno. El dibujo reutiliza cachés y puede componer el paisaje con WebGL2; Canvas 2D conserva una alternativa. La simulación ocurre en la CPU del servidor y cada navegador dibuja con sus propios recursos gráficos. «Rendimiento» distingue las medidas del servidor y de esta pestaña, e informa aceleración identificada, software o dispositivo no verificado, sin prometer hardware en todos los equipos.
 
 La cámara y las fichas funcionan con tacto. Texto legible, contraste, controles amplios, alternativas al color y movimiento reducido forman parte del primer diseño. Sonido y música son opcionales, se activan voluntariamente y no transportan información imprescindible.
 

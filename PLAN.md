@@ -26,6 +26,8 @@ Este texto propone el sentido de la obra; la redacción personal final pertenece
 
 El alcance ampliado permite recorrer territorio procedural más allá del mapa original, con juego a pantalla completa, control individual, habilidades adquiridas y construcción de lugares compartidos. V3 conecta agua potable finita, fauna por celdas, suelo vivo, cultivos y huellas con herencia de parámetros y comunidades locales. La extensión se genera según necesidad; solo las regiones próximas a los habitantes avanzan y la población tiene un máximo de 32.
 
+La arquitectura implementada mantiene **un mundo compartido por todos los clientes del servicio**: la CPU del backend lo simula a 10 Hz y cada navegador dibuja su vista, normalmente actualizada a 2 Hz. Cámaras distintas observan el mismo estado; abrir clientes no multiplica la simulación. El compositor WebGL2 utiliza, cuando está disponible, la GPU del dispositivo cliente. El servidor admite actualmente hasta 12 conexiones WebSocket simultáneas; aumentar esa escala requiere medición.
+
 ## La primera entrega
 
 Una URL privada, cómoda en móvil y escritorio, que permita:

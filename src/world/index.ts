@@ -367,6 +367,8 @@ function share(world: World, donor: Person): void {
   bond(world, donor, recipient, 0.1);
   outcome(world, donor, 'share', 0.16);
   place.gatherings = Math.min(1_000_000, place.gatherings + 1);
+  const archivedPlace = world.chunks[chunkKey(place.x, place.y)]?.places.find(p => p.id === place.id);
+  if (archivedPlace) archivedPlace.gatherings = place.gatherings;
   const habit = donor.habits.find(h => h.placeId === place.id && h.strength >= 0.5);
   if (habit) habit.repetitions = Math.min(1_000_000, habit.repetitions + 1);
   const event = addEvent(world, {
@@ -405,7 +407,8 @@ function bodyAndAction(world: World, person: Person): void {
   person.socialLoad = clamp(person.socialLoad - 0.0008);
   const emptyFood = person.action === 'eat' && (tileAt(world, person.target)?.food ?? 0) < 0.005 && person.inventory < 0.01;
   const emptyWater = person.action === 'drink' && (tileAt(world, person.target)?.drinkingWater ?? 0) < 0.003;
-  if (world.tick >= person.decisionAt || emptyFood || emptyWater || (person.hunger > 0.9 && !['eat','hunt'].includes(person.action)) || (person.thirst > 0.9 && person.action !== 'drink')) choose(world, person);
+  const agreedWait = person.action === 'retreat' && person.lastDispute >= 0 && world.tick < person.decisionAt && world.tick - person.lastDispute < 30;
+  if (!agreedWait && (world.tick >= person.decisionAt || emptyFood || emptyWater || (person.hunger > 0.9 && !['eat','hunt'].includes(person.action)) || (person.thirst > 0.9 && person.action !== 'drink'))) choose(world, person);
   if (['eat','drink','hunt'].includes(person.action)) resourceDispute(world, person, event => addEvent(world, event));
   if (world.tick % 6 === 0 && !(person.action === 'accompany' && distance(person, person.target) <= 1.5)) move(world, person);
   const current = tileAt(world, person)!;
@@ -674,6 +677,10 @@ export function assertWorld(value: unknown, expectedVersion = RULES_VERSION): as
   for (const p of w.people) {
     if (expectedVersion >= 3) {
       assertGenome(p.genome);
+      if (p.genome.parents.length) {
+        const parents = p.genome.parents.map(id => w.people.find(other => other.id === id));
+        if (parents.some(parent => !parent || parent.id === p.id || parent.bornAt >= p.bornAt || parent.genome.generation >= p.genome.generation) || p.genome.generation !== Math.max(...parents.map(parent => parent!.genome.generation)) + 1) fail();
+      }
       if (typeof p.thirst !== 'number' || !Number.isFinite(p.thirst) || p.thirst < 0 || p.thirst > 1 || !Number.isSafeInteger(p.bornAt) || p.bornAt < -4800 || p.bornAt > w.tick || !Number.isSafeInteger(p.lastBirth) || p.lastBirth < -2400 || p.lastBirth > w.tick || !Number.isSafeInteger(p.lastSocial) || p.lastSocial < -30 || p.lastSocial > w.tick || !Number.isSafeInteger(p.lastDispute) || p.lastDispute < -180 || p.lastDispute > w.tick || !Number.isSafeInteger(p.lastPracticeMemory) || p.lastPracticeMemory < 0 || p.lastPracticeMemory > w.tick || !numericMap(p.culture, 0, 1, 3) || !['sharing','stewardship','openness'].every(key => typeof p.culture[key as keyof Culture] === 'number') || !numericMap(p.bonds, 0, 1, MAX_POPULATION) || Object.keys(p.bonds).some(id => !w.people.some(other => other.id === id)) || !(p.communityId === null || typeof p.communityId === 'string' && w.communities?.some(c => c.id === p.communityId))) fail();
     }
     if (!['ready','hungry','thirsty','tired'].includes(p.intentContext)) fail();
@@ -687,8 +694,9 @@ export function assertWorld(value: unknown, expectedVersion = RULES_VERSION): as
     for (const c of w.communities) {
       if (!c || typeof c.id !== 'string' || c.id.length > 80 || communityIds.has(c.id) || typeof c.name !== 'string' || c.name.length > 100 || !validCoordinate(c.x) || !validCoordinate(c.y) || typeof c.color !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(c.color) || !Array.isArray(c.members) || c.members.length > MAX_POPULATION || new Set(c.members).size !== c.members.length || !c.members.every(id => w.people.some(p => p.id === id && p.communityId === c.id)) || !numericMap(c.culture, 0, 1, 3) || !Number.isSafeInteger(c.formedAt) || c.formedAt < 0 || c.formedAt > w.tick || !Number.isSafeInteger(c.cooperation) || c.cooperation < 0 || !Number.isSafeInteger(c.disputes) || c.disputes < 0) fail();
       communityIds.add(c.id);
+      if (!['sharing','stewardship','openness'].every(key => typeof c.culture[key as keyof Culture] === 'number') || w.people.some(p => p.communityId === c.id && !c.members.includes(p.id))) fail();
     }
-    for (const sample of w.history) if (!numericMap(sample, 0, 1e12, 10) || !Number.isSafeInteger(sample.tick) || sample.tick > w.tick || !Number.isInteger(sample.population) || sample.population < 16 || sample.population > MAX_POPULATION || [sample.energy,sample.hunger,sample.fatigue,sample.thirst].some(n => n > 1)) fail();
+    for (const sample of w.history) if (!numericMap(sample, 0, 1e12, 10) || !['tick','population','energy','hunger','fatigue','thirst','discoveries','settlements','cooperation','births'].every(key => typeof sample[key as keyof WorldSample] === 'number') || !Number.isSafeInteger(sample.tick) || sample.tick > w.tick || !Number.isInteger(sample.population) || sample.population < 16 || sample.population > MAX_POPULATION || [sample.energy,sample.hunger,sample.fatigue,sample.thirst].some(n => n > 1)) fail();
   }
 }
 

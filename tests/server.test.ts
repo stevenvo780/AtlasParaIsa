@@ -13,9 +13,17 @@ import { createApp, parseGesture } from '../src/server/app.js';
 import { createWorld, stepWorld, projectWorld } from '../src/world/index.js';
 import { hashToken, makeToken, passwordRecord, passwordVerifier } from '../src/server/auth.js';
 import { acquireLock } from '../src/server/lock.js';
-import type { Gesture, WorldView } from '../src/shared/types.js';
+import type { Gesture, ServerMessage, WorldView } from '../src/shared/types.js';
 
 const password = 'synthetic-test-password-only';
+
+function socketMessage(socket: WebSocket, type: ServerMessage['type']): Promise<ServerMessage> {
+  return new Promise((resolve,reject)=>{
+    const timeout=setTimeout(()=>{socket.off('message',receive);reject(new Error(`Missing ${type} message`));},3000);
+    function receive(data:import('ws').RawData){const message=JSON.parse(data.toString()) as ServerMessage;if(message.type===type){clearTimeout(timeout);socket.off('message',receive);resolve(message);}}
+    socket.on('message',receive);
+  });
+}
 const gesture: Gesture = { id: 'test-plant-0001', kind: 'plant', x: 20, y: 14 };
 async function freePort() {
   const probe = createServer(); probe.listen(0, '127.0.0.1'); await once(probe, 'listening');
@@ -35,6 +43,37 @@ async function fixture(t: { after: (f: () => unknown) => void }, manual = false)
   const send = (g: unknown, cookieValue = cookie) => fetch(origin + '/api/gesture', { method: 'POST', headers: { Origin: origin, Cookie: cookieValue, 'Content-Type': 'application/json' }, body: JSON.stringify(g) });
   return { app, store, origin, cookie, send, dir };
 }
+
+test('two authenticated clients share one authoritative timeline and input transaction while their cameras stay independent', async t => {
+  const f=await fixture(t,true);
+  const login=await fetch(f.origin+'/api/login',{method:'POST',headers:{Origin:f.origin,'Content-Type':'application/json'},body:JSON.stringify({password})});
+  const cookie2=login.headers.get('set-cookie')!.split(';')[0];
+  const a=new WebSocket(f.origin.replace('http:','ws:')+'/ws',{headers:{Origin:f.origin,Cookie:f.cookie}});
+  const b=new WebSocket(f.origin.replace('http:','ws:')+'/ws',{headers:{Origin:f.origin,Cookie:cookie2}});
+  t.after(()=>{a.terminate();b.terminate();});
+  const initial=await Promise.all([socketMessage(a,'state'),socketMessage(b,'state')]);
+  assert.ok(initial.every(m=>m.type==='state'&&m.world.tick===0));
+  const before=structuredClone(f.app.world);const moved=socketMessage(b,'state');
+  b.send(JSON.stringify({type:'viewport',viewport:{x:-1000,y:2000,width:40,height:28}}));await moved;
+  assert.deepEqual(f.app.world,before,'camera and login do not create or advance a simulation');
+  const sameTick=Promise.all([socketMessage(a,'state'),socketMessage(b,'state')]);
+  for(let n=0;n<5;n++)f.app.stepOnce();
+  const [av,bv]=await sameTick;assert.equal(f.app.world.tick,5);
+  assert.ok(av?.type==='state'&&bv?.type==='state');
+  assert.equal(av.world.tick,bv.world.tick);assert.deepEqual(av.world.people,bv.world.people);assert.deepEqual(av.world.events,bv.world.events);assert.notEqual(av.world.originX,bv.world.originX);
+  // WebSocket message order makes a subsequent camera response a fence: the preceding
+  // command has entered the server queue, but cannot commit before the manual step.
+  for(const [socket,id,person] of [[a,'shared-client-a',f.app.world.people[0]!],[b,'shared-client-b',f.app.world.people[1]!]] as const){
+    const fence=socketMessage(socket,'state');socket.send(JSON.stringify({type:'gesture',gesture:{id,kind:'command',agentId:person.id,order:'rest',x:person.x,y:person.y}}));
+    socket.send(JSON.stringify({type:'viewport',viewport:{x:0,y:0,width:40,height:28}}));await fence;
+  }
+  const results=Promise.all([socketMessage(a,'result'),socketMessage(b,'result')]);
+  const states=Promise.all([socketMessage(a,'state'),socketMessage(b,'state')]);f.app.stepOnce();
+  const accepted=await results;assert.ok(accepted.every(m=>m.type==='result'&&m.result.accepted&&m.result.tick===6));
+  assert.deepEqual(accepted.map(m=>m.type==='result'?m.result.order:-1),[0,1]);
+  const shared=await states;assert.ok(shared[0]?.type==='state'&&shared[1]?.type==='state');assert.deepEqual(shared[0].world.people,shared[1].world.people);
+  assert.equal(f.app.world.tick,6);assert.equal((f.store.db.prepare('SELECT COUNT(*) AS n FROM inputs').get() as {n:number}).n,2);assert.deepEqual(f.store.load()!.world,f.app.world);
+});
 
 test('access is mandatory, origin is enforced, private projections exclude internal state', async t => {
   const f = await fixture(t);

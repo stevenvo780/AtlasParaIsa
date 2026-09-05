@@ -3,6 +3,8 @@ import { chromium } from '@playwright/test';
 import { createServer } from 'vite';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import type { WorldView } from '../src/shared/types.js';
 
 const label = (process.env.RENDER_LABEL ?? 'after').replace(/[^a-z0-9-]/gi, '');
@@ -10,7 +12,9 @@ const gpuMode = process.env.RENDER_GPU ?? 'default';
 const animated = process.env.RENDER_SCENE === 'moving';
 const artifact = `artifacts/render-v3-${label}-${gpuMode}${animated ? '-moving' : ''}`;
 const baselineRef = process.env.RENDER_BASELINE_REF;
-const baseline = baselineRef ? execFileSync('git', ['show', `${baselineRef}:src/client/landscape.ts`], { encoding: 'utf8' }) : null;
+const sourceCommit = execFileSync('git', ['rev-parse', '--verify', `${baselineRef ?? 'HEAD'}^{commit}`], { encoding: 'utf8' }).trim();
+const baseline = baselineRef ? execFileSync('git', ['show', `${sourceCommit}:src/client/landscape.ts`], { encoding: 'utf8' }) : null;
+const rendererSha256 = createHash('sha256').update(baseline ?? readFileSync('src/client/landscape.ts')).digest('hex');
 const flags = gpuMode === 'hardware' ? ['--enable-gpu', '--use-angle=vulkan', '--enable-features=Vulkan', '--disable-vulkan-surface', '--ignore-gpu-blocklist'] : gpuMode === 'disabled' ? ['--disable-webgl'] : [];
 const server = await createServer({ configFile: false, plugins: baseline ? [{ name: 'render-baseline', enforce: 'pre', load(id) { if (id.endsWith('/src/client/landscape.ts')) return baseline; } }] : [], server: { host: '127.0.0.1', port: 0 }, logLevel: 'error' });
 await server.listen();
@@ -75,7 +79,7 @@ try {
   }, {animated});
   mkdirSync('artifacts', { recursive: true });
   await page.screenshot({ path: `${artifact}.png` });
-  const report = { label, gpuMode, baselineRef: baselineRef ?? null, flags, ...result, errors };
+  const report = { label, gpuMode, measuredAt: new Date().toISOString(), sourceCommit, rendererSha256, baselineRef: baselineRef ? sourceCommit : null, flags, ...result, errors };
   writeFileSync(`${artifact}.json`, JSON.stringify(report, null, 2) + '\n');
   console.log(JSON.stringify(report, null, 2));
   if (errors.length) process.exitCode = 1;

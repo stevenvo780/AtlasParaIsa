@@ -133,7 +133,8 @@ test('previous recovery removes future terrain versions and inputs without alter
 function legacyWorld() {
   const source = createWorld(42);
   const { chunks: _chunks, retiredChunks: _retired, discoveredChunks: _discovered, settlementCount: _settlements,
-    adaptationEnabled: _adaptation, noveltyEnabled: _novelty, shelterBenefitEnabled: _shelter, ...base } = source;
+    adaptationEnabled: _adaptation, noveltyEnabled: _novelty, shelterBenefitEnabled: _shelter,
+    cooperationEnabled: _cooperation, reproductionEnabled: _reproduction, communities: _communities, communityCounter: _communityCounter, birthCounter: _birthCounter, history: _history, totals: _totals, ...base } = source;
   const legacy = {
     ...base, version: 1, tick: 37,
     tiles: source.tiles.filter(t => t.x >= 0 && t.x < 40 && t.y >= 0 && t.y < 28)
@@ -143,7 +144,8 @@ function legacyWorld() {
     people: source.people.map(p => {
       const { traits: _traits, skills: _skills, materials: _materials, activity: _activity, values: _values,
         visited: _visited, heading: _heading, command: _command, work: _work, lastOutcome: _last, controlMode: _mode,
-        specialty: _specialty, ...old } = p;
+        specialty: _specialty, thirst: _thirst, genome: _genome, bornAt: _bornAt, lastBirth: _lastBirth, lastSocial: _lastSocial,
+        lastDispute: _lastDispute, lastPracticeMemory: _lastPracticeMemory, culture: _culture, communityId: _communityId, bonds: _bonds, intentContext: _intentContext, ...old } = p;
       return old;
     }),
   };

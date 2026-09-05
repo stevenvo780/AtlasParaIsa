@@ -23,7 +23,11 @@ Abre **http://127.0.0.1:3000** e ingresa con esa contraseña. Usa exactamente es
 
 «Vida del mundo» reúne población, historia reciente, paisaje, comunidades y rendimiento. Los recursos y la fauna contados corresponden a **regiones activas del servidor**; no son un censo del territorio procedural completo ni solo de lo que mira la cámara. La pestaña de rendimiento distingue tiempos de simulación y guardado, memoria del proceso y medidas gráficas de este navegador.
 
-El servicio avanza a diez pasos por segundo y guarda cada paso. Cerrar la pestaña no lo detiene. Al detener el proceso y arrancarlo de nuevo, recupera el último estado confirmado y registra una pausa técnica; no inventa encuentros durante la caída.
+**Todos los clientes conectados al mismo servicio comparten un único mundo persistente.** El backend mantiene un estado y un reloj de simulación a diez pasos por segundo, guarda cada paso y envía normalmente dos vistas por segundo a cada cliente. Cada navegador conserva su cámara y dibuja la región solicitada; abrir otra pestaña no crea habitantes ni otra simulación. Las órdenes aceptadas de todos los clientes actúan sobre ese mundo común.
+
+La CPU del servidor ejecuta ecología, decisiones, herencia, sociedad y guardado. Cada navegador utiliza sus propios recursos gráficos para dibujar; WebGL2 puede usar la GPU del dispositivo cliente. No se utiliza la GPU del servidor para simular ni se entrena un modelo. El límite actual es **12 conexiones WebSocket simultáneas** —incluidas varias pestañas de una persona—; no se acredita capacidad para cientos de clientes.
+
+Cerrar todas las pestañas no detiene el mundo. Al detener el proceso y arrancarlo de nuevo, recupera el último estado confirmado y registra una pausa técnica; no inventa encuentros durante la caída.
 
 ## Revisar desde la torre que aloja Docker
 
@@ -97,7 +101,7 @@ El mundo se genera por regiones de 16 × 16 celdas con coordenadas positivas y n
 
 Las reglas y el protocolo visible están en **versión 3**; el esquema SQLite permanece en **versión 2**. Los estados V1 y V2 se validan y migran conservando los datos previos, y reciben los campos nuevos reproducibles. Los contadores y series de V3 comienzan en esa migración; no se reconstruyen nacimientos o cooperación anteriores. Las revisiones archivadas se enriquecen al leerlas sin rellenar recursos explícitamente agotados.
 
-Siete pares de genes de diseño permiten recombinación mendeliana simplificada y variación acotada. La tasa de aprendizaje es heredable; las habilidades, preferencias aprendidas y experiencias no se copian al genoma. Los vecinos pueden tener descendencia física con costes y condiciones locales; S e I quedan fuera de esa regla. No hay muerte de habitantes, gobiernos ni un resultado demostrado del efecto Baldwin. [CIENCIA.md](docs/CIENCIA.md) explica las referencias y límites.
+Siete pares de genes de diseño permiten recombinación mendeliana simplificada y variación acotada. La tasa de aprendizaje es heredable; las habilidades, preferencias aprendidas y experiencias no se copian al genoma. Los vecinos pueden tener descendencia con costes, recursos, confianza, una comunidad y un lugar cercano compartidos; ese lugar no tiene que ser un refugio. S e I quedan fuera de esa regla. Cada descendiente empieza sin aprendizaje heredado y registra su nacimiento como primera experiencia propia. No hay muerte de habitantes, gobiernos ni un resultado demostrado del efecto Baldwin. [CIENCIA.md](docs/CIENCIA.md) explica las referencias y límites.
 
 El paisaje usa cachés de dibujos y un compositor WebGL2 cuando está disponible, con alternativa Canvas 2D ante indisponibilidad, software detectado o pérdida de contexto. El diagnóstico distingue hardware identificado, software e identidad no verificada. Los FPS y tiempos de dibujo son medidas locales; no acreditan que todos los equipos usen una GPU física ni miden su porcentaje de ocupación.
 

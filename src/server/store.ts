@@ -6,6 +6,7 @@ import type { Gesture, GestureResult } from '../shared/types.js';
 import { migrateWorld, type World } from '../world/index.js';
 import { CHUNK_SIZE, MAX_COORDINATE, type Chunk } from '../world/terrain.js';
 import { assertEcosystemTile } from '../world/validation.js';
+import { decodeSnapshot, encodeSnapshot } from './snapshot.js';
 
 const checksum = (s: string) => createHash('sha256').update(s).digest('hex');
 // Preserve all V1 gesture identities; only the new command kind extends the tuple.
@@ -112,7 +113,7 @@ export class Store {
       return null;
     }
     if (checksum(row.body) !== row.digest) throw new Error('Snapshot checksum mismatch. Explicit recovery required.');
-    const world = migrateWorld(JSON.parse(row.body) as unknown);
+    const world = migrateWorld(decodeSnapshot(row.body));
     return { world, savedAt: row.saved_at };
   }
   loadChunk(key: string, atTick = Number.MAX_SAFE_INTEGER): Chunk | null {
@@ -129,7 +130,7 @@ export class Store {
   }
   save(world: World, inputs: { gesture: Gesture; result: GestureResult }[] = [], requiredSessions: string[] = []): void {
     const retired = world.retiredChunks;
-    const body = JSON.stringify({ ...world, retiredChunks: [] });
+    const body = encodeSnapshot(world);
     this.lastSnapshotBytes = Buffer.byteLength(body);
     this.db.exec('BEGIN IMMEDIATE');
     try {
@@ -184,8 +185,8 @@ export class Store {
   previous(destination: string) {
     const row = this.db.prepare('SELECT body,digest,saved_at FROM snapshots WHERE slot=1').get() as Row | undefined;
     if (!row || checksum(row.body) !== row.digest) throw new Error('No valid previous checkpoint.');
-    const world = migrateWorld(JSON.parse(row.body) as unknown);
-    const body = JSON.stringify({ ...world, retiredChunks: [] });
+    const world = migrateWorld(decodeSnapshot(row.body));
+    const body = encodeSnapshot(world);
     this.backup(destination);
     const recovered = new Store(destination);
     try {

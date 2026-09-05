@@ -2,29 +2,33 @@
 
 Referencia de alcance: [PLAN.md](../PLAN.md). Referencia de comportamiento: [EXPERIENCIA.md](EXPERIENCIA.md).
 
-Estado actual: hay un prototipo reversible en TypeScript con interfaz Canvas/DOM, servidor HTTP/WebSocket, autenticación privada, SQLite y pruebas ejecutables. El [README](../README.md) documenta los comandos reales. Los recuerdos son sintéticos; no hay publicación ni alojamiento contratado. Los comandos, versiones y resultados de otros repositorios no se trasladan como capacidades existentes.
+Estado actual: hay un prototipo reversible V3 en TypeScript con interfaz WebGL2/Canvas 2D/DOM, servidor HTTP/WebSocket, autenticación privada, SQLite y pruebas ejecutables. El [README](../README.md) documenta los comandos reales. Los recuerdos son sintéticos; no hay publicación ni alojamiento contratado. Los comandos, versiones y resultados de otros repositorios no se trasladan como capacidades existentes.
 
 ## Arquitectura implementada
 
-Una aplicación web en TypeScript, una simulación en CPU y una base de datos local al servidor. Un mismo servicio sirve la web, gestiona el acceso y ejecuta un mundo persistente. Un bloqueo de proceso protege el directorio del mundo; esta implementación admite una sola instancia activa.
+Una aplicación web en TypeScript, una simulación en CPU y una base de datos local al servidor. Un mismo servicio sirve el frontend compilado, gestiona el acceso y ejecuta **un único mundo persistente compartido por todos sus clientes**. `createApp` conserva un estado del mundo y un temporizador de simulación, independientemente del número de navegadores. Un bloqueo de proceso protege el directorio del mundo; esta implementación admite una sola instancia activa.
 
 ```text
-Navegador: carta, Canvas 2D, controles y diario en DOM
-                     ↕ HTTPS / WebSocket con JSON
-Servicio: sesión privada + simulación + proyección visible
+Navegadores: cámara propia + WebGL2/Canvas 2D + controles y diario en DOM
+                     ↕ HTTPS / WebSocket; vistas normalmente a 2 Hz
+Servicio único: sesión privada + mundo compartido a 10 Hz en CPU
                      ↕ transacciones
 SQLite en almacenamiento persistente: estado + hechos + recuerdos aprobados
 ```
 
-Canvas 2D dibuja el paisaje y el DOM presenta carta, fichas y controles. Vite compila el cliente; TypeScript compila el servidor para Node.js. `package-lock.json` fija las dependencias. Se comprobó Node.js 22.22.3 con `node:sqlite`, que en esa versión avisa de su condición experimental. Si medir la escena en el móvil objetivo justifica otra herramienta 2D, se cambia conservando las reglas de simulación.
+El navegador reutiliza dibujos de terreno y sprites en cachés acotadas. Un compositor WebGL2 carga texturas modificadas y compone el terreno; Canvas 2D conserva habitantes, detalles y la alternativa cuando WebGL2 no está disponible, se pierde el contexto o se detecta software. El diagnóstico clasifica el dispositivo como hardware identificado, software o no verificado: disponer de WebGL2 no prueba aceleración física. La clasificación depende de lo que informa el navegador.
+
+La **CPU del servidor** ejecuta ecología, decisiones, aprendizaje, herencia, sociedad, serialización y guardado. La **GPU del dispositivo cliente**, cuando el navegador la utiliza, acelera el dibujo de esa pestaña. No se usa GPU del servidor para simular o entrenar modelos; no hay inferencia de LLM en el ciclo. Añadir clientes aumenta proyecciones y tráfico del servidor, pero no crea mundos ni relojes de simulación adicionales. El límite vigente es doce conexiones WebSocket simultáneas; no se acredita rendimiento con cientos de clientes.
+
+Vite compila el cliente; TypeScript compila el servidor para Node.js. `package-lock.json` fija las dependencias. Se comprobó Node.js 22.22.3 con `node:sqlite`, que en esa versión avisa de su condición experimental. Las comparaciones de renderizado deben conservar escena, cámara, movimiento y configuración, e informar dispositivo observado y tiempos; los FPS o el tiempo de CPU por cuadro no miden ocupación de la GPU. Los resultados concretos pertenecen a [EVIDENCIA.md](EVIDENCIA.md).
 
 Organización suficiente dentro de una aplicación:
 
 ```text
 src/
-  world/       reglas, agentes, memoria y generación
+  world/       reglas, ecología, genética, sociedad, memoria y estadísticas
   server/      ejecución, guardado, sesión y mensajes
-  client/      escena, carta, diario y controles
+  client/      escena y cachés, carta, fichas, estadísticas y controles
   shared/      tipos de datos que cruzan cliente y servidor
 tests/         escenarios y comprobaciones de continuidad
 ```
@@ -39,11 +43,11 @@ El generador puro usa ruido interpolado multiescala en coordenadas globales, sei
 
 SQLite conserva revisiones de regiones por clave y paso, con suma de integridad. Retirar regiones, guardar el estado, confirmar entradas y registrar hechos sucede en una transacción. Un punto anterior lee únicamente revisiones de regiones que ya existían en ese paso. La memoria activa es acotada; el archivo persistente crece con el territorio modificado. El motor sin Store mantiene una cola pendiente que su integrador debe confirmar; no ofrece archivo ilimitado en RAM.
 
-La migración validada desde V1 conserva las 1120 celdas originales, cuerpos, intenciones, memorias, eventos y azar; completa los bordes de las regiones con el generador e inicializa los campos nuevos de manera reproducible. Las sesiones y los resultados confirmados permanecen válidos. Una versión desconocida o corrupta se rechaza.
+Las reglas y el protocolo están en versión 3, mientras SQLite mantiene esquema 2. La migración V1 conserva las 1120 celdas originales, cuerpos, intenciones, memorias, eventos y azar; completa los bordes de las regiones con el generador. Los estados V1/V2 reciben campos ecológicos, sed, genomas y cultura iniciales de manera reproducible, preservando lo ya guardado. Las comunidades, acumulados y series de V3 empiezan en esa migración; no se inventan antecedentes. Las regiones archivadas también se enriquecen al leerlas, conservando cantidades explícitamente agotadas. Las sesiones y los resultados confirmados permanecen válidos. Una versión desconocida o corrupta se rechaza y nunca dispara un mundo nuevo silencioso.
 
 ## Una única verdad del mundo
 
-El servidor decide qué ocurre. El navegador dibuja, interpola posiciones y envía solicitudes; no ejecuta otra simulación que compita con la primera. Mover una cámara no cambia el estado de los habitantes.
+El servidor decide qué ocurre para todos los clientes. Cada navegador dibuja, interpola posiciones y envía solicitudes al mismo mundo; abrir otra sesión no crea una simulación personal. Mover una cámara no cambia el estado de los habitantes. Las órdenes de clientes distintos entran al mismo orden de aplicación, sujeto a validación y guardado.
 
 Un paso de simulación sigue un orden estable:
 
@@ -51,10 +55,10 @@ Un paso de simulación sigue un orden estable:
 2. Actualizar ambiente, recursos y necesidades.
 3. Construir percepción local y recuperar recuerdos pertinentes.
 4. Elegir o continuar acciones; resolver efectos y encuentros.
-5. Actualizar memoria, hábitos y hechos relevantes.
+5. Actualizar memoria, hábitos, comunidades, posibles nacimientos y estadísticas.
 6. Guardar el estado correspondiente y publicar una vista coherente.
 
-El tiempo avanza con pasos fijos. Como punto de partida experimental pueden usarse diez pasos por segundo y decisiones menos frecuentes; las frecuencias se ajustan midiendo la escena. El dibujo sigue el ritmo de pantalla. No se construye un scheduler distribuido ni se crean relojes separados para sistemas que todavía no existen.
+El tiempo avanza con pasos fijos de 100 ms: diez pasos por segundo, ecología cada diez pasos y vistas normalmente cada cinco. Una entrada aceptada o un cambio de cámara puede producir una vista adicional. El dibujo sigue el ritmo de pantalla e interpola el estado recibido. No hay un scheduler distribuido ni un reloj de simulación por usuario.
 
 El generador aleatorio pertenece al estado guardado. Semilla, estado inicial, versión de reglas y entradas con su paso de aplicación y orden dentro del paso permiten repetir una ejecución de prueba. El servidor asigna y guarda esos tiempos y órdenes. Variar una semilla puede producir historias distintas; una misma ejecución debe ser reproducible.
 
@@ -63,7 +67,9 @@ El generador aleatorio pertenece al estado guardado. Semilla, estado inicial, ve
 | Dato | Contenido mínimo |
 |---|---|
 | Mundo | Versión, semilla, estado del generador aleatorio, paso y tiempo simulado, terreno, recursos y habitantes. |
-| Habitante | Identidad, posición, cuerpo, preferencias, intención, relaciones y memoria acotada. |
+| Habitante | Identidad, posición, cuerpo con sed, genoma y parentesco, valores aprendidos, habilidades, intención, materiales, cultura, confianza y memoria acotada. |
+| Ecología celular | Existencias de fauna y especie por celda, agua potable, fertilidad, biomasa, cultivo, tránsito y actividad celular. |
+| Comunidad y estadísticas | Pertenencia revisable, prácticas medias, hechos de cooperación/conflicto, acumulados y serie reciente acotada. |
 | Recuerdo real aprobado | Identificador, referencia privada a su procedencia, texto aprobado, contexto de activación y efecto posible. |
 | Experiencia simulada | Quién actuó, dónde, qué ocurrió y qué preferencia o relación cambió. |
 | Hecho para crónica | Momento simulado, participantes, causa identificable y texto permitido para la audiencia. |
@@ -77,13 +83,15 @@ Los datos de la simulación y sus textos visibles son distintos del archivo orig
 
 Al principio, recuperar recuerdos significa buscar entre una selección pequeña usando etiquetas de lugar, situación y necesidad. La memoria modifica una preferencia o la evaluación de una acción. La voz usa texto revisado y plantillas que describen hechos.
 
-Las experiencias nuevas refuerzan o debilitan preferencias con límites explícitos. Se conserva una memoria reciente acotada y un resumen de hábitos; no se acumula una copia ilimitada de cada paso.
+Las experiencias nuevas refuerzan o debilitan preferencias con límites explícitos y una tasa de adaptación heredable. Siete pares de genes transmiten parámetros entre vecinos ficticios; habilidades, valores aprendidos y recuerdos no se convierten en alelos. Los descendientes empiezan sin aprendizaje copiado, conservan un primer episodio propio de nacimiento y reciben prácticas culturales iniciales por crianza. La población se limita a 32; los nacimientos consumen recursos y requieren condiciones locales. Se conserva una memoria reciente acotada y un resumen de hábitos; no se acumula una copia ilimitada de cada paso.
 
 Si más adelante hace falta variación lingüística, una generación opcional podrá realizar una intención ya decidida. Nunca controlará el movimiento ni detendrá el mundo. Embeddings, modelos locales y servicios de inferencia requieren una carencia demostrada, no son requisitos de la carta.
 
 ## Guardado, ausencia y errores
 
 El estado, sus hechos correspondientes y las entradas aplicadas se guardan de forma coherente en transacciones. Una confirmación de gesto persistente solo se envía después de su guardado; repetir su identificador devuelve el mismo resultado, sin aplicar el efecto otra vez.
+
+El snapshot V3 codifica las celdas activas en tuplas JSON versionadas (`tiles-tuple-v1`) para evitar repetir veinte nombres de campo por celda en cada escritura. Mantiene los números originales sin cuantización. El lector admite tanto los snapshots históricos de objetos como las tuplas; los archivos de regiones conservan su formato de objetos y el esquema SQLite sigue en versión 2. Se rechazan valores opcionales presentes nulos o no finitos antes de escribir, para no confundir corrupción con ausencia. La copia del estado para cada transacción aprovecha que las celdas son planas; la retirada de regiones las particiona en una sola pasada. Estas optimizaciones mantienen el orden, las causas y la recuperación; el benchmark compara fidelidad y coste de escritura y lectura.
 
 Se conservan un punto de recuperación anterior y una copia de seguridad. Al arrancar se valida la versión y la integridad del estado antes de avanzar. Un fallo de lectura no crea silenciosamente otro mundo: se conserva la evidencia y se recupera un estado válido mediante una operación explícita.
 
@@ -96,7 +104,7 @@ Esta política evita un sistema de recuperación temporal complejo. La entrega d
 
 ## Conexión e interacción
 
-El protocolo V2 añade ventanas de cámara con origen absoluto y órdenes individuales idempotentes. Ventanas distintas del mismo paso son válidas; una vista antigua no puede sustituir un paso posterior. Un protocolo JSON pequeño basta: estado inicial, actualizaciones de estado, solicitud de gesto, resultado y error comprensible. Para esta escala se empieza enviando vistas completas acotadas; los deltas se incorporan únicamente si el tamaño medido lo exige.
+El protocolo V3 conserva ventanas de cámara con origen absoluto y órdenes individuales idempotentes; añade ecología, genealogía, comunidades, estadísticas y rendimiento. Las órdenes nuevas son cazar, beber y cooperar. Ventanas distintas del mismo paso son válidas; una vista antigua no puede sustituir un paso posterior. El intercambio JSON incluye estado inicial, actualizaciones, solicitud de gesto u orden, resultado y error comprensible. Se envían vistas completas acotadas por cliente; no hay una simulación nueva asociada a cada conexión.
 
 Cada vista lleva versión y secuencia. El cliente descarta vistas antiguas y obtiene una nueva al reconectar. Un cliente lento no puede acumular mensajes sin límite: recibe la vista reciente disponible.
 
@@ -104,7 +112,7 @@ Los gestos se validan en el servidor: sesión autorizada, forma y objetivo váli
 
 ## Acceso, material personal y alojamiento
 
-La primera entrega se diseña privada para Steven e Isa. Una sesión revocable controla lectura y gestos; las credenciales se guardan fuera del repositorio y del código del navegador. Elegir el mecanismo concreto al implementar, sin construir una plataforma de cuentas para dos personas. Un enlace difícil de adivinar no sustituye el control de acceso.
+La primera entrega se diseña privada para Steven e Isa. Una contraseña verificada con scrypt y una sesión revocable controlan lectura y gestos; las credenciales se guardan fuera del repositorio y del código del navegador. No hay una plataforma de cuentas individuales ni mundos separados por persona. Un enlace difícil de adivinar no sustituye el control de acceso.
 
 La selección de recuerdos debe indicar qué contenido puede ver esa audiencia. El material original se consulta en su ubicación autorizada y no se copia al repositorio, a logs, a prompts externos ni a la base operativa del mundo. Los textos que entren a la aplicación se revisan; también se revisa el contenido derivado que aparezca en diario o fichas.
 
@@ -123,12 +131,18 @@ Una vista pública de solo lectura puede añadirse después con su contenido rev
 | Construcción y aprendizaje | Materiales y trabajo necesarios; éxito y fracaso modifican valores, y desactivar la actualización conserva costes y habilidades. |
 | Control individual | Desplazamiento físico más allá del mapa anterior, necesidades urgentes y retorno a autonomía. |
 | Ecología | Agotar un recurso altera crecimiento o rutas; se explican entradas y pérdidas; no aparecen cantidades negativas ni recuperación oculta. |
+| Agua y fauna | Suelo húmedo y océano no dan agua potable; recarga acotada, caza con débito y migración sin duplicación; reproducción animal consume biomasa y agua. |
+| Herencia y crianza | Cada locus recibe aporte de ambos progenitores; variar aprendizaje no reescribe alelos; descendencia conserva costes, condiciones, límites y experiencia propia. |
+| Cooperación y comunidades | Materiales, trabajo, trueque y enseñanza producen cambios reales; pertenencia depende de confianza y cultura locales, con alternativas para revisarla. |
+| Disputa y turnos | Dos personas distintas compiten con la misma acción por la misma fuente escasa; controles de abundancia, urgencia, confianza y apertura; espera efectiva sin inventar recursos. |
 | Cuerpo y vínculo | Cambiar una necesidad o una interacción altera una elección y una señal corporal. La distancia por sí sola no determina deterioro afectivo. |
 | Memoria causal | Mismo estado y semilla con y sin una memoria pertinente: cambia una elección prevista. Un recuerdo irrelevante sirve de control y no debe producir ese mismo efecto. |
 | Agencia individual | S e I muestran preferencias diferentes bajo condiciones comparables; las intenciones no son anuladas después por un paseo aleatorio. |
 | Cultura | Una costumbre tiene una cadena de acciones e imitación identificable; desactivar el aprendizaje elimina esa transmisión. |
 | Reproducción de ejecución | Mismo estado inicial, reglas y entradas aplicadas en los mismos pasos y orden producen el mismo estado de simulación, independientemente del dibujo. |
 | Continuidad | Recargar conserva el mundo; cerrar todas las pestañas no detiene el servidor; reiniciar conserva cuerpo, memoria, intención y azar guardados. |
+| Mundo compartido | Dos clientes con cámaras distintas reciben el mismo paso y población; una orden aceptada es visible para ambos; desconectar clientes no multiplica ni detiene pasos. |
+| Renderizado | Comparar escena equivalente con y sin WebGL2; documentar dispositivo, cachés, pérdida de contexto y alternativa 2D, sin llamar GPU física al software. |
 | Fallos | Estado corrupto no inicia un mundo nuevo; un error de guardado no recibe confirmación exitosa; un gesto reenviado no duplica efectos. |
 | Acceso y privacidad | Una petición sin sesión no lee ni modifica el mundo privado. Bundle, mensajes y logs no incluyen conversaciones originales ni datos personales no aprobados. |
 | Crónica | Cada episodio mostrado corresponde a hechos guardados; no se inventan escenas para llenar una ausencia o una caída. |
@@ -136,7 +150,7 @@ Una vista pública de solo lectura puede añadirse después con su contenido rev
 
 Las comparaciones causales mantienen iguales las demás condiciones. No se llama integración a una diferencia provocada simplemente por eliminar acciones posibles del grupo de control. Para resultados probabilísticos se usan varias semillas emparejadas y se registra el efecto observado, sin convertirlo en una medida de conciencia.
 
-El código incorpora comandos de tipos, pruebas y compilación (`npm run check`), pruebas de navegador (`npm run test:e2e`) y una ejecución acelerada con guardado por paso (`npm run test:soak`). Las quince pruebas del motor comprobadas durante su implementación cubren causalidad, transmisión autónoma en semillas emparejadas, memoria irrelevante, reproducción y cotas. Los resultados finales de integración deben leerse junto a su evidencia de ejecución.
+El código incorpora comandos de tipos, pruebas y compilación (`npm run check`), pruebas de navegador (`npm run test:e2e`) y una ejecución acelerada con guardado por paso (`npm run test:soak`). Las suites del motor, ecología, archivo, servidor y navegador cubren mecanismos y controles concretos; la lista anterior también incluye criterios de revisión. Las cifras aprobadas, condiciones medidas y omisiones deben consultarse en [EVIDENCIA.md](EVIDENCIA.md), sin trasladar recuentos de V1/V2 al cierre V3.
 
 Antes de entregar se comprueban también reconexión, reinicio, restauración de copia y varios ciclos de día y noche. El script de ejecución prolongada registra duración, configuración, recursos y fallos en `artifacts/soak.json`; es una ejecución acelerada, no una estancia equivalente en tiempo real. Una prueba prolongada no acredita por sí sola fiabilidad indefinida. El teléfono físico, el alojamiento privado y el contenido personal final siguen pendientes.
 
@@ -146,6 +160,6 @@ Las escenas con datos íntimos se revisan en privado. Las pruebas con otras pers
 
 Terminar una etapa del plan antes de sumar sistemas. Medir rendimiento antes de ampliar población o cambiar renderer. Llevar decisiones y evidencias breves junto al código que se implemente; un fallo corregido no necesita convertirse en otro manifiesto.
 
-No se recuperan automáticamente plantillas de CI, comandos de operación, configuraciones de proveedores ni rutas de otros repositorios. Cuando exista una aplicación, se escriben únicamente los comandos que realmente la construyen, comprueban y ejecutan.
+No se recuperan automáticamente plantillas de CI, comandos de operación, configuraciones de proveedores ni rutas de otros repositorios. Se documentan únicamente los comandos que realmente construyen, comprueban y ejecutan esta aplicación.
 
 Al informar una entrega, distinguir lo diseñado de lo implementado y de lo observado. Nombrar los archivos cambiados, las comprobaciones ejecutadas y lo que no se probó. Este plan queda listo cuando su alcance es coherente; el producto quedará listo cuando la experiencia completa funcione y la carta tenga la voz de Steven.

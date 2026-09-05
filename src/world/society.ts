@@ -33,7 +33,7 @@ export function cooperationOpportunity(world: World, person: Person): Opportunit
     const openness = other.communityId !== person.communityId && !same ? person.culture.openness : 1;
     const score = 0.22 + person.genome.cooperation * 0.35 + trust * 0.16 + openness * 0.07;
     if (other.action === 'build' && ((other.materials.wood < 6 && person.materials.wood > 0) || (other.materials.stone < 3 && person.materials.stone > 0))) opportunities.push({ person: other, kind: 'supply', score: score + 0.22 });
-    else if ((other.action === 'build' || other.action === 'hunt') && other.work > 0) opportunities.push({ person: other, kind: 'assist', score: score + 0.16 });
+    else if ((other.action === 'build' || other.action === 'hunt') && other.work > 0 && other.work < Math.ceil((other.action === 'build' ? 90 : 45) * (1 - (other.skills[other.action] ?? 0) * 0.25)) - 1) opportunities.push({ person: other, kind: 'assist', score: score + 0.16 });
     else if (person.materials.wood >= 2 && person.materials.stone < 2 && other.materials.stone >= 2 && other.materials.wood < 6) opportunities.push({ person: other, kind: 'trade', score: score + 0.08 });
     else if (Object.entries(person.skills).some(([skill, level]) => level > (other.skills[skill] ?? 0) + 0.08)) opportunities.push({ person: other, kind: 'teach', score });
   }
@@ -50,7 +50,9 @@ export function cooperate(world: World, person: Person, emit: Emit): boolean {
     detail = `Aportó una unidad de ${material === 'wood' ? 'madera' : 'piedra'} al trabajo de ${other.name}.`;
   } else if (opportunity.kind === 'assist') {
     const before = other.work;
-    other.work = Math.min(other.action === 'build' ? 89 : 44, other.work + 12); count(world, 'constructionHelp');
+    const ceiling = Math.ceil((other.action === 'build' ? 90 : 45) * (1 - (other.skills[other.action] ?? 0) * 0.25)) - 1;
+    if (before >= ceiling) return false;
+    other.work = Math.min(ceiling, other.work + 12); count(world, 'constructionHelp');
     detail = `Aportó ${other.work - before} unidades de trabajo a ${other.action === 'build' ? 'la obra' : 'la caza'} de ${other.name}.`;
   } else if (opportunity.kind === 'trade') {
     person.materials.wood--; other.materials.wood++; other.materials.stone--; person.materials.stone++; count(world, 'trade');

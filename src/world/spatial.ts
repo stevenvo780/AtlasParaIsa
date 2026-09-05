@@ -38,13 +38,21 @@ export function maintainRegions(world: World, context: WorldContext = {}): void 
     }
   }
   const retired = new Set<string>();
+  const detached = new Map<string, Chunk>();
   for (const [key, meta] of Object.entries(world.chunks)) {
     if (needed.has(key)) continue;
-    world.retiredChunks.push({ ...meta, lastTick: world.tick, tiles: world.tiles.filter(t => chunkKey(t.x, t.y) === key), places: world.places.filter(p => chunkKey(p.x, p.y) === key) });
+    const chunk: Chunk = { ...meta, lastTick: world.tick, tiles: [], places: [] };
+    world.retiredChunks.push(chunk); detached.set(key, chunk);
     delete world.chunks[key]; retired.add(key);
   }
   if (retired.size) {
-    world.tiles = world.tiles.filter(t => !retired.has(chunkKey(t.x, t.y)));
+    const active: Tile[] = [];
+    for (const tile of world.tiles) {
+      const chunk = detached.get(chunkKey(tile.x, tile.y));
+      if (chunk) chunk.tiles.push(tile); else active.push(tile);
+    }
+    for (const place of world.places) detached.get(chunkKey(place.x, place.y))?.places.push(place);
+    world.tiles = active;
     // The three memory anchors remain available as provenance even when dormant.
     world.places = world.places.filter(p => ['claro', 'refugio', 'huerta'].includes(p.id) || !retired.has(chunkKey(p.x, p.y)));
   }

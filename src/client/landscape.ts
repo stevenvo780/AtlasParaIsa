@@ -786,13 +786,14 @@ export class Landscape {
       }
     }
     const water = clamp01(tile.drinkingWater ?? 0);
-    if (water > .04 && (tile.feature === 'spring' || tile.biome === 'wetland' || tile.moisture > .65)) {
+    const reservoir = tile.feature === 'spring' || tile.feature === 'pool';
+    if (water > .04 && (reservoir || tile.biome === 'wetland' || tile.moisture > .65)) {
       ellipse(g, ox+10, oy+11, 2 + water*3, 1+water*2, css(P.soilDark));
       ellipse(g, ox+10, oy+10, 1 + water*3, .5+water*2, css(P.waterShallow));
       px(g, ox+9, oy+9, Math.max(1,Math.round(water*3)), 1, css(P.waterGleam, .65));
     }
     const feature = tile.feature;
-    if (feature === 'spring' && water <= .04) {
+    if (reservoir && water <= .04) {
       ellipse(g, ox+9, oy+10, 5, 3, css(P.soilDark)); ellipse(g, ox+9, oy+9, 4, 2, css(P.soilLight));
       px(g,ox+8,oy+8,1,3,css(P.soilDark)); px(g,ox+6,oy+10,3,1,css(P.soilDark));
     }

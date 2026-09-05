@@ -45,7 +45,7 @@ function report(origin: string) {
 try {
   if (!['start', 'stop', 'status'].includes(action)) throw new Error('Uso: npm run preview:local -- start | stop | status');
   if (action === 'stop') {
-    for (const session of [...sessions].reverse()) if (active(session)) checked('tmux', ['send-keys', '-t', `=${session}`, 'C-c']);
+    for (const session of [...sessions].reverse()) if (active(session)) checked('tmux', ['send-keys', '-t', `=${session}:0.0`, 'C-c']);
     console.log('Cierre ordenado solicitado a las dos sesiones de esta carta. El mundo guardado se conserva.');
   } else if (action === 'status' || sessions.every(active)) {
     if (!existsSync(configFile)) throw new Error('Todavía no existe una revisión configurada.');

@@ -127,3 +127,12 @@ test('local navigation walks around a nearby river and explicitly ends an enclos
   stepWorld(enclosed.w, [{ id: 'blocked-command', kind: 'command', agentId: enclosed.p.id, order: 'move', x: 38, y: 12 }]); run(enclosed.w, 5);
   assert.equal(enclosed.p.command, null); assert.equal(enclosed.p.controlMode, 'auto'); assert.match(enclosed.p.reason, /interrumpida/);
 });
+
+test('directed gathering reaches a locally perceived resource and completes work across decision boundaries', () => {
+  const { w, p } = ready(); p.materials = { wood: 0, stone: 0 };
+  for (const tile of w.tiles) { tile.wood = 0; tile.stone = 0; }
+  const source = tileAt(w, { x: 40, y: 12 })!; source.wood = 3;
+  stepWorld(w, [{ id: 'gather-distant', kind: 'command', agentId: p.id, order: 'gather', x: p.x, y: p.y }]); run(w, 60);
+  assert.ok(p.materials.wood >= 1); assert.ok(source.wood < 3);
+  assert.ok(p.visited.includes('40,12')); assert.ok((p.activity.gather ?? 0) >= 1);
+});

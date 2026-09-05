@@ -217,7 +217,7 @@ function choose(world: World, person: Person): void {
     const command = person.command;
     const directed: Candidate = { action: command.order === 'move' ? 'explore' : command.order, target: { x: command.x, y: command.y }, score: 5, reason: `Tarea solicitada: ${command.order === 'move' ? 'ir al destino' : actionLabel(command.order)}. Conserva sus necesidades corporales.` };
     if (command.order === 'explore') directed.target = explorationTarget(world, person, nearbyTiles);
-    if (command.order === 'gather' && distance(person, command) <= 2 && resource) directed.target = resource;
+    if (command.order === 'gather' && distance(person, command) <= RADIUS && resource) directed.target = resource;
     candidates.push(directed);
   }
   candidates.sort((a, b) => b.score - a.score);

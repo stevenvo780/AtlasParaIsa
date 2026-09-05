@@ -150,7 +150,7 @@ export function createApp(options: AppOptions) {
       for (const socket of clients.keys()) {
         send(socket, { type: 'error', message: 'No se pudo guardar. El mundo está en pausa.' });
         const previous = clients.get(socket)?.lastView;
-        if (previous) send(socket, { type: 'state', world: { ...previous, paused: true, pauseReason: 'No se pudo confirmar el siguiente paso. Se muestra el último estado recibido.' } });
+        if (previous) send(socket, { type: 'state', world: { ...previous, paused: true, pauseReason: 'El mundo está en pausa: no se pudo confirmar el siguiente paso. Se muestra el último estado recibido.' } });
       }
     }
   }

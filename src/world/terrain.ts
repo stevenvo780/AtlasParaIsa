@@ -1,5 +1,7 @@
 import type { Biome, PlaceView, Tile } from '../shared/types.js';
 import { initializeEcosystem } from './ecosystem.js';
+import type { Animal } from './animals.js';
+import type { StructureView } from '../shared/life.js';
 
 export const CHUNK_SIZE = 16;
 /** Technical integer-coordinate guard, not the boundary of a generated map. Upper bound is exclusive. */
@@ -13,6 +15,17 @@ export interface Chunk {
   discovered: boolean;
   places: PlaceView[];
   lastTick: number;
+  animals?: Animal[];
+  structures?: StructureView[];
+  lifeVersion?: 4;
+}
+
+/** Existing roofs gain an identity, without adding food, water or materials. */
+export function legacyStructures(tiles: Tile[], tick: number): StructureView[] {
+  return tiles.filter(tile => tile.terrain === 'shelter').map(tile => ({
+    id: `structure-legacy-${tile.x}-${tile.y}`, x: tile.x, y: tile.y, blueprintId: 'blueprint-base',
+    name: 'Refugio', components: ['frame', 'roof'], condition: 1, water: 0, food: 0, uses: 0, builtAt: tick, builderId: null,
+  }));
 }
 
 const clamp = (value: number): number => Math.max(0, Math.min(1, value));

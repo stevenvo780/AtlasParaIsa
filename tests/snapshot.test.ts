@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { createWorld, assertWorld, stepWorld } from '../src/world/index.js';
+import { createWorld, assertWorld, stepWorld, projectWorld } from '../src/world/index.js';
 import { decodeSnapshot, encodeSnapshot } from '../src/server/snapshot.js';
 import { Store } from '../src/server/store.js';
 
@@ -51,4 +51,29 @@ test('a resumed world continues identically when sharing updates a place and its
   const resumed=decodeSnapshot(encodeSnapshot(world)) as typeof world;
   stepWorld(world);stepWorld(resumed);assert.deepEqual(resumed,world);
   assert.ok(world.places.find(p=>p.id==='claro')!.gatherings>0);
+});
+
+test('V4 animal identities, blueprint costs, counters and settlement memories fail closed under a valid checksum', () => {
+  const valid=createWorld(51926),store=new Store(':memory:');
+  const mutations=[
+    (w:typeof valid)=>{w.animals.push(structuredClone(w.animals[0]!));},
+    (w:typeof valid)=>{w.animals[0]!.health=0;},
+    (w:typeof valid)=>{w.animals=[];},
+    (w:typeof valid)=>{w.blueprints[0]!.cost.work=1;},
+    (w:typeof valid)=>{w.blueprints[0]!.generation=1;},
+    (w:typeof valid)=>{w.structures[0]!.water=0.1;},
+    (w:typeof valid)=>{w.inventionDynamics.accepted=1;},
+    (w:typeof valid)=>{w.structures[0]!.id='structure-1';w.structureCounter=0;},
+    (w:typeof valid)=>{w.blueprints.push({...structuredClone(w.blueprints[0]!),id:'blueprint-2',generation:1,parents:['blueprint-base'],inventorId:'s',components:['frame','roof','cistern'],cost:{wood:8,stone:6,work:130}});w.blueprintCounter=1;},
+    (w:typeof valid)=>{w.people[2]!.home={x:17,y:13,quality:1,observedAt:1};},
+  ];
+  try{store.save(valid);for(const mutate of mutations){const invalid=structuredClone(valid);mutate(invalid);const body=encodeSnapshot(invalid);store.db.prepare('UPDATE snapshots SET body=?,digest=? WHERE slot=0').run(body,createHash('sha256').update(body).digest('hex'));assert.throws(()=>store.load());}}
+  finally{store.close();}
+});
+
+test('life projections keep explicit public fields and cannot expose additional runtime bookkeeping',()=>{
+  const world=createWorld(51926);
+  for(const body of [world.animals[0]!,world.blueprints[0]!,world.blueprints[0]!.cost,world.structures[0]!])Object.assign(body,{internalOnly:'synthetic-internal-state'});
+  const view=projectWorld(world);assert.ok(view.blueprints!.length);assert.ok(view.structures!.length);assert.equal(JSON.stringify(view).includes('synthetic-internal-state'),false);
+  view.blueprints![0]!.components.push('cistern');view.structures![0]!.condition=0;assert.equal(world.blueprints[0]!.components.length,2);assert.equal(world.structures[0]!.condition,1);
 });

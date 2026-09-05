@@ -26,7 +26,7 @@ test('initialization is pure and deterministic and never refills explicitly depl
   assert.notEqual(enriched, original);
 });
 
-test('procedural biomes contain varied features, finite fresh water and all four sparse animal species', () => {
+test('procedural biomes contain varied features, finite fresh water and all six sparse animal species', () => {
   const features = new Set<string>(), species = new Set<string>();
   let occupied = 0, fresh = 0, salt = 0, samples = 0;
   for (let y = -1000; y <= 1000; y += 20) for (let x = -1000; x <= 1000; x += 20) {
@@ -42,9 +42,21 @@ test('procedural biomes contain varied features, finite fresh water and all four
     assert.ok(Number.isInteger(tile.fauna) && tile.fauna! >= 0 && tile.fauna! <= 6);
   }
   for (const feature of ['tree', 'pine', 'palm', 'cactus', 'reeds', 'berries', 'flowers', 'rock', 'clay', 'spring', 'pool']) assert.ok(features.has(feature), `${feature} needs a real procedural example`);
-  assert.deepEqual([...species].sort(), ['boar', 'deer', 'fish', 'hare']);
+  assert.deepEqual([...species].sort(), ['boar', 'deer', 'fish', 'fox', 'hare', 'wolf']);
   assert.ok(occupied > 30 && occupied / samples < 0.1, 'fauna is sparse, not a full tile overlay');
   assert.ok(fresh > 0 && salt > 0);
+});
+
+test('individual-fauna mode leaves legacy stocks alone and never introduces predators into saved populations', () => {
+  const stock = cell(0, 0, { fauna: 2, species: 'hare', growth: 0, drinkingWater: 0, moisture: 0 });
+  stepEcosystem([stock], 200, 'clear', 'night', false);
+  assert.equal(stock.fauna, 2); assert.equal(stock.species, 'hare');
+  for (let y = -20; y <= 20; y++) for (let x = -20; x <= 20; x++) {
+    const saved = cell(x, y, { fauna: 2, species: 'deer' });
+    assert.equal(initializeEcosystem(51926, saved).species, 'deer');
+    const missingSpecies = { ...saved }; delete missingSpecies.species;
+    assert.equal(initializeEcosystem(51926, missingSpecies).species, 'hare');
+  }
 });
 
 test('temperate starting regions have visible water while arid regions retain resource scarcity', () => {

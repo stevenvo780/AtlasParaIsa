@@ -3,6 +3,7 @@ import type { Person, World } from './index.js';
 import { localRandom } from './genetics.js';
 import { count } from './statistics.js';
 import { tileAt } from './spatial.js';
+import { constructionCost, waterAvailable } from './inventions.js';
 
 type Emit = (event: Omit<ChronicleEvent, 'id' | 'tick'>) => ChronicleEvent;
 export type Culture = NonNullable<PersonView['culture']>;
@@ -23,6 +24,40 @@ export function bond(world: World, a: Person, b: Person, amount: number): void {
   }
 }
 export interface Opportunity { person: Person; kind: 'supply' | 'assist' | 'teach' | 'trade'; score: number; }
+/** A home is an observed useful place, not a birth faction or a movement boundary. */
+export function settlementOpportunity(world: World, person: Person): { target: {x:number;y:number}; score: number; reason: string } | undefined {
+  if (!world.cooperationEnabled) return;
+  const viable = (place: {x:number;y:number}) => {
+    let food = 0, water = 0;
+    for (let dy=-4;dy<=4;dy++) for (let dx=-4;dx<=4;dx++) {
+      if (dx*dx+dy*dy>16) continue;
+      const tile = tileAt(world,{x:place.x+dx,y:place.y+dy});
+      if (tile && tile.terrain !== 'water') { food += tile.food; water += tile.drinkingWater ?? 0; }
+    }
+    const facilities = world.structures.filter(s=>distance(s,place)<=4 && s.condition>0.1);
+    food += facilities.reduce((sum,s)=>sum+s.food,0); water += facilities.reduce((sum,s)=>sum+s.water,0);
+    const peers = world.people.filter(p=>p!==person && distance(p,place)<=6);
+    const trust = peers.reduce((sum,p)=>sum+(person.bonds[p.id]??0.15),0)/Math.max(1,peers.length);
+    const provision = Math.min(clamp(food/0.8),clamp(water/0.12));
+    return provision * (0.45 + (facilities.length ? 0.25 : 0) + trust*0.3);
+  };
+  if (person.home && distance(person,person.home)<=7) {
+    person.home.quality = viable(person.home); person.home.observedAt = world.tick;
+    if (person.home.quality < 0.12) delete person.home;
+  }
+  const nearby = world.places.filter(p=>distance(person,p)<=6).map(p=>({place:p,quality:viable(p)}))
+    .sort((a,b)=>b.quality-a.quality || distance(person,a.place)-distance(person,b.place));
+  const best = nearby[0];
+  if (best && best.quality>0.4 && (!person.home || best.quality>person.home.quality+0.12)) person.home={x:best.place.x,y:best.place.y,quality:best.quality,observedAt:world.tick};
+  const home=person.home;
+  if (!home) return;
+  // Old observations decay. An explorer cannot read distant regenerated resources.
+  const confidence=Math.max(0,1-(world.tick-home.observedAt)/2400), quality=home.quality*confidence;
+  if (quality<0.2 || Math.max(person.hunger,person.thirst)>0.82 || person.socialLoad>0.75) return;
+  const away=distance(person,home);
+  if (away<2) return;
+  return {target:{x:home.x,y:home.y},score:quality*(0.55+person.sociability*0.25+(1-person.curiosity)*0.2)+Math.min(0.18,away*0.012),reason:'Vuelve a un lugar conocido con agua, alimento, techo o cooperación; compara esos beneficios con sus necesidades actuales.'};
+}
 export function cooperationOpportunity(world: World, person: Person): Opportunity | undefined {
   if (!world.cooperationEnabled) return;
   const opportunities: Opportunity[] = [];
@@ -32,8 +67,9 @@ export function cooperationOpportunity(world: World, person: Person): Opportunit
     const trust = person.bonds[other.id] ?? 0.2;
     const openness = other.communityId !== person.communityId && !same ? person.culture.openness : 1;
     const score = 0.22 + person.genome.cooperation * 0.35 + trust * 0.16 + openness * 0.07;
-    if (other.action === 'build' && ((other.materials.wood < 6 && person.materials.wood > 0) || (other.materials.stone < 3 && person.materials.stone > 0))) opportunities.push({ person: other, kind: 'supply', score: score + 0.22 });
-    else if ((other.action === 'build' || other.action === 'hunt') && other.work > 0 && other.work < Math.ceil((other.action === 'build' ? 90 : 45) * (1 - (other.skills[other.action] ?? 0) * 0.25)) - 1) opportunities.push({ person: other, kind: 'assist', score: score + 0.16 });
+    const cost = constructionCost(world,other);
+    if (other.action === 'build' && ((other.materials.wood < cost.wood && person.materials.wood > 0) || (other.materials.stone < cost.stone && person.materials.stone > 0))) opportunities.push({ person: other, kind: 'supply', score: score + 0.22 });
+    else if ((other.action === 'build' || other.action === 'hunt') && other.work > 0 && other.work < (other.action === 'build' ? cost.work : Math.ceil(45*(1-(other.skills.hunt??0)*0.25))) - 1) opportunities.push({ person: other, kind: 'assist', score: score + 0.16 });
     else if (person.materials.wood >= 2 && person.materials.stone < 2 && other.materials.stone >= 2 && other.materials.wood < 6) opportunities.push({ person: other, kind: 'trade', score: score + 0.08 });
     else if (Object.entries(person.skills).some(([skill, level]) => level > (other.skills[skill] ?? 0) + 0.08)) opportunities.push({ person: other, kind: 'teach', score });
   }
@@ -44,13 +80,13 @@ export function cooperate(world: World, person: Person, emit: Emit): boolean {
   if (!opportunity || distance(person, opportunity.person) > 1.5) return false;
   const other = opportunity.person; let detail = '';
   if (opportunity.kind === 'supply') {
-    const material = other.materials.wood < 6 && person.materials.wood > 0 ? 'wood' : 'stone';
+    const material = other.materials.wood < constructionCost(world,other).wood && person.materials.wood > 0 ? 'wood' : 'stone';
     if (person.materials[material] < 1 || other.materials[material] >= (material === 'wood' ? 12 : 8)) return false;
     person.materials[material]--; other.materials[material]++;
     detail = `Aportó una unidad de ${material === 'wood' ? 'madera' : 'piedra'} al trabajo de ${other.name}.`;
   } else if (opportunity.kind === 'assist') {
     const before = other.work;
-    const ceiling = Math.ceil((other.action === 'build' ? 90 : 45) * (1 - (other.skills[other.action] ?? 0) * 0.25)) - 1;
+    const ceiling = (other.action === 'build' ? constructionCost(world,other).work : Math.ceil(45*(1-(other.skills.hunt??0)*0.25))) - 1;
     if (before >= ceiling) return false;
     other.work = Math.min(ceiling, other.work + 12); count(world, 'constructionHelp');
     detail = `Aportó ${other.work - before} unidades de trabajo a ${other.action === 'build' ? 'la obra' : 'la caza'} de ${other.name}.`;
@@ -114,7 +150,7 @@ export function updateCommunities(world: World, emit: Emit): void {
 export function resourceDispute(world: World, person: Person, emit: Emit): boolean {
   if (!world.cooperationEnabled || !person.communityId || world.tick - person.lastDispute < 180 || Math.max(person.hunger, person.thirst) < 0.65) return false;
   const source = tileAt(world, person.target);
-  const stock = person.action === 'drink' ? source?.drinkingWater ?? 0 : person.action === 'hunt' ? source?.fauna ?? 0 : source?.food ?? 0;
+  const stock = person.action === 'drink' ? waterAvailable(world,person.target) : person.action === 'hunt' ? source?.fauna ?? 0 : source?.food ?? 0;
   if (!source || !['eat','drink','hunt'].includes(person.action) || stock <= 0 || stock > (person.action === 'drink' ? 0.12 : person.action === 'hunt' ? 1 : 0.06)) return false;
   const other = world.people.find(p => p !== person && p.communityId && p.action === person.action && distance(person, p) <= 2 && distance(person.target, p.target) < 0.5 && Math.max(p.hunger, p.thirst) > 0.65 && world.tick - p.lastDispute >= 180);
   if (!other) return false;

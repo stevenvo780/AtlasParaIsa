@@ -1,15 +1,19 @@
 import { PROTOCOL_VERSION, type Action, type ChronicleEvent, type Gesture, type GestureResult, type MemoryView, type PersonView, type PlaceView, type Tile, type WorldView, type Viewport, type Order, type CommunityView, type WorldSample } from '../shared/types.js';
 import { activate, maintainRegions, normalizeViewport, projectTerrain, tileAt, validCoordinate, type ChunkMeta, type WorldContext } from './spatial.js';
-import { chunkKey, generateChunk, proceduralPlaceName, type Chunk } from './terrain.js';
+import { chunkKey, generateChunk, proceduralPlaceName, legacyStructures, type Chunk } from './terrain.js';
 import { assertGenome, expressGenome, founderGenome, inheritGenome, type Genome } from './genetics.js';
-import { bond, cooperate, cooperationOpportunity, initialCulture, resourceDispute, updateCommunities, type Culture } from './society.js';
+import { bond, cooperate, cooperationOpportunity, initialCulture, resourceDispute, updateCommunities, settlementOpportunity, type Culture } from './society.js';
 import { count, emptyTotals, recordSample, worldStatistics } from './statistics.js';
-import { initializeEcosystem, stepEcosystem, harvestAnimal, harvestMaterial, cultivateTile, trampleTile } from './ecosystem.js';
-import { assertEcosystemTile } from './validation.js';
+import { initializeEcosystem, stepEcosystem, harvestMaterial, cultivateTile, trampleTile } from './ecosystem.js';
+import { assertEcosystemTile, assertLifeState, assertDormantTerrain } from './validation.js';
+import { materializeAnimals, stepAnimals, harvestAt, type Animal } from './animals.js';
+import { advanceNeeds } from './needs.js';
+import { defaultBlueprint, constructionCost, inventionOpportunity, invent, completeConstruction, stepStructures, repairOpportunity, repair, facilityRestQuality, recordFacilityRest, foodAvailable, takeFood, waterAvailable, takeWater, REST_FATIGUE_RATE, REST_ENERGY_RATE } from './inventions.js';
+import type { AnimalDynamics, BlueprintView, StructureView, InventionDynamics } from '../shared/life.js';
 export { tileAt, normalizeViewport } from './spatial.js';
 export type { WorldContext } from './spatial.js';
 
-export const RULES_VERSION = 3;
+export const RULES_VERSION = 4;
 export const MAX_POPULATION = 32;
 export const TICKS_PER_DAY = 2400;
 export const MAX_EVENTS = 120;
@@ -36,6 +40,8 @@ export interface Person extends PersonView {
   work: number; lastOutcome: number; intentContext: 'hungry' | 'thirsty' | 'tired' | 'ready'; controlMode: 'auto' | 'directed';
   thirst: number; genome: Genome; bornAt: number; lastBirth: number; lastSocial: number; lastDispute: number; lastPracticeMemory: number;
   culture: Culture; communityId: string | null; bonds: Record<string, number>;
+  lastInvention?: number;
+  home?: { x: number; y: number; quality: number; observedAt: number };
 }
 export interface Memory extends MemoryView {
   context: 'partner-tired' | 'shelter-tired' | 'food-hungry' | 'rain-shelter' | 'irrelevant';
@@ -52,6 +58,8 @@ export interface World {
   adaptationEnabled: boolean; noveltyEnabled: boolean; shelterBenefitEnabled: boolean;
   cooperationEnabled: boolean; reproductionEnabled: boolean; communities: CommunityView[]; communityCounter: number; birthCounter: number;
   history: WorldSample[]; totals: Record<string, number>;
+  animals: Animal[]; animalCounter: number; animalDynamics: AnimalDynamics;
+  blueprints: BlueprintView[]; structures: StructureView[]; blueprintCounter: number; structureCounter: number; inventionDynamics: InventionDynamics;
 }
 
 function random(world: Pick<World, 'rng'>): number {
@@ -104,6 +112,9 @@ export function createWorld(seed = 20260905): World {
     chunks: {}, retiredChunks: [], discoveredChunks: 0, settlementCount: 0,
     adaptationEnabled: true, noveltyEnabled: true, shelterBenefitEnabled: true,
     cooperationEnabled: true, reproductionEnabled: true, communities: [], communityCounter: 0, birthCounter: 0, history: [], totals: emptyTotals(),
+    animals: [], animalCounter: 0, animalDynamics: { births: 0, deaths: 0, predations: 0, humanHunts: 0, waterConsumed: 0, plantConsumed: 0 },
+    blueprints: [defaultBlueprint()], structures: [], blueprintCounter: 0, structureCounter: 0,
+    inventionDynamics: { attempts: 0, accepted: 0, repairs: 0, waterCollected: 0, foodStored: 0, foodTaken: 0 },
   };
   for (let cy = 0; cy < 2; cy++) for (let cx = 0; cx < 3; cx++) activate(world, cx * 16, cy * 16);
   for (const place of world.places.slice(0, 3)) {
@@ -133,6 +144,7 @@ export function createWorld(seed = 20260905): World {
     });
   }
   for (const person of world.people) initializePerson(world, person);
+  world.structures.push(...legacyStructures(world.tiles, world.tick));
   addEvent(world, { kind: 'memory', actors: [], source: 'sample', text: 'Este mundo comienza con S, I y una vecindad ficticia. Los cinco recuerdos son ejemplos, pendientes de la historia de Steven e Isa.', cause: 'Contenido sintético identificado; no se importaron conversaciones ni biografía.' });
   return world;
 }
@@ -184,9 +196,11 @@ function choose(world: World, person: Person): void {
   const nearbyPeople = world.people.filter(other => other.id !== person.id && distance(person, other) <= RADIUS);
   const partner = nearbyPeople.find(other => person.role !== 'neighbor' && other.role !== 'neighbor');
   const candidates: Candidate[] = [{ action: 'explore', target: person.target, score: 0.33 + person.curiosity * 0.18, reason: 'Tiene energía y curiosidad por lo que hay cerca.' }];
+  const home = settlementOpportunity(world,person);
+  if (home) candidates.push({action:'approach',...home});
   const food = nearbyTiles.filter(tile => tile.food > 0.025).sort((a, b) => (distance(person, a) - a.food * 2) - (distance(person, b) - b.food * 2))[0];
-  if (food || person.inventory > 0.01) candidates.push({ action: 'eat', target: food ?? person, score: Math.max(0, person.hunger - 0.22) * 2.5 - (food ? distance(person, food) * 0.02 : 0), reason: 'El hambre orienta su camino hacia alimento que puede percibir.' });
-  const water = nearbyTiles.filter(t => (t.drinkingWater ?? 0) > 0.005).sort((a, b) => distance(person, a) - distance(person, b))[0];
+  if (food || person.inventory > 0.01 || foodAvailable(world,person)>0) candidates.push({ action: 'eat', target: food ?? person, score: Math.max(0, person.hunger - 0.22) * 2.5 - (food ? distance(person, food) * 0.02 : 0), reason: 'El hambre orienta su camino hacia alimento que puede percibir.' });
+  const water = nearbyTiles.filter(t => waterAvailable(world,t) > 0.005).sort((a, b) => distance(person, a) - distance(person, b))[0];
   if (water) candidates.push({ action: 'drink', target: water, score: Math.max(0, person.thirst - 0.18) * 3.1 - distance(person, water) * 0.015, reason: 'La sed orienta su camino hacia una reserva finita de agua dulce.' });
   const prey = nearbyTiles.filter(t => (t.fauna ?? 0) >= 1).sort((a, b) => distance(person, a) - distance(person, b))[0];
   if (prey && person.inventory < 0.18) candidates.push({ action: 'hunt', target: prey, score: Math.max(0, person.hunger - 0.18) * 2 + person.traits.industriousness * 0.18 + (food && food.food > 0.2 ? 0 : 0.2) - (person.hunger < 0.8 && (prey.fauna ?? 0) <= 1 ? person.culture.stewardship * 0.15 : 0), reason: 'Percibe fauna; cazar cuesta trabajo, retira un animal y proporciona alimento limitado.' });
@@ -197,10 +211,15 @@ function choose(world: World, person: Person): void {
   const resource = nearbyTiles.filter(t => ((t.wood ?? 0) >= 1 && person.materials.wood < 12) || ((t.stone ?? 0) >= 1 && person.materials.stone < 8))
     .sort((a, b) => resourceDistance(person, a) - resourceDistance(person, b))[0];
   const workBias = person.traits.industriousness;
-  const buildable = nearbyTiles.filter(t => t.terrain !== 'shelter' && t.moisture > 0.2 && t.vegetation > 0.15 && !world.places.some(p => distance(p, t) < 10))
+  const cost = constructionCost(world,person);
+  const buildable = nearbyTiles.filter(t => t.terrain !== 'shelter' && t.moisture > 0.2 && t.vegetation > 0.15 && !world.places.some(p => distance(p, t) < 5))
     .sort((a, b) => distance(person, a) - distance(person, b))[0];
-  if (resource && (person.materials.wood < 6 || person.materials.stone < 3)) candidates.push({ action: 'gather', target: resource, score: 0.15 + workBias * 0.4 + (!shelter ? 0.2 : 0), reason: 'Percibe materiales útiles para cultivar y levantar refugios.' });
-  if (buildable && person.materials.wood >= 6 && person.materials.stone >= 3) candidates.push({ action: 'build', target: buildable, score: 0.5 + workBias * 0.45 + (!shelter ? 0.2 : 0), reason: 'Hay materiales y un lugar habitable sin refugio próximo; puede construir con trabajo.' });
+  if (resource && (person.materials.wood < cost.wood || person.materials.stone < cost.stone)) candidates.push({ action: 'gather', target: resource, score: 0.15 + workBias * 0.4 + (!shelter ? 0.2 : 0), reason: 'Percibe materiales útiles para cultivar y levantar refugios.' });
+  if (buildable && person.materials.wood >= cost.wood && person.materials.stone >= cost.stone) candidates.push({ action: 'build', target: buildable, score: 0.5 + workBias * 0.45 + (!shelter ? 0.2 : 0), reason: 'Hay materiales y un lugar habitable; puede construir una receta conocida con trabajo.' });
+  const invention = inventionOpportunity(world,person);
+  if(invention) candidates.push({action:'invent',...invention});
+  const damaged = repairOpportunity(world,person);
+  if(damaged) candidates.push({action:'repair',target:damaged,score:0.5+(1-damaged.condition)*0.35+workBias*0.12,reason:'Un edificio utilizado se desgasta; repararlo cuesta material y trabajo y conserva sus funciones.'});
   const farmland = nearbyTiles.filter(t => t.terrain !== 'shelter' && t.moisture > 0.25 && t.vegetation < 0.8).sort((a, b) => distance(person, a) - distance(person, b))[0];
   if (farmland && person.materials.wood >= 1) candidates.push({ action: 'farm', target: farmland, score: 0.12 + workBias * 0.3 + person.culture.stewardship * 0.12 + (food && food.food < 0.2 ? 0.2 : 0), reason: 'Puede preparar tierra húmeda; el alimento llegará después con agua y luz.' });
   if (partner) {
@@ -251,11 +270,14 @@ function choose(world: World, person: Person): void {
     if (command.order === 'drink' && water) directed.target = water;
     if (command.order === 'hunt' && prey) directed.target = prey;
     if (command.order === 'cooperate' && help) directed.target = help.person;
+    if (command.order === 'repair' && damaged) directed.target = damaged;
     candidates.push(directed);
   }
   candidates.sort((a, b) => b.score - a.score);
   const selected = candidates[0]!;
   if (selected.action === 'explore' && selected.score < 5) selected.target = explorationTarget(world, person, nearbyTiles);
+  // A viable work site retains accumulated work while the same action is selected.
+  if (selected.action===person.action && ['build','invent','repair','farm'].includes(selected.action) && person.work>0) selected.target=person.target;
   if (person.action !== selected.action || distance(person.target, selected.target) > 0) person.work = 0;
   person.action = selected.action;
   person.intentContext = person.thirst > 0.5 ? 'thirsty' : person.hunger > 0.5 ? 'hungry' : person.fatigue > 0.5 ? 'tired' : 'ready';
@@ -269,7 +291,7 @@ function choose(world: World, person: Person): void {
 }
 
 function actionLabel(action: Action): string {
-  return ({ explore: 'explorar', eat: 'buscar alimento', drink: 'beber', hunt: 'cazar', rest: 'descansar', approach: 'acercarse', accompany: 'acompañar', retreat: 'tomar espacio', share: 'compartir alimento', gather: 'recolectar', farm: 'cultivar', build: 'construir', cooperate: 'cooperar' })[action];
+  return ({ explore: 'explorar', eat: 'buscar alimento', drink: 'beber', hunt: 'cazar', rest: 'descansar', approach: 'acercarse', accompany: 'acompañar', retreat: 'tomar espacio', share: 'compartir alimento', gather: 'recolectar', farm: 'cultivar', build: 'construir', cooperate: 'cooperar', invent:'ensayar un diseño', repair:'reparar' })[action];
 }
 
 function resourceDistance(person: Person, tile: Tile): number {
@@ -399,14 +421,11 @@ function share(world: World, donor: Person): void {
 
 function bodyAndAction(world: World, person: Person): void {
   const tile = tileAt(world, person)!;
-  person.hunger = clamp(person.hunger + 0.00027);
-  person.thirst = clamp(person.thirst + 0.00045 + (tile.biome === 'desert' ? 0.0002 : 0));
-  person.energy = clamp(person.energy - 0.00007 - (person.hunger > 0.85 ? 0.00015 : 0) - (person.thirst > 0.85 ? 0.00015 : 0));
-  person.fatigue = clamp(person.fatigue + 0.00009 + (world.weather === 'rain' && tile.terrain !== 'shelter' ? 0.0001 : 0));
+  advanceNeeds(person, { hunger:0.00027, thirst:0.00045+(tile.biome==='desert'?0.0002:0), energy:0.00007, stressEnergy:0.00015, fatigue:0.00009+(world.weather==='rain'&&tile.terrain!=='shelter'?0.0001:0) });
   person.closeness = clamp(person.closeness + 0.0001);
   person.socialLoad = clamp(person.socialLoad - 0.0008);
-  const emptyFood = person.action === 'eat' && (tileAt(world, person.target)?.food ?? 0) < 0.005 && person.inventory < 0.01;
-  const emptyWater = person.action === 'drink' && (tileAt(world, person.target)?.drinkingWater ?? 0) < 0.003;
+  const emptyFood = person.action === 'eat' && (tileAt(world, person.target)?.food ?? 0) < 0.005 && person.inventory < 0.01 && foodAvailable(world,person)<0.001;
+  const emptyWater = person.action === 'drink' && waterAvailable(world,person.target) < 0.003;
   const agreedWait = person.action === 'retreat' && person.lastDispute >= 0 && world.tick < person.decisionAt && world.tick - person.lastDispute < 30;
   if (!agreedWait && (world.tick >= person.decisionAt || emptyFood || emptyWater || (person.hunger > 0.9 && !['eat','hunt'].includes(person.action)) || (person.thirst > 0.9 && person.action !== 'drink'))) choose(world, person);
   if (['eat','drink','hunt'].includes(person.action)) resourceDispute(world, person, event => addEvent(world, event));
@@ -421,6 +440,7 @@ function bodyAndAction(world: World, person: Person): void {
     const saved = Math.min(harvest * 0.25, 0.25 - person.inventory);
     person.inventory += saved;
     let consumed = harvest - saved;
+    if(consumed<0.001 && person.hunger>0.2) consumed += takeFood(world,person,0.002);
     if (consumed < 0.001 && person.inventory > 0 && person.hunger > 0.2) {
       const carried = Math.min(person.inventory, 0.002);
       person.inventory -= carried; consumed += carried;
@@ -431,20 +451,22 @@ function bodyAndAction(world: World, person: Person): void {
     if (person.hunger < 0.12) person.decisionAt = world.tick + 1;
   }
   if (person.action === 'drink' && distance(person, person.target) < 0.5) {
-    const water = Math.min(current.drinkingWater ?? 0, 0.006);
-    current.drinkingWater = Math.max(0, (current.drinkingWater ?? 0) - water); person.thirst = clamp(person.thirst - water * 3);
+    const water = takeWater(world,person,Math.min(0.006,person.thirst/3));
+    person.thirst = clamp(person.thirst - water * 3);
     count(world, 'waterConsumed', water);
     if (water > 0 && world.tick - person.lastOutcome >= 30) outcome(world, person, 'drink', water * 20);
     if (person.thirst < 0.12) { if (person.command?.order === 'drink') { person.command = null; person.controlMode = 'auto'; } person.decisionAt = world.tick + 1; }
   }
   if (person.action === 'rest' && distance(person, person.target) < 0.5) {
-    const quality = current.terrain === 'shelter' && world.shelterBenefitEnabled ? 1 : world.weather === 'rain' ? 0.2 : 0.55;
-    person.fatigue = clamp(person.fatigue - 0.0018 * quality);
+    const quality = world.shelterBenefitEnabled ? Math.max(facilityRestQuality(world,person),world.weather==='rain'?0.2:0.55) : world.weather === 'rain' ? 0.2 : 0.55;
+    const beforeRest={fatigue:person.fatigue,energy:person.energy};
+    person.fatigue = clamp(person.fatigue - REST_FATIGUE_RATE * quality);
     // Energy is readiness for activity, not a thermodynamic measurement. Food availability limits recovery.
-    person.energy = clamp(person.energy + 0.0011 * quality * clamp((1 - Math.max(person.hunger, person.thirst)) / 0.5));
+    person.energy = clamp(person.energy + REST_ENERGY_RATE * quality * clamp((1 - Math.max(person.hunger, person.thirst)) / 0.5));
+    if (world.shelterBenefitEnabled) recordFacilityRest(world,person,beforeRest);
   }
   if (person.action === 'share') share(world, person);
-  if (['gather', 'farm', 'build', 'hunt'].includes(person.action) && distance(person, person.target) < 0.5) performWork(world, person, current);
+  if (['gather', 'farm', 'build', 'hunt', 'invent', 'repair'].includes(person.action) && distance(person, person.target) < 0.5) performWork(world, person, current);
   if (person.action === 'cooperate' && distance(person, person.target) <= 1.5) {
     person.work++;
     if (person.work >= 18) { person.work = 0; const useful = cooperate(world, person, event => addEvent(world, event)); outcome(world, person, 'cooperate', useful ? 0.2 : -0.1, useful); person.decisionAt = world.tick + 1; }
@@ -456,9 +478,8 @@ function performWork(world: World, person: Person, tile: Tile): void {
   person.energy = clamp(person.energy - 0.0003);
   person.fatigue = clamp(person.fatigue + 0.00025 * (1.2 - person.traits.resilience * 0.4));
   person.work++;
-  const duration = person.action === 'build' ? 90 : ['farm','hunt'].includes(person.action) ? 45 : 18;
-  if (person.work < Math.ceil(duration * (1 - (person.skills[person.action] ?? 0) * 0.25))) return;
-  person.work = 0;
+  const duration = person.action === 'build' ? constructionCost(world,person).work : person.action==='invent'?60:person.action==='repair'?30:['farm','hunt'].includes(person.action) ? Math.ceil(45*(1-(person.skills[person.action]??0)*0.25)) : Math.ceil(18*(1-(person.skills[person.action]??0)*0.25));
+  if (person.work < duration) return;
   let success = false;
   if (person.action === 'gather') {
     const preferred = person.materials.wood < 6 ? 'wood' : 'stone';
@@ -469,18 +490,20 @@ function performWork(world: World, person: Person, tile: Tile): void {
   } else if (person.action === 'farm' && person.materials.wood >= 1 && tile.terrain !== 'shelter' && tile.moisture > 0.2 && tile.vegetation < 0.9) {
     if (cultivateTile(tile)) { person.materials.wood--; count(world, 'cultivations'); success = true; }
   } else if (person.action === 'hunt' && (tile.fauna ?? 0) >= 1) {
-    const food = harvestAnimal(tile); const stored = Math.min(0.25 - person.inventory, food * 0.5);
-    person.inventory += stored; person.hunger = clamp(person.hunger - (food - stored) * 4.8); count(world, 'hunts'); count(world, 'foodHarvested', food); success = food > 0;
-  } else if (person.action === 'build' && person.materials.wood >= 6 && person.materials.stone >= 3 && tile.terrain !== 'shelter' && !world.places.some(p => distance(p, tile) < 5)) {
-    person.materials.wood -= 6; person.materials.stone -= 3; tile.terrain = 'shelter'; success = true;
-    const place: PlaceView = { id: `settlement-${tile.x}-${tile.y}`, name: `Refugio de ${proceduralPlaceName(world.seed, tile.x, tile.y)}`, x: tile.x, y: tile.y, description: `Construido por ${person.name}; ofrece descanso y un lugar de encuentro.`, gatherings: 0 };
-    world.places.push(place); world.chunks[chunkKey(tile.x, tile.y)]!.places.push(place); world.settlementCount++;
-    const event = addEvent(world, { kind: 'settlement', actors: [person.id], source: 'simulation', x: tile.x, y: tile.y, text: `${person.name} levantó ${place.name}.`, cause: 'Trabajo completado; inventario −6 madera y −3 piedra. El techo mejora el descanso local.' });
-    remember(person, world, `Construyó un lugar que otros pueden utilizar.`, event.id, place.id);
+    const food = harvestAt(world,tile,person.id,event=>addEvent(world,event)); const stored = Math.min(0.25 - person.inventory, food * 0.5);
+    person.inventory += stored; person.hunger = clamp(person.hunger - (food - stored) * 4.8); if(food>0) count(world, 'hunts'); count(world, 'foodHarvested', food); success = food > 0;
+  } else if (person.action === 'build') {
+    success=!!completeConstruction(world,person,tile,event=>addEvent(world,event));
+  } else if(person.action==='invent') {
+    success=invent(world,person,event=>addEvent(world,event));
+  } else if(person.action==='repair') {
+    const structure=world.structures.find(s=>s.x===tile.x&&s.y===tile.y);
+    if(structure) success=repair(world,person,structure,event=>addEvent(world,event));
   }
+  person.work = 0;
   outcome(world, person, person.action, success ? person.action === 'build' ? 0.3 : 0.14 : -0.2, success);
   if (!success) person.reason = 'La tarea no produjo un resultado: faltan recursos o condiciones. Esa experiencia reduce su preferencia.';
-  if (person.command && ['build', 'farm'].includes(person.command.order)) { person.command = null; person.controlMode = 'auto'; }
+  if (person.command && ['build', 'farm', 'invent', 'repair'].includes(person.command.order)) { person.command = null; person.controlMode = 'auto'; }
   person.decisionAt = world.tick + 1;
 }
 
@@ -508,7 +531,7 @@ function applyGesture(world: World, gesture: Gesture, order: number): GestureRes
   if (!validCoordinate(gesture.x) || !validCoordinate(gesture.y)) return result(false, 'Elige un destino dentro del rango de coordenadas.');
   if (gesture.kind === 'command') {
     const person = world.people.find(p => p.id === gesture.agentId);
-    if (!person || !gesture.order || !['move', 'explore', 'gather', 'farm', 'build', 'rest', 'hunt', 'drink', 'cooperate', 'auto'].includes(gesture.order)) return result(false, 'Habitante u orden desconocida.');
+    if (!person || !gesture.order || !['move', 'explore', 'gather', 'farm', 'build', 'rest', 'hunt', 'drink', 'cooperate', 'invent', 'repair', 'auto'].includes(gesture.order)) return result(false, 'Habitante u orden desconocida.');
     if (distance(person, gesture) > 4096) return result(false, 'El destino de una tarea debe quedar a menos de 4096 celdas.');
     person.command = gesture.order === 'auto' ? null : { order: gesture.order, x: gesture.x, y: gesture.y };
     person.controlMode = person.command ? 'directed' : 'auto'; person.work = 0; person.decisionAt = world.tick;
@@ -551,7 +574,9 @@ export function stepWorld(world: World, inputs: Gesture[] = [], context: WorldCo
   world.invitations = world.invitations.filter(invitation => invitation.until > world.tick);
   world.reminders = world.reminders.filter(reminder => reminder.until > world.tick);
   ecology(world);
-  stepEcosystem(world.tiles, world.tick, world.weather, phaseAt(world.tick));
+  stepEcosystem(world.tiles, world.tick, world.weather, phaseAt(world.tick), false);
+  stepAnimals(world,event=>addEvent(world,event));
+  stepStructures(world,event=>addEvent(world,event));
   for (const person of world.people) bodyAndAction(world, person);
   for (const person of world.people) {
     const chunk = world.chunks[chunkKey(person.x, person.y)]!;
@@ -584,7 +609,9 @@ function reproduce(world: World): void {
       culture: { sharing: (a.culture.sharing + b.culture.sharing) / 2, stewardship: (a.culture.stewardship + b.culture.stewardship) / 2, openness: (a.culture.openness + b.culture.openness) / 2 },
       command: null, controlMode: 'auto', target: { x: a.x, y: a.y }, action: 'rest', reason: 'Un nuevo habitante aprende en la comunidad que lo sostiene.', work: 0, decisionAt: world.tick + 30, lastOutcome: world.tick, lastPracticeMemory: world.tick, recentMemory: null,
       lastSocial: world.tick, lastDispute: world.tick, lastMeeting: world.tick, lastShared: world.tick, socialLoad: 0, closeness: 0.2, need: 'Aprender', heading: world.birthCounter * 2.399963229728653,
+      blueprintId: null, lastInvention: world.tick,
     };
+    delete child.home;
     a.inventory -= 0.08; b.inventory -= 0.08; a.energy = clamp(a.energy - 0.08); b.energy = clamp(b.energy - 0.08); a.lastBirth = world.tick; b.lastBirth = world.tick;
     world.people.push(child); world.communities.find(c => c.id === a.communityId)?.members.push(id); count(world, 'births');
     const event = addEvent(world, { kind: 'birth', actors: [a.id, b.id, child.id], x: child.x, y: child.y, source: 'simulation', text: `${child.name} nació en la comunidad de ${a.name} y ${b.name}.`, cause: `Dos progenitores simulados con recursos, confianza y lugar compartido; reserva conjunta −0.16, cría recibe 0.10. Recombina siete pares de parámetros; ${genome.mutations} variaciones. Habilidades y recuerdos comienzan vacíos; cultura inicial por crianza, no por ADN.` });
@@ -608,10 +635,11 @@ export function projectWorld(world: World, viewport?: Viewport, context: WorldCo
     phase: phaseAt(world.tick), weather: world.weather, width: v.width, height: v.height,
     originX: v.x, originY: v.y, infinite: true, activeChunks: Object.keys(world.chunks).length, discoveredChunks: world.discoveredChunks, settlementCount: world.settlementCount,
     tiles: projected.tiles.map(t => ({ x: t.x, y: t.y, terrain: t.terrain, biome: t.biome, elevation: t.elevation, wood: t.wood, stone: t.stone, moisture: Math.round(t.moisture * 1000) / 1000, food: Math.round(t.food * 1000) / 1000, vegetation: Math.round(t.vegetation * 1000) / 1000, feature: t.feature, variety: t.variety, growth: t.growth, fertility: t.fertility, cultivation: t.cultivation, traffic: t.traffic, drinkingWater: t.drinkingWater, species: t.species, fauna: t.fauna, life: t.life })),
-    people: world.people.map(p => ({ id: p.id, name: p.name, role: p.role, x: p.x, y: p.y, color: p.color, action: p.action, reason: p.reason, energy: p.energy, hunger: p.hunger, fatigue: p.fatigue, thirst: p.thirst, need: p.need, recentMemory: p.recentMemory, traits: { ...p.traits }, skills: { ...p.skills }, materials: { ...p.materials }, specialty: specialty(p), controlMode: p.controlMode,
+    people: world.people.map(p => ({ id: p.id, name: p.name, role: p.role, x: p.x, y: p.y, color: p.color, action: p.action, reason: p.reason, energy: p.energy, hunger: p.hunger, fatigue: p.fatigue, thirst: p.thirst, need: p.need, recentMemory: p.recentMemory, traits: { ...p.traits }, skills: { ...p.skills }, materials: { ...p.materials }, specialty: specialty(p), controlMode: p.controlMode, blueprintId:p.blueprintId??null,
       genome: { generation: p.genome.generation, parents: [...p.genome.parents], learningRate: p.genome.learningRate, cooperation: p.genome.cooperation, mutations: p.genome.mutations }, age: world.tick - p.bornAt, communityId: p.communityId, culture: { ...p.culture }, trust: Object.entries(p.bonds).map(([id, value]) => ({ id, value })), experiences: p.experiences.map(e => ({ tick: e.tick, text: e.text, causeId: e.causeId })) })),
     places: projected.places.map(p => ({ id: p.id, name: p.name, x: p.x, y: p.y, description: p.description, gatherings: p.gatherings })), events: world.events.map(e => ({ id: e.id, tick: e.tick, kind: e.kind, actors: [...e.actors], ...(e.x === undefined ? {} : { x: e.x }), ...(e.y === undefined ? {} : { y: e.y }), text: e.text, cause: e.cause, source: e.source })),
     memories: world.memories.map(m => ({ id: m.id, title: m.title, text: m.text, source: m.source, placeId: m.placeId })),
+    animals: projected.animals, structures: projected.structures, blueprints: world.blueprints.map(b=>({id:b.id,name:b.name,components:[...b.components],generation:b.generation,parents:[...b.parents],inventorId:b.inventorId,tick:b.tick,uses:b.uses,usefulness:b.usefulness,cost:{wood:b.cost.wood,stone:b.cost.stone,work:b.cost.work}})),
     stats: worldStatistics(world), communities: world.communities.map(c => ({ id: c.id, name: c.name, x: c.x, y: c.y, color: c.color, members: [...c.members], culture: { ...c.culture }, formedAt: c.formedAt, cooperation: c.cooperation, disputes: c.disputes })),
   };
 }
@@ -635,7 +663,7 @@ function assertCommon(value: unknown, legacy = false, expectedVersion = RULES_VE
   }
   const ids = new Set<string>();
   for (const person of world.people) {
-    if (!object(person) || !str(person.id, 50) || ids.has(person.id) || !str(person.name, 80) || !['S', 'I', 'neighbor'].includes(String(person.role)) || !coord(person.x, 39) || !coord(person.y, 27) || !land(person) || !object(person.target) || !coord(person.target.x, 39) || !coord(person.target.y, 27) || (legacy && !land(person.target)) || !str(person.color, 30) || !['explore', 'eat', 'rest', 'approach', 'accompany', 'retreat', 'share', 'gather', 'farm', 'build', 'hunt', 'drink', 'cooperate'].includes(String(person.action)) || !str(person.reason) || !str(person.need, 100) || !(person.recentMemory === null || str(person.recentMemory)) || !integer(person.decisionAt) || !Number.isInteger(person.lastMeeting) || !Number.isInteger(person.lastShared) || !list(person.experiences, MAX_EXPERIENCES) || !list(person.habits, MAX_HABITS)) fail();
+    if (!object(person) || !str(person.id, 50) || ids.has(person.id) || !str(person.name, 80) || !['S', 'I', 'neighbor'].includes(String(person.role)) || !coord(person.x, 39) || !coord(person.y, 27) || !land(person) || !object(person.target) || !coord(person.target.x, 39) || !coord(person.target.y, 27) || (legacy && !land(person.target)) || !str(person.color, 30) || !['explore', 'eat', 'rest', 'approach', 'accompany', 'retreat', 'share', 'gather', 'farm', 'build', 'hunt', 'drink', 'cooperate', ...(expectedVersion>=4?['invent','repair']:[])].includes(String(person.action)) || !str(person.reason) || !str(person.need, 100) || !(person.recentMemory === null || str(person.recentMemory)) || !integer(person.decisionAt) || !Number.isInteger(person.lastMeeting) || !Number.isInteger(person.lastShared) || !list(person.experiences, MAX_EXPERIENCES) || !list(person.habits, MAX_HABITS)) fail();
     ids.add(person.id);
     for (const key of ['energy', 'hunger', 'fatigue', 'curiosity', 'sociability', 'generosity', 'closeness', 'socialLoad'] as const) if (!num(person[key])) fail();
     if (!num(person.inventory, 0.25)) fail();
@@ -647,7 +675,7 @@ function assertCommon(value: unknown, legacy = false, expectedVersion = RULES_VE
   }
   if (world.people.filter(p => p.role === 'S').length !== 1 || world.people.filter(p => p.role === 'I').length !== 1) fail();
   for (const place of world.places) if (!object(place) || !str(place.id, 100) || !str(place.name, 200) || !coord(place.x, 39) || !coord(place.y, 27) || !str(place.description) || !integer(place.gatherings, 1_000_000)) fail();
-  for (const event of world.events) if (!object(event) || !str(event.id, 100) || !integer(event.tick, world.tick) || !['ecology', 'meeting', 'care', 'learning', 'memory', 'gesture', 'pause', 'discovery', 'settlement', 'cooperation', 'birth', 'community', 'conflict', 'adaptation'].includes(String(event.kind)) || !list(event.actors, MAX_POPULATION) || !event.actors.every(a => str(a, 100)) || !str(event.text) || !str(event.cause) || !['simulation', 'sample', 'approved'].includes(String(event.source)) || (event.x !== undefined && !coord(event.x, 39)) || (event.y !== undefined && !coord(event.y, 27))) fail();
+  for (const event of world.events) if (!object(event) || !str(event.id, 100) || !integer(event.tick, world.tick) || !['ecology', 'meeting', 'care', 'learning', 'memory', 'gesture', 'pause', 'discovery', 'settlement', 'cooperation', 'birth', 'community', 'conflict', 'adaptation', ...(expectedVersion>=4?['animal','invention']:[])].includes(String(event.kind)) || !list(event.actors, MAX_POPULATION) || !event.actors.every(a => str(a, 100)) || !str(event.text) || !str(event.cause) || !['simulation', 'sample', 'approved'].includes(String(event.source)) || (event.x !== undefined && !coord(event.x, 39)) || (event.y !== undefined && !coord(event.y, 27))) fail();
   for (const memory of world.memories) if (!object(memory) || !str(memory.id, 100) || !str(memory.title, 200) || !str(memory.text) || !['sample', 'approved'].includes(String(memory.source)) || !world.places.some(p => p.id === memory.placeId) || !['partner-tired', 'shelter-tired', 'food-hungry', 'rain-shelter', 'irrelevant'].includes(String(memory.context)) || !['explore', 'eat', 'rest', 'approach', 'accompany', 'retreat', 'share', 'gather', 'farm', 'build', 'hunt', 'drink', 'cooperate'].includes(String(memory.action)) || !num(memory.weight) || !list(memory.roles, 2) || !memory.roles.every(role => role === 'S' || role === 'I')) fail();
   for (const invitation of world.invitations) if (!object(invitation) || !str(invitation.id, 100) || !coord(invitation.x, 39) || !coord(invitation.y, 27) || !integer(invitation.until)) fail();
   for (const reminder of world.reminders) if (!object(reminder) || !str(reminder.memoryId, 100) || !integer(reminder.until) || !world.memories.some(m => m.id === reminder.memoryId)) fail();
@@ -658,6 +686,7 @@ export function assertWorld(value: unknown, expectedVersion = RULES_VERSION): as
   const w = value;
   const fail = (): never => { throw new Error('Estado procedural inválido.'); };
   if (!w.chunks || Array.isArray(w.chunks) || Object.keys(w.chunks).length > 256 || !Array.isArray(w.retiredChunks) || !Number.isSafeInteger(w.discoveredChunks) || w.discoveredChunks < 0 || !Number.isSafeInteger(w.settlementCount) || w.settlementCount < 0 || [w.adaptationEnabled, w.noveltyEnabled, w.shelterBenefitEnabled].some(v => typeof v !== 'boolean')) fail();
+  for(const chunk of w.retiredChunks)assertDormantTerrain(chunk,w.tick,expectedVersion>=3);
   const keys = new Set<string>();
   for (const tile of w.tiles) {
     if (expectedVersion >= 3) assertEcosystemTile(tile);
@@ -684,8 +713,8 @@ export function assertWorld(value: unknown, expectedVersion = RULES_VERSION): as
       if (typeof p.thirst !== 'number' || !Number.isFinite(p.thirst) || p.thirst < 0 || p.thirst > 1 || !Number.isSafeInteger(p.bornAt) || p.bornAt < -4800 || p.bornAt > w.tick || !Number.isSafeInteger(p.lastBirth) || p.lastBirth < -2400 || p.lastBirth > w.tick || !Number.isSafeInteger(p.lastSocial) || p.lastSocial < -30 || p.lastSocial > w.tick || !Number.isSafeInteger(p.lastDispute) || p.lastDispute < -180 || p.lastDispute > w.tick || !Number.isSafeInteger(p.lastPracticeMemory) || p.lastPracticeMemory < 0 || p.lastPracticeMemory > w.tick || !numericMap(p.culture, 0, 1, 3) || !['sharing','stewardship','openness'].every(key => typeof p.culture[key as keyof Culture] === 'number') || !numericMap(p.bonds, 0, 1, MAX_POPULATION) || Object.keys(p.bonds).some(id => !w.people.some(other => other.id === id)) || !(p.communityId === null || typeof p.communityId === 'string' && w.communities?.some(c => c.id === p.communityId))) fail();
     }
     if (!['ready','hungry','thirsty','tired'].includes(p.intentContext)) fail();
-    if (!p.traits || !['curiosity','sociability','industriousness','care','resilience'].every(k => typeof p.traits[k as keyof typeof p.traits] === 'number') || !numericMap(p.traits, 0, 1, 5) || !numericMap(p.skills, 0, 1, 13) || !numericMap(p.values, -0.3, 0.3, 52) || !numericMap(p.activity, 0, 1_000_000, 13) || !p.materials || !Number.isFinite(p.materials.wood) || p.materials.wood < 0 || p.materials.wood > 12 || !Number.isFinite(p.materials.stone) || p.materials.stone < 0 || p.materials.stone > 8 || !Array.isArray(p.visited) || p.visited.length > 192 || !p.visited.every(k => typeof k === 'string' && /^-?\d+,-?\d+$/.test(k)) || !Number.isFinite(p.heading) || !Number.isSafeInteger(p.work) || p.work < 0 || p.work > 90 || !Number.isSafeInteger(p.lastOutcome) || p.lastOutcome < 0 || p.lastOutcome > w.tick || !['auto','directed'].includes(p.controlMode)) fail();
-    if (p.command !== null && (!p.command || !['move','explore','gather','farm','build','rest','hunt','drink','cooperate'].includes(p.command.order) || !validCoordinate(p.command.x) || !validCoordinate(p.command.y))) fail();
+    if (!p.traits || !['curiosity','sociability','industriousness','care','resilience'].every(k => typeof p.traits[k as keyof typeof p.traits] === 'number') || !numericMap(p.traits, 0, 1, 5) || !numericMap(p.skills, 0, 1, 15) || !numericMap(p.values, -0.3, 0.3, 60) || !numericMap(p.activity, 0, 1_000_000, 15) || !p.materials || !Number.isFinite(p.materials.wood) || p.materials.wood < 0 || p.materials.wood > 12 || !Number.isFinite(p.materials.stone) || p.materials.stone < 0 || p.materials.stone > 8 || !Array.isArray(p.visited) || p.visited.length > 192 || !p.visited.every(k => typeof k === 'string' && /^-?\d+,-?\d+$/.test(k)) || !Number.isFinite(p.heading) || !Number.isSafeInteger(p.work) || p.work < 0 || p.work > (expectedVersion>=4?600:90) || !Number.isSafeInteger(p.lastOutcome) || p.lastOutcome < 0 || p.lastOutcome > w.tick || !['auto','directed'].includes(p.controlMode)) fail();
+    if (p.command !== null && (!p.command || !['move','explore','gather','farm','build','rest','hunt','drink','cooperate',...(expectedVersion>=4?['invent','repair']:[])].includes(p.command.order) || !validCoordinate(p.command.x) || !validCoordinate(p.command.y))) fail();
     if ((p.command === null) !== (p.controlMode === 'auto')) fail();
   }
   if (expectedVersion >= 3) {
@@ -698,16 +727,21 @@ export function assertWorld(value: unknown, expectedVersion = RULES_VERSION): as
     }
     for (const sample of w.history) if (!numericMap(sample, 0, 1e12, 10) || !['tick','population','energy','hunger','fatigue','thirst','discoveries','settlements','cooperation','births'].every(key => typeof sample[key as keyof WorldSample] === 'number') || !Number.isSafeInteger(sample.tick) || sample.tick > w.tick || !Number.isInteger(sample.population) || sample.population < 16 || sample.population > MAX_POPULATION || [sample.energy,sample.hunger,sample.fatigue,sample.thirst].some(n => n > 1)) fail();
   }
+  if(expectedVersion>=4) assertLifeState(w);
 }
 
 /** V1/V2 conversion preserves existing fields and initializes only newly introduced mechanisms. */
 export function migrateWorld(value: unknown): World {
   const version = (value as { version?: unknown } | null)?.version;
   if (version === RULES_VERSION) { assertWorld(value); return value; }
+  if(version===3) {
+    assertWorld(value,3);
+    const world=structuredClone(value); upgradeV4(world); assertWorld(world); return world;
+  }
   if (version === 2) {
     assertWorld(value, 2);
     const world = structuredClone(value);
-    upgradeV3(world); assertWorld(world); return world;
+    upgradeV3(world); upgradeV4(world); assertWorld(world); return world;
   }
   assertCommon(value, true);
   const world = structuredClone(value);
@@ -729,12 +763,21 @@ export function migrateWorld(value: unknown): World {
     p.skills = {}; p.values = {}; p.activity = {}; p.materials = { wood: 0, stone: 0 }; p.visited = [];
     p.heading = index * 2.399963229728653; p.command = null; p.work = 0; p.lastOutcome = world.tick; p.intentContext = p.hunger > 0.5 ? 'hungry' : p.fatigue > 0.5 ? 'tired' : 'ready'; p.controlMode = 'auto';
   });
-  upgradeV3(world); assertWorld(world); return world;
+  upgradeV3(world); upgradeV4(world); assertWorld(world); return world;
 }
 function upgradeV3(world: World): void {
-  world.version = RULES_VERSION; world.cooperationEnabled = true; world.reproductionEnabled = true;
+  world.version = 3; world.cooperationEnabled = true; world.reproductionEnabled = true;
   world.communities = []; world.communityCounter = 0; world.birthCounter = 0; world.history = []; world.totals = emptyTotals();
   world.tiles = world.tiles.map(tile => initializeEcosystem(world.seed, tile));
   world.retiredChunks = world.retiredChunks.map(chunk => ({ ...chunk, tiles: chunk.tiles.map(tile => initializeEcosystem(world.seed, tile)) }));
   for (const person of world.people) initializePerson(world, person);
+}
+function upgradeV4(world: World): void {
+  world.version=RULES_VERSION;
+  world.animals=materializeAnimals(world.seed,world.tiles,world.tick); world.animalCounter=0;
+  world.animalDynamics={births:0,deaths:0,predations:0,humanHunts:0,waterConsumed:0,plantConsumed:0};
+  world.blueprints=[defaultBlueprint()]; world.blueprintCounter=0; world.structureCounter=0;
+  world.structures=legacyStructures(world.tiles,world.tick);
+  world.inventionDynamics={attempts:0,accepted:0,repairs:0,waterCollected:0,foodStored:0,foodTaken:0};
+  world.retiredChunks=world.retiredChunks.map(chunk=>({...chunk,lifeVersion:4,animals:materializeAnimals(world.seed,chunk.tiles,world.tick),structures:legacyStructures(chunk.tiles,world.tick)}));
 }

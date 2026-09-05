@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { assertWorld, cloneWorld, createWorld, migrateWorld, stepWorld, tileAt, type Person, type World } from '../src/world/index.js';
-import { cooperate, cooperationOpportunity, culturalDistance, resourceDispute, updateCommunities } from '../src/world/society.js';
+import { assertWorld, cloneWorld, createWorld, migrateWorld, RULES_VERSION, stepWorld, tileAt, type Person, type World } from '../src/world/index.js';
+import { cooperate, cooperationOpportunity, culturalDistance, resourceDispute, updateCommunities, settlementOpportunity } from '../src/world/society.js';
+import { materializeAnimals, syncFauna } from '../src/world/animals.js';
 import { expressGenome, inheritGenome } from '../src/world/genetics.js';
 import { recordSample, worldStatistics } from '../src/world/statistics.js';
 import type { ChronicleEvent } from '../src/shared/types.js';
@@ -37,10 +38,12 @@ test('thirst consumes a finite visible stock; exhaustion chooses and physically 
 test('hunting requires work and debits one actual animal before producing finite food', () => {
   const {w,a} = scene(); a.action='hunt'; a.work=43; a.inventory=0; a.hunger=0.7;
   const source=tileAt(w,a)!; source.species='hare'; source.fauna=2;
+  w.animals=materializeAnimals(w.seed,[source],w.tick);syncFauna(w.tiles,w.animals);
+  for(const animal of w.animals){animal.lastDecision=0;animal.lastMove=0;animal.action='rest';}
   stepWorld(w); assert.equal(source.fauna,2); assert.equal(a.inventory,0);
   stepWorld(w); assert.equal(source.fauna,1); assert.equal(w.totals.hunts,1); assert.equal(w.totals.foodHarvested,0.12);
   assert.equal(a.inventory,0.06); assert.ok(a.hunger<0.5);
-  source.fauna=0; a.work=44; a.action='hunt'; a.decisionAt=w.tick+100; const inventory=a.inventory;
+  w.animals=[];syncFauna(w.tiles,w.animals); a.work=44; a.action='hunt'; a.decisionAt=w.tick+100; const inventory=a.inventory;
   stepWorld(w); assert.equal(a.inventory,inventory); assert.equal(w.totals.hunts,1);
 });
 
@@ -126,10 +129,44 @@ test('learning rate controls acquired preferences, and statistics reflect stock 
 test('V2 migration preserves old learning, zero resources and weather, and optimized clones cannot mutate their source', () => {
   const w=createWorld(51926), old=structuredClone(w) as unknown as Record<string,unknown>;old.version=2;
   const people=old.people as Record<string,unknown>[];const tiles=old.tiles as Record<string,unknown>[];
-  for(const key of ['cooperationEnabled','reproductionEnabled','communities','communityCounter','birthCounter','history','totals'])delete old[key];
+  for(const key of ['cooperationEnabled','reproductionEnabled','communities','communityCounter','birthCounter','history','totals','animals','animalCounter','animalDynamics','blueprints','structures','blueprintCounter','structureCounter','inventionDynamics'])delete old[key];
   for(const p of people)for(const key of ['thirst','genome','bornAt','lastBirth','lastSocial','lastDispute','lastPracticeMemory','culture','communityId','bonds'])delete p[key];
   for(const tile of tiles)for(const key of ['feature','variety','growth','fertility','cultivation','traffic','drinkingWater','life','fauna','species'])delete tile[key];
   tiles[0]!.wood=0;people[2]!.skills={gather:0.5};const before=structuredClone(old);const migrated=migrateWorld(old);
-  assert.deepEqual(old,before);assert.equal(migrated.version,3);assert.equal(migrated.rng,old.rng);assert.equal(migrated.tiles[0]!.wood,0);assert.deepEqual(migrated.people[2]!.skills,{gather:0.5});assertWorld(migrated);
+  assert.deepEqual(old,before);assert.equal(migrated.version,RULES_VERSION);assert.equal(migrated.rng,old.rng);assert.equal(migrated.tiles[0]!.wood,0);assert.deepEqual(migrated.people[2]!.skills,{gather:0.5});assertWorld(migrated);
   const cloned=cloneWorld(migrated);assert.deepEqual(cloned,structuredClone(migrated));cloned.people[2]!.genome.alleles[0]=1;cloned.tiles[0]!.food=1;assert.notDeepEqual(cloned,migrated);
+});
+
+test('home return depends on observed provision and useful contacts; empty resources release exploration without teleporting', () => {
+  const world=createWorld(51926),person=world.people[2]!;
+  person.x=22;person.y=13;person.target={x:22,y:13};person.home={x:17,y:13,quality:0.8,observedAt:0};person.hunger=person.thirst=0.2;person.fatigue=0.1;person.socialLoad=0;person.sociability=0.8;person.curiosity=0.2;
+  for(const p of world.people.filter(p=>p!==person)){p.x=17;p.y=13;person.bonds[p.id]=0.7;}
+  for(const tile of world.tiles)if(Math.hypot(tile.x-17,tile.y-13)<=4){tile.food=0.2;tile.drinkingWater=0.2;}
+  const depleted=cloneWorld(world);for(const tile of depleted.tiles){tile.food=0;tile.drinkingWater=0;tile.fauna=0;}depleted.animals=[];
+  const home=settlementOpportunity(world,person);assert.ok(home);assert.deepEqual(home.target,{x:17,y:13});assert.ok(home.score>0.6);
+  assert.equal(settlementOpportunity(depleted,depleted.people[2]!),undefined);assert.equal(depleted.people[2]!.home,undefined);
+  person.decisionAt=0;const before={x:person.x,y:person.y};stepWorld(world);assert.ok(Math.abs(person.x-before.x)+Math.abs(person.y-before.y)<=1);assert.equal(person.action,'approach');assert.deepEqual(person.target,{x:17,y:13});
+  const stale=cloneWorld(world);stale.tick=4000;stale.people[2]!.x=100;stale.people[2]!.y=100;assert.equal(settlementOpportunity(stale,stale.people[2]!),undefined,'distant stale memories cannot see replenished stock');
+});
+
+test('autonomous seed develops and retains a community, births and useful inventions through real interactions', () => {
+  const world=createWorld(51926);assert.equal(world.communities.length,0);assert.equal(world.people.some(p=>p.communityId!==null),false);
+  for(let n=0;n<600;n++)stepWorld(world);
+  const early=new Set(world.communities.map(c=>c.id));assert.ok(early.size>0);assert.ok(world.totals.cooperation!>0);
+  for(let n=600;n<2400;n++)stepWorld(world);
+  assertWorld(world);assert.ok(world.communities.some(c=>early.has(c.id)&&c.members.length>=3));assert.ok(world.totals.cooperation!>10);assert.ok(world.totals.births!>0);
+  assert.ok(world.people.filter(p=>world.people.some(q=>q!==p&&Math.hypot(q.x-p.x,q.y-p.y)<=7)).length>=world.people.length/2);
+  assert.ok(world.inventionDynamics.attempts>0);assert.ok(world.blueprints.some(b=>b.generation>0));assert.ok(world.structures.some(s=>s.blueprintId!=='blueprint-base'),'a new design must actually be built');
+  assert.ok(world.people.some(p=>(p.activity.build??0)>0),'practice must precede the displayed profession');
+});
+
+test('a cistern earns observed utility only when the human action actually consumes its finite reserve',()=>{
+  const {w,a}=scene(),tile=tileAt(w,a)!;tile.terrain='shelter';tile.drinkingWater=0;a.action='drink';a.thirst=0.8;
+  for(const p of w.people.filter(p=>p!==a)){p.x=10;p.y=20;p.target={x:10,y:20};}
+  const blueprint={...structuredClone(w.blueprints[0]!),id:'blueprint-1',generation:1,parents:['blueprint-base'],inventorId:a.id,components:['frame','roof','cistern'] as const,cost:{wood:8,stone:6,work:130}};
+  w.blueprints.push({...blueprint,components:[...blueprint.components]});w.blueprintCounter=1;w.structureCounter=1;
+  const structure={...structuredClone(w.structures[0]!),id:'structure-1',x:a.x,y:a.y,blueprintId:blueprint.id,components:[...blueprint.components],water:0.1};w.structures.push(structure);
+  const idle=cloneWorld(w);idle.people[2]!.action='explore';idle.people[2]!.hunger=idle.people[2]!.thirst=0.1;
+  stepWorld(idle);assert.equal(idle.structures.find(s=>s.id===structure.id)!.water,0.1);assert.equal(idle.blueprints[1]!.uses,0);
+  stepWorld(w);assert.ok(Math.abs(structure.water-0.094)<1e-12);assert.equal(tile.drinkingWater,0);assert.equal(w.totals.waterConsumed,0.006);assert.ok(a.thirst<0.8);assert.ok(w.blueprints[1]!.uses>0);assert.ok(w.blueprints[1]!.usefulness>0);assertWorld(w);
 });

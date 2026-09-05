@@ -6,7 +6,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { Store, fingerprint } from '../src/server/store.js';
-import { createWorld, type World } from '../src/world/index.js';
+import { createWorld, RULES_VERSION, assertWorld, migrateWorld, projectWorld, type World } from '../src/world/index.js';
+import { activate, maintainRegions } from '../src/world/spatial.js';
+import { harvestAt, materializeAnimals, syncFauna, stepAnimals, MAX_ACTIVE_ANIMALS } from '../src/world/animals.js';
+import { decodeSnapshot,encodeSnapshot } from '../src/server/snapshot.js';
 import { generateChunk, type Chunk } from '../src/world/terrain.js';
 import type { Gesture, GestureResult } from '../src/shared/types.js';
 
@@ -134,7 +137,8 @@ function legacyWorld() {
   const source = createWorld(42);
   const { chunks: _chunks, retiredChunks: _retired, discoveredChunks: _discovered, settlementCount: _settlements,
     adaptationEnabled: _adaptation, noveltyEnabled: _novelty, shelterBenefitEnabled: _shelter,
-    cooperationEnabled: _cooperation, reproductionEnabled: _reproduction, communities: _communities, communityCounter: _communityCounter, birthCounter: _birthCounter, history: _history, totals: _totals, ...base } = source;
+    cooperationEnabled: _cooperation, reproductionEnabled: _reproduction, communities: _communities, communityCounter: _communityCounter, birthCounter: _birthCounter, history: _history, totals: _totals,
+    animals:_animals,animalCounter:_animalCounter,animalDynamics:_animalDynamics,blueprints:_blueprints,structures:_structures,blueprintCounter:_blueprintCounter,structureCounter:_structureCounter,inventionDynamics:_inventionDynamics,...base } = source;
   const legacy = {
     ...base, version: 1, tick: 37,
     tiles: source.tiles.filter(t => t.x >= 0 && t.x < 40 && t.y >= 0 && t.y < 28)
@@ -184,7 +188,7 @@ test('V1 schema migration preserves old snapshots, cells, bodies, experiences an
   try {
     assert.equal((store.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 2);
     const migrated = store.load()!.world;
-    assert.equal(migrated.version, 3); assert.equal(migrated.tick, legacy.tick); assert.equal(migrated.rng, legacy.rng);
+    assert.equal(migrated.version, RULES_VERSION); assert.equal(migrated.tick, legacy.tick); assert.equal(migrated.rng, legacy.rng);
     for (const tile of legacy.tiles) {
       const restored = migrated.tiles.find(t => t.x === tile.x && t.y === tile.y)!;
       for (const [field, value] of Object.entries(tile)) assert.equal(restored[field as keyof typeof restored], value);
@@ -196,7 +200,7 @@ test('V1 schema migration preserves old snapshots, cells, bodies, experiences an
     assert.notEqual(fingerprint(gesture), fingerprint({ ...gesture, agentId: 'i' }));
     assert.notEqual(fingerprint(gesture), fingerprint({ ...gesture, order: 'rest' }));
     store.save(migrated);
-    assert.equal(JSON.parse((store.db.prepare('SELECT body FROM snapshots WHERE slot=0').get() as { body: string }).body).version, 3);
+    assert.equal(JSON.parse((store.db.prepare('SELECT body FROM snapshots WHERE slot=0').get() as { body: string }).body).version, RULES_VERSION);
   } finally { store.close(); }
 });
 
@@ -205,13 +209,13 @@ test('read-only V1 recovery migrates the view without changing schema or creatin
   const path = join(dir, 'legacy.sqlite'); createV1Database(path);
   const store = new Store(path, { readOnly: true });
   try {
-    assert.equal(store.load()!.world.version, 3);
+    assert.equal(store.load()!.world.version, RULES_VERSION);
     assert.equal(store.loadChunk('0,0'), null);
     assert.equal((store.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 1);
     assert.equal(store.db.prepare("SELECT name FROM sqlite_master WHERE name='chunks'").get(), undefined);
     const destination = join(dir, 'recovered.sqlite'); store.previous(destination);
     const recovered = new Store(destination);
-    try { assert.equal(recovered.load()!.world.version, 3); } finally { recovered.close(); }
+    try { assert.equal(recovered.load()!.world.version, RULES_VERSION); } finally { recovered.close(); }
     assert.equal((store.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 1);
   } finally { store.close(); }
 });
@@ -233,4 +237,80 @@ test('incomplete old schema is not upgraded and an incomplete V2 archive is not 
   const untouched = new DatabaseSync(path, { readOnly: true });
   try { assert.equal(untouched.prepare("SELECT name FROM sqlite_master WHERE name='chunks'").get(), undefined); }
   finally { untouched.close(); }
+});
+
+test('V3 migration validates first and preserves bodies, culture, resources and exact individual stock without rewriting its source', () => {
+  const source=createWorld(51926) as unknown as Record<string,unknown>;
+  source.version=3;source.tick=120;
+  for(const key of ['animals','animalCounter','animalDynamics','blueprints','structures','blueprintCounter','structureCounter','inventionDynamics'])delete source[key];
+  const people=source.people as World['people'];people[2]!.skills={build:0.4};people[2]!.bonds.s=0.7;
+  const tiles=source.tiles as World['tiles'];tiles[0]!.food=0;tiles[0]!.wood=0;tiles[0]!.drinkingWater=0;tiles[0]!.fauna=0;delete tiles[0]!.species;
+  const before=structuredClone(source),migrated=migrateWorld(source);
+  assert.deepEqual(source,before);assert.equal(migrated.version,RULES_VERSION);assert.deepEqual(migrated.people,people);assert.deepEqual(migrated.tiles,tiles);
+  assert.equal(migrated.animals.length,tiles.reduce((sum,t)=>sum+(t.fauna??0),0));assert.deepEqual(migrateWorld(source),migrated);
+  assert.ok(migrated.structures.every(s=>s.water===0&&s.food===0&&s.components.join(',')==='frame,roof'));
+  const corrupt=structuredClone(source);(corrupt.tiles as World['tiles'])[0]!.drinkingWater=NaN;
+  assert.throws(()=>migrateWorld(corrupt));assert.equal(corrupt.version,3);
+  const manyRoofs=structuredClone(source);for(const tile of (manyRoofs.tiles as World['tiles']).slice(0,600))tile.terrain='shelter';
+  const migratedRoofs=migrateWorld(manyRoofs);assert.equal(migratedRoofs.structures.length,(manyRoofs.tiles as World['tiles']).filter(t=>t.terrain==='shelter').length);assert.ok(migratedRoofs.structures.length>512);
+});
+
+test('V4 region retirement, storage and return preserve living identities, depleted stock, structures and resources exactly', t => {
+  const {store}=fixture(t),world=createWorld(51926),originalPositions=world.people.map(p=>({x:p.x,y:p.y}));
+  world.tick=10;
+  const origin=world.tiles.filter(tile=>tile.x>=0&&tile.x<16&&tile.y>=0&&tile.y<16);
+  for(const tile of origin){tile.fauna=0;delete tile.species;}
+  const source=origin.find(t=>t.terrain!=='water'&&t.terrain!=='shelter')!;source.fauna=2;source.species='hare';
+  world.animals=world.animals.filter(a=>!(a.x>=0&&a.x<16&&a.y>=0&&a.y<16));world.animals.push(...materializeAnimals(world.seed,[source],world.tick));syncFauna(world.tiles,world.animals);
+  const removed=world.animals.find(a=>a.x===source.x&&a.y===source.y)!.id;assert.equal(harvestAt(world,source,'s'),0.12);
+  source.food=0;source.drinkingWater=0;source.wood=0;
+  const expectedAnimals=structuredClone(world.animals.filter(a=>a.x>=0&&a.x<16&&a.y>=0&&a.y<16));
+  const expectedTiles=structuredClone(origin);
+  const structure=world.structures[0]!;structure.condition=0.35;structure.uses=7;const expectedStructure=structuredClone(structure);
+  for(const p of world.people){p.x=120;p.y=120;p.target={x:120,y:120};}
+  maintainRegions(world);world.tiles.find(t=>t.x===120&&t.y===120)!.terrain='meadow';
+  assert.equal(world.animals.some(a=>expectedAnimals.some(b=>a.id===b.id)),false);assert.ok(world.retiredChunks.find(c=>c.key==='0,0')!.animals);
+  store.save(world);const resumed=store.load()!.world;
+  const beforeCamera=structuredClone(resumed);const view=projectWorld(resumed,{x:0,y:0,width:40,height:28},{loadChunk:(k,t)=>store.loadChunk(k,t)});
+  assert.ok(view.animals!.some(a=>a.id===expectedAnimals[0]!.id));assert.equal(view.animals!.some(a=>a.id===removed),false);assert.deepEqual(resumed,beforeCamera);
+  resumed.tick=30000;for(const [i,p] of resumed.people.entries()){Object.assign(p,originalPositions[i]);p.target={x:p.x,y:p.y};}
+  maintainRegions(resumed,{loadChunk:(k,t)=>store.loadChunk(k,t)});
+  assert.deepEqual(resumed.tiles.filter(t=>t.x>=0&&t.x<16&&t.y>=0&&t.y<16),expectedTiles);
+  assert.deepEqual(resumed.animals.filter(a=>a.x>=0&&a.x<16&&a.y>=0&&a.y<16),expectedAnimals);
+  assert.deepEqual(resumed.structures.find(s=>s.id===expectedStructure.id),expectedStructure);assert.equal(resumed.animals.some(a=>a.id===removed),false);
+  const returning=expectedAnimals[0]!;resumed.tick++;stepAnimals(resumed);
+  assert.equal(resumed.animals.find(a=>a.id===returning.id)!.age,returning.age+1,'dormant time cannot become biological aging or a backlog');
+  assertWorld(resumed);
+});
+
+test('empty V4 archives stay empty, while old stock materializes lazily only on activation and malformed life fails closed', t => {
+  const {store}=fixture(t),world=createWorld(51926);world.tick=10;
+  const legacy=archived(world,10,0);for(const tile of legacy.tiles){tile.fauna=0;delete tile.species;}legacy.tiles[0]!.fauna=2;legacy.tiles[0]!.species='hare';
+  world.retiredChunks=[legacy];store.save(world);const before=structuredClone(world);
+  const camera={x:legacy.cx*16,y:legacy.cy*16,width:16,height:16};projectWorld(world,camera,{loadChunk:(k,t)=>store.loadChunk(k,t)});assert.deepEqual(world,before);
+  activate(world,camera.x,camera.y,{loadChunk:(k,t)=>store.loadChunk(k,t)});
+  assert.equal(world.animals.filter(a=>a.x===camera.x&&a.y===camera.y).length,2);
+  const empty={...legacy,lifeVersion:4 as const,animals:[],structures:[]};for(const tile of empty.tiles){tile.fauna=0;delete tile.species;}
+  world.retiredChunks=[empty];store.save(world);assert.deepEqual(store.loadChunk(empty.key)!.animals,[]);
+  for(const field of ['animals','structures'] as const){const invalid=structuredClone(empty);delete invalid[field];const body=JSON.stringify(invalid);store.db.prepare('UPDATE chunks SET body=?,digest=? WHERE key=?').run(body,digest(body),empty.key);assert.throws(()=>store.loadChunk(empty.key));}
+});
+
+test('a structure counter cannot move backward behind an identity that only exists in an archived region', t=>{
+  const {store}=fixture(t),world=createWorld(51926);world.tick=10;world.structureCounter=7;
+  const chunk=archived(world,10,0),tile=chunk.tiles[0]!;tile.terrain='shelter';
+  chunk.structures=[{...structuredClone(world.structures[0]!),id:'structure-7',x:tile.x,y:tile.y}];world.retiredChunks=[chunk];store.save(world);
+  assert.equal(store.load()!.world.structureCounter,7);
+  const saved=store.db.prepare('SELECT body FROM snapshots WHERE slot=0').get() as {body:string};const invalid=decodeSnapshot(saved.body) as World;invalid.structureCounter=6;
+  const body=encodeSnapshot(invalid);store.db.prepare('UPDATE snapshots SET body=?,digest=? WHERE slot=0').run(body,digest(body));
+  assert.throws(()=>store.load(),/Archived structure identity exceeds snapshot counter/);
+});
+
+test('activating another region above the per-step animal budget preserves every identity and advances a bounded cohort',()=>{
+  const world=createWorld(42);world.animals=[];world.reproductionEnabled=false;
+  for(let cy=0;cy<4;cy++)for(let cx=0;cx<4;cx++)activate(world,cx*16,cy*16);
+  let remaining=MAX_ACTIVE_ANIMALS;for(const tile of world.tiles){tile.fauna=Math.min(6,remaining);remaining-=tile.fauna;if(tile.fauna)tile.species=tile.terrain==='water'?'fish':'hare';else delete tile.species;}
+  world.animals=materializeAnimals(world.seed,world.tiles,world.tick);assert.equal(world.animals.length,MAX_ACTIVE_ANIMALS);
+  for(let cx=10;cx<30&&world.animals.length===MAX_ACTIVE_ANIMALS;cx++)activate(world,cx*16,0);
+  assert.ok(world.animals.length>MAX_ACTIVE_ANIMALS);const ages=new Map(world.animals.map(a=>[a.id,a.age]));world.tick++;stepAnimals(world);
+  assert.equal(world.animals.length,ages.size);assert.equal(world.animals.reduce((sum,a)=>sum+a.age-ages.get(a.id)!,0),MAX_ACTIVE_ANIMALS);assertWorld(world);
 });

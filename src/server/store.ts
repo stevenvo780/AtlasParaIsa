@@ -5,7 +5,7 @@ import { dirname, resolve } from 'node:path';
 import type { Gesture, GestureResult } from '../shared/types.js';
 import { migrateWorld, type World } from '../world/index.js';
 import { CHUNK_SIZE, MAX_COORDINATE, type Chunk } from '../world/terrain.js';
-import { assertEcosystemTile } from '../world/validation.js';
+import { assertEcosystemTile, assertChunkLife } from '../world/validation.js';
 import { decodeSnapshot, encodeSnapshot } from './snapshot.js';
 
 const checksum = (s: string) => createHash('sha256').update(s).digest('hex');
@@ -52,6 +52,7 @@ function assertChunk(value: unknown, key: string, atTick: number): asserts value
     if (!object(place) || !string(place.id, 200) || ids.has(place.id) || !string(place.name, 200) || !string(place.description) || !integer(place.gatherings, 1_000_000) || !Number.isInteger(place.x) || !Number.isInteger(place.y) || place.x < x0 || place.x >= x0 + CHUNK_SIZE || place.y < y0 || place.y >= y0 + CHUNK_SIZE) fail();
     ids.add(place.id);
   }
+  assertChunkLife(chunk, atTick);
 }
 export class GestureConflict extends Error {}
 export class SessionRevoked extends Error {}
@@ -114,6 +115,14 @@ export class Store {
     }
     if (checksum(row.body) !== row.digest) throw new Error('Snapshot checksum mismatch. Explicit recovery required.');
     const world = migrateWorld(decodeSnapshot(row.body));
+    // A migrated global allocator must remain above every archived identity, too.
+    // Otherwise a corrupted counter could allocate an ID already living in a dormant region.
+    if(this.schemaVersion===2) {
+      const archived=this.db.prepare("SELECT MAX(CAST(substr(json_extract(s.value,'$.id'),11) AS INTEGER)) AS maximum FROM chunks c, json_each(c.body,'$.structures') s WHERE c.tick<=? AND json_extract(s.value,'$.id') GLOB 'structure-[0-9]*'").get(world.tick) as {maximum:number|null};
+      if(archived.maximum!==null&&(!Number.isSafeInteger(archived.maximum)||archived.maximum>world.structureCounter))throw new Error('Archived structure identity exceeds snapshot counter. Explicit recovery required.');
+      const animals=this.db.prepare("SELECT DISTINCT json_extract(a.value,'$.id') AS id FROM chunks c, json_each(c.body,'$.animals') a WHERE c.tick<=? AND json_extract(a.value,'$.generation')>0").all(world.tick) as {id:string}[];
+      for(const animal of animals){const serial=/^animal-born-\d+-\d+-([1-9]\d*)$/.exec(animal.id);if(serial&&(!Number.isSafeInteger(Number(serial[1]))||Number(serial[1])>world.animalCounter))throw new Error('Archived animal identity exceeds snapshot counter. Explicit recovery required.');}
+    }
     return { world, savedAt: row.saved_at };
   }
   loadChunk(key: string, atTick = Number.MAX_SAFE_INTEGER): Chunk | null {

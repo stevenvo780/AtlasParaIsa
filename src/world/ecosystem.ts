@@ -1,10 +1,8 @@
-import type { Feature, Tile } from '../shared/types.js';
-
-type Species = 'hare' | 'deer' | 'boar' | 'fish';
+import type { Feature, Tile, Species } from '../shared/types.js';
 const clamp = (n: number, maximum = 1): number => Math.max(0, Math.min(maximum, n));
 const key = (x: number, y: number): string => `${x},${y}`;
 const TREE_FEATURES = new Set<Feature>(['tree', 'pine', 'palm', 'cactus', 'reeds', 'stump']);
-const FOOD_PER_ANIMAL: Record<Species, number> = { hare: 0.12, deer: 0.25, boar: 0.22, fish: 0.1 };
+export const FOOD_PER_ANIMAL: Record<Species, number> = { hare: 0.12, deer: 0.25, boar: 0.22, fish: 0.1, wolf: 0.2, fox: 0.12 };
 
 function hash(seed: number, x: number, y: number, salt: number): number {
   let n = seed ^ Math.imul(x, 0x9e3779b1) ^ Math.imul(y, 0x85ebca77) ^ salt;
@@ -16,6 +14,7 @@ function hash(seed: number, x: number, y: number, salt: number): number {
 /** New fields only: a saved zero means depleted, never permission to refill a patch. */
 export function initializeEcosystem(seed: number, tile: Tile): Tile {
   const result: Tile = { ...tile };
+  const newFauna = result.fauna === undefined;
   const patch = hash(seed, Math.floor(tile.x / 8), Math.floor(tile.y / 8), 1201);
   const local = hash(seed, tile.x, tile.y, 1202);
   const wet = tile.biome === 'wetland';
@@ -54,6 +53,8 @@ export function initializeEcosystem(seed: number, tile: Tile): Tile {
     result.fauna = viable && patch % 7 === 0 && local % 6 === 0 ? 1 + (local >>> 8) % 3 : 0;
   }
   if (result.species === undefined && result.fauna > 0) result.species = water ? 'fish'
+    : newFauna && (local >>> 12) % 13 === 0 ? 'wolf'
+    : newFauna && (local >>> 12) % 13 === 1 ? 'fox'
     : tile.biome === 'forest' ? (patch % 3 === 0 ? 'boar' : 'deer')
     : wet ? 'boar' : 'hare';
   return result;
@@ -72,7 +73,7 @@ function state(tile: Tile): CellState {
 }
 
 /** Soft neighbor rule inspired by cellular automata, not an implementation of Conway or Lenia. */
-export function stepEcosystem(tiles: Tile[], tick: number, weather: 'clear' | 'rain', phase: string): void {
+export function stepEcosystem(tiles: Tile[], tick: number, weather: 'clear' | 'rain', phase: string, updateFauna = true): void {
   if (tick % 10 !== 0) return;
   const cells = tiles.map(state);
   const previous = new Map(cells.map(cell => [key(cell.x, cell.y), cell]));
@@ -115,7 +116,7 @@ export function stepEcosystem(tiles: Tile[], tick: number, weather: 'clear' | 'r
       }
     }
   }
-  if (tick % 50 === 0) stepFauna(tiles, tick);
+  if (updateFauna && tick % 50 === 0) stepFauna(tiles, tick);
 }
 
 function animalWater(cell: CellState, species: Species): number {

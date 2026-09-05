@@ -11,7 +11,7 @@ La interfaz permite buscar, inspeccionar y seguir animales sin darles órdenes h
 | Comprobación V4 | Estado comprobado |
 |---|---|
 | Fauna y ecología | 35 pruebas focales aprobadas tras corregir presupuesto y dormancia; pendiente suite integrada final. |
-| Invenciones | 13 pruebas iniciales aprobadas; revisión de utilidad y nuevas pruebas en curso. |
+| Invenciones | 20 pruebas y cuatro regresiones focalizadas aprobadas tras corregir utilidad y asignación de identidades; pendiente suite integrada final. |
 | Renderer | 3 pruebas aprobadas. |
 | Navegador | 9 pruebas aprobadas en suite y la prueba de invención aprobada por separado después de corregir su escenario; pendiente ejecución completa sobre el cierre final. |
 | Cliente compilado | Build aislado en `/tmp/atlas-v4-client`; no reemplaza todavía la interfaz activa. |
@@ -27,8 +27,8 @@ Se reprodujeron cuatro defectos durante la integración:
 
 - Activar una región con 8192 animales elevaba la población y detenía el paso. El motor ahora distingue identidades residentes y presupuesto de actividad: conserva hasta 393216 identidades, procesa hasta 8192 cuerpos por paso con rotación y hasta 1024 decisiones. La prueba con 8210 conserva todos los individuos y reparte turnos.
 - La edad calculada desde el reloj global adelantaba madurez y senescencia de animales archivados. La corrección conserva edad biológica y pausa reproductiva durante dormancia. Se probó una pausa de un millón de pasos y que las cohortes no queden excluidas del calendario reproductivo.
-- Un contador de estructuras retrocedido podía generar identidades duplicadas y cobrar recursos. Se está reforzando validación y asignación, incluyendo archivos.
-- El descanso sin beneficio adicional y el agua vertida sin consumidor podían sumar utilidad de diseño. Se está separando producción, consumo y recuperación efectiva.
+- Un contador de estructuras retrocedido podía generar identidades duplicadas y cobrar recursos. La validación revisa contadores y archivos; el asignador reserva una identidad libre antes de cobrar. Las pruebas específicas pasan y falta cerrar la revisión integrada.
+- El descanso sin beneficio adicional y el agua vertida sin consumidor podían sumar utilidad de diseño. La cisterna conserva agua hasta consumo real; el descanso compara recuperación efectiva con el exterior. Los dos casos reproducidos ahora tienen usos y utilidad exactamente cero cuando no hay beneficio.
 
 La revisión independiente ejecutó 29 pruebas iniciales de fauna e invenciones sin fallos; los defectos anteriores no estaban cubiertos por ellas. El cierre requiere nuevos controles y verificación integrada.
 
@@ -53,6 +53,8 @@ Se detectaron RTX 5070 Ti y RTX 2060 en el entorno. La simulación, decisiones y
 El servicio existente está en **https://172.26.0.4:3443**, con la misma contraseña, todavía V3. Una lectura del paso 83945 confirmó la dispersión: ninguno de sus dieciséis habitantes tenía otro a siete celdas; mediana al vecino más próximo 329,43 celdas. No había comunidades ni cooperación reciente.
 
 Se conservó una copia SQLite íntegra y privada antes de V4: `before-individual-fauna-v4-2026-09-05T18-43-22-506Z.sqlite`, paso 86991, con comprobación de integridad aprobada. Vive fuera del repositorio, en `~/.local/state/atlas-para-isa-preview`. Todavía no se reinició el mundo: sigue pendiente elegir comienzo nuevo con copia o conservación de su historia.
+
+La migración de esa copia a V4 en memoria conservó **321385 valores escalares previos**, dieciséis habitantes y 16384 celdas. Materializó exactamente 2921 animales y 46 estructuras. Pasaron la validación del mundo y la pureza de cámara; el SHA256 de la base permaneció idéntico antes y después de la lectura. [Resultado local de migración](../artifacts/migration-v4.json). Esta prueba no activa V4 ni sustituye su reinicio integrado.
 
 Servidor y TLS usan las sesiones propias `carta-isa-world` y `carta-isa-https`. Cerrar la terminal no las cierra; no se ha demostrado arranque automático tras reiniciar el contenedor. Credenciales y copias permanecen privadas.
 

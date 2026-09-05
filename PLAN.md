@@ -4,6 +4,8 @@ La revisión privada actual es V4: fauna individual con fisiología compartida, 
 
 Fecha: 5 de septiembre de 2026. Estado: prototipo V4 implementado, comprobado y activo en revisión privada con un mundo nuevo y el anterior conservado íntegro. Cierre personal de la carta, prueba en móvil físico y alojamiento definitivo pendientes.
 
+El objetivo ampliado sigue abierto: construir un mundo que mantenga sus propias redes de producción, aprenda, se diferencie socialmente y descubra procedimientos ejecutables sin supervisión. La fase en desarrollo conecta materiales y herramientas procedurales, especialización por práctica, demografía con herencia y un paisaje más animado. Sus módulos y pruebas aisladas no acreditan todavía integración ni activación; la revisión privada continúa ejecutando V4 hasta validar el conjunto.
+
 El repositorio ya contiene una aplicación local ejecutable. El [README](README.md) reúne los comandos reales de arranque, acceso y recuperación. La experiencia siguiente conserva su alcance de diseño; la implementación actual usa S e I, vecinos ficticios y cinco recuerdos sintéticos identificados, sin importar conversaciones ni atribuirles biografía.
 
 ## La idea
@@ -52,14 +54,14 @@ La primera entrega incluye al menos una costumbre compartida que se forme por re
 | Cuerpo, vínculo, memoria y agencia | Conservar como un solo circuito de comportamiento. |
 | Lugares significativos, silencio, momentos y diario | Conservar; destacar poco y contar hechos ocurridos. |
 | Historia real como semilla | Empezar con recuerdos seleccionados y revisados. La ingestión de todo el archivo de conversaciones deja de ser un requisito inicial. |
-| Autopoiesis y cognición encarnada | Mantener como inspiración para autorregulación y aprendizaje. No convertirlas en una promesa de vida o conciencia demostrada. |
-| Muerte, pérdida y otras relaciones reales | Conservar la pregunta del autor. El prototipo trabaja con consecuencias reversibles; la forma definitiva requiere su decisión personal. |
+| Autopoiesis y cognición encarnada | Conservar el objetivo de autonomía material, mantenimiento y organización que se reconstruye mediante sus propios procesos. Exigir evidencia causal; autorregulación o ciclos en un grafo no demuestran por sí solos autopoiesis ni conciencia. |
+| Muerte, pérdida y otras relaciones reales | Demografía de vecinos ficticios en desarrollo, con genealogía persistente y consecuencias ambientales. S e I conservan protección explícita de continuidad; cambiar su significado personal sigue siendo una decisión del autor. |
 | Descubrimiento de lugares | Incorporado mediante exploración física y crónica. |
 | Reproducción y generaciones | Incorporadas en V3 para vecinos ficticios: nacimientos locales con costes y límite de población, genes mendelianos simplificados y plasticidad heredable. Habilidades y recuerdos adquiridos no se heredan como genes. |
 | Sueños | Fuera del alcance actual. |
 | Territorio procedural, asentamientos y control individual | Incorporados al alcance ampliado solicitado. Sin borde del mapa inicial; regiones activas y rango numérico acotados. |
 | Comunidades, cooperación y disputas | Incorporadas mediante confianza local, semejanza cultural, aportes de materiales, ayuda, enseñanza, trueque y tensión por recursos escasos. Sin violencia ni gobiernos. |
-| Miles de habitantes, guerras, gobiernos y mercados complejos | Fuera del alcance actual; el intercambio implementado es un trueque local acotado. La fauna tiene un presupuesto de ejecución separado. |
+| Miles de habitantes, guerras, gobiernos y mercados complejos | Horizonte conservado: instituciones, conflictos y redes económicas deberán emerger de interacciones verificables. El intercambio actual es un trueque local acotado; ampliar población exige presupuestos medidos. |
 | Invención funcional | Gramática de seis componentes, variantes y cruces entre diseños conocidos, selección contextual, costes, desgaste y utilidad observada por uso. No se inventan componentes físicos arbitrarios. |
 | GPU para dibujar | Incorporado compositor WebGL2 con cachés, diagnóstico del dispositivo y alternativa Canvas 2D. La simulación sigue en CPU; no se promete aceleración física en cualquier navegador. |
 | Entrenamiento de modelos, embeddings obligatorios, múltiples servicios y protocolos binarios | Fuera del alcance actual. La simulación no necesita inferencia de un LLM. |
@@ -95,7 +97,7 @@ Las pruebas automáticas demuestran propiedades concretas del prototipo; no sust
 | Decisión | Cómo avanzar mientras se concreta |
 |---|---|
 | Texto, recuerdos, nombres, rasgos y semejanza visual | Usar S e I y material de prueba identificado. Incorporar biografía solo con una selección real revisada. |
-| Mortalidad y significado de la desconexión | Prototipar tensión, autonomía y reparación reversibles. Los documentos previos discrepan sobre si S e I pueden morir; esta limpieza no resuelve esa elección por Steven. |
+| Mortalidad de S e I y significado de la desconexión | Mantener protección explícita de ambas identidades mientras se desarrolla el ciclo vital de vecinos ficticios. La mortalidad de los demás no decide el significado personal de la pareja. |
 | Representación de otras relaciones reales | Mantener vecinos ficticios. No convertir personas reales en personajes ni cambiar el sentido de esas relaciones por una simplificación editorial. |
 | Audiencia y alojamiento | Diseñar acceso privado para la primera entrega. Confirmar público destinatario, recursos disponibles y coste antes de publicar o contratar infraestructura. |
 
@@ -114,12 +116,14 @@ Esta tabla conserva la dirección expresada por Steven, incluso cuando excede el
 | Biomas ricos y agentes que transformen el entorno | Agua, alimento, madera, piedra, vegetación, cultivos, huellas y edificios están conectados a consumo y trabajo. Ampliar variedad debe añadir consecuencias verificables. |
 | Mundo compartido; backend simula y frontend visualiza | Implementado un estado y un reloj para todos los clientes. El navegador conserva su cámara; la carga de varios clientes requiere medición separada. |
 | Animales con el mismo fundamento corporal, exploración, reproducción y depredación | V4 integra fisiología compartida, cuerpos individuales, genes y memoria local; sin sistemas sociales ni constructivos humanos. |
-| Profesiones y funciones adaptativas, sin asignaciones predeterminadas | Las etiquetas de oficio describen práctica adquirida. Queda pendiente una división de trabajo más profunda con especialización y dependencia entre tareas demostradas. |
+| Profesiones y funciones adaptativas, sin asignaciones predeterminadas | Las etiquetas de oficio describen práctica adquirida. En desarrollo: competencia por procedimiento y dependencias observadas entre productores y usuarios; falta probar especialización autónoma sostenida. |
 | Aprendizaje por genes y memorias, cooperación creciente | Herencia y aprendizaje se separan; hay recuerdos acotados, imitación, enseñanza, intercambio y ayuda. Evolución multigeneracional estable queda por estudiar. |
 | Comunidades culturales, endogrupo/exogrupo y conflictos propios | Implementadas confianza, prácticas adquiridas, pertenencia revisable, disputas por recursos y turnos; no hay todavía guerras, gobiernos o instituciones emergentes. |
 | Que las comunidades permanezcan juntas cuando tenga sentido | V4 incorpora hogares observados y retorno físico. Se exige una ejecución autónoma con cooperación y contraste de escasez; reiniciar la DB por sí solo no corrige dispersión. |
-| Inventar estructuras nuevas que cambien lo que el mundo puede hacer | V4 combina seis componentes funcionales con variantes culturales, costes y utilidad observada. Inventar componentes, herramientas o procesos completamente nuevos sigue como horizonte. |
-| Un mundo muy vivo, autoorganizado, con complejidad inesperada como Conway y la ficción de Black Mirror | Es la dirección creativa: circuitos de recursos, cuerpos, memoria y sociedad. No hay evidencia de conciencia, sentimientos subjetivos, autopoiesis biológica ni complejidad abierta ilimitada. Añadir métricas de persistencia, diversidad y dependencia causal antes de afirmarlo. |
+| Inventar estructuras nuevas que cambien lo que el mundo puede hacer | V4 combina seis componentes funcionales con variantes culturales, costes y utilidad observada. En desarrollo: programas que transforman materiales, producen herramientas y reutilizan productos como entradas o catalizadores. Deben cambiar capacidades físicas y pagar trabajo, materia y desgaste. |
+| Un mundo muy vivo, autoorganizado, con complejidad inesperada como Conway y la ficción de Black Mirror | Objetivo abierto: redes que se mantienen, reconstruyen sus condiciones de existencia y generan procedimientos nuevos sin supervisión. Se distinguirán posibilidad estructural, arranque desde recursos disponibles y mantenimiento material observado. No se ha demostrado conciencia, autopoiesis biológica ni evolución abierta ilimitada. |
+| Evolución continuada y reemplazo generacional | En desarrollo: necesidades y supervivencia con costes heredables, envejecimiento y muerte de vecinos ficticios, nacimientos naturales y archivo de identidad. Una selección en laboratorio no prueba evolución multigeneracional del mundo completo. |
+| Calidad visual excelsa, animación y mundo cambiante | En desarrollo: luz continua, sombras, agua, clima, vegetación y acciones visibles vinculadas a hechos del servidor. Exigir comparación visual y rendimiento medido; respetar movimiento reducido. |
 | Mejor aprovechamiento de CPU y las dos GPU para crecer | Backend único, cachés y guardado optimizado implementados; las GPU del servidor no simulan ecología. Evaluar procesamiento por lotes o kernels ecológicos solo con benchmark y fidelidad frente al motor de referencia. |
 | Mucha más estadística y control del hardware | Hay métricas de recursos, cuerpos, grupos, genealogía, invención y tiempos de cliente/servidor. El presupuesto de fauna debe preservar identidades y repartir turnos; su coste completo necesita evidencia. |
 | Colaboración entre modelos potentes, con calidad antes que ahorro | GPT-6 integra y revisa; aportes externos se evalúan como propuestas. No se usan LLM en el ciclo de simulación. Commits acotados conservan avances. |
@@ -127,6 +131,18 @@ Esta tabla conserva la dirección expresada por Steven, incluso cuando excede el
 ### Documentación y continuidad del trabajo
 
 Un tema tiene una referencia canónica y los demás documentos la enlazan. No crear documentos históricos o de fase que dupliquen reglas, diseño o evidencia: Git ya conserva esas revisiones. Cada cambio de alcance actualiza esta tabla, su regla cuando exista y su evidencia cuando se ejecute.
+
+| Referencia canónica | Responsabilidad |
+|---|---|
+| [PLAN.md](PLAN.md) | Visión, ideas acumuladas, alcance y estado de trabajo. |
+| [README.md](README.md) | Arranque, acceso, operación y recuperación. |
+| [REGLAS.md](docs/REGLAS.md) | Mecánicas, fórmulas, costes, límites y condiciones del modelo implementado. |
+| [CONSTRUCCION.md](docs/CONSTRUCCION.md) | Arquitectura, persistencia, contratos e integración. |
+| [EXPERIENCIA.md](docs/EXPERIENCIA.md) | Interfaz, interacción, narrativa y voz. |
+| [CIENCIA.md](docs/CIENCIA.md) | Fuentes, interpretación y límites de las afirmaciones científicas. |
+| [EVIDENCIA.md](docs/EVIDENCIA.md) | Verificación vigente, condiciones medidas y capacidades todavía no probadas. |
+
+Las especificaciones en desarrollo deben identificarse como tales. Una prueba unitaria, una ejecución autónoma y una capacidad desplegada son estados diferentes. Los resultados detallados de herramientas quedan en artefactos; su interpretación vigente se incorpora a EVIDENCIA sin crear otro documento competidor.
 
 El mundo privado mostró dispersión incompatible con comunidades locales. Para concretar la solicitud de limpiar la base principal se inició un mundo nuevo tras validar V4, conservando íntegra la historia anterior y el acceso existente. Un comienzo nuevo no debe borrar el respaldo ni justificarse mediante repoblación silenciosa de un estado inválido. Los detalles de activación están en EVIDENCIA.
 

@@ -8,6 +8,7 @@ import { initializeEcosystem, stepEcosystem, harvestMaterial, cultivateTile, tra
 import { assertEcosystemTile, assertLifeState, assertDormantTerrain } from './validation.js';
 import { materializeAnimals, stepAnimals, harvestAt, type Animal } from './animals.js';
 import { advanceNeeds } from './needs.js';
+import { assimilateFood, exertBody, hydrateBody, restBody } from './body.js';
 import { defaultBlueprint, constructionCost, inventionOpportunity, invent, completeConstruction, stepStructures, repairOpportunity, repair, facilityRestQuality, recordFacilityRest, foodAvailable, takeFood, waterAvailable, takeWater, REST_FATIGUE_RATE, REST_ENERGY_RATE } from './inventions.js';
 import type { AnimalDynamics, BlueprintView, StructureView, InventionDynamics } from '../shared/life.js';
 import type { TechnologyKnowledge, TechnologyState } from '../shared/technology.js';
@@ -395,8 +396,7 @@ function move(world: World, person: Person): void {
   while (previous.get(key(best)) !== start) best = previous.get(key(best))!;
   person.x = best.x; person.y = best.y;
   trampleTile(tileAt(world, person)!);
-  person.energy = clamp(person.energy - 0.0008);
-  person.fatigue = clamp(person.fatigue + 0.0007 * (1.2 - person.traits.resilience * 0.4));
+  exertBody(person, { energy: 0.0008, fatigue: 0.0007 * (1.2 - person.traits.resilience * 0.4) });
   if (!person.visited.includes(key(person))) {
     person.visited.push(key(person)); person.visited = person.visited.slice(-192);
     if (person.action === 'explore') outcome(world, person, 'explore', 0.05);
@@ -478,14 +478,13 @@ function bodyAndAction(world: World, person: Person): void {
       const carried = Math.min(person.inventory, 0.002);
       person.inventory -= carried; consumed += carried;
     }
-    person.hunger = clamp(person.hunger - consumed * 4.8);
-    person.energy = clamp(person.energy + consumed * 1.2);
+    assimilateFood(person, consumed, { hungerPerUnit: 4.8, energyPerUnit: 1.2 });
     if (consumed > 0 && world.tick - person.lastOutcome >= 30) outcome(world, person, 'eat', consumed * 30);
     if (person.hunger < 0.12) person.decisionAt = world.tick + 1;
   }
   if (person.action === 'drink' && distance(person, person.target) < 0.5) {
     const water = takeWater(world,person,Math.min(0.006,person.thirst/3));
-    person.thirst = clamp(person.thirst - water * 3);
+    hydrateBody(person, water);
     count(world, 'waterConsumed', water);
     if (water > 0 && world.tick - person.lastOutcome >= 30) outcome(world, person, 'drink', water * 20);
     if (person.thirst < 0.12) { if (person.command?.order === 'drink') { person.command = null; person.controlMode = 'auto'; } person.decisionAt = world.tick + 1; }
@@ -493,9 +492,7 @@ function bodyAndAction(world: World, person: Person): void {
   if (person.action === 'rest' && distance(person, person.target) < 0.5) {
     const quality = world.shelterBenefitEnabled ? Math.max(facilityRestQuality(world,person),world.weather==='rain'?0.2:0.55) : world.weather === 'rain' ? 0.2 : 0.55;
     const beforeRest={fatigue:person.fatigue,energy:person.energy};
-    person.fatigue = clamp(person.fatigue - REST_FATIGUE_RATE * quality);
-    // Energy is readiness for activity, not a thermodynamic measurement. Food availability limits recovery.
-    person.energy = clamp(person.energy + REST_ENERGY_RATE * quality * clamp((1 - Math.max(person.hunger, person.thirst)) / 0.5));
+    restBody(person, { fatigue: REST_FATIGUE_RATE, energy: REST_ENERGY_RATE }, quality);
     if (world.shelterBenefitEnabled) recordFacilityRest(world,person,beforeRest);
   }
   if (person.action === 'share') share(world, person);
@@ -517,8 +514,7 @@ function bodyAndAction(world: World, person: Person): void {
 }
 
 function performWork(world: World, person: Person, tile: Tile): void {
-  person.energy = clamp(person.energy - 0.0003);
-  person.fatigue = clamp(person.fatigue + 0.00025 * (1.2 - person.traits.resilience * 0.4));
+  exertBody(person, { energy: 0.0003, fatigue: 0.00025 * (1.2 - person.traits.resilience * 0.4) });
   person.work++;
   const duration = person.action === 'build' ? constructionCost(world,person).work : person.action==='invent'?60:person.action==='repair'?30:['farm','hunt'].includes(person.action) ? Math.ceil(45*(1-(person.skills[person.action]??0)*0.25)) : Math.ceil(18*(1-(person.skills[person.action]??0)*0.25));
   if (person.work < duration) return;
@@ -552,7 +548,7 @@ function performWork(world: World, person: Person, tile: Tile): void {
     }
   } else if (person.action === 'hunt' && (tile.fauna ?? 0) >= 1) {
     const food = harvestAt(world,tile,person.id,event=>addEvent(world,event)); const stored = Math.min(0.25 - person.inventory, food * 0.5);
-    person.inventory += stored; person.hunger = clamp(person.hunger - (food - stored) * 4.8); if(food>0) count(world, 'hunts'); count(world, 'foodHarvested', food); success = food > 0;
+    person.inventory += stored; assimilateFood(person, food - stored, { hungerPerUnit: 4.8, energyPerUnit: 0 }); if(food>0) count(world, 'hunts'); count(world, 'foodHarvested', food); success = food > 0;
   } else if (person.action === 'build') {
     success=!!completeConstruction(world,person,tile,event=>addEvent(world,event));
   } else if(person.action==='invent') {

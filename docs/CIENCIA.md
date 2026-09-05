@@ -1,12 +1,12 @@
 # Ciencia, modelos y comprobaciones
 
-Estas referencias orientan mecanismos y preguntas del código **V5 en integración**. La aplicación no reproduce organismos ni acredita sentimientos, conciencia o fidelidad biográfica. Las unidades y fórmulas son decisiones de diseño comprobables en el código. La versión privada continúa en V4 hasta una activación documentada en [EVIDENCIA.md](EVIDENCIA.md); una descripción científica no acredita despliegue ni resultados experimentales.
+Estas referencias orientan mecanismos y preguntas del candidato **V5 en corrección / sin validar autonomía prolongada**. La aplicación no reproduce organismos ni acredita sentimientos, conciencia o fidelidad biográfica. Las unidades y fórmulas son decisiones de diseño comprobables. El servicio privado sigue en V4; [EVIDENCIA.md](EVIDENCIA.md) conserva resultados, incluidos los que contradicen continuidad y autonomía.
 
 ## Necesidades y aprendizaje
 
 Keramati y Gutkin vinculan recompensa y reducción de desviaciones de variables internas bajo supuestos definidos. Aquí orienta que comer, descansar y protegerse dependan del estado corporal. [Artículo original, eLife, 2014](https://elifesciences.org/articles/04811).
 
-El selector combina hambre, sed, fatiga, predisposiciones, oportunidades locales y valores por contexto y acción. Tras resultados útiles o trabajo fallido actualiza `Q ← Q + α × (resultado − Q)`, con límites ±0.3. V3 permite heredar `α` entre 0.04 y 0.20; los fundadores comienzan con 0.12. El contexto se captura antes del resultado. Esta media incremental es una implementación pequeña propia, no una reproducción completa del algoritmo del artículo. La práctica y la enseñanza desarrollan habilidades; seleccionar una tarea por sí solo no las aumenta.
+El selector combina hambre, sed, fatiga, predisposiciones, oportunidades locales y valores por contexto y acción. Una media incremental propia actualiza preferencias después del resultado, con plasticidad heredable y contexto capturado antes de actuar. La fórmula y sus cotas están en [REGLAS](REGLAS.md#herencia-práctica-y-descendencia); no reproducen todo el algoritmo del artículo. La práctica y la enseñanza desarrollan habilidades; seleccionar una tarea por sí solo no las aumenta.
 
 ## Herencia, plasticidad y aprendizaje
 
@@ -20,7 +20,7 @@ V5 implementa mortalidad de vecinos por inanición, deshidratación, exposición
 
 S e I están sujetos a una política externa que impide que la transición demográfica los retire. Esa protección no procede de sus genes, no constituye selección y debe excluirse de una comparación de mortalidad de vecinos. Las pertenencias de un fallecido se transfieren solo a supervivientes cercanos con capacidad o se registran como pérdidas; la identidad y su genealogía permanecen en un archivo inmutable. El máximo de población residente no limita por sí solo cuántas vidas pueden registrarse a lo largo del tiempo, pero memoria y disco tienen límites explícitos.
 
-El laboratorio demográfico puede aislar compromisos entre rasgos y comparar descendencia bajo condiciones controladas. Sus generaciones y semillas no son generaciones acreditadas del mundo autónomo completo. Un resultado de ese laboratorio tampoco demuestra evolución abierta ni que aprendizaje adquirido se haya vuelto genético. Los protocolos y resultados ejecutados se conservan exclusivamente en [EVIDENCIA.md](EVIDENCIA.md).
+El laboratorio demográfico puede aislar compromisos entre rasgos y comparar descendencia bajo condiciones controladas. Sus generaciones y semillas no son generaciones acreditadas del mundo autónomo completo. Las réplicas largas del candidato inicial perdieron todos los vecinos: acumular enseñanza, recetas o descendencia inicial no demuestra reemplazo generacional. Se corrige la preparación alimentaria local y debe repetirse la observación antes de atribuirle mejora. Los resultados ejecutados se conservan exclusivamente en [EVIDENCIA.md](EVIDENCIA.md).
 
 ## Entorno y construcción
 
@@ -48,11 +48,21 @@ El observador del prototipo aplica una interpretación explícita a sus recibos 
 
 Esta tabla describe los criterios del código, no una equivalencia entre sus indicadores y resultados biológicos. Los catalizadores obligatorios se interpretan conjuntamente; una ayuda opcional consumida entra en el balance de mantenimiento, pero no se transforma por eso en requisito RAF. Las dependencias observadas requieren producción y consumo o uso efectivos, y la reposición debe proceder de procesos activos compatibles. Un stock inicial abundante, un catalizador que nunca se desgasta, flujo en un solo instante o insumos no básicos importados no bastan para acreditar mantenimiento. Se distinguen cobertura de reposición y recambio completo del stock.
 
+«Mantenido» describe el intervalo observado, que puede incluir productores y conocedores ya fallecidos. No garantiza que el proceso siga disponible en su último paso. La réplica con una componente mantenida y extinción de vecinos hace visible esta limitación: continuidad demográfica, conocimiento ejecutable actual y mantenimiento material deben verificarse por separado. Un inventario inicial desconocido también impide cerrar cuentas, aunque el balance material acumulado del simulador sea exacto.
+
 Aquí `food` designa las **entradas externas del inventario tecnológico**, como madera, piedra y agua importadas. No es la comida biológica de los habitantes y no convierte la extracción de esas materias, la energía corporal o la ecología completa en procesos internos de la red analizada. Las transferencias entre actores del ámbito se cancelan; combustible gastado, pérdidas y ejecuciones fallidas siguen presentes en las cuentas. Una ventana con recibos incompletos o existencias incompatibles no se presenta como balance verificado.
 
 Hordijk y Steel explican por qué la frontera es una cuestión adicional: una membrana o límite producido por la propia red puede contenerla y promover sus procesos, y esa relación requiere representación explícita. La definición RAF general no incorpora por sí sola esa frontera; una RAF tampoco basta para identificar un sistema autopoiético. [Artículo original, Journal of Systems Chemistry, 2015](https://pmc.ncbi.nlm.nih.gov/articles/PMC4333308/).
 
 En este código, los inventarios, la pertenencia social y la frontera contable son reglas del simulador, no una frontera física producida y regenerada por los procesos. Por eso el análisis devuelve siempre `boundary: 'not-modeled'` y `autopoiesisEstablished: false`. Una componente fuertemente conectada (SCC) identifica un ciclo de dependencias; no establece generación desde `F`, cantidades viables, reposición ni frontera propia. Incluso un ciclo mantenido en una ventana sigue siendo evidencia acotada de organización tecnológica, sin certificar vida artificial.
+
+## Investigación pendiente: diversidad y continuidad causal
+
+Mouret y Clune proponen MAP-Elites para conservar soluciones de buen desempeño en distintas regiones de un espacio de características, en vez de resumir la búsqueda en un solo óptimo. Inspira una búsqueda futura por capacidades y contextos; **V5 no implementa MAP-Elites**. En este mundo la calidad tendría que provenir de costes y beneficios físicos observados, con espacio para explorar candidatos de utilidad todavía desconocida. Esa adaptación es una propuesta propia, no un resultado del artículo. [Trabajo original, 2015](https://arxiv.org/abs/1504.04909).
+
+La arquitectura propuesta separa tres continuidades: identidad archivada de un procedimiento, conocimiento disponible en habitantes vivos y reposición material de las condiciones para ejecutarlo. Retirar una definición de RAM no equivale a olvidarla culturalmente ni autoriza borrarla del archivo. A la inversa, conservar un programa en SQLite no enseña a un habitante. La enseñanza o el experimento pagado deben explicar cómo vuelve a estar disponible; una muestra material puede orientar una técnica nueva sin convertir su procedencia en conocimiento heredado.
+
+Los siete cambios de arquitectura se especifican en [CONSTRUCCION](CONSTRUCCION.md#siguiente-arquitectura-propuesta-no-implementada), sin anunciarlos como capacidades actuales. Sus controles deben superar los límites de catálogo conservando referencias, retirar productores indispensables, observar varios recambios de herramientas y distinguir pérdida del último conocedor de muerte del inventor. Una frontera autoproducida sigue pendiente: debe afectar físicamente los procesos y depender de su reparación. Ni archivo ilimitado ni diversidad de nombres acreditan evolución abierta.
 
 ## Reglas locales e imitación
 
@@ -85,6 +95,7 @@ Una disputa necesita dos participantes distintos urgidos, la misma acción y la 
 | Herencia | Mantener progenitores y semilla, anular variación | Un aporte de cada progenitor por locus, descendiente reproducible |
 | Plasticidad | Cambiar tasa de aprendizaje con iguales resultados | Diferente actualización de valores sin alterar alelos |
 | Descendencia | Retirar una condición de nacimiento o desactivar reproducción | Costes, población acotada y ausencia de aprendizaje copiado |
+| Preparación alimentaria | Misma pareja y entorno; retirar alimento, confianza mutua o preparación local | Trabajo y débito antes de aumentar reserva, sin aliviar hambre por recoger; repetir generaciones sin nacimientos forzados |
 | Demografía | Igualar cuerpo y entorno, variar resiliencia/actividad o edad | Compromisos de demanda, intervalo reproductivo, senescencia y muerte; S e I separados por política externa |
 | Cierre de una vida | Muerte simultánea, destinatario remoto o inventario lleno | Sin resurrección, destinatarios vivos y cercanos, pérdidas explícitas y genealogía conservada |
 | Agua potable | Comparar depósito, suelo húmedo y océano | Recarga limitada, consumo real y ausencia de agua potable salada |

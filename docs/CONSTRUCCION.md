@@ -2,7 +2,7 @@
 
 Referencia de alcance: [PLAN.md](../PLAN.md). Referencia de comportamiento: [EXPERIENCIA.md](EXPERIENCIA.md).
 
-Estado del código: V5 en integración, con interfaz WebGL2/Canvas 2D/DOM, servidor HTTP/WebSocket, autenticación privada, SQLite y pruebas ejecutables. Añade tecnología material, demografía y archivo de identidades; la revisión privada sigue en V4 hasta validar y activar el conjunto. El [README](../README.md) documenta los comandos reales y [EVIDENCIA.md](EVIDENCIA.md) distingue código probado y servicio activo. Los recuerdos son sintéticos; no hay alojamiento definitivo contratado.
+Estado del candidato: **V5 en corrección / sin validar autonomía prolongada**, con interfaz WebGL2/Canvas 2D/DOM, HTTP/WebSocket, acceso privado y SQLite. Tecnología, demografía y archivo de identidades tienen pruebas de integración; el reemplazo generacional falló en las dos réplicas largas. El servicio sigue en V4. [README](../README.md) conserva operaciones y [EVIDENCIA](EVIDENCIA.md) los resultados, incluida la migración privada rechazada. Los recuerdos son sintéticos; no hay alojamiento definitivo contratado.
 
 ## Arquitectura implementada
 
@@ -43,7 +43,7 @@ El generador puro usa ruido interpolado multiescala en coordenadas globales, sei
 
 SQLite conserva revisiones de regiones por clave y paso, con suma de integridad. Retirar regiones, guardar el estado, confirmar entradas y registrar hechos sucede en una transacción. Un punto anterior lee únicamente revisiones de regiones que ya existían en ese paso. La memoria activa es acotada; el archivo persistente crece con el territorio modificado. El motor sin Store mantiene una cola pendiente que su integrador debe confirmar; no ofrece archivo ilimitado en RAM.
 
-La fuente V5 usa reglas y protocolo 5 y esquema SQLite 3. La migración valida la versión de origen antes de enriquecerla y conserva sus campos. V4 recibe tecnología vacía y estado demográfico cuya edad deriva de su fecha de nacimiento; no se fabrican ensayos ni muertes retrospectivas. La compatibilidad anterior sigue materializando fauna por existencia y planos básicos para refugios antiguos. Una colección guardada vacía impide repoblación implícita. El formato de vida de las regiones continúa en versión 4; no se confunde con la versión global del mundo. Una versión desconocida o corrupta se rechaza y nunca dispara un comienzo nuevo silencioso.
+La fuente V5 usa reglas y protocolo 5 y esquema SQLite 3. La migración valida la versión de origen antes de enriquecerla y conserva sus campos. Un V4 válido recibe tecnología vacía y estado demográfico cuya edad deriva de su fecha de nacimiento; no se fabrican ensayos ni muertes retrospectivas. La compatibilidad anterior sigue materializando fauna por existencia y planos básicos para refugios antiguos. Una colección guardada vacía impide repoblación implícita. El formato de vida de las regiones continúa en versión 4; no se confunde con la versión global del mundo. Una versión desconocida o un estado inválido se rechaza y nunca dispara un comienzo nuevo silencioso. SQLite íntegro no implica un mundo válido: el caso privado rechazado se registra en EVIDENCIA, sin aplicar un recorte que destruya materia.
 
 La tabla `legacy(id,tick,body,digest)` conserva identidades fallecidas de forma inmutable. El snapshot mantiene solo padres directos de habitantes vivos, autores de planos o recetas y hasta 32 fallecimientos recientes, con límite de 600 registros. La cola `retiredLegacy` espera confirmación igual que las regiones retiradas: ambas se insertan en la misma transacción que el snapshot y solo se vacían al confirmar. El historial completo crece en disco; una simulación sin Store debe hacerse cargo de sus colas.
 
@@ -112,9 +112,11 @@ Esta política evita un sistema de recuperación temporal complejo. La entrega d
 
 ## Conexión e interacción
 
-El protocolo V5 conserva ventanas de cámara con origen absoluto y órdenes individuales idempotentes; añade investigar, fabricar, salud, vitalidad, productos, procedimientos y organización observada. La vista de un fallecimiento conserva información de identidad y retira los controles del cuerpo ausente. Ventanas distintas del mismo paso son válidas; una vista antigua no puede sustituir un paso posterior. El intercambio JSON incluye estado inicial, actualizaciones, solicitud de gesto u orden, resultado y error comprensible. Se envían vistas completas acotadas por cliente; no hay una simulación nueva asociada a cada conexión.
+El protocolo V5 conserva ventanas de cámara con origen absoluto y órdenes individuales idempotentes; añade investigar, fabricar, cosechar alimento, reserva alimentaria visible, salud, vitalidad, productos, procedimientos y organización observada. La vista de un fallecimiento conserva información de identidad y retira los controles del cuerpo ausente. Ventanas distintas del mismo paso son válidas; una vista antigua no puede sustituir un paso posterior. El intercambio JSON incluye estado inicial, actualizaciones, solicitud de gesto u orden, resultado y error comprensible. Se envían vistas completas acotadas por cliente; no hay una simulación nueva asociada a cada conexión.
 
 `technology-organization.ts` adapta recibos materiales a `organization.ts`. Agrupa operaciones anidadas sin contar dos veces el desgaste, comprueba continuidad de inventarios y separa transferencias de producción. El análisis derivado se reutiliza entre proyecciones del mismo objeto, paso y contador de ejecuciones; no modifica la simulación. Una ventana incompleta o un balance inconsistente se informa como evidencia insuficiente. Las condiciones de organización y sus límites científicos están en [CIENCIA.md](CIENCIA.md).
+
+Los recibos tecnológicos del servicio todavía son un búfer reciente de 256 entradas dentro del snapshot; no existe archivo persistente de procedimientos y ejecuciones fuera de él. Un actor sin recibos en la ventana puede conservar productos cuyo inventario inicial no se conoce. El adaptador no puede deducirlo del inventario final sin evidencia adicional. El observador experimental multisemilla acumula sus propios contadores completos; esa instrumentación no amplía las garantías del servicio.
 
 Cada vista lleva versión y secuencia. El cliente descarta vistas antiguas y obtiene una nueva al reconectar. Un cliente lento no puede acumular mensajes sin límite: recibe la vista reciente disponible.
 
@@ -134,40 +136,43 @@ Una vista pública de solo lectura puede añadirse después con su contenido rev
 
 ## Comprobaciones que demuestran el producto
 
-| Comprobación | Evidencia necesaria |
+Los controles causales de cuerpos, ecología, aprendizaje, genética, cooperación, invención y organización están en [CIENCIA](CIENCIA.md#controles-que-pueden-contradecir-el-diseño). Los criterios de aceptación del producto pertenecen a [PLAN](../PLAN.md#orden-de-construcción). La integración debe cubrir además:
+
+| Propiedad | Evidencia de ingeniería necesaria |
 |---|---|
-| Cámara independiente | Ventanas negativas y lejanas no cambian estado, azar ni descubrimientos. |
-| Archivo de regiones | Modificar, abandonar, guardar, reiniciar y regresar conserva terreno, estructuras y descubrimientos. |
-| Construcción y aprendizaje | Materiales y trabajo necesarios; éxito y fracaso modifican valores, y desactivar la actualización conserva costes y habilidades. |
-| Control individual | Desplazamiento físico más allá del mapa anterior, necesidades urgentes y retorno a autonomía. |
-| Ecología | Agotar un recurso altera crecimiento o rutas; se explican entradas y pérdidas; no aparecen cantidades negativas ni recuperación oculta. |
-| Agua y fauna | Suelo húmedo y océano no dan agua potable; recarga acotada, caza con débito y migración sin duplicación; reproducción animal consume biomasa y agua. |
-| Fauna individual y presupuesto | Identidades y edad biológica conservadas en archivo; superar el presupuesto por paso reparte actividad sin perder individuos ni detener el mundo. |
-| Invención y estructuras | Gramática válida, costes únicos, linaje cultural conocido, depósitos conservativos, utilidad cero sin beneficio y reparación con costes. |
-| Arraigo autónomo | Una semilla sin órdenes forma comunidades y cooperación; retirar recursos puede cambiar el atractivo del hogar sin teletransporte. |
-| Herencia y crianza | Cada locus recibe aporte de ambos progenitores; variar aprendizaje no reescribe alelos; descendencia conserva costes, condiciones, límites y experiencia propia. |
-| Cooperación y comunidades | Materiales, trabajo, trueque y enseñanza producen cambios reales; pertenencia depende de confianza y cultura locales, con alternativas para revisarla. |
-| Disputa y turnos | Dos personas distintas compiten con la misma acción por la misma fuente escasa; controles de abundancia, urgencia, confianza y apertura; espera efectiva sin inventar recursos. |
-| Cuerpo y vínculo | Cambiar una necesidad o una interacción altera una elección y una señal corporal. La distancia por sí sola no determina deterioro afectivo. |
-| Memoria causal | Mismo estado y semilla con y sin una memoria pertinente: cambia una elección prevista. Un recuerdo irrelevante sirve de control y no debe producir ese mismo efecto. |
-| Agencia individual | S e I muestran preferencias diferentes bajo condiciones comparables; las intenciones no son anuladas después por un paseo aleatorio. |
-| Cultura | Una costumbre tiene una cadena de acciones e imitación identificable; desactivar el aprendizaje elimina esa transmisión. |
-| Reproducción de ejecución | Mismo estado inicial, reglas y entradas aplicadas en los mismos pasos y orden producen el mismo estado de simulación, independientemente del dibujo. |
-| Continuidad | Recargar conserva el mundo; cerrar todas las pestañas no detiene el servidor; reiniciar conserva cuerpo, memoria, intención y azar guardados. |
-| Mundo compartido | Dos clientes con cámaras distintas reciben el mismo paso y población; una orden aceptada es visible para ambos; desconectar clientes no multiplica ni detiene pasos. |
-| Renderizado | Comparar escena equivalente con y sin WebGL2; documentar dispositivo, cachés, pérdida de contexto y alternativa 2D, sin llamar GPU física al software. |
-| Fallos | Estado corrupto no inicia un mundo nuevo; un error de guardado no recibe confirmación exitosa; un gesto reenviado no duplica efectos. |
-| Acceso y privacidad | Una petición sin sesión no lee ni modifica el mundo privado. Bundle, mensajes y logs no incluyen conversaciones originales ni datos personales no aprobados. |
-| Crónica | Cada episodio mostrado corresponde a hechos guardados; no se inventan escenas para llenar una ausencia o una caída. |
-| Móvil y experiencia | En un dispositivo real se puede entrar, leer, explorar, encontrar a S e I y usar gestos sin sonido. Se comprende al menos una causa y una consecuencia. |
+| Determinismo y cámara | Mismas fuentes, estado y entradas producen el mismo mundo; consultar terreno no cambia azar, historia ni regiones activas. |
+| Transacción | Snapshot, archivos, hechos y confirmaciones corresponden al mismo paso. Fallar el commit conserva colas pendientes y no confirma gestos. |
+| Identidad y recuperación | IDs monotónicos sin reutilización; parentescos y autores resolubles, sin registros posteriores al corte consultado ni resurrección. |
+| Archivo y memoria | Terreno y legados reaparecen tras reinicio; cachés acotadas conservan referencias necesarias y el crecimiento persistente se mide por separado. |
+| Acceso y mundo compartido | Dos clientes comparten estado, cámaras independientes y órdenes idempotentes; sin sesión no hay lectura ni escritura y la revocación se aplica a conexiones y entradas pendientes. |
+| Navegador | Vistas antiguas descartadas, reconexión, fallecimiento sin controles inválidos, acciones animadas por hechos y comparación gráfica equivalente. |
+| Operación y fallos | Copia en destino nuevo, lectura sin migración del origen, reinicio y recuperación explícita; un estado inválido no crea otro mundo. |
 
-Las comparaciones causales mantienen iguales las demás condiciones. No se llama integración a una diferencia provocada simplemente por eliminar acciones posibles del grupo de control. Para resultados probabilísticos se usan varias semillas emparejadas y se registra el efecto observado, sin convertirlo en una medida de conciencia.
+Las pruebas unitarias, navegador, soak con commit por paso y observación multisemilla responden preguntas distintas. Los comandos están en README y los resultados ejecutados en EVIDENCIA. Comparar varias semillas sin intervenciones permite descubrir fallos de continuidad que no aparecen en fixtures; no demuestra fiabilidad indefinida. Los hashes identifican el código observado, y cambiar reglas exige nueva evidencia.
 
-El código incorpora comandos de tipos, pruebas y compilación (`npm run check`), pruebas de navegador (`npm run test:e2e`) y una ejecución acelerada con guardado por paso (`npm run test:soak`). Las suites cubren mecanismos y controles concretos; la lista anterior también incluye criterios de revisión. Las cifras aprobadas, condiciones medidas y omisiones deben consultarse en [EVIDENCIA.md](EVIDENCIA.md), sin trasladar recuentos de versiones anteriores al cierre actual.
+El teléfono físico, el alojamiento definitivo y el contenido personal final siguen pendientes. Las escenas íntimas se revisan en privado; las pruebas con otras personas usan material sintético o aprobado. La evaluación busca reconocimiento y comprensión, sin pedir que se confirme una emoción predeterminada.
 
-Antes de entregar se comprueban también reconexión, reinicio, restauración de copia y varios ciclos de día y noche. El script de ejecución prolongada registra duración, configuración, recursos y fallos en `artifacts/soak.json`; es una ejecución acelerada, no una estancia equivalente en tiempo real. Una prueba prolongada no acredita por sí sola fiabilidad indefinida. El teléfono físico, el alojamiento privado y el contenido personal final siguen pendientes.
+## Siguiente arquitectura propuesta, no implementada
 
-Las escenas con datos íntimos se revisan en privado. Las pruebas con otras personas usan material sintético o aprobado para esa audiencia. La evaluación busca saber si se reconoce a la pareja y se entienden las decisiones, no pedirle a alguien que confirme una emoción predeterminada.
+**Una memoria causal archivada, con conocimiento local finito y producción guiada por necesidades observadas.** Es trabajo futuro, separado de las correcciones alimentarias actuales. Debe permitir nuevas recetas después de llenar la caché y reconstruir ventanas de materiales sin aumentar indefinidamente la RAM. No arregla por sí sola demografía, división del trabajo ni mantenimiento.
+
+La propuesta se elaboró con consulta textual a Gemini mediante Antigravity y revisión posterior del código. La respuesta externa fue evidencia de diseño, sin acceso al repositorio, secretos, base privada ni ejecución. Sus sugerencias se corrigieron: archivar no debe esperar a que desaparezcan todos los conocedores; los programas ya son secuencias planas acotadas, y guardar recibos después del snapshot de forma asíncrona rompería la durabilidad necesaria. Las fuentes conceptuales están en [CIENCIA](CIENCIA.md#investigación-pendiente-diversidad-y-continuidad-causal).
+
+| Frente y posible propietario | Cambio concreto | Criterio que puede hacerlo fallar |
+|---|---|---|
+| 1. Contratos tecnológicos — propietario de `shared/technology.ts` y `world/technology.ts` | Separar definición inmutable de receta —ID, firma, versión de leyes, programa, autor y padres— de usos, fabricación y utilidad mutable. El contador de identidad deja de depender de la longitud del catálogo residente. | Evicción o recuperación no reutiliza IDs, cambia programas ni deja un producto apuntando a una receta distinta. |
+| 2. Archivo transaccional — propietario de Store y snapshot | Archivar definiciones y recibos en SQLite junto al snapshot; mantener cola pendiente hasta commit y limitar trabajo admitido por paso. Las transferencias conservan pares y los agregados se calculan después de asegurar recibos durables. | Un fallo entre escrituras conserva la cola y el corte anterior; ningún snapshot confirmado depende de recibos todavía no persistidos. |
+| 3. Ventanas completas — propietario del adaptador de organización | Guardar inventarios físicos de todos los actores actuales al abrir épocas, con paso, último recibo y digest. Reconstruir intervalos mediante deltas completos y agregados idempotentes por rango. Muertes y salidas cierran existencias explícitamente. | Un actor quieto no pierde su inventario inicial; si falta un movimiento el resultado sigue desconocido. No deducir apertura desde cierre ni censar para siempre a todos los fallecidos como inventarios vivos. |
+| 4. Caché y resolución — propietario de tecnología con contrato de archivo acordado | Usar 256 como presupuesto de definiciones residentes, con referencias durables desde lotes, proyectos y procedimientos derivados. Retirar el freno por generación 32 manteniendo límites de operaciones, entradas, trabajo y consultas. Reutilizar programas previos sin expandir toda la genealogía. | Se superan 256 identidades históricas y generación 32 con RAM acotada; reinicio, copias y cortes anteriores resuelven exactamente sus dependencias. |
+| 5. Aprendizaje y redescubrimiento — propietario de sociedad y aprendizaje | Separar la caché del servidor del conocimiento finito de cada actor. Enseñar, olvidar o investigar tiene causas y costes. Permitir ensayos pagados con objetos desconocidos; hoy `localInputs` exige conocer su receta. Distinguir padres culturales de muestras materiales. | Perder al último conocedor elimina fabricación sabida hasta enseñanza o redescubrimiento real; heredar o comprar un objeto no entrega su receta. Un ensayo nuevo conserva identidad y procedencia propias. |
+| 6. Reposición y coordinación — propietario de decisiones y sociedad | Priorizar producción, aprendizaje e intercambio según desgaste, reservas, demandas pendientes y proveedores conocidos localmente. Describir roles mediante trabajo y dependencias reales; compromisos repetidos pueden fundamentar instituciones revisables posteriores. | Retirar un proveedor indispensable altera entregas y trabajo aunque queden vínculos sociales o ciclos estructurales; no hay profesiones, facciones ni información global impuestas. |
+| 7. Diversidad y evaluación — propietario de búsqueda y experimentos | Explorar nichos de capacidades y contextos, con calidad basada en beneficio y coste observados. Reservar intentos exploratorios cuya utilidad sigue desconocida; no exigir superar siempre un récord global. | La novedad sin efecto no recibe utilidad ficticia. Comparaciones emparejadas miden diversidad útil, reproducción de herramientas y coste de exploración, no solo número de nombres. |
+
+Los escritores de tecnología se serializan entre los frentes 1, 4 y 7; archivo y adaptador acuerdan antes el contrato de épocas y referencias. La división anterior es de responsabilidades posibles, no siete ramas autorizadas simultáneamente.
+
+La aceptación conjunta exige varias generaciones humanas y varios recambios completos de herramientas con materia conservada; retirar una entrada o productor indispensable debe interrumpir su dependencia y restaurarlo permitir recuperación observable. Un ciclo histórico mantenido no demuestra disponibilidad actual de quienes saben ejecutarlo. La extinción sigue siendo un fallo aunque el análisis de una ventana antigua permanezca favorable.
+
+Los riesgos principales son duplicar masa al reconstruir transferencias y perder referencias al archivar o recuperar. IDs, integridad, corte temporal y commit atómico deben comprobarse juntos. Una frontera material solo se añadirá si su fabricación y reparación participan causalmente en el circuito; los límites del inventario o de una comunidad no constituyen esa frontera. El archivo puede crecer en disco y necesita presupuesto medido: memoria finita no significa almacenamiento ilimitado.
 
 ## Mantener pequeño el proyecto
 

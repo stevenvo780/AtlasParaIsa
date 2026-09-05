@@ -1,6 +1,6 @@
 # Una Carta Para Isa
 
-Un mundo procedural compartido que continúa mientras el navegador está cerrado: biomas, recursos agotables, animales individuales, exploración, construcción, aprendizaje y comunidades. La fuente **V5 está en integración** y añade herramientas, procedimientos materiales y ciclo vital de vecinos. La revisión privada continúa en V4 hasta la activación registrada en [EVIDENCIA.md](docs/EVIDENCIA.md). S e I son nombres provisionales; los vecinos y los cinco recuerdos iniciales son material ficticio identificado.
+Un mundo procedural compartido que continúa mientras el navegador está cerrado: biomas, recursos agotables, animales individuales, exploración, construcción, aprendizaje y comunidades. El candidato **V5 está en corrección / sin validar autonomía prolongada**; añade producción material y ciclo vital, pero las dos réplicas largas terminaron sin vecinos. La revisión privada sigue en V4. [EVIDENCIA.md](docs/EVIDENCIA.md) distingue pruebas, compatibilidad pendiente y servicio activo. S e I son nombres provisionales; los vecinos y los cinco recuerdos iniciales son ficticios.
 
 La aplicación local está implementada. La voz final de Steven, los recuerdos reales revisados, la prueba en un teléfono físico y el alojamiento privado siguen pendientes. No se ha publicado ni contratado infraestructura.
 
@@ -19,15 +19,11 @@ npm start
 
 `access init` pide una contraseña de entre 12 y 256 caracteres sin mostrarla en la terminal. Guarda un registro scrypt en `data/access.scrypt`, con permisos privados; no guarda la contraseña legible. Si ya existe una credencial, conserva el archivo y termina sin reemplazarlo.
 
-Abre **http://127.0.0.1:3000** e ingresa con esa contraseña. Usa exactamente ese origen: el servidor comprueba `Host` y el origen de las solicitudes. El paisaje ocupa la pantalla. Arrastra para explorar, usa la rueda para acercarte y selecciona cualquier habitante en el mapa o el censo. Puedes seguirlo, dirigir su destino o pedirle explorar, recolectar, cultivar, construir, cazar, beber, cooperar y descansar; «Autónomo» devuelve sus decisiones. Las fichas explican necesidades, habilidades, materiales, parentesco, experiencias y relaciones. Los gestos son sembrar, invitar y recordar; una invitación aceptada puede ser ignorada por los habitantes.
-
-«Vida del mundo» reúne población, historia reciente, paisaje, comunidades y rendimiento. La pestaña «Fauna» permite buscar, seleccionar y seguir animales, con sus necesidades, genes y actividad. Las órdenes de los habitantes incluyen ensayar diseños y reparar; los animales se observan sin recibir esas órdenes humanas. Los diseños muestran componentes, costes, procedencia y utilidad adquirida por uso.
-
-Los recursos y la fauna contados corresponden a **regiones activas del servidor**; no son un censo del territorio procedural completo ni solo de lo que mira la cámara. La pestaña de rendimiento distingue tiempos de simulación y guardado, memoria del proceso y medidas gráficas de este navegador.
+Abre **http://127.0.0.1:3000** e ingresa con esa contraseña. Usa exactamente ese origen: el servidor comprueba `Host` y el origen de las solicitudes. Arrastra para explorar, usa la rueda para acercarte y selecciona un habitante en el mapa o el censo. «Autónomo» devuelve sus decisiones. [EXPERIENCIA.md](docs/EXPERIENCIA.md#participación-de-isa) explica órdenes, fichas, fauna, procedimientos y gestos; los recursos del panel corresponden a regiones activas, no a todo el territorio.
 
 **Todos los clientes conectados al mismo servicio comparten un único mundo persistente.** El backend mantiene un estado y un reloj de simulación a diez pasos por segundo, guarda cada paso y envía normalmente dos vistas por segundo a cada cliente. Cada navegador conserva su cámara y dibuja la región solicitada; abrir otra pestaña no crea habitantes ni otra simulación. Las órdenes aceptadas de todos los clientes actúan sobre ese mundo común.
 
-La CPU del servidor ejecuta ecología, decisiones, herencia, sociedad y guardado. Cada navegador utiliza sus propios recursos gráficos para dibujar; WebGL2 puede usar la GPU del dispositivo cliente. No se utiliza la GPU del servidor para simular ni se entrena un modelo. El límite actual es **12 conexiones WebSocket simultáneas** —incluidas varias pestañas de una persona—; no se acredita capacidad para cientos de clientes.
+La CPU del servidor ejecuta la simulación y el guardado; cada navegador dibuja con sus recursos gráficos. El límite actual es **12 conexiones WebSocket simultáneas**, incluidas varias pestañas de una persona. La distribución del trabajo y los límites gráficos están en [CONSTRUCCION.md](docs/CONSTRUCCION.md#arquitectura-implementada).
 
 Cerrar todas las pestañas no detiene el mundo. Al detener el proceso y arrancarlo de nuevo, recupera el último estado confirmado y registra una pausa técnica; no inventa encuentros durante la caída.
 
@@ -75,7 +71,7 @@ Crea una copia SQLite coherente en una **ruta nueva**. El comando rechaza sobres
 npm run backup -- ./backups/carta-revision-01.sqlite
 ```
 
-La copia contiene el mundo y sus registros operativos; debe permanecer privada. `access.scrypt` es un archivo separado y no forma parte de la copia SQLite.
+El CLI abre el origen en modo de solo lectura, sin migrar el esquema de un servicio anterior. La copia contiene el mundo y sus registros operativos; debe permanecer privada. `access.scrypt` es un archivo separado y no forma parte de la copia SQLite. Copiar una base no acredita que su estado pueda migrarse: la validación del lector puede rechazarla. El caso pendiente de la revisión V4 está en [EVIDENCIA.md](docs/EVIDENCIA.md#servicio-privado-v4-y-compatibilidad-pendiente).
 
 Para restaurar, usa un **directorio de datos nuevo**. Se valida la copia, se revocan sus sesiones y se conserva el mundo de origen:
 
@@ -101,15 +97,7 @@ Esta operación retira en la copia las entradas y los hechos posteriores al punt
 
 El mundo se genera por regiones de 16 × 16 celdas con coordenadas positivas y negativas; no conserva el borde de 40 × 28. El límite técnico es ±10 millones de celdas, con extremo superior excluido. La cámara recibe ventanas de hasta 96 × 64. Solo los alrededores de los habitantes avanzan: las regiones archivadas conservan sus cambios y congelan su ecología. El archivo en disco puede crecer con la exploración.
 
-La fuente usa reglas y protocolo **5** y esquema SQLite **3**. La migración valida versiones anteriores y añade los nuevos campos sin reescribir su historia. Una colección vacía guardada permanece vacía. Antes de actualizar un servicio, conservar base y build; las comprobaciones de compatibilidad, reinicio y activación se registran en EVIDENCIA.
-
-Liebres, ciervos, jabalíes, peces, lobos y zorros tienen cuerpo, percepción, memoria local y seis parámetros heredables. Pueden consumir recursos, desplazarse, huir, depredar, reproducirse y morir por causas del modelo. Comparten la función de necesidades con los humanos, con tasas propias; no construyen ni forman comunidades humanas.
-
-Los habitantes construyen y reparan diseños funcionales, investigan transformaciones de materiales y fabrican técnicas aprendidas. Los productos pueden mejorar tareas, intercambiarse o servir como ingredientes de otros procesos. Inventar cuesta trabajo y recursos; la utilidad exige efectos reales. [REGLAS.md](docs/REGLAS.md) conserva fórmulas, condiciones y límites.
-
-Los vecinos ficticios pueden nacer y morir; el máximo es 32 habitantes vivos. La herencia de parámetros y el aprendizaje adquirido siguen vías separadas. La identidad y autoría de fallecidos se conservan en SQLite, con caché acotado y recuperación histórica. S e I tienen protección explícita de continuidad. No se ha demostrado el efecto Baldwin, autopoiesis biológica o conciencia; [CIENCIA.md](docs/CIENCIA.md) explica las fuentes y el alcance científico.
-
-El paisaje usa cachés de dibujos y un compositor WebGL2 cuando está disponible, con alternativa Canvas 2D ante indisponibilidad, software detectado o pérdida de contexto. El diagnóstico distingue hardware identificado, software e identidad no verificada. Los FPS y tiempos de dibujo son medidas locales; no acreditan que todos los equipos usen una GPU física ni miden su porcentaje de ocupación.
+La fuente V5 usa reglas/protocolo **5** y SQLite **3**; el servicio V4 conserva SQLite **2**. El lector valida el origen antes de migrar. Antes de una actualización, conservar base y build y comprobar compatibilidad en una copia. Actualmente la copia privada V4 fue rechazada por una reserva de madera fuera de cota: no se ha migrado ni actualizado ese servicio. El contrato de archivo y recuperación está en [CONSTRUCCION.md](docs/CONSTRUCCION.md#territorio-procedural-y-archivo); fauna, tecnología y demografía se definen en [REGLAS.md](docs/REGLAS.md).
 
 ## Desarrollo y comprobaciones
 
@@ -123,8 +111,11 @@ El paisaje usa cachés de dibujos y un compositor WebGL2 cuando está disponible
 | `npm run test:e2e` | Ejecuta las pruebas de navegador disponibles con Playwright. Requiere sus navegadores instalados. |
 | `npm run test:smoke` | Comprueba el servidor compilado, contraseña, reinicio tras `SIGKILL` y revocación en un mundo temporal. Requiere `npm run build`. |
 | `npm run test:soak` | Simula cinco días del modelo con guardado SQLite por paso, reinicio y copia; escribe `artifacts/soak.json`. |
+| `npx tsx scripts/evolution.ts --days 15 --seeds 51926,20260905 --output artifacts/evolution-nueva.json` | Observa dos réplicas autónomas, con SQLite cada 120 pasos, reinicio intermedio y copia final. No mide commit por paso. |
 
 `SOAK_DAYS` permite entre 3 y 60 días del modelo. Un día equivale a 2400 pasos: **cuatro minutos simulados**. La ejecución acelerada mide el motor y el guardado; no acredita varios días de operación real ni sustituye la prueba en un móvil físico.
+
+El observador multisemilla admite entre 15 y 25 días y de una a 32 semillas distintas. Usa una ruta de salida nueva para conservar comparaciones; los artefactos históricos de esta revisión son `soak-v5.json` y `evolution-v5.json`. No ejecutes compilaciones que reemplacen el build de una revisión activa: valida un candidato en salida y mundo temporales separados. Las fuentes y los artefactos deben corresponder al mismo código.
 
 Las pruebas incluyen controles emparejados de alimento, refugio, encuentro, recuerdo pertinente/irrelevante y aprendizaje desactivado, además de fauna individual, invención, ecología, archivo y renderizado. [EVIDENCIA.md](docs/EVIDENCIA.md) registra los resultados de la revisión vigente y Git conserva los anteriores; un mecanismo implementado o un comando documentado no equivalen a una ejecución aprobada.
 

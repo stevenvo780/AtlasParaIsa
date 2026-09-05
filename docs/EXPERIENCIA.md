@@ -1,6 +1,6 @@
 # Experiencia, interacción y voz
 
-Este documento desarrolla el [plan unificado](../PLAN.md) y la experiencia de la fuente V5 en integración. Las mecánicas pertenecen a [REGLAS.md](REGLAS.md); [EVIDENCIA.md](EVIDENCIA.md) distingue lo comprobado y activado. Los ejemplos narrativos siguen siendo posibilidades de diseño. La voz final del autor, la biografía aprobada y la prueba en un teléfono físico continúan pendientes.
+Este documento desarrolla la interacción y la voz del [plan unificado](../PLAN.md). El candidato V5 está **en corrección / sin validar autonomía prolongada** y el servicio privado sigue en V4. [REGLAS.md](REGLAS.md) conserva mecánicas y [EVIDENCIA.md](EVIDENCIA.md) los resultados. Las escenas propuestas no garantizan desenlaces; voz final, biografía aprobada y teléfono físico siguen pendientes.
 
 ## Entrar, explorar y volver
 
@@ -12,7 +12,7 @@ Las acciones principales son observar, recorrer, intervenir y volver a mirar. No
 
 Al regresar se ve primero el presente y después, si hubo cambios relevantes, hasta tres episodios desde la última visita. No aparecen reclamos por haberse ido ni premios por visitar a diario.
 
-## Un mundo que sostiene su actividad
+## Un mundo con actividad propia
 
 El paisaje es una extensión procedural vista desde arriba. Se explora en cualquier dirección mediante regiones generadas según necesidad. Agua, bosques, praderas, desiertos, montañas y humedales ofrecen recursos distintos. Volver a una región recupera sus modificaciones guardadas. No existe el borde rectangular inicial, aunque hay un límite numérico de coordenadas y una cantidad acotada de regiones activas.
 
@@ -22,7 +22,7 @@ El modelo ecológico empieza con este ciclo:
 
 **Luz y agua → crecimiento vegetal → alimento → energía y actividad de habitantes → consumo y cambios en el lugar → regeneración condicionada por el entorno.**
 
-Las fuentes y pérdidas se definen explícitamente: la luz aporta energía, la lluvia modifica humedad, desplazarse consume energía y cosechar reduce alimento disponible. El agua potable se encuentra en charcos, manantiales, humedales y agua dulce; el suelo húmedo común no se bebe. Los charcos dependen de lluvia y los manantiales tienen recarga limitada. El océano intercambia agua salada con su entorno, sin convertirse en agua potable.
+La luz favorece crecimiento, la lluvia cambia humedad, desplazarse cuesta actividad y cosechar retira alimento. El paisaje debe hacer reconocibles el agua potable, la comida y los recursos agotados. Ese circuito es una simplificación del modelo, no una promesa de equilibrio indefinido; sus fuentes y pérdidas se definen en REGLAS.
 
 Árboles, pinos, palmas, cactus, juncos, bayas, flores, roca y arcilla distinguen los biomas. Recolectar agota existencias; los árboles pueden quedar como tocones y recuperarse lentamente con condiciones adecuadas. La piedra no reaparece. Cultivar modifica suelo y crecimiento; caminar deja huellas que frenan la recuperación vegetal. Una capa celular local influye en fertilidad y crecimiento según sus vecinos, luz y humedad.
 
@@ -36,7 +36,7 @@ No hacen falta química molecular, hidrodinámica completa ni evolución de espe
 
 Cada habitante percibe una zona limitada. Empieza con energía, hambre, sed y fatiga, más preferencias y vínculos locales. S e I tienen además memoria compartida y una necesidad contextual de cercanía o espacio.
 
-Las acciones incluyen desplazarse, comer, beber, cazar, descansar, explorar, acercarse, acompañar, retirarse, recolectar materiales, cultivar, construir, ensayar diseños, reparar, investigar materiales, fabricar y cooperar. La ficha muestra necesidades, salud y vitalidad. Cada habitante combina predisposiciones con habilidades adquiridas y resultados de sus acciones. Una experiencia favorable o desfavorable puede modificar la elección siguiente. Una intención dura lo suficiente para verse; se abandona cuando cambia una causa relevante.
+La ficha permite distinguir necesidad inmediata, preparación y trabajo. Muestra necesidades, salud, vitalidad y alimento que la persona lleva consigo. Cada habitante combina predisposiciones con habilidades adquiridas y resultados anteriores. Una experiencia favorable o desfavorable puede modificar la elección siguiente; la intención dura lo suficiente para verse y se abandona cuando cambia una causa relevante.
 
 Los genes son siete pares de parámetros de diseño heredables, incluida la rapidez con que se ajustan preferencias. La descendencia recombina un aporte de cada progenitor y empieza sin copiar sus habilidades, hábitos o recuerdos; registra su nacimiento como experiencia propia y después aprende de sus resultados y de otros. La cultura inicial compartida por crianza se registra por separado del genoma. Esto no atribuye genética ni perfiles psicológicos reales a Steven e Isa.
 
@@ -64,17 +64,19 @@ Los vecinos buscan recursos, descansan y se relacionan mediante reglas locales. 
 
 Una forma de cultura implementada es **una costumbre de encuentro o cuidado que se propaga por repetición e imitación**. No nace porque un temporizador declare que existe una tradición. Se conserva quién actuó, quién observó y qué conducta útil se repitió.
 
-Las comunidades se forman a partir de vínculos cercanos, prácticas compatibles y lugares compartidos. Pueden aportar materiales a una obra, ayudar con trabajo, enseñar una técnica o intercambiar madera y piedra. Estas acciones cambian inventarios, capacidad de trabajo o habilidades y tienen costes. Compartir, cuidar el entorno y mantener apertura hacia otros son tres prácticas modificables, distintas de los genes. Influyen en compartir alimento, cultivar, conservar fauna escasa y relacionarse con otros; compartir y cuidar el entorno aprenden de consecuencias, mientras el contacto positivo aproxima las tres prácticas. La pertenencia puede revisarse cuando coinciden baja confianza interna, prácticas diferentes y al menos dos contactos cercanos compatibles fuera del grupo; los círculos no son gobiernos ni facciones asignadas a los fundadores.
+Las comunidades nacen de vínculos cercanos, prácticas compatibles y lugares compartidos. Su historia se lee en aportes a obras, trabajo conjunto, enseñanza e intercambio de objetos o materiales. Esas acciones tienen efectos y costes reales. Compartir, cuidar el entorno y mantener apertura son prácticas aprendidas; la pertenencia puede cambiar. Los círculos visibles describen comunidades, sin representar gobiernos ni facciones asignadas a los fundadores.
 
-La escasez compartida puede producir desacuerdo dentro de una comunidad o entre comunidades: dos personas urgidas realizan la misma acción sobre la misma fuente todavía disponible, con confianza y apertura insuficientes. El conflicto añade fatiga y tensión y hace que una ceda un intento; no hay violencia ni robo. La confianza o apertura suficientes pueden dar lugar a turnos con una espera de doce pasos del mundo, sin fabricar recursos. Pertenecer a grupos distintos no basta para generar una disputa.
+La escasez compartida puede producir desacuerdo dentro de una comunidad o entre comunidades. La crónica debe explicar la fuente disputada y quién esperó o cedió; pertenecer a grupos distintos no basta para inventar un conflicto. La confianza puede facilitar turnos, sin producir recursos. Las condiciones exactas pertenecen a REGLAS.
 
 Un lugar observado con agua, alimento, techo y vínculos puede quedar recordado como hogar. Su utilidad favorece permanecer cerca o regresar caminando. La información pierde vigencia y la escasez puede justificar abandonarlo; no hay teletransporte ni comunidades asignadas para cumplir un contador. La sociedad puede tener episodios propios que después crucen la vida de S e I.
 
 ## Participación de Isa
 
-Se puede seleccionar cualquier habitante en el mapa o el censo, seguirlo con la cámara y solicitar que vaya a un lugar, explore, recolecte, cultive, construya, ensaye un diseño, repare, cace, beba, coopere o descanse. La orden inicia una tarea con trayecto, duración y costes. No anula hambre, sed, cansancio ni obstáculos. «Autónomo» devuelve la selección de tareas al habitante. La pestaña «Fauna» permite buscar, inspeccionar y seguir animales; sus fichas muestran necesidades y actividad sin ofrecerles órdenes humanas.
+Se puede seleccionar cualquier habitante en el mapa o el censo, seguirlo y solicitar que vaya a un lugar, explore, coseche alimento, recolecte materiales, cultive, construya, ensaye un diseño, repare, investigue, fabrique, cace, beba, coopere o descanse. La tarea tiene trayecto, duración y costes; conserva necesidades y obstáculos. «Autónomo» devuelve la selección al habitante. «Fauna» permite buscar, inspeccionar y seguir animales sin ofrecerles órdenes humanas.
 
-«Oficios» permite inspeccionar procedimientos descubiertos, productos, capacidades y dependencias observadas entre quienes producen y usan materiales. Investigar inicia un ensayo con coste y posibilidad de fallo; fabricar ejecuta una técnica conocida con ingredientes presentes. La ficha individual muestra los objetos que porta. Los procesos se explican con operaciones comprensibles; un nombre nuevo sin función material no cuenta como invento. La red distingue uso, intercambio y reposición; no etiqueta un ciclo cualquiera como vida demostrada.
+«Cosechar alimento» llena una reserva visible después de trabajo real. Recoger y comer son hechos distintos: la barra de hambre no mejora por guardar comida. Una posible crianza con alguien conocido puede motivar preparación y acercamiento, pero la interfaz no promete un nacimiento. Las nuevas señales se integraron después de las réplicas fallidas; su eficacia para sostener generaciones sigue pendiente de verificación.
+
+«Oficios» permite inspeccionar procedimientos, productos, capacidades y dependencias observadas entre productores y usuarios. Investigar inicia un ensayo con coste y posibilidad de fallo; fabricar ejecuta una técnica conocida con ingredientes presentes. La ficha muestra los objetos que porta cada persona. Los procesos se explican con operaciones comprensibles; un nombre nuevo sin función material no cuenta como invento. La red distingue uso, intercambio y reposición, con su intervalo y evidencia disponible: un ciclo histórico no garantiza actividad presente ni se etiqueta como vida demostrada.
 
 Si fallece el habitante seleccionado, la ficha muestra su legado y la causa registrada. Se interrumpe el seguimiento del cuerpo ausente y desaparecen las órdenes que ya no pueden ejecutarse. Esta continuidad conserva el hecho sin dibujar un cuerpo ficticio ni enviar órdenes hacia una identidad archivada.
 
@@ -88,7 +90,7 @@ Los tres gestos ambientales disponibles son:
 | Invitar | Deja una señal que puede percibirse como invitación. | Los habitantes deciden si responder según su situación; no los teletransporta. |
 | Recordar | Refuerza temporalmente un recuerdo disponible relacionado con la escena; los actuales son sintéticos identificados. | El contexto determina si influye y cómo; no impone diálogo ni reconciliación. |
 
-Los habitantes realizan por sí mismos el cuidado cotidiano. La intervención aporta posibilidades y permite investigar el mundo, sin convertirse en su fuente necesaria de alimento, memoria o afecto.
+La intención de diseño es que los habitantes resuelvan el cuidado cotidiano por sus procesos. El candidato todavía no sostiene el reemplazo generacional en las réplicas largas. La intervención de Isa aporta posibilidades y permite investigar; no debe convertirse en una obligación de rescatar población para ocultar ese fallo.
 
 Crear paisajes alternativos o comparar reglas puede explorarse después en mundos de prueba separados. Esos experimentos no reinician ni sobrescriben la carta persistente.
 

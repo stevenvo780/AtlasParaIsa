@@ -1,8 +1,8 @@
 # Una Carta Para Isa — plan unificado
 
-La revisión privada actual es V3. Está en ejecución V4: fauna individual con fisiología compartida, depredación y herencia; invenciones de estructuras funcionales mediante gramática y búsqueda; hogares elegidos y retornos que permitan sostener comunidades. Este plan conserva los requisitos y su estado; [REGLAS.md](docs/REGLAS.md) define los mecanismos y [EVIDENCIA.md](docs/EVIDENCIA.md) registra lo comprobado.
+La revisión privada actual es V4: fauna individual con fisiología compartida, depredación y herencia; invenciones de estructuras funcionales mediante gramática y búsqueda; hogares elegidos y retornos que permiten sostener comunidades en la ejecución comprobada. Este plan conserva los requisitos y su estado; [REGLAS.md](docs/REGLAS.md) define los mecanismos y [EVIDENCIA.md](docs/EVIDENCIA.md) registra lo comprobado.
 
-Fecha: 5 de septiembre de 2026. Estado: prototipo V4 implementado y en validación de integración, con V3 todavía activa en la revisión privada. Cierre personal de la carta, prueba en móvil físico y alojamiento definitivo pendientes.
+Fecha: 5 de septiembre de 2026. Estado: prototipo V4 implementado, comprobado y activo en revisión privada con un mundo nuevo y el anterior conservado íntegro. Cierre personal de la carta, prueba en móvil físico y alojamiento definitivo pendientes.
 
 El repositorio ya contiene una aplicación local ejecutable. El [README](README.md) reúne los comandos reales de arranque, acceso y recuperación. La experiencia siguiente conserva su alcance de diseño; la implementación actual usa S e I, vecinos ficticios y cinco recuerdos sintéticos identificados, sin importar conversaciones ni atribuirles biografía.
 
@@ -83,7 +83,7 @@ La ampliación V4 añade fauna individual, fisiología compartida, depredación,
 
 | Etapa | Implementado | Cierre pendiente |
 |---|---|---|
-| 1. Mundo y vínculo | Regiones de 16 × 16, depósitos de agua, recursos modificables, fauna individual y capa celular; dieciséis cuerpos humanos iniciales, decisiones locales, vínculo contextual, cámara y gestos. | Cierre de integración V4 y comprensión en el móvil físico destinatario. |
+| 1. Mundo y vínculo | Regiones de 16 × 16, depósitos de agua, recursos modificables, fauna individual y capa celular; dieciséis cuerpos humanos iniciales, decisiones locales, vínculo contextual, cámara y gestos. | Comprensión en el móvil físico destinatario. |
 | 2. Historia propia | Recuerdos sintéticos, experiencias de práctica, hábitos por observación, comunidades, ayuda y conflicto reversible; descendientes vecinos con genealogía y aprendizaje propio. | Selección real de recuerdos, nombres y rasgos revisada por Steven; evidencia causal de los mecanismos nuevos. |
 | 3. Continuidad | Servicio persistente, sesión revocable, SQLite transaccional, reconexión, copia y recuperación explícita. | Alojamiento privado autorizado con proceso, HTTPS y disco persistentes; la operación local no acredita un despliegue. |
 | 4. La carta terminada | Interfaz y carta de prueba ejecutables para revisión. | Voz final del autor, revisión íntima, arte y ritmo finales, y recorrido en un teléfono real. |
@@ -128,7 +128,7 @@ Esta tabla conserva la dirección expresada por Steven, incluso cuando excede el
 
 Un tema tiene una referencia canónica y los demás documentos la enlazan. No crear documentos históricos o de fase que dupliquen reglas, diseño o evidencia: Git ya conserva esas revisiones. Cada cambio de alcance actualiza esta tabla, su regla cuando exista y su evidencia cuando se ejecute.
 
-El mundo privado mostró dispersión incompatible con comunidades locales. Para concretar la solicitud de limpiar la base principal se prepara un comienzo nuevo tras validar V4, conservando íntegra la historia anterior y el acceso existente. Un comienzo nuevo no debe borrar el respaldo ni justificarse mediante repoblación silenciosa de un estado inválido. Su activación efectiva se registra en EVIDENCIA.
+El mundo privado mostró dispersión incompatible con comunidades locales. Para concretar la solicitud de limpiar la base principal se inició un mundo nuevo tras validar V4, conservando íntegra la historia anterior y el acceso existente. Un comienzo nuevo no debe borrar el respaldo ni justificarse mediante repoblación silenciosa de un estado inválido. Los detalles de activación están en EVIDENCIA.
 
 Una incorporación debe describir **qué permite observar o hacer, qué causa cambia y qué aporta al mundo o a la carta**. Se prueba con la solución más pequeña que cierre ese circuito. Si duplica otra mecánica, exige una explicación larga para tener sentido o solo aumenta escala, se deja fuera.
 

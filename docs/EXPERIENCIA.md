@@ -1,6 +1,6 @@
 # La experiencia y las reglas del mundo
 
-Este documento desarrolla el [plan unificado](../PLAN.md) y la experiencia implementada en el prototipo V4, todavía en validación antes de actualizar la revisión privada V3. Los ejemplos narrativos siguen siendo posibilidades de diseño. La voz final del autor, la biografía aprobada y la prueba en un teléfono físico continúan pendientes; [EVIDENCIA.md](EVIDENCIA.md) distingue lo comprobado.
+Este documento desarrolla el [plan unificado](../PLAN.md) y la experiencia implementada en el prototipo V4. Los ejemplos narrativos siguen siendo posibilidades de diseño. La voz final del autor, la biografía aprobada y la prueba en un teléfono físico continúan pendientes; [EVIDENCIA.md](EVIDENCIA.md) distingue lo comprobado.
 
 ## Entrar, explorar y volver
 

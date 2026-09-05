@@ -1,6 +1,6 @@
 # Una Carta Para Isa
 
-Un mundo procedural que continúa mientras el navegador está cerrado: seis biomas, agua y recursos agotables, animales individuales, exploración, invención, construcción, aprendizaje y comunidades. Parte de dieciséis habitantes y permite descendientes de vecinos hasta un máximo de 32. Es un **prototipo reversible V4 en validación** de la carta de Steven para Isa; la revisión privada continúa en V3 hasta completar la actualización. S e I son nombres provisionales; los vecinos y los cinco recuerdos iniciales son material ficticio identificado.
+Un mundo procedural que continúa mientras el navegador está cerrado: seis biomas, agua y recursos agotables, animales individuales, exploración, invención, construcción, aprendizaje y comunidades. Parte de dieciséis habitantes y permite descendientes de vecinos hasta un máximo de 32. Es un **prototipo reversible V4**, comprobado y activo en la revisión privada de la carta de Steven para Isa. S e I son nombres provisionales; los vecinos y los cinco recuerdos iniciales son material ficticio identificado.
 
 La aplicación local está implementada. La voz final de Steven, los recuerdos reales revisados, la prueba en un teléfono físico y el alojamiento privado siguen pendientes. No se ha publicado ni contratado infraestructura.
 

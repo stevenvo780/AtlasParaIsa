@@ -2,7 +2,7 @@
 
 Referencia de alcance: [PLAN.md](../PLAN.md). Referencia de comportamiento: [EXPERIENCIA.md](EXPERIENCIA.md).
 
-Estado del código: prototipo reversible V4 en validación, con interfaz WebGL2/Canvas 2D/DOM, servidor HTTP/WebSocket, autenticación privada, SQLite y pruebas ejecutables. El [README](../README.md) documenta los comandos reales y [EVIDENCIA.md](EVIDENCIA.md) el estado comprobado y activado. Los recuerdos son sintéticos; no hay publicación ni alojamiento contratado. Los comandos, versiones y resultados de otros repositorios no se trasladan como capacidades existentes.
+Estado del código: prototipo reversible V4, con interfaz WebGL2/Canvas 2D/DOM, servidor HTTP/WebSocket, autenticación privada, SQLite y pruebas ejecutables. El [README](../README.md) documenta los comandos reales y [EVIDENCIA.md](EVIDENCIA.md) el estado comprobado y activado. Los recuerdos son sintéticos; no hay publicación ni alojamiento contratado. Los comandos, versiones y resultados de otros repositorios no se trasladan como capacidades existentes.
 
 ## Arquitectura implementada
 

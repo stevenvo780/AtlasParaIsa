@@ -1,6 +1,6 @@
 # Reglas del prototipo
 
-Estas reglas son la referencia canónica de los mecanismos V4 en `src/world/`. La ampliación está en validación de integración; el estado de activación y las pruebas pertenecen a [EVIDENCIA.md](EVIDENCIA.md). Son unidades del modelo, sin equivalencia biológica demostrada ni una puntuación del amor. La memoria y las diferencias provisionales de S e I son ejemplos de diseño pendientes de la voz de Steven.
+Estas reglas son la referencia canónica de los mecanismos V4 en `src/world/`. El estado de activación y las pruebas pertenecen a [EVIDENCIA.md](EVIDENCIA.md). Son unidades del modelo, sin equivalencia biológica demostrada ni una puntuación del amor. La memoria y las diferencias provisionales de S e I son ejemplos de diseño pendientes de la voz de Steven.
 
 ## Tiempo, paisaje y recursos
 

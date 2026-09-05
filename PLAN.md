@@ -128,7 +128,7 @@ Esta tabla conserva la dirección expresada por Steven, incluso cuando excede el
 
 Un tema tiene una referencia canónica y los demás documentos la enlazan. No crear documentos históricos o de fase que dupliquen reglas, diseño o evidencia: Git ya conserva esas revisiones. Cada cambio de alcance actualiza esta tabla, su regla cuando exista y su evidencia cuando se ejecute.
 
-El mundo privado mostró dispersión incompatible con comunidades locales. Se conserva una copia íntegra antes de cualquier cambio y se mantiene pendiente elegir entre comienzo nuevo o continuidad histórica. Un comienzo nuevo no debe borrar el respaldo ni justificarse mediante repoblación silenciosa de un estado inválido.
+El mundo privado mostró dispersión incompatible con comunidades locales. Para concretar la solicitud de limpiar la base principal se prepara un comienzo nuevo tras validar V4, conservando íntegra la historia anterior y el acceso existente. Un comienzo nuevo no debe borrar el respaldo ni justificarse mediante repoblación silenciosa de un estado inválido. Su activación efectiva se registra en EVIDENCIA.
 
 Una incorporación debe describir **qué permite observar o hacer, qué causa cambia y qué aporta al mundo o a la carta**. Se prueba con la solución más pequeña que cierre ese circuito. Si duplica otra mecánica, exige una explicación larga para tener sentido o solo aumenta escala, se deja fuera.
 

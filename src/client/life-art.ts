@@ -1,4 +1,79 @@
 import type { AnimalView, StructureView } from '../shared/life.js';
+import type { Tile } from '../shared/types.js';
+
+export interface TreeForm {
+  kind: 'tree' | 'pine' | 'palm'; height: number; width: number; foliage: number; variant: number;
+}
+
+/** A cell is a resource patch, not a census of trees. One glyph retains every woody patch. */
+export function treeForm(tile: Tile): TreeForm | null {
+  if (tile.terrain === 'water' || tile.terrain === 'shelter' || !(tile.wood !== undefined && tile.wood > .05)) return null;
+  if (tile.feature && tile.feature !== 'tree' && tile.feature !== 'pine' && tile.feature !== 'palm') return null;
+  const bounded = (n: number) => Math.max(0, Math.min(1, n));
+  const stock = Math.sqrt(bounded(tile.wood / 12));
+  const growth = bounded(tile.growth ?? tile.vegetation), vegetation = bounded(tile.vegetation);
+  return {
+    kind: tile.feature === 'pine' || tile.feature === 'palm' ? tile.feature : 'tree',
+    height: 12 + Math.round(stock * (14 + growth * 16) / 6) * 6,
+    width: 6 + Math.round(stock * (5 + vegetation * 7) / 3) * 3,
+    foliage: Math.round(growth * vegetation * 3),
+    variant: (Math.abs(tile.variety ?? 0) + (tile.biome === 'wetland' ? 2 : tile.biome === 'grassland' ? 1 : 0)) % 4,
+  };
+}
+
+/** 32×48 art, rooted at (16,44); a mature tree is roughly three standing human bodies tall. */
+export function paintTree(g: CanvasRenderingContext2D, form: TreeForm, pose = 1): void {
+  const block = (x: number, y: number, w: number, h: number, color: string) => { g.fillStyle = color; g.fillRect(Math.round(x), Math.round(y), Math.round(w), Math.round(h)); };
+  const oval = (x: number, y: number, rx: number, ry: number, color: string) => {
+    g.fillStyle = color; g.beginPath(); g.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2); g.fill();
+  };
+  const base = 44, top = base - form.height, sway = pose - 1;
+  const trunk = form.height >= 30 ? 3 : 2, center = 16 + sway;
+  const half = form.width / 2, crown = Math.round(form.height * [ .66, .58, .74, .62 ][form.variant]!);
+  const palettes = [['#294a39','#48734b','#81a965'],['#344f38','#648153','#a3b776'],['#2c4944','#4f7661','#92ae78'],['#3e4c32','#778552','#afba76']];
+  const [dark, mid, light] = palettes[form.variant]!;
+  oval(16, 45, Math.min(8, half), 1.5, '#14221a24');
+  block(16 - Math.floor(trunk / 2), top + crown * .5, trunk, form.height - crown * .5, '#69533e');
+  block(16, top + crown * .5, 1, form.height - crown * .5, '#aa875f');
+  block(13, 43, 4, 1, '#69533e'); block(17, 42, 3, 2, '#69533e');
+  if (form.foliage === 0) {
+    // Remaining wood with no live canopy is a standing, depleted crown, not a lush prop.
+    for (const side of [-1, 1]) { block(16 + side * 3, top + 6, 1, crown, '#69533e'); block(16 + Math.min(0, side * 4), top + crown, 5, 1, '#69533e'); }
+    return;
+  }
+  if (form.kind === 'pine') {
+    for (let tier = 0; tier < 3; tier++) {
+      const y = top + tier * crown * .22, depth = Math.round(crown * .62), radius = half * (.55 + tier * .23);
+      for (let row = 0; row < depth; row++) {
+        const w = Math.max(1, Math.round(radius * row / depth));
+        block(center - w, y + row, w * 2 + 1, 1, dark!);
+        block(center - w, y + row, w + 1, 1, tier === 0 ? light! : mid!);
+      }
+    }
+  } else if (form.kind === 'palm') {
+    for (const side of [-1, 1]) for (let row = 0; row < half; row++) {
+      block(center + side * row, top + 3 + Math.floor(row * row / 18), 3, 2, row % 3 ? mid! : light!);
+      block(center + side * row, top + 7 + Math.floor(row * row / 24), 2, 2, dark!);
+    }
+    block(center - 1, top, 2, 7, light!);
+    for (let y = top + 12; y < base - 2; y += 4) block(15, y, 3, 1, '#795d42');
+  } else {
+    const cy = top + crown * .53, spread = .7 + form.foliage * .1;
+    const broad = form.variant === 0 ? 1.2 : form.variant === 3 ? .85 : 1;
+    const split = form.variant === 2;
+    // Forks and unequal crown lobes vary by seeded habitat form, without adding another resource.
+    for (const side of [-1, 1]) {
+      const length = 3 + form.variant % 2;
+      for (let i = 0; i < length; i++) block(16 + side * i, top + crown + length - i * 2, 2, 3, '#795f43');
+    }
+    oval(center, cy + crown * .23, half * spread * broad, crown * .38, dark!);
+    oval(center - half * .34, cy + (split ? -crown * .12 : crown * .04), half * .7 * spread, crown * .41, mid!);
+    oval(center + half * .4, cy + (split ? crown * .19 : -crown * .04), half * .62 * spread, crown * .35, mid!);
+    oval(center - half * .3, cy - crown * .28, half * .51 * spread, crown * .24, light!);
+    if (split || form.variant === 1) oval(center + half * .43, cy - crown * .04, half * .4 * spread, crown * .19, light!);
+    for (let i = 0; i < 3; i++) block(center - half * .5 + i * 3, cy - crown * .19 + (form.variant + i) % 3, 2, 1, light!);
+  }
+}
 
 export const speciesNames: Record<AnimalView['species'], string> = { hare: 'Liebre', deer: 'Venado', boar: 'Jabalí', fish: 'Pez', wolf: 'Lobo', fox: 'Zorro' };
 export const speciesPlural: Record<AnimalView['species'], string> = { hare: 'Liebres', deer: 'Venados', boar: 'Jabalíes', fish: 'Peces', wolf: 'Lobos', fox: 'Zorros' };
@@ -52,18 +127,83 @@ export function paintAnimal(g: CanvasRenderingContext2D, species: AnimalView['sp
   }
 }
 
-/** Composition, repeated parts, damage and stock are visible; no arbitrary hut variant. */
-export function paintStructure(g: CanvasRenderingContext2D, s: StructureView): void {
-  const block = (x: number, y: number, w: number, h: number, color: string) => { g.fillStyle = color; g.fillRect(x, y, w, h); };
+export interface StructureSurface {
+  materials?: { wood: number; stone: number };
+  ground?: Pick<Tile, 'growth' | 'vegetation' | 'cultivation' | 'moisture'>;
+}
+
+/** Parts change layout and capacity; material tones describe the blueprint cost, never an invented alloy. */
+export function paintStructure(g: CanvasRenderingContext2D, s: StructureView, surface: StructureSurface = {}): void {
+  const block = (x: number, y: number, w: number, h: number, color: string) => { g.fillStyle = color; g.fillRect(Math.round(x), Math.round(y), Math.max(0, Math.round(w)), Math.max(0, Math.round(h))); };
   const count = (part: StructureView['components'][number]) => s.components.filter(c => c === part).length;
-  block(2, 28, 28, 3, '#14221a30');
-  if (count('frame')) { block(6, 15, 2, 14, '#87664a'); block(23, 15, 2, 14, '#87664a'); block(6, 15, 19, 2, '#c3a077'); block(8, 26, 15, 3, '#b59773'); }
-  if (count('frame') > 1) { block(10, 16, 2, 12, '#a8845f'); block(19, 16, 2, 12, '#a8845f'); }
-  if (count('roof')) { for (let row = 0; row < 7; row++) block(15 - row * 2, 8 + row, 3 + row * 4, 1, row % 2 ? '#bd945a' : '#d4b579'); for (let n = 1; n < count('roof'); n++) block(4, 14 + n * 2, 25, 1, '#825e3f'); }
-  if (count('garden')) { block(2, 25, 9, 4, '#796246'); for (let n = 0; n < Math.min(5, count('garden') + 2); n++) block(3 + n * 2, 24 - n % 2, 1, 3, '#83ac5d'); }
-  if (count('cistern')) { block(23, 21, 7, 8, '#b5b5a2'); block(24, 28 - Math.min(5, Math.ceil(s.water * 8)), 5, Math.min(5, Math.ceil(s.water * 8)), '#71b8c1'); for (let n = 1; n < count('cistern'); n++) block(29 - n, 20, 1, 8, '#dde0c8'); }
-  if (count('granary')) { block(2, 18, 7, 7, '#ba8d4f'); block(2, 19, 7, 1, '#6e593d'); block(3, 21, Math.min(5, Math.ceil(s.food * 7)), 2, '#e4c77b'); for (let n = 1; n < count('granary'); n++) block(3, 17 - n, 6, 1, '#d3ad63'); }
-  if (count('hearth')) { block(15, 25, 6, 3, '#9b988b'); block(16, 23, 3, 3, '#5a5044'); }
-  if (s.condition < .65) { block(9, 15, 2, 3, '#493f35'); block(21, 16, 1, 4, '#493f35'); }
-  if (s.condition < .3) { g.clearRect(17, 9, 4, 4); block(21, 27, 6, 2, '#765d45'); }
+  const frames = count('frame'), roofs = count('roof'), cisterns = count('cistern'), stores = count('granary'), gardens = count('garden');
+  const condition = Math.max(0, Math.min(1, s.condition)), degraded = condition < .65, broken = condition < .3;
+  const wood = surface.materials?.wood ?? 0, stone = surface.materials?.stone ?? 0;
+  const masonry = wood + stone > 0 ? Math.round(stone / (wood + stone) * 4) : 1;
+  const left = frames > 1 ? 3 : cisterns ? 3 : 6, width = frames > 1 ? 26 : cisterns ? 19 : 21;
+  const floor = stores ? 25 : 28, eave = stores ? 12 : gardens ? 14 : 13;
+  const timber = degraded ? '#88785f' : '#bc9767', beam = '#6b513c', light = '#e0bf87';
+  block(2, 29, 28, 2, '#17292030');
+  if (frames) {
+    // Raised granaries, open garden shelters and framed rooms occupy different silhouettes.
+    block(left, floor, width, Math.max(1, masonry), '#a49a80');
+    block(left, floor + 1, width, 1, '#686d62');
+    if (stores) for (let x = left + 2; x < left + width; x += 7) { block(x, floor, 2, 4, beam); block(x - 1, 28, 4, 1, '#ada68c'); }
+    if (!gardens) {
+      block(left + 2, eave, width - 4, floor - eave, timber);
+      for (let y = eave + 2; y < floor; y += 3) block(left + 2, y, width - 4, 1, '#97774f');
+      block(left + width - 6, floor - 8, 4, 8, '#4e4637');
+      block(left + width - 6, floor - 8, 1, 8, '#deb778');
+      if (stores) for (let x = left + 4; x < left + width - 7; x += 4) block(x, eave + 3, 2, 2, '#4e4637');
+    }
+    for (let bay = 0; bay <= Math.max(1, frames); bay++) {
+      const x = left + Math.round(bay / Math.max(1, frames) * (width - 2));
+      block(x, eave - 1, 2, floor - eave + 2, beam); block(x, eave, 1, floor - eave, light);
+    }
+    block(left, eave, width, 2, beam);
+  }
+  if (roofs) {
+    const spans = Math.max(1, roofs);
+    for (let bay = 0; bay < spans; bay++) {
+      const l = left - 1 + Math.floor(bay * (width + 2) / spans), w = Math.ceil((width + 2) / spans), ridge = eave - (gardens ? 5 : 8);
+      for (let row = 0; row < eave - ridge; row++) {
+        const inset = cisterns ? Math.max(0, Math.round((eave - ridge - row - 1) * .55)) : Math.round((eave - ridge - row - 1) * w / (2 * (eave - ridge)));
+        block(l + inset, ridge + row, w - inset * (cisterns ? 1 : 2), 1, row % 3 === 0 ? '#e0bc79' : degraded ? '#9c8862' : '#b78a50');
+      }
+      block(l, eave - 1, w, 2, '#76583d'); block(l + 1, ridge, Math.max(2, w * .28), 1, '#efd39a');
+      if (broken) { g.clearRect(l + w * .48, ridge + 3, 3, 3); block(l + 3, floor - 1, 6, 2, '#786448'); }
+    }
+  }
+  for (let i = 0; i < cisterns; i++) {
+    const x = 24 - i * 7, y = 21 - i * 2;
+    block(x, y, 7, 8, '#79857c'); block(x + 1, y + 1, 5, 6, '#384e4b');
+    const fill = Math.max(0, Math.min(5, Math.ceil(s.water / Math.max(1, cisterns) / .6 * 5)));
+    if (fill) { block(x + 1, y + 7 - fill, 5, fill, '#529fa4'); block(x + 1, y + 7 - fill, 5, 1, '#bae2d3'); }
+    block(x, y, 7, 1, '#d5d0b3'); block(x, y + 7, 7, 1, '#afb39c');
+    if (roofs) { block(x + 3, eave, 1, y - eave, '#b4bb9d'); block(left + width - 4, eave + 1, Math.max(1, x + 4 - left - width + 4), 1, '#73877f'); }
+  }
+  for (let i = 0; i < stores; i++) {
+    const x = left + 2 + i * 7;
+    block(x, floor - 6, 6, 5, '#8d673e'); block(x, floor - 6, 6, 1, '#dfba73');
+    const fill = Math.max(0, Math.min(4, Math.ceil(s.food / Math.max(1, stores) / .7 * 4)));
+    if (fill) { block(x + 1, floor - 1 - fill, 4, fill, '#e9c677'); block(x + 2, floor - fill, 1, Math.max(1, fill - 1), '#b98c48'); }
+  }
+  for (let i = 0; i < gardens; i++) {
+    const x = 2 + i * 11, y = 24;
+    block(x, y, 10, 5, '#745a3f'); block(x, y + 4, 10, 1, '#c69f6d');
+    for (let row = 0; row < 2; row++) block(x + 1, y + row * 2, 8, 1, '#493f31');
+    // A garden component is prepared infrastructure; crops require received living ground.
+    const ground = surface.ground;
+    if (ground && (ground.cultivation ?? 0) > .08 && ground.vegetation > .1 && (ground.growth ?? ground.vegetation) > .15) {
+      for (let n = 0; n < 3; n++) block(x + 2 + n * 3, y - 1, 1, 3, ground.moisture > .3 ? '#97b86f' : '#baaa69');
+    }
+  }
+  if (count('hearth')) {
+    block(left + 3, 7, 4, 13, '#a2a08d'); block(left + 2, 6, 6, 2, '#d4cbb0');
+    block(left + 3, 13, 3, 1, '#777d72'); block(left + 4, 9, 3, 1, '#777d72');
+    block(left + 2, 24, 6, 4, '#6b6d60'); block(left + 3, 25, 4, 3, '#343a31');
+    // No flame or smoke: StructureView carries no current fuel-burning receipt.
+  }
+  if (degraded) { block(left + 3, eave + 3, 1, 4, '#554735'); block(left + 4, eave + 6, 2, 1, '#554735'); }
+  if (broken) { block(left + 2, 28, 5, 1, '#6d624d'); block(left + 9, 29, 3, 1, '#9c8866'); }
 }

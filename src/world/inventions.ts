@@ -13,6 +13,8 @@ export const RESEARCH_WORK = 60;
 export const REPAIR_WORK = 30;
 export const RESEARCH_COOLDOWN = 1200;
 export const BROKEN_CONDITION = 0.1;
+export const REST_FATIGUE_RATE = 0.0018;
+export const REST_ENERGY_RATE = 0.0011;
 export const COMPONENTS: readonly StructureComponent[] = ['frame', 'roof', 'cistern', 'granary', 'garden', 'hearth'];
 const COSTS: Record<StructureComponent, BlueprintView['cost']> = {
   frame: { wood: 2, stone: 1, work: 20 }, roof: { wood: 4, stone: 2, work: 70 },
@@ -59,6 +61,25 @@ function blueprintName(components: readonly StructureComponent[]): string {
 export function defaultBlueprint(): BlueprintView {
   const components: StructureComponent[] = ['frame', 'roof'];
   return { id: 'blueprint-base', name: blueprintName(components), components, generation: 0, parents: [], inventorId: null, tick: 0, uses: 0, usefulness: 0, cost: blueprintCost(components) };
+}
+
+/** A caller may hold an outdated counter; active and pending archive identities remain reserved. */
+function nextIdentity(counter: number, prefix: 'blueprint' | 'structure', ids: readonly string[]): { id: string; counter: number } | undefined {
+  if (!Number.isSafeInteger(counter) || counter < 0) return;
+  let largest = counter;
+  for (const id of ids) {
+    if (!id.startsWith(`${prefix}-`)) continue;
+    const suffix = id.slice(prefix.length + 1); if (!/^\d+$/.test(suffix)) continue;
+    const reserved = Number(suffix); if (!Number.isSafeInteger(reserved)) return;
+    largest = Math.max(largest, reserved);
+  }
+  if (largest >= Number.MAX_SAFE_INTEGER) return;
+  return { id: `${prefix}-${largest + 1}`, counter: largest + 1 };
+}
+
+function blueprintIdentity(world: World) {
+  return nextIdentity(world.blueprintCounter, 'blueprint', [...world.blueprints.map(b => b.id), ...world.blueprints.flatMap(b => b.parents),
+    ...world.structures.map(s => s.blueprintId), ...world.retiredChunks.flatMap(chunk => (chunk.structures ?? []).map(s => s.blueprintId))]);
 }
 
 function selectedBlueprint(world: World, person: Person): BlueprintView {
@@ -190,6 +211,7 @@ export function inventionOpportunity(world: World, person: Person): { score: num
 export function invent(world: World, person: Person, emit: Emit): boolean {
   if (!world.noveltyEnabled || person.work < RESEARCH_WORK || person.materials.wood < 1 || expertise(person) < 0.2
     || world.tick - (person.lastInvention ?? -RESEARCH_COOLDOWN) < RESEARCH_COOLDOWN) return false;
+  const identity = blueprintIdentity(world); if (!identity) return false;
   person.materials.wood--; person.work -= RESEARCH_WORK; person.lastInvention = world.tick;
   world.inventionDynamics.attempts++;
   const candidate = world.blueprints.length < MAX_BLUEPRINTS ? chooseInvention(world, person) : undefined;
@@ -198,10 +220,10 @@ export function invent(world: World, person: Person, emit: Emit): boolean {
     return false;
   }
   const parents = candidate.parents.map(id => world.blueprints.find(b => b.id === id)).filter((b): b is BlueprintView => !!b);
-  const blueprint: BlueprintView = { id: `blueprint-${++world.blueprintCounter}`, name: blueprintName(candidate.components), components: candidate.components,
+  const blueprint: BlueprintView = { id: identity.id, name: blueprintName(candidate.components), components: candidate.components,
     generation: Math.max(0, ...parents.map(b => b.generation)) + 1, parents: parents.map(b => b.id), inventorId: person.id, tick: world.tick,
     uses: 0, usefulness: 0, cost: blueprintCost(candidate.components) };
-  world.blueprints.push(blueprint); person.blueprintId = blueprint.id; world.inventionDynamics.accepted++;
+  world.blueprintCounter = identity.counter; world.blueprints.push(blueprint); person.blueprintId = blueprint.id; world.inventionDynamics.accepted++;
   const event = emit({ kind: 'invention', actors: [person.id], x: person.x, y: person.y, source: 'simulation',
     text: `${person.name} ideó ${blueprint.name.toLocaleLowerCase('es')}, generación ${blueprint.generation}.`,
     cause: `Ensayo real: −1 madera y ${RESEARCH_WORK} trabajo; selección Pareto entre combinaciones válidas; receta cultural derivada de ${blueprint.parents.join(', ')}. La utilidad deberá comprobarse al usarla.` });
@@ -216,8 +238,10 @@ export function completeConstruction(world: World, person: Person, tile: Tile, e
   if (!validBlueprint(blueprint.components) || world.structures.length >= MAX_STRUCTURES || tileAt(world, tile) !== tile || distance(person, tile) > 0.5
     || tile.terrain === 'water' || tile.terrain === 'shelter' || world.places.some(p => distance(p, tile) < 5)
     || world.structures.some(s => s.x === tile.x && s.y === tile.y) || person.work < cost.work || person.materials.wood < cost.wood || person.materials.stone < cost.stone) return null;
-  person.materials.wood -= cost.wood; person.materials.stone -= cost.stone; person.work -= cost.work;
-  const structure: StructureView = { id: `structure-${++world.structureCounter}`, x: tile.x, y: tile.y, blueprintId: blueprint.id, name: blueprint.name,
+  const identity = nextIdentity(world.structureCounter, 'structure', [...world.structures.map(s => s.id), ...world.retiredChunks.flatMap(chunk => (chunk.structures ?? []).map(s => s.id))]);
+  if (!identity) return null;
+  person.materials.wood -= cost.wood; person.materials.stone -= cost.stone; person.work -= cost.work; world.structureCounter = identity.counter;
+  const structure: StructureView = { id: identity.id, x: tile.x, y: tile.y, blueprintId: blueprint.id, name: blueprint.name,
     components: [...blueprint.components], condition: 1, water: 0, food: 0, uses: 0, builtAt: world.tick, builderId: person.id };
   world.structures.push(structure); tile.terrain = 'shelter'; world.settlementCount++;
   const place = { id: `settlement-${tile.x}-${tile.y}`, name: blueprint.name, x: tile.x, y: tile.y,
@@ -246,8 +270,33 @@ export function takeFood(world: World, person: Point, requested: number): number
     if (!blueprintAffordances(structure.components).foodCapacity) continue;
     const amount = Math.min(structure.food, requested - taken);
     structure.food -= amount; taken += amount; world.inventionDynamics.foodTaken += amount;
-    observeUse(world, structure, amount * 10);
+    if (world.people.some(p => p === person && p.action === 'eat' && p.hunger > 0)) observeUse(world, structure, amount * 10);
     if (taken >= requested) break;
+  }
+  return taken;
+}
+
+/** Perception includes cistern stock directly; keeping water in its reservoir retains provenance. */
+export function waterAvailable(world: World, point: Point): number {
+  return (tileAt(world, point)?.drinkingWater ?? 0) + functionalNear(world, point, 0.5)
+    .reduce((sum, structure) => sum + (blueprintAffordances(structure.components).waterCapacity > 0 ? structure.water : 0), 0);
+}
+
+/** Sole drinking debit: use ambient water first, then credit only water delivered by a cistern.
+ * The engine applies the matching thirst reduction immediately after this call. */
+export function takeWater(world: World, person: Person, requested: number): number {
+  if (!Number.isFinite(requested) || requested <= 0 || !world.people.includes(person) || person.action !== 'drink'
+    || distance(person, person.target) > 0.5 || person.thirst <= 0) return 0;
+  const tile = tileAt(world, person); if (!tile) return 0;
+  const needed = Math.min(requested, person.thirst / 3), ambient = Math.min(tile.drinkingWater ?? 0, needed);
+  tile.drinkingWater = (tile.drinkingWater ?? 0) - ambient;
+  let taken = ambient;
+  for (const structure of functionalNear(world, person, 0.5)) {
+    if (blueprintAffordances(structure.components).waterCapacity <= 0) continue;
+    const amount = Math.min(structure.water, needed - taken);
+    structure.water -= amount; taken += amount;
+    observeUse(world, structure, amount * 15);
+    if (taken >= needed) break;
   }
   return taken;
 }
@@ -265,13 +314,25 @@ export function facilityRestQuality(world: World, person: Person): number {
   const a = blueprintAffordances(structure.components), fuel = hearthFuel(world, person, structure);
   return Math.max(outdoor, clamp((a.restQuality + (fuel > 0 && person.materials.wood >= fuel ? 0.12 : 0)) * structure.condition));
 }
-/** Called only after actual rest: cold-weather hearth benefit burns the occupant's wood. */
-export function recordFacilityRest(world: World, person: Person): void {
-  if (!world.shelterBenefitEnabled) return;
+/** Called after body recovery, with the pre-rest body. Only recovery beyond the outdoor
+ * counterfactual is evidence; saturated bodies and degraded roofs cannot earn fictitious utility. */
+export function recordFacilityRest(world: World, person: Person, before?: Pick<Person, 'fatigue' | 'energy'>): void {
+  if (!world.shelterBenefitEnabled || !before || !Number.isFinite(before.fatigue) || !Number.isFinite(before.energy)
+    || before.fatigue < 0 || before.fatigue > 1 || before.energy < 0 || before.energy > 1 || !world.people.includes(person)
+    || person.action !== 'rest' || distance(person, person.target) > 0.5) return;
   const structure = restFacility(world, person); if (!structure) return;
-  const fuel = hearthFuel(world, person, structure);
-  if (fuel > 0 && person.materials.wood >= fuel) person.materials.wood -= fuel;
-  if (world.tick % 30 === 0) observeUse(world, structure, blueprintAffordances(structure.components).restQuality * structure.condition);
+  const outdoor = world.weather === 'rain' ? 0.2 : 0.55, quality = facilityRestQuality(world, person);
+  const energyRate = REST_ENERGY_RATE * clamp((1 - Math.max(person.hunger, person.thirst)) / 0.5);
+  const actualFatigue = Math.max(0, Math.min(before.fatigue - person.fatigue, before.fatigue, REST_FATIGUE_RATE * quality));
+  const actualEnergy = Math.max(0, Math.min(person.energy - before.energy, 1 - before.energy, energyRate * quality));
+  const extra = (counterfactual: number) => Math.max(0, actualFatigue - Math.min(before.fatigue, REST_FATIGUE_RATE * counterfactual))
+    + Math.max(0, actualEnergy - Math.min(1 - before.energy, energyRate * counterfactual));
+  const benefit = extra(outdoor);
+  // Rounding at saturation must not fabricate an incremental benefit.
+  if (quality <= outdoor || benefit <= 1e-12) return;
+  const fuel = hearthFuel(world, person, structure), unheated = Math.max(outdoor, blueprintAffordances(structure.components).restQuality * structure.condition);
+  if (fuel > 0 && person.materials.wood >= fuel && extra(unheated) > 1e-12) person.materials.wood -= fuel;
+  observeUse(world, structure, benefit / (REST_FATIGUE_RATE + REST_ENERGY_RATE));
 }
 
 export function repairOpportunity(world: World, person: Person): StructureView | undefined {
@@ -299,10 +360,7 @@ export function stepStructures(world: World, _emit: Emit): void {
       const collected = Math.min(a.waterCapacity - structure.water, a.catchment * structure.condition);
       structure.water += Math.max(0, collected); world.inventionDynamics.waterCollected += Math.max(0, collected);
     }
-    // A small public tap makes reservoirs perceptible to the existing finite-water action.
-    const poured = Math.max(0, Math.min(structure.water, 0.018, 0.08 - (tile.drinkingWater ?? 0)));
-    structure.water -= poured; tile.drinkingWater = (tile.drinkingWater ?? 0) + poured;
-    if (poured > 0) observeUse(world, structure, poured * 15);
+    // Production remains stock. Only an actual consumer may turn supply into observed utility.
     if (a.irrigation > 0 && structure.water > 0) {
       const gardens = [[0, -1], [-1, 0], [1, 0], [0, 1]].map(([dx, dy]) => tileAt(world, { x: structure.x + dx!, y: structure.y + dy! }))
         .filter((t): t is Tile => !!t && t.terrain !== 'water' && t.terrain !== 'shelter' && t.moisture < 0.75);
@@ -310,14 +368,12 @@ export function stepStructures(world: World, _emit: Emit): void {
       for (const [index, garden] of gardens.entries()) {
         const amount = Math.min(budget / (gardens.length - index), 0.75 - garden.moisture);
         garden.moisture += amount; structure.water -= amount; budget -= amount;
-        if (amount > 0) observeUse(world, structure, amount * 25);
       }
     }
     if (a.foodCapacity > 0) for (const person of world.people) {
       if (distance(person, structure) > 1.5 || person.hunger >= 0.5 || person.inventory <= 0.12) continue;
       const deposited = Math.max(0, Math.min(person.inventory - 0.12, a.foodCapacity - structure.food, 0.012));
       person.inventory -= deposited; structure.food += deposited; world.inventionDynamics.foodStored += deposited;
-      if (deposited > 0) observeUse(world, structure, deposited * 10);
     }
   }
   if (world.tick % 60 === 0 && world.learningEnabled) for (const person of world.people) {

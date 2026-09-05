@@ -5,7 +5,8 @@ import type { ChronicleEvent } from '../src/shared/types.js';
 import { createWorld, stepWorld, tileAt, type World } from '../src/world/index.js';
 import { blueprintAffordances, blueprintCost, blueprintSignature, BROKEN_CONDITION, completeConstruction, constructionCost,
   defaultBlueprint, facilityRestQuality, foodAvailable, invent, inventionCandidates, inventionOpportunity, MAX_BLUEPRINTS,
-  paretoCandidates, recordFacilityRest, repair, repairOpportunity, RESEARCH_COOLDOWN, stepStructures, takeFood, validBlueprint } from '../src/world/inventions.js';
+  paretoCandidates, recordFacilityRest, repair, repairOpportunity, RESEARCH_COOLDOWN, REST_ENERGY_RATE, REST_FATIGUE_RATE,
+  stepStructures, takeFood, takeWater, validBlueprint, waterAvailable } from '../src/world/inventions.js';
 
 function emitFor(world: World) {
   return (event: Omit<ChronicleEvent, 'id' | 'tick'>): ChronicleEvent => {
@@ -61,17 +62,79 @@ test('construction charges the selected genotype exactly once, with no initial w
   assert.equal(blueprint.uses, 0); assert.equal(blueprint.usefulness, 0);
 });
 
-test('rain, cistern storage and public tap conserve water; clear weather never adds water', () => {
+test('construction reserves active and retired identities before charging even when its counter recedes', () => {
+  const { world, person, tile, emit } = scene(); person.work = 90;
+  const first = completeConstruction(world, person, tile, emit)!; assert.equal(first.id, 'structure-1');
+  world.retiredChunks.push({ ...Object.values(world.chunks)[0]!, tiles: [], places: [], animals: [],
+    structures: [{ ...first, id: 'structure-7', x: 100, y: 100 }] });
+  world.structureCounter = 0; person.x += 6; person.target = { x: person.x, y: person.y }; person.work = 90;
+  const before = { ...person.materials }, second = completeConstruction(world, person, tileAt(world, person)!, emit)!;
+  assert.ok(second); assert.equal(second.id, 'structure-8'); assert.equal(world.structureCounter, 8);
+  assert.equal(person.materials.wood, before.wood - 6); assert.equal(person.materials.stone, before.stone - 3); assert.equal(person.work, 0);
+  const ids = [...world.structures, ...world.retiredChunks.flatMap(chunk => chunk.structures ?? [])].map(structure => structure.id);
+  assert.equal(new Set(ids).size, ids.length);
+});
+
+test('research skips identities referenced by active and retired objects when its counter recedes', () => {
+  const { world, person, tile, emit } = scene();
+  const prior = recipe(world, ['frame', 'roof', 'granary']);
+  person.work = 90; const built = completeConstruction(world, person, tile, emit)!;
+  world.retiredChunks.push({ ...Object.values(world.chunks)[0]!, tiles: [], places: [], animals: [],
+    structures: [{ ...built, id: 'structure-7', blueprintId: 'blueprint-9', x: 100, y: 100 }] });
+  world.blueprintCounter = 0; person.work = 60; world.weather = 'rain'; tile.drinkingWater = 0;
+  const wood = person.materials.wood; assert.ok(invent(world, person, emit));
+  assert.equal(world.blueprints.at(-1)!.id, 'blueprint-10'); assert.equal(world.blueprintCounter, 10);
+  assert.equal(world.blueprints.find(b => b.id === prior.id), prior); assert.equal(person.materials.wood, wood - 1); assert.equal(person.work, 0);
+  assert.equal(new Set(world.blueprints.map(b => b.id)).size, world.blueprints.length);
+});
+
+test('exhausted identity space fails before any material, work or attempt debit', () => {
+  const { world, person, tile, emit } = scene(); world.structureCounter = Number.MAX_SAFE_INTEGER; person.work = 90;
+  const materials = { ...person.materials };
+  assert.equal(completeConstruction(world, person, tile, emit), null); assert.deepEqual(person.materials, materials); assert.equal(person.work, 90);
+  world.blueprintCounter = Number.MAX_SAFE_INTEGER; person.work = 60;
+  assert.equal(invent(world, person, emit), false); assert.deepEqual(person.materials, materials); assert.equal(person.work, 60);
+  assert.equal(world.inventionDynamics.attempts, 0); assert.equal(world.inventionDynamics.accepted, 0);
+});
+
+test('unoccupied cisterns conserve rain as stock without claiming a use or changing ambient water', () => {
   const { world, structure, tile, emit } = building(['frame', 'roof', 'cistern']);
-  tile.drinkingWater = 0; world.weather = 'rain';
+  world.people = []; tile.drinkingWater = 0.2; world.weather = 'rain';
   for (let n = 0; n < 200; n++) { world.tick += 10; stepStructures(world, emit); }
-  close(structure.water + tile.drinkingWater, world.inventionDynamics.waterCollected);
-  assert.ok(structure.water <= 0.6); assert.ok(tile.drinkingWater <= 0.08); assert.ok(structure.water > 0);
+  close(structure.water, world.inventionDynamics.waterCollected);
+  assert.ok(structure.water <= 0.6); assert.equal(tile.drinkingWater, 0.2); assert.ok(structure.water > 0);
   const before = structure.water + tile.drinkingWater, collected = world.inventionDynamics.waterCollected;
   world.weather = 'clear';
-  for (let n = 0; n < 50; n++) { world.tick += 10; tile.drinkingWater -= Math.min(tile.drinkingWater, 0.001); stepStructures(world, emit); }
-  close(structure.water + tile.drinkingWater, before - 0.05); assert.equal(world.inventionDynamics.waterCollected, collected);
-  assert.ok(world.blueprints.find(b => b.id === structure.blueprintId)!.usefulness > 0);
+  for (let n = 0; n < 50; n++) { world.tick += 10; stepStructures(world, emit); }
+  close(structure.water + tile.drinkingWater, before); assert.equal(world.inventionDynamics.waterCollected, collected);
+  assert.equal(structure.uses, 0); assert.equal(world.blueprints.find(b => b.id === structure.blueprintId)!.usefulness, 0);
+});
+
+test('only a real thirsty consumer drawing cistern water earns utility; ambient drinking has no attribution', () => {
+  const { world, person, structure, tile, blueprint } = building(['frame', 'roof', 'cistern']);
+  structure.water = 0.3; tile.drinkingWater = 0.006; person.action = 'drink'; person.thirst = 0.5;
+  close(waterAvailable(world, person), 0.306);
+  const ambient = takeWater(world, person, 0.006); person.thirst -= ambient * 3;
+  close(ambient, 0.006); close(structure.water, 0.3); assert.equal(blueprint.uses, 0); assert.equal(blueprint.usefulness, 0);
+  const beforeWater = waterAvailable(world, person), beforeThirst = person.thirst;
+  const consumed = takeWater(world, person, 0.006); person.thirst -= consumed * 3;
+  close(beforeWater - waterAvailable(world, person), consumed); close(beforeThirst - person.thirst, consumed * 3);
+  assert.equal(structure.uses, 1); assert.equal(blueprint.uses, 1); assert.ok(blueprint.usefulness > 0);
+  const water = structure.water, useful = blueprint.usefulness;
+  person.thirst = 0; assert.equal(takeWater(world, person, 0.006), 0);
+  person.thirst = 0.5; person.action = 'explore'; assert.equal(takeWater(world, person, 0.006), 0);
+  person.action = 'drink'; person.target = { x: person.x + 4, y: person.y }; assert.equal(takeWater(world, person, 0.006), 0);
+  person.target = { x: person.x, y: person.y }; world.people = []; assert.equal(takeWater(world, person, 0.006), 0);
+  assert.equal(structure.water, water); assert.equal(blueprint.usefulness, useful); assert.equal(blueprint.uses, 1);
+});
+
+test('engine drinking debits cistern stock and credits the blueprint only when thirst really falls', () => {
+  const { world, person, structure, tile, blueprint } = building(['frame', 'roof', 'cistern']);
+  tile.drinkingWater = 0; structure.water = 0.3; person.action = 'drink'; person.thirst = 0.5;
+  person.decisionAt = world.tick + 100; world.tick = 601;
+  const thirst = person.thirst; stepWorld(world);
+  close(structure.water, 0.294); close(world.totals.waterConsumed!, 0.006);
+  assert.ok(person.thirst < thirst); assert.equal(blueprint.uses, 1); assert.ok(blueprint.usefulness > 0);
 });
 
 test('gardens debit cistern water into neighboring moisture without instant food or vegetation', () => {
@@ -83,6 +146,7 @@ test('gardens debit cistern water into neighboring moisture without instant food
   world.tick += 10; stepStructures(world, emit);
   close(structure.water + neighbors.reduce((sum, t) => sum + t.moisture, 0), before);
   assert.ok(neighbors.every(t => t.moisture > 0.2)); assert.deepEqual(neighbors.map(t => t.food), food); assert.deepEqual(neighbors.map(t => t.vegetation), vegetation);
+  assert.equal(structure.uses, 0); assert.equal(world.blueprints.find(b => b.id === structure.blueprintId)!.usefulness, 0);
   structure.water = 0; const dry = neighbors.map(t => t.moisture); world.tick += 10; stepStructures(world, emit); assert.deepEqual(neighbors.map(t => t.moisture), dry);
 });
 
@@ -92,8 +156,11 @@ test('granaries only store carried surplus and withdrawals have a sole matching 
   for (let n = 0; n < 10; n++) { world.tick += 10; stepStructures(world, emit); }
   close(person.inventory + structure.food, before); close(world.inventionDynamics.foodStored, structure.food);
   assert.ok(structure.food > 0); close(foodAvailable(world, person), structure.food);
+  assert.equal(structure.uses, 0); assert.equal(world.blueprints.find(b => b.id === structure.blueprintId)!.usefulness, 0);
+  person.action = 'eat'; person.hunger = 0.4;
   const stock = structure.food, withdrawn = takeFood(world, person, 0.05); person.inventory += withdrawn;
   close(structure.food, stock - withdrawn); close(person.inventory + structure.food, before); close(world.inventionDynamics.foodTaken, withdrawn);
+  assert.equal(structure.uses, 1); assert.ok(world.blueprints.find(b => b.id === structure.blueprintId)!.usefulness > 0);
   assert.equal(takeFood(world, { x: person.x + 10, y: person.y }, 1), 0); assert.equal(takeFood(world, person, Number.NaN), 0);
   person.inventory = 0; const unchanged = structure.food; world.tick += 10; stepStructures(world, emit); assert.equal(structure.food, unchanged);
 });
@@ -108,16 +175,53 @@ test('broken structures cease all functions, then repairs spend actual wood and 
   person.work = 30; const condition = structure.condition; assert.equal(repair(world, person, structure, emit), true);
   assert.equal(person.materials.wood, 1); assert.equal(person.work, 0); close(structure.condition, condition + 0.4); assert.equal(world.inventionDynamics.repairs, 1);
   assert.equal(repair(world, person, structure, emit), false);
-  world.tick += 10; stepStructures(world, emit); assert.ok(tile.drinkingWater > 0); assert.ok(foodAvailable(world, person) > 0);
+  world.tick += 10; stepStructures(world, emit); assert.ok(waterAvailable(world, person) > 0); assert.equal(tile.drinkingWater, 0); assert.ok(foodAvailable(world, person) > 0);
 });
 
 test('hearth benefit requires cold weather, an occupant and combustible material', () => {
   const { world, person, structure, emit } = building(['frame', 'roof', 'hearth']);
-  world.weather = 'rain'; person.materials.wood = 1;
-  const fueled = facilityRestQuality(world, person); recordFacilityRest(world, person); close(person.materials.wood, 0.9995);
-  person.materials.wood = 0; assert.ok(facilityRestQuality(world, person) < fueled); recordFacilityRest(world, person); assert.equal(person.materials.wood, 0);
-  person.materials.wood = 1; person.x += 3; world.tick += 10; stepStructures(world, emit); recordFacilityRest(world, person); assert.equal(person.materials.wood, 1);
-  person.x = structure.x; world.weather = 'clear'; world.tick = 800; recordFacilityRest(world, person); assert.equal(person.materials.wood, 1);
+  world.weather = 'rain'; person.materials.wood = 1; person.action = 'rest'; person.energy = 0.5;
+  const rest = () => {
+    const before = { fatigue: person.fatigue, energy: person.energy }, quality = facilityRestQuality(world, person);
+    person.fatigue = Math.max(0, person.fatigue - REST_FATIGUE_RATE * quality);
+    person.energy = Math.min(1, person.energy + REST_ENERGY_RATE * quality);
+    recordFacilityRest(world, person, before);
+  };
+  const fueled = facilityRestQuality(world, person); rest(); close(person.materials.wood, 0.9995);
+  person.materials.wood = 0; assert.ok(facilityRestQuality(world, person) < fueled); rest(); assert.equal(person.materials.wood, 0);
+  person.materials.wood = 1; person.x += 3; world.tick += 10; stepStructures(world, emit); rest(); assert.equal(person.materials.wood, 1);
+  person.x = structure.x; world.weather = 'clear'; world.tick = 800; rest(); assert.equal(person.materials.wood, 1);
+});
+
+test('rest without incremental realized recovery gives exactly zero credit, including clamps and degraded roofs', () => {
+  for (const kind of ['degraded', 'saturated', 'outdoor-suffices', 'no-recovery', 'no-food', 'missing-observation']) {
+    const { world, person, structure, blueprint } = building(['frame', 'roof', 'hearth']);
+    world.weather = 'clear'; person.action = 'rest'; person.materials.wood = 1;
+    person.energy = 0.5; person.fatigue = 0.5;
+    if (kind === 'degraded') structure.condition = 0.2;
+    if (kind === 'saturated') { person.energy = 1; person.fatigue = 0; }
+    if (kind === 'outdoor-suffices') { person.energy = 0.99995; person.fatigue = 0.0001; }
+    if (kind === 'no-food') { person.hunger = 1; person.fatigue = 0; }
+    const before = { fatigue: person.fatigue, energy: person.energy };
+    if (kind !== 'no-recovery') {
+      const quality = facilityRestQuality(world, person);
+      person.fatigue = Math.max(0, person.fatigue - REST_FATIGUE_RATE * quality);
+      if (kind !== 'no-food') person.energy = Math.min(1, person.energy + REST_ENERGY_RATE * quality);
+    }
+    recordFacilityRest(world, person, kind === 'missing-observation' ? undefined : before);
+    assert.equal(structure.uses, 0, kind); assert.equal(blueprint.uses, 0, kind); assert.equal(blueprint.usefulness, 0, kind); assert.equal(person.materials.wood, 1, kind);
+  }
+});
+
+test('engine rest credits only measured recovery beyond the matched outdoor counterfactual', () => {
+  const { world, person, blueprint } = building(['frame', 'roof', 'hearth']);
+  world.weather = 'clear'; world.tick = 601; person.action = 'rest'; person.energy = 0.5; person.fatigue = 0.5; person.decisionAt = world.tick + 100;
+  const control = structuredClone(world); control.shelterBenefitEnabled = false;
+  stepWorld(world); stepWorld(control);
+  const outside = control.people[0]!;
+  close(outside.fatigue - person.fatigue, REST_FATIGUE_RATE * (0.82 - 0.55));
+  close(person.energy - outside.energy, REST_ENERGY_RATE * (0.82 - 0.55));
+  assert.equal(blueprint.uses, 1); assert.ok(blueprint.usefulness > 0); assert.equal(control.blueprints.find(b => b.id === blueprint.id)!.usefulness, 0);
 });
 
 test('Pareto removes dominated options while preserving actual function/cost tradeoffs', () => {

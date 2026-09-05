@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { Store, fingerprint } from '../src/server/store.js';
+import { enableTechnologyJournal } from '../src/world/technology-journal.js';
 import { createWorld, RULES_VERSION, assertWorld, migrateWorld, projectWorld, type World } from '../src/world/index.js';
 import { activate, maintainRegions } from '../src/world/spatial.js';
 import { harvestAt, materializeAnimals, syncFauna, stepAnimals, MAX_ACTIVE_ANIMALS } from '../src/world/animals.js';
@@ -37,6 +38,7 @@ function fixture(t: { after: (callback: () => void) => void }): { store: Store; 
 test('archive versions restore exact edited terrain at the latest permitted world tick', t => {
   const { store } = fixture(t);
   const world = createWorld(42); fixtureTick(world,11);
+  enableTechnologyJournal(world.technology);
   const first = archived(world, 11, 0.12345);
   world.retiredChunks = [first];
   const expected: World = { ...structuredClone(world), retiredChunks: [] };
@@ -189,7 +191,7 @@ test('V1 schema migration preserves old snapshots, cells, bodies, experiences an
   const path = join(dir, 'legacy.sqlite'); const legacy = createV1Database(path);
   const store = new Store(path);
   try {
-    assert.equal((store.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 3);
+    assert.equal((store.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 4);
     const migrated = store.load()!.world;
     assert.equal(migrated.version, RULES_VERSION); assert.equal(migrated.tick, legacy.tick); assert.equal(migrated.rng, legacy.rng);
     for (const tile of legacy.tiles) {

@@ -1,6 +1,6 @@
-# La experiencia y las reglas del mundo
+# Experiencia, interacción y voz
 
-Este documento desarrolla el [plan unificado](../PLAN.md) y la experiencia implementada en el prototipo V4. Los ejemplos narrativos siguen siendo posibilidades de diseño. La voz final del autor, la biografía aprobada y la prueba en un teléfono físico continúan pendientes; [EVIDENCIA.md](EVIDENCIA.md) distingue lo comprobado.
+Este documento desarrolla el [plan unificado](../PLAN.md) y la experiencia de la fuente V5 en integración. Las mecánicas pertenecen a [REGLAS.md](REGLAS.md); [EVIDENCIA.md](EVIDENCIA.md) distingue lo comprobado y activado. Los ejemplos narrativos siguen siendo posibilidades de diseño. La voz final del autor, la biografía aprobada y la prueba en un teléfono físico continúan pendientes.
 
 ## Entrar, explorar y volver
 
@@ -28,7 +28,7 @@ Las fuentes y pérdidas se definen explícitamente: la luz aporta energía, la l
 
 Liebres, ciervos, jabalíes, peces, lobos y zorros tienen identidad, necesidades, salud, memoria local y parámetros heredables. Se desplazan físicamente, comen, beben y descansan; las presas pueden percibir depredadores y huir. La reproducción consume recursos y transmite parámetros con variación. La caza humana y la depredación retiran individuos concretos. Agotar recursos puede cambiar rutas y actividades de habitantes y fauna; ninguna emoción fabrica alimento o agua para rescatar una escena.
 
-El mundo empieza con S, I y catorce vecinos. Los vecinos ficticios pueden tener descendencia si disponen de recursos, cercanía, confianza, una comunidad y un lugar compartidos; no es obligatorio que ese lugar tenga refugio. S e I quedan fuera de esa regla y el máximo es 32 habitantes. El censo crece mediante esos nacimientos y no incluye muerte de habitantes. La edad regula la posibilidad de reproducirse, sin simular etapas infantiles completas.
+El mundo empieza con S, I y catorce vecinos ficticios. La descendencia requiere condiciones materiales y sociales; el censo vivo tiene un límite de 32. Los vecinos pueden enfermar por privaciones del modelo, envejecer y morir. Su identidad, parentesco y autoría permanecen; las pertenencias disponibles pasan a manos cercanas o se registran como pérdidas. S e I conservan una protección explícita de continuidad, sin recibir alimento por esa protección. Sus vidas personales reales no se deducen de estas reglas artificiales.
 
 No hacen falta química molecular, hidrodinámica completa ni evolución de especies para comprobar estas dependencias. La primera pregunta experimental es sencilla: **si cambia la disponibilidad de alimento o refugio, ¿cambian las rutas, los encuentros y las decisiones?**
 
@@ -36,7 +36,7 @@ No hacen falta química molecular, hidrodinámica completa ni evolución de espe
 
 Cada habitante percibe una zona limitada. Empieza con energía, hambre, sed y fatiga, más preferencias y vínculos locales. S e I tienen además memoria compartida y una necesidad contextual de cercanía o espacio.
 
-Las acciones incluyen desplazarse, comer, beber, cazar, descansar, explorar, acercarse, acompañar, retirarse, recolectar materiales, cultivar, construir, ensayar diseños, reparar y cooperar. Cada habitante combina predisposiciones con habilidades adquiridas y resultados de sus acciones. Una experiencia favorable o desfavorable puede modificar la elección siguiente. Una intención dura lo suficiente para verse; se abandona cuando cambia una causa relevante.
+Las acciones incluyen desplazarse, comer, beber, cazar, descansar, explorar, acercarse, acompañar, retirarse, recolectar materiales, cultivar, construir, ensayar diseños, reparar, investigar materiales, fabricar y cooperar. La ficha muestra necesidades, salud y vitalidad. Cada habitante combina predisposiciones con habilidades adquiridas y resultados de sus acciones. Una experiencia favorable o desfavorable puede modificar la elección siguiente. Una intención dura lo suficiente para verse; se abandona cuando cambia una causa relevante.
 
 Los genes son siete pares de parámetros de diseño heredables, incluida la rapidez con que se ajustan preferencias. La descendencia recombina un aporte de cada progenitor y empieza sin copiar sus habilidades, hábitos o recuerdos; registra su nacimiento como experiencia propia y después aprende de sus resultados y de otros. La cultura inicial compartida por crianza se registra por separado del genoma. Esto no atribuye genética ni perfiles psicológicos reales a Steven e Isa.
 
@@ -56,7 +56,7 @@ La distancia geométrica no equivale a falta de amor. Importan el contexto, las 
 
 El vínculo se lee en rutas, espera, postura, ritmo y atención. Las fichas pueden describir necesidades con palabras claras, pero no convierten el amor en una puntuación que Isa deba maximizar.
 
-El prototipo mantiene estas consecuencias reversibles. Si Steven decide incorporar muerte o pérdidas irreversibles, habrá que definir causas, señales, posibilidad de reparación y continuidad del mundo antes de implementarlas. Cerrar la pestaña o perder conexión nunca cuenta como desconexión afectiva.
+La mortalidad de vecinos ficticios pertenece al ciclo de este mundo. La protección de S e I conserva abierta la decisión personal sobre su representación. Cerrar la pestaña o perder conexión nunca cuenta como desconexión afectiva ni causa una muerte.
 
 ## Sociedad con historia propia
 
@@ -73,6 +73,10 @@ Un lugar observado con agua, alimento, techo y vínculos puede quedar recordado 
 ## Participación de Isa
 
 Se puede seleccionar cualquier habitante en el mapa o el censo, seguirlo con la cámara y solicitar que vaya a un lugar, explore, recolecte, cultive, construya, ensaye un diseño, repare, cace, beba, coopere o descanse. La orden inicia una tarea con trayecto, duración y costes. No anula hambre, sed, cansancio ni obstáculos. «Autónomo» devuelve la selección de tareas al habitante. La pestaña «Fauna» permite buscar, inspeccionar y seguir animales; sus fichas muestran necesidades y actividad sin ofrecerles órdenes humanas.
+
+«Oficios» permite inspeccionar procedimientos descubiertos, productos, capacidades y dependencias observadas entre quienes producen y usan materiales. Investigar inicia un ensayo con coste y posibilidad de fallo; fabricar ejecuta una técnica conocida con ingredientes presentes. La ficha individual muestra los objetos que porta. Los procesos se explican con operaciones comprensibles; un nombre nuevo sin función material no cuenta como invento. La red distingue uso, intercambio y reposición; no etiqueta un ciclo cualquiera como vida demostrada.
+
+Si fallece el habitante seleccionado, la ficha muestra su legado y la causa registrada. Se interrumpe el seguimiento del cuerpo ausente y desaparecen las órdenes que ya no pueden ejecutarse. Esta continuidad conserva el hecho sin dibujar un cuerpo ficticio ni enviar órdenes hacia una identidad archivada.
 
 Los asentamientos empiezan como refugios construidos con recursos y trabajo. Los habitantes pueden ensayar variantes con armazón, techo, cisterna, granero, huerta y hogar. Los componentes alteran capacidades y costes: la cisterna recoge lluvia, el granero conserva aportes de alimento, la huerta consume agua y el hogar requiere combustible. Desgaste y reparación afectan su funcionamiento. El dibujo permite reconocer componentes y estado; las fichas distinguen diseño, construcción y uso. Los oficios describen práctica adquirida; no asignan destinos biográficos a S, I o los vecinos.
 
@@ -102,7 +106,7 @@ La profundidad científica se concreta en modelos pequeños, supuestos visibles 
 | ¿Qué se hereda y qué se aprende? | Genes, habilidades, experiencias y cultura siguen vías separadas que se pueden inspeccionar. |
 | ¿Cuándo cooperar resuelve una carencia? | Ayuda, trueque y turnos cambian costes o acceso a recursos realmente escasos. |
 
-Autopoiesis, cognición encarnada y emergencia son inspiraciones del diseño. El proyecto modela algunos circuitos de mantenimiento, regulación y aprendizaje; no pretende demostrar que el software es un organismo autopoiético, que siente, ni que una teoría obliga a dos personas a morir por separarse.
+Autopoiesis, cognición encarnada y emergencia orientan el objetivo de un mundo capaz de sostener y reconstruir su propia organización. Los circuitos implementados deben demostrar dependencias y mantenimiento reales antes de atribuirles ese alcance. La interfaz no afirma sentimientos subjetivos ni convierte una teoría en una obligación de que dos personas mueran por separarse.
 
 Las pruebas muestran propiedades de este modelo. No validan una teoría general del amor ni usan una divergencia estadística como medida de conciencia. La filosofía puede abrir preguntas sin convertir cada escena en una lección escrita.
 
@@ -123,6 +127,8 @@ La voz es breve, concreta y cercana, con tuteo y la cadencia colombiana de la pa
 La carta escrita abre la experiencia y puede volver a leerse. Borrador posible de apertura, pendiente de la voz de Steven: «Te hice un mundo pequeño. Dejé en él algo de nuestra historia y espacio para lo que todavía no sabemos».
 
 La dirección visual es 2D con estética pixel art, paisaje legible y animación corporal. S e I se distinguen por silueta y color; los vecinos conservan identidad sin saturar la pantalla. Los cambios de recursos, cultivo y tránsito tienen representación en el terreno. El dibujo reutiliza cachés y puede componer el paisaje con WebGL2; Canvas 2D conserva una alternativa. La simulación ocurre en la CPU del servidor y cada navegador dibuja con sus propios recursos gráficos. «Rendimiento» distingue las medidas del servidor y de esta pestaña, e informa aceleración identificada, software o dispositivo no verificado, sin prometer hardware en todos los equipos.
+
+La luz cambia de forma continua con el día del servidor. Sombras, agua, vegetación y lluvia aportan movimiento con presupuestos acotados. Las siluetas y poses distinguen animales y acciones. Trabajar requiere estar realizando trabajo en el destino; beber exige un débito corporal observado. Las animaciones de actividad se detienen cuando el estado queda caduco y respetan movimiento reducido. El paisaje puede seguir siendo legible sin llenar cada celda de partículas.
 
 La cámara y las fichas funcionan con tacto. Texto legible, contraste, controles amplios, alternativas al color y movimiento reducido forman parte del primer diseño. Sonido y música son opcionales, se activan voluntariamente y no transportan información imprescindible.
 

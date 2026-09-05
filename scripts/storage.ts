@@ -10,7 +10,8 @@ try {
   if (action === 'backup') {
     const db = resolve(data, 'world.sqlite');
     if (!existsSync(db)) throw new Error('No existe el mundo que se quiere copiar.');
-    const store = new Store(db);
+    // Backing up an older running service must not migrate its schema underneath it.
+    const store = new Store(db, { readOnly: true });
     try { store.load(); store.backup(resolve(argument)); chmodSync(resolve(argument), 0o600); }
     finally { store.close(); }
     console.log('Copia coherente creada. Conserva su acceso privado.');

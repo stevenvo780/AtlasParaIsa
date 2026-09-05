@@ -2,7 +2,7 @@
 
 Referencia de alcance: [PLAN.md](../PLAN.md). Referencia de comportamiento: [EXPERIENCIA.md](EXPERIENCIA.md).
 
-Estado del código: prototipo reversible V4, con interfaz WebGL2/Canvas 2D/DOM, servidor HTTP/WebSocket, autenticación privada, SQLite y pruebas ejecutables. El [README](../README.md) documenta los comandos reales y [EVIDENCIA.md](EVIDENCIA.md) el estado comprobado y activado. Los recuerdos son sintéticos; no hay publicación ni alojamiento contratado. Los comandos, versiones y resultados de otros repositorios no se trasladan como capacidades existentes.
+Estado del código: V5 en integración, con interfaz WebGL2/Canvas 2D/DOM, servidor HTTP/WebSocket, autenticación privada, SQLite y pruebas ejecutables. Añade tecnología material, demografía y archivo de identidades; la revisión privada sigue en V4 hasta validar y activar el conjunto. El [README](../README.md) documenta los comandos reales y [EVIDENCIA.md](EVIDENCIA.md) distingue código probado y servicio activo. Los recuerdos son sintéticos; no hay alojamiento definitivo contratado.
 
 ## Arquitectura implementada
 
@@ -26,7 +26,7 @@ Organización suficiente dentro de una aplicación:
 
 ```text
 src/
-  world/       reglas, necesidades, animales, invenciones, ecología y sociedad
+  world/       cuerpos, animales, ecología, sociedad, tecnología y organización
   server/      ejecución, guardado, sesión y mensajes
   client/      escena y cachés, carta, fichas, estadísticas y controles
   shared/      tipos de datos que cruzan cliente y servidor
@@ -43,7 +43,11 @@ El generador puro usa ruido interpolado multiescala en coordenadas globales, sei
 
 SQLite conserva revisiones de regiones por clave y paso, con suma de integridad. Retirar regiones, guardar el estado, confirmar entradas y registrar hechos sucede en una transacción. Un punto anterior lee únicamente revisiones de regiones que ya existían en ese paso. La memoria activa es acotada; el archivo persistente crece con el territorio modificado. El motor sin Store mantiene una cola pendiente que su integrador debe confirmar; no ofrece archivo ilimitado en RAM.
 
-Las reglas y el protocolo están en versión 4, mientras SQLite mantiene esquema 2. La migración valida la versión de origen antes de enriquecerla. Conserva las celdas y campos anteriores y asigna valores nuevos reproducibles; los acumulados nuevos empiezan en la migración, sin inventar antecedentes. La fauna V3 se materializa una vez por unidad existente; una colección V4 vacía es un dato explícito que impide regenerarla. Los refugios previos reciben un plano básico. Las regiones guardan identidades y estructuras junto a terreno; la cámara solo proyecta esos datos. Una versión desconocida o corrupta se rechaza y nunca dispara un mundo nuevo silencioso.
+La fuente V5 usa reglas y protocolo 5 y esquema SQLite 3. La migración valida la versión de origen antes de enriquecerla y conserva sus campos. V4 recibe tecnología vacía y estado demográfico cuya edad deriva de su fecha de nacimiento; no se fabrican ensayos ni muertes retrospectivas. La compatibilidad anterior sigue materializando fauna por existencia y planos básicos para refugios antiguos. Una colección guardada vacía impide repoblación implícita. El formato de vida de las regiones continúa en versión 4; no se confunde con la versión global del mundo. Una versión desconocida o corrupta se rechaza y nunca dispara un comienzo nuevo silencioso.
+
+La tabla `legacy(id,tick,body,digest)` conserva identidades fallecidas de forma inmutable. El snapshot mantiene solo padres directos de habitantes vivos, autores de planos o recetas y hasta 32 fallecimientos recientes, con límite de 600 registros. La cola `retiredLegacy` espera confirmación igual que las regiones retiradas: ambas se insertan en la misma transacción que el snapshot y solo se vacían al confirmar. El historial completo crece en disco; una simulación sin Store debe hacerse cargo de sus colas.
+
+Leer una identidad exige que su muerte ya haya ocurrido en el paso consultado. La recuperación de un punto anterior poda los registros futuros en una copia, conserva la base original y revoca sesiones de la copia. Se contrastan suma de integridad, fecha, identidad, contador de nacimientos, caché y parentesco; un descendiente no puede nacer después de la muerte de un progenitor. Los archivos mantienen autorías aunque el autor haya desaparecido del censo vivo.
 
 ## Una única verdad del mundo
 
@@ -55,7 +59,7 @@ Un paso de simulación sigue un orden estable:
 2. Actualizar ambiente, recursos y necesidades.
 3. Construir percepción local y recuperar recuerdos pertinentes.
 4. Elegir o continuar acciones; resolver efectos y encuentros.
-5. Actualizar memoria, hábitos, comunidades, posibles nacimientos y estadísticas.
+5. Resolver demografía después de las acciones, liquidar pertenencias localmente, conservar identidades y actualizar comunidades, posibles nacimientos y estadísticas.
 6. Guardar el estado correspondiente y publicar una vista coherente.
 
 El tiempo avanza con pasos fijos de 100 ms: diez pasos por segundo, ecología cada diez pasos y vistas normalmente cada cinco. Una entrada aceptada o un cambio de cámara puede producir una vista adicional. El dibujo sigue el ritmo de pantalla e interpola el estado recibido. No hay un scheduler distribuido ni un reloj de simulación por usuario.
@@ -71,6 +75,8 @@ El generador aleatorio pertenece al estado guardado. Semilla, estado inicial, ve
 | Ecología celular | Agua potable, fertilidad, biomasa, cultivo, tránsito y actividad celular; fauna por celda derivada de individuos. |
 | Animal | Identidad, especie, cuerpo, edad biológica, parámetros heredables, progenitores, percepción y memoria local. |
 | Plano y estructura | Componentes, coste, autor y ascendencia cultural; edificio con identidad, condición, reservas y utilidad derivada de usos. |
+| Tecnología | Programas compuestos, ascendencia cultural, lotes con composición y propiedades, proyectos en curso, competencia por receta y recibos de ejecución acotados. |
+| Identidad fallecida | Nombre ficticio, parentesco, genoma, parámetros demográficos, fechas, causa y comunidad al morir; sin copia genética del aprendizaje. |
 | Comunidad y estadísticas | Pertenencia revisable, prácticas medias, hechos de cooperación/conflicto, acumulados y serie reciente acotada. |
 | Recuerdo real aprobado | Identificador, referencia privada a su procedencia, texto aprobado, contexto de activación y efecto posible. |
 | Experiencia simulada | Quién actuó, dónde, qué ocurrió y qué preferencia o relación cambió. |
@@ -93,7 +99,7 @@ Si más adelante hace falta variación lingüística, una generación opcional p
 
 El estado, sus hechos correspondientes y las entradas aplicadas se guardan de forma coherente en transacciones. Una confirmación de gesto persistente solo se envía después de su guardado; repetir su identificador devuelve el mismo resultado, sin aplicar el efecto otra vez.
 
-El snapshot conserva la codificación de celdas activas en tuplas JSON versionadas (`tiles-tuple-v1`) introducida en V3 para evitar repetir veinte nombres de campo por celda. Mantiene los números originales sin cuantización. El lector admite snapshots de objetos y tuplas; los archivos de regiones conservan su formato de objetos y el esquema SQLite sigue en versión 2. Se rechazan valores opcionales presentes nulos o no finitos antes de escribir, para no confundir corrupción con ausencia. La copia del estado para cada transacción aprovecha que las celdas son planas; los individuos y estructuras mantienen copias independientes. La retirada de regiones conserva también fauna y edificios. Las pruebas verifican identidades, contadores monotónicos y recuperación sin duplicación ni envejecimiento oculto.
+El snapshot conserva celdas activas en tuplas JSON versionadas (`tiles-tuple-v1`) para evitar repetir veinte nombres de campo por celda, sin cuantización. El lector admite objetos y tuplas; los archivos de regiones conservan objetos. Se rechazan valores opcionales presentes nulos o no finitos antes de escribir. La copia del estado para cada transacción aprovecha que las celdas son planas; individuos, estructuras, proyectos, lotes y recuerdos mantienen copias independientes. Las pruebas verifican identidad, contadores monotónicos, recuperación y conservación material.
 
 Se conservan un punto de recuperación anterior y una copia de seguridad. Al arrancar se valida la versión y la integridad del estado antes de avanzar. Un fallo de lectura no crea silenciosamente otro mundo: se conserva la evidencia y se recupera un estado válido mediante una operación explícita.
 
@@ -106,7 +112,9 @@ Esta política evita un sistema de recuperación temporal complejo. La entrega d
 
 ## Conexión e interacción
 
-El protocolo V4 conserva ventanas de cámara con origen absoluto y órdenes individuales idempotentes; incorpora animales, planos, estructuras y sus estadísticas. Las nuevas órdenes humanas son ensayar diseños y reparar. Ventanas distintas del mismo paso son válidas; una vista antigua no puede sustituir un paso posterior. El intercambio JSON incluye estado inicial, actualizaciones, solicitud de gesto u orden, resultado y error comprensible. Se envían vistas completas acotadas por cliente; no hay una simulación nueva asociada a cada conexión.
+El protocolo V5 conserva ventanas de cámara con origen absoluto y órdenes individuales idempotentes; añade investigar, fabricar, salud, vitalidad, productos, procedimientos y organización observada. La vista de un fallecimiento conserva información de identidad y retira los controles del cuerpo ausente. Ventanas distintas del mismo paso son válidas; una vista antigua no puede sustituir un paso posterior. El intercambio JSON incluye estado inicial, actualizaciones, solicitud de gesto u orden, resultado y error comprensible. Se envían vistas completas acotadas por cliente; no hay una simulación nueva asociada a cada conexión.
+
+`technology-organization.ts` adapta recibos materiales a `organization.ts`. Agrupa operaciones anidadas sin contar dos veces el desgaste, comprueba continuidad de inventarios y separa transferencias de producción. El análisis derivado se reutiliza entre proyecciones del mismo objeto, paso y contador de ejecuciones; no modifica la simulación. Una ventana incompleta o un balance inconsistente se informa como evidencia insuficiente. Las condiciones de organización y sus límites científicos están en [CIENCIA.md](CIENCIA.md).
 
 Cada vista lleva versión y secuencia. El cliente descarta vistas antiguas y obtiene una nueva al reconectar. Un cliente lento no puede acumular mensajes sin límite: recibe la vista reciente disponible.
 

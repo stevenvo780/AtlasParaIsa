@@ -11,7 +11,7 @@
  * `.js` (resolución ESM / NodeNext).
  */
 import { PROTOCOL_VERSION } from '../shared/types.js';
-import type { PersonView, PlaceView, Terrain, Tile, WorldView } from '../shared/types.js';
+import type { PersonView, PlaceView, Terrain, Tile, Viewport, WorldView } from '../shared/types.js';
 
 /* ------------------------------------------------------------------ */
 /* Tipos públicos                                                      */
@@ -314,6 +314,10 @@ export class Landscape {
 
   private worldW = 0;
   private worldH = 0;
+  private originX = 0;
+  private originY = 0;
+  private reportedViewport = '';
+  private followedId: string | null = null;
   private grid: (Tile | undefined)[] = [];
   private prevPeople = new Map<string, PersonView>();
   private groundSignature = -1;
@@ -327,6 +331,7 @@ export class Landscape {
 
   private layer: OverlayLayer = 'none';
   private selection: LandscapeSelection | null = null;
+  private pendingTarget: { x: number; y: number } | null = null;
 
   private dpr = 1;
   private cssW = 0;
@@ -354,7 +359,7 @@ export class Landscape {
     this.reduceMotion = e.matches;
   };
 
-  constructor(canvas: HTMLCanvasElement, onSelect: SelectHandler) {
+  constructor(canvas: HTMLCanvasElement, onSelect: SelectHandler, private readonly onViewport?: (viewport: Viewport) => void, private readonly onManualCamera?: () => void) {
     this.canvas = canvas;
     this.onSelect = onSelect;
 
@@ -378,7 +383,7 @@ export class Landscape {
     canvas.setAttribute('role', 'img');
     canvas.setAttribute(
       'aria-label',
-      'Mapa de la isla. Flechas para desplazar, más y menos para acercar, Inicio para centrar.',
+      'Mundo vivo. Arrastra o usa las flechas para recorrer, más y menos para acercar, Inicio para volver. También puedes seleccionar habitantes desde el panel Población.',
     );
 
     this.motionQuery =
@@ -428,17 +433,18 @@ export class Landscape {
     const now = performance.now();
     const first = this.curr === null;
 
-    this.prevPeople.clear();
-    if (this.curr) {
-      for (const p of this.curr.people) this.prevPeople.set(p.id, p);
-      // Cadencia MEDIDA, no supuesta.
-      this.interval = clamp(now - this.currAt, 60, 2000);
+    // A new camera window at the same tick must not restart body interpolation.
+    if (!this.curr || this.curr.tick !== world.tick) {
+      this.prevPeople.clear();
+      if (this.curr && world.tick > this.curr.tick) {
+        for (const p of this.curr.people) this.prevPeople.set(p.id, p);
+        this.interval = clamp(now - this.currAt, 60, 2000);
+      }
+      this.prev = this.curr && world.tick > this.curr.tick ? this.curr : null;
+      this.prevAt = this.currAt;
+      this.currAt = now;
     }
-
-    this.prev = this.curr;
-    this.prevAt = this.currAt;
     this.curr = world;
-    this.currAt = now;
 
     this.rebuildGrid(world);
     const sig = this.signature(world);
@@ -455,8 +461,8 @@ export class Landscape {
   /** Centra la cámara en una coordenada del mundo (en tiles). */
   focus(x: number, y: number): void {
     if (this.destroyed) return;
-    const tx = clamp(x + 0.5, 0, Math.max(0, this.worldW));
-    const ty = clamp(y + 0.5, 0, Math.max(0, this.worldH));
+    const tx = clamp(x + 0.5, -9_999_950, 9_999_950);
+    const ty = clamp(y + 0.5, -9_999_950, 9_999_950);
     if (this.reduceMotion) {
       this.cam.x = tx;
       this.cam.y = ty;
@@ -479,6 +485,12 @@ export class Landscape {
   setLayer(layer: OverlayLayer): void {
     this.layer = layer;
   }
+
+  follow(id: string | null): void { this.followedId = id; }
+
+  setPendingTarget(position: { x: number; y: number } | null): void { this.pendingTarget = position; }
+
+  camera(): { x: number; y: number; zoom: number } { return { ...this.cam }; }
 
   /** Extra pequeño: permite que la barra lateral resalte a quien se elige en una tarjeta. */
   fit(): void { this.fitWorld(); }
@@ -533,6 +545,8 @@ export class Landscape {
   /* ---------------------------------------------------------------- */
 
   private rebuildGrid(world: WorldView): void {
+    this.originX = world.originX ?? 0;
+    this.originY = world.originY ?? 0;
     const w = Math.max(0, Math.floor(world.width));
     const h = Math.max(0, Math.floor(world.height));
     if (w !== this.worldW || h !== this.worldH) {
@@ -552,22 +566,23 @@ export class Landscape {
     if (this.grid.length !== cells) this.grid = new Array<Tile | undefined>(cells);
     this.grid.fill(undefined);
     for (const t of world.tiles) {
-      const tx = Math.floor(t.x);
-      const ty = Math.floor(t.y);
+      const tx = Math.floor(t.x) - this.originX;
+      const ty = Math.floor(t.y) - this.originY;
       if (tx < 0 || ty < 0 || tx >= w || ty >= h) continue;
       this.grid[ty * w + tx] = t;
     }
   }
 
   private tileAt(x: number, y: number): Tile | undefined {
-    if (x < 0 || y < 0 || x >= this.worldW || y >= this.worldH) return undefined;
-    return this.grid[y * this.worldW + x];
+    const localX = x - this.originX, localY = y - this.originY;
+    if (localX < 0 || localY < 0 || localX >= this.worldW || localY >= this.worldH) return undefined;
+    return this.grid[localY * this.worldW + localX];
   }
 
-  /** Fuera del mundo es mar abierto: la isla queda siempre rodeada de agua. */
+  /** A viewport boundary is not a coastline. Unknown neighbours repeat the edge terrain. */
   private terrainAt(x: number, y: number): Terrain {
     const t = this.tileAt(x, y);
-    return t ? t.terrain : 'water';
+    return t?.terrain ?? this.tileAt(clamp(x, this.originX, this.originX + this.worldW - 1), clamp(y, this.originY, this.originY + this.worldH - 1))?.terrain ?? 'meadow';
   }
 
   private signature(world: WorldView): number {
@@ -577,6 +592,8 @@ export class Landscape {
     };
     acc(world.width);
     acc(world.height);
+    acc(world.originX ?? 0);
+    acc(world.originY ?? 0);
     for (const t of world.tiles) {
       acc(t.x);
       acc(t.y);
@@ -595,17 +612,20 @@ export class Landscape {
     if (this.worldW === 0 || this.worldH === 0) return;
     const g = this.groundCtx;
     g.clearRect(0, 0, this.ground.width, this.ground.height);
+    g.save();
+    g.translate(-this.originX * ART, -this.originY * ART);
 
-    for (let y = 0; y < this.worldH; y++) {
-      for (let x = 0; x < this.worldW; x++) {
+    for (let y = this.originY; y < this.originY + this.worldH; y++) {
+      for (let x = this.originX; x < this.originX + this.worldW; x++) {
         this.bakeTileBase(g, x, y);
       }
     }
-    for (let y = 0; y < this.worldH; y++) {
-      for (let x = 0; x < this.worldW; x++) {
+    for (let y = this.originY; y < this.originY + this.worldH; y++) {
+      for (let x = this.originX; x < this.originX + this.worldW; x++) {
         this.bakeCoast(g, x, y);
       }
     }
+    g.restore();
     this.groundBaked = true;
   }
 
@@ -639,13 +659,13 @@ export class Landscape {
     }
 
     if (terrain === 'soil') {
-      const base = mix(P.soilLight, P.soilDark, moisture * 0.7 + 0.1);
+      const base = tile?.biome === 'desert' ? mix(P.sand, P.soilLight, moisture * 0.5) : tile?.biome === 'mountain' ? mix(P.stone, P.stoneShade, 0.35) : mix(P.soilLight, P.soilDark, moisture * 0.7 + 0.1);
       px(g, ox, oy, ART, ART, css(base));
       for (let i = 0; i < 14; i++) {
         const rx = ox + Math.floor(rnd(x, y, 110 + i) * ART);
         const ry = oy + Math.floor(rnd(x, y, 150 + i) * ART);
         const light = rnd(x, y, 190 + i) > 0.55;
-        px(g, rx, ry, 1, 1, css(light ? lighten(P.soil, 0.16) : darken(P.soil, 0.14)));
+        px(g, rx, ry, 1, 1, css(light ? lighten(base, 0.12) : darken(base, 0.12)));
       }
       // Guijarros ocasionales.
       if (rnd(x, y, 231) > 0.78) {
@@ -671,7 +691,7 @@ export class Landscape {
     }
 
     // Pradera: de salvia pálida (poca vegetación) a musgo luminoso (mucha).
-    const base = mix(P.sageLow, P.mossHigh, veg * 0.85);
+    const base = tile?.biome === 'wetland' ? mix(rgb(132, 157, 108), rgb(69, 111, 86), veg * .8) : tile?.biome === 'forest' ? mix(P.sageLow, P.mossHigh, veg * .93) : mix(P.sageLow, P.mossHigh, veg * .72);
     const damp = mix(base, darken(base, 0.1), moisture * 0.35);
     px(g, ox, oy, ART, ART, css(damp));
     const blades = 10 + Math.round(veg * 10);
@@ -749,20 +769,17 @@ export class Landscape {
   /* ---------------------------------------------------------------- */
 
   private recomputeMinZoom(): void {
-    if (this.worldW === 0 || this.worldH === 0 || this.cssW === 0 || this.cssH === 0) return;
-    const fit = Math.min(
-      this.cssW / (this.worldW + FIT_PADDING * 2),
-      this.cssH / (this.worldH + FIT_PADDING * 2),
-    );
-    this.minZoom = Math.max(2, fit);
+    // The window cap bounds work, not geography. Zoom-out must fit within 96 × 64 tiles.
+    this.minZoom = Math.max(10, this.cssW / 88, this.cssH / 56);
   }
 
   /** Encuadre inicial: llena el panel y, aun así, cabe la isla entera. */
   private fitWorld(): void {
     this.recomputeMinZoom();
-    this.cam.zoom = this.minZoom;
-    this.cam.x = this.worldW / 2;
-    this.cam.y = this.worldH / 2;
+    this.cam.zoom = Math.max(this.minZoom, this.cssW < 600 ? 24 : 32);
+    const person = this.curr?.people.find(p => p.role === 'S');
+    this.cam.x = person ? person.x + 0.5 : this.originX + this.worldW / 2;
+    this.cam.y = person ? person.y + 0.5 : this.originY + this.worldH / 2;
     this.clampCamera();
   }
 
@@ -778,14 +795,19 @@ export class Landscape {
   }
 
   private clampCamera(): void {
-    if (this.worldW === 0 || this.worldH === 0) return;
-    const halfW = this.cssW / this.cam.zoom / 2;
-    const halfH = this.cssH / this.cam.zoom / 2;
-    const over = 1; // un tile de mar de cortesía
-    this.cam.x =
-      this.worldW <= halfW * 2 ? this.worldW / 2 : clamp(this.cam.x, halfW - over, this.worldW - halfW + over);
-    this.cam.y =
-      this.worldH <= halfH * 2 ? this.worldH / 2 : clamp(this.cam.y, halfH - over, this.worldH - halfH + over);
+    this.cam.x = clamp(this.cam.x, -9_999_950, 9_999_950);
+    this.cam.y = clamp(this.cam.y, -9_999_950, 9_999_950);
+  }
+
+  private reportViewport(): void {
+    if (!this.curr) return;
+    const width = Math.min(96, Math.ceil(this.cssW / this.cam.zoom) + 6);
+    const height = Math.min(64, Math.ceil(this.cssH / this.cam.zoom) + 6);
+    const viewport = { x: Math.floor(this.cam.x - width / 2), y: Math.floor(this.cam.y - height / 2), width, height };
+    const signature = JSON.stringify(viewport);
+    if (signature === this.reportedViewport) return;
+    this.reportedViewport = signature;
+    this.onViewport?.(viewport);
   }
 
   private screenToWorld(sx: number, sy: number): { x: number; y: number } {
@@ -856,6 +878,11 @@ export class Landscape {
   private frame(now: number): void {
     if (this.destroyed) return;
     this.tickFocus(now);
+    if (this.followedId) {
+      const person = this.interpolatePeople(now).find(p => p.view.id === this.followedId);
+      if (person) { this.cam.x = person.x + 0.5; this.cam.y = person.y + 0.5; }
+    }
+    this.reportViewport();
     this.render(now);
     this.raf = requestAnimationFrame((t) => this.frame(t));
   }
@@ -866,11 +893,11 @@ export class Landscape {
     const ch = this.canvas.height;
     if (cw === 0 || ch === 0) return;
 
-    // Mar abierto de fondo.
+    // Neutral fog means this part of the projection has not arrived. It is never invented sea.
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = css(P.seaDeep);
+    ctx.fillStyle = '#425f50';
     ctx.fillRect(0, 0, cw, ch);
-    ctx.fillStyle = css(P.seaBand, 0.5);
+    ctx.fillStyle = 'rgba(203,220,175,.035)';
     for (let y = 0; y < ch; y += Math.max(6, Math.round(9 * this.dpr))) {
       ctx.fillRect(0, y, cw, Math.max(1, Math.round(this.dpr)));
     }
@@ -883,8 +910,8 @@ export class Landscape {
 
       // Volcado nítido de la escena al panel.
       const scale = (this.cam.zoom / ART) * this.dpr;
-      const originX = (this.cssW / 2 - this.cam.x * this.cam.zoom) * this.dpr;
-      const originY = (this.cssH / 2 - this.cam.y * this.cam.zoom) * this.dpr;
+      const originX = (this.cssW / 2 + (this.originX - this.cam.x) * this.cam.zoom) * this.dpr;
+      const originY = (this.cssH / 2 + (this.originY - this.cam.y) * this.cam.zoom) * this.dpr;
       ctx.imageSmoothingEnabled = false;
       ctx.drawImage(
         this.scene,
@@ -903,14 +930,16 @@ export class Landscape {
     const g = this.sceneCtx;
     g.clearRect(0, 0, this.scene.width, this.scene.height);
     g.drawImage(this.ground, 0, 0);
+    g.save();
+    g.translate(-this.originX * ART, -this.originY * ART);
 
     // Ventana visible en tiles (con holgura para copas altas).
     const halfW = this.cssW / this.cam.zoom / 2;
     const halfH = this.cssH / this.cam.zoom / 2;
-    const x0 = Math.max(0, Math.floor(this.cam.x - halfW) - 1);
-    const x1 = Math.min(this.worldW - 1, Math.ceil(this.cam.x + halfW) + 1);
-    const y0 = Math.max(0, Math.floor(this.cam.y - halfH) - 2);
-    const y1 = Math.min(this.worldH - 1, Math.ceil(this.cam.y + halfH) + 2);
+    const x0 = Math.max(this.originX, Math.floor(this.cam.x - halfW) - 1);
+    const x1 = Math.min(this.originX + this.worldW - 1, Math.ceil(this.cam.x + halfW) + 1);
+    const y0 = Math.max(this.originY, Math.floor(this.cam.y - halfH) - 2);
+    const y1 = Math.min(this.originY + this.worldH - 1, Math.ceil(this.cam.y + halfH) + 2);
 
     const sprites: Sprite[] = [];
 
@@ -926,6 +955,14 @@ export class Landscape {
           this.drawReeds(g, x, y, ox, oy, t);
         } else {
           this.drawBerries(g, x, y, ox, oy, tile.food, t);
+          if ((tile.stone ?? 0) > 0.25 && rnd(x, y, 1700) < Math.min(.85, (tile.stone ?? 0) / 12)) {
+            const rx = ox + 4 + Math.floor(rnd(x, y, 1701) * 7), ry = oy + 9;
+            const size = tile.biome === 'mountain' ? 5 : 3;
+            ellipse(g, rx + 1, ry + 2, size + 1, size * .4, css(P.shadow, .2));
+            ellipse(g, rx, ry - 1, size, size * .75, css(P.stoneShade));
+            ellipse(g, rx - 1, ry - 2, size * .8, size * .6, css(P.stone));
+            px(g, rx - 2, ry - 4, 3, 1, css(lighten(P.stone, .22)));
+          }
           if (tile.terrain === 'shelter') {
             sprites.push({
               kind: SpriteKind.Hut,
@@ -966,6 +1003,7 @@ export class Landscape {
         if (tile) this.drawLayerCell(g, tile, x * ART, y * ART);
       }
     }
+    g.restore();
   }
 
   /* -------------------------- decorado vivo ------------------------ */
@@ -1255,6 +1293,13 @@ export class Landscape {
     ctx.save();
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
 
+    if (this.pendingTarget) {
+      const mark = this.worldToScreen(this.pendingTarget.x + .5, this.pendingTarget.y + .5);
+      ctx.strokeStyle = '#f4d18b'; ctx.fillStyle = '#ddb25533'; ctx.lineWidth = 2;
+      ctx.setLineDash([4, 3]); ctx.beginPath(); ctx.arc(mark.x, mark.y, Math.max(9, this.cam.zoom * .42), 0, Math.PI * 2); ctx.fill(); ctx.stroke(); ctx.setLineDash([]);
+      this.drawChip(mark.x, mark.y - 23, 'Pendiente', P.ink, P.amber, 'meta');
+    }
+
     const sel = this.selection;
     if (sel && sel.kind === 'tile') {
       const a = this.worldToScreen(sel.x, sel.y);
@@ -1342,6 +1387,7 @@ export class Landscape {
   }
 
   private handlePointerDown(e: PointerEvent): void {
+    this.followedId = null; this.onManualCamera?.();
     const pt = this.localPoint(e);
     this.canvas.setPointerCapture(e.pointerId);
     this.canvas.focus({ preventScroll: true });
@@ -1420,6 +1466,7 @@ export class Landscape {
   }
 
   private handleWheel(e: WheelEvent): void {
+    this.followedId = null; this.onManualCamera?.();
     e.preventDefault();
     const pt = this.localPoint(e);
     const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 200 : 1;
@@ -1429,6 +1476,7 @@ export class Landscape {
   }
 
   private handleKeyDown(e: KeyboardEvent): void {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
     const step = e.shiftKey ? 6 : 2;
     let handled = true;
     switch (e.key) {
@@ -1462,6 +1510,7 @@ export class Landscape {
         handled = false;
     }
     if (handled) {
+      this.followedId = null; this.onManualCamera?.();
       e.preventDefault();
       if (e.key !== 'Home') this.focusTo = null;
       this.clampCamera();
@@ -1494,7 +1543,7 @@ export class Landscape {
 
     const tx = Math.floor(w.x);
     const ty = Math.floor(w.y);
-    if (tx < 0 || ty < 0 || tx >= this.worldW || ty >= this.worldH) return;
+    if (!this.tileAt(tx, ty)) return;
     this.selection = { kind: 'tile', x: tx, y: ty };
     this.onSelect(this.selection);
   }

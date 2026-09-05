@@ -34,12 +34,13 @@ function harness(t: TestContext, snapshots: WorldView[], rejectHttp = false, htt
   BrowserSocket.instances = [];
   const worlds: WorldView[] = [], errors: string[] = [], pending: boolean[] = [], posted: Gesture[] = [];
   const statuses: ConnectionStatus[] = [];
+  const worldQueries: string[] = [];
   let expired = false;
   Object.defineProperty(globalThis, 'location', { configurable: true, value: { protocol: 'http:', host: 'example.test' } });
   Object.defineProperty(globalThis, 'window', { configurable: true, value: browserEvents });
   globalThis.WebSocket = BrowserSocket as unknown as typeof WebSocket;
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
-    if (input === '/api/world') return Response.json(snapshots.shift() ?? view(40));
+    if (typeof input === 'string' && input.split('?')[0] === '/api/world') { worldQueries.push(input); return Response.json(snapshots.shift() ?? view(40)); }
     if (input === '/api/gesture') {
       const postedGesture = JSON.parse(String(init?.body)) as Gesture;
       posted.push(postedGesture);
@@ -56,7 +57,7 @@ function harness(t: TestContext, snapshots: WorldView[], rejectHttp = false, htt
     if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
     else Reflect.deleteProperty(globalThis, 'window');
   });
-  return { connection, worlds, errors, pending, posted, statuses, browserEvents, expired: () => expired };
+  return { connection, worlds, errors, pending, posted, statuses, browserEvents, worldQueries, expired: () => expired };
 }
 
 test('same-sequence pause is shown while older state is discarded, including version negotiation', async t => {
@@ -190,4 +191,28 @@ test('HTTP for confirmed A cannot block the fallback for a newer pending B', asy
   assert.deepEqual(h.pending, [true, false, true, false]);
   resolveA(Response.json({ error: 'A ya estaba confirmado.' }, { status: 409 })); await flush();
   assert.deepEqual(h.errors, []);
+});
+
+test('camera requests debounce to the latest bounded absolute viewport and persist on reconnect', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const h = harness(t, [view(40), { ...view(41), originX: -81, originY: 206, width: 96, height: 64 }]);
+  h.connection.start(); await flush(); const first = BrowserSocket.instances[0]!; first.open();
+  h.connection.setViewport({ x: -5, y: 90, width: 50, height: 40 });
+  h.connection.setViewport({ x: -80.2, y: 206.9, width: 500, height: 200 });
+  t.mock.timers.tick(149); assert.equal(first.sent.length, 0);
+  t.mock.timers.tick(1);
+  const expected = { x: -81, y: 206, width: 96, height: 64 };
+  assert.deepEqual(first.sent.map(value => JSON.parse(value)), [{ type: 'viewport', viewport: expected }]);
+  first.close(); t.mock.timers.tick(1000); await flush(); BrowserSocket.instances[1]!.open();
+  const query = new URL(h.worldQueries[1]!, 'http://example.test').searchParams;
+  assert.deepEqual(Object.fromEntries(query), { x: '-81', y: '206', width: '96', height: '64' });
+  assert.deepEqual(BrowserSocket.instances[1]!.sent.map(value => JSON.parse(value)), [{ type: 'viewport', viewport: expected }]);
+});
+
+test('changing the visible region at the same world tick updates the landscape without accepting old ticks', async t => {
+  const h = harness(t, [view(40)]); h.connection.start(); await flush(); const socket = BrowserSocket.instances[0]!; socket.open();
+  socket.message({ type: 'state', world: { ...view(40), originX: -80, originY: 110 } });
+  socket.message({ type: 'state', world: { ...view(40), originX: -80, originY: 110 } });
+  socket.message({ type: 'state', world: { ...view(39), originX: -90, originY: 120 } });
+  assert.equal(h.worlds.length, 2); assert.equal(h.worlds[1]!.originX, -80); assert.equal(h.worlds[1]!.originY, 110);
 });

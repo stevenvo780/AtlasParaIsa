@@ -1,4 +1,4 @@
-import { PROTOCOL_VERSION, type Gesture, type GestureResult, type ServerMessage, type WorldView } from '../shared/types.js';
+import { PROTOCOL_VERSION, type Gesture, type GestureResult, type ServerMessage, type Viewport, type WorldView } from '../shared/types.js';
 
 export type ConnectionStatus = 'connecting' | 'live' | 'offline';
 interface Callbacks {
@@ -16,6 +16,9 @@ export class Connection {
   private retryTimer: ReturnType<typeof setTimeout> | undefined;
   private acknowledgementTimer: ReturnType<typeof setTimeout> | undefined;
   private silenceTimer: ReturnType<typeof setTimeout> | undefined;
+  private viewportTimer: ReturnType<typeof setTimeout> | undefined;
+  private viewport: Viewport | null = null;
+  private viewportSignature = '';
   private retries = 0;
   private stopped = false;
   private sequence = -1;
@@ -29,6 +32,7 @@ export class Connection {
     this.browserOffline = true;
     clearTimeout(this.retryTimer);
     clearTimeout(this.silenceTimer);
+    clearTimeout(this.viewportTimer);
     clearTimeout(this.acknowledgementTimer);
     this.updateStatus('offline');
     const previous = this.socket; this.socket = null; previous?.close();
@@ -55,6 +59,7 @@ export class Connection {
     clearTimeout(this.retryTimer);
     clearTimeout(this.acknowledgementTimer);
     clearTimeout(this.silenceTimer);
+    clearTimeout(this.viewportTimer);
     if (typeof window !== 'undefined') {
       window.removeEventListener('offline', this.onOffline);
       window.removeEventListener('online', this.onOnline);
@@ -72,6 +77,24 @@ export class Connection {
     return true;
   }
 
+  /** Camera requests only change the projection; the server owns exploration. */
+  setViewport(viewport: Viewport): void {
+    if (this.stopped || ![viewport.x, viewport.y, viewport.width, viewport.height].every(Number.isFinite)) return;
+    const width = Math.max(1, Math.min(96, Math.ceil(viewport.width)));
+    const height = Math.max(1, Math.min(64, Math.ceil(viewport.height)));
+    const next = { x: Math.max(-10_000_000, Math.min(10_000_000 - width, Math.floor(viewport.x))), y: Math.max(-10_000_000, Math.min(10_000_000 - height, Math.floor(viewport.y))), width, height };
+    if (JSON.stringify(next) === JSON.stringify(this.viewport)) return;
+    this.viewport = next;
+    clearTimeout(this.viewportTimer);
+    this.viewportTimer = setTimeout(() => this.sendViewport(), 150);
+  }
+
+  private sendViewport(): void {
+    if (!this.stopped && !this.browserOffline && this.viewport && this.socket?.readyState === WebSocket.OPEN) {
+      this.socket.send(JSON.stringify({ type: 'viewport', viewport: this.viewport }));
+    }
+  }
+
   private updateStatus(status: ConnectionStatus): void {
     this.status = status;
     this.callbacks.status(status);
@@ -79,6 +102,7 @@ export class Connection {
 
   private accept(world: WorldView, reconnectSnapshot = false): void {
     const operationalState = `${!!world.paused}:${world.pauseReason ?? ''}`;
+    const viewportSignature = `${world.originX ?? 0}:${world.originY ?? 0}:${world.width}:${world.height}`;
     if (this.stopped) return;
     if (world.version !== PROTOCOL_VERSION) {
       this.callbacks.error('Esta versión del mundo necesita que actualices la página.');
@@ -86,9 +110,10 @@ export class Connection {
       this.updateStatus('offline');
       return;
     }
-    if (!reconnectSnapshot && (world.sequence < this.sequence || (world.sequence === this.sequence && operationalState === this.operationalState))) return;
+    if (!reconnectSnapshot && (world.sequence < this.sequence || (world.sequence === this.sequence && operationalState === this.operationalState && viewportSignature === this.viewportSignature))) return;
     this.sequence = world.sequence;
     this.operationalState = operationalState;
+    this.viewportSignature = viewportSignature;
     this.callbacks.world(world);
   }
 
@@ -107,7 +132,8 @@ export class Connection {
   }
 
   private async getWorld(): Promise<boolean> {
-    const response = await fetch('/api/world', { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(10_000) });
+    const query = this.viewport ? `?${new URLSearchParams(Object.entries(this.viewport).map(([key, value]) => [key, String(value)]))}` : '';
+    const response = await fetch(`/api/world${query}`, { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(10_000) });
     if (response.status === 401 || response.status === 403) { this.expire(); return false; }
     if (!response.ok) throw new Error('El mundo no está disponible todavía.');
     this.accept(await response.json() as WorldView, true);
@@ -128,6 +154,7 @@ export class Connection {
         this.retries = 0;
         this.updateStatus('live');
         this.watchSilence();
+        this.sendViewport();
         if (this.pending) this.deliver();
       };
       socket.onmessage = (event: MessageEvent<string>) => {

@@ -4,7 +4,7 @@ Este documento reúne la meta completa y sus criterios. Describe trabajo por log
 
 ## Meta lista para copiar
 
-Copia solo el contenido del siguiente bloque, desde «Construir» hasta «solas.», sin las marcas de apertura y cierre. Son **3805 caracteres**, incluidos espacios y saltos de línea internos, sin el salto final.
+Copia solo el contenido del siguiente bloque, desde «Construir» hasta «solas.», sin las marcas de apertura y cierre. Son **3842 caracteres**, incluidos espacios y saltos de línea internos, sin el salto final.
 
 ```text
 Construir Una Carta Para Isa: un mundo vivo compartido que conserve la intimidad de Steven e Isa (S e I), sus recuerdos autorizados y espacio para historias nuevas. Retomar lo construido y las ideas de PLAN.md hasta lograr una experiencia autónoma y comprobable, sin reducir la meta a una versión, indicador o mejora técnica.
@@ -19,7 +19,7 @@ Mantener un backend autoritativo y persistente, un mundo y reloj para todos, gua
 
 Investigar fuentes primarias, usar controles contrafactuales y varias semillas. Priorizar calidad y paralelismo seguro, no ahorro de tokens: GPT-6 integra lo difícil y permanece disponible para dialogar. Usar Codex, Claude (Fable/Opus/Sonnet), Gemini, Grok u otros proveedores autorizados, según capacidad y cuota verificadas. Repartir ownership disjunto, revisar independientemente, preservar mundo y cambios ajenos, hacer commits acotados, comunicar avances y mantener documentación canónica. La colaboración externa no implica usar LLM en el ciclo del mundo.
 
-Avanzar con novedad ejecutable, utilidad material, costes conservados, recambio de herramientas, transmisión y pérdida, continuidad sin intervención, recuperación, rendimiento y experiencia comprensible. No cerrar solo por tests verdes, varias generaciones, un SCC, balance o contador de autopoiesis. Exigir evidencia conjunta de los criterios de GOAL.md y la carta revisada, con límites y pendientes explícitos. Aspirar a evolución abierta sin exigir demostrar infinito, conciencia o autopoiesis biológica ni afirmar que las leyes físicas se reescriben solas.
+Avanzar con novedad ejecutable, utilidad material, conservación material y costes explícitos, recambio de herramientas, transmisión y pérdida, continuidad sin intervención, recuperación, rendimiento y experiencia comprensible. No cerrar solo por tests verdes, varias generaciones, un ciclo en un grafo, balance o contador de autopoiesis. Exigir evidencia conjunta de los criterios de GOAL.md y la carta revisada, con límites y pendientes explícitos. Aspirar a evolución abierta sin exigir demostrar infinito, conciencia o autopoiesis biológica ni afirmar que las leyes físicas se reescriben solas.
 ```
 
 ## Criterios de aceptación

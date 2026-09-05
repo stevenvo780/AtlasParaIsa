@@ -1,4 +1,5 @@
 import type { Feature, Tile, Species } from '../shared/types.js';
+import { EcosystemKernel } from './ecosystem-kernel.js';
 const clamp = (n: number, maximum = 1): number => Math.max(0, Math.min(maximum, n));
 const key = (x: number, y: number): string => `${x},${y}`;
 const TREE_FEATURES = new Set<Feature>(['tree', 'pine', 'palm', 'cactus', 'reeds', 'stump']);
@@ -72,50 +73,12 @@ function state(tile: Tile): CellState {
     cultivation: tile.cultivation ?? 0, traffic: tile.traffic ?? 0, fauna: tile.fauna ?? 0, species: tile.species };
 }
 
+const ecosystemKernel = new EcosystemKernel();
+
 /** Soft neighbor rule inspired by cellular automata, not an implementation of Conway or Lenia. */
 export function stepEcosystem(tiles: Tile[], tick: number, weather: 'clear' | 'rain', phase: string, updateFauna = true): void {
   if (tick % 10 !== 0) return;
-  const cells = tiles.map(state);
-  const previous = new Map(cells.map(cell => [key(cell.x, cell.y), cell]));
-  if (previous.size !== cells.length) throw new Error('El ecosistema requiere coordenadas únicas.');
-  const light = phase === 'day' ? 1 : phase === 'night' ? 0 : 0.4;
-  for (const cell of cells) {
-    const tile = cell.tile;
-    let livingNeighbors = 0;
-    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-      if (dx === 0 && dy === 0) continue;
-      if ((previous.get(key(cell.x + dx, cell.y + dy))?.life ?? 0) >= 0.45) livingNeighbors++;
-    }
-    const fertilePattern = livingNeighbors === 3 || (cell.life >= 0.45 && livingNeighbors === 2);
-    const cellularEnergy = light * cell.moisture * (0.6 + cell.fertility * 0.4);
-    tile.life = clamp(cell.life + ((fertilePattern ? 1 : 0) - cell.life) * 0.2 * cellularEnergy
-      - (cell.moisture < 0.15 ? 0.015 : 0) - cell.traffic * 0.004);
-    tile.fertility = clamp(cell.fertility + cell.life * 0.0012 - cell.traffic * 0.0007 - cell.cultivation * 0.0002);
-    const produced = light * cell.moisture * cell.fertility * (0.25 + cell.life * 0.75)
-      * (1 - cell.growth) * (1 - cell.traffic * 0.9) * 0.005;
-    tile.growth = clamp(cell.growth + produced - 0.0002 - cell.traffic * 0.002 - (cell.moisture < 0.15 ? 0.001 : 0));
-    if (tile.terrain !== 'water') tile.vegetation = clamp(tile.vegetation + produced * 0.25 - cell.traffic * 0.001);
-    tile.traffic = clamp(cell.traffic - 0.0005);
-    tile.cultivation = clamp(cell.cultivation - 0.00002);
-    // Rain collects only in visible reservoirs; ordinary moist soil is not a drinking source.
-    const reservoir = tile.feature === 'pool' || tile.feature === 'spring' || tile.biome === 'wetland' || tile.terrain === 'water';
-    tile.drinkingWater = tile.biome === 'ocean' ? 0 : clamp(cell.drinkingWater
-      + (reservoir && weather === 'rain' ? 0.008 * (0.4 + cell.fertility * 0.6) : 0)
-      + (tile.feature === 'spring' ? 0.002 : 0) - (light ? 0.00015 : 0.00003));
-    // Ocean water exchanges slowly with the surrounding saline reservoir. Nutrients remain local.
-    if (tile.terrain === 'water') tile.moisture = clamp(cell.moisture + (tile.biome === 'ocean' ? 0.003 : 0) + (weather === 'rain' ? 0.008 : 0));
-    // Wood regrows slowly by consuming local growth; rock never regenerates.
-    if (tick % 100 === 0 && TREE_FEATURES.has(tile.feature ?? 'none') && cell.growth > 0.65
-      && cell.fertility > 0.4 && cell.moisture > 0.35 && cell.traffic < 0.35 && light > 0) {
-      const capacity = tile.feature === 'reeds' || tile.feature === 'cactus' ? 2 : tile.feature === 'palm' ? 6 : 12;
-      const regrowth = Math.min(capacity - (tile.wood ?? 0), 0.025 * light * cell.moisture * cell.fertility);
-      if (regrowth > 0) {
-        tile.wood = (tile.wood ?? 0) + regrowth;
-        tile.growth = clamp(tile.growth! - regrowth * 0.05);
-        if (tile.feature === 'stump' && tile.wood >= 1) tile.feature = tile.biome === 'mountain' ? 'pine' : 'tree';
-      }
-    }
-  }
+  ecosystemKernel.step(tiles, tick, weather, phase);
   if (updateFauna && tick % 50 === 0) stepFauna(tiles, tick);
 }
 

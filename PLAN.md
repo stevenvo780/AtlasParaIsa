@@ -1,8 +1,8 @@
 # Una Carta Para Isa — plan unificado
 
-La revisión privada actual es V3. Está en ejecución V4: fauna individual con fisiología compartida, depredación y herencia; invenciones de estructuras funcionales mediante gramática y búsqueda; hogares elegidos y retornos que permitan sostener comunidades. Los requisitos están en [EVOLUCION-V4.md](docs/EVOLUCION-V4.md). Las capacidades pendientes no se presentan como evidencia de V3.
+La revisión privada actual es V3. Está en ejecución V4: fauna individual con fisiología compartida, depredación y herencia; invenciones de estructuras funcionales mediante gramática y búsqueda; hogares elegidos y retornos que permitan sostener comunidades. Este plan conserva los requisitos y su estado; [REGLAS.md](docs/REGLAS.md) define los mecanismos y [EVIDENCIA.md](docs/EVIDENCIA.md) registra lo comprobado.
 
-Fecha: 5 de septiembre de 2026. Estado: prototipo V3 implementado con ampliación ecológica, genética y social; verificación de integración registrada por separado. Cierre personal de la carta, prueba en móvil físico y alojamiento definitivo pendientes.
+Fecha: 5 de septiembre de 2026. Estado: prototipo V4 implementado y en validación de integración, con V3 todavía activa en la revisión privada. Cierre personal de la carta, prueba en móvil físico y alojamiento definitivo pendientes.
 
 El repositorio ya contiene una aplicación local ejecutable. El [README](README.md) reúne los comandos reales de arranque, acceso y recuperación. La experiencia siguiente conserva su alcance de diseño; la implementación actual usa S e I, vecinos ficticios y cinco recuerdos sintéticos identificados, sin importar conversaciones ni atribuirles biografía.
 
@@ -26,7 +26,7 @@ Este texto propone el sentido de la obra; la redacción personal final pertenece
 | Ciencia y filosofía | Reglas explícitas, causas comprobables, necesidades que compiten y memoria que transforma conductas. Las preguntas sobre autonomía, identidad y cuidado aparecen en lo que sucede. |
 | Carta para Isa | S e I son reconocibles; hay recuerdos autorizados y lugares propios; la voz es íntima. Volver tiene significado y ausentarse no genera una obligación de cuidado. |
 
-El alcance ampliado permite recorrer territorio procedural más allá del mapa original, con juego a pantalla completa, control individual, habilidades adquiridas y construcción de lugares compartidos. V3 conecta agua potable finita, fauna por celdas, suelo vivo, cultivos y huellas con herencia de parámetros y comunidades locales. La extensión se genera según necesidad; solo las regiones próximas a los habitantes avanzan y la población tiene un máximo de 32.
+El alcance ampliado permite recorrer territorio procedural más allá del mapa original, con juego a pantalla completa, control individual, habilidades adquiridas y construcción de lugares compartidos. V4 conecta agua potable finita, animales individuales con herencia y depredación, suelo vivo, cultivos, invenciones funcionales y hogares recordados con comunidades locales. La extensión se genera según necesidad; solo las regiones próximas a los habitantes avanzan y la población humana tiene un máximo de 32.
 
 La arquitectura implementada mantiene **un mundo compartido por todos los clientes del servicio**: la CPU del backend lo simula a 10 Hz y cada navegador dibuja su vista, normalmente actualizada a 2 Hz. Cámaras distintas observan el mismo estado; abrir clientes no multiplica la simulación. El compositor WebGL2 utiliza, cuando está disponible, la GPU del dispositivo cliente. El servidor admite actualmente hasta 12 conexiones WebSocket simultáneas; aumentar esa escala requiere medición.
 
@@ -38,7 +38,7 @@ Una URL privada, cómoda en móvil y escritorio, que permita:
 2. Recorrer territorio procedural con biomas, depósitos visibles de agua, suelo, vegetación, fauna, alimento, madera, piedra y refugios. Cosecha, caza, cultivo, construcción y tránsito dejan consecuencias.
 3. Reconocer a S e I y una vecindad pequeña: catorce vecinos iniciales, con descendientes posibles hasta 32 habitantes totales. La herencia transmite parámetros del modelo; la crianza y el aprendizaje tienen vías separadas.
 4. Observar cómo necesidades, predisposiciones, habilidades y resultados anteriores cambian decisiones y actividades. Los oficios describen una trayectoria de práctica; las etiquetas no asignan tareas.
-5. Ofrecer gestos e invitaciones, o dirigir temporalmente a cualquier habitante para desplazarse, explorar, recolectar, cultivar, construir, cazar, beber, cooperar o descansar; devolverle después la elección autónoma.
+5. Ofrecer gestos e invitaciones, o dirigir temporalmente a cualquier habitante para desplazarse, explorar, recolectar, cultivar, construir, ensayar un diseño, reparar, cazar, beber, cooperar o descansar; devolverle después la elección autónoma. Inspeccionar y seguir animales con cuerpos y actividad propios.
 6. Descubrir una selección pequeña de recuerdos reales aprobados que influya en comportamientos, lugares y voz.
 7. Consultar una crónica breve, estadísticas con alcance explícito y comunidades que comparten recursos, trabajo y conocimientos. Encontrar continuidad al regresar: el mundo avanza en el servidor aunque el navegador esté cerrado.
 
@@ -59,7 +59,8 @@ La primera entrega incluye al menos una costumbre compartida que se forme por re
 | Sueños | Fuera del alcance actual. |
 | Territorio procedural, asentamientos y control individual | Incorporados al alcance ampliado solicitado. Sin borde del mapa inicial; regiones activas y rango numérico acotados. |
 | Comunidades, cooperación y disputas | Incorporadas mediante confianza local, semejanza cultural, aportes de materiales, ayuda, enseñanza, trueque y tensión por recursos escasos. Sin violencia ni gobiernos. |
-| Miles de agentes, guerras, gobiernos y mercados complejos | Fuera del alcance actual; el intercambio implementado es un trueque local acotado. |
+| Miles de habitantes, guerras, gobiernos y mercados complejos | Fuera del alcance actual; el intercambio implementado es un trueque local acotado. La fauna tiene un presupuesto de ejecución separado. |
+| Invención funcional | Gramática de seis componentes, variantes y cruces entre diseños conocidos, selección contextual, costes, desgaste y utilidad observada por uso. No se inventan componentes físicos arbitrarios. |
 | GPU para dibujar | Incorporado compositor WebGL2 con cachés, diagnóstico del dispositivo y alternativa Canvas 2D. La simulación sigue en CPU; no se promete aceleración física en cualquier navegador. |
 | Entrenamiento de modelos, embeddings obligatorios, múltiples servicios y protocolos binarios | Fuera del alcance actual. La simulación no necesita inferencia de un LLM. |
 | Medidores de conciencia, lenguaje cuántico ornamental y aleatoriedad presentada como agencia | Retirar. Sustituirlos por pruebas de causalidad y explicaciones honestas del modelo. |
@@ -78,11 +79,11 @@ El orden organiza pruebas de extremo a extremo. La persistencia básica se prepa
 
 ### Situación del prototipo
 
-La ampliación V3 añade ecología celular, fauna finita, sed y depósitos visibles, genes y descendencia, comunidades y cooperación, junto con estadísticas y diagnóstico del renderizado. Conserva cámara libre, archivo de regiones, órdenes individuales y refugios construidos con recursos y trabajo. Las reglas y el protocolo son V3; SQLite conserva esquema V2 y migra estados V1/V2. Su evidencia se registra en [EVIDENCIA.md](docs/EVIDENCIA.md).
+La ampliación V4 añade fauna individual, fisiología compartida, depredación, herencia animal, invenciones y motivos locales para volver a un hogar. Conserva ecología celular, genética humana, cooperación, cámara libre, archivo de regiones y órdenes individuales. Las reglas y el protocolo son V4; SQLite conserva esquema V2. Su integración se registra en [EVIDENCIA.md](docs/EVIDENCIA.md); las versiones anteriores permanecen en Git.
 
 | Etapa | Implementado | Cierre pendiente |
 |---|---|---|
-| 1. Mundo y vínculo | Regiones de 16 × 16, depósitos de agua, recursos modificables, fauna y capa celular; dieciséis cuerpos iniciales, decisiones locales, vínculo contextual, cámara y gestos. | Cierre de integración V3 y comprensión en el móvil físico destinatario. |
+| 1. Mundo y vínculo | Regiones de 16 × 16, depósitos de agua, recursos modificables, fauna individual y capa celular; dieciséis cuerpos humanos iniciales, decisiones locales, vínculo contextual, cámara y gestos. | Cierre de integración V4 y comprensión en el móvil físico destinatario. |
 | 2. Historia propia | Recuerdos sintéticos, experiencias de práctica, hábitos por observación, comunidades, ayuda y conflicto reversible; descendientes vecinos con genealogía y aprendizaje propio. | Selección real de recuerdos, nombres y rasgos revisada por Steven; evidencia causal de los mecanismos nuevos. |
 | 3. Continuidad | Servicio persistente, sesión revocable, SQLite transaccional, reconexión, copia y recuperación explícita. | Alojamiento privado autorizado con proceso, HTTPS y disco persistentes; la operación local no acredita un despliegue. |
 | 4. La carta terminada | Interfaz y carta de prueba ejecutables para revisión. | Voz final del autor, revisión íntima, arte y ritmo finales, y recorrido en un teléfono real. |
@@ -101,6 +102,33 @@ Las pruebas automáticas demuestran propiedades concretas del prototipo; no sust
 Estas decisiones se resuelven cuando afectan al trabajo concreto; no hace falta reconstruir el antiguo sistema de firmas, puertas y documentos de aprobación para avanzar con un prototipo reversible.
 
 ## Regla para admitir nuevas ideas
+
+### Ideas acumuladas y estado
+
+Esta tabla conserva la dirección expresada por Steven, incluso cuando excede el prototipo actual. «Pendiente» conserva una intención; no anuncia una capacidad disponible. Las reglas técnicas se mantienen en su documento canónico y las mediciones en EVIDENCIA.
+
+| Idea del autor | Estado y siguiente criterio |
+|---|---|
+| Mundo completo en pantalla y UI cómoda para observar/controlar a cualquiera | Implementado con cámara libre, censo y órdenes humanas; falta comprobar comodidad en teléfono físico. Fauna se puede inspeccionar y seguir. |
+| Territorio procedural de extensión comparable a Minecraft, con descubrimientos y asentamientos | Implementadas regiones deterministas y persistentes con límite numérico explícito; ampliar escala requiere medir memoria, disco y tiempo. |
+| Biomas ricos y agentes que transformen el entorno | Agua, alimento, madera, piedra, vegetación, cultivos, huellas y edificios están conectados a consumo y trabajo. Ampliar variedad debe añadir consecuencias verificables. |
+| Mundo compartido; backend simula y frontend visualiza | Implementado un estado y un reloj para todos los clientes. El navegador conserva su cámara; la carga de varios clientes requiere medición separada. |
+| Animales con el mismo fundamento corporal, exploración, reproducción y depredación | V4 integra fisiología compartida, cuerpos individuales, genes y memoria local; sin sistemas sociales ni constructivos humanos. |
+| Profesiones y funciones adaptativas, sin asignaciones predeterminadas | Las etiquetas de oficio describen práctica adquirida. Queda pendiente una división de trabajo más profunda con especialización y dependencia entre tareas demostradas. |
+| Aprendizaje por genes y memorias, cooperación creciente | Herencia y aprendizaje se separan; hay recuerdos acotados, imitación, enseñanza, intercambio y ayuda. Evolución multigeneracional estable queda por estudiar. |
+| Comunidades culturales, endogrupo/exogrupo y conflictos propios | Implementadas confianza, prácticas adquiridas, pertenencia revisable, disputas por recursos y turnos; no hay todavía guerras, gobiernos o instituciones emergentes. |
+| Que las comunidades permanezcan juntas cuando tenga sentido | V4 incorpora hogares observados y retorno físico. Se exige una ejecución autónoma con cooperación y contraste de escasez; reiniciar la DB por sí solo no corrige dispersión. |
+| Inventar estructuras nuevas que cambien lo que el mundo puede hacer | V4 combina seis componentes funcionales con variantes culturales, costes y utilidad observada. Inventar componentes, herramientas o procesos completamente nuevos sigue como horizonte. |
+| Un mundo muy vivo, autoorganizado, con complejidad inesperada como Conway y la ficción de Black Mirror | Es la dirección creativa: circuitos de recursos, cuerpos, memoria y sociedad. No hay evidencia de conciencia, sentimientos subjetivos, autopoiesis biológica ni complejidad abierta ilimitada. Añadir métricas de persistencia, diversidad y dependencia causal antes de afirmarlo. |
+| Mejor aprovechamiento de CPU y las dos GPU para crecer | Backend único, cachés y guardado optimizado implementados; las GPU del servidor no simulan ecología. Evaluar procesamiento por lotes o kernels ecológicos solo con benchmark y fidelidad frente al motor de referencia. |
+| Mucha más estadística y control del hardware | Hay métricas de recursos, cuerpos, grupos, genealogía, invención y tiempos de cliente/servidor. El presupuesto de fauna debe preservar identidades y repartir turnos; su coste completo necesita evidencia. |
+| Colaboración entre modelos potentes, con calidad antes que ahorro | GPT-6 integra y revisa; aportes externos se evalúan como propuestas. No se usan LLM en el ciclo de simulación. Commits acotados conservan avances. |
+
+### Documentación y continuidad del trabajo
+
+Un tema tiene una referencia canónica y los demás documentos la enlazan. No crear documentos históricos o de fase que dupliquen reglas, diseño o evidencia: Git ya conserva esas revisiones. Cada cambio de alcance actualiza esta tabla, su regla cuando exista y su evidencia cuando se ejecute.
+
+El mundo privado mostró dispersión incompatible con comunidades locales. Se conserva una copia íntegra antes de cualquier cambio y se mantiene pendiente elegir entre comienzo nuevo o continuidad histórica. Un comienzo nuevo no debe borrar el respaldo ni justificarse mediante repoblación silenciosa de un estado inválido.
 
 Una incorporación debe describir **qué permite observar o hacer, qué causa cambia y qué aporta al mundo o a la carta**. Se prueba con la solución más pequeña que cierre ese circuito. Si duplica otra mecánica, exige una explicación larga para tener sentido o solo aumenta escala, se deja fuera.
 

@@ -1,6 +1,6 @@
 # Una Carta Para Isa
 
-Un mundo procedural que continúa mientras el navegador está cerrado: seis biomas, agua y recursos agotables, fauna, exploración, construcción, aprendizaje y comunidades. Parte de dieciséis habitantes y permite descendientes de vecinos hasta un máximo de 32. Es un **prototipo reversible V3** de la carta de Steven para Isa. S e I son nombres provisionales; los vecinos y los cinco recuerdos iniciales son material ficticio identificado.
+Un mundo procedural que continúa mientras el navegador está cerrado: seis biomas, agua y recursos agotables, animales individuales, exploración, invención, construcción, aprendizaje y comunidades. Parte de dieciséis habitantes y permite descendientes de vecinos hasta un máximo de 32. Es un **prototipo reversible V4 en validación** de la carta de Steven para Isa; la revisión privada continúa en V3 hasta completar la actualización. S e I son nombres provisionales; los vecinos y los cinco recuerdos iniciales son material ficticio identificado.
 
 La aplicación local está implementada. La voz final de Steven, los recuerdos reales revisados, la prueba en un teléfono físico y el alojamiento privado siguen pendientes. No se ha publicado ni contratado infraestructura.
 
@@ -21,7 +21,9 @@ npm start
 
 Abre **http://127.0.0.1:3000** e ingresa con esa contraseña. Usa exactamente ese origen: el servidor comprueba `Host` y el origen de las solicitudes. El paisaje ocupa la pantalla. Arrastra para explorar, usa la rueda para acercarte y selecciona cualquier habitante en el mapa o el censo. Puedes seguirlo, dirigir su destino o pedirle explorar, recolectar, cultivar, construir, cazar, beber, cooperar y descansar; «Autónomo» devuelve sus decisiones. Las fichas explican necesidades, habilidades, materiales, parentesco, experiencias y relaciones. Los gestos son sembrar, invitar y recordar; una invitación aceptada puede ser ignorada por los habitantes.
 
-«Vida del mundo» reúne población, historia reciente, paisaje, comunidades y rendimiento. Los recursos y la fauna contados corresponden a **regiones activas del servidor**; no son un censo del territorio procedural completo ni solo de lo que mira la cámara. La pestaña de rendimiento distingue tiempos de simulación y guardado, memoria del proceso y medidas gráficas de este navegador.
+«Vida del mundo» reúne población, historia reciente, paisaje, comunidades y rendimiento. La pestaña «Fauna» permite buscar, seleccionar y seguir animales, con sus necesidades, genes y actividad. Las órdenes de los habitantes incluyen ensayar diseños y reparar; los animales se observan sin recibir esas órdenes humanas. Los diseños muestran componentes, costes, procedencia y utilidad adquirida por uso.
+
+Los recursos y la fauna contados corresponden a **regiones activas del servidor**; no son un censo del territorio procedural completo ni solo de lo que mira la cámara. La pestaña de rendimiento distingue tiempos de simulación y guardado, memoria del proceso y medidas gráficas de este navegador.
 
 **Todos los clientes conectados al mismo servicio comparten un único mundo persistente.** El backend mantiene un estado y un reloj de simulación a diez pasos por segundo, guarda cada paso y envía normalmente dos vistas por segundo a cada cliente. Cada navegador conserva su cámara y dibuja la región solicitada; abrir otra pestaña no crea habitantes ni otra simulación. Las órdenes aceptadas de todos los clientes actúan sobre ese mundo común.
 
@@ -99,7 +101,11 @@ Esta operación retira en la copia las entradas y los hechos posteriores al punt
 
 El mundo se genera por regiones de 16 × 16 celdas con coordenadas positivas y negativas; no conserva el borde de 40 × 28. El límite técnico es ±10 millones de celdas, con extremo superior excluido. La cámara recibe ventanas de hasta 96 × 64. Solo los alrededores de los habitantes avanzan: las regiones archivadas conservan sus cambios y congelan su ecología. El archivo en disco puede crecer con la exploración.
 
-Las reglas y el protocolo visible están en **versión 3**; el esquema SQLite permanece en **versión 2**. Los estados V1 y V2 se validan y migran conservando los datos previos, y reciben los campos nuevos reproducibles. Los contadores y series de V3 comienzan en esa migración; no se reconstruyen nacimientos o cooperación anteriores. Las revisiones archivadas se enriquecen al leerlas sin rellenar recursos explícitamente agotados.
+Las reglas y el protocolo visible de esta ampliación están en **versión 4**; el esquema SQLite permanece en **versión 2**. La migración valida las versiones anteriores antes de añadir campos. Las existencias de fauna V3 se convierten en identidades reproducibles, conservando sus cantidades; una población vacía guardada permanece vacía. Los refugios existentes reciben un diseño básico. Los nuevos contadores comienzan en la migración y no reconstruyen acontecimientos anteriores. La evidencia final de migración y reinicio se registra por separado.
+
+Liebres, ciervos, jabalíes, peces, lobos y zorros tienen cuerpo, percepción, memoria local y seis parámetros heredables. Pueden consumir recursos, desplazarse, huir, depredar, reproducirse y morir por causas del modelo. Comparten la función de necesidades con los humanos, con tasas propias; no construyen ni forman comunidades humanas.
+
+Los habitantes ensayan combinaciones válidas de armazón, techo, cisterna, granero, huerta y hogar. Construir, experimentar y reparar cuestan materiales y trabajo. Una cisterna necesita lluvia, el granero almacena alimento aportado y la huerta consume agua; la utilidad observada exige uso. Es una gramática finita de componentes, sin invención ilimitada de nuevas leyes físicas. Los lugares con recursos y vínculos pueden convertirse en hogares recordados, favorecer retornos físicos y perder atractivo al agotarse.
 
 Siete pares de genes de diseño permiten recombinación mendeliana simplificada y variación acotada. La tasa de aprendizaje es heredable; las habilidades, preferencias aprendidas y experiencias no se copian al genoma. Los vecinos pueden tener descendencia con costes, recursos, confianza, una comunidad y un lugar cercano compartidos; ese lugar no tiene que ser un refugio. S e I quedan fuera de esa regla. Cada descendiente empieza sin aprendizaje heredado y registra su nacimiento como primera experiencia propia. No hay muerte de habitantes, gobiernos ni un resultado demostrado del efecto Baldwin. [CIENCIA.md](docs/CIENCIA.md) explica las referencias y límites.
 
@@ -120,13 +126,13 @@ El paisaje usa cachés de dibujos y un compositor WebGL2 cuando está disponible
 
 `SOAK_DAYS` permite entre 3 y 60 días del modelo. Un día equivale a 2400 pasos: **cuatro minutos simulados**. La ejecución acelerada mide el motor y el guardado; no acredita varios días de operación real ni sustituye la prueba en un móvil físico.
 
-Las pruebas incluyen controles emparejados de alimento, refugio, encuentro, recuerdo pertinente/irrelevante y aprendizaje desactivado, además de ecología, archivo y renderizado. Los resultados y el alcance efectivamente verificado de V3 se registran en [EVIDENCIA.md](docs/EVIDENCIA.md); un mecanismo implementado o un comando documentado no equivalen a una ejecución aprobada.
+Las pruebas incluyen controles emparejados de alimento, refugio, encuentro, recuerdo pertinente/irrelevante y aprendizaje desactivado, además de fauna individual, invención, ecología, archivo y renderizado. [EVIDENCIA.md](docs/EVIDENCIA.md) registra los resultados de la revisión vigente y Git conserva los anteriores; un mecanismo implementado o un comando documentado no equivalen a una ejecución aprobada.
 
 Para las pruebas de navegador, ejecuta primero `npx playwright install chromium` y `npm run build`. La [evidencia de esta entrega](docs/EVIDENCIA.md) registra los resultados y sus límites.
 
 ## Mapa del proyecto
 
-- `src/world/`: reglas deterministas, terreno, ecología, cuerpo, memoria, genética, sociedad y estadísticas.
+- `src/world/`: reglas deterministas, terreno, ecología, fisiología compartida, animales, invenciones, memoria, genética, sociedad y estadísticas.
 - `src/server/`: HTTP/WebSocket, sesión privada, transacciones y continuidad.
 - `src/client/`: paisaje con cachés y WebGL2/Canvas 2D, carta, fichas, estadísticas, crónica y controles accesibles en DOM.
 - `src/shared/`: contrato de datos visible; el navegador no recibe el estado interno completo.

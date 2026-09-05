@@ -2,7 +2,7 @@
 
 Referencia de alcance: [PLAN.md](../PLAN.md). Referencia de comportamiento: [EXPERIENCIA.md](EXPERIENCIA.md).
 
-Estado actual: hay un prototipo reversible V3 en TypeScript con interfaz WebGL2/Canvas 2D/DOM, servidor HTTP/WebSocket, autenticación privada, SQLite y pruebas ejecutables. El [README](../README.md) documenta los comandos reales. Los recuerdos son sintéticos; no hay publicación ni alojamiento contratado. Los comandos, versiones y resultados de otros repositorios no se trasladan como capacidades existentes.
+Estado del código: prototipo reversible V4 en validación, con interfaz WebGL2/Canvas 2D/DOM, servidor HTTP/WebSocket, autenticación privada, SQLite y pruebas ejecutables. El [README](../README.md) documenta los comandos reales y [EVIDENCIA.md](EVIDENCIA.md) el estado comprobado y activado. Los recuerdos son sintéticos; no hay publicación ni alojamiento contratado. Los comandos, versiones y resultados de otros repositorios no se trasladan como capacidades existentes.
 
 ## Arquitectura implementada
 
@@ -26,7 +26,7 @@ Organización suficiente dentro de una aplicación:
 
 ```text
 src/
-  world/       reglas, ecología, genética, sociedad, memoria y estadísticas
+  world/       reglas, necesidades, animales, invenciones, ecología y sociedad
   server/      ejecución, guardado, sesión y mensajes
   client/      escena y cachés, carta, fichas, estadísticas y controles
   shared/      tipos de datos que cruzan cliente y servidor
@@ -43,7 +43,7 @@ El generador puro usa ruido interpolado multiescala en coordenadas globales, sei
 
 SQLite conserva revisiones de regiones por clave y paso, con suma de integridad. Retirar regiones, guardar el estado, confirmar entradas y registrar hechos sucede en una transacción. Un punto anterior lee únicamente revisiones de regiones que ya existían en ese paso. La memoria activa es acotada; el archivo persistente crece con el territorio modificado. El motor sin Store mantiene una cola pendiente que su integrador debe confirmar; no ofrece archivo ilimitado en RAM.
 
-Las reglas y el protocolo están en versión 3, mientras SQLite mantiene esquema 2. La migración V1 conserva las 1120 celdas originales, cuerpos, intenciones, memorias, eventos y azar; completa los bordes de las regiones con el generador. Los estados V1/V2 reciben campos ecológicos, sed, genomas y cultura iniciales de manera reproducible, preservando lo ya guardado. Las comunidades, acumulados y series de V3 empiezan en esa migración; no se inventan antecedentes. Las regiones archivadas también se enriquecen al leerlas, conservando cantidades explícitamente agotadas. Las sesiones y los resultados confirmados permanecen válidos. Una versión desconocida o corrupta se rechaza y nunca dispara un mundo nuevo silencioso.
+Las reglas y el protocolo están en versión 4, mientras SQLite mantiene esquema 2. La migración valida la versión de origen antes de enriquecerla. Conserva las celdas y campos anteriores y asigna valores nuevos reproducibles; los acumulados nuevos empiezan en la migración, sin inventar antecedentes. La fauna V3 se materializa una vez por unidad existente; una colección V4 vacía es un dato explícito que impide regenerarla. Los refugios previos reciben un plano básico. Las regiones guardan identidades y estructuras junto a terreno; la cámara solo proyecta esos datos. Una versión desconocida o corrupta se rechaza y nunca dispara un mundo nuevo silencioso.
 
 ## Una única verdad del mundo
 
@@ -68,7 +68,9 @@ El generador aleatorio pertenece al estado guardado. Semilla, estado inicial, ve
 |---|---|
 | Mundo | Versión, semilla, estado del generador aleatorio, paso y tiempo simulado, terreno, recursos y habitantes. |
 | Habitante | Identidad, posición, cuerpo con sed, genoma y parentesco, valores aprendidos, habilidades, intención, materiales, cultura, confianza y memoria acotada. |
-| Ecología celular | Existencias de fauna y especie por celda, agua potable, fertilidad, biomasa, cultivo, tránsito y actividad celular. |
+| Ecología celular | Agua potable, fertilidad, biomasa, cultivo, tránsito y actividad celular; fauna por celda derivada de individuos. |
+| Animal | Identidad, especie, cuerpo, edad biológica, parámetros heredables, progenitores, percepción y memoria local. |
+| Plano y estructura | Componentes, coste, autor y ascendencia cultural; edificio con identidad, condición, reservas y utilidad derivada de usos. |
 | Comunidad y estadísticas | Pertenencia revisable, prácticas medias, hechos de cooperación/conflicto, acumulados y serie reciente acotada. |
 | Recuerdo real aprobado | Identificador, referencia privada a su procedencia, texto aprobado, contexto de activación y efecto posible. |
 | Experiencia simulada | Quién actuó, dónde, qué ocurrió y qué preferencia o relación cambió. |
@@ -91,7 +93,7 @@ Si más adelante hace falta variación lingüística, una generación opcional p
 
 El estado, sus hechos correspondientes y las entradas aplicadas se guardan de forma coherente en transacciones. Una confirmación de gesto persistente solo se envía después de su guardado; repetir su identificador devuelve el mismo resultado, sin aplicar el efecto otra vez.
 
-El snapshot V3 codifica las celdas activas en tuplas JSON versionadas (`tiles-tuple-v1`) para evitar repetir veinte nombres de campo por celda en cada escritura. Mantiene los números originales sin cuantización. El lector admite tanto los snapshots históricos de objetos como las tuplas; los archivos de regiones conservan su formato de objetos y el esquema SQLite sigue en versión 2. Se rechazan valores opcionales presentes nulos o no finitos antes de escribir, para no confundir corrupción con ausencia. La copia del estado para cada transacción aprovecha que las celdas son planas; la retirada de regiones las particiona en una sola pasada. Estas optimizaciones mantienen el orden, las causas y la recuperación; el benchmark compara fidelidad y coste de escritura y lectura.
+El snapshot conserva la codificación de celdas activas en tuplas JSON versionadas (`tiles-tuple-v1`) introducida en V3 para evitar repetir veinte nombres de campo por celda. Mantiene los números originales sin cuantización. El lector admite snapshots de objetos y tuplas; los archivos de regiones conservan su formato de objetos y el esquema SQLite sigue en versión 2. Se rechazan valores opcionales presentes nulos o no finitos antes de escribir, para no confundir corrupción con ausencia. La copia del estado para cada transacción aprovecha que las celdas son planas; los individuos y estructuras mantienen copias independientes. La retirada de regiones conserva también fauna y edificios. Las pruebas verifican identidades, contadores monotónicos y recuperación sin duplicación ni envejecimiento oculto.
 
 Se conservan un punto de recuperación anterior y una copia de seguridad. Al arrancar se valida la versión y la integridad del estado antes de avanzar. Un fallo de lectura no crea silenciosamente otro mundo: se conserva la evidencia y se recupera un estado válido mediante una operación explícita.
 
@@ -104,7 +106,7 @@ Esta política evita un sistema de recuperación temporal complejo. La entrega d
 
 ## Conexión e interacción
 
-El protocolo V3 conserva ventanas de cámara con origen absoluto y órdenes individuales idempotentes; añade ecología, genealogía, comunidades, estadísticas y rendimiento. Las órdenes nuevas son cazar, beber y cooperar. Ventanas distintas del mismo paso son válidas; una vista antigua no puede sustituir un paso posterior. El intercambio JSON incluye estado inicial, actualizaciones, solicitud de gesto u orden, resultado y error comprensible. Se envían vistas completas acotadas por cliente; no hay una simulación nueva asociada a cada conexión.
+El protocolo V4 conserva ventanas de cámara con origen absoluto y órdenes individuales idempotentes; incorpora animales, planos, estructuras y sus estadísticas. Las nuevas órdenes humanas son ensayar diseños y reparar. Ventanas distintas del mismo paso son válidas; una vista antigua no puede sustituir un paso posterior. El intercambio JSON incluye estado inicial, actualizaciones, solicitud de gesto u orden, resultado y error comprensible. Se envían vistas completas acotadas por cliente; no hay una simulación nueva asociada a cada conexión.
 
 Cada vista lleva versión y secuencia. El cliente descarta vistas antiguas y obtiene una nueva al reconectar. Un cliente lento no puede acumular mensajes sin límite: recibe la vista reciente disponible.
 
@@ -132,6 +134,9 @@ Una vista pública de solo lectura puede añadirse después con su contenido rev
 | Control individual | Desplazamiento físico más allá del mapa anterior, necesidades urgentes y retorno a autonomía. |
 | Ecología | Agotar un recurso altera crecimiento o rutas; se explican entradas y pérdidas; no aparecen cantidades negativas ni recuperación oculta. |
 | Agua y fauna | Suelo húmedo y océano no dan agua potable; recarga acotada, caza con débito y migración sin duplicación; reproducción animal consume biomasa y agua. |
+| Fauna individual y presupuesto | Identidades y edad biológica conservadas en archivo; superar el presupuesto por paso reparte actividad sin perder individuos ni detener el mundo. |
+| Invención y estructuras | Gramática válida, costes únicos, linaje cultural conocido, depósitos conservativos, utilidad cero sin beneficio y reparación con costes. |
+| Arraigo autónomo | Una semilla sin órdenes forma comunidades y cooperación; retirar recursos puede cambiar el atractivo del hogar sin teletransporte. |
 | Herencia y crianza | Cada locus recibe aporte de ambos progenitores; variar aprendizaje no reescribe alelos; descendencia conserva costes, condiciones, límites y experiencia propia. |
 | Cooperación y comunidades | Materiales, trabajo, trueque y enseñanza producen cambios reales; pertenencia depende de confianza y cultura locales, con alternativas para revisarla. |
 | Disputa y turnos | Dos personas distintas compiten con la misma acción por la misma fuente escasa; controles de abundancia, urgencia, confianza y apertura; espera efectiva sin inventar recursos. |
@@ -150,7 +155,7 @@ Una vista pública de solo lectura puede añadirse después con su contenido rev
 
 Las comparaciones causales mantienen iguales las demás condiciones. No se llama integración a una diferencia provocada simplemente por eliminar acciones posibles del grupo de control. Para resultados probabilísticos se usan varias semillas emparejadas y se registra el efecto observado, sin convertirlo en una medida de conciencia.
 
-El código incorpora comandos de tipos, pruebas y compilación (`npm run check`), pruebas de navegador (`npm run test:e2e`) y una ejecución acelerada con guardado por paso (`npm run test:soak`). Las suites del motor, ecología, archivo, servidor y navegador cubren mecanismos y controles concretos; la lista anterior también incluye criterios de revisión. Las cifras aprobadas, condiciones medidas y omisiones deben consultarse en [EVIDENCIA.md](EVIDENCIA.md), sin trasladar recuentos de V1/V2 al cierre V3.
+El código incorpora comandos de tipos, pruebas y compilación (`npm run check`), pruebas de navegador (`npm run test:e2e`) y una ejecución acelerada con guardado por paso (`npm run test:soak`). Las suites cubren mecanismos y controles concretos; la lista anterior también incluye criterios de revisión. Las cifras aprobadas, condiciones medidas y omisiones deben consultarse en [EVIDENCIA.md](EVIDENCIA.md), sin trasladar recuentos de versiones anteriores al cierre actual.
 
 Antes de entregar se comprueban también reconexión, reinicio, restauración de copia y varios ciclos de día y noche. El script de ejecución prolongada registra duración, configuración, recursos y fallos en `artifacts/soak.json`; es una ejecución acelerada, no una estancia equivalente en tiempo real. Una prueba prolongada no acredita por sí sola fiabilidad indefinida. El teléfono físico, el alojamiento privado y el contenido personal final siguen pendientes.
 
@@ -158,7 +163,7 @@ Las escenas con datos íntimos se revisan en privado. Las pruebas con otras pers
 
 ## Mantener pequeño el proyecto
 
-Terminar una etapa del plan antes de sumar sistemas. Medir rendimiento antes de ampliar población o cambiar renderer. Llevar decisiones y evidencias breves junto al código que se implemente; un fallo corregido no necesita convertirse en otro manifiesto.
+Terminar una etapa del plan antes de sumar sistemas. Medir rendimiento antes de ampliar población o cambiar renderer. Mantener un documento canónico por tema: PLAN conserva intención y estado de las ideas; REGLAS define mecanismos; CIENCIA fuentes y límites; EXPERIENCIA interacción y voz; CONSTRUCCION arquitectura; README operación; EVIDENCIA resultados de la revisión vigente. Los enlaces evitan repetir especificaciones. Git conserva historia y versiones anteriores; no crear copias históricas ni documentos de fase que compitan con los canónicos.
 
 No se recuperan automáticamente plantillas de CI, comandos de operación, configuraciones de proveedores ni rutas de otros repositorios. Se documentan únicamente los comandos que realmente construyen, comprueban y ejecutan esta aplicación.
 

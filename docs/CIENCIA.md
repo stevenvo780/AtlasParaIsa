@@ -20,13 +20,17 @@ Los nacimientos de vecinos requieren recursos, confianza, cercanía, comunidad y
 
 La construcción de nicho estudia cómo organismos modifican recursos que después afectan a otros. Aquí orienta observar cómo cultivar, transitar y construir cambian oportunidades futuras. El prototipo no reproduce el modelo de evolución genética de ese trabajo. [Laland, Odling-Smee y Feldman, PNAS, 1999](https://pubmed.ncbi.nlm.nih.gov/10468593/).
 
-Werfel, Petersen y Nagpal demuestran coordinación constructiva mediante percepción local y cambios compartidos del entorno. Su sistema persigue estructuras diseñadas. Nuestro refugio consume recursos, requiere trabajo y mejora descanso; no equivale a una ciudad autoorganizada. [Artículo original, Science, 2014](https://ssr.princeton.edu/sites/g/files/toruqf2946/files/documents/science2014-termes.pdf).
+Werfel, Petersen y Nagpal demuestran coordinación constructiva mediante percepción local y cambios compartidos del entorno. Su sistema persigue estructuras diseñadas. Aquí construir consume recursos y trabajo, y los componentes alteran oportunidades de descanso, almacenamiento y cultivo; no equivale a reproducir su sistema ni a demostrar una ciudad autoorganizada. [Artículo original, Science, 2014](https://ssr.princeton.edu/sites/g/files/toruqf2946/files/documents/science2014-termes.pdf).
+
+La invención V4 usa una gramática finita de seis componentes, cruce y mutación de recetas conocidas, y comparación de utilidad contextual, eficiencia y novedad mediante dominancia de Pareto. Es una búsqueda de diseño propia, acotada a doce propuestas por ensayo y 64 recetas registradas. Un plano conserva autor y ascendencia cultural; no es ADN ni transmisión genética de conocimiento. La selección usa una predicción explícita del entorno, mientras la utilidad observada requiere efectos reales. Las fórmulas y los costes canónicos están en [REGLAS.md](REGLAS.md). La propuesta asistida por Fable se inspeccionó y adaptó al código; usar un modelo potente no constituye validación científica.
 
 ## Reglas locales e imitación
 
 Lenia produce patrones complejos mediante reglas celulares locales. Es una referencia para investigar regularidades emergentes; este motor no implementa Lenia ni el Juego de la Vida, y esos patrones no demuestran conciencia. [Chan, Complex Systems, 2019](https://www.complex-systems.com/abstracts/v28_i03_a01/).
 
-La capa celular V3 usa una regla continua de vecindad que responde a luz, humedad, fertilidad y tránsito. Modifica biomasa y suelo con costes y pérdidas explícitos. Agua potable y humedad son variables distintas: lluvia y recarga limitada alimentan depósitos visibles, mientras el océano mantiene agua potable en cero. La fauna se representa mediante existencias finitas de liebres, ciervos, jabalíes y peces por celda; migrar conserva unidades entre celdas y alimentarse o reproducirse consume biomasa y agua. Estas son simplificaciones ecológicas propias, sin química, hidrología o animales individuales completos.
+La capa celular introducida en V3 usa una regla continua de vecindad que responde a luz, humedad, fertilidad y tránsito. Modifica biomasa y suelo con costes y pérdidas explícitos. Agua potable y humedad son variables distintas: lluvia y recarga limitada alimentan depósitos visibles, mientras el océano mantiene agua potable en cero.
+
+V4 representa la fauna como individuos de seis especies con necesidades, salud, percepción y memoria local. La función fisiológica se comparte con los humanos mediante tasas distintas; no se traslada su sociedad a los animales. Seis parámetros animales heredables regulan capacidades, separados del modelo humano de siete loci diploides. Pastar, beber, desplazarse, huir y depredar cambian cuerpos y entorno; reproducirse paga costes y morir retira una identidad. Es una simplificación ecológica propia, sin calibración biológica, hidrología completa ni especiación abierta. El tiempo biológico se congela fuera de actividad; distribuir un presupuesto de cálculo introduce otra aproximación explícita.
 
 El torneo de Rendell y colaboradores estudia beneficios de copiar información en entornos definidos y la importancia de su actualidad. Nuestra imitación identifica acciones observadas, efectos útiles y quién hizo qué. [Artículo original, Science, 2010](https://lalandlab.wp.st-andrews.ac.uk/files/2015/08/rendell_et-al_2010.pdf).
 
@@ -51,6 +55,11 @@ Las reglas de ayuda, trueque, enseñanza y disputa son decisiones explícitas de
 | Descendencia | Retirar una condición de nacimiento o desactivar reproducción | Costes, población acotada y ausencia de aprendizaje copiado |
 | Agua potable | Comparar depósito, suelo húmedo y océano | Recarga limitada, consumo real y ausencia de agua potable salada |
 | Fauna | Agotar biomasa/agua; variar orden de celdas | Débitos, nacimientos con costes, ausencia de duplicación al migrar |
+| Huida y depredación | Igualar cuerpo y genes, retirar solo respuesta de huida | Movimiento continuo, supervivencia y una sola retirada por presa |
+| Archivo animal | Mantener una región inactiva durante muchos pasos | Identidad, recursos, edad biológica y reproducción sin avance oculto |
+| Invención contextual | Conservar propuestas y cambiar carencia de agua, comida o descanso | Receta válida diferente, coste real y ascendencia conocida |
+| Utilidad de estructuras | Retirar consumidor o beneficio incremental conservando edificio | Producción separada de consumo y utilidad cero sin beneficio |
+| Arraigo | Conservar habitantes y vínculos, agotar recursos del hogar observado | Retorno físico cuando resulta útil y salida cuando deja de serlo |
 | Exploración por novedad | Retirar únicamente incentivo de novedad | Cobertura y revisitas, conservando caminar |
 | Techo útil | Conservar estructura y coste, retirar beneficio corporal | Recuperación de fatiga y energía |
 | Imitación | Desactivar aprendizaje social conservando compartir | Transmisión con cadena de evidencia |

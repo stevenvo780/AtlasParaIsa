@@ -1,6 +1,6 @@
 # La experiencia y las reglas del mundo
 
-Este documento desarrolla el [plan unificado](../PLAN.md) y la experiencia implementada en el prototipo V3. Los ejemplos narrativos siguen siendo posibilidades de diseño. La voz final del autor, la biografía aprobada y la prueba en un teléfono físico continúan pendientes; [EVIDENCIA.md](EVIDENCIA.md) distingue lo comprobado.
+Este documento desarrolla el [plan unificado](../PLAN.md) y la experiencia implementada en el prototipo V4, todavía en validación antes de actualizar la revisión privada V3. Los ejemplos narrativos siguen siendo posibilidades de diseño. La voz final del autor, la biografía aprobada y la prueba en un teléfono físico continúan pendientes; [EVIDENCIA.md](EVIDENCIA.md) distingue lo comprobado.
 
 ## Entrar, explorar y volver
 
@@ -26,7 +26,7 @@ Las fuentes y pérdidas se definen explícitamente: la luz aporta energía, la l
 
 Árboles, pinos, palmas, cactus, juncos, bayas, flores, roca y arcilla distinguen los biomas. Recolectar agota existencias; los árboles pueden quedar como tocones y recuperarse lentamente con condiciones adecuadas. La piedra no reaparece. Cultivar modifica suelo y crecimiento; caminar deja huellas que frenan la recuperación vegetal. Una capa celular local influye en fertilidad y crecimiento según sus vecinos, luz y humedad.
 
-Liebres, ciervos, jabalíes y peces son existencias de fauna por celda: pueden desplazarse a una celda vecina, consumir recursos y reproducirse pagando alimento vegetal y agua. Cazar retira una unidad real de esa existencia. No son animales individuales con biografías o genomas. Agotar recursos puede cambiar las rutas y actividades de habitantes y fauna; ninguna emoción fabrica alimento o agua para rescatar una escena.
+Liebres, ciervos, jabalíes, peces, lobos y zorros tienen identidad, necesidades, salud, memoria local y parámetros heredables. Se desplazan físicamente, comen, beben y descansan; las presas pueden percibir depredadores y huir. La reproducción consume recursos y transmite parámetros con variación. La caza humana y la depredación retiran individuos concretos. Agotar recursos puede cambiar rutas y actividades de habitantes y fauna; ninguna emoción fabrica alimento o agua para rescatar una escena.
 
 El mundo empieza con S, I y catorce vecinos. Los vecinos ficticios pueden tener descendencia si disponen de recursos, cercanía, confianza, una comunidad y un lugar compartidos; no es obligatorio que ese lugar tenga refugio. S e I quedan fuera de esa regla y el máximo es 32 habitantes. El censo crece mediante esos nacimientos y no incluye muerte de habitantes. La edad regula la posibilidad de reproducirse, sin simular etapas infantiles completas.
 
@@ -36,7 +36,7 @@ No hacen falta química molecular, hidrodinámica completa ni evolución de espe
 
 Cada habitante percibe una zona limitada. Empieza con energía, hambre, sed y fatiga, más preferencias y vínculos locales. S e I tienen además memoria compartida y una necesidad contextual de cercanía o espacio.
 
-Las acciones incluyen desplazarse, comer, beber, cazar, descansar, explorar, acercarse, acompañar, retirarse, recolectar materiales, cultivar, construir y cooperar. Cada habitante combina predisposiciones con habilidades adquiridas y resultados de sus acciones. Una experiencia favorable o desfavorable puede modificar la elección siguiente. Una intención dura lo suficiente para verse; se abandona cuando cambia una causa relevante.
+Las acciones incluyen desplazarse, comer, beber, cazar, descansar, explorar, acercarse, acompañar, retirarse, recolectar materiales, cultivar, construir, ensayar diseños, reparar y cooperar. Cada habitante combina predisposiciones con habilidades adquiridas y resultados de sus acciones. Una experiencia favorable o desfavorable puede modificar la elección siguiente. Una intención dura lo suficiente para verse; se abandona cuando cambia una causa relevante.
 
 Los genes son siete pares de parámetros de diseño heredables, incluida la rapidez con que se ajustan preferencias. La descendencia recombina un aporte de cada progenitor y empieza sin copiar sus habilidades, hábitos o recuerdos; registra su nacimiento como experiencia propia y después aprende de sus resultados y de otros. La cultura inicial compartida por crianza se registra por separado del genoma. Esto no atribuye genética ni perfiles psicológicos reales a Steven e Isa.
 
@@ -68,13 +68,13 @@ Las comunidades se forman a partir de vínculos cercanos, prácticas compatibles
 
 La escasez compartida puede producir desacuerdo dentro de una comunidad o entre comunidades: dos personas urgidas realizan la misma acción sobre la misma fuente todavía disponible, con confianza y apertura insuficientes. El conflicto añade fatiga y tensión y hace que una ceda un intento; no hay violencia ni robo. La confianza o apertura suficientes pueden dar lugar a turnos con una espera de doce pasos del mundo, sin fabricar recursos. Pertenecer a grupos distintos no basta para generar una disputa.
 
-La sociedad no necesita girar permanentemente alrededor de la pareja. Puede tener episodios propios; algunos cruzarán la vida de S e I. Por ejemplo, un refugio frecuentado por varios vecinos puede modificar su lugar habitual de reunión.
+Un lugar observado con agua, alimento, techo y vínculos puede quedar recordado como hogar. Su utilidad favorece permanecer cerca o regresar caminando. La información pierde vigencia y la escasez puede justificar abandonarlo; no hay teletransporte ni comunidades asignadas para cumplir un contador. La sociedad puede tener episodios propios que después crucen la vida de S e I.
 
 ## Participación de Isa
 
-Se puede seleccionar cualquier habitante en el mapa o el censo, seguirlo con la cámara y solicitar que vaya a un lugar, explore, recolecte, cultive, construya, cace, beba, coopere o descanse. La orden inicia una tarea con trayecto, duración y costes. No anula hambre, sed, cansancio ni obstáculos. «Autónomo» devuelve la selección de tareas al habitante.
+Se puede seleccionar cualquier habitante en el mapa o el censo, seguirlo con la cámara y solicitar que vaya a un lugar, explore, recolecte, cultive, construya, ensaye un diseño, repare, cace, beba, coopere o descanse. La orden inicia una tarea con trayecto, duración y costes. No anula hambre, sed, cansancio ni obstáculos. «Autónomo» devuelve la selección de tareas al habitante. La pestaña «Fauna» permite buscar, inspeccionar y seguir animales; sus fichas muestran necesidades y actividad sin ofrecerles órdenes humanas.
 
-Los asentamientos empiezan como refugios construidos con recursos y trabajo. El techo mejora posibilidades reales de descanso y encuentro. Los oficios describen práctica adquirida; no asignan destinos biográficos a S, I o los vecinos.
+Los asentamientos empiezan como refugios construidos con recursos y trabajo. Los habitantes pueden ensayar variantes con armazón, techo, cisterna, granero, huerta y hogar. Los componentes alteran capacidades y costes: la cisterna recoge lluvia, el granero conserva aportes de alimento, la huerta consume agua y el hogar requiere combustible. Desgaste y reparación afectan su funcionamiento. El dibujo permite reconocer componentes y estado; las fichas distinguen diseño, construcción y uso. Los oficios describen práctica adquirida; no asignan destinos biográficos a S, I o los vecinos.
 
 Los tres gestos ambientales disponibles son:
 

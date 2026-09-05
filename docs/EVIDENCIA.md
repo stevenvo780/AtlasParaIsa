@@ -1,6 +1,6 @@
 # Evidencia vigente
 
-Fecha de corte: **5 de septiembre de 2026**. El servicio privado ejecuta **V5 `6d0e53b`**, con mundo nuevo y acceso conservado; el V4 inválido quedó archivado íntegro. Dos réplicas de veinticinco días conservaron vecinos de octava generación, sin extinción vecinal. Persisten saturación tecnológica y mantenimiento material sin acreditar. Los checkpoints de apertura están integrados en el candidato **`61fb27d`**, todavía sin desplegar; ninguna medición del servicio o de esas réplicas los incluye. La activación V5 no fue una migración exitosa del estado V4.
+Fecha de corte: **5 de septiembre de 2026**. El servicio privado ejecuta **V5 `6d0e53b`, SQLite 3**, con mundo nuevo y acceso conservado; el V4 inválido quedó archivado íntegro. Dos réplicas de veinticinco días conservaron vecinos de octava generación, sin extinción vecinal. Persisten saturación tecnológica y mantenimiento material sin acreditar. **MAIN `c7796ec`, SQLite 4, es candidato sin desplegar**: archivo, aperturas e índice ecológico de `c3cf1de`, más paisaje e interfaz renovados. Conserva reglas/protocolo 5. Las réplicas largas no incluyen estos cambios. La activación inicial V5 no fue una migración exitosa del estado V4.
 
 Este documento conserva resultados y límites frente al [objetivo rector](../PLAN.md#objetivo-rector); [REGLAS](REGLAS.md) define mecanismos, [CIENCIA](CIENCIA.md) su interpretación y [CONSTRUCCION](CONSTRUCCION.md#arquitectura-de-autonomía-avances-y-trabajo-pendiente) el estado de arquitectura y trabajo pendiente. Git conserva los cierres anteriores, sin documentos históricos paralelos.
 
@@ -95,7 +95,7 @@ Escena equivalente: **1440 × 900, DPR 1, 4928 celdas, veinte habitantes, mil an
 
 Chromium identificó **SwiftShader**, con alternativa Canvas 2D; no verificó GPU física. Las mediciones pertenecen al renderer sintético y no garantizan 60 FPS de toda la aplicación. Las GPU del servidor no ejecutan la simulación.
 
-Capturas locales actualizadas por la suite del candidato: [escritorio](../artifacts/desktop-fullscreen-v5.png), [móvil emulado](../artifacts/mobile-fullscreen-v5.png), [cosecha](../artifacts/forage-before-v5.png), [reserva recibida](../artifacts/forage-after-v5.png), [procedimientos](../artifacts/procedures-v5.png), [legado](../artifacts/legacy-v5.png), [día](../artifacts/daylight-v5.png) y [noche con lluvia](../artifacts/night-rain-v5.png). Se inspeccionaron seis capturas del cierre y sus hashes están en el manifiesto del build. No son capturas de una activación privada V5; la comparación gráfica anterior no se repitió sobre la cosecha.
+Capturas locales del cierre `6d0e53b`: [escritorio](../artifacts/desktop-fullscreen-v5.png), [móvil emulado](../artifacts/mobile-fullscreen-v5.png), [cosecha](../artifacts/forage-before-v5.png), [reserva recibida](../artifacts/forage-after-v5.png), [procedimientos](../artifacts/procedures-v5.png), [legado](../artifacts/legacy-v5.png), [día](../artifacts/daylight-v5.png) y [noche con lluvia](../artifacts/night-rain-v5.png). Se inspeccionaron seis capturas del cierre y sus hashes están en el manifiesto del build. Son pruebas locales, distintas de las capturas privadas de la sección siguiente y de la interfaz candidata nueva. La comparación gráfica anterior no se repitió sobre la cosecha.
 
 ## Servicio privado V5 y archivo V4
 
@@ -111,13 +111,26 @@ La inspección registró una franja vacía mientras la cámara esperaba una regi
 
 Servidor y TLS usan sesiones propias `carta-isa-world` y `carta-isa-https`; su salud fue verificada tras la activación. Cerrar la terminal no las cierra; no se ha acreditado reinicio automático del contenedor. Credenciales, bases y copias permanecen fuera del repositorio y de los prompts externos. El mundo V3 previo también permanece archivado según el [corte V4](../artifacts/cutover-v4.json).
 
+## Candidato de archivo, ecología e interfaz
+
+MAIN **`c7796ec` no está desplegado**. Integra servidor `c3cf1de`, paisaje `fdbab78` e interfaz `c7796ec`; los dos últimos provienen de `be76477` y `756ac0e` en worktree aislado. Reglas y protocolo siguen en 5. El esquema SQLite 4 registra origen de cobertura y archivo tecnológico; no amplía el catálogo de 256 recetas ni conecta aún el ayudante de memoria finita al aprendizaje. [CONSTRUCCION](CONSTRUCCION.md#arquitectura-de-autonomía-avances-y-trabajo-pendiente) conserva el estado de los siete frentes.
+
+| Comprobación | Resultado y alcance |
+|---|---|
+| Aperturas físicas | El cierre previo `61fb27d` pasó **282/282** Node, sin fallos, cancelaciones ni omisiones, **129,459 s**; incluye trece controles nuevos de checkpoint. La revisión independiente cerró la frontera tick/serial. [Log](../artifacts/node-v5-checkpoints.log). |
+| Servidor, archivo e índice ecológico | **Typecheck y Node, salida 0: 365/365**, cero fallos, cancelaciones y omisiones, **145,387 s**, sobre `c3cf1de`. Incluye diario pendiente, primitivas de archivo, Store y equivalencia ecológica. [Log global](../artifacts/node-archive-ecology-full.log). Todavía no incluye las nuevas pruebas del paisaje integrado después. |
+| Paisaje y selección | **8/8 pruebas focales**, incluidas dos nuevas, y typecheck en la rama aislada. Cubren escala/recursos, estados del suelo, componentes y condición, cuerpo legible, selección opaca y destino geográfico. No cambia el estado autoritativo. |
+| Interfaz conjunta | **16/16 E2E, 59,1 s**, en worktree con las fuentes finales de interfaz y paisaje. Incluye navegación, foco, tamaños pequeños emulados y destino de gesto sin enviar una mutación. La validación del build exacto integrado está pendiente. |
+| Rendimiento ecológico completo | Pendiente de una ventana de medición aislada; equivalencia y uso de un índice no prueban mejora de tiempo. |
+| Build, smoke, migración y despliegue | Pendientes para el conjunto integrado; la copia privada comprobada abajo todavía es SQLite 3. |
+
+El [respaldo previo al archivo tecnológico](../artifacts/backup-before-technology-archive.json), del **22:02:19 UTC**, conserva una copia coherente de **335831040 bytes** del V5 real: paso **31195**, diecisiete habitantes, esquema 3, 256 recetas y 1417 ejecuciones, con 1161 recibos ya descartados del búfer. El lector del build anterior la valida y el origen permanece intacto. **Todavía no se ha ejecutado su migración real en copia ni se ha desplegado el candidato.** Archivar los 256 recibos retenidos no recuperará los 1161 anteriores ni certificará aquellas ventanas.
+
+Los checkpoints son prospectivos: no cambian recursos, decisiones o azar ni reparan retrospectivamente los intervalos desconocidos. El origen durable acredita desde dónde se preservan recibos; no implica repetición física de la historia, causalidad completa o reposición de herramientas. No hay nuevas réplicas largas del conjunto candidato.
+
 ## Trabajo y pruebas pendientes
 
-La comparación alimentaria, el soak con commit por paso, la extensión a veinticinco días y la activación están completados dentro de sus alcances. Quedan continuidad fuera de esas trayectorias, transmisión aprendida, recambio de herramientas y mantenimiento material reciente.
-
-El candidato **`61fb27d`** incorpora los checkpoints de inventario desarrollados en `4dfd982`: pasaron **124/124 pruebas afectadas** en worktree aislado, incluidas trece nuevas, typecheck y compilación del servidor. La revisión independiente cerró un defecto de frontera tick/serial y terminó sin P1/P2 pendientes. Tras integrar, typecheck y la suite Node global terminaron con salida 0: **282/282, cero fallos, cancelaciones y omisiones, 129,459 s**, en el [log de checkpoints](../artifacts/node-v5-checkpoints.log). **Todavía no está desplegado.** No se le atribuyen E2E, soak ni réplicas largas adicionales. Sus checkpoints no cambian recursos, decisiones o azar ni reparan retrospectivamente los intervalos desconocidos de los artefactos anteriores.
-
-Archivo SQL de procedimientos/recibos y memoria técnica finita tienen prototipos en la rama aislada `feature/technology-archive`; **no son capacidades integradas ni activas**. CONSTRUCCION conserva el estado de los siete frentes, con apertura física parcialmente integrada y el resto pendiente de integración y evidencia propia.
+La comparación alimentaria, el soak con commit por paso, la extensión a veinticinco días y la activación `6d0e53b` están completados dentro de sus alcances. Quedan continuidad fuera de esas trayectorias, transmisión aprendida, recambio de herramientas y mantenimiento material reciente; el candidato de archivo no resuelve esas propiedades por estar guardado.
 
 No se han probado teléfono físico, Safari/iOS, lector de pantalla, varios días reales, doce clientes bajo carga sostenida, miles de habitantes, fallo físico de disco ni cálculo ecológico en GPU. La voz final y los recuerdos reales siguen pendientes. No se acreditan conciencia, autopoiesis biológica, efecto Baldwin ni evolución abierta.
 

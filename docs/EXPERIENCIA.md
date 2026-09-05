@@ -1,6 +1,6 @@
 # Experiencia, interacción y voz
 
-Este documento desarrolla la interacción y la voz del [objetivo rector](../PLAN.md#objetivo-rector). **V5 `6d0e53b` está activo en la revisión privada**, con reemplazo generacional observado en dos réplicas de veinticinco días. [REGLAS.md](REGLAS.md) conserva mecánicas y [EVIDENCIA.md](EVIDENCIA.md) los resultados y límites. Las escenas propuestas no garantizan desenlaces ni continuidad indefinida; refactor profundo de interfaz, voz final, biografía aprobada y teléfono físico siguen pendientes.
+Este documento desarrolla la interacción y la voz del [objetivo rector](../PLAN.md#objetivo-rector). **V5 `6d0e53b` está activo en la revisión privada**, con reemplazo generacional observado en dos réplicas de veinticinco días. MAIN incorpora un nuevo cuaderno de navegación y paisaje, todavía sin desplegar; se describen abajo como candidato. [REGLAS.md](REGLAS.md) conserva mecánicas y [EVIDENCIA.md](EVIDENCIA.md) resultados y límites. Las escenas propuestas no garantizan desenlaces ni continuidad indefinida. Calidad final, voz de Steven, biografía aprobada y teléfono físico siguen pendientes.
 
 ## Entrar, explorar y volver
 
@@ -18,7 +18,7 @@ El paisaje es una extensión procedural vista desde arriba. Se explora en cualqu
 
 Todos los clientes conectados al servicio observan el mismo mundo y pueden intervenir en él. Cada uno mueve su propia cámara; sus órdenes aceptadas afectan a los habitantes compartidos. El servicio continúa alrededor de los habitantes aunque todos cierren el navegador. Las regiones inactivas conservan sus cambios y congelan su ecología hasta reactivarse. Mover la cámara no acelera cultivos ni crea historia.
 
-La renovación de interfaz del objetivo rector sigue pendiente. Deberá organizar exploración, seguimiento, control e inspección alrededor de lo que cada cuerpo y proceso realmente puede hacer. La escala de árboles, habitantes y construcciones, el estado visible del suelo y las animaciones deben ayudar a entender capacidad, consumo, desgaste y cambio ambiental; una forma nueva necesita una función legible, y la historia y las estadísticas deben permitir comprobar su causa. Este criterio amplía la experiencia sin cambiar la voz íntima de la carta.
+La renovación candidata organiza exploración, seguimiento, control e inspección alrededor de lo que cada cuerpo y proceso puede hacer. La escala de árboles, habitantes y construcciones, el suelo y las animaciones ayudan a reconocer capacidad, consumo, desgaste y cambio ambiental. Las fichas y estadísticas enlazan hechos recibidos con personas, lugares, comunidades y procedimientos disponibles; cuando el episodio causal queda fuera de la ventana lo indican. Esta lectura amplía la experiencia conservando la voz íntima de la carta; no garantiza que todas las causas históricas estén disponibles.
 
 El modelo ecológico empieza con este ciclo:
 
@@ -27,6 +27,10 @@ El modelo ecológico empieza con este ciclo:
 La luz favorece crecimiento, la lluvia cambia humedad, desplazarse cuesta actividad y cosechar retira alimento. El paisaje debe hacer reconocibles el agua potable, la comida y los recursos agotados. Ese circuito es una simplificación del modelo, no una promesa de equilibrio indefinido; sus fuentes y pérdidas se definen en REGLAS.
 
 Árboles, pinos, palmas, cactus, juncos, bayas, flores, roca y arcilla distinguen los biomas. Recolectar agota existencias; los árboles pueden quedar como tocones y recuperarse lentamente con condiciones adecuadas. La piedra no reaparece. Cultivar modifica suelo y crecimiento; caminar deja huellas que frenan la recuperación vegetal. Una capa celular local influye en fertilidad y crecimiento según sus vecinos, luz y humedad.
+
+En el paisaje candidato, un árbol maduro alcanza aproximadamente tres cuerpos humanos. Altura, follaje y silueta dependen de madera presente, crecimiento, vegetación, bioma y variación determinista del lugar. Un símbolo representa una mancha leñosa de la celda, no un individuo botánico; no se dibuja otro árbol sin existencia declarada. Humedad, fertilidad, biomasa, cultivo y tránsito cambian la superficie completa del suelo. El bosque conserva la densidad que indican sus recursos, y las copas dejan legibles los cuerpos que ocultan, aunque nadie los haya seleccionado.
+
+Las estructuras candidatas diferencian repetición de componentes, condición, reservas y proporción de madera y piedra del plano. Esa forma ilustra prestaciones conocidas; el servidor todavía no ofrece geometría constructiva libre ni composición por lote del edificio. Una huerta visible requiere cultivo y vegetación reales. El agua puede mostrar una captación recién recibida durante lluvia; un contador histórico de usos no dibuja fuego ni humo. El hogar carece de una señal pública de combustión presente que permita esa animación.
 
 Liebres, ciervos, jabalíes, peces, lobos y zorros tienen identidad, necesidades, salud, memoria local y parámetros heredables. Se desplazan físicamente, comen, beben y descansan; las presas pueden percibir depredadores y huir. La reproducción consume recursos y transmite parámetros con variación. La caza humana y la depredación retiran individuos concretos. Agotar recursos puede cambiar rutas y actividades de habitantes y fauna; ninguna emoción fabrica alimento o agua para rescatar una escena.
 
@@ -73,6 +77,10 @@ La escasez compartida puede producir desacuerdo dentro de una comunidad o entre 
 Un lugar observado con agua, alimento, techo y vínculos puede quedar recordado como hogar. Su utilidad favorece permanecer cerca o regresar caminando. La información pierde vigencia y la escasez puede justificar abandonarlo; no hay teletransporte ni comunidades asignadas para cumplir un contador. La sociedad puede tener episodios propios que después crucen la vida de S e I.
 
 ## Participación de Isa
+
+El **cuaderno candidato** mantiene una sola página abierta: «Vidas» reúne habitantes y fauna; «Mundo», estadísticas; «Explorar», capas y coordenadas; «Gestos», intervenciones ambientales. «Mapa» despeja la escena y los accesos a S e I permanecen reconocibles. La ficha separa «Ahora», «Equipo» e «Historia», con «Seguir» y «Dirigir» visibles y tareas agrupadas en sustento, trabajo y obras. Se conserva el foco al cerrar y las pestañas admiten teclado. Su prueba en tamaños pequeños emulados no sustituye un teléfono físico.
+
+Inspeccionar la parte opaca de una copa o un tejado selecciona su lugar de origen; el borde transparente y las capas de observación conservan la casilla de suelo. Al dirigir o preparar un gesto, el destino es siempre la casilla geográfica elegida: una copa de otra celda no desvía mover, construir o sembrar. Personas y fauna conservan prioridad de selección. Estas diferencias de interacción no modifican recursos ni decisiones del servidor.
 
 Se puede seleccionar cualquier habitante en el mapa o el censo, seguirlo y solicitar que vaya a un lugar, explore, coseche alimento, recolecte materiales, cultive, construya, ensaye un diseño, repare, investigue, fabrique, cace, beba, coopere o descanse. La tarea tiene trayecto, duración y costes; conserva necesidades y obstáculos. «Autónomo» devuelve la selección al habitante. «Fauna» permite buscar, inspeccionar y seguir animales sin ofrecerles órdenes humanas.
 

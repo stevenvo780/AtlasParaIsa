@@ -2,6 +2,7 @@ import type { AnimalAction, AnimalDynamics, AnimalGenes, AnimalSpecies, AnimalVi
 import type { ChronicleEvent, Tile } from '../shared/types.js';
 import { FOOD_PER_ANIMAL } from './ecosystem.js';
 import { advanceNeeds } from './needs.js';
+import { assimilateFood, exertBody, hydrateBody, restBody } from './body.js';
 import { MAX_COORDINATE } from './terrain.js';
 
 export const MAX_ACTIVE_ANIMALS = 8192;
@@ -179,8 +180,7 @@ function move(animal: Animal, world: AnimalWorld, state: LocalState): void {
   animal.x = next.x; animal.y = next.y; animal.lastMove = world.tick;
   state.counts.set(key(animal), (state.counts.get(key(animal)) ?? 0) + 1);
   state.occupants.set(key(animal), [...(state.occupants.get(key(animal)) ?? []), animal]);
-  animal.energy = clamp(animal.energy - (animal.action === 'flee' ? 0.003 : 0.0015));
-  animal.fatigue = clamp(animal.fatigue + (animal.action === 'flee' ? 0.004 : 0.002));
+  exertBody(animal, { energy: animal.action === 'flee' ? 0.003 : 0.0015, fatigue: animal.action === 'flee' ? 0.004 : 0.002 });
   remember(animal, next, world.tick, true);
 }
 function death(world: AnimalWorld, animal: Animal, cause: string, emit?: AnimalEmitter, hunter?: string): void {
@@ -208,23 +208,21 @@ function feed(animal: Animal, tile: Tile, world: AnimalWorld): void {
     const consumed = Math.min(tile.growth ?? tile.vegetation, 0.0015, animal.hunger / 4);
     tile.growth = clamp((tile.growth ?? tile.vegetation) - consumed);
     tile.vegetation = clamp(tile.vegetation - consumed * 0.5);
-    animal.hunger = clamp(animal.hunger - consumed * 4 * (1 - animal.genes.carnivory));
-    animal.energy = clamp(animal.energy + consumed * 0.8);
+    assimilateFood(animal, consumed, { hungerPerUnit: 4, assimilation: 1 - animal.genes.carnivory, energyPerUnit: 0.8 });
     world.animalDynamics.plantConsumed += consumed;
     // Plant water is finite and belongs to this patch, never to an invisible drinking reservoir.
     if (animal.species !== 'fish') {
       const moisture = Math.min(tile.moisture, consumed * 3);
-      tile.moisture = clamp(tile.moisture - moisture); animal.thirst = clamp(animal.thirst - moisture * 0.3);
+      tile.moisture = clamp(tile.moisture - moisture); hydrateBody(animal, moisture, 0.3);
       world.animalDynamics.waterConsumed += moisture * 0.1;
     }
     if (animal.hunger < 0.15 || (tile.growth ?? 0) <= 0.001) animal.lastDecision = world.tick - 12;
   } else if (animal.action === 'drink') {
     const water = takeWater(animal, tile, Math.min(0.0016, animal.thirst / 3));
-    animal.thirst = clamp(animal.thirst - water * 3); world.animalDynamics.waterConsumed += water;
+    hydrateBody(animal, water); world.animalDynamics.waterConsumed += water;
     if (animal.thirst < 0.15 || water <= 0) animal.lastDecision = world.tick - 12;
   } else if (animal.action === 'rest') {
-    animal.fatigue = clamp(animal.fatigue - 0.002);
-    animal.energy = clamp(animal.energy + 0.0015 * clamp((1 - Math.max(animal.hunger, animal.thirst)) / 0.5));
+    restBody(animal, { fatigue: 0.002, energy: 0.0015 });
     if (animal.energy > 0.75 && animal.fatigue < 0.2) animal.lastDecision = world.tick - 12;
   }
 }
@@ -300,14 +298,14 @@ export function stepAnimals(world: AnimalWorld, emit?: AnimalEmitter): void {
     const prey = byId.get(animal.preyId);
     // A resident prey is physically reachable even when its own routine is deferred; archived animals are absent from byId.
     if (!prey || prey.health <= 0 || !edible(animal, prey) || distance(animal, prey) > 0) { animal.work = 0; continue; }
-    animal.work++; animal.energy = clamp(animal.energy - 0.0008); animal.fatigue = clamp(animal.fatigue + 0.001);
+    animal.work++; exertBody(animal, { energy: 0.0008, fatigue: 0.001 });
     if (animal.work < 4) continue;
     animal.work = 0; prey.health = clamp(prey.health - (0.18 + animal.genes.speed * 0.08 - prey.genes.camouflage * 0.05));
     if (prey.health > 0) continue;
     death(world, prey, 'depredación', emit, animal.id); world.animalDynamics.predations++;
     state.counts.set(key(prey), state.counts.get(key(prey))! - 1);
-    animal.hunger = clamp(animal.hunger - FOOD_PER_ANIMAL[prey.species] * 4.8 * animal.genes.carnivory);
-    animal.energy = clamp(animal.energy + FOOD_PER_ANIMAL[prey.species] * 0.5); animal.lastDecision = world.tick - 12;
+    assimilateFood(animal, FOOD_PER_ANIMAL[prey.species], { hungerPerUnit: 4.8, assimilation: animal.genes.carnivory, energyPerUnit: 0.5 });
+    animal.lastDecision = world.tick - 12;
   }
   world.animals = world.animals.filter(a => a.health > 0);
   reproduce(world, state, active, emit); world.animals.sort(canonical); syncFauna(world.tiles, world.animals);

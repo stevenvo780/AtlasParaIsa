@@ -3,6 +3,13 @@ import { componentNames, componentPurpose } from './life-art.js';
 import { recipeLabel } from './technology-art.js';
 import { esc, svg, icon, number, percentage } from './ui-catalog.js';
 
+/** A received snapshot describes current intent; it is not a new command acknowledgement. */
+export function destinationLink(person: PersonView): string {
+  if (!person.target) return '';
+  const label = person.controlMode === 'directed' ? 'Destino de la tarea' : 'Destino actual';
+  return `<button class="entity-link" title="Centrar la cámara en este destino" data-place-x="${esc(person.target.x)}" data-place-y="${esc(person.target.y)}">${label}: ${number(person.target.x, 1)}, ${number(person.target.y, 1)} ${icon.arrow}</button>`;
+}
+
 export function meter(label: string, value: number): string { const v = Math.max(0, Math.min(100, Math.round(value * 100))); return `<div class="game-need"><span>${esc(label)}</span><meter min="0" max="100" value="${v}" aria-label="${esc(label)}">${v}%</meter><span>${v}%</span></div>`; }
 export function animalSilhouette(species: AnimalView['species']): string {
   const paths = { hare: 'M5 17h12v-7h4v7h-4v4H3v-4h2ZM16 10V2h2v8m2 0V3h2v7', deer: 'M3 13h13V8h6v7h-4v7h-2v-7H6v7H4V13Zm15-5V1m4 7V1m-6 2h7', boar: 'M3 12h16v-2h3v8h-3v4h-2v-4H6v4H4v-4H1v-6h2Zm17 6h4v-3', fish: 'm2 6 6 6L2 18V6Zm6 6 6-5h6l4 5-4 5h-6l-6-5Z', wolf: 'M4 14h11V7l3-5 2 5h3v8h-3v7h-2v-6H7v6H5v-6l-5-4v-3l4 5Z', fox: 'M7 14h8V8l2-6 3 5h3v7h-3v7h-2v-5H9v5H7v-4l-6-2V8l6 6Z' };

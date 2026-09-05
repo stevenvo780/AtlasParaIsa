@@ -27,6 +27,84 @@ test('woody art requires declared stock and keeps growth, depletion and seeded v
   assert.notDeepEqual(treeForm({ ...tree, variety: 3 }), mature);
 });
 
+test('material raster keeps local transitions, exhausted cover and cache dependency boundaries honest', { timeout: 60_000 }, async t => {
+  if (!existsSync(chromium.executablePath())) { t.skip('Chromium absent: material continuity, exhaustion and cache boundary controls not run.'); return; }
+  const server = await createServer({ configFile: false, server: { host: '127.0.0.1', port: 0 }, logLevel: 'error' });
+  await server.listen(); const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage({ viewport: { width: 640, height: 480 }, reducedMotion: 'reduce' });
+    await page.addInitScript('window.__name = value => value');
+    await page.route('**/__material_test.html', route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><body style="margin:0"><canvas style="width:640px;height:480px"></canvas></body>' }));
+    await page.goto(new URL('__material_test.html', server.resolvedUrls!.local[0]).href);
+    const result = await page.evaluate(async () => {
+      const path = '/src/client/landscape.ts'; const { Landscape } = await import(/* @vite-ignore */ path);
+      const renderer = new Landscape(document.querySelector('canvas')!, () => {});
+      const tiles = Array.from({ length: 32 * 24 }, (_, i) => ({ x: i % 32 - 16, y: Math.floor(i / 32) - 8,
+        terrain: 'meadow', biome: 'grassland', feature: 'none', moisture: .5, fertility: .5,
+        vegetation: .75, growth: .75, food: 0, wood: 0, stone: 0, traffic: 0, cultivation: 0, drinkingWater: 0 }));
+      const world = { version: 5, sequence: 900, tick: 900, phase: 'day', day: 1, weather: 'clear', width: 32, height: 24,
+        originX: -16, originY: -8, tiles, people: [], animals: [], structures: [], places: [], memories: [], events: [] };
+      const preserved = JSON.stringify(world);
+      const change = (x: number, y: number, values: object) => ({ ...world, tiles: tiles.map(tile => tile.x === x && tile.y === y ? { ...tile, ...values } : tile) });
+      const raster = (x: number, y: number) => {
+        const canvas = document.createElement('canvas'); canvas.width = canvas.height = 16; const g = canvas.getContext('2d')!;
+        g.translate(-x * 16, -y * 16); renderer.bakeTileBase(g, x, y);
+        return Array.from(g.getImageData(0, 0, 16, 16).data) as number[];
+      };
+      const chunkPixels = () => renderer.chunks.map((chunk: { key: string; canvas: HTMLCanvasElement }) => ({ key: chunk.key,
+        pixels: Array.from(chunk.canvas.getContext('2d')!.getImageData(0, 0, 128, 128).data).join(',') }));
+      renderer.update(world); renderer.render(0);
+      const baseline = raster(7, 3), neighbourBefore = raster(8, 3), distantBefore = raster(10, 3);
+      const chunksBefore = chunkPixels(), buildsBefore = renderer.getDiagnostics().terrainBuilds;
+      renderer.update(change(7, 3, { moisture: .501 }));
+      const sameBucket = raster(7, 3), buildsSame = renderer.getDiagnostics().terrainBuilds;
+      renderer.update(change(7, 3, { moisture: 1, fertility: 1 }));
+      const neighbourAfter = raster(8, 3), distantAfter = raster(10, 3), buildsChanged = renderer.getDiagnostics().terrainBuilds;
+      const changedChunks = chunkPixels().filter((chunk: { key: string; pixels: string }) => chunksBefore.find((previous: { key: string; pixels: string }) => previous.key === chunk.key)!.pixels !== chunk.pixels).map((chunk: { key: string }) => chunk.key);
+      renderer.update({ ...world, tiles: tiles.filter(tile => tile.x !== 7 || tile.y !== 3) });
+      const missingNeighbour = raster(8, 3), buildsMissing = renderer.getDiagnostics().terrainBuilds;
+      renderer.update(change(7, 3, { moisture: 1 }));
+      const arrivedNeighbour = raster(8, 3), buildsArrived = renderer.getDiagnostics().terrainBuilds;
+      renderer.update(change(7, 3, { terrain: 'water' }));
+      const waterNeighbour = raster(8, 3);
+      renderer.update(change(7, 3, { vegetation: 0 })); const depletedAmongGreen = raster(7, 3);
+      renderer.update({ ...world, tiles: tiles.map(tile => ({ ...tile, vegetation: 0 })) }); const depletedAmongBare = raster(7, 3);
+      const baselineZeroTraffic = raster(7, 3);
+      renderer.update({ ...world, tiles: tiles.map(tile => ({ ...tile, vegetation: 0, traffic: tile.x !== 7 || tile.y !== 3 ? 1 : 0 })) });
+      const noBorrowedTraffic = raster(7, 3);
+      renderer.update(change(7, 3, { traffic: 1 })); const worn = raster(7, 3);
+      renderer.update(world); renderer.cam.zoom = 64; renderer.focus(-5, 2); renderer.render(1000);
+      const movedCamera = raster(7, 3); renderer.terrainCache.clear(); renderer.update(world);
+      const afterEviction = chunkPixels();
+      const beforeInPlace = raster(8, 3); const mutable = change(7, 3, { moisture: .5 }); renderer.update(mutable);
+      mutable.tiles.find(tile => tile.x === 7 && tile.y === 3)!.moisture = 1; renderer.update(mutable);
+      const afterInPlace = raster(8, 3);
+      renderer.update(change(7, 3, { traffic: .119 })); const trafficBefore = raster(7, 3), trafficBuildsBefore = renderer.getDiagnostics().terrainBuilds;
+      renderer.update(change(7, 3, { traffic: .121 })); const trafficAfter = raster(7, 3), trafficBuildsAfter = renderer.getDiagnostics().terrainBuilds;
+      const diagnostics = renderer.getDiagnostics(); renderer.destroy();
+      return {
+        sameBucketStable: baseline.join(',') === sameBucket.join(','), buildsBefore, buildsSame, buildsChanged, changedChunks,
+        neighbourChanges: neighbourBefore.join(',') !== neighbourAfter.join(','), distantStable: distantBefore.join(',') === distantAfter.join(','),
+        unknownRepeatsKnown: neighbourBefore.join(',') === missingNeighbour.join(','), waterDoesNotLendSoil: neighbourBefore.join(',') === waterNeighbour.join(','),
+        arrivalRebakes: buildsArrived > buildsMissing && arrivedNeighbour.join(',') !== missingNeighbour.join(','),
+        exhaustedDoesNotBorrowGreen: depletedAmongGreen.join(',') === depletedAmongBare.join(','),
+        zeroTrafficDoesNotBorrowWear: baselineZeroTraffic.join(',') === noBorrowedTraffic.join(','),
+        realTrafficChangesMaterial: baseline.join(',') !== worn.join(','), cameraIndependent: baseline.join(',') === movedCamera.join(','),
+        evictionDeterministic: JSON.stringify(chunksBefore) === JSON.stringify(afterEviction), mutableInputsRebake: beforeInPlace.join(',') !== afterInPlace.join(','),
+        removedTrailThresholdStable: trafficBefore.join(',') === trafficAfter.join(',') && trafficBuildsBefore === trafficBuildsAfter,
+        authoritativeStateUnchanged: preserved === JSON.stringify(world), cacheBytes: diagnostics.cacheBytes,
+      };
+    });
+    assert.equal(result.sameBucketStable, true); assert.equal(result.buildsSame, result.buildsBefore, 'within-bucket changes neither alter the raster nor rebuild the cache');
+    assert.equal(result.buildsChanged - result.buildsSame, 2, 'a changed edge cell invalidates exactly its two dependent chunks');
+    assert.deepEqual(result.changedChunks.sort(), ['0:0', '1:0']);
+    for (const key of ['neighbourChanges','distantStable','unknownRepeatsKnown','waterDoesNotLendSoil','arrivalRebakes','exhaustedDoesNotBorrowGreen',
+      'zeroTrafficDoesNotBorrowWear','realTrafficChangesMaterial','cameraIndependent','evictionDeterministic','mutableInputsRebake','removedTrailThresholdStable','authoritativeStateUnchanged'] as const) assert.equal(result[key], true, key);
+    assert.ok(result.cacheBytes < 10 * 1024 * 1024);
+    mkdirSync('artifacts', { recursive: true }); writeFileSync('artifacts/material-ground-controls.json', JSON.stringify(result, null, 2) + '\n');
+  } finally { await browser.close(); await server.close(); }
+});
+
 test('landscape state: ecological surfaces, material structures and canopy cutaways remain inspectable', { timeout: 60_000 }, async t => {
   if (!existsSync(chromium.executablePath())) {
     t.skip('Chromium absent: ecological raster, structure stock, occlusion, hit-target and cache checks not run.'); return;

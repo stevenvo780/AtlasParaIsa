@@ -58,6 +58,15 @@ interface RGB {
   b: number;
 }
 
+interface GroundMaterial {
+  soil: RGB; leaf: RGB; cover: number; moisture: number; traffic: number;
+}
+
+/** The raster and its cache key must observe the same received-state buckets. */
+function groundBucket(value: number): number { return Math.round(clamp01(value) * 12); }
+function groundValue(value: number): number { return groundBucket(value) / 12; }
+function smooth(value: number): number { const t = clamp01(value); return t * t * (3 - 2 * t); }
+
 function rgb(r: number, g: number, b: number): RGB {
   return { r, g, b };
 }
@@ -199,6 +208,15 @@ function rnd(x: number, y: number, salt: number): number {
   return hash3(x, y, salt) / 4294967296;
 }
 
+/** Stable world-space variation of material, never a source of ecological state. */
+function materialNoise(x: number, y: number, scale: number, salt: number): number {
+  const gx = Math.floor(x / scale), gy = Math.floor(y / scale);
+  const u = smooth(x / scale - gx), v = smooth(y / scale - gy);
+  const top = rnd(gx, gy, salt) * (1 - u) + rnd(gx + 1, gy, salt) * u;
+  const bottom = rnd(gx, gy + 1, salt) * (1 - u) + rnd(gx + 1, gy + 1, salt) * u;
+  return top * (1 - v) + bottom * v;
+}
+
 function clamp(v: number, lo: number, hi: number): number {
   return v < lo ? lo : v > hi ? hi : v;
 }
@@ -330,6 +348,10 @@ export class Landscape {
   private readonly terrainCache = new BoundedCache<GroundChunk>(TERRAIN_CACHE_LIMIT, (chunk, key) => {
     this.gpu?.drop(key); chunk.canvas.width = chunk.canvas.height = 0;
   });
+  private readonly groundStamp = Object.assign(document.createElement('canvas'), { width: ART, height: ART });
+  private readonly groundStampContext = this.groundStamp.getContext('2d')!;
+  private readonly groundPixels = this.groundStampContext.createImageData(ART, ART);
+  private groundMaterials = new WeakMap<Tile, GroundMaterial>();
   private spriteBytes = 0;
   private readonly spriteCache = new BoundedCache<HTMLCanvasElement>(SPRITE_CACHE_LIMIT, canvas => { this.spriteBytes -= canvas.width * canvas.height * 4; canvas.width = canvas.height = 0; });
   private chunks: GroundChunk[] = [];
@@ -622,6 +644,7 @@ export class Landscape {
     this.prev = null;
     this.curr = null;
     this.terrainCache.clear(); this.spriteCache.clear(); this.chunks = []; this.gpu.destroy();
+    this.groundStamp.width = this.groundStamp.height = 0;
     this.scene.width = this.scene.height = 0;
     this.labels.width = this.labels.height = 0; this.labels.remove(); this.phaseLayer.remove(); this.rainLayer.remove();
   }
@@ -677,9 +700,9 @@ export class Landscape {
       const t = this.tileAt(x, y);
       if (!t) { acc(-1); continue; }
       for (const value of `${t.terrain}:${t.biome ?? ''}:${t.feature ?? ''}`) acc(value.charCodeAt(0));
-      for (const value of [t.moisture, t.vegetation, t.food, t.growth ?? 1, t.fertility ?? .5, t.cultivation ?? 0, t.traffic ?? 0, t.drinkingWater ?? 0, t.life ?? 0]) acc(Math.round(clamp01(value) * 12));
+      for (const value of [t.moisture, t.vegetation, t.food, t.growth ?? 1, t.fertility ?? .5, t.cultivation ?? 0, t.traffic ?? 0, t.drinkingWater ?? 0, t.life ?? 0]) acc(groundBucket(value));
       // Preserve visible on/off boundaries even when both values share a coarse color bucket.
-      for (const active of [(t.traffic ?? 0) > .12, (t.cultivation ?? 0) > .08, (t.drinkingWater ?? 0) > .04,
+      for (const active of [(t.cultivation ?? 0) > .08, (t.drinkingWater ?? 0) > .04,
         (t.growth ?? t.vegetation) > .15, (t.growth ?? t.vegetation) > .25, t.vegetation > .04,
         (t.life ?? 0) > .45, t.vegetation > .25, t.food > .3, t.food > .72]) acc(active ? 1 : 0);
       acc(Math.round((t.wood ?? 0) * 2)); acc(Math.round((t.stone ?? 0) * 2)); acc(t.variety ?? 0);
@@ -693,6 +716,8 @@ export class Landscape {
 
   private bakeGround(): void {
     if (this.worldW === 0 || this.worldH === 0) return;
+    // Input objects may be reused by callers; palette memoization lasts only this bake.
+    this.groundMaterials = new WeakMap();
     this.chunks = [];
     for (let cy = Math.floor(this.originY / CHUNK_ART_TILES); cy <= Math.floor((this.originY + this.worldH - 1) / CHUNK_ART_TILES); cy++) {
       for (let cx = Math.floor(this.originX / CHUNK_ART_TILES); cx <= Math.floor((this.originX + this.worldW - 1) / CHUNK_ART_TILES); cx++) {
@@ -721,13 +746,28 @@ export class Landscape {
     this.groundBaked = true;
   }
 
+  private groundMaterial(tile: Tile): GroundMaterial {
+    const cached = this.groundMaterials.get(tile); if (cached) return cached;
+    const fertility = groundValue(tile.fertility ?? .5), moisture = groundValue(tile.moisture);
+    const cultivation = groundValue(tile.cultivation ?? 0), traffic = groundValue(tile.traffic ?? 0);
+    const mineral = tile.biome === 'desert' ? P.sand : tile.biome === 'mountain' ? P.stoneShade : P.soilLight;
+    const humus = tile.biome === 'wetland' ? rgb(83, 88, 65) : rgb(103, 83, 57);
+    const green = tile.biome === 'wetland' ? rgb(78, 112, 93)
+      : tile.biome === 'forest' ? rgb(88, 119, 70) : rgb(126, 151, 88);
+    const material = {
+      soil: darken(mix(mineral, humus, fertility * .72), moisture * .2),
+      leaf: mix(green, rgb(180, 161, 100), (1 - moisture) * .6),
+      cover: groundValue(tile.vegetation) * (1 - cultivation * .6) * (1 - traffic * .88) * (tile.terrain === 'shelter' ? .25 : 1),
+      moisture, traffic,
+    };
+    this.groundMaterials.set(tile, material); return material;
+  }
+
   private bakeTileBase(g: CanvasRenderingContext2D, x: number, y: number): void {
     const tile = this.tileAt(x, y);
     const ox = x * ART;
     const oy = y * ART;
     const terrain: Terrain = tile ? tile.terrain : 'water';
-    const moisture = tile ? clamp01(tile.moisture) : 1;
-    const veg = tile ? clamp01(tile.vegetation) : 0;
 
     if (terrain === 'water') {
       // Profundidad legible: cuanto más agua alrededor, más oscuro el teal.
@@ -750,38 +790,55 @@ export class Landscape {
       return;
     }
 
-    // State fields cover the cell itself: resource sprites cannot substitute for the ground.
-    const quantize = (value: number) => Math.round(clamp01(value) * 12) / 12;
-    const fertility = quantize(tile?.fertility ?? .5), dampness = quantize(moisture);
-    const cultivation = quantize(tile?.cultivation ?? 0), traffic = quantize(tile?.traffic ?? 0);
-    const cover = quantize(veg) * (1 - cultivation * .6) * (1 - traffic * .85);
-    const mineral = tile?.biome === 'desert' ? P.sand : tile?.biome === 'mountain' ? P.stoneShade : P.soilLight;
-    const humus = tile?.biome === 'wetland' ? rgb(88, 96, 68) : rgb(110, 91, 62);
-    const soil = darken(mix(mineral, humus, fertility * .65), dampness * .2);
-    const green = tile?.biome === 'wetland' ? rgb(81, 119, 99)
-      : tile?.biome === 'forest' ? rgb(91, 126, 75) : rgb(143, 165, 100);
-    const leaf = mix(green, rgb(180, 171, 113), (1 - dampness) * .45);
-    px(g, ox, oy, ART, ART, css(soil));
-    // Coarse, world-anchored patches cross cell borders; they do not create extra biomass.
-    for (let by = 0; by < ART; by += 4) for (let bx = 0; bx < ART; bx += 4) {
-      const patch = rnd(Math.floor((ox + bx) / 7), Math.floor((oy + by) / 7), 348);
-      const rooted = clamp01(cover * 1.6 - patch * .65) * (terrain === 'shelter' ? .25 : 1);
-      const c = mix(soil, leaf, rooted);
-      px(g, ox + bx, oy + by, 4, 4, css(mix(c, lighten(c, .09), patch)));
+    if (!tile) return;
+    const owner = this.groundMaterial(tile), samples: GroundMaterial[] = [];
+    // Four surrounding cell centres per pixel, inside a one-cell stencil. Unknown
+    // land repeats the known edge; water never lends a green cover or a soil palette.
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const neighbour = this.tileAt(x + dx, y + dy);
+      samples.push(neighbour && neighbour.terrain !== 'water' ? this.groundMaterial(neighbour) : owner);
     }
-    const grains = 2 + Math.round(fertility * 3);
-    for (let i = 0; i < grains; i++) {
-      const rx = ox + Math.floor(rnd(x, y, 110 + i + (tile?.variety ?? 0)) * ART);
-      const ry = oy + Math.floor(rnd(x, y, 150 + i) * ART);
-      px(g, rx, ry, 1 + (i % 2), 1, css(darken(soil, .16), .35 + fertility * .25));
+    const data = this.groundPixels.data;
+    for (let by = 0; by < ART; by++) for (let bx = 0; bx < ART; bx++) {
+      const u = smooth(((bx + .5) / ART + .5) % 1), v = smooth(((by + .5) / ART + .5) % 1);
+      const index = (by < ART / 2 ? 0 : 3) + (bx < ART / 2 ? 0 : 1);
+      const a = samples[index]!, b = samples[index + 1]!, c = samples[index + 3]!, d = samples[index + 4]!;
+      const wa = (1 - u) * (1 - v), wb = u * (1 - v), wc = (1 - u) * v, wd = u * v;
+      const wx = ox + bx, wy = oy + by;
+      const broad = materialNoise(wx, wy, 29, 348), fine = materialNoise(wx, wy, 7, 351);
+      const patch = broad * .68 + fine * .32;
+      // An exhausted cell cannot borrow living cover from its neighbours. Subcell
+      // distribution is a stable symbol of a cell-average stock, not extra biomass.
+      const cover = Math.min(owner.cover * 1.5, a.cover * wa + b.cover * wb + c.cover * wc + d.cover * wd);
+      const rooted = owner.cover === 0 ? 0 : smooth((cover - patch * .55 + .02) / .52);
+      const traffic = owner.traffic > 0 ? a.traffic * wa + b.traffic * wb + c.traffic * wc + d.traffic * wd : 0;
+      const wear = smooth((traffic - patch * .16) / .85);
+      const soilR = a.soil.r * wa + b.soil.r * wb + c.soil.r * wc + d.soil.r * wd;
+      const soilG = a.soil.g * wa + b.soil.g * wb + c.soil.g * wc + d.soil.g * wd;
+      const soilB = a.soil.b * wa + b.soil.b * wb + c.soil.b * wc + d.soil.b * wd;
+      const leafR = a.leaf.r * wa + b.leaf.r * wb + c.leaf.r * wc + d.leaf.r * wd;
+      const leafG = a.leaf.g * wa + b.leaf.g * wb + c.leaf.g * wc + d.leaf.g * wd;
+      const leafB = a.leaf.b * wa + b.leaf.b * wb + c.leaf.b * wc + d.leaf.b * wd;
+      const pigment = rooted * (1 - wear * .65);
+      // A compacted surface replaces material; no centre node, edge, footstep or
+      // claimed route is manufactured from the scalar traffic field.
+      const grainSeed = rnd(wx, wy, 358);
+      const grain = (grainSeed - .5) * (1 - wear) * 4;
+      // Sparse fibres and granules live on a world lattice incommensurate with
+      // cells. They symbolize existing cover/soil, never countable extra plants.
+      const fx = Math.floor(wx / 5), fy = Math.floor(wy / 7);
+      const tx = fx * 5 + Math.floor(rnd(fx, fy, 364) * 5), ty = fy * 7 + 2 + Math.floor(rnd(fx, fy, 365) * 4);
+      const fibre = owner.cover > 0 && rooted > .6 && rnd(fx, fy, 366) < cover * .8 && wx === tx && wy >= ty - 1 && wy <= ty;
+      const granule = rooted < .35 && grainSeed < .035 ? (owner.moisture > .5 ? -8 : 8) : 0;
+      const relief = Math.round((fine - .5) * 3) * 3 + (broad - .5) * 6 + grain + granule + (fibre ? 15 : 0);
+      const offset = (by * ART + bx) * 4;
+      data[offset] = soilR + (leafR - soilR) * pigment + wear * 9 + relief;
+      data[offset + 1] = soilG + (leafG - soilG) * pigment + wear * 6 + relief;
+      data[offset + 2] = soilB + (leafB - soilB) * pigment + wear * 3 + relief;
+      data[offset + 3] = 255;
     }
-    const blades = Math.round(cover * 4);
-    for (let i = 0; i < blades; i++) {
-      const rx = ox + 1 + Math.floor(rnd(x, y, 340 + i) * 13);
-      const ry = oy + 2 + Math.floor(rnd(x, y, 400 + i) * 12);
-      px(g, rx, ry, 1, 2, css(mix(leaf, P.grassLight, fertility * .3)));
-      if (cover > .6) px(g, rx + 1, ry + 1, 1, 1, css(darken(leaf, .15)));
-    }
+    this.groundStampContext.putImageData(this.groundPixels, 0, 0);
+    g.drawImage(this.groundStamp, ox, oy);
   }
 
   /** Resource art follows server stock/growth. Depleted resources do not remain lush props. */
@@ -789,18 +846,6 @@ export class Landscape {
     const { x, y } = tile, ox = x * ART, oy = y * ART;
     const growth = clamp01(tile.growth ?? tile.vegetation);
     if (tile.terrain === 'water') { this.drawReeds(g, x, y, ox, oy, 0); return; }
-    const traffic = clamp01(tile.traffic ?? 0);
-    if (traffic > .12) {
-      const cx = ox + 8, cy = oy + 9;
-      g.save(); g.strokeStyle = css(P.soilLight, .35 + traffic * .45); g.lineWidth = 1 + Math.round(traffic * 5); g.lineCap = 'round';
-      g.beginPath();
-      for (const [dx, dy] of [[0,-1],[1,0],[0,1],[-1,0]]) if ((this.tileAt(x + dx!, y + dy!)?.traffic ?? 0) > .12) {
-        g.moveTo(cx, cy); g.lineTo(cx + dx! * 8, cy + dy! * 7);
-      }
-      g.stroke(); g.restore();
-      ellipse(g, cx, cy, 2 + traffic * 3, 1 + traffic * 1.4, css(P.soilLight, .35 + traffic * .4));
-      for (let i = 0; i < 3; i++) px(g, ox + 4 + i * 3, oy + 8 + (i + (tile.variety ?? 0)) % 3, 1, 1, css(P.trunkLight, traffic * .45));
-    }
     const cultivation = clamp01(tile.cultivation ?? 0);
     if (cultivation > .08) {
       for (let row = 0; row < 2 + Math.round(cultivation * 2); row++) {

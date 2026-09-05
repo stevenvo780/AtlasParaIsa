@@ -34,6 +34,19 @@ async function fullscreen(page: Page, width: number, height: number): Promise<vo
   const bounds = await page.locator('#landscape').boundingBox(); expect(bounds).toEqual({ x: 0, y: 0, width, height });
   expect(await page.evaluate(() => ({ x: document.documentElement.scrollWidth > innerWidth, y: document.documentElement.scrollHeight > innerHeight }))).toEqual({ x: false, y: false });
 }
+async function chooseGesture(page: Page, kind: 'plant' | 'invite' | 'remember'): Promise<void> {
+  if (await page.locator('#tool-drawer').isHidden()) await page.locator('#intervene-toggle').click();
+  await page.locator(`[data-gesture="${kind}"]`).click();
+}
+async function showTask(page: Page, order: string): Promise<void> {
+  if (order === 'auto') return;
+  if (await page.locator('#task-palette').isHidden()) await page.locator('#task-toggle').click();
+  const group = await page.locator(`[data-order="${order}"]`).getAttribute('data-order-group');
+  await page.locator(`[data-task-group="${group}"]`).click();
+}
+async function issueTask(page: Page, order: string): Promise<void> {
+  await showTask(page, order); await page.locator(`[data-order="${order}"]`).click();
+}
 function setFixtureTick(tick: number): void {
   app.world.tick=tick;
   // Clock fixtures preserve the V5 identity-age invariant before any real step is run.
@@ -76,7 +89,7 @@ test('desktop full-screen HUD, keyboard population selection and physical neighb
   await expect(page.locator('#gesture-result')).toContainText('Tarea recibida');
   await page.locator('[data-order="auto"]').click(); await expect(page.locator('#gesture-result')).toContainText('Retoma');
   await page.locator('#landscape').focus(); await page.keyboard.press('ArrowRight'); await expect(page.locator('#follow-toggle')).toHaveAttribute('aria-pressed', 'false');
-  await page.locator('[data-close="population"]').click(); await page.locator('#focus-s').click(); await expect(page.locator('#inspector-title')).toBeInViewport();
+  await expect(page.locator('#population-drawer')).toBeHidden(); await page.locator('#focus-s').click(); await expect(page.locator('#inspector-title')).toBeInViewport();
   await page.screenshot({ path: 'artifacts/desktop-fullscreen-v5.png' }); expect(observed.errors).toEqual([]);
 });
 
@@ -98,12 +111,12 @@ test('mobile touch: full-screen canvas, one drawer, three gestures, synthetic me
     await page.locator('#focus-i').tap(); await expect(page.locator('#inspector-drawer')).toBeVisible(); await expect(page.locator('#direct-toggle')).toBeInViewport();
     await page.locator('#population-toggle').tap(); await expect(page.locator('#population-drawer')).toBeVisible(); await expect(page.locator('#inspector-drawer')).toBeHidden();
     await page.locator('#focus-s').tap(); await expect(page.locator('#population-drawer')).toBeHidden();
-    await page.locator('[data-gesture="plant"]').tap(); await expect(page.locator('#tool-drawer')).toBeVisible(); await expect(page.locator('#inspector-drawer')).toBeHidden();
+    await chooseGesture(page, 'plant'); await expect(page.locator('#tool-drawer')).toBeVisible(); await expect(page.locator('#inspector-drawer')).toBeHidden();
     await page.locator('#gesture-send').tap(); await expect(page.locator('#gesture-result')).toContainText('planta nueva');
     await expect.poll(() => app.world.tick - app.world.lastGestureTick).toBeGreaterThanOrEqual(30);
-    await page.locator('[data-gesture="invite"]').tap(); await page.locator('#gesture-send').tap(); await expect(page.locator('#gesture-result')).toContainText('invitación');
+    await chooseGesture(page, 'invite'); await page.locator('#gesture-send').tap(); await expect(page.locator('#gesture-result')).toContainText('invitación');
     await page.locator('#layer-toggle').tap(); await page.locator('#place-select').selectOption('claro');
-    await page.locator('[data-gesture="remember"]').tap(); await expect(page.locator('#memory-preview')).toContainText('no biográfico');
+    await chooseGesture(page, 'remember'); await expect(page.locator('#memory-preview')).toContainText('no biográfico');
     await expect.poll(() => app.world.tick - app.world.lastGestureTick).toBeGreaterThanOrEqual(30);
     await page.locator('#gesture-send').tap(); await expect(page.locator('#gesture-result')).toContainText('contexto');
     await page.locator('[data-close="tool"]').tap(); await page.screenshot({ path: 'artifacts/mobile-fullscreen-v5.png' });
@@ -152,6 +165,8 @@ test('world statistics show real scopes, live series and keyboard-operated tabs'
   const geometry = await page.locator('.history-chart svg').evaluateAll(charts => charts.map(chart => ({ text: chart.getAttribute('aria-label'), points: chart.querySelector('polyline')?.getAttribute('points') })));
   expect(geometry.every(chart => chart.text?.includes('muestra') && chart.points && !/NaN|Infinity/.test(chart.points))).toBe(true);
   await page.screenshot({ path: 'artifacts/desktop-stats-v5.png' });
+  const episodes=page.locator('[data-detail="world-events"]'); await episodes.locator('summary').click();
+  await expect(episodes).toContainText('Qué influyó:');
   await page.locator('#stats-tab-life').focus(); await page.keyboard.press('ArrowRight');
   await expect(page.locator('#stats-tab-land')).toBeFocused(); await expect(page.locator('#stats-tab-land')).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('#stats-content')).toContainText('no todo el territorio posible');
@@ -183,7 +198,8 @@ test('an engine-born descendant exposes genealogy, causal memories and learned c
   const birth = app.world.events.find(event => event.kind === 'birth' && event.actors.includes(child.id))!; expect(birth).toBeTruthy();
   const observed = observeMessages(page); await page.setViewportSize({ width: 1440, height: 900 }); await enter(page);
   await page.locator('#population-toggle').click(); await page.getByLabel('Buscar habitante').fill(child.name); await page.locator(`[data-person="${child.id}"]`).click();
-  await page.locator('[data-close="population"]').click();
+  await expect(page.locator('#population-drawer')).toBeHidden();
+  await page.locator('#inspector-tab-story').click();
   const genomeSummary = page.locator('[data-detail="genome"] summary'); await genomeSummary.focus(); await page.keyboard.press('Enter');
   await expect(page.locator('[data-detail="genome"]')).toContainText('Parámetros heredados y fijados al nacer');
   await expect(page.locator('[data-detail="genome"] [data-parent]')).toHaveCount(2);
@@ -191,14 +207,25 @@ test('an engine-born descendant exposes genealogy, causal memories and learned c
   await page.locator('[data-detail="experiences"] summary').click(); await expect(page.locator('.experience-list')).toContainText(birth.cause);
   await page.locator('[data-detail="community"] summary').click(); await expect(page.locator('.person-community')).not.toContainText('Sin comunidad');
   await expect(page.locator('#inhabitant-card meter[aria-label="Sed"]')).toHaveCount(1);
-  await page.locator('#inspector-drawer').evaluate(panel => { panel.scrollTop = 240; });
+  await page.locator('#inhabitant-card').evaluate(panel => { panel.scrollTop = 240; });
   await page.screenshot({ path: 'artifacts/genealogy-v5.png' });
   const parentId = child.genome.parents[0]!, parent = app.world.people.find(p => p.id === parentId)!;
-  await page.locator(`[data-parent="${parentId}"]`).focus(); await page.keyboard.press('Enter');
+  await page.locator(`[data-detail="genome"] [data-parent="${parentId}"]`).focus(); await page.keyboard.press('Enter');
   await expect(page.locator('#inspector-title')).toHaveText(parent.name);
   await page.locator('#stats-toggle').click(); await page.locator('#stats-tab-communities').click();
   await expect(page.locator('.community-card')).toHaveCount(app.world.communities.length);
-  await page.screenshot({ path: 'artifacts/communities-v5.png' }); expect(observed.errors).toEqual([]);
+  await page.screenshot({ path: 'artifacts/communities-v5.png' });
+  await page.locator(`.community-members [data-person-link="${child.id}"]`).click();
+  await expect(page.locator('#inspector-title')).toHaveText(child.name);
+  await page.locator('#inspector-tab-story').click();
+  if (await page.locator('[data-detail="community"]').getAttribute('open') === null) await page.locator('[data-detail="community"] summary').click();
+  const communityLink=page.locator('[data-community]'); await communityLink.focus();
+  const linkedTick=app.world.tick, scroll=await page.locator('#inhabitant-card').evaluate(card=>card.scrollTop);
+  await expect.poll(()=>app.world.tick).toBeGreaterThan(linkedTick+5); await expect(communityLink).toBeFocused();
+  expect(await page.locator('#inhabitant-card').evaluate(card=>card.scrollTop)).toBeCloseTo(scroll,0);
+  await page.keyboard.press('Enter');
+  await expect(page.locator(`[data-community-card="${child.communityId}"]`)).toBeFocused();
+  expect(observed.gestures).toHaveLength(0); expect(observed.errors).toEqual([]);
 });
 
 test('drink, hunt and cooperate orders use confirmed protocol and return to autonomy', async ({ page }) => {
@@ -221,7 +248,7 @@ test('drink, hunt and cooperate orders use confirmed protocol and return to auto
     const currentResource = () => app.world.tiles.find(tile => tile.x === 25 && tile.y === 8)!;
     const before = { water: currentResource().drinkingWater!, fauna: currentResource().fauna!, thirst: currentActor().thirst,
       inventory: currentActor().inventory, skill: currentLearner().skills.gather ?? 0, trust: currentActor().bonds[learner.id] ?? 0, tick: app.world.tick };
-    await page.locator(`[data-order="${order}"]`).click();
+    await issueTask(page, order);
     await expect.poll(() => observed.gestures.some(gesture => gesture.order === order)).toBe(true);
     await expect(page.locator('#gesture-result')).toContainText('Tarea recibida');
     await expect.poll(() => app.world.people.find(p => p.id === 's')!.command?.order).toBe(order);
@@ -244,6 +271,7 @@ test('drink, hunt and cooperate orders use confirmed protocol and return to auto
     await expect.poll(() => app.world.people.find(p => p.id === 's')!.controlMode).toBe('auto');
   }
   const cooperation = app.world.events.find(event => event.kind === 'cooperation' && event.actors.includes('s'))!; expect(cooperation).toBeTruthy();
+  await page.locator('#inspector-tab-story').click();
   await page.locator('[data-detail="experiences"] summary').click(); await expect(page.locator('.experience-list')).toContainText(cooperation.cause);
   await page.screenshot({ path: 'artifacts/cooperation-v5.png' });
   expect(new Set(observed.gestures.map(gesture => gesture.id)).size).toBe(observed.gestures.length);
@@ -313,6 +341,7 @@ test('V5 a keyboard harvest stores real food once, shows progress and respects t
   const observed=observeMessages(page);await page.setViewportSize({width:390,height:844});await enter(page);await page.locator('#focus-s').click();
   const reserve=page.getByRole('meter',{name:'Alimento reservado'});
   await expect(reserve).toHaveAttribute('value','0.24');await expect(reserve).toHaveAttribute('max','0.25');
+  await showTask(page,'forage');
   const button=page.getByRole('button',{name:'Cosechar alimento',exact:true});await button.focus();await expect(button).toBeInViewport();
   await page.screenshot({path:'artifacts/forage-before-v5.png'});await page.keyboard.press('Enter');
   await expect.poll(()=>observed.gestures.length).toBe(1);
@@ -347,7 +376,7 @@ test('V5 research and immediate craft keep causal work, material balances and ke
   const observed=observeMessages(page);await page.setViewportSize({width:1440,height:900});await enter(page);
   const current=()=>app.world.people.find(person=>person.id==='s')!;
   async function command(order:'research'|'craft',done:()=>boolean):Promise<void>{
-    const previous=observed.gestures.length;await page.locator(`[data-order="${order}"]`).click();await expect.poll(()=>observed.gestures.length).toBe(previous+1);
+    const previous=observed.gestures.length;await issueTask(page, order);await expect.poll(()=>observed.gestures.length).toBe(previous+1);
     let steps=0;
     for(let i=0;i<5;i++)app.stepOnce();await expect(page.locator('#gesture-result')).toContainText('Tarea recibida');
     await expect.poll(()=>{for(let i=0;i<5&&!done();i++){if(++steps>150)throw new Error(`${order} no concluyó en 150 pasos reales`);app.stepOnce();}expect(app.failed).toBe(false);return done();},{intervals:[10,20,30]}).toBe(true);
@@ -360,10 +389,13 @@ test('V5 research and immediate craft keep causal work, material balances and ke
   await command('craft',()=>app.world.technology.ledger.crafted===2);
   expect(current().materials.stone).toBe(6);expect(current().technology.items).toHaveLength(2);
   await expect.poll(()=>observed.views.at(-1)?.technology?.dynamics.massError).toBe(0);
-  await page.locator('#stats-toggle').click();await page.locator('#stats-tab-technology').focus();await page.keyboard.press('Enter');
+  await page.locator('#inspector-tab-kit').click(); await page.locator('[data-detail="products"] summary').click();
+  await page.locator('[data-recipe]').first().click();
+  await expect(page.locator('#stats-tab-technology')).toHaveAttribute('aria-selected','true');
   await expect(page.locator('#stats-content')).toContainText('La materia se conserva');
   await expect(page.locator('.technology-recipe')).toHaveCount(1);
-  const summary=page.locator('.technology-recipe summary');await summary.focus();await page.keyboard.press('Enter');
+  const summary=page.locator('.technology-recipe summary');await expect(summary).toBeFocused();
+  await expect(page.locator('.technology-recipe')).toHaveAttribute('open','');
   await expect(page.locator('.process-steps')).toContainText('Intensidad 4/4');
   for(let i=0;i<5;i++)app.stepOnce();await expect.poll(()=>observed.views.at(-1)?.tick).toBe(app.world.tick);await expect(summary).toBeFocused();
   await page.locator('#stats-content').evaluate(panel=>{panel.scrollTop=panel.scrollHeight;});
@@ -376,7 +408,7 @@ test('V5 an ended life leaves its cause visible and cannot retain human controls
   for (const inhabitant of app.world.people) { inhabitant.action='rest';inhabitant.target={x:inhabitant.x,y:inhabitant.y};inhabitant.decisionAt=5000; }
   const neighbor = app.world.people.find(person=>person.role==='neighbor')!;
   const observed=observeMessages(page);await page.setViewportSize({width:1440,height:900});await enter(page);
-  await page.locator('#population-toggle').click();await page.locator(`[data-person="${neighbor.id}"]`).click();await page.locator('[data-close="population"]').click();
+  await page.locator('#population-toggle').click();await page.locator(`[data-person="${neighbor.id}"]`).click();await expect(page.locator('#population-drawer')).toBeHidden();
   await page.locator('[data-detail="vitality"] summary').click();await expect(page.locator('#inhabitant-card meter[aria-label="Salud"]')).toHaveCount(1);
   await page.locator('#follow-toggle').click();await page.locator('#direct-toggle').click();
   // Prepared terminal injury; removal and its public cause are produced by actual engine steps.
@@ -398,14 +430,14 @@ test('V4 invention, component construction and repair debit real work and materi
   const observed=observeMessages(page);await page.setViewportSize({width:1440,height:900});await enter(page);
   const current=()=>app.world.people.find(p=>p.id==='s')!;
   async function command(order:'invent'|'build'|'repair',done:()=>boolean):Promise<void>{
-    const previous=observed.gestures.length;await page.locator(`[data-order="${order}"]`).click();await expect.poll(()=>observed.gestures.length).toBe(previous+1);
-    let sawCommand=false;
-    await expect.poll(()=>{for(let i=0;i<5&&!done();i++){app.stepOnce();sawCommand ||= current().command?.order===order;if(sawCommand&&!current().command&&!done())throw new Error(`La orden ${order} terminó sin producir su resultado.`);}expect(app.failed).toBe(false);return done();},{intervals:[10,20,30,50]}).toBe(true);expect(app.failed).toBe(false);expect(sawCommand).toBe(true);
+    const previous=observed.gestures.length;await issueTask(page, order);await expect.poll(()=>observed.gestures.length).toBe(previous+1);
+    let sawCommand=false, steps=0;
+    await expect.poll(()=>{for(let i=0;i<5&&!done();i++){if(++steps>500)throw new Error(`${order} no concluyó en 500 pasos reales`);app.stepOnce();sawCommand ||= current().command?.order===order;if(sawCommand&&!current().command&&!done())throw new Error(`La orden ${order} terminó sin producir su resultado.`);}expect(app.failed).toBe(false);return done();},{intervals:[10,20,30,50],timeout:15_000}).toBe(true);expect(app.failed).toBe(false);expect(sawCommand).toBe(true);
   }
   await command('invent',()=>app.world.inventionDynamics.accepted===1);
   const blueprint=app.world.blueprints.find(b=>b.inventorId==='s')!;expect(blueprint).toBeTruthy();expect(blueprint.parents).toContain('blueprint-base');expect(blueprint.components.length).toBeGreaterThan(2);expect(current().materials.wood).toBe(11);expect(blueprint.uses).toBe(0);expect(blueprint.usefulness).toBe(0);
   current().decisionAt=app.world.tick+5000;for(let i=0;i<5;i++)app.stepOnce();
-  await page.locator('[data-detail="blueprint"] summary').click();await expect(page.locator(`[data-blueprint="${blueprint.id}"]`)).toContainText(blueprint.name);await expect(page.locator('.blueprint-cost').first()).toContainText(`${blueprint.cost.work} trabajo`);
+  await page.locator('#inspector-tab-kit').click();await page.locator('[data-detail="blueprint"] summary').click();await expect(page.locator(`[data-blueprint="${blueprint.id}"]`)).toContainText(blueprint.name);await expect(page.locator('.blueprint-cost').first()).toContainText(`${blueprint.cost.work} trabajo`);
   // The next starting inventory is prepared explicitly; construction itself must consume its exact recipe.
   current().materials={wood:blueprint.cost.wood,stone:blueprint.cost.stone};current().decisionAt=app.world.tick+5000;
   await command('build',()=>app.world.structures.some(s=>s.builderId==='s'));
@@ -416,5 +448,61 @@ test('V4 invention, component construction and repair debit real work and materi
   for(let i=0;i<5;i++)app.stepOnce();
   await page.locator('#stats-toggle').click();await page.locator('#stats-tab-land').click();await expect(page.locator('#stats-content')).toContainText('Proyectos y construcciones');await page.locator('[data-detail="blueprints"] summary').click();
   await page.locator('#stats-content').evaluate(panel=>{panel.scrollTop=panel.scrollHeight;});await page.screenshot({path:'artifacts/inventions-v5.png'});
+  await page.locator(`.structure-link[data-place-x="${structure.x}"][data-place-y="${structure.y}"]`).click();
+  await expect(page.locator('#inspector-drawer .structure-card')).toContainText(structure.name);
+  await expect(page.locator('#person-controls')).toBeHidden();
   expect(observed.gestures.map(g=>g.order)).toEqual(['invent','build','repair']);expect(new Set(observed.gestures.map(g=>g.id)).size).toBe(3);expect(observed.errors).toEqual([]);
+});
+
+test('V5 notebook navigation preserves a full map, fixed mobile tasks, keyboard focus and read-only selections', async ({ page }) => {
+  const observed = observeMessages(page); await page.setViewportSize({width:1440,height:900}); await enter(page);
+  await expect(page.locator('.game-drawer:visible')).toHaveCount(1);
+  const dock=await page.locator('#inspector-drawer').boundingBox(); expect(dock!.x).toBeGreaterThanOrEqual(1020); expect(dock!.width).toBeLessThanOrEqual(400);
+  await fullscreen(page,1440,900);
+  for(const id of ['population-toggle','stats-toggle','layer-toggle','intervene-toggle','inspector-toggle']) {
+    await page.locator(`#${id}`).click(); await expect(page.locator('.game-drawer:visible')).toHaveCount(1);
+    await expect(page.locator(`#${id}`)).toHaveAttribute('aria-expanded','true');
+  }
+  await page.setViewportSize({width:390,height:844}); await page.emulateMedia({reducedMotion:'reduce'});
+  await page.locator('#inspector-tab-now').focus(); await page.keyboard.press('ArrowRight');
+  await expect(page.locator('#inspector-tab-kit')).toBeFocused(); await expect(page.locator('#inspector-section-now')).toBeHidden();
+  await page.keyboard.press('End'); await expect(page.locator('#inspector-tab-story')).toBeFocused();
+  const fixedBefore=await page.locator('#task-toggle').boundingBox();
+  await page.locator('[data-detail="genome"] summary').click();
+  await page.locator('#inhabitant-card').evaluate(card=>{card.scrollTop=card.scrollHeight;});
+  const fixedAfter=await page.locator('#task-toggle').boundingBox(); expect(fixedAfter).toEqual(fixedBefore);
+  await expect(page.locator('#task-toggle')).toBeInViewport(); await page.locator('#task-toggle').click();
+  const available:string[]=[];
+  for(const group of ['sustenance','work','building']) {
+    await page.locator(`[data-task-group="${group}"]`).click();
+    for(const button of await page.locator('[data-order-group]:visible').all()) { await expect(button).toBeInViewport(); available.push((await button.getAttribute('data-order'))!); }
+  }
+  expect(available.sort()).toEqual(['build','cooperate','craft','drink','explore','farm','forage','gather','hunt','invent','repair','research','rest'].sort());
+  await expect(page.locator('[data-order="auto"]')).toBeInViewport();
+  await page.setViewportSize({width:320,height:568});
+  await page.locator('[data-task-group="work"]').click();
+  for(const button of await page.locator('[data-order]:visible').all()) await expect(button).toBeInViewport({ratio:1});
+  await fullscreen(page,320,568); await page.screenshot({path:'artifacts/interface-tasks-small-mobile.png'});
+  await page.setViewportSize({width:667,height:375});
+  for(const button of await page.locator('[data-order]:visible').all()) { await button.scrollIntoViewIfNeeded(); await expect(button).toBeInViewport({ratio:1}); }
+  await fullscreen(page,667,375); await page.screenshot({path:'artifacts/interface-tasks-landscape-mobile.png'});
+  await page.setViewportSize({width:390,height:844});
+  await page.keyboard.press('Escape'); await expect(page.locator('#task-palette')).toBeHidden(); await expect(page.locator('#task-toggle')).toBeFocused();
+  await page.keyboard.press('Escape'); await expect(page.locator('.game-drawer:visible')).toHaveCount(0); await expect(page.locator('#inspector-toggle')).toBeFocused();
+  expect(await page.locator('.world-navigation').evaluate(nav=>getComputedStyle(nav).animationName)).toBe('none');
+  await fullscreen(page,390,844); expect(observed.gestures).toHaveLength(0); expect(app.world.tick).toBe(0); expect(observed.errors).toEqual([]);
+  await page.screenshot({path:'artifacts/interface-navigation-mobile.png'});
+});
+
+test('V5 gesture targeting keeps geographic ground coordinates while opening the notebook stays read-only', async ({ page }) => {
+  const site=app.world.tiles.find(tile=>tile.x>5&&tile.x<30&&tile.y>4&&tile.y<22&&app.world.people.every(person=>Math.hypot(person.x-tile.x,person.y-tile.y)>3)&&app.world.animals.every(animal=>Math.hypot(animal.x-tile.x,animal.y-tile.y)>3))!;
+  expect(site).toBeDefined();
+  const observed=observeMessages(page); await page.setViewportSize({width:1440,height:900}); await page.emulateMedia({reducedMotion:'reduce'}); await enter(page);
+  await page.locator('#layer-toggle').click(); await page.locator('#tile-x').fill(String(site.x)); await page.locator('#tile-y').fill(String(site.y)); await page.locator('#tile-form button').click();
+  await expect(page.locator('#camera-coordinates')).toHaveText(`${site.x}, ${site.y}`);
+  await chooseGesture(page,'plant'); await page.mouse.click(720,450);
+  await expect(page.locator('#gesture-target')).toHaveText(`casilla ${site.x}, ${site.y}`);
+  await expect(page.locator('#tool-drawer')).toBeVisible(); await expect(page.locator('#inspector-drawer')).toBeHidden();
+  await expect(page.locator('#gesture-send')).toBeEnabled();
+  expect(observed.gestures).toHaveLength(0); expect(app.world.tick).toBe(0); expect(observed.errors).toEqual([]);
 });

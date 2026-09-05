@@ -1,0 +1,185 @@
+/* Navigation geometry is independent from the canvas and the notebook's data views. */
+.game-shell {
+  --paper: #fbf8ed;
+  --ink: #294638;
+  --muted: #66745b;
+  --line: #d5dcc6;
+  --dock-width: 390px;
+}
+.game-shell [hidden] { display: none !important; }
+.game-shell button:focus-visible, .game-shell input:focus-visible, .game-shell select:focus-visible,
+.game-shell summary:focus-visible, .game-shell [tabindex]:focus-visible {
+  outline: 2px solid #a26926; outline-offset: 3px;
+}
+.game-shell .hud-surface { backdrop-filter: none; background: var(--paper); border-color: #e2e5d4; box-shadow: 0 3px 16px #172c2526; }
+.game-top { top: 16px; left: 20px; right: 20px; gap: 12px; align-items: center; }
+.game-brand { min-height: 56px; padding: 10px 16px; }
+.game-top .game-brand { background: #263f33; color: #f6f3df; }
+.game-brand > span { font-size: 22px; }
+.game-brand small { display: none; }
+.game-clock { min-height: 56px; padding: 9px 15px; }
+.game-clock strong { font-size: 21px; }
+.game-clock > div > span, .connection-label { font-size: 11px; }
+.game-actions { min-height: 52px; }
+.selection-shortcuts { position: absolute; top: 88px; left: 20px; display: flex; align-items: center; gap: 6px; padding: 5px 7px; z-index: 12; }
+.selection-shortcuts > span { font-size: 9px; letter-spacing: 1px; padding: 0 5px; color: var(--muted); }
+.selection-shortcuts .role-button { width: 38px; min-height: 44px; }
+#inspector-toggle { display: flex; align-items: center; gap: 7px; min-height: 44px; padding: 0 10px; border-left: 1px solid var(--line); margin-left: 2px; max-width: 160px; color: var(--ink); font-size: 13px; }
+#inspector-toggle svg { width: 17px; height: 17px; flex-shrink: 0; }
+#selection-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#inspector-toggle[aria-expanded=true] { background: #e8ecd9; border-radius: 4px; }
+.world-navigation { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 3px; padding: 5px; z-index: 25; }
+.world-navigation button { min-width: 83px; min-height: 59px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 5px 10px; border-radius: 5px; color: #56684e; font-size: 12px; }
+.world-navigation svg { width: 20px; height: 20px; }
+.world-navigation button:hover { background: #edf0e1; }
+.world-navigation button[aria-expanded=true], .world-navigation button[aria-pressed=true] { background: #294a3a; color: #fffbe9; }
+.game-shell .game-drawer {
+  left: auto; right: 20px; top: 88px; bottom: 103px; width: var(--dock-width); max-width: calc(100vw - 40px);
+  height: auto; max-height: none; transform: none; padding: 22px 22px 20px;
+  background: var(--paper); border: 1px solid #e1dfcb; border-radius: 12px;
+  backdrop-filter: none; box-shadow: 0 10px 34px #16292040; contain: layout paint style;
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.game-shell .game-drawer::before { display: none; }
+.game-drawer > header { flex: 0 0 auto; margin-bottom: 16px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
+.game-shell .inspector-drawer > header { position: static; background: transparent; box-shadow: none; }
+.game-drawer h2 { font-size: 30px; color: var(--ink); line-height: 1.2; letter-spacing: -.5px; }
+.game-drawer > header .eyebrow { font-size: 9px; letter-spacing: 1.2px; }
+.game-drawer label, .game-drawer .drawer-note, .drawer-footnote { font-size: 12px; color: #5b6c53; line-height: 1.6; }
+.game-drawer .button { font-size: 12px; min-height: 44px; }
+.notebook-back { display: flex; align-items: center; gap: 5px; color: #627658; font-size: 11px; min-height: 26px; margin: -8px 0 5px; }
+.notebook-back svg { width: 14px; height: 14px; transform: rotate(180deg); }
+.notebook-back:hover, .entity-link:hover { color: #8e612b; text-decoration: underline; }
+.game-shell #person-primary { flex: 0 0 auto; margin: 0 0 13px; gap: 8px; }
+.inspector-tabs { display: flex; gap: 4px; flex: 0 0 auto; border-bottom: 1px solid var(--line); padding-bottom: 0; margin-bottom: 12px; }
+.inspector-tabs button { flex: 1; min-height: 40px; font-size: 12px; color: #647356; border-bottom: 2px solid transparent; }
+.inspector-tabs button[aria-selected=true] { color: var(--ink); border-color: #a58643; font-weight: 600; background: #eeefde; border-radius: 5px 5px 0 0; }
+#inhabitant-card { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; padding: 0 3px 10px; margin: 0 -3px; scroll-padding: 10px; }
+.game-person-heading { margin: 3px 0 13px; gap: 12px; }
+.game-person-heading strong { font-size: 19px; line-height: 1.35; color: var(--ink); }
+.agency-state { font-size: 11px; color: #617556; margin-top: 5px; line-height: 1.5; }
+.game-current-action { font-size: 12px; margin: 10px 0 5px; color: #6e713e; }
+.game-reason { color: #3e593e; font-size: 19px; line-height: 1.5; margin: 7px 0 15px; }
+.game-needs { padding: 13px 0; margin-bottom: 13px; }
+.game-needs > h3 { font-size: 12px; color: #526a47; margin-bottom: 12px; }
+.game-need { font-size: 11px; grid-template-columns: 79px minmax(60px,1fr) 35px; gap: 9px; margin-top: 9px; }
+.game-shell .person-detail .game-need { font-size: 11px; }
+.person-detail summary { min-height: 44px; font-size: 12px; color: #445e3c; padding-top: 12px; padding-bottom: 12px; }
+.person-detail > p, .blueprint-card > p, .blueprint-card > small, .component-list li { font-size: 12px; color: #5e7052; line-height: 1.7; }
+.person-detail h4 { font-size: 11px; }
+.section-title { font-family: var(--serif); font-size: 21px; font-weight: 400; color: var(--ink); margin: 4px 0 16px; }
+.material-pouch { font-size: 12px; gap: 8px; }
+.food-reserve { font-size: 11px; padding: 12px; }
+.food-reserve p { font-size: 10px; }
+.skill-row, .trait-list > span, .lineage-absent, .gene-chips > span { font-size: 11px; }
+.entity-link { text-align: left; color: #47693b; display: inline-flex; gap: 6px; align-items: center; min-height: 32px; padding: 3px 0; text-decoration: underline; text-underline-offset: 3px; }
+.entity-link svg { width: 13px; height: 13px; flex-shrink: 0; }
+.person-command-bar { flex: 0 0 auto; padding-top: 10px; border-top: 1px solid var(--line); background: var(--paper); }
+.control-help { font-size: 10px; line-height: 1.5; margin: 0 0 8px; color: #637052; }
+.command-main { display: grid; grid-template-columns: 1.35fr 1fr; gap: 8px; }
+.command-main .button { padding: 8px 10px; }
+.task-groups { display: flex; gap: 3px; padding: 4px; background: #e9ebd9; border-radius: 5px; margin-bottom: 7px; }
+.task-groups button { flex: 1; min-height: 36px; font-size: 11px; color: #5c6d4b; border-radius: 3px; }
+.task-groups button[aria-pressed=true] { background: var(--paper); color: var(--ink); box-shadow: 0 1px 3px #263c2520; }
+.order-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 5px; margin: 0 0 9px; }
+.order-grid button { min-height: 48px; font-size: 10px; gap: 3px; padding: 5px 4px; line-height: 1.3; }
+.order-grid button svg { width: 17px; height: 17px; }
+.game-shell .population-drawer .population-tabs, .game-shell .population-drawer .search-label { flex: 0 0 auto; }
+.population-list { min-height: 0; max-height: none; flex: 1 1 auto; overflow: auto; overscroll-behavior: contain; }
+.population-person { min-height: 68px; }
+.population-person strong { font-size: 19px; }
+.population-person small { font-size: 11px; }
+.population-drawer .drawer-footnote { flex: 0 0 auto; padding-top: 10px; margin-bottom: 0; font-size: 10px; }
+.game-shell .layer-drawer, .game-shell .tool-drawer { overflow-y: auto; }
+.gesture-choices { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 5px; margin-bottom: 10px; }
+.gesture-choices button { min-height: 60px; font-size: 12px; display: flex; flex-direction: column; gap: 6px; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 5px; }
+.gesture-choices svg { width: 20px; height: 20px; }
+.gesture-choices button[aria-pressed=true] { color: #354f2c; background: #e3e9d0; border-color: #adbf8e; }
+.stats-tabs { padding: 3px; gap: 1px; margin-bottom: 12px; }
+.stats-tabs button { font-size: 10px; min-height: 45px; overflow-wrap: normal; }
+.stats-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+.stats-chart-grid, .stats-two-columns { grid-template-columns: 1fr; }
+.stat-card > span { font-size: 11px; }
+.stat-card > small, .stats-scope, .stats-section-heading > span, .chart-axis { font-size: 10px; color: #637351; }
+.stats-note, .stats-empty, .stats-facts > span, .tile-facts > span, .distribution-row > div { font-size: 12px; color: #5e7051; }
+.stats-facts strong, .tile-facts strong { font-size: 13px; }
+.community-members .entity-link { margin-right: 8px; font-size: 12px; }
+.recent-evidence { border-bottom: 1px solid var(--line); margin-bottom: 20px; padding-bottom: 6px; }
+.recent-evidence .section-title { margin-bottom: 4px; }
+.recent-evidence > summary { min-height: 48px; padding: 14px 0; font: 17px/1.3 var(--serif); color: var(--ink); cursor: pointer; }
+.recent-evidence > summary > span { font: 10px/1.3 var(--sans); color: var(--muted); float: right; padding-top: 4px; }
+.recent-evidence article { padding: 11px 0; border-top: 1px solid #e1e4d4; }
+.recent-evidence article > p { font: 17px/1.5 var(--serif); color: #425b3a; margin: 6px 0; }
+.recent-evidence article > small { font-size: 11px; line-height: 1.6; color: #657254; display: block; }
+.evidence-links { display: flex; gap: 12px; flex-wrap: wrap; font-size: 11px; }
+.structure-link { display: flex; justify-content: space-between; width: 100%; min-height: 56px; border-bottom: 1px solid var(--line); text-decoration: none; font-size: 13px; }
+.structure-link small { display: block; font-size: 10px; color: var(--muted); margin-top: 3px; }
+.world-coordinates { left: 20px; bottom: 20px; padding: 9px 12px; color: var(--ink); }
+.world-coordinates > span:last-child { color: #647653; }
+.camera-controls { right: 20px; bottom: 20px; }
+.map-hint { bottom: 95px; font-size: 11px; color: #f4f7e4; text-shadow: 0 1px 3px #173022; }
+.game-message-stack { top: 155px; bottom: auto; left: 20px; width: min(360px,calc(100vw - 460px)); transform: none; align-items: flex-start; }
+.game-shell:has(.tool-drawer:not([hidden])) .game-message-stack { top: 155px; bottom: auto; }
+.game-message-stack > p, .game-notice { font-size: 12px; background: #fbf8edf5; color: #3d573b; text-align: left; box-shadow: 0 3px 14px #18302525; }
+.return-toast { top: 155px; left: 20px; transform: none; max-width: 340px; }
+.game-shell.notebook-open .map-hint { left: 33%; }
+@media (min-width: 761px) and (max-width: 1100px) {
+  .game-shell { --dock-width: 360px; }
+  .game-clock { left: 50%; }
+  .game-message-stack { width: calc(100vw - 420px); }
+  .world-navigation { left: 20px; transform: none; }
+  .world-coordinates { bottom: 98px; }
+}
+@media (max-width: 760px) {
+  .game-top { top: max(10px,env(safe-area-inset-top)); left: 10px; right: 10px; gap: 5px; }
+  .game-brand { padding: 10px 11px; min-height: 49px; max-width: calc(100% - 137px); }
+  .game-brand > span { font-size: 19px; white-space: nowrap; }
+  .game-brand > svg { display: none; }
+  .game-actions { min-height: 49px; padding: 2px; }
+  .game-actions .icon-button { min-width: 42px; width: 42px; }
+  .game-clock { top: 65px; left: auto; right: 0; transform: none; min-height: 43px; padding: 7px 9px; gap: 8px; }
+  .game-clock strong { font-size: 17px; }.game-clock > div { gap: 2px; }
+  .game-clock > div > span, .connection-label { font-size: 9px; }.clock-line { height: 23px; }.clock-sun { display: none; }
+  .selection-shortcuts { top: 75px; left: 10px; gap: 3px; padding: 3px; max-width: calc(100% - 167px); }
+  .selection-shortcuts > span { display: none; }.selection-shortcuts .role-button { width: 32px; min-height: 38px; height: 38px; font-size: 19px; }
+  #inspector-toggle { min-height: 38px; padding: 0 6px; max-width: 102px; font-size: 11px; gap: 4px; }
+  #inspector-toggle svg { width: 15px; height: 15px; }
+  .world-navigation { bottom: max(10px,env(safe-area-inset-bottom)); left: 10px; right: 10px; transform: none; padding: 4px; gap: 1px; }
+  .world-navigation button { min-width: 0; flex: 1; min-height: 55px; font-size: 10px; padding: 4px 2px; gap: 5px; }
+  .world-navigation svg { width: 19px; height: 19px; }
+  .game-shell .game-drawer { left: 10px; right: 10px; top: auto; bottom: calc(max(10px,env(safe-area-inset-bottom)) + 73px); width: auto; max-width: none; height: min(61dvh,calc(100dvh - 245px)); max-height: none; padding: 15px 17px 13px; border-radius: 13px; }
+  .game-drawer > header { margin-bottom: 10px; padding-bottom: 8px; }.game-drawer h2 { font-size: 26px; }
+  .notebook-back { margin-top: -5px; min-height: 24px; font-size: 10px; margin-bottom: 0; }
+  .game-shell #person-primary { margin-bottom: 8px; }.game-drawer .button { min-height: 42px; font-size: 11px; }
+  .inspector-tabs { margin-bottom: 8px; }.inspector-tabs button { min-height: 35px; font-size: 11px; }
+  .game-person-heading { margin-top: 0; margin-bottom: 10px; }.game-person-heading strong { font-size: 18px; }
+  .pixel-portrait { transform: scale(.82); transform-origin: left center; margin-right: -5px; }
+  .game-reason { font-size: 18px; line-height: 1.45; }.game-current-action { font-size: 11px; }
+  .game-needs { margin-bottom: 10px; padding: 10px 0; }.game-need { font-size: 11px; }
+  .person-command-bar { padding-top: 8px; }.control-help { font-size: 9px; margin-bottom: 6px; }
+  .task-groups button { min-height: 32px; }.order-grid button { min-height: 44px; font-size: 10px; }.order-grid { gap: 4px; margin-bottom: 7px; }
+  .order-grid button svg { display: none; }
+  .game-message-stack, .game-shell:has(.tool-drawer:not([hidden])) .game-message-stack { top: 131px; left: 10px; right: 10px; width: auto; transform: none; }
+  .game-message-stack > p, .game-notice { max-width: 100%; font-size: 11px; padding: 8px 10px; }
+  .world-coordinates { left: 10px; bottom: 87px; max-width: 230px; }.camera-controls { right: 10px; bottom: 87px; flex-direction: row; }
+  .game-shell.notebook-open .world-coordinates, .game-shell.notebook-open .camera-controls { visibility: hidden; }
+  .return-toast { top: 131px; left: 10px; right: 10px; max-width: none; }
+  .stats-tabs { margin-bottom: 10px; }.stats-tabs button { font-size: 10px; }
+  .population-person { min-height: 61px; }
+}
+@media (max-width: 370px) { .game-brand > span { font-size: 17px; } #inspector-toggle svg { display: none; } }
+@media (max-width: 760px) and (max-height: 650px) {
+  .game-shell .game-drawer { top: 68px; height: auto; }
+  .game-shell .inspector-drawer:has(#task-palette:not([hidden])) #person-primary,
+  .game-shell .inspector-drawer:has(#task-palette:not([hidden])) .inspector-tabs { display: none; }
+  .game-shell .inspector-drawer:has(#task-palette:not([hidden])) .notebook-back { display: none; }
+}
+@media (max-height: 450px) {
+  .game-shell .game-drawer { top: 8px; bottom: 82px; padding: 10px 14px; overflow-y: auto; }
+  .game-shell .game-drawer > header { margin-bottom: 6px; padding-bottom: 5px; }
+  .game-shell .game-drawer > *, #inhabitant-card { flex-shrink: 0; }
+  .game-shell #inhabitant-card { overflow: visible; flex: 0 0 auto; }
+  .game-shell .inspector-drawer:has(#task-palette:not([hidden])) #inhabitant-card { display: none; }
+  .game-shell .game-drawer .person-command-bar { position: static; }
+}
+@media (prefers-reduced-motion: reduce) { .game-shell * { scroll-behavior: auto !important; animation: none !important; transition: none !important; } }

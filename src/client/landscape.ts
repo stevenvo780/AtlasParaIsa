@@ -11,8 +11,9 @@
  * `.js` (resolución ESM / NodeNext).
  */
 import { PROTOCOL_VERSION } from '../shared/types.js';
-import type { PersonView, PlaceView, Terrain, Tile, Viewport, WorldView } from '../shared/types.js';
+import type { AnimalView, PersonView, PlaceView, StructureView, Terrain, Tile, Viewport, WorldView } from '../shared/types.js';
 import { BoundedCache, GpuTerrain, type GpuStatus, type TerrainRaster } from './gpu-terrain.js';
+import { animalActions, speciesNames, paintAnimal, paintStructure } from './life-art.js';
 
 /* ------------------------------------------------------------------ */
 /* Tipos públicos                                                      */
@@ -22,6 +23,7 @@ export type OverlayLayer = 'none' | 'moisture' | 'food';
 
 export type Selection =
   | { kind: 'person'; id: string }
+  | { kind: 'animal'; id: string }
   | { kind: 'tile'; x: number; y: number };
 
 export type LandscapeSelection = Selection;
@@ -268,12 +270,15 @@ interface RenderPerson {
   moving: boolean;
   seed: number;
 }
+interface RenderAnimal { view: AnimalView; x: number; y: number; moving: boolean; left: boolean; }
 
 const enum SpriteKind {
   Tree = 0,
   Hut = 1,
   Person = 2,
   Fauna = 3,
+  Animal = 4,
+  Structure = 5,
 }
 
 interface Sprite {
@@ -286,6 +291,8 @@ interface Sprite {
   person: RenderPerson | null;
   feature?: Tile['feature'];
   tile?: Tile;
+  animal?: RenderAnimal;
+  structure?: StructureView;
 }
 
 export interface RenderDiagnostics {
@@ -293,6 +300,7 @@ export interface RenderDiagnostics {
   visibleTiles: number; drawCalls: number; cacheBuilds: number; cacheEntries: number; cacheBytes: number;
   textureUploads: number; gpuTextureBytes: number;
   terrainBuilds: number; spriteBuilds: number;
+  visibleAnimals: number; visibleStructures: number;
 }
 
 interface GroundChunk extends TerrainRaster { signature: number; }
@@ -332,6 +340,8 @@ export class Landscape {
   private fpsAt = 0;
   private fpsFrames = 0;
   private visibleTiles = 0;
+  private visibleAnimals = 0;
+  private visibleStructures = 0;
   private drawCalls = 0;
   private sceneRevision = 0;
   private sceneKey = '';
@@ -354,6 +364,8 @@ export class Landscape {
   private followedId: string | null = null;
   private grid: (Tile | undefined)[] = [];
   private prevPeople = new Map<string, PersonView>();
+  private prevAnimals = new Map<string, AnimalView>();
+  private followedKind: 'person' | 'animal' = 'person';
   private groundBaked = false;
 
   private cam: Camera = { x: 0, y: 0, zoom: 24 };
@@ -425,7 +437,7 @@ export class Landscape {
     canvas.setAttribute('role', 'img');
     canvas.setAttribute(
       'aria-label',
-      'Mundo vivo. Arrastra o usa las flechas para recorrer, más y menos para acercar, Inicio para volver. También puedes seleccionar habitantes desde el panel Población.',
+      'Mundo vivo. Arrastra o usa las flechas para recorrer, más y menos para acercar, Inicio para volver. También puedes seleccionar habitantes y fauna desde el panel Población.',
     );
 
     this.motionQuery =
@@ -478,8 +490,10 @@ export class Landscape {
     // A new camera window at the same tick must not restart body interpolation.
     if (!this.curr || this.curr.tick !== world.tick) {
       this.prevPeople.clear();
+      this.prevAnimals.clear();
       if (this.curr && world.tick > this.curr.tick) {
         for (const p of this.curr.people) this.prevPeople.set(p.id, p);
+        for (const a of this.curr.animals ?? []) this.prevAnimals.set(a.id, a);
         this.interval = clamp(now - this.currAt, 60, 2000);
       }
       this.prev = this.curr && world.tick > this.curr.tick ? this.curr : null;
@@ -525,7 +539,7 @@ export class Landscape {
     this.layer = layer;
   }
 
-  follow(id: string | null): void { this.followedId = id; }
+  follow(id: string | null, kind: 'person' | 'animal' = 'person'): void { this.followedId = id; this.followedKind = kind; }
 
   setPendingTarget(position: { x: number; y: number } | null): void { this.pendingTarget = position; }
 
@@ -536,7 +550,7 @@ export class Landscape {
     return { fps: this.fps, frameMs: this.frameMs, backend: this.gpu.active ? 'webgl2' : 'canvas2d-cached', gpuStatus: this.gpu.status, gpuLabel: this.gpu.label || undefined,
       visibleTiles: this.visibleTiles, drawCalls: this.drawCalls + this.gpu.drawCalls, cacheBuilds: this.cacheBuilds + this.spriteBuilds,
       cacheEntries: this.terrainCache.size + this.spriteCache.size, cacheBytes: this.terrainCache.size * 128 * 128 * 4 + this.spriteCache.size * 32 * 32 * 4,
-      textureUploads: this.gpu.uploads, gpuTextureBytes: this.gpu.textureCount * 128 * 128 * 4, terrainBuilds: this.cacheBuilds, spriteBuilds: this.spriteBuilds };
+      textureUploads: this.gpu.uploads, gpuTextureBytes: this.gpu.textureCount * 128 * 128 * 4, terrainBuilds: this.cacheBuilds, spriteBuilds: this.spriteBuilds, visibleAnimals: this.visibleAnimals, visibleStructures: this.visibleStructures };
   }
 
   /** Extra pequeño: permite que la barra lateral resalte a quien se elige en una tarjeta. */
@@ -980,6 +994,16 @@ export class Landscape {
     return out;
   }
 
+  private interpolateAnimals(now: number): RenderAnimal[] {
+    const alpha = this.prev && !this.reduceMotion ? clamp01((now - this.currAt) / this.interval) : 1;
+    return (this.curr?.animals ?? []).map(view => {
+      const before = this.prevAnimals.get(view.id);
+      const dx = before ? view.x - before.x : 0, dy = before ? view.y - before.y : 0;
+      return { view, x: before ? before.x + dx * alpha : view.x, y: before ? before.y + dy * alpha : view.y,
+        moving: !!before && (dx !== 0 || dy !== 0) && alpha < 1, left: dx < 0 };
+    });
+  }
+
   /* ---------------------------------------------------------------- */
   /* Bucle de dibujo                                                  */
   /* ---------------------------------------------------------------- */
@@ -988,7 +1012,7 @@ export class Landscape {
     if (this.destroyed) return;
     this.tickFocus(now);
     if (this.followedId) {
-      const person = this.interpolatePeople(now).find(p => p.view.id === this.followedId);
+      const person = (this.followedKind === 'animal' ? this.interpolateAnimals(now) : this.interpolatePeople(now)).find(p => p.view.id === this.followedId);
       if (person) { this.cam.x = person.x + 0.5; this.cam.y = person.y + 0.5; }
     }
     this.reportViewport();
@@ -1031,7 +1055,8 @@ export class Landscape {
     if (world && this.groundBaked && this.worldW > 0) {
       const t = now / 1000;
       const people = this.interpolatePeople(now);
-      this.drawScene(world, people, t);
+      const animals = this.interpolateAnimals(now);
+      this.drawScene(world, people, animals, t);
 
       // Volcado nítido de la escena al panel.
       const scale = (this.cam.zoom / ART) * this.dpr;
@@ -1048,11 +1073,11 @@ export class Landscape {
       this.drawCalls++;
 
       this.drawAmbient(world, cw, ch);
-      this.drawOverlaysScreen(people);
+      this.drawOverlaysScreen(people, animals);
     }
   }
 
-  private drawScene(world: WorldView, people: RenderPerson[], t: number): void {
+  private drawScene(world: WorldView, people: RenderPerson[], animals: RenderAnimal[], t: number): void {
     const g = this.sceneCtx;
 
     // Ventana visible en tiles (con holgura para copas altas).
@@ -1065,7 +1090,7 @@ export class Landscape {
 
     // Pixel-art decoration needs only eight poses/s. Moving people retain full RAF interpolation.
     // With reduced motion, a stationary snapshot costs one cached scene composite per frame.
-    const pose = people.some(person => person.moving) ? t : this.reduceMotion ? 0 : Math.floor(t * 8);
+    const pose = people.some(person => person.moving) || animals.some(animal => animal.moving) ? t : this.reduceMotion ? 0 : Math.floor(t * 8);
     const sceneKey = `${this.sceneRevision}:${this.layer}:${x0}:${x1}:${y0}:${y1}:${pose}`;
     if (sceneKey === this.sceneKey) return;
     this.sceneKey = sceneKey;
@@ -1074,6 +1099,8 @@ export class Landscape {
 
     const sprites: Sprite[] = [];
     this.visibleTiles = 0;
+    this.visibleAnimals = 0; this.visibleStructures = 0;
+    const structuredTiles = new Set((world.structures ?? []).map(s => `${s.x},${s.y}`));
 
     for (let y = y0; y <= y1; y++) {
       for (let x = x0; x <= x1; x++) {
@@ -1086,7 +1113,7 @@ export class Landscape {
         if (tile.terrain === 'water') {
           if (rnd(x, y, 712) > .6) this.drawRipples(g, x, y, ox, oy, t);
         } else {
-          if (tile.terrain === 'shelter') {
+          if (tile.terrain === 'shelter' && !structuredTiles.has(`${x},${y}`)) {
             sprites.push({
               kind: SpriteKind.Hut,
               sortY: oy + 13,
@@ -1096,15 +1123,26 @@ export class Landscape {
               size: 0,
               person: null,
             });
-          } else {
+          } else if (!structuredTiles.has(`${x},${y}`)) {
             this.collectTrees(sprites, x, y, ox, oy, clamp01(tile.vegetation));
           }
         }
-        if (tile.species && (tile.fauna ?? 0) > .04) sprites.push({kind: SpriteKind.Fauna, sortY: oy + 11, ax: ox + 8, ay: oy + 11, seed: 0, size: 0, person: null, tile});
+        if (world.animals === undefined && tile.species && (tile.fauna ?? 0) > .04) sprites.push({kind: SpriteKind.Fauna, sortY: oy + 11, ax: ox + 8, ay: oy + 11, seed: 0, size: 0, person: null, tile});
       }
     }
 
     this.drawPlaces(g, world.places, x0, x1, y0, y1);
+
+    for (const structure of world.structures ?? []) {
+      if (structure.x < x0 || structure.x > x1 || structure.y < y0 || structure.y > y1) continue;
+      this.visibleStructures++;
+      sprites.push({ kind: SpriteKind.Structure, sortY: structure.y * ART + 13, ax: structure.x * ART + 8, ay: structure.y * ART + 13, seed: 0, size: 0, person: null, structure });
+    }
+    for (const animal of animals) {
+      if (animal.x < x0 || animal.x > x1 || animal.y < y0 || animal.y > y1) continue;
+      this.visibleAnimals++;
+      sprites.push({ kind: SpriteKind.Animal, sortY: animal.y * ART + 12, ax: animal.x * ART + 8, ay: animal.y * ART + 12, seed: 0, size: 0, person: null, animal });
+    }
 
     for (const p of people) {
       if (p.x < x0 - 2 || p.x > x1 + 2 || p.y < y0 - 2 || p.y > y1 + 2) continue;
@@ -1118,6 +1156,8 @@ export class Landscape {
     for (const s of sprites) {
       if (s.kind === SpriteKind.Tree) this.drawCachedTree(g, s, t);
       else if (s.kind === SpriteKind.Hut) this.drawHut(g, s.ax, s.ay, s.seed, world.phase);
+      else if (s.animal) this.drawAnimal(g, s.animal, t);
+      else if (s.structure) this.drawStructure(g, s.structure);
       else if (s.tile) this.drawFauna(g, s.tile, t);
       else if (s.person) this.drawPerson(g, s.person, t);
     }
@@ -1132,6 +1172,22 @@ export class Landscape {
   }
 
   /* -------------------------- decorado vivo ------------------------ */
+
+  private drawAnimal(g: CanvasRenderingContext2D, animal: RenderAnimal, t: number): void {
+    const pose = this.reduceMotion || animal.view.action === 'rest' ? 0 : Math.floor(t * (animal.moving ? 8 : 2)) % 2;
+    const key = `animal:${animal.view.species}:${animal.view.action}:${pose}`;
+    let art = this.spriteCache.get(key);
+    if (!art) { art = document.createElement('canvas'); art.width = art.height = 32; paintAnimal(art.getContext('2d')!, animal.view.species, animal.view.action, pose); this.spriteCache.set(key, art); this.spriteBuilds++; }
+    g.save(); g.translate(Math.round(animal.x * ART + 8), Math.round(animal.y * ART + 12)); if (animal.left) g.scale(-1, 1);
+    g.drawImage(art, -16, -26); g.restore(); this.drawCalls++;
+  }
+
+  private drawStructure(g: CanvasRenderingContext2D, structure: StructureView): void {
+    const key = `structure:${structure.components.join(',')}:${structure.condition < .3 ? 0 : structure.condition < .65 ? 1 : 2}:${Math.ceil(structure.water * 8)}:${Math.ceil(structure.food * 8)}`;
+    let art = this.spriteCache.get(key);
+    if (!art) { art = document.createElement('canvas'); art.width = art.height = 32; paintStructure(art.getContext('2d')!, structure); this.spriteCache.set(key, art); this.spriteBuilds++; }
+    g.drawImage(art, Math.round(structure.x * ART + 8) - 16, Math.round(structure.y * ART + 13) - 29); this.drawCalls++;
+  }
 
   private drawRipples(g: CanvasRenderingContext2D, x: number, y: number, ox: number, oy: number, t: number): void {
     const gleam = css(P.waterGleam, 0.4);
@@ -1461,7 +1517,7 @@ export class Landscape {
   }
 
   /** Selección e insignias: en píxeles de pantalla, para que el texto no se pixele. */
-  private drawOverlaysScreen(people: RenderPerson[]): void {
+  private drawOverlaysScreen(people: RenderPerson[], animals: RenderAnimal[]): void {
     const ctx = this.labelCtx;
     ctx.save();
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
@@ -1511,6 +1567,16 @@ export class Landscape {
           p.view.role === 'S' ? P.amber : P.coral,
           'serif',
         );
+      }
+    }
+    if (sel?.kind === 'animal') {
+      const animal = animals.find(a => a.view.id === sel.id);
+      if (animal) {
+        const s = this.worldToScreen(animal.x + .5, animal.y + .75);
+        if (s.x >= -60 && s.x <= this.cssW + 60 && s.y >= -60 && s.y <= this.cssH + 60) {
+          ctx.beginPath(); ctx.ellipse(s.x, s.y, this.cam.zoom * .42, this.cam.zoom * .2, 0, 0, Math.PI * 2); ctx.strokeStyle = '#f2dfb0'; ctx.lineWidth = 1.5; ctx.stroke();
+          this.drawChip(s.x, s.y + 15, `${speciesNames[animal.view.species]} · ${animalActions[animal.view.action]}`, P.ink, P.rule, 'meta');
+        }
       }
     }
     ctx.restore();
@@ -1696,7 +1762,7 @@ export class Landscape {
     if (!world) return;
     const w = this.screenToWorld(sx, sy);
 
-    let best: PersonView | null = null;
+    let best: Selection | null = null;
     let bestD = PERSON_HIT * PERSON_HIT;
     for (const p of this.interpolatePeople(performance.now())) {
       const dx = p.x + 0.5 - w.x;
@@ -1704,12 +1770,16 @@ export class Landscape {
       const d = dx * dx + dy * dy;
       if (d <= bestD) {
         bestD = d;
-        best = p.view;
+        best = { kind: 'person', id: p.view.id };
       }
+    }
+    for (const animal of this.interpolateAnimals(performance.now())) {
+      const d = (animal.x + .5 - w.x) ** 2 + (animal.y + .5 - w.y) ** 2;
+      if (d < bestD) { bestD = d; best = { kind: 'animal', id: animal.view.id }; }
     }
 
     if (best) {
-      this.selection = { kind: 'person', id: best.id };
+      this.selection = best;
       this.onSelect(this.selection);
       return;
     }

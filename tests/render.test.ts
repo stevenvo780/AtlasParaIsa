@@ -42,7 +42,7 @@ test('render browser: dirty chunks, negative coordinates, selection, bounded cac
       const renderer = new Landscape(canvas, (s: unknown) => selected.push(s), undefined, undefined, { allowSoftwareWebGL: true });
       const tile = (x: number, y: number) => ({ x, y, terrain: 'meadow', biome: 'forest', moisture: .7, vegetation: .8, food: .5, growth: .7, feature: 'tree', wood: 4, drinkingWater: .4 });
       const tiles = Array.from({length: 32*24}, (_, i) => tile(i%32-16, Math.floor(i/32)-8));
-      const world = {version: 3, sequence: 1, tick: 1, day: 1, phase: 'day', weather: 'clear', width: 32, height: 24, originX: -16, originY: -8, tiles, people: [], events: [], places: [], memories: []};
+      const world = {version: 4, sequence: 1, tick: 1, day: 1, phase: 'day', weather: 'clear', width: 32, height: 24, originX: -16, originY: -8, tiles, people: [], events: [], places: [], memories: []};
       const serialize = JSON.stringify(world);
       renderer.update(world); renderer.focus(0,0); renderer.render(0);
       const first = renderer.getDiagnostics();
@@ -92,6 +92,38 @@ test('render browser: dirty chunks, negative coordinates, selection, bounded cac
       await page.waitForFunction('window.renderTest.renderer.getDiagnostics().backend === "webgl2"');
       assert.equal(await page.evaluate('window.renderTest.renderer.gpu.gl.getError()'), 0);
     } else t.diagnostic('WebGL unavailable: context-loss/recovery not exercised; cached Canvas2D path exercised.');
+    const life = await page.evaluate(async () => {
+      const { renderer, world } = (window as unknown as {renderTest: {renderer: any;world:any}}).renderTest;
+      const selected: unknown[] = []; renderer.onSelect = (value: unknown) => selected.push(value);
+      const animal = { id: 'observed-deer', species: 'deer', x: -3, y: -2, action: 'flee', reason: 'Un lobo se aproxima.', hunger: .2, thirst: .3, energy: .7, fatigue: .2, health: 1, generation: 1, parents: ['deer-parent'], genes: {speed:.7,perception:.8,metabolism:.5,carnivory:.1,waterEfficiency:.6,camouflage:.3}, age: 800 };
+      let legacyDraws = 0; renderer.drawFauna = () => legacyDraws++;
+      const state = {...world, tick: 10, sequence: 10, animals: [animal], tiles: world.tiles.map((t: object) => ({...t, species:'deer',fauna:2}))};
+      renderer.update(state); renderer.reduceMotion = false;
+      const next = {...state, tick: 11, sequence: 11, animals: [{...animal,x:-2}]}; const serialized = JSON.stringify(next);
+      renderer.update(next); renderer.currAt = 0; renderer.interval = 500;
+      const midpoint = renderer.interpolateAnimals(250)[0]; const completed = renderer.interpolateAnimals(1000)[0];
+      renderer.reduceMotion = true; renderer.focus(-2,-2); renderer.render(1000);
+      const screen = renderer.worldToScreen(-1.5,-1.5); renderer.pick(screen.x,screen.y);
+      const preserved = serialized === JSON.stringify(next);
+      renderer.update({...next,tick:12,sequence:12,animals:[]}); renderer.render(1100);
+      const removed = renderer.getDiagnostics().visibleAnimals;
+      renderer.update({...next,tick:13,sequence:13,animals:[animal,...Array.from({length:6000},(_,i)=>({...animal,id:`far-${i}`,x:10000+i,y:10000}))]}); renderer.render(1200);
+      const visible = renderer.getDiagnostics().visibleAnimals;
+      const path = '/src/client/life-art.ts'; const {paintAnimal,paintStructure} = await import(/* @vite-ignore */ path);
+      const raster = (paint: (pen: CanvasRenderingContext2D)=>void) => { const canvas = document.createElement('canvas');canvas.width=canvas.height=32; const pen=canvas.getContext('2d')!;paint(pen);return [...pen.getImageData(0,0,32,32).data].join(','); };
+      const species = ['hare','deer','boar','fish','wolf','fox'].map(name => raster(pen=>paintAnimal(pen,name,'roam',0)));
+      const base = {id:'s',x:0,y:0,blueprintId:'b',name:'Proyecto',components:['frame','roof'],condition:1,water:0,food:0,uses:0,builtAt:0,builderId:null};
+      const structures = [base,{...base,components:['frame','roof','cistern']},{...base,components:['frame','roof','cistern'],water:.5},{...base,components:['frame','roof','granary']},{...base,components:['frame','roof','granary'],food:.5},{...base,components:['frame','roof','garden']},{...base,components:['frame','roof','hearth']},{...base,components:['frame','roof','roof']},{...base,condition:.1}].map(s=>raster(pen=>paintStructure(pen,s)));
+      return { midpoint:{x:midpoint.x,y:midpoint.y,moving:midpoint.moving}, completed:{x:completed.x,y:completed.y,moving:completed.moving}, selected, preserved, removed, visible,legacyDraws,speciesDistinct:new Set(species).size,structuresDistinct:new Set(structures).size };
+    });
+    assert.deepEqual(life.midpoint, {x:-2.5,y:-2,moving:true}, 'animal interpolates only between received coordinates');
+    assert.deepEqual(life.completed, {x:-2,y:-2,moving:false}, 'local time cannot move beyond the authoritative endpoint');
+    assert.deepEqual(life.selected, [{kind:'animal',id:'observed-deer'}], 'negative-coordinate animal can be selected directly');
+    assert.equal(life.preserved,true); assert.equal(life.removed,0,'a removed identity leaves no body behind');
+    assert.equal(life.legacyDraws,0,'individual snapshots never also draw tile fauna, including empty arrays');
+    assert.equal(life.visible,1,'6000 off-camera animals are culled');
+    assert.equal(life.speciesDistinct,6,'each animal species has distinct artwork');
+    assert.equal(life.structuresDistinct,9,'components, repetitions, stocks and damage all change the drawn structure');
     const travel = await page.evaluate(() => {
       const state = (window as unknown as {renderTest: {renderer: any;world:any}}).renderTest;
       const renderer = state.renderer;

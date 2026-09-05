@@ -65,11 +65,12 @@ test('an opportunity requires observed mutual trust and the same nonempty commun
   b.communityId = a.communityId = null; assert.equal(familyOpportunity(world, a), null);
 });
 
-test('perception stops at seven and a known place must be within four of either partner', () => {
+test('partners and places stay perceptible and a place must be within four of either partner', () => {
   const { world, a, b } = scene();
   b.x = a.x + 8; assert.equal(familyOpportunity(world, a), null);
   b.x = a.x + 7; assert.equal(familyOpportunity(world, a)?.partner, b);
-  world.places[0]!.x = b.x + 4; assert.equal(familyOpportunity(world, a)?.partner, b);
+  world.places[0]!.x = b.x + 4; assert.equal(familyOpportunity(world, a), null);
+  world.places[0]!.x = a.x + 7; assert.equal(familyOpportunity(world, a)?.partner, b);
   world.places[0]!.x++; assert.equal(familyOpportunity(world, a), null);
   world.places = []; assert.equal(familyOpportunity(world, a), null);
 });

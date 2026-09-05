@@ -1,5 +1,7 @@
 # Una Carta Para Isa — plan unificado
 
+La revisión privada actual es V3. Está en ejecución V4: fauna individual con fisiología compartida, depredación y herencia; invenciones de estructuras funcionales mediante gramática y búsqueda; hogares elegidos y retornos que permitan sostener comunidades. Los requisitos están en [EVOLUCION-V4.md](docs/EVOLUCION-V4.md). Las capacidades pendientes no se presentan como evidencia de V3.
+
 Fecha: 5 de septiembre de 2026. Estado: prototipo V3 implementado con ampliación ecológica, genética y social; verificación de integración registrada por separado. Cierre personal de la carta, prueba en móvil físico y alojamiento definitivo pendientes.
 
 El repositorio ya contiene una aplicación local ejecutable. El [README](README.md) reúne los comandos reales de arranque, acceso y recuperación. La experiencia siguiente conserva su alcance de diseño; la implementación actual usa S e I, vecinos ficticios y cinco recuerdos sintéticos identificados, sin importar conversaciones ni atribuirles biografía.

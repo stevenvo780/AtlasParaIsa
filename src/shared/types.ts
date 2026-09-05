@@ -9,8 +9,8 @@ export type Terrain = 'water' | 'soil' | 'meadow' | 'shelter';
 export type Feature = 'tree' | 'pine' | 'palm' | 'cactus' | 'reeds' | 'berries' | 'flowers' | 'rock' | 'clay' | 'stump' | 'spring' | 'pool' | 'none';
 export type Species = 'hare' | 'deer' | 'boar' | 'fish' | 'wolf' | 'fox';
 export interface Tile { x: number; y: number; terrain: Terrain; moisture: number; vegetation: number; food: number; biome?: Biome; elevation?: number; wood?: number; stone?: number; feature?: Feature; variety?: number; growth?: number; fertility?: number; cultivation?: number; traffic?: number; drinkingWater?: number; species?: Species; fauna?: number; life?: number; }
-export type Action = 'explore' | 'eat' | 'drink' | 'hunt' | 'rest' | 'approach' | 'accompany' | 'retreat' | 'share' | 'gather' | 'farm' | 'build' | 'cooperate' | 'invent' | 'repair' | 'research' | 'craft';
-export type Order = 'move' | 'explore' | 'gather' | 'farm' | 'build' | 'hunt' | 'drink' | 'rest' | 'cooperate' | 'invent' | 'repair' | 'research' | 'craft' | 'auto';
+export type Action = 'explore' | 'eat' | 'forage' | 'drink' | 'hunt' | 'rest' | 'approach' | 'accompany' | 'retreat' | 'share' | 'gather' | 'farm' | 'build' | 'cooperate' | 'invent' | 'repair' | 'research' | 'craft';
+export type Order = 'move' | 'explore' | 'forage' | 'gather' | 'farm' | 'build' | 'hunt' | 'drink' | 'rest' | 'cooperate' | 'invent' | 'repair' | 'research' | 'craft' | 'auto';
 export interface GenomeView { generation: number; parents: string[]; learningRate: number; cooperation: number; mutations: number; }
 export interface PersonView {
   id: string; name: string; role: 'S' | 'I' | 'neighbor'; x: number; y: number;
@@ -24,6 +24,7 @@ export interface PersonView {
   communityId?: string | null; culture?: { sharing: number; stewardship: number; openness: number }; trust?: { id: string; value: number }[];
   blueprintId?: string | null;
   target?: { x: number; y: number }; working?: boolean; workProgress?: number;
+  foodReserve?: number; foodReserveCapacity?: number;
   health?: number; vitality?: number; continuityProtected?: boolean;
 }
 export interface PlaceView { id: string; name: string; x: number; y: number; description: string; gatherings: number; }

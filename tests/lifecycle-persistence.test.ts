@@ -39,7 +39,7 @@ function makeChild(world: World) {
   }
   const a=world.people[2]!,b=world.people[3]!;
   for(const person of [a,b]) {person.x=17;person.y=13;person.target={x:17,y:13};person.communityId='community-1';person.inventory=0.2;}
-  a.bonds[b.id]=0.7;world.communityCounter=1;
+  a.bonds[b.id]=b.bonds[a.id]=0.7;world.communityCounter=1;
   world.communities=[{id:'community-1',name:'Comunidad de prueba',x:17,y:13,color:'#aaccee',members:[a.id,b.id],culture:{...a.culture},formedAt:world.tick,cooperation:0,disputes:0}];
   stepWorld(world);assert.equal(world.people.length,17);assertWorld(world);
   return world.people.at(-1)!;

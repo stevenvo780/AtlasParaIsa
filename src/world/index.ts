@@ -13,7 +13,8 @@ import type { AnimalDynamics, BlueprintView, StructureView, InventionDynamics } 
 import type { TechnologyKnowledge, TechnologyState } from '../shared/technology.js';
 import type { DemographicState, LegacyRecord } from '../shared/demography.js';
 import { defaultTechnologyState, initialTechnologyKnowledge, technologyOpportunity, researchTechnology, craftTechnology, projectTechnology, assertTechnology, useTool, recordTechnologyBenefit, settleTechnologyEstate, cancelTechnologyProject } from './technology.js';
-import { initialDemography, demographicTraits, updateDemography } from './demography.js';
+import { initialDemography, demographicTraits } from './demography.js';
+import { reproductiveReadiness, familyOpportunity, availableToShare } from './family.js';
 import { advancePopulation, assertPopulation } from './lineage.js';
 import { analyzeTechnologyOrganization } from './technology-organization.js';
 export { tileAt, normalizeViewport } from './spatial.js';
@@ -212,6 +213,16 @@ function choose(world: World, person: Person): void {
   if (home) candidates.push({action:'approach',...home});
   const food = nearbyTiles.filter(tile => tile.food > 0.025).sort((a, b) => (distance(person, a) - a.food * 2) - (distance(person, b) - b.food * 2))[0];
   if (food || person.inventory > 0.01 || foodAvailable(world,person)>0) candidates.push({ action: 'eat', target: food ?? person, score: Math.max(0, person.hunger - 0.22) * 2.5 - (food ? distance(person, food) * 0.02 : 0), reason: 'El hambre orienta su camino hacia alimento que puede percibir.' });
+  const family = familyOpportunity(world, person);
+  if (family && person.inventory < family.reserveTarget && food) candidates.push({
+    action: 'forage', target: food,
+    score: 0.85 + person.traits.care * 0.2 + (family.reserveTarget - person.inventory) / family.reserveTarget * 0.4 - distance(person, food) * 0.02,
+    reason: `Prepara alimento para una posible crianza con ${family.partner.name}; debe recogerlo del entorno y conservar una reserva.`,
+  });
+  if (family && person.inventory >= family.reserveTarget && family.partner.inventory >= 0.1) candidates.push({
+    action: 'approach', target: family.partner, score: 0.85 + person.traits.care * 0.2,
+    reason: `Tiene reservas y se acerca a ${family.partner.name}; el vínculo y el cuidado corporal permiten intentar una crianza.`,
+  });
   const water = nearbyTiles.filter(t => waterAvailable(world,t) > 0.005).sort((a, b) => distance(person, a) - distance(person, b))[0];
   if (water) candidates.push({ action: 'drink', target: water, score: Math.max(0, person.thirst - 0.18) * 3.1 - distance(person, water) * 0.015, reason: 'La sed orienta su camino hacia una reserva finita de agua dulce.' });
   const prey = nearbyTiles.filter(t => (t.fauna ?? 0) >= 1).sort((a, b) => distance(person, a) - distance(person, b))[0];
@@ -251,7 +262,7 @@ function choose(world: World, person: Person): void {
   const place = world.places.find(p => distance(person, p) <= 3);
   const hungry = nearbyPeople.filter(other => distance(person, other) <= 2 && other.hunger > 0.27).sort((a, b) => b.hunger - a.hunger)[0];
   const learned = place ? person.habits.find(habit => habit.placeId === place.id && habit.strength >= 0.5) : undefined;
-  if (place && hungry && person.inventory >= 0.025 && person.hunger < 0.5 && world.tick - person.lastShared >= 30) candidates.push({
+  if (place && hungry && availableToShare(world, person, hungry) && person.hunger < 0.5 && world.tick - person.lastShared >= 30) candidates.push({
     action: 'share', target: hungry, score: 0.22 + person.generosity * (1 + person.culture.sharing * 0.5) + (learned ? learned.strength : 0),
     reason: learned ? `Repite en ${place.name} el cuidado que observó de otra persona.` : 'Puede compartir parte de lo que recogió con alguien que tiene hambre.',
   });
@@ -281,6 +292,7 @@ function choose(world: World, person: Person): void {
     const directed: Candidate = { action: command.order === 'move' ? 'explore' : command.order, target: { x: command.x, y: command.y }, score: 5, reason: `Tarea solicitada: ${command.order === 'move' ? 'ir al destino' : actionLabel(command.order)}. Conserva sus necesidades corporales.` };
     if (command.order === 'explore') directed.target = explorationTarget(world, person, nearbyTiles);
     if (command.order === 'gather' && distance(person, command) <= RADIUS && resource) directed.target = resource;
+    if (command.order === 'forage' && distance(person, command) <= RADIUS && food) directed.target = food;
     if (command.order === 'drink' && water) directed.target = water;
     if (command.order === 'hunt' && prey) directed.target = prey;
     if (command.order === 'cooperate' && help) directed.target = help.person;
@@ -291,7 +303,8 @@ function choose(world: World, person: Person): void {
   const selected = candidates[0]!;
   if (selected.action === 'explore' && selected.score < 5) selected.target = explorationTarget(world, person, nearbyTiles);
   // A viable work site retains accumulated work while the same action is selected.
-  if (selected.action===person.action && ['build','invent','repair','farm'].includes(selected.action) && person.work>0) selected.target=person.target;
+  if (selected.action===person.action && ['build','invent','repair','farm','forage'].includes(selected.action) && person.work>0
+    && (selected.action!=='forage' || (tileAt(world,person.target)?.food??0)>=0.005)) selected.target=person.target;
   if (person.action !== selected.action || distance(person.target, selected.target) > 0) person.work = 0;
   person.action = selected.action;
   person.intentContext = person.thirst > 0.5 ? 'thirsty' : person.hunger > 0.5 ? 'hungry' : person.fatigue > 0.5 ? 'tired' : 'ready';
@@ -305,7 +318,7 @@ function choose(world: World, person: Person): void {
 }
 
 function actionLabel(action: Action): string {
-  return ({ explore: 'explorar', eat: 'buscar alimento', drink: 'beber', hunt: 'cazar', rest: 'descansar', approach: 'acercarse', accompany: 'acompañar', retreat: 'tomar espacio', share: 'compartir alimento', gather: 'recolectar', farm: 'cultivar', build: 'construir', cooperate: 'cooperar', invent:'ensayar un diseño', repair:'reparar', research:'investigar materiales', craft:'fabricar una técnica aprendida' })[action];
+  return ({ explore: 'explorar', eat: 'buscar alimento', forage: 'cosechar alimento', drink: 'beber', hunt: 'cazar', rest: 'descansar', approach: 'acercarse', accompany: 'acompañar', retreat: 'tomar espacio', share: 'compartir alimento', gather: 'recolectar', farm: 'cultivar', build: 'construir', cooperate: 'cooperar', invent:'ensayar un diseño', repair:'reparar', research:'investigar materiales', craft:'fabricar una técnica aprendida' })[action];
 }
 
 function resourceDistance(person: Person, tile: Tile): number {
@@ -328,11 +341,11 @@ function outcome(world: World, person: Person, action: Action, benefit: number, 
   if (world.adaptationEnabled && world.cooperationEnabled) {
     // Acquired norms react to consequences, independently from inherited alleles.
     const rate = person.genome.learningRate * 0.04;
-    if ((!useful && ['gather','hunt'].includes(action)) || (useful && action === 'farm')) person.culture.stewardship = clamp(person.culture.stewardship + rate);
+    if ((!useful && ['gather','hunt','forage'].includes(action)) || (useful && action === 'farm')) person.culture.stewardship = clamp(person.culture.stewardship + rate);
     if (useful && ['cooperate','share'].includes(action)) person.culture.sharing = clamp(person.culture.sharing + rate);
   }
   person.lastOutcome = world.tick;
-  if (world.adaptationEnabled && world.tick - person.lastPracticeMemory >= 300 && ['gather','hunt','farm','build','drink','cooperate'].includes(action)) {
+  if (world.adaptationEnabled && world.tick - person.lastPracticeMemory >= 300 && ['gather','hunt','farm','build','drink','cooperate','forage'].includes(action)) {
     person.lastPracticeMemory = world.tick;
     const event = addEvent(world, { kind: 'adaptation', actors: [person.id], x: person.x, y: person.y, source: 'simulation', text: `${person.name} recuerda ${useful ? 'un resultado útil' : 'un intento fallido'} al ${actionLabel(action)}.`, cause: `Consecuencia observada ${benefit.toFixed(3)} en contexto ${person.intentContext}; plasticidad heredable ${person.genome.learningRate.toFixed(3)} modifica la preferencia, sin cambiar el genoma.` });
     remember(person, world, `${useful ? 'Funcionó' : 'No funcionó'} ${actionLabel(action)} en (${person.x}, ${person.y}); tendrá en cuenta esa consecuencia.`, event.id);
@@ -342,7 +355,7 @@ function outcome(world: World, person: Person, action: Action, benefit: number, 
   person.activity[action] = Math.min(1_000_000, (person.activity[action] ?? 0) + 1);
 }
 function specialty(person: Person): string {
-  const names: Record<string, string> = { explore: 'exploración', eat: 'recolección de alimento', drink: 'búsqueda de agua', hunt: 'caza', rest: 'recuperación', share: 'cuidado', gather: 'materiales', farm: 'cultivo', build: 'construcción', cooperate: 'cooperación' };
+  const names: Record<string, string> = { explore: 'exploración', eat: 'recolección de alimento', forage: 'cosecha y provisión', drink: 'búsqueda de agua', hunt: 'caza', rest: 'recuperación', share: 'cuidado', gather: 'materiales', farm: 'cultivo', build: 'construcción', cooperate: 'cooperación' };
   const practiced = Object.entries(person.activity).filter(([, count]) => count >= 3).sort((a, b) => b[1] - a[1]).slice(0, 2);
   return practiced.length ? practiced.map(([action]) => names[action] ?? action).join(' · ') : 'Descubriendo sus aptitudes';
 }
@@ -394,7 +407,7 @@ function share(world: World, donor: Person): void {
   if (donor.inventory < 0.025 || donor.hunger >= 0.5 || world.tick - donor.lastShared < 30) return;
   const place = world.places.find(p => distance(donor, p) <= 3);
   const recipient = world.people.filter(p => p.id !== donor.id && p.hunger > 0.27 && distance(p, donor) <= 2).sort((a, b) => b.hunger - a.hunger)[0];
-  if (!place || !recipient) return;
+  if (!place || !recipient || !availableToShare(world, donor, recipient)) return;
   donor.inventory = clamp(donor.inventory - 0.025, 0.25);
   donor.energy = clamp(donor.energy - 0.001);
   recipient.hunger = clamp(recipient.hunger - 0.12);
@@ -440,9 +453,10 @@ function bodyAndAction(world: World, person: Person): void {
   person.closeness = clamp(person.closeness + 0.0001);
   person.socialLoad = clamp(person.socialLoad - 0.0008);
   const emptyFood = person.action === 'eat' && (tileAt(world, person.target)?.food ?? 0) < 0.005 && person.inventory < 0.01 && foodAvailable(world,person)<0.001;
+  const emptyHarvest = person.action === 'forage' && (tileAt(world, person.target)?.food ?? 0) < 0.005;
   const emptyWater = person.action === 'drink' && waterAvailable(world,person.target) < 0.003;
   const agreedWait = person.action === 'retreat' && person.lastDispute >= 0 && world.tick < person.decisionAt && world.tick - person.lastDispute < 30;
-  if (!agreedWait && (world.tick >= person.decisionAt || emptyFood || emptyWater || (person.hunger > 0.9 && !['eat','hunt'].includes(person.action)) || (person.thirst > 0.9 && person.action !== 'drink'))) choose(world, person);
+  if (!agreedWait && (world.tick >= person.decisionAt || emptyFood || emptyHarvest || emptyWater || (person.hunger > 0.9 && !['eat','hunt'].includes(person.action)) || (person.thirst > 0.9 && person.action !== 'drink'))) choose(world, person);
   if (['eat','drink','hunt'].includes(person.action)) resourceDispute(world, person, event => addEvent(world, event));
   if (world.tick % 6 === 0 && !(person.action === 'accompany' && distance(person, person.target) <= 1.5)) move(world, person);
   const current = tileAt(world, person)!;
@@ -490,7 +504,7 @@ function bodyAndAction(world: World, person: Person): void {
       person.decisionAt=world.tick+1;
     }
   }
-  if (['gather', 'farm', 'build', 'hunt', 'invent', 'repair'].includes(person.action) && distance(person, person.target) < 0.5) performWork(world, person, current);
+  if (['gather', 'farm', 'build', 'hunt', 'invent', 'repair', 'forage'].includes(person.action) && distance(person, person.target) < 0.5) performWork(world, person, current);
   if (person.action === 'cooperate' && distance(person, person.target) <= 1.5) {
     person.work++;
     if (person.work >= 18) { person.work = 0; const useful = cooperate(world, person, event => addEvent(world, event)); outcome(world, person, 'cooperate', useful ? 0.2 : -0.1, useful); person.decisionAt = world.tick + 1; }
@@ -516,6 +530,13 @@ function performWork(world: World, person: Person, tile: Tile): void {
       person.materials[material] += amount; count(world, material === 'wood' ? 'woodGathered' : 'stoneGathered', amount);
       recordTechnologyBenefit(world,person,receipt,amount-baseline); success = amount > 0; break;
     }
+  } else if (person.action === 'forage') {
+    const harvested = Math.min(tile.food, 0.06, Math.max(0, 0.25 - person.inventory));
+    tile.food = clamp(tile.food - harvested);
+    tile.vegetation = clamp(tile.vegetation - harvested * 0.1);
+    person.inventory += harvested;
+    count(world, 'foodHarvested', harvested);
+    success = harvested > 0;
   } else if (person.action === 'farm' && person.materials.wood >= 1 && tile.terrain !== 'shelter' && tile.moisture > 0.2 && tile.vegetation < 0.9) {
     if (cultivateTile(tile)) {
       person.materials.wood--; count(world, 'cultivations'); success = true;
@@ -539,7 +560,7 @@ function performWork(world: World, person: Person, tile: Tile): void {
   person.work = 0;
   outcome(world, person, person.action, success ? person.action === 'build' ? 0.3 : 0.14 : -0.2, success);
   if (!success) person.reason = 'La tarea no produjo un resultado: faltan recursos o condiciones. Esa experiencia reduce su preferencia.';
-  if (person.command && ['build', 'farm', 'invent', 'repair'].includes(person.command.order)) { person.command = null; person.controlMode = 'auto'; }
+  if (person.command && ['build', 'farm', 'invent', 'repair', 'forage'].includes(person.command.order)) { person.command = null; person.controlMode = 'auto'; }
   person.decisionAt = world.tick + 1;
 }
 
@@ -567,7 +588,7 @@ function applyGesture(world: World, gesture: Gesture, order: number): GestureRes
   if (!validCoordinate(gesture.x) || !validCoordinate(gesture.y)) return result(false, 'Elige un destino dentro del rango de coordenadas.');
   if (gesture.kind === 'command') {
     const person = world.people.find(p => p.id === gesture.agentId);
-    if (!person || !gesture.order || !['move', 'explore', 'gather', 'farm', 'build', 'rest', 'hunt', 'drink', 'cooperate', 'invent', 'repair', 'research', 'craft', 'auto'].includes(gesture.order)) return result(false, 'Habitante u orden desconocida.');
+    if (!person || !gesture.order || !['move', 'explore', 'gather', 'farm', 'build', 'rest', 'hunt', 'drink', 'cooperate', 'invent', 'repair', 'research', 'craft', 'forage', 'auto'].includes(gesture.order)) return result(false, 'Habitante u orden desconocida.');
     if (distance(person, gesture) > 4096) return result(false, 'El destino de una tarea debe quedar a menos de 4096 celdas.');
     if(['research','craft'].includes(gesture.order)&&person.technology.project&&person.technology.project.kind!==gesture.order) cancelTechnologyProject(world,person);
     person.command = gesture.order === 'auto' ? null : { order: gesture.order, x: gesture.x, y: gesture.y };
@@ -654,7 +675,7 @@ function reproduce(world: World): void {
   if (!world.reproductionEnabled || world.people.length >= MAX_POPULATION || world.tick % 120 !== 0) return;
   for (const a of world.people) {
     if (!fertile(world,a) || !a.communityId) continue;
-    const b = world.people.find(p => p !== a && fertile(world,p) && p.communityId === a.communityId && distance(a, p) <= 3 && (a.bonds[p.id] ?? 0) >= 0.3);
+    const b = world.people.find(p => p !== a && fertile(world,p) && p.communityId === a.communityId && distance(a, p) <= 3 && (a.bonds[p.id] ?? 0) >= 0.3 && (p.bonds[a.id] ?? 0) >= 0.3);
     const place = world.places.find(p => distance(a, p) <= 4);
     if (!b || !place) continue;
     const serial=world.birthCounter+1, id=`descendant-${serial}`;
@@ -680,8 +701,7 @@ function reproduce(world: World): void {
 }
 
 function fertile(world: World, person: Person): boolean {
-  const traits=demographicTraits(person.genome);
-  return person.role==='neighbor' && person.inventory>=0.1 && world.tick-person.lastBirth>=traits.fertilityCooldown && updateDemography({state:person.demography,traits,hunger:person.hunger,thirst:person.thirst,energy:person.energy,fatigue:person.fatigue},{exposure:0,shelter:0,protected:false},0).offspringEligible;
+  return person.inventory >= 0.1 && reproductiveReadiness(world, person);
 }
 
 /** Flat terrain cells can be copied without the generic structured-clone traversal overhead. */
@@ -706,7 +726,7 @@ export function projectWorld(world: World, viewport?: Viewport, context: WorldCo
     originX: v.x, originY: v.y, infinite: true, activeChunks: Object.keys(world.chunks).length, discoveredChunks: world.discoveredChunks, settlementCount: world.settlementCount,
     tiles: projected.tiles.map(t => ({ x: t.x, y: t.y, terrain: t.terrain, biome: t.biome, elevation: t.elevation, wood: t.wood, stone: t.stone, moisture: Math.round(t.moisture * 1000) / 1000, food: Math.round(t.food * 1000) / 1000, vegetation: Math.round(t.vegetation * 1000) / 1000, feature: t.feature, variety: t.variety, growth: t.growth, fertility: t.fertility, cultivation: t.cultivation, traffic: t.traffic, drinkingWater: t.drinkingWater, species: t.species, fauna: t.fauna, life: t.life })),
     people: world.people.map(p => ({ id: p.id, name: p.name, role: p.role, x: p.x, y: p.y, color: p.color, action: p.action, reason: p.reason, energy: p.energy, hunger: p.hunger, fatigue: p.fatigue, thirst: p.thirst, need: p.need, recentMemory: p.recentMemory, traits: { ...p.traits }, skills: { ...p.skills }, materials: { ...p.materials }, specialty: specialty(p), controlMode: p.controlMode, blueprintId:p.blueprintId??null,
-      target: { x:p.target.x,y:p.target.y }, working: ['gather','farm','build','hunt','invent','repair','research','craft'].includes(p.action) && distance(p,p.target)<0.5,
+      target: { x:p.target.x,y:p.target.y }, foodReserve:p.inventory, foodReserveCapacity:0.25, working: ['gather','farm','build','hunt','invent','repair','research','craft','forage'].includes(p.action) && distance(p,p.target)<0.5,
       workProgress: ['research','craft'].includes(p.action) ? (p.technology.project ? clamp(p.technology.project.progress/p.technology.project.requiredWork) : 0) : clamp(p.work / (p.action==='build'?constructionCost(world,p).work:p.action==='invent'?60:p.action==='repair'?30:['farm','hunt'].includes(p.action)?Math.ceil(45*(1-(p.skills[p.action]??0)*0.25)):Math.ceil(18*(1-(p.skills[p.action]??0)*0.25)))),
       health:p.demography.health,vitality:p.demography.vitality,continuityProtected:p.role!=='neighbor',
       genome: { generation: p.genome.generation, parents: [...p.genome.parents], learningRate: p.genome.learningRate, cooperation: p.genome.cooperation, mutations: p.genome.mutations }, age: world.tick - p.bornAt, communityId: p.communityId, culture: { ...p.culture }, trust: Object.entries(p.bonds).map(([id, value]) => ({ id, value })), experiences: p.experiences.map(e => ({ tick: e.tick, text: e.text, causeId: e.causeId })) })),
@@ -738,7 +758,7 @@ function assertCommon(value: unknown, legacy = false, expectedVersion = RULES_VE
   }
   const ids = new Set<string>();
   for (const person of world.people) {
-    if (!object(person) || !str(person.id, 50) || ids.has(person.id) || !str(person.name, 80) || !['S', 'I', 'neighbor'].includes(String(person.role)) || !coord(person.x, 39) || !coord(person.y, 27) || !land(person) || !object(person.target) || !coord(person.target.x, 39) || !coord(person.target.y, 27) || (legacy && !land(person.target)) || !str(person.color, 30) || !['explore', 'eat', 'rest', 'approach', 'accompany', 'retreat', 'share', 'gather', 'farm', 'build', 'hunt', 'drink', 'cooperate', ...(expectedVersion>=4?['invent','repair']:[]), ...(expectedVersion>=5?['research','craft']:[])].includes(String(person.action)) || !str(person.reason) || !str(person.need, 100) || !(person.recentMemory === null || str(person.recentMemory)) || !integer(person.decisionAt) || !Number.isInteger(person.lastMeeting) || !Number.isInteger(person.lastShared) || !list(person.experiences, MAX_EXPERIENCES) || !list(person.habits, MAX_HABITS)) fail();
+    if (!object(person) || !str(person.id, 50) || ids.has(person.id) || !str(person.name, 80) || !['S', 'I', 'neighbor'].includes(String(person.role)) || !coord(person.x, 39) || !coord(person.y, 27) || !land(person) || !object(person.target) || !coord(person.target.x, 39) || !coord(person.target.y, 27) || (legacy && !land(person.target)) || !str(person.color, 30) || !['explore', 'eat', 'rest', 'approach', 'accompany', 'retreat', 'share', 'gather', 'farm', 'build', 'hunt', 'drink', 'cooperate', ...(expectedVersion>=4?['invent','repair']:[]), ...(expectedVersion>=5?['research','craft','forage']:[])].includes(String(person.action)) || !str(person.reason) || !str(person.need, 100) || !(person.recentMemory === null || str(person.recentMemory)) || !integer(person.decisionAt) || !Number.isInteger(person.lastMeeting) || !Number.isInteger(person.lastShared) || !list(person.experiences, MAX_EXPERIENCES) || !list(person.habits, MAX_HABITS)) fail();
     ids.add(person.id);
     for (const key of ['energy', 'hunger', 'fatigue', 'curiosity', 'sociability', 'generosity', 'closeness', 'socialLoad'] as const) if (!num(person[key])) fail();
     if (!num(person.inventory, 0.25)) fail();
@@ -789,7 +809,7 @@ export function assertWorld(value: unknown, expectedVersion = RULES_VERSION): as
     }
     if (!['ready','hungry','thirsty','tired'].includes(p.intentContext)) fail();
     if (!p.traits || !['curiosity','sociability','industriousness','care','resilience'].every(k => typeof p.traits[k as keyof typeof p.traits] === 'number') || !numericMap(p.traits, 0, 1, 5) || !numericMap(p.skills, 0, 1, expectedVersion>=5?18:15) || !numericMap(p.values, -0.3, 0.3, expectedVersion>=5?72:60) || !numericMap(p.activity, 0, 1_000_000, expectedVersion>=5?18:15) || !p.materials || !Number.isFinite(p.materials.wood) || p.materials.wood < 0 || p.materials.wood > 12 || !Number.isFinite(p.materials.stone) || p.materials.stone < 0 || p.materials.stone > 8 || !Array.isArray(p.visited) || p.visited.length > 192 || !p.visited.every(k => typeof k === 'string' && /^-?\d+,-?\d+$/.test(k)) || !Number.isFinite(p.heading) || !Number.isSafeInteger(p.work) || p.work < 0 || p.work > (expectedVersion>=4?600:90) || !Number.isSafeInteger(p.lastOutcome) || p.lastOutcome < 0 || p.lastOutcome > w.tick || !['auto','directed'].includes(p.controlMode)) fail();
-    if (p.command !== null && (!p.command || !['move','explore','gather','farm','build','rest','hunt','drink','cooperate',...(expectedVersion>=4?['invent','repair']:[]), ...(expectedVersion>=5?['research','craft']:[])].includes(p.command.order) || !validCoordinate(p.command.x) || !validCoordinate(p.command.y))) fail();
+    if (p.command !== null && (!p.command || !['move','explore','gather','farm','build','rest','hunt','drink','cooperate',...(expectedVersion>=4?['invent','repair']:[]), ...(expectedVersion>=5?['research','craft','forage']:[])].includes(p.command.order) || !validCoordinate(p.command.x) || !validCoordinate(p.command.y))) fail();
     if ((p.command === null) !== (p.controlMode === 'auto')) fail();
   }
   if (expectedVersion >= 3) {

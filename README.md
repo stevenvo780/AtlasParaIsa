@@ -1,6 +1,6 @@
 # Una Carta Para Isa
 
-Un mundo procedural compartido que continúa mientras el navegador está cerrado: biomas, recursos agotables, animales individuales, exploración, construcción, aprendizaje y comunidades. **V5 `6d0e53b` está activo en la revisión privada desde el 5 de septiembre, 21:08 UTC**, con producción material, ciclo vital y preparación alimentaria local. Dos réplicas de veinticinco días conservaron reemplazo generacional; no acreditan continuidad indefinida. **MAIN `c7796ec` es candidato sin desplegar**: incorpora inventarios de apertura, archivo tecnológico, índice ecológico y renovación de paisaje e interfaz. Mantiene reglas/protocolo 5 y usa SQLite 4; el servicio activo conserva SQLite 3. El [objetivo rector](GOAL.md) reúne la visión de mundo y carta; [EVIDENCIA.md](docs/EVIDENCIA.md) distingue candidatos, resultados y límites. S e I son nombres provisionales; los vecinos y los cinco recuerdos iniciales son ficticios.
+Un mundo procedural compartido que continúa mientras el navegador está cerrado: biomas, recursos agotables, animales individuales, exploración, construcción, aprendizaje y comunidades. **V5 `bf6431b` está activo en la revisión privada**, con reglas/protocolo 5 y SQLite 4. La actualización del 5 de septiembre conserva el mundo, acceso y sesiones y añade archivo tecnológico, aperturas de inventario, índice ecológico y nueva interfaz. Las dos réplicas de veinticinco días pertenecen al cierre biológico anterior; no acreditan continuidad indefinida. El [objetivo rector](GOAL.md) reúne la visión de mundo y carta; [EVIDENCIA.md](docs/EVIDENCIA.md) distingue pruebas, activación y límites. S e I son nombres provisionales; vecinos y cinco recuerdos iniciales son ficticios.
 
 La aplicación local está implementada y la revisión privada mantiene el acceso existente. La voz final de Steven, los recuerdos reales revisados, la prueba en un teléfono físico y el alojamiento definitivo siguen pendientes. No hay publicación pública ni infraestructura nueva contratada.
 
@@ -93,11 +93,19 @@ CARTA_DATA_DIR=./data-previous npm start
 
 Esta operación retira en la copia las entradas y los hechos posteriores al punto recuperado y revoca las sesiones. Conserva el archivo original. Si la base o el punto anterior no se pueden validar, el comando falla; no genera silenciosamente otro mundo.
 
+## Actualizar conservando el mundo
+
+La actualización de SQLite 3 a 4 se comprobó primero en una copia y después conservó el mundo, los archivos de acceso y sus cuatro sesiones. [EVIDENCIA](docs/EVIDENCIA.md#actualización-sin-reiniciar-el-mundo) enlaza preflight, activación, comprobación privada y archivo del build, base y script anteriores. Fue un procedimiento revisado para ese candidato, no un CLI general añadido al proyecto.
+
+Una actualización debe mantener inactivos los CLI independientes de acceso y almacenamiento y cualquier escritura SQL directa. El lease SQLite `world.lock` excluye otras instancias del servidor, pero esos comandos no comparten el lease. Comparar el estado durable antes de reemplazar archivos detecta cambios previos; no convierte el reemplazo en una transacción universal.
+
+Se comprueba el backend en loopback antes de exponerlo por TLS. Si ya se intentó arrancar el backend nuevo, un fallo conserva la base actual y detiene solo los servicios propios; no se restaura una base antigua sobre un mundo que pudo avanzar. La recuperación explícita en copia descrita arriba sigue siendo una operación distinta y revoca las sesiones de esa copia.
+
 ## Territorio y continuidad
 
 El mundo se genera por regiones de 16 × 16 celdas con coordenadas positivas y negativas; no conserva el borde de 40 × 28. El límite técnico es ±10 millones de celdas, con extremo superior excluido. La cámara recibe ventanas de hasta 96 × 64. Solo los alrededores de los habitantes avanzan: las regiones archivadas conservan sus cambios y congelan su ecología. El archivo en disco puede crecer con la exploración.
 
-V5 activo usa reglas/protocolo **5** y SQLite **3**. El lector valida el origen antes de migrar. Antes de una actualización, conservar base y build y comprobar compatibilidad en una copia. La copia privada V4 fue rechazada por una reserva de madera fuera de cota, también con el lector anterior. Se inició un mundo V5 nuevo autorizado y se conservaron íntegros el mundo y build V4 y el acceso existente; **no fue una migración exitosa de ese estado**. El contrato de archivo y recuperación está en [CONSTRUCCION.md](docs/CONSTRUCCION.md#territorio-procedural-y-archivo); fauna, tecnología y demografía se definen en [REGLAS.md](docs/REGLAS.md).
+V5 activo usa reglas/protocolo **5** y SQLite **4**. El lector valida el origen antes de migrar. La actualización del V5 conservó el mundo y sus sesiones; antes se verificó compatibilidad en una copia y se archivaron base y build. El archivo V4 anterior conserva su defecto de madera fuera de cota: el inicio V5 fue un mundo nuevo autorizado, no una migración exitosa de ese V4. El contrato de archivo y recuperación está en [CONSTRUCCION.md](docs/CONSTRUCCION.md#territorio-procedural-y-archivo); [EVIDENCIA.md](docs/EVIDENCIA.md#actualización-sin-reiniciar-el-mundo) registra el cambio efectivo de SQLite 3 a 4.
 
 ## Desarrollo y comprobaciones
 

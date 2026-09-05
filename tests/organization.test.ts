@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { analyzeOrganization } from '../src/world/organization.js';
 import type { OrganizationExecution, OrganizationObservation, OrganizationProcess } from '../src/shared/organization.js';
+import { analyzeTechnologyOrganization, observeTechnologyOrganization } from '../src/world/technology-organization.js';
+import { defaultTechnologyState, initialTechnologyKnowledge, researchTechnology, technologyWorkCost, useTool, recordTechnologyBenefit, settleTechnologyEstate, type TechnologyActor, type TechnologyHost, type TechnologyProgram } from '../src/world/technology.js';
 
 const q = (resourceId: string, amount = 1) => ({ resourceId, amount });
 const process = (id: string, output: string, catalyst: string, parents: string[] = []): OrganizationProcess => ({
@@ -233,4 +235,131 @@ test('stoichiometric units support scaled receipts without weakening exact mater
   const report = analyzeOrganization(observation);
   assert.equal(report.evidence.balanced, true); assert.equal(report.evidence.successful, 4);
   assert.deepEqual(report.maintainedComponents, [['make-a', 'make-b']]);
+});
+
+function technologyScene() {
+  const actor = (id: string): TechnologyActor => ({ id, x: 0, y: 0, energy: 1, fatigue: 0, hunger: 0.1, thirst: 0.1,
+    materials: { wood: 20, stone: 20 }, skills: {}, technology: initialTechnologyKnowledge() });
+  const a = actor('a'), b = actor('b');
+  const host: TechnologyHost = { seed: 23, tick: 0, people: [a, b], technology: defaultTechnologyState() };
+  return { host, a, b };
+}
+function manufacture(host: TechnologyHost, actor: TechnologyActor, program: TechnologyProgram, parents: string[] = []): void {
+  actor.energy = 1; actor.fatigue = 0;
+  actor.technology.project = { kind: 'research', program, parents, recipeId: null, progress: 0,
+    requiredWork: technologyWorkCost(program), energyPaid: 0, startedAt: host.tick };
+  for (let n = 0; actor.technology.project && n < 500; n++) { host.tick++; researchTechnology(host, actor); }
+  assert.equal(actor.technology.project, null);
+}
+const edgeProgram: TechnologyProgram = { inputs: [{ source: 'raw', material: 'stone', mass: 1000 }], steps: [{ op: 'form', intensity: 4, shape: 'edge' }, { op: 'compress', intensity: 2 }] };
+const bindingProgram: TechnologyProgram = { inputs: [{ source: 'raw', material: 'wood', mass: 1000 }], steps: [{ op: 'weave', intensity: 4 }, { op: 'form', intensity: 2, shape: 'sheet' }] };
+
+test('technology adapter measures real manufacture and independent tool wear without reconstructing fictional inventories', () => {
+  const { host, a } = technologyScene(); manufacture(host, a, edgeProgram);
+  host.tick++; const receipt = useTool(host, a, 'cutting', 2)!; recordTechnologyBenefit(host, a, receipt, 0.1);
+  const report = analyzeTechnologyOrganization(host.technology, host.people, host.tick);
+  assert.equal(report.window.complete, true); assert.equal(report.evidence.balanced, true);
+  assert.equal(report.evidence.successful, 2); assert.deepEqual(report.evidence.rejected, []);
+  assert.ok(report.observedDependencies.some(edge => edge.resourceId.startsWith('recipe:')));
+  assert.deepEqual(report.maintainedComponents, []);
+  assert.equal(report.resources.find(item => item.resourceId === 'raw:stone')!.externalInput, 1000);
+});
+
+test('technology transaction envelopes count required catalyst wear once and preserve nested recycling as a separate process', () => {
+  const { host, a } = technologyScene(); manufacture(host, a, bindingProgram);
+  host.technology.budgets.maxItems = 1;
+  const parentRecipe = host.technology.recipes[0]!.id;
+  const advanced: TechnologyProgram = {
+    inputs: [{ source: 'raw', material: 'wood', mass: 1000 }, { source: 'raw', material: 'stone', mass: 1000 }],
+    steps: [{ op: 'combine', intensity: 3, requiredCatalyst: 'binding' }, { op: 'form', intensity: 3, shape: 'rod' }],
+  };
+  manufacture(host, a, advanced, [parentRecipe]);
+  const parent = host.technology.history.at(-1)!;
+  assert.equal(parent.nestedExecutionIds!.length, 2);
+  const receipt = parent.catalysts[0]!;
+  const { observation, diagnostics } = observeTechnologyOrganization(host.technology, host.people, host.tick);
+  const report = analyzeTechnologyOrganization(host.technology, host.people, host.tick);
+  assert.deepEqual(diagnostics, []); assert.equal(report.evidence.balanced, true); assert.deepEqual(report.evidence.rejected, []);
+  assert.equal(report.resources.find(item => item.resourceId === `recipe:${parentRecipe}`)!.catalystWear, receipt.wear);
+  assert.equal(observation.executions.some(item => item.id === receipt.executionId), false, 'merged wear receipt cannot be applied twice');
+  assert.ok(observation.processes.some(item => item.id.startsWith('recycle:')));
+  const manufacturing = observation.processes.find(item => item.id.startsWith(`${parent.recipeId}#`))!;
+  assert.deepEqual(manufacturing.catalysts, [`recipe:${parentRecipe}`]);
+  assert.ok(manufacturing.inputs.every(item => item.resourceId !== `recipe:${parentRecipe}`), 'cleanup cannot become a fake manufacturing reactant');
+});
+
+test('technology fuel and unsuccessful physical trials remain explicit balanced flows without successful production credit', () => {
+  const { host, a } = technologyScene();
+  manufacture(host, a, { inputs: [{ source: 'raw', material: 'stone', mass: 1000 }], steps: [{ op: 'heat', intensity: 4 }, { op: 'weave', intensity: 4 }] });
+  const report = analyzeTechnologyOrganization(host.technology, host.people, host.tick);
+  assert.equal(report.evidence.balanced, true); assert.equal(report.evidence.executed, 1); assert.equal(report.evidence.successful, 0);
+  assert.deepEqual(report.evidence.rejected, []);
+  assert.equal(report.resources.find(item => item.resourceId === 'raw:wood')!.externalInput, 200);
+  assert.equal(report.resources.find(item => item.resourceId === 'spent:wood')!.externalLoss, 200);
+  assert.equal(report.resources.find(item => item.resourceId === 'residue:stone')!.internalProduction, 0);
+});
+
+test('missing transaction children and unlogged inventory edits cannot certify the technology observation', () => {
+  const { host, a } = technologyScene(); manufacture(host, a, bindingProgram);
+  manufacture(host, a, { inputs: [{ source: 'raw', material: 'wood', mass: 1000 }, { source: 'raw', material: 'stone', mass: 1000 }], steps: [{ op: 'combine', intensity: 3, requiredCatalyst: 'binding' }] });
+  const childId = host.technology.history.at(-1)!.catalysts[0]!.executionId;
+  const missing = structuredClone(host.technology); missing.history = missing.history.filter(item => item.id !== childId);
+  let report = analyzeTechnologyOrganization(missing, host.people, host.tick);
+  assert.equal(report.window.complete, false); assert.ok(report.evidence.failures.some(item => item.includes('missing-nested-execution')));
+  a.technology.residue.wood++; report = analyzeTechnologyOrganization(host.technology, host.people, host.tick);
+  assert.equal(report.window.complete, false); assert.ok(report.evidence.failures.includes('current-stock-mismatch:a'));
+});
+
+test('bounded history can analyze a later complete interval without pretending its truncated first tick is complete', () => {
+  const { host, a } = technologyScene(); manufacture(host, a, edgeProgram); host.technology.budgets.maxHistory = 2;
+  for (let n = 0; n < 3; n++) { host.tick++; const receipt = useTool(host, a, 'cutting', 1)!; recordTechnologyBenefit(host, a, receipt, 0.1); }
+  assert.ok(host.technology.historyDropped > 0);
+  const report = analyzeTechnologyOrganization(host.technology, host.people, host.tick);
+  assert.equal(report.window.startTick, host.technology.history[0]!.tick + 1);
+  assert.equal(report.window.complete, true); assert.equal(report.evidence.balanced, true); assert.equal(report.evidence.executed, 1);
+  assert.deepEqual(report.maintainedComponents, []);
+  host.technology.history[0]!.tick = host.tick;
+  const partial = analyzeTechnologyOrganization(host.technology, host.people, host.tick);
+  assert.equal(partial.window.complete, false); assert.ok(partial.evidence.failures.includes('no-complete-retained-tick'));
+});
+
+test('explicit estates close a deceased inventory as external loss, not new production', () => {
+  const { host, a } = technologyScene(); manufacture(host, a, edgeProgram); host.tick++;
+  settleTechnologyEstate(host, a); host.people = host.people.filter(item => item !== a);
+  const report = analyzeTechnologyOrganization(host.technology, host.people, host.tick);
+  assert.equal(report.window.complete, true); assert.equal(report.evidence.balanced, true);
+  assert.equal(report.evidence.executed, 1);
+  assert.ok(report.resources.some(item => item.externalLoss > 0 && item.resourceId.startsWith('recipe:')));
+});
+
+test('paired internal estate transfers cancel imports and losses; a missing half stays unverified', () => {
+  const { host, a, b } = technologyScene(); manufacture(host, a, edgeProgram); host.tick++;
+  settleTechnologyEstate(host, a, [b]); host.people = host.people.filter(item => item !== a);
+  const report = analyzeTechnologyOrganization(host.technology, host.people, host.tick);
+  assert.equal(report.window.complete, true); assert.equal(report.evidence.balanced, true);
+  assert.deepEqual(report.maintenance.externallySuppliedNonFood, []);
+  const missing = structuredClone(host.technology); const received = missing.history.find(item => item.kind === 'transfer' && item.actorId === b.id)!;
+  missing.history = missing.history.filter(item => item.id !== received.id);
+  const incomplete = analyzeTechnologyOrganization(missing, host.people, host.tick);
+  assert.equal(incomplete.window.complete, false); assert.ok(incomplete.evidence.failures.some(item => item.startsWith('incomplete-transfer:')));
+});
+
+test('a globally balanced pool cannot hide false material attribution to individual actors', () => {
+  const { host, a, b } = technologyScene(); manufacture(host, a, edgeProgram); manufacture(host, b, edgeProgram);
+  const events = structuredClone(host.technology);
+  const first = events.history[0]!, second = events.history[1]!;
+  first.inputs[0]!.mass += 10; second.inputs[0]!.mass -= 10;
+  const report = analyzeTechnologyOrganization(events, host.people, host.tick);
+  assert.equal(report.window.complete, false);
+  assert.ok(report.evidence.failures.includes(`transaction-resource-mismatch:${first.id}`));
+  assert.ok(report.evidence.failures.includes(`transaction-resource-mismatch:${second.id}`));
+  assert.deepEqual(report.maintainedComponents, []);
+});
+
+test('required catalyst metadata is checked against the actual recipe, not invented from the remaining receipts', () => {
+  const { host, a } = technologyScene(); manufacture(host, a, bindingProgram);
+  manufacture(host, a, { inputs: [{ source: 'raw', material: 'wood', mass: 1000 }, { source: 'raw', material: 'stone', mass: 1000 }], steps: [{ op: 'combine', intensity: 3, requiredCatalyst: 'binding' }] });
+  host.technology.history.at(-1)!.catalysts[0]!.required = false;
+  const report = analyzeTechnologyOrganization(host.technology, host.people, host.tick);
+  assert.equal(report.window.complete, false); assert.ok(report.evidence.failures.some(item => item.startsWith('missing-required-catalyst:')));
 });

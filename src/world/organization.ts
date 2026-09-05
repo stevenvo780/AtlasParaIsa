@@ -153,7 +153,9 @@ export function analyzeOrganization(observation: OrganizationObservation): Organ
   for (const execution of selected) {
     const process = processMap.get(execution.processId), reasons: string[] = [];
     const units = execution.units ?? 1;
-    if (!process) reasons.push('unknown-process');
+    // Failed research may have no recipe yet. Its real material debits still count,
+    // but an unknown successful process cannot earn production credit.
+    if (!process && execution.success) reasons.push('unknown-process');
     if (units <= 0) reasons.push('zero-units');
     if (execution.success && process) {
       for (const input of process.inputs) if (!near(sum(execution.inputs, input.resourceId), input.amount * units)) reasons.push(`${sum(execution.inputs, input.resourceId) < input.amount * units ? 'missing' : 'excess'}-input:${input.resourceId}`);

@@ -2,6 +2,7 @@ import type { ChronicleEvent } from '../shared/types.js';
 import type { Capability, Composition, Material, MaterialBatch, MaterialProperties, MaterialRequirement, OperationInstruction, PhysicalOperation, ResourceMass, TechnologyExecution, TechnologyKnowledge, TechnologyProgram, TechnologyProject, TechnologyRecipe, TechnologyState, TechnologyView } from '../shared/technology.js';
 import { localRandom } from './genetics.js';
 import { assertTechnologyCheckpoint } from './technology-checkpoint.js';
+import { assertTechnologyJournal, journalTechnologyExecution } from './technology-journal.js';
 export type * from '../shared/technology.js';
 
 export interface TechnologyActor {
@@ -205,6 +206,7 @@ export function technologyStock(actor: TechnologyActor): ResourceMass[] {
 function compositionResources(c: Composition, prefix: string): ResourceMass[] { return MATERIALS.filter(m => c[m]).map(m => ({ resourceId: `${prefix}:${m}`, mass: c[m] })); }
 function appendExecution(host: TechnologyHost, event: Omit<TechnologyExecution, 'id' | 'tick'>): TechnologyExecution {
   const state = host.technology, execution = { ...event, id: `process-${++state.executionCounter}`, tick: host.tick };
+  journalTechnologyExecution(state, execution);
   state.history.push(execution);
   if (state.history.length > state.budgets.maxHistory) { const removed = state.history.length - state.budgets.maxHistory; state.history.splice(0, removed); state.historyDropped += removed; }
   return execution;
@@ -230,7 +232,11 @@ export function useTool(host: TechnologyHost, actor: TechnologyActor, capability
 }
 export function recordTechnologyBenefit(host: TechnologyHost, actor: TechnologyActor, receipt: ToolReceipt | undefined, actualBenefit: number): void {
   if (!receipt || !Number.isFinite(actualBenefit) || actualBenefit <= 0) return;
-  const execution = host.technology.history.find(e => e.id === receipt.executionId && e.kind === 'use' && e.actorId === actor.id && e.recipeId === receipt.recipeId);
+  const state = host.technology;
+  if (state.journal && Number(receipt.executionId.slice(8)) <= state.journal.committedThrough) {
+    throw new Error('A committed technology receipt cannot receive a later benefit.');
+  }
+  const execution = (state.journal?.pending ?? state.history).find(e => e.id === receipt.executionId && e.kind === 'use' && e.actorId === actor.id && e.recipeId === receipt.recipeId);
   if (!execution || execution.benefit > 0) return;
   execution.benefit = actualBenefit;
   const recipe = host.technology.recipes.find(r => r.id === receipt.recipeId); if (recipe) recipe.utility += actualBenefit;
@@ -490,6 +496,7 @@ export function assertTechnology(host: TechnologyHost): void {
   if (!Array.isArray(state.recipes) || state.recipes.length > state.budgets.maxRecipes || !Array.isArray(state.history) || state.history.length > state.budgets.maxHistory) fail();
   for (const key of ['recipeCounter', 'itemCounter', 'executionCounter', 'historyDropped'] as const) if (!integer(state[key])) fail();
   if (state.recipeCounter !== state.recipes.length || state.historyDropped + state.history.length !== state.executionCounter || state.ledger.attempts !== state.ledger.crafted + state.ledger.failures) fail();
+  assertTechnologyJournal(state, host.tick);
   for (const [key, value] of Object.entries(state.ledger)) if (!['imported', 'estateLoss'].includes(key) && !(key === 'energy' ? finite(value) : integer(value))) fail();
   const recipeIds = new Set<string>(), signatures = new Set<string>();
   for (const recipe of state.recipes) {
@@ -515,8 +522,11 @@ export function assertTechnology(host: TechnologyHost): void {
   }
   current.wood += state.ledger.fuelMass; add(current, state.ledger.estateLoss);
   if (MATERIALS.some(m => current[m] !== state.ledger.imported[m])) fail();
-  const executionIds = new Set<string>(); let previousSerial = state.historyDropped;
-  for (const e of state.history) {
+  // Pending receipts may exceed the recent display ring. Validate their physical envelopes too.
+  const pending = state.journal?.pending;
+  const executions = pending && pending.length > state.history.length ? pending : state.history;
+  const executionIds = new Set<string>(); let previousSerial = executions === pending ? state.journal!.committedThrough : state.historyDropped;
+  for (const e of executions) {
     if (!e || typeof e.id !== 'string' || executionIds.has(e.id) || !integer(e.tick, host.tick) || !finite(e.energy) || !integer(e.work) || !finite(e.benefit) || !integer(e.residueMass) || typeof e.success !== 'boolean' || !Array.isArray(e.inputs) || !Array.isArray(e.outputs) || !e.balance || ![e.inputs, e.outputs, e.balance.opening, e.balance.closing, e.balance.externalInputs, e.balance.externalLoss].every(xs => Array.isArray(xs) && xs.every(r => typeof r.resourceId === 'string' && integer(r.mass)))) fail();
     const total = (rs: ResourceMass[]) => rs.reduce((n, r) => n + r.mass, 0);
     if (total(e.balance.opening) + total(e.balance.externalInputs) !== total(e.balance.closing) + total(e.balance.externalLoss)) fail();

@@ -68,10 +68,18 @@ export interface TechnologyState {
   version: 1; recipes: TechnologyRecipe[]; history: TechnologyExecution[]; historyDropped: number;
   /** Optional only for loading older V5 snapshots and standalone unanchored hosts. */
   checkpoint?: TechnologyCheckpoint;
+  /** Durable receipt coverage starts after this serial; pending receipts share the live objects until commit. */
+  journal?: TechnologyJournal;
   recipeCounter: number; itemCounter: number; executionCounter: number;
   ledger: { imported: Composition; estateLoss: Composition; work: number; energy: number; fuelMass: number;
     attempts: number; failures: number; crafted: number; toolUses: number; shared: number; recycled: number };
   budgets: TechnologyBudgets;
+}
+export interface TechnologyJournal {
+  version: 1;
+  startsAfter: number;
+  committedThrough: number;
+  pending: TechnologyExecution[];
 }
 export interface TechnologyView {
   recipes: TechnologyRecipe[];

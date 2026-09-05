@@ -43,6 +43,20 @@ function useMany(world: World, amount: number) {
   }
   return receipts;
 }
+function makeNestedTool(world: World) {
+  const actor = makeTool(world), parentId = world.technology.recipes[0]!.id;
+  actor.energy = 1; actor.fatigue = 0.1; actor.materials.wood = 4;
+  const program: TechnologyProgram = { inputs: [{ source: 'raw', material: 'wood', mass: 1000 }],
+    steps: [{ op: 'form', intensity: 3, shape: 'edge', requiredCatalyst: 'cutting' }] };
+  actor.technology.project = { kind: 'research', program, parents: [parentId], recipeId: null, progress: 0,
+    requiredWork: technologyWorkCost(program), energyPaid: 0, startedAt: world.tick };
+  for (let n = 0; n < 100 && actor.technology.project; n++) { nextTick(world); researchTechnology(world, actor); }
+  assert.equal(actor.technology.project, null);
+  const parent = world.technology.history.at(-1)!;
+  assert.equal(parent.kind, 'research'); assert.equal(parent.nestedExecutionIds?.length, 1);
+  assert.ok(world.technology.history.some(receipt => receipt.id === parent.nestedExecutionIds![0] && receipt.kind === 'use'));
+  assertWorld(world); return parent;
+}
 function rewriteSnapshot(store: Store, slot: number, change: (world: World) => void) {
   const row = store.db.prepare('SELECT body FROM snapshots WHERE slot=?').get(slot) as { body: string };
   const world = decodeSnapshot(row.body) as World; change(world);
@@ -60,7 +74,7 @@ function oldDatabase(path: string, version: 1 | 2 | 3, worlds: World[]) {
     }
     store.db.prepare("INSERT INTO metadata VALUES ('initialized','1')").run();
     store.addSession('old-session', Date.now() + 60_000);
-    store.db.exec(`DROP TABLE technology_executions; DROP TABLE technology_stats; DROP TABLE technology_definitions; PRAGMA user_version=${version};`);
+    store.db.exec(`DROP TABLE technology_executions; DROP TABLE technology_stats; DROP TABLE technology_definitions; DROP TABLE technology_origin; PRAGMA user_version=${version};`);
     if (version < 3) store.db.exec('DROP TABLE legacy');
     if (version < 2) store.db.exec('DROP TABLE chunks');
   } finally { store.close(); }
@@ -315,4 +329,118 @@ test('a late input failure rolls back technology, events and snapshot together',
   assert.equal(count(store, 'events'), events); assert.equal(count(store, 'inputs'), 1);
   assert.deepEqual(store.db.prepare('SELECT body,digest FROM snapshots WHERE slot=0').get(), before);
   assert.deepEqual(world.technology.journal, queue); store.save(world); assert.equal(count(store, 'technology_executions'), 1);
+});
+
+test('old nested receipts survive migration exactly when their lost child predates the durable history origin', t => {
+  const directory = mkdtempSync(join(tmpdir(), 'atlas-nested-bootstrap-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const world = createWorld(51926), parent = structuredClone(makeNestedTool(world)); nextTick(world); useMany(world, 255);
+  assert.equal(world.technology.history[0]!.id, parent.id);
+  const missingChild = parent.nestedExecutionIds![0]!;
+  assert.ok(!world.technology.history.some(receipt => receipt.id === missingChild));
+  const path = join(directory, 'old.sqlite'); oldDatabase(path, 3, [world]); const store = new Store(path);
+  try {
+    assert.equal(store.technologyArchive.getHistoryOrigin(), null);
+    const loaded = store.load()!.world; store.save(loaded);
+    assert.deepEqual(store.technologyArchive.getHistoryOrigin(), { version: 1, startsAfter: world.technology.historyDropped });
+    assert.equal(store.technologyArchive.getExecution(missingChild), null);
+    assert.deepEqual(store.technologyArchive.getExecution(parent.id), parent);
+    assert.equal(count(store, 'technology_executions'), 256);
+    assert.deepEqual(store.load()!.world, loaded);
+  } finally { store.close(); }
+});
+
+test('a nested child lost inside durable coverage remains an error for load and save', t => {
+  const { store } = fixture(t), world = createWorld(51926); store.save(world); const parent = makeNestedTool(world); store.save(world);
+  store.db.prepare('DELETE FROM technology_executions WHERE id=?').run(parent.nestedExecutionIds![0]!);
+  assert.throws(() => store.load(), /[Tt]echnology archive/);
+  nextTick(world); assert.throws(() => store.save(world), /[Tt]echnology archive/);
+  assert.equal(store.technologyArchive.getExecution(parent.nestedExecutionIds![0]!), null);
+});
+
+test('missing or forged durable origin is rejected even for an empty journal and is never healed by save', t => {
+  for (const mutation of ['delete', 'checksum', 'shape', 'boundary'] as const) {
+    const { store } = fixture(t), world = createWorld(51926); store.save(world);
+    if (mutation === 'delete') store.db.exec('DELETE FROM technology_origin');
+    else {
+      const body = JSON.stringify(mutation === 'shape' ? { version: 1, startsAfter: 0, extra: true } : { version: 1, startsAfter: 1 });
+      store.db.prepare('UPDATE technology_origin SET body=?,digest=?').run(body, mutation === 'checksum' ? '0'.repeat(64) : digest(body));
+    }
+    const before = store.db.prepare('SELECT * FROM technology_origin').all();
+    assert.throws(() => store.load(), /[Tt]echnology archive/);
+    assert.throws(() => store.save(world), /[Tt]echnology archive/);
+    assert.deepEqual(store.db.prepare('SELECT * FROM technology_origin').all(), before);
+  }
+});
+
+test('previous pre-journal recovery extends its origin using only the older checkpoint receipts in the copy', t => {
+  const directory = mkdtempSync(join(tmpdir(), 'atlas-nested-previous-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const old = createWorld(51926), parent = structuredClone(makeNestedTool(old)); nextTick(old); useMany(old, 255);
+  const path = join(directory, 'old.sqlite'); oldDatabase(path, 3, [old]); const store = new Store(path);
+  try {
+    // No save occurs at the older boundary. This first migrated commit has a later
+    // origin, while slot 1 still contains the actual pre-journal snapshot.
+    const later = structuredClone(old); nextTick(later); useMany(later, 2); store.save(later);
+    const origin = store.technologyArchive.getHistoryOrigin()!, newerOrigin = old.technology.historyDropped + 2;
+    assert.equal(origin.startsAfter, newerOrigin); assert.equal(store.technologyArchive.getExecution(parent.id), null);
+    const destination = join(directory, 'previous.sqlite'); store.previous(destination);
+    const recovered = new Store(destination, { readOnly: true });
+    try {
+      const loaded = recovered.load()!.world;
+      assert.equal(loaded.tick, old.tick);
+      assert.equal(recovered.technologyArchive.getHistoryOrigin()!.startsAfter, old.technology.historyDropped);
+      assert.equal(recovered.technologyArchive.getExecution(parent.nestedExecutionIds![0]!), null);
+      assert.deepEqual(recovered.technologyArchive.getExecution(parent.id), parent);
+      assert.deepEqual(loaded.technology.history, old.technology.history); assert.equal(count(recovered, 'technology_executions'), 256);
+    } finally { recovered.close(); }
+    assert.deepEqual(store.technologyArchive.getHistoryOrigin(), origin); assert.deepEqual(store.load()!.world, later);
+    assert.equal(store.technologyArchive.getExecution(parent.id), null);
+  } finally { store.close(); }
+});
+
+test('pre-journal recovery refuses corrupt retained observations, covered holes and forged origins before rebuilding', t => {
+  for (const mutation of ['shape', 'gap', 'overlap', 'origin'] as const) {
+    const directory = mkdtempSync(join(tmpdir(), 'atlas-nested-refused-'));
+    t.after(() => rmSync(directory, { recursive: true, force: true }));
+    const old = createWorld(51926); makeNestedTool(old); nextTick(old); useMany(old, 255);
+    const path = join(directory, 'old.sqlite'); oldDatabase(path, 3, [old]); const store = new Store(path);
+    try {
+      const later = structuredClone(old); nextTick(later); useMany(later, 2); store.save(later);
+      const retainedId = `process-${store.technologyArchive.getHistoryOrigin()!.startsAfter + 1}`;
+      if (mutation === 'gap') store.db.prepare('DELETE FROM technology_executions WHERE id=?').run(retainedId);
+      else if (mutation === 'origin') {
+        const body = JSON.stringify({ version: 1, startsAfter: later.technology.historyDropped + 1 });
+        store.db.prepare('UPDATE technology_origin SET body=?,digest=?').run(body, digest(body));
+      } else {
+        const receipt = store.technologyArchive.getExecution(retainedId)!;
+        const body = JSON.stringify({ ...receipt, ...(mutation === 'shape' ? { energy: -1 } : { benefit: receipt.benefit + 0.5 }) });
+        store.db.prepare('UPDATE technology_executions SET body=?,digest=? WHERE id=?').run(body, digest(body), retainedId);
+      }
+      const before = store.db.prepare('SELECT id,body,digest FROM technology_executions ORDER BY serial').all();
+      const origin = store.db.prepare('SELECT * FROM technology_origin').all();
+      assert.throws(() => store.previous(join(directory, 'refused.sqlite')), /[Tt]echnology archive/);
+      assert.deepEqual(store.db.prepare('SELECT id,body,digest FROM technology_executions ORDER BY serial').all(), before);
+      assert.deepEqual(store.db.prepare('SELECT * FROM technology_origin').all(), origin);
+    } finally { store.close(); }
+  }
+});
+
+test('removing journal metadata cannot turn an initialized archive back into bootstrap mode', t => {
+  const { store } = fixture(t), world = createWorld(51926); store.save(world);
+  rewriteSnapshot(store, 0, value => { delete value.technology.journal; });
+  assert.throws(() => store.load(), /unjournaled snapshot/);
+  nextTick(world); assert.throws(() => store.save(world), /lost its declared history origin/);
+  assert.deepEqual(store.technologyArchive.getHistoryOrigin(), { version: 1, startsAfter: 0 });
+});
+
+test('same-connection schema changes invalidate quiet-save caches without rebuilding missing tables', t => {
+  const { store } = fixture(t), world = createWorld(51926); store.save(world); makeTool(world); store.save(world);
+  const changes = store.db.prepare('SELECT total_changes() AS n').get()!.n;
+  store.db.exec('DROP TABLE technology_definitions');
+  assert.equal(store.db.prepare('SELECT total_changes() AS n').get()!.n, changes, 'DDL is invisible to the row-change counter');
+  const before = store.db.prepare('SELECT body,digest FROM snapshots WHERE slot=0').get(); nextTick(world);
+  assert.throws(() => store.save(world), /schema is incomplete/);
+  assert.deepEqual(store.db.prepare('SELECT body,digest FROM snapshots WHERE slot=0').get(), before);
+  assert.equal(store.db.prepare("SELECT name FROM sqlite_master WHERE name='technology_definitions'").get(), undefined);
 });

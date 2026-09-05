@@ -42,11 +42,12 @@ function assertTechnologySchema(db: DatabaseSync): void {
     ['technology_definitions', ['id', 'tick', 'signature', 'body', 'digest'], ['id'], 'signature'],
     ['technology_stats', ['recipeId', 'tick', 'body', 'digest'], ['recipeId', 'tick'], null],
     ['technology_executions', ['id', 'serial', 'tick', 'body', 'digest'], ['id'], 'serial'],
+    ['technology_origin', ['id', 'body', 'digest'], ['id'], null],
   ] as const) {
     const columns = db.prepare('SELECT name,type,"notnull",pk FROM pragma_table_info(?)').all(table) as { name: string; type: string; notnull: number; pk: number }[];
     if (JSON.stringify(columns.map(c => c.name)) !== JSON.stringify(names)
       || JSON.stringify(columns.filter(c => c.pk).sort((a, b) => a.pk - b.pk).map(c => c.name)) !== JSON.stringify(primary)
-      || columns.some(c => c.notnull !== 1 || c.type !== (['tick', 'serial'].includes(c.name) ? 'INTEGER' : 'TEXT'))) technologyFailure('schema is incomplete');
+      || columns.some(c => c.notnull !== 1 || c.type !== (['tick', 'serial'].includes(c.name) || table === 'technology_origin' && c.name === 'id' ? 'INTEGER' : 'TEXT'))) technologyFailure('schema is incomplete');
     if (unique) {
       const indexes = db.prepare('SELECT name FROM pragma_index_list(?) WHERE "unique"=1 AND partial=0').all(table) as { name: string }[];
       if (!indexes.some(index => {
@@ -97,7 +98,7 @@ export class Store {
   readonly technologyArchive: TechnologyArchive;
   lastSnapshotBytes = 0;
   private readonly schemaVersion: number;
-  private verifiedTechnology: { startsAfter: number; through: number; dataVersion: number; totalChanges: number } | null = null;
+  private verifiedTechnology: { startsAfter: number; through: number; dataVersion: number; totalChanges: number; schemaCookie: number } | null = null;
   private verifiedRecipes = new Map<string, { body: string; uses: number; utility: number; manufactured: number }>();
   constructor(readonly path: string, options: { readOnly?: boolean } = {}) {
     const existed = path !== ':memory:' && existsSync(path);
@@ -169,6 +170,9 @@ export class Store {
       if (world.technology.journal!.pending.length || world.technology.journal!.committedThrough !== world.technology.executionCounter) technologyFailure('snapshot contains uncommitted executions');
       this.assertTechnologyCoverage(world);
       if (this.schemaVersion >= 4) this.assertTechnologyCache(world);
+    } else if (this.schemaVersion >= 4 && (this.technologyArchive.getHistoryOrigin()
+      || ['technology_definitions', 'technology_stats', 'technology_executions'].some(table => this.db.prepare(`SELECT 1 FROM ${table} LIMIT 1`).get()))) {
+      technologyFailure('an unjournaled snapshot cannot describe an initialized archive');
     }
     // A migrated global allocator must remain above every archived identity, too.
     // Otherwise a corrupted counter could allocate an ID already living in a dormant region.
@@ -222,6 +226,7 @@ export class Store {
 
   private dataVersion(): number { return Number(this.db.prepare('PRAGMA data_version').get()!.data_version); }
   private totalChanges(): number { return Number(this.db.prepare('SELECT total_changes() AS n').get()!.n); }
+  private schemaCookie(): number { return Number(this.db.prepare('PRAGMA schema_version').get()!.schema_version); }
 
   /** A declared prefix is verified once on load, not scanned at the 10 Hz save cadence. */
   private assertTechnologyCoverage(world: World): void {
@@ -230,11 +235,18 @@ export class Store {
       if (journal.committedThrough !== journal.startsAfter) technologyFailure('coverage has no backing schema');
       return;
     }
-    let serial = journal.startsAfter;
+    const origin = this.technologyArchive.getHistoryOrigin();
+    if (!origin || origin.startsAfter !== journal.startsAfter) technologyFailure('history origin disagrees with snapshot');
+    this.assertTechnologyReceipts(world, journal.startsAfter, journal.committedThrough);
+  }
+
+  private assertTechnologyReceipts(world: World, startsAfter: number, through: number): void {
+    let serial = startsAfter;
+    const state = world.technology;
     const recent = new Map(state.history.map(receipt => [receipt.id, receipt]));
-    while (serial < journal.committedThrough) {
+    while (serial < through) {
       const page = this.technologyArchive.listExecutions({ afterSerial: serial, asOfTick: world.tick,
-        limit: Math.min(1000, journal.committedThrough - serial) });
+        limit: Math.min(1000, through - serial) });
       if (!page.length) technologyFailure('declared execution coverage is incomplete');
       for (const receipt of page) {
         if (receipt.id !== `process-${++serial}`) technologyFailure('declared execution coverage has a gap');
@@ -261,7 +273,7 @@ export class Store {
   private rememberTechnology(world: World): void {
     const state = world.technology, journal = state.journal!;
     this.verifiedTechnology = { startsAfter: journal.startsAfter, through: journal.committedThrough,
-      dataVersion: this.dataVersion(), totalChanges: this.totalChanges() };
+      dataVersion: this.dataVersion(), totalChanges: this.totalChanges(), schemaCookie: this.schemaCookie() };
     this.verifiedRecipes = new Map(state.recipes.map(recipe => [recipe.id, { body: JSON.stringify(definitionOf(recipe)),
       uses: recipe.uses, utility: recipe.utility, manufactured: recipe.manufactured }]));
   }
@@ -272,8 +284,9 @@ export class Store {
     assertTechnologyJournal(state, world.tick);
     const verified = this.verifiedTechnology;
     if (!verified || verified.startsAfter !== journal.startsAfter || verified.through !== journal.committedThrough
-      || verified.dataVersion !== this.dataVersion() || verified.totalChanges !== this.totalChanges()) {
+      || verified.dataVersion !== this.dataVersion() || verified.totalChanges !== this.totalChanges() || verified.schemaCookie !== this.schemaCookie()) {
       this.verifiedRecipes.clear();
+      assertTechnologySchema(this.db);
       if (!recovering) {
         // Validate the durable baseline BEFORE any idempotent writes. Otherwise a
         // deleted definition/statistics row could be silently rebuilt from the candidate.
@@ -288,11 +301,15 @@ export class Store {
             this.assertTechnologyCoverage(baseline); this.assertTechnologyCache(baseline);
             if (journal.startsAfter !== committed.startsAfter || journal.committedThrough !== committed.committedThrough) technologyFailure('candidate changed the committed coverage boundary');
             this.rememberTechnology(baseline);
+          } else if (this.technologyArchive.getHistoryOrigin()) {
+            technologyFailure('baseline snapshot lost its declared history origin');
           }
         }
+        this.technologyArchive.initializeHistory(journal.startsAfter);
         this.assertTechnologyCoverage(world);
       }
     }
+    this.technologyArchive.initializeHistory(journal.startsAfter);
     const latest = this.db.prepare('SELECT serial FROM technology_executions ORDER BY serial DESC LIMIT 1').get() as { serial: number } | undefined;
     if (latest && latest.serial > state.executionCounter) technologyFailure('cannot move behind archived executions');
     for (const recipe of [...state.recipes].sort((a, b) => a.generation - b.generation || a.id.localeCompare(b.id))) {
@@ -375,6 +392,46 @@ export class Store {
     mkdirSync(dirname(resolve(destination)), { recursive: true, mode: 0o700 });
     this.db.prepare('VACUUM INTO ?').run(resolve(destination));
   }
+
+  /** Only called inside a transaction on the explicit recovery copy. A checkpoint
+   * predating journaling supplies real earlier observations, not a moved live watermark. */
+  private rebuildPreviousTechnology(world: World): void {
+    const origin = this.technologyArchive.getHistoryOrigin();
+    const current = this.db.prepare('SELECT body,digest FROM snapshots WHERE slot=0').get() as Row | undefined;
+    // When an origin exists, the newer committed checkpoint must corroborate it.
+    // Unverifiable metadata is not permission to reconstruct a damaged retained prefix.
+    if (origin) {
+      if (!current || checksum(current.body) !== current.digest) technologyFailure('cannot verify recovery history origin');
+      const baseline = migrateWorld(decodeSnapshot(current!.body)), journal = baseline.technology.journal;
+      if (!journal || journal.startsAfter !== origin.startsAfter || journal.pending.length
+        || journal.committedThrough !== baseline.technology.executionCounter) technologyFailure('recovery history origin disagrees with committed snapshot');
+      assertTechnologyJournal(baseline.technology, baseline.tick);
+      this.assertTechnologyReceipts(world, origin.startsAfter, world.technology.executionCounter);
+      for (const recipe of world.technology.recipes) {
+        const retained = this.technologyArchive.getDefinition(recipe.id, world.tick);
+        if (!retained || JSON.stringify(retained) !== JSON.stringify(definitionOf(recipe))) technologyFailure('recovery definition disagrees with checkpoint');
+        const stats = this.technologyArchive.getStats(recipe.id, world.tick);
+        if (stats && (stats.uses > recipe.uses || stats.utility > recipe.utility || stats.manufactured > recipe.manufactured
+          || stats.tick === world.tick && !sameStats(stats, recipe))) technologyFailure('recovery statistics disagree with checkpoint');
+      }
+      for (const receipt of world.technology.history) {
+        const retained = this.technologyArchive.getExecution(receipt.id, world.tick);
+        if (retained && JSON.stringify(retained) !== JSON.stringify(receipt)) technologyFailure('recovery execution disagrees with checkpoint');
+      }
+    } else {
+      if (['technology_definitions', 'technology_stats', 'technology_executions'].some(table => this.db.prepare(`SELECT 1 FROM ${table} LIMIT 1`).get())) technologyFailure('recovery archive has records but no origin');
+      if (current && checksum(current.body) === current.digest) {
+        const baseline = migrateWorld(decodeSnapshot(current.body));
+        if (baseline.technology.journal !== undefined) technologyFailure('recovery lost its declared history origin');
+      }
+    }
+    // All retained rows were validated by truncateAfter; overlapping observations
+    // and any already-declared serial interval were checked above. Only this copy
+    // now receives the old checkpoint's exact surviving ring and its honest origin.
+    this.db.exec('DELETE FROM technology_executions; DELETE FROM technology_stats; DELETE FROM technology_definitions; DELETE FROM technology_origin;');
+    this.verifiedTechnology = null; this.verifiedRecipes.clear();
+  }
+
   previous(destination: string) {
     const row = this.db.prepare('SELECT body,digest,saved_at FROM snapshots WHERE slot=1').get() as Row | undefined;
     if (!row || checksum(row.body) !== row.digest) throw new Error('No valid previous checkpoint.');
@@ -395,7 +452,7 @@ export class Store {
       if (declaredJournal) {
         recovered.assertTechnologyCoverage(world);
         recovered.assertTechnologyCache(world);
-      }
+      } else recovered.rebuildPreviousTechnology(world);
       // A pre-journal checkpoint has surviving receipts in memory, not a backed watermark.
       recovered.flushTechnology(world, true);
       const body = encodeSnapshot({ ...world, technology: technologyStateForCommit(world.technology) });

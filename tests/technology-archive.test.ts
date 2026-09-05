@@ -50,10 +50,62 @@ test('schema installation is explicit, idempotent and owned by the caller transa
     db.exec('BEGIN'); archive.installSchema(); assert.ok(db.isTransaction); db.exec('ROLLBACK');
     assert.equal(count(db, 'sqlite_master'), 0);
     transaction(db, () => { archive.installSchema(); archive.installSchema(); });
-    for (const mutate of [() => archive.putDefinition(definition()), () => archive.putStats('recipe-1', 10, stats(1)),
+    for (const mutate of [() => archive.initializeHistory(0), () => archive.putDefinition(definition()), () => archive.putStats('recipe-1', 10, stats(1)),
       () => archive.putExecution(execution(1)), () => archive.truncateAfter(0)]) assert.throws(mutate, /host transaction/);
     assert.equal(count(db, 'technology_definitions'), 0);
   } finally { db.close(); }
+});
+
+test('history origin is explicit, immutable, transaction-owned and absent until initialized', t => {
+  const { db, archive } = fixture(t);
+  assert.equal(archive.getHistoryOrigin(), null); assert.equal(count(db, 'technology_origin'), 0);
+  db.exec('BEGIN'); archive.initializeHistory(12); assert.deepEqual(archive.getHistoryOrigin(), { version: 1, startsAfter: 12 }); db.exec('ROLLBACK');
+  assert.equal(archive.getHistoryOrigin(), null);
+  transaction(db, () => { archive.initializeHistory(12); archive.initializeHistory(12); });
+  for (const boundary of [0, 11, 13]) assert.throws(() => transaction(db, () => archive.initializeHistory(boundary)), /immutable history origin conflict/);
+  assert.deepEqual(archive.getHistoryOrigin(), { version: 1, startsAfter: 12 });
+  const second = fixture(t);
+  transaction(second.db, () => second.archive.putDefinition(definition()));
+  assert.throws(() => transaction(second.db, () => second.archive.initializeHistory(0)), /must precede archived records/);
+});
+
+test('missing nested references remain strict by default and are unknown only before the declared origin', t => {
+  const { db, archive } = fixture(t), parent = { ...execution(3, 10), nestedExecutionIds: ['process-1'] };
+  assert.throws(() => transaction(db, () => archive.putExecution(parent)), /missing nested execution/);
+  transaction(db, () => { archive.initializeHistory(1); archive.putExecution(parent); });
+  assert.deepEqual(archive.getExecution(parent.id), parent); assert.equal(archive.getExecution('process-1'), null);
+  assert.deepEqual(archive.listExecutions(), [parent]);
+  const coveredParent = { ...execution(4, 10), nestedExecutionIds: ['process-2'] };
+  assert.throws(() => transaction(db, () => archive.putExecution(coveredParent)), /missing nested execution/);
+  transaction(db, () => { archive.putExecution({ ...execution(2, 10), kind: 'use' }); archive.putExecution(coveredParent); });
+  db.exec("DELETE FROM technology_executions WHERE id='process-2'");
+  assert.throws(() => archive.getExecution(coveredParent.id), /missing nested execution/);
+  assert.deepEqual(archive.getExecution(parent.id), parent);
+});
+
+test('an existing pre-origin child is validated and cannot hide malformed evidence behind the boundary', t => {
+  const { db, archive } = fixture(t), parent = { ...execution(2, 10), nestedExecutionIds: ['process-1'] };
+  transaction(db, () => { archive.initializeHistory(1); archive.putExecution({ ...execution(1, 10), kind: 'use' }); archive.putExecution(parent); });
+  const body = JSON.stringify({ ...execution(1, 10), kind: 'use', energy: -1 });
+  db.prepare("UPDATE technology_executions SET body=?,digest=? WHERE id='process-1'").run(body, digest(body));
+  assert.throws(() => archive.getExecution(parent.id), /Invalid technology archive execution/);
+});
+
+test('origin checksum, strict shape, identity and numeric bounds are verified without read-side mutations', t => {
+  const { db, archive, path } = fixture(t); transaction(db, () => archive.initializeHistory(1));
+  for (const value of [null, { version: 2, startsAfter: 1 }, { version: 1, startsAfter: -1 },
+    { version: 1, startsAfter: 0.5 }, { version: 1, startsAfter: '1' }, { version: 1, startsAfter: 1, extra: true }]) {
+    db.exec('BEGIN'); const body = JSON.stringify(value); db.prepare('UPDATE technology_origin SET body=?,digest=?').run(body, digest(body));
+    assert.throws(() => archive.getHistoryOrigin(), /history origin/); assert.throws(() => archive.listExecutions(), /history origin/); db.exec('ROLLBACK');
+  }
+  db.exec('BEGIN'); db.prepare('UPDATE technology_origin SET digest=?').run('0'.repeat(64));
+  assert.throws(() => archive.getHistoryOrigin(), /checksum/); db.exec('ROLLBACK');
+  db.exec('PRAGMA ignore_check_constraints=ON; BEGIN; UPDATE technology_origin SET id=2');
+  assert.throws(() => archive.getHistoryOrigin(), /origin identity/); db.exec('ROLLBACK; PRAGMA ignore_check_constraints=OFF');
+  const before = readFileSync(path), readOnly = new DatabaseSync(path, { readOnly: true });
+  try { assert.deepEqual(new TechnologyArchive(readOnly).getHistoryOrigin(), { version: 1, startsAfter: 1 }); }
+  finally { readOnly.close(); }
+  assert.deepEqual(readFileSync(path), before);
 });
 
 test('an incompatible preexisting schema cannot silently remove uniqueness guarantees', () => {

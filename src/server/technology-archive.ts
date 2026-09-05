@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { TECHNOLOGY_ARCHIVE_LAWS_VERSION, type TechnologyDefinition, type TechnologyExecutionQuery,
-  type TechnologyStats, type TechnologyStatsRecord } from '../shared/technology-archive.js';
+  type TechnologyStats, type TechnologyStatsRecord, type TechnologyHistoryOrigin } from '../shared/technology-archive.js';
 import type { TechnologyExecution, TechnologyProgram } from '../shared/technology.js';
 
 const MAX_TICK = Number.MAX_SAFE_INTEGER;
@@ -129,17 +129,20 @@ export class TechnologyArchive {
       recipeId TEXT NOT NULL, tick INTEGER NOT NULL, body TEXT NOT NULL, digest TEXT NOT NULL, PRIMARY KEY(recipeId,tick));
       CREATE TABLE IF NOT EXISTS technology_executions (
       id TEXT PRIMARY KEY NOT NULL, serial INTEGER UNIQUE NOT NULL, tick INTEGER NOT NULL, body TEXT NOT NULL, digest TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS technology_origin (
+      id INTEGER PRIMARY KEY NOT NULL CHECK(id=1), body TEXT NOT NULL, digest TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS technology_definitions_tick ON technology_definitions(tick);
       CREATE INDEX IF NOT EXISTS technology_executions_tick ON technology_executions(tick);`);
     for (const [table, columns, primary, unique] of [
       ['technology_definitions', ['id', 'tick', 'signature', 'body', 'digest'], ['id'], 'signature'],
       ['technology_stats', ['recipeId', 'tick', 'body', 'digest'], ['recipeId', 'tick'], null],
       ['technology_executions', ['id', 'serial', 'tick', 'body', 'digest'], ['id'], 'serial'],
+      ['technology_origin', ['id', 'body', 'digest'], ['id'], null],
     ] as const) {
       const actual = this.db.prepare('SELECT name,type,"notnull",pk FROM pragma_table_info(?)').all(table) as { name: string; type: string; notnull: number; pk: number }[];
       const actualPrimary = actual.filter(column => column.pk > 0).sort((a, b) => a.pk - b.pk).map(column => column.name);
       if (JSON.stringify(actual.map(column => column.name)) !== JSON.stringify(columns) || JSON.stringify(actualPrimary) !== JSON.stringify(primary)
-        || actual.some(column => column.notnull !== 1 || column.type !== (['tick', 'serial'].includes(column.name) ? 'INTEGER' : 'TEXT'))) fail('schema');
+        || actual.some(column => column.notnull !== 1 || column.type !== (['tick', 'serial'].includes(column.name) || table === 'technology_origin' && column.name === 'id' ? 'INTEGER' : 'TEXT'))) fail('schema');
       if (unique) {
         const indexes = this.db.prepare('SELECT name FROM pragma_index_list(?) WHERE "unique"=1 AND partial=0').all(table) as { name: string }[];
         if (!indexes.some(index => {
@@ -148,6 +151,30 @@ export class TechnologyArchive {
         })) fail('schema uniqueness');
       }
     }
+  }
+
+  getHistoryOrigin(): TechnologyHistoryOrigin | null {
+    const rows = this.db.prepare('SELECT id,body,digest FROM technology_origin LIMIT 2').all() as { id: number; body: string; digest: string }[];
+    if (!rows.length) return null;
+    if (rows.length !== 1 || rows[0]!.id !== 1) fail('history origin identity');
+    const value = decode(rows[0]!);
+    if (!keys(value, ['version', 'startsAfter']) || value.version !== 1 || !integer(value.startsAfter)) fail('history origin');
+    return { version: 1, startsAfter: value.startsAfter };
+  }
+
+  /** Establish the boundary before archiving anything. It cannot be advanced or
+   * rewound in a live archive; a recovery copy is a separate explicit host operation. */
+  initializeHistory(startsAfter: number): void {
+    this.transaction(); tick(startsAfter);
+    const origin = this.getHistoryOrigin();
+    if (origin) {
+      if (origin.startsAfter !== startsAfter) fail('immutable history origin conflict');
+      return;
+    }
+    if (['technology_definitions', 'technology_stats', 'technology_executions'].some(table =>
+      this.db.prepare(`SELECT 1 FROM ${table} LIMIT 1`).get())) fail('history origin must precede archived records');
+    const body = JSON.stringify({ version: 1, startsAfter });
+    this.db.prepare('INSERT INTO technology_origin VALUES (1,?,?)').run(body, checksum(body));
   }
 
   private definitionRow(id: string): DefinitionRow | undefined {
@@ -238,12 +265,19 @@ export class TechnologyArchive {
     return value;
   }
   private executionReferences(value: TechnologyExecution): void {
+    const origin = this.getHistoryOrigin();
     const references = new Set([...value.parentRecipeIds, ...value.catalysts.flatMap(c => c.recipeId ? [c.recipeId] : []), ...(value.recipeId ? [value.recipeId] : [])]);
     for (const list of [value.inputs, value.outputs, ...Object.values(value.balance)]) for (const line of list) if (line.resourceId.startsWith('recipe:')) references.add(line.resourceId.slice(7));
     for (const id of references) if (!this.getDefinition(id, value.tick)) fail('execution definition reference');
     if (value.recipeId && ['research', 'craft'].includes(value.kind) && value.programSignature !== this.getDefinition(value.recipeId, value.tick)!.signature) fail('execution program signature');
     for (const id of value.nestedExecutionIds ?? []) {
-      const row = this.executionRow(id); if (!row) fail('missing nested execution');
+      const row = this.executionRow(id);
+      if (!row) {
+        // Preserve the original reference, without manufacturing a receipt or
+        // certifying its causal meaning outside the explicitly archived interval.
+        if (origin && serialOf(id, 'process')! <= origin.startsAfter) continue;
+        fail('missing nested execution');
+      }
       const child = this.execution(row);
       if (child.tick !== value.tick || child.actorId !== value.actorId || !['use', 'recycle'].includes(child.kind)) fail('nested execution reference');
     }
@@ -262,6 +296,7 @@ export class TechnologyArchive {
   }
   listExecutions({ afterSerial = 0, asOfTick = MAX_TICK, limit = 256 }: TechnologyExecutionQuery = {}): TechnologyExecution[] {
     tick(afterSerial); tick(asOfTick); if (!integer(limit) || limit < 1 || limit > 10000) fail('execution page limit');
+    this.getHistoryOrigin();
     const rows = this.db.prepare('SELECT id,serial,tick,body,digest FROM technology_executions WHERE serial>? AND tick<=? ORDER BY serial LIMIT ?').all(afterSerial, asOfTick, limit) as ExecutionRow[];
     return rows.map(row => { const value = this.execution(row); this.executionTimeline(row, asOfTick); this.executionReferences(value); return value; });
   }
@@ -277,6 +312,7 @@ export class TechnologyArchive {
   /** Recovery of a caller-owned copy. Validate retained references before deleting any future row. */
   truncateAfter(atTick: number): void {
     this.transaction(); tick(atTick);
+    this.getHistoryOrigin();
     for (const row of this.db.prepare('SELECT id FROM technology_definitions WHERE tick<=?').iterate(atTick) as Iterable<{ id: string }>) this.getDefinition(row.id, atTick);
     let previousStats: TechnologyStatsRecord | undefined, previousExecutionTick = -1;
     for (const row of this.db.prepare('SELECT recipeId,tick,body,digest FROM technology_stats WHERE tick<=? ORDER BY recipeId,tick').iterate(atTick) as Iterable<StatsRow>) {

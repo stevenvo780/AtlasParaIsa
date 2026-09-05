@@ -17,6 +17,7 @@ import { initialDemography, demographicTraits } from './demography.js';
 import { reproductiveReadiness, familyOpportunity, availableToShare } from './family.js';
 import { advancePopulation, assertPopulation } from './lineage.js';
 import { analyzeTechnologyOrganization } from './technology-organization.js';
+import { captureTechnologyCheckpoint, advanceTechnologyCheckpoint } from './technology-checkpoint.js';
 export { tileAt, normalizeViewport } from './spatial.js';
 export type { WorldContext } from './spatial.js';
 
@@ -157,6 +158,7 @@ export function createWorld(seed = 20260905): World {
     });
   }
   for (const person of world.people) initializePerson(world, person);
+  world.technology.checkpoint = captureTechnologyCheckpoint(world.technology, world.people, world.tick, 'initial');
   world.structures.push(...legacyStructures(world.tiles, world.tick));
   addEvent(world, { kind: 'memory', actors: [], source: 'sample', text: 'Este mundo comienza con S, I y una vecindad ficticia. Los cinco recuerdos son ejemplos, pendientes de la historia de Steven e Isa.', cause: 'Contenido sintético identificado; no se importaron conversaciones ni biografía.' });
   return world;
@@ -628,6 +630,7 @@ function applyGesture(world: World, gesture: Gesture, order: number): GestureRes
 
 /** One fixed 100 ms step. Browser presence and wall-clock time are never inputs. */
 export function stepWorld(world: World, inputs: Gesture[] = [], context: WorldContext = {}): GestureResult[] {
+  if (world.technology.checkpoint === undefined) world.technology.checkpoint = captureTechnologyCheckpoint(world.technology, world.people, world.tick, 'migration');
   world.tick++;
   maintainRegions(world, context);
   const results = inputs.map((gesture, order) => applyGesture(world, gesture, order));
@@ -650,6 +653,7 @@ export function stepWorld(world: World, inputs: Gesture[] = [], context: WorldCo
   advancePopulation(world,{emit:event=>addEvent(world,event),beforeDeath:transferEstate});
   updateCommunities(world, event => addEvent(world, event));
   reproduce(world);
+  advanceTechnologyCheckpoint(world.technology, world.people, world.tick);
   recordSample(world);
   return results;
 }
@@ -714,12 +718,12 @@ export function cloneWorld(world: World): World {
 }
 
 /** Explicit allow-list: no PRNG, habit internals, private provenance or session data cross the wire. */
-const organizationViews = new WeakMap<World, { tick: number; executionCounter: number; value: NonNullable<WorldView['organization']> }>();
+const organizationViews = new WeakMap<World, { tick: number; executionCounter: number; checkpoint: TechnologyState['checkpoint']; value: NonNullable<WorldView['organization']> }>();
 export function projectWorld(world: World, viewport?: Viewport, context: WorldContext = {}): WorldView {
   const projected = projectTerrain(world, viewport, context), v = projected.viewport;
   let organization=organizationViews.get(world);
-  if(!organization||organization.tick!==world.tick||organization.executionCounter!==world.technology.executionCounter) {
-    organization={tick:world.tick,executionCounter:world.technology.executionCounter,value:analyzeTechnologyOrganization(world.technology,world.people,world.tick)};
+  if(!organization||organization.tick!==world.tick||organization.executionCounter!==world.technology.executionCounter||organization.checkpoint!==world.technology.checkpoint) {
+    organization={tick:world.tick,executionCounter:world.technology.executionCounter,checkpoint:world.technology.checkpoint,value:analyzeTechnologyOrganization(world.technology,world.people,world.tick)};
     organizationViews.set(world,organization);
   }
   return {
@@ -838,7 +842,13 @@ export function assertWorld(value: unknown, expectedVersion = RULES_VERSION): as
 /** V1/V2 conversion preserves existing fields and initializes only newly introduced mechanisms. */
 export function migrateWorld(value: unknown): World {
   const version = (value as { version?: unknown } | null)?.version;
-  if (version === RULES_VERSION) { assertWorld(value); return value; }
+  if (version === RULES_VERSION) {
+    assertWorld(value);
+    if (value.technology.checkpoint !== undefined) return value;
+    const world = structuredClone(value);
+    world.technology.checkpoint = captureTechnologyCheckpoint(world.technology, world.people, world.tick, 'migration');
+    assertWorld(world); return world;
+  }
   if (version===4) { assertWorld(value,4); const world=structuredClone(value); upgradeV5(world); assertWorld(world); return world; }
   if(version===3) {
     assertWorld(value,3);
@@ -891,4 +901,5 @@ function upgradeV5(world: World): void {
   world.version=5; world.technology=defaultTechnologyState(); world.legacy=[]; world.retiredLegacy=[];
   world.demographyDynamics={deaths:0,causes:{starvation:0,dehydration:0,exposure:0,senescence:0},foodLost:0,woodLost:0,stoneLost:0};
   for (const person of world.people) { person.technology=initialTechnologyKnowledge(); person.demography=initialDemography(world.tick-person.bornAt); }
+  world.technology.checkpoint = captureTechnologyCheckpoint(world.technology, world.people, world.tick, 'migration');
 }

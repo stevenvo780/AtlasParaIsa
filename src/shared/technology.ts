@@ -58,8 +58,16 @@ export interface TechnologyBudgets {
   maxRecipes: number; maxSteps: number; maxInputs: number; maxItems: number;
   maxHistory: number; maxGeneration: number; maxMassPerInput: number;
 }
+/** Physical stock at the end of a tick. Receipts before this boundary are excluded. */
+export interface TechnologyCheckpoint {
+  version: 1; tick: number; executionCounter: number;
+  reason: 'initial' | 'migration' | 'history-gap' | 'roster-change';
+  inventories: { actorId: string; items: Pick<MaterialBatch, 'id' | 'recipeId' | 'mass' | 'composition'>[]; residue: Composition }[];
+}
 export interface TechnologyState {
   version: 1; recipes: TechnologyRecipe[]; history: TechnologyExecution[]; historyDropped: number;
+  /** Optional only for loading older V5 snapshots and standalone unanchored hosts. */
+  checkpoint?: TechnologyCheckpoint;
   recipeCounter: number; itemCounter: number; executionCounter: number;
   ledger: { imported: Composition; estateLoss: Composition; work: number; energy: number; fuelMass: number;
     attempts: number; failures: number; crafted: number; toolUses: number; shared: number; recycled: number };

@@ -1,6 +1,7 @@
 import type { OrganizationAnalysis, OrganizationExecution, OrganizationObservation, OrganizationProcess, OrganizationQuantity } from '../shared/organization.js';
-import type { ResourceMass, TechnologyExecution, TechnologyKnowledge, TechnologyState } from '../shared/technology.js';
+import type { Composition, ResourceMass, TechnologyCheckpoint, TechnologyExecution, TechnologyKnowledge, TechnologyState } from '../shared/technology.js';
 import { analyzeOrganization } from './organization.js';
+import { assertTechnologyCheckpoint, technologyHistoryGap } from './technology-checkpoint.js';
 
 export interface TechnologyOrganizationActor { id: string; technology: Pick<TechnologyKnowledge, 'items' | 'residue'>; }
 type Stock = Map<string, number>;
@@ -15,7 +16,7 @@ const stock = (values: readonly ResourceMass[]): Stock => {
 const add = (target: Stock, values: Stock, sign = 1): void => { for (const [id, amount] of values) target.set(id, (target.get(id) ?? 0) + amount * sign); };
 const quantities = (values: Stock): OrganizationQuantity[] => [...values].filter(([, amount]) => amount > 0).sort(([a], [b]) => a.localeCompare(b)).map(([resourceId, amount]) => ({ resourceId, amount }));
 const equals = (a: Stock, b: Stock): boolean => sorted([...a.keys(), ...b.keys()]).every(id => (a.get(id) ?? 0) === (b.get(id) ?? 0));
-const actorStock = (actor: TechnologyOrganizationActor): Stock => {
+const actorStock = (actor: { technology: { items: readonly { recipeId: string | null; mass: number }[]; residue: Composition } }): Stock => {
   const result: Stock = new Map();
   for (const item of actor.technology.items) {
     const id = item.recipeId ? `recipe:${item.recipeId}` : 'unclassified';
@@ -23,6 +24,16 @@ const actorStock = (actor: TechnologyOrganizationActor): Stock => {
   }
   for (const material of ['wood', 'stone', 'water'] as const) if (actor.technology.residue[material]) result.set(`residue:${material}`, actor.technology.residue[material]);
   return result;
+};
+const samePhysicalStock = (opening: TechnologyCheckpoint['inventories'][number], actor: TechnologyOrganizationActor): boolean => {
+  const items = new Map(actor.technology.items.map(item => [item.id, item]));
+  return actor.technology.items.length === opening.items.length && items.size === opening.items.length && ['wood', 'stone', 'water'].every(material =>
+    opening.residue[material as keyof Composition] === actor.technology.residue[material as keyof Composition]) &&
+    opening.items.every(item => {
+      const current = items.get(item.id);
+      return current?.recipeId === item.recipeId && current.mass === item.mass &&
+        (['wood', 'stone', 'water'] as const).every(material => current.composition[material] === item.composition[material]);
+    });
 };
 const hash = (value: string): string => {
   let result = 2166136261;
@@ -39,29 +50,41 @@ interface AdaptedObservation { observation: OrganizationObservation; diagnostics
  */
 export function observeTechnologyOrganization(state: TechnologyState, actors: readonly TechnologyOrganizationActor[], tick: number): AdaptedObservation {
   const diagnostics: string[] = [], history = state.history as FlowRecord[];
-  if (state.historyDropped + history.length !== state.executionCounter) diagnostics.push('execution-ledger-gap');
+  let checkpoint = state.checkpoint;
+  try { assertTechnologyCheckpoint(state, tick); } catch { diagnostics.push('invalid-opening-checkpoint'); checkpoint = undefined; }
+  if (!checkpoint) diagnostics.push('missing-opening-checkpoint');
+  if (technologyHistoryGap(state)) diagnostics.push('execution-ledger-gap');
   const allEvents = new Map(history.map(event => [event.id, event]));
   const parentByChild = new Map<string, string>();
   for (const parent of history) for (const childId of parent.nestedExecutionIds ?? []) {
     if (parentByChild.has(childId)) diagnostics.push(`multiple-transaction-parents:${childId}`);
     parentByChild.set(childId, parent.id);
   }
-  // A truncated buffer can begin inside a tick or transaction. Exclude that whole
-  // tick; a later interval can be complete even though lifetime history is bounded.
-  const startTick = state.historyDropped > 0 && history.length ? history[0]!.tick + 1 : 0;
-  if (startTick > tick) diagnostics.push('no-complete-retained-tick');
-  const selected = history.filter(event => event.tick >= startTick && event.tick <= tick);
+  // The checkpoint is the END of its tick. Its opening is never inferred from
+  // a later receipt or current inventory, including after a history gap.
+  const startTick = checkpoint ? checkpoint.tick + 1 : tick + 1;
+  if (startTick > tick) diagnostics.push('no-complete-epoch');
+  const selected = checkpoint ? history.filter(event => Number(event.id.slice(8)) > checkpoint.executionCounter) : [];
+  for (const event of selected) if (event.tick < startTick || event.tick > tick) diagnostics.push(`execution-outside-epoch:${event.id}`);
   const selectedIds = new Set(selected.map(event => event.id));
   const envelopes = selected.filter(event => !parentByChild.has(event.id));
-  const previousEnvelopes = history.filter(event => event.tick < startTick && !parentByChild.has(event.id));
   const currentActors = new Map(actors.map(actor => [actor.id, actor]));
+  if (currentActors.size !== actors.length) diagnostics.push('duplicate-current-actor');
   const openingByActor = new Map<string, Stock>(), closingByActor = new Map<string, Stock>();
+  for (const inventory of checkpoint?.inventories ?? []) {
+    const opening = actorStock({ technology: inventory });
+    openingByActor.set(inventory.actorId, opening); closingByActor.set(inventory.actorId, new Map(opening));
+  }
+  if (checkpoint && (currentActors.size !== checkpoint.inventories.length || checkpoint.inventories.some(inventory => !currentActors.has(inventory.actorId)))) diagnostics.push('checkpoint-roster-change');
   const lastKind = new Map<string, string>();
   const imported: Stock = new Map(), exported: Stock = new Map();
   const unknownOpening = new Set<string>(), unknownClosing = new Set<string>();
   for (const event of envelopes) {
     const before = stock(event.balance.opening), after = stock(event.balance.closing);
-    if (!openingByActor.has(event.actorId)) openingByActor.set(event.actorId, before);
+    if (!openingByActor.has(event.actorId)) {
+      diagnostics.push(`unobserved-opening-stock:${event.actorId}`);
+      for (const id of before.keys()) unknownOpening.add(id);
+    }
     const previous = closingByActor.get(event.actorId);
     if (previous && !equals(previous, before)) diagnostics.push(`unlogged-stock-change:${event.actorId}`);
     closingByActor.set(event.actorId, after); lastKind.set(event.actorId, event.kind);
@@ -103,14 +126,11 @@ export function observeTechnologyOrganization(state: TechnologyState, actors: re
     const actual = actorStock(actor), previous = closingByActor.get(actor.id);
     if (previous && !equals(previous, actual)) diagnostics.push(`current-stock-mismatch:${actor.id}`);
     if (!openingByActor.has(actor.id)) {
-      const boundary = previousEnvelopes.filter(event => event.actorId === actor.id).at(-1);
-      if (boundary) {
-        const known = stock(boundary.balance.closing); openingByActor.set(actor.id, known);
-        if (!equals(known, actual)) diagnostics.push(`unlogged-stock-change:${actor.id}`);
-      } else if (actual.size) {
-        diagnostics.push(`unobserved-opening-stock:${actor.id}`);
-        for (const id of actual.keys()) unknownOpening.add(id);
-      }
+      diagnostics.push(`unobserved-opening-stock:${actor.id}`);
+      for (const id of actual.keys()) unknownOpening.add(id);
+    } else if (!envelopes.some(event => event.actorId === actor.id)) {
+      const initial = checkpoint!.inventories.find(inventory => inventory.actorId === actor.id)!;
+      if (!samePhysicalStock(initial, actor)) diagnostics.push(`unlogged-physical-stock-change:${actor.id}`);
     }
     closingByActor.set(actor.id, actual);
   }

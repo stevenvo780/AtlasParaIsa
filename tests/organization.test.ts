@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { analyzeOrganization } from '../src/world/organization.js';
 import type { OrganizationExecution, OrganizationObservation, OrganizationProcess } from '../src/shared/organization.js';
 import { analyzeTechnologyOrganization, observeTechnologyOrganization } from '../src/world/technology-organization.js';
+import { captureTechnologyCheckpoint, advanceTechnologyCheckpoint } from '../src/world/technology-checkpoint.js';
 import { defaultTechnologyState, initialTechnologyKnowledge, researchTechnology, technologyWorkCost, useTool, recordTechnologyBenefit, settleTechnologyEstate, type TechnologyActor, type TechnologyHost, type TechnologyProgram } from '../src/world/technology.js';
 
 const q = (resourceId: string, amount = 1) => ({ resourceId, amount });
@@ -242,6 +243,7 @@ function technologyScene() {
     materials: { wood: 20, stone: 20 }, skills: {}, technology: initialTechnologyKnowledge() });
   const a = actor('a'), b = actor('b');
   const host: TechnologyHost = { seed: 23, tick: 0, people: [a, b], technology: defaultTechnologyState() };
+  host.technology.checkpoint = captureTechnologyCheckpoint(host.technology, host.people, host.tick, 'initial');
   return { host, a, b };
 }
 function manufacture(host: TechnologyHost, actor: TechnologyActor, program: TechnologyProgram, parents: string[] = []): void {
@@ -310,22 +312,25 @@ test('missing transaction children and unlogged inventory edits cannot certify t
   assert.equal(report.window.complete, false); assert.ok(report.evidence.failures.includes('current-stock-mismatch:a'));
 });
 
-test('bounded history can analyze a later complete interval without pretending its truncated first tick is complete', () => {
+test('bounded history needs a new physical checkpoint before a later interval can be complete', () => {
   const { host, a } = technologyScene(); manufacture(host, a, edgeProgram); host.technology.budgets.maxHistory = 2;
   for (let n = 0; n < 3; n++) { host.tick++; const receipt = useTool(host, a, 'cutting', 1)!; recordTechnologyBenefit(host, a, receipt, 0.1); }
   assert.ok(host.technology.historyDropped > 0);
   const report = analyzeTechnologyOrganization(host.technology, host.people, host.tick);
-  assert.equal(report.window.startTick, host.technology.history[0]!.tick + 1);
-  assert.equal(report.window.complete, true); assert.equal(report.evidence.balanced, true); assert.equal(report.evidence.executed, 1);
+  assert.equal(report.window.complete, false); assert.equal(report.evidence.balanced, false);
+  assert.ok(report.evidence.failures.includes('execution-ledger-gap'));
   assert.deepEqual(report.maintainedComponents, []);
-  host.technology.history[0]!.tick = host.tick;
-  const partial = analyzeTechnologyOrganization(host.technology, host.people, host.tick);
-  assert.equal(partial.window.complete, false); assert.ok(partial.evidence.failures.includes('no-complete-retained-tick'));
+  advanceTechnologyCheckpoint(host.technology, host.people, host.tick);
+  const boundary = analyzeTechnologyOrganization(host.technology, host.people, host.tick);
+  assert.equal(boundary.window.complete, false); assert.ok(boundary.evidence.failures.includes('no-complete-epoch'));
+  host.tick++; const receipt = useTool(host, a, 'cutting', 1)!; recordTechnologyBenefit(host, a, receipt, 0.1);
+  const later = analyzeTechnologyOrganization(host.technology, host.people, host.tick);
+  assert.equal(later.window.complete, true); assert.equal(later.evidence.balanced, true); assert.equal(later.evidence.executed, 1);
 });
 
 test('explicit estates close a deceased inventory as external loss, not new production', () => {
   const { host, a } = technologyScene(); manufacture(host, a, edgeProgram); host.tick++;
-  settleTechnologyEstate(host, a); host.people = host.people.filter(item => item !== a);
+  settleTechnologyEstate(host, a);
   const report = analyzeTechnologyOrganization(host.technology, host.people, host.tick);
   assert.equal(report.window.complete, true); assert.equal(report.evidence.balanced, true);
   assert.equal(report.evidence.executed, 1);
@@ -334,7 +339,7 @@ test('explicit estates close a deceased inventory as external loss, not new prod
 
 test('paired internal estate transfers cancel imports and losses; a missing half stays unverified', () => {
   const { host, a, b } = technologyScene(); manufacture(host, a, edgeProgram); host.tick++;
-  settleTechnologyEstate(host, a, [b]); host.people = host.people.filter(item => item !== a);
+  settleTechnologyEstate(host, a, [b]);
   const report = analyzeTechnologyOrganization(host.technology, host.people, host.tick);
   assert.equal(report.window.complete, true); assert.equal(report.evidence.balanced, true);
   assert.deepEqual(report.maintenance.externallySuppliedNonFood, []);

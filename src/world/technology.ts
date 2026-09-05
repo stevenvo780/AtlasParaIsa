@@ -1,6 +1,7 @@
 import type { ChronicleEvent } from '../shared/types.js';
 import type { Capability, Composition, Material, MaterialBatch, MaterialProperties, MaterialRequirement, OperationInstruction, PhysicalOperation, ResourceMass, TechnologyExecution, TechnologyKnowledge, TechnologyProgram, TechnologyProject, TechnologyRecipe, TechnologyState, TechnologyView } from '../shared/technology.js';
 import { localRandom } from './genetics.js';
+import { assertTechnologyCheckpoint } from './technology-checkpoint.js';
 export type * from '../shared/technology.js';
 
 export interface TechnologyActor {
@@ -527,4 +528,5 @@ export function assertTechnology(host: TechnologyHost): void {
     executionIds.add(e.id);
   }
   if (state.recipes.reduce((n, r) => n + r.manufactured, 0) !== state.ledger.crafted || state.recipes.reduce((n, r) => n + r.uses, 0) !== state.ledger.toolUses) fail();
+  assertTechnologyCheckpoint(state, host.tick);
 }

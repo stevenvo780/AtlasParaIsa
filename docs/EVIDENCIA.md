@@ -4,6 +4,28 @@ Fecha de corte: **6 de septiembre de 2026**. El servicio privado ejecuta **V5 `7
 
 Este documento conserva resultados y límites frente al [objetivo rector](../GOAL.md); [REGLAS](REGLAS.md) define mecanismos, [CIENCIA](CIENCIA.md) su interpretación y [CONSTRUCCION](CONSTRUCCION.md#arquitectura-de-autonomía-avances-y-trabajo-pendiente) el estado de arquitectura y trabajo pendiente. Git conserva los cierres anteriores, sin documentos históricos paralelos.
 
+## Afinación tras el colapso del mundo observado
+
+Por indicación de Steven, se suspendió la publicación V6 y la incorporación de funciones para investigar supervivencia, construcción y legibilidad. El candidato conjunto `9b40f4d` había pasado **517/517 Node, 18/18 navegador compilado, typecheck, build y smoke**; esos gates no probaron estabilidad demográfica. El [manifiesto](../artifacts/release-v6.json) permanece conservado y el servicio sigue en `7d8777c`. No se reinició ni modificó su mundo para ocultar el incidente.
+
+La captura coherente de las **03:20:10 UTC del 6 de septiembre**, semilla `51926`, corresponde al paso **53.004**, día visible **23** y **22,085 días transcurridos**. Se validó con el Store de la fuente publicada, dentro de una transacción de lectura declarada al verificador; el hash de la copia quedó idéntico. Hay 10.370 eventos correlativos completos, un evento técnico de reinicio separado, 32 legados, 979 definiciones y 3.914 recibos tecnológicos. **No hubo órdenes ni gestos de usuario.** [Informe agregado](../artifacts/refinement-day22/report.json), [serie demográfica sin nombres](../artifacts/refinement-day22/demographic-events.json) y [analizador reproducible](../artifacts/refinement-day22/analyze.mjs).
+
+| Resultado observado | Evidencia |
+|---|---|
+| Balance demográfico | 16 iniciales + 18 nacimientos − 32 muertes = **2 vivos**. Solo quedan S e I, protegidos y con salud 0,05. |
+| Inicio del colapso | 14 muertes por deshidratación entre los pasos 13.045 y 15.039, días 6 y 7; una muerte por exposición en 16.734. Trece muertes por sed ocurrieron dentro del intervalo sin lluvia 10.200–15.000. |
+| Pérdida del recambio | Último nacimiento en 13.200, día 6. Las 17 muertes posteriores por senescencia terminaron en 41.241, día 18. Ningún individuo de generación 2 dejó descendencia registrada. |
+| Persistencia del problema | 11.763 pasos, aproximadamente 4,9 días, con solo las identidades protegidas. Su permanencia no acredita autonomía demográfica. |
+| Construcción | 102 estructuras en la unión de regiones conocidas: tres iniciales y 99 construidas; 20 activas y 82 archivadas, dos rotas. Solo una no tiene beneficio histórico registrado. El contador de beneficio no mide ocupación, visitas ni personas distintas. |
+| Producción tras el colapso | Se crearon al menos diez estructuras en los días 19–22, después de morir el último habitante mortal. La necesidad marginal de nuevas obras requiere revisión. |
+| Reservas e intercambio | El archivo registra 91,20 unidades de lluvia recogida, 0,694 de alimento almacenado y **cero alimento retirado de graneros**. Hay 2.794 acciones de cooperación y 2.617 enseñanzas registradas; estos acumulados no garantizan satisfacción de necesidades. |
+
+La [gráfica de población, causas y construcción](../artifacts/refinement-day22/population-diagnosis.png), disponible también en [SVG](../artifacts/refinement-day22/population-diagnosis.svg), reconstruye hechos archivados; no es un contrafactual causal. La ventana `history` de 96 muestras solo cubre los pasos 47.280–52.980, aproximadamente 2,4 días, y ya había perdido el inicio del colapso. Los stocks finales no permiten deducir cuánta agua podía alcanzar un habitante cuando murió. Las regiones archivadas tienen relojes diferentes; su suma tampoco es un inventario global simultáneo. Los legados no conservan hambre, sed, acción, reservas ni daño acumulado de cada paso. La reproducción causal y las comparaciones de supervivencia permanecen pendientes de cierre.
+
+La revisión visual del mismo build usó dos clientes, **1440×900 y 390×844**, sin órdenes, errores JavaScript ni cambio de simulación; sus sesiones propias se cerraron. Las capturas de navegador son posteriores, pasos 56.390–56.460, día 24, y se distinguen de la copia física anterior. Se comprobó que las copas ocultan edificios y que el inspector móvil muestra primero el agua del suelo, dejando las reservas de la cisterna bajo el pliegue. La unión física contiene 1.211 árboles sin copa pero con madera, frente a solo cuatro tocones de madera cero: la representación repetitiva de ramas no permite inferir tala. [Vista de estructuras](../artifacts/refinement-day22/before-desktop-structures.png), [ramaje](../artifacts/refinement-day22/before-desktop-bareStanding.png), [inspector móvil](../artifacts/refinement-day22/before-mobile-structure-inspector.png) y [métricas visuales](../artifacts/refinement-day22/before-physical-metrics.json).
+
+Fable 5.1 aportó una crítica textual mediante la ruta disponible `claude/fable`. La [adjudicación GPT-6](../artifacts/refinement-day22/before-fable-critique.json) conserva y rechaza sus inferencias incorrectas sobre depósitos vacíos, número de sprites y altura del ramaje. No se atribuye acceso a Mythos, ni se presenta esa crítica como verificación del producto corregido.
+
 ## Base biológica de las pruebas largas
 
 Cierre de código **`6d0e53b`**, con interfaz de cosecha y reserva `a89353e`. Es la base de los experimentos largos y del mundo que después se actualizó. Integra cosecha física, preparación con pareja conocida y apta, protección de reserva con excepción por hambre urgente y acercamiento mediante percepción local y confianza mutua. Las condiciones y costes están en [REGLAS](REGLAS.md#herencia-práctica-y-descendencia).

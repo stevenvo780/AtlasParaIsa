@@ -303,7 +303,8 @@ test('engine can choose paid research autonomously from practiced skill and a lo
   person.command = null; person.controlMode = 'auto'; person.decisionAt = 0; person.closeness = 0; person.generosity = 0; person.socialLoad = 0;
   for (const tile of world.tiles) { tile.drinkingWater = 0; tile.food = 0.4; }
   // Isolate research from the competing need for physical rain protection.
-  // The existing fixture pays for its roof before the autonomous trial begins.
+  // Preparatory work is supplied by this fixture; construction debits its real
+  // materials. The following autonomous trial measures research, not roof labor.
   const materials = { ...person.materials }, cost = constructionCost(world, person);
   person.work = cost.work;
   const roof = completeConstruction(world, person, tile, emit);

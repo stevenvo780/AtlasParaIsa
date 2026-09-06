@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../src/server/store.js';
+import { createApp } from '../src/server/app.js';
 import { createWorld, stepWorld } from '../src/world/index.js';
 import { ensureWorldInstance } from '../src/server/world-instance.js';
 import { validWorldInstanceId } from '../src/shared/world-instance.js';
@@ -51,6 +52,21 @@ test('malformed durable identity is rejected without replacing it or touching sn
     assert.equal(store.db.isTransaction, false);
     assert.equal(store.db.prepare('SELECT value FROM metadata WHERE key=?').get('world-instance-id')?.value, 'broken');
     assert.deepEqual(store.db.prepare('SELECT * FROM snapshots').all(), before);
+  } finally { store.close(); }
+});
+
+test('app startup with malformed identity preserves the previous checkpoint and all durable rows', () => {
+  const store = new Store(':memory:');
+  try {
+    const world = createWorld(42); store.save(world);
+    stepWorld(world, [], store.context); store.save(world);
+    store.db.prepare('INSERT INTO metadata VALUES(?,?)').run('world-instance-id', 'broken');
+    const tables = (store.db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as { name: string }[]).map(row => row.name);
+    const rows = () => tables.map(name => ({ name, rows: store.db.prepare(`SELECT * FROM "${name.replaceAll('"', '""')}"`).all() }));
+    const before = rows();
+    assert.throws(() => createApp({ store, password: 'synthetic-identity-test-only', origin: 'http://127.0.0.1:3000', manual: true }), /Invalid world instance identity/);
+    assert.equal(store.db.isTransaction, false);
+    assert.deepEqual(rows(), before, 'startup must not rotate tick0 out of the recovery slot before refusing tick1');
   } finally { store.close(); }
 });
 

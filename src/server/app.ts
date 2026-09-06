@@ -6,7 +6,7 @@ import { createWorld, stepWorld, projectWorld, normalizeViewport, cloneWorld } f
 import type { Gesture, GestureResult, ServerMessage, Viewport, WorldView, RuntimeStats } from '../shared/types.js';
 import { Store, fingerprint, GestureConflict, SessionRevoked } from './store.js';
 import { cookie, hashToken, makeToken, passwordVerifier, sessionHash } from './auth.js';
-import { ensureWorldInstance } from './world-instance.js';
+import { ensureWorldInstance, readWorldInstance } from './world-instance.js';
 
 class HttpError extends Error { constructor(readonly status: number, message: string) { super(message); } }
 export interface AppOptions {
@@ -45,6 +45,7 @@ export function createApp(options: AppOptions) {
   const origin = new URL(options.origin).origin;
   if (options.secure && !origin.startsWith('https://')) throw new Error('Private hosted access requires an HTTPS origin.');
   const loaded = store.load();
+  const existingInstanceId = readWorldInstance(store.db);
   let world = loaded?.world ?? createWorld(options.seed ?? 51926);
   if (loaded) {
     world.events.push({ id: `pause-${world.tick}-${makeToken().slice(0,12)}`, tick: world.tick, kind: 'pause', actors: [],
@@ -52,7 +53,7 @@ export function createApp(options: AppOptions) {
     world.events = world.events.slice(-120);
   }
   store.save(world);
-  const instanceId = ensureWorldInstance(store.db);
+  const instanceId = existingInstanceId ?? ensureWorldInstance(store.db);
   let stopped = false;
   let failed = false;
   const pending = new Map<string, Pending>();

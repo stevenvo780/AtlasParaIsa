@@ -8,7 +8,7 @@ import { createServer } from 'node:net';
 import { createApp } from '../src/server/app.js';
 import { Store } from '../src/server/store.js';
 import { assertWorld } from '../src/world/index.js';
-import type { Gesture, WorldView } from '../src/shared/types.js';
+import { PROTOCOL_VERSION, type Gesture, type WorldView } from '../src/shared/types.js';
 import { materializeAnimals, syncFauna } from '../src/world/animals.js';
 import { researchTechnology, technologyWorkCost } from '../src/world/technology.js';
 import type { TechnologyProgram } from '../src/shared/technology.js';
@@ -591,7 +591,7 @@ test('V6 a paid vessel prepares water autonomously and shows actual progress and
   await expect(page.locator('.game-needs h3')).toContainText('preparar agua para el camino');
   const progress = page.getByRole('meter', { name: 'Progreso de la tarea' });
   await expect(progress).toHaveAttribute('value', String(Math.round((held.contents!.water - target.initialQuanta) / (target.targetQuanta - target.initialQuanta) * 100)));
-  await expect.poll(() => observed.views.at(-1)?.version).toBe(6);
+  await expect.poll(() => observed.views.at(-1)?.version).toBe(PROTOCOL_VERSION);
   const projected = observed.views.at(-1)!.people.find(person => person.id === makerId)!;
   expect(projected.working).toBe(true); expect(projected.workProgress).toBeGreaterThan(0);
   await page.screenshot({ path: 'artifacts/contained-water-preparation-desktop.png' });

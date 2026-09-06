@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../src/server/store.js';
 import { decodeSnapshot, encodeSnapshot } from '../src/server/snapshot.js';
-import { assertWorld, cloneWorld, createWorld, migrateWorld, stepWorld, type World } from '../src/world/index.js';
+import { assertWorld, cloneWorld, createWorld, migrateWorld, RULES_VERSION, stepWorld, type World } from '../src/world/index.js';
 import { assertTechnology, projectTechnology, researchTechnology, settleTechnologyEstate, technologyWorkCost, transferTechnologyItem, useTool,
   type TechnologyProgram } from '../src/world/technology.js';
 import { assertWaterExecution, carriedTechnologyMass, containedWaterQuanta, drinkContainedWater, fillContainedWater,
@@ -105,7 +105,7 @@ test('chemical water in a paid composite is not drinkable contents and migration
   const legacy = cloneWorld(lab.world); legacy.version = 5; delete legacy.technology.water;
   delete legacy.technology.checkpoint!.water;
   const original = structuredClone(legacy), migrated = migrateWorld(legacy);
-  assert.equal(migrated.version, 6); assert.deepEqual(legacy, original);
+  assert.equal(migrated.version, RULES_VERSION); assert.deepEqual(legacy, original);
   assert.equal(migrated.people[2]!.technology.items[0]!.contents, undefined);
   assert.deepEqual(migrated.technology.recipes, original.technology.recipes);
   assert.deepEqual(migrated.technology.history, original.technology.history);

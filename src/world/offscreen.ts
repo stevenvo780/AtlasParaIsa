@@ -77,7 +77,9 @@ export function prepareEcology(world: World, context: WorldContext = worldContex
     world.animalCounter = batch.animalCounter; world.animalDynamics = batch.animalDynamics; world.inventionDynamics = batch.inventionDynamics;
     for (const event of batch.events) {
       if (!Number.isSafeInteger(world.eventCounter + 1)) throw new Error('Ecological event allocator overflow.');
-      world.events.push({ ...event, id: `e${++world.eventCounter}` });
+      if (state.pendingEvents.length >= 65536) throw new Error('Ecological event queue requires a commit.');
+      const recorded = { ...event, id: `e${++world.eventCounter}` };
+      state.pendingEvents.push(recorded); world.events.push(recorded);
       if (world.events.length > 120) world.events.shift();
     }
     work += batch.chunkTicks; state.workedChunkTicks += batch.chunkTicks; state.migrations += batch.migrations; state.jobs++;

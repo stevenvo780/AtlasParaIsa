@@ -296,6 +296,11 @@ export class Store {
       this.ecologyArchive.assertWorld(baseline);
     }
   }
+  private assertNoEcologyTriggers(): void {
+    if (this.db.prepare("SELECT 1 FROM sqlite_schema WHERE type='trigger' LIMIT 1").get()
+      || this.db.prepare("SELECT 1 FROM sqlite_temp_schema WHERE type='trigger' LIMIT 1").get())
+      throw new Error('Continuous ecology cannot commit through untrusted SQL triggers.');
+  }
 
   /** A declared prefix is verified once on load, not scanned at the 10 Hz save cadence. */
   private assertTechnologyCoverage(world: World): void {
@@ -484,6 +489,11 @@ export class Store {
     this.lastSnapshotBytes = Buffer.byteLength(body);
     this.db.exec('BEGIN IMMEDIATE');
     try {
+      // No host feature installs triggers. They could mutate an unrelated head
+      // after its proof was checked, including during the snapshot INSERT itself.
+      // Hold the write lock before this check so a concurrent connection cannot
+      // install such a side effect between validation and COMMIT.
+      if (world.ecology) this.assertNoEcologyTriggers();
       this.assertEcologyBaseline();
       if (world.ecology && world.ecology.revision === world.ecology.committedRevision) {
         const previous = this.db.prepare('SELECT body FROM snapshots WHERE slot=0').get() as {body:string}|undefined;
@@ -516,7 +526,8 @@ export class Store {
       this.db.prepare('INSERT OR REPLACE INTO snapshots VALUES (0,?,?,?)').run(body, checksum(body), Date.now());
       this.db.prepare("INSERT OR REPLACE INTO metadata VALUES ('initialized','1')").run();
       const insertEvent = this.db.prepare('INSERT OR IGNORE INTO events VALUES (?,?,?)');
-      for (const event of world.events) insertEvent.run(event.id, event.tick, JSON.stringify(event));
+      const events = new Map([...world.events, ...(world.ecology?.pendingEvents ?? [])].map(event => [event.id, event]));
+      for (const event of events.values()) insertEvent.run(event.id, event.tick, JSON.stringify(event));
       const insertInput = this.db.prepare('INSERT INTO inputs VALUES (?,?,?,?,?,?)');
       for (const { gesture, result } of inputs) insertInput.run(gesture.id, fingerprint(gesture), result.tick, result.order, JSON.stringify(gesture), JSON.stringify(result));
       });
@@ -611,6 +622,7 @@ export class Store {
     if (!row || checksum(row.body) !== row.digest) throw new Error('No valid previous checkpoint.');
     const world = migrateWorld(decodeSnapshot(row.body), this.context);
     if (world.ecology && this.schemaVersion < 5) throw new Error('Previous continuous ecology has no backing archive schema.');
+    if (world.ecology) this.assertNoEcologyTriggers();
     if (this.schemaVersion >= 5) this.ecologyArchive.assertPrevious(world);
     const declaredJournal = world.technology.journal !== undefined;
     if (world.technology.catalogue && (world.technology.catalogue.pending.length ||
@@ -622,6 +634,7 @@ export class Store {
     const recovered = new Store(destination);
     try {
       recovered.db.exec('BEGIN IMMEDIATE');
+      if (world.ecology) recovered.assertNoEcologyTriggers();
       recovered.technologyArchive.beginHostTransaction();
       if (world.ecology) recovered.ecologyArchive.restore(world.ecology.revision);
       else recovered.ecologyArchive.restoreLegacyPrevious(world);
@@ -642,6 +655,9 @@ export class Store {
       recovered.db.prepare('UPDATE snapshots SET body=?,digest=?,saved_at=? WHERE slot=0').run(body, checksum(body), row.saved_at);
       recovered.db.prepare('DELETE FROM inputs WHERE tick>?').run(world.tick);
       recovered.db.prepare('DELETE FROM events WHERE tick>?').run(world.tick);
+      // A cold event's physical date can predate both retained snapshots. Its
+      // globally allocated serial records when it actually entered the archive.
+      if (world.ecology) recovered.db.prepare("DELETE FROM events WHERE CAST(substr(id,2) AS INTEGER)>?").run(world.eventCounter);
       recovered.db.prepare('DELETE FROM chunks WHERE tick>?').run(world.tick);
       recovered.db.prepare('DELETE FROM legacy WHERE tick>?').run(world.tick);
       for (const event of recovered.db.prepare('SELECT id FROM events WHERE tick=?').all(world.tick) as {id:string}[]) {

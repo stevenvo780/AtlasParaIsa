@@ -30,7 +30,7 @@ export { phaseAt, TICKS_PER_DAY } from './time.js';
 export { bindWorldContext, tileAt, normalizeViewport, worldContext } from './spatial.js';
 export type { WorldContext } from './spatial.js';
 
-export const RULES_VERSION = 6;
+export const RULES_VERSION = 7;
 export const MAX_POPULATION = 32;
 export const MAX_EVENTS = 120;
 export const MAX_EXPERIENCES = 8;
@@ -93,7 +93,10 @@ function walkable(world: World, p: Point): boolean {
 }
 
 function addEvent(world: World, event: Omit<ChronicleEvent, 'id' | 'tick'>): ChronicleEvent {
+  if (world.ecology && (world.ecology.pendingEvents.length >= 65536 || !Number.isSafeInteger(world.eventCounter + 1)))
+    throw new Error('The ecological event queue or identity allocator requires a commit.');
   const result = { ...event, id: `e${++world.eventCounter}`, tick: world.tick };
+  world.ecology?.pendingEvents.push(result);
   world.events.push(result);
   if (world.events.length > MAX_EVENTS) world.events.shift();
   return result;
@@ -659,7 +662,13 @@ export function stepWorld(world: World, inputs: Gesture[] = [], context: WorldCo
   ecology(world);
   if (world.ecology && world.tick % 600 === 0) world.ecology.pendingClimate.push({ tick: world.tick, weather: world.weather });
   stepEcosystem(world.tiles, world.tick, world.weather, phaseAt(world.tick), false);
+  const seams = new Set(world.ecology?.preparedSeams ?? []);
+  const animalRegions = seams.size ? new Map(world.animals.map(animal => [animal.id, chunkKey(animal.x, animal.y)])) : null;
   stepAnimals(world,event=>addEvent(world,event));
+  if (world.ecology && animalRegions) for (const animal of world.animals) {
+    const from = animalRegions.get(animal.id), to = chunkKey(animal.x, animal.y);
+    if (from !== undefined && from !== to && (seams.has(from) || seams.has(to))) world.ecology.migrations++;
+  }
   stepStructures(world,event=>addEvent(world,event));
   for (const person of world.people) bodyAndAction(world, person);
   for (const person of world.people) {
@@ -784,6 +793,7 @@ function assertCommon(value: unknown, legacy = false, expectedVersion = RULES_VE
   const list = (v: unknown, max: number): v is unknown[] => Array.isArray(v) && v.length <= max;
   if (!object(value) || value.version !== (legacy ? 1 : expectedVersion) || value.width !== 40 || value.height !== 28 || !integer(value.seed, 0xffffffff) || !integer(value.rng, 0xffffffff) || !integer(value.tick) || !integer(value.eventCounter) || typeof value.learningEnabled !== 'boolean' || !['rain', 'clear'].includes(String(value.weather)) || !Number.isInteger(value.lastGestureTick) || (value.lastGestureTick as number) < -COOLDOWN || (value.lastGestureTick as number) > (value.tick as number)) fail();
   const world = value as unknown as World;
+  if ((legacy || expectedVersion < 7) && Object.hasOwn(world, 'ecology')) fail();
   const coord = (n: unknown, max: number) => legacy ? integer(n, max) : validCoordinate(n);
   const land = (p: Point) => legacy ? world.tiles.some(t => t.x === p.x && t.y === p.y && t.terrain !== 'water') : walkable(world, p);
   if (!list(world.tiles, legacy ? 1120 : 65536) || (legacy && world.tiles.length !== 1120) || !list(world.people, expectedVersion < 3 || legacy ? 16 : MAX_POPULATION) || world.people.length < (expectedVersion>=5&&!legacy?2:16) || !list(world.places, legacy ? 3 : 2048) || (legacy && world.places.length !== 3) || !list(world.events, MAX_EVENTS) || !list(world.memories, 10) || !list(world.invitations, 8) || !list(world.reminders, 8)) fail();
@@ -917,6 +927,13 @@ export function migrateWorld(value: unknown, context: WorldContext = {}): World 
     if (catalogueEnabled(world.technology)) for (const person of world.people) maintainTechnologyMemory(world, person);
     assertWorld(world); return world;
   }
+  if (version === 6) {
+    assertWorld(value, 6, context);
+    const world = cloneWorld(value, context); world.version = RULES_VERSION;
+    if (world.technology.checkpoint === undefined) world.technology.checkpoint = captureTechnologyCheckpoint(world.technology, world.people, world.tick, 'migration');
+    if (catalogueEnabled(world.technology)) for (const person of world.people) maintainTechnologyMemory(world, person);
+    assertWorld(world); return world;
+  }
   if (version === 5) {
     assertWorld(value, 5, context);
     const world = cloneWorld(value, context); upgradeV6(world);
@@ -980,5 +997,7 @@ function upgradeV5(world: World): void {
   world.technology.checkpoint = captureTechnologyCheckpoint(world.technology, world.people, world.tick, 'migration');
 }
 function upgradeV6(world: World): void {
-  world.version = 6; world.technology.water = emptyWaterLedger();
+  // Upgrade old water semantics and then adopt the compatible V7 envelope.
+  // Existing regions retain the local V6 law until an explicit new-world opt-in.
+  world.version = RULES_VERSION; world.technology.water = emptyWaterLedger();
 }

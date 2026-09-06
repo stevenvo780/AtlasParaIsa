@@ -1,5 +1,6 @@
 import type { TechnologyCheckpoint, TechnologyKnowledge, TechnologyState } from '../shared/technology.js';
 import { resolveTechnologyRecipe } from './technology-catalogue.js';
+import { assertContainedWater, assertWaterLedger } from './technology-water.js';
 
 export interface TechnologyStockActor { id: string; technology: Pick<TechnologyKnowledge, 'items' | 'residue'>; }
 const materials = ['wood', 'stone', 'water'] as const;
@@ -13,8 +14,9 @@ const composition = (value: unknown): boolean => !!value && typeof value === 'ob
 export function captureTechnologyCheckpoint(state: TechnologyState, actors: readonly TechnologyStockActor[], tick: number,
   reason: TechnologyCheckpoint['reason']): TechnologyCheckpoint {
   return { version: 1, tick, executionCounter: state.executionCounter, reason,
+    ...(state.water ? { water: { ...state.water } } : {}),
     inventories: actors.map(actor => ({ actorId: actor.id, residue: { ...actor.technology.residue },
-      items: actor.technology.items.map(item => ({ id: item.id, recipeId: item.recipeId, mass: item.mass, composition: { ...item.composition } }))
+      items: actor.technology.items.map(item => ({ id: item.id, recipeId: item.recipeId, mass: item.mass, composition: { ...item.composition }, ...(item.contents ? { contents: { ...item.contents } } : {}) }))
         .sort((a, b) => a.id.localeCompare(b.id)),
     })).sort((a, b) => a.actorId.localeCompare(b.actorId)) };
 }
@@ -35,6 +37,7 @@ export function assertTechnologyCheckpoint(state: TechnologyState, tick: number)
     if (serial <= checkpoint.executionCounter ? event.tick > checkpoint.tick : event.tick <= checkpoint.tick) fail();
   }
   const actorIds = new Set<string>(), itemIds = new Set<string>();
+  let contained = 0;
   const recipeExisted = (id: string): boolean => {
     // Resolve the current record, then check only its immutable birth date. A checkpoint
     // is not a claim about recipe statistics at its historical opening tick.
@@ -50,8 +53,17 @@ export function assertTechnologyCheckpoint(state: TechnologyState, tick: number)
         itemIds.has(item.id) || !(item.recipeId === null || recipeExisted(item.recipeId)) || !composition(item.composition) ||
         !integer(item.mass) || item.mass === 0 || item.mass !== materials.reduce((total, material) => total + item.composition[material], 0)) fail();
       itemIds.add(item.id);
+      if (item.contents !== undefined) {
+        if (!state.water) fail();
+        assertContainedWater(item.contents, checkpoint.tick);
+        contained += item.contents.water;
+      }
     }
   }
+  if (checkpoint.water !== undefined) {
+    if (!state.water) fail();
+    assertWaterLedger(checkpoint.water, contained);
+  } else if (contained) fail();
 }
 
 /** Every serial after the checkpoint must still exist, in time and serial order. */

@@ -20,10 +20,12 @@ import { reproductiveReadiness, familyOpportunity, availableToShare } from './fa
 import { advancePopulation, assertLegacyRecord, assertPopulation } from './lineage.js';
 import { analyzeTechnologyOrganization } from './technology-organization.js';
 import { captureTechnologyCheckpoint, advanceTechnologyCheckpoint } from './technology-checkpoint.js';
+import { containedWaterQuanta, drinkContainedWater, emptyWaterLedger, maintainContainedWater, payContainedWaterCarry } from './technology-water.js';
+import { WATER_QUANTA_PER_UNIT } from './material-affordances.js';
 export { bindWorldContext, tileAt, normalizeViewport, worldContext } from './spatial.js';
 export type { WorldContext } from './spatial.js';
 
-export const RULES_VERSION = 5;
+export const RULES_VERSION = 6;
 export const MAX_POPULATION = 32;
 export const TICKS_PER_DAY = 2400;
 export const MAX_EVENTS = 120;
@@ -128,7 +130,7 @@ export function createWorld(seed = 20260905): World {
     animals: [], animalCounter: 0, animalDynamics: { births: 0, deaths: 0, predations: 0, humanHunts: 0, waterConsumed: 0, plantConsumed: 0 },
     blueprints: [defaultBlueprint()], structures: [], blueprintCounter: 0, structureCounter: 0,
     inventionDynamics: { attempts: 0, accepted: 0, repairs: 0, waterCollected: 0, foodStored: 0, foodTaken: 0 },
-    technology: defaultTechnologyState(), legacy: [], retiredLegacy: [],
+    technology: { ...defaultTechnologyState(), water: emptyWaterLedger() }, legacy: [], retiredLegacy: [],
     demographyDynamics: { deaths: 0, causes: { starvation: 0, dehydration: 0, exposure: 0, senescence: 0 }, foodLost: 0, woodLost: 0, stoneLost: 0 },
   };
   for (let cy = 0; cy < 2; cy++) for (let cx = 0; cx < 3; cx++) activate(world, cx * 16, cy * 16);
@@ -230,6 +232,9 @@ function choose(world: World, person: Person): void {
     reason: `Tiene reservas y busca ${familyPlace ? `reunirse con ${family.partner.name} en ${familyPlace.name}` : `acercarse a ${family.partner.name}`}; el vínculo y el cuidado corporal permiten intentar una crianza.`,
   });
   const water = nearbyTiles.filter(t => waterAvailable(world,t) > 0.005).sort((a, b) => distance(person, a) - distance(person, b))[0];
+  const portableWater = containedWaterQuanta(person) > 0;
+  if (portableWater) candidates.push({ action: 'drink', target: { x: person.x, y: person.y }, score: Math.max(0, person.thirst - 0.18) * 3.1,
+    reason: 'Lleva agua en un objeto y puede beber su contenido finito aquí.' });
   if (water) candidates.push({ action: 'drink', target: water, score: Math.max(0, person.thirst - 0.18) * 3.1 - distance(person, water) * 0.015, reason: 'La sed orienta su camino hacia una reserva finita de agua dulce.' });
   const prey = nearbyTiles.filter(t => (t.fauna ?? 0) >= 1).sort((a, b) => distance(person, a) - distance(person, b))[0];
   if (prey && person.inventory < 0.18) candidates.push({ action: 'hunt', target: prey, score: Math.max(0, person.hunger - 0.18) * 2 + person.traits.industriousness * 0.18 + (food && food.food > 0.2 ? 0 : 0.2) - (person.hunger < 0.8 && (prey.fauna ?? 0) <= 1 ? person.culture.stewardship * 0.15 : 0), reason: 'Percibe fauna; cazar cuesta trabajo, retira un animal y proporciona alimento limitado.' });
@@ -299,7 +304,7 @@ function choose(world: World, person: Person): void {
     if (command.order === 'explore') directed.target = explorationTarget(world, person, nearbyTiles);
     if (command.order === 'gather' && distance(person, command) <= RADIUS && resource) directed.target = resource;
     if (command.order === 'forage' && distance(person, command) <= RADIUS && food) directed.target = food;
-    if (command.order === 'drink' && water) directed.target = water;
+    if (command.order === 'drink' && (portableWater || water)) directed.target = portableWater ? { x: person.x, y: person.y } : water!;
     if (command.order === 'hunt' && prey) directed.target = prey;
     if (command.order === 'cooperate' && help) directed.target = help.person;
     if (command.order === 'repair' && damaged) directed.target = damaged;
@@ -395,6 +400,7 @@ function move(world: World, person: Person): void {
     return;
   }
   while (previous.get(key(best)) !== start) best = previous.get(key(best))!;
+  if (!payContainedWaterCarry(world, person)) { person.reason = 'La carga de agua requiere más esfuerzo del que puede hacer ahora.'; return; }
   person.x = best.x; person.y = best.y;
   trampleTile(tileAt(world, person)!);
   exertBody(person, { energy: 0.0008, fatigue: 0.0007 * (1.2 - person.traits.resilience * 0.4) });
@@ -452,6 +458,7 @@ function share(world: World, donor: Person): void {
 }
 
 function bodyAndAction(world: World, person: Person): void {
+  maintainContainedWater(world, person);
   const tile = tileAt(world, person)!;
   const physiology = demographicTraits(person.genome);
   advanceNeeds(person, { hunger:0.00027*physiology.foodDemand, thirst:(0.00045+(tile.biome==='desert'?0.0002:0))*physiology.waterDemand, energy:0.00007, stressEnergy:0.00015, fatigue:0.00009+(world.weather==='rain'&&tile.terrain!=='shelter'?0.0001:0) });
@@ -459,7 +466,7 @@ function bodyAndAction(world: World, person: Person): void {
   person.socialLoad = clamp(person.socialLoad - 0.0008);
   const emptyFood = person.action === 'eat' && (tileAt(world, person.target)?.food ?? 0) < 0.005 && person.inventory < 0.01 && foodAvailable(world,person)<0.001;
   const emptyHarvest = person.action === 'forage' && (tileAt(world, person.target)?.food ?? 0) < 0.005;
-  const emptyWater = person.action === 'drink' && waterAvailable(world,person.target) < 0.003;
+  const emptyWater = person.action === 'drink' && containedWaterQuanta(person) === 0 && waterAvailable(world,person.target) < 0.003;
   const agreedWait = person.action === 'retreat' && person.lastDispute >= 0 && world.tick < person.decisionAt && world.tick - person.lastDispute < 30;
   if (!agreedWait && (world.tick >= person.decisionAt || emptyFood || emptyHarvest || emptyWater || (person.hunger > 0.9 && !['eat','hunt'].includes(person.action)) || (person.thirst > 0.9 && person.action !== 'drink'))) choose(world, person);
   if (['eat','drink','hunt'].includes(person.action)) resourceDispute(world, person, event => addEvent(world, event));
@@ -484,8 +491,10 @@ function bodyAndAction(world: World, person: Person): void {
     if (person.hunger < 0.12) person.decisionAt = world.tick + 1;
   }
   if (person.action === 'drink' && distance(person, person.target) < 0.5) {
-    const water = takeWater(world,person,Math.min(0.006,person.thirst/3));
-    hydrateBody(person, water);
+    const contained = drinkContainedWater(world, person) / WATER_QUANTA_PER_UNIT;
+    const ambient = contained > 0 ? 0 : takeWater(world,person,Math.min(0.006,person.thirst/3));
+    hydrateBody(person, ambient);
+    const water = contained + ambient;
     count(world, 'waterConsumed', water);
     if (water > 0 && world.tick - person.lastOutcome >= 30) outcome(world, person, 'drink', water * 20);
     if (person.thirst < 0.12) { if (person.command?.order === 'drink') { person.command = null; person.controlMode = 'auto'; } person.decisionAt = world.tick + 1; }
@@ -844,6 +853,12 @@ export function assertWorld(value: unknown, expectedVersion = RULES_VERSION, con
   }
   if(expectedVersion>=4) assertLifeState(w);
   if(expectedVersion>=5) {
+    if (expectedVersion === 5 && (Object.hasOwn(w.technology, 'water')
+      || w.people.some(p => Object.hasOwn(p.technology, 'waterActionAt') || Object.hasOwn(p.technology, 'waterCarryAt') || p.technology.items.some(item => Object.hasOwn(item, 'contents')))
+      || w.technology.history.some(e => Object.hasOwn(e, 'water') || e.kind === 'water')
+      || w.technology.journal?.pending.some(e => Object.hasOwn(e, 'water') || e.kind === 'water')
+      || w.technology.checkpoint?.inventories.some(inv => inv.items.some(item => Object.hasOwn(item, 'contents'))))) fail();
+    if (expectedVersion >= 6 && !w.technology.water) fail();
     assertPopulation(w); assertTechnology(w);
     for(const person of [...w.people,...w.legacy,...w.retiredLegacy]) {
       const serial=/^descendant-([1-9]\d*)$/.exec(person.id);
@@ -884,15 +899,22 @@ export function migrateWorld(value: unknown, context: WorldContext = {}): World 
     if (catalogueEnabled(world.technology)) for (const person of world.people) maintainTechnologyMemory(world, person);
     assertWorld(world); return world;
   }
-  if (version===4) { assertWorld(value,4,context); const world=cloneWorld(value,context); upgradeV5(world); assertWorld(world); return world; }
+  if (version === 5) {
+    assertWorld(value, 5, context);
+    const world = cloneWorld(value, context); upgradeV6(world);
+    if (world.technology.checkpoint === undefined) world.technology.checkpoint = captureTechnologyCheckpoint(world.technology, world.people, world.tick, 'migration');
+    if (catalogueEnabled(world.technology)) for (const person of world.people) maintainTechnologyMemory(world, person);
+    assertWorld(world); return world;
+  }
+  if (version===4) { assertWorld(value,4,context); const world=cloneWorld(value,context); upgradeV5(world); upgradeV6(world); assertWorld(world); return world; }
   if(version===3) {
     assertWorld(value,3,context);
-    const world=cloneWorld(value,context); upgradeV4(world); upgradeV5(world); assertWorld(world); return world;
+    const world=cloneWorld(value,context); upgradeV4(world); upgradeV5(world); upgradeV6(world); assertWorld(world); return world;
   }
   if (version === 2) {
     assertWorld(value, 2, context);
     const world = cloneWorld(value, context);
-    upgradeV3(world); upgradeV4(world); upgradeV5(world); assertWorld(world); return world;
+    upgradeV3(world); upgradeV4(world); upgradeV5(world); upgradeV6(world); assertWorld(world); return world;
   }
   assertCommon(value, true);
   const world = structuredClone(value);
@@ -915,7 +937,7 @@ export function migrateWorld(value: unknown, context: WorldContext = {}): World 
     p.skills = {}; p.values = {}; p.activity = {}; p.materials = { wood: 0, stone: 0 }; p.visited = [];
     p.heading = index * 2.399963229728653; p.command = null; p.work = 0; p.lastOutcome = world.tick; p.intentContext = p.hunger > 0.5 ? 'hungry' : p.fatigue > 0.5 ? 'tired' : 'ready'; p.controlMode = 'auto';
   });
-  upgradeV3(world); upgradeV4(world); upgradeV5(world); assertWorld(world); return world;
+  upgradeV3(world); upgradeV4(world); upgradeV5(world); upgradeV6(world); assertWorld(world); return world;
 }
 function upgradeV3(world: World): void {
   world.version = 3; world.cooperationEnabled = true; world.reproductionEnabled = true;
@@ -938,4 +960,7 @@ function upgradeV5(world: World): void {
   world.demographyDynamics={deaths:0,causes:{starvation:0,dehydration:0,exposure:0,senescence:0},foodLost:0,woodLost:0,stoneLost:0};
   for (const person of world.people) { person.technology=initialTechnologyKnowledge(); person.demography=initialDemography(world.tick-person.bornAt); }
   world.technology.checkpoint = captureTechnologyCheckpoint(world.technology, world.people, world.tick, 'migration');
+}
+function upgradeV6(world: World): void {
+  world.version = 6; world.technology.water = emptyWaterLedger();
 }

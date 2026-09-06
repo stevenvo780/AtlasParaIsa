@@ -14,6 +14,20 @@ export interface MaterialBatch {
   id: string; recipeId: string | null; composition: Composition; mass: number;
   properties: MaterialProperties; generation: number; madeAt: number;
   parentItems: string[]; initialMass: number;
+  /** V6 free liquid, never composition.water. One environmental water unit is
+   * 50 material units (50,000 mass quanta); coefficients are simulated, not calibrated. */
+  contents?: ContainedWater;
+}
+export interface ContainedWater { version: 1; water: number; leakRemainder: number; lastTick: number; }
+export interface WaterLedger {
+  version: 1; policyVersion: 1; filled: number; consumed: number; environmentalLoss: number; work: number; energy: number;
+}
+export interface WaterStock { itemId: string; quanta: number; }
+/** Independent liquid envelope; legacy dry envelopes and definition signatures retain their meaning. */
+export interface WaterExecution {
+  version: 1; policyVersion: 1; action: 'fill' | 'drink' | 'leak' | 'spill' | 'transfer' | 'carry';
+  opening: WaterStock[]; closing: WaterStock[]; filled: number; consumed: number; lost: number; received: number; sent: number;
+  source?: { x: number; y: number; opening: number; closing: number };
 }
 export interface MaterialRequirement {
   source: 'raw' | 'product' | 'residue'; material?: Material;
@@ -40,10 +54,13 @@ export interface TechnologyKnowledge {
   attempts: number; lastAttempt: number; project: TechnologyProject | null;
   learnedFrom: { recipeId: string; teacherId: string; tick: number }[];
   competence: Record<string, { attempts: number; successes: number; work: number; benefit: number }>;
+  /** One finite liquid handling action per actor and simulation tick. */
+  waterActionAt?: number;
+  waterCarryAt?: number;
 }
 export interface ResourceMass { resourceId: string; mass: number; }
 export interface TechnologyExecution {
-  id: string; kind: 'research' | 'craft' | 'use' | 'recycle' | 'estate' | 'transfer'; tick: number; actorId: string;
+  id: string; kind: 'research' | 'craft' | 'use' | 'recycle' | 'estate' | 'transfer' | 'water'; tick: number; actorId: string;
   transferId?: string; counterpartyId?: string;
   recipeId: string | null; programSignature: string; inputs: ResourceMass[]; outputs: ResourceMass[];
   residueMass: number; energy: number; work: number; success: boolean;
@@ -52,6 +69,7 @@ export interface TechnologyExecution {
   benefit: number;
   /** Exact nested receipts included between this transaction's opening and closing stocks. */
   nestedExecutionIds?: string[];
+  water?: WaterExecution;
   balance: { opening: ResourceMass[]; closing: ResourceMass[]; externalInputs: ResourceMass[]; externalLoss: ResourceMass[] };
 }
 export interface TechnologyBudgets {
@@ -62,7 +80,8 @@ export interface TechnologyBudgets {
 export interface TechnologyCheckpoint {
   version: 1; tick: number; executionCounter: number;
   reason: 'initial' | 'migration' | 'history-gap' | 'roster-change';
-  inventories: { actorId: string; items: Pick<MaterialBatch, 'id' | 'recipeId' | 'mass' | 'composition'>[]; residue: Composition }[];
+  inventories: { actorId: string; items: Pick<MaterialBatch, 'id' | 'recipeId' | 'mass' | 'composition' | 'contents'>[]; residue: Composition }[];
+  water?: WaterLedger;
 }
 export interface TechnologyState {
   version: 1; recipes: TechnologyRecipe[]; history: TechnologyExecution[]; historyDropped: number;
@@ -72,6 +91,8 @@ export interface TechnologyState {
   journal?: TechnologyJournal;
   /** Resident recipes are a bounded cache when this durable catalogue is present. */
   catalogue?: TechnologyCatalogueState;
+  /** Required by world rules V6; absent in historical V5 snapshots. */
+  water?: WaterLedger;
   recipeCounter: number; itemCounter: number; executionCounter: number;
   ledger: { imported: Composition; estateLoss: Composition; work: number; energy: number; fuelMass: number;
     attempts: number; failures: number; crafted: number; toolUses: number; shared: number; recycled: number };
@@ -102,7 +123,10 @@ export interface TechnologyView {
   recipes: TechnologyRecipe[];
   /** Only each present actor's learned instructions, independent of the detail sample. */
   knowledge?: { actorId: string; recipeIds: string[] }[];
-  items: { id: string; ownerId: string; x: number; y: number; recipeId: string | null; mass: number; generation: number; capacities: Record<Capability, number> }[];
+  items: { id: string; ownerId: string; x: number; y: number; recipeId: string | null; mass: number; generation: number; capacities: Record<Capability, number>;
+    /** Absent in older projections; never infer an empty container from missing data. */
+    water?: { version: 1; quanta: number; capacityQuanta: number; quantaPerUnit: 50000; leakageNumerator: number; leakageDenominator: 1000000 };
+  }[];
   dynamics: { attempts: number; failures: number; recipes: number; products: number; generations: number;
     toolUses: number; observedUtility: number; shared: number; importedMass: number; productMass: number;
     residueMass: number; massError: number; work: number; energy: number; programDiversity: number;

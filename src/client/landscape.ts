@@ -704,7 +704,8 @@ export class Landscape {
       // Preserve visible on/off boundaries even when both values share a coarse color bucket.
       for (const active of [(t.cultivation ?? 0) > .08, (t.drinkingWater ?? 0) > .04,
         (t.growth ?? t.vegetation) > .15, (t.growth ?? t.vegetation) > .25, t.vegetation > .04,
-        (t.life ?? 0) > .45, t.vegetation > .25, t.food > .3, t.food > .72]) acc(active ? 1 : 0);
+        (t.life ?? 0) > .45, t.vegetation > .25, t.food > .3, t.food > .72,
+        (t.wood ?? 0) > 0, (t.wood ?? 0) > .05]) acc(active ? 1 : 0);
       acc(Math.round((t.wood ?? 0) * 2)); acc(Math.round((t.stone ?? 0) * 2)); acc(t.variety ?? 0);
     }
     return h;
@@ -888,6 +889,18 @@ export class Landscape {
       for(let i=0;i<3+Math.round(growth*4);i++){const fx=ox+2+Math.floor(rnd(x,y,1800+i)*12),fy=oy+3+Math.floor(rnd(x,y,1850+i)*10); px(g,fx,fy,1,2,css(P.reed));px(g,fx-1,fy-1,3,1,css(i%2?P.paper:P.berryLight));px(g,fx,fy-2,1,3,css(i%2?P.amber:P.coral));}
     }
     if (feature === 'berries' || (!feature && tile.food > .3)) this.drawBerries(g,x,y,ox,oy,tile.food,0);
+    // A reservoir, bare patch or building may retain legacy wood without a living
+    // tree feature. Show the actual deposit; never turn its water/rock into a tree.
+    if ((tile.wood ?? 0) > 0 && !treeForm(tile) && !['stump', 'reeds', 'cactus'].includes(feature ?? 'none')) {
+      // Match the ground-cache stock buckets, keeping positive remnants visible.
+      const stock = Math.min(12, Math.max(.5, Math.round(tile.wood! * 2) / 2)), pieces = Math.min(3, Math.ceil(stock / 4));
+      for (let i = 0; i < pieces; i++) {
+        const width = Math.max(2, Math.round(2 + Math.sqrt(stock / 12) * 5));
+        px(g, ox+1+i*2, oy+12+i, width, 2, css(P.trunk));
+        px(g, ox+1+i*2, oy+12+i, width, 1, css(P.trunkLight));
+        px(g, ox+i*2, oy+12+i, 1, 2, css(P.soilLight));
+      }
+    }
     if ((tile.life ?? 0) > .45 && tile.vegetation > .25) {
       for(let i=0;i<3;i++) px(g, ox+2+Math.floor(rnd(x,y,1900+i)*12), oy+2+Math.floor(rnd(x,y,1920+i)*12), 1, 1, css(P.grassLight,.8));
     }

@@ -102,7 +102,7 @@ test('broad reproducible samples contain six biomes with bounded correlated reso
     const tiles = samples.get(biome)!;
     return tiles.reduce((sum, tile) => sum + tile[key]!, 0) / tiles.length;
   };
-  assert.ok(average('forest', 'wood') > average('grassland', 'wood') + 5);
+  assert.ok(average('forest', 'wood') > average('grassland', 'wood') * 3, 'forest groves hold more wood per area than scattered grassland trees');
   assert.ok(average('mountain', 'stone') > average('grassland', 'stone') + 3);
   assert.ok(average('forest', 'vegetation') > average('desert', 'vegetation') + 0.5);
   assert.ok(average('forest', 'moisture') > average('desert', 'moisture') + 0.3);

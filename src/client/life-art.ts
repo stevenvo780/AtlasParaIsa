@@ -12,12 +12,16 @@ export function treeForm(tile: Tile): TreeForm | null {
   const bounded = (n: number) => Math.max(0, Math.min(1, n));
   const stock = Math.sqrt(bounded(tile.wood / 12));
   const growth = bounded(tile.growth ?? tile.vegetation), vegetation = bounded(tile.vegetation);
+  const kind = tile.feature === 'pine' || tile.feature === 'palm' ? tile.feature : 'tree';
+  const variant = (Math.abs(tile.variety ?? 0) + (tile.biome === 'wetland' ? 2 : tile.biome === 'grassland' ? 1 : 0)) % 4;
   return {
-    kind: tile.feature === 'pine' || tile.feature === 'palm' ? tile.feature : 'tree',
-    height: 12 + Math.round(stock * (14 + growth * 16) / 6) * 6,
+    kind,
+    // Root spacing comes from real stock distribution, not omitted trees.
+    // Mature forms retain roughly 2–3 standing human heights (14 art pixels).
+    height: Math.min(44, 12 + Math.round(stock * (15 + growth * 14 + (kind === 'pine' ? 3 : variant)) / 2) * 2),
     width: 6 + Math.round(stock * (5 + vegetation * 7) / 3) * 3,
     foliage: Math.round(growth * vegetation * 3),
-    variant: (Math.abs(tile.variety ?? 0) + (tile.biome === 'wetland' ? 2 : tile.biome === 'grassland' ? 1 : 0)) % 4,
+    variant,
   };
 }
 
@@ -29,7 +33,7 @@ export function paintTree(g: CanvasRenderingContext2D, form: TreeForm, pose = 1)
   };
   const base = 44, top = base - form.height, sway = pose - 1;
   const trunk = form.height >= 30 ? 3 : 2, center = 16 + sway;
-  const half = form.width / 2, crown = Math.round(form.height * [ .66, .58, .74, .62 ][form.variant]!);
+  const half = form.width / 2, crown = Math.round(form.height * [ .60, .55, .67, .58 ][form.variant]!);
   const palettes = [['#294a39','#48734b','#81a965'],['#344f38','#648153','#a3b776'],['#2c4944','#4f7661','#92ae78'],['#3e4c32','#778552','#afba76']];
   const [dark, mid, light] = palettes[form.variant]!;
   oval(16, 45, Math.min(8, half), 1.5, '#14221a24');

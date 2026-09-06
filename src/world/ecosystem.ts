@@ -1,5 +1,6 @@
 import type { Feature, Tile, Species } from '../shared/types.js';
 import { EcosystemKernel } from './ecosystem-kernel.js';
+import { initialWood } from './forest.js';
 const clamp = (n: number, maximum = 1): number => Math.max(0, Math.min(maximum, n));
 const key = (x: number, y: number): string => `${x},${y}`;
 const TREE_FEATURES = new Set<Feature>(['tree', 'pine', 'palm', 'cactus', 'reeds', 'stump']);
@@ -28,12 +29,13 @@ export function initializeEcosystem(seed: number, tile: Tile): Tile {
   const pool = !water && !wet && tile.moisture > 0.18 && (tile.elevation ?? 0) < 0.72 && depression % 2 === 0
     && tile.x - Math.floor(tile.x / 4) * 4 === (depression >>> 3) % 4
     && tile.y - Math.floor(tile.y / 4) * 4 === (depression >>> 5) % 4;
-  if (result.wood === undefined) result.wood = water ? 0 : tile.biome === 'forest' ? Math.floor(tile.vegetation * 10) : 0;
+  if (result.wood === undefined) result.wood = initialWood(seed, tile);
   if (result.stone === undefined) result.stone = tile.biome === 'mountain' ? 4 + local % 5 : 0;
   if (result.feature === undefined) {
     result.feature = water ? 'none' : spring ? 'spring' : pool ? 'pool'
       : tile.biome === 'forest' && result.wood > 0 ? (tile.moisture > 0.75 && (tile.elevation ?? 0) < 0.6 && local % 4 === 0 ? 'palm' : (tile.elevation ?? 0) > 0.64 || local % 3 === 0 ? 'pine' : 'tree')
-      : tile.biome === 'forest' && result.wood === 0 ? 'stump'
+      : tile.biome === 'forest' ? (result.stone > 0 && local % 9 === 0 ? 'rock'
+        : tile.food > 0.15 && local % 13 === 0 ? 'berries' : local % 19 === 0 ? 'flowers' : 'none')
       : tile.biome === 'desert' ? (local % 5 === 0 ? 'cactus' : result.stone > 0 ? 'rock' : 'none')
       : wet ? (local % 4 === 0 ? 'clay' : 'reeds')
       : tile.biome === 'mountain' ? (result.stone > 0 ? 'rock' : 'none')

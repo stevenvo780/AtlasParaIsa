@@ -1,5 +1,6 @@
 import type { Biome, PlaceView, Tile } from '../shared/types.js';
 import { initializeEcosystem } from './ecosystem.js';
+import { initialWood } from './forest.js';
 import type { Animal } from './animals.js';
 import type { StructureView } from '../shared/life.js';
 
@@ -119,9 +120,7 @@ export function generateTile(seed: number, x: number, y: number): Tile {
     : biome === 'mountain' ? 0.07 + moisture * 0.16 + detail * 0.025
     : 0.27 + moisture * 0.5 + detail * 0.07);
   const materials = unit(seed, x, y, 700);
-  const wood = biome === 'forest' ? Math.min(12, Math.floor(vegetation * 10 + materials * 4))
-    : biome === 'wetland' ? Math.floor(vegetation * 3 + materials)
-    : biome === 'grassland' && materials > 0.84 ? 1 + Math.floor(materials * 2) : 0;
+  const wood = initialWood(seed, { x, y, terrain: 'meadow', biome, vegetation });
   const stone = biome === 'mountain' ? 4 + Math.floor(materials * 5)
     : biome === 'desert' ? Math.floor(materials * 3)
     : Math.floor(materials * 2);

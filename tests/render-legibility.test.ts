@@ -12,7 +12,7 @@ const structure: StructureView = {id:'fixture-cistern',name:'Refugio',x:0,y:0,bl
 
 test('facility facts separate cumulative benefits, stored water, empty reserves and tiny positive stock',()=>{
  const preserved=JSON.stringify(structure),html=structureCard(structure,null);
- assert.match(html,/Agua en la cisterna/);assert.match(html,/Pasos con beneficio/);assert.match(html,/no indican ocupación actual/);
+ assert.match(html,/Agua en la cisterna/);assert.match(html,/Usos con beneficio/);assert.match(html,/no indican ocupación actual/);
  assert.match(html,/Armazón · Cubierta · Cisterna · Hogar/);assert.doesNotMatch(html,/Usos reales|Último uso|Alimento en el granero|frame|hearth/);
  assert.match(structureCard({...structure,water:0},null),/data-structure-water><span>Agua en la cisterna<\/span><strong>0 /);
  assert.match(structureCard({...structure,water:.00001,condition:0},null),/&lt;0,01/);

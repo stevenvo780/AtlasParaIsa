@@ -13,10 +13,11 @@ const water = (quanta: number, capacityQuanta = 2000, leakageNumerator = 1000) =
   version: 1 as const, quanta, capacityQuanta, quantaPerUnit: 50000 as const,
   leakageNumerator, leakageDenominator: 1000000 as const,
 });
+// Deliberately admit malformed transport data in the negative rendering controls.
 const item = (contents?: unknown): Item => Object.assign({ id: 'fixture-vessel', ownerId: 's', x: 16, y: 12,
   recipeId: 'recipe-cold', mass: 1000, generation: 1,
   capacities: { cutting: 0, storage: .2, insulation: 0, cultivation: 0, binding: 0, abrasion: 0 },
-}, contents === undefined ? {} : { water: contents });
+}, contents === undefined ? {} : { water: contents }) as Item;
 
 // Projection fixtures exercise presentation only: they do not claim that a
 // person filled these vessels, paid a process or lost water in a real world step.

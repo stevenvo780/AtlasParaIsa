@@ -45,7 +45,7 @@ test('technology notebook escapes recipe text and bounds expanded history', () =
   assert.ok(!html.includes('<img ') && !html.includes('<script>'));
   assert.ok(html.includes('&lt;img ') && html.includes('&lt;script&gt;'));
   assert.equal((html.match(/class="person-detail technology-recipe"/g) ?? []).length,20);
-  assert.ok(html.includes('Los 20 procedimientos más recientes'));
+  assert.ok(html.includes('Se muestran 20 procedimientos de esta vista'));
   assert.ok(!html.includes('NaN') && !html.includes('Infinity'));
   assert.match(technologyPane(),/Todavía no se recibieron/,'absent projection stays explicitly absent');
 });

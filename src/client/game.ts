@@ -9,6 +9,7 @@ import { personLink, recentEvidence } from './world-evidence.js';
 import { retainViewState } from './view-state.js';
 import { animalActions, animalColors, componentNames, speciesNames, speciesPlural } from './life-art.js';
 import { technologyPane, recipeCard } from './technology-art.js';
+import { readWorldVisit, saveWorldVisit } from './visit-memory.js';
 import './style.css';
 import './game.css';
 import './notebook.css';
@@ -35,8 +36,8 @@ let soundContext: AudioContext | null = null;
 let soundTimer: ReturnType<typeof setTimeout> | undefined;
 const el = <T extends HTMLElement = HTMLElement>(id: string): T => document.getElementById(id) as T;
 const mobile = (): boolean => matchMedia('(max-width: 760px)').matches;
-function saveVisit(): void { if (world) try { localStorage.setItem('carta:last-visit', String(world.tick)); } catch { /* Optional. */ } }
-function readVisit(): number | null { try { const raw = localStorage.getItem('carta:last-visit'); return raw !== null && Number.isFinite(Number(raw)) ? Number(raw) : null; } catch { return null; } }
+function saveVisit(): void { if (world) try { saveWorldVisit(localStorage, world); } catch { /* Optional. */ } }
+function readVisit(current: WorldView): number | null { try { return readWorldVisit(localStorage, current); } catch { return null; } }
 function stopSound(): void { clearTimeout(soundTimer); if (soundContext) void soundContext.close(); soundContext = null; document.getElementById('sound-toggle')?.setAttribute('aria-pressed', 'false'); }
 function clean(): void { saveVisit(); connection?.stop(); landscape?.destroy(); stopSound(); connection = null; landscape = null; world = null; pending = false; following = false; control = 'inspect'; populationSignature = ''; inspectorSignature = ''; memorySignature = ''; statsTab = 'life'; populationKind = 'people'; }
 
@@ -54,7 +55,7 @@ function loginScreen(message = ''): void {
 }
 
 function enterWorld(): void {
-  clean(); lastVisit = readVisit(); status = 'connecting';
+  clean(); lastVisit = null; status = 'connecting';
   root.innerHTML = worldShell();
   notebook = new Notebook(el('game')); inspectorTab = 'now';
   focusedRecipe = null;
@@ -172,6 +173,7 @@ function receiveWorld(next: WorldView): void {
   const first = world === null; world = next; landscape?.update(next); el('map-loading').hidden = true; el('world-day').textContent = `Día ${next.day}`; el('world-phase').textContent = `${phases[next.phase]}${next.weather === 'rain' ? ' · lluvia' : ''}`;
   el('world-extent').textContent = next.infinite ? `${next.discoveredChunks ?? 0} regiones · ${next.settlementCount ?? 0} asentamientos` : 'Región inicial';
   if (first) {
+    lastVisit = readVisit(next);
     const p = next.people.find(p => p.role === 'S') ?? next.people[0]; if (p) { activePersonId = p.id; selected = { kind: 'person', id: p.id }; landscape?.select(selected); }
     if (!mobile()) drawer('inspector', true);
     if (lastVisit === null) el<HTMLDialogElement>('letter-dialog').showModal();

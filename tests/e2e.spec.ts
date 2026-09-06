@@ -15,6 +15,47 @@ import type { TechnologyProgram } from '../src/shared/technology.js';
 
 const password = 'synthetic-browser-test-only';
 let app: ReturnType<typeof createApp>, store: Store, dir: string, origin: string;
+
+test('V6 visit provenance follows one execution across restart and recognizes a fresh world at the same origin', async ({ page }) => {
+  const observed = observeMessages(page);
+  await enter(page);
+  const firstView = await page.evaluate(async () => (await fetch('/api/world')).json()) as WorldView & { instanceId: string };
+  expect(firstView.instanceId).toMatch(/^[0-9a-f-]{36}$/);
+  for (let i = 0; i < 5; i++) app.stepOnce();
+  await expect.poll(() => observed.views.at(-1)?.tick).toBe(5);
+  await page.reload();
+  await expect(page.locator('#connection-label')).toHaveText('En vivo');
+  await expect(page.locator('#letter-dialog')).toBeHidden();
+  const bookmark = await page.evaluate(() => JSON.parse(localStorage.getItem('carta:last-visit-v2')!));
+  expect(bookmark).toEqual({ version: 1, instanceId: firstView.instanceId, tick: 5 });
+
+  await app.close(); store.close();
+  store = new Store(join(dir, 'world.sqlite'));
+  app = createApp({ store, password, origin, manual: true });
+  app.server.listen(Number(new URL(origin).port), '127.0.0.1'); await once(app.server, 'listening');
+  await page.reload();
+  await expect(page.locator('#connection-label')).toHaveText('En vivo');
+  await expect(page.locator('#letter-dialog')).toBeHidden();
+  expect(await page.evaluate(async () => (await (await fetch('/api/world')).json()).instanceId)).toBe(firstView.instanceId);
+
+  await app.close(); store.close();
+  store = new Store(join(dir, 'fresh.sqlite'));
+  app = createApp({ store, password, origin, manual: true, seed: 51926 });
+  expect(app.world.tick).toBe(0);
+  // New publication may already have advanced when its owner first visits.
+  // A clock comparison alone cannot identify which execution was observed.
+  for (let i = 0; i < 10; i++) app.stepOnce();
+  app.server.listen(Number(new URL(origin).port), '127.0.0.1'); await once(app.server, 'listening');
+  await page.reload();
+  await expect(page.getByLabel('Contraseña privada')).toBeVisible();
+  await page.getByLabel('Contraseña privada').fill(password);
+  await page.getByRole('button', { name: 'Entrar a la carta' }).click();
+  await expect(page.locator('#letter-dialog')).toBeVisible();
+  const freshView = await page.evaluate(async () => (await fetch('/api/world')).json()) as WorldView & { instanceId: string };
+  expect(freshView.instanceId).not.toBe(firstView.instanceId);
+  expect(freshView.tick).toBe(10);
+  expect(observed.gestures).toHaveLength(0); expect(observed.errors).toEqual([]);
+});
 test.beforeEach(async ({}, testInfo) => {
   dir = mkdtempSync(join(tmpdir(), 'carta-browser-')); store = new Store(join(dir, 'world.sqlite'));
   const probe = createServer(); probe.listen(0, '127.0.0.1'); await once(probe, 'listening'); const port = (probe.address() as { port: number }).port;

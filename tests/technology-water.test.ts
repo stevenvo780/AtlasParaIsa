@@ -194,6 +194,7 @@ test('automatic inventory recycling exports fill separately and does not convert
 
 test('real drink action consumes local carried stock and checkpoint copies its contents without aliasing', () => {
   const lab = fixture(); fill(lab, 4);
+  lab.tile.drinkingWater = 0;
   lab.actor.action = 'drink'; lab.actor.thirst = 0.7;
   const before = lab.world.technology.water!.consumed;
   stepWorld(lab.world);

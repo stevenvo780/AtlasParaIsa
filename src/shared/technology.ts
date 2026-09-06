@@ -57,6 +57,8 @@ export interface TechnologyKnowledge {
   /** One finite liquid handling action per actor and simulation tick. */
   waterActionAt?: number;
   waterCarryAt?: number;
+  /** Bounded autonomous preparation at a perceived local source; no liquid is reserved in advance. */
+  waterPreparation?: { itemId: string; sourceX: number; sourceY: number; initialQuanta: number; targetQuanta: number; startedAt: number };
 }
 export interface ResourceMass { resourceId: string; mass: number; }
 export interface TechnologyExecution {

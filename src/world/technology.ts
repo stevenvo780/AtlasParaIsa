@@ -50,6 +50,7 @@ export function initialTechnologyKnowledge(): TechnologyKnowledge {
 /** Keep local instructions and practice bounded, including after stock leaves an actor. */
 export function maintainTechnologyMemory(host: TechnologyHost, actor: TechnologyActor): void {
   const knowledge = actor.technology, capacity = technologyMemoryCapacity(host.technology);
+  if (knowledge.waterPreparation && !knowledge.items.some(item => item.id === knowledge.waterPreparation!.itemId)) delete knowledge.waterPreparation;
   if (knowledge.knownRecipes.length > capacity && !rememberRecipe(knowledge, knowledge.knownRecipes.at(-1)!, {
     capacity, protectedIds: technologyProjectPins(knowledge),
   }).remembered) throw new Error('Active technology instructions exceed local memory capacity.');
@@ -218,6 +219,7 @@ function withdraw(host: TechnologyHost, actor: TechnologyActor, plan: Withdrawal
   if (plan.waterTile) plan.waterTile.drinkingWater = Math.max(0, plan.waterTile.drinkingWater! - plan.imported.water / 50_000);
   for (const item of actor.technology.items) {
     const amount = plan.itemMasses.get(item.id) ?? 0;
+    if (amount && actor.technology.waterPreparation?.itemId === item.id) delete actor.technology.waterPreparation;
     if (amount) settleContainedWaterCapacity(host, item, true);
     subtract(item.composition, plan.itemCompositions.get(item.id) ?? empty()); item.mass -= amount;
   }
@@ -241,6 +243,7 @@ export function useTool(host: TechnologyHost, actor: TechnologyActor, capability
   if (!CAPABILITIES.includes(capability) || !Number.isFinite(demand) || demand <= 0) return;
   const ranked = actor.technology.items.map(item => ({ item, power: materialCapacities(item)[capability] })).filter(i => i.power > 0.07).sort((a, b) => b.power - a.power || a.item.id.localeCompare(b.item.id));
   const best = ranked[0]; if (!best) return;
+  if (actor.technology.waterPreparation?.itemId === best.item.id) delete actor.technology.waterPreparation;
   const opening = technologyStock(actor), waterOpening = containedWaterStock(actor), requestedWear = Math.max(1, Math.ceil(demand * (2 + (1 - best.item.properties.toughness) * 8))), wear = Math.min(best.item.mass, requestedWear);
   const debris = splitComposition(best.item.composition, wear); subtract(best.item.composition, debris); best.item.mass -= wear; add(actor.technology.residue, debris);
   const waterLost = settleContainedWaterCapacity(host, best.item, best.item.mass === 0);
@@ -497,6 +500,7 @@ export function transferTechnologyItem(host: TechnologyHost, from: TechnologyAct
  * Local transfers move the existing objects; unclaimed material exits the technology model
  * at that location and is explicitly accounted as loss, never invented ecological food. */
 export function settleTechnologyEstate(host: TechnologyHost, actor: TechnologyActor, recipients: TechnologyActor[] = []): { transfers: { to: string; items: string[]; mass: number }[]; lost: Composition; executionIds: string[] } {
+  delete actor.technology.waterPreparation;
   const result = { transfers: [] as { to: string; items: string[]; mass: number }[], lost: empty(), executionIds: [] as string[] };
   const nearby = recipients.filter((p, index) => p !== actor && p.id !== actor.id && recipients.indexOf(p) === index && host.people.includes(p) && distance(actor, p) <= 2).sort((a, b) => distance(actor, a) - distance(actor, b) || a.id.localeCompare(b.id));
   for (const recipient of nearby) {

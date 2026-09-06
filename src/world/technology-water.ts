@@ -11,6 +11,8 @@ import { assertWaterContents, capacityOverflowReturns, containerAffordance, DEFA
 
 export const WATER_WORK_ENERGY = 0.00045;
 export const WATER_WORK_FATIGUE = 0.00032;
+export const WATER_PREPARATION_MAX_TICKS = 16;
+export const WATER_RESERVE_HORIZON = 180;
 type WaterActor = TechnologyActor & BodyState;
 const integer = (n: unknown): n is number => typeof n === 'number' && Number.isSafeInteger(n) && n >= 0;
 const sum = (stock: readonly WaterStock[]): number => stock.reduce((n, line) => n + line.quanta, 0);
@@ -97,6 +99,16 @@ export function assertTechnologyWater(host: TechnologyHost): void {
       if (!ledger) fail(); assertContainedWater(item.contents, host.tick);
       if (item.contents.water > containerAffordance(item).capacityQuanta) fail();
       current = safe(current + item.contents.water);
+    }
+    const preparation = actor.technology.waterPreparation;
+    if (preparation !== undefined) {
+      if (!ledger || !keys(preparation, ['itemId', 'sourceX', 'sourceY', 'initialQuanta', 'targetQuanta', 'startedAt'])
+        || !Number.isSafeInteger(preparation.sourceX) || !Number.isSafeInteger(preparation.sourceY)
+        || !integer(preparation.initialQuanta) || !integer(preparation.targetQuanta) || preparation.targetQuanta <= preparation.initialQuanta
+        || preparation.targetQuanta > DEFAULT_WATER_POLICY.flowQuantaPerTick * WATER_PREPARATION_MAX_TICKS
+        || !integer(preparation.startedAt) || preparation.startedAt > host.tick || host.tick - preparation.startedAt > WATER_PREPARATION_MAX_TICKS
+        || preparation.sourceX !== actor.x || preparation.sourceY !== actor.y
+        || !actor.technology.items.some(item => item.id === preparation.itemId && preparation.targetQuanta <= containerAffordance(item).capacityQuanta)) fail();
     }
   }
   if (!ledger) {
@@ -272,4 +284,49 @@ export function payContainedWaterCarry(host: TechnologyHost, actor: WaterActor):
   exertBody(actor, { energy, fatigue }); actor.technology.waterCarryAt = host.tick;
   record(host, actor, waterEnvelope(actor, opening, 'carry')!, 1, energy);
   return true;
+}
+
+/** A preparatory plan predicts only its owner's bodily demand and observed material retention.
+ * No remote source, destination or recipe classification is consulted. */
+export function beginWaterPreparation(host: TechnologyHost, actor: WaterActor, thirstPerTick: number): boolean {
+  if (!host.technology.water || !host.people.includes(actor) || actor.technology.waterPreparation || !preparationReady(actor)
+    || !Number.isFinite(thirstPerTick) || thirstPerTick <= 0) return false;
+  const source = host.tiles?.find(tile => tile.x === actor.x && tile.y === actor.y);
+  if (!source || (source.drinkingWater ?? 0) * WATER_QUANTA_PER_UNIT < DEFAULT_WATER_POLICY.flowQuantaPerTick) return false;
+  const desired = Math.min(DEFAULT_WATER_POLICY.flowQuantaPerTick * WATER_PREPARATION_MAX_TICKS,
+    Math.max(DEFAULT_WATER_POLICY.flowQuantaPerTick, Math.ceil(thirstPerTick * WATER_RESERVE_HORIZON / 3 * WATER_QUANTA_PER_UNIT)));
+  const carried = containedWaterQuanta(actor);
+  if (carried >= desired * 0.65) return false; // Do not chase each leaked quantum with a new filling visit.
+  const choices = actor.technology.items.flatMap(item => {
+    const properties = containerAffordance(item), initial = item.contents?.water ?? 0;
+    const target = Math.min(properties.capacityQuanta, desired - (carried - initial), initial + freeWaterCarryQuanta(host, actor));
+    const missing = target - initial;
+    if (missing < DEFAULT_WATER_POLICY.flowQuantaPerTick) return [];
+    const retained = leakIntegerRemainder({ water: target, leakRemainder: 0 }, properties.leakageNumerator,
+      DEFAULT_WATER_POLICY.fixedPointDenominator, WATER_RESERVE_HORIZON).contents.water;
+    const effort = Math.ceil(missing / DEFAULT_WATER_POLICY.quantaPerWork) * WATER_WORK_ENERGY
+      + target / 1000 * 0.0008 * Math.ceil(WATER_RESERVE_HORIZON / 6);
+    if (retained < DEFAULT_WATER_POLICY.flowQuantaPerTick || retained < target * 0.75 || actor.energy < 0.3 + effort) return [];
+    return [{ item, initial, target, retained, effort }];
+  }).sort((a, b) => b.retained / b.target - a.retained / a.target || a.effort - b.effort || a.item.id.localeCompare(b.item.id));
+  const chosen = choices[0]; if (!chosen) return false;
+  actor.technology.waterPreparation = { itemId: chosen.item.id, sourceX: actor.x, sourceY: actor.y,
+    initialQuanta: chosen.initial, targetQuanta: chosen.target, startedAt: host.tick };
+  return true;
+}
+function preparationReady(actor: WaterActor): boolean {
+  return actor.hunger < 0.55 && actor.thirst < 0.18 && actor.fatigue < 0.6 && actor.energy > 0.35;
+}
+/** Every call either pays one real flow or closes the phase. The fixed target is never replenished after completion. */
+export function advanceWaterPreparation(host: TechnologyHost, actor: WaterActor): { moved: number; complete: boolean } {
+  const plan = actor.technology.waterPreparation;
+  if (!plan) return { moved: 0, complete: true };
+  const item = actor.technology.items.find(item => item.id === plan.itemId);
+  const cancel = () => { delete actor.technology.waterPreparation; return { moved: 0, complete: true }; };
+  if (!preparationReady(actor) || !item || actor.x !== plan.sourceX || actor.y !== plan.sourceY
+    || host.tick - plan.startedAt >= WATER_PREPARATION_MAX_TICKS || (item.contents?.water ?? 0) >= plan.targetQuanta) return cancel();
+  const moved = fillContainedWater(host, actor, item.id, plan.targetQuanta - (item.contents?.water ?? 0));
+  const complete = !moved || (item.contents?.water ?? 0) >= plan.targetQuanta;
+  if (complete) delete actor.technology.waterPreparation;
+  return { moved, complete };
 }

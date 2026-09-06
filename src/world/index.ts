@@ -20,7 +20,7 @@ import { reproductiveReadiness, familyOpportunity, availableToShare } from './fa
 import { advancePopulation, assertLegacyRecord, assertPopulation } from './lineage.js';
 import { analyzeTechnologyOrganization } from './technology-organization.js';
 import { captureTechnologyCheckpoint, advanceTechnologyCheckpoint } from './technology-checkpoint.js';
-import { containedWaterQuanta, drinkContainedWater, emptyWaterLedger, maintainContainedWater, payContainedWaterCarry } from './technology-water.js';
+import { advanceWaterPreparation, beginWaterPreparation, containedWaterQuanta, drinkContainedWater, emptyWaterLedger, maintainContainedWater, payContainedWaterCarry } from './technology-water.js';
 import { WATER_QUANTA_PER_UNIT } from './material-affordances.js';
 export { bindWorldContext, tileAt, normalizeViewport, worldContext } from './spatial.js';
 export type { WorldContext } from './spatial.js';
@@ -318,6 +318,7 @@ function choose(world: World, person: Person): void {
     && (selected.action!=='forage' || (tileAt(world,person.target)?.food??0)>=0.005)) selected.target=person.target;
   if (person.action !== selected.action || distance(person.target, selected.target) > 0) person.work = 0;
   person.action = selected.action;
+  if (selected.action !== 'drink') delete person.technology.waterPreparation;
   person.intentContext = person.thirst > 0.5 ? 'thirsty' : person.hunger > 0.5 ? 'hungry' : person.fatigue > 0.5 ? 'tired' : 'ready';
   person.target = { x: selected.target.x, y: selected.target.y };
   person.reason = selected.memory ? `${selected.reason} Influye «${selected.memory.title}», ${selected.memory.source === 'sample' ? 'material de prueba' : 'recuerdo aprobado'}.` : selected.reason;
@@ -464,6 +465,18 @@ function bodyAndAction(world: World, person: Person): void {
   advanceNeeds(person, { hunger:0.00027*physiology.foodDemand, thirst:(0.00045+(tile.biome==='desert'?0.0002:0))*physiology.waterDemand, energy:0.00007, stressEnergy:0.00015, fatigue:0.00009+(world.weather==='rain'&&tile.terrain!=='shelter'?0.0001:0) });
   person.closeness = clamp(person.closeness + 0.0001);
   person.socialLoad = clamp(person.socialLoad - 0.0008);
+  if (person.technology.waterPreparation) {
+    if (person.action !== 'drink' || person.command) delete person.technology.waterPreparation;
+    else {
+      const preparation = advanceWaterPreparation(world, person);
+      person.decisionAt = preparation.moved > 0 ? world.tick + 1 : world.tick;
+      if (preparation.moved > 0) {
+        person.reason = preparation.complete ? 'Preparó una reserva finita de agua; vuelve a elegir su camino.' : 'Llena un objeto que retiene agua para preparar una reserva de viaje; cada carga cuesta esfuerzo.';
+        person.need = 'Preparar agua para el camino';
+        return; // This tick's handling effort cannot also be spent drinking or working.
+      }
+    }
+  }
   const emptyFood = person.action === 'eat' && (tileAt(world, person.target)?.food ?? 0) < 0.005 && person.inventory < 0.01 && foodAvailable(world,person)<0.001;
   const emptyHarvest = person.action === 'forage' && (tileAt(world, person.target)?.food ?? 0) < 0.005;
   const emptyWater = person.action === 'drink' && containedWaterQuanta(person) === 0 && waterAvailable(world,person.target) < 0.003;
@@ -491,13 +504,22 @@ function bodyAndAction(world: World, person: Person): void {
     if (person.hunger < 0.12) person.decisionAt = world.tick + 1;
   }
   if (person.action === 'drink' && distance(person, person.target) < 0.5) {
-    const contained = drinkContainedWater(world, person) / WATER_QUANTA_PER_UNIT;
-    const ambient = contained > 0 ? 0 : takeWater(world,person,Math.min(0.006,person.thirst/3));
+    const needed = Math.min(0.006, person.thirst / 3);
+    const ambient = takeWater(world, person, needed);
     hydrateBody(person, ambient);
+    const remaining = Math.max(0, Math.floor((needed - ambient) * WATER_QUANTA_PER_UNIT));
+    const contained = remaining > 0 ? drinkContainedWater(world, person, remaining) / WATER_QUANTA_PER_UNIT : 0;
     const water = contained + ambient;
     count(world, 'waterConsumed', water);
     if (water > 0 && world.tick - person.lastOutcome >= 30) outcome(world, person, 'drink', water * 20);
-    if (person.thirst < 0.12) { if (person.command?.order === 'drink') { person.command = null; person.controlMode = 'auto'; } person.decisionAt = world.tick + 1; }
+    if (person.thirst < 0.12) {
+      if (person.command?.order === 'drink') { person.command = null; person.controlMode = 'auto'; }
+      person.decisionAt = world.tick + 1;
+      if (ambient > 0 && !person.command && beginWaterPreparation(world, person,
+        (0.00045 + (current.biome === 'desert' ? 0.0002 : 0)) * physiology.waterDemand)) {
+        person.reason = 'Ya bebió de la fuente local; prepara una reserva útil para cuando se aleje.';
+      }
+    }
   }
   if (person.action === 'rest' && distance(person, person.target) < 0.5) {
     const quality = world.shelterBenefitEnabled ? Math.max(facilityRestQuality(world,person),world.weather==='rain'?0.2:0.55) : world.weather === 'rain' ? 0.2 : 0.55;
@@ -601,6 +623,7 @@ function applyGesture(world: World, gesture: Gesture, order: number): GestureRes
     if (!person || !gesture.order || !['move', 'explore', 'gather', 'farm', 'build', 'rest', 'hunt', 'drink', 'cooperate', 'invent', 'repair', 'research', 'craft', 'forage', 'auto'].includes(gesture.order)) return result(false, 'Habitante u orden desconocida.');
     if (distance(person, gesture) > 4096) return result(false, 'El destino de una tarea debe quedar a menos de 4096 celdas.');
     if(['research','craft'].includes(gesture.order)&&person.technology.project&&person.technology.project.kind!==gesture.order) cancelTechnologyProject(world,person);
+    delete person.technology.waterPreparation;
     person.command = gesture.order === 'auto' ? null : { order: gesture.order, x: gesture.x, y: gesture.y };
     person.controlMode = person.command ? 'directed' : 'auto'; person.work = 0; person.decisionAt = world.tick;
     addEvent(world, { kind: 'gesture', actors: [person.id], x: person.x, y: person.y, source: 'simulation', text: gesture.order === 'auto' ? `${person.name} vuelve a elegir sus tareas.` : `${person.name} recibió una tarea: ${gesture.order}.`, cause: 'Orden explícita; conserva desplazamiento físico, costes y necesidades.' });
@@ -744,8 +767,9 @@ export function projectWorld(world: World, viewport?: Viewport, context: WorldCo
     originX: v.x, originY: v.y, infinite: true, activeChunks: Object.keys(world.chunks).length, discoveredChunks: world.discoveredChunks, settlementCount: world.settlementCount,
     tiles: projected.tiles.map(t => ({ x: t.x, y: t.y, terrain: t.terrain, biome: t.biome, elevation: t.elevation, wood: t.wood, stone: t.stone, moisture: Math.round(t.moisture * 1000) / 1000, food: Math.round(t.food * 1000) / 1000, vegetation: Math.round(t.vegetation * 1000) / 1000, feature: t.feature, variety: t.variety, growth: t.growth, fertility: t.fertility, cultivation: t.cultivation, traffic: t.traffic, drinkingWater: t.drinkingWater, species: t.species, fauna: t.fauna, life: t.life })),
     people: world.people.map(p => ({ id: p.id, name: p.name, role: p.role, x: p.x, y: p.y, color: p.color, action: p.action, reason: p.reason, energy: p.energy, hunger: p.hunger, fatigue: p.fatigue, thirst: p.thirst, need: p.need, recentMemory: p.recentMemory, traits: { ...p.traits }, skills: { ...p.skills }, materials: { ...p.materials }, specialty: specialty(p), controlMode: p.controlMode, blueprintId:p.blueprintId??null,
-      target: { x:p.target.x,y:p.target.y }, foodReserve:p.inventory, foodReserveCapacity:0.25, working: ['gather','farm','build','hunt','invent','repair','research','craft','forage'].includes(p.action) && distance(p,p.target)<0.5,
-      workProgress: ['research','craft'].includes(p.action) ? (p.technology.project ? clamp(p.technology.project.progress/p.technology.project.requiredWork) : 0) : clamp(p.work / (p.action==='build'?constructionCost(world,p).work:p.action==='invent'?60:p.action==='repair'?30:['farm','hunt'].includes(p.action)?Math.ceil(45*(1-(p.skills[p.action]??0)*0.25)):Math.ceil(18*(1-(p.skills[p.action]??0)*0.25)))),
+      target: { x:p.target.x,y:p.target.y }, foodReserve:p.inventory, foodReserveCapacity:0.25, working: !!p.technology.waterPreparation || ['gather','farm','build','hunt','invent','repair','research','craft','forage'].includes(p.action) && distance(p,p.target)<0.5,
+      workProgress: p.technology.waterPreparation ? clamp(((p.technology.items.find(item => item.id === p.technology.waterPreparation!.itemId)?.contents?.water ?? 0) - p.technology.waterPreparation.initialQuanta) / (p.technology.waterPreparation.targetQuanta - p.technology.waterPreparation.initialQuanta))
+        : ['research','craft'].includes(p.action) ? (p.technology.project ? clamp(p.technology.project.progress/p.technology.project.requiredWork) : 0) : clamp(p.work / (p.action==='build'?constructionCost(world,p).work:p.action==='invent'?60:p.action==='repair'?30:['farm','hunt'].includes(p.action)?Math.ceil(45*(1-(p.skills[p.action]??0)*0.25)):Math.ceil(18*(1-(p.skills[p.action]??0)*0.25)))),
       health:p.demography.health,vitality:p.demography.vitality,continuityProtected:p.role!=='neighbor',
       genome: { generation: p.genome.generation, parents: [...p.genome.parents], learningRate: p.genome.learningRate, cooperation: p.genome.cooperation, mutations: p.genome.mutations }, age: world.tick - p.bornAt, communityId: p.communityId, culture: { ...p.culture }, trust: Object.entries(p.bonds).map(([id, value]) => ({ id, value })), experiences: p.experiences.map(e => ({ tick: e.tick, text: e.text, causeId: e.causeId })) })),
     places: projected.places.map(p => ({ id: p.id, name: p.name, x: p.x, y: p.y, description: p.description, gatherings: p.gatherings })), events: world.events.map(e => ({ id: e.id, tick: e.tick, kind: e.kind, actors: [...e.actors], ...(e.x === undefined ? {} : { x: e.x }), ...(e.y === undefined ? {} : { y: e.y }), text: e.text, cause: e.cause, source: e.source })),
@@ -854,7 +878,7 @@ export function assertWorld(value: unknown, expectedVersion = RULES_VERSION, con
   if(expectedVersion>=4) assertLifeState(w);
   if(expectedVersion>=5) {
     if (expectedVersion === 5 && (Object.hasOwn(w.technology, 'water')
-      || w.people.some(p => Object.hasOwn(p.technology, 'waterActionAt') || Object.hasOwn(p.technology, 'waterCarryAt') || p.technology.items.some(item => Object.hasOwn(item, 'contents')))
+      || w.people.some(p => Object.hasOwn(p.technology, 'waterActionAt') || Object.hasOwn(p.technology, 'waterCarryAt') || Object.hasOwn(p.technology, 'waterPreparation') || p.technology.items.some(item => Object.hasOwn(item, 'contents')))
       || w.technology.history.some(e => Object.hasOwn(e, 'water') || e.kind === 'water')
       || w.technology.journal?.pending.some(e => Object.hasOwn(e, 'water') || e.kind === 'water')
       || w.technology.checkpoint?.inventories.some(inv => inv.items.some(item => Object.hasOwn(item, 'contents'))))) fail();

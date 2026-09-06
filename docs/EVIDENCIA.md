@@ -155,7 +155,7 @@ Se realizaron además **1080 comparaciones ecológicas exactas**: tres tamaños,
 
 El prototipo temporal de escritura en worker comparó ochenta pasos sobre la referencia fija: estado y recarga iguales, **93,32 ms/paso síncrono frente a 175,31 en worker**. Redujo el atraso de un temporizador de diagnóstico, pero no mejoró capacidad de avance; no es una prueba de FPS y no se integró. Un primer perfil con fuentes mutando y otro solapado con la suite fueron excluidos; las repeticiones válidas y sus límites están identificados en el informe.
 
-El control de territorio remoto conservó celdas, hash y edades animales al archivar y reactivar: confirma la política de congelación actual. No se ejecutó un kernel GPU, no se midió aceleración con las dos GPU ni carga sostenida de doce clientes. Estos artefactos llevan un nombre experimental que incluye `v6`; **la aplicación sigue en reglas/protocolo 5**.
+El control de territorio remoto conservó celdas, hash y edades animales al archivar y reactivar: confirma la política de congelación actual. No se ejecutó un kernel GPU, no se midió aceleración con las dos GPU ni carga sostenida de doce clientes. Estos artefactos llevan un nombre experimental que incluye `v6`; **aquella aplicación medida usaba reglas/protocolo 5**.
 
 ## Actualización sin reiniciar el mundo
 
@@ -223,17 +223,19 @@ Chromium comprobó el servicio entre **01:47:08.730 y 01:47:11.277 UTC**: contra
 
 Se inspeccionaron las dos capturas: la interfaz ocupa toda la pantalla y los controles son legibles, pero el bosque continúa demasiado denso y oculta gran parte del suelo. Esta publicación no acredita una reducción física de árboles, un teléfono real, supervivencia prolongada del mundo nuevo ni uso de GPU del servidor.
 
-## Transporte de agua en el candidato V6
+## Transporte de agua V6 integrado
 
 La rama aislada `feature/contained-water-integrated`, fuente **`eefbbe2`**, conecta contenido líquido, preparación autónoma y su inspector. Pasaron **496/496 Node**, **17/17 E2E con cliente y servidor compilados**, typecheck y build; fuentes y compilados conservaron sus hashes al terminar. La revisión GPT-6 independiente del planificador pasó nueve pruebas focales y dos controles adicionales: continuidad exacta en ocho puntos de guardado durante el llenado y una fuente parcial sin doble cobro. No revisó su propia implementación de interfaz ni repitió las observaciones largas. [Validación integrada](../artifacts/water-v6-integrated-evidence.json), [manifiesto](../artifacts/water-v6-integrated-manifest.json) y [revisión](../artifacts/water-v6-planning-review.json).
 
 Tres semillas durante **7200 pasos cada una**, sin órdenes ni objetos o programas suministrados, produjeron 55 objetos con capacidad suficiente, trece llenados y tres consumos portátiles. El balance agregado en cuantos fue **10468 llenados = 2619 consumidos + 7208 perdidos + 641 contenidos**; hubo 793 acciones de trabajo y 0,2661716 de energía gastada. Los consumos se observaron lejos de la fuente, hasta dieciséis celdas; el baseline tuvo cero llenados y consumos portátiles. Las pérdidas incluyen fugas y derrames, por lo que el resultado no demuestra una mejora ecológica general ni mayor supervivencia. El inspector distingue contenido, capacidad y fuga prevista; se observaron preparación, progreso y contenido real en móvil emulado. [Experimento y límites](../artifacts/water-v6-autonomy-evidence.json), [baseline](../artifacts/water-v6-autonomy-baseline.json) y [candidato](../artifacts/water-v6-autonomy-candidate.json).
 
-**Esta rama no está publicada:** la instancia privada sigue siendo V5 `7d8777c`. Su integración en la línea principal y la documentación completa del contrato V6 corresponden a una entrega posterior.
+La integración en la línea principal **`95ff0d2`** conserva iguales los **120 archivos de fuentes, pruebas y configuración** comparados con `eefbbe2`; las diferencias pertenecen a documentación y al cambio preexistente de `.gitignore`. No se repitieron las suites por una fusión que conserva exactamente esos archivos. Los **39 archivos del build activo** permanecieron idénticos a V5 `7d8777c`; integrar fuentes no reemplazó el build ni el mundo. [Comprobación de integración](../artifacts/water-v6-main-integration.json).
+
+**V6 está integrado y no publicado:** la instancia privada sigue siendo V5 `7d8777c`. [REGLAS](REGLAS.md#agua-contenida-y-preparación-autónoma), [CONSTRUCCION](CONSTRUCCION.md#contrato-v6-de-agua-contenida) y [EXPERIENCIA](EXPERIENCIA.md#participación-de-isa) definen contrato, persistencia y lectura del inspector. La próxima publicación de pruebas comenzará un mundo nuevo según la política vigente.
 
 ## Trabajo y pruebas pendientes
 
-La comparación alimentaria, el soak con commit por paso y la extensión a veinticinco días están completados dentro de sus alcances anteriores. La publicación privada `7d8777c` amplía el catálogo y conecta memoria local; faltan observaciones largas y multisemilla con esa memoria, recambio de herramientas y mantenimiento material reciente. Activo y candidato mantienen ecología lejana congelada y falta de simulación en GPU del servidor. El transporte de agua contenido tiene una integración V6 aislada y validada, todavía sin publicar.
+La comparación alimentaria, el soak con commit por paso y la extensión a veinticinco días están completados dentro de sus alcances anteriores. La publicación privada `7d8777c` amplía el catálogo y conecta memoria local; faltan observaciones largas y multisemilla con esa memoria, recambio de herramientas y mantenimiento material reciente. Activo y candidato mantienen ecología lejana congelada y falta de simulación en GPU del servidor. El transporte de agua contenido está integrado y validado en la línea principal V6, todavía sin publicar.
 
 No se han probado teléfono físico, Safari/iOS, lector de pantalla, varios días reales, doce clientes bajo carga sostenida, miles de habitantes, fallo físico de disco ni cálculo ecológico en GPU. La voz final y los recuerdos reales siguen pendientes. No se acreditan conciencia, autopoiesis biológica, efecto Baldwin ni evolución abierta.
 

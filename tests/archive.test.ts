@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { Store, fingerprint } from '../src/server/store.js';
 import { enableTechnologyJournal } from '../src/world/technology-journal.js';
+import { enableTechnologyCatalogue } from '../src/world/technology-catalogue.js';
 import { createWorld, RULES_VERSION, assertWorld, migrateWorld, projectWorld, type World } from '../src/world/index.js';
 import { activate, maintainRegions } from '../src/world/spatial.js';
 import { harvestAt, materializeAnimals, syncFauna, stepAnimals, MAX_ACTIVE_ANIMALS } from '../src/world/animals.js';
@@ -39,6 +40,7 @@ test('archive versions restore exact edited terrain at the latest permitted worl
   const { store } = fixture(t);
   const world = createWorld(42); fixtureTick(world,11);
   enableTechnologyJournal(world.technology);
+  enableTechnologyCatalogue(world.technology);
   const first = archived(world, 11, 0.12345);
   world.retiredChunks = [first];
   const expected: World = { ...structuredClone(world), retiredChunks: [] };

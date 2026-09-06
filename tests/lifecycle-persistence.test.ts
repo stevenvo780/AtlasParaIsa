@@ -103,8 +103,15 @@ test('checksum-consistent archive identity forgery still fails validation',t=>{
 
 test('a counter cannot move behind a living descendant, and a refused collision spends no parental reserves',t=>{
   const {store}=fixture(t),world=createWorld(51926),child=makeChild(world);assert.equal(child.id,'descendant-1');
-  world.birthCounter=0;assert.throws(()=>assertWorld(world));store.save(world);assert.throws(()=>store.load());
-  world.birthCounter=1;assertWorld(world);
+  world.birthCounter=0;assert.throws(()=>assertWorld(world));assert.throws(()=>store.save(world));
+  assert.equal(store.load(),null,'an invalid birth counter must be rejected before the first snapshot');
+  world.birthCounter=1;assertWorld(world);store.save(world);
+  const original=store.db.prepare('SELECT body,digest FROM snapshots WHERE slot=0').get() as {body:string;digest:string};
+  const damaged=JSON.parse(original.body);damaged.birthCounter=0;
+  const body=JSON.stringify(damaged),digest=createHash('sha256').update(body).digest('hex');
+  store.db.prepare('UPDATE snapshots SET body=?,digest=? WHERE slot=0').run(body,digest);
+  assert.throws(()=>store.load(),'a recomputed checksum must not conceal an invalid persisted birth counter');
+  store.db.prepare('UPDATE snapshots SET body=?,digest=? WHERE slot=0').run(original.body,original.digest);
   world.tick=4799;
   for(const person of world.people) {person.demography.age=world.tick-person.bornAt;person.action='rest';person.decisionAt=9999;person.hunger=0.1;person.thirst=0.1;person.fatigue=0.1;person.energy=0.9;person.inventory=0.2;}
   world.birthCounter=0;

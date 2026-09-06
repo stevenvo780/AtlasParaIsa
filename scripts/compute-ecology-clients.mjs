@@ -71,7 +71,9 @@ export class GPUWorker {
     result.process=spawn('python3',[new URL('./compute-ecology-gpu.py',import.meta.url).pathname,'--devices',devices,'--nvrtc',nvrtc],{stdio:['pipe','pipe','pipe']});
     result.stderr='';result.process.stderr.on('data',chunk=>{result.stderr=(result.stderr+chunk.toString()).slice(-4096);});
     result.reader=new BinaryReader(result.process.stdout);
-    result.completion=new Promise(resolve=>result.process.once('exit',(code,signal)=>resolve({code,signal})));
+    // A failed spawn emits error/close without exit (for example absent Python).
+    // close also waits for the child's pipes, so failure cleanup cannot hang here.
+    result.completion=new Promise(resolve=>result.process.once('close',(code,signal)=>resolve({code,signal})));
     result.process.once('error',error=>{result.reader.error=error;result.reader.done=true;result.reader.wake();});
     try {result.initialization=(await result.deadline(result.reader.frame())).header;result.startupMs=performance.now()-started;return result;}
     catch(error){await result.close();throw error;}

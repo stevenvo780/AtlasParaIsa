@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { EcosystemKernel } from '../src/world/ecosystem-kernel.js';
 import { generateChunk } from '../src/world/terrain.js';
 // Isolated .mjs benchmark helpers intentionally have no application wiring.
@@ -16,6 +17,18 @@ function fixture():Tile[] {
   tiles.push({x:201,y:-200,terrain:'meadow',biome:'mountain',feature:'stump',wood:0.999,growth:0.9,fertility:0.9,moisture:0.9,vegetation:0.7,food:0.5});
   return tiles;
 }
+test('missing Python rejects GPU setup and completes owned cleanup without an exit event',()=>{
+  const clientURL = new URL('../scripts/compute-ecology-clients.mjs', import.meta.url).href;
+  const probe = spawnSync(process.execPath, ['--input-type=module', '--eval', `
+    import assert from 'node:assert/strict';
+    import { GPUWorker } from ${JSON.stringify(clientURL)};
+    await assert.rejects(GPUWorker.create('0', '/unused-nvrtc'), error => error.code === 'ENOENT');
+    process.stdout.write('rejected-and-closed');
+  `], { env: { PATH: '/nonexistent-atlas-compute-python' }, encoding: 'utf8', timeout: 3000 });
+  assert.equal(probe.error, undefined);
+  assert.equal(probe.status, 0);
+  assert.equal(probe.stdout, 'rejected-and-closed');
+});
 test('SoA port agrees exactly with the unchanged engine through 120 varied updates, gaps and feature transitions',()=>{
   let actual=fixture(),expected=clone(actual);const kernel=new EcosystemKernel();
   for(let j=0;j<120;j++){

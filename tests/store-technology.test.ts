@@ -67,7 +67,10 @@ function oldDatabase(path: string, version: 1 | 2 | 3, worlds: World[]) {
   const store = new Store(path);
   try {
     for (const world of worlds) {
+      // This fixture predates the chronicle journal as well as the technology journal.
+      delete world.chronicleJournal;
       const old = structuredClone(world); delete old.technology.journal;
+      for (const event of old.events) store.db.prepare('INSERT OR IGNORE INTO events VALUES (?,?,?)').run(event.id,event.tick,JSON.stringify(event));
       const body = encodeSnapshot(old);
       store.db.exec('INSERT OR REPLACE INTO snapshots SELECT 1,body,digest,saved_at FROM snapshots WHERE slot=0');
       store.db.prepare('INSERT OR REPLACE INTO snapshots VALUES (0,?,?,?)').run(body, digest(body), 123);

@@ -70,6 +70,26 @@ Los siete frentes de arquitectura y su estado se especifican en [CONSTRUCCION](C
 
 Los controles de laboratorio ya superan los antiguos topes del catálogo conservando referencias y pagando los procedimientos; una copia autónoma también produjo recetas después de saturar la caché. Queda retirar productores indispensables, observar varios recambios de herramientas y comprobar a lo largo de varias generaciones la pérdida del último conocedor, distinta de morir el inventor. Una frontera autoproducida debe afectar físicamente los procesos y depender de su reparación. Ni guardar programas, acumular nombres ni obtener un balance completo acreditan evolución abierta o mantenimiento material.
 
+### Neuroevolución después de afinar el mundo
+
+Steven propone aprovechar CPU, las dos GPU y RAM para aprender qué condiciones y decisiones sostienen un mundo más complejo. **Es investigación posterior a la afinación en curso, sin implementación ni entrenamiento activos.** Primero se corrigen decisiones corporales, utilidad constructiva, cobertura de métricas y legibilidad. Seleccionar políticas sobre un fallo de consumo o una pérdida de registros podría premiar errores del simulador.
+
+La propuesta distingue dos experimentos. La sensibilidad de parámetros compara variaciones acotadas de tasas ambientales y costes para identificar condiciones viables y dependencias causales; cada configuración queda fijada y versionada durante su evaluación. La neuroevolución compara pequeñas redes de decisión, inicialmente de tamaño fijo y con memoria recurrente si aporta una ventaja comprobada, usando esas mismas condiciones. Las redes reciben observaciones locales y estado corporal, eligen acciones físicamente admisibles y pagan sus costes. No conocen stocks remotos ni pueden cambiar balances, daño o leyes del mundo para obtener una puntuación mejor.
+
+MAP-Elites aporta la idea de conservar estrategias eficaces en distintas regiones de un espacio de comportamientos. Los descriptores propuestos aquí —movilidad, dependencia de reservas, especialización práctica y cooperación con beneficio— necesitan pruebas de que reflejan diferencias funcionales. La calidad se contrasta mediante continuidad de vecinos mortales y recambio, satisfacción de necesidades, mantenimiento material y robustez frente a escasez y cambios ambientales. Novedad, número de edificios, recetas, acciones o población al final no bastan por separado; un repertorio también puede colapsar o explotar una métrica. Esta aplicación al mundo es un diseño propio pendiente, no un resultado atribuido al artículo.
+
+QDax proporciona implementaciones de búsqueda de calidad y diversidad, neuroevolución y aprendizaje por refuerzo con JAX y aceleración de hardware. Es una opción para un prototipo medido, sin compromiso todavía de incorporarla al backend TypeScript ni de portar toda la simulación. [Artículo y código de referencia, JMLR, 2024](https://www.jmlr.org/papers/v25/23-1027.html).
+
+| Recurso | Trabajo propuesto | Condición para adoptarlo |
+|---|---|---|
+| CPU y núcleos | Ecología con estructuras irregulares, eventos, autoridad del mundo visible y réplicas independientes. | Comparar rendimiento y trayectorias equivalentes; reservar capacidad para la respuesta del servicio. |
+| GPU | Evaluar muchas redes y lotes numéricos; entrenamiento o variación poblacional según el algoritmo probado. | Incluir preparación, transferencias, sincronización y resultado en la medición. Repartir lotes según capacidad real; las memorias de dos GPU no forman automáticamente una sola reserva. |
+| RAM y disco | Experiencias, repertorios, estados experimentales, trazas causales y puntos de recuperación. | Memoria residente acotada, archivo verificable y procedencia de políticas; disponer de RAM no justifica crecimiento sin límite. |
+
+Genes o parámetros iniciales seleccionados, adaptación de una red durante la vida y recuerdos o enseñanza son estados distintos. Aprender no escribe automáticamente en el genoma; transmitir una técnica necesita una interacción con evidencia. Se deben comparar controles con aprendizaje deshabilitado, variación neutral y el selector actual, con presupuesto comparable y semillas reservadas antes del ajuste. Si un simulador vectorizado aproxima al autoritativo, la fidelidad y los resultados de las políticas se comprueban de nuevo en el motor real. Las réplicas de entrenamiento están aisladas: todos los clientes siguen mirando el mismo mundo persistente.
+
+El experimento debe registrar intervalos completos, extinciones, variación entre semillas, costes y efectos adversos, además de versiones de reglas y modelos. Una política sólo pasa al servicio después de validación independiente y una publicación identificable. Encontrar estrategias variadas sería un avance comprobable; no demostraría conciencia ni evolución abierta ilimitada. La comparación ecológica CPU/CUDA ya realizada mide otro recorrido de datos y no decide de antemano si estos lotes de aprendizaje tendrán ventaja.
+
 ## Reglas locales e imitación
 
 Lenia produce patrones complejos mediante reglas celulares locales. Es una referencia para investigar regularidades emergentes; este motor no implementa Lenia ni el Juego de la Vida, y esos patrones no demuestran conciencia. [Chan, Complex Systems, 2019](https://www.complex-systems.com/abstracts/v28_i03_a01/).

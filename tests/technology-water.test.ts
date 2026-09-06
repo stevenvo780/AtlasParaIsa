@@ -57,6 +57,24 @@ function balanced(world: World) {
   assertTechnology(world);
 }
 
+test('severe thirst drinks a paid carried reserve before searching an empty neighborhood', () => {
+  const lab = fixture(), { world, actor } = lab;
+  fill(lab, 4);
+  for (const tile of world.tiles) tile.drinkingWater = 0;
+  for (const structure of world.structures) structure.water = 0;
+  Object.assign(actor, { hunger: .2, thirst: .95, energy: .8, fatigue: 0, decisionAt: 0 });
+  const position = { x: actor.x, y: actor.y }, opening = containedWaterQuanta(actor);
+  const consumed = world.technology.water!.consumed;
+  stepWorld(world);
+  assert.equal(actor.action, 'drink');
+  assert.deepEqual({ x: actor.x, y: actor.y }, position);
+  assert.ok(actor.thirst < .95);
+  assert.ok(containedWaterQuanta(actor) < opening);
+  assert.ok(world.technology.water!.consumed > consumed);
+  assert.equal(actor.command, null);
+  balanced(world); assertWorld(world);
+});
+
 test('paid hollow properties fill from finite local water, retain fractional source stock and only actual drinking relieves thirst', () => {
   const lab = fixture(), { world, actor, item, tile } = lab;
   const recipeBefore = structuredClone(world.technology.recipes[0]), dry = structuredClone(item.composition), thirst = actor.thirst;

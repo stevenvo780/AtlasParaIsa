@@ -236,7 +236,7 @@ function choose(world: World, person: Person): void {
   if (portableWater) candidates.push({ action: 'drink', target: { x: person.x, y: person.y }, score: Math.max(0, person.thirst - 0.18) * 3.1,
     reason: 'Lleva agua en un objeto y puede beber su contenido finito aquí.' });
   if (water) candidates.push({ action: 'drink', target: water, score: Math.max(0, person.thirst - 0.18) * 3.1 - distance(person, water) * 0.015, reason: 'La sed orienta su camino hacia una reserva finita de agua dulce.' });
-  else if (person.thirst > 0.6) {
+  else if (!portableWater && person.thirst > 0.6) {
     // An empty perceptual neighborhood does not remove the bodily motive. Searching
     // uses the existing local exploration and movement costs; it reveals no distant
     // water and provides no thirst relief until a real reserve is reached and debited.

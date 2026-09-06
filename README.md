@@ -27,13 +27,13 @@ Abre **http://127.0.0.1:3000** e ingresa con esa contraseña. Usa exactamente es
 
 La CPU del servidor ejecuta la simulación y el guardado; cada navegador dibuja con sus recursos gráficos. El límite actual es **12 conexiones WebSocket simultáneas**, incluidas varias pestañas de una persona. La distribución del trabajo y los límites gráficos están en [CONSTRUCCION.md](docs/CONSTRUCCION.md#arquitectura-implementada).
 
-Cerrar todas las pestañas no detiene el mundo. Al detener el proceso y arrancarlo de nuevo, recupera el último estado confirmado y registra una pausa técnica; no inventa encuentros durante la caída.
+Cerrar todas las pestañas no detiene el mundo. Al detener el proceso y arrancarlo de nuevo **sin cambiar de versión**, recupera el último estado confirmado y registra una pausa técnica; no inventa encuentros durante la caída. La publicación de una nueva versión de pruebas tiene la [política de comienzo desde cero](#nuevas-versiones-de-pruebas) descrita abajo.
 
 ## Revisar desde la torre que aloja Docker
 
 Dentro de este contenedor Linux, `npm run preview:local` arranca la aplicación en dos sesiones de tmux propias, con `socat` como terminación HTTPS y un certificado local autofirmado. Requiere `tmux`, `socat` con OpenSSL y `openssl`, además de la compilación. El comando muestra la IP privada del contenedor y el puerto **3443**; el puerto interno del servidor es **3123**. `CARTA_PREVIEW_IP` permite elegir otra IPv4 privada asignada al contenedor.
 
-El navegador de la torre debe aceptar el certificado local. La contraseña se genera una vez y se conserva con permisos privados en `~/.local/state/atlas-para-isa-preview/password`, fuera del repositorio. Se consulta localmente; el comando no la imprime en los logs. El mundo de revisión vive en `~/.local/state/atlas-para-isa-preview/world` y se conserva entre arranques.
+El navegador de la torre debe aceptar el certificado local. La contraseña se genera una vez y se conserva con permisos privados en `~/.local/state/atlas-para-isa-preview/password`, fuera del repositorio. Se consulta localmente; el comando no la imprime en los logs. El mundo de revisión vive en `~/.local/state/atlas-para-isa-preview/world` y se conserva entre arranques de la misma versión. `preview:local` no publica por sí solo una versión nueva ni reinicia el mundo.
 
 ```sh
 npm run preview:local
@@ -75,7 +75,7 @@ npm run backup -- ./backups/carta-revision-01.sqlite
 
 El CLI abre el origen en modo de solo lectura, sin migrar el esquema de un servicio anterior. La copia contiene el mundo y sus registros operativos; debe permanecer privada. `access.scrypt` es un archivo separado y no forma parte de la copia SQLite. Copiar una base no acredita que su estado pueda migrarse: la validación del lector puede rechazarla. El defecto conservado en el archivo V4 está en [EVIDENCIA.md](docs/EVIDENCIA.md#servicio-privado-v5-y-archivo-v4).
 
-Para restaurar, usa un **directorio de datos nuevo**. Se valida la copia, se revocan sus sesiones y se conserva el mundo de origen:
+Para recuperar o inspeccionar una ejecución anterior, usa un **directorio de datos nuevo** y un build compatible. Se valida la copia, se revocan sus sesiones y se conserva el mundo de origen. Estos comandos no sirven para reemplazar el mundo de una nueva versión de pruebas con un estado viejo:
 
 ```sh
 CARTA_DATA_DIR=./data-restored npm run restore -- ./backups/carta-revision-01.sqlite
@@ -95,7 +95,17 @@ CARTA_DATA_DIR=./data-previous npm start
 
 Esta operación retira en la copia las entradas y los hechos posteriores al punto recuperado y revoca las sesiones. Conserva el archivo original. Si la base o el punto anterior no se pueden validar, el comando falla; no genera silenciosamente otro mundo.
 
+## Nuevas versiones de pruebas
+
+Por decisión de Steven, **durante esta etapa de desarrollo cada nueva versión de pruebas publicada empieza un mundo limpio en el paso cero**, aunque no cambien los números de reglas, protocolo o esquema. Antes de reemplazar la instancia se resguardan de forma privada y coherente su base, archivos e historia junto al build correspondiente. El mundo nuevo usa almacenamiento separado del archivo anterior y conserva la contraseña existente. No se restaura un estado viejo encima de él.
+
+La política se aplica al publicar una versión para probarla, no a cada edición, commit o compilación. El repositorio y su historial Git conservan los avances. Reconectar, cerrar el navegador o reiniciar el servicio sin cambiar de versión mantiene el mundo confirmado; una corrupción, un crash o un fallo de guardado no autorizan borrarlo para ocultar el problema. Los mundos archivados siguen disponibles para diagnóstico en copias separadas, sin mezclarlos con la ejecución nueva.
+
+La próxima publicación prevista es `7d8777c`, con mundo nuevo. **La instancia `bf6431b` todavía no ha sido reiniciada.** [EVIDENCIA](docs/EVIDENCIA.md) registrará la fuente publicada, el comienzo desde cero, el resguardo y la comprobación del acceso cuando se ejecuten. Esta política no añade un comando automático de publicación o reset.
+
 ## Actualizar conservando el mundo
+
+Esta sección describe la actualización anterior y la compatibilidad de los lectores. La publicación de nuevas versiones de pruebas sigue ahora la política de mundo limpio indicada arriba.
 
 La actualización de SQLite 3 a 4 se comprobó primero en una copia y después conservó el mundo, los archivos de acceso y sus cuatro sesiones. [EVIDENCIA](docs/EVIDENCIA.md#actualización-sin-reiniciar-el-mundo) enlaza preflight, activación, comprobación privada y archivo del build, base y script anteriores. Fue un procedimiento revisado para ese candidato, no un CLI general añadido al proyecto.
 

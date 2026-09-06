@@ -6,7 +6,7 @@ Estado de la revisión: **V5 `bf6431b` activo con SQLite 4**, conservando mundo,
 
 ## Arquitectura implementada
 
-Una aplicación web en TypeScript, una simulación en CPU y una base de datos local al servidor. Un mismo servicio sirve el frontend compilado, gestiona el acceso y ejecuta **un único mundo persistente compartido por todos sus clientes**. `createApp` conserva un estado del mundo y un temporizador de simulación, independientemente del número de navegadores. Un lease SQLite excluye otras instancias del servidor; no cubre CLI independientes ni escrituras SQL directas. La aplicación admite una sola instancia activa y [README](../README.md#actualizar-conservando-el-mundo) conserva el límite operativo de actualización.
+Una aplicación web en TypeScript, una simulación en CPU y una base de datos local al servidor. Un mismo servicio sirve el frontend compilado, gestiona el acceso y ejecuta **un único mundo persistente compartido por todos sus clientes**. `createApp` conserva un estado del mundo y un temporizador de simulación, independientemente del número de navegadores. Un lease SQLite excluye otras instancias del servidor; no cubre CLI independientes ni escrituras SQL directas. La aplicación admite una sola instancia activa y [README](../README.md#nuevas-versiones-de-pruebas) conserva la política de publicación durante el desarrollo y sus límites operativos.
 
 ```text
 Navegadores: cámara propia + WebGL2/Canvas 2D + controles y diario en DOM
@@ -107,6 +107,8 @@ Si más adelante hace falta variación lingüística, una generación opcional p
 
 ## Guardado, ausencia y errores
 
+Durante esta etapa, publicar una nueva versión de pruebas inicia otro mundo desde el paso cero, con base e historia anteriores resguardadas por separado y contraseña estable. La operación conserva la correspondencia entre cada archivo y su build, y separa los inventarios, regiones, identidades y recibos de cada ejecución. Esta política de publicación no es un fallback del lector ni un reset del repositorio: los arranques ordinarios de una misma versión conservan su mundo. El procedimiento y el estado de activación están en [README](../README.md#nuevas-versiones-de-pruebas) y [EVIDENCIA](EVIDENCIA.md).
+
 El estado, sus hechos correspondientes y las entradas aplicadas se guardan de forma coherente en transacciones. Una confirmación de gesto persistente solo se envía después de su guardado; repetir su identificador devuelve el mismo resultado, sin aplicar el efecto otra vez.
 
 El snapshot conserva celdas activas en tuplas JSON versionadas (`tiles-tuple-v1`) para evitar repetir veinte nombres de campo por celda, sin cuantización. El lector admite objetos y tuplas; los archivos de regiones conservan objetos. Se rechazan valores opcionales presentes nulos o no finitos antes de escribir. La copia del estado para cada transacción aprovecha que las celdas son planas; individuos, estructuras, proyectos, lotes y recuerdos mantienen copias independientes. Las pruebas verifican identidad, contadores monotónicos, recuperación y conservación material.
@@ -136,7 +138,7 @@ Resolver el catálogo no reconstruye un mundo mediante repetición física de re
 Hay dos ausencias diferentes:
 
 - **Isa cierra el navegador:** el servidor sigue avanzando y guardando. Su última visita sirve para seleccionar la crónica, no para calcular hambre o afecto.
-- **El servicio se detiene:** la primera versión recupera el último estado confirmado y retoma desde allí. El intervalo de caída queda registrado como pausa; no se inventan encuentros ni se simulan meses retrospectivos para disimularla.
+- **El servicio se detiene sin cambiar de versión:** recupera el último estado confirmado y retoma desde allí. El intervalo de caída queda registrado como pausa; no se inventan encuentros ni se simulan meses retrospectivos para disimularla.
 
 Esta política evita un sistema de recuperación temporal complejo. La entrega debe mostrar con honestidad las pausas técnicas y la reconexión. Si falla el guardado, no se confirman más cambios persistentes: se protege el último estado coherente y se informa la indisponibilidad.
 
@@ -179,6 +181,7 @@ Los controles causales de cuerpos, ecología, aprendizaje, genética, cooperaci�
 | Acceso y mundo compartido | Dos clientes comparten estado, cámaras independientes y órdenes idempotentes; sin sesión no hay lectura ni escritura y la revocación se aplica a conexiones y entradas pendientes. |
 | Navegador | Vistas antiguas descartadas, reconexión, fallecimiento sin controles inválidos, acciones animadas por hechos y comparación gráfica equivalente. |
 | Operación y fallos | Copia en destino nuevo, lectura sin migración del origen, reinicio y recuperación explícita; un estado inválido no crea otro mundo. |
+| Publicación de pruebas | Mundo inicial en el paso cero, versión identificada, archivos e historia anteriores resguardados y contraseña estable. No restaurar un estado viejo encima del nuevo; un reinicio sin cambio de versión recupera su último estado confirmado. |
 
 Las pruebas unitarias, navegador, soak con commit por paso y observación multisemilla responden preguntas distintas. Los comandos están en README y los resultados ejecutados en EVIDENCIA. Comparar varias semillas sin intervenciones permite descubrir fallos de continuidad que no aparecen en fixtures; no demuestra fiabilidad indefinida. Los hashes identifican el código observado, y cambiar reglas exige nueva evidencia.
 

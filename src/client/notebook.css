@@ -103,6 +103,14 @@
 .stat-card > small, .stats-scope, .stats-section-heading > span, .chart-axis { font-size: 10px; color: #637351; }
 .stats-note, .stats-empty, .stats-facts > span, .tile-facts > span, .distribution-row > div { font-size: 12px; color: #5e7051; }
 .stats-facts strong, .tile-facts strong { font-size: 13px; }
+.structure-reserves { display: grid; gap: 8px; margin: 14px 0 10px; }
+.structure-reserves > div { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 11px 12px; background: #e4eddd; border: 1px solid #cedcc2; border-radius: 7px; }
+.structure-reserves span, .structure-components, .structure-benefit { font-size: 12px; line-height: 1.6; color: #4c6248; }
+.structure-reserves strong { font-size: 19px; white-space: nowrap; color: #365c50; }
+.structure-reserves small { font-size: 12px; font-weight: 400; }
+.structure-components { margin: 10px 0; }
+.structure-benefit { display: flex; justify-content: space-between; gap: 12px; }
+.structure-history-note { margin-top: 4px; }
 .community-members .entity-link { margin-right: 8px; font-size: 12px; }
 .recent-evidence { border-bottom: 1px solid var(--line); margin-bottom: 20px; padding-bottom: 6px; }
 .recent-evidence .section-title { margin-bottom: 4px; }

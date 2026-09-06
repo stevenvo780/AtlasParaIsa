@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { Store } from '../src/server/store.js';
 import { decodeSnapshot, encodeSnapshot } from '../src/server/snapshot.js';
 import { assertWorld, cloneWorld, createWorld, migrateWorld, stepWorld, type World } from '../src/world/index.js';
-import { assertTechnology, researchTechnology, settleTechnologyEstate, technologyWorkCost, transferTechnologyItem, useTool,
+import { assertTechnology, projectTechnology, researchTechnology, settleTechnologyEstate, technologyWorkCost, transferTechnologyItem, useTool,
   type TechnologyProgram } from '../src/world/technology.js';
 import { assertWaterExecution, carriedTechnologyMass, containedWaterQuanta, drinkContainedWater, fillContainedWater,
   maintainContainedWater, payContainedWaterCarry, WATER_WORK_ENERGY } from '../src/world/technology-water.js';
@@ -305,4 +305,58 @@ test('checksum-consistent removal of a committed spill from snapshot and archive
     store.db.prepare('UPDATE technology_executions SET body=?,digest=? WHERE id=?').run(receipt, digest(receipt), event.id);
     assert.throws(() => store.load(), /contained water/);
   } finally { store.close(); }
+});
+
+test('the projection supplies authoritative liquid capacity and amount separately from structural mass', () => {
+  const lab = fixture(), initial = projectTechnology(lab.world).items[0]!;
+  assert.equal(initial.water!.quanta, 0); assert.equal(initial.water!.quantaPerUnit, 50_000);
+  assert.equal(initial.water!.capacityQuanta, containerAffordance(lab.item).capacityQuanta);
+  fill(lab); const before = structuredClone(lab.world), projected = projectTechnology(lab.world).items[0]!;
+  assert.equal(projected.mass, lab.item.mass); assert.equal(projected.water!.quanta, lab.item.contents!.water);
+  assert.equal(projected.water!.leakageNumerator, containerAffordance(lab.item).leakageNumerator);
+  projected.water!.quanta = 0; assert.deepEqual(lab.world, before);
+  const legacy = fixture(); delete legacy.world.technology.water; delete legacy.world.technology.checkpoint!.water;
+  assert.equal(projectTechnology(legacy.world).items[0]!.water, undefined, 'old projection omits the datum instead of asserting empty');
+});
+
+test('retiming real receipts cannot allocate two handling actions to the same actor in one tick', () => {
+  for (const second of ['fill', 'drink'] as const) {
+    const lab = fixture(); fill(lab); nextTick(lab.world);
+    if (second === 'fill') fillContainedWater(lab.world, lab.actor, lab.item.id);
+    else drinkContainedWater(lab.world, lab.actor);
+    balanced(lab.world);
+    const events = lab.world.technology.history.filter(e => e.water?.action === 'fill' || e.water?.action === 'drink');
+    events[0]!.tick = events[1]!.tick;
+    assert.throws(() => assertTechnology(lab.world), /contained water/);
+  }
+});
+
+test('paired whole-object transfers cannot rename the contained liquid into a different vessel', () => {
+  const lab = fixture(), spare = paid(lab.world, hollow), receiver = lab.world.people[3]!;
+  receiver.x = lab.actor.x; receiver.y = lab.actor.y;
+  assert.equal(transferTechnologyItem(lab.world, lab.actor, receiver, spare.id), true);
+  fill(lab);
+  assert.equal(transferTechnologyItem(lab.world, lab.actor, receiver, lab.item.id), true); balanced(lab.world);
+  const received = lab.world.technology.history.at(-1)!;
+  received.water!.closing[0]!.itemId = spare.id;
+  spare.contents = lab.item.contents; delete lab.item.contents;
+  assert.throws(() => assertTechnology(lab.world), /contained water/);
+});
+
+test('a dry gift cannot act as an uncharged pour between two vessels that stay with its sender', () => {
+  const lab = fixture(), spare = paid(lab.world, hollow), gift = paid(lab.world, hollow), receiver = lab.world.people[3]!;
+  receiver.x = lab.actor.x; receiver.y = lab.actor.y;
+  fill(lab); assert.equal(transferTechnologyItem(lab.world, lab.actor, receiver, gift.id), true); balanced(lab.world);
+  const sent = lab.world.technology.history.at(-2)!;
+  assert.equal(sent.water!.sent, 0); assert.equal(sent.water!.received, 0);
+  sent.water!.closing[0]!.itemId = spare.id; spare.contents = lab.item.contents; delete lab.item.contents;
+  assert.throws(() => assertTechnology(lab.world), /contained water/);
+});
+
+test('a statistics overflow cannot consume water or hydrate the actor without its receipt', () => {
+  const lab = fixture(); fill(lab); nextTick(lab.world); maintainContainedWater(lab.world, lab.actor);
+  lab.world.technology.recipes[0]!.uses = Number.MAX_SAFE_INTEGER;
+  const before = structuredClone(lab.world);
+  assert.throws(() => drinkContainedWater(lab.world, lab.actor), /statistics|integer|overflow/);
+  assert.deepEqual(lab.world, before);
 });

@@ -14,7 +14,7 @@ export const WATER_WORK_FATIGUE = 0.00032;
 type WaterActor = TechnologyActor & BodyState;
 const integer = (n: unknown): n is number => typeof n === 'number' && Number.isSafeInteger(n) && n >= 0;
 const sum = (stock: readonly WaterStock[]): number => stock.reduce((n, line) => n + line.quanta, 0);
-const fail = (): never => { throw new Error('Invalid contained water state or receipt.'); };
+function fail(): never { throw new Error('Invalid contained water state or receipt.'); }
 const keys = (value: unknown, required: string[], optional: string[] = []): value is Record<string, unknown> =>
   !!value && typeof value === 'object' && !Array.isArray(value) && required.every(k => Object.hasOwn(value, k))
   && Object.keys(value).every(k => required.includes(k) || optional.includes(k));
@@ -81,10 +81,11 @@ export function assertWaterExecution(event: Pick<TechnologyExecution, 'kind' | '
   for (const id of new Set([...before.keys(), ...after.keys()])) {
     const change = (after.get(id) ?? 0) - (before.get(id) ?? 0);
     increases += Number(change > 0); decreases += Number(change < 0);
+    if (w.action === 'transfer' && change !== 0 && before.has(id) && after.has(id)) fail(); // Whole objects move; transfer cannot pour between vessels.
   }
   if (w.action === 'fill' && (increases !== 1 || decreases) || w.action === 'drink' && (decreases !== 1 || increases)
     || ['leak', 'spill'].includes(w.action) && increases || w.action === 'carry' && (increases || decreases)
-    || w.action === 'transfer' && (w.sent && increases || w.received && decreases)) fail();
+    || w.action === 'transfer' && (w.sent && increases || w.received && decreases || !w.sent && !w.received && (increases || decreases))) fail();
   if (w.action === 'spill' && !['use', 'research', 'craft', 'recycle', 'estate'].includes(event.kind)) fail();
 }
 export function assertTechnologyWater(host: TechnologyHost): void {
@@ -113,15 +114,30 @@ export function assertTechnologyWater(host: TechnologyHost): void {
     .map(item => ({ itemId: item.id, quanta: item.contents!.water })).sort((a, b) => a.itemId.localeCompare(b.itemId))]));
   const after = host.technology.history.filter(e => Number(e.id.slice(8)) > checkpoint.executionCounter);
   const nested = new Set(after.flatMap(e => e.nestedExecutionIds ?? [])), totals = { ...(checkpoint.water ?? emptyWaterLedger()) };
+  const handling = new Set<string>(), carrying = new Set<string>(), transfers = new Map<string, TechnologyExecution[]>();
   const same = (a: WaterStock[], b: WaterStock[]) => JSON.stringify(a) === JSON.stringify([...b].sort((a, b) => a.itemId.localeCompare(b.itemId)));
   for (const event of after) if (!nested.has(event.id)) {
     if (!event.water) continue;
     assertWaterExecution(event);
+    const action = event.water.action, key = `${event.actorId}:${event.tick}`;
+    const budget = action === 'fill' || action === 'drink' ? handling : action === 'carry' ? carrying : undefined;
+    if (budget) { if (budget.has(key)) fail(); budget.add(key); }
+    if (action === 'transfer' && (event.water.sent || event.water.received)) {
+      const pair = transfers.get(event.transferId!) ?? []; pair.push(event); transfers.set(event.transferId!, pair);
+    }
     const before = stocks.get(event.actorId); if (!before || !same(before, event.water.opening)) fail();
     stocks.set(event.actorId, [...event.water.closing].sort((a, b) => a.itemId.localeCompare(b.itemId)));
     totals.filled = safe(totals.filled + event.water.filled); totals.consumed = safe(totals.consumed + event.water.consumed);
     totals.environmentalLoss = safe(totals.environmentalLoss + event.water.lost);
     if (event.kind === 'water') { totals.work = safe(totals.work + event.work); totals.energy += event.energy; }
+  }
+  for (const pair of transfers.values()) {
+    if (pair.length !== 2) fail();
+    const sent = pair.find(e => e.water!.sent > 0), received = pair.find(e => e.water!.received > 0);
+    if (!sent || !received || sent.tick !== received.tick || sent.actorId !== received.counterpartyId || sent.counterpartyId !== received.actorId) fail();
+    const removed = sent.water!.opening.filter(line => !sent.water!.closing.some(other => other.itemId === line.itemId));
+    const added = received.water!.closing.filter(line => !received.water!.opening.some(other => other.itemId === line.itemId));
+    if (!same(removed, added)) fail();
   }
   for (const actor of host.people) if (!same(stocks.get(actor.id)!, containedWaterStock(actor))) fail();
   if (totals.filled !== ledger.filled || totals.consumed !== ledger.consumed || totals.environmentalLoss !== ledger.environmentalLoss
@@ -137,14 +153,17 @@ function room(host: TechnologyHost): void {
   if (!integer(host.tick) || host.technology.executionCounter >= Number.MAX_SAFE_INTEGER
     || (host.technology.journal?.pending.length ?? 0) >= MAX_PENDING_TECHNOLOGY_EXECUTIONS) fail();
 }
-function account(host: TechnologyHost, delta: Partial<Pick<WaterLedger, 'filled' | 'consumed' | 'environmentalLoss' | 'work' | 'energy'>>): void {
+function nextAccount(host: TechnologyHost, delta: Partial<Pick<WaterLedger, 'filled' | 'consumed' | 'environmentalLoss' | 'work' | 'energy'>>): WaterLedger {
   const ledger = host.technology.water ?? emptyWaterLedger(), next = { ...ledger };
   for (const [key, amount] of Object.entries(delta) as [keyof typeof delta, number][]) {
     const value = next[key] + amount;
     if (!Number.isFinite(value) || value < 0 || value > Number.MAX_SAFE_INTEGER || key !== 'energy' && !integer(value)) fail();
     next[key] = value;
   }
-  host.technology.water = next;
+  return next;
+}
+function account(host: TechnologyHost, delta: Partial<Pick<WaterLedger, 'filled' | 'consumed' | 'environmentalLoss' | 'work' | 'energy'>>): void {
+  host.technology.water = nextAccount(host, delta);
 }
 export function waterEnvelope(actor: TechnologyActor, opening: WaterStock[], action: WaterExecution['action'],
   delta: Partial<Pick<WaterExecution, 'filled' | 'consumed' | 'lost' | 'received' | 'sent' | 'source'>> = {}): WaterExecution | undefined {
@@ -223,21 +242,27 @@ export function drinkContainedWater(host: TechnologyHost, actor: WaterActor, req
     requestedQuanta: requested, carryFreeQuanta: requested, elapsedTicks: 1, workAvailable: 1 });
   if (!flow.movedQuanta) return 0;
   room(host); const opening = containedWaterStock(actor), thirst = actor.thirst, energy = flow.workSpent * WATER_WORK_ENERGY;
-  account(host, { consumed: flow.movedQuanta, work: flow.workSpent, energy });
-  item.contents.water = flow.sourceWater; if (!item.contents.water) item.contents.leakRemainder = 0;
-  actor.technology.waterActionAt = host.tick;
-  exertBody(actor, { energy, fatigue: flow.workSpent * WATER_WORK_FATIGUE });
-  hydrateBody(actor, flow.movedQuanta / WATER_QUANTA_PER_UNIT);
-  const benefit = thirst - actor.thirst;
+  const ledger = nextAccount(host, { consumed: flow.movedQuanta, work: flow.workSpent, energy });
+  const body = { hunger: actor.hunger, thirst, energy: actor.energy, fatigue: actor.fatigue };
+  exertBody(body, { energy, fatigue: flow.workSpent * WATER_WORK_FATIGUE });
+  hydrateBody(body, flow.movedQuanta / WATER_QUANTA_PER_UNIT);
+  const benefit = thirst - body.thirst;
+  // Archive resolution or statistics overflow must fail before the consumption
+  // debit or bodily relief. All remaining assignments have been checked above.
   if (item.recipeId) {
     updateTechnologyRecipeStats(host, item.recipeId, { uses: 1, utility: benefit }); host.technology.ledger.toolUses++;
     touchKnownRecipe(actor.technology, item.recipeId);
   }
+  host.technology.water = ledger;
+  item.contents.water = flow.sourceWater; if (!item.contents.water) item.contents.leakRemainder = 0;
+  actor.technology.waterActionAt = host.tick;
+  actor.energy = body.energy; actor.fatigue = body.fatigue; actor.thirst = body.thirst;
   record(host, actor, waterEnvelope(actor, opening, 'drink', { consumed: flow.movedQuanta })!, flow.workSpent, energy, benefit, item.recipeId);
   return flow.movedQuanta;
 }
 /** One actual movement can pay this payload cost; an exhausted carrier cannot move it for free. */
 export function payContainedWaterCarry(host: TechnologyHost, actor: WaterActor): boolean {
+  if (!host.people.includes(actor)) return false;
   const water = containedWaterQuanta(actor); if (!water) return true;
   if (actor.technology.waterCarryAt === host.tick) return false;
   const energy = water / 1000 * 0.0008, fatigue = water / 1000 * 0.0007;

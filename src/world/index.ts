@@ -231,6 +231,13 @@ function choose(world: World, person: Person): void {
   });
   const water = nearbyTiles.filter(t => waterAvailable(world,t) > 0.005).sort((a, b) => distance(person, a) - distance(person, b))[0];
   if (water) candidates.push({ action: 'drink', target: water, score: Math.max(0, person.thirst - 0.18) * 3.1 - distance(person, water) * 0.015, reason: 'La sed orienta su camino hacia una reserva finita de agua dulce.' });
+  else if (person.thirst > 0.6) {
+    // An empty perceptual neighborhood does not remove the bodily motive. Searching
+    // uses the existing local exploration and movement costs; it reveals no distant
+    // water and provides no thirst relief until a real reserve is reached and debited.
+    candidates[0]!.score = Math.max(candidates[0]!.score, (person.thirst - 0.18) * 3.1);
+    candidates[0]!.reason = 'La sed persiste y no percibe una reserva; recorre el entorno cercano para buscar agua.';
+  }
   const prey = nearbyTiles.filter(t => (t.fauna ?? 0) >= 1).sort((a, b) => distance(person, a) - distance(person, b))[0];
   if (prey && person.inventory < 0.18) candidates.push({ action: 'hunt', target: prey, score: Math.max(0, person.hunger - 0.18) * 2 + person.traits.industriousness * 0.18 + (food && food.food > 0.2 ? 0 : 0.2) - (person.hunger < 0.8 && (prey.fauna ?? 0) <= 1 ? person.culture.stewardship * 0.15 : 0), reason: 'Percibe fauna; cazar cuesta trabajo, retira un animal y proporciona alimento limitado.' });
   const help = cooperationOpportunity(world, person);

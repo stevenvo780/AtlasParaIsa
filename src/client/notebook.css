@@ -183,3 +183,21 @@
   .game-shell .game-drawer .person-command-bar { position: static; }
 }
 @media (prefers-reduced-motion: reduce) { .game-shell * { scroll-behavior: auto !important; animation: none !important; transition: none !important; } }
+.game-shell .carried-water {
+  padding: 8px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #365f68;
+  background: #e8f0ed;
+  border-color: #c2d6d2;
+}
+.carried-water > div { gap: 8px; }
+.carried-water strong { color: #244f59; font-size: 11px; white-space: normal; overflow-wrap: anywhere; }
+.carried-water > div strong { text-align: right; }
+.carried-water p { margin: 0; font-size: 11px; line-height: 1.5; }
+.carried-water > p:first-child { margin-bottom: 6px; }
+.carried-water > p:last-child { margin-top: 6px; }
+.carried-water meter { margin-top: 8px; background: #c5d8d4; }
+.carried-water meter::-webkit-meter-bar { background: #c5d8d4; }
+.carried-water meter::-webkit-meter-optimum-value { background: #547e89; }
+.carried-water meter::-moz-meter-bar { background: #547e89; }

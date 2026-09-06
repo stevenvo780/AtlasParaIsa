@@ -7,6 +7,39 @@ const operations: Record<string,string> = {combine:'Unir',separate:'Separar',for
 const capacities: Record<string,string> = {cutting:'Cortar',storage:'Contener',insulation:'Aislar',cultivation:'Cultivar',binding:'Unir',abrasion:'Pulir'};
 const sourceName: Record<string,string> = {wood:'madera',stone:'piedra',water:'agua',raw:'materia prima',product:'producto anterior',residue:'residuo'};
 const shapes: Record<string,string> = {edge:'filo',hollow:'hueco',sheet:'lámina',rod:'vara',granular:'granos'};
+
+/** Optional authoritative projection. Older views omit it; absence is not zero.
+ * Geometry and leakage are calculated by the server, never by this renderer. */
+interface ProjectedWater {
+  version: 1; quanta: number; capacityQuanta: number; quantaPerUnit: 50000;
+  leakageNumerator: number; leakageDenominator: 1000000;
+}
+function projectedWater(value: unknown): value is ProjectedWater {
+  if (!value || typeof value !== 'object') return false;
+  const water = value as Partial<ProjectedWater>;
+  return water.version === 1 && water.quantaPerUnit === 50000 && water.leakageDenominator === 1000000
+    && Number.isSafeInteger(water.quanta) && water.quanta! >= 0
+    && Number.isSafeInteger(water.capacityQuanta) && water.capacityQuanta! >= water.quanta!
+    && Number.isSafeInteger(water.leakageNumerator) && water.leakageNumerator! >= 0
+    && water.leakageNumerator! <= water.leakageDenominator;
+}
+export function carriedWaterCard(item: TechnologyView['items'][number]): string {
+  const water: unknown = (item as { water?: unknown }).water;
+  if (water === undefined) return '<p class="drawer-note" data-water-state="unavailable">Contenido de agua no recibido en esta vista.</p>';
+  if (!projectedWater(water)) return '<p class="drawer-note" data-water-state="unavailable">Datos de agua no disponibles en esta vista.</p>';
+  if (!water.capacityQuanta) return '<p class="drawer-note" data-water-state="incapable">Este objeto no retiene agua transportada.</p>';
+  const state = water.quanta === 0 ? 'empty' : water.quanta === water.capacityQuanta ? 'full' : 'partial';
+  const label = state === 'empty' ? 'Vacío' : state === 'full' ? 'Lleno' : 'Con agua';
+  const amount = n(water.quanta / water.quantaPerUnit, 5), capacity = n(water.capacityQuanta / water.quantaPerUnit, 5);
+  const rate = n(100 * water.leakageNumerator / water.leakageDenominator, 4);
+  return `<section class="food-reserve carried-water" data-water-item="${esc(item.id)}" data-water-state="${state}" aria-label="Agua transportada · ${label}">
+    <p><strong>Agua transportada · ${label}</strong></p>
+    <div><span>Contenido</span><strong>${amount} u. de agua</strong></div>
+    <div><span>Capacidad actual</span><strong>${capacity} u. de agua</strong></div>
+    <meter min="0" max="${water.capacityQuanta}" value="${water.quanta}" aria-label="Agua transportada: ${amount} de ${capacity} unidades">${amount} / ${capacity}</meter>
+    <p>Fuga: ${rate}% por paso. Tasa del recipiente, no pérdida observada.</p>
+  </section>`;
+}
 export function recipeLabel(recipe: TechnologyRecipe): string {
   const serial=recipe.id.replace('recipe-','');
   return recipe.name===`${recipe.program.steps.map(step=>step.op).join('·').slice(0,70)} ${serial}`

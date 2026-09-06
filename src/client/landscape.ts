@@ -1165,7 +1165,8 @@ export class Landscape {
     // With reduced motion, a stationary snapshot costs one cached scene composite per frame.
     const pose = people.some(person => person.moving) || animals.some(animal => animal.moving) ? t : this.reduceMotion ? 0 : Math.floor(t * 8);
     const selectedBody = this.selection?.kind === 'animal' ? this.selection.id : '';
-    const sceneKey = `${this.sceneRevision}:${this.layer}:${x0}:${x1}:${y0}:${y1}:${pose}:${selectedBody}`;
+    const selectedTile = this.selection?.kind === 'tile' ? this.selection : null;
+    const sceneKey = `${this.sceneRevision}:${this.layer}:${x0}:${x1}:${y0}:${y1}:${pose}:${selectedBody}:${selectedTile?.x}:${selectedTile?.y}`;
     if (sceneKey === this.sceneKey) return;
     this.sceneKey = sceneKey;
     g.clearRect(0, 0, this.scene.width, this.scene.height);
@@ -1238,10 +1239,21 @@ export class Landscape {
       for (const sprite of sprites) if (this.effects.shadows < VISUAL_BUDGET.shadows && sprite.kind === SpriteKind.Tree && sprite.seed % 13 === 0) this.drawCastShadow(g, sprite);
     }
     const inspectedAnimal = selectedBody ? animals.find(a=>a.view.id===selectedBody) : undefined;
+    const inspectedStructures = selectedTile ? (world.structures ?? []).filter(s => s.x === selectedTile.x && s.y === selectedTile.y) : [];
+    const siteTile = selectedTile ? this.tileAt(selectedTile.x, selectedTile.y) : undefined;
+    const inspectedWater = siteTile && !inspectedStructures.length && (siteTile.terrain === 'water'
+      || (siteTile.drinkingWater ?? 0) > 0 && (siteTile.feature === 'pool' || siteTile.feature === 'spring')) ? siteTile : undefined;
+    const site = selectedTile && (inspectedStructures.length || inspectedWater) ? {
+      left: selectedTile.x * ART + (inspectedStructures.length ? -8 : 0),
+      right: selectedTile.x * ART + (inspectedStructures.length ? 24 : 16),
+      top: selectedTile.y * ART + (inspectedStructures.length ? -16 : 0), bottom: selectedTile.y * ART + 16,
+      foot: selectedTile.y * ART + 13,
+    } : null;
     const revealedBodies = [...people, ...(inspectedAnimal ? [inspectedAnimal] : [])];
     const coveredPeople = new Set<string>();
     const behind = (sprite: Sprite, height: number, width: number) => {
-      let intersects = false;
+      let intersects = !!site && sprite.ay > site.foot && sprite.ax + width / 2 > site.left
+        && sprite.ax - width / 2 < site.right && sprite.ay > site.top && sprite.ay - height < site.bottom;
       for (const body of revealedBodies) {
         const x = body.x * ART + 8, foot = body.y * ART + 12;
         if (foot < sprite.ay && Math.abs(x - sprite.ax) < width / 2 + 4
@@ -1266,6 +1278,18 @@ export class Landscape {
       }
       else if (s.tile) this.drawFauna(g, s.tile, t);
       else if (s.person) this.drawPerson(g, s.person, t);
+    }
+    // A selected facility or water patch is a local cutaway, like the existing body reveal.
+    // Redraw received material within its footprint; no state, roots or hit targets change.
+    if (site) {
+      g.save(); g.beginPath(); g.rect(site.left, site.top, site.right - site.left, site.bottom - site.top); g.clip();
+      if (inspectedWater) { this.bakeTileBase(g, inspectedWater.x, inspectedWater.y); this.bakeFeatures(g, inspectedWater); }
+      for (const structure of inspectedStructures) this.drawStructure(g, structure, t);
+      // Preserve bodies in front of the inspected object after the local reveal.
+      for (const s of sprites) if (s.ay >= site.foot) {
+        if (s.person) this.drawPerson(g, s.person, t); else if (s.animal) this.drawAnimal(g, s.animal, t);
+      }
+      g.restore();
     }
     this.bodyCutaways = coveredPeople.size;
     // Restore real bodies within a local cutaway. Contrast must not depend on selecting a person.

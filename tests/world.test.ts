@@ -155,7 +155,9 @@ function cultureScene(): World {
   donor.generosity = 0.98; donor.hunger = 0.05; donor.inventory = 0.25;
   observer.generosity = 0; observer.curiosity = 0; observer.hunger = 0.05;
   observer.action = 'rest'; observer.decisionAt = 65; observer.inventory = 0.25;
-  recipient.hunger = 0.98; recipient.inventory = 0; recipient.fatigue = 0.95;
+  // Moderate hunger still makes real help useful, while exhaustion permits a
+  // nearby pause. Severe deprivation would correctly send it searching instead.
+  recipient.hunger = 0.75; recipient.inventory = 0; recipient.fatigue = 0.95;
   return world;
 }
 
@@ -210,14 +212,17 @@ test('two actual observations retain provenance after their chronicle events are
   assertWorld(world);
 });
 
-test('hungry bodies cannot recover activity energy without food by resting indefinitely', () => {
+test('hungry bodies cannot recover activity energy without food regardless of their chosen action', () => {
   const world = scene();
   for (const tile of world.tiles) tile.food = 0;
   const s = world.people[0]!;
   s.hunger = 1; s.inventory = 0; s.energy = 0.2; s.fatigue = 0.9;
   const before = s.energy;
-  run(world, 100);
-  assert.equal(s.action, 'rest');
+  for (let tick = 0; tick < 100; tick++) {
+    const previous = s.energy;
+    stepWorld(world);
+    assert.ok(s.energy <= previous, 'neither rest nor searching can replenish readiness without a meal');
+  }
   assert.ok(s.energy < before);
   assert.equal(s.hunger, 1);
 });

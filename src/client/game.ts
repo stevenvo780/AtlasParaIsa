@@ -260,7 +260,7 @@ function renderInspector(): void {
       replacePersonCard(legacy ? `<p class="game-reason">Esta vida terminó en el paso ${esc(legacy.diedAt)}.</p><p class="drawer-note">${esc(deathCauses[legacy.cause] ?? legacy.cause)}</p><p class="drawer-note">Generación ${esc(legacy.generation)}. Su historia permanece en la crónica del mundo.</p>` : '<p class="drawer-note">Este habitante ya no aparece en el estado recibido.</p>');
       if (following) { following=false; landscape?.follow(null); } control='inspect'; inspectorSignature='';return;
     }
-    const signature = JSON.stringify([p, world.events.map(event => event.id), world.communities, world.blueprints, world.technology?.items.filter(item=>item.ownerId===p.id)]); if (signature === inspectorSignature) return; inspectorSignature = signature;
+    const signature = JSON.stringify([p, world.events.map(event => event.id), world.communities, world.blueprints, world.technology?.items.filter(item=>item.ownerId===p.id), world.technology?.knowledge?.find(entry=>entry.actorId===p.id), world.technology?.recipes]); if (signature === inspectorSignature) return; inspectorSignature = signature;
     el('inspector-title').textContent = p.name; el('person-controls').hidden = false; el('person-primary').hidden = false; const source = world.memories.find(m => m.text === p.recentMemory)?.source;
     const sections = inheritedAndLearned(p, world);
     const color = /^#[\da-f]{3,8}$/i.test(p.color) ? p.color : '#a4805b';

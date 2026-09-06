@@ -114,11 +114,20 @@ test('a failed SQL commit leaves cold inventories, weather and metadata pending 
   assert.ok(result.work > 0); if (result.ready) stepWorld(draft, [], lab.store.context);
   const pending = structuredClone(draft.ecology), row = lab.store.db.prepare('SELECT body,digest FROM snapshots WHERE slot=0').get();
   const archived = lab.store.db.prepare('SELECT * FROM ecology_heads ORDER BY key').all();
-  lab.store.db.exec("CREATE TRIGGER ecology_save_failure BEFORE INSERT ON snapshots BEGIN SELECT RAISE(ABORT,'forced ecology rollback'); END;");
+  const exec = lab.store.db.exec.bind(lab.store.db); let stagedWrites = 0;
+  lab.store.db.exec = sql => {
+    if (sql === 'COMMIT') {
+      assert.notDeepEqual(lab.store.db.prepare('SELECT body,digest FROM snapshots WHERE slot=0').get(), row);
+      assert.notDeepEqual(lab.store.db.prepare('SELECT * FROM ecology_heads ORDER BY key').all(), archived);
+      stagedWrites++; throw new Error('forced ecology rollback');
+    }
+    return exec(sql);
+  };
   assert.throws(() => lab.store.save(draft), /forced ecology rollback/);
+  assert.equal(stagedWrites, 1); lab.store.db.exec = exec;
   assert.deepEqual(draft.ecology, pending); assert.deepEqual(lab.store.db.prepare('SELECT body,digest FROM snapshots WHERE slot=0').get(), row);
   assert.deepEqual(lab.store.db.prepare('SELECT * FROM ecology_heads ORDER BY key').all(), archived);
-  lab.store.db.exec('DROP TRIGGER ecology_save_failure'); lab.store.save(draft);
+  lab.store.save(draft);
   assert.equal(draft.ecology!.pending.length, 0); assert.deepEqual(lab.store.load()!.world, draft);
 });
 

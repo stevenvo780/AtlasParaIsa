@@ -9,7 +9,7 @@ import { assertEcologyState, assertRegionKey, ecologyStateForCommit, type Ecolog
 const digest = (body: string) => createHash('sha256').update(body).digest('hex');
 const fail = (): never => { throw new Error('Ecology archive integrity or retained revision mismatch. Explicit recovery required.'); };
 type Row = { key: string; tick: number; body: string | null; digest: string | null };
-type Header = { revision: number; tick: number; state: EcologyState };
+type Header = { revision: number; tick: number; eventCounter: number; state: EcologyState };
 const TABLES = {
   ecology_headers: ['slot', 'revision', 'tick', 'body', 'digest'],
   ecology_heads: ['key', 'tick', 'body', 'digest'],
@@ -52,7 +52,8 @@ export class EcologyArchive implements EcologyReader {
     const header: Header = JSON.parse(row.body);
     if (!header || header.revision !== row.revision || header.tick !== row.tick || !header.state
       || header.state.revision !== header.revision || header.state.committedRevision !== header.revision
-      || header.state.pending.length || header.state.pendingClimate.length || !Number.isSafeInteger(header.tick) || header.tick < 0) fail();
+      || header.state.pending.length || header.state.pendingClimate.length || !Array.isArray(header.state.pendingEvents) || header.state.pendingEvents.length
+      || !Number.isSafeInteger(header.tick) || header.tick < 0 || !Number.isSafeInteger(header.eventCounter) || header.eventCounter < 0) fail();
     return header;
   }
   private slot(revision: number): 0 | 1 | null {
@@ -89,9 +90,21 @@ export class EcologyArchive implements EcologyReader {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 512 || !Array.isArray(excluded) || excluded.length > 1024) fail();
     excluded.forEach(assertRegionKey); if (cursor !== null) assertRegionKey(cursor);
     const slot = this.slot(revision); if (slot === null) return [];
-    // SQL bounds the result; no lifetime catalogue is materialized in JS.
-    const rows = this.db.prepare(`SELECT key,tick FROM (${this.view(slot)}) WHERE key NOT IN (SELECT value FROM json_each(?))
-      ORDER BY tick,CASE WHEN ? IS NULL OR key>? THEN 0 ELSE 1 END,key LIMIT ?`).all(JSON.stringify(excluded), cursor, cursor, limit) as { key: string; tick: number }[];
+    // Read indexed time groups and rotate their key range. ORDER BY a computed
+    // cursor expression would sort a whole equal-time population before LIMIT.
+    // Each range is bounded by the requested result and the excluded queue.
+    const rows: {key:string;tick:number}[] = [], excludedJson = JSON.stringify(excluded);
+    let afterTick = -1;
+    while (rows.length < limit) {
+      const first = this.db.prepare(`SELECT tick FROM (${this.view(slot)}) WHERE tick>? AND key NOT IN (SELECT value FROM json_each(?))
+        ORDER BY tick,key LIMIT 1`).get(afterTick, excludedJson) as {tick:number}|undefined;
+      if (!first) break;
+      rows.push(...this.db.prepare(`SELECT key,tick FROM (${this.view(slot)}) WHERE tick=? AND (? IS NULL OR key>?)
+        AND key NOT IN (SELECT value FROM json_each(?)) ORDER BY key LIMIT ?`).all(first.tick,cursor,cursor,excludedJson,limit-rows.length) as {key:string;tick:number}[]);
+      if (cursor !== null && rows.length < limit) rows.push(...this.db.prepare(`SELECT key,tick FROM (${this.view(slot)}) WHERE tick=? AND key<=?
+        AND key NOT IN (SELECT value FROM json_each(?)) ORDER BY key LIMIT ?`).all(first.tick,cursor,excludedJson,limit-rows.length) as {key:string;tick:number}[]);
+      afterTick = first.tick;
+    }
     return rows.map(row => { assertRegionKey(row.key); return { key: row.key, asOfTick: row.tick }; });
   }
   summary(revision: number): EcologySummary {
@@ -109,8 +122,9 @@ export class EcologyArchive implements EcologyReader {
     assertEcologyState(world);
     if (!world.ecology) { if (this.slot(0) !== null) fail(); return; }
     const state = world.ecology, slot = this.slot(state.committedRevision);
-    if (slot === null || state.pending.length || state.pendingClimate.length || state.revision !== state.committedRevision
-      || JSON.stringify(this.header(slot)!.state) !== JSON.stringify(state) || this.header(slot)!.tick !== world.tick) fail();
+    if (slot === null || state.pending.length || state.pendingClimate.length || state.pendingEvents.length || state.revision !== state.committedRevision
+      || JSON.stringify(this.header(slot)!.state) !== JSON.stringify(state) || this.header(slot)!.tick !== world.tick
+      || this.header(slot)!.eventCounter !== world.eventCounter) fail();
     let regions = 0, sumTicks = 0, oldestTick: number | null = null;
     let identityCount = 0;
     for (const row of this.db.prepare(this.view(slot!)).iterate() as Iterable<Row>) {
@@ -147,12 +161,18 @@ export class EcologyArchive implements EcologyReader {
       ) GROUP BY id HAVING COUNT(*)>1 LIMIT 1`).get()) fail();
     if (JSON.stringify({ regions, sumTicks, oldestTick }) !== JSON.stringify(state.summary)) fail();
     // Read chronologically without retaining lifetime weather in the snapshot.
-    let expected = 0;
+    let expected = 0, latestWeather: string | undefined;
     for (const row of this.db.prepare('SELECT tick,weather,digest FROM ecology_climate WHERE tick<=? ORDER BY tick').iterate(world.tick) as Iterable<{tick:number;weather:string;digest:string}>) {
       if (row.tick !== expected || !['clear','rain'].includes(row.weather) || digest(JSON.stringify([row.tick,row.weather])) !== row.digest) fail();
       expected += 600;
+      latestWeather = row.weather;
     }
-    if (expected !== Math.floor(world.tick / 600) * 600 + 600) fail();
+    if (expected !== Math.floor(world.tick / 600) * 600 + 600 || latestWeather !== world.weather) fail();
+    for (const event of world.events) {
+      const row = this.db.prepare('SELECT tick,body FROM events WHERE id=?').get(event.id) as {tick:number;body:string}|undefined;
+      if (!row || row.tick !== event.tick || row.body !== JSON.stringify(event)) fail();
+    }
+    if (slot === 0 && this.db.prepare('SELECT 1 FROM events WHERE CAST(substr(id,2) AS INTEGER)>? LIMIT 1').get(world.eventCounter)) fail();
   }
   assertPrevious(world: World): void {
     if (world.ecology) { this.assertWorld(world); return; }
@@ -180,6 +200,12 @@ export class EcologyArchive implements EcologyReader {
       && JSON.stringify(state) === JSON.stringify(previous.state)) return;
     if (previous ? state.committedRevision !== previous.revision || state.revision !== previous.revision + 1 || world.tick < previous.tick || world.tick > previous.tick + 1
       : state.revision !== 0 || state.committedRevision !== 0 || world.tick !== 0) fail();
+    if (previous) {
+      if (world.eventCounter !== previous.eventCounter + state.pendingEvents.length) fail();
+      for (const [index, event] of state.pendingEvents.entries()) {
+        if (event.id !== `e${previous.eventCounter + index + 1}` || this.db.prepare('SELECT 1 FROM events WHERE id=?').get(event.id)) fail();
+      }
+    }
     this.db.exec('DELETE FROM ecology_previous; INSERT OR REPLACE INTO ecology_headers SELECT 1,revision,tick,body,digest FROM ecology_headers WHERE slot=0;');
     const aggregate: EcologySummary = previous ? { ...previous.state.summary } : { regions: 0, sumTicks: 0, oldestTick: null };
     for (const item of state.pending) {
@@ -209,7 +235,7 @@ export class EcologyArchive implements EcologyReader {
     if (JSON.stringify(aggregate) !== JSON.stringify(state.summary)) fail();
     const latest = this.db.prepare('SELECT tick,weather FROM ecology_climate ORDER BY tick DESC LIMIT 1').get() as ClimateObservation | undefined;
     if (latest?.tick !== Math.floor(world.tick / 600) * 600 || latest.weather !== world.weather) fail();
-    const header: Header = { revision: state.revision, tick: world.tick, state: ecologyStateForCommit(state) }, body = JSON.stringify(header);
+    const header: Header = { revision: state.revision, tick: world.tick, eventCounter: world.eventCounter, state: ecologyStateForCommit(state) }, body = JSON.stringify(header);
     this.db.prepare('INSERT OR REPLACE INTO ecology_headers VALUES (0,?,?,?,?)').run(state.revision, world.tick, body, digest(body));
   }
   /** Recovery changes only the explicit backup, restoring exact inverse deltas. */

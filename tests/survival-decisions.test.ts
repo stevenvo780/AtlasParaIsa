@@ -57,12 +57,13 @@ test('water search still permits urgent food and recovery from exhaustion', () =
   assert.equal(food.person.action, 'eat');
   assert.ok(food.person.hunger < .98);
   const rest = dryLaboratory();
-  Object.assign(rest.person, { thirst: .9, fatigue: .96, energy: .08 });
+  // Severe exhaustion with enough hydration for actual readiness recovery.
+  Object.assign(rest.person, { thirst: .55, fatigue: .96, energy: .08 });
   const here = tileAt(rest.world, rest.person)!;
   for (const tile of rest.world.tiles) if (tile.terrain === 'shelter') tile.terrain = 'meadow';
   here.terrain = 'shelter';
   stepWorld(rest.world);
   assert.equal(rest.person.action, 'rest');
   assert.ok(rest.person.fatigue < .96);
-  assert.ok(rest.person.thirst > .9, 'rest does not create drinking water');
+  assert.ok(rest.person.thirst > .55, 'rest does not create drinking water');
 });

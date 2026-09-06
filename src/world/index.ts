@@ -9,13 +9,13 @@ import { assertEcosystemTile, assertLifeState, assertDormantTerrain } from './va
 import { materializeAnimals, stepAnimals, harvestAt, type Animal } from './animals.js';
 import { advanceNeeds } from './needs.js';
 import { assimilateFood, exertBody, hydrateBody, restBody } from './body.js';
-import { defaultBlueprint, constructionCost, constructionOpportunity, inventionOpportunity, invent, completeConstruction, stepStructures, repairOpportunity, repair, facilityRestQuality, recordFacilityRest, foodAvailable, takeFood, waterAvailable, takeWater, REST_FATIGUE_RATE, REST_ENERGY_RATE } from './inventions.js';
+import { defaultBlueprint, constructionCost, constructionOpportunity, inventionOpportunity, invent, completeConstruction, stepStructures, repairOpportunity, repair, facilityRestQuality, recordFacilityRest, foodAvailable, takeFood, waterAvailable, takeWater, REST_FATIGUE_RATE, REST_ENERGY_RATE, BROKEN_CONDITION } from './inventions.js';
 import type { AnimalDynamics, BlueprintView, StructureView, InventionDynamics } from '../shared/life.js';
 import type { TechnologyKnowledge, TechnologyState } from '../shared/technology.js';
 import type { DemographicState, LegacyRecord } from '../shared/demography.js';
 import { defaultTechnologyState, initialTechnologyKnowledge, technologyOpportunity, researchTechnology, craftTechnology, projectTechnology, assertTechnology, useTool, recordTechnologyBenefit, settleTechnologyEstate, cancelTechnologyProject, maintainTechnologyMemory } from './technology.js';
 import { catalogueEnabled, resolveTechnologyRecipe } from './technology-catalogue.js';
-import { initialDemography, demographicTraits } from './demography.js';
+import { initialDemography, demographicTraits, updateDemography } from './demography.js';
 import { reproductiveReadiness, familyOpportunity, availableToShare } from './family.js';
 import { advancePopulation, assertLegacyRecord, assertPopulation } from './lineage.js';
 import { analyzeTechnologyOrganization } from './technology-organization.js';
@@ -206,6 +206,41 @@ function ecology(world: World): void {
 
 interface Candidate { action: Action; target: Point; score: number; reason: string; memory?: Memory; }
 
+/** Exact physical roof predicate used by population damage, independent of display labels. */
+function bodilyShelter(world: World, point: Point): number {
+  return world.shelterBenefitEnabled && tileAt(world, point)?.terrain === 'shelter' ? Math.max(0, ...world.structures
+    .filter(s => s.x === point.x && s.y === point.y && s.condition > BROKEN_CONDITION && s.components.includes('roof'))
+    .map(s => s.condition)) : 0;
+}
+
+/** One model day converts damage/tick into the same normalized units as health.
+ * D/(health+D) is bounded even near death. The horizon and existing 3.1 need-score
+ * scale are planning heuristics, not biological calibration or changes to damage.
+ * Raw damage also keeps protected S/I responsive despite their survival floor. */
+function avoidedDamageScore(person: Person, before: number, after: number): number {
+  const damage = Math.max(0, before - after) * TICKS_PER_DAY;
+  return damage > 0 ? 3.1 * damage / (person.demography.health + damage) : 0;
+}
+
+function bodilyDamage(world: World, person: Person, body: Pick<Person, 'hunger' | 'thirst' | 'fatigue' | 'energy'>, shelter: number): number {
+  const transition = updateDemography({ state: person.demography, traits: demographicTraits(person.genome), ...body },
+    { exposure: world.weather === 'rain' ? 1 : 0, shelter, protected: person.role !== 'neighbor' }, 1);
+  // Maximum-age enforcement includes residual health in senescence damage. It is
+  // inevitable, and must not cancel the elder's incentive to eat, drink or seek cover.
+  return transition.damage.starvation + transition.damage.dehydration + transition.damage.exposure;
+}
+
+/** Read-only preview of the current cell's meal, including the existing reserve split.
+ * This is only a decision forecast. bodyAndAction still owns every actual debit. */
+function immediateMeal(world: World, person: Person): number {
+  const harvest = Math.min(tileAt(world, person)?.food ?? 0, 0.0035);
+  const saved = Math.min(harvest * 0.25, 0.25 - person.inventory);
+  let consumed = harvest - saved;
+  if (consumed < 0.001 && person.hunger > 0.2) consumed += Math.min(foodAvailable(world, person), 0.002);
+  if (consumed < 0.001 && person.inventory + saved > 0 && person.hunger > 0.2) consumed += Math.min(person.inventory + saved, 0.002);
+  return consumed;
+}
+
 function choose(world: World, person: Person): void {
   const nearbyTiles: Tile[] = [];
   for (let dy = -RADIUS; dy <= RADIUS; dy++) for (let dx = -RADIUS; dx <= RADIUS; dx++) {
@@ -219,6 +254,14 @@ function choose(world: World, person: Person): void {
   if (home) candidates.push({action:'approach',...home});
   const food = nearbyTiles.filter(tile => tile.food > 0.025).sort((a, b) => (distance(person, a) - a.food * 2) - (distance(person, b) - b.food * 2))[0];
   if (food || person.inventory > 0.01 || foodAvailable(world,person)>0) candidates.push({ action: 'eat', target: food ?? person, score: Math.max(0, person.hunger - 0.22) * 2.5 - (food ? distance(person, food) * 0.02 : 0), reason: 'El hambre orienta su camino hacia alimento que puede percibir.' });
+  const body = { hunger: person.hunger, thirst: person.thirst, fatigue: person.fatigue, energy: person.energy };
+  const protection = bodilyShelter(world, person), damage = bodilyDamage(world, person, body, protection), meal = immediateMeal(world, person);
+  if (meal > 0) {
+    const fed = { ...body }; assimilateFood(fed, meal, { hungerPerUnit: 4.8, energyPerUnit: 1.2 });
+    const relief = avoidedDamageScore(person, damage, bodilyDamage(world, person, fed, protection));
+    if (relief > 0) candidates.push({ action: 'eat', target: person, score: Math.max(0, person.hunger - 0.22) * 2.5 + relief,
+      reason: 'Puede comer una reserva local ahora; aliviar el daño corporal no requiere esperar una caza.' });
+  }
   const family = familyOpportunity(world, person);
   const familyPlace = family ? world.places.filter(place => distance(person,place)<=RADIUS && distance(family.partner,place)<=RADIUS)
     .sort((a,b) => (distance(person,a)+distance(family.partner,a))-(distance(person,b)+distance(family.partner,b)) || a.id.localeCompare(b.id))[0] : undefined;
@@ -248,7 +291,12 @@ function choose(world: World, person: Person): void {
   const help = cooperationOpportunity(world, person);
   if (help) candidates.push({ action: 'cooperate', target: help.person, score: help.score, reason: `Puede ${help.kind === 'teach' ? 'enseñar una técnica practicada' : help.kind === 'tools' ? 'intercambiar un objeto útil por materia disponible' : help.kind === 'trade' ? 'intercambiar materiales complementarios' : help.kind === 'assist' ? 'colaborar en una tarea' : 'aportar materiales'} con ${help.person.name}.` });
   const shelter = nearbyTiles.filter(tile => tile.terrain === 'shelter').sort((a, b) => distance(person, a) - distance(person, b))[0];
-  candidates.push({ action: 'rest', target: shelter ?? person, score: person.fatigue * 1.75 + (1 - person.energy) * 1.2 + (phaseAt(world.tick) === 'night' ? 0.1 : 0), reason: shelter ? 'El cansancio hace valiosa una pausa bajo techo.' : 'Necesita una pausa; no percibe un refugio cercano.' });
+  // Ask the actual bodily law whether rest can restore readiness. Unit quality
+  // isolates nutrition/hydration limits without duplicating their thresholds.
+  const rested = { hunger: person.hunger, thirst: person.thirst, fatigue: person.fatigue, energy: person.energy };
+  restBody(rested, { fatigue: REST_FATIGUE_RATE, energy: REST_ENERGY_RATE });
+  const readinessRecovery = clamp((rested.energy - person.energy) / REST_ENERGY_RATE);
+  candidates.push({ action: 'rest', target: shelter ?? person, score: person.fatigue * 1.75 + (1 - person.energy) * 1.2 * readinessRecovery + (phaseAt(world.tick) === 'night' ? 0.1 : 0), reason: shelter ? 'El cansancio hace valiosa una pausa bajo techo.' : 'Necesita una pausa; no percibe un refugio cercano.' });
   const resource = nearbyTiles.filter(t => ((t.wood ?? 0) >= 1 && person.materials.wood < 12) || ((t.stone ?? 0) >= 1 && person.materials.stone < 8))
     .sort((a, b) => resourceDistance(person, a) - resourceDistance(person, b))[0];
   const workBias = person.traits.industriousness;

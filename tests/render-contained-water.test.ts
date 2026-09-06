@@ -53,10 +53,9 @@ test('authoritative zero, partial, full and incapable vessels are distinct witho
 test('the smallest water quantum stays visible and permeability is a coefficient rather than observed loss', () => {
   const html = carriedWaterCard(item(water(1, 2000, 1)));
   assert.match(html, /0,00002 u\. de agua/);
-  assert.match(html, /Fuga: 0,0001% por paso/);
-  assert.match(html, /no pérdida observada/);
-  assert.doesNotMatch(html, /ha perdido|utilidad|hidratación|Llenar/);
-  assert.match(carriedWaterCard(item(water(500, 2000, 0))), /Fuga: 0%/);
+  assert.match(html, /Fuga prevista: 0,0001 % por paso/);
+  assert.doesNotMatch(html, /ha perdido|utilidad|hidratación|Llenar|Tasa del recipiente|pérdida observada/);
+  assert.match(carriedWaterCard(item(water(500, 2000, 0))), /Fuga prevista: 0 %/);
 });
 
 test('unsafe quantities or unsupported units produce an unavailable state instead of a plausible false gauge', () => {
@@ -118,7 +117,7 @@ test('content-only snapshots retain inspector focus, scroll and camera across em
     for (const [name, contents, expected] of [
       ['partial', water(750), '0,015 u. de agua'],
       ['full', water(2000), 'Agua transportada · Lleno'],
-      ['leakage', water(500, 2000, 5000), 'Fuga: 0,5% por paso'],
+      ['leakage', water(500, 2000, 5000), 'Fuga prevista: 0,5 % por paso'],
       ['legacy', undefined, 'Contenido de agua no recibido en esta vista'],
     ] as const) {
       publish(contents); await expect(products).toContainText(expected);

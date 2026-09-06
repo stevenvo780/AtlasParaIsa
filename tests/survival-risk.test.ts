@@ -214,3 +214,78 @@ test('missing or unreachable building materials cannot finance protective work',
     assert.equal(world.structures.length, count);
   }
 });
+
+function emptyRoofLaboratory(hunger = 1) {
+  const { world, person, roof } = rainScene();
+  world.tick = 1801; world.reproductionEnabled = false; world.cooperationEnabled = false;
+  world.people = [person]; world.animals = []; world.communities = []; world.invitations = [];
+  for (const tile of world.tiles) { tile.food = 0; tile.fauna = 0; tile.vegetation = 0; tile.wood = 0; tile.stone = 0; tile.drinkingWater = 0; }
+  for (const s of world.structures) { s.water = 0; s.food = 0; }
+  Object.assign(person, { x: roof.x, y: roof.y, target: { x: roof.x, y: roof.y }, action: 'rest', decisionAt: 0,
+    hunger, thirst: .2, energy: .8, fatigue: 0, inventory: 0, heading: 0, materials: { wood: 0, stone: 0 }, bonds: {}, communityId: null, home: undefined });
+  person.demography.health = .08; person.demography.vitality = .2; person.demography.age = world.tick - person.bornAt;
+  return { world, person };
+}
+
+test('an empty roof cannot retain a starving body when paid exploration can discover a finite meal', () => {
+  const { world, person } = emptyRoofLaboratory(), food = tileAt(world, { x: 33, y: 8 })!;
+  food.terrain = 'meadow'; food.food = .9;
+  assert.equal(Math.hypot(food.x - person.x, food.y - person.y), 8, 'food starts outside perception');
+  const control = cloneWorld(world); tileAt(control, food)!.food = 0;
+  const other = control.people[0]!, energy = person.energy;
+  stepWorld(world); stepWorld(control);
+  assert.equal(person.action, 'explore');
+  assert.deepEqual(person.target, other.target, 'unseen food does not direct the search');
+  assert.equal(person.hunger, 1, 'choosing a search gives no free relief');
+  assert.match(person.reason, /hambre|alimento/);
+  for (let i = 1; i < 6; i++) stepWorld(world);
+  assert.ok(person.energy < energy - .0008, 'first physical step and basal needs are paid');
+  for (let i = 6; i < 91; i++) stepWorld(world);
+  assert.ok(world.people.includes(person), 'the body survives long enough to reach and eat the finite meal');
+  assert.ok(person.hunger < .7);
+  assert.ok(world.totals.foodHarvested > .05);
+  assert.ok(food.food < .85);
+  assert.equal(person.command, null);
+});
+
+test('protective rest still competes when no meal is needed and hunger search is bounded near stress', () => {
+  const comfortable = emptyRoofLaboratory(.2);
+  stepWorld(comfortable.world);
+  assert.equal(comfortable.person.action, 'rest');
+  for (const hunger of [.7199, .72, .7201, .9999, 1]) {
+    const { world, person } = emptyRoofLaboratory(hunger);
+    stepWorld(world);
+    assert.ok(Number.isFinite(person.target.x) && Number.isFinite(person.target.y));
+    assert.ok(person.hunger >= hunger, 'a motive never fabricates nutrition');
+    if (hunger >= .9999) assert.equal(person.action, 'explore');
+  }
+});
+
+test('the hungry search control with enough initial health reaches a meal and remains alive for 180 steps', () => {
+  const { world, person } = emptyRoofLaboratory(), food = tileAt(world, { x: 33, y: 8 })!;
+  person.demography.health = .12; food.terrain = 'meadow'; food.food = .9;
+  for (let i = 0; i < 180; i++) stepWorld(world);
+  assert.ok(world.people.includes(person));
+  assert.ok(person.hunger < .7);
+  assert.ok(world.totals.foodHarvested > .05);
+  assert.ok(food.food < .85);
+});
+
+test('a visible living prey can motivate a paid hunt when there is no meal, despite a nearby roof', () => {
+  const animal = createWorld(42).animals.find(a => a.species === 'hare')!;
+  assert.ok(animal);
+  const { world, person } = emptyRoofLaboratory();
+  Object.assign(animal, { x: 26, y: 8, target: { x: 26, y: 8 }, action: 'rest', hunger: .2, thirst: .2, fatigue: .99, energy: .1, lastDecision: world.tick });
+  world.animals = [animal]; tileAt(world, animal)!.fauna = 1;
+  const energy = person.energy;
+  stepWorld(world);
+  assert.equal(person.action, 'hunt');
+  assert.equal(person.hunger, 1);
+  assert.equal(world.animals.includes(animal), true, 'a forecast cannot liquidate an animal');
+  for (let i = 1; i < 60 && world.animalDynamics.humanHunts === 0; i++) stepWorld(world);
+  assert.equal(world.animalDynamics.humanHunts, 1);
+  assert.equal(world.animals.includes(animal), false);
+  assert.ok(person.hunger < 1);
+  assert.ok(person.energy < energy - 45 * .0003, 'pursuit/work and basal metabolism are paid');
+  assert.equal(person.command, null);
+});

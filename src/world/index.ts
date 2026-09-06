@@ -4,7 +4,7 @@ import { chunkKey, generateChunk, proceduralPlaceName, legacyStructures, type Ch
 import { assertGenome, expressGenome, founderGenome, inheritGenome, type Genome } from './genetics.js';
 import { bond, cooperate, cooperationOpportunity, initialCulture, resourceDispute, updateCommunities, settlementOpportunity, type Culture } from './society.js';
 import { count, emptyTotals, recordSample, worldStatistics } from './statistics.js';
-import { initializeEcosystem, stepEcosystem, harvestMaterial, cultivateTile, trampleTile } from './ecosystem.js';
+import { initializeEcosystem, stepEcosystem, harvestMaterial, cultivateTile, trampleTile, FOOD_PER_ANIMAL } from './ecosystem.js';
 import { assertEcosystemTile, assertLifeState, assertDormantTerrain } from './validation.js';
 import { materializeAnimals, stepAnimals, harvestAt, type Animal } from './animals.js';
 import { advanceNeeds } from './needs.js';
@@ -323,6 +323,16 @@ function choose(world: World, person: Person): void {
     score: Math.max(0, person.thirst - .18) * 3.1, reason: 'Puede beber una reserva local ahora para aliviar la privación corporal.' });
   const prey = nearbyTiles.filter(t => (t.fauna ?? 0) >= 1).sort((a, b) => distance(person, a) - distance(person, b))[0];
   if (prey && person.inventory < 0.18) candidates.push({ action: 'hunt', target: prey, score: Math.max(0, person.hunger - 0.18) * 2 + person.traits.industriousness * 0.18 + (food && food.food > 0.2 ? 0 : 0.2) - (person.hunger < 0.8 && (prey.fauna ?? 0) <= 1 ? person.culture.stewardship * 0.15 : 0), reason: 'Percibe fauna; cazar cuesta trabajo, retira un animal y proporciona alimento limitado.' });
+  if (!food && !prey && meal === 0 && person.hunger > .6) {
+    // Like thirst, deprivation still motivates a paid search when perception is
+    // empty. This potential small meal is a need score, never a stock or reward.
+    const soughtFood = { ...body }; assimilateFood(soughtFood, .002, { hungerPerUnit: 4.8, energyPerUnit: 1.2 });
+    const motive = (person.hunger - .22) * 2.5 + avoidedDamageScore(person, damage, bodilyDamage(world, person, soughtFood, protection));
+    if (motive > candidates[0]!.score) {
+      candidates[0]!.score = motive;
+      candidates[0]!.reason = 'El hambre persiste sin alimento ni presa percibidos; sale a buscar una comida por terreno cercano.';
+    }
+  }
   const help = cooperationOpportunity(world, person);
   if (help) candidates.push({ action: 'cooperate', target: help.person, score: help.score, reason: `Puede ${help.kind === 'teach' ? 'enseñar una técnica practicada' : help.kind === 'tools' ? 'intercambiar un objeto útil por materia disponible' : help.kind === 'trade' ? 'intercambiar materiales complementarios' : help.kind === 'assist' ? 'colaborar en una tarea' : 'aportar materiales'} con ${help.person.name}.` });
   const routes = perceivedRoutes(person, nearbyTiles), stepsTo = (point: Point) => routes.get(`${point.x},${point.y}`);
@@ -448,9 +458,22 @@ function choose(world: World, person: Person): void {
     let forecast = { ...body };
     if (candidate.action === 'eat') assimilateFood(forecast, immediateMeal(world, { ...person, ...candidate.target }), { hungerPerUnit: 4.8, energyPerUnit: 1.2 });
     if (candidate.action === 'drink') forecast = drinkingBody(world, person, candidate.target);
+    // A speculative pursuit must not displace a meal that can already be eaten.
+    if (candidate.action === 'hunt' && !food && meal === 0) {
+      const victim = world.animals.filter(a => a.x === candidate.target.x && a.y === candidate.target.y && a.health > 0)
+        .sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0)[0];
+      const huntWork = Math.max(0, Math.ceil(45 * (1 - (person.skills.hunt ?? 0) * .25))
+        - (person.action === 'hunt' && distance(person.target, candidate.target) === 0 ? person.work : 0));
+      if (victim && affordable(steps, huntWork)) {
+        // Conditional on that visible animal remaining until the paid hunt ends.
+        // The real action must still remove its identity before feeding the body.
+        const meat = FOOD_PER_ANIMAL[victim.species], saved = Math.min(.25 - person.inventory, meat * .5);
+        assimilateFood(forecast, meat - saved, { hungerPerUnit: 4.8, energyPerUnit: 0 }); work = huntWork;
+      }
+    }
     const relief = avoidedDamageScore(person, outdoorDamage, bodilyDamage(world, person, forecast, cover), travel * 6 + work);
     candidate.score += relief;
-    if (exposed && cover > protection && relief > 0) candidate.reason += candidate.action === 'repair' || candidate.action === 'build' || candidate === coverGather
+    if (exposed && cover > 0 && relief > 0) candidate.reason += candidate.action === 'repair' || candidate.action === 'build' || candidate === coverGather
       ? ' Completar el trabajo pagado puede reducir el daño que le causa la lluvia.'
       : ' El techo funcional que percibe reduce el daño corporal de la lluvia.';
   }

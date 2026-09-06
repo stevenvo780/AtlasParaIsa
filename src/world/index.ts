@@ -1,3 +1,4 @@
+import { recordChronicleEvent, enableChronicleJournal, assertChronicleJournal, type ChronicleJournal } from './chronicle-journal.js';
 import { PROTOCOL_VERSION, type Action, type ChronicleEvent, type Gesture, type GestureResult, type MemoryView, type PersonView, type PlaceView, type Tile, type WorldView, type Viewport, type Order, type CommunityView, type WorldSample } from '../shared/types.js';
 import { activate, bindWorldContext, maintainRegions, normalizeViewport, projectTerrain, tileAt, validCoordinate, worldContext, type ChunkMeta, type WorldContext } from './spatial.js';
 import { chunkKey, generateChunk, proceduralPlaceName, legacyStructures, type Chunk } from './terrain.js';
@@ -63,7 +64,7 @@ export interface Memory extends MemoryView {
 export interface World {
   version: number; seed: number; rng: number; tick: number; width: number; height: number;
   weather: 'clear' | 'rain'; tiles: Tile[]; people: Person[]; places: PlaceView[];
-  memories: Memory[]; events: ChronicleEvent[]; eventCounter: number;
+  memories: Memory[]; events: ChronicleEvent[]; eventCounter: number; chronicleJournal?: ChronicleJournal;
   invitations: { id: string; x: number; y: number; until: number }[];
   reminders: { memoryId: string; until: number }[];
   lastGestureTick: number; learningEnabled: boolean;
@@ -93,7 +94,7 @@ function walkable(world: World, p: Point): boolean {
 }
 
 function addEvent(world: World, event: Omit<ChronicleEvent, 'id' | 'tick'>): ChronicleEvent {
-  const result = { ...event, id: `e${++world.eventCounter}`, tick: world.tick };
+  const result = recordChronicleEvent(world, event);
   world.events.push(result);
   if (world.events.length > MAX_EVENTS) world.events.shift();
   return result;
@@ -1015,6 +1016,7 @@ function assertCommon(value: unknown, legacy = false, expectedVersion = RULES_VE
 export function assertWorld(value: unknown, expectedVersion = RULES_VERSION, context?: WorldContext): asserts value is World {
   assertCommon(value, false, expectedVersion);
   const w = value;
+  assertChronicleJournal(w);
   bindWorldContext(w, context ?? worldContext(w));
   const fail = (): never => { throw new Error('Estado procedural inválido.'); };
   const identities = new Map<string, Person | LegacyRecord | undefined>();
@@ -1105,6 +1107,12 @@ export function assertWorld(value: unknown, expectedVersion = RULES_VERSION, con
 
 /** V1/V2 conversion preserves existing fields and initializes only newly introduced mechanisms. */
 export function migrateWorld(value: unknown, context: WorldContext = {}): World {
+  const world = migrateWorldState(value, context);
+  enableChronicleJournal(world);
+  return world;
+}
+
+function migrateWorldState(value: unknown, context: WorldContext = {}): World {
   const version = (value as { version?: unknown } | null)?.version;
   if (version === RULES_VERSION) {
     assertWorld(value, RULES_VERSION, context);

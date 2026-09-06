@@ -16,6 +16,7 @@ import { enableTechnologyJournal, assertTechnologyJournal, technologyStateForCom
 import { assertTechnologyCatalogueState, enableTechnologyCatalogue, markTechnologyCatalogueCommitted,
   technologyCatalogueStateForCommit, technologyCatalogueTotals, technologyFunctionCode,
   TECHNOLOGY_FUNCTION_WORDS, type TechnologyCatalogueReader } from '../world/technology-catalogue.js';
+import { assertChronicleEvent, assertChronicleJournal, enableChronicleJournal, chronicleSerial, chronicleFailure, chronicleForCommit, EMPTY_CHRONICLE_DIGEST } from '../world/chronicle-journal.js';
 import { assertTechnology, maintainTechnologyMemory } from '../world/technology.js';
 
 const checksum = (s: string) => createHash('sha256').update(s).digest('hex');
@@ -24,6 +25,9 @@ export const fingerprint = (g: Gesture) => checksum(JSON.stringify(g.kind === 'c
   ? [g.kind, g.x, g.y, g.memoryId ?? null, g.agentId ?? null, g.order ?? null]
   : [g.kind, g.x, g.y, g.memoryId ?? null]));
 type Row = { body: string; digest: string; saved_at: number };
+type ChronicleStamp = { dataVersion: number; totalChanges: number; schemaCookie: number; tempSchemaCookie: number };
+const sameChronicleStamp = (a: ChronicleStamp, b: ChronicleStamp) => Object.keys(a).every(key => a[key as keyof ChronicleStamp] === b[key as keyof ChronicleStamp]);
+type ChronicleProof = { startsAfter: number; through: number; digest: string; tick: number; stamp: ChronicleStamp };
 type SchemaColumn = { name: string; pk: number };
 const BASE_TABLES: Record<string, string[]> = {
   snapshots: ['slot', 'body', 'digest', 'saved_at'], events: ['id', 'tick', 'body'],
@@ -112,6 +116,7 @@ export class Store {
   };
   lastSnapshotBytes = 0;
   private readonly schemaVersion: number;
+  private verifiedChronicle: ChronicleProof | null = null;
   private verifiedTechnology: { startsAfter: number; through: number; catalogueThrough: number; dataVersion: number; totalChanges: number; schemaCookie: number } | null = null;
   private verifiedRecipes = new Map<string, { body: string; uses: number; utility: number; manufactured: number }>();
   private verifiedCatalogue: { totals: TechnologyCatalogueTotals; functions: number[] } | null = null;
@@ -194,6 +199,8 @@ export class Store {
     assertTechnology(world);
   }
   load(): { world: World; savedAt: number } | null {
+    const chronicleStamp = this.chronicleStamp(), rawTransaction = this.db.isTransaction;
+    this.verifiedChronicle = null;
     const check = this.db.prepare('PRAGMA quick_check').get() as Record<string, unknown>;
     if (Object.values(check)[0] !== 'ok') throw new Error('SQLite integrity check failed. Explicit recovery required.');
     const row = this.db.prepare('SELECT body,digest,saved_at FROM snapshots WHERE slot=0').get() as Row | undefined;
@@ -203,9 +210,12 @@ export class Store {
       return null;
     }
     if (checksum(row.body) !== row.digest) throw new Error('Snapshot checksum mismatch. Explicit recovery required.');
-    const world = migrateWorld(decodeSnapshot(row.body), this.context);
+    const decoded = decodeSnapshot(row.body) as World, declaredChronicle = decoded.chronicleJournal !== undefined;
+    const world = migrateWorld(decoded, this.context);
     if (world.technology.catalogue && (world.technology.catalogue.pending.length ||
       world.technology.catalogue.committedThrough !== world.technology.recipeCounter)) technologyFailure('snapshot contains uncommitted definitions');
+    this.assertChronicleOrigin(world, declaredChronicle);
+    this.assertChronicleArchive(world);
     const declaredJournal = world.technology.journal !== undefined;
     enableTechnologyJournal(world.technology);
     assertTechnologyJournal(world.technology, world.tick);
@@ -239,6 +249,8 @@ export class Store {
     }
     this.prepareTechnology(world, declaredJournal && this.schemaVersion >= 4 ? world.technology.recipeCounter : 0);
     if (declaredJournal && this.schemaVersion >= 4) this.rememberTechnology(world);
+    if (!sameChronicleStamp(chronicleStamp, this.chronicleStamp())) chronicleFailure('database changed while loading');
+    if (!rawTransaction) this.rememberChronicle(world, chronicleStamp);
     return { world, savedAt: row.saved_at };
   }
   loadLegacy(id: string, atTick=Number.MAX_SAFE_INTEGER): LegacyRecord | null {
@@ -271,6 +283,107 @@ export class Store {
   private dataVersion(): number { return Number(this.db.prepare('PRAGMA data_version').get()!.data_version); }
   private totalChanges(): number { return Number(this.db.prepare('SELECT total_changes() AS n').get()!.n); }
   private schemaCookie(): number { return Number(this.db.prepare('PRAGMA schema_version').get()!.schema_version); }
+
+  private chronicleStamp(): ChronicleStamp {
+    return { dataVersion: this.dataVersion(), totalChanges: this.totalChanges(), schemaCookie: this.schemaCookie(),
+      tempSchemaCookie: Number(this.db.prepare('PRAGMA temp.schema_version').get()!.schema_version) };
+  }
+  private chronicleHasTriggers(): boolean {
+    return !!this.db.prepare("SELECT 1 FROM main.sqlite_schema WHERE type='trigger' UNION ALL SELECT 1 FROM temp.sqlite_schema WHERE type='trigger' LIMIT 1").get();
+  }
+  private assertChronicleSchema(): void {
+    if (this.db.prepare("SELECT 1 FROM temp.sqlite_schema WHERE name IN ('events','metadata','snapshots') LIMIT 1").get()) chronicleFailure('temporary objects shadow durable tables');
+    for (const [table, fields] of [['events',['id','tick','body']],['metadata',['key','value']]] as const) {
+      const columns = this.db.prepare(`PRAGMA main.table_info(${table})`).all() as { name: string; type: string; pk: number; notnull: number }[];
+      if (columns.length !== fields.length || columns.some((column,index) => column.name !== fields[index]
+        || column.type !== (column.name === 'tick' ? 'INTEGER' : 'TEXT') || column.pk !== (index === 0 ? 1 : 0)
+        || index > 0 && column.notnull !== 1)) chronicleFailure('schema uniqueness or fields are invalid');
+    }
+  }
+  private chronicleOrigin(): number | null {
+    const row = this.db.prepare("SELECT value FROM main.metadata WHERE key='chronicle-origin-v1'").get() as { value: string } | undefined;
+    if (!row) return null;
+    let origin: { version?: unknown; startsAfter?: unknown };
+    try { origin = JSON.parse(row.value); } catch { chronicleFailure('invalid durable origin'); }
+    if (!origin! || typeof origin !== 'object' || Array.isArray(origin)
+      || Object.keys(origin).sort().join(',') !== 'startsAfter,version' || origin.version !== 1
+      || typeof origin.startsAfter !== 'number' || !Number.isSafeInteger(origin.startsAfter) || origin.startsAfter < 0) chronicleFailure('invalid durable origin');
+    return origin.startsAfter as number;
+  }
+  private assertChronicleOrigin(world: World, declared: boolean, recoveringLegacy = false): void {
+    const origin = this.chronicleOrigin();
+    if (declared ? origin !== world.chronicleJournal!.startsAfter : origin !== null && !recoveringLegacy) chronicleFailure('durable origin disagrees with snapshot');
+  }
+  private rememberChronicle(world: World, stamp: ChronicleStamp): void {
+    const journal = world.chronicleJournal!;
+    this.verifiedChronicle = { startsAfter: journal.startsAfter, through: journal.committedThrough,
+      digest: journal.committedDigest, tick: world.tick, stamp };
+  }
+  private chronicleDigest(world: World): string {
+    let digest = world.chronicleJournal!.committedDigest;
+    for (const event of world.chronicleJournal!.pending) digest = checksum(`${digest}\n${JSON.stringify(event)}`);
+    return digest;
+  }
+  /** Bounded memory: primary-key reads and a rolling digest, never a Set of the lifetime archive. */
+  private assertChronicleArchive(world: World, allowLater = false): void {
+    this.assertChronicleSchema();
+    assertChronicleJournal(world);
+    const journal = world.chronicleJournal!;
+    if (journal.pending.length || journal.committedThrough !== world.eventCounter) chronicleFailure('snapshot contains uncommitted events');
+    const lookup = this.db.prepare('SELECT id,tick,body FROM events WHERE id=?');
+    let digest = EMPTY_CHRONICLE_DIGEST, tick = 0;
+    for (let serial = journal.startsAfter + 1; serial <= journal.committedThrough; serial++) {
+      const row = lookup.get(`e${serial}`) as { id: string; tick: number; body: string } | undefined;
+      if (!row) chronicleFailure('declared coverage has a gap');
+      let event: unknown; try { event = JSON.parse(row!.body); } catch { chronicleFailure('invalid archived JSON'); }
+      assertChronicleEvent(event, world.tick);
+      if (event.id !== row!.id || event.tick !== row!.tick || event.tick < tick) chronicleFailure('archived identity or timeline disagrees');
+      tick = event.tick; digest = checksum(`${digest}\n${row!.body}`);
+    }
+    if (digest !== journal.committedDigest) chronicleFailure('archive digest disagrees');
+    if (!allowLater && this.db.prepare("SELECT 1 FROM events WHERE id GLOB 'e[0-9]*' AND (CAST(substr(id,2) AS INTEGER)>? OR CAST(substr(id,2) AS INTEGER)<=0 OR id<>'e'||CAST(substr(id,2) AS INTEGER)) LIMIT 1").get(world.eventCounter)) chronicleFailure('archived event exceeds snapshot counter');
+    for (const event of world.events) {
+      const row = lookup.get(event.id) as { tick: number; body: string } | undefined;
+      if (!row || row.tick !== event.tick || row.body !== JSON.stringify(event)) chronicleFailure('visible event disagrees with archive');
+    }
+  }
+  /** Called before any host SQL writes. A raw transaction can never supply a reusable proof. */
+  private assertChronicleChanges(world: World, stampBeforeBegin: ChronicleStamp, trusted: boolean): void {
+    const journal = world.chronicleJournal!, proof = this.verifiedChronicle;
+    if (!trusted || !proof || !sameChronicleStamp(proof.stamp, stampBeforeBegin)
+      || !sameChronicleStamp(stampBeforeBegin, this.chronicleStamp())) {
+      this.verifiedChronicle = null;
+      this.assertChronicleSchema();
+      const row = this.db.prepare('SELECT body,digest FROM snapshots WHERE slot=0').get() as Row | undefined;
+      if (!row) {
+        if (this.chronicleOrigin() !== null || this.db.prepare("SELECT 1 FROM metadata WHERE key='initialized'").get() || this.db.prepare('SELECT 1 FROM events LIMIT 1').get()) chronicleFailure('baseline snapshot is missing');
+        if (journal.committedThrough !== journal.startsAfter || journal.committedDigest !== EMPTY_CHRONICLE_DIGEST) chronicleFailure('committed history has no baseline');
+      } else {
+        if (checksum(row.body) !== row.digest) chronicleFailure('baseline snapshot checksum mismatch');
+        const baseline = decodeSnapshot(row.body) as World, declared = baseline.chronicleJournal !== undefined;
+        enableChronicleJournal(baseline); this.assertChronicleOrigin(baseline, declared); this.assertChronicleArchive(baseline);
+        this.rememberChronicle(baseline, this.chronicleStamp());
+      }
+    }
+    const baseline = this.verifiedChronicle;
+    if (baseline && (journal.startsAfter !== baseline.startsAfter || journal.committedThrough !== baseline.through
+      || journal.committedDigest !== baseline.digest || world.tick < baseline.tick
+      || journal.pending.some(event => event.tick < baseline.tick))) chronicleFailure('candidate changed committed history');
+  }
+  private flushChronicle(world: World): void {
+    const journal = world.chronicleJournal!, origin = this.chronicleOrigin();
+    if (origin === null) this.db.prepare("INSERT INTO metadata VALUES ('chronicle-origin-v1',?)").run(JSON.stringify({ version: 1, startsAfter: journal.startsAfter }));
+    else if (origin !== journal.startsAfter) chronicleFailure('durable origin changed');
+    const lookup = this.db.prepare('SELECT tick,body FROM events WHERE id=?');
+    const insert = this.db.prepare('INSERT INTO events VALUES (?,?,?)');
+    for (const event of [...journal.pending, ...world.events]) {
+      assertChronicleEvent(event, world.tick);
+      const body = JSON.stringify(event), previous = lookup.get(event.id) as { tick: number; body: string } | undefined;
+      if (previous) {
+        if (previous.tick !== event.tick || previous.body !== body) chronicleFailure('an immutable event cannot be overwritten');
+      } else insert.run(event.id, event.tick, body);
+    }
+  }
 
   /** A declared prefix is verified once on load, not scanned at the 10 Hz save cadence. */
   private assertTechnologyCoverage(world: World): void {
@@ -450,18 +563,26 @@ export class Store {
 
   save(world: World, inputs: { gesture: Gesture; result: GestureResult }[] = [], requiredSessions: string[] = []): void {
     const retired = world.retiredChunks;
+    if (this.db.isTransaction) { this.verifiedChronicle = null; throw new Error("Store.save requires its own transaction."); }
+    const chronicleStamp = this.chronicleStamp();
+    enableChronicleJournal(world); assertChronicleJournal(world);
+    const committedChronicle = chronicleForCommit(world, this.chronicleDigest(world));
     this.prepareTechnology(world);
     enableTechnologyJournal(world.technology);
     assertTechnologyJournal(world.technology, world.tick);
-    const body = encodeSnapshot({ ...world, technology: technologyCatalogueStateForCommit(technologyStateForCommit(world.technology)) });
+    const body = encodeSnapshot({ ...world, chronicleJournal: committedChronicle, technology: technologyCatalogueStateForCommit(technologyStateForCommit(world.technology)) });
     this.lastSnapshotBytes = Buffer.byteLength(body);
     this.db.exec('BEGIN IMMEDIATE');
+    let chronicleTriggers = false;
     try {
+      chronicleTriggers = this.chronicleHasTriggers();
       this.technologyArchive.beginHostTransaction();
       // Authorization and commit share a transaction with respect to external revocation.
       if (requiredSessions.some(hash => !this.sessionValid(hash))) throw new SessionRevoked('Session revoked before commit.');
+      this.assertChronicleChanges(world, chronicleStamp, !chronicleTriggers);
       this.flushTechnology(world);
       this.technologyArchive.observeHostWrites(() => {
+      this.flushChronicle(world);
       const archiveIdentity=this.db.prepare('INSERT INTO legacy VALUES (?,?,?,?)');
       for (const record of world.retiredLegacy) {
         assertLegacyRecord(record,world.tick); this.assertLegacyParents(record,world);
@@ -481,19 +602,31 @@ export class Store {
       this.db.exec('INSERT OR REPLACE INTO snapshots SELECT 1,body,digest,saved_at FROM snapshots WHERE slot=0');
       this.db.prepare('INSERT OR REPLACE INTO snapshots VALUES (0,?,?,?)').run(body, checksum(body), Date.now());
       this.db.prepare("INSERT OR REPLACE INTO metadata VALUES ('initialized','1')").run();
-      const insertEvent = this.db.prepare('INSERT OR IGNORE INTO events VALUES (?,?,?)');
-      for (const event of world.events) insertEvent.run(event.id, event.tick, JSON.stringify(event));
       const insertInput = this.db.prepare('INSERT INTO inputs VALUES (?,?,?,?,?,?)');
       for (const { gesture, result } of inputs) insertInput.run(gesture.id, fingerprint(gesture), result.tick, result.order, JSON.stringify(gesture), JSON.stringify(result));
       });
+      if (chronicleTriggers) {
+        this.assertChronicleOrigin({ ...world, chronicleJournal: committedChronicle }, true);
+        this.assertChronicleArchive({ ...world, chronicleJournal: committedChronicle });
+        const saved = this.db.prepare('SELECT body,digest FROM snapshots WHERE slot=0').get() as Row | undefined;
+        if (!saved || saved.body !== body || saved.digest !== checksum(body)) chronicleFailure('trigger changed committed snapshot');
+      }
       this.db.exec('COMMIT');
       this.technologyArchive.acknowledgeHostCommit();
     } catch (error) {
       if (this.db.isTransaction) this.db.exec('ROLLBACK');
       this.technologyArchive.invalidateVerification();
+      this.verifiedChronicle = null;
       throw error;
     }
     // A discarded transaction must leave the caller's pending archive queue intact for a retry.
+    world.chronicleJournal = committedChronicle;
+    this.verifiedChronicle = null;
+    try {
+      const current = this.chronicleStamp();
+      if (!chronicleTriggers && current.dataVersion === chronicleStamp.dataVersion && current.schemaCookie === chronicleStamp.schemaCookie
+        && current.tempSchemaCookie === chronicleStamp.tempSchemaCookie) this.rememberChronicle(world, current);
+    } catch { /* Durable commit succeeded; losing a cache is not a failed transaction. */ }
     world.retiredChunks = [];
     world.retiredLegacy = [];
     markTechnologyJournalCommitted(world.technology);
@@ -572,7 +705,10 @@ export class Store {
   previous(destination: string) {
     const row = this.db.prepare('SELECT body,digest,saved_at FROM snapshots WHERE slot=1').get() as Row | undefined;
     if (!row || checksum(row.body) !== row.digest) throw new Error('No valid previous checkpoint.');
-    const world = migrateWorld(decodeSnapshot(row.body), this.context);
+    const decoded = decodeSnapshot(row.body) as World, declaredChronicle = decoded.chronicleJournal !== undefined;
+    const world = migrateWorld(decoded, this.context);
+    this.assertChronicleOrigin(world, declaredChronicle, true);
+    this.assertChronicleArchive(world, true);
     const declaredJournal = world.technology.journal !== undefined;
     if (world.technology.catalogue && (world.technology.catalogue.pending.length ||
       world.technology.catalogue.committedThrough !== world.technology.recipeCounter)) technologyFailure('previous snapshot contains uncommitted definitions');
@@ -604,8 +740,12 @@ export class Store {
       recovered.db.prepare('DELETE FROM chunks WHERE tick>?').run(world.tick);
       recovered.db.prepare('DELETE FROM legacy WHERE tick>?').run(world.tick);
       for (const event of recovered.db.prepare('SELECT id FROM events WHERE tick=?').all(world.tick) as {id:string}[]) {
-        if (!world.events.some(e => e.id === event.id)) recovered.db.prepare('DELETE FROM events WHERE id=?').run(event.id);
+        const serial = chronicleSerial(event.id);
+        if (serial !== null ? serial > world.eventCounter : !world.events.some(e => e.id === event.id)) recovered.db.prepare('DELETE FROM events WHERE id=?').run(event.id);
       }
+      // Recovery changes only the explicit destination's coverage epoch.
+      recovered.db.prepare("INSERT OR REPLACE INTO metadata VALUES ('chronicle-origin-v1',?)").run(JSON.stringify({ version: 1, startsAfter: world.chronicleJournal!.startsAfter }));
+      recovered.assertChronicleOrigin(world, true); recovered.assertChronicleArchive(world);
       recovered.revoke(); recovered.db.exec('COMMIT'); recovered.technologyArchive.acknowledgeHostCommit(); recovered.load();
     } catch (error) {
       if (recovered.db.isTransaction) recovered.db.exec('ROLLBACK');

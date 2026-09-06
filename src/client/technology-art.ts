@@ -37,7 +37,7 @@ export function carriedWaterCard(item: TechnologyView['items'][number]): string 
     <div><span>Contenido</span><strong>${amount} u. de agua</strong></div>
     <div><span>Capacidad actual</span><strong>${capacity} u. de agua</strong></div>
     <meter min="0" max="${water.capacityQuanta}" value="${water.quanta}" aria-label="Agua transportada: ${amount} de ${capacity} unidades">${amount} / ${capacity}</meter>
-    <p>Fuga: ${rate}% por paso. Tasa del recipiente, no pérdida observada.</p>
+    <p>Fuga prevista: ${rate} % por paso.</p>
   </section>`;
 }
 export function recipeLabel(recipe: TechnologyRecipe): string {

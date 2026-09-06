@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { assertWorld, bindWorldContext, cloneWorld, createWorld, migrateWorld, projectWorld, stepWorld, worldContext,
+import { assertWorld, bindWorldContext, cloneWorld, createWorld, migrateWorld, projectWorld, RULES_VERSION, stepWorld, worldContext,
   type World, type WorldContext } from '../src/world/index.js';
 import { enableTechnologyCatalogue, resolveTechnologyRecipe } from '../src/world/technology-catalogue.js';
 import { craftTechnology, maintainTechnologyMemory, projectTechnology, recordTechnologyBenefit, technologyWorkCost, useTool, type TechnologyProgram } from '../src/world/technology.js';
@@ -132,10 +132,10 @@ test('technology authors remain valid through a pending estate and a cold identi
   assert.equal(world.people.some(person => person.id === maker.id), false);
   const record = world.retiredLegacy.find(person => person.id === maker.id)!; assert.ok(record);
   world.legacy = world.legacy.filter(person => person.id !== maker.id);
-  assertWorld(world, 5, context);
+  assertWorld(world, RULES_VERSION, context);
   identities.set(record.id, structuredClone(record)); world.retiredLegacy = [];
   const original = structuredClone(world);
-  assertWorld(world, 5, context); assert.deepEqual(world, original, 'archive identity resolution cannot grow a lifetime RAM cache');
+  assertWorld(world, RULES_VERSION, context); assert.deepEqual(world, original, 'archive identity resolution cannot grow a lifetime RAM cache');
   assertWorld(cloneWorld(world));
   const broken = cloneWorld(world, { ...context, loadLegacy: () => null });
   assert.throws(() => assertWorld(broken), /procedural/);

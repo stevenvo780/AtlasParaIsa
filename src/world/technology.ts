@@ -2,9 +2,13 @@ import type { ChronicleEvent } from '../shared/types.js';
 import type { Capability, Composition, Material, MaterialBatch, MaterialProperties, MaterialRequirement, OperationInstruction, PhysicalOperation, ResourceMass, TechnologyExecution, TechnologyKnowledge, TechnologyProgram, TechnologyProject, TechnologyRecipe, TechnologyState, TechnologyView } from '../shared/technology.js';
 import { localRandom } from './genetics.js';
 import { assertTechnologyCheckpoint } from './technology-checkpoint.js';
-import { assertTechnologyJournal, journalTechnologyExecution } from './technology-journal.js';
+import { assertTechnologyJournal } from './technology-journal.js';
+import { appendTechnologyExecution as appendExecution, technologyStock } from './technology-execution.js';
+import { assertTechnologyWater, assertWaterExecution, containedWaterStock, freeWaterCarryQuanta, settleContainedWaterCapacity, waterEnvelope } from './technology-water.js';
+export { technologyStock } from './technology-execution.js';
 import { assertTechnologyCatalogueState, catalogueEnabled, findTechnologyRecipe, hasTechnologyFunction, registerTechnologyRecipe, resolveTechnologyRecipe, technologyCatalogueTotals, technologyMemoryCapacity, updateTechnologyRecipeStats } from './technology-catalogue.js';
 import { pruneTechnologyCompetence, rememberRecipe, technologyProjectPins, touchKnownRecipe } from './technology-memory.js';
+import { containerAffordance } from './material-affordances.js';
 export type * from '../shared/technology.js';
 
 export interface TechnologyActor {
@@ -46,6 +50,7 @@ export function initialTechnologyKnowledge(): TechnologyKnowledge {
 /** Keep local instructions and practice bounded, including after stock leaves an actor. */
 export function maintainTechnologyMemory(host: TechnologyHost, actor: TechnologyActor): void {
   const knowledge = actor.technology, capacity = technologyMemoryCapacity(host.technology);
+  if (knowledge.waterPreparation && !knowledge.items.some(item => item.id === knowledge.waterPreparation!.itemId)) delete knowledge.waterPreparation;
   if (knowledge.knownRecipes.length > capacity && !rememberRecipe(knowledge, knowledge.knownRecipes.at(-1)!, {
     capacity, protectedIds: technologyProjectPins(knowledge),
   }).remembered) throw new Error('Active technology instructions exceed local memory capacity.');
@@ -184,7 +189,9 @@ function planWithdrawal(host: TechnologyHost, actor: TechnologyActor, program: T
         if (take <= 0) continue;
         const available = { ...item.composition }; subtract(available, itemCompositions.get(item.id) ?? empty());
         const c = splitComposition(available, take);
-        fragments.push({ ...structuredClone(item), composition: c, mass: take, initialMass: take });
+        const fragment = { ...structuredClone(item), composition: c, mass: take, initialMass: take };
+        delete fragment.contents; // Reshaping a substrate does not duplicate or chemically absorb its fill.
+        fragments.push(fragment);
         itemMasses.set(item.id, previously + take); itemCompositions.set(item.id, sum([itemCompositions.get(item.id) ?? empty(), c])); needed -= take; if (!needed) break;
       }
       if (needed) return;
@@ -210,7 +217,12 @@ function withdraw(host: TechnologyHost, actor: TechnologyActor, plan: Withdrawal
   actor.materials.wood = Math.max(0, actor.materials.wood - plan.imported.wood / MASS_UNIT);
   actor.materials.stone = Math.max(0, actor.materials.stone - plan.imported.stone / MASS_UNIT);
   if (plan.waterTile) plan.waterTile.drinkingWater = Math.max(0, plan.waterTile.drinkingWater! - plan.imported.water / 50_000);
-  for (const item of actor.technology.items) { const amount = plan.itemMasses.get(item.id) ?? 0; subtract(item.composition, plan.itemCompositions.get(item.id) ?? empty()); item.mass -= amount; }
+  for (const item of actor.technology.items) {
+    const amount = plan.itemMasses.get(item.id) ?? 0;
+    if (amount && actor.technology.waterPreparation?.itemId === item.id) delete actor.technology.waterPreparation;
+    if (amount) settleContainedWaterCapacity(host, item, true);
+    subtract(item.composition, plan.itemCompositions.get(item.id) ?? empty()); item.mass -= amount;
+  }
   actor.technology.items = actor.technology.items.filter(i => i.mass > 0);
   subtract(actor.technology.residue, plan.residue);
   // Fuel becomes inert carried residue. It preserves mass but cannot release heat a second time.
@@ -219,21 +231,7 @@ function withdraw(host: TechnologyHost, actor: TechnologyActor, plan: Withdrawal
   add(host.technology.ledger.imported, plan.imported);
 }
 function itemResource(i: MaterialBatch): string { return i.recipeId ? `recipe:${i.recipeId}` : 'unclassified'; }
-export function technologyStock(actor: TechnologyActor): ResourceMass[] {
-  const map = new Map<string, number>();
-  for (const item of actor.technology.items) map.set(itemResource(item), (map.get(itemResource(item)) ?? 0) + item.mass);
-  for (const m of MATERIALS) if (actor.technology.residue[m]) map.set(`residue:${m}`, actor.technology.residue[m]);
-  return [...map].map(([resourceId, mass]) => ({ resourceId, mass })).sort((a, b) => a.resourceId.localeCompare(b.resourceId));
-}
 function compositionResources(c: Composition, prefix: string): ResourceMass[] { return MATERIALS.filter(m => c[m]).map(m => ({ resourceId: `${prefix}:${m}`, mass: c[m] })); }
-function appendExecution(host: TechnologyHost, event: Omit<TechnologyExecution, 'id' | 'tick'>): TechnologyExecution {
-  const state = host.technology, execution = { ...event, id: `process-${state.executionCounter + 1}`, tick: host.tick };
-  journalTechnologyExecution(state, execution);
-  state.executionCounter++;
-  state.history.push(execution);
-  if (state.history.length > state.budgets.maxHistory) { const removed = state.history.length - state.budgets.maxHistory; state.history.splice(0, removed); state.historyDropped += removed; }
-  return execution;
-}
 export function toolCapacities(actor: TechnologyActor): Record<Capability, number> {
   const result = Object.fromEntries(CAPABILITIES.map(c => [c, 0])) as Record<Capability, number>;
   for (const item of actor.technology.items) { const powers = materialCapacities(item); for (const c of CAPABILITIES) result[c] = Math.max(result[c], powers[c]); }
@@ -245,12 +243,15 @@ export function useTool(host: TechnologyHost, actor: TechnologyActor, capability
   if (!CAPABILITIES.includes(capability) || !Number.isFinite(demand) || demand <= 0) return;
   const ranked = actor.technology.items.map(item => ({ item, power: materialCapacities(item)[capability] })).filter(i => i.power > 0.07).sort((a, b) => b.power - a.power || a.item.id.localeCompare(b.item.id));
   const best = ranked[0]; if (!best) return;
-  const opening = technologyStock(actor), requestedWear = Math.max(1, Math.ceil(demand * (2 + (1 - best.item.properties.toughness) * 8))), wear = Math.min(best.item.mass, requestedWear);
+  if (actor.technology.waterPreparation?.itemId === best.item.id) delete actor.technology.waterPreparation;
+  const opening = technologyStock(actor), waterOpening = containedWaterStock(actor), requestedWear = Math.max(1, Math.ceil(demand * (2 + (1 - best.item.properties.toughness) * 8))), wear = Math.min(best.item.mass, requestedWear);
   const debris = splitComposition(best.item.composition, wear); subtract(best.item.composition, debris); best.item.mass -= wear; add(actor.technology.residue, debris);
+  const waterLost = settleContainedWaterCapacity(host, best.item, best.item.mass === 0);
   actor.technology.items = actor.technology.items.filter(i => i.mass > 0);
   const state = host.technology; state.ledger.toolUses++;
   if (best.item.recipeId) { updateTechnologyRecipeStats(host, best.item.recipeId, { uses: 1 }); touchKnownRecipe(actor.technology, best.item.recipeId); }
-  const event = appendExecution(host, { kind: 'use', actorId: actor.id, recipeId: best.item.recipeId, programSignature: '', inputs: [{ resourceId: itemResource(best.item), mass: wear }], outputs: compositionResources(debris, 'residue'), residueMass: wear, energy: 0, work: 0, success: true, parentRecipeIds: [], catalysts: [], benefit: 0, balance: { opening, closing: technologyStock(actor), externalInputs: [], externalLoss: [] } });
+  const water = waterEnvelope(actor, waterOpening, 'spill', waterLost ? { lost: waterLost } : {});
+  const event = appendExecution(host, { kind: 'use', actorId: actor.id, recipeId: best.item.recipeId, programSignature: '', inputs: [{ resourceId: itemResource(best.item), mass: wear }], outputs: compositionResources(debris, 'residue'), residueMass: wear, energy: 0, work: 0, success: true, parentRecipeIds: [], catalysts: [], benefit: 0, ...(water ? { water } : {}), balance: { opening, closing: technologyStock(actor), externalInputs: [], externalLoss: [] } });
   maintainTechnologyMemory(host, actor);
   return { executionId: event.id, itemId: best.item.id, recipeId: best.item.recipeId, capability, power: best.power * wear / requestedWear, wear };
 }
@@ -336,8 +337,10 @@ export function technologyOpportunity(host: TechnologyHost, actor: TechnologyAct
 function recycleToFit(host: TechnologyHost, actor: TechnologyActor): void {
   while (actor.technology.items.length >= host.technology.budgets.maxItems) {
     const item = [...actor.technology.items].sort((a, b) => Math.max(...Object.values(materialCapacities(a))) - Math.max(...Object.values(materialCapacities(b))) || a.madeAt - b.madeAt)[0]!;
-    const opening = technologyStock(actor); actor.technology.items = actor.technology.items.filter(i => i !== item); add(actor.technology.residue, item.composition); host.technology.ledger.recycled++;
-    appendExecution(host, { kind: 'recycle', actorId: actor.id, recipeId: item.recipeId, programSignature: '', inputs: [{ resourceId: itemResource(item), mass: item.mass }], outputs: compositionResources(item.composition, 'residue'), residueMass: item.mass, energy: 0, work: 0, success: true, parentRecipeIds: [], catalysts: [], benefit: 0, balance: { opening, closing: technologyStock(actor), externalInputs: [], externalLoss: [] } });
+    const opening = technologyStock(actor), waterOpening = containedWaterStock(actor), lost = settleContainedWaterCapacity(host, item, true);
+    actor.technology.items = actor.technology.items.filter(i => i !== item); add(actor.technology.residue, item.composition); host.technology.ledger.recycled++;
+    const water = waterEnvelope(actor, waterOpening, 'spill', lost ? { lost } : {});
+    appendExecution(host, { kind: 'recycle', actorId: actor.id, recipeId: item.recipeId, programSignature: '', inputs: [{ resourceId: itemResource(item), mass: item.mass }], outputs: compositionResources(item.composition, 'residue'), residueMass: item.mass, energy: 0, work: 0, success: true, parentRecipeIds: [], catalysts: [], benefit: 0, ...(water ? { water } : {}), balance: { opening, closing: technologyStock(actor), externalInputs: [], externalLoss: [] } });
   }
   maintainTechnologyMemory(host, actor);
 }
@@ -357,7 +360,8 @@ function finishProject(host: TechnologyHost, actor: TechnologyActor, project: Te
     throw new Error('Technology ancestry exceeds the safe generation limit.');
   }
   knowledge.attempts++; knowledge.lastAttempt = host.tick; state.ledger.attempts++;
-  const opening = technologyStock(actor), plan = planWithdrawal(host, actor, project.program), signature = programSignature(project.program), transactionStart = state.executionCounter;
+  const opening = technologyStock(actor), waterOpening = containedWaterStock(actor), lossBefore = state.water?.environmentalLoss ?? 0,
+    plan = planWithdrawal(host, actor, project.program), signature = programSignature(project.program), transactionStart = state.executionCounter;
   if (!plan) {
     state.ledger.failures++;
     if (project.recipeId) { const practice = knowledge.competence[project.recipeId] ??= { attempts: 0, successes: 0, work: 0, benefit: 0 }; practice.attempts++; practice.work += project.progress; }
@@ -410,10 +414,12 @@ function finishProject(host: TechnologyHost, actor: TechnologyActor, project: Te
   actor.skills.technology = clamp((actor.skills.technology ?? 0) + 0.008);
   const outputs = success && output && recipe ? [{ resourceId: `recipe:${recipe.id}`, mass: output.mass }] : [];
   outputs.push(...compositionResources(residue, 'residue'), ...compositionResources(plan.fuel, 'spent'));
+  const lost = (state.water?.environmentalLoss ?? 0) - lossBefore;
+  const water = waterEnvelope(actor, waterOpening, 'spill', lost ? { lost } : {});
   appendExecution(host, { kind: project.kind, actorId: actor.id, recipeId: recipe?.id ?? null, programSignature: signature,
     inputs: [...project.program.inputs.map(i => ({ resourceId: i.source === 'product' ? `recipe:${i.recipeId}` : `${i.source}:${i.material}`, mass: i.mass })), ...plan.fuelInputs], outputs,
     residueMass: mass(residue), energy: project.energyPaid, work: project.progress, success, parentRecipeIds: project.parents,
-    catalysts, benefit: 0, nestedExecutionIds: Array.from({ length: state.executionCounter - transactionStart }, (_, n) => `process-${transactionStart + n + 1}`), balance: { opening, closing: technologyStock(actor), externalInputs: compositionResources(plan.imported, 'raw'), externalLoss: compositionResources(plan.fuel, 'spent') } });
+    catalysts, benefit: 0, ...(water ? { water } : {}), nestedExecutionIds: Array.from({ length: state.executionCounter - transactionStart }, (_, n) => `process-${transactionStart + n + 1}`), balance: { opening, closing: technologyStock(actor), externalInputs: compositionResources(plan.imported, 'raw'), externalLoss: compositionResources(plan.fuel, 'spent') } });
   knowledge.project = null; maintainTechnologyMemory(host, actor);
   return success;
 }
@@ -478,11 +484,15 @@ export function transferTechnologyItem(host: TechnologyHost, from: TechnologyAct
   if (host.cooperationEnabled === false || from.id === to.id || !host.people.includes(from) || !host.people.includes(to) || distance(from, to) > 2 || to.technology.items.length >= host.technology.budgets.maxItems) return false;
   const index = from.technology.items.findIndex(i => i.id === itemId); if (index < 0) return false;
   const item = from.technology.items[index]!, senderOpening = technologyStock(from), receiverOpening = technologyStock(to);
+  const sentWater = item.contents?.water ?? 0;
+  if ((sentWater || containedWaterStock(to).length) && freeWaterCarryQuanta(host, to) < item.mass + sentWater) return false;
+  const senderWater = containedWaterStock(from), receiverWater = containedWaterStock(to);
   from.technology.items.splice(index, 1); to.technology.items.push(item);
   const resources = [{ resourceId: itemResource(item), mass: item.mass }], transferId = `transfer-${host.technology.executionCounter + 1}`;
   const common = { kind: 'transfer' as const, recipeId: item.recipeId, programSignature: '', residueMass: 0, energy: 0, work: 0, success: true, parentRecipeIds: [], catalysts: [], benefit: 0, transferId };
-  appendExecution(host, { ...common, actorId: from.id, counterpartyId: to.id, inputs: resources, outputs: [], balance: { opening: senderOpening, closing: technologyStock(from), externalInputs: [], externalLoss: resources } });
-  appendExecution(host, { ...common, actorId: to.id, counterpartyId: from.id, inputs: [], outputs: resources, balance: { opening: receiverOpening, closing: technologyStock(to), externalInputs: resources, externalLoss: [] } });
+  const out = waterEnvelope(from, senderWater, 'transfer', sentWater ? { sent: sentWater } : {}), into = waterEnvelope(to, receiverWater, 'transfer', sentWater ? { received: sentWater } : {});
+  appendExecution(host, { ...common, actorId: from.id, counterpartyId: to.id, inputs: resources, outputs: [], ...(out ? { water: out } : {}), balance: { opening: senderOpening, closing: technologyStock(from), externalInputs: [], externalLoss: resources } });
+  appendExecution(host, { ...common, actorId: to.id, counterpartyId: from.id, inputs: [], outputs: resources, ...(into ? { water: into } : {}), balance: { opening: receiverOpening, closing: technologyStock(to), externalInputs: resources, externalLoss: [] } });
   maintainTechnologyMemory(host, from); maintainTechnologyMemory(host, to);
   return true;
 }
@@ -490,28 +500,44 @@ export function transferTechnologyItem(host: TechnologyHost, from: TechnologyAct
  * Local transfers move the existing objects; unclaimed material exits the technology model
  * at that location and is explicitly accounted as loss, never invented ecological food. */
 export function settleTechnologyEstate(host: TechnologyHost, actor: TechnologyActor, recipients: TechnologyActor[] = []): { transfers: { to: string; items: string[]; mass: number }[]; lost: Composition; executionIds: string[] } {
+  delete actor.technology.waterPreparation;
   const result = { transfers: [] as { to: string; items: string[]; mass: number }[], lost: empty(), executionIds: [] as string[] };
   const nearby = recipients.filter((p, index) => p !== actor && p.id !== actor.id && recipients.indexOf(p) === index && host.people.includes(p) && distance(actor, p) <= 2).sort((a, b) => distance(actor, a) - distance(actor, b) || a.id.localeCompare(b.id));
   for (const recipient of nearby) {
     const room = Math.max(0, host.technology.budgets.maxItems - recipient.technology.items.length);
-    const items = actor.technology.items.slice(0, room), debris = { ...actor.technology.residue };
+    let free = freeWaterCarryQuanta(host, recipient);
+    let bounded = containedWaterStock(recipient).length > 0;
+    const items: MaterialBatch[] = [];
+    for (const item of actor.technology.items) {
+      if (items.length >= room) break;
+      const carried = item.mass + (item.contents?.water ?? 0);
+      if ((bounded || (item.contents?.water ?? 0) > 0) && carried > free) continue;
+      bounded ||= (item.contents?.water ?? 0) > 0;
+      free = Math.max(0, free - carried); items.push(item);
+    }
+    const debris = bounded ? splitComposition(actor.technology.residue, free) : { ...actor.technology.residue };
     if (!items.length && !mass(debris)) continue;
-    const senderOpening = technologyStock(actor), receiverOpening = technologyStock(recipient);
-    actor.technology.items.splice(0, items.length); recipient.technology.items.push(...items);
-    add(recipient.technology.residue, debris); actor.technology.residue = empty();
+    const senderOpening = technologyStock(actor), receiverOpening = technologyStock(recipient), senderWater = containedWaterStock(actor), receiverWater = containedWaterStock(recipient);
+    const movedWater = items.reduce((n, item) => n + (item.contents?.water ?? 0), 0);
+    actor.technology.items = actor.technology.items.filter(item => !items.includes(item)); recipient.technology.items.push(...items);
+    add(recipient.technology.residue, debris); subtract(actor.technology.residue, debris);
     const resources = [...items.map(i => ({ resourceId: itemResource(i), mass: i.mass })), ...compositionResources(debris, 'residue')];
     const transferId = `transfer-${host.technology.executionCounter + 1}`;
     const common = { kind: 'transfer' as const, recipeId: null, programSignature: '', residueMass: 0, energy: 0, work: 0, success: true, parentRecipeIds: [], catalysts: [], benefit: 0, transferId };
-    const sent = appendExecution(host, { ...common, actorId: actor.id, counterpartyId: recipient.id, inputs: resources, outputs: [], balance: { opening: senderOpening, closing: technologyStock(actor), externalInputs: [], externalLoss: resources } });
-    const received = appendExecution(host, { ...common, actorId: recipient.id, counterpartyId: actor.id, inputs: [], outputs: resources, balance: { opening: receiverOpening, closing: technologyStock(recipient), externalInputs: resources, externalLoss: [] } });
+    const out = waterEnvelope(actor, senderWater, 'transfer', movedWater ? { sent: movedWater } : {}), into = waterEnvelope(recipient, receiverWater, 'transfer', movedWater ? { received: movedWater } : {});
+    const sent = appendExecution(host, { ...common, actorId: actor.id, counterpartyId: recipient.id, inputs: resources, outputs: [], ...(out ? { water: out } : {}), balance: { opening: senderOpening, closing: technologyStock(actor), externalInputs: [], externalLoss: resources } });
+    const received = appendExecution(host, { ...common, actorId: recipient.id, counterpartyId: actor.id, inputs: [], outputs: resources, ...(into ? { water: into } : {}), balance: { opening: receiverOpening, closing: technologyStock(recipient), externalInputs: resources, externalLoss: [] } });
     result.executionIds.push(sent.id, received.id); result.transfers.push({ to: recipient.id, items: items.map(i => i.id), mass: resources.reduce((n, r) => n + r.mass, 0) });
     maintainTechnologyMemory(host, recipient);
   }
   const opening = technologyStock(actor);
   if (opening.length) {
+    const waterOpening = containedWaterStock(actor);
+    let lost = 0; for (const item of actor.technology.items) lost += settleContainedWaterCapacity(host, item, true);
     result.lost = sum([...actor.technology.items.map(i => i.composition), actor.technology.residue]);
     add(host.technology.ledger.estateLoss, result.lost); actor.technology.items = []; actor.technology.residue = empty();
-    const event = appendExecution(host, { kind: 'estate', actorId: actor.id, recipeId: null, programSignature: '', inputs: opening, outputs: [], residueMass: 0, energy: 0, work: 0, success: true, parentRecipeIds: [], catalysts: [], benefit: 0, balance: { opening, closing: [], externalInputs: [], externalLoss: opening } });
+    const water = waterEnvelope(actor, waterOpening, 'spill', lost ? { lost } : {});
+    const event = appendExecution(host, { kind: 'estate', actorId: actor.id, recipeId: null, programSignature: '', inputs: opening, outputs: [], residueMass: 0, energy: 0, work: 0, success: true, parentRecipeIds: [], catalysts: [], benefit: 0, ...(water ? { water } : {}), balance: { opening, closing: [], externalInputs: [], externalLoss: opening } });
     result.executionIds.push(event.id);
   }
   actor.technology.project = null;
@@ -521,7 +547,12 @@ export function settleTechnologyEstate(host: TechnologyHost, actor: TechnologyAc
 export function projectTechnology(host: TechnologyHost): TechnologyView {
   const state = host.technology, all = host.people.flatMap(p => p.technology.items), composition = sum(all.map(i => i.composition)), residue = sum(host.people.map(p => p.technology.residue));
   const importedMass = mass(state.ledger.imported), productMass = mass(composition), residueMass = mass(residue), totals = technologyCatalogueTotals(host);
-  return { recipes: structuredClone(state.recipes), items: host.people.flatMap(p => p.technology.items.map(i => ({ id: i.id, ownerId: p.id, x: p.x, y: p.y, recipeId: i.recipeId, mass: i.mass, generation: i.generation, capacities: materialCapacities(i) }))),
+  return { recipes: structuredClone(state.recipes), items: host.people.flatMap(p => p.technology.items.map(i => {
+    const affordance = state.water ? containerAffordance(i) : undefined;
+    return { id: i.id, ownerId: p.id, x: p.x, y: p.y, recipeId: i.recipeId, mass: i.mass, generation: i.generation, capacities: materialCapacities(i),
+      ...(affordance ? { water: { version: 1 as const, quanta: i.contents?.water ?? 0, capacityQuanta: affordance.capacityQuanta,
+        quantaPerUnit: 50000 as const, leakageNumerator: affordance.leakageNumerator, leakageDenominator: 1000000 as const } } : {}) };
+  })),
     knowledge: host.people.map(person => ({ actorId: person.id, recipeIds: [...person.technology.knownRecipes] })),
     dynamics: { attempts: state.ledger.attempts, failures: state.ledger.failures, recipes: totals.recipes, products: all.length, generations: totals.maxGeneration,
       toolUses: state.ledger.toolUses, observedUtility: totals.utility, shared: state.ledger.shared,
@@ -577,16 +608,18 @@ export function assertTechnology(host: TechnologyHost): void {
   }
   current.wood += state.ledger.fuelMass; add(current, state.ledger.estateLoss);
   if (MATERIALS.some(m => current[m] !== state.ledger.imported[m])) fail();
+  assertTechnologyWater(host);
   // Pending receipts may exceed the recent display ring. Validate their physical envelopes too.
   const pending = state.journal?.pending;
   const executions = pending && pending.length > state.history.length ? pending : state.history;
   const executionIds = new Set<string>(); let previousSerial = executions === pending ? state.journal!.committedThrough : state.historyDropped;
   for (const e of executions) {
+    assertWaterExecution(e);
     if (!e || typeof e.id !== 'string' || executionIds.has(e.id) || !integer(e.tick, host.tick) || !finite(e.energy) || !integer(e.work) || !finite(e.benefit) || !integer(e.residueMass) || typeof e.success !== 'boolean' || !Array.isArray(e.inputs) || !Array.isArray(e.outputs) || !e.balance || ![e.inputs, e.outputs, e.balance.opening, e.balance.closing, e.balance.externalInputs, e.balance.externalLoss].every(xs => Array.isArray(xs) && xs.every(r => typeof r.resourceId === 'string' && integer(r.mass)))) fail();
     const total = (rs: ResourceMass[]) => rs.reduce((n, r) => n + r.mass, 0);
     if (total(e.balance.opening) + total(e.balance.externalInputs) !== total(e.balance.closing) + total(e.balance.externalLoss)) fail();
     const serial = Number(e.id.slice(8));
-    if (!/^process-\d+$/.test(e.id) || !integer(serial, state.executionCounter) || serial !== previousSerial + 1 || !['research', 'craft', 'use', 'recycle', 'estate', 'transfer'].includes(e.kind) || typeof e.actorId !== 'string' || e.actorId.length > 100 || !(e.recipeId === null || getRecipe(e.recipeId, e.tick)) || !Array.isArray(e.parentRecipeIds) || e.parentRecipeIds.length > 6 || e.parentRecipeIds.some(id => !getRecipe(id, e.tick)) || !Array.isArray(e.catalysts) || e.catalysts.length > state.budgets.maxSteps || e.catalysts.some(c => typeof c.itemId !== 'string' || !(c.recipeId === null || getRecipe(c.recipeId, e.tick)) || !integer(c.wear) || typeof c.required !== 'boolean' || !/^process-\d+$/.test(c.executionId))) fail();
+    if (!/^process-\d+$/.test(e.id) || !integer(serial, state.executionCounter) || serial !== previousSerial + 1 || !['research', 'craft', 'use', 'recycle', 'estate', 'transfer', 'water'].includes(e.kind) || typeof e.actorId !== 'string' || e.actorId.length > 100 || !(e.recipeId === null || getRecipe(e.recipeId, e.tick)) || !Array.isArray(e.parentRecipeIds) || e.parentRecipeIds.length > 6 || e.parentRecipeIds.some(id => !getRecipe(id, e.tick)) || !Array.isArray(e.catalysts) || e.catalysts.length > state.budgets.maxSteps || e.catalysts.some(c => typeof c.itemId !== 'string' || !(c.recipeId === null || getRecipe(c.recipeId, e.tick)) || !integer(c.wear) || typeof c.required !== 'boolean' || !/^process-\d+$/.test(c.executionId))) fail();
     if (e.nestedExecutionIds !== undefined && (!Array.isArray(e.nestedExecutionIds) || e.nestedExecutionIds.length > state.budgets.maxSteps + 1 || new Set(e.nestedExecutionIds).size !== e.nestedExecutionIds.length || e.nestedExecutionIds.some(id => !/^process-\d+$/.test(id) || Number(id.slice(8)) >= serial || !integer(Number(id.slice(8)), state.executionCounter)))) fail();
     if (e.kind === 'transfer' && (typeof e.transferId !== 'string' || !/^transfer-\d+$/.test(e.transferId) || typeof e.counterpartyId !== 'string' || e.counterpartyId === e.actorId)) fail();
     previousSerial = serial;

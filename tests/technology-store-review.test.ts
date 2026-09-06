@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../src/server/store.js';
 import { decodeSnapshot, encodeSnapshot } from '../src/server/snapshot.js';
-import { assertWorld, createWorld, stepWorld, type World } from '../src/world/index.js';
+import { assertWorld, createWorld, RULES_VERSION, stepWorld, type World } from '../src/world/index.js';
 import { researchTechnology, technologyWorkCost, type TechnologyProgram } from '../src/world/technology.js';
 import type { Gesture } from '../src/shared/types.js';
 
@@ -100,7 +100,7 @@ test('previous rejects a checksum-consistent uncommitted catalogue boundary befo
   assert.equal(previous.technology.recipeCounter, 1);
   previous.technology.catalogue!.committedThrough = 0;
   previous.technology.catalogue!.pending = [structuredClone(previous.technology.recipes[0]!)];
-  assertWorld(previous, 5, lab.store.context); // Physically valid; only its claimed durable boundary is false.
+  assertWorld(previous, RULES_VERSION, lab.store.context); // Physically valid; only its claimed durable boundary is false.
   const body = encodeSnapshot(previous), digest = createHash('sha256').update(body).digest('hex');
   lab.store.db.prepare('UPDATE snapshots SET body=?,digest=? WHERE slot=1').run(body, digest);
   const snapshots = lab.store.db.prepare('SELECT slot,body,digest FROM snapshots ORDER BY slot').all();

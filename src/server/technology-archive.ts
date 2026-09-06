@@ -3,6 +3,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { TECHNOLOGY_ARCHIVE_LAWS_VERSION, type TechnologyDefinition, type TechnologyExecutionQuery,
   type TechnologyStats, type TechnologyStatsRecord, type TechnologyHistoryOrigin } from '../shared/technology-archive.js';
 import type { TechnologyCatalogueTotals, TechnologyExecution, TechnologyProgram } from '../shared/technology.js';
+import { assertWaterExecution } from '../world/technology-water.js';
 import { technologyFunctionCode, technologyFunctionCount, TECHNOLOGY_FUNCTION_WORDS } from '../world/technology-catalogue.js';
 
 const MAX_TICK = Number.MAX_SAFE_INTEGER;
@@ -76,9 +77,9 @@ function resources(value: unknown): boolean {
 }
 function assertExecution(value: unknown): asserts value is TechnologyExecution {
   if (!keys(value, ['id', 'kind', 'tick', 'actorId', 'recipeId', 'programSignature', 'inputs', 'outputs', 'residueMass', 'energy', 'work', 'success',
-    'parentRecipeIds', 'catalysts', 'benefit', 'balance'], ['transferId', 'counterpartyId', 'nestedExecutionIds'])
+    'parentRecipeIds', 'catalysts', 'benefit', 'balance'], ['transferId', 'counterpartyId', 'nestedExecutionIds', 'water'])
     || serialOf(value.id, 'process') === null || !integer(value.tick) || !identifier(value.actorId)
-    || !['research', 'craft', 'use', 'recycle', 'estate', 'transfer'].includes(String(value.kind))
+    || !['research', 'craft', 'use', 'recycle', 'estate', 'transfer', 'water'].includes(String(value.kind))
     || !(value.recipeId === null || recipeId(value.recipeId)) || typeof value.programSignature !== 'string' || value.programSignature.length > 16000
     || !integer(value.residueMass) || !finite(value.energy) || !integer(value.work) || !finite(value.benefit) || typeof value.success !== 'boolean'
     || !ids(value.parentRecipeIds, 6) || !Array.isArray(value.catalysts) || value.catalysts.length > 12
@@ -99,6 +100,7 @@ function assertExecution(value: unknown): asserts value is TechnologyExecution {
     if (serialOf(value.transferId, 'transfer') === null || !identifier(value.counterpartyId) || value.counterpartyId === value.actorId) fail('transfer identities');
   } else if (Object.hasOwn(value, 'transferId') || Object.hasOwn(value, 'counterpartyId')) fail('unexpected transfer identities');
   const execution = value as unknown as TechnologyExecution;
+  assertWaterExecution(execution);
   const total = (lines: TechnologyExecution['inputs']) => lines.reduce((sum, line) => sum + line.mass, 0);
   const opening = total(execution.balance.opening) + total(execution.balance.externalInputs), closing = total(execution.balance.closing) + total(execution.balance.externalLoss);
   if (!Number.isSafeInteger(opening) || !Number.isSafeInteger(closing) || opening !== closing) fail('execution mass envelope');

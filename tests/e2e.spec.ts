@@ -10,7 +10,7 @@ import { Store } from '../src/server/store.js';
 import { assertWorld } from '../src/world/index.js';
 import type { Gesture, WorldView } from '../src/shared/types.js';
 import { materializeAnimals, syncFauna } from '../src/world/animals.js';
-import { technologyWorkCost } from '../src/world/technology.js';
+import { researchTechnology, technologyWorkCost } from '../src/world/technology.js';
 import type { TechnologyProgram } from '../src/shared/technology.js';
 
 const password = 'synthetic-browser-test-only';
@@ -19,7 +19,7 @@ test.beforeEach(async ({}, testInfo) => {
   dir = mkdtempSync(join(tmpdir(), 'carta-browser-')); store = new Store(join(dir, 'world.sqlite'));
   const probe = createServer(); probe.listen(0, '127.0.0.1'); await once(probe, 'listening'); const port = (probe.address() as { port: number }).port;
   await new Promise<void>(resolve => probe.close(() => resolve())); origin = `http://127.0.0.1:${port}`;
-  app = createApp({ store, password, origin, seed: 51926, ...(/^V[45] /.test(testInfo.title) ? { manual: true } : {}), ...(process.env.E2E_STATIC_DIR ? { staticDir: process.env.E2E_STATIC_DIR } : {}) });
+  app = createApp({ store, password, origin, seed: 51926, ...(/^V[456] /.test(testInfo.title) ? { manual: true } : {}), ...(process.env.E2E_STATIC_DIR ? { staticDir: process.env.E2E_STATIC_DIR } : {}) });
   app.server.listen(port, '127.0.0.1'); await once(app.server, 'listening'); mkdirSync('artifacts', { recursive: true });
 });
 test.afterEach(async () => { await app?.close(); store?.close(); if (dir) rmSync(dir, { recursive: true, force: true }); });
@@ -510,4 +510,72 @@ test('V5 gesture targeting keeps geographic ground coordinates while opening the
   await expect(page.locator('#tool-drawer')).toBeVisible(); await expect(page.locator('#inspector-drawer')).toBeHidden();
   await expect(page.locator('#gesture-send')).toBeEnabled();
   expect(observed.gestures).toHaveLength(0); expect(app.world.tick).toBe(0); expect(observed.errors).toEqual([]);
+});
+
+test('V6 a paid vessel prepares water autonomously and shows actual progress and contents through the server projection', async ({ page }) => {
+  // Controlled physical laboratory: this program and starting substrate are
+  // selected explicitly. The real process pays its material and work; subsequent
+  // preparation comes only from ordinary server steps without user commands.
+  const fixture = app.world, maker = fixture.people[2]!, makerId = maker.id;
+  fixture.reproductionEnabled = false; fixture.cooperationEnabled = false;
+  for (const person of fixture.people) {
+    person.action = 'rest'; person.decisionAt = 1_000_000; person.target = { x: person.x, y: person.y };
+    person.energy = 1; person.fatigue = 0; person.hunger = person.thirst = 0.1;
+  }
+  maker.materials = { wood: 0, stone: 2 };
+  const program: TechnologyProgram = { inputs: [{ source: 'raw', material: 'stone', mass: 2000 }],
+    steps: [{ op: 'form', intensity: 4, shape: 'hollow' }, { op: 'compress', intensity: 2 }] };
+  maker.technology.project = { kind: 'research', program, parents: [], recipeId: null,
+    progress: 0, requiredWork: technologyWorkCost(program), energyPaid: 0, startedAt: fixture.tick };
+  while (maker.technology.project) { setFixtureTick(fixture.tick + 1); researchTechnology(fixture, maker); }
+  expect(maker.technology.items).toHaveLength(1); expect(maker.materials.stone).toBe(0);
+  fixture.noveltyEnabled = false;
+  for (const tile of fixture.tiles) tile.drinkingWater = 0;
+  for (const structure of fixture.structures) structure.water = 0;
+  const source = fixture.tiles.find(tile => tile.x === maker.x && tile.y === maker.y)!;
+  source.drinkingWater = 0.8; source.wood = source.stone = 0;
+  maker.thirst = 0.5; maker.decisionAt = fixture.tick;
+  assertWorld(fixture);
+  const current = () => app.world.people.find(person => person.id === makerId)!;
+  for (let tick = 0; tick < 120 && !current().technology.waterPreparation; tick++) app.stepOnce();
+  expect(current().technology.waterPreparation).toBeDefined(); app.stepOnce();
+  expect(app.failed).toBe(false); assertWorld(app.world);
+  const held = current().technology.items[0]!, target = current().technology.waterPreparation!;
+  expect(held.contents!.water).toBeGreaterThan(0); expect(app.world.technology.water!.consumed).toBe(0);
+  const observed = observeMessages(page); await page.setViewportSize({ width: 1440, height: 900 });
+  await page.emulateMedia({ reducedMotion: 'reduce' }); await enter(page);
+  await page.locator('#population-toggle').click(); await page.getByLabel('Buscar habitante').fill(current().name);
+  await page.locator(`[data-person="${makerId}"]`).click();
+  await expect(page.locator('.game-reason')).toContainText('Llena un objeto que retiene agua');
+  await expect(page.locator('.game-needs h3')).toContainText('preparar agua para el camino');
+  const progress = page.getByRole('meter', { name: 'Progreso de la tarea' });
+  await expect(progress).toHaveAttribute('value', String(Math.round((held.contents!.water - target.initialQuanta) / (target.targetQuanta - target.initialQuanta) * 100)));
+  await expect.poll(() => observed.views.at(-1)?.version).toBe(6);
+  const projected = observed.views.at(-1)!.people.find(person => person.id === makerId)!;
+  expect(projected.working).toBe(true); expect(projected.workProgress).toBeGreaterThan(0);
+  await page.screenshot({ path: 'artifacts/contained-water-preparation-desktop.png' });
+  await progress.scrollIntoViewIfNeeded(); await expect(progress).toBeInViewport({ ratio: 1 });
+  await page.screenshot({ path: 'artifacts/contained-water-preparation-progress.png' });
+  await page.locator('#inspector-tab-kit').click(); await page.locator('[data-detail="products"] summary').click();
+  const card = page.locator(`[data-water-item="${held.id}"]`);
+  await expect(card).toHaveAttribute('data-water-state', 'partial');
+  await expect(card).toContainText('Agua transportada · Con agua');
+  await expect(card.locator('meter')).toHaveAttribute('value', String(held.contents!.water));
+  await page.setViewportSize({ width: 320, height: 568 }); await card.scrollIntoViewIfNeeded();
+  await expect(card).toBeInViewport({ ratio: 1 }); await fullscreen(page, 320, 568);
+  await page.screenshot({ path: 'artifacts/contained-water-real-mobile.png' });
+  const before = app.world.technology.water!.filled; app.stepOnce();
+  expect(app.world.technology.water!.filled).toBeGreaterThan(before);
+  await expect(card.locator('meter')).toHaveAttribute('value', String(current().technology.items[0]!.contents!.water));
+  for (let tick = 0; tick < 16 && current().technology.waterPreparation; tick++) app.stepOnce();
+  expect(current().technology.waterPreparation).toBeUndefined(); expect(app.failed).toBe(false);
+  // Normal broadcasts occur every five ticks. A read-only camera request obtains
+  // the completed snapshot without advancing past its short completion phase.
+  await page.locator('#landscape').focus(); await page.keyboard.press('ArrowRight');
+  await expect.poll(() => observed.views.at(-1)?.tick).toBe(app.world.tick);
+  await page.locator('#inspector-tab-now').click();
+  await expect(page.locator('.game-reason')).toContainText('Preparó una reserva finita de agua');
+  await expect(progress).toHaveCount(0);
+  expect(app.world.technology.water!.consumed).toBe(0); expect(app.world.technology.recipes[0]!.utility).toBe(0);
+  expect(observed.gestures).toHaveLength(0); expect(observed.errors).toEqual([]); assertWorld(app.world);
 });

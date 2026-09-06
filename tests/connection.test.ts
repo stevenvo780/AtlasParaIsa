@@ -73,6 +73,18 @@ test('same-sequence pause is shown while older state is discarded, including ver
   assert.equal(socket.readyState, 3);
 });
 
+for (const incompatible of [PROTOCOL_VERSION - 1, PROTOCOL_VERSION + 1]) {
+  test(`client accepts the current projection and rejects incompatible protocol ${incompatible}`, async t => {
+    const h = harness(t, [view(100)]);
+    h.connection.start(); await flush();
+    const socket = BrowserSocket.instances[0]!; socket.open();
+    assert.equal(h.worlds[0]!.version, PROTOCOL_VERSION);
+    socket.message({ type: 'state', world: { ...view(101), version: incompatible } });
+    assert.equal(h.worlds.length, 1); assert.match(h.errors[0]!, /actualices la página/);
+    assert.equal(socket.readyState, 3);
+  });
+}
+
 test('authoritative reconnect can recover a lower sequence and discard older messages thereafter', async t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const h = harness(t, [view(100), view(40)]);

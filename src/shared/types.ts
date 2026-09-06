@@ -2,7 +2,7 @@ import type { AnimalView, AnimalDynamics, BlueprintView, StructureView, Inventio
 import type { TechnologyView } from './technology.js';
 import type { OrganizationAnalysis } from './organization.js';
 export type { AnimalView, AnimalDynamics, BlueprintView, StructureView, InventionDynamics } from './life.js';
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 6;
 export interface Viewport { x: number; y: number; width: number; height: number; }
 export type Biome = 'grassland' | 'forest' | 'desert' | 'mountain' | 'wetland' | 'ocean';
 export type Terrain = 'water' | 'soil' | 'meadow' | 'shelter';

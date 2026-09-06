@@ -126,6 +126,7 @@ export function registerTechnologyRecipe(host: TechnologyCatalogueHost, recipe: 
     recipe.manufactured !== 0 || recipe.uses !== 0 || recipe.utility !== 0) fail('new recipe allocation');
   if (findTechnologyRecipe(host, recipe.signature)) fail('duplicate program');
   const code = technologyFunctionCode(recipe.capacities);
+  if (recipe.novelty !== (hasTechnologyFunction(host, recipe.capacities) ? 'program' : 'both')) fail('new recipe novelty');
   if (!catalogue) {
     if (state.recipes.length >= state.budgets.maxRecipes || recipe.generation > state.budgets.maxGeneration) fail('standalone catalogue capacity');
     state.recipeCounter++; state.recipes.push(recipe); return;

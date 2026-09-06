@@ -88,6 +88,44 @@ test('signature lookup resolves a cold discovery without allocating an identity,
   assert.equal(host.technology.recipeCounter, counter);
 });
 
+test('novelty labels follow the paid program history even after its function leaves the resident cache', () => {
+  const actor: TechnologyActor = { id: 'maker', x: 0, y: 0, energy: 1, fatigue: 0,
+    materials: { wood: 0, stone: 10 }, skills: {}, technology: initialTechnologyKnowledge() };
+  const reference: TechnologyHost = { seed: 731, tick: 0, people: [actor], technology: defaultTechnologyState() };
+  for (const intensity of [1, 3, 2]) {
+    const program: TechnologyProgram = { inputs: [{ source: 'raw', material: 'stone', mass: 1000 }], steps: [{ op: 'compress', intensity }] };
+    actor.technology.project = { kind: 'research', program, parents: [], recipeId: null,
+      progress: 0, requiredWork: technologyWorkCost(program), energyPaid: 0, startedAt: reference.tick };
+    let completed = false;
+    while (actor.technology.project) { reference.tick++; completed = researchTechnology(reference, actor); }
+    assert.equal(completed, true);
+  }
+  const definitions = reference.technology.recipes.map(recipe => ({ ...structuredClone(recipe), manufactured: 0, uses: 0, utility: 0 }));
+  assert.deepEqual(definitions.map(recipe => recipe.novelty), ['both', 'both', 'program']);
+  assert.notEqual(definitions[0]!.signature, definitions[2]!.signature);
+  assert.equal(technologyFunctionCode(definitions[0]!.capacities), technologyFunctionCode(definitions[2]!.capacities));
+  for (const archived of [false, true]) {
+    const host = { tick: reference.tick, technology: defaultTechnologyState() };
+    if (archived) {
+      enableTechnologyCatalogue(host.technology);
+      host.technology.budgets.maxRecipes = 1;
+      bindTechnologyCatalogue(host.technology, { resolve: () => null, findBySignature: () => null });
+    }
+    const empty = structuredClone(host.technology);
+    assert.throws(() => registerTechnologyRecipe(host, { ...definitions[0]!, novelty: 'program' }), /new recipe novelty/);
+    assert.deepEqual(host.technology, empty, 'a false first-function label must allocate nothing');
+    registerTechnologyRecipe(host, structuredClone(definitions[0]!));
+    registerTechnologyRecipe(host, structuredClone(definitions[1]!));
+    if (archived) assert.deepEqual(host.technology.recipes.map(recipe => recipe.id), ['recipe-2']);
+    const before = structuredClone(host.technology);
+    assert.throws(() => registerTechnologyRecipe(host, { ...definitions[2]!, novelty: 'both' }), /new recipe novelty/);
+    assert.deepEqual(host.technology, before, 'a repeated function cannot change identity, cache, pending records or totals');
+    registerTechnologyRecipe(host, structuredClone(definitions[2]!));
+    assert.equal(host.technology.recipeCounter, 3);
+    assert.equal(technologyCatalogueTotals(host).functionalDiversity, 2);
+  }
+});
+
 test('read-only resolution and copied aggregate views leave cache order, pending writes and archive objects untouched', () => {
   const { host, archive, reads } = archivedFixture(), before = structuredClone(host.technology), cache = host.technology.recipes;
   const recipe = resolveTechnologyRecipe(host, 'recipe-1', { cache: false })!;

@@ -17,6 +17,8 @@ import { assertTechnologyCatalogueState, enableTechnologyCatalogue, markTechnolo
   technologyCatalogueStateForCommit, technologyCatalogueTotals, technologyFunctionCode,
   TECHNOLOGY_FUNCTION_WORDS, type TechnologyCatalogueReader } from '../world/technology-catalogue.js';
 import { assertTechnology, maintainTechnologyMemory } from '../world/technology.js';
+import { EcologyArchive } from './ecology-archive.js';
+import { ecologyStateForCommit, markEcologyCommitted } from '../world/offscreen-state.js';
 
 const checksum = (s: string) => createHash('sha256').update(s).digest('hex');
 // Preserve all V1 gesture identities; only the new command kind extends the tuple.
@@ -102,6 +104,7 @@ export class SessionRevoked extends Error {}
 export class Store {
   readonly db: DatabaseSync;
   readonly technologyArchive: TechnologyArchive;
+  readonly ecologyArchive: EcologyArchive;
   readonly catalogueReader: TechnologyCatalogueReader = {
     resolve: (id, atTick) => this.readTechnologyRecipe(id, atTick),
     findBySignature: (signature, atTick) => {
@@ -115,17 +118,19 @@ export class Store {
   private verifiedTechnology: { startsAfter: number; through: number; catalogueThrough: number; dataVersion: number; totalChanges: number; schemaCookie: number } | null = null;
   private verifiedRecipes = new Map<string, { body: string; uses: number; utility: number; manufactured: number }>();
   private verifiedCatalogue: { totals: TechnologyCatalogueTotals; functions: number[] } | null = null;
+  private verifiedEcology: { dataVersion: number; totalChanges: number; schemaCookie: number } | null = null;
   constructor(readonly path: string, options: { readOnly?: boolean } = {}) {
     const existed = path !== ':memory:' && existsSync(path);
     if (path !== ':memory:' && !options.readOnly) mkdirSync(dirname(resolve(path)), { recursive: true, mode: 0o700 });
     this.db = new DatabaseSync(path, { readOnly: options.readOnly ?? false });
     this.technologyArchive = new TechnologyArchive(this.db);
-    let schemaVersion = existed ? 0 : 4;
+    this.ecologyArchive = new EcologyArchive(this.db);
+    let schemaVersion = existed ? 0 : 5;
     try {
       if (existed) {
         const marker = this.db.prepare('PRAGMA application_id').get() as { application_id: number };
         const version = this.db.prepare('PRAGMA user_version').get() as { user_version: number };
-        if (marker.application_id !== 1128354388 || ![1, 2, 3, 4].includes(version.user_version)) throw new Error('Unrecognized database or schema version. Explicit recovery required.');
+        if (marker.application_id !== 1128354388 || ![1, 2, 3, 4, 5].includes(version.user_version)) throw new Error('Unrecognized database or schema version. Explicit recovery required.');
         schemaVersion = version.user_version;
         for (const [table, columns] of Object.entries(BASE_TABLES)) {
           const actual = (this.db.prepare(`PRAGMA table_info(${table})`).all() as SchemaColumn[]).map(row => row.name);
@@ -141,10 +146,11 @@ export class Store {
           if (JSON.stringify(columns.map(c=>c.name))!==JSON.stringify(['id','tick','body','digest']) || columns.find(c=>c.name==='id')?.pk!==1) throw new Error('Identity archive schema is incomplete. Explicit recovery required.');
         }
         if (schemaVersion >= 4) assertTechnologySchema(this.db);
+        if (schemaVersion >= 5) this.ecologyArchive.assertSchema();
       }
       if (!options.readOnly) {
         this.db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=3000;');
-        if (!existed || schemaVersion < 4) {
+        if (!existed || schemaVersion < 5) {
           this.db.exec('BEGIN IMMEDIATE');
           try {
             if (!existed) this.db.exec(`
@@ -155,9 +161,10 @@ export class Store {
               CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);`);
             if (!existed || schemaVersion === 1) this.db.exec(ARCHIVE_SCHEMA);
             if (!existed || schemaVersion < 3) this.db.exec(LEGACY_SCHEMA);
-            this.technologyArchive.installSchema();
-            this.db.exec('PRAGMA application_id=1128354388; PRAGMA user_version=4; COMMIT;');
-            schemaVersion = 4;
+            if (!existed || schemaVersion < 4) this.technologyArchive.installSchema();
+            this.ecologyArchive.installSchema();
+            this.db.exec('PRAGMA application_id=1128354388; PRAGMA user_version=5; COMMIT;');
+            schemaVersion = 5;
           } catch (error) {
             if (this.db.isTransaction) this.db.exec('ROLLBACK');
             throw error;
@@ -170,6 +177,7 @@ export class Store {
   get context(): WorldContext {
     return { loadChunk: (key, atTick) => this.loadChunk(key, atTick),
       loadLegacy: (id, atTick) => this.loadLegacy(id, atTick),
+      ...(this.schemaVersion >= 5 ? { ecologyReader: this.ecologyArchive } : {}),
       ...(this.schemaVersion >= 4 ? { catalogueReader: this.catalogueReader } : {}) };
   }
   private readTechnologyRecipe(id: string, atTick: number): TechnologyRecipe | null {
@@ -204,6 +212,8 @@ export class Store {
     }
     if (checksum(row.body) !== row.digest) throw new Error('Snapshot checksum mismatch. Explicit recovery required.');
     const world = migrateWorld(decodeSnapshot(row.body), this.context);
+    if (world.ecology && this.schemaVersion < 5) throw new Error('Continuous ecology has no backing archive schema.');
+    if (this.schemaVersion >= 5) this.ecologyArchive.assertWorld(world);
     if (world.technology.catalogue && (world.technology.catalogue.pending.length ||
       world.technology.catalogue.committedThrough !== world.technology.recipeCounter)) technologyFailure('snapshot contains uncommitted definitions');
     const declaredJournal = world.technology.journal !== undefined;
@@ -239,6 +249,7 @@ export class Store {
     }
     this.prepareTechnology(world, declaredJournal && this.schemaVersion >= 4 ? world.technology.recipeCounter : 0);
     if (declaredJournal && this.schemaVersion >= 4) this.rememberTechnology(world);
+    this.rememberEcology();
     return { world, savedAt: row.saved_at };
   }
   loadLegacy(id: string, atTick=Number.MAX_SAFE_INTEGER): LegacyRecord | null {
@@ -271,6 +282,20 @@ export class Store {
   private dataVersion(): number { return Number(this.db.prepare('PRAGMA data_version').get()!.data_version); }
   private totalChanges(): number { return Number(this.db.prepare('SELECT total_changes() AS n').get()!.n); }
   private schemaCookie(): number { return Number(this.db.prepare('PRAGMA schema_version').get()!.schema_version); }
+  private rememberEcology(): void {
+    this.verifiedEcology = { dataVersion: this.dataVersion(), totalChanges: this.totalChanges(), schemaCookie: this.schemaCookie() };
+  }
+  private assertEcologyBaseline(): void {
+    const proof = this.verifiedEcology;
+    if (proof && proof.dataVersion === this.dataVersion() && proof.totalChanges === this.totalChanges() && proof.schemaCookie === this.schemaCookie()) return;
+    this.ecologyArchive.assertSchema();
+    const row = this.db.prepare('SELECT body,digest FROM snapshots WHERE slot=0').get() as Row | undefined;
+    if (row) {
+      if (checksum(row.body) !== row.digest) throw new Error('Ecological baseline snapshot checksum mismatch.');
+      const baseline = migrateWorld(decodeSnapshot(row.body), this.context);
+      this.ecologyArchive.assertWorld(baseline);
+    }
+  }
 
   /** A declared prefix is verified once on load, not scanned at the 10 Hz save cadence. */
   private assertTechnologyCoverage(world: World): void {
@@ -451,17 +476,26 @@ export class Store {
   save(world: World, inputs: { gesture: Gesture; result: GestureResult }[] = [], requiredSessions: string[] = []): void {
     const retired = world.retiredChunks;
     this.prepareTechnology(world);
+    if (world.ecology) assertWorld(world, world.version, this.context);
     enableTechnologyJournal(world.technology);
     assertTechnologyJournal(world.technology, world.tick);
-    const body = encodeSnapshot({ ...world, technology: technologyCatalogueStateForCommit(technologyStateForCommit(world.technology)) });
+    const body = encodeSnapshot({ ...world, ...(world.ecology ? { ecology: ecologyStateForCommit(world.ecology) } : {}),
+      technology: technologyCatalogueStateForCommit(technologyStateForCommit(world.technology)) });
     this.lastSnapshotBytes = Buffer.byteLength(body);
     this.db.exec('BEGIN IMMEDIATE');
     try {
+      this.assertEcologyBaseline();
+      if (world.ecology && world.ecology.revision === world.ecology.committedRevision) {
+        const previous = this.db.prepare('SELECT body FROM snapshots WHERE slot=0').get() as {body:string}|undefined;
+        if (previous && (decodeSnapshot(previous.body) as World).ecology && previous.body !== body)
+          throw new Error('An ecological snapshot changed without advancing its durable revision.');
+      }
       this.technologyArchive.beginHostTransaction();
       // Authorization and commit share a transaction with respect to external revocation.
       if (requiredSessions.some(hash => !this.sessionValid(hash))) throw new SessionRevoked('Session revoked before commit.');
       this.flushTechnology(world);
       this.technologyArchive.observeHostWrites(() => {
+      this.ecologyArchive.flush(world);
       const archiveIdentity=this.db.prepare('INSERT INTO legacy VALUES (?,?,?,?)');
       for (const record of world.retiredLegacy) {
         assertLegacyRecord(record,world.tick); this.assertLegacyParents(record,world);
@@ -491,6 +525,7 @@ export class Store {
     } catch (error) {
       if (this.db.isTransaction) this.db.exec('ROLLBACK');
       this.technologyArchive.invalidateVerification();
+      this.verifiedEcology = null;
       throw error;
     }
     // A discarded transaction must leave the caller's pending archive queue intact for a retry.
@@ -498,6 +533,7 @@ export class Store {
     world.retiredLegacy = [];
     markTechnologyJournalCommitted(world.technology);
     markTechnologyCatalogueCommitted(world.technology);
+    markEcologyCommitted(world);
     // The transaction is already durable. Failure to refresh an optimization
     // cannot turn a successful save into a reported failure or a discarded tick.
     try { this.rememberTechnology(world); }
@@ -505,6 +541,7 @@ export class Store {
       this.verifiedTechnology = null; this.verifiedCatalogue = null; this.verifiedRecipes.clear();
       this.technologyArchive.invalidateVerification();
     }
+    try { this.rememberEcology(); } catch { this.verifiedEcology = null; }
   }
   result(gesture: Gesture): GestureResult | null {
     const row = this.db.prepare('SELECT fingerprint,result FROM inputs WHERE id=?').get(gesture.id) as { fingerprint: string; result: string } | undefined;
@@ -573,6 +610,8 @@ export class Store {
     const row = this.db.prepare('SELECT body,digest,saved_at FROM snapshots WHERE slot=1').get() as Row | undefined;
     if (!row || checksum(row.body) !== row.digest) throw new Error('No valid previous checkpoint.');
     const world = migrateWorld(decodeSnapshot(row.body), this.context);
+    if (world.ecology && this.schemaVersion < 5) throw new Error('Previous continuous ecology has no backing archive schema.');
+    if (this.schemaVersion >= 5) this.ecologyArchive.assertPrevious(world);
     const declaredJournal = world.technology.journal !== undefined;
     if (world.technology.catalogue && (world.technology.catalogue.pending.length ||
       world.technology.catalogue.committedThrough !== world.technology.recipeCounter)) technologyFailure('previous snapshot contains uncommitted definitions');
@@ -584,6 +623,8 @@ export class Store {
     try {
       recovered.db.exec('BEGIN IMMEDIATE');
       recovered.technologyArchive.beginHostTransaction();
+      if (world.ecology) recovered.ecologyArchive.restore(world.ecology.revision);
+      else recovered.ecologyArchive.restoreLegacyPrevious(world);
       bindWorldContext(world, recovered.context);
       // Two snapshots may share a tick. Their serial/recipe boundaries still differ.
       recovered.db.prepare('DELETE FROM technology_executions WHERE serial>?').run(world.technology.executionCounter);

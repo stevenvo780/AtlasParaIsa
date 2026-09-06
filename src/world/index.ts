@@ -24,6 +24,8 @@ import { advanceWaterPreparation, beginWaterPreparation, containedWaterQuanta, d
 import { WATER_QUANTA_PER_UNIT } from './material-affordances.js';
 import { updateEcosystemResources } from './ecology-resources.js';
 import { phaseAt, TICKS_PER_DAY } from './time.js';
+import { assertEcologyState, type EcologyState } from './offscreen-state.js';
+import { finishEcologyStep, projectEcology } from './offscreen.js';
 export { phaseAt, TICKS_PER_DAY } from './time.js';
 export { bindWorldContext, tileAt, normalizeViewport, worldContext } from './spatial.js';
 export type { WorldContext } from './spatial.js';
@@ -63,6 +65,7 @@ export interface Memory extends MemoryView {
   action: Action; weight: number; roles: ('S' | 'I')[];
 }
 export interface World {
+  ecology?: EcologyState;
   version: number; seed: number; rng: number; tick: number; width: number; height: number;
   weather: 'clear' | 'rain'; tiles: Tile[]; people: Person[]; places: PlaceView[];
   memories: Memory[]; events: ChronicleEvent[]; eventCounter: number;
@@ -645,13 +648,16 @@ function applyGesture(world: World, gesture: Gesture, order: number): GestureRes
 /** One fixed 100 ms step. Browser presence and wall-clock time are never inputs. */
 export function stepWorld(world: World, inputs: Gesture[] = [], context: WorldContext = worldContext(world)): GestureResult[] {
   bindWorldContext(world, context);
+  if (world.ecology && (world.ecology.preparedForTick !== world.tick || world.ecology.preparing.length))
+    throw new Error('Prepare and commit ecological maintenance before advancing people or commands.');
   if (world.technology.checkpoint === undefined) world.technology.checkpoint = captureTechnologyCheckpoint(world.technology, world.people, world.tick, 'migration');
   world.tick++;
-  maintainRegions(world, context);
+  if (!world.ecology) maintainRegions(world, context);
   const results = inputs.map((gesture, order) => applyGesture(world, gesture, order));
   world.invitations = world.invitations.filter(invitation => invitation.until > world.tick);
   world.reminders = world.reminders.filter(reminder => reminder.until > world.tick);
   ecology(world);
+  if (world.ecology && world.tick % 600 === 0) world.ecology.pendingClimate.push({ tick: world.tick, weather: world.weather });
   stepEcosystem(world.tiles, world.tick, world.weather, phaseAt(world.tick), false);
   stepAnimals(world,event=>addEvent(world,event));
   stepStructures(world,event=>addEvent(world,event));
@@ -671,6 +677,7 @@ export function stepWorld(world: World, inputs: Gesture[] = [], context: WorldCo
   if (catalogueEnabled(world.technology)) for (const person of world.people) maintainTechnologyMemory(world, person);
   advanceTechnologyCheckpoint(world.technology, world.people, world.tick);
   recordSample(world);
+  finishEcologyStep(world, context);
   return results;
 }
 
@@ -747,7 +754,8 @@ export function projectWorld(world: World, viewport?: Viewport, context: WorldCo
     organizationViews.set(world,organization);
   }
   return {
-    version: PROTOCOL_VERSION, sequence: world.tick, tick: world.tick, day: Math.floor(world.tick / TICKS_PER_DAY) + 1,
+    version: PROTOCOL_VERSION, sequence: world.ecology?.revision ?? world.tick, tick: world.tick, day: Math.floor(world.tick / TICKS_PER_DAY) + 1,
+    ...(world.ecology ? { ecology: projectEcology(world, viewport, context) } : {}),
     phase: phaseAt(world.tick), weather: world.weather, width: v.width, height: v.height,
     originX: v.x, originY: v.y, infinite: true, activeChunks: Object.keys(world.chunks).length, discoveredChunks: world.discoveredChunks, settlementCount: world.settlementCount,
     tiles: projected.tiles.map(t => ({ x: t.x, y: t.y, terrain: t.terrain, biome: t.biome, elevation: t.elevation, wood: t.wood, stone: t.stone, moisture: Math.round(t.moisture * 1000) / 1000, food: Math.round(t.food * 1000) / 1000, vegetation: Math.round(t.vegetation * 1000) / 1000, feature: t.feature, variety: t.variety, growth: t.growth, fertility: t.fertility, cultivation: t.cultivation, traffic: t.traffic, drinkingWater: t.drinkingWater, species: t.species, fauna: t.fauna, life: t.life })),
@@ -807,6 +815,7 @@ export function assertWorld(value: unknown, expectedVersion = RULES_VERSION, con
   assertCommon(value, false, expectedVersion);
   const w = value;
   bindWorldContext(w, context ?? worldContext(w));
+  assertEcologyState(w);
   const fail = (): never => { throw new Error('Estado procedural inválido.'); };
   const identities = new Map<string, Person | LegacyRecord | undefined>();
   const identity = (id: string): Person | LegacyRecord | undefined => {

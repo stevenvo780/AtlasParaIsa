@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import { once } from 'node:events';
 import { EcosystemKernel } from '../src/world/ecosystem-kernel.js';
 import { generateChunk } from '../src/world/terrain.js';
 // Isolated .mjs benchmark helpers intentionally have no application wiring.
@@ -28,6 +29,28 @@ test('missing Python rejects GPU setup and completes owned cleanup without an ex
   assert.equal(probe.error, undefined);
   assert.equal(probe.status, 0);
   assert.equal(probe.stdout, 'rejected-and-closed');
+});
+test('GPU requests cover stdin backpressure and close escalates only their owned unresponsive child',async()=>{
+  // Real pipes and an owned child that acknowledges readiness but never reads input.
+  const child=spawn(process.execPath,['--eval',"process.on('SIGTERM',()=>{}); process.stdout.write('ready'); setInterval(()=>{},1000);"],{stdio:['pipe','pipe','pipe']});
+  const completed=new Promise(resolve=>child.once('close',(code,signal)=>resolve({code,signal})));
+  await once(child.stdout,'data');
+  const gpu=new GPUWorker();gpu.process=child;gpu.completion=completed;
+  gpu.reader={frame:()=>new Promise(()=>{})};child.stdin.on('error',()=>{});
+  const deadline=gpu.deadline.bind(gpu);let deadlines=0;
+  gpu.deadline=promise=>{deadlines++;return deadline(promise,30);};
+  try {
+    await assert.rejects(gpu.setup(131072,new Int32Array(262144)),/deadline exceeded/);
+    assert.equal(deadlines,1);assert.equal(child.stdin.writableNeedDrain,true);
+    await assert.rejects(gpu.step(new Float64Array(131072),10,false,1),/deadline exceeded/);
+    assert.equal(deadlines,2);
+    await gpu.close();
+    assert.equal(child.signalCode,'SIGKILL');
+    await gpu.close(); // Repeated cleanup awaits the same already completed close.
+  } finally {
+    if(child.exitCode===null&&child.signalCode===null)child.kill('SIGKILL');
+    await completed;
+  }
 });
 test('SoA port agrees exactly with the unchanged engine through 120 varied updates, gaps and feature transitions',()=>{
   let actual=fixture(),expected=clone(actual);const kernel=new EcosystemKernel();

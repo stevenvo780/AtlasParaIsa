@@ -75,12 +75,13 @@ export class GPUWorker {
     // close also waits for the child's pipes, so failure cleanup cannot hang here.
     result.completion=new Promise(resolve=>result.process.once('close',(code,signal)=>resolve({code,signal})));
     result.process.once('error',error=>{result.reader.error=error;result.reader.done=true;result.reader.wake();});
+    result.process.stdin.on('error',error=>{result.reader.error=error;result.reader.done=true;result.reader.wake();});
     try {result.initialization=(await result.deadline(result.reader.frame())).header;result.startupMs=performance.now()-started;return result;}
     catch(error){await result.close();throw error;}
   }
-  async deadline(promise) {
+  async deadline(promise, timeoutMs=60000) {
     let timer;
-    try {return await Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>{this.process.kill('SIGTERM');reject(new Error('Owned GPU worker deadline exceeded'));},60000);})]);}
+    try {return await Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>{this.process.kill('SIGTERM');reject(new Error('Owned GPU worker deadline exceeded'));},timeoutMs);})]);}
     finally {clearTimeout(timer);}
   }
   async send(header,body) {
@@ -90,17 +91,30 @@ export class GPUWorker {
     if(!this.process.stdin.write(payload))await once(this.process.stdin,'drain');
   }
   async setup(n,neighbors) {
-    const start=performance.now();await this.send({kind:'setup',n},neighbors);
-    const reply=await this.deadline(this.reader.frame());return {...reply.header,nodeSetupMs:performance.now()-start};
+    const start=performance.now();
+    const reply=await this.deadline((async()=>{await this.send({kind:'setup',n},neighbors);return this.reader.frame();})());
+    return {...reply.header,nodeSetupMs:performance.now()-start};
   }
   async step(data,tick,rain,light) {
-    const start=performance.now();await this.send({kind:'step',tick,rain,light},data);
-    const result=await this.deadline(this.reader.frame());
+    const start=performance.now();
+    const result=await this.deadline((async()=>{await this.send({kind:'step',tick,rain,light},data);return this.reader.frame();})());
     return {data:result.data,phases:{...result.header,nodeIPCRoundTripMs:performance.now()-start}};
   }
   async close() {
     if(!this.process)return;
+    this.closing??=this.finishClose();return this.closing;
+  }
+  async waitClosed(milliseconds) {
+    let timer;
+    try{return await Promise.race([this.completion.then(()=>true),new Promise(resolve=>{timer=setTimeout(()=>resolve(false),milliseconds);})]);}
+    finally{clearTimeout(timer);}
+  }
+  async finishClose() {
     if(this.process.exitCode===null && this.process.signalCode===null){this.process.stdin.end();}
-    await this.completion;
+    if(await this.waitClosed(1000))return;
+    this.process.kill('SIGTERM');
+    if(await this.waitClosed(1000))return;
+    this.process.kill('SIGKILL');
+    if(!await this.waitClosed(1000))throw new Error('Owned GPU worker did not close after SIGKILL');
   }
 }

@@ -100,6 +100,8 @@ export interface TechnologyCatalogueState {
 }
 export interface TechnologyView {
   recipes: TechnologyRecipe[];
+  /** Only each present actor's learned instructions, independent of the detail sample. */
+  knowledge?: { actorId: string; recipeIds: string[] }[];
   items: { id: string; ownerId: string; x: number; y: number; recipeId: string | null; mass: number; generation: number; capacities: Record<Capability, number> }[];
   dynamics: { attempts: number; failures: number; recipes: number; products: number; generations: number;
     toolUses: number; observedUtility: number; shared: number; importedMass: number; productMass: number;

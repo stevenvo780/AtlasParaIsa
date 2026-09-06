@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import type { Gesture, GestureResult } from '../shared/types.js';
-import { migrateWorld, type World } from '../world/index.js';
+import { assertWorld, bindWorldContext, migrateWorld, type World, type WorldContext } from '../world/index.js';
 import { CHUNK_SIZE, MAX_COORDINATE, type Chunk } from '../world/terrain.js';
 import { assertEcosystemTile, assertChunkLife } from '../world/validation.js';
 import { decodeSnapshot, encodeSnapshot } from './snapshot.js';
@@ -11,8 +11,12 @@ import type { LegacyRecord } from '../shared/demography.js';
 import { assertLegacyRecord } from '../world/lineage.js';
 import { TechnologyArchive } from './technology-archive.js';
 import { TECHNOLOGY_ARCHIVE_LAWS_VERSION, type TechnologyDefinition } from '../shared/technology-archive.js';
-import type { TechnologyRecipe } from '../shared/technology.js';
+import type { TechnologyCatalogueTotals, TechnologyRecipe } from '../shared/technology.js';
 import { enableTechnologyJournal, assertTechnologyJournal, technologyStateForCommit, markTechnologyJournalCommitted } from '../world/technology-journal.js';
+import { assertTechnologyCatalogueState, enableTechnologyCatalogue, markTechnologyCatalogueCommitted,
+  technologyCatalogueStateForCommit, technologyCatalogueTotals, technologyFunctionCode,
+  TECHNOLOGY_FUNCTION_WORDS, type TechnologyCatalogueReader } from '../world/technology-catalogue.js';
+import { assertTechnology, maintainTechnologyMemory } from '../world/technology.js';
 
 const checksum = (s: string) => createHash('sha256').update(s).digest('hex');
 // Preserve all V1 gesture identities; only the new command kind extends the tuple.
@@ -35,6 +39,8 @@ function definitionOf(recipe: TechnologyRecipe): TechnologyDefinition {
 const sameStats = (a: { uses: number; utility: number; manufactured: number }, b: TechnologyRecipe) =>
   a.uses === b.uses && a.utility === b.utility && a.manufactured === b.manufactured;
 const technologyFailure = (message: string): never => { throw new Error(`Technology archive ${message}. Explicit recovery required.`); };
+const sameUtility = (a: number, b: number, terms: number): boolean => Number.isFinite(a) && Number.isFinite(b)
+  && Math.abs(a - b) <= Number.EPSILON * Math.max(1, terms) * Math.max(1, a, b);
 
 /** Read-only schema inspection: opening a recovery source must never install tables. */
 function assertTechnologySchema(db: DatabaseSync): void {
@@ -96,10 +102,19 @@ export class SessionRevoked extends Error {}
 export class Store {
   readonly db: DatabaseSync;
   readonly technologyArchive: TechnologyArchive;
+  readonly catalogueReader: TechnologyCatalogueReader = {
+    resolve: (id, atTick) => this.readTechnologyRecipe(id, atTick),
+    findBySignature: (signature, atTick) => {
+      if (this.schemaVersion < 4) return null;
+      const definition = this.technologyArchive.findDefinitionBySignature(signature, atTick);
+      return definition ? this.readTechnologyRecipe(definition.id, atTick) : null;
+    },
+  };
   lastSnapshotBytes = 0;
   private readonly schemaVersion: number;
-  private verifiedTechnology: { startsAfter: number; through: number; dataVersion: number; totalChanges: number; schemaCookie: number } | null = null;
+  private verifiedTechnology: { startsAfter: number; through: number; catalogueThrough: number; dataVersion: number; totalChanges: number; schemaCookie: number } | null = null;
   private verifiedRecipes = new Map<string, { body: string; uses: number; utility: number; manufactured: number }>();
+  private verifiedCatalogue: { totals: TechnologyCatalogueTotals; functions: number[] } | null = null;
   constructor(readonly path: string, options: { readOnly?: boolean } = {}) {
     const existed = path !== ':memory:' && existsSync(path);
     if (path !== ':memory:' && !options.readOnly) mkdirSync(dirname(resolve(path)), { recursive: true, mode: 0o700 });
@@ -152,6 +167,32 @@ export class Store {
       this.schemaVersion = schemaVersion;
     } catch (error) { this.db.close(); throw error; }
   }
+  get context(): WorldContext {
+    return { loadChunk: (key, atTick) => this.loadChunk(key, atTick),
+      loadLegacy: (id, atTick) => this.loadLegacy(id, atTick),
+      ...(this.schemaVersion >= 4 ? { catalogueReader: this.catalogueReader } : {}) };
+  }
+  private readTechnologyRecipe(id: string, atTick: number): TechnologyRecipe | null {
+    if (this.schemaVersion < 4) return null;
+    const definition = this.technologyArchive.getDefinition(id, atTick);
+    if (!definition) return null;
+    const stats = this.technologyArchive.getStats(id, atTick);
+    if (!stats) technologyFailure('definition has no statistics at the requested tick');
+    const { lawsVersion: _lawsVersion, ...recipe } = definition;
+    return { ...recipe, uses: stats!.uses, utility: stats!.utility, manufactured: stats!.manufactured };
+  }
+  /** Validate the old complete representation before adopting bounded local memory.
+   * An existing catalogue is never repaired or pruned to make corrupted input load. */
+  private prepareTechnology(world: World, committedThrough = 0): void {
+    bindWorldContext(world, this.context);
+    if (this.schemaVersion >= 4 && world.technology.catalogue === undefined) {
+      assertWorld(world, world.version, this.context);
+      enableTechnologyCatalogue(world.technology, { committedThrough });
+      for (const actor of world.people) maintainTechnologyMemory(world, actor);
+    }
+    assertTechnologyCatalogueState(world);
+    assertTechnology(world);
+  }
   load(): { world: World; savedAt: number } | null {
     const check = this.db.prepare('PRAGMA quick_check').get() as Record<string, unknown>;
     if (Object.values(check)[0] !== 'ok') throw new Error('SQLite integrity check failed. Explicit recovery required.');
@@ -162,7 +203,9 @@ export class Store {
       return null;
     }
     if (checksum(row.body) !== row.digest) throw new Error('Snapshot checksum mismatch. Explicit recovery required.');
-    const world = migrateWorld(decodeSnapshot(row.body));
+    const world = migrateWorld(decodeSnapshot(row.body), this.context);
+    if (world.technology.catalogue && (world.technology.catalogue.pending.length ||
+      world.technology.catalogue.committedThrough !== world.technology.recipeCounter)) technologyFailure('snapshot contains uncommitted definitions');
     const declaredJournal = world.technology.journal !== undefined;
     enableTechnologyJournal(world.technology);
     assertTechnologyJournal(world.technology, world.tick);
@@ -194,6 +237,7 @@ export class Store {
       if (serial.maximum!==null&&(!Number.isSafeInteger(serial.maximum)||serial.maximum>world.birthCounter)) throw new Error('Archived human identity exceeds snapshot counter. Explicit recovery required.');
       for (const person of world.people) if(this.loadLegacy(person.id,world.tick)) throw new Error('A deceased identity is present among living inhabitants. Explicit recovery required.');
     }
+    this.prepareTechnology(world, declaredJournal && this.schemaVersion >= 4 ? world.technology.recipeCounter : 0);
     if (declaredJournal && this.schemaVersion >= 4) this.rememberTechnology(world);
     return { world, savedAt: row.saved_at };
   }
@@ -256,11 +300,29 @@ export class Store {
     }
   }
 
+  private assertTechnologyAuthor(world: World, definition: Pick<TechnologyDefinition, 'inventorId' | 'tick'>): void {
+    const author = world.people.find(person => person.id === definition.inventorId)
+      ?? world.legacy.find(person => person.id === definition.inventorId)
+      ?? world.retiredLegacy.find(person => person.id === definition.inventorId)
+      ?? this.loadLegacy(definition.inventorId, world.tick);
+    if (!author || author.bornAt > definition.tick || 'diedAt' in author && author.diedAt < definition.tick)
+      technologyFailure('definition author disagrees with world history');
+  }
   private assertTechnologyCache(world: World): void {
     const state = world.technology;
-    // V5 still retains every definition (the 256 cap is unchanged by this integration).
-    const count = this.db.prepare('SELECT COUNT(*) AS count FROM technology_definitions WHERE tick<=?').get(world.tick) as { count: number };
-    if (count.count !== state.recipes.length) technologyFailure('definition cache disagrees with archive');
+    // The resident list is a cache, never evidence of lifetime archive coverage.
+    const summary = this.technologyArchive.summarizeDefinitions(world.tick, definition => this.assertTechnologyAuthor(world, definition));
+    if (summary.recipes !== state.recipeCounter) technologyFailure('definition cache disagrees with archive');
+    if (state.catalogue) {
+      const totals = state.catalogue.totals;
+      for (const key of ['recipes', 'maxGeneration', 'manufactured', 'uses', 'functionalDiversity'] as const)
+        if (summary[key] !== totals[key]) technologyFailure('catalogue aggregates disagree with archive');
+      // Utility is an observational float accumulated in execution order in the
+      // world and recipe order in the archive. Only this non-material sum gets a
+      // rounding allowance; integer mass, counts and novelty bits stay exact.
+      if (!sameUtility(summary.utility, totals.utility, summary.uses + summary.recipes) ||
+        JSON.stringify(summary.functions) !== JSON.stringify(state.catalogue.functions)) technologyFailure('catalogue summary disagrees with archive');
+    }
     for (const recipe of state.recipes) {
       const definition = this.technologyArchive.getDefinition(recipe.id, world.tick), stats = this.technologyArchive.getStats(recipe.id, world.tick);
       if (!definition || JSON.stringify(definition) !== JSON.stringify(definitionOf(recipe))) technologyFailure('cached definition disagrees with archive');
@@ -273,15 +335,54 @@ export class Store {
   private rememberTechnology(world: World): void {
     const state = world.technology, journal = state.journal!;
     this.verifiedTechnology = { startsAfter: journal.startsAfter, through: journal.committedThrough,
+      catalogueThrough: state.catalogue?.committedThrough ?? state.recipeCounter,
       dataVersion: this.dataVersion(), totalChanges: this.totalChanges(), schemaCookie: this.schemaCookie() };
     this.verifiedRecipes = new Map(state.recipes.map(recipe => [recipe.id, { body: JSON.stringify(definitionOf(recipe)),
       uses: recipe.uses, utility: recipe.utility, manufactured: recipe.manufactured }]));
+    const functions = state.catalogue?.functions.slice() ?? Array<number>(TECHNOLOGY_FUNCTION_WORDS).fill(0);
+    if (!state.catalogue) for (const recipe of state.recipes) {
+      const code = technologyFunctionCode(recipe.capacities), index = code >>> 5;
+      functions[index] = (functions[index]! | (1 << (code & 31))) >>> 0;
+    }
+    this.verifiedCatalogue = { totals: technologyCatalogueTotals(world), functions };
+  }
+
+  /** Prove aggregate changes from bounded pending records before acknowledging a
+   * new snapshot. Unchanged resident objects cannot silently change the totals. */
+  private assertTechnologyChanges(world: World): void {
+    const state = world.technology, catalogue = state.catalogue;
+    if (!catalogue) return;
+    const expected = this.verifiedCatalogue ? { ...this.verifiedCatalogue.totals }
+      : { recipes: 0, maxGeneration: 0, manufactured: 0, uses: 0, utility: 0, functionalDiversity: 0 };
+    const functions = this.verifiedCatalogue?.functions.slice() ?? Array<number>(TECHNOLOGY_FUNCTION_WORDS).fill(0);
+    const prefix = expected.recipes;
+    for (const recipe of [...catalogue.pending].sort((a, b) => Number(a.id.slice(7)) - Number(b.id.slice(7)))) {
+      const id = Number(recipe.id.slice(7));
+      const previous = id <= prefix ? this.verifiedRecipes.get(recipe.id) ?? this.readTechnologyRecipe(recipe.id, world.tick) : null;
+      if (id <= prefix && !previous) technologyFailure('pending statistics have no durable definition');
+      if (id > prefix) {
+        if (id !== ++expected.recipes) technologyFailure('pending definitions do not extend the durable prefix');
+        expected.maxGeneration = Math.max(expected.maxGeneration, recipe.generation);
+        const code = technologyFunctionCode(recipe.capacities), index = code >>> 5, bit = 1 << (code & 31);
+        if (!(functions[index]! & bit)) { functions[index] = (functions[index]! | bit) >>> 0; expected.functionalDiversity++; }
+      }
+      for (const key of ['manufactured', 'uses', 'utility'] as const) {
+        const delta = recipe[key] - (previous?.[key] ?? 0);
+        if (!Number.isFinite(delta) || delta < 0) technologyFailure('pending statistics regress');
+        expected[key] += delta;
+      }
+    }
+    for (const key of ['recipes', 'maxGeneration', 'manufactured', 'uses', 'functionalDiversity'] as const)
+      if (!Number.isSafeInteger(expected[key]) || expected[key] !== catalogue.totals[key]) technologyFailure('catalogue totals changed without matching pending records');
+    if (!sameUtility(expected.utility, catalogue.totals.utility, expected.uses + expected.recipes) ||
+      JSON.stringify(functions) !== JSON.stringify(catalogue.functions)) technologyFailure('catalogue summary changed without matching pending records');
   }
 
   /** All writes use the host transaction. Neither this helper nor a failed save clears queues. */
   private flushTechnology(world: World, recovering = false): void {
     const state = world.technology, journal = state.journal!;
     assertTechnologyJournal(state, world.tick);
+    assertTechnologyCatalogueState(world);
     const verified = this.verifiedTechnology;
     if (!verified || verified.startsAfter !== journal.startsAfter || verified.through !== journal.committedThrough
       || verified.dataVersion !== this.dataVersion() || verified.totalChanges !== this.totalChanges() || verified.schemaCookie !== this.schemaCookie()) {
@@ -291,15 +392,18 @@ export class Store {
         // Validate the durable baseline BEFORE any idempotent writes. Otherwise a
         // deleted definition/statistics row could be silently rebuilt from the candidate.
         const row = this.db.prepare('SELECT body,digest FROM snapshots WHERE slot=0').get() as Row | undefined;
+        if (!row && this.db.prepare("SELECT 1 FROM metadata WHERE key='initialized'").get()) technologyFailure('baseline snapshot is missing');
         if (row) {
           if (checksum(row.body) !== row.digest) technologyFailure('baseline snapshot checksum mismatch');
-          const baseline = migrateWorld(decodeSnapshot(row.body));
+          const baseline = migrateWorld(decodeSnapshot(row.body), this.context);
           if (baseline.technology.journal !== undefined) {
             const committed = baseline.technology.journal;
             assertTechnologyJournal(baseline.technology, baseline.tick);
             if (committed.pending.length || committed.committedThrough !== baseline.technology.executionCounter) technologyFailure('baseline snapshot contains uncommitted executions');
             this.assertTechnologyCoverage(baseline); this.assertTechnologyCache(baseline);
             if (journal.startsAfter !== committed.startsAfter || journal.committedThrough !== committed.committedThrough) technologyFailure('candidate changed the committed coverage boundary');
+            if (baseline.technology.catalogue && state.catalogue?.committedThrough !== baseline.technology.catalogue.committedThrough)
+              technologyFailure('candidate changed the committed definition boundary');
             this.rememberTechnology(baseline);
           } else if (this.technologyArchive.getHistoryOrigin()) {
             technologyFailure('baseline snapshot lost its declared history origin');
@@ -310,13 +414,33 @@ export class Store {
       }
     }
     this.technologyArchive.initializeHistory(journal.startsAfter);
+    if (this.verifiedTechnology && state.catalogue && state.catalogue.committedThrough !== this.verifiedTechnology.catalogueThrough)
+      technologyFailure('candidate changed the committed definition boundary');
+    if (!recovering) this.assertTechnologyChanges(world);
     const latest = this.db.prepare('SELECT serial FROM technology_executions ORDER BY serial DESC LIMIT 1').get() as { serial: number } | undefined;
     if (latest && latest.serial > state.executionCounter) technologyFailure('cannot move behind archived executions');
-    for (const recipe of [...state.recipes].sort((a, b) => a.generation - b.generation || a.id.localeCompare(b.id))) {
+    const changed = state.catalogue?.pending ?? state.recipes;
+    for (const recipe of changed) this.assertTechnologyAuthor(world, recipe);
+    if (state.catalogue) {
+      const pendingIds = new Set(changed.map(recipe => recipe.id));
+      for (const recipe of state.recipes) {
+        if (pendingIds.has(recipe.id)) continue;
+        const cached = this.verifiedRecipes.get(recipe.id);
+        if (cached) {
+          if (cached.body !== JSON.stringify(definitionOf(recipe)) || !sameStats(cached, recipe))
+            technologyFailure('resident definition or statistics changed without a pending record');
+        } else {
+          const durable = this.readTechnologyRecipe(recipe.id, world.tick);
+          if (!durable || JSON.stringify(definitionOf(durable)) !== JSON.stringify(definitionOf(recipe)) || !sameStats(durable, recipe))
+            technologyFailure('cold resident definition or statistics disagrees with archive');
+        }
+      }
+    }
+    for (const recipe of [...changed].sort((a, b) => Number(a.id.slice(7)) - Number(b.id.slice(7)))) {
       const definition = definitionOf(recipe), cached = this.verifiedRecipes.get(recipe.id);
       if (!cached || cached.body !== JSON.stringify(definition)) this.technologyArchive.putDefinition(definition);
     }
-    for (const recipe of state.recipes) {
+    for (const recipe of changed) {
       const previous = this.verifiedRecipes.get(recipe.id) ?? this.technologyArchive.getStats(recipe.id, world.tick);
       if (!previous || !sameStats(previous, recipe)) this.technologyArchive.putStats(recipe.id, world.tick,
         { uses: recipe.uses, utility: recipe.utility, manufactured: recipe.manufactured });
@@ -326,15 +450,18 @@ export class Store {
 
   save(world: World, inputs: { gesture: Gesture; result: GestureResult }[] = [], requiredSessions: string[] = []): void {
     const retired = world.retiredChunks;
+    this.prepareTechnology(world);
     enableTechnologyJournal(world.technology);
     assertTechnologyJournal(world.technology, world.tick);
-    const body = encodeSnapshot({ ...world, technology: technologyStateForCommit(world.technology) });
+    const body = encodeSnapshot({ ...world, technology: technologyCatalogueStateForCommit(technologyStateForCommit(world.technology)) });
     this.lastSnapshotBytes = Buffer.byteLength(body);
     this.db.exec('BEGIN IMMEDIATE');
     try {
+      this.technologyArchive.beginHostTransaction();
       // Authorization and commit share a transaction with respect to external revocation.
       if (requiredSessions.some(hash => !this.sessionValid(hash))) throw new SessionRevoked('Session revoked before commit.');
       this.flushTechnology(world);
+      this.technologyArchive.observeHostWrites(() => {
       const archiveIdentity=this.db.prepare('INSERT INTO legacy VALUES (?,?,?,?)');
       for (const record of world.retiredLegacy) {
         assertLegacyRecord(record,world.tick); this.assertLegacyParents(record,world);
@@ -358,16 +485,26 @@ export class Store {
       for (const event of world.events) insertEvent.run(event.id, event.tick, JSON.stringify(event));
       const insertInput = this.db.prepare('INSERT INTO inputs VALUES (?,?,?,?,?,?)');
       for (const { gesture, result } of inputs) insertInput.run(gesture.id, fingerprint(gesture), result.tick, result.order, JSON.stringify(gesture), JSON.stringify(result));
+      });
       this.db.exec('COMMIT');
+      this.technologyArchive.acknowledgeHostCommit();
     } catch (error) {
       if (this.db.isTransaction) this.db.exec('ROLLBACK');
+      this.technologyArchive.invalidateVerification();
       throw error;
     }
     // A discarded transaction must leave the caller's pending archive queue intact for a retry.
     world.retiredChunks = [];
     world.retiredLegacy = [];
     markTechnologyJournalCommitted(world.technology);
-    this.rememberTechnology(world);
+    markTechnologyCatalogueCommitted(world.technology);
+    // The transaction is already durable. Failure to refresh an optimization
+    // cannot turn a successful save into a reported failure or a discarded tick.
+    try { this.rememberTechnology(world); }
+    catch {
+      this.verifiedTechnology = null; this.verifiedCatalogue = null; this.verifiedRecipes.clear();
+      this.technologyArchive.invalidateVerification();
+    }
   }
   result(gesture: Gesture): GestureResult | null {
     const row = this.db.prepare('SELECT fingerprint,result FROM inputs WHERE id=?').get(gesture.id) as { fingerprint: string; result: string } | undefined;
@@ -402,7 +539,7 @@ export class Store {
     // Unverifiable metadata is not permission to reconstruct a damaged retained prefix.
     if (origin) {
       if (!current || checksum(current.body) !== current.digest) technologyFailure('cannot verify recovery history origin');
-      const baseline = migrateWorld(decodeSnapshot(current!.body)), journal = baseline.technology.journal;
+      const baseline = migrateWorld(decodeSnapshot(current!.body), this.context), journal = baseline.technology.journal;
       if (!journal || journal.startsAfter !== origin.startsAfter || journal.pending.length
         || journal.committedThrough !== baseline.technology.executionCounter) technologyFailure('recovery history origin disagrees with committed snapshot');
       assertTechnologyJournal(baseline.technology, baseline.tick);
@@ -421,7 +558,7 @@ export class Store {
     } else {
       if (['technology_definitions', 'technology_stats', 'technology_executions'].some(table => this.db.prepare(`SELECT 1 FROM ${table} LIMIT 1`).get())) technologyFailure('recovery archive has records but no origin');
       if (current && checksum(current.body) === current.digest) {
-        const baseline = migrateWorld(decodeSnapshot(current.body));
+        const baseline = migrateWorld(decodeSnapshot(current.body), this.context);
         if (baseline.technology.journal !== undefined) technologyFailure('recovery lost its declared history origin');
       }
     }
@@ -435,8 +572,10 @@ export class Store {
   previous(destination: string) {
     const row = this.db.prepare('SELECT body,digest,saved_at FROM snapshots WHERE slot=1').get() as Row | undefined;
     if (!row || checksum(row.body) !== row.digest) throw new Error('No valid previous checkpoint.');
-    const world = migrateWorld(decodeSnapshot(row.body));
+    const world = migrateWorld(decodeSnapshot(row.body), this.context);
     const declaredJournal = world.technology.journal !== undefined;
+    if (world.technology.catalogue && (world.technology.catalogue.pending.length ||
+      world.technology.catalogue.committedThrough !== world.technology.recipeCounter)) technologyFailure('previous snapshot contains uncommitted definitions');
     enableTechnologyJournal(world.technology);
     assertTechnologyJournal(world.technology, world.tick);
     if (declaredJournal && (world.technology.journal!.pending.length || world.technology.journal!.committedThrough !== world.technology.executionCounter)) technologyFailure('previous snapshot contains uncommitted executions');
@@ -444,6 +583,8 @@ export class Store {
     const recovered = new Store(destination);
     try {
       recovered.db.exec('BEGIN IMMEDIATE');
+      recovered.technologyArchive.beginHostTransaction();
+      bindWorldContext(world, recovered.context);
       // Two snapshots may share a tick. Their serial/recipe boundaries still differ.
       recovered.db.prepare('DELETE FROM technology_executions WHERE serial>?').run(world.technology.executionCounter);
       recovered.db.prepare('DELETE FROM technology_stats WHERE recipeId IN (SELECT id FROM technology_definitions WHERE CAST(substr(id,8) AS INTEGER)>?)').run(world.technology.recipeCounter);
@@ -453,9 +594,10 @@ export class Store {
         recovered.assertTechnologyCoverage(world);
         recovered.assertTechnologyCache(world);
       } else recovered.rebuildPreviousTechnology(world);
+      recovered.prepareTechnology(world, declaredJournal ? world.technology.recipeCounter : 0);
       // A pre-journal checkpoint has surviving receipts in memory, not a backed watermark.
       recovered.flushTechnology(world, true);
-      const body = encodeSnapshot({ ...world, technology: technologyStateForCommit(world.technology) });
+      const body = encodeSnapshot({ ...world, technology: technologyCatalogueStateForCommit(technologyStateForCommit(world.technology)) });
       recovered.db.prepare('UPDATE snapshots SET body=?,digest=?,saved_at=? WHERE slot=0').run(body, checksum(body), row.saved_at);
       recovered.db.prepare('DELETE FROM inputs WHERE tick>?').run(world.tick);
       recovered.db.prepare('DELETE FROM events WHERE tick>?').run(world.tick);
@@ -464,8 +606,11 @@ export class Store {
       for (const event of recovered.db.prepare('SELECT id FROM events WHERE tick=?').all(world.tick) as {id:string}[]) {
         if (!world.events.some(e => e.id === event.id)) recovered.db.prepare('DELETE FROM events WHERE id=?').run(event.id);
       }
-      recovered.revoke(); recovered.db.exec('COMMIT'); recovered.load();
-    } catch (error) { if (recovered.db.isTransaction) recovered.db.exec('ROLLBACK'); throw error; }
+      recovered.revoke(); recovered.db.exec('COMMIT'); recovered.technologyArchive.acknowledgeHostCommit(); recovered.load();
+    } catch (error) {
+      if (recovered.db.isTransaction) recovered.db.exec('ROLLBACK');
+      recovered.technologyArchive.invalidateVerification(); throw error;
+    }
     finally { recovered.close(); }
   }
   close() { this.db.close(); }

@@ -294,7 +294,7 @@ test('a new Store saving without load still validates its declared durable basel
   store.db.exec('DELETE FROM technology_stats'); nextTick(world);
   const reopened = new Store(path);
   try {
-    assert.throws(() => reopened.save(world), /statistics disagree/);
+    assert.throws(() => reopened.save(world), /statistics (disagree|coverage)/);
     assert.equal(count(reopened, 'technology_stats'), 0);
   } finally { reopened.close(); }
 });
@@ -307,7 +307,10 @@ test('legitimate session changes invalidate the cache and still allow the next c
 });
 
 test('previous recovery honors serial boundaries even when two checkpoints share a tick', t => {
-  const { store, directory } = fixture(t), world = createWorld(51926); store.save(world); const previous = structuredClone(world);
+  const { store, directory } = fixture(t), world = createWorld(51926);
+  // Both saved snapshots share tick 1; an execution at tick 0 would violate the
+  // initial opening checkpoint's whole-tick boundary before testing recovery.
+  nextTick(world); store.save(world); const previous = structuredClone(world);
   const actor = world.people[2]!, program: TechnologyProgram = { inputs: [{ source: 'raw', material: 'stone', mass: 1000 }], steps: [{ op: 'form', shape: 'edge', intensity: 4 }] };
   actor.technology.project = { kind: 'research', program, parents: [], recipeId: null, progress: 0,
     requiredWork: technologyWorkCost(program), energyPaid: 0, startedAt: world.tick };

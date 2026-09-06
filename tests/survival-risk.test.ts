@@ -289,3 +289,38 @@ test('a visible living prey can motivate a paid hunt when there is no meal, desp
   assert.ok(person.energy < energy - 45 * .0003, 'pursuit/work and basal metabolism are paid');
   assert.equal(person.command, null);
 });
+
+for (const resource of ['food', 'water', 'prey'] as const) test(`visible but unreachable ${resource} cannot suppress a bodily search`, () => {
+    const { world, person } = emptyRoofLaboratory(resource === 'water' ? .2 : 1);
+    person.demography.health = .12;
+    if (resource === 'water') person.thirst = 1;
+    const island = tileAt(world, { x: 31, y: 8 })!; island.terrain = 'meadow';
+    for (const p of [{ x: 30, y: 8 }, { x: 32, y: 8 }, { x: 31, y: 7 }, { x: 31, y: 9 }]) tileAt(world, p)!.terrain = 'water';
+    if (resource === 'food') island.food = .9;
+    else if (resource === 'water') island.drinkingWater = .9;
+    else {
+      const animal = createWorld(42).animals.find(a => a.species === 'hare')!;
+      Object.assign(animal, { x: 31, y: 8, target: { x: 31, y: 8 }, action: 'rest', hunger: .2, thirst: .2, fatigue: .99, energy: .1, lastDecision: world.tick });
+      world.animals = [animal]; island.fauna = 1;
+    }
+    stepWorld(world);
+    assert.equal(person.action, 'explore', resource);
+    assert.notDeepEqual(person.target, { x: island.x, y: island.y });
+    assert.equal(resource === 'water' ? person.thirst : person.hunger, 1, 'search has no free bodily relief');
+    assert.equal(world.animalDynamics.humanHunts, 0);
+    assert.equal(person.work, 0);
+});
+
+test('a reachable prey outside the planning effort budget cannot extinguish food search', () => {
+  const animal = createWorld(42).animals.find(a => a.species === 'hare')!, { world, person } = emptyRoofLaboratory();
+  person.energy = .018; person.demography.health = .12;
+  Object.assign(animal, { x: 32, y: 8, target: { x: 32, y: 8 }, action: 'rest', hunger: .2, thirst: .2, fatigue: .99, energy: .1, lastDecision: world.tick });
+  world.animals = [animal]; tileAt(world, animal)!.fauna = 1;
+  assert.ok(person.energy < 7 * .0008 + 45 * .0003, 'nominal travel and hunt exceed the planning budget');
+  stepWorld(world);
+  assert.equal(person.action, 'explore');
+  assert.match(person.reason, /hambre|alimento/);
+  assert.equal(person.hunger, 1);
+  assert.equal(world.animalDynamics.humanHunts, 0);
+  assert.equal(person.work, 0);
+});

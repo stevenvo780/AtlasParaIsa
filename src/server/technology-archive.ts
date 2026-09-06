@@ -292,6 +292,14 @@ export class TechnologyArchive {
     }
     if (value.generation !== generation + 1) fail('definition generation');
   }
+  private definitionFunction(value: TechnologyDefinition, functions: readonly number[]): number {
+    const code = technologyFunctionCode(value.capacities), seen = !!(functions[code >>> 5]! & (1 << (code & 31)));
+    // Program signatures are independently unique. The frozen 'function' tag may
+    // describe an actual first occurrence, but cannot invent a second one.
+    const reportsFunctionNovelty = value.novelty === 'both' || value.novelty === 'function';
+    if (reportsFunctionNovelty !== !seen) fail('definition novelty');
+    return code;
+  }
   private scanDefinitions(asOfTick: number, inspect?: (definition: TechnologyDefinition) => void): DefinitionProof {
     this.assertSchema();
     // SQLite INTEGER affinity is not a STRICT-table guarantee. An undatable row cannot
@@ -306,7 +314,7 @@ export class TechnologyArchive {
       if (serialOf(value.id, 'recipe') !== proof.recipes + 1) fail('definition sequence');
       if (value.tick < proof.lastTick) fail('definition chronology');
       proof.recipes++; proof.lastTick = value.tick; proof.maxGeneration = Math.max(proof.maxGeneration, value.generation);
-      const code = technologyFunctionCode(value.capacities), word = code >>> 5;
+      const code = this.definitionFunction(value, proof.functions), word = code >>> 5;
       proof.functions[word] = (proof.functions[word]! | (1 << (code & 31))) >>> 0;
       const inspected: unknown = inspect?.(value);
       if (inspected && typeof (inspected as { then?: unknown }).then === 'function') fail('asynchronous definition inspector');
@@ -349,9 +357,9 @@ export class TechnologyArchive {
     if (this.db.prepare('SELECT 1 FROM technology_definitions WHERE signature=?').get(value.signature)) fail('duplicate definition signature');
     if (serialOf(value.id, 'recipe') !== proof.recipes + 1) fail('definition sequence');
     if (value.tick < proof.lastTick) fail('definition chronology');
+    const code = this.definitionFunction(value, proof.functions), word = code >>> 5;
     const result = this.db.prepare('INSERT INTO technology_definitions VALUES (?,?,?,?,?)').run(value.id, value.tick, value.signature, body, checksum(body));
     this.ownMutation(before, Number(result.changes), () => {
-      const code = technologyFunctionCode(value.capacities), word = code >>> 5;
       proof.functions[word] = (proof.functions[word]! | (1 << (code & 31))) >>> 0;
       proof.recipes++; proof.lastTick = value.tick; proof.maxGeneration = Math.max(proof.maxGeneration, value.generation);
       proof.functionalDiversity = technologyFunctionCount(proof.functions); this.definitionProof = proof;

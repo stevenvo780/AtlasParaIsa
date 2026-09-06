@@ -30,7 +30,7 @@ function definition(id = 1, tick = 10, parent?: TechnologyDefinition): Technolog
   if (parent) program.inputs = [{ source: 'product', recipeId: parent.id, mass: 1000 }];
   return { lawsVersion: 1, id: `recipe-${id}`, name: `Design ${id}`, program, signature: programSignature(program),
     parents: parent ? [parent.id] : [], generation: parent ? parent.generation + 1 : 1, inventorId: 'inventor-1', tick, x: 0, y: 0,
-    novelty: 'program', capacities: { cutting: 0.2, storage: 0, insulation: 0, cultivation: 0.1, binding: 0, abrasion: 0.2 } };
+    novelty: id === 1 ? 'both' : 'program', capacities: { cutting: 0.2, storage: 0, insulation: 0, cultivation: 0.1, binding: 0, abrasion: 0.2 } };
 }
 function execution(serial: number, tick = serial): TechnologyExecution {
   // Storage fixture: failed attempts carry no invented product or causal success.

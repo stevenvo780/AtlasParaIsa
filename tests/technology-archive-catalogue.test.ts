@@ -8,7 +8,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { TechnologyArchive } from '../src/server/technology-archive.js';
 import type { TechnologyDefinition } from '../src/shared/technology-archive.js';
 import type { Capability, TechnologyProgram } from '../src/shared/technology.js';
-import { programSignature } from '../src/world/technology.js';
+import { applyPhysicalOperation, materialCapacities, programSignature, rawMaterial, technologyWorkCost, validTechnologyProgram } from '../src/world/technology.js';
 import { TECHNOLOGY_FUNCTION_WORDS, technologyFunctionCode, technologyFunctionCount } from '../src/world/technology-catalogue.js';
 
 const checksum = (body: string) => createHash('sha256').update(body).digest('hex');
@@ -50,6 +50,82 @@ function countQueries(db: DatabaseSync) {
   db.prepare = sql => { count++; return original(sql); };
   return { reset() { count = 0; }, get count() { return count; } };
 }
+
+function physicalDefinitions(): TechnologyDefinition[] {
+  let tick = 0;
+  return ([1, 2, 3] as const).map((intensity, index) => {
+    const program: TechnologyProgram = { inputs: [{ source: 'raw', material: 'stone', mass: 1000 }], steps: [{ op: 'compress', intensity }] };
+    assert.ok(validTechnologyProgram(program));
+    const result = applyPhysicalOperation(program.steps[0]!, [rawMaterial('stone', 1000)]);
+    assert.ok(result.success && result.product); tick += technologyWorkCost(program);
+    return { ...definition(index + 1), program, signature: programSignature(program), generation: 1, parents: [], tick,
+      capacities: materialCapacities(result.product!), novelty: index === 1 ? 'program' : 'both' };
+  });
+}
+
+test('novelty admission derives its label from earlier functions before any insert or proof mutation', t => {
+  const { db, archive } = fixture(t), [first, repeated, different] = physicalDefinitions();
+  assert.notEqual(first!.signature, repeated!.signature);
+  assert.equal(technologyFunctionCode(first!.capacities), technologyFunctionCode(repeated!.capacities));
+  assert.notEqual(technologyFunctionCode(first!.capacities), technologyFunctionCode(different!.capacities));
+  host(db, archive, () => {
+    assert.throws(() => archive.putDefinition({ ...first!, novelty: 'program' }), /definition novelty/);
+    archive.putDefinition(first!); archive.putStats(first!.id, first!.tick, { manufactured: 0, uses: 0, utility: 0 });
+  });
+  const opening = archive.summarizeDefinitions(first!.tick);
+  for (const novelty of ['both', 'function'] as const) {
+    host(db, archive, () => {
+      assert.throws(() => archive.putDefinition({ ...repeated!, novelty }), /definition novelty/);
+      assert.equal(archive.getDefinition(repeated!.id), null);
+      assert.deepEqual(archive.summarizeDefinitions(repeated!.tick), opening);
+    });
+  }
+  host(db, archive, () => {
+    archive.putDefinition(repeated!); archive.putStats(repeated!.id, repeated!.tick, { manufactured: 0, uses: 0, utility: 0 });
+    assert.throws(() => archive.putDefinition({ ...different!, novelty: 'program' }), /definition novelty/);
+    archive.putDefinition(different!); archive.putStats(different!.id, different!.tick, { manufactured: 0, uses: 0, utility: 0 });
+    // Replaying a definition is not a second discovery. Its existing byte representation stays immutable.
+    for (const value of [first!, repeated!, different!]) archive.putDefinition(structuredClone(value));
+  });
+  const summary = archive.summarizeDefinitions(different!.tick);
+  assert.equal(summary.recipes, 3); assert.equal(summary.functionalDiversity, 2);
+});
+
+test('novelty prefix validation rejects a forged repeated-function label even after its digest is recomputed', t => {
+  for (const novelty of ['both', 'function'] as const) {
+    const { db, archive } = fixture(t), [first, repeated] = physicalDefinitions();
+    host(db, archive, () => {
+      for (const value of [first!, repeated!]) {
+        archive.putDefinition(value); archive.putStats(value.id, value.tick, { manufactured: 0, uses: 0, utility: 0 });
+      }
+    });
+    const opening = archive.summarizeDefinitions(first!.tick);
+    assert.equal(archive.summarizeDefinitions(repeated!.tick).functionalDiversity, 1);
+    const body = JSON.stringify({ ...repeated!, novelty });
+    db.prepare('UPDATE technology_definitions SET body=?,digest=? WHERE id=?').run(body, checksum(body), repeated!.id);
+    assert.deepEqual(archive.summarizeDefinitions(first!.tick), opening, 'a future false label cannot rewrite a valid past prefix');
+    assert.throws(() => archive.summarizeDefinitions(repeated!.tick), /definition novelty/);
+    assert.throws(() => archive.getDefinition(repeated!.id), /definition novelty/);
+    assert.throws(() => archive.getStats(repeated!.id), /definition novelty/);
+    assert.equal((db.prepare('SELECT body FROM technology_definitions WHERE id=?').get(repeated!.id) as { body: string }).body, body,
+      'validation reports corruption without rewriting historical labels');
+  }
+});
+
+test('legacy function novelty is preserved only for the first occurrence of its function', t => {
+  const { db, archive } = fixture(t), [original, repeated] = physicalDefinitions(), first = { ...original!, novelty: 'function' as const };
+  host(db, archive, () => {
+    for (const value of [first, repeated!]) {
+      archive.putDefinition(value); archive.putStats(value.id, value.tick, { manufactured: 0, uses: 0, utility: 0 });
+    }
+  });
+  assert.deepEqual(archive.getDefinition(first.id), first);
+  assert.equal(archive.getDefinition(repeated!.id)!.novelty, 'program');
+  assert.equal(archive.summarizeDefinitions(repeated!.tick).functionalDiversity, 1);
+  const body = JSON.stringify({ ...first, novelty: 'program' });
+  db.prepare('UPDATE technology_definitions SET body=?,digest=? WHERE id=?').run(body, checksum(body), first.id);
+  assert.throws(() => archive.summarizeDefinitions(first.tick), /definition novelty/);
+});
 
 test('streaming summary spans 257 definitions and a lineage beyond 32, uses latest actual statistics and inspects every author', t => {
   const { db, archive } = fixture(t); populate(db, archive, 257);

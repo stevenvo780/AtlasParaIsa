@@ -302,16 +302,25 @@ export class TechnologyArchive {
     if (reportsFunctionNovelty !== !seen) fail('definition novelty');
     return code;
   }
-  private scanDefinitions(asOfTick: number, inspect?: (definition: TechnologyDefinition) => void): DefinitionProof {
-    this.assertSchema();
-    // SQLite INTEGER affinity is not a STRICT-table guarantee. An undatable row cannot
-    // silently disappear behind the as-of predicate, even when its JSON has a valid digest.
-    if (this.db.prepare("SELECT 1 FROM technology_definitions WHERE typeof(tick)<>'integer' OR tick<0 OR tick>? LIMIT 1").get(MAX_TICK)) fail('definition tick');
-    const proof: DefinitionProof = { throughTick: asOfTick, recipes: 0, maxGeneration: 0, lastTick: -1,
-      functionalDiversity: 0, functions: Array<number>(TECHNOLOGY_FUNCTION_WORDS).fill(0) };
+  private scanDefinitions(asOfTick: number, inspect?: (definition: TechnologyDefinition) => void, opening?: DefinitionProof): DefinitionProof {
+    if (!opening) {
+      this.assertSchema();
+      // SQLite INTEGER affinity is not a STRICT-table guarantee. An undatable row cannot
+      // silently disappear behind the as-of predicate, even when its JSON has a valid digest.
+      if (this.db.prepare("SELECT 1 FROM technology_definitions WHERE typeof(tick)<>'integer' OR tick<0 OR tick>? LIMIT 1").get(MAX_TICK)) fail('definition tick');
+    }
+    // An opening proof belongs to the unchanged database stamp checked by read/synchronize.
+    // Its schema, every stored tick's type, and earlier edges are already verified. Copy its
+    // bounded bitmap so a rejected extension cannot certify a partially inspected suffix.
+    const proof: DefinitionProof = opening ? { ...opening, throughTick: asOfTick, functions: [...opening.functions] }
+      : { throughTick: asOfTick, recipes: 0, maxGeneration: 0, lastTick: -1,
+        functionalDiversity: 0, functions: Array<number>(TECHNOLOGY_FUNCTION_WORDS).fill(0) };
     // Canonical IDs sort numerically without retaining any identity set or ancestor stack.
     // Each parent precedes its child, so checking every local edge proves the entire prefix DAG.
-    for (const row of this.db.prepare('SELECT id,tick,signature,body,digest FROM technology_definitions WHERE tick<=? ORDER BY length(id),id').iterate(asOfTick) as Iterable<DefinitionRow>) {
+    const rows = opening
+      ? this.db.prepare('SELECT id,tick,signature,body,digest FROM technology_definitions WHERE tick>? AND tick<=? ORDER BY length(id),id').iterate(opening.throughTick, asOfTick)
+      : this.db.prepare('SELECT id,tick,signature,body,digest FROM technology_definitions WHERE tick<=? ORDER BY length(id),id').iterate(asOfTick);
+    for (const row of rows as Iterable<DefinitionRow>) {
       const value = this.definition(row); this.definitionParents(value);
       if (serialOf(value.id, 'recipe') !== proof.recipes + 1) fail('definition sequence');
       if (value.tick < proof.lastTick) fail('definition chronology');
@@ -331,7 +340,7 @@ export class TechnologyArchive {
     if (proof && !this.db.prepare('SELECT 1 FROM technology_definitions WHERE tick>? AND tick<=? LIMIT 1').get(proof.throughTick, asOfTick)) {
       proof.throughTick = asOfTick; return proof;
     }
-    return this.scanDefinitions(asOfTick);
+    return this.scanDefinitions(asOfTick, undefined, proof ?? undefined);
   }
   getDefinition(id: string, asOfTick = MAX_TICK): TechnologyDefinition | null {
     if (!recipeId(id)) fail('definition lookup'); tick(asOfTick);

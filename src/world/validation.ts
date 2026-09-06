@@ -89,17 +89,18 @@ export function assertLifeState(world: World): void {
     if(person.home!==undefined&&(!object(person.home)||!coordinate(person.home.x)||!coordinate(person.home.y)||!number(person.home.quality)||!integer(person.home.observedAt,world.tick)))fail();
   }
   const animalIds=new Set(world.animals.map(a=>a.id)),structureIds=new Set(world.structures.map(s=>s.id));
-  for(const chunk of world.retiredChunks) {
+  const dormant = [...world.retiredChunks, ...(world.ecology?.pending.flatMap(item => item.chunk ? [item.chunk] : []) ?? [])];
+  for(const chunk of dormant) {
     assertChunkLife(chunk,world.tick);
     for(const animal of chunk.animals??[]){if(animalIds.has(animal.id))fail();animalIds.add(animal.id);}
     for(const structure of chunk.structures??[]){if(structureIds.has(structure.id)||!ids.has(structure.blueprintId))fail();structureIds.add(structure.id);}
   }
-  for(const structure of [...world.structures,...world.retiredChunks.flatMap(c=>c.structures??[])]) {
+  for(const structure of [...world.structures,...dormant.flatMap(c=>c.structures??[])]) {
     const serial=/^structure-([1-9]\d*)$/.exec(structure.id);
     if(serial && !integer(Number(serial[1]),world.structureCounter))fail();
     if(!serial && structure.id!==`structure-legacy-${structure.x}-${structure.y}`)fail();
   }
-  for(const animal of [...world.animals,...world.retiredChunks.flatMap(c=>c.animals??[])]){
+  for(const animal of [...world.animals,...dormant.flatMap(c=>c.animals??[])]){
     const serial=/^animal-born-\d+-\d+-([1-9]\d*)$/.exec(animal.id);
     if(serial&&!integer(Number(serial[1]),world.animalCounter))fail();
   }

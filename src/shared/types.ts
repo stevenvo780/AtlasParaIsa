@@ -29,12 +29,16 @@ export interface PersonView {
 }
 export interface PlaceView { id: string; name: string; x: number; y: number; description: string; gatherings: number; }
 export interface ChronicleEvent {
+  /** Host tick when a delayed ecological observation became available. */
+  observedAt?: number;
   id: string; tick: number; kind: 'ecology' | 'meeting' | 'care' | 'learning' | 'adaptation' | 'memory' | 'gesture' | 'pause' | 'discovery' | 'settlement' | 'cooperation' | 'birth' | 'community' | 'conflict' | 'animal' | 'invention' | 'death';
   actors: string[]; text: string; cause: string; x?: number; y?: number; source: 'simulation' | 'sample' | 'approved';
 }
 export interface MemoryView { id: string; title: string; text: string; source: 'sample' | 'approved'; placeId: string; }
 export interface WorldView {
+  ecology?: import('./ecology.js').EcologyView;
   version: number; sequence: number; tick: number; day: number;
+  instanceId?: string;
   phase: 'dawn' | 'day' | 'dusk' | 'night'; weather: 'clear' | 'rain';
   width: number; height: number; tiles: Tile[]; people: PersonView[]; places: PlaceView[];
   events: ChronicleEvent[]; memories: MemoryView[];

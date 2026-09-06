@@ -2,7 +2,8 @@ import { createHash } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { TECHNOLOGY_ARCHIVE_LAWS_VERSION, type TechnologyDefinition, type TechnologyExecutionQuery,
   type TechnologyStats, type TechnologyStatsRecord, type TechnologyHistoryOrigin } from '../shared/technology-archive.js';
-import type { TechnologyExecution, TechnologyProgram } from '../shared/technology.js';
+import type { TechnologyCatalogueTotals, TechnologyExecution, TechnologyProgram } from '../shared/technology.js';
+import { technologyFunctionCode, technologyFunctionCount, TECHNOLOGY_FUNCTION_WORDS } from '../world/technology-catalogue.js';
 
 const MAX_TICK = Number.MAX_SAFE_INTEGER;
 const CAPABILITIES = ['cutting', 'storage', 'insulation', 'cultivation', 'binding', 'abrasion'];
@@ -111,15 +112,105 @@ function decode(row: { body: string; digest: string }): unknown {
   try { return JSON.parse(row.body); } catch { return fail('JSON'); }
 }
 const monotone = (a: TechnologyStats, b: TechnologyStats) => a.uses <= b.uses && a.utility <= b.utility && a.manufactured <= b.manufactured;
+export type TechnologyDefinitionSummary = TechnologyCatalogueTotals & { functions: number[] };
+interface ArchiveStamp { dataVersion: number; totalChanges: number; schemaCookie: number; tempSchemaCookie: number; transaction: boolean; }
+interface DefinitionProof {
+  throughTick: number; recipes: number; maxGeneration: number; lastTick: number;
+  functionalDiversity: number; functions: number[];
+}
+interface SummaryProof { fromTick: number; throughTick: number; value: TechnologyDefinitionSummary; }
+const sameDatabase = (a: ArchiveStamp, b: ArchiveStamp) => a.dataVersion === b.dataVersion && a.schemaCookie === b.schemaCookie && a.tempSchemaCookie === b.tempSchemaCookie;
+const sameStamp = (a: ArchiveStamp, b: ArchiveStamp) => sameDatabase(a, b) && a.totalChanges === b.totalChanges && a.transaction === b.transaction;
+const copySummary = (value: TechnologyDefinitionSummary): TechnologyDefinitionSummary => ({ ...value, functions: [...value.functions] });
 
 /** Persistence primitives only. The host owns transactions, pending queues, checkpoints,
- * cache eviction and causal analysis. Serials are ordered but may have historical gaps;
- * completeness must be checked against the host's opening checkpoint, never inferred here.
+ * cache eviction and causal analysis. Definition IDs form a contiguous allocation prefix.
+ * Execution serials may have historical gaps; their completeness must be checked against
+ * the host's opening checkpoint, never inferred from definition coverage.
  * No constructor/read operation changes SQLite. */
 export class TechnologyArchive {
+  private verifiedStamp: ArchiveStamp | null = null;
+  private definitionProof: DefinitionProof | null = null;
+  private summaryProof: SummaryProof | null = null;
+  private hostTransaction = false;
+  private readDepth = 0;
   constructor(private readonly db: DatabaseSync) {}
 
   private transaction(): void { if (!this.db.isTransaction) throw new Error('Technology archive mutation requires a host transaction.'); }
+
+  private stamp(): ArchiveStamp {
+    return { dataVersion: (this.db.prepare('PRAGMA main.data_version').get() as { data_version: number }).data_version,
+      totalChanges: (this.db.prepare('SELECT total_changes() AS n').get() as { n: number }).n,
+      schemaCookie: (this.db.prepare('PRAGMA main.schema_version').get() as { schema_version: number }).schema_version,
+      tempSchemaCookie: (this.db.prepare('PRAGMA temp.schema_version').get() as { schema_version: number }).schema_version,
+      transaction: this.db.isTransaction };
+  }
+  private clearProofs(): void { this.verifiedStamp = null; this.definitionProof = null; this.summaryProof = null; }
+  invalidateVerification(): void { this.clearProofs(); this.hostTransaction = false; }
+  private synchronize(): ArchiveStamp {
+    const current = this.stamp();
+    if (!current.transaction) this.hostTransaction = false;
+    if (!this.verifiedStamp || !sameStamp(this.verifiedStamp, current) || current.transaction && !this.hostTransaction) this.clearProofs();
+    this.verifiedStamp = current;
+    return current;
+  }
+  private retainProofs(): boolean { return !this.db.isTransaction || this.hostTransaction; }
+  private hasTriggers(): boolean {
+    return !!this.db.prepare("SELECT 1 FROM main.sqlite_schema WHERE type='trigger' UNION ALL SELECT 1 FROM temp.sqlite_schema WHERE type='trigger' LIMIT 1").get();
+  }
+  private read<T>(callback: () => T): T {
+    if (this.readDepth) return callback();
+    const before = this.synchronize(); this.readDepth++;
+    try {
+      const result = callback();
+      if (!sameStamp(before, this.stamp())) { this.clearProofs(); fail('changed during verified read'); }
+      return result;
+    } catch (error) { this.clearProofs(); throw error; }
+    finally { this.readDepth--; if (!this.retainProofs()) this.clearProofs(); }
+  }
+
+  /** The synchronous Store owns this transaction until acknowledgeHostCommit or invalidation.
+   * Generic callers retain no proofs computed inside raw transactions: rollback+begin cannot
+   * be distinguished using SQLite's cumulative change counters alone.
+   */
+  beginHostTransaction(): void {
+    this.transaction();
+    if (this.hostTransaction) fail('nested host transaction');
+    const current = this.stamp(), prior = this.verifiedStamp;
+    if (!prior || prior.transaction || !sameDatabase(prior, current) || prior.totalChanges !== current.totalChanges) this.clearProofs();
+    this.hostTransaction = true; this.verifiedStamp = current;
+  }
+  /** callback is trusted, synchronous SQL on non-technology tables; no transaction boundaries. */
+  observeHostWrites<T>(callback: () => T): T {
+    this.transaction();
+    const before = this.synchronize(), triggers = this.hasTriggers();
+    try {
+      const result = callback();
+      if (result && typeof (result as { then?: unknown }).then === 'function') fail('asynchronous host writes');
+      const after = this.stamp();
+      if (!after.transaction) fail('host write transaction boundary');
+      if (!this.hostTransaction || triggers || this.hasTriggers() || !sameDatabase(before, after)) this.clearProofs();
+      this.verifiedStamp = after;
+      return result;
+    } catch (error) { this.invalidateVerification(); throw error; }
+  }
+  /** Cache optimization only. A durable COMMIT must never be reported as failed by this hook. */
+  acknowledgeHostCommit(): void {
+    try {
+      const current = this.stamp(), prior = this.verifiedStamp;
+      if (!this.hostTransaction || current.transaction || !prior || !prior.transaction || !sameDatabase(prior, current)
+        || prior.totalChanges !== current.totalChanges || this.hasTriggers()) this.clearProofs();
+      else this.verifiedStamp = current;
+    } catch { this.clearProofs(); }
+    finally { this.hostTransaction = false; }
+  }
+  private ownMutation(before: ArchiveStamp, changes: number, update?: () => void): void {
+    const after = this.stamp();
+    if (!this.hostTransaction || !sameDatabase(before, after) || before.transaction !== after.transaction
+      || after.totalChanges !== before.totalChanges + changes || this.hasTriggers()) this.clearProofs();
+    else update?.();
+    this.verifiedStamp = after;
+  }
 
   installSchema(): void {
     this.transaction();
@@ -133,6 +224,10 @@ export class TechnologyArchive {
       id INTEGER PRIMARY KEY NOT NULL CHECK(id=1), body TEXT NOT NULL, digest TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS technology_definitions_tick ON technology_definitions(tick);
       CREATE INDEX IF NOT EXISTS technology_executions_tick ON technology_executions(tick);`);
+    this.assertSchema();
+  }
+
+  private assertSchema(): void {
     for (const [table, columns, primary, unique] of [
       ['technology_definitions', ['id', 'tick', 'signature', 'body', 'digest'], ['id'], 'signature'],
       ['technology_stats', ['recipeId', 'tick', 'body', 'digest'], ['recipeId', 'tick'], null],
@@ -166,6 +261,7 @@ export class TechnologyArchive {
    * rewound in a live archive; a recovery copy is a separate explicit host operation. */
   initializeHistory(startsAfter: number): void {
     this.transaction(); tick(startsAfter);
+    const before = this.synchronize();
     const origin = this.getHistoryOrigin();
     if (origin) {
       if (origin.startsAfter !== startsAfter) fail('immutable history origin conflict');
@@ -174,7 +270,8 @@ export class TechnologyArchive {
     if (['technology_definitions', 'technology_stats', 'technology_executions'].some(table =>
       this.db.prepare(`SELECT 1 FROM ${table} LIMIT 1`).get())) fail('history origin must precede archived records');
     const body = JSON.stringify({ version: 1, startsAfter });
-    this.db.prepare('INSERT INTO technology_origin VALUES (1,?,?)').run(body, checksum(body));
+    const result = this.db.prepare('INSERT INTO technology_origin VALUES (1,?,?)').run(body, checksum(body));
+    this.ownMutation(before, Number(result.changes));
   }
 
   private definitionRow(id: string): DefinitionRow | undefined {
@@ -185,50 +282,93 @@ export class TechnologyArchive {
     if (value.id !== row.id || value.tick !== row.tick || value.signature !== row.signature) fail('definition key or tick');
     return value;
   }
-  private definitionReferences(value: TechnologyDefinition): void {
-    // Validate the reachable DAG, not only the immediate parent's JSON. The set is
-    // query-local and traversal is iterative, so a long lineage cannot overflow the stack.
-    const pending = [value], visited = new Set<string>();
-    while (pending.length) {
-      const current = pending.pop()!;
-      if (visited.has(current.id)) continue;
-      visited.add(current.id);
-      const parents = current.parents.map(id => {
-        const row = this.definitionRow(id); if (!row) fail('missing definition parent');
-        const parent = this.definition(row);
-        if (parent.tick > current.tick || parent.generation >= current.generation) fail('definition parent chronology');
-        return parent;
-      });
-      if (current.generation !== 1 + Math.max(0, ...parents.map(parent => parent.generation))) fail('definition generation');
-      for (const parent of parents) if (!visited.has(parent.id)) pending.push(parent);
+  private definitionParents(value: TechnologyDefinition): void {
+    let generation = 0;
+    for (const id of value.parents) {
+      const row = this.definitionRow(id); if (!row) fail('missing definition parent');
+      const parent = this.definition(row);
+      if (parent.tick > value.tick || parent.generation >= value.generation || serialOf(parent.id, 'recipe')! >= serialOf(value.id, 'recipe')!) fail('definition parent chronology');
+      generation = Math.max(generation, parent.generation);
     }
+    if (value.generation !== generation + 1) fail('definition generation');
+  }
+  private scanDefinitions(asOfTick: number, inspect?: (definition: TechnologyDefinition) => void): DefinitionProof {
+    this.assertSchema();
+    // SQLite INTEGER affinity is not a STRICT-table guarantee. An undatable row cannot
+    // silently disappear behind the as-of predicate, even when its JSON has a valid digest.
+    if (this.db.prepare("SELECT 1 FROM technology_definitions WHERE typeof(tick)<>'integer' OR tick<0 OR tick>? LIMIT 1").get(MAX_TICK)) fail('definition tick');
+    const proof: DefinitionProof = { throughTick: asOfTick, recipes: 0, maxGeneration: 0, lastTick: -1,
+      functionalDiversity: 0, functions: Array<number>(TECHNOLOGY_FUNCTION_WORDS).fill(0) };
+    // Canonical IDs sort numerically without retaining any identity set or ancestor stack.
+    // Each parent precedes its child, so checking every local edge proves the entire prefix DAG.
+    for (const row of this.db.prepare('SELECT id,tick,signature,body,digest FROM technology_definitions WHERE tick<=? ORDER BY length(id),id').iterate(asOfTick) as Iterable<DefinitionRow>) {
+      const value = this.definition(row); this.definitionParents(value);
+      if (serialOf(value.id, 'recipe') !== proof.recipes + 1) fail('definition sequence');
+      if (value.tick < proof.lastTick) fail('definition chronology');
+      proof.recipes++; proof.lastTick = value.tick; proof.maxGeneration = Math.max(proof.maxGeneration, value.generation);
+      const code = technologyFunctionCode(value.capacities), word = code >>> 5;
+      proof.functions[word] = (proof.functions[word]! | (1 << (code & 31))) >>> 0;
+      const inspected: unknown = inspect?.(value);
+      if (inspected && typeof (inspected as { then?: unknown }).then === 'function') fail('asynchronous definition inspector');
+    }
+    proof.functionalDiversity = technologyFunctionCount(proof.functions);
+    if (this.retainProofs() && (!this.definitionProof || this.definitionProof.throughTick <= asOfTick)) this.definitionProof = proof;
+    return proof;
+  }
+  private verifyDefinitionsThrough(asOfTick: number): DefinitionProof {
+    const proof = this.definitionProof;
+    if (proof && proof.throughTick >= asOfTick) return proof;
+    if (proof && !this.db.prepare('SELECT 1 FROM technology_definitions WHERE tick>? AND tick<=? LIMIT 1').get(proof.throughTick, asOfTick)) {
+      proof.throughTick = asOfTick; return proof;
+    }
+    return this.scanDefinitions(asOfTick);
   }
   getDefinition(id: string, asOfTick = MAX_TICK): TechnologyDefinition | null {
     if (!recipeId(id)) fail('definition lookup'); tick(asOfTick);
-    const row = this.definitionRow(id); if (!row) return null;
-    tick(row.tick); if (row.tick > asOfTick) return null;
-    const value = this.definition(row); this.definitionReferences(value);
-    return value;
+    return this.read(() => {
+      const row = this.definitionRow(id); if (!row) return null;
+      tick(row.tick); if (row.tick > asOfTick) return null;
+      const value = this.definition(row); this.verifyDefinitionsThrough(value.tick);
+      return value;
+    });
   }
   findDefinitionBySignature(value: string, asOfTick = MAX_TICK): TechnologyDefinition | null {
     if (!text(value, 16000)) fail('signature lookup'); tick(asOfTick);
-    const row = this.db.prepare('SELECT id,tick,signature,body,digest FROM technology_definitions WHERE signature=?').get(value) as DefinitionRow | undefined;
-    if (!row) return null;
-    return this.getDefinition(row.id, asOfTick);
+    return this.read(() => {
+      const row = this.db.prepare('SELECT id,tick,signature,body,digest FROM technology_definitions WHERE signature=?').get(value) as DefinitionRow | undefined;
+      if (!row) return null;
+      return this.getDefinition(row.id, asOfTick);
+    });
   }
   putDefinition(value: TechnologyDefinition): void {
-    this.transaction(); assertDefinition(value); this.definitionReferences(value);
+    this.transaction(); assertDefinition(value);
+    const before = this.synchronize(); this.definitionParents(value);
+    const proof = this.verifyDefinitionsThrough(MAX_TICK);
     const body = JSON.stringify(value), prior = this.definitionRow(value.id);
-    if (prior) { this.getDefinition(value.id); if (prior.body !== body) fail('immutable definition conflict'); return; }
-    if (this.findDefinitionBySignature(value.signature)) fail('duplicate definition signature');
-    this.db.prepare('INSERT INTO technology_definitions VALUES (?,?,?,?,?)').run(value.id, value.tick, value.signature, body, checksum(body));
+    if (prior) { this.definition(prior); if (prior.body !== body) fail('immutable definition conflict'); return; }
+    if (this.db.prepare('SELECT 1 FROM technology_definitions WHERE signature=?').get(value.signature)) fail('duplicate definition signature');
+    if (serialOf(value.id, 'recipe') !== proof.recipes + 1) fail('definition sequence');
+    if (value.tick < proof.lastTick) fail('definition chronology');
+    const result = this.db.prepare('INSERT INTO technology_definitions VALUES (?,?,?,?,?)').run(value.id, value.tick, value.signature, body, checksum(body));
+    this.ownMutation(before, Number(result.changes), () => {
+      const code = technologyFunctionCode(value.capacities), word = code >>> 5;
+      proof.functions[word] = (proof.functions[word]! | (1 << (code & 31))) >>> 0;
+      proof.recipes++; proof.lastTick = value.tick; proof.maxGeneration = Math.max(proof.maxGeneration, value.generation);
+      proof.functionalDiversity = technologyFunctionCount(proof.functions); this.definitionProof = proof;
+      // A new definition has no statistics until its matching putStats; no complete summary exists yet.
+      this.summaryProof = null;
+    });
   }
 
-  private stats(row: StatsRow): TechnologyStatsRecord {
+  private stats(row: StatsRow, verifiedPrefix = false): TechnologyStatsRecord {
     const value = decode(row);
     if (!keys(value, ['recipeId', 'tick', 'uses', 'utility', 'manufactured']) || value.recipeId !== row.recipeId || value.tick !== row.tick) fail('statistics key or tick');
     const stats = { uses: value.uses, utility: value.utility, manufactured: value.manufactured }; assertStats(stats); tick(row.tick);
-    if (!recipeId(row.recipeId) || !this.getDefinition(row.recipeId, row.tick)) fail('statistics definition reference');
+    if (!recipeId(row.recipeId)) fail('statistics definition reference');
+    if (verifiedPrefix) {
+      const definition = this.definitionRow(row.recipeId);
+      if (!definition || this.definition(definition).tick > row.tick) fail('statistics definition reference');
+    } else if (!this.getDefinition(row.recipeId, row.tick)) fail('statistics definition reference');
     return { recipeId: row.recipeId, tick: row.tick, ...stats };
   }
   private statsTimeline(row: StatsRow, value: TechnologyStats, asOfTick = MAX_TICK): void {
@@ -238,14 +378,50 @@ export class TechnologyArchive {
   }
   getStats(recipe: string, asOfTick = MAX_TICK): TechnologyStatsRecord | null {
     if (!recipeId(recipe)) fail('statistics lookup'); tick(asOfTick);
-    const row = this.db.prepare('SELECT recipeId,tick,body,digest FROM technology_stats WHERE recipeId=? AND tick<=? ORDER BY tick DESC LIMIT 1').get(recipe, asOfTick) as StatsRow | undefined;
-    if (!row) return null;
-    const value = this.stats(row);
-    this.statsTimeline(row, value, asOfTick);
-    return value;
+    return this.read(() => {
+      const row = this.db.prepare('SELECT recipeId,tick,body,digest FROM technology_stats WHERE recipeId=? AND tick<=? ORDER BY tick DESC LIMIT 1').get(recipe, asOfTick) as StatsRow | undefined;
+      if (!row) return null;
+      const value = this.stats(row);
+      this.statsTimeline(row, value, asOfTick);
+      return value;
+    });
+  }
+
+  /** Exact counters/bitmap, finite utility, and only the latest validated statistic per definition.
+   * inspect always streams every definition, even when a prior summary is reusable.
+   */
+  summarizeDefinitions(asOfTick: number, inspect?: (definition: TechnologyDefinition) => void): TechnologyDefinitionSummary {
+    tick(asOfTick); if (inspect !== undefined && typeof inspect !== 'function') fail('definition inspector');
+    return this.read(() => {
+      const cached = this.summaryProof;
+      if (!inspect && cached && asOfTick >= cached.fromTick && asOfTick <= cached.throughTick) return copySummary(cached.value);
+      const proof = this.scanDefinitions(asOfTick, inspect);
+      const result: TechnologyDefinitionSummary = { recipes: proof.recipes, maxGeneration: proof.maxGeneration,
+        manufactured: 0, uses: 0, utility: 0, functionalDiversity: proof.functionalDiversity, functions: [...proof.functions] };
+      if (this.db.prepare("SELECT 1 FROM technology_stats WHERE typeof(tick)<>'integer' OR tick<0 OR tick>? LIMIT 1").get(MAX_TICK)) fail('statistics tick');
+      let previous: TechnologyStatsRecord | undefined, covered = 0;
+      const latest = (): void => {
+        if (!previous) return;
+        covered++; result.manufactured += previous.manufactured; result.uses += previous.uses; result.utility += previous.utility;
+        if (!integer(result.manufactured) || !integer(result.uses) || !finite(result.utility)) fail('summary overflow');
+      };
+      for (const row of this.db.prepare('SELECT recipeId,tick,body,digest FROM technology_stats WHERE tick<=? ORDER BY recipeId,tick').iterate(asOfTick) as Iterable<StatsRow>) {
+        const value = this.stats(row, true);
+        if (previous?.recipeId === value.recipeId) { if (!monotone(previous, value)) fail('statistics regression'); }
+        else latest();
+        previous = value;
+      }
+      latest();
+      if (covered !== proof.recipes) fail('summary statistics coverage');
+      const future = this.db.prepare('SELECT MIN(tick) AS tick FROM (SELECT MIN(tick) AS tick FROM technology_definitions WHERE tick>? UNION ALL SELECT MIN(tick) AS tick FROM technology_stats WHERE tick>?)').get(asOfTick, asOfTick) as { tick: number | null };
+      const throughTick = future.tick === null ? MAX_TICK : future.tick - 1;
+      if (this.retainProofs()) this.summaryProof = { fromTick: asOfTick, throughTick, value: result };
+      return copySummary(result);
+    });
   }
   putStats(recipe: string, atTick: number, value: TechnologyStats): void {
     this.transaction(); if (!recipeId(recipe)) fail('statistics identity'); tick(atTick); assertStats(value);
+    const token = this.synchronize();
     if (!this.getDefinition(recipe, atTick)) fail('statistics definition reference');
     const body = JSON.stringify({ recipeId: recipe, tick: atTick, ...value });
     const exact = this.db.prepare('SELECT recipeId,tick,body,digest FROM technology_stats WHERE recipeId=? AND tick=?').get(recipe, atTick) as StatsRow | undefined;
@@ -253,7 +429,16 @@ export class TechnologyArchive {
     const before = this.getStats(recipe, atTick);
     const after = this.db.prepare('SELECT recipeId,tick,body,digest FROM technology_stats WHERE recipeId=? AND tick>? ORDER BY tick LIMIT 1').get(recipe, atTick) as StatsRow | undefined;
     if (before && !monotone(before, value) || after && !monotone(value, this.stats(after))) fail('statistics regression');
-    this.db.prepare('INSERT INTO technology_stats VALUES (?,?,?,?)').run(recipe, atTick, body, checksum(body));
+    const result = this.db.prepare('INSERT INTO technology_stats VALUES (?,?,?,?)').run(recipe, atTick, body, checksum(body));
+    this.ownMutation(token, Number(result.changes), () => {
+      const cached = this.summaryProof;
+      if (!cached || cached.throughTick !== MAX_TICK || atTick < cached.fromTick || after) { this.summaryProof = null; return; }
+      const next = { ...cached.value, uses: cached.value.uses + (value.uses - (before?.uses ?? 0)),
+        manufactured: cached.value.manufactured + (value.manufactured - (before?.manufactured ?? 0)),
+        utility: cached.value.utility + (value.utility - (before?.utility ?? 0)) };
+      if (!integer(next.uses) || !integer(next.manufactured) || !finite(next.utility)) { this.summaryProof = null; return; }
+      this.summaryProof = { fromTick: atTick, throughTick: MAX_TICK, value: next };
+    });
   }
 
   private executionRow(id: string): ExecutionRow | undefined {
@@ -302,18 +487,21 @@ export class TechnologyArchive {
   }
   putExecution(value: TechnologyExecution): void {
     this.transaction(); assertExecution(value); this.executionReferences(value);
+    const token = this.synchronize();
     const body = JSON.stringify(value), prior = this.executionRow(value.id);
     if (prior) { this.getExecution(value.id); if (prior.body !== body) fail('immutable execution conflict'); return; }
     const serial = serialOf(value.id, 'process')!;
     this.executionTimeline({ id: value.id, serial, tick: value.tick, body, digest: checksum(body) });
-    this.db.prepare('INSERT INTO technology_executions VALUES (?,?,?,?,?)').run(value.id, serial, value.tick, body, checksum(body));
+    const result = this.db.prepare('INSERT INTO technology_executions VALUES (?,?,?,?,?)').run(value.id, serial, value.tick, body, checksum(body));
+    this.ownMutation(token, Number(result.changes));
   }
 
   /** Recovery of a caller-owned copy. Validate retained references before deleting any future row. */
   truncateAfter(atTick: number): void {
     this.transaction(); tick(atTick);
+    this.synchronize();
     this.getHistoryOrigin();
-    for (const row of this.db.prepare('SELECT id FROM technology_definitions WHERE tick<=?').iterate(atTick) as Iterable<{ id: string }>) this.getDefinition(row.id, atTick);
+    this.scanDefinitions(atTick);
     let previousStats: TechnologyStatsRecord | undefined, previousExecutionTick = -1;
     for (const row of this.db.prepare('SELECT recipeId,tick,body,digest FROM technology_stats WHERE tick<=? ORDER BY recipeId,tick').iterate(atTick) as Iterable<StatsRow>) {
       const value = this.stats(row);
@@ -328,5 +516,6 @@ export class TechnologyArchive {
     this.db.prepare('DELETE FROM technology_executions WHERE tick>?').run(atTick);
     this.db.prepare('DELETE FROM technology_stats WHERE tick>?').run(atTick);
     this.db.prepare('DELETE FROM technology_definitions WHERE tick>?').run(atTick);
+    this.clearProofs();
   }
 }

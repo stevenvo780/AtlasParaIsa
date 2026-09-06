@@ -3,10 +3,12 @@ import { readFileSync, statSync } from 'node:fs';
 import { resolve, extname, sep } from 'node:path';
 import { WebSocketServer, WebSocket } from 'ws';
 import { createWorld, stepWorld, projectWorld, normalizeViewport, cloneWorld } from '../world/index.js';
-import type { Gesture, GestureResult, ServerMessage, Viewport, WorldView, RuntimeStats } from '../shared/types.js';
+import type { ChronicleEvent, Gesture, GestureResult, ServerMessage, Viewport, WorldView, RuntimeStats } from '../shared/types.js';
 import { Store, fingerprint, GestureConflict, SessionRevoked } from './store.js';
 import { cookie, hashToken, makeToken, passwordVerifier, sessionHash } from './auth.js';
 import { ensureWorldInstance, readWorldInstance } from './world-instance.js';
+import { enableContinuousEcology } from '../world/offscreen-state.js';
+import { prepareEcology } from '../world/offscreen.js';
 
 class HttpError extends Error { constructor(readonly status: number, message: string) { super(message); } }
 export interface AppOptions {
@@ -47,9 +49,17 @@ export function createApp(options: AppOptions) {
   const loaded = store.load();
   const existingInstanceId = readWorldInstance(store.db);
   let world = loaded?.world ?? createWorld(options.seed ?? 51926);
+  if (!loaded) enableContinuousEcology(world);
   if (loaded) {
-    world.events.push({ id: `pause-${world.tick}-${makeToken().slice(0,12)}`, tick: world.tick, kind: 'pause', actors: [],
-      text: 'El servicio estuvo en pausa. El mundo retoma desde su último momento guardado.', cause: 'Reinicio del servicio; sin avance retrospectivo.', source: 'simulation' });
+    if (world.ecology) {
+      if (!Number.isSafeInteger(world.ecology.revision + 1) || !Number.isSafeInteger(world.eventCounter + 1))
+        throw new Error('Cannot record service restart: durable identity space exhausted.');
+      world.ecology.revision++;
+    }
+    const event: ChronicleEvent = { id: world.ecology ? `e${++world.eventCounter}` : `pause-${world.tick}-${makeToken().slice(0,12)}`, tick: world.tick, kind: 'pause', actors: [],
+      text: 'El servicio estuvo en pausa. El mundo retoma desde su último momento guardado.', cause: 'Reinicio del servicio; sin avance retrospectivo.', source: 'simulation' };
+    world.ecology?.pendingEvents.push(event);
+    world.events.push(event);
     world.events = world.events.slice(-120);
   }
   store.save(world);
@@ -140,17 +150,21 @@ export function createApp(options: AppOptions) {
         else { item.reject(new HttpError(401, 'La sesión terminó antes de aplicar el gesto.')); pending.delete(item.gesture.id); }
       }
       const draft = cloneWorld(world, context);
-      const results = stepWorld(draft, valid.map(item => item.gesture), context);
-      if (results.length !== valid.length) throw new Error('Gesture result count mismatch');
+      const advancing = prepareEcology(draft, context).ready;
+      // A region must finish its past before a human can use its present stock.
+      // Maintenance has its own durable revision but leaves pending orders and
+      // the human clock untouched until the promotion barrier is ready.
+      const results = advancing ? stepWorld(draft, valid.map(item => item.gesture), context) : [];
+      if (advancing && results.length !== valid.length) throw new Error('Gesture result count mismatch');
       const saveStarted = performance.now();
-      store.save(draft, valid.map((item, i) => ({ gesture: item.gesture, result: results[i] })), valid.map(item => item.hash));
+      store.save(draft, advancing ? valid.map((item, i) => ({ gesture: item.gesture, result: results[i] })) : [], advancing ? valid.map(item => item.hash) : []);
       runtime.saveMs = performance.now() - saveStarted;
       world = draft;
       runtime.stepMs = performance.now() - stepStarted; measurements.push(runtime.stepMs); if (measurements.length > 120) measurements.shift();
       runtime.p95StepMs = [...measurements].sort((a, b) => a - b)[Math.floor(measurements.length * 0.95)] ?? 0;
       runtime.activeTiles = world.tiles.length; runtime.processRssMiB = process.memoryUsage.rss() / 1048576; runtime.snapshotBytes = store.lastSnapshotBytes;
-      for (let i=0; i<valid.length; i++) { pending.delete(valid[i].gesture.id); valid[i].resolve(results[i]); }
-      if (world.tick % 5 === 0 || valid.length) broadcast();
+      if (advancing) for (let i=0; i<valid.length; i++) { pending.delete(valid[i].gesture.id); valid[i].resolve(results[i]); }
+      if (!advancing || world.tick % 5 === 0 || valid.length) broadcast();
     } catch (error) {
       if (error instanceof SessionRevoked) {
         for (const item of pending.values()) if (!store.sessionValid(item.hash)) {

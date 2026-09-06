@@ -6,6 +6,7 @@ import { createWorld, stepWorld, projectWorld, normalizeViewport, cloneWorld } f
 import type { Gesture, GestureResult, ServerMessage, Viewport, WorldView, RuntimeStats } from '../shared/types.js';
 import { Store, fingerprint, GestureConflict, SessionRevoked } from './store.js';
 import { cookie, hashToken, makeToken, passwordVerifier, sessionHash } from './auth.js';
+import { ensureWorldInstance } from './world-instance.js';
 
 class HttpError extends Error { constructor(readonly status: number, message: string) { super(message); } }
 export interface AppOptions {
@@ -51,6 +52,7 @@ export function createApp(options: AppOptions) {
     world.events = world.events.slice(-120);
   }
   store.save(world);
+  const instanceId = ensureWorldInstance(store.db);
   let stopped = false;
   let failed = false;
   const pending = new Map<string, Pending>();
@@ -65,7 +67,7 @@ export function createApp(options: AppOptions) {
   const view = (viewport?: Viewport) => {
     const start = performance.now(), projected = projectWorld(world, viewport, context);
     runtime.projectionMs = performance.now() - start;
-    return { ...projected, performance: { ...runtime }, ...(failed ? { paused: true, pauseReason: 'No se pudo guardar. El mundo está en pausa para proteger lo ya vivido.' } : {}) };
+    return { ...projected, instanceId, performance: { ...runtime }, ...(failed ? { paused: true, pauseReason: 'No se pudo guardar. El mundo está en pausa para proteger lo ya vivido.' } : {}) };
   };
   function authorized(req: IncomingMessage) {
     const hash = sessionHash(req);

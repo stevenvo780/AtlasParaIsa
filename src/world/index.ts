@@ -22,12 +22,14 @@ import { analyzeTechnologyOrganization } from './technology-organization.js';
 import { captureTechnologyCheckpoint, advanceTechnologyCheckpoint } from './technology-checkpoint.js';
 import { advanceWaterPreparation, beginWaterPreparation, containedWaterQuanta, drinkContainedWater, emptyWaterLedger, maintainContainedWater, payContainedWaterCarry } from './technology-water.js';
 import { WATER_QUANTA_PER_UNIT } from './material-affordances.js';
+import { updateEcosystemResources } from './ecology-resources.js';
+import { phaseAt, TICKS_PER_DAY } from './time.js';
+export { phaseAt, TICKS_PER_DAY } from './time.js';
 export { bindWorldContext, tileAt, normalizeViewport, worldContext } from './spatial.js';
 export type { WorldContext } from './spatial.js';
 
 export const RULES_VERSION = 6;
 export const MAX_POPULATION = 32;
-export const TICKS_PER_DAY = 2400;
 export const MAX_EVENTS = 120;
 export const MAX_EXPERIENCES = 8;
 const MAX_HABITS = 3;
@@ -80,11 +82,6 @@ export interface World {
 function random(world: Pick<World, 'rng'>): number {
   world.rng = (Math.imul(world.rng, 1664525) + 1013904223) >>> 0;
   return world.rng / 4294967296;
-}
-
-export function phaseAt(tick: number): WorldView['phase'] {
-  const t = tick % TICKS_PER_DAY;
-  return t < 300 ? 'dawn' : t < 1500 ? 'day' : t < 1800 ? 'dusk' : 'night';
 }
 
 function walkable(world: World, p: Point): boolean {
@@ -189,19 +186,7 @@ function ecology(world: World): void {
       cause: 'Cambio de tiempo del generador guardado; la lluvia aporta agua, no alimento instantáneo.',
     });
   }
-  if (world.tick % 10 !== 0) return;
-  const phase = phaseAt(world.tick);
-  const light = phase === 'day' ? 1 : phase === 'night' ? 0 : 0.4;
-  for (const tile of world.tiles) {
-    if (tile.terrain === 'water') continue;
-    // Neighbor water is an explicit, local moisture source.
-    const nearWater = [[tile.x - 1, tile.y], [tile.x + 1, tile.y], [tile.x, tile.y - 1], [tile.x, tile.y + 1]]
-      .some(([x, y]) => tileAt(world, { x: x!, y: y! })?.terrain === 'water');
-    tile.moisture = clamp(tile.moisture + (world.weather === 'rain' ? 0.012 : 0) + (nearWater ? 0.008 : 0) - 0.0015 - light * 0.001);
-    const growth = light * tile.moisture * 0.007 * (1 - tile.vegetation);
-    tile.vegetation = clamp(tile.vegetation + growth - (tile.moisture < 0.15 ? 0.0015 : 0.0001));
-    tile.food = clamp(tile.food + light * tile.moisture * tile.vegetation * 0.006 * (1 - tile.food) - 0.0001);
-  }
+  updateEcosystemResources(world.tiles, world.tick, world.weather, phaseAt(world.tick));
 }
 
 interface Candidate { action: Action; target: Point; score: number; reason: string; memory?: Memory; }

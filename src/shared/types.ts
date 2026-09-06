@@ -35,6 +35,7 @@ export interface ChronicleEvent {
 export interface MemoryView { id: string; title: string; text: string; source: 'sample' | 'approved'; placeId: string; }
 export interface WorldView {
   version: number; sequence: number; tick: number; day: number;
+  instanceId?: string;
   phase: 'dawn' | 'day' | 'dusk' | 'night'; weather: 'clear' | 'rain';
   width: number; height: number; tiles: Tile[]; people: PersonView[]; places: PlaceView[];
   events: ChronicleEvent[]; memories: MemoryView[];

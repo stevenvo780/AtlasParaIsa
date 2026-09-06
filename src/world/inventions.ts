@@ -13,6 +13,7 @@ export const RESEARCH_WORK = 60;
 export const REPAIR_WORK = 30;
 export const RESEARCH_COOLDOWN = 1200;
 export const BROKEN_CONDITION = 0.1;
+const REPAIR_CONDITION_LIMIT = 0.95;
 export const REST_FATIGUE_RATE = 0.0018;
 export const REST_ENERGY_RATE = 0.0011;
 export const COMPONENTS: readonly StructureComponent[] = ['frame', 'roof', 'cistern', 'granary', 'garden', 'hearth'];
@@ -86,6 +87,97 @@ function selectedBlueprint(world: World, person: Person): BlueprintView {
   return world.blueprints.find(b => b.id === person.blueprintId && validBlueprint(b.components)) ?? world.blueprints.find(b => b.id === 'blueprint-base') ?? defaultBlueprint();
 }
 export function constructionCost(world: World, person: Person): BlueprintView['cost'] { return blueprintCost(selectedBlueprint(world, person).components); }
+
+const CONSTRUCTION_RADIUS = 7;
+const MIN_SERVICE_GAIN = 0.025;
+type Services = { rest: number; water: number; food: number; irrigation: number };
+
+/** These are perceived opportunities, not occupancy or production receipts. Roofs are
+ * reusable; storage/catchment and irrigation add across locally visible structures.
+ * Normalized catchment discounts worn collectors without inventing water in them. */
+function localServices(world: World, person: Person, replacement?: { structure: StructureView; condition: number }, added?: readonly StructureComponent[], fuelWood = person.materials.wood): Services {
+  const result: Services = { rest: world.weather === 'rain' ? 0.2 : 0.55, water: 0, food: 0, irrigation: 0 };
+  const add = (components: readonly StructureComponent[], condition: number, water = 0, food = 0) => {
+    if (condition <= BROKEN_CONDITION) return;
+    const a = blueprintAffordances(components);
+    if (world.shelterBenefitEnabled) {
+      const heated = (world.weather === 'rain' || world.tick % 2400 >= 1800) && fuelWood >= a.hearths * 0.0005;
+      result.rest = Math.max(result.rest, clamp((a.restQuality + (heated ? a.hearths * 0.12 : 0)) * condition));
+    }
+    result.water += Math.max(water, a.waterCapacity * clamp(a.catchment / 0.012 * condition));
+    result.food += Math.max(0, a.foodCapacity - food);
+    result.irrigation += a.irrigation * condition;
+  };
+  for (const structure of world.structures) {
+    if (distance(person, structure) > CONSTRUCTION_RADIUS || tileAt(world, structure)?.terrain !== 'shelter') continue;
+    add(structure.components, replacement?.structure === structure ? replacement.condition : structure.condition, structure.water, structure.food);
+  }
+  if (added) add(added, 1);
+  return result;
+}
+
+function constructionContext(world: World, person: Person) {
+  const nearby = world.people.filter(other => distance(person, other) <= CONSTRUCTION_RADIUS);
+  return { ...inventionContext(world, person),
+    // Drinking lowers thirst by three times the debited water. One full body's
+    // dose is a planning reserve; additional demand comes only from people seen.
+    waterDemand: Math.max(1 / 3, nearby.reduce((sum, other) => sum + other.thirst / 3, 0)),
+    foodSurplus: nearby.reduce((sum, other) => sum + Math.max(0, other.inventory - 0.12), 0) };
+}
+
+function serviceValue(services: Services, context: ReturnType<typeof constructionContext>): number {
+  return services.rest * context.rest
+    + clamp(services.water / context.waterDemand) * context.rainPotential * context.water
+    + Math.min(services.food, context.foodSurplus) * context.food
+    + clamp(services.irrigation / 0.012) * context.rainPotential * (1 - context.moisture) * context.food * 0.65;
+}
+
+function localMaterials(world: World, person: Person): Person['materials'] {
+  const materials = { ...person.materials };
+  for (let dy = -CONSTRUCTION_RADIUS; dy <= CONSTRUCTION_RADIUS; dy++) for (let dx = -CONSTRUCTION_RADIUS; dx <= CONSTRUCTION_RADIUS; dx++) {
+    if (dx * dx + dy * dy > CONSTRUCTION_RADIUS * CONSTRUCTION_RADIUS) continue;
+    const tile = tileAt(world, { x: person.x + dx, y: person.y + dy });
+    // The gathering action requires at least one unit on a tile. Fractional
+    // leftovers spread across many tiles are not a reachable material reserve.
+    if (tile && tile.terrain !== 'water') { materials.wood += Math.floor(tile.wood ?? 0); materials.stone += Math.floor(tile.stone ?? 0); }
+  }
+  return materials;
+}
+
+function usefulRepairs(world: World, person: Person) {
+  const context = constructionContext(world, person), before = serviceValue(localServices(world, person), context);
+  return world.structures.flatMap(structure => {
+    if (structure.condition >= REPAIR_CONDITION_LIMIT || distance(person, structure) > CONSTRUCTION_RADIUS || tileAt(world, structure)?.terrain !== 'shelter') return [];
+    // Evaluate each physically legal paid prefix. A broken roof can need several
+    // steps before it helps; a last top-up with no extra service earns no benefit.
+    let condition = structure.condition, steps = 0;
+    const options: { structure: StructureView; gain: number; steps: number; efficiency: number }[] = [];
+    while (condition < REPAIR_CONDITION_LIMIT) {
+      condition = clamp(condition + 0.4); steps++;
+      const gain = serviceValue(localServices(world, person, { structure, condition }, undefined, Math.max(0, person.materials.wood - steps)), context) - before;
+      if (gain >= MIN_SERVICE_GAIN) options.push({ structure, gain, steps, efficiency: gain / (steps * (1 + REPAIR_WORK / 30)) });
+    }
+    return options;
+  }).sort((a, b) => b.efficiency - a.efficiency || distance(person, a.structure) - distance(person, b.structure) || a.structure.id.localeCompare(b.structure.id));
+}
+
+/** Autonomous admission only. Explicit construction still uses completeConstruction
+ * and pays the same material/work costs. No distant archive, historical uses or
+ * invented number of occupants contributes to this local marginal comparison. */
+export function constructionOpportunity(world: World, person: Person): { score: number; reason: string } | undefined {
+  if (world.structures.length >= MAX_STRUCTURES) return;
+  const blueprint = selectedBlueprint(world, person), cost = blueprintCost(blueprint.components), materials = localMaterials(world, person);
+  if (materials.wood < cost.wood || materials.stone < cost.stone) return;
+  const context = constructionContext(world, person), before = serviceValue(localServices(world, person), context);
+  // Material committed to the building cannot simultaneously fuel its hearth.
+  const gain = serviceValue(localServices(world, person, undefined, blueprint.components, Math.max(0, person.materials.wood - cost.wood)), context) - before;
+  const expense = normalizedCost(cost), baseExpense = normalizedCost(defaultBlueprint().cost);
+  if (gain < MIN_SERVICE_GAIN * expense / baseExpense) return;
+  const repair = usefulRepairs(world, person).find(option => materials.wood >= option.steps);
+  if (repair && repair.efficiency >= gain / expense) return;
+  return { score: 0.35 + person.traits.industriousness * 0.2 + Math.min(0.55, gain) - expense * 0.005,
+    reason: 'El plano aporta una función adicional frente a las instalaciones que percibe; fabricarlo exige materiales y trabajo.' };
+}
 
 export interface InventionContext { water: number; food: number; rest: number; rainPotential: number; foodSurplus: number; moisture: number; cold: number; fuel: number; }
 /** Perceived local deficits, not global resource omniscience or invented weather history.
@@ -337,11 +429,11 @@ export function recordFacilityRest(world: World, person: Person, before?: Pick<P
 
 export function repairOpportunity(world: World, person: Person): StructureView | undefined {
   if (person.materials.wood < 1) return;
-  return world.structures.filter(s => s.condition < 0.6 && distance(person, s) <= 5)
-    .sort((a, b) => a.condition - b.condition || distance(person, a) - distance(person, b) || a.id.localeCompare(b.id))[0];
+  const materials = localMaterials(world, person);
+  return usefulRepairs(world, person).find(option => materials.wood >= option.steps)?.structure;
 }
 export function repair(world: World, person: Person, structure: StructureView, emit: Emit): boolean {
-  if (!world.structures.includes(structure) || structure.condition >= 0.95 || distance(person, structure) > 1.5 || person.materials.wood < 1 || person.work < REPAIR_WORK) return false;
+  if (!world.structures.includes(structure) || structure.condition >= REPAIR_CONDITION_LIMIT || distance(person, structure) > 1.5 || person.materials.wood < 1 || person.work < REPAIR_WORK) return false;
   person.materials.wood--; person.work -= REPAIR_WORK; structure.condition = clamp(structure.condition + 0.4); world.inventionDynamics.repairs++;
   emit({ kind: 'invention', actors: [person.id], x: structure.x, y: structure.y, source: 'simulation', text: `${person.name} reparó ${structure.name.toLocaleLowerCase('es')}.`,
     cause: `Mantenimiento real: −1 madera y ${REPAIR_WORK} trabajo; condición +0,4 hasta un máximo de 1.` });

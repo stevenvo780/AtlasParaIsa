@@ -4,6 +4,8 @@ Un mundo procedural compartido que continúa mientras el navegador está cerrado
 
 La aplicación local está implementada y la revisión privada mantiene el acceso existente. La voz final de Steven, los recuerdos reales revisados, la prueba en un teléfono físico y el alojamiento definitivo siguen pendientes. No hay publicación pública ni infraestructura nueva contratada.
 
+El **candidato `7d8777c` aún no está activo**. Conecta el archivo tecnológico con investigación y fabricación: 256 define la caché residente, mientras las identidades y generaciones tecnológicas pueden seguir creciendo en SQLite. Cada persona conserva hasta 32 instrucciones. La interfaz distingue ese conocimiento de los objetos que lleva y de los detalles disponibles en la vista. EVIDENCIA registra la validación conjunta aprobada, navegador y smoke compilados y una continuación autónoma en copia; activación y observaciones largas multisemilla del candidato siguen pendientes.
+
 ## Arrancar en local
 
 Requiere Node.js **22.22 o posterior de la rama 22**; esta implementación se comprobó con **22.22.3**. El manifiesto también admite Node.js 24 o posterior, sin acreditar aquí esas versiones. Se usa `node:sqlite`, que en Node.js 22 muestra un aviso de API experimental.
@@ -97,6 +99,8 @@ Esta operación retira en la copia las entradas y los hechos posteriores al punt
 
 La actualización de SQLite 3 a 4 se comprobó primero en una copia y después conservó el mundo, los archivos de acceso y sus cuatro sesiones. [EVIDENCIA](docs/EVIDENCIA.md#actualización-sin-reiniciar-el-mundo) enlaza preflight, activación, comprobación privada y archivo del build, base y script anteriores. Fue un procedimiento revisado para ese candidato, no un CLI general añadido al proyecto.
 
+El catálogo integrado en `614b25d` y validado en `7d8777c` es una actualización posterior, todavía sin activar. Al cargar un snapshot antiguo válido, Store añade metadatos de catálogo y aplica memoria local finita; puede olvidar instrucciones y práctica sin soporte, pero no rellena recursos ni modifica cuerpos o parentescos. Guardar confirma esa adopción. El acceso `readOnly` conserva la base de origen, aunque la representación cargada en memoria adopte el catálogo cuando el esquema lo admite. La comprobación previa debe usar una copia y conservar juntos base y build anteriores: el lector antiguo no tiene el contrato de las referencias tecnológicas que ya salieron de RAM.
+
 Una actualización debe mantener inactivos los CLI independientes de acceso y almacenamiento y cualquier escritura SQL directa. El lease SQLite `world.lock` excluye otras instancias del servidor, pero esos comandos no comparten el lease. Comparar el estado durable antes de reemplazar archivos detecta cambios previos; no convierte el reemplazo en una transacción universal.
 
 Se comprueba el backend en loopback antes de exponerlo por TLS. Si ya se intentó arrancar el backend nuevo, un fallo conserva la base actual y detiene solo los servicios propios; no se restaura una base antigua sobre un mundo que pudo avanzar. La recuperación explícita en copia descrita arriba sigue siendo una operación distinta y revoca las sesiones de esa copia.
@@ -106,6 +110,8 @@ Se comprueba el backend en loopback antes de exponerlo por TLS. Si ya se intent�
 El mundo se genera por regiones de 16 × 16 celdas con coordenadas positivas y negativas; no conserva el borde de 40 × 28. El límite técnico es ±10 millones de celdas, con extremo superior excluido. La cámara recibe ventanas de hasta 96 × 64. Solo los alrededores de los habitantes avanzan: las regiones archivadas conservan sus cambios y congelan su ecología. El archivo en disco puede crecer con la exploración.
 
 V5 activo usa reglas/protocolo **5** y SQLite **4**. El lector valida el origen antes de migrar. La actualización del V5 conservó el mundo y sus sesiones; antes se verificó compatibilidad en una copia y se archivaron base y build. El archivo V4 anterior conserva su defecto de madera fuera de cota: el inicio V5 fue un mundo nuevo autorizado, no una migración exitosa de ese V4. El contrato de archivo y recuperación está en [CONSTRUCCION.md](docs/CONSTRUCCION.md#territorio-procedural-y-archivo); [EVIDENCIA.md](docs/EVIDENCIA.md#actualización-sin-reiniciar-el-mundo) registra el cambio efectivo de SQLite 3 a 4.
+
+En `bf6431b`, 256 recetas y generación tecnológica 32 todavía detienen la búsqueda. El candidato conserva reglas/protocolo 5 y SQLite 4, separa esos límites de la historia durable y mantiene acotados caché, memoria, proyectos y colas pendientes. Snapshot, definiciones, estadísticas y recibos se confirman juntos; un fallo conserva las colas y no confirma órdenes. El disco puede crecer y no hay almacenamiento ilimitado ni reconstrucción de episodios perdidos. [REGLAS](docs/REGLAS.md#catálogo-resoluble-y-memoria-técnica) y [CONSTRUCCION](docs/CONSTRUCCION.md#archivo-tecnológico) detallan el contrato.
 
 ## Desarrollo y comprobaciones
 

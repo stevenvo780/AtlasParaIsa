@@ -2,6 +2,8 @@
 
 Este documento desarrolla la interacción y voz del [objetivo rector](../GOAL.md). **V5 `bf6431b` está activo en la revisión privada**, con el cuaderno y paisaje renovados y el mismo mundo conservado. El reemplazo generacional de dos réplicas de veinticinco días corresponde al cierre biológico anterior. [REGLAS.md](REGLAS.md) conserva mecánicas y [EVIDENCIA.md](EVIDENCIA.md) pruebas y límites. Las escenas no garantizan desenlaces ni continuidad indefinida; calidad final, voz de Steven, biografía aprobada y teléfono físico siguen pendientes.
 
+El candidato `7d8777c`, todavía sin activar, amplía el catálogo tecnológico y distingue en la ficha lo que alguien recuerda, lo que lleva y los detalles que llegaron a la vista. Pasaron la validación conjunta, el navegador y el smoke compilados, además de la continuación autónoma en copia. La revisión en el servicio privado y las observaciones largas multisemilla del candidato siguen pendientes.
+
 ## Entrar, explorar y volver
 
 Isa abre la carta, encuentra unas palabras de Steven y entra directamente al paisaje. En los primeros treinta segundos puede localizar a S e I y percibir que cada uno está haciendo algo por una razón.
@@ -88,6 +90,10 @@ Se puede seleccionar cualquier habitante en el mapa o el censo, seguirlo y solic
 
 «Oficios» permite inspeccionar procedimientos, productos, capacidades y dependencias observadas entre productores y usuarios. Investigar inicia un ensayo con coste y posibilidad de fallo; fabricar ejecuta una técnica conocida con ingredientes presentes. La ficha muestra los objetos que porta cada persona. Los procesos se explican con operaciones comprensibles; un nombre nuevo sin función material no cuenta como invento. La red distingue uso, intercambio y reposición, con su intervalo y evidencia disponible: un ciclo histórico no garantiza actividad presente ni se etiqueta como vida demostrada.
 
+En la interfaz candidata, «Procedimientos que recuerda» presenta el repertorio recibido para ese habitante, separado de «Objetos que lleva». Si falta el detalle de una receta, se conserva su referencia y se indica «Detalles fuera de esta vista»; eso no significa que la persona la haya olvidado. Si falta el repertorio completo, la ficha informa esa ausencia, sin convertirla en una lista vacía. Llevar un producto, heredarlo o verlo en el cuaderno no enseña a fabricarlo.
+
+El cuaderno distingue el total descubierto de la selección de procedimientos cuyos detalles están disponibles. La memoria puede cambiar por uso, aprendizaje y olvido, mientras el archivo conserva la autoría de una técnica incluso después de morir su inventor. Volver a descubrir el mismo procedimiento requiere un ensayo pagado y mantiene su identidad original. El candidato no ofrece todavía una navegación completa de todo el archivo desde el navegador; una referencia histórica o un ciclo dibujado no demuestra conocimiento presente ni reposición material.
+
 Si fallece el habitante seleccionado, la ficha muestra su legado y la causa registrada. Se interrumpe el seguimiento del cuerpo ausente y desaparecen las órdenes que ya no pueden ejecutarse. Esta continuidad conserva el hecho sin dibujar un cuerpo ficticio ni enviar órdenes hacia una identidad archivada.
 
 Los asentamientos empiezan como refugios construidos con recursos y trabajo. Los habitantes pueden ensayar variantes con armazón, techo, cisterna, granero, huerta y hogar. Los componentes alteran capacidades y costes: la cisterna recoge lluvia, el granero conserva aportes de alimento, la huerta consume agua y el hogar requiere combustible. Desgaste y reparación afectan su funcionamiento. El dibujo permite reconocer componentes y estado; las fichas distinguen diseño, construcción y uso. Los oficios describen práctica adquirida; no asignan destinos biográficos a S, I o los vecinos.
@@ -100,7 +106,7 @@ Los tres gestos ambientales disponibles son:
 | Invitar | Deja una señal que puede percibirse como invitación. | Los habitantes deciden si responder según su situación; no los teletransporta. |
 | Recordar | Refuerza temporalmente un recuerdo disponible relacionado con la escena; los actuales son sintéticos identificados. | El contexto determina si influye y cómo; no impone diálogo ni reconciliación. |
 
-La intención de diseño es que los habitantes resuelvan el cuidado cotidiano por sus procesos. V5 conserva generaciones nuevas en las dos ventanas de veinticinco días estudiadas, con límites materiales y de catálogo todavía abiertos. La intervención de Isa aporta posibilidades y permite investigar; no debe convertirse en una obligación de rescatar población ni en condición para que el mundo continúe.
+La intención de diseño es que los habitantes resuelvan el cuidado cotidiano por sus procesos. V5 conserva generaciones nuevas en las dos ventanas de veinticinco días estudiadas. La continuación del candidato sobre una copia supera el antiguo tope de recetas, pero no acredita nuevas funciones ni mantenimiento indefinido; [PLAN](../PLAN.md#siguiente-avance-de-autonomía) resume ese alcance. La intervención de Isa aporta posibilidades y permite investigar; no debe convertirse en una obligación de rescatar población ni en condición para que el mundo continúe.
 
 Crear paisajes alternativos o comparar reglas puede explorarse después en mundos de prueba separados. Esos experimentos no reinician ni sobrescriben la carta persistente.
 

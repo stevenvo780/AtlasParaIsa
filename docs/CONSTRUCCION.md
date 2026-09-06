@@ -47,6 +47,8 @@ Esta implementación mantiene fórmulas, orden y frecuencia del motor de referen
 
 Un prototipo temporal de escritura en worker conservó estado y recarga y atendió mejor un temporizador de diagnóstico, pero redujo el avance por segundo; no está integrado. Antes de adoptarlo faltan protocolo de confirmación, reconciliación de commits inciertos, escritor único para acceso y mundo, cierre y controles de fallo. La continuidad territorial exige además un calendario persistido por región y fronteras de época coherentes; cambiar el lugar donde corre el cálculo no modifica por sí solo la congelación actual.
 
+La comparación posterior de `EcosystemKernel` ejecutó CUDA real en ambas GPU, en un harness separado del servidor. Las conversiones y transferencias no demostraron una mejora robusta del tiempo completo; el runtime conserva CPU. [EVIDENCIA](EVIDENCIA.md#comparación-física-de-cpu-y-ambas-gpu) registra tamaños, fases y límites. Los scripts `compute-*` quedan como instrumentos reproducibles; no instalan NVRTC ni el puente Python como dependencias de la aplicación. Una representación por región con arrays residentes y borradores separados es una posibilidad posterior, aún sin implementar; necesita vecinos del mismo paso y confirmación transaccional antes de publicar resultados.
+
 ## Territorio procedural y archivo
 
 El generador puro usa ruido interpolado multiescala en coordenadas globales, seis biomas y regiones de 16 × 16. Generar en distinto orden produce las mismas celdas. El rango técnico es `[-10 000 000, 10 000 000)`. Los barrios activos dependen de la población, no de la cámara; las vistas admiten hasta 96 × 64 celdas. La ecología archivada permanece congelada.
@@ -60,6 +62,8 @@ La tabla `legacy(id,tick,body,digest)` conserva identidades fallecidas de forma 
 El servicio `7d8777c` resuelve también la autoría de recetas fuera de RAM mediante el archivo de identidades. Una definición puede seguir apuntando a su inventor fallecido aunque su legado ya no esté en la caché; la consulta comprueba identidad y fechas sin volver a crear al habitante ni otorgar conocimiento a otros.
 
 Leer una identidad exige que su muerte ya haya ocurrido en el paso consultado. La recuperación de un punto anterior poda los registros futuros en una copia, conserva la base original y revoca sesiones de la copia. Se contrastan suma de integridad, fecha, identidad, contador de nacimientos, caché y parentesco; un descendiente no puede nacer después de la muerte de un progenitor. Los archivos mantienen autorías aunque el autor haya desaparecido del censo vivo.
+
+El generador principal incorpora claros físicos desde `7fff2f3`, integrado antes de la primera publicación V6. `forest.ts` distribuye parcelas en coordenadas globales, sin resembra por chunk; la inicialización conserva los valores explícitos de regiones anteriores. El renderer representa existencias positivas sin cambiar el estado. La revisión independiente comprobó conservación de regiones antiguas y generación exacta en los límites numéricos. Esta distribución no activa por sí sola la ecología distante; el scheduler cronológico y su archivo V7 siguen en desarrollo.
 
 ## Una única verdad del mundo
 
@@ -116,6 +120,12 @@ El estado, sus hechos correspondientes y las entradas aplicadas se guardan de fo
 El snapshot conserva celdas activas en tuplas JSON versionadas (`tiles-tuple-v1`) para evitar repetir veinte nombres de campo por celda, sin cuantización. El lector admite objetos y tuplas; los archivos de regiones conservan objetos. Se rechazan valores opcionales presentes nulos o no finitos antes de escribir. La copia del estado para cada transacción aprovecha que las celdas son planas; individuos, estructuras, proyectos, lotes y recuerdos mantienen copias independientes. Las pruebas verifican identidad, contadores monotónicos, recuperación y conservación material.
 
 Se conservan un punto de recuperación anterior y una copia de seguridad. Al arrancar se valida la versión y la integridad del estado antes de avanzar. Un fallo de lectura no crea silenciosamente otro mundo: se conserva la evidencia y se recupera un estado válido mediante una operación explícita.
+
+### Identidad de ejecución y última visita
+
+La próxima versión guarda un UUID público de ejecución en `metadata.world-instance-id`, independiente de semilla, protocolo y sesión. `world-instance.ts` valida un valor existente antes de que `createApp` añada una pausa o rote snapshots. Si falta, lo asigna después del primer guardado válido y antes de ofrecer vistas; no reemplaza un identificador dañado. Reinicios, copias y recuperación conservan metadata; otra base creada desde cero recibe otra identidad. La proyección autenticada incorpora `instanceId`; no es una credencial ni aparece en las rutas públicas de acceso o salud.
+
+`visit-memory.ts` conserva un único marcador local versionado con identidad y paso. Los marcadores antiguos sin identidad, de otro mundo, inválidos o posteriores al paso recibido se ignoran. El almacenamiento del navegador es opcional. Esta separación evita que una publicación nueva herede una visita anterior aunque ya haya superado su paso. No modifica reglas físicas ni el guardado de sesiones.
 
 ### Archivo tecnológico
 

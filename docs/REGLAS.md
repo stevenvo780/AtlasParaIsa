@@ -27,6 +27,12 @@ No hay regeneración instantánea para fabricar un encuentro ni un balance termo
 
 Solo las regiones alrededor de habitantes avanzan su ecología. Las demás se archivan y quedan congeladas hasta reactivarse; la cámara consulta terreno y modificaciones sin activar regiones, producir historia ni consumir el azar del clima. SQLite crece con la exploración: extensión procedural no significa almacenamiento ilimitado.
 
+### Claros y arboledas de la siguiente publicación
+
+El código principal incorpora una nueva distribución inicial de madera, todavía sin publicar. Un candidato de raíz por bloque global de 2 × 2 celdas y dos campos suaves de hábitat, de escalas 24 y 8, producen claros y agrupaciones en bosque y pradera. Las raíces pueden quedar juntas; el bloque limita densidad, sin imponer obstáculos de movimiento. En las parcelas forestales elegidas se conserva el stock local de hasta doce unidades. No se reducen existencias de regiones ya guardadas para aclarar su dibujo.
+
+Un claro nuevo con madera cero comienza como suelo, bayas, flores o roca según su estado; no se convierte en tocón. Los tocones reales conservan la posibilidad de regenerar bajo las condiciones y costes existentes. Una celda guardada con madera positiva mantiene su depósito aunque no corresponda a una raíz del generador nuevo; una existencia cero no se rellena al cargar. Alimento, vegetación, humedad, agua y los demás campos comparados conservan sus valores iniciales. La distribución es una decisión del modelo, sin calibración botánica ni prueba de supervivencia prolongada con estas reservas menores. [EVIDENCIA](EVIDENCIA.md#claros-físicos-y-lectura-del-paisaje) registra las comparaciones.
+
 ## Cuerpos, elecciones y vínculo
 
 En `7d8777c` activo, `body.ts` centraliza avance fisiológico, esfuerzo, asimilación, hidratación y descanso; `needs.ts` conserva la entrada compatible. Humanos y fauna usan esas operaciones en sus acciones reales, con sus tasas existentes. La asimilación y la hidratación reciben solo cantidades ya retiradas del recurso local. El refactor conserva las ecuaciones, el orden de cálculo y los resultados anteriores; no añade unidades físicas, capacidades sociales animales ni continuidad fuera de las regiones activas. La protección de S e I, la reproducción y las pausas sociales mantienen sus reglas específicas. [EVIDENCIA](EVIDENCIA.md#núcleo-corporal-compartido-en-el-código) conserva las pruebas de paridad y sus controles negativos; la publicación privada se acredita por separado.

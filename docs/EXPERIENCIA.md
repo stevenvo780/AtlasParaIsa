@@ -40,6 +40,8 @@ El mundo empieza con S, I y catorce vecinos ficticios. La descendencia requiere 
 
 No hacen falta química molecular, hidrodinámica completa ni evolución de especies para comprobar estas dependencias. La primera pregunta experimental es sencilla: **si cambia la disponibilidad de alimento o refugio, ¿cambian las rutas, los encuentros y las decisiones?**
 
+El bosque integrado para la próxima publicación deja ver suelo, fuentes y fauna mediante claros y grupos de árboles con existencias físicas distintas. Los árboles maduros mantienen aproximadamente dos a tres alturas corporales y variaciones causales de copa. Cuando una fuente, roca o construcción conserva madera sin árbol vivo, se ven restos del depósito; no desaparece el recurso para despejar la escena. [Comparación de escritorio](../artifacts/forest-candidate/51926-1440.png) y [móvil emulado](../artifacts/forest-candidate/51926-390.png), todavía fuera del servicio privado.
+
 ## Cuerpos y decisiones
 
 Cada habitante percibe una zona limitada. Empieza con energía, hambre, sed y fatiga, más preferencias y vínculos locales. S e I tienen además memoria compartida y una necesidad contextual de cercanía o espacio.
@@ -129,6 +131,8 @@ La profundidad científica se concreta en modelos pequeños, supuestos visibles 
 Autopoiesis, cognición encarnada y emergencia orientan el objetivo de un mundo capaz de sostener y reconstruir su propia organización. Los circuitos implementados deben demostrar dependencias y mantenimiento reales antes de atribuirles ese alcance. La interfaz no afirma sentimientos subjetivos ni convierte una teoría en una obligación de que dos personas mueran por separarse.
 
 Las pruebas muestran propiedades de este modelo. No validan una teoría general del amor ni usan una divergencia estadística como medida de conciencia. La filosofía puede abrir preguntas sin convertir cada escena en una lección escrita.
+
+La próxima publicación también vincula la última visita del navegador a esa ejecución del mundo. Reiniciar el mismo mundo conserva el punto de regreso; publicar uno nuevo vuelve a presentar la carta, aunque coincidan dirección, contraseña y semilla y el mundo ya haya avanzado. Una visita antigua sin procedencia o posterior a un punto recuperado no se atribuye a la ejecución recibida. La ausencia de almacenamiento local no impide entrar ni guardar el mundo.
 
 ## La historia real dentro de la carta
 

@@ -90,6 +90,8 @@ Las reglas de ayuda, trueque, enseñanza y disputa son decisiones explícitas de
 
 Una disputa necesita dos participantes distintos urgidos, la misma acción y la misma fuente todavía disponible pero escasa, además de confianza y apertura insuficientes. Puede ser interna o entre grupos. Confianza o apertura altas permiten una espera de doce pasos para turnarse; el desacuerdo añade tensión y cede un intento, sin violencia ni recursos nuevos. Ninguno de los artículos se presenta como validación de esta regla concreta ni de una teoría general del conflicto humano.
 
+La comparación de CPU y ambas GPU verifica fidelidad de un pipeline concreto, no una teoría de escalabilidad general. Igualdad Float64, tiempo del kernel y tiempo de obtener la salida son medidas distintas. La conclusión práctica conserva CPU porque las conversiones y transferencias no justificaron adoptar el prototipo; no demuestra que toda implementación GPU o paralela sea más lenta. El [experimento reproducible](EVIDENCIA.md#comparación-física-de-cpu-y-ambas-gpu) delimita carga, hardware, variación y operaciones excluidas.
+
 ## Controles que pueden contradecir el diseño
 
 | Mecanismo | Control | Qué medir |

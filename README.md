@@ -8,6 +8,8 @@ La versión activa conecta el archivo tecnológico con investigación y fabricac
 
 **El código principal incorpora agua transportable V6 desde `95ff0d2`; todavía no está publicado.** Objetos fabricados pueden contener agua según sus propiedades, llenarse con trabajo en fuentes finitas y permitir bebida lejos de ellas, con peso, fugas y derrames contabilizados. El inspector muestra contenido, capacidad y fuga prevista. [REGLAS](docs/REGLAS.md#agua-contenida-y-preparación-autónoma) define este contrato; [EVIDENCIA](docs/EVIDENCIA.md#transporte-de-agua-v6-integrado) registra 496 pruebas Node, 17 de navegador y la observación autónoma de tres semillas. Compilar este árbol genera reglas/protocolo 6 y SQLite 4; el servicio privado conserva su build V5 hasta la siguiente publicación con mundo nuevo.
 
+También están integrados los claros físicos y las arboledas, junto con una última visita del navegador vinculada a cada ejecución. Se prepara su primera publicación V6 con mundo limpio; hasta entonces, el servicio sigue en V5. La continuidad ecológica fuera de los barrios humanos pertenece al trabajo V7 posterior. La comparación real de CPU, workers y ambas GPU quedó como herramienta de laboratorio: no mostró una mejora robusta del tiempo completo y la simulación conserva CPU. [EVIDENCIA](docs/EVIDENCIA.md#comparación-física-de-cpu-y-ambas-gpu) separa las mediciones de las capacidades publicadas.
+
 ## Arrancar en local
 
 Requiere Node.js **22.22 o posterior de la rama 22**; esta implementación se comprobó con **22.22.3**. El manifiesto también admite Node.js 24 o posterior, sin acreditar aquí esas versiones. Se usa `node:sqlite`, que en Node.js 22 muestra un aviso de API experimental.

@@ -233,9 +233,37 @@ La integración en la línea principal **`95ff0d2`** conserva iguales los **120 
 
 **V6 está integrado y no publicado:** la instancia privada sigue siendo V5 `7d8777c`. [REGLAS](REGLAS.md#agua-contenida-y-preparación-autónoma), [CONSTRUCCION](CONSTRUCCION.md#contrato-v6-de-agua-contenida) y [EXPERIENCIA](EXPERIENCIA.md#participación-de-isa) definen contrato, persistencia y lectura del inspector. La próxima publicación de pruebas comenzará un mundo nuevo según la política vigente.
 
+El smoke compilado posterior de `eefbbe2` comprobó acceso, avance, reinicio tras `SIGKILL`, sesión conservada, revocación y salida limpia, con datos temporales. Sus 42 archivos compilados conservaron los hashes. [Resultado](../artifacts/water-v6-compiled-smoke.json).
+
+## Claros físicos y lectura del paisaje
+
+`7fff2f3`, integrado en la línea principal, cambia la génesis de madera y su representación. En **36864 celdas, nueve regiones y tres semillas**, solo difieren madera y feature; los demás campos iniciales coinciden exactamente. La ventana forestal inicial de semilla 51926 pasa de **4096 a 917 celdas con madera**, y de **39543 a 8808 unidades**. La cobertura opaca del árbol completo, incluyendo tronco, pasa de **79,31 a 24,42 %** en escritorio y de **79,92 a 27,11 %** en móvil, a igual cámara y escala. Es una medida raster, sin equivalencia a cobertura botánica real. [Manifiesto y doce capturas](../artifacts/forest-validation.json).
+
+Pasaron **503/503 Node**, **17/17 E2E compilados**, typecheck y build sobre el commit fijado. La primera pasada concurrente tuvo 15/17 con dos capturas sin conexión; los dos escenarios pasaron después y la suite completa serial pasó sin modificar fuente o fixtures. No se aisló una única causa para los rojos. La revisión independiente pasó seis controles focales, conservó exactamente 1536 celdas antiguas tras inicialización y SQLite —1220 con madera fuera de las nuevas parcelas— y comparó 1024 celdas en los límites técnicos. Todavía faltan observaciones largas de autonomía con esta disponibilidad menor de madera y publicación privada.
+
+## Identidad del mundo y regreso del navegador
+
+`8565624`, integrado en la línea principal, distingue ejecuciones aunque tengan la misma semilla y origen. La comprobación focal final pasó **5/5** y la del servidor anterior al último guard **23/23**. Pasaron typecheck, build, smoke del entrypoint compilado y **18/18 E2E con cliente compilado y servidor TypeScript de la misma fuente**. El escenario nuevo conserva acceso y visita tras reiniciar la base y vuelve a presentar la carta después de crear otra, incluso si esta ya supera el paso visitado. [Informe](../artifacts/world-instance-validation.json) y [navegador final](../artifacts/world-instance-e2e-final.log).
+
+La primera suite concurrente pasó 17/18 y falló un resultado de caza mientras la captura mostraba reconexión. Se conservó ese [log](../artifacts/world-instance-e2e.log); la repetición serial no cambió el fixture ni corrigió la aplicación para ocultar ese fallo. La revisión independiente sí detectó otro defecto reproducible: el arranque rotaba el checkpoint anterior antes de rechazar una identidad malformada. El guard final rechaza antes de escribir y conserva exactamente las once tablas del control. No se atribuye aún una ejecución de suite completa a la combinación final de todas las ramas ni se ha publicado esta capacidad.
+
+## Comparación física de CPU y ambas GPU
+
+El benchmark **`ee073d4`**, con física fijada a `95ff0d2`, utilizó el Ryzen 9 9950X3D y CUDA real en **RTX 5070 Ti de 16 GiB y RTX 2060 de 6 GiB**. Comparó seis tamaños, de 256 a un millón de celdas, durante ocho actualizaciones consecutivas por tamaño: referencia Node, arrays locales, cuatro y ocho workers, GPU 0, GPU 1 y ambas. Los 336 registros de ejecución incluyen **288 comparaciones de alternativas con igualdad exacta Float64** frente a la referencia. FMA quedó desactivado. El driver y NVRTC 12.9.86 temporales, con hashes, están en los [artefactos](../artifacts/compute-ecology-20260906/result.json).
+
+| Celdas | Node | Cuatro workers | Ocho workers | RTX 5070 Ti | RTX 2060 | Ambas GPU |
+|---:|---:|---:|---:|---:|---:|---:|
+| 256 | 0,195 ms | 0,286 ms | 0,252 ms | 0,471 ms | 0,446 ms | 0,589 ms |
+| 4096 | 0,435 ms | 0,457 ms | 1,302 ms | 1,865 ms | 1,430 ms | 1,951 ms |
+| 1000000 | 412,168 ms | 355,033 ms | 408,459 ms | 1137,219 ms | 1264,783 ms | 1309,059 ms |
+
+Son medianas de siete invocaciones posteriores a la primera: incluyen clonación de celdas, comprobación de coordenadas, conversiones, ejecución, transferencias y ensamblado. Arranque, generación y topología inicial se registran aparte. El intervalo de kernel de la RTX 5070 Ti fue 0,466 ms para un millón de celdas; ese intervalo aislado no representa el coste de obtener un mundo actualizado. La variación de clonación y GC impide atribuir la ventaja aparente de workers grandes al paralelismo. No se incluyeron cuerpos, actualización base de recursos, mundo completo, proyección ni SQLite, y el host no fue exclusivo. [Fases y límites](../artifacts/compute-ecology-20260906/analysis.json). **Se conserva el kernel CPU actual; no se integra este puente CUDA en el runtime.**
+
+La revisión independiente recalculó 42 resúmenes y cerró dos fallos del harness: ausencia de Python que no terminaba el cierre, y escritura bloqueada a un hijo que quedaba fuera del timeout. El código final **`a4fd0a1`** limita envío y respuesta juntos y escala el cierre solo del proceso propio; pasó **9/9 pruebas con ambas GPU, sin skips**, además de typecheck. Los controles incluyen hijos sin lectura que ignoran SIGTERM, cierre repetido y Python ausente. La física y el código CUDA no cambiaron; la matriz de tiempos no se repitió y sigue atribuida a `ee073d4`. [Validación final](../artifacts/compute-ecology-20260906/final-validation.json) y [pruebas](../artifacts/compute-ecology-20260906/tests-final.tap). Sin `COMPUTE_NVRTC`, los tres controles CUDA indican explícitamente que no verificaron paridad GPU.
+
 ## Trabajo y pruebas pendientes
 
-La comparación alimentaria, el soak con commit por paso y la extensión a veinticinco días están completados dentro de sus alcances anteriores. La publicación privada `7d8777c` amplía el catálogo y conecta memoria local; faltan observaciones largas y multisemilla con esa memoria, recambio de herramientas y mantenimiento material reciente. Activo y candidato mantienen ecología lejana congelada y falta de simulación en GPU del servidor. El transporte de agua contenido está integrado y validado en la línea principal V6, todavía sin publicar.
+La comparación alimentaria, el soak con commit por paso y la extensión a veinticinco días están completados dentro de sus alcances anteriores. La publicación privada `7d8777c` amplía el catálogo y conecta memoria local; faltan observaciones largas y multisemilla con esa memoria, recambio de herramientas y mantenimiento material reciente. El servicio y el código integrado mantienen ecología lejana congelada; el benchmark CUDA comprobado no forma parte de la simulación del servidor. El transporte de agua contenido está integrado y validado en la línea principal V6, todavía sin publicar.
 
 No se han probado teléfono físico, Safari/iOS, lector de pantalla, varios días reales, doce clientes bajo carga sostenida, miles de habitantes, fallo físico de disco ni cálculo ecológico en GPU. La voz final y los recuerdos reales siguen pendientes. No se acreditan conciencia, autopoiesis biológica, efecto Baldwin ni evolución abierta.
 

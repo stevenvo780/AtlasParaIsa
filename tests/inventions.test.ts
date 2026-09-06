@@ -298,10 +298,19 @@ test('unsuccessful paid research preserves the registry; absent resources and ex
 });
 
 test('engine can choose paid research autonomously from practiced skill and a local deficit', () => {
-  const { world, person } = scene();
+  const { world, person, tile, emit } = scene();
   world.weather = 'rain'; person.skills = { build: 0.6 }; person.activity = { gather: 8 }; person.curiosity = 0.9; person.traits.industriousness = 0.1;
   person.command = null; person.controlMode = 'auto'; person.decisionAt = 0; person.closeness = 0; person.generosity = 0; person.socialLoad = 0;
   for (const tile of world.tiles) { tile.drinkingWater = 0; tile.food = 0.4; }
+  // Isolate research from the competing need for physical rain protection.
+  // Preparatory work is supplied by this fixture; construction debits its real
+  // materials. The following autonomous trial measures research, not roof labor.
+  const materials = { ...person.materials }, cost = constructionCost(world, person);
+  person.work = cost.work;
+  const roof = completeConstruction(world, person, tile, emit);
+  assert.ok(roof); assert.equal(person.work, 0);
+  assert.deepEqual(person.materials, { wood: materials.wood - cost.wood, stone: materials.stone - cost.stone });
+  assert.equal(roof.food + roof.water, 0);
   assert.ok(inventionOpportunity(world, person));
   for (let n = 0; n < 100 && world.inventionDynamics.attempts === 0; n++) stepWorld(world);
   assert.ok(world.inventionDynamics.attempts >= 1); assert.ok(world.inventionDynamics.accepted >= 1);

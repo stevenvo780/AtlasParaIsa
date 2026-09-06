@@ -200,7 +200,9 @@ test('world statistics show real scopes, live series and keyboard-operated tabs'
   const observed = observeMessages(page); await page.setViewportSize({ width: 1440, height: 900 }); await enter(page);
   await page.locator('#stats-toggle').focus(); await page.keyboard.press('Enter');
   await expect(page.locator('#stats-tab-life')).toBeFocused();
-  await expect(page.locator('#stats-content .stat-card').filter({ has: page.locator(':scope > span', { hasText: /^Habitantes$/ }) }).locator('strong')).toHaveText(String(app.world.people.length));
+  await expect(page.locator('#stats-content .stat-card').filter({ has: page.locator(':scope > span', { hasText: /^Vecinos vivos$/ }) }).locator('strong')).toHaveText(String(app.world.people.filter(person => person.role === 'neighbor').length));
+  await expect(page.locator('#stats-content .stat-card').filter({ has: page.locator(':scope > span', { hasText: /^S\/I protegidos$/ }) }).locator('strong')).toHaveText(String(app.world.people.filter(person => person.role !== 'neighbor').length));
+  await expect(page.locator('[data-demographic-summary]')).toContainText(`${app.world.people.length} vidas · censo global`);
   await expect(page.locator('#stats-content')).toContainText('Todavía no hay muestras');
   await expect.poll(() => observed.views.at(-1)?.stats?.history.length ?? 0, { timeout: 10_000 }).toBeGreaterThan(0);
   await expect(page.locator('.history-chart svg')).toHaveCount(2);

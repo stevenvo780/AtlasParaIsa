@@ -25,7 +25,14 @@ export function personBlueprint(person: PersonView, world: WorldView | null): Bl
 }
 export function structureCard(structure: StructureView, world: WorldView | null): string {
   const blueprint = world?.blueprints?.find(b => b.id === structure.blueprintId);
-  return `<section class="structure-card"><h3>${esc(structure.name)}</h3>${meter('Estado', structure.condition)}<p class="drawer-note">${structure.condition <= .1 ? 'Dañada: necesita reparación para funcionar.' : structure.condition < .65 ? 'El desgaste reduce sus prestaciones.' : 'En condiciones de uso.'}</p><div class="tile-facts"><span>Agua almacenada<strong>${number(structure.water, 2)} u.</strong></span><span>Alimento guardado<strong>${number(structure.food, 2)} u.</strong></span><span>Usos reales<strong>${number(structure.uses)}</strong></span></div>${blueprint ? blueprintCard(blueprint, world) : `<p class="drawer-note">Componentes: ${structure.components.map(part => componentNames[part]).join(' · ')}.</p>`}</section>`;
+  const parts = [...new Set(structure.components)].map(part => `${componentNames[part]}${structure.components.filter(p => p === part).length > 1 ? ` ×${structure.components.filter(p => p === part).length}` : ''}`);
+  const cisterns = structure.components.filter(part => part === 'cistern').length, granaries = structure.components.filter(part => part === 'granary').length;
+  return `<section class="structure-card" data-structure="${esc(structure.id)}">${meter('Estado', structure.condition)}<div class="structure-reserves">${cisterns ? `<div data-structure-water><span>Agua en la cisterna</span><strong>${resourceQuantity(structure.water)} <small>/ ${number(cisterns * .6, 2)} u.</small></strong></div>` : ''}${granaries ? `<div data-structure-food><span>Alimento en el granero</span><strong>${resourceQuantity(structure.food)} <small>/ ${number(granaries * .7, 2)} u.</small></strong></div>` : ''}</div><p class="drawer-note">${structure.condition <= .1 ? 'Dañada: necesita reparación para funcionar.' : structure.condition < .65 ? 'El desgaste reduce sus prestaciones.' : 'En condiciones de uso.'}</p><p class="structure-components">${parts.join(' · ')}</p><div class="structure-benefit"><span>Usos con beneficio</span><strong>${number(structure.uses)}</strong></div><p class="drawer-note structure-history-note">Acumulados desde su construcción; no indican ocupación actual.</p>${blueprint ? `<details class="person-detail" data-detail="structure-blueprint-${esc(structure.id)}"><summary>Proyecto y materiales</summary>${blueprintCard(blueprint, world)}</details>` : ''}</section>`;
+}
+
+/** A positive reserve smaller than the display precision must never read as zero. */
+export function resourceQuantity(value: number): string {
+  return value > 0 && value < .01 ? `&lt;${number(.01, 2)}` : number(value, 2);
 }
 
 function procedureReference(recipeId: string, technology: WorldView['technology']): string {

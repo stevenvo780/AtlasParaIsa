@@ -41,8 +41,17 @@ export function paintTree(g: CanvasRenderingContext2D, form: TreeForm, pose = 1)
   block(16, top + crown * .5, 1, form.height - crown * .5, '#aa875f');
   block(13, 43, 4, 1, '#69533e'); block(17, 42, 3, 2, '#69533e');
   if (form.foliage === 0) {
-    // Remaining wood with no live canopy is a standing, depleted crown, not a lush prop.
-    for (const side of [-1, 1]) { block(16 + side * 3, top + 6, 1, crown, '#69533e'); block(16 + Math.min(0, side * 4), top + crown, 5, 1, '#69533e'); }
+    // Low received ground cover is not evidence of felling or tree death.
+    // Keep standing wood and its height; tapered, unequal forks avoid a repeated fence glyph.
+    const lean = form.variant % 2 === 0 ? -1 : 1;
+    for (let step = 0; step < Math.ceil(crown * .52); step++) {
+      block(16 + lean * Math.floor(step / 5), top + crown * .52 - step, step < 3 ? 2 : 1, 2, '#795f43');
+    }
+    for (const side of [-1, 1]) {
+      const length = 3 + (form.variant + (side > 0 ? 1 : 0)) % 3;
+      const fork = top + crown * (side === lean ? .55 : .81);
+      for (let step = 0; step < length; step++) block(16 + side * step, fork - step, step < 2 ? 2 : 1, 2, '#795f43');
+    }
     return;
   }
   if (form.kind === 'pine') {

@@ -38,7 +38,7 @@ test('GPU requests cover stdin backpressure and close escalates only their owned
   const gpu=new GPUWorker();gpu.process=child;gpu.completion=completed;
   gpu.reader={frame:()=>new Promise(()=>{})};child.stdin.on('error',()=>{});
   const deadline=gpu.deadline.bind(gpu);let deadlines=0;
-  gpu.deadline=promise=>{deadlines++;return deadline(promise,30);};
+  gpu.deadline=(promise:Promise<unknown>)=>{deadlines++;return deadline(promise,30);};
   try {
     await assert.rejects(gpu.setup(131072,new Int32Array(262144)),/deadline exceeded/);
     assert.equal(deadlines,1);assert.equal(child.stdin.writableNeedDrain,true);

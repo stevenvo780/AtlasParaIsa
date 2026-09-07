@@ -155,6 +155,20 @@ Las pruebas incluyen controles emparejados de alimento, refugio, encuentro, recu
 
 Para las pruebas de navegador, ejecuta primero `npx playwright install chromium` y `npm run build`. La [evidencia de esta entrega](docs/EVIDENCIA.md) registra los resultados y sus límites.
 
+### Diagnóstico reproducible de supervivencia
+
+`scripts/survival-matrix.py` ejecuta tres mundos normales independientes, semillas **51926, 42 y 20260905**, durante **60000 pasos (25 días)**, con reinicio exacto en 30000. Usa una copia de fuentes fijada en Git y una salida nueva; no abre ni reinicia la carta privada. La fuente debe tener sus dependencias instaladas y permanecer inmóvil durante la prueba.
+
+```sh
+python3 scripts/survival-matrix.py /ruta/fuente-fijada /ruta/salida-nueva --source-sha SHA_COMPLETO --run
+```
+
+Sin `--run` imprime la configuración. En Linux limita tiempo, heap, disco, snapshots, logs y procesos hijos propios; `--help` describe sus opciones. Por defecto ejecuta tres procesos, con 1024 MiB de heap y hasta 8192 MiB de salida por semilla; el heap no limita toda la memoria RSS. El auditor TypeScript guarda cada 120 pasos si hay journal, o cada paso para la fuente anterior sin journal, comprueba cada evento contra SQLite y verifica la recarga final. Una cola completa permite los lotes sin perder hechos de la ventana visible.
+
+El informe separa vecinos de S/I, intervalos de vida, presión corporal, acciones, edades y oportunidades familiares. Estas últimas son muestras posteriores a las acciones y posibles costes de nacimiento, no causas exclusivas de infertilidad. Los puntos de recuperación por riesgo pueden preceder hasta 120 pasos a la observación; ambos tiempos se registran. Los stocks activos y el agua geométricamente cercana no prueban acceso, consumo ni disponibilidad global simultánea. El tiempo del experimento no mide rendimiento del servicio con navegador.
+
+Los controles del auditor están incluidos en `npm test`. Los controles de procesos del wrapper se ejecutan con `python3 tests/survival-matrix_test.py`; fuera de Linux indican expresamente qué limpieza de procesos no comprobaron. [EVIDENCIA](docs/EVIDENCIA.md) identifica las fuentes y resultados de cada ejecución.
+
 ## Mapa del proyecto
 
 - `src/world/`: reglas deterministas, terreno, ecología, fisiología compartida, animales, invenciones, memoria, genética, sociedad y estadísticas.

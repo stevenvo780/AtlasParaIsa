@@ -26,6 +26,8 @@ La copia coherente del **7 de septiembre a las 04:52:41 UTC**, fuente `03470e3`,
 
 **Causa terminal no equivale a ausencia de daño anterior.** Por el balance de salud de esta fuente, las 57 muertes antes del máximo requieren pérdidas acumuladas distintas de la senescencia. El límite inferior inferido por caso está entre 0,156 y 0,752 unidades de salud; no identifica mezcla, fechas ni decisiones responsables. Es una implicación matemática del balance, no una repetición causal de esas vidas. Los legados no registran una serie completa de lesiones y curación.
 
+La [gráfica de población, generaciones y edad relativa de muerte](../artifacts/survival-20260907/observed/demography.png), también en [SVG](../artifacts/survival-20260907/observed/demography.svg), deriva exclusivamente del informe sellado. Su [script](../artifacts/survival-20260907/observed/plot.py) verifica el hash de entrada y excluye S/I de las tres vistas.
+
 Este diagnóstico no ejecutó carga integral de Store ni validación completa del archivo tecnológico y regional. Tampoco repitió naturalmente los 113 días ni comparó semillas. El promedio entre comprobación de publicación y snapshot fue aproximadamente **5,57 pasos/s**; incluye pausas o variaciones no reconstruidas y no es un perfil de CPU/GPU. La evidencia favorece preservar este mundo y medir otros escenarios antes de cambiar envejecimiento, fertilidad o el selector. La neuroevolución continúa condicionada a esa afinación.
 
 ## Afinación tras el colapso del mundo observado

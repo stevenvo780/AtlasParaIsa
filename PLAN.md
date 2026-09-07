@@ -98,7 +98,7 @@ El orden organiza pruebas de extremo a extremo. La persistencia básica se prepa
 
 ### Situación del prototipo
 
-La fuente V6 para grabación conecta tecnología material, agua contenida, prácticas por procedimiento, mortalidad humana, archivo de identidades, fauna, ecología y comunidades, con SQLite 4. El selector afinado responde a comida accesible, sed, recuperación efectiva y protección física; la interfaz distingue reservas, condición y alcance de las estadísticas. Las pruebas largas anteriores conservan sus fuentes y resultados, incluidos colapsos y efectos adversos: no acreditan todavía continuidad demográfica del conjunto `03470e3`.
+La fuente V6 para grabación conecta tecnología material, agua contenida, prácticas por procedimiento, mortalidad humana, archivo de identidades, fauna, ecología y comunidades, con SQLite 4. El selector afinado responde a comida accesible, sed, recuperación efectiva y protección física; la interfaz distingue reservas, condición y alcance de las estadísticas. Las pruebas largas anteriores conservan sus fuentes y resultados, incluidos colapsos y efectos adversos. La [observación actual de `03470e3`](docs/EVIDENCIA.md#recambio-observado-después-de-la-afinación) acredita recambio acotado en una semilla y no sustituye la comparación entre entornos.
 
 | Etapa | Implementado | Cierre pendiente |
 |---|---|---|

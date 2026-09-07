@@ -90,6 +90,8 @@ def main(argv=None):
     parser.add_argument('output', type=pathlib.Path)
     parser.add_argument('--source-sha', required=True)
     parser.add_argument('--run', action='store_true')
+    parser.add_argument('--seeds', type=int, nargs='+', default=[51926,42,20260905],
+        help='Distinct unsigned 32-bit seeds, in report order; default preserves the reference matrix.')
     parser.add_argument('--ticks', type=int, default=60000)
     parser.add_argument('--restart-at', type=int, default=30000)
     parser.add_argument('--save-every', choices=['auto','1','120'], default='auto')
@@ -107,7 +109,9 @@ def main(argv=None):
     if not (0 < args.restart_at < args.ticks and args.timeout > 0 and args.heap_mib >= 256
         and args.log_limit > 0 and args.max_disk_mib > 0 and args.max_snapshots >= 0 and args.checkpoint_every >= 0):
         parser.error('invalid experiment quota or restart')
-    seeds = [51926,42,20260905]
+    seeds = args.seeds
+    if len(set(seeds)) != len(seeds) or any(seed < 0 or seed > 0xffffffff for seed in seeds):
+        parser.error('seeds must be distinct unsigned 32-bit integers')
     plan = dict(source=args.source_sha, sourcePath=str(source), output=str(output), seeds=seeds,
         ticks=args.ticks, restartAt=args.restart_at, saveEvery=args.save_every, jobs=args.jobs,
         timeoutPerSeed=args.timeout, heapMiBPerProcess=args.heap_mib, diskMiBPerSeed=args.max_disk_mib,

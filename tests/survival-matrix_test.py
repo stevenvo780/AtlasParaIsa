@@ -29,4 +29,19 @@ class Control(unittest.TestCase):
   source=REPO;sha=m.head(source);out=root/'should-not-exist'
   p=subprocess.run([sys.executable,str(WRAPPER),source,str(out),'--source-sha',sha],capture_output=True,text=True,timeout=10);self.assertEqual(p.returncode,0);self.assertEqual(json.loads(p.stdout)['status'],'plan-only');self.assertFalse(out.exists())
   p=subprocess.run([sys.executable,str(WRAPPER),source,str(out),'--source-sha','0'*40],capture_output=True,text=True,timeout=10);self.assertNotEqual(p.returncode,0);self.assertFalse(out.exists())
+ def test_seed_selection_preserves_order_and_reference_default(self):
+  source=REPO;sha=m.head(source);out=root/'seed-plan-only'
+  base=[sys.executable,str(WRAPPER),str(source),str(out),'--source-sha',sha]
+  default=subprocess.run(base,capture_output=True,text=True,timeout=10)
+  self.assertEqual(default.returncode,0);self.assertEqual(json.loads(default.stdout)['seeds'],[51926,42,20260905])
+  for selected in [[314159,271828,161803],[0,4294967295],[42]]:
+   result=subprocess.run(base+['--seeds',*map(str,selected)],capture_output=True,text=True,timeout=10)
+   self.assertEqual(result.returncode,0);self.assertEqual(json.loads(result.stdout)['seeds'],selected)
+  self.assertFalse(out.exists(),'planning must not create experimental output')
+ def test_ambiguous_or_invalid_seeds_fail_before_run_creates_output(self):
+  source=REPO;sha=m.head(source);out=root/'invalid-seed-output'
+  base=[sys.executable,str(WRAPPER),str(source),str(out),'--source-sha',sha,'--run','--seeds']
+  for selected in [[],['42','42'],['-1'],['4294967296'],['2.5'],['nan'],['42','4294967338']]:
+   result=subprocess.run(base+selected,capture_output=True,text=True,timeout=10)
+   self.assertNotEqual(result.returncode,0);self.assertFalse(out.exists())
 if __name__=='__main__':unittest.main()

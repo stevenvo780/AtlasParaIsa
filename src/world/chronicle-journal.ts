@@ -28,7 +28,7 @@ export function assertChronicleEvent(value: unknown, tick: number): asserts valu
   if (Object.keys(event).some(key => !['id','tick','kind','actors','text','cause','x','y','source'].includes(key))
     || !text(event.id,100) || !integer(event.tick) || event.tick > tick
     || !['ecology','meeting','care','learning','adaptation','memory','gesture','pause','discovery','settlement','cooperation','birth','community','conflict','animal','invention','death'].includes(event.kind)
-    || !Array.isArray(event.actors) || event.actors.length > 32 || !event.actors.every(id => text(id,100))
+    || !Array.isArray(event.actors) || event.actors.length > 32 || !Array.from(event.actors).every(id => text(id,100))
     || !text(event.text) || !text(event.cause) || !['simulation','sample','approved'].includes(event.source)
     || (event.x !== undefined && !coordinate(event.x)) || (event.y !== undefined && !coordinate(event.y))) chronicleFailure('invalid event');
 }

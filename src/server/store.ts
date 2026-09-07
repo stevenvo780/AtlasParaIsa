@@ -312,7 +312,11 @@ export class Store {
   }
   private assertChronicleOrigin(world: World, declared: boolean, recoveringLegacy = false): void {
     const origin = this.chronicleOrigin();
-    if (declared ? origin !== world.chronicleJournal!.startsAfter : origin !== null && !recoveringLegacy) chronicleFailure('durable origin disagrees with snapshot');
+    // Only the authentic adoption checkpoint can precede a declared journal.
+    // A later checkpoint missing its journal must not erase an already covered
+    // interval by reopening it as unknown during previous() recovery.
+    if (declared ? origin !== world.chronicleJournal!.startsAfter
+      : origin !== null && (!recoveringLegacy || origin !== world.eventCounter)) chronicleFailure('durable origin disagrees with snapshot');
   }
   private rememberChronicle(world: World, stamp: ChronicleStamp): void {
     const journal = world.chronicleJournal!;

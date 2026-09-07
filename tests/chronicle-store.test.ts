@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../src/server/store.js';
@@ -84,6 +84,54 @@ test('queue limit rejects before counter, ring or pending mutation', () => {
   const before = structuredClone(world);
   assert.throws(() => emit(world), /journal is full/);
   assert.deepEqual(world, before);
+});
+
+test('sparse actors are rejected before emitting an observation', () => {
+  const world = createWorld(42), before = structuredClone(world);
+  assert.throws(() => recordChronicleEvent(world, { kind: 'ecology', actors: Array<string>(1),
+    text: 'Invalid sparse list.', cause: 'Test fixture.', source: 'simulation' }), /invalid event/);
+  assert.deepEqual(world, before);
+});
+
+test('a sparse pending actor list outside the visible ring cannot be committed', t => {
+  const { store } = laboratory(t), world = createWorld(42); store.save(world);
+  const before = tables(store);
+  emit(world); world.chronicleJournal!.pending[0]!.actors = Array<string>(1);
+  for (let i = 0; i < 121; i++) emit(world);
+  const draft = structuredClone(world);
+  assert.throws(() => store.save(world), /invalid event/);
+  assert.deepEqual(tables(store), before); assert.deepEqual(world, draft);
+});
+
+test('previous cannot erase certified coverage by stripping its checkpoint journal', t => {
+  const { store, directory } = laboratory(t), world = createWorld(42);
+  for (let i = 0; i < 180; i++) emit(world);
+  store.save(world); emit(world); store.save(world);
+  const checkpoint = JSON.parse(String(store.db.prepare('SELECT body FROM snapshots WHERE slot=1').get()!.body));
+  delete checkpoint.chronicleJournal;
+  const body = JSON.stringify(checkpoint), digest = createHash('sha256').update(body).digest('hex');
+  store.db.prepare('UPDATE snapshots SET body=?,digest=? WHERE slot=1').run(body, digest);
+  store.db.prepare("DELETE FROM events WHERE id='e2'").run();
+  const before = tables(store), destination = join(directory, 'forged-previous.sqlite');
+  assert.throws(() => store.load(), /coverage has a gap/);
+  assert.throws(() => store.previous(destination), /durable origin disagrees/);
+  assert.deepEqual(tables(store), before); assert.equal(existsSync(destination), false);
+});
+
+test('previous still recovers the authentic checkpoint that opened a journal epoch', t => {
+  const { store, directory } = laboratory(t), world = createWorld(42);
+  for (let i = 0; i < 180; i++) emit(world);
+  store.save(world);
+  const checkpoint = JSON.parse(String(store.db.prepare('SELECT body FROM snapshots WHERE slot=0').get()!.body));
+  delete checkpoint.chronicleJournal;
+  const body = JSON.stringify(checkpoint), digest = createHash('sha256').update(body).digest('hex');
+  store.db.prepare('UPDATE snapshots SET body=?,digest=? WHERE slot=0').run(body, digest);
+  store.db.prepare("DELETE FROM metadata WHERE key='chronicle-origin-v1'").run();
+  const adopted = store.load()!.world, opening = structuredClone(adopted);
+  emit(adopted); store.save(adopted);
+  const destination = join(directory, 'authentic-previous.sqlite'); store.previous(destination);
+  const recovered = new Store(destination, { readOnly: true });
+  try { assert.deepEqual(recovered.load()!.world, opening); } finally { recovered.close(); }
 });
 
 for (const corruption of ['delete', 'valid-body', 'invalid-body', 'tick'] as const) {

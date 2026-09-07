@@ -123,13 +123,23 @@ Durante esta etapa, publicar una nueva versión de pruebas inicia otro mundo des
 
 El estado, sus hechos correspondientes y las entradas aplicadas se guardan de forma coherente en transacciones. Una confirmación de gesto persistente solo se envía después de su guardado; repetir su identificador devuelve el mismo resultado, sin aplicar el efecto otra vez.
 
+### Integridad de la crónica
+
+El candidato `189791d`, todavía sin publicar, separa la ventana visible de **120 hechos** de una cola durable de hasta **32768 hechos pendientes**. Un paso puede producir más de 120: cada emisión válida entra en ambas estructuras y se rechaza antes de modificar contadores si no cabe o contiene actores inválidos. Snapshot, cola completa y demás archivos se confirman juntos; el estado solo vacía pendientes después del commit. Un rollback conserva los hechos para reintentar.
+
+El journal declara origen, último serial comprometido y digest encadenado. Store comprueba continuidad, contenido, origen durable y correspondencia con el snapshot; reutiliza la prueba mientras no cambie la base y revalida ante cambios externos o de esquema. No cambian SQLite 4 ni reglas/protocolo 6: el campo es opcional para admitir snapshots anteriores. Al adoptarlos se declara desconocido el prefijo previo al contador actual; no se reconstruye ni certifica lo perdido. Una recuperación anterior conserva todos los seriales cubiertos hasta su contador, aunque ya no estén en la ventana visible. No permite retirar el journal de un checkpoint para convertir un hueco cubierto en historia desconocida.
+
+Los eventos técnicos de pausa que no usan serial pertenecen a la crónica operativa, fuera de la cadena serial cuando dejan la ventana visible. El archivo no registra cada variación corporal ni sustituye métricas de daño acumulado. La cobertura completa de hechos emitidos tampoco acredita supervivencia. [EVIDENCIA](EVIDENCIA.md) separa la validación de esta corrección del mundo privado anterior.
+
+### Snapshot y recuperación
+
 El snapshot conserva celdas activas en tuplas JSON versionadas (`tiles-tuple-v1`) para evitar repetir veinte nombres de campo por celda, sin cuantización. El lector admite objetos y tuplas; los archivos de regiones conservan objetos. Se rechazan valores opcionales presentes nulos o no finitos antes de escribir. La copia del estado para cada transacción aprovecha que las celdas son planas; individuos, estructuras, proyectos, lotes y recuerdos mantienen copias independientes. Las pruebas verifican identidad, contadores monotónicos, recuperación y conservación material.
 
 Se conservan un punto de recuperación anterior y una copia de seguridad. Al arrancar se valida la versión y la integridad del estado antes de avanzar. Un fallo de lectura no crea silenciosamente otro mundo: se conserva la evidencia y se recupera un estado válido mediante una operación explícita.
 
 ### Identidad de ejecución y última visita
 
-La próxima versión guarda un UUID público de ejecución en `metadata.world-instance-id`, independiente de semilla, protocolo y sesión. `world-instance.ts` valida un valor existente antes de que `createApp` añada una pausa o rote snapshots. Si falta, lo asigna después del primer guardado válido y antes de ofrecer vistas; no reemplaza un identificador dañado. Reinicios, copias y recuperación conservan metadata; otra base creada desde cero recibe otra identidad. La proyección autenticada incorpora `instanceId`; no es una credencial ni aparece en las rutas públicas de acceso o salud.
+La versión V6 publicada guarda un UUID público de ejecución en `metadata.world-instance-id`, independiente de semilla, protocolo y sesión. `world-instance.ts` valida un valor existente antes de que `createApp` añada una pausa o rote snapshots. Si falta, lo asigna después del primer guardado válido y antes de ofrecer vistas; no reemplaza un identificador dañado. Reinicios, copias y recuperación conservan metadata; otra base creada desde cero recibe otra identidad. La proyección autenticada incorpora `instanceId`; no es una credencial ni aparece en las rutas públicas de acceso o salud.
 
 `visit-memory.ts` conserva un único marcador local versionado con identidad y paso. Los marcadores antiguos sin identidad, de otro mundo, inválidos o posteriores al paso recibido se ignoran. El almacenamiento del navegador es opcional. Esta separación evita que una publicación nueva herede una visita anterior aunque ya haya superado su paso. No modifica reglas físicas ni el guardado de sesiones.
 

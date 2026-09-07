@@ -7,6 +7,7 @@ import { craftTechnology, maintainTechnologyMemory, projectTechnology, recordTec
 import { assertTechnologyCheckpoint, captureTechnologyCheckpoint } from '../src/world/technology-checkpoint.js';
 import { observeTechnologyOrganization } from '../src/world/technology-organization.js';
 import { cooperate, cooperationOpportunity } from '../src/world/society.js';
+import { recordChronicleEvent } from '../src/world/chronicle-journal.js';
 import type { LegacyRecord } from '../src/shared/demography.js';
 
 const edge: TechnologyProgram = { inputs: [{ source: 'raw', material: 'stone', mass: 1000 }], steps: [{ op: 'form', intensity: 4, shape: 'edge' }, { op: 'compress', intensity: 2 }] };
@@ -100,7 +101,7 @@ test('local cooperation chooses a practiced cold recipe and teaches it with cost
   assert.equal(opportunity.kind, 'teach'); assert.equal(opportunity.recipeId, 'recipe-1');
   assert.deepEqual(learner.technology.knownRecipes, [], 'choosing an opportunity cannot teach');
   assert.equal(cooperate(world, maker, event => {
-    const result = { ...event, id: `e${++world.eventCounter}`, tick: world.tick }; world.events.push(result); return result;
+    const result = recordChronicleEvent(world, event); world.events.push(result); return result;
   }), true);
   assert.deepEqual(learner.technology.knownRecipes, ['recipe-1']); assert.equal(learner.technology.items.length, 0);
   assert.ok(Math.abs(energy - maker.energy - 0.003) < 1e-12); assert.equal(world.technology.ledger.work - work, 1);

@@ -8,6 +8,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { Store, fingerprint } from '../src/server/store.js';
 import { enableTechnologyJournal } from '../src/world/technology-journal.js';
 import { enableTechnologyCatalogue } from '../src/world/technology-catalogue.js';
+import { recordChronicleEvent } from '../src/world/chronicle-journal.js';
 import { createWorld, RULES_VERSION, assertWorld, migrateWorld, projectWorld, type World } from '../src/world/index.js';
 import { activate, maintainRegions } from '../src/world/spatial.js';
 import { harvestAt, materializeAnimals, syncFauna, stepAnimals, MAX_ACTIVE_ANIMALS } from '../src/world/animals.js';
@@ -43,7 +44,11 @@ test('archive versions restore exact edited terrain at the latest permitted worl
   enableTechnologyCatalogue(world.technology);
   const first = archived(world, 11, 0.12345);
   world.retiredChunks = [first];
-  const expected: World = { ...structuredClone(world), retiredChunks: [] };
+  const expected: World = { ...structuredClone(world), retiredChunks: [], chronicleJournal: {
+    ...world.chronicleJournal!, committedThrough: world.eventCounter,
+    committedDigest: world.chronicleJournal!.pending.reduce((chain, event) => digest(`${chain}\n${JSON.stringify(event)}`), world.chronicleJournal!.committedDigest),
+    pending: [],
+  } };
   store.save(world);
   assert.deepEqual(world, expected);
   assert.deepEqual(store.load()!.world, expected);
@@ -67,8 +72,9 @@ test('input failure rolls back archive, world, events and ledger while preservin
   const before = store.load();
   const draft = structuredClone(world); fixtureTick(draft,1);
   const chunk = archived(draft, 1, 0.42); draft.retiredChunks = [chunk];
-  const eventId = `e${++draft.eventCounter}`;
-  draft.events.push({ id: eventId, tick: 1, kind: 'discovery', actors: [], source: 'simulation', text: 'Hallazgo sintético.', cause: 'Escena de rollback del archivo.' });
+  const event = recordChronicleEvent(draft, { kind: 'discovery', actors: [], source: 'simulation', text: 'Hallazgo sintético.', cause: 'Escena de rollback del archivo.' });
+  const eventId = event.id;
+  draft.events.push(event);
   const uncommitted = structuredClone(draft);
   store.db.exec("CREATE TRIGGER fail_archive_input BEFORE INSERT ON inputs BEGIN SELECT RAISE(ABORT, 'injected archive transaction failure'); END;");
   assert.throws(() => store.save(draft, [{ gesture, result: resultAt(1) }]), /injected archive transaction failure/);
@@ -81,8 +87,12 @@ test('input failure rolls back archive, world, events and ledger while preservin
   store.db.exec('DROP TRIGGER fail_archive_input');
   store.save(draft, [{ gesture, result: resultAt(1) }]);
   assert.deepEqual(draft.retiredChunks, []);
+  assert.deepEqual(draft.chronicleJournal!.pending, []);
+  assert.equal(draft.chronicleJournal!.committedThrough, draft.eventCounter);
   assert.deepEqual(store.loadChunk(chunk.key), chunk);
   assert.deepEqual(store.result(gesture), resultAt(1));
+  assert.equal(store.db.prepare('SELECT body FROM events WHERE id=?').get(eventId)!.body, JSON.stringify(event));
+  assert.deepEqual(store.load()!.world, draft);
 });
 
 test('archive checksum and structural corruption fail closed instead of generating replacement terrain', t => {
@@ -142,7 +152,7 @@ test('previous recovery removes future terrain versions and inputs without alter
 /** A genuine old shape: no chunk metadata, procedural resources or V2 person extensions. */
 function legacyWorld() {
   const source = createWorld(42);
-  const { chunks: _chunks, retiredChunks: _retired, discoveredChunks: _discovered, settlementCount: _settlements,
+  const { chronicleJournal: _chronicleJournal, chunks: _chunks, retiredChunks: _retired, discoveredChunks: _discovered, settlementCount: _settlements,
     adaptationEnabled: _adaptation, noveltyEnabled: _novelty, shelterBenefitEnabled: _shelter,
     cooperationEnabled: _cooperation, reproductionEnabled: _reproduction, communities: _communities, communityCounter: _communityCounter, birthCounter: _birthCounter, history: _history, totals: _totals,
     animals:_animals,animalCounter:_animalCounter,animalDynamics:_animalDynamics,blueprints:_blueprints,structures:_structures,blueprintCounter:_blueprintCounter,structureCounter:_structureCounter,inventionDynamics:_inventionDynamics,...base } = source;
@@ -181,6 +191,7 @@ function createV1Database(path: string): ReturnType<typeof legacyWorld> {
     db.prepare('INSERT INTO snapshots VALUES (0,?,?,?)').run(body, digest(body), 1000);
     db.prepare('INSERT INTO snapshots VALUES (1,?,?,?)').run(body, digest(body), 900);
     db.prepare("INSERT INTO metadata VALUES ('initialized','1')").run();
+    for (const event of legacy.events) db.prepare('INSERT INTO events VALUES (?,?,?)').run(event.id, event.tick, JSON.stringify(event));
     const oldFingerprint = digest(JSON.stringify(['plant', 17, 13, null]));
     const oldResult = { id: oldGesture.id, accepted: true, tick: 12, order: 0, message: 'Gesto sintético anterior.' };
     db.prepare('INSERT INTO inputs VALUES (?,?,?,?,?,?)').run(oldGesture.id, oldFingerprint, 12, 0, JSON.stringify(oldGesture), JSON.stringify(oldResult));

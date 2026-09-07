@@ -4,11 +4,12 @@ import { assertWorld, cloneWorld, createWorld, migrateWorld, RULES_VERSION, step
 import { cooperate, cooperationOpportunity, culturalDistance, resourceDispute, updateCommunities, settlementOpportunity } from '../src/world/society.js';
 import { materializeAnimals, syncFauna } from '../src/world/animals.js';
 import { expressGenome, inheritGenome } from '../src/world/genetics.js';
+import { recordChronicleEvent } from '../src/world/chronicle-journal.js';
 import { recordSample, worldStatistics } from '../src/world/statistics.js';
 import type { ChronicleEvent } from '../src/shared/types.js';
 
 function emit(w: World) { return (event: Omit<ChronicleEvent, 'id' | 'tick'>) => {
-  const result = { ...event, id: `e${++w.eventCounter}`, tick: w.tick }; w.events.push(result); return result;
+  const result = recordChronicleEvent(w, event); w.events.push(result); return result;
 }; }
 function scene() {
   const w = createWorld(51926), a = w.people[2]!, b = w.people[3]!;

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import type { BlueprintView, StructureComponent } from '../src/shared/life.js';
 import type { ChronicleEvent } from '../src/shared/types.js';
 import { createWorld, stepWorld, tileAt, type World } from '../src/world/index.js';
+import { recordChronicleEvent } from '../src/world/chronicle-journal.js';
 import { blueprintAffordances, blueprintCost, blueprintSignature, BROKEN_CONDITION, completeConstruction, constructionCost,
   defaultBlueprint, facilityRestQuality, foodAvailable, invent, inventionCandidates, inventionOpportunity, MAX_BLUEPRINTS,
   paretoCandidates, recordFacilityRest, repair, repairOpportunity, RESEARCH_COOLDOWN, REST_ENERGY_RATE, REST_FATIGUE_RATE,
@@ -10,7 +11,7 @@ import { blueprintAffordances, blueprintCost, blueprintSignature, BROKEN_CONDITI
 
 function emitFor(world: World) {
   return (event: Omit<ChronicleEvent, 'id' | 'tick'>): ChronicleEvent => {
-    const result = { ...event, id: `test-event-${++world.eventCounter}`, tick: world.tick }; world.events.push(result); return result;
+    const result = recordChronicleEvent(world, event); world.events.push(result); return result;
   };
 }
 function scene(seed = 51926) {

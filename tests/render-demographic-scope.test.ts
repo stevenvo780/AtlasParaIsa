@@ -4,6 +4,8 @@ import {mkdirSync, writeFileSync} from 'node:fs';
 import {chromium, expect, type WebSocketRoute} from '@playwright/test';
 import {createServer} from 'vite';
 import {createWorld, projectWorld} from '../src/world/index.js';
+import type {PersonView} from '../src/shared/types.js';
+import {inheritedAndLearned} from '../src/client/inspector-view.js';
 
 /** Presentation fixture, not an autonomous survival experiment. No engine step is run. */
 function populationFixture(extinct: boolean) {
@@ -40,9 +42,13 @@ test('global mortality remains visible beside protected identities and a short t
       await expect(card('Nacimientos').locator('strong')).toHaveText(extinct?'18':'0');
       if(extinct){await expect(summary).toContainText('Sin vecinos vivos');await expect(summary).toContainText('Su presencia no demuestra que los vecinos hayan sobrevivido');}
       else await expect(summary).not.toContainText('Sin vecinos vivos');
-      const deathsBox=await card('Muertes humanas').boundingBox(),panelBox=await panel.boundingBox();
-      const mortalityVisible=!!deathsBox&&!!panelBox&&deathsBox.y>=panelBox.y&&deathsBox.y+deathsBox.height<=panelBox.y+panelBox.height;
-      assert.equal(mortalityVisible,true,'mortality is visible in the initial statistics viewport without scrolling');
+      const panelBox=await panel.boundingBox();
+      let mortalityVisible=true;
+      for(const label of ['Vecinos vivos','S/I protegidos','Muertes humanas','Nacimientos']) {
+        const box=await card(label).boundingBox();
+        mortalityVisible&&=!!box&&!!panelBox&&box.y>=panelBox.y&&box.y+box.height<=panelBox.y+panelBox.height;
+      }
+      assert.equal(mortalityVisible,true,'all four demographic metrics are visible initially without scrolling');
       await page.screenshot({path:`artifacts/demography-${extinct?'loss':'fresh'}-${width}.png`});
       if(extinct){
         const window=page.locator('[data-population-window]');await expect(window).toContainText('54.240–59.940');await expect(window).toContainText('2,38 días');await expect(window).toContainText('96 muestras');await expect(window).toContainText('no es un registro completo');
@@ -63,4 +69,110 @@ test('global mortality remains visible beside protected identities and a short t
     }
     writeFileSync('artifacts/demographic-scope-controls.json',JSON.stringify({scope:'Synthetic UI fixtures; no autonomous survival or runtime publication.',report},null,2)+'\n');
   }finally{await browser.close();await server.close();}
+});
+
+type Stage = NonNullable<PersonView['lifeStage']>;
+function stageFixture(stages: Stage[]) {
+  const view = projectWorld(createWorld(51926));
+  const identities = view.people.filter(p => p.role !== 'neighbor');
+  identities[0]!.lifeStage = 'juvenile'; identities[1]!.lifeStage = 'adult';
+  const neighbors = view.people.filter(p => p.role === 'neighbor').slice(0, stages.length);
+  neighbors.forEach((p, i) => { p.lifeStage = stages[i]!; p.age = 999999; });
+  // Deliberately identical age/generation with different server stages: the client must not infer thresholds.
+  view.people = [...identities, ...neighbors]; view.stats!.population = view.people.length;
+  view.demography!.deaths = 14 - neighbors.length; view.demography!.causes.senescence = 14 - neighbors.length;
+  return view;
+}
+
+test('inspector labels server stages and missing data without guessing from age, generation or protection', () => {
+  const view = stageFixture(['juvenile', 'adult', 'senescent']), before = structuredClone(view);
+  for (const [i, label] of ['En crecimiento', 'Edad de crianza', 'Vejez'].entries()) {
+    const p = view.people.filter(p => p.role === 'neighbor')[i]!;
+    assert.match(inheritedAndLearned(p, view).now, new RegExp(`Etapa del modelo</span><strong>${label}`));
+  }
+  const unknown = structuredClone(view.people[2]!); delete unknown.lifeStage;
+  const html = inheritedAndLearned(unknown, view).now;
+  assert.match(html, /Etapa del modelo<\/span><strong>Sin dato/);
+  assert.doesNotMatch(html, /<strong>Vejez|<strong>Edad de crianza/);
+  const protectedHtml = inheritedAndLearned(view.people[1]!, view).now;
+  assert.match(protectedHtml, /continuidad de esta identidad está protegida/);
+  assert.doesNotMatch(protectedHtml, /La edad no garantiza una crianza/);
+  assert.deepEqual(view, before);
+});
+
+test('global life-stage summary and inspector update without disturbing focus, scroll, camera or commands', {timeout:90_000}, async () => {
+  const server=await createServer({configFile:false,server:{host:'127.0.0.1',port:0},logLevel:'error'});await server.listen();
+  const browser=await chromium.launch({headless:true});mkdirSync('artifacts',{recursive:true});
+  const controls:unknown[]=[];
+  try {
+    for(const [width,height] of [[390,844],[320,568],[1440,900]] as const) {
+      const context=await browser.newContext({viewport:{width,height},reducedMotion:'reduce'}),page=await context.newPage();
+      const original=stageFixture(['juvenile','adult','senescent']),preserved=JSON.stringify(original);
+      let current=structuredClone(original),socket:WebSocketRoute|undefined;
+      const messages:{type:string}[]=[],errors:string[]=[];
+      page.on('pageerror',e=>errors.push(e.name));
+      await page.route('**/api/session',r=>r.fulfill({json:{authenticated:true}}));
+      await page.route('**/api/world**',r=>r.fulfill({json:current}));
+      await page.route('**/api/gesture',r=>{messages.push({type:'gesture'});return r.fulfill({status:500});});
+      await page.routeWebSocket('**/ws',s=>{socket=s;s.onMessage(m=>messages.push(JSON.parse(String(m))));});
+      const publish=()=>{current.sequence++;socket!.send(JSON.stringify({type:'state',world:current}));};
+      const setStages=(stages:(Stage|undefined)[])=>{current.people.filter(p=>p.role==='neighbor').forEach((p,i)=>{p.lifeStage=stages[i];});publish();};
+      await page.goto(server.resolvedUrls!.local[0]!);await expect(page.locator('#connection-label')).toHaveText('En vivo');
+      if(await page.locator('#letter-dialog').isVisible())await page.getByRole('button',{name:'Entrar al mundo'}).click();
+      await page.locator('#stats-toggle').click();
+      const panel=page.locator('#stats-content'),stages=page.locator('[data-neighbor-life-stages]'),status=page.locator('[data-replacement-status]');
+      const stage=(name:string)=>stages.locator(`[data-life-stage="${name}"] strong`);
+      for(const name of ['juvenile','adult','senescent'])await expect(stage(name)).toHaveText('1');
+      await expect(stages).toContainText('3/3 con dato');
+      await expect(status).toContainText('La edad no garantiza una crianza');
+      const metrics=await page.locator('[data-demographic-summary] > .stats-grid .stat-card').evaluateAll(cards=>{
+        const panel=document.getElementById('stats-content')!.getBoundingClientRect();
+        return cards.map(card=>{const box=card.getBoundingClientRect();return {label:card.querySelector('span')!.textContent,top:box.top,bottom:box.bottom,panelTop:panel.top,panelBottom:panel.bottom,fullyVisible:box.top>=panel.top&&box.bottom<=panel.bottom};});
+      });
+      if(width!==320)assert.ok(metrics.length===4&&metrics.every(m=>m.fullyVisible),'four primary metrics remain visible without scrolling');
+      await page.screenshot({path:`artifacts/life-stage-initial-${width}.png`});
+      const details=page.locator('[data-detail="human-death-causes"]'),toggle=details.locator('summary');
+      await toggle.click();await toggle.focus();await panel.evaluate(e=>{e.scrollTop=180;});
+      const scroll=await panel.evaluate(e=>e.scrollTop),camera=await page.locator('#camera-coordinates').textContent();
+      setStages(['senescent','senescent','senescent']);
+      await expect(status).toHaveText('No hay recambio posible entre los vecinos actuales.');
+      await expect(stage('senescent')).toHaveText('3');await expect(stage('juvenile')).toHaveText('0');
+      await expect(toggle).toBeFocused();assert.equal(await panel.evaluate(e=>e.scrollTop),scroll);await expect(page.locator('#camera-coordinates')).toHaveText(camera!);
+      await stages.scrollIntoViewIfNeeded();await page.screenshot({path:`artifacts/life-stage-no-replacement-${width}.png`});
+      const rows=await stages.locator('.stats-facts > span').evaluateAll(nodes=>nodes.map(e=>({height:e.getBoundingClientRect().height,textPixels:parseFloat(getComputedStyle(e).fontSize)})));
+      assert.ok(rows.every(r=>r.height<=42&&r.textPixels>=11),'age-stage rows remain compact and readable');
+      setStages(['juvenile','senescent','senescent']);await expect(status).toHaveText('No hay recambio posible entre los vecinos actuales.');
+      setStages(['juvenile','juvenile','senescent']);await expect(status).toContainText('La edad no garantiza una crianza');
+      setStages([undefined,'senescent','senescent']);await expect(stage('unknown')).toHaveText('1');await expect(status).toContainText('no se puede evaluar el recambio por edad');
+      setStages([undefined,undefined,undefined]);for(const name of ['juvenile','adult','senescent'])await expect(stage(name)).toHaveText('—');
+      await expect(stage('unknown')).toHaveText('3');await expect(status).not.toContainText('No hay recambio posible');
+      await stages.scrollIntoViewIfNeeded();await page.screenshot({path:`artifacts/life-stage-unknown-${width}.png`});
+
+      setStages(['juvenile','adult','senescent']);
+      const neighborId=current.people.find(p=>p.role==='neighbor')!.id;
+      await page.locator('#population-toggle').click();await page.locator(`[data-person="${neighborId}"]`).click();
+      await page.locator('#inspector-tab-now').click();
+      const body=page.locator('[data-detail="vitality"]'),bodyToggle=body.locator('summary'),label=body.locator('[data-person-life-stage] strong'),card=page.locator('#inhabitant-card');
+      await bodyToggle.click();await expect(label).toHaveText('En crecimiento');await bodyToggle.focus();
+      await card.evaluate(e=>{e.scrollTop=Math.min(120,e.scrollHeight-e.clientHeight);});
+      const cardScroll=await card.evaluate(e=>e.scrollTop),inspectorCamera=await page.locator('#camera-coordinates').textContent();
+      const demographicAge=current.people.find(p=>p.id===neighborId)!.age;
+      for (const [nextStage, text] of [['adult','Edad de crianza'],['senescent','Vejez']] as const) {
+        setStages([nextStage,'adult','senescent']);
+        await expect(label).toHaveText(text);await expect(bodyToggle).toBeFocused();await expect(body).toHaveAttribute('open','');
+        assert.equal(await card.evaluate(e=>e.scrollTop),cardScroll);await expect(page.locator('#camera-coordinates')).toHaveText(inspectorCamera!);
+      }
+      assert.equal(current.people.find(p=>p.id===neighborId)!.age,demographicAge,'stage-only update did not supply a different numeric age');
+      await body.scrollIntoViewIfNeeded();await page.screenshot({path:`artifacts/life-stage-inspector-${width}.png`});
+      setStages([undefined,'adult','senescent']);await expect(label).toHaveText('Sin dato');
+      assert.deepEqual(await page.locator('#landscape').boundingBox(),{x:0,y:0,width,height});
+      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+      assert.equal(await card.evaluate(e=>e.scrollWidth>e.clientWidth),false);
+      assert.equal(messages.filter(m=>m.type==='gesture').length,0);assert.deepEqual(errors,[]);assert.equal(JSON.stringify(original),preserved);
+      controls.push({viewport:[width,height],primaryMetrics:metrics,stageRows:rows,protectedExcluded:true,unknownIsNotInfertile:true,immaturePotentialIncluded:true,
+        summaryFocusScrollCameraPreserved:true,inspectorFocusScrollCameraPreserved:true,stageOnlyUpdate:true,commands:0,errors});
+      await context.close();
+    }
+    writeFileSync('artifacts/life-stage-controls.json',JSON.stringify({scope:'Synthetic presentation fixtures. No engine steps, paid births or autonomous sustainability claimed.',controls},null,2)+'\n');
+  } finally {await browser.close();await server.close();}
 });

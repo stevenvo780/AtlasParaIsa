@@ -26,6 +26,8 @@ export interface PersonView {
   target?: { x: number; y: number }; working?: boolean; workProgress?: number;
   foodReserve?: number; foodReserveCapacity?: number;
   health?: number; vitality?: number; continuityProtected?: boolean;
+  /** Server-derived inherited age thresholds; absence means unknown, not reproductive readiness. */
+  lifeStage?: 'juvenile' | 'adult' | 'senescent';
 }
 export interface PlaceView { id: string; name: string; x: number; y: number; description: string; gatherings: number; }
 export interface ChronicleEvent {

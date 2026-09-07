@@ -159,13 +159,15 @@ Para las pruebas de navegador, ejecuta primero `npx playwright install chromium`
 
 ### Diagnóstico reproducible de supervivencia
 
-`scripts/survival-matrix.py` ejecuta tres mundos normales independientes, semillas **51926, 42 y 20260905**, durante **60000 pasos (25 días)**, con reinicio exacto en 30000. Usa una copia de fuentes fijada en Git y una salida nueva; no abre ni reinicia la carta privada. La fuente debe tener sus dependencias instaladas y permanecer inmóvil durante la prueba.
+`scripts/survival-matrix.py` ejecuta por defecto tres mundos normales independientes, semillas **51926, 42 y 20260905**, durante **60000 pasos (25 días)**, con reinicio exacto en 30000. Usa una copia de fuentes fijada en Git y una salida nueva; no abre ni reinicia la carta privada. La fuente debe tener sus dependencias instaladas y permanecer inmóvil durante la prueba.
 
 ```sh
 python3 scripts/survival-matrix.py /ruta/fuente-fijada /ruta/salida-nueva --source-sha SHA_COMPLETO --run
 ```
 
 Sin `--run` imprime la configuración. En Linux limita tiempo, heap, disco, snapshots, logs y procesos hijos propios; `--help` describe sus opciones. Por defecto ejecuta tres procesos, con 1024 MiB de heap y hasta 8192 MiB de salida por semilla; el heap no limita toda la memoria RSS. El auditor TypeScript guarda cada 120 pasos si hay journal, o cada paso para la fuente anterior sin journal, comprueba cada evento contra SQLite y verifica la recarga final. Una cola completa permite los lotes sin perder hechos de la ventana visible.
+
+`--seeds 314159 271828 161803` selecciona otro conjunto y conserva su orden en el informe. Admite enteros distintos entre 0 y 4294967295; rechaza duplicados y valores que el motor normalizaría a otra semilla antes de crear la salida. Selecciona las semillas de contraste antes de observar resultados y conserva también los desenlaces adversos. La semilla no cambia el conjunto de leyes; los hashes del producto y del ejecutor distinguen cada experimento.
 
 El informe separa vecinos de S/I, intervalos de vida, presión corporal, acciones, edades y oportunidades familiares. Estas últimas son muestras posteriores a las acciones y posibles costes de nacimiento, no causas exclusivas de infertilidad. Los puntos de recuperación por riesgo pueden preceder hasta 120 pasos a la observación; ambos tiempos se registran. Los stocks activos y el agua geométricamente cercana no prueban acceso, consumo ni disponibilidad global simultánea. El tiempo del experimento no mide rendimiento del servicio con navegador.
 

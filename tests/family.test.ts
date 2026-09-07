@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createWorld, type Person } from '../src/world/index.js';
+import { assertWorld, cloneWorld, createWorld, stepWorld, type Person } from '../src/world/index.js';
 import { demographicTraits, initialDemography, updateDemography } from '../src/world/demography.js';
 import { availableToShare, familyOpportunity, FAMILY_RESERVE_TARGET, reproductiveReadiness } from '../src/world/family.js';
 
@@ -56,13 +56,61 @@ test('cooldown is inherited, inclusive at its boundary, and protected roles cann
   }
 });
 
-test('an opportunity requires observed mutual trust and the same nonempty community', () => {
+test('mutual local trust allows different communities without inventing affiliation or trust', () => {
   const { world, a, b } = scene();
   assert.equal(familyOpportunity(world, a)?.partner, b);
   delete b.bonds[a.id]; assert.equal(familyOpportunity(world, a), null);
   b.bonds[a.id] = 0.3; a.bonds[b.id] = 0.299; assert.equal(familyOpportunity(world, a), null);
-  a.bonds[b.id] = 0.3; b.communityId = 'other'; assert.equal(familyOpportunity(world, a), null);
-  b.communityId = a.communityId = null; assert.equal(familyOpportunity(world, a), null);
+  a.bonds[b.id] = 0.3; b.communityId = 'other';
+  const before = structuredClone(world);
+  assert.equal(familyOpportunity(world, a)?.partner, b);
+  assert.equal(familyOpportunity(world, b)?.partner, a);
+  assert.deepEqual(world, before, 'a prospective family cannot alter communities, bodies or trust');
+  b.communityId = null; assert.equal(familyOpportunity(world, a), null);
+  b.communityId = 'other'; a.communityId = null; assert.equal(familyOpportunity(world, a), null);
+});
+
+test('cross-community birth keeps both memberships and pays the same food and energy costs', () => {
+  const world = createWorld(51926), a = world.people[2]!, b = world.people[3]!;
+  world.tick = 599; world.communities = [];
+  for (const person of world.people) {
+    person.communityId = null; person.bonds = {}; person.action = 'rest'; person.decisionAt = 999;
+    person.hunger = person.thirst = person.fatigue = 0.1; person.energy = 0.9;
+    person.demography = initialDemography(world.tick - person.bornAt);
+    person.target = { x: person.x, y: person.y };
+  }
+  for (const [index, person] of [a, b].entries()) {
+    person.x = 17; person.y = 13; person.target = { x: 17, y: 13 }; person.inventory = 0.2;
+    person.communityId = `family-test-${index}`;
+    world.communities.push({ id: person.communityId, name: person.communityId, x: 17, y: 13,
+      color: '#aabbcc', members: [person.id], culture: { ...person.culture }, formedAt: 0, cooperation: 0, disputes: 0 });
+  }
+  a.bonds[b.id] = b.bonds[a.id] = 0.7;
+  const control = cloneWorld(world); control.reproductionEnabled = false;
+  const missingFood = cloneWorld(world); missingFood.people[2]!.inventory = 0.09;
+  const untrusted = cloneWorld(world); untrusted.people[3]!.bonds[a.id] = 0.299;
+  const exhausted = cloneWorld(world); exhausted.people[3]!.energy = 0.5;
+  const senescent = cloneWorld(world), elder = senescent.people[3]!;
+  elder.bornAt = world.tick - demographicTraits(elder.genome).senescenceStart;
+  elder.demography.age = world.tick - elder.bornAt;
+  for (const blocked of [missingFood, untrusted, exhausted, senescent]) {
+    stepWorld(blocked); assert.equal(blocked.totals.births, 0); assert.equal(blocked.people.length, 16);
+  }
+  stepWorld(control); stepWorld(world);
+  assert.equal(world.totals.births, 1); assert.equal(world.people.length, 17);
+  const child = world.people.at(-1)!;
+  assert.deepEqual(child.genome.parents, [a.id, b.id]); assert.equal(child.bornAt, 600);
+  assert.equal(a.communityId, 'family-test-0'); assert.equal(b.communityId, 'family-test-1');
+  assert.equal(child.communityId, a.communityId);
+  assert.deepEqual(world.communities.find(c => c.id === a.communityId)!.members, [a.id, child.id]);
+  assert.deepEqual(world.communities.find(c => c.id === b.communityId)!.members, [b.id]);
+  for (const parent of [a, b]) {
+    const unchanged = control.people.find(p => p.id === parent.id)!;
+    assert.ok(Math.abs(unchanged.inventory - parent.inventory - 0.08) < 1e-12);
+    assert.ok(Math.abs(unchanged.energy - parent.energy - 0.08) < 1e-12);
+  }
+  assert.equal(child.inventory, 0.1); assert.deepEqual(child.skills, {}); assert.deepEqual(child.technology.knownRecipes, []);
+  assertWorld(world);
 });
 
 test('partners and places stay perceptible and a place must be within four of either partner', () => {

@@ -19,10 +19,10 @@ export interface FamilyOpportunity { partner: Person; reserveTarget: number; }
 
 /** A known, mutually trusted local partner can motivate acquiring real reserves.
  * This intent neither supplies food nor guarantees a birth; the host owns actions and costs.
- * Group membership stays a requirement here to isolate reserve preparation in the A/B run. */
+ * Both partners retain their communities; mutual local trust can cross their labels. */
 export function familyOpportunity(world: World, person: Person): FamilyOpportunity | null {
   if (!world.reproductionEnabled || !person.communityId || !reproductiveReadiness(world, person)) return null;
-  const partner = world.people.filter(other => other !== person && other.id !== person.id && other.communityId === person.communityId
+  const partner = world.people.filter(other => other !== person && other.id !== person.id && !!other.communityId
     && distance(person, other) <= 7 && (person.bonds[other.id] ?? 0) >= 0.3 && (other.bonds[person.id] ?? 0) >= 0.3
     && reproductiveReadiness(world, other)
     && world.places.some(place => distance(person, place) <= 7 && (distance(person, place) <= 4 || distance(other, place) <= 4)))

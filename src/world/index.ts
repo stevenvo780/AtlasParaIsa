@@ -907,7 +907,7 @@ function reproduce(world: World): void {
   if (!world.reproductionEnabled || world.people.length >= MAX_POPULATION || world.tick % 120 !== 0) return;
   for (const a of world.people) {
     if (!fertile(world,a) || !a.communityId) continue;
-    const b = world.people.find(p => p !== a && fertile(world,p) && p.communityId === a.communityId && distance(a, p) <= 3 && (a.bonds[p.id] ?? 0) >= 0.3 && (p.bonds[a.id] ?? 0) >= 0.3);
+    const b = world.people.find(p => p !== a && fertile(world,p) && !!p.communityId && distance(a, p) <= 3 && (a.bonds[p.id] ?? 0) >= 0.3 && (p.bonds[a.id] ?? 0) >= 0.3);
     const place = world.places.find(p => distance(a, p) <= 4);
     if (!b || !place) continue;
     const serial=world.birthCounter+1, id=`descendant-${serial}`;
@@ -926,7 +926,7 @@ function reproduce(world: World): void {
     delete child.home;
     a.inventory -= 0.08; b.inventory -= 0.08; a.energy = clamp(a.energy - 0.08); b.energy = clamp(b.energy - 0.08); a.lastBirth = world.tick; b.lastBirth = world.tick;
     world.people.push(child); world.communities.find(c => c.id === a.communityId)?.members.push(id); count(world, 'births');
-    const event = addEvent(world, { kind: 'birth', actors: [a.id, b.id, child.id], x: child.x, y: child.y, source: 'simulation', text: `${child.name} nació en la comunidad de ${a.name} y ${b.name}.`, cause: `Dos progenitores simulados con recursos, confianza y lugar compartido; reserva conjunta −0.16, cría recibe 0.10. Recombina siete pares de parámetros; ${genome.mutations} variaciones. Habilidades y recuerdos comienzan vacíos; cultura inicial por crianza, no por ADN.` });
+    const event = addEvent(world, { kind: 'birth', actors: [a.id, b.id, child.id], x: child.x, y: child.y, source: 'simulation', text: a.communityId === b.communityId ? `${child.name} nació en la comunidad de ${a.name} y ${b.name}.` : `${child.name} nació del vínculo entre ${a.name} y ${b.name}, de comunidades distintas.`, cause: `Dos progenitores simulados con recursos, confianza y lugar compartido; reserva conjunta −0.16, cría recibe 0.10. Recombina siete pares de parámetros; ${genome.mutations} variaciones. Habilidades y recuerdos comienzan vacíos; cultura inicial por crianza, no por ADN.` });
     remember(child, world, 'La comunidad sostuvo su llegada.', event.id, place.id);
     break;
   }

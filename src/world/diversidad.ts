@@ -23,6 +23,12 @@ const FOOD_ACTIONS: readonly Action[] = ['eat', 'forage', 'hunt', 'farm', 'gathe
 const PLACE_BUCKETS = 6;
 /** Dimensión total y fija de `vectorConducta`, documentada para quien la consuma. */
 export const CONDUCTA_DIMENSIONS = ACTIONS.length * 2 + 5 + FOOD_ACTIONS.length + PLACE_BUCKETS;
+/** Número de categorías POSIBLES de oficio dominante (las 18 de `Action`), no las
+ * observadas en la población. Base fija del denominador de la entropía de `oficios`
+ * en `indiceDiversidad` (ronda de arreglo: normalizar por observadas infla la cifra
+ * cuando colapsa la RIQUEZA de oficios — un mundo con solo 2 de 18 oficios puntuaba
+ * entropía máxima). Exportado para que los tests puedan fijar el valor esperado. */
+export const OFICIOS_CATEGORIAS = ACTIONS.length;
 
 /** FNV-1a de 32 bits: determinista, sin dependencias, solo para repartir `placeId`
  * en `PLACE_BUCKETS` cubetas fijas (no es una decisión criptográfica). */
@@ -35,6 +41,16 @@ function hashString(value: string): number {
 /** Acota a [0,1) de forma monótona y determinista sin fijar un techo arbitrario
  * ligado al tamaño del catálogo de recetas (que crece con la simulación). */
 const squash = (x: number): number => x / (1 + Math.abs(x));
+
+/** Escala `group` a norma L2 1 y lo añade a `vector` (ronda de arreglo: sin esto,
+ * el peso de cada grupo en la distancia coseno final depende de escalas accidentales
+ * —p. ej. tecnología con 5 dims casi saturadas pesaba 54,5 % y "tipos de alimento"
+ * 0,4 %—, no del diseño). Un grupo en blanco (norma 0, p. ej. tecnología de alguien
+ * que no ha fabricado nada) se añade como ceros: no aporta ni resta peso. */
+function pushNormalized(vector: number[], group: readonly number[]): void {
+  const norm = Math.sqrt(group.reduce((sum, x) => sum + x * x, 0));
+  for (const x of group) vector.push(norm > 0 ? x / norm : 0);
+}
 
 /** Acción con mayor conteo acumulado en `person.activity` (mismo criterio que el
  * oficio mostrado al cliente); `null` si la persona aún no ha actuado. Empates se
@@ -58,25 +74,31 @@ function dominantAction(person: Person): Action | null {
  * 4. Tipos de alimento (`FOOD_ACTIONS.length` dims): `skills` en las acciones de comida.
  * 5. Lugares en memorias recientes (`PLACE_BUCKETS` dims): `placeId` de `experiences`
  *    repartidos por hash determinista.
+ * Cada grupo se normaliza a norma L2 1 ANTES de concatenar (`pushNormalized`, ronda
+ * de arreglo), así los 5 grupos pesan lo mismo en la distancia coseno final con
+ * independencia de sus escalas de origen (fracciones que suman 1, one-hot, escalares
+ * `squash`, etc.); un grupo en blanco pesa 0, no amortigua a los demás. El vector
+ * completo vuelve a normalizarse L2 al final (norma 1 siempre que algún grupo sea
+ * no nulo).
  * `world` se recibe para mantener la firma pactada con quien integre esta función
  * (T013); hoy toda la entrada sale de `person`, que ya registra lo necesario.
  */
 export function vectorConducta(person: Person, _world: World): number[] {
   const vector: number[] = [];
   const totalActivity = ACTIONS.reduce((sum, action) => sum + (person.activity[action] ?? 0), 0);
-  for (const action of ACTIONS) vector.push(totalActivity > 0 ? (person.activity[action] ?? 0) / totalActivity : 0);
+  pushNormalized(vector, ACTIONS.map(action => totalActivity > 0 ? (person.activity[action] ?? 0) / totalActivity : 0));
   const dominant = dominantAction(person);
-  for (const action of ACTIONS) vector.push(action === dominant ? 1 : 0);
+  pushNormalized(vector, ACTIONS.map(action => action === dominant ? 1 : 0));
   const competence = Object.values(person.technology.competence);
   const meanSuccessRate = competence.length ? competence.reduce((sum, c) => sum + c.successes / Math.max(1, c.attempts), 0) / competence.length : 0;
   const meanBenefit = competence.length ? competence.reduce((sum, c) => sum + c.benefit, 0) / competence.length : 0;
   const itemsMass = person.technology.items.reduce((sum, item) => sum + item.mass, 0);
-  vector.push(squash(person.technology.knownRecipes.length), meanSuccessRate, squash(meanBenefit), squash(person.technology.items.length), squash(itemsMass));
-  for (const action of FOOD_ACTIONS) vector.push(person.skills[action] ?? 0);
+  pushNormalized(vector, [squash(person.technology.knownRecipes.length), meanSuccessRate, squash(meanBenefit), squash(person.technology.items.length), squash(itemsMass)]);
+  pushNormalized(vector, FOOD_ACTIONS.map(action => person.skills[action] ?? 0));
   const buckets = new Array(PLACE_BUCKETS).fill(0) as number[];
   const withPlace = person.experiences.filter(experience => experience.placeId !== '');
   for (const experience of withPlace) buckets[hashString(experience.placeId) % PLACE_BUCKETS] += 1;
-  for (const count of buckets) vector.push(withPlace.length > 0 ? count / withPlace.length : 0);
+  pushNormalized(vector, buckets.map(count => withPlace.length > 0 ? count / withPlace.length : 0));
   const norm = Math.sqrt(vector.reduce((sum, x) => sum + x * x, 0));
   return norm > 0 ? vector.map(x => x / norm) : vector;
 }
@@ -100,9 +122,15 @@ function cosineDistance(a: readonly number[], b: readonly number[]): number {
 /**
  * FR-007/SC-003: `conducta` = distancia coseno media de `vectorConducta` entre cada
  * par de habitantes vivos (`world.people`, que ya excluye a los difuntos: T019 no
- * filtra nada); `oficios` = entropía normalizada (0..1) de `dominantAction` sobre la
- * población; `total` = media de ambas. O(n²) con n acotado por `poblacion.maxima`
- * (≤ 8.128 pares con 128 habitantes: barato). 0 ó 1 habitante → {0,0,0}, sin excepción.
+ * filtra nada); `oficios` = entropía de Shannon de `dominantAction` sobre la
+ * población, normalizada por `Math.log(OFICIOS_CATEGORIAS)` — las categorías
+ * POSIBLES (las 18 de `Action`), no las observadas (ronda de arreglo: normalizar
+ * por observadas dejaba que un mundo con solo 2 oficios de 18 puntuara entropía
+ * máxima, incapaz de detectar el colapso de riqueza de oficios que SC-003 debe
+ * poder refutar); recortada a 1 por si el rótulo "sin oficio aún" (`dominantAction`
+ * `null`) añadiera una categoría más de las 18 contempladas. `total` = media de
+ * ambas. O(n²) con n acotado por `poblacion.maxima` (≤ 8.128 pares con 128
+ * habitantes: barato). 0 ó 1 habitante → {0,0,0}, sin excepción.
  */
 export function indiceDiversidad(world: World): { conducta: number; oficios: number; total: number } {
   const people = world.people;
@@ -121,7 +149,7 @@ export function indiceDiversidad(world: World): { conducta: number; oficios: num
   let entropy = 0;
   if (counts.size > 1) {
     for (const count of counts.values()) { const share = count / people.length; entropy -= share * Math.log(share); }
-    entropy /= Math.log(counts.size);
+    entropy = Math.min(1, entropy / Math.log(OFICIOS_CATEGORIAS));
   }
   return { conducta, oficios: entropy, total: (conducta + entropy) / 2 };
 }

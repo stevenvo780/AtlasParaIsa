@@ -116,6 +116,7 @@ Como desarrollador, el paso del mundo está separado en fases puras (percepción
 - **FR-010**: El modo completo MUST incluir mapa de calor de recursos y un pase visual de luz diurna/agua/vegetación coherente con las reglas.
 - **FR-011**: `src/world/index.ts` y `src/client/landscape.ts` MUST partirse en módulos por fase/tema sin cambiar el comportamiento (verificado por determinismo).
 - **FR-012**: Toda tarea de reglas MUST dejar su experimento y su fila en `docs/EVIDENCIA.md`.
+- **FR-013** (rev. 3, Steven 2026-09-19 12:05): **el límite de población lo pone el hardware, no el software.** Ningún tope fijo en el código (ni 32, ni 40, ni 128); un gobernador en el servidor pausa los nacimientos mientras el p95 del paso supere el presupuesto (`gobernador.presupuestoMs`, 50 ms) y los reanuda por debajo del 70 %; el entorno (comida, agua) sigue siendo el límite natural. En una máquina mayor el mundo crece más sin tocar código. `poblacion.maxima` queda solo como instrumento del laboratorio (default 1 000 000).
 
 ### Key Entities
 
@@ -139,6 +140,7 @@ Como desarrollador, el paso del mundo está separado en fases puras (percepción
 - **SC-008**: `docs/EVIDENCIA.md` con una sección nueva fechada 2026-09-19 con SHA, semillas y cifras de cada criterio.
 - **SC-009** (rev. 2): mensaje `state` por cliente < 120 KiB a t=8000 con 32 habitantes (hoy 465 KiB); p95 del paso del servidor < 50 ms con 32 habitantes dispersos (hoy 131,9 ms) medido con `scripts/benchmark-simulation.ts`.
 - **SC-010** (rev. 2): el fichero SQLite del servidor no crece más de 20 MB por día simulado con poda activa (hoy ~170 MB/día simulado); `npm run backup` en caliente nunca reporta corrupción falsa.
+- **SC-012** (rev. 3): con `poblacion.maxima` sin efecto, un mundo de 25 días en la torre estabiliza su población por gobernador/entorno (no por tope) manteniendo `tickHz ≥ 9` y p95 < 50 ms; el `state` expone `performance.gobernador`.
 - **SC-011** (rev. 2): a 25 días simulados (16 réplicas) ninguna extinción, ≥ 3 generaciones vivas, ≥ 2 causas de muerte distintas registradas con lugar y 3 eventos previos, y ≥ 4 recetas distintas en uso simultáneo.
 
 ## Assumptions

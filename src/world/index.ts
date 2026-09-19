@@ -248,11 +248,11 @@ function avoidedDamageScore(person: Person, before: number, after: number, delay
 }
 
 function bodilyDamage(world: World, person: Person, body: Pick<Person, 'hunger' | 'thirst' | 'fatigue' | 'energy'>, shelter: number): number {
-  const transition = updateDemography({ state: person.demography, traits: demographicTraits(person.genome),
+  const transition = updateDemography({ id: person.id, state: person.demography, traits: demographicTraits(person.genome),
     hunger: body.hunger, thirst: body.thirst, fatigue: body.fatigue, energy: body.energy },
-    { exposure: world.weather === 'rain' ? 1 : 0, shelter, protected: person.role !== 'neighbor' }, 1);
-  // Maximum-age enforcement includes residual health in senescence damage. It is
-  // inevitable, and must not cancel the elder's incentive to eat, drink or seek cover.
+    { exposure: world.weather === 'rain' ? 1 : 0, shelter, protected: person.role !== 'neighbor',
+      seed: world.seed, tick: world.tick, senescence: paramsOf(world).cuerpo }, 1);
+  // Senescence remains separate from avoidable bodily damage so elders still value food, water and shelter.
   return transition.damage.starvation + transition.damage.dehydration + transition.damage.exposure;
 }
 

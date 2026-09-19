@@ -65,7 +65,9 @@ test('senescence integrates age pressure and finite lifespan creates a vacancy e
   close(whole.damage.senescence, first.damage.senescence + second.damage.senescence);
   assert.equal(whole.state.age, second.state.age); assert.ok(whole.damage.senescence > 0);
   const final = updateDemography({ ...person, state: initialDemography(person.traits.maximumAge - 1) }, safe, 1);
-  assert.equal(final.death, 'senescence'); assert.equal(final.state.age, person.traits.maximumAge); assert.equal(final.state.health, 0); assert.equal(final.offspringEligible, false);
+  assert.equal(final.death, null); assert.equal(final.state.age, person.traits.maximumAge); assert.ok(final.senescenceRisk > 0); assert.equal(final.offspringEligible, false);
+  const vacancy = untilDeath({ ...person, state: initialDemography(person.traits.senescenceStart) }, safe, person.traits.maximumAge * 3);
+  assert.equal(vacancy.death, 'senescence'); assert.ok(vacancy.state.age < person.traits.maximumAge * 3);
 });
 
 test('continuity protection is an explicit external policy and leaves the physiological cause visible', () => {
@@ -75,7 +77,8 @@ test('continuity protection is an explicit external policy and leaves the physio
   assert.equal(protectedResult.state.health, PROTECTED_HEALTH_FLOOR); assert.ok(protectedResult.state.vitality >= PROTECTED_VITALITY_FLOOR);
   assert.equal(protectedResult.state.deathCause, null); assert.equal(protectedResult.offspringEligible, false);
   assert.equal(protectedResult.damage.dehydration, unprotected.damage.dehydration); assert.equal(person.thirst, 1);
-  const old = { ...actor(), state: initialDemography(person.traits.maximumAge) };
+  const oldBody = actor();
+  const old = { ...oldBody, state: { ...initialDemography(oldBody.traits.maximumAge * 3), health: 0.00001, vitality: 0.01 } };
   const continued = updateDemography(old, { ...safe, protected: true });
   assert.equal(continued.death, null); assert.equal(continued.preventedDeath, 'senescence'); assert.equal(continued.state.age, old.state.age + 1);
 });

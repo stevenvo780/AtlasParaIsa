@@ -21,7 +21,15 @@ export interface DemographicTraits {
   maximumAge: number;
 }
 
+/** Ley de senescencia (T010). Subconjunto estructural de `WorldParams['cuerpo']`. */
+export interface SenescenceLaw {
+  riesgoSenescenciaDiario: number;
+  riesgoSenescenciaPendiente: number;
+  cuidadoReduceRiesgo: number;
+}
+
 export interface DemographicActor {
+  id?: string;
   state: Readonly<DemographicState>;
   traits: Readonly<DemographicTraits>;
   hunger: number;
@@ -33,6 +41,9 @@ export interface DemographicActor {
 export interface DemographicEnvironment {
   exposure: number;
   shelter: number;
+  seed?: number;
+  tick?: number;
+  senescence?: Readonly<SenescenceLaw>;
   /** External continuity policy, supplied by the caller for protected identities. */
   protected: boolean;
 }
@@ -43,6 +54,8 @@ export interface DemographicTransition {
   /** A policy veto in this interval, not an additional death or a biological trait. */
   preventedDeath: DemographicDeathCause | null;
   offspringEligible: boolean;
+  /** Probability of senescence death during this interval. */
+  senescenceRisk: number;
   /** Integrated injury pressures before healing and the health floor. */
   damage: Record<DemographicDeathCause, number>;
 }

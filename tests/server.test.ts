@@ -11,6 +11,7 @@ import { WebSocket } from 'ws';
 import { Store } from '../src/server/store.js';
 import { createApp, parseGesture } from '../src/server/app.js';
 import { createWorld, stepWorld, projectWorld } from '../src/world/index.js';
+import { parseParams, setParams } from '../src/world/params.js';
 import { hashToken, makeToken, passwordRecord, passwordVerifier } from '../src/server/auth.js';
 import { acquireLock } from '../src/server/lock.js';
 import type { Gesture, ServerMessage, WorldView } from '../src/shared/types.js';
@@ -295,4 +296,37 @@ test('a committed retry remains retrievable during a later storage pause',async 
   f.store.save=()=>{throw new Error('later synthetic failure');};
   await new Promise<void>(resolve=>setTimeout(resolve,50));assert.equal(f.app.failed,true);
   const retried=await f.send(gesture);assert.equal(retried.status,200);assert.deepEqual(await retried.json(),committed);
+});
+
+test('con cadencia 20 el paso no reescribe el mundo en cada tick, un gesto fuerza el guardado y el estado publica el ritmo real',async t=>{
+  const f=await fixture(t,true);
+  setParams(f.app.world,parseParams('persistencia.cadaTicks=20'));
+  const savedTick=()=>JSON.parse((f.store.db.prepare('SELECT body FROM snapshots WHERE slot=0').get() as {body:string}).body).tick as number;
+  assert.equal(savedTick(),0);
+  for(let n=0;n<5;n++)f.app.stepOnce();
+  assert.equal(f.app.world.tick,5);assert.equal(savedTick(),0,'entre múltiplos de la cadencia no se persiste');
+  const inflight=f.send({...gesture,id:'cadence-gesture-01'});
+  await new Promise<void>(resolve=>setTimeout(resolve,25));
+  f.app.stepOnce();
+  assert.equal((await inflight).status,200);
+  assert.equal(savedTick(),6,'un gesto confirmado obliga a guardar en su propio paso');
+  while(f.app.world.tick<20)f.app.stepOnce();
+  assert.equal(savedTick(),20,'la cadencia guarda al cruzar el múltiplo');
+  assert.deepEqual(f.store.load()!.world,f.app.world);
+  const view=await (await fetch(f.origin+'/api/world',{headers:{Cookie:f.cookie}})).json() as WorldView;
+  assert.ok(Number.isFinite(view.performance!.tickHz)&&view.performance!.tickHz>0,'el ritmo real se mide, no se declara');
+});
+
+test('el planificador cita cada paso con compensación de deriva y el cierre no deja pasos pendientes',async t=>{
+  const f=await fixture(t);
+  await new Promise<void>(resolve=>setTimeout(resolve,300));
+  const advanced=f.app.world.tick;
+  assert.ok(advanced>=8&&advanced<=30,`el mundo avanzó ${advanced} pasos en 300 ms a 15 ms de cadencia`);
+  const view=await (await fetch(f.origin+'/api/world',{headers:{Cookie:f.cookie}})).json() as WorldView;
+  const hz=view.performance!.tickHz;
+  assert.ok(hz>10&&hz<200,`ritmo medido ${hz} Hz`);
+  await f.app.close();
+  const stopped=f.app.world.tick;
+  await new Promise<void>(resolve=>setTimeout(resolve,80));
+  assert.equal(f.app.world.tick,stopped,'tras cerrar no se planifica ningún paso más');
 });

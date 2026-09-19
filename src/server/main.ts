@@ -2,6 +2,7 @@ import { resolve } from 'node:path';
 import { createApp } from './app.js';
 import { Store } from './store.js';
 import { acquireLock } from './lock.js';
+import { parseParams, setParams } from '../world/params.js';
 
 process.umask(0o077);
 const port = Number(process.env.PORT ?? 3000);
@@ -16,6 +17,10 @@ let store: Store | undefined;
 try {
   store = new Store(resolve(dataPath, 'world.sqlite'));
   const app = createApp({ store, password: process.env.CARTA_PASSWORD, credentialPath: resolve(dataPath, 'access.scrypt'), origin, secure });
+  // En producción el mundo se persiste cada 20 pasos (2 s) y siempre que llega un
+  // gesto; un corte arriesga esos 2 s de simulación, nunca un gesto confirmado.
+  // CARTA_PARAMS puede ajustarlo (y abrir la ventana de poda) sin tocar código.
+  setParams(app.world, parseParams(`persistencia.cadaTicks=20${process.env.CARTA_PARAMS ? `,${process.env.CARTA_PARAMS}` : ''}`));
   let closing = false;
   const shutdown = async () => {
     if (closing) return; closing = true;

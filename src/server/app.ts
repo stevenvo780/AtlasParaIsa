@@ -3,6 +3,7 @@ import { readFileSync, statSync } from 'node:fs';
 import { resolve, extname, sep } from 'node:path';
 import { WebSocketServer, WebSocket } from 'ws';
 import { createWorld, stepWorld, projectWorld, normalizeViewport, cloneWorld } from '../world/index.js';
+import { paramsOf } from '../world/params.js';
 import type { Gesture, GestureResult, ServerMessage, Viewport, WorldView, RuntimeStats } from '../shared/types.js';
 import { Store, fingerprint, GestureConflict, SessionRevoked } from './store.js';
 import { cookie, hashToken, makeToken, passwordVerifier, sessionHash } from './auth.js';
@@ -64,7 +65,8 @@ export function createApp(options: AppOptions) {
   const staticDir = resolve(options.staticDir ?? 'dist/client');
   const context = store.context;
   const measurements: number[] = [];
-  const runtime: RuntimeStats = { stepMs: 0, p95StepMs: 0, saveMs: 0, projectionMs: 0, snapshotBytes: 0, activeTiles: world.tiles.length, processRssMiB: process.memoryUsage.rss() / 1048576 };
+  const beats: number[] = [];
+  const runtime: RuntimeStats = { stepMs: 0, p95StepMs: 0, saveMs: 0, projectionMs: 0, snapshotBytes: 0, activeTiles: world.tiles.length, processRssMiB: process.memoryUsage.rss() / 1048576, tickHz: 0 };
   const view = (viewport?: Viewport) => {
     const start = performance.now(), projected = projectWorld(world, viewport, context);
     runtime.projectionMs = performance.now() - start;
@@ -131,6 +133,11 @@ export function createApp(options: AppOptions) {
   function stepOnce() {
     if (failed || stopped) return;
     const stepStarted = performance.now();
+    // Ritmo real en reloj de pared sobre los últimos 120 pasos: lo que de verdad
+    // avanza el mundo, no el intervalo pedido. Sin pasos previos no se afirma nada.
+    beats.push(stepStarted); if (beats.length > 120) beats.shift();
+    const span = beats.length > 1 ? beats[beats.length - 1]! - beats[0]! : 0;
+    runtime.tickHz = span > 0 ? (beats.length - 1) * 1000 / span : 0;
     const batch = [...pending.values()];
     const valid: Pending[] = [];
     try {
@@ -142,9 +149,14 @@ export function createApp(options: AppOptions) {
       const draft = cloneWorld(world, context);
       const results = stepWorld(draft, valid.map(item => item.gesture), context);
       if (results.length !== valid.length) throw new Error('Gesture result count mismatch');
-      const saveStarted = performance.now();
-      store.save(draft, valid.map((item, i) => ({ gesture: item.gesture, result: results[i] })), valid.map(item => item.hash));
-      runtime.saveMs = performance.now() - saveStarted;
+      // C3/C12: persistir es una transacción por cadencia, no por tick. Un gesto
+      // confirmado nunca espera: obliga a guardar en su propio paso. Lo que se
+      // arriesga entre guardados son los pasos de la cadencia, jamás un gesto.
+      if (valid.length > 0 || draft.tick % paramsOf(draft).persistencia.cadaTicks === 0) {
+        const saveStarted = performance.now();
+        store.save(draft, valid.map((item, i) => ({ gesture: item.gesture, result: results[i] })), valid.map(item => item.hash));
+        runtime.saveMs = performance.now() - saveStarted;
+      }
       world = draft;
       runtime.stepMs = performance.now() - stepStarted; measurements.push(runtime.stepMs); if (measurements.length > 120) measurements.shift();
       runtime.p95StepMs = [...measurements].sort((a, b) => a - b)[Math.floor(measurements.length * 0.95)] ?? 0;
@@ -262,18 +274,37 @@ export function createApp(options: AppOptions) {
       });
     } catch (error) { socket.end(`HTTP/1.1 ${error instanceof HttpError ? error.status : 503} Rejected\r\nConnection: close\r\n\r\n`); }
   });
-  const timer = options.manual ? undefined : setInterval(stepOnce, options.tickMs ?? 100);
+  // Planificador con compensación de deriva: el próximo paso se cita en `next +=
+  // tickMs`, no «tickMs después de terminar», así un paso lento no desplaza para
+  // siempre el reloj del mundo. Tras una pausa larga se recita, nunca se recupera
+  // el retraso con una ráfaga de pasos: el mundo no salta hacia atrás ni adelante.
+  const tickMs = options.tickMs ?? 100;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let next = performance.now() + tickMs;
+  function schedule() {
+    timer = setTimeout(() => {
+      next += tickMs;
+      stepOnce();
+      // El corte se juzga DESPUÉS del paso: un paso que duró más que el intervalo
+      // vuelve a citarse, nunca dispara una ráfaga para «recuperar» lo perdido.
+      const now = performance.now();
+      if (next < now) next = now + tickMs;
+      if (!stopped) schedule();
+    }, Math.max(0, next - performance.now()));
+    timer.unref();
+  }
+  if (!options.manual) schedule();
   const heartbeat = setInterval(() => {
     for (const [socket, client] of clients) {
       if (!client.alive || !store.sessionValid(client.hash)) { socket.terminate(); continue; }
       client.alive = false; socket.ping();
     }
   }, 20_000);
-  heartbeat.unref(); timer?.unref();
+  heartbeat.unref();
   return {
     server, stepOnce, get world() { return world; }, get failed() { return failed; },
     async close() {
-      stopped = true; clearInterval(timer); clearInterval(heartbeat);
+      stopped = true; if (timer) clearTimeout(timer); clearInterval(heartbeat);
       for (const item of pending.values()) item.reject(new HttpError(503, 'El servicio se está cerrando.'));
       pending.clear(); for (const socket of clients.keys()) socket.terminate(); ws.close();
       if (server.listening) await new Promise<void>((yes, no) => server.close(error => error ? no(error) : yes()));

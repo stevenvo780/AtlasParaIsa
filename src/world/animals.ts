@@ -74,7 +74,12 @@ export function materializeAnimals(seed: number, tiles: Tile[], tick: number): A
   return animals;
 }
 
-/** Compatibility projection only. Mixed-species totals must be counted from identities, not this representative species. */
+interface FaunaCache { length: number; index: Map<string, Tile>; occupied: Set<string>; }
+const faunaCaches = new WeakMap<Tile[], FaunaCache>();
+
+/** Compatibility projection only. Mixed-species totals must be counted from identities, not this representative species.
+ * P2: only tiles with fauna the previous call or this one are written; a cache keyed on the tiles array remembers which
+ * (rebuilt, reading ground-truth `fauna`, whenever that array is replaced or grows — same trigger as `terrainIndexes`). */
 export function syncFauna(tiles: Tile[], animals: Animal[]): void {
   const counts = new Map<string, { count: number; species: AnimalSpecies }>();
   for (const animal of animals) {
@@ -83,11 +88,19 @@ export function syncFauna(tiles: Tile[], animals: Animal[]): void {
     else counts.set(p, { count: 1, species: animal.species });
     if (counts.get(p)!.count > MAX_ANIMALS_PER_TILE) throw new Error('Capacidad local de fauna excedida.');
   }
-  for (const tile of tiles) {
-    const count = counts.get(key(tile));
+  let cache = faunaCaches.get(tiles);
+  if (!cache || cache.length !== tiles.length) {
+    cache = { length: tiles.length, index: new Map(tiles.map(t => [key(t), t])), occupied: new Set(tiles.filter(t => t.fauna).map(key)) };
+    faunaCaches.set(tiles, cache);
+  }
+  for (const p of new Set([...cache.occupied, ...counts.keys()])) {
+    const tile = cache.index.get(p);
+    if (!tile) continue;
+    const count = counts.get(p);
     tile.fauna = count?.count ?? 0;
     if (count) tile.species = count.species; else delete tile.species;
   }
+  cache.occupied = new Set(counts.keys());
 }
 
 function habitat(animal: Animal, tile: Tile): boolean {

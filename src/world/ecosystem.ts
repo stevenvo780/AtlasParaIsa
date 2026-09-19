@@ -1,5 +1,6 @@
 import type { Feature, Tile, Species } from '../shared/types.js';
-import { EcosystemKernel } from './ecosystem-kernel.js';
+import { EcosystemKernel, type EcosystemOptions } from './ecosystem-kernel.js';
+export type { EcosystemOptions } from './ecosystem-kernel.js';
 import { initialWood } from './forest.js';
 const clamp = (n: number, maximum = 1): number => Math.max(0, Math.min(maximum, n));
 const key = (x: number, y: number): string => `${x},${y}`;
@@ -78,9 +79,9 @@ function state(tile: Tile): CellState {
 const ecosystemKernel = new EcosystemKernel();
 
 /** Soft neighbor rule inspired by cellular automata, not an implementation of Conway or Lenia. */
-export function stepEcosystem(tiles: Tile[], tick: number, weather: 'clear' | 'rain', phase: string, updateFauna = true): void {
+export function stepEcosystem(tiles: Tile[], tick: number, weather: 'clear' | 'rain', phase: string, updateFauna = true, options?: EcosystemOptions): void {
   if (tick % 10 !== 0) return;
-  ecosystemKernel.step(tiles, tick, weather, phase);
+  ecosystemKernel.step(tiles, tick, weather, phase, options);
   if (updateFauna && tick % 50 === 0) stepFauna(tiles, tick);
 }
 

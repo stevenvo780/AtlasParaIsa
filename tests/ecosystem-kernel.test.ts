@@ -193,3 +193,19 @@ test('non-update ticks do not allocate or validate and empty update sets remain 
   kernel.step([], 10, 'rain', 'day'); assert.equal(kernel.cachedTopologyCount, 1);
 });
 
+test('absent fertility decay and explicit zero preserve the frozen kernel result exactly', () => {
+  const source = [cell(0, 0, { life: 0.5, fertility: 1, growth: 0.8 }), cell(1, 0, { life: 1, fertility: 0.7 })];
+  const absent = cloneTiles(source), zero = cloneTiles(source), expected = cloneTiles(source);
+  new EcosystemKernel().step(absent, 10, 'clear', 'day');
+  new EcosystemKernel().step(zero, 10, 'clear', 'day', { decaimientoFertilidad: 0 });
+  referenceStep(expected, 10, 'clear', 'day');
+  assert.deepStrictEqual(absent, expected); assert.deepStrictEqual(zero, expected);
+});
+
+test('fertility decay releases a saturated cell from the upper clamp', () => {
+  const control = [cell(0, 0, { life: 0.5, fertility: 1 })], decaying = cloneTiles(control);
+  new EcosystemKernel().step(control, 10, 'clear', 'day');
+  new EcosystemKernel().step(decaying, 10, 'clear', 'day', { decaimientoFertilidad: 0.001 });
+  assert.equal(control[0]!.fertility, 1);
+  assert.ok(decaying[0]!.fertility! < 1); assert.ok(decaying[0]!.fertility! < control[0]!.fertility!);
+});

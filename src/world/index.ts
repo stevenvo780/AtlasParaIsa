@@ -182,7 +182,8 @@ function seededTraits(seed: number, index: number): Person['traits'] {
   return { curiosity: 0.1 + random(state) * 0.85, sociability: 0.1 + random(state) * 0.85, industriousness: 0.1 + random(state) * 0.85, care: 0.05 + random(state) * 0.9, resilience: 0.1 + random(state) * 0.85 };
 }
 
-function ecology(world: World): void {
+/** Exportada para que la evidencia de T013 aplique la ley real a un mapa amplio sin pagar el coste del paso completo. */
+export function ecology(world: World): void {
   if (world.tick % 600 === 0) {
     const previous = world.weather;
     world.weather = random(world) < 0.4 ? 'rain' : 'clear';
@@ -195,15 +196,19 @@ function ecology(world: World): void {
   if (world.tick % 10 !== 0) return;
   const phase = phaseAt(world.tick);
   const light = phase === 'day' ? 1 : phase === 'night' ? 0 : 0.4;
+  const { capacidadBosque, capacidadPastizal, capacidadOtros, velocidadRegeneracion, decaimientoComida } = paramsOf(world).recursos;
   for (const tile of world.tiles) {
     if (tile.terrain === 'water') continue;
     // Neighbor water is an explicit, local moisture source.
     const nearWater = [[tile.x - 1, tile.y], [tile.x + 1, tile.y], [tile.x, tile.y - 1], [tile.x, tile.y + 1]]
       .some(([x, y]) => tileAt(world, { x: x!, y: y! })?.terrain === 'water');
     tile.moisture = clamp(tile.moisture + (world.weather === 'rain' ? 0.012 : 0) + (nearWater ? 0.008 : 0) - 0.0015 - light * 0.001);
-    const growth = light * tile.moisture * 0.007 * (1 - tile.vegetation);
+    const K = tile.biome === 'forest' ? capacidadBosque : tile.biome === 'grassland' ? capacidadPastizal : capacidadOtros;
+    const headroom = K > 0 ? 1 - tile.vegetation / K : 0;
+    const growth = velocidadRegeneracion * light * tile.moisture * 0.007 * headroom;
     tile.vegetation = clamp(tile.vegetation + growth - (tile.moisture < 0.15 ? 0.0015 : 0.0001));
-    tile.food = clamp(tile.food + light * tile.moisture * tile.vegetation * 0.006 * (1 - tile.food) - 0.0001);
+    const foodHeadroom = K > 0 ? 1 - tile.food / K : 0;
+    tile.food = clamp(tile.food + velocidadRegeneracion * light * tile.moisture * tile.vegetation * 0.006 * foodHeadroom - decaimientoComida);
   }
 }
 
@@ -864,7 +869,7 @@ export function stepWorld(world: World, inputs: Gesture[] = [], context: WorldCo
   world.invitations = world.invitations.filter(invitation => invitation.until > world.tick);
   world.reminders = world.reminders.filter(reminder => reminder.until > world.tick);
   ecology(world);
-  stepEcosystem(world.tiles, world.tick, world.weather, phaseAt(world.tick), false);
+  stepEcosystem(world.tiles, world.tick, world.weather, phaseAt(world.tick), false, { decaimientoFertilidad: paramsOf(world).recursos.decaimientoFertilidad });
   stepAnimals(world,event=>addEvent(world,event));
   stepStructures(world,event=>addEvent(world,event));
   for (const person of world.people) bodyAndAction(world, person);

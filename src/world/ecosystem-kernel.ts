@@ -4,6 +4,8 @@ const clamp = (n: number): number => Math.max(0, Math.min(1, n));
 const TREE_FEATURES = new Set<Feature>(['tree', 'pine', 'palm', 'cactus', 'reeds', 'stump']);
 const MAX_TOPOLOGIES = 4;
 
+export interface EcosystemOptions { decaimientoFertilidad?: number }
+
 interface Topology {
   coordinates: Float64Array;
   neighbors: Int32Array;
@@ -58,8 +60,9 @@ export class EcosystemKernel {
 
   get cachedTopologyCount(): number { return this.topologies.length; }
 
-  step(tiles: Tile[], tick: number, weather: 'clear' | 'rain', phase: string): void {
+  step(tiles: Tile[], tick: number, weather: 'clear' | 'rain', phase: string, options?: EcosystemOptions): void {
     if (tick % 10 !== 0) return;
+    const decaimientoFertilidad = options?.decaimientoFertilidad ?? 0;
     const index = this.topologies.findIndex(topology => sameCoordinates(topology, tiles));
     // Build and reject duplicate coordinates before modifying any tile or cache.
     const previous = index < 0 ? buildTopology(tiles) : this.topologies[index];
@@ -91,7 +94,7 @@ export class EcosystemKernel {
       const cellularEnergy = light * moisture * (0.6 + fertility * 0.4);
       tile.life = clamp(life + ((fertilePattern ? 1 : 0) - life) * 0.2 * cellularEnergy
         - (moisture < 0.15 ? 0.015 : 0) - traffic * 0.004);
-      tile.fertility = clamp(fertility + life * 0.0012 - traffic * 0.0007 - cultivation * 0.0002);
+      tile.fertility = clamp(fertility + life * 0.0012 - traffic * 0.0007 - cultivation * 0.0002 - decaimientoFertilidad * fertility);
       const produced = light * moisture * fertility * (0.25 + life * 0.75)
         * (1 - growth) * (1 - traffic * 0.9) * 0.005;
       tile.growth = clamp(growth + produced - 0.0002 - traffic * 0.002 - (moisture < 0.15 ? 0.001 : 0));

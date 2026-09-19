@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import type { Tile } from '../src/shared/types.js';
 import { generateChunk, generateTile } from '../src/world/terrain.js';
 import { initializeEcosystem, stepEcosystem, harvestAnimal, harvestMaterial, cultivateTile, trampleTile } from '../src/world/ecosystem.js';
+import { createWorld, stepWorld } from '../src/world/index.js';
+import { parseParams } from '../src/world/params.js';
 
 function cell(x = 0, y = 0, overrides: Partial<Tile> = {}): Tile {
   return { x, y, terrain: 'meadow', biome: 'grassland', moisture: 0.8, vegetation: 0.5, food: 0.2,
@@ -140,6 +142,18 @@ test('cultivation changes the soil without instant food; repeated footsteps supp
   assert.ok(trail.traffic! > meadow.traffic!); assert.ok(trail.growth! < meadow.growth!);
   stepEcosystem([trail], 10, 'clear', 'day'); stepEcosystem([meadow], 10, 'clear', 'day');
   assert.ok(trail.growth! < meadow.growth!); assert.ok(trail.vegetation < meadow.vegetation);
+});
+
+test('a saturated dry cell above its carrying capacity loses vegetation and food toward that capacity', () => {
+  const params = parseParams('recursos.capacidadBosque=0.2,recursos.capacidadPastizal=0.2,recursos.capacidadOtros=0.2');
+  const world = createWorld(51926, params), occupied = new Set(world.people.flatMap(person => [`${person.x},${person.y}`, `${person.target.x},${person.target.y}`]));
+  const tile = world.tiles.find(candidate => candidate.terrain !== 'water' && !occupied.has(`${candidate.x},${candidate.y}`))!;
+  tile.moisture = 0.8; tile.vegetation = 0.8; tile.food = 0.8; world.tick = 9; world.weather = 'clear';
+  const initial = { vegetation: tile.vegetation, food: tile.food };
+  stepWorld(world);
+  assert.ok(tile.vegetation < initial.vegetation); assert.ok(tile.food < initial.food);
+  assert.ok(Math.abs(tile.vegetation - 0.2) < Math.abs(initial.vegetation - 0.2));
+  assert.ok(Math.abs(tile.food - 0.2) < Math.abs(initial.food - 0.2));
 });
 
 test('hunting yields only actual bounded animal biomass and depletion never silently repopulates', () => {

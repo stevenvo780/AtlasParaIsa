@@ -2,7 +2,7 @@ import { recordChronicleEvent, enableChronicleJournal, assertChronicleJournal, t
 import { PROTOCOL_VERSION, type Action, type ChronicleEvent, type Gesture, type GestureResult, type MemoryView, type PersonView, type PlaceView, type Tile, type WorldView, type Viewport, type Order, type CommunityView, type WorldSample } from '../shared/types.js';
 import { activate, bindWorldContext, maintainRegions, normalizeViewport, projectTerrain, tileAt, validCoordinate, worldContext, type ChunkMeta, type WorldContext } from './spatial.js';
 import { chunkKey, generateChunk, proceduralPlaceName, legacyStructures, type Chunk } from './terrain.js';
-import { assertGenome, expressGenome, founderGenome, inheritGenome, type Genome } from './genetics.js';
+import { assertGenome, DEFAULT_MUTATION_RATE, expressGenome, founderGenome, inheritGenome, type Genome } from './genetics.js';
 import { bond, cooperate, cooperationOpportunity, initialCulture, resourceDispute, updateCommunities, settlementOpportunity, type Culture } from './society.js';
 import { count, emptyTotals, recordSample, worldStatistics } from './statistics.js';
 import { initializeEcosystem, stepEcosystem, harvestMaterial, cultivateTile, trampleTile, FOOD_PER_ANIMAL } from './ecosystem.js';
@@ -915,7 +915,7 @@ function reproduce(world: World): void {
     if (!b || !place) continue;
     const serial=world.birthCounter+1, id=`descendant-${serial}`;
     if(!Number.isSafeInteger(serial)||[...world.people,...world.legacy,...world.retiredLegacy].some(p=>p.id===id)) throw new Error('La identidad de un nacimiento ya existe; no se gastaron reservas.');
-    const genome=inheritGenome(world.seed,id,[a,b]); world.birthCounter=serial;
+    const genome=inheritGenome(world.seed,id,[a,b],DEFAULT_MUTATION_RATE*paramsOf(world).genes.tasaMutacion); world.birthCounter=serial;
     const traits = expressGenome(genome);
     const child: Person = { ...structuredClone(a), id, name: `${proceduralPlaceName(world.seed, world.birthCounter, genome.generation).split(' ')[0]} ${world.birthCounter}`.slice(0, 70), role: 'neighbor',
       genome, traits, curiosity: traits.curiosity, sociability: traits.sociability, generosity: traits.care, bornAt: world.tick, lastBirth: world.tick, thirst: 0.15,

@@ -80,7 +80,14 @@ export interface WorldStats { population: number; meanEnergy: number; meanHunger
   /** T019/T036(e): diversidad de conducta y de oficios de la población viva (0..1 cada una). */
   diversidad?: { conducta: number; oficios: number; total: number }; }
 /** `tickHz`: ritmo real medido en reloj de pared sobre los últimos pasos, no el ritmo pedido. */
-export interface RuntimeStats { stepMs: number; p95StepMs: number; saveMs: number; projectionMs: number; snapshotBytes: number; activeTiles: number; processRssMiB: number; tickHz: number; }
+export interface RuntimeStats { stepMs: number; p95StepMs: number; saveMs: number; projectionMs: number; snapshotBytes: number; activeTiles: number; processRssMiB: number; tickHz: number;
+  /**
+   * Ruling R17: el hardware, no un tope fijo, limita la población. `activo` es el valor
+   * vigente de `world.reproductionEnabled`; el gobernador lo apaga cuando `p95StepMs`
+   * supera `presupuestoMs` y lo reenciende por debajo del 70 % de ese presupuesto.
+   * `manual` guarda una orden humana (null = sin orden); mientras no sea null, manda ella.
+   */
+  gobernador?: { activo: boolean; presupuestoMs: number; p95StepMs: number; manual: boolean | null }; }
 export type GestureKind = 'plant' | 'invite' | 'remember' | 'command';
 export interface Gesture { id: string; kind: GestureKind; x: number; y: number; memoryId?: string; agentId?: string; order?: Order; }
 export interface GestureResult {

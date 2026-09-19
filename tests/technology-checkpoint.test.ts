@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Store } from '../src/server/store.js';
 import { decodeSnapshot, encodeSnapshot } from '../src/server/snapshot.js';
-import { assertWorld, cloneWorld, createWorld, migrateWorld, projectWorld, stepWorld, type World } from '../src/world/index.js';
+import { assertWorld, cloneWorld, createWorld, migrateWorld, projectWorld, stepWorld, POPULATION_HARD_LIMIT, type World } from '../src/world/index.js';
 import { captureTechnologyCheckpoint, advanceTechnologyCheckpoint, assertTechnologyCheckpoint } from '../src/world/technology-checkpoint.js';
 import { analyzeTechnologyOrganization } from '../src/world/technology-organization.js';
 import { defaultTechnologyState, initialTechnologyKnowledge, researchTechnology, technologyWorkCost, useTool,
@@ -189,10 +189,19 @@ test('checkpoint shape rejects forged mass, counters, duplicate identities, and 
     value => { value.technology.checkpoint!.inventories.push(structuredClone(value.technology.checkpoint!.inventories[0]!)); },
     value => { value.technology.checkpoint!.inventories[1]!.items.push(structuredClone(value.technology.checkpoint!.inventories[0]!.items[0]!)); },
     value => { value.technology.checkpoint!.inventories[0]!.items[0]!.recipeId = 'missing'; },
-    value => { value.technology.checkpoint!.inventories = Array.from({ length: 129 }, (_, n) => ({ actorId: `actor-${n}`, items: [], residue: { wood: 0, stone: 0, water: 0 } })); },
+    // Ruling R17: el tope de inventarios ya no dice cuánta gente cabe; solo ataja un
+    // snapshot corrupto. Se fuerza la longitud (array disperso) para no reservar un millón de objetos.
+    value => { value.technology.checkpoint!.inventories.length = POPULATION_HARD_LIMIT + 1; },
   ];
   for (const mutation of mutations) { const changed = structuredClone(host); mutation(changed); assert.throws(() => assertTechnologyCheckpoint(changed.technology, changed.tick), /checkpoint/); }
   assertTechnologyCheckpoint(host.technology, host.tick);
+});
+
+test('ruling R17: 129 inventarios (antes rechazados por el tope de 128) son un checkpoint válido', () => {
+  const { host, a } = scene(); manufacture(host, a); anchor(host);
+  const changed = structuredClone(host);
+  changed.technology.checkpoint!.inventories = Array.from({ length: 129 }, (_, n) => ({ actorId: `actor-${String(n).padStart(4, '0')}`, items: [], residue: { wood: 0, stone: 0, water: 0 } }));
+  assertTechnologyCheckpoint(changed.technology, changed.tick);
 });
 
 test('a checkpoint cannot hide a retained receipt by moving its tick or serial boundary', () => {

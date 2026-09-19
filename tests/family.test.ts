@@ -281,7 +281,8 @@ test('legacy params (maxima 32, one birth per check) keep one birth per 120 tick
   assert.equal(paramsOf(world).poblacion.maxima, 32);
   assert.equal(paramsOf(world).poblacion.intervaloComprobacionTicks, 120);
   assert.equal(paramsOf(world).poblacion.nacimientosPorComprobacion, 1);
-  assert.equal(DEFAULT_PARAMS.poblacion.maxima, 40); // calibrado 2026-09-19 (ruling R14)
+  // Ruling R17 (2026-09-19): el default dejó de ser un tope de diseño (era 40); ahora limita el hardware.
+  assert.equal(DEFAULT_PARAMS.poblacion.maxima, 1_000_000);
   stepWorld(world);
   assert.equal(world.tick % 120, 0); assert.equal(world.totals.births, 1); assert.equal(world.people.length, 17);
   const firstBirthTick = world.tick;

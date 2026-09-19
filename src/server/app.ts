@@ -3,7 +3,7 @@ import { readFileSync, statSync } from 'node:fs';
 import { resolve, extname, sep } from 'node:path';
 import { isIP } from 'node:net';
 import { WebSocketServer, WebSocket } from 'ws';
-import { createWorld, stepWorld, projectWorld, normalizeViewport, cloneWorld, personDetail } from '../world/index.js';
+import { createWorld, stepWorld, projectWorld, normalizeViewport, cloneWorld, personDetail, type World } from '../world/index.js';
 import { paramsOf } from '../world/params.js';
 import { technologyRecipeDetail } from '../world/technology.js';
 import type { ClientMessage, Gesture, GestureResult, ServerMessage, Viewport, WorldView, RuntimeStats } from '../shared/types.js';
@@ -74,6 +74,17 @@ export function rate(map: Map<string, { count: number; reset: number }>, key: st
   row.count++; map.set(key, row);
   if (row.count > max) throw new HttpError(429, 'Espera un momento antes de intentarlo de nuevo.');
 }
+/**
+ * Ruling R17: decisión del gobernador, aislada y pura para poder verificarla sin reloj.
+ * Por encima del presupuesto se apaga; por debajo del 70 % se reenciende; en la banda
+ * muerta [0,7·P, P] se conserva el estado vigente — esa histéresis evita oscilar.
+ */
+export function decideReproduction(p95StepMs: number, presupuestoMs: number, actual: boolean): boolean {
+  if (p95StepMs > presupuestoMs) return false;
+  if (p95StepMs < presupuestoMs * 0.7) return true;
+  return actual;
+}
+
 export function createApp(options: AppOptions) {
   const { store } = options;
   const verifyPassword = passwordVerifier(options);
@@ -104,7 +115,26 @@ export function createApp(options: AppOptions) {
   const context = store.context;
   const measurements: number[] = [];
   const beats: number[] = [];
-  const runtime: RuntimeStats = { stepMs: 0, p95StepMs: 0, saveMs: 0, projectionMs: 0, snapshotBytes: 0, activeTiles: world.tiles.length, processRssMiB: process.memoryUsage.rss() / 1048576, tickHz: 0 };
+  const runtime: RuntimeStats = { stepMs: 0, p95StepMs: 0, saveMs: 0, projectionMs: 0, snapshotBytes: 0, activeTiles: world.tiles.length, processRssMiB: process.memoryUsage.rss() / 1048576, tickHz: 0,
+    gobernador: { activo: world.reproductionEnabled, presupuestoMs: paramsOf(world).gobernador.presupuestoMs, p95StepMs: 0, manual: null } };
+  /**
+   * Ruling R17: la población la limita el HARDWARE, no un tope fijo. Tras medir el paso,
+   * el gobernador compara el p95 (ventana de 120 pasos) con `gobernador.presupuestoMs`:
+   * por encima apaga la reproducción, por debajo del 70 % la reenciende. La histéresis
+   * (0,7) evita que el mundo oscile en el filo del presupuesto.
+   *
+   * Una orden humana manda siempre: mientras `runtime.gobernador.manual` no sea `null`,
+   * el gobernador observa y publica el p95 pero no toca `reproductionEnabled`.
+   */
+  function governReproduction(draft: World): void {
+    const stats = runtime.gobernador!;
+    stats.presupuestoMs = paramsOf(draft).gobernador.presupuestoMs;
+    stats.p95StepMs = runtime.p95StepMs;
+    if (stats.manual !== null) { draft.reproductionEnabled = stats.manual; stats.activo = stats.manual; return; }
+    // Sin medición todavía (primer paso) no se afirma nada sobre el hardware.
+    if (measurements.length > 0) draft.reproductionEnabled = decideReproduction(runtime.p95StepMs, stats.presupuestoMs, draft.reproductionEnabled);
+    stats.activo = draft.reproductionEnabled;
+  }
   const view = (viewport?: Viewport) => {
     const start = performance.now(), projected = projectWorld(world, viewport, context);
     runtime.projectionMs = performance.now() - start;
@@ -194,6 +224,8 @@ export function createApp(options: AppOptions) {
       world = draft;
       runtime.stepMs = performance.now() - stepStarted; measurements.push(runtime.stepMs); if (measurements.length > 120) measurements.shift();
       runtime.p95StepMs = [...measurements].sort((a, b) => a - b)[Math.floor(measurements.length * 0.95)] ?? 0;
+      // El gobernador decide sobre el mundo ya vigente: la próxima `reproduce()` lo lee.
+      governReproduction(world);
       runtime.activeTiles = world.tiles.length; runtime.processRssMiB = process.memoryUsage.rss() / 1048576; runtime.snapshotBytes = store.lastSnapshotBytes;
       for (let i=0; i<valid.length; i++) { pending.delete(valid[i].gesture.id); valid[i].resolve(results[i]); }
       if (world.tick % 5 === 0 || valid.length) broadcast();
@@ -360,6 +392,10 @@ export function createApp(options: AppOptions) {
   heartbeat.unref();
   return {
     server, stepOnce, get world() { return world; }, get failed() { return failed; },
+    /** Copia de las métricas vivas (incluido el gobernador de ruling R17); solo lectura. */
+    get runtime(): RuntimeStats { return { ...runtime, ...(runtime.gobernador ? { gobernador: { ...runtime.gobernador } } : {}) }; },
+    /** Orden humana sobre la reproducción: manda sobre el gobernador. `null` la devuelve al hardware. */
+    setReproduccionManual(value: boolean | null) { runtime.gobernador!.manual = value; if (value !== null) { world.reproductionEnabled = value; runtime.gobernador!.activo = value; } },
     async close() {
       stopped = true; if (timer) clearTimeout(timer); clearInterval(heartbeat);
       for (const item of pending.values()) item.reject(new HttpError(503, 'El servicio se está cerrando.'));

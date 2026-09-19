@@ -21,6 +21,9 @@
     "respaldo": "bash scripts/respaldo.sh",
     "restore": "tsx scripts/storage.ts restore",
     "recover:previous": "tsx scripts/storage.ts previous",
+    "lab": "tsx scripts/lab/barrido.ts",
+    "lab:replica": "tsx scripts/lab/replica.ts",
+    "lab:resumen": "tsx scripts/lab/resumen.ts",
     "check": "npm run typecheck && npm test && npm run build"
   },
   "dependencies": {

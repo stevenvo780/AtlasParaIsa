@@ -80,9 +80,9 @@ test('rendererProfile — completo (escritorio): dpr hasta 3× y sin tope de fps
   assert.equal(perfil.fpsCap, null);
 });
 
-test('rendererProfile — observador (móvil ligero): dpr ≤ 1,5× y fps bajo (30)', () => {
+test('rendererProfile — observador (móvil ligero): dpr clavado en 1× (T024/P1) y fps bajo (30)', () => {
   const perfil = rendererProfile('observador');
-  assert.equal(perfil.dprCeiling, 1.5);
+  assert.equal(perfil.dprCeiling, 1, 'observador clava el dpr efectivo en 1×: contrato T024/P1/FR-008');
   assert.equal(perfil.fpsCap, 30);
 });
 

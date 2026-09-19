@@ -84,7 +84,9 @@ test('render browser: dirty chunks, negative coordinates, selection, bounded cac
       const { Landscape } = await import(/* @vite-ignore */ path);
       const canvas = document.querySelector('canvas')!;
       const selected: unknown[] = [];
-      const renderer = new Landscape(canvas, (s: unknown) => selected.push(s), undefined, undefined, { allowSoftwareWebGL: true });
+      // Este test prueba el camino de ESCRITORIO (GpuTerrain + recuperación de contexto WebGL): el modo se declara,
+      // no se deduce del viewport de 640 px (la heurística lo tomaría por móvil y dejaría `gpu` en null).
+      const renderer = new Landscape(canvas, (s: unknown) => selected.push(s), undefined, undefined, { allowSoftwareWebGL: true, modo: 'completo' });
       const tile = (x: number, y: number) => ({ x, y, terrain: 'meadow', biome: 'forest', moisture: .7, vegetation: .8, food: .5, growth: .7, feature: 'tree', wood: 4, drinkingWater: .4 });
       const tiles = Array.from({length: 32*24}, (_, i) => tile(i%32-16, Math.floor(i/32)-8));
       const world = {version: 4, sequence: 1, tick: 1, day: 1, phase: 'day', weather: 'clear', width: 32, height: 24, originX: -16, originY: -8, tiles, people: [], events: [], places: [], memories: []};

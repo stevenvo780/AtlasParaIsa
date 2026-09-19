@@ -68,8 +68,8 @@ export interface RendererProfile {
 const RENDERER_PROFILES: Record<Modo, RendererProfile> = {
   // Escritorio: sin recorte de nitidez (hasta 3×) ni tope de fps propio.
   completo: { dprCeiling: 3, fpsCap: null },
-  // Móvil de gama baja (P1, FR-008): recorta nitidez a 1,5× y fps a 30 para no quemar batería/CPU.
-  observador: { dprCeiling: 1.5, fpsCap: 30 },
+  // Móvil de gama baja (P1, FR-008): clava el dpr efectivo en 1× (contrato T024) y throttlea a 30 fps para no quemar batería/CPU.
+  observador: { dprCeiling: 1, fpsCap: 30 },
 };
 
 /**

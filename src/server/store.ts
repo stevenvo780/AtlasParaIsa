@@ -227,18 +227,19 @@ export class Store {
    * instantánea queda congelada durante toda la verificación. */
   load(): { world: World; savedAt: number } | null {
     const rawTransaction = this.db.isTransaction;
-    if (!rawTransaction) {
-      this.db.exec('BEGIN');
-      // Lectura cebadora: fija la instantánea ANTES de sellar `data_version`.
-      this.db.prepare('SELECT 1 FROM main.sqlite_schema LIMIT 1').get();
-      // La carga hace miles de lecturas del archivo de tecnología (una por referencia de cada
-      // ejecución archivada). Sin transacción anfitriona el archivo descarta sus pruebas en cada
-      // lectura y vuelve a recorrer todas las definiciones: 468 s con 13 710 ejecuciones
-      // (evidencia 2026-09-19). Dentro de la misma instantánea de lectura las pruebas siguen
-      // siendo válidas, igual que en `save()`.
-      this.technologyArchive.beginHostTransaction();
-    }
+    if (!rawTransaction) this.db.exec('BEGIN');
     try {
+      if (!rawTransaction) {
+        // Lectura cebadora: fija la instantánea ANTES de sellar `data_version`.
+        this.db.prepare('SELECT 1 FROM main.sqlite_schema LIMIT 1').get();
+        // La carga hace miles de lecturas del archivo de tecnología (una por referencia de cada
+        // ejecución archivada). Sin transacción anfitriona el archivo descarta sus pruebas en cada
+        // lectura y vuelve a recorrer todas las definiciones: 468 s con 13 710 ejecuciones
+        // (evidencia 2026-09-19). Dentro de la misma instantánea de lectura las pruebas siguen
+        // siendo válidas, igual que en `save()`. Va dentro del `try`: si fallara, el `catch`
+        // deshace el BEGIN en vez de dejar la conexión en transacción para siempre.
+        this.technologyArchive.beginHostTransaction();
+      }
       const loaded = this.loadVerified(rawTransaction);
       if (!rawTransaction && this.db.isTransaction) { this.db.exec('COMMIT'); this.technologyArchive.acknowledgeHostCommit(); }
       return loaded;

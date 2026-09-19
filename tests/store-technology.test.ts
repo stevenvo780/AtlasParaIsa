@@ -450,3 +450,29 @@ test('same-connection schema changes invalidate quiet-save caches without rebuil
   assert.deepEqual(store.db.prepare('SELECT body,digest FROM snapshots WHERE slot=0').get(), before);
   assert.equal(store.db.prepare("SELECT name FROM sqlite_master WHERE name='technology_definitions'").get(), undefined);
 });
+
+/** La carga hace una lectura del archivo por cada referencia de cada ejecución. Si `load()`
+ * no declara su transacción anfitriona, el archivo descarta sus pruebas en cada lectura y
+ * vuelve a recorrer TODAS las definiciones: 468 s con 13 710 ejecuciones (evidencia
+ * 2026-09-19). El coste de verificación debe depender de las definiciones, no del archivo. */
+test('el coste de verificación de load() no crece con las ejecuciones archivadas', t => {
+  const medir = (ejecuciones: number) => {
+    const { store } = fixture(t), world = createWorld(51926);
+    store.save(world); makeTool(world); nextTick(world);
+    useMany(world, ejecuciones);
+    makeTool(world, world.technology.recipes[0]!.id); nextTick(world);
+    store.save(world);
+    const observado = store.technologyArchive as unknown as { scanDefinitions(...a: unknown[]): unknown };
+    const original = observado.scanDefinitions;
+    let barridos = 0;
+    observado.scanDefinitions = function (...a: unknown[]) { barridos++; return original.apply(this, a); };
+    try { store.technologyArchive.invalidateVerification(); assert.ok(store.load()); }
+    finally { observado.scanDefinitions = original; }
+    return { barridos, ejecuciones: count(store, 'technology_executions') };
+  };
+  const pocas = medir(50), muchas = medir(700);
+  assert.ok(muchas.ejecuciones > pocas.ejecuciones * 5, 'el segundo archivo debe ser mucho mayor');
+  assert.equal(muchas.barridos, pocas.barridos,
+    `load() recorrió las definiciones ${muchas.barridos} veces con ${muchas.ejecuciones} ejecuciones ` +
+    `y ${pocas.barridos} con ${pocas.ejecuciones}: el coste de verificación crece con el archivo`);
+});

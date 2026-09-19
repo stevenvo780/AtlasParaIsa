@@ -23,6 +23,12 @@ import { paramsOf } from '../world/params.js';
 /** Profundidad de recuperación: cada cien guardados el slot 2 hereda la instantánea
  * vigente, de modo que el respaldo más viejo mide minutos y no el último paso. */
 export const DEEP_CHECKPOINT_EVERY_SAVES = 100;
+/** Cadencia de la revisión COMPLETA del mundo (`assertWorld`) dentro de `save()`.
+ * Recorrer el mundo entero cuesta O(tiles + gente + recetas) y a día 5 (40 personas,
+ * instantánea de 4,3 MiB) era 270 ms de los 634 ms del guardado: el 43 %. Se paga
+ * una vez cada diez guardados —y siempre en el primero de cada proceso— en lugar de
+ * en todos. Ver `save()` para la ventana descubierta y su compensación. */
+export const DEEP_VALIDATION_EVERY_SAVES = 10;
 
 const checksum = (s: string) => createHash('sha256').update(s).digest('hex');
 // Preserve all V1 gesture identities; only the new command kind extends the tuple.
@@ -161,7 +167,12 @@ export class Store {
         // WAL + synchronous=NORMAL: un corte de luz puede costar el último commit
         // (≤ `persistencia.cadaTicks` pasos), nunca una base corrupta ni un estado
         // a medias. El fsync por tick era el 48 % del paso del servidor (C3).
-        this.db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=3000;');
+        // `wal_autocheckpoint` por defecto (1000 páginas ≈ 4 MiB) dispara un volcado
+        // del WAL a la base DENTRO de casi cada COMMIT cuando la instantánea pesa
+        // megabytes. Con 4000 páginas (≈16 MiB) el volcado se paga una vez cada
+        // varios guardados en lugar de en todos: mismo trabajo total, un WAL acotado
+        // y un p95 que deja de heredar el checkpoint en cada guardado.
+        this.db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=3000; PRAGMA wal_autocheckpoint=4000;');
         if (!existed || schemaVersion < 4) {
           this.db.exec('BEGIN IMMEDIATE');
           try {
@@ -654,8 +665,19 @@ export class Store {
     // motivo es evidencia más precisa que «estado procedural inválido».
     for (const recipe of world.technology.catalogue?.pending ?? world.technology.recipes) this.assertTechnologyAuthor(world, recipe);
     // Escribir exige la misma ley de frontera que leer: nunca se archiva un estado
-    // que `load()` rechazaría. Con cadencia (no cada tick) el coste es asumible.
-    assertWorld(world, world.version, this.context);
+    // que `load()` rechazaría. La revisión COMPLETA recorre el mundo entero (tiles,
+    // gente, recetas) y a día 5 era el 43 % del guardado: se ejecuta cada
+    // `DEEP_VALIDATION_EVERY_SAVES` guardados y SIEMPRE en el primero de cada
+    // proceso. VENTANA DESCUBIERTA: hasta 9 guardados (≤180 pasos, ~18 s con
+    // `cadaTicks=20`) pueden archivarse sin la revisión completa. Lo que la cubre:
+    // (1) las leyes POR SECCIÓN —crónica, tecnología, terreno dormido, identidades—
+    // se siguen comprobando en CADA guardado; (2) `load()` aplica `assertWorld` al
+    // arrancar, así que un estado inválido nunca se pone en uso; (3) el slot 1
+    // conserva el guardado anterior y el slot 2 uno de cada cien, de modo que
+    // `previous()` sigue siendo la salida si la revisión completa falla tarde.
+    const deepValidation = this.saves % DEEP_VALIDATION_EVERY_SAVES === 0;
+    if (deepValidation) assertWorld(world, world.version, this.context);
+    else bindWorldContext(world, this.context);
     const window = paramsOf(world).persistencia.ventanaEventosTicks;
     const prunes = window > 0 && world.tick - this.lastPruneTick >= window;
     const body = encodeSnapshot({ ...world, chronicleJournal: committedChronicle, technology: technologyCatalogueStateForCommit(technologyStateForCommit(world.technology)) });
@@ -692,6 +714,9 @@ export class Store {
         }
       }
       if (prunes) this.pruneChronicle(world, committedChronicle, window);
+      // El slot 1 sigue heredando la instantánea del guardado ANTERIOR en cada
+      // guardado: cuesta ~13 ms de 630 a día 5 y es la profundidad de recuperación
+      // que `previous()` promete (un guardado, no diez). Espaciarlo no compensa.
       this.db.exec('INSERT OR REPLACE INTO snapshots SELECT 1,body,digest,saved_at FROM snapshots WHERE slot=0');
       if ((this.saves + 1) % DEEP_CHECKPOINT_EVERY_SAVES === 0) this.db.exec('INSERT OR REPLACE INTO snapshots SELECT 2,body,digest,saved_at FROM snapshots WHERE slot=0');
       this.db.prepare('INSERT OR REPLACE INTO snapshots VALUES (0,?,?,?)').run(body, checksum(body), Date.now());

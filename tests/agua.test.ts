@@ -19,7 +19,14 @@ function run(world: ReturnType<typeof createWorld>, ticks: number): void {
 // cualquier cambio legítimo del motor ajeno a T035, además de depender del valor de
 // `DEFAULT_PARAMS.agua.cuencas`, que otras tareas del sprint recalibran). Con `cuencas=1` el ruido
 // nunca cruza el umbral (test "ruidoCuenca... cae en [0,1)" de abajo): esto debe ser un no-op.
-const HASH_AGUA_MUNDO_4821_DIA1_CUENCAS1 = 'ffa5012d1b02f2fe5173440e54c5b19ea7730e77981abda96d6395762ab3b691';
+// RE-LÍNEA BASE 2026-09-19 (integración de los 20 workstreams T010–T036 + la calibración ab4d9fb):
+// el valor anterior (`ffa5012d…`) se midió en la rama de T035 aislada. Tras 1 día de simulación el
+// agua depende también de a dónde caminan y beben los habitantes, así que la ley de senescencia, la
+// varianza de fundadores y las capacidades de bioma lo mueven aunque `cuencas=1` siga siendo un no-op
+// del generador (lo prueban, sin hash, las pruebas «conserva toda el agua potable de origen» y
+// «`agua.cuencas` del MUNDO llega a createWorld→activate» de este mismo fichero). A partir de aquí
+// vuelve a ser un detector de deriva: si cambia, algo tocó el agua o el motor.
+const HASH_AGUA_MUNDO_4821_DIA1_CUENCAS1 = '0c2d09d3ed7681f60ea80eafb7581ba2a4d51dde240c1b1d13853c18f240ef15';
 
 test('T035 control: agua.cuencas=1 EXPLÍCITO (no el default global) deja el agua/feature de las teselas bit a bit igual a hoy tras 1 día', () => {
   const world = createWorld(4821, parseParams('agua.cuencas=1'));

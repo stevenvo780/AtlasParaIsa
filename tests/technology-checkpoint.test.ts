@@ -189,7 +189,7 @@ test('checkpoint shape rejects forged mass, counters, duplicate identities, and 
     value => { value.technology.checkpoint!.inventories.push(structuredClone(value.technology.checkpoint!.inventories[0]!)); },
     value => { value.technology.checkpoint!.inventories[1]!.items.push(structuredClone(value.technology.checkpoint!.inventories[0]!.items[0]!)); },
     value => { value.technology.checkpoint!.inventories[0]!.items[0]!.recipeId = 'missing'; },
-    value => { value.technology.checkpoint!.inventories = Array.from({ length: 33 }, (_, n) => ({ actorId: `actor-${n}`, items: [], residue: { wood: 0, stone: 0, water: 0 } })); },
+    value => { value.technology.checkpoint!.inventories = Array.from({ length: 129 }, (_, n) => ({ actorId: `actor-${n}`, items: [], residue: { wood: 0, stone: 0, water: 0 } })); },
   ];
   for (const mutation of mutations) { const changed = structuredClone(host); mutation(changed); assert.throws(() => assertTechnologyCheckpoint(changed.technology, changed.tick), /checkpoint/); }
   assertTechnologyCheckpoint(host.technology, host.tick);

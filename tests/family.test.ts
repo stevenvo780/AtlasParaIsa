@@ -275,12 +275,13 @@ test('direct parent-child and full siblings cannot be a reproducing pair', () =>
   stepWorld(world); assert.equal(world.totals.births, 0); assert.equal(world.people.length, 16);
 });
 
-test('default params keep one birth per 120 ticks and a living cap of 32', () => {
+test('legacy params (maxima 32, one birth per check) keep one birth per 120 ticks and a living cap of 32', () => {
   const { world, neighbors } = colony();
+  setParams(world, parseParams('poblacion.maxima=32,poblacion.nacimientosPorComprobacion=1'));
   assert.equal(paramsOf(world).poblacion.maxima, 32);
   assert.equal(paramsOf(world).poblacion.intervaloComprobacionTicks, 120);
   assert.equal(paramsOf(world).poblacion.nacimientosPorComprobacion, 1);
-  assert.equal(DEFAULT_PARAMS.poblacion.maxima, 32);
+  assert.equal(DEFAULT_PARAMS.poblacion.maxima, 40); // calibrado 2026-09-19 (ruling R14)
   stepWorld(world);
   assert.equal(world.tick % 120, 0); assert.equal(world.totals.births, 1); assert.equal(world.people.length, 17);
   const firstBirthTick = world.tick;

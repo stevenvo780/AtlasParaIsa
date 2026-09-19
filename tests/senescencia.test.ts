@@ -10,17 +10,18 @@ const safe = { exposure: 0, shelter: 0, protected: false } as const;
 function body(age: number, health = 1, vitality = 1, id = 'subject'): DemographicActor {
   return { id, state: { ...initialDemography(age), health, vitality }, traits, hunger: 0.1, thirst: 0.1, energy: 0.85, fatigue: 0.1 };
 }
-function forcedDeathAge(seed: number, health: number, vitality: number, dt: number): number | null {
+const LEGACY_LAW: SenescenceLaw = { ...DEFAULT_PARAMS.cuerpo, riesgoSenescenciaDiario: 0.02, riesgoSenescenciaPendiente: 6, cuidadoReduceRiesgo: 0.6 };
+function forcedDeathAge(seed: number, health: number, vitality: number, dt: number, law?: SenescenceLaw): number | null {
   let age = traits.senescenceStart;
   while (age < traits.maximumAge * 2) {
-    const result = updateDemography(body(age, health, vitality), { ...safe, seed, tick: age }, Math.min(dt, traits.maximumAge * 2 - age));
+    const result = updateDemography(body(age, health, vitality), { ...safe, seed, tick: age, ...(law ? { senescence: law } : {}) }, Math.min(dt, traits.maximumAge * 2 - age));
     if (result.death) { assert.equal(result.death, 'senescence'); return result.state.age; }
     age = result.state.age;
   }
   return null;
 }
-function cohort(dt: number, health: number, vitality: number): number[] {
-  return Array.from({ length: 2000 }, (_, seed) => forcedDeathAge(seed, health, vitality, dt)).filter((age): age is number => age !== null);
+function cohort(dt: number, health: number, vitality: number, law?: SenescenceLaw): number[] {
+  return Array.from({ length: 2000 }, (_, seed) => forcedDeathAge(seed, health, vitality, dt, law)).filter((age): age is number => age !== null);
 }
 function median(values: readonly number[]): number | null {
   if (values.length === 0) return null;
@@ -39,7 +40,7 @@ test('maximum age is a risk threshold rather than a death decree', context => {
 });
 
 test('care separates cumulative mortality without making healthy elders immortal', context => {
-  const neglected = cohort(240, 0.2, 0.2), full = cohort(240, 1, 1);
+  const neglected = cohort(240, 0.2, 0.2, LEGACY_LAW), full = cohort(240, 1, 1, LEGACY_LAW); // ley de referencia de T001; los defaults calibrados (0,04/10) se validan en el laboratorio
   const neglectedFraction = neglected.length / 2000, fullFraction = full.length / 2000;
   assert.ok(neglectedFraction > 0.95); assert.ok(fullFraction > 0.05 && fullFraction < 0.5); assert.ok(fullFraction < neglectedFraction);
   context.diagnostic(JSON.stringify({ seeds: 2000, dt: 240, neglectedFraction, fullFraction,

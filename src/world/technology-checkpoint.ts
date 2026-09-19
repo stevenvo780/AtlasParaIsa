@@ -22,13 +22,16 @@ export function captureTechnologyCheckpoint(state: TechnologyState, actors: read
 }
 
 /** Shape/integrity of a historical opening, not a claim that subsequent flows close. */
+/** Un inventario por habitante vivo: espeja MAX_POPULATION (128, tope duro de assertWorld desde T012); antes 32 y abortaba la simulación al superar 32 habitantes. */
+const MAX_CHECKPOINT_INVENTORIES = 128;
+
 export function assertTechnologyCheckpoint(state: TechnologyState, tick: number): void {
   const checkpoint = state.checkpoint;
   if (checkpoint === undefined) return; // Legacy V5 is anchored explicitly by migrateWorld.
   const fail = (): never => { throw new Error('Invalid technology opening checkpoint.'); };
   if (!checkpoint || checkpoint.version !== 1 || !integer(checkpoint.tick, tick) || !integer(checkpoint.executionCounter, state.executionCounter) ||
     !['initial', 'migration', 'history-gap', 'roster-change'].includes(checkpoint.reason) ||
-    !Array.isArray(checkpoint.inventories) || checkpoint.inventories.length > 32) fail();
+    !Array.isArray(checkpoint.inventories) || checkpoint.inventories.length > MAX_CHECKPOINT_INVENTORIES) fail();
   if (checkpoint.reason === 'initial' && (checkpoint.tick !== 0 || checkpoint.executionCounter !== 0)) fail();
   // A serial boundary must also be a whole-tick boundary. Otherwise a forged
   // earlier tick could hide executions included in the alleged opening stock.

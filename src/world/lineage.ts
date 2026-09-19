@@ -3,6 +3,7 @@ import type { LegacyRecord, DemographicDeathCause } from '../shared/demography.j
 import type { Person, World } from './index.js';
 import { assertGenome } from './genetics.js';
 import { demographicTraits, updateDemography } from './demography.js';
+import { paramsOf } from './params.js';
 import { tileAt } from './spatial.js';
 import { BROKEN_CONDITION } from './inventions.js';
 
@@ -121,9 +122,10 @@ export function advancePopulation(world: World, callbacks: PopulationCallbacks):
     const shelter = world.shelterBenefitEnabled && tile?.terrain === 'shelter' ? Math.max(0, ...world.structures
       .filter(structure => structure.x === person.x && structure.y === person.y && structure.condition > BROKEN_CONDITION && structure.components.includes('roof'))
       .map(structure => structure.condition)) : 0;
-    return { person, transition: updateDemography({ state: person.demography, traits: demographicTraits(person.genome),
+    return { person, transition: updateDemography({ id: person.id, state: person.demography, traits: demographicTraits(person.genome),
       hunger: person.hunger, thirst: person.thirst, fatigue: person.fatigue, energy: person.energy },
-    { exposure: world.weather === 'rain' ? 1 : 0, shelter, protected: person.role === 'S' || person.role === 'I' }, 1) };
+    { exposure: world.weather === 'rain' ? 1 : 0, shelter, protected: person.role === 'S' || person.role === 'I',
+      seed: world.seed, tick: world.tick, senescence: paramsOf(world).cuerpo }, 1) };
   });
   const dying = transitions.filter(result => result.transition.death !== null).sort((a, b) => a.person.id.localeCompare(b.person.id));
   if (!callbacks.beforeDeath && dying.some(result => carriesEstate(result.person))) throw new Error('Falta una liquidación explícita de los recursos del fallecido.');

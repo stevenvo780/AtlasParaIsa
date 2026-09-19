@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdirSync, writeFileSync} from 'node:fs';
+import {existsSync, mkdirSync, writeFileSync} from 'node:fs';
 import {chromium, expect, type WebSocketRoute} from '@playwright/test';
 import {createServer} from 'vite';
 import {createWorld, projectWorld} from '../src/world/index.js';
@@ -20,11 +20,13 @@ function populationFixture(extinct: boolean) {
   return view;
 }
 
-test('global mortality remains visible beside protected identities and a short two-person history',{timeout:60_000},async()=>{
-  const server=await createServer({configFile:false,server:{host:'127.0.0.1',port:0},logLevel:'error'});await server.listen();
-  const browser=await chromium.launch({headless:true});mkdirSync('artifacts',{recursive:true});
+test('global mortality remains visible beside protected identities and a short two-person history',{timeout:60_000},async t=>{
+  if(!existsSync(chromium.executablePath())){t.skip('Chromium absent: global mortality visibility and demographic history checks not run.');return;}
+  let server:Awaited<ReturnType<typeof createServer>>|undefined,browser:Awaited<ReturnType<typeof chromium.launch>>|undefined;
   const report:{scenario:string;viewport:number[];mortalityVisible:boolean;orders:number;worldUnchanged:boolean}[]=[];
   try{
+    server=await createServer({configFile:false,server:{host:'127.0.0.1',port:0},logLevel:'error'});await server.listen();
+    browser=await chromium.launch({headless:true});mkdirSync('artifacts',{recursive:true});
     for(const[width,height]of[[390,844],[1440,900]])for(const extinct of[true,false]){
       const context=await browser.newContext({viewport:{width:width!,height:height!},reducedMotion:'reduce'}),page=await context.newPage();
       const original=populationFixture(extinct),preserved=JSON.stringify(original);let current=structuredClone(original),socket:WebSocketRoute|undefined;
@@ -48,7 +50,7 @@ test('global mortality remains visible beside protected identities and a short t
         const box=await card(label).boundingBox();
         mortalityVisible&&=!!box&&!!panelBox&&box.y>=panelBox.y&&box.y+box.height<=panelBox.y+panelBox.height;
       }
-      assert.equal(mortalityVisible,true,'all four demographic metrics are visible initially without scrolling');
+      assert.ok(mortalityVisible,'all four demographic metrics are visible initially without scrolling');
       await page.screenshot({path:`artifacts/demography-${extinct?'loss':'fresh'}-${width}.png`});
       if(extinct){
         const window=page.locator('[data-population-window]');await expect(window).toContainText('54.240–59.940');await expect(window).toContainText('2,38 días');await expect(window).toContainText('96 muestras');await expect(window).toContainText('no es un registro completo');
@@ -68,7 +70,7 @@ test('global mortality remains visible beside protected identities and a short t
       report.push({scenario:extinct?'two-protected-no-neighbors':'fresh-sixteen',viewport:[width!,height!],mortalityVisible,orders:0,worldUnchanged:true});await context.close();
     }
     writeFileSync('artifacts/demographic-scope-controls.json',JSON.stringify({scope:'Synthetic UI fixtures; no autonomous survival or runtime publication.',report},null,2)+'\n');
-  }finally{await browser.close();await server.close();}
+  }finally{await browser?.close();await server?.close();}
 });
 
 type Stage = NonNullable<PersonView['lifeStage']>;
@@ -100,11 +102,13 @@ test('inspector labels server stages and missing data without guessing from age,
   assert.deepEqual(view, before);
 });
 
-test('global life-stage summary and inspector update without disturbing focus, scroll, camera or commands', {timeout:90_000}, async () => {
-  const server=await createServer({configFile:false,server:{host:'127.0.0.1',port:0},logLevel:'error'});await server.listen();
-  const browser=await chromium.launch({headless:true});mkdirSync('artifacts',{recursive:true});
+test('global life-stage summary and inspector update without disturbing focus, scroll, camera or commands', {timeout:90_000}, async t => {
+  if (!existsSync(chromium.executablePath())) { t.skip('Chromium absent: global life-stage summary and inspector update checks not run.'); return; }
+  let server:Awaited<ReturnType<typeof createServer>>|undefined,browser:Awaited<ReturnType<typeof chromium.launch>>|undefined;
   const controls:unknown[]=[];
   try {
+    server=await createServer({configFile:false,server:{host:'127.0.0.1',port:0},logLevel:'error'});await server.listen();
+    browser=await chromium.launch({headless:true});mkdirSync('artifacts',{recursive:true});
     for(const [width,height] of [[390,844],[320,568],[1440,900]] as const) {
       const context=await browser.newContext({viewport:{width,height},reducedMotion:'reduce'}),page=await context.newPage();
       const original=stageFixture(['juvenile','adult','senescent']),preserved=JSON.stringify(original);
@@ -174,5 +178,5 @@ test('global life-stage summary and inspector update without disturbing focus, s
       await context.close();
     }
     writeFileSync('artifacts/life-stage-controls.json',JSON.stringify({scope:'Synthetic presentation fixtures. No engine steps, paid births or autonomous sustainability claimed.',controls},null,2)+'\n');
-  } finally {await browser.close();await server.close();}
+  } finally {await browser?.close();await server?.close();}
 });

@@ -13,3 +13,4 @@ build/
 .atlas-refinement-*/
 .worktrees/
 .superpowers/
+.claude/worktrees/

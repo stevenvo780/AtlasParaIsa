@@ -23,6 +23,7 @@ import { analyzeTechnologyOrganization } from './technology-organization.js';
 import { captureTechnologyCheckpoint, advanceTechnologyCheckpoint } from './technology-checkpoint.js';
 import { advanceWaterPreparation, beginWaterPreparation, containedWaterQuanta, drinkContainedWater, emptyWaterLedger, maintainContainedWater, payContainedWaterCarry, WATER_WORK_ENERGY, WATER_WORK_FATIGUE } from './technology-water.js';
 import { flowQuantized, WATER_QUANTA_PER_UNIT } from './material-affordances.js';
+import { DEFAULT_PARAMS, paramsOf, setParams, type WorldParams } from './params.js';
 export { bindWorldContext, tileAt, normalizeViewport, worldContext } from './spatial.js';
 export type { WorldContext } from './spatial.js';
 
@@ -107,7 +108,7 @@ function remember(person: Person, world: World, text: string, causeId: string, p
 }
 
 /** A reproducible procedural territory. Identities and starting memories are fictional. */
-export function createWorld(seed = 20260905): World {
+export function createWorld(seed = 20260905, params?: WorldParams): World {
   const normalizedSeed = seed >>> 0;
   const world: World = {
     version: RULES_VERSION, seed: normalizedSeed, rng: normalizedSeed, tick: 0,
@@ -166,6 +167,7 @@ export function createWorld(seed = 20260905): World {
   world.technology.checkpoint = captureTechnologyCheckpoint(world.technology, world.people, world.tick, 'initial');
   world.structures.push(...legacyStructures(world.tiles, world.tick));
   addEvent(world, { kind: 'memory', actors: [], source: 'sample', text: 'Este mundo comienza con S, I y una vecindad ficticia. Los cinco recuerdos son ejemplos, pendientes de la historia de Steven e Isa.', cause: 'Contenido sintético identificado; no se importaron conversaciones ni biografía.' });
+  setParams(world, params ?? DEFAULT_PARAMS);
   return world;
 }
 
@@ -943,6 +945,7 @@ export function cloneWorld(world: World, context: WorldContext = worldContext(wo
   const draft: World = structuredClone({ ...world, tiles: [] });
   draft.tiles = world.tiles.map(tile => ({ ...tile }));
   bindWorldContext(draft, { ...worldContext(world), ...(context && typeof context === 'object' ? context : {}) });
+  setParams(draft, paramsOf(world));
   return draft;
 }
 

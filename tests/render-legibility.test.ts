@@ -1,4 +1,5 @@
 import {test} from 'node:test';
+import {existsSync} from 'node:fs';
 import assert from 'node:assert/strict';
 import {chromium, expect, type WebSocketRoute} from '@playwright/test';
 import {createServer} from 'vite';
@@ -25,9 +26,11 @@ test('facility facts separate cumulative benefits, stored water, empty reserves 
  assert.equal(treeForm({...tile,feature:'stump'}),null);
 });
 
-test('selected facility is visible in the mobile first fold and reserve-only changes keep focus with no orders',{timeout:30_000},async()=>{
- const server=await createServer({configFile:false,server:{host:'127.0.0.1',port:0},logLevel:'error'});await server.listen();const browser=await chromium.launch({headless:true});
+test('selected facility is visible in the mobile first fold and reserve-only changes keep focus with no orders',{timeout:30_000},async t=>{
+ if(!existsSync(chromium.executablePath())){t.skip('Chromium absent: mobile first-fold facility visibility and reserve-only focus checks not run.');return;}
+ let server:Awaited<ReturnType<typeof createServer>>|undefined,browser:Awaited<ReturnType<typeof chromium.launch>>|undefined;
  try{
+  server=await createServer({configFile:false,server:{host:'127.0.0.1',port:0},logLevel:'error'});await server.listen();browser=await chromium.launch({headless:true});
   const p=await browser.newPage({viewport:{width:390,height:844},reducedMotion:'reduce'}),w=projectWorld(createWorld(51926));
   w.structures=[structuredClone(structure)];w.tiles[0]={...w.tiles[0]!,x:0,y:0,terrain:'meadow',drinkingWater:0};w.places=[{id:'fixture',x:0,y:0,name:'Refugio',description:'Componentes frame, roof, cistern, hearth.',gatherings:0}];
   const preserved=JSON.stringify(w),messages:{type:string}[]=[],errors:string[]=[];let socket:WebSocketRoute|undefined;
@@ -42,12 +45,14 @@ test('selected facility is visible in the mobile first fold and reserve-only cha
   await summary.click();await expect(p.locator('[data-detail="structure-ground"]')).toContainText('Agua en el terreno');
   next.sequence++;next.structures![0]!.water=0;socket!.send(JSON.stringify({type:'state',world:next}));await expect(water).toContainText('0 / 0,6');await expect(summary).toBeFocused();
   assert.deepEqual(await p.locator('#landscape').boundingBox(),{x:0,y:0,width:390,height:844});assert.equal(messages.filter(m=>m.type==='gesture').length,0);assert.deepEqual(errors,[]);assert.equal(JSON.stringify(w),preserved);
- }finally{await browser.close();await server.close();}
+ }finally{await browser?.close();await server?.close();}
 });
 
-test('cutaways reveal only selected material and leafless wood keeps deterministic non-leafy branches',{timeout:30_000},async()=>{
- const server=await createServer({configFile:false,server:{host:'127.0.0.1',port:0},logLevel:'error'});await server.listen();const browser=await chromium.launch({headless:true});
+test('cutaways reveal only selected material and leafless wood keeps deterministic non-leafy branches',{timeout:30_000},async t=>{
+ if(!existsSync(chromium.executablePath())){t.skip('Chromium absent: cutaway material reveal and deterministic tree rendering checks not run.');return;}
+ let server:Awaited<ReturnType<typeof createServer>>|undefined,browser:Awaited<ReturnType<typeof chromium.launch>>|undefined;
  try{
+  server=await createServer({configFile:false,server:{host:'127.0.0.1',port:0},logLevel:'error'});await server.listen();browser=await chromium.launch({headless:true});
   const p=await browser.newPage({viewport:{width:640,height:480},reducedMotion:'reduce'});await p.addInitScript('window.__name = value => value');
   await p.route('**/__legibility',r=>r.fulfill({contentType:'text/html',body:'<canvas style="width:640px;height:480px"></canvas>'}));await p.goto(new URL('__legibility',server.resolvedUrls!.local[0]).href);
   const result=await p.evaluate(async ({structure,version})=>{
@@ -64,5 +69,5 @@ test('cutaways reveal only selected material and leafless wood keeps determinist
    r.destroy();return{changes,distantChanges,waterChanges,restored:Array.from(normal).join(',')===Array.from(cleared).join(','),unchanged:JSON.stringify(w)===preserved,variants:new Set(signatures).size,rootsStable,greenPixels,deterministic};
   },{structure,version:PROTOCOL_VERSION});
   assert.ok(result.changes>0&&result.waterChanges>0);assert.equal(result.distantChanges,0);assert.equal(result.restored,true);assert.equal(result.unchanged,true);assert.equal(result.variants,4);assert.equal(result.rootsStable,true);assert.equal(result.greenPixels,0);assert.equal(result.deterministic,true);
- }finally{await browser.close();await server.close();}
+ }finally{await browser?.close();await server?.close();}
 });

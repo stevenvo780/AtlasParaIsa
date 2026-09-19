@@ -24,6 +24,15 @@ function socketMessage(socket: WebSocket, type: ServerMessage['type']): Promise<
     socket.on('message',receive);
   });
 }
+/** Broadcasts queued while nobody was reading arrive in a burst: a snapshot of the past answers
+ * nothing about now, so the listener stays until one from `tick` onwards shows up. */
+function stateFrom(socket: WebSocket, tick: number): Promise<WorldView> {
+  return new Promise((resolve,reject)=>{
+    const timeout=setTimeout(()=>{socket.off('message',receive);reject(new Error(`Sin estado en el paso ${tick} o posterior`));},5000);
+    function receive(data:import('ws').RawData){const message=JSON.parse(data.toString()) as ServerMessage;if(message.type==='state'&&message.world.tick>=tick){clearTimeout(timeout);socket.off('message',receive);resolve(message.world);}}
+    socket.on('message',receive);
+  });
+}
 const gesture: Gesture = { id: 'test-plant-0001', kind: 'plant', x: 20, y: 14 };
 async function freePort() {
   const probe = createServer(); probe.listen(0, '127.0.0.1'); await once(probe, 'listening');
@@ -297,16 +306,46 @@ test('the snapshot carries procedure summaries and a definition is served only w
   const initial=await socketMessage(socket,'state');
   assert.ok(initial.type==='state');
   assert.equal(JSON.stringify(initial.world.technology!.recipes).includes('"program"'),false);
+  // The promise of this task is «I open a procedure and I see its steps»: it needs a world that
+  // discovered one, served through the same catalogue the public world uses.
+  for(let n=0;n<600&&!f.app.world.technology.recipes.length;n++)f.app.stepOnce();
+  assert.ok(f.app.world.technology.recipes.length>0,`sin procedimiento tras ${f.app.world.tick} pasos`);
+  assert.ok(f.app.world.technology.catalogue,'el mundo servido resuelve por catálogo, como en producción');
+  const id=f.app.world.technology.recipes[0]!.id;
+  // `send` drops a snapshot while the socket is behind: stepping in a tight loop leaves the client in the
+  // past on purpose. Let the buffer drain, then step with the listener already waiting.
+  await new Promise<void>(resolve=>setTimeout(resolve,200));
+  const pendingState=stateFrom(socket,f.app.world.tick);
+  for(let n=0;n<5;n++){f.app.stepOnce();await new Promise<void>(resolve=>setTimeout(resolve,10));}
+  const latest=await pendingState;
+  const summary=latest.technology!.recipes.find(recipe=>recipe.id===id);
+  assert.ok(summary&&!('program' in summary),'el snapshot lista el procedimiento sin sus pasos');
   const before=structuredClone(f.app.world);
+  const known=f.app.world.technology.recipes.find(recipe=>recipe.id===id)!;
+  const asked=socketMessage(socket,'recipe');
+  socket.send(JSON.stringify({type:'recipe',id}));
+  const served=await asked;
+  assert.ok(served.type==='recipe'&&served.id===id&&served.recipe!==null,'el programa pedido llega por el socket');
+  const program=served.type==='recipe'?served.recipe:null;
+  assert.ok(program&&program.program.steps.length>0&&program.program.inputs.length>0,'un programa servido tiene pasos y entradas');
+  assert.deepEqual(program,JSON.parse(JSON.stringify(known)),'lo servido es la definición residente tal como el cable puede llevarla');
+  const absent=`recipe-${f.app.world.technology.recipeCounter+1000}`;
   const unknown=socketMessage(socket,'recipe');
-  socket.send(JSON.stringify({type:'recipe',id:'recipe-1'}));
-  assert.deepEqual(await unknown,{type:'recipe',id:'recipe-1',recipe:null},'an absent definition is null, never an empty program');
+  socket.send(JSON.stringify({type:'recipe',id:absent}));
+  assert.deepEqual(await unknown,{type:'recipe',id:absent,recipe:null},'an absent definition is null, never an empty program');
   for(const id of ['recipe-0','recipe-x','',42,null]){
     const rejected=socketMessage(socket,'error');
     socket.send(JSON.stringify({type:'recipe',id}));
     const message=await rejected;assert.ok(message.type==='error'&&/procedimiento no válido/.test(message.message),String(id));
   }
   assert.deepEqual(f.app.world,before,'a query is not a transaction: nothing was stepped or saved');
+  // A long life evicts a resident definition (`cacheRecipe` keeps the last `maxRecipes`): from then on the
+  // only copy is the archived one and the reader is the store's. That branch must serve the same program.
+  assert.ok(!f.app.world.technology.catalogue!.pending.some(recipe=>recipe.id===id),'la definición ya está comprometida en el archivo');
+  f.app.world.technology.recipes=f.app.world.technology.recipes.filter(recipe=>recipe.id!==id);
+  const evicted=socketMessage(socket,'recipe');
+  socket.send(JSON.stringify({type:'recipe',id}));
+  assert.deepEqual(await evicted,{type:'recipe',id,recipe:JSON.parse(JSON.stringify(known))},'un programa archivado se sirve igual que uno residente');
 });
 
 test('a committed retry remains retrievable during a later storage pause',async t=>{

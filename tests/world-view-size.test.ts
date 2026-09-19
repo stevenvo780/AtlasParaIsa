@@ -29,21 +29,37 @@ test('a snapshot carries procedure summaries, never their programs, and the savi
   const bytes = JSON.stringify(view).length;
   const before = JSON.stringify({ ...view, technology: { ...technology, recipes: world.technology.recipes } }).length;
   const summaryBytes = JSON.stringify(technology.recipes).length;
-  t.diagnostic(`t=8000 · ${world.people.length} hab. · ${world.technology.recipes.length} recetas · state ${(bytes / KIB).toFixed(1)} KiB (con programas ${(before / KIB).toFixed(1)} KiB) · recetas ${(summaryBytes / KIB).toFixed(1)} KiB · tiles ${(JSON.stringify(view.tiles).length / KIB).toFixed(1)} KiB`);
+  t.diagnostic(`t=8000 · ${world.people.length} hab. · ${world.technology.recipes.length} recetas · state ${(bytes / KIB).toFixed(1)} KiB (con programas ${(before / KIB).toFixed(1)} KiB) · recetas ${(summaryBytes / KIB).toFixed(1)} KiB · tiles ${(JSON.stringify(view.tiles).length / KIB).toFixed(1)} KiB · people ${(JSON.stringify(view.people).length / KIB).toFixed(1)} KiB`);
   assert.ok(summaryBytes < 64 * KIB, `summaries at ${(summaryBytes / KIB).toFixed(1)} KiB`);
   assert.ok(before - bytes > 140 * KIB, `the programs weighed ${((before - bytes) / KIB).toFixed(1)} KiB`);
   assert.ok(bytes < before * 0.83, `the snapshot keeps ${(100 * bytes / before).toFixed(1)} % of its size with programs`);
-  // Honest ceiling of what T020 alone can reach: `tiles` (≈292 KiB) and `people` (≈83 KiB) still
-  // travel whole every tick, so the brief's 120 KiB needs the delta/camera work, not this fix.
-  assert.ok(bytes < 640 * KIB, `state at ${(bytes / KIB).toFixed(1)} KiB`);
+  // PROVISIONAL CEILING OF THIS PHASE, NOT THE BRIEF'S TARGET. T020 asked for `state` < 120 KiB; what
+  // this fix alone reaches is measured above and stated here without dressing it up: `tiles` (≈292 KiB)
+  // and `people` (≈83 KiB) still travel whole every tick, so even deleting `technology` entirely would
+  // leave ≈487 KiB. The 120 KiB target belongs to the tiles delta / dirty-page work (cause (a) of the
+  // C4 critical), which is outside this task's files; this bound only forbids a regression from here.
+  assert.ok(bytes < 640 * KIB, `state at ${(bytes / KIB).toFixed(1)} KiB — provisional ceiling of this phase, not the brief's 120 KiB`);
 });
 
 test('the chronicle and the letter reach the snapshot through a declared window', () => {
-  const world = grownWorld(600), view = projectWorld(world);
-  assert.ok(view.events.length > 0 && view.events.length <= VIEW_EVENTS);
-  assert.ok(view.memories.length <= VIEW_MEMORIES);
-  assert.deepEqual(view.events.map(event => event.id), world.events.slice(-VIEW_EVENTS).map(event => event.id));
-  assert.deepEqual(view.memories.map(memory => memory.id), world.memories.slice(-VIEW_MEMORIES).map(memory => memory.id));
+  const lived = projectWorld(grownWorld(600));
+  assert.ok(lived.events.length > 0 && lived.events.length <= VIEW_EVENTS, `lived chronicle: ${lived.events.length}`);
+  assert.ok(lived.memories.length > 0 && lived.memories.length <= VIEW_MEMORIES);
+  // A running world never reaches the window (MAX_EVENTS = 120 trims the chronicle, `assertWorld` caps
+  // memories at 10), so only a world that exceeds it can refute the projection: `projectWorld` does not
+  // validate, and without its two slices this snapshot would carry 260 events and 120 memories.
+  const world = createWorld(51926), seed = world.memories[0]!;
+  const surplus = 60, extraMemories = 20;
+  world.events = Array.from({ length: VIEW_EVENTS + surplus }, (_, i) => ({ id: `synthetic-event-${i}`, tick: i,
+    kind: 'memory' as const, actors: [], text: 'Crónica sintética de prueba.', cause: 'Prueba de la ventana.', source: 'sample' as const }));
+  world.memories = Array.from({ length: VIEW_MEMORIES + extraMemories }, (_, i) => ({ ...seed, id: `synthetic-memory-${i}` }));
+  const view = projectWorld(world);
+  assert.equal(view.events.length, VIEW_EVENTS, 'the chronicle crosses the wire bounded');
+  assert.equal(view.events[0]!.id, `synthetic-event-${surplus}`, 'the window keeps the newest; the oldest stay out');
+  assert.equal(view.events.at(-1)!.id, `synthetic-event-${VIEW_EVENTS + surplus - 1}`);
+  assert.equal(view.memories.length, VIEW_MEMORIES);
+  assert.equal(view.memories[0]!.id, `synthetic-memory-${extraMemories}`);
+  assert.equal(view.memories.at(-1)!.id, `synthetic-memory-${VIEW_MEMORIES + extraMemories - 1}`);
 });
 
 test('a program is served one at a time and reading it never touches the world', () => {

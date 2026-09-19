@@ -49,7 +49,10 @@ export function recipeLabel(recipe: TechnologyRecipeSummary): string {
     ? `${program.split('·').map(op=>operations[op] ?? op).join(' · ')} ${serial}` : recipe.name;
 }
 
-/** A summary card states that the steps are absent from this snapshot; it never draws an empty program. */
+/** A summary card states that the steps are absent from this snapshot; it never draws an empty program.
+ * Only what cannot change is drawn from a requested detail: steps, inputs and lineage. `manufactured`,
+ * `uses` and `utility` move every step and are frozen at the moment of the query, so a card asked for an
+ * hour ago would present them as this tick's under a header that says «paso N». They are not drawn. */
 export function recipeCard(recipe: TechnologyRecipe | TechnologyRecipeSummary): string {
   const strongest = Object.entries(recipe.capacities).sort((a,b)=>b[1]-a[1]).slice(0,3);
   const detail = 'program' in recipe ? recipe : null;
@@ -58,7 +61,7 @@ export function recipeCard(recipe: TechnologyRecipe | TechnologyRecipeSummary): 
   return `<details class="person-detail technology-recipe" data-detail="recipe-${esc(recipe.id)}"><summary>${esc(recipeLabel(recipe))} <span>G${recipe.generation}</span></summary>
     ${detail ? `<p class="technology-materials">${inputs}</p><ol class="process-steps">${steps}</ol>` : `<p class="stats-note">Los pasos de este procedimiento no viajan en cada actualización. <button class="entity-link" data-recipe="${esc(recipe.id)}">Pedir los pasos</button></p>`}
     <div class="technology-capacities">${strongest.map(([capacity,value])=>`<span>${esc(capacities[capacity] ?? capacity)}<meter aria-label="${esc(capacities[capacity] ?? capacity)}" min="0" max="1" value="${Math.max(0,Math.min(1,value))}"></meter></span>`).join('')}</div>
-    ${detail ? `<p>${n(detail.manufactured,0)} fabricados · ${n(detail.uses,0)} usos · utilidad observada ${n(detail.utility,2)}.</p><small>${detail.parents.length ? `Procede de ${detail.parents.map(esc).join(', ')}.` : 'Primer procedimiento de esta línea.'}</small>` : ''}</details>`;
+    ${detail ? `<small>${detail.parents.length ? `Procede de ${detail.parents.map(esc).join(', ')}.` : 'Primer procedimiento de esta línea.'}</small>` : ''}</details>`;
 }
 
 function organizationGraph(analysis: OrganizationAnalysis, technology: TechnologyView): string {

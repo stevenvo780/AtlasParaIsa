@@ -3,7 +3,9 @@ import type { TechnologyRecipe, TechnologyView } from './technology.js';
 import type { OrganizationAnalysis } from './organization.js';
 export type { AnimalView, AnimalDynamics, BlueprintView, StructureView, InventionDynamics } from './life.js';
 export type { TechnologyRecipe, TechnologyRecipeSummary } from './technology.js';
-export const PROTOCOL_VERSION = 6;
+/** 7: `TechnologyView.recipes` carries summaries; the program travels only on request.
+ * A cached older client must fail in the open instead of drawing an absent program. */
+export const PROTOCOL_VERSION = 7;
 export interface Viewport { x: number; y: number; width: number; height: number; }
 export type Biome = 'grassland' | 'forest' | 'desert' | 'mountain' | 'wetland' | 'ocean';
 export type Terrain = 'water' | 'soil' | 'meadow' | 'shelter';

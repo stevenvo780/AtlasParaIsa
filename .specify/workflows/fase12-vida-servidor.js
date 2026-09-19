@@ -31,6 +31,7 @@ const TAREAS = [
   { id: 'T024', modelo: 'claude', effort: null, wrapper: 'sonnet', tests: 'tests/modo.test.ts tests/connection.test.ts', hallazgo: 'P1' },
   { id: 'T025', modelo: 'claude', effort: null, wrapper: 'sonnet', tests: 'tests/animals.test.ts', hallazgo: 'P2' },
   { id: 'T022', modelo: 'claude', effort: null, wrapper: 'sonnet', tests: 'tests/respaldo.test.ts', hallazgo: 'critico: sin respaldo, 6,1 GiB/dia' },
+  { id: 'T019', modelo: 'claude', effort: null, wrapper: 'sonnet', tests: 'tests/diversidad.test.ts', hallazgo: 'FR-007/SC-003 (indice de diversidad)' },
   { id: 'T020', modelo: 'claude', effort: null, wrapper: 'opus',   tests: 'tests/world-view-size.test.ts tests/connection.test.ts tests/server.test.ts', hallazgo: 'C4' },
   { id: 'T021', modelo: 'claude', effort: null, wrapper: 'opus',   tests: 'tests/server.test.ts tests/store-technology.test.ts tests/chronicle-store.test.ts tests/archive.test.ts', hallazgo: 'C3/C5/C10/C12' },
 ]

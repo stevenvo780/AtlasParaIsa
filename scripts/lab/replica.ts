@@ -72,6 +72,8 @@ function dailyMetrics(world: ReturnType<typeof createWorld>) {
   const gini = typeof loose.giniRecursosPorRegion === 'number' ? loose.giniRecursosPorRegion : null;
   const fraccionComida = typeof loose.fraccionCeldasConComida === 'number' ? loose.fraccionCeldasConComida : null;
   const distanciaAgua = typeof loose.distanciaMediaAgua === 'number' ? loose.distanciaMediaAgua : null;
+  // R1 (SC-004 parte 2): regionesSinAgua no viajaba a ningún consumidor del laboratorio.
+  const regionesSinAgua = typeof loose.regionesSinAgua === 'number' ? loose.regionesSinAgua : null;
   const generaciones = stats.generations;
   const specialties = projectWorld(world).people.map(p => p.specialty ?? '');
   const muertesPorCausa = Object.fromEntries(CAUSES.map(cause => [cause, world.demographyDynamics.causes[cause]])) as Record<Cause, number>;
@@ -92,7 +94,7 @@ function dailyMetrics(world: ReturnType<typeof createWorld>) {
     // (`enableTechnologyCatalogue`, ver Store.save). Esta réplica SIEMPRE lo deja en
     // true; si alguien quita el Store este campo lo delata (y el test de abajo lo afirma).
     catalogoActivo: catalogueEnabled(world.technology),
-    cooperaciones: world.totals.cooperation ?? 0, gini, fraccionComida, distanciaAgua,
+    cooperaciones: world.totals.cooperation ?? 0, gini, fraccionComida, distanciaAgua, regionesSinAgua,
   };
 }
 
@@ -141,6 +143,7 @@ async function main(): Promise<void> {
       generacionesVivasFinal: ultimoDia.generacionesVivas, diversidadOficiosFinal: ultimoDia.diversidadOficios,
       recetasDistintasEnUsoFinal: ultimoDia.recetasDistintasEnUso, cooperacionesTotal: ultimoDia.cooperaciones,
       gini: ultimoDia.gini, fraccionComida: ultimoDia.fraccionComida, distanciaAgua: ultimoDia.distanciaAgua,
+      regionesSinAgua: ultimoDia.regionesSinAgua,
       p50Ms: Math.round(p50 * 100) / 100, p95Ms: Math.round(p95 * 100) / 100, rssMaximo: maxRss,
     };
     const replica = {

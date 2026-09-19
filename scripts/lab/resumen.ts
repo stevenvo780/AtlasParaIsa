@@ -11,8 +11,9 @@
  *   - Ese mismo subdirectorio contiene `dia-NNN.json`, uno por día simulado 0..dias-1:
  *     `{ tick, poblacion, nacimientos, muertes: Record<causa, n>, fundadoresVivos,
  *        generacionesVivas, diversidadOficios, recetasDistintasEnUso, cooperaciones,
- *        gini, fraccionComida, distanciaAgua, p50Ms, p95Ms, rss }`; `gini`/`fraccionComida`/
- *        `distanciaAgua` son `null` si T013 (`worldStatistics`) todavía no existía al correr.
+ *        gini, fraccionComida, distanciaAgua, regionesSinAgua, p50Ms, p95Ms, rss }`;
+ *        `gini`/`fraccionComida`/`distanciaAgua`/`regionesSinAgua` son `null` si `worldStatistics`
+ *        todavía no los calculaba al correr (T013; `regionesSinAgua` desde R1 SC-004 parte 2).
  *   - `--control <dir>`: mismo formato que `--entrada`; si se omite, el grupo cuyos `params`
  *     sean `{}` (si lo hay) actúa de control.
  *
@@ -39,6 +40,8 @@ interface DiaMetrica {
   fundadoresVivos: number; generacionesVivas: number; diversidadOficios: number;
   recetasDistintasEnUso: number; cooperaciones: number;
   gini: number | null; fraccionComida: number | null; distanciaAgua: number | null;
+  /** R1 (SC-004 parte 2): fracción de regiones con tierra sin agua potable; `null` si no viajó. */
+  regionesSinAgua: number | null;
   p50Ms: number; p95Ms: number; rss: number;
 }
 
@@ -58,7 +61,7 @@ interface MetricasReplica {
   supervivenciaFundadores: number | null; poblacionFinalSobreInicial: number | null;
   diversidadFinal: number | null; diaDiversidadUsado: number | null;
   giniFinal: number | null; fraccionComidaFinal: number | null;
-  distanciaAguaFinal: number | null; p95Ms: number | null;
+  distanciaAguaFinal: number | null; regionesSinAguaFinal: number | null; p95Ms: number | null;
   muertesPorCausa: Record<string, number>; muertesDesconocidas: number;
   colapsoTemprano: boolean;
 }
@@ -109,7 +112,8 @@ function leerDia(ruta: string): DiaMetrica {
     fundadoresVivos: dia.fundadoresVivos ?? 0, generacionesVivas: dia.generacionesVivas ?? 0,
     diversidadOficios: dia.diversidadOficios ?? 0, recetasDistintasEnUso: dia.recetasDistintasEnUso ?? 0,
     cooperaciones: dia.cooperaciones ?? 0, gini: dia.gini ?? null, fraccionComida: dia.fraccionComida ?? null,
-    distanciaAgua: dia.distanciaAgua ?? null, p50Ms: dia.p50Ms ?? 0, p95Ms: dia.p95Ms ?? 0, rss: dia.rss ?? 0,
+    distanciaAgua: dia.distanciaAgua ?? null, regionesSinAgua: dia.regionesSinAgua ?? null,
+    p50Ms: dia.p50Ms ?? 0, p95Ms: dia.p95Ms ?? 0, rss: dia.rss ?? 0,
   };
 }
 
@@ -139,7 +143,8 @@ function metricasReplica(replica: ReplicaLeida): MetricasReplica {
   const { dias } = replica;
   if (dias.length === 0) {
     return { supervivenciaFundadores: null, poblacionFinalSobreInicial: null, diversidadFinal: null,
-      diaDiversidadUsado: null, giniFinal: null, fraccionComidaFinal: null, distanciaAguaFinal: null, p95Ms: null,
+      diaDiversidadUsado: null, giniFinal: null, fraccionComidaFinal: null, distanciaAguaFinal: null,
+      regionesSinAguaFinal: null, p95Ms: null,
       muertesPorCausa: {}, muertesDesconocidas: 0, colapsoTemprano: false };
   }
   const primero = dias[0]!, ultimo = dias.at(-1)!;
@@ -162,7 +167,8 @@ function metricasReplica(replica: ReplicaLeida): MetricasReplica {
     poblacionFinalSobreInicial: primero.poblacion > 0 ? ultimo.poblacion / primero.poblacion : null,
     diversidadFinal: diaDiversidad.diversidadOficios, diaDiversidadUsado: indiceDiversidad,
     giniFinal: ultimo.gini, fraccionComidaFinal: ultimo.fraccionComida,
-    distanciaAguaFinal: ultimo.distanciaAgua, p95Ms: p95Serie?.mediana ?? null,
+    distanciaAguaFinal: ultimo.distanciaAgua, regionesSinAguaFinal: ultimo.regionesSinAgua,
+    p95Ms: p95Serie?.mediana ?? null,
     muertesPorCausa, muertesDesconocidas, colapsoTemprano,
   };
 }
@@ -234,7 +240,8 @@ interface GrupoResumen {
   diaDiversidadUsado: number | null;
   metricas: { supervivenciaFundadores: Agregado | null; poblacionFinalSobreInicial: Agregado | null;
     diversidadFinal: Agregado | null; giniFinal: Agregado | null; fraccionComidaFinal: Agregado | null;
-    distanciaAguaFinal: Agregado | null; p95Ms: Agregado | null; muertesPorCausa: Record<string, Agregado | null> };
+    distanciaAguaFinal: Agregado | null; regionesSinAguaFinal: Agregado | null; p95Ms: Agregado | null;
+    muertesPorCausa: Record<string, Agregado | null> };
   colapsoTemprano: { detectado: boolean; replicas: string[] };
   muertesDesconocidas: number;
   comparacionControl: Record<string, { delta: number; semaforo: Semaforo | null } | null> | null;
@@ -250,6 +257,7 @@ function agregarGrupo(replicas: ReplicaLeida[], causas: string[]): GrupoResumen[
     giniFinal: agregar(metricas.map(m => m.giniFinal)),
     fraccionComidaFinal: agregar(metricas.map(m => m.fraccionComidaFinal)),
     distanciaAguaFinal: agregar(metricas.map(m => m.distanciaAguaFinal)),
+    regionesSinAguaFinal: agregar(metricas.map(m => m.regionesSinAguaFinal)),
     p95Ms: agregar(metricas.map(m => m.p95Ms)),
     muertesPorCausa: Object.fromEntries(causas.map(causa => [causa, agregar(metricas.map(m => m.muertesPorCausa[causa] ?? 0))])),
   };
@@ -357,7 +365,7 @@ function generarMarkdown(resultado: ResultadoResumen): string {
       const d = g.comparacionControl?.[clave]; return d ? `${d.delta >= 0 ? '+' : ''}${d.delta.toFixed(3)}` : '—';
     };
     const diversidad = `${formatoAgregado(g.metricas.diversidadFinal)}${g.diaDiversidadUsado !== null ? ` (día ${g.diaDiversidadUsado})` : ''}`;
-    return `| ${nombre} | ${g.replicas}${g.abortadas ? ` (+${g.abortadas} abortadas)` : ''} | ${formatoAgregado(g.metricas.supervivenciaFundadores)} | ${delta('supervivenciaFundadores')} | ${formatoAgregado(g.metricas.poblacionFinalSobreInicial)} | ${diversidad} | ${formatoAgregado(g.metricas.giniFinal)} | ${formatoAgregado(g.metricas.fraccionComidaFinal)} | ${formatoAgregado(g.metricas.distanciaAguaFinal, 1)} | ${formatoAgregado(g.metricas.p95Ms, 1)} | ${g.muertesDesconocidas} | ${g.semaforo} |`;
+    return `| ${nombre} | ${g.replicas}${g.abortadas ? ` (+${g.abortadas} abortadas)` : ''} | ${formatoAgregado(g.metricas.supervivenciaFundadores)} | ${delta('supervivenciaFundadores')} | ${formatoAgregado(g.metricas.poblacionFinalSobreInicial)} | ${diversidad} | ${formatoAgregado(g.metricas.giniFinal)} | ${formatoAgregado(g.metricas.fraccionComidaFinal)} | ${formatoAgregado(g.metricas.distanciaAguaFinal, 1)} | ${formatoAgregado(g.metricas.regionesSinAguaFinal)} | ${formatoAgregado(g.metricas.p95Ms, 1)} | ${g.muertesDesconocidas} | ${g.semaforo} |`;
   }).join('\n');
 
   const causasFilas = resultado.causasConocidas.length || resultado.grupos.some(g => Object.keys(g.metricas.muertesPorCausa).length)
@@ -376,8 +384,8 @@ function generarMarkdown(resultado: ResultadoResumen): string {
     `Generado: ${resultado.generadoEn} · Entrada: \`${resultado.entrada}\` · Control: ${resultado.control ? `\`${resultado.control}\`` : 'ninguno declarado'}\n\n` +
     `Réplicas: ${resultado.totalReplicas} (${resultado.replicasAbortadas} abortadas) en ${resultado.grupos.length} grupo(s) de parámetros.\n\n` +
     `## Por grupo de parámetros\n\n` +
-    `| Grupo | Réplicas | Superv. fundadores | Δ vs control | Población final/inicial | Diversidad | Gini | % celdas comida | Dist. agua | p95 ms | Muertes desconocidas | Semáforo |\n` +
-    `|---|---|---|---|---|---|---|---|---|---|---|---|\n${filas}\n\n` +
+    `| Grupo | Réplicas | Superv. fundadores | Δ vs control | Población final/inicial | Diversidad | Gini | % celdas comida | Dist. agua | Regiones sin agua | p95 ms | Muertes desconocidas | Semáforo |\n` +
+    `|---|---|---|---|---|---|---|---|---|---|---|---|---|\n${filas}\n\n` +
     `## Muertes por causa (mediana por réplica del grupo)\n\n` +
     `| Causa | ${resultado.grupos.map(g => g.esControl ? 'control' : JSON.stringify(g.params)).join(' | ')} |\n` +
     `|---|${resultado.grupos.map(() => '---').join('|')}|\n${causasFilas}\n\n` +

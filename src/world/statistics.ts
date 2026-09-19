@@ -2,8 +2,12 @@ import type { Tile, WorldStats, WorldSample } from '../shared/types.js';
 import type { World } from './index.js';
 import { CHUNK_SIZE, MAX_COORDINATE } from './terrain.js';
 import { indiceDiversidad } from './diversidad.js';
+import { regionesSinAgua as regionesSinAguaDe } from './agua.js';
 
 export interface WorldStatsRecursos extends WorldStats { giniRecursosPorRegion: number; fraccionCeldasConComida: number; distanciaMediaAgua: number;
+  /** R1 (SC-004 parte 2, T035/T036e): cableada desde `agua.ts` (misma función que usan los tests
+   * de `agua.test.ts`) en vez de quedar sin consumidor. */
+  regionesSinAgua: number;
   /** Paso en el que se calcularon las métricas caras (gini, comida, agua, diversidad).
    * Las demás cifras son siempre del paso actual; estas se refrescan con cadencia. */
   statsTick: number }
@@ -13,7 +17,7 @@ export interface WorldStatsRecursos extends WorldStats { giniRecursosPorRegion: 
  * recalculaba por cliente y por tick. Se refrescan cada 200 pasos (~20 s a 10 Hz) y entre
  * medias se reutiliza el último valor, marcado en la vista con `statsTick`. */
 export const ESTADISTICAS_CARAS_CADA_TICKS = 200;
-type EstadisticasCaras = { statsTick: number; giniRecursosPorRegion: number; fraccionCeldasConComida: number; distanciaMediaAgua: number; diversidad: { conducta: number; oficios: number; total: number } };
+type EstadisticasCaras = { statsTick: number; giniRecursosPorRegion: number; fraccionCeldasConComida: number; distanciaMediaAgua: number; regionesSinAgua: number; diversidad: { conducta: number; oficios: number; total: number } };
 /** Cachés laterales (nunca viajan en la instantánea ni entran en `assertWorld`). */
 const carasPorMundo = new WeakMap<World, EstadisticasCaras>();
 const vistaPorMundo = new WeakMap<World, { tick: number; value: WorldStatsRecursos }>();
@@ -28,7 +32,8 @@ function estadisticasCaras(world: World): EstadisticasCaras {
   if (previa && world.tick >= previa.statsTick && world.tick - previa.statsTick < ESTADISTICAS_CARAS_CADA_TICKS) return previa;
   const caras: EstadisticasCaras = { statsTick: world.tick,
     giniRecursosPorRegion: giniRecursosPorRegion(world.tiles), fraccionCeldasConComida: fraccionCeldasConComida(world.tiles),
-    distanciaMediaAgua: distanciaMediaAgua(world.tiles), diversidad: indiceDiversidad(world) };
+    distanciaMediaAgua: distanciaMediaAgua(world.tiles), regionesSinAgua: regionesSinAguaDe(world.tiles),
+    diversidad: indiceDiversidad(world) };
   carasPorMundo.set(world, caras);
   return caras;
 }
@@ -60,15 +65,19 @@ export function fraccionCeldasConComida(tiles: readonly Tile[], umbral = 0.1): n
   return land === 0 ? 0 : withFood / land;
 }
 
-/** Distancia Manhattan media al agua por celdas cargadas; agua es terreno acuatico o una reserva
- * potable visible; sin ninguna fuente devuelve -1 (Infinity no sobrevive a JSON). BFS por indices
- * enteros sobre arrays tipados: sin objetos ni claves de cadena por celda visitada. */
+/** Distancia BFS media (celdas cargadas) desde tierra hasta agua POTABLE conectada (4-vecinos);
+ * sin ninguna fuente devuelve -1 (Infinity no sobrevive a JSON). R1 (SC-004 parte 3, hallazgo
+ * residual T041): la semilla del BFS es SOLO `drinkingWater > 0` — el mar (`terrain === 'water'`)
+ * nunca es fuente aquí, porque no es agua potable (`ecosystem.ts` fija `drinkingWater = 0` para
+ * toda tesela oceánica) y contarlo infla artificialmente la conectividad, invirtiendo el veredicto
+ * de SC-004 en mundos costeros (ver `.superpowers/sdd/tasks/t041-residuales.md`, hallazgo R1).
+ * BFS por indices enteros sobre arrays tipados: sin objetos ni claves de cadena por celda visitada. */
 export function distanciaMediaAgua(tiles: readonly Tile[]): number {
   const count = tiles.length, index = new Map<number, number>();
   for (let i = 0; i < count; i++) { const tile = tiles[i]!; index.set(packPosition(tile.x, tile.y), i); }
   const distances = new Int32Array(count).fill(-1), queue = new Int32Array(count);
   let tail = 0;
-  for (let i = 0; i < count; i++) { const tile = tiles[i]!; if (tile.terrain === 'water' || (tile.drinkingWater ?? 0) > 0) { distances[i] = 0; queue[tail++] = i; } }
+  for (let i = 0; i < count; i++) { const tile = tiles[i]!; if ((tile.drinkingWater ?? 0) > 0) { distances[i] = 0; queue[tail++] = i; } }
   if (tail === 0) return -1;
   for (let head = 0; head < tail; head++) {
     const tile = tiles[queue[head]!]!, next = distances[queue[head]!]! + 1;

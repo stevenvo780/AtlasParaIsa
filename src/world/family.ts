@@ -1,6 +1,7 @@
 import type { Person, World } from './index.js';
 import { demographicTraits, updateDemography } from './demography.js';
 import { localRandom } from './genetics.js';
+import { paramsOf } from './params.js';
 
 export const FAMILY_RESERVE_TARGET = 0.12;
 const SHARE_AMOUNT = 0.025;
@@ -40,7 +41,7 @@ export function chooseReproductivePartner(world: Pick<World, 'seed' | 'tick'>, p
  * dt=0 queries the same demographic model without advancing age or recovering the body. */
 export function reproductiveReadiness(world: World, person: Person): boolean {
   if (person.role !== 'neighbor') return false;
-  const traits = demographicTraits(person.genome);
+  const traits = demographicTraits(person.genome, paramsOf(world).cuerpo);
   if (world.tick - person.lastBirth < traits.fertilityCooldown) return false;
   return updateDemography({ state: person.demography, traits, hunger: person.hunger, thirst: person.thirst,
     energy: person.energy, fatigue: person.fatigue }, { exposure: 0, shelter: 0, protected: false }, 0).offspringEligible;

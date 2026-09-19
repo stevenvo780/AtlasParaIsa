@@ -253,7 +253,7 @@ function avoidedDamageScore(person: Person, before: number, after: number, delay
 }
 
 function bodilyDamage(world: World, person: Person, body: Pick<Person, 'hunger' | 'thirst' | 'fatigue' | 'energy'>, shelter: number): number {
-  const transition = updateDemography({ id: person.id, state: person.demography, traits: demographicTraits(person.genome),
+  const transition = updateDemography({ id: person.id, state: person.demography, traits: demographicTraits(person.genome, paramsOf(world).cuerpo),
     hunger: body.hunger, thirst: body.thirst, fatigue: body.fatigue, energy: body.energy },
     { exposure: world.weather === 'rain' ? 1 : 0, shelter, protected: person.role !== 'neighbor',
       seed: world.seed, tick: world.tick, senescence: paramsOf(world).cuerpo }, 1);
@@ -685,7 +685,7 @@ function share(world: World, donor: Person): void {
 function bodyAndAction(world: World, person: Person): void {
   maintainContainedWater(world, person);
   const tile = tileAt(world, person)!;
-  const physiology = demographicTraits(person.genome);
+  const physiology = demographicTraits(person.genome, paramsOf(world).cuerpo);
   advanceNeeds(person, { hunger:0.00027*physiology.foodDemand, thirst:(0.00045+(tile.biome==='desert'?0.0002:0))*physiology.waterDemand, energy:0.00007, stressEnergy:0.00015, fatigue:0.00009+(world.weather==='rain'&&tile.terrain!=='shelter'?0.0001:0) });
   person.closeness = clamp(person.closeness + 0.0001);
   person.socialLoad = clamp(person.socialLoad - 0.0008);
@@ -1020,13 +1020,15 @@ export function projectWorld(world: World, viewport?: Viewport, context: WorldCo
     organization={tick:world.tick,executionCounter:world.technology.executionCounter,checkpoint:world.technology.checkpoint,value:analyzeTechnologyOrganization(world.technology,world.people,world.tick)};
     organizationViews.set(world,organization);
   }
+  // La ley de longevidad del mundo, leída una vez por proyección: decide `lifeStage` de cada persona.
+  const cuerpo = paramsOf(world).cuerpo;
   return {
     version: PROTOCOL_VERSION, sequence: world.tick, tick: world.tick, day: Math.floor(world.tick / TICKS_PER_DAY) + 1,
     phase: phaseAt(world.tick), weather: world.weather, width: v.width, height: v.height,
     originX: v.x, originY: v.y, infinite: true, activeChunks: Object.keys(world.chunks).length, discoveredChunks: world.discoveredChunks, settlementCount: world.settlementCount,
     tiles: projected.tiles.map(t => ({ x: t.x, y: t.y, terrain: t.terrain, biome: t.biome, elevation: viewNumber(t.elevation), moisture: viewNumber(t.moisture), food: viewNumber(t.food), vegetation: viewNumber(t.vegetation), feature: t.feature, growth: viewNumber(t.growth), fertility: viewNumber(t.fertility), species: t.species, ...amount('wood', t.wood), ...amount('stone', t.stone), ...amount('variety', t.variety), ...amount('cultivation', t.cultivation), ...amount('traffic', t.traffic), ...amount('drinkingWater', t.drinkingWater), ...amount('fauna', t.fauna), ...amount('life', t.life) })),
     people: world.people.map((p): PersonView => {
-      const life = demographicTraits(p.genome);
+      const life = demographicTraits(p.genome, cuerpo);
       return { id: p.id, name: p.name, role: p.role, x: p.x, y: p.y, color: p.color, action: p.action, reason: p.reason, energy: p.energy, hunger: p.hunger, fatigue: p.fatigue, thirst: p.thirst, need: p.need, recentMemory: p.recentMemory, traits: { ...p.traits }, skills: { ...p.skills }, materials: { ...p.materials }, specialty: specialty(p), controlMode: p.controlMode, blueprintId:p.blueprintId??null,
       target: { x:p.target.x,y:p.target.y }, foodReserve:p.inventory, foodReserveCapacity:0.25, working: !!p.technology.waterPreparation || ['gather','farm','build','hunt','invent','repair','research','craft','forage'].includes(p.action) && distance(p,p.target)<0.5,
       workProgress: p.technology.waterPreparation ? clamp(((p.technology.items.find(item => item.id === p.technology.waterPreparation!.itemId)?.contents?.water ?? 0) - p.technology.waterPreparation.initialQuanta) / (p.technology.waterPreparation.targetQuanta - p.technology.waterPreparation.initialQuanta))

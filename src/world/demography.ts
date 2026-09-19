@@ -1,5 +1,6 @@
-import type { DemographicActor, DemographicDeathCause, DemographicEnvironment, DemographicState, DemographicTraits, DemographicTransition, SenescenceLaw } from '../shared/demography.js';
+import type { DemographicActor, DemographicDeathCause, DemographicEnvironment, DemographicState, DemographicTraits, DemographicTransition, LongevityLaw, SenescenceLaw } from '../shared/demography.js';
 import { localRandom } from './genetics.js';
+import { DEFAULT_PARAMS } from './params.js';
 
 export const DEMOGRAPHY_TICKS_PER_DAY = 2400;
 export const MAX_DEMOGRAPHY_DT = DEMOGRAPHY_TICKS_PER_DAY;
@@ -19,17 +20,34 @@ export function initialDemography(age = 0): DemographicState {
 }
 
 /** Diploid model loci 4 (resilience) and 2 (activity), already inherited by genetics.ts.
- * Resistance trades against food demand and reproductive tempo; no skill or cultural value is read. */
-export function demographicTraits(genome: { alleles: readonly number[] }): DemographicTraits {
+ * Resistance trades against food demand and reproductive tempo; no skill or cultural value is read.
+ *
+ * La longevidad es LEY DEL MUNDO, no una constante del módulo (R3): `longevity` es
+ * `paramsOf(world).cuerpo` y sus defaults (11 / 4 / 1 / 0,75) son exactamente los literales que
+ * T010 dejó escritos a mano, así que omitirla devuelve el mundo de siempre bit a bit. El resto de
+ * los rasgos (demanda de comida y agua, madurez, descanso reproductivo) no dependen de esta ley:
+ * sólo del genoma, y por eso `assertLegacyRecord` puede seguir recalculándolos sin mundo. */
+export function demographicTraits(genome: { alleles: readonly number[] }, longevity: Readonly<LongevityLaw> = DEFAULT_PARAMS.cuerpo): DemographicTraits {
   if (!Array.isArray(genome.alleles) || genome.alleles.length !== 14 || !genome.alleles.every(unit)) throw new RangeError('Alelos demográficos inválidos.');
+  if (![longevity.longevidadBaseDias, longevity.longevidadPorResiliencia, longevity.longevidadPorActividad, longevity.senescenciaInicioFraccion]
+    .every(value => Number.isFinite(value) && value >= 0)) throw new RangeError('Ley de longevidad inválida.');
   const resilience = (genome.alleles[8]! + genome.alleles[9]!) / 2;
   const activity = (genome.alleles[4]! + genome.alleles[5]!) / 2;
-  const maximumAge = Math.round((11 + resilience * 4 - activity) * DEMOGRAPHY_TICKS_PER_DAY);
+  const maximumAge = Math.round((longevity.longevidadBaseDias + resilience * longevity.longevidadPorResiliencia
+    - activity * longevity.longevidadPorActividad) * DEMOGRAPHY_TICKS_PER_DAY);
+  const maturityAge = Math.round((1.8 + resilience * 0.3 + activity * 0.1) * DEMOGRAPHY_TICKS_PER_DAY);
+  const senescenceStart = Math.round(maximumAge * longevity.senescenciaInicioFraccion);
+  // `PARAM_RANGES` admite combinaciones (base 1 con pendiente de actividad 20, fracción 0 o 1) que
+  // rompen el orden madurez < vejez < edad máxima que `updateDemography` exige. Romper aquí nombra
+  // la ley; dejarlo pasar se oiría más tarde como un «estado demográfico inválido» sin causa.
+  if (!(maturityAge < senescenceStart && senescenceStart < maximumAge)) {
+    throw new RangeError(`Ley de longevidad degenerada: madurez ${maturityAge}, inicio de vejez ${senescenceStart}, edad máxima ${maximumAge} ticks. Revisa cuerpo.longevidad* y cuerpo.senescenciaInicioFraccion.`);
+  }
   return { resilience, foodDemand: 0.85 + resilience * 0.4 + activity * 0.2,
     waterDemand: 1.15 - resilience * 0.35 + activity * 0.15,
-    maturityAge: Math.round((1.8 + resilience * 0.3 + activity * 0.1) * DEMOGRAPHY_TICKS_PER_DAY),
+    maturityAge,
     fertilityCooldown: Math.round((0.8 + resilience * 0.5 + activity * 0.1) * DEMOGRAPHY_TICKS_PER_DAY),
-    senescenceStart: Math.round(maximumAge * 0.75), maximumAge };
+    senescenceStart, maximumAge };
 }
 
 function validate(actor: DemographicActor, environment: DemographicEnvironment, dt: number): void {

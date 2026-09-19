@@ -1,12 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import type { DemographicActor, DemographicEnvironment } from '../src/shared/demography.js';
 import { demographicTraits, DEMOGRAPHY_TICKS_PER_DAY as DAY, initialDemography, MAX_DEMOGRAPHY_DT,
   PROTECTED_HEALTH_FLOOR, PROTECTED_VITALITY_FLOOR, updateDemography } from '../src/world/demography.js';
 import { assertGenome, founderGenome, inheritGenome, localRandom, type Genome } from '../src/world/genetics.js';
 import { createWorld, stepWorld, type Person } from '../src/world/index.js';
 import { closeKin } from '../src/world/family.js';
-import { DEFAULT_PARAMS } from '../src/world/params.js';
+import { DEFAULT_PARAMS, parseParams, type WorldParams } from '../src/world/params.js';
 
 const safe: DemographicEnvironment = { exposure: 0, shelter: 0, protected: false, seed: 431, tick: 0, senescence: DEFAULT_PARAMS.cuerpo };
 function genome(resilience = 0.5, activity = 0.5, id = 'founder'): Genome {
@@ -268,4 +269,59 @@ test('affinity with replacement spreads paternity among 32 inhabitants (Gini < 0
   assert.ok(values.reduce((sum, n) => sum + n, 0) === births * 2);
   assert.ok(coefficient < 0.5, `gini ${coefficient} >= 0.5 with ${births} births`);
   context.diagnostic(JSON.stringify({ experiment: 'paternity-gini', inhabitants: 32, checks: 200, births, gini: coefficient, parents: values.filter(n => n > 0).length, max: Math.max(...values), min: Math.min(...values) }));
+});
+
+// ── R3: control bit a bit y cable de `cuerpo.longevidad*` hasta el mundo vivo ──────────────────
+/** Huella del mundo completo en lo que la ley de longevidad puede tocar: cuerpos vivos (edad, salud,
+ * vitalidad, genoma) y el archivo de identidades con la edad máxima y el inicio de senescencia que
+ * cada difunto declaró. No entra nada de tiempo real: el digest es puro en (semilla, params). */
+function worldDigest(world: ReturnType<typeof createWorld>): string {
+  const bodies = world.people.map(p => [p.id, p.bornAt, p.demography.age, p.demography.health, p.demography.vitality,
+    p.genome.generation, p.genome.mutations, p.genome.alleles]);
+  const legacy = world.legacy.map(r => [r.id, r.bornAt, r.diedAt, r.cause, r.traits.senescenceStart, r.traits.maximumAge]);
+  return createHash('sha1').update(JSON.stringify({ tick: world.tick, poblacion: world.people.length,
+    nacimientos: world.totals.births, muertes: world.demographyDynamics.deaths,
+    causas: world.demographyDynamics.causes, bodies, legacy })).digest('hex').slice(0, 16);
+}
+
+function runDays(days: number, params?: WorldParams, seed = 51926): { world: ReturnType<typeof createWorld>; digests: string[] } {
+  const world = createWorld(seed, params), digests: string[] = [];
+  for (let day = 1; day <= days; day++) { for (let tick = 0; tick < DAY; tick++) stepWorld(world); digests.push(worldDigest(world)); }
+  return { world, digests };
+}
+
+/** Constitución II (evidencia): cablear los cuatro params de longevidad no puede cambiar el mundo
+ * público. Estos digests se midieron en la base del sprint (99fac6d) ANTES del cable, con
+ * `createWorld(51926)` y los DEFAULTS; si la ley cableada devuelve otra cosa, los defaults dejaron
+ * de coincidir con los literales 11/4/1/0,75 de T010 y hay que decirlo, no ajustar el número. */
+const CONTROL_51926 = ['d53d17b2f0052138', 'fe5ee506b702013b', 'd48bd3321943cb34'];
+
+test('R3 control: 3 días del mundo público con los defaults son bit a bit los de antes del cable', context => {
+  const { world, digests } = runDays(3);
+  assert.deepEqual(digests, CONTROL_51926, 'el mundo con los defaults cambió al cablear cuerpo.longevidad*');
+  context.diagnostic(JSON.stringify({ seed: 51926, dias: 3, digests, poblacion: world.people.length,
+    nacimientos: world.totals.births, muertes: world.demographyDynamics.deaths, causas: world.demographyDynamics.causes }));
+});
+
+/** El contraste decisivo que R3 pedía: el param tiene que llegar al MUNDO, no sólo a la función pura.
+ * Se usa `longevidadBaseDias=4` (y no el 6 del brief) porque con 4 el primer fundador entra en
+ * senescencia hacia el día 2,3 y el mundo ya diverge dentro de los 3 días que este test puede pagar;
+ * con 6 la vejez empieza el día 3,8 y haría falta una corrida de laboratorio. La sensibilidad con 6
+ * se mide sobre la ley pura en tests/senescencia.test.ts. */
+test('R3: cuerpo.longevidadBaseDias llega hasta el mundo vivo y lo cambia', context => {
+  const corta = parseParams('cuerpo.longevidadBaseDias=4');
+  const { world, digests } = runDays(3, corta);
+  assert.notDeepEqual(digests, CONTROL_51926, 'acortar la vida 7 días no cambió el mundo: el param sigue sin lector');
+  assert.notEqual(digests[2], CONTROL_51926[2]);
+  const senescencias = world.demographyDynamics.causes.senescence;
+  assert.ok(senescencias > 0, `con edad máxima de 3-7 días debe haber muertes por senescencia en 3 días, hubo ${senescencias}`);
+  assert.equal(new Set(world.people.map(p => p.id)).size, world.people.length);
+  context.diagnostic(JSON.stringify({ seed: 51926, dias: 3, params: 'cuerpo.longevidadBaseDias=4', digests,
+    poblacion: world.people.length, nacimientos: world.totals.births, causas: world.demographyDynamics.causes }));
+});
+
+test('R3: senescenciaInicioFraccion llega hasta el mundo vivo y lo cambia', context => {
+  const { digests } = runDays(3, parseParams('cuerpo.senescenciaInicioFraccion=0.2'));
+  assert.notDeepEqual(digests, CONTROL_51926, 'adelantar la vejez no cambió el mundo: el param sigue sin lector');
+  context.diagnostic(JSON.stringify({ seed: 51926, dias: 3, params: 'cuerpo.senescenciaInicioFraccion=0.2', digests }));
 });

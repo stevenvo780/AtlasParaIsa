@@ -21,6 +21,16 @@ export interface DemographicTraits {
   maximumAge: number;
 }
 
+/** Ley de longevidad (T010, cableada en R3). Subconjunto estructural de `WorldParams['cuerpo']`:
+ * fija la edad máxima (base + resiliencia·gen − actividad·hábito) y el inicio de la vejez (fracción
+ * de la edad máxima). La lee `demographicTraits`; el mundo se la pasa con `paramsOf(world).cuerpo`. */
+export interface LongevityLaw {
+  longevidadBaseDias: number;
+  longevidadPorResiliencia: number;
+  longevidadPorActividad: number;
+  senescenciaInicioFraccion: number;
+}
+
 /** Ley de senescencia (T010). Subconjunto estructural de `WorldParams['cuerpo']`. */
 export interface SenescenceLaw {
   riesgoSenescenciaDiario: number;

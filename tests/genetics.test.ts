@@ -32,27 +32,22 @@ test('control bit a bit: varianza 0 produce exactamente el mismo genoma que la v
   assert.equal(g2.cooperation, phenotype2[6]);
 });
 
-test('heterocigosis real: varianza 0.15 genera diversidad y heterocigosis', () => {
-  const seed = 20260905; // same seed as createWorld
-  const ids = ['s', 'i', ...Array.from({ length: 14 }, (_, i) => `neighbor-${i}`)];
+function random(state: { rng: number }): number { state.rng = (Math.imul(state.rng, 1664525) + 1013904223) >>> 0; return state.rng / 4294967296; }
+function seededTraits(seed: number, index: number) {
+  const state = { rng: (seed ^ Math.imul(index + 1, 2654435761)) >>> 0 };
+  return { curiosity: 0.1 + random(state) * 0.85, sociability: 0.1 + random(state) * 0.85, industriousness: 0.1 + random(state) * 0.85, care: 0.05 + random(state) * 0.9, resilience: 0.1 + random(state) * 0.85 };
+}
+
+test('heterocigosis real: varianza 0.15 genera diversidad y heterocigosis con traits reales', () => {
+  const seed = 20260905;
+  const ids = ['s', 'i', 'neighbor-1', 'neighbor-2', 'neighbor-3', 'neighbor-4', 'neighbor-5', 'neighbor-6', 'neighbor-7', 'neighbor-8', 'neighbor-9', 'neighbor-10', 'neighbor-11', 'neighbor-12', 'neighbor-13', 'neighbor-14'];
   const genomes = ids.map((id, index) => {
-    // Generate some diverse traits just to simulate seededTraits roughly, or use constant, 
-    // the variance comes from founderGenome anyway.
-    const traits = {
-      curiosity: 0.4 + (index % 3) * 0.1,
-      sociability: 0.4 + (index % 4) * 0.1,
-      industriousness: 0.5,
-      care: 0.5,
-      resilience: 0.5
-    };
-    return founderGenome(seed, id, traits, 0.15);
+    return founderGenome(seed, id, seededTraits(seed, index), 0.15);
   });
   
-  // Check >= 12 distinct learningRates
   const rates = new Set(genomes.map(g => g.learningRate.toFixed(6)));
   assert.ok(rates.size >= 12, `Se esperaban >=12 learningRates distintos, se obtuvieron ${rates.size}`);
   
-  // Check mean heterozygosity > 0.3
   let totalHeterozygosity = 0;
   for (const g of genomes) {
     for (let gene = 0; gene < GENE_COUNT; gene++) {
@@ -61,6 +56,26 @@ test('heterocigosis real: varianza 0.15 genera diversidad y heterocigosis', () =
   }
   const meanHeterozygosity = totalHeterozygosity / (16 * GENE_COUNT);
   assert.ok(meanHeterozygosity > 0.3, `Heterocigosis media ${meanHeterozygosity} debería ser > 0.3`);
+});
+
+import { createWorld } from '../src/world/index.js';
+import { parseParams } from '../src/world/params.js';
+
+test('heterocigosis real: createWorld con varianza 0.15 cumple criterios en el juego real', () => {
+  const w2 = createWorld(20260905, parseParams('genes.varianzaFundadores=0.15'));
+  
+  const rates = new Set(w2.people.map(p => p.genome.learningRate.toFixed(6)));
+  assert.ok(rates.size >= 12, `Se esperaban >=12 learningRates distintos, se obtuvieron ${rates.size}`);
+  
+  let hetero = 0, n = 0;
+  for (const p of w2.people) {
+    for (let gene = 0; gene < 7; gene++) {
+      hetero += Math.abs(p.genome.alleles[gene * 2]! - p.genome.alleles[gene * 2 + 1]!);
+      n++;
+    }
+  }
+  const meanHeterozygosity = hetero / n;
+  assert.ok(meanHeterozygosity > 0.3, `Heterocigosis media en world real ${meanHeterozygosity} debería ser > 0.3`);
 });
 
 test('determinismo: misma semilla, id y varianza producen mismo genoma', () => {

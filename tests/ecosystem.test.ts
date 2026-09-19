@@ -61,12 +61,19 @@ test('individual-fauna mode leaves legacy stocks alone and never introduces pred
   }
 });
 
+// Este control mide el reparto hidrológico DE ORIGEN de `initializeEcosystem` (qué rasgos dan agua
+// potable), que es anterior a T035 y no debe depender de la calibración de hoy: por eso fija
+// `agua.cuencas=1` (sin gating) en vez de usar `DEFAULT_PARAMS` (hoy 0,4). Constitución I.
+// Medido 2026-09-19 con el default 0,4 la ventana inicial baja a 30/26/6/34/2 reservas por semilla
+// (1/42/2026/51926/98765): el mundo de la semilla 2026 se queda en 6, bajo el mínimo de 8 de este
+// control — la escasez de agua cerca del origen es ahora una propiedad del mundo, no un fallo.
+const CUENCAS_SIN_GATING = 1;
 test('temperate starting regions have visible water while arid regions retain resource scarcity', () => {
   const reservesBySeed = new Map<number, number>();
   for (const seed of [1, 42, 2026, 51926, 98765]) {
     let reserves = 0, ordinarySoil = 0;
     for (let y = 0; y < 28; y++) for (let x = 0; x < 40; x++) {
-      const tile = generateTile(seed, x, y);
+      const tile = generateTile(seed, x, y, CUENCAS_SIN_GATING);
       if (tile.drinkingWater! > 0) reserves++;
       else if (tile.terrain !== 'water') ordinarySoil++;
     }

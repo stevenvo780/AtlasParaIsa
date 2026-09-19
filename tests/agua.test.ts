@@ -4,33 +4,37 @@ import { createHash } from 'node:crypto';
 import { createWorld, stepWorld, TICKS_PER_DAY } from '../src/world/index.js';
 import { parseParams } from '../src/world/params.js';
 import { generateChunk } from '../src/world/terrain.js';
-import { ruidoCuenca, regionesSinAgua, distanciaMediaAgua } from '../src/world/agua.js';
+import { stepEcosystem } from '../src/world/ecosystem.js';
+import { ruidoCuenca, enCuenca, regionesSinAgua, distanciaMediaAguaManhattan } from '../src/world/agua.js';
 import type { Tile } from '../src/shared/types.js';
 
 function run(world: ReturnType<typeof createWorld>, ticks: number): void {
   for (let n = 0; n < ticks; n++) stepWorld(world);
 }
 
-// Hash del JSON del mundo semilla 4821 tras 1 día (TICKS_PER_DAY) con los params por defecto
-// (agua.cuencas=1), capturado comparando bit a bit contra `ecosystem.ts`/`terrain.ts` previos a
-// T035 (sin gating): el diff de los dos JSON completos fue vacío. Cualquier cambio de este hash
-// significa que `cuencas=1` dejó de ser un no-op.
-const HASH_MUNDO_4821_DIA1_CUENCAS1 = '0a7e2e48df1950051842fe6d5c1a7b6e2f402d56e55a76ea5661a4de04338219';
+// Hash del estado de AGUA (solo x, y, feature, drinkingWater redondeado — no el JSON completo del
+// mundo) del mundo semilla 4821 tras 1 día (TICKS_PER_DAY) con `agua.cuencas=1` EXPLÍCITO. Acotado
+// al subsistema de agua a propósito (T035 ronda de arreglo, hallazgo importante: el control
+// original hasheaba `JSON.stringify(world)` completo — 6 004 820 caracteres — y se rompía con
+// cualquier cambio legítimo del motor ajeno a T035, además de depender del valor de
+// `DEFAULT_PARAMS.agua.cuencas`, que otras tareas del sprint recalibran). Con `cuencas=1` el ruido
+// nunca cruza el umbral (test "ruidoCuenca... cae en [0,1)" de abajo): esto debe ser un no-op.
+// RE-LÍNEA BASE 2026-09-19 (integración de los 20 workstreams T010–T036 + la calibración ab4d9fb):
+// el valor anterior (`ffa5012d…`) se midió en la rama de T035 aislada. Tras 1 día de simulación el
+// agua depende también de a dónde caminan y beben los habitantes, así que la ley de senescencia, la
+// varianza de fundadores y las capacidades de bioma lo mueven aunque `cuencas=1` siga siendo un no-op
+// del generador (lo prueban, sin hash, las pruebas «conserva toda el agua potable de origen» y
+// «`agua.cuencas` del MUNDO llega a createWorld→activate» de este mismo fichero). A partir de aquí
+// vuelve a ser un detector de deriva: si cambia, algo tocó el agua o el motor.
+const HASH_AGUA_MUNDO_4821_DIA1_CUENCAS1 = '0c2d09d3ed7681f60ea80eafb7581ba2a4d51dde240c1b1d13853c18f240ef15';
 
-test('T035 control: agua.cuencas=1 (default) deja el mundo semilla 4821 bit a bit igual a hoy tras 1 día', () => {
-  const world = createWorld(4821);
+test('T035 control: agua.cuencas=1 EXPLÍCITO (no el default global) deja el agua/feature de las teselas bit a bit igual a hoy tras 1 día', () => {
+  const world = createWorld(4821, parseParams('agua.cuencas=1'));
   assert.equal(world.tiles.length > 0, true);
   run(world, TICKS_PER_DAY);
-  const digest = createHash('sha256').update(JSON.stringify(world)).digest('hex');
-  assert.equal(digest, HASH_MUNDO_4821_DIA1_CUENCAS1);
-});
-
-test('T035 control: agua.cuencas=1 explícito coincide con los params por defecto tras 1 día', () => {
-  const explicito = createWorld(4821, parseParams('agua.cuencas=1'));
-  const porDefecto = createWorld(4821);
-  run(explicito, TICKS_PER_DAY);
-  run(porDefecto, TICKS_PER_DAY);
-  assert.deepEqual(explicito, porDefecto);
+  const aguaTeselas = world.tiles.map(t => ({ x: t.x, y: t.y, feature: t.feature ?? 'none', drinkingWater: Number((t.drinkingWater ?? 0).toFixed(6)) }));
+  const digest = createHash('sha256').update(JSON.stringify(aguaTeselas)).digest('hex');
+  assert.equal(digest, HASH_AGUA_MUNDO_4821_DIA1_CUENCAS1);
 });
 
 test('T035: cuencas=1 conserva toda el agua potable de origen tesela a tesela (generateChunk)', () => {
@@ -38,6 +42,32 @@ test('T035: cuencas=1 conserva toda el agua potable de origen tesela a tesela (g
   const sinGate = generateChunk(seed, 0, 0).tiles;
   const conCuencasUno = generateChunk(seed, 0, 0, 1).tiles;
   assert.deepEqual(conCuencasUno, sinGate);
+});
+
+test('T035 ronda de arreglo (hallazgo crítico #2 — cableado): `agua.cuencas` del MUNDO llega al camino real createWorld→activate, no se queda pegado al default global', () => {
+  const seed = 4821;
+  const abierto = createWorld(seed, parseParams('agua.cuencas=1'));
+  const cerrado = createWorld(seed, parseParams('agua.cuencas=0.05'));
+  assert.ok(abierto.tiles.length > 0 && cerrado.tiles.length > 0);
+
+  // Si `activate()`/`projectTerrain()` ignorasen `paramsOf(world).agua.cuencas` (como antes de esta
+  // ronda), ambos mundos serían idénticos tesela a tesela pase lo que pase con el parámetro: este
+  // assert por sí solo detecta ese fallo de cableado (antes de la ronda, `assert.deepEqual` entre
+  // los dos mundos PASABA con cualquier valor de `agua.cuencas`, ver hallazgo "el único test que
+  // toca el camino real ya no puede fallar").
+  assert.notDeepEqual(cerrado.tiles.map(t => t.drinkingWater), abierto.tiles.map(t => t.drinkingWater));
+
+  // Monotonía por el camino real: una cuenca más restrictiva nunca puede DEJAR más agua que una más
+  // permisiva en la misma coordenada (el gateo solo quita, nunca añade).
+  const mapaAbierto = new Map(abierto.tiles.map(t => [`${t.x},${t.y}`, t.drinkingWater ?? 0]));
+  for (const tile of cerrado.tiles) {
+    const original = mapaAbierto.get(`${tile.x},${tile.y}`) ?? 0;
+    assert.ok((tile.drinkingWater ?? 0) <= original + 1e-9, `drinkingWater no puede crecer en (${tile.x},${tile.y}) por el camino real`);
+  }
+
+  const sinAguaAbierto = regionesSinAgua(abierto.tiles);
+  const sinAguaCerrado = regionesSinAgua(cerrado.tiles);
+  assert.ok(sinAguaCerrado > sinAguaAbierto, `cuencas=0.05 debería dejar más regiones secas que cuencas=1 por el camino real (abierto=${sinAguaAbierto}, cerrado=${sinAguaCerrado})`);
 });
 
 test('T035: cuencas=0.4 deja ≥30% de regiones sin agua superficial y distancia media > 6 (mundo de 4 chunks)', () => {
@@ -50,16 +80,16 @@ test('T035: cuencas=0.4 deja ≥30% de regiones sin agua superficial y distancia
 
   const sinAguaAntes = regionesSinAgua(antes);
   const sinAguaDespues = regionesSinAgua(despues);
-  const distanciaAntes = distanciaMediaAgua(antes);
-  const distanciaDespues = distanciaMediaAgua(despues);
+  const distanciaAntes = distanciaMediaAguaManhattan(antes);
+  const distanciaDespues = distanciaMediaAguaManhattan(despues);
 
   // El "antes" (evidencia SC-004 2026-09-19): 0% de regiones sin agua superficial y distancia ~3-4.
   assert.equal(sinAguaAntes, 0);
-  assert.ok(distanciaAntes < 6, `distancia "antes" esperada < 6, fue ${distanciaAntes}`);
+  assert.ok(distanciaAntes >= 0 && distanciaAntes < 6, `distancia "antes" esperada en [0,6), fue ${distanciaAntes}`);
 
   // El "después" (SC-004 parte 2 y 3): ≥30% de regiones sin agua superficial y distancia media > 6.
   assert.ok(sinAguaDespues >= 0.3, `regionesSinAgua esperado ≥0,30 con cuencas=0.4, fue ${sinAguaDespues}`);
-  assert.ok(distanciaDespues > 6, `distanciaMediaAgua esperada > 6 con cuencas=0.4, fue ${distanciaDespues}`);
+  assert.ok(distanciaDespues > 6, `distanciaMediaAguaManhattan esperada > 6 con cuencas=0.4, fue ${distanciaDespues}`);
 
   // La gating nunca puede DEJAR más agua potable que la original (solo puede quitar, no añadir).
   const mapaAntes = new Map(antes.map(t => [`${t.x},${t.y}`, t.drinkingWater ?? 0]));
@@ -67,6 +97,41 @@ test('T035: cuencas=0.4 deja ≥30% de regiones sin agua superficial y distancia
     const original = mapaAntes.get(`${tile.x},${tile.y}`) ?? 0;
     assert.ok((tile.drinkingWater ?? 0) <= original + 1e-9, `drinkingWater no puede crecer en (${tile.x},${tile.y})`);
   }
+});
+
+test('T035 ronda de arreglo (hallazgo crítico #1 — durabilidad): fuera de cuenca, la lluvia NO rellena el agua potable (antes se deshacía en el siguiente tick de lluvia)', () => {
+  const seed = 4821, cuencas = 0.4;
+  // Busca determinísticamente una coordenada dentro y otra fuera de la cuenca para esta semilla.
+  let dentro: { x: number; y: number } | undefined, fuera: { x: number; y: number } | undefined;
+  for (let x = 0; x < 200 && (!dentro || !fuera); x++) {
+    for (let y = 0; y < 200 && (!dentro || !fuera); y++) {
+      if (enCuenca(seed, x, y, cuencas)) dentro ??= { x, y }; else fuera ??= { x, y };
+    }
+  }
+  assert.ok(dentro && fuera, 'el fixture necesita al menos una coordenada dentro y otra fuera de la cuenca');
+
+  const manantial = (p: { x: number; y: number }): Tile => ({
+    x: p.x, y: p.y, terrain: 'meadow', biome: 'grassland', feature: 'spring', moisture: 0.5,
+    vegetation: 0.2, food: 0, drinkingWater: 0,
+  });
+  const tileDentro = manantial(dentro!), tileFuera = manantial(fuera!);
+
+  // 50 pasos de kernel (500 ticks) con lluvia constante, gateados con la MISMA cuenca que generó
+  // las teselas — igual que hace `stepWorld` con `world.seed`/`paramsOf(world).agua.cuencas`.
+  for (let tick = 10; tick <= 500; tick += 10) {
+    stepEcosystem([tileDentro], tick, 'rain', 'day', false, { seed, cuencas });
+    stepEcosystem([tileFuera], tick, 'rain', 'day', false, { seed, cuencas });
+  }
+
+  assert.equal(tileFuera.drinkingWater, 0, `fuera de cuenca drinkingWater debería seguir en 0 tras 50 pasos de lluvia, fue ${tileFuera.drinkingWater}`);
+  assert.ok((tileDentro.drinkingWater ?? 0) > 0, `dentro de cuenca drinkingWater debería recargarse con la lluvia (comportamiento sin cambios), fue ${tileDentro.drinkingWater}`);
+});
+
+test('T035 ronda de arreglo: sin pasar seed/cuencas a stepEcosystem, la recarga por lluvia es idéntica a la de siempre (control del kernel)', () => {
+  const control: Tile = { x: 5, y: 5, terrain: 'meadow', biome: 'grassland', feature: 'spring', moisture: 0.5, vegetation: 0.2, food: 0, drinkingWater: 0 };
+  for (let tick = 10; tick <= 100; tick += 10) stepEcosystem([control], tick, 'rain', 'day', false);
+  // 10 pasos de kernel: 0.008*(0.4+0*0.6) + 0.002 - 0.00015 por paso = 0.00505 * 10 = 0.0505.
+  assert.ok(Math.abs((control.drinkingWater ?? 0) - 0.0505) < 1e-9, `esperado 0,0505, fue ${control.drinkingWater}`);
 });
 
 test('T035: el mar (ocean, elevation < 0,37) no cambia con ninguna cuencas', () => {
@@ -113,10 +178,23 @@ test('regionesSinAgua: 0 teselas ⇒ 0; todas con agua ⇒ 0; ninguna con agua �
   assert.equal(regionesSinAgua(sinAgua), 1);
 });
 
-test('distanciaMediaAgua: sin ninguna tesela con agua potable, la distancia es Infinity', () => {
+test('T035 ronda de arreglo (hallazgo importante): regionesSinAgua ignora las regiones 100% océano (no cuenta como "seca" una región sin tierra)', () => {
+  const soloOceano: Tile[] = Array.from({ length: 4 }, (_, i) => ({ x: i, y: 0, terrain: 'water', moisture: 1, vegetation: 0, food: 0, biome: 'ocean', drinkingWater: 0 }));
+  assert.equal(regionesSinAgua(soloOceano), 0, 'una región sin ninguna tesela de tierra no debe contar como región seca (ni como húmeda)');
+
+  const mixta: Tile[] = [
+    ...soloOceano,
+    // Región distinta (tamRegion=16 ⇒ x=20 cae en la región "1,0", no en la "0,0" del océano).
+    { x: 20, y: 0, terrain: 'meadow', moisture: 0.5, vegetation: 0.2, food: 0, drinkingWater: 0 },
+  ];
+  // La región de océano puro sigue sin contar; la única región CON TIERRA está seca ⇒ 100%.
+  assert.equal(regionesSinAgua(mixta), 1);
+});
+
+test('distanciaMediaAguaManhattan: sin ninguna tesela con agua potable, el centinela es -1 (no Infinity: serializa mal en JSON)', () => {
   const tiles: Tile[] = [
     { x: 0, y: 0, terrain: 'meadow', moisture: 0.5, vegetation: 0.2, food: 0, drinkingWater: 0 },
     { x: 5, y: 5, terrain: 'meadow', moisture: 0.5, vegetation: 0.2, food: 0, drinkingWater: 0 },
   ];
-  assert.equal(distanciaMediaAgua(tiles), Infinity);
+  assert.equal(distanciaMediaAguaManhattan(tiles), -1);
 });

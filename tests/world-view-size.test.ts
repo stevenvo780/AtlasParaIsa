@@ -17,7 +17,12 @@ function grownWorld(ticks: number): ReturnType<typeof createWorld> {
 test('a snapshot carries procedure summaries, never their programs, and the saving is measurable', t => {
   const world = grownWorld(8000);
   assert.equal(world.tick, 8000);
-  assert.equal(world.people.length, 32, 'the measurement is stated for 32 inhabitants');
+  // MEDIDO 2026-09-19 tras la integración de T010-T036 y la calibración ab4d9fb: 28 habitantes
+  // (antes 32). Fijar los params viejos NO devuelve 32 — la diferencia la producen las leyes nuevas
+  // (senescencia cableada en advancePopulation, genoma de T011, parentesco de T012), no los params.
+  // Esta prueba mide el TAMAÑO de la instantánea del mundo tal como se envía hoy, así que se enuncia
+  // sobre la población real de hoy y sigue siendo refutable: si cambia, la medición debe rehacerse.
+  assert.equal(world.people.length, 28, 'the measurement is stated for 28 inhabitants');
   assert.ok(world.technology.recipes.length >= 200, `resident definitions: ${world.technology.recipes.length}`);
   const view = projectWorld(world), technology = view.technology!;
   assert.equal(technology.recipes.length, world.technology.recipes.length);

@@ -3,7 +3,6 @@ import { initializeEcosystem } from './ecosystem.js';
 import { initialWood } from './forest.js';
 import type { Animal } from './animals.js';
 import type { StructureView } from '../shared/life.js';
-import { DEFAULT_PARAMS } from './params.js';
 
 export const CHUNK_SIZE = 16;
 /** Technical integer-coordinate guard, not the boundary of a generated map. Upper bound is exclusive. */
@@ -89,7 +88,7 @@ export function chunkKey(x: number, y: number): string {
 }
 
 /** No persistent cache or shared random stream: a cell is a pure function of seed and position. */
-export function generateTile(seed: number, x: number, y: number, cuencas: number = DEFAULT_PARAMS.agua.cuencas): Tile {
+export function generateTile(seed: number, x: number, y: number, cuencas = 1): Tile {
   assertSeed(seed); assertCoordinate(x); assertCoordinate(y);
   const continents = octaves(seed, x, y, 512, 100);
   const hills = octaves(seed, x, y, 64, 200);
@@ -149,7 +148,7 @@ export function proceduralPlaceName(seed: number, x: number, y: number): string 
   return `${nouns[hash(seed, x, y, 800) % nouns.length]} ${QUALIFIERS[hash(seed, x, y, 801) % QUALIFIERS.length]}`;
 }
 
-export function generateChunk(seed: number, cx: number, cy: number, cuencas: number = DEFAULT_PARAMS.agua.cuencas): Chunk {
+export function generateChunk(seed: number, cx: number, cy: number, cuencas = 1): Chunk {
   assertSeed(seed);
   const limit = MAX_COORDINATE / CHUNK_SIZE;
   if (!Number.isInteger(cx) || !Number.isInteger(cy) || cx < -limit || cy < -limit || cx >= limit || cy >= limit) {

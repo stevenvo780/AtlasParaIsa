@@ -2,7 +2,7 @@ import { recordChronicleEvent, enableChronicleJournal, assertChronicleJournal, t
 import { PROTOCOL_VERSION, type Action, type ChronicleEvent, type Gesture, type GestureResult, type MemoryView, type PersonView, type PersonDetail, type PlaceView, type Tile, type WorldView, type Viewport, type Order, type CommunityView, type WorldSample } from '../shared/types.js';
 import { activate, bindWorldContext, maintainRegions, normalizeViewport, projectTerrain, tileAt, validCoordinate, worldContext, type ChunkMeta, type WorldContext } from './spatial.js';
 import { chunkKey, generateChunk, proceduralPlaceName, legacyStructures, type Chunk } from './terrain.js';
-import { assertGenome, expressGenome, founderGenome, inheritGenome, type Genome } from './genetics.js';
+import { assertGenome, DEFAULT_MUTATION_RATE, expressGenome, founderGenome, inheritGenome, type Genome } from './genetics.js';
 import { bond, cooperate, cooperationOpportunity, initialCulture, resourceDispute, updateCommunities, settlementOpportunity, type Culture } from './society.js';
 import { count, emptyTotals, recordSample, worldStatistics } from './statistics.js';
 import { initializeEcosystem, stepEcosystem, harvestMaterial, cultivateTile, trampleTile, FOOD_PER_ANIMAL } from './ecosystem.js';
@@ -151,6 +151,12 @@ export function createWorld(seed = 20260905, params?: WorldParams): World {
     technology: { ...defaultTechnologyState(), water: emptyWaterLedger() }, legacy: [], retiredLegacy: [],
     demographyDynamics: { deaths: 0, causes: { starvation: 0, dehydration: 0, exposure: 0, senescence: 0 }, foodLost: 0, woodLost: 0, stoneLost: 0 },
   };
+  // T035 ronda de arreglo (hallazgo crítico #2): los params del mundo deben fijarse ANTES de
+  // activar el primer chunk — `activate()` lee `paramsOf(world).agua.cuencas` para generar las
+  // teselas, y `paramsOf` solo ve lo que haya en el WeakMap para ESTE objeto `world` en ese
+  // momento. Fijarlo al final (como antes) dejaba la región de partida siempre con el default
+  // global sin importar el `params` recibido aquí.
+  setParams(world, params ?? DEFAULT_PARAMS);
   for (let cy = 0; cy < 2; cy++) for (let cx = 0; cx < 3; cx++) activate(world, cx * 16, cy * 16);
   for (const place of world.places.slice(0, 3)) {
     const tile = tileAt(world, place)!; tile.terrain = 'shelter';
@@ -184,7 +190,6 @@ export function createWorld(seed = 20260905, params?: WorldParams): World {
   world.technology.checkpoint = captureTechnologyCheckpoint(world.technology, world.people, world.tick, 'initial');
   world.structures.push(...legacyStructures(world.tiles, world.tick));
   addEvent(world, { kind: 'memory', actors: [], source: 'sample', text: 'Este mundo comienza con S, I y una vecindad ficticia. Los cinco recuerdos son ejemplos, pendientes de la historia de Steven e Isa.', cause: 'Contenido sintético identificado; no se importaron conversaciones ni biografía.' });
-  setParams(world, params ?? DEFAULT_PARAMS);
   return world;
 }
 
@@ -886,7 +891,10 @@ export function stepWorld(world: World, inputs: Gesture[] = [], context: WorldCo
   world.invitations = world.invitations.filter(invitation => invitation.until > world.tick);
   world.reminders = world.reminders.filter(reminder => reminder.until > world.tick);
   ecology(world);
-  stepEcosystem(world.tiles, world.tick, world.weather, phaseAt(world.tick), false, { decaimientoFertilidad: paramsOf(world).recursos.decaimientoFertilidad });
+  // T013 (decaimiento de fertilidad) + T035 (gateo de cuenca duradero: la lluvia no rellena
+  // una tesela fuera de cuenca) viajan juntos en las mismas opciones de ecología.
+  stepEcosystem(world.tiles, world.tick, world.weather, phaseAt(world.tick), false,
+    { decaimientoFertilidad: paramsOf(world).recursos.decaimientoFertilidad, seed: world.seed, cuencas: paramsOf(world).agua.cuencas });
   stepAnimals(world,event=>addEvent(world,event));
   stepStructures(world,event=>addEvent(world,event));
   for (const person of world.people) bodyAndAction(world, person);
@@ -952,7 +960,7 @@ function reproduce(world: World): void {
     const { a, b } = pair;
     const serial=world.birthCounter+1, id=`descendant-${serial}`;
     if(!Number.isSafeInteger(serial)||[...world.people,...world.legacy,...world.retiredLegacy].some(p=>p.id===id)) throw new Error('La identidad de un nacimiento ya existe; no se gastaron reservas.');
-    const genome=inheritGenome(world.seed,id,[a,b]); world.birthCounter=serial;
+    const genome=inheritGenome(world.seed,id,[a,b],DEFAULT_MUTATION_RATE*paramsOf(world).genes.tasaMutacion); world.birthCounter=serial;
     const traits = expressGenome(genome);
     const child: Person = { ...structuredClone(a), id, name: `${proceduralPlaceName(world.seed, world.birthCounter, genome.generation).split(' ')[0]} ${world.birthCounter}`.slice(0, 70), role: 'neighbor',
       genome, traits, curiosity: traits.curiosity, sociability: traits.sociability, generosity: traits.care, bornAt: world.tick, lastBirth: world.tick, thirst: 0.15,
@@ -1222,7 +1230,9 @@ function migrateWorldState(value: unknown, context: WorldContext = {}): World {
   const originalTiles = new Map(world.tiles.map(t => [`${t.x},${t.y}`, t]));
   world.tiles = [];
   for (let cy = 0; cy < 2; cy++) for (let cx = 0; cx < 3; cx++) {
-    const chunk = generateChunk(world.seed, cx, cy);
+    // T035 ronda de arreglo: coherencia con `paramsOf` (equivalente hoy a `DEFAULT_PARAMS.agua
+    // .cuencas`, ningún `World` migrado tiene params propios fijados todavía en este punto).
+    const chunk = generateChunk(world.seed, cx, cy, paramsOf(world).agua.cuencas);
     const { tiles, ...meta } = chunk;
     meta.discovered = true; meta.lastTick = world.tick;
     meta.places = world.places.filter(p => chunkKey(p.x, p.y) === meta.key);
@@ -1239,8 +1249,8 @@ function migrateWorldState(value: unknown, context: WorldContext = {}): World {
 function upgradeV3(world: World): void {
   world.version = 3; world.cooperationEnabled = true; world.reproductionEnabled = true;
   world.communities = []; world.communityCounter = 0; world.birthCounter = 0; world.history = []; world.totals = emptyTotals();
-  world.tiles = world.tiles.map(tile => initializeEcosystem(world.seed, tile));
-  world.retiredChunks = world.retiredChunks.map(chunk => ({ ...chunk, tiles: chunk.tiles.map(tile => initializeEcosystem(world.seed, tile)) }));
+  world.tiles = world.tiles.map(tile => initializeEcosystem(world.seed, tile, paramsOf(world).agua.cuencas));
+  world.retiredChunks = world.retiredChunks.map(chunk => ({ ...chunk, tiles: chunk.tiles.map(tile => initializeEcosystem(world.seed, tile, paramsOf(world).agua.cuencas)) }));
   for (const person of world.people) initializePerson(world, person);
 }
 function upgradeV4(world: World): void {

@@ -1,14 +1,13 @@
 import type { DemographicActor, DemographicDeathCause, DemographicEnvironment, DemographicState, DemographicTraits, DemographicTransition, SenescenceLaw } from '../shared/demography.js';
 import { localRandom } from './genetics.js';
-import { DEFAULT_PARAMS } from './params.js';
 
 export const DEMOGRAPHY_TICKS_PER_DAY = 2400;
 export const MAX_DEMOGRAPHY_DT = DEMOGRAPHY_TICKS_PER_DAY;
 export const PROTECTED_HEALTH_FLOOR = 0.05;
 export const PROTECTED_VITALITY_FLOOR = 0.08;
-const SENESCENCE_WEAR_PER_DAY = 0.25; // TODO params: cuerpo.desgasteSenescenciaDiario
+/** Desgaste de vejez de la ley vigente: intacto (×1,00 del anterior), para que la vejez siga siendo legible. */
+export const SENESCENCE_WEAR_PER_DAY = 0.8;
 const SENESCENCE_GENE_RELIEF = 0.4; // TODO params: cuerpo.alivioGenSenescencia
-const DEFAULT_SENESCENCE: SenescenceLaw = DEFAULT_PARAMS.cuerpo;
 const CAUSES: readonly DemographicDeathCause[] = ['starvation', 'dehydration', 'exposure', 'senescence'];
 const clamp = (value: number) => Math.max(0, Math.min(1, value));
 const unit = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1;
@@ -38,10 +37,12 @@ function validate(actor: DemographicActor, environment: DemographicEnvironment, 
   if (!Number.isFinite(dt) || dt < 0 || dt > MAX_DEMOGRAPHY_DT || !state || !traits
     || ![actor.hunger, actor.thirst, actor.energy, actor.fatigue, state.health, state.vitality, environment.exposure, environment.shelter, traits.resilience].every(unit)
     || typeof environment.protected !== 'boolean' || !Number.isFinite(state.age) || state.age < 0 || state.age + dt > Number.MAX_SAFE_INTEGER
-    || (actor.id !== undefined && typeof actor.id !== 'string') || (environment.seed !== undefined && !Number.isInteger(environment.seed))
+    || (actor.id !== undefined && (typeof actor.id !== 'string' || actor.id.length === 0))
+    || (environment.seed !== undefined && !Number.isInteger(environment.seed))
     || (environment.tick !== undefined && !Number.isFinite(environment.tick))
-    || (law !== undefined && (![law.riesgoSenescenciaDiario, law.riesgoSenescenciaPendiente, law.cuidadoReduceRiesgo]
-      .every(value => Number.isFinite(value) && value >= 0) || !unit(law.cuidadoReduceRiesgo)))
+    || (law !== undefined && (typeof law !== 'object' || law === null
+      || ![law.riesgoSenescenciaDiario, law.riesgoSenescenciaPendiente].every(value => Number.isFinite(value) && value >= 0)
+      || !unit(law.cuidadoReduceRiesgo)))
     || (state.deathCause !== null && !CAUSES.includes(state.deathCause)) || ((state.health === 0) !== (state.deathCause !== null))
     || !Number.isFinite(traits.foodDemand) || traits.foodDemand <= 0 || traits.foodDemand > 3
     || !Number.isFinite(traits.waterDemand) || traits.waterDemand <= 0 || traits.waterDemand > 3
@@ -54,12 +55,14 @@ function eligible(actor: DemographicActor, state: DemographicState): boolean {
     && state.health >= 0.55 && state.vitality >= 0.5 && actor.hunger <= 0.45 && actor.thirst <= 0.45 && actor.energy >= 0.6 && actor.fatigue <= 0.65;
 }
 
-/** Exact integral of quadratic age pressure, saturated after maximumAge. */
-function senescenceDamage(startAge: number, endAge: number, traits: Readonly<DemographicTraits>, care: number, law: Readonly<SenescenceLaw>): number {
+/** Exact integral of quadratic age pressure over the interval, in simulation-day units. The wear
+ * is the pre-existing law, untouched: the hazard REPLACES the age cut, it does not stack on it.
+ * Health still falls to ~0,2 at maximumAge, so old age stays legible, and it is not modulated by
+ * care: an elder cannot buy back the years already worn. */
+function senescenceDamage(startAge: number, endAge: number, traits: Readonly<DemographicTraits>): number {
   const width = traits.maximumAge - traits.senescenceStart;
-  const primitive = (age: number) => Math.pow(Math.max(0, Math.min(age, traits.maximumAge) - traits.senescenceStart), 3) / (3 * width * width)
-    + Math.max(0, age - traits.maximumAge);
-  return (primitive(endAge) - primitive(startAge)) * SENESCENCE_WEAR_PER_DAY * (1 - law.cuidadoReduceRiesgo * care) / DEMOGRAPHY_TICKS_PER_DAY;
+  const primitive = (age: number) => Math.pow(Math.max(0, Math.min(age, traits.maximumAge) - traits.senescenceStart), 3) / (3 * width * width);
+  return (primitive(endAge) - primitive(startAge)) * SENESCENCE_WEAR_PER_DAY / DEMOGRAPHY_TICKS_PER_DAY;
 }
 
 function mortalityRisk(startAge: number, endAge: number, traits: Readonly<DemographicTraits>, care: number, law: Readonly<SenescenceLaw>): number {
@@ -91,7 +94,14 @@ export function updateDemography(actor: DemographicActor, environment: Demograph
   // Death is absorbing. Protection does not resurrect an identity already recorded as dead.
   if (state.deathCause !== null) return { state, death: state.deathCause, preventedDeath: null, offspringEligible: false, senescenceRisk: 0, damage };
   if (dt === 0) return { state, death: null, preventedDeath: null, offspringEligible: eligible(actor, state), senescenceRisk: 0, damage };
-  const days = dt / DEMOGRAPHY_TICKS_PER_DAY, traits = actor.traits, law = environment.senescence ?? DEFAULT_SENESCENCE;
+  const days = dt / DEMOGRAPHY_TICKS_PER_DAY, traits = actor.traits, law = environment.senescence;
+  const { id } = actor, { seed, tick } = environment;
+  // Sin valores por defecto: un bucle que avance cuerpos sin identidad, semilla, tick o ley tomaría
+  // tiradas correlacionadas, idénticas entre semillas del mundo, y dejaría `cuerpo.*` fuera del alcance
+  // de `parseParams`. Eso es exactamente lo que hay que oír romper, no absorber en silencio.
+  if (id === undefined || seed === undefined || tick === undefined || law === undefined) {
+    throw new RangeError('Avanzar un cuerpo exige id, semilla, tick y ley de senescencia explícitos.');
+  }
   const hungry = clamp((actor.hunger - 0.72) / 0.28), thirsty = clamp((actor.thirst - 0.7) / 0.3);
   const exposure = environment.exposure * (1 - environment.shelter), resistance = 1 - traits.resilience * 0.7;
   const nourishment = clamp((0.65 - actor.hunger) / 0.55) * clamp((0.6 - actor.thirst) / 0.5);
@@ -99,21 +109,22 @@ export function updateDemography(actor: DemographicActor, environment: Demograph
   const strain = hungry * 0.65 * traits.foodDemand + thirsty * traits.waterDemand + exposure * resistance * 0.2
     + actor.fatigue * (1 - actor.energy) * 0.08;
   state.vitality = clamp(state.vitality + (recovery - strain) * days);
-  const care = clamp(actor.state.health * (actor.state.vitality + state.vitality) / 2);
+  // El cuidado se lee del cuerpo GUARDADO, no del hipotético: así la decisión de senescencia es pura
+  // en (seed, id, tick) y las ~9 previsiones por tick de index.ts devuelven exactamente lo mismo.
+  const care = clamp(actor.state.health * actor.state.vitality);
   const vulnerability = 1 + (1 - (actor.state.vitality + state.vitality) / 2) * 0.75;
   damage.starvation = hungry * hungry * 1.3 * traits.foodDemand * days * vulnerability;
   damage.dehydration = thirsty * thirsty * 2 * traits.waterDemand * days * vulnerability;
   damage.exposure = exposure * resistance * 0.48 * days * vulnerability;
   state.age += dt;
-  damage.senescence = senescenceDamage(actor.state.age, state.age, traits, care, law);
+  damage.senescence = senescenceDamage(actor.state.age, state.age, traits);
   const aging = clamp((state.age - traits.senescenceStart) / (traits.maximumAge - traits.senescenceStart));
   const healing = nourishment * actor.energy * state.vitality * 0.08 * (1 - aging) * days;
   state.health = clamp(state.health + healing - CAUSES.reduce((sum, cause) => sum + damage[cause], 0));
   let death: DemographicDeathCause | null = null;
   const senescenceRisk = mortalityRisk(actor.state.age, state.age, traits, care, law);
   if (state.health <= 0) death = [...CAUSES].sort((a, b) => damage[b] - damage[a])[0]!;
-  else if (senescenceRisk > 0 && localRandom(environment.seed ?? 0,
-    `senescence:${actor.id ?? traits.maximumAge}:${environment.tick ?? state.age}:${state.age}`)() < senescenceRisk) {
+  else if (senescenceRisk > 0 && localRandom(seed, `senescence:${id}:${tick}`)() < senescenceRisk) {
     damage.senescence += state.health; state.health = 0; death = 'senescence';
   }
   if (death && environment.protected) {

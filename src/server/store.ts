@@ -231,13 +231,20 @@ export class Store {
       this.db.exec('BEGIN');
       // Lectura cebadora: fija la instantánea ANTES de sellar `data_version`.
       this.db.prepare('SELECT 1 FROM main.sqlite_schema LIMIT 1').get();
+      // La carga hace miles de lecturas del archivo de tecnología (una por referencia de cada
+      // ejecución archivada). Sin transacción anfitriona el archivo descarta sus pruebas en cada
+      // lectura y vuelve a recorrer todas las definiciones: 468 s con 13 710 ejecuciones
+      // (evidencia 2026-09-19). Dentro de la misma instantánea de lectura las pruebas siguen
+      // siendo válidas, igual que en `save()`.
+      this.technologyArchive.beginHostTransaction();
     }
     try {
       const loaded = this.loadVerified(rawTransaction);
-      if (!rawTransaction && this.db.isTransaction) this.db.exec('COMMIT');
+      if (!rawTransaction && this.db.isTransaction) { this.db.exec('COMMIT'); this.technologyArchive.acknowledgeHostCommit(); }
       return loaded;
     } catch (error) {
       if (!rawTransaction && this.db.isTransaction) this.db.exec('ROLLBACK');
+      if (!rawTransaction) this.technologyArchive.invalidateVerification();
       throw error;
     }
   }

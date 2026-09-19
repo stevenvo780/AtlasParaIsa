@@ -233,3 +233,42 @@ test('render browser: dirty chunks, negative coordinates, selection, bounded cac
     assert.deepEqual(errors, []);
   } finally { await browser.close(); await server.close(); }
 });
+
+test('render browser: modo observador limita dpr a 1×, throttlea a 30 fps y fuerza reduceMotion (T024, P1)', { timeout: 60_000 }, async t => {
+  if (!existsSync(chromium.executablePath())) { t.skip('Chromium executable absent: dpr/fps/reduceMotion de modo observador no se ejecutaron.'); return; }
+  const server = await createServer({ configFile: false, server: { host: '127.0.0.1', port: 0 }, logLevel: 'error' });
+  await server.listen();
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3 });
+    const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
+    await page.addInitScript('window.__name = value => value');
+    await page.route('**/__render_test.html', route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><body style="margin:0"><canvas style="position:absolute;inset:0;width:100%;height:100%"></canvas></body>' }));
+    const url = new URL('__render_test.html', server.resolvedUrls!.local[0]).href;
+    await page.goto(url);
+    await page.evaluate(() => localStorage.setItem('atlas-modo', 'observador'));
+    const observador = await page.evaluate(async () => {
+      const path = '/src/client/landscape.ts'; const { Landscape } = await import(/* @vite-ignore */ path);
+      const canvas = document.querySelector('canvas')!;
+      const renderer = new Landscape(canvas, () => {}, undefined, undefined, { allowSoftwareWebGL: true });
+      const deadline = performance.now() + 3000;
+      let fps = renderer.getDiagnostics().fps;
+      while (fps <= 0 && performance.now() < deadline) { await new Promise(r => setTimeout(r, 100)); fps = renderer.getDiagnostics().fps; }
+      return { canvasW: canvas.width, cssW: canvas.clientWidth, dpr: window.devicePixelRatio, fps, reduceMotion: (renderer as unknown as { reduceMotion: boolean }).reduceMotion };
+    });
+    await page.goto(url); // Recarga: descarta el rAF y los observers de la instancia anterior antes de medir "completo".
+    await page.evaluate(() => localStorage.setItem('atlas-modo', 'completo'));
+    const completo = await page.evaluate(async () => {
+      const path = '/src/client/landscape.ts'; const { Landscape } = await import(/* @vite-ignore */ path);
+      const canvas = document.querySelector('canvas')!;
+      const renderer = new Landscape(canvas, () => {}, undefined, undefined, { allowSoftwareWebGL: true });
+      return { canvasW: canvas.width, cssW: canvas.clientWidth, dpr: window.devicePixelRatio };
+    });
+    assert.deepEqual(errors, []);
+    assert.ok(observador.dpr >= 2, `este test necesita deviceScaleFactor≥2 para ser significativo (fue ${observador.dpr})`);
+    assert.equal(observador.canvasW, observador.cssW, 'observador: el dpr efectivo debe quedar en 1×, no en el dpr real del dispositivo');
+    assert.ok(observador.fps > 0 && observador.fps <= 31, `observador debe throttlear el bucle a ~30 fps (medido ${observador.fps})`);
+    assert.equal(observador.reduceMotion, true, 'observador fuerza reduceMotion (no interpola)');
+    assert.ok(completo.canvasW > completo.cssW, 'completo: sin el techo de observador, un dispositivo de alta densidad sigue redibujando a más de 1×');
+  } finally { await browser.close(); await server.close(); }
+});

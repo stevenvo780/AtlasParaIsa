@@ -33,7 +33,13 @@ function limitedMemory(): boolean {
 function noWebgl2(): boolean {
   // Sin `document` (Node, pruebas sin DOM) no hay forma de comprobarlo: se asume lo peor.
   if (typeof document === 'undefined') return true;
-  try { return !document.createElement('canvas').getContext('webgl2'); } catch { return true; }
+  let gl: WebGL2RenderingContext | null;
+  try { gl = document.createElement('canvas').getContext('webgl2') as WebGL2RenderingContext | null; } catch { return true; }
+  // Sonda de usar y tirar: libera el contexto de inmediato (no memoizamos `decidirModo`, ver informe
+  // T024) para no agotar el límite de contextos WebGL2 del navegador. `getExtension` puede faltar en
+  // un stub de test o fallar en un navegador raro: no debe cambiar el resultado ya decidido arriba.
+  try { gl?.getExtension?.('WEBGL_lose_context')?.loseContext(); } catch { /* best-effort */ }
+  return !gl;
 }
 
 /** Persiste una elección explícita (conmutador de la barra, o `?modo=` al llegar). */

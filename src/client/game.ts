@@ -141,6 +141,10 @@ function wire(): void {
   el('modo-toggle').addEventListener('click', () => {
     const next: Modo = decidirModo() === 'observador' ? 'completo' : 'observador';
     setModo(next);
+    // Si `?modo=` sigue en la URL tras recargar, decidirModo() le da prioridad y pisa lo que
+    // acabamos de guardar: el conmutador quedaría en no-op permanente. La quitamos primero.
+    const url = new URL(location.href);
+    if (url.searchParams.has('modo')) { url.searchParams.delete('modo'); history.replaceState(null, '', url); }
     location.reload();
   });
   el('logout-button').addEventListener('click', async () => { try { const response = await fetch('/api/logout', { method: 'POST', credentials: 'same-origin', signal: AbortSignal.timeout(10_000) }); if (!response.ok) throw new Error(); loginScreen(); } catch { loginScreen('Ocultamos la carta, pero no pudimos revocar la sesión. Vuelve a conectar para cerrar la sesión.'); } });

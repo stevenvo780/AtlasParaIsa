@@ -28,6 +28,7 @@ export class Connection {
   private pending: Gesture | null = null;
   private readonly requesting = new Set<string>();
   private readonly askedRecipes = new Set<string>();
+  private subscribeMs = 0;
   private status: ConnectionStatus = 'connecting';
   private browserOffline = false;
   private readonly onOffline = (): void => {
@@ -90,6 +91,14 @@ export class Connection {
     this.viewport = next;
     clearTimeout(this.viewportTimer);
     this.viewportTimer = setTimeout(() => this.sendViewport(), 150);
+  }
+
+  /** Modo ligero móvil (T024/T036a): pide al servidor una cadencia mínima para ESTE cliente.
+   * Se recuerda y se reenvía en cada reconexión, porque el servidor no la conserva entre sockets. */
+  suscribir(intervaloMs: number): void {
+    if (!Number.isFinite(intervaloMs) || intervaloMs < 0) return;
+    this.subscribeMs = Math.floor(intervaloMs);
+    this.transmit({ type: 'suscripcion', intervaloMs: this.subscribeMs });
   }
 
   /** A procedure's steps are not part of the snapshot; a reader asks for one at a time. */
@@ -171,6 +180,7 @@ export class Connection {
         this.retries = 0;
         this.updateStatus('live');
         this.watchSilence();
+        if (this.subscribeMs) this.transmit({ type: 'suscripcion', intervaloMs: this.subscribeMs });
         this.sendViewport();
         if (this.pending) this.deliver();
       };

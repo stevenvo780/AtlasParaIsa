@@ -345,7 +345,8 @@ export class Landscape {
   private readonly phaseLayer = document.createElement('div');
   private readonly rainLayer = document.createElement('div');
 
-  private readonly gpu: GpuTerrain;
+  /** T036(a): en modo observador no se instancia GpuTerrain; el dibujado cae al Canvas 2D cacheado. */
+  private readonly gpu: GpuTerrain | null;
   private readonly terrainCache = new BoundedCache<GroundChunk>(TERRAIN_CACHE_LIMIT, (chunk, key) => {
     this.gpu?.drop(key); chunk.canvas.width = chunk.canvas.height = 0;
   });
@@ -438,7 +439,7 @@ export class Landscape {
     this.reduceMotion = e.matches;
   };
 
-  constructor(canvas: HTMLCanvasElement, onSelect: SelectHandler, private readonly onViewport?: (viewport: Viewport) => void, private readonly onManualCamera?: () => void, options: { allowSoftwareWebGL?: boolean } = {}) {
+  constructor(canvas: HTMLCanvasElement, onSelect: SelectHandler, private readonly onViewport?: (viewport: Viewport) => void, private readonly onManualCamera?: () => void, options: { allowSoftwareWebGL?: boolean; modo?: 'completo' | 'observador' } = {}) {
     this.canvas = canvas;
     this.onSelect = onSelect;
 
@@ -446,7 +447,7 @@ export class Landscape {
     if (!ctx) throw new Error('Landscape: este navegador no expone un contexto 2D.');
     this.ctx = ctx;
 
-    this.gpu = new GpuTerrain(canvas, options.allowSoftwareWebGL);
+    this.gpu = options.modo === 'observador' ? null : new GpuTerrain(canvas, options.allowSoftwareWebGL);
     // Multiplication must happen after browser composition: tinting a transparent 2D
     // overlay alone would brighten the WebGL terrain at night. Labels remain above it.
     for (const layer of [this.phaseLayer, this.rainLayer]) {
@@ -593,10 +594,10 @@ export class Landscape {
 
   /** CPU submission time, actual RAF rate, and detected backend; not a GPU timer. */
   getDiagnostics(): RenderDiagnostics {
-    return { fps: this.fps, frameMs: this.frameMs, backend: this.gpu.active ? 'webgl2' : 'canvas2d-cached', gpuStatus: this.gpu.status, gpuLabel: this.gpu.label || undefined,
-      visibleTiles: this.visibleTiles, drawCalls: this.drawCalls + this.gpu.drawCalls, cacheBuilds: this.cacheBuilds + this.spriteBuilds,
+    return { fps: this.fps, frameMs: this.frameMs, backend: this.gpu?.active ? 'webgl2' : 'canvas2d-cached', gpuStatus: this.gpu?.status ?? 'unavailable', gpuLabel: this.gpu?.label || undefined,
+      visibleTiles: this.visibleTiles, drawCalls: this.drawCalls + (this.gpu?.drawCalls ?? 0), cacheBuilds: this.cacheBuilds + this.spriteBuilds,
       cacheEntries: this.terrainCache.size + this.spriteCache.size, cacheBytes: this.terrainCache.size * 128 * 128 * 4 + this.spriteBytes,
-      textureUploads: this.gpu.uploads, gpuTextureBytes: this.gpu.textureCount * 128 * 128 * 4, terrainBuilds: this.cacheBuilds, spriteBuilds: this.spriteBuilds, visibleAnimals: this.visibleAnimals, visibleStructures: this.visibleStructures,
+      textureUploads: this.gpu?.uploads ?? 0, gpuTextureBytes: (this.gpu?.textureCount ?? 0) * 128 * 128 * 4, terrainBuilds: this.cacheBuilds, spriteBuilds: this.spriteBuilds, visibleAnimals: this.visibleAnimals, visibleStructures: this.visibleStructures,
       bodyCutaways: this.bodyCutaways, effects: { ...this.effects }, effectBudget: VISUAL_BUDGET };
   }
 
@@ -649,7 +650,7 @@ export class Landscape {
     this.grid = [];
     this.prev = null;
     this.curr = null;
-    this.terrainCache.clear(); this.spriteCache.clear(); this.chunks = []; this.gpu.destroy();
+    this.terrainCache.clear(); this.spriteCache.clear(); this.chunks = []; this.gpu?.destroy();
     this.groundStamp.width = this.groundStamp.height = 0;
     this.scene.width = this.scene.height = 0;
     this.labels.width = this.labels.height = 0; this.labels.remove(); this.phaseLayer.remove(); this.rainLayer.remove();
@@ -1116,7 +1117,7 @@ export class Landscape {
     // Neutral fog means this part of the projection has not arrived. It is never invented sea.
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     this.drawCalls = 0;
-    const accelerated = this.gpu.render(this.chunks, { ...this.cam, width: this.cssW, height: this.cssH, dpr: this.dpr });
+    const accelerated = this.gpu?.render(this.chunks, { ...this.cam, width: this.cssW, height: this.cssH, dpr: this.dpr }) ?? false;
     ctx.clearRect(0, 0, cw, ch);
     this.labelCtx.setTransform(1,0,0,1,0,0); this.labelCtx.clearRect(0,0,cw,ch);
     if (!accelerated) {

@@ -58,11 +58,13 @@ function loginScreen(message = ''): void {
 }
 
 /** P1: refleja en la barra el modo decidido por `decidirModo()` (query, recordado o heurística). */
-function syncModo(): void {
-  const active = decidirModo() === 'observador';
+function syncModo(): Modo {
+  const modo = decidirModo();
+  const active = modo === 'observador';
   const button = el('modo-toggle');
   button.setAttribute('aria-pressed', String(active));
   button.title = active ? 'Modo ligero activo: toca para volver al completo' : 'Activar el modo ligero para móviles lentos';
+  return modo;
 }
 
 function enterWorld(): void {
@@ -70,14 +72,12 @@ function enterWorld(): void {
   root.innerHTML = worldShell();
   notebook = new Notebook(el('game')); inspectorTab = 'now';
   focusedRecipe = null; recipeDetails.clear();
-  syncModo();
+  const modo = syncModo();
   connection = new Connection({ world: receiveWorld, status: value => { status = value; renderStatus(); }, pending: value => { pending = value; if (!value) landscape?.setPendingTarget(null); renderControls(); }, result: result => message(result.message, result.accepted), error: text => message(text, false), expired: () => loginScreen('La sesión terminó. Vuelve a entrar para ver la carta.'), recipe: (id, recipe) => { recipeDetails.set(id, recipe); if (statsTab === 'technology' && !el('stats-drawer').hidden) renderStats(); } });
-  landscape = new Landscape(el<HTMLCanvasElement>('landscape'), pick, viewport => { connection?.setViewport(viewport); el('camera-coordinates').textContent = `${viewport.x + Math.floor(viewport.width / 2)}, ${viewport.y + Math.floor(viewport.height / 2)}`; }, () => { following = false; renderControls(); });
-  // TODO T024→T020: en observador debería enviarse `{type:'suscripcion', intervaloMs: 5000}` (el
-  // servidor ya lo respeta: src/server/app.ts) y `landscape` no debería instanciar `GpuTerrain`.
-  // `Connection` no expone un envío genérico (lo necesitará T020 para `{type:'recipe',id}`) y el
-  // constructor de `Landscape` queda fuera del alcance asignado a esta tarea (solo resize/frame);
-  // ambos huecos quedan para cuando T020 aporte ese hook. Ver informe T024.
+  landscape = new Landscape(el<HTMLCanvasElement>('landscape'), pick, viewport => { connection?.setViewport(viewport); el('camera-coordinates').textContent = `${viewport.x + Math.floor(viewport.width / 2)}, ${viewport.y + Math.floor(viewport.height / 2)}`; }, () => { following = false; renderControls(); }, { modo });
+  // T036(a): en observador el mundo llega cada 5 s (el servidor acota a 1000 ms) y el terreno se
+  // dibuja en Canvas 2D: ni WebGL2 ni una cadencia que un móvil lento no puede sostener.
+  if (modo === 'observador') connection.suscribir(5000);
   wire(); renderTool(); connection.start();
 }
 

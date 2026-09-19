@@ -28,6 +28,19 @@ Auditoría integral de 12 revisores independientes + refutación adversarial: [`
 | «En el celular es imposible» | El mensaje `state` no está acotado por cámara: 465 KiB por cliente, 2 veces por segundo (186 KiB son recetas con su programa completo que la UI no dibuja); sin modo ligero ni tope de `dpr`. | `src/world/index.ts:953-978`, `src/world/technology.ts:550`, `src/client/landscape.ts:612` |
 | «La arquitectura es mejorable» | Capas sanas; lo mejorable es estructural: `cloneWorld` + `stepWorld` + `store.save` síncronos cada tick (10 Hz), p95 131,9 ms con 32 habitantes dispersos. | `src/server/app.ts:142-146,265`, `src/server/store.ts:568-645` |
 
+## Estado 2026-09-19 (sprint)
+
+El mismo día de la revisión de arriba se corrigieron y calibraron las 4 leyes del motor que explicaban las cinco quejas: senescencia como riesgo Gompertz gradual (no un corte de edad), capacidad de carga logística por bioma con decaimiento de fertilidad, agua superficial concentrada en cuencas, y elección de pareja por afinidad con variación genética real en los fundadores, además de persistencia por cadencia validada en frontera. El resultado se desplegó en producción (`https://atlas.humanizar.tech`) a las **11:19**, commit **`835f3d5`**, con la política de mundo nuevo por versión publicada ya descrita más abajo. Los defaults calibrados son el fallback analítico de `research.md` (sin barrido T031 ejecutado por el límite de tiempo del sprint); están documentados con sus fórmulas en [REGLAS.md](docs/REGLAS.md#parámetros-del-mundo-srcworldparamsts-sprint-2026-09-19).
+
+| Indicador | Antes del sprint | Producción tras el sprint |
+|---|---|---|
+| `/api/world` (tras 1,5 h de servidor corriendo) | 85 s (event loop saturado, cliente aborta a 10 s) | 0,89 s (363 KiB) |
+| CPU del proceso servidor | ~95 % sostenido (sin cadencia) | 27 % (37 % horas después, con el laboratorio corriendo en paralelo) |
+| Causa de muerte dominante | 494/496 (99,6 %) por corte incondicional de edad | riesgo de senescencia real; 0 muertes el día 1 en la réplica de verificación |
+| Celdas con comida | 100 % saturadas (`t=1251`, sin capacidad de carga) | 68,9 % con `food>0,3` (mundo público, día 1) / 93,65 % con `food>0,1` (réplica de laboratorio, semilla 4821) |
+
+Quedan pendientes post-evento: los barridos de calibración T031/T032, la dieta del `state` para móvil (T036h, hoy ~576,6 KiB a t=8000) y el checklist de publicación T043 (`CARTA_PROXY_IP`, `data/access.scrypt`, activar el timer de respaldo, abrir la ventana de poda con `CARTA_PARAMS`). Detalle completo en [docs/EVIDENCIA.md](docs/EVIDENCIA.md).
+
 ## Arrancar en local
 
 Requiere Node.js **22.22 o posterior de la rama 22**; esta implementación se comprobó con **22.22.3**. El manifiesto también admite Node.js 24 o posterior, sin acreditar aquí esas versiones. Se usa `node:sqlite`, que en Node.js 22 muestra un aviso de API experimental.
@@ -185,9 +198,30 @@ El informe separa vecinos de S/I, intervalos de vida, presión corporal, accione
 
 Los controles del auditor están incluidos en `npm test`. Los controles de procesos del wrapper se ejecutan con `python3 tests/survival-matrix_test.py`; fuera de Linux indican expresamente qué limpieza de procesos no comprobaron. La [matriz V6 cerrada](docs/EVIDENCIA.md#matriz-v6-cerrada-a-veinticinco-días) conserva sus ejecutores originales, informes y hashes; reinicio en 30000, recarga final y crónica completa pasaron en las tres semillas. El cierre de integridad no convierte el resultado demográfico adverso en éxito de supervivencia.
 
-## Laboratorio (en construcción)
+## Laboratorio
 
-El laboratorio de réplicas masivas (`npm run lab`) **no existe todavía**: se construye en T016–T018 de `specs/001-mundo-solido-masivo/tasks.md`. Su documentación de uso vivirá en `scripts/lab/README.md` una vez creado ese script.
+El laboratorio de réplicas masivas (T016–T018 de `specs/001-mundo-solido-masivo/tasks.md`) ejecuta simulaciones deterministas fuera del servidor, sin navegador ni WebSocket, para medir las leyes del mundo con cifras (constitución II: evidencia). Tres comandos npm:
+
+```sh
+# Una réplica individual determinista
+npx tsx scripts/lab/replica.ts --seed 51926 --dias 10 --params "cuerpo.riesgoSenescenciaDiario=0.01,genes.varianzaFundadores=0.15" --salida artifacts/lab/mi-corrida
+
+# Barrido masivo: producto cartesiano de --param × --replicas, en cola con concurrencia acotada
+npm run lab -- --replicas 8 --dias 25 --param cuerpo.riesgoSenescenciaDiario=0.04,0.08 --param cuerpo.cuidadoReduceRiesgo=0.6,0.8
+
+# Agregar un barrido ya corrido en resumen.json/resumen.md
+npm run lab:resumen -- --entrada artifacts/lab/mi-corrida --control artifacts/lab/base
+```
+
+`npm run lab:replica` corre `scripts/lab/replica.ts` (una réplica de N días de 2400 ticks, **siempre con un `Store` SQLite temporal adjunto**: sin él las leyes de tecnología son distintas — hallazgo P3 de `docs/REVISION-2026-09-19.md` — la ventana de recetas residentes se llena a 256 y deja de poder inventar). Escribe `dia-NNN.json` por cada día (población, nacimientos, muertes por causa, fundadores vivos, generaciones vivas, diversidad de oficios, gini de recursos, fracción de celdas con comida, distancia media a agua, p50/p95 ms por tick, rss) y `replica.json` al terminar (parámetros resueltos, sha de git, digest sha256 del código de `src/world`). Salida determinista salvo tiempos y memoria.
+
+`npm run lab` corre `scripts/lab/barrido.ts`: encola réplicas como procesos hijos con concurrencia acotada (por defecto `availableParallelism()-2`), mata el grupo de procesos completo y marca "abortada" la réplica que supere `--timeout` (600 s por defecto), y al terminar invoca automáticamente `scripts/lab/resumen.ts` sobre la salida.
+
+`npm run lab:resumen` agrega un directorio de barrido en `resumen.json` y `resumen.md`, con semáforo 🟢🟡🔴 solo para las 4 métricas con umbral explícito en `spec.md` (SC-002 supervivencia de fundadores, SC-003 diversidad ≥0,6, SC-004 Gini ≥0,35, SC-005 cero muertes de causa desconocida); el resto se reporta comparado contra el grupo de control (`params: {}`) sin semáforo.
+
+**Aviso operativo: pinnear un worktree para líneas base.** El laboratorio importa el código de simulación por ruta absoluta al árbol de trabajo compartido, sin aislar una copia. Si el árbol principal sigue recibiendo commits en vivo (p. ej. otro workflow de desarrollo en paralelo), una réplica larga puede arrancar con una versión del código y terminar corriendo sobre otra sin que se note (ver el aviso de integridad en `docs/evidencia-2026-09-19/linea-base-reglas-viejas-16x25.md`). Para una línea base o comparación que deba ser estable, fija un worktree de git en el commit exacto que se quiere medir (`git worktree add`) y apunta la réplica a ese worktree en vez de al árbol principal mientras haya desarrollo activo.
+
+Con `persistencia.cadaTicks=1` (el default de `params.ts`), guardar cada tick cuesta caro (~32 ms/tick, un día completo ≈78 s); para barridos grandes conviene pasar `--params "persistencia.cadaTicks=200"` (o el valor que calibre T031) para acelerar sin dejar de ejercitar el guardado periódico con `Store`. Detalle completo en `scripts/lab/README.md`.
 
 ## Mapa del proyecto
 

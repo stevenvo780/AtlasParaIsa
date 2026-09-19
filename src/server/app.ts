@@ -5,7 +5,8 @@ import { isIP } from 'node:net';
 import { WebSocketServer, WebSocket } from 'ws';
 import { createWorld, stepWorld, projectWorld, normalizeViewport, cloneWorld } from '../world/index.js';
 import { paramsOf } from '../world/params.js';
-import type { Gesture, GestureResult, ServerMessage, Viewport, WorldView, RuntimeStats } from '../shared/types.js';
+import { technologyRecipeDetail } from '../world/technology.js';
+import type { ClientMessage, Gesture, GestureResult, ServerMessage, Viewport, WorldView, RuntimeStats } from '../shared/types.js';
 import { Store, fingerprint, GestureConflict, SessionRevoked } from './store.js';
 import { cookie, hashToken, makeToken, passwordVerifier, sessionHash } from './auth.js';
 import { ensureWorldInstance, readWorldInstance } from './world-instance.js';
@@ -292,10 +293,16 @@ export function createApp(options: AppOptions) {
             if (Date.now() - info.window >= 10_000) { info.window = Date.now(); info.messages = 0; }
             if (++info.messages > 120) { client.close(4008, 'Demasiados mensajes.'); return; }
             if (binary) throw new HttpError(400, 'Se requiere JSON.');
-            const parsed = JSON.parse(data.toString()) as { type?: unknown; gesture?: unknown; viewport?: Viewport };
+            const parsed = JSON.parse(data.toString()) as Partial<ClientMessage> & { gesture?: unknown; viewport?: Viewport; id?: unknown };
             if (parsed?.type === 'viewport') {
               try { info.viewport = normalizeViewport(parsed.viewport); } catch { throw new HttpError(400, 'Ventana de cámara no válida.'); }
               sendView(client); return;
+            }
+            // One definition at a time, read-only: the snapshot carries summaries and this query never advances the world.
+            if (parsed?.type === 'recipe') {
+              if (typeof parsed.id !== 'string' || !/^recipe-[1-9]\d{0,9}$/.test(parsed.id)) throw new HttpError(400, 'Identificador de procedimiento no válido.');
+              send(client, { type: 'recipe', id: parsed.id, recipe: technologyRecipeDetail(world, parsed.id) ?? null });
+              return;
             }
             if (!parsed || parsed.type !== 'gesture') throw new HttpError(400, 'Mensaje desconocido.');
             const result = await requestGesture(parseGesture(parsed.gesture), hash);

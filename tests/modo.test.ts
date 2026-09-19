@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { decidirModo, setModo, type Modo } from '../src/client/modo.js';
+import { decidirModo, setModo, rendererProfile, type Modo } from '../src/client/modo.js';
 
 /** Storage mínimo en memoria: basta para lo que `modo.ts` usa de `Storage`. */
 function memoryStorage() {
@@ -70,4 +70,26 @@ test('setModo tolera la ausencia de localStorage (privacidad/almacenamiento bloq
     assert.doesNotThrow(() => setModo('observador'));
     assert.doesNotThrow(() => decidirModo());
   });
+});
+
+// R5: `rendererProfile` es pura (sin DOM) — el techo de dpr y el tope de fps de `Landscape`
+// dependen ÚNICAMENTE del `Modo` recibido, nunca de una heurística de dispositivo releída aparte.
+test('rendererProfile — completo (escritorio): dpr hasta 3× y sin tope de fps propio', () => {
+  const perfil = rendererProfile('completo');
+  assert.equal(perfil.dprCeiling, 3);
+  assert.equal(perfil.fpsCap, null);
+});
+
+test('rendererProfile — observador (móvil ligero): dpr ≤ 1,5× y fps bajo (30)', () => {
+  const perfil = rendererProfile('observador');
+  assert.equal(perfil.dprCeiling, 1.5);
+  assert.equal(perfil.fpsCap, 30);
+});
+
+test('rendererProfile es una función pura: mismo modo, mismo resultado, sin globals de DOM', () => {
+  // No hay stub de location/localStorage/matchMedia/navigator/document en este test a propósito:
+  // si rendererProfile tocara alguno, lanzaría o daría un resultado distinto por entorno.
+  assert.deepEqual(rendererProfile('completo'), rendererProfile('completo'));
+  assert.deepEqual(rendererProfile('observador'), rendererProfile('observador'));
+  assert.notDeepEqual(rendererProfile('completo'), rendererProfile('observador'));
 });

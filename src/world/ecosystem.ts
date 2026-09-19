@@ -1,6 +1,8 @@
 import type { Feature, Tile, Species } from '../shared/types.js';
 import { EcosystemKernel } from './ecosystem-kernel.js';
 import { initialWood } from './forest.js';
+import { DEFAULT_PARAMS } from './params.js';
+import { ruidoCuenca } from './agua.js';
 const clamp = (n: number, maximum = 1): number => Math.max(0, Math.min(maximum, n));
 const key = (x: number, y: number): string => `${x},${y}`;
 const TREE_FEATURES = new Set<Feature>(['tree', 'pine', 'palm', 'cactus', 'reeds', 'stump']);
@@ -14,7 +16,7 @@ function hash(seed: number, x: number, y: number, salt: number): number {
 }
 
 /** New fields only: a saved zero means depleted, never permission to refill a patch. */
-export function initializeEcosystem(seed: number, tile: Tile): Tile {
+export function initializeEcosystem(seed: number, tile: Tile, cuencas: number = DEFAULT_PARAMS.agua.cuencas): Tile {
   const result: Tile = { ...tile };
   const newFauna = result.fauna === undefined;
   const patch = hash(seed, Math.floor(tile.x / 8), Math.floor(tile.y / 8), 1201);
@@ -48,8 +50,15 @@ export function initializeEcosystem(seed: number, tile: Tile): Tile {
   if (result.fertility === undefined) result.fertility = clamp(water ? 0.35 : 0.12 + tile.moisture * 0.55 + tile.vegetation * 0.25);
   if (result.cultivation === undefined) result.cultivation = 0;
   if (result.traffic === undefined) result.traffic = 0;
-  if (result.drinkingWater === undefined) result.drinkingWater = ocean ? 0 : result.feature === 'spring' ? 0.65
-    : result.feature === 'pool' ? 0.22 + tile.moisture * 0.2 : wet ? 0.25 + tile.moisture * 0.35 : water ? 0.7 : 0;
+  if (result.drinkingWater === undefined) {
+    // «Cuencas» (T035, SC-004): el agua potable de origen (manantial/charca/humedal) solo se
+    // conserva dentro de una cuenca (ruido de baja frecuencia < agua.cuencas); fuera de ella la
+    // tesela queda seca de agua potable (la humedad general, `tile.moisture`, no cambia aquí). El
+    // mar (`ocean`) no entra en el ruido: sigue sin agua potable, como siempre.
+    const potable = result.feature === 'spring' ? 0.65
+      : result.feature === 'pool' ? 0.22 + tile.moisture * 0.2 : wet ? 0.25 + tile.moisture * 0.35 : water ? 0.7 : 0;
+    result.drinkingWater = ocean ? 0 : potable > 0 && ruidoCuenca(seed, tile.x, tile.y) >= cuencas ? 0 : potable;
+  }
   if (result.life === undefined) result.life = local % 5 === 0 ? 0.65 : 0.03;
   if (result.fauna === undefined) {
     const viable = water || (tile.vegetation > 0.15 && tile.moisture > 0.3 && tile.terrain !== 'shelter');

@@ -3,6 +3,7 @@ import { initializeEcosystem } from './ecosystem.js';
 import { initialWood } from './forest.js';
 import type { Animal } from './animals.js';
 import type { StructureView } from '../shared/life.js';
+import { DEFAULT_PARAMS } from './params.js';
 
 export const CHUNK_SIZE = 16;
 /** Technical integer-coordinate guard, not the boundary of a generated map. Upper bound is exclusive. */
@@ -88,7 +89,7 @@ export function chunkKey(x: number, y: number): string {
 }
 
 /** No persistent cache or shared random stream: a cell is a pure function of seed and position. */
-export function generateTile(seed: number, x: number, y: number): Tile {
+export function generateTile(seed: number, x: number, y: number, cuencas: number = DEFAULT_PARAMS.agua.cuencas): Tile {
   assertSeed(seed); assertCoordinate(x); assertCoordinate(y);
   const continents = octaves(seed, x, y, 512, 100);
   const hills = octaves(seed, x, y, 64, 200);
@@ -112,7 +113,7 @@ export function generateTile(seed: number, x: number, y: number): Tile {
   else if (moisture > 0.56) biome = 'forest';
   else biome = 'grassland';
 
-  if (water) return initializeEcosystem(seed, { x, y, terrain: 'water', biome, elevation: rounded(elevation), moisture: 1, vegetation: 0, food: 0, wood: 0, stone: 0 });
+  if (water) return initializeEcosystem(seed, { x, y, terrain: 'water', biome, elevation: rounded(elevation), moisture: 1, vegetation: 0, food: 0, wood: 0, stone: 0 }, cuencas);
 
   const vegetation = clamp(biome === 'forest' ? 0.62 + moisture * 0.3 + detail * 0.06
     : biome === 'wetland' ? 0.45 + moisture * 0.35 + detail * 0.07
@@ -128,7 +129,7 @@ export function generateTile(seed: number, x: number, y: number): Tile {
     x, y, terrain: biome === 'desert' || biome === 'mountain' ? 'soil' : 'meadow', biome,
     elevation: rounded(elevation), moisture: rounded(moisture), vegetation: rounded(vegetation),
     food: rounded(clamp(vegetation * (0.16 + moisture * 0.38) * (0.9 + detail * 0.1))), wood, stone,
-  });
+  }, cuencas);
 }
 
 const LANDMARKS: Record<Biome, readonly string[]> = {
@@ -148,7 +149,7 @@ export function proceduralPlaceName(seed: number, x: number, y: number): string 
   return `${nouns[hash(seed, x, y, 800) % nouns.length]} ${QUALIFIERS[hash(seed, x, y, 801) % QUALIFIERS.length]}`;
 }
 
-export function generateChunk(seed: number, cx: number, cy: number): Chunk {
+export function generateChunk(seed: number, cx: number, cy: number, cuencas: number = DEFAULT_PARAMS.agua.cuencas): Chunk {
   assertSeed(seed);
   const limit = MAX_COORDINATE / CHUNK_SIZE;
   if (!Number.isInteger(cx) || !Number.isInteger(cy) || cx < -limit || cy < -limit || cx >= limit || cy >= limit) {
@@ -157,7 +158,7 @@ export function generateChunk(seed: number, cx: number, cy: number): Chunk {
   const x0 = cx * CHUNK_SIZE, y0 = cy * CHUNK_SIZE;
   const tiles: Tile[] = [];
   for (let dy = 0; dy < CHUNK_SIZE; dy++) {
-    for (let dx = 0; dx < CHUNK_SIZE; dx++) tiles.push(generateTile(seed, x0 + dx, y0 + dy));
+    for (let dx = 0; dx < CHUNK_SIZE; dx++) tiles.push(generateTile(seed, x0 + dx, y0 + dy, cuencas));
   }
   const places: PlaceView[] = [];
   if (hash(seed, cx, cy, 900) % 7 === 0) {

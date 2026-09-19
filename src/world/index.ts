@@ -100,6 +100,22 @@ function addEvent(world: World, event: Omit<ChronicleEvent, 'id' | 'tick'>): Chr
   return result;
 }
 
+/** FR-006: legible death registration. `advancePopulation` (lineage.ts) already emits place (x,y)
+ * with the event; this adds tick and up to 3 prior events of the same actor, both in the narrated
+ * `text` and in a structured `death` field, before the event is committed to the chronicle. The
+ * short cause comes from `world.legacy`, which `advancePopulation` pushes the record to just before
+ * emitting (never from parsing the free-text `cause`). */
+export function deathContext(world: World, event: Omit<ChronicleEvent, 'id' | 'tick'>): Omit<ChronicleEvent, 'id' | 'tick'> {
+  const actorId = event.actors[0];
+  if (actorId === undefined || event.x === undefined || event.y === undefined) throw new Error('Evento de muerte sin actor o lugar.');
+  const record = world.legacy.find(entry => entry.id === actorId);
+  if (!record) throw new Error('Evento de muerte sin registro de legado correspondiente.');
+  const previous = world.events.filter(e => e.actors.includes(actorId)).slice(-3).map(e => e.text);
+  const history = previous.length ? ` Antes: ${previous.join(' · ')}.` : ' Sin episodios previos en la ventana reciente de la crónica.';
+  return { ...event, text: `${event.text} Ocurrió en (${event.x}, ${event.y}), paso ${world.tick}.${history}`,
+    death: { cause: record.cause, tick: world.tick, x: event.x, y: event.y, previous } };
+}
+
 function remember(person: Person, world: World, text: string, causeId: string, placeId = ''): void {
   person.experiences.push({ tick: world.tick, text, causeId, placeId });
   if (person.experiences.length > MAX_EXPERIENCES) person.experiences.shift();
@@ -875,7 +891,7 @@ export function stepWorld(world: World, inputs: Gesture[] = [], context: WorldCo
     }
   }
   encounters(world);
-  advancePopulation(world,{emit:event=>addEvent(world,event),beforeDeath:transferEstate});
+  advancePopulation(world,{emit:event=>addEvent(world,event.kind==='death'?deathContext(world,event):event),beforeDeath:transferEstate});
   updateCommunities(world, event => addEvent(world, event));
   reproduce(world);
   if (catalogueEnabled(world.technology)) for (const person of world.people) maintainTechnologyMemory(world, person);
@@ -971,7 +987,7 @@ export function projectWorld(world: World, viewport?: Viewport, context: WorldCo
       lifeStage: p.demography.age < life.maturityAge ? 'juvenile' : p.demography.age < life.senescenceStart ? 'adult' : 'senescent',
       genome: { generation: p.genome.generation, parents: [...p.genome.parents], learningRate: p.genome.learningRate, cooperation: p.genome.cooperation, mutations: p.genome.mutations }, age: world.tick - p.bornAt, communityId: p.communityId, culture: { ...p.culture }, trust: Object.entries(p.bonds).map(([id, value]) => ({ id, value })), experiences: p.experiences.map(e => ({ tick: e.tick, text: e.text, causeId: e.causeId })) };
     }),
-    places: projected.places.map(p => ({ id: p.id, name: p.name, x: p.x, y: p.y, description: p.description, gatherings: p.gatherings })), events: world.events.map(e => ({ id: e.id, tick: e.tick, kind: e.kind, actors: [...e.actors], ...(e.x === undefined ? {} : { x: e.x }), ...(e.y === undefined ? {} : { y: e.y }), text: e.text, cause: e.cause, source: e.source })),
+    places: projected.places.map(p => ({ id: p.id, name: p.name, x: p.x, y: p.y, description: p.description, gatherings: p.gatherings })), events: world.events.map(e => ({ id: e.id, tick: e.tick, kind: e.kind, actors: [...e.actors], ...(e.x === undefined ? {} : { x: e.x }), ...(e.y === undefined ? {} : { y: e.y }), text: e.text, cause: e.cause, source: e.source, ...(e.death === undefined ? {} : { death: { ...e.death, previous: [...e.death.previous] } }) })),
     memories: world.memories.map(m => ({ id: m.id, title: m.title, text: m.text, source: m.source, placeId: m.placeId })),
     animals: projected.animals, structures: projected.structures, blueprints: world.blueprints.map(b=>({id:b.id,name:b.name,components:[...b.components],generation:b.generation,parents:[...b.parents],inventorId:b.inventorId,tick:b.tick,uses:b.uses,usefulness:b.usefulness,cost:{wood:b.cost.wood,stone:b.cost.stone,work:b.cost.work}})),
     stats: worldStatistics(world), communities: world.communities.map(c => ({ id: c.id, name: c.name, x: c.x, y: c.y, color: c.color, members: [...c.members], culture: { ...c.culture }, formedAt: c.formedAt, cooperation: c.cooperation, disputes: c.disputes })),

@@ -33,6 +33,9 @@ export interface PlaceView { id: string; name: string; x: number; y: number; des
 export interface ChronicleEvent {
   id: string; tick: number; kind: 'ecology' | 'meeting' | 'care' | 'learning' | 'adaptation' | 'memory' | 'gesture' | 'pause' | 'discovery' | 'settlement' | 'cooperation' | 'birth' | 'community' | 'conflict' | 'animal' | 'invention' | 'death';
   actors: string[]; text: string; cause: string; x?: number; y?: number; source: 'simulation' | 'sample' | 'approved';
+  /** FR-006: only on kind 'death'. Explicit place, tick and up to 3 prior events of the same actor,
+   * so the inspector can show legible context beyond the free-text `cause`. */
+  death?: { cause: string; tick: number; x: number; y: number; previous: string[] };
 }
 export interface MemoryView { id: string; title: string; text: string; source: 'sample' | 'approved'; placeId: string; }
 export interface WorldView {

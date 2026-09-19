@@ -3,7 +3,7 @@ import { readFileSync, statSync } from 'node:fs';
 import { resolve, extname, sep } from 'node:path';
 import { isIP } from 'node:net';
 import { WebSocketServer, WebSocket } from 'ws';
-import { createWorld, stepWorld, projectWorld, normalizeViewport, cloneWorld } from '../world/index.js';
+import { createWorld, stepWorld, projectWorld, normalizeViewport, cloneWorld, personDetail } from '../world/index.js';
 import { paramsOf } from '../world/params.js';
 import { technologyRecipeDetail } from '../world/technology.js';
 import type { ClientMessage, Gesture, GestureResult, ServerMessage, Viewport, WorldView, RuntimeStats } from '../shared/types.js';
@@ -303,6 +303,12 @@ export function createApp(options: AppOptions) {
             if (parsed?.type === 'viewport') {
               try { info.viewport = normalizeViewport(parsed.viewport); } catch { throw new HttpError(400, 'Ventana de cámara no válida.'); }
               sendView(client); return;
+            }
+            // T036(h): one inhabitant's biography at a time, read-only; the snapshot no longer carries it.
+            if (parsed?.type === 'persona') {
+              if (typeof parsed.id !== 'string' || !/^[A-Za-z0-9_:-]{1,50}$/.test(parsed.id)) throw new HttpError(400, 'Identificador de habitante no válido.');
+              send(client, { type: 'persona', id: parsed.id, persona: personDetail(world, parsed.id) ?? null });
+              return;
             }
             // One definition at a time, read-only: the snapshot carries summaries and this query never advances the world.
             if (parsed?.type === 'recipe') {

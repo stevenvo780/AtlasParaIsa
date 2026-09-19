@@ -1,4 +1,4 @@
-import { PROTOCOL_VERSION, type ClientMessage, type Gesture, type GestureResult, type ServerMessage, type TechnologyRecipe, type Viewport, type WorldView } from '../shared/types.js';
+import { PROTOCOL_VERSION, type ClientMessage, type Gesture, type GestureResult, type PersonDetail, type ServerMessage, type TechnologyRecipe, type Viewport, type WorldView } from '../shared/types.js';
 
 export type ConnectionStatus = 'connecting' | 'live' | 'offline';
 interface Callbacks {
@@ -10,6 +10,8 @@ interface Callbacks {
   pending: (pending: boolean) => void;
   /** A null definition means the server could not serve it, never that the procedure is empty. */
   recipe?: (id: string, recipe: TechnologyRecipe | null) => void;
+  /** T036(h): a null persona means that identity is not in the served world, never that it lived nothing. */
+  persona?: (id: string, persona: PersonDetail | null) => void;
 }
 
 /** The server owns the world. This class retries an input with its original ID. */
@@ -28,6 +30,7 @@ export class Connection {
   private pending: Gesture | null = null;
   private readonly requesting = new Set<string>();
   private readonly askedRecipes = new Set<string>();
+  private readonly askedPeople = new Set<string>();
   private subscribeMs = 0;
   private status: ConnectionStatus = 'connecting';
   private browserOffline = false;
@@ -109,6 +112,15 @@ export class Connection {
     return true;
   }
 
+  /** T036(h): experiences, trust and remembered procedures are not part of the snapshot;
+   * the inspector asks for one inhabitant at a time. */
+  requestPersona(id: string): boolean {
+    if (this.stopped || !/^[A-Za-z0-9_:-]{1,50}$/.test(id) || this.askedPeople.has(id)) return false;
+    if (!this.transmit({ type: 'persona', id })) return false;
+    this.askedPeople.add(id);
+    return true;
+  }
+
   private transmit(message: ClientMessage): boolean {
     if (this.stopped || this.browserOffline || this.socket?.readyState !== WebSocket.OPEN) return false;
     this.socket.send(JSON.stringify(message));
@@ -121,7 +133,7 @@ export class Connection {
 
   private updateStatus(status: ConnectionStatus): void {
     // A question asked to a socket that died was never answered; leaving it pending would silence the next one.
-    if (status !== 'live') this.askedRecipes.clear();
+    if (status !== 'live') { this.askedRecipes.clear(); this.askedPeople.clear(); }
     this.status = status;
     this.callbacks.status(status);
   }
@@ -192,6 +204,7 @@ export class Connection {
           if (message.type === 'state') this.accept(message.world);
           else if (message.type === 'result') this.result(message.result);
           else if (message.type === 'recipe') { this.askedRecipes.delete(message.id); this.callbacks.recipe?.(message.id, message.recipe); }
+          else if (message.type === 'persona') { this.askedPeople.delete(message.id); this.callbacks.persona?.(message.id, message.persona); }
           else if (message.type === 'error') this.callbacks.error(message.message);
         } catch { this.callbacks.error('No pudimos leer una actualización. Esperamos la siguiente.'); }
       };

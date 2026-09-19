@@ -1,4 +1,4 @@
-import type { AnimalView, BlueprintView, ChronicleEvent, Gesture, Order, PersonView, StructureView, TechnologyRecipe, WorldView } from '../shared/types.js';
+import type { AnimalView, BlueprintView, ChronicleEvent, Gesture, Order, PersonDetail, PersonView, StructureView, TechnologyRecipe, WorldView } from '../shared/types.js';
 import { Connection, type ConnectionStatus } from './connection.js';
 import { Landscape, type Selection } from './landscape.js';
 import { actions, phases, terrains, biomes, deathCauses, icon, esc, number, percentage } from './ui-catalog.js';
@@ -36,6 +36,8 @@ let inspectorTab: 'now' | 'kit' | 'story' = 'now';
 let focusedRecipe: string | null = null;
 /** Steps requested one by one: the snapshot only carries each procedure's identity and capacities. */
 const recipeDetails = new Map<string, TechnologyRecipe | null>();
+/** T036(h): biografías pedidas de una en una; el `state` sólo trae la identidad y el estado de ahora. */
+const personaDetails = new Map<string, PersonDetail | null>();
 let soundContext: AudioContext | null = null;
 let soundTimer: ReturnType<typeof setTimeout> | undefined;
 const el = <T extends HTMLElement = HTMLElement>(id: string): T => document.getElementById(id) as T;
@@ -72,9 +74,9 @@ function enterWorld(): void {
   clean(); lastVisit = null; status = 'connecting';
   root.innerHTML = worldShell();
   notebook = new Notebook(el('game')); inspectorTab = 'now';
-  focusedRecipe = null; recipeDetails.clear();
+  focusedRecipe = null; recipeDetails.clear(); personaDetails.clear();
   const modo = syncModo();
-  connection = new Connection({ world: receiveWorld, status: value => { status = value; renderStatus(); }, pending: value => { pending = value; if (!value) landscape?.setPendingTarget(null); renderControls(); }, result: result => message(result.message, result.accepted), error: text => message(text, false), expired: () => loginScreen('La sesión terminó. Vuelve a entrar para ver la carta.'), recipe: (id, recipe) => { recipeDetails.set(id, recipe); if (statsTab === 'technology' && !el('stats-drawer').hidden) renderStats(); } });
+  connection = new Connection({ world: receiveWorld, status: value => { status = value; renderStatus(); }, pending: value => { pending = value; if (!value) landscape?.setPendingTarget(null); renderControls(); }, result: result => message(result.message, result.accepted), error: text => message(text, false), expired: () => loginScreen('La sesión terminó. Vuelve a entrar para ver la carta.'), recipe: (id, recipe) => { recipeDetails.set(id, recipe); if (statsTab === 'technology' && !el('stats-drawer').hidden) renderStats(); }, persona: (id, persona) => { personaDetails.set(id, persona); if (selected?.kind === 'person' && selected.id === id) { inspectorSignature = ''; renderInspector(); } } });
   landscape = new Landscape(el<HTMLCanvasElement>('landscape'), pick, viewport => { connection?.setViewport(viewport); el('camera-coordinates').textContent = `${viewport.x + Math.floor(viewport.width / 2)}, ${viewport.y + Math.floor(viewport.height / 2)}`; }, () => { following = false; renderControls(); }, { modo });
   // T036(a): en observador el mundo llega cada 5 s (el servidor acota a 1000 ms) y el terreno se
   // dibuja en Canvas 2D: ni WebGL2 ni una cadencia que un móvil lento no puede sostener.
@@ -234,7 +236,7 @@ function sound(): void {
 function receiveWorld(next: WorldView): void {
   // T036(g): un procedimiento puede reformularse mientras el mundo avanza. La caché describe un
   // paso concreto: al cambiar `tick` deja de ser válida y se vuelve a preguntar bajo demanda.
-  if (world !== null && next.tick !== world.tick) recipeDetails.clear();
+  if (world !== null && next.tick !== world.tick) { recipeDetails.clear(); personaDetails.clear(); }
   const first = world === null; world = next; landscape?.update(next); el('map-loading').hidden = true; el('world-day').textContent = `Día ${next.day}`; el('world-phase').textContent = `${phases[next.phase]}${next.weather === 'rain' ? ' · lluvia' : ''}`;
   el('world-extent').textContent = next.infinite ? `${next.discoveredChunks ?? 0} regiones · ${next.settlementCount ?? 0} asentamientos` : 'Región inicial';
   if (first) {
@@ -330,9 +332,12 @@ function renderInspector(): void {
       replacePersonCard(legacy ? `<p class="game-reason">Esta vida terminó en el paso ${esc(legacy.diedAt)}.</p><p class="drawer-note">${esc(deathCauses[legacy.cause] ?? legacy.cause)}</p><p class="drawer-note">Generación ${esc(legacy.generation)}. Su historia permanece en la crónica del mundo.</p>${farewell ? deathHistory(farewell) : ''}` : '<p class="drawer-note">Este habitante ya no aparece en el estado recibido.</p>');
       if (following) { following=false; landscape?.follow(null); } control='inspect'; inspectorSignature='';return;
     }
-    const signature = JSON.stringify([p, world.events.map(event => event.id), world.communities, world.blueprints, world.technology?.items.filter(item=>item.ownerId===p.id), world.technology?.knowledge?.find(entry=>entry.actorId===p.id), world.technology?.recipes]); if (signature === inspectorSignature) return; inspectorSignature = signature;
+    // T036(h): la biografía no viaja en el `state`; se pide al abrir la ficha y se cachea por tick.
+    if (!personaDetails.has(p.id)) connection?.requestPersona(p.id);
+    const persona = personaDetails.get(p.id) ?? undefined;
+    const signature = JSON.stringify([p, persona ?? null, world.events.map(event => event.id), world.communities, world.blueprints, world.technology?.items.filter(item=>item.ownerId===p.id), world.technology?.knowledge?.find(entry=>entry.actorId===p.id) ?? null, world.technology?.recipes]); if (signature === inspectorSignature) return; inspectorSignature = signature;
     el('inspector-title').textContent = p.name; el('person-controls').hidden = false; el('person-primary').hidden = false; const source = world.memories.find(m => m.text === p.recentMemory)?.source;
-    const sections = inheritedAndLearned(p, world);
+    const sections = inheritedAndLearned(persona ? { ...p, experiences: persona.experiences, trust: persona.trust } : p, world, persona?.recipeIds);
     const color = /^#[\da-f]{3,8}$/i.test(p.color) ? p.color : '#a4805b';
     replacePersonCard(`<section id="inspector-section-now" role="tabpanel" aria-labelledby="inspector-tab-now"><div class="game-person-heading"><div class="pixel-portrait ${p.role === 'I' ? 'portrait-i' : ''}" style="--person-color:${color}" aria-hidden="true"><span class="pixel-body"></span></div><div><strong>${esc(p.specialty ?? 'Su camino está tomando forma')}</strong><span class="agency-state ${p.controlMode === 'directed' ? 'is-directed' : ''}">${p.controlMode === 'directed' ? 'Siguiendo una orden' : 'Actuando por su cuenta'}</span></div></div><p class="game-current-action">${actions[p.action]} <span>· ${esc(p.x)}, ${esc(p.y)}</span></p><p class="game-reason">${esc(p.reason)}</p><div class="game-needs"><h3>Ahora necesita ${esc(p.need.toLocaleLowerCase('es'))}</h3>${meter('Energía', p.energy)}${meter('Hambre', p.hunger)}${p.thirst === undefined ? '' : meter('Sed', p.thirst)}${meter('Cansancio', p.fatigue)}</div>${destinationLink(p)}${sections.now}</section><section id="inspector-section-kit" role="tabpanel" aria-labelledby="inspector-tab-kit"><h3 class="section-title">Lo que lleva y sabe hacer</h3><div class="material-pouch"><span>${icon.leaf}<strong>${number(p.materials?.wood)}</strong> madera</span><span>${icon.hammer}<strong>${number(p.materials?.stone)}</strong> piedra</span></div>${personBlueprint(p, world) ? `<details class="person-detail" data-detail="blueprint"><summary>Proyecto que sabe construir</summary>${blueprintCard(personBlueprint(p, world)!, world)}</details>` : ''}${sections.kit}</section><section id="inspector-section-story" role="tabpanel" aria-labelledby="inspector-tab-story"><h3 class="section-title">Una vida entre otras</h3>${sections.story}${recentEvidence(world, p.id)}${p.recentMemory ? `<details class="person-detail memory-detail" data-detail="memory"><summary>Algo que lleva consigo</summary><p>${esc(p.recentMemory)}</p><small>${source === 'sample' ? 'RECUERDO DE PRUEBA · NO ES BIOGRAFÍA' : source === 'approved' ? 'RECUERDO APROBADO' : 'EXPERIENCIA DEL MUNDO SIMULADO'}</small></details>` : ''}</section>`);
   } else {

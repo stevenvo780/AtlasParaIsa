@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createWorld, stepWorld, projectWorld, VIEW_EVENTS, VIEW_MEMORIES } from '../src/world/index.js';
+import { createWorld, stepWorld, projectWorld, personDetail, VIEW_EVENTS, VIEW_MEMORIES } from '../src/world/index.js';
+import type { Viewport } from '../src/shared/types.js';
 import { projectTechnology, technologyRecipeDetail } from '../src/world/technology.js';
 import type { TechnologyRecipe } from '../src/shared/technology.js';
 
@@ -39,6 +40,56 @@ test('a snapshot carries procedure summaries, never their programs, and the savi
   // leave ≈487 KiB. The 120 KiB target belongs to the tiles delta / dirty-page work (cause (a) of the
   // C4 critical), which is outside this task's files; this bound only forbids a regression from here.
   assert.ok(bytes < 640 * KIB, `state at ${(bytes / KIB).toFixed(1)} KiB — provisional ceiling of this phase, not the brief's 120 KiB`);
+});
+
+/** T036(h): la dieta del `state`, medida con las dos cámaras que la evidencia de T020 midió
+ * (docs/evidencia-2026-09-19/state-desglose-t020.md). Las cotas son las MEDIDAS de hoy, no las del
+ * encargo: prohíben una regresión y dicen sin adornos a cuánto llegó esta fase. Lo que queda para
+ * bajar de 120/250 KiB está fuera de estos ficheros y consta en el desglose que imprime la prueba. */
+test('la dieta del `state` se mide con las dos cámaras de la evidencia', t => {
+  const world = grownWorld(8000);
+  const medida = (label: string, viewport: Viewport): number => {
+    const view = projectWorld(world, viewport), bytes = JSON.stringify(view).length;
+    const partes = Object.entries(view).map(([key, value]) => [key, JSON.stringify(value)?.length ?? 0] as const)
+      .sort((a, b) => b[1] - a[1]).slice(0, 6).map(([key, size]) => `${key} ${(size / KIB).toFixed(1)}K`);
+    t.diagnostic(`cámara ${label} · state ${(bytes / KIB).toFixed(1)} KiB · ${partes.join(' · ')}`);
+    return bytes;
+  };
+  const movil = medida('12x8', { x: 0, y: 0, width: 12, height: 8 });
+  const completa = medida('40x28', { x: 0, y: 0, width: 40, height: 28 });
+  // Antes de T036(h): 295.3 KiB y 591.9 KiB con este mismo mundo y semilla.
+  assert.ok(movil < 200 * KIB, `cámara 12x8 a ${(movil / KIB).toFixed(1)} KiB (antes 295.3 KiB)`);
+  assert.ok(completa < 420 * KIB, `cámara 40x28 a ${(completa / KIB).toFixed(1)} KiB (antes 591.9 KiB)`);
+  assert.ok(movil < 295 * KIB && completa < 592 * KIB, 'la dieta no puede deshacerse en silencio');
+  // Lo que la dieta quitó del cable, comprobado en el propio mensaje y no sólo en su tamaño.
+  const view = projectWorld(world, { x: 0, y: 0, width: 40, height: 28 });
+  for (const person of view.people) {
+    assert.equal(person.experiences, undefined, 'las experiencias se piden con `{type:\'persona\'}`');
+    assert.equal(person.trust, undefined, 'los vínculos se piden con `{type:\'persona\'}`');
+  }
+  assert.equal(view.technology!.knowledge, undefined, 'el repertorio por actor se pide por habitante');
+  assert.equal((view.organization as { resources?: unknown }).resources, undefined, 'el balance por recurso no lo dibuja nadie');
+  assert.ok(view.events.length <= 40, `ventana de crónica: ${view.events.length}`);
+  assert.equal(VIEW_EVENTS, 40);
+  // Una cantidad que vale cero no viaja; una que describe el terreno sí, aunque valga cero.
+  assert.ok(view.tiles.some(tile => tile.wood === undefined), 'una tesela sin madera no lleva `wood: 0`');
+  assert.ok(view.tiles.every(tile => typeof tile.moisture === 'number' && typeof tile.food === 'number'),
+    'humedad y alimento viajan siempre: ahí un cero es un dato');
+  for (const tile of view.tiles) for (const value of [tile.elevation, tile.moisture, tile.food, tile.vegetation, tile.wood, tile.stone, tile.growth, tile.fertility, tile.cultivation, tile.traffic, tile.drinkingWater, tile.fauna, tile.life]) {
+    if (value !== undefined) assert.equal(value, Math.round(value * 1000) / 1000, 'una tesela viaja en milésimas');
+  }
+});
+
+/** La biografía que salió del `state` se sirve entera por habitante y leerla no toca el mundo. */
+test('la biografía de un habitante se sirve a petición y no altera el mundo', () => {
+  const world = grownWorld(600), person = world.people[0]!, before = structuredClone(world);
+  const detail = personDetail(world, person.id)!;
+  assert.equal(detail.id, person.id);
+  assert.deepEqual(detail.experiences, person.experiences.map(e => ({ tick: e.tick, text: e.text, causeId: e.causeId })));
+  assert.deepEqual(detail.trust.map(t => t.id).sort(), Object.keys(person.bonds).sort());
+  assert.deepEqual(detail.recipeIds, [...person.technology.knownRecipes]);
+  assert.deepEqual(world, before, 'una consulta no es una transacción');
+  for (const invalid of ['', 'no-existe', '../persona', 'x'.repeat(51)]) assert.equal(personDetail(world, invalid), undefined, `rechazado: ${invalid}`);
 });
 
 test('the chronicle and the letter reach the snapshot through a declared window', () => {

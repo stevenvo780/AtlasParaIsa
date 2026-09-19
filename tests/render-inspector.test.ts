@@ -46,12 +46,19 @@ test('remembered identity, received details and carried objects are distinct fac
   kit = inheritedAndLearned(person, world).kit;
   assert.match(kit, /No recuerda ningún procedimiento ahora/); assert.match(kit, /Objetos que lleva/);
   assert.match(kit, /Llevar un objeto no implica recordar cómo se fabrica/);
+  // T036(h): el repertorio salió del `state` y llega con `{type:'persona'}`. Mientras no ha llegado
+  // la ficha lo dice («cargando»), que no es lo mismo que «no recuerda ninguno»: ausencia ≠ vacío.
   for (const knowledge of [undefined, [{ actorId: 'other', recipeIds: [] }]]) {
     world.technology!.knowledge = knowledge;
     kit = inheritedAndLearned(person, world).kit;
-    assert.match(kit, /Su repertorio de procedimientos no aparece en esta vista/);
+    assert.match(kit, /Cargando su repertorio/);
     assert.doesNotMatch(kit, /No recuerda ningún procedimiento ahora/);
   }
+  // Con la respuesta del servidor en la mano, el repertorio manda sobre lo que trajera el `state`.
+  kit = inheritedAndLearned(person, world, ['recipe-cold']).kit;
+  assert.match(kit, /Procedimiento recipe-cold/); assert.doesNotMatch(kit, /Cargando su repertorio/);
+  assert.doesNotMatch(inheritedAndLearned(person, world, []).kit, /Cargando su repertorio/);
+  assert.match(inheritedAndLearned(person, world, []).kit, /No recuerda ningún procedimiento ahora/);
   world.technology!.knowledge = [{ actorId: 's', recipeIds: ['<img src=x onerror="bad()">'] }];
   kit = inheritedAndLearned(person, world).kit;
   assert.ok(!kit.includes('<img ') && kit.includes('&lt;img '));
@@ -101,7 +108,7 @@ test('catalogue metadata and personal learning refresh independently without com
     await expect(procedures).not.toContainText('No recuerda ningún procedimiento ahora');
     await procedures.scrollIntoViewIfNeeded(); await page.screenshot({ path: 'artifacts/catalog-ui-memory.png' });
     current.technology!.knowledge = undefined; publish();
-    await expect(procedures).toContainText('Su repertorio de procedimientos no aparece en esta vista');
+    await expect(procedures).toContainText('Cargando su repertorio');
     await expect(procedures).not.toContainText('No recuerda ningún procedimiento ahora');
     await page.setViewportSize({ width: 320, height: 568 });
     await summary.focus(); await expect(summary).toBeFocused();

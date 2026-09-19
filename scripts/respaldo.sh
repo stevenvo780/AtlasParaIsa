@@ -2,10 +2,14 @@
 # T022 — Respaldo horario del mundo de Isa (hueco del crítico: 6,1 GiB/día, sin respaldo).
 #
 # Copia consistente vía la API de respaldo online de SQLite (`.backup`): segura con WAL
-# y con el servidor escribiendo a la vez (no es un `cp` del fichero). Solo LEE "$DB";
-# nunca escribe ni borra el mundo en marcha. La copia se verifica con PRAGMA quick_check
-# antes de comprimirla; si falla, se descarta y el script termina en error (sin rescates
-# ocultos: una copia dudosa nunca cuenta como éxito).
+# y con el servidor escribiendo a la vez (no es un `cp` del fichero). Abre "$DB" con
+# `sqlite3 -readonly`: solo LEE, nunca escribe ni borra el mundo. Sin -readonly, cuando
+# este proceso es la ÚNICA conexión (servidor parado, WAL pendiente sin checkpointear),
+# SQLite haría un checkpoint automático al cerrar la conexión de respaldo y modificaría
+# el fichero original — -readonly evita esa escritura incluso en ese caso. La copia se
+# verifica con PRAGMA quick_check antes de comprimirla; si falla, se descarta y el
+# script termina en error (sin rescates ocultos: una copia dudosa nunca cuenta como
+# éxito).
 #
 # Variables de entorno:
 #   DB          ruta del mundo a copiar (por defecto "${CARTA_DATA_DIR:-data}/world.sqlite",
@@ -39,7 +43,7 @@ if [ -e "$copia" ] || [ -e "$copia.gz" ]; then
   exit 1
 fi
 
-sqlite3 "$DB" ".backup '$copia'"
+sqlite3 -readonly "$DB" ".backup '$copia'"
 
 verificacion="$(sqlite3 "$copia" 'PRAGMA quick_check;')"
 if [ "$verificacion" != "ok" ]; then

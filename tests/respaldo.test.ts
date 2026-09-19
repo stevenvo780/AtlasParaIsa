@@ -1,9 +1,11 @@
 import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, utimesSync, readdirSync, readFileSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, utimesSync, readdirSync, readFileSync, existsSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { once } from 'node:events';
 import { gunzipSync } from 'node:zlib';
 import { Store } from '../src/server/store.js';
 import { createWorld } from '../src/world/index.js';
@@ -42,14 +44,37 @@ test('respaldo.sh produce una copia que Store abre y load() acepta', (t: TestCon
   } finally { copy.close(); }
 });
 
-test('respaldo.sh verifica quick_check y no deja el mundo original tocado', (t: TestContext) => {
+test('respaldo.sh solo LEE el mundo original con WAL pendiente y sin conexión viva (servidor caído a mitad de escritura)', async (t: TestContext) => {
   const { db, dest } = fixture(t);
-  const store = new Store(db); const world = createWorld(70402); store.save(world); store.close();
-  const before = readFileSync(db);
+  // Un `store.close()` normal hace checkpoint y borra el -wal (node:sqlite), lo que dejaría
+  // este test incapaz de refutar nada: no habría WAL pendiente que el `.backup` pudiera tocar.
+  // Para reproducir el escenario de riesgo real (servidor caído, sin ninguna conexión viva,
+  // con escrituras aún en el -wal) se escribe desde un proceso hijo y se mata con SIGKILL
+  // antes de que pueda cerrar limpiamente — mismo patrón que el test de crash de
+  // tests/server.test.ts ("actual crash releases instance lock...").
+  const storeUrl = pathToFileURL(resolve('src/server/store.ts')).href;
+  const worldUrl = pathToFileURL(resolve('src/world/index.ts')).href;
+  const code = `import { Store } from ${JSON.stringify(storeUrl)}; import { createWorld } from ${JSON.stringify(worldUrl)}; const s = new Store(${JSON.stringify(db)}); s.save(createWorld(70402)); console.log('guardado'); setInterval(() => {}, 1000);`;
+  const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', code], { stdio: ['ignore', 'pipe', 'pipe'] });
+  try {
+    const [data] = await once(child.stdout, 'data');
+    assert.match(data.toString(), /guardado/);
+    child.kill('SIGKILL');
+    await once(child, 'exit');
 
-  const result = run({ DB: db, DEST: dest });
-  assert.equal(result.status, 0, result.stderr);
-  assert.deepEqual(readFileSync(db), before, 'el respaldo solo debe LEER el mundo original');
+    assert.ok(existsSync(`${db}-wal`), 'el fixture debe dejar un -wal pendiente para que el test pueda refutar el requisito');
+    const before = readFileSync(db);
+
+    const result = run({ DB: db, DEST: dest });
+    assert.equal(result.status, 0, result.stderr);
+    // Comparación por igualdad de bytes (no assert.deepEqual): si el respaldo checkpointeara
+    // el origen, ambos buffers difieren mucho en tamaño y el diff de deepEqual sobre buffers
+    // grandes puede tardar minutos; Buffer.compare falla rápido con un mensaje igual de claro.
+    assert.equal(Buffer.compare(readFileSync(db), before), 0, 'el respaldo solo debe LEER el mundo original (bytes distintos: hizo un checkpoint)');
+    assert.ok(existsSync(`${db}-wal`), 'el respaldo no debe checkpointear/borrar el -wal ajeno (eso sería una escritura)');
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+  }
 });
 
 test('respaldo.sh falla explícitamente si la base de datos no existe (sin rescates ocultos)', (t: TestContext) => {

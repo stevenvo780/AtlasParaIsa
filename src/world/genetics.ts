@@ -20,8 +20,10 @@ function gaussian(random: () => number): number {
 export function founderGenome(seed: number, id: string, traits: NonNullable<PersonView['traits']>, varianza = 0): Genome {
   const random = localRandom(seed, `genome:${id}`);
   const phenotype = [traits.curiosity, traits.sociability, traits.industriousness, traits.care, traits.resilience, 0.5, 0.2 + random() * 0.65];
-  const sd = Math.sqrt(varianza);
-  const displaced = (value: number) => sd === 0 ? value : clamp(value + gaussian(random) * sd);
+  // Factor 1.5 compensa la pérdida de varianza empírica al truncar con clamp a [0,1],
+  // evitando que la heterocigosis colapse cuando el ruido empuja los valores contra los bordes.
+  const sd = Math.sqrt(varianza) * 1.5;
+  const displaced = (value: number) => varianza === 0 ? value : clamp(value + gaussian(random) * sd);
   const alleles = phenotype.flatMap(value => [displaced(value), displaced(value)]);
   return { alleles, generation: 0, parents: [], mutations: 0,
     learningRate: 0.04 + ((alleles[10]! + alleles[11]!) / 2) * 0.16, cooperation: (alleles[12]! + alleles[13]!) / 2 };

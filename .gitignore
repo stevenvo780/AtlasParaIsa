@@ -8,4 +8,4 @@ playwright-report/
 test-results/
 *.sqlite*
 *.log
-artifacts/
+artifacts/build/

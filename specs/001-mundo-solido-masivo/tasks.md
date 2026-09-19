@@ -40,7 +40,7 @@
 - [ ] T023 [US2] Diagnóstico con el laboratorio: barrido `--param cuerpo.hambreDias=2,3,4 cuerpo.sedDias=1,2,3 cuerpo.frioTolerancia=…` (32 réplicas × 10 días) → identificar la causa dominante de muerte temprana en `resumen.md`; escribir hallazgo en EVIDENCIA (depende de T014, T021).
 - [ ] T024 [US2] Corregir la regla responsable (no rescates: cambiar la ley o el valor por defecto en `params.ts` con justificación) y volver a barrer; elegir el valor con mejor supervivencia SIN población > 200 % (depende de T023).
 - [ ] T025 [P] [US2] Homogeneidad: en `src/world/genetics.ts` y `src/world/lineage.ts` aumentar varianza heredable con parámetro `genes.varianza`, y en `src/world/needs.ts`/`decision` ponderar decisiones por rasgos individuales y recuerdos propios (no por tablas globales); barrer `genes.varianza` y `social.imitacion` y elegir por diversidad ≥ 0,6 manteniendo supervivencia (depende de T022).
-- [ ] T026 [US2] Barrido de confirmación 32×10 con los nuevos defaults + control = línea base; fila en EVIDENCIA con SHA y cifras; `npm run typecheck && npm test` verdes.
+- [ ] T026 [US2] Barrido de confirmación 32×10 con los nuevos defaults + control = línea base; fila en EVIDENCIA con SHA y cifras; `npm run typecheck && npm test` verdes. — ficheros: docs/EVIDENCIA.md y src/world/params.ts
 
 **Checkpoint**: SC-002, SC-003, SC-005 cumplidos y documentados.
 
@@ -51,7 +51,7 @@
 
 - [ ] T030 [P] [US3] `src/world/recursos.ts`: densidad por bioma × ruido espacial determinista (reutilizar `terrain.ts`), agua superficial sólo en cuencas (`agua.cuencas`), agotamiento por extracción y regeneración logística (`recursos.regeneracionDias`); `giniPorRegion`, `regionesSinAgua`, `distanciaMediaAgua` en `statistics.ts`; test `tests/recursos.test.ts`.
 - [ ] T031 [US3] Integrar `recursos.ts` en la generación (`terrain.ts`, `ecosystem.ts`) y en extracción/consumo (`technology-water.ts`, `needs.ts`); mantener determinismo (control con la misma semilla debe cambiar SOLO por el parámetro) (depende de T030).
-- [ ] T032 [US3] Barrido `--param recursos.densidad=0.4,0.7,1.0 agua.cuencas=…` 32×10; elegir defaults que cumplan Gini/agua manteniendo SC-002; EVIDENCIA (depende de T031, T026).
+- [ ] T032 [US3] Barrido `--param recursos.densidad=0.4,0.7,1.0 agua.cuencas=…` 32×10; elegir defaults que cumplan Gini/agua manteniendo SC-002; EVIDENCIA (depende de T031, T026). — ficheros: docs/EVIDENCIA.md y src/world/params.ts
 - [ ] T033 [P] [US3] Cliente: capa `mapa de calor` de recursos en `src/client/` (tecla `H`), leyenda, y comprobación de que los totales por región coinciden con `worldStatistics` recibido; captura en `artifacts/`.
 
 ## Phase 5: US4 — Presentable: espectacular en escritorio, observador en móvil (P2)
@@ -73,13 +73,13 @@
 - [ ] T050 [US5] Guardar control: barrido 8×3 días con `--seed-base 7` en `artifacts/lab/control-refactor-antes/`.
 - [ ] T051 [P] [US5] Partir `src/world/index.ts` en `src/world/paso/{percepcion,decision,accion,materia,registro}.ts` + `paso/index.ts` (orquestador); `index.ts` queda como fachada que re-exporta.
 - [ ] T052 [P] [US5] Partir `src/client/landscape.ts` en `src/client/paisaje/{terreno,agua,vegetacion,habitantes,luz,calor}.ts` + `paisaje/index.ts`.
-- [ ] T053 [US5] Barrido de control después y `diff` de métricas contra T050 → idénticas; `npm run check` verde (depende de T051, T052).
+- [ ] T053 [US5] Barrido de control después y `diff` de métricas contra T050 → idénticas; `npm run check` verde (depende de T051, T052). — ficheros: artifacts/lab/control-refactor-despues/ y docs/EVIDENCIA.md
 
 ## Phase 7: Cierre y publicación
 
-- [ ] T060 Barrido largo 16×25 días con los defaults finales (en segundo plano mientras se cierra el resto); EVIDENCIA con SC-001..008 medidos.
+- [ ] T060 Barrido largo 16×25 días con los defaults finales (en segundo plano mientras se cierra el resto); EVIDENCIA con SC-001..008 medidos. — ficheros: artifacts/lab/final-25d/ y docs/EVIDENCIA.md
 - [ ] T061 `npm run check`; actualizar `docs/REGLAS.md` (parámetros y defaults) y `README.md` (sección Laboratorio); `PLAN.md` estado 2026-09-19.
-- [ ] T062 Merge `001-mundo-solido-masivo` → `main`, push; `npm run build`; relanzar el servidor público (ventana 0 del tmux `atlas`: Ctrl-C, Enter) y verificar `https://atlas.humanizar.tech` en escritorio y móvil.
+- [ ] T062 Merge `001-mundo-solido-masivo` → `main`, push; `npm run build`; relanzar el servidor público (ventana 0 del tmux `atlas`: Ctrl-C, Enter) y verificar `https://atlas.humanizar.tech` en escritorio y móvil. — ficheros: dist/ (npm run build) y ~/.local/bin/atlas-servidor-tmux
 
 ## Dependencies
 Setup → US1 → (US2 ∥ parcialmente US3) → US4 → US5 → Cierre. Dentro de cada fase, las tareas `[P]` van en paralelo (subagentes, ficheros disjuntos); las demás en orden.

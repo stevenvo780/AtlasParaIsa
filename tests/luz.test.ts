@@ -44,14 +44,18 @@ test('tinteDeFase, sombraLarga, brilloAgua y humoDeHogar son deterministas', () 
   assert.deepEqual(humoDeHogar(300, 42), humoDeHogar(300, 42));
 });
 
-test('sombraLarga es nula de noche, y de día tiene magnitud acotada con dos lóbulos (mañana y tarde)', () => {
+test('sombraLarga es nula de noche, y de día tiene longitud larga al ras y opacidad real (nunca ausente) al mediodía', () => {
   for (let tick = 1800; tick < TICKS_PER_DAY; tick += 53) {
     assert.deepEqual(sombraLarga('night', tick), { dx: 0, dy: 0, alpha: 0 });
   }
-  const morning = sombraLarga('dawn', 300); // borde amanecer/día: ángulo solar rasante, lóbulo de sombra larga
-  const noon = sombraLarga('day', 900); // mediodía solar: sombra corta
+  const morning = sombraLarga('dawn', 300); // borde amanecer/día: ángulo solar rasante, sombra larga
+  const noon = sombraLarga('day', 900); // mediodía solar: sombra corta, NO ausente
   assert.ok(Math.abs(morning.dx) > Math.abs(noon.dx), 'la sombra a media mañana debe ser más larga que al mediodía');
-  assert.ok(noon.alpha < morning.alpha);
+  // Cota inferior real (antes `noon` daba exactamente {-0,0,0} y estas dos aserciones
+  // pasaban por construcción sin poder distinguir "sombra corta" de "sombra ausente").
+  assert.ok(noon.alpha > 0, 'la opacidad al mediodía debe ser real, no cero');
+  assert.ok(noon.dy > 0, 'la sombra debe tener extensión vertical real al mediodía, no cero');
+  assert.ok(noon.alpha > morning.alpha, 'la opacidad crece con la luz directa y es máxima al mediodía, como visual-state.ts::daylightAt (shadowAlpha = sun·0.2)');
   for (let tick = 0; tick < 1800; tick += 41) {
     const sombra = sombraLarga(phaseAt(tick), tick);
     assert.ok(sombra.alpha >= 0 && sombra.alpha <= 0.4);

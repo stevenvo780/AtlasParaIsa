@@ -55,22 +55,27 @@ export function tinteDeFase(phase: Phase, tick: number): Tinte {
 }
 
 const SUN_START = PHASE_BOUNDS.dawn[0], SUN_END = PHASE_BOUNDS.dusk[1], SUN_SPAN = SUN_END - SUN_START;
-const SHADOW_REACH = 10, SHADOW_MAX_ALPHA = 0.4;
+const SHADOW_REACH = 10, SHADOW_MAX_ALPHA = 0.4, SHADOW_MIN_LENGTH = 0.25;
 
 /**
- * Sombra proyectada de árboles y personas: nula de noche (sin sol, sin sombra direccional);
- * larga al principio/final de la ventana con sol (amanecer/atardecer, ángulo rasante) y corta
- * al mediodía solar. `elevation` es 0 en los dos extremos de [dawn,dusk] y 1 al mediodía solar;
- * `magnitude` es la parábola 4·e·(1−e), que vale 0 en ambos extremos Y en el mediodía solar,
- * dando dos lóbulos de sombra larga (media mañana, media tarde) sin discontinuidad con la noche.
+ * Sombra proyectada de árboles y personas: nula de noche (sin sol, sin sombra direccional).
+ * `elevation` es 0 en los dos extremos de la ventana con sol (empalma con `night`, que da
+ * alpha 0) y 1 al mediodía solar. Longitud y opacidad se calculan por separado (ronda de
+ * arreglo: antes compartían la parábola `4·e·(1−e)`, que se anulaba también al mediodía —
+ * sombra AUSENTE, no corta — justo cuando la escena está más iluminada):
+ * - LONGITUD (`dx`,`dy`): máxima al ras (amanecer/atardecer, `elevation→0`) y decrece hasta un
+ *   piso de `SHADOW_MIN_LENGTH` al mediodía — corta, nunca nula.
+ * - OPACIDAD (`alpha`): crece con la luz directa, `SHADOW_MAX_ALPHA · elevation`, máxima al
+ *   mediodía — igual que el modelo que ya usa el cliente hoy (`visual-state.ts::daylightAt`,
+ *   `shadowAlpha = sun·0.2`, también máxima al mediodía).
  */
 export function sombraLarga(phase: Phase, tick: number): Sombra {
   if (phase === 'night') return { dx: 0, dy: 0, alpha: 0 };
   const t = tick % TICKS_PER_DAY;
   const angle = ((t - SUN_START) / SUN_SPAN) * Math.PI;
   const elevation = Math.sin(angle);
-  const magnitude = 4 * elevation * (1 - elevation);
-  return { dx: -Math.cos(angle) * SHADOW_REACH * magnitude, dy: SHADOW_REACH * 0.35 * magnitude, alpha: SHADOW_MAX_ALPHA * magnitude };
+  const length = SHADOW_MIN_LENGTH + (1 - SHADOW_MIN_LENGTH) * (1 - elevation);
+  return { dx: -Math.cos(angle) * SHADOW_REACH * length, dy: SHADOW_REACH * 0.35 * length, alpha: SHADOW_MAX_ALPHA * elevation };
 }
 
 /**

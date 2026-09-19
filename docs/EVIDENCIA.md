@@ -420,3 +420,13 @@ Revisión integral previa: `docs/REVISION-2026-09-19.md` (12 hallazgos confirmad
 - T031 barrido de calibración (senescencia, genes, capacidad de carga) con control → defaults elegidos.
 - T032 barrido largo 16×25 días con defaults finales (SC-011).
 - SC-009/010: `state` y p95 tras T020/T021; crecimiento SQLite con poda.
+
+### SC-004 «antes» (SHA `027c0e9`, 4 semillas × 10 días, regiones = chunks 16×16; detalle en `docs/evidencia-2026-09-19/sc004-antes-recursos.md`)
+| Día | celdas food>0,3 | food media | Gini food/región | regiones sin agua superficial | distancia media a agua potable |
+|---|---|---|---|---|---|
+| 0 | 0,0 % | 0,11 | **0,154** | 0,0 % | 3,24 |
+| 3 | 79,5 % | 0,53 | 0,213 | 0,0 % | 3,28 |
+| 7 | 93,3 % | 0,78 | 0,160 | 0,0 % | 3,13 |
+| 10 | 94,3 % | 0,81 | **0,133** | 0,8 % | **3,00** |
+
+Lectura: la comida satura (> 90 % de celdas con `food > 0,3`) en el **día 7**; el Gini de comida por región **baja** con el tiempo (0,154 → 0,133; objetivo ≥ 0,35); **no hay regiones secas** (0–0,8 %; objetivo ≥ 30 %) y el agua potable está a **3,0 celdas** (objetivo > 6). Veredicto SC-004 hoy: **NO CUMPLE en las tres partes**. Consecuencia: T013 (capacidad de carga + decaimiento) cubre comida/fertilidad; se añade **T035 agua en cuencas** (`agua.cuencas`) para las partes 2 y 3.

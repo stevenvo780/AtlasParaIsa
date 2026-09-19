@@ -20,6 +20,8 @@ export interface WorldParams {
   poblacion: { maxima: number; intervaloComprobacionTicks: number; nacimientosPorComprobacion: number };
   recursos: { capacidadBosque: number; capacidadPastizal: number; capacidadOtros: number; velocidadRegeneracion: number; decaimientoFertilidad: number; decaimientoComida: number };
   persistencia: { cadaTicks: number; ventanaEventosTicks: number };
+  /** Agua superficial concentrada en cuencas: 1 = generación actual (todas las charcas/manantiales); < 1 conserva solo las de las cuencas más húmedas (T035). */
+  agua: { cuencas: number };
 }
 
 function deepFreeze<T>(value: T): T {
@@ -39,6 +41,7 @@ const RAW_DEFAULTS: WorldParams = {
   poblacion: { maxima: 32, intervaloComprobacionTicks: 120, nacimientosPorComprobacion: 1 },
   recursos: { capacidadBosque: 1, capacidadPastizal: 1, capacidadOtros: 1, velocidadRegeneracion: 1, decaimientoFertilidad: 0, decaimientoComida: 0.0001 },
   persistencia: { cadaTicks: 1, ventanaEventosTicks: 0 },
+  agua: { cuencas: 1 },
 };
 
 /** Objeto congelado en profundidad: nunca se muta; `parseParams` clona para cada override. */
@@ -66,6 +69,7 @@ export const PARAM_RANGES: Record<string, [number, number]> = {
   'recursos.decaimientoComida': [0, 1],
   'persistencia.cadaTicks': [1, 10000],
   'persistencia.ventanaEventosTicks': [0, 1_000_000],
+  'agua.cuencas': [0.05, 1],
 };
 
 /** Aplana un objeto anidado o ya plano a pares "a.b" → valor (hoja, no objeto). */

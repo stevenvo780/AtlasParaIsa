@@ -34,6 +34,7 @@ const TAREAS = [
   { id: 'T019', modelo: 'claude', effort: null, wrapper: 'sonnet', tests: 'tests/diversidad.test.ts', hallazgo: 'FR-007/SC-003 (indice de diversidad)' },
   { id: 'T033', modelo: 'claude', effort: null, wrapper: 'sonnet', tests: 'tests/calor.test.ts', hallazgo: 'FR-010 mapa de calor (US3 esc. 3)' },
   { id: 'T034', modelo: 'claude', effort: null, wrapper: 'sonnet', tests: 'tests/luz.test.ts', hallazgo: 'FR-010 pase visual (US4)' },
+  { id: 'T035', modelo: 'claude', effort: null, wrapper: 'sonnet', tests: 'tests/agua.test.ts', hallazgo: 'SC-004 agua: 0% regiones secas, distancia 3,0 celdas' },
   { id: 'T020', modelo: 'claude', effort: null, wrapper: 'opus',   tests: 'tests/world-view-size.test.ts tests/connection.test.ts tests/server.test.ts', hallazgo: 'C4' },
   { id: 'T021', modelo: 'claude', effort: null, wrapper: 'opus',   tests: 'tests/server.test.ts tests/store-technology.test.ts tests/chronicle-store.test.ts tests/archive.test.ts', hallazgo: 'C3/C5/C10/C12' },
 ]

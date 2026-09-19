@@ -9,6 +9,7 @@ import { createApp } from '../src/server/app.js';
 import { encodeSnapshot } from '../src/server/snapshot.js';
 import { createWorld, type World } from '../src/world/index.js';
 import { DEFAULT_PARAMS, paramsOf, parseParams, setParams } from '../src/world/params.js';
+import { deploymentParams } from '../src/server/deployment-params.js';
 
 /** R8: los `WorldParams` viven en un WeakMap por instancia, así que un mundo recargado
  * desde JSON los perdía y volvía a los defaults. Ahora viajan en la instantánea. */
@@ -90,7 +91,43 @@ test('createApp genera el mundo nuevo con los parámetros recibidos y respeta lo
   const resumed = createApp({ store: reopened, password: 'synthetic-test-password-only', origin: 'http://127.0.0.1:3000', manual: true, seed: 42, params: otros });
   t.after(async () => { await resumed.close(); });
   assert.deepEqual(paramsOf(resumed.world), params, 'un mundo cargado conserva los params con los que se generó');
-  // …y CARTA_PARAMS los sobreescribe explícitamente, como hace `main.ts` tras `createApp`.
-  setParams(resumed.world, otros);
-  assert.deepEqual(paramsOf(resumed.world), otros);
+  // …y la configuración explícita del despliegue se aplica ENCIMA, clave a clave, con la
+  // receta literal de `main.ts`: no reemplaza el objeto entero (eso borraría la instantánea).
+  setParams(resumed.world, deploymentParams(paramsOf(resumed.world), 'agua.cuencas=0.2'));
+  assert.equal(paramsOf(resumed.world).agua.cuencas, 0.2, 'CARTA_PARAMS manda sobre lo que nombra');
+  assert.equal(paramsOf(resumed.world).persistencia.cadaTicks, 20, 'la cadencia de producción también');
+});
+
+/** Ronda de corrección R2: `setParams(app.world, parseParams(CARTA_PARAMS))` reemplazaba el
+ * objeto ENTERO por «defaults + CARTA_PARAMS», así que en el único camino de despliegue real
+ * los params de la instantánea se borraban siempre y R8 quedaba inerte. La precedencia que
+ * publica docs/REGLAS.md §Parámetros tiene que ser cierta, no una intención. */
+test('la receta del despliegue conserva del mundo cargado toda clave que no nombre', t => {
+  const { store, path } = laboratory(t);
+  const generados = parseParams('agua.cuencas=1,poblacion.maxima=50');
+  store.save(createWorld(51926, generados));
+
+  const reopened = new Store(path);
+  t.after(() => reopened.close());
+  const app = createApp({ store: reopened, password: 'synthetic-test-password-only', origin: 'http://127.0.0.1:3000', manual: true, seed: 51926, params: deploymentParams() });
+  t.after(async () => { await app.close(); });
+  // Exactamente lo que corre en producción sin CARTA_PARAMS.
+  setParams(app.world, deploymentParams(paramsOf(app.world), undefined));
+  const vigentes = paramsOf(app.world);
+  assert.equal(vigentes.agua.cuencas, 1, 'el terreno se generó con este régimen: reabrirlo no puede cambiarlo');
+  assert.equal(vigentes.poblacion.maxima, 50, 'ni el techo con el que venía');
+  assert.equal(vigentes.persistencia.cadaTicks, 20, 'y la cadencia del despliegue sí se impone');
+  assert.equal(vigentes.persistencia.ventanaEventosTicks, 24000);
+  assert.notDeepEqual(vigentes, DEFAULT_PARAMS);
+});
+
+test('parseParams sobre una base aplica los overrides encima de ella, no encima de los defaults', () => {
+  const base = parseParams('agua.cuencas=1,poblacion.maxima=50');
+  assert.equal(parseParams(undefined, base), base, 'sin overrides la base pasa tal cual');
+  const encima = parseParams('poblacion.maxima=7', base);
+  assert.equal(encima.poblacion.maxima, 7);
+  assert.equal(encima.agua.cuencas, 1, 'lo que el override no nombra sobrevive');
+  assert.equal(encima.cuerpo.longevidadBaseDias, DEFAULT_PARAMS.cuerpo.longevidadBaseDias);
+  assert.throws(() => parseParams('agua.cuencas=9', base), /fuera de rango/, 'la base no relaja la validación');
+  assert.deepEqual(parseParams('poblacion.maxima=7'), parseParams('poblacion.maxima=7', DEFAULT_PARAMS), 'la base por defecto es DEFAULT_PARAMS');
 });

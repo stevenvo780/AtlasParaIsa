@@ -86,9 +86,25 @@ export function createApp(options: AppOptions) {
   const loaded = store.load();
   const existingInstanceId = readWorldInstance(store.db);
   let world = loaded?.world ?? createWorld(options.seed ?? 51926, options.params);
+  // Arrancar desde un respaldo es un retroceso: la crónica que Isa lee no puede decir que
+  // el mundo «retoma desde su último momento guardado», y el operador tiene que ver que el
+  // eslabón vigente está podrido. El retroceso solo se puede medir en tiempo de servicio:
+  // el cuerpo que superaba al respaldo es ilegible, así que sus pasos no se saben.
+  const respaldo = loaded && loaded.slot > 0
+    ? { slot: loaded.slot, retrocesoSegundos: loaded.supersededAt === null ? null : Math.max(0, Math.round((loaded.supersededAt - loaded.savedAt) / 1000)) }
+    : null;
+  if (respaldo) console.warn(`El último momento guardado no se pudo leer; el mundo arranca desde el respaldo ${respaldo.slot}`
+    + `${respaldo.retrocesoSegundos === null ? '' : `, ${respaldo.retrocesoSegundos} s atrás`}. Motivo: ${loaded!.skipped.join('; ')}.`);
   if (loaded) {
+    // Sin número cuando la fila del eslabón dañado ni siquiera estaba: decirlo sin cifra
+    // es honesto; inventarla, no. En pasos nunca se puede medir (el cuerpo es ilegible).
+    const perdido = respaldo === null ? '' : respaldo.retrocesoSegundos === null
+      ? 'lo simulado después de él' : `lo simulado en los ${respaldo.retrocesoSegundos} s siguientes`;
     world.events.push({ id: `pause-${world.tick}-${makeToken().slice(0,12)}`, tick: world.tick, kind: 'pause', actors: [],
-      text: 'El servicio estuvo en pausa. El mundo retoma desde su último momento guardado.', cause: 'Reinicio del servicio; sin avance retrospectivo.', source: 'simulation' });
+      text: respaldo ? 'El servicio estuvo en pausa. El último momento guardado no se pudo leer y el mundo retoma desde un respaldo anterior.'
+        : 'El servicio estuvo en pausa. El mundo retoma desde su último momento guardado.',
+      cause: respaldo ? `Reinicio del servicio; se adoptó el respaldo ${respaldo.slot} de la cadena y se perdió ${perdido}.`
+        : 'Reinicio del servicio; sin avance retrospectivo.', source: 'simulation' });
     world.events = world.events.slice(-120);
   }
   store.save(world);
@@ -229,7 +245,7 @@ export function createApp(options: AppOptions) {
     try {
       const url = new URL(req.url ?? '/', origin);
       if (req.headers.host !== new URL(origin).host) throw new HttpError(403, 'Host no autorizado.');
-      if (req.method === 'GET' && url.pathname === '/health') return json(res, failed ? 503 : 200, { status: failed ? 'paused' : 'ok' });
+      if (req.method === 'GET' && url.pathname === '/health') return json(res, failed ? 503 : 200, { status: failed ? 'paused' : 'ok', ...(respaldo ? { respaldo } : {}) });
       if (req.method === 'GET' && url.pathname === '/api/session') {
         const hash = sessionHash(req);
         return json(res, 200, { authenticated: !!hash && store.sessionValid(hash) });

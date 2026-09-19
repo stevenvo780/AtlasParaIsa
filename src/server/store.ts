@@ -30,6 +30,20 @@ export const DEEP_CHECKPOINT_EVERY_SAVES = 100;
  * entero (R2: hasta esta ronda el slot 2 se escribía y no lo leía nadie). */
 export const SNAPSHOT_SLOTS = [0, 1, 2] as const;
 export type SnapshotSlot = (typeof SNAPSHOT_SLOTS)[number];
+/** Lo que `load()` devuelve, con el eslabón del que salió el mundo a la vista: adoptar un
+ * respaldo es un retroceso, y quien lo pone en servicio tiene que poder contarlo (el
+ * suceso de pausa de la crónica y `/health` lo hacen, en `app.ts`). */
+export interface LoadedSnapshot {
+  world: World; savedAt: number;
+  /** Eslabón adoptado: 0 es la instantánea vigente, > 0 un respaldo. */
+  slot: SnapshotSlot;
+  /** Por qué se saltó cada eslabón anterior. Vacío cuando `slot === 0`. */
+  skipped: string[];
+  /** `saved_at` del eslabón dañado más reciente, o `null` si su fila ni siquiera estaba.
+   * La diferencia con `savedAt` es el retroceso del rescate: el cuerpo que lo superaba
+   * es ilegible, así que en pasos no se puede medir, solo en tiempo de servicio. */
+  supersededAt: number | null;
+}
 /** Cadencia de la revisión COMPLETA del mundo (`assertWorld`) dentro de `save()`.
  * Recorrer el mundo entero cuesta O(tiles + gente + recetas) y a día 5 (40 personas,
  * instantánea de 4,3 MiB) era 270 ms de los 634 ms del guardado: el 43 %. Se paga
@@ -137,6 +151,10 @@ export class Store {
   /** Guardados confirmados y último paso en que se intentó podar: gobiernan la
    * profundidad del tercer respaldo y el coste amortizado de la poda. */
   private saves = 0;
+  /** ¿El cuerpo que hoy ocupa el slot 0 se puede leer entero? `null` = todavía no consta
+   * (una conexión que guarda sin haber cargado), y entonces `save()` lo comprueba una
+   * sola vez. Gobierna la rotación de respaldos: ver `rotatesBackups()`. */
+  private slot0Readable: boolean | null = null;
   private lastPruneTick = -1;
   private readonly schemaVersion: number;
   private verifiedChronicle: ChronicleProof | null = null;
@@ -232,7 +250,7 @@ export class Store {
   /** C10: leer es una transacción. Una copia en caliente o un guardado de otra
    * conexión ya no puede convertir una lectura correcta en «corrupción»: la
    * instantánea queda congelada durante toda la verificación. */
-  load(): { world: World; savedAt: number } | null {
+  load(): LoadedSnapshot | null {
     const rawTransaction = this.db.isTransaction;
     if (!rawTransaction) {
       this.db.exec('BEGIN');
@@ -259,26 +277,34 @@ export class Store {
    *    posterior; si lo guarda, adoptarlo tiraría lo ya vivido y la recuperación tiene
    *    que ser explícita (`previous()`, que poda y revoca en una copia nueva).
    */
-  private loadVerified(rawTransaction: boolean): { world: World; savedAt: number } | null {
+  private loadVerified(rawTransaction: boolean): LoadedSnapshot | null {
     const chronicleStamp = this.chronicleStamp();
     this.verifiedChronicle = null;
     const check = this.db.prepare('PRAGMA quick_check').get() as Record<string, unknown>;
     if (Object.values(check)[0] !== 'ok') throw new Error('SQLite integrity check failed. Explicit recovery required.');
     const refusals: string[] = [];
+    // El momento del eslabón dañado MÁS RECIENTE cuya fila seguía ahí: es lo único que
+    // mide el retroceso de un rescate, porque el cuerpo que lo superaba no se puede leer.
+    let supersededAt: number | null = null;
     for (const slot of SNAPSHOT_SLOTS) {
       const row = this.db.prepare('SELECT body,digest,saved_at FROM snapshots WHERE slot=?').get(slot) as Row | undefined;
       if (!row) { refusals.push(`slot ${slot}: snapshot missing`); continue; }
-      if (checksum(row.body) !== row.digest) { refusals.push(`slot ${slot}: snapshot checksum mismatch`); continue; }
+      const refuse = (reason: string) => { refusals.push(`slot ${slot}: ${reason}`); supersededAt ??= row.saved_at; };
+      if (checksum(row.body) !== row.digest) { refuse('snapshot checksum mismatch'); continue; }
       let decoded: World;
       try { decoded = decodeSnapshot(row.body) as World; }
-      catch (error) { refusals.push(`slot ${slot}: ${error instanceof Error ? error.message : String(error)}`); continue; }
-      return this.loadSlot(row, decoded, slot, rawTransaction, chronicleStamp);
+      catch (error) { refuse(error instanceof Error ? error.message : String(error)); continue; }
+      // Un slot 0 que se lee entero es el único cuerpo que `save()` puede copiar a un
+      // respaldo. Si adoptamos un respaldo, el slot 0 queda marcado como NO fiable.
+      this.slot0Readable = slot === 0;
+      return this.loadSlot(row, decoded, slot, rawTransaction, chronicleStamp, refusals, supersededAt);
     }
     if (refusals.every(reason => reason.endsWith('snapshot missing'))
-      && !this.db.prepare("SELECT value FROM metadata WHERE key='initialized'").get()) return null;
+      && !this.db.prepare("SELECT value FROM metadata WHERE key='initialized'").get()) { this.slot0Readable = true; return null; }
     throw new Error(`Snapshot missing or unusable in every backup slot (${refusals.join('; ')}). Explicit recovery required.`);
   }
-  private loadSlot(row: Row, decoded: World, slot: SnapshotSlot, rawTransaction: boolean, chronicleStamp: ChronicleStamp): { world: World; savedAt: number } {
+  private loadSlot(row: Row, decoded: World, slot: SnapshotSlot, rawTransaction: boolean, chronicleStamp: ChronicleStamp,
+    skipped: string[], supersededAt: number | null): LoadedSnapshot {
     const declaredChronicle = decoded.chronicleJournal !== undefined;
     // Los params se restauran ANTES de `migrateWorld`, que ya valida con `assertWorld`:
     // la ley de frontera mide el mundo con los parámetros con los que se guardó (R8).
@@ -326,7 +352,15 @@ export class Store {
     if (declaredJournal && this.schemaVersion >= 4) this.rememberTechnology(world);
     if (!sameChronicleStamp(chronicleStamp, this.chronicleStamp())) chronicleFailure('database changed while loading');
     if (!rawTransaction) this.rememberChronicle(world, chronicleStamp);
-    return { world, savedAt: row.saved_at };
+    return { world, savedAt: row.saved_at, slot, skipped, supersededAt: slot > 0 ? supersededAt : null };
+  }
+  /** ¿El cuerpo del slot 0 se lee entero? Lo pregunta `save()` cuando esta conexión aún
+   * no ha cargado nada (no consta el estado de la cadena) y solo la primera vez: después
+   * lo sabe por el guardado que acaba de confirmar. Un slot 0 ausente no tiene nada que
+   * propagar, así que la rotación —que copiaría cero filas— no hace daño. */
+  private readSlot0(): boolean {
+    const row = this.db.prepare('SELECT body,digest FROM snapshots WHERE slot=0').get() as Row | undefined;
+    return this.slot0Readable = !row || checksum(row.body) === row.digest;
   }
   /** Un respaldo solo se adopta EN CALIENTE si el archivo durable acaba donde acaba él.
    * En cuanto el archivo guarda un suceso, un gesto, una región, una identidad o una
@@ -733,6 +767,7 @@ export class Store {
     this.db.exec('BEGIN IMMEDIATE');
     let chronicleTriggers = false;
     try {
+      const rotatesBackups = this.slot0Readable ?? this.readSlot0();
       chronicleTriggers = this.chronicleHasTriggers();
       this.technologyArchive.beginHostTransaction();
       // Authorization and commit share a transaction with respect to external revocation.
@@ -765,8 +800,13 @@ export class Store {
       // El slot 1 sigue heredando la instantánea del guardado ANTERIOR en cada
       // guardado: cuesta ~13 ms de 630 a día 5 y es la profundidad de recuperación
       // que `previous()` promete (un guardado, no diez). Espaciarlo no compensa.
-      this.db.exec('INSERT OR REPLACE INTO snapshots SELECT 1,body,digest,saved_at FROM snapshots WHERE slot=0');
-      if ((this.saves + 1) % DEEP_CHECKPOINT_EVERY_SAVES === 0) this.db.exec('INSERT OR REPLACE INTO snapshots SELECT 2,body,digest,saved_at FROM snapshots WHERE slot=0');
+      // Pero solo si ese cuerpo se puede leer: tras un rescate el slot 0 está podrido y
+      // copiarlo destruiría en un guardado (2 s en producción) el respaldo que acababa de
+      // salvar el arranque. Un cuerpo no verificado nunca entra en un respaldo.
+      if (rotatesBackups) {
+        this.db.exec('INSERT OR REPLACE INTO snapshots SELECT 1,body,digest,saved_at FROM snapshots WHERE slot=0');
+        if ((this.saves + 1) % DEEP_CHECKPOINT_EVERY_SAVES === 0) this.db.exec('INSERT OR REPLACE INTO snapshots SELECT 2,body,digest,saved_at FROM snapshots WHERE slot=0');
+      }
       this.db.prepare('INSERT OR REPLACE INTO snapshots VALUES (0,?,?,?)').run(body, checksum(body), Date.now());
       this.db.prepare("INSERT OR REPLACE INTO metadata VALUES ('initialized','1')").run();
       const insertInput = this.db.prepare('INSERT INTO inputs VALUES (?,?,?,?,?,?)');
@@ -780,6 +820,9 @@ export class Store {
       }
       this.db.exec('COMMIT');
       this.saves++;
+      // Confirmado: el slot 0 es ahora este cuerpo, escrito y verificado por esta misma
+      // conexión, así que la rotación de respaldos se reanuda en el guardado siguiente.
+      this.slot0Readable = true;
       if (prunes) this.lastPruneTick = world.tick;
       this.technologyArchive.acknowledgeHostCommit();
     } catch (error) {

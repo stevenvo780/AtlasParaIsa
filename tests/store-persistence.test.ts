@@ -127,7 +127,63 @@ test('la cadena de respaldo rescata el guardado anterior cuando la instantánea 
   store.db.exec("UPDATE snapshots SET body='{}' WHERE slot=0");
   const loaded = store.load()!;
   assert.equal(loaded.world.tick, 0, 'la cadena adopta el slot 1 cuando el slot 0 no se puede verificar');
+  assert.equal(loaded.slot, 1, 'la carga declara de qué eslabón salió el mundo');
+  assert.equal(loaded.skipped.length, 1, 'y por qué se saltó el anterior');
+  assert.match(loaded.skipped[0]!, /slot 0: snapshot checksum mismatch/);
   assert.equal(savedBody(store, 0), '{}', 'cargar no repara la cadena: escribir sigue siendo explícito');
+});
+
+test('un guardado tras el rescate no copia el slot 0 podrido encima del respaldo que lo salvó', t => {
+  const { store } = laboratory(t);
+  const world = createWorld(3);
+  store.save(world);                         // slot 0 = tick 0
+  fixtureTick(world, 1); store.save(world);  // slot 0 = tick 1, slot 1 = tick 0
+  store.db.exec("UPDATE snapshots SET body='{}' WHERE slot=0");
+  const rescued = store.load()!;
+  assert.equal(rescued.slot, 1, 'el arranque salió del respaldo');
+
+  // Sin esta ley, `save()` copiaba el slot 0 —ahora podrido— al slot 1 y el rescate
+  // destruía en ~2 s el único respaldo bueno: fallar cerrado con red se convertía en
+  // arrancar solo y sin red. Un cuerpo no verificado no entra nunca en un respaldo.
+  fixtureTick(rescued.world, 2); store.save(rescued.world);
+  assert.notEqual(savedBody(store, 1), '{}', 'el respaldo que salvó el arranque sobrevive al primer guardado');
+  assert.equal(JSON.parse(savedBody(store, 1)!).tick, 0);
+  assert.equal(JSON.parse(savedBody(store, 0)!).tick, 2, 'y el slot 0 ya es un guardado verificado');
+
+  // Reparada la cadena, la rotación se reanuda sola: la profundidad no se pierde para siempre.
+  fixtureTick(rescued.world, 3); store.save(rescued.world);
+  assert.equal(JSON.parse(savedBody(store, 1)!).tick, 2);
+  assert.equal(store.load()!.slot, 0, 'el siguiente arranque ya no necesita respaldo');
+});
+
+test('el respaldo profundo tampoco hereda un slot 0 sin verificar', t => {
+  const { store } = laboratory(t);
+  const world = createWorld(3);
+  for (let n = 1; n < DEEP_CHECKPOINT_EVERY_SAVES; n++) { fixtureTick(world, n); store.save(world); }
+  store.db.exec("UPDATE snapshots SET body='{}' WHERE slot=0");
+  const rescued = store.load()!;
+  assert.equal(rescued.slot, 1);
+  // El guardado número cien es justo el que copia al slot 2: tampoco puede propagar basura.
+  fixtureTick(rescued.world, DEEP_CHECKPOINT_EVERY_SAVES); store.save(rescued.world);
+  assert.equal(savedBody(store, 2), undefined, 'un slot 0 podrido no se convierte en el respaldo profundo');
+  assert.equal(JSON.parse(savedBody(store, 1)!).tick, DEEP_CHECKPOINT_EVERY_SAVES - 2, 'ni en el respaldo cercano');
+});
+
+test('una conexión que nunca cargó no puede guardar sobre un slot 0 ilegible: falla cerrada', t => {
+  const { store, path } = laboratory(t);
+  const world = createWorld(3);
+  store.save(world);
+  fixtureTick(world, 1); store.save(world);
+  store.db.exec("UPDATE snapshots SET body='{}' WHERE slot=0");
+  // El rescate de `load()` es la ÚNICA puerta por la que un slot 0 podrido llega a un
+  // guardado: sin la prueba de crónica que deja la carga, el guardado se niega antes de
+  // escribir nada, así que la rotación no llega a ocurrir y el respaldo sigue intacto.
+  const otro = new Store(path);
+  try {
+    fixtureTick(world, 2);
+    assert.throws(() => otro.save(world), /baseline snapshot checksum mismatch/);
+    assert.equal(JSON.parse(savedBody(otro, 1)!).tick, 0, 'el respaldo bueno sigue ahí');
+  } finally { otro.close(); }
 });
 
 test('una copia de respaldo no se adopta en caliente si el archivo durable guarda algo posterior', t => {

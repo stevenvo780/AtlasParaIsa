@@ -1,5 +1,6 @@
 import type { ChronicleEvent } from '../shared/types.js';
 import { MAX_COORDINATE } from './terrain.js';
+import { POPULATION_HARD_LIMIT } from '../shared/life.js';
 
 /** Backpressure on uncommitted observations, never a silent history truncation. */
 export const MAX_PENDING_CHRONICLE_EVENTS = 32_768;
@@ -15,8 +16,8 @@ export interface ChronicleHost {
   tick: number; eventCounter: number; events: ChronicleEvent[]; chronicleJournal?: ChronicleJournal;
 }
 const integer = (n: unknown): n is number => typeof n === 'number' && Number.isSafeInteger(n) && n >= 0;
-/** Un evento puede listar a todos los habitantes vivos (p.ej. `community`): espeja MAX_POPULATION (128); antes 32 y abortaba con >32 habitantes (T041). */
-const MAX_CHRONICLE_ACTORS = 128;
+/** Un evento puede listar a todos los habitantes vivos (p.ej. `community`): espeja el tope anticorrupción de `assertWorld` (ruling R17); antes 128, y 32 antes de T041. Ya no limita el mundo. */
+const MAX_CHRONICLE_ACTORS = POPULATION_HARD_LIMIT;
 
 export function chronicleSerial(id: string): number | null {
   if (typeof id !== 'string' || !/^e[1-9]\d*$/.test(id)) return null;

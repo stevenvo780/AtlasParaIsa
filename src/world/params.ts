@@ -22,6 +22,12 @@ export interface WorldParams {
   persistencia: { cadaTicks: number; ventanaEventosTicks: number };
   /** Agua superficial concentrada en cuencas: 1 = generación actual (todas las charcas/manantiales); < 1 conserva solo las de las cuencas más húmedas (T035). */
   agua: { cuencas: number };
+  /**
+   * Ruling R17: el límite de población lo pone el hardware. `presupuestoMs` es el p95
+   * del paso (ms) que el servidor se permite; por encima el gobernador apaga la
+   * reproducción, por debajo del 70 % la reenciende. Default 50 ms = constitución V.
+   */
+  gobernador: { presupuestoMs: number };
 }
 
 function deepFreeze<T>(value: T): T {
@@ -38,10 +44,13 @@ const RAW_DEFAULTS: WorldParams = {
     riesgoSenescenciaDiario: 0.04, riesgoSenescenciaPendiente: 10, cuidadoReduceRiesgo: 0.6,
   },
   genes: { varianzaFundadores: 0.15, tasaMutacion: 1 },
-  poblacion: { maxima: 40, intervaloComprobacionTicks: 120, nacimientosPorComprobacion: 2 },
+  // Ruling R17: `maxima` ya no es un tope de diseño (era 40); por defecto no limita y el
+  // freno lo ponen el entorno y el gobernador. Sigue siendo parámetro para el laboratorio.
+  poblacion: { maxima: 1_000_000, intervaloComprobacionTicks: 120, nacimientosPorComprobacion: 2 },
   recursos: { capacidadBosque: 1, capacidadPastizal: 0.7, capacidadOtros: 0.35, velocidadRegeneracion: 1, decaimientoFertilidad: 0.001, decaimientoComida: 0.0001 },
   persistencia: { cadaTicks: 1, ventanaEventosTicks: 0 },
   agua: { cuencas: 0.4 },
+  gobernador: { presupuestoMs: 50 },
 };
 
 /** Objeto congelado en profundidad: nunca se muta; `parseParams` clona para cada override. */
@@ -58,7 +67,7 @@ export const PARAM_RANGES: Record<string, [number, number]> = {
   'cuerpo.cuidadoReduceRiesgo': [0, 1],
   'genes.varianzaFundadores': [0, 1],
   'genes.tasaMutacion': [0, 10],
-  'poblacion.maxima': [1, 128],
+  'poblacion.maxima': [1, 1_000_000],
   'poblacion.intervaloComprobacionTicks': [1, 10000],
   'poblacion.nacimientosPorComprobacion': [0, 20],
   'recursos.capacidadBosque': [0, 10],
@@ -70,6 +79,7 @@ export const PARAM_RANGES: Record<string, [number, number]> = {
   'persistencia.cadaTicks': [1, 10000],
   'persistencia.ventanaEventosTicks': [0, 1_000_000],
   'agua.cuencas': [0.05, 1],
+  'gobernador.presupuestoMs': [5, 5000],
 };
 
 /** Aplana un objeto anidado o ya plano a pares "a.b" → valor (hoja, no objeto). */

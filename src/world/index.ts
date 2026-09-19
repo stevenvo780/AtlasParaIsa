@@ -12,6 +12,7 @@ import { advanceNeeds } from './needs.js';
 import { assimilateFood, exertBody, hydrateBody, restBody } from './body.js';
 import { defaultBlueprint, constructionCost, constructionOpportunity, inventionOpportunity, invent, completeConstruction, stepStructures, repairOpportunity, repair, facilityRestQuality, recordFacilityRest, foodAvailable, takeFood, waterAvailable, takeWater, REST_FATIGUE_RATE, REST_ENERGY_RATE, BROKEN_CONDITION } from './inventions.js';
 import type { AnimalDynamics, BlueprintView, StructureView, InventionDynamics } from '../shared/life.js';
+import { POPULATION_HARD_LIMIT } from '../shared/life.js';
 import type { TechnologyKnowledge, TechnologyState } from '../shared/technology.js';
 import type { DemographicState, LegacyRecord } from '../shared/demography.js';
 import { defaultTechnologyState, initialTechnologyKnowledge, technologyOpportunity, researchTechnology, craftTechnology, projectTechnology, assertTechnology, useTool, recordTechnologyBenefit, settleTechnologyEstate, cancelTechnologyProject, maintainTechnologyMemory } from './technology.js';
@@ -28,7 +29,13 @@ export { bindWorldContext, tileAt, normalizeViewport, worldContext } from './spa
 export type { WorldContext } from './spatial.js';
 
 export const RULES_VERSION = 6;
-export const MAX_POPULATION = 128;
+/**
+ * Ruling R17: ya no hay tope de población en el software. `POPULATION_HARD_LIMIT`
+ * (1.000.000) solo protege `assertWorld` de un snapshot corrupto; el freno real es el
+ * entorno y el gobernador por p95 del paso. Se reexporta para que un único número
+ * gobierne crónica, checkpoints y validación.
+ */
+export { POPULATION_HARD_LIMIT };
 export const TICKS_PER_DAY = 2400;
 export const MAX_EVENTS = 120;
 export const MAX_EXPERIENCES = 8;
@@ -1055,7 +1062,7 @@ function assertCommon(value: unknown, legacy = false, expectedVersion = RULES_VE
   const list = (v: unknown, max: number): v is unknown[] => Array.isArray(v) && v.length <= max;
   if (!object(value) || value.version !== (legacy ? 1 : expectedVersion) || value.width !== 40 || value.height !== 28 || !integer(value.seed, 0xffffffff) || !integer(value.rng, 0xffffffff) || !integer(value.tick) || !integer(value.eventCounter) || typeof value.learningEnabled !== 'boolean' || !['rain', 'clear'].includes(String(value.weather)) || !Number.isInteger(value.lastGestureTick) || (value.lastGestureTick as number) < -COOLDOWN || (value.lastGestureTick as number) > (value.tick as number)) fail();
   const world = value as unknown as World;
-  const populationCap = Math.max(MAX_POPULATION, paramsOf(world).poblacion.maxima);
+  const populationCap = Math.max(POPULATION_HARD_LIMIT, paramsOf(world).poblacion.maxima);
   const coord = (n: unknown, max: number) => legacy ? integer(n, max) : validCoordinate(n);
   const land = (p: Point) => legacy ? world.tiles.some(t => t.x === p.x && t.y === p.y && t.terrain !== 'water') : walkable(world, p);
   if (!list(world.tiles, legacy ? 1120 : 65536) || (legacy && world.tiles.length !== 1120) || !list(world.people, expectedVersion < 3 || legacy ? 16 : populationCap) || world.people.length < (expectedVersion>=5&&!legacy?2:16) || !list(world.places, legacy ? 3 : 2048) || (legacy && world.places.length !== 3) || !list(world.events, MAX_EVENTS) || !list(world.memories, 10) || !list(world.invitations, 8) || !list(world.reminders, 8)) fail();
@@ -1086,7 +1093,7 @@ function assertCommon(value: unknown, legacy = false, expectedVersion = RULES_VE
 export function assertWorld(value: unknown, expectedVersion = RULES_VERSION, context?: WorldContext): asserts value is World {
   assertCommon(value, false, expectedVersion);
   const w = value;
-  const populationCap = Math.max(MAX_POPULATION, paramsOf(w).poblacion.maxima);
+  const populationCap = Math.max(POPULATION_HARD_LIMIT, paramsOf(w).poblacion.maxima);
   assertChronicleJournal(w);
   bindWorldContext(w, context ?? worldContext(w));
   const fail = (): never => { throw new Error('Estado procedural inválido.'); };

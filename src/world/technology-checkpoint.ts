@@ -1,6 +1,7 @@
 import type { TechnologyCheckpoint, TechnologyKnowledge, TechnologyState } from '../shared/technology.js';
 import { resolveTechnologyRecipe } from './technology-catalogue.js';
 import { assertContainedWater, assertWaterLedger } from './technology-water.js';
+import { POPULATION_HARD_LIMIT } from '../shared/life.js';
 
 export interface TechnologyStockActor { id: string; technology: Pick<TechnologyKnowledge, 'items' | 'residue'>; }
 const materials = ['wood', 'stone', 'water'] as const;
@@ -22,8 +23,8 @@ export function captureTechnologyCheckpoint(state: TechnologyState, actors: read
 }
 
 /** Shape/integrity of a historical opening, not a claim that subsequent flows close. */
-/** Un inventario por habitante vivo: espeja MAX_POPULATION (128, tope duro de assertWorld desde T012); antes 32 y abortaba la simulación al superar 32 habitantes. */
-const MAX_CHECKPOINT_INVENTORIES = 128;
+/** Un inventario por habitante vivo: espeja el tope anticorrupción de `assertWorld` (ruling R17); antes 128, y 32 antes de T041. Ya no limita el mundo. */
+const MAX_CHECKPOINT_INVENTORIES = POPULATION_HARD_LIMIT;
 
 export function assertTechnologyCheckpoint(state: TechnologyState, tick: number): void {
   const checkpoint = state.checkpoint;

@@ -1,5 +1,5 @@
 import type { TechnologyView, TechnologyRecipe, TechnologyRecipeSummary } from '../shared/technology.js';
-import type { OrganizationAnalysis } from '../shared/organization.js';
+import type { OrganizationSummary } from '../shared/organization.js';
 
 const esc = (value: string | number): string => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
 const n = (value: number, digits = 1): string => value.toLocaleString('es-CO', {maximumFractionDigits:digits});
@@ -64,7 +64,7 @@ export function recipeCard(recipe: TechnologyRecipe | TechnologyRecipeSummary): 
     ${detail ? `<small>${detail.parents.length ? `Procede de ${detail.parents.map(esc).join(', ')}.` : 'Primer procedimiento de esta línea.'}</small>` : ''}</details>`;
 }
 
-function organizationGraph(analysis: OrganizationAnalysis, technology: TechnologyView): string {
+function organizationGraph(analysis: OrganizationSummary, technology: TechnologyView): string {
   const processes = [...analysis.processes].sort((a,b)=>b.executions-a.executions).slice(0,12);
   if (!processes.length) return '<p class="stats-empty">Aún no hay procesos registrados para conectar.</p>';
   const positions = new Map(processes.map((process,i)=>[process.id,{x:i%2 ? 205 : 75,y:35+Math.floor(i/2)*62}]));
@@ -79,7 +79,7 @@ function organizationGraph(analysis: OrganizationAnalysis, technology: Technolog
 }
 
 /** `details` holds the programs already asked for; a summary is drawn where none arrived. */
-export function technologyPane(technology?: TechnologyView, organization?: OrganizationAnalysis, details?: ReadonlyMap<string, TechnologyRecipe | null>): string {
+export function technologyPane(technology?: TechnologyView, organization?: OrganizationSummary, details?: ReadonlyMap<string, TechnologyRecipe | null>): string {
   if (!technology) return '<p class="stats-empty">Todavía no se recibieron los materiales y procedimientos de este mundo.</p>';
   const d = technology.dynamics;
   const card = (recipe: TechnologyRecipeSummary): string => recipeCard(details?.get(recipe.id) ?? recipe);

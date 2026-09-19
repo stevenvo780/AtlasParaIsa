@@ -1,5 +1,5 @@
 import { recordChronicleEvent, enableChronicleJournal, assertChronicleJournal, type ChronicleJournal } from './chronicle-journal.js';
-import { PROTOCOL_VERSION, type Action, type ChronicleEvent, type Gesture, type GestureResult, type MemoryView, type PersonView, type PlaceView, type Tile, type WorldView, type Viewport, type Order, type CommunityView, type WorldSample } from '../shared/types.js';
+import { PROTOCOL_VERSION, type Action, type ChronicleEvent, type Gesture, type GestureResult, type MemoryView, type PersonView, type PersonDetail, type PlaceView, type Tile, type WorldView, type Viewport, type Order, type CommunityView, type WorldSample } from '../shared/types.js';
 import { activate, bindWorldContext, maintainRegions, normalizeViewport, projectTerrain, tileAt, validCoordinate, worldContext, type ChunkMeta, type WorldContext } from './spatial.js';
 import { chunkKey, generateChunk, proceduralPlaceName, legacyStructures, type Chunk } from './terrain.js';
 import { assertGenome, expressGenome, founderGenome, inheritGenome, type Genome } from './genetics.js';
@@ -990,10 +990,17 @@ export function cloneWorld(world: World, context: WorldContext = worldContext(wo
 /** Explicit allow-list: no PRNG, habit internals, private provenance or session data cross the wire. */
 const organizationViews = new WeakMap<World, { tick: number; executionCounter: number; checkpoint: TechnologyState['checkpoint']; value: NonNullable<WorldView['organization']> }>();
 /** Windows of the projection, not of the world: the chronicle and the letter keep their own bounds. */
-export const VIEW_EVENTS = 200, VIEW_MEMORIES = 100;
+export const VIEW_EVENTS = 40, VIEW_MEMORIES = 100;
 /** A snapshot is read by a screen: thousandths are the resolution it draws and the one the wire pays for.
  * An absent datum stays absent; rounding never invents a zero. */
-const viewNumber = <T extends number | undefined>(value: T): T => (typeof value === 'number' ? Math.round(value * 1000) / 1000 : value) as T;
+const r3 = (n: number): number => Math.round(n * 1000) / 1000;
+const viewNumber = <T extends number | undefined>(value: T): T => (typeof value === 'number' ? r3(value) : value) as T;
+/** T036(h): «no hay nada de esto aquí» no necesita viajar como `0`. Estas magnitudes son cantidades
+ * (existencias, huellas, fauna): su ausencia y su cero significan lo mismo para quien dibuja, y el
+ * cliente ya las lee con `?? 0`. Las que sí describen el terreno —humedad, alimento, vegetación,
+ * altitud, crecimiento, fertilidad— viajan siempre, porque ahí un cero es un dato. */
+const amount = <K extends string>(key: K, value: number | undefined): Partial<Record<K, number>> =>
+  (typeof value !== 'number' || value === 0 ? {} : { [key]: r3(value) } as Record<K, number>);
 export function projectWorld(world: World, viewport?: Viewport, context: WorldContext = worldContext(world)): WorldView {
   bindWorldContext(world, context);
   const projected = projectTerrain(world, viewport, context), v = projected.viewport;
@@ -1006,7 +1013,7 @@ export function projectWorld(world: World, viewport?: Viewport, context: WorldCo
     version: PROTOCOL_VERSION, sequence: world.tick, tick: world.tick, day: Math.floor(world.tick / TICKS_PER_DAY) + 1,
     phase: phaseAt(world.tick), weather: world.weather, width: v.width, height: v.height,
     originX: v.x, originY: v.y, infinite: true, activeChunks: Object.keys(world.chunks).length, discoveredChunks: world.discoveredChunks, settlementCount: world.settlementCount,
-    tiles: projected.tiles.map(t => ({ x: t.x, y: t.y, terrain: t.terrain, biome: t.biome, elevation: viewNumber(t.elevation), wood: viewNumber(t.wood), stone: viewNumber(t.stone), moisture: viewNumber(t.moisture), food: viewNumber(t.food), vegetation: viewNumber(t.vegetation), feature: t.feature, variety: t.variety, growth: viewNumber(t.growth), fertility: viewNumber(t.fertility), cultivation: viewNumber(t.cultivation), traffic: viewNumber(t.traffic), drinkingWater: viewNumber(t.drinkingWater), species: t.species, fauna: viewNumber(t.fauna), life: viewNumber(t.life) })),
+    tiles: projected.tiles.map(t => ({ x: t.x, y: t.y, terrain: t.terrain, biome: t.biome, elevation: viewNumber(t.elevation), moisture: viewNumber(t.moisture), food: viewNumber(t.food), vegetation: viewNumber(t.vegetation), feature: t.feature, growth: viewNumber(t.growth), fertility: viewNumber(t.fertility), species: t.species, ...amount('wood', t.wood), ...amount('stone', t.stone), ...amount('variety', t.variety), ...amount('cultivation', t.cultivation), ...amount('traffic', t.traffic), ...amount('drinkingWater', t.drinkingWater), ...amount('fauna', t.fauna), ...amount('life', t.life) })),
     people: world.people.map((p): PersonView => {
       const life = demographicTraits(p.genome);
       return { id: p.id, name: p.name, role: p.role, x: p.x, y: p.y, color: p.color, action: p.action, reason: p.reason, energy: p.energy, hunger: p.hunger, fatigue: p.fatigue, thirst: p.thirst, need: p.need, recentMemory: p.recentMemory, traits: { ...p.traits }, skills: { ...p.skills }, materials: { ...p.materials }, specialty: specialty(p), controlMode: p.controlMode, blueprintId:p.blueprintId??null,
@@ -1015,15 +1022,27 @@ export function projectWorld(world: World, viewport?: Viewport, context: WorldCo
         : ['research','craft'].includes(p.action) ? (p.technology.project ? clamp(p.technology.project.progress/p.technology.project.requiredWork) : 0) : clamp(p.work / (p.action==='build'?constructionCost(world,p).work:p.action==='invent'?60:p.action==='repair'?30:['farm','hunt'].includes(p.action)?Math.ceil(45*(1-(p.skills[p.action]??0)*0.25)):Math.ceil(18*(1-(p.skills[p.action]??0)*0.25)))),
       health:p.demography.health,vitality:p.demography.vitality,continuityProtected:p.role!=='neighbor',
       lifeStage: p.demography.age < life.maturityAge ? 'juvenile' : p.demography.age < life.senescenceStart ? 'adult' : 'senescent',
-      genome: { generation: p.genome.generation, parents: [...p.genome.parents], learningRate: p.genome.learningRate, cooperation: p.genome.cooperation, mutations: p.genome.mutations }, age: world.tick - p.bornAt, communityId: p.communityId, culture: { ...p.culture }, trust: Object.entries(p.bonds).map(([id, value]) => ({ id, value })), experiences: p.experiences.map(e => ({ tick: e.tick, text: e.text, causeId: e.causeId })) };
+      genome: { generation: p.genome.generation, parents: [...p.genome.parents], learningRate: p.genome.learningRate, cooperation: p.genome.cooperation, mutations: p.genome.mutations }, age: world.tick - p.bornAt, communityId: p.communityId, culture: { ...p.culture } };
     }),
     places: projected.places.map(p => ({ id: p.id, name: p.name, x: p.x, y: p.y, description: p.description, gatherings: p.gatherings })), events: world.events.slice(-VIEW_EVENTS).map(e => ({ id: e.id, tick: e.tick, kind: e.kind, actors: [...e.actors], ...(e.x === undefined ? {} : { x: e.x }), ...(e.y === undefined ? {} : { y: e.y }), text: e.text, cause: e.cause, source: e.source, ...(e.death === undefined ? {} : { death: { ...e.death, previous: [...e.death.previous] } }) })),
     memories: world.memories.slice(-VIEW_MEMORIES).map(m => ({ id: m.id, title: m.title, text: m.text, source: m.source, placeId: m.placeId })),
     animals: projected.animals, structures: projected.structures, blueprints: world.blueprints.map(b=>({id:b.id,name:b.name,components:[...b.components],generation:b.generation,parents:[...b.parents],inventorId:b.inventorId,tick:b.tick,uses:b.uses,usefulness:b.usefulness,cost:{wood:b.cost.wood,stone:b.cost.stone,work:b.cost.work}})),
     stats: worldStatistics(world), communities: world.communities.map(c => ({ id: c.id, name: c.name, x: c.x, y: c.y, color: c.color, members: [...c.members], culture: { ...c.culture }, formedAt: c.formedAt, cooperation: c.cooperation, disputes: c.disputes })),
-    technology: projectTechnology(world), organization: structuredClone(organization.value),
+    technology: projectTechnology(world), organization: (({ resources: _resources, ...summary }) => structuredClone(summary))(organization.value),
     demography: {deaths:world.demographyDynamics.deaths,causes:{...world.demographyDynamics.causes},recent:world.legacy.slice(0,32).map(p=>({id:p.id,name:p.name,generation:p.generation,parents:[...p.parents],bornAt:p.bornAt,diedAt:p.diedAt,cause:p.cause}))},
   };
+}
+
+/** T036(h): la biografía de UN habitante, servida a petición y de sólo lectura, como
+ * `technologyRecipeDetail`. Una identidad que ya no vive devuelve `undefined`: ausente, no vacía. */
+export function personDetail(world: World, id: string): PersonDetail | undefined {
+  if (typeof id !== 'string' || id.length > 50) return undefined;
+  const person = world.people.find(p => p.id === id);
+  if (!person) return undefined;
+  return { id: person.id,
+    experiences: person.experiences.map(e => ({ tick: e.tick, text: e.text, causeId: e.causeId })),
+    trust: Object.entries(person.bonds).map(([other, value]) => ({ id: other, value: viewNumber(value) })),
+    recipeIds: [...person.technology.knownRecipes] };
 }
 
 /** Reject corruption on load rather than silently replacing a world. */

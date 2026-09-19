@@ -1,11 +1,16 @@
 import type { AnimalView, AnimalDynamics, BlueprintView, StructureView, InventionDynamics } from './life.js';
 import type { TechnologyRecipe, TechnologyView } from './technology.js';
-import type { OrganizationAnalysis } from './organization.js';
+import type { OrganizationSummary } from './organization.js';
 export type { AnimalView, AnimalDynamics, BlueprintView, StructureView, InventionDynamics } from './life.js';
 export type { TechnologyRecipe, TechnologyRecipeSummary } from './technology.js';
 /** 7: `TechnologyView.recipes` carries summaries; the program travels only on request.
+ * 8 (T036(h)): dieta del `state`. `PersonView.experiences`, `PersonView.trust` y
+ * `TechnologyView.knowledge` ya no viajan en cada instantánea: el inspector los pide con
+ * `{type:'persona', id}`. Las magnitudes de tesela que valen cero se omiten, `VIEW_EVENTS` baja a 40 y
+ * `organization` viaja sin el balance por recurso. Un cliente antiguo en caché debe fallar a la vista
+ * en lugar de dibujar como «cero» lo que sólo está ausente.
  * A cached older client must fail in the open instead of drawing an absent program. */
-export const PROTOCOL_VERSION = 7;
+export const PROTOCOL_VERSION = 8;
 export interface Viewport { x: number; y: number; width: number; height: number; }
 export type Biome = 'grassland' | 'forest' | 'desert' | 'mountain' | 'wetland' | 'ocean';
 export type Terrain = 'water' | 'soil' | 'meadow' | 'shelter';
@@ -23,14 +28,26 @@ export interface PersonView {
   specialty?: string; controlMode?: 'auto' | 'directed';
   traits?: { curiosity: number; sociability: number; industriousness: number; care: number; resilience: number };
   skills?: Record<string, number>; materials?: { wood: number; stone: number };
-  genome?: GenomeView; age?: number; experiences?: { tick: number; text: string; causeId: string }[];
-  communityId?: string | null; culture?: { sharing: number; stewardship: number; openness: number }; trust?: { id: string; value: number }[];
+  genome?: GenomeView; age?: number;
+  /** T036(h): fuera del `state`; llegan con `{type:'persona'}`. Ausente = «todavía no pedido», nunca «no tiene». */
+  experiences?: { tick: number; text: string; causeId: string }[];
+  communityId?: string | null; culture?: { sharing: number; stewardship: number; openness: number };
+  /** T036(h): fuera del `state`; llega con `{type:'persona'}`. Ausente = «todavía no pedido», nunca «sin vínculos». */
+  trust?: { id: string; value: number }[];
   blueprintId?: string | null;
   target?: { x: number; y: number }; working?: boolean; workProgress?: number;
   foodReserve?: number; foodReserveCapacity?: number;
   health?: number; vitality?: number; continuityProtected?: boolean;
   /** Server-derived inherited age thresholds; absence means unknown, not reproductive readiness. */
   lifeStage?: 'juvenile' | 'adult' | 'senescent';
+}
+/** T036(h): lo que el inspector pide por habitante y no viaja en cada `state`. */
+export interface PersonDetail {
+  id: string;
+  experiences: { tick: number; text: string; causeId: string }[];
+  trust: { id: string; value: number }[];
+  /** Repertorio de procedimientos que recuerda; antes `TechnologyView.knowledge`. */
+  recipeIds: string[];
 }
 export interface PlaceView { id: string; name: string; x: number; y: number; description: string; gatherings: number; }
 export interface ChronicleEvent {
@@ -52,7 +69,7 @@ export interface WorldView {
   stats?: WorldStats; performance?: RuntimeStats;
   communities?: CommunityView[];
   animals?: AnimalView[]; blueprints?: BlueprintView[]; structures?: StructureView[];
-  technology?: TechnologyView; organization?: OrganizationAnalysis;
+  technology?: TechnologyView; organization?: OrganizationSummary;
   /** Identity of the served world; the projection omits it and the server adds it. */
   instanceId?: string;
   demography?: { deaths: number; causes: Record<string, number>; recent: { id: string; name: string; generation: number; parents: string[]; bornAt: number; diedAt: number; cause: string }[] };
@@ -74,6 +91,8 @@ export type ClientMessage =
   | { type: 'gesture'; gesture: Gesture }
   | { type: 'viewport'; viewport: Viewport }
   | { type: 'recipe'; id: string }
+  /** T036(h): la biografía de un solo habitante, pedida al abrir su ficha. */
+  | { type: 'persona'; id: string }
   /** Modo ligero móvil (T024): cadencia mínima pedida por ese cliente; el servidor acota a 1000 ms. */
   | { type: 'suscripcion'; intervaloMs: number };
 export type ServerMessage =
@@ -81,4 +100,6 @@ export type ServerMessage =
   | { type: 'result'; result: GestureResult }
   /** A null definition means the server cannot serve that program now, never that it is empty. */
   | { type: 'recipe'; id: string; recipe: TechnologyRecipe | null }
+  /** A null persona means that identity is not in the served world now, never that it lived nothing. */
+  | { type: 'persona'; id: string; persona: PersonDetail | null }
   | { type: 'error'; message: string };

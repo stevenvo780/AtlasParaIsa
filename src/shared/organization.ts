@@ -121,3 +121,7 @@ export interface OrganizationAnalysis {
   actorActivity: { actorId: string; processId: string; executions: number }[];
   actorRoles: { actorId: string; executions: number; dominantProcessId: string; dominantShare: number; effectiveProcesses: number }[];
 }
+
+/** T036(h): lo que viaja en el `state`. El balance por recurso (≈29 KiB con 256 recetas) no lo dibuja
+ * ningún cliente; el análisis completo sigue disponible para el laboratorio y las pruebas. */
+export type OrganizationSummary = Omit<OrganizationAnalysis, 'resources'> & { resources?: OrganizationResourceBalance[] };

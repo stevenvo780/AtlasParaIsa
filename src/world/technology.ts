@@ -553,6 +553,8 @@ function viewCapacities(values: Record<Capability, number>): Record<Capability, 
 export function projectTechnology(host: TechnologyHost): TechnologyView {
   const state = host.technology, all = host.people.flatMap(p => p.technology.items), composition = sum(all.map(i => i.composition)), residue = sum(host.people.map(p => p.technology.residue));
   const importedMass = mass(state.ledger.imported), productMass = mass(composition), residueMass = mass(residue), totals = technologyCatalogueTotals(host);
+  /** T036(h): el repertorio de cada actor (≈13 KiB) ya no viaja en cada `state`: el inspector lo pide
+   * por habitante con `{type:'persona'}`. Su ausencia significa «no está en esta vista», no «no sabe nada». */
   return { recipes: state.recipes.map(recipe => ({ id: recipe.id, name: recipe.name, generation: recipe.generation, capacities: viewCapacities(recipe.capacities) })),
     items: host.people.flatMap(p => p.technology.items.map(i => {
     const affordance = state.water ? containerAffordance(i) : undefined;
@@ -560,7 +562,6 @@ export function projectTechnology(host: TechnologyHost): TechnologyView {
       ...(affordance ? { water: { version: 1 as const, quanta: i.contents?.water ?? 0, capacityQuanta: affordance.capacityQuanta,
         quantaPerUnit: 50000 as const, leakageNumerator: affordance.leakageNumerator, leakageDenominator: 1000000 as const } } : {}) };
   })),
-    knowledge: host.people.map(person => ({ actorId: person.id, recipeIds: [...person.technology.knownRecipes] })),
     dynamics: { attempts: state.ledger.attempts, failures: state.ledger.failures, recipes: totals.recipes, products: all.length, generations: totals.maxGeneration,
       toolUses: state.ledger.toolUses, observedUtility: totals.utility, shared: state.ledger.shared,
       importedMass, productMass, residueMass, massError: importedMass - productMass - residueMass - state.ledger.fuelMass - mass(state.ledger.estateLoss), estateLostMass: mass(state.ledger.estateLoss),

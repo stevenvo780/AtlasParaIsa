@@ -3,7 +3,35 @@ import type { World } from './index.js';
 import { CHUNK_SIZE } from './terrain.js';
 import { indiceDiversidad } from './diversidad.js';
 
-export interface WorldStatsRecursos extends WorldStats { giniRecursosPorRegion: number; fraccionCeldasConComida: number; distanciaMediaAgua: number }
+export interface WorldStatsRecursos extends WorldStats { giniRecursosPorRegion: number; fraccionCeldasConComida: number; distanciaMediaAgua: number;
+  /** Paso en el que se calcularon las métricas caras (gini, comida, agua, diversidad).
+   * Las demás cifras son siempre del paso actual; estas se refrescan con cadencia. */
+  statsTick: number }
+
+/** T041: las métricas de recursos recorren TODAS las teselas (y `distanciaMediaAgua` hace
+ * una BFS completa). Con 12 clientes costaban ~444 ms por paso porque `projectWorld` las
+ * recalculaba por cliente y por tick. Se refrescan cada 200 pasos (~20 s a 10 Hz) y entre
+ * medias se reutiliza el último valor, marcado en la vista con `statsTick`. */
+export const ESTADISTICAS_CARAS_CADA_TICKS = 200;
+type EstadisticasCaras = { statsTick: number; giniRecursosPorRegion: number; fraccionCeldasConComida: number; distanciaMediaAgua: number; diversidad: { conducta: number; oficios: number; total: number } };
+/** Cachés laterales (nunca viajan en la instantánea ni entran en `assertWorld`). */
+const carasPorMundo = new WeakMap<World, EstadisticasCaras>();
+const vistaPorMundo = new WeakMap<World, { tick: number; value: WorldStatsRecursos }>();
+/** `cloneWorld` crea un objeto nuevo cada paso: sin esto la cadencia no sobreviviría al clon. */
+export function heredarEstadisticas(draft: World, source: World): void {
+  const caras = carasPorMundo.get(source);
+  if (caras) carasPorMundo.set(draft, caras);
+}
+function estadisticasCaras(world: World): EstadisticasCaras {
+  const previa = carasPorMundo.get(world);
+  // Un mundo que retrocede (recuperación) o que ya cumplió la cadencia recalcula.
+  if (previa && world.tick >= previa.statsTick && world.tick - previa.statsTick < ESTADISTICAS_CARAS_CADA_TICKS) return previa;
+  const caras: EstadisticasCaras = { statsTick: world.tick,
+    giniRecursosPorRegion: giniRecursosPorRegion(world.tiles), fraccionCeldasConComida: fraccionCeldasConComida(world.tiles),
+    distanciaMediaAgua: distanciaMediaAgua(world.tiles), diversidad: indiceDiversidad(world) };
+  carasPorMundo.set(world, caras);
+  return caras;
+}
 
 export function giniRecursosPorRegion(tiles: readonly Tile[]): number {
   const totals = new Map<string, number>();
@@ -54,6 +82,16 @@ export function recordSample(world: World): void {
   world.history.push(sample(world)); world.history = world.history.slice(-96);
 }
 export function worldStatistics(world: World): WorldStatsRecursos {
+  // Memoria por (mundo, paso): `projectWorld` corre una vez por cliente conectado y el
+  // recorrido de teselas y fauna es idéntico para todos dentro del mismo paso.
+  const memoria = vistaPorMundo.get(world);
+  if (memoria && memoria.tick === world.tick) return memoria.value;
+  const value = computeWorldStatistics(world);
+  vistaPorMundo.set(world, { tick: world.tick, value });
+  return value;
+}
+function computeWorldStatistics(world: World): WorldStatsRecursos {
+  const caras = estadisticasCaras(world);
   const current = sample(world), actions: Record<string, number> = {}, biomes: Record<string, number> = {}, features: Record<string, number> = {}, generations: Record<string, number> = {}, wildlife: Record<string, number> = {};
   const materials = { wood: 0, stone: 0 }; let freshWater = 0, cultivatedTiles = 0, trailTiles = 0;
   for (const p of world.people) { actions[p.action] = (actions[p.action] ?? 0) + 1; generations[p.genome.generation] = (generations[p.genome.generation] ?? 0) + 1; materials.wood += p.materials.wood; materials.stone += p.materials.stone; }
@@ -64,5 +102,5 @@ export function worldStatistics(world: World): WorldStatsRecursos {
   }
   for(const animal of world.animals) wildlife[animal.species]=(wildlife[animal.species]??0)+1;
   const structures:Record<string,number>={}; for(const structure of world.structures){freshWater+=structure.water;for(const component of structure.components)structures[component]=(structures[component]??0)+1;}
-  return { population: current.population, meanEnergy: current.energy, meanHunger: current.hunger, meanFatigue: current.fatigue, meanThirst: current.thirst, materials, actions, biomes, features, totals: { ...world.totals }, generations, history: world.history.map(s => ({ ...s })), scope: 'active-regions', wildlife, freshWater, cultivatedTiles, trailTiles, animalDynamics:{...world.animalDynamics}, structures,blueprints:world.blueprints.length,inventionDynamics:{...world.inventionDynamics}, giniRecursosPorRegion: giniRecursosPorRegion(world.tiles), fraccionCeldasConComida: fraccionCeldasConComida(world.tiles), distanciaMediaAgua: distanciaMediaAgua(world.tiles), diversidad: indiceDiversidad(world) };
+  return { population: current.population, meanEnergy: current.energy, meanHunger: current.hunger, meanFatigue: current.fatigue, meanThirst: current.thirst, materials, actions, biomes, features, totals: { ...world.totals }, generations, history: world.history.map(s => ({ ...s })), scope: 'active-regions', wildlife, freshWater, cultivatedTiles, trailTiles, animalDynamics:{...world.animalDynamics}, structures,blueprints:world.blueprints.length,inventionDynamics:{...world.inventionDynamics}, ...caras, diversidad: { ...caras.diversidad } };
 }

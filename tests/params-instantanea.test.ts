@@ -1,0 +1,96 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { Store } from '../src/server/store.js';
+import { createApp } from '../src/server/app.js';
+import { encodeSnapshot } from '../src/server/snapshot.js';
+import { createWorld, type World } from '../src/world/index.js';
+import { DEFAULT_PARAMS, paramsOf, parseParams, setParams } from '../src/world/params.js';
+
+/** R8: los `WorldParams` viven en un WeakMap por instancia, así que un mundo recargado
+ * desde JSON los perdía y volvía a los defaults. Ahora viajan en la instantánea. */
+const digest = (body: string) => createHash('sha256').update(body).digest('hex');
+function laboratory(t: { after(callback: () => void): void }) {
+  const directory = mkdtempSync(join(tmpdir(), 'atlas-params-test-'));
+  const path = join(directory, 'world.sqlite'), store = new Store(path);
+  t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
+  return { store, path, directory };
+}
+const row = (store: Store) => store.db.prepare('SELECT body,digest FROM snapshots WHERE slot=0').get() as { body: string; digest: string };
+const rewrite = (store: Store, body: string) => store.db.prepare('UPDATE snapshots SET body=?,digest=? WHERE slot=0').run(body, digest(body));
+
+test('los parámetros del mundo viajan en la instantánea y mandan al recargar', t => {
+  const { store, path } = laboratory(t);
+  const params = parseParams('agua.cuencas=0.8,poblacion.maxima=50');
+  const world = createWorld(51926, params);
+  store.save(world);
+  const saved = row(store);
+  assert.deepEqual(JSON.parse(saved.body).params, params, 'la instantánea declara los params vigentes');
+
+  const reopened = new Store(path);
+  try {
+    const loaded = reopened.load()!.world;
+    assert.deepEqual(paramsOf(loaded), params, 'un mundo recargado conserva sus params, no los defaults');
+    assert.equal(paramsOf(loaded).agua.cuencas, 0.8);
+    assert.equal(paramsOf(loaded).poblacion.maxima, 50);
+    // Guardar lo recargado reproduce el mismo cuerpo: los params no introducen deriva.
+    reopened.save(loaded);
+    assert.equal(row(reopened).digest, saved.digest, 'el dígeste sobrevive a la ida y vuelta');
+  } finally { reopened.close(); }
+});
+
+test('con los defaults la instantánea es la misma de antes de la ley, y sin campo se lee DEFAULT_PARAMS', t => {
+  const { store, path } = laboratory(t);
+  const world = createWorld(51926);
+  store.save(world);
+  const saved = row(store);
+  assert.equal('params' in JSON.parse(saved.body), false, 'los defaults no ocupan sitio: control bit a bit del mundo anterior');
+  assert.equal(encodeSnapshot(world, DEFAULT_PARAMS), encodeSnapshot(world));
+
+  // Migración: una instantánea escrita antes de esta ley no declara params.
+  const antigua = JSON.parse(saved.body) as Record<string, unknown>;
+  assert.equal(antigua.paramsEncoding, undefined);
+  const reopened = new Store(path);
+  try { assert.equal(paramsOf(reopened.load()!.world), DEFAULT_PARAMS, 'sin campo, los params son los defaults por identidad'); }
+  finally { reopened.close(); }
+});
+
+test('unos parámetros fuera de rango en la instantánea fallan cerrado en vez de colarse en el mundo', t => {
+  const { store } = laboratory(t);
+  const world = createWorld(51926, parseParams('agua.cuencas=0.8'));
+  store.save(world);
+  const cuerpo = JSON.parse(row(store).body) as Record<string, unknown>;
+  const params = structuredClone(cuerpo.params) as { agua: { cuencas: number } };
+  params.agua.cuencas = 9;
+  rewrite(store, JSON.stringify({ ...cuerpo, params }));
+  assert.throws(() => store.load(), /Invalid snapshot parameters/, 'un dígeste recalculado no legitima un parámetro imposible');
+
+  const desconocido = JSON.stringify({ ...cuerpo, params: { ...(cuerpo.params as object), inventado: { clave: 1 } } });
+  rewrite(store, desconocido);
+  assert.throws(() => store.load(), /Invalid snapshot parameters/);
+});
+
+test('createApp genera el mundo nuevo con los parámetros recibidos y respeta los de la instantánea al recargar', async t => {
+  const { store, path } = laboratory(t);
+  const params = parseParams('agua.cuencas=1');
+  const app = createApp({ store, password: 'synthetic-test-password-only', origin: 'http://127.0.0.1:3000', manual: true, seed: 42, params });
+  t.after(async () => { await app.close(); });
+  const conAgua = (world: World) => world.tiles.filter(tile => (tile.drinkingWater ?? 0) > 0).length;
+  assert.deepEqual(paramsOf(app.world), params, 'los params llegan antes de que createApp genere el mundo');
+  assert.equal(conAgua(app.world), conAgua(createWorld(42, params)));
+  assert.notEqual(conAgua(app.world), conAgua(createWorld(42)), 'el terreno se generó con los params pedidos, no con los defaults');
+
+  // Al recargar, los params de la instantánea mandan sobre los de createApp…
+  const reopened = new Store(path);
+  t.after(() => reopened.close());
+  const otros = parseParams('agua.cuencas=0.2');
+  const resumed = createApp({ store: reopened, password: 'synthetic-test-password-only', origin: 'http://127.0.0.1:3000', manual: true, seed: 42, params: otros });
+  t.after(async () => { await resumed.close(); });
+  assert.deepEqual(paramsOf(resumed.world), params, 'un mundo cargado conserva los params con los que se generó');
+  // …y CARTA_PARAMS los sobreescribe explícitamente, como hace `main.ts` tras `createApp`.
+  setParams(resumed.world, otros);
+  assert.deepEqual(paramsOf(resumed.world), otros);
+});

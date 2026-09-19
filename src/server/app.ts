@@ -4,7 +4,7 @@ import { resolve, extname, sep } from 'node:path';
 import { isIP } from 'node:net';
 import { WebSocketServer, WebSocket } from 'ws';
 import { createWorld, stepWorld, projectWorld, normalizeViewport, cloneWorld, personDetail } from '../world/index.js';
-import { paramsOf } from '../world/params.js';
+import { paramsOf, type WorldParams } from '../world/params.js';
 import { technologyRecipeDetail } from '../world/technology.js';
 import type { ClientMessage, Gesture, GestureResult, ServerMessage, Viewport, WorldView, RuntimeStats } from '../shared/types.js';
 import { Store, fingerprint, GestureConflict, SessionRevoked } from './store.js';
@@ -15,6 +15,10 @@ class HttpError extends Error { constructor(readonly status: number, message: st
 export interface AppOptions {
   store: Store; password?: string; credentialPath?: string; origin: string;
   secure?: boolean; staticDir?: string; tickMs?: number; seed?: number; manual?: boolean;
+  /** Params con los que se GENERA un mundo nuevo (R6: antes llegaban después de que
+   * `createApp` ya hubiera generado el terreno). Un mundo cargado conserva los suyos,
+   * los de su instantánea; quien quiera imponerlos llama `setParams` después. */
+  params?: WorldParams;
 }
 type Pending = { gesture: Gesture; hash: string; resolve: (r: GestureResult) => void; reject: (e: Error) => void; promise: Promise<GestureResult> };
 export function parseGesture(value: unknown): Gesture {
@@ -81,7 +85,7 @@ export function createApp(options: AppOptions) {
   if (options.secure && !origin.startsWith('https://')) throw new Error('Private hosted access requires an HTTPS origin.');
   const loaded = store.load();
   const existingInstanceId = readWorldInstance(store.db);
-  let world = loaded?.world ?? createWorld(options.seed ?? 51926);
+  let world = loaded?.world ?? createWorld(options.seed ?? 51926, options.params);
   if (loaded) {
     world.events.push({ id: `pause-${world.tick}-${makeToken().slice(0,12)}`, tick: world.tick, kind: 'pause', actors: [],
       text: 'El servicio estuvo en pausa. El mundo retoma desde su último momento guardado.', cause: 'Reinicio del servicio; sin avance retrospectivo.', source: 'simulation' });

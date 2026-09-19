@@ -4,7 +4,7 @@ import { activate, bindWorldContext, maintainRegions, normalizeViewport, project
 import { chunkKey, generateChunk, proceduralPlaceName, legacyStructures, type Chunk } from './terrain.js';
 import { assertGenome, DEFAULT_MUTATION_RATE, expressGenome, founderGenome, inheritGenome, type Genome } from './genetics.js';
 import { bond, cooperate, cooperationOpportunity, initialCulture, resourceDispute, updateCommunities, settlementOpportunity, type Culture } from './society.js';
-import { count, emptyTotals, recordSample, worldStatistics } from './statistics.js';
+import { count, emptyTotals, heredarEstadisticas, recordSample, worldStatistics } from './statistics.js';
 import { initializeEcosystem, stepEcosystem, harvestMaterial, cultivateTile, trampleTile, FOOD_PER_ANIMAL } from './ecosystem.js';
 import { assertEcosystemTile, assertLifeState, assertDormantTerrain } from './validation.js';
 import { materializeAnimals, stepAnimals, harvestAt, type Animal } from './animals.js';
@@ -992,6 +992,9 @@ export function cloneWorld(world: World, context: WorldContext = worldContext(wo
   draft.tiles = world.tiles.map(tile => ({ ...tile }));
   bindWorldContext(draft, { ...worldContext(world), ...(context && typeof context === 'object' ? context : {}) });
   setParams(draft, paramsOf(world));
+  // T041: la cadencia de las métricas caras vive en una caché lateral por mundo; el clon
+  // de cada paso la hereda para no recalcular la BFS de agua en cada tick.
+  heredarEstadisticas(draft, world);
   return draft;
 }
 

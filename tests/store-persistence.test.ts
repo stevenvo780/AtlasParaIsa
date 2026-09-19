@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Store, DEEP_CHECKPOINT_EVERY_SAVES } from '../src/server/store.js';
+import { Store, DEEP_CHECKPOINT_EVERY_SAVES, DEEP_VALIDATION_EVERY_SAVES } from '../src/server/store.js';
 import { createWorld, cloneWorld, type World } from '../src/world/index.js';
 import { parseParams, setParams } from '../src/world/params.js';
 import { recordChronicleEvent } from '../src/world/chronicle-journal.js';
@@ -68,16 +68,18 @@ test('con ventana de poda el archivo retiene la ventana de sucesos y una sola ve
   try { assert.equal(reopened.load()!.world.eventCounter, world.eventCounter); } finally { reopened.close(); }
 });
 
-test('save() rechaza un estado que load() rechazaría y conserva el último guardado válido', t => {
+test('la revisión completa rechaza un estado que load() rechazaría y conserva el último guardado válido', t => {
   const { store } = laboratory(t);
   const world = createWorld(11);
-  store.save(world);
-  const draft = cloneWorld(world, store.context);
-  fixtureTick(draft, 1);
-  draft.tiles[0]!.wood = 99; // fuera del rango que assertWorld exige al cargar
-  assert.throws(() => store.save(draft), /procedural|Invalid|inválido/i);
+  store.save(world); // guardado 0: siempre lleva revisión completa
+  const invalid = () => { const draft = cloneWorld(world, store.context); draft.tiles[0]!.wood = 99; return draft; };
+  // La revisión completa vuelve a tocar tras DEEP_VALIDATION_EVERY_SAVES guardados.
+  for (let n = 1; n < DEEP_VALIDATION_EVERY_SAVES; n++) { const valid = cloneWorld(world, store.context); fixtureTick(valid, n); store.save(valid); }
+  const draft = invalid();
+  fixtureTick(draft, DEEP_VALIDATION_EVERY_SAVES);
+  assert.throws(() => store.save(draft), /procedural|Invalid|inválido/i); // fuera del rango que assertWorld exige al cargar
   const loaded = store.load()!;
-  assert.equal(loaded.world.tick, 0);
+  assert.equal(loaded.world.tick, DEEP_VALIDATION_EVERY_SAVES - 1);
   assert.equal(loaded.world.tiles[0]!.wood, world.tiles[0]!.wood);
 });
 

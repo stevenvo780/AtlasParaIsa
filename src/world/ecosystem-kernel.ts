@@ -8,16 +8,19 @@ const MAX_TOPOLOGIES = 4;
 /** Opciones de la ecología: T013 (`decaimientoFertilidad`) + T035 (`seed`/`cuencas`). */
 export interface EcosystemOptions { decaimientoFertilidad?: number; seed?: number; cuencas?: number }
 
+/**
+ * Índice ordenado de vecinos + la ÚNICA instantánea que la regla necesita.
+ *
+ * R4 (perfilado del bucle caliente): antes se copiaban siete campos de cada tesela a siete
+ * `Float64Array` antes de actualizar nada. Solo `life` se lee de OTRA tesela (la vecindad viva);
+ * los seis restantes se leían únicamente en el índice `i`, justo antes de que esa misma iteración
+ * los reescribiera, así que leerlos de la tesela da exactamente el mismo doble. Se conserva el
+ * único campo que de verdad necesita una foto previa.
+ */
 interface Topology {
   coordinates: Float64Array;
   neighbors: Int32Array;
-  growth: Float64Array;
-  fertility: Float64Array;
   life: Float64Array;
-  moisture: Float64Array;
-  drinkingWater: Float64Array;
-  cultivation: Float64Array;
-  traffic: Float64Array;
 }
 
 function sameCoordinates(topology: Topology, tiles: readonly Tile[]): boolean {
@@ -29,28 +32,39 @@ function sameCoordinates(topology: Topology, tiles: readonly Tile[]): boolean {
   return true;
 }
 
+/**
+ * R4: el índice de posiciones es un mapa de filas (`y` → `x` → índice) con claves NUMÉRICAS. La
+ * versión anterior construía una clave de cadena `${x},${y}` por tesela y otra por cada uno de sus
+ * ocho vecinos — nueve cadenas por tesela cada vez que el mundo carga o retira un chunk y la
+ * topología se reconstruye. El mapa anidado es inyectivo para cualquier par de enteros (no supone
+ * ningún rango de coordenadas) y conserva el mismo orden de vecinos, el mismo `-1` para los
+ * ausentes y el mismo rechazo de coordenadas duplicadas antes de tocar nada.
+ */
 function buildTopology(tiles: readonly Tile[]): Topology {
-  const coordinates = new Float64Array(tiles.length * 2);
-  const positions = new Map<string, number>();
-  for (let i = 0; i < tiles.length; i++) {
+  const length = tiles.length;
+  const coordinates = new Float64Array(length * 2);
+  const rows = new Map<number, Map<number, number>>();
+  for (let i = 0; i < length; i++) {
     const tile = tiles[i];
-    const key = `${tile.x},${tile.y}`;
-    if (positions.has(key)) throw new Error('El ecosistema requiere coordenadas únicas.');
-    positions.set(key, i);
+    let row = rows.get(tile.y);
+    if (row === undefined) { row = new Map<number, number>(); rows.set(tile.y, row); }
+    if (row.has(tile.x)) throw new Error('El ecosistema requiere coordenadas únicas.');
+    row.set(tile.x, i);
     coordinates[i * 2] = tile.x; coordinates[i * 2 + 1] = tile.y;
   }
-  const neighbors = new Int32Array(tiles.length * 8).fill(-1);
-  for (let i = 0; i < tiles.length; i++) {
+  const neighbors = new Int32Array(length * 8).fill(-1);
+  for (let i = 0; i < length; i++) {
     const tile = tiles[i];
-    let offset = 0;
-    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-      if (dx === 0 && dy === 0) continue;
-      neighbors[i * 8 + offset++] = positions.get(`${tile.x + dx},${tile.y + dy}`) ?? -1;
+    let offset = i * 8;
+    for (let dy = -1; dy <= 1; dy++) {
+      const row = rows.get(tile.y + dy);
+      for (let dx = -1; dx <= 1; dx++) {
+        if (dx === 0 && dy === 0) continue;
+        neighbors[offset++] = row === undefined ? -1 : row.get(tile.x + dx) ?? -1;
+      }
     }
   }
-  return { coordinates, neighbors, growth: new Float64Array(tiles.length), fertility: new Float64Array(tiles.length),
-    life: new Float64Array(tiles.length), moisture: new Float64Array(tiles.length), drinkingWater: new Float64Array(tiles.length),
-    cultivation: new Float64Array(tiles.length), traffic: new Float64Array(tiles.length) };
+  return { coordinates, neighbors, life: new Float64Array(length) };
 }
 
 /** Scratch storage only: no Tile references or ecological values are reused between calls.
@@ -80,26 +94,26 @@ export class EcosystemKernel {
     if (index >= 0) this.topologies.splice(index, 1);
     this.topologies.unshift(previous);
     if (this.topologies.length > MAX_TOPOLOGIES) this.topologies.pop();
-    for (let i = 0; i < tiles.length; i++) {
-      const tile = tiles[i];
-      previous.growth[i] = tile.growth ?? tile.vegetation;
-      previous.fertility[i] = tile.fertility ?? 0;
-      previous.life[i] = tile.life ?? 0;
-      previous.moisture[i] = tile.moisture;
-      previous.drinkingWater[i] = tile.drinkingWater ?? 0;
-      previous.cultivation[i] = tile.cultivation ?? 0;
-      previous.traffic[i] = tile.traffic ?? 0;
-    }
+    const length = tiles.length, neighbors = previous.neighbors, lifeBefore = previous.life;
+    // La vecindad viva se lee de la foto previa; el resto de campos se lee de la propia tesela en
+    // su iteración, antes de que esa misma iteración los reescriba (mismo valor, mismo orden).
+    for (let i = 0; i < length; i++) lifeBefore[i] = tiles[i].life ?? 0;
     const light = phase === 'day' ? 1 : phase === 'night' ? 0 : 0.4;
-    for (let i = 0; i < tiles.length; i++) {
+    for (let i = 0; i < length; i++) {
       const tile = tiles[i];
-      const growth = previous.growth[i], fertility = previous.fertility[i], life = previous.life[i];
-      const moisture = previous.moisture[i], drinkingWater = previous.drinkingWater[i];
-      const cultivation = previous.cultivation[i], traffic = previous.traffic[i];
+      // R4: cada campo se lee UNA vez. `terrain`, `biome` y `feature` se leían entre dos y tres
+      // veces por tesela, y las teselas vivas no tienen forma estable (`animals.ts:101` hace
+      // `delete tile.species` en cada paso), así que cada lectura repetida es una búsqueda en tabla
+      // hash en vez de un acceso a ranura.
+      const vegetation = tile.vegetation, moisture = tile.moisture;
+      const terrain = tile.terrain, biome = tile.biome, feature = tile.feature;
+      const growth = tile.growth ?? vegetation, fertility = tile.fertility ?? 0, life = lifeBefore[i];
+      const drinkingWater = tile.drinkingWater ?? 0, cultivation = tile.cultivation ?? 0, traffic = tile.traffic ?? 0;
       let livingNeighbors = 0;
+      const base = i * 8;
       for (let offset = 0; offset < 8; offset++) {
-        const neighbor = previous.neighbors[i * 8 + offset];
-        if (neighbor >= 0 && previous.life[neighbor] >= 0.45) livingNeighbors++;
+        const neighbor = neighbors[base + offset];
+        if (neighbor >= 0 && lifeBefore[neighbor] >= 0.45) livingNeighbors++;
       }
       const fertilePattern = livingNeighbors === 3 || (life >= 0.45 && livingNeighbors === 2);
       const cellularEnergy = light * moisture * (0.6 + fertility * 0.4);
@@ -109,28 +123,28 @@ export class EcosystemKernel {
       const produced = light * moisture * fertility * (0.25 + life * 0.75)
         * (1 - growth) * (1 - traffic * 0.9) * 0.005;
       tile.growth = clamp(growth + produced - 0.0002 - traffic * 0.002 - (moisture < 0.15 ? 0.001 : 0));
-      if (tile.terrain !== 'water') tile.vegetation = clamp(tile.vegetation + produced * 0.25 - traffic * 0.001);
+      if (terrain !== 'water') tile.vegetation = clamp(vegetation + produced * 0.25 - traffic * 0.001);
       tile.traffic = clamp(traffic - 0.0005);
       tile.cultivation = clamp(cultivation - 0.00002);
       // Rain remains restricted to the same visible reservoirs as the object kernel.
-      const reservoirSource = tile.feature === 'pool' || tile.feature === 'spring' || tile.biome === 'wetland' || tile.terrain === 'water';
+      const reservoirSource = feature === 'pool' || feature === 'spring' || biome === 'wetland' || terrain === 'water';
       // T035 (hallazgo crítico #1): fuera de cuenca, un manantial/charca/humedal NO recarga con la
       // lluvia (ni con el goteo fijo del manantial) — el mar (`terrain==='water'`) queda exento del
       // ruido, igual que en la generación, y de todos modos su `drinkingWater` se fuerza a 0 abajo.
-      const reservoir = reservoirSource && (tile.terrain === 'water' || enCuenca(seed, tile.x, tile.y, cuencas));
-      tile.drinkingWater = tile.biome === 'ocean' ? 0 : clamp(drinkingWater
+      const reservoir = reservoirSource && (terrain === 'water' || enCuenca(seed, tile.x, tile.y, cuencas));
+      tile.drinkingWater = biome === 'ocean' ? 0 : clamp(drinkingWater
         + (reservoir && weather === 'rain' ? 0.008 * (0.4 + fertility * 0.6) : 0)
-        + (reservoir && tile.feature === 'spring' ? 0.002 : 0) - (light ? 0.00015 : 0.00003));
-      if (tile.terrain === 'water') tile.moisture = clamp(moisture + (tile.biome === 'ocean' ? 0.003 : 0) + (weather === 'rain' ? 0.008 : 0));
+        + (reservoir && feature === 'spring' ? 0.002 : 0) - (light ? 0.00015 : 0.00003));
+      if (terrain === 'water') tile.moisture = clamp(moisture + (biome === 'ocean' ? 0.003 : 0) + (weather === 'rain' ? 0.008 : 0));
       // Wood consumes local growth; feature changes still use this tile's old growth.
-      if (tick % 100 === 0 && TREE_FEATURES.has(tile.feature ?? 'none') && growth > 0.65
+      if (tick % 100 === 0 && TREE_FEATURES.has(feature ?? 'none') && growth > 0.65
         && fertility > 0.4 && moisture > 0.35 && traffic < 0.35 && light > 0) {
-        const capacity = tile.feature === 'reeds' || tile.feature === 'cactus' ? 2 : tile.feature === 'palm' ? 6 : 12;
+        const capacity = feature === 'reeds' || feature === 'cactus' ? 2 : feature === 'palm' ? 6 : 12;
         const regrowth = Math.min(capacity - (tile.wood ?? 0), 0.025 * light * moisture * fertility);
         if (regrowth > 0) {
           tile.wood = (tile.wood ?? 0) + regrowth;
           tile.growth = clamp(tile.growth! - regrowth * 0.05);
-          if (tile.feature === 'stump' && tile.wood >= 1) tile.feature = tile.biome === 'mountain' ? 'pine' : 'tree';
+          if (feature === 'stump' && tile.wood >= 1) tile.feature = biome === 'mountain' ? 'pine' : 'tree';
         }
       }
     }

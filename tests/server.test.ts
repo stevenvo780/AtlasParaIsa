@@ -290,6 +290,25 @@ test('previous-checkpoint CLI holds the destination lock throughout recovery', (
   } finally {rmSync(dir,{recursive:true,force:true});}
 });
 
+test('the snapshot carries procedure summaries and a definition is served only when asked, without advancing the world',async t=>{
+  const f=await fixture(t,true);
+  const socket=new WebSocket(f.origin.replace('http:','ws:')+'/ws',{headers:{Origin:f.origin,Cookie:f.cookie}});
+  t.after(()=>socket.terminate());
+  const initial=await socketMessage(socket,'state');
+  assert.ok(initial.type==='state');
+  assert.equal(JSON.stringify(initial.world.technology!.recipes).includes('"program"'),false);
+  const before=structuredClone(f.app.world);
+  const unknown=socketMessage(socket,'recipe');
+  socket.send(JSON.stringify({type:'recipe',id:'recipe-1'}));
+  assert.deepEqual(await unknown,{type:'recipe',id:'recipe-1',recipe:null},'an absent definition is null, never an empty program');
+  for(const id of ['recipe-0','recipe-x','',42,null]){
+    const rejected=socketMessage(socket,'error');
+    socket.send(JSON.stringify({type:'recipe',id}));
+    const message=await rejected;assert.ok(message.type==='error'&&/procedimiento no válido/.test(message.message),String(id));
+  }
+  assert.deepEqual(f.app.world,before,'a query is not a transaction: nothing was stepped or saved');
+});
+
 test('a committed retry remains retrievable during a later storage pause',async t=>{
   const f=await fixture(t);const first=await f.send(gesture);assert.equal(first.status,200);const committed=await first.json();
   f.store.save=()=>{throw new Error('later synthetic failure');};

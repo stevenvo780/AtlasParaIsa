@@ -1,7 +1,8 @@
 import type { AnimalView, AnimalDynamics, BlueprintView, StructureView, InventionDynamics } from './life.js';
-import type { TechnologyView } from './technology.js';
+import type { TechnologyRecipe, TechnologyView } from './technology.js';
 import type { OrganizationAnalysis } from './organization.js';
 export type { AnimalView, AnimalDynamics, BlueprintView, StructureView, InventionDynamics } from './life.js';
+export type { TechnologyRecipe, TechnologyRecipeSummary } from './technology.js';
 export const PROTOCOL_VERSION = 6;
 export interface Viewport { x: number; y: number; width: number; height: number; }
 export type Biome = 'grassland' | 'forest' | 'desert' | 'mountain' | 'wetland' | 'ocean';
@@ -47,6 +48,8 @@ export interface WorldView {
   communities?: CommunityView[];
   animals?: AnimalView[]; blueprints?: BlueprintView[]; structures?: StructureView[];
   technology?: TechnologyView; organization?: OrganizationAnalysis;
+  /** Identity of the served world; the projection omits it and the server adds it. */
+  instanceId?: string;
   demography?: { deaths: number; causes: Record<string, number>; recent: { id: string; name: string; generation: number; parents: string[]; bornAt: number; diedAt: number; cause: string }[] };
 }
 export interface CommunityView { id: string; name: string; x: number; y: number; color: string; members: string[]; culture: { sharing: number; stewardship: number; openness: number }; formedAt: number; cooperation: number; disputes: number; }
@@ -58,7 +61,14 @@ export interface Gesture { id: string; kind: GestureKind; x: number; y: number; 
 export interface GestureResult {
   id: string; accepted: boolean; tick: number; order: number; message: string;
 }
+/** Everything a client may send upstream. A camera or a query is never a gesture. */
+export type ClientMessage =
+  | { type: 'gesture'; gesture: Gesture }
+  | { type: 'viewport'; viewport: Viewport }
+  | { type: 'recipe'; id: string };
 export type ServerMessage =
   | { type: 'state'; world: WorldView }
   | { type: 'result'; result: GestureResult }
+  /** A null definition means the server cannot serve that program now, never that it is empty. */
+  | { type: 'recipe'; id: string; recipe: TechnologyRecipe | null }
   | { type: 'error'; message: string };

@@ -1,7 +1,7 @@
 import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { Connection, type ConnectionStatus } from '../src/client/connection.js';
-import { PROTOCOL_VERSION, type Gesture, type ServerMessage, type WorldView } from '../src/shared/types.js';
+import { PROTOCOL_VERSION, type Gesture, type ServerMessage, type TechnologyRecipe, type WorldView } from '../src/shared/types.js';
 
 class BrowserSocket {
   static readonly OPEN = 1;
@@ -49,7 +49,8 @@ function harness(t: TestContext, snapshots: WorldView[], rejectHttp = false, htt
     }
     throw new Error(`Unexpected route ${String(input)}`);
   }) as typeof fetch;
-  const connection = new Connection({ world: world => worlds.push(world), result: () => {}, status: value => statuses.push(value), error: message => errors.push(message), expired: () => { expired = true; }, pending: value => pending.push(value) });
+  const recipes: { id: string; recipe: TechnologyRecipe | null }[] = [];
+  const connection = new Connection({ world: world => worlds.push(world), result: () => {}, status: value => statuses.push(value), error: message => errors.push(message), expired: () => { expired = true; }, pending: value => pending.push(value), recipe: (id, recipe) => recipes.push({ id, recipe }) });
   t.after(() => {
     connection.stop(); globalThis.fetch = originalFetch; globalThis.WebSocket = originalSocket;
     if (originalLocation) Object.defineProperty(globalThis, 'location', originalLocation);
@@ -57,7 +58,7 @@ function harness(t: TestContext, snapshots: WorldView[], rejectHttp = false, htt
     if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
     else Reflect.deleteProperty(globalThis, 'window');
   });
-  return { connection, worlds, errors, pending, posted, statuses, browserEvents, worldQueries, expired: () => expired };
+  return { connection, worlds, errors, pending, posted, statuses, browserEvents, worldQueries, recipes, expired: () => expired };
 }
 
 test('same-sequence pause is shown while older state is discarded, including version negotiation', async t => {
@@ -227,4 +228,32 @@ test('changing the visible region at the same world tick updates the landscape w
   socket.message({ type: 'state', world: { ...view(40), originX: -80, originY: 110 } });
   socket.message({ type: 'state', world: { ...view(39), originX: -90, originY: 120 } });
   assert.equal(h.worlds.length, 2); assert.equal(h.worlds[1]!.originX, -80); assert.equal(h.worlds[1]!.originY, 110);
+});
+
+test('a procedure detail is asked once per socket, answered to its own id, and never confused with a gesture', async t => {
+  const h = harness(t, [view(40)]); h.connection.start(); await flush();
+  const socket = BrowserSocket.instances[0]!; socket.open();
+  assert.equal(h.connection.requestRecipe('recipe-12'), true);
+  assert.equal(h.connection.requestRecipe('recipe-12'), false, 'the same question is not repeated while it waits');
+  for (const invalid of ['', 'recipe-0', 'recipe-x', '../recipe-1', 'recipe-1 ']) assert.equal(h.connection.requestRecipe(invalid), false, invalid);
+  assert.deepEqual(socket.sent.map(value => JSON.parse(value)), [{ type: 'recipe', id: 'recipe-12' }]);
+  const recipe = { id: 'recipe-12', name: 'form 12', generation: 1, program: { inputs: [], steps: [] }, signature: 'x', parents: [],
+    inventorId: 's', tick: 4, x: 1, y: 2, novelty: 'program', capacities: {}, uses: 0, utility: 0, manufactured: 1 } as unknown as TechnologyRecipe;
+  socket.message({ type: 'recipe', id: 'recipe-12', recipe });
+  socket.message({ type: 'recipe', id: 'recipe-99', recipe: null });
+  assert.deepEqual(h.recipes.map(entry => [entry.id, entry.recipe?.name ?? null]), [['recipe-12', 'form 12'], ['recipe-99', null]]);
+  assert.equal(h.worlds.length, 1, 'an answered query is not a new state');
+  assert.deepEqual(h.errors, []);
+  assert.equal(h.connection.requestRecipe('recipe-12'), true, 'once answered the question can be asked again');
+});
+
+test('a question asked to a socket that died does not silence the next one', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const h = harness(t, [view(40), view(41)]); h.connection.start(); await flush();
+  const first = BrowserSocket.instances[0]!; first.open();
+  assert.equal(h.connection.requestRecipe('recipe-7'), true);
+  first.close(); t.mock.timers.tick(1000); await flush();
+  const second = BrowserSocket.instances[1]!; second.open();
+  assert.equal(h.connection.requestRecipe('recipe-7'), true);
+  assert.deepEqual(second.sent.map(value => JSON.parse(value)), [{ type: 'recipe', id: 'recipe-7' }]);
 });

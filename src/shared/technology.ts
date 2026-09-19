@@ -44,6 +44,9 @@ export interface TechnologyRecipe {
   x: number; y: number; novelty: 'program' | 'function' | 'both';
   capacities: Record<Capability, number>; uses: number; utility: number; manufactured: number;
 }
+/** What a snapshot can afford about a definition: who it is and what it can do, never its program.
+ * The steps travel only when a client asks for one procedure; absence is not an empty program. */
+export type TechnologyRecipeSummary = Pick<TechnologyRecipe, 'id' | 'name' | 'generation' | 'capacities'>;
 export interface TechnologyProject {
   kind: 'research' | 'craft'; program: TechnologyProgram; parents: string[];
   recipeId: string | null; progress: number; requiredWork: number; energyPaid: number;
@@ -122,7 +125,8 @@ export interface TechnologyCatalogueState {
   memoryCapacity: number;
 }
 export interface TechnologyView {
-  recipes: TechnologyRecipe[];
+  /** Summaries only; ask the server for one definition to read its program. */
+  recipes: TechnologyRecipeSummary[];
   /** Only each present actor's learned instructions, independent of the detail sample. */
   knowledge?: { actorId: string; recipeIds: string[] }[];
   items: { id: string; ownerId: string; x: number; y: number; recipeId: string | null; mass: number; generation: number; capacities: Record<Capability, number>;

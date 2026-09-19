@@ -1,4 +1,4 @@
-import type { AnimalView, BlueprintView, ChronicleEvent, Gesture, Order, PersonView, StructureView, WorldView } from '../shared/types.js';
+import type { AnimalView, BlueprintView, ChronicleEvent, Gesture, Order, PersonView, StructureView, TechnologyRecipe, WorldView } from '../shared/types.js';
 import { Connection, type ConnectionStatus } from './connection.js';
 import { Landscape, type Selection } from './landscape.js';
 import { actions, phases, terrains, biomes, deathCauses, icon, esc, number, percentage } from './ui-catalog.js';
@@ -32,6 +32,8 @@ let populationKind: 'people' | 'animals' = 'people';
 let notebook: Notebook | null = null;
 let inspectorTab: 'now' | 'kit' | 'story' = 'now';
 let focusedRecipe: string | null = null;
+/** Steps requested one by one: the snapshot only carries each procedure's identity and capacities. */
+const recipeDetails = new Map<string, TechnologyRecipe | null>();
 let soundContext: AudioContext | null = null;
 let soundTimer: ReturnType<typeof setTimeout> | undefined;
 const el = <T extends HTMLElement = HTMLElement>(id: string): T => document.getElementById(id) as T;
@@ -58,8 +60,8 @@ function enterWorld(): void {
   clean(); lastVisit = null; status = 'connecting';
   root.innerHTML = worldShell();
   notebook = new Notebook(el('game')); inspectorTab = 'now';
-  focusedRecipe = null;
-  connection = new Connection({ world: receiveWorld, status: value => { status = value; renderStatus(); }, pending: value => { pending = value; if (!value) landscape?.setPendingTarget(null); renderControls(); }, result: result => message(result.message, result.accepted), error: text => message(text, false), expired: () => loginScreen('La sesión terminó. Vuelve a entrar para ver la carta.') });
+  focusedRecipe = null; recipeDetails.clear();
+  connection = new Connection({ world: receiveWorld, status: value => { status = value; renderStatus(); }, pending: value => { pending = value; if (!value) landscape?.setPendingTarget(null); renderControls(); }, result: result => message(result.message, result.accepted), error: text => message(text, false), expired: () => loginScreen('La sesión terminó. Vuelve a entrar para ver la carta.'), recipe: (id, recipe) => { recipeDetails.set(id, recipe); if (statsTab === 'technology' && !el('stats-drawer').hidden) renderStats(); } });
   landscape = new Landscape(el<HTMLCanvasElement>('landscape'), pick, viewport => { connection?.setViewport(viewport); el('camera-coordinates').textContent = `${viewport.x + Math.floor(viewport.width / 2)}, ${viewport.y + Math.floor(viewport.height / 2)}`; }, () => { following = false; renderControls(); });
   wire(); renderTool(); connection.start();
 }
@@ -152,7 +154,10 @@ function navigateEntity(event: MouseEvent): void {
     const card = [...el('stats-content').querySelectorAll<HTMLElement>('[data-community-card]')].find(card=>card.dataset.communityCard===link.dataset.community);
     card?.scrollIntoView({ block: 'nearest' }); card?.focus({ preventScroll: true });
   } else if (link.dataset.recipe) {
-    focusedRecipe = link.dataset.recipe; selectStatsTab('technology'); drawer('stats', true);
+    focusedRecipe = link.dataset.recipe;
+    // Opening a procedure is what asks the server for its steps; the snapshot never carries them.
+    if (!recipeDetails.has(focusedRecipe)) connection?.requestRecipe(focusedRecipe);
+    selectStatsTab('technology'); drawer('stats', true);
     const detail = [...el('stats-content').querySelectorAll<HTMLDetailsElement>('details')].find(detail=>detail.dataset.detail===`recipe-${focusedRecipe}`);
     if (detail) { detail.open = true; detail.scrollIntoView({ block: 'start' }); detail.querySelector('summary')?.focus({ preventScroll: true }); }
   } else if (link.dataset.placeX !== undefined && link.dataset.placeY !== undefined) {
@@ -383,8 +388,11 @@ function renderStatsContent(): void {
   const stats = world.stats, runtime = world.performance;
   const stamp = `<div class="stats-scope"><span class="scope-dot"></span><span>${status === 'live' && !world.paused ? 'Estado recibido del servidor' : 'Último estado recibido'} · paso ${world.tick}</span></div>`;
   if (statsTab === 'technology') {
-    const targeted = world.technology?.recipes.find(recipe=>recipe.id===focusedRecipe);
-    panel.innerHTML = stamp + (targeted && !world.technology?.recipes.slice(-20).includes(targeted) ? recipeCard(targeted) : '') + technologyPane(world.technology,world.organization);
+    // The notebook already draws the last twenty with whatever detail arrived; only a recipe outside it needs its own card.
+    const listed = world.technology?.recipes.slice(-20).some(recipe=>recipe.id===focusedRecipe) ?? false;
+    const targeted = listed ? undefined : (focusedRecipe ? recipeDetails.get(focusedRecipe) : null) ?? world.technology?.recipes.find(recipe=>recipe.id===focusedRecipe);
+    const missing = focusedRecipe && recipeDetails.get(focusedRecipe) === null ? `<p class="stats-note">Los pasos de ${esc(focusedRecipe)} no están disponibles en este mundo ahora.</p>` : '';
+    panel.innerHTML = stamp + missing + (targeted ? recipeCard(targeted) : '') + technologyPane(world.technology,world.organization,recipeDetails);
     return;
   }
   if (statsTab === 'performance') {

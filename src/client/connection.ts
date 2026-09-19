@@ -1,4 +1,4 @@
-import { PROTOCOL_VERSION, type Gesture, type GestureResult, type ServerMessage, type Viewport, type WorldView } from '../shared/types.js';
+import { PROTOCOL_VERSION, type ClientMessage, type Gesture, type GestureResult, type ServerMessage, type TechnologyRecipe, type Viewport, type WorldView } from '../shared/types.js';
 
 export type ConnectionStatus = 'connecting' | 'live' | 'offline';
 interface Callbacks {
@@ -8,6 +8,8 @@ interface Callbacks {
   expired: () => void;
   error: (message: string) => void;
   pending: (pending: boolean) => void;
+  /** A null definition means the server could not serve it, never that the procedure is empty. */
+  recipe?: (id: string, recipe: TechnologyRecipe | null) => void;
 }
 
 /** The server owns the world. This class retries an input with its original ID. */
@@ -25,6 +27,7 @@ export class Connection {
   private operationalState = '';
   private pending: Gesture | null = null;
   private readonly requesting = new Set<string>();
+  private readonly askedRecipes = new Set<string>();
   private status: ConnectionStatus = 'connecting';
   private browserOffline = false;
   private readonly onOffline = (): void => {
@@ -89,13 +92,27 @@ export class Connection {
     this.viewportTimer = setTimeout(() => this.sendViewport(), 150);
   }
 
+  /** A procedure's steps are not part of the snapshot; a reader asks for one at a time. */
+  requestRecipe(id: string): boolean {
+    if (this.stopped || !/^recipe-[1-9]\d{0,9}$/.test(id) || this.askedRecipes.has(id)) return false;
+    if (!this.transmit({ type: 'recipe', id })) return false;
+    this.askedRecipes.add(id);
+    return true;
+  }
+
+  private transmit(message: ClientMessage): boolean {
+    if (this.stopped || this.browserOffline || this.socket?.readyState !== WebSocket.OPEN) return false;
+    this.socket.send(JSON.stringify(message));
+    return true;
+  }
+
   private sendViewport(): void {
-    if (!this.stopped && !this.browserOffline && this.viewport && this.socket?.readyState === WebSocket.OPEN) {
-      this.socket.send(JSON.stringify({ type: 'viewport', viewport: this.viewport }));
-    }
+    if (this.viewport) this.transmit({ type: 'viewport', viewport: this.viewport });
   }
 
   private updateStatus(status: ConnectionStatus): void {
+    // A question asked to a socket that died was never answered; leaving it pending would silence the next one.
+    if (status !== 'live') this.askedRecipes.clear();
     this.status = status;
     this.callbacks.status(status);
   }
@@ -164,6 +181,7 @@ export class Connection {
           const message = JSON.parse(event.data) as ServerMessage;
           if (message.type === 'state') this.accept(message.world);
           else if (message.type === 'result') this.result(message.result);
+          else if (message.type === 'recipe') { this.askedRecipes.delete(message.id); this.callbacks.recipe?.(message.id, message.recipe); }
           else if (message.type === 'error') this.callbacks.error(message.message);
         } catch { this.callbacks.error('No pudimos leer una actualización. Esperamos la siguiente.'); }
       };
@@ -200,8 +218,7 @@ export class Connection {
 
   private deliver(): void {
     if (!this.pending || this.stopped) return;
-    if (this.socket?.readyState === WebSocket.OPEN) {
-      this.socket.send(JSON.stringify({ type: 'gesture', gesture: this.pending }));
+    if (this.transmit({ type: 'gesture', gesture: this.pending })) {
       clearTimeout(this.acknowledgementTimer);
       this.acknowledgementTimer = setTimeout(() => void this.deliverHttp(), 6000);
     } else void this.deliverHttp();

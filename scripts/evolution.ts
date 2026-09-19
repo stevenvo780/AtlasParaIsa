@@ -149,7 +149,8 @@ function sample(world: World, observer: Observer) {
     }),
     cooperation: world.totals.cooperation ?? 0, trade: world.totals.trade ?? 0, totals: { ...world.totals },
     technology: { dynamics: technology.dynamics, ledger: structuredClone(world.technology.ledger),
-      recipes: technology.recipes.map(r => ({ id: r.id, generation: r.generation, parents: [...r.parents], inventorId: r.inventorId,
+      // Evidence reads the resident definitions, not the bounded projection the wire carries.
+      recipes: world.technology.recipes.map(r => ({ id: r.id, generation: r.generation, parents: [...r.parents], inventorId: r.inventorId,
         tick: r.tick, uses: r.uses, utility: r.utility, manufactured: r.manufactured, novelty: r.novelty })),
       observedLifetime: structuredClone(observer),
       recipesCraftedMoreThanOnce: Object.values(observer.craftsByRecipe).filter(count => count > 1).length,

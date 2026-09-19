@@ -544,12 +544,19 @@ export function settleTechnologyEstate(host: TechnologyHost, actor: TechnologyAc
   maintainTechnologyMemory(host, actor);
   return result;
 }
+/** A projection is drawn, not computed on: thousandths are what a meter can show and what the wire can pay. */
+function viewCapacities(values: Record<Capability, number>): Record<Capability, number> {
+  const out = {} as Record<Capability, number>;
+  for (const capability of CAPABILITIES) out[capability] = Math.round(values[capability] * 1000) / 1000;
+  return out;
+}
 export function projectTechnology(host: TechnologyHost): TechnologyView {
   const state = host.technology, all = host.people.flatMap(p => p.technology.items), composition = sum(all.map(i => i.composition)), residue = sum(host.people.map(p => p.technology.residue));
   const importedMass = mass(state.ledger.imported), productMass = mass(composition), residueMass = mass(residue), totals = technologyCatalogueTotals(host);
-  return { recipes: structuredClone(state.recipes), items: host.people.flatMap(p => p.technology.items.map(i => {
+  return { recipes: state.recipes.map(recipe => ({ id: recipe.id, name: recipe.name, generation: recipe.generation, capacities: viewCapacities(recipe.capacities) })),
+    items: host.people.flatMap(p => p.technology.items.map(i => {
     const affordance = state.water ? containerAffordance(i) : undefined;
-    return { id: i.id, ownerId: p.id, x: p.x, y: p.y, recipeId: i.recipeId, mass: i.mass, generation: i.generation, capacities: materialCapacities(i),
+    return { id: i.id, ownerId: p.id, x: p.x, y: p.y, recipeId: i.recipeId, mass: i.mass, generation: i.generation, capacities: viewCapacities(materialCapacities(i)),
       ...(affordance ? { water: { version: 1 as const, quanta: i.contents?.water ?? 0, capacityQuanta: affordance.capacityQuanta,
         quantaPerUnit: 50000 as const, leakageNumerator: affordance.leakageNumerator, leakageDenominator: 1000000 as const } } : {}) };
   })),
@@ -560,6 +567,12 @@ export function projectTechnology(host: TechnologyHost): TechnologyView {
       work: state.ledger.work, energy: state.ledger.energy, programDiversity: totals.recipes,
       functionalDiversity: totals.functionalDiversity,
       reusedProducts: state.history.filter(e => ['research', 'craft'].includes(e.kind) && e.inputs.some(i => i.resourceId.startsWith('recipe:'))).length, historyDropped: state.historyDropped }, budgets: { ...state.budgets } };
+}
+/** One definition on demand, read-only: the resident cache is not extended by a reader's curiosity.
+ * `undefined` means «this host cannot serve that program now», never «the procedure has no steps». */
+export function technologyRecipeDetail(host: TechnologyHost, id: string): TechnologyRecipe | undefined {
+  if (typeof id !== 'string' || !/^recipe-[1-9]\d{0,9}$/.test(id)) return undefined;
+  try { return resolveTechnologyRecipe(host, id, { cache: false }); } catch { return undefined; }
 }
 
 export function assertTechnology(host: TechnologyHost): void {

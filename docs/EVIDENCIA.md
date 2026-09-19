@@ -430,3 +430,9 @@ Revisión integral previa: `docs/REVISION-2026-09-19.md` (12 hallazgos confirmad
 | 10 | 94,3 % | 0,81 | **0,133** | 0,8 % | **3,00** |
 
 Lectura: la comida satura (> 90 % de celdas con `food > 0,3`) en el **día 7**; el Gini de comida por región **baja** con el tiempo (0,154 → 0,133; objetivo ≥ 0,35); **no hay regiones secas** (0–0,8 %; objetivo ≥ 30 %) y el agua potable está a **3,0 celdas** (objetivo > 6). Veredicto SC-004 hoy: **NO CUMPLE en las tres partes**. Consecuencia: T013 (capacidad de carga + decaimiento) cubre comida/fertilidad; se añade **T035 agua en cuencas** (`agua.cuencas`) para las partes 2 y 3.
+
+### Línea base con reglas viejas · 14 réplicas válidas × 25 días (SHA `10ac5c1`, semillas 1000–1015 menos 1009/1011; `Store` temporal por réplica; detalle en `docs/evidencia-2026-09-19/linea-base-reglas-viejas-16x25.md`)
+- **0 muertes hasta el día ~7** en 13/14 réplicas; población **16 → 32** (tope) entre los días 4 y 7.
+- Mediana de población cae a **~12–13 en los días 15–17** (ola de senescencia); **3/14 réplicas (21 %) colapsan a población 2** (solo S e I, protegidos) antes del día 25; el resto se recupera con nacimientos de generaciones posteriores y vuelve a 32 hacia el día 25.
+- **496 muertes acumuladas: 494 senescencia, 2 deshidratación, 0 hambre, 0 frío** → el corte de edad era el 99,6 % de la mortalidad; hambre/sed/frío están bien gestionados por la IA.
+- Validez: las 14 réplicas arrancaron sincronizadas a las 09:57 antes de que aterrizara ningún cambio de reglas en la rama; las 2 excluidas corrieron contra un estado intermedio del merge (lección: el laboratorio debe pinnear un worktree, no el árbol compartido).

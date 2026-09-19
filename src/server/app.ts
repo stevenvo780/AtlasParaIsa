@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { readFileSync, statSync } from 'node:fs';
 import { resolve, extname, sep } from 'node:path';
+import { isIP } from 'node:net';
 import { WebSocketServer, WebSocket } from 'ws';
 import { createWorld, stepWorld, projectWorld, normalizeViewport, cloneWorld } from '../world/index.js';
 import type { Gesture, GestureResult, ServerMessage, Viewport, WorldView, RuntimeStats } from '../shared/types.js';
@@ -39,6 +40,15 @@ async function body(req: IncomingMessage) {
 function json(res: ServerResponse, status: number, data: unknown) {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(data));
 }
+const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+export function loginKey(remoteAddress: string | undefined, xff: string | string[] | undefined): string {
+  if (xff !== undefined && remoteAddress !== undefined && LOOPBACK.has(remoteAddress)) {
+    const head = Array.isArray(xff) ? xff[0] : xff.split(',')[0];
+    const candidate = head?.trim();
+    if (candidate && isIP(candidate) !== 0) return candidate;
+  }
+  return remoteAddress ?? 'local';
+}
 export function createApp(options: AppOptions) {
   const { store } = options;
   const verifyPassword = passwordVerifier(options);
@@ -60,6 +70,7 @@ export function createApp(options: AppOptions) {
   const clients = new Map<WebSocket, { hash: string; alive: boolean; messages: number; window: number; viewport?: Viewport; lastView?: WorldView }>();
   const loginAttempts = new Map<string, { count: number; reset: number }>();
   const gestureAttempts = new Map<string, { count: number; reset: number }>();
+  const loginGlobal = new Map<string, { count: number; reset: number }>();
   const ws = new WebSocketServer({ noServer: true, maxPayload: 4096, perMessageDeflate: false });
   const staticDir = resolve(options.staticDir ?? 'dist/client');
   const context = store.context;
@@ -186,7 +197,8 @@ export function createApp(options: AppOptions) {
       }
       if (req.method === 'POST') checkOrigin(req);
       if (req.method === 'POST' && url.pathname === '/api/login') {
-        rate(loginAttempts, req.socket.remoteAddress ?? 'local', 6, 60_000);
+        rate(loginAttempts, loginKey(req.socket.remoteAddress, req.headers['x-forwarded-for']), 6, 60_000);
+        rate(loginGlobal, '*', 60, 60_000);
         const value = await body(req) as { password?: unknown } | null;
         if (!value || typeof value.password !== 'string' || !verifyPassword(value.password)) throw new HttpError(401, 'La contraseña no coincide.');
         const oldHash = sessionHash(req); if (oldHash) store.revoke(oldHash);

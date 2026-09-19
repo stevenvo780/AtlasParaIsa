@@ -9,7 +9,7 @@ import { pathToFileURL } from 'node:url';
 import { once } from 'node:events';
 import { WebSocket } from 'ws';
 import { Store } from '../src/server/store.js';
-import { createApp, parseGesture } from '../src/server/app.js';
+import { createApp, parseGesture, loginKey } from '../src/server/app.js';
 import { createWorld, stepWorld, projectWorld } from '../src/world/index.js';
 import { hashToken, makeToken, passwordRecord, passwordVerifier } from '../src/server/auth.js';
 import { acquireLock } from '../src/server/lock.js';
@@ -295,4 +295,36 @@ test('a committed retry remains retrievable during a later storage pause',async 
   f.store.save=()=>{throw new Error('later synthetic failure');};
   await new Promise<void>(resolve=>setTimeout(resolve,50));assert.equal(f.app.failed,true);
   const retried=await f.send(gesture);assert.equal(retried.status,200);assert.deepEqual(await retried.json(),committed);
+});
+
+test('loginKey uses X-Forwarded-For when the socket is loopback',()=>{
+  assert.equal(loginKey('127.0.0.1','8.8.8.8'),'8.8.8.8');
+  assert.equal(loginKey('::1','2001:db8::1'),'2001:db8::1');
+  assert.equal(loginKey('::ffff:127.0.0.1','8.8.8.8'),'8.8.8.8');
+});
+test('loginKey picks the first IP from a comma-separated XFF chain',()=>{
+  assert.equal(loginKey('127.0.0.1','9.9.9.9, 1.1.1.1'),'9.9.9.9');
+  assert.equal(loginKey('127.0.0.1',['9.9.9.9','1.1.1.1']),'9.9.9.9');
+});
+test('loginKey falls back to remoteAddress when the first XFF token is invalid',()=>{
+  assert.equal(loginKey('127.0.0.1','no-soy-una-ip, 8.8.4.4'),'127.0.0.1');
+  assert.equal(loginKey('127.0.0.1',['   ','1.1.1.1']),'127.0.0.1');
+});
+test('loginKey falls back to remoteAddress when no XFF header is present',()=>{
+  assert.equal(loginKey('127.0.0.1',undefined),'127.0.0.1');
+});
+test('loginKey ignores XFF when the socket is not loopback',()=>{
+  assert.equal(loginKey('203.0.113.5','8.8.8.8'),'203.0.113.5');
+});
+test('loginKey falls back to "local" when remoteAddress is undefined',()=>{
+  assert.equal(loginKey(undefined,undefined),'local');
+  assert.equal(loginKey(undefined,'8.8.8.8'),'local');
+});
+
+test('login rate-limit isolates clients by forwarded IP behind a loopback proxy',async t=>{
+  const f=await fixture(t);
+  const post=(xff:string)=>fetch(f.origin+'/api/login',{method:'POST',headers:{Origin:f.origin,'Content-Type':'application/json','X-Forwarded-For':xff},body:JSON.stringify({password})});
+  for(let i=0;i<6;i++){const res=await post('10.0.0.1');assert.equal(res.status,200);}
+  const blocked=await post('10.0.0.1');assert.equal(blocked.status,429);
+  const different=await post('10.0.0.2');assert.notEqual(different.status,429);
 });

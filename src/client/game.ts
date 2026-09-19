@@ -2,7 +2,7 @@ import type { AnimalView, BlueprintView, ChronicleEvent, Gesture, Order, PersonV
 import { Connection, type ConnectionStatus } from './connection.js';
 import { Landscape, type Selection } from './landscape.js';
 import { actions, phases, terrains, biomes, deathCauses, icon, esc, number, percentage } from './ui-catalog.js';
-import { meter, animalSilhouette, blueprintCard, personBlueprint, structureCard, resourceQuantity, inheritedAndLearned, destinationLink } from './inspector-view.js';
+import { meter, deathHistory, animalSilhouette, blueprintCard, personBlueprint, structureCard, resourceQuantity, inheritedAndLearned, destinationLink } from './inspector-view.js';
 import { worldShell } from './world-shell.js';
 import { Notebook, wireTabs, type NotebookPage } from './notebook.js';
 import { personLink, recentEvidence } from './world-evidence.js';
@@ -288,7 +288,10 @@ function renderInspector(): void {
       el('person-controls').hidden = true; el('person-primary').hidden = true; el('direct-toggle').hidden = true;
       el('inspector-tabs').hidden = true;
       el('inspector-title').textContent = legacy?.name ?? 'Fuera de esta vista';
-      replacePersonCard(legacy ? `<p class="game-reason">Esta vida terminó en el paso ${esc(legacy.diedAt)}.</p><p class="drawer-note">${esc(deathCauses[legacy.cause] ?? legacy.cause)}</p><p class="drawer-note">Generación ${esc(legacy.generation)}. Su historia permanece en la crónica del mundo.</p>` : '<p class="drawer-note">Este habitante ya no aparece en el estado recibido.</p>');
+      // T036(b): la «Historia» de una identidad difunta es su contexto de muerte (FR-006). Un evento
+      // sin campo `death` (crónica antigua) no dibuja nada, en vez de un hueco que parezca un dato.
+      const farewell = world.events.find(event => event.kind === 'death' && event.actors.includes(id));
+      replacePersonCard(legacy ? `<p class="game-reason">Esta vida terminó en el paso ${esc(legacy.diedAt)}.</p><p class="drawer-note">${esc(deathCauses[legacy.cause] ?? legacy.cause)}</p><p class="drawer-note">Generación ${esc(legacy.generation)}. Su historia permanece en la crónica del mundo.</p>${farewell ? deathHistory(farewell) : ''}` : '<p class="drawer-note">Este habitante ya no aparece en el estado recibido.</p>');
       if (following) { following=false; landscape?.follow(null); } control='inspect'; inspectorSignature='';return;
     }
     const signature = JSON.stringify([p, world.events.map(event => event.id), world.communities, world.blueprints, world.technology?.items.filter(item=>item.ownerId===p.id), world.technology?.knowledge?.find(entry=>entry.actorId===p.id), world.technology?.recipes]); if (signature === inspectorSignature) return; inspectorSignature = signature;

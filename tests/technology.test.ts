@@ -2,6 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { applyPhysicalOperation, assertTechnology, craftTechnology, defaultTechnologyState, initialTechnologyKnowledge, materialCapacities, PHYSICAL_OPERATIONS, programSignature, projectTechnology, proposeTechnologyProgram, rawMaterial, recordTechnologyBenefit, researchTechnology, settleTechnologyEstate, shareTechnology, splitComposition, technologyOpportunity, technologyWorkCost, toolCapacities, useTool, validTechnologyProgram, type TechnologyActor, type TechnologyHost, type TechnologyProgram } from '../src/world/technology.js';
 import type { Composition, OperationInstruction } from '../src/shared/technology.js';
+// createWorld/stepWorld drive the real production call site (src/world/index.ts:728, inside
+// bodyAndAction) that C2 actually fixed; technology.ts's own craftTechnology/technologyOpportunity
+// were already correct before T014 and cannot exercise that line on their own (see the test below).
+import { createWorld, stepWorld } from '../src/world/index.js';
 
 function scene(seed = 51926) {
   const actor = (id: string): TechnologyActor => ({ id, x: 0, y: 0, energy: 1, fatigue: 0, hunger: 0.1, thirst: 0.1, curiosity: 0.9, materials: { wood: 12, stone: 8 }, skills: {}, technology: initialTechnologyKnowledge() });
@@ -229,4 +233,39 @@ test('craftTechnology manufactures the recipe technologyOpportunity decided, not
   assert.equal(a.technology.project?.recipeId, 'recipe-2'); // Not recipe-1, despite its higher benefit.
   while (a.technology.project) { host.tick++; craftTechnology(host, a, decision?.recipeId); }
   assert.equal(a.technology.items.at(-1)?.recipeId, 'recipe-2');
+});
+
+test('the real call site (src/world/index.ts:728, inside bodyAndAction) wires technologyOpportunity\'s decision into the craft it performs, exercised through stepWorld (C2)', () => {
+  // The test above only reaches technology.ts's public API; craftTechnology/technologyOpportunity
+  // were already correct before T014 (see the report). The actual bug — and the actual fix — lived
+  // in the one call to craftTechnology() inside src/world/index.ts's bodyAndAction, which this test
+  // drives through createWorld/stepWorld instead of calling technology.ts directly.
+  const world = createWorld(93107), person = world.people[2]!; // Index 2: avoids 's'/'i' (world.people[0..1]).
+  const ready = () => { person.materials = { wood: 12, stone: 8 }; person.energy = 1; person.fatigue = 0.1; person.hunger = 0.1; person.thirst = 0.1; };
+  ready();
+  assert.equal(runProgram(world, person, edge), true); // recipe-1: a cutting tool the actor still holds.
+  ready();
+  assert.equal(runProgram(world, person, fibre), true); // recipe-2: a binding tool, learned but about to be lost.
+  person.technology.items = person.technology.items.filter(item => item.recipeId !== 'recipe-2'); // The binding tool wore out; the recipe stays known.
+  person.technology.competence['recipe-1'] = { attempts: 10, successes: 10, work: 10, benefit: 50 }; // recipe-1 dominates by raw benefit/successes.
+  ready();
+  world.tick += 50; // Clears the 45-tick autonomous cooldown (technology.ts:330).
+  const decision = technologyOpportunity(world, person);
+  assert.equal(decision?.kind, 'craft'); assert.equal(decision?.recipeId, 'recipe-2'); // Same scenario as the test above, on the real World/Person.
+  // person.action/target are read by bodyAndAction, never by craftTechnology itself — setting them
+  // directly (instead of letting choose() pick) is the only way a test reaches line 728 deterministically.
+  person.action = 'craft'; person.target = { x: person.x, y: person.y }; person.command = null; person.controlMode = 'auto';
+  person.decisionAt = world.tick + 10_000; // Keeps choose() from re-deciding mid-craft; only bodyAndAction's craft branch is under test.
+  for (let guard = 0; person.technology.project === null; guard++) {
+    if (guard >= 5) throw new Error('bodyAndAction never started the craft project — cannot reach index.ts:728');
+    stepWorld(world);
+  }
+  // The assertion that actually refutes C2 at its real location: had index.ts:728 stayed on the old
+  // `craftTechnology(world, person, undefined, …)` pattern, this would start recipe-1 (higher benefit), not recipe-2.
+  assert.equal(person.technology.project?.recipeId, 'recipe-2');
+  for (let guard = 0; person.technology.project; guard++) {
+    if (guard >= 400) throw new Error('the craft project driven through stepWorld did not complete in time');
+    stepWorld(world);
+  }
+  assert.equal(person.technology.items.at(-1)?.recipeId, 'recipe-2'); // Not recipe-1: C2 stays fixed at the production call site.
 });

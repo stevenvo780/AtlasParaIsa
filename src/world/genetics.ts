@@ -3,6 +3,22 @@ import type { GenomeView, PersonView } from '../shared/types.js';
 export interface Genome extends GenomeView { alleles: number[]; }
 export const GENE_COUNT = 7;
 const clamp = (n: number) => Math.max(0, Math.min(1, n));
+/** Como `clamp`, pero el excedente fuera de [0,1] decae de forma continua hacia el borde en vez
+ * de pegarse EXACTAMENTE a él (revisión T011: con el clamp duro, dos alelos que se salían de
+ * rango por distinto margen podían terminar ambos en el mismo 0 o 1 literal, colapsando a 0 la
+ * heterocigosis de ese locus aunque el ruido gaussiano de cada uno fuera distinto — medido:
+ * 36,6 % de los alelos fundadores con varianzaFundadores=0.15). `EXCESS_SOFTENING` (0.02) fija
+ * la escala del amortiguado: coincide con `clamp` en el borde exacto (continuidad en n=0 y n=1)
+ * y para |excedente| grande se acerca asintóticamente a 0/1 sin tocarlos nunca, así que dos
+ * excedentes distintos siempre producen alelos distintos. Cambia el resultado en como mucho
+ * `EXCESS_SOFTENING` frente al clamp duro, así que no hace falta re-calibrar el factor de `sd`
+ * (T011 §4) ni los umbrales de heterocigosis ya verificados. */
+const EXCESS_SOFTENING = 0.02;
+function softClamp(n: number): number {
+  if (n < 0) { const excess = -n; return EXCESS_SOFTENING * excess / (1 + excess); }
+  if (n > 1) { const excess = n - 1; return 1 - EXCESS_SOFTENING * excess / (1 + excess); }
+  return n;
+}
 export function localRandom(seed: number, salt: string): () => number {
   let state = seed >>> 0;
   for (const c of salt) state = Math.imul(state ^ c.charCodeAt(0), 16777619) >>> 0;
@@ -20,8 +36,12 @@ function gaussian(random: () => number): number {
 export function founderGenome(seed: number, id: string, traits: NonNullable<PersonView['traits']>, varianza = 0): Genome {
   const random = localRandom(seed, `genome:${id}`);
   const phenotype = [traits.curiosity, traits.sociability, traits.industriousness, traits.care, traits.resilience, 0.5, 0.2 + random() * 0.65];
-  const sd = Math.sqrt(varianza);
-  const displaced = (value: number) => sd === 0 ? value : clamp(value + gaussian(random) * sd);
+  // Factor 1.5 compensa la pérdida de varianza empírica al truncar cerca de [0,1] (T011 §4,
+  // verificado con las semillas reales del juego: heterocigosis 0.359/0.402). Sigue siendo un
+  // ajuste empírico, no una fórmula cerrada — igual que antes de esta ronda de arreglo; lo único
+  // que cambia aquí es softClamp en vez de clamp (ver comentario de softClamp arriba).
+  const sd = Math.sqrt(varianza) * 1.5;
+  const displaced = (value: number) => varianza === 0 ? value : softClamp(value + gaussian(random) * sd);
   const alleles = phenotype.flatMap(value => [displaced(value), displaced(value)]);
   return { alleles, generation: 0, parents: [], mutations: 0,
     learningRate: 0.04 + ((alleles[10]! + alleles[11]!) / 2) * 0.16, cooperation: (alleles[12]! + alleles[13]!) / 2 };

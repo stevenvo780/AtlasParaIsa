@@ -47,15 +47,26 @@ interface ReplicaLeida {
   diasDeclarados: number; abortada: boolean; dias: DiaMetrica[];
 }
 
+// Réplica ya etiquetada con su procedencia (`--entrada` o `--control`). Necesario para que dos
+// grupos con la MISMA firma de parámetros pero de fuentes distintas (p.ej. control con reglas
+// viejas vs un grupo de defaults del barrido, T030→T031) NO se fusionen en uno solo.
+interface ReplicaConOrigen extends ReplicaLeida { esDelControl: boolean }
+
 interface Agregado { mediana: number; p10: number; p90: number; n: number }
 
 interface MetricasReplica {
   supervivenciaFundadores: number | null; poblacionFinalSobreInicial: number | null;
-  diversidadFinal: number | null; giniFinal: number | null; fraccionComidaFinal: number | null;
+  diversidadFinal: number | null; diaDiversidadUsado: number | null;
+  giniFinal: number | null; fraccionComidaFinal: number | null;
   distanciaAguaFinal: number | null; p95Ms: number | null;
   muertesPorCausa: Record<string, number>; muertesDesconocidas: number;
   colapsoTemprano: boolean;
 }
+
+// SC-003 (spec.md): "diversidad ≥ 0,6 en la mediana de réplicas AL DÍA 5", no en el último día del
+// barrido (que en T031/T032 es el día 10 o 25). Si la réplica tiene menos de 6 días registrados
+// (día 0..5), se cae al último día disponible y se documenta cuál se usó realmente.
+const INDICE_DIA_DIVERSIDAD_SC003 = 5;
 
 interface ConflictoDeterminismo { firma: string; seed: number; digest: string; replicas: string[]; primeraDiferencia: string }
 
@@ -127,8 +138,9 @@ function descubrirReplicas(raiz: string): ReplicaLeida[] {
 function metricasReplica(replica: ReplicaLeida): MetricasReplica {
   const { dias } = replica;
   if (dias.length === 0) {
-    return { supervivenciaFundadores: null, poblacionFinalSobreInicial: null, diversidadFinal: null, giniFinal: null,
-      fraccionComidaFinal: null, distanciaAguaFinal: null, p95Ms: null, muertesPorCausa: {}, muertesDesconocidas: 0, colapsoTemprano: false };
+    return { supervivenciaFundadores: null, poblacionFinalSobreInicial: null, diversidadFinal: null,
+      diaDiversidadUsado: null, giniFinal: null, fraccionComidaFinal: null, distanciaAguaFinal: null, p95Ms: null,
+      muertesPorCausa: {}, muertesDesconocidas: 0, colapsoTemprano: false };
   }
   const primero = dias[0]!, ultimo = dias.at(-1)!;
   const muertesPorCausa: Record<string, number> = {};
@@ -141,24 +153,38 @@ function metricasReplica(replica: ReplicaLeida): MetricasReplica {
   const primerosDias = dias.slice(0, 3);
   const colapsoTemprano = primero.poblacion > 0 && primerosDias.some(d => d.poblacion < primero.poblacion * 0.5);
   const p95Serie = agregar(dias.map(d => d.p95Ms));
+  // SC-003: diversidad AL DÍA 5, no en el último día del barrido; con < 6 días registrados se cae
+  // al último disponible y se reporta el índice realmente usado.
+  const indiceDiversidad = Math.min(INDICE_DIA_DIVERSIDAD_SC003, dias.length - 1);
+  const diaDiversidad = dias[indiceDiversidad]!;
   return {
     supervivenciaFundadores: primero.fundadoresVivos > 0 ? ultimo.fundadoresVivos / primero.fundadoresVivos : null,
     poblacionFinalSobreInicial: primero.poblacion > 0 ? ultimo.poblacion / primero.poblacion : null,
-    diversidadFinal: ultimo.diversidadOficios, giniFinal: ultimo.gini, fraccionComidaFinal: ultimo.fraccionComida,
+    diversidadFinal: diaDiversidad.diversidadOficios, diaDiversidadUsado: indiceDiversidad,
+    giniFinal: ultimo.gini, fraccionComidaFinal: ultimo.fraccionComida,
     distanciaAguaFinal: ultimo.distanciaAgua, p95Ms: p95Serie?.mediana ?? null,
     muertesPorCausa, muertesDesconocidas, colapsoTemprano,
   };
 }
 
-/** Compara dos series de días campo a campo; devuelve la primera diferencia como texto, o `null`. */
+// Campos de DiaMetrica excluidos de la comparación de determinismo por depender del reloj de
+// pared (tiempos de paso y memoria), no del estado del mundo. Todo lo demás se compara: misma
+// semilla + mismo digest de `src/world` debe dar EXACTAMENTE la misma serie de estado del mundo.
+const CAMPOS_NO_DETERMINISTAS = new Set<keyof DiaMetrica>(['p50Ms', 'p95Ms', 'rss']);
+
+/** Compara dos series de días recorriendo TODAS las claves de `DiaMetrica` (salvo las de reloj de
+ * pared) en vez de una lista literal, para no volver a omitir un campo al ampliar el contrato.
+ * Devuelve la primera diferencia como texto, o `null`. */
 function primeraDiferenciaDias(a: DiaMetrica[], b: DiaMetrica[]): string | null {
   if (a.length !== b.length) return `número de días distinto (${a.length} vs ${b.length})`;
   for (let i = 0; i < a.length; i++) {
     const da = a[i]!, db = b[i]!;
-    for (const campo of ['poblacion', 'diversidadOficios', 'gini', 'fraccionComida', 'distanciaAgua'] as const) {
-      if (da[campo] !== db[campo]) return `día ${i}, campo "${campo}": ${JSON.stringify(da[campo])} vs ${JSON.stringify(db[campo])}`;
+    for (const campo of Object.keys(da) as (keyof DiaMetrica)[]) {
+      if (CAMPOS_NO_DETERMINISTAS.has(campo)) continue;
+      const va = da[campo], vb = db[campo];
+      const iguales = typeof va === 'object' ? JSON.stringify(va) === JSON.stringify(vb) : va === vb;
+      if (!iguales) return `día ${i}, campo "${campo}": ${JSON.stringify(va)} vs ${JSON.stringify(vb)}`;
     }
-    if (JSON.stringify(da.muertes) !== JSON.stringify(db.muertes)) return `día ${i}, campo "muertes": ${JSON.stringify(da.muertes)} vs ${JSON.stringify(db.muertes)}`;
   }
   return null;
 }
@@ -203,6 +229,9 @@ const peor = (...s: (Semaforo | null)[]): Semaforo => {
 
 interface GrupoResumen {
   params: Params; firma: string; esControl: boolean; replicas: number; abortadas: number;
+  // Índice del día realmente usado para `diversidadFinal` (SC-003 pide el día 5; con réplicas más
+  // cortas se cae al último día disponible). `null` si el grupo no tiene ninguna réplica válida.
+  diaDiversidadUsado: number | null;
   metricas: { supervivenciaFundadores: Agregado | null; poblacionFinalSobreInicial: Agregado | null;
     diversidadFinal: Agregado | null; giniFinal: Agregado | null; fraccionComidaFinal: Agregado | null;
     distanciaAguaFinal: Agregado | null; p95Ms: Agregado | null; muertesPorCausa: Record<string, Agregado | null> };
@@ -226,23 +255,51 @@ function agregarGrupo(replicas: ReplicaLeida[], causas: string[]): GrupoResumen[
   };
 }
 
-function construirGrupos(replicas: ReplicaLeida[], firmaControl: string | null, conflictos: ConflictoDeterminismo[]): GrupoResumen[] {
-  const porFirma = new Map<string, ReplicaLeida[]>();
-  for (const replica of replicas) porFirma.set(firmaEstable(replica.params), [...(porFirma.get(firmaEstable(replica.params)) ?? []), replica]);
+// Clave de agrupación: procedencia + firma de parámetros. Con `--control` explícito, un grupo de
+// `--entrada` NUNCA comparte clave con el grupo de `--control` aunque tengan los mismos `params`
+// (pueden venir de digests/reglas distintas: T030 vs T031). Sin `--control` explícito, todas las
+// réplicas vienen de `--entrada` y el comportamiento de "control automático" (`params: {}`) es el
+// de siempre.
+function claveGrupo(replica: ReplicaConOrigen): string {
+  return `${replica.esDelControl ? 'control' : 'entrada'}::${firmaEstable(replica.params)}`;
+}
+
+function construirGrupos(replicas: ReplicaConOrigen[], huboControlExplicito: boolean, conflictos: ConflictoDeterminismo[]): GrupoResumen[] {
+  const porGrupo = new Map<string, ReplicaConOrigen[]>();
+  for (const replica of replicas) porGrupo.set(claveGrupo(replica), [...(porGrupo.get(claveGrupo(replica)) ?? []), replica]);
   const causas = [...new Set(replicas.flatMap(r => r.dias.flatMap(d => Object.keys(d.muertes))))].sort();
   const firmasConConflicto = new Set(conflictos.map(c => c.firma.split('::')[0]));
 
-  const gruposControl = firmaControl !== null ? porFirma.get(firmaControl) ?? [] : null;
+  // El grupo de control es: (a) con `--control` explícito, el (único) grupo cuyas réplicas vienen
+  // de esa fuente; (b) sin `--control`, el grupo de `--entrada` cuyos `params` son `{}`, si existe.
+  const claveControlAutomatico = `entrada::${firmaEstable({})}`;
+  const claveControl = huboControlExplicito
+    ? [...porGrupo.keys()].find(c => c.startsWith('control::')) ?? null
+    : (porGrupo.has(claveControlAutomatico) ? claveControlAutomatico : null);
+  const gruposControl = claveControl !== null ? (porGrupo.get(claveControl) ?? []).filter(r => !r.abortada) : null;
   const metricasControl = gruposControl && gruposControl.length ? agregarGrupo(gruposControl, causas) : null;
 
   const grupos: GrupoResumen[] = [];
-  for (const [firma, replicasGrupo] of porFirma) {
+  for (const [clave, replicasGrupo] of porGrupo) {
+    const firma = firmaEstable(replicasGrupo[0]!.params);
     const vivas = replicasGrupo.filter(r => !r.abortada);
     const metricasVivas = vivas.map(metricasReplica);
     const metricas = agregarGrupo(vivas, causas);
     const colapsoReplicas = vivas.filter((_, i) => metricasVivas[i]!.colapsoTemprano).map(r => r.directorio);
     const muertesDesconocidas = metricasVivas.reduce((total, m) => total + m.muertesDesconocidas, 0);
-    const esControl = firmaControl !== null && firma === firmaControl;
+    const esControl = clave === claveControl;
+    // Día realmente usado para diversidadFinal (SC-003): el mínimo entre las réplicas vivas del
+    // grupo, para no ocultar que alguna se quedó corta y cayó al último día disponible.
+    const diasUsados = metricasVivas.map(m => m.diaDiversidadUsado).filter((d): d is number => d !== null);
+    const diaDiversidadUsado: number | null = diasUsados.length ? Math.min(...diasUsados) : null;
+
+    // Un grupo sin NINGUNA réplica válida (todas abortadas, o abortada:false pero sin días
+    // registrados) no tiene datos con los que evaluar SC-002..005: NO puede salir verde por
+    // defecto. Igual si, habiendo réplicas válidas, una métrica con umbral SC sigue sin mediana
+    // (todas sus réplicas devolvieron `null` para esa métrica): sin datos ≠ cumple el umbral.
+    const sinReplicasValidas = vivas.length === 0;
+    const metricaSinDatos = !sinReplicasValidas &&
+      (metricas.supervivenciaFundadores === null || metricas.diversidadFinal === null || metricas.giniFinal === null);
 
     const semSuperv = semaforoUmbral(metricas.supervivenciaFundadores?.mediana ?? null, 0.70);
     const semDiv = semaforoUmbral(metricas.diversidadFinal?.mediana ?? null, 0.60);
@@ -250,11 +307,14 @@ function construirGrupos(replicas: ReplicaLeida[], firmaControl: string | null, 
     const semDesconocidas: Semaforo | null = muertesDesconocidas > 0 ? '🔴' : null;
     const semColapso: Semaforo | null = colapsoReplicas.length > 0 ? '🔴' : null;
     const semDeterminismo: Semaforo | null = firmasConConflicto.has(firma) ? '🔴' : null;
-    const semaforo = peor(semSuperv, semDiv, semGini, semDesconocidas, semColapso, semDeterminismo);
+    const semSinDatos: Semaforo | null = (sinReplicasValidas || metricaSinDatos) ? '🔴' : null;
+    const semaforo = peor(semSuperv, semDiv, semGini, semDesconocidas, semColapso, semDeterminismo, semSinDatos);
 
     const motivos: string[] = [];
+    if (sinReplicasValidas) motivos.push('sin réplicas válidas (todas abortadas o sin días registrados): SC-002..005 no evaluables, no puede salir verde');
+    else if (metricaSinDatos) motivos.push('una o más métricas con umbral SC-002..005 no tienen mediana calculable (sin datos)');
     if (semSuperv === '🔴' || semSuperv === '🟡') motivos.push(`supervivencia de fundadores ${((metricas.supervivenciaFundadores?.mediana ?? 0) * 100).toFixed(1)} % (SC-002 ≥ 70 %)`);
-    if (semDiv === '🔴' || semDiv === '🟡') motivos.push(`diversidad ${(metricas.diversidadFinal?.mediana ?? 0).toFixed(2)} (SC-003 ≥ 0,60)`);
+    if (semDiv === '🔴' || semDiv === '🟡') motivos.push(`diversidad día ${diaDiversidadUsado ?? '?'} = ${(metricas.diversidadFinal?.mediana ?? 0).toFixed(2)} (SC-003 ≥ 0,60 al día 5)`);
     if (semGini === '🔴' || semGini === '🟡') motivos.push(`gini ${(metricas.giniFinal?.mediana ?? 0).toFixed(2)} (SC-004 ≥ 0,35)`);
     if (semDesconocidas) motivos.push(`${muertesDesconocidas} muerte(s) con causa desconocida (SC-005 = 0)`);
     if (semColapso) motivos.push(`colapso > 50 % en los 2 primeros días en ${colapsoReplicas.length} réplica(s)`);
@@ -274,6 +334,7 @@ function construirGrupos(replicas: ReplicaLeida[], firmaControl: string | null, 
     }
 
     grupos.push({ params: replicasGrupo[0]!.params, firma, esControl, replicas: vivas.length, abortadas: replicasGrupo.length - vivas.length,
+      diaDiversidadUsado,
       metricas, colapsoTemprano: { detectado: colapsoReplicas.length > 0, replicas: colapsoReplicas }, muertesDesconocidas,
       comparacionControl, semaforo, motivos });
   }
@@ -295,7 +356,8 @@ function generarMarkdown(resultado: ResultadoResumen): string {
     const delta = (clave: string) => {
       const d = g.comparacionControl?.[clave]; return d ? `${d.delta >= 0 ? '+' : ''}${d.delta.toFixed(3)}` : '—';
     };
-    return `| ${nombre} | ${g.replicas}${g.abortadas ? ` (+${g.abortadas} abortadas)` : ''} | ${formatoAgregado(g.metricas.supervivenciaFundadores)} | ${delta('supervivenciaFundadores')} | ${formatoAgregado(g.metricas.poblacionFinalSobreInicial)} | ${formatoAgregado(g.metricas.diversidadFinal)} | ${formatoAgregado(g.metricas.giniFinal)} | ${formatoAgregado(g.metricas.fraccionComidaFinal)} | ${formatoAgregado(g.metricas.distanciaAguaFinal, 1)} | ${formatoAgregado(g.metricas.p95Ms, 1)} | ${g.muertesDesconocidas} | ${g.semaforo} |`;
+    const diversidad = `${formatoAgregado(g.metricas.diversidadFinal)}${g.diaDiversidadUsado !== null ? ` (día ${g.diaDiversidadUsado})` : ''}`;
+    return `| ${nombre} | ${g.replicas}${g.abortadas ? ` (+${g.abortadas} abortadas)` : ''} | ${formatoAgregado(g.metricas.supervivenciaFundadores)} | ${delta('supervivenciaFundadores')} | ${formatoAgregado(g.metricas.poblacionFinalSobreInicial)} | ${diversidad} | ${formatoAgregado(g.metricas.giniFinal)} | ${formatoAgregado(g.metricas.fraccionComidaFinal)} | ${formatoAgregado(g.metricas.distanciaAguaFinal, 1)} | ${formatoAgregado(g.metricas.p95Ms, 1)} | ${g.muertesDesconocidas} | ${g.semaforo} |`;
   }).join('\n');
 
   const causasFilas = resultado.causasConocidas.length || resultado.grupos.some(g => Object.keys(g.metricas.muertesPorCausa).length)
@@ -323,17 +385,26 @@ function generarMarkdown(resultado: ResultadoResumen): string {
     `${resultado.determinismo.ok ? '🟢 sin conflictos.' : `🔴 rotura de determinismo:\n\n${conflictos}`}\n\n` +
     `## Motivos de semáforo no verde\n\n${motivos}\n\n` +
     `_Semáforo: verde cumple el umbral SC-002/003/004 de \`spec.md\`; rojo, por debajo de la mitad del umbral (o incumplimiento` +
-    ` duro SC-005 / colapso temprano / rotura de determinismo); ámbar, la zona intermedia — banda no fijada en \`spec.md\`._\n`;
+    ` duro SC-005 / colapso temprano / rotura de determinismo / grupo sin réplicas válidas o sin datos para una métrica con` +
+    ` umbral SC); ámbar, la zona intermedia — banda no fijada en \`spec.md\`. Diversidad: SC-003 se mide al día 5; con réplicas` +
+    ` más cortas se usa el último día disponible (indicado entre paréntesis)._\n`;
 }
 
 function resumirBarrido(entrada: string, opciones: { control?: string | null; salida?: string } = {}): ResultadoResumen {
-  const replicas = descubrirReplicas(entrada);
-  const replicasControl = opciones.control ? descubrirReplicas(opciones.control) : [];
-  const todas = [...replicas, ...replicasControl];
-  const firmaControl = replicasControl.length ? firmaEstable(replicasControl[0]!.params)
-    : (replicas.some(r => firmaEstable(r.params) === firmaEstable({})) ? firmaEstable({}) : null);
+  const replicasEntradaCrudas = descubrirReplicas(entrada);
+  const replicasControlCrudas = opciones.control ? descubrirReplicas(opciones.control) : [];
+  // Si `--control` apunta a un subdirectorio DENTRO de `--entrada`, `descubrirReplicas` las
+  // encuentra por las dos rutas: se descartan de "entrada" los directorios ya cubiertos por
+  // `--control` (por ruta resuelta) para no contarlos ni pesarlos dos veces en las medianas.
+  const directoriosControl = new Set(replicasControlCrudas.map(r => resolve(r.directorio)));
+  const replicasEntrada = replicasEntradaCrudas.filter(r => !directoriosControl.has(resolve(r.directorio)));
+  const todas: ReplicaConOrigen[] = [
+    ...replicasEntrada.map(r => ({ ...r, esDelControl: false as const })),
+    ...replicasControlCrudas.map(r => ({ ...r, esDelControl: true as const })),
+  ];
+  const huboControlExplicito = opciones.control != null;
   const conflictos = detectarRoturaDeterminismo(todas);
-  const grupos = construirGrupos(todas, firmaControl, conflictos);
+  const grupos = construirGrupos(todas, huboControlExplicito, conflictos);
   const resultado: ResultadoResumen = {
     generadoEn: new Date().toISOString(), entrada: resolve(entrada), control: opciones.control ? resolve(opciones.control) : null,
     totalReplicas: todas.length, replicasAbortadas: todas.filter(r => r.abortada).length,

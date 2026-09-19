@@ -208,3 +208,152 @@ test('--entrada faltante y directorio inexistente fallan con error claro (sin cr
   const resultadoInexistente = spawnSync(process.execPath, ['--import', 'tsx', 'scripts/lab/resumen.ts', '--entrada', '/no/existe/atlas-lab'], { encoding: 'utf8' });
   assert.notEqual(resultadoInexistente.status, 0);
 });
+
+// --- Ronda de arreglo (revisión T018) --------------------------------------------------------
+
+test('un grupo con TODAS sus réplicas abortadas no puede salir 🟢: semáforo 🔴, motivo explícito, exit 1', () => {
+  const raiz = directorioTemporal();
+  try {
+    // Exactamente el caso reproducido por el revisor: 2 réplicas del mismo grupo, ambas abortadas
+    // (agotaron el --timeout de T017) → 0 réplicas válidas para evaluar SC-002..005.
+    mkdirSync(join(raiz, 'g1', 'a'), { recursive: true });
+    writeFileSync(join(raiz, 'g1', 'a', 'replica.json'), JSON.stringify({ seed: 1, params: { riesgoSenescenciaDiario: 0.04 }, sha: 'sha-a', digest: 'digest-a', dias: 0, abortada: true }));
+    mkdirSync(join(raiz, 'g1', 'b'), { recursive: true });
+    writeFileSync(join(raiz, 'g1', 'b', 'replica.json'), JSON.stringify({ seed: 2, params: { riesgoSenescenciaDiario: 0.04 }, sha: 'sha-b', digest: 'digest-b', dias: 0, abortada: true }));
+
+    const { status, salida } = correr(raiz);
+    assert.equal(status, 1, 'un grupo sin réplicas válidas debe fallar con exit ≠ 0, nunca 0');
+    const resumen = salida as { replicas: number; abortadas: number; semaforos: Record<string, string> };
+    assert.equal(resumen.replicas, 2, 'total de réplicas descubiertas (incluye abortadas)');
+    assert.equal(resumen.abortadas, 2);
+    assert.ok(Object.values(resumen.semaforos).every(s => s === '🔴'), 'ningún grupo sin datos puede quedar en verde');
+
+    const json = JSON.parse(readFileSync(join(raiz, 'resumen.json'), 'utf8'));
+    assert.equal(json.grupos.length, 1);
+    assert.equal(json.grupos[0].semaforo, '🔴');
+    assert.equal(json.grupos[0].replicas, 0);
+    assert.ok(json.grupos[0].motivos.some((m: string) => m.includes('sin réplicas válidas')));
+  } finally { rmSync(raiz, { recursive: true, force: true }); }
+});
+
+test('rotura de determinismo detecta diferencias en fundadoresVivos/nacimientos/generacionesVivas/recetas/cooperaciones (no solo los 5 campos originales)', () => {
+  const raiz = directorioTemporal();
+  try {
+    // Misma semilla, mismo digest, misma serie de población y de muertes (los 5 campos que el
+    // detector original SÍ comparaba) pero fundadoresVivos/nacimientos/recetas/cooperaciones
+    // distintos: eso es una rotura de determinismo real (mueren/nacen habitantes distintos).
+    const base = (extra: Partial<Dia>): Dia => ({ tick: 0, poblacion: 16, muertes: {}, fundadoresVivos: 16, diversidadOficios: 0.5,
+      gini: 0.3, fraccionComida: 0.4, distanciaAgua: 5, p95Ms: 40, nacimientos: 0, generacionesVivas: 1, recetasDistintasEnUso: 3, cooperaciones: 10, ...extra });
+    // `nacimientos` se deja IGUAL en ambas réplicas a propósito: así la primera diferencia real de
+    // la iteración por claves es `fundadoresVivos` (justo la métrica de SC-002), y de paso queda
+    // cubierto que generacionesVivas/recetasDistintasEnUso/cooperaciones también entran a comparar.
+    escribirReplica(join(raiz, 'a'), { seed: 42, params: {}, sha: 'sha-a', digest: 'digest-igual', dias: [
+      base({ fundadoresVivos: 14, generacionesVivas: 1, recetasDistintasEnUso: 3, cooperaciones: 10 }),
+    ] });
+    escribirReplica(join(raiz, 'b'), { seed: 42, params: {}, sha: 'sha-b', digest: 'digest-igual', dias: [
+      base({ fundadoresVivos: 9, generacionesVivas: 2, recetasDistintasEnUso: 7, cooperaciones: 99 }),
+    ] });
+
+    const { status, salida } = correr(raiz);
+    assert.equal((salida as { determinismoOk: boolean }).determinismoOk, false, 'fundadoresVivos/nacimientos/recetas/cooperaciones distintos con mismo seed+digest debe ser una rotura');
+    assert.equal(status, 1);
+    const json = JSON.parse(readFileSync(join(raiz, 'resumen.json'), 'utf8'));
+    assert.equal(json.determinismo.conflictos.length, 1);
+    assert.match(json.determinismo.conflictos[0].primeraDiferencia, /fundadoresVivos/);
+  } finally { rmSync(raiz, { recursive: true, force: true }); }
+});
+
+test('--control NO se fusiona con un grupo de --entrada que comparta params: cada uno mantiene su propia mediana y hay delta', () => {
+  const raiz = directorioTemporal();
+  try {
+    const controlDir = join(raiz, 'control-viejo');
+    const entradaDir = join(raiz, 'barrido-nuevo');
+    // Control: reglas viejas, digest distinto, supervivencia 8/16.
+    escribirReplica(join(controlDir, 'r1'), { seed: 1, params: {}, sha: 'sha-c', digest: 'digest-viejo', dias: [
+      { tick: 0, poblacion: 16, muertes: {}, fundadoresVivos: 16, diversidadOficios: 0.5, gini: 0.3, fraccionComida: 0.4, distanciaAgua: 5, p95Ms: 40 },
+      { tick: 2400, poblacion: 8, muertes: { starvation: 8 }, fundadoresVivos: 8, diversidadOficios: 0.5, gini: 0.3, fraccionComida: 0.4, distanciaAgua: 5, p95Ms: 40 },
+    ] });
+    // Entrada: MISMOS params ({}) pero reglas nuevas, digest distinto, supervivencia 16/16.
+    escribirReplica(join(entradaDir, 'r1'), { seed: 2, params: {}, sha: 'sha-e', digest: 'digest-nuevo', dias: [
+      { tick: 0, poblacion: 16, muertes: {}, fundadoresVivos: 16, diversidadOficios: 0.5, gini: 0.3, fraccionComida: 0.4, distanciaAgua: 5, p95Ms: 40 },
+      { tick: 2400, poblacion: 16, muertes: {}, fundadoresVivos: 16, diversidadOficios: 0.5, gini: 0.3, fraccionComida: 0.4, distanciaAgua: 5, p95Ms: 40 },
+    ] });
+
+    const { status, salida } = correr(entradaDir, ['--control', controlDir]);
+    const resumen = salida as { grupos: number; replicas: number };
+    assert.equal(resumen.grupos, 2, 'control y entrada con los mismos params deben quedar en grupos SEPARADOS');
+    assert.equal(resumen.replicas, 2, 'sin duplicar réplicas');
+    assert.equal(status, 0);
+
+    const json = JSON.parse(readFileSync(join(entradaDir, 'resumen.json'), 'utf8'));
+    assert.equal(json.grupos.length, 2);
+    const control = json.grupos.find((g: { esControl: boolean }) => g.esControl);
+    const grupoEntrada = json.grupos.find((g: { esControl: boolean }) => !g.esControl);
+    assert.ok(control && grupoEntrada, 'debe distinguir el grupo control del grupo de entrada aunque compartan params');
+    cerca(control.metricas.supervivenciaFundadores.mediana, 8 / 16);
+    cerca(grupoEntrada.metricas.supervivenciaFundadores.mediana, 1);
+    assert.ok(grupoEntrada.comparacionControl, 'debe haber comparación con el control (no se anula por compartir params)');
+    cerca(grupoEntrada.comparacionControl.supervivenciaFundadores.delta, 1 - 8 / 16);
+  } finally { rmSync(raiz, { recursive: true, force: true }); }
+});
+
+test('--control dentro de --entrada no se cuenta ni pesa dos veces (sin doble descubrimiento)', () => {
+  const raiz = directorioTemporal();
+  try {
+    const controlDir = join(raiz, 'control');
+    escribirReplica(join(controlDir, 'r1'), { seed: 1, params: {}, sha: 'sha-c', digest: 'digest-c', dias: [
+      { tick: 0, poblacion: 10, muertes: {}, fundadoresVivos: 10, diversidadOficios: 0.5, gini: 0.3, fraccionComida: 0.4, distanciaAgua: 5, p95Ms: 10 },
+    ] });
+    escribirReplica(join(raiz, 'grupo', 'r2'), { seed: 2, params: { x: 1 }, sha: 'sha-x', digest: 'digest-x', dias: [
+      { tick: 0, poblacion: 10, muertes: {}, fundadoresVivos: 10, diversidadOficios: 0.5, gini: 0.3, fraccionComida: 0.4, distanciaAgua: 5, p95Ms: 10 },
+    ] });
+
+    const { salida } = correr(raiz, ['--control', controlDir]);
+    const resumen = salida as { replicas: number; grupos: number };
+    assert.equal(resumen.replicas, 2, 'la réplica de --control (dentro de --entrada) no debe contarse dos veces');
+    const json = JSON.parse(readFileSync(join(raiz, 'resumen.json'), 'utf8'));
+    const control = json.grupos.find((g: { esControl: boolean }) => g.esControl);
+    assert.equal(control.replicas, 1, 'el grupo control no debe pesar el doble');
+  } finally { rmSync(raiz, { recursive: true, force: true }); }
+});
+
+test('SC-003 se mide al día 5 (no en el último día del barrido) y el día usado queda escrito en el resumen', () => {
+  const raiz = directorioTemporal();
+  try {
+    // 10 días (0..9): diversidad sube linealmente. Al día 5 = 0.50 (no cumple, < 0.60); en el
+    // último día (9) = 0.90 (cumpliría). El semáforo debe evaluar el día 5, no el último.
+    const dias: Dia[] = Array.from({ length: 10 }, (_, i) => ({
+      tick: i * 2400, poblacion: 16, muertes: {}, fundadoresVivos: 16, diversidadOficios: i * 0.1,
+      gini: 0.5, fraccionComida: 0.5, distanciaAgua: 5, p95Ms: 20,
+    }));
+    escribirReplica(join(raiz, 'largo'), { seed: 1, params: { dias: 10 }, sha: 'sha-l', digest: 'digest-l', dias });
+
+    const { salida } = correr(raiz);
+    assert.equal((salida as { determinismoOk: boolean }).determinismoOk, true);
+    const json = JSON.parse(readFileSync(join(raiz, 'resumen.json'), 'utf8'));
+    const grupo = json.grupos[0];
+    assert.equal(grupo.diaDiversidadUsado, 5, 'debe usar el día 5, no el último (9)');
+    cerca(grupo.metricas.diversidadFinal.mediana, 0.5, 1e-9);
+    assert.equal(grupo.semaforo, '🟡', 'diversidad 0.5 (mitad de 0.60 ≤ 0.5 < 0.60) → ámbar, NO el verde que daría el último día (0.90)');
+    assert.ok(grupo.motivos.some((m: string) => m.includes('día 5')));
+
+    const markdown = readFileSync(join(raiz, 'resumen.md'), 'utf8');
+    assert.match(markdown, /\(día 5\)/, 'resumen.md debe indicar qué día se usó para la diversidad');
+  } finally { rmSync(raiz, { recursive: true, force: true }); }
+});
+
+test('SC-003 con réplicas más cortas que 6 días cae al último día disponible (comportamiento previo preservado)', () => {
+  const raiz = directorioTemporal();
+  try {
+    const dias: Dia[] = [
+      { tick: 0, poblacion: 16, muertes: {}, fundadoresVivos: 16, diversidadOficios: 0.3, gini: 0.3, fraccionComida: 0.4, distanciaAgua: 5, p95Ms: 20 },
+      { tick: 2400, poblacion: 16, muertes: {}, fundadoresVivos: 16, diversidadOficios: 0.65, gini: 0.4, fraccionComida: 0.4, distanciaAgua: 5, p95Ms: 20 },
+    ];
+    escribirReplica(join(raiz, 'corto'), { seed: 1, params: {}, sha: 'sha-c', digest: 'digest-c', dias });
+    correr(raiz);
+    const json = JSON.parse(readFileSync(join(raiz, 'resumen.json'), 'utf8'));
+    const grupo = json.grupos[0];
+    assert.equal(grupo.diaDiversidadUsado, 1, 'con solo 2 días (índices 0,1) debe caer al último disponible');
+    cerca(grupo.metricas.diversidadFinal.mediana, 0.65);
+  } finally { rmSync(raiz, { recursive: true, force: true }); }
+});

@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { assertWorld, cloneWorld, createWorld, stepWorld, type Person } from '../src/world/index.js';
 import { demographicTraits, initialDemography, updateDemography } from '../src/world/demography.js';
-import { availableToShare, familyOpportunity, FAMILY_RESERVE_TARGET, reproductiveReadiness } from '../src/world/family.js';
+import { availableToShare, chooseReproductivePartner, closeKin, familyOpportunity, FAMILY_RESERVE_TARGET, pairAffinity, reproductiveReadiness } from '../src/world/family.js';
+import { DEFAULT_PARAMS, paramsOf, parseParams, setParams } from '../src/world/params.js';
+import { founderGenome } from '../src/world/genetics.js';
 
 function scene() {
   const world = createWorld(51926);
@@ -180,4 +182,172 @@ test('queries leave age, bodies, resources, projects, knowledge and random state
     assert.equal(availableToShare(world, a, b), false);
   }
   assert.deepEqual(world, before); assert.equal(a.inventory, 0); assert.equal(world.totals.births, 0);
+});
+
+function ripePerson(world: { tick: number }, person: Person): void {
+  person.hunger = person.thirst = person.fatigue = 0.1; person.energy = 0.9; person.inventory = 0.2;
+  person.action = 'rest'; person.decisionAt = world.tick + 999; person.target = { x: person.x, y: person.y };
+  const traits = demographicTraits(person.genome);
+  if (person.genome.parents.length === 0) person.bornAt = world.tick - traits.maturityAge - 10;
+  person.demography = initialDemography(world.tick - person.bornAt);
+  if (world.tick - person.lastBirth < traits.fertilityCooldown) person.lastBirth = Math.max(-2400, world.tick - traits.fertilityCooldown);
+}
+
+function colony(seed = 51926, extras = 0) {
+  const world = createWorld(seed);
+  world.tick = 599;
+  const template = world.people.find(person => person.role === 'neighbor')!;
+  for (let n = 0; n < extras; n++) {
+    const id = `neighbor-extra-${n}`;
+    const copy: Person = { ...structuredClone(template), id, name: id, genome: founderGenome(world.seed, id, template.traits), bonds: {}, communityId: null };
+    world.people.push(copy);
+  }
+  const neighbors = world.people.filter(person => person.role === 'neighbor');
+  world.communities = [{ id: 'shared', name: 'shared', x: 17, y: 13, color: '#aabbcc', members: [], culture: { ...template.culture }, formedAt: 0, cooperation: 0, disputes: 0 }];
+  for (const [index, person] of neighbors.entries()) {
+    person.x = 17; person.y = 13;
+    person.communityId = 'shared'; person.bonds = {};
+    ripePerson(world, person);
+    world.communities[0]!.members.push(person.id);
+  }
+  for (const a of neighbors) for (const b of neighbors) if (a !== b) a.bonds[b.id] = 0.3;
+  world.places = [{ ...world.places[0]!, x: 17, y: 13 }];
+  return { world, neighbors };
+}
+
+test('affinity chooses the closer trusted partner; insertion order keeps the first eligible', () => {
+  const { world, a, b, c } = scene();
+  a.bonds[c.id] = c.bonds[a.id] = 0.9; b.x = a.x + 3; c.x = a.x + 1;
+  const candidates = [b, c];
+  assert.equal(chooseReproductivePartner(world, a, candidates, false), b);
+  assert.equal(chooseReproductivePartner(world, a, candidates, true), c);
+  assert.ok(pairAffinity(a, c) > pairAffinity(a, b));
+  world.people.reverse();
+  assert.equal(chooseReproductivePartner(world, a, [c, b], false), c);
+  assert.equal(chooseReproductivePartner(world, a, [c, b], true), c);
+});
+
+test('a birth picks the affine partner rather than the first neighbor in insertion order', () => {
+  const world = createWorld(51926), a = world.people[2]!, b = world.people[3]!, c = world.people[4]!;
+  world.tick = 599; world.communities = [];
+  for (const person of world.people) {
+    person.communityId = null; person.bonds = {}; person.action = 'rest'; person.decisionAt = 999;
+    ripePerson(world, person);
+  }
+  world.communities.push({ id: 'shared', name: 'shared', x: 17, y: 13, color: '#aabbcc', members: [a.id, b.id, c.id], culture: { ...a.culture }, formedAt: 0, cooperation: 0, disputes: 0 });
+  for (const person of [a, b, c]) { person.x = 17; person.y = 13; person.target = { x: 17, y: 13 }; person.communityId = 'shared'; }
+  a.bonds[b.id] = b.bonds[a.id] = 0.3; b.x = 20;
+  a.bonds[c.id] = c.bonds[a.id] = 0.9; c.x = 17;
+  b.bonds[c.id] = c.bonds[b.id] = 0.3;
+  stepWorld(world);
+  assert.equal(world.totals.births, 1);
+  const child = world.people.at(-1)!;
+  assert.deepEqual(child.genome.parents, [a.id, c.id]);
+  const event = world.events.find(entry => entry.kind === 'birth')!;
+  assert.ok(event.cause.includes(a.name) && event.cause.includes(c.name));
+  assert.ok(event.cause.includes(world.places[0]!.name));
+  assert.ok(event.cause.includes(`${world.places[0]!.x},${world.places[0]!.y}`));
+  assertWorld(world);
+});
+
+test('direct parent-child and full siblings cannot be a reproducing pair', () => {
+  const world = createWorld(51926), parent = world.people[2]!, other = world.people[3]!, siblingA = world.people[4]!, siblingB = world.people[5]!;
+  world.tick = 599; world.communities = [];
+  for (const person of world.people) { person.communityId = null; person.bonds = {}; ripePerson(world, person); }
+  siblingA.genome = { ...structuredClone(parent.genome), generation: 1, parents: [parent.id, other.id] };
+  siblingB.genome = { ...structuredClone(other.genome), generation: 1, parents: [parent.id, other.id] };
+  assert.equal(closeKin(parent, siblingA), true); assert.equal(closeKin(siblingA, siblingB), true);
+  assert.equal(closeKin(parent, other), false);
+  world.communities.push({ id: 'kin', name: 'kin', x: 17, y: 13, color: '#aabbcc', members: [parent.id, siblingA.id], culture: { ...parent.culture }, formedAt: 0, cooperation: 0, disputes: 0 });
+  for (const person of [parent, siblingA]) {
+    person.x = 17; person.y = 13; person.target = { x: 17, y: 13 }; person.communityId = 'kin';
+    person.bonds = { [parent.id]: 0.9, [siblingA.id]: 0.9 }; delete person.bonds[person.id];
+  }
+  stepWorld(world); assert.equal(world.totals.births, 0); assert.equal(world.people.length, 16);
+  world.tick = 719;
+  world.communities[0]!.members = [siblingA.id, siblingB.id];
+  parent.communityId = null;
+  for (const person of [siblingA, siblingB]) {
+    person.x = 17; person.y = 13; person.target = { x: 17, y: 13 }; person.communityId = 'kin';
+    person.bonds = { [siblingA.id]: 0.9, [siblingB.id]: 0.9 }; delete person.bonds[person.id];
+    ripePerson(world, person);
+  }
+  stepWorld(world); assert.equal(world.totals.births, 0); assert.equal(world.people.length, 16);
+});
+
+test('default params keep one birth per 120 ticks and a living cap of 32', () => {
+  const { world, neighbors } = colony();
+  assert.equal(paramsOf(world).poblacion.maxima, 32);
+  assert.equal(paramsOf(world).poblacion.intervaloComprobacionTicks, 120);
+  assert.equal(paramsOf(world).poblacion.nacimientosPorComprobacion, 1);
+  assert.equal(DEFAULT_PARAMS.poblacion.maxima, 32);
+  stepWorld(world);
+  assert.equal(world.tick % 120, 0); assert.equal(world.totals.births, 1); assert.equal(world.people.length, 17);
+  const firstBirthTick = world.tick;
+  stepWorld(world); assert.equal(world.totals.births, 1);
+  world.tick = firstBirthTick + 118;
+  for (const person of world.people) person.demography.age = world.tick - person.bornAt;
+  for (const person of neighbors) { person.inventory = 0.2; person.energy = 0.9; person.hunger = person.thirst = person.fatigue = 0.1; }
+  stepWorld(world); assert.equal(world.totals.births, 1); assert.equal(world.tick % 120, 119);
+  stepWorld(world); assert.equal(world.totals.births, 2); assert.equal(world.people.length, 18); assert.equal(world.tick % 120, 0);
+  while (world.people.length < 32 && world.totals.births < 20) {
+    world.tick += 119;
+    for (const person of world.people) {
+      person.demography.age = world.tick - person.bornAt;
+      if (person.role !== 'neighbor' || person.genome.parents.length) continue;
+      person.inventory = 0.2; person.energy = 0.9; person.hunger = person.thirst = person.fatigue = 0.1;
+      person.x = person.y = 17; person.target = { x: 17, y: 13 }; person.action = 'rest'; person.decisionAt = world.tick + 999;
+    }
+    stepWorld(world);
+  }
+  assert.equal(world.people.length, 32); assert.equal(world.totals.births, 16);
+  const frozen = world.totals.births;
+  world.tick += 119;
+  for (const person of world.people) {
+    person.demography.age = world.tick - person.bornAt;
+    if (person.role === 'neighbor' && !person.genome.parents.length) {
+      person.inventory = 0.2; person.energy = 0.9; person.x = person.y = 17; person.target = { x: 17, y: 13 };
+    }
+  }
+  stepWorld(world);
+  assert.equal(world.people.length, 32); assert.equal(world.totals.births, frozen);
+});
+
+test('two births in one check use four distinct parents when the param allows it', () => {
+  const { world, neighbors } = colony();
+  setParams(world, parseParams('poblacion.nacimientosPorComprobacion=2'));
+  const four = neighbors.slice(0, 4);
+  world.people.filter(person => !four.includes(person)).forEach(person => { person.communityId = null; });
+  world.communities[0]!.members = four.map(person => person.id);
+  for (const person of four) { person.x = 17; person.y = 13; person.bonds = Object.fromEntries(four.filter(other => other !== person).map(other => [other.id, 0.5])); }
+  stepWorld(world);
+  assert.equal(world.totals.births, 2); assert.equal(world.people.length, 18);
+  const children = world.people.filter(person => person.genome.parents.length);
+  assert.equal(children.length, 2);
+  const parents = children.flatMap(person => person.genome.parents);
+  assert.equal(new Set(parents).size, 4);
+});
+
+test('the same seed repeats the same parents in the same order', () => {
+  const run = () => {
+    const { world } = colony(771);
+    const births: string[][] = [];
+    for (let n = 0; n < 6; n++) {
+      if (n) world.tick += 119;
+      for (const person of world.people) {
+        person.demography.age = world.tick - person.bornAt;
+        if (person.role === 'neighbor' && !person.genome.parents.length) {
+          person.inventory = 0.2; person.energy = 0.9; person.hunger = person.thirst = person.fatigue = 0.1;
+        }
+      }
+      stepWorld(world);
+      const child = world.people.find(person => person.bornAt === world.tick);
+      if (child) births.push([...child.genome.parents]);
+    }
+    return births;
+  };
+  const first = run(), second = run();
+  assert.ok(first.length >= 4);
+  assert.deepEqual(first, second);
+  assert.ok(first.every(pair => pair.length === 2 && pair[0] !== pair[1]));
 });

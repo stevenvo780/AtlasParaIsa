@@ -1,9 +1,40 @@
 import type { Person, World } from './index.js';
 import { demographicTraits, updateDemography } from './demography.js';
+import { localRandom } from './genetics.js';
 
 export const FAMILY_RESERVE_TARGET = 0.12;
 const SHARE_AMOUNT = 0.025;
 const distance = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(a.x - b.x, a.y - b.y);
+
+/** Direct parent/child or full siblings. Founders with empty `parents` are never kin this way. */
+export function closeKin(a: Person, b: Person): boolean {
+  if (a.genome.parents.includes(b.id) || b.genome.parents.includes(a.id)) return true;
+  return a.genome.parents.length > 0 && b.genome.parents.length > 0 && a.genome.parents.some(id => b.genome.parents.includes(id));
+}
+
+/** Higher is closer and more mutually trusted. Eligible pairs already sit within 3 cells. */
+export function pairAffinity(a: Person, b: Person): number {
+  return (1 - distance(a, b) / 3) + ((a.bonds[b.id] ?? 0) + (b.bonds[a.id] ?? 0)) / 2;
+}
+
+export function pairTie(world: Pick<World, 'seed' | 'tick'>, a: Person, b: Person): number {
+  const lo = a.id < b.id ? a.id : b.id, hi = a.id < b.id ? b.id : a.id;
+  return localRandom(world.seed, `reproduce:${world.tick}:${lo}:${hi}`)();
+}
+
+/** `byAffinity=false` keeps insertion order (first of `candidates`). Ties break with `localRandom`. */
+export function chooseReproductivePartner(world: Pick<World, 'seed' | 'tick'>, person: Person, candidates: Person[], byAffinity = true): Person | undefined {
+  if (!candidates.length) return undefined;
+  if (!byAffinity) return candidates[0];
+  let best: Person | undefined, bestScore = -Infinity, bestTie = -Infinity;
+  for (const other of candidates) {
+    const score = pairAffinity(person, other), tie = pairTie(world, person, other);
+    if (!best || score > bestScore || (score === bestScore && (tie > bestTie || (tie === bestTie && other.id < best.id)))) {
+      best = other; bestScore = score; bestTie = tie;
+    }
+  }
+  return best;
+}
 
 /** The existing physiological/cooldown gate, without its separate portable-food requirement.
  * dt=0 queries the same demographic model without advancing age or recovering the body. */

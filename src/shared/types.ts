@@ -71,7 +71,9 @@ export interface GestureResult {
 export type ClientMessage =
   | { type: 'gesture'; gesture: Gesture }
   | { type: 'viewport'; viewport: Viewport }
-  | { type: 'recipe'; id: string };
+  | { type: 'recipe'; id: string }
+  /** Modo ligero móvil (T024): cadencia mínima pedida por ese cliente; el servidor acota a 1000 ms. */
+  | { type: 'suscripcion'; intervaloMs: number };
 export type ServerMessage =
   | { type: 'state'; world: WorldView }
   | { type: 'result'; result: GestureResult }

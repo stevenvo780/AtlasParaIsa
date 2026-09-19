@@ -10,6 +10,7 @@ import { retainViewState } from './view-state.js';
 import { animalActions, animalColors, componentNames, speciesNames, speciesPlural } from './life-art.js';
 import { technologyPane, recipeCard } from './technology-art.js';
 import { readWorldVisit, saveWorldVisit } from './visit-memory.js';
+import { decidirModo, setModo, type Modo } from './modo.js';
 import './style.css';
 import './game.css';
 import './notebook.css';
@@ -56,13 +57,27 @@ function loginScreen(message = ''): void {
   });
 }
 
+/** P1: refleja en la barra el modo decidido por `decidirModo()` (query, recordado o heurística). */
+function syncModo(): void {
+  const active = decidirModo() === 'observador';
+  const button = el('modo-toggle');
+  button.setAttribute('aria-pressed', String(active));
+  button.title = active ? 'Modo ligero activo: toca para volver al completo' : 'Activar el modo ligero para móviles lentos';
+}
+
 function enterWorld(): void {
   clean(); lastVisit = null; status = 'connecting';
   root.innerHTML = worldShell();
   notebook = new Notebook(el('game')); inspectorTab = 'now';
   focusedRecipe = null; recipeDetails.clear();
+  syncModo();
   connection = new Connection({ world: receiveWorld, status: value => { status = value; renderStatus(); }, pending: value => { pending = value; if (!value) landscape?.setPendingTarget(null); renderControls(); }, result: result => message(result.message, result.accepted), error: text => message(text, false), expired: () => loginScreen('La sesión terminó. Vuelve a entrar para ver la carta.'), recipe: (id, recipe) => { recipeDetails.set(id, recipe); if (statsTab === 'technology' && !el('stats-drawer').hidden) renderStats(); } });
   landscape = new Landscape(el<HTMLCanvasElement>('landscape'), pick, viewport => { connection?.setViewport(viewport); el('camera-coordinates').textContent = `${viewport.x + Math.floor(viewport.width / 2)}, ${viewport.y + Math.floor(viewport.height / 2)}`; }, () => { following = false; renderControls(); });
+  // TODO T024→T020: en observador debería enviarse `{type:'suscripcion', intervaloMs: 5000}` (el
+  // servidor ya lo respeta: src/server/app.ts) y `landscape` no debería instanciar `GpuTerrain`.
+  // `Connection` no expone un envío genérico (lo necesitará T020 para `{type:'recipe',id}`) y el
+  // constructor de `Landscape` queda fuera del alcance asignado a esta tarea (solo resize/frame);
+  // ambos huecos quedan para cuando T020 aporte ese hook. Ver informe T024.
   wire(); renderTool(); connection.start();
 }
 
@@ -125,6 +140,15 @@ function wire(): void {
   el('chronicle-button').addEventListener('click', () => { renderJournal(); el<HTMLDialogElement>('chronicle-dialog').showModal(); });
   el('enter-landscape').addEventListener('click', () => { el<HTMLDialogElement>('letter-dialog').close(); el('landscape').focus(); });
   for (const dialog of root.querySelectorAll<HTMLDialogElement>('dialog')) dialog.querySelector('.dialog-close')!.addEventListener('click', () => dialog.close());
+  el('modo-toggle').addEventListener('click', () => {
+    const next: Modo = decidirModo() === 'observador' ? 'completo' : 'observador';
+    setModo(next);
+    // Si `?modo=` sigue en la URL tras recargar, decidirModo() le da prioridad y pisa lo que
+    // acabamos de guardar: el conmutador quedaría en no-op permanente. La quitamos primero.
+    const url = new URL(location.href);
+    if (url.searchParams.has('modo')) { url.searchParams.delete('modo'); history.replaceState(null, '', url); }
+    location.reload();
+  });
   el('logout-button').addEventListener('click', async () => { try { const response = await fetch('/api/logout', { method: 'POST', credentials: 'same-origin', signal: AbortSignal.timeout(10_000) }); if (!response.ok) throw new Error(); loginScreen(); } catch { loginScreen('Ocultamos la carta, pero no pudimos revocar la sesión. Vuelve a conectar para cerrar la sesión.'); } });
   el('zoom-in').addEventListener('click', () => landscape?.zoom(1)); el('zoom-out').addEventListener('click', () => landscape?.zoom(-1)); el('map-reset').addEventListener('click', () => { following = false; landscape?.follow(null); landscape?.fit(); renderControls(); });
   for (const role of ['S', 'I']) el(`focus-${role.toLowerCase()}`).addEventListener('click', () => { const p = world?.people.find(p => p.role === role); if (p) choosePerson(p.id); });

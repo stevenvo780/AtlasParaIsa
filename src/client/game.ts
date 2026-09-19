@@ -11,6 +11,7 @@ import { animalActions, animalColors, componentNames, speciesNames, speciesPlura
 import { technologyPane, recipeCard } from './technology-art.js';
 import { readWorldVisit, saveWorldVisit } from './visit-memory.js';
 import { decidirModo, setModo, type Modo } from './modo.js';
+import { capasDeCalor, leyendaCalor, type Capa } from './calor.js';
 import './style.css';
 import './game.css';
 import './notebook.css';
@@ -165,7 +166,39 @@ function wire(): void {
   el<HTMLFormElement>('tile-form').addEventListener('submit', event => { event.preventDefault(); const x = Number(el<HTMLInputElement>('tile-x').value), y = Number(el<HTMLInputElement>('tile-y').value); if (!Number.isInteger(x) || !Number.isInteger(y)) return; selected = { kind: 'tile', x, y }; following = false; landscape?.follow(null); landscape?.focus(x, y); landscape?.select(selected); inspectorSignature = ''; renderInspector(); renderTool(); drawer('inspector', true); });
   el('landscape').addEventListener('keydown', event => { const keyboard = event as KeyboardEvent; if (control !== 'direct' || keyboard.ctrlKey || keyboard.metaKey || keyboard.altKey || keyboard.repeat) return; const key = keyboard.key.toLowerCase(); const offsets: Record<string, [number, number]> = { w: [0, -1], a: [-1, 0], s: [0, 1], d: [1, 0] }; const offset = offsets[key], p = person(); if (!offset || !p) return; event.preventDefault(); sendCommand('move', { x: p.x + offset[0], y: p.y + offset[1] }); });
   el('game').addEventListener('keydown', event => { if ((event as KeyboardEvent).key === 'Escape') { if (!el('inspector-drawer').hidden && !el('task-palette').hidden) { toggleTasks(false); el('task-toggle').focus(); return; } if (control === 'direct') { control = 'inspect'; renderControls(); if (!el('inspector-drawer').hidden) el('direct-toggle').focus(); else el('landscape').focus(); return; } notebook?.close(); } });
+  el('heat-button').addEventListener('click', () => cicloCalor());
+  document.addEventListener('keydown', event => {
+    if (event.key.toLowerCase() !== 'h' || event.ctrlKey || event.metaKey || event.altKey || event.repeat) return;
+    const focus = event.target as HTMLElement | null;
+    const tag = focus?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || focus?.isContentEditable) return;
+    event.preventDefault();
+    cicloCalor();
+  });
   el('sound-toggle').addEventListener('click', async () => { if (soundContext) { stopSound(); return; } try { soundContext = new AudioContext(); await soundContext.resume(); el('sound-toggle').setAttribute('aria-pressed', 'true'); sound(); } catch { stopSound(); message('No se pudo activar el sonido. Puedes explorar sin él.', false); } });
+}
+
+let capaCalor: Capa | null = null;
+
+/** Cicla null → comida → vegetación → agua → fertilidad → madera → null (tecla H y botón «Calor»). */
+function cicloCalor(): void {
+  const siguiente = capaCalor === null ? 0 : capasDeCalor.indexOf(capaCalor) + 1;
+  capaCalor = siguiente >= capasDeCalor.length ? null : capasDeCalor[siguiente]!;
+  landscape?.setCapaCalor(capaCalor);
+  renderLeyendaCalor();
+}
+
+function renderLeyendaCalor(): void {
+  const panel = document.getElementById('heat-legend');
+  const boton = document.getElementById('heat-button');
+  boton?.setAttribute('aria-pressed', String(capaCalor !== null));
+  if (!panel) return;
+  panel.hidden = capaCalor === null;
+  if (!capaCalor) { panel.innerHTML = ''; return; }
+  const leyenda = leyendaCalor(capaCalor);
+  panel.innerHTML = `<p class="eyebrow">MAPA DE CALOR</p><h3>${esc(leyenda.titulo)}</h3><ul class="heat-stops">${leyenda.paradas
+    .map(parada => `<li><i style="background:${parada.color}" aria-hidden="true"></i><span>${esc(parada.etiqueta)}</span></li>`)
+    .join('')}</ul>`;
 }
 
 function navigateEntity(event: MouseEvent): void {

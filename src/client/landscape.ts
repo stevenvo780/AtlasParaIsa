@@ -17,6 +17,7 @@ import { animalActions, speciesNames, paintAnimal, paintStructure, paintTree, tr
 import { animalPose, daylightAt, newEventAccents, VISUAL_BUDGET, EVENT_LIFETIME_MS, type EventAccent } from './visual-state.js';
 import type { Capability } from '../shared/technology.js';
 import { decidirModo } from './modo.js';
+import { dibujarCalor, type Capa } from './calor.js';
 
 /* ------------------------------------------------------------------ */
 /* Tipos públicos                                                      */
@@ -336,6 +337,18 @@ interface PointerState {
 /* Landscape                                                           */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Pinta el mapa de calor (T033) sobre el lienzo de escena, que ya está trasladado
+ * al origen del mundo: una tesela ocupa `ART` px en ese sistema. Con `capa === null`
+ * no emite ninguna orden de dibujo.
+ */
+export function pintarCalor(g: CanvasRenderingContext2D, tiles: readonly Tile[], capa: Capa | null): void {
+  if (!capa || tiles.length === 0) return;
+  const previo = g.fillStyle;
+  dibujarCalor(g, tiles, capa, { x0: 0, y0: 0, tileSize: ART, scale: 1 });
+  g.fillStyle = previo;
+}
+
 export class Landscape {
   private readonly canvas: HTMLCanvasElement;
   private readonly ctx: CanvasRenderingContext2D;
@@ -405,6 +418,7 @@ export class Landscape {
   private focusStart = 0;
 
   private layer: OverlayLayer = 'none';
+  private capaCalor: Capa | null = null;
   private selection: LandscapeSelection | null = null;
   private pickMode: 'ground' | 'inspect' = 'ground';
   private pendingTarget: { x: number; y: number } | null = null;
@@ -583,6 +597,15 @@ export class Landscape {
     this.layer = layer;
   }
 
+  /** Mapa de calor de recursos (T033). `null` lo apaga. Invalida la escena cacheada. */
+  setCapaCalor(capa: Capa | null): void {
+    if (this.capaCalor === capa) return;
+    this.capaCalor = capa;
+    this.sceneKey = '';
+  }
+
+  capaDeCalor(): Capa | null { return this.capaCalor; }
+
   follow(id: string | null, kind: 'person' | 'animal' = 'person'): void { this.followedId = id; this.followedKind = kind; }
 
   setPendingTarget(position: { x: number; y: number } | null): void { this.pendingTarget = position; }
@@ -683,6 +706,14 @@ export class Landscape {
       if (tx < 0 || ty < 0 || tx >= w || ty >= h) continue;
       this.grid[ty * w + tx] = t;
     }
+  }
+
+  /** Teselas existentes dentro de la ventana visible ya calculada por `drawScene`. */
+  private teselasVisibles(x0: number, x1: number, y0: number, y1: number): Tile[] {
+    if (!this.capaCalor) return [];
+    const teselas: Tile[] = [];
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) { const tile = this.tileAt(x, y); if (tile) teselas.push(tile); }
+    return teselas;
   }
 
   private tileAt(x: number, y: number): Tile | undefined {
@@ -1180,11 +1211,15 @@ export class Landscape {
     const pose = people.some(person => person.moving) || animals.some(animal => animal.moving) ? t : this.reduceMotion ? 0 : Math.floor(t * 8);
     const selectedBody = this.selection?.kind === 'animal' ? this.selection.id : '';
     const selectedTile = this.selection?.kind === 'tile' ? this.selection : null;
-    const sceneKey = `${this.sceneRevision}:${this.layer}:${x0}:${x1}:${y0}:${y1}:${pose}:${selectedBody}:${selectedTile?.x}:${selectedTile?.y}`;
+    const sceneKey = `${this.sceneRevision}:${this.layer}:${this.capaCalor ?? ''}:${x0}:${x1}:${y0}:${y1}:${pose}:${selectedBody}:${selectedTile?.x}:${selectedTile?.y}`;
     if (sceneKey === this.sceneKey) return;
     this.sceneKey = sceneKey;
     g.clearRect(0, 0, this.scene.width, this.scene.height);
     g.save(); g.translate(-this.originX * ART, -this.originY * ART);
+
+    // Mapa de calor: sobre el terreno ya pintado (los chunks van al lienzo principal)
+    // y debajo de decoración, animales y personas de esta escena.
+    pintarCalor(g, this.teselasVisibles(x0, x1, y0, y1), this.capaCalor);
 
     const sprites: Sprite[] = [];
     this.effects.water = this.effects.vegetation = this.effects.shadows = 0;

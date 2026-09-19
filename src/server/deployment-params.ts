@@ -10,7 +10,11 @@ import { DEFAULT_PARAMS, parseParams, type WorldParams } from '../world/params.j
  * corte arriesga esos 2 s de simulación, nunca un gesto confirmado. `CARTA_PARAMS` ajusta
  * cualquier parámetro (y abre la ventana de poda) sin tocar código.
  */
-export const PRODUCTION_PARAMS = 'persistencia.cadaTicks=20,persistencia.ventanaEventosTicks=24000';
+// Ruling R19 (2026-09-19 16:30): cadencia 100 pasos (10 s). Con 20, a 40 habitantes el guardado
+// (350–500 ms) entraba 6 veces en la ventana de 120 pasos del gobernador y fijaba su p95, así que
+// los nacimientos quedaban pausados para siempre; con 100 entra una vez y el p95 mide el paso.
+// Coste si está mal: hasta 10 s de mundo perdidos en un corte (antes 2 s).
+export const PRODUCTION_PARAMS = 'persistencia.cadaTicks=100,persistencia.ventanaEventosTicks=24000';
 
 /**
  * Los overrides del despliegue aplicados ENCIMA de `base`, clave a clave. Para un mundo

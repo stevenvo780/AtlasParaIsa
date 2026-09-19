@@ -298,7 +298,7 @@ La refutación está en `tests/params-instantanea.test.ts`: un mundo generado co
 | `recursos.velocidadRegeneracion` | 1 | [0, 10] | Multiplicador de la tasa base de regeneración ecológica | T013 |
 | `recursos.decaimientoFertilidad` | 0.001 | [0, 1] | Tasa de decaimiento proporcional por tick de la fertilidad del suelo | T013 |
 | `recursos.decaimientoComida` | 0.0001 | [0, 1] | Tasa de descomposición y pérdida de comida por tick | T013 |
-| `persistencia.cadaTicks` | 1 (producción fija 20 vía `main.ts`) | [1, 10000] | Cadencia en ticks para el guardado periódico en disco | T021 |
+| `persistencia.cadaTicks` | 1 (producción fija 100 vía `deployment-params.ts`, ruling R19; antes 20) | [1, 10000] | Cadencia en ticks para el guardado periódico en disco | T021 |
 | `persistencia.ventanaEventosTicks` | 0 (sin poda; abrir con `CARTA_PARAMS`) | [0, 1000000] | Ventana de retención temporal para la poda de eventos y chunks | T021 |
 | `agua.cuencas` | 0.4 | [0.05, 1] | Umbral de ruido de cuenca bajo el cual una tesela conserva su agua potable de origen | T035 |
 

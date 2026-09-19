@@ -5,7 +5,7 @@ import type { TechnologyRecipe } from '../src/shared/technology.js';
 import type { ChronicleEvent, CommunityView } from '../src/shared/types.js';
 import { createWorld, type Person, type World } from '../src/world/index.js';
 import { demographicTraits, initialDemography } from '../src/world/demography.js';
-import { founderGenome } from '../src/world/genetics.js';
+import { founderGenome, inheritGenome } from '../src/world/genetics.js';
 import { advancePopulation, assertLegacyRecord, assertPopulation, MAX_LEGACY_CACHE, RECENT_LEGACY_COUNT, referencedLegacy, retainLegacy } from '../src/world/lineage.js';
 
 function emitFor(world: World) {
@@ -150,4 +150,36 @@ test('population validation rejects dead identities reappearing, duplicate rows 
   world.people.push({ ...a, demography: initialDemography(world.tick - a.bornAt) });
   const deaths = world.demographyDynamics.deaths;
   assert.throws(() => advancePopulation(world, { emit }), /fallecida reapareció/); assert.equal(world.demographyDynamics.deaths, deaths);
+});
+
+test('herencia pura (mutationRate 0) combina alelos exactos de los dos padres', () => {
+  const seed = 12345;
+  const mockTraits = { curiosity: 0.5, sociability: 0.5, industriousness: 0.5, care: 0.5, resilience: 0.5 };
+  const parentA = founderGenome(seed, 'padre', mockTraits, 0.5);
+  const parentB = founderGenome(seed + 1, 'madre', mockTraits, 0.5);
+  
+  const child = inheritGenome(seed, 'hijo', [{ id: 'padre', genome: parentA }, { id: 'madre', genome: parentB }], 0);
+  
+  for (let gene = 0; gene < 7; gene++) {
+    const a1 = child.alleles[gene * 2]!;
+    const a2 = child.alleles[gene * 2 + 1]!;
+    
+    const parentAAlleles = [parentA.alleles[gene * 2]!, parentA.alleles[gene * 2 + 1]!];
+    const parentBAlleles = [parentB.alleles[gene * 2]!, parentB.alleles[gene * 2 + 1]!];
+    
+    assert.ok(parentAAlleles.includes(a1), `Alelo ${a1} en locus ${gene} (copia 1) no proviene del padre A`);
+    assert.ok(parentBAlleles.includes(a2), `Alelo ${a2} en locus ${gene} (copia 2) no proviene de la madre B`);
+  }
+});
+
+test('determinismo de herencia: misma llamada da mismo resultado', () => {
+  const seed = 999;
+  const mockTraits = { curiosity: 0.5, sociability: 0.5, industriousness: 0.5, care: 0.5, resilience: 0.5 };
+  const parentA = founderGenome(seed, 'padre', mockTraits, 0.5);
+  const parentB = founderGenome(seed + 1, 'madre', mockTraits, 0.5);
+  
+  const child1 = inheritGenome(seed, 'hijo-det', [{ id: 'padre', genome: parentA }, { id: 'madre', genome: parentB }]);
+  const child2 = inheritGenome(seed, 'hijo-det', [{ id: 'padre', genome: parentA }, { id: 'madre', genome: parentB }]);
+  
+  assert.deepEqual(child1, child2);
 });

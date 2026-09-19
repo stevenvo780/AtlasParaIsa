@@ -142,6 +142,7 @@ export function createWorld(seed = 20260905, params?: WorldParams): World {
   }
   const names = ['S', 'I', 'Luma', 'Nilo', 'Duna', 'Bruma', 'Olmo', 'Vera', 'Tilo', 'Cora', 'Lino', 'Nara', 'Río', 'Alba', 'Mora', 'Sol'];
   const colors = ['#f4ce7a', '#e7a8b9', '#9dc8ae', '#9ebacc', '#d8ba91', '#b8a6cc'];
+  const varianzaFundadores = (params ?? DEFAULT_PARAMS).genes.varianzaFundadores;
   for (let n = 0; n < names.length; n++) {
     const place = world.places[Math.floor(n / 6) % world.places.length]!;
     const x = place.x + n % 3 - 1;
@@ -159,11 +160,11 @@ export function createWorld(seed = 20260905, params?: WorldParams): World {
       lastMeeting: -300, lastShared: -60, experiences: [], habits: [],
       traits, skills: {}, materials: { wood: 0, stone: 0 }, activity: {}, values: {}, visited: [],
       heading: n * 2.399963229728653, command: null, work: 0, lastOutcome: 0, intentContext: 'ready', controlMode: 'auto',
-      thirst: 0.15, genome: founderGenome(world.seed, id, traits), bornAt: -4800, lastBirth: -2400, lastSocial: -30, lastDispute: -180, lastPracticeMemory: 0, culture: initialCulture(world.seed, id), communityId: null, bonds: {},
+      thirst: 0.15, genome: founderGenome(world.seed, id, traits, varianzaFundadores), bornAt: -4800, lastBirth: -2400, lastSocial: -30, lastDispute: -180, lastPracticeMemory: 0, culture: initialCulture(world.seed, id), communityId: null, bonds: {},
       technology: initialTechnologyKnowledge(), demography: initialDemography(4800),
     });
   }
-  for (const person of world.people) initializePerson(world, person);
+  for (const person of world.people) initializePerson(world, person, varianzaFundadores);
   world.technology.checkpoint = captureTechnologyCheckpoint(world.technology, world.people, world.tick, 'initial');
   world.structures.push(...legacyStructures(world.tiles, world.tick));
   addEvent(world, { kind: 'memory', actors: [], source: 'sample', text: 'Este mundo comienza con S, I y una vecindad ficticia. Los cinco recuerdos son ejemplos, pendientes de la historia de Steven e Isa.', cause: 'Contenido sintético identificado; no se importaron conversaciones ni biografía.' });
@@ -171,8 +172,8 @@ export function createWorld(seed = 20260905, params?: WorldParams): World {
   return world;
 }
 
-function initializePerson(world: World, person: Person): void {
-  person.thirst = 0.15; person.genome = founderGenome(world.seed, person.id, person.traits);
+function initializePerson(world: World, person: Person, varianzaFundadores: number = paramsOf(world).genes.varianzaFundadores): void {
+  person.thirst = 0.15; person.genome = founderGenome(world.seed, person.id, person.traits, varianzaFundadores);
   person.bornAt = world.tick - 4800; person.lastBirth = world.tick - 2400; person.lastSocial = -30; person.lastDispute = -180; person.lastPracticeMemory = world.tick;
   person.culture = initialCulture(world.seed, person.id); person.communityId = null; person.bonds = {};
 }

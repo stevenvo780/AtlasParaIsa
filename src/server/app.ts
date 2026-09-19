@@ -57,7 +57,9 @@ export function createApp(options: AppOptions) {
   let stopped = false;
   let failed = false;
   const pending = new Map<string, Pending>();
-  const clients = new Map<WebSocket, { hash: string; alive: boolean; messages: number; window: number; viewport?: Viewport; lastView?: WorldView }>();
+  // T024 (P1): `subscribeMs` es la cadencia mínima que un cliente pidió (móvil observador) —
+  // 0 = sin pedido, se manda con la cadencia normal. `lastBroadcastAt` la hace cumplir en `broadcast`.
+  const clients = new Map<WebSocket, { hash: string; alive: boolean; messages: number; window: number; viewport?: Viewport; lastView?: WorldView; subscribeMs: number; lastBroadcastAt: number }>();
   const loginAttempts = new Map<string, { count: number; reset: number }>();
   const gestureAttempts = new Map<string, { count: number; reset: number }>();
   const ws = new WebSocketServer({ noServer: true, maxPayload: 4096, perMessageDeflate: false });
@@ -93,8 +95,11 @@ export function createApp(options: AppOptions) {
     socket.send(JSON.stringify(message));
   }
   function broadcast() {
+    const now = Date.now();
     for (const [socket, client] of clients) {
       if (!store.sessionValid(client.hash)) { socket.close(4001, 'La sesión terminó.'); continue; }
+      // T024 (P1): un cliente suscrito con `intervaloMs` no recibe empujes más seguido que eso.
+      if (client.subscribeMs && now - client.lastBroadcastAt < client.subscribeMs) continue;
       sendView(socket);
     }
   }
@@ -103,6 +108,7 @@ export function createApp(options: AppOptions) {
     try {
       const projected = view(client.viewport);
       client.lastView = projected;
+      client.lastBroadcastAt = Date.now();
       send(socket, { type: 'state', world: projected });
     } catch {
       // A camera read is not a simulation transaction. Never retry the failing archive in a fallback.
@@ -237,7 +243,7 @@ export function createApp(options: AppOptions) {
       const hash = authorized(req);
       if (clients.size >= 12) throw new HttpError(429, 'Demasiadas conexiones.');
       ws.handleUpgrade(req, socket, head, client => {
-        clients.set(client, { hash, alive: true, messages: 0, window: Date.now() });
+        clients.set(client, { hash, alive: true, messages: 0, window: Date.now(), subscribeMs: 0, lastBroadcastAt: 0 });
         client.on('error', () => client.terminate());
         client.on('pong', () => { const info = clients.get(client); if (info) info.alive = true; });
         client.on('close', () => clients.delete(client));
@@ -248,10 +254,17 @@ export function createApp(options: AppOptions) {
             if (Date.now() - info.window >= 10_000) { info.window = Date.now(); info.messages = 0; }
             if (++info.messages > 120) { client.close(4008, 'Demasiados mensajes.'); return; }
             if (binary) throw new HttpError(400, 'Se requiere JSON.');
-            const parsed = JSON.parse(data.toString()) as { type?: unknown; gesture?: unknown; viewport?: Viewport };
+            // `ClientMessage` (T020) aún no existe en este workstream: tipo local mínimo, ver informe T024.
+            const parsed = JSON.parse(data.toString()) as { type?: unknown; gesture?: unknown; viewport?: Viewport; intervaloMs?: unknown };
             if (parsed?.type === 'viewport') {
               try { info.viewport = normalizeViewport(parsed.viewport); } catch { throw new HttpError(400, 'Ventana de cámara no válida.'); }
               sendView(client); return;
+            }
+            if (parsed?.type === 'suscripcion') {
+              // Modo ligero móvil (P1): el cliente pide una cadencia más espaciada; 1000 ms es el piso.
+              if (typeof parsed.intervaloMs !== 'number' || !Number.isFinite(parsed.intervaloMs) || parsed.intervaloMs < 0) throw new HttpError(400, 'Intervalo de suscripción no válido.');
+              info.subscribeMs = Math.max(1000, Math.floor(parsed.intervaloMs));
+              return;
             }
             if (!parsed || parsed.type !== 'gesture') throw new HttpError(400, 'Mensaje desconocido.');
             const result = await requestGesture(parseGesture(parsed.gesture), hash);

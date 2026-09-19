@@ -16,6 +16,7 @@ import { BoundedCache, GpuTerrain, type GpuStatus, type TerrainRaster } from './
 import { animalActions, speciesNames, paintAnimal, paintStructure, paintTree, treeForm, type TreeForm } from './life-art.js';
 import { animalPose, daylightAt, newEventAccents, VISUAL_BUDGET, EVENT_LIFETIME_MS, type EventAccent } from './visual-state.js';
 import type { Capability } from '../shared/technology.js';
+import { decidirModo } from './modo.js';
 
 /* ------------------------------------------------------------------ */
 /* Tipos públicos                                                      */
@@ -410,6 +411,10 @@ export class Landscape {
   private dpr = 1;
   private cssW = 0;
   private cssH = 0;
+  // Ligero móvil (P1): decidido una vez por instancia; `resize`/`frame` lo usan. Wiring mínimo
+  // fuera de esos dos métodos (una constante calculada, no una regla) — ver informe de T024.
+  private readonly modo = decidirModo();
+  private lastFrameAt = 0;
 
   private pointers = new Map<number, PointerState>();
   private pinchDist = 0;
@@ -609,7 +614,8 @@ export class Landscape {
     const rect = this.canvas.getBoundingClientRect();
     const w = Math.max(1, Math.round(rect.width));
     const h = Math.max(1, Math.round(rect.height));
-    this.dpr = clamp(window.devicePixelRatio || 1, 1, 3);
+    // P1: sin techo, un móvil de dpr 3 redibujaba > 3 MPx por frame. Observador limita a 1×.
+    this.dpr = clamp(window.devicePixelRatio || 1, 1, this.modo === 'observador' ? 1 : 1.5);
     this.cssW = w;
     this.cssH = h;
     const dw = Math.round(w * this.dpr);
@@ -1078,6 +1084,13 @@ export class Landscape {
 
   private frame(now: number): void {
     if (this.destroyed) return;
+    // P1 observador: 30 fps (mitad de un rAF típico de 60 Hz) y sin interpolar —
+    // reutiliza `reduceMotion`, que ya congela la pose y detiene la interpolación en todo el resto.
+    if (this.modo === 'observador') {
+      this.reduceMotion = true;
+      if (now - this.lastFrameAt < 1000 / 30) { this.raf = requestAnimationFrame((t) => this.frame(t)); return; }
+    }
+    this.lastFrameAt = now;
     this.tickFocus(now);
     if (this.followedId) {
       const person = (this.followedKind === 'animal' ? this.interpolateAnimals(now) : this.interpolatePeople(now)).find(p => p.view.id === this.followedId);

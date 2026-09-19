@@ -15,6 +15,9 @@ export interface ChronicleHost {
   tick: number; eventCounter: number; events: ChronicleEvent[]; chronicleJournal?: ChronicleJournal;
 }
 const integer = (n: unknown): n is number => typeof n === 'number' && Number.isSafeInteger(n) && n >= 0;
+/** Un evento puede listar a todos los habitantes vivos (p.ej. `community`): espeja MAX_POPULATION (128); antes 32 y abortaba con >32 habitantes (T041). */
+const MAX_CHRONICLE_ACTORS = 128;
+
 export function chronicleSerial(id: string): number | null {
   if (typeof id !== 'string' || !/^e[1-9]\d*$/.test(id)) return null;
   const serial = Number(id.slice(1)); return integer(serial) ? serial : null;
@@ -35,7 +38,7 @@ export function assertChronicleEvent(value: unknown, tick: number): asserts valu
   if (Object.keys(event).some(key => !['id','tick','kind','actors','text','cause','x','y','source','death'].includes(key))
     || !text(event.id,100) || !integer(event.tick) || event.tick > tick
     || !['ecology','meeting','care','learning','adaptation','memory','gesture','pause','discovery','settlement','cooperation','birth','community','conflict','animal','invention','death'].includes(event.kind)
-    || !Array.isArray(event.actors) || event.actors.length > 32 || !Array.from(event.actors).every(id => text(id,100))
+    || !Array.isArray(event.actors) || event.actors.length > MAX_CHRONICLE_ACTORS || !Array.from(event.actors).every(id => text(id,100))
     || !text(event.text) || !text(event.cause) || !['simulation','sample','approved'].includes(event.source)
     || (event.x !== undefined && !coordinate(event.x)) || (event.y !== undefined && !coordinate(event.y)) || !deathOk) chronicleFailure('invalid event');
 }

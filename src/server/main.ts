@@ -20,7 +20,7 @@ try {
   // En producción el mundo se persiste cada 20 pasos (2 s) y siempre que llega un
   // gesto; un corte arriesga esos 2 s de simulación, nunca un gesto confirmado.
   // CARTA_PARAMS puede ajustarlo (y abrir la ventana de poda) sin tocar código.
-  setParams(app.world, parseParams(`persistencia.cadaTicks=20${process.env.CARTA_PARAMS ? `,${process.env.CARTA_PARAMS}` : ''}`));
+  setParams(app.world, parseParams(`persistencia.cadaTicks=20,persistencia.ventanaEventosTicks=24000${process.env.CARTA_PARAMS ? `,${process.env.CARTA_PARAMS}` : ''}`));
   let closing = false;
   const shutdown = async () => {
     if (closing) return; closing = true;

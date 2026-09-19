@@ -58,7 +58,7 @@ export const PARAM_RANGES: Record<string, [number, number]> = {
   'cuerpo.cuidadoReduceRiesgo': [0, 1],
   'genes.varianzaFundadores': [0, 1],
   'genes.tasaMutacion': [0, 10],
-  'poblacion.maxima': [1, 200],
+  'poblacion.maxima': [1, 128],
   'poblacion.intervaloComprobacionTicks': [1, 10000],
   'poblacion.nacimientosPorComprobacion': [0, 20],
   'recursos.capacidadBosque': [0, 10],

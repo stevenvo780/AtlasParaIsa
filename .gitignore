@@ -10,3 +10,6 @@ test-results/
 *.log
 artifacts/
 build/
+.atlas-refinement-*/
+.worktrees/
+.superpowers/

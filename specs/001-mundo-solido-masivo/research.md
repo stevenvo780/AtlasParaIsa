@@ -25,3 +25,24 @@
 - Cambiar reglas y refactorizar a la vez rompe el determinismo sin saber por qué → orden estricto: instrumento → reglas → visual → refactor.
 - Sobreajustar a 10 días: correr al menos un barrido de 25 días al final (existe precedente V6).
 - El servidor público comparte `data/`: el laboratorio usa siempre directorios temporales.
+
+## Medido 2026-09-19 (revisión integral; fuente: `docs/REVISION-2026-09-19.md`)
+Todo con ejecución real sobre `aeada2e` en la torre.
+- **Mortalidad**: `maximumAge = round((11 + resilience·4 − activity)·2400)` → 10,45–14,70 días (42–59 min reales); corte incondicional en `demography.ts:82`. Semilla 12345 hasta día 7,4: **0 muertes**, población 16→32 (tope) → los nacimientos paran → la ola de senescencia extingue el mundo ~día 15. Hambre/sed/frío bien gestionados por la IA (usa rasgos y memorias propias, no tablas globales).
+- **Genética**: 16 fundadores homocigotos en los 7 loci; `learningRate` = 0,12 en todos (alelos 0,5/0,5 = codificación exacta del default). Sin variación de partida no hay selección posible.
+- **Tecnología**: `technologyOpportunity` decide `recipeId`; `craftTechnology` lo ignora y fabrica la de mayor `benefit` (reproducido con el motor). Con Store `memoryCapacity=32`; sin Store `maxRecipes=256`, `maxGeneration=32` → **el laboratorio debe adjuntar Store**.
+- **Entorno**: a t=1251, 1120/1120 celdas con comida, 100 % vegetación > 0,3, 36 celdas (3 %) con agua potable. `ecology()` crece cada 10 ticks hacia saturación sin K por bioma; fertilidad sin decaimiento → 1,0. Generación inicial sí desigual (madera 4,6 % global, distancia media 17 celdas). Hipótesis «doble regeneración» refutada (kernel +0,05).
+- **Servidor**: 32 hab. dispersos (28.672 tiles activas): paso p50 78,4 / p95 131,9 ms (clon 16,5, guardado 48,7). Soak archivado (18 hab.): p95 64,9 ms, picos 639 ms. SQLite crece ~7 KB/tick (6,8 MB @t500 → 32,6 MB @t4000) sin poda; `data/world.sqlite` público = 347 MB + 9,7 GB en `experiments/`.
+- **Red**: `state` = 469.337 B a t=12000 con cámara 12×8; 186 KiB son 256 recetas con programa; 2 envíos/s.
+- **Cliente**: `dpr = clamp(devicePixelRatio,1,3)`; en móvil dpr 3 → canvas 1206×2622 por rAF. Higiene de recursos correcta (rAF, listeners, contextlost, backoff).
+- **Determinismo**: sano (sin `Math.random`/`Date.now` en `src/world`; misma semilla → idéntico tras 400 pasos; snapshot roundtrip bit a bit).
+- **Tests**: 53/56 ok en < 6 s; `world.test.ts` 115 s; 2 cuelgan por `listen()` fuera del `try` + Chromium 1243 ausente (instalado 2026-09-19).
+
+## Decisiones (rev. 2)
+8. **Muerte como riesgo, no decreto**: hazard Gompertz determinista desde `senescenceStart`, reducido por salud·vitalidad y resiliencia; la salud se desgasta en la vejez para que la muerte sea legible. Alternativa rechazada: subir `maximumAge` (solo retrasa la ola; no produce recambio ni diversidad de causas).
+9. **Reemplazo continuo**: tope paramétrico, varios nacimientos por comprobación si hay hueco, pareja por afinidad determinista. Alternativa rechazada: quitar el tope (rompe el presupuesto V).
+10. **Capacidad de carga por bioma** y decaimiento de fertilidad, ambos paramétricos con default = hoy (control bit a bit) y calibrados por barrido (Gini ≥ 0,35; 30–70 % celdas con comida).
+11. **Params en `WeakMap`** por mundo (patrón ya usado en `spatial.ts`, `technology-catalogue.ts`): sin campo nuevo en `World`, sin migración.
+12. **`state` acotado**: recetas como resumen + detalle bajo demanda; ventana de eventos/memorias. Objetivo < 120 KiB.
+13. **Guardado por cadencia** (20 ticks o al haber gestos) + poda por ventana + `synchronous=NORMAL`.
+14. **US5 pospuesta** (ver plan.md, Complexity Tracking).

@@ -4,7 +4,9 @@
 
 **Created**: 2026-09-19
 
-**Status**: Ready for implementation
+**Status**: Ready for implementation — **rev. 2 (2026-09-19, tras `docs/REVISION-2026-09-19.md`)**: las causas de cada historia están localizadas con cifras; el plan corre en paralelo (ver `plan.md` «Protocolo de ejecución»); US5 pospuesta.
+
+**Intención de fondo** (Steven, 2026-09-19): no solo «que no mueran»: que la vida sea **riesgo con sentido** (edad, cuidado, genes), que la población se **reemplace** y **evolucione** (variación heredable + selección), que la cooperación y la técnica **diversifiquen** en vez de converger, y que el entorno sea **finito y desigual** para que moverse, transportar y cooperar tengan motivo. La carta es un experimento científico y filosófico observable: cada regla debe poder refutarse con el laboratorio.
 
 **Input**: Steven, 2026-09-19: «La arquitectura de software es mejorable; los agentes se mueren a gran velocidad; son muy homogéneos; hay errores invisibles como que el entorno es literalmente recursos en todos lados. Tenemos ~4 horas de Fable 5.1: que aproveche el ordenador al máximo (RAM, GPUs, CPU), muchas instancias y simulaciones, workflows masivos, y que quede un proyecto sólido, presentable y visualmente muy llamativo. En el celular el frontend es imposible: entornos separados para máxima optimización.»
 
@@ -32,7 +34,9 @@ Como autor, quiero que en 10 días simulados la población no colapse, que dos h
 
 **Why this priority**: es la queja central ("se mueren a gran velocidad", "muy homogéneos"). Sin esto la carta no vive.
 
-**Independent Test**: sobre el laboratorio de US1, con 32 réplicas de 10 días: mediana de supervivencia de fundadores ≥ 70 %, población final entre 60 % y 200 % de la inicial, índice de diversidad de conducta ≥ 0,6 (definido en research.md), 0 muertes con causa `desconocida`.
+**Independent Test**: sobre el laboratorio de US1, con 32 réplicas de 10 días: mediana de supervivencia de fundadores ≥ 70 %, población final entre 60 % y 200 % de la inicial, índice de diversidad de conducta ≥ 0,6 (definido en research.md), 0 muertes con causa `desconocida`. **Añadido rev. 2**: a 25 días (T032) ninguna réplica se extingue, hay ≥ 3 generaciones vivas, la senescencia es la causa dominante pero **no** la única, y el Gini de nº de hijos por progenitor < 0,5 (paternidad repartida).
+
+**Causa localizada (rev. 2)**: corte de edad incondicional en `demography.ts:82` (10,45–14,70 días) + tope de 32 que detiene los nacimientos → extinción ~día 15; fundadores homocigotos (`genetics.ts:14`); `craftTechnology` fabrica otra receta que la decidida (`technology.ts:463`). Ver T010–T015.
 
 **Acceptance Scenarios**:
 
@@ -74,7 +78,9 @@ Como autor, en el evento abro `https://atlas.humanizar.tech` en el portátil y s
 
 ---
 
-### User Story 5 - Arquitectura que aguanta (Priority: P3)
+### User Story 5 - Arquitectura que aguanta (Priority: P3) — **POSPUESTA (rev. 2)**
+
+> La revisión verificó que las capas son sanas (`src/world` nunca importa server/client; estado lateral en `WeakMap`; ciclos solo `import type`). Lo que sí falla de la arquitectura (paso síncrono O(tiles), `state` sin acotar) se corrige en T020/T021/T025 sin partir ficheros. El troceado en módulos < 400 líneas se hace después del evento con el laboratorio como control de determinismo (plan.md, Complexity Tracking).
 
 Como desarrollador, el paso del mundo está separado en fases puras (percepción → decisión → acción → materia → registro) con contratos tipados, `src/world/index.ts` (1.196 líneas) y `src/client/landscape.ts` (2.032) partidos en módulos < 400 líneas, sin comportamiento cambiado (los 58 tests y el laboratorio dan lo mismo antes y después con la misma semilla).
 
@@ -131,6 +137,9 @@ Como desarrollador, el paso del mundo está separado en fases puras (percepción
 - **SC-006**: Modo observador en móvil emulado: carga < 3 s, memoria < 150 MB, sin errores de consola; escritorio ≥ 55 fps con 32 habitantes.
 - **SC-007**: Suite (58 tests) y typecheck verdes en cada fase; determinismo conservado tras el refactor (métricas idénticas con la misma semilla).
 - **SC-008**: `docs/EVIDENCIA.md` con una sección nueva fechada 2026-09-19 con SHA, semillas y cifras de cada criterio.
+- **SC-009** (rev. 2): mensaje `state` por cliente < 120 KiB a t=8000 con 32 habitantes (hoy 465 KiB); p95 del paso del servidor < 50 ms con 32 habitantes dispersos (hoy 131,9 ms) medido con `scripts/benchmark-simulation.ts`.
+- **SC-010** (rev. 2): el fichero SQLite del servidor no crece más de 20 MB por día simulado con poda activa (hoy ~170 MB/día simulado); `npm run backup` en caliente nunca reporta corrupción falsa.
+- **SC-011** (rev. 2): a 25 días simulados (16 réplicas) ninguna extinción, ≥ 3 generaciones vivas, ≥ 2 causas de muerte distintas registradas con lugar y 3 eventos previos, y ≥ 4 recetas distintas en uso simultáneo.
 
 ## Assumptions
 
@@ -138,3 +147,6 @@ Como desarrollador, el paso del mundo está separado en fases puras (percepción
 - No hay presupuesto de GPU para la simulación en este bloque: la GPU se usa para render y, si sobra tiempo, para el benchmark de ecología ya existente (`scripts/compute-ecology-*`). La CPU (32 hilos) es el recurso principal del laboratorio.
 - La carta, los recuerdos y S e I no se tocan sin Steven.
 - Las cifras objetivo (70 %, 0,6, 0,35) son puntos de partida; el laboratorio puede revisarlas con evidencia y dejarlo escrito.
+- (rev. 2) El laboratorio **adjunta un Store SQLite temporal por réplica**: sin Store rigen otras leyes de tecnología (`technology-catalogue.ts:63,75`) y las cifras no serían las de producción.
+- (rev. 2) Los parámetros (`src/world/params.ts`) viven fuera del snapshot; el servidor público corre con `DEFAULT_PARAMS` calibrados en código.
+- (rev. 2) Ejecución con paralelismo máximo y múltiples proveedores (Codex, Gemini, Grok, MiniMax, Claude) según `tasks.md`; el coste de tokens no es restricción; la calidad se sostiene con revisión adversarial por tarea y del diff completo.

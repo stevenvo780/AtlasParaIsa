@@ -16,6 +16,18 @@ La versión conjunta incluye claros físicos y arboledas, última visita vincula
 
 La continuidad ecológica fuera de los barrios humanos sigue como trabajo V7 aplazado. La comparación de CPU, workers y ambas GPU no mostró una mejora robusta del tiempo completo y la simulación conserva CPU. [EVIDENCIA](docs/EVIDENCIA.md#comparación-física-de-cpu-y-ambas-gpu) delimita esas mediciones. La [neuroevolución](docs/CIENCIA.md#neuroevolución-después-de-afinar-el-mundo) continúa como investigación futura, sin redes entrenadas ni políticas nuevas de ese tipo en el servicio.
 
+## Revisión 2026-09-19
+
+Auditoría integral de 12 revisores independientes + refutación adversarial: [`docs/REVISION-2026-09-19.md`](docs/REVISION-2026-09-19.md) (12 hallazgos confirmados, 4 plausibles, 15 refutados). Las cinco quejas del autor y su causa raíz confirmada:
+
+| Queja | Causa raíz confirmada | Dónde |
+|---|---|---|
+| «Se mueren a gran velocidad» | Muerte por senescencia incondicional a edad casi fija (`maximumAge`), sin mirar hambre, sed, salud ni cuidados. | `src/world/demography.ts:23,82-83`, `src/world/index.ts:30,162,907` |
+| «Son muy homogéneos» | `craftTechnology()` ignora la receta que decidió `technologyOpportunity()`; los 16 fundadores nacen homocigotos con `learningRate` idéntico; reproducción con 1 nacimiento por comprobación de 120 ticks y corte duro a 32. | `src/world/technology.ts:462-465`, `src/world/genetics.ts:14-16`, `src/world/index.ts:906-931` |
+| «Recursos en todos lados» | `ecology()` hace crecer vegetación y comida en todas las celdas de tierra sin capacidad de carga por bioma; la fertilidad no tiene decaimiento natural. | `src/world/index.ts:183-206`, `src/world/ecosystem-kernel.ts:94` |
+| «En el celular es imposible» | El mensaje `state` no está acotado por cámara: 465 KiB por cliente, 2 veces por segundo (186 KiB son recetas con su programa completo que la UI no dibuja); sin modo ligero ni tope de `dpr`. | `src/world/index.ts:953-978`, `src/world/technology.ts:550`, `src/client/landscape.ts:612` |
+| «La arquitectura es mejorable» | Capas sanas; lo mejorable es estructural: `cloneWorld` + `stepWorld` + `store.save` síncronos cada tick (10 Hz), p95 131,9 ms con 32 habitantes dispersos. | `src/server/app.ts:142-146,265`, `src/server/store.ts:568-645` |
+
 ## Arrancar en local
 
 Requiere Node.js **22.22 o posterior de la rama 22**; esta implementación se comprobó con **22.22.3**. El manifiesto también admite Node.js 24 o posterior, sin acreditar aquí esas versiones. Se usa `node:sqlite`, que en Node.js 22 muestra un aviso de API experimental.
@@ -172,6 +184,10 @@ Sin `--run` imprime la configuración. En Linux limita tiempo, heap, disco, snap
 El informe separa vecinos de S/I, intervalos de vida, presión corporal, acciones, edades y oportunidades familiares. Estas últimas son muestras posteriores a las acciones y posibles costes de nacimiento, no causas exclusivas de infertilidad. Los puntos de recuperación por riesgo pueden preceder hasta 120 pasos a la observación; ambos tiempos se registran. Los stocks activos y el agua geométricamente cercana no prueban acceso, consumo ni disponibilidad global simultánea. El tiempo del experimento no mide rendimiento del servicio con navegador.
 
 Los controles del auditor están incluidos en `npm test`. Los controles de procesos del wrapper se ejecutan con `python3 tests/survival-matrix_test.py`; fuera de Linux indican expresamente qué limpieza de procesos no comprobaron. La [matriz V6 cerrada](docs/EVIDENCIA.md#matriz-v6-cerrada-a-veinticinco-días) conserva sus ejecutores originales, informes y hashes; reinicio en 30000, recarga final y crónica completa pasaron en las tres semillas. El cierre de integridad no convierte el resultado demográfico adverso en éxito de supervivencia.
+
+## Laboratorio (en construcción)
+
+El laboratorio de réplicas masivas (`npm run lab`) **no existe todavía**: se construye en T016–T018 de `specs/001-mundo-solido-masivo/tasks.md`. Su documentación de uso vivirá en `scripts/lab/README.md` una vez creado ese script.
 
 ## Mapa del proyecto
 

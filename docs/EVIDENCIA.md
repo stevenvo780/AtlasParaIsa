@@ -436,3 +436,36 @@ Lectura: la comida satura (> 90 % de celdas con `food > 0,3`) en el **día 7**; 
 - Mediana de población cae a **~12–13 en los días 15–17** (ola de senescencia); **3/14 réplicas (21 %) colapsan a población 2** (solo S e I, protegidos) antes del día 25; el resto se recupera con nacimientos de generaciones posteriores y vuelve a 32 hacia el día 25.
 - **496 muertes acumuladas: 494 senescencia, 2 deshidratación, 0 hambre, 0 frío** → el corte de edad era el 99,6 % de la mortalidad; hambre/sed/frío están bien gestionados por la IA.
 - Validez: las 14 réplicas arrancaron sincronizadas a las 09:57 antes de que aterrizara ningún cambio de reglas en la rama; las 2 excluidas corrieron contra un estado intermedio del merge (lección: el laboratorio debe pinnear un worktree, no el árbol compartido).
+
+### Despliegue (11:19, commit `835f3d5`)
+
+Tras integrar y calibrar las 4 leyes del motor (senescencia, capacidad de carga + agua en cuencas, elección de pareja, persistencia; ver `docs/REGLAS.md#parámetros-del-mundo-srcworldparamsts-sprint-2026-09-19`) con el fallback analítico de `research.md` (Ruling R14 del ledger: sin barrido T031 por el límite de tiempo del evento), se validó una réplica de laboratorio con los defaults finales y se desplegó el mundo nuevo en producción.
+
+**Réplica de verificación con los defaults calibrados desplegados** (`scripts/lab/replica.ts`, semilla 4821, 1 día, SHA `835f3d5`, fichero `dia-001.json`; params = exactamente `DEFAULT_PARAMS` de `src/world/params.ts`): población 16 → 17 (1 nacimiento), **0 muertes de cualquier causa**, 16/16 fundadores vivos, 2 generaciones vivas, Gini de recursos por región = 0,2307, fracción de celdas con `food > 0,1` = **93,65 %**, distancia media a agua potable = 3,12 celdas, p50 = 3,57 ms/tick, p95 = 23,11 ms/tick.
+
+**Cifras públicas medidas en el mundo desplegado (~11:19–11:20)** — reportadas por el orquestador del despliegue; a diferencia de las cifras de laboratorio de arriba, no pude re-verificarlas de forma independiente contra un artefacto o log de este árbol (nota de transparencia, no una objeción a la cifra):
+- Login: 0,39 s. `/api/world`: 0,89 s, payload 363 KiB.
+- `tickHz`: 9,91 (objetivo 10 Hz). `p95StepMs`: 39,6 ms (presupuesto constitucional < 50 ms).
+- Índice de diversidad (SC-003, medición puntual del mundo público, no mediana de réplicas): 0,60.
+- Celdas con `food > 0,3` en el mundo público: 772/1120 (68,9 %) al día 1 — umbral distinto (0,3) del `fraccionComida` de la réplica de laboratorio (umbral 0,1 por defecto en `fraccionCeldasConComida`), ambas cifras son reales pero no comparables directamente entre sí.
+- CPU del proceso servidor: 27 %. Nota: horas después, con el laboratorio corriendo en paralelo y 18–30 habitantes, se observó hasta 37 % de CPU (carga y momento distintos, no necesariamente una contradicción).
+
+**Comparación con la línea de partida ya confirmada arriba** (`aeada2e`/`10ac5c1`/`027c0e9`):
+
+| Métrica | Antes | Producción tras el sprint |
+|---|---|---|
+| `/api/world` (servidor con 1,5 h de actividad) | **85 s** (event loop saturado, cliente aborta a 10 s) | **0,89 s** (363 KiB) |
+| Causa de muerte dominante | 494/496 (99,6 %) por corte incondicional de edad | riesgo de senescencia gradual; 0 muertes día 1 en la réplica de verificación |
+| Celdas con comida | 100 % saturadas (`t=1251`, sin capacidad de carga) | 68,9 % (`food>0,3`, mundo público) / 93,65 % (`food>0,1`, réplica de laboratorio) |
+| Regiones sin agua superficial (SC-004) | 0,0 %–0,8 % (medido en `sc004-antes-recursos.md`) | fixture de 4 chunks con `cuencas=0,4`: **75 %** de regiones secas, distancia media 15–16 celdas (antes: 0 %/3,92) — `.superpowers/sdd/tasks/T035-report.md`; el re-muestreo con la metodología completa de 4 semillas × 10 días de `sc004-antes-recursos.md` queda pendiente post-evento |
+
+### Pendiente post-evento
+
+| Ítem | Qué falta | Por qué quedó pendiente |
+|---|---|---|
+| **T031** | Barrido de calibración con la rejilla analítica de `research.md` (senescencia: `riesgoSenescenciaDiario=0,04/0,08 × riesgoSenescenciaPendiente=6/10 × cuidadoReduceRiesgo=0,6/0,8 × senescenciaInicioFraccion=0,75/0,9`, 16 combinaciones × 8 réplicas × 25 días; más un barrido de entorno en paralelo). | Descartado por el deadline del evento (Ruling R14 del ledger); se desplegó el fallback analítico en su lugar. |
+| **T032** | Barrido largo de confirmación: 16 réplicas × 25 días con los defaults finales, verificando ≥3 generaciones vivas y ninguna extinción (SC-011). | Programado para correr en segundo plano tras el evento, sin bloquear el despliegue. |
+| **T036(h)** | Dieta del `state`: sacar `experiences`/`trust` de cada persona del broadcast general (servirlos bajo demanda al abrir el inspector) y recortar `events` a los últimos 40, para bajar de ~576,6 KiB a <120 KiB con cámara móvil 12×8 a t=8000. | No se llegó a implementar en la ventana del sprint (`.superpowers/sdd/tasks/T036-report.md`, sección «(h) PENDIENTE»). |
+| **T019 (hallazgos diferidos)** | Normalizar la entropía del índice de diversidad por el número de categorías realmente observadas (`log(ACTIONS.length)` en vez de un denominador fijo); revisar si los pesos por grupo de acciones son una decisión deliberada o accidental. | Quedaron abiertos como "importante" en la revisión de T019; no se amplió el alcance de esa tarea. |
+| **T022 (menores del ledger)** | Copias `.sqlite` huérfanas si `gzip` falla a mitad de proceso; `RETENCION=0` borraría todas las copias sin guarda; el test de retención no distingue por `mtime` real; la retención es por número de copias (48) y no por espacio en disco; faltan `RandomizedDelaySec`/`After=network.target` en el timer systemd. | Detalles de robustez pospuestos tras verificar el funcionamiento del script base de respaldo. |
+| **T043 (checklist de publicación, ninguno de los 4 puntos ejecutado)** | (1) `CARTA_PROXY_IP` sin fijar: el limitador de login por `X-Forwarded-For` (T023) queda inactivo tras el proxy Caddy. (2) `data/access.scrypt` no existe: la contraseña sigue en texto plano en `/proc/<pid>/environ` vía `CARTA_PASSWORD`. (3) El timer systemd de respaldo de T022 está creado pero no activado (`systemctl --user enable --now atlas-respaldo.timer`). (4) `CARTA_PARAMS` no fija `persistencia.ventanaEventosTicks`: la base de datos de producción sigue sin poda (default `0`). | Checklist operativo de infraestructura del host, pendiente de ejecución por Steven. |

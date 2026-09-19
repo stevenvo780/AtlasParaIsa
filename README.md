@@ -39,7 +39,7 @@ El mismo día de la revisión de arriba se corrigieron y calibraron las 4 leyes 
 | Causa de muerte dominante | 494/496 (99,6 %) por corte incondicional de edad | riesgo de senescencia real; 0 muertes el día 1 en la réplica de verificación |
 | Celdas con comida | 100 % saturadas (`t=1251`, sin capacidad de carga) | 68,9 % con `food>0,3` (mundo público, día 1) / 93,65 % con `food>0,1` (réplica de laboratorio, semilla 4821) |
 
-Quedan pendientes post-evento: los barridos de calibración T031/T032, la dieta del `state` para móvil (T036h, hoy ~576,6 KiB a t=8000) y el checklist de publicación T043 (`CARTA_PROXY_IP`, `data/access.scrypt`, activar el timer de respaldo, abrir la ventana de poda con `CARTA_PARAMS`). Detalle completo en [docs/EVIDENCIA.md](docs/EVIDENCIA.md).
+T036(h) (dieta del `state`, commit `4bc6d96`) bajó el mensaje del cliente de 295,3 a 183,4 KiB con cámara móvil (−38 %) y de 591,9 a 409,4 KiB con cámara completa (−31 %, `t=8000`, 32 habitantes), sin llegar a las metas de 120/250 KiB: `technology` (recetas + items) y `tiles` con cámara completa siguen viajando enteros. Quedan pendientes post-evento: los barridos de calibración T031/T032, seguir la dieta del `state` hasta las metas, y el checklist de publicación T043 (`CARTA_PROXY_IP`, `data/access.scrypt`, activar el timer de respaldo, abrir la ventana de poda con `CARTA_PARAMS`). Detalle completo en [docs/EVIDENCIA.md](docs/EVIDENCIA.md).
 
 ## Arrancar en local
 

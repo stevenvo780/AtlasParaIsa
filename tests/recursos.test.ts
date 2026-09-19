@@ -5,6 +5,7 @@ import { createWorld, ecology, stepWorld, TICKS_PER_DAY, type World } from '../s
 import { parseParams, type WorldParams } from '../src/world/params.js';
 import { CHUNK_SIZE, generateChunk } from '../src/world/terrain.js';
 import { ESTADISTICAS_CARAS_CADA_TICKS, distanciaMediaAgua, fraccionCeldasConComida, giniRecursosPorRegion, worldStatistics } from '../src/world/statistics.js';
+import { regionesSinAgua } from '../src/world/agua.js';
 
 const tile = (x: number, y: number, food: number, changes: Partial<Tile> = {}): Tile => ({ x, y, terrain: 'meadow', moisture: 0, vegetation: 0, food, ...changes });
 
@@ -148,13 +149,19 @@ test('resource statistics are pure and match hand-calculated examples', () => {
   assert.equal(giniRecursosPorRegion([]), 0); assert.equal(giniRecursosPorRegion([tile(0, 0, 0), tile(16, 0, 0)]), 0);
   const food = [tile(0, 0, 0.2), tile(1, 0, 0.1), tile(2, 0, 0.10001), tile(3, 0, 1, { terrain: 'water' })];
   assert.equal(fraccionCeldasConComida(food), 2 / 3);
+  // R1 (SC-004 parte 3, hallazgo T041): la fuente del BFS es SOLO agua potable (`drinkingWater > 0`),
+  // nunca `terrain === 'water'` (el mar). La fuente de la rejilla es (0,0) con agua potable, no mar.
   const grid: Tile[] = [];
-  for (let y = 0; y < 3; y++) for (let x = 0; x < 3; x++) grid.push(tile(x, y, 0, x === 0 && y === 0 ? { terrain: 'water' } : {}));
-  assert.equal(distanciaMediaAgua(grid), 18 / 8);
+  for (let y = 0; y < 3; y++) for (let x = 0; x < 3; x++) grid.push(tile(x, y, 0, x === 0 && y === 0 ? { drinkingWater: 0.5 } : {}));
+  assert.equal(distanciaMediaAgua(grid), 18 / 9);
   assert.equal(distanciaMediaAgua([tile(0, 0, 0), tile(1, 0, 0)]), -1);
   assert.equal(distanciaMediaAgua([]), -1);
   // Celdas negativas y aisladas: el empaquetado entero de coordenadas no puede colisionar ni perder islas.
-  assert.equal(distanciaMediaAgua([tile(-1, -1, 0, { terrain: 'water' }), tile(-1, -2, 0), tile(500, 500, 0)]), 1);
+  assert.equal(distanciaMediaAgua([tile(-1, -1, 0, { drinkingWater: 0.5 }), tile(-1, -2, 0), tile(500, 500, 0)]), 0.5);
+  // El mar (terrain 'water') NUNCA es fuente, aunque sea la única tesela de "agua" en el mundo: sin
+  // ninguna tesela con `drinkingWater > 0`, el centinela es -1 — el hallazgo R1 exacto (mundo con
+  // solo mar no debe dar una distancia finita, y `regionesSinAgua` debe marcar la región como seca).
+  assert.equal(distanciaMediaAgua([tile(0, 0, 0, { terrain: 'water' }), tile(1, 0, 0)]), -1);
   assert.deepStrictEqual(uniform, [tile(0, 0, 1), tile(16, 0, 1)]);
 });
 
@@ -176,7 +183,8 @@ function giniStrings(tiles: readonly Tile[]): number {
 function distanceStrings(tiles: readonly Tile[]): number {
   const byPosition = new Map(tiles.map(t => [`${t.x},${t.y}`, t])), distances = new Map<string, number>();
   const queue: [number, number][] = [];
-  for (const t of tiles) if (t.terrain === 'water' || (t.drinkingWater ?? 0) > 0) { distances.set(`${t.x},${t.y}`, 0); queue.push([t.x, t.y]); }
+  // R1: misma corrección que `distanciaMediaAgua` — solo agua potable, nunca el mar.
+  for (const t of tiles) if ((t.drinkingWater ?? 0) > 0) { distances.set(`${t.x},${t.y}`, 0); queue.push([t.x, t.y]); }
   if (queue.length === 0) return -1;
   for (let head = 0; head < queue.length; head++) {
     const [x, y] = queue[head]!, distance = distances.get(`${x},${y}`)!;
@@ -216,4 +224,32 @@ test('resource statistics are memoized per tick and the expensive ones refresh o
   const refrescada = worldStatistics(world);
   assert.equal(refrescada.statsTick, ESTADISTICAS_CARAS_CADA_TICKS);
   assert.equal(refrescada.fraccionCeldasConComida, 0);
+});
+
+test('worldStatistics cablea regionesSinAgua (R1, SC-004 parte 2) y coincide con la función de agua.ts', () => {
+  const world = createWorld(51926);
+  const stats = worldStatistics(world);
+  assert.equal(typeof stats.regionesSinAgua, 'number');
+  assert.equal(stats.regionesSinAgua, regionesSinAgua(world.tiles), 'worldStatistics debe usar la MISMA función que agua.ts, no una copia');
+});
+
+// R1 (brief): «un mundo con solo mar da distancia = centinela y regionesSinAgua = 1; con una
+// charca la distancia es la de la charca». Un mundo "solo mar" en el sentido de SC-004 es tierra
+// sin NINGUNA agua potable (el mar en sí nunca es fuente, ver arriba): ambas métricas deben
+// coincidir en marcarlo como seco.
+test('R1 (SC-004): un mundo con solo mar (sin agua potable) da distanciaMediaAgua = -1 y regionesSinAgua = 1; con una charca, la distancia es la distancia real a la charca', () => {
+  // Franja de tierra de 5x1 junto a mar: el mar NUNCA debe contar como fuente potable.
+  const soloMar: Tile[] = [
+    ...Array.from({ length: 5 }, (_, x) => tile(x, 0, 0.2, { drinkingWater: 0 })),
+    ...Array.from({ length: 3 }, (_, x) => tile(5 + x, 0, 0, { terrain: 'water', biome: 'ocean', drinkingWater: 0 })),
+  ];
+  assert.equal(distanciaMediaAgua(soloMar), -1, 'sin ninguna tesela con agua potable, el mar no debe hacer de fuente');
+  assert.equal(regionesSinAgua(soloMar), 1, 'la única región con tierra no tiene agua potable: 100% seca');
+
+  // Misma franja, con una charca (drinkingWater > 0) en el extremo x=4: ahora sí hay fuente, y la
+  // distancia media debe ser la distancia real (BFS) hasta esa charca, no al mar contiguo.
+  const conCharca: Tile[] = soloMar.map(t => t.x === 4 && t.terrain !== 'water' ? { ...t, drinkingWater: 0.5, feature: 'pool' as const } : t);
+  // Distancias Manhattan desde x=0..4 (tierra) hasta la charca en x=4: 4,3,2,1,0 → media 2.
+  assert.equal(distanciaMediaAgua(conCharca), 2, 'la distancia debe ser la BFS real hasta la charca, no un centinela ni el mar');
+  assert.equal(regionesSinAgua(conCharca), 0, 'con la charca, la región deja de estar seca');
 });

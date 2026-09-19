@@ -78,7 +78,16 @@ export interface CommunityView { id: string; name: string; x: number; y: number;
 export interface WorldSample { tick: number; population: number; energy: number; hunger: number; fatigue: number; thirst: number; discoveries: number; settlements: number; cooperation: number; births: number; }
 export interface WorldStats { population: number; meanEnergy: number; meanHunger: number; meanFatigue: number; meanThirst: number; materials: { wood: number; stone: number }; actions: Record<string, number>; biomes: Record<string, number>; features: Record<string, number>; totals: Record<string, number>; generations: Record<string, number>; history: WorldSample[]; scope: 'active-regions'; wildlife: Record<string, number>; freshWater: number; cultivatedTiles: number; trailTiles: number; animalDynamics?: AnimalDynamics; structures?: Record<string, number>; blueprints?: number; inventionDynamics?: InventionDynamics;
   /** T019/T036(e): diversidad de conducta y de oficios de la población viva (0..1 cada una). */
-  diversidad?: { conducta: number; oficios: number; total: number }; }
+  diversidad?: { conducta: number; oficios: number; total: number };
+  /** R1 (SC-004, T035/T036e): métricas de recursos/agua declaradas para que crucen el tipo del
+   * cable (antes viajaban en runtime vía WorldStatsRecursos pero eran invisibles al cliente). */
+  giniRecursosPorRegion?: number; fraccionCeldasConComida?: number;
+  /** Distancia BFS media (celdas) desde tierra cargada hasta agua POTABLE conectada; centinela
+   * `-1` sin ninguna fuente potable en las celdas cargadas (nunca cuenta el mar). SC-004 parte 3. */
+  distanciaMediaAgua?: number;
+  /** Fracción [0,1] de regiones con tierra sin ninguna celda de agua potable superficial; las
+   * regiones 100% océano no cuentan. SC-004 parte 2 (objetivo ≥ 0,30). */
+  regionesSinAgua?: number; }
 /** `tickHz`: ritmo real medido en reloj de pared sobre los últimos pasos, no el ritmo pedido. */
 export interface RuntimeStats { stepMs: number; p95StepMs: number; saveMs: number; projectionMs: number; snapshotBytes: number; activeTiles: number; processRssMiB: number; tickHz: number; }
 export type GestureKind = 'plant' | 'invite' | 'remember' | 'command';

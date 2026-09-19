@@ -41,13 +41,36 @@ function json(res: ServerResponse, status: number, data: unknown) {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(data));
 }
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
-export function loginKey(remoteAddress: string | undefined, xff: string | string[] | undefined): string {
-  if (xff !== undefined && remoteAddress !== undefined && LOOPBACK.has(remoteAddress)) {
-    const head = Array.isArray(xff) ? xff[0] : xff.split(',')[0];
-    const candidate = head?.trim();
+// El despliegue real (atlas-servidor) escucha en la IP de malla (HOST=100.64.0.1) y el peer
+// que ve el socket es el Caddy del VPS por la malla (100.64.0.11), NO loopback: por eso el
+// conjunto de proxies de confianza es configurable con CARTA_PROXY_IP (lista separada por
+// comas), y no solo loopback. Ver hallazgo C7 / revisión T023.
+export function trustedProxiesFromEnv(env: NodeJS.ProcessEnv = process.env): ReadonlySet<string> {
+  const extra = (env.CARTA_PROXY_IP ?? '').split(',').map(s => s.trim()).filter(Boolean);
+  return extra.length ? new Set([...LOOPBACK, ...extra]) : LOOPBACK;
+}
+// El último token de X-Forwarded-For es el que añade el proxy de confianza más cercano
+// (asumiendo que AÑADE, no reemplaza, la cadena); el primer token lo controla el cliente y
+// no debe usarse como clave del limitador (permitiría evadirlo rotando el valor).
+function lastForwardedFor(xff: string | string[]): string | undefined {
+  const raw = Array.isArray(xff) ? xff.join(',') : xff;
+  const parts = raw.split(',');
+  return parts[parts.length - 1]?.trim() || undefined;
+}
+export function loginKey(remoteAddress: string | undefined, xff: string | string[] | undefined, trusted: ReadonlySet<string> = LOOPBACK): string {
+  if (xff !== undefined && remoteAddress !== undefined && trusted.has(remoteAddress)) {
+    const candidate = lastForwardedFor(xff);
     if (candidate && isIP(candidate) !== 0) return candidate;
   }
   return remoteAddress ?? 'local';
+}
+export function rate(map: Map<string, { count: number; reset: number }>, key: string, max: number, interval: number) {
+  const now = Date.now();
+  for (const [k, v] of map) if (v.reset <= now) map.delete(k);
+  const row = map.get(key) ?? { count: 0, reset: now + interval };
+  if (map.size >= 2048 && !map.has(key)) throw new HttpError(429, 'Demasiadas solicitudes. Intenta más tarde.');
+  row.count++; map.set(key, row);
+  if (row.count > max) throw new HttpError(429, 'Espera un momento antes de intentarlo de nuevo.');
 }
 export function createApp(options: AppOptions) {
   const { store } = options;
@@ -71,6 +94,7 @@ export function createApp(options: AppOptions) {
   const loginAttempts = new Map<string, { count: number; reset: number }>();
   const gestureAttempts = new Map<string, { count: number; reset: number }>();
   const loginGlobal = new Map<string, { count: number; reset: number }>();
+  const trustedProxies = trustedProxiesFromEnv();
   const ws = new WebSocketServer({ noServer: true, maxPayload: 4096, perMessageDeflate: false });
   const staticDir = resolve(options.staticDir ?? 'dist/client');
   const context = store.context;
@@ -88,14 +112,6 @@ export function createApp(options: AppOptions) {
   }
   function checkOrigin(req: IncomingMessage) {
     if (req.headers.origin !== origin) throw new HttpError(403, 'Origen no autorizado.');
-  }
-  function rate(map: Map<string, {count:number;reset:number}>, key: string, max: number, interval: number) {
-    const now = Date.now();
-    for (const [k, v] of map) if (v.reset <= now) map.delete(k);
-    const row = map.get(key) ?? { count: 0, reset: now + interval };
-    if (map.size >= 2048 && !map.has(key)) throw new HttpError(429, 'Demasiadas solicitudes. Intenta más tarde.');
-    row.count++; map.set(key, row);
-    if (row.count > max) throw new HttpError(429, 'Espera un momento antes de intentarlo de nuevo.');
   }
   function send(socket: WebSocket, message: ServerMessage) {
     if (socket.readyState !== WebSocket.OPEN) return;
@@ -197,8 +213,12 @@ export function createApp(options: AppOptions) {
       }
       if (req.method === 'POST') checkOrigin(req);
       if (req.method === 'POST' && url.pathname === '/api/login') {
-        rate(loginAttempts, loginKey(req.socket.remoteAddress, req.headers['x-forwarded-for']), 6, 60_000);
-        rate(loginGlobal, '*', 60, 60_000);
+        rate(loginAttempts, loginKey(req.socket.remoteAddress, req.headers['x-forwarded-for'], trustedProxies), 6, 60_000);
+        // Cortafuegos ante una avalancha real, no un segundo límite por-persona: con el cupo
+        // por clave (6/60s) ya aplicado arriba, 600/60s solo actúa si hay ~100 claves distintas
+        // atacando a la vez. Un umbral bajo (p. ej. 60) repetía el daño de C7: cualquier tercero
+        // sin sesión bloqueaba a la dueña de la carta.
+        rate(loginGlobal, '*', 600, 60_000);
         const value = await body(req) as { password?: unknown } | null;
         if (!value || typeof value.password !== 'string' || !verifyPassword(value.password)) throw new HttpError(401, 'La contraseña no coincide.');
         const oldHash = sessionHash(req); if (oldHash) store.revoke(oldHash);

@@ -272,10 +272,10 @@ El módulo `src/world/params.ts` introduce la interfaz `WorldParams` para parame
 
 | Parámetro | Default (calibrado 2026-09-19) | Rango | Ley que controla | Tarea |
 | :--- | :--- | :--- | :--- | :--- |
-| `cuerpo.longevidadBaseDias` | 11 | [1, 60] | Longevidad base para el cálculo de edad máxima | T001 |
+| `cuerpo.longevidadBaseDias` | 11 | [4, 60] | Longevidad base para el cálculo de edad máxima | T001 · R3 |
 | `cuerpo.longevidadPorResiliencia` | 4 | [0, 20] | Aumento de longevidad por rasgo de resiliencia | T001 |
-| `cuerpo.longevidadPorActividad` | 1 | [0, 20] | Reducción de longevidad por actividad acumulada | T001 |
-| `cuerpo.senescenciaInicioFraccion` | 0.75 | [0, 1] | Fracción de `maximumAge` donde arranca el desgaste y el riesgo de senescencia | T010 |
+| `cuerpo.longevidadPorActividad` | 1 | [0, 8] | Reducción de longevidad por actividad acumulada | T001 · R3 |
+| `cuerpo.senescenciaInicioFraccion` | 0.75 | [0.25, 0.99] | Fracción de `maximumAge` donde arranca el desgaste y el riesgo de senescencia | T010 · R3 |
 | `cuerpo.riesgoSenescenciaDiario` | 0.04 | [0, 1] | Tasa base diaria del hazard de mortalidad por senescencia | T010 |
 | `cuerpo.riesgoSenescenciaPendiente` | 10 | [0, 50] | Pendiente Gompertz de aceleración del riesgo de senescencia | T010 |
 | `cuerpo.cuidadoReduceRiesgo` | 0.6 | [0, 1] | Fracción de riesgo/desgaste mitigable por salud y vitalidad plenas | T010 |
@@ -293,6 +293,20 @@ El módulo `src/world/params.ts` introduce la interfaz `WorldParams` para parame
 | `persistencia.cadaTicks` | 1 (producción fija 20 vía `main.ts`) | [1, 10000] | Cadencia en ticks para el guardado periódico en disco | T021 |
 | `persistencia.ventanaEventosTicks` | 0 (sin poda; abrir con `CARTA_PARAMS`) | [0, 1000000] | Ventana de retención temporal para la poda de eventos y chunks | T021 |
 | `agua.cuencas` | 0.4 | [0.05, 1] | Umbral de ruido de cuenca bajo el cual una tesela conserva su agua potable de origen | T035 |
+
+> **Rangos de longevidad (revisión de R3, 2026-09-19).** Los tres rangos marcados «R3» se estrecharon respecto de
+> T001 porque los anteriores declaraban legales valores que el motor no podía correr. La ley de T010 exige
+> `madurez < inicio de vejez < edad máxima` para CUALQUIER genoma, y esa condición depende del genoma: con
+> `longevidadBaseDias=1` rompía el 57 % de 2000 genomas uniformes, con 2 el 16 %, con 3 el 0,5 % y con 4 ninguno
+> (`localRandom`, sal «probe-r3»). La rotura no se oía al parsear sino a mitad de corrida, cuando nacía el primer
+> cuerpo desafortunado, y salía del camino caliente (`bodilyDamage`, `bodyAndAction`, `projectWorld`): una réplica
+> de laboratorio moría tras horas y en el servidor público un `CARTA_PARAMS` así habría matado el bucle de tick.
+> Un rango por clave no puede expresarlo todo —`longevidadBaseDias=4` y `longevidadPorActividad=8` son legales por
+> separado y juntos dan una edad máxima negativa—, así que `parseParams` y `setParams` llaman además a
+> `assertLongevityLaw`, que evalúa la ley en las cuatro esquinas de (resiliencia, actividad) ∈ {0,1}²: las tres
+> edades son afines en ese par antes de redondear, así que las cuatro esquinas acotan todo el interior. Cuesta
+> 201 ns por llamada (el 0,02 % del presupuesto de 50 ms por paso del gobernador) y se paga al fijar los params,
+> no dentro del tick. La guarda de `demographicTraits` sigue en su sitio, degradada a aserción de estado imposible.
 
 ### Leyes nuevas (calibradas 2026-09-19, fallback analítico; barrido T031 pendiente post-evento)
 

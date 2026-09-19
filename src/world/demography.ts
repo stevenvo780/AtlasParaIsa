@@ -1,8 +1,11 @@
 import type { DemographicActor, DemographicDeathCause, DemographicEnvironment, DemographicState, DemographicTraits, DemographicTransition, LongevityLaw, SenescenceLaw } from '../shared/demography.js';
+import { DEMOGRAPHY_TICKS_PER_DAY, longevityAges } from '../shared/demography.js';
 import { localRandom } from './genetics.js';
 import { DEFAULT_PARAMS } from './params.js';
 
-export const DEMOGRAPHY_TICKS_PER_DAY = 2400;
+/** Reexportado desde `shared/demography.ts`, donde vive junto a la geometría de la ley de
+ * longevidad para que `params.ts` pueda validarla sin importar el motor. */
+export { DEMOGRAPHY_TICKS_PER_DAY };
 export const MAX_DEMOGRAPHY_DT = DEMOGRAPHY_TICKS_PER_DAY;
 export const PROTECTED_HEALTH_FLOOR = 0.05;
 export const PROTECTED_VITALITY_FLOOR = 0.08;
@@ -33,13 +36,12 @@ export function demographicTraits(genome: { alleles: readonly number[] }, longev
     .every(value => Number.isFinite(value) && value >= 0)) throw new RangeError('Ley de longevidad inválida.');
   const resilience = (genome.alleles[8]! + genome.alleles[9]!) / 2;
   const activity = (genome.alleles[4]! + genome.alleles[5]!) / 2;
-  const maximumAge = Math.round((longevity.longevidadBaseDias + resilience * longevity.longevidadPorResiliencia
-    - activity * longevity.longevidadPorActividad) * DEMOGRAPHY_TICKS_PER_DAY);
-  const maturityAge = Math.round((1.8 + resilience * 0.3 + activity * 0.1) * DEMOGRAPHY_TICKS_PER_DAY);
-  const senescenceStart = Math.round(maximumAge * longevity.senescenciaInicioFraccion);
-  // `PARAM_RANGES` admite combinaciones (base 1 con pendiente de actividad 20, fracción 0 o 1) que
-  // rompen el orden madurez < vejez < edad máxima que `updateDemography` exige. Romper aquí nombra
-  // la ley; dejarlo pasar se oiría más tarde como un «estado demográfico inválido» sin causa.
+  const { maturityAge, senescenceStart, maximumAge } = longevityAges(resilience, activity, longevity);
+  // Aserción de estado imposible, NO la primera línea de defensa (revisión de R3): la condición
+  // depende del genoma, así que aquí no rompería al fijar la ley sino cuando naciera el primer
+  // cuerpo desafortunado —a mitad de una réplica de horas, o dentro del bucle de tick del servidor.
+  // Quien fija los params (`parseParams`/`setParams`, vía `assertLongevityLaw`) ya rechazó toda ley
+  // que pudiera llegar hasta aquí; si aun así llega, se oye en vez de seguir con edades absurdas.
   if (!(maturityAge < senescenceStart && senescenceStart < maximumAge)) {
     throw new RangeError(`Ley de longevidad degenerada: madurez ${maturityAge}, inicio de vejez ${senescenceStart}, edad máxima ${maximumAge} ticks. Revisa cuerpo.longevidad* y cuerpo.senescenciaInicioFraccion.`);
   }

@@ -5,9 +5,9 @@ import type { DemographicActor, DemographicEnvironment } from '../src/shared/dem
 import { demographicTraits, DEMOGRAPHY_TICKS_PER_DAY as DAY, initialDemography, MAX_DEMOGRAPHY_DT,
   PROTECTED_HEALTH_FLOOR, PROTECTED_VITALITY_FLOOR, updateDemography } from '../src/world/demography.js';
 import { assertGenome, founderGenome, inheritGenome, localRandom, type Genome } from '../src/world/genetics.js';
-import { createWorld, stepWorld, type Person } from '../src/world/index.js';
+import { createWorld, projectWorld, stepWorld, type Person } from '../src/world/index.js';
 import { closeKin } from '../src/world/family.js';
-import { DEFAULT_PARAMS, parseParams, type WorldParams } from '../src/world/params.js';
+import { DEFAULT_PARAMS, PARAM_RANGES, parseParams, type WorldParams } from '../src/world/params.js';
 
 const safe: DemographicEnvironment = { exposure: 0, shelter: 0, protected: false, seed: 431, tick: 0, senescence: DEFAULT_PARAMS.cuerpo };
 function genome(resilience = 0.5, activity = 0.5, id = 'founder'): Genome {
@@ -321,7 +321,26 @@ test('R3: cuerpo.longevidadBaseDias llega hasta el mundo vivo y lo cambia', cont
 });
 
 test('R3: senescenciaInicioFraccion llega hasta el mundo vivo y lo cambia', context => {
-  const { digests } = runDays(3, parseParams('cuerpo.senescenciaInicioFraccion=0.2'));
+  const { digests } = runDays(3, parseParams('cuerpo.senescenciaInicioFraccion=0.25'));
   assert.notDeepEqual(digests, CONTROL_51926, 'adelantar la vejez no cambió el mundo: el param sigue sin lector');
-  context.diagnostic(JSON.stringify({ seed: 51926, dias: 3, params: 'cuerpo.senescenciaInicioFraccion=0.2', digests }));
+  context.diagnostic(JSON.stringify({ seed: 51926, dias: 3, params: 'cuerpo.senescenciaInicioFraccion=0.25', digests }));
+});
+
+/** Revisión de R3: el escenario que reventaba. `demographicTraits` lanzaba `RangeError` desde el
+ * camino caliente (`bodilyDamage`, `bodyAndAction`, `projectWorld`, `advancePopulation`) cuando le
+ * tocaba un genoma desafortunado, así que una ley «legal» tiraba la corrida a mitad, no al parsear.
+ * Contrato nuevo: todo valor que `PARAM_RANGES` acepta da un mundo que se crea, avanza y se proyecta. */
+test('R3: los extremos legales de la ley de longevidad dan mundos corribles (240 pasos + proyeccion)', context => {
+  const medido: Record<string, number> = {};
+  for (const clave of ['cuerpo.longevidadBaseDias', 'cuerpo.longevidadPorResiliencia',
+    'cuerpo.longevidadPorActividad', 'cuerpo.senescenciaInicioFraccion'] as const) {
+    for (const valor of PARAM_RANGES[clave]!) {
+      const spec = `${clave}=${valor}`;
+      const world = createWorld(51926, parseParams(spec));
+      for (let tick = 0; tick < 240; tick++) stepWorld(world);
+      assert.ok(projectWorld(world).people.length > 0, `${spec} dejó el mundo sin nadie que proyectar`);
+      medido[spec] = world.people.length;
+    }
+  }
+  context.diagnostic(JSON.stringify({ pasos: 240, poblacionFinal: medido }));
 });

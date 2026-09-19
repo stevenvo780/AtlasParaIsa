@@ -6,6 +6,8 @@
  * añaden campos a `World`, así se evita migrar snapshots guardados).
  */
 
+import { DEMOGRAPHY_TICKS_PER_DAY, longevityAges, type LongevityLaw } from '../shared/demography.js';
+
 export interface WorldParams {
   cuerpo: {
     longevidadBaseDias: number;
@@ -49,10 +51,17 @@ export const DEFAULT_PARAMS: WorldParams = deepFreeze(RAW_DEFAULTS);
 
 /** Rango [mínimo, máximo] permitido por clave punteada. Usado por `parseParams`. */
 export const PARAM_RANGES: Record<string, [number, number]> = {
-  'cuerpo.longevidadBaseDias': [1, 60],
+  // Longevidad (revisión de R3): los mínimos/máximos son los que, CON EL RESTO DE LA LEY EN SUS
+  // DEFAULTS, dan un mundo corrible para CUALQUIER genoma. Medido con 2000 genomas uniformes
+  // (`localRandom`, sal «probe-r3»): base 1 rompe el 57 %, base 2 el 16 %, base 3 el 0,5 % y base 4
+  // ninguno; con `porActividad` 20 la edad máxima de un cuerpo poco resiliente es negativa, y la
+  // fracción 0 o 1 colapsa la vejez. Los rangos anteriores ([1,60], [0,20], [0,1]) declaraban legal
+  // todo eso y la rotura no se oía al parsear, sino al nacer el primer cuerpo desafortunado.
+  // Las combinaciones CRUZADAS no caben en un rango por clave: las comprueba `assertLongevityLaw`.
+  'cuerpo.longevidadBaseDias': [4, 60],
   'cuerpo.longevidadPorResiliencia': [0, 20],
-  'cuerpo.longevidadPorActividad': [0, 20],
-  'cuerpo.senescenciaInicioFraccion': [0, 1],
+  'cuerpo.longevidadPorActividad': [0, 8],
+  'cuerpo.senescenciaInicioFraccion': [0.25, 0.99],
   'cuerpo.riesgoSenescenciaDiario': [0, 1],
   'cuerpo.riesgoSenescenciaPendiente': [0, 50],
   'cuerpo.cuidadoReduceRiesgo': [0, 1],
@@ -71,6 +80,44 @@ export const PARAM_RANGES: Record<string, [number, number]> = {
   'persistencia.ventanaEventosTicks': [0, 1_000_000],
   'agua.cuencas': [0.05, 1],
 };
+
+/** Holgura mínima, en ticks, entre madurez, vejez y edad máxima en las cuatro esquinas. Absorbe el
+ * redondeo: `longevityAges` redondea tres veces, así que una diferencia continua puede moverse hasta
+ * ~1,5 ticks al redondear. Exigir 4 en las esquinas garantiza el orden estricto en todo el interior. */
+const LONGEVITY_SLACK_TICKS = 4;
+const LONGEVITY_CORNERS: readonly (readonly [number, number])[] = [[0, 0], [0, 1], [1, 0], [1, 1]];
+const days = (ticks: number) => (ticks / DEMOGRAPHY_TICKS_PER_DAY).toFixed(2);
+
+/**
+ * La ley de longevidad tiene que dar un mundo corrible ANTES del primer paso (revisión de R3).
+ * `PARAM_RANGES` acota cada clave por separado, pero «madurez < vejez < edad máxima» es una
+ * condición CRUZADA entre las cuatro y ningún rango por clave puede expresarla: `base 4` es legal y
+ * `porActividad 8` también, y juntas dan una edad máxima negativa. Antes esto se oía en
+ * `demographicTraits`, es decir DENTRO del tick y sólo cuando nacía un genoma desafortunado: una
+ * réplica de laboratorio moría tras horas y el servidor público perdía el bucle de simulación. Aquí
+ * cuesta cuatro multiplicaciones y se paga una vez, al fijar los params.
+ *
+ * Basta con las cuatro esquinas de (resiliencia, actividad) ∈ {0,1}²: las tres edades son afines en
+ * ese par antes de redondear, así que su mínimo sobre el cuadrado está en una esquina.
+ */
+export function assertLongevityLaw(law: Readonly<LongevityLaw>): void {
+  // El mensaje se arma sólo al fallar: `cloneWorld` llama a `setParams` en CADA paso (app.ts:183),
+  // así que el camino feliz no debe convertir cuatro números a texto por tick.
+  const claves = () => `cuerpo.longevidadBaseDias=${law.longevidadBaseDias}, cuerpo.longevidadPorResiliencia=${law.longevidadPorResiliencia}, `
+    + `cuerpo.longevidadPorActividad=${law.longevidadPorActividad}, cuerpo.senescenciaInicioFraccion=${law.senescenciaInicioFraccion}`;
+  if (![law.longevidadBaseDias, law.longevidadPorResiliencia, law.longevidadPorActividad, law.senescenciaInicioFraccion]
+    .every(value => Number.isFinite(value) && value >= 0)) {
+    throw new Error(`Ley de longevidad inválida (${claves()}): los cuatro valores deben ser números finitos y no negativos.`);
+  }
+  for (const [resilience, activity] of LONGEVITY_CORNERS) {
+    const { maturityAge, senescenceStart, maximumAge } = longevityAges(resilience, activity, law);
+    if (maturityAge + LONGEVITY_SLACK_TICKS <= senescenceStart && senescenceStart + LONGEVITY_SLACK_TICKS <= maximumAge) continue;
+    throw new Error(`Ley de longevidad imposible (${claves()}): un cuerpo de resiliencia ${resilience} y actividad ${activity} `
+      + `maduraría a los ${days(maturityAge)} días, envejecería a los ${days(senescenceStart)} y moriría de viejo a los ${days(maximumAge)}. `
+      + 'Hace falta madurez < vejez < edad máxima para cualquier genoma: sube cuerpo.longevidadBaseDias, '
+      + 'baja cuerpo.longevidadPorActividad o sube cuerpo.senescenciaInicioFraccion.');
+  }
+}
 
 /** Aplana un objeto anidado o ya plano a pares "a.b" → valor (hoja, no objeto). */
 function flatten(value: unknown, prefix: string, out: Record<string, unknown>): void {
@@ -130,7 +177,10 @@ export function parseParams(input?: Record<string, string> | string): WorldParam
     if (value < min || value > max) throw new Error(`Valor fuera de rango para "${key}": ${value} (rango permitido [${min}, ${max}]).`);
     setPath(draft, key, value);
   }
-  return deepFreeze(draft as unknown as WorldParams);
+  const params = draft as unknown as WorldParams;
+  // Cruce de claves: el rango por clave no puede verlo, y el tick es demasiado tarde.
+  assertLongevityLaw(params.cuerpo);
+  return deepFreeze(params);
 }
 
 const worldParams = new WeakMap<object, WorldParams>();
@@ -140,7 +190,10 @@ export function paramsOf(world: object): WorldParams {
   return worldParams.get(world) ?? DEFAULT_PARAMS;
 }
 
-/** Fija los params de un mundo (o clon). Lo llaman `createWorld`/`cloneWorld` en `index.ts`. */
+/** Fija los params de un mundo (o clon). Lo llaman `createWorld`/`cloneWorld` en `index.ts` y
+ * `main.ts`, que aplica CARTA_PARAMS sobre un mundo ya creado: por eso la ley se valida también
+ * aquí y no sólo en `parseParams`. */
 export function setParams(world: object, params: WorldParams): void {
+  assertLongevityLaw(params.cuerpo);
   worldParams.set(world, params);
 }

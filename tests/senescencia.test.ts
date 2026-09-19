@@ -4,7 +4,7 @@ import type { DemographicActor, DemographicTraits, DemographicTransition, Longev
 import { demographicTraits, DEMOGRAPHY_TICKS_PER_DAY as DAY, initialDemography,
   PROTECTED_HEALTH_FLOOR, PROTECTED_VITALITY_FLOOR, SENESCENCE_WEAR_PER_DAY, updateDemography } from '../src/world/demography.js';
 import { localRandom } from '../src/world/genetics.js';
-import { DEFAULT_PARAMS } from '../src/world/params.js';
+import { assertLongevityLaw, DEFAULT_PARAMS, PARAM_RANGES, parseParams, setParams } from '../src/world/params.js';
 
 const traits = demographicTraits({ alleles: Array<number>(14).fill(0.5) });
 /** Ley de referencia de T001 (0,02 · 6 · 0,6). Las métricas miden la LEY, no los defaults del sprint:
@@ -343,14 +343,95 @@ test('R3: longevidadPorResiliencia y longevidadPorActividad son las pendientes d
     Math.round((11 + resilience * 8 - activity) * DAY));
 });
 
-/** `updateDemography` exige madurez < inicio de senescencia < edad máxima. `PARAM_RANGES` admite
- * combinaciones que rompen ese orden (base 1 con pendiente de actividad 20): el mundo debe oírse
- * romper nombrando la ley, no caerse más tarde con un «estado demográfico inválido». */
-test('R3: una ley de longevidad degenerada se oye romper y nombra su causa', () => {
+const LONGEVITY_KEYS = ['cuerpo.longevidadBaseDias', 'cuerpo.longevidadPorResiliencia',
+  'cuerpo.longevidadPorActividad', 'cuerpo.senescenciaInicioFraccion'] as const;
+
+// ── Revisión de R3: DÓNDE se valida la ley ────────────────────────────────────────────────────
+// La guarda de `demographicTraits` depende del GENOMA, así que una ley degenerada no se oía al
+// parsear sino cuando nacía el primer cuerpo desafortunado: con `cuerpo.longevidadBaseDias=3`
+// —valor que `PARAM_RANGES` aceptaba— 10 de cada 2000 genomas uniformes lanzaban `RangeError`, y la
+// excepción salía del camino caliente (index.ts `bodilyDamage`/`bodyAndAction`/`projectWorld`,
+// lineage.ts `advancePopulation`), así que una réplica de laboratorio moría tras horas de corrida y
+// el servidor público perdía el bucle de tick. La primera línea de defensa vive ahora donde no
+// cuesta la corrida: `parseParams` y `setParams`, ANTES del primer paso.
+
+test('R3: los valores que PARAM_RANGES acepta a solas dan una ley corrible para CUALQUIER genoma', context => {
+  const muestra = genomes(2000, 'rangos-legales'), rangos: Record<string, [number, number]> = {};
+  for (const clave of LONGEVITY_KEYS) {
+    const [min, max] = PARAM_RANGES[clave]!;
+    rangos[clave] = [min, max];
+    for (const valor of [min, (min + max) / 2, max]) {
+      const { cuerpo } = parseParams(`${clave}=${valor}`);
+      for (const genome of muestra) {
+        const t = demographicTraits(genome, cuerpo);
+        assert.ok(t.maturityAge < t.senescenceStart && t.senescenceStart < t.maximumAge,
+          `${clave}=${valor} rompe la ley con un genoma legal: ${JSON.stringify(t)}`);
+      }
+    }
+  }
+  context.diagnostic(JSON.stringify({ genomas: muestra.length, valoresPorClave: 3, rangos }));
+});
+
+test('R3: una ley de longevidad imposible se oye romper al fijar los params, no a mitad de corrida', () => {
+  // (a) Las trampas de UNA sola clave ya no se declaran legales: caen por rango, sin crear mundo.
+  for (const spec of ['cuerpo.longevidadBaseDias=1', 'cuerpo.longevidadBaseDias=3',
+    'cuerpo.senescenciaInicioFraccion=0', 'cuerpo.senescenciaInicioFraccion=0.05',
+    'cuerpo.senescenciaInicioFraccion=1', 'cuerpo.longevidadPorActividad=20']) {
+    assert.throws(() => parseParams(spec), /rango/i, `${spec} debería caer por rango`);
+  }
+  // (b) Pero la condición «madurez < vejez < edad máxima» es CRUZADA y ningún rango por clave puede
+  // expresarla: estas dos combinaciones son legales clave a clave y aun así no dan mundo.
+  const cruzadas = ['cuerpo.longevidadBaseDias=4,cuerpo.longevidadPorResiliencia=0,cuerpo.longevidadPorActividad=8',
+    'cuerpo.longevidadBaseDias=4,cuerpo.senescenciaInicioFraccion=0.25'];
+  for (const spec of cruzadas) {
+    for (const [clave, valor] of spec.split(',').map(par => par.split('='))) {
+      const [min, max] = PARAM_RANGES[clave!]!;
+      assert.ok(Number(valor) >= min && Number(valor) <= max, `${clave}=${valor} debería ser legal a solas`);
+    }
+    assert.throws(() => parseParams(spec), /Ley de longevidad imposible/, spec);
+  }
+  // El mensaje nombra las cuatro claves con su valor, para que el laboratorio sepa cuál mover.
+  assert.throws(() => parseParams(cruzadas[1]!), /cuerpo\.senescenciaInicioFraccion=0\.25/);
+  assert.throws(() => parseParams(cruzadas[1]!), /cuerpo\.longevidadPorResiliencia=4/);
+  // (c) `setParams` es el otro punto de entrada: `main.ts` fija CARTA_PARAMS sobre un mundo YA creado.
+  assert.throws(() => setParams({}, { ...DEFAULT_PARAMS, cuerpo: { ...DEFAULT_PARAMS.cuerpo, senescenciaInicioFraccion: 0 } }),
+    /Ley de longevidad imposible/);
+  assert.throws(() => setParams({}, { ...DEFAULT_PARAMS, cuerpo: { ...DEFAULT_PARAMS.cuerpo, longevidadBaseDias: Number.NaN } }),
+    /Ley de longevidad inválida/);
+  // (d) La guarda de `demographicTraits` sigue viva, pero degradada a aserción de estado imposible:
+  // nadie debería poder llegar hasta aquí con una ley así, y si llega se oye.
   const genome = { alleles: Array<number>(14).fill(0.5) };
+  assert.throws(() => demographicTraits(genome, { ...DEFAULT_PARAMS.cuerpo, senescenciaInicioFraccion: 0 }), /Ley de longevidad degenerada/);
   assert.throws(() => demographicTraits(genome, { ...DEFAULT_PARAMS.cuerpo, longevidadBaseDias: 1, longevidadPorResiliencia: 0, longevidadPorActividad: 20 }),
     /Ley de longevidad degenerada/);
-  assert.throws(() => demographicTraits(genome, { ...DEFAULT_PARAMS.cuerpo, senescenciaInicioFraccion: 0 }), /Ley de longevidad degenerada/);
-  assert.throws(() => demographicTraits(genome, { ...DEFAULT_PARAMS.cuerpo, senescenciaInicioFraccion: 1 }), /Ley de longevidad degenerada/);
   assert.throws(() => demographicTraits(genome, { ...DEFAULT_PARAMS.cuerpo, longevidadBaseDias: Number.NaN }), /Ley de longevidad inválida/);
+});
+
+/** La propiedad que sostiene el arreglo: si `assertLongevityLaw` acepta una ley, NINGÚN genoma la
+ * rompe después. Se comprueba con leyes cruzadas al azar dentro de `PARAM_RANGES` —las que el
+ * barrido del laboratorio combinaría—. La recíproca importa menos: rechazar de más cuesta un
+ * mensaje al arrancar, no una réplica de horas. El argumento detrás es que las tres edades son
+ * afines en (resiliencia, actividad) antes de redondear, así que las cuatro esquinas del cuadrado
+ * acotan el interior; los 4 ticks de holgura absorben el redondeo. */
+test('R3: ninguna ley aceptada al fijar los params rompe con un genoma real (400 leyes × 200 genomas)', context => {
+  const muestra = genomes(200, 'leyes-cruzadas'), random = localRandom(7, 'leyes-cruzadas');
+  const [baseMin, baseMax] = PARAM_RANGES['cuerpo.longevidadBaseDias']!;
+  const [, resilienciaMax] = PARAM_RANGES['cuerpo.longevidadPorResiliencia']!;
+  const [, actividadMax] = PARAM_RANGES['cuerpo.longevidadPorActividad']!;
+  const [fraccionMin, fraccionMax] = PARAM_RANGES['cuerpo.senescenciaInicioFraccion']!;
+  let aceptadas = 0, rechazadas = 0;
+  for (let i = 0; i < 400; i++) {
+    const law: LongevityLaw = { longevidadBaseDias: baseMin + random() * (baseMax - baseMin),
+      longevidadPorResiliencia: random() * resilienciaMax, longevidadPorActividad: random() * actividadMax,
+      senescenciaInicioFraccion: fraccionMin + random() * (fraccionMax - fraccionMin) };
+    try { assertLongevityLaw(law); } catch { rechazadas++; continue; }
+    aceptadas++;
+    for (const genome of muestra) {
+      const t = demographicTraits(genome, law);
+      assert.ok(t.maturityAge < t.senescenceStart && t.senescenceStart < t.maximumAge,
+        `una ley aceptada rompió con un genoma: ${JSON.stringify({ law, t })}`);
+    }
+  }
+  assert.ok(aceptadas > 300, `la validación rechaza de más: solo ${aceptadas} de 400 leyes aceptadas`);
+  context.diagnostic(JSON.stringify({ leyes: 400, aceptadas, rechazadas, genomas: muestra.length }));
 });

@@ -209,3 +209,24 @@ test('an explicit craft request uses an available learned process despite autono
   assert.equal(craftTechnology(host, b), false); assert.equal(b.technology.project, null);
   assertTechnology(host);
 });
+
+test('craftTechnology manufactures the recipe technologyOpportunity decided, not merely the highest-benefit known one (C2)', () => {
+  const { host, a } = scene();
+  runProgram(host, a, edge); // recipe-1: a cutting tool the actor still holds.
+  runProgram(host, a, fibre); // recipe-2: a binding tool, learned but about to be lost.
+  a.technology.items = a.technology.items.filter(item => item.recipeId !== 'recipe-2'); // The binding tool wore out; the recipe stays known.
+  a.technology.competence['recipe-1'] = { attempts: 10, successes: 10, work: 10, benefit: 50 }; // recipe-1 dominates by raw benefit/successes.
+  host.tick += 50; // Clears the 45-tick autonomous cooldown.
+  const decision = technologyOpportunity(host, a);
+  assert.equal(decision?.kind, 'craft'); assert.equal(decision?.recipeId, 'recipe-2');
+  assert.equal(decision?.reason, 'Puede reproducir una técnica aprendida para recuperar una capacidad material.');
+  // C2 itself: a caller that drops the decided recipeId (the bug in src/world/index.ts before this fix)
+  // falls back to the highest-benefit known recipe and silently crafts recipe-1 instead of recipe-2.
+  const stale = structuredClone(host), staleActor = stale.people.find(p => p.id === a.id)!;
+  craftTechnology(stale, staleActor, undefined);
+  assert.equal(staleActor.technology.project?.recipeId, 'recipe-1');
+  craftTechnology(host, a, decision?.recipeId);
+  assert.equal(a.technology.project?.recipeId, 'recipe-2'); // Not recipe-1, despite its higher benefit.
+  while (a.technology.project) { host.tick++; craftTechnology(host, a, decision?.recipeId); }
+  assert.equal(a.technology.items.at(-1)?.recipeId, 'recipe-2');
+});

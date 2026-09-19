@@ -1,8 +1,6 @@
 import type { Feature, Tile, Species } from '../shared/types.js';
 import { EcosystemKernel, type EcosystemOptions } from './ecosystem-kernel.js';
-export type { EcosystemOptions } from './ecosystem-kernel.js';
 import { initialWood } from './forest.js';
-import { DEFAULT_PARAMS } from './params.js';
 import { ruidoCuenca } from './agua.js';
 const clamp = (n: number, maximum = 1): number => Math.max(0, Math.min(maximum, n));
 const key = (x: number, y: number): string => `${x},${y}`;
@@ -16,8 +14,15 @@ function hash(seed: number, x: number, y: number, salt: number): number {
   return (n ^ (n >>> 16)) >>> 0;
 }
 
-/** New fields only: a saved zero means depleted, never permission to refill a patch. */
-export function initializeEcosystem(seed: number, tile: Tile, cuencas: number = DEFAULT_PARAMS.agua.cuencas): Tile {
+/**
+ * New fields only: a saved zero means depleted, never permission to refill a patch.
+ * `cuencas` (T035 ronda de arreglo, hallazgo crítico #2): el default es el valor NEUTRO literal
+ * `1` (nunca gatea), no `DEFAULT_PARAMS.agua.cuencas` — así un llamador que no pasa `cuencas`
+ * explícitamente conserva el comportamiento de hoy sin importar a qué se recalibre el default
+ * global. El valor real de una partida viene siempre de `paramsOf(world).agua.cuencas`, cableado
+ * en `spatial.ts`/`index.ts`.
+ */
+export function initializeEcosystem(seed: number, tile: Tile, cuencas = 1): Tile {
   const result: Tile = { ...tile };
   const newFauna = result.fauna === undefined;
   const patch = hash(seed, Math.floor(tile.x / 8), Math.floor(tile.y / 8), 1201);
@@ -87,7 +92,13 @@ function state(tile: Tile): CellState {
 
 const ecosystemKernel = new EcosystemKernel();
 
-/** Soft neighbor rule inspired by cellular automata, not an implementation of Conway or Lenia. */
+/**
+ * Soft neighbor rule inspired by cellular automata, not an implementation of Conway or Lenia.
+ * `seed`/`cuencas` (T035 ronda de arreglo, hallazgo crítico #1): igual que `initializeEcosystem`,
+ * el default `cuencas=1` nunca gatea la recarga por lluvia del kernel — bit a bit igual a hoy
+ * cuando el llamador no los pasa. El llamador real (`stepWorld` en `index.ts`) pasa `world.seed` y
+ * `paramsOf(world).agua.cuencas` para que la cuenca sea DURADERA (no se rellene con la lluvia).
+ */
 export function stepEcosystem(tiles: Tile[], tick: number, weather: 'clear' | 'rain', phase: string, updateFauna = true, options?: EcosystemOptions): void {
   if (tick % 10 !== 0) return;
   ecosystemKernel.step(tiles, tick, weather, phase, options);

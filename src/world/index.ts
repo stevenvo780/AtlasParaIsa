@@ -151,9 +151,11 @@ export function createWorld(seed = 20260905, params?: WorldParams): World {
     technology: { ...defaultTechnologyState(), water: emptyWaterLedger() }, legacy: [], retiredLegacy: [],
     demographyDynamics: { deaths: 0, causes: { starvation: 0, dehydration: 0, exposure: 0, senescence: 0 }, foodLost: 0, woodLost: 0, stoneLost: 0 },
   };
-  // Los params deben quedar fijados ANTES de generar el terreno: `activate` lee
-  // `paramsOf(world).agua.cuencas` (T035) y con `setParams` al final generaba siempre con
-  // `DEFAULT_PARAMS`, ignorando los params pedidos.
+  // T035 ronda de arreglo (hallazgo crítico #2): los params del mundo deben fijarse ANTES de
+  // activar el primer chunk — `activate()` lee `paramsOf(world).agua.cuencas` para generar las
+  // teselas, y `paramsOf` solo ve lo que haya en el WeakMap para ESTE objeto `world` en ese
+  // momento. Fijarlo al final (como antes) dejaba la región de partida siempre con el default
+  // global sin importar el `params` recibido aquí.
   setParams(world, params ?? DEFAULT_PARAMS);
   for (let cy = 0; cy < 2; cy++) for (let cx = 0; cx < 3; cx++) activate(world, cx * 16, cy * 16);
   for (const place of world.places.slice(0, 3)) {
@@ -889,7 +891,10 @@ export function stepWorld(world: World, inputs: Gesture[] = [], context: WorldCo
   world.invitations = world.invitations.filter(invitation => invitation.until > world.tick);
   world.reminders = world.reminders.filter(reminder => reminder.until > world.tick);
   ecology(world);
-  stepEcosystem(world.tiles, world.tick, world.weather, phaseAt(world.tick), false, { decaimientoFertilidad: paramsOf(world).recursos.decaimientoFertilidad });
+  // T013 (decaimiento de fertilidad) + T035 (gateo de cuenca duradero: la lluvia no rellena
+  // una tesela fuera de cuenca) viajan juntos en las mismas opciones de ecología.
+  stepEcosystem(world.tiles, world.tick, world.weather, phaseAt(world.tick), false,
+    { decaimientoFertilidad: paramsOf(world).recursos.decaimientoFertilidad, seed: world.seed, cuencas: paramsOf(world).agua.cuencas });
   stepAnimals(world,event=>addEvent(world,event));
   stepStructures(world,event=>addEvent(world,event));
   for (const person of world.people) bodyAndAction(world, person);
@@ -1225,6 +1230,8 @@ function migrateWorldState(value: unknown, context: WorldContext = {}): World {
   const originalTiles = new Map(world.tiles.map(t => [`${t.x},${t.y}`, t]));
   world.tiles = [];
   for (let cy = 0; cy < 2; cy++) for (let cx = 0; cx < 3; cx++) {
+    // T035 ronda de arreglo: coherencia con `paramsOf` (equivalente hoy a `DEFAULT_PARAMS.agua
+    // .cuencas`, ningún `World` migrado tiene params propios fijados todavía en este punto).
     const chunk = generateChunk(world.seed, cx, cy, paramsOf(world).agua.cuencas);
     const { tiles, ...meta } = chunk;
     meta.discovered = true; meta.lastTick = world.tick;

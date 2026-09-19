@@ -1,10 +1,12 @@
 import type { Feature, Tile } from '../shared/types.js';
+import { enCuenca } from './agua.js';
 
 const clamp = (n: number): number => Math.max(0, Math.min(1, n));
 const TREE_FEATURES = new Set<Feature>(['tree', 'pine', 'palm', 'cactus', 'reeds', 'stump']);
 const MAX_TOPOLOGIES = 4;
 
-export interface EcosystemOptions { decaimientoFertilidad?: number }
+/** Opciones de la ecología: T013 (`decaimientoFertilidad`) + T035 (`seed`/`cuencas`). */
+export interface EcosystemOptions { decaimientoFertilidad?: number; seed?: number; cuencas?: number }
 
 interface Topology {
   coordinates: Float64Array;
@@ -60,9 +62,18 @@ export class EcosystemKernel {
 
   get cachedTopologyCount(): number { return this.topologies.length; }
 
+  /**
+   * `seed`/`cuencas` (T035 ronda de arreglo, hallazgo crítico #1): con el default `cuencas=1` el
+   * gateo de cuenca nunca excluye nada (bit a bit igual a hoy para cualquier llamador que no los
+   * pase). El llamador real (`stepEcosystem` en `ecosystem.ts`, cableado desde `stepWorld`) pasa
+   * `world.seed`/`paramsOf(world).agua.cuencas` para que una tesela fuera de cuenca NO se rellene
+   * con la lluvia (antes: `reservoir` ignoraba la cuenca y la regla de T035 se deshacía en la
+   * siguiente lluvia).
+   */
   step(tiles: Tile[], tick: number, weather: 'clear' | 'rain', phase: string, options?: EcosystemOptions): void {
     if (tick % 10 !== 0) return;
     const decaimientoFertilidad = options?.decaimientoFertilidad ?? 0;
+    const seed = options?.seed ?? 0, cuencas = options?.cuencas ?? 1;
     const index = this.topologies.findIndex(topology => sameCoordinates(topology, tiles));
     // Build and reject duplicate coordinates before modifying any tile or cache.
     const previous = index < 0 ? buildTopology(tiles) : this.topologies[index];
@@ -102,10 +113,14 @@ export class EcosystemKernel {
       tile.traffic = clamp(traffic - 0.0005);
       tile.cultivation = clamp(cultivation - 0.00002);
       // Rain remains restricted to the same visible reservoirs as the object kernel.
-      const reservoir = tile.feature === 'pool' || tile.feature === 'spring' || tile.biome === 'wetland' || tile.terrain === 'water';
+      const reservoirSource = tile.feature === 'pool' || tile.feature === 'spring' || tile.biome === 'wetland' || tile.terrain === 'water';
+      // T035 (hallazgo crítico #1): fuera de cuenca, un manantial/charca/humedal NO recarga con la
+      // lluvia (ni con el goteo fijo del manantial) — el mar (`terrain==='water'`) queda exento del
+      // ruido, igual que en la generación, y de todos modos su `drinkingWater` se fuerza a 0 abajo.
+      const reservoir = reservoirSource && (tile.terrain === 'water' || enCuenca(seed, tile.x, tile.y, cuencas));
       tile.drinkingWater = tile.biome === 'ocean' ? 0 : clamp(drinkingWater
         + (reservoir && weather === 'rain' ? 0.008 * (0.4 + fertility * 0.6) : 0)
-        + (tile.feature === 'spring' ? 0.002 : 0) - (light ? 0.00015 : 0.00003));
+        + (reservoir && tile.feature === 'spring' ? 0.002 : 0) - (light ? 0.00015 : 0.00003));
       if (tile.terrain === 'water') tile.moisture = clamp(moisture + (tile.biome === 'ocean' ? 0.003 : 0) + (weather === 'rain' ? 0.008 : 0));
       // Wood consumes local growth; feature changes still use this tile's old growth.
       if (tick % 100 === 0 && TREE_FEATURES.has(tile.feature ?? 'none') && growth > 0.65

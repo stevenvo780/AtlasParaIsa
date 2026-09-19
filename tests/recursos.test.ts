@@ -70,7 +70,10 @@ function frozenEcology(world: World): void {
 }
 
 test('with default parameters the new law reproduces the frozen pre-T013 ecology bit for bit', () => {
-  const seed = 51926, current = createWorld(seed), frozen = createWorld(seed);
+  // `frozenEcology` es la ley SIN capacidad de carga: el oráculo solo coincide con la ley nueva si
+  // se le fijan las capacidades viejas (=1). Desde ab4d9fb `DEFAULT_PARAMS` ya trae 0,7/0,35, así
+  // que un `createWorld(seed)` implícito haría divergir los dos mundos (Constitución I).
+  const seed = 51926, current = createWorld(seed, parseParams(SIN_CAPACIDAD)), frozen = createWorld(seed);
   current.tiles = diverseTiles(seed); frozen.tiles = diverseTiles(seed);
   current.people = []; frozen.people = []; current.animals = []; frozen.animals = [];
   assert.deepStrictEqual(current.tiles, frozen.tiles);

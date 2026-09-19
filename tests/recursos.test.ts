@@ -4,7 +4,7 @@ import type { Tile } from '../src/shared/types.js';
 import { createWorld, ecology, stepWorld, TICKS_PER_DAY, type World } from '../src/world/index.js';
 import { parseParams, type WorldParams } from '../src/world/params.js';
 import { CHUNK_SIZE, generateChunk } from '../src/world/terrain.js';
-import { distanciaMediaAgua, fraccionCeldasConComida, giniRecursosPorRegion, worldStatistics } from '../src/world/statistics.js';
+import { ESTADISTICAS_CARAS_CADA_TICKS, distanciaMediaAgua, fraccionCeldasConComida, giniRecursosPorRegion, worldStatistics } from '../src/world/statistics.js';
 
 const tile = (x: number, y: number, food: number, changes: Partial<Tile> = {}): Tile => ({ x, y, terrain: 'meadow', moisture: 0, vegetation: 0, food, ...changes });
 
@@ -200,18 +200,20 @@ test('integer keys and the sorted Gini give the same numbers as the string-keyed
   assert.ok(Math.abs(giniRecursosPorRegion(evolved) - giniStrings(evolved)) < 1e-12);
 });
 
-test('resource statistics are computed once per tick and expire when the tick or the loaded cells change', () => {
+test('resource statistics are memoized per tick and the expensive ones refresh on the 200-tick cadence', () => {
   const world = createWorld(51926);
   const first = worldStatistics(world), second = worldStatistics(world);
-  assert.equal(second.distanciaMediaAgua, first.distanciaMediaAgua);
-  assert.equal(second.giniRecursosPorRegion, first.giniRecursosPorRegion);
-  // Contrato explícito de la caché: dentro del mismo tick las celdas no cambian (solo `stepWorld` las
-  // toca, y `stepWorld` avanza el tick), así que un cambio a mano no se ve hasta que el tick avanza.
+  assert.equal(second, first, 'within the same tick every projection reuses the same object');
+  // Contrato explícito: las métricas caras (gini, comida, agua, diversidad) se recalculan cada
+  // ESTADISTICAS_CARAS_CADA_TICKS pasos y la vista lo declara en `statsTick`; un cambio a mano en
+  // las celdas no se ve hasta que se cumple la cadencia.
   world.tiles.forEach(candidate => { if (candidate.terrain !== 'water') candidate.food = 0; });
-  assert.equal(worldStatistics(world).fraccionCeldasConComida, first.fraccionCeldasConComida);
   world.tick++;
-  assert.equal(worldStatistics(world).fraccionCeldasConComida, 0);
-  // Y también caduca si cambian las celdas cargadas sin avanzar el tick (activar o retirar chunks).
-  world.tiles = [...world.tiles, tile(9000, 9000, 1)];
-  assert.ok(worldStatistics(world).fraccionCeldasConComida > 0);
+  const intermedio = worldStatistics(world);
+  assert.equal(intermedio.fraccionCeldasConComida, first.fraccionCeldasConComida);
+  assert.equal(intermedio.statsTick, 0);
+  world.tick = ESTADISTICAS_CARAS_CADA_TICKS;
+  const refrescada = worldStatistics(world);
+  assert.equal(refrescada.statsTick, ESTADISTICAS_CARAS_CADA_TICKS);
+  assert.equal(refrescada.fraccionCeldasConComida, 0);
 });

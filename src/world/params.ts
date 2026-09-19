@@ -35,13 +35,13 @@ function deepFreeze<T>(value: T): T {
 const RAW_DEFAULTS: WorldParams = {
   cuerpo: {
     longevidadBaseDias: 11, longevidadPorResiliencia: 4, longevidadPorActividad: 1, senescenciaInicioFraccion: 0.75,
-    riesgoSenescenciaDiario: 0.02, riesgoSenescenciaPendiente: 6, cuidadoReduceRiesgo: 0.6,
+    riesgoSenescenciaDiario: 0.04, riesgoSenescenciaPendiente: 10, cuidadoReduceRiesgo: 0.6,
   },
-  genes: { varianzaFundadores: 0, tasaMutacion: 1 },
-  poblacion: { maxima: 32, intervaloComprobacionTicks: 120, nacimientosPorComprobacion: 1 },
-  recursos: { capacidadBosque: 1, capacidadPastizal: 1, capacidadOtros: 1, velocidadRegeneracion: 1, decaimientoFertilidad: 0, decaimientoComida: 0.0001 },
+  genes: { varianzaFundadores: 0.15, tasaMutacion: 1 },
+  poblacion: { maxima: 40, intervaloComprobacionTicks: 120, nacimientosPorComprobacion: 2 },
+  recursos: { capacidadBosque: 1, capacidadPastizal: 0.7, capacidadOtros: 0.35, velocidadRegeneracion: 1, decaimientoFertilidad: 0.001, decaimientoComida: 0.0001 },
   persistencia: { cadaTicks: 1, ventanaEventosTicks: 0 },
-  agua: { cuencas: 1 },
+  agua: { cuencas: 0.4 },
 };
 
 /** Objeto congelado en profundidad: nunca se muta; `parseParams` clona para cada override. */

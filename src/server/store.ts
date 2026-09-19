@@ -6,7 +6,7 @@ import type { Gesture, GestureResult } from '../shared/types.js';
 import { assertWorld, bindWorldContext, migrateWorld, type World, type WorldContext } from '../world/index.js';
 import { CHUNK_SIZE, MAX_COORDINATE, type Chunk } from '../world/terrain.js';
 import { assertEcosystemTile, assertChunkLife } from '../world/validation.js';
-import { decodeSnapshot, encodeSnapshot } from './snapshot.js';
+import { decodeSnapshot, encodeSnapshot, takeSnapshotParams } from './snapshot.js';
 import type { LegacyRecord } from '../shared/demography.js';
 import { assertLegacyRecord } from '../world/lineage.js';
 import { TechnologyArchive } from './technology-archive.js';
@@ -18,11 +18,32 @@ import { assertTechnologyCatalogueState, enableTechnologyCatalogue, markTechnolo
   TECHNOLOGY_FUNCTION_WORDS, type TechnologyCatalogueReader } from '../world/technology-catalogue.js';
 import { assertChronicleEvent, assertChronicleJournal, enableChronicleJournal, chronicleSerial, chronicleFailure, chronicleForCommit, EMPTY_CHRONICLE_DIGEST, type ChronicleJournal } from '../world/chronicle-journal.js';
 import { assertTechnology, maintainTechnologyMemory } from '../world/technology.js';
-import { paramsOf } from '../world/params.js';
+import { paramsOf, setParams } from '../world/params.js';
 
 /** Profundidad de recuperación: cada cien guardados el slot 2 hereda la instantánea
  * vigente, de modo que el respaldo más viejo mide minutos y no el último paso. */
 export const DEEP_CHECKPOINT_EVERY_SAVES = 100;
+/** La cadena de respaldo, de la más reciente a la más profunda: la instantánea vigente
+ * (0), la copia del guardado anterior (1) y la copia profunda (2, una de cada
+ * `DEEP_CHECKPOINT_EVERY_SAVES`). `load()` y `previous()` la recorren EN ORDEN —cada uno
+ * con su ley, documentada en cada método— y ninguno adopta un eslabón sin verificarlo
+ * entero (R2: hasta esta ronda el slot 2 se escribía y no lo leía nadie). */
+export const SNAPSHOT_SLOTS = [0, 1, 2] as const;
+export type SnapshotSlot = (typeof SNAPSHOT_SLOTS)[number];
+/** Lo que `load()` devuelve, con el eslabón del que salió el mundo a la vista: adoptar un
+ * respaldo es un retroceso, y quien lo pone en servicio tiene que poder contarlo (el
+ * suceso de pausa de la crónica y `/health` lo hacen, en `app.ts`). */
+export interface LoadedSnapshot {
+  world: World; savedAt: number;
+  /** Eslabón adoptado: 0 es la instantánea vigente, > 0 un respaldo. */
+  slot: SnapshotSlot;
+  /** Por qué se saltó cada eslabón anterior. Vacío cuando `slot === 0`. */
+  skipped: string[];
+  /** `saved_at` del eslabón dañado más reciente, o `null` si su fila ni siquiera estaba.
+   * La diferencia con `savedAt` es el retroceso del rescate: el cuerpo que lo superaba
+   * es ilegible, así que en pasos no se puede medir, solo en tiempo de servicio. */
+  supersededAt: number | null;
+}
 /** Cadencia de la revisión COMPLETA del mundo (`assertWorld`) dentro de `save()`.
  * Recorrer el mundo entero cuesta O(tiles + gente + recetas) y a día 5 (40 personas,
  * instantánea de 4,3 MiB) era 270 ms de los 634 ms del guardado: el 43 %. Se paga
@@ -130,6 +151,10 @@ export class Store {
   /** Guardados confirmados y último paso en que se intentó podar: gobiernan la
    * profundidad del tercer respaldo y el coste amortizado de la poda. */
   private saves = 0;
+  /** ¿El cuerpo que hoy ocupa el slot 0 se puede leer entero? `null` = todavía no consta
+   * (una conexión que guarda sin haber cargado), y entonces `save()` lo comprueba una
+   * sola vez. Gobierna la rotación de respaldos: ver `rotatesBackups()`. */
+  private slot0Readable: boolean | null = null;
   private lastPruneTick = -1;
   private readonly schemaVersion: number;
   private verifiedChronicle: ChronicleProof | null = null;
@@ -225,7 +250,7 @@ export class Store {
   /** C10: leer es una transacción. Una copia en caliente o un guardado de otra
    * conexión ya no puede convertir una lectura correcta en «corrupción»: la
    * instantánea queda congelada durante toda la verificación. */
-  load(): { world: World; savedAt: number } | null {
+  load(): LoadedSnapshot | null {
     const rawTransaction = this.db.isTransaction;
     if (!rawTransaction) this.db.exec('BEGIN');
     try {
@@ -249,20 +274,53 @@ export class Store {
       throw error;
     }
   }
-  private loadVerified(rawTransaction: boolean): { world: World; savedAt: number } | null {
+  /**
+   * Recorre la cadena de respaldo y adopta la primera instantánea LEGIBLE, con dos
+   * límites que mantienen la ley de frontera:
+   * 1. Solo se salta el DAÑO FÍSICO —fila ausente, checksum roto, JSON ilegible—, que es
+   *    justo para lo que existen las copias. Una instantánea que se lee entera pero
+   *    INFRINGE una ley no se sustituye por un respaldo: eso taparía un estado inválido
+   *    en vez de recuperarlo, así que falla cerrada como siempre (Constitución VI).
+   * 2. Un respaldo (slot > 0) solo entra en caliente si el archivo durable no guarda NADA
+   *    posterior; si lo guarda, adoptarlo tiraría lo ya vivido y la recuperación tiene
+   *    que ser explícita (`previous()`, que poda y revoca en una copia nueva).
+   */
+  private loadVerified(rawTransaction: boolean): LoadedSnapshot | null {
     const chronicleStamp = this.chronicleStamp();
     this.verifiedChronicle = null;
     const check = this.db.prepare('PRAGMA quick_check').get() as Record<string, unknown>;
     if (Object.values(check)[0] !== 'ok') throw new Error('SQLite integrity check failed. Explicit recovery required.');
-    const row = this.db.prepare('SELECT body,digest,saved_at FROM snapshots WHERE slot=0').get() as Row | undefined;
-    if (!row) {
-      const initialized = this.db.prepare("SELECT value FROM metadata WHERE key='initialized'").get();
-      if (initialized) throw new Error('Snapshot missing from initialized database. Explicit recovery required.');
-      return null;
+    const refusals: string[] = [];
+    // El momento del eslabón dañado MÁS RECIENTE cuya fila seguía ahí: es lo único que
+    // mide el retroceso de un rescate, porque el cuerpo que lo superaba no se puede leer.
+    let supersededAt: number | null = null;
+    for (const slot of SNAPSHOT_SLOTS) {
+      const row = this.db.prepare('SELECT body,digest,saved_at FROM snapshots WHERE slot=?').get(slot) as Row | undefined;
+      if (!row) { refusals.push(`slot ${slot}: snapshot missing`); continue; }
+      const refuse = (reason: string) => { refusals.push(`slot ${slot}: ${reason}`); supersededAt ??= row.saved_at; };
+      if (checksum(row.body) !== row.digest) { refuse('snapshot checksum mismatch'); continue; }
+      let decoded: World;
+      try { decoded = decodeSnapshot(row.body) as World; }
+      catch (error) { refuse(error instanceof Error ? error.message : String(error)); continue; }
+      // Un slot 0 que se lee entero es el único cuerpo que `save()` puede copiar a un
+      // respaldo. Si adoptamos un respaldo, el slot 0 queda marcado como NO fiable.
+      this.slot0Readable = slot === 0;
+      return this.loadSlot(row, decoded, slot, rawTransaction, chronicleStamp, refusals, supersededAt);
     }
-    if (checksum(row.body) !== row.digest) throw new Error('Snapshot checksum mismatch. Explicit recovery required.');
-    const decoded = decodeSnapshot(row.body) as World, declaredChronicle = decoded.chronicleJournal !== undefined;
+    if (refusals.every(reason => reason.endsWith('snapshot missing'))
+      && !this.db.prepare("SELECT value FROM metadata WHERE key='initialized'").get()) { this.slot0Readable = true; return null; }
+    throw new Error(`Snapshot missing or unusable in every backup slot (${refusals.join('; ')}). Explicit recovery required.`);
+  }
+  private loadSlot(row: Row, decoded: World, slot: SnapshotSlot, rawTransaction: boolean, chronicleStamp: ChronicleStamp,
+    skipped: string[], supersededAt: number | null): LoadedSnapshot {
+    const declaredChronicle = decoded.chronicleJournal !== undefined;
+    // Los params se restauran ANTES de `migrateWorld`, que ya valida con `assertWorld`:
+    // la ley de frontera mide el mundo con los parámetros con los que se guardó (R8).
+    const params = takeSnapshotParams(decoded);
+    setParams(decoded, params);
     const world = migrateWorld(decoded, this.context);
+    setParams(world, params);
+    if (slot > 0) this.assertNothingNewerThan(world);
     if (world.technology.catalogue && (world.technology.catalogue.pending.length ||
       world.technology.catalogue.committedThrough !== world.technology.recipeCounter)) technologyFailure('snapshot contains uncommitted definitions');
     this.assertChronicleOrigin(world, declaredChronicle);
@@ -302,7 +360,30 @@ export class Store {
     if (declaredJournal && this.schemaVersion >= 4) this.rememberTechnology(world);
     if (!sameChronicleStamp(chronicleStamp, this.chronicleStamp())) chronicleFailure('database changed while loading');
     if (!rawTransaction) this.rememberChronicle(world, chronicleStamp);
-    return { world, savedAt: row.saved_at };
+    return { world, savedAt: row.saved_at, slot, skipped, supersededAt: slot > 0 ? supersededAt : null };
+  }
+  /** ¿El cuerpo del slot 0 se lee entero? Lo pregunta `save()` cuando esta conexión aún
+   * no ha cargado nada (no consta el estado de la cadena) y solo la primera vez: después
+   * lo sabe por el guardado que acaba de confirmar. Un slot 0 ausente no tiene nada que
+   * propagar, así que la rotación —que copiaría cero filas— no hace daño. */
+  private readSlot0(): boolean {
+    const row = this.db.prepare('SELECT body,digest FROM snapshots WHERE slot=0').get() as Row | undefined;
+    return this.slot0Readable = !row || checksum(row.body) === row.digest;
+  }
+  /** Un respaldo solo se adopta EN CALIENTE si el archivo durable acaba donde acaba él.
+   * En cuanto el archivo guarda un suceso, un gesto, una región, una identidad o una
+   * observación técnica posterior, adoptarlo significaría tirar lo ya vivido: eso es
+   * recuperación, no arranque, y pasa por `previous()` —que poda en una copia nueva y
+   * revoca las sesiones— o por `npm run recover:previous -- <dir> --slot N`. */
+  private assertNothingNewerThan(world: World): void {
+    const later = (sql: string, ...values: (string | number)[]) => !!this.db.prepare(sql).get(...values);
+    const behind = (): never => { throw new Error('Backup snapshot is behind the durable archive. Explicit recovery required.'); };
+    if (later('SELECT 1 FROM inputs WHERE tick>? LIMIT 1', world.tick)) behind();
+    if (this.schemaVersion >= 2 && later('SELECT 1 FROM chunks WHERE tick>? LIMIT 1', world.tick)) behind();
+    if (this.schemaVersion >= 3 && later('SELECT 1 FROM legacy WHERE tick>? LIMIT 1', world.tick)) behind();
+    if (this.schemaVersion >= 4 && (later('SELECT 1 FROM technology_executions WHERE serial>? LIMIT 1', world.technology.executionCounter)
+      || later('SELECT 1 FROM technology_stats WHERE tick>? LIMIT 1', world.tick)
+      || later("SELECT 1 FROM technology_definitions WHERE id GLOB 'recipe-[0-9]*' AND CAST(substr(id,8) AS INTEGER)>? LIMIT 1", world.technology.recipeCounter))) behind();
   }
   loadLegacy(id: string, atTick=Number.MAX_SAFE_INTEGER): LegacyRecord | null {
     if (typeof id!=='string'||!id.length||id.length>50||!Number.isSafeInteger(atTick)||atTick<0) throw new RangeError('Invalid identity archive lookup.');
@@ -688,11 +769,13 @@ export class Store {
     else bindWorldContext(world, this.context);
     const window = paramsOf(world).persistencia.ventanaEventosTicks;
     const prunes = window > 0 && world.tick - this.lastPruneTick >= window;
-    const body = encodeSnapshot({ ...world, chronicleJournal: committedChronicle, technology: technologyCatalogueStateForCommit(technologyStateForCommit(world.technology)) });
+    // Los params vigentes viajan con el mundo: `load()` no puede medirlo con otros (R8).
+    const body = encodeSnapshot({ ...world, chronicleJournal: committedChronicle, technology: technologyCatalogueStateForCommit(technologyStateForCommit(world.technology)) }, paramsOf(world));
     this.lastSnapshotBytes = Buffer.byteLength(body);
     this.db.exec('BEGIN IMMEDIATE');
     let chronicleTriggers = false;
     try {
+      const rotatesBackups = this.slot0Readable ?? this.readSlot0();
       chronicleTriggers = this.chronicleHasTriggers();
       this.technologyArchive.beginHostTransaction();
       // Authorization and commit share a transaction with respect to external revocation.
@@ -725,8 +808,13 @@ export class Store {
       // El slot 1 sigue heredando la instantánea del guardado ANTERIOR en cada
       // guardado: cuesta ~13 ms de 630 a día 5 y es la profundidad de recuperación
       // que `previous()` promete (un guardado, no diez). Espaciarlo no compensa.
-      this.db.exec('INSERT OR REPLACE INTO snapshots SELECT 1,body,digest,saved_at FROM snapshots WHERE slot=0');
-      if ((this.saves + 1) % DEEP_CHECKPOINT_EVERY_SAVES === 0) this.db.exec('INSERT OR REPLACE INTO snapshots SELECT 2,body,digest,saved_at FROM snapshots WHERE slot=0');
+      // Pero solo si ese cuerpo se puede leer: tras un rescate el slot 0 está podrido y
+      // copiarlo destruiría en un guardado (2 s en producción) el respaldo que acababa de
+      // salvar el arranque. Un cuerpo no verificado nunca entra en un respaldo.
+      if (rotatesBackups) {
+        this.db.exec('INSERT OR REPLACE INTO snapshots SELECT 1,body,digest,saved_at FROM snapshots WHERE slot=0');
+        if ((this.saves + 1) % DEEP_CHECKPOINT_EVERY_SAVES === 0) this.db.exec('INSERT OR REPLACE INTO snapshots SELECT 2,body,digest,saved_at FROM snapshots WHERE slot=0');
+      }
       this.db.prepare('INSERT OR REPLACE INTO snapshots VALUES (0,?,?,?)').run(body, checksum(body), Date.now());
       this.db.prepare("INSERT OR REPLACE INTO metadata VALUES ('initialized','1')").run();
       const insertInput = this.db.prepare('INSERT INTO inputs VALUES (?,?,?,?,?,?)');
@@ -740,6 +828,9 @@ export class Store {
       }
       this.db.exec('COMMIT');
       this.saves++;
+      // Confirmado: el slot 0 es ahora este cuerpo, escrito y verificado por esta misma
+      // conexión, así que la rotación de respaldos se reanuda en el guardado siguiente.
+      this.slot0Readable = true;
       if (prunes) this.lastPruneTick = world.tick;
       this.technologyArchive.acknowledgeHostCommit();
     } catch (error) {
@@ -831,11 +922,14 @@ export class Store {
     this.verifiedTechnology = null; this.verifiedRecipes.clear();
   }
 
-  previous(destination: string) {
-    const row = this.db.prepare('SELECT body,digest,saved_at FROM snapshots WHERE slot=1').get() as Row | undefined;
-    if (!row || checksum(row.body) !== row.digest) throw new Error('No valid previous checkpoint.');
+  /** Verificación previa de un candidato de la cadena, ANTES de copiar nada al destino:
+   * una recuperación imposible no deja una copia a medias. */
+  private verifyPrevious(row: Row): { world: World; declaredJournal: boolean } {
     const decoded = decodeSnapshot(row.body) as World, declaredChronicle = decoded.chronicleJournal !== undefined;
+    const params = takeSnapshotParams(decoded);
+    setParams(decoded, params);
     const world = migrateWorld(decoded, this.context);
+    setParams(world, params);
     this.assertChronicleOrigin(world, declaredChronicle, true);
     this.assertChronicleArchive(world, true);
     const declaredJournal = world.technology.journal !== undefined;
@@ -844,6 +938,29 @@ export class Store {
     enableTechnologyJournal(world.technology);
     assertTechnologyJournal(world.technology, world.tick);
     if (declaredJournal && (world.technology.journal!.pending.length || world.technology.journal!.committedThrough !== world.technology.executionCounter)) technologyFailure('previous snapshot contains uncommitted executions');
+    return { world, declaredJournal };
+  }
+  /**
+   * Recuperación explícita a un punto anterior, en una copia NUEVA: recorre la cadena
+   * desde `fromSlot` (1 = el guardado anterior, 2 = el respaldo profundo de cada
+   * `DEEP_CHECKPOINT_EVERY_SAVES`) y rebobina al primer respaldo verificable. Devuelve
+   * el slot que restauró, para que quien lo pidió sepa cuánto retrocedió.
+   */
+  previous(destination: string, fromSlot: SnapshotSlot = 1): SnapshotSlot {
+    const refusals: string[] = [];
+    let chosen: { slot: SnapshotSlot; savedAt: number; world: World; declaredJournal: boolean } | undefined;
+    for (const slot of SNAPSHOT_SLOTS) {
+      if (slot < fromSlot) continue;
+      const candidate = this.db.prepare('SELECT body,digest,saved_at FROM snapshots WHERE slot=?').get(slot) as Row | undefined;
+      if (!candidate) { refusals.push(`slot ${slot}: snapshot missing`); continue; }
+      if (checksum(candidate.body) !== candidate.digest) { refusals.push(`slot ${slot}: snapshot checksum mismatch`); continue; }
+      // Aquí sí se salta un respaldo que infringe una ley: quien pidió recuperar ya
+      // aceptó retroceder, y el destino es una copia nueva que se poda y se valida.
+      try { chosen = { slot, savedAt: candidate.saved_at, ...this.verifyPrevious(candidate) }; break; }
+      catch (error) { refusals.push(`slot ${slot}: ${error instanceof Error ? error.message : String(error)}`); }
+    }
+    if (!chosen) throw new Error(`No valid previous checkpoint (${refusals.join('; ')}).`);
+    const { world, declaredJournal } = chosen;
     this.backup(destination);
     const recovered = new Store(destination);
     try {
@@ -862,8 +979,11 @@ export class Store {
       recovered.prepareTechnology(world, declaredJournal ? world.technology.recipeCounter : 0);
       // A pre-journal checkpoint has surviving receipts in memory, not a backed watermark.
       recovered.flushTechnology(world, true);
-      const body = encodeSnapshot({ ...world, technology: technologyCatalogueStateForCommit(technologyStateForCommit(world.technology)) });
-      recovered.db.prepare('UPDATE snapshots SET body=?,digest=?,saved_at=? WHERE slot=0').run(body, checksum(body), row.saved_at);
+      const body = encodeSnapshot({ ...world, technology: technologyCatalogueStateForCommit(technologyStateForCommit(world.technology)) }, paramsOf(world));
+      recovered.db.prepare('UPDATE snapshots SET body=?,digest=?,saved_at=? WHERE slot=0').run(body, checksum(body), chosen.savedAt);
+      // La copia empieza su propia cadena: heredar los respaldos del original dejaría
+      // ahí puntos POSTERIORES al que se acaba de restaurar (o los que fallaron).
+      recovered.db.prepare('DELETE FROM snapshots WHERE slot<>0').run();
       recovered.db.prepare('DELETE FROM inputs WHERE tick>?').run(world.tick);
       recovered.db.prepare('DELETE FROM events WHERE tick>?').run(world.tick);
       recovered.db.prepare('DELETE FROM chunks WHERE tick>?').run(world.tick);
@@ -881,6 +1001,7 @@ export class Store {
       recovered.technologyArchive.invalidateVerification(); throw error;
     }
     finally { recovered.close(); }
+    return chosen.slot;
   }
   close() { this.db.close(); }
 }

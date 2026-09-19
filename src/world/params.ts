@@ -118,18 +118,25 @@ function setPath(target: Record<string, unknown>, dottedKey: string, value: numb
 }
 
 /**
- * Acepta `undefined` (→ `DEFAULT_PARAMS`, por identidad), una cadena "a.b=1,c.d=2" o
+ * Acepta `undefined` (→ `base`, por identidad), una cadena "a.b=1,c.d=2" o
  * JSON (anidado o plano), o un `Record<string,string>` de claves punteadas. Devuelve
- * un objeto NUEVO congelado: clon profundo de los defaults con los overrides
+ * un objeto NUEVO congelado: clon profundo de `base` con los overrides
  * aplicados. Lanza `Error` con mensaje claro en español si una clave no existe en
  * `PARAM_RANGES`, el valor no es numérico o cae fuera del rango permitido.
+ *
+ * `base` es el escalón inferior de la precedencia y por defecto son los `DEFAULT_PARAMS`
+ * (comportamiento de siempre). Existe porque los overrides explícitos de un despliegue
+ * se aplican ENCIMA de lo que ya rige —los params que un mundo trae en su instantánea—
+ * y reemplazar el objeto entero borraba en silencio lo que el override no nombra
+ * (ronda de corrección R2). La validación no cambia con la base: cada override se sigue
+ * midiendo contra `PARAM_RANGES`, y la base llegó por este mismo camino.
  */
-export function parseParams(input?: Record<string, string> | string): WorldParams {
-  if (input === undefined) return DEFAULT_PARAMS;
+export function parseParams(input?: Record<string, string> | string, base: WorldParams = DEFAULT_PARAMS): WorldParams {
+  if (input === undefined) return base;
   const raw = typeof input === 'string' ? parseParamString(input) : input;
   const overrides: Record<string, unknown> = {};
   flatten(raw, '', overrides);
-  const draft = structuredClone(RAW_DEFAULTS) as unknown as Record<string, unknown>;
+  const draft = structuredClone(base) as unknown as Record<string, unknown>;
   for (const [key, rawValue] of Object.entries(overrides)) {
     const range = PARAM_RANGES[key];
     if (!range) throw new Error(`Parámetro desconocido: "${key}". Claves válidas: ${Object.keys(PARAM_RANGES).join(', ')}.`);

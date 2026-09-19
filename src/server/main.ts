@@ -2,7 +2,8 @@ import { resolve } from 'node:path';
 import { createApp } from './app.js';
 import { Store } from './store.js';
 import { acquireLock } from './lock.js';
-import { parseParams, setParams } from '../world/params.js';
+import { paramsOf, setParams } from '../world/params.js';
+import { deploymentParams } from './deployment-params.js';
 
 process.umask(0o077);
 const port = Number(process.env.PORT ?? 3000);
@@ -16,11 +17,12 @@ const unlock = acquireLock(resolve(dataPath, 'world.lock'));
 let store: Store | undefined;
 try {
   store = new Store(resolve(dataPath, 'world.sqlite'));
-  const app = createApp({ store, password: process.env.CARTA_PASSWORD, credentialPath: resolve(dataPath, 'access.scrypt'), origin, secure });
-  // En producción el mundo se persiste cada 20 pasos (2 s) y siempre que llega un
-  // gesto; un corte arriesga esos 2 s de simulación, nunca un gesto confirmado.
-  // CARTA_PARAMS puede ajustarlo (y abrir la ventana de poda) sin tocar código.
-  setParams(app.world, parseParams(`persistencia.cadaTicks=20,persistencia.ventanaEventosTicks=24000${process.env.CARTA_PARAMS ? `,${process.env.CARTA_PARAMS}` : ''}`));
+  // Los params llegan ANTES de que `createApp` genere un mundo nuevo (R6: `agua.cuencas`
+  // decide el terreno en la generación, así que fijarlos después no servía de nada).
+  const app = createApp({ store, password: process.env.CARTA_PASSWORD, credentialPath: resolve(dataPath, 'access.scrypt'), origin, secure, params: deploymentParams() });
+  // Precedencia: un mundo cargado trae los params de su instantánea y esta línea aplica
+  // ENCIMA la configuración explícita del despliegue, solo en las claves que nombra.
+  setParams(app.world, deploymentParams(paramsOf(app.world)));
   let closing = false;
   const shutdown = async () => {
     if (closing) return; closing = true;

@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { Store, DEEP_CHECKPOINT_EVERY_SAVES, DEEP_VALIDATION_EVERY_SAVES } from '../src/server/store.js';
 import { createWorld, cloneWorld, type World } from '../src/world/index.js';
 import { parseParams, setParams } from '../src/world/params.js';
@@ -116,4 +116,117 @@ test('cada cien guardados un tercer respaldo hereda la instantánea vigente', t 
   assert.equal(JSON.parse(savedBody(store, 1)!).tick, DEEP_CHECKPOINT_EVERY_SAVES - 1);
   assert.equal(JSON.parse(savedBody(store, 0)!).tick, DEEP_CHECKPOINT_EVERY_SAVES);
   assert.equal(JSON.parse(savedBody(store, 2)!).tick, DEEP_CHECKPOINT_EVERY_SAVES - 1);
+});
+
+test('la cadena de respaldo rescata el guardado anterior cuando la instantánea vigente se corrompe y el archivo no ha avanzado', t => {
+  const { store } = laboratory(t);
+  const world = createWorld(3);
+  store.save(world);
+  fixtureTick(world, 1); store.save(world);
+  assert.equal(JSON.parse(savedBody(store, 1)!).tick, 0);
+  store.db.exec("UPDATE snapshots SET body='{}' WHERE slot=0");
+  const loaded = store.load()!;
+  assert.equal(loaded.world.tick, 0, 'la cadena adopta el slot 1 cuando el slot 0 no se puede verificar');
+  assert.equal(loaded.slot, 1, 'la carga declara de qué eslabón salió el mundo');
+  assert.equal(loaded.skipped.length, 1, 'y por qué se saltó el anterior');
+  assert.match(loaded.skipped[0]!, /slot 0: snapshot checksum mismatch/);
+  assert.equal(savedBody(store, 0), '{}', 'cargar no repara la cadena: escribir sigue siendo explícito');
+});
+
+test('un guardado tras el rescate no copia el slot 0 podrido encima del respaldo que lo salvó', t => {
+  const { store } = laboratory(t);
+  const world = createWorld(3);
+  store.save(world);                         // slot 0 = tick 0
+  fixtureTick(world, 1); store.save(world);  // slot 0 = tick 1, slot 1 = tick 0
+  store.db.exec("UPDATE snapshots SET body='{}' WHERE slot=0");
+  const rescued = store.load()!;
+  assert.equal(rescued.slot, 1, 'el arranque salió del respaldo');
+
+  // Sin esta ley, `save()` copiaba el slot 0 —ahora podrido— al slot 1 y el rescate
+  // destruía en ~2 s el único respaldo bueno: fallar cerrado con red se convertía en
+  // arrancar solo y sin red. Un cuerpo no verificado no entra nunca en un respaldo.
+  fixtureTick(rescued.world, 2); store.save(rescued.world);
+  assert.notEqual(savedBody(store, 1), '{}', 'el respaldo que salvó el arranque sobrevive al primer guardado');
+  assert.equal(JSON.parse(savedBody(store, 1)!).tick, 0);
+  assert.equal(JSON.parse(savedBody(store, 0)!).tick, 2, 'y el slot 0 ya es un guardado verificado');
+
+  // Reparada la cadena, la rotación se reanuda sola: la profundidad no se pierde para siempre.
+  fixtureTick(rescued.world, 3); store.save(rescued.world);
+  assert.equal(JSON.parse(savedBody(store, 1)!).tick, 2);
+  assert.equal(store.load()!.slot, 0, 'el siguiente arranque ya no necesita respaldo');
+});
+
+test('el respaldo profundo tampoco hereda un slot 0 sin verificar', t => {
+  const { store } = laboratory(t);
+  const world = createWorld(3);
+  for (let n = 1; n < DEEP_CHECKPOINT_EVERY_SAVES; n++) { fixtureTick(world, n); store.save(world); }
+  store.db.exec("UPDATE snapshots SET body='{}' WHERE slot=0");
+  const rescued = store.load()!;
+  assert.equal(rescued.slot, 1);
+  // El guardado número cien es justo el que copia al slot 2: tampoco puede propagar basura.
+  fixtureTick(rescued.world, DEEP_CHECKPOINT_EVERY_SAVES); store.save(rescued.world);
+  assert.equal(savedBody(store, 2), undefined, 'un slot 0 podrido no se convierte en el respaldo profundo');
+  assert.equal(JSON.parse(savedBody(store, 1)!).tick, DEEP_CHECKPOINT_EVERY_SAVES - 2, 'ni en el respaldo cercano');
+});
+
+test('una conexión que nunca cargó no puede guardar sobre un slot 0 ilegible: falla cerrada', t => {
+  const { store, path } = laboratory(t);
+  const world = createWorld(3);
+  store.save(world);
+  fixtureTick(world, 1); store.save(world);
+  store.db.exec("UPDATE snapshots SET body='{}' WHERE slot=0");
+  // El rescate de `load()` es la ÚNICA puerta por la que un slot 0 podrido llega a un
+  // guardado: sin la prueba de crónica que deja la carga, el guardado se niega antes de
+  // escribir nada, así que la rotación no llega a ocurrir y el respaldo sigue intacto.
+  const otro = new Store(path);
+  try {
+    fixtureTick(world, 2);
+    assert.throws(() => otro.save(world), /baseline snapshot checksum mismatch/);
+    assert.equal(JSON.parse(savedBody(otro, 1)!).tick, 0, 'el respaldo bueno sigue ahí');
+  } finally { otro.close(); }
+});
+
+test('una copia de respaldo no se adopta en caliente si el archivo durable guarda algo posterior', t => {
+  const { store } = laboratory(t);
+  const world = createWorld(3);
+  store.save(world);
+  fixtureTick(world, 1);
+  const chunk = generateChunk(world.seed, -4, 7); chunk.discovered = true; chunk.lastTick = 1; world.retiredChunks = [chunk];
+  store.save(world); // el archivo de terreno dormido avanza con el segundo guardado
+  store.db.exec("UPDATE snapshots SET body='{}' WHERE slot=0");
+  assert.throws(() => store.load(), /Backup snapshot is behind the durable archive/,
+    'adoptar el respaldo tiraría la región ya archivada: la recuperación tiene que ser explícita');
+  assert.equal(Number(store.db.prepare('SELECT COUNT(*) AS n FROM chunks').get()!.n), 1, 'un arranque fallido no borra nada');
+});
+
+test('con los dos puntos recientes inutilizados, la cadena alcanza el tercer respaldo y previous() lo restaura', t => {
+  const { store, path } = laboratory(t);
+  const world = createWorld(3);
+  for (let n = 1; n <= DEEP_CHECKPOINT_EVERY_SAVES; n++) { fixtureTick(world, n); store.save(world); }
+  assert.equal(JSON.parse(savedBody(store, 2)!).tick, DEEP_CHECKPOINT_EVERY_SAVES - 1, 'el tercer respaldo existe tras cien guardados');
+  store.db.exec("UPDATE snapshots SET body='{}' WHERE slot IN (0,1)");
+  assert.equal(store.load()!.world.tick, DEEP_CHECKPOINT_EVERY_SAVES - 1, 'la cadena 0 → 1 → 2 llega al respaldo profundo');
+  const destination = join(dirname(path), 'desde-slot-2.sqlite');
+  assert.equal(store.previous(destination), 2, 'previous() informa del respaldo que restauró');
+  const recovered = new Store(destination);
+  try {
+    assert.equal(recovered.load()!.world.tick, DEEP_CHECKPOINT_EVERY_SAVES - 1);
+    assert.equal(Number(recovered.db.prepare('SELECT COUNT(*) AS n FROM snapshots').get()!.n), 1,
+      'la copia recuperada empieza su propia cadena: no hereda respaldos inservibles');
+  } finally { recovered.close(); }
+});
+
+test('previous() cede el turno al respaldo profundo solo cuando el guardado anterior no se puede verificar', t => {
+  const { store, path } = laboratory(t);
+  const world = createWorld(3);
+  for (let n = 1; n <= DEEP_CHECKPOINT_EVERY_SAVES; n++) { fixtureTick(world, n); store.save(world); }
+  const destination = join(dirname(path), 'desde-slot-1.sqlite');
+  assert.equal(store.previous(destination), 1, 'con el slot 1 sano la profundidad no cambia');
+  const recovered = new Store(destination);
+  try { assert.equal(recovered.load()!.world.tick, DEEP_CHECKPOINT_EVERY_SAVES - 1); } finally { recovered.close(); }
+  store.db.exec('DELETE FROM snapshots WHERE slot=2');
+  store.db.exec("UPDATE snapshots SET body='{}' WHERE slot=1");
+  const refused = join(dirname(path), 'sin-cadena.sqlite');
+  assert.throws(() => store.previous(refused), /No valid previous checkpoint/);
+  assert.equal(existsSync(refused), false, 'una recuperación imposible no deja copia a medias');
 });

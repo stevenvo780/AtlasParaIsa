@@ -124,11 +124,12 @@ Si el estado actual no es válido pero existe un punto anterior verificable en l
 
 ```sh
 npm run recover:previous -- ./data-previous
+npm run recover:previous -- ./data-previous --slot 2   # respaldo profundo (uno de cada cien guardados)
 CARTA_DATA_DIR=./data-previous npm run access -- init
 CARTA_DATA_DIR=./data-previous npm start
 ```
 
-Esta operación retira en la copia las entradas y los hechos posteriores al punto recuperado y revoca las sesiones. Conserva el archivo original. Si la base o el punto anterior no se pueden validar, el comando falla; no genera silenciosamente otro mundo.
+Esta operación retira en la copia las entradas y los hechos posteriores al punto recuperado y revoca las sesiones. Conserva el archivo original. Si la base o el punto anterior no se pueden validar, el comando falla; no genera silenciosamente otro mundo. Sin `--slot` empieza por el guardado anterior y baja sola al respaldo profundo si aquel no se puede verificar; al terminar dice desde cuál restauró.
 
 ## Nuevas versiones de pruebas
 

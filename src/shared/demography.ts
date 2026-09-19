@@ -21,6 +21,35 @@ export interface DemographicTraits {
   maximumAge: number;
 }
 
+/** Ley de longevidad (T010, cableada en R3). Subconjunto estructural de `WorldParams['cuerpo']`:
+ * fija la edad máxima (base + resiliencia·gen − actividad·hábito) y el inicio de la vejez (fracción
+ * de la edad máxima). La lee `demographicTraits`; el mundo se la pasa con `paramsOf(world).cuerpo`. */
+export interface LongevityLaw {
+  longevidadBaseDias: number;
+  longevidadPorResiliencia: number;
+  longevidadPorActividad: number;
+  senescenciaInicioFraccion: number;
+}
+
+/** Ticks de simulación por día. Vive aquí, y no sólo en `world/demography.ts`, porque la geometría
+ * de la ley de longevidad la leen dos módulos que no pueden importarse entre sí: el motor
+ * (`world/demography.ts`) y la validación de `parseParams` (`world/params.ts`). */
+export const DEMOGRAPHY_TICKS_PER_DAY = 2400;
+
+/** Las tres edades, en ticks, que un cuerpo alcanza bajo una ley de longevidad: única copia de la
+ * ley de T010. La evalúan `demographicTraits` (sobre el genoma de cada persona) y
+ * `assertLongevityLaw` (sobre las cuatro esquinas de resiliencia/actividad, al fijar los params).
+ * Antes de redondear, las tres edades son AFINES en (resiliencia, actividad), así que las cuatro
+ * esquinas del cuadrado [0,1]² acotan todo el interior: si la ley es sana en las cuatro con una
+ * holgura que cubra el redondeo, lo es para cualquier genoma posible. */
+export function longevityAges(resilience: number, activity: number, law: Readonly<LongevityLaw>):
+Pick<DemographicTraits, 'maturityAge' | 'senescenceStart' | 'maximumAge'> {
+  const maximumAge = Math.round((law.longevidadBaseDias + resilience * law.longevidadPorResiliencia
+    - activity * law.longevidadPorActividad) * DEMOGRAPHY_TICKS_PER_DAY);
+  const maturityAge = Math.round((1.8 + resilience * 0.3 + activity * 0.1) * DEMOGRAPHY_TICKS_PER_DAY);
+  return { maturityAge, senescenceStart: Math.round(maximumAge * law.senescenciaInicioFraccion), maximumAge };
+}
+
 /** Ley de senescencia (T010). Subconjunto estructural de `WorldParams['cuerpo']`. */
 export interface SenescenceLaw {
   riesgoSenescenciaDiario: number;

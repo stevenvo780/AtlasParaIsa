@@ -11,6 +11,11 @@ export const RECENT_LEGACY_COUNT = 32;
 export const MAX_LEGACY_CACHE = 600;
 const CAUSES: readonly DemographicDeathCause[] = ['starvation', 'dehydration', 'exposure', 'senescence'];
 const TRAIT_KEYS = ['resilience', 'foodDemand', 'waterDemand', 'maturityAge', 'fertilityCooldown', 'senescenceStart', 'maximumAge'] as const;
+/** Rasgos que sólo dependen del genoma: se recalculan aquí aunque no haya mundo a mano. Los dos que
+ * faltan —`senescenceStart` y `maximumAge`— los fija `cuerpo.longevidad*`, que el laboratorio cambia
+ * por réplica (R3), así que un archivo escrito bajo otra ley no puede recalcularse; de ésos se exige
+ * la coherencia estructural que `updateDemography` da por supuesta. */
+const GENOME_TRAIT_KEYS = ['resilience', 'foodDemand', 'waterDemand', 'maturityAge', 'fertilityCooldown'] as const;
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const unit = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1;
 const integer = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
@@ -37,8 +42,10 @@ export function assertLegacyRecord(value: unknown, atTick: number): asserts valu
   if (record.generation !== record.genome.generation || record.parents.length !== record.genome.parents.length
     || record.parents.some((id, index) => id !== record.genome.parents[index])) fail();
   const expression = demographicTraits(record.genome);
-  if (TRAIT_KEYS.some(key => record.traits[key] !== expression[key])) fail();
-  if (record.cause === 'senescence' && record.diedAt - record.bornAt < expression.senescenceStart) fail();
+  if (GENOME_TRAIT_KEYS.some(key => record.traits[key] !== expression[key])) fail();
+  if (!integer(record.traits.senescenceStart) || !integer(record.traits.maximumAge)
+    || record.traits.maturityAge >= record.traits.senescenceStart || record.traits.senescenceStart >= record.traits.maximumAge) fail();
+  if (record.cause === 'senescence' && record.diedAt - record.bornAt < record.traits.senescenceStart) fail();
 }
 
 /** Only dead references need a legacy row; living parent/inventor identities are in the snapshot. */
@@ -122,7 +129,7 @@ export function advancePopulation(world: World, callbacks: PopulationCallbacks):
     const shelter = world.shelterBenefitEnabled && tile?.terrain === 'shelter' ? Math.max(0, ...world.structures
       .filter(structure => structure.x === person.x && structure.y === person.y && structure.condition > BROKEN_CONDITION && structure.components.includes('roof'))
       .map(structure => structure.condition)) : 0;
-    return { person, transition: updateDemography({ id: person.id, state: person.demography, traits: demographicTraits(person.genome),
+    return { person, transition: updateDemography({ id: person.id, state: person.demography, traits: demographicTraits(person.genome, paramsOf(world).cuerpo),
       hunger: person.hunger, thirst: person.thirst, fatigue: person.fatigue, energy: person.energy },
     { exposure: world.weather === 'rain' ? 1 : 0, shelter, protected: person.role === 'S' || person.role === 'I',
       seed: world.seed, tick: world.tick, senescence: paramsOf(world).cuerpo }, 1) };
@@ -131,7 +138,7 @@ export function advancePopulation(world: World, callbacks: PopulationCallbacks):
   if (!callbacks.beforeDeath && dying.some(result => carriesEstate(result.person))) throw new Error('Falta una liquidación explícita de los recursos del fallecido.');
   const records = dying.map(({ person, transition }): LegacyRecord => ({ id: person.id, name: person.name, role: person.role,
     generation: person.genome.generation, parents: [...person.genome.parents], bornAt: person.bornAt, diedAt: world.tick,
-    cause: transition.death!, genome: structuredClone(person.genome), traits: demographicTraits(person.genome), communityId: person.communityId }));
+    cause: transition.death!, genome: structuredClone(person.genome), traits: demographicTraits(person.genome, paramsOf(world).cuerpo), communityId: person.communityId }));
   for (const record of records) assertLegacyRecord(record, world.tick);
   for (const { person, transition } of transitions) person.demography = transition.state;
   for (const { person } of dying) callbacks.beforeDeath?.(world, person);

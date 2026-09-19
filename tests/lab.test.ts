@@ -27,13 +27,20 @@ test('réplica de 1 día produce dia-001.json y replica.json con las claves espe
 
   const dia = readJson(join(dir, 'dia-001.json'));
   assert.equal(dia.tick, 2400);
-  for (const key of ['poblacion', 'nacimientos', 'fundadoresVivos', 'generacionesVivas', 'diversidadOficios', 'recetasDistintasEnUso', 'cooperaciones', 'p50Ms', 'p95Ms', 'rss'])
+  for (const key of ['poblacion', 'nacimientos', 'fundadoresVivos', 'generacionesVivas', 'diversidadOficios', 'recetasDistintasEnUso', 'diversidadFuncional', 'cooperaciones', 'p50Ms', 'p95Ms', 'rss'])
     assert.equal(typeof dia[key], 'number', `dia-001.json.${key} debe ser number`);
   const muertes = dia.muertesPorCausa as Json;
   for (const cause of CAUSES) assert.equal(typeof muertes[cause], 'number', `muertesPorCausa.${cause} debe ser number`);
   for (const key of ['gini', 'fraccionComida', 'distanciaAgua']) assert.ok(dia[key] === null || typeof dia[key] === 'number', `${key} debe ser number o null (T013 aún no existe en este árbol)`);
+  // P3 (requisito central de T016, refutable): esta réplica SIEMPRE adjunta un Store, así
+  // que `catalogoActivo` (== catalogueEnabled(world.technology)) debe ser true. Si alguien
+  // borra `new Store(...)`/`store.save(world)` de replica.ts, `enableTechnologyCatalogue`
+  // nunca corre y este assert falla — a diferencia de `recetasDistintasEnUso > 0`, que
+  // (medido con seed 51926, mismos params, sin Store) da el mismo valor >0 igual.
+  assert.equal(dia.catalogoActivo, true, 'con Store el catálogo de producción debe estar activo (P3)');
   // P3: con Store adjunto la catalogación de producción rige y el mundo fabrica tecnología medible.
   assert.ok((dia.recetasDistintasEnUso as number) > 0, 'con Store el mundo debe fabricar tecnología en 1 día');
+  assert.ok((dia.diversidadFuncional as number) > 0, 'con Store debe haber al menos una función tecnológica distinta descubierta');
 
   const replica = readJson(join(dir, 'replica.json'));
   assert.equal(replica.seed, 51926);

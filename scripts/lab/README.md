@@ -20,14 +20,32 @@ npx tsx scripts/lab/replica.ts --seed 51926 --dias 10 --params "cuerpo.riesgoSen
 ## Por qué SIEMPRE hay un `Store` (hallazgo P3)
 
 `docs/REVISION-2026-09-19.md` (P3) documenta que las leyes de tecnología dependen de si el mundo
-tiene un `Store` SQLite adjunto o no:
+tiene un `Store` SQLite adjunto o no. **Corrección (revisión 2026-09-19 de T016):** una versión
+anterior de esta nota decía que con Store `world.technology.recipes` quedaba acotado a
+`memoryCapacity=32`; es falso — verificado en `src/world/technology-catalogue.ts`, `cacheRecipe`
+(línea 84) recorta `state.recipes` con `budgets.maxRecipes` (256 por defecto) **en los dos
+regímenes**. Lo que de verdad diverge:
 
-- **Con Store** (producción real): `Store.save()` llama a `enableTechnologyCatalogue`, que activa una
-  memoria residente acotada (`memoryCapacity = min(32, budgets.maxRecipes)`) respaldada por el
-  archivo SQLite (`technology_definitions`/`technology_stats`); las recetas fuera de la ventana se
-  recuperan por `catalogueReader` en vez de perderse.
-- **Sin Store**: `world.technology.recipes` es un simple arreglo `slice(-budgets.maxRecipes)`
-  (256 por defecto), sin distinción "comprometido/pendiente" ni recuperación de lo evictado.
+- `budgets.maxRecipes` acota **`world.technology.recipes`** (la ventana LRU residente) con y sin
+  Store por igual. La diferencia entre regímenes es qué pasa cuando esa ventana se llena:
+  - **Con Store** (producción real): `Store.save()` llama a `enableTechnologyCatalogue`
+    (`src/server/store.ts:195`), que activa un catálogo respaldado por el archivo SQLite
+    (`technology_definitions`/`technology_stats`). Las recetas evictadas de la ventana residente
+    **no se pierden**: se recuperan por `catalogueReader` (`resolveTechnologyRecipe`), y
+    `technologyCatalogueTotals(world)` (`src/world/technology-catalogue.ts:161`) mantiene
+    `{recipes, manufactured, uses, utility, maxGeneration, functionalDiversity}` sin podar —
+    `recipes` sigue a `state.recipeCounter`, que sigue creciendo más allá de 256.
+  - **Sin Store**: no hay catálogo ni recuperación. Una vez `world.technology.recipes.length`
+    llega a `budgets.maxRecipes`, `registerTechnologyRecipe` **falla** en vez de podar
+    (`src/world/technology-catalogue.ts:131`, «standalone catalogue capacity») — la simulación deja
+    de poder inventar recetas nuevas. `technologyCatalogueTotals(world)` en este régimen recalcula
+    sobre la misma ventana acotada en cada llamada, así que sus totales también quedan atrapados
+    en ese tope.
+- `memoryCapacity` (`min(32, budgets.maxRecipes)` con Store) **no** acota `world.technology.recipes`:
+  acota `person.technology.knownRecipes`/`learnedFrom`, la memoria de recetas **por persona**
+  (`technologyMemoryCapacity`, usada en `src/world/technology.ts:52,407,472,597`). Sin Store,
+  `technologyMemoryCapacity` devuelve `budgets.maxRecipes` (256) sin acotar — la memoria por
+  persona es mucho más laxa que con Store (32).
 
 Un laboratorio que mida sin `Store` estaría midiendo una física de tecnología **distinta** a la que
 corre en `atlas.humanizar.tech`. Por eso `replica.ts`:
@@ -51,7 +69,8 @@ corre en `atlas.humanizar.tech`. Por eso `replica.ts`:
   "tick": 2400, "poblacion": 22, "nacimientos": 6,
   "muertesPorCausa": { "starvation": 0, "dehydration": 0, "exposure": 0, "senescence": 0 },
   "fundadoresVivos": 16, "generacionesVivas": 2,
-  "diversidadOficios": 2.59, "recetasDistintasEnUso": 69, "cooperaciones": 200,
+  "diversidadOficios": 2.59, "recetasDistintasEnUso": 69, "diversidadFuncional": 5,
+  "catalogoActivo": true, "cooperaciones": 200,
   "gini": null, "fraccionComida": null, "distanciaAgua": null,
   "p50Ms": 3.77, "p95Ms": 14.44, "rss": 245014528
 }
@@ -63,8 +82,21 @@ corre en `atlas.humanizar.tech`. Por eso `replica.ts`:
 - `diversidadOficios`: entropía de Shannon (bits) de `specialty()` entre los habitantes vivos, leída
   vía `projectWorld(world).people[].specialty` (la función `specialty()` no se exporta de
   `src/world/index.ts`, así que no se duplica aquí).
-- `recetasDistintasEnUso`: recetas en `world.technology.recipes` con `manufactured > 0` — el número
-  que P3 dice que cambia según haya o no `Store` adjunto.
+- `recetasDistintasEnUso`: **corregido (revisión 2026-09-19 de T016)** — ya no cuenta sobre
+  `world.technology.recipes` (esa ventana residente satura en `budgets.maxRecipes`, 256, con y sin
+  Store por igual: medido, día 2 con seed 51926 daba 256 en ambos regímenes). Ahora es
+  `technologyCatalogueTotals(world).recipes`: con Store (el único régimen de esta réplica) es
+  `world.technology.recipeCounter`, que **no** se poda al evictar la ventana y sigue creciendo
+  (264 al día 2 con la misma semilla) — el número que de verdad refleja cuántas recetas distintas
+  se han registrado, no el tamaño de una caché.
+- `diversidadFuncional`: `technologyCatalogueTotals(world).functionalDiversity` — cuántos perfiles
+  de capacidad (`Capability`: cutting/storage/insulation/cultivation/binding/abrasion, cuantizados)
+  distintos se han descubierto jamás; tampoco se poda al evictar la ventana residente. Complementa a
+  `recetasDistintasEnUso`: varias recetas pueden compartir el mismo perfil funcional.
+- `catalogoActivo`: `catalogueEnabled(world.technology)` — instrumento directo de P3, true ⇔ el
+  catálogo de producción (`enableTechnologyCatalogue`) está activo. Esta réplica SIEMPRE lo deja en
+  `true`; si algún cambio futuro deja de adjuntar el `Store`, este campo (y el test que lo afirma en
+  `tests/lab.test.ts`) lo detecta.
 - `gini`/`fraccionComida`/`distanciaAgua`: de `worldStatistics(world)` si T013 ya añadió
   `giniRecursosPorRegion`/`fraccionCeldasConComida`/`distanciaMediaAgua`; si no, `null` (comprobación
   dinámica con `typeof`, no un import estático — no se edita `statistics.ts`).

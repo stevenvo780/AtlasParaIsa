@@ -4,13 +4,24 @@
  * `--seed S --dias D [--params "a.b=1,c.d=2"] --salida <dir>`
  *
  * Corrige P3 (docs/REVISION-2026-09-19.md): las leyes de tecnología cambian según haya
- * o no un `Store` SQLite adjunto (con Store, `enableTechnologyCatalogue` fija
- * `memoryCapacity=32`; sin Store rige `budgets.maxRecipes=256` sin poda por LRU). Un
- * laboratorio sin Store mediría una física distinta a la de producción. Por eso esta
- * réplica SIEMPRE crea un `Store` temporal y lo guarda antes de simular un solo tick
- * (`store.save(world)` fija la catalogación y liga el `WorldContext`, ver
- * `src/server/store.ts:195` y `src/world/spatial.ts:18-22`), y vuelve a guardar cada
- * `persistencia.cadaTicks` ticks como haría el servidor.
+ * o no un `Store` SQLite adjunto. `budgets.maxRecipes` (256 por defecto) acota
+ * `world.technology.recipes` (la ventana residente) EN AMBOS regímenes — eso NO es lo
+ * que diverge (revisión 2026-09-19 de T016; `memoryCapacity` no acota esa ventana, acota
+ * `person.technology.knownRecipes`/`learnedFrom`, la memoria POR PERSONA, ver
+ * `src/world/technology.ts:52,407,472,597`). Lo que sí diverge: sin Store, una vez la
+ * ventana llega a `maxRecipes` no se puede registrar ninguna receta más
+ * (`registerTechnologyRecipe` falla con «standalone catalogue capacity»,
+ * `src/world/technology-catalogue.ts:131`) y `technologyMemoryCapacity` devuelve
+ * `budgets.maxRecipes` sin acotar (memoria por persona ilimitada hasta ese tope); con
+ * Store, `enableTechnologyCatalogue` activa un catálogo respaldado por SQLite
+ * (`technology_definitions`/`technology_stats`, recuperable vía `catalogueReader`) cuyos
+ * totales (`technologyCatalogueTotals`) NO se podan al evictar la ventana residente, y
+ * `memoryCapacity=min(32,maxRecipes)` sí acota la memoria por persona. Un laboratorio sin
+ * Store mediría una física distinta a la de producción. Por eso esta réplica SIEMPRE crea
+ * un `Store` temporal y lo guarda antes de simular un solo tick (`store.save(world)` fija
+ * la catalogación y liga el `WorldContext`, ver `src/server/store.ts:195` y
+ * `src/world/spatial.ts:18-22`), y vuelve a guardar cada `persistencia.cadaTicks` ticks
+ * como haría el servidor.
  */
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -19,6 +30,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../../src/server/store.js';
 import { assertWorld, createWorld, projectWorld, stepWorld, TICKS_PER_DAY } from '../../src/world/index.js';
+import { catalogueEnabled, technologyCatalogueTotals } from '../../src/world/technology-catalogue.js';
 import { worldStatistics } from '../../src/world/statistics.js';
 import { parseParams, type WorldParams } from '../../src/world/params.js';
 
@@ -63,10 +75,23 @@ function dailyMetrics(world: ReturnType<typeof createWorld>) {
   const generaciones = stats.generations;
   const specialties = projectWorld(world).people.map(p => p.specialty ?? '');
   const muertesPorCausa = Object.fromEntries(CAUSES.map(cause => [cause, world.demographyDynamics.causes[cause]])) as Record<Cause, number>;
+  // P3 (revisión 2026-09-19 de T016): `world.technology.recipes` es la ventana LRU
+  // residente, acotada por `budgets.maxRecipes` (256 por defecto) EN AMBOS regímenes —
+  // contar sobre ella satura a partir de ese tope y deja de distinguir con/sin Store.
+  // `technologyCatalogueTotals(world)` no se poda al evictar la ventana: con Store (el
+  // único régimen que corre esta réplica, ver cabecera del fichero) `.recipes` sigue a
+  // `recipeCounter` sin límite y `.functionalDiversity` cuenta perfiles de capacidad
+  // (`Capability`) realmente distintos jamás descubiertos, también sin ventana.
+  const catalogo = technologyCatalogueTotals(world);
   return {
     poblacion: world.people.length, nacimientos: world.totals.births ?? 0, muertesPorCausa,
     fundadoresVivos: generaciones['0'] ?? 0, generacionesVivas: Object.keys(generaciones).length,
-    diversidadOficios: specialtyEntropy(specialties), recetasDistintasEnUso: world.technology.recipes.filter(r => r.manufactured > 0).length,
+    diversidadOficios: specialtyEntropy(specialties), recetasDistintasEnUso: catalogo.recipes,
+    diversidadFuncional: catalogo.functionalDiversity,
+    // Instrumento directo: true ⇔ el mundo tiene el catálogo de producción activo
+    // (`enableTechnologyCatalogue`, ver Store.save). Esta réplica SIEMPRE lo deja en
+    // true; si alguien quita el Store este campo lo delata (y el test de abajo lo afirma).
+    catalogoActivo: catalogueEnabled(world.technology),
     cooperaciones: world.totals.cooperation ?? 0, gini, fraccionComida, distanciaAgua,
   };
 }

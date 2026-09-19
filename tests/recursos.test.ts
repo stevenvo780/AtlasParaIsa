@@ -47,7 +47,12 @@ test('implicit and explicit default resource parameters preserve the complete wo
  * si se quita la capacidad, la comida media vuelve a ~0,96 y el Gini se desploma a ~0. */
 test('finite biome capacities bind the ten-day harvest and open regional inequality', () => {
   const seed = 51926, params = parseParams('recursos.capacidadOtros=0.2,recursos.capacidadPastizal=0.5,recursos.decaimientoFertilidad=0.001');
-  const finite = tenDays(seed, params), control = tenDays(seed);
+  // Legacy "no capacity" control (capacidadPastizal=1, capacidadOtros=1, the old defaults). Since the
+  // 2026-09-19 recalibration DEFAULT_PARAMS itself now has finite capacidadPastizal=0.7/capacidadOtros=0.35,
+  // so an implicit-defaults control is no longer a "no capacity" baseline and would open its own,
+  // smaller inequality (Gini ~0.19 measured) — it must be pinned explicitly to keep this a real control.
+  const control = tenDays(seed, parseParams('recursos.capacidadPastizal=1,recursos.capacidadOtros=1'));
+  const finite = tenDays(seed, params);
   const overCapacity = landOf(finite).filter(tile => tile.food > capacityOf(tile, params) + 1e-9 || tile.vegetation > capacityOf(tile, params) + 1e-9);
   assert.equal(overCapacity.length, 0, `${overCapacity.length} celdas superaron su capacidad de carga`);
   const gini = giniRecursosPorRegion(finite), giniControl = giniRecursosPorRegion(control);

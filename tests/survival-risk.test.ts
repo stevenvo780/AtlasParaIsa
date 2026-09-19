@@ -4,9 +4,10 @@ import { createWorld, stepWorld, cloneWorld } from '../src/world/index.js';
 import { tileAt } from '../src/world/spatial.js';
 import { demographicTraits } from '../src/world/demography.js';
 import { BROKEN_CONDITION, constructionCost, constructionOpportunity } from '../src/world/inventions.js';
+import { parseParams, type WorldParams } from '../src/world/params.js';
 
-function scene(role: 'neighbor' | 'S' = 'neighbor') {
-  const world = createWorld(42), person = world.people.find(p => p.role === role)!;
+function scene(role: 'neighbor' | 'S' = 'neighbor', params?: WorldParams) {
+  const world = createWorld(42, params), person = world.people.find(p => p.role === role)!;
   // Isolate the actor's own consumption from a neighbor feeding it first.
   for (const p of world.people) { p.inventory = 0; p.hunger = .2; }
   Object.assign(person, { x: 25, y: 8, hunger: 1, thirst: .2, energy: .14, fatigue: .58,
@@ -71,8 +72,8 @@ test('near-zero health does not create unbounded choices or prevent a physically
 
 /** Decision laboratory: all initial stocks/conditions are explicit, with no
  * replenishment, command or body intervention while the trial runs. */
-function rainScene() {
-  const { world, person } = scene();
+function rainScene(params?: WorldParams) {
+  const { world, person } = scene('neighbor', params);
   world.weather = 'rain';
   const roof = world.structures.find(s => s.x === 25 && s.y === 8)!;
   assert.ok(roof?.components.includes('roof'));
@@ -215,8 +216,8 @@ test('missing or unreachable building materials cannot finance protective work',
   }
 });
 
-function emptyRoofLaboratory(hunger = 1) {
-  const { world, person, roof } = rainScene();
+function emptyRoofLaboratory(hunger = 1, params?: WorldParams) {
+  const { world, person, roof } = rainScene(params);
   world.tick = 1801; world.reproductionEnabled = false; world.cooperationEnabled = false;
   world.people = [person]; world.animals = []; world.communities = []; world.invitations = [];
   for (const tile of world.tiles) { tile.food = 0; tile.fauna = 0; tile.vegetation = 0; tile.wood = 0; tile.stone = 0; tile.drinkingWater = 0; }
@@ -261,8 +262,18 @@ test('protective rest still competes when no meal is needed and hunger search is
   }
 });
 
+// Legacy founder determinism (genes.varianzaFundadores=0, the old default). This control's neighbor
+// (seed 42) sits on a real knife-edge between eating through the finite meal and repeatedly breaking
+// off to search for rain cover (both are modeled, competing motives; see the "protective rest still
+// competes" test above). MEASURED 2026-09-19: with the recalibrated default (varianzaFundadores=0.15)
+// that same neighbor's perturbed genome pushes the trade-off just past the 180-step/0.7 threshold
+// (hunger ends at ~0.71, never below .7). None of the other recalibrated defaults (senescence risk,
+// biome capacities, fertility decay, agua.cuencas) move this outcome — isolated testing confirmed only
+// genes.varianzaFundadores drives it. Pinning the old value keeps this a determinism control instead of
+// a referendum on the new genetic variance; the underlying rain/food trade-off is exercised elsewhere.
+const LEGACY_FOUNDER_DETERMINISM = parseParams('genes.varianzaFundadores=0');
 test('the hungry search control with enough initial health reaches a meal and remains alive for 180 steps', () => {
-  const { world, person } = emptyRoofLaboratory(), food = tileAt(world, { x: 33, y: 8 })!;
+  const { world, person } = emptyRoofLaboratory(1, LEGACY_FOUNDER_DETERMINISM), food = tileAt(world, { x: 33, y: 8 })!;
   person.demography.health = .12; food.terrain = 'meadow'; food.food = .9;
   for (let i = 0; i < 180; i++) stepWorld(world);
   assert.ok(world.people.includes(person));

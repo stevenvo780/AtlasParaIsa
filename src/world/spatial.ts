@@ -7,6 +7,7 @@ import type { AnimalView, StructureView } from '../shared/life.js';
 import { projectAnimal } from './animals.js';
 import type { LegacyRecord } from '../shared/demography.js';
 import { bindTechnologyCatalogue, type TechnologyCatalogueReader } from './technology-catalogue.js';
+import { paramsOf } from './params.js';
 
 export interface WorldContext {
   loadChunk?: (key: string, atTick: number) => Chunk | null;
@@ -38,10 +39,12 @@ export function activate(world: World, x: number, y: number, context: WorldConte
   if (world.chunks[key]) return;
   const pending = world.retiredChunks.findIndex(c => c.key === key);
   const { cx, cy } = chunkCoords(x, y);
-  const chunk = pending >= 0 ? world.retiredChunks.splice(pending, 1)[0]! : context.loadChunk?.(key, world.tick) ?? generateChunk(world.seed, cx, cy);
+  // T035: el mundo genera su terreno con SUS params (`agua.cuencas`), no con `DEFAULT_PARAMS`.
+  const cuencas = paramsOf(world).agua.cuencas;
+  const chunk = pending >= 0 ? world.retiredChunks.splice(pending, 1)[0]! : context.loadChunk?.(key, world.tick) ?? generateChunk(world.seed, cx, cy, cuencas);
   const { tiles, animals, structures, ...meta } = chunk;
   world.chunks[key] = meta;
-  const initialized=tiles.map(tile => initializeEcosystem(world.seed, tile));
+  const initialized=tiles.map(tile => initializeEcosystem(world.seed, tile, cuencas));
   world.tiles.push(...initialized);
   world.animals.push(...(animals ?? materializeAnimals(world.seed, initialized, world.tick)));
   world.structures.push(...(structures ?? legacyStructures(tiles, world.tick)));
@@ -102,13 +105,13 @@ export function projectTerrain(world: World, viewport?: Viewport, context: World
     let chunk = archive.get(key);
     if (!chunk) {
       const { cx, cy } = chunkCoords(x, y);
-      chunk = world.retiredChunks.find(c => c.key === key) ?? context.loadChunk?.(key, world.tick) ?? generateChunk(world.seed, cx, cy);
+      chunk = world.retiredChunks.find(c => c.key === key) ?? context.loadChunk?.(key, world.tick) ?? generateChunk(world.seed, cx, cy, paramsOf(world).agua.cuencas);
       archive.set(key, chunk);
       // Undiscovered landmarks are scenery, not recorded discoveries.
       for (const place of chunk.places) places.set(place.id, place);
     }
     const index = (y - chunk.cy * CHUNK_SIZE) * CHUNK_SIZE + x - chunk.cx * CHUNK_SIZE;
-    tiles.push(initializeEcosystem(world.seed, chunk.tiles[index] ?? generateTile(world.seed, x, y)));
+    tiles.push(initializeEcosystem(world.seed, chunk.tiles[index] ?? generateTile(world.seed, x, y, paramsOf(world).agua.cuencas), paramsOf(world).agua.cuencas));
   }
   const visible = (p: {x: number; y: number}) => p.x >= v.x && p.y >= v.y && p.x < v.x + v.width && p.y < v.y + v.height;
   return { viewport: v, tiles, places: [...places.values()].filter(visible).map(p => ({ ...p })),

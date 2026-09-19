@@ -1,10 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createWorld, stepWorld, projectWorld, assertWorld, tileAt, type World } from '../src/world/index.js';
+import { parseParams, type WorldParams } from '../src/world/params.js';
 
 function run(w: World, ticks: number) { for (let n = 0; n < ticks; n++) stepWorld(w); }
-function ready() {
-  const w = createWorld(51926), p = w.people[2]!;
+function ready(params?: WorldParams) {
+  const w = createWorld(51926, params), p = w.people[2]!;
   p.x = 36; p.y = 12; p.target = { x: p.x, y: p.y }; p.hunger = 0.1; p.fatigue = 0.1; p.energy = 1;
   p.materials = { wood: 6, stone: 3 }; p.work = 0; p.decisionAt = 0;
   return { w, p };
@@ -75,7 +76,12 @@ test('professions are descriptive and urgent bodily needs can suspend user work'
 });
 
 test('a failed task changes the next autonomous choice; its paired learning control keeps the same costs', () => {
-  const { w, p } = ready();
+  // Control de la ley de adaptación: se mide con los fundadores SIN varianza genética (el default
+  // previo a la calibración ab4d9fb, hoy `genes.varianzaFundadores=0.15`). Con varianza, los rasgos
+  // de `w.people[2]` cambian y el castigo aprendido de 'gather' ya no basta para voltear la elección
+  // a 'explore': lo que se quiere fijar aquí es la ley (castigo ⇒ cambio de elección), no la
+  // calibración genética. Constitución I: el control fija sus params explícitamente.
+  const { w, p } = ready(parseParams('genes.varianzaFundadores=0'));
   p.materials = { wood: 0, stone: 0 }; p.curiosity = 0.5; p.traits.industriousness = 0.2125; p.generosity = 0; p.closeness = 0;
   const tile = tileAt(w, p)!; tile.wood = 0; tile.stone = 0;
   // Keep the nearest resource unavailable until the directed trial completes.

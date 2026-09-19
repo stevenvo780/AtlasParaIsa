@@ -59,7 +59,14 @@ test('dos réplicas con la misma semilla y params dan métricas idénticas salvo
 
   assert.deepEqual(stripTimings(readJson(join(dirA, 'dia-001.json'))), stripTimings(readJson(join(dirB, 'dia-001.json'))));
   const replicaA = readJson(join(dirA, 'replica.json')), replicaB = readJson(join(dirB, 'replica.json'));
+  // `digest` (sha256 de los .ts de src/world) SÍ debe coincidir: es la huella del código de
+  // simulación y cualquier diferencia significaría que las dos réplicas no corrieron el mismo mundo.
   assert.equal(replicaA.digest, replicaB.digest);
-  assert.equal(replicaA.sha, replicaB.sha);
+  // `sha` NO se compara: es `git rev-parse HEAD` en el momento de correr (replica.ts, README §sha),
+  // es decir PROCEDENCIA, no una métrica del mundo. Dos spawns separados por un commit en el árbol
+  // (normal durante un sprint) devuelven SHAs distintos sin que el mundo haya cambiado en nada —
+  // exactamente lo que ocurrió en la corrida 28720d8 (776b22f vs 1f08d79, dos commits del sprint).
+  // Se mantiene el contrato de formato, que es lo que este test puede afirmar de verdad.
+  for (const sha of [replicaA.sha, replicaB.sha]) assert.match(sha as string, /^[0-9a-f]{40}$/);
   assert.deepEqual(stripTimings(replicaA.resumen as Json), stripTimings(replicaB.resumen as Json));
 });

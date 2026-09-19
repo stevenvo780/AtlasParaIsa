@@ -9,7 +9,7 @@ import { pathToFileURL } from 'node:url';
 import { once } from 'node:events';
 import { WebSocket } from 'ws';
 import { Store } from '../src/server/store.js';
-import { createApp, parseGesture } from '../src/server/app.js';
+import { createApp, parseGesture, loginKey, trustedProxiesFromEnv, rate } from '../src/server/app.js';
 import { createWorld, stepWorld, projectWorld } from '../src/world/index.js';
 import { parseParams, setParams } from '../src/world/params.js';
 import { hashToken, makeToken, passwordRecord, passwordVerifier } from '../src/server/auth.js';
@@ -329,4 +329,73 @@ test('el planificador cita cada paso con compensación de deriva y el cierre no 
   const stopped=f.app.world.tick;
   await new Promise<void>(resolve=>setTimeout(resolve,80));
   assert.equal(f.app.world.tick,stopped,'tras cerrar no se planifica ningún paso más');
+||||||| b30d61b
+test('loginKey uses X-Forwarded-For when the socket is loopback',()=>{
+  assert.equal(loginKey('127.0.0.1','8.8.8.8'),'8.8.8.8');
+  assert.equal(loginKey('::1','2001:db8::1'),'2001:db8::1');
+  assert.equal(loginKey('::ffff:127.0.0.1','8.8.8.8'),'8.8.8.8');
+});
+test('loginKey picks the LAST IP from a comma-separated XFF chain (the one the trusted proxy appended, not the client-controlled head)',()=>{
+  assert.equal(loginKey('127.0.0.1','9.9.9.9, 1.1.1.1'),'1.1.1.1');
+  assert.equal(loginKey('127.0.0.1',['9.9.9.9','1.1.1.1']),'1.1.1.1');
+});
+test('loginKey falls back to remoteAddress when the last XFF token is invalid',()=>{
+  assert.equal(loginKey('127.0.0.1','8.8.4.4, no-soy-una-ip'),'127.0.0.1');
+  assert.equal(loginKey('127.0.0.1',['1.1.1.1','   ']),'127.0.0.1');
+});
+test('loginKey falls back to remoteAddress when no XFF header is present',()=>{
+  assert.equal(loginKey('127.0.0.1',undefined),'127.0.0.1');
+});
+test('loginKey ignores XFF when the socket is not a trusted proxy',()=>{
+  assert.equal(loginKey('203.0.113.5','8.8.8.8'),'203.0.113.5');
+});
+test('loginKey falls back to "local" when remoteAddress is undefined',()=>{
+  assert.equal(loginKey(undefined,undefined),'local');
+  assert.equal(loginKey(undefined,'8.8.8.8'),'local');
+});
+
+// Hallazgo crítico C7 (ronda de revisión T023): en producción atlas-servidor escucha en la
+// malla (HOST=100.64.0.1) y el peer real es el Caddy del VPS por la malla (100.64.0.11), no
+// loopback. Por defecto (sin CARTA_PROXY_IP) ese socket NO es de confianza -- la sesión de
+// login no debe leer XFF de un origen no declarado explícitamente.
+test('loginKey does NOT trust XFF from the real mesh proxy address by default (loopback-only trust)',()=>{
+  assert.equal(loginKey('100.64.0.11','8.8.8.8'),'100.64.0.11');
+});
+// ... pero una vez declarado de confianza (el arreglo real de C7), el socket de malla sí
+// puede aportar la IP del cliente vía XFF, exactamente el caso "socket = 100.64.0.11 y XFF
+// presente" que pidió el revisor.
+test('loginKey trusts XFF from an explicitly-configured proxy address (mesh peer 100.64.0.11)',()=>{
+  const trusted = new Set(['127.0.0.1','::1','::ffff:127.0.0.1','100.64.0.11']);
+  assert.equal(loginKey('100.64.0.11','8.8.8.8',trusted),'8.8.8.8');
+  assert.equal(loginKey('100.64.0.12','8.8.8.8',trusted),'100.64.0.12');
+});
+
+test('trustedProxiesFromEnv adds CARTA_PROXY_IP (comma-separated) on top of loopback, and stays loopback-only when unset',()=>{
+  assert.deepEqual([...trustedProxiesFromEnv({})].sort(),['127.0.0.1','::1','::ffff:127.0.0.1'].sort());
+  assert.deepEqual([...trustedProxiesFromEnv({CARTA_PROXY_IP:''})].sort(),['127.0.0.1','::1','::ffff:127.0.0.1'].sort());
+  const withProxy = trustedProxiesFromEnv({CARTA_PROXY_IP:' 100.64.0.11 , 100.64.0.12'});
+  assert.ok(withProxy.has('100.64.0.11')&&withProxy.has('100.64.0.12')&&withProxy.has('127.0.0.1'));
+});
+
+test('login rate-limit isolates clients by forwarded IP behind a loopback proxy',async t=>{
+  const f=await fixture(t);
+  const post=(xff:string)=>fetch(f.origin+'/api/login',{method:'POST',headers:{Origin:f.origin,'Content-Type':'application/json','X-Forwarded-For':xff},body:JSON.stringify({password})});
+  for(let i=0;i<6;i++){const res=await post('10.0.0.1');assert.equal(res.status,200);}
+  const blocked=await post('10.0.0.1');assert.equal(blocked.status,429);
+  const different=await post('10.0.0.2');assert.notEqual(different.status,429);
+});
+
+// Hallazgo "importante" (ronda de revisión T023): el cupo global compartido (loginGlobal,
+// app.ts) es una regla nueva con coste (constitución / regla de ejecución 5) y no tenía test.
+// rate() es exactamente el mecanismo que envuelve ese Map con la clave fija '*': un test
+// directo sobre rate() refuta cualquier umbral equivocado, clave mal puesta u off-by-one sin
+// pagar 600 peticiones HTTP reales.
+test('rate() enforces a hard cap once a shared key crosses the threshold (the mechanism behind the global login cap)',()=>{
+  const map = new Map<string,{count:number;reset:number}>();
+  for(let i=0;i<600;i++) assert.doesNotThrow(()=>rate(map,'*',600,60_000));
+  assert.throws(()=>rate(map,'*',600,60_000),/Espera un momento/);
+  // Aislada de otras claves: una clave nueva no comparte cupo con '*'.
+  const other = new Map<string,{count:number;reset:number}>();
+  other.set('*',{count:600,reset:Date.now()+60_000});
+  assert.doesNotThrow(()=>rate(other,'otra-clave',6,60_000));
 });

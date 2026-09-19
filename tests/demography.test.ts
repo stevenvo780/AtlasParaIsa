@@ -6,17 +6,22 @@ import { demographicTraits, DEMOGRAPHY_TICKS_PER_DAY as DAY, initialDemography, 
 import { assertGenome, founderGenome, inheritGenome, localRandom, type Genome } from '../src/world/genetics.js';
 import { createWorld, stepWorld, type Person } from '../src/world/index.js';
 import { closeKin } from '../src/world/family.js';
+import { DEFAULT_PARAMS } from '../src/world/params.js';
 
-const safe: DemographicEnvironment = { exposure: 0, shelter: 0, protected: false };
+const safe: DemographicEnvironment = { exposure: 0, shelter: 0, protected: false, seed: 431, tick: 0, senescence: DEFAULT_PARAMS.cuerpo };
 function genome(resilience = 0.5, activity = 0.5, id = 'founder'): Genome {
   return founderGenome(431, id, { curiosity: 0.5, sociability: 0.5, industriousness: activity, care: 0.5, resilience });
 }
 function actor(resilience = 0.5): DemographicActor {
-  return { state: initialDemography(), traits: demographicTraits(genome(resilience)), hunger: 0.1, thirst: 0.1, energy: 0.85, fatigue: 0.1 };
+  return { id: `body-${resilience}`, state: initialDemography(), traits: demographicTraits(genome(resilience)), hunger: 0.1, thirst: 0.1, energy: 0.85, fatigue: 0.1 };
 }
 function untilDeath(person: DemographicActor, environment: DemographicEnvironment, limit = 50 * DAY) {
   let current = { ...person, state: { ...person.state } }, result = updateDemography(current, environment, 0);
-  for (let tick = 0; tick < limit && !result.death; tick += 240) { result = updateDemography(current, environment, 240); current = { ...current, state: result.state }; }
+  // El tick avanza con la edad: la tirada de senescencia es pura en (semilla, id, tick) y un tick
+  // congelado repetiría el mismo dado en cada paso.
+  for (let tick = 0; tick < limit && !result.death; tick += 240) {
+    result = updateDemography(current, { ...environment, tick: (environment.tick ?? 0) + tick }, 240); current = { ...current, state: result.state };
+  }
   return result;
 }
 const close = (actual: number, expected: number) => assert.ok(Math.abs(actual - expected) < 1e-10, `${actual} != ${expected}`);
@@ -78,8 +83,9 @@ test('continuity protection is an explicit external policy and leaves the physio
   assert.equal(protectedResult.state.deathCause, null); assert.equal(protectedResult.offspringEligible, false);
   assert.equal(protectedResult.damage.dehydration, unprotected.damage.dehydration); assert.equal(person.thirst, 1);
   const oldBody = actor();
-  const old = { ...oldBody, state: { ...initialDemography(oldBody.traits.maximumAge * 3), health: 0.00001, vitality: 0.01 } };
+  const old = { ...oldBody, state: { ...initialDemography(oldBody.traits.maximumAge * 8), health: 0.00001, vitality: 0.01 } };
   const continued = updateDemography(old, { ...safe, protected: true });
+  assert.equal(continued.senescenceRisk, 1);
   assert.equal(continued.death, null); assert.equal(continued.preventedDeath, 'senescence'); assert.equal(continued.state.age, old.state.age + 1);
 });
 

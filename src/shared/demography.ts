@@ -29,6 +29,8 @@ export interface SenescenceLaw {
 }
 
 export interface DemographicActor {
+  /** Identidad estable del cuerpo. Obligatoria en toda llamada con `dt > 0`: la tirada de
+   * senescencia es pura en `(seed, id, tick)` y no existe ningún valor por defecto. */
   id?: string;
   state: Readonly<DemographicState>;
   traits: Readonly<DemographicTraits>;
@@ -41,8 +43,12 @@ export interface DemographicActor {
 export interface DemographicEnvironment {
   exposure: number;
   shelter: number;
+  /** Semilla y tick del mundo. Obligatorios con `dt > 0`; sin ellos `updateDemography` lanza
+   * en vez de caer en una semilla fija que sincronizaría las muertes entre réplicas. */
   seed?: number;
   tick?: number;
+  /** `paramsOf(world).cuerpo`. Obligatoria con `dt > 0`: sin defaults ocultos, el laboratorio
+   * (T016–T018) necesita que `parseParams` llegue hasta aquí. */
   senescence?: Readonly<SenescenceLaw>;
   /** External continuity policy, supplied by the caller for protected identities. */
   protected: boolean;

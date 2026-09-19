@@ -199,6 +199,9 @@ function sound(): void {
 }
 
 function receiveWorld(next: WorldView): void {
+  // T036(g): un procedimiento puede reformularse mientras el mundo avanza. La caché describe un
+  // paso concreto: al cambiar `tick` deja de ser válida y se vuelve a preguntar bajo demanda.
+  if (world !== null && next.tick !== world.tick) recipeDetails.clear();
   const first = world === null; world = next; landscape?.update(next); el('map-loading').hidden = true; el('world-day').textContent = `Día ${next.day}`; el('world-phase').textContent = `${phases[next.phase]}${next.weather === 'rain' ? ' · lluvia' : ''}`;
   el('world-extent').textContent = next.infinite ? `${next.discoveredChunks ?? 0} regiones · ${next.settlementCount ?? 0} asentamientos` : 'Región inicial';
   if (first) {

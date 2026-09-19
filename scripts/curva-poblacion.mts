@@ -1,5 +1,5 @@
-import { createWorld, stepWorld, cloneWorld, TICKS_PER_DAY } from './src/world/index.js';
-import { parseParams, setParams, paramsOf } from './src/world/params.js';
+import { createWorld, stepWorld, cloneWorld, TICKS_PER_DAY } from '../src/world/index.js';
+import { parseParams, setParams, paramsOf } from '../src/world/params.js';
 
 const days = Number(process.env.DIAS ?? 10);
 let world = createWorld(51926);
@@ -14,7 +14,7 @@ for (let day = 1; day <= days; day++) {
     world = draft;
   }
   const ms = performance.now() - t0;
-  const food = world.people.reduce((s, p) => s + p.inventory, 0) / Math.max(1, world.people.length);
+  const food = world.people.reduce((s: number, p) => s + p.inventory, 0) / Math.max(1, world.people.length);
   line.push(String(world.people.length));
   console.log(`dia ${day}: poblacion=${world.people.length} nacimientos=${world.totals.births ?? 0} muertes=${world.demographyDynamics.deaths} reservaPerCapita=${food.toFixed(3)} msPorTick=${(ms / TICKS_PER_DAY).toFixed(2)}`);
 }

@@ -16,7 +16,7 @@ import { BoundedCache, GpuTerrain, type GpuStatus, type TerrainRaster } from './
 import { animalActions, speciesNames, paintAnimal, paintStructure, paintTree, treeForm, type TreeForm } from './life-art.js';
 import { animalPose, daylightAt, newEventAccents, VISUAL_BUDGET, EVENT_LIFETIME_MS, type EventAccent } from './visual-state.js';
 import type { Capability } from '../shared/technology.js';
-import { decidirModo } from './modo.js';
+import { decidirModo, rendererProfile, type Modo } from './modo.js';
 import { dibujarCalor, type Capa } from './calor.js';
 
 /* ------------------------------------------------------------------ */
@@ -428,7 +428,10 @@ export class Landscape {
   private cssH = 0;
   // Ligero móvil (P1): decidido una vez por instancia; `resize`/`frame` lo usan. Wiring mínimo
   // fuera de esos dos métodos (una constante calculada, no una regla) — ver informe de T024.
-  private readonly modo = decidirModo();
+  // R5: manda `options.modo` (así lo decidió quien instancia); solo se recae en la heurística
+  // de `decidirModo()` cuando no se pasa ninguno explícito. Se asigna en el constructor (no aquí,
+  // en el inicializador de campo) porque ahí ya existe `options`.
+  private readonly modo: Modo;
   private lastFrameAt = 0;
 
   private pointers = new Map<number, PointerState>();
@@ -456,12 +459,13 @@ export class Landscape {
   constructor(canvas: HTMLCanvasElement, onSelect: SelectHandler, private readonly onViewport?: (viewport: Viewport) => void, private readonly onManualCamera?: () => void, options: { allowSoftwareWebGL?: boolean; modo?: 'completo' | 'observador' } = {}) {
     this.canvas = canvas;
     this.onSelect = onSelect;
+    this.modo = options.modo ?? decidirModo();
 
     const ctx = canvas.getContext('2d', { alpha: true });
     if (!ctx) throw new Error('Landscape: este navegador no expone un contexto 2D.');
     this.ctx = ctx;
 
-    this.gpu = options.modo === 'observador' ? null : new GpuTerrain(canvas, options.allowSoftwareWebGL);
+    this.gpu = this.modo === 'observador' ? null : new GpuTerrain(canvas, options.allowSoftwareWebGL);
     // Multiplication must happen after browser composition: tinting a transparent 2D
     // overlay alone would brighten the WebGL terrain at night. Labels remain above it.
     for (const layer of [this.phaseLayer, this.rainLayer]) {
@@ -638,8 +642,9 @@ export class Landscape {
     const rect = this.canvas.getBoundingClientRect();
     const w = Math.max(1, Math.round(rect.width));
     const h = Math.max(1, Math.round(rect.height));
-    // P1: sin techo, un móvil de dpr 3 redibujaba > 3 MPx por frame. Observador limita a 1×.
-    this.dpr = clamp(window.devicePixelRatio || 1, 1, this.modo === 'observador' ? 1 : 1.5);
+    // R5: techo de dpr por `this.modo` (ver `rendererProfile`, sin DOM) — completo hasta 3×,
+    // observador ≤ 1,5× (P1: sin techo, un móvil de dpr 3 redibujaba > 3 MPx por frame).
+    this.dpr = clamp(window.devicePixelRatio || 1, 1, rendererProfile(this.modo).dprCeiling);
     this.cssW = w;
     this.cssH = h;
     const dw = Math.round(w * this.dpr);
@@ -1116,11 +1121,13 @@ export class Landscape {
 
   private frame(now: number): void {
     if (this.destroyed) return;
-    // P1 observador: 30 fps (mitad de un rAF típico de 60 Hz) y sin interpolar —
-    // reutiliza `reduceMotion`, que ya congela la pose y detiene la interpolación en todo el resto.
-    if (this.modo === 'observador') {
+    // R5: tope de fps por `this.modo` (ver `rendererProfile`, sin DOM). P1 observador: 30 fps
+    // (mitad de un rAF típico de 60 Hz) y sin interpolar — reutiliza `reduceMotion`, que ya
+    // congela la pose y detiene la interpolación en todo el resto. Completo no tiene tope propio.
+    const fpsCap = rendererProfile(this.modo).fpsCap;
+    if (fpsCap !== null) {
       this.reduceMotion = true;
-      if (now - this.lastFrameAt < 1000 / 30) { this.raf = requestAnimationFrame((t) => this.frame(t)); return; }
+      if (now - this.lastFrameAt < 1000 / fpsCap) { this.raf = requestAnimationFrame((t) => this.frame(t)); return; }
     }
     this.lastFrameAt = now;
     this.tickFocus(now);

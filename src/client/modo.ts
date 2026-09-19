@@ -56,3 +56,26 @@ export function decidirModo(): Modo {
   if (stored) return stored;
   return smallScreen() || limitedMemory() || noWebgl2() ? 'observador' : 'completo';
 }
+
+/** Techo de dpr y tope de fps que `Landscape` aplica al dibujar. */
+export interface RendererProfile {
+  /** Factor máximo de `devicePixelRatio` (antes de `clamp(dpr, 1, techo)`). */
+  readonly dprCeiling: number;
+  /** Tope de fps del bucle de dibujo, o `null` si no hay tope (tan rápido como el `rAF` del navegador). */
+  readonly fpsCap: number | null;
+}
+
+const RENDERER_PROFILES: Record<Modo, RendererProfile> = {
+  // Escritorio: sin recorte de nitidez (hasta 3×) ni tope de fps propio.
+  completo: { dprCeiling: 3, fpsCap: null },
+  // Móvil de gama baja (P1, FR-008): clava el dpr efectivo en 1× (contrato T024) y throttlea a 30 fps para no quemar batería/CPU.
+  observador: { dprCeiling: 1, fpsCap: 30 },
+};
+
+/**
+ * R5: el techo de dpr y el tope de fps se derivan ESTRICTAMENTE de `Modo` — nunca de una
+ * heurística suelta releída aparte (tamaño de pantalla, memoria, WebGL2…). Pura, sin DOM.
+ */
+export function rendererProfile(modo: Modo): RendererProfile {
+  return RENDERER_PROFILES[modo];
+}

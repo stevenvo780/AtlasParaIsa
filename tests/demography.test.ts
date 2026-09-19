@@ -4,6 +4,8 @@ import type { DemographicActor, DemographicEnvironment } from '../src/shared/dem
 import { demographicTraits, DEMOGRAPHY_TICKS_PER_DAY as DAY, initialDemography, MAX_DEMOGRAPHY_DT,
   PROTECTED_HEALTH_FLOOR, PROTECTED_VITALITY_FLOOR, updateDemography } from '../src/world/demography.js';
 import { assertGenome, founderGenome, inheritGenome, localRandom, type Genome } from '../src/world/genetics.js';
+import { createWorld, stepWorld, type Person } from '../src/world/index.js';
+import { closeKin } from '../src/world/family.js';
 
 const safe: DemographicEnvironment = { exposure: 0, shelter: 0, protected: false };
 function genome(resilience = 0.5, activity = 0.5, id = 'founder'): Genome {
@@ -181,4 +183,80 @@ test('paired eight-generation experiment changes inherited distributions under s
   context.diagnostic(JSON.stringify({ experiment: 'paired-inherited-selection', seeds: results.map(r => r.seed), generations: 8, cohort: 64,
     initialMean: 0.5, selectedMean: selected, neutralMean: neutral, difference: selected - neutral,
     limitation: 'controlled exposure assay and weighted parent selection; not evidence of open-ended autonomous evolution' }));
+});
+
+function gini(values: number[]): number {
+  const n = values.length, sum = values.reduce((total, value) => total + value, 0);
+  if (sum === 0) return 0;
+  let total = 0;
+  for (const x of values) for (const y of values) total += Math.abs(x - y);
+  return total / (2 * n * sum);
+}
+
+test('affinity with replacement spreads paternity among 32 inhabitants (Gini < 0.5)', context => {
+  const world = createWorld(51926);
+  world.tick = 599;
+  const template = world.people.find(person => person.role === 'neighbor')!;
+  while (world.people.length < 32) {
+    const id = `neighbor-extra-${world.people.length}`;
+    world.people.push({ ...structuredClone(template), id, name: id, genome: founderGenome(world.seed, id, template.traits), bonds: {}, communityId: null });
+  }
+  const neighbors = world.people.filter(person => person.role === 'neighbor');
+  world.communities = [{ id: 'shared', name: 'shared', x: 17, y: 13, color: '#aabbcc', members: neighbors.map(person => person.id), culture: { ...template.culture }, formedAt: 0, cooperation: 0, disputes: 0 }];
+  world.places = [{ ...world.places[0]!, x: 17, y: 13 }];
+  for (const person of neighbors) {
+    person.x = 17; person.y = 13; person.target = { x: 17, y: 13 }; person.communityId = 'shared'; person.bonds = {};
+    const traits = demographicTraits(person.genome);
+    person.bornAt = world.tick - traits.maturityAge - 10; person.lastBirth = world.tick - traits.fertilityCooldown;
+    person.demography = initialDemography(world.tick - person.bornAt);
+    person.hunger = person.thirst = person.fatigue = 0.1; person.energy = 0.9; person.inventory = 0.2;
+    person.action = 'rest'; person.decisionAt = world.tick + 999;
+  }
+  for (const a of neighbors) for (const b of neighbors) if (a.id < b.id) {
+    const bond = 0.3 + localRandom(world.seed, `bond:${a.id}:${b.id}`)() * 0.7;
+    a.bonds[b.id] = b.bonds[a.id] = bond;
+  }
+  const founders = new Set(neighbors.map(person => person.id));
+  const counts = new Map<string, number>([...founders].map(id => [id, 0]));
+  const parentsOf: [string, string][] = [];
+  const remove = (person: Person) => {
+    world.people = world.people.filter(other => other.id !== person.id);
+    for (const other of world.people) delete other.bonds[person.id];
+    for (const community of world.communities) community.members = community.members.filter(id => id !== person.id);
+  };
+  for (let n = 0; n < 200; n++) {
+    if (n) world.tick += 119;
+    if (world.people.length >= 32) {
+      const vacant = world.people.find(person => person.genome.parents.length) ?? world.people.find(person => person.id.startsWith('neighbor-extra-'));
+      if (vacant) remove(vacant);
+    }
+    for (const person of world.people) {
+      if (person.role === 'S' || person.role === 'I') {
+        person.bornAt = world.tick - 4800; person.demography = initialDemography(4800);
+        person.hunger = person.thirst = person.fatigue = 0.1; person.energy = 0.9;
+        continue;
+      }
+      if (person.role === 'neighbor' && !person.genome.parents.length) {
+        const traits = demographicTraits(person.genome);
+        person.bornAt = world.tick - traits.maturityAge - 10;
+        person.hunger = person.thirst = person.fatigue = 0.1; person.energy = 0.9; person.inventory = 0.2;
+        person.x = person.y = 17; person.target = { x: 17, y: 13 }; person.action = 'rest'; person.decisionAt = world.tick + 999;
+      }
+      person.demography.age = world.tick - person.bornAt;
+    }
+    const before = world.totals.births;
+    stepWorld(world);
+    if (world.totals.births === before) continue;
+    const child = world.people.find(person => person.bornAt === world.tick)!;
+    assert.equal(closeKin(world.people.find(p => p.id === child.genome.parents[0])!, world.people.find(p => p.id === child.genome.parents[1])!), false);
+    parentsOf.push([child.genome.parents[0]!, child.genome.parents[1]!]);
+    for (const id of child.genome.parents) counts.set(id, (counts.get(id) ?? 0) + 1);
+  }
+  const values = [...founders].map(id => counts.get(id) ?? 0);
+  const coefficient = gini(values);
+  const births = parentsOf.length;
+  assert.ok(births >= 30, `replacement should yield many births, got ${births}`);
+  assert.ok(values.reduce((sum, n) => sum + n, 0) === births * 2);
+  assert.ok(coefficient < 0.5, `gini ${coefficient} >= 0.5 with ${births} births`);
+  context.diagnostic(JSON.stringify({ experiment: 'paternity-gini', inhabitants: 32, checks: 200, births, gini: coefficient, parents: values.filter(n => n > 0).length, max: Math.max(...values), min: Math.min(...values) }));
 });

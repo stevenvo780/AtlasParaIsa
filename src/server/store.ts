@@ -16,8 +16,13 @@ import { enableTechnologyJournal, assertTechnologyJournal, technologyStateForCom
 import { assertTechnologyCatalogueState, enableTechnologyCatalogue, markTechnologyCatalogueCommitted,
   technologyCatalogueStateForCommit, technologyCatalogueTotals, technologyFunctionCode,
   TECHNOLOGY_FUNCTION_WORDS, type TechnologyCatalogueReader } from '../world/technology-catalogue.js';
-import { assertChronicleEvent, assertChronicleJournal, enableChronicleJournal, chronicleSerial, chronicleFailure, chronicleForCommit, EMPTY_CHRONICLE_DIGEST } from '../world/chronicle-journal.js';
+import { assertChronicleEvent, assertChronicleJournal, enableChronicleJournal, chronicleSerial, chronicleFailure, chronicleForCommit, EMPTY_CHRONICLE_DIGEST, type ChronicleJournal } from '../world/chronicle-journal.js';
 import { assertTechnology, maintainTechnologyMemory } from '../world/technology.js';
+import { paramsOf } from '../world/params.js';
+
+/** Profundidad de recuperación: cada cien guardados el slot 2 hereda la instantánea
+ * vigente, de modo que el respaldo más viejo mide minutos y no el último paso. */
+export const DEEP_CHECKPOINT_EVERY_SAVES = 100;
 
 const checksum = (s: string) => createHash('sha256').update(s).digest('hex');
 // Preserve all V1 gesture identities; only the new command kind extends the tuple.
@@ -28,6 +33,7 @@ type Row = { body: string; digest: string; saved_at: number };
 type ChronicleStamp = { dataVersion: number; totalChanges: number; schemaCookie: number; tempSchemaCookie: number };
 const sameChronicleStamp = (a: ChronicleStamp, b: ChronicleStamp) => Object.keys(a).every(key => a[key as keyof ChronicleStamp] === b[key as keyof ChronicleStamp]);
 type ChronicleProof = { startsAfter: number; through: number; digest: string; tick: number; stamp: ChronicleStamp };
+type ChroniclePrune = { through: number; digest: string };
 type SchemaColumn = { name: string; pk: number };
 const BASE_TABLES: Record<string, string[]> = {
   snapshots: ['slot', 'body', 'digest', 'saved_at'], events: ['id', 'tick', 'body'],
@@ -115,6 +121,10 @@ export class Store {
     },
   };
   lastSnapshotBytes = 0;
+  /** Guardados confirmados y último paso en que se intentó podar: gobiernan la
+   * profundidad del tercer respaldo y el coste amortizado de la poda. */
+  private saves = 0;
+  private lastPruneTick = -1;
   private readonly schemaVersion: number;
   private verifiedChronicle: ChronicleProof | null = null;
   private verifiedTechnology: { startsAfter: number; through: number; catalogueThrough: number; dataVersion: number; totalChanges: number; schemaCookie: number } | null = null;
@@ -148,7 +158,10 @@ export class Store {
         if (schemaVersion >= 4) assertTechnologySchema(this.db);
       }
       if (!options.readOnly) {
-        this.db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=3000;');
+        // WAL + synchronous=NORMAL: un corte de luz puede costar el último commit
+        // (≤ `persistencia.cadaTicks` pasos), nunca una base corrupta ni un estado
+        // a medias. El fsync por tick era el 48 % del paso del servidor (C3).
+        this.db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=3000;');
         if (!existed || schemaVersion < 4) {
           this.db.exec('BEGIN IMMEDIATE');
           try {
@@ -198,8 +211,27 @@ export class Store {
     assertTechnologyCatalogueState(world);
     assertTechnology(world);
   }
+  /** C10: leer es una transacción. Una copia en caliente o un guardado de otra
+   * conexión ya no puede convertir una lectura correcta en «corrupción»: la
+   * instantánea queda congelada durante toda la verificación. */
   load(): { world: World; savedAt: number } | null {
-    const chronicleStamp = this.chronicleStamp(), rawTransaction = this.db.isTransaction;
+    const rawTransaction = this.db.isTransaction;
+    if (!rawTransaction) {
+      this.db.exec('BEGIN');
+      // Lectura cebadora: fija la instantánea ANTES de sellar `data_version`.
+      this.db.prepare('SELECT 1 FROM main.sqlite_schema LIMIT 1').get();
+    }
+    try {
+      const loaded = this.loadVerified(rawTransaction);
+      if (!rawTransaction && this.db.isTransaction) this.db.exec('COMMIT');
+      return loaded;
+    } catch (error) {
+      if (!rawTransaction && this.db.isTransaction) this.db.exec('ROLLBACK');
+      throw error;
+    }
+  }
+  private loadVerified(rawTransaction: boolean): { world: World; savedAt: number } | null {
+    const chronicleStamp = this.chronicleStamp();
     this.verifiedChronicle = null;
     const check = this.db.prepare('PRAGMA quick_check').get() as Record<string, unknown>;
     if (Object.values(check)[0] !== 'ok') throw new Error('SQLite integrity check failed. Explicit recovery required.');
@@ -328,6 +360,19 @@ export class Store {
     for (const event of world.chronicleJournal!.pending) digest = checksum(`${digest}\n${JSON.stringify(event)}`);
     return digest;
   }
+  /** Límite de poda: hasta qué serie se borró y con qué dígeste cerraba la cadena ahí.
+   * Es el único modo de seguir verificando lo retenido sin releer lo borrado. */
+  private prunedChronicle(): ChroniclePrune | null {
+    const row = this.db.prepare("SELECT value FROM main.metadata WHERE key='chronicle-pruned-v1'").get() as { value: string } | undefined;
+    if (!row) return null;
+    let pruned: { version?: unknown; through?: unknown; digest?: unknown };
+    try { pruned = JSON.parse(row.value); } catch { chronicleFailure('invalid prune boundary'); }
+    if (!pruned! || typeof pruned !== 'object' || Array.isArray(pruned)
+      || Object.keys(pruned).sort().join(',') !== 'digest,through,version' || pruned.version !== 1
+      || typeof pruned.through !== 'number' || !Number.isSafeInteger(pruned.through) || pruned.through < 0
+      || typeof pruned.digest !== 'string' || !/^[0-9a-f]{64}$/.test(pruned.digest)) chronicleFailure('invalid prune boundary');
+    return { through: pruned.through as number, digest: pruned.digest as string };
+  }
   /** Bounded memory: primary-key reads and a rolling digest, never a Set of the lifetime archive. */
   private assertChronicleArchive(world: World, allowLater = false): void {
     this.assertChronicleSchema();
@@ -335,8 +380,13 @@ export class Store {
     const journal = world.chronicleJournal!;
     if (journal.pending.length || journal.committedThrough !== world.eventCounter) chronicleFailure('snapshot contains uncommitted events');
     const lookup = this.db.prepare('SELECT id,tick,body FROM events WHERE id=?');
-    let digest = EMPTY_CHRONICLE_DIGEST, tick = 0;
-    for (let serial = journal.startsAfter + 1; serial <= journal.committedThrough; serial++) {
+    const boundary = this.prunedChronicle();
+    // Una instantánea anterior al límite de poda ya no se puede verificar: se
+    // declara, no se rellena. Recuperar a ese punto exige recuperación explícita.
+    if (boundary && boundary.through > journal.committedThrough) chronicleFailure('prune boundary escapes declared coverage');
+    const pruned = boundary && boundary.through > journal.startsAfter ? boundary : null;
+    let digest = pruned ? pruned.digest : EMPTY_CHRONICLE_DIGEST, tick = 0;
+    for (let serial = (pruned ? pruned.through : journal.startsAfter) + 1; serial <= journal.committedThrough; serial++) {
       const row = lookup.get(`e${serial}`) as { id: string; tick: number; body: string } | undefined;
       if (!row) chronicleFailure('declared coverage has a gap');
       let event: unknown; try { event = JSON.parse(row!.body); } catch { chronicleFailure('invalid archived JSON'); }
@@ -387,6 +437,32 @@ export class Store {
         if (previous.tick !== event.tick || previous.body !== body) chronicleFailure('an immutable event cannot be overwritten');
       } else insert.run(event.id, event.tick, body);
     }
+  }
+
+  /** C5: el archivo deja de crecer sin fin. Borra un prefijo YA verificado de
+   * sucesos y guarda el dígeste de control del límite, de modo que la cadena
+   * siga cerrando contra la instantánea sin releer lo borrado. Nunca toca la
+   * ventana pedida, lo visible ni lo pendiente; su coste es O(borrados). */
+  private pruneChronicle(world: World, journal: ChronicleJournal, window: number): void {
+    const horizon = world.tick - window;
+    if (horizon <= 0) return;
+    const previous = this.prunedChronicle();
+    const pruned = previous && previous.through > journal.startsAfter ? previous : null;
+    const from = pruned ? pruned.through : journal.startsAfter;
+    let visible = Number.MAX_SAFE_INTEGER;
+    for (const event of world.events) { const serial = chronicleSerial(event.id); if (serial !== null && serial < visible) visible = serial; }
+    const oldest = this.db.prepare("SELECT MAX(CAST(substr(id,2) AS INTEGER)) AS serial FROM events WHERE id GLOB 'e[0-9]*' AND tick<?").get(horizon) as { serial: number | null };
+    const boundary = Math.min(journal.committedThrough, visible - 1, oldest.serial ?? 0);
+    if (boundary <= from) return;
+    let digest = pruned ? pruned.digest : EMPTY_CHRONICLE_DIGEST;
+    const lookup = this.db.prepare('SELECT body FROM events WHERE id=?');
+    for (let serial = from + 1; serial <= boundary; serial++) {
+      const row = lookup.get(`e${serial}`) as { body: string } | undefined;
+      if (!row) chronicleFailure('declared coverage has a gap');
+      digest = checksum(`${digest}\n${row!.body}`);
+    }
+    this.db.prepare("DELETE FROM events WHERE id GLOB 'e[0-9]*' AND CAST(substr(id,2) AS INTEGER)<=?").run(boundary);
+    this.db.prepare("INSERT OR REPLACE INTO metadata VALUES ('chronicle-pruned-v1',?)").run(JSON.stringify({ version: 1, through: boundary, digest }));
   }
 
   /** A declared prefix is verified once on load, not scanned at the 10 Hz save cadence. */
@@ -574,6 +650,14 @@ export class Store {
     this.prepareTechnology(world);
     enableTechnologyJournal(world.technology);
     assertTechnologyJournal(world.technology, world.tick);
+    // La autoría de una definición se juzga antes que la validez general: su
+    // motivo es evidencia más precisa que «estado procedural inválido».
+    for (const recipe of world.technology.catalogue?.pending ?? world.technology.recipes) this.assertTechnologyAuthor(world, recipe);
+    // Escribir exige la misma ley de frontera que leer: nunca se archiva un estado
+    // que `load()` rechazaría. Con cadencia (no cada tick) el coste es asumible.
+    assertWorld(world, world.version, this.context);
+    const window = paramsOf(world).persistencia.ventanaEventosTicks;
+    const prunes = window > 0 && world.tick - this.lastPruneTick >= window;
     const body = encodeSnapshot({ ...world, chronicleJournal: committedChronicle, technology: technologyCatalogueStateForCommit(technologyStateForCommit(world.technology)) });
     this.lastSnapshotBytes = Buffer.byteLength(body);
     this.db.exec('BEGIN IMMEDIATE');
@@ -597,13 +681,19 @@ export class Store {
       }
       if (retired.length) {
         const archive = this.db.prepare('INSERT OR REPLACE INTO chunks VALUES (?,?,?,?)');
+        // Con ventana de poda el terreno dormido guarda una sola versión por clave:
+        // la vigente. Sin ventana (0) se conserva el historial completo de siempre.
+        const supersede = window > 0 ? this.db.prepare('DELETE FROM chunks WHERE key=? AND tick<?') : null;
         for (const chunk of retired) {
           assertChunk(chunk, chunk.key, world.tick);
           const archivedBody = JSON.stringify(chunk);
           archive.run(chunk.key, world.tick, archivedBody, checksum(archivedBody));
+          supersede?.run(chunk.key, world.tick);
         }
       }
+      if (prunes) this.pruneChronicle(world, committedChronicle, window);
       this.db.exec('INSERT OR REPLACE INTO snapshots SELECT 1,body,digest,saved_at FROM snapshots WHERE slot=0');
+      if ((this.saves + 1) % DEEP_CHECKPOINT_EVERY_SAVES === 0) this.db.exec('INSERT OR REPLACE INTO snapshots SELECT 2,body,digest,saved_at FROM snapshots WHERE slot=0');
       this.db.prepare('INSERT OR REPLACE INTO snapshots VALUES (0,?,?,?)').run(body, checksum(body), Date.now());
       this.db.prepare("INSERT OR REPLACE INTO metadata VALUES ('initialized','1')").run();
       const insertInput = this.db.prepare('INSERT INTO inputs VALUES (?,?,?,?,?,?)');
@@ -616,6 +706,8 @@ export class Store {
         if (!saved || saved.body !== body || saved.digest !== checksum(body)) chronicleFailure('trigger changed committed snapshot');
       }
       this.db.exec('COMMIT');
+      this.saves++;
+      if (prunes) this.lastPruneTick = world.tick;
       this.technologyArchive.acknowledgeHostCommit();
     } catch (error) {
       if (this.db.isTransaction) this.db.exec('ROLLBACK');

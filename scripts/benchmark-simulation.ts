@@ -57,7 +57,7 @@ function fixture(population: 16 | 32): World {
   assertWorld(world); return world;
 }
 
-/** Same WAL/FULL snapshot/previous/metadata/event transaction as Store.save, empty inputs/archive. */
+/** Same WAL/NORMAL snapshot/previous/metadata/event transaction as Store.save, empty inputs/archive. */
 function saveEncoded(store: Store, world: World, body: string): void {
   assert.equal(world.retiredChunks.length, 0);
   const db = store.db;
@@ -101,7 +101,7 @@ try {
     try {
       for (const store of Object.values(stores)) {
         assert.equal(Object.values(store.db.prepare('PRAGMA journal_mode').get()!)[0], 'wal');
-        assert.equal(Object.values(store.db.prepare('PRAGMA synchronous').get()!)[0], 2);
+        assert.equal(Object.values(store.db.prepare('PRAGMA synchronous').get()!)[0], 1);
       }
       for (let iteration = -warmup; iteration < samples; iteration++) {
         const collect = iteration >= 0;
@@ -152,7 +152,7 @@ try {
   const report = { generatedAt: new Date().toISOString(), environment: { ...environment, loadAverageAfter: loadavg() },
     sourceCommit: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), sourceHashes,
     seed, wallSeconds: (performance.now() - started) / 1000, peakRssMiB: process.resourceUsage().maxRSS / 1024, scenarios,
-    method: 'Paired identical live states; codecs and clones alternate order. Encoding, decoding, SQLite transaction and simulation are timed separately. CPU uses process.cpuUsage(user+system); wall uses performance.now. Fidelity and integrity assertions are outside measured regions. WAL and synchronous=FULL on separate temporary files; same previous/current snapshot, digest, metadata and event SQL for both encodings.',
+    method: 'Paired identical live states; codecs and clones alternate order. Encoding, decoding, SQLite transaction and simulation are timed separately. CPU uses process.cpuUsage(user+system); wall uses performance.now. Fidelity and integrity assertions are outside measured regions. WAL and synchronous=NORMAL on separate temporary files; same previous/current snapshot, digest, metadata and event SQL for both encodings.',
     limits: '24–60 steps are a short synthetic comparison, not a soak. No browser, GPU, threads, sessions, gestures, archival writes, concurrent clients or power-loss test. CPU samples may include V8 GC/runtime threads. Files use the current temporary filesystem and host cache. Other processes/soak may contend: wall time is not isolated. Encode+transaction is a paired sum of separate intervals, not end-to-end request latency.', failures: 0 };
   mkdirSync('artifacts', { recursive: true }); writeFileSync('artifacts/cpu-v3-comparison.json', JSON.stringify(report, null, 2) + '\n');
   console.log('Saved artifacts/cpu-v3-comparison.json');

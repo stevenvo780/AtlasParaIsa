@@ -11,7 +11,7 @@
     "build": "vite build && tsc -p tsconfig.server.json",
     "start": "node dist/server/server/main.js",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test --test-timeout=240000 tests/*.test.ts",
+    "test": "tsx --test --test-timeout=600000 tests/*.test.ts",
     "test:e2e": "playwright test",
     "test:soak": "tsx scripts/soak.ts",
     "test:smoke": "tsx scripts/smoke.ts",

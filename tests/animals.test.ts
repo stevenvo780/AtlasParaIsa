@@ -201,6 +201,28 @@ test('mixed-species projection is deterministic and cannot exceed six local anim
   for (let n = 0; n < 100; n++) { run(w, 1); assert.ok(w.tiles.every(t => t.fauna! <= 6)); assert.equal(w.animals.length, 7); }
 });
 
+test('P2: incremental syncFauna cache matches a from-scratch recomputation through movement, births and predation over 500 ticks', () => {
+  const tiles = Array.from({ length: 49 }, (_, n) => tile(n % 7, Math.floor(n / 7)));
+  const hares = [animal('hare', 1, 1, 'a'), animal('hare', 1, 1, 'b'), animal('hare', 5, 5, 'c'), animal('hare', 5, 5, 'd')];
+  const wolf = animal('wolf', 3, 3); wolf.hunger = 0.8;
+  const w = world(tiles, [...hares, wolf]); w.reproductionEnabled = true;
+  const k = (p: { x: number; y: number }): string => `${p.x},${p.y}`;
+  const fromScratch = (): { fauna: number; species: AnimalSpecies | null }[] => {
+    const counts = new Map<string, { count: number; species: AnimalSpecies }>();
+    for (const a of w.animals) {
+      const p = k(a), existing = counts.get(p);
+      if (existing) { existing.count++; if (a.species < existing.species) existing.species = a.species; }
+      else counts.set(p, { count: 1, species: a.species });
+    }
+    return w.tiles.map(t => { const c = counts.get(k(t)); return { fauna: c?.count ?? 0, species: c?.species ?? null }; });
+  };
+  const cached = (): { fauna: number; species: AnimalSpecies | null }[] => w.tiles.map(t => ({ fauna: t.fauna ?? 0, species: t.species ?? null }));
+  // Every tick, not just checkpoints: any stale entry left by the previous-tick cache must surface immediately.
+  for (let n = 0; n < 500; n++) { run(w, 1); assert.deepEqual(cached(), fromScratch(), `tick ${w.tick}`); }
+  assert.ok(w.animalDynamics.births > 0, 'the scenario must exercise occupancy churn (new tiles gain fauna), not stay static');
+  assertAnimals(w.animals, w.tick, w.tiles);
+});
+
 test('simulation decisions, mating and encounters are invariant under both animal and tile permutation', () => {
   const tiles = Array.from({ length: 9 }, (_, n) => tile(n % 3, Math.floor(n / 3)));
   const a = animal('deer', 0, 0, 'a'), b = animal('deer', 0, 0, 'b'), wolf = animal('wolf', 2, 2); wolf.hunger = 0.8;

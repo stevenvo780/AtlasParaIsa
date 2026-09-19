@@ -1,0 +1,32 @@
+# T022 — Unidad de usuario systemd para el respaldo horario del mundo de Isa.
+#
+# NO se activa desde el sprint: Steven la instala y habilita en T043
+# (checklist de publicación), junto con atlas-respaldo.timer:
+#
+#   mkdir -p ~/.config/systemd/user
+#   ln -sf /datos/workspaces/personal/AtlasParaIsa/scripts/systemd/atlas-respaldo.service \
+#          ~/.config/systemd/user/atlas-respaldo.service
+#   ln -sf /datos/workspaces/personal/AtlasParaIsa/scripts/systemd/atlas-respaldo.timer \
+#          ~/.config/systemd/user/atlas-respaldo.timer
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now atlas-respaldo.timer
+#
+# Verificación: systemctl --user status atlas-respaldo.timer
+#               journalctl --user -u atlas-respaldo.service -n 20
+
+[Unit]
+Description=Respaldo horario del mundo de Isa (Una Carta Para Isa, T022)
+Documentation=file:///datos/workspaces/personal/AtlasParaIsa/specs/001-mundo-solido-masivo/tasks.md
+After=network.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/datos/workspaces/personal/AtlasParaIsa
+ExecStart=/datos/workspaces/personal/AtlasParaIsa/scripts/respaldo.sh
+# DB y DEST usan los valores por defecto del script (data/world.sqlite relativo a
+# WorkingDirectory; ~/.local/state/atlas-para-isa/backups). Para cambiarlos, añadir aquí:
+#   Environment=DB=/ruta/al/mundo.sqlite
+#   Environment=DEST=/ruta/de/copias
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7

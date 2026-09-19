@@ -2,6 +2,7 @@ import type { PlaceView, Tile, Viewport } from '../shared/types.js';
 import { CHUNK_SIZE, MAX_COORDINATE, chunkCoords, chunkKey, generateChunk, generateTile, legacyStructures, type Chunk } from './terrain.js';
 import type { World } from './index.js';
 import { initializeEcosystem } from './ecosystem.js';
+import { paramsOf } from './params.js';
 import { materializeAnimals } from './animals.js';
 import type { AnimalView, StructureView } from '../shared/life.js';
 import { projectAnimal } from './animals.js';
@@ -38,10 +39,14 @@ export function activate(world: World, x: number, y: number, context: WorldConte
   if (world.chunks[key]) return;
   const pending = world.retiredChunks.findIndex(c => c.key === key);
   const { cx, cy } = chunkCoords(x, y);
-  const chunk = pending >= 0 ? world.retiredChunks.splice(pending, 1)[0]! : context.loadChunk?.(key, world.tick) ?? generateChunk(world.seed, cx, cy);
+  // T035 ronda de arreglo (hallazgo crítico #2): `agua.cuencas` del MUNDO real, no el default
+  // global de `generateChunk`/`initializeEcosystem` — este es el único sitio de producción que
+  // materializa teselas nuevas en una partida.
+  const cuencas = paramsOf(world).agua.cuencas;
+  const chunk = pending >= 0 ? world.retiredChunks.splice(pending, 1)[0]! : context.loadChunk?.(key, world.tick) ?? generateChunk(world.seed, cx, cy, cuencas);
   const { tiles, animals, structures, ...meta } = chunk;
   world.chunks[key] = meta;
-  const initialized=tiles.map(tile => initializeEcosystem(world.seed, tile));
+  const initialized=tiles.map(tile => initializeEcosystem(world.seed, tile, cuencas));
   world.tiles.push(...initialized);
   world.animals.push(...(animals ?? materializeAnimals(world.seed, initialized, world.tick)));
   world.structures.push(...(structures ?? legacyStructures(tiles, world.tick)));
@@ -95,6 +100,9 @@ export function normalizeViewport(value?: Viewport): Viewport {
 export function projectTerrain(world: World, viewport?: Viewport, context: WorldContext = worldContext(world)): { viewport: Viewport; tiles: Tile[]; places: PlaceView[]; animals: AnimalView[]; structures: StructureView[] } {
   const v = normalizeViewport(viewport), tiles: Tile[] = [], places = new Map(world.places.map(p => [p.id, p]));
   const archive = new Map<string, Chunk>();
+  // T035 ronda de arreglo (hallazgo crítico #2): misma cuenca que `activate()`, para que la
+  // previsualización de una zona aún no materializada coincida con lo que se generará de verdad.
+  const cuencas = paramsOf(world).agua.cuencas;
   for (let y = v.y; y < v.y + v.height; y++) for (let x = v.x; x < v.x + v.width; x++) {
     const active = tileAt(world, { x, y });
     if (active) { tiles.push({ ...active }); continue; }
@@ -102,13 +110,13 @@ export function projectTerrain(world: World, viewport?: Viewport, context: World
     let chunk = archive.get(key);
     if (!chunk) {
       const { cx, cy } = chunkCoords(x, y);
-      chunk = world.retiredChunks.find(c => c.key === key) ?? context.loadChunk?.(key, world.tick) ?? generateChunk(world.seed, cx, cy);
+      chunk = world.retiredChunks.find(c => c.key === key) ?? context.loadChunk?.(key, world.tick) ?? generateChunk(world.seed, cx, cy, cuencas);
       archive.set(key, chunk);
       // Undiscovered landmarks are scenery, not recorded discoveries.
       for (const place of chunk.places) places.set(place.id, place);
     }
     const index = (y - chunk.cy * CHUNK_SIZE) * CHUNK_SIZE + x - chunk.cx * CHUNK_SIZE;
-    tiles.push(initializeEcosystem(world.seed, chunk.tiles[index] ?? generateTile(world.seed, x, y)));
+    tiles.push(initializeEcosystem(world.seed, chunk.tiles[index] ?? generateTile(world.seed, x, y, cuencas), cuencas));
   }
   const visible = (p: {x: number; y: number}) => p.x >= v.x && p.y >= v.y && p.x < v.x + v.width && p.y < v.y + v.height;
   return { viewport: v, tiles, places: [...places.values()].filter(visible).map(p => ({ ...p })),

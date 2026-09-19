@@ -135,6 +135,12 @@ export function createWorld(seed = 20260905, params?: WorldParams): World {
     technology: { ...defaultTechnologyState(), water: emptyWaterLedger() }, legacy: [], retiredLegacy: [],
     demographyDynamics: { deaths: 0, causes: { starvation: 0, dehydration: 0, exposure: 0, senescence: 0 }, foodLost: 0, woodLost: 0, stoneLost: 0 },
   };
+  // T035 ronda de arreglo (hallazgo crítico #2): los params del mundo deben fijarse ANTES de
+  // activar el primer chunk — `activate()` lee `paramsOf(world).agua.cuencas` para generar las
+  // teselas, y `paramsOf` solo ve lo que haya en el WeakMap para ESTE objeto `world` en ese
+  // momento. Fijarlo al final (como antes) dejaba la región de partida siempre con el default
+  // global sin importar el `params` recibido aquí.
+  setParams(world, params ?? DEFAULT_PARAMS);
   for (let cy = 0; cy < 2; cy++) for (let cx = 0; cx < 3; cx++) activate(world, cx * 16, cy * 16);
   for (const place of world.places.slice(0, 3)) {
     const tile = tileAt(world, place)!; tile.terrain = 'shelter';
@@ -167,7 +173,6 @@ export function createWorld(seed = 20260905, params?: WorldParams): World {
   world.technology.checkpoint = captureTechnologyCheckpoint(world.technology, world.people, world.tick, 'initial');
   world.structures.push(...legacyStructures(world.tiles, world.tick));
   addEvent(world, { kind: 'memory', actors: [], source: 'sample', text: 'Este mundo comienza con S, I y una vecindad ficticia. Los cinco recuerdos son ejemplos, pendientes de la historia de Steven e Isa.', cause: 'Contenido sintético identificado; no se importaron conversaciones ni biografía.' });
-  setParams(world, params ?? DEFAULT_PARAMS);
   return world;
 }
 
@@ -864,7 +869,7 @@ export function stepWorld(world: World, inputs: Gesture[] = [], context: WorldCo
   world.invitations = world.invitations.filter(invitation => invitation.until > world.tick);
   world.reminders = world.reminders.filter(reminder => reminder.until > world.tick);
   ecology(world);
-  stepEcosystem(world.tiles, world.tick, world.weather, phaseAt(world.tick), false);
+  stepEcosystem(world.tiles, world.tick, world.weather, phaseAt(world.tick), false, world.seed, paramsOf(world).agua.cuencas);
   stepAnimals(world,event=>addEvent(world,event));
   stepStructures(world,event=>addEvent(world,event));
   for (const person of world.people) bodyAndAction(world, person);
@@ -1158,7 +1163,9 @@ function migrateWorldState(value: unknown, context: WorldContext = {}): World {
   const originalTiles = new Map(world.tiles.map(t => [`${t.x},${t.y}`, t]));
   world.tiles = [];
   for (let cy = 0; cy < 2; cy++) for (let cx = 0; cx < 3; cx++) {
-    const chunk = generateChunk(world.seed, cx, cy);
+    // T035 ronda de arreglo: coherencia con `paramsOf` (equivalente hoy a `DEFAULT_PARAMS.agua
+    // .cuencas`, ningún `World` migrado tiene params propios fijados todavía en este punto).
+    const chunk = generateChunk(world.seed, cx, cy, paramsOf(world).agua.cuencas);
     const { tiles, ...meta } = chunk;
     meta.discovered = true; meta.lastTick = world.tick;
     meta.places = world.places.filter(p => chunkKey(p.x, p.y) === meta.key);
@@ -1175,8 +1182,8 @@ function migrateWorldState(value: unknown, context: WorldContext = {}): World {
 function upgradeV3(world: World): void {
   world.version = 3; world.cooperationEnabled = true; world.reproductionEnabled = true;
   world.communities = []; world.communityCounter = 0; world.birthCounter = 0; world.history = []; world.totals = emptyTotals();
-  world.tiles = world.tiles.map(tile => initializeEcosystem(world.seed, tile));
-  world.retiredChunks = world.retiredChunks.map(chunk => ({ ...chunk, tiles: chunk.tiles.map(tile => initializeEcosystem(world.seed, tile)) }));
+  world.tiles = world.tiles.map(tile => initializeEcosystem(world.seed, tile, paramsOf(world).agua.cuencas));
+  world.retiredChunks = world.retiredChunks.map(chunk => ({ ...chunk, tiles: chunk.tiles.map(tile => initializeEcosystem(world.seed, tile, paramsOf(world).agua.cuencas)) }));
   for (const person of world.people) initializePerson(world, person);
 }
 function upgradeV4(world: World): void {

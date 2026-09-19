@@ -95,7 +95,7 @@ test('createApp genera el mundo nuevo con los parámetros recibidos y respeta lo
   // receta literal de `main.ts`: no reemplaza el objeto entero (eso borraría la instantánea).
   setParams(resumed.world, deploymentParams(paramsOf(resumed.world), 'agua.cuencas=0.2'));
   assert.equal(paramsOf(resumed.world).agua.cuencas, 0.2, 'CARTA_PARAMS manda sobre lo que nombra');
-  assert.equal(paramsOf(resumed.world).persistencia.cadaTicks, 20, 'la cadencia de producción también');
+  assert.equal(paramsOf(resumed.world).persistencia.cadaTicks, 100, 'la cadencia de producción también');
 });
 
 /** Ronda de corrección R2: `setParams(app.world, parseParams(CARTA_PARAMS))` reemplazaba el
@@ -116,7 +116,7 @@ test('la receta del despliegue conserva del mundo cargado toda clave que no nomb
   const vigentes = paramsOf(app.world);
   assert.equal(vigentes.agua.cuencas, 1, 'el terreno se generó con este régimen: reabrirlo no puede cambiarlo');
   assert.equal(vigentes.poblacion.maxima, 50, 'ni el techo con el que venía');
-  assert.equal(vigentes.persistencia.cadaTicks, 20, 'y la cadencia del despliegue sí se impone');
+  assert.equal(vigentes.persistencia.cadaTicks, 100, 'y la cadencia del despliegue sí se impone');
   assert.equal(vigentes.persistencia.ventanaEventosTicks, 24000);
   assert.notDeepEqual(vigentes, DEFAULT_PARAMS);
 });

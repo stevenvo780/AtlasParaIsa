@@ -18,6 +18,7 @@
     "preview:local": "tsx scripts/preview.ts",
     "access": "tsx scripts/access.ts",
     "backup": "tsx scripts/storage.ts backup",
+    "respaldo": "bash scripts/respaldo.sh",
     "restore": "tsx scripts/storage.ts restore",
     "recover:previous": "tsx scripts/storage.ts previous",
     "check": "npm run typecheck && npm test && npm run build"

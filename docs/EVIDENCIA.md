@@ -399,3 +399,24 @@ La comparación alimentaria, el soak con commit por paso y las extensiones anter
 No se han probado teléfono físico, Safari/iOS, lector de pantalla, varios días reales, doce clientes bajo carga sostenida, miles de habitantes, fallo físico de disco ni cálculo ecológico en GPU. La voz final y los recuerdos reales siguen pendientes. No se acreditan conciencia, autopoiesis biológica, efecto Baldwin ni evolución abierta.
 
 Los comandos reproducibles y la política de artefactos están en [README](../README.md#desarrollo-y-comprobaciones). Los JSON y capturas conservan el detalle; las cifras interpretadas permanecen aquí. Las revisiones anteriores se consultan en Git.
+
+## 2026-09-19 · Sprint «mundo sólido» (rama `001-mundo-solido-masivo`)
+
+Revisión integral previa: `docs/REVISION-2026-09-19.md` (12 hallazgos confirmados, 15 refutados, 4 huecos operativos; 45 agentes con verificación adversarial). Plan y tareas: `specs/001-mundo-solido-masivo/`. Todas las cifras de esta sección salen de ejecución real en la torre (32 hilos).
+
+### Línea de partida (SHA `aeada2e` → docs `10ac5c1` → Gate 0 `1619c6b`)
+| Métrica | Valor medido | Método |
+|---|---|---|
+| Celdas con comida / vegetación > 0,3 / agua potable (t=1251, mundo 40×28) | **100 % / 100 % / 3 %** (1120/1120/36) | `/api/world` del servidor local con `CARTA_DATA_DIR` temporal |
+| Muerte por senescencia | ventana **10,45–14,70 días** (42–59 min reales), incondicional (`demography.ts:82`) | aritmética + ejecución: semilla 12345, 0 muertes hasta día 7,4, población 16→32 |
+| Paso del servidor, 32 hab. dispersos (28.672 tiles) | **p50 78,4 ms / p95 131,9 ms** (clon 16,5; guardado 48,7) | fixture de `scripts/benchmark-simulation.ts` + `stepOnce` real |
+| `state` por cliente (t=12000, cámara 12×8) | **469.337 B** (186 KiB recetas) ×2/s | `JSON.stringify(projectWorld(...))` |
+| Crecimiento SQLite sin poda | ~7 KB/tick; producción **6,10 GiB/día** (9.093.120 B en 120 s) | `stat` ×2 sobre `data/world.sqlite` |
+| Suite de tests (antes de Gate 0) | 53/56 ok; 2 cuelgan (Vite `listen()` fuera del `try` + Chromium 1243 ausente); `world.test.ts` 115 s | ejecución fichero a fichero con `timeout 90` |
+| Gate 0 (`1619c6b`) | typecheck ✅; **627 pass / 0 fail / 3 skip (GPU)** en 117 s; `params.test` 18/18; control 200 pasos con/sin params → JSON idéntico | `npm test` completo |
+
+### Pendiente de rellenar en este sprint
+- T030 línea base 32×10 días con `scripts/lab` (reglas viejas) → fija SC-002..005.
+- T031 barrido de calibración (senescencia, genes, capacidad de carga) con control → defaults elegidos.
+- T032 barrido largo 16×25 días con defaults finales (SC-011).
+- SC-009/010: `state` y p95 tras T020/T021; crecimiento SQLite con poda.

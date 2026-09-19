@@ -13,6 +13,8 @@ export const meta = {
 const REPO = '/datos/workspaces/personal/AtlasParaIsa'
 const TASKS = 'specs/001-mundo-solido-masivo/tasks.md'
 const LEDGER = `${REPO}/.superpowers/sdd/tasks/progress.md`
+// Commit del Gate 0 (params.ts + tests desbloqueados): todo worktree debe contenerlo. Sobrescribible con args.base.
+const BASE_SPRINT = (args && args.base) || '1619c6b'
 
 // modelo: ruta delegar_a_cloud ('claude' = lo implementa el propio agente Claude) · wrapper: modelo Claude del agente
 const TAREAS = [
@@ -83,6 +85,7 @@ function promptImplementador(t) {
 ERES EL IMPLEMENTADOR DE LA TAREA ${t.id} (corrige el hallazgo ${t.hallazgo} de docs/REVISION-2026-09-19.md). Estas en un WORKTREE aislado (comprueba con 'pwd' y 'git rev-parse --abbrev-ref HEAD'); el repo principal es ${REPO}. Otros 13 agentes trabajan en otros worktrees a la vez: no toques el repo principal salvo para escribir tu informe.
 
 PREPARACION:
+0. AUTO-REPARACION OBLIGATORIA: el harness a veces crea el worktree desde 'main' (viejo) en vez de desde la rama del sprint. Ejecuta: 'git merge-base --is-ancestor ${BASE_SPRINT} HEAD || git merge --no-edit ${BASE_SPRINT}'. Luego confirma que existen src/world/params.ts y que 'grep -c "\\*\\*${t.id}\\*\\*" ${TASKS}' devuelve 1. Si no, PARA y devuelve estado BLOCKED explicando que el worktree no contiene el Gate 0.
 1. 'ln -sfn ${REPO}/node_modules node_modules' (el worktree no tiene node_modules). Si 'git rev-parse --abbrev-ref HEAD' es HEAD (detached), 'git checkout -b sprint/${t.id}'. Anota BASE = 'git rev-parse HEAD'.
 2. Lee tu tarea: 'grep -n "\\*\\*${t.id}\\*\\*" ${TASKS}' y lee ese bullet ENTERO (es tu brief; los valores exactos estan ahi). Lee tambien la seccion del hallazgo ${t.hallazgo} en docs/REVISION-2026-09-19.md y las lineas de codigo citadas EN SU CONTEXTO.
 3. Lee src/world/params.ts (claves y defaults) si tu tarea usa parametros.

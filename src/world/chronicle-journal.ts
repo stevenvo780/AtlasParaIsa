@@ -25,12 +25,19 @@ export function assertChronicleEvent(value: unknown, tick: number): asserts valu
   const event = value as ChronicleEvent;
   const text = (v: unknown, max = 2000): v is string => typeof v === 'string' && v.length <= max;
   const coordinate = (v: unknown) => typeof v === 'number' && Number.isSafeInteger(v) && v >= -MAX_COORDINATE && v < MAX_COORDINATE;
-  if (Object.keys(event).some(key => !['id','tick','kind','actors','text','cause','x','y','source'].includes(key))
+  // FR-006: `death` is optional (older archived events have none) but, when present, must be a
+  // well-formed place+history record on a 'death' event, matching the event's own x/y exactly.
+  const death = event.death as Record<string, unknown> | undefined;
+  const deathOk = death === undefined || (event.kind === 'death' && typeof death === 'object' && death !== null && !Array.isArray(death)
+    && Object.keys(death).sort().join(',') === 'cause,previous,tick,x,y' && text(death.cause, 50) && integer(death.tick) && death.tick <= tick
+    && death.x === event.x && death.y === event.y && coordinate(death.x) && coordinate(death.y)
+    && Array.isArray(death.previous) && death.previous.length <= 3 && death.previous.every(p => text(p)));
+  if (Object.keys(event).some(key => !['id','tick','kind','actors','text','cause','x','y','source','death'].includes(key))
     || !text(event.id,100) || !integer(event.tick) || event.tick > tick
     || !['ecology','meeting','care','learning','adaptation','memory','gesture','pause','discovery','settlement','cooperation','birth','community','conflict','animal','invention','death'].includes(event.kind)
     || !Array.isArray(event.actors) || event.actors.length > 32 || !Array.from(event.actors).every(id => text(id,100))
     || !text(event.text) || !text(event.cause) || !['simulation','sample','approved'].includes(event.source)
-    || (event.x !== undefined && !coordinate(event.x)) || (event.y !== undefined && !coordinate(event.y))) chronicleFailure('invalid event');
+    || (event.x !== undefined && !coordinate(event.x)) || (event.y !== undefined && !coordinate(event.y)) || !deathOk) chronicleFailure('invalid event');
 }
 export function assertChronicleJournal(world: ChronicleHost): void {
   const journal = world.chronicleJournal;

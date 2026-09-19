@@ -1,7 +1,17 @@
-import type { AnimalView, BlueprintView, PersonView, StructureView, WorldView } from '../shared/types.js';
+import type { AnimalView, BlueprintView, ChronicleEvent, PersonView, StructureView, WorldView } from '../shared/types.js';
 import { componentNames, componentPurpose } from './life-art.js';
 import { carriedWaterCard, recipeLabel } from './technology-art.js';
 import { esc, svg, icon, number, percentage } from './ui-catalog.js';
+
+/** FR-006: the legible context (place, tick, up to 3 prior episodes) of a `death` chronicle event,
+ * for a «Historia» detail on an identity that no longer appears in `world.people`. The caller
+ * resolves which event corresponds to the inspected legacy id (`world.events.find(...)`); an
+ * event without a `death` field (older archive) renders nothing rather than a false blank. */
+export function deathHistory(event: ChronicleEvent): string {
+  if (!event.death) return '';
+  const { x, y, tick, previous } = event.death;
+  return `<details class="person-detail" data-detail="death" open><summary>Cómo y dónde terminó <span class="detail-badge">paso ${esc(tick)}</span></summary><p>Lugar: (${esc(x)}, ${esc(y)}).</p>${previous.length ? `<h4 class="detail-subtitle">Episodios previos</h4><ol class="experience-list">${previous.map(text => `<li><p>${esc(text)}</p></li>`).join('')}</ol>` : '<p>Sin episodios previos en la ventana reciente de la crónica.</p>'}</details>`;
+}
 
 /** A received snapshot describes current intent; it is not a new command acknowledgement. */
 export function destinationLink(person: PersonView): string {

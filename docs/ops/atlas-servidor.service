@@ -1,0 +1,30 @@
+# Unidad systemd de USUARIO para el servidor público de Una Carta Para Isa (propuesta T043, 2026-09-21).
+# Motivo: la sesión tmux «atlas» no sobrevive a un reinicio de la torre; el 20–21 de septiembre de 2026
+# hubo tres reinicios y el servidor estuvo dos días caído. Con esta unidad arranca solo y se reinicia si muere.
+#
+# Instalación (la hace Steven; no toca ~/.local/bin/atlas-servidor*):
+#   mkdir -p ~/.config/systemd/user && cp docs/ops/atlas-servidor.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload && systemctl --user enable --now atlas-servidor.service
+#   loginctl enable-linger stev        # para que arranque sin sesión abierta
+# Convivencia con tmux: si la unidad está activa, NO lanzar también el wrapper en tmux (dos procesos
+# pelearían por el puerto 3000 y por data/world.sqlite). Para publicar una versión nueva:
+#   npm run build && systemctl --user restart atlas-servidor.service   (corte ≈ 10 s + carga del mundo)
+# Log: journalctl --user -u atlas-servidor -f
+[Unit]
+Description=Una Carta Para Isa — servidor público (atlas.humanizar.tech)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/atlas-servidor
+WorkingDirectory=/datos/workspaces/personal/AtlasParaIsa
+Restart=always
+RestartSec=5
+# El mundo se guarda cada 100 pasos (10 s, ruling R19): dar tiempo al cierre ordenado.
+TimeoutStopSec=60
+KillSignal=SIGINT
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=default.target

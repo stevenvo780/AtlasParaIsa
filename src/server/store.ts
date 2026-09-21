@@ -50,6 +50,16 @@ export interface LoadedSnapshot {
  * una vez cada diez guardados —y siempre en el primero de cada proceso— en lugar de
  * en todos. Ver `save()` para la ventana descubierta y su compensación. */
 export const DEEP_VALIDATION_EVERY_SAVES = 10;
+/**
+ * ¿Toca la revisión completa (`assertWorld`) en este guardado? Cada `DEEP_VALIDATION_EVERY_SAVES`
+ * guardados y siempre en el primero del proceso, SALVO que el proceso acabe de cargar el mundo:
+ * `load()` ya aplica `assertWorld` entero (migrateWorld), así que repetirlo en el guardado 0 solo
+ * duplica el coste — 103 s de mundo congelado con 133 710 ejecuciones archivadas (2026-09-21).
+ */
+export function deepValidationDue(saves: number, verifiedByLoad: boolean): boolean {
+  if (saves === 0) return !verifiedByLoad;
+  return saves % DEEP_VALIDATION_EVERY_SAVES === 0;
+}
 
 const checksum = (s: string) => createHash('sha256').update(s).digest('hex');
 // Preserve all V1 gesture identities; only the new command kind extends the tuple.
@@ -151,6 +161,8 @@ export class Store {
   /** Guardados confirmados y último paso en que se intentó podar: gobiernan la
    * profundidad del tercer respaldo y el coste amortizado de la poda. */
   private saves = 0;
+  /** `load()` devolvió un mundo ya revisado por completo: el guardado 0 no repite `assertWorld`. */
+  private verifiedByLoad = false;
   /** ¿El cuerpo que hoy ocupa el slot 0 se puede leer entero? `null` = todavía no consta
    * (una conexión que guarda sin haber cargado), y entonces `save()` lo comprueba una
    * sola vez. Gobierna la rotación de respaldos: ver `rotatesBackups()`. */
@@ -267,6 +279,7 @@ export class Store {
       }
       const loaded = this.loadVerified(rawTransaction);
       if (!rawTransaction && this.db.isTransaction) { this.db.exec('COMMIT'); this.technologyArchive.acknowledgeHostCommit(); }
+      if (loaded && this.saves === 0) this.verifiedByLoad = true;
       return loaded;
     } catch (error) {
       if (!rawTransaction && this.db.isTransaction) this.db.exec('ROLLBACK');
@@ -764,7 +777,7 @@ export class Store {
     // arrancar, así que un estado inválido nunca se pone en uso; (3) el slot 1
     // conserva el guardado anterior y el slot 2 uno de cada cien, de modo que
     // `previous()` sigue siendo la salida si la revisión completa falla tarde.
-    const deepValidation = this.saves % DEEP_VALIDATION_EVERY_SAVES === 0;
+    const deepValidation = deepValidationDue(this.saves, this.verifiedByLoad);
     if (deepValidation) assertWorld(world, world.version, this.context);
     else bindWorldContext(world, this.context);
     const window = paramsOf(world).persistencia.ventanaEventosTicks;

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { Store, DEEP_CHECKPOINT_EVERY_SAVES, DEEP_VALIDATION_EVERY_SAVES } from '../src/server/store.js';
+import { Store, DEEP_CHECKPOINT_EVERY_SAVES, DEEP_VALIDATION_EVERY_SAVES, deepValidationDue } from '../src/server/store.js';
 import { createWorld, cloneWorld, type World } from '../src/world/index.js';
 import { parseParams, setParams } from '../src/world/params.js';
 import { recordChronicleEvent } from '../src/world/chronicle-journal.js';
@@ -229,4 +229,12 @@ test('previous() cede el turno al respaldo profundo solo cuando el guardado ante
   const refused = join(dirname(path), 'sin-cadena.sqlite');
   assert.throws(() => store.previous(refused), /No valid previous checkpoint/);
   assert.equal(existsSync(refused), false, 'una recuperación imposible no deja copia a medias');
+});
+
+test('el guardado 0 no repite la revisión completa cuando load() ya la hizo; sin carga, sí', () => {
+  assert.equal(deepValidationDue(0, false), true, 'proceso que crea el mundo: revisión completa en el primer guardado');
+  assert.equal(deepValidationDue(0, true), false, 'proceso que cargó el mundo: load() ya lo revisó entero');
+  for (const n of [1, 5, 9]) assert.equal(deepValidationDue(n, true), false);
+  assert.equal(deepValidationDue(DEEP_VALIDATION_EVERY_SAVES, true), true, 'la cadencia sigue intacta tras la carga');
+  assert.equal(deepValidationDue(DEEP_VALIDATION_EVERY_SAVES * 3, false), true);
 });

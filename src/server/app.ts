@@ -23,6 +23,10 @@ export interface AppOptions {
   params?: WorldParams;
   /** Instance-local monotonic clock; tests can measure work without patching global timers. */
   monotonicNow?: () => number;
+  /** T136: permite alternar la compresión del `WebSocketServer` sin editar este fichero
+   * entre corridas del banco (`scripts/benchmark-ws-deflate.ts`). Default: ver la línea
+   * donde se usa, con la cifra medida. */
+  perMessageDeflate?: boolean;
 }
 type Pending = { gesture: Gesture; hash: string; resolve: (r: GestureResult) => void; reject: (e: Error) => void; promise: Promise<GestureResult> };
 export function parseGesture(value: unknown): Gesture {
@@ -124,7 +128,13 @@ export function createApp(options: AppOptions) {
   const gestureAttempts = new Map<string, { count: number; reset: number }>();
   const loginGlobal = new Map<string, { count: number; reset: number }>();
   const trustedProxies = trustedProxiesFromEnv();
-  const ws = new WebSocketServer({ noServer: true, maxPayload: 4096, perMessageDeflate: false });
+  // T136: medido con `scripts/benchmark-ws-deflate.ts` (12 clientes, viewport 40x28,
+  // 1000 pasos, esta torre, 2026-09-22): activar la compresión ahorra 88.7% de bytes
+  // (650.9 MB -> 73.3 MB) pero cuesta +15.3 s de CPU de proceso y +58.8 ms de p95 SOLO
+  // en el paso que difunde — ya por encima del presupuesto de 50 ms del gobernador, y
+  // ese coste es invisible para él porque `runtime.p95StepMs` se congela antes de
+  // `broadcast()`. No compensa: se deja en `false`. Detalle: T136-report.md.
+  const ws = new WebSocketServer({ noServer: true, maxPayload: 4096, perMessageDeflate: options.perMessageDeflate ?? false });
   const staticDir = resolve(options.staticDir ?? 'dist/client');
   const context = store.context;
   const measurements = new RollingStepPerformance();

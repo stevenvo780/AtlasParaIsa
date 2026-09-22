@@ -4,6 +4,7 @@ import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSyn
 import { availableParallelism } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { splitParamList } from '../../src/shared/param-syntax.js';
 import { parseParams } from '../../src/world/params.js';
 
 // Barrido masivo del laboratorio (US1, spec.md): producto cartesiano de --param × --replicas,
@@ -116,7 +117,7 @@ function parseArgs(argv: readonly string[]): Options | null {
           const eq = raw.indexOf('=');
           if (eq <= 0) throw new Error(`--param requiere clave=valor1,valor2 (recibido "${raw}")`);
           const paramKey = raw.slice(0, eq);
-          const values = raw.slice(eq + 1).split(',').map(value => value.trim()).filter(value => value.length > 0);
+          const values = splitParamList(raw.slice(eq + 1)).filter(value => value.length > 0);
           if (!values.length) throw new Error(`--param ${paramKey} no trae valores`);
           paramValues.set(paramKey, [...(paramValues.get(paramKey) ?? []), ...values]);
           const next = argv[i + 1];

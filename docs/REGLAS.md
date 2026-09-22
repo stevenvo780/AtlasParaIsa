@@ -315,6 +315,40 @@ El escalón intermedio tiene que ser alcanzable de verdad. En la primera versió
 
 La refutación está en `tests/params-instantanea.test.ts`: un mundo generado con `agua.cuencas=1` tiene el agua potable de ese régimen (no la del default), un mundo guardado con `agua.cuencas=0.8,poblacion.maxima=50` los conserva al recargar con el mismo dígeste, la receta del despliegue conserva del mundo cargado toda clave que no nombra mientras impone la cadencia, y la instantánea sin campo vuelve a `DEFAULT_PARAMS` por identidad.
 
+**T102, configuración tipada (2026-09-22).** `PARAM_DESCRIPTORS` declara el tipo de cada hoja;
+`PARAM_RANGES` conserva sus tuplas numéricas para los consumidores existentes. Se aceptan
+booleanos `true`/`false`, enums y arrays JSON además de números. Por ejemplo:
+`motor.hilos=8,motor.gpu=[1,0],motor.orden=inverso,motor.clonPorPaso=false`.
+Las comas dentro de JSON pertenecen al valor: en el laboratorio
+`--param 'motor.hilos=1,8' 'motor.gpu=[],[0],[0,1]'` crea seis combinaciones.
+Los arrays conservan su orden, se copian y se congelan; tipos incorrectos, valores no finitos,
+claves desconocidas y elementos duplicados en las listas se rechazan.
+
+| Opción reservada | Default | Valores aceptados |
+|---|---|---|
+| `motor.clonPorPaso` | `true` | booleano |
+| `motor.hilos` | `1` | entero de 1 a 512 |
+| `motor.soaTerreno`, `motor.particionarPersonas` | `false` | booleano |
+| `motor.gpu` | `[]` | índices enteros seguros no negativos, únicos, sin consultar el hardware |
+| `motor.orden` | `natural` | `natural`, `inverso`, `adversarial` |
+| `persistencia.paginasSucias`, `red.deltas` | `false` | booleano |
+| `gobernador.senales` | `["p95"]` | lista no vacía, sin duplicados; sólo `p95` hasta T161 |
+| `limites.teselasActivas`, `limites.chunks` | `65536`, `256` | enteros de 1 a `Number.MAX_SAFE_INTEGER` |
+| `limites.comunidades`, `limites.fauna` | `8`, `393216` | enteros de 1 a `Number.MAX_SAFE_INTEGER` |
+
+Estas opciones se validan y persisten, pero **T102 no activa backends, deltas ni nuevas señales,
+ni cambia los topes de validación o fundación de comunidades**. La ejecución sigue usando el
+motor V7 y el gobernador p95 existentes. Los límites son declaraciones pendientes de T100;
+no se calculan con memoria o CPU del host. El rango de un índice GPU no acredita que exista
+ese dispositivo. Las etapas posteriores deben validar su capacidad real al conectarlas.
+
+El formato `params-v1` sigue siendo legible: un snapshot anterior completa las claves nuevas
+con estos defaults y conserva sus overrides históricos. Los defaults siguen sin ocupar un
+campo en el snapshot; los overrides antiguos incorporan las nuevas claves al próximo guardado.
+`digestoCanonico` conserva todos los parámetros: añadir configuración cambia su hash aunque
+el estado físico sea igual. El control separado `scripts/verify-params-baseline.ts` compara
+estado completo, orden, aliases, `undefined` y bits numéricos frente a V7, sin debilitar ese digesto.
+
 | Parámetro | Default (calibrado 2026-09-19) | Rango | Ley que controla | Tarea |
 | :--- | :--- | :--- | :--- | :--- |
 | `cuerpo.longevidadBaseDias` | 11 | [4, 60] | Longevidad base para el cálculo de edad máxima | T001 · R3 |

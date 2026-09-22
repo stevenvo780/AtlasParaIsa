@@ -7,6 +7,7 @@
  */
 
 import { DEMOGRAPHY_TICKS_PER_DAY, longevityAges, type LongevityLaw } from '../shared/demography.js';
+import { splitParamList } from '../shared/param-syntax.js';
 
 export interface WorldParams {
   cuerpo: {
@@ -21,7 +22,7 @@ export interface WorldParams {
   genes: { varianzaFundadores: number; tasaMutacion: number };
   poblacion: { maxima: number; intervaloComprobacionTicks: number; nacimientosPorComprobacion: number };
   recursos: { capacidadBosque: number; capacidadPastizal: number; capacidadOtros: number; velocidadRegeneracion: number; decaimientoFertilidad: number; decaimientoComida: number };
-  persistencia: { cadaTicks: number; ventanaEventosTicks: number };
+  persistencia: { cadaTicks: number; ventanaEventosTicks: number; paginasSucias: boolean };
   /** Agua superficial concentrada en cuencas: 1 = generación actual (todas las charcas/manantiales); < 1 conserva solo las de las cuencas más húmedas (T035). */
   agua: { cuencas: number };
   /**
@@ -29,7 +30,12 @@ export interface WorldParams {
    * del paso (ms) que el servidor se permite; por encima el gobernador apaga la
    * reproducción, por debajo del 70 % la reenciende. Default 50 ms = constitución V.
    */
-  gobernador: { presupuestoMs: number };
+  gobernador: { presupuestoMs: number; senales: string[] };
+  /** T102: configuración reservada; todavía no selecciona otro backend. */
+  motor: { clonPorPaso: boolean; hilos: number; soaTerreno: boolean; particionarPersonas: boolean; gpu: number[]; orden: 'natural' | 'inverso' | 'adversarial' };
+  red: { deltas: boolean };
+  /** T100 aún pendiente: declarar estos valores no cambia las validaciones actuales. */
+  limites: { teselasActivas: number; chunks: number; comunidades: number; fauna: number };
 }
 
 function deepFreeze<T>(value: T): T {
@@ -50,9 +56,12 @@ const RAW_DEFAULTS: WorldParams = {
   // freno lo ponen el entorno y el gobernador. Sigue siendo parámetro para el laboratorio.
   poblacion: { maxima: 1_000_000, intervaloComprobacionTicks: 120, nacimientosPorComprobacion: 2 },
   recursos: { capacidadBosque: 1, capacidadPastizal: 0.7, capacidadOtros: 0.35, velocidadRegeneracion: 1, decaimientoFertilidad: 0.001, decaimientoComida: 0.0001 },
-  persistencia: { cadaTicks: 1, ventanaEventosTicks: 0 },
+  persistencia: { cadaTicks: 1, ventanaEventosTicks: 0, paginasSucias: false },
   agua: { cuencas: 0.4 },
-  gobernador: { presupuestoMs: 50 },
+  gobernador: { presupuestoMs: 50, senales: ['p95'] },
+  motor: { clonPorPaso: true, hilos: 1, soaTerreno: false, particionarPersonas: false, gpu: [], orden: 'natural' },
+  red: { deltas: false },
+  limites: { teselasActivas: 65536, chunks: 256, comunidades: 8, fauna: 393216 },
 };
 
 /** Objeto congelado en profundidad: nunca se muta; `parseParams` clona para cada override. */
@@ -89,7 +98,66 @@ export const PARAM_RANGES: Record<string, [number, number]> = {
   'persistencia.ventanaEventosTicks': [0, 1_000_000],
   'agua.cuencas': [0.05, 1],
   'gobernador.presupuestoMs': [5, 5000],
+  'motor.hilos': [1, 512],
+  'limites.teselasActivas': [1, Number.MAX_SAFE_INTEGER],
+  'limites.chunks': [1, Number.MAX_SAFE_INTEGER],
+  'limites.comunidades': [1, Number.MAX_SAFE_INTEGER],
+  'limites.fauna': [1, Number.MAX_SAFE_INTEGER],
 };
+
+type ScalarDescriptor = { kind: 'number'; range: readonly [number, number]; integer?: boolean }
+  | { kind: 'boolean' } | { kind: 'enum'; values: readonly string[] };
+export type ParamDescriptor = ScalarDescriptor | { kind: 'array'; element: ScalarDescriptor; minLength: number; unique: boolean };
+type ParamValue = number | boolean | string | (number | boolean | string)[];
+
+/** PARAM_RANGES conserva sus tuplas numéricas; cada hoja declara además su tipo. */
+export const PARAM_DESCRIPTORS: Readonly<Record<string, ParamDescriptor>> = deepFreeze({
+  ...Object.fromEntries(Object.entries(PARAM_RANGES).map(([key, range]) => [key,
+    { kind: 'number', range, integer: key === 'motor.hilos' || key.startsWith('limites.') }])),
+  'motor.clonPorPaso': { kind: 'boolean' },
+  'motor.soaTerreno': { kind: 'boolean' },
+  'motor.particionarPersonas': { kind: 'boolean' },
+  'motor.gpu': { kind: 'array', element: { kind: 'number', range: [0, Number.MAX_SAFE_INTEGER], integer: true }, minLength: 0, unique: true },
+  'motor.orden': { kind: 'enum', values: ['natural', 'inverso', 'adversarial'] },
+  'persistencia.paginasSucias': { kind: 'boolean' },
+  'red.deltas': { kind: 'boolean' },
+  'gobernador.senales': { kind: 'array', element: { kind: 'enum', values: ['p95'] }, minLength: 1, unique: true },
+});
+const PARAM_KEYS = Object.keys(PARAM_DESCRIPTORS);
+
+function unknownParam(key: string): never {
+  throw new Error(`Parámetro desconocido: "${key}". Claves válidas: ${PARAM_KEYS.join(', ')}.`);
+}
+
+function paramValue(key: string, raw: unknown, descriptor: ParamDescriptor, text = true): ParamValue {
+  if (descriptor.kind === 'array') {
+    let array = raw;
+    if (text && typeof raw === 'string') {
+      try { array = JSON.parse(raw); } catch { throw new Error(`Valor inválido para "${key}": se esperaba un array JSON.`); }
+    }
+    if (!Array.isArray(array) || array.length < descriptor.minLength) throw new Error(`Valor inválido para "${key}": se esperaba un array con al menos ${descriptor.minLength} elementos.`);
+    const entries = array;
+    const values = Array.from({ length: entries.length }, (_, index) => paramValue(`${key}[${index}]`, entries[index], descriptor.element, false) as number | boolean | string);
+    if (descriptor.unique && new Set(values).size !== values.length) throw new Error(`Valor inválido para "${key}": elementos duplicados.`);
+    return values;
+  }
+  if (descriptor.kind === 'boolean') {
+    if (typeof raw === 'boolean') return raw;
+    if (text && typeof raw === 'string' && ['true', 'false'].includes(raw.trim())) return raw.trim() === 'true';
+    throw new Error(`Valor inválido para "${key}": se esperaba true o false.`);
+  }
+  if (descriptor.kind === 'enum') {
+    if (typeof raw === 'string' && descriptor.values.includes(raw)) return raw;
+    throw new Error(`Valor inválido para "${key}": valores permitidos ${descriptor.values.join(', ')}.`
+      + (key.startsWith('gobernador.senales') ? ' Las demás señales requieren T161.' : ''));
+  }
+  const value = typeof raw === 'number' ? raw : text && typeof raw === 'string' && raw.trim() !== '' ? Number(raw.trim()) : NaN;
+  if (!Number.isFinite(value)) throw new Error(`Valor no numérico para "${key}": "${typeof raw === 'string' || typeof raw === 'number' ? String(raw) : typeof raw}".`);
+  const [min, max] = descriptor.range;
+  if (value < min || value > max) throw new Error(`Valor fuera de rango para "${key}": ${value} (rango permitido [${min}, ${max}]).`);
+  if (descriptor.integer && !Number.isSafeInteger(value)) throw new Error(`Valor inválido para "${key}": se esperaba un entero seguro.`);
+  return value;
+}
 
 /** Holgura mínima, en ticks, entre madurez, vejez y edad máxima en las cuatro esquinas. Absorbe el
  * redondeo: `longevityAges` redondea tres veces, así que una diferencia continua puede moverse hasta
@@ -131,14 +199,20 @@ export function assertLongevityLaw(law: Readonly<LongevityLaw>): void {
 
 /** Aplana un objeto anidado o ya plano a pares "a.b" → valor (hoja, no objeto). */
 function flatten(value: unknown, prefix: string, out: Record<string, unknown>): void {
+  if (prefix && Object.hasOwn(PARAM_DESCRIPTORS, prefix)) { out[prefix] = value; return; }
+  if (prefix && !PARAM_KEYS.some(key => key.startsWith(`${prefix}.`))) unknownParam(prefix);
   if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
-    for (const [key, child] of Object.entries(value as Record<string, unknown>)) flatten(child, prefix ? `${prefix}.${key}` : key, out);
+    if (![Object.prototype, null].includes(Object.getPrototypeOf(value))) throw new Error('Formato de parámetros inválido: se esperaba un objeto JSON.');
+    for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+      if (!key) unknownParam(key);
+      flatten(child, prefix ? `${prefix}.${key}` : key, out);
+    }
   } else {
-    out[prefix] = value;
+    throw new Error(`Formato de parámetros inválido: "${prefix || 'raíz'}" debe ser un objeto de claves conocidas.`);
   }
 }
 
-/** "cuerpo.longevidadBaseDias=14,genes.varianzaFundadores=0.15" o un objeto/array JSON (anidado o plano). */
+/** Asignaciones separadas por comas externas a JSON, o un objeto JSON anidado/plano. */
 function parseParamString(input: string): Record<string, unknown> {
   const trimmed = input.trim();
   if (trimmed === '') return {};
@@ -146,18 +220,21 @@ function parseParamString(input: string): Record<string, unknown> {
     try { return JSON.parse(trimmed) as Record<string, unknown>; }
     catch { throw new Error(`Parámetros en JSON inválido: "${input}".`); }
   }
-  const pairs: Record<string, string> = {};
-  for (const part of trimmed.split(',')) {
-    const piece = part.trim();
+  const pairs: Record<string, unknown> = Object.create(null);
+  for (const piece of splitParamList(trimmed)) {
     if (piece === '') continue;
     const eq = piece.indexOf('=');
     if (eq <= 0) throw new Error(`Formato de parámetros inválido: "${piece}" (se esperaba "clave.sub=valor").`);
-    pairs[piece.slice(0, eq).trim()] = piece.slice(eq + 1).trim();
+    const value = piece.slice(eq + 1).trim();
+    if (value.startsWith('"')) {
+      try { pairs[piece.slice(0, eq).trim()] = JSON.parse(value); }
+      catch { throw new Error(`Parámetros en JSON inválido: "${piece}".`); }
+    } else pairs[piece.slice(0, eq).trim()] = value;
   }
   return pairs;
 }
 
-function setPath(target: Record<string, unknown>, dottedKey: string, value: number): void {
+function setPath(target: Record<string, unknown>, dottedKey: string, value: ParamValue): void {
   const parts = dottedKey.split('.');
   let node = target;
   for (let i = 0; i < parts.length - 1; i++) node = node[parts[i]!] as Record<string, unknown>;
@@ -166,10 +243,10 @@ function setPath(target: Record<string, unknown>, dottedKey: string, value: numb
 
 /**
  * Acepta `undefined` (→ `base`, por identidad), una cadena "a.b=1,c.d=2" o
- * JSON (anidado o plano), o un `Record<string,string>` de claves punteadas. Devuelve
+ * JSON (anidado o plano), o un diccionario con valores tipados o de texto. Devuelve
  * un objeto NUEVO congelado: clon profundo de `base` con los overrides
  * aplicados. Lanza `Error` con mensaje claro en español si una clave no existe en
- * `PARAM_RANGES`, el valor no es numérico o cae fuera del rango permitido.
+ * `PARAM_DESCRIPTORS`, o el valor incumple su tipo o rango.
  *
  * `base` es el escalón inferior de la precedencia y por defecto son los `DEFAULT_PARAMS`
  * (comportamiento de siempre). Existe porque los overrides explícitos de un despliegue
@@ -178,21 +255,14 @@ function setPath(target: Record<string, unknown>, dottedKey: string, value: numb
  * (ronda de corrección R2). La validación no cambia con la base: cada override se sigue
  * midiendo contra `PARAM_RANGES`, y la base llegó por este mismo camino.
  */
-export function parseParams(input?: Record<string, string> | string, base: WorldParams = DEFAULT_PARAMS): WorldParams {
+export function parseParams(input?: Record<string, unknown> | string, base: WorldParams = DEFAULT_PARAMS): WorldParams {
   if (input === undefined) return base;
   const raw = typeof input === 'string' ? parseParamString(input) : input;
-  const overrides: Record<string, unknown> = {};
+  const overrides: Record<string, unknown> = Object.create(null);
   flatten(raw, '', overrides);
   const draft = structuredClone(base) as unknown as Record<string, unknown>;
   for (const [key, rawValue] of Object.entries(overrides)) {
-    const range = PARAM_RANGES[key];
-    if (!range) throw new Error(`Parámetro desconocido: "${key}". Claves válidas: ${Object.keys(PARAM_RANGES).join(', ')}.`);
-    const trimmed = typeof rawValue === 'number' ? null : String(rawValue).trim();
-    const value = typeof rawValue === 'number' ? rawValue : trimmed === '' ? NaN : Number(trimmed);
-    if (!Number.isFinite(value)) throw new Error(`Valor no numérico para "${key}": "${String(rawValue)}".`);
-    const [min, max] = range;
-    if (value < min || value > max) throw new Error(`Valor fuera de rango para "${key}": ${value} (rango permitido [${min}, ${max}]).`);
-    setPath(draft, key, value);
+    setPath(draft, key, paramValue(key, rawValue, PARAM_DESCRIPTORS[key]!));
   }
   const params = draft as unknown as WorldParams;
   // Cruce de claves: el rango por clave no puede verlo, y el tick es demasiado tarde.

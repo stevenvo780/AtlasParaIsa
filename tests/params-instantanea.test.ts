@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { Store } from '../src/server/store.js';
 import { createApp } from '../src/server/app.js';
 import { encodeSnapshot } from '../src/server/snapshot.js';
-import { createWorld, type World } from '../src/world/index.js';
+import { cloneWorld, createWorld, type World } from '../src/world/index.js';
 import { DEFAULT_PARAMS, paramsOf, parseParams, setParams } from '../src/world/params.js';
 import { deploymentParams } from '../src/server/deployment-params.js';
 
@@ -130,4 +130,57 @@ test('parseParams sobre una base aplica los overrides encima de ella, no encima 
   assert.equal(encima.cuerpo.longevidadBaseDias, DEFAULT_PARAMS.cuerpo.longevidadBaseDias);
   assert.throws(() => parseParams('agua.cuencas=9', base), /fuera de rango/, 'la base no relaja la validación');
   assert.deepEqual(parseParams('poblacion.maxima=7'), parseParams('poblacion.maxima=7', DEFAULT_PARAMS), 'la base por defecto es DEFAULT_PARAMS');
+});
+
+test('T102: parámetros tipados sobreviven a guardado, reinicio, clon y overrides del despliegue', t => {
+  const { store, path } = laboratory(t);
+  const params = parseParams('agua.cuencas=0.8,motor.hilos=8,motor.gpu=[1,0],motor.clonPorPaso=false,motor.orden=inverso,persistencia.paginasSucias=true,red.deltas=true');
+  store.save(createWorld(51926, params));
+  const saved = row(store), reopened = new Store(path);
+  try {
+    const loaded = reopened.load()!.world, effective = paramsOf(loaded);
+    assert.deepEqual(effective, params);
+    assert.ok(Object.isFrozen(effective.motor.gpu)); assert.ok(Object.isFrozen(effective.gobernador.senales));
+    assert.equal(paramsOf(cloneWorld(loaded)), effective);
+    reopened.save(loaded);
+    assert.equal(row(reopened).body, saved.body, 'roundtrip tipado conserva los bytes');
+    const overridden = deploymentParams(effective, 'motor.hilos=16,motor.gpu=[]');
+    assert.equal(overridden.motor.hilos, 16); assert.deepEqual(overridden.motor.gpu, []);
+    assert.deepEqual(effective.motor.gpu, [1, 0]); assert.equal(overridden.agua.cuencas, 0.8);
+    assert.equal(overridden.motor.clonPorPaso, false); assert.equal(overridden.persistencia.cadaTicks, 100);
+  } finally { reopened.close(); }
+});
+
+test('T102: snapshot params-v1 anterior completa sólo los campos nuevos con defaults', t => {
+  const { store, path } = laboratory(t);
+  const params = parseParams('agua.cuencas=0.8,persistencia.cadaTicks=20');
+  store.save(createWorld(51926, params));
+  const saved = JSON.parse(row(store).body);
+  for (const key of ['motor', 'red', 'limites']) delete saved.params[key];
+  delete saved.params.persistencia.paginasSucias; delete saved.params.gobernador.senales;
+  rewrite(store, JSON.stringify(saved));
+  const reopened = new Store(path);
+  try {
+    const loaded = reopened.load()!.world;
+    assert.deepEqual(paramsOf(loaded), params);
+    reopened.save(loaded);
+    const expanded = JSON.parse(row(reopened).body).params;
+    assert.equal(expanded.agua.cuencas, 0.8); assert.equal(expanded.persistencia.cadaTicks, 20);
+    assert.deepEqual(expanded.motor, DEFAULT_PARAMS.motor);
+  } finally { reopened.close(); }
+});
+
+test('T102: checksum recalculado no legitima flags, arrays o señales corruptos del snapshot', t => {
+  const { store } = laboratory(t);
+  store.save(createWorld(51926, parseParams('motor.hilos=8')));
+  const saved = JSON.parse(row(store).body);
+  for (const [section, key, value] of [
+    ['motor', 'hilos', 1.5], ['motor', 'clonPorPaso', 1], ['motor', 'gpu', [0, 0]],
+    ['motor', 'gpu', ['0']], ['motor', 'gpu', [null]], ['motor', 'orden', 'azar'],
+    ['gobernador', 'senales', []], ['gobernador', 'senales', ['rss']], ['limites', 'fauna', -1],
+  ] as const) {
+    const corrupted = structuredClone(saved); corrupted.params[section][key] = value;
+    rewrite(store, JSON.stringify(corrupted));
+    assert.throws(() => store.load(), /Invalid snapshot parameters/, `${section}.${key}`);
+  }
 });

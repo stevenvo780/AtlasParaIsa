@@ -184,6 +184,87 @@ test('barrido: --param acepta varios grupos "clave=v1,v2" sueltos tras un solo -
   } finally { rmSync(salida, { recursive: true, force: true }); rmSync(stubDir, { recursive: true, force: true }); }
 });
 
+test('barrido: combina números, arrays, booleanos y enums sin separar las comas de motor.gpu', () => {
+  const salida = mkdtempSync(join(tmpdir(), 'carta-barrido-'));
+  const stubDir = newStubDir();
+  const replicaStub = join(stubDir, 'replica.ts'), resumenStub = join(stubDir, 'resumen.ts');
+  writeFileSync(replicaStub, STUB_REPLICA_OK);
+  writeFileSync(resumenStub, STUB_RESUMEN_OK);
+  try {
+    const outcome = runBarrido(
+      ['--replicas', '1', '--dias', '2', '--concurrencia', '4', '--timeout', '20', '--seed-base', '30',
+        '--param', 'motor.hilos=1', 'motor.gpu=[], [0], [0,1]', 'motor.clonPorPaso=false,true',
+        '--param', 'motor.orden=natural,inverso', '--param', 'motor.hilos=8', '--salida', salida],
+      { CARTA_REPLICA_SCRIPT: replicaStub, CARTA_RESUMEN_SCRIPT: resumenStub },
+    );
+    assert.equal(outcome.status, 0, `barrido.ts falló: ${outcome.stderr}`);
+    const recibidos = readdirSync(salida, { withFileTypes: true }).filter(entry => entry.isDirectory()).map(entry => {
+      const replica = JSON.parse(readFileSync(join(salida, entry.name, 'seed-30', 'replica.json'), 'utf8'));
+      assert.equal(replica.seed, 30);
+      assert.equal(replica.dias, 2);
+      return replica.params as string;
+    });
+    const esperados: string[] = [];
+    for (const hilos of [1, 8]) for (const gpu of ['[]', '[0]', '[0,1]']) {
+      for (const clon of [false, true]) for (const orden of ['natural', 'inverso']) {
+        esperados.push(`motor.hilos=${hilos},motor.gpu=${gpu},motor.clonPorPaso=${clon},motor.orden=${orden}`);
+      }
+    }
+    assert.equal(recibidos.length, 24, 'cada array es un valor; repetir --param agrega valores a la misma clave');
+    assert.deepEqual(recibidos.sort(), esperados.sort(), 'cada réplica recibe --params completo y en el orden de claves de la CLI');
+    const log = readFileSync(join(salida, 'progreso.log'), 'utf8');
+    assert.equal(log.split('\n').filter(line => line.includes('job=')).length, 24);
+    assert.match(log, /barrido completo: ok=24 abortadas=0 errores=0/);
+  } finally { rmSync(salida, { recursive: true, force: true }); rmSync(stubDir, { recursive: true, force: true }); }
+});
+
+test('barrido: arrays con delimitadores o comillas sin cerrar fallan antes de crear el barrido', () => {
+  const base = mkdtempSync(join(tmpdir(), 'carta-barrido-'));
+  const stubDir = newStubDir();
+  const replicaStub = join(stubDir, 'replica.ts'), resumenStub = join(stubDir, 'resumen.ts');
+  writeFileSync(replicaStub, STUB_REPLICA_OK);
+  writeFileSync(resumenStub, STUB_RESUMEN_OK);
+  try {
+    const invalidos = ['motor.gpu=[0,1', 'motor.gpu=0,1]', 'motor.gpu=[0,1}', 'motor.gpu=["0,1]'];
+    for (const [index, raw] of invalidos.entries()) {
+      const salida = join(base, `invalido-${index}`);
+      const outcome = runBarrido(
+        ['--replicas', '1', '--dias', '1', '--concurrencia', '1', '--param', raw, '--salida', salida],
+        { CARTA_REPLICA_SCRIPT: replicaStub, CARTA_RESUMEN_SCRIPT: resumenStub },
+      );
+      assert.equal(outcome.status, 1, `el barrido debe rechazar ${raw}: ${outcome.stderr}`);
+      assert.ok(outcome.stderr.trim().length > 0, `el error de ${raw} debe explicar la sintaxis inválida`);
+      assert.equal(existsSync(salida), false, `no debe encolar réplicas ni crear progreso para ${raw}`);
+    }
+  } finally { rmSync(base, { recursive: true, force: true }); rmSync(stubDir, { recursive: true, force: true }); }
+});
+
+test('barrido: el marcador de réplica fallida conserva arrays y opciones de motor normalizados', () => {
+  const salida = mkdtempSync(join(tmpdir(), 'carta-barrido-'));
+  const stubDir = newStubDir();
+  const replicaStub = join(stubDir, 'replica.ts'), resumenStub = join(stubDir, 'resumen.ts');
+  writeFileSync(replicaStub, "throw new Error('fallo antes de producir replica.json');\n");
+  writeFileSync(resumenStub, STUB_RESUMEN_OK);
+  try {
+    const outcome = runBarrido(
+      ['--replicas', '1', '--dias', '1', '--concurrencia', '1', '--timeout', '20', '--seed-base', '31',
+        '--param', 'motor.gpu=[0,1]', 'motor.hilos=8', 'motor.clonPorPaso=false', 'motor.orden=inverso', '--salida', salida],
+      { CARTA_REPLICA_SCRIPT: replicaStub, CARTA_RESUMEN_SCRIPT: resumenStub },
+    );
+    assert.equal(outcome.status, 1, 'la réplica fallida no se convierte en un barrido exitoso');
+    const grupos = readdirSync(salida, { withFileTypes: true }).filter(entry => entry.isDirectory());
+    assert.equal(grupos.length, 1, 'el array de dos GPU sigue siendo una sola combinación');
+    const marcador = JSON.parse(readFileSync(join(salida, grupos[0]!.name, 'seed-31', 'replica.json'), 'utf8'));
+    assert.equal(marcador.abortada, true);
+    assert.equal(marcador.barrido.estado, 'error');
+    assert.equal(marcador.params._paramsCrudos, undefined, 'el marcador debe agruparse por parámetros normalizados');
+    assert.equal(marcador.params.motor.hilos, 8);
+    assert.deepEqual(marcador.params.motor.gpu, [0, 1]);
+    assert.equal(marcador.params.motor.clonPorPaso, false);
+    assert.equal(marcador.params.motor.orden, 'inverso');
+  } finally { rmSync(salida, { recursive: true, force: true }); rmSync(stubDir, { recursive: true, force: true }); }
+});
+
 test('barrido: una réplica que supera --timeout mata TODO el árbol de procesos, queda "abortada" con marcador replica.json para T018, y no bloquea el resto', () => {
   const salida = mkdtempSync(join(tmpdir(), 'carta-barrido-'));
   const stubDir = newStubDir();

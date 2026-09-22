@@ -49,6 +49,43 @@ export function reproductiveReadiness(world: World, person: Person): boolean {
 
 export interface FamilyOpportunity { partner: Person; reserveTarget: number; }
 
+/** One decision's visible workers, preserving their order within each physical cell. */
+export function observedForagersByCell(people: readonly Person[]): Map<string, Person[]> {
+  const cells = new Map<string, Person[]>();
+  for (const person of people) {
+    if (person.action !== 'forage') continue;
+    const key = `${person.x},${person.y}`, group = cells.get(key);
+    if (group) group.push(person); else cells.set(key, [person]);
+  }
+  return cells;
+}
+
+/** Local prediction only: it grants no ownership, stock or knowledge of the next choice. */
+export function earlierForagerExhausts(
+  person: Person, source: { x: number; y: number; food: number }, observedPeople: readonly Person[],
+  ownRemainingWork: number,
+  physical: {
+    tick: number; radius: number;
+    duration: (other: Person) => number;
+    capacity: (other: Person) => number;
+    continues: (other: Person, ticks: number) => boolean;
+  },
+): boolean {
+  for (const other of observedPeople) {
+    if (other.id === person.id || distance(person, other) > physical.radius || other.action !== 'forage'
+      || other.work <= 0 || distance(other, source) >= 0.5 || distance(other.target, source) >= 0.5
+      || other.technology.waterPreparation) continue;
+    const remaining = Math.max(1, physical.duration(other) - other.work);
+    // The observer cannot know whether the other already worked in this tick.
+    // Compare their latest completion with our earliest, even assuming no travel.
+    // Ties and a one-tick lead remain uncertain; no actor-order arbitration.
+    if (remaining + 1 >= ownRemainingWork || physical.tick + remaining >= other.decisionAt
+      || physical.capacity(other) < source.food || !physical.continues(other, remaining + 1)) continue;
+    return true;
+  }
+  return false;
+}
+
 /** A known, mutually trusted local partner allowed by the kinship gate can motivate acquiring real reserves.
  * This intent neither supplies food nor guarantees a birth; the host owns actions and costs.
  * Both partners retain their communities; mutual local trust can cross their labels. */

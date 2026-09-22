@@ -10,17 +10,17 @@ import * as family from '../src/world/family.js';
 import { FamilyObservation, familySample, roleActivity } from '../scripts/lab/family-observation.js';
 import { classifyOutcome, prepare, verifyPlan } from '../scripts/lab/family-reserve-batch.js';
 
-test('V8 paired plan fixes both arms, seeds, horizon, persistence and deadline, refusing altered contracts', () => {
+test('V9 paired plan fixes both arms, seeds, horizon, persistence and deadline, refusing altered contracts', () => {
   const root = fileURLToPath(new URL('..', import.meta.url));
-  const directory = resolve(root, 'artifacts/family-reserve-v8-20260922', `fixture-${randomUUID()}`);
+  const directory = resolve(root, 'artifacts/family-contention-v9-20260922', `fixture-${randomUUID()}`);
   try {
     const batch = prepare(directory);
-    assert.equal(batch.sources.baseline.originSha, '3dd615ee069d9d61f51a4c74f85d33c15a4583e0');
+    assert.equal(batch.sources.baseline.originSha, 'eaa2709b24ef02623921ba39bf32159a0892b4e1');
     assert.equal(batch.days, 13); assert.equal(batch.ticks, 31200); assert.equal(batch.workers, 6);
     assert.equal(batch.timeoutMs, 3600000); assert.equal(batch.params, 'persistencia.cadaTicks=20');
     assert.deepEqual(batch.jobs.map(j => j.id), ['baseline-1007', 'candidate-1007', 'baseline-1012', 'candidate-1012', 'baseline-1013', 'candidate-1013']);
-    assert.match(readFileSync(resolve(batch.sources.baseline.root, 'src/world/index.ts'), 'utf8'), /RULES_VERSION = 7;/);
-    assert.match(readFileSync(resolve(batch.sources.candidate.root, 'src/world/index.ts'), 'utf8'), /RULES_VERSION = 8;/);
+    assert.match(readFileSync(resolve(batch.sources.baseline.root, 'src/world/index.ts'), 'utf8'), /RULES_VERSION = 8;/);
+    assert.match(readFileSync(resolve(batch.sources.candidate.root, 'src/world/index.ts'), 'utf8'), /RULES_VERSION = 9;/);
     verifyPlan(batch);
     for (const changed of [{ ...batch, days: 14 }, { ...batch, workers: 7 }, { ...batch, timeoutMs: 3600001 },
       { ...batch, jobs: batch.jobs.map((j, i) => i === 0 ? { ...j, seed: 9999 } : j) }]) assert.throws(() => verifyPlan(changed));

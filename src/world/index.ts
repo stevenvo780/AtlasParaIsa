@@ -2,8 +2,8 @@ import { recordChronicleEvent, enableChronicleJournal, assertChronicleJournal, t
 import { PROTOCOL_VERSION, type Action, type ChronicleEvent, type Gesture, type GestureResult, type MemoryView, type PersonView, type PersonDetail, type PlaceView, type Tile, type WorldView, type Viewport, type Order, type CommunityView, type WorldSample, type FaseNombre } from '../shared/types.js';
 import { activate, bindWorldContext, maintainRegions, normalizeViewport, projectTerrain, tileAt, validCoordinate, worldContext, type ChunkMeta, type WorldContext } from './spatial.js';
 import { chunkKey, generateChunk, proceduralPlaceName, legacyStructures, type Chunk } from './terrain.js';
-import { assertGenome, DEFAULT_MUTATION_RATE, expressGenome, founderGenome, inheritGenome, type Genome } from './genetics.js';
-import { bond, cooperate, cooperationOpportunity, initialCulture, resourceDispute, updateCommunities, settlementOpportunity, type Culture } from './society.js';
+import { assertGenome, DEFAULT_MUTATION_RATE, expressGenome, founderGenome, inheritGenome, localRandom, type Genome } from './genetics.js';
+import { bond, convivir, cooperate, cooperationOpportunity, initialCulture, resourceDispute, updateCommunities, settlementOpportunity, type Culture } from './society.js';
 import { count, emptyTotals, heredarEstadisticas, recordSample, worldStatistics } from './statistics.js';
 import { initializeEcosystem, stepEcosystem, harvestMaterial, cultivateTile, trampleTile, FOOD_PER_ANIMAL } from './ecosystem.js';
 import { assertEcosystemTile, assertLifeState, assertDormantTerrain } from './validation.js';
@@ -24,7 +24,7 @@ import { analyzeTechnologyOrganization } from './technology-organization.js';
 import { captureTechnologyCheckpoint, advanceTechnologyCheckpoint } from './technology-checkpoint.js';
 import { advanceWaterPreparation, beginWaterPreparation, canHandleContainedWater, containedWaterQuanta, drinkContainedWater, emptyWaterLedger, maintainContainedWater, payContainedWaterCarry, WATER_WORK_ENERGY, WATER_WORK_FATIGUE } from './technology-water.js';
 import { flowQuantized, WATER_QUANTA_PER_UNIT } from './material-affordances.js';
-import { DEFAULT_PARAMS, paramsOf, setParams, limitsOf, type WorldParams } from './params.js';
+import { DEFAULT_PARAMS, MAX_FOUNDER_AGE_TICKS, paramsOf, setParams, limitsOf, type WorldParams } from './params.js';
 export { bindWorldContext, tileAt, normalizeViewport, worldContext } from './spatial.js';
 export type { WorldContext } from './spatial.js';
 
@@ -204,6 +204,7 @@ export function createWorld(seed = 20260905, params?: WorldParams): World {
       person.curiosity = person.traits.curiosity;
       person.sociability = person.traits.sociability;
       person.generosity = person.traits.care;
+      assignFounderAge(world, person);
     }
   }
   world.technology.checkpoint = captureTechnologyCheckpoint(world.technology, world.people, world.tick, 'initial');
@@ -216,6 +217,26 @@ function initializePerson(world: World, person: Person, varianzaFundadores: numb
   person.thirst = 0.15; person.genome = founderGenome(world.seed, person.id, person.traits, varianzaFundadores);
   person.bornAt = world.tick - 4800; person.lastBirth = world.tick - 2400; person.lastSocial = -30; person.lastDispute = -180; person.lastPracticeMemory = world.tick;
   person.culture = initialCulture(world.seed, person.id); person.communityId = null; person.bonds = {};
+}
+
+/**
+ * Hipótesis cohorte (2026-09-22): CONDICIÓN INICIAL, no ley. Con la edad fija de siempre (2 días) los
+ * dieciséis fundadores maduran y envejecen a la vez, y la ventana fértil de toda la cohorte se cierra de
+ * golpe hacia el día 8. `genes.edadFundadoresMinDias/MaxDias` reparten la edad de cada fundador mortal en
+ * ese rango con una tirada local y propia (`localRandom(seed, 'edad-fundador:'+id)`: no consume el
+ * generador del mundo), y la acotan por debajo del inicio de SU vejez: nadie empieza ya viejo. `bornAt`,
+ * `lastBirth` (nunca antes del nacimiento) y `demography.age` se fijan juntos, así que
+ * `age === tick − bornAt` sigue siendo cierto. Con el default 2..2 la tirada da exactamente 2 días
+ * (4800 ticks) y `lastBirth` −2400: el mundo de siempre, bit a bit. S e I no pasan por aquí.
+ */
+function assignFounderAge(world: World, person: Person): void {
+  const { genes, cuerpo } = paramsOf(world);
+  const dias = genes.edadFundadoresMinDias + (genes.edadFundadoresMaxDias - genes.edadFundadoresMinDias) * localRandom(world.seed, `edad-fundador:${person.id}`)();
+  const vejez = demographicTraits(person.genome, cuerpo).senescenceStart;
+  const age = Math.min(Math.round(dias * TICKS_PER_DAY), vejez - 1);
+  person.bornAt = world.tick - age;
+  person.lastBirth = world.tick - Math.min(age, TICKS_PER_DAY);
+  person.demography = initialDemography(age);
 }
 
 function seededTraits(seed: number, index: number): Person['traits'] {
@@ -1108,7 +1129,7 @@ export function stepWorld(world: World, inputs: Gesture[] = [], context: WorldCo
       }
     }
   });
-  medirFase(medicion, 'encuentros', () => encounters(world));
+  medirFase(medicion, 'encuentros', () => { encounters(world); convivir(world); });
   medirFase(medicion, 'demografia', () => advancePopulation(world,{emit:event=>addEvent(world,event.kind==='death'?deathContext(world,event):event),beforeDeath:transferEstate}));
   medirFase(medicion, 'comunidades', () => updateCommunities(world, event => addEvent(world, event)));
   medirFase(medicion, 'reproduccion', () => reproduce(world));
@@ -1149,7 +1170,8 @@ function reproduce(world: World): void {
   // mira cada paso, pero el cupo se cuenta sobre la misma ventana móvil, así que el calendario
   // máximo —`nacimientosPorComprobacion` por ventana— no se mueve (lo cita SC-013). Sin campos
   // nuevos en `World`: la ventana se reconstruye de los `bornAt` que ya existen, y los
-  // fundadores (`bornAt = −4800`) nunca caen dentro de ella.
+  // fundadores (`bornAt ≤ −1200`, `genes.edadFundadoresMinDias` ≥ 0,5 días) no caen dentro
+  // de ella con el intervalo por defecto.
   if (!pop.comprobacionContinua && world.tick % pop.intervaloComprobacionTicks !== 0) return;
   const recientes = pop.comprobacionContinua
     ? world.people.filter(p => p.role === 'neighbor' && p.bornAt > world.tick - pop.intervaloComprobacionTicks).length : 0;
@@ -1500,7 +1522,7 @@ export function assertWorld(value: unknown, expectedVersion = RULES_VERSION, con
         const parents = p.genome.parents.map(id => identity(id));
         if (parents.some(parent => !parent || parent.id === p.id || parent.bornAt >= p.bornAt || ('diedAt' in parent && parent.diedAt < p.bornAt) || parent.genome.generation >= p.genome.generation) || p.genome.generation !== Math.max(...parents.map(parent => parent!.genome.generation)) + 1) fail();
       }
-      if (typeof p.thirst !== 'number' || !Number.isFinite(p.thirst) || p.thirst < 0 || p.thirst > 1 || !Number.isSafeInteger(p.bornAt) || p.bornAt < -4800 || p.bornAt > w.tick || !Number.isSafeInteger(p.lastBirth) || p.lastBirth < -2400 || p.lastBirth > w.tick || !Number.isSafeInteger(p.lastSocial) || p.lastSocial < -30 || p.lastSocial > w.tick || !Number.isSafeInteger(p.lastDispute) || p.lastDispute < -180 || p.lastDispute > w.tick || !Number.isSafeInteger(p.lastPracticeMemory) || p.lastPracticeMemory < 0 || p.lastPracticeMemory > w.tick || !numericMap(p.culture, 0, 1, 3) || !['sharing','stewardship','openness'].every(key => typeof p.culture[key as keyof Culture] === 'number') || !numericMap(p.bonds, 0, 1, populationCap) || Object.keys(p.bonds).some(id => !alive.has(id)) || !(p.communityId === null || typeof p.communityId === 'string' && w.communities?.some(c => c.id === p.communityId))) fail();
+      if (typeof p.thirst !== 'number' || !Number.isFinite(p.thirst) || p.thirst < 0 || p.thirst > 1 || !Number.isSafeInteger(p.bornAt) || p.bornAt < -MAX_FOUNDER_AGE_TICKS || p.bornAt > w.tick || !Number.isSafeInteger(p.lastBirth) || p.lastBirth < -2400 || p.lastBirth > w.tick || !Number.isSafeInteger(p.lastSocial) || p.lastSocial < -30 || p.lastSocial > w.tick || !Number.isSafeInteger(p.lastDispute) || p.lastDispute < -180 || p.lastDispute > w.tick || !Number.isSafeInteger(p.lastPracticeMemory) || p.lastPracticeMemory < 0 || p.lastPracticeMemory > w.tick || !numericMap(p.culture, 0, 1, 3) || !['sharing','stewardship','openness'].every(key => typeof p.culture[key as keyof Culture] === 'number') || !numericMap(p.bonds, 0, 1, populationCap) || Object.keys(p.bonds).some(id => !alive.has(id)) || !(p.communityId === null || typeof p.communityId === 'string' && w.communities?.some(c => c.id === p.communityId))) fail();
     }
     if (!['ready','hungry','thirsty','tired'].includes(p.intentContext)) fail();
     if (!p.traits || !['curiosity','sociability','industriousness','care','resilience'].every(k => typeof p.traits[k as keyof typeof p.traits] === 'number') || !numericMap(p.traits, 0, 1, 5) || !numericMap(p.skills, 0, 1, expectedVersion>=5?18:15) || !numericMap(p.values, -0.3, 0.3, expectedVersion>=5?72:60) || !numericMap(p.activity, 0, 1_000_000, expectedVersion>=5?18:15) || !p.materials || !Number.isFinite(p.materials.wood) || p.materials.wood < 0 || p.materials.wood > 12 || !Number.isFinite(p.materials.stone) || p.materials.stone < 0 || p.materials.stone > 8 || !Array.isArray(p.visited) || p.visited.length > 192 || !p.visited.every(k => typeof k === 'string' && /^-?\d+,-?\d+$/.test(k)) || !Number.isFinite(p.heading) || !Number.isSafeInteger(p.work) || p.work < 0 || p.work > (expectedVersion>=4?600:90) || !Number.isSafeInteger(p.lastOutcome) || p.lastOutcome < 0 || p.lastOutcome > w.tick || !['auto','directed'].includes(p.controlMode)) fail();

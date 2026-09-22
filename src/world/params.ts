@@ -19,7 +19,13 @@ export interface WorldParams {
     riesgoSenescenciaPendiente: number;
     cuidadoReduceRiesgo: number;
   };
-  genes: { varianzaFundadores: number; tasaMutacion: number };
+  /**
+   * `edadFundadoresMinDias`/`edadFundadoresMaxDias` (hipótesis cohorte, 2026-09-22) son una CONDICIÓN
+   * INICIAL, no una ley: la edad con que arranca cada fundador mortal (vecinos; S e I no cambian) se
+   * reparte de forma determinista en `[min, max]` días con `localRandom(seed, 'edad-fundador:'+id)`,
+   * acotada por debajo del inicio de su propia vejez. Default 2 y 2 = los 4800 ticks de siempre.
+   */
+  genes: { varianzaFundadores: number; tasaMutacion: number; edadFundadoresMinDias: number; edadFundadoresMaxDias: number };
   /**
    * `exigeComunidad`, `radioPareja`, `radioLugar` y `comprobacionContinua` son leyes
    * candidatas del embudo de natalidad (diagnóstico 2026-09-22, `scripts/lab/diagnostico-natalidad.ts`):
@@ -67,7 +73,10 @@ export interface WorldParams {
   /** `social.maxComunidades`: tope de FUNDACIÓN de comunidades (`society.ts`), regla de conducta separada
    * de la admisión `limites.comunidades` (revisión de T100, 2026-09-22). */
   social: { maxComunidades: number; disputaNecesidad: number; disputaEscasez: number; disputaRadio: number; disputaDestino: number; disputaEspera: number;
-    ensenanzaRareza: number; confianzaSalida: number; distanciaAlternativa: number };
+    ensenanzaRareza: number; confianzaSalida: number; distanciaAlternativa: number;
+    /** Convivencia (hipótesis cohorte, 2026-09-22): vínculo mutuo que ganan por paso dos personas a
+     * ≤ 2 celdas, `vinculoConvivencia · sociabilidad media`, sin superar `TECHO_CONVIVENCIA`. 0 = hoy. */
+    vinculoConvivencia: number };
 }
 
 function deepFreeze<T>(value: T): T {
@@ -83,7 +92,7 @@ const RAW_DEFAULTS: WorldParams = {
     longevidadBaseDias: 11, longevidadPorResiliencia: 4, longevidadPorActividad: 1, senescenciaInicioFraccion: 0.75,
     riesgoSenescenciaDiario: 0.04, riesgoSenescenciaPendiente: 10, cuidadoReduceRiesgo: 0.6,
   },
-  genes: { varianzaFundadores: 0.15, tasaMutacion: 1 },
+  genes: { varianzaFundadores: 0.15, tasaMutacion: 1, edadFundadoresMinDias: 2, edadFundadoresMaxDias: 2 },
   // Ruling R17: `maxima` ya no es un tope de diseño (era 40); por defecto no limita y el
   // freno lo ponen el entorno y el gobernador. Sigue siendo parámetro para el laboratorio.
   poblacion: { maxima: 1_000_000, intervaloComprobacionTicks: 120, nacimientosPorComprobacion: 2,
@@ -101,7 +110,7 @@ const RAW_DEFAULTS: WorldParams = {
   // cultural), así que abrirlas no cambia el mundo.
   conducta: { habituacion: 0 },
   social: { maxComunidades: 8, disputaNecesidad: 0.65, disputaEscasez: 1, disputaRadio: 2, disputaDestino: 0.5, disputaEspera: 180,
-    ensenanzaRareza: 0, confianzaSalida: 0.35, distanciaAlternativa: 0.2 },
+    ensenanzaRareza: 0, confianzaSalida: 0.35, distanciaAlternativa: 0.2, vinculoConvivencia: 0 },
 };
 
 /** Objeto congelado en profundidad: nunca se muta; `parseParams` clona para cada override. */
@@ -152,6 +161,12 @@ export const PARAM_RANGES: Record<string, [number, number]> = {
   'cuerpo.cuidadoReduceRiesgo': [0, 1],
   'genes.varianzaFundadores': [0, 1],
   'genes.tasaMutacion': [0, 10],
+  // Condición inicial de la cohorte fundadora (días). El mínimo 0,5 deja a todo fundador fuera de la
+  // ventana de nacimientos recientes de `comprobacionContinua` con el intervalo por defecto (120
+  // ticks); el máximo 30 es la cota anticorrupción de `bornAt` en `assertWorld`. min ≤ max lo
+  // comprueba `assertFounderAges`, porque un rango por clave no puede verlo.
+  'genes.edadFundadoresMinDias': [0.5, 30],
+  'genes.edadFundadoresMaxDias': [0.5, 30],
   'poblacion.maxima': [1, 1_000_000],
   'poblacion.intervaloComprobacionTicks': [1, 10000],
   'poblacion.nacimientosPorComprobacion': [0, 20],
@@ -192,6 +207,9 @@ export const PARAM_RANGES: Record<string, [number, number]> = {
   'social.ensenanzaRareza': [0, 5],
   'social.confianzaSalida': [0, 1],
   'social.distanciaAlternativa': [0, 1],
+  // Ganancia de vínculo por paso compartido a ≤ 2 celdas. Con 0,01 dos personas de sociabilidad
+  // media pasan de 0,2 a 0,3 en ~20 pasos: el tope del rango ya es «casi instantáneo».
+  'social.vinculoConvivencia': [0, 0.01],
 };
 
 type ScalarDescriptor = { kind: 'number'; range: readonly [number, number]; integer?: boolean }
@@ -290,6 +308,18 @@ export function assertLongevityLaw(law: Readonly<LongevityLaw>): void {
   }
 }
 
+/** Edad máxima, en ticks, que puede tener un fundador al crear el mundo: cota anticorrupción de
+ * `bornAt` en `assertWorld` (antes el literal −4800 de los 2 días fijos). */
+export const MAX_FOUNDER_AGE_TICKS = PARAM_RANGES['genes.edadFundadoresMaxDias']![1] * DEMOGRAPHY_TICKS_PER_DAY;
+
+/** Cruce de claves de la cohorte fundadora: el mínimo no puede superar al máximo. */
+export function assertFounderAges(genes: Readonly<WorldParams['genes']>): void {
+  if (!(genes.edadFundadoresMinDias <= genes.edadFundadoresMaxDias)) {
+    throw new Error(`Edad de fundadores imposible: genes.edadFundadoresMinDias=${genes.edadFundadoresMinDias} supera a `
+      + `genes.edadFundadoresMaxDias=${genes.edadFundadoresMaxDias}.`);
+  }
+}
+
 /** Aplana un objeto anidado o ya plano a pares "a.b" → valor (hoja, no objeto). */
 function flatten(value: unknown, prefix: string, out: Record<string, unknown>): void {
   if (prefix && Object.hasOwn(PARAM_DESCRIPTORS, prefix)) { out[prefix] = value; return; }
@@ -360,6 +390,7 @@ export function parseParams(input?: Record<string, unknown> | string, base: Worl
   const params = draft as unknown as WorldParams;
   // Cruce de claves: el rango por clave no puede verlo, y el tick es demasiado tarde.
   assertLongevityLaw(params.cuerpo);
+  assertFounderAges(params.genes);
   return deepFreeze(params);
 }
 

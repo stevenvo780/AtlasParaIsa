@@ -1,5 +1,23 @@
 # Evidencia vigente
 
+## Noche del 22 de septiembre de 2026
+
+La extinción de la V7 pública fue el gobernador en política `apagar` (p95 del paso > 50 ms por
+clon+guardado de un mundo envejecido → 0 nacimientos 15 días → senescencia); reproducida 4/4 en
+laboratorio con parámetros públicos y clon por paso. La política `techo` (fija techo = población al
+frenar, solo repone, nunca baja) evita el apagado pero no basta: con reproducción permitida y sin
+freno, las semillas 7 y 42 casi no nacen. El embudo de natalidad localizó el cerrojo: no son 3 celdas
+(muestreo instantáneo), sino que en la semilla 7 el par fértil válido más cercano de toda la corrida de
+7200 pasos está a 18,38 celdas. Etapa A integrada en `n-INTEGRA`: T105–T108, T134 y T136 aprobadas sin
+gate abierto, T109 cerrada tras su test de control; T100, T103 y T104 quedan parciales (admisión
+separada de conducta, gate de rendimiento del clon abierto, cifras de `stepOnce` no alcanzables porque
+domina la simulación). El A/B de ciencia de 15 días muestra que la habituación rescata la natalidad de
+7 y 42 pero frena a la semilla 1, que las disputas cuestan vidas sin ganar diversidad, y que ningún
+brazo alcanza SC-003 ≥ 0,6. Se decide congelar las etapas B–F de `002-mundo-ilimitado` hasta sostener
+100 días con 3 generaciones en el 90 % de las semillas, y priorizar diagnóstico barato sobre escala.
+PENDIENTE: la completa el orquestador con las cifras del carril de cortejo. [Revisión
+completa](REVISION-NOCHE-2026-09-22.md).
+
 ## Límites persistidos compatibles, 22 de septiembre de 2026
 
 `39ac4b8`:1251/1251 pruebas sin omisiones, typecheck y build/smoke exactos.

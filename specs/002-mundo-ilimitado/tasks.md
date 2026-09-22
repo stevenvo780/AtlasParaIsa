@@ -1,5 +1,9 @@
 # Tasks: Mundo ilimitado — el techo lo pone el hardware
 
+> **Etapas B–F congeladas el 2026-09-22** hasta que la biología sostenga 100 días: los 16 fundadores
+> deben llegar a 100 días con 3 generaciones en el 90 % de las semillas antes de reanudarlas (ver
+> `docs/REVISION-NOCHE-2026-09-22.md`).
+
 **Input**: [spec.md](spec.md) + [plan.md](plan.md) + [research.md](research.md) + los 3 juicios y 4 mapas de `.superpowers/sdd/002/` · **Branch**: `002-mundo-ilimitado` (desde **`f30d528`**) · **Constitución**: manda.
 
 **Meta** (Steven, literal): «hay que ajustar el software para que aproveche al máximo el hardware para que la simulación pueda crecer sin parar». **Requisito no negociable**: con N hilos, con otra geometría de particiones o con GPU, el mundo es **idéntico bit a bit** al de 1 hilo.
@@ -51,6 +55,7 @@
 
 - [ ] **T100** [codex/gpt-5.6-sol · high] **Topes de anticorrupción derivados de parámetros** (depende de T101 y T102). **Sin esta tarea la feature entera se despliega y el techo sigue estando en el software.**
   **Avance técnico 2026-09-22:** SQLite5 y páginas transaccionales integradas en `b7b8583`;1153/1153 sin omisiones,typecheck,build/smoke exactos y seis paridades1200ticks. El control externo encontró y corrigió el orden raíz al recargar páginas. [Evidencia](../../docs/REVISION-PERSISTENCIA-PAGINADA-2026-09-22.md). Siguen pendientes activación de límites por hardware, ley comunitaria/fauna y roundtrip2M; **T100/A0 permanecen abiertos**.
+  **Avance 2026-09-22 (noche):** la revisión adversarial del workflow de Etapa A encontró dos hallazgos altos de diseño (la admisión `limites.*` no puede ser política; el tope de fundación de 8 no debía ser un `>=` fijo en `society.ts`). Se resolvieron en la integración (`0179d60`, worktree `n-INTEGRA`): tope de fundación de comunidades movido a `social.maxComunidades` (default 8 = conducta de hoy), cría de fauna vuelta a la capacidad natural del terreno, `limites.*` reducido a admitir o lanzar (136/136 focales). Sigue abierto el roundtrip de 2 M teselas y quitar el «sin tope» de fundación queda deliberadamente pospuesto a la próxima versión de reglas (FR-002); no se marca cerrada. Ver `docs/REVISION-NOCHE-2026-09-22.md` §d.
   **Preflight 2026-09-22:** quitar el gate de ocho comunidades sí cambia conductas y reproducción; debe declararse y contrastarse por separado de relajar validaciones. El límite de fauna también interviene en nacimientos y `assertAnimals`. Ampliar ownership a las rutas de Store que decodifican antes de restaurar parámetros y a sus recuperaciones: todas deben validar y aplicar límites persistidos antes de usarlos. Si los límites dependen de memoria del host, resolverlos fuera del motor y persistirlos explícitamente, sin defaults ambientales ocultos. Los controles de mundo pequeño no sustituyen negativos que alcancen esos gates.
   Hay **cuatro** topes fijos que ninguna tarea tocaba y que bloquean SC-004 por sí solos (refutaciones R1/G1/R8, verificadas en el árbol):
   · `src/server/snapshot.ts:53` — `record.tiles.length > 65536` ⇒ `throw new Error('Invalid snapshot tile encoding. Explicit recovery required.')`, en el camino de `load()` (`store.ts:264`), `previous()` (`store.ts:837`) y las dos rutas de recuperación (`store.ts:436,610,804,823`): **un mundo de más de 65 536 teselas activas no se puede ni guardar ni cargar**.
@@ -71,6 +76,7 @@
 - [ ] **T103** [P] [codex/gpt-5.6-sol · high] **Clon acotado: `retiredChunks` deja de clonarse en profundidad.**
   **Perfil real 2026-09-22:** tres bases envejecidas a5/13 días, en carga y tras19 pasos de cadencia20, conservan digestos y SQLite/WAL. El clon compartido dio p50 de19,94–33,53ms y p95 de29,28–47,00ms en la pasada final; no alcanza6,15/10ms. Dos pasadas e instrumento preservados, host compartido. [Informe](../../docs/REVISION-CLON-ENVEJECIDO-2026-09-22.md). La paridad está probada; **el gate de rendimiento sigue rojo**.
   **Preflight 2026-09-22:** la implementación ya está en V7. `scripts/verify-clone-trajectory.mts <repo>` compara el clon completo con el compartido en semillas 1/7/51926 durante 2400 ticks, clonando cada paso, guardando cada 20 y recargando en 1200/2400: digestos iguales y diez tablas durables iguales salvo snapshots. Hubo 568/535/391 pasos clonados con chunks pendientes, por lo que el control sí ejerce el cambio. [Resultados](../../docs/evidencia-2026-09-22/clone-trajectory.json). El banco previo de 65536 teselas dormidas era sintético; el perfil real posterior figura arriba y **T103 no se marca cerrado**.
+  **Avance 2026-09-22 (noche):** fusionada en `n-INTEGRA` como parte de la Etapa A (orden de merge T103→T105→T106→T107→T108→T109→T104); la paridad de `digestoCanonico` está probada, pero el **gate de rendimiento sigue rojo**: las cifras objetivo de p50/p95 del clon no se alcanzaron en la integración. No se marca cerrada. Ver `docs/REVISION-NOCHE-2026-09-22.md` §d.
   `cloneWorld` (`src/world/index.ts:995-1005`) copia `retiredChunks` **superficialmente** (array nuevo, mismos objetos) y `activate` (`src/world/spatial.ts:36-52`) hace **clon profundo del chunk que reanima** antes de reinyectar sus animales, estructuras y lugares en el mundo (copy-on-write). Hoy `structuredClone({...world, tiles: []})` excluye `tiles` pero **no** `retiredChunks`, que pesa 14,8 MiB de los 23,2 MiB del mundo a los 5 días.
   · **Ficheros**: `src/world/index.ts` (solo `cloneWorld`), `src/world/spatial.ts` (solo `activate`), `tests/clon-acotado.test.ts` (nuevo).
   · **Tests**: reanimar un chunk y mutar sus animales en el borrador no toca el mundo confirmado (comparado con `digestoCanonico`, que sí mira `retiredChunks`); `tests/projection-failure.test.ts` sigue verde.
@@ -88,15 +94,16 @@
   · **Tests**: (1) fallo sintético de `store.save` ⇒ `digestoCanonico(app.world)` idéntico al de antes del paso; (2) el mismo test **con un chunk recién reanimado en ese paso** (el caso que el hash de hoy no veía); (3) `stepWorld` que lanza a mitad ⇒ mundo restaurado; (4) `SessionRevoked` ⇒ el mundo no avanza con un gesto no confirmado; (5) `motor.clonPorPaso=true` restaura exactamente el comportamiento de hoy.
   · **Control (experimento)**: 2 400 pasos, semilla 51926, **con gestos y con `store.save` activos** (lo que los scripts de medida de las propuestas NO ejercitaban): día simulado **43 510 → ≤ 6 500 ms**, p50 del par **17,82 → ≤ 2,0 ms**, RSS **524,3 → ≤ 220 MiB**, `digestoCanonico` a 1 200 y 2 400 pasos **idéntico**.
   · **Cierre**: los 5 tests verdes, las 4 cifras alcanzadas y digesto idéntico en 3 semillas. Si la restauración no está lista, **la tarea no cierra**: quitar el clon sin ella está vetado.
+  **Avance 2026-09-22 (noche):** integrada en `n-INTEGRA` (`e669ea4`, 30 commits sobre `main`): `stepOnce` coherente con el punto de restauración, junto con el perfil por fase (T107) y el gobernador `techo` (GOB); 94/94 focales del bucle del servidor. El punto de restauración es correcto y el digesto queda idéntico, pero las cifras objetivo de tiempo por paso no son alcanzables porque el paso lo domina la simulación, no el clon. Hallazgo colateral: `delete tile.species` deja las teselas en modo diccionario, y el clon por paso las renormalizaba sin que nadie lo supiera; el punto de restauración conserva esa higiene. No se marca cerrada. Ver `docs/REVISION-NOCHE-2026-09-22.md` §d.
 
-- [ ] **T105** [P] [codex/gpt-5.6-sol · high] **`prep` y `flushTechnology` del guardado.**
+- [x] **T105** [P] [codex/gpt-5.6-sol · high] **`prep` y `flushTechnology` del guardado.**
   Hoy, a 40 habitantes y 5 días, dentro de `save` mandan `prep` **168 ms** y `flushTechnology` **75 ms**. Reducirlos sin cambiar el contrato de verificación: `prep` deja de reconstruir lo que no cambió (seguir el patrón de `verifiedRecipes`/`verifiedTechnology`, `store.ts:136-138,549-552,640-656`), `flushTechnology` escribe solo recibos nuevos y no recalcula pruebas ya retenidas.
   · **Ficheros**: `src/server/store.ts` (solo `save`/`prep`/`flushTechnology`), `tests/store-guardado.test.ts` (nuevo o ampliado).
   · **Tests**: el contenido escrito es idéntico al de hoy fila a fila; la verificación profunda cada `DEEP_VALIDATION_EVERY_SAVES=10` sigue corriendo.
   · **Control (experimento)**: mismo mundo de 40 hab / 5 días, `saveMs` desglosado antes/después.
   · **Cierre**: `prep` **≤ 20 ms** y `flushTechnology` **≤ 10 ms**, con las filas escritas idénticas.
 
-- [ ] **T106** [P] [gemini/pro · high] **`assertWorld` deja de ser cúbico.**
+- [x] **T106** [P] [gemini/pro · high] **`assertWorld` deja de ser cúbico.**
   `src/world/index.ts:1148` hace `Object.keys(p.bonds).some(id => !w.people.some(other => other.id === id))` **dentro** del bucle de personas ⇒ O(P × B × P): a 8 000 habitantes con 64 vínculos son ~4·10⁹ comparaciones de cadena **en cada carga**. Sustituir por un `Set<id>` construido una vez. Además acotar el bucle de `recipeIds` (`index.ts:1178-1190`), que es superlineal y toca disco por receta, reutilizando la caché de pruebas ya retenida.
   · **Ficheros**: `src/world/index.ts` (solo `assertWorld`), `tests/assert-world-escala.test.ts` (nuevo).
   · **Tests**: mundo sintético de 2 000 personas con 64 vínculos ⇒ `assertWorld` < 1 s; un vínculo huérfano sigue fallando con el mismo mensaje; un `recipeId` inexistente sigue fallando.
@@ -104,26 +111,27 @@
   · **Cierre**: el tiempo de `assertWorld` crece **linealmente** con P en {200, 800, 2 000} (R² > 0,95 sobre el ajuste lineal).
   · **Alcance explícitamente excluido**: los topes `65536`/`256`/`8` de `assertWorld` los levanta **T100** en Gate A0, no esta tarea. Si al mergear hay conflicto en `assertWorld`, manda T100.
 
-- [ ] **T107** [P] [minimax/MiniMax-M3] **Perfil por fase y fracción serial.**
+- [x] **T107** [P] [minimax/MiniMax-M3] **Perfil por fase y fracción serial.**
   `stepOnce` mide y publica ms por fase (`maintainRegions`, ecología, kernel, fauna, personas, encuentros, demografía, comunidades, reproducción, checkpoint, muestreo, `save`, `broadcast`) en `runtime.fases` y en `performance.fases` del `state`, más `runtime.fraccionSerial` (fracción del paso que no es paralelizable por diseño).
   · **Ficheros**: `src/server/app.ts` (instrumentación), `src/world/index.ts` (marcas de fase), `src/shared/types.ts` (`RuntimeStats`), `tests/perfil-fases.test.ts` (nuevo).
   · **Tests**: la suma de las fases no difiere del `stepMs` en más del 5 %; `fraccionSerial` ∈ [0,1].
   · **Control**: `digestoCanonico` idéntico (solo instrumentación); el coste de medir ≤ 2 % del paso.
   · **Cierre**: el `state` publica las fases y el laboratorio las registra por día.
 
-- [ ] **T108** [P] [minimax/MiniMax-M3] **Desbloquear el banco de cómputo y perfilar el kernel vivo.**
+- [x] **T108** [P] [minimax/MiniMax-M3] **Desbloquear el banco de cómputo y perfilar el kernel vivo.**
   `scripts/compute-ecology-benchmark.mjs:34` exige identidad de **bytes** de `src/world/ecosystem-kernel.ts`, `ecosystem.ts` y `terrain.ts` con `95ff0d2` y hoy lanza `Baseline core changed`: **no protege nada desde el 6 de septiembre**. Sustituir el candado de bytes por una **especificación versionada de las fórmulas** (lista de campos y términos, con su versión) validada contra el kernel vivo. Con el banco desbloqueado, medir `EcosystemKernel.step` **dentro del motor** a 65 k, 1 M y 4 M celdas y dejar las cifras en el informe.
   · **Ficheros**: `scripts/compute-ecology-benchmark.mjs`, `.superpowers/sdd/002/tareas/T108-report.md`.
   · **Tests**: el banco corre en verde contra HEAD; cambiar un término del kernel hace fallar la especificación versionada.
   · **Control**: las cifras del banco a 1 M celdas reproducen 47,30 / 23,97 / 19,41 ms (1 / 4 / 8 hilos) dentro de ±15 %.
   · **Cierre**: banco verde + tabla de coste del kernel por número de celdas, que es la línea base de las etapas B y C.
 
-- [ ] **T109** [P] [claude sonnet · high] **`scripts/curva-techo.mts` — el instrumento que mide el techo.**
+- [x] **T109** [P] [claude sonnet · high] **`scripts/curva-techo.mts` — el instrumento que mide el techo.**
   Args `--seed --hilos --gpu --escala habitantes|teselas --hasta N --salida <dir>`. Hace crecer la escala hasta que el p95 del paso toca `gobernador.presupuestoMs` y escribe `{escala, p95, p50, tickHz, rss, teselasActivas, teselasPorHabitante, fraccionSerial}` por punto. Es el instrumento que cierra SC-003, SC-004 y SC-013 en todas las etapas.
   · **Ficheros**: `scripts/curva-techo.mts` (nuevo), `package.json` (script `"techo"`), `scripts/lab/README.md`, `tests/curva-techo.test.ts` (nuevo).
   · **Tests**: dos corridas con la misma semilla dan la misma curva salvo tiempos; el criterio de parada es reproducible.
   · **Control**: el punto de partida de la curva coincide con el p95 medido por el laboratorio para la misma escena.
   · **Cierre**: la curva de HOY queda escrita en `docs/EVIDENCIA.md` como línea base de la feature.
+  **Cierre 2026-09-22 (noche):** quedó con un hallazgo medio abierto (test del control frente al laboratorio) al cerrar el workflow de Etapa A; Sonnet lo cerró en su worktree y se fusionó junto con el resto de la suite en `9d2089b` (suite completa de la integración 1300/1307, 4 omitidos). Marcada cerrada.
 
 - [ ] **T110** [orquestador] **Gate A.** Merge en orden T103 → T105 → T106 → T107 → T108 → T109 → T104 (el más conflictivo, el último) → `npm run typecheck && npm test` en un worktree → `npx tsx scripts/curva-techo.mts --escala habitantes --hilos 1` → fila en `docs/EVIDENCIA.md` §«2026-09-19 · Etapa A» con SHA, semillas, ANTES/DESPUÉS y control → commit. **Criterio de cierre de la etapa**: SC-002 y el escalón de 250 habitantes de SC-003 alcanzados, digesto idéntico en 3 semillas, suite 781/0. **Se despliega.**
 
@@ -280,7 +288,7 @@
   · **Control (experimento)**: mismo barrido de exploración, tamaño de la tabla `chunks` antes/después con `VACUUM INTO`.
   · **Cierre**: **≥ 60 %** menos bytes en `chunks` y `digestoCanonico` intacto tras recargar.
 
-- [ ] **T134** [P] [claude sonnet · high] **`people`, `communities` y `blueprints` por viewport, y censo en el servidor.**
+- [x] **T134** [P] [claude sonnet · high] **`people`, `communities` y `blueprints` por viewport, y censo en el servidor.**
   `projectWorld` (`src/world/index.ts:1037-1046`) aplica a `people` el mismo `visible()` que `projectTerrain` ya usa para `tiles` (`spatial.ts:121`), con margen de una celda. Los agregados de censo (`neighbors`, histograma de `lifeStage`, `protectedCount`) pasan a `stats`, donde hoy el cliente los recalcula recorriendo miles de objetos (`game.ts:419-437`). Subir `PROTOCOL_VERSION`.
   **Alcance ampliado 2026-09-19 (refutación R10, verificada — filtrar `people` no alcanza SC-005 por sí solo)**: en el mismo objeto siguen viajando **sin ningún filtro** `communities` (`index.ts:1050`: `members: [...c.members]`) y `blueprints` (`index.ts:1049`). Cuenta: cada habitante está en como mucho una comunidad, así que con 10 000 habitantes los arrays `members` contienen 10 000 ids; `"descendant-10000",` son 19 B en JSON ⇒ **≈190 KB solo en `members`**, frente al techo de 120 KiB = 122 880 B, **antes** de contar teselas, personas, tecnología, crónica y estadísticas. Las comunidades viajan con `memberCount` y solo los miembros **visibles**; los planos, solo los referenciados por las estructuras visibles (o a petición, como ya hace `technologyRecipeDetail`). Es **cambio de contrato de cliente**: `game.ts:475-476` renderiza un enlace por miembro (`community.members.map(id => personLink(world!, id))`) y hay que adaptarlo aquí mismo o dejarlo declarado para T137 en el informe.
   · **Ficheros**: `src/world/index.ts` (solo `projectWorld`), `src/world/statistics.ts`, `src/shared/types.ts`, `src/client/game.ts` (solo el panel de comunidad), `tests/world-view-size.test.ts` (ampliado), `tests/censo-servidor.test.ts` (nuevo).
@@ -296,7 +304,7 @@
   · **Control**: `red.deltas=false` reproduce el protocolo de hoy.
   · **Cierre**: **< 120 KiB** en viewport medio y **< 250 KiB** en viewport máximo, 0 mensajes descartados y 0 sockets terminados en 1 000 pasos.
 
-- [ ] **T136** [P] [minimax/MiniMax-M3] **Medir `perMessageDeflate` y decidir con el número.**
+- [x] **T136** [P] [minimax/MiniMax-M3] **Medir `perMessageDeflate` y decidir con el número.**
   Hoy está en `false` explícito (`app.ts:102/113`) sobre el JSON más repetitivo posible. Medir CPU y memoria **por conexión** con 12 clientes a 2 Hz y decidir: si el coste cabe en el presupuesto de 50 ms, se activa; si no, se deja y se documenta por qué. Revisar los umbrales de `send()` (256 KiB / 2 MiB, `app.ts:123-124/153-154`) — **sin subirlos**: si un mensaje no cabe, el arreglo es el delta, no el umbral.
   · **Ficheros**: `src/server/app.ts` (solo la opción del `WebSocketServer` y un comentario con la cifra), `.superpowers/sdd/002/tareas/T136-report.md`.
   · **Tests**: el banco de red de T138 con y sin compresión.

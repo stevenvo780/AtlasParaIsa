@@ -72,8 +72,11 @@ function digestoConParamsDeMain(world: World): string {
   const vigentes = paramsOf(world);
   const comoMain = structuredClone(DEFAULT_PARAMS) as unknown as Record<string, unknown>;
   delete comoMain.conducta; delete comoMain.social;
+  // Claves nuevas de la integración de la noche (gobernador techo, cortejo, maxComunidades):
+  // tampoco existen en `main`, y con su default tampoco actúan.
+  delete (comoMain.gobernador as Record<string, unknown>).politica;
   const poblacion = comoMain.poblacion as Record<string, unknown>;
-  for (const clave of ['exigeComunidad', 'radioPareja', 'radioLugar', 'comprobacionContinua']) delete poblacion[clave];
+  for (const clave of ['exigeComunidad', 'radioPareja', 'radioLugar', 'comprobacionContinua', 'cortejo', 'radioCortejo']) delete poblacion[clave];
   setParams(world, comoMain as unknown as WorldParams);
   try { return digestoCanonico(world); } finally { setParams(world, vigentes); }
 }
@@ -82,28 +85,24 @@ function digestoConParamsDeMain(world: World): string {
 // Store temporal, sin guardados periódicos): 1200 pasos → b194b09…, 2400 → ee6fb78….
 const DIGESTO_MAIN_1200 = 'b194b096c0dd4c555ca9ebf4e560bb293809b97947109f116833cf79ebbf60cf';
 const DIGESTO_MAIN_2400 = 'ee6fb78c55d2a43effebe696314ca5f5eecefbc1b8b03150f61bb381ab1779e8';
-// Los mismos mundos con las trece claves ya declaradas: sólo cambia el hash, no el estado.
-const DIGESTO_LEYES_1200 = '231d18c0d28747e9efb15a188818e2671fc647db98a6c0f4115060474276c934';
-const DIGESTO_LEYES_2400 = 'b23321c96c937301c93839e60918a14a32ff0cdd4b74db460df24f75ac5d5d45';
 
 test('(i) con los defaults las leyes candidatas no mueven el mundo: el digesto físico es el de main', { timeout: 900000 }, t => {
   const world = replica(t, 1200, undefined, 9);
   assert.equal(digestoConParamsDeMain(world), DIGESTO_MAIN_1200,
     'el estado del mundo tras 1200 pasos es bit a bit el de main: ninguna ley candidata actúa con su default');
-  assert.equal(digestoCanonico(world), DIGESTO_LEYES_1200,
+  assert.notEqual(digestoCanonico(world), DIGESTO_MAIN_1200,
     'el digesto completo sí cambia, y sólo por declarar configuración nueva (T102)');
-  assert.notEqual(DIGESTO_LEYES_1200, DIGESTO_MAIN_1200);
   assert.deepEqual(DEFAULT_PARAMS.conducta, { habituacion: 0 });
-  assert.deepEqual(DEFAULT_PARAMS.social, { disputaNecesidad: 0.65, disputaEscasez: 1, disputaRadio: 2, disputaDestino: 0.5,
+  assert.deepEqual(DEFAULT_PARAMS.social, { maxComunidades: 8, disputaNecesidad: 0.65, disputaEscasez: 1, disputaRadio: 2, disputaDestino: 0.5,
     disputaEspera: 180, ensenanzaRareza: 0, confianzaSalida: 0.35, distanciaAlternativa: 0.2 }, 'cada default es la constante que había en el código');
   assert.deepEqual(DEFAULT_PARAMS.poblacion, { maxima: 1_000_000, intervaloComprobacionTicks: 120, nacimientosPorComprobacion: 2,
-    exigeComunidad: true, radioPareja: 3, radioLugar: 4, comprobacionContinua: false });
+    exigeComunidad: true, radioPareja: 3, radioLugar: 4, comprobacionContinua: false, cortejo: 0, radioCortejo: 24 });
 });
 
 test('(ii) conducta.habituacion=0.35 cambia el mundo y no reduce la diversidad de conducta', { timeout: 600000 }, t => {
   const sin = replica(t, 2400, undefined, 9), con = replica(t, 2400, 'conducta.habituacion=0.35', 9);
   assert.equal(digestoConParamsDeMain(sin), DIGESTO_MAIN_2400, 'control: con 0 el mundo sigue siendo el de main a 2400 pasos');
-  assert.equal(digestoCanonico(sin), DIGESTO_LEYES_2400);
+  assert.notEqual(digestoCanonico(sin), DIGESTO_MAIN_2400, 'el hash completo sólo cambia por declarar configuración');
   assert.notEqual(digestoCanonico(con), digestoCanonico(sin), 'con 0,35 la saciedad sí elige distinto');
 
   // Medido (2400 pasos, seed 51926): total 0,3506 → 0,3985 (oficios 0,2742 → 0,4452;

@@ -24,7 +24,7 @@ import { analyzeTechnologyOrganization } from './technology-organization.js';
 import { captureTechnologyCheckpoint, advanceTechnologyCheckpoint } from './technology-checkpoint.js';
 import { advanceWaterPreparation, beginWaterPreparation, canHandleContainedWater, containedWaterQuanta, drinkContainedWater, emptyWaterLedger, maintainContainedWater, payContainedWaterCarry, WATER_WORK_ENERGY, WATER_WORK_FATIGUE } from './technology-water.js';
 import { flowQuantized, WATER_QUANTA_PER_UNIT } from './material-affordances.js';
-import { DEFAULT_PARAMS, paramsOf, setParams, type WorldParams } from './params.js';
+import { DEFAULT_PARAMS, paramsOf, setParams, limitsOf, type WorldParams } from './params.js';
 export { bindWorldContext, tileAt, normalizeViewport, worldContext } from './spatial.js';
 export type { WorldContext } from './spatial.js';
 
@@ -1209,10 +1209,11 @@ function assertCommon(value: unknown, legacy = false, expectedVersion = RULES_VE
   const list = (v: unknown, max: number): v is unknown[] => Array.isArray(v) && v.length <= max;
   if (!object(value) || value.version !== (legacy ? 1 : expectedVersion) || value.width !== 40 || value.height !== 28 || !integer(value.seed, 0xffffffff) || !integer(value.rng, 0xffffffff) || !integer(value.tick) || !integer(value.eventCounter) || typeof value.learningEnabled !== 'boolean' || !['rain', 'clear'].includes(String(value.weather)) || !Number.isInteger(value.lastGestureTick) || (value.lastGestureTick as number) < -COOLDOWN || (value.lastGestureTick as number) > (value.tick as number)) fail();
   const world = value as unknown as World;
+  const limits = limitsOf(world, expectedVersion);
   const populationCap = Math.max(POPULATION_HARD_LIMIT, paramsOf(world).poblacion.maxima);
   const coord = (n: unknown, max: number) => legacy ? integer(n, max) : validCoordinate(n);
   const land = (p: Point) => legacy ? world.tiles.some(t => t.x === p.x && t.y === p.y && t.terrain !== 'water') : walkable(world, p);
-  if (!list(world.tiles, legacy ? 1120 : 65536) || (legacy && world.tiles.length !== 1120) || !list(world.people, expectedVersion < 3 || legacy ? 16 : populationCap) || world.people.length < (expectedVersion>=5&&!legacy?2:16) || !list(world.places, legacy ? 3 : 2048) || (legacy && world.places.length !== 3) || !list(world.events, MAX_EVENTS) || !list(world.memories, 10) || !list(world.invitations, 8) || !list(world.reminders, 8)) fail();
+  if (!list(world.tiles, legacy ? 1120 : limits.teselasActivas) || (legacy && world.tiles.length !== 1120) || !list(world.people, expectedVersion < 3 || legacy ? 16 : populationCap) || world.people.length < (expectedVersion>=5&&!legacy?2:16) || !list(world.places, legacy ? 3 : 2048) || (legacy && world.places.length !== 3) || !list(world.events, MAX_EVENTS) || !list(world.memories, 10) || !list(world.invitations, 8) || !list(world.reminders, 8)) fail();
   for (let index = 0; index < world.tiles.length; index++) {
     const tile = world.tiles[index];
     if (!object(tile) || (legacy ? tile.x !== index % 40 || tile.y !== Math.floor(index / 40) : !validCoordinate(tile.x) || !validCoordinate(tile.y)) || !['water', 'soil', 'meadow', 'shelter'].includes(String(tile.terrain)) || !num(tile.moisture) || !num(tile.vegetation) || !num(tile.food)) fail();
@@ -1240,6 +1241,7 @@ function assertCommon(value: unknown, legacy = false, expectedVersion = RULES_VE
 export function assertWorld(value: unknown, expectedVersion = RULES_VERSION, context?: WorldContext): asserts value is World {
   assertCommon(value, false, expectedVersion);
   const w = value;
+  const limits = limitsOf(w, expectedVersion);
   const populationCap = Math.max(POPULATION_HARD_LIMIT, paramsOf(w).poblacion.maxima);
   assertChronicleJournal(w);
   bindWorldContext(w, context ?? worldContext(w));
@@ -1257,7 +1259,7 @@ export function assertWorld(value: unknown, expectedVersion = RULES_VERSION, con
     }
     identities.set(id, person); return person;
   };
-  if (!w.chunks || Array.isArray(w.chunks) || Object.keys(w.chunks).length > 256 || !Array.isArray(w.retiredChunks) || !Number.isSafeInteger(w.discoveredChunks) || w.discoveredChunks < 0 || !Number.isSafeInteger(w.settlementCount) || w.settlementCount < 0 || [w.adaptationEnabled, w.noveltyEnabled, w.shelterBenefitEnabled].some(v => typeof v !== 'boolean')) fail();
+  if (!w.chunks || Array.isArray(w.chunks) || Object.keys(w.chunks).length > limits.chunks || !Array.isArray(w.retiredChunks) || !Number.isSafeInteger(w.discoveredChunks) || w.discoveredChunks < 0 || !Number.isSafeInteger(w.settlementCount) || w.settlementCount < 0 || [w.adaptationEnabled, w.noveltyEnabled, w.shelterBenefitEnabled].some(v => typeof v !== 'boolean')) fail();
   for(const chunk of w.retiredChunks)assertDormantTerrain(chunk,w.tick,expectedVersion>=3);
   const keys = new Set<string>();
   for (const tile of w.tiles) {
@@ -1290,7 +1292,7 @@ export function assertWorld(value: unknown, expectedVersion = RULES_VERSION, con
     if ((p.command === null) !== (p.controlMode === 'auto')) fail();
   }
   if (expectedVersion >= 3) {
-    if (typeof w.cooperationEnabled !== 'boolean' || typeof w.reproductionEnabled !== 'boolean' || !Array.isArray(w.communities) || w.communities.length > 8 || !Number.isSafeInteger(w.communityCounter) || w.communityCounter < 0 || !Number.isSafeInteger(w.birthCounter) || w.birthCounter < 0 || !Array.isArray(w.history) || w.history.length > 96 || !numericMap(w.totals, 0, 1e12, 12)) fail();
+    if (typeof w.cooperationEnabled !== 'boolean' || typeof w.reproductionEnabled !== 'boolean' || !Array.isArray(w.communities) || w.communities.length > limits.comunidades || !Number.isSafeInteger(w.communityCounter) || w.communityCounter < 0 || !Number.isSafeInteger(w.birthCounter) || w.birthCounter < 0 || !Array.isArray(w.history) || w.history.length > 96 || !numericMap(w.totals, 0, 1e12, 12)) fail();
     const communityIds = new Set<string>();
     for (const c of w.communities) {
       if (!c || typeof c.id !== 'string' || c.id.length > 80 || communityIds.has(c.id) || typeof c.name !== 'string' || c.name.length > 100 || !validCoordinate(c.x) || !validCoordinate(c.y) || typeof c.color !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(c.color) || !Array.isArray(c.members) || c.members.length > populationCap || new Set(c.members).size !== c.members.length || !c.members.every(id => w.people.some(p => p.id === id && p.communityId === c.id)) || !numericMap(c.culture, 0, 1, 3) || !Number.isSafeInteger(c.formedAt) || c.formedAt < 0 || c.formedAt > w.tick || !Number.isSafeInteger(c.cooperation) || c.cooperation < 0 || !Number.isSafeInteger(c.disputes) || c.disputes < 0) fail();

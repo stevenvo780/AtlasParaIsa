@@ -49,14 +49,16 @@ test('snapshot preserves signed zero in tile, person and community values', () =
   assert.ok(Object.is(restored.communities[0]!.x, -0));
 });
 
-test('ordinary compact snapshot bytes and absent optional fields remain compatible', () => {
+test('ordinary compact bytes gain only the explicit limits profile; historical bytes stay compatible', () => {
   for (const params of [DEFAULT_PARAMS, parseParams('agua.cuencas=0.9,motor.gpu=[2,0]')]) {
     const world = createWorld(51926, params);
     const tiles = world.tiles.map(t => [t.x,t.y,t.terrain,t.moisture,t.vegetation,t.food,t.biome,t.elevation,
       t.wood,t.stone,t.feature,t.variety,t.growth,t.fertility,t.cultivation,t.traffic,t.drinkingWater,t.species,t.fauna,t.life]);
     const expected = { ...world, retiredChunks: [], retiredLegacy: [], tiles, tileEncoding: 'tiles-tuple-v1',
       ...(params === DEFAULT_PARAMS ? {} : { paramsEncoding: 'params-v1', params }) };
-    assert.equal(encodeSnapshot(world, params), JSON.stringify(expected));
+    assert.ok(encodeSnapshot(world, params) === JSON.stringify({ ...expected, limitsProfile: { version: 1, ...params.limites } }), 'current bytes equal the legacy encoding plus its explicit limits profile');
     assert.equal(digestoCanonico(restore(encodeSnapshot(world, params))), digestoCanonico(world));
+    const historical = { ...world, version: 8 };
+    assert.ok(encodeSnapshot(historical, params) === JSON.stringify({ ...expected, version: 8 }), 'historical writers preserve ordinary bytes');
   }
 });

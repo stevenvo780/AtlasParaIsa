@@ -4,11 +4,12 @@ import { FOOD_PER_ANIMAL } from './ecosystem.js';
 import { advanceNeeds } from './needs.js';
 import { assimilateFood, exertBody, hydrateBody, restBody } from './body.js';
 import { MAX_COORDINATE } from './terrain.js';
+import { LEGACY_WORLD_LIMITS, limitsOf } from './params.js';
 
 export const MAX_ACTIVE_ANIMALS = 8192;
 export const MAX_ANIMALS_PER_TILE = 6;
-// Identity capacity follows the world's 65,536 active cells, independently of per-tick work.
-export const MAX_STORED_ANIMALS = 65536 * MAX_ANIMALS_PER_TILE;
+// Rules 9 still use this historical value in births; admission is parameterized.
+export const MAX_STORED_ANIMALS = LEGACY_WORLD_LIMITS.fauna;
 export const MAX_ANIMAL_MEMORY = 12;
 export const MAX_ANIMAL_DECISIONS_PER_TICK = 1024;
 const MEMORY_TTL = 480;
@@ -280,7 +281,7 @@ function reproduce(world: AnimalWorld, state: LocalState, active: Animal[], emit
 
 /** Active cells only; canonical decisions and flee-before-contact movement make array order irrelevant. */
 export function stepAnimals(world: AnimalWorld, emit?: AnimalEmitter): void {
-  if (world.animals.length > MAX_STORED_ANIMALS) throw new Error('Capacidad regional de fauna excedida.');
+  if (world.animals.length > limitsOf(world).fauna) throw new Error('Capacidad regional de fauna excedida.');
   const state: LocalState = { tiles: terrainIndex(world), occupants: new Map(), counts: new Map() };
   world.animals.sort(canonical);
   const population = world.animals.length;
@@ -360,8 +361,8 @@ export function assertAnimal(value: unknown, tick: number): asserts value is Ani
     seen.add(key(memory));
   }
 }
-export function assertAnimals(value: unknown, tick: number, tiles?: Tile[]): asserts value is Animal[] {
-  if (!Array.isArray(value) || value.length > MAX_STORED_ANIMALS) throw new Error('Colección de fauna inválida.');
+export function assertAnimals(value: unknown, tick: number, tiles?: Tile[], maxAnimals = LEGACY_WORLD_LIMITS.fauna): asserts value is Animal[] {
+  if (!Number.isSafeInteger(maxAnimals) || maxAnimals < 1 || !Array.isArray(value) || value.length > maxAnimals) throw new Error('Colección de fauna inválida.');
   const ids = new Set<string>(), counts = new Map<string, number>(), positions = tiles && new Map(tiles.map(t => [key(t), t]));
   for (const animal of value) {
     assertAnimal(animal, tick);

@@ -1,0 +1,36 @@
+{
+  "revision": "bfdaa0ff51c0e69a928ef657d023c6681452acb7",
+  "rulesVersion": 7,
+  "schemaVersion": 4,
+  "tests": {
+    "command": "COMPUTE_NVRTC=/opt/cuda/lib64/libnvrtc.so timeout 1200 npm test -- --test-concurrency=8",
+    "tests": 946,
+    "pass": 946,
+    "fail": 0,
+    "skipped": 0,
+    "durationMs": 216558.818787,
+    "exitCode": 0,
+    "log": "/tmp/atlas-storage-phase2-full.log",
+    "sha256": "0fedecad951bc863b9e06850736f8f00f5acae6fe405500d9fc3f288c605ff8f"
+  },
+  "typecheck": {
+    "command": "npm run typecheck",
+    "exitCode": 0,
+    "log": "/tmp/atlas-storage-phase2-typecheck.log",
+    "sha256": "952d0130b7edf4ed056e0ba0cd962126c2acad44de8ab0c4f30ed3babd21bfe2"
+  },
+  "independentSnapshotAudit": {
+    "checks": 24,
+    "ordinaryByteControls": 12,
+    "result": "passed",
+    "instrument": "/tmp/atlas-phase2-independent.mts",
+    "instrumentSha256": "0f25d228a9ab429c215d0fdb4d92bfb618a6f423aab680c81e448f7f8bcca8da",
+    "evidence": "t100-phase2-independent.json"
+  },
+  "limits": [
+    "No new E2E/browser run for these storage-only changes",
+    "T100 segmentation and hardware limits still open",
+    "No 2M tiles durable roundtrip",
+    "Public compiled service remains 3dd615e"
+  ]
+}

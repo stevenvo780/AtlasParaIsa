@@ -1,0 +1,175 @@
+{
+  "scope": "Independent exact snapshot roundtrip, escaped text and root property order; six seeds, not arbitrary JS objects or every durable table.",
+  "checks": 24,
+  "ordinaryByteControls": 12,
+  "results": [
+    {
+      "seed": 1,
+      "reverse": false,
+      "variant": "ordinary",
+      "bytes": 224257,
+      "digest": "dfd3a0580c4cba8963ce1235e9f1f799f32e4c2d770d0b48ee998baae7da8736"
+    },
+    {
+      "seed": 1,
+      "reverse": false,
+      "variant": "signed",
+      "bytes": 224237,
+      "digest": "5083e2ef2d3cd3005777af7515d678a8e46728e5d2ca6304d119b9c3ff87bdb4"
+    },
+    {
+      "seed": 1,
+      "reverse": true,
+      "variant": "ordinary",
+      "bytes": 224257,
+      "digest": "dfd3a0580c4cba8963ce1235e9f1f799f32e4c2d770d0b48ee998baae7da8736"
+    },
+    {
+      "seed": 1,
+      "reverse": true,
+      "variant": "signed",
+      "bytes": 224237,
+      "digest": "5083e2ef2d3cd3005777af7515d678a8e46728e5d2ca6304d119b9c3ff87bdb4"
+    },
+    {
+      "seed": 7,
+      "reverse": false,
+      "variant": "ordinary",
+      "bytes": 228122,
+      "digest": "01b08b9c5157f28d44ffb55385837701ebf4276108dc3b8ac4dea3cae3cf3a00"
+    },
+    {
+      "seed": 7,
+      "reverse": false,
+      "variant": "signed",
+      "bytes": 228104,
+      "digest": "435f1d208e43d2e9392fb15abdcb01030d12df74b9a02d7a9d37b87795714336"
+    },
+    {
+      "seed": 7,
+      "reverse": true,
+      "variant": "ordinary",
+      "bytes": 228122,
+      "digest": "01b08b9c5157f28d44ffb55385837701ebf4276108dc3b8ac4dea3cae3cf3a00"
+    },
+    {
+      "seed": 7,
+      "reverse": true,
+      "variant": "signed",
+      "bytes": 228104,
+      "digest": "435f1d208e43d2e9392fb15abdcb01030d12df74b9a02d7a9d37b87795714336"
+    },
+    {
+      "seed": 1007,
+      "reverse": false,
+      "variant": "ordinary",
+      "bytes": 208939,
+      "digest": "260384c3f4ea96704e3583c513c852b41f1a6f5ad01bac2063a2d4474b08a863"
+    },
+    {
+      "seed": 1007,
+      "reverse": false,
+      "variant": "signed",
+      "bytes": 208920,
+      "digest": "4769768f0387a1734e244616dd7eb6a4fdb119735358ac3e0687c7cee2412ee7"
+    },
+    {
+      "seed": 1007,
+      "reverse": true,
+      "variant": "ordinary",
+      "bytes": 208939,
+      "digest": "260384c3f4ea96704e3583c513c852b41f1a6f5ad01bac2063a2d4474b08a863"
+    },
+    {
+      "seed": 1007,
+      "reverse": true,
+      "variant": "signed",
+      "bytes": 208920,
+      "digest": "4769768f0387a1734e244616dd7eb6a4fdb119735358ac3e0687c7cee2412ee7"
+    },
+    {
+      "seed": 1012,
+      "reverse": false,
+      "variant": "ordinary",
+      "bytes": 228241,
+      "digest": "e2ea5880ccf6567b3ab6853fdea11dd88c8003e90d297b7a5b1fb114042a8710"
+    },
+    {
+      "seed": 1012,
+      "reverse": false,
+      "variant": "signed",
+      "bytes": 228222,
+      "digest": "e96f4301abe0dd31942af83ef6dd2962ab3dd15d9bd5a51612857c4b9f891122"
+    },
+    {
+      "seed": 1012,
+      "reverse": true,
+      "variant": "ordinary",
+      "bytes": 228241,
+      "digest": "e2ea5880ccf6567b3ab6853fdea11dd88c8003e90d297b7a5b1fb114042a8710"
+    },
+    {
+      "seed": 1012,
+      "reverse": true,
+      "variant": "signed",
+      "bytes": 228222,
+      "digest": "e96f4301abe0dd31942af83ef6dd2962ab3dd15d9bd5a51612857c4b9f891122"
+    },
+    {
+      "seed": 1013,
+      "reverse": false,
+      "variant": "ordinary",
+      "bytes": 270495,
+      "digest": "3b8008eaf062a6a017db56212b38e37597cddb023e947a5beca968c9b72cabe9"
+    },
+    {
+      "seed": 1013,
+      "reverse": false,
+      "variant": "signed",
+      "bytes": 270476,
+      "digest": "c84e0d7efd7fcc520e99001665d5bc4956e115955b27bded539aa2c96a0d2930"
+    },
+    {
+      "seed": 1013,
+      "reverse": true,
+      "variant": "ordinary",
+      "bytes": 270495,
+      "digest": "3b8008eaf062a6a017db56212b38e37597cddb023e947a5beca968c9b72cabe9"
+    },
+    {
+      "seed": 1013,
+      "reverse": true,
+      "variant": "signed",
+      "bytes": 270476,
+      "digest": "c84e0d7efd7fcc520e99001665d5bc4956e115955b27bded539aa2c96a0d2930"
+    },
+    {
+      "seed": 51926,
+      "reverse": false,
+      "variant": "ordinary",
+      "bytes": 216102,
+      "digest": "4c2ed71a897d70fbbcfb601f60cd1a0638b2d575e708814c3f79b197601494f6"
+    },
+    {
+      "seed": 51926,
+      "reverse": false,
+      "variant": "signed",
+      "bytes": 216083,
+      "digest": "15ce7ee498492c670198ab046e7845e2742ce414e454856425f6cb3d741380f0"
+    },
+    {
+      "seed": 51926,
+      "reverse": true,
+      "variant": "ordinary",
+      "bytes": 216102,
+      "digest": "4c2ed71a897d70fbbcfb601f60cd1a0638b2d575e708814c3f79b197601494f6"
+    },
+    {
+      "seed": 51926,
+      "reverse": true,
+      "variant": "signed",
+      "bytes": 216083,
+      "digest": "15ce7ee498492c670198ab046e7845e2742ce414e454856425f6cb3d741380f0"
+    }
+  ]
+}

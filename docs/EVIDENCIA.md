@@ -1,5 +1,18 @@
 # Evidencia vigente
 
+## Persistencia y cierre del diagnóstico familiar, 22 de septiembre de 2026
+
+La integración `bfdaa0f` conserva V7 y SQLite4: recupera sólo corrupción física,
+mantiene leyes V1 al migrar y conserva ceros negativos. **946/946 pruebas sin
+omisiones**, typecheck y build/smoke exactos, más controles independientes de archivo
+y snapshot. [Evidencia y límites](REVISION-PERSISTENCIA-2026-09-22.md).
+T100 y A0 siguen abiertos; no se han activado segmentación ni límites por hardware.
+
+La comparación V7→V8 terminó las seis corridas de trece días: mortales finales
+0→0, 15→24 y 22→20. Sus 78 ventanas y seis checkpoints fueron auditados.
+[Resultado mixto y procedencia](REVISION-FAMILIA-V8-2026-09-22.md).
+V8 permanece como candidata; el build público continúa en `3dd615e`.
+
 ## Parámetros y persistencia técnica, 22 de septiembre de 2026
 
 T102 queda cerrado: opciones tipadas y congeladas, todavía sin activar workers, GPU,

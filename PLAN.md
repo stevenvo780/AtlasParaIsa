@@ -11,11 +11,13 @@ La suite integrada y la publicación se documentan en
 [EVIDENCIA](docs/EVIDENCIA.md#revisión-y-ejecución-2026-09-22); los estados de servicio
 y cifras de las secciones históricas siguientes pertenecen a sus fechas.
 
-T102 ya dispone de parámetros tipados e inactivos. Las correcciones técnicas de Store
-y digesto se verificaron sobre V7 con 923/923 tests, sin omisiones, y seis controles
-de paridad física/archivo. La candidata familiar V8 permanece separada. T100 sigue
-abierto: lectura semántica cerrada, migración V1, números exactos, snapshot segmentado
-y límites persistidos necesitan completar sus controles antes de cerrar A0.
+T102 ya dispone de parámetros tipados e inactivos. Tras los controles de Store y
+digesto, la integración técnica V7 alcanzó 946/946 pruebas sin omisiones, typecheck
+y build/smoke exactos. Recuperación estricta, migración V1 y números exactos tienen
+controles independientes; [persistencia](docs/REVISION-PERSISTENCIA-2026-09-22.md).
+T100 sigue abierto por segmentación y límites persistidos, incluida la puerta de
+dos millones de teselas. La candidata familiar V8 permanece separada: su comparación
+de trece días terminó con resultado mixto, sin demostrar sostenibilidad conjunta.
 
 La comparación reservada fija 32 semillas, control y candidato, a 30 días simulados.
 Se ejecuta en copias inmutables con 24 procesos; no emplea el gobernador del servidor

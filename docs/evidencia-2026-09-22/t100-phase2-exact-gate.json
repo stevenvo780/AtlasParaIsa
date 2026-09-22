@@ -1,0 +1,15 @@
+{
+  "repository": "/datos/workspaces/personal/AtlasParaIsa-storage-integration-20260922",
+  "revision": "bfdaa0ff51c0e69a928ef657d023c6681452acb7",
+  "helperSha256": "6e944c787553f36fed2841f190e4ef7936f9b024658e8d8e42833a1657382d46",
+  "dependencies": "/datos/workspaces/personal/AtlasParaIsa/node_modules",
+  "worktree": "/tmp/atlas-deploy-check.YjQ1Ta/worktree",
+  "startedAt": "2026-09-22T11:33:45Z",
+  "finishedAt": "2026-09-22T11:33:48.209Z",
+  "status": "passed",
+  "phase": "complete",
+  "exitCode": 0,
+  "buildExitCode": 0,
+  "smokeExitCode": 0,
+  "cleanup": true
+}

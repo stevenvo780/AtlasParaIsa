@@ -24,6 +24,8 @@ export function encodeSnapshotTileRows(tiles: readonly Tile[]): unknown[][] {
     const row: unknown[] = [t.x,t.y,t.terrain,t.moisture,t.vegetation,t.food,t.biome,t.elevation,t.wood,t.stone,t.feature,t.variety,t.growth,t.fertility,t.cultivation,t.traffic,t.drinkingWater,t.species,t.fauna,t.life];
     for (let i = 0; i < row.length; i++) {
       const value = row[i];
+      if (i < 6 && i !== 2 && (typeof value !== 'number' || !Number.isFinite(value)))
+        throw new Error('Invalid required numeric tile value. Snapshot was not written.');
       if (i >= 6 && (value === null || typeof value === 'number' && !Number.isFinite(value))) throw new Error('Invalid optional tile value. Snapshot was not written.');
       if (Object.is(value, -0)) row[i] = exactJsonNumber(value);
     }

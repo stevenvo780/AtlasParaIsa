@@ -9,7 +9,7 @@ import path from 'node:path';
 import { EcosystemKernel } from '../src/world/ecosystem-kernel.ts';
 import { generateChunk } from '../src/world/terrain.ts';
 import { DEFAULT_PARAMS } from '../src/world/params.ts';
-import { FIELDS, MAX_CELLS, ECOLOGY_CONTRACT, validateLiveKernel, topology, pack, unpack, stepArrays, compare } from './compute-ecology-core.mjs';
+import { FIELDS, MAX_CELLS, ECOLOGY_CONTRACT, ECOLOGY_KERNEL_SPEC, validateLiveKernel, validateKernelSpecification, topology, pack, unpack, stepArrays, compare } from './compute-ecology-core.mjs';
 import { CPUWorkers, GPUWorker } from './compute-ecology-clients.mjs';
 
 const args=process.argv.slice(2);
@@ -24,9 +24,6 @@ if(sizes.some(n=>!Number.isInteger(n)||n<1||n>MAX_CELLS)||!Number.isInteger(repe
 await mkdir(directory,{recursive:false,mode:0o700});
 const sha=data=>createHash('sha256').update(data).digest('hex');
 const source=execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();
-const coreFiles=['src/world/ecosystem-kernel.ts','src/world/ecosystem.ts','src/world/terrain.ts','src/world/agua.ts','src/world/params.ts'];
-const hashes=async()=>Object.fromEntries(await Promise.all(coreFiles.map(async file=>[file,sha(await readFile(file))])));
-const initialHashes=await hashes();
 const benchmarkFiles=['scripts/compute-ecology-core.mjs','scripts/compute-ecology-worker.mjs','scripts/compute-ecology-clients.mjs','scripts/compute-ecology-benchmark.mjs','scripts/compute-ecology-gpu.py','scripts/compute-ecology.cu'];
 const benchmarkHashes=Object.fromEntries(await Promise.all(benchmarkFiles.map(async file=>[file,sha(await readFile(file))])));
 async function hardware(){
@@ -50,7 +47,7 @@ function checkCoordinates(tiles,coords){for(let i=0;i<tiles.length;i++)if(!Objec
 const clone=tiles=>tiles.map(tile=>({...tile}));
 function summary(values){const sorted=[...values].sort((a,b)=>a-b);return {min:sorted[0],median:sorted[Math.floor(sorted.length/2)],max:sorted.at(-1),mean:values.reduce((a,b)=>a+b,0)/values.length};}
 const kernelOptions={seed:51926,cuencas:DEFAULT_PARAMS.agua.cuencas,decaimientoFertilidad:DEFAULT_PARAMS.recursos.decaimientoFertilidad};
-const result={version:3,startedAt:new Date().toISOString(),source,contract:ECOLOGY_CONTRACT,kernelOptions,coreHashes:initialHashes,benchmarkHashes,hardwareBefore:await hardware(),sizes,repetitions,precision:'Float64; NVRTC --fmad=false; no fast-math',scope:'Live EcosystemKernel only, with current default basin and fertility-decay options. Does not include stepWorld, raw resource updater, fauna, cloneWorld beyond tiles, JSON, projection or SQLite. Shared host; no exclusive hardware allocation.',coldDefinition:'First invocation after process/context and topology setup; startup, NVRTC compilation and topology allocation/upload are separately charged. Driver disk JIT cache is not disabled. Warm summaries exclude the first invocation but do not hide later JIT/GC outliers.',gpuTransport:'Persistent Python ctypes worker over binary stdio; pageable HtoD and DtoH, synchronized kernel, CUDA event interval, output assembly and Node IPC measured. Dual mode partitions outputs 50/50 and duplicates complete old input uploads, including halo life; no transfers omitted.',sources:['https://docs.nvidia.com/cuda/nvrtc/index.html','https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__EXEC.html','https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__EVENT.html'],cases:[],gpu:[]};
+const result={version:4,startedAt:new Date().toISOString(),source,contract:ECOLOGY_CONTRACT,kernelSpec:ECOLOGY_KERNEL_SPEC,kernelOptions,benchmarkHashes,hardwareBefore:await hardware(),sizes,repetitions,precision:'Float64; NVRTC --fmad=false; no fast-math',scope:'Live EcosystemKernel only, with current default basin and fertility-decay options. Does not include stepWorld, raw resource updater, fauna, cloneWorld beyond tiles, JSON, projection or SQLite. Shared host; no exclusive hardware allocation.',coldDefinition:'First invocation after process/context and topology setup; startup, NVRTC compilation and topology allocation/upload are separately charged. Driver disk JIT cache is not disabled. Warm summaries exclude the first invocation but do not hide later JIT/GC outliers.',gpuTransport:'Persistent Python ctypes worker over binary stdio; pageable HtoD and DtoH, synchronized kernel, CUDA event interval, output assembly and Node IPC measured. Dual mode partitions outputs 50/50 and duplicates complete old input uploads, including halo life; no transfers omitted.',sources:['https://docs.nvidia.com/cuda/nvrtc/index.html','https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__EXEC.html','https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__EVENT.html'],cases:[],gpu:[]};
 const gpus=[];
 try{
   const validationKernel=new EcosystemKernel();
@@ -103,11 +100,18 @@ try{
       result.cases.push(entry);await writeFile(path.join(directory,'result.json'),JSON.stringify(result,null,2)+'\n',{mode:0o600});
     }finally{for(const item of workers)await item.pool.close();}
   }
-  result.completedAt=new Date().toISOString();result.hardwareAfter=await hardware();result.coreHashesAfter=await hashes();
+  result.completedAt=new Date().toISOString();result.hardwareAfter=await hardware();
   result.benchmarkHashesAfter=Object.fromEntries(await Promise.all(benchmarkFiles.map(async file=>[file,sha(await readFile(file))])));
   if(JSON.stringify(benchmarkHashes)!==JSON.stringify(result.benchmarkHashesAfter))throw new Error('Benchmark changed during run');
-  result.coreUnchanged=JSON.stringify(initialHashes)===JSON.stringify(result.coreHashesAfter);
-  if(!result.coreUnchanged)throw new Error('Core source changed during benchmark');
+  // T108: el candado de bytes SHA256 (hash 95ff0d2 de 2024-09-06) sobre
+  // src/world/ecosystem-kernel.ts se sustituye por ECOLOGY_KERNEL_SPEC, que
+  // valida campos del tile y coeficientes del cuerpo de step() contra una
+  // especificación versionada. Comentarios, líneas vacías y reformateos
+  // pasan; cualquier cambio de reglas (número, coeficiente, campo, reorden)
+  // hace fallar el banco en seco.
+  const kernelSource=await readFile('src/world/ecosystem-kernel.ts','utf8');
+  result.kernelSpecCheck=validateKernelSpecification(kernelSource);
+  if(!result.kernelSpecCheck.valid)throw new Error(`Kernel specification mismatch: ${result.kernelSpecCheck.reason}`);
   result.ok=true;
 }catch(error){result.ok=false;result.error=String(error);throw error;}
 finally{

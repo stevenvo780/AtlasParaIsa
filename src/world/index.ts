@@ -1345,7 +1345,8 @@ export function assertWorld(value: unknown, expectedVersion = RULES_VERSION, con
       const serial=/^descendant-([1-9]\d*)$/.exec(person.id);
       if(person.genome.generation>0&&(!serial||!Number.isSafeInteger(Number(serial[1]))||Number(serial[1])>w.birthCounter)) fail();
     }
-    const recipeIds = new Set([...w.technology.recipes, ...(w.technology.catalogue?.pending ?? [])].map(recipe => recipe.id));
+    const ownRecipes = [...w.technology.recipes, ...(w.technology.catalogue?.pending ?? [])];
+    const recipeIds = new Set(ownRecipes.map(recipe => recipe.id));
     for (const person of w.people) {
       for (const id of person.technology.knownRecipes) recipeIds.add(id);
       for (const item of person.technology.items) if (item.recipeId) recipeIds.add(item.recipeId);
@@ -1357,8 +1358,14 @@ export function assertWorld(value: unknown, expectedVersion = RULES_VERSION, con
       for (const id of event.parentRecipeIds) recipeIds.add(id);
       for (const catalyst of event.catalysts) if (catalyst.recipeId) recipeIds.add(catalyst.recipeId);
     }
+    // assertTechnology already re-checked every id here against `recipes`/`pending` (the
+    // exact source of `ownRecipes`) by shape, signature and ancestry; this loop only adds
+    // the author-identity check. A Map built once turns each lookup below into O(1) instead
+    // of the two full-array scans `resolveTechnologyRecipe` repeats per id — the disk-backed
+    // reader stays reserved for ids retired from both arrays.
+    const ownRecipesById = new Map(ownRecipes.map(recipe => [recipe.id, recipe] as const));
     for (const id of recipeIds) {
-      const recipe = resolveTechnologyRecipe(w, id, { cache: false });
+      const recipe = ownRecipesById.get(id) ?? resolveTechnologyRecipe(w, id, { cache: false });
       if (!recipe) fail();
       const author = identity(recipe!.inventorId);
       if (!author || author.bornAt > recipe!.tick || ('diedAt' in author && author.diedAt < recipe!.tick)) fail();

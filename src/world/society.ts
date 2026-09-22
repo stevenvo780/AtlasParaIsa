@@ -1,6 +1,7 @@
 import type { ChronicleEvent, CommunityView, PersonView } from '../shared/types.js';
 import type { Person, World } from './index.js';
 import { localRandom } from './genetics.js';
+import { foundingCommunityCap } from './params.js';
 import { count } from './statistics.js';
 import { tileAt } from './spatial.js';
 import { constructionCost, waterAvailable } from './inventions.js';
@@ -280,7 +281,10 @@ export function updateCommunities(world: World, emit: Emit): void {
     const known = nearby.find(p => p.communityId);
     if (known) { person.communityId = known.communityId; world.communities.find(c => c.id === known.communityId)?.members.push(person.id); continue; }
     const free = nearby.filter(p => !p.communityId);
-    if (free.length < 2 || world.communities.length >= 8 || !world.places.some(place => distance(person, place) <= 7)) continue;
+    // T100: el tope de fundación deja de ser el literal `>= 8` y sale a parámetro
+    // (`foundingCommunityCap`, default 8 = conducta de siempre). Elevarlo es un CAMBIO DE
+    // CONDUCTA declarado, no una relajación de validación: ver el contrato de esa función.
+    if (free.length < 2 || world.communities.length >= foundingCommunityCap(world) || !world.places.some(place => distance(person, place) <= 7)) continue;
     const members = [person, ...free], id = `community-${++world.communityCounter}`;
     const syllables = ['Sauce','Brisa','Lumbre','Junco','Piedra','Semilla','Rocío','Sendero'];
     const random = localRandom(world.seed, id), name = `Círculo de ${syllables[Math.floor(random() * syllables.length)]}`;

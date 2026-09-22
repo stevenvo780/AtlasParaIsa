@@ -7,7 +7,8 @@ import { performance } from 'node:perf_hooks';
 import { createWorld, stepWorld, assertWorld, projectWorld, cloneWorld, TICKS_PER_DAY } from '../src/world/index.js';
 import { worldStatistics } from '../src/world/statistics.js';
 import { Store } from '../src/server/store.js';
-import { MAX_ACTIVE_ANIMALS, MAX_STORED_ANIMALS } from '../src/world/animals.js';
+import { MAX_ACTIVE_ANIMALS } from '../src/world/animals.js';
+import { limitsOf } from '../src/world/params.js';
 
 const days = Number(process.env.SOAK_DAYS ?? 5);
 if (!Number.isInteger(days) || days < 3 || days > 60) throw new Error('SOAK_DAYS debe estar entre 3 y 60.');
@@ -57,7 +58,7 @@ try {
     stepWithCommitMs: {p50:latencies[Math.floor(latencies.length*0.5)],p95:latencies[Math.floor(latencies.length*0.95)],max:latencies.at(-1)},
     peakRssMiB: process.resourceUsage().maxRSS/1024, maximumViewBytes, maximumSnapshotBytes, databaseBytes:statSync(path).size,
     society: { communities: world.communities.map(c=>({id:c.id,members:c.members.length,formedAt:c.formedAt,cooperation:c.cooperation})), generations: worldStatistics(world).generations, totals: world.totals, finalWildlife: worldStatistics(world).wildlife, meanThirst: worldStatistics(world).meanThirst, homes:world.people.filter(p=>p.home).length, withNearbyPeers:world.people.filter(p=>world.people.some(q=>q!==p&&Math.hypot(p.x-q.x,p.y-q.y)<=7)).length },
-    individualLife: { maximumRegionAnimals:maximumActiveAnimals, physiologyBudgetPerTick:MAX_ACTIVE_ANIMALS, maximumStoredAnimals:MAX_STORED_ANIMALS, dynamics:world.animalDynamics, regionAnimals:world.animals.length },
+    individualLife: { maximumRegionAnimals:maximumActiveAnimals, physiologyBudgetPerTick:MAX_ACTIVE_ANIMALS, storedAnimalsLimit:limitsOf(world).fauna, dynamics:world.animalDynamics, regionAnimals:world.animals.length },
     inventions: { maximumActiveStructures, dynamics:world.inventionDynamics, activeStructures:world.structures.length, blueprints:world.blueprints.map(b=>({id:b.id,generation:b.generation,components:b.components,uses:b.uses,usefulness:b.usefulness})), builtInnovations:world.structures.filter(s=>s.blueprintId!=='blueprint-base').length },
     technology: projectWorld(world).technology?.dynamics,
     organization: projectWorld(world).organization,

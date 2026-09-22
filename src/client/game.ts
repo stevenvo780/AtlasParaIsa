@@ -472,8 +472,13 @@ function renderStatsContent(): void {
   if (statsTab === 'communities') {
     panel.innerHTML = `${stamp}<p class="stats-note">Las comunidades se forman en el mundo simulado. Su cultura y confianza cambian con las interacciones; pertenecer a grupos distintos no implica hostilidad.</p>${world.communities?.length ? world.communities.map(community => {
       const color = /^#[\da-f]{3,8}$/i.test(community.color) ? community.color : '#779264';
+      // T134 (FR-026): `members` ya no viaja completo — solo quien está en la cámara. `memberCount`
+      // trae el total real; si faltan miembros por estar fuera de vista, se dice explícitamente
+      // en vez de dar a entender que la lista mostrada es la comunidad entera.
+      const total = community.memberCount ?? community.members.length;
       const members = community.members.map(id => personLink(world!,id));
-      return `<article class="community-card" data-community-card="${esc(community.id)}" tabindex="-1"><header><span class="community-swatch" style="background:${color}" aria-hidden="true"></span><div><h3>${esc(community.name)}</h3><p>${community.members.length} habitantes · desde el paso ${community.formedAt}</p></div></header><p class="community-members">${members.join(' ')}</p><div class="community-counts"><span><strong>${number(community.cooperation)}</strong> cooperaciones</span><span><strong>${number(community.disputes)}</strong> desacuerdos</span></div>${meter('Compartir', community.culture.sharing)}${meter('Cuidar el entorno', community.culture.stewardship)}${meter('Apertura', community.culture.openness)}</article>`;
+      const hidden = total - community.members.length;
+      return `<article class="community-card" data-community-card="${esc(community.id)}" tabindex="-1"><header><span class="community-swatch" style="background:${color}" aria-hidden="true"></span><div><h3>${esc(community.name)}</h3><p>${number(total)} habitantes · desde el paso ${community.formedAt}</p></div></header><p class="community-members">${members.join(' ')}${hidden > 0 ? `<span class="community-members-more">y ${number(hidden)} más fuera de esta vista</span>` : ''}</p><div class="community-counts"><span><strong>${number(community.cooperation)}</strong> cooperaciones</span><span><strong>${number(community.disputes)}</strong> desacuerdos</span></div>${meter('Compartir', community.culture.sharing)}${meter('Cuidar el entorno', community.culture.stewardship)}${meter('Apertura', community.culture.openness)}</article>`;
     }).join('') : '<div class="stats-empty illustrated-empty">Todavía no se ha formado una comunidad. Los encuentros y las acciones locales pueden dejar costumbres compartidas.</div>'}`;
     return;
   }

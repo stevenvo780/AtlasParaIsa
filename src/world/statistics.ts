@@ -3,6 +3,8 @@ import type { World } from './index.js';
 import { CHUNK_SIZE, MAX_COORDINATE } from './terrain.js';
 import { indiceDiversidad } from './diversidad.js';
 import { regionesSinAgua as regionesSinAguaDe } from './agua.js';
+import { demographicTraits } from './demography.js';
+import { paramsOf } from './params.js';
 
 export interface WorldStatsRecursos extends WorldStats { giniRecursosPorRegion: number; fraccionCeldasConComida: number; distanciaMediaAgua: number;
   /** R1 (SC-004 parte 2, T035/T036e): cableada desde `agua.ts` (misma función que usan los tests
@@ -116,7 +118,25 @@ function computeWorldStatistics(world: World): WorldStatsRecursos {
   const caras = estadisticasCaras(world);
   const current = sample(world), actions: Record<string, number> = {}, biomes: Record<string, number> = {}, features: Record<string, number> = {}, generations: Record<string, number> = {}, wildlife: Record<string, number> = {};
   const materials = { wood: 0, stone: 0 }; let freshWater = 0, cultivatedTiles = 0, trailTiles = 0;
-  for (const p of world.people) { actions[p.action] = (actions[p.action] ?? 0) + 1; generations[p.genome.generation] = (generations[p.genome.generation] ?? 0) + 1; materials.wood += p.materials.wood; materials.stone += p.materials.stone; }
+  // T134 (FR-026): censo sobre TODA la población, no solo la de la cámara — `people` ahora se
+  // recorta por viewport (`projectWorld`), así que el recuento y las etapas de vida deben salir
+  // de aquí, no de contar el `people` recibido como hacía el cliente (`game.ts:419-437`).
+  const cuerpo = paramsOf(world).cuerpo;
+  const lifeStage = { juvenile: 0, adult: 0, senescent: 0, unknown: 0 };
+  let neighbors = 0, identities = 0, protectedCount = 0;
+  for (const p of world.people) {
+    actions[p.action] = (actions[p.action] ?? 0) + 1; generations[p.genome.generation] = (generations[p.genome.generation] ?? 0) + 1; materials.wood += p.materials.wood; materials.stone += p.materials.stone;
+    if (p.role === 'neighbor') {
+      neighbors++;
+      const traits = demographicTraits(p.genome, cuerpo);
+      const age = p.demography.age;
+      if (typeof age !== 'number') lifeStage.unknown++;
+      else if (age < traits.maturityAge) lifeStage.juvenile++; else if (age < traits.senescenceStart) lifeStage.adult++; else lifeStage.senescent++;
+    } else {
+      // Server-computed, never absent: identities are always continuity-protected by role.
+      identities++; protectedCount++;
+    }
+  }
   for (const tile of world.tiles) {
     const biome = tile.biome ?? 'grassland', feature = tile.feature ?? 'none';
     biomes[biome] = (biomes[biome] ?? 0) + 1; features[feature] = (features[feature] ?? 0) + 1;
@@ -124,5 +144,6 @@ function computeWorldStatistics(world: World): WorldStatsRecursos {
   }
   for(const animal of world.animals) wildlife[animal.species]=(wildlife[animal.species]??0)+1;
   const structures:Record<string,number>={}; for(const structure of world.structures){freshWater+=structure.water;for(const component of structure.components)structures[component]=(structures[component]??0)+1;}
-  return { population: current.population, meanEnergy: current.energy, meanHunger: current.hunger, meanFatigue: current.fatigue, meanThirst: current.thirst, materials, actions, biomes, features, totals: { ...world.totals }, generations, history: world.history.map(s => ({ ...s })), scope: 'active-regions', wildlife, freshWater, cultivatedTiles, trailTiles, animalDynamics:{...world.animalDynamics}, structures,blueprints:world.blueprints.length,inventionDynamics:{...world.inventionDynamics}, ...caras, diversidad: { ...caras.diversidad } };
+  return { population: current.population, meanEnergy: current.energy, meanHunger: current.hunger, meanFatigue: current.fatigue, meanThirst: current.thirst, materials, actions, biomes, features, totals: { ...world.totals }, generations, history: world.history.map(s => ({ ...s })), scope: 'active-regions', wildlife, freshWater, cultivatedTiles, trailTiles, animalDynamics:{...world.animalDynamics}, structures,blueprints:world.blueprints.length,inventionDynamics:{...world.inventionDynamics}, ...caras, diversidad: { ...caras.diversidad },
+    census: { neighbors, identities, protectedCount, lifeStage: { ...lifeStage } } };
 }

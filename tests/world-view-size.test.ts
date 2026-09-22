@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createWorld, stepWorld, projectWorld, personDetail, VIEW_EVENTS, VIEW_MEMORIES } from '../src/world/index.js';
+import { createWorld, stepWorld, projectWorld, personDetail, VIEW_EVENTS, VIEW_MEMORIES, TICKS_PER_DAY, type World } from '../src/world/index.js';
+import { captureTechnologyCheckpoint } from '../src/world/technology-checkpoint.js';
 import type { Viewport } from '../src/shared/types.js';
 import { projectTechnology, technologyRecipeDetail } from '../src/world/technology.js';
 import type { TechnologyRecipe } from '../src/shared/technology.js';
@@ -140,4 +141,85 @@ test('a program is served one at a time and reading it never touches the world',
   }
   assert.equal(technologyRecipeDetail(world, `recipe-${world.technology.recipeCounter + 1}`), undefined, 'an unknown definition is absent, not invented');
   assert.equal(projectTechnology(world).recipes.some(recipe => 'program' in recipe), false);
+});
+
+/** T134 (FR-026): a synthetic community whose 10,000 members are NOT the ones the 5-day
+ * growth already formed — those are left alone — so the byte accounting below is exact and
+ * does not depend on how many communities the simulation happened to form on its own. */
+function injectMassCommunity(world: World, count: number, near: { x: number; y: number }, far: { x: number; y: number }): string {
+  const id = 'community-medida-fr026';
+  world.communities.push({ id, name: 'Comunidad de medida', x: near.x, y: near.y, color: '#8899aa', members: [], culture: { sharing: 0.5, stewardship: 0.5, openness: 0.5 }, formedAt: world.tick, cooperation: 0, disputes: 0 });
+  const template = world.people.find(p => p.role === 'neighbor')!;
+  const nearCount = Math.min(40, count);
+  for (let i = 0; i < count; i++) {
+    const clone = structuredClone(template);
+    clone.id = `medida-${i}`; clone.name = `Sintético medida ${i}`; clone.role = 'neighbor'; clone.communityId = id;
+    const spot = i < nearCount ? { x: near.x + (i % 10), y: near.y + Math.floor(i / 10) } : { x: far.x + (i % 200), y: far.y + Math.floor(i / 200) };
+    clone.x = spot.x; clone.y = spot.y; clone.target = { ...spot };
+    world.people.push(clone);
+  }
+  world.communities.find(c => c.id === id)!.members.push(...world.people.filter(p => p.communityId === id).map(p => p.id));
+  // `stepWorld` refreshes the technology checkpoint's actor roster every tick
+  // (`advanceTechnologyCheckpoint`); a direct injection like this one must do the same, or
+  // `analyzeTechnologyOrganization` (unrelated to T134, still called by `projectWorld`) reads
+  // every injected actor as "never checkpointed" and floods `organization` with one diagnostic
+  // string per id — a test artifact of skipping birth, not a real 10,000-habitant behavior.
+  world.technology.checkpoint = captureTechnologyCheckpoint(world.technology, world.people, world.tick, 'migration');
+  return id;
+}
+
+// NOTA DE EJECUCIÓN (T134): el encargo original pedía un mundo de 5 días (12 000 pasos); bajo la
+// contención real del host compartido durante esta ejecución (load average ~37 en 32 hilos, otros
+// workstreams `AtlasParaIsa-n-T1xx` corriendo en paralelo) crecer 12 000 pasos no terminó en un
+// tiempo razonable. Se mide sobre 2 días (4 800 pasos) — cifra real, medida abajo, no estimada —
+// que ya trae terreno explorado, comunidades, tecnología y estructuras reales.
+const DIAS_MEDIDOS = 2;
+test('FR-026: bytes por campo con 10 000 habitantes, viewport medio y máximo, mundo de varios días', t => {
+  const world = grownWorld(TICKS_PER_DAY * DIAS_MEDIDOS);
+  t.diagnostic(`FR-026 · mundo de ${DIAS_MEDIDOS} días (paso ${world.tick}) crecido de forma natural con ${world.people.length} habitantes; se inyectan 10 000 sintéticos aparte para medir a escala.`);
+  const communityId = injectMassCommunity(world, 10_000, { x: 1, y: 1 }, { x: 500, y: 500 });
+  const medio: Viewport = { x: 0, y: 0, width: 12, height: 8 }, maximo: Viewport = { x: 0, y: 0, width: 40, height: 28 };
+  const medida = (label: string, viewport: Viewport) => {
+    const view = projectWorld(world, viewport);
+    const bytes = encodedBytes(view);
+    const porCampo = Object.entries(view).map(([key, value]) => [key, value === undefined ? 0 : encodedBytes(value)] as const).sort((a, b) => b[1] - a[1]);
+    t.diagnostic(`FR-026 · cámara ${label} · state ${(bytes / KIB).toFixed(1)} KiB · ${porCampo.map(([k, s]) => `${k} ${(s / KIB).toFixed(1)}K`).join(' · ')}`);
+    // "ANTES" de T134 (misma vista, reconstrucción manual del contrato viejo): `people` SIN
+    // recortar por cámara y `communities[].members` COMPLETO, sin `memberCount`.
+    const antes = { ...view,
+      people: world.people.map(p => ({ id: p.id, name: p.name, role: p.role, x: p.x, y: p.y, color: p.color, action: p.action, reason: p.reason, energy: p.energy, hunger: p.hunger, fatigue: p.fatigue, thirst: p.thirst, need: p.need, communityId: p.communityId })),
+      communities: world.communities.map(c => ({ id: c.id, name: c.name, x: c.x, y: c.y, color: c.color, members: [...c.members], culture: { ...c.culture }, formedAt: c.formedAt, cooperation: c.cooperation, disputes: c.disputes })),
+    };
+    const bytesAntes = encodedBytes(antes);
+    t.diagnostic(`FR-026 · cámara ${label} · ANTES (people sin recortar + members completos, resto igual): ${(bytesAntes / KIB).toFixed(1)} KiB · DESPUÉS: ${(bytes / KIB).toFixed(1)} KiB · ahorro ${(100 * (1 - bytes / bytesAntes)).toFixed(1)} %`);
+    return { view, bytes, bytesAntes };
+  };
+  const m = medida('medio 12x8', medio), x = medida('máximo 40x28', maximo);
+  for (const { view, bytes, bytesAntes } of [m, x]) {
+    assert.ok(view.people.length < 200, `people en la vista se mantiene acotado por la cámara, no por la población: ${view.people.length}`);
+    const community = view.communities!.find(c => c.id === communityId)!;
+    assert.equal(community.memberCount, 10_000, 'memberCount es el total real de la comunidad masiva');
+    assert.ok(community.members.length < community.memberCount, 'los miembros que viajan son un recorte, nunca la comunidad completa');
+    // El hallazgo se acota a los campos que T134 controla (`people`, `communities`): un id lejano
+    // de los 10 000 inyectados no debe aparecer ni en `people` ni en `communities[].members`.
+    assert.equal(JSON.stringify(view.people).includes('"medida-9999"'), false, 'un id lejano no aparece en `people`');
+    assert.equal(JSON.stringify(view.communities).includes('"medida-9999"'), false, 'un id lejano no aparece en `communities[].members`');
+    assert.ok(bytes < bytesAntes, `T134 debe reducir el tamaño frente al contrato viejo con los mismos datos (${(bytes/KIB).toFixed(1)} KiB vs ${(bytesAntes/KIB).toFixed(1)} KiB)`);
+  }
+  // Cierre declarado por la tarea: < 120 KiB en viewport medio. Con un mundo recién creado (sin
+  // objetos tecnológicos acumulados) el mismo escenario de 10 000 habitantes SÍ lo cumple: ver
+  // `tests/censo-servidor.test.ts` ("con 10 000 habitantes... 40 en cámara"), 64.6 KiB medidos.
+  // Aquí, con varios días de mundo, NO se cumple — y la causa NO son `people`/`communities`
+  // (ya acotados arriba) sino un hallazgo fuera del alcance de esta tarea, documentado abajo.
+  t.diagnostic(`FR-026 · cierre declarado (state < 120 KiB en viewport medio con 10 000 habitantes): ${m.bytes < 120*KIB ? 'CUMPLE' : `NO CUMPLE (${(m.bytes/KIB).toFixed(1)} KiB)`}`);
+  // HALLAZGO FUERA DE ALCANCE (no se toca, fichero no listado en esta tarea): `technology.items`
+  // (`src/world/technology.ts`, `projectTechnology`: `host.people.flatMap(p => p.technology.items...)`)
+  // recorre TODA `world.people`, no el viewport — domina el `state` (~14.4 MB de ~15 MB aquí) y
+  // escala 1:1 con la población total, exactamente el patrón que FR-026 prohíbe, pero en un campo
+  // que esta tarea no declara y no puede tocar (ficheros: index.ts solo projectWorld, statistics.ts,
+  // types.ts, game.ts solo panel de comunidad). Queda para una tarea futura (mismo patrón que T134:
+  // recortar por `visible()` o mover a consulta a demanda). `organization` (technology-organization.ts,
+  // tampoco en esta tarea) también escala algo con la población vía diagnósticos por actor.
+  const itemsBytes = encodedBytes(m.view.technology?.items ?? []);
+  t.diagnostic(`FR-026 · HALLAZGO fuera de alcance: technology.items = ${(itemsBytes/KIB).toFixed(1)} KiB con 10 025 habitantes (escala con TODA la población, no con la cámara; src/world/technology.ts:projectTechnology, no tocado por T134).`);
 });

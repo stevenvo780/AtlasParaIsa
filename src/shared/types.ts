@@ -11,8 +11,13 @@ export type { TechnologyRecipe, TechnologyRecipeSummary } from './technology.js'
  * en lugar de dibujar como «cero» lo que sólo está ausente.
  * 9: water projection v1 omits its fixed unit and leakage denominator. The reader
  * supplies those format constants; quantities and the water version stay explicit.
- * A cached older client must fail in the open instead of drawing missing metadata. */
-export const PROTOCOL_VERSION = 9;
+ * A cached older client must fail in the open instead of drawing missing metadata.
+ * 10 (T134, FR-026): `people` is trimmed to the camera (same `visible()` as `tiles`, margin one
+ * cell); census aggregates (`neighbors`, `lifeStage`, `protectedCount`) move to `stats.census`,
+ * computed over the whole population, not the trimmed view. `communities[].members` carries only
+ * visible members plus `memberCount`; `blueprints` carries only the ones a visible structure
+ * references. A cached older client must fail in the open, not draw a partial roster as complete. */
+export const PROTOCOL_VERSION = 10;
 export interface Viewport { x: number; y: number; width: number; height: number; }
 export type Biome = 'grassland' | 'forest' | 'desert' | 'mountain' | 'wetland' | 'ocean';
 export type Terrain = 'water' | 'soil' | 'meadow' | 'shelter';
@@ -76,7 +81,11 @@ export interface WorldView {
   instanceId?: string;
   demography?: { deaths: number; causes: Record<string, number>; recent: { id: string; name: string; generation: number; parents: string[]; bornAt: number; diedAt: number; cause: string }[] };
 }
-export interface CommunityView { id: string; name: string; x: number; y: number; color: string; members: string[]; culture: { sharing: number; stewardship: number; openness: number }; formedAt: number; cooperation: number; disputes: number; }
+/** `CommunityView` es a la vez la entidad interna (`World.communities`, `members` completo, sin
+ * `memberCount`) y la forma que viaja por la red (T134/FR-026: `members` recortado a la cámara,
+ * `memberCount` con el total real). `memberCount` queda opcional para no forzar al productor
+ * interno; `projectWorld` SIEMPRE lo rellena, así que el cliente lo trata como presente. */
+export interface CommunityView { id: string; name: string; x: number; y: number; color: string; members: string[]; memberCount?: number; culture: { sharing: number; stewardship: number; openness: number }; formedAt: number; cooperation: number; disputes: number; }
 export interface WorldSample { tick: number; population: number; energy: number; hunger: number; fatigue: number; thirst: number; discoveries: number; settlements: number; cooperation: number; births: number; }
 export interface WorldStats { population: number; meanEnergy: number; meanHunger: number; meanFatigue: number; meanThirst: number; materials: { wood: number; stone: number }; actions: Record<string, number>; biomes: Record<string, number>; features: Record<string, number>; totals: Record<string, number>; generations: Record<string, number>; history: WorldSample[]; scope: 'active-regions'; wildlife: Record<string, number>; freshWater: number; cultivatedTiles: number; trailTiles: number; animalDynamics?: AnimalDynamics; structures?: Record<string, number>; blueprints?: number; inventionDynamics?: InventionDynamics;
   /** T019/T036(e): diversidad de conducta y de oficios de la población viva (0..1 cada una). */
@@ -89,7 +98,12 @@ export interface WorldStats { population: number; meanEnergy: number; meanHunger
   distanciaMediaAgua?: number;
   /** Fracción [0,1] de regiones con tierra sin ninguna celda de agua potable superficial; las
    * regiones 100% océano no cuentan. SC-004 parte 2 (objetivo ≥ 0,30). */
-  regionesSinAgua?: number; }
+  regionesSinAgua?: number;
+  /** T134 (FR-026): censo sobre TODA la población, ajeno al viewport de `people`. `neighbors` y
+   * `identities` cuentan por rol; `lifeStage` solo suma vecinos, con `unknown` para los que no
+   * tienen edad registrada; `protectedCount` son las identidades S/I (siempre protegidas por rol). */
+  census?: { neighbors: number; identities: number; protectedCount: number;
+    lifeStage: { juvenile: number; adult: number; senescent: number; unknown: number } }; }
 /** `tickHz`: ritmo real medido en reloj de pared sobre los últimos pasos, no el ritmo pedido. */
 export interface RuntimeStats { stepMs: number; p95StepMs: number; saveMs: number; projectionMs: number; snapshotBytes: number; activeTiles: number; processRssMiB: number; tickHz: number;
   /** Coste del borrador y de las leyes, separado del guardado del mismo paso. */

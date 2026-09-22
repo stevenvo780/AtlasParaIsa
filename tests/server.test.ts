@@ -70,7 +70,11 @@ test('two authenticated clients share one authoritative timeline and input trans
   for(let n=0;n<5;n++)f.app.stepOnce();
   const [av,bv]=await sameTick;assert.equal(f.app.world.tick,5);
   assert.ok(av?.type==='state'&&bv?.type==='state');
-  assert.equal(av.world.tick,bv.world.tick);assert.deepEqual(av.world.people,bv.world.people);assert.deepEqual(av.world.events,bv.world.events);assert.notEqual(av.world.originX,bv.world.originX);
+  // T134 (FR-017/FR-026): `people` ahora se recorta por cámara — `b` la movió lejos (-1000,2000) y
+  // legítimamente ve un reparto distinto (aquí, vacío). El invariante de «una sola línea de tiempo
+  // autoritativa» pasa a probarse con lo que SÍ es ajeno a la cámara: el tick, la crónica y el censo
+  // (`stats.census`, agregado sobre TODA la población en el servidor).
+  assert.equal(av.world.tick,bv.world.tick);assert.deepEqual(av.world.events,bv.world.events);assert.deepEqual(av.world.stats!.census,bv.world.stats!.census);assert.notDeepEqual(av.world.people,bv.world.people,'cámaras distintas ahora ven repartos de personas distintos');assert.notEqual(av.world.originX,bv.world.originX);
   // WebSocket message order makes a subsequent camera response a fence: the preceding
   // command has entered the server queue, but cannot commit before the manual step.
   for(const [socket,id,person] of [[a,'shared-client-a',f.app.world.people[0]!],[b,'shared-client-b',f.app.world.people[1]!]] as const){

@@ -3,7 +3,6 @@ import type { Person, World } from './index.js';
 import { localRandom } from './genetics.js';
 import { paramsOf } from './params.js';
 import { count } from './statistics.js';
-import { paramsOf } from './params.js';
 import { tileAt } from './spatial.js';
 import { constructionCost, waterAvailable } from './inventions.js';
 import { CAPABILITIES, MASS_UNIT, materialCapacities, shareTechnology, toolCapacities, transferTechnologyItem } from './technology.js';

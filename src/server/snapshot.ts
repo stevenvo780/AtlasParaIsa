@@ -1,5 +1,5 @@
 import type { Tile } from '../shared/types.js';
-import type { World } from '../world/index.js';
+import { RULES_VERSION, type World } from '../world/index.js';
 import { DEFAULT_PARAMS, LEGACY_WORLD_LIMITS, PARAMETER_LIMITS_RULES_VERSION, WORLD_LIMIT_KEYS,
   assertWorldLimits, parseParams, type WorldLimits, type WorldParams } from '../world/params.js';
 import { exactJsonNumber, stringifyExact } from '../shared/exact-json.js';
@@ -21,9 +21,15 @@ export class SnapshotPhysicalError extends Error {}
 /** Readable bytes with an explicitly recognized codec/parameter violation. */
 export class SnapshotSemanticError extends Error {}
 
+function assertSnapshotRulesVersion(record: Record<string, unknown>): void {
+  if (!Number.isSafeInteger(record.version) || (record.version as number) < 1 || (record.version as number) > RULES_VERSION)
+    throw new SnapshotSemanticError('Invalid snapshot rules version. Explicit recovery required.');
+}
+
 /** Admission is checked before tuples/pages are expanded. The profile is transport
  * metadata; effective laws remain the complete params covered by the world digest. */
 export function readSnapshotLimits(record: Record<string, unknown>, validateParams = true): Readonly<WorldLimits> {
+  assertSnapshotRulesVersion(record);
   const params = validateParams ? readSnapshotParams(record) : undefined;
   if (!Object.hasOwn(record, 'limitsProfile')) return LEGACY_WORLD_LIMITS;
   const profile = record.limitsProfile;

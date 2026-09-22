@@ -4,6 +4,7 @@ import type { Chunk } from './terrain.js';
 import { assertAnimals } from './animals.js';
 import type { BlueprintView, StructureView } from '../shared/life.js';
 import { validBlueprint, blueprintCost, blueprintAffordances, blueprintSignature } from './inventions.js';
+import { LEGACY_WORLD_LIMITS, limitsOf } from './params.js';
 export function assertEcosystemTile(tile: Tile, required = true): void {
   const fail = (): never => { throw new Error('Elemento del ecosistema inválido.'); };
   if ((required || tile.feature !== undefined) && !['tree','pine','palm','cactus','reeds','berries','flowers','rock','clay','stump','spring','pool','none'].includes(String(tile.feature))) fail();
@@ -27,10 +28,10 @@ export function assertBlueprint(value: unknown,tick: number): asserts value is B
   const b=value as unknown as BlueprintView, cost=blueprintCost(b.components);
   if(b.cost.wood!==cost.wood||b.cost.stone!==cost.stone||b.cost.work!==cost.work)fail();
 }
-export function assertStructures(value: unknown,tick: number,tiles: Tile[]): asserts value is StructureView[] {
+export function assertStructures(value: unknown,tick: number,tiles: Tile[],maxTiles=LEGACY_WORLD_LIMITS.teselasActivas): asserts value is StructureView[] {
   // The construction policy limits new work; it must not discard valid older roofs
   // when several archived regions become resident together.
-  if(!Array.isArray(value)||value.length>Math.min(65536,tiles.length))fail();
+  if(!Array.isArray(value)||value.length>Math.min(maxTiles,tiles.length))fail();
   const positions=new Map(tiles.map(t=>[`${t.x},${t.y}`,t])),ids=new Set<string>(),occupied=new Set<string>();
   for(const s of value as StructureView[]) {
     if(!object(s)||!string(s.id,100)||ids.has(s.id)||!coordinate(s.x)||!coordinate(s.y)||!string(s.blueprintId,100)||!string(s.name,200)||!validBlueprint(s.components)||!number(s.condition)||!number(s.water,4)||!number(s.food,4)||!integer(s.uses)||!integer(s.builtAt,tick)||!(s.builderId===null||string(s.builderId,50)))fail();
@@ -60,9 +61,10 @@ function assertFaunaStock(tiles:Tile[],animals:World['animals']):void {
   for(const tile of tiles)if((tile.fauna??0)!==(counts.get(`${tile.x},${tile.y}`)??0))fail();
 }
 export function assertLifeState(world: World): void {
-  assertAnimals(world.animals,world.tick,world.tiles);
+  const limits=limitsOf(world,world.version);
+  assertAnimals(world.animals,world.tick,world.tiles,limits.fauna);
   assertFaunaStock(world.tiles,world.animals);
-  assertStructures(world.structures,world.tick,world.tiles);
+  assertStructures(world.structures,world.tick,world.tiles,limits.teselasActivas);
   if(!integer(world.animalCounter)||!integer(world.blueprintCounter)||!integer(world.structureCounter)||!Array.isArray(world.blueprints)||world.blueprints.length<1||world.blueprints.length>64)fail();
   const ids=new Set<string>(),signatures=new Set<string>();
   for(const blueprint of world.blueprints) {assertBlueprint(blueprint,world.tick);const signature=blueprintSignature(blueprint.components);if(ids.has(blueprint.id)||signatures.has(signature))fail();ids.add(blueprint.id);signatures.add(signature);}

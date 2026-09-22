@@ -1,12 +1,13 @@
 import type { Tile } from '../shared/types.js';
 import type { World } from '../world/index.js';
-import { DEFAULT_PARAMS, parseParams, type WorldParams } from '../world/params.js';
+import { DEFAULT_PARAMS, LEGACY_WORLD_LIMITS, PARAMETER_LIMITS_RULES_VERSION, WORLD_LIMIT_KEYS,
+  assertWorldLimits, parseParams, type WorldLimits, type WorldParams } from '../world/params.js';
 import { exactJsonNumber, stringifyExact } from '../shared/exact-json.js';
 
 // Lossless JSON tuples avoid repeating twenty property names for every active tile
 // on every durable step. Old object snapshots remain readable. No float quantization.
 export const SNAPSHOT_TILE_ENCODING = 'tiles-tuple-v1';
-export const LEGACY_SNAPSHOT_TILE_LIMIT = 65536;
+export const LEGACY_SNAPSHOT_TILE_LIMIT = LEGACY_WORLD_LIMITS.teselasActivas;
 /** R8: los `WorldParams` viven en un `WeakMap` por instancia (params.ts, ruling R3), así
  * que `load()` reconstruía el mundo desde JSON SIN ellos y volvía silenciosamente a
  * `DEFAULT_PARAMS`. Viajan en la instantánea como campo versionado y aparte del `World`:
@@ -19,6 +20,34 @@ const FIELDS = ['x','y','terrain','moisture','vegetation','food','biome','elevat
 export class SnapshotPhysicalError extends Error {}
 /** Readable bytes with an explicitly recognized codec/parameter violation. */
 export class SnapshotSemanticError extends Error {}
+
+/** Admission is checked before tuples/pages are expanded. The profile is transport
+ * metadata; effective laws remain the complete params covered by the world digest. */
+export function readSnapshotLimits(record: Record<string, unknown>, validateParams = true): Readonly<WorldLimits> {
+  const params = validateParams ? readSnapshotParams(record) : undefined;
+  if (!Object.hasOwn(record, 'limitsProfile')) return LEGACY_WORLD_LIMITS;
+  const profile = record.limitsProfile;
+  if (!profile || typeof profile !== 'object' || Array.isArray(profile)
+    || Object.keys(profile).length !== WORLD_LIMIT_KEYS.length + 1
+    || (profile as { version?: unknown }).version !== 1
+    || !Number.isSafeInteger(record.version) || (record.version as number) < PARAMETER_LIMITS_RULES_VERSION)
+    throw new SnapshotSemanticError('Invalid snapshot limits profile. Explicit recovery required.');
+  const limits = { ...profile } as Record<string, unknown>; delete limits.version;
+  try { assertWorldLimits(limits); }
+  catch (error) { throw new SnapshotSemanticError('Invalid snapshot limits profile. Explicit recovery required.', { cause: error }); }
+  if (params && WORLD_LIMIT_KEYS.some(key => limits[key] !== params.limites[key]))
+    throw new SnapshotSemanticError('Snapshot limits disagree with parameters. Explicit recovery required.');
+  return limits;
+}
+
+export function assertSnapshotCounts(record: Record<string, unknown>, limits: Readonly<WorldLimits>, tileCount?: number): void {
+  if (tileCount !== undefined && tileCount > (record.version === 1 ? 1120 : limits.teselasActivas))
+    throw new SnapshotSemanticError('Invalid snapshot tile encoding. Explicit recovery required.');
+  if (record.chunks && typeof record.chunks === 'object' && Object.keys(record.chunks).length > limits.chunks
+    || Array.isArray(record.communities) && record.communities.length > limits.comunidades
+    || Array.isArray(record.animals) && record.animals.length > limits.fauna)
+    throw new SnapshotSemanticError('Invalid snapshot collection limit. Explicit recovery required.');
+}
 export function encodeSnapshotTileRows(tiles: readonly Tile[]): unknown[][] {
   // JSON null is reserved for absent optional fields. Never erase invalid present
   // values (JSON itself would turn NaN/Infinity into null) during compaction.
@@ -36,11 +65,16 @@ export function encodeSnapshotTileRows(tiles: readonly Tile[]): unknown[][] {
 }
 export function snapshotRecord(world: World, params: WorldParams, tiles: unknown): Record<string, unknown> {
   if (Object.hasOwn(world, 'snapshotEncoding')) throw new Error('Reserved snapshot encoding field. Snapshot was not written.');
+  if (Object.hasOwn(world, 'limitsProfile')) throw new Error('Reserved snapshot limits profile. Snapshot was not written.');
+  assertWorldLimits(params.limites);
+  const limits = world.version < PARAMETER_LIMITS_RULES_VERSION ? LEGACY_WORLD_LIMITS : params.limites;
+  assertSnapshotCounts(world as unknown as Record<string, unknown>, limits, world.tiles.length);
   const body = stringifyExact(params);
   const encoded: Record<string, unknown> = { ...world, retiredChunks: [], retiredLegacy: [], tiles, tileEncoding: SNAPSHOT_TILE_ENCODING };
-  // Los defaults no se escriben: con ellos la instantánea es bit a bit la de siempre.
+  // Los params por defecto no se repiten; el perfil de límites sí es explícito.
   delete encoded.params; delete encoded.paramsEncoding;
   if (body !== DEFAULT_PARAMS_BODY) { encoded.paramsEncoding = PARAMS_ENCODING; encoded.params = params; }
+  if (world.version >= PARAMETER_LIMITS_RULES_VERSION) encoded.limitsProfile = { version: 1, ...limits };
   return encoded;
 }
 export function encodeSnapshot(world: World, params: WorldParams = DEFAULT_PARAMS): string {
@@ -102,10 +136,14 @@ export function decodeSnapshotValue(value: unknown): unknown {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
   const record = value as Record<string, unknown>;
   if ('snapshotEncoding' in record) throw new SnapshotSemanticError('Snapshot parts require a durable reader. Explicit recovery required.');
-  if (!('tileEncoding' in record)) return value;
-  if (record.tileEncoding !== SNAPSHOT_TILE_ENCODING || !Array.isArray(record.tiles) || record.tiles.length > LEGACY_SNAPSHOT_TILE_LIMIT) throw new SnapshotSemanticError('Invalid snapshot tile encoding. Explicit recovery required.');
-  record.tiles = decodeSnapshotTileRows(record.tiles);
-  delete record.tileEncoding;
+  const limits = readSnapshotLimits(record);
+  assertSnapshotCounts(record, limits, Array.isArray(record.tiles) ? record.tiles.length : undefined);
+  if ('tileEncoding' in record) {
+    if (record.tileEncoding !== SNAPSHOT_TILE_ENCODING || !Array.isArray(record.tiles)) throw new SnapshotSemanticError('Invalid snapshot tile encoding. Explicit recovery required.');
+    record.tiles = decodeSnapshotTileRows(record.tiles);
+    delete record.tileEncoding;
+  }
+  delete record.limitsProfile;
   return value;
 }
 export function decodeSnapshot(body: string): unknown { return decodeSnapshotValue(parseSnapshotJSON(body)); }

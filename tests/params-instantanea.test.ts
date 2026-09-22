@@ -43,12 +43,12 @@ test('los parámetros del mundo viajan en la instantánea y mandan al recargar',
   } finally { reopened.close(); }
 });
 
-test('con los defaults la instantánea es la misma de antes de la ley, y sin campo se lee DEFAULT_PARAMS', t => {
+test('los params por defecto no se repiten en la instantánea y sin campo se lee DEFAULT_PARAMS', t => {
   const { store, path } = laboratory(t);
   const world = createWorld(51926);
   store.save(world);
   const saved = row(store);
-  assert.equal('params' in JSON.parse(saved.body), false, 'los defaults no ocupan sitio: control bit a bit del mundo anterior');
+  assert.equal('params' in JSON.parse(saved.body), false, 'los params por defecto conservan su representación implícita');
   assert.equal(encodeSnapshot(world, DEFAULT_PARAMS), encodeSnapshot(world));
 
   // Migración: una instantánea escrita antes de esta ley no declara params.

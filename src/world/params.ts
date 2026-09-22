@@ -34,7 +34,7 @@ export interface WorldParams {
   /** T102: configuración reservada; todavía no selecciona otro backend. */
   motor: { clonPorPaso: boolean; hilos: number; soaTerreno: boolean; particionarPersonas: boolean; gpu: number[]; orden: 'natural' | 'inverso' | 'adversarial' };
   red: { deltas: boolean };
-  /** T100 aún pendiente: declarar estos valores no cambia las validaciones actuales. */
+  /** T100: admisión de colecciones; no son una política silenciosa de natalidad. */
   limites: { teselasActivas: number; chunks: number; comunidades: number; fauna: number };
 }
 
@@ -66,6 +66,24 @@ const RAW_DEFAULTS: WorldParams = {
 
 /** Objeto congelado en profundidad: nunca se muta; `parseParams` clona para cada override. */
 export const DEFAULT_PARAMS: WorldParams = deepFreeze(RAW_DEFAULTS);
+export type WorldLimits = WorldParams['limites'];
+/** Historical admission bounds, independent of the machine reading an old world. */
+export const LEGACY_WORLD_LIMITS: Readonly<WorldLimits> = DEFAULT_PARAMS.limites;
+export const PARAMETER_LIMITS_RULES_VERSION = 9;
+export const WORLD_LIMIT_KEYS = ['teselasActivas', 'chunks', 'comunidades', 'fauna'] as const;
+
+export function assertWorldLimits(value: unknown): asserts value is WorldLimits {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || Object.keys(value).length !== WORLD_LIMIT_KEYS.length
+    || WORLD_LIMIT_KEYS.some(key => !Object.hasOwn(value, key)
+      || !Number.isSafeInteger((value as WorldLimits)[key]) || (value as WorldLimits)[key] < 1))
+    throw new Error('Límites de admisión inválidos: se requieren cuatro enteros seguros positivos.');
+}
+
+/** Old rules must be validated before migration can activate stored T102 options. */
+export function limitsOf(world: object, version?: number): Readonly<WorldLimits> {
+  return version !== undefined && version < PARAMETER_LIMITS_RULES_VERSION ? LEGACY_WORLD_LIMITS : paramsOf(world).limites;
+}
 
 /** Rango [mínimo, máximo] permitido por clave punteada. Usado por `parseParams`. */
 export const PARAM_RANGES: Record<string, [number, number]> = {
@@ -282,5 +300,6 @@ export function paramsOf(world: object): WorldParams {
  * aquí y no sólo en `parseParams`. */
 export function setParams(world: object, params: WorldParams): void {
   assertLongevityLaw(params.cuerpo);
+  assertWorldLimits(params.limites);
   worldParams.set(world, params);
 }

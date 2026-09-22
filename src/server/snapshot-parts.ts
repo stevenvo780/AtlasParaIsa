@@ -3,9 +3,9 @@ import type { DatabaseSync } from 'node:sqlite';
 import type { Tile } from '../shared/types.js';
 import { stringifyExact } from '../shared/exact-json.js';
 import type { World } from '../world/index.js';
-import type { WorldParams } from '../world/params.js';
+import type { WorldLimits, WorldParams } from '../world/params.js';
 import { decodeSnapshotValue, decodeSnapshotTileRows, encodeSnapshot, encodeSnapshotTileRows,
-  LEGACY_SNAPSHOT_TILE_LIMIT, parseSnapshotJSON, readSnapshotParams, snapshotRecord,
+  assertSnapshotCounts, parseSnapshotJSON, readSnapshotLimits, snapshotRecord,
   SNAPSHOT_TILE_ENCODING, SnapshotPhysicalError, SnapshotSemanticError } from './snapshot.js';
 
 // Transport bounds, independent of world laws and available host hardware.
@@ -130,10 +130,14 @@ export class SnapshotParts {
     const world = value.world as Record<string, unknown>, tiles = value.tiles as Record<string, unknown>;
     if (!Object.hasOwn(world, 'tiles') || world.tiles !== null || Object.hasOwn(world, 'snapshotEncoding')
       || world.tileEncoding !== SNAPSHOT_TILE_ENCODING) failure('metadata tile encoding');
-    if (validateParams) readSnapshotParams(world);
+    let limits: Readonly<WorldLimits>;
+    try { limits = readSnapshotLimits(world, validateParams); }
+    catch (error) { if (error instanceof SnapshotSemanticError) failure(error.message); throw error; }
     if (!keys(tiles, ['count', 'pages']) || !Number.isSafeInteger(tiles.count) || (tiles.count as number) < 1
-      || (tiles.count as number) > LEGACY_SNAPSHOT_TILE_LIMIT || !Array.isArray(tiles.pages)
+      || !Array.isArray(tiles.pages)
       || tiles.pages.length !== Math.ceil((tiles.count as number) / SNAPSHOT_PAGE_TILES)) failure('tile count');
+    try { assertSnapshotCounts(world, limits, tiles.count as number); }
+    catch (error) { if (error instanceof SnapshotSemanticError) failure(error.message); throw error; }
     let count = 0;
     for (const [index, page] of (tiles.pages as unknown[]).entries()) {
       if (!object(page) || !keys(page, ['index', 'digest', 'count', 'bytes']) || page.index !== index
@@ -174,6 +178,7 @@ export class SnapshotParts {
     }
     const world = { ...manifest.world, tiles };
     delete (world as Record<string, unknown>).tileEncoding;
+    delete (world as Record<string, unknown>).limitsProfile;
     return { value: world, bytes };
   }
 

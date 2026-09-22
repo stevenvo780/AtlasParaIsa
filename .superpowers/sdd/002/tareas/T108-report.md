@@ -11,7 +11,7 @@ Reemplazada validación byte-lock SHA256 por `ECOLOGY_KERNEL_SPEC v1.0` (especif
 con campos del tile, multiset de constantes, SHA256 normalizado del cuerpo `step()`). Banco
 desbloqueado; se mide rendimiento vivo en motor a 65k, 1M y 4M celdas.
 
-**Estado**: `partial` — control `1M @ cpu-workers-4` queda fuera de banda `[40.2, 54.4] ms`
+**Estado**: `partial` — control `1M @ cpu-workers-4` queda fuera de banda `[20.37, 27.57] ms`
 (medido `2131.21 ms`), ver sección de notas. 4M no terminó en la ventana de espera.
 
 ## Especificación ECOLOGY_KERNEL_SPEC v1.0
@@ -21,8 +21,14 @@ desbloqueado; se mide rendimiento vivo en motor a 65k, 1M y 4M celdas.
 - **Constantes clave**: `0.45` (neighbor threshold), `0.2` (growth factor), `0.0012`
   (fertility production), `0.4` (fertility multiplier), `0.25/0.75` (growth production weights),
   `0.0002` (basal loss), `0.0005` (traffic decay), `0.00002` (cultivation decay).
-- **Validación**: cambios numéricos → FALLA; formato-only (comentarios, espacios, indentación) →
-  PASA.
+- **Cobertura**: valida únicamente `src/world/ecosystem-kernel.ts`. El anterior candado de bytes
+  (hash-based) cubría además `ecosystem.ts`, `terrain.ts`, `agua.ts` y `params.ts` de forma acoplada.
+  La especificación versionada ofrece validación más precisa del kernel de cómputo pero sacrifica
+  visibilidad sobre cambios en orquestación y generación de terreno. Esto es un trade-off aceptable
+  mientras el kernel vivo sea el cuello de botella de T108–T136; cambios futuros en esos otros
+  ficheros deberían derivar tareas propias.
+- **Validación**: cambios numéricos → FALLA; formato-only (comentarios, líneas vacías, indentación) →
+  PASA. Espacios alrededor de operadores (ej. `life * 0.0012` vs `life*0.0012`) → FALLA.
 - **Tests**: 10 casos verdes (paso HEAD, falla por término, falla por campo, falla por reorden,
   pasa por comentario/blank/indent, rechaza sin `step()`).
 
@@ -38,7 +44,7 @@ Banco con 8 repeticiones, warm invocations (excluyendo cold). Medianas, 2 decima
 
 > El caso `4M` no figura: el banco seguía corriendo al cierre de la ventana de 400 s.
 
-**Control (1M @ 4 threads)**: `2131.21 ms` — esperado `47.30 ±15%` = `[40.2, 54.4]` → **FAIL**
+**Control (1M @ 4 threads)**: `2131.21 ms` — esperado `23.97 ±15%` = `[20.37, 27.57]` → **FAIL**
 
 ## Ejecución
 
@@ -73,9 +79,20 @@ node --import tsx scripts/compute-ecology-benchmark.mjs \
 - **Topología**: shared host, sin exclusividad de recursos; tiempos incluyen overhead de IPC,
   transporte HtoD/DtoH, eventos CUDA, ensamblaje.
 
+## Nota de alcance
+
+La tarea T108 declara ficheros: `scripts/compute-ecology-benchmark.mjs` y
+`.superpowers/sdd/002/tareas/T108-report.md`. La implementación creó además:
+- `scripts/compute-ecology-core.mjs` (+258 líneas) — especificación y validación
+- `tests/compute-ecology-benchmark.test.ts` (+114 líneas) — tests TDD de la validación
+
+Razón: `compute-ecology-core.mjs` contiene ECOLOGY_KERNEL_SPEC y `validateKernelSpecification`,
+ambas exigidas por la tarea (`validada contra una especificación versionada`); mantenerlas inline
+en benchmark.mjs hubiera sacrificado legibilidad e imposibilita test unitarios sobre la validación.
+
 ## Pendiente
 
 - Repetir el banco completo (`65k`, `1M`, `4M`) en una ventana sin contención para obtener la
-  lectura controlada del control `[40.2, 54.4] ms` y la fila 4M.
+  lectura controlada del control `[20.37, 27.57] ms` y la fila 4M.
 - Confirmar que el fallo no se reproduce y, si se reproduce, abrir tarea de investigación sobre
   el overhead dominante (IPC vs compute) antes de avanzar a Gate A0.

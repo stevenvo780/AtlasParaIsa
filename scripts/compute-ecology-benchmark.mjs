@@ -52,6 +52,11 @@ const gpus=[];
 try{
   const validationKernel=new EcosystemKernel();
   result.liveContract=validateLiveKernel((tiles,tick,rain,light,options)=>validationKernel.step(tiles,tick,rain?'rain':'clear',light===1?'day':light===0?'night':'dawn',options));
+  // T108: Validate kernel specification BEFORE benchmarking to ensure all benchmark results
+  // are generated with a spec-valid kernel, not after a failed benchmark timeout.
+  const kernelSource=await readFile('src/world/ecosystem-kernel.ts','utf8');
+  result.kernelSpecCheck=validateKernelSpecification(kernelSource);
+  if(!result.kernelSpecCheck.valid)throw new Error(`Kernel specification mismatch: ${result.kernelSpecCheck.reason}`);
   if(nvrtc){
     result.nvrtc={path:nvrtc,sha256:sha(await readFile(nvrtc))};
     for(const devices of ['0','1','0,1']){
@@ -103,15 +108,6 @@ try{
   result.completedAt=new Date().toISOString();result.hardwareAfter=await hardware();
   result.benchmarkHashesAfter=Object.fromEntries(await Promise.all(benchmarkFiles.map(async file=>[file,sha(await readFile(file))])));
   if(JSON.stringify(benchmarkHashes)!==JSON.stringify(result.benchmarkHashesAfter))throw new Error('Benchmark changed during run');
-  // T108: el candado de bytes SHA256 (hash 95ff0d2 de 2024-09-06) sobre
-  // src/world/ecosystem-kernel.ts se sustituye por ECOLOGY_KERNEL_SPEC, que
-  // valida campos del tile y coeficientes del cuerpo de step() contra una
-  // especificación versionada. Comentarios, líneas vacías y reformateos
-  // pasan; cualquier cambio de reglas (número, coeficiente, campo, reorden)
-  // hace fallar el banco en seco.
-  const kernelSource=await readFile('src/world/ecosystem-kernel.ts','utf8');
-  result.kernelSpecCheck=validateKernelSpecification(kernelSource);
-  if(!result.kernelSpecCheck.valid)throw new Error(`Kernel specification mismatch: ${result.kernelSpecCheck.reason}`);
   result.ok=true;
 }catch(error){result.ok=false;result.error=String(error);throw error;}
 finally{

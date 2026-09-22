@@ -27,6 +27,47 @@ export function bond(world: World, a: Person, b: Person, amount: number): void {
     a.culture[key] = clamp(a.culture[key] + delta); b.culture[key] = clamp(b.culture[key] - delta);
   }
 }
+/**
+ * Convivencia (hipótesis cohorte, 2026-09-22; `social.vinculoConvivencia`, default 0 = hoy). Diagnóstico
+ * (`scripts/lab/diagnostico-natalidad.ts`, semilla 20260919): hay fértiles con comunidad y lugar pero sin
+ * vínculo mutuo ≥ 0,3 con otro fértil, porque el vínculo sólo sube al cooperar, compartir o acompañar.
+ * Ley local: dos personas a ≤ `RADIO_CONVIVENCIA` celdas ganan, en cada paso que comparten, vínculo mutuo
+ * `vinculoConvivencia · (sociabilidad media)`. No cuesta ni produce recursos: el único precio es el tiempo
+ * que pasan cerca, que no pasan en otra cosa. Está acotada por `TECHO_CONVIVENCIA`: la cercanía hace
+ * conocidos, no íntimos; por encima de 0,5 sólo cooperar o compartir siguen subiendo el vínculo. No usa
+ * `bond()` a propósito: `bond()` además acerca la cultura un 1,5 % por llamada, y llamado en cada paso de
+ * cercanía homogeneizaría la cultura en unos cientos de pasos, que no es lo que esta ley afirma.
+ * Un vínculo ausente vale 0,2, como en `bond()`. Coste: índice espacial del paso por casillas de lado
+ * `RADIO_CONVIVENCIA`, O(P) más los pares realmente cercanos, sin recorrer todos los pares.
+ */
+export const RADIO_CONVIVENCIA = 2;
+export const TECHO_CONVIVENCIA = 0.5;
+function acercar(a: Person, b: Person, ganancia: number): void {
+  const actual = a.bonds[b.id] ?? 0.2;
+  if (actual < TECHO_CONVIVENCIA) a.bonds[b.id] = Math.min(TECHO_CONVIVENCIA, actual + ganancia);
+}
+export function convivir(world: World): void {
+  const tasa = paramsOf(world).social.vinculoConvivencia;
+  if (!(tasa > 0)) return;
+  const people = world.people, celda = (n: number) => Math.floor(n / RADIO_CONVIVENCIA);
+  const casillas = new Map<string, number[]>();
+  for (let i = 0; i < people.length; i++) {
+    const key = `${celda(people[i]!.x)},${celda(people[i]!.y)}`;
+    const lista = casillas.get(key);
+    if (lista) lista.push(i); else casillas.set(key, [i]);
+  }
+  for (let i = 0; i < people.length; i++) {
+    const a = people[i]!, cx = celda(a.x), cy = celda(a.y);
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      for (const j of casillas.get(`${cx + dx},${cy + dy}`) ?? []) {
+        const b = people[j]!;
+        if (j <= i || distance(a, b) > RADIO_CONVIVENCIA) continue;
+        const ganancia = tasa * (a.sociability + b.sociability) / 2;
+        acercar(a, b, ganancia); acercar(b, a, ganancia);
+      }
+    }
+  }
+}
 export interface Opportunity {
   person: Person; kind: 'supply' | 'assist' | 'teach' | 'trade' | 'tools'; score: number;
   recipeId?: string; supplyMaterial?: 'wood' | 'stone';

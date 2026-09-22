@@ -371,3 +371,55 @@ test('barrido: si resumen.ts no logra escribir resumen.json/md, el código de sa
     assert.match(log, /no se gener[oó]/i);
   } finally { rmSync(salida, { recursive: true, force: true }); rmSync(stubDir, { recursive: true, force: true }); }
 });
+
+// T118-bis: --gobernador se reenvía a CADA réplica; sin la bandera, no se pasa nada (compatible
+// con réplicas viejas que no la conocen).
+const STUB_REPLICA_REGISTRA_GOBERNADOR =
+  "import { mkdirSync, writeFileSync } from 'node:fs';\n" +
+  "const args = process.argv.slice(2);\n" +
+  "const at = (flag) => { const i = args.indexOf(flag); return i === -1 ? undefined : args[i + 1]; };\n" +
+  "const salida = at('--salida'); if (!salida) throw new Error('stub: falta --salida');\n" +
+  "mkdirSync(salida, { recursive: true });\n" +
+  "writeFileSync(salida + '/replica.json', JSON.stringify({ seed: Number(at('--seed')), dias: Number(at('--dias')), params: at('--params') ?? '', gobernadorRecibido: at('--gobernador') ?? null }) + '\\n');\n";
+
+test('barrido: --gobernador servidor se reenvía a la réplica', () => {
+  const salida = mkdtempSync(join(tmpdir(), 'carta-barrido-'));
+  const stubDir = newStubDir();
+  const replicaStub = join(stubDir, 'replica.ts');
+  writeFileSync(replicaStub, STUB_REPLICA_REGISTRA_GOBERNADOR);
+  const resumenStub = join(stubDir, 'resumen.ts');
+  writeFileSync(resumenStub, STUB_RESUMEN_OK);
+  try {
+    const outcome = runBarrido(
+      ['--replicas', '1', '--dias', '1', '--concurrencia', '1', '--timeout', '20', '--seed-base', '710', '--gobernador', 'servidor', '--salida', salida],
+      { CARTA_REPLICA_SCRIPT: replicaStub, CARTA_RESUMEN_SCRIPT: resumenStub },
+    );
+    assert.equal(outcome.status, 0, `barrido.ts falló: ${outcome.stderr}`);
+    const replicaJson = JSON.parse(readFileSync(join(salida, 'base', 'seed-710', 'replica.json'), 'utf8')) as Record<string, unknown>;
+    assert.equal(replicaJson.gobernadorRecibido, 'servidor');
+  } finally { rmSync(salida, { recursive: true, force: true }); rmSync(stubDir, { recursive: true, force: true }); }
+});
+
+test('barrido: sin --gobernador no se pasa nada a la réplica (compatibilidad)', () => {
+  const salida = mkdtempSync(join(tmpdir(), 'carta-barrido-'));
+  const stubDir = newStubDir();
+  const replicaStub = join(stubDir, 'replica.ts');
+  writeFileSync(replicaStub, STUB_REPLICA_REGISTRA_GOBERNADOR);
+  const resumenStub = join(stubDir, 'resumen.ts');
+  writeFileSync(resumenStub, STUB_RESUMEN_OK);
+  try {
+    const outcome = runBarrido(
+      ['--replicas', '1', '--dias', '1', '--concurrencia', '1', '--timeout', '20', '--seed-base', '711', '--salida', salida],
+      { CARTA_REPLICA_SCRIPT: replicaStub, CARTA_RESUMEN_SCRIPT: resumenStub },
+    );
+    assert.equal(outcome.status, 0, `barrido.ts falló: ${outcome.stderr}`);
+    const replicaJson = JSON.parse(readFileSync(join(salida, 'base', 'seed-711', 'replica.json'), 'utf8')) as Record<string, unknown>;
+    assert.equal(replicaJson.gobernadorRecibido, null);
+  } finally { rmSync(salida, { recursive: true, force: true }); rmSync(stubDir, { recursive: true, force: true }); }
+});
+
+test('barrido: --gobernador rechaza valores fuera de no|servidor', () => {
+  const outcome = runBarrido(['--replicas', '1', '--dias', '1', '--gobernador', 'invalido']);
+  assert.notEqual(outcome.status, 0);
+  assert.match(outcome.stderr, /--gobernador/);
+});

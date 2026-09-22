@@ -29,11 +29,15 @@ import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../../src/server/store.js';
-import { assertWorld, createWorld, projectWorld, stepWorld, TICKS_PER_DAY } from '../../src/world/index.js';
+import { assertWorld, cloneWorld, createWorld, projectWorld, stepWorld, TICKS_PER_DAY, type World } from '../../src/world/index.js';
 import { catalogueEnabled, technologyCatalogueTotals } from '../../src/world/technology-catalogue.js';
 import { worldStatistics } from '../../src/world/statistics.js';
+import { indiceDiversidad } from '../../src/world/diversidad.js';
 import { parseParams, type WorldParams } from '../../src/world/params.js';
+import { decideReproduction, RollingStepPerformance } from '../../src/server/governor.js';
 import { durableActivityMetrics } from './metrics.js';
+
+type ModoGobernador = 'no' | 'servidor';
 
 const CAUSES = ['starvation', 'dehydration', 'exposure', 'senescence'] as const;
 type Cause = typeof CAUSES[number];
@@ -101,11 +105,62 @@ function dailyMetrics(world: ReturnType<typeof createWorld>, store: Store) {
   };
 }
 
+/**
+ * T118-bis ("laboratorio consciente del servidor"): `dailyMetrics` (arriba) queda intacta a
+ * propósito — es el contrato que el test (a) protege bit a bit para `--gobernador no` (default).
+ * Estas métricas SOLO existen con `--gobernador servidor`, y se calculan aparte para no arriesgar
+ * ni una clave nueva en el régimen de hoy.
+ *
+ * `reproduccionActivaTicks`/`ticksDia` acotan la fracción al día en curso (no acumulado desde el
+ * inicio, a diferencia del resto de `dailyMetrics`): es la señal que delata si el gobernador pasó
+ * el día apagando/reencendiendo nacimientos, y acumularla desde el día 1 la diluiría.
+ */
+function metricasGobernador(world: World, reproduccionActivaTicks: number, ticksDia: number, p95GobernadorFinal: number, cloneMsMuestras: readonly number[], saveMsMuestras: readonly number[]) {
+  const vivos = world.people;
+  type Rasgos = { resilience: number; learningRate: number; curiosity: number; sociability: number; care: number };
+  const sumas = new Map<number, { cuenta: number; suma: Rasgos }>();
+  for (const persona of vivos) {
+    const generacion = persona.genome.generation;
+    let entrada = sumas.get(generacion);
+    if (!entrada) { entrada = { cuenta: 0, suma: { resilience: 0, learningRate: 0, curiosity: 0, sociability: 0, care: 0 } }; sumas.set(generacion, entrada); }
+    entrada.cuenta++;
+    entrada.suma.resilience += persona.traits.resilience; entrada.suma.learningRate += persona.genome.learningRate;
+    entrada.suma.curiosity += persona.traits.curiosity; entrada.suma.sociability += persona.traits.sociability; entrada.suma.care += persona.traits.care;
+  }
+  const rasgosPorGeneracion: Record<string, Rasgos> = {};
+  for (const [generacion, { cuenta, suma }] of [...sumas.entries()].sort((a, b) => a[0] - b[0]))
+    rasgosPorGeneracion[String(generacion)] = { resilience: suma.resilience / cuenta, learningRate: suma.learningRate / cuenta, curiosity: suma.curiosity / cuenta, sociability: suma.sociability / cuenta, care: suma.care / cuenta };
+  // Varianza media de los 14 alelos (GENE_COUNT*2) entre los vivos; 0 con 0 o 1 habitante (sin
+  // pareja no hay dispersión que medir, no es indefinido).
+  let varianzaGenetica = 0;
+  if (vivos.length > 0) {
+    const numAlelos = vivos[0]!.genome.alleles.length;
+    let sumaVarianzas = 0;
+    for (let indice = 0; indice < numAlelos; indice++) {
+      const valores = vivos.map(persona => persona.genome.alleles[indice]!);
+      const media = valores.reduce((suma, valor) => suma + valor, 0) / valores.length;
+      sumaVarianzas += valores.reduce((suma, valor) => suma + (valor - media) ** 2, 0) / valores.length;
+    }
+    varianzaGenetica = sumaVarianzas / numAlelos;
+  }
+  return {
+    reproduccionActivaFraccion: ticksDia > 0 ? reproduccionActivaTicks / ticksDia : 0,
+    p95GobernadorFinal, cloneMsP50: distribution(cloneMsMuestras).p50, saveMsP50: distribution(saveMsMuestras).p50,
+    indiceDiversidad: indiceDiversidad(world),
+    cooperacionPorTipo: { cooperation: world.totals.cooperation ?? 0, teaching: world.totals.teaching ?? 0, trade: world.totals.trade ?? 0, constructionHelp: world.totals.constructionHelp ?? 0, conflicts: world.totals.conflicts ?? 0 },
+    comunidades: world.communities.length,
+    rasgosPorGeneracion, varianzaGenetica,
+  };
+}
+
 async function main(): Promise<void> {
   const seed = Number(arg('--seed') ?? 51926), dias = Number(arg('--dias') ?? 1), salida = arg('--salida');
   if (!Number.isInteger(seed) || seed < 0) throw new Error('Uso: --seed N --dias D [--params "a.b=1,c.d=2"] --salida <dir> (seed entero ≥ 0).');
   if (!Number.isInteger(dias) || dias < 1) throw new Error('Uso: --seed N --dias D [--params "a.b=1,c.d=2"] --salida <dir> (dias entero ≥ 1).');
   if (!salida) throw new Error('Uso: --seed N --dias D [--params "a.b=1,c.d=2"] --salida <dir> (falta --salida).');
+  const gobernadorArg = arg('--gobernador') ?? 'no';
+  if (gobernadorArg !== 'no' && gobernadorArg !== 'servidor') throw new Error('Uso: --gobernador no|servidor (por defecto "no").');
+  const gobernadorModo: ModoGobernador = gobernadorArg;
   const params: WorldParams = parseParams(arg('--params'));
   mkdirSync(salida, { recursive: true });
 
@@ -113,7 +168,7 @@ async function main(): Promise<void> {
   process.env.CARTA_DATA_DIR = dataDir;
   const store = new Store(join(dataDir, 'world.sqlite'));
   try {
-    const world = createWorld(seed, params);
+    let world = createWorld(seed, params);
     const poblacionInicial = world.people.length;
     const vecinosMortalesIniciales = world.people.filter(person => person.role === 'neighbor').length;
     const fundadoresMortalesIniciales = world.people.filter(person => person.role === 'neighbor' && person.genome.generation === 0).length;
@@ -121,13 +176,47 @@ async function main(): Promise<void> {
     // (enableTechnologyCatalogue) y liga el WorldContext (loadChunk/catalogueReader) al mundo.
     store.save(world);
 
+    // Solo con --gobernador servidor: p95 de la ventana de 120 pasos (mismo mecanismo que
+    // src/server/app.ts) y acumuladores del DÍA en curso, reiniciados en cada dia-NNN.json.
+    const gobernadorPerf = new RollingStepPerformance();
+    let reproduccionActivaTicksDia = 0, ticksDia = 0, p95GobernadorActual = 0;
+    const cloneMsDia: number[] = [], saveMsDia: number[] = [];
+
     const totalTicks = dias * TICKS_PER_DAY, stepTimes: number[] = [];
     let maxRss = process.memoryUsage().rss, ultimoDia: ReturnType<typeof dailyMetrics> | null = null;
     for (let tick = 1; tick <= totalTicks; tick++) {
-      const started = performance.now();
-      stepWorld(world);
-      stepTimes.push(performance.now() - started);
-      if (tick % params.persistencia.cadaTicks === 0) store.save(world);
+      if (gobernadorModo === 'servidor') {
+        // Imita src/server/app.ts:stepOnce — clon+paso, guardado por cadencia DENTRO de la
+        // medición, y el gobernador decidiendo sobre el paso ya medido (governReproduction).
+        const stepStarted = performance.now();
+        let cloneMs = 0;
+        if (params.motor.clonPorPaso) {
+          const cloneStarted = performance.now();
+          const draft = cloneWorld(world, store.context);
+          cloneMs = performance.now() - cloneStarted;
+          stepWorld(draft);
+          world = draft;
+        } else {
+          stepWorld(world);
+        }
+        let saveMs = 0;
+        if (tick % params.persistencia.cadaTicks === 0) {
+          const saveStarted = performance.now();
+          store.save(world);
+          saveMs = performance.now() - saveStarted;
+        }
+        const stepMs = performance.now() - stepStarted;
+        stepTimes.push(stepMs);
+        p95GobernadorActual = gobernadorPerf.record(stepMs);
+        world.reproductionEnabled = decideReproduction(p95GobernadorActual, params.gobernador.presupuestoMs, world.reproductionEnabled);
+        ticksDia++; if (world.reproductionEnabled) reproduccionActivaTicksDia++;
+        cloneMsDia.push(cloneMs); saveMsDia.push(saveMs);
+      } else {
+        const started = performance.now();
+        stepWorld(world);
+        stepTimes.push(performance.now() - started);
+        if (tick % params.persistencia.cadaTicks === 0) store.save(world);
+      }
       if (tick % TICKS_PER_DAY === 0) {
         if (tick % params.persistencia.cadaTicks !== 0) store.save(world);
         assertWorld(world);
@@ -135,8 +224,10 @@ async function main(): Promise<void> {
         maxRss = Math.max(maxRss, rss);
         const metrics = dailyMetrics(world, store);
         ultimoDia = metrics;
-        const body = { tick, ...metrics, p50Ms: Math.round(p50 * 100) / 100, p95Ms: Math.round(p95 * 100) / 100, rss };
+        const extra = gobernadorModo === 'servidor' ? metricasGobernador(world, reproduccionActivaTicksDia, ticksDia, p95GobernadorActual, cloneMsDia, saveMsDia) : {};
+        const body = { tick, ...metrics, ...extra, p50Ms: Math.round(p50 * 100) / 100, p95Ms: Math.round(p95 * 100) / 100, rss };
         writeFileSync(join(salida, `dia-${String(dia).padStart(3, '0')}.json`), JSON.stringify(body, null, 2) + '\n');
+        if (gobernadorModo === 'servidor') { reproduccionActivaTicksDia = 0; ticksDia = 0; cloneMsDia.length = 0; saveMsDia.length = 0; }
       }
     }
     store.save(world);
@@ -154,7 +245,10 @@ async function main(): Promise<void> {
       p50Ms: Math.round(p50 * 100) / 100, p95Ms: Math.round(p95 * 100) / 100, rssMaximo: maxRss,
     };
     const replica = {
-      metricasVersion: 2, gobernador: 'no-ejecutado; replica de leyes, no del servidor',
+      metricasVersion: 2,
+      gobernador: gobernadorModo === 'servidor'
+        ? 'servidor; imita stepOnce (clon+paso, guardado por cadencia, decideReproduction sobre p95) cada tick'
+        : 'no-ejecutado; replica de leyes, no del servidor',
       seed, params, sha: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
       digest: worldSourceDigest(), dias, resumen,
     };

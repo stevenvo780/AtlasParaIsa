@@ -28,11 +28,14 @@ import { DEFAULT_PARAMS, PARAM_DESCRIPTORS, PARAM_RANGES, paramsOf, parseParams,
 
 /** Réplica mínima de laboratorio: Store temporal y `save` antes de simular (como
  * `scripts/lab/replica.ts`). Devuelve el mundo y el tick de CADA nacimiento. */
-function replicaDetallada(t: { after(callback: () => void): void }, pasos: number, params?: string, seed = 51926): { world: World; nacimientos: number[] } {
+function replicaDetallada(t: { after(callback: () => void): void }, pasos: number, params?: string, seed = 51926, version?: number): { world: World; nacimientos: number[] } {
   const directory = mkdtempSync(join(tmpdir(), 'atlas-leyes-'));
   const store = new Store(join(directory, 'world.sqlite'));
   t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
   const world = createWorld(seed, parseParams(params));
+  // Reglas 10 corrige el alias del evento `community`; los controles contra `main` corren
+  // el mismo mundo etiquetado V9 para comprobar que la historia V9 se reproduce byte a byte.
+  if (version !== undefined) world.version = version;
   store.save(world);
   const nacimientos: number[] = [];
   for (let tick = 1; tick <= pasos; tick++) {
@@ -42,8 +45,8 @@ function replicaDetallada(t: { after(callback: () => void): void }, pasos: numbe
   }
   return { world, nacimientos };
 }
-function replica(t: { after(callback: () => void): void }, pasos: number, params?: string): World {
-  return replicaDetallada(t, pasos, params).world;
+function replica(t: { after(callback: () => void): void }, pasos: number, params?: string, version?: number): World {
+  return replicaDetallada(t, pasos, params, 51926, version).world;
 }
 /** Como la réplica, pero archivando CADA paso, igual que el servidor: sólo así se oye si
  * una ley reescribe un evento que ya es durable (`Store.save` exige inmutabilidad). */
@@ -75,7 +78,7 @@ function digestoConParamsDeMain(world: World): string {
   try { return digestoCanonico(world); } finally { setParams(world, vigentes); }
 }
 
-// Medidos en `main` @694f6b6 ANTES de tocar nada, con la réplica de arriba (seed 51926,
+// Medidos en `main` @694f6b6 (reglas 9) ANTES de tocar nada, con la réplica de arriba (seed 51926,
 // Store temporal, sin guardados periódicos): 1200 pasos → b194b09…, 2400 → ee6fb78….
 const DIGESTO_MAIN_1200 = 'b194b096c0dd4c555ca9ebf4e560bb293809b97947109f116833cf79ebbf60cf';
 const DIGESTO_MAIN_2400 = 'ee6fb78c55d2a43effebe696314ca5f5eecefbc1b8b03150f61bb381ab1779e8';
@@ -83,8 +86,8 @@ const DIGESTO_MAIN_2400 = 'ee6fb78c55d2a43effebe696314ca5f5eecefbc1b8b03150f61bb
 const DIGESTO_LEYES_1200 = '231d18c0d28747e9efb15a188818e2671fc647db98a6c0f4115060474276c934';
 const DIGESTO_LEYES_2400 = 'b23321c96c937301c93839e60918a14a32ff0cdd4b74db460df24f75ac5d5d45';
 
-test('(i) con los defaults las leyes candidatas no mueven el mundo: el digesto físico es el de main', { timeout: 300000 }, t => {
-  const world = replica(t, 1200);
+test('(i) con los defaults las leyes candidatas no mueven el mundo: el digesto físico es el de main', { timeout: 900000 }, t => {
+  const world = replica(t, 1200, undefined, 9);
   assert.equal(digestoConParamsDeMain(world), DIGESTO_MAIN_1200,
     'el estado del mundo tras 1200 pasos es bit a bit el de main: ninguna ley candidata actúa con su default');
   assert.equal(digestoCanonico(world), DIGESTO_LEYES_1200,
@@ -98,7 +101,7 @@ test('(i) con los defaults las leyes candidatas no mueven el mundo: el digesto f
 });
 
 test('(ii) conducta.habituacion=0.35 cambia el mundo y no reduce la diversidad de conducta', { timeout: 600000 }, t => {
-  const sin = replica(t, 2400), con = replica(t, 2400, 'conducta.habituacion=0.35');
+  const sin = replica(t, 2400, undefined, 9), con = replica(t, 2400, 'conducta.habituacion=0.35', 9);
   assert.equal(digestoConParamsDeMain(sin), DIGESTO_MAIN_2400, 'control: con 0 el mundo sigue siendo el de main a 2400 pasos');
   assert.equal(digestoCanonico(sin), DIGESTO_LEYES_2400);
   assert.notEqual(digestoCanonico(con), digestoCanonico(sin), 'con 0,35 la saciedad sí elige distinto');

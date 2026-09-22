@@ -635,6 +635,19 @@ function choose(world: World, person: Person): void {
     candidates[0]!.reason += ' La lluvia daña su cuerpo; busca protección por terreno cercano sin una solución local viable.';
   }
   for (const candidate of candidates) candidate.score += person.values[valueKey(person, candidate.action)] ?? 0;
+  // Ley candidata `conducta.habituacion` (noche de ciencia 2026-09-22): el refuerzo de
+  // `values` premia al ganador y la elección se traba en una sola acción. La saciedad la
+  // descuenta: cuanto mayor es la fracción vitalicia de una acción en `activity`, menos
+  // vale repetirla, modulada por `curiosity` —un rasgo heredable, así que la selección
+  // puede actuar sobre la ley—. Con el default 0 no se resta nada y el orden es el de
+  // siempre; el desempate del `sort` tampoco cambia.
+  const habituacion = paramsOf(world).conducta.habituacion;
+  if (habituacion > 0) {
+    let acted = 0;
+    for (const done of Object.values(person.activity)) acted += done;
+    const lifetime = Math.max(1, acted);
+    for (const candidate of candidates) candidate.score -= habituacion * (0.5 + person.curiosity) * ((person.activity[candidate.action] ?? 0) / lifetime);
+  }
   if (person.command && person.hunger < 0.85 && person.thirst < 0.85 && person.fatigue < 0.88 && person.energy > 0.15) {
     const command = person.command;
     const directed: Candidate = { action: command.order === 'move' ? 'explore' : command.order, target: { x: command.x, y: command.y }, score: 5, directed: true, reason: `Tarea solicitada: ${command.order === 'move' ? 'ir al destino' : actionLabel(command.order)}. Conserva sus necesidades corporales.` };

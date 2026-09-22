@@ -399,6 +399,33 @@ estado completo, orden, aliases, `undefined` y bits numéricos frente a V7, sin 
 | `persistencia.cadaTicks` | 1 (producción fija 100 vía `deployment-params.ts`, ruling R19; antes 20) | [1, 10000] | Cadencia en ticks para el guardado periódico en disco | T021 |
 | `persistencia.ventanaEventosTicks` | 0 (sin poda; abrir con `CARTA_PARAMS`) | [0, 1000000] | Ventana de retención temporal para la poda de eventos y chunks | T021 |
 | `agua.cuencas` | 0.4 | [0.05, 1] | Umbral de ruido de cuenca bajo el cual una tesela conserva su agua potable de origen | T035 |
+| `conducta.habituacion` | 0 | [0, 2] | Descuento por saciedad en la elección de acción: resta `habituacion · (0,5 + curiosity) · share`, con `share` = fracción vitalicia de esa acción en `activity` | Noche de ciencia 2026-09-22 |
+| `social.disputaNecesidad` | 0.65 | [0.1, 1] | Necesidad (máximo de hambre y sed) que exige `resourceDispute` a los dos implicados | Noche de ciencia 2026-09-22 |
+| `social.disputaEscasez` | 1 | [0.1, 20] | Multiplicador de los tres umbrales de stock de la disputa (0,06 comida · 0,12 agua · 1 fauna) | Noche de ciencia 2026-09-22 |
+| `social.disputaRadio` | 2 | [1, 8] | Distancia máxima, en celdas, entre dos personas que compiten por el mismo destino | Noche de ciencia 2026-09-22 |
+| `social.ensenanzaRareza` | 0 | [0, 5] | Peso de la rareza al elegir qué receta enseñar: clave `gain + ensenanzaRareza · (1 − conocedores/vivos)` | Noche de ciencia 2026-09-22 |
+| `social.confianzaSalida` | 0.35 | [0, 1] | Confianza media con los pares por debajo de la cual se puede dejar una comunidad | Noche de ciencia 2026-09-22 |
+| `social.distanciaAlternativa` | 0.2 | [0, 1] | Distancia cultural máxima que puede tener una alternativa para contar como refugio al salir | Noche de ciencia 2026-09-22 |
+
+#### Leyes candidatas (noche de ciencia, 2026-09-22)
+
+`docs/ANALISIS-DINAMICAS-2026-09-21.md` mide tres cierres del mundo vigente: la cooperación es
+97 % enseñanza y el refuerzo de `values` traba la elección en la acción que ya ganó; los conflictos
+y los turnos están en **0** porque `resourceDispute` exige a la vez necesidad ≥ 0,65 en dos personas,
+una fuente casi agotada y contacto a ≤ 2 celdas; y las comunidades se forman el día 1 y no vuelven a
+cambiar, porque cada cooperación suma +0,12 de confianza y la media satura por encima del 0,35 que
+exigía la salida. Las siete claves de arriba **no deciden nada**: son las constantes que ya estaban
+escritas en `src/world/index.ts` y `src/world/society.ts`, sacadas a la superficie para que el
+laboratorio pueda refutarlas. Con sus defaults el mundo es el de `main` **bit a bit**: seed 51926 con
+Store adjunto da el mismo digesto físico a 1200 y a 2400 pasos (`b194b09…` y `ee6fb78…`). Lo que sí
+cambia es el digesto **completo**, porque `digestoCanonico` incluye los params: declarar configuración
+mueve el hash aunque el estado físico sea idéntico, igual que en T102 (`bd121f4…` y `17336c1…`).
+
+Medido al abrirlas (seed 51926, 2400 pasos, misma réplica): `conducta.habituacion=0,35` sube el índice
+de diversidad total de 0,3506 a 0,3985 —la entropía de oficios pasa de 0,2742 a 0,4452 y la distancia
+media entre repertorios baja de 0,4271 a 0,3517— y la enseñanza sube de 49 a 82 actos;
+`social.disputaNecesidad=0,45, disputaEscasez=3, disputaRadio=3` produce el primer conflicto (1, frente
+a 0 con los defaults) sin ningún turno acordado todavía. Refutación en `tests/leyes-candidatas.test.ts`.
 
 > **Rangos de longevidad (revisión de R3, 2026-09-19).** Los tres rangos marcados «R3» se estrecharon respecto de
 > T001 porque los anteriores declaraban legales valores que el motor no podía correr. La ley de T010 exige

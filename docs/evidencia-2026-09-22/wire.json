@@ -1,0 +1,24 @@
+{
+  "rules": 7,
+  "protocol": 9,
+  "seed": 51926,
+  "tick": 8000,
+  "population": 29,
+  "recipes": 256,
+  "encoding": "UTF-8",
+  "mobileBytes": 197127,
+  "fullBytes": 411338,
+  "withFullDefinitionsBytes": 554666,
+  "savedBytes": 143328,
+  "programFieldsBytes": 50521,
+  "capsKiB": {
+    "mobile": 200,
+    "full": 420,
+    "summaries": 64,
+    "unfiltered": 640
+  },
+  "ratioMax": 0.83,
+  "microSavedBytesPerObject": 51,
+  "focalTests": 5,
+  "leakedProgramNegative": "fails exact projected recipe keys"
+}

@@ -1,5 +1,27 @@
 # Una Carta Para Isa — plan unificado
 
+## Estado actual
+
+Actualización del 22 de septiembre de 2026. La [revisión vigente](docs/REVISION-2026-09-22.md)
+reúne las correcciones de parentesco, enseñanza útil, fabricación por dependencias,
+expresión genética inicial y búsqueda física de agua. El candidato declara reglas 7,
+protocolo 9 y SQLite 4. La suite integrada y la publicación se documentan en
+[EVIDENCIA](docs/EVIDENCIA.md#revisión-y-ejecución-2026-09-22); los estados de servicio
+y cifras de las secciones históricas siguientes pertenecen a sus fechas.
+
+La comparación reservada fija 32 semillas, control y candidato, a 30 días simulados.
+Se ejecuta en copias inmutables con 24 procesos; no emplea el gobernador del servidor
+y sus tiempos concurrentes no acreditan rendimiento de producción. Una réplica sin
+terminar no se cuenta como supervivencia a 30 días. Las primeras comparaciones tienen
+resultados mixtos, incluida pérdida de población; no prueban superioridad general.
+
+Sigue abierto GOAL.md: selección frente a neutralidad, continuidad y diversidad
+multigeneracional, reposición autónoma de insumos, territorio multiescala, etapas A–F
+de la feature 002, teléfono físico y revisión personal de la carta. La medición del
+archivo mejoró el guardado, pero aún excede 50 ms en la carga envejecida ensayada.
+CPU y ambas GPU se midieron con datos equivalentes; el puente GPU no mejora el coste
+completo y permanece fuera del servidor. Ninguna corrección altera la carta de S/I.
+
 ## Estado 2026-09-19 · sprint «mundo sólido»
 
 Una revisión integral de 12 dimensiones (10 revisores Sonnet 5 y 2 Opus) sobre la rama `001-mundo-solido-masivo` en el commit base `aeada2e`, contrastada con un refutador adversarial Opus que leyó y ejecutó el código real para cada hallazgo grave, arrojó 31 veredictos (12 confirmados, 4 plausibles y 15 refutados, recogidos en [REVISION-2026-09-19.md](docs/REVISION-2026-09-19.md)). Antes de modificar reglas se verificó el arranque: `npm run typecheck` y `npm run build` resultaron verdes (cliente en 150 KB JS y 76 KB CSS), mientras que `npm test` se colgaba por invocación de `listen()` de Vite fuera del bloque `try` y ausencia de Chromium; el mundo simulado mantenía 22 habitantes vivos sin errores sobre Canvas 2D como fallback correcto de WebGL2, observándose a t=1251 sobre 1120 celdas que el 100 % contenía comida y vegetación > 0,3, frente a solo un 3 % con agua potable.
@@ -54,7 +76,7 @@ Lo que el hardware permite hoy (medido): un hilo Node sostiene 10 Hz hasta ~35 h
 
 [GOAL.md](GOAL.md) contiene la **meta completa lista para copiar**, sus criterios de aceptación y las condiciones de cierre. Es la única fuente del objetivo del proyecto. Este plan conserva las ideas acumuladas, el alcance, el estado y el orden de trabajo; una capacidad implementada o una prueba aprobada no equivale a completar la meta.
 
-## Estado actual
+## Estado histórico del 7 de septiembre de 2026
 
 **Prioridad de afinación, reiterada por Steven el 7 de septiembre:** corregir supervivencia, utilidad de las construcciones y legibilidad antes de incorporar nuevos sistemas. Se conservó y analizó el mundo V5 cuya población mortal se extinguió; la fuente para grabar incorpora correcciones de decisiones y representación. Su copia acredita **113,35 días con recambio: 29 vecinos mortales de generaciones 21–24**, sin órdenes, y se mantiene intacta. La [matriz V6 cerrada](docs/EVIDENCIA.md#matriz-v6-cerrada-a-veinticinco-días) completó tres semillas de 60000 pasos y terminó con **30, 18 y 1 vecinos mortales**. La tercera no conserva ningún vecino anterior a la senescencia, incluidos inmaduros: no puede producir otra generación sin nuevos entrantes. No son tres casos viables ni evidencia de continuidad indefinida. El candidato experimental `292f17a` contrasta una barrera comunitaria en otra rama; su evaluación larga sigue pendiente y no está publicado. V7 y neuroevolución siguen pendientes.
 

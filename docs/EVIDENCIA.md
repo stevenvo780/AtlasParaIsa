@@ -1,5 +1,20 @@
 # Evidencia vigente
 
+## Revisión y ejecución 2026-09-22
+
+La [revisión actual](REVISION-2026-09-22.md) registra controles de parentesco, agua
+transportada inaccesible, expresión de fundadores, enseñanza útil, instrumentación,
+clon y CPU/GPU. La primera comparación de tres semillas a diez días es mixta: no
+demuestra estabilidad conjunta, transmisión sostenida ni cierre del objetivo. El
+gobernador sigue detectando un coste real excesivo de persistencia. El candidato de
+reglas 7/protocolo 9 pasó **899/899 pruebas Node, cero omisiones, 18/18 E2E**, typecheck
+y smoke compilado. [Gate e identificación de fuentes](evidencia-2026-09-22/gates.json).
+La integración a main y la publicación se realizan después del build/smoke del commit
+exacto. La serie de 32 pares a 30 días sigue abierta: los primeros casos completos
+incluyen extinciones en ambos brazos y no se usan para inferir la tasa del conjunto.
+
+## Estado histórico del 7 de septiembre de 2026
+
 Cierre experimental: **7 de septiembre de 2026, 05:38:43 UTC**; la captura privada corresponde a las **04:52:41 UTC**. El servicio privado continúa en **`03470e3`, reglas/protocolo 6 y SQLite 4**, sin reemplazar su build ni su mundo. Incluye transporte de agua, claros físicos, afinación corporal y constructiva, inspector y estadísticas revisados. La copia acredita recambio durante **113,35 días del modelo en la semilla 51926**, sin órdenes. La matriz posterior de tres semillas a veinticinco días termina con **30, 18 y 1 vecinos mortales**; la tercera no conserva posibles progenitores y carece de recambio. No demuestra viabilidad en las tres ni continuidad indefinida. El mundo V5 anterior y sus resultados adversos se conservan.
 
 Este documento conserva resultados y límites frente al [objetivo rector](../GOAL.md); [REGLAS](REGLAS.md) define mecanismos, [CIENCIA](CIENCIA.md) su interpretación y [CONSTRUCCION](CONSTRUCCION.md#arquitectura-de-autonomía-avances-y-trabajo-pendiente) el estado de arquitectura y trabajo pendiente. Git conserva los cierres anteriores, sin documentos históricos paralelos.

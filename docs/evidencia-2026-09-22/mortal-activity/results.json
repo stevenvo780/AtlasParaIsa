@@ -1,0 +1,844 @@
+{
+  "schema": "mortal-activity-audit-v1",
+  "generatedAt": "2026-09-22T09:55:28Z",
+  "scope": {
+    "description": "One day-6 window in 12 paired reserved seeds; not six daily windows and not a 30-day result",
+    "seeds": [
+      1000,
+      1001,
+      1002,
+      1003,
+      1004,
+      1005,
+      1006,
+      1007,
+      1008,
+      1009,
+      1010,
+      1011
+    ],
+    "replicas": 24,
+    "day": 6,
+    "afterTickExclusive": 12000,
+    "throughTickInclusive": 14400,
+    "engine": "world",
+    "hardwareGovernorExecuted": false
+  },
+  "provenance": {
+    "batch": "artifacts/coherence-20260922/reserved-long/batch-2026-09-22T09-21-07-615Z",
+    "sources": {
+      "baseline": {
+        "originCommit": "9665754c15e9c9c40b025a69ccf990896bc3849c",
+        "rootDirty": false,
+        "sourceHash": "5479b2f228163918db431c85df3eea263157c4cd1b1f1f38c2be470c1de47db4",
+        "frozenInstrumentHash": "5da6ca99421bc9f4009e8491edc953e1434e9ae028485095aff45c6a56306777",
+        "frozenMetricasVersion": 2
+      },
+      "candidate": {
+        "originCommit": "9665754c15e9c9c40b025a69ccf990896bc3849c",
+        "rootDirty": true,
+        "sourceHash": "783b2dc78b0361a51e390c2e015429a984c50f8b1b6ce73bbd941d7e4d30778d",
+        "frozenInstrumentHash": "5da6ca99421bc9f4009e8491edc953e1434e9ae028485095aff45c6a56306777",
+        "frozenMetricasVersion": 2
+      }
+    },
+    "queriesSha256": {
+      "uses.sql": "4f698c84abe6e31b746f419d2f424da40c121ba456a35f78fa12f0b552ecc860",
+      "teaching.sql": "d23fea31a85561eb2cba17a191b3ef066611c33113410ecbada760e974d42362"
+    },
+    "temporaryAuditScript": "/tmp/atlas-mortal-activity-20260922-IL00QG/audit.py",
+    "auditScriptSha256": "b92672d10ddc192208822c676fef0aa0e8682ea0f1c6c55fc720381e826b515d",
+    "rawAggregateResultsSha256": "f4e6e15bc289a0dc4270ed54eeb24f93e0f8c1bf1d52df29273a4e44c56ce1b5",
+    "temporaryCopiesDirectory": "/tmp/atlas-mortal-activity-20260922-IL00QG",
+    "databaseCopiesPublished": false,
+    "frozenSourcesOrOriginalDatabasesModified": false
+  },
+  "extraction": {
+    "method": "One coherent read-only SQLite transaction per source. Copy only evidence tables to private derived SQLite; close writer, chmod 0444, reopen mode=ro for every analytical query. Never copy the database separately from its WAL.",
+    "copiedTables": [
+      "snapshots (slot 0)",
+      "legacy",
+      "technology_definitions (tick<=14400)",
+      "technology_executions (tick<=14400)",
+      "events",
+      "technology_origin",
+      "metadata (chronicle origin/prune only)"
+    ],
+    "excludedTables": [
+      "chunks",
+      "technology_stats",
+      "inputs",
+      "sessions"
+    ],
+    "warning": "Derived analytical projections, not restorable world backups. Snapshot endpoints differ; actor roles/identity remain stable and historical lifespans are checked at execution tick."
+  },
+  "checks": {
+    "projections": 24,
+    "quickCheck": "all ok",
+    "snapshotAndImmutableRowSha256": "all matched",
+    "technologyExecutionPrefix": "contiguous from serial 1 through last execution at tick<=14400",
+    "chronicle": "all serials from 1 through copied snapshot and chained digest matched; startsAfter=0 and no prune",
+    "uniqueIdentityRoster": "snapshot.people UNION ALL legacy has no duplicate IDs",
+    "originalDay6DailyMetricComparisons": 24,
+    "additionalCumulativeCrossChecks": {
+      "count": 24,
+      "interval": "(0,14400]",
+      "purpose": "validation only; summary and runs below report the single day-6 window"
+    },
+    "matchedFrozenMetrics": [
+      "usosUtiles",
+      "beneficioUso (absolute tolerance 1e-7)",
+      "usosDeInventorAjeno",
+      "usosSinAutorResuelto"
+    ],
+    "temporarySqlControls": {
+      "passed": true,
+      "cases": [
+        "actor differs from author",
+        "dead mortal included",
+        "unknown actor is not mortal",
+        "exclusive start and inclusive end",
+        "non-use/failed/zero excluded",
+        "recipe learning distinct from habits",
+        "learning and cooperation not summed as separate teaching episodes"
+      ]
+    }
+  },
+  "interpretation": {
+    "actor": "technology_executions.body.actorId; never substitute inventorId",
+    "author": "technology_definitions.body.inventorId; inventor identity can be deceased",
+    "mortal": "resolved role=neighbor from living snapshot or durable legacy; require bornAt<=use.tick<=diedAt when diedAt exists",
+    "protected": "resolved role S or I",
+    "unknown": "unresolved/missing/invalid-lifespan identities stay unknown and do not count as mortal success",
+    "recipeTeaching": "kind=learning with exact shareTechnology cause; actors[0]=teacher, actors[1]=learner",
+    "cooperationTeaching": "kind=cooperation and cause prefix Estrategia teach; same actor direction",
+    "doubleCountWarning": "Recipe and cooperation teaching rows can describe the same episode. Do not add the two matrices. Episodes are not useful causal outcomes."
+  },
+  "summary": {
+    "baseline": {
+      "mortalUsefulUses": 1842,
+      "mortalBenefit": 244.0598663873371,
+      "protectedUsefulUses": 188,
+      "protectedBenefit": 22.336643272751335,
+      "unknownUsefulUses": 0,
+      "mortalUsesByMortalAuthor": 1801,
+      "mortalUsesByForeignMortalAuthor": 292,
+      "mortalUsesByProtectedAuthor": 41,
+      "unknownAuthorUses": 0,
+      "recipeTeachingEpisodes": {
+        "mortal→mortal": 4077,
+        "mortal→protected": 355,
+        "protected→mortal": 451,
+        "protected→protected": 11
+      },
+      "cooperationTeachingEpisodes": {
+        "mortal→mortal": 5132,
+        "mortal→protected": 402,
+        "protected→mortal": 482,
+        "protected→protected": 20
+      }
+    },
+    "candidate": {
+      "mortalUsefulUses": 2135,
+      "mortalBenefit": 294.41785229276303,
+      "protectedUsefulUses": 179,
+      "protectedBenefit": 32.37050159537441,
+      "unknownUsefulUses": 0,
+      "mortalUsesByMortalAuthor": 2098,
+      "mortalUsesByForeignMortalAuthor": 401,
+      "mortalUsesByProtectedAuthor": 37,
+      "unknownAuthorUses": 0,
+      "recipeTeachingEpisodes": {
+        "mortal→mortal": 513,
+        "mortal→protected": 24,
+        "protected→mortal": 29
+      },
+      "cooperationTeachingEpisodes": {
+        "mortal→mortal": 567,
+        "mortal→protected": 26,
+        "protected→mortal": 34
+      }
+    },
+    "pairedMortalUseChange": {
+      "improved": 10,
+      "worsened": 2,
+      "tied": 0,
+      "aggregatePercent": 15.90662323561347,
+      "worsenedSeeds": [
+        1002,
+        1004
+      ]
+    }
+  },
+  "runs": [
+    {
+      "variant": "baseline",
+      "seed": 1000,
+      "copiedSnapshotTick": 26020,
+      "copiedSnapshotDigest": "4d20da20291c4a5268ed6b368d263710c390398d25b690434ba6d8528abb4def",
+      "mortalUsefulUses": 179,
+      "mortalBenefit": 23.894674024924335,
+      "protectedUsefulUses": 12,
+      "protectedBenefit": 1.7776738128030727,
+      "unknownUsefulUses": 0,
+      "unknownBenefit": 0,
+      "mortalUsesByMortalAuthor": 178,
+      "mortalUsesByForeignMortalAuthor": 42,
+      "mortalUsesByProtectedAuthor": 1,
+      "unknownAuthorUses": 0,
+      "recipeTeachingEpisodes": {
+        "mortal→mortal": 138,
+        "mortal→protected": 22,
+        "protected→mortal": 36
+      },
+      "cooperationTeachingEpisodes": {
+        "mortal→mortal": 176,
+        "mortal→protected": 22,
+        "protected→mortal": 36
+      },
+      "matchesFrozenDay6Totals": true
+    },
+    {
+      "variant": "candidate",
+      "seed": 1000,
+      "copiedSnapshotTick": 28900,
+      "copiedSnapshotDigest": "dca42e4613e32406be054eac55e4f6a2521341cafb0908df85d32429ede4a074",
+      "mortalUsefulUses": 191,
+      "mortalBenefit": 21.863952547176503,
+      "protectedUsefulUses": 9,
+      "protectedBenefit": 1.0280850860069457,
+      "unknownUsefulUses": 0,
+      "unknownBenefit": 0,
+      "mortalUsesByMortalAuthor": 189,
+      "mortalUsesByForeignMortalAuthor": 45,
+      "mortalUsesByProtectedAuthor": 2,
+      "unknownAuthorUses": 0,
+      "recipeTeachingEpisodes": {
+        "mortal→mortal": 56,
+        "mortal→protected": 2,
+        "protected→mortal": 3
+      },
+      "cooperationTeachingEpisodes": {
+        "mortal→mortal": 59,
+        "mortal→protected": 2,
+        "protected→mortal": 4
+      },
+      "matchesFrozenDay6Totals": true
+    },
+    {
+      "variant": "baseline",
+      "seed": 1001,
+      "copiedSnapshotTick": 23660,
+      "copiedSnapshotDigest": "c141cc13c9ea37b971406d7a1ff6de32c8995a11c72b4fbea4ec2d991627ab33",
+      "mortalUsefulUses": 247,
+      "mortalBenefit": 36.77300896980074,
+      "protectedUsefulUses": 18,
+      "protectedBenefit": 1.863890794243324,
+      "unknownUsefulUses": 0,
+      "unknownBenefit": 0,
+      "mortalUsesByMortalAuthor": 237,
+      "mortalUsesByForeignMortalAuthor": 22,
+      "mortalUsesByProtectedAuthor": 10,
+      "unknownAuthorUses": 0,
+      "recipeTeachingEpisodes": {
+        "mortal→mortal": 569,
+        "mortal→protected": 30,
+        "protected→mortal": 82
+      },
+      "cooperationTeachingEpisodes": {
+        "mortal→mortal": 763,
+        "mortal→protected": 40,
+        "protected→mortal": 82
+      },
+      "matchesFrozenDay6Totals": true
+    },
+    {
+      "variant": "candidate",
+      "seed": 1001,
+      "copiedSnapshotTick": 25360,
+      "copiedSnapshotDigest": "2a90b91042e0acd357fe3f9e914032a8cbfc9b822d793b9d4543cccc4453cf9e",
+      "mortalUsefulUses": 334,
+      "mortalBenefit": 50.49440961644212,
+      "protectedUsefulUses": 28,
+      "protectedBenefit": 3.2850276800392315,
+      "unknownUsefulUses": 0,
+      "unknownBenefit": 0,
+      "mortalUsesByMortalAuthor": 314,
+      "mortalUsesByForeignMortalAuthor": 48,
+      "mortalUsesByProtectedAuthor": 20,
+      "unknownAuthorUses": 0,
+      "recipeTeachingEpisodes": {
+        "mortal→mortal": 110,
+        "mortal→protected": 6,
+        "protected→mortal": 12
+      },
+      "cooperationTeachingEpisodes": {
+        "mortal→mortal": 129,
+        "mortal→protected": 6,
+        "protected→mortal": 12
+      },
+      "matchesFrozenDay6Totals": true
+    },
+    {
+      "variant": "baseline",
+      "seed": 1002,
+      "copiedSnapshotTick": 26820,
+      "copiedSnapshotDigest": "821a32b4a8dd096e9951985b8ad5e4c588fe5b2d8da5e9cc708d87568e1d521a",
+      "mortalUsefulUses": 172,
+      "mortalBenefit": 33.37355498154021,
+      "protectedUsefulUses": 10,
+      "protectedBenefit": 1.269524606517544,
+      "unknownUsefulUses": 0,
+      "unknownBenefit": 0,
+      "mortalUsesByMortalAuthor": 164,
+      "mortalUsesByForeignMortalAuthor": 22,
+      "mortalUsesByProtectedAuthor": 8,
+      "unknownAuthorUses": 0,
+      "recipeTeachingEpisodes": {
+        "mortal→mortal": 202,
+        "mortal→protected": 12,
+        "protected→mortal": 70
+      },
+      "cooperationTeachingEpisodes": {
+        "mortal→mortal": 255,
+        "mortal→protected": 32,
+        "protected→mortal": 70
+      },
+      "matchesFrozenDay6Totals": true
+    },
+    {
+      "variant": "candidate",
+      "seed": 1002,
+      "copiedSnapshotTick": 36820,
+      "copiedSnapshotDigest": "613b2c84c79bcc8b26d1c2fd523e614841e944e0425a21f9833d32e649d88491",
+      "mortalUsefulUses": 94,
+      "mortalBenefit": 15.202008309326878,
+      "protectedUsefulUses": 15,
+      "protectedBenefit": 3.9543492332057473,
+      "unknownUsefulUses": 0,
+      "unknownBenefit": 0,
+      "mortalUsesByMortalAuthor": 94,
+      "mortalUsesByForeignMortalAuthor": 28,
+      "mortalUsesByProtectedAuthor": 0,
+      "unknownAuthorUses": 0,
+      "recipeTeachingEpisodes": {
+        "mortal→mortal": 16
+      },
+      "cooperationTeachingEpisodes": {
+        "mortal→mortal": 29
+      },
+      "matchesFrozenDay6Totals": true
+    },
+    {
+      "variant": "baseline",
+      "seed": 1003,
+      "copiedSnapshotTick": 21600,
+      "copiedSnapshotDigest": "8c6b486c0b77aa6b2f8eb53b1cd753c5225cfb3687a9729e2b6b1a46d53f3a21",
+      "mortalUsefulUses": 189,
+      "mortalBenefit": 18.967135386096835,
+      "protectedUsefulUses": 31,
+      "protectedBenefit": 2.1698711095475325,
+      "unknownUsefulUses": 0,
+      "unknownBenefit": 0,
+      "mortalUsesByMortalAuthor": 189,
+      "mortalUsesByForeignMortalAuthor": 24,
+      "mortalUsesByProtectedAuthor": 0,
+      "unknownAuthorUses": 0,
+      "recipeTeachingEpisodes": {
+        "mortal→mortal": 664,
+        "mortal→protected": 30,
+        "protected→mortal": 75
+      },
+      "cooperationTeachingEpisodes": {
+        "mortal→mortal": 704,
+        "mortal→protected": 30,
+        "protected→mortal": 75
+      },
+      "matchesFrozenDay6Totals": true
+    },
+    {
+      "variant": "candidate",
+      "seed": 1003,
+      "copiedSnapshotTick": 30540,
+      "copiedSnapshotDigest": "79541f009de0093240d0b42a92a70e63491cec58b1096187a34ff3c605e64f90",
+      "mortalUsefulUses": 199,
+      "mortalBenefit": 19.17386336082533,
+      "protectedUsefulUses": 16,
+      "protectedBenefit": 1.2312808919877585,
+      "unknownUsefulUses": 0,
+      "unknownBenefit": 0,
+      "mortalUsesByMortalAuthor": 199,
+      "mortalUsesByForeignMortalAuthor": 28,
+      "mortalUsesByProtectedAuthor": 0,
+      "unknownAuthorUses": 0,
+      "recipeTeachingEpisodes": {
+        "mortal→mortal": 60
+      },
+      "cooperationTeachingEpisodes": {
+        "mortal→mortal": 61
+      },
+      "matchesFrozenDay6Totals": true
+    },
+    {
+      "variant": "baseline",
+      "seed": 1004,
+      "copiedSnapshotTick": 21540,
+      "copiedSnapshotDigest": "e48d911250bc682a4993d89d3228e6003c13393b7bf809c4b5564ad571e4e4ea",
+      "mortalUsefulUses": 278,
+      "mortalBenefit": 31.979869642309346,
+      "protectedUsefulUses": 17,
+      "protectedBenefit": 4.146460099730412,
+      "unknownUsefulUses": 0,
+      "unknownBenefit": 0,
+      "mortalUsesByMortalAuthor": 262,
+      "mortalUsesByForeignMortalAuthor": 51,
+      "mortalUsesByProtectedAuthor": 16,
+      "unknownAuthorUses": 0,
+      "recipeTeachingEpisodes": {
+        "mortal→mortal": 325
+      },
+      "cooperationTeachingEpisodes": {
+        "mortal→mortal": 352
+      },
+      "matchesFrozenDay6Totals": true
+    },
+    {
+      "variant": "candidate",
+      "seed": 1004,
+      "copiedSnapshotTick": 27560,
+      "copiedSnapshotDigest": "d97e69bc6268b6423f8e99eadc7d2282b411d9121939998db975073bd7d503b4",
+      "mortalUsefulUses": 139,
+      "mortalBenefit": 12.647576946630522,
+      "protectedUsefulUses": 6,
+      "protectedBenefit": 0.6680525240088535,
+      "unknownUsefulUses": 0,
+      "unknownBenefit": 0,
+      "mortalUsesByMortalAuthor": 139,
+      "mortalUsesByForeignMortalAuthor": 25,
+      "mortalUsesByProtectedAuthor": 0,
+      "unknownAuthorUses": 0,
+      "recipeTeachingEpisodes": {
+        "mortal→mortal": 16,
+        "mortal→protected": 1,
+        "protected→mortal": 1
+      },
+      "cooperationTeachingEpisodes": {
+        "mortal→mortal": 16,
+        "mortal→protected": 1,
+        "protected→mortal": 1
+      },
+      "matchesFrozenDay6Totals": true
+    },
+    {
+      "variant": "baseline",
+      "seed": 1005,
+      "copiedSnapshotTick": 24540,
+      "copiedSnapshotDigest": "40c2e7afeaf63db7db5f91c169f493b854c2aef55a495d02241765dfe067ff4e",
+      "mortalUsefulUses": 139,
+      "mortalBenefit": 12.684974728148276,
+      "protectedUsefulUses": 26,
+      "protectedBenefit": 3.816918181914792,
+      "unknownUsefulUses": 0,
+      "unknownBenefit": 0,
+      "mortalUsesByMortalAuthor": 134,
+      "mortalUsesByForeignMortalAuthor": 13,
+      "mortalUsesByProtectedAuthor": 5,
+      "unknownAuthorUses": 0,
+      "recipeTeachingEpisodes": {
+        "mortal→mortal": 360,
+        "mortal→protected": 62,
+        "protected→mortal": 70
+      },
+      "cooperationTeachingEpisodes": {
+        "mortal→mortal": 396,
+        "mortal→protected": 67,
+        "protected→mortal": 74
+      },
+      "matchesFrozenDay6Totals": true
+    },
+    {
+      "variant": "candidate",
+      "seed": 1005,
+      "copiedSnapshotTick": 46000,
+      "copiedSnapshotDigest": "e9d98d759a683a36f3b40c1b65ffc23e29bc1c04c07d550ba50110fbe9fb51be",
+      "mortalUsefulUses": 168,
+      "mortalBenefit": 28.610605144784515,
+      "protectedUsefulUses": 20,
+      "protectedBenefit": 3.0079748254527403,
+      "unknownUsefulUses": 0,
+      "unknownBenefit": 0,
+      "mortalUsesByMortalAuthor": 167,
+      "mortalUsesByForeignMortalAuthor": 30,
+      "mortalUsesByProtectedAuthor": 1,
+      "unknownAuthorUses": 0,
+      "recipeTeachingEpisodes": {
+        "mortal→mortal": 11,
+        "mortal→protected": 3
+      },
+      "cooperationTeachingEpisodes": {
+        "mortal→mortal": 13,
+        "mortal→protected": 3,
+        "protected→mortal": 1
+      },
+      "matchesFrozenDay6Totals": true
+    },
+    {
+      "variant": "baseline",
+      "seed": 1006,
+      "copiedSnapshotTick": 38240,
+      "copiedSnapshotDigest": "2575333a5435dd83053af42b47014fb3e69c39a68007ae7c19a31a01b4582587",
+      "mortalUsefulUses": 146,
+      "mortalBenefit": 23.805051347575446,
+      "protectedUsefulUses": 9,
+      "protectedBenefit": 1.4944430317145776,
+      "unknownUsefulUses": 0,
+      "unknownBenefit": 0,
+      "mortalUsesByMortalAuthor": 146,
+      "mortalUsesByForeignMortalAuthor": 21,
+      "mortalUsesByProtectedAuthor": 0,
+      "unknownAuthorUses": 0,
+      "recipeTeachingEpisodes": {
+        "mortal→mortal": 229,
+        "mortal→protected": 27,
+        "protected→mortal": 27
+      },
+      "cooperationTeachingEpisodes": {
+        "mortal→mortal": 263,
+        "mortal→protected": 29,
+        "protected→mortal": 31
+      },
+      "matchesFrozenDay6Totals": true
+    },
+    {
+      "variant": "candidate",
+      "seed": 1006,
+      "copiedSnapshotTick": 37920,
+      "copiedSnapshotDigest": "a3125f6ddb8cb102312acd74449c465c53f3a74e1bd3f782d33178dd4b1c322f",
+      "mortalUsefulUses": 188,
+      "mortalBenefit": 39.19064440703548,
+      "protectedUsefulUses": 32,
+      "protectedBenefit": 12.293268184983868,
+      "unknownUsefulUses": 0,
+      "unknownBenefit": 0,
+      "mortalUsesByMortalAuthor": 179,
+      "mortalUsesByForeignMortalAuthor": 42,
+      "mortalUsesByProtectedAuthor": 9,
+      "unknownAuthorUses": 0,
+      "recipeTeachingEpisodes": {
+        "mortal→mortal": 24
+      },
+      "cooperationTeachingEpisodes": {
+        "mortal→mortal": 24
+      },
+      "matchesFrozenDay6Totals": true
+    },
+    {
+      "variant": "baseline",
+      "seed": 1007,
+      "copiedSnapshotTick": 72000,
+      "copiedSnapshotDigest": "6b6d23d6441fc4f7538873016624ced807285345ebf9aa962405b8cde57b87c7",
+      "mortalUsefulUses": 71,
+      "mortalBenefit": 10.256426704179832,
+      "protectedUsefulUses": 4,
+      "protectedBenefit": 0.019,
+      "unknownUsefulUses": 0,
+      "unknownBenefit": 0,
+      "mortalUsesByMortalAuthor": 71,
+      "mortalUsesByForeignMortalAuthor": 4,
+      "mortalUsesByProtectedAuthor": 0,
+      "unknownAuthorUses": 0,
+      "recipeTeachingEpisodes": {
+        "mortal→mortal": 55
+      },
+      "cooperationTeachingEpisodes": {
+        "mortal→mortal": 62
+      },
+      "matchesFrozenDay6Totals": true
+    },
+    {
+      "variant": "candidate",
+      "seed": 1007,
+      "copiedSnapshotTick": 72000,
+      "copiedSnapshotDigest": "4c0a92586b504a479be06b0e8d2143d9eb752db2d1af142e072d4614606b2a0f",
+      "mortalUsefulUses": 96,
+      "mortalBenefit": 10.348095988793633,
+      "protectedUsefulUses": 0,
+      "protectedBenefit": 0,
+      "unknownUsefulUses": 0,
+      "unknownBenefit": 0,
+      "mortalUsesByMortalAuthor": 96,
+      "mortalUsesByForeignMortalAuthor": 1,
+      "mortalUsesByProtectedAuthor": 0,
+      "unknownAuthorUses": 0,
+      "recipeTeachingEpisodes": {
+        "mortal→protected": 1
+      },
+      "cooperationTeachingEpisodes": {
+        "mortal→protected": 1
+      },
+      "matchesFrozenDay6Totals": true
+    },
+    {
+      "variant": "baseline",
+      "seed": 1008,
+      "copiedSnapshotTick": 21600,
+      "copiedSnapshotDigest": "5e9c2704aea56c2688c378ff83dbbf1a427b714828fbb65026760bd5210c2ce5",
+      "mortalUsefulUses": 76,
+      "mortalBenefit": 13.852398741393788,
+      "protectedUsefulUses": 0,
+      "protectedBenefit": 0,
+      "unknownUsefulUses": 0,
+      "unknownBenefit": 0,
+      "mortalUsesByMortalAuthor": 76,
+      "mortalUsesByForeignMortalAuthor": 13,
+      "mortalUsesByProtectedAuthor": 0,
+      "unknownAuthorUses": 0,
+      "recipeTeachingEpisodes": {
+        "mortal→mortal": 393
+      },
+      "cooperationTeachingEpisodes": {
+        "mortal→mortal": 643
+      },
+      "matchesFrozenDay6Totals": true
+    },
+    {
+      "variant": "candidate",
+      "seed": 1008,
+      "copiedSnapshotTick": 23140,
+      "copiedSnapshotDigest": "ecadbdf1f33a12233fec15d0484859a1c64eb9b92d35d2222bd483621d2a80b1",
+      "mortalUsefulUses": 217,
+      "mortalBenefit": 27.711166970253917,
+      "protectedUsefulUses": 6,
+      "protectedBenefit": 0.5423698659135694,
+      "unknownUsefulUses": 0,
+      "unknownBenefit": 0,
+      "mortalUsesByMortalAuthor": 217,
+      "mortalUsesByForeignMortalAuthor": 55,
+      "mortalUsesByProtectedAuthor": 0,
+      "unknownAuthorUses": 0,
+      "recipeTeachingEpisodes": {
+        "mortal→mortal": 62,
+        "mortal→protected": 4,
+        "protected→mortal": 2
+      },
+      "cooperationTeachingEpisodes": {
+        "mortal→mortal": 65,
+        "mortal→protected": 4,
+        "protected→mortal": 3
+      },
+      "matchesFrozenDay6Totals": true
+    },
+    {
+      "variant": "baseline",
+      "seed": 1009,
+      "copiedSnapshotTick": 31240,
+      "copiedSnapshotDigest": "44daf353d4439fe4b0262551830495739a524dea8b91548ede4c797b99c1db78",
+      "mortalUsefulUses": 104,
+      "mortalBenefit": 15.65027882703289,
+      "protectedUsefulUses": 17,
+      "protectedBenefit": 1.7547259729577498,
+      "unknownUsefulUses": 0,
+      "unknownBenefit": 0,
+      "mortalUsesByMortalAuthor": 104,
+      "mortalUsesByForeignMortalAuthor": 28,
+      "mortalUsesByProtectedAuthor": 0,
+      "unknownAuthorUses": 0,
+      "recipeTeachingEpisodes": {
+        "mortal→mortal": 468,
+        "mortal→protected": 24,
+        "protected→mortal": 22
+      },
+      "cooperationTeachingEpisodes": {
+        "mortal→mortal": 616,
+        "mortal→protected": 27,
+        "protected→mortal": 22
+      },
+      "matchesFrozenDay6Totals": true
+    },
+    {
+      "variant": "candidate",
+      "seed": 1009,
+      "copiedSnapshotTick": 27140,
+      "copiedSnapshotDigest": "4b84aa0561c55ab9982bdfc9fc8df20c3cb8e44295a26979c87d811e711871a0",
+      "mortalUsefulUses": 144,
+      "mortalBenefit": 22.443944524898672,
+      "protectedUsefulUses": 16,
+      "protectedBenefit": 3.4224193807332104,
+      "unknownUsefulUses": 0,
+      "unknownBenefit": 0,
+      "mortalUsesByMortalAuthor": 143,
+      "mortalUsesByForeignMortalAuthor": 42,
+      "mortalUsesByProtectedAuthor": 1,
+      "unknownAuthorUses": 0,
+      "recipeTeachingEpisodes": {
+        "mortal→mortal": 97,
+        "protected→mortal": 1
+      },
+      "cooperationTeachingEpisodes": {
+        "mortal→mortal": 110,
+        "protected→mortal": 2
+      },
+      "matchesFrozenDay6Totals": true
+    },
+    {
+      "variant": "baseline",
+      "seed": 1010,
+      "copiedSnapshotTick": 26640,
+      "copiedSnapshotDigest": "be5fe5b8a0cc0df781b898d57adacf8ffbea7e52f404cb31e8e953ec2447f72f",
+      "mortalUsefulUses": 153,
+      "mortalBenefit": 11.969574446115132,
+      "protectedUsefulUses": 11,
+      "protectedBenefit": 1.2160683704314683,
+      "unknownUsefulUses": 0,
+      "unknownBenefit": 0,
+      "mortalUsesByMortalAuthor": 153,
+      "mortalUsesByForeignMortalAuthor": 37,
+      "mortalUsesByProtectedAuthor": 0,
+      "unknownAuthorUses": 0,
+      "recipeTeachingEpisodes": {
+        "mortal→mortal": 458,
+        "mortal→protected": 55,
+        "protected→mortal": 28,
+        "protected→protected": 11
+      },
+      "cooperationTeachingEpisodes": {
+        "mortal→mortal": 609,
+        "mortal→protected": 62,
+        "protected→mortal": 51,
+        "protected→protected": 20
+      },
+      "matchesFrozenDay6Totals": true
+    },
+    {
+      "variant": "candidate",
+      "seed": 1010,
+      "copiedSnapshotTick": 22120,
+      "copiedSnapshotDigest": "feb548c8ff080c05576b0f7ae8452277cd5c7a2dfc538c282c6adb37d6046870",
+      "mortalUsefulUses": 208,
+      "mortalBenefit": 25.705678918469495,
+      "protectedUsefulUses": 25,
+      "protectedBenefit": 2.547899733228778,
+      "unknownUsefulUses": 0,
+      "unknownBenefit": 0,
+      "mortalUsesByMortalAuthor": 204,
+      "mortalUsesByForeignMortalAuthor": 43,
+      "mortalUsesByProtectedAuthor": 4,
+      "unknownAuthorUses": 0,
+      "recipeTeachingEpisodes": {
+        "mortal→mortal": 50,
+        "mortal→protected": 7,
+        "protected→mortal": 7
+      },
+      "cooperationTeachingEpisodes": {
+        "mortal→mortal": 50,
+        "mortal→protected": 9,
+        "protected→mortal": 8
+      },
+      "matchesFrozenDay6Totals": true
+    },
+    {
+      "variant": "baseline",
+      "seed": 1011,
+      "copiedSnapshotTick": 29600,
+      "copiedSnapshotDigest": "7dd6149b2691d251251fc027d0f99a0abd52d933ab86431261e0b9b59450dd4f",
+      "mortalUsefulUses": 88,
+      "mortalBenefit": 10.852918588220264,
+      "protectedUsefulUses": 33,
+      "protectedBenefit": 2.808067292890864,
+      "unknownUsefulUses": 0,
+      "unknownBenefit": 0,
+      "mortalUsesByMortalAuthor": 87,
+      "mortalUsesByForeignMortalAuthor": 15,
+      "mortalUsesByProtectedAuthor": 1,
+      "unknownAuthorUses": 0,
+      "recipeTeachingEpisodes": {
+        "mortal→mortal": 216,
+        "mortal→protected": 93,
+        "protected→mortal": 41
+      },
+      "cooperationTeachingEpisodes": {
+        "mortal→mortal": 293,
+        "mortal→protected": 93,
+        "protected→mortal": 41
+      },
+      "matchesFrozenDay6Totals": true
+    },
+    {
+      "variant": "candidate",
+      "seed": 1011,
+      "copiedSnapshotTick": 26440,
+      "copiedSnapshotDigest": "ac71554dea9274b12662171035e30c11c440aadf049b2eaba52cf3587c78c6f6",
+      "mortalUsefulUses": 157,
+      "mortalBenefit": 21.02590555812599,
+      "protectedUsefulUses": 6,
+      "protectedBenefit": 0.38977418981370476,
+      "unknownUsefulUses": 0,
+      "unknownBenefit": 0,
+      "mortalUsesByMortalAuthor": 157,
+      "mortalUsesByForeignMortalAuthor": 14,
+      "mortalUsesByProtectedAuthor": 0,
+      "unknownAuthorUses": 0,
+      "recipeTeachingEpisodes": {
+        "mortal→mortal": 11,
+        "protected→mortal": 3
+      },
+      "cooperationTeachingEpisodes": {
+        "mortal→mortal": 11,
+        "protected→mortal": 3
+      },
+      "matchesFrozenDay6Totals": true
+    }
+  ],
+  "survivorBiasCheck": {
+    "usesLostByFilteringOnlyActorsAliveAtDay6": {
+      "baseline": 15,
+      "candidate": 7
+    },
+    "deadActorsWhoUsedDuringDay6": {
+      "baseline": 4,
+      "candidate": 2
+    }
+  },
+  "limitations": [
+    "Only seeds 1000..1011, single day-6 interval. The 32-pair 30-day batch is not evaluated by this report.",
+    "Mortal use increases in 10/12 pairs, with two regressions; aggregate improvement is not universal or a survival result.",
+    "Mortal actor plus mortal author does not prove independence from protected teachers, transfers, care or other intermediaries.",
+    "Recipe teaching events omit recipeId; the displayed recipe name is not a reliable identity. Historical teaching-to-use linkage cannot be reconstructed.",
+    "learnedFrom is endpoint-local, removed on forgetting and absent from deceased legacy. The existing learned-use count omits those histories and <=tick does not establish within-tick order.",
+    "Teaching classification uses literal causes tied to the frozen source revisions; missing or pruned coverage must be unknown, not zero.",
+    "This is poststratification with separately hashed queries, not a retroactive change to the frozen metricsVersion2 instrument."
+  ],
+  "recommendedFutureContract": [
+    "Keep global metrics descriptive; publish mortal, protected and unknown strata plus actor/author and teacher/learner matrices with explicit intervals and a new instrument version.",
+    "For causal teaching-to-use attribution persist structured recipeId, teacherId, learnerId, tick and executionCounterBefore at teaching. Require later tick or later execution serial within same tick; use EXISTS or one latest relevant lesson to avoid duplicated use counts.",
+    "Persist learning receipts independently from local forgetting/death; never infer recipe identity from display names."
+  ],
+  "recommendedTests": [
+    "Real Store: use then death before save remains in mortal use totals.",
+    "Mortal-invented tool used by protected actor and protected-invented tool used by mortal remain different cells.",
+    "Unknown actor/author, failed/non-use/zero-benefit and interval boundaries remain explicit.",
+    "Forgetting and teacher/learner death do not delete durable learning evidence.",
+    "Same-tick use before/after teaching and repeated teaching count only causally subsequent uses once.",
+    "Generic learning habits and duplicate learning/cooperation receipts are not counted as extra recipe transmissions; pruned/missing history produces unknown."
+  ],
+  "queryParameters": {
+    "uses.sql": {
+      "after": 12000,
+      "end": 14400
+    },
+    "teaching.sql": [
+      {
+        "after": 12000,
+        "end": 14400,
+        "kind": "recipe",
+        "recipeCause": "Transmisión cercana de una receta realmente conocida; enseñar cuesta energía y no entrega productos ni materias primas."
+      },
+      {
+        "after": 12000,
+        "end": 14400,
+        "kind": "cooperation",
+        "recipeCause": "Transmisión cercana de una receta realmente conocida; enseñar cuesta energía y no entrega productos ni materias primas."
+      }
+    ]
+  }
+}

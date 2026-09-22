@@ -1,5 +1,42 @@
 # Reglas del prototipo
 
+## Candidato V7, revisión del 22 de septiembre de 2026
+
+La fuente candidata declara **reglas 7, protocolo 9 y SQLite 4**. Aún no acredita una
+nueva publicación ni el cierre de la feature 002. Su [revisión y controles](REVISION-2026-09-22.md)
+separan los resultados de las referencias históricas que siguen abajo.
+
+Los vecinos fundadores expresan sus alelos mediante la misma ley que sus descendientes;
+la caracterización de S/I se conserva. La intención de formar pareja excluye los mismos
+parentescos que la reproducción. La enseñanza exige práctica y una posibilidad material
+local; no se acredita cooperación enseñando cooperación repetidamente. Una técnica
+intermedia puede enseñarse para completar instrucciones ya recordadas. El selector puede
+planificar esa cadena dentro de su memoria finita, con materias, herramientas, desgaste,
+combustible, energía y trabajo completos. El pronóstico no crea existencias ni enseña
+recetas desconocidas; cada acción vuelve a evaluar el estado físico real.
+
+Si beber de un recipiente requiere recuperar capacidad corporal, el agente descansa
+localmente cuando puede recuperarla; su sed sólo baja después de retirar agua efectiva.
+Cuando la sed fuerza una búsqueda urgente, conserva un destino local viable hasta
+alcanzarlo. Percibir agua, un obstáculo o una necesidad que gane la elección puede
+interrumpirlo; no obtiene conocimiento de fuentes fuera de su percepción.
+Estas correcciones no aumentan longevidad, reservas, nacimientos por intervalo ni el
+presupuesto del gobernador.
+
+El lector conserva la compatibilidad con estados V6 válidos mediante una copia y cambio
+de versión: no reescribe rasgos, hechos, recibos o existencias históricos. La política de
+publicación sigue exigiendo un mundo nuevo separado, mientras los reinicios de esa misma
+versión conservan su último estado confirmado. Esta compatibilidad no promete que V6 y
+V7 produzcan la misma trayectoria futura.
+
+El protocolo 9 evita repetir dos constantes en cada objeto con metadatos de agua.
+El formato de agua versión 1 fija 50 000 cuantos por unidad y denominador de fuga
+1 000 000. El cliente conserva lectura de la forma completa anterior, rechaza constantes
+contradictorias y distingue contenido desconocido, recipiente vacío y objeto incapaz.
+No se redondea agua, se eliminan objetos ni se cambia la instantánea durable.
+
+## Referencia histórica para grabación
+
 La referencia privada activa para grabación es **`03470e3`**, con reglas/protocolo 6 y SQLite 4, publicada y comprobada el 6 de septiembre de 2026. Incluye agua contenida, claros físicos y afinaciones de elección corporal y construcción, además del catálogo resoluble, memoria técnica finita y cuerpo compartido. [EVIDENCIA.md](EVIDENCIA.md#matriz-v6-cerrada-a-veinticinco-días) distingue la captura de 113,35 días de la matriz V6: tres semillas terminaron con 30, 18 y 1 vecinos mortales, y la tercera ya no tiene recambio posible. La fuente experimental `189791d` añade journal sin modificar estas leyes; `4a05bb5` incorpora validación incremental del archivo y continúa sin publicar. Ni las pruebas ni la trayectoria favorable acreditan continuidad indefinida. El [objetivo rector](../GOAL.md) conserva las capacidades pendientes. Las unidades no tienen equivalencia biológica demostrada ni puntúan el amor. La memoria y diferencias provisionales de S e I esperan la voz de Steven.
 
 ## Tiempo, paisaje y recursos

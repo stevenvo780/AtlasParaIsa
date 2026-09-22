@@ -1,0 +1,18 @@
+{
+  "scope": "clone only; synthetic dormant terrain, alternating order; shared host",
+  "seed": 51926,
+  "activeTiles": 1536,
+  "dormantTiles": 65536,
+  "dormantBytes": 18828936,
+  "before": {
+    "n": 80,
+    "p50Ms": 84.7543829999995,
+    "p95Ms": 126.888868
+  },
+  "after": {
+    "n": 80,
+    "p50Ms": 0.3415129999993951,
+    "p95Ms": 0.6780049999997573
+  },
+  "digest": "ea2eb9c6d86ff9e04290f59a588a98962fab770a9fce278978c062f59283035f"
+}

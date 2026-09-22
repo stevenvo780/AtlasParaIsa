@@ -1,0 +1,33 @@
+{
+  "generatedAt": "2026-09-22T10:21:22.057362+00:00",
+  "sourceHash": "783b2dc78b0361a51e390c2e015429a984c50f8b1b6ce73bbd941d7e4d30778d",
+  "typecheck": {
+    "command": "npm run typecheck",
+    "exitCode": 0
+  },
+  "nodeSuite": {
+    "command": "COMPUTE_NVRTC=/opt/cuda/lib64/libnvrtc.so timeout 1200 npm test -- --test-concurrency=8",
+    "tests": 899,
+    "passed": 899,
+    "failed": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "durationMs": 348370.882445,
+    "log": "/tmp/atlas-v7-full-final.log",
+    "logSha256": "de5866ddd2e76178e076d2a813f391b61193ba0a10aed8337c6c6e353968dd7e"
+  },
+  "compiledBrowserSuite": {
+    "command": "npm run test:e2e",
+    "passed": 18,
+    "failed": 0,
+    "log": "/tmp/atlas-v7-e2e-final.log"
+  },
+  "compiledSmoke": {
+    "passed": true,
+    "report": "smoke.json"
+  },
+  "exactCommittedBuildAndSmoke": {
+    "status": "pending commit"
+  },
+  "scope": "Production source unchanged since the frozen reserved candidate. Laboratory concurrent timings are not performance acceptance. No GOAL.md or feature002 completion claimed."
+}

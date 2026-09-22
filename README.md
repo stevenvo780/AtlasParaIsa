@@ -1,5 +1,28 @@
 # Una Carta Para Isa
 
+Mundo procedural compartido y persistente: humanos y fauna consumen recursos finitos,
+aprenden, fabrican y se reproducen bajo leyes locales. El objetivo completo y sus
+criterios de aceptación están en [GOAL.md](GOAL.md).
+
+**Estado del 22 de septiembre de 2026:** candidato de reglas 7, protocolo 9 y SQLite 4,
+con correcciones verificables de cooperación, parentesco, planificación técnica y
+búsqueda de agua. [PLAN](PLAN.md#estado-actual) identifica lo pendiente y la
+[revisión vigente](docs/REVISION-2026-09-22.md) separa controles causales, resultados
+demográficos mixtos y rendimiento. La serie reservada de 32 pares de mundos está en
+ejecución; no se declara autonomía sostenida ni cierre del proyecto. El estado de
+publicación se registra en [EVIDENCIA](docs/EVIDENCIA.md#revisión-y-ejecución-2026-09-22).
+
+El servidor de `atlas.humanizar.tech` sirve `dist/client` desde el árbol principal.
+Las compilaciones de prueba se hacen en worktrees aislados. Para publicar hay que
+validar el commit, verificar un respaldo, detener el servicio y sólo entonces compilar
+ese árbol. Cada versión de pruebas publicada usa un directorio de mundo nuevo;
+reiniciar la misma versión recupera su estado confirmado. La contraseña se conserva.
+
+## Antecedentes de septiembre de 2026
+
+Los estados de despliegue y cifras siguientes son registros históricos de las fuentes
+citadas; no sustituyen el estado vigente enlazado arriba.
+
 Un mundo procedural compartido que continúa mientras el navegador está cerrado: biomas, recursos agotables, animales individuales, exploración, construcción, aprendizaje y comunidades. **`03470e3` está activo en la revisión privada para grabación**, con reglas/protocolo 6 y SQLite 4. La publicación se comprobó el 6 de septiembre de 2026 a las 15:18:36 UTC: mundo normal nuevo, contraseña y acceso TLS conservados. El [objetivo rector](GOAL.md) reúne la visión de mundo y carta; [EVIDENCIA.md](docs/EVIDENCIA.md#publicación-para-grabación) identifica la fuente, las comprobaciones y el estado de publicación. S e I son nombres provisionales; vecinos y cinco recuerdos iniciales son ficticios.
 
 La aplicación local está implementada y la revisión privada mantiene el acceso existente. La voz final de Steven, los recuerdos reales revisados, la prueba en un teléfono físico y el alojamiento definitivo siguen pendientes. No hay publicación pública ni infraestructura nueva contratada.

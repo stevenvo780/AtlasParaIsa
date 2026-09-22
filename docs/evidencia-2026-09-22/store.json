@@ -1,0 +1,2335 @@
+{
+  "scope": "Paired ablations of current V7 Store, same saved world, cadence20, 12 saves, snapshot and archived tables checked; no validation removed",
+  "runs": {
+    "baseline": {
+      "source": "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/artifacts/coherence-20260922/baseline-server-51926/world.sqlite",
+      "mode": "baseline",
+      "cadence": 20,
+      "rounds": 12,
+      "sourceHashesBefore": {
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/scripts/benchmark-store.ts": "8d0c5d7df61e77e991a567553262f43dccaac53e1747f6f244780ae69c488ebb",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/assets.d.ts": "da5bf71d48cf909584a01c80b445f730507068f5b34c920f352e2bfcf0315e4c",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/calor.ts": "0badff9eee93ea8bf3139e951add2c34441918bee20e00c8395928fa61f8cc50",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/connection.ts": "00bbf18a09af54ae5c8255478ae32a093c3b8e17fecd9eea1f8a6d0a9d6674c0",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/game.ts": "4ce4cb53b6619c8e9191be2aa13e5dd771f39f209bfab8522dc52c530a145fe6",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/gpu-terrain.ts": "6358268d850b9d7f9fc9eaaf71465af9f80eb45af26747ab9d6d02c132610344",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/icons.ts": "ac93abdf11d9e9af66a2c7ff0a065830f8ab296282fab8475c2c4020628232c2",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/inspector-view.ts": "8e73f336b357c2b4f5c3b7e77c3d447d130b8a0f4f35f0c244246e48fd98d9cd",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/landscape.ts": "56a8c9516714f15e205c6d5caf8900cc3a237e66ac74d4801a9a95ab21914127",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/life-art.ts": "b91f5329d5f2682acfafdba53f1a1d5c61773542d7898a4587938a694d471554",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/luz.ts": "a32c9a414821356ad9a92026ccd88d9c0172c22a983a36ae83c9973529c07fc5",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/main.ts": "1ee4d5f1660a7b563f9cc2c0fa34001a66196cb743d8cfd82d5f695cd2d8e7c5",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/modo.ts": "da299cfb83a3a5b7d98af8ad8bcf8daec3187c020341e5198bf15941adcc717a",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/notebook.ts": "2a402e8296984667e2d09940acba3d8db933b3ce79867b19abb704e041a65865",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/technology-art.ts": "0a62aca27e2a2c1b8f74f28eb749fb93b72be0d0ec4686d65e22768d65436207",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/ui-catalog.ts": "2c575046663adfff12ef0b329df60e1e768d9325eed2a075cb9cb8558ef0485b",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/view-state.ts": "d277ab560a3dd27a1121e0a5b9d59275e93bc083cd9c5d0834bfa4c48fd65af5",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/visit-memory.ts": "59779ab05cb463e4251881315dd56058fff576bba334f5dc59dd0bb8164d879a",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/visual-state.ts": "4ae8b5f0189b325c070d95b31263aae23f8a1e158d5e78b3b2571b31cbba0d35",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/world-evidence.ts": "0931f518021743c5506ba22cbcb72d51c4612cf876fef24112a35bf26af1fe98",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/world-shell.ts": "e23460194a952687f08fe93bfb0ba04760dd6d7ca2e7b1dc07920097eee6b69f",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/app.ts": "8f0d87bf29635052aaa3d1bb7fd0a7e4f83c473d635e490d6d6745f765707257",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/auth.ts": "e8dc1eabf65ac7a5065d0582671be22813005f83c0cce00886a67c9d952c11d2",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/deployment-params.ts": "184bcd3f84781dc533bcb3cb5191d9bc4d3b5c308442dae71430906bae336608",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/governor.ts": "c122b0448c10ab444f7622b13912b91f9dc8fd87cc352006326dcfbdc2d713fb",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/lock.ts": "6818293ed97e2dc2862e7a06e42f8aa8c017a5f27e6656f338331f83a555f536",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/main.ts": "408733d7f78dc204a270b91ccaf06a72df6ed6b8a6e214b75529b1a08088fe10",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/snapshot.ts": "ca6f266357bb676aeadd16f078df7be8bb6eb08213e238b44cca03a07fea012c",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/store.ts": "907f3978db423defb9bc03fec915f9f8da8c56262be61a23f28265a83b8d15d2",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/technology-archive.ts": "3820d2dbaf01ddb25e01debc320bd549c59d6b67e7eb56a72541cd01da0899d4",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/world-instance.ts": "0bb10082d68e29d900bad745f2e06ed284e79603ca49ab3c93792e27ed603969",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/shared/demography.ts": "a9e6d6f273957529e942d5358988171a7ab25327ced8d039706f7dfa5fb9fa6f",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/shared/life.ts": "7c2ee3924ddbae01f55c22ff52ac2bd208e8877284c1ee48782f33239f1070bf",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/shared/organization.ts": "30d8869086faf0754002e240b3bef1fcec9600d51ab3b40c6bce7ef977f4a2bd",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/shared/technology-archive.ts": "4d9ad0b9f1be01e95fbfb5365b6a1391b3321f39c5bcfce0806d5cb2d0079354",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/shared/technology.ts": "e3394386e61bc508956400a3a0bf1c35193c4265bfa527ebebf03dee038b8b69",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/shared/types.ts": "df913b9326f03f4773107c54e9472905c31634f699fab59f9ab75650d21b59a3",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/shared/world-instance.ts": "09967c006226f2fca8fd04af2ca3c310db67278e95d0cfaccbd193d241605349",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/agua.ts": "3f3be7cac9fffe40a31bd7d38b223b1d9398dd1d310d2170825b3b40bb031e0e",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/animals.ts": "0e9cce23504715a370f74c24b8f0c0e82d0cb1447945b3486ff8843ee1af0a7a",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/body.ts": "00643e43be3f11a5804772e9d0ccc405c447d23377997a5a4269937ecc2101cb",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/chronicle-journal.ts": "880f5298474445f435e820fc034b7019ca80007823cfa3607fa551f4b3ffedee",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/demography.ts": "09fececd55349ee7e48db5b632ddb1f06e6f8143a669a9f8611bfd3cbc531dfe",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/digesto.ts": "d330eccce86f8576d042e41acd42deabf2ea6fa3730a80c51f34fc47cbf9f05d",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/diversidad.ts": "57b104be0efbd12d188dc352123c2982e83a15d27fa5d9bfcbf965f9cc33e6d3",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/ecosystem-kernel.ts": "b1cb946781e204fd9db31520c61699f4f91cf431d1b735351984f6e2e3bf9b78",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/ecosystem.ts": "24444f458e70e6c41bb0e9fc5f88290ee50fbe1edbd3b44109805ce89baeee10",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/family.ts": "0ba24f3399c5cda9400b431ff373bdc7ce98572993ee04fcd5a9db45734471d4",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/forest.ts": "9c6c32126a74a35896038994f5988cb7b6490ef440b67fc741b7ce13e1e54212",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/genetics.ts": "6303faa03b11d4f5d659055947955aa16ff82f75a0e8cff143d6ad336da7e12e",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/index.ts": "5d925107b8115c61f218b7ae5b0236324758dccdc3bd7b88262a1f5f20d5ffe7",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/inventions.ts": "c45cd3b84f74c46eb9a1158c4fc3a52716ff0eafe5dfc2039aefe350f02c14a4",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/lineage.ts": "e24706e14642c4aa5144de8abd8e76d3d63977829328b0f6cd5d1a0e74f01862",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/material-affordances.ts": "0bb5041204409e1545ec2f783862a46de325246520b4025c49ed7ef4cfc0e142",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/needs.ts": "40990c1ad6e824e247f70e217dad1bda0d986ab3d80d0d4c1c8561844061c292",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/organization.ts": "e6e3597bf46474fcfec908f01eb562089f37000b14ebea14b40e4eb91901b7b8",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/params.ts": "b10662cab2a7a8efd1b3f38d7f79c4edf63c175c88c08ba8366b13539a5dd51b",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/society.ts": "6828319b26060bec728de7643a4f9becc63282fb09872d117292e3dde7fcadf3",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/spatial.ts": "17861e50a4e6ade76981a06541ab86bd8f87e42e5612ef7ec4c0fecc69d652e9",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/statistics.ts": "c4f8374433a8121c998c421d0eb044a2e4c0c860d214240f6552ed3a8ab4d0c0",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology-catalogue.ts": "7b3fd17ea57181b8aad059a9ae19f0e9f03e89f3d73c0a3c15e17aa246dcffc6",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology-checkpoint.ts": "34f16cc74a700265f2e5407ba3e52e984b74474c2fbd6444e99196586ce9469f",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology-execution.ts": "5d1423ee670dd034c5f50d3bd7b612e39eab40ba7181725aec42ab945c6e41a4",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology-journal.ts": "2687af97e425c1a13d9fc8a0c229eb12c544673f2ab04e3514cd4974be0abacf",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology-memory.ts": "8fdf32db2628ad7b311701fdac4067966f5e3fe2ad187d78a2eaf63cc20490fb",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology-organization.ts": "3840fa5602012386dc705e9fc7f46f0c18e3983a731481b05e1ca0bb8fa12dde",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology-water.ts": "51bb48999be20e560056739158a0127cf3351b81adafda69f0c434f2465ea9d6",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology.ts": "ff781172cb2440c08e4f02048e0a8330f81b7fb4da7acad736ca964c63e6dafc",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/terrain.ts": "538280dba7df8ee07b6b8ada9d2e8ddd007b82bc8d1bae3196927709d3f14c97",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/validation.ts": "9b9f86d53786967c1138ed2c41b4a6a17a0695eab75ef2e28bc15f28b47cc3cd"
+      },
+      "sourceHashesAfter": {
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/scripts/benchmark-store.ts": "8d0c5d7df61e77e991a567553262f43dccaac53e1747f6f244780ae69c488ebb",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/assets.d.ts": "da5bf71d48cf909584a01c80b445f730507068f5b34c920f352e2bfcf0315e4c",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/calor.ts": "0badff9eee93ea8bf3139e951add2c34441918bee20e00c8395928fa61f8cc50",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/connection.ts": "00bbf18a09af54ae5c8255478ae32a093c3b8e17fecd9eea1f8a6d0a9d6674c0",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/game.ts": "4ce4cb53b6619c8e9191be2aa13e5dd771f39f209bfab8522dc52c530a145fe6",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/gpu-terrain.ts": "6358268d850b9d7f9fc9eaaf71465af9f80eb45af26747ab9d6d02c132610344",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/icons.ts": "ac93abdf11d9e9af66a2c7ff0a065830f8ab296282fab8475c2c4020628232c2",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/inspector-view.ts": "8e73f336b357c2b4f5c3b7e77c3d447d130b8a0f4f35f0c244246e48fd98d9cd",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/landscape.ts": "56a8c9516714f15e205c6d5caf8900cc3a237e66ac74d4801a9a95ab21914127",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/life-art.ts": "b91f5329d5f2682acfafdba53f1a1d5c61773542d7898a4587938a694d471554",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/luz.ts": "a32c9a414821356ad9a92026ccd88d9c0172c22a983a36ae83c9973529c07fc5",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/main.ts": "1ee4d5f1660a7b563f9cc2c0fa34001a66196cb743d8cfd82d5f695cd2d8e7c5",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/modo.ts": "da299cfb83a3a5b7d98af8ad8bcf8daec3187c020341e5198bf15941adcc717a",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/notebook.ts": "2a402e8296984667e2d09940acba3d8db933b3ce79867b19abb704e041a65865",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/technology-art.ts": "0a62aca27e2a2c1b8f74f28eb749fb93b72be0d0ec4686d65e22768d65436207",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/ui-catalog.ts": "2c575046663adfff12ef0b329df60e1e768d9325eed2a075cb9cb8558ef0485b",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/view-state.ts": "d277ab560a3dd27a1121e0a5b9d59275e93bc083cd9c5d0834bfa4c48fd65af5",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/visit-memory.ts": "59779ab05cb463e4251881315dd56058fff576bba334f5dc59dd0bb8164d879a",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/visual-state.ts": "4ae8b5f0189b325c070d95b31263aae23f8a1e158d5e78b3b2571b31cbba0d35",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/world-evidence.ts": "0931f518021743c5506ba22cbcb72d51c4612cf876fef24112a35bf26af1fe98",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/world-shell.ts": "e23460194a952687f08fe93bfb0ba04760dd6d7ca2e7b1dc07920097eee6b69f",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/app.ts": "8f0d87bf29635052aaa3d1bb7fd0a7e4f83c473d635e490d6d6745f765707257",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/auth.ts": "e8dc1eabf65ac7a5065d0582671be22813005f83c0cce00886a67c9d952c11d2",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/deployment-params.ts": "184bcd3f84781dc533bcb3cb5191d9bc4d3b5c308442dae71430906bae336608",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/governor.ts": "c122b0448c10ab444f7622b13912b91f9dc8fd87cc352006326dcfbdc2d713fb",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/lock.ts": "6818293ed97e2dc2862e7a06e42f8aa8c017a5f27e6656f338331f83a555f536",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/main.ts": "408733d7f78dc204a270b91ccaf06a72df6ed6b8a6e214b75529b1a08088fe10",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/snapshot.ts": "ca6f266357bb676aeadd16f078df7be8bb6eb08213e238b44cca03a07fea012c",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/store.ts": "907f3978db423defb9bc03fec915f9f8da8c56262be61a23f28265a83b8d15d2",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/technology-archive.ts": "3820d2dbaf01ddb25e01debc320bd549c59d6b67e7eb56a72541cd01da0899d4",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/world-instance.ts": "0bb10082d68e29d900bad745f2e06ed284e79603ca49ab3c93792e27ed603969",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/shared/demography.ts": "a9e6d6f273957529e942d5358988171a7ab25327ced8d039706f7dfa5fb9fa6f",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/shared/life.ts": "7c2ee3924ddbae01f55c22ff52ac2bd208e8877284c1ee48782f33239f1070bf",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/shared/organization.ts": "30d8869086faf0754002e240b3bef1fcec9600d51ab3b40c6bce7ef977f4a2bd",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/shared/technology-archive.ts": "4d9ad0b9f1be01e95fbfb5365b6a1391b3321f39c5bcfce0806d5cb2d0079354",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/shared/technology.ts": "e3394386e61bc508956400a3a0bf1c35193c4265bfa527ebebf03dee038b8b69",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/shared/types.ts": "df913b9326f03f4773107c54e9472905c31634f699fab59f9ab75650d21b59a3",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/shared/world-instance.ts": "09967c006226f2fca8fd04af2ca3c310db67278e95d0cfaccbd193d241605349",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/agua.ts": "3f3be7cac9fffe40a31bd7d38b223b1d9398dd1d310d2170825b3b40bb031e0e",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/animals.ts": "0e9cce23504715a370f74c24b8f0c0e82d0cb1447945b3486ff8843ee1af0a7a",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/body.ts": "00643e43be3f11a5804772e9d0ccc405c447d23377997a5a4269937ecc2101cb",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/chronicle-journal.ts": "880f5298474445f435e820fc034b7019ca80007823cfa3607fa551f4b3ffedee",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/demography.ts": "09fececd55349ee7e48db5b632ddb1f06e6f8143a669a9f8611bfd3cbc531dfe",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/digesto.ts": "d330eccce86f8576d042e41acd42deabf2ea6fa3730a80c51f34fc47cbf9f05d",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/diversidad.ts": "57b104be0efbd12d188dc352123c2982e83a15d27fa5d9bfcbf965f9cc33e6d3",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/ecosystem-kernel.ts": "b1cb946781e204fd9db31520c61699f4f91cf431d1b735351984f6e2e3bf9b78",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/ecosystem.ts": "24444f458e70e6c41bb0e9fc5f88290ee50fbe1edbd3b44109805ce89baeee10",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/family.ts": "0ba24f3399c5cda9400b431ff373bdc7ce98572993ee04fcd5a9db45734471d4",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/forest.ts": "9c6c32126a74a35896038994f5988cb7b6490ef440b67fc741b7ce13e1e54212",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/genetics.ts": "6303faa03b11d4f5d659055947955aa16ff82f75a0e8cff143d6ad336da7e12e",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/index.ts": "5d925107b8115c61f218b7ae5b0236324758dccdc3bd7b88262a1f5f20d5ffe7",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/inventions.ts": "c45cd3b84f74c46eb9a1158c4fc3a52716ff0eafe5dfc2039aefe350f02c14a4",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/lineage.ts": "e24706e14642c4aa5144de8abd8e76d3d63977829328b0f6cd5d1a0e74f01862",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/material-affordances.ts": "0bb5041204409e1545ec2f783862a46de325246520b4025c49ed7ef4cfc0e142",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/needs.ts": "40990c1ad6e824e247f70e217dad1bda0d986ab3d80d0d4c1c8561844061c292",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/organization.ts": "e6e3597bf46474fcfec908f01eb562089f37000b14ebea14b40e4eb91901b7b8",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/params.ts": "b10662cab2a7a8efd1b3f38d7f79c4edf63c175c88c08ba8366b13539a5dd51b",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/society.ts": "6828319b26060bec728de7643a4f9becc63282fb09872d117292e3dde7fcadf3",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/spatial.ts": "17861e50a4e6ade76981a06541ab86bd8f87e42e5612ef7ec4c0fecc69d652e9",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/statistics.ts": "c4f8374433a8121c998c421d0eb044a2e4c0c860d214240f6552ed3a8ab4d0c0",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology-catalogue.ts": "7b3fd17ea57181b8aad059a9ae19f0e9f03e89f3d73c0a3c15e17aa246dcffc6",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology-checkpoint.ts": "34f16cc74a700265f2e5407ba3e52e984b74474c2fbd6444e99196586ce9469f",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology-execution.ts": "5d1423ee670dd034c5f50d3bd7b612e39eab40ba7181725aec42ab945c6e41a4",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology-journal.ts": "2687af97e425c1a13d9fc8a0c229eb12c544673f2ab04e3514cd4974be0abacf",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology-memory.ts": "8fdf32db2628ad7b311701fdac4067966f5e3fe2ad187d78a2eaf63cc20490fb",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology-organization.ts": "3840fa5602012386dc705e9fc7f46f0c18e3983a731481b05e1ca0bb8fa12dde",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology-water.ts": "51bb48999be20e560056739158a0127cf3351b81adafda69f0c434f2465ea9d6",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology.ts": "ff781172cb2440c08e4f02048e0a8330f81b7fb4da7acad736ca964c63e6dafc",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/terrain.ts": "538280dba7df8ee07b6b8ada9d2e8ddd007b82bc8d1bae3196927709d3f14c97",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/validation.ts": "9b9f86d53786967c1138ed2c41b4a6a17a0695eab75ef2e28bc15f28b47cc3cd"
+      },
+      "loadMs": 3499.621579,
+      "samples": [
+        {
+          "round": 0,
+          "tick": 12020,
+          "population": 25,
+          "tiles": 12288,
+          "simulationMs": 183.1681410000001,
+          "saveMs": 105.5408379999999,
+          "phases": {
+            "prepareTechnology": {
+              "calls": 1,
+              "ms": 49.19081899999992
+            },
+            "assertChronicleChanges": {
+              "calls": 1,
+              "ms": 0.09226100000023507
+            },
+            "assertTechnologyChanges": {
+              "calls": 1,
+              "ms": 0.13020200000028126
+            },
+            "flushTechnology": {
+              "calls": 1,
+              "ms": 16.454197999999906
+            },
+            "flushChronicle": {
+              "calls": 1,
+              "ms": 0.5419379999998455
+            },
+            "rememberTechnology": {
+              "calls": 1,
+              "ms": 0.47793700000011086
+            }
+          }
+        },
+        {
+          "round": 1,
+          "tick": 12040,
+          "population": 25,
+          "tiles": 11776,
+          "simulationMs": 162.8460100000002,
+          "saveMs": 111.60636200000044,
+          "phases": {
+            "prepareTechnology": {
+              "calls": 1,
+              "ms": 60.8245909999996
+            },
+            "assertChronicleChanges": {
+              "calls": 1,
+              "ms": 0.02370100000007369
+            },
+            "assertTechnologyChanges": {
+              "calls": 1,
+              "ms": 0.12022200000046723
+            },
+            "flushTechnology": {
+              "calls": 1,
+              "ms": 17.16465700000026
+            },
+            "flushChronicle": {
+              "calls": 1,
+              "ms": 0.411736000000019
+            },
+            "rememberTechnology": {
+              "calls": 1,
+              "ms": 0.4736669999992955
+            }
+          }
+        },
+        {
+          "round": 2,
+          "tick": 12060,
+          "population": 25,
+          "tiles": 11776,
+          "simulationMs": 144.98435299999983,
+          "saveMs": 106.16483700000026,
+          "phases": {
+            "prepareTechnology": {
+              "calls": 1,
+              "ms": 53.85253399999965
+            },
+            "assertChronicleChanges": {
+              "calls": 1,
+              "ms": 0.024970000000394066
+            },
+            "assertTechnologyChanges": {
+              "calls": 1,
+              "ms": 0.06440099999963422
+            },
+            "flushTechnology": {
+              "calls": 1,
+              "ms": 18.59336699999949
+            },
+            "flushChronicle": {
+              "calls": 1,
+              "ms": 0.41134600000077626
+            },
+            "rememberTechnology": {
+              "calls": 1,
+              "ms": 0.5110770000001139
+            }
+          }
+        },
+        {
+          "round": 3,
+          "tick": 12080,
+          "population": 25,
+          "tiles": 12800,
+          "simulationMs": 159.6808149999997,
+          "saveMs": 109.02204500000062,
+          "phases": {
+            "prepareTechnology": {
+              "calls": 1,
+              "ms": 59.07566600000064
+            },
+            "assertChronicleChanges": {
+              "calls": 1,
+              "ms": 0.019210000000384753
+            },
+            "assertTechnologyChanges": {
+              "calls": 1,
+              "ms": 0.03407100000003993
+            },
+            "flushTechnology": {
+              "calls": 1,
+              "ms": 14.452440000000024
+            },
+            "flushChronicle": {
+              "calls": 1,
+              "ms": 0.39222499999959837
+            },
+            "rememberTechnology": {
+              "calls": 1,
+              "ms": 3.373486999999841
+            }
+          }
+        },
+        {
+          "round": 4,
+          "tick": 12100,
+          "population": 25,
+          "tiles": 12800,
+          "simulationMs": 146.79126700000052,
+          "saveMs": 109.42280100000062,
+          "phases": {
+            "prepareTechnology": {
+              "calls": 1,
+              "ms": 55.92064200000004
+            },
+            "assertChronicleChanges": {
+              "calls": 1,
+              "ms": 0.01746999999977561
+            },
+            "assertTechnologyChanges": {
+              "calls": 1,
+              "ms": 0.036429999999199936
+            },
+            "flushTechnology": {
+              "calls": 1,
+              "ms": 14.553690999999162
+            },
+            "flushChronicle": {
+              "calls": 1,
+              "ms": 0.3866250000000946
+            },
+            "rememberTechnology": {
+              "calls": 1,
+              "ms": 0.47918699999991077
+            }
+          }
+        },
+        {
+          "round": 5,
+          "tick": 12120,
+          "population": 25,
+          "tiles": 13312,
+          "simulationMs": 131.24819200000002,
+          "saveMs": 132.56413000000066,
+          "phases": {
+            "prepareTechnology": {
+              "calls": 1,
+              "ms": 75.8904480000001
+            },
+            "assertChronicleChanges": {
+              "calls": 1,
+              "ms": 0.018839999999727297
+            },
+            "assertTechnologyChanges": {
+              "calls": 1,
+              "ms": 0.1803120000004128
+            },
+            "flushTechnology": {
+              "calls": 1,
+              "ms": 19.093163999999888
+            },
+            "flushChronicle": {
+              "calls": 1,
+              "ms": 0.43370599999980186
+            },
+            "rememberTechnology": {
+              "calls": 1,
+              "ms": 0.5173270000004777
+            }
+          }
+        },
+        {
+          "round": 6,
+          "tick": 12140,
+          "population": 25,
+          "tiles": 12288,
+          "simulationMs": 125.87117800000033,
+          "saveMs": 106.9616759999999,
+          "phases": {
+            "prepareTechnology": {
+              "calls": 1,
+              "ms": 56.87704500000018
+            },
+            "assertChronicleChanges": {
+              "calls": 1,
+              "ms": 0.01716000000033091
+            },
+            "assertTechnologyChanges": {
+              "calls": 1,
+              "ms": 0.15242200000011508
+            },
+            "flushTechnology": {
+              "calls": 1,
+              "ms": 12.768536999999924
+            },
+            "flushChronicle": {
+              "calls": 1,
+              "ms": 0.35072499999932916
+            },
+            "rememberTechnology": {
+              "calls": 1,
+              "ms": 0.4724559999995108
+            }
+          }
+        },
+        {
+          "round": 7,
+          "tick": 12160,
+          "population": 25,
+          "tiles": 12800,
+          "simulationMs": 135.52387999999974,
+          "saveMs": 106.81034400000044,
+          "phases": {
+            "prepareTechnology": {
+              "calls": 1,
+              "ms": 58.38410500000009
+            },
+            "assertChronicleChanges": {
+              "calls": 1,
+              "ms": 0.017129999999269785
+            },
+            "assertTechnologyChanges": {
+              "calls": 1,
+              "ms": 0.036059999999451975
+            },
+            "flushTechnology": {
+              "calls": 1,
+              "ms": 11.530429000000368
+            },
+            "flushChronicle": {
+              "calls": 1,
+              "ms": 0.368745000000672
+            },
+            "rememberTechnology": {
+              "calls": 1,
+              "ms": 0.5484269999997196
+            }
+          }
+        },
+        {
+          "round": 8,
+          "tick": 12180,
+          "population": 25,
+          "tiles": 12800,
+          "simulationMs": 113.14168100000006,
+          "saveMs": 103.20928399999957,
+          "phases": {
+            "prepareTechnology": {
+              "calls": 1,
+              "ms": 56.760363000000325
+            },
+            "assertChronicleChanges": {
+              "calls": 1,
+              "ms": 0.06977100000040082
+            },
+            "assertTechnologyChanges": {
+              "calls": 1,
+              "ms": 0.04324999999971624
+            },
+            "flushTechnology": {
+              "calls": 1,
+              "ms": 13.492736999999579
+            },
+            "flushChronicle": {
+              "calls": 1,
+              "ms": 0.35868500000015047
+            },
+            "rememberTechnology": {
+              "calls": 1,
+              "ms": 0.48513700000057725
+            }
+          }
+        },
+        {
+          "round": 9,
+          "tick": 12200,
+          "population": 25,
+          "tiles": 12288,
+          "simulationMs": 126.28632300000027,
+          "saveMs": 103.46113699999933,
+          "phases": {
+            "prepareTechnology": {
+              "calls": 1,
+              "ms": 54.185107000000244
+            },
+            "assertChronicleChanges": {
+              "calls": 1,
+              "ms": 0.02155999999922642
+            },
+            "assertTechnologyChanges": {
+              "calls": 1,
+              "ms": 0.03797000000031403
+            },
+            "flushTechnology": {
+              "calls": 1,
+              "ms": 13.279273000000103
+            },
+            "flushChronicle": {
+              "calls": 1,
+              "ms": 0.3695050000005722
+            },
+            "rememberTechnology": {
+              "calls": 1,
+              "ms": 0.46795599999950355
+            }
+          }
+        },
+        {
+          "round": 10,
+          "tick": 12220,
+          "population": 25,
+          "tiles": 12800,
+          "simulationMs": 106.53182000000015,
+          "saveMs": 188.68114400000013,
+          "phases": {
+            "prepareTechnology": {
+              "calls": 1,
+              "ms": 57.81460700000025
+            },
+            "assertChronicleChanges": {
+              "calls": 1,
+              "ms": 0.01731000000017957
+            },
+            "assertTechnologyChanges": {
+              "calls": 1,
+              "ms": 0.03137999999944441
+            },
+            "flushTechnology": {
+              "calls": 1,
+              "ms": 13.691589000000022
+            },
+            "flushChronicle": {
+              "calls": 1,
+              "ms": 0.3790049999997791
+            },
+            "rememberTechnology": {
+              "calls": 1,
+              "ms": 0.5149169999995138
+            }
+          }
+        },
+        {
+          "round": 11,
+          "tick": 12240,
+          "population": 25,
+          "tiles": 13312,
+          "simulationMs": 111.90428299999985,
+          "saveMs": 100.21765100000084,
+          "phases": {
+            "prepareTechnology": {
+              "calls": 1,
+              "ms": 54.449830999999904
+            },
+            "assertChronicleChanges": {
+              "calls": 1,
+              "ms": 0.016810000000077707
+            },
+            "assertTechnologyChanges": {
+              "calls": 1,
+              "ms": 0.03268000000025495
+            },
+            "flushTechnology": {
+              "calls": 1,
+              "ms": 8.760060000000522
+            },
+            "flushChronicle": {
+              "calls": 1,
+              "ms": 0.3651749999999083
+            },
+            "rememberTechnology": {
+              "calls": 1,
+              "ms": 0.43651600000066537
+            }
+          }
+        }
+      ],
+      "finalTick": 12240,
+      "finalStateHash": "0dbee61ddd43cb1a44cd976ee5d069de56c106a895c433c54717a18890954880",
+      "archiveHashes": {
+        "technology_definitions": {
+          "rows": 488,
+          "sha256": "84b8eaddffd3b349d8ff3a37d85164626a9dbdae37ff191ea64841771f1313da"
+        },
+        "technology_stats": {
+          "rows": 1290,
+          "sha256": "011121c58b8af7605efe1de3c052dba0e4d7efcb2922d491ba28832bb49adad1"
+        },
+        "technology_executions": {
+          "rows": 20408,
+          "sha256": "71f23555cb4459418339867da10e582f84566d861d4df2ec3933fa034dc3b853"
+        },
+        "technology_origin": {
+          "rows": 1,
+          "sha256": "e5e554e7a32bde7c9e85ffe647fa0fe593725d4f53f236986d371e43c1c26fa9"
+        }
+      },
+      "snapshotBytes": 3901896
+    },
+    "statements": {
+      "source": "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/artifacts/coherence-20260922/baseline-server-51926/world.sqlite",
+      "mode": "statements",
+      "cadence": 20,
+      "rounds": 12,
+      "sourceHashesBefore": {
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/scripts/benchmark-store.ts": "8d0c5d7df61e77e991a567553262f43dccaac53e1747f6f244780ae69c488ebb",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/assets.d.ts": "da5bf71d48cf909584a01c80b445f730507068f5b34c920f352e2bfcf0315e4c",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/calor.ts": "0badff9eee93ea8bf3139e951add2c34441918bee20e00c8395928fa61f8cc50",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/connection.ts": "00bbf18a09af54ae5c8255478ae32a093c3b8e17fecd9eea1f8a6d0a9d6674c0",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/game.ts": "4ce4cb53b6619c8e9191be2aa13e5dd771f39f209bfab8522dc52c530a145fe6",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/gpu-terrain.ts": "6358268d850b9d7f9fc9eaaf71465af9f80eb45af26747ab9d6d02c132610344",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/icons.ts": "ac93abdf11d9e9af66a2c7ff0a065830f8ab296282fab8475c2c4020628232c2",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/inspector-view.ts": "8e73f336b357c2b4f5c3b7e77c3d447d130b8a0f4f35f0c244246e48fd98d9cd",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/landscape.ts": "56a8c9516714f15e205c6d5caf8900cc3a237e66ac74d4801a9a95ab21914127",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/life-art.ts": "b91f5329d5f2682acfafdba53f1a1d5c61773542d7898a4587938a694d471554",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/luz.ts": "a32c9a414821356ad9a92026ccd88d9c0172c22a983a36ae83c9973529c07fc5",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/main.ts": "1ee4d5f1660a7b563f9cc2c0fa34001a66196cb743d8cfd82d5f695cd2d8e7c5",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/modo.ts": "da299cfb83a3a5b7d98af8ad8bcf8daec3187c020341e5198bf15941adcc717a",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/notebook.ts": "2a402e8296984667e2d09940acba3d8db933b3ce79867b19abb704e041a65865",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/technology-art.ts": "0a62aca27e2a2c1b8f74f28eb749fb93b72be0d0ec4686d65e22768d65436207",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/ui-catalog.ts": "2c575046663adfff12ef0b329df60e1e768d9325eed2a075cb9cb8558ef0485b",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/view-state.ts": "d277ab560a3dd27a1121e0a5b9d59275e93bc083cd9c5d0834bfa4c48fd65af5",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/visit-memory.ts": "59779ab05cb463e4251881315dd56058fff576bba334f5dc59dd0bb8164d879a",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/visual-state.ts": "4ae8b5f0189b325c070d95b31263aae23f8a1e158d5e78b3b2571b31cbba0d35",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/world-evidence.ts": "0931f518021743c5506ba22cbcb72d51c4612cf876fef24112a35bf26af1fe98",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/world-shell.ts": "e23460194a952687f08fe93bfb0ba04760dd6d7ca2e7b1dc07920097eee6b69f",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/app.ts": "8f0d87bf29635052aaa3d1bb7fd0a7e4f83c473d635e490d6d6745f765707257",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/auth.ts": "e8dc1eabf65ac7a5065d0582671be22813005f83c0cce00886a67c9d952c11d2",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/deployment-params.ts": "184bcd3f84781dc533bcb3cb5191d9bc4d3b5c308442dae71430906bae336608",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/governor.ts": "c122b0448c10ab444f7622b13912b91f9dc8fd87cc352006326dcfbdc2d713fb",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/lock.ts": "6818293ed97e2dc2862e7a06e42f8aa8c017a5f27e6656f338331f83a555f536",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/main.ts": "408733d7f78dc204a270b91ccaf06a72df6ed6b8a6e214b75529b1a08088fe10",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/snapshot.ts": "ca6f266357bb676aeadd16f078df7be8bb6eb08213e238b44cca03a07fea012c",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/store.ts": "907f3978db423defb9bc03fec915f9f8da8c56262be61a23f28265a83b8d15d2",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/technology-archive.ts": "3820d2dbaf01ddb25e01debc320bd549c59d6b67e7eb56a72541cd01da0899d4",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/world-instance.ts": "0bb10082d68e29d900bad745f2e06ed284e79603ca49ab3c93792e27ed603969",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/shared/demography.ts": "a9e6d6f273957529e942d5358988171a7ab25327ced8d039706f7dfa5fb9fa6f",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/shared/life.ts": "7c2ee3924ddbae01f55c22ff52ac2bd208e8877284c1ee48782f33239f1070bf",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/shared/organization.ts": "30d8869086faf0754002e240b3bef1fcec9600d51ab3b40c6bce7ef977f4a2bd",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/shared/technology-archive.ts": "4d9ad0b9f1be01e95fbfb5365b6a1391b3321f39c5bcfce0806d5cb2d0079354",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/shared/technology.ts": "e3394386e61bc508956400a3a0bf1c35193c4265bfa527ebebf03dee038b8b69",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/shared/types.ts": "df913b9326f03f4773107c54e9472905c31634f699fab59f9ab75650d21b59a3",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/shared/world-instance.ts": "09967c006226f2fca8fd04af2ca3c310db67278e95d0cfaccbd193d241605349",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/agua.ts": "3f3be7cac9fffe40a31bd7d38b223b1d9398dd1d310d2170825b3b40bb031e0e",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/animals.ts": "0e9cce23504715a370f74c24b8f0c0e82d0cb1447945b3486ff8843ee1af0a7a",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/body.ts": "00643e43be3f11a5804772e9d0ccc405c447d23377997a5a4269937ecc2101cb",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/chronicle-journal.ts": "880f5298474445f435e820fc034b7019ca80007823cfa3607fa551f4b3ffedee",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/demography.ts": "09fececd55349ee7e48db5b632ddb1f06e6f8143a669a9f8611bfd3cbc531dfe",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/digesto.ts": "d330eccce86f8576d042e41acd42deabf2ea6fa3730a80c51f34fc47cbf9f05d",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/diversidad.ts": "57b104be0efbd12d188dc352123c2982e83a15d27fa5d9bfcbf965f9cc33e6d3",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/ecosystem-kernel.ts": "b1cb946781e204fd9db31520c61699f4f91cf431d1b735351984f6e2e3bf9b78",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/ecosystem.ts": "24444f458e70e6c41bb0e9fc5f88290ee50fbe1edbd3b44109805ce89baeee10",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/family.ts": "0ba24f3399c5cda9400b431ff373bdc7ce98572993ee04fcd5a9db45734471d4",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/forest.ts": "9c6c32126a74a35896038994f5988cb7b6490ef440b67fc741b7ce13e1e54212",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/genetics.ts": "6303faa03b11d4f5d659055947955aa16ff82f75a0e8cff143d6ad336da7e12e",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/index.ts": "5d925107b8115c61f218b7ae5b0236324758dccdc3bd7b88262a1f5f20d5ffe7",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/inventions.ts": "c45cd3b84f74c46eb9a1158c4fc3a52716ff0eafe5dfc2039aefe350f02c14a4",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/lineage.ts": "e24706e14642c4aa5144de8abd8e76d3d63977829328b0f6cd5d1a0e74f01862",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/material-affordances.ts": "0bb5041204409e1545ec2f783862a46de325246520b4025c49ed7ef4cfc0e142",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/needs.ts": "40990c1ad6e824e247f70e217dad1bda0d986ab3d80d0d4c1c8561844061c292",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/organization.ts": "e6e3597bf46474fcfec908f01eb562089f37000b14ebea14b40e4eb91901b7b8",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/params.ts": "b10662cab2a7a8efd1b3f38d7f79c4edf63c175c88c08ba8366b13539a5dd51b",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/society.ts": "6828319b26060bec728de7643a4f9becc63282fb09872d117292e3dde7fcadf3",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/spatial.ts": "17861e50a4e6ade76981a06541ab86bd8f87e42e5612ef7ec4c0fecc69d652e9",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/statistics.ts": "c4f8374433a8121c998c421d0eb044a2e4c0c860d214240f6552ed3a8ab4d0c0",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology-catalogue.ts": "7b3fd17ea57181b8aad059a9ae19f0e9f03e89f3d73c0a3c15e17aa246dcffc6",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology-checkpoint.ts": "34f16cc74a700265f2e5407ba3e52e984b74474c2fbd6444e99196586ce9469f",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology-execution.ts": "5d1423ee670dd034c5f50d3bd7b612e39eab40ba7181725aec42ab945c6e41a4",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology-journal.ts": "2687af97e425c1a13d9fc8a0c229eb12c544673f2ab04e3514cd4974be0abacf",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology-memory.ts": "8fdf32db2628ad7b311701fdac4067966f5e3fe2ad187d78a2eaf63cc20490fb",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology-organization.ts": "3840fa5602012386dc705e9fc7f46f0c18e3983a731481b05e1ca0bb8fa12dde",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology-water.ts": "51bb48999be20e560056739158a0127cf3351b81adafda69f0c434f2465ea9d6",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology.ts": "ff781172cb2440c08e4f02048e0a8330f81b7fb4da7acad736ca964c63e6dafc",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/terrain.ts": "538280dba7df8ee07b6b8ada9d2e8ddd007b82bc8d1bae3196927709d3f14c97",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/validation.ts": "9b9f86d53786967c1138ed2c41b4a6a17a0695eab75ef2e28bc15f28b47cc3cd"
+      },
+      "sourceHashesAfter": {
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/scripts/benchmark-store.ts": "8d0c5d7df61e77e991a567553262f43dccaac53e1747f6f244780ae69c488ebb",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/assets.d.ts": "da5bf71d48cf909584a01c80b445f730507068f5b34c920f352e2bfcf0315e4c",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/calor.ts": "0badff9eee93ea8bf3139e951add2c34441918bee20e00c8395928fa61f8cc50",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/connection.ts": "00bbf18a09af54ae5c8255478ae32a093c3b8e17fecd9eea1f8a6d0a9d6674c0",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/game.ts": "4ce4cb53b6619c8e9191be2aa13e5dd771f39f209bfab8522dc52c530a145fe6",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/gpu-terrain.ts": "6358268d850b9d7f9fc9eaaf71465af9f80eb45af26747ab9d6d02c132610344",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/icons.ts": "ac93abdf11d9e9af66a2c7ff0a065830f8ab296282fab8475c2c4020628232c2",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/inspector-view.ts": "8e73f336b357c2b4f5c3b7e77c3d447d130b8a0f4f35f0c244246e48fd98d9cd",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/landscape.ts": "56a8c9516714f15e205c6d5caf8900cc3a237e66ac74d4801a9a95ab21914127",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/life-art.ts": "b91f5329d5f2682acfafdba53f1a1d5c61773542d7898a4587938a694d471554",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/luz.ts": "a32c9a414821356ad9a92026ccd88d9c0172c22a983a36ae83c9973529c07fc5",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/main.ts": "1ee4d5f1660a7b563f9cc2c0fa34001a66196cb743d8cfd82d5f695cd2d8e7c5",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/modo.ts": "da299cfb83a3a5b7d98af8ad8bcf8daec3187c020341e5198bf15941adcc717a",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/notebook.ts": "2a402e8296984667e2d09940acba3d8db933b3ce79867b19abb704e041a65865",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/technology-art.ts": "0a62aca27e2a2c1b8f74f28eb749fb93b72be0d0ec4686d65e22768d65436207",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/ui-catalog.ts": "2c575046663adfff12ef0b329df60e1e768d9325eed2a075cb9cb8558ef0485b",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/view-state.ts": "d277ab560a3dd27a1121e0a5b9d59275e93bc083cd9c5d0834bfa4c48fd65af5",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/visit-memory.ts": "59779ab05cb463e4251881315dd56058fff576bba334f5dc59dd0bb8164d879a",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/visual-state.ts": "4ae8b5f0189b325c070d95b31263aae23f8a1e158d5e78b3b2571b31cbba0d35",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/world-evidence.ts": "0931f518021743c5506ba22cbcb72d51c4612cf876fef24112a35bf26af1fe98",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/world-shell.ts": "e23460194a952687f08fe93bfb0ba04760dd6d7ca2e7b1dc07920097eee6b69f",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/app.ts": "8f0d87bf29635052aaa3d1bb7fd0a7e4f83c473d635e490d6d6745f765707257",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/auth.ts": "e8dc1eabf65ac7a5065d0582671be22813005f83c0cce00886a67c9d952c11d2",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/deployment-params.ts": "184bcd3f84781dc533bcb3cb5191d9bc4d3b5c308442dae71430906bae336608",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/governor.ts": "c122b0448c10ab444f7622b13912b91f9dc8fd87cc352006326dcfbdc2d713fb",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/lock.ts": "6818293ed97e2dc2862e7a06e42f8aa8c017a5f27e6656f338331f83a555f536",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/main.ts": "408733d7f78dc204a270b91ccaf06a72df6ed6b8a6e214b75529b1a08088fe10",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/snapshot.ts": "ca6f266357bb676aeadd16f078df7be8bb6eb08213e238b44cca03a07fea012c",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/store.ts": "907f3978db423defb9bc03fec915f9f8da8c56262be61a23f28265a83b8d15d2",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/technology-archive.ts": "3820d2dbaf01ddb25e01debc320bd549c59d6b67e7eb56a72541cd01da0899d4",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/world-instance.ts": "0bb10082d68e29d900bad745f2e06ed284e79603ca49ab3c93792e27ed603969",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/shared/demography.ts": "a9e6d6f273957529e942d5358988171a7ab25327ced8d039706f7dfa5fb9fa6f",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/shared/life.ts": "7c2ee3924ddbae01f55c22ff52ac2bd208e8877284c1ee48782f33239f1070bf",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/shared/organization.ts": "30d8869086faf0754002e240b3bef1fcec9600d51ab3b40c6bce7ef977f4a2bd",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/shared/technology-archive.ts": "4d9ad0b9f1be01e95fbfb5365b6a1391b3321f39c5bcfce0806d5cb2d0079354",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/shared/technology.ts": "e3394386e61bc508956400a3a0bf1c35193c4265bfa527ebebf03dee038b8b69",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/shared/types.ts": "df913b9326f03f4773107c54e9472905c31634f699fab59f9ab75650d21b59a3",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/shared/world-instance.ts": "09967c006226f2fca8fd04af2ca3c310db67278e95d0cfaccbd193d241605349",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/agua.ts": "3f3be7cac9fffe40a31bd7d38b223b1d9398dd1d310d2170825b3b40bb031e0e",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/animals.ts": "0e9cce23504715a370f74c24b8f0c0e82d0cb1447945b3486ff8843ee1af0a7a",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/body.ts": "00643e43be3f11a5804772e9d0ccc405c447d23377997a5a4269937ecc2101cb",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/chronicle-journal.ts": "880f5298474445f435e820fc034b7019ca80007823cfa3607fa551f4b3ffedee",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/demography.ts": "09fececd55349ee7e48db5b632ddb1f06e6f8143a669a9f8611bfd3cbc531dfe",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/digesto.ts": "d330eccce86f8576d042e41acd42deabf2ea6fa3730a80c51f34fc47cbf9f05d",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/diversidad.ts": "57b104be0efbd12d188dc352123c2982e83a15d27fa5d9bfcbf965f9cc33e6d3",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/ecosystem-kernel.ts": "b1cb946781e204fd9db31520c61699f4f91cf431d1b735351984f6e2e3bf9b78",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/ecosystem.ts": "24444f458e70e6c41bb0e9fc5f88290ee50fbe1edbd3b44109805ce89baeee10",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/family.ts": "0ba24f3399c5cda9400b431ff373bdc7ce98572993ee04fcd5a9db45734471d4",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/forest.ts": "9c6c32126a74a35896038994f5988cb7b6490ef440b67fc741b7ce13e1e54212",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/genetics.ts": "6303faa03b11d4f5d659055947955aa16ff82f75a0e8cff143d6ad336da7e12e",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/index.ts": "5d925107b8115c61f218b7ae5b0236324758dccdc3bd7b88262a1f5f20d5ffe7",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/inventions.ts": "c45cd3b84f74c46eb9a1158c4fc3a52716ff0eafe5dfc2039aefe350f02c14a4",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/lineage.ts": "e24706e14642c4aa5144de8abd8e76d3d63977829328b0f6cd5d1a0e74f01862",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/material-affordances.ts": "0bb5041204409e1545ec2f783862a46de325246520b4025c49ed7ef4cfc0e142",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/needs.ts": "40990c1ad6e824e247f70e217dad1bda0d986ab3d80d0d4c1c8561844061c292",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/organization.ts": "e6e3597bf46474fcfec908f01eb562089f37000b14ebea14b40e4eb91901b7b8",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/params.ts": "b10662cab2a7a8efd1b3f38d7f79c4edf63c175c88c08ba8366b13539a5dd51b",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/society.ts": "6828319b26060bec728de7643a4f9becc63282fb09872d117292e3dde7fcadf3",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/spatial.ts": "17861e50a4e6ade76981a06541ab86bd8f87e42e5612ef7ec4c0fecc69d652e9",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/statistics.ts": "c4f8374433a8121c998c421d0eb044a2e4c0c860d214240f6552ed3a8ab4d0c0",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology-catalogue.ts": "7b3fd17ea57181b8aad059a9ae19f0e9f03e89f3d73c0a3c15e17aa246dcffc6",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology-checkpoint.ts": "34f16cc74a700265f2e5407ba3e52e984b74474c2fbd6444e99196586ce9469f",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology-execution.ts": "5d1423ee670dd034c5f50d3bd7b612e39eab40ba7181725aec42ab945c6e41a4",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology-journal.ts": "2687af97e425c1a13d9fc8a0c229eb12c544673f2ab04e3514cd4974be0abacf",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology-memory.ts": "8fdf32db2628ad7b311701fdac4067966f5e3fe2ad187d78a2eaf63cc20490fb",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology-organization.ts": "3840fa5602012386dc705e9fc7f46f0c18e3983a731481b05e1ca0bb8fa12dde",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology-water.ts": "51bb48999be20e560056739158a0127cf3351b81adafda69f0c434f2465ea9d6",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology.ts": "ff781172cb2440c08e4f02048e0a8330f81b7fb4da7acad736ca964c63e6dafc",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/terrain.ts": "538280dba7df8ee07b6b8ada9d2e8ddd007b82bc8d1bae3196927709d3f14c97",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/validation.ts": "9b9f86d53786967c1138ed2c41b4a6a17a0695eab75ef2e28bc15f28b47cc3cd"
+      },
+      "loadMs": 2272.643922,
+      "samples": [
+        {
+          "round": 0,
+          "tick": 12020,
+          "population": 25,
+          "tiles": 12288,
+          "simulationMs": 193.0037970000003,
+          "saveMs": 83.83990399999993,
+          "phases": {
+            "prepareTechnology": {
+              "calls": 1,
+              "ms": 30.41678899999988
+            },
+            "assertChronicleChanges": {
+              "calls": 1,
+              "ms": 0.1311319999999796
+            },
+            "assertTechnologyChanges": {
+              "calls": 1,
+              "ms": 0.13967200000024604
+            },
+            "flushTechnology": {
+              "calls": 1,
+              "ms": 12.012444999999843
+            },
+            "flushChronicle": {
+              "calls": 1,
+              "ms": 0.5751980000000003
+            },
+            "rememberTechnology": {
+              "calls": 1,
+              "ms": 0.5770579999998517
+            }
+          }
+        },
+        {
+          "round": 1,
+          "tick": 12040,
+          "population": 25,
+          "tiles": 11776,
+          "simulationMs": 172.27971100000013,
+          "saveMs": 83.34769700000015,
+          "phases": {
+            "prepareTechnology": {
+              "calls": 1,
+              "ms": 37.80537000000004
+            },
+            "assertChronicleChanges": {
+              "calls": 1,
+              "ms": 0.05003099999976257
+            },
+            "assertTechnologyChanges": {
+              "calls": 1,
+              "ms": 0.15273200000001452
+            },
+            "flushTechnology": {
+              "calls": 1,
+              "ms": 10.338522000000012
+            },
+            "flushChronicle": {
+              "calls": 1,
+              "ms": 0.4351060000003599
+            },
+            "rememberTechnology": {
+              "calls": 1,
+              "ms": 0.5780979999999545
+            }
+          }
+        },
+        {
+          "round": 2,
+          "tick": 12060,
+          "population": 25,
+          "tiles": 11776,
+          "simulationMs": 147.0826830000001,
+          "saveMs": 74.625047,
+          "phases": {
+            "prepareTechnology": {
+              "calls": 1,
+              "ms": 29.80839100000003
+            },
+            "assertChronicleChanges": {
+              "calls": 1,
+              "ms": 0.04919100000006438
+            },
+            "assertTechnologyChanges": {
+              "calls": 1,
+              "ms": 0.09030100000018138
+            },
+            "flushTechnology": {
+              "calls": 1,
+              "ms": 10.006036999999651
+            },
+            "flushChronicle": {
+              "calls": 1,
+              "ms": 0.4218460000001869
+            },
+            "rememberTechnology": {
+              "calls": 1,
+              "ms": 0.5861479999998664
+            }
+          }
+        },
+        {
+          "round": 3,
+          "tick": 12080,
+          "population": 25,
+          "tiles": 12800,
+          "simulationMs": 162.75357900000017,
+          "saveMs": 82.74711799999977,
+          "phases": {
+            "prepareTechnology": {
+              "calls": 1,
+              "ms": 32.495046999999886
+            },
+            "assertChronicleChanges": {
+              "calls": 1,
+              "ms": 0.03995100000020102
+            },
+            "assertTechnologyChanges": {
+              "calls": 1,
+              "ms": 0.03720000000021173
+            },
+            "flushTechnology": {
+              "calls": 1,
+              "ms": 10.4334530000001
+            },
+            "flushChronicle": {
+              "calls": 1,
+              "ms": 0.4115160000001197
+            },
+            "rememberTechnology": {
+              "calls": 1,
+              "ms": 0.5146869999998671
+            }
+          }
+        },
+        {
+          "round": 4,
+          "tick": 12100,
+          "population": 25,
+          "tiles": 12800,
+          "simulationMs": 154.3262340000001,
+          "saveMs": 83.96917600000006,
+          "phases": {
+            "prepareTechnology": {
+              "calls": 1,
+              "ms": 34.402054000000135
+            },
+            "assertChronicleChanges": {
+              "calls": 1,
+              "ms": 0.0395410000000993
+            },
+            "assertTechnologyChanges": {
+              "calls": 1,
+              "ms": 0.04271099999959915
+            },
+            "flushTechnology": {
+              "calls": 1,
+              "ms": 10.139279999999872
+            },
+            "flushChronicle": {
+              "calls": 1,
+              "ms": 0.42016499999999724
+            },
+            "rememberTechnology": {
+              "calls": 1,
+              "ms": 0.6490690000000541
+            }
+          }
+        },
+        {
+          "round": 5,
+          "tick": 12120,
+          "population": 25,
+          "tiles": 13312,
+          "simulationMs": 144.06292199999962,
+          "saveMs": 84.33689000000004,
+          "phases": {
+            "prepareTechnology": {
+              "calls": 1,
+              "ms": 33.16478600000028
+            },
+            "assertChronicleChanges": {
+              "calls": 1,
+              "ms": 0.03272999999990134
+            },
+            "assertTechnologyChanges": {
+              "calls": 1,
+              "ms": 0.16901199999983874
+            },
+            "flushTechnology": {
+              "calls": 1,
+              "ms": 11.01938199999995
+            },
+            "flushChronicle": {
+              "calls": 1,
+              "ms": 0.4717059999998128
+            },
+            "rememberTechnology": {
+              "calls": 1,
+              "ms": 0.6103480000001582
+            }
+          }
+        },
+        {
+          "round": 6,
+          "tick": 12140,
+          "population": 25,
+          "tiles": 12288,
+          "simulationMs": 135.26004000000012,
+          "saveMs": 81.76375400000006,
+          "phases": {
+            "prepareTechnology": {
+              "calls": 1,
+              "ms": 34.36478199999965
+            },
+            "assertChronicleChanges": {
+              "calls": 1,
+              "ms": 0.032290000000102737
+            },
+            "assertTechnologyChanges": {
+              "calls": 1,
+              "ms": 0.14526200000000244
+            },
+            "flushTechnology": {
+              "calls": 1,
+              "ms": 8.61256800000001
+            },
+            "flushChronicle": {
+              "calls": 1,
+              "ms": 0.38253500000018903
+            },
+            "rememberTechnology": {
+              "calls": 1,
+              "ms": 0.5804079999998066
+            }
+          }
+        },
+        {
+          "round": 7,
+          "tick": 12160,
+          "population": 25,
+          "tiles": 12800,
+          "simulationMs": 139.70853099999977,
+          "saveMs": 80.57091800000035,
+          "phases": {
+            "prepareTechnology": {
+              "calls": 1,
+              "ms": 33.67441300000064
+            },
+            "assertChronicleChanges": {
+              "calls": 1,
+              "ms": 0.033350000000609725
+            },
+            "assertTechnologyChanges": {
+              "calls": 1,
+              "ms": 0.044861000000310014
+            },
+            "flushTechnology": {
+              "calls": 1,
+              "ms": 7.9323590000003605
+            },
+            "flushChronicle": {
+              "calls": 1,
+              "ms": 0.3974660000003496
+            },
+            "rememberTechnology": {
+              "calls": 1,
+              "ms": 0.5868279999995138
+            }
+          }
+        },
+        {
+          "round": 8,
+          "tick": 12180,
+          "population": 25,
+          "tiles": 12800,
+          "simulationMs": 115.91061400000035,
+          "saveMs": 76.31858000000011,
+          "phases": {
+            "prepareTechnology": {
+              "calls": 1,
+              "ms": 31.82865700000002
+            },
+            "assertChronicleChanges": {
+              "calls": 1,
+              "ms": 0.1052319999998872
+            },
+            "assertTechnologyChanges": {
+              "calls": 1,
+              "ms": 0.04655999999977212
+            },
+            "flushTechnology": {
+              "calls": 1,
+              "ms": 9.043793999999252
+            },
+            "flushChronicle": {
+              "calls": 1,
+              "ms": 0.38022600000022067
+            },
+            "rememberTechnology": {
+              "calls": 1,
+              "ms": 0.609599000000344
+            }
+          }
+        },
+        {
+          "round": 9,
+          "tick": 12200,
+          "population": 25,
+          "tiles": 12288,
+          "simulationMs": 137.553132,
+          "saveMs": 80.3618149999993,
+          "phases": {
+            "prepareTechnology": {
+              "calls": 1,
+              "ms": 32.96310300000005
+            },
+            "assertChronicleChanges": {
+              "calls": 1,
+              "ms": 0.03649000000041269
+            },
+            "assertTechnologyChanges": {
+              "calls": 1,
+              "ms": 0.04329099999995378
+            },
+            "flushTechnology": {
+              "calls": 1,
+              "ms": 9.529571000000033
+            },
+            "flushChronicle": {
+              "calls": 1,
+              "ms": 0.40409599999929924
+            },
+            "rememberTechnology": {
+              "calls": 1,
+              "ms": 0.7765010000002803
+            }
+          }
+        },
+        {
+          "round": 10,
+          "tick": 12220,
+          "population": 25,
+          "tiles": 12800,
+          "simulationMs": 116.20861700000023,
+          "saveMs": 136.59943700000076,
+          "phases": {
+            "prepareTechnology": {
+              "calls": 1,
+              "ms": 33.64215200000035
+            },
+            "assertChronicleChanges": {
+              "calls": 1,
+              "ms": 0.03143100000033883
+            },
+            "assertTechnologyChanges": {
+              "calls": 1,
+              "ms": 0.03513000000020838
+            },
+            "flushTechnology": {
+              "calls": 1,
+              "ms": 6.77048300000024
+            },
+            "flushChronicle": {
+              "calls": 1,
+              "ms": 0.4089860000003682
+            },
+            "rememberTechnology": {
+              "calls": 1,
+              "ms": 0.5927380000002813
+            }
+          }
+        },
+        {
+          "round": 11,
+          "tick": 12240,
+          "population": 25,
+          "tiles": 13312,
+          "simulationMs": 119.6278740000007,
+          "saveMs": 73.24237600000015,
+          "phases": {
+            "prepareTechnology": {
+              "calls": 1,
+              "ms": 32.30827399999998
+            },
+            "assertChronicleChanges": {
+              "calls": 1,
+              "ms": 0.02866100000028382
+            },
+            "assertTechnologyChanges": {
+              "calls": 1,
+              "ms": 0.038021000000298955
+            },
+            "flushTechnology": {
+              "calls": 1,
+              "ms": 6.347766999999294
+            },
+            "flushChronicle": {
+              "calls": 1,
+              "ms": 0.3951759999999922
+            },
+            "rememberTechnology": {
+              "calls": 1,
+              "ms": 0.5443870000008246
+            }
+          }
+        }
+      ],
+      "finalTick": 12240,
+      "finalStateHash": "0dbee61ddd43cb1a44cd976ee5d069de56c106a895c433c54717a18890954880",
+      "archiveHashes": {
+        "technology_definitions": {
+          "rows": 488,
+          "sha256": "84b8eaddffd3b349d8ff3a37d85164626a9dbdae37ff191ea64841771f1313da"
+        },
+        "technology_stats": {
+          "rows": 1290,
+          "sha256": "011121c58b8af7605efe1de3c052dba0e4d7efcb2922d491ba28832bb49adad1"
+        },
+        "technology_executions": {
+          "rows": 20408,
+          "sha256": "71f23555cb4459418339867da10e582f84566d861d4df2ec3933fa034dc3b853"
+        },
+        "technology_origin": {
+          "rows": 1,
+          "sha256": "e5e554e7a32bde7c9e85ffe647fa0fe593725d4f53f236986d371e43c1c26fa9"
+        }
+      },
+      "snapshotBytes": 3901896
+    },
+    "memo": {
+      "source": "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/artifacts/coherence-20260922/baseline-server-51926/world.sqlite",
+      "mode": "memo",
+      "cadence": 20,
+      "rounds": 12,
+      "sourceHashesBefore": {
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/scripts/benchmark-store.ts": "8d0c5d7df61e77e991a567553262f43dccaac53e1747f6f244780ae69c488ebb",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/assets.d.ts": "da5bf71d48cf909584a01c80b445f730507068f5b34c920f352e2bfcf0315e4c",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/calor.ts": "0badff9eee93ea8bf3139e951add2c34441918bee20e00c8395928fa61f8cc50",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/connection.ts": "00bbf18a09af54ae5c8255478ae32a093c3b8e17fecd9eea1f8a6d0a9d6674c0",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/game.ts": "4ce4cb53b6619c8e9191be2aa13e5dd771f39f209bfab8522dc52c530a145fe6",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/gpu-terrain.ts": "6358268d850b9d7f9fc9eaaf71465af9f80eb45af26747ab9d6d02c132610344",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/icons.ts": "ac93abdf11d9e9af66a2c7ff0a065830f8ab296282fab8475c2c4020628232c2",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/inspector-view.ts": "8e73f336b357c2b4f5c3b7e77c3d447d130b8a0f4f35f0c244246e48fd98d9cd",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/landscape.ts": "56a8c9516714f15e205c6d5caf8900cc3a237e66ac74d4801a9a95ab21914127",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/life-art.ts": "b91f5329d5f2682acfafdba53f1a1d5c61773542d7898a4587938a694d471554",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/luz.ts": "a32c9a414821356ad9a92026ccd88d9c0172c22a983a36ae83c9973529c07fc5",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/main.ts": "1ee4d5f1660a7b563f9cc2c0fa34001a66196cb743d8cfd82d5f695cd2d8e7c5",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/modo.ts": "da299cfb83a3a5b7d98af8ad8bcf8daec3187c020341e5198bf15941adcc717a",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/notebook.ts": "2a402e8296984667e2d09940acba3d8db933b3ce79867b19abb704e041a65865",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/technology-art.ts": "0a62aca27e2a2c1b8f74f28eb749fb93b72be0d0ec4686d65e22768d65436207",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/ui-catalog.ts": "2c575046663adfff12ef0b329df60e1e768d9325eed2a075cb9cb8558ef0485b",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/view-state.ts": "d277ab560a3dd27a1121e0a5b9d59275e93bc083cd9c5d0834bfa4c48fd65af5",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/visit-memory.ts": "59779ab05cb463e4251881315dd56058fff576bba334f5dc59dd0bb8164d879a",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/visual-state.ts": "4ae8b5f0189b325c070d95b31263aae23f8a1e158d5e78b3b2571b31cbba0d35",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/world-evidence.ts": "0931f518021743c5506ba22cbcb72d51c4612cf876fef24112a35bf26af1fe98",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/world-shell.ts": "e23460194a952687f08fe93bfb0ba04760dd6d7ca2e7b1dc07920097eee6b69f",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/app.ts": "8f0d87bf29635052aaa3d1bb7fd0a7e4f83c473d635e490d6d6745f765707257",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/auth.ts": "e8dc1eabf65ac7a5065d0582671be22813005f83c0cce00886a67c9d952c11d2",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/deployment-params.ts": "184bcd3f84781dc533bcb3cb5191d9bc4d3b5c308442dae71430906bae336608",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/governor.ts": "c122b0448c10ab444f7622b13912b91f9dc8fd87cc352006326dcfbdc2d713fb",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/lock.ts": "6818293ed97e2dc2862e7a06e42f8aa8c017a5f27e6656f338331f83a555f536",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/main.ts": "408733d7f78dc204a270b91ccaf06a72df6ed6b8a6e214b75529b1a08088fe10",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/snapshot.ts": "ca6f266357bb676aeadd16f078df7be8bb6eb08213e238b44cca03a07fea012c",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/store.ts": "907f3978db423defb9bc03fec915f9f8da8c56262be61a23f28265a83b8d15d2",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/technology-archive.ts": "3820d2dbaf01ddb25e01debc320bd549c59d6b67e7eb56a72541cd01da0899d4",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/world-instance.ts": "0bb10082d68e29d900bad745f2e06ed284e79603ca49ab3c93792e27ed603969",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/shared/demography.ts": "a9e6d6f273957529e942d5358988171a7ab25327ced8d039706f7dfa5fb9fa6f",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/shared/life.ts": "7c2ee3924ddbae01f55c22ff52ac2bd208e8877284c1ee48782f33239f1070bf",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/shared/organization.ts": "30d8869086faf0754002e240b3bef1fcec9600d51ab3b40c6bce7ef977f4a2bd",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/shared/technology-archive.ts": "4d9ad0b9f1be01e95fbfb5365b6a1391b3321f39c5bcfce0806d5cb2d0079354",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/shared/technology.ts": "e3394386e61bc508956400a3a0bf1c35193c4265bfa527ebebf03dee038b8b69",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/shared/types.ts": "df913b9326f03f4773107c54e9472905c31634f699fab59f9ab75650d21b59a3",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/shared/world-instance.ts": "09967c006226f2fca8fd04af2ca3c310db67278e95d0cfaccbd193d241605349",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/agua.ts": "3f3be7cac9fffe40a31bd7d38b223b1d9398dd1d310d2170825b3b40bb031e0e",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/animals.ts": "0e9cce23504715a370f74c24b8f0c0e82d0cb1447945b3486ff8843ee1af0a7a",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/body.ts": "00643e43be3f11a5804772e9d0ccc405c447d23377997a5a4269937ecc2101cb",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/chronicle-journal.ts": "880f5298474445f435e820fc034b7019ca80007823cfa3607fa551f4b3ffedee",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/demography.ts": "09fececd55349ee7e48db5b632ddb1f06e6f8143a669a9f8611bfd3cbc531dfe",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/digesto.ts": "d330eccce86f8576d042e41acd42deabf2ea6fa3730a80c51f34fc47cbf9f05d",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/diversidad.ts": "57b104be0efbd12d188dc352123c2982e83a15d27fa5d9bfcbf965f9cc33e6d3",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/ecosystem-kernel.ts": "b1cb946781e204fd9db31520c61699f4f91cf431d1b735351984f6e2e3bf9b78",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/ecosystem.ts": "24444f458e70e6c41bb0e9fc5f88290ee50fbe1edbd3b44109805ce89baeee10",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/family.ts": "0ba24f3399c5cda9400b431ff373bdc7ce98572993ee04fcd5a9db45734471d4",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/forest.ts": "9c6c32126a74a35896038994f5988cb7b6490ef440b67fc741b7ce13e1e54212",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/genetics.ts": "6303faa03b11d4f5d659055947955aa16ff82f75a0e8cff143d6ad336da7e12e",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/index.ts": "5d925107b8115c61f218b7ae5b0236324758dccdc3bd7b88262a1f5f20d5ffe7",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/inventions.ts": "c45cd3b84f74c46eb9a1158c4fc3a52716ff0eafe5dfc2039aefe350f02c14a4",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/lineage.ts": "e24706e14642c4aa5144de8abd8e76d3d63977829328b0f6cd5d1a0e74f01862",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/material-affordances.ts": "0bb5041204409e1545ec2f783862a46de325246520b4025c49ed7ef4cfc0e142",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/needs.ts": "40990c1ad6e824e247f70e217dad1bda0d986ab3d80d0d4c1c8561844061c292",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/organization.ts": "e6e3597bf46474fcfec908f01eb562089f37000b14ebea14b40e4eb91901b7b8",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/params.ts": "b10662cab2a7a8efd1b3f38d7f79c4edf63c175c88c08ba8366b13539a5dd51b",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/society.ts": "6828319b26060bec728de7643a4f9becc63282fb09872d117292e3dde7fcadf3",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/spatial.ts": "17861e50a4e6ade76981a06541ab86bd8f87e42e5612ef7ec4c0fecc69d652e9",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/statistics.ts": "c4f8374433a8121c998c421d0eb044a2e4c0c860d214240f6552ed3a8ab4d0c0",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology-catalogue.ts": "7b3fd17ea57181b8aad059a9ae19f0e9f03e89f3d73c0a3c15e17aa246dcffc6",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology-checkpoint.ts": "34f16cc74a700265f2e5407ba3e52e984b74474c2fbd6444e99196586ce9469f",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology-execution.ts": "5d1423ee670dd034c5f50d3bd7b612e39eab40ba7181725aec42ab945c6e41a4",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology-journal.ts": "2687af97e425c1a13d9fc8a0c229eb12c544673f2ab04e3514cd4974be0abacf",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology-memory.ts": "8fdf32db2628ad7b311701fdac4067966f5e3fe2ad187d78a2eaf63cc20490fb",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology-organization.ts": "3840fa5602012386dc705e9fc7f46f0c18e3983a731481b05e1ca0bb8fa12dde",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology-water.ts": "51bb48999be20e560056739158a0127cf3351b81adafda69f0c434f2465ea9d6",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology.ts": "ff781172cb2440c08e4f02048e0a8330f81b7fb4da7acad736ca964c63e6dafc",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/terrain.ts": "538280dba7df8ee07b6b8ada9d2e8ddd007b82bc8d1bae3196927709d3f14c97",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/validation.ts": "9b9f86d53786967c1138ed2c41b4a6a17a0695eab75ef2e28bc15f28b47cc3cd",
+        "/tmp/atlas-store-v7-final-memo-20260922/store-generic-copy.mts": "8ef574227814336f1d53152c69e5b22653ce5c35a357bf4a8e2ecd6791a0a327"
+      },
+      "sourceHashesAfter": {
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/scripts/benchmark-store.ts": "8d0c5d7df61e77e991a567553262f43dccaac53e1747f6f244780ae69c488ebb",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/assets.d.ts": "da5bf71d48cf909584a01c80b445f730507068f5b34c920f352e2bfcf0315e4c",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/calor.ts": "0badff9eee93ea8bf3139e951add2c34441918bee20e00c8395928fa61f8cc50",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/connection.ts": "00bbf18a09af54ae5c8255478ae32a093c3b8e17fecd9eea1f8a6d0a9d6674c0",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/game.ts": "4ce4cb53b6619c8e9191be2aa13e5dd771f39f209bfab8522dc52c530a145fe6",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/gpu-terrain.ts": "6358268d850b9d7f9fc9eaaf71465af9f80eb45af26747ab9d6d02c132610344",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/icons.ts": "ac93abdf11d9e9af66a2c7ff0a065830f8ab296282fab8475c2c4020628232c2",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/inspector-view.ts": "8e73f336b357c2b4f5c3b7e77c3d447d130b8a0f4f35f0c244246e48fd98d9cd",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/landscape.ts": "56a8c9516714f15e205c6d5caf8900cc3a237e66ac74d4801a9a95ab21914127",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/life-art.ts": "b91f5329d5f2682acfafdba53f1a1d5c61773542d7898a4587938a694d471554",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/luz.ts": "a32c9a414821356ad9a92026ccd88d9c0172c22a983a36ae83c9973529c07fc5",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/main.ts": "1ee4d5f1660a7b563f9cc2c0fa34001a66196cb743d8cfd82d5f695cd2d8e7c5",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/modo.ts": "da299cfb83a3a5b7d98af8ad8bcf8daec3187c020341e5198bf15941adcc717a",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/notebook.ts": "2a402e8296984667e2d09940acba3d8db933b3ce79867b19abb704e041a65865",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/technology-art.ts": "0a62aca27e2a2c1b8f74f28eb749fb93b72be0d0ec4686d65e22768d65436207",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/ui-catalog.ts": "2c575046663adfff12ef0b329df60e1e768d9325eed2a075cb9cb8558ef0485b",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/view-state.ts": "d277ab560a3dd27a1121e0a5b9d59275e93bc083cd9c5d0834bfa4c48fd65af5",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/visit-memory.ts": "59779ab05cb463e4251881315dd56058fff576bba334f5dc59dd0bb8164d879a",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/visual-state.ts": "4ae8b5f0189b325c070d95b31263aae23f8a1e158d5e78b3b2571b31cbba0d35",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/world-evidence.ts": "0931f518021743c5506ba22cbcb72d51c4612cf876fef24112a35bf26af1fe98",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/world-shell.ts": "e23460194a952687f08fe93bfb0ba04760dd6d7ca2e7b1dc07920097eee6b69f",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/app.ts": "8f0d87bf29635052aaa3d1bb7fd0a7e4f83c473d635e490d6d6745f765707257",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/auth.ts": "e8dc1eabf65ac7a5065d0582671be22813005f83c0cce00886a67c9d952c11d2",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/deployment-params.ts": "184bcd3f84781dc533bcb3cb5191d9bc4d3b5c308442dae71430906bae336608",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/governor.ts": "c122b0448c10ab444f7622b13912b91f9dc8fd87cc352006326dcfbdc2d713fb",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/lock.ts": "6818293ed97e2dc2862e7a06e42f8aa8c017a5f27e6656f338331f83a555f536",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/main.ts": "408733d7f78dc204a270b91ccaf06a72df6ed6b8a6e214b75529b1a08088fe10",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/snapshot.ts": "ca6f266357bb676aeadd16f078df7be8bb6eb08213e238b44cca03a07fea012c",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/store.ts": "907f3978db423defb9bc03fec915f9f8da8c56262be61a23f28265a83b8d15d2",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/technology-archive.ts": "3820d2dbaf01ddb25e01debc320bd549c59d6b67e7eb56a72541cd01da0899d4",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/world-instance.ts": "0bb10082d68e29d900bad745f2e06ed284e79603ca49ab3c93792e27ed603969",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/shared/demography.ts": "a9e6d6f273957529e942d5358988171a7ab25327ced8d039706f7dfa5fb9fa6f",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/shared/life.ts": "7c2ee3924ddbae01f55c22ff52ac2bd208e8877284c1ee48782f33239f1070bf",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/shared/organization.ts": "30d8869086faf0754002e240b3bef1fcec9600d51ab3b40c6bce7ef977f4a2bd",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/shared/technology-archive.ts": "4d9ad0b9f1be01e95fbfb5365b6a1391b3321f39c5bcfce0806d5cb2d0079354",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/shared/technology.ts": "e3394386e61bc508956400a3a0bf1c35193c4265bfa527ebebf03dee038b8b69",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/shared/types.ts": "df913b9326f03f4773107c54e9472905c31634f699fab59f9ab75650d21b59a3",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/shared/world-instance.ts": "09967c006226f2fca8fd04af2ca3c310db67278e95d0cfaccbd193d241605349",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/agua.ts": "3f3be7cac9fffe40a31bd7d38b223b1d9398dd1d310d2170825b3b40bb031e0e",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/animals.ts": "0e9cce23504715a370f74c24b8f0c0e82d0cb1447945b3486ff8843ee1af0a7a",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/body.ts": "00643e43be3f11a5804772e9d0ccc405c447d23377997a5a4269937ecc2101cb",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/chronicle-journal.ts": "880f5298474445f435e820fc034b7019ca80007823cfa3607fa551f4b3ffedee",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/demography.ts": "09fececd55349ee7e48db5b632ddb1f06e6f8143a669a9f8611bfd3cbc531dfe",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/digesto.ts": "d330eccce86f8576d042e41acd42deabf2ea6fa3730a80c51f34fc47cbf9f05d",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/diversidad.ts": "57b104be0efbd12d188dc352123c2982e83a15d27fa5d9bfcbf965f9cc33e6d3",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/ecosystem-kernel.ts": "b1cb946781e204fd9db31520c61699f4f91cf431d1b735351984f6e2e3bf9b78",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/ecosystem.ts": "24444f458e70e6c41bb0e9fc5f88290ee50fbe1edbd3b44109805ce89baeee10",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/family.ts": "0ba24f3399c5cda9400b431ff373bdc7ce98572993ee04fcd5a9db45734471d4",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/forest.ts": "9c6c32126a74a35896038994f5988cb7b6490ef440b67fc741b7ce13e1e54212",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/genetics.ts": "6303faa03b11d4f5d659055947955aa16ff82f75a0e8cff143d6ad336da7e12e",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/index.ts": "5d925107b8115c61f218b7ae5b0236324758dccdc3bd7b88262a1f5f20d5ffe7",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/inventions.ts": "c45cd3b84f74c46eb9a1158c4fc3a52716ff0eafe5dfc2039aefe350f02c14a4",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/lineage.ts": "e24706e14642c4aa5144de8abd8e76d3d63977829328b0f6cd5d1a0e74f01862",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/material-affordances.ts": "0bb5041204409e1545ec2f783862a46de325246520b4025c49ed7ef4cfc0e142",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/needs.ts": "40990c1ad6e824e247f70e217dad1bda0d986ab3d80d0d4c1c8561844061c292",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/organization.ts": "e6e3597bf46474fcfec908f01eb562089f37000b14ebea14b40e4eb91901b7b8",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/params.ts": "b10662cab2a7a8efd1b3f38d7f79c4edf63c175c88c08ba8366b13539a5dd51b",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/society.ts": "6828319b26060bec728de7643a4f9becc63282fb09872d117292e3dde7fcadf3",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/spatial.ts": "17861e50a4e6ade76981a06541ab86bd8f87e42e5612ef7ec4c0fecc69d652e9",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/statistics.ts": "c4f8374433a8121c998c421d0eb044a2e4c0c860d214240f6552ed3a8ab4d0c0",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology-catalogue.ts": "7b3fd17ea57181b8aad059a9ae19f0e9f03e89f3d73c0a3c15e17aa246dcffc6",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology-checkpoint.ts": "34f16cc74a700265f2e5407ba3e52e984b74474c2fbd6444e99196586ce9469f",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology-execution.ts": "5d1423ee670dd034c5f50d3bd7b612e39eab40ba7181725aec42ab945c6e41a4",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology-journal.ts": "2687af97e425c1a13d9fc8a0c229eb12c544673f2ab04e3514cd4974be0abacf",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology-memory.ts": "8fdf32db2628ad7b311701fdac4067966f5e3fe2ad187d78a2eaf63cc20490fb",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology-organization.ts": "3840fa5602012386dc705e9fc7f46f0c18e3983a731481b05e1ca0bb8fa12dde",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology-water.ts": "51bb48999be20e560056739158a0127cf3351b81adafda69f0c434f2465ea9d6",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology.ts": "ff781172cb2440c08e4f02048e0a8330f81b7fb4da7acad736ca964c63e6dafc",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/terrain.ts": "538280dba7df8ee07b6b8ada9d2e8ddd007b82bc8d1bae3196927709d3f14c97",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/validation.ts": "9b9f86d53786967c1138ed2c41b4a6a17a0695eab75ef2e28bc15f28b47cc3cd",
+        "/tmp/atlas-store-v7-final-memo-20260922/store-generic-copy.mts": "8ef574227814336f1d53152c69e5b22653ce5c35a357bf4a8e2ecd6791a0a327"
+      },
+      "loadMs": 2274.045663,
+      "samples": [
+        {
+          "round": 0,
+          "tick": 12020,
+          "population": 25,
+          "tiles": 12288,
+          "simulationMs": 194.50573799999984,
+          "saveMs": 74.82497599999988,
+          "phases": {
+            "prepareTechnology": {
+              "calls": 1,
+              "ms": 17.60179100000005
+            },
+            "assertChronicleChanges": {
+              "calls": 1,
+              "ms": 0.14203199999974458
+            },
+            "assertTechnologyChanges": {
+              "calls": 1,
+              "ms": 0.13792199999988952
+            },
+            "flushTechnology": {
+              "calls": 1,
+              "ms": 11.953923999999915
+            },
+            "flushChronicle": {
+              "calls": 1,
+              "ms": 0.6319189999999253
+            },
+            "rememberTechnology": {
+              "calls": 1,
+              "ms": 0.5886980000000221
+            }
+          }
+        },
+        {
+          "round": 1,
+          "tick": 12040,
+          "population": 25,
+          "tiles": 11776,
+          "simulationMs": 176.325288,
+          "saveMs": 69.54447399999981,
+          "phases": {
+            "prepareTechnology": {
+              "calls": 1,
+              "ms": 20.92783700000018
+            },
+            "assertChronicleChanges": {
+              "calls": 1,
+              "ms": 0.0520409999999174
+            },
+            "assertTechnologyChanges": {
+              "calls": 1,
+              "ms": 0.15221199999996315
+            },
+            "flushTechnology": {
+              "calls": 1,
+              "ms": 11.902512999999999
+            },
+            "flushChronicle": {
+              "calls": 1,
+              "ms": 0.4479559999999765
+            },
+            "rememberTechnology": {
+              "calls": 1,
+              "ms": 0.7834309999998368
+            }
+          }
+        },
+        {
+          "round": 2,
+          "tick": 12060,
+          "population": 25,
+          "tiles": 11776,
+          "simulationMs": 154.90721500000018,
+          "saveMs": 62.997813999999835,
+          "phases": {
+            "prepareTechnology": {
+              "calls": 1,
+              "ms": 16.867890999999872
+            },
+            "assertChronicleChanges": {
+              "calls": 1,
+              "ms": 0.03822000000036496
+            },
+            "assertTechnologyChanges": {
+              "calls": 1,
+              "ms": 0.07628100000010818
+            },
+            "flushTechnology": {
+              "calls": 1,
+              "ms": 11.03915199999983
+            },
+            "flushChronicle": {
+              "calls": 1,
+              "ms": 0.42383600000039223
+            },
+            "rememberTechnology": {
+              "calls": 1,
+              "ms": 0.5780179999997017
+            }
+          }
+        },
+        {
+          "round": 3,
+          "tick": 12080,
+          "population": 25,
+          "tiles": 12800,
+          "simulationMs": 165.1414050000003,
+          "saveMs": 68.66119199999957,
+          "phases": {
+            "prepareTechnology": {
+              "calls": 1,
+              "ms": 17.035943999999745
+            },
+            "assertChronicleChanges": {
+              "calls": 1,
+              "ms": 0.0336699999998018
+            },
+            "assertTechnologyChanges": {
+              "calls": 1,
+              "ms": 0.04167100000040591
+            },
+            "flushTechnology": {
+              "calls": 1,
+              "ms": 11.276155000000017
+            },
+            "flushChronicle": {
+              "calls": 1,
+              "ms": 0.4301759999998467
+            },
+            "rememberTechnology": {
+              "calls": 1,
+              "ms": 0.5545680000000175
+            }
+          }
+        },
+        {
+          "round": 4,
+          "tick": 12100,
+          "population": 25,
+          "tiles": 12800,
+          "simulationMs": 156.40100400000028,
+          "saveMs": 66.73465499999975,
+          "phases": {
+            "prepareTechnology": {
+              "calls": 1,
+              "ms": 17.625342000000273
+            },
+            "assertChronicleChanges": {
+              "calls": 1,
+              "ms": 0.028259999999590946
+            },
+            "assertTechnologyChanges": {
+              "calls": 1,
+              "ms": 0.04383999999981825
+            },
+            "flushTechnology": {
+              "calls": 1,
+              "ms": 10.246880000000147
+            },
+            "flushChronicle": {
+              "calls": 1,
+              "ms": 0.4317260000002534
+            },
+            "rememberTechnology": {
+              "calls": 1,
+              "ms": 0.6422489999999925
+            }
+          }
+        },
+        {
+          "round": 5,
+          "tick": 12120,
+          "population": 25,
+          "tiles": 13312,
+          "simulationMs": 143.11094200000025,
+          "saveMs": 67.11076000000003,
+          "phases": {
+            "prepareTechnology": {
+              "calls": 1,
+              "ms": 16.659427999999934
+            },
+            "assertChronicleChanges": {
+              "calls": 1,
+              "ms": 0.03379099999983737
+            },
+            "assertTechnologyChanges": {
+              "calls": 1,
+              "ms": 0.18786299999965195
+            },
+            "flushTechnology": {
+              "calls": 1,
+              "ms": 10.983380000000125
+            },
+            "flushChronicle": {
+              "calls": 1,
+              "ms": 0.49154700000008233
+            },
+            "rememberTechnology": {
+              "calls": 1,
+              "ms": 0.5924679999998261
+            }
+          }
+        },
+        {
+          "round": 6,
+          "tick": 12140,
+          "population": 25,
+          "tiles": 12288,
+          "simulationMs": 134.112748,
+          "saveMs": 65.38568600000008,
+          "phases": {
+            "prepareTechnology": {
+              "calls": 1,
+              "ms": 18.19696900000008
+            },
+            "assertChronicleChanges": {
+              "calls": 1,
+              "ms": 0.027620000000297296
+            },
+            "assertTechnologyChanges": {
+              "calls": 1,
+              "ms": 0.14936200000011013
+            },
+            "flushTechnology": {
+              "calls": 1,
+              "ms": 9.83951500000012
+            },
+            "flushChronicle": {
+              "calls": 1,
+              "ms": 0.37947600000006787
+            },
+            "rememberTechnology": {
+              "calls": 1,
+              "ms": 0.6024990000000798
+            }
+          }
+        },
+        {
+          "round": 7,
+          "tick": 12160,
+          "population": 25,
+          "tiles": 12800,
+          "simulationMs": 141.43399799999997,
+          "saveMs": 63.56499100000019,
+          "phases": {
+            "prepareTechnology": {
+              "calls": 1,
+              "ms": 17.21336599999995
+            },
+            "assertChronicleChanges": {
+              "calls": 1,
+              "ms": 0.029579999999441497
+            },
+            "assertTechnologyChanges": {
+              "calls": 1,
+              "ms": 0.044409999999516
+            },
+            "flushTechnology": {
+              "calls": 1,
+              "ms": 7.732435999999325
+            },
+            "flushChronicle": {
+              "calls": 1,
+              "ms": 0.4451759999992646
+            },
+            "rememberTechnology": {
+              "calls": 1,
+              "ms": 0.6190390000001571
+            }
+          }
+        },
+        {
+          "round": 8,
+          "tick": 12180,
+          "population": 25,
+          "tiles": 12800,
+          "simulationMs": 122.39552700000058,
+          "saveMs": 62.60700799999995,
+          "phases": {
+            "prepareTechnology": {
+              "calls": 1,
+              "ms": 16.83980000000065
+            },
+            "assertChronicleChanges": {
+              "calls": 1,
+              "ms": 0.10467199999948207
+            },
+            "assertTechnologyChanges": {
+              "calls": 1,
+              "ms": 0.05098999999972875
+            },
+            "flushTechnology": {
+              "calls": 1,
+              "ms": 10.304681000000528
+            },
+            "flushChronicle": {
+              "calls": 1,
+              "ms": 0.3953750000000582
+            },
+            "rememberTechnology": {
+              "calls": 1,
+              "ms": 0.624217999999928
+            }
+          }
+        },
+        {
+          "round": 9,
+          "tick": 12200,
+          "population": 25,
+          "tiles": 12288,
+          "simulationMs": 136.22521599999982,
+          "saveMs": 62.93536200000017,
+          "phases": {
+            "prepareTechnology": {
+              "calls": 1,
+              "ms": 16.484865999999784
+            },
+            "assertChronicleChanges": {
+              "calls": 1,
+              "ms": 0.034109999999600404
+            },
+            "assertTechnologyChanges": {
+              "calls": 1,
+              "ms": 0.044921000000613276
+            },
+            "flushTechnology": {
+              "calls": 1,
+              "ms": 9.666653000000224
+            },
+            "flushChronicle": {
+              "calls": 1,
+              "ms": 0.4087549999994735
+            },
+            "rememberTechnology": {
+              "calls": 1,
+              "ms": 0.618839000000662
+            }
+          }
+        },
+        {
+          "round": 10,
+          "tick": 12220,
+          "population": 25,
+          "tiles": 12800,
+          "simulationMs": 113.91522999999961,
+          "saveMs": 120.47976000000017,
+          "phases": {
+            "prepareTechnology": {
+              "calls": 1,
+              "ms": 16.839490000000296
+            },
+            "assertChronicleChanges": {
+              "calls": 1,
+              "ms": 0.030539999999746215
+            },
+            "assertTechnologyChanges": {
+              "calls": 1,
+              "ms": 0.03431000000000495
+            },
+            "flushTechnology": {
+              "calls": 1,
+              "ms": 6.811474000000089
+            },
+            "flushChronicle": {
+              "calls": 1,
+              "ms": 0.4068550000001778
+            },
+            "rememberTechnology": {
+              "calls": 1,
+              "ms": 0.6516890000002604
+            }
+          }
+        },
+        {
+          "round": 11,
+          "tick": 12240,
+          "population": 25,
+          "tiles": 13312,
+          "simulationMs": 119.83473099999992,
+          "saveMs": 57.677779999999984,
+          "phases": {
+            "prepareTechnology": {
+              "calls": 1,
+              "ms": 17.102765000000545
+            },
+            "assertChronicleChanges": {
+              "calls": 1,
+              "ms": 0.026440000000548025
+            },
+            "assertTechnologyChanges": {
+              "calls": 1,
+              "ms": 0.036331000000245695
+            },
+            "flushTechnology": {
+              "calls": 1,
+              "ms": 5.670888000000559
+            },
+            "flushChronicle": {
+              "calls": 1,
+              "ms": 0.3980950000004668
+            },
+            "rememberTechnology": {
+              "calls": 1,
+              "ms": 0.5840579999994588
+            }
+          }
+        }
+      ],
+      "finalTick": 12240,
+      "finalStateHash": "0dbee61ddd43cb1a44cd976ee5d069de56c106a895c433c54717a18890954880",
+      "archiveHashes": {
+        "technology_definitions": {
+          "rows": 488,
+          "sha256": "84b8eaddffd3b349d8ff3a37d85164626a9dbdae37ff191ea64841771f1313da"
+        },
+        "technology_stats": {
+          "rows": 1290,
+          "sha256": "011121c58b8af7605efe1de3c052dba0e4d7efcb2922d491ba28832bb49adad1"
+        },
+        "technology_executions": {
+          "rows": 20408,
+          "sha256": "71f23555cb4459418339867da10e582f84566d861d4df2ec3933fa034dc3b853"
+        },
+        "technology_origin": {
+          "rows": 1,
+          "sha256": "e5e554e7a32bde7c9e85ffe647fa0fe593725d4f53f236986d371e43c1c26fa9"
+        }
+      },
+      "snapshotBytes": 3901896
+    },
+    "current": {
+      "source": "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/artifacts/coherence-20260922/baseline-server-51926/world.sqlite",
+      "mode": "current",
+      "cadence": 20,
+      "rounds": 12,
+      "sourceHashesBefore": {
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/scripts/benchmark-store.ts": "8d0c5d7df61e77e991a567553262f43dccaac53e1747f6f244780ae69c488ebb",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/assets.d.ts": "da5bf71d48cf909584a01c80b445f730507068f5b34c920f352e2bfcf0315e4c",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/calor.ts": "0badff9eee93ea8bf3139e951add2c34441918bee20e00c8395928fa61f8cc50",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/connection.ts": "00bbf18a09af54ae5c8255478ae32a093c3b8e17fecd9eea1f8a6d0a9d6674c0",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/game.ts": "4ce4cb53b6619c8e9191be2aa13e5dd771f39f209bfab8522dc52c530a145fe6",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/gpu-terrain.ts": "6358268d850b9d7f9fc9eaaf71465af9f80eb45af26747ab9d6d02c132610344",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/icons.ts": "ac93abdf11d9e9af66a2c7ff0a065830f8ab296282fab8475c2c4020628232c2",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/inspector-view.ts": "8e73f336b357c2b4f5c3b7e77c3d447d130b8a0f4f35f0c244246e48fd98d9cd",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/landscape.ts": "56a8c9516714f15e205c6d5caf8900cc3a237e66ac74d4801a9a95ab21914127",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/life-art.ts": "b91f5329d5f2682acfafdba53f1a1d5c61773542d7898a4587938a694d471554",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/luz.ts": "a32c9a414821356ad9a92026ccd88d9c0172c22a983a36ae83c9973529c07fc5",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/main.ts": "1ee4d5f1660a7b563f9cc2c0fa34001a66196cb743d8cfd82d5f695cd2d8e7c5",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/modo.ts": "da299cfb83a3a5b7d98af8ad8bcf8daec3187c020341e5198bf15941adcc717a",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/notebook.ts": "2a402e8296984667e2d09940acba3d8db933b3ce79867b19abb704e041a65865",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/technology-art.ts": "0a62aca27e2a2c1b8f74f28eb749fb93b72be0d0ec4686d65e22768d65436207",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/ui-catalog.ts": "2c575046663adfff12ef0b329df60e1e768d9325eed2a075cb9cb8558ef0485b",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/view-state.ts": "d277ab560a3dd27a1121e0a5b9d59275e93bc083cd9c5d0834bfa4c48fd65af5",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/visit-memory.ts": "59779ab05cb463e4251881315dd56058fff576bba334f5dc59dd0bb8164d879a",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/visual-state.ts": "4ae8b5f0189b325c070d95b31263aae23f8a1e158d5e78b3b2571b31cbba0d35",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/world-evidence.ts": "0931f518021743c5506ba22cbcb72d51c4612cf876fef24112a35bf26af1fe98",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/world-shell.ts": "e23460194a952687f08fe93bfb0ba04760dd6d7ca2e7b1dc07920097eee6b69f",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/app.ts": "8f0d87bf29635052aaa3d1bb7fd0a7e4f83c473d635e490d6d6745f765707257",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/auth.ts": "e8dc1eabf65ac7a5065d0582671be22813005f83c0cce00886a67c9d952c11d2",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/deployment-params.ts": "184bcd3f84781dc533bcb3cb5191d9bc4d3b5c308442dae71430906bae336608",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/governor.ts": "c122b0448c10ab444f7622b13912b91f9dc8fd87cc352006326dcfbdc2d713fb",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/lock.ts": "6818293ed97e2dc2862e7a06e42f8aa8c017a5f27e6656f338331f83a555f536",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/main.ts": "408733d7f78dc204a270b91ccaf06a72df6ed6b8a6e214b75529b1a08088fe10",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/snapshot.ts": "ca6f266357bb676aeadd16f078df7be8bb6eb08213e238b44cca03a07fea012c",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/store.ts": "907f3978db423defb9bc03fec915f9f8da8c56262be61a23f28265a83b8d15d2",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/technology-archive.ts": "3820d2dbaf01ddb25e01debc320bd549c59d6b67e7eb56a72541cd01da0899d4",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/world-instance.ts": "0bb10082d68e29d900bad745f2e06ed284e79603ca49ab3c93792e27ed603969",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/shared/demography.ts": "a9e6d6f273957529e942d5358988171a7ab25327ced8d039706f7dfa5fb9fa6f",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/shared/life.ts": "7c2ee3924ddbae01f55c22ff52ac2bd208e8877284c1ee48782f33239f1070bf",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/shared/organization.ts": "30d8869086faf0754002e240b3bef1fcec9600d51ab3b40c6bce7ef977f4a2bd",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/shared/technology-archive.ts": "4d9ad0b9f1be01e95fbfb5365b6a1391b3321f39c5bcfce0806d5cb2d0079354",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/shared/technology.ts": "e3394386e61bc508956400a3a0bf1c35193c4265bfa527ebebf03dee038b8b69",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/shared/types.ts": "df913b9326f03f4773107c54e9472905c31634f699fab59f9ab75650d21b59a3",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/shared/world-instance.ts": "09967c006226f2fca8fd04af2ca3c310db67278e95d0cfaccbd193d241605349",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/agua.ts": "3f3be7cac9fffe40a31bd7d38b223b1d9398dd1d310d2170825b3b40bb031e0e",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/animals.ts": "0e9cce23504715a370f74c24b8f0c0e82d0cb1447945b3486ff8843ee1af0a7a",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/body.ts": "00643e43be3f11a5804772e9d0ccc405c447d23377997a5a4269937ecc2101cb",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/chronicle-journal.ts": "880f5298474445f435e820fc034b7019ca80007823cfa3607fa551f4b3ffedee",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/demography.ts": "09fececd55349ee7e48db5b632ddb1f06e6f8143a669a9f8611bfd3cbc531dfe",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/digesto.ts": "d330eccce86f8576d042e41acd42deabf2ea6fa3730a80c51f34fc47cbf9f05d",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/diversidad.ts": "57b104be0efbd12d188dc352123c2982e83a15d27fa5d9bfcbf965f9cc33e6d3",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/ecosystem-kernel.ts": "b1cb946781e204fd9db31520c61699f4f91cf431d1b735351984f6e2e3bf9b78",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/ecosystem.ts": "24444f458e70e6c41bb0e9fc5f88290ee50fbe1edbd3b44109805ce89baeee10",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/family.ts": "0ba24f3399c5cda9400b431ff373bdc7ce98572993ee04fcd5a9db45734471d4",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/forest.ts": "9c6c32126a74a35896038994f5988cb7b6490ef440b67fc741b7ce13e1e54212",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/genetics.ts": "6303faa03b11d4f5d659055947955aa16ff82f75a0e8cff143d6ad336da7e12e",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/index.ts": "5d925107b8115c61f218b7ae5b0236324758dccdc3bd7b88262a1f5f20d5ffe7",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/inventions.ts": "c45cd3b84f74c46eb9a1158c4fc3a52716ff0eafe5dfc2039aefe350f02c14a4",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/lineage.ts": "e24706e14642c4aa5144de8abd8e76d3d63977829328b0f6cd5d1a0e74f01862",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/material-affordances.ts": "0bb5041204409e1545ec2f783862a46de325246520b4025c49ed7ef4cfc0e142",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/needs.ts": "40990c1ad6e824e247f70e217dad1bda0d986ab3d80d0d4c1c8561844061c292",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/organization.ts": "e6e3597bf46474fcfec908f01eb562089f37000b14ebea14b40e4eb91901b7b8",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/params.ts": "b10662cab2a7a8efd1b3f38d7f79c4edf63c175c88c08ba8366b13539a5dd51b",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/society.ts": "6828319b26060bec728de7643a4f9becc63282fb09872d117292e3dde7fcadf3",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/spatial.ts": "17861e50a4e6ade76981a06541ab86bd8f87e42e5612ef7ec4c0fecc69d652e9",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/statistics.ts": "c4f8374433a8121c998c421d0eb044a2e4c0c860d214240f6552ed3a8ab4d0c0",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology-catalogue.ts": "7b3fd17ea57181b8aad059a9ae19f0e9f03e89f3d73c0a3c15e17aa246dcffc6",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology-checkpoint.ts": "34f16cc74a700265f2e5407ba3e52e984b74474c2fbd6444e99196586ce9469f",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology-execution.ts": "5d1423ee670dd034c5f50d3bd7b612e39eab40ba7181725aec42ab945c6e41a4",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology-journal.ts": "2687af97e425c1a13d9fc8a0c229eb12c544673f2ab04e3514cd4974be0abacf",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology-memory.ts": "8fdf32db2628ad7b311701fdac4067966f5e3fe2ad187d78a2eaf63cc20490fb",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology-organization.ts": "3840fa5602012386dc705e9fc7f46f0c18e3983a731481b05e1ca0bb8fa12dde",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology-water.ts": "51bb48999be20e560056739158a0127cf3351b81adafda69f0c434f2465ea9d6",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology.ts": "ff781172cb2440c08e4f02048e0a8330f81b7fb4da7acad736ca964c63e6dafc",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/terrain.ts": "538280dba7df8ee07b6b8ada9d2e8ddd007b82bc8d1bae3196927709d3f14c97",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/validation.ts": "9b9f86d53786967c1138ed2c41b4a6a17a0695eab75ef2e28bc15f28b47cc3cd"
+      },
+      "sourceHashesAfter": {
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/scripts/benchmark-store.ts": "8d0c5d7df61e77e991a567553262f43dccaac53e1747f6f244780ae69c488ebb",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/assets.d.ts": "da5bf71d48cf909584a01c80b445f730507068f5b34c920f352e2bfcf0315e4c",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/calor.ts": "0badff9eee93ea8bf3139e951add2c34441918bee20e00c8395928fa61f8cc50",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/connection.ts": "00bbf18a09af54ae5c8255478ae32a093c3b8e17fecd9eea1f8a6d0a9d6674c0",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/game.ts": "4ce4cb53b6619c8e9191be2aa13e5dd771f39f209bfab8522dc52c530a145fe6",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/gpu-terrain.ts": "6358268d850b9d7f9fc9eaaf71465af9f80eb45af26747ab9d6d02c132610344",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/icons.ts": "ac93abdf11d9e9af66a2c7ff0a065830f8ab296282fab8475c2c4020628232c2",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/inspector-view.ts": "8e73f336b357c2b4f5c3b7e77c3d447d130b8a0f4f35f0c244246e48fd98d9cd",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/landscape.ts": "56a8c9516714f15e205c6d5caf8900cc3a237e66ac74d4801a9a95ab21914127",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/life-art.ts": "b91f5329d5f2682acfafdba53f1a1d5c61773542d7898a4587938a694d471554",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/luz.ts": "a32c9a414821356ad9a92026ccd88d9c0172c22a983a36ae83c9973529c07fc5",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/main.ts": "1ee4d5f1660a7b563f9cc2c0fa34001a66196cb743d8cfd82d5f695cd2d8e7c5",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/modo.ts": "da299cfb83a3a5b7d98af8ad8bcf8daec3187c020341e5198bf15941adcc717a",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/notebook.ts": "2a402e8296984667e2d09940acba3d8db933b3ce79867b19abb704e041a65865",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/technology-art.ts": "0a62aca27e2a2c1b8f74f28eb749fb93b72be0d0ec4686d65e22768d65436207",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/ui-catalog.ts": "2c575046663adfff12ef0b329df60e1e768d9325eed2a075cb9cb8558ef0485b",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/view-state.ts": "d277ab560a3dd27a1121e0a5b9d59275e93bc083cd9c5d0834bfa4c48fd65af5",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/visit-memory.ts": "59779ab05cb463e4251881315dd56058fff576bba334f5dc59dd0bb8164d879a",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/visual-state.ts": "4ae8b5f0189b325c070d95b31263aae23f8a1e158d5e78b3b2571b31cbba0d35",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/world-evidence.ts": "0931f518021743c5506ba22cbcb72d51c4612cf876fef24112a35bf26af1fe98",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/client/world-shell.ts": "e23460194a952687f08fe93bfb0ba04760dd6d7ca2e7b1dc07920097eee6b69f",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/app.ts": "8f0d87bf29635052aaa3d1bb7fd0a7e4f83c473d635e490d6d6745f765707257",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/auth.ts": "e8dc1eabf65ac7a5065d0582671be22813005f83c0cce00886a67c9d952c11d2",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/deployment-params.ts": "184bcd3f84781dc533bcb3cb5191d9bc4d3b5c308442dae71430906bae336608",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/governor.ts": "c122b0448c10ab444f7622b13912b91f9dc8fd87cc352006326dcfbdc2d713fb",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/lock.ts": "6818293ed97e2dc2862e7a06e42f8aa8c017a5f27e6656f338331f83a555f536",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/main.ts": "408733d7f78dc204a270b91ccaf06a72df6ed6b8a6e214b75529b1a08088fe10",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/snapshot.ts": "ca6f266357bb676aeadd16f078df7be8bb6eb08213e238b44cca03a07fea012c",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/store.ts": "907f3978db423defb9bc03fec915f9f8da8c56262be61a23f28265a83b8d15d2",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/technology-archive.ts": "3820d2dbaf01ddb25e01debc320bd549c59d6b67e7eb56a72541cd01da0899d4",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/server/world-instance.ts": "0bb10082d68e29d900bad745f2e06ed284e79603ca49ab3c93792e27ed603969",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/shared/demography.ts": "a9e6d6f273957529e942d5358988171a7ab25327ced8d039706f7dfa5fb9fa6f",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/shared/life.ts": "7c2ee3924ddbae01f55c22ff52ac2bd208e8877284c1ee48782f33239f1070bf",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/shared/organization.ts": "30d8869086faf0754002e240b3bef1fcec9600d51ab3b40c6bce7ef977f4a2bd",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/shared/technology-archive.ts": "4d9ad0b9f1be01e95fbfb5365b6a1391b3321f39c5bcfce0806d5cb2d0079354",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/shared/technology.ts": "e3394386e61bc508956400a3a0bf1c35193c4265bfa527ebebf03dee038b8b69",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/shared/types.ts": "df913b9326f03f4773107c54e9472905c31634f699fab59f9ab75650d21b59a3",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/shared/world-instance.ts": "09967c006226f2fca8fd04af2ca3c310db67278e95d0cfaccbd193d241605349",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/agua.ts": "3f3be7cac9fffe40a31bd7d38b223b1d9398dd1d310d2170825b3b40bb031e0e",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/animals.ts": "0e9cce23504715a370f74c24b8f0c0e82d0cb1447945b3486ff8843ee1af0a7a",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/body.ts": "00643e43be3f11a5804772e9d0ccc405c447d23377997a5a4269937ecc2101cb",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/chronicle-journal.ts": "880f5298474445f435e820fc034b7019ca80007823cfa3607fa551f4b3ffedee",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/demography.ts": "09fececd55349ee7e48db5b632ddb1f06e6f8143a669a9f8611bfd3cbc531dfe",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/digesto.ts": "d330eccce86f8576d042e41acd42deabf2ea6fa3730a80c51f34fc47cbf9f05d",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/diversidad.ts": "57b104be0efbd12d188dc352123c2982e83a15d27fa5d9bfcbf965f9cc33e6d3",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/ecosystem-kernel.ts": "b1cb946781e204fd9db31520c61699f4f91cf431d1b735351984f6e2e3bf9b78",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/ecosystem.ts": "24444f458e70e6c41bb0e9fc5f88290ee50fbe1edbd3b44109805ce89baeee10",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/family.ts": "0ba24f3399c5cda9400b431ff373bdc7ce98572993ee04fcd5a9db45734471d4",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/forest.ts": "9c6c32126a74a35896038994f5988cb7b6490ef440b67fc741b7ce13e1e54212",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/genetics.ts": "6303faa03b11d4f5d659055947955aa16ff82f75a0e8cff143d6ad336da7e12e",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/index.ts": "5d925107b8115c61f218b7ae5b0236324758dccdc3bd7b88262a1f5f20d5ffe7",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/inventions.ts": "c45cd3b84f74c46eb9a1158c4fc3a52716ff0eafe5dfc2039aefe350f02c14a4",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/lineage.ts": "e24706e14642c4aa5144de8abd8e76d3d63977829328b0f6cd5d1a0e74f01862",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/material-affordances.ts": "0bb5041204409e1545ec2f783862a46de325246520b4025c49ed7ef4cfc0e142",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/needs.ts": "40990c1ad6e824e247f70e217dad1bda0d986ab3d80d0d4c1c8561844061c292",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/organization.ts": "e6e3597bf46474fcfec908f01eb562089f37000b14ebea14b40e4eb91901b7b8",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/params.ts": "b10662cab2a7a8efd1b3f38d7f79c4edf63c175c88c08ba8366b13539a5dd51b",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/society.ts": "6828319b26060bec728de7643a4f9becc63282fb09872d117292e3dde7fcadf3",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/spatial.ts": "17861e50a4e6ade76981a06541ab86bd8f87e42e5612ef7ec4c0fecc69d652e9",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/statistics.ts": "c4f8374433a8121c998c421d0eb044a2e4c0c860d214240f6552ed3a8ab4d0c0",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology-catalogue.ts": "7b3fd17ea57181b8aad059a9ae19f0e9f03e89f3d73c0a3c15e17aa246dcffc6",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology-checkpoint.ts": "34f16cc74a700265f2e5407ba3e52e984b74474c2fbd6444e99196586ce9469f",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology-execution.ts": "5d1423ee670dd034c5f50d3bd7b612e39eab40ba7181725aec42ab945c6e41a4",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology-journal.ts": "2687af97e425c1a13d9fc8a0c229eb12c544673f2ab04e3514cd4974be0abacf",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology-memory.ts": "8fdf32db2628ad7b311701fdac4067966f5e3fe2ad187d78a2eaf63cc20490fb",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology-organization.ts": "3840fa5602012386dc705e9fc7f46f0c18e3983a731481b05e1ca0bb8fa12dde",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology-water.ts": "51bb48999be20e560056739158a0127cf3351b81adafda69f0c434f2465ea9d6",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/technology.ts": "ff781172cb2440c08e4f02048e0a8330f81b7fb4da7acad736ca964c63e6dafc",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/terrain.ts": "538280dba7df8ee07b6b8ada9d2e8ddd007b82bc8d1bae3196927709d3f14c97",
+        "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/src/world/validation.ts": "9b9f86d53786967c1138ed2c41b4a6a17a0695eab75ef2e28bc15f28b47cc3cd"
+      },
+      "loadMs": 2237.6528289999997,
+      "samples": [
+        {
+          "round": 0,
+          "tick": 12020,
+          "population": 25,
+          "tiles": 12288,
+          "simulationMs": 193.65689699999984,
+          "saveMs": 67.93930900000032,
+          "phases": {
+            "prepareTechnology": {
+              "calls": 1,
+              "ms": 15.39411999999993
+            },
+            "assertChronicleChanges": {
+              "calls": 1,
+              "ms": 0.14898200000016004
+            },
+            "assertTechnologyChanges": {
+              "calls": 1,
+              "ms": 0.13840199999958713
+            },
+            "flushTechnology": {
+              "calls": 1,
+              "ms": 12.446999999999662
+            },
+            "flushChronicle": {
+              "calls": 1,
+              "ms": 0.6052779999999984
+            },
+            "rememberTechnology": {
+              "calls": 1,
+              "ms": 0.5754879999999503
+            }
+          }
+        },
+        {
+          "round": 1,
+          "tick": 12040,
+          "population": 25,
+          "tiles": 11776,
+          "simulationMs": 174.64072699999997,
+          "saveMs": 64.92797700000028,
+          "phases": {
+            "prepareTechnology": {
+              "calls": 1,
+              "ms": 17.43387900000016
+            },
+            "assertChronicleChanges": {
+              "calls": 1,
+              "ms": 0.05065000000013242
+            },
+            "assertTechnologyChanges": {
+              "calls": 1,
+              "ms": 0.1467819999998028
+            },
+            "flushTechnology": {
+              "calls": 1,
+              "ms": 10.038657000000057
+            },
+            "flushChronicle": {
+              "calls": 1,
+              "ms": 0.49340600000004997
+            },
+            "rememberTechnology": {
+              "calls": 1,
+              "ms": 0.594007999999576
+            }
+          }
+        },
+        {
+          "round": 2,
+          "tick": 12060,
+          "population": 25,
+          "tiles": 11776,
+          "simulationMs": 158.75802999999996,
+          "saveMs": 60.164042999999765,
+          "phases": {
+            "prepareTechnology": {
+              "calls": 1,
+              "ms": 14.262265000000298
+            },
+            "assertChronicleChanges": {
+              "calls": 1,
+              "ms": 0.034979999999904976
+            },
+            "assertTechnologyChanges": {
+              "calls": 1,
+              "ms": 0.07450100000005477
+            },
+            "flushTechnology": {
+              "calls": 1,
+              "ms": 10.572464999999738
+            },
+            "flushChronicle": {
+              "calls": 1,
+              "ms": 0.4206260000000839
+            },
+            "rememberTechnology": {
+              "calls": 1,
+              "ms": 0.5697680000002947
+            }
+          }
+        },
+        {
+          "round": 3,
+          "tick": 12080,
+          "population": 25,
+          "tiles": 12800,
+          "simulationMs": 176.34900000000016,
+          "saveMs": 59.513042999999925,
+          "phases": {
+            "prepareTechnology": {
+              "calls": 1,
+              "ms": 14.502288000000135
+            },
+            "assertChronicleChanges": {
+              "calls": 1,
+              "ms": 0.03302000000030603
+            },
+            "assertTechnologyChanges": {
+              "calls": 1,
+              "ms": 0.041581000000405766
+            },
+            "flushTechnology": {
+              "calls": 1,
+              "ms": 10.271169999999984
+            },
+            "flushChronicle": {
+              "calls": 1,
+              "ms": 0.41764499999999316
+            },
+            "rememberTechnology": {
+              "calls": 1,
+              "ms": 0.6286780000000363
+            }
+          }
+        },
+        {
+          "round": 4,
+          "tick": 12100,
+          "population": 25,
+          "tiles": 12800,
+          "simulationMs": 176.59003200000006,
+          "saveMs": 65.60519600000043,
+          "phases": {
+            "prepareTechnology": {
+              "calls": 1,
+              "ms": 14.999174999999923
+            },
+            "assertChronicleChanges": {
+              "calls": 1,
+              "ms": 0.02952999999979511
+            },
+            "assertTechnologyChanges": {
+              "calls": 1,
+              "ms": 0.04241099999990183
+            },
+            "flushTechnology": {
+              "calls": 1,
+              "ms": 10.671925999999985
+            },
+            "flushChronicle": {
+              "calls": 1,
+              "ms": 0.4345260000000053
+            },
+            "rememberTechnology": {
+              "calls": 1,
+              "ms": 0.6374289999998837
+            }
+          }
+        },
+        {
+          "round": 5,
+          "tick": 12120,
+          "population": 25,
+          "tiles": 13312,
+          "simulationMs": 185.03362800000014,
+          "saveMs": 65.77581899999996,
+          "phases": {
+            "prepareTechnology": {
+              "calls": 1,
+              "ms": 14.900974000000133
+            },
+            "assertChronicleChanges": {
+              "calls": 1,
+              "ms": 0.02959999999984575
+            },
+            "assertTechnologyChanges": {
+              "calls": 1,
+              "ms": 0.17097200000034718
+            },
+            "flushTechnology": {
+              "calls": 1,
+              "ms": 10.812637999999879
+            },
+            "flushChronicle": {
+              "calls": 1,
+              "ms": 0.4679160000000593
+            },
+            "rememberTechnology": {
+              "calls": 1,
+              "ms": 0.6406590000001415
+            }
+          }
+        },
+        {
+          "round": 6,
+          "tick": 12140,
+          "population": 25,
+          "tiles": 12288,
+          "simulationMs": 168.811506,
+          "saveMs": 61.87676499999998,
+          "phases": {
+            "prepareTechnology": {
+              "calls": 1,
+              "ms": 15.050404999999955
+            },
+            "assertChronicleChanges": {
+              "calls": 1,
+              "ms": 0.026969999999892025
+            },
+            "assertTechnologyChanges": {
+              "calls": 1,
+              "ms": 0.1433919999999489
+            },
+            "flushTechnology": {
+              "calls": 1,
+              "ms": 8.586906999999883
+            },
+            "flushChronicle": {
+              "calls": 1,
+              "ms": 0.37239599999975326
+            },
+            "rememberTechnology": {
+              "calls": 1,
+              "ms": 1.285707999999886
+            }
+          }
+        },
+        {
+          "round": 7,
+          "tick": 12160,
+          "population": 25,
+          "tiles": 12800,
+          "simulationMs": 164.4790269999994,
+          "saveMs": 61.45122999999967,
+          "phases": {
+            "prepareTechnology": {
+              "calls": 1,
+              "ms": 13.918251000000055
+            },
+            "assertChronicleChanges": {
+              "calls": 1,
+              "ms": 0.02634100000068429
+            },
+            "assertTechnologyChanges": {
+              "calls": 1,
+              "ms": 0.04536100000041188
+            },
+            "flushTechnology": {
+              "calls": 1,
+              "ms": 8.506735999999364
+            },
+            "flushChronicle": {
+              "calls": 1,
+              "ms": 0.4659860000001572
+            },
+            "rememberTechnology": {
+              "calls": 1,
+              "ms": 0.6309989999999743
+            }
+          }
+        },
+        {
+          "round": 8,
+          "tick": 12180,
+          "population": 25,
+          "tiles": 12800,
+          "simulationMs": 149.3712999999998,
+          "saveMs": 59.4558820000002,
+          "phases": {
+            "prepareTechnology": {
+              "calls": 1,
+              "ms": 13.732947999999851
+            },
+            "assertChronicleChanges": {
+              "calls": 1,
+              "ms": 0.11224199999924167
+            },
+            "assertTechnologyChanges": {
+              "calls": 1,
+              "ms": 0.05462100000022474
+            },
+            "flushTechnology": {
+              "calls": 1,
+              "ms": 9.817583999999442
+            },
+            "flushChronicle": {
+              "calls": 1,
+              "ms": 0.4090860000005705
+            },
+            "rememberTechnology": {
+              "calls": 1,
+              "ms": 0.6458980000006704
+            }
+          }
+        },
+        {
+          "round": 9,
+          "tick": 12200,
+          "population": 25,
+          "tiles": 12288,
+          "simulationMs": 167.01969000000008,
+          "saveMs": 60.0348099999992,
+          "phases": {
+            "prepareTechnology": {
+              "calls": 1,
+              "ms": 14.113212999999632
+            },
+            "assertChronicleChanges": {
+              "calls": 1,
+              "ms": 0.032220000000052096
+            },
+            "assertTechnologyChanges": {
+              "calls": 1,
+              "ms": 0.03960000000006403
+            },
+            "flushTechnology": {
+              "calls": 1,
+              "ms": 9.288076999999248
+            },
+            "flushChronicle": {
+              "calls": 1,
+              "ms": 0.4013359999999011
+            },
+            "rememberTechnology": {
+              "calls": 1,
+              "ms": 0.594679000000724
+            }
+          }
+        },
+        {
+          "round": 10,
+          "tick": 12220,
+          "population": 25,
+          "tiles": 12800,
+          "simulationMs": 140.41009699999995,
+          "saveMs": 117.53855500000009,
+          "phases": {
+            "prepareTechnology": {
+              "calls": 1,
+              "ms": 13.784058000000186
+            },
+            "assertChronicleChanges": {
+              "calls": 1,
+              "ms": 0.03095000000030268
+            },
+            "assertTechnologyChanges": {
+              "calls": 1,
+              "ms": 0.03595099999984086
+            },
+            "flushTechnology": {
+              "calls": 1,
+              "ms": 6.7016020000000935
+            },
+            "flushChronicle": {
+              "calls": 1,
+              "ms": 0.3947550000002593
+            },
+            "rememberTechnology": {
+              "calls": 1,
+              "ms": 0.6367589999999836
+            }
+          }
+        },
+        {
+          "round": 11,
+          "tick": 12240,
+          "population": 25,
+          "tiles": 13312,
+          "simulationMs": 146.35194799999954,
+          "saveMs": 55.626790000000256,
+          "phases": {
+            "prepareTechnology": {
+              "calls": 1,
+              "ms": 14.345996000000014
+            },
+            "assertChronicleChanges": {
+              "calls": 1,
+              "ms": 0.02772000000004482
+            },
+            "assertTechnologyChanges": {
+              "calls": 1,
+              "ms": 0.03717000000051485
+            },
+            "flushTechnology": {
+              "calls": 1,
+              "ms": 5.787659000000531
+            },
+            "flushChronicle": {
+              "calls": 1,
+              "ms": 0.397146000000248
+            },
+            "rememberTechnology": {
+              "calls": 1,
+              "ms": 0.5508879999997589
+            }
+          }
+        }
+      ],
+      "finalTick": 12240,
+      "finalStateHash": "0dbee61ddd43cb1a44cd976ee5d069de56c106a895c433c54717a18890954880",
+      "archiveHashes": {
+        "technology_definitions": {
+          "rows": 488,
+          "sha256": "84b8eaddffd3b349d8ff3a37d85164626a9dbdae37ff191ea64841771f1313da"
+        },
+        "technology_stats": {
+          "rows": 1290,
+          "sha256": "011121c58b8af7605efe1de3c052dba0e4d7efcb2922d491ba28832bb49adad1"
+        },
+        "technology_executions": {
+          "rows": 20408,
+          "sha256": "71f23555cb4459418339867da10e582f84566d861d4df2ec3933fa034dc3b853"
+        },
+        "technology_origin": {
+          "rows": 1,
+          "sha256": "e5e554e7a32bde7c9e85ffe647fa0fe593725d4f53f236986d371e43c1c26fa9"
+        }
+      },
+      "snapshotBytes": 3901896
+    }
+  }
+}

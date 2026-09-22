@@ -1,0 +1,12 @@
+{
+  "exit": 0,
+  "signal": null,
+  "elapsedMs": 17544.949897,
+  "initialLabNodes": 24,
+  "finalLabNodes": 24,
+  "extraArtifactWrites": 18264,
+  "files": 24,
+  "payloadBytes": 4096,
+  "intervalMs": 20,
+  "output": "/tmp/atlas-browser-watch-fixed-20260922.tap"
+}

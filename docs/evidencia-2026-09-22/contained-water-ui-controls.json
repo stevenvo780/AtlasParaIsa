@@ -1,0 +1,31 @@
+{
+  "syntheticProjectionOnly": true,
+  "waterProjectionVersion": 1,
+  "protocolVersion": 9,
+  "quantumPerWaterUnit": 50000,
+  "waterRepresentations": [
+    "compact-v1",
+    "complete-v1"
+  ],
+  "states": [
+    "empty",
+    "partial",
+    "full",
+    "leakage-coefficient",
+    "legacy-unavailable"
+  ],
+  "unchangedPeople": true,
+  "contentOnlyRefresh": true,
+  "focusAndScrollPreserved": true,
+  "cameraPreserved": true,
+  "mobileWaterCardFullyVisible": true,
+  "minimumWaterTextPixels": 11,
+  "smallestQuantumVisible": true,
+  "localMemoryNotDerivedFromItems": true,
+  "commandsSent": 0,
+  "mobileViewport": [
+    320,
+    568
+  ],
+  "errors": []
+}

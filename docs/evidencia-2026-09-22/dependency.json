@@ -1,0 +1,93 @@
+{
+  "scope": "Isolated technologyOpportunity CPU, simulated cold archive in RAM, no SQLite",
+  "results": [
+    {
+      "label": "small viable paid chain",
+      "iterations": 5000,
+      "results": [
+        {
+          "variant": "control",
+          "known": 3,
+          "medianMs": 0.0026299999999963575,
+          "p95Ms": 0.004649999999998045,
+          "maxMs": 0.1608720000000119,
+          "totalMs": 14.173710999999429
+        },
+        {
+          "variant": "candidate",
+          "known": 3,
+          "medianMs": 0.02110999999999308,
+          "p95Ms": 0.0317799999999977,
+          "maxMs": 0.29563199999998346,
+          "totalMs": 120.23288400000057
+        }
+      ]
+    },
+    {
+      "label": "medium memory viable paid chain",
+      "iterations": 5000,
+      "results": [
+        {
+          "variant": "control",
+          "known": 32,
+          "medianMs": 0.010010000000022501,
+          "p95Ms": 0.01064000000002352,
+          "maxMs": 0.12791099999998323,
+          "totalMs": 52.04246100000006
+        },
+        {
+          "variant": "candidate",
+          "known": 32,
+          "medianMs": 0.026650999999958458,
+          "p95Ms": 0.03182000000003882,
+          "maxMs": 0.3448530000000005,
+          "totalMs": 138.71164399999884
+        }
+      ]
+    },
+    {
+      "label": "medium memory missing owned catalyst",
+      "iterations": 5000,
+      "results": [
+        {
+          "variant": "control",
+          "known": 32,
+          "medianMs": 0.009700000000009368,
+          "p95Ms": 0.01036999999996624,
+          "maxMs": 0.09628100000003315,
+          "totalMs": 50.334299999998336
+        },
+        {
+          "variant": "candidate",
+          "known": 32,
+          "medianMs": 0.01862000000005537,
+          "p95Ms": 0.020009999999956563,
+          "maxMs": 0.17082200000004377,
+          "totalMs": 96.89203700000155
+        }
+      ]
+    },
+    {
+      "label": "medium memory cold in-memory archive (no SQLite I/O)",
+      "iterations": 5000,
+      "results": [
+        {
+          "variant": "control",
+          "known": 32,
+          "medianMs": 0.128680999999915,
+          "p95Ms": 0.13398200000006,
+          "maxMs": 0.24536200000011377,
+          "totalMs": 654.5693290000052
+        },
+        {
+          "variant": "candidate",
+          "known": 32,
+          "medianMs": 0.14795100000037564,
+          "p95Ms": 0.15904199999999946,
+          "maxMs": 0.6546160000000327,
+          "totalMs": 754.0404400000041
+        }
+      ]
+    }
+  ]
+}

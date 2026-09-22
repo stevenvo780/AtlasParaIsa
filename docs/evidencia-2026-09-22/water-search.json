@@ -1,0 +1,707 @@
+{
+  "scope": "Isolated waypoint retention, first integration frozen source plus only choose patch, 3 days, production Store cadence20, no governor or performance claim",
+  "seeds": [
+    4,
+    17,
+    83
+  ],
+  "runs": {
+    "before": [
+      {
+        "seed": 4,
+        "root": "artifacts/coherence-20260922/candidate-source",
+        "params": {
+          "cuerpo": {
+            "longevidadBaseDias": 11,
+            "longevidadPorResiliencia": 4,
+            "longevidadPorActividad": 1,
+            "senescenciaInicioFraccion": 0.75,
+            "riesgoSenescenciaDiario": 0.04,
+            "riesgoSenescenciaPendiente": 10,
+            "cuidadoReduceRiesgo": 0.6
+          },
+          "genes": {
+            "varianzaFundadores": 0.15,
+            "tasaMutacion": 1
+          },
+          "poblacion": {
+            "maxima": 1000000,
+            "intervaloComprobacionTicks": 120,
+            "nacimientosPorComprobacion": 2
+          },
+          "recursos": {
+            "capacidadBosque": 1,
+            "capacidadPastizal": 0.7,
+            "capacidadOtros": 0.35,
+            "velocidadRegeneracion": 1,
+            "decaimientoFertilidad": 0.001,
+            "decaimientoComida": 0.0001
+          },
+          "persistencia": {
+            "cadaTicks": 20,
+            "ventanaEventosTicks": 0
+          },
+          "agua": {
+            "cuencas": 0.4
+          },
+          "gobernador": {
+            "presupuestoMs": 50
+          }
+        },
+        "scope": "3 days stepWorld with production Store every20ticks, no governor, heldout17and83, no performance claim",
+        "days": [
+          {
+            "seed": 4,
+            "tick": 2400,
+            "population": 20,
+            "neighbors": 18,
+            "births": 5,
+            "deaths": {
+              "deaths": 1,
+              "causes": {
+                "starvation": 0,
+                "dehydration": 1,
+                "exposure": 0,
+                "senescence": 0
+              },
+              "foodLost": 0.11274001701309744,
+              "woodLost": 7,
+              "stoneLost": 7
+            },
+            "waterConsumed": 6.035965164677785,
+            "firstTarget": null
+          },
+          {
+            "seed": 4,
+            "tick": 4800,
+            "population": 16,
+            "neighbors": 14,
+            "births": 6,
+            "deaths": {
+              "deaths": 6,
+              "causes": {
+                "starvation": 0,
+                "dehydration": 6,
+                "exposure": 0,
+                "senescence": 0
+              },
+              "foodLost": 0.46116727823058734,
+              "woodLost": 10,
+              "stoneLost": 27
+            },
+            "waterConsumed": 11.639413733864146,
+            "firstTarget": null
+          },
+          {
+            "seed": 4,
+            "tick": 7200,
+            "population": 18,
+            "neighbors": 16,
+            "births": 9,
+            "deaths": {
+              "deaths": 7,
+              "causes": {
+                "starvation": 0,
+                "dehydration": 7,
+                "exposure": 0,
+                "senescence": 0
+              },
+              "foodLost": 0.5223929846985996,
+              "woodLost": 10,
+              "stoneLost": 33
+            },
+            "waterConsumed": 19.255914283715477,
+            "firstTarget": null
+          }
+        ]
+      },
+      {
+        "seed": 17,
+        "root": "artifacts/coherence-20260922/candidate-source",
+        "params": {
+          "cuerpo": {
+            "longevidadBaseDias": 11,
+            "longevidadPorResiliencia": 4,
+            "longevidadPorActividad": 1,
+            "senescenciaInicioFraccion": 0.75,
+            "riesgoSenescenciaDiario": 0.04,
+            "riesgoSenescenciaPendiente": 10,
+            "cuidadoReduceRiesgo": 0.6
+          },
+          "genes": {
+            "varianzaFundadores": 0.15,
+            "tasaMutacion": 1
+          },
+          "poblacion": {
+            "maxima": 1000000,
+            "intervaloComprobacionTicks": 120,
+            "nacimientosPorComprobacion": 2
+          },
+          "recursos": {
+            "capacidadBosque": 1,
+            "capacidadPastizal": 0.7,
+            "capacidadOtros": 0.35,
+            "velocidadRegeneracion": 1,
+            "decaimientoFertilidad": 0.001,
+            "decaimientoComida": 0.0001
+          },
+          "persistencia": {
+            "cadaTicks": 20,
+            "ventanaEventosTicks": 0
+          },
+          "agua": {
+            "cuencas": 0.4
+          },
+          "gobernador": {
+            "presupuestoMs": 50
+          }
+        },
+        "scope": "3 days stepWorld with production Store every20ticks, no governor, heldout17and83, no performance claim",
+        "days": [
+          {
+            "seed": 17,
+            "tick": 2400,
+            "population": 14,
+            "neighbors": 12,
+            "births": 0,
+            "deaths": {
+              "deaths": 2,
+              "causes": {
+                "starvation": 0,
+                "dehydration": 2,
+                "exposure": 0,
+                "senescence": 0
+              },
+              "foodLost": 0.18000000000000005,
+              "woodLost": 0,
+              "stoneLost": 9
+            },
+            "waterConsumed": 5.561932799999989,
+            "firstTarget": {
+              "thirst": 0.46318502595306543,
+              "health": 0.6092125676304814
+            }
+          },
+          {
+            "seed": 17,
+            "tick": 4800,
+            "population": 14,
+            "neighbors": 12,
+            "births": 0,
+            "deaths": {
+              "deaths": 2,
+              "causes": {
+                "starvation": 0,
+                "dehydration": 2,
+                "exposure": 0,
+                "senescence": 0
+              },
+              "foodLost": 0.18000000000000005,
+              "woodLost": 0,
+              "stoneLost": 9
+            },
+            "waterConsumed": 11.143377329056978,
+            "firstTarget": {
+              "thirst": 0.18508460458504628,
+              "health": 0.49390372294588103
+            }
+          },
+          {
+            "seed": 17,
+            "tick": 7200,
+            "population": 15,
+            "neighbors": 13,
+            "births": 1,
+            "deaths": {
+              "deaths": 2,
+              "causes": {
+                "starvation": 0,
+                "dehydration": 2,
+                "exposure": 0,
+                "senescence": 0
+              },
+              "foodLost": 0.18000000000000005,
+              "woodLost": 0,
+              "stoneLost": 9
+            },
+            "waterConsumed": 16.52000831603704,
+            "firstTarget": {
+              "thirst": 0.5136411346297326,
+              "health": 0.5104174870726637
+            }
+          }
+        ]
+      },
+      {
+        "seed": 83,
+        "root": "artifacts/coherence-20260922/candidate-source",
+        "params": {
+          "cuerpo": {
+            "longevidadBaseDias": 11,
+            "longevidadPorResiliencia": 4,
+            "longevidadPorActividad": 1,
+            "senescenciaInicioFraccion": 0.75,
+            "riesgoSenescenciaDiario": 0.04,
+            "riesgoSenescenciaPendiente": 10,
+            "cuidadoReduceRiesgo": 0.6
+          },
+          "genes": {
+            "varianzaFundadores": 0.15,
+            "tasaMutacion": 1
+          },
+          "poblacion": {
+            "maxima": 1000000,
+            "intervaloComprobacionTicks": 120,
+            "nacimientosPorComprobacion": 2
+          },
+          "recursos": {
+            "capacidadBosque": 1,
+            "capacidadPastizal": 0.7,
+            "capacidadOtros": 0.35,
+            "velocidadRegeneracion": 1,
+            "decaimientoFertilidad": 0.001,
+            "decaimientoComida": 0.0001
+          },
+          "persistencia": {
+            "cadaTicks": 20,
+            "ventanaEventosTicks": 0
+          },
+          "agua": {
+            "cuencas": 0.4
+          },
+          "gobernador": {
+            "presupuestoMs": 50
+          }
+        },
+        "scope": "3 days stepWorld with production Store every20ticks, no governor, heldout17and83, no performance claim",
+        "days": [
+          {
+            "seed": 83,
+            "tick": 2400,
+            "population": 22,
+            "neighbors": 20,
+            "births": 6,
+            "deaths": {
+              "deaths": 0,
+              "causes": {
+                "starvation": 0,
+                "dehydration": 0,
+                "exposure": 0,
+                "senescence": 0
+              },
+              "foodLost": 0,
+              "woodLost": 0,
+              "stoneLost": 0
+            },
+            "waterConsumed": 5.728994017418729,
+            "firstTarget": {
+              "thirst": 0.49027576114718807,
+              "health": 0.9701169834672809
+            }
+          },
+          {
+            "seed": 83,
+            "tick": 4800,
+            "population": 25,
+            "neighbors": 23,
+            "births": 9,
+            "deaths": {
+              "deaths": 0,
+              "causes": {
+                "starvation": 0,
+                "dehydration": 0,
+                "exposure": 0,
+                "senescence": 0
+              },
+              "foodLost": 0,
+              "woodLost": 0,
+              "stoneLost": 0
+            },
+            "waterConsumed": 15.088024273028443,
+            "firstTarget": {
+              "thirst": 0.22491038334322982,
+              "health": 0.9573835975167054
+            }
+          },
+          {
+            "seed": 83,
+            "tick": 7200,
+            "population": 30,
+            "neighbors": 28,
+            "births": 14,
+            "deaths": {
+              "deaths": 0,
+              "causes": {
+                "starvation": 0,
+                "dehydration": 0,
+                "exposure": 0,
+                "senescence": 0
+              },
+              "foodLost": 0,
+              "woodLost": 0,
+              "stoneLost": 0
+            },
+            "waterConsumed": 24.91819012929663,
+            "firstTarget": {
+              "thirst": 0.3345970191048452,
+              "health": 0.9101981444950475
+            }
+          }
+        ]
+      }
+    ],
+    "after": [
+      {
+        "seed": 4,
+        "root": "/tmp/atlas-water-fixed-source",
+        "params": {
+          "cuerpo": {
+            "longevidadBaseDias": 11,
+            "longevidadPorResiliencia": 4,
+            "longevidadPorActividad": 1,
+            "senescenciaInicioFraccion": 0.75,
+            "riesgoSenescenciaDiario": 0.04,
+            "riesgoSenescenciaPendiente": 10,
+            "cuidadoReduceRiesgo": 0.6
+          },
+          "genes": {
+            "varianzaFundadores": 0.15,
+            "tasaMutacion": 1
+          },
+          "poblacion": {
+            "maxima": 1000000,
+            "intervaloComprobacionTicks": 120,
+            "nacimientosPorComprobacion": 2
+          },
+          "recursos": {
+            "capacidadBosque": 1,
+            "capacidadPastizal": 0.7,
+            "capacidadOtros": 0.35,
+            "velocidadRegeneracion": 1,
+            "decaimientoFertilidad": 0.001,
+            "decaimientoComida": 0.0001
+          },
+          "persistencia": {
+            "cadaTicks": 20,
+            "ventanaEventosTicks": 0
+          },
+          "agua": {
+            "cuencas": 0.4
+          },
+          "gobernador": {
+            "presupuestoMs": 50
+          }
+        },
+        "scope": "3 days stepWorld with production Store every20ticks, no governor, heldout17and83, no performance claim",
+        "days": [
+          {
+            "seed": 4,
+            "tick": 2400,
+            "population": 21,
+            "neighbors": 19,
+            "births": 5,
+            "deaths": {
+              "deaths": 0,
+              "causes": {
+                "starvation": 0,
+                "dehydration": 0,
+                "exposure": 0,
+                "senescence": 0
+              },
+              "foodLost": 0,
+              "woodLost": 0,
+              "stoneLost": 0
+            },
+            "waterConsumed": 6.244664364677794,
+            "firstTarget": {
+              "thirst": 0.6731121956702325,
+              "health": 0.7641237052574408
+            }
+          },
+          {
+            "seed": 4,
+            "tick": 4800,
+            "population": 19,
+            "neighbors": 17,
+            "births": 5,
+            "deaths": {
+              "deaths": 2,
+              "causes": {
+                "starvation": 0,
+                "dehydration": 2,
+                "exposure": 0,
+                "senescence": 0
+              },
+              "foodLost": 0.1403749999999998,
+              "woodLost": 0,
+              "stoneLost": 7
+            },
+            "waterConsumed": 13.867338634925026,
+            "firstTarget": {
+              "thirst": 0.26586714024059976,
+              "health": 0.7590032228720528
+            }
+          },
+          {
+            "seed": 4,
+            "tick": 7200,
+            "population": 17,
+            "neighbors": 15,
+            "births": 6,
+            "deaths": {
+              "deaths": 5,
+              "causes": {
+                "starvation": 0,
+                "dehydration": 4,
+                "exposure": 1,
+                "senescence": 0
+              },
+              "foodLost": 0.33482177254412576,
+              "woodLost": 19.805,
+              "stoneLost": 28
+            },
+            "waterConsumed": 22.460027262482658,
+            "firstTarget": {
+              "thirst": 0.7766220848109691,
+              "health": 0.41914378032412447
+            }
+          }
+        ]
+      },
+      {
+        "seed": 17,
+        "root": "/tmp/atlas-water-fixed-source",
+        "params": {
+          "cuerpo": {
+            "longevidadBaseDias": 11,
+            "longevidadPorResiliencia": 4,
+            "longevidadPorActividad": 1,
+            "senescenciaInicioFraccion": 0.75,
+            "riesgoSenescenciaDiario": 0.04,
+            "riesgoSenescenciaPendiente": 10,
+            "cuidadoReduceRiesgo": 0.6
+          },
+          "genes": {
+            "varianzaFundadores": 0.15,
+            "tasaMutacion": 1
+          },
+          "poblacion": {
+            "maxima": 1000000,
+            "intervaloComprobacionTicks": 120,
+            "nacimientosPorComprobacion": 2
+          },
+          "recursos": {
+            "capacidadBosque": 1,
+            "capacidadPastizal": 0.7,
+            "capacidadOtros": 0.35,
+            "velocidadRegeneracion": 1,
+            "decaimientoFertilidad": 0.001,
+            "decaimientoComida": 0.0001
+          },
+          "persistencia": {
+            "cadaTicks": 20,
+            "ventanaEventosTicks": 0
+          },
+          "agua": {
+            "cuencas": 0.4
+          },
+          "gobernador": {
+            "presupuestoMs": 50
+          }
+        },
+        "scope": "3 days stepWorld with production Store every20ticks, no governor, heldout17and83, no performance claim",
+        "days": [
+          {
+            "seed": 17,
+            "tick": 2400,
+            "population": 13,
+            "neighbors": 11,
+            "births": 0,
+            "deaths": {
+              "deaths": 3,
+              "causes": {
+                "starvation": 0,
+                "dehydration": 3,
+                "exposure": 0,
+                "senescence": 0
+              },
+              "foodLost": 0.2700000000000001,
+              "woodLost": 0,
+              "stoneLost": 11
+            },
+            "waterConsumed": 4.684660901662435,
+            "firstTarget": {
+              "thirst": 0.5601204160911275,
+              "health": 0.48011542784497574
+            }
+          },
+          {
+            "seed": 17,
+            "tick": 4800,
+            "population": 13,
+            "neighbors": 11,
+            "births": 0,
+            "deaths": {
+              "deaths": 3,
+              "causes": {
+                "starvation": 0,
+                "dehydration": 3,
+                "exposure": 0,
+                "senescence": 0
+              },
+              "foodLost": 0.2700000000000001,
+              "woodLost": 0,
+              "stoneLost": 11
+            },
+            "waterConsumed": 10.377399878835263,
+            "firstTarget": {
+              "thirst": 0.28947370329071154,
+              "health": 0.4857655888302596
+            }
+          },
+          {
+            "seed": 17,
+            "tick": 7200,
+            "population": 13,
+            "neighbors": 11,
+            "births": 0,
+            "deaths": {
+              "deaths": 3,
+              "causes": {
+                "starvation": 0,
+                "dehydration": 3,
+                "exposure": 0,
+                "senescence": 0
+              },
+              "foodLost": 0.2700000000000001,
+              "woodLost": 0,
+              "stoneLost": 11
+            },
+            "waterConsumed": 15.486644950744768,
+            "firstTarget": {
+              "thirst": 0.3053158520822499,
+              "health": 0.5073562780144395
+            }
+          }
+        ]
+      },
+      {
+        "seed": 83,
+        "root": "/tmp/atlas-water-fixed-source",
+        "params": {
+          "cuerpo": {
+            "longevidadBaseDias": 11,
+            "longevidadPorResiliencia": 4,
+            "longevidadPorActividad": 1,
+            "senescenciaInicioFraccion": 0.75,
+            "riesgoSenescenciaDiario": 0.04,
+            "riesgoSenescenciaPendiente": 10,
+            "cuidadoReduceRiesgo": 0.6
+          },
+          "genes": {
+            "varianzaFundadores": 0.15,
+            "tasaMutacion": 1
+          },
+          "poblacion": {
+            "maxima": 1000000,
+            "intervaloComprobacionTicks": 120,
+            "nacimientosPorComprobacion": 2
+          },
+          "recursos": {
+            "capacidadBosque": 1,
+            "capacidadPastizal": 0.7,
+            "capacidadOtros": 0.35,
+            "velocidadRegeneracion": 1,
+            "decaimientoFertilidad": 0.001,
+            "decaimientoComida": 0.0001
+          },
+          "persistencia": {
+            "cadaTicks": 20,
+            "ventanaEventosTicks": 0
+          },
+          "agua": {
+            "cuencas": 0.4
+          },
+          "gobernador": {
+            "presupuestoMs": 50
+          }
+        },
+        "scope": "3 days stepWorld with production Store every20ticks, no governor, heldout17and83, no performance claim",
+        "days": [
+          {
+            "seed": 83,
+            "tick": 2400,
+            "population": 22,
+            "neighbors": 20,
+            "births": 6,
+            "deaths": {
+              "deaths": 0,
+              "causes": {
+                "starvation": 0,
+                "dehydration": 0,
+                "exposure": 0,
+                "senescence": 0
+              },
+              "foodLost": 0,
+              "woodLost": 0,
+              "stoneLost": 0
+            },
+            "waterConsumed": 5.728994017418729,
+            "firstTarget": {
+              "thirst": 0.49027576114718807,
+              "health": 0.9701169834672809
+            }
+          },
+          {
+            "seed": 83,
+            "tick": 4800,
+            "population": 25,
+            "neighbors": 23,
+            "births": 9,
+            "deaths": {
+              "deaths": 0,
+              "causes": {
+                "starvation": 0,
+                "dehydration": 0,
+                "exposure": 0,
+                "senescence": 0
+              },
+              "foodLost": 0,
+              "woodLost": 0,
+              "stoneLost": 0
+            },
+            "waterConsumed": 15.088024273028443,
+            "firstTarget": {
+              "thirst": 0.22491038334322982,
+              "health": 0.9573835975167054
+            }
+          },
+          {
+            "seed": 83,
+            "tick": 7200,
+            "population": 30,
+            "neighbors": 28,
+            "births": 14,
+            "deaths": {
+              "deaths": 0,
+              "causes": {
+                "starvation": 0,
+                "dehydration": 0,
+                "exposure": 0,
+                "senescence": 0
+              },
+              "foodLost": 0,
+              "woodLost": 0,
+              "stoneLost": 0
+            },
+            "waterConsumed": 24.988912580006666,
+            "firstTarget": {
+              "thirst": 0.2625970191048481,
+              "health": 0.9100937331418751
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

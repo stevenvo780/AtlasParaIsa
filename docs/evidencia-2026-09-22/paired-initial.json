@@ -1,0 +1,5735 @@
+{
+  "scope": "Exploratory initial integration, before dependency-planning and storage fixes. Not final acceptance.",
+  "runs": [
+    {
+      "run": "baseline-server-51926",
+      "metadata": {
+        "sha": "9665754c15e9c9c40b025a69ccf990896bc3849c",
+        "source": "5479b2f228163918db431c85df3eea263157c4cd1b1f1f38c2be470c1de47db4",
+        "seed": 51926,
+        "days": 5,
+        "engine": "server",
+        "params": {
+          "cuerpo": {
+            "longevidadBaseDias": 11,
+            "longevidadPorResiliencia": 4,
+            "longevidadPorActividad": 1,
+            "senescenciaInicioFraccion": 0.75,
+            "riesgoSenescenciaDiario": 0.04,
+            "riesgoSenescenciaPendiente": 10,
+            "cuidadoReduceRiesgo": 0.6
+          },
+          "genes": {
+            "varianzaFundadores": 0.15,
+            "tasaMutacion": 1
+          },
+          "poblacion": {
+            "maxima": 1000000,
+            "intervaloComprobacionTicks": 120,
+            "nacimientosPorComprobacion": 2
+          },
+          "recursos": {
+            "capacidadBosque": 1,
+            "capacidadPastizal": 0.7,
+            "capacidadOtros": 0.35,
+            "velocidadRegeneracion": 1,
+            "decaimientoFertilidad": 0.001,
+            "decaimientoComida": 0.0001
+          },
+          "persistencia": {
+            "cadaTicks": 20,
+            "ventanaEventosTicks": 0
+          },
+          "agua": {
+            "cuencas": 0.4
+          },
+          "gobernador": {
+            "presupuestoMs": 50
+          }
+        },
+        "scope": "createApp, real clone/step/save and hardware governor; no clients, scheduler or network",
+        "thresholds": {
+          "mortalExtinction": 0,
+          "failedSteps": 0,
+          "serverStepP95Ms": 50
+        },
+        "complete": true,
+        "finalTick": 12000
+      },
+      "days": [
+        {
+          "day": 1,
+          "tick": 2400,
+          "population": 21,
+          "births": 5,
+          "deaths": {
+            "deaths": 0,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 0,
+              "exposure": 0,
+              "senescence": 0
+            },
+            "foodLost": 0,
+            "woodLost": 0,
+            "stoneLost": 0
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 4,
+          "totals": {
+            "foodHarvested": 2.5861693641638994,
+            "woodGathered": 164.1854223452474,
+            "stoneGathered": 80,
+            "hunts": 0,
+            "waterConsumed": 6.846553872042669,
+            "cooperation": 200,
+            "teaching": 183,
+            "trade": 13,
+            "conflicts": 0,
+            "births": 5,
+            "cultivations": 0,
+            "constructionHelp": 4
+          },
+          "diversity": {
+            "conducta": 0.4076225475043593,
+            "oficios": 0.3400603140512926,
+            "total": 0.37384143077782594
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 0,
+              "hastaTickInclusivo": 2400
+            },
+            "vecinosMortales": 19,
+            "fundadoresMortalesVivos": 14,
+            "generacionesMortalesVivas": [
+              0,
+              1
+            ],
+            "recetasDistintasEnUso": 8,
+            "recetasDistintasFabricadas": 5,
+            "usosUtiles": 34,
+            "beneficioUso": 6.134771672513027,
+            "usosDeInventorAjeno": 13,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.38235294117647056,
+            "usosConEnsenanzaRecordada": 11,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 183,
+              "trade": 13,
+              "constructionHelp": 4
+            },
+            "otrasCooperacionesAcumuladas": 0,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 8.055211000000327,
+          "p95StepMs": 17.30677999999898,
+          "maxStepMs": 71.6829740000012,
+          "p95SaveMs": 32.82642599999963,
+          "rss": 321003520,
+          "runtime": {
+            "stepMs": 50.54687700000068,
+            "p95StepMs": 29.994395999998233,
+            "saveMs": 31.41736899999887,
+            "projectionMs": 0,
+            "snapshotBytes": 1894108,
+            "activeTiles": 5632,
+            "processRssMiB": 309.453125,
+            "tickHz": 69.77950501455429,
+            "gobernador": {
+              "activo": true,
+              "presupuestoMs": 50,
+              "p95StepMs": 29.994395999998233,
+              "manual": null
+            }
+          }
+        },
+        {
+          "day": 2,
+          "tick": 4800,
+          "population": 25,
+          "births": 9,
+          "deaths": {
+            "deaths": 0,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 0,
+              "exposure": 0,
+              "senescence": 0
+            },
+            "foodLost": 0,
+            "woodLost": 0,
+            "stoneLost": 0
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 5,
+          "totals": {
+            "foodHarvested": 7.147481517282854,
+            "woodGathered": 311.8777617928817,
+            "stoneGathered": 140,
+            "hunts": 0,
+            "waterConsumed": 14.890854057539963,
+            "cooperation": 505,
+            "teaching": 471,
+            "trade": 21,
+            "conflicts": 0,
+            "births": 9,
+            "cultivations": 0,
+            "constructionHelp": 13
+          },
+          "diversity": {
+            "conducta": 0.435151400114381,
+            "oficios": 0.4212602889672534,
+            "total": 0.4282058445408172
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 2400,
+              "hastaTickInclusivo": 4800
+            },
+            "vecinosMortales": 23,
+            "fundadoresMortalesVivos": 14,
+            "generacionesMortalesVivas": [
+              0,
+              1
+            ],
+            "recetasDistintasEnUso": 34,
+            "recetasDistintasFabricadas": 14,
+            "usosUtiles": 84,
+            "beneficioUso": 11.585643493925245,
+            "usosDeInventorAjeno": 23,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.27380952380952384,
+            "usosConEnsenanzaRecordada": 13,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 471,
+              "trade": 21,
+              "constructionHelp": 13
+            },
+            "otrasCooperacionesAcumuladas": 0,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 13.22749499999918,
+          "p95StepMs": 35.93380099999922,
+          "maxStepMs": 77.7145359999995,
+          "p95SaveMs": 54.33983900000021,
+          "rss": 365539328,
+          "runtime": {
+            "stepMs": 63.29482999999891,
+            "p95StepMs": 46.08088699999644,
+            "saveMs": 43.41149100000621,
+            "projectionMs": 0,
+            "snapshotBytes": 2229764,
+            "activeTiles": 6912,
+            "processRssMiB": 343.29296875,
+            "tickHz": 62.00165037035004,
+            "gobernador": {
+              "activo": true,
+              "presupuestoMs": 50,
+              "p95StepMs": 46.08088699999644,
+              "manual": null
+            }
+          }
+        },
+        {
+          "day": 3,
+          "tick": 7200,
+          "population": 25,
+          "births": 9,
+          "deaths": {
+            "deaths": 0,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 0,
+              "exposure": 0,
+              "senescence": 0
+            },
+            "foodLost": 0,
+            "woodLost": 0,
+            "stoneLost": 0
+          },
+          "reproductionPausedTicks": 1581,
+          "neighborsReady": 14,
+          "totals": {
+            "foodHarvested": 11.536981517283472,
+            "woodGathered": 418.9524287744557,
+            "stoneGathered": 207,
+            "hunts": 0,
+            "waterConsumed": 24.182616911741256,
+            "cooperation": 972,
+            "teaching": 904,
+            "trade": 26,
+            "conflicts": 0,
+            "births": 9,
+            "cultivations": 0,
+            "constructionHelp": 42
+          },
+          "diversity": {
+            "conducta": 0.3932524924317412,
+            "oficios": 0.3940296741212986,
+            "total": 0.3936410832765199
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 4800,
+              "hastaTickInclusivo": 7200
+            },
+            "vecinosMortales": 23,
+            "fundadoresMortalesVivos": 14,
+            "generacionesMortalesVivas": [
+              0,
+              1
+            ],
+            "recetasDistintasEnUso": 52,
+            "recetasDistintasFabricadas": 13,
+            "usosUtiles": 112,
+            "beneficioUso": 15.99389682261772,
+            "usosDeInventorAjeno": 23,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.20535714285714285,
+            "usosConEnsenanzaRecordada": 15,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 904,
+              "trade": 26,
+              "constructionHelp": 42
+            },
+            "otrasCooperacionesAcumuladas": 0,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 17.461372000005213,
+          "p95StepMs": 42.64885200000572,
+          "maxStepMs": 128.35930699999153,
+          "p95SaveMs": 71.80308399999922,
+          "rss": 424693760,
+          "runtime": {
+            "stepMs": 103.38740999999573,
+            "p95StepMs": 67.05184000000008,
+            "saveMs": 72.9816439999995,
+            "projectionMs": 0,
+            "snapshotBytes": 3104946,
+            "activeTiles": 9216,
+            "processRssMiB": 404.38671875,
+            "tickHz": 38.74002941433422,
+            "gobernador": {
+              "activo": false,
+              "presupuestoMs": 50,
+              "p95StepMs": 67.05184000000008,
+              "manual": null
+            }
+          }
+        },
+        {
+          "day": 4,
+          "tick": 9600,
+          "population": 25,
+          "births": 9,
+          "deaths": {
+            "deaths": 0,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 0,
+              "exposure": 0,
+              "senescence": 0
+            },
+            "foodLost": 0,
+            "woodLost": 0,
+            "stoneLost": 0
+          },
+          "reproductionPausedTicks": 2400,
+          "neighborsReady": 17,
+          "totals": {
+            "foodHarvested": 15.984481517284216,
+            "woodGathered": 479.76733947456916,
+            "stoneGathered": 235,
+            "hunts": 4,
+            "waterConsumed": 33.37721366861926,
+            "cooperation": 1337,
+            "teaching": 1257,
+            "trade": 27,
+            "conflicts": 0,
+            "births": 9,
+            "cultivations": 0,
+            "constructionHelp": 53
+          },
+          "diversity": {
+            "conducta": 0.34330449872559293,
+            "oficios": 0.38435692224163925,
+            "total": 0.3638307104836161
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 7200,
+              "hastaTickInclusivo": 9600
+            },
+            "vecinosMortales": 23,
+            "fundadoresMortalesVivos": 14,
+            "generacionesMortalesVivas": [
+              0,
+              1
+            ],
+            "recetasDistintasEnUso": 29,
+            "recetasDistintasFabricadas": 10,
+            "usosUtiles": 65,
+            "beneficioUso": 9.41010731078281,
+            "usosDeInventorAjeno": 13,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.2,
+            "usosConEnsenanzaRecordada": 13,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 1257,
+              "trade": 27,
+              "constructionHelp": 53
+            },
+            "otrasCooperacionesAcumuladas": 0,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 20.581594000017503,
+          "p95StepMs": 68.28928700000688,
+          "maxStepMs": 196.95505499999854,
+          "p95SaveMs": 104.60932399999001,
+          "rss": 448598016,
+          "runtime": {
+            "stepMs": 129.32149599998957,
+            "p95StepMs": 104.54749199998332,
+            "saveMs": 98.03830300000845,
+            "projectionMs": 0,
+            "snapshotBytes": 3812755,
+            "activeTiles": 12544,
+            "processRssMiB": 427.24609375,
+            "tickHz": 36.66874295052454,
+            "gobernador": {
+              "activo": false,
+              "presupuestoMs": 50,
+              "p95StepMs": 104.54749199998332,
+              "manual": null
+            }
+          }
+        },
+        {
+          "day": 5,
+          "tick": 12000,
+          "population": 25,
+          "births": 9,
+          "deaths": {
+            "deaths": 0,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 0,
+              "exposure": 0,
+              "senescence": 0
+            },
+            "foodLost": 0,
+            "woodLost": 0,
+            "stoneLost": 0
+          },
+          "reproductionPausedTicks": 2400,
+          "neighborsReady": 17,
+          "totals": {
+            "foodHarvested": 20.492981517282928,
+            "woodGathered": 604.360085531275,
+            "stoneGathered": 321,
+            "hunts": 5,
+            "waterConsumed": 42.66416237538089,
+            "cooperation": 1740,
+            "teaching": 1651,
+            "trade": 31,
+            "conflicts": 0,
+            "births": 9,
+            "cultivations": 1,
+            "constructionHelp": 57
+          },
+          "diversity": {
+            "conducta": 0.3667673673484126,
+            "oficios": 0.39159817959665033,
+            "total": 0.3791827734725315
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 9600,
+              "hastaTickInclusivo": 12000
+            },
+            "vecinosMortales": 23,
+            "fundadoresMortalesVivos": 14,
+            "generacionesMortalesVivas": [
+              0,
+              1
+            ],
+            "recetasDistintasEnUso": 60,
+            "recetasDistintasFabricadas": 19,
+            "usosUtiles": 160,
+            "beneficioUso": 25.69529647325743,
+            "usosDeInventorAjeno": 47,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.29375,
+            "usosConEnsenanzaRecordada": 30,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 1651,
+              "trade": 31,
+              "constructionHelp": 57
+            },
+            "otrasCooperacionesAcumuladas": 1,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 29.40433099999791,
+          "p95StepMs": 128.0543319999997,
+          "maxStepMs": 1332.7226770000125,
+          "p95SaveMs": 384.7989950000192,
+          "rss": 470822912,
+          "runtime": {
+            "stepMs": 389.7937190000084,
+            "p95StepMs": 239.34882499999367,
+            "saveMs": 340.176472000021,
+            "projectionMs": 0,
+            "snapshotBytes": 3709788,
+            "activeTiles": 12288,
+            "processRssMiB": 448.359375,
+            "tickHz": 18.512106061529384,
+            "gobernador": {
+              "activo": false,
+              "presupuestoMs": 50,
+              "p95StepMs": 239.34882499999367,
+              "manual": null
+            }
+          }
+        }
+      ]
+    },
+    {
+      "run": "baseline-world-1",
+      "metadata": {
+        "sha": "9665754c15e9c9c40b025a69ccf990896bc3849c",
+        "source": "5479b2f228163918db431c85df3eea263157c4cd1b1f1f38c2be470c1de47db4",
+        "seed": 1,
+        "days": 10,
+        "engine": "world",
+        "params": {
+          "cuerpo": {
+            "longevidadBaseDias": 11,
+            "longevidadPorResiliencia": 4,
+            "longevidadPorActividad": 1,
+            "senescenciaInicioFraccion": 0.75,
+            "riesgoSenescenciaDiario": 0.04,
+            "riesgoSenescenciaPendiente": 10,
+            "cuidadoReduceRiesgo": 0.6
+          },
+          "genes": {
+            "varianzaFundadores": 0.15,
+            "tasaMutacion": 1
+          },
+          "poblacion": {
+            "maxima": 1000000,
+            "intervaloComprobacionTicks": 120,
+            "nacimientosPorComprobacion": 2
+          },
+          "recursos": {
+            "capacidadBosque": 1,
+            "capacidadPastizal": 0.7,
+            "capacidadOtros": 0.35,
+            "velocidadRegeneracion": 1,
+            "decaimientoFertilidad": 0.001,
+            "decaimientoComida": 0.0001
+          },
+          "persistencia": {
+            "cadaTicks": 20,
+            "ventanaEventosTicks": 0
+          },
+          "agua": {
+            "cuencas": 0.4
+          },
+          "gobernador": {
+            "presupuestoMs": 50
+          }
+        },
+        "scope": "stepWorld and production Store; governor not executed",
+        "thresholds": {
+          "mortalExtinction": 0,
+          "failedSteps": 0,
+          "serverStepP95Ms": 50
+        },
+        "complete": true,
+        "finalTick": 24000
+      },
+      "days": [
+        {
+          "day": 1,
+          "tick": 2400,
+          "population": 22,
+          "births": 6,
+          "deaths": {
+            "deaths": 0,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 0,
+              "exposure": 0,
+              "senescence": 0
+            },
+            "foodLost": 0,
+            "woodLost": 0,
+            "stoneLost": 0
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 1,
+          "totals": {
+            "foodHarvested": 2.3638482781710177,
+            "woodGathered": 104.3585708,
+            "stoneGathered": 50,
+            "hunts": 0,
+            "waterConsumed": 5.768393333375491,
+            "cooperation": 154,
+            "teaching": 146,
+            "trade": 7,
+            "conflicts": 0,
+            "births": 6,
+            "cultivations": 0,
+            "constructionHelp": 1
+          },
+          "diversity": {
+            "conducta": 0.5039097784627723,
+            "oficios": 0.4696830233644187,
+            "total": 0.4867964009135955
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 0,
+              "hastaTickInclusivo": 2400
+            },
+            "vecinosMortales": 20,
+            "fundadoresMortalesVivos": 14,
+            "generacionesMortalesVivas": [
+              0,
+              1
+            ],
+            "recetasDistintasEnUso": 4,
+            "recetasDistintasFabricadas": 5,
+            "usosUtiles": 6,
+            "beneficioUso": 0.5289444835935269,
+            "usosDeInventorAjeno": 4,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.6666666666666666,
+            "usosConEnsenanzaRecordada": 1,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 146,
+              "trade": 7,
+              "constructionHelp": 1
+            },
+            "otrasCooperacionesAcumuladas": 0,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 1.0279399999999441,
+          "p95StepMs": 8.321191999999996,
+          "maxStepMs": 58.09763200000043,
+          "p95SaveMs": 36.5564489999997,
+          "rss": 236380160,
+          "runtime": null
+        },
+        {
+          "day": 2,
+          "tick": 4800,
+          "population": 25,
+          "births": 10,
+          "deaths": {
+            "deaths": 1,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 1,
+              "exposure": 0,
+              "senescence": 0
+            },
+            "foodLost": 0.16888846381755057,
+            "woodLost": 0,
+            "stoneLost": 0
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 3,
+          "totals": {
+            "foodHarvested": 7.141748515115538,
+            "woodGathered": 187.15408709471217,
+            "stoneGathered": 126,
+            "hunts": 0,
+            "waterConsumed": 14.343334208955227,
+            "cooperation": 546,
+            "teaching": 519,
+            "trade": 11,
+            "conflicts": 0,
+            "births": 10,
+            "cultivations": 0,
+            "constructionHelp": 15
+          },
+          "diversity": {
+            "conducta": 0.44505772535347055,
+            "oficios": 0.40749810502120304,
+            "total": 0.4262779151873368
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 2400,
+              "hastaTickInclusivo": 4800
+            },
+            "vecinosMortales": 23,
+            "fundadoresMortalesVivos": 13,
+            "generacionesMortalesVivas": [
+              0,
+              1
+            ],
+            "recetasDistintasEnUso": 39,
+            "recetasDistintasFabricadas": 20,
+            "usosUtiles": 85,
+            "beneficioUso": 9.446351440820825,
+            "usosDeInventorAjeno": 19,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.2235294117647059,
+            "usosConEnsenanzaRecordada": 3,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 519,
+              "trade": 11,
+              "constructionHelp": 15
+            },
+            "otrasCooperacionesAcumuladas": 1,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 3.1220810000013444,
+          "p95StepMs": 25.39676899999995,
+          "maxStepMs": 77.9656130000003,
+          "p95SaveMs": 58.80465099999856,
+          "rss": 293711872,
+          "runtime": null
+        },
+        {
+          "day": 3,
+          "tick": 7200,
+          "population": 28,
+          "births": 15,
+          "deaths": {
+            "deaths": 3,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 3,
+              "exposure": 0,
+              "senescence": 0
+            },
+            "foodLost": 0.17126346381755025,
+            "woodLost": 7,
+            "stoneLost": 7
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 4,
+          "totals": {
+            "foodHarvested": 11.886105508046242,
+            "woodGathered": 289.12702918908775,
+            "stoneGathered": 206,
+            "hunts": 2,
+            "waterConsumed": 24.050018979758864,
+            "cooperation": 1017,
+            "teaching": 980,
+            "trade": 17,
+            "conflicts": 0,
+            "births": 15,
+            "cultivations": 0,
+            "constructionHelp": 18
+          },
+          "diversity": {
+            "conducta": 0.42668684975195875,
+            "oficios": 0.45425882431913317,
+            "total": 0.44047283703554596
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 4800,
+              "hastaTickInclusivo": 7200
+            },
+            "vecinosMortales": 26,
+            "fundadoresMortalesVivos": 12,
+            "generacionesMortalesVivas": [
+              0,
+              1,
+              2
+            ],
+            "recetasDistintasEnUso": 55,
+            "recetasDistintasFabricadas": 21,
+            "usosUtiles": 139,
+            "beneficioUso": 18.44901578132236,
+            "usosDeInventorAjeno": 45,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.3237410071942446,
+            "usosConEnsenanzaRecordada": 14,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 980,
+              "trade": 17,
+              "constructionHelp": 18
+            },
+            "otrasCooperacionesAcumuladas": 2,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 4.605763999999908,
+          "p95StepMs": 43.889773999999306,
+          "maxStepMs": 174.46978700000182,
+          "p95SaveMs": 108.85556200000065,
+          "rss": 319811584,
+          "runtime": null
+        },
+        {
+          "day": 4,
+          "tick": 9600,
+          "population": 31,
+          "births": 18,
+          "deaths": {
+            "deaths": 3,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 3,
+              "exposure": 0,
+              "senescence": 0
+            },
+            "foodLost": 0.17126346381755025,
+            "woodLost": 7,
+            "stoneLost": 7
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 10,
+          "totals": {
+            "foodHarvested": 18.532361643618867,
+            "woodGathered": 294.2492986177894,
+            "stoneGathered": 206,
+            "hunts": 2,
+            "waterConsumed": 35.18414177374139,
+            "cooperation": 1716,
+            "teaching": 1675,
+            "trade": 21,
+            "conflicts": 0,
+            "births": 18,
+            "cultivations": 0,
+            "constructionHelp": 18
+          },
+          "diversity": {
+            "conducta": 0.40673543601397494,
+            "oficios": 0.33977746377955853,
+            "total": 0.37325644989676676
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 7200,
+              "hastaTickInclusivo": 9600
+            },
+            "vecinosMortales": 29,
+            "fundadoresMortalesVivos": 12,
+            "generacionesMortalesVivas": [
+              0,
+              1,
+              2
+            ],
+            "recetasDistintasEnUso": 76,
+            "recetasDistintasFabricadas": 24,
+            "usosUtiles": 175,
+            "beneficioUso": 14.26914627819111,
+            "usosDeInventorAjeno": 44,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.25142857142857145,
+            "usosConEnsenanzaRecordada": 17,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 1675,
+              "trade": 21,
+              "constructionHelp": 18
+            },
+            "otrasCooperacionesAcumuladas": 2,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 6.659983999998076,
+          "p95StepMs": 100.66498600000341,
+          "maxStepMs": 418.5627460000105,
+          "p95SaveMs": 291.7615699999951,
+          "rss": 356630528,
+          "runtime": null
+        },
+        {
+          "day": 5,
+          "tick": 12000,
+          "population": 38,
+          "births": 25,
+          "deaths": {
+            "deaths": 3,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 3,
+              "exposure": 0,
+              "senescence": 0
+            },
+            "foodLost": 0.17126346381755025,
+            "woodLost": 7,
+            "stoneLost": 7
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 11,
+          "totals": {
+            "foodHarvested": 24.70368570227652,
+            "woodGathered": 388.29146948566625,
+            "stoneGathered": 254,
+            "hunts": 2,
+            "waterConsumed": 48.273935033098766,
+            "cooperation": 2394,
+            "teaching": 2317,
+            "trade": 46,
+            "conflicts": 0,
+            "births": 25,
+            "cultivations": 0,
+            "constructionHelp": 29
+          },
+          "diversity": {
+            "conducta": 0.3685678665652026,
+            "oficios": 0.349808402201059,
+            "total": 0.3591881343831308
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 9600,
+              "hastaTickInclusivo": 12000
+            },
+            "vecinosMortales": 36,
+            "fundadoresMortalesVivos": 12,
+            "generacionesMortalesVivas": [
+              0,
+              1,
+              2,
+              3
+            ],
+            "recetasDistintasEnUso": 52,
+            "recetasDistintasFabricadas": 18,
+            "usosUtiles": 116,
+            "beneficioUso": 25.04947412389688,
+            "usosDeInventorAjeno": 45,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.3879310344827586,
+            "usosConEnsenanzaRecordada": 6,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 2317,
+              "trade": 46,
+              "constructionHelp": 29
+            },
+            "otrasCooperacionesAcumuladas": 2,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 6.900932000004104,
+          "p95StepMs": 165.19417799999064,
+          "maxStepMs": 449.17104200000176,
+          "p95SaveMs": 371.09493000000657,
+          "rss": 362582016,
+          "runtime": null
+        },
+        {
+          "day": 6,
+          "tick": 14400,
+          "population": 44,
+          "births": 32,
+          "deaths": {
+            "deaths": 4,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 4,
+              "exposure": 0,
+              "senescence": 0
+            },
+            "foodLost": 0.1976568503442948,
+            "woodLost": 8.041698151251754,
+            "stoneLost": 8
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 7,
+          "totals": {
+            "foodHarvested": 31.254562117234073,
+            "woodGathered": 437.5579303287622,
+            "stoneGathered": 292,
+            "hunts": 3,
+            "waterConsumed": 62.75477005994883,
+            "cooperation": 3377,
+            "teaching": 3265,
+            "trade": 70,
+            "conflicts": 0,
+            "births": 32,
+            "cultivations": 0,
+            "constructionHelp": 40
+          },
+          "diversity": {
+            "conducta": 0.3723379849581128,
+            "oficios": 0.35440611860317917,
+            "total": 0.363372051780646
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 12000,
+              "hastaTickInclusivo": 14400
+            },
+            "vecinosMortales": 42,
+            "fundadoresMortalesVivos": 12,
+            "generacionesMortalesVivas": [
+              0,
+              1,
+              2,
+              3
+            ],
+            "recetasDistintasEnUso": 68,
+            "recetasDistintasFabricadas": 27,
+            "usosUtiles": 148,
+            "beneficioUso": 16.320471830371524,
+            "usosDeInventorAjeno": 53,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.3581081081081081,
+            "usosConEnsenanzaRecordada": 22,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 3265,
+              "trade": 70,
+              "constructionHelp": 40
+            },
+            "otrasCooperacionesAcumuladas": 2,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 11.492708000005223,
+          "p95StepMs": 191.59523000000627,
+          "maxStepMs": 682.5122160000028,
+          "p95SaveMs": 448.7375489999831,
+          "rss": 335151104,
+          "runtime": null
+        },
+        {
+          "day": 7,
+          "tick": 16800,
+          "population": 53,
+          "births": 41,
+          "deaths": {
+            "deaths": 4,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 4,
+              "exposure": 0,
+              "senescence": 0
+            },
+            "foodLost": 0.1976568503442948,
+            "woodLost": 8.041698151251754,
+            "stoneLost": 8
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 11,
+          "totals": {
+            "foodHarvested": 40.08389437420907,
+            "woodGathered": 520.9839793559546,
+            "stoneGathered": 364,
+            "hunts": 4,
+            "waterConsumed": 81.30006884899409,
+            "cooperation": 4425,
+            "teaching": 4248,
+            "trade": 127,
+            "conflicts": 0,
+            "births": 41,
+            "cultivations": 0,
+            "constructionHelp": 47
+          },
+          "diversity": {
+            "conducta": 0.37762732631812423,
+            "oficios": 0.3639956783825879,
+            "total": 0.3708115023503561
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 14400,
+              "hastaTickInclusivo": 16800
+            },
+            "vecinosMortales": 51,
+            "fundadoresMortalesVivos": 12,
+            "generacionesMortalesVivas": [
+              0,
+              1,
+              2,
+              3
+            ],
+            "recetasDistintasEnUso": 58,
+            "recetasDistintasFabricadas": 23,
+            "usosUtiles": 104,
+            "beneficioUso": 14.334415634901625,
+            "usosDeInventorAjeno": 35,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.33653846153846156,
+            "usosConEnsenanzaRecordada": 12,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 4248,
+              "trade": 127,
+              "constructionHelp": 47
+            },
+            "otrasCooperacionesAcumuladas": 3,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 18.992476999992505,
+          "p95StepMs": 286.5612770000007,
+          "maxStepMs": 3591.342207000009,
+          "p95SaveMs": 1013.0906010000035,
+          "rss": 394383360,
+          "runtime": null
+        },
+        {
+          "day": 8,
+          "tick": 19200,
+          "population": 58,
+          "births": 48,
+          "deaths": {
+            "deaths": 6,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 6,
+              "exposure": 0,
+              "senescence": 0
+            },
+            "foodLost": 0.24040685034429488,
+            "woodLost": 18.878698151251758,
+            "stoneLost": 18
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 6,
+          "totals": {
+            "foodHarvested": 47.417947055802856,
+            "woodGathered": 656.3736918918478,
+            "stoneGathered": 490,
+            "hunts": 5,
+            "waterConsumed": 96.27875925820456,
+            "cooperation": 5138,
+            "teaching": 4922,
+            "trade": 142,
+            "conflicts": 0,
+            "births": 48,
+            "cultivations": 0,
+            "constructionHelp": 71
+          },
+          "diversity": {
+            "conducta": 0.37583598112399463,
+            "oficios": 0.3868531764143791,
+            "total": 0.38134457876918687
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 16800,
+              "hastaTickInclusivo": 19200
+            },
+            "vecinosMortales": 56,
+            "fundadoresMortalesVivos": 11,
+            "generacionesMortalesVivas": [
+              0,
+              1,
+              2,
+              3,
+              4
+            ],
+            "recetasDistintasEnUso": 43,
+            "recetasDistintasFabricadas": 23,
+            "usosUtiles": 93,
+            "beneficioUso": 23.88625315262624,
+            "usosDeInventorAjeno": 47,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.5053763440860215,
+            "usosConEnsenanzaRecordada": 13,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 4922,
+              "trade": 142,
+              "constructionHelp": 71
+            },
+            "otrasCooperacionesAcumuladas": 3,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 24.155331999994814,
+          "p95StepMs": 367.2750549999764,
+          "maxStepMs": 1167.9236260000034,
+          "p95SaveMs": 842.6875120000332,
+          "rss": 438341632,
+          "runtime": null
+        },
+        {
+          "day": 9,
+          "tick": 21600,
+          "population": 32,
+          "births": 52,
+          "deaths": {
+            "deaths": 36,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 36,
+              "exposure": 0,
+              "senescence": 0
+            },
+            "foodLost": 0.7991983279071496,
+            "woodLost": 128.64037805963667,
+            "stoneLost": 104
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 4,
+          "totals": {
+            "foodHarvested": 52.24126708433889,
+            "woodGathered": 811.4442092860879,
+            "stoneGathered": 590,
+            "hunts": 5,
+            "waterConsumed": 107.62143544052971,
+            "cooperation": 5660,
+            "teaching": 5403,
+            "trade": 156,
+            "conflicts": 8,
+            "births": 52,
+            "cultivations": 10,
+            "constructionHelp": 96
+          },
+          "diversity": {
+            "conducta": 0.40427893543707055,
+            "oficios": 0.40345770033764616,
+            "total": 0.40386831788735833
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 19200,
+              "hastaTickInclusivo": 21600
+            },
+            "vecinosMortales": 30,
+            "fundadoresMortalesVivos": 7,
+            "generacionesMortalesVivas": [
+              0,
+              1,
+              2,
+              3,
+              4
+            ],
+            "recetasDistintasEnUso": 40,
+            "recetasDistintasFabricadas": 19,
+            "usosUtiles": 149,
+            "beneficioUso": 23.84004507990777,
+            "usosDeInventorAjeno": 86,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.5771812080536913,
+            "usosConEnsenanzaRecordada": 30,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 5403,
+              "trade": 156,
+              "constructionHelp": 96
+            },
+            "otrasCooperacionesAcumuladas": 5,
+            "conflictosAcumulados": 8
+          },
+          "p50StepMs": 34.596644999983255,
+          "p95StepMs": 278.9963380000554,
+          "maxStepMs": 1085.4913069999893,
+          "p95SaveMs": 706.4551090000896,
+          "rss": 443809792,
+          "runtime": null
+        },
+        {
+          "day": 10,
+          "tick": 24000,
+          "population": 28,
+          "births": 56,
+          "deaths": {
+            "deaths": 44,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 44,
+              "exposure": 0,
+              "senescence": 0
+            },
+            "foodLost": 0.9586442438835139,
+            "woodLost": 154.259781773947,
+            "stoneLost": 149
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 4,
+          "totals": {
+            "foodHarvested": 56.98126708434017,
+            "woodGathered": 860.5769659868105,
+            "stoneGathered": 624,
+            "hunts": 14,
+            "waterConsumed": 116.9656750144767,
+            "cooperation": 6257,
+            "teaching": 5900,
+            "trade": 180,
+            "conflicts": 8,
+            "births": 56,
+            "cultivations": 22,
+            "constructionHelp": 171
+          },
+          "diversity": {
+            "conducta": 0.39276399936801115,
+            "oficios": 0.3723367228724361,
+            "total": 0.3825503611202236
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 21600,
+              "hastaTickInclusivo": 24000
+            },
+            "vecinosMortales": 26,
+            "fundadoresMortalesVivos": 5,
+            "generacionesMortalesVivas": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5
+            ],
+            "recetasDistintasEnUso": 31,
+            "recetasDistintasFabricadas": 19,
+            "usosUtiles": 75,
+            "beneficioUso": 14.188197198596136,
+            "usosDeInventorAjeno": 53,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.7066666666666667,
+            "usosConEnsenanzaRecordada": 27,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 5900,
+              "trade": 180,
+              "constructionHelp": 171
+            },
+            "otrasCooperacionesAcumuladas": 6,
+            "conflictosAcumulados": 8
+          },
+          "p50StepMs": 22.163786999997683,
+          "p95StepMs": 182.47265999997035,
+          "maxStepMs": 573.4050369999604,
+          "p95SaveMs": 421.51703099999577,
+          "rss": 427888640,
+          "runtime": null
+        }
+      ]
+    },
+    {
+      "run": "baseline-world-4",
+      "metadata": {
+        "sha": "9665754c15e9c9c40b025a69ccf990896bc3849c",
+        "source": "5479b2f228163918db431c85df3eea263157c4cd1b1f1f38c2be470c1de47db4",
+        "seed": 4,
+        "days": 10,
+        "engine": "world",
+        "params": {
+          "cuerpo": {
+            "longevidadBaseDias": 11,
+            "longevidadPorResiliencia": 4,
+            "longevidadPorActividad": 1,
+            "senescenciaInicioFraccion": 0.75,
+            "riesgoSenescenciaDiario": 0.04,
+            "riesgoSenescenciaPendiente": 10,
+            "cuidadoReduceRiesgo": 0.6
+          },
+          "genes": {
+            "varianzaFundadores": 0.15,
+            "tasaMutacion": 1
+          },
+          "poblacion": {
+            "maxima": 1000000,
+            "intervaloComprobacionTicks": 120,
+            "nacimientosPorComprobacion": 2
+          },
+          "recursos": {
+            "capacidadBosque": 1,
+            "capacidadPastizal": 0.7,
+            "capacidadOtros": 0.35,
+            "velocidadRegeneracion": 1,
+            "decaimientoFertilidad": 0.001,
+            "decaimientoComida": 0.0001
+          },
+          "persistencia": {
+            "cadaTicks": 20,
+            "ventanaEventosTicks": 0
+          },
+          "agua": {
+            "cuencas": 0.4
+          },
+          "gobernador": {
+            "presupuestoMs": 50
+          }
+        },
+        "scope": "stepWorld and production Store; governor not executed",
+        "thresholds": {
+          "mortalExtinction": 0,
+          "failedSteps": 0,
+          "serverStepP95Ms": 50
+        },
+        "complete": true,
+        "finalTick": 24000
+      },
+      "days": [
+        {
+          "day": 1,
+          "tick": 2400,
+          "population": 18,
+          "births": 3,
+          "deaths": {
+            "deaths": 1,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 1,
+              "exposure": 0,
+              "senescence": 0
+            },
+            "foodLost": 0.11500000000000002,
+            "woodLost": 0,
+            "stoneLost": 0
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 3,
+          "totals": {
+            "foodHarvested": 1.691948450861211,
+            "woodGathered": 73.1925658,
+            "stoneGathered": 60.142267663718684,
+            "hunts": 1,
+            "waterConsumed": 5.19252226522227,
+            "cooperation": 95,
+            "teaching": 88,
+            "trade": 5,
+            "conflicts": 0,
+            "births": 3,
+            "cultivations": 4,
+            "constructionHelp": 2
+          },
+          "diversity": {
+            "conducta": 0.43672024697653894,
+            "oficios": 0.37356254086117274,
+            "total": 0.40514139391885584
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 0,
+              "hastaTickInclusivo": 2400
+            },
+            "vecinosMortales": 16,
+            "fundadoresMortalesVivos": 13,
+            "generacionesMortalesVivas": [
+              0,
+              1
+            ],
+            "recetasDistintasEnUso": 5,
+            "recetasDistintasFabricadas": 3,
+            "usosUtiles": 12,
+            "beneficioUso": 1.3511322256309017,
+            "usosDeInventorAjeno": 5,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.4166666666666667,
+            "usosConEnsenanzaRecordada": 4,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 88,
+              "trade": 5,
+              "constructionHelp": 2
+            },
+            "otrasCooperacionesAcumuladas": 0,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 2.4552440000006754,
+          "p95StepMs": 12.415712999999982,
+          "maxStepMs": 82.61801299999979,
+          "p95SaveMs": 56.81732600000032,
+          "rss": 262795264,
+          "runtime": null
+        },
+        {
+          "day": 2,
+          "tick": 4800,
+          "population": 16,
+          "births": 4,
+          "deaths": {
+            "deaths": 4,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 4,
+              "exposure": 0,
+              "senescence": 0
+            },
+            "foodLost": 0.38746542791953953,
+            "woodLost": 10,
+            "stoneLost": 8
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 3,
+          "totals": {
+            "foodHarvested": 4.356461887907499,
+            "woodGathered": 129.00946976492156,
+            "stoneGathered": 116.14226766371868,
+            "hunts": 2,
+            "waterConsumed": 11.38729512148348,
+            "cooperation": 259,
+            "teaching": 237,
+            "trade": 8,
+            "conflicts": 0,
+            "births": 4,
+            "cultivations": 7,
+            "constructionHelp": 14
+          },
+          "diversity": {
+            "conducta": 0.2232733093546047,
+            "oficios": 0.08088636282435548,
+            "total": 0.15207983608948009
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 2400,
+              "hastaTickInclusivo": 4800
+            },
+            "vecinosMortales": 14,
+            "fundadoresMortalesVivos": 10,
+            "generacionesMortalesVivas": [
+              0,
+              1
+            ],
+            "recetasDistintasEnUso": 14,
+            "recetasDistintasFabricadas": 8,
+            "usosUtiles": 25,
+            "beneficioUso": 2.211589419198173,
+            "usosDeInventorAjeno": 3,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.12,
+            "usosConEnsenanzaRecordada": 1,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 237,
+              "trade": 8,
+              "constructionHelp": 14
+            },
+            "otrasCooperacionesAcumuladas": 0,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 3.2768209999994724,
+          "p95StepMs": 29.01190100000167,
+          "maxStepMs": 78.09354699999676,
+          "p95SaveMs": 52.691742000002705,
+          "rss": 294158336,
+          "runtime": null
+        },
+        {
+          "day": 3,
+          "tick": 7200,
+          "population": 16,
+          "births": 6,
+          "deaths": {
+            "deaths": 6,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 5,
+              "exposure": 1,
+              "senescence": 0
+            },
+            "foodLost": 0.64370554521083,
+            "woodLost": 17.315682916042675,
+            "stoneLost": 19
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 0,
+          "totals": {
+            "foodHarvested": 7.037468790761714,
+            "woodGathered": 155.36673692240504,
+            "stoneGathered": 123.14226766371868,
+            "hunts": 2,
+            "waterConsumed": 17.81492549298781,
+            "cooperation": 459,
+            "teaching": 431,
+            "trade": 9,
+            "conflicts": 4,
+            "births": 6,
+            "cultivations": 7,
+            "constructionHelp": 17
+          },
+          "diversity": {
+            "conducta": 0.3303985407226742,
+            "oficios": 0.20825140229380604,
+            "total": 0.26932497150824014
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 4800,
+              "hastaTickInclusivo": 7200
+            },
+            "vecinosMortales": 14,
+            "fundadoresMortalesVivos": 8,
+            "generacionesMortalesVivas": [
+              0,
+              1
+            ],
+            "recetasDistintasEnUso": 25,
+            "recetasDistintasFabricadas": 16,
+            "usosUtiles": 40,
+            "beneficioUso": 1.7345904924891506,
+            "usosDeInventorAjeno": 11,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.275,
+            "usosConEnsenanzaRecordada": 5,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 431,
+              "trade": 9,
+              "constructionHelp": 17
+            },
+            "otrasCooperacionesAcumuladas": 2,
+            "conflictosAcumulados": 4
+          },
+          "p50StepMs": 3.1734899999937625,
+          "p95StepMs": 29.782617000000755,
+          "maxStepMs": 84.95226299999922,
+          "p95SaveMs": 57.86518000000069,
+          "rss": 317882368,
+          "runtime": null
+        },
+        {
+          "day": 4,
+          "tick": 9600,
+          "population": 15,
+          "births": 6,
+          "deaths": {
+            "deaths": 7,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 5,
+              "exposure": 2,
+              "senescence": 0
+            },
+            "foodLost": 0.64370554521083,
+            "woodLost": 17.315682916042675,
+            "stoneLost": 19
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 7,
+          "totals": {
+            "foodHarvested": 9.753382017779,
+            "woodGathered": 163.29721761845445,
+            "stoneGathered": 145.14226766371868,
+            "hunts": 3,
+            "waterConsumed": 24.084175595368684,
+            "cooperation": 782,
+            "teaching": 752,
+            "trade": 9,
+            "conflicts": 4,
+            "births": 6,
+            "cultivations": 7,
+            "constructionHelp": 19
+          },
+          "diversity": {
+            "conducta": 0.3426376081454734,
+            "oficios": 0.39334614612361707,
+            "total": 0.36799187713454523
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 7200,
+              "hastaTickInclusivo": 9600
+            },
+            "vecinosMortales": 13,
+            "fundadoresMortalesVivos": 7,
+            "generacionesMortalesVivas": [
+              0,
+              1
+            ],
+            "recetasDistintasEnUso": 48,
+            "recetasDistintasFabricadas": 18,
+            "usosUtiles": 93,
+            "beneficioUso": 5.503645150075481,
+            "usosDeInventorAjeno": 13,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.13978494623655913,
+            "usosConEnsenanzaRecordada": 11,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 752,
+              "trade": 9,
+              "constructionHelp": 19
+            },
+            "otrasCooperacionesAcumuladas": 2,
+            "conflictosAcumulados": 4
+          },
+          "p50StepMs": 3.4100219999963883,
+          "p95StepMs": 31.04531500000303,
+          "maxStepMs": 92.6393390000012,
+          "p95SaveMs": 59.23492800000531,
+          "rss": 343379968,
+          "runtime": null
+        },
+        {
+          "day": 5,
+          "tick": 12000,
+          "population": 18,
+          "births": 9,
+          "deaths": {
+            "deaths": 7,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 5,
+              "exposure": 2,
+              "senescence": 0
+            },
+            "foodLost": 0.64370554521083,
+            "woodLost": 17.315682916042675,
+            "stoneLost": 19
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 0,
+          "totals": {
+            "foodHarvested": 12.574780311258545,
+            "woodGathered": 184.02684241094067,
+            "stoneGathered": 163.14226766371868,
+            "hunts": 3,
+            "waterConsumed": 30.811304858723602,
+            "cooperation": 1195,
+            "teaching": 1162,
+            "trade": 12,
+            "conflicts": 4,
+            "births": 9,
+            "cultivations": 7,
+            "constructionHelp": 19
+          },
+          "diversity": {
+            "conducta": 0.37456604233653495,
+            "oficios": 0.3605000891516495,
+            "total": 0.3675330657440922
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 9600,
+              "hastaTickInclusivo": 12000
+            },
+            "vecinosMortales": 16,
+            "fundadoresMortalesVivos": 7,
+            "generacionesMortalesVivas": [
+              0,
+              1,
+              2
+            ],
+            "recetasDistintasEnUso": 43,
+            "recetasDistintasFabricadas": 21,
+            "usosUtiles": 74,
+            "beneficioUso": 5.001978553299484,
+            "usosDeInventorAjeno": 6,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.08108108108108109,
+            "usosConEnsenanzaRecordada": 6,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 1162,
+              "trade": 12,
+              "constructionHelp": 19
+            },
+            "otrasCooperacionesAcumuladas": 2,
+            "conflictosAcumulados": 4
+          },
+          "p50StepMs": 4.703353999997489,
+          "p95StepMs": 48.47502499999973,
+          "maxStepMs": 218.94334199999867,
+          "p95SaveMs": 136.03465299999516,
+          "rss": 353050624,
+          "runtime": null
+        },
+        {
+          "day": 6,
+          "tick": 14400,
+          "population": 20,
+          "births": 12,
+          "deaths": {
+            "deaths": 8,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 5,
+              "exposure": 3,
+              "senescence": 0
+            },
+            "foodLost": 0.7867055452108298,
+            "woodLost": 17.315682916042675,
+            "stoneLost": 19
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 3,
+          "totals": {
+            "foodHarvested": 16.2246314043259,
+            "woodGathered": 224.07079284984115,
+            "stoneGathered": 245.14226766371868,
+            "hunts": 3,
+            "waterConsumed": 39.19637700509837,
+            "cooperation": 1543,
+            "teaching": 1507,
+            "trade": 15,
+            "conflicts": 4,
+            "births": 12,
+            "cultivations": 9,
+            "constructionHelp": 19
+          },
+          "diversity": {
+            "conducta": 0.3749930524980052,
+            "oficios": 0.40172023377652616,
+            "total": 0.3883566431372657
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 12000,
+              "hastaTickInclusivo": 14400
+            },
+            "vecinosMortales": 18,
+            "fundadoresMortalesVivos": 7,
+            "generacionesMortalesVivas": [
+              0,
+              1,
+              2
+            ],
+            "recetasDistintasEnUso": 43,
+            "recetasDistintasFabricadas": 17,
+            "usosUtiles": 86,
+            "beneficioUso": 6.867157479481158,
+            "usosDeInventorAjeno": 7,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.08139534883720931,
+            "usosConEnsenanzaRecordada": 4,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 1507,
+              "trade": 15,
+              "constructionHelp": 19
+            },
+            "otrasCooperacionesAcumuladas": 2,
+            "conflictosAcumulados": 4
+          },
+          "p50StepMs": 6.9524229999951785,
+          "p95StepMs": 115.96066299999075,
+          "maxStepMs": 461.08263000000443,
+          "p95SaveMs": 223.6623499999987,
+          "rss": 325763072,
+          "runtime": null
+        },
+        {
+          "day": 7,
+          "tick": 16800,
+          "population": 19,
+          "births": 13,
+          "deaths": {
+            "deaths": 10,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 7,
+              "exposure": 3,
+              "senescence": 0
+            },
+            "foodLost": 0.8792055452108293,
+            "woodLost": 18.6151663074089,
+            "stoneLost": 20
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 4,
+          "totals": {
+            "foodHarvested": 19.814461436431614,
+            "woodGathered": 245.62098895185665,
+            "stoneGathered": 300.1422676637187,
+            "hunts": 3,
+            "waterConsumed": 45.64751041481914,
+            "cooperation": 1850,
+            "teaching": 1813,
+            "trade": 16,
+            "conflicts": 4,
+            "births": 13,
+            "cultivations": 14,
+            "constructionHelp": 19
+          },
+          "diversity": {
+            "conducta": 0.28912314153949165,
+            "oficios": 0.34264278938124487,
+            "total": 0.31588296546036826
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 14400,
+              "hastaTickInclusivo": 16800
+            },
+            "vecinosMortales": 17,
+            "fundadoresMortalesVivos": 6,
+            "generacionesMortalesVivas": [
+              0,
+              1,
+              2,
+              3
+            ],
+            "recetasDistintasEnUso": 47,
+            "recetasDistintasFabricadas": 20,
+            "usosUtiles": 93,
+            "beneficioUso": 6.272334061214426,
+            "usosDeInventorAjeno": 16,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.17204301075268819,
+            "usosConEnsenanzaRecordada": 9,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 1813,
+              "trade": 16,
+              "constructionHelp": 19
+            },
+            "otrasCooperacionesAcumuladas": 2,
+            "conflictosAcumulados": 4
+          },
+          "p50StepMs": 8.106121999997413,
+          "p95StepMs": 122.89584100000502,
+          "maxStepMs": 340.47394100000383,
+          "p95SaveMs": 263.7876629999955,
+          "rss": 408301568,
+          "runtime": null
+        },
+        {
+          "day": 8,
+          "tick": 19200,
+          "population": 18,
+          "births": 14,
+          "deaths": {
+            "deaths": 12,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 9,
+              "exposure": 3,
+              "senescence": 0
+            },
+            "foodLost": 0.8997931476966183,
+            "woodLost": 19.170872507408898,
+            "stoneLost": 21
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 5,
+          "totals": {
+            "foodHarvested": 23.038961436430796,
+            "woodGathered": 269.55977317004454,
+            "stoneGathered": 352.1422676637187,
+            "hunts": 3,
+            "waterConsumed": 52.16119687914429,
+            "cooperation": 2159,
+            "teaching": 2117,
+            "trade": 16,
+            "conflicts": 4,
+            "births": 14,
+            "cultivations": 20,
+            "constructionHelp": 23
+          },
+          "diversity": {
+            "conducta": 0.3042803692449036,
+            "oficios": 0.23981246656813146,
+            "total": 0.2720464179065175
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 16800,
+              "hastaTickInclusivo": 19200
+            },
+            "vecinosMortales": 16,
+            "fundadoresMortalesVivos": 5,
+            "generacionesMortalesVivas": [
+              0,
+              1,
+              2,
+              3
+            ],
+            "recetasDistintasEnUso": 36,
+            "recetasDistintasFabricadas": 17,
+            "usosUtiles": 57,
+            "beneficioUso": 5.551822546555723,
+            "usosDeInventorAjeno": 10,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.17543859649122806,
+            "usosConEnsenanzaRecordada": 9,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 2117,
+              "trade": 16,
+              "constructionHelp": 23
+            },
+            "otrasCooperacionesAcumuladas": 3,
+            "conflictosAcumulados": 4
+          },
+          "p50StepMs": 10.930093000002671,
+          "p95StepMs": 146.98145300001488,
+          "maxStepMs": 358.7509320000245,
+          "p95SaveMs": 292.5925350000034,
+          "rss": 375918592,
+          "runtime": null
+        },
+        {
+          "day": 9,
+          "tick": 21600,
+          "population": 17,
+          "births": 15,
+          "deaths": {
+            "deaths": 14,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 10,
+              "exposure": 3,
+              "senescence": 1
+            },
+            "foodLost": 1.0321787451358675,
+            "woodLost": 19.37805468113986,
+            "stoneLost": 31.142267663718684
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 1,
+          "totals": {
+            "foodHarvested": 25.872087528034143,
+            "woodGathered": 275.3939506883103,
+            "stoneGathered": 408.14226766371866,
+            "hunts": 3,
+            "waterConsumed": 59.09641910211555,
+            "cooperation": 2489,
+            "teaching": 2446,
+            "trade": 16,
+            "conflicts": 4,
+            "births": 15,
+            "cultivations": 23,
+            "constructionHelp": 23
+          },
+          "diversity": {
+            "conducta": 0.290382516076497,
+            "oficios": 0.2928224811615021,
+            "total": 0.29160249861899956
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 19200,
+              "hastaTickInclusivo": 21600
+            },
+            "vecinosMortales": 15,
+            "fundadoresMortalesVivos": 4,
+            "generacionesMortalesVivas": [
+              0,
+              1,
+              2,
+              3
+            ],
+            "recetasDistintasEnUso": 39,
+            "recetasDistintasFabricadas": 17,
+            "usosUtiles": 93,
+            "beneficioUso": 8.075920378416445,
+            "usosDeInventorAjeno": 34,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.3655913978494624,
+            "usosConEnsenanzaRecordada": 29,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 2446,
+              "trade": 16,
+              "constructionHelp": 23
+            },
+            "otrasCooperacionesAcumuladas": 4,
+            "conflictosAcumulados": 4
+          },
+          "p50StepMs": 14.234258000011323,
+          "p95StepMs": 195.323825999978,
+          "maxStepMs": 2181.705087999988,
+          "p95SaveMs": 591.413532000006,
+          "rss": 365047808,
+          "runtime": null
+        },
+        {
+          "day": 10,
+          "tick": 24000,
+          "population": 12,
+          "births": 15,
+          "deaths": {
+            "deaths": 19,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 14,
+              "exposure": 3,
+              "senescence": 2
+            },
+            "foodLost": 1.6222102680368735,
+            "woodLost": 19.508890541798166,
+            "stoneLost": 71.14226766371868
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 1,
+          "totals": {
+            "foodHarvested": 27.74108752803358,
+            "woodGathered": 287.3939506883103,
+            "stoneGathered": 436.14226766371866,
+            "hunts": 3,
+            "waterConsumed": 63.31171700149509,
+            "cooperation": 2690,
+            "teaching": 2647,
+            "trade": 16,
+            "conflicts": 4,
+            "births": 15,
+            "cultivations": 23,
+            "constructionHelp": 23
+          },
+          "diversity": {
+            "conducta": 0.2732832957515679,
+            "oficios": 0.23498474344556108,
+            "total": 0.2541340195985645
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 21600,
+              "hastaTickInclusivo": 24000
+            },
+            "vecinosMortales": 10,
+            "fundadoresMortalesVivos": 2,
+            "generacionesMortalesVivas": [
+              0,
+              1,
+              2,
+              3
+            ],
+            "recetasDistintasEnUso": 30,
+            "recetasDistintasFabricadas": 15,
+            "usosUtiles": 76,
+            "beneficioUso": 4.746136917213411,
+            "usosDeInventorAjeno": 15,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.19736842105263158,
+            "usosConEnsenanzaRecordada": 13,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 2647,
+              "trade": 16,
+              "constructionHelp": 23
+            },
+            "otrasCooperacionesAcumuladas": 4,
+            "conflictosAcumulados": 4
+          },
+          "p50StepMs": 12.840022000018507,
+          "p95StepMs": 141.4328749999986,
+          "maxStepMs": 489.3029160000151,
+          "p95SaveMs": 307.72611300001154,
+          "rss": 357511168,
+          "runtime": null
+        }
+      ]
+    },
+    {
+      "run": "baseline-world-7",
+      "metadata": {
+        "sha": "9665754c15e9c9c40b025a69ccf990896bc3849c",
+        "source": "5479b2f228163918db431c85df3eea263157c4cd1b1f1f38c2be470c1de47db4",
+        "seed": 7,
+        "days": 10,
+        "engine": "world",
+        "params": {
+          "cuerpo": {
+            "longevidadBaseDias": 11,
+            "longevidadPorResiliencia": 4,
+            "longevidadPorActividad": 1,
+            "senescenciaInicioFraccion": 0.75,
+            "riesgoSenescenciaDiario": 0.04,
+            "riesgoSenescenciaPendiente": 10,
+            "cuidadoReduceRiesgo": 0.6
+          },
+          "genes": {
+            "varianzaFundadores": 0.15,
+            "tasaMutacion": 1
+          },
+          "poblacion": {
+            "maxima": 1000000,
+            "intervaloComprobacionTicks": 120,
+            "nacimientosPorComprobacion": 2
+          },
+          "recursos": {
+            "capacidadBosque": 1,
+            "capacidadPastizal": 0.7,
+            "capacidadOtros": 0.35,
+            "velocidadRegeneracion": 1,
+            "decaimientoFertilidad": 0.001,
+            "decaimientoComida": 0.0001
+          },
+          "persistencia": {
+            "cadaTicks": 20,
+            "ventanaEventosTicks": 0
+          },
+          "agua": {
+            "cuencas": 0.4
+          },
+          "gobernador": {
+            "presupuestoMs": 50
+          }
+        },
+        "scope": "stepWorld and production Store; governor not executed",
+        "thresholds": {
+          "mortalExtinction": 0,
+          "failedSteps": 0,
+          "serverStepP95Ms": 50
+        },
+        "complete": true,
+        "finalTick": 24000
+      },
+      "days": [
+        {
+          "day": 1,
+          "tick": 2400,
+          "population": 18,
+          "births": 2,
+          "deaths": {
+            "deaths": 0,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 0,
+              "exposure": 0,
+              "senescence": 0
+            },
+            "foodLost": 0,
+            "woodLost": 0,
+            "stoneLost": 0
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 10,
+          "totals": {
+            "foodHarvested": 2.4744999999999804,
+            "woodGathered": 258.2303493237039,
+            "stoneGathered": 158,
+            "hunts": 1,
+            "waterConsumed": 5.549218848368715,
+            "cooperation": 120,
+            "teaching": 107,
+            "trade": 8,
+            "conflicts": 0,
+            "births": 2,
+            "cultivations": 0,
+            "constructionHelp": 5
+          },
+          "diversity": {
+            "conducta": 0.3309505386439514,
+            "oficios": 0.30015627785989046,
+            "total": 0.3155534082519209
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 0,
+              "hastaTickInclusivo": 2400
+            },
+            "vecinosMortales": 16,
+            "fundadoresMortalesVivos": 14,
+            "generacionesMortalesVivas": [
+              0,
+              1
+            ],
+            "recetasDistintasEnUso": 16,
+            "recetasDistintasFabricadas": 14,
+            "usosUtiles": 89,
+            "beneficioUso": 7.56552163623002,
+            "usosDeInventorAjeno": 20,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.2247191011235955,
+            "usosConEnsenanzaRecordada": 16,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 107,
+              "trade": 8,
+              "constructionHelp": 5
+            },
+            "otrasCooperacionesAcumuladas": 0,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 2.8301480000000083,
+          "p95StepMs": 17.667192999999315,
+          "maxStepMs": 113.24231599999985,
+          "p95SaveMs": 76.15717599999971,
+          "rss": 278503424,
+          "runtime": null
+        },
+        {
+          "day": 2,
+          "tick": 4800,
+          "population": 20,
+          "births": 4,
+          "deaths": {
+            "deaths": 0,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 0,
+              "exposure": 0,
+              "senescence": 0
+            },
+            "foodLost": 0,
+            "woodLost": 0,
+            "stoneLost": 0
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 10,
+          "totals": {
+            "foodHarvested": 5.799499999999844,
+            "woodGathered": 375.3827752863454,
+            "stoneGathered": 241,
+            "hunts": 1,
+            "waterConsumed": 12.886992415654168,
+            "cooperation": 358,
+            "teaching": 328,
+            "trade": 17,
+            "conflicts": 0,
+            "births": 4,
+            "cultivations": 0,
+            "constructionHelp": 13
+          },
+          "diversity": {
+            "conducta": 0.3619070193850201,
+            "oficios": 0.3738369030393043,
+            "total": 0.3678719612121622
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 2400,
+              "hastaTickInclusivo": 4800
+            },
+            "vecinosMortales": 18,
+            "fundadoresMortalesVivos": 14,
+            "generacionesMortalesVivas": [
+              0,
+              1
+            ],
+            "recetasDistintasEnUso": 52,
+            "recetasDistintasFabricadas": 23,
+            "usosUtiles": 162,
+            "beneficioUso": 19.616259709958722,
+            "usosDeInventorAjeno": 41,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.25308641975308643,
+            "usosConEnsenanzaRecordada": 37,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 328,
+              "trade": 17,
+              "constructionHelp": 13
+            },
+            "otrasCooperacionesAcumuladas": 0,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 4.60912499999904,
+          "p95StepMs": 64.62280800000008,
+          "maxStepMs": 131.1075380000002,
+          "p95SaveMs": 98.60554899999988,
+          "rss": 322830336,
+          "runtime": null
+        },
+        {
+          "day": 3,
+          "tick": 7200,
+          "population": 22,
+          "births": 6,
+          "deaths": {
+            "deaths": 0,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 0,
+              "exposure": 0,
+              "senescence": 0
+            },
+            "foodLost": 0,
+            "woodLost": 0,
+            "stoneLost": 0
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 9,
+          "totals": {
+            "foodHarvested": 9.109899058759275,
+            "woodGathered": 458.8167729725756,
+            "stoneGathered": 289,
+            "hunts": 2,
+            "waterConsumed": 20.542601737764514,
+            "cooperation": 622,
+            "teaching": 583,
+            "trade": 21,
+            "conflicts": 0,
+            "births": 6,
+            "cultivations": 1,
+            "constructionHelp": 18
+          },
+          "diversity": {
+            "conducta": 0.3936542622715195,
+            "oficios": 0.4410233572358989,
+            "total": 0.4173388097537092
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 4800,
+              "hastaTickInclusivo": 7200
+            },
+            "vecinosMortales": 20,
+            "fundadoresMortalesVivos": 14,
+            "generacionesMortalesVivas": [
+              0,
+              1
+            ],
+            "recetasDistintasEnUso": 55,
+            "recetasDistintasFabricadas": 13,
+            "usosUtiles": 170,
+            "beneficioUso": 20.37208073264375,
+            "usosDeInventorAjeno": 36,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.21176470588235294,
+            "usosConEnsenanzaRecordada": 29,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 583,
+              "trade": 21,
+              "constructionHelp": 18
+            },
+            "otrasCooperacionesAcumuladas": 0,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 6.4135800000003655,
+          "p95StepMs": 88.0220479999989,
+          "maxStepMs": 311.6659210000071,
+          "p95SaveMs": 249.89746000000014,
+          "rss": 377143296,
+          "runtime": null
+        },
+        {
+          "day": 4,
+          "tick": 9600,
+          "population": 24,
+          "births": 8,
+          "deaths": {
+            "deaths": 0,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 0,
+              "exposure": 0,
+              "senescence": 0
+            },
+            "foodLost": 0,
+            "woodLost": 0,
+            "stoneLost": 0
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 13,
+          "totals": {
+            "foodHarvested": 14.358834988258852,
+            "woodGathered": 542.0942483852903,
+            "stoneGathered": 321,
+            "hunts": 2,
+            "waterConsumed": 28.966047492154143,
+            "cooperation": 1011,
+            "teaching": 954,
+            "trade": 33,
+            "conflicts": 0,
+            "births": 8,
+            "cultivations": 7,
+            "constructionHelp": 24
+          },
+          "diversity": {
+            "conducta": 0.3722927533232707,
+            "oficios": 0.4692910362836148,
+            "total": 0.42079189480344276
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 7200,
+              "hastaTickInclusivo": 9600
+            },
+            "vecinosMortales": 22,
+            "fundadoresMortalesVivos": 14,
+            "generacionesMortalesVivas": [
+              0,
+              1
+            ],
+            "recetasDistintasEnUso": 87,
+            "recetasDistintasFabricadas": 26,
+            "usosUtiles": 225,
+            "beneficioUso": 20.94951173185498,
+            "usosDeInventorAjeno": 39,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.17333333333333334,
+            "usosConEnsenanzaRecordada": 17,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 954,
+              "trade": 33,
+              "constructionHelp": 24
+            },
+            "otrasCooperacionesAcumuladas": 0,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 6.676540999993449,
+          "p95StepMs": 164.6552900000097,
+          "maxStepMs": 453.3337259999971,
+          "p95SaveMs": 342.1702579999983,
+          "rss": 438218752,
+          "runtime": null
+        },
+        {
+          "day": 5,
+          "tick": 12000,
+          "population": 26,
+          "births": 10,
+          "deaths": {
+            "deaths": 0,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 0,
+              "exposure": 0,
+              "senescence": 0
+            },
+            "foodLost": 0,
+            "woodLost": 0,
+            "stoneLost": 0
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 13,
+          "totals": {
+            "foodHarvested": 18.5412060584697,
+            "woodGathered": 636.0452712059392,
+            "stoneGathered": 369,
+            "hunts": 2,
+            "waterConsumed": 37.801361865588106,
+            "cooperation": 1334,
+            "teaching": 1268,
+            "trade": 36,
+            "conflicts": 0,
+            "births": 10,
+            "cultivations": 10,
+            "constructionHelp": 30
+          },
+          "diversity": {
+            "conducta": 0.3995013709132457,
+            "oficios": 0.46973008773824265,
+            "total": 0.4346157293257442
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 9600,
+              "hastaTickInclusivo": 12000
+            },
+            "vecinosMortales": 24,
+            "fundadoresMortalesVivos": 14,
+            "generacionesMortalesVivas": [
+              0,
+              1
+            ],
+            "recetasDistintasEnUso": 80,
+            "recetasDistintasFabricadas": 19,
+            "usosUtiles": 235,
+            "beneficioUso": 33.963003088964285,
+            "usosDeInventorAjeno": 31,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.13191489361702127,
+            "usosConEnsenanzaRecordada": 15,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 1268,
+              "trade": 36,
+              "constructionHelp": 30
+            },
+            "otrasCooperacionesAcumuladas": 0,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 7.768268000014359,
+          "p95StepMs": 229.70119800000975,
+          "maxStepMs": 541.7936270000064,
+          "p95SaveMs": 461.240742999973,
+          "rss": 407449600,
+          "runtime": null
+        },
+        {
+          "day": 6,
+          "tick": 14400,
+          "population": 27,
+          "births": 11,
+          "deaths": {
+            "deaths": 0,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 0,
+              "exposure": 0,
+              "senescence": 0
+            },
+            "foodLost": 0,
+            "woodLost": 0,
+            "stoneLost": 0
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 14,
+          "totals": {
+            "foodHarvested": 23.495054613617544,
+            "woodGathered": 694.7830606815115,
+            "stoneGathered": 399,
+            "hunts": 2,
+            "waterConsumed": 47.58227721233541,
+            "cooperation": 1621,
+            "teaching": 1547,
+            "trade": 39,
+            "conflicts": 0,
+            "births": 11,
+            "cultivations": 19,
+            "constructionHelp": 35
+          },
+          "diversity": {
+            "conducta": 0.3923641183839787,
+            "oficios": 0.4750783513988226,
+            "total": 0.4337212348914007
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 12000,
+              "hastaTickInclusivo": 14400
+            },
+            "vecinosMortales": 25,
+            "fundadoresMortalesVivos": 14,
+            "generacionesMortalesVivas": [
+              0,
+              1
+            ],
+            "recetasDistintasEnUso": 94,
+            "recetasDistintasFabricadas": 12,
+            "usosUtiles": 212,
+            "beneficioUso": 22.181703960197098,
+            "usosDeInventorAjeno": 24,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.11320754716981132,
+            "usosConEnsenanzaRecordada": 17,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 1547,
+              "trade": 39,
+              "constructionHelp": 35
+            },
+            "otrasCooperacionesAcumuladas": 0,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 14.432038000028115,
+          "p95StepMs": 246.68465000001015,
+          "maxStepMs": 4573.154787999985,
+          "p95SaveMs": 1022.5275770000007,
+          "rss": 397119488,
+          "runtime": null
+        },
+        {
+          "day": 7,
+          "tick": 16800,
+          "population": 30,
+          "births": 14,
+          "deaths": {
+            "deaths": 0,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 0,
+              "exposure": 0,
+              "senescence": 0
+            },
+            "foodLost": 0,
+            "woodLost": 0,
+            "stoneLost": 0
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 11,
+          "totals": {
+            "foodHarvested": 28.943219653078533,
+            "woodGathered": 745.0791921902022,
+            "stoneGathered": 424,
+            "hunts": 4,
+            "waterConsumed": 57.60385382860316,
+            "cooperation": 1872,
+            "teaching": 1788,
+            "trade": 40,
+            "conflicts": 0,
+            "births": 14,
+            "cultivations": 20,
+            "constructionHelp": 44
+          },
+          "diversity": {
+            "conducta": 0.4882430724531227,
+            "oficios": 0.5434277277580438,
+            "total": 0.5158354001055833
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 14400,
+              "hastaTickInclusivo": 16800
+            },
+            "vecinosMortales": 28,
+            "fundadoresMortalesVivos": 14,
+            "generacionesMortalesVivas": [
+              0,
+              1,
+              2
+            ],
+            "recetasDistintasEnUso": 71,
+            "recetasDistintasFabricadas": 10,
+            "usosUtiles": 189,
+            "beneficioUso": 23.358639028564646,
+            "usosDeInventorAjeno": 24,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.12698412698412698,
+            "usosConEnsenanzaRecordada": 14,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 1788,
+              "trade": 40,
+              "constructionHelp": 44
+            },
+            "otrasCooperacionesAcumuladas": 0,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 13.998420999967493,
+          "p95StepMs": 337.87556700001005,
+          "maxStepMs": 1126.465989999997,
+          "p95SaveMs": 747.8233420000179,
+          "rss": 432328704,
+          "runtime": null
+        },
+        {
+          "day": 8,
+          "tick": 19200,
+          "population": 32,
+          "births": 16,
+          "deaths": {
+            "deaths": 0,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 0,
+              "exposure": 0,
+              "senescence": 0
+            },
+            "foodLost": 0,
+            "woodLost": 0,
+            "stoneLost": 0
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 7,
+          "totals": {
+            "foodHarvested": 33.441581281334955,
+            "woodGathered": 877.4466997456828,
+            "stoneGathered": 512.119510292507,
+            "hunts": 5,
+            "waterConsumed": 68.72889917631635,
+            "cooperation": 2263,
+            "teaching": 2155,
+            "trade": 50,
+            "conflicts": 0,
+            "births": 16,
+            "cultivations": 24,
+            "constructionHelp": 57
+          },
+          "diversity": {
+            "conducta": 0.42339250513770466,
+            "oficios": 0.4854769878047358,
+            "total": 0.45443474647122023
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 16800,
+              "hastaTickInclusivo": 19200
+            },
+            "vecinosMortales": 30,
+            "fundadoresMortalesVivos": 14,
+            "generacionesMortalesVivas": [
+              0,
+              1,
+              2
+            ],
+            "recetasDistintasEnUso": 115,
+            "recetasDistintasFabricadas": 18,
+            "usosUtiles": 276,
+            "beneficioUso": 41.481760641436786,
+            "usosDeInventorAjeno": 42,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.15217391304347827,
+            "usosConEnsenanzaRecordada": 30,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 2155,
+              "trade": 50,
+              "constructionHelp": 57
+            },
+            "otrasCooperacionesAcumuladas": 1,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 16.941519999993034,
+          "p95StepMs": 354.9727889999631,
+          "maxStepMs": 1051.5386239999789,
+          "p95SaveMs": 806.0370489999768,
+          "rss": 426209280,
+          "runtime": null
+        },
+        {
+          "day": 9,
+          "tick": 21600,
+          "population": 33,
+          "births": 17,
+          "deaths": {
+            "deaths": 0,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 0,
+              "exposure": 0,
+              "senescence": 0
+            },
+            "foodLost": 0,
+            "woodLost": 0,
+            "stoneLost": 0
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 8,
+          "totals": {
+            "foodHarvested": 38.93143747759352,
+            "woodGathered": 954.3255939903331,
+            "stoneGathered": 565.119510292507,
+            "hunts": 7,
+            "waterConsumed": 80.68716285300577,
+            "cooperation": 2853,
+            "teaching": 2718,
+            "trade": 51,
+            "conflicts": 0,
+            "births": 17,
+            "cultivations": 30,
+            "constructionHelp": 82
+          },
+          "diversity": {
+            "conducta": 0.3948452627209423,
+            "oficios": 0.4786007749099218,
+            "total": 0.4367230188154321
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 19200,
+              "hastaTickInclusivo": 21600
+            },
+            "vecinosMortales": 31,
+            "fundadoresMortalesVivos": 14,
+            "generacionesMortalesVivas": [
+              0,
+              1,
+              2
+            ],
+            "recetasDistintasEnUso": 144,
+            "recetasDistintasFabricadas": 33,
+            "usosUtiles": 320,
+            "beneficioUso": 38.21747761586108,
+            "usosDeInventorAjeno": 42,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.13125,
+            "usosConEnsenanzaRecordada": 26,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 2718,
+              "trade": 51,
+              "constructionHelp": 82
+            },
+            "otrasCooperacionesAcumuladas": 2,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 23.457258000038564,
+          "p95StepMs": 385.5427630000049,
+          "maxStepMs": 1154.8994729999686,
+          "p95SaveMs": 894.8636940000579,
+          "rss": 442503168,
+          "runtime": null
+        },
+        {
+          "day": 10,
+          "tick": 24000,
+          "population": 35,
+          "births": 20,
+          "deaths": {
+            "deaths": 1,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 0,
+              "exposure": 1,
+              "senescence": 0
+            },
+            "foodLost": 0.25,
+            "woodLost": 0.7488956917235476,
+            "stoneLost": 0.11951029250704259
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 8,
+          "totals": {
+            "foodHarvested": 45.575358786053,
+            "woodGathered": 1008.367758172737,
+            "stoneGathered": 595.119510292507,
+            "hunts": 7,
+            "waterConsumed": 91.8647577992178,
+            "cooperation": 3479,
+            "teaching": 3336,
+            "trade": 58,
+            "conflicts": 0,
+            "births": 20,
+            "cultivations": 33,
+            "constructionHelp": 83
+          },
+          "diversity": {
+            "conducta": 0.415285768631571,
+            "oficios": 0.45698652782685734,
+            "total": 0.4361361482292142
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 21600,
+              "hastaTickInclusivo": 24000
+            },
+            "vecinosMortales": 33,
+            "fundadoresMortalesVivos": 14,
+            "generacionesMortalesVivas": [
+              0,
+              1,
+              2,
+              3
+            ],
+            "recetasDistintasEnUso": 144,
+            "recetasDistintasFabricadas": 29,
+            "usosUtiles": 356,
+            "beneficioUso": 39.921386256524805,
+            "usosDeInventorAjeno": 37,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.10393258426966293,
+            "usosConEnsenanzaRecordada": 12,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 3336,
+              "trade": 58,
+              "constructionHelp": 83
+            },
+            "otrasCooperacionesAcumuladas": 2,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 29.507879000040703,
+          "p95StepMs": 432.0769239999354,
+          "maxStepMs": 1359.6928349999944,
+          "p95SaveMs": 1077.9093059999868,
+          "rss": 468594688,
+          "runtime": null
+        }
+      ]
+    },
+    {
+      "run": "candidate-server-51926",
+      "metadata": {
+        "sha": "9665754c15e9c9c40b025a69ccf990896bc3849c",
+        "source": "a6ff1fece77efb0aa6bf00faf95897113ec2e3d58c239f2d5967024c58a1fa59",
+        "seed": 51926,
+        "days": 5,
+        "engine": "server",
+        "params": {
+          "cuerpo": {
+            "longevidadBaseDias": 11,
+            "longevidadPorResiliencia": 4,
+            "longevidadPorActividad": 1,
+            "senescenciaInicioFraccion": 0.75,
+            "riesgoSenescenciaDiario": 0.04,
+            "riesgoSenescenciaPendiente": 10,
+            "cuidadoReduceRiesgo": 0.6
+          },
+          "genes": {
+            "varianzaFundadores": 0.15,
+            "tasaMutacion": 1
+          },
+          "poblacion": {
+            "maxima": 1000000,
+            "intervaloComprobacionTicks": 120,
+            "nacimientosPorComprobacion": 2
+          },
+          "recursos": {
+            "capacidadBosque": 1,
+            "capacidadPastizal": 0.7,
+            "capacidadOtros": 0.35,
+            "velocidadRegeneracion": 1,
+            "decaimientoFertilidad": 0.001,
+            "decaimientoComida": 0.0001
+          },
+          "persistencia": {
+            "cadaTicks": 20,
+            "ventanaEventosTicks": 0
+          },
+          "agua": {
+            "cuencas": 0.4
+          },
+          "gobernador": {
+            "presupuestoMs": 50
+          }
+        },
+        "scope": "createApp, real clone/step/save and hardware governor; no clients, scheduler or network",
+        "thresholds": {
+          "mortalExtinction": 0,
+          "failedSteps": 0,
+          "serverStepP95Ms": 50
+        },
+        "complete": true,
+        "finalTick": 12000
+      },
+      "days": [
+        {
+          "day": 1,
+          "tick": 2400,
+          "population": 22,
+          "births": 6,
+          "deaths": {
+            "deaths": 0,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 0,
+              "exposure": 0,
+              "senescence": 0
+            },
+            "foodLost": 0,
+            "woodLost": 0,
+            "stoneLost": 0
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 2,
+          "totals": {
+            "foodHarvested": 2.2390266819805857,
+            "woodGathered": 189.89321424160957,
+            "stoneGathered": 107,
+            "hunts": 0,
+            "waterConsumed": 6.855994713603237,
+            "cooperation": 66,
+            "teaching": 48,
+            "trade": 12,
+            "conflicts": 0,
+            "births": 6,
+            "cultivations": 0,
+            "constructionHelp": 6
+          },
+          "diversity": {
+            "conducta": 0.43388344106235743,
+            "oficios": 0.3193293937241573,
+            "total": 0.3766064173932574
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 0,
+              "hastaTickInclusivo": 2400
+            },
+            "vecinosMortales": 20,
+            "fundadoresMortalesVivos": 14,
+            "generacionesMortalesVivas": [
+              0,
+              1
+            ],
+            "recetasDistintasEnUso": 11,
+            "recetasDistintasFabricadas": 11,
+            "usosUtiles": 36,
+            "beneficioUso": 5.00175102735242,
+            "usosDeInventorAjeno": 13,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.3611111111111111,
+            "usosConEnsenanzaRecordada": 10,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 48,
+              "trade": 12,
+              "constructionHelp": 6
+            },
+            "otrasCooperacionesAcumuladas": 0,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 8.109273999999914,
+          "p95StepMs": 19.737746000000016,
+          "maxStepMs": 57.96245799999815,
+          "p95SaveMs": 6.15740900000003,
+          "rss": 329428992,
+          "runtime": {
+            "stepMs": 44.84305300000051,
+            "p95StepMs": 35.05425599999944,
+            "cloneMs": 6.877414000002318,
+            "simulationMs": 10.072449999999662,
+            "saveMs": 27.889319000001706,
+            "projectionMs": 0,
+            "snapshotBytes": 1702787,
+            "activeTiles": 5120,
+            "processRssMiB": 317.55859375,
+            "tickHz": 68.58419839917957,
+            "gobernador": {
+              "activo": true,
+              "presupuestoMs": 50,
+              "p95StepMs": 35.05425599999944,
+              "manual": null
+            }
+          }
+        },
+        {
+          "day": 2,
+          "tick": 4800,
+          "population": 22,
+          "births": 6,
+          "deaths": {
+            "deaths": 0,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 0,
+              "exposure": 0,
+              "senescence": 0
+            },
+            "foodLost": 0,
+            "woodLost": 0,
+            "stoneLost": 0
+          },
+          "reproductionPausedTicks": 1581,
+          "neighborsReady": 9,
+          "totals": {
+            "foodHarvested": 6.458162828337698,
+            "woodGathered": 381.40535996496266,
+            "stoneGathered": 233,
+            "hunts": 1,
+            "waterConsumed": 14.073485778975654,
+            "cooperation": 150,
+            "teaching": 87,
+            "trade": 30,
+            "conflicts": 0,
+            "births": 6,
+            "cultivations": 0,
+            "constructionHelp": 33
+          },
+          "diversity": {
+            "conducta": 0.3290672121908348,
+            "oficios": 0.22678113018185,
+            "total": 0.2779241711863424
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 2400,
+              "hastaTickInclusivo": 4800
+            },
+            "vecinosMortales": 20,
+            "fundadoresMortalesVivos": 14,
+            "generacionesMortalesVivas": [
+              0,
+              1
+            ],
+            "recetasDistintasEnUso": 46,
+            "recetasDistintasFabricadas": 20,
+            "usosUtiles": 120,
+            "beneficioUso": 19.644667077189276,
+            "usosDeInventorAjeno": 28,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.23333333333333334,
+            "usosConEnsenanzaRecordada": 20,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 87,
+              "trade": 30,
+              "constructionHelp": 33
+            },
+            "otrasCooperacionesAcumuladas": 0,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 20.837652999995044,
+          "p95StepMs": 44.50192999999854,
+          "maxStepMs": 152.48358700000972,
+          "p95SaveMs": 17.997661999997945,
+          "rss": 419168256,
+          "runtime": {
+            "stepMs": 99.08881899999687,
+            "p95StepMs": 74.35875700000906,
+            "cloneMs": 11.898772000000463,
+            "simulationMs": 16.05748499999754,
+            "saveMs": 71.12616200000048,
+            "projectionMs": 0,
+            "snapshotBytes": 3888132,
+            "activeTiles": 12800,
+            "processRssMiB": 399.34375,
+            "tickHz": 39.905635124500634,
+            "gobernador": {
+              "activo": false,
+              "presupuestoMs": 50,
+              "p95StepMs": 74.35875700000906,
+              "manual": null
+            }
+          }
+        },
+        {
+          "day": 3,
+          "tick": 7200,
+          "population": 22,
+          "births": 6,
+          "deaths": {
+            "deaths": 0,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 0,
+              "exposure": 0,
+              "senescence": 0
+            },
+            "foodLost": 0,
+            "woodLost": 0,
+            "stoneLost": 0
+          },
+          "reproductionPausedTicks": 2400,
+          "neighborsReady": 15,
+          "totals": {
+            "foodHarvested": 10.500162828338098,
+            "woodGathered": 557.7737505019743,
+            "stoneGathered": 350,
+            "hunts": 2,
+            "waterConsumed": 22.61642302946323,
+            "cooperation": 169,
+            "teaching": 101,
+            "trade": 32,
+            "conflicts": 0,
+            "births": 6,
+            "cultivations": 0,
+            "constructionHelp": 36
+          },
+          "diversity": {
+            "conducta": 0.36252057024957934,
+            "oficios": 0.3344465388159662,
+            "total": 0.3484835545327728
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 4800,
+              "hastaTickInclusivo": 7200
+            },
+            "vecinosMortales": 20,
+            "fundadoresMortalesVivos": 14,
+            "generacionesMortalesVivas": [
+              0,
+              1
+            ],
+            "recetasDistintasEnUso": 65,
+            "recetasDistintasFabricadas": 18,
+            "usosUtiles": 187,
+            "beneficioUso": 35.63092150179732,
+            "usosDeInventorAjeno": 44,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.23529411764705882,
+            "usosConEnsenanzaRecordada": 37,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 101,
+              "trade": 32,
+              "constructionHelp": 36
+            },
+            "otrasCooperacionesAcumuladas": 0,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 30.113629999978002,
+          "p95StepMs": 82.09956700001203,
+          "maxStepMs": 373.05246100001386,
+          "p95SaveMs": 51.520657999994,
+          "rss": 459939840,
+          "runtime": {
+            "stepMs": 255.02504099998623,
+            "p95StepMs": 160.93044600001303,
+            "cloneMs": 13.378221999999369,
+            "simulationMs": 23.079315999988467,
+            "saveMs": 218.56589300002088,
+            "projectionMs": 0,
+            "snapshotBytes": 4186166,
+            "activeTiles": 13824,
+            "processRssMiB": 465.1171875,
+            "tickHz": 26.89222926669595,
+            "gobernador": {
+              "activo": false,
+              "presupuestoMs": 50,
+              "p95StepMs": 160.93044600001303,
+              "manual": null
+            }
+          }
+        },
+        {
+          "day": 4,
+          "tick": 9600,
+          "population": 22,
+          "births": 6,
+          "deaths": {
+            "deaths": 0,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 0,
+              "exposure": 0,
+              "senescence": 0
+            },
+            "foodLost": 0,
+            "woodLost": 0,
+            "stoneLost": 0
+          },
+          "reproductionPausedTicks": 2400,
+          "neighborsReady": 12,
+          "totals": {
+            "foodHarvested": 14.85116282833887,
+            "woodGathered": 713.0623391593155,
+            "stoneGathered": 440,
+            "hunts": 5,
+            "waterConsumed": 30.566944840819826,
+            "cooperation": 193,
+            "teaching": 116,
+            "trade": 32,
+            "conflicts": 0,
+            "births": 6,
+            "cultivations": 0,
+            "constructionHelp": 45
+          },
+          "diversity": {
+            "conducta": 0.3276662120618187,
+            "oficios": 0.34421995366297004,
+            "total": 0.3359430828623944
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 7200,
+              "hastaTickInclusivo": 9600
+            },
+            "vecinosMortales": 20,
+            "fundadoresMortalesVivos": 14,
+            "generacionesMortalesVivas": [
+              0,
+              1
+            ],
+            "recetasDistintasEnUso": 64,
+            "recetasDistintasFabricadas": 15,
+            "usosUtiles": 207,
+            "beneficioUso": 32.4355106503977,
+            "usosDeInventorAjeno": 49,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.23671497584541062,
+            "usosConEnsenanzaRecordada": 37,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 116,
+              "trade": 32,
+              "constructionHelp": 45
+            },
+            "otrasCooperacionesAcumuladas": 0,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 32.54823600000236,
+          "p95StepMs": 165.0807339999883,
+          "maxStepMs": 488.4905290000024,
+          "p95SaveMs": 129.8602580000006,
+          "rss": 491864064,
+          "runtime": {
+            "stepMs": 488.4062580000027,
+            "p95StepMs": 250.68683800002327,
+            "cloneMs": 22.523167999985162,
+            "simulationMs": 37.4873109999462,
+            "saveMs": 428.3812279999838,
+            "projectionMs": 0,
+            "snapshotBytes": 4497220,
+            "activeTiles": 16128,
+            "processRssMiB": 468.671875,
+            "tickHz": 19.631750067235824,
+            "gobernador": {
+              "activo": false,
+              "presupuestoMs": 50,
+              "p95StepMs": 250.68683800002327,
+              "manual": null
+            }
+          }
+        },
+        {
+          "day": 5,
+          "tick": 12000,
+          "population": 22,
+          "births": 6,
+          "deaths": {
+            "deaths": 0,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 0,
+              "exposure": 0,
+              "senescence": 0
+            },
+            "foodLost": 0,
+            "woodLost": 0,
+            "stoneLost": 0
+          },
+          "reproductionPausedTicks": 2400,
+          "neighborsReady": 16,
+          "totals": {
+            "foodHarvested": 19.128958970704282,
+            "woodGathered": 860.2758712903131,
+            "stoneGathered": 547,
+            "hunts": 5,
+            "waterConsumed": 39.16659741601952,
+            "cooperation": 211,
+            "teaching": 128,
+            "trade": 33,
+            "conflicts": 0,
+            "births": 6,
+            "cultivations": 7,
+            "constructionHelp": 50
+          },
+          "diversity": {
+            "conducta": 0.31324865015497527,
+            "oficios": 0.3473865034794082,
+            "total": 0.33031757681719176
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 9600,
+              "hastaTickInclusivo": 12000
+            },
+            "vecinosMortales": 20,
+            "fundadoresMortalesVivos": 14,
+            "generacionesMortalesVivas": [
+              0,
+              1
+            ],
+            "recetasDistintasEnUso": 96,
+            "recetasDistintasFabricadas": 24,
+            "usosUtiles": 277,
+            "beneficioUso": 44.87361216114472,
+            "usosDeInventorAjeno": 67,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.24187725631768953,
+            "usosConEnsenanzaRecordada": 49,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 128,
+              "trade": 33,
+              "constructionHelp": 50
+            },
+            "otrasCooperacionesAcumuladas": 0,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 37.67986099998234,
+          "p95StepMs": 236.7050009999657,
+          "maxStepMs": 685.7227469999925,
+          "p95SaveMs": 184.385540999996,
+          "rss": 518447104,
+          "runtime": {
+            "stepMs": 529.4966010000207,
+            "p95StepMs": 317.0202720000525,
+            "cloneMs": 21.486768000002485,
+            "simulationMs": 33.23647699999856,
+            "saveMs": 474.75962500000605,
+            "projectionMs": 0,
+            "snapshotBytes": 4899714,
+            "activeTiles": 17664,
+            "processRssMiB": 494.5078125,
+            "tickHz": 17.555607479633117,
+            "gobernador": {
+              "activo": false,
+              "presupuestoMs": 50,
+              "p95StepMs": 317.0202720000525,
+              "manual": null
+            }
+          }
+        }
+      ]
+    },
+    {
+      "run": "candidate-world-1",
+      "metadata": {
+        "sha": "9665754c15e9c9c40b025a69ccf990896bc3849c",
+        "source": "a6ff1fece77efb0aa6bf00faf95897113ec2e3d58c239f2d5967024c58a1fa59",
+        "seed": 1,
+        "days": 10,
+        "engine": "world",
+        "params": {
+          "cuerpo": {
+            "longevidadBaseDias": 11,
+            "longevidadPorResiliencia": 4,
+            "longevidadPorActividad": 1,
+            "senescenciaInicioFraccion": 0.75,
+            "riesgoSenescenciaDiario": 0.04,
+            "riesgoSenescenciaPendiente": 10,
+            "cuidadoReduceRiesgo": 0.6
+          },
+          "genes": {
+            "varianzaFundadores": 0.15,
+            "tasaMutacion": 1
+          },
+          "poblacion": {
+            "maxima": 1000000,
+            "intervaloComprobacionTicks": 120,
+            "nacimientosPorComprobacion": 2
+          },
+          "recursos": {
+            "capacidadBosque": 1,
+            "capacidadPastizal": 0.7,
+            "capacidadOtros": 0.35,
+            "velocidadRegeneracion": 1,
+            "decaimientoFertilidad": 0.001,
+            "decaimientoComida": 0.0001
+          },
+          "persistencia": {
+            "cadaTicks": 20,
+            "ventanaEventosTicks": 0
+          },
+          "agua": {
+            "cuencas": 0.4
+          },
+          "gobernador": {
+            "presupuestoMs": 50
+          }
+        },
+        "scope": "stepWorld and production Store; governor not executed",
+        "thresholds": {
+          "mortalExtinction": 0,
+          "failedSteps": 0,
+          "serverStepP95Ms": 50
+        },
+        "complete": true,
+        "finalTick": 24000
+      },
+      "days": [
+        {
+          "day": 1,
+          "tick": 2400,
+          "population": 21,
+          "births": 5,
+          "deaths": {
+            "deaths": 0,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 0,
+              "exposure": 0,
+              "senescence": 0
+            },
+            "foodLost": 0,
+            "woodLost": 0,
+            "stoneLost": 0
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 2,
+          "totals": {
+            "foodHarvested": 2.2773942379104604,
+            "woodGathered": 105,
+            "stoneGathered": 79,
+            "hunts": 0,
+            "waterConsumed": 5.510945362195528,
+            "cooperation": 50,
+            "teaching": 40,
+            "trade": 9,
+            "conflicts": 0,
+            "births": 5,
+            "cultivations": 0,
+            "constructionHelp": 1
+          },
+          "diversity": {
+            "conducta": 0.4516361571697861,
+            "oficios": 0.46426388208784364,
+            "total": 0.4579500196288149
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 0,
+              "hastaTickInclusivo": 2400
+            },
+            "vecinosMortales": 19,
+            "fundadoresMortalesVivos": 14,
+            "generacionesMortalesVivas": [
+              0,
+              1
+            ],
+            "recetasDistintasEnUso": 6,
+            "recetasDistintasFabricadas": 7,
+            "usosUtiles": 9,
+            "beneficioUso": 0.342046065935372,
+            "usosDeInventorAjeno": 2,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.2222222222222222,
+            "usosConEnsenanzaRecordada": 2,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 40,
+              "trade": 9,
+              "constructionHelp": 1
+            },
+            "otrasCooperacionesAcumuladas": 0,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 1.6772229999996853,
+          "p95StepMs": 14.87594799999988,
+          "maxStepMs": 87.86600699999963,
+          "p95SaveMs": 53.34033199999976,
+          "rss": 228868096,
+          "runtime": null
+        },
+        {
+          "day": 2,
+          "tick": 4800,
+          "population": 23,
+          "births": 8,
+          "deaths": {
+            "deaths": 1,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 1,
+              "exposure": 0,
+              "senescence": 0
+            },
+            "foodLost": 0.13162499999999994,
+            "woodLost": 0,
+            "stoneLost": 3
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 4,
+          "totals": {
+            "foodHarvested": 6.54132465248561,
+            "woodGathered": 233.6650729067586,
+            "stoneGathered": 167,
+            "hunts": 1,
+            "waterConsumed": 14.170347940835276,
+            "cooperation": 124,
+            "teaching": 90,
+            "trade": 16,
+            "conflicts": 0,
+            "births": 8,
+            "cultivations": 2,
+            "constructionHelp": 18
+          },
+          "diversity": {
+            "conducta": 0.45350874282251774,
+            "oficios": 0.5411729017536938,
+            "total": 0.4973408222881058
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 2400,
+              "hastaTickInclusivo": 4800
+            },
+            "vecinosMortales": 21,
+            "fundadoresMortalesVivos": 13,
+            "generacionesMortalesVivas": [
+              0,
+              1
+            ],
+            "recetasDistintasEnUso": 33,
+            "recetasDistintasFabricadas": 11,
+            "usosUtiles": 89,
+            "beneficioUso": 25.73614299591394,
+            "usosDeInventorAjeno": 48,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.5393258426966292,
+            "usosConEnsenanzaRecordada": 43,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 90,
+              "trade": 16,
+              "constructionHelp": 18
+            },
+            "otrasCooperacionesAcumuladas": 0,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 4.4457149999980174,
+          "p95StepMs": 37.8027379999985,
+          "maxStepMs": 181.04279899999892,
+          "p95SaveMs": 83.08470800000032,
+          "rss": 311570432,
+          "runtime": null
+        },
+        {
+          "day": 3,
+          "tick": 7200,
+          "population": 27,
+          "births": 13,
+          "deaths": {
+            "deaths": 2,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 2,
+              "exposure": 0,
+              "senescence": 0
+            },
+            "foodLost": 0.2851249999999996,
+            "woodLost": 0,
+            "stoneLost": 4
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 7,
+          "totals": {
+            "foodHarvested": 11.284699388252553,
+            "woodGathered": 338.6333731808425,
+            "stoneGathered": 257,
+            "hunts": 2,
+            "waterConsumed": 23.746868636219162,
+            "cooperation": 207,
+            "teaching": 155,
+            "trade": 23,
+            "conflicts": 0,
+            "births": 13,
+            "cultivations": 2,
+            "constructionHelp": 29
+          },
+          "diversity": {
+            "conducta": 0.4450398036925885,
+            "oficios": 0.5298337285538716,
+            "total": 0.48743676612323006
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 4800,
+              "hastaTickInclusivo": 7200
+            },
+            "vecinosMortales": 25,
+            "fundadoresMortalesVivos": 12,
+            "generacionesMortalesVivas": [
+              0,
+              1,
+              2
+            ],
+            "recetasDistintasEnUso": 50,
+            "recetasDistintasFabricadas": 17,
+            "usosUtiles": 142,
+            "beneficioUso": 20.94588247428134,
+            "usosDeInventorAjeno": 50,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.352112676056338,
+            "usosConEnsenanzaRecordada": 44,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 155,
+              "trade": 23,
+              "constructionHelp": 29
+            },
+            "otrasCooperacionesAcumuladas": 0,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 7.03437500000291,
+          "p95StepMs": 66.49761099999887,
+          "maxStepMs": 248.52197799999703,
+          "p95SaveMs": 133.13836900000024,
+          "rss": 318636032,
+          "runtime": null
+        },
+        {
+          "day": 4,
+          "tick": 9600,
+          "population": 30,
+          "births": 16,
+          "deaths": {
+            "deaths": 2,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 2,
+              "exposure": 0,
+              "senescence": 0
+            },
+            "foodLost": 0.2851249999999996,
+            "woodLost": 0,
+            "stoneLost": 4
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 11,
+          "totals": {
+            "foodHarvested": 17.182040500759868,
+            "woodGathered": 345.89148313257925,
+            "stoneGathered": 265,
+            "hunts": 2,
+            "waterConsumed": 33.863280472793925,
+            "cooperation": 287,
+            "teaching": 218,
+            "trade": 37,
+            "conflicts": 0,
+            "births": 16,
+            "cultivations": 2,
+            "constructionHelp": 32
+          },
+          "diversity": {
+            "conducta": 0.46334864021060346,
+            "oficios": 0.5992744624487477,
+            "total": 0.5313115513296756
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 7200,
+              "hastaTickInclusivo": 9600
+            },
+            "vecinosMortales": 28,
+            "fundadoresMortalesVivos": 12,
+            "generacionesMortalesVivas": [
+              0,
+              1,
+              2
+            ],
+            "recetasDistintasEnUso": 73,
+            "recetasDistintasFabricadas": 20,
+            "usosUtiles": 171,
+            "beneficioUso": 15.081950159411617,
+            "usosDeInventorAjeno": 44,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.2573099415204678,
+            "usosConEnsenanzaRecordada": 37,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 218,
+              "trade": 37,
+              "constructionHelp": 32
+            },
+            "otrasCooperacionesAcumuladas": 0,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 12.842820000005304,
+          "p95StepMs": 126.02235100000689,
+          "maxStepMs": 579.284851000004,
+          "p95SaveMs": 372.7032489999983,
+          "rss": 360419328,
+          "runtime": null
+        },
+        {
+          "day": 5,
+          "tick": 12000,
+          "population": 38,
+          "births": 24,
+          "deaths": {
+            "deaths": 2,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 2,
+              "exposure": 0,
+              "senescence": 0
+            },
+            "foodLost": 0.2851249999999996,
+            "woodLost": 0,
+            "stoneLost": 4
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 9,
+          "totals": {
+            "foodHarvested": 23.124429897509483,
+            "woodGathered": 495.6643323135595,
+            "stoneGathered": 330,
+            "hunts": 5,
+            "waterConsumed": 45.92496762633018,
+            "cooperation": 465,
+            "teaching": 331,
+            "trade": 51,
+            "conflicts": 0,
+            "births": 24,
+            "cultivations": 2,
+            "constructionHelp": 83
+          },
+          "diversity": {
+            "conducta": 0.4541993597565701,
+            "oficios": 0.6040671385355207,
+            "total": 0.5291332491460454
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 9600,
+              "hastaTickInclusivo": 12000
+            },
+            "vecinosMortales": 36,
+            "fundadoresMortalesVivos": 12,
+            "generacionesMortalesVivas": [
+              0,
+              1,
+              2,
+              3
+            ],
+            "recetasDistintasEnUso": 82,
+            "recetasDistintasFabricadas": 25,
+            "usosUtiles": 182,
+            "beneficioUso": 39.86378767345532,
+            "usosDeInventorAjeno": 50,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.27472527472527475,
+            "usosConEnsenanzaRecordada": 23,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 331,
+              "trade": 51,
+              "constructionHelp": 83
+            },
+            "otrasCooperacionesAcumuladas": 0,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 15.668067999999039,
+          "p95StepMs": 241.1480750000046,
+          "maxStepMs": 762.9873499999812,
+          "p95SaveMs": 526.15300999998,
+          "rss": 345575424,
+          "runtime": null
+        },
+        {
+          "day": 6,
+          "tick": 14400,
+          "population": 40,
+          "births": 27,
+          "deaths": {
+            "deaths": 3,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 3,
+              "exposure": 0,
+              "senescence": 0
+            },
+            "foodLost": 0.33149999999999963,
+            "woodLost": 5,
+            "stoneLost": 4
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 13,
+          "totals": {
+            "foodHarvested": 29.8923753310274,
+            "woodGathered": 562.5731019991935,
+            "stoneGathered": 375,
+            "hunts": 6,
+            "waterConsumed": 60.37744405275901,
+            "cooperation": 600,
+            "teaching": 428,
+            "trade": 66,
+            "conflicts": 0,
+            "births": 27,
+            "cultivations": 2,
+            "constructionHelp": 106
+          },
+          "diversity": {
+            "conducta": 0.4670037883016324,
+            "oficios": 0.5507901031534274,
+            "total": 0.5088969457275299
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 12000,
+              "hastaTickInclusivo": 14400
+            },
+            "vecinosMortales": 38,
+            "fundadoresMortalesVivos": 12,
+            "generacionesMortalesVivas": [
+              0,
+              1,
+              2,
+              3
+            ],
+            "recetasDistintasEnUso": 93,
+            "recetasDistintasFabricadas": 16,
+            "usosUtiles": 219,
+            "beneficioUso": 31.519454769893553,
+            "usosDeInventorAjeno": 74,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.3378995433789954,
+            "usosConEnsenanzaRecordada": 50,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 428,
+              "trade": 66,
+              "constructionHelp": 106
+            },
+            "otrasCooperacionesAcumuladas": 0,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 17.56503200001316,
+          "p95StepMs": 244.07558100001188,
+          "maxStepMs": 681.1002749999752,
+          "p95SaveMs": 586.687546000001,
+          "rss": 355123200,
+          "runtime": null
+        },
+        {
+          "day": 7,
+          "tick": 16800,
+          "population": 48,
+          "births": 35,
+          "deaths": {
+            "deaths": 3,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 3,
+              "exposure": 0,
+              "senescence": 0
+            },
+            "foodLost": 0.33149999999999963,
+            "woodLost": 5,
+            "stoneLost": 4
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 13,
+          "totals": {
+            "foodHarvested": 37.599453624851506,
+            "woodGathered": 695.528803344533,
+            "stoneGathered": 475,
+            "hunts": 6,
+            "waterConsumed": 76.97467142193426,
+            "cooperation": 800,
+            "teaching": 560,
+            "trade": 93,
+            "conflicts": 0,
+            "births": 35,
+            "cultivations": 3,
+            "constructionHelp": 147
+          },
+          "diversity": {
+            "conducta": 0.44177448439135164,
+            "oficios": 0.5570753787206318,
+            "total": 0.49942493155599177
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 14400,
+              "hastaTickInclusivo": 16800
+            },
+            "vecinosMortales": 46,
+            "fundadoresMortalesVivos": 12,
+            "generacionesMortalesVivas": [
+              0,
+              1,
+              2,
+              3
+            ],
+            "recetasDistintasEnUso": 90,
+            "recetasDistintasFabricadas": 32,
+            "usosUtiles": 247,
+            "beneficioUso": 53.17635440795245,
+            "usosDeInventorAjeno": 113,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.4574898785425101,
+            "usosConEnsenanzaRecordada": 67,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 560,
+              "trade": 93,
+              "constructionHelp": 147
+            },
+            "otrasCooperacionesAcumuladas": 0,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 20.148600000014994,
+          "p95StepMs": 279.2635500000324,
+          "maxStepMs": 1022.6029170000111,
+          "p95SaveMs": 672.9057729999768,
+          "rss": 396193792,
+          "runtime": null
+        },
+        {
+          "day": 8,
+          "tick": 19200,
+          "population": 54,
+          "births": 42,
+          "deaths": {
+            "deaths": 4,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 4,
+              "exposure": 0,
+              "senescence": 0
+            },
+            "foodLost": 0.33249999999999963,
+            "woodLost": 10.004992430364,
+            "stoneLost": 5
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 8,
+          "totals": {
+            "foodHarvested": 46.056339484082486,
+            "woodGathered": 907.4648407589128,
+            "stoneGathered": 658,
+            "hunts": 11,
+            "waterConsumed": 92.81534172958528,
+            "cooperation": 1128,
+            "teaching": 705,
+            "trade": 118,
+            "conflicts": 0,
+            "births": 42,
+            "cultivations": 6,
+            "constructionHelp": 305
+          },
+          "diversity": {
+            "conducta": 0.4514991347553453,
+            "oficios": 0.5373536818602723,
+            "total": 0.4944264083078088
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 16800,
+              "hastaTickInclusivo": 19200
+            },
+            "vecinosMortales": 52,
+            "fundadoresMortalesVivos": 11,
+            "generacionesMortalesVivas": [
+              0,
+              1,
+              2,
+              3
+            ],
+            "recetasDistintasEnUso": 87,
+            "recetasDistintasFabricadas": 35,
+            "usosUtiles": 280,
+            "beneficioUso": 75.75522984895886,
+            "usosDeInventorAjeno": 125,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.44642857142857145,
+            "usosConEnsenanzaRecordada": 56,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 705,
+              "trade": 118,
+              "constructionHelp": 305
+            },
+            "otrasCooperacionesAcumuladas": 0,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 17.012696999998298,
+          "p95StepMs": 278.94441200001165,
+          "maxStepMs": 769.1863009999506,
+          "p95SaveMs": 601.7049720000359,
+          "rss": 444149760,
+          "runtime": null
+        },
+        {
+          "day": 9,
+          "tick": 21600,
+          "population": 57,
+          "births": 50,
+          "deaths": {
+            "deaths": 9,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 9,
+              "exposure": 0,
+              "senescence": 0
+            },
+            "foodLost": 0.5258272745705534,
+            "woodLost": 38.70768463067027,
+            "stoneLost": 26
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 13,
+          "totals": {
+            "foodHarvested": 56.07963402184399,
+            "woodGathered": 1112.8300888918043,
+            "stoneGathered": 817,
+            "hunts": 18,
+            "waterConsumed": 114.21181352115991,
+            "cooperation": 1369,
+            "teaching": 857,
+            "trade": 135,
+            "conflicts": 0,
+            "births": 50,
+            "cultivations": 11,
+            "constructionHelp": 376
+          },
+          "diversity": {
+            "conducta": 0.4604627404036091,
+            "oficios": 0.5741263063695518,
+            "total": 0.5172945233865804
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 19200,
+              "hastaTickInclusivo": 21600
+            },
+            "vecinosMortales": 55,
+            "fundadoresMortalesVivos": 10,
+            "generacionesMortalesVivas": [
+              0,
+              1,
+              2,
+              3,
+              4
+            ],
+            "recetasDistintasEnUso": 116,
+            "recetasDistintasFabricadas": 33,
+            "usosUtiles": 388,
+            "beneficioUso": 74.33105190139936,
+            "usosDeInventorAjeno": 179,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.46134020618556704,
+            "usosConEnsenanzaRecordada": 104,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 857,
+              "trade": 135,
+              "constructionHelp": 376
+            },
+            "otrasCooperacionesAcumuladas": 1,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 22.21646399993915,
+          "p95StepMs": 306.49330999993253,
+          "maxStepMs": 845.9967930000275,
+          "p95SaveMs": 600.5599530000472,
+          "rss": 399949824,
+          "runtime": null
+        },
+        {
+          "day": 10,
+          "tick": 24000,
+          "population": 53,
+          "births": 53,
+          "deaths": {
+            "deaths": 16,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 16,
+              "exposure": 0,
+              "senescence": 0
+            },
+            "foodLost": 0.6986316669834712,
+            "woodLost": 70.89181018616128,
+            "stoneLost": 60
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 17,
+          "totals": {
+            "foodHarvested": 65.45668994603452,
+            "woodGathered": 1330.838891910744,
+            "stoneGathered": 925,
+            "hunts": 29,
+            "waterConsumed": 132.16250780963696,
+            "cooperation": 1579,
+            "teaching": 982,
+            "trade": 169,
+            "conflicts": 3,
+            "births": 53,
+            "cultivations": 35,
+            "constructionHelp": 427
+          },
+          "diversity": {
+            "conducta": 0.4180004232749801,
+            "oficios": 0.4912473812095984,
+            "total": 0.4546239022422892
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 21600,
+              "hastaTickInclusivo": 24000
+            },
+            "vecinosMortales": 51,
+            "fundadoresMortalesVivos": 8,
+            "generacionesMortalesVivas": [
+              0,
+              1,
+              2,
+              3,
+              4
+            ],
+            "recetasDistintasEnUso": 108,
+            "recetasDistintasFabricadas": 30,
+            "usosUtiles": 380,
+            "beneficioUso": 93.62009051262822,
+            "usosDeInventorAjeno": 225,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.5921052631578947,
+            "usosConEnsenanzaRecordada": 129,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 982,
+              "trade": 169,
+              "constructionHelp": 427
+            },
+            "otrasCooperacionesAcumuladas": 1,
+            "conflictosAcumulados": 3
+          },
+          "p50StepMs": 25.741073999903165,
+          "p95StepMs": 301.765803999966,
+          "maxStepMs": 822.9958949999418,
+          "p95SaveMs": 577.5634190000128,
+          "rss": 404307968,
+          "runtime": null
+        }
+      ]
+    },
+    {
+      "run": "candidate-world-4",
+      "metadata": {
+        "sha": "9665754c15e9c9c40b025a69ccf990896bc3849c",
+        "source": "a6ff1fece77efb0aa6bf00faf95897113ec2e3d58c239f2d5967024c58a1fa59",
+        "seed": 4,
+        "days": 10,
+        "engine": "world",
+        "params": {
+          "cuerpo": {
+            "longevidadBaseDias": 11,
+            "longevidadPorResiliencia": 4,
+            "longevidadPorActividad": 1,
+            "senescenciaInicioFraccion": 0.75,
+            "riesgoSenescenciaDiario": 0.04,
+            "riesgoSenescenciaPendiente": 10,
+            "cuidadoReduceRiesgo": 0.6
+          },
+          "genes": {
+            "varianzaFundadores": 0.15,
+            "tasaMutacion": 1
+          },
+          "poblacion": {
+            "maxima": 1000000,
+            "intervaloComprobacionTicks": 120,
+            "nacimientosPorComprobacion": 2
+          },
+          "recursos": {
+            "capacidadBosque": 1,
+            "capacidadPastizal": 0.7,
+            "capacidadOtros": 0.35,
+            "velocidadRegeneracion": 1,
+            "decaimientoFertilidad": 0.001,
+            "decaimientoComida": 0.0001
+          },
+          "persistencia": {
+            "cadaTicks": 20,
+            "ventanaEventosTicks": 0
+          },
+          "agua": {
+            "cuencas": 0.4
+          },
+          "gobernador": {
+            "presupuestoMs": 50
+          }
+        },
+        "scope": "stepWorld and production Store; governor not executed",
+        "thresholds": {
+          "mortalExtinction": 0,
+          "failedSteps": 0,
+          "serverStepP95Ms": 50
+        },
+        "complete": true,
+        "finalTick": 24000
+      },
+      "days": [
+        {
+          "day": 1,
+          "tick": 2400,
+          "population": 20,
+          "births": 5,
+          "deaths": {
+            "deaths": 1,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 1,
+              "exposure": 0,
+              "senescence": 0
+            },
+            "foodLost": 0.11274001701309744,
+            "woodLost": 7,
+            "stoneLost": 7
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 1,
+          "totals": {
+            "foodHarvested": 2.0661766781353057,
+            "woodGathered": 134.83497576320002,
+            "stoneGathered": 131.75962425500506,
+            "hunts": 0,
+            "waterConsumed": 6.035965164677785,
+            "cooperation": 18,
+            "teaching": 17,
+            "trade": 1,
+            "conflicts": 0,
+            "births": 5,
+            "cultivations": 11,
+            "constructionHelp": 0
+          },
+          "diversity": {
+            "conducta": 0.29191996026917116,
+            "oficios": 0.17312735711977043,
+            "total": 0.23252365869447078
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 0,
+              "hastaTickInclusivo": 2400
+            },
+            "vecinosMortales": 18,
+            "fundadoresMortalesVivos": 13,
+            "generacionesMortalesVivas": [
+              0,
+              1
+            ],
+            "recetasDistintasEnUso": 9,
+            "recetasDistintasFabricadas": 3,
+            "usosUtiles": 17,
+            "beneficioUso": 3.194725287185424,
+            "usosDeInventorAjeno": 0,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0,
+            "usosConEnsenanzaRecordada": 0,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 17,
+              "trade": 1,
+              "constructionHelp": 0
+            },
+            "otrasCooperacionesAcumuladas": 0,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 2.5789599999998245,
+          "p95StepMs": 18.28300499999932,
+          "maxStepMs": 119.69420699999864,
+          "p95SaveMs": 75.03437400000075,
+          "rss": 285097984,
+          "runtime": null
+        },
+        {
+          "day": 2,
+          "tick": 4800,
+          "population": 16,
+          "births": 6,
+          "deaths": {
+            "deaths": 6,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 6,
+              "exposure": 0,
+              "senescence": 0
+            },
+            "foodLost": 0.46116727823058734,
+            "woodLost": 10,
+            "stoneLost": 27
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 4,
+          "totals": {
+            "foodHarvested": 5.160027305344666,
+            "woodGathered": 221.63759415046258,
+            "stoneGathered": 199.75962425500506,
+            "hunts": 3,
+            "waterConsumed": 11.639413733864146,
+            "cooperation": 31,
+            "teaching": 22,
+            "trade": 2,
+            "conflicts": 0,
+            "births": 6,
+            "cultivations": 26,
+            "constructionHelp": 7
+          },
+          "diversity": {
+            "conducta": 0.1966244770393565,
+            "oficios": 0.08088636282435548,
+            "total": 0.138755419931856
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 2400,
+              "hastaTickInclusivo": 4800
+            },
+            "vecinosMortales": 14,
+            "fundadoresMortalesVivos": 10,
+            "generacionesMortalesVivas": [
+              0,
+              1
+            ],
+            "recetasDistintasEnUso": 9,
+            "recetasDistintasFabricadas": 10,
+            "usosUtiles": 18,
+            "beneficioUso": 2.3040766737896337,
+            "usosDeInventorAjeno": 1,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.05555555555555555,
+            "usosConEnsenanzaRecordada": 1,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 22,
+              "trade": 2,
+              "constructionHelp": 7
+            },
+            "otrasCooperacionesAcumuladas": 0,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 5.9997069999990345,
+          "p95StepMs": 41.37462599999708,
+          "maxStepMs": 173.52022600000055,
+          "p95SaveMs": 120.0342429999946,
+          "rss": 330502144,
+          "runtime": null
+        },
+        {
+          "day": 3,
+          "tick": 7200,
+          "population": 18,
+          "births": 9,
+          "deaths": {
+            "deaths": 7,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 7,
+              "exposure": 0,
+              "senescence": 0
+            },
+            "foodLost": 0.5223929846985996,
+            "woodLost": 10,
+            "stoneLost": 33
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 2,
+          "totals": {
+            "foodHarvested": 8.13248548444139,
+            "woodGathered": 242.05392647669225,
+            "stoneGathered": 223.00000000000003,
+            "hunts": 4,
+            "waterConsumed": 19.255914283715477,
+            "cooperation": 53,
+            "teaching": 41,
+            "trade": 3,
+            "conflicts": 0,
+            "births": 9,
+            "cultivations": 29,
+            "constructionHelp": 7
+          },
+          "diversity": {
+            "conducta": 0.3301762563566138,
+            "oficios": 0.19258661176072292,
+            "total": 0.26138143405866837
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 4800,
+              "hastaTickInclusivo": 7200
+            },
+            "vecinosMortales": 16,
+            "fundadoresMortalesVivos": 9,
+            "generacionesMortalesVivas": [
+              0,
+              1
+            ],
+            "recetasDistintasEnUso": 33,
+            "recetasDistintasFabricadas": 15,
+            "usosUtiles": 55,
+            "beneficioUso": 4.621714339199978,
+            "usosDeInventorAjeno": 9,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.16363636363636364,
+            "usosConEnsenanzaRecordada": 9,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 41,
+              "trade": 3,
+              "constructionHelp": 7
+            },
+            "otrasCooperacionesAcumuladas": 2,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 5.760535000001255,
+          "p95StepMs": 42.31888099999924,
+          "maxStepMs": 172.85638599999947,
+          "p95SaveMs": 118.53927599999588,
+          "rss": 336482304,
+          "runtime": null
+        },
+        {
+          "day": 4,
+          "tick": 9600,
+          "population": 18,
+          "births": 10,
+          "deaths": {
+            "deaths": 8,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 8,
+              "exposure": 0,
+              "senescence": 0
+            },
+            "foodLost": 0.6312575487711997,
+            "woodLost": 10,
+            "stoneLost": 41
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 7,
+          "totals": {
+            "foodHarvested": 11.452607568273276,
+            "woodGathered": 248.05392647669225,
+            "stoneGathered": 262,
+            "hunts": 4,
+            "waterConsumed": 25.792628946129923,
+            "cooperation": 66,
+            "teaching": 53,
+            "trade": 3,
+            "conflicts": 0,
+            "births": 10,
+            "cultivations": 29,
+            "constructionHelp": 8
+          },
+          "diversity": {
+            "conducta": 0.3651309493825908,
+            "oficios": 0.25250832094064973,
+            "total": 0.30881963516162025
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 7200,
+              "hastaTickInclusivo": 9600
+            },
+            "vecinosMortales": 16,
+            "fundadoresMortalesVivos": 8,
+            "generacionesMortalesVivas": [
+              0,
+              1
+            ],
+            "recetasDistintasEnUso": 46,
+            "recetasDistintasFabricadas": 16,
+            "usosUtiles": 104,
+            "beneficioUso": 8.439174352913609,
+            "usosDeInventorAjeno": 22,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.21153846153846154,
+            "usosConEnsenanzaRecordada": 22,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 53,
+              "trade": 3,
+              "constructionHelp": 8
+            },
+            "otrasCooperacionesAcumuladas": 2,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 8.39472399999795,
+          "p95StepMs": 66.01260200000252,
+          "maxStepMs": 288.5120840000018,
+          "p95SaveMs": 202.14577299999655,
+          "rss": 322220032,
+          "runtime": null
+        },
+        {
+          "day": 5,
+          "tick": 12000,
+          "population": 17,
+          "births": 12,
+          "deaths": {
+            "deaths": 11,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 10,
+              "exposure": 1,
+              "senescence": 0
+            },
+            "foodLost": 0.9812008275269715,
+            "woodLost": 24.11500000000026,
+            "stoneLost": 64
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 4,
+          "totals": {
+            "foodHarvested": 14.755107568273912,
+            "woodGathered": 258.05392647669225,
+            "stoneGathered": 270,
+            "hunts": 4,
+            "waterConsumed": 32.49305461157715,
+            "cooperation": 94,
+            "teaching": 81,
+            "trade": 3,
+            "conflicts": 0,
+            "births": 12,
+            "cultivations": 29,
+            "constructionHelp": 8
+          },
+          "diversity": {
+            "conducta": 0.418369602913826,
+            "oficios": 0.2928224811615021,
+            "total": 0.35559604203766404
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 9600,
+              "hastaTickInclusivo": 12000
+            },
+            "vecinosMortales": 15,
+            "fundadoresMortalesVivos": 7,
+            "generacionesMortalesVivas": [
+              0,
+              1,
+              2
+            ],
+            "recetasDistintasEnUso": 47,
+            "recetasDistintasFabricadas": 9,
+            "usosUtiles": 96,
+            "beneficioUso": 7.151658145442924,
+            "usosDeInventorAjeno": 8,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.08333333333333333,
+            "usosConEnsenanzaRecordada": 8,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 81,
+              "trade": 3,
+              "constructionHelp": 8
+            },
+            "otrasCooperacionesAcumuladas": 2,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 8.307373999996344,
+          "p95StepMs": 107.45239599999331,
+          "maxStepMs": 298.47888700000476,
+          "p95SaveMs": 220.77975900001184,
+          "rss": 375152640,
+          "runtime": null
+        },
+        {
+          "day": 6,
+          "tick": 14400,
+          "population": 18,
+          "births": 14,
+          "deaths": {
+            "deaths": 12,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 11,
+              "exposure": 1,
+              "senescence": 0
+            },
+            "foodLost": 1.0024508275269715,
+            "woodLost": 29.90282901024669,
+            "stoneLost": 66
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 5,
+          "totals": {
+            "foodHarvested": 17.941107568273623,
+            "woodGathered": 300.0443427460182,
+            "stoneGathered": 373,
+            "hunts": 4,
+            "waterConsumed": 38.51702733285362,
+            "cooperation": 144,
+            "teaching": 125,
+            "trade": 9,
+            "conflicts": 0,
+            "births": 14,
+            "cultivations": 29,
+            "constructionHelp": 8
+          },
+          "diversity": {
+            "conducta": 0.3118193791007057,
+            "oficios": 0.2863777487230264,
+            "total": 0.29909856391186607
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 12000,
+              "hastaTickInclusivo": 14400
+            },
+            "vecinosMortales": 16,
+            "fundadoresMortalesVivos": 7,
+            "generacionesMortalesVivas": [
+              0,
+              1,
+              2
+            ],
+            "recetasDistintasEnUso": 46,
+            "recetasDistintasFabricadas": 17,
+            "usosUtiles": 102,
+            "beneficioUso": 12.646733828611815,
+            "usosDeInventorAjeno": 25,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.24509803921568626,
+            "usosConEnsenanzaRecordada": 14,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 125,
+              "trade": 9,
+              "constructionHelp": 8
+            },
+            "otrasCooperacionesAcumuladas": 2,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 9.05853899999056,
+          "p95StepMs": 117.49084800001583,
+          "maxStepMs": 373.9870820000069,
+          "p95SaveMs": 293.6645000000135,
+          "rss": 368328704,
+          "runtime": null
+        },
+        {
+          "day": 7,
+          "tick": 16800,
+          "population": 17,
+          "births": 14,
+          "deaths": {
+            "deaths": 13,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 12,
+              "exposure": 1,
+              "senescence": 0
+            },
+            "foodLost": 1.2274508275269715,
+            "woodLost": 31.373069410246693,
+            "stoneLost": 73
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 8,
+          "totals": {
+            "foodHarvested": 20.939849745408893,
+            "woodGathered": 317.7362578107576,
+            "stoneGathered": 447.99999999999994,
+            "hunts": 4,
+            "waterConsumed": 45.42177180235954,
+            "cooperation": 168,
+            "teaching": 148,
+            "trade": 9,
+            "conflicts": 0,
+            "births": 14,
+            "cultivations": 32,
+            "constructionHelp": 9
+          },
+          "diversity": {
+            "conducta": 0.29182085103937855,
+            "oficios": 0.30234879367391804,
+            "total": 0.2970848223566483
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 14400,
+              "hastaTickInclusivo": 16800
+            },
+            "vecinosMortales": 15,
+            "fundadoresMortalesVivos": 6,
+            "generacionesMortalesVivas": [
+              0,
+              1,
+              2
+            ],
+            "recetasDistintasEnUso": 57,
+            "recetasDistintasFabricadas": 18,
+            "usosUtiles": 123,
+            "beneficioUso": 11.353681860521377,
+            "usosDeInventorAjeno": 26,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.21138211382113822,
+            "usosConEnsenanzaRecordada": 23,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 148,
+              "trade": 9,
+              "constructionHelp": 9
+            },
+            "otrasCooperacionesAcumuladas": 2,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 13.371830999996746,
+          "p95StepMs": 140.0772790000192,
+          "maxStepMs": 422.43894100000034,
+          "p95SaveMs": 341.48647699999856,
+          "rss": 403562496,
+          "runtime": null
+        },
+        {
+          "day": 8,
+          "tick": 19200,
+          "population": 17,
+          "births": 15,
+          "deaths": {
+            "deaths": 14,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 13,
+              "exposure": 1,
+              "senescence": 0
+            },
+            "foodLost": 1.2712008275269715,
+            "woodLost": 35.539563409770004,
+            "stoneLost": 81
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 4,
+          "totals": {
+            "foodHarvested": 23.63046825016529,
+            "woodGathered": 331.0746600235771,
+            "stoneGathered": 487.99999999999994,
+            "hunts": 4,
+            "waterConsumed": 50.99875845197221,
+            "cooperation": 220,
+            "teaching": 185,
+            "trade": 10,
+            "conflicts": 0,
+            "births": 15,
+            "cultivations": 34,
+            "constructionHelp": 23
+          },
+          "diversity": {
+            "conducta": 0.22256906820929548,
+            "oficios": 0.12531625253600379,
+            "total": 0.17394266037264963
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 16800,
+              "hastaTickInclusivo": 19200
+            },
+            "vecinosMortales": 15,
+            "fundadoresMortalesVivos": 6,
+            "generacionesMortalesVivas": [
+              0,
+              1,
+              2
+            ],
+            "recetasDistintasEnUso": 42,
+            "recetasDistintasFabricadas": 16,
+            "usosUtiles": 107,
+            "beneficioUso": 8.776370685605425,
+            "usosDeInventorAjeno": 19,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.17757009345794392,
+            "usosConEnsenanzaRecordada": 16,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 185,
+              "trade": 10,
+              "constructionHelp": 23
+            },
+            "otrasCooperacionesAcumuladas": 2,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 17.08904699998675,
+          "p95StepMs": 173.2872469999711,
+          "maxStepMs": 531.2144199999748,
+          "p95SaveMs": 429.23794500000076,
+          "rss": 343179264,
+          "runtime": null
+        },
+        {
+          "day": 9,
+          "tick": 21600,
+          "population": 13,
+          "births": 15,
+          "deaths": {
+            "deaths": 18,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 17,
+              "exposure": 1,
+              "senescence": 0
+            },
+            "foodLost": 1.8749447153851504,
+            "woodLost": 35.539563409770004,
+            "stoneLost": 105
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 2,
+          "totals": {
+            "foodHarvested": 26.113732893094912,
+            "woodGathered": 333.0746600235771,
+            "stoneGathered": 541,
+            "hunts": 4,
+            "waterConsumed": 56.41203196208497,
+            "cooperation": 243,
+            "teaching": 208,
+            "trade": 10,
+            "conflicts": 0,
+            "births": 15,
+            "cultivations": 34,
+            "constructionHelp": 23
+          },
+          "diversity": {
+            "conducta": 0.20306246379572526,
+            "oficios": 0.09382508402283747,
+            "total": 0.14844377390928137
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 19200,
+              "hastaTickInclusivo": 21600
+            },
+            "vecinosMortales": 11,
+            "fundadoresMortalesVivos": 4,
+            "generacionesMortalesVivas": [
+              0,
+              1,
+              2
+            ],
+            "recetasDistintasEnUso": 44,
+            "recetasDistintasFabricadas": 18,
+            "usosUtiles": 107,
+            "beneficioUso": 6.382481955579488,
+            "usosDeInventorAjeno": 24,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.22429906542056074,
+            "usosConEnsenanzaRecordada": 20,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 208,
+              "trade": 10,
+              "constructionHelp": 23
+            },
+            "otrasCooperacionesAcumuladas": 2,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 18.59842799999751,
+          "p95StepMs": 144.85003100003814,
+          "maxStepMs": 623.5025959999766,
+          "p95SaveMs": 458.2586339999689,
+          "rss": 408018944,
+          "runtime": null
+        },
+        {
+          "day": 10,
+          "tick": 24000,
+          "population": 9,
+          "births": 15,
+          "deaths": {
+            "deaths": 22,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 19,
+              "exposure": 1,
+              "senescence": 2
+            },
+            "foodLost": 2.4199597318093082,
+            "woodLost": 38.32325588496032,
+            "stoneLost": 135
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 2,
+          "totals": {
+            "foodHarvested": 27.828732893094397,
+            "woodGathered": 335.0936270467315,
+            "stoneGathered": 573,
+            "hunts": 4,
+            "waterConsumed": 59.565542339972325,
+            "cooperation": 253,
+            "teaching": 215,
+            "trade": 10,
+            "conflicts": 0,
+            "births": 15,
+            "cultivations": 34,
+            "constructionHelp": 26
+          },
+          "diversity": {
+            "conducta": 0.12192847285825642,
+            "oficios": 0,
+            "total": 0.06096423642912821
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 21600,
+              "hastaTickInclusivo": 24000
+            },
+            "vecinosMortales": 7,
+            "fundadoresMortalesVivos": 2,
+            "generacionesMortalesVivas": [
+              0,
+              1,
+              2
+            ],
+            "recetasDistintasEnUso": 28,
+            "recetasDistintasFabricadas": 12,
+            "usosUtiles": 69,
+            "beneficioUso": 3.2556485947303533,
+            "usosDeInventorAjeno": 7,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.10144927536231885,
+            "usosConEnsenanzaRecordada": 4,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 215,
+              "trade": 10,
+              "constructionHelp": 26
+            },
+            "otrasCooperacionesAcumuladas": 2,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 12.185568000015337,
+          "p95StepMs": 79.68440399999963,
+          "maxStepMs": 368.4227480000118,
+          "p95SaveMs": 246.15926200000104,
+          "rss": 379928576,
+          "runtime": null
+        }
+      ]
+    },
+    {
+      "run": "candidate-world-7",
+      "metadata": {
+        "sha": "9665754c15e9c9c40b025a69ccf990896bc3849c",
+        "source": "a6ff1fece77efb0aa6bf00faf95897113ec2e3d58c239f2d5967024c58a1fa59",
+        "seed": 7,
+        "days": 10,
+        "engine": "world",
+        "params": {
+          "cuerpo": {
+            "longevidadBaseDias": 11,
+            "longevidadPorResiliencia": 4,
+            "longevidadPorActividad": 1,
+            "senescenciaInicioFraccion": 0.75,
+            "riesgoSenescenciaDiario": 0.04,
+            "riesgoSenescenciaPendiente": 10,
+            "cuidadoReduceRiesgo": 0.6
+          },
+          "genes": {
+            "varianzaFundadores": 0.15,
+            "tasaMutacion": 1
+          },
+          "poblacion": {
+            "maxima": 1000000,
+            "intervaloComprobacionTicks": 120,
+            "nacimientosPorComprobacion": 2
+          },
+          "recursos": {
+            "capacidadBosque": 1,
+            "capacidadPastizal": 0.7,
+            "capacidadOtros": 0.35,
+            "velocidadRegeneracion": 1,
+            "decaimientoFertilidad": 0.001,
+            "decaimientoComida": 0.0001
+          },
+          "persistencia": {
+            "cadaTicks": 20,
+            "ventanaEventosTicks": 0
+          },
+          "agua": {
+            "cuencas": 0.4
+          },
+          "gobernador": {
+            "presupuestoMs": 50
+          }
+        },
+        "scope": "stepWorld and production Store; governor not executed",
+        "thresholds": {
+          "mortalExtinction": 0,
+          "failedSteps": 0,
+          "serverStepP95Ms": 50
+        },
+        "complete": true,
+        "finalTick": 24000
+      },
+      "days": [
+        {
+          "day": 1,
+          "tick": 2400,
+          "population": 18,
+          "births": 2,
+          "deaths": {
+            "deaths": 0,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 0,
+              "exposure": 0,
+              "senescence": 0
+            },
+            "foodLost": 0,
+            "woodLost": 0,
+            "stoneLost": 0
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 10,
+          "totals": {
+            "foodHarvested": 2.560499999999986,
+            "woodGathered": 256.30605465157373,
+            "stoneGathered": 158,
+            "hunts": 1,
+            "waterConsumed": 5.468384822290205,
+            "cooperation": 43,
+            "teaching": 23,
+            "trade": 2,
+            "conflicts": 0,
+            "births": 2,
+            "cultivations": 0,
+            "constructionHelp": 18
+          },
+          "diversity": {
+            "conducta": 0.36551437020913985,
+            "oficios": 0.23981246656813146,
+            "total": 0.30266341838863564
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 0,
+              "hastaTickInclusivo": 2400
+            },
+            "vecinosMortales": 16,
+            "fundadoresMortalesVivos": 14,
+            "generacionesMortalesVivas": [
+              0,
+              1
+            ],
+            "recetasDistintasEnUso": 15,
+            "recetasDistintasFabricadas": 7,
+            "usosUtiles": 56,
+            "beneficioUso": 9.185779382464883,
+            "usosDeInventorAjeno": 15,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.26785714285714285,
+            "usosConEnsenanzaRecordada": 15,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 23,
+              "trade": 2,
+              "constructionHelp": 18
+            },
+            "otrasCooperacionesAcumuladas": 0,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 5.096350000000257,
+          "p95StepMs": 30.467931000000135,
+          "maxStepMs": 152.75061899999855,
+          "p95SaveMs": 109.07403300000078,
+          "rss": 323563520,
+          "runtime": null
+        },
+        {
+          "day": 2,
+          "tick": 4800,
+          "population": 19,
+          "births": 3,
+          "deaths": {
+            "deaths": 0,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 0,
+              "exposure": 0,
+              "senescence": 0
+            },
+            "foodLost": 0,
+            "woodLost": 0,
+            "stoneLost": 0
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 9,
+          "totals": {
+            "foodHarvested": 6.002999999999835,
+            "woodGathered": 323.4246617073836,
+            "stoneGathered": 200,
+            "hunts": 1,
+            "waterConsumed": 12.495546604484453,
+            "cooperation": 78,
+            "teaching": 44,
+            "trade": 14,
+            "conflicts": 0,
+            "births": 3,
+            "cultivations": 0,
+            "constructionHelp": 20
+          },
+          "diversity": {
+            "conducta": 0.41770470586070424,
+            "oficios": 0.3876205364643476,
+            "total": 0.40266262116252594
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 2400,
+              "hastaTickInclusivo": 4800
+            },
+            "vecinosMortales": 17,
+            "fundadoresMortalesVivos": 14,
+            "generacionesMortalesVivas": [
+              0,
+              1
+            ],
+            "recetasDistintasEnUso": 54,
+            "recetasDistintasFabricadas": 19,
+            "usosUtiles": 158,
+            "beneficioUso": 17.32808495627893,
+            "usosDeInventorAjeno": 45,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.2848101265822785,
+            "usosConEnsenanzaRecordada": 39,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 44,
+              "trade": 14,
+              "constructionHelp": 20
+            },
+            "otrasCooperacionesAcumuladas": 0,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 7.0131449999971665,
+          "p95StepMs": 60.93921699999919,
+          "maxStepMs": 226.22855700000218,
+          "p95SaveMs": 125.3234350000057,
+          "rss": 338870272,
+          "runtime": null
+        },
+        {
+          "day": 3,
+          "tick": 7200,
+          "population": 19,
+          "births": 3,
+          "deaths": {
+            "deaths": 0,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 0,
+              "exposure": 0,
+              "senescence": 0
+            },
+            "foodLost": 0,
+            "woodLost": 0,
+            "stoneLost": 0
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 13,
+          "totals": {
+            "foodHarvested": 9.009499999999951,
+            "woodGathered": 348.30149326998173,
+            "stoneGathered": 219,
+            "hunts": 1,
+            "waterConsumed": 18.989927861165718,
+            "cooperation": 109,
+            "teaching": 56,
+            "trade": 21,
+            "conflicts": 0,
+            "births": 3,
+            "cultivations": 0,
+            "constructionHelp": 32
+          },
+          "diversity": {
+            "conducta": 0.3949915470297931,
+            "oficios": 0.42271796248980087,
+            "total": 0.408854754759797
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 4800,
+              "hastaTickInclusivo": 7200
+            },
+            "vecinosMortales": 17,
+            "fundadoresMortalesVivos": 14,
+            "generacionesMortalesVivas": [
+              0,
+              1
+            ],
+            "recetasDistintasEnUso": 52,
+            "recetasDistintasFabricadas": 12,
+            "usosUtiles": 171,
+            "beneficioUso": 21.237680634382297,
+            "usosDeInventorAjeno": 45,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.2631578947368421,
+            "usosConEnsenanzaRecordada": 40,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 56,
+              "trade": 21,
+              "constructionHelp": 32
+            },
+            "otrasCooperacionesAcumuladas": 0,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 9.152451000001747,
+          "p95StepMs": 96.03348900000128,
+          "maxStepMs": 346.0654530000029,
+          "p95SaveMs": 245.3432599999942,
+          "rss": 353271808,
+          "runtime": null
+        },
+        {
+          "day": 4,
+          "tick": 9600,
+          "population": 21,
+          "births": 5,
+          "deaths": {
+            "deaths": 0,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 0,
+              "exposure": 0,
+              "senescence": 0
+            },
+            "foodLost": 0,
+            "woodLost": 0,
+            "stoneLost": 0
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 12,
+          "totals": {
+            "foodHarvested": 12.90395941756514,
+            "woodGathered": 371.72737363333067,
+            "stoneGathered": 230,
+            "hunts": 1,
+            "waterConsumed": 26.837493670076984,
+            "cooperation": 144,
+            "teaching": 87,
+            "trade": 24,
+            "conflicts": 0,
+            "births": 5,
+            "cultivations": 0,
+            "constructionHelp": 33
+          },
+          "diversity": {
+            "conducta": 0.389337355821054,
+            "oficios": 0.42227025251081046,
+            "total": 0.4058038041659322
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 7200,
+              "hastaTickInclusivo": 9600
+            },
+            "vecinosMortales": 19,
+            "fundadoresMortalesVivos": 14,
+            "generacionesMortalesVivas": [
+              0,
+              1,
+              2
+            ],
+            "recetasDistintasEnUso": 75,
+            "recetasDistintasFabricadas": 26,
+            "usosUtiles": 216,
+            "beneficioUso": 25.515237755877923,
+            "usosDeInventorAjeno": 58,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.26851851851851855,
+            "usosConEnsenanzaRecordada": 50,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 87,
+              "trade": 24,
+              "constructionHelp": 33
+            },
+            "otrasCooperacionesAcumuladas": 0,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 12.505547000007937,
+          "p95StepMs": 163.10207799999625,
+          "maxStepMs": 522.866628000018,
+          "p95SaveMs": 370.5984139999928,
+          "rss": 344272896,
+          "runtime": null
+        },
+        {
+          "day": 5,
+          "tick": 12000,
+          "population": 23,
+          "births": 7,
+          "deaths": {
+            "deaths": 0,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 0,
+              "exposure": 0,
+              "senescence": 0
+            },
+            "foodLost": 0,
+            "woodLost": 0,
+            "stoneLost": 0
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 13,
+          "totals": {
+            "foodHarvested": 16.82595941756549,
+            "woodGathered": 448.65875719463185,
+            "stoneGathered": 267,
+            "hunts": 1,
+            "waterConsumed": 34.04309256359264,
+            "cooperation": 189,
+            "teaching": 120,
+            "trade": 26,
+            "conflicts": 0,
+            "births": 7,
+            "cultivations": 1,
+            "constructionHelp": 43
+          },
+          "diversity": {
+            "conducta": 0.39578046870250266,
+            "oficios": 0.41605335397901655,
+            "total": 0.4059169113407596
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 9600,
+              "hastaTickInclusivo": 12000
+            },
+            "vecinosMortales": 21,
+            "fundadoresMortalesVivos": 14,
+            "generacionesMortalesVivas": [
+              0,
+              1,
+              2
+            ],
+            "recetasDistintasEnUso": 80,
+            "recetasDistintasFabricadas": 14,
+            "usosUtiles": 235,
+            "beneficioUso": 31.672944195113732,
+            "usosDeInventorAjeno": 42,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.17872340425531916,
+            "usosConEnsenanzaRecordada": 38,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 120,
+              "trade": 26,
+              "constructionHelp": 43
+            },
+            "otrasCooperacionesAcumuladas": 0,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 15.985730999993393,
+          "p95StepMs": 217.6711110000033,
+          "maxStepMs": 587.762487,
+          "p95SaveMs": 481.4335730000166,
+          "rss": 399429632,
+          "runtime": null
+        },
+        {
+          "day": 6,
+          "tick": 14400,
+          "population": 24,
+          "births": 8,
+          "deaths": {
+            "deaths": 0,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 0,
+              "exposure": 0,
+              "senescence": 0
+            },
+            "foodLost": 0,
+            "woodLost": 0,
+            "stoneLost": 0
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 15,
+          "totals": {
+            "foodHarvested": 20.876356535583586,
+            "woodGathered": 521.8594818642182,
+            "stoneGathered": 325,
+            "hunts": 1,
+            "waterConsumed": 42.833372742632726,
+            "cooperation": 244,
+            "teaching": 158,
+            "trade": 36,
+            "conflicts": 0,
+            "births": 8,
+            "cultivations": 3,
+            "constructionHelp": 50
+          },
+          "diversity": {
+            "conducta": 0.3970983487255553,
+            "oficios": 0.37280890394913396,
+            "total": 0.38495362633734465
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 12000,
+              "hastaTickInclusivo": 14400
+            },
+            "vecinosMortales": 22,
+            "fundadoresMortalesVivos": 14,
+            "generacionesMortalesVivas": [
+              0,
+              1,
+              2
+            ],
+            "recetasDistintasEnUso": 88,
+            "recetasDistintasFabricadas": 16,
+            "usosUtiles": 247,
+            "beneficioUso": 34.29517652152501,
+            "usosDeInventorAjeno": 66,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.26720647773279355,
+            "usosConEnsenanzaRecordada": 53,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 158,
+              "trade": 36,
+              "constructionHelp": 50
+            },
+            "otrasCooperacionesAcumuladas": 0,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 21.767224000010174,
+          "p95StepMs": 265.13669300000765,
+          "maxStepMs": 993.7307339999825,
+          "p95SaveMs": 621.5428959999699,
+          "rss": 392855552,
+          "runtime": null
+        },
+        {
+          "day": 7,
+          "tick": 16800,
+          "population": 26,
+          "births": 10,
+          "deaths": {
+            "deaths": 0,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 0,
+              "exposure": 0,
+              "senescence": 0
+            },
+            "foodLost": 0,
+            "woodLost": 0,
+            "stoneLost": 0
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 10,
+          "totals": {
+            "foodHarvested": 25.808852850015644,
+            "woodGathered": 585.1504307766501,
+            "stoneGathered": 358,
+            "hunts": 2,
+            "waterConsumed": 51.22855475345976,
+            "cooperation": 321,
+            "teaching": 207,
+            "trade": 42,
+            "conflicts": 0,
+            "births": 10,
+            "cultivations": 11,
+            "constructionHelp": 72
+          },
+          "diversity": {
+            "conducta": 0.4125339149406143,
+            "oficios": 0.4321530060646854,
+            "total": 0.4223434605026498
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 14400,
+              "hastaTickInclusivo": 16800
+            },
+            "vecinosMortales": 24,
+            "fundadoresMortalesVivos": 14,
+            "generacionesMortalesVivas": [
+              0,
+              1,
+              2,
+              3
+            ],
+            "recetasDistintasEnUso": 70,
+            "recetasDistintasFabricadas": 13,
+            "usosUtiles": 190,
+            "beneficioUso": 31.47454899330093,
+            "usosDeInventorAjeno": 52,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.2736842105263158,
+            "usosConEnsenanzaRecordada": 28,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 207,
+              "trade": 42,
+              "constructionHelp": 72
+            },
+            "otrasCooperacionesAcumuladas": 0,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 19.42237500002375,
+          "p95StepMs": 241.97357199998805,
+          "maxStepMs": 850.3755090000341,
+          "p95SaveMs": 590.4528549999814,
+          "rss": 431661056,
+          "runtime": null
+        },
+        {
+          "day": 8,
+          "tick": 19200,
+          "population": 30,
+          "births": 14,
+          "deaths": {
+            "deaths": 0,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 0,
+              "exposure": 0,
+              "senescence": 0
+            },
+            "foodLost": 0,
+            "woodLost": 0,
+            "stoneLost": 0
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 7,
+          "totals": {
+            "foodHarvested": 31.036839316237955,
+            "woodGathered": 764.0522429909213,
+            "stoneGathered": 493,
+            "hunts": 3,
+            "waterConsumed": 62.13831411534299,
+            "cooperation": 405,
+            "teaching": 258,
+            "trade": 49,
+            "conflicts": 0,
+            "births": 14,
+            "cultivations": 17,
+            "constructionHelp": 98
+          },
+          "diversity": {
+            "conducta": 0.4186975205245685,
+            "oficios": 0.45507442678808796,
+            "total": 0.4368859736563282
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 16800,
+              "hastaTickInclusivo": 19200
+            },
+            "vecinosMortales": 28,
+            "fundadoresMortalesVivos": 14,
+            "generacionesMortalesVivas": [
+              0,
+              1,
+              2,
+              3
+            ],
+            "recetasDistintasEnUso": 82,
+            "recetasDistintasFabricadas": 21,
+            "usosUtiles": 275,
+            "beneficioUso": 66.33012015752804,
+            "usosDeInventorAjeno": 86,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.31272727272727274,
+            "usosConEnsenanzaRecordada": 68,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 258,
+              "trade": 49,
+              "constructionHelp": 98
+            },
+            "otrasCooperacionesAcumuladas": 0,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 14.687524000008125,
+          "p95StepMs": 236.8550159999868,
+          "maxStepMs": 559.7306450000033,
+          "p95SaveMs": 476.9356690000277,
+          "rss": 396668928,
+          "runtime": null
+        },
+        {
+          "day": 9,
+          "tick": 21600,
+          "population": 30,
+          "births": 14,
+          "deaths": {
+            "deaths": 0,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 0,
+              "exposure": 0,
+              "senescence": 0
+            },
+            "foodLost": 0,
+            "woodLost": 0,
+            "stoneLost": 0
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 10,
+          "totals": {
+            "foodHarvested": 37.177828084384785,
+            "woodGathered": 822.2086159288851,
+            "stoneGathered": 520,
+            "hunts": 3,
+            "waterConsumed": 73.19612396868028,
+            "cooperation": 450,
+            "teaching": 294,
+            "trade": 51,
+            "conflicts": 0,
+            "births": 14,
+            "cultivations": 22,
+            "constructionHelp": 105
+          },
+          "diversity": {
+            "conducta": 0.3922060610346199,
+            "oficios": 0.4596524365062776,
+            "total": 0.42592924877044874
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 19200,
+              "hastaTickInclusivo": 21600
+            },
+            "vecinosMortales": 28,
+            "fundadoresMortalesVivos": 14,
+            "generacionesMortalesVivas": [
+              0,
+              1,
+              2,
+              3
+            ],
+            "recetasDistintasEnUso": 107,
+            "recetasDistintasFabricadas": 16,
+            "usosUtiles": 284,
+            "beneficioUso": 41.379562181182685,
+            "usosDeInventorAjeno": 69,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.24295774647887325,
+            "usosConEnsenanzaRecordada": 64,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 294,
+              "trade": 51,
+              "constructionHelp": 105
+            },
+            "otrasCooperacionesAcumuladas": 0,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 18.405109000043012,
+          "p95StepMs": 270.0433850000263,
+          "maxStepMs": 688.9615550000453,
+          "p95SaveMs": 554.6039190000156,
+          "rss": 424206336,
+          "runtime": null
+        },
+        {
+          "day": 10,
+          "tick": 24000,
+          "population": 30,
+          "births": 14,
+          "deaths": {
+            "deaths": 0,
+            "causes": {
+              "starvation": 0,
+              "dehydration": 0,
+              "exposure": 0,
+              "senescence": 0
+            },
+            "foodLost": 0,
+            "woodLost": 0,
+            "stoneLost": 0
+          },
+          "reproductionPausedTicks": 0,
+          "neighborsReady": 12,
+          "totals": {
+            "foodHarvested": 43.37368054164695,
+            "woodGathered": 876.1072887819472,
+            "stoneGathered": 540,
+            "hunts": 4,
+            "waterConsumed": 83.95673426769203,
+            "cooperation": 506,
+            "teaching": 334,
+            "trade": 59,
+            "conflicts": 0,
+            "births": 14,
+            "cultivations": 26,
+            "constructionHelp": 112
+          },
+          "diversity": {
+            "conducta": 0.3827406713312295,
+            "oficios": 0.4699072002522249,
+            "total": 0.4263239357917272
+          },
+          "activity": {
+            "ventanaActividad": {
+              "desdeTickExclusivo": 21600,
+              "hastaTickInclusivo": 24000
+            },
+            "vecinosMortales": 28,
+            "fundadoresMortalesVivos": 14,
+            "generacionesMortalesVivas": [
+              0,
+              1,
+              2,
+              3
+            ],
+            "recetasDistintasEnUso": 138,
+            "recetasDistintasFabricadas": 23,
+            "usosUtiles": 392,
+            "beneficioUso": 55.40866529311087,
+            "usosDeInventorAjeno": 66,
+            "usosSinAutorResuelto": 0,
+            "fraccionUsoAjeno": 0.1683673469387755,
+            "usosConEnsenanzaRecordada": 47,
+            "cooperacionAcumuladaPorTipo": {
+              "teaching": 334,
+              "trade": 59,
+              "constructionHelp": 112
+            },
+            "otrasCooperacionesAcumuladas": 1,
+            "conflictosAcumulados": 0
+          },
+          "p50StepMs": 23.743297000066377,
+          "p95StepMs": 315.1433759999927,
+          "maxStepMs": 1050.8833469999954,
+          "p95SaveMs": 641.7790280000772,
+          "rss": 435900416,
+          "runtime": null
+        }
+      ]
+    }
+  ]
+}

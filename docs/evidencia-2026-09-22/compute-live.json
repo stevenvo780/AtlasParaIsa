@@ -1,0 +1,5526 @@
+{
+  "version": 3,
+  "startedAt": "2026-09-22T08:24:24.552Z",
+  "source": "9665754c15e9c9c40b025a69ccf990896bc3849c",
+  "contract": {
+    "version": 3,
+    "fields": [
+      "growth",
+      "fertility",
+      "life",
+      "moisture",
+      "drinkingWater",
+      "cultivation",
+      "traffic",
+      "vegetation",
+      "wood",
+      "feature",
+      "aquatic",
+      "ocean",
+      "mountain",
+      "wetland",
+      "woodPresent",
+      "x",
+      "y"
+    ],
+    "options": {
+      "decaimientoFertilidad": 0,
+      "seed": 0,
+      "cuencas": 1
+    },
+    "terms": {
+      "life": "old 8-neighbor life >= 0.45; fertile at 3 neighbors or alive with 2; light/moisture/fertility growth minus drought and traffic",
+      "fertility": "clamp(fertility + life*0.0012 - traffic*0.0007 - cultivation*0.0002 - decaimientoFertilidad*fertility)",
+      "growth": "light*moisture*fertility*(0.25+life*0.75)*(1-growth)*(1-traffic*0.9)*0.005; losses 0.0002, traffic*0.002, drought 0.001",
+      "water": "rain and spring recharge require reservoir AND (aquatic OR ruidoCuenca(seed,x,y)<cuencas); ocean forced to zero",
+      "basin": "32-bit imul hash; salt1400; scale24; floor negative coordinates; quintic fade and bilinear lerp in original order",
+      "wood": "100-tick regrowth debits updated growth; uses old fertility/moisture/growth; stump transitions preserved",
+      "cadence": "no updates except tick%10==0; read old neighbor life; Float64 with FMA disabled"
+    }
+  },
+  "kernelOptions": {
+    "seed": 51926,
+    "cuencas": 0.4,
+    "decaimientoFertilidad": 0.001
+  },
+  "coreHashes": {
+    "src/world/ecosystem-kernel.ts": "b1cb946781e204fd9db31520c61699f4f91cf431d1b735351984f6e2e3bf9b78",
+    "src/world/ecosystem.ts": "24444f458e70e6c41bb0e9fc5f88290ee50fbe1edbd3b44109805ce89baeee10",
+    "src/world/terrain.ts": "538280dba7df8ee07b6b8ada9d2e8ddd007b82bc8d1bae3196927709d3f14c97",
+    "src/world/agua.ts": "3f3be7cac9fffe40a31bd7d38b223b1d9398dd1d310d2170825b3b40bb031e0e",
+    "src/world/params.ts": "b10662cab2a7a8efd1b3f38d7f79c4edf63c175c88c08ba8366b13539a5dd51b"
+  },
+  "benchmarkHashes": {
+    "scripts/compute-ecology-core.mjs": "f271d4e8d7590708ba42cef102b35a072278fa4e4a243163ab9c63db126011ef",
+    "scripts/compute-ecology-worker.mjs": "5ba9726a3ad941d947ce88ac906e2995e0d53c270610cc78b18dae99fb6df445",
+    "scripts/compute-ecology-clients.mjs": "e8b1deee3db738bbc61ba4a36a03bc1b88c1feb4f330aa0bad76149f3e84b6ec",
+    "scripts/compute-ecology-benchmark.mjs": "979e69ff703e15c3bb8ea97a9a47e8b3ba26f51d7d1f09a4886b9f4c492af797",
+    "scripts/compute-ecology-gpu.py": "475f2fb0b46390e6641b1dbec3e3daad17bbc4f75f40f15c4437fd48b1bf6784",
+    "scripts/compute-ecology.cu": "7c68c91437442b8456e40b25fd8ea50461042893485dbe0caac637c3ffe0a080"
+  },
+  "hardwareBefore": {
+    "at": "2026-09-22T08:24:24.578Z",
+    "cpuModel": "AMD Ryzen 9 9950X3D 16-Core Processor",
+    "logicalCPUs": 32,
+    "parallelism": 32,
+    "cpuMax": {
+      "available": false,
+      "error": "ENOENT"
+    },
+    "memoryMax": {
+      "available": false,
+      "error": "ENOENT"
+    },
+    "memoryCurrent": {
+      "available": false,
+      "error": "ENOENT"
+    },
+    "hostLoadAverage": [
+      6.16,
+      5.28,
+      4.2
+    ],
+    "gpu": [
+      "0, NVIDIA GeForce RTX 5070 Ti, 16303, 14604, 10, 610.43.03",
+      "1, NVIDIA GeForce RTX 2060, 6144, 5637, 11, 610.43.03"
+    ]
+  },
+  "sizes": [
+    65536,
+    1000000,
+    4000000
+  ],
+  "repetitions": 8,
+  "precision": "Float64; NVRTC --fmad=false; no fast-math",
+  "scope": "Live EcosystemKernel only, with current default basin and fertility-decay options. Does not include stepWorld, raw resource updater, fauna, cloneWorld beyond tiles, JSON, projection or SQLite. Shared host; no exclusive hardware allocation.",
+  "coldDefinition": "First invocation after process/context and topology setup; startup, NVRTC compilation and topology allocation/upload are separately charged. Driver disk JIT cache is not disabled. Warm summaries exclude the first invocation but do not hide later JIT/GC outliers.",
+  "gpuTransport": "Persistent Python ctypes worker over binary stdio; pageable HtoD and DtoH, synchronized kernel, CUDA event interval, output assembly and Node IPC measured. Dual mode partitions outputs 50/50 and duplicates complete old input uploads, including halo life; no transfers omitted.",
+  "sources": [
+    "https://docs.nvidia.com/cuda/nvrtc/index.html",
+    "https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__EXEC.html",
+    "https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__EVENT.html"
+  ],
+  "cases": [
+    {
+      "cells": 65536,
+      "generationMs": 50.543601999999964,
+      "topologyBuildMs": 40.23183300000005,
+      "topologyBytes": 3145728,
+      "stateBytes": 8912896,
+      "workerStartup": [
+        {
+          "workers": 4,
+          "startupMs": 82.02775999999994
+        },
+        {
+          "workers": 8,
+          "startupMs": 93.10353500000008
+        }
+      ],
+      "gpuSetup": [
+        {
+          "name": "gpu-0",
+          "setupMs": 0.5118839999340707,
+          "devices": [
+            {
+              "index": 0,
+              "allocationAndTopologyUploadMs": 0.46462399996016757,
+              "residentBytes": 19922944
+            }
+          ],
+          "bytes": 0,
+          "nodeSetupMs": 1.718793999999889
+        },
+        {
+          "name": "gpu-1",
+          "setupMs": 0.6690459999845189,
+          "devices": [
+            {
+              "index": 1,
+              "allocationAndTopologyUploadMs": 0.6305160000010801,
+              "residentBytes": 19922944
+            }
+          ],
+          "bytes": 0,
+          "nodeSetupMs": 1.8470059999999648
+        },
+        {
+          "name": "gpu-0,1",
+          "setupMs": 0.9578189999501774,
+          "devices": [
+            {
+              "index": 0,
+              "allocationAndTopologyUploadMs": 0.5508240001290687,
+              "residentBytes": 15466496
+            },
+            {
+              "index": 1,
+              "allocationAndTopologyUploadMs": 0.34408300007271464,
+              "residentBytes": 15466496
+            }
+          ],
+          "bytes": 0,
+          "nodeSetupMs": 2.286879999999883
+        }
+      ],
+      "trials": [
+        {
+          "trial": 0,
+          "tick": 100,
+          "rain": true,
+          "light": 1,
+          "mode": "node-reference",
+          "cold": true,
+          "totalMs": 65.45084899999983,
+          "cloneMs": 12.050322999999935,
+          "computeMs": 53.4005259999999,
+          "different": 0,
+          "maximumAbsoluteError": 0
+        },
+        {
+          "trial": 0,
+          "tick": 100,
+          "rain": true,
+          "light": 1,
+          "mode": "cpu-soa",
+          "cold": true,
+          "totalMs": 171.59164599999986,
+          "cloneMs": 116.30735400000003,
+          "coordinateCheckMs": 1.3098009999998794,
+          "packMs": 4.20289600000001,
+          "computeAndTransferMs": 4.7727910000000975,
+          "unpackMs": 44.998803999999836,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "computeMs": 4.765540999999985
+          }
+        },
+        {
+          "trial": 0,
+          "tick": 100,
+          "rain": true,
+          "light": 1,
+          "mode": "cpu-workers-4",
+          "cold": true,
+          "totalMs": 189.89315199999987,
+          "cloneMs": 161.95599399999992,
+          "coordinateCheckMs": 1.3850119999999606,
+          "packMs": 6.619416000000001,
+          "computeAndTransferMs": 16.342370000000074,
+          "unpackMs": 3.5903599999999187,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "dispatchAndComputeMs": 16.15609799999993,
+            "workerComputeMs": [
+              14.66546500000004,
+              15.314390999999887,
+              12.783578999999918,
+              14.664974999999913
+            ]
+          }
+        },
+        {
+          "trial": 0,
+          "tick": 100,
+          "rain": true,
+          "light": 1,
+          "mode": "cpu-workers-8",
+          "cold": true,
+          "totalMs": 35.150390000000016,
+          "cloneMs": 12.060623000000078,
+          "coordinateCheckMs": 0.6005949999998847,
+          "packMs": 4.187294999999949,
+          "computeAndTransferMs": 15.410982000000104,
+          "unpackMs": 2.8908950000000004,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "dispatchAndComputeMs": 15.389681999999993,
+            "workerComputeMs": [
+              14.854807000000164,
+              10.167067000000088,
+              14.743035999999847,
+              7.874037000000044,
+              14.255840999999918,
+              14.832625999999891,
+              9.768583999999919,
+              10.542400000000043
+            ]
+          }
+        },
+        {
+          "trial": 0,
+          "tick": 100,
+          "rain": true,
+          "light": 1,
+          "mode": "gpu-0",
+          "cold": true,
+          "totalMs": 40.74054799999999,
+          "cloneMs": 20.292232999999896,
+          "coordinateCheckMs": 0.48660399999994297,
+          "packMs": 4.65300000000002,
+          "computeAndTransferMs": 13.16606200000001,
+          "unpackMs": 2.1426490000001195,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 5.012263000025996,
+            "assemblyMs": 2.0511079999323556,
+            "devices": [
+              {
+                "index": 0,
+                "uploadMs": 1.0169279998990532,
+                "eventKernelMs": 0.1393599957227707,
+                "launchAndKernelSyncMs": 0.24086200005513092,
+                "downloadMs": 1.319232000014381,
+                "driverRoundTripMs": 2.577021999968565,
+                "uploadedBytes": 8912896,
+                "downloadedBytes": 8912896
+              }
+            ],
+            "bytes": 8912896,
+            "nodeIPCRoundTripMs": 13.023380999999972
+          }
+        },
+        {
+          "trial": 0,
+          "tick": 100,
+          "rain": true,
+          "light": 1,
+          "mode": "gpu-1",
+          "cold": true,
+          "totalMs": 41.344153000000006,
+          "cloneMs": 21.386381999999912,
+          "coordinateCheckMs": 0.6221559999999045,
+          "packMs": 3.4993000000001757,
+          "computeAndTransferMs": 13.292282999999998,
+          "unpackMs": 2.5440320000000156,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 7.334931999821492,
+            "assemblyMs": 1.010068000141473,
+            "devices": [
+              {
+                "index": 1,
+                "uploadMs": 2.4828809998780343,
+                "eventKernelMs": 0.26185598969459534,
+                "launchAndKernelSyncMs": 0.727636999954484,
+                "downloadMs": 2.7841230000831274,
+                "driverRoundTripMs": 5.994640999915646,
+                "uploadedBytes": 8912896,
+                "downloadedBytes": 8912896
+              }
+            ],
+            "bytes": 8912896,
+            "nodeIPCRoundTripMs": 13.281993000000057
+          }
+        },
+        {
+          "trial": 0,
+          "tick": 100,
+          "rain": true,
+          "light": 1,
+          "mode": "gpu-0,1",
+          "cold": true,
+          "totalMs": 32.85214999999994,
+          "cloneMs": 15.296440999999959,
+          "coordinateCheckMs": 0.39056299999992916,
+          "packMs": 3.1290070000000014,
+          "computeAndTransferMs": 12.063812999999982,
+          "unpackMs": 1.9723260000000664,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 6.028921000051923,
+            "assemblyMs": 1.0407190000023547,
+            "devices": [
+              {
+                "index": 0,
+                "uploadMs": 0.6703060000745609,
+                "eventKernelMs": 0.11846400052309036,
+                "launchAndKernelSyncMs": 0.2208609998888278,
+                "downloadMs": 1.0593090000838856,
+                "driverRoundTripMs": 1.9504760000472743,
+                "uploadedBytes": 8912896,
+                "downloadedBytes": 4456448
+              },
+              {
+                "index": 1,
+                "uploadMs": 2.425191000156701,
+                "eventKernelMs": 0.22006399929523468,
+                "launchAndKernelSyncMs": 0.7049259997984336,
+                "downloadMs": 1.3965220000500267,
+                "driverRoundTripMs": 4.5266390000051615,
+                "uploadedBytes": 8912896,
+                "downloadedBytes": 4456448
+              }
+            ],
+            "bytes": 8912896,
+            "nodeIPCRoundTripMs": 12.05125299999986
+          }
+        },
+        {
+          "trial": 1,
+          "tick": 200,
+          "rain": false,
+          "light": 0,
+          "mode": "node-reference",
+          "cold": false,
+          "totalMs": 136.8799180000001,
+          "cloneMs": 119.39304900000002,
+          "computeMs": 17.48686900000007,
+          "different": 0,
+          "maximumAbsoluteError": 0
+        },
+        {
+          "trial": 1,
+          "tick": 200,
+          "rain": false,
+          "light": 0,
+          "mode": "cpu-workers-4",
+          "cold": false,
+          "totalMs": 22.52001199999995,
+          "cloneMs": 11.403197999999975,
+          "coordinateCheckMs": 0.4492729999999483,
+          "packMs": 3.3255890000000363,
+          "computeAndTransferMs": 5.432876000000078,
+          "unpackMs": 1.9090759999999136,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "dispatchAndComputeMs": 5.41590599999995,
+            "workerComputeMs": [
+              5.122263999999859,
+              1.5695240000000013,
+              1.5603630000000521,
+              1.7924250000000939
+            ]
+          }
+        },
+        {
+          "trial": 1,
+          "tick": 200,
+          "rain": false,
+          "light": 0,
+          "mode": "cpu-workers-8",
+          "cold": false,
+          "totalMs": 27.221272,
+          "cloneMs": 20.457513999999946,
+          "coordinateCheckMs": 0.4425340000000233,
+          "packMs": 2.6207319999998617,
+          "computeAndTransferMs": 1.8457160000000385,
+          "unpackMs": 1.854776000000129,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "dispatchAndComputeMs": 1.8318460000000414,
+            "workerComputeMs": [
+              1.4849930000000313,
+              1.2484709999998813,
+              1.0628090000000157,
+              1.062659000000167,
+              1.2770509999998012,
+              1.2137099999999919,
+              1.0796290000000681,
+              1.281741000000011
+            ]
+          }
+        },
+        {
+          "trial": 1,
+          "tick": 200,
+          "rain": false,
+          "light": 0,
+          "mode": "gpu-0",
+          "cold": false,
+          "totalMs": 26.641298000000006,
+          "cloneMs": 11.823041000000103,
+          "coordinateCheckMs": 0.5738949999999932,
+          "packMs": 2.799543999999969,
+          "computeAndTransferMs": 9.566342000000077,
+          "unpackMs": 1.8784759999998641,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 3.2379579999997077,
+            "assemblyMs": 1.3491720001184149,
+            "devices": [
+              {
+                "index": 0,
+                "uploadMs": 0.6620259998726397,
+                "eventKernelMs": 0.1324159950017929,
+                "launchAndKernelSyncMs": 0.19370100017113145,
+                "downloadMs": 0.8721479998712311,
+                "driverRoundTripMs": 1.7278749999150023,
+                "uploadedBytes": 8912896,
+                "downloadedBytes": 8912896
+              }
+            ],
+            "bytes": 8912896,
+            "nodeIPCRoundTripMs": 9.555661999999984
+          }
+        },
+        {
+          "trial": 1,
+          "tick": 200,
+          "rain": false,
+          "light": 0,
+          "mode": "gpu-1",
+          "cold": false,
+          "totalMs": 42.956727,
+          "cloneMs": 23.14856799999984,
+          "coordinateCheckMs": 0.4514240000000882,
+          "packMs": 3.0955159999998614,
+          "computeAndTransferMs": 14.109341000000086,
+          "unpackMs": 2.1518780000001243,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 6.860069000140356,
+            "assemblyMs": 0.8816980000574404,
+            "devices": [
+              {
+                "index": 1,
+                "uploadMs": 2.44991099998515,
+                "eventKernelMs": 0.14345599710941315,
+                "launchAndKernelSyncMs": 0.618165000105364,
+                "downloadMs": 2.769023999917408,
+                "driverRoundTripMs": 5.837100000007922,
+                "uploadedBytes": 8912896,
+                "downloadedBytes": 8912896
+              }
+            ],
+            "bytes": 8912896,
+            "nodeIPCRoundTripMs": 14.099290999999994
+          }
+        },
+        {
+          "trial": 1,
+          "tick": 200,
+          "rain": false,
+          "light": 0,
+          "mode": "gpu-0,1",
+          "cold": false,
+          "totalMs": 89.09319099999993,
+          "cloneMs": 60.661588000000165,
+          "coordinateCheckMs": 0.7308960000000297,
+          "packMs": 2.964475999999877,
+          "computeAndTransferMs": 22.696433999999954,
+          "unpackMs": 2.0397969999999077,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 10.659050999947794,
+            "assemblyMs": 1.073578999921665,
+            "devices": [
+              {
+                "index": 0,
+                "uploadMs": 2.7154829999744834,
+                "eventKernelMs": 0.13040000200271606,
+                "launchAndKernelSyncMs": 0.21745200001532794,
+                "downloadMs": 0.6369459999859828,
+                "driverRoundTripMs": 3.569880999975794,
+                "uploadedBytes": 8912896,
+                "downloadedBytes": 4456448
+              },
+              {
+                "index": 1,
+                "uploadMs": 5.011632999867288,
+                "eventKernelMs": 0.5531200170516968,
+                "launchAndKernelSyncMs": 1.4926520000244636,
+                "downloadMs": 2.724424000007275,
+                "driverRoundTripMs": 9.228708999899027,
+                "uploadedBytes": 8912896,
+                "downloadedBytes": 4456448
+              }
+            ],
+            "bytes": 8912896,
+            "nodeIPCRoundTripMs": 22.686333999999988
+          }
+        },
+        {
+          "trial": 1,
+          "tick": 200,
+          "rain": false,
+          "light": 0,
+          "mode": "cpu-soa",
+          "cold": false,
+          "totalMs": 21.57344400000011,
+          "cloneMs": 12.859640000000127,
+          "coordinateCheckMs": 0.7629759999999806,
+          "packMs": 3.2849879999998848,
+          "computeAndTransferMs": 3.5705910000001495,
+          "unpackMs": 1.095248999999967,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "computeMs": 3.5684009999999944
+          }
+        },
+        {
+          "trial": 2,
+          "tick": 300,
+          "rain": true,
+          "light": 0.4,
+          "mode": "node-reference",
+          "cold": false,
+          "totalMs": 21.97781699999996,
+          "cloneMs": 16.880393999999797,
+          "computeMs": 5.097423000000163,
+          "different": 0,
+          "maximumAbsoluteError": 0
+        },
+        {
+          "trial": 2,
+          "tick": 300,
+          "rain": true,
+          "light": 0.4,
+          "mode": "cpu-workers-8",
+          "cold": false,
+          "totalMs": 25.751239999999598,
+          "cloneMs": 9.865663999999924,
+          "coordinateCheckMs": 0.7663760000000366,
+          "packMs": 3.327119000000039,
+          "computeAndTransferMs": 9.636511999999584,
+          "unpackMs": 2.155569000000014,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "dispatchAndComputeMs": 9.61786200000006,
+            "workerComputeMs": [
+              4.925412000000051,
+              6.874068000000079,
+              5.019841999999699,
+              4.374607000000196,
+              6.142492999999831,
+              6.523424999999861,
+              4.517319000000043,
+              9.25905899999998
+            ]
+          }
+        },
+        {
+          "trial": 2,
+          "tick": 300,
+          "rain": true,
+          "light": 0.4,
+          "mode": "gpu-0",
+          "cold": false,
+          "totalMs": 66.50180799999998,
+          "cloneMs": 20.47592500000019,
+          "coordinateCheckMs": 2.6011020000000826,
+          "packMs": 13.17427299999963,
+          "computeAndTransferMs": 25.92123100000026,
+          "unpackMs": 4.32927699999982,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 8.604872999967483,
+            "assemblyMs": 3.733682000074623,
+            "devices": [
+              {
+                "index": 0,
+                "uploadMs": 1.9555769999897166,
+                "eventKernelMs": 0.16979199647903442,
+                "launchAndKernelSyncMs": 0.30292200017356663,
+                "downloadMs": 2.2933000000193715,
+                "driverRoundTripMs": 4.551799000182655,
+                "uploadedBytes": 8912896,
+                "downloadedBytes": 8912896
+              }
+            ],
+            "bytes": 8912896,
+            "nodeIPCRoundTripMs": 25.894570999999814
+          }
+        },
+        {
+          "trial": 2,
+          "tick": 300,
+          "rain": true,
+          "light": 0.4,
+          "mode": "gpu-1",
+          "cold": false,
+          "totalMs": 48.34539300000006,
+          "cloneMs": 14.363123000000087,
+          "coordinateCheckMs": 0.8515870000001087,
+          "packMs": 3.973773999999594,
+          "computeAndTransferMs": 27.087041000000227,
+          "unpackMs": 2.0698680000000422,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 19.452345999980025,
+            "assemblyMs": 1.1425289999351662,
+            "devices": [
+              {
+                "index": 1,
+                "uploadMs": 6.291504000046189,
+                "eventKernelMs": 2.258431911468506,
+                "launchAndKernelSyncMs": 4.152805000103399,
+                "downloadMs": 7.70905599983962,
+                "driverRoundTripMs": 18.153364999989208,
+                "uploadedBytes": 8912896,
+                "downloadedBytes": 8912896
+              }
+            ],
+            "bytes": 8912896,
+            "nodeIPCRoundTripMs": 27.072370999999748
+          }
+        },
+        {
+          "trial": 2,
+          "tick": 300,
+          "rain": true,
+          "light": 0.4,
+          "mode": "gpu-0,1",
+          "cold": false,
+          "totalMs": 42.49115299999994,
+          "cloneMs": 20.340364000000136,
+          "coordinateCheckMs": 0.38373300000012023,
+          "packMs": 2.5996619999996256,
+          "computeAndTransferMs": 17.17037700000037,
+          "unpackMs": 1.997016999999687,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 10.254607999968357,
+            "assemblyMs": 0.9592879998763237,
+            "devices": [
+              {
+                "index": 0,
+                "uploadMs": 0.9810379999635188,
+                "eventKernelMs": 0.106175996363163,
+                "launchAndKernelSyncMs": 0.1661419998981728,
+                "downloadMs": 0.4221530000450002,
+                "driverRoundTripMs": 1.5693329999066918,
+                "uploadedBytes": 8912896,
+                "downloadedBytes": 4456448
+              },
+              {
+                "index": 1,
+                "uploadMs": 4.799930999979551,
+                "eventKernelMs": 0.6579520106315613,
+                "launchAndKernelSyncMs": 1.6066540001702379,
+                "downloadMs": 2.7162429998952575,
+                "driverRoundTripMs": 9.122828000045047,
+                "uploadedBytes": 8912896,
+                "downloadedBytes": 4456448
+              }
+            ],
+            "bytes": 8912896,
+            "nodeIPCRoundTripMs": 17.15186700000004
+          }
+        },
+        {
+          "trial": 2,
+          "tick": 300,
+          "rain": true,
+          "light": 0.4,
+          "mode": "cpu-soa",
+          "cold": false,
+          "totalMs": 19.92507999999998,
+          "cloneMs": 10.260187999999744,
+          "coordinateCheckMs": 0.6623349999999846,
+          "packMs": 3.1206170000000384,
+          "computeAndTransferMs": 3.8865630000000237,
+          "unpackMs": 1.9953770000001896,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "computeMs": 3.882952999999816
+          }
+        },
+        {
+          "trial": 2,
+          "tick": 300,
+          "rain": true,
+          "light": 0.4,
+          "mode": "cpu-workers-4",
+          "cold": false,
+          "totalMs": 35.0300299999999,
+          "cloneMs": 17.96439399999963,
+          "coordinateCheckMs": 0.4850940000001174,
+          "packMs": 2.9097249999999804,
+          "computeAndTransferMs": 11.158844999999928,
+          "unpackMs": 2.5119720000002417,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "dispatchAndComputeMs": 11.144905000000108,
+            "workerComputeMs": [
+              9.60406200000034,
+              8.900955999999951,
+              10.885972999999922,
+              10.180917000000136
+            ]
+          }
+        },
+        {
+          "trial": 3,
+          "tick": 400,
+          "rain": false,
+          "light": 1,
+          "mode": "node-reference",
+          "cold": false,
+          "totalMs": 20.112771000000066,
+          "cloneMs": 15.552802000000156,
+          "computeMs": 4.55996899999991,
+          "different": 0,
+          "maximumAbsoluteError": 0
+        },
+        {
+          "trial": 3,
+          "tick": 400,
+          "rain": false,
+          "light": 1,
+          "mode": "gpu-0",
+          "cold": false,
+          "totalMs": 29.728384000000005,
+          "cloneMs": 13.765038000000004,
+          "coordinateCheckMs": 0.3885730000001786,
+          "packMs": 2.680442999999741,
+          "computeAndTransferMs": 10.655781000000388,
+          "unpackMs": 2.2385489999996935,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 2.769243000102506,
+            "assemblyMs": 0.7595160000164469,
+            "devices": [
+              {
+                "index": 0,
+                "uploadMs": 0.7952370001476083,
+                "eventKernelMs": 0.2473600059747696,
+                "launchAndKernelSyncMs": 0.2951330000087182,
+                "downloadMs": 0.77455599989662,
+                "driverRoundTripMs": 1.8649260000529466,
+                "uploadedBytes": 8912896,
+                "downloadedBytes": 8912896
+              }
+            ],
+            "bytes": 8912896,
+            "nodeIPCRoundTripMs": 10.623831000000337
+          }
+        },
+        {
+          "trial": 3,
+          "tick": 400,
+          "rain": false,
+          "light": 1,
+          "mode": "gpu-1",
+          "cold": false,
+          "totalMs": 105.77008299999989,
+          "cloneMs": 86.05917499999987,
+          "coordinateCheckMs": 0.6650859999999739,
+          "packMs": 4.720810000000256,
+          "computeAndTransferMs": 12.41984599999978,
+          "unpackMs": 1.9051660000000084,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 7.030161000102453,
+            "assemblyMs": 0.852167999937592,
+            "devices": [
+              {
+                "index": 1,
+                "uploadMs": 2.540092000117511,
+                "eventKernelMs": 0.15833599865436554,
+                "launchAndKernelSyncMs": 0.6085449999773118,
+                "downloadMs": 2.810343999954057,
+                "driverRoundTripMs": 5.95898100004888,
+                "uploadedBytes": 8912896,
+                "downloadedBytes": 8912896
+              }
+            ],
+            "bytes": 8912896,
+            "nodeIPCRoundTripMs": 12.40575600000011
+          }
+        },
+        {
+          "trial": 3,
+          "tick": 400,
+          "rain": false,
+          "light": 1,
+          "mode": "gpu-0,1",
+          "cold": false,
+          "totalMs": 29.628901999999925,
+          "cloneMs": 12.401276000000053,
+          "coordinateCheckMs": 0.7374060000001919,
+          "packMs": 3.829142000000047,
+          "computeAndTransferMs": 10.64875099999972,
+          "unpackMs": 2.012326999999914,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 5.334095000080197,
+            "assemblyMs": 0.7236960000227555,
+            "devices": [
+              {
+                "index": 0,
+                "uploadMs": 0.7586369999899034,
+                "eventKernelMs": 0.12188799679279327,
+                "launchAndKernelSyncMs": 0.22448100003202853,
+                "downloadMs": 0.5833650000113266,
+                "driverRoundTripMs": 1.5664830000332586,
+                "uploadedBytes": 8912896,
+                "downloadedBytes": 4456448
+              },
+              {
+                "index": 1,
+                "uploadMs": 2.4856410000211326,
+                "eventKernelMs": 0.11334399878978729,
+                "launchAndKernelSyncMs": 0.5824549998578732,
+                "downloadMs": 1.3978619999761577,
+                "driverRoundTripMs": 4.4659579998551635,
+                "uploadedBytes": 8912896,
+                "downloadedBytes": 4456448
+              }
+            ],
+            "bytes": 8912896,
+            "nodeIPCRoundTripMs": 10.634079999999813
+          }
+        },
+        {
+          "trial": 3,
+          "tick": 400,
+          "rain": false,
+          "light": 1,
+          "mode": "cpu-soa",
+          "cold": false,
+          "totalMs": 27.49327399999993,
+          "cloneMs": 18.70140900000024,
+          "coordinateCheckMs": 0.43710399999963556,
+          "packMs": 2.9828160000001844,
+          "computeAndTransferMs": 3.6755809999999656,
+          "unpackMs": 1.6963639999999032,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "computeMs": 3.6732010000000628
+          }
+        },
+        {
+          "trial": 3,
+          "tick": 400,
+          "rain": false,
+          "light": 1,
+          "mode": "cpu-workers-4",
+          "cold": false,
+          "totalMs": 17.155857000000196,
+          "cloneMs": 10.026436000000103,
+          "coordinateCheckMs": 0.5917650000001231,
+          "packMs": 2.9078049999998257,
+          "computeAndTransferMs": 1.77116500000011,
+          "unpackMs": 1.8586860000000343,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "dispatchAndComputeMs": 1.7568150000001879,
+            "workerComputeMs": [
+              1.4090830000000096,
+              1.4987129999999524,
+              1.269090999999662,
+              1.4809929999996712
+            ]
+          }
+        },
+        {
+          "trial": 3,
+          "tick": 400,
+          "rain": false,
+          "light": 1,
+          "mode": "cpu-workers-8",
+          "cold": false,
+          "totalMs": 29.550822000000153,
+          "cloneMs": 20.416204000000107,
+          "coordinateCheckMs": 0.8089869999998882,
+          "packMs": 4.092834999999923,
+          "computeAndTransferMs": 2.032187000000249,
+          "unpackMs": 2.200608999999986,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "dispatchAndComputeMs": 2.0164870000003248,
+            "workerComputeMs": [
+              1.495223000000351,
+              1.267840999999862,
+              1.5404530000000705,
+              1.41265199999998,
+              1.469242000000122,
+              1.4149120000001858,
+              1.6111040000000685,
+              1.2060310000001664
+            ]
+          }
+        },
+        {
+          "trial": 4,
+          "tick": 500,
+          "rain": true,
+          "light": 0,
+          "mode": "node-reference",
+          "cold": false,
+          "totalMs": 22.08368900000005,
+          "cloneMs": 15.863776000000144,
+          "computeMs": 6.219912999999906,
+          "different": 0,
+          "maximumAbsoluteError": 0
+        },
+        {
+          "trial": 4,
+          "tick": 500,
+          "rain": true,
+          "light": 0,
+          "mode": "gpu-1",
+          "cold": false,
+          "totalMs": 34.42862400000013,
+          "cloneMs": 18.410347,
+          "coordinateCheckMs": 0.5256150000000162,
+          "packMs": 2.922754000000168,
+          "computeAndTransferMs": 10.69551199999978,
+          "unpackMs": 1.8743960000001607,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 6.810117999975773,
+            "assemblyMs": 0.8152870000230905,
+            "devices": [
+              {
+                "index": 1,
+                "uploadMs": 2.4666110000453045,
+                "eventKernelMs": 0.15014399588108063,
+                "launchAndKernelSyncMs": 0.6002449999868986,
+                "downloadMs": 2.784923000035633,
+                "driverRoundTripMs": 5.851779000067836,
+                "uploadedBytes": 8912896,
+                "downloadedBytes": 8912896
+              }
+            ],
+            "bytes": 8912896,
+            "nodeIPCRoundTripMs": 10.682992000000013
+          }
+        },
+        {
+          "trial": 4,
+          "tick": 500,
+          "rain": true,
+          "light": 0,
+          "mode": "gpu-0,1",
+          "cold": false,
+          "totalMs": 36.46658200000002,
+          "cloneMs": 10.623961000000236,
+          "coordinateCheckMs": 0.4764839999998003,
+          "packMs": 3.590571000000182,
+          "computeAndTransferMs": 19.56625699999995,
+          "unpackMs": 2.2093089999998483,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 5.625437999924543,
+            "assemblyMs": 0.9566590001668374,
+            "devices": [
+              {
+                "index": 0,
+                "uploadMs": 1.0456190000240895,
+                "eventKernelMs": 0.110944002866745,
+                "launchAndKernelSyncMs": 0.17163100005745946,
+                "downloadMs": 0.5732049999096489,
+                "driverRoundTripMs": 1.7904549999911978,
+                "uploadedBytes": 8912896,
+                "downloadedBytes": 4456448
+              },
+              {
+                "index": 1,
+                "uploadMs": 2.5051909999547206,
+                "eventKernelMs": 0.10313600301742554,
+                "launchAndKernelSyncMs": 0.5678949999037286,
+                "downloadMs": 1.3962319999336614,
+                "driverRoundTripMs": 4.469317999792111,
+                "uploadedBytes": 8912896,
+                "downloadedBytes": 4456448
+              }
+            ],
+            "bytes": 8912896,
+            "nodeIPCRoundTripMs": 19.550087000000076
+          }
+        },
+        {
+          "trial": 4,
+          "tick": 500,
+          "rain": true,
+          "light": 0,
+          "mode": "cpu-soa",
+          "cold": false,
+          "totalMs": 23.54807099999971,
+          "cloneMs": 13.931658999999854,
+          "coordinateCheckMs": 0.6835259999998016,
+          "packMs": 3.1149060000002464,
+          "computeAndTransferMs": 3.752071999999771,
+          "unpackMs": 2.065908000000036,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "computeMs": 3.7485420000002705
+          }
+        },
+        {
+          "trial": 4,
+          "tick": 500,
+          "rain": true,
+          "light": 0,
+          "mode": "cpu-workers-4",
+          "cold": false,
+          "totalMs": 23.60902100000021,
+          "cloneMs": 17.509719000000132,
+          "coordinateCheckMs": 0.3957239999999729,
+          "packMs": 2.586052000000109,
+          "computeAndTransferMs": 1.6053230000002259,
+          "unpackMs": 1.5122029999997721,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "dispatchAndComputeMs": 1.5898329999999987,
+            "workerComputeMs": [
+              1.315762000000177,
+              1.2963010000003123,
+              1.2231610000003457,
+              1.212601000000177
+            ]
+          }
+        },
+        {
+          "trial": 4,
+          "tick": 500,
+          "rain": true,
+          "light": 0,
+          "mode": "cpu-workers-8",
+          "cold": false,
+          "totalMs": 17.18464700000004,
+          "cloneMs": 10.286857999999938,
+          "coordinateCheckMs": 0.8674280000000181,
+          "packMs": 3.0940660000001117,
+          "computeAndTransferMs": 1.572722999999769,
+          "unpackMs": 1.3635720000002038,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "dispatchAndComputeMs": 1.5477430000000822,
+            "workerComputeMs": [
+              1.1923010000000431,
+              0.906336999999894,
+              1.2207909999997355,
+              1.156238999999914,
+              0.860787000000073,
+              0.804157000000032,
+              1.0913989999999103,
+              0.960599000000002
+            ]
+          }
+        },
+        {
+          "trial": 4,
+          "tick": 500,
+          "rain": true,
+          "light": 0,
+          "mode": "gpu-0",
+          "cold": false,
+          "totalMs": 45.33988700000009,
+          "cloneMs": 21.849326999999903,
+          "coordinateCheckMs": 0.7289060000002792,
+          "packMs": 3.373468999999659,
+          "computeAndTransferMs": 16.798223000000235,
+          "unpackMs": 2.589962000000014,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 4.426337999802854,
+            "assemblyMs": 1.1562900001536036,
+            "devices": [
+              {
+                "index": 0,
+                "uploadMs": 1.2768409999353025,
+                "eventKernelMs": 0.14159999787807465,
+                "launchAndKernelSyncMs": 0.2458520000345743,
+                "downloadMs": 1.5763730000344367,
+                "driverRoundTripMs": 3.0990660000043135,
+                "uploadedBytes": 8912896,
+                "downloadedBytes": 8912896
+              }
+            ],
+            "bytes": 8912896,
+            "nodeIPCRoundTripMs": 16.7784529999999
+          }
+        },
+        {
+          "trial": 5,
+          "tick": 600,
+          "rain": false,
+          "light": 0.4,
+          "mode": "node-reference",
+          "cold": false,
+          "totalMs": 43.02545699999973,
+          "cloneMs": 38.172055999999884,
+          "computeMs": 4.853400999999849,
+          "different": 0,
+          "maximumAbsoluteError": 0
+        },
+        {
+          "trial": 5,
+          "tick": 600,
+          "rain": false,
+          "light": 0.4,
+          "mode": "gpu-0,1",
+          "cold": false,
+          "totalMs": 42.774265000000014,
+          "cloneMs": 19.916359999999713,
+          "coordinateCheckMs": 0.770886000000246,
+          "packMs": 3.3369290000000547,
+          "computeAndTransferMs": 16.591621000000032,
+          "unpackMs": 2.158468999999968,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 11.130844999797773,
+            "assemblyMs": 1.9497460000366118,
+            "devices": [
+              {
+                "index": 0,
+                "uploadMs": 0.96065799993994,
+                "eventKernelMs": 0.11011199653148651,
+                "launchAndKernelSyncMs": 0.16006200007723237,
+                "downloadMs": 0.5009639999116189,
+                "driverRoundTripMs": 1.6216839999287913,
+                "uploadedBytes": 8912896,
+                "downloadedBytes": 4456448
+              },
+              {
+                "index": 1,
+                "uploadMs": 4.775340000151118,
+                "eventKernelMs": 0.5286080241203308,
+                "launchAndKernelSyncMs": 1.4775829999962298,
+                "downloadMs": 2.7159829999163776,
+                "driverRoundTripMs": 8.968906000063726,
+                "uploadedBytes": 8912896,
+                "downloadedBytes": 4456448
+              }
+            ],
+            "bytes": 8912896,
+            "nodeIPCRoundTripMs": 16.576560999999856
+          }
+        },
+        {
+          "trial": 5,
+          "tick": 600,
+          "rain": false,
+          "light": 0.4,
+          "mode": "cpu-soa",
+          "cold": false,
+          "totalMs": 26.772437999999966,
+          "cloneMs": 17.22750700000006,
+          "coordinateCheckMs": 0.48886399999992136,
+          "packMs": 2.931434999999965,
+          "computeAndTransferMs": 3.8672930000002452,
+          "unpackMs": 2.2573389999997744,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "computeMs": 3.86376300000029
+          }
+        },
+        {
+          "trial": 5,
+          "tick": 600,
+          "rain": false,
+          "light": 0.4,
+          "mode": "cpu-workers-4",
+          "cold": false,
+          "totalMs": 16.420231000000058,
+          "cloneMs": 9.257520000000113,
+          "coordinateCheckMs": 0.4521429999999782,
+          "packMs": 2.9579760000001443,
+          "computeAndTransferMs": 1.952506000000085,
+          "unpackMs": 1.8000859999997374,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "dispatchAndComputeMs": 1.9373160000000098,
+            "workerComputeMs": [
+              1.7181749999999738,
+              1.505153000000064,
+              1.546132999999827,
+              1.6152029999998376
+            ]
+          }
+        },
+        {
+          "trial": 5,
+          "tick": 600,
+          "rain": false,
+          "light": 0.4,
+          "mode": "cpu-workers-8",
+          "cold": false,
+          "totalMs": 20.86770800000022,
+          "cloneMs": 14.445434000000205,
+          "coordinateCheckMs": 0.39094299999987925,
+          "packMs": 2.5180709999999635,
+          "computeAndTransferMs": 1.8131560000001627,
+          "unpackMs": 1.7001040000000103,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "dispatchAndComputeMs": 1.7989659999998366,
+            "workerComputeMs": [
+              1.5308030000001054,
+              1.180829999999787,
+              1.281311000000187,
+              1.501882999999907,
+              1.3328920000003563,
+              1.4852419999997437,
+              1.4399419999999736,
+              1.1556799999998475
+            ]
+          }
+        },
+        {
+          "trial": 5,
+          "tick": 600,
+          "rain": false,
+          "light": 0.4,
+          "mode": "gpu-0",
+          "cold": false,
+          "totalMs": 25.008053999999902,
+          "cloneMs": 9.890385000000151,
+          "coordinateCheckMs": 0.6822560000000522,
+          "packMs": 2.907433999999739,
+          "computeAndTransferMs": 7.833707000000231,
+          "unpackMs": 3.694271999999728,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 2.889624000090407,
+            "assemblyMs": 0.8894070001588261,
+            "devices": [
+              {
+                "index": 0,
+                "uploadMs": 0.8840169998620695,
+                "eventKernelMs": 0.13494400680065155,
+                "launchAndKernelSyncMs": 0.191302000075666,
+                "downloadMs": 0.7774260000132927,
+                "driverRoundTripMs": 1.8527449999510281,
+                "uploadedBytes": 8912896,
+                "downloadedBytes": 8912896
+              }
+            ],
+            "bytes": 8912896,
+            "nodeIPCRoundTripMs": 7.8199469999999565
+          }
+        },
+        {
+          "trial": 5,
+          "tick": 600,
+          "rain": false,
+          "light": 0.4,
+          "mode": "gpu-1",
+          "cold": false,
+          "totalMs": 44.644480999999814,
+          "cloneMs": 18.333086000000094,
+          "coordinateCheckMs": 0.5665449999996781,
+          "packMs": 4.124845000000278,
+          "computeAndTransferMs": 19.375605999999607,
+          "unpackMs": 2.2443990000001577,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 13.633485999889672,
+            "assemblyMs": 1.0597289999623172,
+            "devices": [
+              {
+                "index": 1,
+                "uploadMs": 4.902262000086921,
+                "eventKernelMs": 1.0994880199432373,
+                "launchAndKernelSyncMs": 2.047176999894873,
+                "downloadMs": 5.415587000015876,
+                "driverRoundTripMs": 12.36502599999767,
+                "uploadedBytes": 8912896,
+                "downloadedBytes": 8912896
+              }
+            ],
+            "bytes": 8912896,
+            "nodeIPCRoundTripMs": 19.353535000000193
+          }
+        },
+        {
+          "trial": 6,
+          "tick": 700,
+          "rain": true,
+          "light": 1,
+          "mode": "node-reference",
+          "cold": false,
+          "totalMs": 16.212978999999905,
+          "cloneMs": 10.739861999999903,
+          "computeMs": 5.473117000000002,
+          "different": 0,
+          "maximumAbsoluteError": 0
+        },
+        {
+          "trial": 6,
+          "tick": 700,
+          "rain": true,
+          "light": 1,
+          "mode": "cpu-soa",
+          "cold": false,
+          "totalMs": 30.570420999999897,
+          "cloneMs": 17.777942000000166,
+          "coordinateCheckMs": 0.9022979999999734,
+          "packMs": 3.6290909999997893,
+          "computeAndTransferMs": 4.592959000000064,
+          "unpackMs": 3.668130999999903,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "computeMs": 4.587978999999905
+          }
+        },
+        {
+          "trial": 6,
+          "tick": 700,
+          "rain": true,
+          "light": 1,
+          "mode": "cpu-workers-4",
+          "cold": false,
+          "totalMs": 24.638950000000023,
+          "cloneMs": 10.721362000000227,
+          "coordinateCheckMs": 0.7829159999996591,
+          "packMs": 4.610540000000128,
+          "computeAndTransferMs": 5.831759000000147,
+          "unpackMs": 2.6923729999998613,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "dispatchAndComputeMs": 5.810758999999962,
+            "workerComputeMs": [
+              1.8901559999999336,
+              1.8773459999997613,
+              1.8170860000000175,
+              1.7983749999998508
+            ]
+          }
+        },
+        {
+          "trial": 6,
+          "tick": 700,
+          "rain": true,
+          "light": 1,
+          "mode": "cpu-workers-8",
+          "cold": false,
+          "totalMs": 21.344833000000108,
+          "cloneMs": 13.75547800000004,
+          "coordinateCheckMs": 0.49017400000002453,
+          "packMs": 3.3566490000002887,
+          "computeAndTransferMs": 1.654863999999634,
+          "unpackMs": 2.0876680000001215,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "dispatchAndComputeMs": 1.6458940000002258,
+            "workerComputeMs": [
+              1.4067220000001726,
+              1.0209690000001501,
+              1.4076319999999214,
+              1.3789019999999255,
+              0.9596480000000156,
+              0.950937999999951,
+              1.275720999999976,
+              0.9269979999999123
+            ]
+          }
+        },
+        {
+          "trial": 6,
+          "tick": 700,
+          "rain": true,
+          "light": 1,
+          "mode": "gpu-0",
+          "cold": false,
+          "totalMs": 34.32756299999983,
+          "cloneMs": 16.98968500000001,
+          "coordinateCheckMs": 0.37016300000004776,
+          "packMs": 2.5577509999998256,
+          "computeAndTransferMs": 12.185695000000123,
+          "unpackMs": 2.224268999999822,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 2.9031149999809713,
+            "assemblyMs": 0.9339279999949213,
+            "devices": [
+              {
+                "index": 0,
+                "uploadMs": 0.8715670001038234,
+                "eventKernelMs": 0.1356479972600937,
+                "launchAndKernelSyncMs": 0.18075200000566838,
+                "downloadMs": 0.7687459999488055,
+                "driverRoundTripMs": 1.8210650000582973,
+                "uploadedBytes": 8912896,
+                "downloadedBytes": 8912896
+              }
+            ],
+            "bytes": 8912896,
+            "nodeIPCRoundTripMs": 12.174264000000221
+          }
+        },
+        {
+          "trial": 6,
+          "tick": 700,
+          "rain": true,
+          "light": 1,
+          "mode": "gpu-1",
+          "cold": false,
+          "totalMs": 49.42272200000025,
+          "cloneMs": 12.396426000000247,
+          "coordinateCheckMs": 1.0743489999999838,
+          "packMs": 3.9962439999999333,
+          "computeAndTransferMs": 29.07998899999984,
+          "unpackMs": 2.8757140000002437,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 15.221810000184632,
+            "assemblyMs": 1.2338910000835313,
+            "devices": [
+              {
+                "index": 1,
+                "uploadMs": 6.285374000071897,
+                "eventKernelMs": 1.1165759563446045,
+                "launchAndKernelSyncMs": 2.0373669999571575,
+                "downloadMs": 5.4628069999580475,
+                "driverRoundTripMs": 13.785547999987102,
+                "uploadedBytes": 8912896,
+                "downloadedBytes": 8912896
+              }
+            ],
+            "bytes": 8912896,
+            "nodeIPCRoundTripMs": 29.073609000000033
+          }
+        },
+        {
+          "trial": 6,
+          "tick": 700,
+          "rain": true,
+          "light": 1,
+          "mode": "gpu-0,1",
+          "cold": false,
+          "totalMs": 30.58598099999972,
+          "cloneMs": 9.715692999999646,
+          "coordinateCheckMs": 0.4784540000000561,
+          "packMs": 3.139227000000119,
+          "computeAndTransferMs": 15.239649999999983,
+          "unpackMs": 2.012956999999915,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 10.030105999931038,
+            "assemblyMs": 0.8375570000680455,
+            "devices": [
+              {
+                "index": 0,
+                "uploadMs": 1.14955000003647,
+                "eventKernelMs": 0.11260800063610077,
+                "launchAndKernelSyncMs": 0.17829200010055501,
+                "downloadMs": 0.5256140000255982,
+                "driverRoundTripMs": 1.8534560001626232,
+                "uploadedBytes": 8912896,
+                "downloadedBytes": 4456448
+              },
+              {
+                "index": 1,
+                "uploadMs": 4.7529999999369466,
+                "eventKernelMs": 0.5366719961166382,
+                "launchAndKernelSyncMs": 1.4909230001194373,
+                "downloadMs": 2.7127529999688704,
+                "driverRoundTripMs": 8.956676000025254,
+                "uploadedBytes": 8912896,
+                "downloadedBytes": 4456448
+              }
+            ],
+            "bytes": 8912896,
+            "nodeIPCRoundTripMs": 15.231780000000072
+          }
+        },
+        {
+          "trial": 7,
+          "tick": 800,
+          "rain": false,
+          "light": 0,
+          "mode": "node-reference",
+          "cold": false,
+          "totalMs": 23.541211000000203,
+          "cloneMs": 19.306874999999764,
+          "computeMs": 4.2343360000004395,
+          "different": 0,
+          "maximumAbsoluteError": 0
+        },
+        {
+          "trial": 7,
+          "tick": 800,
+          "rain": false,
+          "light": 0,
+          "mode": "cpu-workers-4",
+          "cold": false,
+          "totalMs": 18.466797000000042,
+          "cloneMs": 11.200534999999945,
+          "coordinateCheckMs": 0.8030069999999796,
+          "packMs": 2.9565050000001065,
+          "computeAndTransferMs": 2.1302489999998215,
+          "unpackMs": 1.3765010000001894,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "dispatchAndComputeMs": 2.12007900000026,
+            "workerComputeMs": [
+              1.774014999999963,
+              1.7934949999998935,
+              1.7722249999997075,
+              1.673113999999714
+            ]
+          }
+        },
+        {
+          "trial": 7,
+          "tick": 800,
+          "rain": false,
+          "light": 0,
+          "mode": "cpu-workers-8",
+          "cold": false,
+          "totalMs": 22.9332959999997,
+          "cloneMs": 17.793581999999788,
+          "coordinateCheckMs": 0.3809030000002167,
+          "packMs": 2.6175029999999424,
+          "computeAndTransferMs": 1.2392500000000837,
+          "unpackMs": 0.9020579999996698,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "dispatchAndComputeMs": 1.2326300000004267,
+            "workerComputeMs": [
+              0.7581560000003265,
+              0.8541770000001634,
+              0.7883369999999559,
+              0.9357690000001639,
+              0.8544670000001133,
+              0.8854780000001483,
+              0.9409279999999853,
+              0.89334800000006
+            ]
+          }
+        },
+        {
+          "trial": 7,
+          "tick": 800,
+          "rain": false,
+          "light": 0,
+          "mode": "gpu-0",
+          "cold": false,
+          "totalMs": 20.022091000000273,
+          "cloneMs": 9.292319000000134,
+          "coordinateCheckMs": 0.35349300000007133,
+          "packMs": 2.4377509999999347,
+          "computeAndTransferMs": 6.9588490000001,
+          "unpackMs": 0.9796790000000328,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 3.042946000050506,
+            "assemblyMs": 0.8597169999120524,
+            "devices": [
+              {
+                "index": 0,
+                "uploadMs": 0.9912789998907101,
+                "eventKernelMs": 0.17584000527858734,
+                "launchAndKernelSyncMs": 0.23427200017067662,
+                "downloadMs": 0.7766459998492792,
+                "driverRoundTripMs": 2.002196999910666,
+                "uploadedBytes": 8912896,
+                "downloadedBytes": 8912896
+              }
+            ],
+            "bytes": 8912896,
+            "nodeIPCRoundTripMs": 6.954228999999941
+          }
+        },
+        {
+          "trial": 7,
+          "tick": 800,
+          "rain": false,
+          "light": 0,
+          "mode": "gpu-1",
+          "cold": false,
+          "totalMs": 39.11200299999973,
+          "cloneMs": 16.503729999999905,
+          "coordinateCheckMs": 0.4214939999997114,
+          "packMs": 2.43382100000008,
+          "computeAndTransferMs": 18.256435000000238,
+          "unpackMs": 1.4965229999997973,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 13.827017999801683,
+            "assemblyMs": 1.3433209999220708,
+            "devices": [
+              {
+                "index": 1,
+                "uploadMs": 4.780490999792164,
+                "eventKernelMs": 1.0376960039138794,
+                "launchAndKernelSyncMs": 1.9854870001836389,
+                "downloadMs": 5.448175999845262,
+                "driverRoundTripMs": 12.214153999821065,
+                "uploadedBytes": 8912896,
+                "downloadedBytes": 8912896
+              }
+            ],
+            "bytes": 8912896,
+            "nodeIPCRoundTripMs": 18.25154500000008
+          }
+        },
+        {
+          "trial": 7,
+          "tick": 800,
+          "rain": false,
+          "light": 0,
+          "mode": "gpu-0,1",
+          "cold": false,
+          "totalMs": 31.86299199999985,
+          "cloneMs": 9.1796489999997,
+          "coordinateCheckMs": 0.4090329999999085,
+          "packMs": 2.558332000000064,
+          "computeAndTransferMs": 17.565110000000004,
+          "unpackMs": 2.150868000000173,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 5.982411000104548,
+            "assemblyMs": 1.2849610000102984,
+            "devices": [
+              {
+                "index": 0,
+                "uploadMs": 1.2263010000879149,
+                "eventKernelMs": 0.1207360029220581,
+                "launchAndKernelSyncMs": 0.2175810000153433,
+                "downloadMs": 0.8026369998788141,
+                "driverRoundTripMs": 2.2465189999820723,
+                "uploadedBytes": 8912896,
+                "downloadedBytes": 4456448
+              },
+              {
+                "index": 1,
+                "uploadMs": 2.50095199999123,
+                "eventKernelMs": 0.10806400328874588,
+                "launchAndKernelSyncMs": 0.5608750000192231,
+                "downloadMs": 1.411232000009477,
+                "driverRoundTripMs": 4.47305900001993,
+                "uploadedBytes": 8912896,
+                "downloadedBytes": 4456448
+              }
+            ],
+            "bytes": 8912896,
+            "nodeIPCRoundTripMs": 17.559799999999996
+          }
+        },
+        {
+          "trial": 7,
+          "tick": 800,
+          "rain": false,
+          "light": 0,
+          "mode": "cpu-soa",
+          "cold": false,
+          "totalMs": 19.315634000000045,
+          "cloneMs": 12.48748599999999,
+          "coordinateCheckMs": 0.33295300000008865,
+          "packMs": 2.278178999999909,
+          "computeAndTransferMs": 3.0742270000000644,
+          "unpackMs": 1.1427889999999934,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "computeMs": 3.0695059999998193
+          }
+        }
+      ],
+      "summary": {
+        "node-reference": {
+          "coldInvocationMs": 65.45084899999983,
+          "warmTotalMs": {
+            "min": 16.212978999999905,
+            "median": 22.08368900000005,
+            "max": 136.8799180000001,
+            "mean": 40.54769171428571
+          },
+          "warmComputeAndTransferMs": {
+            "min": 4.2343360000004395,
+            "median": 5.097423000000163,
+            "max": 17.48686900000007,
+            "mean": 6.84643257142862
+          },
+          "maxAbsoluteError": 0,
+          "differentValues": 0
+        },
+        "cpu-soa": {
+          "coldInvocationMs": 171.59164599999986,
+          "warmTotalMs": {
+            "min": 19.315634000000045,
+            "median": 23.54807099999971,
+            "max": 30.570420999999897,
+            "mean": 24.17119457142852
+          },
+          "warmComputeAndTransferMs": {
+            "min": 3.0742270000000644,
+            "median": 3.752071999999771,
+            "max": 4.592959000000064,
+            "mean": 3.774183714285755
+          },
+          "maxAbsoluteError": 0,
+          "differentValues": 0
+        },
+        "cpu-workers-4": {
+          "coldInvocationMs": 189.89315199999987,
+          "warmTotalMs": {
+            "min": 16.420231000000058,
+            "median": 22.52001199999995,
+            "max": 35.0300299999999,
+            "mean": 22.548699714285767
+          },
+          "warmComputeAndTransferMs": {
+            "min": 1.6053230000002259,
+            "median": 2.1302489999998215,
+            "max": 11.158844999999928,
+            "mean": 4.268960428571485
+          },
+          "maxAbsoluteError": 0,
+          "differentValues": 0
+        },
+        "cpu-workers-8": {
+          "coldInvocationMs": 35.150390000000016,
+          "warmTotalMs": {
+            "min": 17.18464700000004,
+            "median": 22.9332959999997,
+            "max": 29.550822000000153,
+            "mean": 23.550545428571404
+          },
+          "warmComputeAndTransferMs": {
+            "min": 1.2392500000000837,
+            "median": 1.8131560000001627,
+            "max": 9.636511999999584,
+            "mean": 2.827772571428503
+          },
+          "maxAbsoluteError": 0,
+          "differentValues": 0
+        },
+        "gpu-0": {
+          "coldInvocationMs": 40.74054799999999,
+          "warmTotalMs": {
+            "min": 20.022091000000273,
+            "median": 29.728384000000005,
+            "max": 66.50180799999998,
+            "mean": 35.367012142857156
+          },
+          "warmComputeAndTransferMs": {
+            "min": 6.9588490000001,
+            "median": 10.655781000000388,
+            "max": 25.92123100000026,
+            "mean": 12.845689714285916
+          },
+          "maxAbsoluteError": 0,
+          "differentValues": 0
+        },
+        "gpu-1": {
+          "coldInvocationMs": 41.344153000000006,
+          "warmTotalMs": {
+            "min": 34.42862400000013,
+            "median": 44.644480999999814,
+            "max": 105.77008299999989,
+            "mean": 52.09714757142855
+          },
+          "warmComputeAndTransferMs": {
+            "min": 10.69551199999978,
+            "median": 18.256435000000238,
+            "max": 29.07998899999984,
+            "mean": 18.717681428571364
+          },
+          "maxAbsoluteError": 0,
+          "differentValues": 0
+        },
+        "gpu-0,1": {
+          "coldInvocationMs": 32.85214999999994,
+          "warmTotalMs": {
+            "min": 29.628901999999925,
+            "median": 36.46658200000002,
+            "max": 89.09319099999993,
+            "mean": 43.27186657142848
+          },
+          "warmComputeAndTransferMs": {
+            "min": 10.64875099999972,
+            "median": 17.17037700000037,
+            "max": 22.696433999999954,
+            "mean": 17.068314285714287
+          },
+          "maxAbsoluteError": 0,
+          "differentValues": 0
+        }
+      }
+    },
+    {
+      "cells": 1000000,
+      "generationMs": 657.3494150000001,
+      "topologyBuildMs": 978.3811189999997,
+      "topologyBytes": 48000000,
+      "stateBytes": 136000000,
+      "workerStartup": [
+        {
+          "workers": 4,
+          "startupMs": 62.62934299999961
+        },
+        {
+          "workers": 8,
+          "startupMs": 82.41827199999989
+        }
+      ],
+      "gpuSetup": [
+        {
+          "name": "gpu-0",
+          "setupMs": 2.588452000054531,
+          "devices": [
+            {
+              "index": 0,
+              "allocationAndTopologyUploadMs": 2.1630390001519118,
+              "residentBytes": 304000000
+            }
+          ],
+          "bytes": 0,
+          "nodeSetupMs": 15.93856599999981
+        },
+        {
+          "name": "gpu-1",
+          "setupMs": 28.773194999985208,
+          "devices": [
+            {
+              "index": 1,
+              "allocationAndTopologyUploadMs": 27.888348000033147,
+              "residentBytes": 304000000
+            }
+          ],
+          "bytes": 0,
+          "nodeSetupMs": 41.46471399999973
+        },
+        {
+          "name": "gpu-0,1",
+          "setupMs": 22.28392899996834,
+          "devices": [
+            {
+              "index": 0,
+              "allocationAndTopologyUploadMs": 2.06580799999756,
+              "residentBytes": 236000000
+            },
+            {
+              "index": 1,
+              "allocationAndTopologyUploadMs": 19.555007000008118,
+              "residentBytes": 236000000
+            }
+          ],
+          "bytes": 0,
+          "nodeSetupMs": 34.36850299999969
+        }
+      ],
+      "trials": [
+        {
+          "trial": 0,
+          "tick": 100,
+          "rain": true,
+          "light": 1,
+          "mode": "node-reference",
+          "cold": true,
+          "totalMs": 967.4923310000004,
+          "cloneMs": 740.5911390000001,
+          "computeMs": 226.90119200000026,
+          "different": 0,
+          "maximumAbsoluteError": 0
+        },
+        {
+          "trial": 0,
+          "tick": 100,
+          "rain": true,
+          "light": 1,
+          "mode": "cpu-soa",
+          "cold": true,
+          "totalMs": 798.1560150000005,
+          "cloneMs": 619.8254670000006,
+          "coordinateCheckMs": 8.008358000000044,
+          "packMs": 66.6253569999999,
+          "computeAndTransferMs": 72.00530299999991,
+          "unpackMs": 31.691530000000057,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "computeMs": 72.0011629999999
+          }
+        },
+        {
+          "trial": 0,
+          "tick": 100,
+          "rain": true,
+          "light": 1,
+          "mode": "cpu-workers-4",
+          "cold": true,
+          "totalMs": 422.85813899999994,
+          "cloneMs": 270.56187300000056,
+          "coordinateCheckMs": 7.578324999999495,
+          "packMs": 63.951154000000315,
+          "computeAndTransferMs": 43.93810399999984,
+          "unpackMs": 36.82868299999973,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "dispatchAndComputeMs": 43.92368400000032,
+            "workerComputeMs": [
+              43.48548000000028,
+              33.92254899999989,
+              39.886129999999866,
+              40.265763000000334
+            ]
+          }
+        },
+        {
+          "trial": 0,
+          "tick": 100,
+          "rain": true,
+          "light": 1,
+          "mode": "cpu-workers-8",
+          "cold": true,
+          "totalMs": 426.6435389999997,
+          "cloneMs": 279.7539800000004,
+          "coordinateCheckMs": 7.843476999999439,
+          "packMs": 59.810207999999875,
+          "computeAndTransferMs": 48.298721000000114,
+          "unpackMs": 30.937152999999853,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "dispatchAndComputeMs": 48.28531099999964,
+            "workerComputeMs": [
+              34.12844000000041,
+              43.27079799999956,
+              28.543273000000227,
+              42.73636299999998,
+              47.83430699999917,
+              34.51074299999982,
+              38.28196500000013,
+              33.35033399999975
+            ]
+          }
+        },
+        {
+          "trial": 0,
+          "tick": 100,
+          "rain": true,
+          "light": 1,
+          "mode": "gpu-0",
+          "cold": true,
+          "totalMs": 808.7325979999996,
+          "cloneMs": 250.50574099999994,
+          "coordinateCheckMs": 6.370033999999578,
+          "packMs": 39.55113600000004,
+          "computeAndTransferMs": 477.47273099999984,
+          "unpackMs": 34.832956000000195,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 46.49192600004426,
+            "assemblyMs": 14.303231999974741,
+            "devices": [
+              {
+                "index": 0,
+                "uploadMs": 11.87949099994512,
+                "eventKernelMs": 0.527616024017334,
+                "launchAndKernelSyncMs": 0.5878550000488758,
+                "downloadMs": 19.53251699978864,
+                "driverRoundTripMs": 31.999862999782636,
+                "uploadedBytes": 136000000,
+                "downloadedBytes": 136000000
+              }
+            ],
+            "bytes": 136000000,
+            "nodeIPCRoundTripMs": 477.46064099999967
+          }
+        },
+        {
+          "trial": 0,
+          "tick": 100,
+          "rain": true,
+          "light": 1,
+          "mode": "gpu-1",
+          "cold": true,
+          "totalMs": 1475.0900870000005,
+          "cloneMs": 634.8467770000007,
+          "coordinateCheckMs": 6.327014000000418,
+          "packMs": 39.57812600000034,
+          "computeAndTransferMs": 758.3794149999994,
+          "unpackMs": 35.958754999999655,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 211.74680900003295,
+            "assemblyMs": 14.571252999985518,
+            "devices": [
+              {
+                "index": 1,
+                "uploadMs": 93.46314399999756,
+                "eventKernelMs": 16.489215850830078,
+                "launchAndKernelSyncMs": 17.535839000174747,
+                "downloadMs": 85.99587099979544,
+                "driverRoundTripMs": 196.99485399996775,
+                "uploadedBytes": 136000000,
+                "downloadedBytes": 136000000
+              }
+            ],
+            "bytes": 136000000,
+            "nodeIPCRoundTripMs": 758.370105
+          }
+        },
+        {
+          "trial": 0,
+          "tick": 100,
+          "rain": true,
+          "light": 1,
+          "mode": "gpu-0,1",
+          "cold": true,
+          "totalMs": 1199.90503,
+          "cloneMs": 700.483209,
+          "coordinateCheckMs": 6.352983999999196,
+          "packMs": 43.06585599999926,
+          "computeAndTransferMs": 414.8357930000002,
+          "unpackMs": 35.16718800000126,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 84.85543100005088,
+            "assemblyMs": 20.208400999990772,
+            "devices": [
+              {
+                "index": 0,
+                "uploadMs": 21.086649000153557,
+                "eventKernelMs": 0.3145279884338379,
+                "launchAndKernelSyncMs": 0.40467299982083205,
+                "downloadMs": 14.157491000105438,
+                "driverRoundTripMs": 35.64881300007983,
+                "uploadedBytes": 136000000,
+                "downloadedBytes": 68000000
+              },
+              {
+                "index": 1,
+                "uploadMs": 42.06198800011407,
+                "eventKernelMs": 0.8797760009765625,
+                "launchAndKernelSyncMs": 1.3839609998740343,
+                "downloadMs": 20.990749000020514,
+                "driverRoundTripMs": 64.43669800000862,
+                "uploadedBytes": 136000000,
+                "downloadedBytes": 68000000
+              }
+            ],
+            "bytes": 136000000,
+            "nodeIPCRoundTripMs": 414.82603299999937
+          }
+        },
+        {
+          "trial": 1,
+          "tick": 200,
+          "rain": false,
+          "light": 0,
+          "mode": "node-reference",
+          "cold": false,
+          "totalMs": 459.09929700000066,
+          "cloneMs": 374.81506099999933,
+          "computeMs": 84.28423600000133,
+          "different": 0,
+          "maximumAbsoluteError": 0
+        },
+        {
+          "trial": 1,
+          "tick": 200,
+          "rain": false,
+          "light": 0,
+          "mode": "cpu-workers-4",
+          "cold": false,
+          "totalMs": 947.3054670000001,
+          "cloneMs": 830.1527339999993,
+          "coordinateCheckMs": 7.9478370000015275,
+          "packMs": 42.1990679999999,
+          "computeAndTransferMs": 33.62066499999855,
+          "unpackMs": 33.38516300000083,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "dispatchAndComputeMs": 33.606675000000905,
+            "workerComputeMs": [
+              32.88057900000058,
+              33.29112299999906,
+              31.841371000000436,
+              25.61877699999968
+            ]
+          }
+        },
+        {
+          "trial": 1,
+          "tick": 200,
+          "rain": false,
+          "light": 0,
+          "mode": "cpu-workers-8",
+          "cold": false,
+          "totalMs": 417.3455699999995,
+          "cloneMs": 303.1091809999998,
+          "coordinateCheckMs": 6.708866999999373,
+          "packMs": 39.330353000001196,
+          "computeAndTransferMs": 35.149858999999196,
+          "unpackMs": 33.047309999999925,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "dispatchAndComputeMs": 35.13818799999899,
+            "workerComputeMs": [
+              28.239040000000386,
+              22.73499300000003,
+              26.04617099999996,
+              30.172506999999314,
+              34.786495000000286,
+              29.356669000000693,
+              32.72907699999996,
+              26.411173999998937
+            ]
+          }
+        },
+        {
+          "trial": 1,
+          "tick": 200,
+          "rain": false,
+          "light": 0,
+          "mode": "gpu-0",
+          "cold": false,
+          "totalMs": 1019.2610110000005,
+          "cloneMs": 352.21370600000046,
+          "coordinateCheckMs": 6.8555579999992915,
+          "packMs": 36.51105000000098,
+          "computeAndTransferMs": 590.2708039999998,
+          "unpackMs": 33.40989300000001,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 35.19452800014733,
+            "assemblyMs": 8.782754000094428,
+            "devices": [
+              {
+                "index": 0,
+                "uploadMs": 14.820306000046912,
+                "eventKernelMs": 0.5159040093421936,
+                "launchAndKernelSyncMs": 0.5852750000485685,
+                "downloadMs": 10.860222000019348,
+                "driverRoundTripMs": 26.26580300011483,
+                "uploadedBytes": 136000000,
+                "downloadedBytes": 136000000
+              }
+            ],
+            "bytes": 136000000,
+            "nodeIPCRoundTripMs": 590.2569739999999
+          }
+        },
+        {
+          "trial": 1,
+          "tick": 200,
+          "rain": false,
+          "light": 0,
+          "mode": "gpu-1",
+          "cold": false,
+          "totalMs": 1642.1528319999998,
+          "cloneMs": 767.3803329999992,
+          "coordinateCheckMs": 6.783887000001414,
+          "packMs": 46.70891599999959,
+          "computeAndTransferMs": 782.1775249999992,
+          "unpackMs": 39.10217100000045,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 204.1596799999752,
+            "assemblyMs": 9.097916999962763,
+            "devices": [
+              {
+                "index": 1,
+                "uploadMs": 93.38950100004695,
+                "eventKernelMs": 16.32044792175293,
+                "launchAndKernelSyncMs": 17.368827999916903,
+                "downloadMs": 84.0934620000553,
+                "driverRoundTripMs": 194.85179100001915,
+                "uploadedBytes": 136000000,
+                "downloadedBytes": 136000000
+              }
+            ],
+            "bytes": 136000000,
+            "nodeIPCRoundTripMs": 782.1678040000006
+          }
+        },
+        {
+          "trial": 1,
+          "tick": 200,
+          "rain": false,
+          "light": 0,
+          "mode": "gpu-0,1",
+          "cold": false,
+          "totalMs": 1329.0553599999985,
+          "cloneMs": 614.9665969999987,
+          "coordinateCheckMs": 8.529352000001381,
+          "packMs": 40.89555599999949,
+          "computeAndTransferMs": 628.1872169999988,
+          "unpackMs": 36.476638000000094,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 82.0182540001042,
+            "assemblyMs": 12.807467999891742,
+            "devices": [
+              {
+                "index": 0,
+                "uploadMs": 20.142129999840108,
+                "eventKernelMs": 0.43702399730682373,
+                "launchAndKernelSyncMs": 0.523793999946065,
+                "downloadMs": 9.693032000086532,
+                "driverRoundTripMs": 30.358955999872705,
+                "uploadedBytes": 136000000,
+                "downloadedBytes": 68000000
+              },
+              {
+                "index": 1,
+                "uploadMs": 46.75286600013351,
+                "eventKernelMs": 0.8600959777832031,
+                "launchAndKernelSyncMs": 1.3059109999176144,
+                "downloadMs": 20.836056000007375,
+                "driverRoundTripMs": 68.8948330000585,
+                "uploadedBytes": 136000000,
+                "downloadedBytes": 68000000
+              }
+            ],
+            "bytes": 136000000,
+            "nodeIPCRoundTripMs": 628.1788369999995
+          }
+        },
+        {
+          "trial": 1,
+          "tick": 200,
+          "rain": false,
+          "light": 0,
+          "mode": "cpu-soa",
+          "cold": false,
+          "totalMs": 891.1198980000008,
+          "cloneMs": 745.3360649999995,
+          "coordinateCheckMs": 7.8078759999989416,
+          "packMs": 42.933663000003435,
+          "computeAndTransferMs": 66.19350999999733,
+          "unpackMs": 28.848784000001615,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "computeMs": 66.18927000000258
+          }
+        },
+        {
+          "trial": 2,
+          "tick": 300,
+          "rain": true,
+          "light": 0.4,
+          "mode": "node-reference",
+          "cold": false,
+          "totalMs": 439.5927260000026,
+          "cloneMs": 351.9260850000028,
+          "computeMs": 87.6666409999998,
+          "different": 0,
+          "maximumAbsoluteError": 0
+        },
+        {
+          "trial": 2,
+          "tick": 300,
+          "rain": true,
+          "light": 0.4,
+          "mode": "cpu-workers-8",
+          "cold": false,
+          "totalMs": 807.6554069999984,
+          "cloneMs": 700.8428049999966,
+          "coordinateCheckMs": 5.769849000000249,
+          "packMs": 38.323223000003054,
+          "computeAndTransferMs": 31.835598999998183,
+          "unpackMs": 30.883931000000302,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "dispatchAndComputeMs": 31.82267899999715,
+            "workerComputeMs": [
+              29.96862300000066,
+              31.517416000002413,
+              28.79417299999841,
+              29.00667500000054,
+              31.296103999997285,
+              26.384973000000173,
+              30.25132500000109,
+              25.064852000003157
+            ]
+          }
+        },
+        {
+          "trial": 2,
+          "tick": 300,
+          "rain": true,
+          "light": 0.4,
+          "mode": "gpu-0",
+          "cold": false,
+          "totalMs": 896.6243450000002,
+          "cloneMs": 264.64130600000135,
+          "coordinateCheckMs": 6.981208999997762,
+          "packMs": 39.36575300000186,
+          "computeAndTransferMs": 551.6104899999991,
+          "unpackMs": 34.02558700000009,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 34.303840000120545,
+            "assemblyMs": 10.132295999937924,
+            "devices": [
+              {
+                "index": 0,
+                "uploadMs": 12.459205999903133,
+                "eventKernelMs": 0.5404800176620483,
+                "launchAndKernelSyncMs": 0.6100350001361221,
+                "downloadMs": 10.85536100003992,
+                "driverRoundTripMs": 23.924602000079176,
+                "uploadedBytes": 136000000,
+                "downloadedBytes": 136000000
+              }
+            ],
+            "bytes": 136000000,
+            "nodeIPCRoundTripMs": 551.5994099999989
+          }
+        },
+        {
+          "trial": 2,
+          "tick": 300,
+          "rain": true,
+          "light": 0.4,
+          "mode": "gpu-1",
+          "cold": false,
+          "totalMs": 1466.1680190000006,
+          "cloneMs": 647.6567800000012,
+          "coordinateCheckMs": 8.209059000000707,
+          "packMs": 40.8717859999997,
+          "computeAndTransferMs": 735.4665879999993,
+          "unpackMs": 33.96380599999975,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 183.8530920001631,
+            "assemblyMs": 10.49059899992244,
+            "devices": [
+              {
+                "index": 1,
+                "uploadMs": 93.27140699997472,
+                "eventKernelMs": 16.45680046081543,
+                "launchAndKernelSyncMs": 17.485097999951904,
+                "downloadMs": 62.35159600009865,
+                "driverRoundTripMs": 173.10810100002527,
+                "uploadedBytes": 136000000,
+                "downloadedBytes": 136000000
+              }
+            ],
+            "bytes": 136000000,
+            "nodeIPCRoundTripMs": 735.4495079999979
+          }
+        },
+        {
+          "trial": 2,
+          "tick": 300,
+          "rain": true,
+          "light": 0.4,
+          "mode": "gpu-0,1",
+          "cold": false,
+          "totalMs": 1515.4808940000003,
+          "cloneMs": 725.9510349999982,
+          "coordinateCheckMs": 6.8461480000005395,
+          "packMs": 40.98662500000137,
+          "computeAndTransferMs": 699.1635470000001,
+          "unpackMs": 42.53353900000002,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 78.93028599983154,
+            "assemblyMs": 14.291350000121383,
+            "devices": [
+              {
+                "index": 0,
+                "uploadMs": 20.440832000076625,
+                "eventKernelMs": 0.3826879858970642,
+                "launchAndKernelSyncMs": 0.4648439999073162,
+                "downloadMs": 8.166369000036866,
+                "driverRoundTripMs": 29.072045000020807,
+                "uploadedBytes": 136000000,
+                "downloadedBytes": 68000000
+              },
+              {
+                "index": 1,
+                "uploadMs": 42.13583599994308,
+                "eventKernelMs": 0.8712639808654785,
+                "launchAndKernelSyncMs": 1.363271000172972,
+                "downloadMs": 20.85856599978797,
+                "driverRoundTripMs": 64.35767299990403,
+                "uploadedBytes": 136000000,
+                "downloadedBytes": 68000000
+              }
+            ],
+            "bytes": 136000000,
+            "nodeIPCRoundTripMs": 699.1515870000003
+          }
+        },
+        {
+          "trial": 2,
+          "tick": 300,
+          "rain": true,
+          "light": 0.4,
+          "mode": "cpu-soa",
+          "cold": false,
+          "totalMs": 5715.691391999997,
+          "cloneMs": 3495.4292459999997,
+          "coordinateCheckMs": 150.69303899999795,
+          "packMs": 737.2146119999998,
+          "computeAndTransferMs": 791.2625250000019,
+          "unpackMs": 541.0919699999977,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "computeMs": 791.2512849999985
+          }
+        },
+        {
+          "trial": 2,
+          "tick": 300,
+          "rain": true,
+          "light": 0.4,
+          "mode": "cpu-workers-4",
+          "cold": false,
+          "totalMs": 3929.4901539999955,
+          "cloneMs": 3151.207265000001,
+          "coordinateCheckMs": 66.12823399999616,
+          "packMs": 299.30016199999955,
+          "computeAndTransferMs": 144.7162640000024,
+          "unpackMs": 268.1382289999965,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "dispatchAndComputeMs": 144.6792340000029,
+            "workerComputeMs": [
+              129.48327599999902,
+              139.7812730000005,
+              143.55672399999457,
+              107.01000799999747
+            ]
+          }
+        },
+        {
+          "trial": 3,
+          "tick": 400,
+          "rain": false,
+          "light": 1,
+          "mode": "node-reference",
+          "cold": false,
+          "totalMs": 2234.9045929999993,
+          "cloneMs": 1686.2951969999995,
+          "computeMs": 548.6093959999998,
+          "different": 0,
+          "maximumAbsoluteError": 0
+        },
+        {
+          "trial": 3,
+          "tick": 400,
+          "rain": false,
+          "light": 1,
+          "mode": "gpu-0",
+          "cold": false,
+          "totalMs": 5138.7669129999995,
+          "cloneMs": 3352.524704999996,
+          "coordinateCheckMs": 28.791709999997693,
+          "packMs": 207.25522300000011,
+          "computeAndTransferMs": 1423.7681680000023,
+          "unpackMs": 126.42710700000316,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 115.78028799999629,
+            "assemblyMs": 28.36029700006293,
+            "devices": [
+              {
+                "index": 0,
+                "uploadMs": 37.1590299998843,
+                "eventKernelMs": 0.57123202085495,
+                "launchAndKernelSyncMs": 0.7238860000597924,
+                "downloadMs": 48.461286000019754,
+                "driverRoundTripMs": 86.34420199996384,
+                "uploadedBytes": 136000000,
+                "downloadedBytes": 136000000
+              }
+            ],
+            "bytes": 136000000,
+            "nodeIPCRoundTripMs": 1423.742938000003
+          }
+        },
+        {
+          "trial": 3,
+          "tick": 400,
+          "rain": false,
+          "light": 1,
+          "mode": "gpu-1",
+          "cold": false,
+          "totalMs": 2605.352448000005,
+          "cloneMs": 1309.3730330000035,
+          "coordinateCheckMs": 24.35615400000097,
+          "packMs": 103.28198200000043,
+          "computeAndTransferMs": 1082.4227419999952,
+          "unpackMs": 85.91853700000502,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 207.44189200013352,
+            "assemblyMs": 21.673760999874503,
+            "devices": [
+              {
+                "index": 1,
+                "uploadMs": 85.12283100003515,
+                "eventKernelMs": 16.49180793762207,
+                "launchAndKernelSyncMs": 17.483236000089164,
+                "downloadMs": 82.7435900000637,
+                "driverRoundTripMs": 185.34965700018802,
+                "uploadedBytes": 136000000,
+                "downloadedBytes": 136000000
+              }
+            ],
+            "bytes": 136000000,
+            "nodeIPCRoundTripMs": 1082.4005919999981
+          }
+        },
+        {
+          "trial": 3,
+          "tick": 400,
+          "rain": false,
+          "light": 1,
+          "mode": "gpu-0,1",
+          "cold": false,
+          "totalMs": 2441.288760999996,
+          "cloneMs": 1126.4856139999974,
+          "coordinateCheckMs": 18.482144000001426,
+          "packMs": 140.07835799999884,
+          "computeAndTransferMs": 1058.7527130000017,
+          "unpackMs": 97.48993199999677,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 142.5309680000737,
+            "assemblyMs": 44.147427999860156,
+            "devices": [
+              {
+                "index": 0,
+                "uploadMs": 36.379373000045234,
+                "eventKernelMs": 0.3928639888763428,
+                "launchAndKernelSyncMs": 0.6285549998210627,
+                "downloadMs": 32.35418000008394,
+                "driverRoundTripMs": 69.36210799995024,
+                "uploadedBytes": 136000000,
+                "downloadedBytes": 68000000
+              },
+              {
+                "index": 1,
+                "uploadMs": 73.94874600004187,
+                "eventKernelMs": 0.8787199854850769,
+                "launchAndKernelSyncMs": 1.2622109998119413,
+                "downloadMs": 22.552278000148362,
+                "driverRoundTripMs": 97.76323500000217,
+                "uploadedBytes": 136000000,
+                "downloadedBytes": 68000000
+              }
+            ],
+            "bytes": 136000000,
+            "nodeIPCRoundTripMs": 1058.7318530000048
+          }
+        },
+        {
+          "trial": 3,
+          "tick": 400,
+          "rain": false,
+          "light": 1,
+          "mode": "cpu-soa",
+          "cold": false,
+          "totalMs": 1091.4280300000028,
+          "cloneMs": 864.334229,
+          "coordinateCheckMs": 14.919054000005417,
+          "packMs": 71.69435699999303,
+          "computeAndTransferMs": 85.4080810000014,
+          "unpackMs": 55.07230900000286,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "computeMs": 85.40312099999574
+          }
+        },
+        {
+          "trial": 3,
+          "tick": 400,
+          "rain": false,
+          "light": 1,
+          "mode": "cpu-workers-4",
+          "cold": false,
+          "totalMs": 633.6055150000029,
+          "cloneMs": 433.1828059999971,
+          "coordinateCheckMs": 11.922310000001744,
+          "packMs": 76.12986400000227,
+          "computeAndTransferMs": 59.406033999999636,
+          "unpackMs": 52.9645010000022,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "dispatchAndComputeMs": 59.38814399999683,
+            "workerComputeMs": [
+              43.78690500000084,
+              56.067856000001484,
+              58.94922999999835,
+              34.62795800000458
+            ]
+          }
+        },
+        {
+          "trial": 3,
+          "tick": 400,
+          "rain": false,
+          "light": 1,
+          "mode": "cpu-workers-8",
+          "cold": false,
+          "totalMs": 526.0318679999982,
+          "cloneMs": 352.4658930000005,
+          "coordinateCheckMs": 10.449546999996528,
+          "packMs": 66.66912500000035,
+          "computeAndTransferMs": 44.95793400000548,
+          "unpackMs": 51.48936899999535,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "dispatchAndComputeMs": 44.943154000000504,
+            "workerComputeMs": [
+              40.112483999997494,
+              44.579461000001174,
+              41.28421399999934,
+              44.108477000001585,
+              42.088560999996844,
+              42.588455000004615,
+              32.743022999995446,
+              39.53677900000184
+            ]
+          }
+        },
+        {
+          "trial": 4,
+          "tick": 500,
+          "rain": true,
+          "light": 0,
+          "mode": "node-reference",
+          "cold": false,
+          "totalMs": 543.686483999998,
+          "cloneMs": 442.3167009999961,
+          "computeMs": 101.36978300000192,
+          "different": 0,
+          "maximumAbsoluteError": 0
+        },
+        {
+          "trial": 4,
+          "tick": 500,
+          "rain": true,
+          "light": 0,
+          "mode": "gpu-1",
+          "cold": false,
+          "totalMs": 1892.4455660000021,
+          "cloneMs": 942.0521450000015,
+          "coordinateCheckMs": 16.83647999999812,
+          "packMs": 66.59684399999969,
+          "computeAndTransferMs": 815.9636129999999,
+          "unpackMs": 50.996484000002965,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 148.14663199990719,
+            "assemblyMs": 12.181451000060406,
+            "devices": [
+              {
+                "index": 1,
+                "uploadMs": 91.95695400012482,
+                "eventKernelMs": 1.6696959733963013,
+                "launchAndKernelSyncMs": 2.1295779999945808,
+                "downloadMs": 41.62883599997258,
+                "driverRoundTripMs": 135.71536800009198,
+                "uploadedBytes": 136000000,
+                "downloadedBytes": 136000000
+              }
+            ],
+            "bytes": 136000000,
+            "nodeIPCRoundTripMs": 815.9519230000005
+          }
+        },
+        {
+          "trial": 4,
+          "tick": 500,
+          "rain": true,
+          "light": 0,
+          "mode": "gpu-0,1",
+          "cold": false,
+          "totalMs": 1677.286033999997,
+          "cloneMs": 676.1412380000038,
+          "coordinateCheckMs": 11.990729999997711,
+          "packMs": 60.17180999999982,
+          "computeAndTransferMs": 870.2696880000003,
+          "unpackMs": 58.71256799999537,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 91.3221490000069,
+            "assemblyMs": 22.728218999873206,
+            "devices": [
+              {
+                "index": 0,
+                "uploadMs": 30.582763999973395,
+                "eventKernelMs": 0.3630079925060272,
+                "launchAndKernelSyncMs": 0.5160949999662989,
+                "downloadMs": 19.378931000119337,
+                "driverRoundTripMs": 50.47779000005903,
+                "uploadedBytes": 136000000,
+                "downloadedBytes": 68000000
+              },
+              {
+                "index": 1,
+                "uploadMs": 43.548441999973875,
+                "eventKernelMs": 0.940064013004303,
+                "launchAndKernelSyncMs": 1.2212999999974272,
+                "downloadMs": 23.47744500002591,
+                "driverRoundTripMs": 68.24718699999721,
+                "uploadedBytes": 136000000,
+                "downloadedBytes": 68000000
+              }
+            ],
+            "bytes": 136000000,
+            "nodeIPCRoundTripMs": 870.2539780000006
+          }
+        },
+        {
+          "trial": 4,
+          "tick": 500,
+          "rain": true,
+          "light": 0,
+          "mode": "cpu-soa",
+          "cold": false,
+          "totalMs": 1285.6180319999985,
+          "cloneMs": 1026.4908510000023,
+          "coordinateCheckMs": 10.877790999998979,
+          "packMs": 82.5292249999984,
+          "computeAndTransferMs": 106.32323200000246,
+          "unpackMs": 59.39693299999635,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "computeMs": 106.31656199999998
+          }
+        },
+        {
+          "trial": 4,
+          "tick": 500,
+          "rain": true,
+          "light": 0,
+          "mode": "cpu-workers-4",
+          "cold": false,
+          "totalMs": 782.9631360000058,
+          "cloneMs": 586.5536760000032,
+          "coordinateCheckMs": 12.698365999996895,
+          "packMs": 76.26901300000463,
+          "computeAndTransferMs": 48.17511899999954,
+          "unpackMs": 59.26696200000151,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "dispatchAndComputeMs": 48.15965899999719,
+            "workerComputeMs": [
+              37.818153000000166,
+              47.434133000002475,
+              47.880887000006624,
+              37.26682900000014
+            ]
+          }
+        },
+        {
+          "trial": 4,
+          "tick": 500,
+          "rain": true,
+          "light": 0,
+          "mode": "cpu-workers-8",
+          "cold": false,
+          "totalMs": 722.3681810000053,
+          "cloneMs": 573.3319650000049,
+          "coordinateCheckMs": 10.139274000001024,
+          "packMs": 58.1484319999945,
+          "computeAndTransferMs": 34.866689000002225,
+          "unpackMs": 45.881821000002674,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "dispatchAndComputeMs": 34.84931900000083,
+            "workerComputeMs": [
+              27.602577999998175,
+              31.252488999998604,
+              31.58886199999688,
+              27.05727399999887,
+              32.44741900000372,
+              27.147705000003043,
+              30.431603000004543,
+              34.37306499999977
+            ]
+          }
+        },
+        {
+          "trial": 4,
+          "tick": 500,
+          "rain": true,
+          "light": 0,
+          "mode": "gpu-0",
+          "cold": false,
+          "totalMs": 1305.7240940000047,
+          "cloneMs": 244.2245250000051,
+          "coordinateCheckMs": 9.490609000000404,
+          "packMs": 67.61009999999806,
+          "computeAndTransferMs": 928.7047180000009,
+          "unpackMs": 55.694142000000284,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 61.91353300005176,
+            "assemblyMs": 15.247295999870403,
+            "devices": [
+              {
+                "index": 0,
+                "uploadMs": 24.347671999976228,
+                "eventKernelMs": 0.5566719770431519,
+                "launchAndKernelSyncMs": 0.6836249999651045,
+                "downloadMs": 21.2694570000167,
+                "driverRoundTripMs": 46.30075399995803,
+                "uploadedBytes": 136000000,
+                "downloadedBytes": 136000000
+              }
+            ],
+            "bytes": 136000000,
+            "nodeIPCRoundTripMs": 928.6921080000029
+          }
+        },
+        {
+          "trial": 5,
+          "tick": 600,
+          "rain": false,
+          "light": 0.4,
+          "mode": "node-reference",
+          "cold": false,
+          "totalMs": 815.4186059999993,
+          "cloneMs": 703.5332689999996,
+          "computeMs": 111.88533699999971,
+          "different": 0,
+          "maximumAbsoluteError": 0
+        },
+        {
+          "trial": 5,
+          "tick": 600,
+          "rain": false,
+          "light": 0.4,
+          "mode": "gpu-0,1",
+          "cold": false,
+          "totalMs": 1799.3099569999977,
+          "cloneMs": 829.053436000002,
+          "coordinateCheckMs": 12.499313000000257,
+          "packMs": 62.35195599999861,
+          "computeAndTransferMs": 845.5134689999977,
+          "unpackMs": 49.89178299999912,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 148.82559099987702,
+            "assemblyMs": 20.194716999867524,
+            "devices": [
+              {
+                "index": 0,
+                "uploadMs": 21.018894000008004,
+                "eventKernelMs": 0.3641279935836792,
+                "launchAndKernelSyncMs": 0.556125000002794,
+                "downloadMs": 11.02617099991221,
+                "driverRoundTripMs": 32.60118999992301,
+                "uploadedBytes": 136000000,
+                "downloadedBytes": 68000000
+              },
+              {
+                "index": 1,
+                "uploadMs": 92.41689500004213,
+                "eventKernelMs": 8.124863624572754,
+                "launchAndKernelSyncMs": 9.123705000092741,
+                "downloadMs": 26.729441000043153,
+                "driverRoundTripMs": 128.27004100017803,
+                "uploadedBytes": 136000000,
+                "downloadedBytes": 68000000
+              }
+            ],
+            "bytes": 136000000,
+            "nodeIPCRoundTripMs": 845.4984790000017
+          }
+        },
+        {
+          "trial": 5,
+          "tick": 600,
+          "rain": false,
+          "light": 0.4,
+          "mode": "cpu-soa",
+          "cold": false,
+          "totalMs": 1125.0831190000026,
+          "cloneMs": 916.565294,
+          "coordinateCheckMs": 13.469641000003321,
+          "packMs": 59.731073999995715,
+          "computeAndTransferMs": 81.50146500000119,
+          "unpackMs": 53.815645000002405,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "computeMs": 81.49649499999941
+          }
+        },
+        {
+          "trial": 5,
+          "tick": 600,
+          "rain": false,
+          "light": 0.4,
+          "mode": "cpu-workers-4",
+          "cold": false,
+          "totalMs": 810.4261019999976,
+          "cloneMs": 607.2542119999998,
+          "coordinateCheckMs": 17.477804000001925,
+          "packMs": 88.4938919999986,
+          "computeAndTransferMs": 37.961684000001696,
+          "unpackMs": 59.238509999995586,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "dispatchAndComputeMs": 37.93495400000393,
+            "workerComputeMs": [
+              36.84597500000382,
+              35.697925000000396,
+              37.57550099999935,
+              33.80702900000324
+            ]
+          }
+        },
+        {
+          "trial": 5,
+          "tick": 600,
+          "rain": false,
+          "light": 0.4,
+          "mode": "cpu-workers-8",
+          "cold": false,
+          "totalMs": 800.4493559999974,
+          "cloneMs": 615.3182860000015,
+          "coordinateCheckMs": 13.022006999999576,
+          "packMs": 88.36871099999553,
+          "computeAndTransferMs": 33.49860700000136,
+          "unpackMs": 50.241744999999355,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "dispatchAndComputeMs": 33.47812700000213,
+            "workerComputeMs": [
+              31.735782000003383,
+              24.901526000001468,
+              29.53066399999807,
+              33.08797400000185,
+              29.971118000001297,
+              30.022407999997085,
+              30.330990999995265,
+              30.286740999996255
+            ]
+          }
+        },
+        {
+          "trial": 5,
+          "tick": 600,
+          "rain": false,
+          "light": 0.4,
+          "mode": "gpu-0",
+          "cold": false,
+          "totalMs": 1704.9779449999987,
+          "cloneMs": 691.5723839999991,
+          "coordinateCheckMs": 14.076107000000775,
+          "packMs": 76.70205300000089,
+          "computeAndTransferMs": 868.703005000003,
+          "unpackMs": 53.924395999994886,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 58.756554999945365,
+            "assemblyMs": 18.386952000128076,
+            "devices": [
+              {
+                "index": 0,
+                "uploadMs": 21.319736000123157,
+                "eventKernelMs": 0.5489919781684875,
+                "launchAndKernelSyncMs": 0.654395999845292,
+                "downloadMs": 18.094849000135582,
+                "driverRoundTripMs": 40.06898100010403,
+                "uploadedBytes": 136000000,
+                "downloadedBytes": 136000000
+              }
+            ],
+            "bytes": 136000000,
+            "nodeIPCRoundTripMs": 868.6888950000066
+          }
+        },
+        {
+          "trial": 5,
+          "tick": 600,
+          "rain": false,
+          "light": 0.4,
+          "mode": "gpu-1",
+          "cold": false,
+          "totalMs": 1630.316856999998,
+          "cloneMs": 714.3925679999957,
+          "coordinateCheckMs": 11.611576000010245,
+          "packMs": 65.14220699999714,
+          "computeAndTransferMs": 781.2637279999908,
+          "unpackMs": 57.906778000004124,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 153.84038000001965,
+            "assemblyMs": 16.06660299989926,
+            "devices": [
+              {
+                "index": 1,
+                "uploadMs": 90.59742799991,
+                "eventKernelMs": 1.7095359563827515,
+                "launchAndKernelSyncMs": 2.1711880001475947,
+                "downloadMs": 44.73883899981956,
+                "driverRoundTripMs": 137.50745499987715,
+                "uploadedBytes": 136000000,
+                "downloadedBytes": 136000000
+              }
+            ],
+            "bytes": 136000000,
+            "nodeIPCRoundTripMs": 781.2320280000131
+          }
+        },
+        {
+          "trial": 6,
+          "tick": 700,
+          "rain": true,
+          "light": 1,
+          "mode": "node-reference",
+          "cold": false,
+          "totalMs": 1018.6580029999895,
+          "cloneMs": 906.3588269999891,
+          "computeMs": 112.29917600000044,
+          "different": 0,
+          "maximumAbsoluteError": 0
+        },
+        {
+          "trial": 6,
+          "tick": 700,
+          "rain": true,
+          "light": 1,
+          "mode": "cpu-soa",
+          "cold": false,
+          "totalMs": 1659.003905999998,
+          "cloneMs": 1377.9148600000044,
+          "coordinateCheckMs": 19.648271999991266,
+          "packMs": 85.93974800000433,
+          "computeAndTransferMs": 122.6752109999943,
+          "unpackMs": 52.825815000003786,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "computeMs": 122.66839099999925
+          }
+        },
+        {
+          "trial": 6,
+          "tick": 700,
+          "rain": true,
+          "light": 1,
+          "mode": "cpu-workers-4",
+          "cold": false,
+          "totalMs": 771.9691199999943,
+          "cloneMs": 583.2600949999905,
+          "coordinateCheckMs": 18.216169999999693,
+          "packMs": 69.5032429999992,
+          "computeAndTransferMs": 49.01913400000194,
+          "unpackMs": 51.97047800000291,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "dispatchAndComputeMs": 49.003953999999794,
+            "workerComputeMs": [
+              36.161338000005344,
+              48.58377100000507,
+              44.05987299999106,
+              28.351273000007495
+            ]
+          }
+        },
+        {
+          "trial": 6,
+          "tick": 700,
+          "rain": true,
+          "light": 1,
+          "mode": "cpu-workers-8",
+          "cold": false,
+          "totalMs": 535.5089409999928,
+          "cloneMs": 374.7198570000037,
+          "coordinateCheckMs": 10.984400000001187,
+          "packMs": 66.35212599999795,
+          "computeAndTransferMs": 33.54915700000129,
+          "unpackMs": 49.90340099998866,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "dispatchAndComputeMs": 33.53092699999979,
+            "workerComputeMs": [
+              24.465620999995735,
+              27.34050500000012,
+              31.480509000000893,
+              24.442981000000145,
+              33.10018300000229,
+              24.95243499999924,
+              24.927604999989853,
+              30.88898400000471
+            ]
+          }
+        },
+        {
+          "trial": 6,
+          "tick": 700,
+          "rain": true,
+          "light": 1,
+          "mode": "gpu-0",
+          "cold": false,
+          "totalMs": 1278.260242999997,
+          "cloneMs": 270.00102300000435,
+          "coordinateCheckMs": 8.674610999994911,
+          "packMs": 58.02288800000679,
+          "computeAndTransferMs": 892.4055660000013,
+          "unpackMs": 49.15615499998967,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 57.35087299990482,
+            "assemblyMs": 16.751298000144743,
+            "devices": [
+              {
+                "index": 0,
+                "uploadMs": 21.1489650000658,
+                "eventKernelMs": 0.5822719931602478,
+                "launchAndKernelSyncMs": 0.7439959999828716,
+                "downloadMs": 18.470212000011088,
+                "driverRoundTripMs": 40.36317300005976,
+                "uploadedBytes": 136000000,
+                "downloadedBytes": 136000000
+              }
+            ],
+            "bytes": 136000000,
+            "nodeIPCRoundTripMs": 892.3912859999982
+          }
+        },
+        {
+          "trial": 6,
+          "tick": 700,
+          "rain": true,
+          "light": 1,
+          "mode": "gpu-1",
+          "cold": false,
+          "totalMs": 1620.3705000000045,
+          "cloneMs": 615.2885530000058,
+          "coordinateCheckMs": 9.74319999999716,
+          "packMs": 60.78058000000601,
+          "computeAndTransferMs": 882.6582199999975,
+          "unpackMs": 51.899946999998065,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 161.3453570000729,
+            "assemblyMs": 14.829612000085035,
+            "devices": [
+              {
+                "index": 1,
+                "uploadMs": 92.90230400006294,
+                "eventKernelMs": 8.8405122756958,
+                "launchAndKernelSyncMs": 9.89157199978763,
+                "downloadMs": 43.3777570001439,
+                "driverRoundTripMs": 146.17163299999447,
+                "uploadedBytes": 136000000,
+                "downloadedBytes": 136000000
+              }
+            ],
+            "bytes": 136000000,
+            "nodeIPCRoundTripMs": 882.6446399999986
+          }
+        },
+        {
+          "trial": 6,
+          "tick": 700,
+          "rain": true,
+          "light": 1,
+          "mode": "gpu-0,1",
+          "cold": false,
+          "totalMs": 1677.93398300001,
+          "cloneMs": 756.9923340000096,
+          "coordinateCheckMs": 9.2426359999954,
+          "packMs": 60.45189699999173,
+          "computeAndTransferMs": 795.7509000000136,
+          "unpackMs": 55.49621599999955,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 90.6677650000347,
+            "assemblyMs": 19.476189999977578,
+            "devices": [
+              {
+                "index": 0,
+                "uploadMs": 36.665731000084634,
+                "eventKernelMs": 0.4633600115776062,
+                "launchAndKernelSyncMs": 0.5410039998423599,
+                "downloadMs": 14.357647999986511,
+                "driverRoundTripMs": 51.564382999913505,
+                "uploadedBytes": 136000000,
+                "downloadedBytes": 68000000
+              },
+              {
+                "index": 1,
+                "uploadMs": 48.06622499995683,
+                "eventKernelMs": 0.8929600119590759,
+                "launchAndKernelSyncMs": 1.2066799999956856,
+                "downloadMs": 21.59246700011863,
+                "driverRoundTripMs": 70.86537200007115,
+                "uploadedBytes": 136000000,
+                "downloadedBytes": 68000000
+              }
+            ],
+            "bytes": 136000000,
+            "nodeIPCRoundTripMs": 795.7352600000013
+          }
+        },
+        {
+          "trial": 7,
+          "tick": 800,
+          "rain": false,
+          "light": 0,
+          "mode": "node-reference",
+          "cold": false,
+          "totalMs": 1053.7494759999972,
+          "cloneMs": 947.1900809999934,
+          "computeMs": 106.55939500000386,
+          "different": 0,
+          "maximumAbsoluteError": 0
+        },
+        {
+          "trial": 7,
+          "tick": 800,
+          "rain": false,
+          "light": 0,
+          "mode": "cpu-workers-4",
+          "cold": false,
+          "totalMs": 1403.187539999999,
+          "cloneMs": 1240.231792999999,
+          "coordinateCheckMs": 11.561965000000782,
+          "packMs": 57.554151999996975,
+          "computeAndTransferMs": 44.5101250000007,
+          "unpackMs": 49.32950500000152,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "dispatchAndComputeMs": 44.49339499999769,
+            "workerComputeMs": [
+              29.546283000003314,
+              43.9725710000057,
+              36.45416999999725,
+              26.983371000009356
+            ]
+          }
+        },
+        {
+          "trial": 7,
+          "tick": 800,
+          "rain": false,
+          "light": 0,
+          "mode": "cpu-workers-8",
+          "cold": false,
+          "totalMs": 369.8682059999992,
+          "cloneMs": 233.65390799999295,
+          "coordinateCheckMs": 8.215437000006204,
+          "packMs": 58.65284199999587,
+          "computeAndTransferMs": 29.24877999999444,
+          "unpackMs": 40.09723900000972,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "dispatchAndComputeMs": 29.23450999999477,
+            "workerComputeMs": [
+              27.468236000000616,
+              23.75351499998942,
+              24.232168999995338,
+              23.31803100000252,
+              23.86706599999161,
+              25.61361100000795,
+              27.143232999995234,
+              28.804865999991307
+            ]
+          }
+        },
+        {
+          "trial": 7,
+          "tick": 800,
+          "rain": false,
+          "light": 0,
+          "mode": "gpu-0",
+          "cold": false,
+          "totalMs": 1136.6389150000032,
+          "cloneMs": 223.57068499999878,
+          "coordinateCheckMs": 7.869074000002001,
+          "packMs": 53.41927900000883,
+          "computeAndTransferMs": 799.6179399999965,
+          "unpackMs": 52.161936999997124,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 54.154553999978816,
+            "assemblyMs": 16.943158999993102,
+            "devices": [
+              {
+                "index": 0,
+                "uploadMs": 18.661002999806442,
+                "eventKernelMs": 0.5594239830970764,
+                "launchAndKernelSyncMs": 0.6754060000275786,
+                "downloadMs": 17.612994000046456,
+                "driverRoundTripMs": 36.949402999880476,
+                "uploadedBytes": 136000000,
+                "downloadedBytes": 136000000
+              }
+            ],
+            "bytes": 136000000,
+            "nodeIPCRoundTripMs": 799.6056600000011
+          }
+        },
+        {
+          "trial": 7,
+          "tick": 800,
+          "rain": false,
+          "light": 0,
+          "mode": "gpu-1",
+          "cold": false,
+          "totalMs": 1840.8857419999986,
+          "cloneMs": 876.0444540000026,
+          "coordinateCheckMs": 9.82815099999425,
+          "packMs": 62.586433000004035,
+          "computeAndTransferMs": 844.5172619999939,
+          "unpackMs": 47.909442000003764,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 193.26653400003124,
+            "assemblyMs": 11.232842000026722,
+            "devices": [
+              {
+                "index": 1,
+                "uploadMs": 92.79829000001882,
+                "eventKernelMs": 16.313823699951172,
+                "launchAndKernelSyncMs": 17.340173000093273,
+                "downloadMs": 71.64633699994738,
+                "driverRoundTripMs": 181.78480000005948,
+                "uploadedBytes": 136000000,
+                "downloadedBytes": 136000000
+              }
+            ],
+            "bytes": 136000000,
+            "nodeIPCRoundTripMs": 844.5041520000086
+          }
+        },
+        {
+          "trial": 7,
+          "tick": 800,
+          "rain": false,
+          "light": 0,
+          "mode": "gpu-0,1",
+          "cold": false,
+          "totalMs": 1465.3380550000002,
+          "cloneMs": 622.7536929999915,
+          "coordinateCheckMs": 8.706891000008909,
+          "packMs": 52.14678699999058,
+          "computeAndTransferMs": 736.7903460000089,
+          "unpackMs": 44.94033800000034,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 87.90548999991188,
+            "assemblyMs": 18.711113000108526,
+            "devices": [
+              {
+                "index": 0,
+                "uploadMs": 23.921216999951866,
+                "eventKernelMs": 0.3386879861354828,
+                "launchAndKernelSyncMs": 0.49538400003257266,
+                "downloadMs": 13.221537999925204,
+                "driverRoundTripMs": 37.63813899990964,
+                "uploadedBytes": 136000000,
+                "downloadedBytes": 68000000
+              },
+              {
+                "index": 1,
+                "uploadMs": 46.72670300010395,
+                "eventKernelMs": 0.84934401512146,
+                "launchAndKernelSyncMs": 1.2584099999912723,
+                "downloadMs": 20.92587199990703,
+                "driverRoundTripMs": 68.91098500000226,
+                "uploadedBytes": 136000000,
+                "downloadedBytes": 68000000
+              }
+            ],
+            "bytes": 136000000,
+            "nodeIPCRoundTripMs": 736.7787960000132
+          }
+        },
+        {
+          "trial": 7,
+          "tick": 800,
+          "rain": false,
+          "light": 0,
+          "mode": "cpu-soa",
+          "cold": false,
+          "totalMs": 1057.1189349999913,
+          "cloneMs": 888.5571049999999,
+          "coordinateCheckMs": 8.971953999993275,
+          "packMs": 53.74656900000991,
+          "computeAndTransferMs": 63.64927099998749,
+          "unpackMs": 42.19403600000078,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "computeMs": 63.64481099999102
+          }
+        }
+      ],
+      "summary": {
+        "node-reference": {
+          "coldInvocationMs": 967.4923310000004,
+          "warmTotalMs": {
+            "min": 439.5927260000026,
+            "median": 815.4186059999993,
+            "max": 2234.9045929999993,
+            "mean": 937.8727407142839
+          },
+          "warmComputeAndTransferMs": {
+            "min": 84.28423600000133,
+            "median": 106.55939500000386,
+            "max": 548.6093959999998,
+            "mean": 164.66770914285812
+          },
+          "maxAbsoluteError": 0,
+          "differentValues": 0
+        },
+        "cpu-soa": {
+          "coldInvocationMs": 798.1560150000005,
+          "warmTotalMs": {
+            "min": 891.1198980000008,
+            "median": 1125.0831190000026,
+            "max": 5715.691391999997,
+            "mean": 1832.1519017142843
+          },
+          "warmComputeAndTransferMs": {
+            "min": 63.64927099998749,
+            "median": 85.4080810000014,
+            "max": 791.2625250000019,
+            "mean": 188.14475642856945
+          },
+          "maxAbsoluteError": 0,
+          "differentValues": 0
+        },
+        "cpu-workers-4": {
+          "coldInvocationMs": 422.85813899999994,
+          "warmTotalMs": {
+            "min": 633.6055150000029,
+            "median": 810.4261019999976,
+            "max": 3929.4901539999955,
+            "mean": 1325.5638619999993
+          },
+          "warmComputeAndTransferMs": {
+            "min": 33.62066499999855,
+            "median": 48.17511899999954,
+            "max": 144.7162640000024,
+            "mean": 59.62986071428635
+          },
+          "maxAbsoluteError": 0,
+          "differentValues": 0
+        },
+        "cpu-workers-8": {
+          "coldInvocationMs": 426.6435389999997,
+          "warmTotalMs": {
+            "min": 369.8682059999992,
+            "median": 535.5089409999928,
+            "max": 807.6554069999984,
+            "mean": 597.0325041428558
+          },
+          "warmComputeAndTransferMs": {
+            "min": 29.24877999999444,
+            "median": 33.54915700000129,
+            "max": 44.95793400000548,
+            "mean": 34.729517857143165
+          },
+          "maxAbsoluteError": 0,
+          "differentValues": 0
+        },
+        "gpu-0": {
+          "coldInvocationMs": 808.7325979999996,
+          "warmTotalMs": {
+            "min": 896.6243450000002,
+            "median": 1278.260242999997,
+            "max": 5138.7669129999995,
+            "mean": 1782.8933522857149
+          },
+          "warmComputeAndTransferMs": {
+            "min": 551.6104899999991,
+            "median": 868.703005000003,
+            "max": 1423.7681680000023,
+            "mean": 865.0115272857147
+          },
+          "maxAbsoluteError": 0,
+          "differentValues": 0
+        },
+        "gpu-1": {
+          "coldInvocationMs": 1475.0900870000005,
+          "warmTotalMs": {
+            "min": 1466.1680190000006,
+            "median": 1642.1528319999998,
+            "max": 2605.352448000005,
+            "mean": 1813.955994857144
+          },
+          "warmComputeAndTransferMs": {
+            "min": 735.4665879999993,
+            "median": 815.9636129999999,
+            "max": 1082.4227419999952,
+            "mean": 846.3528111428537
+          },
+          "maxAbsoluteError": 0,
+          "differentValues": 0
+        },
+        "gpu-0,1": {
+          "coldInvocationMs": 1199.90503,
+          "warmTotalMs": {
+            "min": 1329.0553599999985,
+            "median": 1677.286033999997,
+            "max": 2441.288760999996,
+            "mean": 1700.813292
+          },
+          "warmComputeAndTransferMs": {
+            "min": 628.1872169999988,
+            "median": 795.7509000000136,
+            "max": 1058.7527130000017,
+            "mean": 804.9182685714316
+          },
+          "maxAbsoluteError": 0,
+          "differentValues": 0
+        }
+      }
+    },
+    {
+      "cells": 4000000,
+      "generationMs": 4534.345578000008,
+      "topologyBuildMs": 8251.599636999992,
+      "topologyBytes": 192000000,
+      "stateBytes": 544000000,
+      "workerStartup": [
+        {
+          "workers": 4,
+          "startupMs": 131.55569999999716
+        },
+        {
+          "workers": 8,
+          "startupMs": 142.28235799999675
+        }
+      ],
+      "gpuSetup": [
+        {
+          "name": "gpu-0",
+          "setupMs": 16.680715999882523,
+          "devices": [
+            {
+              "index": 0,
+              "allocationAndTopologyUploadMs": 15.449775999968551,
+              "residentBytes": 1216000000
+            }
+          ],
+          "bytes": 0,
+          "nodeSetupMs": 100.0302340000053
+        },
+        {
+          "name": "gpu-1",
+          "setupMs": 98.63603300004797,
+          "devices": [
+            {
+              "index": 1,
+              "allocationAndTopologyUploadMs": 97.81697600010375,
+              "residentBytes": 1216000000
+            }
+          ],
+          "bytes": 0,
+          "nodeSetupMs": 169.6691109999956
+        },
+        {
+          "name": "gpu-0,1",
+          "setupMs": 61.026526999967246,
+          "devices": [
+            {
+              "index": 0,
+              "allocationAndTopologyUploadMs": 15.436394999824188,
+              "residentBytes": 944000000
+            },
+            {
+              "index": 1,
+              "allocationAndTopologyUploadMs": 43.86079699997936,
+              "residentBytes": 944000000
+            }
+          ],
+          "bytes": 0,
+          "nodeSetupMs": 128.31334400000924
+        }
+      ],
+      "trials": [
+        {
+          "trial": 0,
+          "tick": 100,
+          "rain": true,
+          "light": 1,
+          "mode": "node-reference",
+          "cold": true,
+          "totalMs": 6615.158525999999,
+          "cloneMs": 3747.271259000001,
+          "computeMs": 2867.8872669999982,
+          "different": 0,
+          "maximumAbsoluteError": 0
+        },
+        {
+          "trial": 0,
+          "tick": 100,
+          "rain": true,
+          "light": 1,
+          "mode": "cpu-soa",
+          "cold": true,
+          "totalMs": 4129.487338000006,
+          "cloneMs": 3304.143001000004,
+          "coordinateCheckMs": 34.46283000000403,
+          "packMs": 292.92299300000013,
+          "computeAndTransferMs": 329.5451499999908,
+          "unpackMs": 168.41336400000728,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "computeMs": 329.5398200000054
+          }
+        },
+        {
+          "trial": 0,
+          "tick": 100,
+          "rain": true,
+          "light": 1,
+          "mode": "cpu-workers-4",
+          "cold": true,
+          "totalMs": 3985.699548999997,
+          "cloneMs": 3399.5929580000084,
+          "coordinateCheckMs": 29.12940599999274,
+          "packMs": 271.367545000001,
+          "computeAndTransferMs": 140.93757999999798,
+          "unpackMs": 144.67205999999715,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "dispatchAndComputeMs": 140.92414999999164,
+            "workerComputeMs": [
+              119.70667899999535,
+              133.44883000000846,
+              125.86790899999323,
+              140.3829459999979
+            ]
+          }
+        },
+        {
+          "trial": 0,
+          "tick": 100,
+          "rain": true,
+          "light": 1,
+          "mode": "cpu-workers-8",
+          "cold": true,
+          "totalMs": 3831.575100999995,
+          "cloneMs": 3301.836752999996,
+          "coordinateCheckMs": 28.518370000005234,
+          "packMs": 246.38893000000098,
+          "computeAndTransferMs": 123.67852899999707,
+          "unpackMs": 131.15251899999566,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "dispatchAndComputeMs": 123.66703899999266,
+            "workerComputeMs": [
+              104.19296099999337,
+              123.11098400001356,
+              123.20225499999651,
+              115.12913900001149,
+              104.88913700000558,
+              98.63120599999093,
+              103.05454199999804,
+              107.19584499999473
+            ]
+          }
+        },
+        {
+          "trial": 0,
+          "tick": 100,
+          "rain": true,
+          "light": 1,
+          "mode": "gpu-0",
+          "cold": true,
+          "totalMs": 14866.938248999984,
+          "cloneMs": 3036.749113999991,
+          "coordinateCheckMs": 27.299910000001546,
+          "packMs": 184.12635500000033,
+          "computeAndTransferMs": 11424.627281999987,
+          "unpackMs": 194.13558800000465,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 200.74364900006003,
+            "assemblyMs": 66.3518449998719,
+            "devices": [
+              {
+                "index": 0,
+                "uploadMs": 53.222009000137405,
+                "eventKernelMs": 1.903167963027954,
+                "launchAndKernelSyncMs": 2.0068859998900734,
+                "downloadMs": 78.9565570000832,
+                "driverRoundTripMs": 134.18545200011067,
+                "uploadedBytes": 544000000,
+                "downloadedBytes": 544000000
+              }
+            ],
+            "bytes": 544000000,
+            "nodeIPCRoundTripMs": 11424.616781999997
+          }
+        },
+        {
+          "trial": 0,
+          "tick": 100,
+          "rain": true,
+          "light": 1,
+          "mode": "gpu-1",
+          "cold": true,
+          "totalMs": 18714.14420000001,
+          "cloneMs": 7609.27051599999,
+          "coordinateCheckMs": 28.809771000000183,
+          "packMs": 196.0801490000158,
+          "computeAndTransferMs": 10720.21159999998,
+          "unpackMs": 159.77216400002362,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 505.56968599994434,
+            "assemblyMs": 70.88555699988319,
+            "devices": [
+              {
+                "index": 1,
+                "uploadMs": 258.6148899999898,
+                "eventKernelMs": 6.561823844909668,
+                "launchAndKernelSyncMs": 7.076405999896451,
+                "downloadMs": 168.78614100005507,
+                "driverRoundTripMs": 434.47743699994135,
+                "uploadedBytes": 544000000,
+                "downloadedBytes": 544000000
+              }
+            ],
+            "bytes": 544000000,
+            "nodeIPCRoundTripMs": 10720.199560000008
+          }
+        },
+        {
+          "trial": 0,
+          "tick": 100,
+          "rain": true,
+          "light": 1,
+          "mode": "gpu-0,1",
+          "cold": true,
+          "totalMs": 16041.96452400001,
+          "cloneMs": 4850.633700000006,
+          "coordinateCheckMs": 24.524364999990212,
+          "packMs": 171.61003600002732,
+          "computeAndTransferMs": 10806.369765999989,
+          "unpackMs": 188.8266569999978,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 333.9052169999377,
+            "assemblyMs": 55.925764999983585,
+            "devices": [
+              {
+                "index": 0,
+                "uploadMs": 66.37777800006006,
+                "eventKernelMs": 0.9520000219345093,
+                "launchAndKernelSyncMs": 1.015668000036385,
+                "downloadMs": 53.651076999813085,
+                "driverRoundTripMs": 121.04452299990953,
+                "uploadedBytes": 544000000,
+                "downloadedBytes": 272000000
+              },
+              {
+                "index": 1,
+                "uploadMs": 188.39680899986888,
+                "eventKernelMs": 3.353408098220825,
+                "launchAndKernelSyncMs": 3.8636110000425106,
+                "downloadMs": 85.4623499999434,
+                "driverRoundTripMs": 277.7227699998548,
+                "uploadedBytes": 544000000,
+                "downloadedBytes": 272000000
+              }
+            ],
+            "bytes": 544000000,
+            "nodeIPCRoundTripMs": 10806.356595999998
+          }
+        },
+        {
+          "trial": 1,
+          "tick": 200,
+          "rain": false,
+          "light": 0,
+          "mode": "node-reference",
+          "cold": false,
+          "totalMs": 5037.570378000004,
+          "cloneMs": 4672.072684999992,
+          "computeMs": 365.4976930000121,
+          "different": 0,
+          "maximumAbsoluteError": 0
+        },
+        {
+          "trial": 1,
+          "tick": 200,
+          "rain": false,
+          "light": 0,
+          "mode": "cpu-workers-4",
+          "cold": false,
+          "totalMs": 6162.8444080000045,
+          "cloneMs": 5588.484471000003,
+          "coordinateCheckMs": 38.03955099999439,
+          "packMs": 223.31540399999358,
+          "computeAndTransferMs": 143.48030299998936,
+          "unpackMs": 169.52467900002375,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "dispatchAndComputeMs": 143.46291299999575,
+            "workerComputeMs": [
+              108.85211999999592,
+              142.90665900000022,
+              127.71988899999997,
+              130.32898000002024
+            ]
+          }
+        },
+        {
+          "trial": 1,
+          "tick": 200,
+          "rain": false,
+          "light": 0,
+          "mode": "cpu-workers-8",
+          "cold": false,
+          "totalMs": 4188.84214600001,
+          "cloneMs": 3595.5123350000067,
+          "coordinateCheckMs": 35.0508259999915,
+          "packMs": 230.16739600000437,
+          "computeAndTransferMs": 137.77994700000272,
+          "unpackMs": 190.33164200000465,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "dispatchAndComputeMs": 137.75915699999314,
+            "workerComputeMs": [
+              100.82236499999999,
+              131.73127899999963,
+              134.8034939999925,
+              132.35881400000653,
+              137.3313130000024,
+              122.50701600001776,
+              136.26251500000944,
+              111.04881599999499
+            ]
+          }
+        },
+        {
+          "trial": 1,
+          "tick": 200,
+          "rain": false,
+          "light": 0,
+          "mode": "gpu-0",
+          "cold": false,
+          "totalMs": 15694.418252000003,
+          "cloneMs": 4060.345508999977,
+          "coordinateCheckMs": 33.41123300002073,
+          "packMs": 216.31663399998797,
+          "computeAndTransferMs": 11204.873496999993,
+          "unpackMs": 179.47137900002417,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 171.59713099999863,
+            "assemblyMs": 45.98790199997893,
+            "devices": [
+              {
+                "index": 0,
+                "uploadMs": 60.794498999939606,
+                "eventKernelMs": 1.7764159440994263,
+                "launchAndKernelSyncMs": 1.867725000010978,
+                "downloadMs": 62.66949300015767,
+                "driverRoundTripMs": 125.33171700010826,
+                "uploadedBytes": 544000000,
+                "downloadedBytes": 544000000
+              }
+            ],
+            "bytes": 544000000,
+            "nodeIPCRoundTripMs": 11204.86166699999
+          }
+        },
+        {
+          "trial": 1,
+          "tick": 200,
+          "rain": false,
+          "light": 0,
+          "mode": "gpu-1",
+          "cold": false,
+          "totalMs": 16137.443843000015,
+          "cloneMs": 3182.015757999994,
+          "coordinateCheckMs": 29.950364999996964,
+          "packMs": 208.90406800000346,
+          "computeAndTransferMs": 12519.540462000004,
+          "unpackMs": 197.03319000001648,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 482.3902729999645,
+            "assemblyMs": 44.250517000136824,
+            "devices": [
+              {
+                "index": 1,
+                "uploadMs": 261.4709500001027,
+                "eventKernelMs": 6.495744228363037,
+                "launchAndKernelSyncMs": 7.02164599988464,
+                "downloadMs": 169.40234800017606,
+                "driverRoundTripMs": 437.8949440001634,
+                "uploadedBytes": 544000000,
+                "downloadedBytes": 544000000
+              }
+            ],
+            "bytes": 544000000,
+            "nodeIPCRoundTripMs": 12519.523182000004
+          }
+        },
+        {
+          "trial": 1,
+          "tick": 200,
+          "rain": false,
+          "light": 0,
+          "mode": "gpu-0,1",
+          "cold": false,
+          "totalMs": 17257.96869899999,
+          "cloneMs": 5268.374144000001,
+          "coordinateCheckMs": 40.342485000001034,
+          "packMs": 226.94438000000082,
+          "computeAndTransferMs": 11519.339860999986,
+          "unpackMs": 202.96782900000107,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 365.10897800008024,
+            "assemblyMs": 71.90980100017441,
+            "devices": [
+              {
+                "index": 0,
+                "uploadMs": 84.27550800001882,
+                "eventKernelMs": 0.9370560050010681,
+                "launchAndKernelSyncMs": 1.054498000030435,
+                "downloadMs": 46.074358999931064,
+                "driverRoundTripMs": 131.40436499998032,
+                "uploadedBytes": 544000000,
+                "downloadedBytes": 272000000
+              },
+              {
+                "index": 1,
+                "uploadMs": 203.56651800011605,
+                "eventKernelMs": 3.272768020629883,
+                "launchAndKernelSyncMs": 3.7586089999877004,
+                "downloadMs": 85.63124800002697,
+                "driverRoundTripMs": 292.9563750001307,
+                "uploadedBytes": 544000000,
+                "downloadedBytes": 272000000
+              }
+            ],
+            "bytes": 544000000,
+            "nodeIPCRoundTripMs": 11519.323969999998
+          }
+        },
+        {
+          "trial": 1,
+          "tick": 200,
+          "rain": false,
+          "light": 0,
+          "mode": "cpu-soa",
+          "cold": false,
+          "totalMs": 6308.071067000012,
+          "cloneMs": 5653.915548000019,
+          "coordinateCheckMs": 30.1308039999858,
+          "packMs": 208.76711099999375,
+          "computeAndTransferMs": 275.9206230000127,
+          "unpackMs": 139.33698100000038,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "computeMs": 275.9148919999716
+          }
+        },
+        {
+          "trial": 2,
+          "tick": 300,
+          "rain": true,
+          "light": 0.4,
+          "mode": "node-reference",
+          "cold": false,
+          "totalMs": 3607.199162999983,
+          "cloneMs": 3263.489036999992,
+          "computeMs": 343.71012599999085,
+          "different": 0,
+          "maximumAbsoluteError": 0
+        },
+        {
+          "trial": 2,
+          "tick": 300,
+          "rain": true,
+          "light": 0.4,
+          "mode": "cpu-workers-8",
+          "cold": false,
+          "totalMs": 5674.6273130000045,
+          "cloneMs": 5187.001266000007,
+          "coordinateCheckMs": 32.416440999979386,
+          "packMs": 202.8240410000144,
+          "computeAndTransferMs": 113.24250699998811,
+          "unpackMs": 139.14305800001603,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "dispatchAndComputeMs": 113.22994699998526,
+            "workerComputeMs": [
+              81.52211200000602,
+              112.87320500001078,
+              99.26359899999807,
+              102.77600600000005,
+              102.4446530000132,
+              86.7441220000037,
+              103.78566399999545,
+              102.82278700001189
+            ]
+          }
+        },
+        {
+          "trial": 2,
+          "tick": 300,
+          "rain": true,
+          "light": 0.4,
+          "mode": "gpu-0",
+          "cold": false,
+          "totalMs": 13208.725340000005,
+          "cloneMs": 1446.9701850000129,
+          "coordinateCheckMs": 35.09703199999058,
+          "packMs": 213.13842999999179,
+          "computeAndTransferMs": 11344.889339999994,
+          "unpackMs": 168.63035300001502,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 182.70250399996257,
+            "assemblyMs": 48.018851000051654,
+            "devices": [
+              {
+                "index": 0,
+                "uploadMs": 69.50995800002602,
+                "eventKernelMs": 1.7968000173568726,
+                "launchAndKernelSyncMs": 1.9019849999040161,
+                "downloadMs": 63.068548000046576,
+                "driverRoundTripMs": 134.4804909999766,
+                "uploadedBytes": 544000000,
+                "downloadedBytes": 544000000
+              }
+            ],
+            "bytes": 544000000,
+            "nodeIPCRoundTripMs": 11344.874040000024
+          }
+        },
+        {
+          "trial": 2,
+          "tick": 300,
+          "rain": true,
+          "light": 0.4,
+          "mode": "gpu-1",
+          "cold": false,
+          "totalMs": 15875.515389999986,
+          "cloneMs": 4226.986818000005,
+          "coordinateCheckMs": 31.286641000013333,
+          "packMs": 194.6626019999967,
+          "computeAndTransferMs": 11246.687055999995,
+          "unpackMs": 175.89227299997583,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 501.5621369998371,
+            "assemblyMs": 40.440691999947376,
+            "devices": [
+              {
+                "index": 1,
+                "uploadMs": 282.6440100000127,
+                "eventKernelMs": 6.611775875091553,
+                "launchAndKernelSyncMs": 7.079535000002579,
+                "downloadMs": 171.168679999937,
+                "driverRoundTripMs": 460.8922249999523,
+                "uploadedBytes": 544000000,
+                "downloadedBytes": 544000000
+              }
+            ],
+            "bytes": 544000000,
+            "nodeIPCRoundTripMs": 11246.672826000024
+          }
+        },
+        {
+          "trial": 2,
+          "tick": 300,
+          "rain": true,
+          "light": 0.4,
+          "mode": "gpu-0,1",
+          "cold": false,
+          "totalMs": 15591.009025999985,
+          "cloneMs": 4065.285057000001,
+          "coordinateCheckMs": 31.136608999979217,
+          "packMs": 199.27214200003073,
+          "computeAndTransferMs": 11128.388498999993,
+          "unpackMs": 166.92671899998095,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 350.54932400021244,
+            "assemblyMs": 62.851642999930846,
+            "devices": [
+              {
+                "index": 0,
+                "uploadMs": 76.8210700000509,
+                "eventKernelMs": 0.9422079920768738,
+                "launchAndKernelSyncMs": 1.0162779999518534,
+                "downloadMs": 39.88049600002341,
+                "driverRoundTripMs": 117.71784400002616,
+                "uploadedBytes": 544000000,
+                "downloadedBytes": 272000000
+              },
+              {
+                "index": 1,
+                "uploadMs": 198.23932300005254,
+                "eventKernelMs": 3.3198719024658203,
+                "launchAndKernelSyncMs": 3.832529999954204,
+                "downloadMs": 85.3126950000842,
+                "driverRoundTripMs": 287.38454800009094,
+                "uploadedBytes": 544000000,
+                "downloadedBytes": 272000000
+              }
+            ],
+            "bytes": 544000000,
+            "nodeIPCRoundTripMs": 11128.378109000041
+          }
+        },
+        {
+          "trial": 2,
+          "tick": 300,
+          "rain": true,
+          "light": 0.4,
+          "mode": "cpu-soa",
+          "cold": false,
+          "totalMs": 5750.0283649999765,
+          "cloneMs": 5111.931727999996,
+          "coordinateCheckMs": 30.042520000017248,
+          "packMs": 204.9479799999972,
+          "computeAndTransferMs": 262.00226599996677,
+          "unpackMs": 141.10387099999934,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "computeMs": 261.99738600000273
+          }
+        },
+        {
+          "trial": 2,
+          "tick": 300,
+          "rain": true,
+          "light": 0.4,
+          "mode": "cpu-workers-4",
+          "cold": false,
+          "totalMs": 1867.3514650000143,
+          "cloneMs": 1380.3398470000247,
+          "coordinateCheckMs": 29.732887999969535,
+          "packMs": 184.71728400001302,
+          "computeAndTransferMs": 127.70857800001977,
+          "unpackMs": 144.8528679999872,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "dispatchAndComputeMs": 127.69474800000899,
+            "workerComputeMs": [
+              118.55054800002836,
+              123.45764499995857,
+              123.89706899999874,
+              127.34460499999113
+            ]
+          }
+        },
+        {
+          "trial": 3,
+          "tick": 400,
+          "rain": false,
+          "light": 1,
+          "mode": "node-reference",
+          "cold": false,
+          "totalMs": 2165.200998000044,
+          "cloneMs": 1814.6726469999994,
+          "computeMs": 350.5283510000445,
+          "different": 0,
+          "maximumAbsoluteError": 0
+        },
+        {
+          "trial": 3,
+          "tick": 400,
+          "rain": false,
+          "light": 1,
+          "mode": "gpu-0",
+          "cold": false,
+          "totalMs": 16305.813339999993,
+          "cloneMs": 4577.631102999963,
+          "coordinateCheckMs": 24.158255000016652,
+          "packMs": 186.73174700001255,
+          "computeAndTransferMs": 11334.728072999977,
+          "unpackMs": 182.56416200002423,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 165.04576199986332,
+            "assemblyMs": 46.574345999943034,
+            "devices": [
+              {
+                "index": 0,
+                "uploadMs": 57.58423099996435,
+                "eventKernelMs": 1.800927996635437,
+                "launchAndKernelSyncMs": 1.8779140000333427,
+                "downloadMs": 58.76420899994628,
+                "driverRoundTripMs": 118.22635399994397,
+                "uploadedBytes": 544000000,
+                "downloadedBytes": 544000000
+              }
+            ],
+            "bytes": 544000000,
+            "nodeIPCRoundTripMs": 11334.717662999989
+          }
+        },
+        {
+          "trial": 3,
+          "tick": 400,
+          "rain": false,
+          "light": 1,
+          "mode": "gpu-1",
+          "cold": false,
+          "totalMs": 14238.781053000013,
+          "cloneMs": 1932.1367609999725,
+          "coordinateCheckMs": 27.552640000008978,
+          "packMs": 195.22337800002424,
+          "computeAndTransferMs": 11922.918209999974,
+          "unpackMs": 160.9500640000333,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 423.02187500013133,
+            "assemblyMs": 37.41737500013187,
+            "devices": [
+              {
+                "index": 1,
+                "uploadMs": 207.70293300006415,
+                "eventKernelMs": 6.5583038330078125,
+                "launchAndKernelSyncMs": 7.05621399993106,
+                "downloadMs": 170.6152709998605,
+                "driverRoundTripMs": 385.3744179998557,
+                "uploadedBytes": 544000000,
+                "downloadedBytes": 544000000
+              }
+            ],
+            "bytes": 544000000,
+            "nodeIPCRoundTripMs": 11922.908400000015
+          }
+        },
+        {
+          "trial": 3,
+          "tick": 400,
+          "rain": false,
+          "light": 1,
+          "mode": "gpu-0,1",
+          "cold": false,
+          "totalMs": 16789.93999600003,
+          "cloneMs": 4283.3679040000425,
+          "coordinateCheckMs": 26.475861999962945,
+          "packMs": 196.84442600002512,
+          "computeAndTransferMs": 12105.905988999992,
+          "unpackMs": 177.34581500000786,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 360.2218469998206,
+            "assemblyMs": 70.44426499987821,
+            "devices": [
+              {
+                "index": 0,
+                "uploadMs": 69.81882000013684,
+                "eventKernelMs": 1.0512640476226807,
+                "launchAndKernelSyncMs": 1.136708999865732,
+                "downloadMs": 41.683986000180084,
+                "driverRoundTripMs": 112.63951500018266,
+                "uploadedBytes": 544000000,
+                "downloadedBytes": 272000000
+              },
+              {
+                "index": 1,
+                "uploadMs": 200.3500130001612,
+                "eventKernelMs": 3.3167359828948975,
+                "launchAndKernelSyncMs": 3.8101789998563618,
+                "downloadMs": 85.33784800010835,
+                "driverRoundTripMs": 289.4980400001259,
+                "uploadedBytes": 544000000,
+                "downloadedBytes": 272000000
+              }
+            ],
+            "bytes": 544000000,
+            "nodeIPCRoundTripMs": 12105.894648999965
+          }
+        },
+        {
+          "trial": 3,
+          "tick": 400,
+          "rain": false,
+          "light": 1,
+          "mode": "cpu-soa",
+          "cold": false,
+          "totalMs": 5115.641416000028,
+          "cloneMs": 4423.295800000022,
+          "coordinateCheckMs": 34.49700099998154,
+          "packMs": 226.030923000013,
+          "computeAndTransferMs": 280.36763500003144,
+          "unpackMs": 151.45005699998,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "computeMs": 280.3637050000252
+          }
+        },
+        {
+          "trial": 3,
+          "tick": 400,
+          "rain": false,
+          "light": 1,
+          "mode": "cpu-workers-4",
+          "cold": false,
+          "totalMs": 1611.8840310000232,
+          "cloneMs": 1068.527155000018,
+          "coordinateCheckMs": 30.150709000008646,
+          "packMs": 203.35232999996515,
+          "computeAndTransferMs": 147.8260200000368,
+          "unpackMs": 162.02781699999468,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "dispatchAndComputeMs": 147.8112399999518,
+            "workerComputeMs": [
+              145.59781300002942,
+              120.4446529999841,
+              147.40145599999232,
+              118.09540400002152
+            ]
+          }
+        },
+        {
+          "trial": 3,
+          "tick": 400,
+          "rain": false,
+          "light": 1,
+          "mode": "cpu-workers-8",
+          "cold": false,
+          "totalMs": 1850.732605999976,
+          "cloneMs": 1347.6040159999975,
+          "coordinateCheckMs": 31.635889999975916,
+          "packMs": 207.1872990000411,
+          "computeAndTransferMs": 113.9566829999676,
+          "unpackMs": 150.34871799999382,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "dispatchAndComputeMs": 113.94369299995014,
+            "workerComputeMs": [
+              113.6819109999924,
+              113.23828799999319,
+              102.99057999998331,
+              107.19758100004401,
+              109.39589800004615,
+              103.87571699998807,
+              113.42299900000216,
+              108.81527399999322
+            ]
+          }
+        },
+        {
+          "trial": 4,
+          "tick": 500,
+          "rain": true,
+          "light": 0,
+          "mode": "node-reference",
+          "cold": false,
+          "totalMs": 2399.283143000037,
+          "cloneMs": 1993.3151300000027,
+          "computeMs": 405.96801300003426,
+          "different": 0,
+          "maximumAbsoluteError": 0
+        },
+        {
+          "trial": 4,
+          "tick": 500,
+          "rain": true,
+          "light": 0,
+          "mode": "gpu-1",
+          "cold": false,
+          "totalMs": 15647.038157999981,
+          "cloneMs": 3465.761572999996,
+          "coordinateCheckMs": 28.06330199999502,
+          "packMs": 205.0386409999919,
+          "computeAndTransferMs": 11786.36460999999,
+          "unpackMs": 161.8100320000085,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 427.1399809999821,
+            "assemblyMs": 43.04393600000367,
+            "devices": [
+              {
+                "index": 1,
+                "uploadMs": 206.1305090001042,
+                "eventKernelMs": 6.526879787445068,
+                "launchAndKernelSyncMs": 7.04069299990806,
+                "downloadMs": 170.70343099999263,
+                "driverRoundTripMs": 383.8746330000049,
+                "uploadedBytes": 544000000,
+                "downloadedBytes": 544000000
+              }
+            ],
+            "bytes": 544000000,
+            "nodeIPCRoundTripMs": 11786.353309999977
+          }
+        },
+        {
+          "trial": 4,
+          "tick": 500,
+          "rain": true,
+          "light": 0,
+          "mode": "gpu-0,1",
+          "cold": false,
+          "totalMs": 17752.385860999988,
+          "cloneMs": 6007.243062999973,
+          "coordinateCheckMs": 34.66909199999645,
+          "packMs": 211.43658500001766,
+          "computeAndTransferMs": 11322.593972000002,
+          "unpackMs": 176.4431489999988,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 362.1243709999362,
+            "assemblyMs": 71.02431499993145,
+            "devices": [
+              {
+                "index": 0,
+                "uploadMs": 67.99223300004087,
+                "eventKernelMs": 0.9769920110702515,
+                "launchAndKernelSyncMs": 1.0526680000566557,
+                "downloadMs": 35.333485999899494,
+                "driverRoundTripMs": 104.37838699999702,
+                "uploadedBytes": 544000000,
+                "downloadedBytes": 272000000
+              },
+              {
+                "index": 1,
+                "uploadMs": 201.59182999987024,
+                "eventKernelMs": 3.2821760177612305,
+                "launchAndKernelSyncMs": 3.7901890000284766,
+                "downloadMs": 85.4513039998892,
+                "driverRoundTripMs": 290.8333229997879,
+                "uploadedBytes": 544000000,
+                "downloadedBytes": 272000000
+              }
+            ],
+            "bytes": 544000000,
+            "nodeIPCRoundTripMs": 11322.58226200001
+          }
+        },
+        {
+          "trial": 4,
+          "tick": 500,
+          "rain": true,
+          "light": 0,
+          "mode": "cpu-soa",
+          "cold": false,
+          "totalMs": 4759.529827999999,
+          "cloneMs": 4143.396490999963,
+          "coordinateCheckMs": 25.278710000042338,
+          "packMs": 191.79008399997838,
+          "computeAndTransferMs": 255.5550129999756,
+          "unpackMs": 143.50953000003938,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "computeMs": 255.5516329999664
+          }
+        },
+        {
+          "trial": 4,
+          "tick": 500,
+          "rain": true,
+          "light": 0,
+          "mode": "cpu-workers-4",
+          "cold": false,
+          "totalMs": 3789.325927000027,
+          "cloneMs": 3288.88595299999,
+          "coordinateCheckMs": 29.10688899998786,
+          "packMs": 201.40297500003362,
+          "computeAndTransferMs": 128.2716139999684,
+          "unpackMs": 141.6584960000473,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "dispatchAndComputeMs": 128.25638400000753,
+            "workerComputeMs": [
+              126.69387299998198,
+              109.55072400002973,
+              127.94795299996622,
+              110.75390399998287
+            ]
+          }
+        },
+        {
+          "trial": 4,
+          "tick": 500,
+          "rain": true,
+          "light": 0,
+          "mode": "cpu-workers-8",
+          "cold": false,
+          "totalMs": 4305.319299999974,
+          "cloneMs": 3829.570873999968,
+          "coordinateCheckMs": 36.53629399999045,
+          "packMs": 196.8536300000269,
+          "computeAndTransferMs": 100.352704000019,
+          "unpackMs": 142.00579799996922,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "dispatchAndComputeMs": 100.33251400000881,
+            "workerComputeMs": [
+              94.94014299998526,
+              90.60263099998701,
+              97.41497199999867,
+              89.9040559999994,
+              88.0230819999706,
+              99.91171100002248,
+              90.08979699999327,
+              90.19585800002096
+            ]
+          }
+        },
+        {
+          "trial": 4,
+          "tick": 500,
+          "rain": true,
+          "light": 0,
+          "mode": "gpu-0",
+          "cold": false,
+          "totalMs": 15565.781636000029,
+          "cloneMs": 4315.072334000026,
+          "coordinateCheckMs": 34.518938999972306,
+          "packMs": 197.5148840000038,
+          "computeAndTransferMs": 10837.024926999991,
+          "unpackMs": 181.65055200003553,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 157.93434700003672,
+            "assemblyMs": 48.56745500001125,
+            "devices": [
+              {
+                "index": 0,
+                "uploadMs": 57.148878999896624,
+                "eventKernelMs": 1.7671359777450562,
+                "launchAndKernelSyncMs": 1.836904000128925,
+                "downloadMs": 50.07077599998411,
+                "driverRoundTripMs": 109.05655900000966,
+                "uploadedBytes": 544000000,
+                "downloadedBytes": 544000000
+              }
+            ],
+            "bytes": 544000000,
+            "nodeIPCRoundTripMs": 10837.011427000049
+          }
+        },
+        {
+          "trial": 5,
+          "tick": 600,
+          "rain": false,
+          "light": 0.4,
+          "mode": "node-reference",
+          "cold": false,
+          "totalMs": 4762.043258999998,
+          "cloneMs": 4420.100295000011,
+          "computeMs": 341.9429639999871,
+          "different": 0,
+          "maximumAbsoluteError": 0
+        },
+        {
+          "trial": 5,
+          "tick": 600,
+          "rain": false,
+          "light": 0.4,
+          "mode": "gpu-0,1",
+          "cold": false,
+          "totalMs": 14450.974859000009,
+          "cloneMs": 2613.9494309999864,
+          "coordinateCheckMs": 32.596813999989536,
+          "packMs": 205.35843900003238,
+          "computeAndTransferMs": 11435.843762999983,
+          "unpackMs": 163.22641200001817,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 434.24289300014607,
+            "assemblyMs": 61.327208999955474,
+            "devices": [
+              {
+                "index": 0,
+                "uploadMs": 70.74985000008382,
+                "eventKernelMs": 0.9449599981307983,
+                "launchAndKernelSyncMs": 1.0216480000053707,
+                "downloadMs": 42.52890899988415,
+                "driverRoundTripMs": 114.30040699997335,
+                "uploadedBytes": 544000000,
+                "downloadedBytes": 272000000
+              },
+              {
+                "index": 1,
+                "uploadMs": 283.58038399983343,
+                "eventKernelMs": 3.3114559650421143,
+                "launchAndKernelSyncMs": 3.8117090000469034,
+                "downloadMs": 85.23072900015904,
+                "driverRoundTripMs": 372.6228220000394,
+                "uploadedBytes": 544000000,
+                "downloadedBytes": 272000000
+              }
+            ],
+            "bytes": 544000000,
+            "nodeIPCRoundTripMs": 11435.833103000012
+          }
+        },
+        {
+          "trial": 5,
+          "tick": 600,
+          "rain": false,
+          "light": 0.4,
+          "mode": "cpu-soa",
+          "cold": false,
+          "totalMs": 7034.136622999969,
+          "cloneMs": 6379.905851999996,
+          "coordinateCheckMs": 32.568782999995165,
+          "packMs": 209.0701930000214,
+          "computeAndTransferMs": 268.3285569999716,
+          "unpackMs": 144.263237999985,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "computeMs": 268.3219270000118
+          }
+        },
+        {
+          "trial": 5,
+          "tick": 600,
+          "rain": false,
+          "light": 0.4,
+          "mode": "cpu-workers-4",
+          "cold": false,
+          "totalMs": 4281.034218999965,
+          "cloneMs": 3696.322698999953,
+          "coordinateCheckMs": 35.17617300001439,
+          "packMs": 248.99422100000083,
+          "computeAndTransferMs": 132.259029000008,
+          "unpackMs": 168.28209699998843,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "dispatchAndComputeMs": 132.24594900000375,
+            "workerComputeMs": [
+              125.42914799996652,
+              113.76957100001164,
+              131.7265040000202,
+              113.56703799997922
+            ]
+          }
+        },
+        {
+          "trial": 5,
+          "tick": 600,
+          "rain": false,
+          "light": 0.4,
+          "mode": "cpu-workers-8",
+          "cold": false,
+          "totalMs": 2683.6682549999678,
+          "cloneMs": 2130.0859559999662,
+          "coordinateCheckMs": 37.39076900004875,
+          "packMs": 223.15928699995857,
+          "computeAndTransferMs": 126.48694600001909,
+          "unpackMs": 166.5452969999751,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "dispatchAndComputeMs": 126.47342600004049,
+            "workerComputeMs": [
+              99.4273529999773,
+              123.56080400000792,
+              122.62025700003142,
+              122.22821400000248,
+              95.94816700002411,
+              115.41625199996633,
+              108.66524200001732,
+              126.02210199995898
+            ]
+          }
+        },
+        {
+          "trial": 5,
+          "tick": 600,
+          "rain": false,
+          "light": 0.4,
+          "mode": "gpu-0",
+          "cold": false,
+          "totalMs": 14609.29151000001,
+          "cloneMs": 2077.9619420000236,
+          "coordinateCheckMs": 33.027095999976154,
+          "packMs": 203.9513830000069,
+          "computeAndTransferMs": 12094.903600999969,
+          "unpackMs": 199.44748800003435,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 178.38938199997756,
+            "assemblyMs": 49.107256999832316,
+            "devices": [
+              {
+                "index": 0,
+                "uploadMs": 67.7838359999896,
+                "eventKernelMs": 1.8059200048446655,
+                "launchAndKernelSyncMs": 1.8938739999612153,
+                "downloadMs": 59.36212300002808,
+                "driverRoundTripMs": 129.0398329999789,
+                "uploadedBytes": 544000000,
+                "downloadedBytes": 544000000
+              }
+            ],
+            "bytes": 544000000,
+            "nodeIPCRoundTripMs": 12094.89175099996
+          }
+        },
+        {
+          "trial": 5,
+          "tick": 600,
+          "rain": false,
+          "light": 0.4,
+          "mode": "gpu-1",
+          "cold": false,
+          "totalMs": 19205.095318000007,
+          "cloneMs": 5659.089725000027,
+          "coordinateCheckMs": 35.64936599996872,
+          "packMs": 197.94798599998467,
+          "computeAndTransferMs": 13073.357661000045,
+          "unpackMs": 239.05057999998098,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 420.2861019998636,
+            "assemblyMs": 44.63506199999756,
+            "devices": [
+              {
+                "index": 1,
+                "uploadMs": 197.48934199992618,
+                "eventKernelMs": 6.577600002288818,
+                "launchAndKernelSyncMs": 7.0776020002085716,
+                "downloadMs": 170.82982399983848,
+                "driverRoundTripMs": 375.39676799997324,
+                "uploadedBytes": 544000000,
+                "downloadedBytes": 544000000
+              }
+            ],
+            "bytes": 544000000,
+            "nodeIPCRoundTripMs": 13073.34155100002
+          }
+        },
+        {
+          "trial": 6,
+          "tick": 700,
+          "rain": true,
+          "light": 1,
+          "mode": "node-reference",
+          "cold": false,
+          "totalMs": 3930.6391719999956,
+          "cloneMs": 3528.5779500000062,
+          "computeMs": 402.06122199998936,
+          "different": 0,
+          "maximumAbsoluteError": 0
+        },
+        {
+          "trial": 6,
+          "tick": 700,
+          "rain": true,
+          "light": 1,
+          "mode": "cpu-soa",
+          "cold": false,
+          "totalMs": 4720.799876999983,
+          "cloneMs": 3983.831315999967,
+          "coordinateCheckMs": 36.26191000000108,
+          "packMs": 240.90986100002192,
+          "computeAndTransferMs": 286.4704909999855,
+          "unpackMs": 173.32629900000757,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "computeMs": 286.46443100000033
+          }
+        },
+        {
+          "trial": 6,
+          "tick": 700,
+          "rain": true,
+          "light": 1,
+          "mode": "cpu-workers-4",
+          "cold": false,
+          "totalMs": 1951.437922000012,
+          "cloneMs": 1334.0256609999924,
+          "coordinateCheckMs": 33.18245600000955,
+          "packMs": 237.88168900000164,
+          "computeAndTransferMs": 144.80851699999766,
+          "unpackMs": 201.53959900001064,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "dispatchAndComputeMs": 144.68588599999202,
+            "workerComputeMs": [
+              140.87834699999075,
+              113.782865999965,
+              144.1934219999821,
+              112.32272500003455
+            ]
+          }
+        },
+        {
+          "trial": 6,
+          "tick": 700,
+          "rain": true,
+          "light": 1,
+          "mode": "cpu-workers-8",
+          "cold": false,
+          "totalMs": 2507.5934240000206,
+          "cloneMs": 1896.2474290000391,
+          "coordinateCheckMs": 39.94049700000323,
+          "packMs": 254.35198099998524,
+          "computeAndTransferMs": 121.77416500000982,
+          "unpackMs": 195.2793519999832,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "dispatchAndComputeMs": 121.75076500000432,
+            "workerComputeMs": [
+              121.40562199999113,
+              109.51474399998551,
+              112.16973300004611,
+              108.2569150000345,
+              104.56764700001804,
+              110.42651099996874,
+              115.69269999995595,
+              106.64734299998963
+            ]
+          }
+        },
+        {
+          "trial": 6,
+          "tick": 700,
+          "rain": true,
+          "light": 1,
+          "mode": "gpu-0",
+          "cold": false,
+          "totalMs": 14620.624684000039,
+          "cloneMs": 2686.3625870000105,
+          "coordinateCheckMs": 36.913403999991715,
+          "packMs": 205.23467600002186,
+          "computeAndTransferMs": 11543.430212999985,
+          "unpackMs": 148.68380400002934,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 222.12408100017456,
+            "assemblyMs": 57.936909999853015,
+            "devices": [
+              {
+                "index": 0,
+                "uploadMs": 79.01766800000587,
+                "eventKernelMs": 1.7589759826660156,
+                "launchAndKernelSyncMs": 1.960254000096029,
+                "downloadMs": 82.88522599991666,
+                "driverRoundTripMs": 163.86314800001855,
+                "uploadedBytes": 544000000,
+                "downloadedBytes": 544000000
+              }
+            ],
+            "bytes": 544000000,
+            "nodeIPCRoundTripMs": 11543.419442999992
+          }
+        },
+        {
+          "trial": 6,
+          "tick": 700,
+          "rain": true,
+          "light": 1,
+          "mode": "gpu-1",
+          "cold": false,
+          "totalMs": 17737.414788999944,
+          "cloneMs": 4181.130505000008,
+          "coordinateCheckMs": 39.900196000002325,
+          "packMs": 269.13673699996434,
+          "computeAndTransferMs": 13079.39290700003,
+          "unpackMs": 167.85444399993867,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 527.0598209999662,
+            "assemblyMs": 63.56044199992539,
+            "devices": [
+              {
+                "index": 1,
+                "uploadMs": 282.0096929999636,
+                "eventKernelMs": 6.577951908111572,
+                "launchAndKernelSyncMs": 7.016212000053201,
+                "downloadMs": 174.09592199987856,
+                "driverRoundTripMs": 463.12182699989535,
+                "uploadedBytes": 544000000,
+                "downloadedBytes": 544000000
+              }
+            ],
+            "bytes": 544000000,
+            "nodeIPCRoundTripMs": 13079.378587000072
+          }
+        },
+        {
+          "trial": 6,
+          "tick": 700,
+          "rain": true,
+          "light": 1,
+          "mode": "gpu-0,1",
+          "cold": false,
+          "totalMs": 14830.031931999954,
+          "cloneMs": 2878.468363999971,
+          "coordinateCheckMs": 31.315972000011243,
+          "packMs": 203.6036890000105,
+          "computeAndTransferMs": 11566.859387999983,
+          "unpackMs": 149.7845189999789,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 378.8323269998273,
+            "assemblyMs": 78.90968399988196,
+            "devices": [
+              {
+                "index": 0,
+                "uploadMs": 103.28742499996224,
+                "eventKernelMs": 0.9638720154762268,
+                "launchAndKernelSyncMs": 1.0561579999830428,
+                "downloadMs": 49.90001999999549,
+                "driverRoundTripMs": 154.24360299994078,
+                "uploadedBytes": 544000000,
+                "downloadedBytes": 272000000
+              },
+              {
+                "index": 1,
+                "uploadMs": 212.6294259999213,
+                "eventKernelMs": 3.3221120834350586,
+                "launchAndKernelSyncMs": 3.82049800009554,
+                "downloadMs": 83.14387699988401,
+                "driverRoundTripMs": 299.59380099990085,
+                "uploadedBytes": 544000000,
+                "downloadedBytes": 272000000
+              }
+            ],
+            "bytes": 544000000,
+            "nodeIPCRoundTripMs": 11566.846788000083
+          }
+        },
+        {
+          "trial": 7,
+          "tick": 800,
+          "rain": false,
+          "light": 0,
+          "mode": "node-reference",
+          "cold": false,
+          "totalMs": 2602.7330579999834,
+          "cloneMs": 2264.0755409999983,
+          "computeMs": 338.6575169999851,
+          "different": 0,
+          "maximumAbsoluteError": 0
+        },
+        {
+          "trial": 7,
+          "tick": 800,
+          "rain": false,
+          "light": 0,
+          "mode": "cpu-workers-4",
+          "cold": false,
+          "totalMs": 4604.456096000038,
+          "cloneMs": 4168.6228010000195,
+          "coordinateCheckMs": 27.600103999953717,
+          "packMs": 184.06356200005393,
+          "computeAndTransferMs": 99.40750600001775,
+          "unpackMs": 124.76212299999315,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "dispatchAndComputeMs": 99.3907660000259,
+            "workerComputeMs": [
+              98.96574300003704,
+              98.96156199998222,
+              98.14360599999782,
+              97.92499499989208
+            ]
+          }
+        },
+        {
+          "trial": 7,
+          "tick": 800,
+          "rain": false,
+          "light": 0,
+          "mode": "cpu-workers-8",
+          "cold": false,
+          "totalMs": 3447.6988999999594,
+          "cloneMs": 3012.2619229999837,
+          "coordinateCheckMs": 28.188727000029758,
+          "packMs": 171.27361999999266,
+          "computeAndTransferMs": 94.518812000053,
+          "unpackMs": 141.45581799990032,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "dispatchAndComputeMs": 94.50649199995678,
+            "workerComputeMs": [
+              72.88103099993896,
+              94.15818699996453,
+              85.6166830000002,
+              86.32400400005281,
+              72.80987899994943,
+              71.96635699993931,
+              85.3973709999118,
+              86.07950100000016
+            ]
+          }
+        },
+        {
+          "trial": 7,
+          "tick": 800,
+          "rain": false,
+          "light": 0,
+          "mode": "gpu-0",
+          "cold": false,
+          "totalMs": 12443.846389999962,
+          "cloneMs": 1146.6968379999744,
+          "coordinateCheckMs": 29.740698000066914,
+          "packMs": 181.27694000001065,
+          "computeAndTransferMs": 10948.972407999914,
+          "unpackMs": 137.15950599999633,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 131.95846000007805,
+            "assemblyMs": 36.213192000104755,
+            "devices": [
+              {
+                "index": 0,
+                "uploadMs": 50.19871299964507,
+                "eventKernelMs": 1.773535966873169,
+                "launchAndKernelSyncMs": 1.8472560000191152,
+                "downloadMs": 43.52502700021432,
+                "driverRoundTripMs": 95.5709959998785,
+                "uploadedBytes": 544000000,
+                "downloadedBytes": 544000000
+              }
+            ],
+            "bytes": 544000000,
+            "nodeIPCRoundTripMs": 10948.94627700001
+          }
+        },
+        {
+          "trial": 7,
+          "tick": 800,
+          "rain": false,
+          "light": 0,
+          "mode": "gpu-1",
+          "cold": false,
+          "totalMs": 14689.298020999995,
+          "cloneMs": 4041.899921000004,
+          "coordinateCheckMs": 26.196301999967545,
+          "packMs": 158.6388840000145,
+          "computeAndTransferMs": 10329.285658000037,
+          "unpackMs": 133.2772559999721,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 424.3317569998908,
+            "assemblyMs": 36.87312400006704,
+            "devices": [
+              {
+                "index": 1,
+                "uploadMs": 209.81113900006676,
+                "eventKernelMs": 6.478879928588867,
+                "launchAndKernelSyncMs": 7.013769999957731,
+                "downloadMs": 170.44250099979763,
+                "driverRoundTripMs": 387.2674099998221,
+                "uploadedBytes": 544000000,
+                "downloadedBytes": 544000000
+              }
+            ],
+            "bytes": 544000000,
+            "nodeIPCRoundTripMs": 10329.275227000006
+          }
+        },
+        {
+          "trial": 7,
+          "tick": 800,
+          "rain": false,
+          "light": 0,
+          "mode": "gpu-0,1",
+          "cold": false,
+          "totalMs": 15180.931752000004,
+          "cloneMs": 4431.269293000107,
+          "coordinateCheckMs": 20.965293999994174,
+          "packMs": 158.35033099993598,
+          "computeAndTransferMs": 10439.090737999999,
+          "unpackMs": 131.25609599996824,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "gpuAndAssemblyMs": 411.8522559997473,
+            "assemblyMs": 47.06203000023379,
+            "devices": [
+              {
+                "index": 0,
+                "uploadMs": 51.323269000022265,
+                "eventKernelMs": 1.0094720125198364,
+                "launchAndKernelSyncMs": 1.0750149999694258,
+                "downloadMs": 22.540716000094108,
+                "driverRoundTripMs": 74.9390000000858,
+                "uploadedBytes": 544000000,
+                "downloadedBytes": 272000000
+              },
+              {
+                "index": 1,
+                "uploadMs": 277.5828129997535,
+                "eventKernelMs": 3.270656108856201,
+                "launchAndKernelSyncMs": 3.7988930002939014,
+                "downloadMs": 83.09066499987239,
+                "driverRoundTripMs": 364.4723709999198,
+                "uploadedBytes": 544000000,
+                "downloadedBytes": 272000000
+              }
+            ],
+            "bytes": 544000000,
+            "nodeIPCRoundTripMs": 10439.081258000107
+          }
+        },
+        {
+          "trial": 7,
+          "tick": 800,
+          "rain": false,
+          "light": 0,
+          "mode": "cpu-soa",
+          "cold": false,
+          "totalMs": 5447.740984999924,
+          "cloneMs": 4947.266296999995,
+          "coordinateCheckMs": 20.344370999955572,
+          "packMs": 151.2117449999787,
+          "computeAndTransferMs": 217.8485150000779,
+          "unpackMs": 111.07005699991714,
+          "different": 0,
+          "maximumAbsoluteError": 0,
+          "phases": {
+            "computeMs": 217.84378499991726
+          }
+        }
+      ],
+      "summary": {
+        "node-reference": {
+          "coldInvocationMs": 6615.158525999999,
+          "warmTotalMs": {
+            "min": 2165.200998000044,
+            "median": 3607.199162999983,
+            "max": 5037.570378000004,
+            "mean": 3500.667024428578
+          },
+          "warmComputeAndTransferMs": {
+            "min": 338.6575169999851,
+            "median": 350.5283510000445,
+            "max": 405.96801300003426,
+            "mean": 364.05226942857763
+          },
+          "maxAbsoluteError": 0,
+          "differentValues": 0
+        },
+        "cpu-soa": {
+          "coldInvocationMs": 4129.487338000006,
+          "warmTotalMs": {
+            "min": 4720.799876999983,
+            "median": 5447.740984999924,
+            "max": 7034.136622999969,
+            "mean": 5590.849737285699
+          },
+          "warmComputeAndTransferMs": {
+            "min": 217.8485150000779,
+            "median": 268.3285569999716,
+            "max": 286.4704909999855,
+            "mean": 263.78472857143163
+          },
+          "maxAbsoluteError": 0,
+          "differentValues": 0
+        },
+        "cpu-workers-4": {
+          "coldInvocationMs": 3985.699548999997,
+          "warmTotalMs": {
+            "min": 1611.8840310000232,
+            "median": 3789.325927000027,
+            "max": 6162.8444080000045,
+            "mean": 3466.904866857155
+          },
+          "warmComputeAndTransferMs": {
+            "min": 99.40750600001775,
+            "median": 132.259029000008,
+            "max": 147.8260200000368,
+            "mean": 131.96593814286254
+          },
+          "maxAbsoluteError": 0,
+          "differentValues": 0
+        },
+        "cpu-workers-8": {
+          "coldInvocationMs": 3831.575100999995,
+          "warmTotalMs": {
+            "min": 1850.732605999976,
+            "median": 3447.6988999999594,
+            "max": 5674.6273130000045,
+            "mean": 3522.640277714273
+          },
+          "warmComputeAndTransferMs": {
+            "min": 94.518812000053,
+            "median": 113.9566829999676,
+            "max": 137.77994700000272,
+            "mean": 115.44453771429419
+          },
+          "maxAbsoluteError": 0,
+          "differentValues": 0
+        },
+        "gpu-0": {
+          "coldInvocationMs": 14866.938248999984,
+          "warmTotalMs": {
+            "min": 12443.846389999962,
+            "median": 14620.624684000039,
+            "max": 16305.813339999993,
+            "mean": 14635.500164571435
+          },
+          "warmComputeAndTransferMs": {
+            "min": 10837.024926999991,
+            "median": 11334.728072999977,
+            "max": 12094.903600999969,
+            "mean": 11329.83172271426
+          },
+          "maxAbsoluteError": 0,
+          "differentValues": 0
+        },
+        "gpu-1": {
+          "coldInvocationMs": 18714.14420000001,
+          "warmTotalMs": {
+            "min": 14238.781053000013,
+            "median": 15875.515389999986,
+            "max": 19205.095318000007,
+            "mean": 16218.655224571421
+          },
+          "warmComputeAndTransferMs": {
+            "min": 10329.285658000037,
+            "median": 11922.918209999974,
+            "max": 13079.39290700003,
+            "mean": 11993.935223428582
+          },
+          "maxAbsoluteError": 0,
+          "differentValues": 0
+        },
+        "gpu-0,1": {
+          "coldInvocationMs": 16041.96452400001,
+          "warmTotalMs": {
+            "min": 14450.974859000009,
+            "median": 15591.009025999985,
+            "max": 17752.385860999988,
+            "mean": 15979.03458928571
+          },
+          "warmComputeAndTransferMs": {
+            "min": 10439.090737999999,
+            "median": 11435.843762999983,
+            "max": 12105.905988999992,
+            "mean": 11359.71745857142
+          },
+          "maxAbsoluteError": 0,
+          "differentValues": 0
+        }
+      }
+    }
+  ],
+  "gpu": [
+    {
+      "devices": [
+        {
+          "index": 0,
+          "architecture": "compute_120",
+          "contextMs": 97.4335930000052,
+          "compileMs": 12.683138000056715,
+          "moduleLoadMs": 0.20960200004083163
+        }
+      ],
+      "startupMs": 168.22168800000003,
+      "ready": true,
+      "precision": "Float64",
+      "fmad": false,
+      "bytes": 0
+    },
+    {
+      "devices": [
+        {
+          "index": 1,
+          "architecture": "compute_75",
+          "contextMs": 147.60393100004876,
+          "compileMs": 12.477137000132643,
+          "moduleLoadMs": 0.40708300002734177
+        }
+      ],
+      "startupMs": 214.32834100000002,
+      "ready": true,
+      "precision": "Float64",
+      "fmad": false,
+      "bytes": 0
+    },
+    {
+      "devices": [
+        {
+          "index": 0,
+          "architecture": "compute_120",
+          "contextMs": 95.53749599990624,
+          "compileMs": 13.56177600018782,
+          "moduleLoadMs": 0.25447199982409074
+        },
+        {
+          "index": 1,
+          "architecture": "compute_75",
+          "contextMs": 75.42931500006489,
+          "compileMs": 9.746432999918397,
+          "moduleLoadMs": 1.004538999950455
+        }
+      ],
+      "startupMs": 251.77205100000003,
+      "ready": true,
+      "precision": "Float64",
+      "fmad": false,
+      "bytes": 0
+    }
+  ],
+  "liveContract": {
+    "version": 3,
+    "comparisons": 192,
+    "differentValues": 0
+  },
+  "nvrtc": {
+    "path": "/opt/cuda/lib64/libnvrtc.so",
+    "sha256": "afff6fa2eae856b90f66c2d83bbce4a4177404c506291e3a83486244d86c2815"
+  },
+  "completedAt": "2026-09-22T08:34:37.419Z",
+  "hardwareAfter": {
+    "at": "2026-09-22T08:34:37.545Z",
+    "cpuModel": "AMD Ryzen 9 9950X3D 16-Core Processor",
+    "logicalCPUs": 32,
+    "parallelism": 32,
+    "cpuMax": {
+      "available": false,
+      "error": "ENOENT"
+    },
+    "memoryMax": {
+      "available": false,
+      "error": "ENOENT"
+    },
+    "memoryCurrent": {
+      "available": false,
+      "error": "ENOENT"
+    },
+    "hostLoadAverage": [
+      10.84,
+      11.59,
+      8.66
+    ],
+    "gpu": [
+      "0, NVIDIA GeForce RTX 5070 Ti, 16303, 12082, 10, 610.43.03",
+      "1, NVIDIA GeForce RTX 2060, 6144, 3401, 11, 610.43.03"
+    ]
+  },
+  "coreHashesAfter": {
+    "src/world/ecosystem-kernel.ts": "b1cb946781e204fd9db31520c61699f4f91cf431d1b735351984f6e2e3bf9b78",
+    "src/world/ecosystem.ts": "24444f458e70e6c41bb0e9fc5f88290ee50fbe1edbd3b44109805ce89baeee10",
+    "src/world/terrain.ts": "538280dba7df8ee07b6b8ada9d2e8ddd007b82bc8d1bae3196927709d3f14c97",
+    "src/world/agua.ts": "3f3be7cac9fffe40a31bd7d38b223b1d9398dd1d310d2170825b3b40bb031e0e",
+    "src/world/params.ts": "b10662cab2a7a8efd1b3f38d7f79c4edf63c175c88c08ba8366b13539a5dd51b"
+  },
+  "benchmarkHashesAfter": {
+    "scripts/compute-ecology-core.mjs": "f271d4e8d7590708ba42cef102b35a072278fa4e4a243163ab9c63db126011ef",
+    "scripts/compute-ecology-worker.mjs": "5ba9726a3ad941d947ce88ac906e2995e0d53c270610cc78b18dae99fb6df445",
+    "scripts/compute-ecology-clients.mjs": "e8b1deee3db738bbc61ba4a36a03bc1b88c1feb4f330aa0bad76149f3e84b6ec",
+    "scripts/compute-ecology-benchmark.mjs": "979e69ff703e15c3bb8ea97a9a47e8b3ba26f51d7d1f09a4886b9f4c492af797",
+    "scripts/compute-ecology-gpu.py": "475f2fb0b46390e6641b1dbec3e3daad17bbc4f75f40f15c4437fd48b1bf6784",
+    "scripts/compute-ecology.cu": "7c68c91437442b8456e40b25fd8ea50461042893485dbe0caac637c3ffe0a080"
+  },
+  "coreUnchanged": true,
+  "ok": true
+}

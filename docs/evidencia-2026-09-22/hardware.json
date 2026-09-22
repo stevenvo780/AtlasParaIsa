@@ -1,0 +1,48 @@
+{
+  "cpuModel": "AMD Ryzen 9 9950X3D 16-Core Processor",
+  "logicalCPUs": 32,
+  "affinityCPUs": 32,
+  "cpuMax": null,
+  "cpuset": "0-31",
+  "memoryMax": null,
+  "memoryCurrent": null,
+  "tools": {
+    "node": "/usr/bin/node",
+    "python3": "/usr/bin/python3",
+    "nvcc": "/opt/cuda/bin/nvcc",
+    "nvidia-smi": "/usr/bin/nvidia-smi",
+    "vulkaninfo": null,
+    "clinfo": null,
+    "g++": "/usr/bin/g++"
+  },
+  "gpus": [
+    "0, NVIDIA GeForce RTX 5070 Ti, 16303, 14603, 610.43.03, 12.0, 9, 5, 16",
+    "1, NVIDIA GeForce RTX 2060, 6144, 5637, 610.43.03, 7.5, 11, 2, 4"
+  ],
+  "cuda": {
+    "cuInit": 0,
+    "cuDeviceGetCount": 0,
+    "devices": 2
+  },
+  "vulkanICDFiles": [
+    "/usr/share/vulkan/icd.d/nvidia_icd.json"
+  ],
+  "vulkan": {
+    "vkCreateInstance": 0,
+    "enumerationResult": 0,
+    "devices": 2
+  },
+  "nodeWebGPU": "{\"navigator\":true,\"gpu\":false}",
+  "drm": [
+    {
+      "node": "/dev/dri/renderD129",
+      "readable": true,
+      "writable": true
+    },
+    {
+      "node": "/dev/dri/renderD128",
+      "readable": true,
+      "writable": true
+    }
+  ]
+}

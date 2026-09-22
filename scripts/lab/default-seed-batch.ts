@@ -144,7 +144,10 @@ export function verifyEvidence(batch: Batch, job: Job): string | undefined {
     const db = new DatabaseSync(join(job.output, 'world.sqlite'), { readOnly: true });
     try {
       const snapshot = db.prepare('SELECT body,digest FROM snapshots WHERE slot=0').get() as { body: string; digest: string } | undefined;
-      if (!snapshot || hash(snapshot.body) !== snapshot.digest || JSON.parse(snapshot.body).tick !== batch.ticks || !isDeepStrictEqual(JSON.parse(snapshot.body).params, batch.effectiveParams)) return 'Final SQLite checkpoint is absent, damaged or behind the horizon.';
+      if (!snapshot || hash(snapshot.body) !== snapshot.digest) return 'Final SQLite checkpoint is absent or damaged.';
+      const world = JSON.parse(snapshot.body);
+      if (world.seed !== job.seed || world.version !== (job.side === 'baseline' ? 7 : 9)) return 'Final SQLite checkpoint identity disagrees with the fixed seed or rules.';
+      if (world.tick !== batch.ticks || !isDeepStrictEqual(world.params, batch.effectiveParams)) return 'Final SQLite checkpoint is behind the horizon or has different laws.';
     } finally { db.close(); }
     for (let day = 1; day <= batch.days; day++) {
       const record = json(join(job.output, `day-${String(day).padStart(3, '0')}.json`));

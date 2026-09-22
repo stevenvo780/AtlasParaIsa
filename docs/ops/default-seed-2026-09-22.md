@@ -15,12 +15,12 @@ La [captura sanitizada](../evidencia-2026-09-22/default-seed-public-params.json)
 | V7 src completo + package.json | SHA256 `776ae07aa9a037e4d656f5abfc57d5cf770792d1102698e23ef68a4f9eadb4c7` |
 | V9 src completo + package.json | SHA256 `9addd8f10de65b86b579800bf31b9f2f10a39788aa9251527817de32bd9e704d` |
 | Instrumento family-reserve.ts + metrics.ts + family-observation.ts | SHA256 `12053834befc95ebedc4bf1bf4c4308ff49c040c21d233f585aa02d3f894f542` |
-| Wrapper portable, protocolo2 | SHA256 `4cb87b02603882fe12dc8e49b2998126529c8a5389a187841ca114eb8e533d8e` |
+| Wrapper portable, protocolo2, identidad final validada | SHA256 `4eabb260fbb096a8a43fae42d258503b40f241e335aac6e1105793fa0b7e45f2` |
 | Piloto portable | SHA256 `edc47d62a889cc6aaf1a8c4a7c4351f8a6357f695847ee54e248d3bb832892cb` |
 
 `prepare` extrae **ambos motores con git archive**, sin usar src del checkout ni exigir HEAD=V9. También extrae el instrumento original desde V9: modificaciones futuras al laboratorio no entran silenciosamente en esta comparación. Guarda copias de sólo lectura, sus hashes, ambos launchers y el JSON íntegro de parámetros. Cada parser de motor debe devolver exactamente los22 valores capturados.
 
-Los objetos Git referenciados tienen que existir en un clon nuevo. Se conservan mediante las ramas originales `sprint/family-reserve-v8-20260922` y `sprint/family-contention-v9-20260922` cuando sean publicadas; el historial de esta última alcanza V7. La existencia local se puede comprobar con `git cat-file -e <sha>^{commit}`. No sustituir un SHA ausente por HEAD ni por otra versión de reglas.
+Los objetos Git referenciados tienen que existir en un clon nuevo. Se conservan mediante las ramas originales publicadas `sprint/family-reserve-v8-20260922` y `sprint/family-contention-v9-20260922`; el historial de esta última alcanza V7. La existencia local se puede comprobar con `git cat-file -e <sha>^{commit}`. No sustituir un SHA ausente por HEAD ni por otra versión de reglas.
 
 ## Ejecución desde la raíz del repositorio
 
@@ -54,6 +54,14 @@ El piloto usa el mismo instrumento sin modificar, un día/2400ticks por brazo y 
 No se incluyen fixes técnicos posteriores a los dos commits fijados, incluido el encoder no-finito. Un error de esos binarios debe conservarse como resultado; no se reemplaza el motor en mitad de una corrida.
 
 ## Procedencia histórica y verificación de esta entrega
+
+La revisión de integración añadió la identidad del checkpoint al verificador final:
+semilla y versión deben coincidir con el brazo, además del tick, checksum y todas
+las leyes. Cuatro negativos alteran semilla o versión en los dos checkpoints del
+piloto y recomponen su checksum: el control anterior aceptaba el primero; la
+corrección rechaza los cuatro. Typecheck y3/3 pruebas pasan, manteniendo los dos
+pilotos reales de2400ticks. No se aplicó esta reparación al wrapper privado vivo;
+sus resultados requieren la auditoría independiente final correspondiente.
 
 El diagnóstico ya iniciado el22 de septiembre conserva el **wrapper privado de protocolo1** `68bdccf3e50e9cd990ca061dfcc5e82b7ce69f029fec07efae1b094600166733` y su piloto `513a1f3cdc80e7028feaec37b420f9dd1cf2344a93d5df3bb546a45cc73ff711`. El wrapper portable tiene bytes distintos; **no reemplaza ni adopta aquel manifiesto**. Sólo el instrumento físico/de métricas, los motores, las leyes y los presupuestos conservan las identidades anteriores.
 

@@ -7,7 +7,8 @@ import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { syncBuiltinESMExports } from 'node:module';
-import { artifactBytes, classifyOutcome } from '../scripts/lab/default-seed-batch.js';
+import { DatabaseSync } from 'node:sqlite';
+import { artifactBytes, classifyOutcome, verifyEvidence, type Batch } from '../scripts/lab/default-seed-batch.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const BASELINE = '3dd615ee069d9d61f51a4c74f85d33c15a4583e0';
@@ -65,6 +66,22 @@ test('portable frozen CLI archives both fixed laws away from candidate HEAD and 
   assert.equal(pilot.passed, true); assert.equal(pilot.batchHash, hash(original)); assert.equal(pilot.pilotHash, batch.pilotHash);
   assert.deepEqual(pilot.pilots.map((p: {checkpoint: {version: number}}) => p.checkpoint.version), [7, 9]);
   for (const p of pilot.pilots) assert.deepEqual(p.checkpoint, { tick: 2400, version: p.checkpoint.version, slot: 0, paramsEqual: true, inputs: 0 });
+  const pilotBatch = { ...batch, days: 1, ticks: 2400 } as Batch;
+  for (const originalJob of pilotBatch.jobs) {
+    const job = { ...originalJob, output: join(batchPath, 'pilot', originalJob.id) };
+    assert.equal(verifyEvidence(pilotBatch, job), undefined);
+    const db = new DatabaseSync(join(job.output, 'world.sqlite'));
+    try {
+      const row = db.prepare('SELECT body,digest FROM snapshots WHERE slot=0').get() as { body: string; digest: string };
+      for (const change of [{ seed: 1007 }, { version: originalJob.side === 'baseline' ? 9 : 7 }]) {
+        const altered = JSON.stringify({ ...JSON.parse(row.body), ...change });
+        db.prepare('UPDATE snapshots SET body=?,digest=? WHERE slot=0').run(altered, hash(altered));
+        assert.match(verifyEvidence(pilotBatch, job) ?? '', /identity/, 'checksum-valid wrong world must not certify completion');
+        db.prepare('UPDATE snapshots SET body=?,digest=? WHERE slot=0').run(row.body, row.digest);
+      }
+    } finally { db.close(); }
+    assert.equal(verifyEvidence(pilotBatch, job), undefined);
+  }
   assert.equal(cli(frozen, ['check', batchPath]).status, 0);
   writeFileSync(join(batchPath, 'pilot.json'), JSON.stringify({ ...pilot, batchHash: '0'.repeat(64) }));
   assert.notEqual(cli(frozen, ['run', batchPath]).status, 0, 'another manifest cannot borrow the completed pilot');

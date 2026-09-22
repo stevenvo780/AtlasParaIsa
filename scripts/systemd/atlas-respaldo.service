@@ -23,8 +23,11 @@ After=network.target
 Type=oneshot
 WorkingDirectory=/datos/workspaces/personal/AtlasParaIsa
 ExecStart=/datos/workspaces/personal/AtlasParaIsa/scripts/respaldo.sh
-# DB y DEST usan los valores por defecto del script (data/world.sqlite relativo a
-# WorkingDirectory; ~/.local/state/atlas-para-isa/backups). Para cambiarlos, añadir aquí:
+# Compartir CARTA_DATA_DIR con el servicio evita respaldar una versión archivada.
+EnvironmentFile=%h/.config/atlas-para-isa/runtime.env
+# CARTA_DATA_DIR absoluto y DEST se fijan en runtime.env antes de activar la unidad.
+# Si falta el archivo, systemd falla: no respalda silenciosamente una versión vieja.
+# Para una configuración explícita adicional, añadir aquí:
 #   Environment=DB=/ruta/al/mundo.sqlite
 #   Environment=DEST=/ruta/de/copias
 Nice=10

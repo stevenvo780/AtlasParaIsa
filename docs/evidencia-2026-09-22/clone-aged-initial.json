@@ -1,0 +1,257 @@
+{
+  "at": "2026-09-22T11:56:22.870Z",
+  "node": "v22.23.1",
+  "instrumentSha256": "60d4bfc94c00dde147fb0621a1cb26ee8baa57cee016d56136331f110c17d3b7",
+  "sourceHashes": {
+    "src/world/index.ts": "b184b575e3bee604cea7913670b55e022e1f802a20c8e4cb79f53079ae42d7d5",
+    "src/world/spatial.ts": "17861e50a4e6ade76981a06541ab86bd8f87e42e5612ef7ec4c0fecc69d652e9",
+    "src/world/statistics.ts": "c4f8374433a8121c998c421d0eb044a2e4c0c860d214240f6552ed3a8ab4d0c0",
+    "src/server/store.ts": "4f10800ee95857ccccc010dba59ecdd362e4cc8efd08a017ff995dbbe0096928"
+  },
+  "scope": "Clone only, real aged checkpoints at load and 19 unsaved physical steps (cadence20), alternating order, 10 warmups and60 measured rounds. Shared host, no forced GC, CPU includes runtime overhead. Historical V6 fixture migrates in memory to V7; original SQLite/WAL unchanged. No synthetic dormant terrain, server latency or timing reproduction of the historical 10.25ms baseline.",
+  "results": [
+    {
+      "path": "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/artifacts/coherence-20260922/baseline-server-51926/world.sqlite",
+      "sourceVersion": 6,
+      "loadedVersion": 7,
+      "seed": 51926,
+      "sourceTick": 12000,
+      "sourceSnapshotDigest": "becac8bb852c665f5cb1cf79b2b5da7ae71deffc23d32c9d492f7a3c77545c0c",
+      "archivedChunks": 433,
+      "before": {
+        "db": "84ddd751dc4c9035412485514889c1e019d14a89ce8563216413ac91a87c54fa",
+        "wal": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stages": [
+        {
+          "tick": 12000,
+          "pendingChunks": 0,
+          "pendingTiles": 0,
+          "pendingBytes": 2,
+          "activeTiles": 12288,
+          "people": 25,
+          "digest": "d3cf90fd8b676f137732e60f0b30501b4453008a3fc9d2cc1f285423c9aa4ae6",
+          "wall": {
+            "full": {
+              "n": 60,
+              "p50Ms": 15.039955000000191,
+              "p95Ms": 20.34253699999954
+            },
+            "shared": {
+              "n": 60,
+              "p50Ms": 16.476548999999977,
+              "p95Ms": 30.285782999999356
+            }
+          },
+          "processCPU": {
+            "full": {
+              "n": 60,
+              "p50Ms": 26.546,
+              "p95Ms": 46.137
+            },
+            "shared": {
+              "n": 60,
+              "p50Ms": 30.755,
+              "p95Ms": 81.269
+            }
+          }
+        },
+        {
+          "tick": 12019,
+          "pendingChunks": 4,
+          "pendingTiles": 1024,
+          "pendingBytes": 374722,
+          "activeTiles": 12288,
+          "people": 25,
+          "digest": "2800e10a15ba80f7e2217dfb98f574bc312213e12a7299fbaa41be9b6c1c6f0e",
+          "wall": {
+            "full": {
+              "n": 60,
+              "p50Ms": 22.14099300000089,
+              "p95Ms": 31.702816000000894
+            },
+            "shared": {
+              "n": 60,
+              "p50Ms": 19.890581999999995,
+              "p95Ms": 32.41191299999991
+            }
+          },
+          "processCPU": {
+            "full": {
+              "n": 60,
+              "p50Ms": 37.593,
+              "p95Ms": 56.048
+            },
+            "shared": {
+              "n": 60,
+              "p50Ms": 34.809,
+              "p95Ms": 95.743
+            }
+          }
+        }
+      ]
+    },
+    {
+      "path": "/datos/workspaces/personal/AtlasParaIsa-family-v8-20260922/artifacts/family-reserve-v8-20260922/batch-2026-09-22T10-44-21-140Z/runs/baseline-1012/world.sqlite",
+      "sourceVersion": 7,
+      "loadedVersion": 7,
+      "seed": 1012,
+      "sourceTick": 31200,
+      "sourceSnapshotDigest": "833c5ad4386272675c5c645e9144431976fd595e5988182f7f3853bb64ba86df",
+      "archivedChunks": 3208,
+      "before": {
+        "db": "439852db79eeced604d40a7bcba085bd0253daa89c7716a0b71962c8f10db27e",
+        "wal": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stages": [
+        {
+          "tick": 31200,
+          "pendingChunks": 0,
+          "pendingTiles": 0,
+          "pendingBytes": 2,
+          "activeTiles": 10496,
+          "people": 17,
+          "digest": "1ad65b3ae9737bd50936675a0bae5909745dcd2d3098dcaf1fbf00cd03e4bcde",
+          "wall": {
+            "full": {
+              "n": 60,
+              "p50Ms": 12.699113000002399,
+              "p95Ms": 25.41926500000045
+            },
+            "shared": {
+              "n": 60,
+              "p50Ms": 13.294509000003018,
+              "p95Ms": 20.20185499999934
+            }
+          },
+          "processCPU": {
+            "full": {
+              "n": 60,
+              "p50Ms": 21.006,
+              "p95Ms": 65.775
+            },
+            "shared": {
+              "n": 60,
+              "p50Ms": 22.96,
+              "p95Ms": 37.804
+            }
+          }
+        },
+        {
+          "tick": 31219,
+          "pendingChunks": 2,
+          "pendingTiles": 512,
+          "pendingBytes": 206732,
+          "activeTiles": 10496,
+          "people": 17,
+          "digest": "032e3826cbcb8fd1b6f2ed7521398e3206c13f248e85571541d2d198ac522984",
+          "wall": {
+            "full": {
+              "n": 60,
+              "p50Ms": 18.540690000001632,
+              "p95Ms": 31.37487300000066
+            },
+            "shared": {
+              "n": 60,
+              "p50Ms": 17.29131700000289,
+              "p95Ms": 29.9316089999993
+            }
+          },
+          "processCPU": {
+            "full": {
+              "n": 60,
+              "p50Ms": 32.441,
+              "p95Ms": 92.15
+            },
+            "shared": {
+              "n": 60,
+              "p50Ms": 29.142,
+              "p95Ms": 48.71
+            }
+          }
+        }
+      ]
+    },
+    {
+      "path": "/datos/workspaces/personal/AtlasParaIsa-family-v8-20260922/artifacts/family-reserve-v8-20260922/batch-2026-09-22T10-44-21-140Z/runs/baseline-1013/world.sqlite",
+      "sourceVersion": 7,
+      "loadedVersion": 7,
+      "seed": 1013,
+      "sourceTick": 31200,
+      "sourceSnapshotDigest": "26f62545440eda450c1dbbfaa41ec0a795ebf711d41ead814848b5fa5cd6c505",
+      "archivedChunks": 3114,
+      "before": {
+        "db": "678d74637bcbe4188b36906a97369d866dac8585934140d252cc2b4ba2386c52",
+        "wal": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stages": [
+        {
+          "tick": 31200,
+          "pendingChunks": 0,
+          "pendingTiles": 0,
+          "pendingBytes": 2,
+          "activeTiles": 18176,
+          "people": 24,
+          "digest": "18083517a58b3eebd75b584888c002c6b378d70b343de4bd603a7af0b69c2588",
+          "wall": {
+            "full": {
+              "n": 60,
+              "p50Ms": 21.085134000000835,
+              "p95Ms": 26.927431000003708
+            },
+            "shared": {
+              "n": 60,
+              "p50Ms": 20.541798000005656,
+              "p95Ms": 29.4377650000024
+            }
+          },
+          "processCPU": {
+            "full": {
+              "n": 60,
+              "p50Ms": 32.806,
+              "p95Ms": 49.588
+            },
+            "shared": {
+              "n": 60,
+              "p50Ms": 31.466,
+              "p95Ms": 75.545
+            }
+          }
+        },
+        {
+          "tick": 31219,
+          "pendingChunks": 4,
+          "pendingTiles": 1024,
+          "pendingBytes": 398396,
+          "activeTiles": 18176,
+          "people": 24,
+          "digest": "d9f1740409391efe2d299c751f669a0b49135970fa944f1d850d8b4ae6f676da",
+          "wall": {
+            "full": {
+              "n": 60,
+              "p50Ms": 33.00261000001046,
+              "p95Ms": 39.99555699998746
+            },
+            "shared": {
+              "n": 60,
+              "p50Ms": 30.825817999997525,
+              "p95Ms": 54.64689800000633
+            }
+          },
+          "processCPU": {
+            "full": {
+              "n": 60,
+              "p50Ms": 56.93,
+              "p95Ms": 82.633
+            },
+            "shared": {
+              "n": 60,
+              "p50Ms": 50.97,
+              "p95Ms": 163.731
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

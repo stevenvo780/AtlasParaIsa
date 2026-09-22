@@ -1,5 +1,6 @@
 // Isolated benchmark port, checked against the live EcosystemKernel; never imported by the app.
 import { isDeepStrictEqual } from 'node:util';
+import { createHash } from 'node:crypto';
 export const ECOLOGY_CONTRACT = Object.freeze({
   version: 3,
   fields: ['growth', 'fertility', 'life', 'moisture', 'drinkingWater', 'cultivation', 'traffic', 'vegetation', 'wood', 'feature', 'aquatic', 'ocean', 'mountain', 'wetland', 'woodPresent', 'x', 'y'],
@@ -21,6 +22,263 @@ export const FIELDS = ECOLOGY_CONTRACT.fields.length;
 export const MAX_CELLS = 4_000_000;
 export const FEATURES = [undefined, 'none', 'tree', 'pine', 'palm', 'cactus', 'reeds', 'stump', 'spring', 'pool', 'berries', 'flowers', 'rock', 'clay'];
 export const clamp = n => Math.max(0, Math.min(1, n));
+
+/**
+ * ECOLOGY_KERNEL_SPEC — versión 1.0 de las fórmulas del kernel vivo
+ * (`src/world/ecosystem-kernel.ts`). Sustituye al candado de bytes SHA256
+ * que bloqueaba el banco desde 2024-09-06: la lista cerrada de campos del
+ * tile y de constantes/coeficientes en fórmulas, junto con un hash canónico
+ * del cuerpo de `step()` con comentarios y espacios colapsados, acepta
+ * refactorizaciones de formato y rechaza cambios de reglas.
+ *
+ * `terms` declara cada aparición textual de un coeficiente de regla en el
+ * cuerpo de `step()`. Una entrada por ocurrencia (los valores que aparecen
+ * dos veces —`0.45`, `0.6`, `0.4`, `0.15`, `0.35`, `0.0002`, `0.001`,
+ * `0.002`, `0.008`, `0.25`, `2`— reciben varias entradas con sufijo
+ * contextual). Bumpear `version` y `canonicalStepBodyHash` cuando cambia
+ * una regla intencionalmente.
+ */
+export const ECOLOGY_KERNEL_SPEC = Object.freeze({
+  version: '1.0',
+  fieldsRead: Object.freeze([
+    'vegetation', 'moisture', 'terrain', 'biome', 'feature', 'growth',
+    'fertility', 'life', 'drinkingWater', 'cultivation', 'traffic', 'wood',
+    'x', 'y',
+  ]),
+  fieldsWritten: Object.freeze([
+    'life', 'fertility', 'growth', 'vegetation', 'traffic',
+    'cultivation', 'drinkingWater', 'moisture', 'wood', 'feature',
+  ]),
+  terms: Object.freeze({
+    // Umbrales y factores del parche life
+    lifeNeighborThreshold: 0.45,
+    lifeFertileThreshold: 0.45,
+    fertileNeighborCount: 2,
+    lifePatternFactor: 0.2,
+    lifeDroughtThreshold: 0.15,
+    growthDroughtThreshold: 0.15,
+    lifeDroughtPenalty: 0.015,
+    lifeTrafficPenalty: 0.004,
+
+    // cellularEnergy = light * moisture * (base + fertility * factor)
+    cellularEnergyBase: 0.6,
+    cellularEnergyFertilityFactor: 0.4,
+
+    // fertility = clamp(fertility + life * production − traffic * trafficDecay
+    //                − cultivation * cultivationDecay − decay * fertility)
+    fertilityProduction: 0.0012,
+    fertilityTrafficDecay: 0.0007,
+    fertilityCultivationDecay: 0.0002,
+
+    // growth = clamp(growth + produced − baselineDecay − traffic * trafficDecay
+    //                − droughtDecay)
+    growthLifeBase: 0.25,
+    growthLifeFactor: 0.75,
+    growthScale: 0.005,
+    growthBaselineDecay: 0.0002,
+    growthTrafficDecay: 0.002,
+    growthDroughtDecay: 0.001,
+    growthTrafficFactor: 0.9,
+
+    // vegetation = clamp(vegetation + produced * productionFactor − traffic * trafficDecay)
+    vegetationProductionFactor: 0.25,
+    vegetationTrafficDecay: 0.001,
+
+    // traffic y cultivation
+    trafficDecay: 0.0005,
+    cultivationDecay: 0.00002,
+
+    // drinkingWater: rain = 0.008 * (0.4 + fertility * 0.6), spring = 0.002
+    rainRecharge: 0.008,
+    rainFertilityBase: 0.4,
+    rainFertilityFactor: 0.6,
+    springRecharge: 0.002,
+    waterDecayDay: 0.00015,
+    waterDecayNight: 0.00003,
+
+    // moisture = clamp(moisture + (ocean ? oceanMoisture : 0) + (rain ? rainRecharge : 0))
+    oceanMoisture: 0.003,
+    rainMoistureRecharge: 0.008,
+
+    // Luz: day=1, night=0, dawn=0.4
+    dawnLight: 0.4,
+
+    // Regrowth de madera (tick % 100)
+    woodGrowthThreshold: 0.65,
+    woodFertilityThreshold: 0.4,
+    woodMoistureThreshold: 0.35,
+    woodTrafficThreshold: 0.35,
+    woodRegrowthRate: 0.025,
+    woodRegrowthCost: 0.05,
+    woodCapacityDefault: 12,
+    woodCapacityPalm: 6,
+    woodCapacityReeds: 2,
+  }),
+  // SHA256 del cuerpo de step() con comentarios /* */, // y secuencias de
+  // espacios colapsadas. Hay que bumpear la versión (y este hash) junto con
+  // cualquier cambio intencional de reglas.
+  canonicalStepBodyHash: '88aa7c842b2d9756df8c72d4c0f9a3abd08d213922531450c112f4b20e7b494a',
+});
+
+// Conteos/índices que aparecen en el cuerpo de step() y NO son reglas
+// versionadas. Mantener este set sincronizado con el kernel.
+const STRUCTURAL_NUMERIC_LITERALS = new Set([0, 1, 3, 8, 10, 100]);
+
+function extractStepBody(source) {
+  const stepStart = source.indexOf('step(tiles: Tile[]');
+  if (stepStart < 0) throw new Error('step() not found in kernel source');
+  let bodyStart = source.indexOf('{', stepStart);
+  if (bodyStart < 0) throw new Error('step() body start not found');
+  let depth = 1;
+  let i = bodyStart + 1;
+  while (i < source.length && depth > 0) {
+    const ch = source[i];
+    if (ch === '{') depth++;
+    else if (ch === '}') depth--;
+    i++;
+  }
+  if (depth !== 0) throw new Error('step() body braces unbalanced');
+  return source.slice(bodyStart, i - 1);
+}
+
+function stripComments(body) {
+  // /* ... */ primero (puede cruzar líneas).
+  let s = body.replace(/\/\*[\s\S]*?\*\//g, '');
+  // // después, pero solo si no estamos dentro de un literal de cadena.
+  s = s.split('\n').map(line => {
+    const idx = line.indexOf('//');
+    if (idx < 0) return line;
+    const before = line.slice(0, idx);
+    const sq = (before.match(/(?<!\\)'/g) || []).length;
+    const dq = (before.match(/(?<!\\)"/g) || []).length;
+    if (sq % 2 === 1 || dq % 2 === 1) return line;
+    return before;
+  }).join('\n');
+  return s;
+}
+
+function normalizeStepBody(source) {
+  return stripComments(extractStepBody(source)).replace(/\s+/g, ' ').trim();
+}
+
+function extractNumericLiterals(source) {
+  const stripped = stripComments(extractStepBody(source));
+  const matches = stripped.match(/-?\d+\.?\d*(?:e[+-]?\d+)?/gi) || [];
+  return matches.map(Number);
+}
+
+function extractTileFieldAccesses(source) {
+  const stripped = stripComments(extractStepBody(source));
+  const matches = stripped.match(/\btile\.([a-zA-Z_]\w*)/g) || [];
+  return new Set(matches.map(m => m.slice(5)));
+}
+
+function multiset(arr) {
+  const m = new Map();
+  for (const v of arr) m.set(v, (m.get(v) || 0) + 1);
+  return m;
+}
+
+function hashNormalizedStepBody(source) {
+  return createHash('sha256').update(normalizeStepBody(source)).digest('hex');
+}
+
+/**
+ * Valida que el código fuente del kernel vivo cumple ECOLOGY_KERNEL_SPEC.
+ * Devuelve `{valid:true, version}` o `{valid:false, version, reason}` con la
+ * primera discrepancia encontrada (tér mino faltante/extra, campo fuera de
+ * lista, o cuerpo de step() con hash distinto).
+ */
+export function validateKernelSpecification(kernelSource) {
+  if (typeof kernelSource !== 'string') throw new Error('kernelSource must be a string');
+  let srcLiterals;
+  try {
+    srcLiterals = extractNumericLiterals(kernelSource).filter(n => !STRUCTURAL_NUMERIC_LITERALS.has(n));
+  } catch (error) {
+    return {
+      valid: false,
+      version: ECOLOGY_KERNEL_SPEC.version,
+      reason: `Could not locate EcosystemKernel.step() body: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+  let srcFields;
+  try {
+    srcFields = extractTileFieldAccesses(kernelSource);
+  } catch (error) {
+    return {
+      valid: false,
+      version: ECOLOGY_KERNEL_SPEC.version,
+      reason: `Could not extract tile fields: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+  let actualHash;
+  try {
+    actualHash = hashNormalizedStepBody(kernelSource);
+  } catch (error) {
+    return {
+      valid: false,
+      version: ECOLOGY_KERNEL_SPEC.version,
+      reason: `Could not hash step() body: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+
+  const specTerms = Object.values(ECOLOGY_KERNEL_SPEC.terms);
+  const specMultiset = multiset(specTerms);
+  const srcMultiset = multiset(srcLiterals);
+
+  const missingTerms = [];
+  for (const [val, count] of specMultiset) {
+    if ((srcMultiset.get(val) || 0) < count) missingTerms.push(val);
+  }
+  if (missingTerms.length > 0) {
+    return {
+      valid: false,
+      version: ECOLOGY_KERNEL_SPEC.version,
+      reason: `Kernel is missing spec term(s): ${missingTerms.join(', ')}. Bump ECOLOGY_KERNEL_SPEC.version if this is intentional.`,
+    };
+  }
+  const extraTerms = [];
+  for (const [val, count] of srcMultiset) {
+    if ((specMultiset.get(val) || 0) < count) extraTerms.push(val);
+  }
+  if (extraTerms.length > 0) {
+    return {
+      valid: false,
+      version: ECOLOGY_KERNEL_SPEC.version,
+      reason: `Kernel introduces new term(s) not in ECOLOGY_KERNEL_SPEC.terms: ${extraTerms.join(', ')}. Add them to the spec or revert.`,
+    };
+  }
+
+  const specFields = new Set([...ECOLOGY_KERNEL_SPEC.fieldsRead, ...ECOLOGY_KERNEL_SPEC.fieldsWritten]);
+  const missingFields = [...specFields].filter(f => !srcFields.has(f));
+  if (missingFields.length > 0) {
+    return {
+      valid: false,
+      version: ECOLOGY_KERNEL_SPEC.version,
+      reason: `Kernel no longer references spec field(s): ${missingFields.join(', ')}. Bump ECOLOGY_KERNEL_SPEC.version if this is intentional.`,
+    };
+  }
+  const extraFields = [...srcFields].filter(f => !specFields.has(f));
+  if (extraFields.length > 0) {
+    return {
+      valid: false,
+      version: ECOLOGY_KERNEL_SPEC.version,
+      reason: `Kernel accesses new tile field(s) not in ECOLOGY_KERNEL_SPEC: ${extraFields.join(', ')}. Add them to fieldsRead/fieldsWritten or revert.`,
+    };
+  }
+
+  if (actualHash !== ECOLOGY_KERNEL_SPEC.canonicalStepBodyHash) {
+    return {
+      valid: false,
+      version: ECOLOGY_KERNEL_SPEC.version,
+      reason: `Kernel step() body structure changed (hash mismatch). expected=${ECOLOGY_KERNEL_SPEC.canonicalStepBodyHash.slice(0, 12)}…, got=${actualHash.slice(0, 12)}…. Bump ECOLOGY_KERNEL_SPEC.version and canonicalStepBodyHash if this is intentional.`,
+      expectedHash: ECOLOGY_KERNEL_SPEC.canonicalStepBodyHash,
+      actualHash,
+    };
+  }
+
+  return { valid: true, version: ECOLOGY_KERNEL_SPEC.version };
+}
 
 export function topology(tiles) {
   const positions = new Map();

@@ -70,3 +70,74 @@ test('dos réplicas con la misma semilla y params dan métricas idénticas salvo
   for (const sha of [replicaA.sha, replicaB.sha]) assert.match(sha as string, /^[0-9a-f]{40}$/);
   assert.deepEqual(stripTimings(replicaA.resumen as Json), stripTimings(replicaB.resumen as Json));
 });
+
+// T118-bis ("laboratorio consciente del servidor"): --gobernador servidor|no en replica.ts.
+// Claves exactas de dia-NNN.json ANTES de esta tarea (congeladas a partir de la corrida de
+// control, seed 51926, FAST_PARAMS): el default (sin --flag) DEBE seguir produciendo
+// exactamente este conjunto — ni una clave nueva de más.
+const CLAVES_DIA_SIN_GOBERNADOR = new Set([
+  'tick', 'poblacion', 'nacimientos', 'muertesPorCausa', 'fundadoresVivos', 'generacionesVivas',
+  'diversidadOficios', 'recetasCreadasAcumuladas', 'diversidadConducta', 'diversidadFuncional',
+  'catalogoActivo', 'cooperaciones', 'gini', 'fraccionComida', 'distanciaAgua', 'regionesSinAgua',
+  'ventanaActividad', 'vecinosMortales', 'fundadoresMortalesVivos', 'generacionesMortalesVivas',
+  'recetasDistintasEnUso', 'recetasDistintasFabricadas', 'usosUtiles', 'beneficioUso',
+  'usosDeInventorAjeno', 'usosSinAutorResuelto', 'fraccionUsoAjeno', 'usosConEnsenanzaRecordada',
+  'cooperacionAcumuladaPorTipo', 'otrasCooperacionesAcumuladas', 'conflictosAcumulados',
+  'p50Ms', 'p95Ms', 'rss',
+]);
+const CLAVES_GOBERNADOR_SERVIDOR = ['reproduccionActivaFraccion', 'p95GobernadorFinal', 'cloneMsP50', 'saveMsP50', 'indiceDiversidad', 'cooperacionPorTipo', 'comunidades', 'rasgosPorGeneracion', 'varianzaGenetica'] as const;
+
+test('--gobernador (default "no" y explícito "no") no añade ninguna clave nueva a dia-001.json', (t) => {
+  const dirDefault = runReplica(t, ['--seed', '1', '--dias', '1', '--params', FAST_PARAMS]);
+  const dirNo = runReplica(t, ['--seed', '1', '--dias', '1', '--params', FAST_PARAMS, '--gobernador', 'no']);
+
+  const diaDefault = readJson(join(dirDefault, 'dia-001.json'));
+  const diaNo = readJson(join(dirNo, 'dia-001.json'));
+  assert.deepEqual(new Set(Object.keys(diaDefault)), CLAVES_DIA_SIN_GOBERNADOR, 'sin --gobernador el conjunto de claves debe ser EXACTAMENTE el de antes de esta tarea');
+  assert.deepEqual(new Set(Object.keys(diaNo)), CLAVES_DIA_SIN_GOBERNADOR, '--gobernador no debe producir el mismo conjunto de claves que el default');
+  for (const clave of CLAVES_GOBERNADOR_SERVIDOR) { assert.ok(!(clave in diaDefault), `${clave} no debe existir sin --gobernador`); assert.ok(!(clave in diaNo), `${clave} no debe existir con --gobernador no`); }
+  assert.deepEqual(stripTimings(diaDefault), stripTimings(diaNo), 'default y --gobernador no deben coincidir bit a bit salvo tiempos');
+
+  const replicaDefault = readJson(join(dirDefault, 'replica.json')), replicaNo = readJson(join(dirNo, 'replica.json'));
+  assert.deepEqual(stripTimings(replicaDefault.resumen as Json), stripTimings(replicaNo.resumen as Json));
+  assert.equal(replicaDefault.gobernador, replicaNo.gobernador, 'el campo descriptivo "gobernador" no debe cambiar entre default y --gobernador no');
+});
+
+test('--gobernador servidor añade los campos nuevos y reproduccionActivaFraccion cae en [0,1]', (t) => {
+  const dir = runReplica(t, ['--seed', '51926', '--dias', '1', '--params', FAST_PARAMS, '--gobernador', 'servidor']);
+  const dia = readJson(join(dir, 'dia-001.json'));
+
+  for (const clave of CLAVES_GOBERNADOR_SERVIDOR) assert.ok(clave in dia, `dia-001.json.${clave} debe existir con --gobernador servidor`);
+  const fraccion = dia.reproduccionActivaFraccion as number;
+  assert.equal(typeof fraccion, 'number');
+  assert.ok(fraccion >= 0 && fraccion <= 1, `reproduccionActivaFraccion debe caer en [0,1] (fue ${fraccion})`);
+  assert.equal(typeof dia.p95GobernadorFinal, 'number'); assert.ok((dia.p95GobernadorFinal as number) >= 0);
+  assert.equal(typeof dia.cloneMsP50, 'number'); assert.ok((dia.cloneMsP50 as number) >= 0);
+  assert.equal(typeof dia.saveMsP50, 'number'); assert.ok((dia.saveMsP50 as number) >= 0);
+
+  const indice = dia.indiceDiversidad as Json;
+  for (const key of ['conducta', 'oficios', 'total']) assert.equal(typeof indice[key], 'number', `indiceDiversidad.${key} debe ser number`);
+
+  const cooperacion = dia.cooperacionPorTipo as Json;
+  for (const key of ['cooperation', 'teaching', 'trade', 'constructionHelp', 'conflicts']) assert.equal(typeof cooperacion[key], 'number', `cooperacionPorTipo.${key} debe ser number`);
+
+  assert.equal(typeof dia.comunidades, 'number');
+  assert.ok(dia.comunidades as number >= 0);
+
+  const rasgos = dia.rasgosPorGeneracion as Record<string, Json>;
+  assert.ok(Object.keys(rasgos).length > 0, 'rasgosPorGeneracion debe tener al menos una generación viva');
+  for (const generacion of Object.values(rasgos)) for (const key of ['resilience', 'learningRate', 'curiosity', 'sociability', 'care']) assert.equal(typeof generacion[key], 'number', `rasgosPorGeneracion[*].${key} debe ser number`);
+
+  assert.equal(typeof dia.varianzaGenetica, 'number');
+  assert.ok((dia.varianzaGenetica as number) >= 0);
+
+  const replica = readJson(join(dir, 'replica.json'));
+  assert.match(replica.gobernador as string, /servidor/, 'el campo "gobernador" debe describir el modo servidor');
+});
+
+test('--gobernador acepta solo "servidor"|"no"', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'atlas-lab-test-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const result = spawnSync(process.execPath, ['--import', 'tsx', 'scripts/lab/replica.ts', '--seed', '1', '--dias', '1', '--params', FAST_PARAMS, '--gobernador', 'invalido', '--salida', dir], { encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+});

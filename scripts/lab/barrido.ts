@@ -38,6 +38,7 @@ interface Job {
   readonly dias: number;
   readonly paramsArg: string;
   readonly dir: string;
+  readonly gobernador: string | undefined;
 }
 
 interface JobResult {
@@ -56,13 +57,14 @@ interface Options {
   readonly timeoutMs: number;
   readonly salida: string;
   readonly control: string | undefined;
+  readonly gobernador: string | undefined;
   readonly paramValues: ReadonlyMap<string, readonly string[]>;
 }
 
 function printHelp(): void {
   console.log(
     'Uso: npm run lab -- --replicas N --dias D [--param clave=v1,v2 ...] [--seed-base S] ' +
-    '[--concurrencia C] [--timeout SEGUNDOS] [--salida DIR] [--control DIR]\n' +
+    '[--concurrencia C] [--timeout SEGUNDOS] [--salida DIR] [--control DIR] [--gobernador no|servidor]\n' +
     'Corre el producto cartesiano de --param (repetible, o varios "clave=v1,v2" sueltos tras un ' +
     'solo --param, como en T031) × --replicas réplicas con scripts/lab/replica.ts, en cola con ' +
     '--concurrencia procesos a la vez (por defecto availableParallelism()-2); mata el GRUPO de ' +
@@ -88,7 +90,7 @@ function sello(): string {
 function parseArgs(argv: readonly string[]): Options | null {
   const paramValues = new Map<string, string[]>();
   let replicas: number | undefined, dias: number | undefined, seedBase: number | undefined;
-  let concurrencia: number | undefined, timeoutSeconds: number | undefined, salida: string | undefined, control: string | undefined;
+  let concurrencia: number | undefined, timeoutSeconds: number | undefined, salida: string | undefined, control: string | undefined, gobernador: string | undefined;
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
     if (arg === '--help' || arg === '-h') { printHelp(); return null; }
@@ -108,6 +110,12 @@ function parseArgs(argv: readonly string[]): Options | null {
       case '--timeout': timeoutSeconds = requireInt(takeValue(), key, 1); break;
       case '--salida': salida = takeValue(); break;
       case '--control': control = takeValue(); break;
+      case '--gobernador': {
+        const value = takeValue();
+        if (value !== 'no' && value !== 'servidor') throw new Error(`--gobernador requiere "no" o "servidor" (recibido "${value}")`);
+        gobernador = value;
+        break;
+      }
       case '--param': {
         let raw = takeValue();
         // T031 (tasks.md) escribe varios grupos "clave=v1,v2" sueltos tras un solo --param (no
@@ -135,6 +143,7 @@ function parseArgs(argv: readonly string[]): Options | null {
     replicas, dias, paramValues,
     salida: resolve(ROOT, salida ?? join('artifacts', 'lab', sello())),
     control: control ? resolve(ROOT, control) : undefined,
+    gobernador,
     seedBase: seedBase ?? 1,
     concurrencia: concurrencia ?? Math.max(1, availableParallelism() - 2),
     timeoutMs: (timeoutSeconds ?? DEFAULT_TIMEOUT_SECONDS) * 1000,
@@ -164,7 +173,7 @@ function buildJobs(options: Options): Job[] {
     const paramsArg = Object.entries(combo).map(([key, value]) => `${key}=${value}`).join(',');
     for (let replica = 0; replica < options.replicas; replica++) {
       const seed = options.seedBase + replica;
-      jobs.push({ id: `${slug}/seed-${seed}`, seed, dias: options.dias, paramsArg, dir: join(options.salida, slug, `seed-${seed}`) });
+      jobs.push({ id: `${slug}/seed-${seed}`, seed, dias: options.dias, paramsArg, dir: join(options.salida, slug, `seed-${seed}`), gobernador: options.gobernador });
     }
   }
   return jobs;
@@ -243,6 +252,7 @@ async function runJob(job: Job, timeoutMs: number): Promise<JobResult> {
   const replicaScript = process.env.CARTA_REPLICA_SCRIPT || 'scripts/lab/replica.ts';
   const args = ['tsx', replicaScript, '--seed', String(job.seed), '--dias', String(job.dias), '--salida', job.dir];
   if (job.paramsArg) args.push('--params', job.paramsArg);
+  if (job.gobernador) args.push('--gobernador', job.gobernador);
   const logFd = openSync(join(job.dir, 'proceso.log'), 'a');
   const { child, done } = spawnAwait('npx', args, ROOT, ['ignore', logFd, logFd], true);
   let timedOut = false;

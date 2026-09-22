@@ -16,6 +16,9 @@ npx tsx scripts/lab/replica.ts --seed 51926 --dias 10 --params "cuerpo.riesgoSen
   Sin `--params`, corre con `DEFAULT_PARAMS` (el comportamiento actual).
 - `--salida <dir>` (obligatorio): directorio donde se escriben `dia-NNN.json` (uno por día) y, al
   terminar, `replica.json`. Se crea si no existe.
+- `--gobernador no|servidor` (opcional, por defecto `no`): ver «Gobernador consciente del servidor»
+  más abajo. `no` es EXACTAMENTE el comportamiento de siempre (salida bit a bit idéntica); pasar
+  explícitamente `no` es equivalente a omitir la bandera.
 
 ## Por qué SIEMPRE hay un `Store` (hallazgo P3)
 
@@ -125,6 +128,57 @@ corre en `atlas.humanizar.tech`. Por eso `replica.ts`:
 **Salida determinista salvo tiempos**: con la misma semilla, params y código, dos réplicas dan
 exactamente los mismos valores en todas las claves salvo `p50Ms`, `p95Ms`, `rss` y `rssMaximo`
 (dependen del reloj de pared y del asignador de memoria del proceso, no de la simulación).
+
+## Gobernador consciente del servidor (`--gobernador servidor`)
+
+Por defecto (`--gobernador no`, o sin la bandera) esta réplica corre las LEYES del mundo
+(`stepWorld` sobre el mismo objeto, sin clonar) pero **no** el gobernador de población de
+`src/server/app.ts` (R17: el hardware pone el límite vía `gobernador.presupuestoMs` y
+`decideReproduction`). Eso es adecuado para medir ciencia pura, pero no reproduce la dinámica de
+extinción del mundo público V7 (`docs/EVIDENCIA.md` §"Mundo público V7: recambio insuficiente",
+`docs/ANALISIS-DINAMICAS-2026-09-21.md` §2.1): el mundo público SÍ clona por paso y SÍ apaga/reenciende
+la reproducción según el p95 de los últimos 120 pasos.
+
+`--gobernador servidor` imita `stepOnce` (`src/server/app.ts`) tick a tick:
+
+1. Si `params.motor.clonPorPaso` (por defecto `true`): `draft = cloneWorld(world, store.context)`,
+   `stepWorld(draft)`, `world = draft`. Si es `false`, `stepWorld(world)` in situ (sin clonar) —
+   `motor.clonPorPaso` es un parámetro ya definido en `src/world/params.ts` que ningún motor
+   consume todavía; esta réplica es el primer consumidor.
+2. `store.save(world)` cuando `tick % persistencia.cadaTicks === 0`, **dentro** de la ventana
+   medida (igual que `stepOnce`: el coste de guardar cuenta para el presupuesto del gobernador).
+3. `p95 = new RollingStepPerformance().record(stepMs)` (ventana de 120 pasos, `src/server/governor.ts`,
+   el MISMO módulo que usa el servidor — no se reimplementa la política).
+4. `world.reproductionEnabled = decideReproduction(p95, params.gobernador.presupuestoMs,
+   world.reproductionEnabled)` — de nuevo, importado de `governor.ts`, nunca redefinido aquí.
+
+Con `--gobernador servidor`, cada `dia-NNN.json` añade (ninguno de estos campos existe con
+`--gobernador no`):
+
+- `reproduccionActivaFraccion`: fracción de los ticks **de ese día** con `reproductionEnabled`
+  (no acumulado desde el día 1: es la señal de si el gobernador estuvo cortando nacimientos hoy).
+- `p95GobernadorFinal`: el p95 de la ventana de 120 pasos al final del día.
+- `cloneMsP50`/`saveMsP50`: medianas de `cloneWorld`/`store.save` sobre los ticks de ese día
+  (0 en `cloneMsP50` si `motor.clonPorPaso=false`).
+- Ciencia barata leída del estado, sin recorridos nuevos caros:
+  - `indiceDiversidad`: `{conducta, oficios, total}` de `src/world/diversidad.ts` (función real,
+    la misma que cablea `src/world/statistics.ts`).
+  - `cooperacionPorTipo`: `{cooperation, teaching, trade, constructionHelp, conflicts}` de
+    `world.totals` (acumulados desde el inicio, como el resto de `world.totals`).
+  - `comunidades`: `world.communities.length`.
+  - `rasgosPorGeneracion`: media, por generación **viva**, de `resilience`/`curiosity`/
+    `sociability`/`care` (`person.traits`) y `learningRate` (`person.genome`).
+  - `varianzaGenetica`: varianza media de los 14 alelos (`GENE_COUNT*2`, `src/world/genetics.ts`)
+    entre los vivos.
+- `transmisionCultural` **no** se añade: `durableActivityMetrics` (`scripts/lab/metrics.ts`,
+  ya incluido en `dailyMetrics` en ambos regímenes) no expone ningún campo con ese nombre —
+  lo más cercano es `usosConEnsenanzaRecordada`, que ya viaja siempre.
+
+`replica.json.gobernador` describe el modo usado en texto libre (antes decía siempre
+"no-ejecutado"; ahora distingue "no-ejecutado" de "servidor; imita stepOnce…").
+
+`scripts/lab/barrido.ts` acepta `--gobernador no|servidor` y lo reenvía tal cual a cada réplica del
+barrido (omitido ⇒ no se pasa nada ⇒ comportamiento de siempre).
 
 ## Rendimiento
 

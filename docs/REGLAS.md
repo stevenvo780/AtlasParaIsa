@@ -1,5 +1,16 @@
 # Reglas del prototipo
 
+## Candidato V8: provisión familiar local, 22 de septiembre de 2026
+
+Sobre V7 publicado desde `3dd615e`, esta rama declara **reglas 8**, manteniendo
+protocolo 9 y SQLite 4. Una intención familiar viable puede planear una cosecha
+pequeña físicamente rentable, con las mismas rutas percibidas, esfuerzo, decadencia
+y asimilación del motor. La previsión no otorga comida ni energía. El objetivo
+validado no se reemplaza por trabajo parcial de otro objetivo. El filtro general
+para comer y las reglas reproductivas/corporales no cambian. Los costes, controles
+y límites están en la [revisión V8](REVISION-FAMILIA-V8-2026-09-22.md). Es una
+propuesta en evaluación; no acredita publicación ni sostenibilidad demográfica.
+
 ## Candidato V7, revisión del 22 de septiembre de 2026
 
 La fuente candidata declara **reglas 7, protocolo 9 y SQLite 4**. Aún no acredita una

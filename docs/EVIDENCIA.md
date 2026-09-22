@@ -1,5 +1,22 @@
 # Evidencia vigente
 
+## Propuesta familiar V8, 22 de septiembre de 2026
+
+Base V7 publicada `3dd615ee069d9d61f51a4c74f85d33c15a4583e0`, rama
+`sprint/family-reserve-v8-20260922`: [diseño causal, costes, rebaseline y contrato
+emparejado](REVISION-FAMILIA-V8-2026-09-22.md). Focales de regla/migración: 94/94;
+instrumento: 3/3; typecheck verde. Los controles de 600 ticks y kernel aislado no
+cambian; dos goldens de trayectoria se actualizan por la ley V8 declarada. El
+presupuesto UTF-8 móvil/completo sigue pasando sin elevar límites. Suite completa:
+**912 pass, 0 fail, 3 CUDA skips** por ausencia de `COMPUTE_NVRTC`, 484.35 s. Typecheck
+y build verdes. Focal posterior `COMPUTE_NVRTC=/opt/cuda/lib64/libnvrtc.so` sobre
+`tests/compute-ecology.test.ts`: **14/14, cero skips**, incluidas GPU 0, 1 y 0+1.
+La ablación privada del selector conserva V8/costes y restaura
+exactamente los hashes V7 de agua y demografía. Los pares 1007/1012/1013 × V7/V8 ×
+13 días están lanzados con fuentes congeladas; resultados aún pendientes. Ninguna
+afirmación de sostenibilidad, rendimiento de servidor o publicación deriva de esos
+controles.
+
 ## Revisión y ejecución 2026-09-22
 
 La [revisión actual](REVISION-2026-09-22.md) registra controles de parentesco, agua

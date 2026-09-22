@@ -98,8 +98,18 @@ El servicio persistente y el timer horario están habilitados con linger; la pri
 copia del mundo nuevo pasó descompresión y `quick_check`. No se reinició la torre.
 [Registro operativo](evidencia-2026-09-22/publication.json).
 
-La serie de 32 pares a 30 días sigue abierta: los primeros casos completos
-incluyen extinciones en ambos brazos y no se usan para inferir la tasa del conjunto.
+El intento original de32 pares a30 días terminó con30 corridas completas y34
+timeouts; su resultado global es `failed`, no64 éxitos. Los34 timeouts tienen una
+continuación separada desde checkpoints, todavía abierta. El manifiesto de esa
+continuación conserva su corte:24 completos entonces y seis activos excluidos,
+que después terminaron correctamente sin incorporarse retroactivamente al intento.
+
+Hay13 pares originales con ambos extremos completos: once terminan0→0 mortales,
+1025 termina0→1 y1031 termina0→222 (control V6→candidato V7). No se extrapola una
+tasa sobre estos13: completar dentro del deadline selecciona trayectorias y los
+otros19 pares siguen censurados hasta verificar sus continuaciones. Se comprobaron
+los JSON finales, su procedencia y sus ventanas; este corte no repite una auditoría
+completa de los archivos SQLite. [Extremos y límites](evidencia-2026-09-22/reserved-original-final-endpoints.json).
 
 ## Estado histórico del 7 de septiembre de 2026
 

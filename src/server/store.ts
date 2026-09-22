@@ -19,6 +19,7 @@ import { assertTechnologyCatalogueState, enableTechnologyCatalogue, markTechnolo
 import { assertChronicleEvent, assertChronicleJournal, enableChronicleJournal, chronicleSerial, chronicleFailure, chronicleForCommit, EMPTY_CHRONICLE_DIGEST, type ChronicleJournal } from '../world/chronicle-journal.js';
 import { assertTechnology, maintainTechnologyMemory } from '../world/technology.js';
 import { paramsOf, setParams } from '../world/params.js';
+import { stringifyExact } from '../shared/exact-json.js';
 
 /** Profundidad de recuperación: cada cien guardados el slot 2 hereda la instantánea
  * vigente, de modo que el respaldo más viejo mide minutos y no el último paso. */
@@ -398,7 +399,7 @@ export class Store {
       if (count.count!==world.demographyDynamics.deaths) throw new Error('Identity archive count disagrees with snapshot. Explicit recovery required.');
       for (const record of world.legacy) {
         const archived=this.loadLegacy(record.id,world.tick);
-        if (!archived || JSON.stringify(archived)!==JSON.stringify(record)) throw new Error('Cached identity disagrees with archive. Explicit recovery required.');
+        if (!archived || stringifyExact(archived)!==stringifyExact(record)) throw new Error('Cached identity disagrees with archive. Explicit recovery required.');
         this.assertLegacyParents(record,world);
       }
       const serial=this.db.prepare("SELECT MAX(CAST(substr(id,12) AS INTEGER)) AS maximum FROM legacy WHERE tick<=? AND id GLOB 'descendant-[0-9]*'").get(world.tick) as {maximum:number|null};
@@ -837,8 +838,8 @@ export class Store {
       for (const record of world.retiredLegacy) {
         assertLegacyRecord(record,world.tick); this.assertLegacyParents(record,world);
         const prior=this.loadLegacy(record.id);
-        const archivedBody=JSON.stringify(record);
-        if (prior) { if(JSON.stringify(prior)!==archivedBody) throw new Error('An archived identity cannot be overwritten. Explicit recovery required.'); }
+        const archivedBody=stringifyExact(record);
+        if (prior) { if(stringifyExact(prior)!==archivedBody) throw new Error('An archived identity cannot be overwritten. Explicit recovery required.'); }
         else archiveIdentity.run(record.id,record.diedAt,archivedBody,checksum(archivedBody));
       }
       if (retired.length) {
@@ -848,7 +849,7 @@ export class Store {
         const supersede = window > 0 ? this.db.prepare('DELETE FROM chunks WHERE key=? AND tick<?') : null;
         for (const chunk of retired) {
           assertChunk(chunk, chunk.key, world.tick);
-          const archivedBody = JSON.stringify(chunk);
+          const archivedBody = stringifyExact(chunk);
           archive.run(chunk.key, world.tick, archivedBody, checksum(archivedBody));
           supersede?.run(chunk.key, world.tick);
         }

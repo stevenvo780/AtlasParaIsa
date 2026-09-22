@@ -1,0 +1,40 @@
+{
+  "date": "2026-09-22T11:31:34.884Z",
+  "node": "v22.23.1",
+  "fixture": "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922/artifacts/coherence-20260922/baseline-server-51926/world.sqlite",
+  "sourceBodySHA256": "becac8bb852c665f5cb1cf79b2b5da7ae71deffc23d32c9d492f7a3c77545c0c",
+  "parentCommit": "f3d4c3c086cf2408e7f59c69d942cea40184f21a",
+  "parentEncoderSHA256": "530d051fc79d11721b45ca2750b1bb37435fddf748d5cd097099b45934d91a7e",
+  "candidateFilesSHA256": {
+    "src/server/snapshot.ts": "85484be8b6b53295a17fecb71595cf46ce65c54f3036c5241a9df219dd166178",
+    "src/shared/exact-json.ts": "23fe2b1b8f9510f1e2474dc815ef2192fba9e78276690a7f9e5da1ba59a15194",
+    "src/server/store.ts": "4f10800ee95857ccccc010dba59ecdd362e4cc8efd08a017ff995dbbe0096928",
+    "src/world/lineage.ts": "95bdd5495ceabe6e2988e03d31fb4fbb0c516b2af722710063f38f2d3fffb6c2"
+  },
+  "instrumentSHA256": "f0a83d46fc79446f9700132b6dfeef985270747a1e8b60f8b9f6ddd4c6dc0e5c",
+  "tiles": 12288,
+  "people": 25,
+  "characters": 3707718,
+  "outputSHA256": "1384c36a155451bf141f0d7c6d44cdce72eb7106b6ee74f0383952316d323cff",
+  "rounds": 60,
+  "allOrdinaryBytesEqual": true,
+  "sharedHost": true,
+  "scope": "Encoder only, same readonly fixture, alternating variants; not server/save latency or a 2M gate.",
+  "results": {
+    "parent": {
+      "medianMs": 28.351518000000056,
+      "p95Ms": 35.64191200000005,
+      "minMs": 25.390981999999894
+    },
+    "globalReplacer": {
+      "medianMs": 30.33079600000019,
+      "p95Ms": 34.730013999999755,
+      "minMs": 26.709854000000178
+    },
+    "candidate": {
+      "medianMs": 20.430378999999448,
+      "p95Ms": 26.495662000000266,
+      "minMs": 17.89861699999983
+    }
+  }
+}

@@ -1,5 +1,6 @@
 import type { ChronicleEvent } from '../shared/types.js';
 import type { LegacyRecord, DemographicDeathCause } from '../shared/demography.js';
+import { stringifyExact } from '../shared/exact-json.js';
 import type { Person, World } from './index.js';
 import { assertGenome } from './genetics.js';
 import { demographicTraits, updateDemography } from './demography.js';
@@ -59,7 +60,7 @@ export function referencedLegacy(world: World): Set<string> {
 }
 
 function identityValue(record: LegacyRecord): string {
-  return JSON.stringify([record.id, record.name, record.role, record.generation, record.parents, record.bornAt, record.diedAt, record.cause,
+  return stringifyExact([record.id, record.name, record.role, record.generation, record.parents, record.bornAt, record.diedAt, record.cause,
     record.genome.generation, record.genome.parents, record.genome.learningRate, record.genome.cooperation, record.genome.mutations, record.genome.alleles,
     TRAIT_KEYS.map(key => record.traits[key]), record.communityId]);
 }

@@ -1,6 +1,7 @@
 import type { Tile } from '../shared/types.js';
 import type { World } from '../world/index.js';
 import { DEFAULT_PARAMS, parseParams, type WorldParams } from '../world/params.js';
+import { exactJsonNumber, stringifyExact } from '../shared/exact-json.js';
 
 // Lossless JSON tuples avoid repeating twenty property names for every active tile
 // on every durable step. Old object snapshots remain readable. No float quantization.
@@ -11,7 +12,7 @@ const ENCODING = 'tiles-tuple-v1';
  * el objeto del mundo sigue sin llevarlos. Una instantánea SIN campo es anterior a esta
  * ley — o tiene exactamente los defaults — y se lee como `DEFAULT_PARAMS`. */
 const PARAMS_ENCODING = 'params-v1';
-const DEFAULT_PARAMS_BODY = JSON.stringify(DEFAULT_PARAMS);
+const DEFAULT_PARAMS_BODY = stringifyExact(DEFAULT_PARAMS);
 const FIELDS = ['x','y','terrain','moisture','vegetation','food','biome','elevation','wood','stone','feature','variety','growth','fertility','cultivation','traffic','drinkingWater','species','fauna','life'] as const;
 /** Only unreadable bytes justify trying an older checkpoint automatically. */
 export class SnapshotPhysicalError extends Error {}
@@ -19,19 +20,28 @@ export function encodeSnapshot(world: World, params: WorldParams = DEFAULT_PARAM
   // JSON null is reserved for absent optional fields. Never erase invalid present
   // values (JSON itself would turn NaN/Infinity into null) during compaction.
   const tiles = world.tiles.map(t => {
-    const row = [t.x,t.y,t.terrain,t.moisture,t.vegetation,t.food,t.biome,t.elevation,t.wood,t.stone,t.feature,t.variety,t.growth,t.fertility,t.cultivation,t.traffic,t.drinkingWater,t.species,t.fauna,t.life];
-    for (let i = 6; i < row.length; i++) {
+    const row: unknown[] = [t.x,t.y,t.terrain,t.moisture,t.vegetation,t.food,t.biome,t.elevation,t.wood,t.stone,t.feature,t.variety,t.growth,t.fertility,t.cultivation,t.traffic,t.drinkingWater,t.species,t.fauna,t.life];
+    for (let i = 0; i < row.length; i++) {
       const value = row[i];
-      if (value === null || typeof value === 'number' && !Number.isFinite(value)) throw new Error('Invalid optional tile value. Snapshot was not written.');
+      if (i >= 6 && (value === null || typeof value === 'number' && !Number.isFinite(value))) throw new Error('Invalid optional tile value. Snapshot was not written.');
+      if (Object.is(value, -0)) row[i] = exactJsonNumber(value);
     }
     return row;
   });
-  const body = JSON.stringify(params);
+  const body = stringifyExact(params);
   const encoded: Record<string, unknown> = { ...world, retiredChunks: [], retiredLegacy: [], tiles, tileEncoding: ENCODING };
   // Los defaults no se escriben: con ellos la instantánea es bit a bit la de siempre.
   delete encoded.params; delete encoded.paramsEncoding;
   if (body !== DEFAULT_PARAMS_BODY) { encoded.paramsEncoding = PARAMS_ENCODING; encoded.params = params; }
-  return JSON.stringify(encoded);
+  // Tile scalars were checked above. Keep their native serializer fast instead
+  // of running a JS replacer for every scalar a second time. Metadata still uses
+  // the exact scalar writer. Property order and ordinary bytes remain unchanged.
+  const fields: string[] = [];
+  for (const [key, value] of Object.entries(encoded)) {
+    const fragment = key === 'tiles' ? JSON.stringify(value) : key === 'params' ? body : stringifyExact(value);
+    if (fragment !== undefined) fields.push(`${JSON.stringify(key)}:${fragment}`);
+  }
+  return `{${fields.join(',')}}`;
 }
 /**
  * Extrae —y RETIRA— los parámetros de una instantánea ya decodificada: el `World` no

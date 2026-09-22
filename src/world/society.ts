@@ -2,6 +2,7 @@ import type { ChronicleEvent, CommunityView, PersonView } from '../shared/types.
 import type { Person, World } from './index.js';
 import { localRandom } from './genetics.js';
 import { count } from './statistics.js';
+import { paramsOf } from './params.js';
 import { tileAt } from './spatial.js';
 import { constructionCost, waterAvailable } from './inventions.js';
 import { CAPABILITIES, MASS_UNIT, materialCapacities, shareTechnology, toolCapacities, transferTechnologyItem } from './technology.js';
@@ -89,12 +90,32 @@ function practicedRecipeToTeach(world: World, teacher: Person, learner: Person):
   // program), with the other substrates still required locally; the world catalogue
   // supplies no new desires and no product is credited until fabrication pays for it.
   const prospectivePrograms = [...remembered.map(recipe => recipe.program), ...requestedPrograms(world, learner)];
-  return candidates.filter(recipe => inputsAvailable(recipe.program)).map(recipe => ({ recipe,
+  const viable = candidates.filter(recipe => inputsAvailable(recipe.program)).map(recipe => ({ recipe,
     gain: Math.max(...CAPABILITIES.map(capability => recipe.capacities[capability] - powers[capability]))
       + (prospectivePrograms.some(program => program.inputs.some(input => input.source === 'product' && input.recipeId === recipe.id)
         && inputsAvailable(program, recipe.id)) ? 1 : 0),
-  })).filter(candidate => candidate.gain > 0.12)
-    .sort((a, b) => b.gain - a.gain || (teacher.technology.competence[b.recipe.id]?.benefit ?? 0) - (teacher.technology.competence[a.recipe.id]?.benefit ?? 0) || a.recipe.id.localeCompare(b.recipe.id))[0]?.recipe.id;
+  })).filter(candidate => candidate.gain > 0.12);
+  // Ley candidata `social.ensenanzaRareza`: ordenar sólo por `gain` reenseña siempre la
+  // misma receta y la transmisión se apaga cuando todos la saben. La rareza medida —la
+  // fracción de vivos que NO la recuerdan— entra en la clave de orden; con el default 0
+  // la clave vuelve a ser `gain` y el orden es exactamente el histórico. El filtro
+  // `gain > 0.12` y los dos desempates (beneficio del maestro, id) no se tocan.
+  const rareza = paramsOf(world).social.ensenanzaRareza;
+  const holders = rareza > 0 ? recipeHolders(world, viable) : undefined;
+  const alive = Math.max(1, world.people.length);
+  return viable.map(candidate => ({ ...candidate,
+    key: candidate.gain + (holders ? rareza * (1 - (holders.get(candidate.recipe.id) ?? 0) / alive) : 0) }))
+    .sort((a, b) => b.key - a.key || (teacher.technology.competence[b.recipe.id]?.benefit ?? 0) - (teacher.technology.competence[a.recipe.id]?.benefit ?? 0) || a.recipe.id.localeCompare(b.recipe.id))[0]?.recipe.id;
+}
+/** Vivos que ya recuerdan cada receta candidata, en UNA pasada por la población: contar
+ * por receta recorrería `O(personas × recetas)` una vez por candidata. */
+function recipeHolders(world: World, candidates: readonly { recipe: { id: string } }[]): Map<string, number> {
+  const counts = new Map(candidates.map(candidate => [candidate.recipe.id, 0]));
+  for (const person of world.people) for (const id of person.technology.knownRecipes) {
+    const held = counts.get(id);
+    if (held !== undefined) counts.set(id, held + 1);
+  }
+  return counts;
 }
 /** A request comes from the recipient's active program, or a recipe they actually know
  * while attempting fabrication. The world's catalogue is never a source of desires. */
@@ -256,13 +277,18 @@ export function updateCommunities(world: World, emit: Emit): void {
   if (!world.cooperationEnabled || world.tick % 120 !== 0) return;
   // Membership can change when lived practices and trust cease to fit a group.
   // Nearby compatible contacts are required; geographical isolation alone is insufficient.
+  // Leyes candidatas `social.confianzaSalida` y `social.distanciaAlternativa`: cada
+  // cooperación suma +0,12 de confianza, así que la media satura y la salida queda
+  // cerrada; y las alternativas vienen de grupos que divergen, así que exigirles menos
+  // de 0,2 de distancia cultural las descarta siempre. Los defaults son esos dos números.
+  const { confianzaSalida, distanciaAlternativa } = paramsOf(world).social;
   for (const person of world.people) {
     const group = world.communities.find(c => c.id === person.communityId);
     if (!group || culturalDistance(person.culture, group.culture) < 0.3) continue;
     const peers = world.people.filter(p => p !== person && p.communityId === group.id);
     const trust = peers.length ? peers.reduce((sum, p) => sum + (person.bonds[p.id] ?? 0.2), 0) / peers.length : 0.2;
-    const alternatives = world.people.filter(p => p !== person && p.communityId !== group.id && distance(person, p) <= 6 && (person.bonds[p.id] ?? 0) >= 0.3 && culturalDistance(person.culture, p.culture) < 0.2);
-    if (trust >= 0.35 || alternatives.length < 2) continue;
+    const alternatives = world.people.filter(p => p !== person && p.communityId !== group.id && distance(person, p) <= 6 && (person.bonds[p.id] ?? 0) >= 0.3 && culturalDistance(person.culture, p.culture) < distanciaAlternativa);
+    if (trust >= confianzaSalida || alternatives.length < 2) continue;
     person.communityId = null;
     emit({ kind: 'community', actors: [person.id], x: person.x, y: person.y, source: 'simulation', text: `${person.name} dejó ${group.name} y buscó otra comunidad cercana.`, cause: 'Prácticas distintas, confianza interna baja y al menos dos contactos cercanos compatibles; la pertenencia es revisable.' });
   }
@@ -292,11 +318,17 @@ export function updateCommunities(world: World, emit: Emit): void {
   world.communities = world.communities.filter(group => group.members.length > 0);
 }
 export function resourceDispute(world: World, person: Person, emit: Emit): boolean {
-  if (!world.cooperationEnabled || !person.communityId || world.tick - person.lastDispute < 180 || Math.max(person.hunger, person.thirst) < 0.65) return false;
+  // Leyes candidatas `social.disputaNecesidad`, `social.disputaEscasez` y
+  // `social.disputaRadio`: las tres condiciones tienen que darse A LA VEZ (necesidad
+  // urgente, fuente casi agotada y otra persona con el mismo destino al lado), y con los
+  // números de hoy no coinciden nunca — cero disputas y cero turnos en toda la medición.
+  // `disputaEscasez` multiplica los tres umbrales de stock (comida, agua, fauna) a la vez.
+  const { disputaNecesidad, disputaEscasez, disputaRadio } = paramsOf(world).social;
+  if (!world.cooperationEnabled || !person.communityId || world.tick - person.lastDispute < 180 || Math.max(person.hunger, person.thirst) < disputaNecesidad) return false;
   const source = tileAt(world, person.target);
   const stock = person.action === 'drink' ? waterAvailable(world,person.target) : person.action === 'hunt' ? source?.fauna ?? 0 : source?.food ?? 0;
-  if (!source || !['eat','drink','hunt'].includes(person.action) || stock <= 0 || stock > (person.action === 'drink' ? 0.12 : person.action === 'hunt' ? 1 : 0.06)) return false;
-  const other = world.people.find(p => p !== person && p.communityId && p.action === person.action && distance(person, p) <= 2 && distance(person.target, p.target) < 0.5 && Math.max(p.hunger, p.thirst) > 0.65 && world.tick - p.lastDispute >= 180);
+  if (!source || !['eat','drink','hunt'].includes(person.action) || stock <= 0 || stock > disputaEscasez * (person.action === 'drink' ? 0.12 : person.action === 'hunt' ? 1 : 0.06)) return false;
+  const other = world.people.find(p => p !== person && p.communityId && p.action === person.action && distance(person, p) <= disputaRadio && distance(person.target, p.target) < 0.5 && Math.max(p.hunger, p.thirst) > disputaNecesidad && world.tick - p.lastDispute >= 180);
   if (!other) return false;
   const trust = person.bonds[other.id] ?? 0.2;
   if (trust >= 0.55 || (person.culture.openness + other.culture.openness) / 2 >= 0.65) {

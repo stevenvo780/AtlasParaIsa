@@ -36,6 +36,15 @@ export interface WorldParams {
   red: { deltas: boolean };
   /** T100: admisión de colecciones; no son una política silenciosa de natalidad. */
   limites: { teselasActivas: number; chunks: number; comunidades: number; fauna: number; aplicacion: 'historicos' | 'parametros' };
+  /**
+   * Leyes candidatas (noche de ciencia, 2026-09-22). `docs/ANALISIS-DINAMICAS-2026-09-21.md`
+   * mide tres cierres: la elección refuerza al ganador y se traba en cooperar, las disputas
+   * por recursos nunca se disparan y la pertenencia a una comunidad no vuelve a revisarse.
+   * Estas claves abren esos tres cerrojos SIN decidir nada: con sus defaults el mundo es el
+   * de hoy paso a paso, y sólo un laboratorio que las mueva mide otra cosa.
+   */
+  conducta: { habituacion: number };
+  social: { disputaNecesidad: number; disputaEscasez: number; disputaRadio: number; ensenanzaRareza: number; confianzaSalida: number; distanciaAlternativa: number };
 }
 
 function deepFreeze<T>(value: T): T {
@@ -62,6 +71,11 @@ const RAW_DEFAULTS: WorldParams = {
   motor: { clonPorPaso: true, hilos: 1, soaTerreno: false, particionarPersonas: false, gpu: [], orden: 'natural' },
   red: { deltas: false },
   limites: { teselasActivas: 65536, chunks: 256, comunidades: 8, fauna: 393216, aplicacion: 'parametros' },
+  // Leyes candidatas: cada default es la constante que hoy está escrita en el código
+  // (`index.ts` no descuenta saciedad; `society.ts` usa 0,65 / ×1 / 2 celdas / sin rareza /
+  // 0,35 de confianza / 0,2 de distancia cultural), así que abrirlas no cambia el mundo.
+  conducta: { habituacion: 0 },
+  social: { disputaNecesidad: 0.65, disputaEscasez: 1, disputaRadio: 2, ensenanzaRareza: 0, confianzaSalida: 0.35, distanciaAlternativa: 0.2 },
 };
 
 /** Objeto congelado en profundidad: nunca se muta; `parseParams` clona para cada override. */
@@ -129,6 +143,16 @@ export const PARAM_RANGES: Record<string, [number, number]> = {
   'limites.chunks': [1, Number.MAX_SAFE_INTEGER],
   'limites.comunidades': [1, Number.MAX_SAFE_INTEGER],
   'limites.fauna': [1, Number.MAX_SAFE_INTEGER],
+  // Leyes candidatas. El mínimo de `disputaNecesidad` y `disputaEscasez` no es 0 a
+  // propósito: con 0 la disputa dejaría de exigir necesidad o escasez y sería un
+  // conflicto decretado, no medido. `disputaRadio` parte de 1 celda (contacto real).
+  'conducta.habituacion': [0, 2],
+  'social.disputaNecesidad': [0.1, 1],
+  'social.disputaEscasez': [0.1, 20],
+  'social.disputaRadio': [1, 8],
+  'social.ensenanzaRareza': [0, 5],
+  'social.confianzaSalida': [0, 1],
+  'social.distanciaAlternativa': [0, 1],
 };
 
 type ScalarDescriptor = { kind: 'number'; range: readonly [number, number]; integer?: boolean }

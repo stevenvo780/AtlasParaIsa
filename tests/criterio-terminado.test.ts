@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { evaluarConjunto, parsearArgumentos, type Informe } from '../scripts/lab/criterio-terminado.mjs';
@@ -153,6 +153,7 @@ test('criterio de terminado: la CLI imprime la tabla con los umbrales y escribe 
     assert.match(r.stdout, /CRITERIO DE TERMINADO/);
     assert.match(r.stdout, /C7 tecnología +usos de inventor ajeno/);
     assert.match(r.stdout, /MAYORÍA/);
+    assert.match(r.stdout, /corte PROVISIONAL en el día 20 < 60/);
     const json = JSON.parse(readFileSync(salida, 'utf8')) as Informe;
     assert.equal(json.dia, 20);
     assert.equal(json.umbrales.usoAjenoMin, 0.15);
@@ -160,5 +161,61 @@ test('criterio de terminado: la CLI imprime la tabla con los umbrales y escribe 
     const sinEntrada = spawnSync(process.execPath, ['--import', 'tsx', 'scripts/lab/criterio-terminado.mts'], { encoding: 'utf8' });
     assert.equal(sinEntrada.status, 1);
     assert.match(sinEntrada.stderr, /Falta --entrada/);
+  } finally { rmSync(raiz, { recursive: true, force: true }); }
+});
+
+test('criterio de terminado: revisión — nada se aprueba por una sola muestra, un campo ausente o un tipo residual', () => {
+  const raiz = mkdtempSync(join(tmpdir(), 'atlas-criterio-rev-'));
+  try {
+    // C3: sin generacionesMortalesVivas, generacionesVivas cuenta la generación 0 de S e I aunque ya no
+    // quede ningún fundador mortal: 3 generaciones «vivas» pueden ser solo 2 mortales ⇒ desconocido.
+    const sinMortales = (d: number, g: number) => { const { generacionesMortalesVivas: _g, ...resto } = diaSano(d); return { ...resto, generacionesVivas: g }; };
+    escribir(raiz, 'G-1', rango(20).map(d => sinMortales(d, 3)), true);
+    escribir(raiz, 'G-2', rango(20).map(d => sinMortales(d, 4)), true);
+    escribir(raiz, 'G-3', rango(20).map(d => sinMortales(d, 2)), true);
+    // C8: diversidad constante (no crece) y serie decreciente con un pico aislado el día D.
+    escribir(raiz, 'V-1', rango(20).map(d => ({ ...diaSano(d), diversidadConducta: 0.3 })), true);
+    escribir(raiz, 'V-2', rango(20).map(d => ({ ...diaSano(d), diversidadConducta: d === 20 ? 0.7 : 0.6 - 0.01 * d })), true);
+    // C4: un tipo con 2 actos en la ventana (17 % de 12) no es «relevante».
+    escribir(raiz, 'K-1', rango(20).map(d => ({ ...diaSano(d), cooperacionAcumuladaPorTipo: { teaching: d, trade: Math.floor(d / 5), constructionHelp: 0 } })), true);
+    // C1: la población cae por debajo de 16 dentro de la ventana y se recupera el día D.
+    escribir(raiz, 'P-1', rango(20).map(d => d === 15 ? { ...diaSano(d), poblacion: 12, vecinosMortales: 10 } : diaSano(d)), true);
+    // Extinción sin vecinosMortales (métricas antiguas): población 2 = solo S e I, inmortales.
+    escribir(raiz, 'X-1', rango(12).map(d => { const { vecinosMortales: _v, ...resto } = diaSano(d); return d >= 9 ? { ...resto, poblacion: 2 } : resto; }), true);
+    const inf = evaluarConjunto(raiz, { dia: 20 });
+    assert.equal(replica(inf, 'G-1').criterios!.generaciones.estado, 'desconocido');
+    assert.equal(replica(inf, 'G-1').todos, 'desconocido');
+    assert.equal(replica(inf, 'G-2').criterios!.generaciones.estado, 'cumple');
+    assert.equal(replica(inf, 'G-3').criterios!.generaciones.estado, 'falla');
+    assert.equal(replica(inf, 'V-1').criterios!.diversidad.estado, 'falla');
+    assert.match(replica(inf, 'V-1').criterios!.diversidad.motivo, /constante/);
+    assert.equal(replica(inf, 'V-2').criterios!.diversidad.estado, 'falla');
+    assert.equal(replica(inf, 'K-1').criterios!.cooperacion.estado, 'falla');
+    assert.equal(replica(inf, 'P-1').criterios!.supervivencia.estado, 'falla');
+    assert.equal(replica(inf, 'X-1').estado, 'extinguida');
+    assert.equal(replica(inf, 'X-1').diaExtincion, 9);
+
+    // C8 con dos días (5 y 6): ni pendiente ni comparación de bloques con una sola muestra por extremo.
+    assert.equal(replica(evaluarConjunto(raiz, { dia: 6 }), 'V-2').criterios!.diversidad.estado, 'desconocido');
+
+    // C6: con un solo día leído el balance se hace desde el estado inicial (16, 0, 0), no se da por bueno.
+    escribir(raiz, 'B-1', [{ ...diaSano(1), poblacion: 15, nacimientos: 0, muertesPorCausa: { starvation: 0, dehydration: 0, exposure: 0, senescence: 0 } }], true);
+    const uno = replica(evaluarConjunto(raiz, { dia: 1, causasMin: 0 }), 'B-1').criterios!.muertes;
+    assert.equal(uno.valores.residuoBalance, -1);
+    assert.equal(uno.estado, 'falla');
+  } finally { rmSync(raiz, { recursive: true, force: true }); }
+});
+
+test('criterio de terminado: una réplica en curso que lleva horas sin escribir se avisa como posible proceso muerto', () => {
+  const raiz = mkdtempSync(join(tmpdir(), 'atlas-criterio-rev-'));
+  try {
+    escribir(raiz, 'E-1', rango(5).map(diaSano), false);
+    escribir(raiz, 'E-2', rango(5).map(diaSano), false);
+    const antiguo = new Date(Date.now() - 5 * 3600 * 1000);
+    for (const n of rango(5)) utimesSync(join(raiz, 'E-1', `dia-00${n}.json`), antiguo, antiguo);
+    const inf = evaluarConjunto(raiz, { dia: 20 });
+    assert.equal(replica(inf, 'E-1').estado, 'en-curso');
+    assert.ok(inf.avisos.some(a => a.startsWith('E-1:') && /proceso muerto/.test(a)), inf.avisos.join('\n'));
+    assert.ok(!inf.avisos.some(a => a.startsWith('E-2:')));
   } finally { rmSync(raiz, { recursive: true, force: true }); }
 });

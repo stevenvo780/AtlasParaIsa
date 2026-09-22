@@ -216,22 +216,30 @@ justificación de cada uno está en la cabecera del script y se repite en la sal
 
 | # | criterio | cumple si… | banderas |
 |---|---|---|---|
-| C1 | supervivencia | `poblacion(D) ≥ 16` (14 fundadores mortales + S e I) | `--poblacion-min` |
+| C1 | supervivencia | `poblacion ≥ 16` **todos** los días de la ventana, no solo el día D (14 fundadores mortales + S e I) | `--poblacion-min` |
 | C2 | recambio | nacimientos en la ventana ≥ 1 **y** `fundadoresMortalesVivos(D) ≤ 1` | `--nacimientos-min --fundadores-max` |
-| C3 | varias generaciones | `generacionesMortalesVivas(D)` ≥ 3 (sin S e I, que mantienen viva la generación 0) | `--generaciones-min` |
-| C4 | cooperación variada | ≥ 2 tipos de `cooperacionAcumuladaPorTipo` (+ `foodShared` si existe), cada uno ≥ 10 % de los actos de la ventana | `--coop-tipos-min --coop-fraccion-min` |
+| C3 | varias generaciones | `generacionesMortalesVivas(D)` ≥ 3 (sin S e I, que mantienen viva la generación 0; si falta, `generacionesVivas` solo como cota: cumple si `generacionesVivas − 1 ≥ 3`, si no «desconocido» o falla) | `--generaciones-min` |
+| C4 | cooperación variada | ≥ 2 tipos de `cooperacionAcumuladaPorTipo` (+ `foodShared` si existe), cada uno ≥ 10 % de los actos de la ventana **y** ≥ 5 actos en ella | `--coop-tipos-min --coop-fraccion-min --coop-actos-min` |
 | C5 | conflictos | `conflictosAcumulados` crece ≥ 1 en la ventana (si es 0 en toda la réplica lo dice) | `--conflictos-min` |
-| C6 | muertes legibles | 0 muertes fuera de starvation/dehydration/exposure/senescence, ≥ 2 causas en 1..D y balance `Δpoblación = Δnacimientos − Δmuertes` | `--causas-min --causas-conocidas` |
+| C6 | muertes legibles | 0 muertes fuera de starvation/dehydration/exposure/senescence, ≥ 2 causas en 1..D y balance `Δpoblación = Δnacimientos − Δmuertes` desde el día 0 (16 habitantes, o `resumen.poblacionInicial`) | `--causas-min --causas-conocidas` |
 | C7 | tecnología transmitida | Σ`usosDeInventorAjeno` / Σ(`usosUtiles` − `usosSinAutorResuelto`) en la ventana ≥ 0,15 y uso ajeno en ≥ 50 % de sus días | `--uso-ajeno-min --dias-uso-ajeno-min` |
-| C8 | diversidad creciente | pendiente MCO de `diversidadConducta` en días 5..D ≥ 0 **o** valor(D) ≥ valor(5) | `--pendiente-min --dia-base-diversidad --diversidad-regla o\|y` |
+| C8 | diversidad creciente | pendiente MCO de `diversidadConducta` en días 5..D (≥ 3 días con dato) ≥ 0 **o** media de los k últimos días ≥ media de los k primeros, k = min(10, mitad del tramo) ≥ 2; una serie constante falla | `--pendiente-min --dia-base-diversidad --diversidad-regla o\|y` |
 
 - Cada criterio es cumple / falla / **desconocido** (campo ausente): nunca se aprueba por defecto.
+- Nada se decide con un día suelto: `diversidadConducta` salta ±0,1 de un día a otro en r2, así que
+  C8 compara medias de bloques y exige ≥ 3 puntos para la pendiente; C1 mira toda la ventana.
+- `replica.ts` solo escribe las 4 causas conocidas en `muertesPorCausa`: la comprobación que de verdad
+  detecta una muerte sin causa en C6 es el balance.
 - **Extinguida** (algún día ≤ D con 0 `vecinosMortales`): cuenta y falla los 8. **En curso** (sin
   `replica.json` y sin dia-D) y **corta** (terminó antes de D sin extinguirse): excluidas, se dice
-  cuántas y por qué día van. Una réplica que sigue corriendo pero ya escribió dia-D se evalúa.
+  cuántas y por qué día van. Una réplica que sigue corriendo pero ya escribió dia-D se evalúa. Sin
+  `vecinosMortales` la extinción se lee como `poblacion ≤ 2` (S e I son inmortales). Una «en curso»
+  que lleva > 3 h sin escribir (`--estancada-horas`) se avisa como posible proceso muerto.
 - Veredicto por brazo (`--mayoria 0.5`): «mayoría» si cumplen los 8 ≥ 50 % de las semillas del brazo
   aunque todas las excluidas fallaran; «no mayoría» si ni contando como aprobadas las excluidas y las
   desconocidas se llega; si no, «indeterminado». También se da la fracción literal sobre evaluadas.
+- Con D < 60 la salida avisa de que el corte es **provisional**: el criterio exige 60 días, así que un
+  «no mayoría» al día 10 es del corte, no del criterio.
 - Salida: tabla por brazo (cumplen/evaluadas por criterio y los 8 a la vez), una línea por réplica
   con el motivo de cada fallo, y el informe completo en JSON con `--salida`.
 

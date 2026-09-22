@@ -23,9 +23,10 @@
  * Los campos de uso de tecnología (usosUtiles, usosDeInventorAjeno…) son POR DÍA (metrics.ts los
  * cuenta en (tick−2400, tick]) y se suman sobre los días de la ventana.
  *
- *  C1 supervivencia — poblacion(D) ≥ 16 [--poblacion-min]. El mundo nace con 16 (14 vecinos mortales
- *     fundadores + S e I, inmortales): ≥ 16 equivale a que los mortales vivos sean al menos tantos
- *     como los fundadores mortales, i.e. la población se ha repuesto, no solo sobrevive un resto.
+ *  C1 supervivencia — poblacion ≥ 16 [--poblacion-min] TODOS los días de la ventana (no solo el día
+ *     D: «mantiene población durante» no se prueba con una foto de un día). El mundo nace con 16 (14
+ *     vecinos mortales fundadores + S e I, inmortales; createWorld): ≥ 16 equivale a que los mortales
+ *     vivos sean al menos tantos como los fundadores mortales, i.e. la población se ha repuesto.
  *  C2 recambio — nacimientos en la ventana ≥ 1 [--nacimientos-min] Y fundadoresMortalesVivos(D) ≤ 1
  *     [--fundadores-max]. «La población ya no es la fundadora»: de los 14 fundadores mortales quedan
  *     0 o casi (≤ 1), y aún nace gente al final (no es un pico de natalidad de los primeros días).
@@ -34,11 +35,15 @@
  *  C3 varias generaciones — generaciones mortales vivas(D) ≥ 3 [--generaciones-min] (abuelos, padres
  *     e hijos a la vez). Se cuenta `generacionesMortalesVivas` y no `generacionesVivas`, que incluye a
  *     S e I y mantiene «viva» la generación 0 para siempre (inflaría en 1 el recuento una vez muertos
- *     los fundadores). Solo si falta la primera se cae a la segunda, y la salida lo dice.
+ *     los fundadores). Si falta la primera se usa la segunda como COTA: generacionesVivas − 1 ≤
+ *     mortales ≤ generacionesVivas, así que cumple solo si generacionesVivas − 1 ≥ el mínimo, falla si
+ *     generacionesVivas < el mínimo y, entre medias, «desconocido» (nunca aprobado por la inflación).
  *  C4 cooperación variada — ≥ 2 tipos [--coop-tipos-min], cada uno con ≥ 10 % [--coop-fraccion-min]
- *     de los actos tipificados de la ventana. Tipos = claves de `cooperacionAcumuladaPorTipo`
- *     (teaching, trade, constructionHelp) + `foodShared` si algún día aparece en el fichero. El 10 %
- *     evita que un tipo residual (un trueque entre cientos de enseñanzas) cuente como «relevante».
+ *     de los actos tipificados de la ventana Y ≥ 5 actos en ella [--coop-actos-min]. Tipos = claves de
+ *     `cooperacionAcumuladaPorTipo` (teaching, trade, constructionHelp) + `foodShared` si algún día
+ *     aparece en el fichero. El 10 % evita que un tipo residual (un trueque entre cientos de
+ *     enseñanzas) cuente como «relevante»; el mínimo absoluto evita lo contrario, que con pocos actos
+ *     (2 trueques entre 12 actos = 17 %) un tipo casi ausente pase por la fracción (~1 acto cada 2 días).
  *     `otrasCooperacionesAcumuladas` (aporte de material y turnos ante escasez, mezclados) se informa
  *     pero no cuenta como tipo: mezcla dos mecanismos.
  *  C5 conflictos — conflictos en la ventana ≥ 1 [--conflictos-min]: el conflicto sigue existiendo al
@@ -48,8 +53,12 @@
  *     [--causas-conocidas starvation,dehydration,exposure,senescence: `DemographicDeathCause` de
  *     src/shared/demography.ts], ≥ 2 causas distintas con alguna muerte [--causas-min] (un mundo que
  *     solo mata de vejez, o solo de hambre, no tiene muertes variadas ni legibles como historia) Y el
- *     balance cierra: poblacion(D) − poblacion(d₀) = Δnacimientos − Δmuertes entre el primer día
- *     leído d₀ y D (una baja sin muerte registrada sería una muerte sin causa legible).
+ *     balance cierra: poblacion(D) − poblacion(0) = nacimientos(D) − muertes(D) desde el estado
+ *     inicial (dia-000.json si existe; si no, 16 habitantes, 0 nacimientos y 0 muertes, o
+ *     `resumen.poblacionInicial` de replica.json): una baja sin muerte registrada sería una muerte sin
+ *     causa legible. OJO: replica.ts solo escribe las 4 causas conocidas en `muertesPorCausa`, así que
+ *     «0 muertes fuera del vocabulario» no puede fallar con sus ficheros; el balance es la comprobación
+ *     que de verdad detecta una muerte sin causa.
  *  C7 tecnología que se transmite — en la ventana, Σ usosDeInventorAjeno / Σ (usosUtiles −
  *     usosSinAutorResuelto) ≥ 0,15 [--uso-ajeno-min] (al menos ~1 de cada 7 usos útiles con autor
  *     conocido es de un invento de OTRA persona; las réplicas de la noche 2026-09-22 dan 0,05–0,40
@@ -57,22 +66,29 @@
  *     campo es diario, «usosDeInventorAjeno crece» se lee como «su acumulado crece de forma sostenida»,
  *     no un solo día aislado.
  *  C8 diversidad creciente — pendiente por mínimos cuadrados de `diversidadConducta` sobre los días
- *     5..D ≥ 0 [--pendiente-min, --dia-base-diversidad] O valor(D) ≥ valor(5). Día 5 como base porque
- *     antes domina el asentamiento inicial (y es el día de SC-003). `--diversidad-regla y` exige las
- *     dos condiciones en vez de una.
+ *     5..D ≥ 0 [--pendiente-min, --dia-base-diversidad] O media de los k últimos días ≥ media de los k
+ *     primeros (desde el día 5), con k = min(ventana, ⌊(D−5+1)/2⌋). Día 5 como base porque antes
+ *     domina el asentamiento inicial (y es el día de SC-003). `--diversidad-regla y` exige las dos.
+ *     El indicador diario es ruidoso (saltos de ±0,1 de un día a otro en r2), así que no se compara
+ *     un día suelto con otro: la pendiente exige ≥ 3 días con dato y cada bloque ≥ 2 días completos
+ *     (si no, esa parte es «desconocido»), y una serie constante FALLA (no crece, aunque su pendiente
+ *     sea 0 ≥ 0).
  *
  * Todo criterio es cumple / falla / desconocido. Un campo ausente o ilegible da «desconocido», NUNCA
  * «cumple»: una semilla solo «cumple todos» si los 8 cumplen.
  *
  * Estados de réplica al día D:
  *   - evaluada: tiene dia-D (aunque siga corriendo: los días 1..D ya no cambian);
- *   - extinguida: algún día ≤ D con 0 vecinos mortales (`vecinosMortales`, o `poblacion` 0 si falta;
- *     solo los vecinos se reproducen, family.ts, así que no hay vuelta atrás). Cuenta como evaluada que
- *     FALLA los 8 criterios, llegue o no a escribir dia-D;
+ *   - extinguida: algún día ≤ D con 0 vecinos mortales (`vecinosMortales`; si falta, `poblacion` − 2,
+ *     porque S e I son inmortales y la población nunca baja de 2; solo los vecinos se reproducen,
+ *     family.ts, así que no hay vuelta atrás). Cuenta como evaluada que FALLA los 8 criterios, llegue
+ *     o no a escribir dia-D;
  *   - ilegible: un dia-NNN.json intermedio no es JSON válido o su tick no es NNN·2400. Cuenta como
  *     evaluada con los 8 «desconocido» (nunca aprobada);
  *   - en curso: sin replica.json y aún sin dia-D → EXCLUIDA (se dice cuántas y por qué día van).
- *     Un último dia-NNN.json a medio escribir de una réplica en curso se ignora con aviso;
+ *     Un último dia-NNN.json a medio escribir de una réplica en curso se ignora con aviso. Si lleva
+ *     más de 3 h [--estancada-horas] sin escribir nada se avisa de que el proceso puede haber muerto
+ *     sin dejar replica.json (sigue excluida: el script no puede saberlo; revisar su .log);
  *   - corta: tiene replica.json (o el barrido la marcó abortada) pero terminó antes de D sin
  *     extinguirse (se corrió con --dias < D) → EXCLUIDA: falta horizonte, no es un fallo.
  *
@@ -99,22 +115,32 @@ export const CRITERIOS: readonly IdCriterio[] = ['supervivencia', 'recambio', 'g
 export interface Umbrales {
   dia: number | 'comun'; ventana: number;
   poblacionMin: number; nacimientosMin: number; fundadoresMax: number; generacionesMin: number;
-  coopTiposMin: number; coopFraccionMin: number; conflictosMin: number;
+  coopTiposMin: number; coopFraccionMin: number; coopActosMin: number; conflictosMin: number;
   causasMin: number; causasConocidas: string[];
   usoAjenoMin: number; diasUsoAjenoMin: number;
   diaBaseDiversidad: number; pendienteMin: number; diversidadRegla: 'o' | 'y';
-  mayoria: number;
+  mayoria: number; estancadaHoras: number;
 }
 
+/** «durante al menos 60 días simulados»: un corte anterior no puede aprobar ni suspender el criterio. */
+export const DIAS_CRITERIO = 60;
+
 export const UMBRALES_POR_DEFECTO: Readonly<Umbrales> = Object.freeze({
-  dia: 60, ventana: 10,
+  dia: DIAS_CRITERIO, ventana: 10,
   poblacionMin: 16, nacimientosMin: 1, fundadoresMax: 1, generacionesMin: 3,
-  coopTiposMin: 2, coopFraccionMin: 0.10, conflictosMin: 1,
+  coopTiposMin: 2, coopFraccionMin: 0.10, coopActosMin: 5, conflictosMin: 1,
   causasMin: 2, causasConocidas: ['starvation', 'dehydration', 'exposure', 'senescence'],
   usoAjenoMin: 0.15, diasUsoAjenoMin: 0.5,
   diaBaseDiversidad: 5, pendienteMin: 0, diversidadRegla: 'o' as const,
-  mayoria: 0.5,
+  mayoria: 0.5, estancadaHoras: 3,
 });
+
+/** createWorld: S, I y 14 vecinos fundadores. S e I (roles 'S' | 'I') son inmortales: en los 552
+ * dia-NNN.json de r2 (noche 2026-09-22) poblacion − vecinosMortales = 2 siempre. */
+const POBLACION_INICIAL = 16, INMORTALES = 2;
+/** Mínimos de muestras de C8: una pendiente de 2 puntos o un bloque de 1 día es una comparación de
+ * días sueltos de un indicador que salta ±0,1 de un día a otro. */
+const PUNTOS_MIN_PENDIENTE = 3, DIAS_MIN_BLOQUE = 2;
 
 export interface ResultadoCriterio { estado: Estado; motivo: string; valores: Record<string, unknown> }
 export type EstadoReplica = 'evaluada' | 'extinguida' | 'ilegible' | 'en-curso' | 'corta';
@@ -147,6 +173,8 @@ type Dia = Record<string, unknown>;
 interface ReplicaLeida {
   nombre: string; brazo: string; semilla: number; directorio: string;
   terminada: boolean; abortada: boolean; dias: Map<number, Dia>; error: string | null; ultimaEscritura: string | null;
+  /** `resumen.poblacionInicial` de replica.json, si está. */
+  poblacionInicial: number | null;
 }
 
 // ── lectura ─────────────────────────────────────────────────────────────────────────────────────
@@ -155,13 +183,15 @@ const PATRON_DIA = /^dia-(\d+)\.json$/;
 const esObjeto = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
 
 function leerReplica(directorio: string, nombre: string, brazo: string, semilla: number, avisos: string[]): ReplicaLeida {
-  const r: ReplicaLeida = { nombre, brazo, semilla, directorio, terminada: false, abortada: false, dias: new Map(), error: null, ultimaEscritura: null };
+  const r: ReplicaLeida = { nombre, brazo, semilla, directorio, terminada: false, abortada: false, dias: new Map(), error: null, ultimaEscritura: null, poblacionInicial: null };
   const metaRuta = join(directorio, 'replica.json');
   if (existsSync(metaRuta)) {
     r.terminada = true;
     try {
       const meta: unknown = JSON.parse(readFileSync(metaRuta, 'utf8'));
       r.abortada = esObjeto(meta) && meta.abortada === true;
+      const inicial = esObjeto(meta) && esObjeto(meta.resumen) ? meta.resumen.poblacionInicial : undefined;
+      if (typeof inicial === 'number' && Number.isInteger(inicial) && inicial >= 0) r.poblacionInicial = inicial;
     } catch { r.error = 'replica.json no es JSON válido'; return r; }
   }
   const nombres = readdirSync(directorio).filter(n => PATRON_DIA.test(n))
@@ -178,8 +208,9 @@ function leerReplica(directorio: string, nombre: string, brazo: string, semilla:
     if (typeof cuerpo.tick === 'number' && cuerpo.tick !== dia * TICKS_POR_DIA) { r.error = `${fichero}: tick ${cuerpo.tick} ≠ ${dia}·${TICKS_POR_DIA}`; return r; }
     r.dias.set(dia, cuerpo);
   }
+  // Sin ningún dia-NNN.json, la «última escritura» es la del directorio (creado al lanzar la réplica).
   const ultimo = nombres.at(-1);
-  if (ultimo) r.ultimaEscritura = statSync(join(directorio, ultimo)).mtime.toISOString();
+  r.ultimaEscritura = statSync(ultimo ? join(directorio, ultimo) : directorio).mtime.toISOString();
   return r;
 }
 
@@ -240,25 +271,30 @@ function pendienteMco(puntos: readonly (readonly [number, number])[]): number | 
 
 export function describirCriterios(u: Umbrales): Record<IdCriterio, string> {
   return {
-    supervivencia: `poblacion(D) ≥ ${u.poblacionMin}`,
+    supervivencia: `poblacion ≥ ${u.poblacionMin} todos los días de la ventana`,
     recambio: `nacimientos en la ventana ≥ ${u.nacimientosMin} y fundadoresMortalesVivos(D) ≤ ${u.fundadoresMax}`,
     generaciones: `generaciones mortales vivas(D) ≥ ${u.generacionesMin}`,
-    cooperacion: `≥ ${u.coopTiposMin} tipos de cooperación con ≥ ${pct(u.coopFraccionMin)} de los actos tipificados de la ventana`,
+    cooperacion: `≥ ${u.coopTiposMin} tipos de cooperación con ≥ ${pct(u.coopFraccionMin)} de los actos tipificados de la ventana y ≥ ${u.coopActosMin} actos`,
     conflictos: `conflictos en la ventana ≥ ${u.conflictosMin}`,
-    muertes: `0 muertes fuera de {${u.causasConocidas.join(', ')}}, ≥ ${u.causasMin} causas distintas en los días 1..D y balance población = nacimientos − muertes`,
+    muertes: `0 muertes fuera de {${u.causasConocidas.join(', ')}}, ≥ ${u.causasMin} causas distintas en los días 1..D y balance población = nacimientos − muertes desde el día 0`,
     tecnologia: `usos de inventor ajeno / usos útiles con autor en la ventana ≥ ${u.usoAjenoMin} y uso ajeno en ≥ ${pct(u.diasUsoAjenoMin)} de sus días`,
-    diversidad: `pendiente MCO de diversidadConducta días ${u.diaBaseDiversidad}..D ≥ ${u.pendienteMin} ${u.diversidadRegla === 'o' ? 'o' : 'y'} valor(D) ≥ valor(${u.diaBaseDiversidad})`,
+    diversidad: `pendiente MCO de diversidadConducta días ${u.diaBaseDiversidad}..D (≥ ${PUNTOS_MIN_PENDIENTE} días) ≥ ${u.pendienteMin} ${u.diversidadRegla === 'o' ? 'o' : 'y'} media de los k últimos días ≥ media de los k primeros (k = min(ventana, mitad del tramo) ≥ ${DIAS_MIN_BLOQUE}); constante ⇒ falla`,
   };
 }
 
 // ── los 8 criterios ─────────────────────────────────────────────────────────────────────────────
 
-interface Contexto { dias: Map<number, Dia>; D: number; base: number; diasVentana: number[]; u: Umbrales }
+interface Contexto { dias: Map<number, Dia>; D: number; base: number; diasVentana: number[]; u: Umbrales; poblacionInicial: number }
 
-function supervivencia({ dias, D, u }: Contexto): ResultadoCriterio {
+function supervivencia({ dias, D, diasVentana, u }: Contexto): ResultadoCriterio {
+  const serie = diasVentana.map(dia => [dia, num(dias.get(dia), 'poblacion')] as const);
+  const conocidos = serie.filter((x): x is readonly [number, number] => x[1] !== null), faltan = serie.filter(([, p]) => p === null).map(([dia]) => dia);
   const p = num(dias.get(D), 'poblacion');
-  if (p === null) return { estado: 'desconocido', motivo: 'falta poblacion en el día D', valores: { poblacion: null } };
-  return { estado: p >= u.poblacionMin ? 'cumple' : 'falla', motivo: `población ${p} ${p >= u.poblacionMin ? '≥' : '<'} ${u.poblacionMin}`, valores: { poblacion: p } };
+  if (!conocidos.length) return { estado: 'desconocido', motivo: 'falta poblacion en la ventana', valores: { poblacion: p, poblacionMinima: null, diasSinDato: faltan } };
+  const [diaMin, minima] = conocidos.reduce((m, x) => x[1] < m[1] ? x : m);
+  const estado = y(...serie.map(([, v]) => v === null ? null : v >= u.poblacionMin));
+  const motivo = `población mínima ${minima} (día ${diaMin}) ${minima >= u.poblacionMin ? '≥' : '<'} ${u.poblacionMin}; día D: ${p ?? '¿?'}${faltan.length ? `; sin dato los días ${faltan.join(', ')}` : ''}`;
+  return { estado, motivo, valores: { poblacion: p, poblacionMinima: minima, diaPoblacionMinima: diaMin, diasSinDato: faltan } };
 }
 
 function recambio({ dias, D, base, u }: Contexto): ResultadoCriterio {
@@ -275,10 +311,17 @@ function recambio({ dias, D, base, u }: Contexto): ResultadoCriterio {
 
 function generaciones({ dias, D, u }: Contexto): ResultadoCriterio {
   const d = dias.get(D), mortales = d?.generacionesMortalesVivas;
-  const [g, fuente] = Array.isArray(mortales) ? [mortales.length, 'generacionesMortalesVivas'] : [num(d, 'generacionesVivas'), 'generacionesVivas (incluye a S e I: la generación 0 nunca desaparece)'];
-  if (g === null) return { estado: 'desconocido', motivo: 'faltan generacionesMortalesVivas y generacionesVivas', valores: { generaciones: null, fuente: null } };
-  const lista = Array.isArray(mortales) ? ` [${mortales.join(', ')}]` : '';
-  return { estado: g >= u.generacionesMin ? 'cumple' : 'falla', motivo: `${g} generaciones vivas${lista}${fuente === 'generacionesMortalesVivas' ? '' : ` (fuente: ${fuente})`}`, valores: { generaciones: g, fuente } };
+  if (Array.isArray(mortales)) {
+    const g = mortales.length;
+    return { estado: g >= u.generacionesMin ? 'cumple' : 'falla', motivo: `${g} generaciones vivas [${mortales.join(', ')}]`, valores: { generaciones: g, fuente: 'generacionesMortalesVivas' } };
+  }
+  // generacionesVivas = generaciones mortales ∪ {0}: S e I son la generación 0 y no mueren. Sin saber si
+  // queda algún fundador mortal, las mortales son generacionesVivas − 1 o generacionesVivas.
+  const todas = num(d, 'generacionesVivas');
+  if (todas === null) return { estado: 'desconocido', motivo: 'faltan generacionesMortalesVivas y generacionesVivas', valores: { generaciones: null, fuente: null } };
+  const estado: Estado = todas < u.generacionesMin ? 'falla' : todas - 1 >= u.generacionesMin ? 'cumple' : 'desconocido';
+  return { estado, motivo: `entre ${Math.max(0, todas - 1)} y ${todas} generaciones mortales vivas (falta generacionesMortalesVivas; generacionesVivas = ${todas} incluye la generación 0 de S e I)`,
+    valores: { generaciones: null, cotaInferior: Math.max(0, todas - 1), cotaSuperior: todas, fuente: 'generacionesVivas' } };
 }
 
 function cooperacion({ dias, D, base, u }: Contexto): ResultadoCriterio {
@@ -301,10 +344,10 @@ function cooperacion({ dias, D, base, u }: Contexto): ResultadoCriterio {
   const total = Object.values(porTipo).reduce((s, n) => s + n, 0);
   if (total <= 0) return { estado: 'falla', motivo: 'ningún acto de cooperación tipificado en la ventana', valores: { porTipo, total, otras } };
   const fracciones = Object.fromEntries(Object.entries(porTipo).map(([t, n]) => [t, redondear(n / total)]));
-  const relevantes = Object.entries(porTipo).filter(([, n]) => n > 0 && n / total >= u.coopFraccionMin).map(([t]) => t);
-  const detalle = Object.entries(porTipo).sort((a, b) => b[1] - a[1]).map(([t, n]) => `${t} ${pct(n / total)}`).join(', ');
+  const relevantes = Object.entries(porTipo).filter(([, n]) => n > 0 && n >= u.coopActosMin && n / total >= u.coopFraccionMin).map(([t]) => t);
+  const detalle = Object.entries(porTipo).sort((a, b) => b[1] - a[1]).map(([t, n]) => `${t} ${n} (${pct(n / total)})`).join(', ');
   return { estado: relevantes.length >= u.coopTiposMin ? 'cumple' : 'falla',
-    motivo: `${relevantes.length} tipo(s) ≥ ${pct(u.coopFraccionMin)} de ${total} actos: ${detalle}`,
+    motivo: `${relevantes.length} tipo(s) con ≥ ${pct(u.coopFraccionMin)} y ≥ ${u.coopActosMin} de ${total} actos: ${detalle}`,
     valores: { porTipo, fracciones, total, relevantes, otrasNoTipificadas: otras } };
 }
 
@@ -317,27 +360,24 @@ function conflictos({ dias, D, base, u }: Contexto): ResultadoCriterio {
   return { estado: ventana >= u.conflictosMin ? 'cumple' : 'falla', motivo, valores: { conflictosVentana: ventana, conflictosAcumulados: cD } };
 }
 
-function muertes({ dias, D, u }: Contexto): ResultadoCriterio {
+function muertes({ dias, D, u, poblacionInicial }: Contexto): ResultadoCriterio {
   const mD = mapa(dias.get(D), 'muertesPorCausa');
   if (!mD) return { estado: 'desconocido', motivo: 'falta muertesPorCausa en el día D', valores: {} };
   const desconocidas = Object.entries(mD).filter(([causa, n]) => !u.causasConocidas.includes(causa) && n > 0);
   const causas = u.causasConocidas.filter(causa => (mD[causa] ?? 0) > 0);
-  // Balance demográfico entre el primer día leído y D: una baja sin muerte registrada no es legible.
-  const primero = Math.min(...dias.keys());
-  let residuo: number | null | undefined; // undefined = no aplica (solo hay un día)
-  if (primero < D) {
-    const d0 = dias.get(primero)!, dD = dias.get(D)!;
-    const m0 = mapa(d0, 'muertesPorCausa'), p0 = num(d0, 'poblacion'), n0 = num(d0, 'nacimientos'), pD = num(dD, 'poblacion'), nD = num(dD, 'nacimientos');
-    const suma = (m: Record<string, number>) => Object.values(m).reduce((s, n) => s + n, 0);
-    residuo = m0 && p0 !== null && n0 !== null && pD !== null && nD !== null ? (pD - p0) - ((nD - n0) - (suma(mD) - suma(m0))) : null;
-  }
+  // Balance demográfico desde el estado inicial (día 0) hasta D: una baja sin muerte registrada no es
+  // legible. Nunca «no aplica»: con un solo día leído también hay un par (día 0, día D).
+  const d0: Dia = dias.get(0) ?? { poblacion: poblacionInicial, nacimientos: 0, muertesPorCausa: {} }, dD = dias.get(D)!;
+  const m0 = mapa(d0, 'muertesPorCausa'), p0 = num(d0, 'poblacion'), n0 = num(d0, 'nacimientos'), pD = num(dD, 'poblacion'), nD = num(dD, 'nacimientos');
+  const suma = (m: Record<string, number>) => Object.values(m).reduce((s, n) => s + n, 0);
+  const residuo = m0 && p0 !== null && n0 !== null && pD !== null && nD !== null ? (pD - p0) - ((nD - n0) - (suma(mD) - suma(m0))) : null;
   const partes = [
     causas.length ? `causas: ${causas.map(c => `${c} ${mD[c]}`).join(', ')}${causas.length >= u.causasMin ? '' : ` (< ${u.causasMin} distintas)`}` : 'ninguna muerte registrada',
     ...(desconocidas.length ? [`${desconocidas.reduce((s, [, n]) => s + n, 0)} muertes de causa desconocida (${desconocidas.map(([c]) => c).join(', ')})`] : []),
-    ...(residuo === null ? ['balance población/nacimientos/muertes no calculable (faltan campos)'] : residuo !== undefined && residuo !== 0 ? [`el balance no cierra: residuo ${residuo} habitantes sin nacimiento o muerte registrada (días ${primero}..${D})`] : []),
+    ...(residuo === null ? ['balance población/nacimientos/muertes no calculable (faltan campos)'] : residuo !== 0 ? [`el balance no cierra: residuo ${residuo} habitantes sin nacimiento o muerte registrada (días 0..${D}, población inicial ${p0})`] : []),
   ];
-  return { estado: y(desconocidas.length === 0, causas.length >= u.causasMin, residuo === undefined ? true : residuo === null ? null : residuo === 0),
-    motivo: partes.join('; '), valores: { muertesPorCausa: mD, causasDistintas: causas.length, muertesDesconocidas: Object.fromEntries(desconocidas), residuoBalance: residuo ?? null } };
+  return { estado: y(desconocidas.length === 0, causas.length >= u.causasMin, residuo === null ? null : residuo === 0),
+    motivo: partes.join('; '), valores: { muertesPorCausa: mD, causasDistintas: causas.length, muertesDesconocidas: Object.fromEntries(desconocidas), residuoBalance: residuo, poblacionInicial: p0 } };
 }
 
 function tecnologia({ dias, diasVentana, u }: Contexto): ResultadoCriterio {
@@ -361,22 +401,39 @@ function diversidad({ dias, D, u }: Contexto): ResultadoCriterio {
   if (D <= b) return { estado: 'desconocido', motivo: `D = ${D} ≤ día base ${b}: no hay tramo que medir`, valores: {} };
   const puntos: [number, number][] = [];
   for (let dia = b; dia <= D; dia++) { const v = num(dias.get(dia), 'diversidadConducta'); if (v !== null) puntos.push([dia, v]); }
-  const pendiente = pendienteMco(puntos), vb = num(dias.get(b), 'diversidadConducta'), vD = num(dias.get(D), 'diversidadConducta');
-  const s1 = pendiente === null ? null : pendiente >= u.pendienteMin, s2 = vb === null || vD === null ? null : vD >= vb;
+  const valores = puntos.map(([, v]) => v);
+  // Una serie plana no «crece» aunque su pendiente sea 0 ≥ 0 (p. ej. un indicador atascado en 0).
+  if (puntos.length >= 2 && Math.max(...valores) === Math.min(...valores))
+    return { estado: 'falla', motivo: `diversidadConducta constante (${redondear(valores[0]!)}) en ${puntos.length} días: no crece`, valores: { pendiente: 0, puntos: puntos.length } };
+  const pendiente = puntos.length >= PUNTOS_MIN_PENDIENTE ? pendienteMco(puntos) : null;
+  // Bloques de k días en cada extremo, no un día suelto contra otro: el indicador diario es ruidoso.
+  const k = Math.min(u.ventana, Math.floor((D - b + 1) / 2));
+  const media = (desde: number): number | null => {
+    if (k < DIAS_MIN_BLOQUE) return null;
+    let s = 0;
+    for (let dia = desde; dia < desde + k; dia++) { const v = num(dias.get(dia), 'diversidadConducta'); if (v === null) return null; s += v; }
+    return s / k;
+  };
+  const inicio = media(b), final = media(D - k + 1);
+  const s1 = pendiente === null ? null : pendiente >= u.pendienteMin, s2 = inicio === null || final === null ? null : final >= inicio;
   const estado = u.diversidadRegla === 'o' ? o(s1, s2) : y(s1, s2);
-  const motivo = `pendiente ${pendiente === null ? '¿?' : pendiente.toExponential(2)}/día (${puntos.length} días); día ${b} ${vb === null ? '¿?' : redondear(vb)} → día ${D} ${vD === null ? '¿?' : redondear(vD)}`;
-  return { estado, motivo, valores: { pendiente, puntos: puntos.length, valorBase: vb, valorFinal: vD } };
+  const bloques = k >= DIAS_MIN_BLOQUE ? `media días ${b}..${b + k - 1} ${inicio === null ? '¿?' : redondear(inicio)} → días ${D - k + 1}..${D} ${final === null ? '¿?' : redondear(final)}` : `tramo de ${D - b + 1} días: bloques de < ${DIAS_MIN_BLOQUE} días, sin comparar`;
+  const motivo = `pendiente ${pendiente === null ? `¿? (${puntos.length} días con dato, < ${PUNTOS_MIN_PENDIENTE})` : `${pendiente.toExponential(2)}/día (${puntos.length} días)`}; ${bloques}`;
+  return { estado, motivo, valores: { pendiente, puntos: puntos.length, diasPorBloque: k, mediaInicio: inicio, mediaFinal: final } };
 }
 
 const EVALUADORES: Record<IdCriterio, (c: Contexto) => ResultadoCriterio> = { supervivencia, recambio, generaciones, cooperacion, conflictos, muertes, tecnologia, diversidad };
 
 // ── réplica, brazo, conjunto ────────────────────────────────────────────────────────────────────
 
-/** 0 vecinos mortales ⇒ extinguida para siempre: solo los vecinos se reproducen (family.ts). */
+/** 0 vecinos mortales ⇒ extinguida para siempre: solo los vecinos se reproducen (family.ts). Sin
+ * `vecinosMortales` (métricas antiguas), poblacion − 2: S e I son inmortales y nunca faltan, así que
+ * `poblacion` nunca llega a 0 y no sirve como señal de extinción. */
 function mortales(d: Dia): number | null {
   const v = num(d, 'vecinosMortales');
   if (v !== null) return v;
-  return num(d, 'poblacion') === 0 ? 0 : null;
+  const p = num(d, 'poblacion');
+  return p === null ? null : Math.max(0, p - INMORTALES);
 }
 
 function diaDeExtincion(r: ReplicaLeida, hasta: number): number | null {
@@ -390,7 +447,7 @@ function todosIguales(estado: Estado, motivo: string): Record<IdCriterio, Result
   return Object.fromEntries(CRITERIOS.map(id => [id, { estado, motivo, valores: {} }])) as Record<IdCriterio, ResultadoCriterio>;
 }
 
-function evaluarReplica(r: ReplicaLeida, D: number, u: Umbrales): EvaluacionReplica {
+function evaluarReplica(r: ReplicaLeida, D: number, u: Umbrales, avisos: string[], ahora: number): EvaluacionReplica {
   const comun = { nombre: r.nombre, brazo: r.brazo, semilla: r.semilla, directorio: r.directorio, terminada: r.terminada, ultimoDia: ultimoDia(r), ultimaEscritura: r.ultimaEscritura };
   if (r.error) return { ...comun, estado: 'ilegible', diaExtincion: null, nota: r.error, todos: 'desconocido', criterios: todosIguales('desconocido', `réplica ilegible: ${r.error}`) };
   const extincion = diaDeExtincion(r, D);
@@ -398,11 +455,15 @@ function evaluarReplica(r: ReplicaLeida, D: number, u: Umbrales): EvaluacionRepl
   if (!r.dias.has(D)) {
     if (r.terminada) return { ...comun, estado: 'corta', diaExtincion: null, todos: null, criterios: null,
       nota: r.abortada ? `abortada por el barrido en el día ${comun.ultimoDia ?? 0} < ${D}, sin extinguirse` : `terminó en el día ${comun.ultimoDia ?? 0} < ${D} sin extinguirse (corrida con --dias menor)` };
-    return { ...comun, estado: 'en-curso', diaExtincion: null, todos: null, criterios: null, nota: `en curso: va por el día ${comun.ultimoDia ?? 0}` };
+    const horas = r.ultimaEscritura ? (ahora - Date.parse(r.ultimaEscritura)) / 3.6e6 : null;
+    const estancada = horas !== null && horas > u.estancadaHoras;
+    if (estancada) avisos.push(`${r.nombre}: sin replica.json y sin escribir desde hace ${horas.toFixed(1)} h (> ${u.estancadaHoras} h): ¿proceso muerto? Sigue excluida como «en curso»; revisar su .log.`);
+    return { ...comun, estado: 'en-curso', diaExtincion: null, todos: null, criterios: null,
+      nota: `en curso: va por el día ${comun.ultimoDia ?? 0}${horas === null ? '' : `, última escritura hace ${horas < 1 ? `${Math.round(horas * 60)} min` : `${horas.toFixed(1)} h`}`}${estancada ? ' (¿muerta?)' : ''}` };
   }
   const base = D - u.ventana, diasVentana: number[] = [];
   for (let dia = Math.max(1, base + 1); dia <= D; dia++) diasVentana.push(dia);
-  const contexto: Contexto = { dias: r.dias, D, base, diasVentana, u };
+  const contexto: Contexto = { dias: r.dias, D, base, diasVentana, u, poblacionInicial: r.poblacionInicial ?? POBLACION_INICIAL };
   const criterios = Object.fromEntries(CRITERIOS.map(id => [id, EVALUADORES[id](contexto)])) as Record<IdCriterio, ResultadoCriterio>;
   return { ...comun, estado: 'evaluada', diaExtincion: null, nota: r.terminada ? null : 'aún corriendo (días 1..D ya escritos)',
     todos: y(...CRITERIOS.map(id => criterios[id].estado === 'desconocido' ? null : criterios[id].estado === 'cumple')), criterios };
@@ -441,10 +502,12 @@ export function evaluarConjunto(conjunto: string, parcial: Partial<Umbrales> = {
   const avisos: string[] = [];
   const { replicas: leidas, ignorados } = descubrir(resolve(conjunto), avisos);
   const D = resolverDia(leidas, u);
-  const replicas = leidas.map(r => evaluarReplica(r, D, u))
+  const ahora = Date.now();
+  const replicas = leidas.map(r => evaluarReplica(r, D, u, avisos, ahora))
     .sort((a, b) => a.brazo.localeCompare(b.brazo) || a.semilla - b.semilla);
   const brazos = [...new Set(replicas.map(r => r.brazo))].map(brazo => resumirBrazo(brazo, replicas.filter(r => r.brazo === brazo), u));
   const desde = Math.max(1, D - u.ventana + 1);
+  if (D < DIAS_CRITERIO) avisos.unshift(`D = ${D} < ${DIAS_CRITERIO}: el criterio exige al menos ${DIAS_CRITERIO} días simulados; los veredictos son del corte en el día ${D} (provisionales), no del criterio.`);
   return { criterio: CRITERIO_STEVEN, conjunto: resolve(conjunto), diaPedido: u.dia, dia: D, ventana: { desde, hasta: D, dias: D - desde + 1 },
     umbrales: { ...u, dia: D }, descripcionCriterios: describirCriterios(u), brazos, replicas, ignorados, avisos };
 }
@@ -455,7 +518,7 @@ const ETIQUETA: Record<IdCriterio, string> = { supervivencia: 'supervivencia', r
   conflictos: 'conflictos', muertes: 'muertes', tecnologia: 'tecnología', diversidad: 'diversidad' };
 const BANDERAS: Record<IdCriterio, string> = {
   supervivencia: '--poblacion-min', recambio: '--nacimientos-min --fundadores-max', generaciones: '--generaciones-min',
-  cooperacion: '--coop-tipos-min --coop-fraccion-min', conflictos: '--conflictos-min', muertes: '--causas-min --causas-conocidas',
+  cooperacion: '--coop-tipos-min --coop-fraccion-min --coop-actos-min', conflictos: '--conflictos-min', muertes: '--causas-min --causas-conocidas',
   tecnologia: '--uso-ajeno-min --dias-uso-ajeno-min', diversidad: '--pendiente-min --dia-base-diversidad --diversidad-regla',
 };
 const MARCA: Record<Estado, string> = { cumple: '✓', falla: '✗', desconocido: '?' };
@@ -465,6 +528,7 @@ export function informeTexto(inf: Informe): string {
   const l: string[] = [];
   l.push(`CRITERIO DE TERMINADO — «${inf.criterio}»`);
   l.push(`Conjunto: ${inf.conjunto}`);
+  if (inf.dia < DIAS_CRITERIO) l.push(`AVISO: corte PROVISIONAL en el día ${inf.dia} < ${DIAS_CRITERIO}; ningún veredicto de abajo es el del criterio (exige ≥ ${DIAS_CRITERIO} días).`);
   l.push(`Día evaluado D = ${inf.dia}${inf.diaPedido === 'comun' ? ' (último día común)' : ''} · ventana: días ${inf.ventana.desde}..${inf.ventana.hasta} (${inf.ventana.dias} días; acumulados = valor(D) − valor(D−${inf.umbrales.ventana}))`);
   l.push('Umbrales (ajustables):');
   CRITERIOS.forEach((id, i) => l.push(`  C${i + 1} ${col(ETIQUETA[id], 13)} ${inf.descripcionCriterios[id]}   [${BANDERAS[id]}]`));
@@ -492,7 +556,7 @@ export function informeTexto(inf: Informe): string {
     l.push(`Excluidas (${excluidas.length}: ${excluidas.filter(r => r.estado === 'en-curso').length} en curso, ${excluidas.filter(r => r.estado === 'corta').length} cortas):`);
     for (const b of inf.brazos) {
       const deBrazo = excluidas.filter(r => r.brazo === b.brazo);
-      if (deBrazo.length) l.push(`  ${col(b.brazo, 14)} ${deBrazo.map(r => `${r.semilla}${r.estado === 'corta' ? ' (corta' : ' (día'} ${r.ultimoDia ?? 0})`).join(', ')}`);
+      if (deBrazo.length) l.push(`  ${col(b.brazo, 14)} ${deBrazo.map(r => `${r.semilla}${r.estado === 'corta' ? ' (corta' : ' (día'} ${r.ultimoDia ?? 0}${r.nota?.endsWith('(¿muerta?)') ? ', ¿muerta?' : ''})`).join(', ')}`);
     }
   }
   if (inf.ignorados.length) l.push('', `Directorios ignorados: ${inf.ignorados.join('; ')}`);
@@ -504,9 +568,9 @@ export function informeTexto(inf: Informe): string {
 
 const USO = `Uso: npx tsx scripts/lab/criterio-terminado.mts --entrada <conjunto> [--dia N|comun] [--ventana 10] [--salida informe.json]
   [--poblacion-min 16] [--nacimientos-min 1] [--fundadores-max 1] [--generaciones-min 3]
-  [--coop-tipos-min 2] [--coop-fraccion-min 0.1] [--conflictos-min 1] [--causas-min 2]
+  [--coop-tipos-min 2] [--coop-fraccion-min 0.1] [--coop-actos-min 5] [--conflictos-min 1] [--causas-min 2]
   [--causas-conocidas starvation,dehydration,exposure,senescence] [--uso-ajeno-min 0.15] [--dias-uso-ajeno-min 0.5]
-  [--dia-base-diversidad 5] [--pendiente-min 0] [--diversidad-regla o|y] [--mayoria 0.5]`;
+  [--dia-base-diversidad 5] [--pendiente-min 0] [--diversidad-regla o|y] [--mayoria 0.5] [--estancada-horas 3]`;
 
 function numero(valor: string, bandera: string, { entero = false, min = -Infinity, max = Infinity } = {}): number {
   const n = Number(valor);
@@ -528,6 +592,7 @@ export function parsearArgumentos(argv: readonly string[]): { entrada: string; s
     '--generaciones-min': v => { u.generacionesMin = numero(v, '--generaciones-min', noNegativo); },
     '--coop-tipos-min': v => { u.coopTiposMin = numero(v, '--coop-tipos-min', { entero: true, min: 1 }); },
     '--coop-fraccion-min': v => { u.coopFraccionMin = numero(v, '--coop-fraccion-min', fraccion); },
+    '--coop-actos-min': v => { u.coopActosMin = numero(v, '--coop-actos-min', noNegativo); },
     '--conflictos-min': v => { u.conflictosMin = numero(v, '--conflictos-min', noNegativo); },
     '--causas-min': v => { u.causasMin = numero(v, '--causas-min', { entero: true, min: 0 }); },
     '--causas-conocidas': v => { u.causasConocidas = v.split(',').map(s => s.trim()).filter(Boolean); },
@@ -537,6 +602,7 @@ export function parsearArgumentos(argv: readonly string[]): { entrada: string; s
     '--pendiente-min': v => { u.pendienteMin = numero(v, '--pendiente-min'); },
     '--diversidad-regla': v => { if (v !== 'o' && v !== 'y') throw new Error(`--diversidad-regla: «o» o «y», no «${v}».\n${USO}`); u.diversidadRegla = v; },
     '--mayoria': v => { u.mayoria = numero(v, '--mayoria', { min: 0, max: 1 }); },
+    '--estancada-horas': v => { u.estancadaHoras = numero(v, '--estancada-horas', { min: 0 }); },
   };
   for (let i = 0; i < argv.length; i++) {
     const bandera = argv[i]!;

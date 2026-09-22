@@ -10,8 +10,8 @@ import type { ClientMessage, Gesture, GestureResult, ServerMessage, Viewport, Wo
 import { Store, fingerprint, GestureConflict, SessionRevoked } from './store.js';
 import { cookie, hashToken, makeToken, passwordVerifier, sessionHash } from './auth.js';
 import { ensureWorldInstance, readWorldInstance } from './world-instance.js';
-import { decideReproduction, RollingStepPerformance } from './governor.js';
-export { decideReproduction } from './governor.js';
+import { Gobernador } from './governor.js';
+export { decideReproduction, decidirConTecho } from './governor.js';
 
 class HttpError extends Error { constructor(readonly status: number, message: string) { super(message); } }
 export interface AppOptions {
@@ -129,7 +129,7 @@ export function createApp(options: AppOptions) {
   const ws = new WebSocketServer({ noServer: true, maxPayload: 4096, perMessageDeflate: false });
   const staticDir = resolve(options.staticDir ?? 'dist/client');
   const context = store.context;
-  const measurements = new RollingStepPerformance();
+  const gobernador = new Gobernador();
   const beats: number[] = [];
   // T107: nombres fijos de `FaseNombre`, listados una vez para no repetir el literal en cada
   // reinicio del registro (uno nuevo por paso; nunca se reutiliza el del paso anterior).
@@ -137,23 +137,25 @@ export function createApp(options: AppOptions) {
   const fasesEnCero = (): Record<FaseNombre, number> => Object.fromEntries(FASE_NOMBRES.map(nombre => [nombre, 0])) as Record<FaseNombre, number>;
   const runtime: RuntimeStats = { stepMs: 0, p95StepMs: 0, cloneMs: 0, simulationMs: 0, saveMs: 0, projectionMs: 0, snapshotBytes: 0, activeTiles: world.tiles.length, processRssMiB: process.memoryUsage.rss() / 1048576, tickHz: 0,
     fases: fasesEnCero(), fraccionSerial: 0,
-    gobernador: { activo: world.reproductionEnabled, presupuestoMs: paramsOf(world).gobernador.presupuestoMs, p95StepMs: 0, manual: null } };
+    gobernador: { activo: world.reproductionEnabled, presupuestoMs: paramsOf(world).gobernador.presupuestoMs, p95StepMs: 0, manual: null,
+      politica: paramsOf(world).gobernador.politica, techo: null, techoObservado: null } };
   /**
    * Ruling R17: la población la limita el HARDWARE, no un tope fijo. Tras medir el paso,
-   * el gobernador compara el p95 (ventana de 120 pasos) con `gobernador.presupuestoMs`:
-   * por encima apaga la reproducción, por debajo del 70 % la reenciende. La histéresis
-   * (0,7) evita que el mundo oscile en el filo del presupuesto.
+   * el gobernador compara el p95 (ventana de 120 pasos) con `gobernador.presupuestoMs`.
+   * La política la elige `gobernador.politica` (ver `governor.ts`): `apagar` (2026-09-19,
+   * apaga por encima y reenciende bajo el 70 %) o `techo` (default desde 2026-09-22: por
+   * encima solo se repone, no se crece). La histéresis (0,7) evita oscilar en el filo.
    *
    * Una orden humana manda siempre: mientras `runtime.gobernador.manual` no sea `null`,
    * el gobernador observa y publica el p95 pero no toca `reproductionEnabled`.
    */
   function governReproduction(draft: World): void {
-    const stats = runtime.gobernador!;
-    stats.presupuestoMs = paramsOf(draft).gobernador.presupuestoMs;
+    const stats = runtime.gobernador!, params = paramsOf(draft).gobernador;
+    stats.presupuestoMs = params.presupuestoMs; stats.politica = params.politica;
     stats.p95StepMs = runtime.p95StepMs;
     if (stats.manual !== null) { draft.reproductionEnabled = stats.manual; stats.activo = stats.manual; return; }
-    // Sin medición todavía (primer paso) no se afirma nada sobre el hardware.
-    if (measurements.count > 0) draft.reproductionEnabled = decideReproduction(runtime.p95StepMs, stats.presupuestoMs, draft.reproductionEnabled);
+    draft.reproductionEnabled = gobernador.decidir(params, draft.reproductionEnabled, draft.people.length, draft.tiles.length, draft.tick);
+    stats.techo = gobernador.estado.techo; stats.techoObservado = gobernador.techoObservado;
     stats.activo = draft.reproductionEnabled;
   }
   const view = (viewport?: Viewport) => {
@@ -255,7 +257,7 @@ export function createApp(options: AppOptions) {
       }
       world = draft;
       runtime.stepMs = monotonicNow() - stepStarted;
-      runtime.p95StepMs = measurements.record(runtime.stepMs);
+      runtime.p95StepMs = gobernador.registrar(runtime.stepMs);
       // El gobernador decide sobre el mundo ya vigente: la próxima `reproduce()` lo lee.
       governReproduction(world);
       runtime.activeTiles = world.tiles.length; runtime.processRssMiB = process.memoryUsage.rss() / 1048576; runtime.snapshotBytes = store.lastSnapshotBytes;

@@ -163,3 +163,112 @@ test('el software ya no pone tope: `poblacion.maxima` por defecto no limita y el
   assert.throws(() => parseParams('gobernador.presupuestoMs=4'), /rango/i);
   assert.throws(() => parseParams('gobernador.presupuestoMs=5001'), /rango/i);
 });
+
+// ---------------------------------------------------------------------------------------------
+// Política `techo` (revisión 2026-09-22): el mundo público V7 se extinguió porque la política
+// `apagar` dejó cero nacimientos durante 15 días con un paso caro por clon + guardado de un
+// mundo envejecido (docs/EVIDENCIA.md, «Mundo público V7: recambio insuficiente»). Con `techo`
+// el hardware limita el crecimiento, no el reemplazo.
+// ---------------------------------------------------------------------------------------------
+
+import { decidirConTecho, ESTADO_TECHO_INICIAL, Gobernador } from '../src/server/governor.js';
+import type { Person } from '../src/world/index.js';
+
+/** Igual que `fatalThirst` en tests/muerte.test.ts: sed total y salud mínima ⇒ muerte real por deshidratación en el paso auténtico. */
+function fatalThirstFor(person: Person): void { person.thirst = 1; person.demography = { ...person.demography, health: 1e-8, vitality: 0.1 }; }
+
+test('techo: por encima del presupuesto se fija el techo en la población y solo se repone; bajo el 70 % se retira', () => {
+  const rojo = decidirConTecho(60, 50, 22, ESTADO_TECHO_INICIAL);
+  assert.equal(rojo.estado.techo, 22, 'el techo es la población del frenazo');
+  assert.equal(rojo.reproduccion, false, 'con la población en el techo no se crece');
+  const muerte = decidirConTecho(60, 50, 21, rojo.estado);
+  assert.equal(muerte.estado.techo, 22, 'una muerte no baja el techo');
+  assert.equal(muerte.reproduccion, true, 'por debajo del techo se repone');
+  const repuesto = decidirConTecho(60, 50, 22, muerte.estado);
+  assert.equal(repuesto.reproduccion, false);
+  const bandaMuerta = decidirConTecho(40, 50, 22, repuesto.estado);
+  assert.equal(bandaMuerta.estado.techo, 22, 'la banda muerta conserva el techo (histéresis)');
+  const verde = decidirConTecho(34.9, 50, 22, bandaMuerta.estado);
+  assert.equal(verde.estado.techo, null, 'con holgura el techo se retira');
+  assert.equal(verde.reproduccion, true);
+  assert.equal(decidirConTecho(50, 50, 22, ESTADO_TECHO_INICIAL).estado.techo, null, 'el presupuesto exacto todavía no frena');
+});
+
+test('techo: el techo nunca baja, ni con rojo grave sostenido (carga externa no debe vaciar el mundo)', () => {
+  let estado = { ...ESTADO_TECHO_INICIAL };
+  for (let n = 0; n < 5000; n++) estado = decidirConTecho(300, 50, 30, estado).estado;
+  assert.equal(estado.techo, 30, 'ni 5000 pasos a 6× el presupuesto bajan el techo');
+  assert.equal(decidirConTecho(300, 50, 29, estado).reproduccion, true, 'sigue reponiendo bajo carga extrema');
+});
+
+test('techo: la función es pura (no muta el estado recibido)', () => {
+  const estado = Object.freeze({ techo: 10 });
+  const r = decidirConTecho(60, 50, 9, estado);
+  assert.deepEqual(estado, { techo: 10 });
+  assert.deepEqual(r.estado, { techo: 10 }); assert.notEqual(r.estado, estado);
+});
+
+test('Gobernador: `apagar` reproduce exactamente decideReproduction y `techo` registra el frenazo (T164) sin borrarlo al volver a verde', () => {
+  const apagar = new Gobernador(), techo = new Gobernador();
+  const params = (politica: 'apagar' | 'techo') => ({ presupuestoMs: 50, politica });
+  assert.equal(apagar.decidir(params('apagar'), true, 22, 1120, 1), true, 'sin mediciones no se afirma nada');
+  for (let n = 0; n < 8; n++) { apagar.registrar(80); techo.registrar(80); }
+  assert.equal(apagar.decidir(params('apagar'), true, 22, 1120, 8), decideReproduction(80, 50, true));
+  assert.equal(techo.decidir(params('techo'), true, 22, 1120, 8), false);
+  assert.deepEqual(techo.estado, { techo: 22 });
+  assert.ok(techo.techoObservado, 'el frenazo queda registrado');
+  assert.equal(techo.techoObservado!.poblacion, 22); assert.equal(techo.techoObservado!.teselasActivas, 1120);
+  assert.equal(techo.techoObservado!.tick, 8); assert.equal(techo.techoObservado!.senal, 'p95');
+  assert.match(techo.techoObservado!.motivo, /frenado por p95 = 80\.0 ms > 50 ms con 22 habitantes y 1120 teselas activas/);
+  assert.equal(techo.decidir(params('techo'), false, 21, 1120, 9), true, 'una muerte permite reponer');
+  for (let n = 0; n < GOVERNOR_WINDOW_STEPS; n++) techo.registrar(10);
+  assert.equal(techo.decidir(params('techo'), false, 21, 1120, 130), true);
+  assert.equal(techo.estado.techo, null, 'en verde el techo se retira');
+  assert.equal(techo.techoObservado!.tick, 8, 'el último frenazo no se borra al volver a verde');
+});
+
+test('servidor con la política por defecto (techo): bajo carga no crece, pero una muerte real se repone y el frenazo viaja en las métricas', t => {
+  const f = fixture(t, 50, { slowMs: 80, deterministic: true });
+  assert.equal(DEFAULT_PARAMS.gobernador.politica, 'techo');
+  assert.equal(parseParams('gobernador.politica=apagar').gobernador.politica, 'apagar');
+  assert.throws(() => parseParams('gobernador.politica=otra'), /valores permitidos/);
+  for (let n = 0; n < 8; n++) f.app.stepOnce();
+  const poblacion = f.app.world.people.length;
+  const stats = f.app.runtime.gobernador!;
+  assert.equal(stats.politica, 'techo');
+  assert.ok(stats.p95StepMs > 50);
+  assert.equal(stats.techo, poblacion, 'el techo se fija en la población del frenazo');
+  assert.equal(f.app.world.reproductionEnabled, false, 'en el techo no se crece');
+  assert.ok(stats.techoObservado && stats.techoObservado.poblacion === poblacion && stats.techoObservado.motivo.includes('frenado por p95'));
+  // Una muerte real (deshidratación producida por el stepWorld auténtico): la población baja y se permite reponer.
+  const victima = f.app.world.people.find(p => p.role === 'neighbor')!;
+  fatalThirstFor(victima);
+  let muerto = false;
+  for (let n = 0; n < 40 && !muerto; n++) { f.app.stepOnce(); muerto = f.app.world.people.length < poblacion; }
+  assert.ok(muerto, 'la sed fatal produjo una muerte real');
+  assert.equal(f.app.runtime.gobernador!.techo, poblacion, 'la muerte no baja el techo');
+  assert.equal(f.app.world.reproductionEnabled, true, 'por debajo del techo el mundo repone aunque siga en rojo');
+  assert.ok(f.app.runtime.gobernador!.p95StepMs > 50, 'sigue en rojo: el hardware no cambió');
+  assert.equal(f.app.failed, false);
+});
+
+test('servidor con `gobernador.politica=apagar`: bajo carga sostenida apaga la reproducción aunque haya muertes (el gobernador de 2026-09-19)', t => {
+  const dir = mkdtempSync(join(tmpdir(), 'carta-gobernador-apagar-'));
+  const store = new Store(join(dir, 'world.sqlite'));
+  let clock = 0;
+  const app = createApp({ store, password, origin: 'http://127.0.0.1:3000', manual: true, seed: 42,
+    params: parseParams('gobernador.presupuestoMs=50,gobernador.politica=apagar'), monotonicNow: () => clock++ });
+  t.after(async () => { await app.close(); store.close(); rmSync(dir, { recursive: true, force: true }); });
+  const save = store.save.bind(store);
+  store.save = ((...args: Parameters<Store['save']>) => { clock += 80; return save(...args); }) as Store['save'];
+  for (let n = 0; n < 8; n++) app.stepOnce();
+  const poblacion = app.world.people.length;
+  assert.equal(app.runtime.gobernador!.politica, 'apagar');
+  assert.equal(app.runtime.gobernador!.techo, null);
+  assert.equal(app.world.reproductionEnabled, false);
+  fatalThirstFor(app.world.people.find(p => p.role === 'neighbor')!);
+  let muerto = false;
+  for (let n = 0; n < 40 && !muerto; n++) { app.stepOnce(); muerto = app.world.people.length < poblacion; }
+  assert.ok(muerto);
+  assert.equal(app.world.reproductionEnabled, false, 'apagar no repone: la extinción observada en el mundo público');
+});

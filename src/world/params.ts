@@ -20,7 +20,18 @@ export interface WorldParams {
     cuidadoReduceRiesgo: number;
   };
   genes: { varianzaFundadores: number; tasaMutacion: number };
-  poblacion: { maxima: number; intervaloComprobacionTicks: number; nacimientosPorComprobacion: number };
+  /**
+   * `exigeComunidad`, `radioPareja`, `radioLugar` y `comprobacionContinua` son leyes
+   * candidatas del embudo de natalidad (diagnóstico 2026-09-22, `scripts/lab/diagnostico-natalidad.ts`):
+   * con sus defaults `reproduce()` es la de hoy. Ninguna levanta el techo de nacimientos:
+   * el calendario máximo sigue siendo `nacimientosPorComprobacion` por ventana de
+   * `intervaloComprobacionTicks` pasos.
+   */
+  poblacion: { maxima: number; intervaloComprobacionTicks: number; nacimientosPorComprobacion: number;
+    exigeComunidad: boolean; radioPareja: number; radioLugar: number; comprobacionContinua: boolean;
+    /** Cortejo (2026-09-22): peso con que una persona fértil busca a otra fértil, no emparentada y con
+     * vínculo mutuo ≥ 0,3 que está fuera de `radioPareja` pero dentro de `radioCortejo`. 0 = hoy. */
+    cortejo: number; radioCortejo: number };
   recursos: { capacidadBosque: number; capacidadPastizal: number; capacidadOtros: number; velocidadRegeneracion: number; decaimientoFertilidad: number; decaimientoComida: number };
   persistencia: { cadaTicks: number; ventanaEventosTicks: number; paginasSucias: boolean };
   /** Agua superficial concentrada en cuencas: 1 = generación actual (todas las charcas/manantiales); < 1 conserva solo las de las cuencas más húmedas (T035). */
@@ -45,11 +56,18 @@ export interface WorldParams {
   red: { deltas: boolean };
   /** T100: admisión de colecciones; no son una política silenciosa de natalidad. */
   limites: { teselasActivas: number; chunks: number; comunidades: number; fauna: number; aplicacion: 'historicos' | 'parametros' };
-  /** Leyes sociales. `maxComunidades`: tope de FUNDACIÓN de comunidades (`society.ts`); es una regla
-   * de conducta, separada de la admisión `limites.comunidades` (revisión de T100, 2026-09-22): la
-   * máquina no decide conductas. Default 8 = la conducta de siempre; FR-002 pide retirarlo (sin tope)
-   * en la próxima versión de reglas, con su evidencia. */
-  social: { maxComunidades: number };
+  /**
+   * Leyes candidatas (noche de ciencia, 2026-09-22). `docs/ANALISIS-DINAMICAS-2026-09-21.md`
+   * mide tres cierres: la elección refuerza al ganador y se traba en cooperar, las disputas
+   * por recursos nunca se disparan y la pertenencia a una comunidad no vuelve a revisarse.
+   * Estas claves abren esos tres cerrojos SIN decidir nada: con sus defaults el mundo es el
+   * de hoy paso a paso, y sólo un laboratorio que las mueva mide otra cosa.
+   */
+  conducta: { habituacion: number };
+  /** `social.maxComunidades`: tope de FUNDACIÓN de comunidades (`society.ts`), regla de conducta separada
+   * de la admisión `limites.comunidades` (revisión de T100, 2026-09-22). */
+  social: { maxComunidades: number; disputaNecesidad: number; disputaEscasez: number; disputaRadio: number; disputaDestino: number; disputaEspera: number;
+    ensenanzaRareza: number; confianzaSalida: number; distanciaAlternativa: number };
 }
 
 function deepFreeze<T>(value: T): T {
@@ -68,7 +86,8 @@ const RAW_DEFAULTS: WorldParams = {
   genes: { varianzaFundadores: 0.15, tasaMutacion: 1 },
   // Ruling R17: `maxima` ya no es un tope de diseño (era 40); por defecto no limita y el
   // freno lo ponen el entorno y el gobernador. Sigue siendo parámetro para el laboratorio.
-  poblacion: { maxima: 1_000_000, intervaloComprobacionTicks: 120, nacimientosPorComprobacion: 2 },
+  poblacion: { maxima: 1_000_000, intervaloComprobacionTicks: 120, nacimientosPorComprobacion: 2,
+    exigeComunidad: true, radioPareja: 3, radioLugar: 4, comprobacionContinua: false, cortejo: 0, radioCortejo: 24 },
   recursos: { capacidadBosque: 1, capacidadPastizal: 0.7, capacidadOtros: 0.35, velocidadRegeneracion: 1, decaimientoFertilidad: 0.001, decaimientoComida: 0.0001 },
   persistencia: { cadaTicks: 1, ventanaEventosTicks: 0, paginasSucias: false },
   agua: { cuencas: 0.4 },
@@ -76,7 +95,13 @@ const RAW_DEFAULTS: WorldParams = {
   motor: { clonPorPaso: true, hilos: 1, soaTerreno: false, particionarPersonas: false, gpu: [], orden: 'natural' },
   red: { deltas: false },
   limites: { teselasActivas: 65536, chunks: 256, comunidades: 8, fauna: 393216, aplicacion: 'parametros' },
-  social: { maxComunidades: 8 },
+  // Leyes candidatas: cada default es la constante que hoy está escrita en el código
+  // (`index.ts` no descuenta saciedad; `society.ts` usa 0,65 / ×1 / 2 celdas / 0,5 de
+  // destino / 180 ticks de espera / sin rareza / 0,35 de confianza / 0,2 de distancia
+  // cultural), así que abrirlas no cambia el mundo.
+  conducta: { habituacion: 0 },
+  social: { maxComunidades: 8, disputaNecesidad: 0.65, disputaEscasez: 1, disputaRadio: 2, disputaDestino: 0.5, disputaEspera: 180,
+    ensenanzaRareza: 0, confianzaSalida: 0.35, distanciaAlternativa: 0.2 },
 };
 
 /** Objeto congelado en profundidad: nunca se muta; `parseParams` clona para cada override. */
@@ -130,6 +155,12 @@ export const PARAM_RANGES: Record<string, [number, number]> = {
   'poblacion.maxima': [1, 1_000_000],
   'poblacion.intervaloComprobacionTicks': [1, 10000],
   'poblacion.nacimientosPorComprobacion': [0, 20],
+  // Embudo de natalidad: el radio de pareja entra además en `pairAffinity` (family.ts),
+  // así que mover uno mueve también cómo se ordenan las parejas candidatas.
+  'poblacion.radioPareja': [1, 32],
+  'poblacion.radioLugar': [1, 64],
+  'poblacion.cortejo': [0, 5],
+  'poblacion.radioCortejo': [1, 128],
   'recursos.capacidadBosque': [0, 10],
   'recursos.capacidadPastizal': [0, 10],
   'recursos.capacidadOtros': [0, 10],
@@ -146,6 +177,21 @@ export const PARAM_RANGES: Record<string, [number, number]> = {
   'limites.comunidades': [1, Number.MAX_SAFE_INTEGER],
   'limites.fauna': [1, Number.MAX_SAFE_INTEGER],
   'social.maxComunidades': [1, Number.MAX_SAFE_INTEGER],
+  // Leyes candidatas. El mínimo de `disputaNecesidad` y `disputaEscasez` no es 0 a
+  // propósito: con 0 la disputa dejaría de exigir necesidad o escasez y sería un
+  // conflicto decretado, no medido. `disputaRadio` parte de 1 celda (contacto real).
+  'conducta.habituacion': [0, 2],
+  'social.disputaNecesidad': [0.1, 1],
+  'social.disputaEscasez': [0.1, 20],
+  'social.disputaRadio': [1, 8],
+  // `disputaDestino` es la coincidencia de destino, no la distancia entre personas: con
+  // 0,5 sólo disputan quienes apuntan A LA MISMA celda. `disputaEspera` son los ticks de
+  // calma tras una disputa, en ambos lados; entera, porque se compara con `world.tick`.
+  'social.disputaDestino': [0.1, 8],
+  'social.disputaEspera': [1, 10000],
+  'social.ensenanzaRareza': [0, 5],
+  'social.confianzaSalida': [0, 1],
+  'social.distanciaAlternativa': [0, 1],
 };
 
 type ScalarDescriptor = { kind: 'number'; range: readonly [number, number]; integer?: boolean }
@@ -156,7 +202,9 @@ type ParamValue = number | boolean | string | (number | boolean | string)[];
 /** PARAM_RANGES conserva sus tuplas numéricas; cada hoja declara además su tipo. */
 export const PARAM_DESCRIPTORS: Readonly<Record<string, ParamDescriptor>> = deepFreeze({
   ...Object.fromEntries(Object.entries(PARAM_RANGES).map(([key, range]) => [key,
-    { kind: 'number', range, integer: key === 'motor.hilos' || key.startsWith('limites.') || key === 'social.maxComunidades' }])),
+    { kind: 'number', range, integer: key === 'motor.hilos' || key === 'social.disputaEspera' || key === 'social.maxComunidades' || key.startsWith('limites.') }])),
+  'poblacion.exigeComunidad': { kind: 'boolean' },
+  'poblacion.comprobacionContinua': { kind: 'boolean' },
   'motor.clonPorPaso': { kind: 'boolean' },
   'motor.soaTerreno': { kind: 'boolean' },
   'motor.particionarPersonas': { kind: 'boolean' },

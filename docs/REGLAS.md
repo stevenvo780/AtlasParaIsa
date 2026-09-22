@@ -424,6 +424,87 @@ estado completo, orden, aliases, `undefined` y bits numéricos frente a V7, sin 
 | `persistencia.cadaTicks` | 1 (producción fija 100 vía `deployment-params.ts`, ruling R19; antes 20) | [1, 10000] | Cadencia en ticks para el guardado periódico en disco | T021 |
 | `persistencia.ventanaEventosTicks` | 0 (sin poda; abrir con `CARTA_PARAMS`) | [0, 1000000] | Ventana de retención temporal para la poda de eventos y chunks | T021 |
 | `agua.cuencas` | 0.4 | [0.05, 1] | Umbral de ruido de cuenca bajo el cual una tesela conserva su agua potable de origen | T035 |
+| `conducta.habituacion` | 0 | [0, 2] | Descuento por saciedad en la elección de acción: resta `habituacion · (0,5 + curiosity) · share`, con `share` = fracción vitalicia de esa acción en `activity` | Noche de ciencia 2026-09-22 |
+| `social.disputaNecesidad` | 0.65 | [0.1, 1] | Necesidad (máximo de hambre y sed) que exige `resourceDispute` a los dos implicados | Noche de ciencia 2026-09-22 |
+| `social.disputaEscasez` | 1 | [0.1, 20] | Multiplicador de los tres umbrales de stock de la disputa (0,06 comida · 0,12 agua · 1 fauna) | Noche de ciencia 2026-09-22 |
+| `social.disputaRadio` | 2 | [1, 8] | Distancia máxima, en celdas, entre dos personas que compiten por el mismo destino | Noche de ciencia 2026-09-22 |
+| `social.disputaDestino` | 0.5 | [0.1, 8] | Cuánto tienen que coincidir los dos destinos para que haya disputa (0,5 = la misma celda) | Noche de ciencia 2026-09-22 |
+| `social.disputaEspera` | 180 | [1, 10000] (entero) | Ticks de calma que guarda cada lado tras una disputa, antes de poder volver a disputar | Noche de ciencia 2026-09-22 |
+| `social.ensenanzaRareza` | 0 | [0, 5] | Peso de la rareza al elegir qué receta enseñar: clave `gain + ensenanzaRareza · (1 − conocedores/vivos)` | Noche de ciencia 2026-09-22 |
+| `social.confianzaSalida` | 0.35 | [0, 1] | Confianza media con los pares por debajo de la cual se puede dejar una comunidad | Noche de ciencia 2026-09-22 |
+| `social.distanciaAlternativa` | 0.2 | [0, 1] | Distancia cultural máxima que puede tener una alternativa para contar como refugio al salir | Noche de ciencia 2026-09-22 |
+| `poblacion.exigeComunidad` | `true` | booleano | Si reproducirse exige pertenecer a una comunidad; con `false` la cría hereda la del progenitor `a`, o ninguna | Noche de ciencia 2026-09-22 |
+| `poblacion.radioPareja` | 3 | [1, 32] | Distancia máxima entre progenitores en `reproduce()`; es también la escala espacial de `pairAffinity` | Noche de ciencia 2026-09-22 |
+| `poblacion.radioLugar` | 4 | [1, 64] | Distancia máxima a un lugar compartido para que un nacimiento tenga sitio | Noche de ciencia 2026-09-22 |
+| `poblacion.comprobacionContinua` | `false` | booleano | Muestrea `reproduce()` cada paso en vez de cada `intervaloComprobacionTicks`; el techo por ventana no cambia | Noche de ciencia 2026-09-22 |
+
+#### Leyes candidatas (noche de ciencia, 2026-09-22)
+
+`docs/ANALISIS-DINAMICAS-2026-09-21.md` mide tres cierres del mundo vigente: la cooperación es
+97 % enseñanza y el refuerzo de `values` traba la elección en la acción que ya ganó; los conflictos
+y los turnos están en **0** porque `resourceDispute` exige a la vez necesidad ≥ 0,65 en dos personas,
+una fuente casi agotada y contacto a ≤ 2 celdas; y las comunidades se forman el día 1 y no vuelven a
+cambiar, porque cada cooperación suma +0,12 de confianza y la media satura por encima del 0,35 que
+exigía la salida. Las nueve claves de arriba **no deciden nada**: son las constantes que ya estaban
+escritas en `src/world/index.ts` y `src/world/society.ts`, sacadas a la superficie para que el
+laboratorio pueda refutarlas. Con sus defaults el mundo es el de `main` **bit a bit**: seed 51926 con
+Store adjunto da el mismo digesto físico a 1200 y a 2400 pasos (`b194b09…` y `ee6fb78…`). Lo que sí
+cambia es el digesto **completo**, porque `digestoCanonico` incluye los params: declarar configuración
+mueve el hash aunque el estado físico sea idéntico, igual que en T102 (`d3e6371…` y `1ab5231…`).
+
+Medido al abrirlas (seed 51926, 2400 pasos, misma réplica): `conducta.habituacion=0,35` sube el índice
+de diversidad total de 0,3506 a 0,3985 —la entropía de oficios pasa de 0,2742 a 0,4452 y la distancia
+media entre repertorios baja de 0,4271 a 0,3517— y la enseñanza sube de 49 a 82 actos;
+`social.disputaNecesidad=0,45, disputaEscasez=3, disputaRadio=3` produce el primer conflicto (1, frente
+a 0 con los defaults) sin ningún turno acordado todavía.
+
+**Qué NO es el cerrojo de la disputa (medido, 2026-09-22).** Aflojar además la coincidencia de destino
+y la espera (`disputaDestino=1,5, disputaEspera=60`) sobre ese mismo juego deja el mundo **idéntico**:
+mismo digesto físico (`5dc8528c…`), 1 conflicto, 0 turnos y 63 cooperaciones en los dos casos. La única
+disputa que ocurre ya cumplía «mismo destino» y «180 ticks de calma», así que esas dos condiciones no
+eran lo que mantenía el contador en cero; lo que lo mantenía es la conjunción de necesidad, escasez y
+proximidad. Ambas quedan parametrizadas igualmente para que el barrido pueda descartarlas con datos.
+Refutación en `tests/leyes-candidatas.test.ts`.
+
+#### El embudo de natalidad (instrumento `scripts/lab/diagnostico-natalidad.ts`, 2026-09-22)
+
+El instrumento cuenta, en cada comprobación de `reproduce()`, cuántos mortales superan cada condición
+de la ley. En la **semilla 7** hay ~14 mortales y ~3,7 fértiles de media por comprobación, pero sólo
+~4,5 tienen comunidad y **ninguno** encuentra pareja: el mundo se extingue por senescencia sin que
+nazca nadie. Las cuatro claves `poblacion.*` de la tabla abren cada condición por separado; con sus
+defaults `reproduce()` es la de hoy, y **ninguna levanta el techo de nacimientos** — `comprobacionContinua`
+sólo cambia el **muestreo**: en vez de mirar una vez cada `intervaloComprobacionTicks` pasos mira cada
+paso, y antes de buscar pareja descuenta los nacimientos de la ventana móvil anterior, de modo que el
+calendario máximo sigue siendo `nacimientosPorComprobacion` por ventana (lo cita SC-013). No añade
+ningún campo a `World`: la ventana se reconstruye de los `bornAt` existentes.
+
+**Medición (3 días = 7200 pasos, nacimientos acumulados):**
+
+| Configuración | semilla 7 | semilla 42 |
+| :--- | ---: | ---: |
+| defaults | 0 | 6 |
+| `exigeComunidad=false` | 0 | 6 |
+| `radioPareja=6` | 0 | 8 |
+| `radioLugar=8` | 0 | 6 |
+| `comprobacionContinua=true` | 0 | 6 |
+| las cuatro, con `radioPareja=6` | 0 | 8 |
+| las cuatro, con `radioPareja=20` | 1 | 8 |
+
+**El radio de pareja es el cerrojo, y es mucho mayor de lo que parecía.** Midiendo los 7200 pasos (no
+sólo las 60 comprobaciones), el par fértil, no consanguíneo y con vínculo mutuo ≥ 0,3 **más cercano**
+de toda la corrida de la semilla 7 está a **18,38 celdas**. Por eso `radioPareja=6` —y también 12— no
+abre nada: hace falta 20. Los vínculos existen, pero la gente que se quiere está lejos.
+
+> **Defecto anotado (no corregido aquí).** El evento de fundación de una comunidad se emite con el
+> MISMO arreglo que `group.members` (`society.ts`), así que un nacimiento lo extiende retroactivamente.
+> Con la comprobación periódica el nacimiento cae siempre en el mismo paso y la extensión viaja con el
+> evento antes de archivarse; esa lista extendida es la que guardan las instantáneas de hoy, y copiar el
+> arreglo al emitirlo **cambia historias ya escritas** (medido: el digesto de las semillas 51926 y 42 se
+> mueve). Con `comprobacionContinua` el nacimiento puede caer 1..119 pasos después, cuando el evento ya
+> es durable, y empujar lo reescribiría: `Store.save` aborta con «an immutable event cannot be
+> overwritten» (reproducido en la semilla 42, paso 167). `reproduce()` evita el alias **sólo** en ese
+> camino, reemplazando el arreglo en vez de empujarlo; el camino por defecto queda intacto. Arreglar el
+> alias de raíz es una tarea aparte, porque mueve el digesto.
 
 > **Rangos de longevidad (revisión de R3, 2026-09-19).** Los tres rangos marcados «R3» se estrecharon respecto de
 > T001 porque los anteriores declaraban legales valores que el motor no podía correr. La ley de T010 exige

@@ -448,6 +448,28 @@ function choose(world: World, person: Person): void {
     action: 'approach', target: familyPlace ?? family.partner, score: 0.85 + person.traits.care * 0.2,
     reason: `Tiene reservas y busca ${familyPlace ? `reunirse con ${family.partner.name} en ${familyPlace.name}` : `acercarse a ${family.partner.name}`}; el vínculo y el cuidado corporal permiten intentar una crianza.`,
   });
+  // Cortejo (2026-09-22, `poblacion.cortejo`, default 0 = conducta de hoy). Diagnóstico: en la semilla 7
+  // hay adultos fértiles con vínculo mutuo, pero la pareja válida más cercana de toda la corrida está a
+  // 18 celdas; nadie la busca y el mundo se extingue sin nacer nadie. Ley local: quien está en edad fértil
+  // y recuerda un vínculo mutuo con otra persona fértil no emparentada, fuera de `radioPareja` pero dentro
+  // de `radioCortejo`, puede ir hacia ella. Cuesta el mismo movimiento que cualquier desplazamiento, no
+  // crea recursos ni garantiza un nacimiento; hambre, sed y descanso siguen ganando cuando urgen.
+  const leyPoblacion = paramsOf(world).poblacion;
+  if (leyPoblacion.cortejo > 0 && !family && world.reproductionEnabled && person.role === 'neighbor' && reproductiveReadiness(world, person)) {
+    let cortejado: Person | undefined, vinculo = 0;
+    for (const [id, strength] of Object.entries(person.bonds)) {
+      if (strength < 0.3) continue;
+      const other = world.people.find(p => p.id === id);
+      if (!other || other.role !== 'neighbor' || (other.bonds[person.id] ?? 0) < 0.3 || closeKin(person, other)) continue;
+      const away = distance(person, other);
+      if (away <= leyPoblacion.radioPareja || away > leyPoblacion.radioCortejo || !reproductiveReadiness(world, other)) continue;
+      if (!cortejado || away < distance(person, cortejado) || (away === distance(person, cortejado) && other.id < cortejado.id)) {
+        cortejado = other; vinculo = (strength + (other.bonds[person.id] ?? 0)) / 2;
+      }
+    }
+    if (cortejado) candidates.push({ action: 'approach', target: { x: cortejado.x, y: cortejado.y }, score: leyPoblacion.cortejo * (0.5 + vinculo * 0.5),
+      reason: `Recuerda el vínculo con ${cortejado.name} y lo busca; ambos están en edad de criar y la cercanía hace posible una familia.` });
+  }
   const water = reachableTiles.filter(t => waterAvailable(world,t) > 0.005 && planAffordable(stepsTo(t)!, 0)).sort((a, b) => distance(person, a) - distance(person, b))[0];
   const carriedWater = containedWaterQuanta(person) > 0;
   const portableWater = carriedWater && canHandleContainedWater(person, world.tick);
@@ -635,6 +657,19 @@ function choose(world: World, person: Person): void {
     candidates[0]!.reason += ' La lluvia daña su cuerpo; busca protección por terreno cercano sin una solución local viable.';
   }
   for (const candidate of candidates) candidate.score += person.values[valueKey(person, candidate.action)] ?? 0;
+  // Ley candidata `conducta.habituacion` (noche de ciencia 2026-09-22): el refuerzo de
+  // `values` premia al ganador y la elección se traba en una sola acción. La saciedad la
+  // descuenta: cuanto mayor es la fracción vitalicia de una acción en `activity`, menos
+  // vale repetirla, modulada por `curiosity` —un rasgo heredable, así que la selección
+  // puede actuar sobre la ley—. Con el default 0 no se resta nada y el orden es el de
+  // siempre; el desempate del `sort` tampoco cambia.
+  const habituacion = paramsOf(world).conducta.habituacion;
+  if (habituacion > 0) {
+    let acted = 0;
+    for (const done of Object.values(person.activity)) acted += done;
+    const lifetime = Math.max(1, acted);
+    for (const candidate of candidates) candidate.score -= habituacion * (0.5 + person.curiosity) * ((person.activity[candidate.action] ?? 0) / lifetime);
+  }
   if (person.command && person.hunger < 0.85 && person.thirst < 0.85 && person.fatigue < 0.88 && person.energy > 0.15) {
     const command = person.command;
     const directed: Candidate = { action: command.order === 'move' ? 'explore' : command.order, target: { x: command.x, y: command.y }, score: 5, directed: true, reason: `Tarea solicitada: ${command.order === 'move' ? 'ir al destino' : actionLabel(command.order)}. Conserva sus necesidades corporales.` };
@@ -1108,20 +1143,32 @@ function transferEstate(world: World, person: Person): void {
 const ELECCION_POR_AFINIDAD = true;
 function reproduce(world: World): void {
   const pop = paramsOf(world).poblacion;
-  if (!world.reproductionEnabled || world.people.length >= pop.maxima || world.tick % pop.intervaloComprobacionTicks !== 0) return;
+  if (!world.reproductionEnabled || world.people.length >= pop.maxima) return;
+  // Leyes candidatas del embudo de natalidad (diagnóstico 2026-09-22). `comprobacionContinua`
+  // cambia SÓLO el muestreo: en vez de mirar una vez cada `intervaloComprobacionTicks` pasos,
+  // mira cada paso, pero el cupo se cuenta sobre la misma ventana móvil, así que el calendario
+  // máximo —`nacimientosPorComprobacion` por ventana— no se mueve (lo cita SC-013). Sin campos
+  // nuevos en `World`: la ventana se reconstruye de los `bornAt` que ya existen, y los
+  // fundadores (`bornAt = −4800`) nunca caen dentro de ella.
+  if (!pop.comprobacionContinua && world.tick % pop.intervaloComprobacionTicks !== 0) return;
+  const recientes = pop.comprobacionContinua
+    ? world.people.filter(p => p.role === 'neighbor' && p.bornAt > world.tick - pop.intervaloComprobacionTicks).length : 0;
+  const cupo = pop.nacimientosPorComprobacion - recientes;
+  if (cupo <= 0) return;
   const used = new Set<string>();
-  const fit = (p: Person): boolean => !used.has(p.id) && fertile(world, p) && !!p.communityId;
-  const match = (a: Person, b: Person): boolean => b !== a && fit(b) && distance(a, b) <= 3 && (a.bonds[b.id] ?? 0) >= 0.3 && (b.bonds[a.id] ?? 0) >= 0.3 && !closeKin(a, b);
-  for (let n = 0; n < pop.nacimientosPorComprobacion && world.people.length < pop.maxima; n++) {
+  const fit = (p: Person): boolean => !used.has(p.id) && fertile(world, p) && (!pop.exigeComunidad || !!p.communityId);
+  const match = (a: Person, b: Person): boolean => b !== a && fit(b) && distance(a, b) <= pop.radioPareja && (a.bonds[b.id] ?? 0) >= 0.3 && (b.bonds[a.id] ?? 0) >= 0.3 && !closeKin(a, b);
+  for (let n = 0; n < cupo && world.people.length < pop.maxima; n++) {
     let pair: { a: Person; b: Person } | undefined, place: (typeof world.places)[number] | undefined;
     for (const a of world.people) {
       if (!fit(a)) continue;
-      const here = world.places.find(p => distance(a, p) <= 4);
+      const here = world.places.find(p => distance(a, p) <= pop.radioLugar);
       if (!here) continue;
       const b = chooseReproductivePartner(world, a, world.people.filter(p => match(a, p)), ELECCION_POR_AFINIDAD);
       if (!b) continue;
       if (!ELECCION_POR_AFINIDAD) { pair = { a, b }; place = here; break; }
-      if (!pair || pairAffinity(a, b) > pairAffinity(pair.a, pair.b) || (pairAffinity(a, b) === pairAffinity(pair.a, pair.b) && pairTie(world, a, b) > pairTie(world, pair.a, pair.b))) {
+      const afinidad = pairAffinity(a, b, pop.radioPareja), mejor = pair ? pairAffinity(pair.a, pair.b, pop.radioPareja) : -Infinity;
+      if (!pair || afinidad > mejor || (afinidad === mejor && pairTie(world, a, b) > pairTie(world, pair.a, pair.b))) {
         pair = { a, b }; place = here;
       }
     }
@@ -1142,7 +1189,18 @@ function reproduce(world: World): void {
     };
     delete child.home;
     a.inventory -= 0.08; b.inventory -= 0.08; a.energy = clamp(a.energy - 0.08); b.energy = clamp(b.energy - 0.08); a.lastBirth = world.tick; b.lastBirth = world.tick;
-    world.people.push(child); world.communities.find(c => c.id === a.communityId)?.members.push(id); count(world, 'births');
+    world.people.push(child);
+    // El evento de fundación de una comunidad comparte el arreglo con `group.members`
+    // (society.ts). Con la comprobación periódica un nacimiento cae siempre en el mismo paso
+    // que ese evento, así que empujar aquí lo extiende ANTES de que se archive y la crónica
+    // sigue siendo coherente: eso es lo que guardan las instantáneas de hoy y por eso el
+    // camino por defecto no se toca. Con `comprobacionContinua` el nacimiento puede caer
+    // 1..119 pasos DESPUÉS, cuando el evento ya es durable, y empujar lo reescribiría: el
+    // Store lo rechaza («an immutable event cannot be overwritten»). Reemplazar el arreglo
+    // deja el mismo censo sin tocar el pasado. El alias en sí queda como defecto anotado.
+    const group = world.communities.find(c => c.id === a.communityId);
+    if (group) { if (pop.comprobacionContinua) group.members = [...group.members, id]; else group.members.push(id); }
+    count(world, 'births');
     const event = addEvent(world, { kind: 'birth', actors: [a.id, b.id, child.id], x: child.x, y: child.y, source: 'simulation', text: a.communityId === b.communityId ? `${child.name} nació en la comunidad de ${a.name} y ${b.name}.` : `${child.name} nació del vínculo entre ${a.name} y ${b.name}, de comunidades distintas.`, cause: `${a.name} y ${b.name} junto a ${place.name} (${place.x},${place.y}). Dos progenitores simulados con recursos, confianza y lugar compartido; reserva conjunta −0.16, cría recibe 0.10. Recombina siete pares de parámetros; ${genome.mutations} variaciones. Habilidades y recuerdos comienzan vacíos; cultura inicial por crianza, no por ADN.` });
     remember(child, world, 'La comunidad sostuvo su llegada.', event.id, place.id);
     used.add(a.id); used.add(b.id);

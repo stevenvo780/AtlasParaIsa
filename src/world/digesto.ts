@@ -30,16 +30,51 @@ function canonicalWorld(world: World): Canonical {
   return canonical({ world, params: paramsOf(world) });
 }
 
-/** JSON.stringify collapses -0 into 0; a bit-level control must keep that sign. */
-function canonicalJson(value: Canonical): string {
-  if (typeof value === 'number') return Object.is(value, -0) ? '-0' : JSON.stringify(value);
-  if (value === null || typeof value !== 'object') return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
-  return `{${Object.entries(value).map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`).join(',')}}`;
+// Object.fromEntries (the original canonicalizer) enumerates array-index keys
+// numerically before other sorted keys. Preserve those exact historical bytes.
+function compareKeys(a: string, b: string): number {
+  const index = (key: string): boolean => {
+    const n = Number(key); return Number.isInteger(n) && n >= 0 && n < 0xffffffff && String(n) === key;
+  };
+  const ai = index(a), bi = index(b);
+  return ai && bi ? Number(a) - Number(b) : ai ? -1 : bi ? 1 : compareText(a, b);
+}
+
+function emitCanonical(value: unknown, emit: (text: string) => void): void {
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) throw new TypeError('Non-finite canonical world value.');
+    emit(Object.is(value, -0) ? '-0' : JSON.stringify(value)); return;
+  }
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') { emit(JSON.stringify(value)); return; }
+  if (Array.isArray(value)) {
+    emit('[');
+    for (let i = 0; i < value.length; i++) {
+      if (i) emit(',');
+      if (i in value) emitCanonical(value[i], emit);
+    }
+    emit(']'); return;
+  }
+  if (typeof value !== 'object') throw new TypeError('Unsupported canonical world value.');
+  emit('{');
+  const entries = Object.entries(value).filter(([, entry]) => entry !== undefined).sort(([a], [b]) => compareKeys(a, b));
+  for (let i = 0; i < entries.length; i++) {
+    if (i) emit(',');
+    const [key, entry] = entries[i]!; emit(JSON.stringify(key)); emit(':'); emitCanonical(entry, emit);
+  }
+  emit('}');
 }
 
 export function digestoCanonico(world: World): string {
-  return createHash('sha256').update(canonicalJson(canonicalWorld(world))).digest('hex');
+  const hash = createHash('sha256');
+  let pieces: string[] = [], length = 0;
+  const flush = () => { if (pieces.length) hash.update(pieces.join('')); pieces = []; length = 0; };
+  emitCanonical({ world, params: paramsOf(world) }, text => {
+    pieces.push(text); length += text.length;
+    // No full-world copy or string: a large valid world can exceed V8's string limit.
+    // Flush only between complete JSON tokens so UTF-16 pairs are never split.
+    if (length >= 64 * 1024) flush();
+  });
+  flush(); return hash.digest('hex');
 }
 
 export interface CanonicalDifference { path: string; before: Canonical | undefined; after: Canonical | undefined; }

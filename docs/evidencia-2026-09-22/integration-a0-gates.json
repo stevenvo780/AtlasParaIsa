@@ -1,0 +1,41 @@
+{
+  "sourceCapture": {
+    "capturedAt": "2026-09-22T10:59:54.205505+00:00",
+    "sourceHash": "c23d9013dfb3b2bac57e86ec3c3ae480d571f2cce7a6f10106e36fa6e33768b9",
+    "scope": "Captured while full Node suite was running; source files have not changed since integration. Verification scripts can be added separately."
+  },
+  "sourcesVerifiedAfterGate": true,
+  "tests": {
+    "pass": 939,
+    "fail": 0,
+    "skipped": 0,
+    "durationMs": 501706.522909,
+    "cuda": "/opt/cuda/lib64/libnvrtc.so"
+  },
+  "typecheck": "passed",
+  "build": "passed",
+  "e2e": {
+    "pass": 18
+  },
+  "smoke": "passed",
+  "physicalAndArchiveComparisons": 6,
+  "logs": {
+    "full": {
+      "path": "/tmp/atlas-integrated-v8-a0-full.log",
+      "sha256": "f36bbcce764fe5b64bec78643abed5c87ccc8071b15ec2625b46a35098fdf302"
+    },
+    "build": {
+      "path": "/tmp/atlas-integrated-v8-a0-build.log",
+      "sha256": "6301037adbbb15f80cae5d2ba52e7087449289f65359c4f2b86f7becc2fc74c5"
+    },
+    "e2e": {
+      "path": "/tmp/atlas-integrated-v8-a0-e2e.log",
+      "sha256": "80c5bb760af413ab0c832936b737bb36cac64b7bb6b1acfd11543d5786d0ba54"
+    },
+    "smoke": {
+      "path": "/tmp/atlas-integrated-v8-a0-smoke.log",
+      "sha256": "ad90392de09e1578b2f6ba9f79cd48fdb647a6b4ecfca61c92dfa8e23b1366f5"
+    }
+  },
+  "scope": "Integrated candidate V8 plus T102, Store parameter validation and streaming digest; not deployed; T100 and A0 remain open."
+}

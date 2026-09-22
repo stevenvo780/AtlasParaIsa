@@ -1,0 +1,13 @@
+{
+  "mode": "new",
+  "scope": "Synthetic digest-only sequence of valid Unicode strings, not a validated/persisted world or a server performance gate.",
+  "count": 10927,
+  "canonicalCharacters": 537601366,
+  "maxStringLength": 536870888,
+  "exceedsStringLimit": true,
+  "expectedHash": "339beb87c9ceb601cf247cfc072fcb6577778573c57ec824ce7461c06d94e67a",
+  "result": "339beb87c9ceb601cf247cfc072fcb6577778573c57ec824ce7461c06d94e67a",
+  "elapsedMs": 3720.863528,
+  "maxRssKiB": 93272,
+  "digestSourceSha256": "a94e90d74b3942d6ced54256a0bab7f4283d50e3e42492bff9351e5bf6082d74"
+}

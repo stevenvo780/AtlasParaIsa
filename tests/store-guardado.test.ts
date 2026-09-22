@@ -48,6 +48,67 @@ test('reusing SQL programs preserves snapshot bytes and a cold verified restart'
   finally { reopened.close(); }
 });
 
+// T105: `prepareTechnology`/`flushTechnology` dejaron de reconstruir en cada guardado lo
+// que ya estaba probado (store.ts: `rememberTechnology` reutiliza el `body` cacheado de una
+// receta residente en vez de recalcular `JSON.stringify(definitionOf(recipe))`, y el bucle
+// «en frío» de `flushTechnology` solo repite `sameStats` para una receta ya cacheada). Estas
+// pruebas fijan el contrato: mismas filas escritas, misma detección de corrupción.
+const dumpTechnologyTables = (store: Store): Record<string, unknown[]> => Object.fromEntries(
+  ([['technology_definitions', 'length(id),id'], ['technology_stats', 'recipeId,tick'],
+    ['technology_executions', 'serial'], ['technology_origin', 'id']] as const).map(([table, order]) =>
+    [table, store.db.prepare(`SELECT * FROM ${table} ORDER BY ${order}`).all()]));
+
+test('T105: recetas residentes sin cambios escriben las mismas filas de tecnología guardado tras guardado', t => {
+  const { store, world, recipe } = fixture(t);
+  // Segunda receta: mientras se inventa, `recipe-1` queda fuera de `pending` (no cambia)
+  // y pasa por el bucle «en frío» de `flushTechnology` en cada uno de estos guardados.
+  const actor = world.people[3]!;
+  actor.materials.wood = 8; actor.energy = 1; actor.fatigue = 0.1;
+  const program: TechnologyProgram = { inputs: [{ source: 'raw', material: 'wood', mass: 4000 }],
+    steps: [{ op: 'form', shape: 'rod', intensity: 3 }] };
+  actor.technology.project = { kind: 'research', program, parents: [], recipeId: null, progress: 0,
+    requiredWork: technologyWorkCost(program), energyPaid: 0, startedAt: world.tick };
+  for (let n = 0; n < 100 && actor.technology.project; n++) {
+    world.tick++; for (const person of world.people) person.demography.age = world.tick - person.bornAt;
+    researchTechnology(world, actor);
+  }
+  assert.equal(world.technology.recipeCounter, 2, 'la segunda receta se registró');
+  store.save(world);
+  const afterSecondRecipe = dumpTechnologyTables(store);
+  const cachedBody = (store as unknown as { verifiedRecipes: Map<string, { body: string }> }).verifiedRecipes.get(recipe.id)!.body;
+  // Guardados adicionales sin ningún cambio: `recipe-1` sigue sin estar en `pending`,
+  // así que cada uno reutiliza el mismo `body` cacheado (misma referencia de cadena) en
+  // vez de reconstruirlo, y las filas durables no se tocan.
+  for (let round = 0; round < 4; round++) {
+    store.save(world);
+    assert.deepEqual(dumpTechnologyTables(store), afterSecondRecipe, `guardado ${round}: las filas de tecnología no cambian`);
+    const nowCached = (store as unknown as { verifiedRecipes: Map<string, { body: string }> }).verifiedRecipes.get(recipe.id)!.body;
+    assert.ok(Object.is(nowCached, cachedBody), `guardado ${round}: el body de recipe-1 se reutiliza, no se recalcula`);
+  }
+});
+
+test('T105: un guardado con la caché de recetas vacía escribe las mismas filas que uno con la caché caliente', t => {
+  const first = fixture(t), second = fixture(t);
+  for (const { store, world } of [first, second]) for (let n = 0; n < 3; n++) store.save(world);
+  // Fuerza en `second` el camino «en frío» (sin `verifiedRecipes`) que T105 dejó de pagar
+  // en cada guardado; debe escribir exactamente lo mismo que el camino caliente de `first`.
+  (second.store as unknown as { verifiedRecipes: Map<string, unknown> }).verifiedRecipes.clear();
+  second.store.save(second.world);
+  first.store.save(first.world);
+  assert.deepEqual(dumpTechnologyTables(second.store), dumpTechnologyTables(first.store));
+});
+
+test('T105: una receta residente mutada sin registro pendiente se sigue rechazando', t => {
+  const { store, world, recipe } = fixture(t);
+  store.save(world);
+  // Sin pasar por `updateTechnologyRecipeStats` (que además la pendría), como haría un
+  // futuro error de programación: el guardado debe seguir fallando por estadísticas, no
+  // solo por definición, para que el atajo de T105 no lo deje pasar en silencio.
+  const live = world.technology.recipes.find(r => r.id === recipe.id)!;
+  live.uses += 1;
+  assert.throws(() => store.save(world), /resident definition or statistics changed without a pending record/);
+});
+
 for (const external of [false, true]) test(`warm SQL programs reject checksum-consistent corruption from ${external ? 'another connection' : 'the same connection'}`, t => {
   const { store, world, path, recipe } = fixture(t), before = snapshot(store);
   const writer = external ? new DatabaseSync(path) : store.db;

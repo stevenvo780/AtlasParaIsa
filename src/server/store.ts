@@ -704,7 +704,14 @@ export class Store {
     this.verifiedTechnology = { startsAfter: journal.startsAfter, through: journal.committedThrough,
       catalogueThrough: state.catalogue?.committedThrough ?? state.recipeCounter,
       dataVersion: this.dataVersion(), totalChanges: this.totalChanges(), schemaCookie: this.schemaCookie() };
-    this.verifiedRecipes = new Map(state.recipes.map(recipe => [recipe.id, { body: JSON.stringify(definitionOf(recipe)),
+    // `definitionOf` strips the three mutable stats fields, so its JSON is a pure function
+    // of properties `registerTechnologyRecipe` sets once and nothing ever reassigns
+    // (T105: grep confirms the only post-creation mutation site is `Object.assign` in
+    // `updateTechnologyRecipeStats`, which touches manufactured/uses/utility only). A
+    // recipe already in the previous map has that same body verbatim forever; re-stringify
+    // only ids this map has never seen, instead of the whole resident window every save.
+    const previousRecipes = this.verifiedRecipes;
+    this.verifiedRecipes = new Map(state.recipes.map(recipe => [recipe.id, { body: previousRecipes.get(recipe.id)?.body ?? JSON.stringify(definitionOf(recipe)),
       uses: recipe.uses, utility: recipe.utility, manufactured: recipe.manufactured }]));
     const functions = state.catalogue?.functions.slice() ?? Array<number>(TECHNOLOGY_FUNCTION_WORDS).fill(0);
     if (!state.catalogue) for (const recipe of state.recipes) {
@@ -794,8 +801,14 @@ export class Store {
         if (pendingIds.has(recipe.id)) continue;
         const cached = this.verifiedRecipes.get(recipe.id);
         if (cached) {
-          if (cached.body !== JSON.stringify(definitionOf(recipe)) || !sameStats(cached, recipe))
-            technologyFailure('resident definition or statistics changed without a pending record');
+          // T105: a recipe outside `pendingIds` was not touched by `updateTechnologyRecipeStats`
+          // this round — the only site that mutates a resident recipe, and it always pends its
+          // target first. Its definition (program/capacities/parents/…) is therefore provably the
+          // same object state `cached.body` was stringified from; only the stats can have drifted,
+          // so those are what a warm hit re-checks here. The `else` branch below still runs the
+          // full definition comparison against the durable row for every id `verifiedRecipes`
+          // has not proven yet (right after a reset, or a stamp mismatch clears the cache).
+          if (!sameStats(cached, recipe)) technologyFailure('resident definition or statistics changed without a pending record');
         } else {
           const durable = this.readTechnologyRecipe(recipe.id, world.tick);
           if (!durable || JSON.stringify(definitionOf(durable)) !== JSON.stringify(definitionOf(recipe)) || !sameStats(durable, recipe))

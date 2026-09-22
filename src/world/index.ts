@@ -254,6 +254,26 @@ export function ecology(world: World): void {
 }
 
 interface Candidate { action: Action; target: Point; score: number; reason: string; memory?: Memory; directed?: boolean; }
+/** Ley DIV (`conducta.aptitud`): qué rasgo heredable hace a alguien apto para
+ * cada OFICIO. Sigue las afinidades que la elección ya usaba (explorar e investigar con
+ * `curiosity`, recolectar/cultivar con `industriousness`, provisión familiar con `care`); la caza,
+ * el esfuerzo físico más caro, va con `resilience` y cooperar con `sociability`, para que cada uno
+ * de los cinco rasgos tenga al menos un oficio. Comer, beber, descansar y los actos de vínculo
+ * (acercarse, acompañar, retirarse) no son oficios: la ley no los toca. */
+const RASGO_DEL_OFICIO: Partial<Record<Action, keyof NonNullable<PersonView['traits']>>> = {
+  explore: 'curiosity', research: 'curiosity', invent: 'curiosity',
+  gather: 'industriousness', farm: 'industriousness', build: 'industriousness', repair: 'industriousness', craft: 'industriousness',
+  hunt: 'resilience', forage: 'care', share: 'care', cooperate: 'sociability',
+};
+/** Ventaja comparativa de `traits` en `action` (ley DIV): el rasgo del oficio menos la media de los
+ * cinco rasgos de la MISMA persona. Suma cero sobre los cinco rasgos: quien es bueno en todo no
+ * gana nada por serlo, sólo ordena sus oficios; 0 para lo que no es un oficio. Pura y exportada
+ * para que la ley pueda probarse sin simular. */
+export function ventajaComparativa(traits: NonNullable<PersonView['traits']>, action: Action): number {
+  const rasgo = RASGO_DEL_OFICIO[action];
+  if (!rasgo) return 0;
+  return traits[rasgo] - (traits.curiosity + traits.sociability + traits.industriousness + traits.care + traits.resilience) / 5;
+}
 
 /** Exact physical roof predicate used by population damage, independent of display labels. */
 function bodilyShelter(world: World, point: Point): number {
@@ -669,6 +689,20 @@ function choose(world: World, person: Person): void {
     for (const done of Object.values(person.activity)) acted += done;
     const lifetime = Math.max(1, acted);
     for (const candidate of candidates) candidate.score -= habituacion * (0.5 + person.curiosity) * ((person.activity[candidate.action] ?? 0) / lifetime);
+  }
+  // Ley candidata DIV, ventaja comparativa heredable (`conducta.aptitud`, 2026-09-22). La
+  // habituación sube la riqueza de oficios pero iguala los repertorios: cada cual rota por todo y
+  // los vectores de conducta se parecen más (SC-003 se queda en 0,3–0,5). Aquí cada OFICIO vale
+  // más para quien tiene su rasgo por encima de la media de SUS cinco rasgos y menos para quien lo
+  // tiene por debajo (`ventajaComparativa`): sólo reparte la atención de cada persona entre
+  // oficios —comer, beber, descansar y los actos de vínculo no se tocan—, no crea recursos ni
+  // revela nada lejano. Con el default 0 no se suma nada y el orden es el de siempre.
+  const aptitud = paramsOf(world).conducta.aptitud;
+  if (aptitud > 0) {
+    for (const candidate of candidates) {
+      if (!RASGO_DEL_OFICIO[candidate.action]) continue;
+      candidate.score += aptitud * ventajaComparativa(person.traits, candidate.action);
+    }
   }
   if (person.command && person.hunger < 0.85 && person.thirst < 0.85 && person.fatigue < 0.88 && person.energy > 0.15) {
     const command = person.command;

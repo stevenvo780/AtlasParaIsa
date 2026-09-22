@@ -1122,11 +1122,42 @@ function fertile(world: World, person: Person): boolean {
   return person.inventory >= 0.1 && reproductiveReadiness(world, person);
 }
 
+/** `structuredClone` semantics for the plain JSON-shaped world state, without its
+ * serialize/deserialize round trip. `shared` keeps the identity the world already has —
+ * an event lives at once in `events` and in `chronicleJournal.pending`, a place in
+ * `places` and in the meta of its active chunk — so writing through one path is still
+ * seen through the other. Anything that is not a plain object or array (a Date, a
+ * null-prototype record) falls back to `structuredClone` for that subtree. */
+function cloneState<T>(value: T, shared: Map<object, unknown>): T {
+  if (value === null) return value;
+  const kind = typeof value;
+  // A host capability smuggled into the state still fails loudly, as structuredClone did.
+  if (kind !== 'object') return kind === 'function' ? structuredClone(value) : value;
+  const source = value as unknown as object;
+  const previous = shared.get(source);
+  if (previous !== undefined) return previous as T;
+  if (Array.isArray(source)) {
+    const copy: unknown[] = new Array(source.length);
+    shared.set(source, copy);
+    for (let i = 0; i < source.length; i++) if (i in source) copy[i] = cloneState(source[i], shared);
+    return copy as T;
+  }
+  if (Object.getPrototypeOf(source) !== Object.prototype) {
+    const copy = structuredClone(value); shared.set(source, copy as object); return copy;
+  }
+  const copy: Record<string, unknown> = {};
+  shared.set(source, copy);
+  for (const key in source) copy[key] = cloneState((source as Record<string, unknown>)[key], shared);
+  return copy as T;
+}
+
 /** Flat terrain cells can be copied without the generic structured-clone traversal overhead. */
 export function cloneWorld(world: World, context: WorldContext): World;
 export function cloneWorld(world: World): World;
 export function cloneWorld(world: World, context: WorldContext = worldContext(world)): World {
-  const draft: World = structuredClone({ ...world, tiles: [], retiredChunks: [] });
+  // Same state and same sharing as structuredClone: the non-tile state of the aged 51926
+  // laboratory fixture copies in 2.23 ms instead of 8.11 ms (T103).
+  const draft: World = cloneState({ ...world, tiles: [], retiredChunks: [] }, new Map());
   draft.tiles = world.tiles.map(tile => ({ ...tile }));
   // Dormant chunks are immutable until activate() takes a private deep copy.
   // A new queue is still required: retiring/reactivating must not edit the confirmed queue.

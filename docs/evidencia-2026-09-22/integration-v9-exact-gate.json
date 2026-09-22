@@ -1,0 +1,15 @@
+{
+  "repository": "/datos/workspaces/personal/AtlasParaIsa-integrated-v9-20260922",
+  "revision": "96e89b11e3a4c30d47305df2c93fbc91a2ab4edf",
+  "helperSha256": "6e944c787553f36fed2841f190e4ef7936f9b024658e8d8e42833a1657382d46",
+  "dependencies": "/datos/workspaces/personal/AtlasParaIsa/node_modules",
+  "worktree": "/tmp/atlas-deploy-check.0TVSdr/worktree",
+  "startedAt": "2026-09-22T11:58:26Z",
+  "finishedAt": "2026-09-22T11:58:30.700Z",
+  "status": "passed",
+  "phase": "complete",
+  "exitCode": 0,
+  "buildExitCode": 0,
+  "smokeExitCode": 0,
+  "cleanup": true
+}

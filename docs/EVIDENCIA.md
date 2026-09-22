@@ -1,6 +1,12 @@
 # Evidencia vigente
 
-## Propuesta de contención familiar V9, 22 de septiembre de 2026
+## Integración familiar V9, 22 de septiembre de 2026
+
+La integración `96e89b1` sobre la persistencia vigente pasó **981/981 pruebas sin
+omisiones**, typecheck, build/smoke exacto,18/18 Chromium y seis comparaciones de
+estado/archivo de1200ticks. [Gate y alcance](REVISION-INTEGRACION-V9-2026-09-22.md).
+Las fuentes incorporan V8/V9; el build público sigue en `3dd615e`. La comparación
+demográfica V8→V9 aún no termina y no se declara sostenibilidad.
 
 Base V8 `eaa2709b24ef02623921ba39bf32159a0892b4e1`; rama aislada
 `sprint/family-contention-v9-20260922`. El [informe de V9](REVISION-CONTENCION-V9-2026-09-22.md)
@@ -16,8 +22,8 @@ filtro nuevo produce 4 fallos esperados y 3 controles verdes, y recupera exactam
 V8 en los estados t150 de 1007/1012/1013, salvo la etiqueta de versión. También
 recupera los cuatro goldens V8 de agua/demografía; la candidata los conserva, sin
 actualizar hashes. Protocolo y SQLite no cambian. Revisión independiente del cambio
-local sin bloqueos; suite completa conjunta pendiente de integración, sin repetirla
-en esta rama. Sin publicación ni afirmación de sostenibilidad.
+local sin bloqueos; esa rama aislada no repitió la suite completa. El gate conjunto
+posterior figura arriba. Sin publicación ni afirmación de sostenibilidad.
 
 La optimización posterior agrupa una vez trabajadores visibles por celda, conserva
 sus predicados y pasa 44 focales, además de los tres controles del laboratorio.
@@ -43,7 +49,7 @@ T100 y A0 siguen abiertos; no se han activado segmentación ni límites por hard
 La comparación V7→V8 terminó las seis corridas de trece días: mortales finales
 0→0, 15→24 y 22→20. Sus 78 ventanas y seis checkpoints fueron auditados.
 [Resultado mixto y procedencia](REVISION-FAMILIA-V8-2026-09-22.md).
-V8 permanece como candidata; el build público continúa en `3dd615e`.
+V8 se conservó como candidata hasta integrarla junto con V9; el build público continúa en `3dd615e`.
 
 ## Parámetros y persistencia técnica, 22 de septiembre de 2026
 

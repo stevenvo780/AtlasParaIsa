@@ -24,8 +24,8 @@ Los episodios de cooperación de todos los roles pasan de 32/358/543 a 28/432/47
 Estas tres semillas se eligieron para diagnóstico a partir de observaciones previas;
 no constituyen validación reservada. Cada brazo usa fuentes congeladas, igual
 instrumento, cadencia20 y motor físico sin gobernador. Los tiempos concurrentes no
-acreditan rendimiento del servidor. La candidata V8 sigue separada de main y del
-build público. El resultado no justifica declarar sostenibilidad ni superioridad
+acreditan rendimiento del servidor. V8 se mantuvo separada hasta su integración
+junto con V9; este resultado pertenece a V8, no a V9 ni al build público. El resultado no justifica declarar sostenibilidad ni superioridad
 general, ni ajustar leyes materiales para conseguir una cifra de población.
 
 ## Mecanismo y controles de V8

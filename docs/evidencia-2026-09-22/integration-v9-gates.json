@@ -1,0 +1,46 @@
+{
+  "revision": "96e89b11e3a4c30d47305df2c93fbc91a2ab4edf",
+  "rulesVersion": 9,
+  "protocolVersion": 9,
+  "sqliteVersion": 4,
+  "typecheckExitCode": 0,
+  "tests": {
+    "pass": 981,
+    "fail": 0,
+    "skipped": 0,
+    "durationMs": 250480.765823,
+    "exitCode": 0,
+    "command": "COMPUTE_NVRTC=/opt/cuda/lib64/libnvrtc.so timeout 1200 npm test -- --test-concurrency=8",
+    "log": "/tmp/atlas-integrated-v9-full.log",
+    "logSha256": "ae9b1539b09b544e395ebbb4b746b5b5811ea668b7c1c1d50f2cfa8dde652301"
+  },
+  "browser": {
+    "pass": 18,
+    "durationSeconds": 59.9,
+    "exitCode": 0,
+    "log": "/tmp/atlas-integrated-v9-e2e.log",
+    "logSha256": "3a515197eef55158f50058b795ee46024abc4025e613939c364242707806d997"
+  },
+  "buildExitCode": 0,
+  "parity": {
+    "cases": 6,
+    "ticksEach": 1200,
+    "reloadTicks": [
+      600,
+      1200
+    ],
+    "cloneCheckInterval": 120,
+    "equalDurableTables": 10,
+    "source": "cf04ac402d25179c9fa878292390e3c2aff0255e",
+    "instrument": "/tmp/atlas-integrated-v9-parity.mts",
+    "instrumentSha256": "0e40157a84dc0915e8ae6999fcc0b317fa5b436d84b0a27e39ef972e7c0ab212",
+    "scope": "Same V9 world including order, undefined, numeric bits and aliases; defaults/reserved options. Complete digests differ because new typed parameters remain included."
+  },
+  "laterChanges": "Only clone benchmark instrumentation and documentation after this tested revision; no src or package changes.",
+  "limits": [
+    "No completed thirteen-day V9 result at this gate",
+    "Prior V8 comparison is mixed and diagnostic",
+    "No claim of sustainability or server p95",
+    "Public compiled service still 3dd615e"
+  ]
+}

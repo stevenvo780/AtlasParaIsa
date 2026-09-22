@@ -16,8 +16,11 @@ digesto, la integración técnica V7 alcanzó 946/946 pruebas sin omisiones, typ
 y build/smoke exactos. Recuperación estricta, migración V1 y números exactos tienen
 controles independientes; [persistencia](docs/REVISION-PERSISTENCIA-2026-09-22.md).
 T100 sigue abierto por segmentación y límites persistidos, incluida la puerta de
-dos millones de teselas. La candidata familiar V8 permanece separada: su comparación
-de trece días terminó con resultado mixto, sin demostrar sostenibilidad conjunta.
+dos millones de teselas. La provisión familiar V8 y la contención local V9 se
+integraron sobre esa base:981/981 pruebas sin omisiones,18/18 Chromium y seis controles
+de estado/archivo; [gate V9](docs/REVISION-INTEGRACION-V9-2026-09-22.md). El contraste
+V8 de trece días terminó mixto y el de V9 sigue abierto. El perfil de tres mundos
+envejecidos tampoco alcanza el presupuesto del clon: [T103 continúa abierto](docs/REVISION-CLON-ENVEJECIDO-2026-09-22.md).
 
 La comparación reservada fija 32 semillas, control y candidato, a 30 días simulados.
 Se ejecuta en copias inmutables con 24 procesos; no emplea el gobernador del servidor

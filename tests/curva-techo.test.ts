@@ -54,23 +54,30 @@ test('el instrumento encuentra el techo (p95 ≥ presupuestoMs) antes de un hast
   assert.match(result.stdout, /Curva completa \(presupuesto\)/, 'con --hasta generoso el criterio de parada real es cruzar gobernador.presupuestoMs, no agotar --hasta');
 });
 
-test('dos corridas con la misma semilla dan el mismo primer escalón salvo tiempos', (t) => {
+test('dos corridas con la misma semilla dan la misma curva salvo tiempos (hasta donde ambas llegaron)', (t) => {
   // Esta torre corre varios worktrees hermanos en paralelo (load average de dos dígitos no es
   // raro durante un sprint nocturno): el p95 real de UNA corrida concreta puede cruzar
   // `presupuestoMs` (50 ms) en un escalón distinto al de otra corrida por puro ruido del
-  // sistema, así que comparar la secuencia COMPLETA de escalones entre dos procesos
-  // reventaría por contención, no por el instrumento. Lo que SÍ es determinista pase lo que
-  // pase con el reloj: el primer escalón (siempre la misma escena de partida de `createWorld`,
-  // antes de que cualquier decisión de parada pueda ramificar la corrida) y la huella de
-  // `src/world` (`digest`), ninguno de los dos depende de cuánto tardó ningún paso.
+  // sistema (contención de CPU, no el instrumento), así que las dos curvas pueden tener
+  // distinto NÚMERO de puntos. Lo que SÍ es determinista pase lo que pase con el reloj: cada
+  // punto de índice `i` corresponde siempre a la MISMA cantidad de pasos simulados desde la
+  // misma semilla (`(i+1) × GOVERNOR_WINDOW_STEPS` pasos deterministas de `createWorld`), así
+  // que sus campos estructurales (escala/habitantes/teselas/tick/digest…) deben coincidir
+  // exactamente entre corridas para todo índice que AMBAS alcanzaron — solo el índice en el
+  // que cada corrida decide parar (y las columnas de tiempo: p50/p95/tickHz/rss) pueden variar.
+  // Esto valida bastante más que el primer escalón sin volverse frágil ante el ruido de la torre.
   const args = ['--seed', '20260905', '--escala', 'habitantes', '--hasta', '64'];
   const a = runCurva(t, args), b = runCurva(t, args);
   assert.equal(a.result.status, 0, a.result.stderr);
   assert.equal(b.result.status, 0, b.result.stderr);
   const curvaA = readJson(join(a.dir, 'curva.json')), curvaB = readJson(join(b.dir, 'curva.json'));
   assert.equal(curvaA.digest, curvaB.digest);
-  const primeroA = stripTimings((curvaA.puntos as Json[])[0]!), primeroB = stripTimings((curvaB.puntos as Json[])[0]!);
-  assert.deepEqual(primeroA, primeroB, 'el primer escalón (escena de partida de createWorld, sin ninguna decisión de parada de por medio) debe ser idéntico salvo tiempos');
+  const puntosA = curvaA.puntos as Json[], puntosB = curvaB.puntos as Json[];
+  assert.ok(puntosA.length >= 1 && puntosB.length >= 1);
+  const comunes = Math.min(puntosA.length, puntosB.length);
+  for (let i = 0; i < comunes; i++) {
+    assert.deepEqual(stripTimings(puntosA[i]!), stripTimings(puntosB[i]!), `el escalón ${i} (misma cantidad de pasos deterministas desde la misma semilla) debe ser idéntico salvo tiempos`);
+  }
 });
 
 test('el criterio de parada es una función determinista de p95 y presupuestoMs, no del reloj', (t) => {

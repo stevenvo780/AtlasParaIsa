@@ -48,6 +48,11 @@
  * mantiene vivo alrededor de cada persona (T111 lo llama «activación», radio compuesto ~13)
  * no se solape con el de la vecina. Activar chunks sin una persona cerca no sirve: el mismo
  * `maintainRegions` los retira en el siguiente paso si no hay nadie a menos de 8 teselas.
+ * El «calentamiento» de cada ancla llama a `maintainRegions` DIRECTAMENTE (no
+ * `cloneWorld`+`stepWorld`, hallazgo de revisión adversarial, confirmado): es una función pura
+ * de `world.people` que solo activa/retira chunks — no toca `world.tick` ni corre ecología,
+ * fauna, hambre o senescencia — así que activar cientos de anclas para llegar a 65536 teselas
+ * no envejece ni un tick a los fundadores reales ('S'/'I') ni a las anclas ya puestas.
  */
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -58,7 +63,7 @@ import { Store } from '../src/server/store.js';
 import { GOVERNOR_WINDOW_STEPS, RollingStepPerformance } from '../src/server/governor.js';
 import { cloneWorld, createWorld, stepWorld, tileAt, type Person, type World } from '../src/world/index.js';
 import { paramsOf, DEFAULT_PARAMS, type WorldParams } from '../src/world/params.js';
-import type { WorldContext } from '../src/world/spatial.js';
+import { maintainRegions, type WorldContext } from '../src/world/spatial.js';
 
 /** Hoy no hay ninguna fase paralelizable implementada (T102 es config reservada): el paso
  * entero corre en un solo hilo. Ver la nota de cabecera sobre T107. */
@@ -140,36 +145,33 @@ function buscarTeselaCaminable(world: World, cx: number, cy: number): { x: numbe
 }
 
 /** Añade anclas hasta que `world.tiles.length` (teselasActivas) llegue a `objetivo`; cada
- * ancla necesita un paso de «calentamiento» (no medido, no guardado) para que
- * `maintainRegions` active su bloque — a diferencia de la escala de habitantes, aquí SÍ es
- * el efecto que se busca. Tras activarlo, la ancla se reubica a la primera tesela transitable
- * del propio bloque (su centro exacto puede haber caído en agua). Devuelve el mundo vigente
- * (cada calentamiento clona). */
+ * ancla necesita un «calentamiento» para que `maintainRegions` active su bloque — a diferencia
+ * de la escala de habitantes, aquí SÍ es el efecto que se busca. El calentamiento llama a
+ * `maintainRegions(world, context)` directamente (no `cloneWorld`+`stepWorld`): es la misma
+ * función que usa `stepWorld` internamente, pero sola no avanza `world.tick` ni corre ecología,
+ * fauna, hambre o senescencia — así que ninguna ancla ni fundador envejece un solo tick por el
+ * calentamiento, sea cual sea la escala alcanzada. Como no hay clon, `actual` se muta en el
+ * sitio (igual que ya hace `agregarHabitantesSinteticos` con `world.people`) y el objeto
+ * `ancla` sigue siendo la misma referencia tras activarse, sin falta de buscarla por id. Tras
+ * activar su bloque, la ancla se reubica a la primera tesela transitable del propio bloque (su
+ * centro exacto puede haber caído en agua). Devuelve el mundo vigente (el mismo `world`, mutado). */
 function agregarAnclasSinteticas(world: World, objetivo: number, contador: { n: number }, context: WorldContext): World {
-  let actual = world;
   let guardia = 0;
   const TOPE_GUARDIA = 20_000; // una ancla activa hasta 9 chunks (2304 teselas): de sobra para 65536
-  while (actual.tiles.length < objetivo) {
+  while (world.tiles.length < objetivo) {
     if (++guardia > TOPE_GUARDIA) throw new Error(`No se alcanzaron ${objetivo} teselas tras ${TOPE_GUARDIA} anclas; revisar la geometría de activación.`);
-    // La plantilla se relee en CADA vuelta, no antes del bucle: cada calentamiento avanza
-    // `actual.tick`, y `demography.age` de un clon debe cuadrar con `actual.tick - bornAt` en
-    // el momento exacto en que se clona (`assertPopulation`, lineage.ts) — una plantilla
-    // capturada una sola vez fuera del bucle queda vieja desde la segunda ancla en adelante.
-    const plantilla = founderTemplate(actual);
+    const plantilla = founderTemplate(world);
     const n = contador.n++;
     const { x, y } = coordenadaAncla(n);
     const ancla = structuredClone(plantilla);
     ancla.id = `ancla-${n}`;
     desvincular(ancla, x, y);
-    actual.people.push(ancla);
-    const draft = cloneWorld(actual, context);
-    stepWorld(draft, [], context);
-    actual = draft;
-    const viva = actual.people.find(p => p.id === ancla.id)!;
-    const destino = buscarTeselaCaminable(actual, x, y);
-    if (destino.x !== viva.x || destino.y !== viva.y) desvincular(viva, destino.x, destino.y);
+    world.people.push(ancla);
+    maintainRegions(world, context);
+    const destino = buscarTeselaCaminable(world, x, y);
+    if (destino.x !== ancla.x || destino.y !== ancla.y) desvincular(ancla, destino.x, destino.y);
   }
-  return actual;
+  return world;
 }
 
 interface Punto {
@@ -239,8 +241,13 @@ async function main(): Promise<void> {
         p95 = rolling.record(stepMs);
       }
       const { p50 } = distribution(tiempos);
-      const span = beats.length > 1 ? beats[beats.length - 1]! - beats[0]! : 0;
-      const tickHz = span > 0 ? (beats.length - 1) * 1000 / span : 0;
+      // `span` es el tiempo de pared para completar los `beats.length` pasos enteros: desde el
+      // arranque del primero hasta el FIN del último (arranque + su propia duración), no hasta
+      // el arranque del último — eso dejaría fuera la duración del paso más reciente y sesgaría
+      // `tickHz` al alza (hallazgo de revisión adversarial, confirmado: ~0,8 % en una ventana de
+      // 120 pasos de ~30 ms). `tickHz` es entonces pasos / tiempo-de-pared-total de esos pasos.
+      const span = beats.length > 0 ? beats[beats.length - 1]! + tiempos[tiempos.length - 1]! - beats[0]! : 0;
+      const tickHz = span > 0 ? beats.length * 1000 / span : 0;
       const presupuestoMs = paramsOf(world).gobernador.presupuestoMs;
       const habitantes = world.people.length, teselasActivas = world.tiles.length;
       const punto: Punto = {

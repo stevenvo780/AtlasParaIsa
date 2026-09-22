@@ -9,8 +9,20 @@ demuestra estabilidad conjunta, transmisión sostenida ni cierre del objetivo. E
 gobernador sigue detectando un coste real excesivo de persistencia. El candidato de
 reglas 7/protocolo 9 pasó **899/899 pruebas Node, cero omisiones, 18/18 E2E**, typecheck
 y smoke compilado. [Gate e identificación de fuentes](evidencia-2026-09-22/gates.json).
-La integración a main y la publicación se realizan después del build/smoke del commit
-exacto. La serie de 32 pares a 30 días sigue abierta: los primeros casos completos
+El commit **`3dd615e` está integrado en main, subido a GitHub y publicado** en
+`https://atlas.humanizar.tech`, después del build/smoke de ese commit en un worktree.
+El build público se hizo con el servicio detenido. El mundo V7 usa un directorio
+nuevo; los datos y el build anteriores permanecen resguardados. El primer registro
+operativo guardado muestra paso 2800, 22 habitantes y ningún fallecido; no se capturó
+un snapshot durable del paso cero antes del avance automático. Un reinicio ordenado
+conservó identidad y checkpoint 3600, con 23 habitantes. Health, rechazo 401 sin sesión
+y bytes de los assets públicos coinciden con el build. No se probó login autenticado
+público; el wrapper y su configuración de acceso se conservaron sin leer secretos.
+El servicio persistente y el timer horario están habilitados con linger; la primera
+copia del mundo nuevo pasó descompresión y `quick_check`. No se reinició la torre.
+[Registro operativo](evidencia-2026-09-22/publication.json).
+
+La serie de 32 pares a 30 días sigue abierta: los primeros casos completos
 incluyen extinciones en ambos brazos y no se usan para inferir la tasa del conjunto.
 
 ## Estado histórico del 7 de septiembre de 2026

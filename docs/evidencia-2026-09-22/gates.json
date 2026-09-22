@@ -27,7 +27,20 @@
     "report": "smoke.json"
   },
   "exactCommittedBuildAndSmoke": {
-    "status": "pending commit"
+    "repository": "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922",
+    "revision": "3dd615ee069d9d61f51a4c74f85d33c15a4583e0",
+    "helperSha256": "6e944c787553f36fed2841f190e4ef7936f9b024658e8d8e42833a1657382d46",
+    "dependencies": "/datos/workspaces/personal/AtlasParaIsa/node_modules",
+    "worktree": "/tmp/atlas-deploy-check.kmuqwy/worktree",
+    "startedAt": "2026-09-22T10:23:53Z",
+    "finishedAt": "2026-09-22T10:23:55.598Z",
+    "status": "passed",
+    "phase": "complete",
+    "exitCode": 0,
+    "buildExitCode": 0,
+    "smokeExitCode": 0,
+    "cleanup": true
   },
-  "scope": "Production source unchanged since the frozen reserved candidate. Laboratory concurrent timings are not performance acceptance. No GOAL.md or feature002 completion claimed."
+  "scope": "Production source unchanged since the frozen reserved candidate. Laboratory concurrent timings are not performance acceptance. No GOAL.md or feature002 completion claimed.",
+  "publicationReport": "publication.json"
 }

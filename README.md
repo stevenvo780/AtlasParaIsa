@@ -4,13 +4,15 @@ Mundo procedural compartido y persistente: humanos y fauna consumen recursos fin
 aprenden, fabrican y se reproducen bajo leyes locales. El objetivo completo y sus
 criterios de aceptación están en [GOAL.md](GOAL.md).
 
-**Estado del 22 de septiembre de 2026:** candidato de reglas 7, protocolo 9 y SQLite 4,
+**Estado del 22 de septiembre de 2026:** publicado `3dd615e`, reglas 7, protocolo 9 y SQLite 4,
 con correcciones verificables de cooperación, parentesco, planificación técnica y
 búsqueda de agua. [PLAN](PLAN.md#estado-actual) identifica lo pendiente y la
 [revisión vigente](docs/REVISION-2026-09-22.md) separa controles causales, resultados
 demográficos mixtos y rendimiento. La serie reservada de 32 pares de mundos está en
 ejecución; no se declara autonomía sostenida ni cierre del proyecto. El estado de
 publicación se registra en [EVIDENCIA](docs/EVIDENCIA.md#revisión-y-ejecución-2026-09-22).
+El servicio de usuario `atlas-servidor.service` y el respaldo horario están habilitados;
+un reinicio ordenado conservó el mismo mundo. Los archivos anteriores siguen separados.
 
 El servidor de `atlas.humanizar.tech` sirve `dist/client` desde el árbol principal.
 Las compilaciones de prueba se hacen en worktrees aislados. Para publicar hay que

@@ -1,0 +1,113 @@
+{
+  "capturedAt": "2026-09-22T10:34:54.279770+00:00",
+  "status": "published",
+  "codeRevision": "3dd615ee069d9d61f51a4c74f85d33c15a4583e0",
+  "sourceHash": "783b2dc78b0361a51e390c2e015429a984c50f8b1b6ce73bbd941d7e4d30778d",
+  "url": "https://atlas.humanizar.tech",
+  "rulesVersion": 7,
+  "protocolVersion": 9,
+  "sqliteVersion": 4,
+  "gate": {
+    "repository": "/datos/workspaces/personal/AtlasParaIsa-coherent-20260922",
+    "revision": "3dd615ee069d9d61f51a4c74f85d33c15a4583e0",
+    "helperSha256": "6e944c787553f36fed2841f190e4ef7936f9b024658e8d8e42833a1657382d46",
+    "dependencies": "/datos/workspaces/personal/AtlasParaIsa/node_modules",
+    "worktree": "/tmp/atlas-deploy-check.kmuqwy/worktree",
+    "startedAt": "2026-09-22T10:23:53Z",
+    "finishedAt": "2026-09-22T10:23:55.598Z",
+    "status": "passed",
+    "phase": "complete",
+    "exitCode": 0,
+    "buildExitCode": 0,
+    "smokeExitCode": 0,
+    "cleanup": true
+  },
+  "operation": {
+    "buildOnlyAfterServiceStopped": true,
+    "oldCompiledBuildPreserved": true,
+    "oldDataDirectoryPreserved": true,
+    "oldDatabaseUnchangedAcrossRestart": true,
+    "newWorldFromInitiallyEmptyDirectory": true,
+    "sameVersionRestartKeepsWorld": true,
+    "credentialsAndWrapperUnchanged": true,
+    "liveAuthenticatedLoginTested": false,
+    "liveStepZeroSnapshotCaptured": false
+  },
+  "liveChecks": {
+    "firstRecordedSnapshot": {
+      "rulesVersion": 7,
+      "seed": 51926,
+      "tick": 2800,
+      "people": 22,
+      "legacy": 0,
+      "directory": "/datos/workspaces/personal/AtlasParaIsa-worlds/v7-20260922"
+    },
+    "restartBefore": {
+      "tick": 3600,
+      "version": 7,
+      "seed": 51926,
+      "people": 23,
+      "legacy": 0
+    },
+    "restartAfter": {
+      "tick": 3600,
+      "version": 7,
+      "seed": 51926,
+      "people": 23,
+      "legacy": 0
+    },
+    "identityPreserved": true,
+    "health": {
+      "status": "ok"
+    },
+    "unauthenticatedWorldStatus": 401,
+    "assetsMatchCompiled": [
+      {
+        "asset": "/assets/index-C6X130Rz.js",
+        "sha256": "856c72ea524db0ec1fb595147008c6d3b499130aa208b0f98b9cc215e7fe25ec"
+      },
+      {
+        "asset": "/assets/index-dDwXMXEk.css",
+        "sha256": "5a6fa359d99a37288cb8f137af8527af9e2622280c7fdaeea81d49dcf36c57f7"
+      }
+    ]
+  },
+  "backup": {
+    "capturedAt": "2026-09-22T10:32:53.832652+00:00",
+    "backupName": "world-20260922-0532.sqlite.gz",
+    "bytes": 1434942,
+    "sha256": "4099364f2d08bc02b5857176dd0a87214797233ace9ac1857a54adfb628d4740",
+    "quickCheck": "ok",
+    "rulesVersion": 7,
+    "tick": 2900,
+    "people": 22
+  },
+  "priorBackup": {
+    "sha256": "a0d658682c416b2cee5cf092e2673085069cdab7a8cc0eeb8b711e38fc2f79bf",
+    "validation": [
+      "SQLite quick_check before compression",
+      "gzip -t"
+    ]
+  },
+  "service": {
+    "name": "atlas-servidor.service",
+    "enabled": true,
+    "active": true,
+    "nRestarts": 0,
+    "linger": true
+  },
+  "backupTimer": {
+    "name": "atlas-respaldo.timer",
+    "enabled": true,
+    "active": true,
+    "persistent": true,
+    "calendar": "hourly",
+    "randomizedDelaySec": 120
+  },
+  "limits": [
+    "Early new-world births do not demonstrate demographic continuity.",
+    "No authenticated live login was performed; the unchanged wrapper preserves its existing access configuration.",
+    "No physical host reboot was performed.",
+    "Initial empty directory was verified; no durable step-zero snapshot was captured before automatic advancement."
+  ]
+}

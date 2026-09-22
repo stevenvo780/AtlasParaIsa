@@ -4,8 +4,10 @@
 
 Actualización del 22 de septiembre de 2026. La [revisión vigente](docs/REVISION-2026-09-22.md)
 reúne las correcciones de parentesco, enseñanza útil, fabricación por dependencias,
-expresión genética inicial y búsqueda física de agua. El candidato declara reglas 7,
-protocolo 9 y SQLite 4. La suite integrada y la publicación se documentan en
+expresión genética inicial y búsqueda física de agua. La publicación `3dd615e` está
+activa con reglas 7, protocolo 9 y SQLite 4. El mundo nuevo avanza y conserva identidad
+y checkpoint tras reiniciar el servicio; el respaldo horario está habilitado.
+La suite integrada y la publicación se documentan en
 [EVIDENCIA](docs/EVIDENCIA.md#revisión-y-ejecución-2026-09-22); los estados de servicio
 y cifras de las secciones históricas siguientes pertenecen a sus fechas.
 

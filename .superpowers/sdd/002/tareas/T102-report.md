@@ -77,6 +77,9 @@ El resultado conjunto fue **939/939, cero fallos/omisiones**, 501.707 s, con CUD
 typecheck, build, 18/18 E2E y smoke verdes. T102 queda cerrado; T100 y Gate A0 siguen abiertos.
 La integración añade seis comparaciones físicas de 1200 ticks contra familia V8 y compara
 las diez tablas durables salvo snapshots. Véase `docs/REVISION-INTEGRACION-A0-2026-09-22.md`.
+La separación posterior de los tres cambios técnicos sobre V7 (`6c9e88c`) pasa
+923/923 tests sin omisiones, typecheck, build/smoke exactos y seis comparaciones adicionales
+contra `6ddadaf`, con el mismo alcance de estado y tablas.
 
 El control físico recarga con la misma conexión y no compara filas del archivo SQLite externo.
 La prueba de parámetros abre otra conexión; no se ensayó un reinicio completo del proceso del

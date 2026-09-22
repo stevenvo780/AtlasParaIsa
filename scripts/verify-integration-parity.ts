@@ -1,6 +1,6 @@
-/** Control conjunto: familia V8 frente a la integración de configuración y validadores.
+/** Control conjunto de configuración, Store y digesto sobre el mismo motor de referencia.
  * node --import tsx scripts/verify-integration-parity.ts BASELINE_DIRECTORY [ticks=1200]
- * El digesto completo incluye la configuración y permanece sin cambios. */
+ * El digesto completo sigue incluyendo la configuración; sus resultados deben diferir. */
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
@@ -51,7 +51,7 @@ function sourceHashes(root: string): Record<string, string> {
 const sources = { baseline: sourceHashes(baseline), candidate: sourceHashes(process.cwd()) };
 const changed = [...new Set([...Object.keys(sources.baseline), ...Object.keys(sources.candidate)])]
   .filter(key => sources.baseline[key] !== sources.candidate[key]).sort();
-assert.deepEqual(changed, ['server/store.ts', 'shared/param-syntax.ts', 'world/digesto.ts', 'world/params.ts'], 'sólo los cuatro módulos revisados pueden diferir de la familia V8');
+assert.deepEqual(changed, ['server/store.ts', 'shared/param-syntax.ts', 'world/digesto.ts', 'world/params.ts'], 'sólo los cuatro módulos revisados pueden diferir del motor de referencia');
 const directory = mkdtempSync(join(tmpdir(), 'atlas-integration-parity-')), results: object[] = [];
 const reserved = 'motor.hilos=8,motor.gpu=[1,0],motor.clonPorPaso=false,motor.soaTerreno=true,motor.particionarPersonas=true,motor.orden=adversarial,persistencia.paginasSucias=true,red.deltas=true,limites.comunidades=12';
 try {

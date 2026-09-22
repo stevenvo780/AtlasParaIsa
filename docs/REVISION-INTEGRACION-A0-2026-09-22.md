@@ -1,5 +1,20 @@
 # Integración técnica A0 y candidata familiar V8
 
+## Integración conservando V7
+
+Los tres cambios técnicos se separaron de la candidata familiar sobre `6ddadaf`.
+El commit **`6c9e88c`**, con reglas V7, pasó typecheck, **923/923 tests, cero omisiones**
+(454.125 s) y build/smoke del commit exacto en worktree. Seis trayectorias de 1200 ticks
+contra `6ddadaf` conservan el estado físico y las diez tablas durables comparadas.
+Evidencia: `a0-v7-tests.json`, `a0-v7-exact-gate.json` y `a0-v7-parity.json` en
+`evidencia-2026-09-22/`. Los 18 E2E siguientes pertenecen al candidato conjunto V8;
+no se atribuyen como una nueva ejecución sobre este commit V7.
+
+Esto permite integrar T102 y las dos correcciones técnicas manteniendo V8 separada.
+No se recompiló el árbol público: el servicio conserva el build `3dd615e`.
+
+## Gate de la candidata conjunta V8
+
 La fuente integrada pasó typecheck, **939/939 tests Node, cero fallos y cero omisiones**
 (501.707 s), build, **18/18 E2E** y smoke. Hash conjunto de los `.ts` de world/server/shared:
 `c23d9013dfb3b2bac57e86ec3c3ae480d571f2cce7a6f10106e36fa6e33768b9`.

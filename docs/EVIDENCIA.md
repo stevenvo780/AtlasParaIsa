@@ -1,5 +1,17 @@
 # Evidencia vigente
 
+## Parámetros y persistencia técnica, 22 de septiembre de 2026
+
+T102 queda cerrado: opciones tipadas y congeladas, todavía sin activar workers, GPU,
+deltas o nuevos límites. La validación de Store conserva las leyes persistidas en sus
+rutas de línea base/recuperación; el digesto calcula los mismos bytes por fragmentos,
+sin construir una string del mundo completo. [Cambios, controles y límites](REVISION-INTEGRACION-A0-2026-09-22.md).
+La combinación sobre V7 (`6c9e88c`) pasó **923/923 tests sin omisiones**, typecheck,
+build/smoke del commit exacto y seis controles de estado/archivo contra V7 anterior.
+El candidato conjunto V8 tiene otro gate: 939/939 y 18/18 E2E. Se mantiene separado;
+su resultado demográfico sigue siendo mixto. **T100 y Gate A0 permanecen abiertos**.
+El build público continúa en `3dd615e`; estos gates no constituyen otra publicación.
+
 ## Revisión y ejecución 2026-09-22
 
 La [revisión actual](REVISION-2026-09-22.md) registra controles de parentesco, agua

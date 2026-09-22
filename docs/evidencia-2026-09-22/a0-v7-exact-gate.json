@@ -1,0 +1,15 @@
+{
+  "repository": "/datos/workspaces/personal/AtlasParaIsa-a0-20260922",
+  "revision": "6c9e88c7f4e070b6ac7a32d23ea16ae9ba03a29b",
+  "helperSha256": "6e944c787553f36fed2841f190e4ef7936f9b024658e8d8e42833a1657382d46",
+  "dependencies": "/datos/workspaces/personal/AtlasParaIsa/node_modules",
+  "worktree": "/tmp/atlas-deploy-check.xpbsNr/worktree",
+  "startedAt": "2026-09-22T11:13:41Z",
+  "finishedAt": "2026-09-22T11:13:44.492Z",
+  "status": "passed",
+  "phase": "complete",
+  "exitCode": 0,
+  "buildExitCode": 0,
+  "smokeExitCode": 0,
+  "cleanup": true
+}

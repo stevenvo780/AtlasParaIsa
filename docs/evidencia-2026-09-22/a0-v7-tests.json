@@ -1,0 +1,13 @@
+{
+  "tests": 923,
+  "pass": 923,
+  "fail": 0,
+  "cancelled": 0,
+  "skipped": 0,
+  "todo": 0,
+  "durationMs": 454124.813788,
+  "logSha256": "8194431dab9c67f95e194d0b6c2f26e22dd5fb5a2ad3b8e2da8a7c4aff7747ef",
+  "testedCommit": "6c9e88c7f4e070b6ac7a32d23ea16ae9ba03a29b",
+  "scope": "V7 plus T102, Store baseline validation, streaming digest; no family V8",
+  "cuda": "/opt/cuda/lib64/libnvrtc.so"
+}

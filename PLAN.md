@@ -11,6 +11,12 @@ La suite integrada y la publicación se documentan en
 [EVIDENCIA](docs/EVIDENCIA.md#revisión-y-ejecución-2026-09-22); los estados de servicio
 y cifras de las secciones históricas siguientes pertenecen a sus fechas.
 
+T102 ya dispone de parámetros tipados e inactivos. Las correcciones técnicas de Store
+y digesto se verificaron sobre V7 con 923/923 tests, sin omisiones, y seis controles
+de paridad física/archivo. La candidata familiar V8 permanece separada. T100 sigue
+abierto: lectura semántica cerrada, migración V1, números exactos, snapshot segmentado
+y límites persistidos necesitan completar sus controles antes de cerrar A0.
+
 La comparación reservada fija 32 semillas, control y candidato, a 30 días simulados.
 Se ejecuta en copias inmutables con 24 procesos; no emplea el gobernador del servidor
 y sus tiempos concurrentes no acreditan rendimiento de producción. Una réplica sin

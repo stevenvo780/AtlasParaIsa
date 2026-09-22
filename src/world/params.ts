@@ -45,6 +45,11 @@ export interface WorldParams {
   red: { deltas: boolean };
   /** T100: admisión de colecciones; no son una política silenciosa de natalidad. */
   limites: { teselasActivas: number; chunks: number; comunidades: number; fauna: number; aplicacion: 'historicos' | 'parametros' };
+  /** Leyes sociales. `maxComunidades`: tope de FUNDACIÓN de comunidades (`society.ts`); es una regla
+   * de conducta, separada de la admisión `limites.comunidades` (revisión de T100, 2026-09-22): la
+   * máquina no decide conductas. Default 8 = la conducta de siempre; FR-002 pide retirarlo (sin tope)
+   * en la próxima versión de reglas, con su evidencia. */
+  social: { maxComunidades: number };
 }
 
 function deepFreeze<T>(value: T): T {
@@ -71,6 +76,7 @@ const RAW_DEFAULTS: WorldParams = {
   motor: { clonPorPaso: true, hilos: 1, soaTerreno: false, particionarPersonas: false, gpu: [], orden: 'natural' },
   red: { deltas: false },
   limites: { teselasActivas: 65536, chunks: 256, comunidades: 8, fauna: 393216, aplicacion: 'parametros' },
+  social: { maxComunidades: 8 },
 };
 
 /** Objeto congelado en profundidad: nunca se muta; `parseParams` clona para cada override. */
@@ -102,22 +108,6 @@ export function limitsOf(world: object, version?: number): Readonly<WorldLimits>
   return version !== undefined && version < PARAMETER_LIMITS_RULES_VERSION ? LEGACY_WORLD_LIMITS : effectiveLimits(paramsOf(world));
 }
 
-/**
- * Tope de FUNDACIÓN de comunidades (`society.ts`), el único lector de conducta de `limites`.
- * Comparte número con la admisión a propósito y con coste declarado: el digesto canónico
- * incluye los params efectivos, así que una clave propia cambiaría el digesto de TODO mundo
- * por defecto y rompería el control de T100 («solo se relajan validaciones, no se cambia
- * ninguna regla»). Medido el 2026-09-22 en este worktree: añadir una clave con el default de
- * hoy y SIN ningún lector mueve `digestoCanonico(createWorld(51926))` a 60 pasos de
- * `fa9c0523…` a `b2ccd87e…`. Consecuencia que el integrador debe conocer: subir
- * `limites.comunidades` para ADMITIR un mundo grande sube también el tope de fundación, o
- * sea que cambia conductas y hay que contrastarlo como cambio de reglas, no como admisión.
- * Retirar el tope (FR-002: «default sin tope») es Reglas 10 con su propia versión y su fila
- * de evidencia (`docs/T100-LIMITES-CONTRATO.md`); ese día esta función deja de leer `limites`.
- */
-export function foundingCommunityCap(world: object): number {
-  return limitsOf(world).comunidades;
-}
 
 /** Rango [mínimo, máximo] permitido por clave punteada. Usado por `parseParams`. */
 export const PARAM_RANGES: Record<string, [number, number]> = {
@@ -155,6 +145,7 @@ export const PARAM_RANGES: Record<string, [number, number]> = {
   'limites.chunks': [1, Number.MAX_SAFE_INTEGER],
   'limites.comunidades': [1, Number.MAX_SAFE_INTEGER],
   'limites.fauna': [1, Number.MAX_SAFE_INTEGER],
+  'social.maxComunidades': [1, Number.MAX_SAFE_INTEGER],
 };
 
 type ScalarDescriptor = { kind: 'number'; range: readonly [number, number]; integer?: boolean }
@@ -165,7 +156,7 @@ type ParamValue = number | boolean | string | (number | boolean | string)[];
 /** PARAM_RANGES conserva sus tuplas numéricas; cada hoja declara además su tipo. */
 export const PARAM_DESCRIPTORS: Readonly<Record<string, ParamDescriptor>> = deepFreeze({
   ...Object.fromEntries(Object.entries(PARAM_RANGES).map(([key, range]) => [key,
-    { kind: 'number', range, integer: key === 'motor.hilos' || key.startsWith('limites.') }])),
+    { kind: 'number', range, integer: key === 'motor.hilos' || key.startsWith('limites.') || key === 'social.maxComunidades' }])),
   'motor.clonPorPaso': { kind: 'boolean' },
   'motor.soaTerreno': { kind: 'boolean' },
   'motor.particionarPersonas': { kind: 'boolean' },

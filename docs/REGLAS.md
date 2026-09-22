@@ -363,6 +363,7 @@ claves desconocidas y elementos duplicados en las listas se rechazan.
 | `gobernador.politica` | `techo` | `apagar` (gobernador de 2026-09-19) o `techo` (2026-09-22: el hardware limita el crecimiento, no el reemplazo) |
 | `limites.teselasActivas`, `limites.chunks` | `65536`, `256` | enteros de 1 a `Number.MAX_SAFE_INTEGER` |
 | `limites.comunidades`, `limites.fauna` | `8`, `393216` | enteros de 1 a `Number.MAX_SAFE_INTEGER` |
+| `social.maxComunidades` | `8` | entero de 1 a `Number.MAX_SAFE_INTEGER`; tope de FUNDACIÓN de comunidades (conducta), separado de la admisión `limites.comunidades` (2026-09-22) |
 
 ### Gobernador: política `techo` (2026-09-22)
 

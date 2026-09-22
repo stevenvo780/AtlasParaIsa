@@ -9,7 +9,8 @@ import { LEGACY_WORLD_LIMITS, limitsOf } from './params.js';
 export const MAX_ACTIVE_ANIMALS = 8192;
 export const MAX_ANIMALS_PER_TILE = 6;
 // Historical ceiling, kept only for legacy admission defaults and reporting: the live
-// breeding ceiling is `limitsOf(world).fauna`, resolved per world, never this constant.
+// admission ceiling is `limitsOf(world).fauna` (throws in `stepAnimals`); breeding capacity is
+// the natural one, never a limit: the machine does not decide conduct.
 export const MAX_STORED_ANIMALS = LEGACY_WORLD_LIMITS.fauna;
 export const MAX_ANIMAL_MEMORY = 12;
 export const MAX_ANIMAL_DECISIONS_PER_TICK = 1024;
@@ -257,7 +258,9 @@ function reproduce(world: AnimalWorld, state: LocalState, active: Animal[], emit
     const neighbors = [[0, 0], [0, -1], [-1, 0], [1, 0], [0, 1]].flatMap(([dx, dy]) => state.occupants.get(`${a.x + dx},${a.y + dy}`) ?? []);
     const b = neighbors.filter(b => b.id !== a.id && b.species === a.species && eligible(b)).sort(canonical)[0];
     if (!b) continue;
-    capacity ??= Math.min(limitsOf(world).fauna, world.tiles.filter(t => t.terrain !== 'shelter' && (t.growth ?? 0) > 0.04).length * 3);
+    // Capacidad de cría = capacidad NATURAL del terreno. `limites.fauna` es admisión (lanza en
+    // `stepAnimals`), nunca una política silenciosa: la máquina no decide cuántos animales nacen.
+    capacity ??= world.tiles.filter(t => t.terrain !== 'shelter' && (t.growth ?? 0) > 0.04).length * 3;
     if (world.animals.length >= capacity) break;
     const parents = [a.id, b.id].sort(), id = `animal-born-${world.seed >>> 0}-${world.tick}-${++world.animalCounter}`;
     const inherited = Object.fromEntries(Object.keys(a.genes).map(name => {

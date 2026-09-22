@@ -189,9 +189,10 @@ function grazed(world: AnimalWorld, ticks = 2000): number {
   return peak;
 }
 
-test('T100: la capacidad de cría animal deriva del límite efectivo', () => {
+test('T100: la capacidad de cría animal es la natural; `limites.fauna` sólo admite o lanza, nunca recorta en silencio', () => {
   assert.equal(grazed(herd()), 6);
-  assert.equal(grazed(herd(5)), 5);
+  assert.equal(grazed(herd(6)), 6, 'un límite igual a la capacidad natural admite sin cambiar la cría');
+  assert.throws(() => grazed(herd(5)), /fauna excedida/, 'por debajo de lo natural la admisión falla cerrado en vez de recortar la cría');
 });
 
 /** Trío conviviente y compatible: sólo el tope de fundación puede impedir la comunidad. */
@@ -225,9 +226,12 @@ test('T100: con el default de hoy la fundación se detiene en ocho comunidades',
   assert.equal(open.people.every(person => !!person.communityId), true);
 });
 
-test('T100: elevar limites.comunidades cambia la conducta de fundación', () => {
-  const world = filled(foundingWorld('limites.comunidades=9'), 8);
+test('T100: elevar social.maxComunidades cambia la conducta de fundación; elevar limites.comunidades (admisión) no', () => {
+  const world = filled(foundingWorld('social.maxComunidades=9'), 8);
   updateCommunities(world, emit);
   assert.equal(world.people.every(person => !!person.communityId), true);
   assert.equal(world.communities.length, 1);
+  const admitted = filled(foundingWorld('limites.comunidades=9'), 8);
+  updateCommunities(admitted, emit);
+  assert.deepEqual(admitted.people.map(person => person.communityId), [null, null, null], 'la admisión no es una ley de fundación');
 });

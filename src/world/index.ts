@@ -256,14 +256,15 @@ export function ecology(world: World): void {
 interface Candidate { action: Action; target: Point; score: number; reason: string; memory?: Memory; directed?: boolean; }
 /** Ley DIV (`conducta.aptitud`): qué rasgo heredable hace a alguien apto para
  * cada OFICIO. Sigue las afinidades que la elección ya usaba (explorar e investigar con
- * `curiosity`, recolectar/cultivar con `industriousness`, provisión familiar con `care`); la caza,
- * el esfuerzo físico más caro, va con `resilience` y cooperar con `sociability`, para que cada uno
- * de los cinco rasgos tenga al menos un oficio. Comer, beber, descansar y los actos de vínculo
- * (acercarse, acompañar, retirarse) no son oficios: la ley no los toca. */
+ * `curiosity`, recolectar/cultivar con `industriousness`, compartir con `care`); la caza, el
+ * esfuerzo físico más caro, va con `resilience` y cooperar con `sociability`, para que cada uno de
+ * los cinco rasgos tenga al menos un oficio. Comer, beber, descansar, los actos de vínculo
+ * (acercarse, acompañar, retirarse) y la provisión para una crianza (`forage`, que sólo nace de
+ * `familyOpportunity`) no son oficios: la ley no los toca. */
 const RASGO_DEL_OFICIO: Partial<Record<Action, keyof NonNullable<PersonView['traits']>>> = {
   explore: 'curiosity', research: 'curiosity', invent: 'curiosity',
   gather: 'industriousness', farm: 'industriousness', build: 'industriousness', repair: 'industriousness', craft: 'industriousness',
-  hunt: 'resilience', forage: 'care', share: 'care', cooperate: 'sociability',
+  hunt: 'resilience', share: 'care', cooperate: 'sociability',
 };
 /** Ventaja comparativa de `traits` en `action` (ley DIV): el rasgo del oficio menos la media de los
  * cinco rasgos de la MISMA persona. Suma cero sobre los cinco rasgos: quien es bueno en todo no
@@ -384,11 +385,13 @@ function choose(world: World, person: Person): void {
   const nearbyPeople = world.people.filter(other => other.id !== person.id && distance(person, other) <= RADIUS);
   const partner = nearbyPeople.find(other => person.role !== 'neighbor' && other.role !== 'neighbor');
   const candidates: Candidate[] = [{ action: 'explore', target: person.target, score: 0.33 + person.curiosity * 0.18, reason: 'Tiene energía y curiosidad por lo que hay cerca.' }];
-  // Ley DIV (`conducta.aptitud`): la ventaja comparativa entra en el apetito de explorar AQUÍ, antes
-  // de que la sed, el hambre o la lluvia conviertan este candidato en una búsqueda corporal con
-  // `Math.max`: así la aptitud ordena el ocio, pero nunca frena la búsqueda de agua, comida o techo
-  // (medido: aplicada después, la semilla 7 perdía 2 personas por sed y 1 por intemperie en 2 días).
-  const aptitud = paramsOf(world).conducta.aptitud;
+  // Ley DIV (`conducta.aptitud`): la especialización es para quien no tiene urgencias. Sólo actúa
+  // en el contexto `ready` de `valueKey` (sed, hambre y cansancio ≤ 0,5); por encima, beber, comer
+  // y descansar compiten exactamente como hoy (medido: sin esta guarda, con aptitud=2 un oficio
+  // aplazaba la bebida y la semilla 42 perdía 4 personas por sed en 2 días; la base, 1). Y entra en
+  // el apetito de explorar AQUÍ, antes de que la lluvia lo convierta en una búsqueda de techo con
+  // `Math.max`: ordena el ocio, nunca frena una búsqueda corporal.
+  const aptitud = person.thirst <= 0.5 && person.hunger <= 0.5 && person.fatigue <= 0.5 ? paramsOf(world).conducta.aptitud : 0;
   if (aptitud > 0) candidates[0]!.score += aptitud * ventajaComparativa(person.traits, 'explore');
   const home = settlementOpportunity(world,person);
   if (home) candidates.push({action:'approach',...home});
@@ -701,10 +704,11 @@ function choose(world: World, person: Person): void {
   // los vectores de conducta se parecen más (SC-003 se queda en 0,3–0,5). Aquí cada OFICIO vale
   // más para quien tiene su rasgo por encima de la media de SUS cinco rasgos y menos para quien lo
   // tiene por debajo (`ventajaComparativa`): sólo reparte la atención de cada persona entre
-  // oficios —comer, beber, descansar y los actos de vínculo no se tocan—, no crea recursos ni
-  // revela nada lejano. Explorar ya la recibió al nacer el candidato (arriba). Los demás oficios
-  // no llevan búsquedas corporales con `Math.max`: su alivio corporal es un sumando, y la ley
-  // también. Con el default 0 no se suma nada y el orden es el de siempre.
+  // oficios —comer, beber, descansar, los actos de vínculo y la provisión para una crianza no se
+  // tocan—, no crea recursos ni revela nada lejano, y sólo sin urgencias corporales (arriba).
+  // Explorar ya la recibió al nacer el candidato; los demás oficios no llevan búsquedas con
+  // `Math.max`: su alivio corporal es un sumando, y la ley también. Con el default 0 no se suma
+  // nada y el orden es el de siempre.
   if (aptitud > 0) {
     for (const candidate of candidates) {
       if (candidate === candidates[0] || !RASGO_DEL_OFICIO[candidate.action]) continue;

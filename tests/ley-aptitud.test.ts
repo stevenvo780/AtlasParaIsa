@@ -61,9 +61,13 @@ test('(ii) ventajaComparativa: rasgo del oficio menos la media propia, suma cero
   const traits = { curiosity: 0.9, sociability: 0.1, industriousness: 0.5, care: 0.5, resilience: 0.5 };
   for (const action of ['explore', 'research', 'invent'] as const) assert.ok(Math.abs(ventajaComparativa(traits, action) - 0.4) < 1e-12, action);
   assert.ok(Math.abs(ventajaComparativa(traits, 'cooperate') + 0.4) < 1e-12);
-  for (const action of ['gather', 'farm', 'build', 'repair', 'craft', 'share', 'forage', 'hunt'] as const) assert.ok(Math.abs(ventajaComparativa(traits, action)) < 1e-12, action);
-  // Comer, beber, descansar y los actos de vínculo no son oficios: la ley no los toca nunca.
-  for (const action of ['eat', 'drink', 'rest', 'approach', 'accompany', 'retreat'] as const) assert.equal(ventajaComparativa(traits, action), 0, action);
+  for (const action of ['gather', 'farm', 'build', 'repair', 'craft', 'share', 'hunt'] as const) assert.ok(Math.abs(ventajaComparativa(traits, action)) < 1e-12, action);
+  // Comer, beber, descansar, los actos de vínculo y la provisión para una crianza no son oficios:
+  // la ley no los toca nunca, ni siquiera con rasgos muy desiguales.
+  for (const action of ['eat', 'drink', 'rest', 'approach', 'accompany', 'retreat', 'forage'] as const) {
+    assert.equal(ventajaComparativa(traits, action), 0, action);
+    assert.equal(ventajaComparativa({ curiosity: 0.05, sociability: 0.95, industriousness: 0.05, care: 0.95, resilience: 0.95 }, action), 0, action);
+  }
   // Suma cero sobre los cinco rasgos: ser bueno en todo no da ventaja; sólo ordena los oficios.
   const desigual = { curiosity: 0.93, sociability: 0.27, industriousness: 0.61, care: 0.12, resilience: 0.78 };
   const suma = Object.values(OFICIO_DE).reduce((total, action) => total + ventajaComparativa(desigual, action), 0);

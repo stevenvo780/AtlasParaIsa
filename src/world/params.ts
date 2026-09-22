@@ -64,8 +64,9 @@ export interface WorldParams {
    * de hoy paso a paso, y sólo un laboratorio que las mueva mide otra cosa.
    */
   conducta: { habituacion: number;
-    /** Ventaja comparativa heredable (DIV, 2026-09-22), `index.ts` → `choose`: cada OFICIO suma
-     * `aptitud · (rasgo del oficio − media de los cinco rasgos de la persona)`. 0 = hoy. */
+    /** Ventaja comparativa heredable (DIV, 2026-09-22), `index.ts` → `choose`: sin urgencias
+     * corporales (sed, hambre y cansancio ≤ 0,5), cada OFICIO suma `aptitud · (rasgo del oficio −
+     * media de los cinco rasgos de la persona)`. 0 = hoy. */
     aptitud: number };
   /** `social.maxComunidades`: tope de FUNDACIÓN de comunidades (`society.ts`), regla de conducta separada
    * de la admisión `limites.comunidades` (revisión de T100, 2026-09-22). */

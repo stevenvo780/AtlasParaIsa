@@ -90,7 +90,7 @@ test('(i) con los defaults las leyes candidatas no mueven el mundo: el digesto f
   assert.equal(digestoCanonico(world), DIGESTO_LEYES_1200,
     'el digesto completo sí cambia, y sólo por declarar configuración nueva (T102)');
   assert.notEqual(DIGESTO_LEYES_1200, DIGESTO_MAIN_1200);
-  assert.deepEqual(DEFAULT_PARAMS.conducta, { habituacion: 0 });
+  assert.deepEqual(DEFAULT_PARAMS.conducta, { habituacion: 0, aptitud: 0 });
   assert.deepEqual(DEFAULT_PARAMS.social, { disputaNecesidad: 0.65, disputaEscasez: 1, disputaRadio: 2, disputaDestino: 0.5,
     disputaEspera: 180, ensenanzaRareza: 0, confianzaSalida: 0.35, distanciaAlternativa: 0.2 }, 'cada default es la constante que había en el código');
   assert.deepEqual(DEFAULT_PARAMS.poblacion, { maxima: 1_000_000, intervaloComprobacionTicks: 120, nacimientosPorComprobacion: 2,

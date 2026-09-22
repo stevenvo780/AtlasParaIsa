@@ -18,7 +18,7 @@ import { DEFAULT_PARAMS, PARAM_RANGES, paramsOf, parseParams, setParams, type Wo
  * `docs/ANALISIS-DINAMICAS-2026-09-21.md` mide tres cierres del mundo vigente: la elección
  * de acción se traba en cooperar (97 % de la cooperación es enseñanza), las disputas por
  * recursos no ocurren jamás (conflictos y turnos = 0) y la pertenencia a una comunidad se
- * decide el día 1 y no vuelve a revisarse. Las siete claves nuevas abren esos cerrojos sin
+ * decide el día 1 y no vuelve a revisarse. Las nueve claves nuevas abren esos cerrojos sin
  * decidir por ellos: sus defaults son las constantes que hoy están escritas en el código.
  *
  * Las cifras literales de este fichero se midieron con un script equivalente a `replica()`
@@ -38,7 +38,7 @@ function replica(t: { after(callback: () => void): void }, pasos: number, params
 }
 
 /**
- * Digesto del mismo mundo medido con la FORMA de params de `main` (sin las siete claves
+ * Digesto del mismo mundo medido con la FORMA de params de `main` (sin las nueve claves
  * nuevas). `digestoCanonico` hashea `{world, params}` (T101/T102, docs/REGLAS.md: «añadir
  * configuración cambia su hash aunque el estado físico sea igual»), así que declarar las
  * leyes candidatas mueve el hash completo aunque ninguna actúe. Quitarlas del objeto de
@@ -57,9 +57,9 @@ function digestoConParamsDeMain(world: World): string {
 // Store temporal, sin guardados periódicos): 1200 pasos → b194b09…, 2400 → ee6fb78….
 const DIGESTO_MAIN_1200 = 'b194b096c0dd4c555ca9ebf4e560bb293809b97947109f116833cf79ebbf60cf';
 const DIGESTO_MAIN_2400 = 'ee6fb78c55d2a43effebe696314ca5f5eecefbc1b8b03150f61bb381ab1779e8';
-// Los mismos mundos con las siete claves ya declaradas: sólo cambia el hash, no el estado.
-const DIGESTO_LEYES_1200 = 'bd121f4f39ee7bdfe3c8e33a4d3890a557501ae28a0e62477c572d5bf6ec888c';
-const DIGESTO_LEYES_2400 = '17336c1b8f06771edff2eae332b011750d26b8bc4a939265ffb3e8c0d20669d9';
+// Los mismos mundos con las nueve claves ya declaradas: sólo cambia el hash, no el estado.
+const DIGESTO_LEYES_1200 = 'd3e6371531e152937922a3a8ae8f24ab36e8b1e521ab3058fbb3d17fb637b590';
+const DIGESTO_LEYES_2400 = '1ab52318601c6d87eea404c1b91dcf61eb705118eb6e60621d584967c1ec056c';
 
 test('(i) con los defaults las leyes candidatas no mueven el mundo: el digesto físico es el de main', { timeout: 300000 }, t => {
   const world = replica(t, 1200);
@@ -69,8 +69,8 @@ test('(i) con los defaults las leyes candidatas no mueven el mundo: el digesto f
     'el digesto completo sí cambia, y sólo por declarar configuración nueva (T102)');
   assert.notEqual(DIGESTO_LEYES_1200, DIGESTO_MAIN_1200);
   assert.deepEqual(DEFAULT_PARAMS.conducta, { habituacion: 0 });
-  assert.deepEqual(DEFAULT_PARAMS.social, { disputaNecesidad: 0.65, disputaEscasez: 1, disputaRadio: 2,
-    ensenanzaRareza: 0, confianzaSalida: 0.35, distanciaAlternativa: 0.2 }, 'cada default es la constante que había en el código');
+  assert.deepEqual(DEFAULT_PARAMS.social, { disputaNecesidad: 0.65, disputaEscasez: 1, disputaRadio: 2, disputaDestino: 0.5,
+    disputaEspera: 180, ensenanzaRareza: 0, confianzaSalida: 0.35, distanciaAlternativa: 0.2 }, 'cada default es la constante que había en el código');
 });
 
 test('(ii) conducta.habituacion=0.35 cambia el mundo y no reduce la diversidad de conducta', { timeout: 600000 }, t => {
@@ -89,12 +89,31 @@ test('(ii) conducta.habituacion=0.35 cambia el mundo y no reduce la diversidad d
 });
 
 test('(iii) abrir el umbral de disputa produce disputas donde antes había cero', { timeout: 600000 }, t => {
-  const world = replica(t, 2400, 'social.disputaNecesidad=0.45,social.disputaEscasez=3,social.disputaRadio=3');
-  const turnos = world.events.filter(event => event.text.includes('acordaron turnarse')).length;
-  const conflictos = world.totals.conflicts ?? 0;
+  const { conflictos, turnos } = disputas(replica(t, 2400, 'social.disputaNecesidad=0.45,social.disputaEscasez=3,social.disputaRadio=3'));
   // Medido: 1 conflicto y 0 turnos en 2400 pasos, frente a 0 y 0 con los defaults. La
   // cooperación sube de 58 a 63 (la disputa también consume el intento de quien cede).
   assert.ok(conflictos + turnos > 0, `sigue en cero: conflictos=${conflictos}, turnos=${turnos}`);
+});
+
+/** Conflictos contados + turnos acordados en la crónica del mundo. */
+function disputas(world: World): { conflictos: number; turnos: number; cooperaciones: number } {
+  return { conflictos: world.totals.conflicts ?? 0, cooperaciones: world.totals.cooperation ?? 0,
+    turnos: world.events.filter(event => event.text.includes('acordaron turnarse')).length };
+}
+
+test('(vii) abrir también la coincidencia de destino y la espera sigue produciendo más disputas que los defaults', { timeout: 900000 }, t => {
+  const defecto = disputas(replica(t, 2400));
+  const abierto = disputas(replica(t, 2400,
+    'social.disputaNecesidad=0.45,social.disputaEscasez=3,social.disputaRadio=3,social.disputaDestino=1.5,social.disputaEspera=60'));
+  assert.deepEqual(defecto, { conflictos: 0, turnos: 0, cooperaciones: 58 }, 'con los defaults la disputa sigue sin ocurrir jamás');
+  assert.ok(abierto.conflictos + abierto.turnos > defecto.conflictos + defecto.turnos,
+    `abierto=${JSON.stringify(abierto)} no supera a defecto=${JSON.stringify(defecto)}`);
+  // Medido: 1 conflicto, 0 turnos y 63 cooperaciones, EXACTAMENTE lo mismo que con
+  // `disputaNecesidad/Escasez/Radio` solos (test iii) — y con el mismo estado físico
+  // (digesto sin params `5dc8528c…` en los dos). En esta trayectoria la coincidencia de
+  // destino y la espera de 180 ticks no eran el cerrojo: la única disputa que ocurre ya
+  // cumplía < 0,5 y ≥ 180, y aflojarlas a 1,5 y 60 no abre ninguna más.
+  assert.deepEqual(abierto, { conflictos: 1, turnos: 0, cooperaciones: 63 });
 });
 
 const edge: TechnologyProgram = { inputs: [{ source: 'raw', material: 'stone', mass: 1000 }],
@@ -144,11 +163,12 @@ test('(iv) social.ensenanzaRareza ordena por difusión cuando el gain empata', t
     'con 0,5 la receta que sólo recuerda el maestro adelanta a la que ya conocen 15 de 16');
 });
 
-test('(v) parseParams acota las siete claves nuevas y rechaza lo que cae fuera de rango', () => {
+test('(v) parseParams acota las nueve claves nuevas y rechaza lo que cae fuera de rango', () => {
   const claves = ['conducta.habituacion', 'social.disputaNecesidad', 'social.disputaEscasez',
-    'social.disputaRadio', 'social.ensenanzaRareza', 'social.confianzaSalida', 'social.distanciaAlternativa'] as const;
+    'social.disputaRadio', 'social.disputaDestino', 'social.disputaEspera',
+    'social.ensenanzaRareza', 'social.confianzaSalida', 'social.distanciaAlternativa'] as const;
   assert.deepEqual(claves.map(clave => PARAM_RANGES[clave]),
-    [[0, 2], [0.1, 1], [0.1, 20], [1, 8], [0, 5], [0, 1], [0, 1]]);
+    [[0, 2], [0.1, 1], [0.1, 20], [1, 8], [0.1, 8], [1, 10000], [0, 5], [0, 1], [0, 1]]);
   for (const clave of claves) {
     const [min, max] = PARAM_RANGES[clave]!;
     assert.throws(() => parseParams(`${clave}=${min - 0.05}`), /rango/i, `${clave} por debajo del mínimo`);
@@ -158,6 +178,10 @@ test('(v) parseParams acota las siete claves nuevas y rechaza lo que cae fuera d
     assert.equal(valor(parseParams(`${clave}=${min}`), clave), min, `${clave} en su mínimo`);
     assert.equal(valor(parseParams(`${clave}=${max}`), clave), max, `${clave} en su máximo`);
   }
+  // La espera se compara con `world.tick`: es entera, y un decimal se rechaza al parsear.
+  assert.throws(() => parseParams('social.disputaEspera=1.5'), /entero/i);
+  assert.equal(parseParams('social.disputaEspera=60').social.disputaEspera, 60);
+  assert.equal(parseParams('social.disputaDestino=1.5').social.disputaDestino, 1.5);
   assert.throws(() => parseParams('conducta.inexistente=1'), /desconocid/i);
   assert.throws(() => parseParams('social.disputa=1'), /desconocid/i);
   assert.equal(parseParams('social.disputaRadio=8,conducta.habituacion=2').social.disputaRadio, 8);

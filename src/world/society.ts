@@ -322,13 +322,15 @@ export function resourceDispute(world: World, person: Person, emit: Emit): boole
   // `social.disputaRadio`: las tres condiciones tienen que darse A LA VEZ (necesidad
   // urgente, fuente casi agotada y otra persona con el mismo destino al lado), y con los
   // números de hoy no coinciden nunca — cero disputas y cero turnos en toda la medición.
-  // `disputaEscasez` multiplica los tres umbrales de stock (comida, agua, fauna) a la vez.
-  const { disputaNecesidad, disputaEscasez, disputaRadio } = paramsOf(world).social;
-  if (!world.cooperationEnabled || !person.communityId || world.tick - person.lastDispute < 180 || Math.max(person.hunger, person.thirst) < disputaNecesidad) return false;
+  // `disputaEscasez` multiplica los tres umbrales de stock (comida, agua, fauna) a la vez;
+  // `disputaDestino` es cuánto tienen que coincidir los dos destinos y `disputaEspera` los
+  // ticks de calma que guarda cada lado tras disputar.
+  const { disputaNecesidad, disputaEscasez, disputaRadio, disputaDestino, disputaEspera } = paramsOf(world).social;
+  if (!world.cooperationEnabled || !person.communityId || world.tick - person.lastDispute < disputaEspera || Math.max(person.hunger, person.thirst) < disputaNecesidad) return false;
   const source = tileAt(world, person.target);
   const stock = person.action === 'drink' ? waterAvailable(world,person.target) : person.action === 'hunt' ? source?.fauna ?? 0 : source?.food ?? 0;
   if (!source || !['eat','drink','hunt'].includes(person.action) || stock <= 0 || stock > disputaEscasez * (person.action === 'drink' ? 0.12 : person.action === 'hunt' ? 1 : 0.06)) return false;
-  const other = world.people.find(p => p !== person && p.communityId && p.action === person.action && distance(person, p) <= disputaRadio && distance(person.target, p.target) < 0.5 && Math.max(p.hunger, p.thirst) > disputaNecesidad && world.tick - p.lastDispute >= 180);
+  const other = world.people.find(p => p !== person && p.communityId && p.action === person.action && distance(person, p) <= disputaRadio && distance(person.target, p.target) < disputaDestino && Math.max(p.hunger, p.thirst) > disputaNecesidad && world.tick - p.lastDispute >= disputaEspera);
   if (!other) return false;
   const trust = person.bonds[other.id] ?? 0.2;
   if (trust >= 0.55 || (person.culture.openness + other.culture.openness) / 2 >= 0.65) {

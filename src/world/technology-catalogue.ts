@@ -3,6 +3,11 @@ import type { Capability, TechnologyCatalogueTotals, TechnologyRecipe, Technolog
 export interface TechnologyCatalogueReader {
   resolve(id: string, atTick: number): TechnologyRecipe | null;
   findBySignature(signature: string, atTick: number): TechnologyRecipe | null;
+  /** `true` sólo si `resolve` devuelve SIEMPRE un objeto nuevo, plano y sin partes compartidas con
+   * nada que el anfitrión conserve (el Store: cada lectura es una copia). Entonces la resolución no
+   * necesita su propio `structuredClone` defensivo (sprint noche-perf 2026-09-22). Sin la marca, se
+   * clona como siempre. */
+  readonly freshCopies?: boolean;
 }
 export interface TechnologyCatalogueHost { technology: TechnologyState; tick: number; }
 export const MAX_PENDING_TECHNOLOGY_RECIPES = 65_536;
@@ -83,19 +88,25 @@ function checkedRecipe(host: TechnologyCatalogueHost, recipe: TechnologyRecipe, 
 }
 function cacheRecipe(state: TechnologyState, recipe: TechnologyRecipe): void {
   // Replacing the array avoids extending an array currently being validated/iterated.
-  state.recipes = [...state.recipes.filter(current => current.id !== recipe.id), recipe].slice(-state.budgets.maxRecipes);
+  // Sprint noche-perf 2026-09-22: una sola pasada en vez de filter + spread + slice (tres arreglos por
+  // resolución); mismo contenido, mismo orden y, como antes, siempre un arreglo nuevo.
+  const current = state.recipes, max = state.budgets.maxRecipes, next: TechnologyRecipe[] = [];
+  current.forEach(cached => { if (cached.id !== recipe.id) next.push(cached); });
+  next.push(recipe);
+  state.recipes = next.length > max ? next.slice(-max) : next;
 }
 export function resolveTechnologyRecipe(host: TechnologyCatalogueHost, id: string,
   options: { cache?: boolean } = {}): TechnologyRecipe | undefined {
   const state = host.technology;
   if (!catalogueEnabled(state)) return state.recipes.find(recipe => recipe.id === id);
-  if (serial(id) < 1 || serial(id) > state.recipeCounter) return undefined;
+  const number = serial(id);
+  if (number < 1 || number > state.recipeCounter) return undefined;
   let recipe = state.catalogue!.pending.find(recipe => recipe.id === id) ?? state.recipes.find(recipe => recipe.id === id);
   if (!recipe) {
     const reader = readers.get(state); if (!reader) fail('an archived reference requires its host reader');
     const archived = reader.resolve(id, host.tick);
     if (!archived) return undefined;
-    recipe = structuredClone(checkedRecipe(host, archived, id));
+    recipe = reader.freshCopies === true ? checkedRecipe(host, archived, id) : structuredClone(checkedRecipe(host, archived, id));
   }
   checkedRecipe(host, recipe, id);
   if (options.cache !== false) cacheRecipe(state, recipe);

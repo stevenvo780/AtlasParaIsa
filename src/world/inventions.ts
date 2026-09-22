@@ -352,7 +352,11 @@ function observeUse(world: World, structure: StructureView, benefit: number): vo
   const blueprint = world.blueprints.find(b => b.id === structure.blueprintId);
   if (blueprint) { blueprint.uses++; blueprint.usefulness = clamp(blueprint.usefulness + (clamp(benefit) - blueprint.usefulness) * 0.04); }
 }
-const functionalNear = (world: World, point: Point, radius = 1.5) => world.structures.filter(s => s.condition > BROKEN_CONDITION && tileAt(world, s)?.terrain === 'shelter' && distance(s, point) <= radius);
+// Sprint noche-perf 2026-09-22: se descarta primero lo que está a más de `radius + 1` en algún eje (entonces
+// `Math.hypot` supera `radius` sin duda de redondeo) y el filtro completo, puro, decide igual que antes sobre
+// el resto; el orden de `world.structures` se conserva. Evita un `tileAt` por estructura en cada consulta.
+const functionalNear = (world: World, point: Point, radius = 1.5) => world.structures.filter(s => Math.abs(s.x - point.x) <= radius + 1
+  && Math.abs(s.y - point.y) <= radius + 1 && s.condition > BROKEN_CONDITION && tileAt(world, s)?.terrain === 'shelter' && distance(s, point) <= radius);
 export function foodAvailable(world: World, person: Point): number { return functionalNear(world, person).reduce((sum, s) => sum + (blueprintAffordances(s.components).foodCapacity ? s.food : 0), 0); }
 /** Returns food removed, never also credits inventory. The consumer owns the sole matching credit. */
 export function takeFood(world: World, person: Point, requested: number): number {

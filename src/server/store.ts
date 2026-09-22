@@ -52,6 +52,14 @@ export interface LoadedSnapshot {
  * una vez cada diez guardados —y siempre en el primero de cada proceso— en lugar de
  * en todos. Ver `save()` para la ventana descubierta y su compensación. */
 export const DEEP_VALIDATION_EVERY_SAVES = 10;
+/** Tope de recetas en la memoria de lecturas archivadas (`archivedRecipeMemo`); al llenarse se vacía. */
+const ARCHIVED_RECIPE_MEMO_LIMIT = 65_536;
+interface ArchivedRecipeMemo {
+  epoch: string;
+  /** Tick de la fila archivada más reciente bajo este sello; `undefined` hasta el primer reuso. */
+  horizon: number | undefined;
+  recipes: Map<string, { atTick: number; value: TechnologyRecipe | null }>;
+}
 /**
  * ¿Toca la revisión completa (`assertWorld`) en este guardado? Cada `DEEP_VALIDATION_EVERY_SAVES`
  * guardados y siempre en el primero del proceso, SALVO que el proceso acabe de cargar el mundo:
@@ -167,6 +175,9 @@ export class Store {
   readonly db: DatabaseSync;
   readonly technologyArchive: TechnologyArchive;
   readonly catalogueReader: TechnologyCatalogueReader = {
+    // `readTechnologyRecipe` devuelve siempre un objeto recién construido (lectura decodificada o copia
+    // de una memoria que nunca se entrega): la resolución del mundo no necesita clonarlo otra vez.
+    freshCopies: true,
     resolve: (id, atTick) => this.readTechnologyRecipe(id, atTick),
     findBySignature: (signature, atTick) => {
       if (this.schemaVersion < 4) return null;
@@ -267,8 +278,15 @@ export class Store {
     if (this.schemaVersion < 4) return null;
     const reads = typeof atTick === 'number' && typeof id === 'string' ? this.technologyReads : null, key = `${atTick}:${id}`;
     if (reads?.recipes.has(key)) return copyArchivedRecipe(reads.recipes.get(key)!);
+    const memo = this.technologyReads === null ? this.archivedRecipeMemo(id, atTick) : null;
+    const remembered = memo?.recipes.get(id);
+    if (memo && remembered) {
+      // Válida si la lectura recordada y ésta miran ambas desde la fila más reciente o después.
+      memo.horizon ??= this.technologyArchive.latestTick();
+      if (remembered.atTick >= memo.horizon && atTick >= memo.horizon) return remembered.value && copyArchivedRecipe(remembered.value);
+    }
     const definition = this.technologyArchive.getDefinition(id, atTick);
-    if (!definition) return null;
+    if (!definition) { memo?.recipes.set(id, { atTick, value: null }); return null; }
     const stats = this.technologyArchive.getStats(id, atTick);
     if (!stats) technologyFailure('definition has no statistics at the requested tick');
     const { lawsVersion: _lawsVersion, ...recipe } = definition;
@@ -277,7 +295,30 @@ export class Store {
       if (reads.recipes.size >= reads.limit) reads.recipes.delete(reads.recipes.keys().next().value!);
       reads.recipes.set(key, copyArchivedRecipe(value));
     }
+    memo?.recipes.set(id, { atTick, value: copyArchivedRecipe(value) });
     return value;
+  }
+  /** Memoria de recetas archivadas durante la simulación (sprint noche-perf 2026-09-22). La ventana
+   * residente del mundo (`budgets.maxRecipes` = 256) es menor que las recetas que recuerdan los vivos
+   * (1 066 distintas a día 6 en la semilla 51926 con las leyes candidatas), así que casi toda
+   * resolución volvía a SQLite: 82 lecturas verificadas por paso, un cuarto del paso. Una lectura
+   * «a fecha de» `atTick` sólo puede cambiar si cambia la base —lo delata el sello del archivo, que
+   * cualquier escritura propia o ajena mueve— o si hay filas posteriores a `atTick`; por eso sólo se
+   * reutiliza con el sello intacto, fuera de toda transacción y cuando la lectura recordada y la nueva
+   * miran ambas desde la fila más reciente (`horizon`, que se consulta sólo al primer reuso de cada
+   * sello: con un guardado por paso casi nunca se llega a pedir). Cada receta se lee y verifica
+   * entera la primera vez; después se devuelve una copia de ese mismo valor, como hace la memoria de
+   * validación de arriba. Nada de esto entra en el mundo ni en el disco. */
+  private archivedRecipes: ArchivedRecipeMemo | null = null;
+  private archivedRecipeMemo(id: unknown, atTick: unknown): ArchivedRecipeMemo | null {
+    if (typeof id !== 'string' || typeof atTick !== 'number' || !Number.isSafeInteger(atTick)) return null;
+    const epoch = this.technologyArchive.readEpoch();
+    if (epoch === null) { this.archivedRecipes = null; return null; }
+    let memo = this.archivedRecipes;
+    if (!memo || memo.epoch !== epoch || memo.recipes.size >= ARCHIVED_RECIPE_MEMO_LIMIT) {
+      memo = this.archivedRecipes = { epoch, horizon: undefined, recipes: new Map() };
+    }
+    return memo;
   }
   /** Only this synchronous validation owns the read snapshot and its temporary
    * resolution memory. Neither caller-owned transactions nor subsequent saves

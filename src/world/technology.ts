@@ -9,6 +9,7 @@ export { technologyStock } from './technology-execution.js';
 import { assertTechnologyCatalogueState, catalogueEnabled, findTechnologyRecipe, hasTechnologyFunction, registerTechnologyRecipe, resolveTechnologyRecipe, technologyCatalogueTotals, technologyMemoryCapacity, updateTechnologyRecipeStats } from './technology-catalogue.js';
 import { pruneTechnologyCompetence, rememberRecipe, technologyProjectPins, touchKnownRecipe } from './technology-memory.js';
 import { containerAffordance } from './material-affordances.js';
+import { firstTileAt } from './tile-index.js';
 export type * from '../shared/technology.js';
 
 export interface TechnologyActor {
@@ -204,7 +205,7 @@ function planWithdrawal(host: TechnologyHost, actor: TechnologyActor, program: T
   const scrapFuel = Math.min(fuelNeeded, availableScrap); residue.wood += scrapFuel; fuel.wood = fuelNeeded;
   imported.wood += fuelNeeded - scrapFuel;
   if (actor.materials.wood * MASS_UNIT + 1e-8 < imported.wood || actor.materials.stone * MASS_UNIT + 1e-8 < imported.stone || MATERIALS.some(m => actor.technology.residue[m] < residue[m])) return;
-  const waterTile = imported.water ? host.tiles?.find(t => t.x === Math.round(actor.x) && t.y === Math.round(actor.y)) : undefined;
+  const waterTile = imported.water ? (host.tiles ? firstTileAt(host.tiles, Math.round(actor.x), Math.round(actor.y)) : undefined) : undefined;
   // Drinking stock uses fifty mass units per normalized water unit; only the occupied tile is observable.
   if (imported.water && (waterTile?.drinkingWater ?? 0) * 50_000 + 1e-8 < imported.water) return;
   for (const step of program.steps) if (step.requiredCatalyst && !actor.technology.items.some(item => item.mass - (itemMasses.get(item.id) ?? 0) >= 30 && materialCapacities(item)[step.requiredCatalyst!] >= 0.1)) return;
@@ -290,7 +291,7 @@ function localInputs(host: TechnologyHost, actor: TechnologyActor): MaterialRequ
   for (const material of ['wood', 'stone'] as const) if (actor.materials[material] >= 1) result.push({ source: 'raw', material, mass: MASS_UNIT });
   for (const material of MATERIALS) if (actor.technology.residue[material] >= 150) result.push({ source: 'residue', material, mass: Math.min(1000, actor.technology.residue[material]) });
   for (const item of actor.technology.items) if (item.recipeId && item.mass >= 200 && actor.technology.knownRecipes.includes(item.recipeId)) result.push({ source: 'product', recipeId: item.recipeId, mass: Math.min(item.mass, 1000) });
-  const tile = host.tiles?.find(t => t.x === Math.round(actor.x) && t.y === Math.round(actor.y));
+  const tile = (host.tiles ? firstTileAt(host.tiles, Math.round(actor.x), Math.round(actor.y)) : undefined);
   if ((tile?.drinkingWater ?? 0) >= 0.01) result.push({ source: 'raw', material: 'water', mass: 500 });
   return result;
 }
@@ -357,7 +358,7 @@ function forecastCraft(host: TechnologyHost, actor: TechnologyActor, recipe: Tec
   return product;
 }
 function localTechnologyUses(host: TechnologyHost, actor: TechnologyActor): Capability[] {
-  const tile = host.tiles?.find(t => t.x === Math.round(actor.x) && t.y === Math.round(actor.y));
+  const tile = (host.tiles ? firstTileAt(host.tiles, Math.round(actor.x), Math.round(actor.y)) : undefined);
   if (!tile) return [];
   const uses: Capability[] = [];
   if ((tile.wood ?? 0) > 1 && actor.materials.wood < 11) uses.push('cutting');
@@ -382,7 +383,7 @@ function dependencyCraft(host: TechnologyHost, actor: TechnologyActor, known: Te
     // Contained water is not chemical substrate or a catalyst. Do not speculate on
     // its transport, leakage or future hydration while forecasting fabrication.
     for (const item of privateActor.technology.items) delete item.contents;
-    const tile = host.tiles?.find(t => t.x === Math.round(actor.x) && t.y === Math.round(actor.y));
+    const tile = (host.tiles ? firstTileAt(host.tiles, Math.round(actor.x), Math.round(actor.y)) : undefined);
     const privateHost: TechnologyHost = { seed: host.seed, tick: host.tick, people: [privateActor], tiles: tile ? [{ ...tile }] : [],
       technology: { ...defaultTechnologyState(), budgets: host.technology.budgets, itemCounter: host.technology.itemCounter } };
     const route: TechnologyRecipe[] = [], visiting = new Set<string>();

@@ -203,6 +203,22 @@ tick cuesta caro: ~32 ms/tick medidos en esta torre (un día completo, ~78 s). P
 T031) para acelerar sin dejar de ejercitar el guardado periódico con `Store`; los tests de este
 fichero usan `persistencia.cadaTicks=300` por la misma razón.
 
+### Perfil y control de identidad — `rendimiento.ts` (sprint noche-perf 2026-09-22)
+
+```bash
+npx tsx scripts/lab/rendimiento.ts digestos                      # digestoCanonico tras 1200/2400 pasos en 51926, 7 (leyes candidatas) y 42 (defaults)
+npx tsx scripts/lab/rendimiento.ts instantanea --seed 51926 --dias 6 --salida DIR   # mundo representativo (población ~58)
+npx tsx scripts/lab/rendimiento.ts perfil --desde DIR --pasos 1200                  # CPU propia por fase y paso + digestos
+node --cpu-prof --import tsx scripts/lab/rendimiento.ts perfil --desde DIR --pasos 1200  # perfil por función
+```
+
+Mismo régimen que `replica.ts` (Store temporal, guardado cada `persistencia.cadaTicks`). `perfil` mide con
+`process.cpuUsage` —tiempo de CPU del proceso, no reloj de pared— porque la torre suele estar cargada; compara
+siempre antes/después en la misma sesión. Toda optimización del paso debe dejar el mundo bit a bit igual:
+`tests/rendimiento-identidad.test.ts` fija los digestos del árbol sin optimizar (cómo se obtuvieron, en su
+cabecera). Con el mundo de 6 días de la semilla 51926 (leyes candidatas), el paso bajó de 112 a 60 ms de CPU
+(×1,86) sin mover un bit (digestos idénticos a 1200 y 2400 pasos).
+
 ## El techo del hardware — `../curva-techo.mts` (T109)
 
 `replica.ts` mide **leyes** (población, tecnología, cooperación…) a una escala fija; hermana con

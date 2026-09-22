@@ -9,8 +9,20 @@ export interface RecipeMemoryResult { remembered: boolean; forgotten: string[]; 
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' &&
   (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null);
 const integer = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
-const recipeId = (value: unknown): value is string => typeof value === 'string' && value.length <= 100 &&
+const recipeIdText = (value: string): boolean => value.length <= 100 &&
   /^recipe-[1-9]\d*$/.test(value) && Number.isSafeInteger(Number(value.slice(7)));
+/** Sprint noche-perf 2026-09-22: `assertMemory` valida cada paso las mismas identidades de cada
+ * persona (cientos de expresiones regulares por paso). La validez es función pura del texto: se
+ * recuerdan los textos ya aceptados y todo lo demás se comprueba como siempre. */
+const acceptedRecipeIds = new Set<string>();
+const recipeId = (value: unknown): value is string => {
+  if (typeof value !== 'string') return false;
+  if (acceptedRecipeIds.has(value)) return true;
+  if (!recipeIdText(value)) return false;
+  if (acceptedRecipeIds.size >= 65_536) acceptedRecipeIds.clear();
+  acceptedRecipeIds.add(value);
+  return true;
+};
 const fail = (): never => { throw new TypeError('Invalid recipe memory input.'); };
 
 /** Validate the fields read or changed here; physical laws remain the host's responsibility. */

@@ -159,6 +159,22 @@ export class TechnologyArchive {
   }
   private clearProofs(): void { this.verifiedStamp = null; this.definitionProof = null; this.summaryProof = null; }
   invalidateVerification(): void { this.clearProofs(); this.hostTransaction = false; }
+  /** Sello de la base para la memoria de lecturas del anfitrión (Store, sprint noche-perf 2026-09-22):
+   * el mismo `stamp()` que invalida las pruebas de este archivo, serializado; `null` dentro de una
+   * transacción, donde el anfitrión no debe recordar nada. Cualquier escritura propia (total_changes),
+   * ajena (data_version) o de esquema cambia el sello. */
+  readEpoch(): string | null {
+    const stamp = this.stamp();
+    return stamp.transaction ? null : `${stamp.dataVersion}:${stamp.totalChanges}:${stamp.schemaCookie}:${stamp.tempSchemaCookie}`;
+  }
+  /** Tick más alto de cualquier definición o estadística archivada, o -1 si no hay ninguna. Una lectura
+   * «a fecha de» un tick igual o posterior no depende de ese tick mientras el sello no cambie. */
+  latestTick(): number {
+    const definitions = this.readStatement('SELECT max(tick) AS t FROM technology_definitions').get() as { t: unknown };
+    const stats = this.readStatement('SELECT max(tick) AS t FROM technology_stats').get() as { t: unknown };
+    const ticks = [definitions.t, stats.t].map(t => t === null ? -1 : typeof t === 'number' && Number.isSafeInteger(t) ? t : Number.NaN);
+    return Math.max(...ticks);
+  }
   private synchronize(): ArchiveStamp {
     const current = this.stamp();
     if (!current.transaction) this.hostTransaction = false;

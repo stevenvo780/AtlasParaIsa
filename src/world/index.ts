@@ -1,6 +1,8 @@
 import { recordChronicleEvent, enableChronicleJournal, assertChronicleJournal, type ChronicleJournal } from './chronicle-journal.js';
 import { PROTOCOL_VERSION, type Action, type ChronicleEvent, type Gesture, type GestureResult, type MemoryView, type PersonView, type PersonDetail, type PlaceView, type Tile, type WorldView, type Viewport, type Order, type CommunityView, type WorldSample, type FaseNombre } from '../shared/types.js';
 import { activate, bindWorldContext, maintainRegions, normalizeViewport, projectTerrain, tileAt, validCoordinate, worldContext, type ChunkMeta, type WorldContext } from './spatial.js';
+import { tileLookup } from './tile-index.js';
+import { primero, primeroConFiltroCaro } from './orden.js';
 import { chunkKey, generateChunk, proceduralPlaceName, legacyStructures, type Chunk } from './terrain.js';
 import { assertGenome, DEFAULT_MUTATION_RATE, expressGenome, founderGenome, inheritGenome, localRandom, type Genome } from './genetics.js';
 import { bond, convivir, cooperate, cooperationOpportunity, initialCulture, resourceDispute, updateCommunities, settlementOpportunity, type Culture } from './society.js';
@@ -261,11 +263,15 @@ export function ecology(world: World): void {
   const phase = phaseAt(world.tick);
   const light = phase === 'day' ? 1 : phase === 'night' ? 0 : 0.4;
   const { capacidadBosque, capacidadPastizal, capacidadOtros, velocidadRegeneracion, decaimientoComida } = paramsOf(world).recursos;
+  // Índice fijado antes del recorrido (sprint noche-perf 2026-09-22): este bucle sólo cambia campos de
+  // las teselas, nunca `world.tiles`, así que es la misma tesela que devolvería `tileAt` en cada vuelta,
+  // sin crear cuatro pares y cuatro puntos por tesela.
+  const tileIn = tileLookup(world.tiles);
+  const waterAt = (x: number, y: number): boolean => tileIn(x, y)?.terrain === 'water';
   for (const tile of world.tiles) {
     if (tile.terrain === 'water') continue;
-    // Neighbor water is an explicit, local moisture source.
-    const nearWater = [[tile.x - 1, tile.y], [tile.x + 1, tile.y], [tile.x, tile.y - 1], [tile.x, tile.y + 1]]
-      .some(([x, y]) => tileAt(world, { x: x!, y: y! })?.terrain === 'water');
+    // Neighbor water is an explicit, local moisture source (same four cells, same short-circuit order).
+    const nearWater = waterAt(tile.x - 1, tile.y) || waterAt(tile.x + 1, tile.y) || waterAt(tile.x, tile.y - 1) || waterAt(tile.x, tile.y + 1);
     tile.moisture = clamp(tile.moisture + (world.weather === 'rain' ? 0.012 : 0) + (nearWater ? 0.008 : 0) - 0.0015 - light * 0.001);
     const K = tile.biome === 'forest' ? capacidadBosque : tile.biome === 'grassland' ? capacidadPastizal : capacidadOtros;
     const headroom = K > 0 ? 1 - tile.vegetation / K : 0;
@@ -389,6 +395,22 @@ function canRecoverWaterHandling(world: World, person: Person): boolean {
   return false;
 }
 
+/** `world.people.find(p => p.id === id)` sin recorrer la población por cada vínculo (sprint noche-perf
+ * 2026-09-22; la ley de cortejo lo hacía por vínculo, persona y decisión: O(P·B·P)). `world.people` sólo
+ * cambia por `push` (nacimientos) o reasignación (muertes), así que el índice se invalida por identidad
+ * y longitud, como `tileAt`; guarda la PRIMERA persona de cada id, como `find`. */
+const peopleById = new WeakMap<Person[], { length: number; byId: Map<string, Person> }>();
+function personById(world: World, id: string): Person | undefined {
+  let index = peopleById.get(world.people);
+  if (!index || index.length !== world.people.length) {
+    const byId = new Map<string, Person>();
+    for (const person of world.people) if (!byId.has(person.id)) byId.set(person.id, person);
+    index = { length: world.people.length, byId };
+    peopleById.set(world.people, index);
+  }
+  return index.byId.get(id);
+}
+
 function choose(world: World, person: Person): void {
   const nearbyTiles: Tile[] = [];
   for (let dy = -RADIUS; dy <= RADIUS; dy++) for (let dx = -RADIUS; dx <= RADIUS; dx++) {
@@ -418,7 +440,8 @@ function choose(world: World, person: Person): void {
   if (aptitud > 0) candidates[0]!.score += aptitud * ventajaComparativa(person.traits, 'explore');
   const home = settlementOpportunity(world,person);
   if (home) candidates.push({action:'approach',...home});
-  const food = reachableTiles.filter(tile => tile.food > 0.025 && planAffordable(stepsTo(tile)!, 0)).sort((a, b) => (distance(person, a) - a.food * 2) - (distance(person, b) - b.food * 2))[0];
+  // Sprint noche-perf: `primero*` (orden.ts) da el mismo elemento que `filter(…).sort(…)[0]` sin ordenar.
+  const food = primero(reachableTiles, (a, b) => (distance(person, a) - a.food * 2) - (distance(person, b) - b.food * 2), tile => tile.food > 0.025 && planAffordable(stepsTo(tile)!, 0));
   if (food || person.inventory > 0.01 || foodAvailable(world,person)>0) candidates.push({ action: 'eat', target: food ?? person, score: Math.max(0, person.hunger - 0.22) * 2.5 - (food ? distance(person, food) * 0.02 : 0), reason: 'El hambre orienta su camino hacia alimento que puede percibir.' });
   const body = { hunger: person.hunger, thirst: person.thirst, fatigue: person.fatigue, energy: person.energy };
   const protection = bodilyShelter(world, person), damage = bodilyDamage(world, person, body, protection), meal = immediateMeal(world, person);
@@ -511,7 +534,7 @@ function choose(world: World, person: Person): void {
     let cortejado: Person | undefined, vinculo = 0;
     for (const [id, strength] of Object.entries(person.bonds)) {
       if (strength < 0.3) continue;
-      const other = world.people.find(p => p.id === id);
+      const other = personById(world, id);
       if (!other || other.role !== 'neighbor' || (other.bonds[person.id] ?? 0) < 0.3 || closeKin(person, other)) continue;
       const away = distance(person, other);
       if (away <= leyPoblacion.radioPareja || away > leyPoblacion.radioCortejo || !reproductiveReadiness(world, other)) continue;
@@ -522,7 +545,7 @@ function choose(world: World, person: Person): void {
     if (cortejado) candidates.push({ action: 'approach', target: { x: cortejado.x, y: cortejado.y }, score: leyPoblacion.cortejo * (0.5 + vinculo * 0.5),
       reason: `Recuerda el vínculo con ${cortejado.name} y lo busca; ambos están en edad de criar y la cercanía hace posible una familia.` });
   }
-  const water = reachableTiles.filter(t => waterAvailable(world,t) > 0.005 && planAffordable(stepsTo(t)!, 0)).sort((a, b) => distance(person, a) - distance(person, b))[0];
+  const water = primeroConFiltroCaro(reachableTiles, (a, b) => distance(person, a) - distance(person, b), t => waterAvailable(world,t) > 0.005 && planAffordable(stepsTo(t)!, 0));
   const carriedWater = containedWaterQuanta(person) > 0;
   const portableWater = carriedWater && canHandleContainedWater(person, world.tick);
   const localWater = waterAvailable(world, person) > 0;
@@ -595,8 +618,8 @@ function choose(world: World, person: Person): void {
   }
   const help = cooperationOpportunity(world, person);
   if (help) candidates.push({ action: 'cooperate', target: help.person, score: help.score, reason: `Puede ${help.kind === 'teach' ? 'enseñar una técnica practicada' : help.kind === 'tools' ? 'intercambiar un objeto útil por materia disponible' : help.kind === 'trade' ? 'intercambiar materiales complementarios' : help.kind === 'assist' ? 'colaborar en una tarea' : 'aportar materiales'} con ${help.person.name}.` });
-  const shelter = nearbyTiles.filter(tile => bodilyShelter(world, tile) > 0 && stepsTo(tile) !== undefined)
-    .sort((a, b) => bodilyShelter(world, b) * (TICKS_PER_DAY - stepsTo(b)! * 6) - bodilyShelter(world, a) * (TICKS_PER_DAY - stepsTo(a)! * 6))[0];
+  const shelter = primero(nearbyTiles, (a, b) => bodilyShelter(world, b) * (TICKS_PER_DAY - stepsTo(b)! * 6) - bodilyShelter(world, a) * (TICKS_PER_DAY - stepsTo(a)! * 6),
+    tile => bodilyShelter(world, tile) > 0 && stepsTo(tile) !== undefined);
   // Ask the actual bodily law whether rest can restore readiness. Unit quality
   // isolates nutrition/hydration limits without duplicating their thresholds.
   const rested = { hunger: person.hunger, thirst: person.thirst, fatigue: person.fatigue, energy: person.energy };
@@ -608,12 +631,12 @@ function choose(world: World, person: Person): void {
     reason: recoverWater ? 'Lleva agua pero necesita recuperar aquí el esfuerzo para manipularla; descansa antes de volver a intentar beber.'
       : shelter ? 'El cansancio hace valiosa una pausa bajo techo.' : 'Necesita una pausa; no percibe un refugio cercano.' };
   candidates.push(restCandidate);
-  const resource = nearbyTiles.filter(t => ((t.wood ?? 0) >= 1 && person.materials.wood < 12) || ((t.stone ?? 0) >= 1 && person.materials.stone < 8))
-    .sort((a, b) => resourceDistance(person, a) - resourceDistance(person, b))[0];
+  const resource = primero(nearbyTiles, (a, b) => resourceDistance(person, a) - resourceDistance(person, b),
+    t => ((t.wood ?? 0) >= 1 && person.materials.wood < 12) || ((t.stone ?? 0) >= 1 && person.materials.stone < 8));
   const workBias = person.traits.industriousness;
   const cost = constructionCost(world,person);
-  const buildable = nearbyTiles.filter(t => t.terrain !== 'shelter' && t.moisture > 0.2 && t.vegetation > 0.15 && !world.places.some(p => distance(p, t) < 5))
-    .sort((a, b) => distance(person, a) - distance(person, b))[0];
+  const buildable = primeroConFiltroCaro(nearbyTiles, (a, b) => distance(person, a) - distance(person, b),
+    t => t.terrain !== 'shelter' && t.moisture > 0.2 && t.vegetation > 0.15 && !world.places.some(p => distance(p, t) < 5));
   if (resource && (person.materials.wood < cost.wood || person.materials.stone < cost.stone)) candidates.push({ action: 'gather', target: resource, score: 0.15 + workBias * 0.4 + (!shelter ? 0.2 : 0), reason: 'Percibe materiales útiles para cultivar y levantar refugios.' });
   const construction = buildable ? constructionOpportunity(world, person) : undefined;
   if (buildable && construction && person.materials.wood >= cost.wood && person.materials.stone >= cost.stone) candidates.push({ action: 'build', target: buildable, ...construction });
@@ -623,7 +646,7 @@ function choose(world: World, person: Person): void {
   if (technology) candidates.push({ action: technology.kind, target: person, score: technology.score, reason: technology.reason });
   const damaged = repairOpportunity(world,person);
   if(damaged) candidates.push({action:'repair',target:damaged,score:0.5+(1-damaged.condition)*0.35+workBias*0.12,reason:'Reparar una instalación que percibe recupera una función útil; exige material y trabajo.'});
-  const farmland = nearbyTiles.filter(t => t.terrain !== 'shelter' && t.moisture > 0.25 && t.vegetation < 0.8).sort((a, b) => distance(person, a) - distance(person, b))[0];
+  const farmland = primero(nearbyTiles, (a, b) => distance(person, a) - distance(person, b), t => t.terrain !== 'shelter' && t.moisture > 0.25 && t.vegetation < 0.8);
   if (farmland && person.materials.wood >= 1) candidates.push({ action: 'farm', target: farmland, score: 0.12 + workBias * 0.3 + person.culture.stewardship * 0.12 + (food && food.food < 0.2 ? 0.2 : 0), reason: 'Puede preparar tierra húmeda; el alimento llegará después con agua y luz.' });
   if (partner) {
     if (person.socialLoad > 0.7 || partner.socialLoad > 0.8) {
@@ -825,7 +848,7 @@ function explorationTarget(world: World, person: Person, tiles: Tile[]): Point {
   const companions = world.cooperationEnabled ? world.people.filter(p => p.id !== person.id && distance(person, p) <= 7 && (person.bonds[p.id] ?? 0) > 0.3) : [];
   const score = (t: Tile) => ((t.x - person.x) * heading.x + (t.y - person.y) * heading.y) * 0.2 + (world.noveltyEnabled && !person.visited.includes(`${t.x},${t.y}`) ? 2 : 0)
     + (t.traffic ?? 0) * 0.1 + (companions.length ? (distance(person, companions[0]!) - distance(t, companions[0]!)) * person.sociability * (1 - person.curiosity) * 0.18 : 0);
-  return options.sort((a, b) => score(b) - score(a) || a.x - b.x || a.y - b.y)[0] ?? person;
+  return primero(options, (a, b) => score(b) - score(a) || a.x - b.x || a.y - b.y) ?? person;
 }
 function valueKey(person: Person, action: Action): string { return `${person.thirst > 0.5 ? 'thirsty' : person.hunger > 0.5 ? 'hungry' : person.fatigue > 0.5 ? 'tired' : 'ready'}:${action}`; }
 /** Update only after an observed outcome, including failed work. Skills require useful production. */

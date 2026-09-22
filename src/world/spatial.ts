@@ -8,6 +8,7 @@ import type { AnimalView, StructureView } from '../shared/life.js';
 import { projectAnimal } from './animals.js';
 import type { LegacyRecord } from '../shared/demography.js';
 import { bindTechnologyCatalogue, type TechnologyCatalogueReader } from './technology-catalogue.js';
+import { lastTileAt } from './tile-index.js';
 
 export interface WorldContext {
   loadChunk?: (key: string, atTick: number) => Chunk | null;
@@ -24,14 +25,10 @@ export function bindWorldContext(world: World, context: WorldContext): void {
 export function worldContext(world: World): WorldContext { return contexts.get(world) ?? {}; }
 export type ChunkMeta = Omit<Chunk, 'tiles' | 'animals' | 'structures'>;
 export const validCoordinate = (n: unknown): n is number => typeof n === 'number' && Number.isSafeInteger(n) && n >= -MAX_COORDINATE && n < MAX_COORDINATE;
-const indexes = new WeakMap<World, { tiles: Tile[]; length: number; map: Map<string, Tile> }>();
+/** Índice compartido con la fauna (tile-index.ts): misma respuesta que el `Map` de claves
+ * `"x,y"` que se construía aquí, sin crear una cadena por consulta. */
 export function tileAt(world: World, p: { x: number; y: number }): Tile | undefined {
-  let index = indexes.get(world);
-  if (!index || index.tiles !== world.tiles || index.length !== world.tiles.length) {
-    index = { tiles: world.tiles, length: world.tiles.length, map: new Map(world.tiles.map(t => [`${t.x},${t.y}`, t])) };
-    indexes.set(world, index);
-  }
-  return index.map.get(`${p.x},${p.y}`);
+  return lastTileAt(world.tiles, p.x, p.y);
 }
 export function activate(world: World, x: number, y: number, context: WorldContext = worldContext(world)): void {
   if (!validCoordinate(x) || !validCoordinate(y)) return;

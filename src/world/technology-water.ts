@@ -6,6 +6,7 @@ import { appendTechnologyExecution, technologyStock } from './technology-executi
 import { MAX_PENDING_TECHNOLOGY_EXECUTIONS } from './technology-journal.js';
 import { touchKnownRecipe } from './technology-memory.js';
 import { updateTechnologyRecipeStats } from './technology-catalogue.js';
+import { firstTileAt } from './tile-index.js';
 import { assertWaterContents, capacityOverflowReturns, containerAffordance, DEFAULT_WATER_POLICY, flowQuantized,
   leakIntegerRemainder, WATER_QUANTA_PER_UNIT } from './material-affordances.js';
 
@@ -228,7 +229,7 @@ export function fillContainedWater(host: TechnologyHost, actor: WaterActor, item
   if (!canHandle(host, actor)) return 0;
   maintainContainedWater(host, actor);
   const item = actor.technology.items.find(item => item.id === itemId);
-  const tile = host.tiles?.find(tile => tile.x === actor.x && tile.y === actor.y);
+  const tile = (host.tiles ? firstTileAt(host.tiles, actor.x, actor.y) : undefined);
   if (!item || !tile || !Number.isFinite(tile.drinkingWater) || tile.drinkingWater! <= 0 || tile.drinkingWater! > 1) return 0;
   if (item.contents) assertContainedWater(item.contents, host.tick);
   const before = tile.drinkingWater!, contents = item.contents?.water ?? 0;
@@ -296,7 +297,7 @@ export function payContainedWaterCarry(host: TechnologyHost, actor: WaterActor):
 export function beginWaterPreparation(host: TechnologyHost, actor: WaterActor, thirstPerTick: number): boolean {
   if (!host.technology.water || !host.people.includes(actor) || actor.technology.waterPreparation || !preparationReady(actor)
     || !Number.isFinite(thirstPerTick) || thirstPerTick <= 0) return false;
-  const source = host.tiles?.find(tile => tile.x === actor.x && tile.y === actor.y);
+  const source = (host.tiles ? firstTileAt(host.tiles, actor.x, actor.y) : undefined);
   if (!source || (source.drinkingWater ?? 0) * WATER_QUANTA_PER_UNIT < DEFAULT_WATER_POLICY.flowQuantaPerTick) return false;
   const desired = Math.min(DEFAULT_WATER_POLICY.flowQuantaPerTick * WATER_PREPARATION_MAX_TICKS,
     Math.max(DEFAULT_WATER_POLICY.flowQuantaPerTick, Math.ceil(thirstPerTick * WATER_RESERVE_HORIZON / 3 * WATER_QUANTA_PER_UNIT)));

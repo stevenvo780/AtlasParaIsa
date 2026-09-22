@@ -313,6 +313,11 @@ export function updateCommunities(world: World, emit: Emit): void {
     const group: CommunityView = { id, name, x: person.x, y: person.y, members: members.map(p => p.id), color: ['#dfba67','#76b8be','#c498b8','#a3bb6c'][world.communityCounter % 4]!, culture: { ...person.culture }, formedAt: world.tick, cooperation: 0, disputes: 0 };
     for (const p of members) p.communityId = id;
     world.communities.push(group);
+    // NOTA (2026-09-22): este evento COMPARTE el arreglo con `group.members`. Un nacimiento
+    // del MISMO paso lo extiende retroactivamente, y esa lista extendida es la que hoy
+    // guardan las instantáneas de producción. Copiarlo aquí cambiaría historias ya escritas
+    // (medido: el digesto de las semillas 51926 y 42 se mueve), así que no se toca en esta
+    // tarea; `reproduce` evita el alias sólo en el camino que lo rompería (index.ts).
     emit({ kind: 'community', actors: group.members, x: person.x, y: person.y, source: 'simulation', text: `${name} tomó forma entre ${members.map(p => p.name).join(', ')}.`, cause: 'Confianza ganada en interacciones cercanas, prácticas compatibles y un lugar compartido; no se asignó una facción al nacer.' });
   }
   world.communities = world.communities.filter(group => group.members.length > 0);

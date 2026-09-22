@@ -1090,20 +1090,32 @@ function transferEstate(world: World, person: Person): void {
 const ELECCION_POR_AFINIDAD = true;
 function reproduce(world: World): void {
   const pop = paramsOf(world).poblacion;
-  if (!world.reproductionEnabled || world.people.length >= pop.maxima || world.tick % pop.intervaloComprobacionTicks !== 0) return;
+  if (!world.reproductionEnabled || world.people.length >= pop.maxima) return;
+  // Leyes candidatas del embudo de natalidad (diagnóstico 2026-09-22). `comprobacionContinua`
+  // cambia SÓLO el muestreo: en vez de mirar una vez cada `intervaloComprobacionTicks` pasos,
+  // mira cada paso, pero el cupo se cuenta sobre la misma ventana móvil, así que el calendario
+  // máximo —`nacimientosPorComprobacion` por ventana— no se mueve (lo cita SC-013). Sin campos
+  // nuevos en `World`: la ventana se reconstruye de los `bornAt` que ya existen, y los
+  // fundadores (`bornAt = −4800`) nunca caen dentro de ella.
+  if (!pop.comprobacionContinua && world.tick % pop.intervaloComprobacionTicks !== 0) return;
+  const recientes = pop.comprobacionContinua
+    ? world.people.filter(p => p.role === 'neighbor' && p.bornAt > world.tick - pop.intervaloComprobacionTicks).length : 0;
+  const cupo = pop.nacimientosPorComprobacion - recientes;
+  if (cupo <= 0) return;
   const used = new Set<string>();
-  const fit = (p: Person): boolean => !used.has(p.id) && fertile(world, p) && !!p.communityId;
-  const match = (a: Person, b: Person): boolean => b !== a && fit(b) && distance(a, b) <= 3 && (a.bonds[b.id] ?? 0) >= 0.3 && (b.bonds[a.id] ?? 0) >= 0.3 && !closeKin(a, b);
-  for (let n = 0; n < pop.nacimientosPorComprobacion && world.people.length < pop.maxima; n++) {
+  const fit = (p: Person): boolean => !used.has(p.id) && fertile(world, p) && (!pop.exigeComunidad || !!p.communityId);
+  const match = (a: Person, b: Person): boolean => b !== a && fit(b) && distance(a, b) <= pop.radioPareja && (a.bonds[b.id] ?? 0) >= 0.3 && (b.bonds[a.id] ?? 0) >= 0.3 && !closeKin(a, b);
+  for (let n = 0; n < cupo && world.people.length < pop.maxima; n++) {
     let pair: { a: Person; b: Person } | undefined, place: (typeof world.places)[number] | undefined;
     for (const a of world.people) {
       if (!fit(a)) continue;
-      const here = world.places.find(p => distance(a, p) <= 4);
+      const here = world.places.find(p => distance(a, p) <= pop.radioLugar);
       if (!here) continue;
       const b = chooseReproductivePartner(world, a, world.people.filter(p => match(a, p)), ELECCION_POR_AFINIDAD);
       if (!b) continue;
       if (!ELECCION_POR_AFINIDAD) { pair = { a, b }; place = here; break; }
-      if (!pair || pairAffinity(a, b) > pairAffinity(pair.a, pair.b) || (pairAffinity(a, b) === pairAffinity(pair.a, pair.b) && pairTie(world, a, b) > pairTie(world, pair.a, pair.b))) {
+      const afinidad = pairAffinity(a, b, pop.radioPareja), mejor = pair ? pairAffinity(pair.a, pair.b, pop.radioPareja) : -Infinity;
+      if (!pair || afinidad > mejor || (afinidad === mejor && pairTie(world, a, b) > pairTie(world, pair.a, pair.b))) {
         pair = { a, b }; place = here;
       }
     }
@@ -1124,7 +1136,18 @@ function reproduce(world: World): void {
     };
     delete child.home;
     a.inventory -= 0.08; b.inventory -= 0.08; a.energy = clamp(a.energy - 0.08); b.energy = clamp(b.energy - 0.08); a.lastBirth = world.tick; b.lastBirth = world.tick;
-    world.people.push(child); world.communities.find(c => c.id === a.communityId)?.members.push(id); count(world, 'births');
+    world.people.push(child);
+    // El evento de fundación de una comunidad comparte el arreglo con `group.members`
+    // (society.ts). Con la comprobación periódica un nacimiento cae siempre en el mismo paso
+    // que ese evento, así que empujar aquí lo extiende ANTES de que se archive y la crónica
+    // sigue siendo coherente: eso es lo que guardan las instantáneas de hoy y por eso el
+    // camino por defecto no se toca. Con `comprobacionContinua` el nacimiento puede caer
+    // 1..119 pasos DESPUÉS, cuando el evento ya es durable, y empujar lo reescribiría: el
+    // Store lo rechaza («an immutable event cannot be overwritten»). Reemplazar el arreglo
+    // deja el mismo censo sin tocar el pasado. El alias en sí queda como defecto anotado.
+    const group = world.communities.find(c => c.id === a.communityId);
+    if (group) { if (pop.comprobacionContinua) group.members = [...group.members, id]; else group.members.push(id); }
+    count(world, 'births');
     const event = addEvent(world, { kind: 'birth', actors: [a.id, b.id, child.id], x: child.x, y: child.y, source: 'simulation', text: a.communityId === b.communityId ? `${child.name} nació en la comunidad de ${a.name} y ${b.name}.` : `${child.name} nació del vínculo entre ${a.name} y ${b.name}, de comunidades distintas.`, cause: `${a.name} y ${b.name} junto a ${place.name} (${place.x},${place.y}). Dos progenitores simulados con recursos, confianza y lugar compartido; reserva conjunta −0.16, cría recibe 0.10. Recombina siete pares de parámetros; ${genome.mutations} variaciones. Habilidades y recuerdos comienzan vacíos; cultura inicial por crianza, no por ADN.` });
     remember(child, world, 'La comunidad sostuvo su llegada.', event.id, place.id);
     used.add(a.id); used.add(b.id);

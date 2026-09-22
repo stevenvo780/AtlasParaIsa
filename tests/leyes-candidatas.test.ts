@@ -11,14 +11,14 @@ import { indiceDiversidad } from '../src/world/diversidad.js';
 import { cooperationOpportunity } from '../src/world/society.js';
 import { researchTechnology, technologyWorkCost, type TechnologyProgram } from '../src/world/technology.js';
 import { resolveTechnologyRecipe } from '../src/world/technology-catalogue.js';
-import { DEFAULT_PARAMS, PARAM_RANGES, paramsOf, parseParams, setParams, type WorldParams } from '../src/world/params.js';
+import { DEFAULT_PARAMS, PARAM_DESCRIPTORS, PARAM_RANGES, paramsOf, parseParams, setParams, type WorldParams } from '../src/world/params.js';
 
 /**
  * Noche de ciencia 2026-09-22 — cuatro leyes CANDIDATAS declaradas como parámetros.
  * `docs/ANALISIS-DINAMICAS-2026-09-21.md` mide tres cierres del mundo vigente: la elección
  * de acción se traba en cooperar (97 % de la cooperación es enseñanza), las disputas por
  * recursos no ocurren jamás (conflictos y turnos = 0) y la pertenencia a una comunidad se
- * decide el día 1 y no vuelve a revisarse. Las nueve claves nuevas abren esos cerrojos sin
+ * decide el día 1 y no vuelve a revisarse. Las trece claves nuevas abren esos cerrojos sin
  * decidir por ellos: sus defaults son las constantes que hoy están escritas en el código.
  *
  * Las cifras literales de este fichero se midieron con un script equivalente a `replica()`
@@ -26,19 +26,39 @@ import { DEFAULT_PARAMS, PARAM_RANGES, paramsOf, parseParams, setParams, type Wo
  * para que rijan las leyes de tecnología de producción y no las del catálogo aislado).
  */
 
-/** Réplica mínima de laboratorio: semilla 51926, Store temporal, `save` antes de simular. */
-function replica(t: { after(callback: () => void): void }, pasos: number, params?: string): World {
+/** Réplica mínima de laboratorio: Store temporal y `save` antes de simular (como
+ * `scripts/lab/replica.ts`). Devuelve el mundo y el tick de CADA nacimiento. */
+function replicaDetallada(t: { after(callback: () => void): void }, pasos: number, params?: string, seed = 51926): { world: World; nacimientos: number[] } {
   const directory = mkdtempSync(join(tmpdir(), 'atlas-leyes-'));
   const store = new Store(join(directory, 'world.sqlite'));
   t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
-  const world = createWorld(51926, parseParams(params));
+  const world = createWorld(seed, parseParams(params));
   store.save(world);
-  for (let tick = 1; tick <= pasos; tick++) stepWorld(world);
-  return world;
+  const nacimientos: number[] = [];
+  for (let tick = 1; tick <= pasos; tick++) {
+    const antes = world.birthCounter;
+    stepWorld(world);
+    for (let n = antes; n < world.birthCounter; n++) nacimientos.push(world.tick);
+  }
+  return { world, nacimientos };
+}
+function replica(t: { after(callback: () => void): void }, pasos: number, params?: string): World {
+  return replicaDetallada(t, pasos, params).world;
+}
+/** Como la réplica, pero archivando CADA paso, igual que el servidor: sólo así se oye si
+ * una ley reescribe un evento que ya es durable (`Store.save` exige inmutabilidad). */
+function replicaConGuardado(t: { after(callback: () => void): void }, pasos: number, params?: string, seed = 51926): { world: World } {
+  const directory = mkdtempSync(join(tmpdir(), 'atlas-leyes-durable-'));
+  const store = new Store(join(directory, 'world.sqlite'));
+  t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
+  const world = createWorld(seed, parseParams(params));
+  store.save(world);
+  for (let tick = 1; tick <= pasos; tick++) { stepWorld(world); store.save(world); }
+  return { world };
 }
 
 /**
- * Digesto del mismo mundo medido con la FORMA de params de `main` (sin las nueve claves
+ * Digesto del mismo mundo medido con la FORMA de params de `main` (sin las trece claves
  * nuevas). `digestoCanonico` hashea `{world, params}` (T101/T102, docs/REGLAS.md: «añadir
  * configuración cambia su hash aunque el estado físico sea igual»), así que declarar las
  * leyes candidatas mueve el hash completo aunque ninguna actúe. Quitarlas del objeto de
@@ -49,6 +69,8 @@ function digestoConParamsDeMain(world: World): string {
   const vigentes = paramsOf(world);
   const comoMain = structuredClone(DEFAULT_PARAMS) as unknown as Record<string, unknown>;
   delete comoMain.conducta; delete comoMain.social;
+  const poblacion = comoMain.poblacion as Record<string, unknown>;
+  for (const clave of ['exigeComunidad', 'radioPareja', 'radioLugar', 'comprobacionContinua']) delete poblacion[clave];
   setParams(world, comoMain as unknown as WorldParams);
   try { return digestoCanonico(world); } finally { setParams(world, vigentes); }
 }
@@ -57,9 +79,9 @@ function digestoConParamsDeMain(world: World): string {
 // Store temporal, sin guardados periódicos): 1200 pasos → b194b09…, 2400 → ee6fb78….
 const DIGESTO_MAIN_1200 = 'b194b096c0dd4c555ca9ebf4e560bb293809b97947109f116833cf79ebbf60cf';
 const DIGESTO_MAIN_2400 = 'ee6fb78c55d2a43effebe696314ca5f5eecefbc1b8b03150f61bb381ab1779e8';
-// Los mismos mundos con las nueve claves ya declaradas: sólo cambia el hash, no el estado.
-const DIGESTO_LEYES_1200 = 'd3e6371531e152937922a3a8ae8f24ab36e8b1e521ab3058fbb3d17fb637b590';
-const DIGESTO_LEYES_2400 = '1ab52318601c6d87eea404c1b91dcf61eb705118eb6e60621d584967c1ec056c';
+// Los mismos mundos con las trece claves ya declaradas: sólo cambia el hash, no el estado.
+const DIGESTO_LEYES_1200 = '231d18c0d28747e9efb15a188818e2671fc647db98a6c0f4115060474276c934';
+const DIGESTO_LEYES_2400 = 'b23321c96c937301c93839e60918a14a32ff0cdd4b74db460df24f75ac5d5d45';
 
 test('(i) con los defaults las leyes candidatas no mueven el mundo: el digesto físico es el de main', { timeout: 300000 }, t => {
   const world = replica(t, 1200);
@@ -71,6 +93,8 @@ test('(i) con los defaults las leyes candidatas no mueven el mundo: el digesto f
   assert.deepEqual(DEFAULT_PARAMS.conducta, { habituacion: 0 });
   assert.deepEqual(DEFAULT_PARAMS.social, { disputaNecesidad: 0.65, disputaEscasez: 1, disputaRadio: 2, disputaDestino: 0.5,
     disputaEspera: 180, ensenanzaRareza: 0, confianzaSalida: 0.35, distanciaAlternativa: 0.2 }, 'cada default es la constante que había en el código');
+  assert.deepEqual(DEFAULT_PARAMS.poblacion, { maxima: 1_000_000, intervaloComprobacionTicks: 120, nacimientosPorComprobacion: 2,
+    exigeComunidad: true, radioPareja: 3, radioLugar: 4, comprobacionContinua: false });
 });
 
 test('(ii) conducta.habituacion=0.35 cambia el mundo y no reduce la diversidad de conducta', { timeout: 600000 }, t => {
@@ -93,6 +117,57 @@ test('(iii) abrir el umbral de disputa produce disputas donde antes había cero'
   // Medido: 1 conflicto y 0 turnos en 2400 pasos, frente a 0 y 0 con los defaults. La
   // cooperación sube de 58 a 63 (la disputa también consume el intento de quien cede).
   assert.ok(conflictos + turnos > 0, `sigue en cero: conflictos=${conflictos}, turnos=${turnos}`);
+});
+
+/** Ninguna ventana de `intervalo` pasos consecutivos supera el techo por ventana. Basta
+ * mirar las ventanas que ARRANCAN en un nacimiento: cualquier otra está contenida en una
+ * de ésas o tiene menos nacimientos. */
+function techoPorVentana(nacimientos: readonly number[], intervalo = DEFAULT_PARAMS.poblacion.intervaloComprobacionTicks): number {
+  return Math.max(0, ...nacimientos.map(inicio => nacimientos.filter(tick => tick >= inicio && tick < inicio + intervalo).length));
+}
+
+const DIA = 2400;
+
+test('(viii) abrir el embudo de natalidad hace nacer a alguien en la semilla 7 sin levantar el calendario', { timeout: 900000 }, t => {
+  // Diagnóstico 2026-09-22 (`scripts/lab/diagnostico-natalidad.ts`): en la semilla 7 hay
+  // ~9 fértiles de 14 mortales, pero sólo 6 tienen comunidad y ninguno encuentra pareja.
+  // Medido con el radio real de la ley, mirando los 7200 pasos y no sólo las comprobaciones:
+  // el par fértil, no consanguíneo y con vínculo mutuo ≥ 0,3 MÁS CERCANO de toda la corrida
+  // está a 18,38 celdas. Por eso `radioPareja=6` (ni 12) abre nada y hace falta 20.
+  const hoy = replicaDetallada(t, 3 * DIA, undefined, 7);
+  assert.equal(hoy.world.birthCounter, 0, 'con las leyes de hoy la semilla 7 no pare a nadie en 3 días');
+  assert.equal(replicaDetallada(t, 3 * DIA,
+    'poblacion.exigeComunidad=false,poblacion.radioPareja=6,poblacion.radioLugar=8,poblacion.comprobacionContinua=true', 7).world.birthCounter,
+    0, 'con radioPareja=6 la semilla 7 SIGUE sin parir: el cerrojo no eran 3 celdas, eran 18');
+
+  const abierto = replicaDetallada(t, 3 * DIA,
+    'poblacion.exigeComunidad=false,poblacion.radioPareja=20,poblacion.radioLugar=8,poblacion.comprobacionContinua=true', 7);
+  assert.ok(abierto.world.birthCounter > 0, `sigue sin nacer nadie: ${JSON.stringify(abierto.nacimientos)}`);
+  assert.equal(abierto.world.birthCounter, abierto.nacimientos.length);
+  assert.ok(techoPorVentana(abierto.nacimientos) <= DEFAULT_PARAMS.poblacion.nacimientosPorComprobacion,
+    `alguna ventana de 120 pasos supera el techo: ${JSON.stringify(abierto.nacimientos)}`);
+});
+
+test('(x) comprobacionContinua no reescribe un evento ya archivado al meter al recién nacido en el censo', { timeout: 900000 }, t => {
+  // El evento de fundación de una comunidad comparte el arreglo con `group.members`
+  // (society.ts). Con la comprobación periódica el nacimiento cae en el MISMO paso y la
+  // extensión viaja con el evento; con `comprobacionContinua` cae 1..119 pasos después y
+  // empujar reescribiría un evento ya durable: `Store.save` lo rechaza. La semilla 42 lo
+  // reproducía en el paso 167. El censo del grupo tiene que seguir incluyendo a la cría.
+  const { world } = replicaConGuardado(t, 400, 'poblacion.comprobacionContinua=true', 42);
+  assert.ok(world.birthCounter > 0, 'la semilla 42 tiene que parir dentro de los 400 pasos');
+  const censados = world.communities.flatMap(group => group.members);
+  for (const person of world.people) if (person.communityId) assert.ok(censados.includes(person.id), `${person.id} no figura en su comunidad`);
+});
+
+test('(ix) comprobacionContinua sola cambia el muestreo, no el calendario máximo', { timeout: 900000 }, t => {
+  const continua = replicaDetallada(t, DIA, 'poblacion.comprobacionContinua=true');
+  // Techo del calendario en 2400 pasos: 2400/120 × 2 = 40. Hoy la semilla 51926 pare 6.
+  assert.ok(continua.world.birthCounter <= DIA / DEFAULT_PARAMS.poblacion.intervaloComprobacionTicks * DEFAULT_PARAMS.poblacion.nacimientosPorComprobacion,
+    `${continua.world.birthCounter} nacimientos superan el techo de 40`);
+  assert.ok(continua.world.birthCounter >= 6, `muestrear cada paso no puede parir menos que hoy: ${continua.world.birthCounter} < 6`);
+  assert.ok(techoPorVentana(continua.nacimientos) <= DEFAULT_PARAMS.poblacion.nacimientosPorComprobacion,
+    `alguna ventana de 120 pasos supera el techo: ${JSON.stringify(continua.nacimientos)}`);
 });
 
 /** Conflictos contados + turnos acordados en la crónica del mundo. */
@@ -163,12 +238,13 @@ test('(iv) social.ensenanzaRareza ordena por difusión cuando el gain empata', t
     'con 0,5 la receta que sólo recuerda el maestro adelanta a la que ya conocen 15 de 16');
 });
 
-test('(v) parseParams acota las nueve claves nuevas y rechaza lo que cae fuera de rango', () => {
+test('(v) parseParams acota las trece claves nuevas y rechaza lo que cae fuera de rango', () => {
   const claves = ['conducta.habituacion', 'social.disputaNecesidad', 'social.disputaEscasez',
     'social.disputaRadio', 'social.disputaDestino', 'social.disputaEspera',
-    'social.ensenanzaRareza', 'social.confianzaSalida', 'social.distanciaAlternativa'] as const;
+    'social.ensenanzaRareza', 'social.confianzaSalida', 'social.distanciaAlternativa',
+    'poblacion.radioPareja', 'poblacion.radioLugar'] as const;
   assert.deepEqual(claves.map(clave => PARAM_RANGES[clave]),
-    [[0, 2], [0.1, 1], [0.1, 20], [1, 8], [0.1, 8], [1, 10000], [0, 5], [0, 1], [0, 1]]);
+    [[0, 2], [0.1, 1], [0.1, 20], [1, 8], [0.1, 8], [1, 10000], [0, 5], [0, 1], [0, 1], [1, 32], [1, 64]]);
   for (const clave of claves) {
     const [min, max] = PARAM_RANGES[clave]!;
     assert.throws(() => parseParams(`${clave}=${min - 0.05}`), /rango/i, `${clave} por debajo del mínimo`);
@@ -182,7 +258,15 @@ test('(v) parseParams acota las nueve claves nuevas y rechaza lo que cae fuera d
   assert.throws(() => parseParams('social.disputaEspera=1.5'), /entero/i);
   assert.equal(parseParams('social.disputaEspera=60').social.disputaEspera, 60);
   assert.equal(parseParams('social.disputaDestino=1.5').social.disputaDestino, 1.5);
+  // Los dos interruptores del embudo son booleanos estrictos: nada de 0/1 ni 'False'.
+  for (const clave of ['poblacion.exigeComunidad', 'poblacion.comprobacionContinua'] as const) {
+    assert.equal(PARAM_DESCRIPTORS[clave]!.kind, 'boolean');
+    for (const malo of ['0', '1', 'False', 'si', '']) assert.throws(() => parseParams(`${clave}=${malo}`), /true o false/, `${clave}=${malo}`);
+    assert.equal(valorBooleano(parseParams(`${clave}=false`), clave), false);
+    assert.equal(valorBooleano(parseParams(`${clave}=true`), clave), true);
+  }
   assert.throws(() => parseParams('conducta.inexistente=1'), /desconocid/i);
+  assert.throws(() => parseParams('poblacion.inexistente=1'), /desconocid/i);
   assert.throws(() => parseParams('social.disputa=1'), /desconocid/i);
   assert.equal(parseParams('social.disputaRadio=8,conducta.habituacion=2').social.disputaRadio, 8);
 });
@@ -207,6 +291,9 @@ test('(vi) una instantánea anterior a estas leyes las completa con sus defaults
 });
 
 function valor(params: WorldParams, clave: string): number {
-  const [seccion, hoja] = clave.split('.') as ['conducta' | 'social', string];
+  const [seccion, hoja] = clave.split('.') as ['conducta' | 'social' | 'poblacion', string];
   return (params[seccion] as unknown as Record<string, number>)[hoja]!;
+}
+function valorBooleano(params: WorldParams, clave: string): boolean {
+  return (params.poblacion as unknown as Record<string, boolean>)[clave.split('.')[1]!]!;
 }

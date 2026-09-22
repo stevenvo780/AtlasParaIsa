@@ -1,7 +1,7 @@
 import type { Person, World } from './index.js';
 import { demographicTraits, updateDemography } from './demography.js';
 import { localRandom } from './genetics.js';
-import { paramsOf } from './params.js';
+import { DEFAULT_PARAMS, paramsOf } from './params.js';
 
 export const FAMILY_RESERVE_TARGET = 0.12;
 const SHARE_AMOUNT = 0.025;
@@ -13,9 +13,12 @@ export function closeKin(a: Person, b: Person): boolean {
   return a.genome.parents.length > 0 && b.genome.parents.length > 0 && a.genome.parents.some(id => b.genome.parents.includes(id));
 }
 
-/** Higher is closer and more mutually trusted. Eligible pairs already sit within 3 cells. */
-export function pairAffinity(a: Person, b: Person): number {
-  return (1 - distance(a, b) / 3) + ((a.bonds[b.id] ?? 0) + (b.bonds[a.id] ?? 0)) / 2;
+/** Higher is closer and more mutually trusted. Eligible pairs already sit within `radioPareja` cells.
+ * `radioPareja` es la misma distancia que admite `reproduce()`: la cercanía puntúa en
+ * unidades de ese radio, así que ensancharlo no vuelve despreciable el término espacial.
+ * El default reproduce el 3 histórico. */
+export function pairAffinity(a: Person, b: Person, radioPareja: number = DEFAULT_PARAMS.poblacion.radioPareja): number {
+  return (1 - distance(a, b) / radioPareja) + ((a.bonds[b.id] ?? 0) + (b.bonds[a.id] ?? 0)) / 2;
 }
 
 export function pairTie(world: Pick<World, 'seed' | 'tick'>, a: Person, b: Person): number {
@@ -28,8 +31,11 @@ export function chooseReproductivePartner(world: Pick<World, 'seed' | 'tick'>, p
   if (!candidates.length) return undefined;
   if (!byAffinity) return candidates[0];
   let best: Person | undefined, bestScore = -Infinity, bestTie = -Infinity;
+  // `world` puede ser un `Pick` sintético en pruebas: `paramsOf` devuelve entonces los
+  // defaults, que son exactamente los números históricos.
+  const radioPareja = paramsOf(world).poblacion.radioPareja;
   for (const other of candidates) {
-    const score = pairAffinity(person, other), tie = pairTie(world, person, other);
+    const score = pairAffinity(person, other, radioPareja), tie = pairTie(world, person, other);
     if (!best || score > bestScore || (score === bestScore && (tie > bestTie || (tie === bestTie && other.id < best.id)))) {
       best = other; bestScore = score; bestTie = tie;
     }

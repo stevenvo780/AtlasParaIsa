@@ -20,7 +20,15 @@ export interface WorldParams {
     cuidadoReduceRiesgo: number;
   };
   genes: { varianzaFundadores: number; tasaMutacion: number };
-  poblacion: { maxima: number; intervaloComprobacionTicks: number; nacimientosPorComprobacion: number };
+  /**
+   * `exigeComunidad`, `radioPareja`, `radioLugar` y `comprobacionContinua` son leyes
+   * candidatas del embudo de natalidad (diagnóstico 2026-09-22, `scripts/lab/diagnostico-natalidad.ts`):
+   * con sus defaults `reproduce()` es la de hoy. Ninguna levanta el techo de nacimientos:
+   * el calendario máximo sigue siendo `nacimientosPorComprobacion` por ventana de
+   * `intervaloComprobacionTicks` pasos.
+   */
+  poblacion: { maxima: number; intervaloComprobacionTicks: number; nacimientosPorComprobacion: number;
+    exigeComunidad: boolean; radioPareja: number; radioLugar: number; comprobacionContinua: boolean };
   recursos: { capacidadBosque: number; capacidadPastizal: number; capacidadOtros: number; velocidadRegeneracion: number; decaimientoFertilidad: number; decaimientoComida: number };
   persistencia: { cadaTicks: number; ventanaEventosTicks: number; paginasSucias: boolean };
   /** Agua superficial concentrada en cuencas: 1 = generación actual (todas las charcas/manantiales); < 1 conserva solo las de las cuencas más húmedas (T035). */
@@ -64,7 +72,8 @@ const RAW_DEFAULTS: WorldParams = {
   genes: { varianzaFundadores: 0.15, tasaMutacion: 1 },
   // Ruling R17: `maxima` ya no es un tope de diseño (era 40); por defecto no limita y el
   // freno lo ponen el entorno y el gobernador. Sigue siendo parámetro para el laboratorio.
-  poblacion: { maxima: 1_000_000, intervaloComprobacionTicks: 120, nacimientosPorComprobacion: 2 },
+  poblacion: { maxima: 1_000_000, intervaloComprobacionTicks: 120, nacimientosPorComprobacion: 2,
+    exigeComunidad: true, radioPareja: 3, radioLugar: 4, comprobacionContinua: false },
   recursos: { capacidadBosque: 1, capacidadPastizal: 0.7, capacidadOtros: 0.35, velocidadRegeneracion: 1, decaimientoFertilidad: 0.001, decaimientoComida: 0.0001 },
   persistencia: { cadaTicks: 1, ventanaEventosTicks: 0, paginasSucias: false },
   agua: { cuencas: 0.4 },
@@ -131,6 +140,10 @@ export const PARAM_RANGES: Record<string, [number, number]> = {
   'poblacion.maxima': [1, 1_000_000],
   'poblacion.intervaloComprobacionTicks': [1, 10000],
   'poblacion.nacimientosPorComprobacion': [0, 20],
+  // Embudo de natalidad: el radio de pareja entra además en `pairAffinity` (family.ts),
+  // así que mover uno mueve también cómo se ordenan las parejas candidatas.
+  'poblacion.radioPareja': [1, 32],
+  'poblacion.radioLugar': [1, 64],
   'recursos.capacidadBosque': [0, 10],
   'recursos.capacidadPastizal': [0, 10],
   'recursos.capacidadOtros': [0, 10],
@@ -172,6 +185,8 @@ type ParamValue = number | boolean | string | (number | boolean | string)[];
 export const PARAM_DESCRIPTORS: Readonly<Record<string, ParamDescriptor>> = deepFreeze({
   ...Object.fromEntries(Object.entries(PARAM_RANGES).map(([key, range]) => [key,
     { kind: 'number', range, integer: key === 'motor.hilos' || key === 'social.disputaEspera' || key.startsWith('limites.') }])),
+  'poblacion.exigeComunidad': { kind: 'boolean' },
+  'poblacion.comprobacionContinua': { kind: 'boolean' },
   'motor.clonPorPaso': { kind: 'boolean' },
   'motor.soaTerreno': { kind: 'boolean' },
   'motor.particionarPersonas': { kind: 'boolean' },

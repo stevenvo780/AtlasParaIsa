@@ -320,7 +320,8 @@ export function updateCommunities(world: World, emit: Emit): void {
     // guardan las instantáneas de producción. Copiarlo aquí cambiaría historias ya escritas
     // (medido: el digesto de las semillas 51926 y 42 se mueve), así que no se toca en esta
     // tarea; `reproduce` evita el alias sólo en el camino que lo rompería (index.ts).
-    emit({ kind: 'community', actors: group.members, x: person.x, y: person.y, source: 'simulation', text: `${name} tomó forma entre ${members.map(p => p.name).join(', ')}.`, cause: 'Confianza ganada en interacciones cercanas, prácticas compatibles y un lugar compartido; no se asignó una facción al nacer.' });
+    // Reglas ≥ 10: el evento lleva su propia copia; los mundos V9 conservan su historia.
+    emit({ kind: 'community', actors: world.version >= 10 ? [...group.members] : group.members, x: person.x, y: person.y, source: 'simulation', text: `${name} tomó forma entre ${members.map(p => p.name).join(', ')}.`, cause: 'Confianza ganada en interacciones cercanas, prácticas compatibles y un lugar compartido; no se asignó una facción al nacer.' });
   }
   world.communities = world.communities.filter(group => group.members.length > 0);
 }

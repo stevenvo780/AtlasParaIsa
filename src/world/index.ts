@@ -30,7 +30,7 @@ export type { WorldContext } from './spatial.js';
 
 // V9 accounts for an earlier visible forager when planning finite family reserves.
 // Physical work, consumption and reproduction gates retain their existing laws.
-export const RULES_VERSION = 9;
+export const RULES_VERSION = 10;
 /**
  * Ruling R17: ya no hay tope de población en el software. `POPULATION_HARD_LIMIT`
  * (1.000.000) solo protege `assertWorld` de un snapshot corrupto; el freno real es el
@@ -1197,9 +1197,10 @@ function reproduce(world: World): void {
     // camino por defecto no se toca. Con `comprobacionContinua` el nacimiento puede caer
     // 1..119 pasos DESPUÉS, cuando el evento ya es durable, y empujar lo reescribiría: el
     // Store lo rechaza («an immutable event cannot be overwritten»). Reemplazar el arreglo
-    // deja el mismo censo sin tocar el pasado. El alias en sí queda como defecto anotado.
+    // deja el mismo censo sin tocar el pasado. Desde reglas 10 el evento lleva su propia copia
+    // (society.ts) y aquí se reemplaza siempre; los mundos V9 conservan el alias histórico.
     const group = world.communities.find(c => c.id === a.communityId);
-    if (group) { if (pop.comprobacionContinua) group.members = [...group.members, id]; else group.members.push(id); }
+    if (group) { if (pop.comprobacionContinua || world.version >= 10) group.members = [...group.members, id]; else group.members.push(id); }
     count(world, 'births');
     const event = addEvent(world, { kind: 'birth', actors: [a.id, b.id, child.id], x: child.x, y: child.y, source: 'simulation', text: a.communityId === b.communityId ? `${child.name} nació en la comunidad de ${a.name} y ${b.name}.` : `${child.name} nació del vínculo entre ${a.name} y ${b.name}, de comunidades distintas.`, cause: `${a.name} y ${b.name} junto a ${place.name} (${place.x},${place.y}). Dos progenitores simulados con recursos, confianza y lugar compartido; reserva conjunta −0.16, cría recibe 0.10. Recombina siete pares de parámetros; ${genome.mutations} variaciones. Habilidades y recuerdos comienzan vacíos; cultura inicial por crianza, no por ADN.` });
     remember(child, world, 'La comunidad sostuvo su llegada.', event.id, place.id);
@@ -1578,9 +1579,14 @@ function migrateWorldState(value: unknown, context: WorldContext = {}): World {
     if (catalogueEnabled(world.technology)) for (const person of world.people) maintainTechnologyMemory(world, person);
     assertWorld(world); return world;
   }
+  if (version === 9) {
+    assertWorld(value, 9, context);
+    const world = cloneWorld(value, context); upgradeV10(world);
+    return migrateWorldState(world, context);
+  }
   if (version === 8) {
     assertWorld(value, 8, context);
-    const world = cloneWorld(value, context); upgradeV9(world);
+    const world = cloneWorld(value, context); upgradeV9(world); upgradeV10(world);
     return migrateWorldState(world, context);
   }
   if (version === 7) {
@@ -1597,20 +1603,20 @@ function migrateWorldState(value: unknown, context: WorldContext = {}): World {
   }
   if (version === 5) {
     assertWorld(value, 5, context);
-    const world = cloneWorld(value, context); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world);
+    const world = cloneWorld(value, context); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); upgradeV10(world);
     if (world.technology.checkpoint === undefined) world.technology.checkpoint = captureTechnologyCheckpoint(world.technology, world.people, world.tick, 'migration');
     if (catalogueEnabled(world.technology)) for (const person of world.people) maintainTechnologyMemory(world, person);
     assertWorld(world); return world;
   }
-  if (version===4) { assertWorld(value,4,context); const world=cloneWorld(value,context); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); assertWorld(world); return world; }
+  if (version===4) { assertWorld(value,4,context); const world=cloneWorld(value,context); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); upgradeV10(world); assertWorld(world); return world; }
   if(version===3) {
     assertWorld(value,3,context);
-    const world=cloneWorld(value,context); upgradeV4(world); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); assertWorld(world); return world;
+    const world=cloneWorld(value,context); upgradeV4(world); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); upgradeV10(world); assertWorld(world); return world;
   }
   if (version === 2) {
     assertWorld(value, 2, context);
     const world = cloneWorld(value, context);
-    upgradeV3(world); upgradeV4(world); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); assertWorld(world); return world;
+    upgradeV3(world); upgradeV4(world); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); upgradeV10(world); assertWorld(world); return world;
   }
   assertCommon(value, true);
   const world = structuredClone(value);
@@ -1638,7 +1644,7 @@ function migrateWorldState(value: unknown, context: WorldContext = {}): World {
     p.skills = {}; p.values = {}; p.activity = {}; p.materials = { wood: 0, stone: 0 }; p.visited = [];
     p.heading = index * 2.399963229728653; p.command = null; p.work = 0; p.lastOutcome = world.tick; p.intentContext = p.hunger > 0.5 ? 'hungry' : p.fatigue > 0.5 ? 'tired' : 'ready'; p.controlMode = 'auto';
   });
-  upgradeV3(world); upgradeV4(world); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); assertWorld(world); return world;
+  upgradeV3(world); upgradeV4(world); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); upgradeV10(world); assertWorld(world); return world;
 }
 function upgradeV3(world: World): void {
   world.version = 3; world.cooperationEnabled = true; world.reproductionEnabled = true;
@@ -1670,3 +1676,5 @@ function upgradeV7(world: World): void { world.version = 7; }
 function upgradeV8(world: World): void { world.version = 8; }
 /** V9 changes only local family planning; stored bodies, work and resources remain historical. */
 function upgradeV9(world: World): void { world.version = 9; }
+/** V10 prepara las leyes nuevas; al migrar sólo cambia la etiqueta, el estado guardado queda intacto. */
+function upgradeV10(world: World): void { world.version = 10; }

@@ -505,6 +505,13 @@ abre nada: hace falta 20. Los vínculos existen, pero la gente que se quiere est
 > overwritten» (reproducido en la semilla 42, paso 167). `reproduce()` evita el alias **sólo** en ese
 > camino, reemplazando el arreglo en vez de empujarlo; el camino por defecto queda intacto. Arreglar el
 > alias de raíz es una tarea aparte, porque mueve el digesto.
+>
+> **Corregido de raíz en reglas 10.** Con `world.version >= 10` el evento `community` lleva su propia
+> copia de los miembros fundadores y `reproduce()` siempre reemplaza el arreglo; los mundos V9 (el
+> público) siguen con el alias y reproducen su historia byte a byte. Medido en la semilla 51926 a 1200
+> pasos: V10 y V9 difieren sólo en `version` y en los actores de un evento de fundación (sin
+> `neighbor-9`, que se sumó después por el camino de unión, no por nacimiento). Prueba:
+> `tests/rules-v10.test.ts`.
 
 > **Rangos de longevidad (revisión de R3, 2026-09-19).** Los tres rangos marcados «R3» se estrecharon respecto de
 > T001 porque los anteriores declaraban legales valores que el motor no podía correr. La ley de T010 exige

@@ -8,22 +8,18 @@ import { DatabaseSync } from 'node:sqlite';
 import { cloneWorld, createWorld, stepWorld } from '../src/world/index.js';
 import * as family from '../src/world/family.js';
 import { FamilyObservation, familySample, roleActivity } from '../scripts/lab/family-observation.js';
-import { classifyOutcome, prepare, verifyPlan } from '../scripts/lab/family-reserve-batch.js';
+import { classifyOutcome, prepare } from '../scripts/lab/family-reserve-batch.js';
 
-test('V9 paired plan fixes both arms, seeds, horizon, persistence and deadline, refusing altered contracts', () => {
+test('V9 paired plan is frozen history: a rules-V10 tree cannot pose as its candidate', () => {
+  // El lote V8-contra-V9 (docs/REVISION-CONTENCION-V9-2026-09-22.md) copia el árbol vivo como
+  // candidato. Desde reglas 10 ese árbol ya no es V9 y `prepare` tiene que negarse, dejando
+  // constancia del rechazo, en vez de fabricar un lote con la etiqueta equivocada.
   const root = fileURLToPath(new URL('..', import.meta.url));
   const directory = resolve(root, 'artifacts/family-contention-v9-20260922', `fixture-${randomUUID()}`);
   try {
-    const batch = prepare(directory);
-    assert.equal(batch.sources.baseline.originSha, 'eaa2709b24ef02623921ba39bf32159a0892b4e1');
-    assert.equal(batch.days, 13); assert.equal(batch.ticks, 31200); assert.equal(batch.workers, 6);
-    assert.equal(batch.timeoutMs, 3600000); assert.equal(batch.params, 'persistencia.cadaTicks=20');
-    assert.deepEqual(batch.jobs.map(j => j.id), ['baseline-1007', 'candidate-1007', 'baseline-1012', 'candidate-1012', 'baseline-1013', 'candidate-1013']);
-    assert.match(readFileSync(resolve(batch.sources.baseline.root, 'src/world/index.ts'), 'utf8'), /RULES_VERSION = 8;/);
-    assert.match(readFileSync(resolve(batch.sources.candidate.root, 'src/world/index.ts'), 'utf8'), /RULES_VERSION = 9;/);
-    verifyPlan(batch);
-    for (const changed of [{ ...batch, days: 14 }, { ...batch, workers: 7 }, { ...batch, timeoutMs: 3600001 },
-      { ...batch, jobs: batch.jobs.map((j, i) => i === 0 ? { ...j, seed: 9999 } : j) }]) assert.throws(() => verifyPlan(changed));
+    assert.match(readFileSync(resolve(root, 'src/world/index.ts'), 'utf8'), /RULES_VERSION = 10;/);
+    assert.throws(() => prepare(directory), /Candidate must declare rules V9\./);
+    assert.match(readFileSync(resolve(directory, 'preparation-failure.json'), 'utf8'), /Candidate must declare rules V9/);
     assert.throws(() => prepare(directory), /EEXIST/);
     assert.equal(classifyOutcome(0, { timedOut: true }), 'timeout');
     assert.equal(classifyOutcome(0, { invalidEvidence: true }), 'invalid-evidence');

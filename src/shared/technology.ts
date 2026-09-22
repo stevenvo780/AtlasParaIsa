@@ -130,8 +130,10 @@ export interface TechnologyView {
   /** Only each present actor's learned instructions, independent of the detail sample. */
   knowledge?: { actorId: string; recipeIds: string[] }[];
   items: { id: string; ownerId: string; x: number; y: number; recipeId: string | null; mass: number; generation: number; capacities: Record<Capability, number>;
-    /** Absent in older projections; never infer an empty container from missing data. */
-    water?: { version: 1; quanta: number; capacityQuanta: number; quantaPerUnit: 50000; leakageNumerator: number; leakageDenominator: 1000000 };
+    /** Absent in older projections; never infer an empty container from missing data.
+     * In version 1 the optional constants default to 50000 and 1000000 respectively.
+     * Protocol 9 omits them; readers also accept the previous complete representation. */
+    water?: { version: 1; quanta: number; capacityQuanta: number; quantaPerUnit?: 50000; leakageNumerator: number; leakageDenominator?: 1000000 };
   }[];
   dynamics: { attempts: number; failures: number; recipes: number; products: number; generations: number;
     toolUses: number; observedUtility: number; shared: number; importedMass: number; productMass: number;

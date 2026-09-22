@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../src/server/store.js';
 import { decodeSnapshot, encodeSnapshot } from '../src/server/snapshot.js';
-import { assertWorld, cloneWorld, createWorld, migrateWorld, stepWorld, type World } from '../src/world/index.js';
+import { assertWorld, cloneWorld, createWorld, migrateWorld, RULES_VERSION, stepWorld, type World } from '../src/world/index.js';
 import { assertTechnology, projectTechnology, researchTechnology, settleTechnologyEstate, technologyWorkCost, transferTechnologyItem, useTool,
   type TechnologyProgram } from '../src/world/technology.js';
 import { assertWaterExecution, carriedTechnologyMass, containedWaterQuanta, drinkContainedWater, fillContainedWater,
@@ -123,7 +123,7 @@ test('chemical water in a paid composite is not drinkable contents and migration
   const legacy = cloneWorld(lab.world); legacy.version = 5; delete legacy.technology.water;
   delete legacy.technology.checkpoint!.water;
   const original = structuredClone(legacy), migrated = migrateWorld(legacy);
-  assert.equal(migrated.version, 6); assert.deepEqual(legacy, original);
+  assert.equal(migrated.version, RULES_VERSION); assert.deepEqual(legacy, original);
   assert.equal(migrated.people[2]!.technology.items[0]!.contents, undefined);
   assert.deepEqual(migrated.technology.recipes, original.technology.recipes);
   assert.deepEqual(migrated.technology.history, original.technology.history);
@@ -328,7 +328,9 @@ test('checksum-consistent removal of a committed spill from snapshot and archive
 
 test('the projection supplies authoritative liquid capacity and amount separately from structural mass', () => {
   const lab = fixture(), initial = projectTechnology(lab.world).items[0]!;
-  assert.equal(initial.water!.quanta, 0); assert.equal(initial.water!.quantaPerUnit, 50_000);
+  assert.equal(initial.water!.quanta, 0); assert.equal(initial.water!.version, 1);
+  assert.equal(initial.water!.quantaPerUnit, undefined, 'protocol 9 omits the fixed v1 unit, not the liquid amount');
+  assert.equal(initial.water!.leakageDenominator, undefined, 'protocol 9 omits the fixed v1 leakage denominator');
   assert.equal(initial.water!.capacityQuanta, containerAffordance(lab.item).capacityQuanta);
   fill(lab); const before = structuredClone(lab.world), projected = projectTechnology(lab.world).items[0]!;
   assert.equal(projected.mass, lab.item.mass); assert.equal(projected.water!.quanta, lab.item.contents!.water);
@@ -336,6 +338,28 @@ test('the projection supplies authoritative liquid capacity and amount separatel
   projected.water!.quanta = 0; assert.deepEqual(lab.world, before);
   const legacy = fixture(); delete legacy.world.technology.water; delete legacy.world.technology.checkpoint!.water;
   assert.equal(projectTechnology(legacy.world).items[0]!.water, undefined, 'old projection omits the datum instead of asserting empty');
+});
+
+test('compact water projection removes only repeated constants from a paid filled object', t => {
+  const lab = fixture(); fill(lab);
+  const digest = () => createHash('sha256').update(JSON.stringify(lab.world)).digest('hex'), before = digest();
+  const compact = projectTechnology(lab.world);
+  const complete = { ...compact, items: compact.items.map(item => ({ ...item, ...(item.water ? { water: {
+    ...item.water, quantaPerUnit: 50000 as const, leakageDenominator: 1000000 as const,
+  } } : {}) })) };
+  const compactBytes = Buffer.byteLength(JSON.stringify(compact)), completeBytes = Buffer.byteLength(JSON.stringify(complete));
+  const waterItems = compact.items.filter(item => item.water).length;
+  assert.ok(waterItems > 0);
+  assert.equal(completeBytes - compactBytes, waterItems * ',"quantaPerUnit":50000,"leakageDenominator":1000000'.length);
+  assert.deepEqual(compact.items.map(item => item.id), lab.world.people.flatMap(person => person.technology.items.map(item => item.id)), 'every physical object remains in the view');
+  for (const projected of compact.items) if (projected.water) {
+    const physical = lab.world.people.flatMap(person => person.technology.items).find(item => item.id === projected.id)!;
+    assert.equal(projected.water.quanta, physical.contents?.water ?? 0);
+    assert.equal(projected.water.capacityQuanta, containerAffordance(physical).capacityQuanta);
+    assert.equal(projected.water.leakageNumerator, containerAffordance(physical).leakageNumerator);
+  }
+  assert.equal(digest(), before); assertTechnology(lab.world);
+  t.diagnostic(`paid fixture: ${completeBytes} → ${compactBytes} bytes; ${completeBytes - compactBytes} saved, ${waterItems} objects retained`);
 });
 
 test('retiming real receipts cannot allocate two handling actions to the same actor in one tick', () => {

@@ -31,13 +31,70 @@ export interface Opportunity {
   recipeId?: string; supplyMaterial?: 'wood' | 'stone';
   exchange?: { itemId: string; material: 'wood' | 'stone'; amount: number };
 }
+/** Instruction helps a material task the learner is actually undertaking. A skill
+ * received from a lesson is not evidence that its holder has practised it. */
+function practicedSkillToTeach(world: World, teacher: Person, learner: Person): string | undefined {
+  if (!world.learningEnabled || distance(learner, learner.target) > 7) return;
+  const skill = learner.action;
+  if (!['gather', 'farm', 'hunt', 'forage'].includes(skill) || (teacher.activity[skill] ?? 0) <= 0 ||
+    (teacher.skills[skill] ?? 0) <= (learner.skills[skill] ?? 0) + 0.08) return;
+  const tile = tileAt(world, learner.target);
+  if (!tile) return;
+  const useful = skill === 'gather' ? ((tile.wood ?? 0) >= 1 && learner.materials.wood < 12) || ((tile.stone ?? 0) >= 1 && learner.materials.stone < 8)
+    : skill === 'farm' ? learner.materials.wood >= 1 && tile.terrain !== 'shelter' && tile.moisture > 0.2 && tile.vegetation < 0.9 && (tile.cultivation ?? 0) < 1
+    : skill === 'hunt' ? (tile.fauna ?? 0) >= 1
+    : tile.food > 0 && learner.inventory < 0.25;
+  return useful ? skill : undefined;
+}
+
+/** This is a local prospect, not a withdrawal: supplies still require collection
+ * or exchange and fabrication still pays the physical execution's full costs. */
+function localRecipeInputs(world: World, teacher: Person, learner: Person): (program: TechnologyProgram, prospectiveProductId?: string) => boolean {
+  const raw = { wood: (learner.materials.wood + teacher.materials.wood) * MASS_UNIT,
+    stone: (learner.materials.stone + teacher.materials.stone) * MASS_UNIT, water: 0 };
+  for (let dy = -7; dy <= 7; dy++) for (let dx = -7; dx <= 7; dx++) {
+    if (dx * dx + dy * dy > 49) continue;
+    const tile = tileAt(world, { x: learner.x + dx, y: learner.y + dy });
+    if (tile && tile.terrain !== 'water') { raw.wood += (tile.wood ?? 0) * MASS_UNIT; raw.stone += (tile.stone ?? 0) * MASS_UNIT; raw.water += (tile.drinkingWater ?? 0) * 50_000; }
+  }
+  const items = [...learner.technology.items, ...teacher.technology.items], powers = toolCapacities({ ...learner, technology: { ...learner.technology, items } });
+  return (program, prospectiveProductId) => {
+    const required = { wood: 0, stone: 0, water: 0 }, residue = { wood: 0, stone: 0, water: 0 }, products = new Map<string, number>();
+    for (const input of program.inputs) {
+      if (input.source === 'product') products.set(input.recipeId!, (products.get(input.recipeId!) ?? 0) + input.mass);
+      else (input.source === 'raw' ? required : residue)[input.material!] += input.mass;
+    }
+    const fuel = program.steps.reduce((n, step) => n + (step.op === 'heat' ? step.intensity * 50 : 0), 0);
+    required.wood += Math.max(0, fuel - Math.max(0, learner.technology.residue.wood - residue.wood));
+    return (['wood', 'stone', 'water'] as const).every(material => required[material] <= raw[material] && residue[material] <= learner.technology.residue[material]) &&
+      [...products].every(([id, needed]) => id === prospectiveProductId || items.filter(item => item.recipeId === id).reduce((total, item) => total + item.mass, 0) >= needed) &&
+      program.steps.every(step => !step.requiredCatalyst || powers[step.requiredCatalyst] >= 0.1);
+  };
+}
 function practicedRecipeToTeach(world: World, teacher: Person, learner: Person): string | undefined {
   if (!world.learningEnabled) return;
-  return teacher.technology.knownRecipes.flatMap(id => {
+  const candidates = teacher.technology.knownRecipes.flatMap(id => {
     if (learner.technology.knownRecipes.includes(id) || (teacher.technology.competence[id]?.successes ?? 0) <= 0) return [];
     const recipe = resolveTechnologyRecipe(world, id); return recipe ? [recipe] : [];
-  })
-    .sort((a, b) => (teacher.technology.competence[b.id]?.benefit ?? 0) - (teacher.technology.competence[a.id]?.benefit ?? 0) || a.id.localeCompare(b.id))[0]?.id;
+  });
+  if (!candidates.length) return;
+  const inputsAvailable = localRecipeInputs(world, teacher, learner);
+  const remembered = learner.technology.knownRecipes.flatMap(id => { const recipe = resolveTechnologyRecipe(world, id); return recipe ? [recipe] : []; });
+  const known = remembered.filter(recipe => inputsAvailable(recipe.program));
+  // Possessing a tool does not teach its replacement. Compare reproducible
+  // instructions, not the world catalogue or the teacher's lifetime popularity.
+  const powers = Object.fromEntries(CAPABILITIES.map(capability => [capability, Math.max(0, ...known.map(recipe => recipe.capacities[capability]))])) as Record<Capability, number>;
+  // An intermediate can unblock instructions already remembered before a craft
+  // action is possible. Assess only those instructions (or the learner's own active
+  // program), with the other substrates still required locally; the world catalogue
+  // supplies no new desires and no product is credited until fabrication pays for it.
+  const prospectivePrograms = [...remembered.map(recipe => recipe.program), ...requestedPrograms(world, learner)];
+  return candidates.filter(recipe => inputsAvailable(recipe.program)).map(recipe => ({ recipe,
+    gain: Math.max(...CAPABILITIES.map(capability => recipe.capacities[capability] - powers[capability]))
+      + (prospectivePrograms.some(program => program.inputs.some(input => input.source === 'product' && input.recipeId === recipe.id)
+        && inputsAvailable(program, recipe.id)) ? 1 : 0),
+  })).filter(candidate => candidate.gain > 0.12)
+    .sort((a, b) => b.gain - a.gain || (teacher.technology.competence[b.recipe.id]?.benefit ?? 0) - (teacher.technology.competence[a.recipe.id]?.benefit ?? 0) || a.recipe.id.localeCompare(b.recipe.id))[0]?.recipe.id;
 }
 /** A request comes from the recipient's active program, or a recipe they actually know
  * while attempting fabrication. The world's catalogue is never a source of desires. */
@@ -143,7 +200,7 @@ export function cooperationOpportunity(world: World, person: Person): Opportunit
     if (other.action === 'build' && ((other.materials.wood < cost.wood && person.materials.wood > 0) || (other.materials.stone < cost.stone && person.materials.stone > 0))) opportunities.push({ person: other, kind: 'supply', score: score + 0.22 });
     else if ((other.action === 'build' || other.action === 'hunt') && other.work > 0 && other.work < (other.action === 'build' ? cost.work : Math.ceil(45*(1-(other.skills.hunt??0)*0.25))) - 1) opportunities.push({ person: other, kind: 'assist', score: score + 0.16 });
     else if (person.materials.wood >= 2 && person.materials.stone < 2 && other.materials.stone >= 2 && other.materials.wood < 6) opportunities.push({ person: other, kind: 'trade', score: score + 0.08 });
-    else if (world.learningEnabled && Object.entries(person.skills).some(([skill, level]) => level > (other.skills[skill] ?? 0) + 0.08)) opportunities.push({ person: other, kind: 'teach', score });
+    else if (practicedSkillToTeach(world, person, other)) opportunities.push({ person: other, kind: 'teach', score });
   }
   return opportunities.sort((a, b) => b.score - a.score || distance(person, a.person) - distance(person, b.person) || a.person.id.localeCompare(b.person.id))[0];
 }
@@ -175,12 +232,12 @@ export function cooperate(world: World, person: Person, emit: Emit): boolean {
     const words: Record<Capability, string> = { cutting: 'corte', storage: 'contención', insulation: 'aislamiento', cultivation: 'palanca para cultivo', binding: 'unión', abrasion: 'abrasión' };
     detail = `Entregó el objeto ${item.id}, con ${item.mass} unidades de masa y capacidad de ${words[strongest]}, a cambio de una unidad de ${exchange.material === 'wood' ? 'madera' : 'piedra'}; resuelve una carencia observable sin duplicar el lote.`;
   } else if (opportunity.recipeId) {
-    if (!practicedRecipeToTeach(world, person, other) || (person.technology.competence[opportunity.recipeId]?.successes ?? 0) <= 0 || !shareTechnology(world, person, other, emit, opportunity.recipeId)) return false;
+    if (practicedRecipeToTeach(world, person, other) !== opportunity.recipeId || !shareTechnology(world, person, other, emit, opportunity.recipeId)) return false;
     helperPaid = true; count(world, 'teaching');
     const recipe = resolveTechnologyRecipe(world, opportunity.recipeId)!;
     detail = `Mostró las operaciones practicadas ${recipe.program.steps.map(s => s.op).join(' → ')}; ${other.name} aprendió la receta por esta interacción cercana.`;
   } else {
-    const skill = Object.keys(person.skills).filter(key => person.skills[key]! > (other.skills[key] ?? 0) + 0.08).sort((a, b) => person.skills[b]! - person.skills[a]!)[0];
+    const skill = practicedSkillToTeach(world, person, other);
     if (!skill) return false;
     other.skills[skill] = clamp((other.skills[skill] ?? 0) + Math.min(0.012, (person.skills[skill]! - (other.skills[skill] ?? 0)) * other.genome.learningRate)); count(world, 'teaching');
     detail = `Mostró una técnica practicada de ${skill}; ${other.name} aprendió mediante observación.`;

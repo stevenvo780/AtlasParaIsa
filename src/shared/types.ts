@@ -9,8 +9,10 @@ export type { TechnologyRecipe, TechnologyRecipeSummary } from './technology.js'
  * `{type:'persona', id}`. Las magnitudes de tesela que valen cero se omiten, `VIEW_EVENTS` baja a 40 y
  * `organization` viaja sin el balance por recurso. Un cliente antiguo en caché debe fallar a la vista
  * en lugar de dibujar como «cero» lo que sólo está ausente.
- * A cached older client must fail in the open instead of drawing an absent program. */
-export const PROTOCOL_VERSION = 8;
+ * 9: water projection v1 omits its fixed unit and leakage denominator. The reader
+ * supplies those format constants; quantities and the water version stay explicit.
+ * A cached older client must fail in the open instead of drawing missing metadata. */
+export const PROTOCOL_VERSION = 9;
 export interface Viewport { x: number; y: number; width: number; height: number; }
 export type Biome = 'grassland' | 'forest' | 'desert' | 'mountain' | 'wetland' | 'ocean';
 export type Terrain = 'water' | 'soil' | 'meadow' | 'shelter';
@@ -90,6 +92,8 @@ export interface WorldStats { population: number; meanEnergy: number; meanHunger
   regionesSinAgua?: number; }
 /** `tickHz`: ritmo real medido en reloj de pared sobre los últimos pasos, no el ritmo pedido. */
 export interface RuntimeStats { stepMs: number; p95StepMs: number; saveMs: number; projectionMs: number; snapshotBytes: number; activeTiles: number; processRssMiB: number; tickHz: number;
+  /** Coste del borrador y de las leyes, separado del guardado del mismo paso. */
+  cloneMs?: number; simulationMs?: number;
   /**
    * Ruling R17: el hardware, no un tope fijo, limita la población. `activo` es el valor
    * vigente de `world.reproductionEnabled`; el gobernador lo apaga cuando `p95StepMs`

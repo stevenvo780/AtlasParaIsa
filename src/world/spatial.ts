@@ -43,7 +43,10 @@ export function activate(world: World, x: number, y: number, context: WorldConte
   // global de `generateChunk`/`initializeEcosystem` — este es el único sitio de producción que
   // materializa teselas nuevas en una partida.
   const cuencas = paramsOf(world).agua.cuencas;
-  const chunk = pending >= 0 ? world.retiredChunks.splice(pending, 1)[0]! : context.loadChunk?.(key, world.tick) ?? generateChunk(world.seed, cx, cy, cuencas);
+  // Both pending snapshots and host readers may share immutable archived objects.
+  // Clone only the chunk being reactivated, before exposing animals/places/structures to laws.
+  const archived = pending >= 0 ? world.retiredChunks.splice(pending, 1)[0]! : context.loadChunk?.(key, world.tick);
+  const chunk = archived ? structuredClone(archived) : generateChunk(world.seed, cx, cy, cuencas);
   const { tiles, animals, structures, ...meta } = chunk;
   world.chunks[key] = meta;
   const initialized=tiles.map(tile => initializeEcosystem(world.seed, tile, cuencas));

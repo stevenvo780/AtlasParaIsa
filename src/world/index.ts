@@ -22,13 +22,15 @@ import { reproductiveReadiness, familyOpportunity, availableToShare, closeKin, c
 import { advancePopulation, assertLegacyRecord, assertPopulation } from './lineage.js';
 import { analyzeTechnologyOrganization } from './technology-organization.js';
 import { captureTechnologyCheckpoint, advanceTechnologyCheckpoint } from './technology-checkpoint.js';
-import { advanceWaterPreparation, beginWaterPreparation, containedWaterQuanta, drinkContainedWater, emptyWaterLedger, maintainContainedWater, payContainedWaterCarry, WATER_WORK_ENERGY, WATER_WORK_FATIGUE } from './technology-water.js';
+import { advanceWaterPreparation, beginWaterPreparation, canHandleContainedWater, containedWaterQuanta, drinkContainedWater, emptyWaterLedger, maintainContainedWater, payContainedWaterCarry, WATER_WORK_ENERGY, WATER_WORK_FATIGUE } from './technology-water.js';
 import { flowQuantized, WATER_QUANTA_PER_UNIT } from './material-affordances.js';
 import { DEFAULT_PARAMS, paramsOf, setParams, type WorldParams } from './params.js';
 export { bindWorldContext, tileAt, normalizeViewport, worldContext } from './spatial.js';
 export type { WorldContext } from './spatial.js';
 
-export const RULES_VERSION = 6;
+// V7 declares the 2026-09-22 choice, kinship, phenotype and material-learning laws.
+// It does not claim the parallel-world feature is complete or change the wire protocol.
+export const RULES_VERSION = 7;
 /**
  * Ruling R17: ya no hay tope de población en el software. `POPULATION_HARD_LIMIT`
  * (1.000.000) solo protege `assertWorld` de un snapshot corrupto; el freno real es el
@@ -193,7 +195,17 @@ export function createWorld(seed = 20260905, params?: WorldParams): World {
       technology: initialTechnologyKnowledge(), demography: initialDemography(4800),
     });
   }
-  for (const person of world.people) initializePerson(world, person, varianzaFundadores);
+  for (const person of world.people) {
+    initializePerson(world, person, varianzaFundadores);
+    // Founders and descendants express the same inherited loci. The authored
+    // S/I characterization is preserved; this corrects fictional neighbors only.
+    if (person.role === 'neighbor') {
+      person.traits = expressGenome(person.genome);
+      person.curiosity = person.traits.curiosity;
+      person.sociability = person.traits.sociability;
+      person.generosity = person.traits.care;
+    }
+  }
   world.technology.checkpoint = captureTechnologyCheckpoint(world.technology, world.people, world.tick, 'initial');
   world.structures.push(...legacyStructures(world.tiles, world.tick));
   addEvent(world, { kind: 'memory', actors: [], source: 'sample', text: 'Este mundo comienza con S, I y una vecindad ficticia. Los cinco recuerdos son ejemplos, pendientes de la historia de Steven e Isa.', cause: 'Contenido sintético identificado; no se importaron conversaciones ni biografía.' });
@@ -299,7 +311,7 @@ function drinkingBody(world: World, person: Person, point: Point) {
   const needed = Math.min(.006, body.thirst / 3), ambient = Math.min(waterAvailable(world, point), needed);
   hydrateBody(body, ambient);
   const item = person.technology.items.find(item => (item.contents?.water ?? 0) > 0);
-  if (item && distance(person, point) === 0 && person.technology.waterActionAt !== world.tick && body.energy >= WATER_WORK_ENERGY && body.fatigue <= 1 - WATER_WORK_FATIGUE) {
+  if (item && distance(person, point) === 0 && canHandleContainedWater(person, world.tick)) {
     const requested = Math.min(Math.max(0, Math.floor((needed - ambient) * WATER_QUANTA_PER_UNIT)), Math.floor(body.thirst / 3 * WATER_QUANTA_PER_UNIT));
     const flow = flowQuantized({ sourceWater: item.contents!.water, destinationWater: 0, destinationCapacity: requested,
       requestedQuanta: requested, carryFreeQuanta: requested, elapsedTicks: 1, workAvailable: 1 });
@@ -307,6 +319,30 @@ function drinkingBody(world: World, person: Person, point: Point) {
     hydrateBody(body, flow.movedQuanta / WATER_QUANTA_PER_UNIT);
   }
   return body;
+}
+
+function bodilyNeedRates(world: World, tile: Tile, physiology: ReturnType<typeof demographicTraits>) {
+  return { hunger: 0.00027 * physiology.foodDemand, thirst: (0.00045 + (tile.biome === 'desert' ? 0.0002 : 0)) * physiology.waterDemand,
+    energy: 0.00007, stressEnergy: 0.00015, fatigue: 0.00009 + (world.weather === 'rain' && tile.terrain !== 'shelter' ? 0.0001 : 0) };
+}
+
+function localRestQuality(world: World, person: Person): number {
+  const exposedQuality = world.weather === 'rain' ? 0.2 : 0.55;
+  return world.shelterBenefitEnabled ? Math.max(facilityRestQuality(world, person), exposedQuality) : exposedQuality;
+}
+
+/** A local paid pause is useful only if its real recovery can enable handling within
+ * the next decision interval. This predicts capacity, never hydration or new contents. */
+function canRecoverWaterHandling(world: World, person: Person): boolean {
+  const forecast = { ...person }, quality = localRestQuality(world, person);
+  const rates = bodilyNeedRates(world, tileAt(world, person)!, demographicTraits(person.genome, paramsOf(world).cuerpo));
+  for (let elapsed = 1; elapsed <= 30; elapsed++) {
+    restBody(forecast, { fatigue: REST_FATIGUE_RATE, energy: REST_ENERGY_RATE }, quality);
+    // The next choice happens after the following tick's basal needs, as in bodyAndAction.
+    advanceNeeds(forecast, rates);
+    if (canHandleContainedWater(forecast, world.tick + elapsed)) return true;
+  }
+  return false;
 }
 
 function choose(world: World, person: Person): void {
@@ -349,11 +385,15 @@ function choose(world: World, person: Person): void {
     reason: `Tiene reservas y busca ${familyPlace ? `reunirse con ${family.partner.name} en ${familyPlace.name}` : `acercarse a ${family.partner.name}`}; el vínculo y el cuidado corporal permiten intentar una crianza.`,
   });
   const water = reachableTiles.filter(t => waterAvailable(world,t) > 0.005 && planAffordable(stepsTo(t)!, 0)).sort((a, b) => distance(person, a) - distance(person, b))[0];
-  const portableWater = containedWaterQuanta(person) > 0;
+  const carriedWater = containedWaterQuanta(person) > 0;
+  const portableWater = carriedWater && canHandleContainedWater(person, world.tick);
+  const localWater = waterAvailable(world, person) > 0;
+  const recoverWater = carriedWater && !portableWater && !localWater && canRecoverWaterHandling(world, person);
+  const seekingWater = !water && !portableWater && !localWater && !recoverWater && person.thirst > 0.6;
   if (portableWater) candidates.push({ action: 'drink', target: { x: person.x, y: person.y }, score: Math.max(0, person.thirst - 0.18) * 3.1,
     reason: 'Lleva agua en un objeto y puede beber su contenido finito aquí.' });
   if (water) candidates.push({ action: 'drink', target: water, score: Math.max(0, person.thirst - 0.18) * 3.1 - distance(person, water) * 0.015, reason: 'La sed orienta su camino hacia una reserva finita de agua dulce.' });
-  else if (!portableWater && person.thirst > 0.6) {
+  else if (seekingWater) {
     // An empty perceptual neighborhood does not remove the bodily motive. Searching
     // uses the existing local exploration and movement costs; it reveals no distant
     // water and provides no thirst relief until a real reserve is reached and debited.
@@ -395,7 +435,12 @@ function choose(world: World, person: Person): void {
   const rested = { hunger: person.hunger, thirst: person.thirst, fatigue: person.fatigue, energy: person.energy };
   restBody(rested, { fatigue: REST_FATIGUE_RATE, energy: REST_ENERGY_RATE });
   const readinessRecovery = clamp((rested.energy - person.energy) / REST_ENERGY_RATE);
-  candidates.push({ action: 'rest', target: shelter ?? person, score: person.fatigue * 1.75 + (1 - person.energy) * 1.2 * readinessRecovery + (phaseAt(world.tick) === 'night' ? 0.1 : 0), reason: shelter ? 'El cansancio hace valiosa una pausa bajo techo.' : 'Necesita una pausa; no percibe un refugio cercano.' });
+  const restCandidate: Candidate = { action: 'rest', target: recoverWater ? person : shelter ?? person,
+    score: Math.max(person.fatigue * 1.75 + (1 - person.energy) * 1.2 * readinessRecovery + (phaseAt(world.tick) === 'night' ? 0.1 : 0),
+      recoverWater ? Math.max(0, person.thirst - 0.18) * 3.1 : 0),
+    reason: recoverWater ? 'Lleva agua pero necesita recuperar aquí el esfuerzo para manipularla; descansa antes de volver a intentar beber.'
+      : shelter ? 'El cansancio hace valiosa una pausa bajo techo.' : 'Necesita una pausa; no percibe un refugio cercano.' };
+  candidates.push(restCandidate);
   const resource = nearbyTiles.filter(t => ((t.wood ?? 0) >= 1 && person.materials.wood < 12) || ((t.stone ?? 0) >= 1 && person.materials.stone < 8))
     .sort((a, b) => resourceDistance(person, a) - resourceDistance(person, b))[0];
   const workBias = person.traits.industriousness;
@@ -540,7 +585,16 @@ function choose(world: World, person: Person): void {
   }
   candidates.sort((a, b) => b.score - a.score);
   const selected = candidates[0]!;
-  if (selected.action === 'explore' && !selected.directed) selected.target = explorationTarget(world, person, reachableTiles);
+  if (selected.action === 'explore' && !selected.directed) {
+    // Urgent thirst reconsiders every tick. Replacing a still viable waypoint
+    // each time can reverse the route before either endpoint is ever visited.
+    // Keep the paid local search leg; visible water and bodily recovery still
+    // compete on every choice, and blocked/reached targets must be replaced.
+    const remaining = stepsTo(person.target);
+    const continuingSearch = seekingWater && person.action === 'explore' && remaining !== undefined
+      && remaining > 0 && planAffordable(remaining, 0);
+    selected.target = continuingSearch ? person.target : explorationTarget(world, person, reachableTiles);
+  }
   // A viable work site retains accumulated work while the same action is selected.
   // A protective forecast in rain cannot be redirected to a different old site
   // after its route, function and cost have already been evaluated.
@@ -553,7 +607,7 @@ function choose(world: World, person: Person): void {
   person.intentContext = person.thirst > 0.5 ? 'thirsty' : person.hunger > 0.5 ? 'hungry' : person.fatigue > 0.5 ? 'tired' : 'ready';
   person.target = { x: selected.target.x, y: selected.target.y };
   person.reason = selected.memory ? `${selected.reason} Influye «${selected.memory.title}», ${selected.memory.source === 'sample' ? 'material de prueba' : 'recuerdo aprobado'}.` : selected.reason;
-  person.decisionAt = world.tick + 30;
+  person.decisionAt = world.tick + (selected === restCandidate && recoverWater ? 1 : 30);
   if (selected.memory && person.recentMemory !== selected.memory.text) {
     const event = addEvent(world, { kind: 'memory', actors: [person.id], text: `${person.name} eligió ${actionLabel(selected.action)} al recordar «${selected.memory.title}».`, cause: `Contexto ${selected.memory.context}; recuerdo ${selected.memory.id}; aumenta la preferencia por ${selected.action}.`, x: person.x, y: person.y, source: selected.memory.source });
     remember(person, world, selected.memory.text, event.id, selected.memory.placeId);
@@ -693,7 +747,7 @@ function bodyAndAction(world: World, person: Person): void {
   maintainContainedWater(world, person);
   const tile = tileAt(world, person)!;
   const physiology = demographicTraits(person.genome, paramsOf(world).cuerpo);
-  advanceNeeds(person, { hunger:0.00027*physiology.foodDemand, thirst:(0.00045+(tile.biome==='desert'?0.0002:0))*physiology.waterDemand, energy:0.00007, stressEnergy:0.00015, fatigue:0.00009+(world.weather==='rain'&&tile.terrain!=='shelter'?0.0001:0) });
+  advanceNeeds(person, bodilyNeedRates(world, tile, physiology));
   person.closeness = clamp(person.closeness + 0.0001);
   person.socialLoad = clamp(person.socialLoad - 0.0008);
   if (person.technology.waterPreparation) {
@@ -711,8 +765,10 @@ function bodyAndAction(world: World, person: Person): void {
   const emptyFood = person.action === 'eat' && (tileAt(world, person.target)?.food ?? 0) < 0.005 && person.inventory < 0.01 && foodAvailable(world,person)<0.001;
   const emptyHarvest = person.action === 'forage' && (tileAt(world, person.target)?.food ?? 0) < 0.005;
   const emptyWater = person.action === 'drink' && containedWaterQuanta(person) === 0 && waterAvailable(world,person.target) < 0.003;
+  const blockedCarriedWater = person.action === 'drink' && distance(person, person.target) < 0.5
+    && containedWaterQuanta(person) > 0 && !canHandleContainedWater(person, world.tick) && waterAvailable(world, person) <= 0;
   const agreedWait = person.action === 'retreat' && person.lastDispute >= 0 && world.tick < person.decisionAt && world.tick - person.lastDispute < 30;
-  if (!agreedWait && (world.tick >= person.decisionAt || emptyFood || emptyHarvest || emptyWater || (person.hunger > 0.9 && !['eat','hunt'].includes(person.action)) || (person.thirst > 0.9 && person.action !== 'drink'))) choose(world, person);
+  if (!agreedWait && (world.tick >= person.decisionAt || emptyFood || emptyHarvest || emptyWater || blockedCarriedWater || (person.hunger > 0.9 && !['eat','hunt'].includes(person.action)) || (person.thirst > 0.9 && person.action !== 'drink'))) choose(world, person);
   if (['eat','drink','hunt'].includes(person.action)) resourceDispute(world, person, event => addEvent(world, event));
   if (world.tick % 6 === 0 && !(person.action === 'accompany' && distance(person, person.target) <= 1.5)) move(world, person);
   const current = tileAt(world, person)!;
@@ -753,7 +809,7 @@ function bodyAndAction(world: World, person: Person): void {
     }
   }
   if (person.action === 'rest' && distance(person, person.target) < 0.5) {
-    const quality = world.shelterBenefitEnabled ? Math.max(facilityRestQuality(world,person),world.weather==='rain'?0.2:0.55) : world.weather === 'rain' ? 0.2 : 0.55;
+    const quality = localRestQuality(world, person);
     const beforeRest={fatigue:person.fatigue,energy:person.energy};
     restBody(person, { fatigue: REST_FATIGUE_RATE, energy: REST_ENERGY_RATE }, quality);
     if (world.shelterBenefitEnabled) recordFacilityRest(world,person,beforeRest);
@@ -995,8 +1051,11 @@ function fertile(world: World, person: Person): boolean {
 export function cloneWorld(world: World, context: WorldContext): World;
 export function cloneWorld(world: World): World;
 export function cloneWorld(world: World, context: WorldContext = worldContext(world)): World {
-  const draft: World = structuredClone({ ...world, tiles: [] });
+  const draft: World = structuredClone({ ...world, tiles: [], retiredChunks: [] });
   draft.tiles = world.tiles.map(tile => ({ ...tile }));
+  // Dormant chunks are immutable until activate() takes a private deep copy.
+  // A new queue is still required: retiring/reactivating must not edit the confirmed queue.
+  draft.retiredChunks = [...world.retiredChunks];
   bindWorldContext(draft, { ...worldContext(world), ...(context && typeof context === 'object' ? context : {}) });
   setParams(draft, paramsOf(world));
   // T041: la cadencia de las métricas caras vive en una caché lateral por mundo; el clon
@@ -1110,10 +1169,13 @@ export function assertWorld(value: unknown, expectedVersion = RULES_VERSION, con
   assertChronicleJournal(w);
   bindWorldContext(w, context ?? worldContext(w));
   const fail = (): never => { throw new Error('Estado procedural inválido.'); };
-  const identities = new Map<string, Person | LegacyRecord | undefined>();
+  // assertCommon has already rejected duplicate live IDs. Resolve live references
+  // once rather than scanning the roster for every bond and recipe author.
+  const alive = new Map(w.people.map(person => [person.id, person]));
+  const identities = new Map<string, Person | LegacyRecord | undefined>(alive);
   const identity = (id: string): Person | LegacyRecord | undefined => {
     if (identities.has(id)) return identities.get(id);
-    let person: Person | LegacyRecord | undefined = w.people.find(person => person.id === id) ?? w.legacy?.find(person => person.id === id) ?? w.retiredLegacy?.find(person => person.id === id);
+    let person: Person | LegacyRecord | undefined = w.legacy?.find(person => person.id === id) ?? w.retiredLegacy?.find(person => person.id === id);
     if (!person && expectedVersion >= 5) {
       const archived = worldContext(w).loadLegacy?.(id, w.tick);
       if (archived) { assertLegacyRecord(archived, w.tick); if (archived.id !== id) fail(); person = archived; }
@@ -1145,7 +1207,7 @@ export function assertWorld(value: unknown, expectedVersion = RULES_VERSION, con
         const parents = p.genome.parents.map(id => identity(id));
         if (parents.some(parent => !parent || parent.id === p.id || parent.bornAt >= p.bornAt || ('diedAt' in parent && parent.diedAt < p.bornAt) || parent.genome.generation >= p.genome.generation) || p.genome.generation !== Math.max(...parents.map(parent => parent!.genome.generation)) + 1) fail();
       }
-      if (typeof p.thirst !== 'number' || !Number.isFinite(p.thirst) || p.thirst < 0 || p.thirst > 1 || !Number.isSafeInteger(p.bornAt) || p.bornAt < -4800 || p.bornAt > w.tick || !Number.isSafeInteger(p.lastBirth) || p.lastBirth < -2400 || p.lastBirth > w.tick || !Number.isSafeInteger(p.lastSocial) || p.lastSocial < -30 || p.lastSocial > w.tick || !Number.isSafeInteger(p.lastDispute) || p.lastDispute < -180 || p.lastDispute > w.tick || !Number.isSafeInteger(p.lastPracticeMemory) || p.lastPracticeMemory < 0 || p.lastPracticeMemory > w.tick || !numericMap(p.culture, 0, 1, 3) || !['sharing','stewardship','openness'].every(key => typeof p.culture[key as keyof Culture] === 'number') || !numericMap(p.bonds, 0, 1, populationCap) || Object.keys(p.bonds).some(id => !w.people.some(other => other.id === id)) || !(p.communityId === null || typeof p.communityId === 'string' && w.communities?.some(c => c.id === p.communityId))) fail();
+      if (typeof p.thirst !== 'number' || !Number.isFinite(p.thirst) || p.thirst < 0 || p.thirst > 1 || !Number.isSafeInteger(p.bornAt) || p.bornAt < -4800 || p.bornAt > w.tick || !Number.isSafeInteger(p.lastBirth) || p.lastBirth < -2400 || p.lastBirth > w.tick || !Number.isSafeInteger(p.lastSocial) || p.lastSocial < -30 || p.lastSocial > w.tick || !Number.isSafeInteger(p.lastDispute) || p.lastDispute < -180 || p.lastDispute > w.tick || !Number.isSafeInteger(p.lastPracticeMemory) || p.lastPracticeMemory < 0 || p.lastPracticeMemory > w.tick || !numericMap(p.culture, 0, 1, 3) || !['sharing','stewardship','openness'].every(key => typeof p.culture[key as keyof Culture] === 'number') || !numericMap(p.bonds, 0, 1, populationCap) || Object.keys(p.bonds).some(id => !alive.has(id)) || !(p.communityId === null || typeof p.communityId === 'string' && w.communities?.some(c => c.id === p.communityId))) fail();
     }
     if (!['ready','hungry','thirsty','tired'].includes(p.intentContext)) fail();
     if (!p.traits || !['curiosity','sociability','industriousness','care','resilience'].every(k => typeof p.traits[k as keyof typeof p.traits] === 'number') || !numericMap(p.traits, 0, 1, 5) || !numericMap(p.skills, 0, 1, expectedVersion>=5?18:15) || !numericMap(p.values, -0.3, 0.3, expectedVersion>=5?72:60) || !numericMap(p.activity, 0, 1_000_000, expectedVersion>=5?18:15) || !p.materials || !Number.isFinite(p.materials.wood) || p.materials.wood < 0 || p.materials.wood > 12 || !Number.isFinite(p.materials.stone) || p.materials.stone < 0 || p.materials.stone > 8 || !Array.isArray(p.visited) || p.visited.length > 192 || !p.visited.every(k => typeof k === 'string' && /^-?\d+,-?\d+$/.test(k)) || !Number.isFinite(p.heading) || !Number.isSafeInteger(p.work) || p.work < 0 || p.work > (expectedVersion>=4?600:90) || !Number.isSafeInteger(p.lastOutcome) || p.lastOutcome < 0 || p.lastOutcome > w.tick || !['auto','directed'].includes(p.controlMode)) fail();
@@ -1216,22 +1278,29 @@ function migrateWorldState(value: unknown, context: WorldContext = {}): World {
     if (catalogueEnabled(world.technology)) for (const person of world.people) maintainTechnologyMemory(world, person);
     assertWorld(world); return world;
   }
+  if (version === 6) {
+    // Recovery tools may read a valid old world without rewriting its history or
+    // founders. Published test versions still start a separate world by policy.
+    assertWorld(value, 6, context);
+    const world = cloneWorld(value, context); upgradeV7(world);
+    return migrateWorldState(world, context);
+  }
   if (version === 5) {
     assertWorld(value, 5, context);
-    const world = cloneWorld(value, context); upgradeV6(world);
+    const world = cloneWorld(value, context); upgradeV6(world); upgradeV7(world);
     if (world.technology.checkpoint === undefined) world.technology.checkpoint = captureTechnologyCheckpoint(world.technology, world.people, world.tick, 'migration');
     if (catalogueEnabled(world.technology)) for (const person of world.people) maintainTechnologyMemory(world, person);
     assertWorld(world); return world;
   }
-  if (version===4) { assertWorld(value,4,context); const world=cloneWorld(value,context); upgradeV5(world); upgradeV6(world); assertWorld(world); return world; }
+  if (version===4) { assertWorld(value,4,context); const world=cloneWorld(value,context); upgradeV5(world); upgradeV6(world); upgradeV7(world); assertWorld(world); return world; }
   if(version===3) {
     assertWorld(value,3,context);
-    const world=cloneWorld(value,context); upgradeV4(world); upgradeV5(world); upgradeV6(world); assertWorld(world); return world;
+    const world=cloneWorld(value,context); upgradeV4(world); upgradeV5(world); upgradeV6(world); upgradeV7(world); assertWorld(world); return world;
   }
   if (version === 2) {
     assertWorld(value, 2, context);
     const world = cloneWorld(value, context);
-    upgradeV3(world); upgradeV4(world); upgradeV5(world); upgradeV6(world); assertWorld(world); return world;
+    upgradeV3(world); upgradeV4(world); upgradeV5(world); upgradeV6(world); upgradeV7(world); assertWorld(world); return world;
   }
   assertCommon(value, true);
   const world = structuredClone(value);
@@ -1256,7 +1325,7 @@ function migrateWorldState(value: unknown, context: WorldContext = {}): World {
     p.skills = {}; p.values = {}; p.activity = {}; p.materials = { wood: 0, stone: 0 }; p.visited = [];
     p.heading = index * 2.399963229728653; p.command = null; p.work = 0; p.lastOutcome = world.tick; p.intentContext = p.hunger > 0.5 ? 'hungry' : p.fatigue > 0.5 ? 'tired' : 'ready'; p.controlMode = 'auto';
   });
-  upgradeV3(world); upgradeV4(world); upgradeV5(world); upgradeV6(world); assertWorld(world); return world;
+  upgradeV3(world); upgradeV4(world); upgradeV5(world); upgradeV6(world); upgradeV7(world); assertWorld(world); return world;
 }
 function upgradeV3(world: World): void {
   world.version = 3; world.cooperationEnabled = true; world.reproductionEnabled = true;
@@ -1283,3 +1352,4 @@ function upgradeV5(world: World): void {
 function upgradeV6(world: World): void {
   world.version = 6; world.technology.water = emptyWaterLedger();
 }
+function upgradeV7(world: World): void { world.version = 7; }

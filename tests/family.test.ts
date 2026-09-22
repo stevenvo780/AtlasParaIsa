@@ -6,8 +6,8 @@ import { availableToShare, chooseReproductivePartner, closeKin, familyOpportunit
 import { DEFAULT_PARAMS, paramsOf, parseParams, setParams } from '../src/world/params.js';
 import { founderGenome } from '../src/world/genetics.js';
 
-function scene() {
-  const world = createWorld(51926);
+function scene(seed = 51926) {
+  const world = createWorld(seed);
   world.tick = 6000;
   const [a, b, c] = world.people.filter(person => person.role === 'neighbor').slice(0, 3) as [Person, Person, Person];
   world.people = [a, b, c];
@@ -70,6 +70,47 @@ test('mutual local trust allows different communities without inventing affiliat
   assert.deepEqual(world, before, 'a prospective family cannot alter communities, bodies or trust');
   b.communityId = null; assert.equal(familyOpportunity(world, a), null);
   b.communityId = 'other'; a.communityId = null; assert.equal(familyOpportunity(world, a), null);
+});
+
+test('close relatives cannot retain a family reserve for a birth that the reproductive gate forbids', context => {
+  const blocked: { seed: number; relation: string; intent: boolean; share: boolean }[] = [];
+  const relations: Record<string, (a: Person, b: Person) => void> = {
+    parent: (a, b) => { b.genome.parents = [a.id, 'other-parent']; },
+    child: (a, b) => { a.genome.parents = [b.id, 'other-parent']; },
+    siblings: (a, b) => { a.genome.parents = ['parent-1', 'parent-2']; b.genome.parents = ['parent-1', 'parent-2']; },
+    halfSiblings: (a, b) => { a.genome.parents = ['parent-1', 'parent-2']; b.genome.parents = ['parent-1', 'parent-3']; },
+  };
+  for (const seed of [1, 4, 7, 51926]) for (const [relation, relate] of Object.entries(relations)) {
+    const { world, a, b } = scene(seed);
+    a.inventory = FAMILY_RESERVE_TARGET;
+    assert.ok(familyOpportunity(world, a), 'unrelated founders provide the matched viable control');
+    assert.equal(availableToShare(world, a, b), false);
+    relate(a, b);
+    for (const person of [a, b]) if (person.genome.parents.length) person.genome.generation = 1;
+    assert.equal(closeKin(a, b), true);
+    assert.ok(reproductiveReadiness(world, a) && reproductiveReadiness(world, b), 'kinship is the only failed gate');
+    const before = structuredClone(world);
+    const intent = familyOpportunity(world, a) !== null, share = availableToShare(world, a, b);
+    assert.deepEqual(world, before, 'a rejected intention cannot consume or create food, trust, or offspring');
+    if (intent || !share) blocked.push({ seed, relation, intent, share });
+  }
+  context.diagnostic(JSON.stringify({ seeds: [1, 4, 7, 51926], kinPairs: 16, impossibleIntentsOrReservedFood: blocked.length }));
+  assert.deepEqual(blocked, []);
+});
+
+test('a closer relative cannot hide a viable unrelated partner, even across community labels', () => {
+  for (const seed of [1, 4, 7, 51926]) {
+    const { world, a, b, c } = scene(seed);
+    b.genome.parents = [a.id, 'other-parent']; b.genome.generation = 1;
+    c.communityId = 'other'; a.bonds[c.id] = c.bonds[a.id] = 0.3;
+    a.inventory = FAMILY_RESERVE_TARGET;
+    assert.equal(familyOpportunity(world, a)?.partner, c);
+    assert.equal(availableToShare(world, a, c), false, 'a real unrelated opportunity still earmarks its paid reserve');
+    world.people.reverse(); assert.equal(familyOpportunity(world, a)?.partner, c);
+    c.bonds[a.id] = 0.299;
+    assert.equal(familyOpportunity(world, a), null, 'kinship cannot bypass the mutual-trust control');
+    assert.equal(availableToShare(world, a, b), true);
+  }
 });
 
 test('cross-community birth keeps both memberships and pays the same food and energy costs', () => {

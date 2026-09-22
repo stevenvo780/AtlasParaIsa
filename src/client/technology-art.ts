@@ -14,19 +14,27 @@ interface ProjectedWater {
   version: 1; quanta: number; capacityQuanta: number; quantaPerUnit: 50000;
   leakageNumerator: number; leakageDenominator: 1000000;
 }
-function projectedWater(value: unknown): value is ProjectedWater {
-  if (!value || typeof value !== 'object') return false;
+function projectedWater(value: unknown): ProjectedWater | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return;
   const water = value as Partial<ProjectedWater>;
-  return water.version === 1 && water.quantaPerUnit === 50000 && water.leakageDenominator === 1000000
+  // Only version 1 supplies these fixed format constants. Explicit null, wrong
+  // units, unknown versions or missing quantities never become plausible zeros.
+  const quantaPerUnit = water.quantaPerUnit === undefined ? 50000 : water.quantaPerUnit;
+  const leakageDenominator = water.leakageDenominator === undefined ? 1000000 : water.leakageDenominator;
+  if (water.version === 1 && quantaPerUnit === 50000 && leakageDenominator === 1000000
     && Number.isSafeInteger(water.quanta) && water.quanta! >= 0
     && Number.isSafeInteger(water.capacityQuanta) && water.capacityQuanta! >= water.quanta!
     && Number.isSafeInteger(water.leakageNumerator) && water.leakageNumerator! >= 0
-    && water.leakageNumerator! <= water.leakageDenominator;
+    && water.leakageNumerator! <= leakageDenominator)
+    return { version: 1, quanta: water.quanta!, capacityQuanta: water.capacityQuanta!, quantaPerUnit,
+      leakageNumerator: water.leakageNumerator!, leakageDenominator };
+  return;
 }
 export function carriedWaterCard(item: TechnologyView['items'][number]): string {
-  const water: unknown = (item as { water?: unknown }).water;
-  if (water === undefined) return '<p class="drawer-note" data-water-state="unavailable">Contenido de agua no recibido en esta vista.</p>';
-  if (!projectedWater(water)) return '<p class="drawer-note" data-water-state="unavailable">Datos de agua no disponibles en esta vista.</p>';
+  const payload: unknown = (item as { water?: unknown }).water;
+  if (payload === undefined) return '<p class="drawer-note" data-water-state="unavailable">Contenido de agua no recibido en esta vista.</p>';
+  const water = projectedWater(payload);
+  if (!water) return '<p class="drawer-note" data-water-state="unavailable">Datos de agua no disponibles en esta vista.</p>';
   if (!water.capacityQuanta) return '<p class="drawer-note" data-water-state="incapable">Este objeto no retiene agua transportada.</p>';
   const state = water.quanta === 0 ? 'empty' : water.quanta === water.capacityQuanta ? 'full' : 'partial';
   const label = state === 'empty' ? 'Vacío' : state === 'full' ? 'Lleno' : 'Con agua';

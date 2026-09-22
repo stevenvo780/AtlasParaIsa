@@ -44,13 +44,15 @@ import type { Tile } from '../src/shared/types.js';
 const huella = (valor: unknown): string => createHash('sha256').update(JSON.stringify(valor)).digest('hex').slice(0, 16);
 const huellaMundo = (world: World): string => huella({ tiles: world.tiles, people: world.people, animals: world.animals });
 
-test('600 pasos de la semilla pública conservan la huella del mundo (coste ≠ ley)', () => {
+test('600 pasos conservan la trayectoria declarada de 2026-09-22; el kernel aislado conserva su ley', () => {
   const world = createWorld(51926);
   for (let paso = 0; paso < 600; paso++) stepWorld(world);
-  assert.equal(world.tiles.length, 3584);
+  // Founder expression/social/family/water corrections change routes and ecology
+  // exposure. This new world baseline is documented; the kernel-only hash below is unchanged.
+  assert.equal(world.tiles.length, 2048);
   assert.equal(world.people.length, 18);
-  assert.equal(world.animals.length, 111);
-  assert.equal(huellaMundo(world), 'ad80ea717de47c3a');
+  assert.equal(world.animals.length, 41);
+  assert.equal(huellaMundo(world), '06ce08ae78df91ac');
 });
 
 /** Mapa de 25 chunks (6400 teselas) directamente contra el kernel: aísla el bucle caliente del

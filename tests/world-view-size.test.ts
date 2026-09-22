@@ -6,6 +6,7 @@ import { projectTechnology, technologyRecipeDetail } from '../src/world/technolo
 import type { TechnologyRecipe } from '../src/shared/technology.js';
 
 const KIB = 1024;
+const encodedBytes = (value: unknown): number => Buffer.byteLength(JSON.stringify(value), 'utf8');
 /** Without a Store the catalogue is absent and the resident definitions reach `maxRecipes` (256):
  * the heaviest snapshot this world can produce, which is the one the measurement must survive. */
 function grownWorld(ticks: number): ReturnType<typeof createWorld> {
@@ -22,7 +23,9 @@ test('a snapshot carries procedure summaries, never their programs, and the savi
   // (senescencia cableada en advancePopulation, genoma de T011, parentesco de T012), no los params.
   // Esta prueba mide el TAMAÑO de la instantánea del mundo tal como se envía hoy, así que se enuncia
   // sobre la población real de hoy y sigue siendo refutable: si cambia, la medición debe rehacerse.
-  assert.equal(world.people.length, 28, 'the measurement is stated for 28 inhabitants');
+  // Re-measured after the declared V7 behavior corrections: 29 people.
+  // All payload ceilings and the reduction ratio below remain unchanged.
+  assert.equal(world.people.length, 29, 'the measurement is stated for 29 inhabitants');
   assert.ok(world.technology.recipes.length >= 200, `resident definitions: ${world.technology.recipes.length}`);
   const view = projectWorld(world), technology = view.technology!;
   assert.equal(technology.recipes.length, world.technology.recipes.length);
@@ -32,12 +35,19 @@ test('a snapshot carries procedure summaries, never their programs, and the savi
   }
   assert.equal(JSON.stringify(technology.recipes).includes('"program"'), false);
   assert.equal(JSON.stringify(view).includes('"steps"'), false, 'no program crosses the wire inside the snapshot');
-  const bytes = JSON.stringify(view).length;
-  const before = JSON.stringify({ ...view, technology: { ...technology, recipes: world.technology.recipes } }).length;
-  const summaryBytes = JSON.stringify(technology.recipes).length;
-  t.diagnostic(`t=8000 · ${world.people.length} hab. · ${world.technology.recipes.length} recetas · state ${(bytes / KIB).toFixed(1)} KiB (con programas ${(before / KIB).toFixed(1)} KiB) · recetas ${(summaryBytes / KIB).toFixed(1)} KiB · tiles ${(JSON.stringify(view.tiles).length / KIB).toFixed(1)} KiB · people ${(JSON.stringify(view.people).length / KIB).toFixed(1)} KiB`);
+  const bytes = encodedBytes(view);
+  const before = encodedBytes({ ...view, technology: { ...technology, recipes: world.technology.recipes } });
+  const summaryBytes = encodedBytes(technology.recipes);
+  t.diagnostic(`t=8000 · ${world.people.length} hab. · ${world.technology.recipes.length} recetas · state ${(bytes / KIB).toFixed(1)} KiB (con programas ${(before / KIB).toFixed(1)} KiB) · recetas ${(summaryBytes / KIB).toFixed(1)} KiB · tiles ${(encodedBytes(view.tiles) / KIB).toFixed(1)} KiB · people ${(encodedBytes(view.people) / KIB).toFixed(1)} KiB`);
   assert.ok(summaryBytes < 64 * KIB, `summaries at ${(summaryBytes / KIB).toFixed(1)} KiB`);
-  assert.ok(before - bytes > 140 * KIB, `the programs weighed ${((before - bytes) / KIB).toFixed(1)} KiB`);
+  // Different physical laws discover different programs. The historical 140 KiB
+  // also counted signatures/statistics, so it was not a fixed cost of omitting
+  // programs. Compare these same definitions with only their program fields removed.
+  const withoutPrograms = world.technology.recipes.map(({ program: _program, ...definition }) => definition);
+  const programBytes = encodedBytes(world.technology.recipes) - encodedBytes(withoutPrograms);
+  assert.ok(programBytes > 0 && before - bytes >= programBytes,
+    `saving ${before - bytes} bytes must cover ${programBytes} bytes of omitted program fields`);
+  t.diagnostic(`UTF-8 state: ${bytes} bytes; with full definitions: ${before} bytes; saving: ${before - bytes} bytes; program fields alone: ${programBytes} bytes`);
   assert.ok(bytes < before * 0.83, `the snapshot keeps ${(100 * bytes / before).toFixed(1)} % of its size with programs`);
   // PROVISIONAL CEILING OF THIS PHASE, NOT THE BRIEF'S TARGET. T020 asked for `state` < 120 KiB; what
   // this fix alone reaches is measured above and stated here without dressing it up: `tiles` (≈292 KiB)
@@ -54,10 +64,10 @@ test('a snapshot carries procedure summaries, never their programs, and the savi
 test('la dieta del `state` se mide con las dos cámaras de la evidencia', t => {
   const world = grownWorld(8000);
   const medida = (label: string, viewport: Viewport): number => {
-    const view = projectWorld(world, viewport), bytes = JSON.stringify(view).length;
-    const partes = Object.entries(view).map(([key, value]) => [key, JSON.stringify(value)?.length ?? 0] as const)
+    const view = projectWorld(world, viewport), bytes = encodedBytes(view);
+    const partes = Object.entries(view).map(([key, value]) => [key, value === undefined ? 0 : encodedBytes(value)] as const)
       .sort((a, b) => b[1] - a[1]).slice(0, 6).map(([key, size]) => `${key} ${(size / KIB).toFixed(1)}K`);
-    t.diagnostic(`cámara ${label} · state ${(bytes / KIB).toFixed(1)} KiB · ${partes.join(' · ')}`);
+    t.diagnostic(`cámara ${label} · state ${(bytes / KIB).toFixed(1)} KiB (${bytes} UTF-8 bytes) · ${partes.join(' · ')}`);
     return bytes;
   };
   const movil = medida('12x8', { x: 0, y: 0, width: 12, height: 8 });

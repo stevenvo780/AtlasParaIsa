@@ -213,9 +213,14 @@ export function maintainContainedWater(host: TechnologyHost, actor: TechnologyAc
   for (const change of changes) change.item.contents = change.contents;
   if (lost) record(host, actor, waterEnvelope(actor, opening, 'leak', { lost })!);
 }
-function canHandle(host: TechnologyHost, actor: WaterActor): boolean {
-  return host.people.includes(actor) && actor.technology.waterActionAt !== host.tick && actor.energy >= WATER_WORK_ENERGY
+/** Bodily and per-tick handling prerequisites shared by real actions and read-only forecasts.
+ * Ownership, contents and source debits remain the action's responsibility. */
+export function canHandleContainedWater(actor: WaterActor, tick: number): boolean {
+  return actor.technology.waterActionAt !== tick && actor.energy >= WATER_WORK_ENERGY
     && actor.fatigue <= 1 - WATER_WORK_FATIGUE && [actor.hunger, actor.thirst, actor.energy, actor.fatigue].every(n => Number.isFinite(n) && n >= 0 && n <= 1);
+}
+function canHandle(host: TechnologyHost, actor: WaterActor): boolean {
+  return host.people.includes(actor) && canHandleContainedWater(actor, host.tick);
 }
 /** Backend action only: no planner or inventory lookup grants procedural knowledge. */
 export function fillContainedWater(host: TechnologyHost, actor: WaterActor, itemId: string, requestedQuanta = DEFAULT_WATER_POLICY.flowQuantaPerTick): number {

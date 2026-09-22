@@ -290,15 +290,14 @@ function runDays(days: number, params?: WorldParams, seed = 51926): { world: Ret
   return { world, digests };
 }
 
-/** Constitución II (evidencia): cablear los cuatro params de longevidad no puede cambiar el mundo
- * público. Estos digests se midieron en la base del sprint (99fac6d) ANTES del cable, con
- * `createWorld(51926)` y los DEFAULTS; si la ley cableada devuelve otra cosa, los defaults dejaron
- * de coincidir con los literales 11/4/1/0,75 de T010 y hay que decirlo, no ajustar el número. */
-const CONTROL_51926 = ['d53d17b2f0052138', 'fe5ee506b702013b', 'd48bd3321943cb34'];
+/** Trajectory regression for the declared 2026-09-22 behavioral corrections, not
+ * a claim of equality to 99fac6d. Historical hashes and paired controls are recorded
+ * in docs/REVISION-2026-09-22.md; longevity formulas/defaults themselves are unchanged. */
+const CONTROL_51926 = ['32969bf8a6c5fd01', 'cc29d3747073ab13', '1ca1c608cd4a071f'];
 
-test('R3 control: 3 días del mundo público con los defaults son bit a bit los de antes del cable', context => {
+test('3 días con defaults conservan la trayectoria demográfica declarada el 2026-09-22', context => {
   const { world, digests } = runDays(3);
-  assert.deepEqual(digests, CONTROL_51926, 'el mundo con los defaults cambió al cablear cuerpo.longevidad*');
+  assert.deepEqual(digests, CONTROL_51926, 'cambió la trayectoria de las correcciones declaradas el 2026-09-22');
   context.diagnostic(JSON.stringify({ seed: 51926, dias: 3, digests, poblacion: world.people.length,
     nacimientos: world.totals.births, muertes: world.demographyDynamics.deaths, causas: world.demographyDynamics.causes }));
 });

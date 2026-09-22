@@ -7,7 +7,7 @@ export const FAMILY_RESERVE_TARGET = 0.12;
 const SHARE_AMOUNT = 0.025;
 const distance = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(a.x - b.x, a.y - b.y);
 
-/** Direct parent/child or full siblings. Founders with empty `parents` are never kin this way. */
+/** Direct parent/child or siblings sharing either parent. Founders with empty `parents` are never kin this way. */
 export function closeKin(a: Person, b: Person): boolean {
   if (a.genome.parents.includes(b.id) || b.genome.parents.includes(a.id)) return true;
   return a.genome.parents.length > 0 && b.genome.parents.length > 0 && a.genome.parents.some(id => b.genome.parents.includes(id));
@@ -49,14 +49,14 @@ export function reproductiveReadiness(world: World, person: Person): boolean {
 
 export interface FamilyOpportunity { partner: Person; reserveTarget: number; }
 
-/** A known, mutually trusted local partner can motivate acquiring real reserves.
+/** A known, mutually trusted local partner allowed by the kinship gate can motivate acquiring real reserves.
  * This intent neither supplies food nor guarantees a birth; the host owns actions and costs.
  * Both partners retain their communities; mutual local trust can cross their labels. */
 export function familyOpportunity(world: World, person: Person): FamilyOpportunity | null {
   if (!world.reproductionEnabled || !person.communityId || !reproductiveReadiness(world, person)) return null;
   const partner = world.people.filter(other => other !== person && other.id !== person.id && !!other.communityId
     && distance(person, other) <= 7 && (person.bonds[other.id] ?? 0) >= 0.3 && (other.bonds[person.id] ?? 0) >= 0.3
-    && reproductiveReadiness(world, other)
+    && !closeKin(person, other) && reproductiveReadiness(world, other)
     && world.places.some(place => distance(person, place) <= 7 && (distance(person, place) <= 4 || distance(other, place) <= 4)))
     .sort((a, b) => distance(person, a) - distance(person, b) || a.id.localeCompare(b.id))[0];
   return partner ? { partner, reserveTarget: FAMILY_RESERVE_TARGET } : null;

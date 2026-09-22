@@ -26,7 +26,10 @@ function run(world: ReturnType<typeof createWorld>, ticks: number): void {
 // del generador (lo prueban, sin hash, las pruebas «conserva toda el agua potable de origen» y
 // «`agua.cuencas` del MUNDO llega a createWorld→activate» de este mismo fichero). A partir de aquí
 // vuelve a ser un detector de deriva: si cambia, algo tocó el agua o el motor.
-const HASH_AGUA_MUNDO_4821_DIA1_CUENCAS1 = '0c2d09d3ed7681f60ea80eafb7581ba2a4d51dde240c1b1d13853c18f240ef15';
+// 2026-09-22: baseline changed deliberately by founder expression, local teaching,
+// viable family intent and paid water recovery; see docs/REVISION-2026-09-22.md.
+// Generator and isolated water controls below retain their original assertions.
+const HASH_AGUA_MUNDO_4821_DIA1_CUENCAS1 = '6a049c8502a8b22cd7d6792b7a20f49f0a4e0641002d63e92cf5f9573e74dac9';
 
 test('T035 control: agua.cuencas=1 EXPLÍCITO (no el default global) deja el agua/feature de las teselas bit a bit igual a hoy tras 1 día', () => {
   const world = createWorld(4821, parseParams('agua.cuencas=1'));

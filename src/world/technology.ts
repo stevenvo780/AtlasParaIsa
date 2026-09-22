@@ -20,7 +20,7 @@ export interface TechnologyActor {
 type Emit = (event: Omit<ChronicleEvent, 'id' | 'tick'>) => unknown;
 export interface TechnologyHost {
   seed: number; tick: number; people: TechnologyActor[]; technology: TechnologyState;
-  tiles?: { x: number; y: number; drinkingWater?: number }[];
+  tiles?: { x: number; y: number; drinkingWater?: number; wood?: number; stone?: number; terrain?: string; moisture?: number; vegetation?: number; cultivation?: number }[];
   cooperationEnabled?: boolean; learningEnabled?: boolean; noveltyEnabled?: boolean; emit?: Emit;
 }
 export const MASS_UNIT = 1000;
@@ -56,10 +56,10 @@ export function maintainTechnologyMemory(host: TechnologyHost, actor: Technology
   }).remembered) throw new Error('Active technology instructions exceed local memory capacity.');
   pruneTechnologyCompetence(knowledge);
 }
-function knownTechnologyRecipes(host: TechnologyHost, actor: TechnologyActor): TechnologyRecipe[] {
+function knownTechnologyRecipes(host: TechnologyHost, actor: TechnologyActor, cache = true): TechnologyRecipe[] {
   // The archive resolves only identities already held locally; its cache is not knowledge.
   return actor.technology.knownRecipes.flatMap(id => {
-    const recipe = resolveTechnologyRecipe(host, id);
+    const recipe = resolveTechnologyRecipe(host, id, { cache });
     return recipe ? [recipe] : [];
   });
 }
@@ -238,14 +238,23 @@ export function toolCapacities(actor: TechnologyActor): Record<Capability, numbe
   return result;
 }
 export interface ToolReceipt { executionId: string; itemId: string; recipeId: string | null; capability: Capability; power: number; wear: number; }
+function bestTool(actor: TechnologyActor, capability: Capability) {
+  return actor.technology.items.map(item => ({ item, power: materialCapacities(item)[capability] })).filter(i => i.power > 0.07)
+    .sort((a, b) => b.power - a.power || a.item.id.localeCompare(b.item.id))[0];
+}
+/** Shared by execution and private forecasts: the useful impulse pays the same wear. */
+function spendToolMaterial(actor: TechnologyActor, best: { item: MaterialBatch; power: number }, demand: number) {
+  const requestedWear = Math.max(1, Math.ceil(demand * (2 + (1 - best.item.properties.toughness) * 8))), wear = Math.min(best.item.mass, requestedWear);
+  const debris = splitComposition(best.item.composition, wear);
+  subtract(best.item.composition, debris); best.item.mass -= wear; add(actor.technology.residue, debris);
+  return { wear, debris, power: best.power * wear / requestedWear };
+}
 /** A receipt commits abrasion immediately. Call recordTechnologyBenefit only after applying the actual world delta. */
 export function useTool(host: TechnologyHost, actor: TechnologyActor, capability: Capability, demand = 1): ToolReceipt | undefined {
   if (!CAPABILITIES.includes(capability) || !Number.isFinite(demand) || demand <= 0) return;
-  const ranked = actor.technology.items.map(item => ({ item, power: materialCapacities(item)[capability] })).filter(i => i.power > 0.07).sort((a, b) => b.power - a.power || a.item.id.localeCompare(b.item.id));
-  const best = ranked[0]; if (!best) return;
+  const best = bestTool(actor, capability); if (!best) return;
   if (actor.technology.waterPreparation?.itemId === best.item.id) delete actor.technology.waterPreparation;
-  const opening = technologyStock(actor), waterOpening = containedWaterStock(actor), requestedWear = Math.max(1, Math.ceil(demand * (2 + (1 - best.item.properties.toughness) * 8))), wear = Math.min(best.item.mass, requestedWear);
-  const debris = splitComposition(best.item.composition, wear); subtract(best.item.composition, debris); best.item.mass -= wear; add(actor.technology.residue, debris);
+  const opening = technologyStock(actor), waterOpening = containedWaterStock(actor), { wear, debris, power } = spendToolMaterial(actor, best, demand);
   const waterLost = settleContainedWaterCapacity(host, best.item, best.item.mass === 0);
   actor.technology.items = actor.technology.items.filter(i => i.mass > 0);
   const state = host.technology; state.ledger.toolUses++;
@@ -253,7 +262,7 @@ export function useTool(host: TechnologyHost, actor: TechnologyActor, capability
   const water = waterEnvelope(actor, waterOpening, 'spill', waterLost ? { lost: waterLost } : {});
   const event = appendExecution(host, { kind: 'use', actorId: actor.id, recipeId: best.item.recipeId, programSignature: '', inputs: [{ resourceId: itemResource(best.item), mass: wear }], outputs: compositionResources(debris, 'residue'), residueMass: wear, energy: 0, work: 0, success: true, parentRecipeIds: [], catalysts: [], benefit: 0, ...(water ? { water } : {}), balance: { opening, closing: technologyStock(actor), externalInputs: [], externalLoss: [] } });
   maintainTechnologyMemory(host, actor);
-  return { executionId: event.id, itemId: best.item.id, recipeId: best.item.recipeId, capability, power: best.power * wear / requestedWear, wear };
+  return { executionId: event.id, itemId: best.item.id, recipeId: best.item.recipeId, capability, power, wear };
 }
 export function recordTechnologyBenefit(host: TechnologyHost, actor: TechnologyActor, receipt: ToolReceipt | undefined, actualBenefit: number): void {
   if (!receipt || !Number.isFinite(actualBenefit) || actualBenefit <= 0) return;
@@ -324,11 +333,96 @@ export function proposeTechnologyProgram(host: TechnologyHost, actor: Technology
   if (parents.some(id => { const recipe = resolveTechnologyRecipe(host, id); return !actor.technology.knownRecipes.includes(id) || !recipe || recipe.generation >= generationLimit(state); })) return;
   return { program, parents: parents.slice(0, 6) };
 }
+/** A forecast has no receipts, practice, catalogue writes or public stocks. All
+ * substrates and catalyst wear still pass through the execution's physical laws. */
+function forecastCraft(host: TechnologyHost, actor: TechnologyActor, recipe: TechnologyRecipe): MaterialBatch | undefined {
+  const plan = planWithdrawal(host, actor, recipe.program);
+  if (!plan) return;
+  withdraw(host, actor, plan);
+  let current = plan.inputs;
+  for (const step of recipe.program.steps) {
+    const capability = step.requiredCatalyst ?? step.catalyst, tool = capability ? bestTool(actor, capability) : undefined;
+    const impulse = tool ? spendToolMaterial(actor, tool, step.intensity * 0.4).power : 0;
+    actor.technology.items = actor.technology.items.filter(item => item.mass > 0);
+    const result = applyPhysicalOperation(step, current, impulse);
+    add(actor.technology.residue, result.residue);
+    if (!result.success || !result.product) return;
+    current = [result.product];
+  }
+  // Do not plan a chain that depends on silently recycling another needed tool.
+  if (actor.technology.items.length >= host.technology.budgets.maxItems) return;
+  const product = current[0]!;
+  product.id = `product-${++host.technology.itemCounter}`; product.recipeId = recipe.id;
+  actor.technology.items.push(product);
+  return product;
+}
+function localTechnologyUses(host: TechnologyHost, actor: TechnologyActor): Capability[] {
+  const tile = host.tiles?.find(t => t.x === Math.round(actor.x) && t.y === Math.round(actor.y));
+  if (!tile) return [];
+  const uses: Capability[] = [];
+  if ((tile.wood ?? 0) > 1 && actor.materials.wood < 11) uses.push('cutting');
+  if ((tile.stone ?? 0) > 1 && actor.materials.stone < 7) uses.push('abrasion');
+  if (actor.materials.wood >= 1 && tile.terrain !== 'shelter' && (tile.moisture ?? 0) > 0.2
+    && (tile.vegetation ?? 1) < 0.9 && (tile.cultivation ?? 0) < 0.9) uses.push('cultivation');
+  if (host.technology.water && (tile.drinkingWater ?? 0) > 0) uses.push('storage');
+  return uses;
+}
+/** Follow only locally remembered product dependencies, with at most one memory's
+ * worth of fabrication steps per forecast. No alternative-program search or
+ * unbounded quantity expansion; the next decision recomputes from actual stock. */
+function dependencyCraft(host: TechnologyHost, actor: TechnologyActor, known: TechnologyRecipe[], powers: Record<Capability, number>): TechnologyRecipe | undefined {
+  if (!known.some(recipe => recipe.program.inputs.some(input => input.source === 'product'))) return;
+  const uses = localTechnologyUses(host, actor), byId = new Map(known.map(recipe => [recipe.id, recipe]));
+  const improves = (capacities: Record<Capability, number>, capabilities: Capability[]) => capabilities.some(c => capacities[c] > Math.max(0.12, powers[c] * 1.35));
+  for (const goal of known) {
+    if (!goal.program.inputs.some(input => input.source === 'product') || !improves(goal.capacities, uses)) continue;
+    const privateActor: TechnologyActor = { ...actor, materials: { ...actor.materials }, technology: {
+      ...actor.technology, residue: { ...actor.technology.residue }, items: structuredClone(actor.technology.items),
+    } };
+    // Contained water is not chemical substrate or a catalyst. Do not speculate on
+    // its transport, leakage or future hydration while forecasting fabrication.
+    for (const item of privateActor.technology.items) delete item.contents;
+    const tile = host.tiles?.find(t => t.x === Math.round(actor.x) && t.y === Math.round(actor.y));
+    const privateHost: TechnologyHost = { seed: host.seed, tick: host.tick, people: [privateActor], tiles: tile ? [{ ...tile }] : [],
+      technology: { ...defaultTechnologyState(), budgets: host.technology.budgets, itemCounter: host.technology.itemCounter } };
+    const route: TechnologyRecipe[] = [], visiting = new Set<string>();
+    let remaining = known.length, work = 0;
+    const produce = (recipe: TechnologyRecipe): MaterialBatch | undefined => {
+      if (remaining-- <= 0 || visiting.has(recipe.id)) return;
+      visiting.add(recipe.id);
+      const demands = new Map<string, number>();
+      for (const input of recipe.program.inputs) if (input.source === 'product') demands.set(input.recipeId!, (demands.get(input.recipeId!) ?? 0) + input.mass);
+      for (const [id, required] of demands) {
+        const stock = () => privateActor.technology.items.reduce((n, item) => n + (item.recipeId === id ? item.mass : 0), 0);
+        while (stock() < required) {
+          const dependency = byId.get(id), before = stock();
+          if (!dependency || !produce(dependency) || stock() <= before) return;
+        }
+      }
+      const output = forecastCraft(privateHost, privateActor, recipe);
+      if (!output) return;
+      work += technologyWorkCost(recipe.program); route.push(recipe); visiting.delete(recipe.id);
+      return output;
+    };
+    const output = produce(goal);
+    if (!output || actor.energy - work * 0.00045 < 0.3 || actor.fatigue + work * 0.00032 > 0.72) continue;
+    // The end product, not a remembered historical capacity, must improve an
+    // available use after paying the whole chain, including its future farm wood.
+    const finalUses = localTechnologyUses({ ...privateHost, technology: host.technology }, privateActor)
+      .filter(capability => capability !== 'storage' || containerAffordance(output).capacityQuanta > 0);
+    if (improves(materialCapacities(output), finalUses)) return route[0];
+  }
+  return;
+}
 export function technologyOpportunity(host: TechnologyHost, actor: TechnologyActor): { kind: 'research' | 'craft'; score: number; reason: string; recipeId?: string } | undefined {
   if (actor.energy < 0.3 || actor.fatigue > 0.72 || Math.max(actor.hunger ?? 0, actor.thirst ?? 0) > 0.78) return;
   if (actor.technology.project) return { kind: actor.technology.project.kind, score: 0.86, reason: 'Continúa un proceso material que ya empezó y pagó.', recipeId: actor.technology.project.recipeId ?? undefined };
+  const powers = toolCapacities(actor), known = knownTechnologyRecipes(host, actor, false).sort((a, b) => (actor.technology.competence[b.id]?.benefit ?? 0) - (actor.technology.competence[a.id]?.benefit ?? 0) || (actor.technology.competence[b.id]?.successes ?? 0) - (actor.technology.competence[a.id]?.successes ?? 0) || a.id.localeCompare(b.id));
+  // A justified chain can continue its paid work without the cadence used to
+  // space speculative research and unrelated replacement crafts.
+  const dependency = dependencyCraft(host, actor, known, powers);
+  if (dependency) return { kind: 'craft', recipeId: dependency.id, score: 0.58, reason: 'Reproduce un paso conocido de una cadena material que mejora un uso disponible aquí; cada paso exige sus propios insumos y trabajo.' };
   if (host.tick - actor.technology.lastAttempt < 45) return;
-  const powers = toolCapacities(actor), known = knownTechnologyRecipes(host, actor);
   const craft = known.filter(r => planWithdrawal(host, actor, r.program) && CAPABILITIES.some(c => r.capacities[c] > Math.max(0.12, powers[c] * 1.35))).sort((a, b) => (actor.technology.competence[b.id]?.benefit ?? 0) - (actor.technology.competence[a.id]?.benefit ?? 0) || (actor.technology.competence[b.id]?.successes ?? 0) - (actor.technology.competence[a.id]?.successes ?? 0) || a.id.localeCompare(b.id))[0];
   if (craft && actor.technology.items.length < host.technology.budgets.maxItems && actor.technology.attempts % 3 !== 0) return { kind: 'craft', recipeId: craft.id, score: 0.58, reason: 'Puede reproducir una técnica aprendida para recuperar una capacidad material.' };
   if (host.noveltyEnabled === false || !inventionRoom(host.technology) || !localInputs(host, actor).length) return;
@@ -560,7 +654,7 @@ export function projectTechnology(host: TechnologyHost): TechnologyView {
     const affordance = state.water ? containerAffordance(i) : undefined;
     return { id: i.id, ownerId: p.id, x: p.x, y: p.y, recipeId: i.recipeId, mass: i.mass, generation: i.generation, capacities: viewCapacities(materialCapacities(i)),
       ...(affordance ? { water: { version: 1 as const, quanta: i.contents?.water ?? 0, capacityQuanta: affordance.capacityQuanta,
-        quantaPerUnit: 50000 as const, leakageNumerator: affordance.leakageNumerator, leakageDenominator: 1000000 as const } } : {}) };
+        leakageNumerator: affordance.leakageNumerator } } : {}) };
   })),
     dynamics: { attempts: state.ledger.attempts, failures: state.ledger.failures, recipes: totals.recipes, products: all.length, generations: totals.maxGeneration,
       toolUses: state.ledger.toolUses, observedUtility: totals.utility, shared: state.ledger.shared,

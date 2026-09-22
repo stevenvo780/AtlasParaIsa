@@ -63,11 +63,39 @@ test('supply, exchange and work assistance preserve inventories and have differe
 });
 
 test('teaching requires a practiced technique and changes the learner without copying genes or episodes', () => {
-  const {w,a,b}=scene(); a.skills={hunt:0.7}; b.skills={hunt:0.1};
+  const {w,a,b}=scene(); a.skills={hunt:0.7}; a.activity.hunt=3; b.skills={hunt:0.1}; b.action='hunt'; tileAt(w,b)!.fauna=1;
   const genome=structuredClone(b.genome), before=culturalDistance(a.culture,b.culture);
   assert.equal(cooperationOpportunity(w,a)?.kind,'teach'); cooperate(w,a,emit(w));
   assert.ok(b.skills.hunt!>0.1); assert.equal(a.skills.hunt,0.7); assert.deepEqual(b.genome,genome); assert.equal(w.totals.teaching,1);
   assert.ok(culturalDistance(a.culture,b.culture)<before); assert.equal(b.experiences.length,1);
+});
+
+test('teaching cooperation cannot recursively manufacture more cooperation', () => {
+  const {w,a,b}=scene(); a.skills={cooperate:0.9}; a.activity.cooperate=100; b.skills={cooperate:0.1};
+  const before=structuredClone({totals:w.totals,energy:a.energy,fatigue:a.fatigue,learner:b});
+  assert.equal(cooperationOpportunity(w,a),undefined); assert.equal(cooperate(w,a,emit(w)),false);
+  assert.deepEqual({totals:w.totals,energy:a.energy,fatigue:a.fatigue,learner:b},before);
+});
+
+test('skill teaching needs a practiced useful task, its local material and a reachable learner', () => {
+  const {w,a,b}=scene(); a.skills={gather:0.9}; a.activity.gather=3; b.skills={gather:0.1};
+  a.materials=b.materials={wood:0,stone:0};
+  assert.equal(cooperationOpportunity(w,a),undefined,'an idle learner creates no demand');
+  b.action='gather'; const tile=tileAt(w,b)!; tile.wood=tile.stone=0;
+  assert.equal(cooperationOpportunity(w,a),undefined,'an empty site has no useful practice');
+  tile.wood=3; assert.equal(cooperationOpportunity(w,a)?.kind,'teach');
+  const unpracticed=cloneWorld(w); unpracticed.people[2]!.activity.gather=0;
+  assert.equal(cooperationOpportunity(unpracticed,unpracticed.people[2]!),undefined,'a received skill alone is not practical experience');
+  const disabled=cloneWorld(w); disabled.learningEnabled=false;
+  assert.equal(cooperate(disabled,disabled.people[2]!,emit(disabled)),false);
+  b.target={x:b.x-8,y:b.y}; assert.equal(cooperationOpportunity(w,a),undefined,'no remote assessment of a work site');
+  b.target={x:b.x,y:b.y}; b.x=a.x+2;
+  assert.equal(cooperationOpportunity(w,a)?.kind,'teach'); assert.equal(cooperate(w,a,emit(w)),false);
+  b.x=a.x; const wood=tile.wood, materials=structuredClone([a.materials,b.materials]), energy=a.energy;
+  assert.equal(cooperate(w,a,emit(w)),true); assert.ok(b.skills.gather!>0.1);
+  assert.equal(tile.wood,wood); assert.deepEqual([a.materials,b.materials],materials,'teaching grants no material');
+  assert.ok(a.energy<energy); assert.equal(w.totals.teaching,1); assert.equal(w.totals.cooperation,1);
+  assert.equal(b.activity.gather??0,0,'instruction does not fabricate a successful gathering history');
 });
 
 test('communities arise from nearby trust and compatible practices; labels alone do not create membership', () => {

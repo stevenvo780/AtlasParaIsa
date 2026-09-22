@@ -7,28 +7,59 @@ Las fases anteriores resolvieron V1/errores semánticos, `-0` y transporte segme
 
 ## 4a. Admisión y persistencia, sin nuevas conductas
 
-Los cuatro valores efectivos son `params.limites.{teselasActivas,chunks,comunidades,fauna}`.
+### Corrección de contrato tras revisión R3 (antes del parche)
+
+El perfil 4a inicial no conservaba la operabilidad de snapshots antiguos que declaraban
+límites T102 inferiores a sus cantidades: esos números eran opciones inactivas y podían
+ser válidos en el binario anterior. Se añade por decisión explícita de la raíz
+`params.limites.aplicacion: 'historicos' | 'parametros'`, con default nuevo `parametros`.
+Los cuatro números declarados nunca se reemplazan ni se acotan al migrar.
+
+Un snapshot legacy sin perfil y sin marca se interpreta como `historicos`; sus límites
+efectivos son los cuatro guards históricos, aunque sus números reservados sean menores.
+Esto permite cargar, avanzar, guardar y volver a cargar sin activar esas opciones.
+El modo `parametros` usa los cuatro números declarados. El modo es tipado, persistido
+y automáticamente incluido en el digesto completo; no vive en un WeakMap oculto.
+
+Los nuevos snapshots usan `limitsProfile` versión 2, con `aplicacion` y los cuatro
+límites **efectivos**, además de params explícitos incluso para sus defaults. Se exige
+la marca en params, el modo concordante y las cuatro cantidades efectivas correctas.
+El perfil experimental v1 sigue leyéndose como `parametros`; nunca activa un mundo
+histórico. Perfil v2 sin marca, marca sin perfil y contradicciones se rechazan antes
+de resolver páginas. Borrar ambos puede ser indistinguible de un snapshot legacy
+auténtico de reglas 9: se aplican guards históricos, sin prometer detectar ese caso.
+La futura ley 10 deberá exigir el modo y el perfil en toda snapshot nueva de esa ley.
+
+Esta clave cambia de forma declarada el digesto completo de parámetros. No se elimina
+del control para fingir igualdad con el binario anterior. El contraste físico conserva
+todas las leyes antiguas y comprueba por separado la marca esperada; los roundtrips del
+nuevo binario siguen exigiendo digesto completo exacto. Los negativos y la cadena legacy
+se escriben antes del parche en `tests/limites-legacy-mode.test.ts`.
+
+Los cuatro valores declarados son `params.limites.{teselasActivas,chunks,comunidades,fauna}`.
 Son enteros seguros positivos. Sus defaults del motor siguen siendo deterministas.
-Se activan para validación los parámetros que T102 aceptaba como opciones reservadas.
+El modo `parametros` los aplica a validación; `historicos` conserva su declaración
+sin activar opciones que T102 había aceptado como reservadas.
 
 Todo snapshot nuevo de reglas 9 o posteriores lleva un perfil de transporte
-`limitsProfile: {version: 1, teselasActivas, chunks, comunidades, fauna}`. Sus claves
-son cerradas y sus cuatro valores deben coincidir con los parámetros efectivos;
+`limitsProfile: {version: 2, aplicacion, teselasActivas, chunks, comunidades, fauna}`.
+Sus claves son cerradas y sus cuatro valores deben coincidir con los límites efectivos;
 un checksum correcto no convierte una contradicción en válida. El lector verifica
 el perfil y las cantidades antes de expandir tuplas/páginas y elimina el perfil al
 reconstruir World. No hay nueva ley oculta en un WeakMap: el digesto completo sigue
 incluyendo los cuatro valores efectivos dentro de params.
 
-Un snapshot sin perfil se admite con los límites históricos, aunque declare valores
-T102 mayores. V1 conserva además su geometría de 1120 celdas; las versiones anteriores
+Un snapshot sin perfil ni modo se admite con los límites históricos, aunque declare
+valores T102 mayores o menores. V1 conserva además su geometría de 1120 celdas; las versiones anteriores
 a 9 no pueden usar el perfil para ampliar sus límites. Primero se verifica el mundo
 legacy y después se migra. Los parámetros existentes se conservan exactamente; no se
 consulta hardware durante load, previous, migración ni validación de baselines.
-Al guardar el mundo migrado se declara su perfil explícito, sin recalcular valores.
+Al guardar el mundo migrado se declara el modo histórico y su perfil explícito,
+sin recalcular ni reemplazar los cuatro valores reservados.
 
-Los contadores de admisión de terreno/chunks/comunidades/fauna provienen de parámetros
-en mundos actuales. Los límites históricos siguen disponibles sólo para interpretar
-formatos anteriores. Se conserva por ahora el gate conductual de ocho comunidades y
+Los contadores de admisión provienen del modo y los parámetros declarados. Los límites
+históricos siguen disponibles para formatos anteriores y su continuidad explícita.
+Se conserva por ahora el gate conductual de ocho comunidades y
 el techo de reproducción animal de reglas 9: retirarlos requiere una fase separada.
 Los límites de 256 celdas por chunk y seis animales por celda son leyes estructurales,
 no techos globales que deban elevarse.

@@ -118,7 +118,7 @@ test('control: 200 stepWorld con y sin params explícitos (DEFAULT_PARAMS) da el
 
 test('T102: defaults deterministas y opciones reservadas sin activar nuevas etapas', () => {
   assert.deepEqual(DEFAULT_PARAMS.motor, { clonPorPaso: true, hilos: 1, soaTerreno: false, particionarPersonas: false, gpu: [], orden: 'natural' });
-  assert.deepEqual(DEFAULT_PARAMS.limites, { teselasActivas: 65536, chunks: 256, comunidades: 8, fauna: 393216 });
+  assert.deepEqual(DEFAULT_PARAMS.limites, { teselasActivas: 65536, chunks: 256, comunidades: 8, fauna: 393216, aplicacion: 'parametros' });
   assert.equal(DEFAULT_PARAMS.persistencia.paginasSucias, false);
   assert.equal(DEFAULT_PARAMS.red.deltas, false);
   assert.deepEqual(DEFAULT_PARAMS.gobernador.senales, ['p95']);

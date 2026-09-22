@@ -49,16 +49,20 @@ test('snapshot preserves signed zero in tile, person and community values', () =
   assert.ok(Object.is(restored.communities[0]!.x, -0));
 });
 
-test('ordinary compact bytes gain only the explicit limits profile; historical bytes stay compatible', () => {
+test('ordinary compact bytes declare parameters and limits profile; historical bytes stay compatible', () => {
   for (const params of [DEFAULT_PARAMS, parseParams('agua.cuencas=0.9,motor.gpu=[2,0]')]) {
     const world = createWorld(51926, params);
     const tiles = world.tiles.map(t => [t.x,t.y,t.terrain,t.moisture,t.vegetation,t.food,t.biome,t.elevation,
       t.wood,t.stone,t.feature,t.variety,t.growth,t.fertility,t.cultivation,t.traffic,t.drinkingWater,t.species,t.fauna,t.life]);
     const expected = { ...world, retiredChunks: [], retiredLegacy: [], tiles, tileEncoding: 'tiles-tuple-v1',
       ...(params === DEFAULT_PARAMS ? {} : { paramsEncoding: 'params-v1', params }) };
-    assert.ok(encodeSnapshot(world, params) === JSON.stringify({ ...expected, limitsProfile: { version: 1, ...params.limites } }), 'current bytes equal the legacy encoding plus its explicit limits profile');
+    const { aplicacion, ...numericLimits } = params.limites;
+    assert.ok(encodeSnapshot(world, params) === JSON.stringify({ ...expected, paramsEncoding: 'params-v1', params,
+      limitsProfile: { version: 2, aplicacion, ...numericLimits } }), 'current bytes declare exact parameters and limits profile');
     assert.equal(digestoCanonico(restore(encodeSnapshot(world, params))), digestoCanonico(world));
     const historical = { ...world, version: 8 };
-    assert.ok(encodeSnapshot(historical, params) === JSON.stringify({ ...expected, version: 8 }), 'historical writers preserve ordinary bytes');
+    const historicalExpected = { ...expected, version: 8,
+      ...(params === DEFAULT_PARAMS ? {} : { params: { ...params, limites: numericLimits } }) };
+    assert.ok(encodeSnapshot(historical, params) === JSON.stringify(historicalExpected), 'historical writers preserve ordinary bytes and never emit a new mode without its profile');
   }
 });

@@ -43,19 +43,20 @@ test('los parámetros del mundo viajan en la instantánea y mandan al recargar',
   } finally { reopened.close(); }
 });
 
-test('los params por defecto no se repiten en la instantánea y sin campo se lee DEFAULT_PARAMS', t => {
+test('los defaults actuales son explícitos y una instantánea legacy sin params recibe el modo histórico', t => {
   const { store, path } = laboratory(t);
   const world = createWorld(51926);
   store.save(world);
   const saved = row(store);
-  assert.equal('params' in JSON.parse(saved.body), false, 'los params por defecto conservan su representación implícita');
+  assert.deepEqual(JSON.parse(saved.body).params, DEFAULT_PARAMS, 'el modo actual se declara incluso con defaults');
   assert.equal(encodeSnapshot(world, DEFAULT_PARAMS), encodeSnapshot(world));
 
   // Migración: una instantánea escrita antes de esta ley no declara params.
   const antigua = JSON.parse(saved.body) as Record<string, unknown>;
-  assert.equal(antigua.paramsEncoding, undefined);
+  delete antigua.params; delete antigua.paramsEncoding; delete antigua.limitsProfile;
+  rewrite(store, JSON.stringify(antigua));
   const reopened = new Store(path);
-  try { assert.equal(paramsOf(reopened.load()!.world), DEFAULT_PARAMS, 'sin campo, los params son los defaults por identidad'); }
+  try { assert.deepEqual(paramsOf(reopened.load()!.world), parseParams('limites.aplicacion=historicos'), 'sin campo, se conservan números y se declara su aplicación histórica'); }
   finally { reopened.close(); }
 });
 
@@ -156,13 +157,14 @@ test('T102: snapshot params-v1 anterior completa sólo los campos nuevos con def
   const params = parseParams('agua.cuencas=0.8,persistencia.cadaTicks=20');
   store.save(createWorld(51926, params));
   const saved = JSON.parse(row(store).body);
+  delete saved.limitsProfile;
   for (const key of ['motor', 'red', 'limites']) delete saved.params[key];
   delete saved.params.persistencia.paginasSucias; delete saved.params.gobernador.senales;
   rewrite(store, JSON.stringify(saved));
   const reopened = new Store(path);
   try {
     const loaded = reopened.load()!.world;
-    assert.deepEqual(paramsOf(loaded), params);
+    assert.deepEqual(paramsOf(loaded), parseParams('limites.aplicacion=historicos', params));
     reopened.save(loaded);
     const expanded = JSON.parse(row(reopened).body).params;
     assert.equal(expanded.agua.cuencas, 0.8); assert.equal(expanded.persistencia.cadaTicks, 20);

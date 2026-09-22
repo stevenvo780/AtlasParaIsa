@@ -5,7 +5,7 @@ import { stringifyExact } from '../shared/exact-json.js';
 import type { World } from '../world/index.js';
 import type { WorldLimits, WorldParams } from '../world/params.js';
 import { decodeSnapshotValue, decodeSnapshotTileRows, encodeSnapshot, encodeSnapshotTileRows,
-  assertSnapshotCounts, parseSnapshotJSON, readSnapshotLimits, snapshotRecord,
+  assertSnapshotCounts, parseSnapshotJSON, readSnapshotLimits, retainSnapshotLimitMode, snapshotRecord,
   SNAPSHOT_TILE_ENCODING, SnapshotPhysicalError, SnapshotSemanticError } from './snapshot.js';
 
 // Transport bounds, independent of world laws and available host hardware.
@@ -178,6 +178,7 @@ export class SnapshotParts {
     }
     const world = { ...manifest.world, tiles };
     delete (world as Record<string, unknown>).tileEncoding;
+    retainSnapshotLimitMode(world);
     delete (world as Record<string, unknown>).limitsProfile;
     return { value: world, bytes };
   }

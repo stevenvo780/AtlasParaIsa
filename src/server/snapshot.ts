@@ -1,7 +1,7 @@
 import type { Tile } from '../shared/types.js';
 import { RULES_VERSION, type World } from '../world/index.js';
 import { DEFAULT_PARAMS, LEGACY_WORLD_LIMITS, PARAMETER_LIMITS_RULES_VERSION, WORLD_LIMIT_KEYS,
-  assertWorldLimits, parseParams, type WorldLimits, type WorldParams } from '../world/params.js';
+  assertWorldLimits, effectiveLimits, parseParams, type WorldLimits, type WorldParams } from '../world/params.js';
 import { exactJsonNumber, stringifyExact } from '../shared/exact-json.js';
 
 // Lossless JSON tuples avoid repeating twenty property names for every active tile
@@ -11,10 +11,11 @@ export const LEGACY_SNAPSHOT_TILE_LIMIT = LEGACY_WORLD_LIMITS.teselasActivas;
 /** R8: los `WorldParams` viven en un `WeakMap` por instancia (params.ts, ruling R3), así
  * que `load()` reconstruía el mundo desde JSON SIN ellos y volvía silenciosamente a
  * `DEFAULT_PARAMS`. Viajan en la instantánea como campo versionado y aparte del `World`:
- * el objeto del mundo sigue sin llevarlos. Una instantánea SIN campo es anterior a esta
- * ley — o tiene exactamente los defaults — y se lee como `DEFAULT_PARAMS`. */
+ * el objeto del mundo sigue sin llevarlos. Una instantánea SIN campo usa los valores
+ * históricos y declara ahora su modo de admisión histórico. */
 const PARAMS_ENCODING = 'params-v1';
-const DEFAULT_PARAMS_BODY = stringifyExact(DEFAULT_PARAMS);
+const LEGACY_PARAMS_BODY = stringifyExact({ ...DEFAULT_PARAMS, limites: LEGACY_WORLD_LIMITS });
+const HISTORICAL_DEFAULT_PARAMS = parseParams('limites.aplicacion=historicos');
 const FIELDS = ['x','y','terrain','moisture','vegetation','food','biome','elevation','wood','stone','feature','variety','growth','fertility','cultivation','traffic','drinkingWater','species','fauna','life'] as const;
 /** Only unreadable bytes justify trying an older checkpoint automatically. */
 export class SnapshotPhysicalError extends Error {}
@@ -31,17 +32,27 @@ function assertSnapshotRulesVersion(record: Record<string, unknown>): void {
 export function readSnapshotLimits(record: Record<string, unknown>, validateParams = true): Readonly<WorldLimits> {
   assertSnapshotRulesVersion(record);
   const params = validateParams ? readSnapshotParams(record) : undefined;
-  if (!Object.hasOwn(record, 'limitsProfile')) return LEGACY_WORLD_LIMITS;
+  const declaredMode = hasSnapshotLimitMode(record);
+  if (!Object.hasOwn(record, 'limitsProfile')) {
+    if (declaredMode) throw new SnapshotSemanticError('Missing snapshot limits profile for declared application mode. Explicit recovery required.');
+    return LEGACY_WORLD_LIMITS;
+  }
   const profile = record.limitsProfile;
   if (!profile || typeof profile !== 'object' || Array.isArray(profile)
-    || Object.keys(profile).length !== WORLD_LIMIT_KEYS.length + 1
-    || (profile as { version?: unknown }).version !== 1
+    || ![1, 2].includes((profile as { version: number }).version)
+    || Object.keys(profile).length !== WORLD_LIMIT_KEYS.length + ((profile as { version: number }).version === 2 ? 2 : 1)
     || !Number.isSafeInteger(record.version) || (record.version as number) < PARAMETER_LIMITS_RULES_VERSION)
     throw new SnapshotSemanticError('Invalid snapshot limits profile. Explicit recovery required.');
+  const version = (profile as { version: number }).version;
+  const application = version === 1 ? 'parametros' : (profile as { aplicacion?: unknown }).aplicacion;
+  if (version === 2 && (!declaredMode || typeof application !== 'string' || !['historicos', 'parametros'].includes(application))
+    || params && params.limites.aplicacion !== application)
+    throw new SnapshotSemanticError('Invalid snapshot limits application mode. Explicit recovery required.');
   const limits = { ...profile } as Record<string, unknown>; delete limits.version;
+  if (version === 2) delete limits.aplicacion;
   try { assertWorldLimits(limits); }
   catch (error) { throw new SnapshotSemanticError('Invalid snapshot limits profile. Explicit recovery required.', { cause: error }); }
-  if (params && WORLD_LIMIT_KEYS.some(key => limits[key] !== params.limites[key]))
+  if (params && WORLD_LIMIT_KEYS.some(key => limits[key] !== effectiveLimits(params)[key]))
     throw new SnapshotSemanticError('Snapshot limits disagree with parameters. Explicit recovery required.');
   return limits;
 }
@@ -72,15 +83,19 @@ export function encodeSnapshotTileRows(tiles: readonly Tile[]): unknown[][] {
 export function snapshotRecord(world: World, params: WorldParams, tiles: unknown): Record<string, unknown> {
   if (Object.hasOwn(world, 'snapshotEncoding')) throw new Error('Reserved snapshot encoding field. Snapshot was not written.');
   if (Object.hasOwn(world, 'limitsProfile')) throw new Error('Reserved snapshot limits profile. Snapshot was not written.');
-  assertWorldLimits(params.limites);
-  const limits = world.version < PARAMETER_LIMITS_RULES_VERSION ? LEGACY_WORLD_LIMITS : params.limites;
+  assertWorldLimits(params.limites, true);
+  const limits = world.version < PARAMETER_LIMITS_RULES_VERSION ? LEGACY_WORLD_LIMITS : effectiveLimits(params);
   assertSnapshotCounts(world as unknown as Record<string, unknown>, limits, world.tiles.length);
-  const body = stringifyExact(params);
+  const current = world.version >= PARAMETER_LIMITS_RULES_VERSION;
+  const serializedParams = current ? params : { ...params, limites: Object.fromEntries(WORLD_LIMIT_KEYS.map(key => [key, params.limites[key]])) };
+  const body = stringifyExact(serializedParams);
   const encoded: Record<string, unknown> = { ...world, retiredChunks: [], retiredLegacy: [], tiles, tileEncoding: SNAPSHOT_TILE_ENCODING };
-  // Los params por defecto no se repiten; el perfil de límites sí es explícito.
+  // Current snapshots declare the mode even with defaults; old encoders retain
+  // their historical omission convention.
   delete encoded.params; delete encoded.paramsEncoding;
-  if (body !== DEFAULT_PARAMS_BODY) { encoded.paramsEncoding = PARAMS_ENCODING; encoded.params = params; }
-  if (world.version >= PARAMETER_LIMITS_RULES_VERSION) encoded.limitsProfile = { version: 1, ...limits };
+  if (current || body !== LEGACY_PARAMS_BODY) { encoded.paramsEncoding = PARAMS_ENCODING; encoded.params = serializedParams; }
+  if (current) encoded.limitsProfile = { version: 2, aplicacion: params.limites.aplicacion,
+    ...Object.fromEntries(WORLD_LIMIT_KEYS.map(key => [key, limits[key]])) };
   return encoded;
 }
 export function encodeSnapshot(world: World, params: WorldParams = DEFAULT_PARAMS): string {
@@ -98,18 +113,32 @@ export function encodeSnapshot(world: World, params: WorldParams = DEFAULT_PARAM
 }
 /**
  * Valida los parámetros sin modificar la instantánea. El `World` recibe sus leyes
- * con `setParams`, después de extraerlas. Sin campo ⇒ `DEFAULT_PARAMS`
- * (migración de toda instantánea anterior a R8). Un campo presente se valida contra
+ * con `setParams`, después de extraerlas. Sin campo ni perfil ⇒ defaults históricos,
+ * con modo explícito; no se activa una opción T102 reservada al migrar. Un campo presente se valida contra
  * `PARAM_RANGES` como cualquier entrada: un dígeste recalculado no legitima un
  * parámetro imposible.
  */
+function hasSnapshotLimitMode(record: Record<string, unknown>): boolean {
+  const params = record.params as Record<string, unknown> | undefined;
+  return !!params && (Object.hasOwn(params, 'limites.aplicacion') || !!params.limites && typeof params.limites === 'object'
+    && Object.hasOwn(params.limites, 'aplicacion'));
+}
+
+/** Preserve a v1 profile's interpretation when its transport marker is removed. */
+export function retainSnapshotLimitMode(record: Record<string, unknown>): void {
+  if (Object.hasOwn(record, 'limitsProfile') && !hasSnapshotLimitMode(record)) {
+    record.params = readSnapshotParams(record); record.paramsEncoding = PARAMS_ENCODING;
+  }
+}
+
 export function readSnapshotParams(value: unknown): WorldParams {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return DEFAULT_PARAMS;
   const record = value as Record<string, unknown>;
-  if (!('params' in record) && !('paramsEncoding' in record)) return DEFAULT_PARAMS;
+  const base = !Object.hasOwn(record, 'limitsProfile') && !hasSnapshotLimitMode(record) ? HISTORICAL_DEFAULT_PARAMS : DEFAULT_PARAMS;
+  if (!('params' in record) && !('paramsEncoding' in record)) return base;
   const { params, paramsEncoding } = record;
   if (paramsEncoding !== PARAMS_ENCODING || !params || typeof params !== 'object' || Array.isArray(params)) throw new SnapshotSemanticError('Invalid snapshot parameter encoding. Explicit recovery required.');
-  try { return parseParams(params as Record<string, string>); }
+  try { return parseParams(params as Record<string, string>, base); }
   catch (error) {
     if (!(error instanceof Error) || error.constructor !== Error || 'code' in error) throw error;
     throw new SnapshotSemanticError(`Invalid snapshot parameters: ${error.message} Explicit recovery required.`, { cause: error });
@@ -150,6 +179,7 @@ export function decodeSnapshotValue(value: unknown): unknown {
     record.tiles = decodeSnapshotTileRows(record.tiles);
     delete record.tileEncoding;
   }
+  retainSnapshotLimitMode(record);
   delete record.limitsProfile;
   return value;
 }

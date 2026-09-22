@@ -165,8 +165,8 @@ test('piezas: dos páginas conservan las 4352 tuplas en su orden exacto', t => {
   const committed = digestoCanonico(world), value = manifest(lab.store);
   assert.deepEqual(value.tiles.pages.map(page => [page.index, page.count]), [[0, 4096], [1, 256]]);
   assert.equal(value.tiles.count, world.tiles.length);
-  assert.equal(Object.hasOwn(value.world, 'params'), false, 'los defaults no se serializan');
-  assert.equal(Object.hasOwn(value.world, 'paramsEncoding'), false);
+  assert.deepEqual(value.world.params, paramsOf(world), 'el modo de aplicación se declara aun con defaults');
+  assert.equal(value.world.paramsEncoding, 'params-v1');
   const rows = value.tiles.pages.flatMap(page => JSON.parse(pageBody(lab.store, page)) as unknown[][]);
   assert.deepEqual(rows, JSON.parse(encodeSnapshot(world, paramsOf(world))).tiles);
   assert.equal(partDigests(lab.store).length, 2);

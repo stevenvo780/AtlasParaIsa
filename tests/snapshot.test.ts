@@ -2,15 +2,21 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { createWorld, assertWorld, stepWorld, projectWorld } from '../src/world/index.js';
-import { decodeSnapshot, encodeSnapshot } from '../src/server/snapshot.js';
+import { decodeSnapshot, encodeSnapshot, takeSnapshotParams } from '../src/server/snapshot.js';
+import { setParams } from '../src/world/params.js';
 import { Store } from '../src/server/store.js';
+
+function restore(body: string): ReturnType<typeof createWorld> {
+  const world = decodeSnapshot(body) as ReturnType<typeof createWorld>;
+  setParams(world, takeSnapshotParams(world)); return world;
+}
 
 test('compact snapshots round-trip every scalar exactly and substantially reduce repeated JSON keys', () => {
   const world=createWorld(51926);for(let i=0;i<21;i++)stepWorld(world);
   const tile=world.tiles[0]!;tile.food=Number.MIN_VALUE;tile.moisture=0.12345678901234567;tile.wood=0;tile.stone=0;tile.drinkingWater=0;tile.species=undefined;tile.fauna=0;
   world.retiredChunks=[];
   const plain=JSON.stringify(world),compact=encodeSnapshot(world);
-  assert.deepEqual(decodeSnapshot(compact),JSON.parse(plain));assert.ok(compact.length<plain.length*0.75);
+  assert.deepEqual(restore(compact),JSON.parse(plain));assert.ok(compact.length<plain.length*0.75);
   assert.deepEqual(decodeSnapshot(plain),JSON.parse(plain));assertWorld(decodeSnapshot(compact));
 });
 
@@ -48,7 +54,7 @@ test('a resumed world continues identically when sharing updates a place and its
   const world=createWorld(51926),donor=world.people[2]!,recipient=world.people[3]!;
   donor.x=recipient.x=17;donor.y=recipient.y=13;donor.action='share';donor.inventory=0.2;donor.hunger=0.1;donor.thirst=0.1;donor.decisionAt=100;donor.target={x:17,y:13};
   recipient.action='rest';recipient.hunger=0.6;recipient.decisionAt=100;recipient.target={x:17,y:13};
-  const resumed=decodeSnapshot(encodeSnapshot(world)) as typeof world;
+  const resumed=restore(encodeSnapshot(world));
   stepWorld(world);stepWorld(resumed);assert.deepEqual(resumed,world);
   assert.ok(world.places.find(p=>p.id==='claro')!.gatherings>0);
 });

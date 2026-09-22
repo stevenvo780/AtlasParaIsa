@@ -1,5 +1,21 @@
 # Reglas del prototipo
 
+## Candidato V9: competencia observada al preparar reservas
+
+Sobre V8 `eaa2709`, esta propuesta declara **reglas 9**, conservando protocolo 9 y
+SQLite 4. Al planear una reserva familiar descarta una fuente cuyo stock observado
+puede agotar antes un cosechador visible, ya presente y con trabajo avanzado. Usa
+la duración y capacidad físicas existentes; no anticipa elecciones futuras ni
+asigna propiedad sobre fuentes. Empates y una ventaja temporal ambigua se admiten;
+una intención próxima a reevaluarse o una necesidad urgente también dejan abierta
+la incertidumbre. La previsión no consume ni reserva recursos.
+
+La selección para comer, las órdenes explícitas, los costes y los requisitos de
+reproducción conservan sus reglas. El trabajo parcial sólo se conserva en un sitio
+que siga siendo viable. La migración V8→V9 valida y copia el estado histórico sin
+reescribir existencias, genes o trabajo. [Controles y límites de V9](REVISION-CONTENCION-V9-2026-09-22.md).
+La propuesta no acredita publicación ni una mejora general de reproducción.
+
 ## Candidato V8: provisión familiar local, 22 de septiembre de 2026
 
 Sobre V7 publicado desde `3dd615e`, esta rama declara **reglas 8**, manteniendo

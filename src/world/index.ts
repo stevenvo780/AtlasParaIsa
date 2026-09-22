@@ -18,7 +18,7 @@ import type { DemographicState, LegacyRecord } from '../shared/demography.js';
 import { defaultTechnologyState, initialTechnologyKnowledge, technologyOpportunity, researchTechnology, craftTechnology, projectTechnology, assertTechnology, useTool, recordTechnologyBenefit, settleTechnologyEstate, cancelTechnologyProject, maintainTechnologyMemory } from './technology.js';
 import { catalogueEnabled, resolveTechnologyRecipe } from './technology-catalogue.js';
 import { initialDemography, demographicTraits, updateDemography } from './demography.js';
-import { reproductiveReadiness, familyOpportunity, availableToShare, closeKin, chooseReproductivePartner, pairAffinity, pairTie } from './family.js';
+import { reproductiveReadiness, familyOpportunity, availableToShare, closeKin, chooseReproductivePartner, pairAffinity, pairTie, earlierForagerExhausts, observedForagersByCell } from './family.js';
 import { advancePopulation, assertLegacyRecord, assertPopulation } from './lineage.js';
 import { analyzeTechnologyOrganization } from './technology-organization.js';
 import { captureTechnologyCheckpoint, advanceTechnologyCheckpoint } from './technology-checkpoint.js';
@@ -28,9 +28,9 @@ import { DEFAULT_PARAMS, paramsOf, setParams, type WorldParams } from './params.
 export { bindWorldContext, tileAt, normalizeViewport, worldContext } from './spatial.js';
 export type { WorldContext } from './spatial.js';
 
-// V8 declares costed local provisioning for a viable family, including small harvests.
+// V9 accounts for an earlier visible forager when planning finite family reserves.
 // Physical work, consumption and reproduction gates retain their existing laws.
-export const RULES_VERSION = 8;
+export const RULES_VERSION = 9;
 /**
  * Ruling R17: ya no hay tope de población en el software. `POPULATION_HARD_LIMIT`
  * (1.000.000) solo protege `assertWorld` de un snapshot corrupto; el freno real es el
@@ -385,6 +385,7 @@ function choose(world: World, person: Person): void {
     if (!family || person.inventory >= family.reserveTarget) return;
     const sources = reachableTiles.filter(tile => tile.food >= MIN_FORAGE_STOCK && distance(tile, family.partner) <= RADIUS);
     if (!sources.length) return;
+    const foragers = observedForagersByCell(nearbyPeople);
     const physiology = demographicTraits(person.genome, paramsOf(world).cuerpo);
     // The exact future route climate is unknown. The largest perceived basal
     // rates give a conservative desert/rain forecast without reading remote land.
@@ -401,6 +402,16 @@ function choose(world: World, person: Person): void {
       const work = Math.max(1, workDuration(world, person, 'forage')
         - (person.action === 'forage' && distance(person.target, tile) === 0 ? person.work : 0));
       if (!planAffordable(steps, work)) continue;
+      const workers = foragers.get(`${tile.x},${tile.y}`);
+      if (workers && earlierForagerExhausts(person, tile, workers, work, {
+        tick: world.tick, radius: RADIUS, duration: other => workDuration(world, other, 'forage'),
+        capacity: other => Math.min(FORAGE_AMOUNT, Math.max(0, 0.25 - other.inventory)),
+        continues: (other, ticks) => {
+          const body = { hunger: other.hunger, thirst: other.thirst, energy: other.energy, fatigue: other.fatigue };
+          advanceNeeds(body, bodilyNeedRates(world, tile, demographicTraits(other.genome, paramsOf(world).cuerpo)), ticks);
+          return body.hunger <= 0.9 && body.thirst <= 0.9;
+        },
+      })) continue;
       const delay = steps * 6 + work;
       const decay = (Math.floor((world.tick + delay) / 10) - Math.floor(world.tick / 10)) * paramsOf(world).recursos.decaimientoComida;
       const available = Math.max(0, tile.food - decay);
@@ -1342,6 +1353,11 @@ function migrateWorldState(value: unknown, context: WorldContext = {}): World {
     if (catalogueEnabled(world.technology)) for (const person of world.people) maintainTechnologyMemory(world, person);
     assertWorld(world); return world;
   }
+  if (version === 8) {
+    assertWorld(value, 8, context);
+    const world = cloneWorld(value, context); upgradeV9(world);
+    return migrateWorldState(world, context);
+  }
   if (version === 7) {
     assertWorld(value, 7, context);
     const world = cloneWorld(value, context); upgradeV8(world);
@@ -1356,20 +1372,20 @@ function migrateWorldState(value: unknown, context: WorldContext = {}): World {
   }
   if (version === 5) {
     assertWorld(value, 5, context);
-    const world = cloneWorld(value, context); upgradeV6(world); upgradeV7(world); upgradeV8(world);
+    const world = cloneWorld(value, context); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world);
     if (world.technology.checkpoint === undefined) world.technology.checkpoint = captureTechnologyCheckpoint(world.technology, world.people, world.tick, 'migration');
     if (catalogueEnabled(world.technology)) for (const person of world.people) maintainTechnologyMemory(world, person);
     assertWorld(world); return world;
   }
-  if (version===4) { assertWorld(value,4,context); const world=cloneWorld(value,context); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); assertWorld(world); return world; }
+  if (version===4) { assertWorld(value,4,context); const world=cloneWorld(value,context); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); assertWorld(world); return world; }
   if(version===3) {
     assertWorld(value,3,context);
-    const world=cloneWorld(value,context); upgradeV4(world); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); assertWorld(world); return world;
+    const world=cloneWorld(value,context); upgradeV4(world); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); assertWorld(world); return world;
   }
   if (version === 2) {
     assertWorld(value, 2, context);
     const world = cloneWorld(value, context);
-    upgradeV3(world); upgradeV4(world); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); assertWorld(world); return world;
+    upgradeV3(world); upgradeV4(world); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); assertWorld(world); return world;
   }
   assertCommon(value, true);
   const world = structuredClone(value);
@@ -1394,7 +1410,7 @@ function migrateWorldState(value: unknown, context: WorldContext = {}): World {
     p.skills = {}; p.values = {}; p.activity = {}; p.materials = { wood: 0, stone: 0 }; p.visited = [];
     p.heading = index * 2.399963229728653; p.command = null; p.work = 0; p.lastOutcome = world.tick; p.intentContext = p.hunger > 0.5 ? 'hungry' : p.fatigue > 0.5 ? 'tired' : 'ready'; p.controlMode = 'auto';
   });
-  upgradeV3(world); upgradeV4(world); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); assertWorld(world); return world;
+  upgradeV3(world); upgradeV4(world); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); assertWorld(world); return world;
 }
 function upgradeV3(world: World): void {
   world.version = 3; world.cooperationEnabled = true; world.reproductionEnabled = true;
@@ -1424,3 +1440,5 @@ function upgradeV6(world: World): void {
 function upgradeV7(world: World): void { world.version = 7; }
 
 function upgradeV8(world: World): void { world.version = 8; }
+/** V9 changes only local family planning; stored bodies, work and resources remain historical. */
+function upgradeV9(world: World): void { world.version = 9; }

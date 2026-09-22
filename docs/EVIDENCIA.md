@@ -1,5 +1,37 @@
 # Evidencia vigente
 
+## Propuesta de contención familiar V9, 22 de septiembre de 2026
+
+Base V8 `eaa2709b24ef02623921ba39bf32159a0892b4e1`; rama aislada
+`sprint/family-contention-v9-20260922`. El [informe de V9](REVISION-CONTENCION-V9-2026-09-22.md)
+separa el bloqueo demográfico observado del fallo local de planificación: en 1007,
+un segundo cosechador inicia sobre una fuente que otro visible ya está agotando.
+El prefijo natural 131 se reproduce con Store; la autonomía nueva cobra una
+alternativa pagando movimiento/trabajo, y cada ganancia coincide con el débito del
+suelo. Sin alimento no gana reserva. No se usa el nacimiento como criterio de ajuste.
+
+Los 107 focales ampliados de selección, migración, demografía, agua y persistencia
+pasan sin omisiones (92.8 s), y typecheck está verde. La ablación exclusiva del
+filtro nuevo produce 4 fallos esperados y 3 controles verdes, y recupera exactamente
+V8 en los estados t150 de 1007/1012/1013, salvo la etiqueta de versión. También
+recupera los cuatro goldens V8 de agua/demografía; la candidata los conserva, sin
+actualizar hashes. Protocolo y SQLite no cambian. Revisión independiente del cambio
+local sin bloqueos; suite completa conjunta pendiente de integración, sin repetirla
+en esta rama. Sin publicación ni afirmación de sostenibilidad.
+
+La optimización posterior agrupa una vez trabajadores visibles por celda, conserva
+sus predicados y pasa 44 focales, además de los tres controles del laboratorio.
+Coinciden exactamente 66 comparaciones de World completo y digest, antes/después
+del índice, en 1007/1012/1013 hasta 2400 ticks. La ablación final conserva los prefijos
+V8 y produce 4 fallos esperados con 5 controles verdes. En el microperfil, V9 sin/con
+índice pasa de CPU media .186 a .196 ms con 16 personas y de .751 a .292 ms con 64 y
+fuentes densas. Es coste del selector en fixtures, no rendimiento del servidor.
+
+El siguiente contraste fija V8 `eaa2709` frente a V9, 1007/1012/1013, 13 días, seis
+procesos, una hora simétrica por réplica y Store cada 20. Son semillas diagnósticas
+ya observadas; no constituyen otro conjunto reservado. Conserva sin cambios el
+instrumento `12053834befc95ebedc4bf1bf4c4308ff49c040c21d233f585aa02d3f894f542`.
+
 ## Propuesta familiar V8, 22 de septiembre de 2026
 
 Base V7 publicada `3dd615ee069d9d61f51a4c74f85d33c15a4583e0`, rama

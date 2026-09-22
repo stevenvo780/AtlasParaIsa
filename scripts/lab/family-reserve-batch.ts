@@ -1,4 +1,4 @@
-/** Predeclared V7/V8 family-reserve audit. Independent of the reserved 30-day batch.
+/** Predeclared V8/V9 visible contention audit; all three seeds are diagnostic, not holdouts. Independent of the reserved 30-day batch.
  * Both sides use one frozen coherence.ts + metrics.ts and retain every database.
  */
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
@@ -9,8 +9,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-const RESERVED = join(ROOT, 'artifacts/family-reserve-v8-20260922');
-const BASELINE = '3dd615ee069d9d61f51a4c74f85d33c15a4583e0';
+const RESERVED = join(ROOT, 'artifacts/family-contention-v9-20260922');
+const BASELINE = 'eaa2709b24ef02623921ba39bf32159a0892b4e1';
 const SEEDS = [1007, 1012, 1013] as const;
 const DAYS = 13, TICKS = DAYS * 2400, WORKERS = 6, TIMEOUT_MS = 3_600_000;
 const INSTRUMENT_FILES = ['scripts/lab/family-reserve.ts', 'scripts/lab/metrics.ts', 'scripts/lab/family-observation.ts'];
@@ -64,7 +64,7 @@ function atomicJson(path: string, value: unknown): void {
 }
 function insideReserved(path: string): void {
   const rel = relative(RESERVED, path);
-  if (!rel || rel.startsWith('..') || resolve(RESERVED, rel) !== path) throw new Error('Batch directories must be children of artifacts/family-reserve-v8-20260922.');
+  if (!rel || rel.startsWith('..') || resolve(RESERVED, rel) !== path) throw new Error('Batch directories must be children of artifacts/family-contention-v9-20260922.');
 }
 function sourceMetadata(root: string, sha: string, rootDirty: boolean): Source {
   // The origin commit is provenance, not a claim that dirty candidate files equal
@@ -85,15 +85,16 @@ export function prepare(directory: string): Batch {
     const before = fullHash(ROOT), origin = execFileSync('git', ['-C', ROOT, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
     copy(ROOT, candidateRoot, ['package.json', ...files(ROOT, 'src')]);
     if (before !== fullHash(ROOT) || before !== fullHash(candidateRoot)) throw new Error('Candidate source changed while copying; prepare a fresh batch once stable.');
-    if (!/export const RULES_VERSION = 8;/.test(readFileSync(join(candidateRoot, 'src/world/index.ts'), 'utf8'))) throw new Error('Candidate must declare rules V8.');
+    if (!/export const RULES_VERSION = 9;/.test(readFileSync(join(candidateRoot, 'src/world/index.ts'), 'utf8'))) throw new Error('Candidate must declare rules V9.');
     const rootDirty = execFileSync('git', ['-C', ROOT, 'status', '--porcelain', '--', 'src', 'package.json'], { encoding: 'utf8' }).trim().length > 0;
     const sources = { baseline: sourceMetadata(baselineRoot, BASELINE, false), candidate: sourceMetadata(candidateRoot, origin, rootDirty) };
     const instrumentRoot = join(directory, 'instrument'), instrumentBefore = instrumentHash(ROOT);
+    if (instrumentBefore !== '12053834befc95ebedc4bf1bf4c4308ff49c040c21d233f585aa02d3f894f542') throw new Error('The predeclared V8 instrument changed.');
     copy(ROOT, instrumentRoot, ['package.json', ...INSTRUMENT_FILES]);
     symlinkSync(join(ROOT, 'node_modules'), join(instrumentRoot, 'node_modules'), 'dir');
     if (instrumentBefore !== instrumentHash(ROOT) || instrumentBefore !== instrumentHash(instrumentRoot)) throw new Error('Instrument changed while copying.');
     const runnerHash = hash(readFileSync(fileURLToPath(import.meta.url)));
-    writeFileSync(join(directory, 'family-reserve-batch.ts'), readFileSync(fileURLToPath(import.meta.url)), { flag: 'wx', mode: 0o444 });
+    writeFileSync(join(directory, 'family-contention-batch.mts'), readFileSync(fileURLToPath(import.meta.url)), { flag: 'wx', mode: 0o444 });
     for (const folder of ['runs', 'logs', 'results', 'tmp']) mkdirSync(join(directory, folder));
     const jobs = SEEDS.flatMap(seed => (['baseline', 'candidate'] as const).map(side => ({
       id: `${side}-${seed}`, side, seed, output: join(directory, 'runs', `${side}-${seed}`), log: join(directory, 'logs', `${side}-${seed}.log`),
@@ -101,7 +102,7 @@ export function prepare(directory: string): Batch {
     const batch: Batch = { version: 1, createdAt: new Date().toISOString(), directory, sourceWorkspace: ROOT,
       days: DAYS, ticks: TICKS, workers: WORKERS, timeoutMs: TIMEOUT_MS, engine: 'world', params: 'persistencia.cadaTicks=20',
       metricasVersion: 2, sources, instrumentRoot, instrumentHash: instrumentBefore, runnerHash, jobs,
-      scope: 'Three predeclared pairs 1007/1012/1013, 13 days, V7 versus V8. 1007 is a diagnostic seed, not a holdout. Six children at nice 10, identical one-hour deadlines. stepWorld and production SQLite every 20 ticks; no governor, scheduler, clients or network. Concurrent timings are not a server performance gate.' };
+      scope: 'Three predeclared pairs 1007/1012/1013, 13 days, V8 versus V9. All three seeds are diagnostic and previously observed, not new holdouts. Six children at nice 10, identical one-hour deadlines. stepWorld and production SQLite every 20 ticks; no governor, scheduler, clients or network. Concurrent timings are not a server performance gate.' };
     writeFileSync(join(directory, 'batch.json'), JSON.stringify(batch, null, 2) + '\n', { flag: 'wx' });
     atomicJson(join(directory, 'progress.json'), { state: 'prepared', simulationsStarted: 0, jobs: jobs.length });
     return batch;
@@ -133,6 +134,7 @@ export function verifyEvidence(batch: Batch, job: Job): string | undefined {
   return undefined;
 }
 export function verifyPlan(batch: Batch): void {
+  if (batch.instrumentHash !== '12053834befc95ebedc4bf1bf4c4308ff49c040c21d233f585aa02d3f894f542') throw new Error('The instrument is not the predeclared V8 instrument.');
   insideReserved(batch.directory);
   if (batch.version !== 1 || batch.days !== DAYS || batch.ticks !== TICKS || batch.workers < 1 || batch.workers > WORKERS || !Number.isInteger(batch.workers)
     || batch.timeoutMs !== TIMEOUT_MS || batch.engine !== 'world' || batch.params !== 'persistencia.cadaTicks=20' || batch.metricasVersion !== 2 || batch.jobs.length !== SEEDS.length * 2) throw new Error('Unsupported batch contract.');

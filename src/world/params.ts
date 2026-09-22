@@ -34,8 +34,11 @@ export interface WorldParams {
     cortejo: number; radioCortejo: number };
   recursos: { capacidadBosque: number; capacidadPastizal: number; capacidadOtros: number; velocidadRegeneracion: number; decaimientoFertilidad: number; decaimientoComida: number };
   persistencia: { cadaTicks: number; ventanaEventosTicks: number; paginasSucias: boolean };
-  /** Agua superficial concentrada en cuencas: 1 = generación actual (todas las charcas/manantiales); < 1 conserva solo las de las cuencas más húmedas (T035). */
-  agua: { cuencas: number };
+  /** Agua superficial concentrada en cuencas: 1 = generación actual (todas las charcas/manantiales); < 1 conserva solo las de las cuencas más húmedas (T035).
+   * `memoria` (2026-09-22, ley candidata SED): quien no percibe agua vuelve hacia la última celda con agua que vio
+   * (o donde bebió) cuando la sed prevista AL LLEGAR —sed actual − agua que lleva + sed del camino— supera este
+   * umbral, en vez de explorar al azar; el recuerdo se olvida al verlo seco. 1 = nunca (hoy: ni recuerda ni vuelve). */
+  agua: { cuencas: number; memoria: number };
   /**
    * Ruling R17: el límite de población lo pone el hardware. `presupuestoMs` es el p95
    * del paso (ms) que el servidor se permite. `politica` decide qué hace el gobernador
@@ -90,7 +93,7 @@ const RAW_DEFAULTS: WorldParams = {
     exigeComunidad: true, radioPareja: 3, radioLugar: 4, comprobacionContinua: false, cortejo: 0, radioCortejo: 24 },
   recursos: { capacidadBosque: 1, capacidadPastizal: 0.7, capacidadOtros: 0.35, velocidadRegeneracion: 1, decaimientoFertilidad: 0.001, decaimientoComida: 0.0001 },
   persistencia: { cadaTicks: 1, ventanaEventosTicks: 0, paginasSucias: false },
-  agua: { cuencas: 0.4 },
+  agua: { cuencas: 0.4, memoria: 1 },
   gobernador: { presupuestoMs: 50, senales: ['p95'], politica: 'techo' },
   motor: { clonPorPaso: true, hilos: 1, soaTerreno: false, particionarPersonas: false, gpu: [], orden: 'natural' },
   red: { deltas: false },
@@ -170,6 +173,8 @@ export const PARAM_RANGES: Record<string, [number, number]> = {
   'persistencia.cadaTicks': [1, 10000],
   'persistencia.ventanaEventosTicks': [0, 1_000_000],
   'agua.cuencas': [0.05, 1],
+  // Umbral de sed prevista al llegar; 1 apaga la ley (el bloque entero se salta con 1, no sólo el disparo).
+  'agua.memoria': [0, 1],
   'gobernador.presupuestoMs': [5, 5000],
   'motor.hilos': [1, 512],
   'limites.teselasActivas': [1, Number.MAX_SAFE_INTEGER],

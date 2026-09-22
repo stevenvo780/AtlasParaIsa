@@ -424,6 +424,7 @@ estado completo, orden, aliases, `undefined` y bits numéricos frente a V7, sin 
 | `persistencia.cadaTicks` | 1 (producción fija 100 vía `deployment-params.ts`, ruling R19; antes 20) | [1, 10000] | Cadencia en ticks para el guardado periódico en disco | T021 |
 | `persistencia.ventanaEventosTicks` | 0 (sin poda; abrir con `CARTA_PARAMS`) | [0, 1000000] | Ventana de retención temporal para la poda de eventos y chunks | T021 |
 | `agua.cuencas` | 0.4 | [0.05, 1] | Umbral de ruido de cuenca bajo el cual una tesela conserva su agua potable de origen | T035 |
+| `agua.memoria` | 1 (apagada) | [0, 1] | Sed prevista al llegar al último lugar con agua que vio (sed actual − agua que lleva + sed del camino a 6 pasos por celda) por encima de la cual, sin agua a la vista, emprende la vuelta; el recuerdo se renueva al ver o beber agua y se olvida al verlo seco | Noche 2026-09-22 (SED) |
 | `conducta.habituacion` | 0 | [0, 2] | Descuento por saciedad en la elección de acción: resta `habituacion · (0,5 + curiosity) · share`, con `share` = fracción vitalicia de esa acción en `activity` | Noche de ciencia 2026-09-22 |
 | `social.disputaNecesidad` | 0.65 | [0.1, 1] | Necesidad (máximo de hambre y sed) que exige `resourceDispute` a los dos implicados | Noche de ciencia 2026-09-22 |
 | `social.disputaEscasez` | 1 | [0.1, 20] | Multiplicador de los tres umbrales de stock de la disputa (0,06 comida · 0,12 agua · 1 fauna) | Noche de ciencia 2026-09-22 |
@@ -526,6 +527,21 @@ abre nada: hace falta 20. Los vínculos existen, pero la gente que se quiere est
 > edades son afines en ese par antes de redondear, así que las cuatro esquinas acotan todo el interior. Cuesta
 > 201 ns por llamada (el 0,02 % del presupuesto de 50 ms por paso del gobernador) y se paga al fijar los params,
 > no dentro del tick. La guarda de `demographicTraits` sigue en su sitio, degradada a aserción de estado imposible.
+
+#### Memoria del agua (ley candidata SED, 2026-09-22)
+
+Diagnóstico (base de la noche, semilla 42, 6 días): los 3 muertos por sed llevaban 843–1094 pasos con sed
+> 0,7 **explorando** (la búsqueda de hoy premia celdas nuevas), a 117–186 celdas de donde bebieron por última
+vez y a 130–137 del agua más cercana: la sed no los mata junto al agua, los mata haberse alejado. Recordar
+sólo dónde se bebió no basta (el recuerdo se pierde en cuanto esa charca se agota: 3 de 4 muertos sin recuerdo);
+volver sólo por la sed actual tampoco (la vuelta empieza demasiado lejos: 8 muertes en la 42). Con la ley, el
+recuerdo es la última celda con agua **vista** y la vuelta la dispara la sed **prevista al llegar**, así que la
+correa se acorta a medida que crece la sed y quien lleva agua en un recipiente puede alejarse más. Medido
+(4 semillas × 6 días, `agua.memoria=0,6`): muertes por sed 6 → 4 (42: 3 → 0), población 182 → 183,
+nacimientos 126 → 124; a 8 días 16 → 7 (1: 11 → 5; 42: 4 → 0), población 232 → 240, nacimientos 188 → 185.
+Lo que queda: quien ve seco su recuerdo lo olvida y vuelve a la búsqueda al azar, que no encuentra agua a
+15–30 celdas en ~1100 pasos (semilla 1: los 3 muertos del día 6 ya no tenían recuerdo). Refutación en
+`tests/agua-memoria.test.ts`.
 
 ### Leyes nuevas (calibradas 2026-09-19, fallback analítico; barrido T031 pendiente post-evento)
 

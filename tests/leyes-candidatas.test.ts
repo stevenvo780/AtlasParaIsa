@@ -77,6 +77,8 @@ function digestoConParamsDeMain(world: World): string {
   delete (comoMain.gobernador as Record<string, unknown>).politica;
   const poblacion = comoMain.poblacion as Record<string, unknown>;
   for (const clave of ['exigeComunidad', 'radioPareja', 'radioLugar', 'comprobacionContinua', 'cortejo', 'radioCortejo']) delete poblacion[clave];
+  delete (comoMain.agua as Record<string, unknown>).memoria;
+  for (const clave of ['edadFundadoresMinDias', 'edadFundadoresMaxDias']) delete (comoMain.genes as Record<string, unknown>)[clave];
   setParams(world, comoMain as unknown as WorldParams);
   try { return digestoCanonico(world); } finally { setParams(world, vigentes); }
 }
@@ -92,11 +94,15 @@ test('(i) con los defaults las leyes candidatas no mueven el mundo: el digesto f
     'el estado del mundo tras 1200 pasos es bit a bit el de main: ninguna ley candidata actúa con su default');
   assert.notEqual(digestoCanonico(world), DIGESTO_MAIN_1200,
     'el digesto completo sí cambia, y sólo por declarar configuración nueva (T102)');
-  assert.deepEqual(DEFAULT_PARAMS.conducta, { habituacion: 0 });
-  assert.deepEqual(DEFAULT_PARAMS.social, { maxComunidades: 8, disputaNecesidad: 0.65, disputaEscasez: 1, disputaRadio: 2, disputaDestino: 0.5,
-    disputaEspera: 180, ensenanzaRareza: 0, confianzaSalida: 0.35, distanciaAlternativa: 0.2 }, 'cada default es la constante que había en el código');
-  assert.deepEqual(DEFAULT_PARAMS.poblacion, { maxima: 1_000_000, intervaloComprobacionTicks: 120, nacimientosPorComprobacion: 2,
-    exigeComunidad: true, radioPareja: 3, radioLugar: 4, comprobacionContinua: false, cortejo: 0, radioCortejo: 24 });
+  // Sólo las claves originales de cada ley: las hipótesis posteriores añaden claves a los mismos
+  // grupos y comparar el objeto entero rompía el test con cada una sin que nada cambiara.
+  assert.equal(DEFAULT_PARAMS.conducta.habituacion, 0);
+  const social = DEFAULT_PARAMS.social as unknown as Record<string, unknown>;
+  for (const [clave, valor] of Object.entries({ maxComunidades: 8, disputaNecesidad: 0.65, disputaEscasez: 1, disputaRadio: 2, disputaDestino: 0.5,
+    disputaEspera: 180, ensenanzaRareza: 0, confianzaSalida: 0.35, distanciaAlternativa: 0.2 })) assert.equal(social[clave], valor, `default de social.${clave}`);
+  const poblacion = DEFAULT_PARAMS.poblacion as unknown as Record<string, unknown>;
+  for (const [clave, valor] of Object.entries({ maxima: 1_000_000, intervaloComprobacionTicks: 120, nacimientosPorComprobacion: 2,
+    exigeComunidad: true, radioPareja: 3, radioLugar: 4, comprobacionContinua: false, cortejo: 0, radioCortejo: 24 })) assert.equal(poblacion[clave], valor, `default de poblacion.${clave}`);
 });
 
 test('(ii) conducta.habituacion=0.35 cambia el mundo y no reduce la diversidad de conducta', { timeout: 600000 }, t => {

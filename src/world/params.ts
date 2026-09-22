@@ -72,7 +72,11 @@ export interface WorldParams {
    * Estas claves abren esos tres cerrojos SIN decidir nada: con sus defaults el mundo es el
    * de hoy paso a paso, y sólo un laboratorio que las mueva mide otra cosa.
    */
-  conducta: { habituacion: number };
+  conducta: { habituacion: number;
+    /** Ventaja comparativa heredable (DIV, 2026-09-22), `index.ts` → `choose`: sin urgencias
+     * corporales (sed, hambre y cansancio ≤ 0,5), cada OFICIO suma `aptitud · (rasgo del oficio −
+     * media de los cinco rasgos de la persona)`. 0 = hoy. */
+    aptitud: number };
   /** `social.maxComunidades`: tope de FUNDACIÓN de comunidades (`society.ts`), regla de conducta separada
    * de la admisión `limites.comunidades` (revisión de T100, 2026-09-22). */
   social: { maxComunidades: number; disputaNecesidad: number; disputaEscasez: number; disputaRadio: number; disputaDestino: number; disputaEspera: number;
@@ -111,7 +115,7 @@ const RAW_DEFAULTS: WorldParams = {
   // (`index.ts` no descuenta saciedad; `society.ts` usa 0,65 / ×1 / 2 celdas / 0,5 de
   // destino / 180 ticks de espera / sin rareza / 0,35 de confianza / 0,2 de distancia
   // cultural), así que abrirlas no cambia el mundo.
-  conducta: { habituacion: 0 },
+  conducta: { habituacion: 0, aptitud: 0 },
   social: { maxComunidades: 8, disputaNecesidad: 0.65, disputaEscasez: 1, disputaRadio: 2, disputaDestino: 0.5, disputaEspera: 180,
     ensenanzaRareza: 0, confianzaSalida: 0.35, distanciaAlternativa: 0.2, vinculoConvivencia: 0 },
 };
@@ -201,6 +205,10 @@ export const PARAM_RANGES: Record<string, [number, number]> = {
   // propósito: con 0 la disputa dejaría de exigir necesidad o escasez y sería un
   // conflicto decretado, no medido. `disputaRadio` parte de 1 celda (contacto real).
   'conducta.habituacion': [0, 2],
+  // Ventaja comparativa: sumando de la puntuación de un OFICIO (nunca de comer, beber, descansar
+  // ni de los actos de vínculo). Rasgo menos media de los cinco cae en [−0,8, 0,8], así que con
+  // el máximo 2 la ley mueve un oficio a lo sumo ±1,6, la escala de `habituacion`.
+  'conducta.aptitud': [0, 2],
   'social.disputaNecesidad': [0.1, 1],
   'social.disputaEscasez': [0.1, 20],
   'social.disputaRadio': [1, 8],

@@ -4,6 +4,10 @@ import { spawnSync, type SpawnSyncReturns } from 'node:child_process';
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { GOVERNOR_WINDOW_STEPS } from '../src/server/governor.js';
+// `.mjs` (no `.mts`): tsx resuelve el especificador ESM `.mjs` contra el fuente `.mts`, igual que
+// ya hace `tests/survival-audit.test.ts` con `scripts/survival-audit.mts`.
+import { cerrarEscena, crearEscenaBase, medirVentana } from '../scripts/curva-techo.mjs';
 
 type Json = Record<string, unknown>;
 const readJson = (path: string): Json => JSON.parse(readFileSync(path, 'utf8')) as Json;
@@ -46,6 +50,71 @@ test('escala de habitantes: produce puntos con las claves pedidas por T109 y par
   assert.ok(['hasta', 'presupuesto', 'limite-seguridad'].includes(curva.motivoParada as string));
   const primerPunto = (curva.puntos as Json[])[0]!;
   assert.equal(primerPunto.escala, 16, 'el primer escalón de la escala de habitantes es la población inicial de createWorld');
+});
+
+test('control T109: el punto de partida de la curva coincide en escena y metodología con el laboratorio', (t) => {
+  // Hallazgo medio de la revisión adversarial T109 (tasks.md:121-127): el «Control» de la tarea
+  // exige que el punto de partida de la curva coincida con el p95 medido por el laboratorio para
+  // la MISMA escena, y hasta ahora nada lo comprobaba de forma ejecutable.
+  //
+  // Por qué NO se comparan milisegundos absolutos: esta torre corre varios worktrees hermanos en
+  // paralelo (carga de dos dígitos no es rara durante un sprint) y este test lanza un proceso
+  // hijo (curva-techo.mts) mientras mide otra escena EN ESTE MISMO proceso — ambos compiten por
+  // CPU con quien más esté corriendo en la máquina en ese instante, ajeno a la simulación. Un p95
+  // en ms concreto depende del planificador del sistema operativo, no solo del código bajo
+  // prueba, así que exigir igualdad (o siquiera una tolerancia relativa estrecha) de tiempos
+  // sería frágil por diseño y no probaría nada sobre el instrumento.
+  //
+  // Qué SÍ es legítimamente comparable, porque es determinista pase lo que pase con el reloj:
+  //   - LA ESCENA: población, teselas activas y teselas/habitante deben coincidir EXACTAMENTE —
+  //     ambas mediciones parten del mismo `createWorld(seed)` con los mismos `motor.hilos`/`gpu`
+  //     por defecto (1, []) y sin ningún clon sintético (el primer escalón de `--escala
+  //     habitantes` es, por construcción de `agregarHabitantesSinteticos`, la población inicial).
+  //   - LA DEFINICIÓN del p95: la misma ventana de `GOVERNOR_WINDOW_STEPS` (120) pasos y el mismo
+  //     percentil de `RollingStepPerformance` (src/server/governor.ts) — compartida a propósito
+  //     entre servidor y experimentos —, así que el NÚMERO de pasos medidos (`world.tick`, que
+  //     arranca en 0 en ambas mediciones) debe coincidir exactamente.
+  //   - Que ambos p95 sean números finitos y positivos: si alguna de las dos mediciones diera
+  //     0/NaN/Infinity ahí sí habría un desacuerdo real de metodología entre el instrumento y el
+  //     laboratorio, no un artefacto del reloj de la torre.
+  const seed = 51926;
+
+  // (1) El instrumento: corre `curva-techo.mts` con una escena mínima (misma semilla, escala de
+  // habitantes, `--hasta` igual a la población inicial para que el primer y único punto sea
+  // exactamente esa escena) y lee su primer punto.
+  const { dir, result } = runCurva(t, ['--seed', String(seed), '--escala', 'habitantes', '--hasta', '16']);
+  assert.equal(result.status, 0, result.stderr);
+  const curva = readJson(join(dir, 'curva.json'));
+  const puntos = curva.puntos as Json[];
+  assert.ok(puntos.length >= 1, 'debe producir al menos el punto de partida');
+  const primerPunto = puntos[0]!;
+
+  // (2) El laboratorio: mide, EN ESTE MISMO PROCESO, la misma escena por la misma vía interna
+  // (createWorld + Store temporal + el trío clon→paso→guardado + RollingStepPerformance),
+  // reutilizando las funciones que `curva-techo.mts` exporta para esto (no se duplica la
+  // construcción de la escena).
+  const escena = crearEscenaBase(seed, 1, []);
+  let medicion: ReturnType<typeof medirVentana>;
+  try {
+    medicion = medirVentana(escena.world, escena.context, escena.store, GOVERNOR_WINDOW_STEPS);
+  } finally {
+    cerrarEscena(escena);
+  }
+
+  assert.equal(primerPunto.tick, GOVERNOR_WINDOW_STEPS, 'el instrumento mide exactamente una ventana de GOVERNOR_WINDOW_STEPS pasos desde tick 0');
+  assert.equal(medicion.pasos, GOVERNOR_WINDOW_STEPS, 'el laboratorio mide el mismo número de pasos que el instrumento (misma definición de p95)');
+  assert.equal(primerPunto.tick, medicion.pasos, 'mismo número de pasos medidos que el laboratorio para esta escena');
+
+  assert.equal(primerPunto.habitantes, medicion.world.people.length, 'misma escala de habitantes que el laboratorio');
+  assert.equal(primerPunto.teselasActivas, medicion.world.tiles.length, 'misma escala de teselas activas que el laboratorio');
+  assert.equal(
+    primerPunto.teselasPorHabitante,
+    medicion.world.tiles.length / Math.max(1, medicion.world.people.length),
+    'misma teselas/habitante que el laboratorio',
+  );
+
+  assert.ok(Number.isFinite(primerPunto.p95 as number) && (primerPunto.p95 as number) > 0, 'el p95 del instrumento debe ser finito y positivo');
+  assert.ok(Number.isFinite(medicion.p95) && medicion.p95 > 0, 'el p95 del laboratorio debe ser finito y positivo');
 });
 
 test('el instrumento encuentra el techo (p95 ≥ presupuestoMs) antes de un hasta generoso', (t) => {

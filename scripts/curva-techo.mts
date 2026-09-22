@@ -56,9 +56,10 @@
  */
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { Store } from '../src/server/store.js';
 import { GOVERNOR_WINDOW_STEPS, RollingStepPerformance } from '../src/server/governor.js';
 import { cloneWorld, createWorld, stepWorld, tileAt, type Person, type World } from '../src/world/index.js';
@@ -174,6 +175,73 @@ function agregarAnclasSinteticas(world: World, objetivo: number, contador: { n: 
   return world;
 }
 
+/**
+ * ---------------------------------------------------------------------------------------------
+ * Reutilizable por tests (hallazgo medio de la revisión adversarial T109, `tasks.md:121-127`):
+ * «Falta un test ejecutable del control: el punto de partida de la curva coincide con el p95
+ * medido por el laboratorio para la misma escena». `crearEscenaBase` + `medirVentana` son
+ * EXACTAMENTE los dos bloques que arma `main()` para el primer escalón de `--escala habitantes`
+ * (sin ningún habitante sintético añadido todavía: `agregarHabitantesSinteticos` no hace nada
+ * cuando `objetivo` ya es `world.people.length`, o sea que la escena de partida ES la población
+ * inicial de `createWorld`). Exportarlos evita que un test que quiera comparar «el punto de
+ * partida de la curva» contra «lo que mide el laboratorio para la misma escena» tenga que
+ * reconstruir la escena por su cuenta y arriesgarse a divergir de `main()` con el tiempo.
+ * ---------------------------------------------------------------------------------------------
+ */
+
+export interface EscenaBase { world: World; store: Store; context: WorldContext; dataDir: string; }
+
+/** Misma construcción que hace `main()` antes de la corrida: `Store` SQLite temporal (P3, ver
+ * cabecera del fichero), `createWorld(seed, params)` con `motor.hilos`/`motor.gpu` fijados,
+ * reproducción desactivada (la decide el instrumento/quien mida, no el emparejamiento orgánico) y
+ * un primer `store.save(world)` que fija la catalogación de tecnología y liga el `WorldContext` —
+ * es la escena EXACTA del primer punto de la curva de `--escala habitantes`. Llamar a
+ * `cerrarEscena` cuando termine. */
+export function crearEscenaBase(seed: number, hilos = 1, gpu: number[] = []): EscenaBase {
+  const dataDir = mkdtempSync(join(tmpdir(), 'atlas-techo-'));
+  process.env.CARTA_DATA_DIR = dataDir;
+  const store = new Store(join(dataDir, 'world.sqlite'));
+  const params: WorldParams = { ...DEFAULT_PARAMS, motor: { ...DEFAULT_PARAMS.motor, hilos, gpu } };
+  const world = createWorld(seed, params);
+  world.reproductionEnabled = false;
+  store.save(world);
+  return { world, store, context: store.context, dataDir };
+}
+
+/** Cierra el `Store` y borra el directorio temporal de `crearEscenaBase`. */
+export function cerrarEscena(escena: EscenaBase): void {
+  escena.store.close();
+  rmSync(escena.dataDir, { recursive: true, force: true });
+}
+
+export interface VentanaMedida { world: World; p50: number; p95: number; pasos: number; }
+
+/** Mide `pasos` pasos con el MISMO trío clon→paso→guardado condicionado a `persistencia.cadaTicks`
+ * que usa el bucle interno de `main()` (y que reproduce `stepOnce` de `src/server/app.ts`: «el
+ * paso» que el gobernador mide incluye clon + simulación + guardado, no solo el cálculo del
+ * mundo — ver cabecera del fichero), acumulando en una `RollingStepPerformance` NUEVA e
+ * independiente (`src/server/governor.ts`, compartida a propósito entre servidor y experimentos).
+ * Con `pasos === GOVERNOR_WINDOW_STEPS` el `p95` devuelto es exactamente el que calcularía un
+ * escalón de la curva sobre la misma escena: la ventana rodante tiene ese mismo tamaño, así que
+ * `pasos` medidas frescas la llenan por completo sin depender de ninguna historia previa. */
+export function medirVentana(world: World, context: WorldContext, store: Store, pasos: number): VentanaMedida {
+  const rolling = new RollingStepPerformance();
+  let actual = world, p95 = 0;
+  const tiempos: number[] = [];
+  for (let i = 0; i < pasos; i++) {
+    const started = performance.now();
+    const draft = cloneWorld(actual, context);
+    stepWorld(draft, [], context);
+    if (draft.tick % paramsOf(draft).persistencia.cadaTicks === 0) store.save(draft);
+    actual = draft;
+    const stepMs = performance.now() - started;
+    tiempos.push(stepMs);
+    p95 = rolling.record(stepMs);
+  }
+  const { p50 } = distribution(tiempos);
+  return { world: actual, p50: Math.round(p50 * 100) / 100, p95: Math.round(p95 * 100) / 100, pasos: rolling.count };
+}
+
 interface Punto {
   escala: number; habitantes: number; teselasActivas: number; teselasPorHabitante: number;
   p50: number; p95: number; tickHz: number; rss: number; fraccionSerial: number;
@@ -280,4 +348,14 @@ async function main(): Promise<void> {
   } finally { store.close(); rmSync(dataDir, { recursive: true, force: true }); }
 }
 
-main().catch(error => { console.error((error as Error).message); process.exitCode = 1; });
+// Guarda de "ejecutado directamente" (hallazgo de la revisión adversarial T109, al exportar
+// `crearEscenaBase`/`medirVentana`/`cerrarEscena` para `tests/curva-techo.test.ts`): sin esto,
+// el simple `import` del módulo desde un test ejecutaría TAMBIÉN `main()` contra el `argv` del
+// proceso de test (que no trae `--escala`/`--salida`), imprimiendo el mensaje de uso y dejando
+// `process.exitCode = 1` aunque todos los tests declarados pasen. `realpathSync` normaliza
+// symlinks/relativos de `process.argv[1]` (p.ej. `scripts/curva-techo.mts` al invocarse con
+// `--import tsx scripts/curva-techo.mts ...`, como hacen los tests de este fichero) antes de
+// comparar con la URL de este propio módulo.
+const invocadoDirectamente = process.argv[1] !== undefined
+  && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
+if (invocadoDirectamente) main().catch(error => { console.error((error as Error).message); process.exitCode = 1; });

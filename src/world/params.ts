@@ -93,6 +93,23 @@ export function limitsOf(world: object, version?: number): Readonly<WorldLimits>
   return version !== undefined && version < PARAMETER_LIMITS_RULES_VERSION ? LEGACY_WORLD_LIMITS : effectiveLimits(paramsOf(world));
 }
 
+/**
+ * Tope de FUNDACIÓN de comunidades (`society.ts`), el único lector de conducta de `limites`.
+ * Comparte número con la admisión a propósito y con coste declarado: el digesto canónico
+ * incluye los params efectivos, así que una clave propia cambiaría el digesto de TODO mundo
+ * por defecto y rompería el control de T100 («solo se relajan validaciones, no se cambia
+ * ninguna regla»). Medido el 2026-09-22 en este worktree: añadir una clave con el default de
+ * hoy y SIN ningún lector mueve `digestoCanonico(createWorld(51926))` a 60 pasos de
+ * `fa9c0523…` a `b2ccd87e…`. Consecuencia que el integrador debe conocer: subir
+ * `limites.comunidades` para ADMITIR un mundo grande sube también el tope de fundación, o
+ * sea que cambia conductas y hay que contrastarlo como cambio de reglas, no como admisión.
+ * Retirar el tope (FR-002: «default sin tope») es Reglas 10 con su propia versión y su fila
+ * de evidencia (`docs/T100-LIMITES-CONTRATO.md`); ese día esta función deja de leer `limites`.
+ */
+export function foundingCommunityCap(world: object): number {
+  return limitsOf(world).comunidades;
+}
+
 /** Rango [mínimo, máximo] permitido por clave punteada. Usado por `parseParams`. */
 export const PARAM_RANGES: Record<string, [number, number]> = {
   // Longevidad (revisión de R3): los mínimos/máximos son los que, CON EL RESTO DE LA LEY EN SUS

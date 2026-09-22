@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { getHeapStatistics } from 'node:v8';
 import { assertWorld, createWorld, type World } from '../src/world/index.js';
 import { updateCommunities } from '../src/world/society.js';
 import { materializeAnimals, stepAnimals, syncFauna, type AnimalWorld } from '../src/world/animals.js';
@@ -13,18 +14,34 @@ import { DEFAULT_PARAMS, paramsOf, parseParams, setParams } from '../src/world/p
 import { decodeSnapshot, encodeSnapshot, takeSnapshotParams, SnapshotSemanticError } from '../src/server/snapshot.js';
 import { Store } from '../src/server/store.js';
 
-/** `chunks` regiones completas: la geometría estructural fija 256 teselas por chunk. */
+/** `chunks` regiones completas: la geometría estructural fija 256 teselas por chunk.
+ * Los cuerpos son HETEROGÉNEOS y de alta precisión a propósito: 2 M copias de una sola
+ * tesela comparten forma y valores, y medir memoria sobre ellas subestima el coste real
+ * (`BYTES_PER_ACTIVE_TILE` sale de esta prueba). Cada tesela lleva sus campos opcionales y
+ * fracciones irracionales derivadas de su posición, dentro de los rangos de `validation.ts`. */
 function wideWorld(chunks = 257): World {
   const world = createWorld(51926, parseParams({ limites: { teselasActivas: chunks * 256, chunks, comunidades: 12 } }));
   const template = world.tiles.find(tile => tile.terrain === 'meadow')!;
   for (let cx = 100; Object.keys(world.chunks).length < chunks; cx++) {
     const cy = 100, key = `${cx},${cy}`;
     world.chunks[key] = { key, cx, cy, discovered: false, places: [], lastTick: 0 };
-    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++)
-      world.tiles.push({ ...template, x: cx * 16 + x, y: cy * 16 + y, fauna: 0, species: undefined });
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+      const tx = cx * 16 + x, ty = cy * 16 + y, n = tx * 65537 + ty * 7919;
+      const fraction = (n % 1000003) / 1000003;
+      world.tiles.push({ ...template, x: tx, y: ty, fauna: 0, species: undefined,
+        moisture: fraction, vegetation: 1 - fraction / 3, food: fraction / 7, growth: fraction / 11,
+        fertility: 1 - fraction / 5, drinkingWater: fraction / 13, cultivation: fraction / 17,
+        // `-0` a propósito: el digesto lo distingue de `0` y el códec debe conservarlo.
+        traffic: n % 4 === 0 ? -0 : fraction / 19, life: fraction / 23, elevation: fraction / 29,
+        wood: n % 7, stone: n % 5, variety: n % 4 });
+    }
   }
   return world;
 }
+/** Pico de RSS del proceso (`maxRSS` viene en KiB), no el instantáneo de `memoryUsage.rss()`:
+ * el instantáneo ni es el máximo ni distingue qué fase lo alcanzó. Es monótono, así que
+ * leerlo tras la fase escritora da el pico de ESA fase. */
+const peakRssBytes = (): number => process.resourceUsage().maxRSS * 1024;
 const checksum = (body: string): string => createHash('sha256').update(body).digest('hex');
 function tables(store: Store): string {
   const names = store.db.prepare("SELECT name FROM sqlite_schema WHERE type='table' ORDER BY name").all() as { name: string }[];
@@ -125,15 +142,27 @@ test('T100: 2 097 152 teselas y 8192 chunks conservan el digesto confirmado al r
   { skip: escala ? false : 'prueba lenta: exige CARTA_TEST_ESCALA=1' }, t => {
   const directory = mkdtempSync(join(tmpdir(), 'atlas-limits-2m-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
-  const started = performance.now(), world = wideWorld(8192), path = join(directory, 'world.sqlite');
-  assert.equal(world.tiles.length, 2_097_152); assert.equal(Object.keys(world.chunks).length, 8192);
-  assertWorld(world);
-  const store = new Store(path);
-  let digest: string;
-  try { store.save(world); digest = digestoCanonico(world); } finally { store.close(); }
+  const started = performance.now(), path = join(directory, 'world.sqlite');
+  // El mundo escritor vive en su propio ámbito y se suelta antes de recargar: así el pico
+  // de RSS medido aquí es el de UN mundo residente, no el de dos (escritor + recargado).
+  const escritura = (() => {
+    const world = wideWorld(8192);
+    assert.equal(world.tiles.length, 2_097_152); assert.equal(Object.keys(world.chunks).length, 8192);
+    assertWorld(world);
+    const store = new Store(path);
+    try {
+      store.save(world);
+      return { digest: digestoCanonico(world), rss: peakRssBytes(), tiles: world.tiles.length, ms: performance.now() - started };
+    } finally { store.close(); }
+  })();
+  const lectura = performance.now();
   const reopened = new Store(path);
-  try { assert.equal(digestoCanonico(reopened.load()!.world), digest); } finally { reopened.close(); }
-  console.log(`2M teselas: ${Math.round(performance.now() - started)} ms, RSS pico ${(process.memoryUsage.rss() / 1048576).toFixed(0)} MiB, ${statSync(path).size} bytes en disco.`);
+  try { assert.equal(digestoCanonico(reopened.load()!.world), escritura.digest); } finally { reopened.close(); }
+  const bytes = statSync(path).size, heap = getHeapStatistics().heap_size_limit;
+  console.log(`2M teselas: escritura ${Math.round(escritura.ms)} ms, lectura ${Math.round(performance.now() - lectura)} ms; `
+    + `RSS pico del escritor ${(escritura.rss / 1048576).toFixed(0)} MiB (${(escritura.rss / escritura.tiles).toFixed(0)} B/tesela); `
+    + `RSS pico del proceso ${(peakRssBytes() / 1048576).toFixed(0)} MiB; ${bytes} bytes en disco `
+    + `(${(bytes / escritura.tiles).toFixed(0)} B/tesela); heap configurado ${(heap / 1048576).toFixed(0)} MiB.`);
 });
 
 /** El techo de cría animal es el límite efectivo del mundo, no una constante del binario.

@@ -365,12 +365,7 @@ export class Store {
   private loadSlot(row: Row, decoded: World, slot: SnapshotSlot, rawTransaction: boolean, chronicleStamp: ChronicleStamp,
     skipped: string[], supersededAt: number | null): LoadedSnapshot {
     const declaredChronicle = decoded.chronicleJournal !== undefined;
-    // Los params se restauran ANTES de `migrateWorld`, que ya valida con `assertWorld`:
-    // la ley de frontera mide el mundo con los parámetros con los que se guardó (R8).
-    const params = takeSnapshotParams(decoded);
-    setParams(decoded, params);
-    const world = migrateWorld(decoded, this.context);
-    setParams(world, params);
+    const world = this.migrateSnapshot(decoded);
     if (slot > 0) this.assertNothingNewerThan(world);
     if (world.technology.catalogue && (world.technology.catalogue.pending.length ||
       world.technology.catalogue.committedThrough !== world.technology.recipeCounter)) technologyFailure('snapshot contains uncommitted definitions');
@@ -739,7 +734,7 @@ export class Store {
         if (!row && this.db.prepare("SELECT 1 FROM metadata WHERE key='initialized'").get()) technologyFailure('baseline snapshot is missing');
         if (row) {
           if (checksum(row.body) !== row.digest) technologyFailure('baseline snapshot checksum mismatch');
-          const baseline = migrateWorld(decodeSnapshot(row.body), this.context);
+          const baseline = this.migrateSnapshot(decodeSnapshot(row.body) as World);
           if (baseline.technology.journal !== undefined) {
             const committed = baseline.technology.journal;
             assertTechnologyJournal(baseline.technology, baseline.tick);
@@ -943,7 +938,7 @@ export class Store {
     // Unverifiable metadata is not permission to reconstruct a damaged retained prefix.
     if (origin) {
       if (!current || checksum(current.body) !== current.digest) technologyFailure('cannot verify recovery history origin');
-      const baseline = migrateWorld(decodeSnapshot(current!.body), this.context), journal = baseline.technology.journal;
+      const baseline = this.migrateSnapshot(decodeSnapshot(current!.body) as World), journal = baseline.technology.journal;
       if (!journal || journal.startsAfter !== origin.startsAfter || journal.pending.length
         || journal.committedThrough !== baseline.technology.executionCounter) technologyFailure('recovery history origin disagrees with committed snapshot');
       assertTechnologyJournal(baseline.technology, baseline.tick);
@@ -962,7 +957,7 @@ export class Store {
     } else {
       if (['technology_definitions', 'technology_stats', 'technology_executions'].some(table => this.db.prepare(`SELECT 1 FROM ${table} LIMIT 1`).get())) technologyFailure('recovery archive has records but no origin');
       if (current && checksum(current.body) === current.digest) {
-        const baseline = migrateWorld(decodeSnapshot(current.body), this.context);
+        const baseline = this.migrateSnapshot(decodeSnapshot(current.body) as World);
         if (baseline.technology.journal !== undefined) technologyFailure('recovery lost its declared history origin');
       }
     }
@@ -973,14 +968,21 @@ export class Store {
     this.verifiedTechnology = null; this.verifiedRecipes.clear();
   }
 
-  /** Verificación previa de un candidato de la cadena, ANTES de copiar nada al destino:
-   * una recuperación imposible no deja una copia a medias. */
-  private verifyPrevious(row: Row): { world: World; declaredJournal: boolean } {
-    const decoded = decodeSnapshot(row.body) as World, declaredChronicle = decoded.chronicleJournal !== undefined;
+  /** Todas las lecturas de un mundo durable validan sus leyes antes de migrarlo,
+   * también al verificar el baseline de un guardado o reconstruir una recuperación. */
+  private migrateSnapshot(decoded: World): World {
     const params = takeSnapshotParams(decoded);
     setParams(decoded, params);
     const world = migrateWorld(decoded, this.context);
     setParams(world, params);
+    return world;
+  }
+
+  /** Verificación previa de un candidato de la cadena, ANTES de copiar nada al destino:
+   * una recuperación imposible no deja una copia a medias. */
+  private verifyPrevious(row: Row): { world: World; declaredJournal: boolean } {
+    const decoded = decodeSnapshot(row.body) as World, declaredChronicle = decoded.chronicleJournal !== undefined;
+    const world = this.migrateSnapshot(decoded);
     this.assertChronicleOrigin(world, declaredChronicle, true);
     this.assertChronicleArchive(world, true);
     const declaredJournal = world.technology.journal !== undefined;

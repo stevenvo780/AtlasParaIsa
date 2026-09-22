@@ -171,7 +171,7 @@ test('el software ya no pone tope: `poblacion.maxima` por defecto no limita y el
 // el hardware limita el crecimiento, no el reemplazo.
 // ---------------------------------------------------------------------------------------------
 
-import { decidirConTecho, ESTADO_TECHO_INICIAL, GOVERNOR_DECLINE_STEPS, Gobernador, type EstadoTecho } from '../src/server/governor.js';
+import { decidirConTecho, ESTADO_TECHO_INICIAL, Gobernador } from '../src/server/governor.js';
 import type { Person } from '../src/world/index.js';
 
 /** Igual que `fatalThirst` en tests/muerte.test.ts: sed total y salud mínima ⇒ muerte real por deshidratación en el paso auténtico. */
@@ -188,32 +188,24 @@ test('techo: por encima del presupuesto se fija el techo en la población y solo
   assert.equal(repuesto.reproduccion, false);
   const bandaMuerta = decidirConTecho(40, 50, 22, repuesto.estado);
   assert.equal(bandaMuerta.estado.techo, 22, 'la banda muerta conserva el techo (histéresis)');
-  assert.equal(bandaMuerta.estado.pasosEnRojo, 0);
   const verde = decidirConTecho(34.9, 50, 22, bandaMuerta.estado);
   assert.equal(verde.estado.techo, null, 'con holgura el techo se retira');
   assert.equal(verde.reproduccion, true);
   assert.equal(decidirConTecho(50, 50, 22, ESTADO_TECHO_INICIAL).estado.techo, null, 'el presupuesto exacto todavía no frena');
 });
 
-test('techo: un rojo grave y sostenido baja el techo una unidad por día simulado; nunca por debajo de cero ni por muertes provocadas', () => {
-  assert.equal(GOVERNOR_DECLINE_STEPS, 2400, 'un día simulado a 10 Hz');
+test('techo: el techo nunca baja, ni con rojo grave sostenido (carga externa no debe vaciar el mundo)', () => {
   let estado = { ...ESTADO_TECHO_INICIAL };
-  for (let n = 0; n < GOVERNOR_DECLINE_STEPS - 1; n++) estado = decidirConTecho(120, 50, 30, estado).estado;
-  assert.equal(estado.techo, 30, 'antes de completar el día el techo no cambia');
-  estado = decidirConTecho(120, 50, 30, estado).estado;
-  assert.equal(estado.techo, 29, 'p95 > 2× presupuesto durante 2400 pasos baja el techo en uno');
-  for (let n = 0; n < GOVERNOR_DECLINE_STEPS; n++) estado = decidirConTecho(80, 50, 30, estado).estado;
-  assert.equal(estado.techo, 29, 'un rojo leve (< 2×) no sigue bajando el techo');
-  let cero: EstadoTecho = { techo: 0, pasosEnRojo: GOVERNOR_DECLINE_STEPS - 1 };
-  cero = decidirConTecho(120, 50, 0, cero).estado;
-  assert.equal(cero.techo, 0);
+  for (let n = 0; n < 5000; n++) estado = decidirConTecho(300, 50, 30, estado).estado;
+  assert.equal(estado.techo, 30, 'ni 5000 pasos a 6× el presupuesto bajan el techo');
+  assert.equal(decidirConTecho(300, 50, 29, estado).reproduccion, true, 'sigue reponiendo bajo carga extrema');
 });
 
 test('techo: la función es pura (no muta el estado recibido)', () => {
-  const estado = Object.freeze({ techo: 10, pasosEnRojo: 3 });
+  const estado = Object.freeze({ techo: 10 });
   const r = decidirConTecho(60, 50, 9, estado);
-  assert.deepEqual(estado, { techo: 10, pasosEnRojo: 3 });
-  assert.deepEqual(r.estado, { techo: 10, pasosEnRojo: 4 });
+  assert.deepEqual(estado, { techo: 10 });
+  assert.deepEqual(r.estado, { techo: 10 }); assert.notEqual(r.estado, estado);
 });
 
 test('Gobernador: `apagar` reproduce exactamente decideReproduction y `techo` registra el frenazo (T164) sin borrarlo al volver a verde', () => {
@@ -223,7 +215,7 @@ test('Gobernador: `apagar` reproduce exactamente decideReproduction y `techo` re
   for (let n = 0; n < 8; n++) { apagar.registrar(80); techo.registrar(80); }
   assert.equal(apagar.decidir(params('apagar'), true, 22, 1120, 8), decideReproduction(80, 50, true));
   assert.equal(techo.decidir(params('techo'), true, 22, 1120, 8), false);
-  assert.deepEqual(techo.estado, { techo: 22, pasosEnRojo: 1 });
+  assert.deepEqual(techo.estado, { techo: 22 });
   assert.ok(techo.techoObservado, 'el frenazo queda registrado');
   assert.equal(techo.techoObservado!.poblacion, 22); assert.equal(techo.techoObservado!.teselasActivas, 1120);
   assert.equal(techo.techoObservado!.tick, 8); assert.equal(techo.techoObservado!.senal, 'p95');

@@ -1,9 +1,5 @@
 /** Recent completed steps, including persistence. This is not a lifetime percentile. */
 export const GOVERNOR_WINDOW_STEPS = 120;
-/** Política `techo`: pasos seguidos en rojo grave (p95 > 2× presupuesto) que bajan el techo una unidad
- * (= un día simulado a 10 Hz, `TICKS_PER_DAY`). Con un rojo grave el servidor ya no sostiene 10 Hz; la
- * población decrece por muertes no repuestas, despacio: el instrumento cambia el crecimiento, no mata. */
-export const GOVERNOR_DECLINE_STEPS = 20 * GOVERNOR_WINDOW_STEPS;
 
 /** Shared by the server and experiments so both use the same window and percentile. */
 export class RollingStepPerformance {
@@ -29,9 +25,9 @@ export function decideReproduction(p95StepMs: number, presupuestoMs: number, act
   return actual;
 }
 
-/** Estado de la política `techo`: el techo vigente (null = sin freno) y los pasos seguidos en rojo. */
-export interface EstadoTecho { techo: number | null; pasosEnRojo: number }
-export const ESTADO_TECHO_INICIAL: Readonly<EstadoTecho> = Object.freeze({ techo: null, pasosEnRojo: 0 });
+/** Estado de la política `techo`: el techo vigente (null = sin freno). */
+export interface EstadoTecho { techo: number | null }
+export const ESTADO_TECHO_INICIAL: Readonly<EstadoTecho> = Object.freeze({ techo: null });
 
 /**
  * Política `gobernador.politica = 'techo'` (revisión 2026-09-22; T162/T164 parciales de la feature 002).
@@ -39,20 +35,18 @@ export const ESTADO_TECHO_INICIAL: Readonly<EstadoTecho> = Object.freeze({ techo
  * · Verde (p95 < 70 % del presupuesto): sin techo, la reproducción queda permitida.
  * · Rojo (p95 > presupuesto): si no había techo se fija en la población actual; solo se permiten
  *   nacimientos mientras la población esté por debajo del techo (reponer muertes, no crecer).
- *   Si el rojo es grave (p95 > 2× presupuesto) y persiste, el techo baja una unidad cada
- *   `GOVERNOR_DECLINE_STEPS` pasos (un día simulado): la población decrece por muertes no repuestas.
  * · Banda muerta [70 %, 100 %]: el techo vigente se conserva tal cual (histéresis de R17).
+ * El techo nunca baja: el gobernador detiene el crecimiento, jamás reduce una población. Una bajada
+ * automática bajo rojo grave se probó y se descartó el 2026-09-22: con carga EXTERNA sostenida (una
+ * barrida de laboratorio en la misma torre) habría dejado días simulados sin nacimientos y reproducido
+ * la extinción por senescencia que esta política corrige. Si el rojo es por carga externa, la población
+ * se mantiene y el servidor corre más lento hasta que la carga se retire.
  * Función pura: no toca el mundo ni relojes; el estado viaja como argumento y como resultado.
  */
 export function decidirConTecho(p95StepMs: number, presupuestoMs: number, poblacion: number, estado: Readonly<EstadoTecho>): { reproduccion: boolean; estado: EstadoTecho } {
-  if (p95StepMs < presupuestoMs * 0.7) return { reproduccion: true, estado: { techo: null, pasosEnRojo: 0 } };
-  let techo = estado.techo, pasosEnRojo = estado.pasosEnRojo;
-  if (p95StepMs > presupuestoMs) {
-    if (techo === null) techo = poblacion;
-    pasosEnRojo += 1;
-    if (p95StepMs > presupuestoMs * 2 && pasosEnRojo % GOVERNOR_DECLINE_STEPS === 0) techo = Math.max(0, techo - 1);
-  } else pasosEnRojo = 0;
-  return { reproduccion: techo === null || poblacion < techo, estado: { techo, pasosEnRojo } };
+  if (p95StepMs < presupuestoMs * 0.7) return { reproduccion: true, estado: { techo: null } };
+  const techo = estado.techo === null && p95StepMs > presupuestoMs ? poblacion : estado.techo;
+  return { reproduccion: techo === null || poblacion < techo, estado: { techo } };
 }
 
 /** T164: registro del último frenazo (no se borra al volver a verde). Es publicación, no regla. */

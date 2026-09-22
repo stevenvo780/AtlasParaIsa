@@ -35,9 +35,8 @@ export interface WorldParams {
    *   mundo se extinguió por senescencia sin que el hardware estuviera saturado por la gente.
    * · `techo` (default): el hardware limita el CRECIMIENTO, no el reemplazo. Al cruzar el
    *   presupuesto se fija un techo = población de ese momento y solo se permiten nacimientos
-   *   mientras la población esté por debajo del techo; con p95 > 2× presupuesto sostenido el
-   *   techo baja una unidad por día simulado (la población decrece por muertes no
-   *   repuestas, nunca por muertes provocadas); por debajo del 70 % el techo se retira.
+   *   mientras la población esté por debajo del techo; el techo nunca baja (bajo carga externa
+   *   la población se mantiene y el servidor corre más lento); por debajo del 70 % se retira.
    * Default 50 ms = constitución V.
    */
   gobernador: { presupuestoMs: number; senales: string[]; politica: 'apagar' | 'techo' };

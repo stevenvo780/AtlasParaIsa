@@ -1,0 +1,46 @@
+{
+  "observedAt": "2026-09-22T12:12:53.158711+00:00",
+  "tick": 53700,
+  "seed": 51926,
+  "version": 7,
+  "snapshotDigest": "2b1b0ddbe32c4ca3fc810cee06e27f4c70e9c3205a394fc99f94e8408e6f2c1a",
+  "params": {
+    "cuerpo": {
+      "longevidadBaseDias": 11,
+      "longevidadPorResiliencia": 4,
+      "longevidadPorActividad": 1,
+      "senescenciaInicioFraccion": 0.75,
+      "riesgoSenescenciaDiario": 0.04,
+      "riesgoSenescenciaPendiente": 10,
+      "cuidadoReduceRiesgo": 0.6
+    },
+    "genes": {
+      "varianzaFundadores": 0.15,
+      "tasaMutacion": 1
+    },
+    "poblacion": {
+      "maxima": 1000000,
+      "intervaloComprobacionTicks": 120,
+      "nacimientosPorComprobacion": 2
+    },
+    "recursos": {
+      "capacidadBosque": 1,
+      "capacidadPastizal": 0.7,
+      "capacidadOtros": 0.35,
+      "velocidadRegeneracion": 1,
+      "decaimientoFertilidad": 0.001,
+      "decaimientoComida": 0.0001
+    },
+    "persistencia": {
+      "cadaTicks": 100,
+      "ventanaEventosTicks": 24000
+    },
+    "agua": {
+      "cuencas": 0.4
+    },
+    "gobernador": {
+      "presupuestoMs": 50
+    }
+  },
+  "acceptedInputRows": 0
+}

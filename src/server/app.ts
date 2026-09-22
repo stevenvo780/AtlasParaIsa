@@ -10,6 +10,8 @@ import type { ClientMessage, Gesture, GestureResult, ServerMessage, Viewport, Wo
 import { Store, fingerprint, GestureConflict, SessionRevoked } from './store.js';
 import { cookie, hashToken, makeToken, passwordVerifier, sessionHash } from './auth.js';
 import { ensureWorldInstance, readWorldInstance } from './world-instance.js';
+import { decideReproduction, RollingStepPerformance } from './governor.js';
+export { decideReproduction } from './governor.js';
 
 class HttpError extends Error { constructor(readonly status: number, message: string) { super(message); } }
 export interface AppOptions {
@@ -19,6 +21,8 @@ export interface AppOptions {
    * `createApp` ya hubiera generado el terreno). Un mundo cargado conserva los suyos,
    * los de su instantánea; quien quiera imponerlos llama `setParams` después. */
   params?: WorldParams;
+  /** Instance-local monotonic clock; tests can measure work without patching global timers. */
+  monotonicNow?: () => number;
 }
 type Pending = { gesture: Gesture; hash: string; resolve: (r: GestureResult) => void; reject: (e: Error) => void; promise: Promise<GestureResult> };
 export function parseGesture(value: unknown): Gesture {
@@ -78,19 +82,9 @@ export function rate(map: Map<string, { count: number; reset: number }>, key: st
   row.count++; map.set(key, row);
   if (row.count > max) throw new HttpError(429, 'Espera un momento antes de intentarlo de nuevo.');
 }
-/**
- * Ruling R17: decisión del gobernador, aislada y pura para poder verificarla sin reloj.
- * Por encima del presupuesto se apaga; por debajo del 70 % se reenciende; en la banda
- * muerta [0,7·P, P] se conserva el estado vigente — esa histéresis evita oscilar.
- */
-export function decideReproduction(p95StepMs: number, presupuestoMs: number, actual: boolean): boolean {
-  if (p95StepMs > presupuestoMs) return false;
-  if (p95StepMs < presupuestoMs * 0.7) return true;
-  return actual;
-}
-
 export function createApp(options: AppOptions) {
   const { store } = options;
+  const monotonicNow = options.monotonicNow ?? (() => performance.now());
   const verifyPassword = passwordVerifier(options);
   const origin = new URL(options.origin).origin;
   if (options.secure && !origin.startsWith('https://')) throw new Error('Private hosted access requires an HTTPS origin.');
@@ -133,9 +127,9 @@ export function createApp(options: AppOptions) {
   const ws = new WebSocketServer({ noServer: true, maxPayload: 4096, perMessageDeflate: false });
   const staticDir = resolve(options.staticDir ?? 'dist/client');
   const context = store.context;
-  const measurements: number[] = [];
+  const measurements = new RollingStepPerformance();
   const beats: number[] = [];
-  const runtime: RuntimeStats = { stepMs: 0, p95StepMs: 0, saveMs: 0, projectionMs: 0, snapshotBytes: 0, activeTiles: world.tiles.length, processRssMiB: process.memoryUsage.rss() / 1048576, tickHz: 0,
+  const runtime: RuntimeStats = { stepMs: 0, p95StepMs: 0, cloneMs: 0, simulationMs: 0, saveMs: 0, projectionMs: 0, snapshotBytes: 0, activeTiles: world.tiles.length, processRssMiB: process.memoryUsage.rss() / 1048576, tickHz: 0,
     gobernador: { activo: world.reproductionEnabled, presupuestoMs: paramsOf(world).gobernador.presupuestoMs, p95StepMs: 0, manual: null } };
   /**
    * Ruling R17: la población la limita el HARDWARE, no un tope fijo. Tras medir el paso,
@@ -152,12 +146,12 @@ export function createApp(options: AppOptions) {
     stats.p95StepMs = runtime.p95StepMs;
     if (stats.manual !== null) { draft.reproductionEnabled = stats.manual; stats.activo = stats.manual; return; }
     // Sin medición todavía (primer paso) no se afirma nada sobre el hardware.
-    if (measurements.length > 0) draft.reproductionEnabled = decideReproduction(runtime.p95StepMs, stats.presupuestoMs, draft.reproductionEnabled);
+    if (measurements.count > 0) draft.reproductionEnabled = decideReproduction(runtime.p95StepMs, stats.presupuestoMs, draft.reproductionEnabled);
     stats.activo = draft.reproductionEnabled;
   }
   const view = (viewport?: Viewport) => {
-    const start = performance.now(), projected = projectWorld(world, viewport, context);
-    runtime.projectionMs = performance.now() - start;
+    const start = monotonicNow(), projected = projectWorld(world, viewport, context);
+    runtime.projectionMs = monotonicNow() - start;
     return { ...projected, instanceId, performance: { ...runtime }, ...(failed ? { paused: true, pauseReason: 'No se pudo guardar. El mundo está en pausa para proteger lo ya vivido.' } : {}) };
   };
   function authorized(req: IncomingMessage) {
@@ -216,7 +210,8 @@ export function createApp(options: AppOptions) {
   }
   function stepOnce() {
     if (failed || stopped) return;
-    const stepStarted = performance.now();
+    const stepStarted = monotonicNow();
+    runtime.cloneMs = 0; runtime.simulationMs = 0; runtime.saveMs = 0;
     // Ritmo real en reloj de pared sobre los últimos 120 pasos: lo que de verdad
     // avanza el mundo, no el intervalo pedido. Sin pasos previos no se afirma nada.
     beats.push(stepStarted); if (beats.length > 120) beats.shift();
@@ -230,20 +225,24 @@ export function createApp(options: AppOptions) {
         if (store.sessionValid(item.hash)) valid.push(item);
         else { item.reject(new HttpError(401, 'La sesión terminó antes de aplicar el gesto.')); pending.delete(item.gesture.id); }
       }
+      const cloneStarted = monotonicNow();
       const draft = cloneWorld(world, context);
+      runtime.cloneMs = monotonicNow() - cloneStarted;
+      const simulationStarted = monotonicNow();
       const results = stepWorld(draft, valid.map(item => item.gesture), context);
+      runtime.simulationMs = monotonicNow() - simulationStarted;
       if (results.length !== valid.length) throw new Error('Gesture result count mismatch');
       // C3/C12: persistir es una transacción por cadencia, no por tick. Un gesto
       // confirmado nunca espera: obliga a guardar en su propio paso. Lo que se
       // arriesga entre guardados son los pasos de la cadencia, jamás un gesto.
       if (valid.length > 0 || draft.tick % paramsOf(draft).persistencia.cadaTicks === 0) {
-        const saveStarted = performance.now();
+        const saveStarted = monotonicNow();
         store.save(draft, valid.map((item, i) => ({ gesture: item.gesture, result: results[i] })), valid.map(item => item.hash));
-        runtime.saveMs = performance.now() - saveStarted;
+        runtime.saveMs = monotonicNow() - saveStarted;
       }
       world = draft;
-      runtime.stepMs = performance.now() - stepStarted; measurements.push(runtime.stepMs); if (measurements.length > 120) measurements.shift();
-      runtime.p95StepMs = [...measurements].sort((a, b) => a - b)[Math.floor(measurements.length * 0.95)] ?? 0;
+      runtime.stepMs = monotonicNow() - stepStarted;
+      runtime.p95StepMs = measurements.record(runtime.stepMs);
       // El gobernador decide sobre el mundo ya vigente: la próxima `reproduce()` lo lee.
       governReproduction(world);
       runtime.activeTiles = world.tiles.length; runtime.processRssMiB = process.memoryUsage.rss() / 1048576; runtime.snapshotBytes = store.lastSnapshotBytes;
@@ -389,17 +388,17 @@ export function createApp(options: AppOptions) {
   // el retraso con una ráfaga de pasos: el mundo no salta hacia atrás ni adelante.
   const tickMs = options.tickMs ?? 100;
   let timer: ReturnType<typeof setTimeout> | undefined;
-  let next = performance.now() + tickMs;
+  let next = monotonicNow() + tickMs;
   function schedule() {
     timer = setTimeout(() => {
       next += tickMs;
       stepOnce();
       // El corte se juzga DESPUÉS del paso: un paso que duró más que el intervalo
       // vuelve a citarse, nunca dispara una ráfaga para «recuperar» lo perdido.
-      const now = performance.now();
+      const now = monotonicNow();
       if (next < now) next = now + tickMs;
       if (!stopped) schedule();
-    }, Math.max(0, next - performance.now()));
+    }, Math.max(0, next - monotonicNow()));
     timer.unref();
   }
   if (!options.manual) schedule();

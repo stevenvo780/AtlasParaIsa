@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { DatabaseSync } from 'node:sqlite';
+import type { DatabaseSync, StatementSync } from 'node:sqlite';
 import { TECHNOLOGY_ARCHIVE_LAWS_VERSION, type TechnologyDefinition, type TechnologyExecutionQuery,
   type TechnologyStats, type TechnologyStatsRecord, type TechnologyHistoryOrigin } from '../shared/technology-archive.js';
 import type { TechnologyCatalogueTotals, TechnologyExecution, TechnologyProgram } from '../shared/technology.js';
@@ -136,15 +136,25 @@ export class TechnologyArchive {
   private summaryProof: SummaryProof | null = null;
   private hostTransaction = false;
   private readDepth = 0;
+  /** A fixed set of SQL programs, never cached rows or validation results. Each get
+   * still reads the current SQLite snapshot and every stamp check remains in place.
+   * Streaming statements stay separate: a nested read must not reset an iterator. */
+  private readonly readStatements = new Map<string, StatementSync>();
   constructor(private readonly db: DatabaseSync) {}
+
+  private readStatement(sql: string): StatementSync {
+    let statement = this.readStatements.get(sql);
+    if (!statement) { statement = this.db.prepare(sql); this.readStatements.set(sql, statement); }
+    return statement;
+  }
 
   private transaction(): void { if (!this.db.isTransaction) throw new Error('Technology archive mutation requires a host transaction.'); }
 
   private stamp(): ArchiveStamp {
-    return { dataVersion: (this.db.prepare('PRAGMA main.data_version').get() as { data_version: number }).data_version,
-      totalChanges: (this.db.prepare('SELECT total_changes() AS n').get() as { n: number }).n,
-      schemaCookie: (this.db.prepare('PRAGMA main.schema_version').get() as { schema_version: number }).schema_version,
-      tempSchemaCookie: (this.db.prepare('PRAGMA temp.schema_version').get() as { schema_version: number }).schema_version,
+    return { dataVersion: (this.readStatement('PRAGMA main.data_version').get() as { data_version: number }).data_version,
+      totalChanges: (this.readStatement('SELECT total_changes() AS n').get() as { n: number }).n,
+      schemaCookie: (this.readStatement('PRAGMA main.schema_version').get() as { schema_version: number }).schema_version,
+      tempSchemaCookie: (this.readStatement('PRAGMA temp.schema_version').get() as { schema_version: number }).schema_version,
       transaction: this.db.isTransaction };
   }
   private clearProofs(): void { this.verifiedStamp = null; this.definitionProof = null; this.summaryProof = null; }
@@ -158,7 +168,7 @@ export class TechnologyArchive {
   }
   private retainProofs(): boolean { return !this.db.isTransaction || this.hostTransaction; }
   private hasTriggers(): boolean {
-    return !!this.db.prepare("SELECT 1 FROM main.sqlite_schema WHERE type='trigger' UNION ALL SELECT 1 FROM temp.sqlite_schema WHERE type='trigger' LIMIT 1").get();
+    return !!this.readStatement("SELECT 1 FROM main.sqlite_schema WHERE type='trigger' UNION ALL SELECT 1 FROM temp.sqlite_schema WHERE type='trigger' LIMIT 1").get();
   }
   private read<T>(callback: () => T): T {
     if (this.readDepth) return callback();
@@ -277,7 +287,7 @@ export class TechnologyArchive {
   }
 
   private definitionRow(id: string): DefinitionRow | undefined {
-    return this.db.prepare('SELECT id,tick,signature,body,digest FROM technology_definitions WHERE id=?').get(id) as DefinitionRow | undefined;
+    return this.readStatement('SELECT id,tick,signature,body,digest FROM technology_definitions WHERE id=?').get(id) as DefinitionRow | undefined;
   }
   private definition(row: DefinitionRow): TechnologyDefinition {
     const value = decode(row); assertDefinition(value);
@@ -391,14 +401,14 @@ export class TechnologyArchive {
     return { recipeId: row.recipeId, tick: row.tick, ...stats };
   }
   private statsTimeline(row: StatsRow, value: TechnologyStats, asOfTick = MAX_TICK): void {
-    const before = this.db.prepare('SELECT recipeId,tick,body,digest FROM technology_stats WHERE recipeId=? AND tick<? ORDER BY tick DESC LIMIT 1').get(row.recipeId, row.tick) as StatsRow | undefined;
-    const after = this.db.prepare('SELECT recipeId,tick,body,digest FROM technology_stats WHERE recipeId=? AND tick>? AND tick<=? ORDER BY tick LIMIT 1').get(row.recipeId, row.tick, asOfTick) as StatsRow | undefined;
+    const before = this.readStatement('SELECT recipeId,tick,body,digest FROM technology_stats WHERE recipeId=? AND tick<? ORDER BY tick DESC LIMIT 1').get(row.recipeId, row.tick) as StatsRow | undefined;
+    const after = this.readStatement('SELECT recipeId,tick,body,digest FROM technology_stats WHERE recipeId=? AND tick>? AND tick<=? ORDER BY tick LIMIT 1').get(row.recipeId, row.tick, asOfTick) as StatsRow | undefined;
     if (before && !monotone(this.stats(before), value) || after && !monotone(value, this.stats(after))) fail('statistics regression');
   }
   getStats(recipe: string, asOfTick = MAX_TICK): TechnologyStatsRecord | null {
     if (!recipeId(recipe)) fail('statistics lookup'); tick(asOfTick);
     return this.read(() => {
-      const row = this.db.prepare('SELECT recipeId,tick,body,digest FROM technology_stats WHERE recipeId=? AND tick<=? ORDER BY tick DESC LIMIT 1').get(recipe, asOfTick) as StatsRow | undefined;
+      const row = this.readStatement('SELECT recipeId,tick,body,digest FROM technology_stats WHERE recipeId=? AND tick<=? ORDER BY tick DESC LIMIT 1').get(recipe, asOfTick) as StatsRow | undefined;
       if (!row) return null;
       const value = this.stats(row);
       this.statsTimeline(row, value, asOfTick);
@@ -461,7 +471,7 @@ export class TechnologyArchive {
   }
 
   private executionRow(id: string): ExecutionRow | undefined {
-    return this.db.prepare('SELECT id,serial,tick,body,digest FROM technology_executions WHERE id=?').get(id) as ExecutionRow | undefined;
+    return this.readStatement('SELECT id,serial,tick,body,digest FROM technology_executions WHERE id=?').get(id) as ExecutionRow | undefined;
   }
   private execution(row: ExecutionRow): TechnologyExecution {
     const value = decode(row); assertExecution(value);
@@ -487,8 +497,8 @@ export class TechnologyArchive {
     }
   }
   private executionTimeline(row: ExecutionRow, asOfTick = MAX_TICK): void {
-    const before = this.db.prepare('SELECT id,serial,tick,body,digest FROM technology_executions WHERE serial<? AND tick<=? ORDER BY serial DESC LIMIT 1').get(row.serial, asOfTick) as ExecutionRow | undefined;
-    const after = this.db.prepare('SELECT id,serial,tick,body,digest FROM technology_executions WHERE serial>? AND tick<=? ORDER BY serial LIMIT 1').get(row.serial, asOfTick) as ExecutionRow | undefined;
+    const before = this.readStatement('SELECT id,serial,tick,body,digest FROM technology_executions WHERE serial<? AND tick<=? ORDER BY serial DESC LIMIT 1').get(row.serial, asOfTick) as ExecutionRow | undefined;
+    const after = this.readStatement('SELECT id,serial,tick,body,digest FROM technology_executions WHERE serial>? AND tick<=? ORDER BY serial LIMIT 1').get(row.serial, asOfTick) as ExecutionRow | undefined;
     if (before && this.execution(before).tick > row.tick || after && this.execution(after).tick < row.tick) fail('execution chronology');
   }
   getExecution(id: string, asOfTick = MAX_TICK): TechnologyExecution | null {

@@ -76,9 +76,12 @@ test('a failed post-COMMIT cache refresh still reports success and a reopened da
   const expectedTick = lab.world.tick, expectedHistory = structuredClone(lab.world.technology.history);
   const acknowledge = lab.store.technologyArchive.acknowledgeHostCommit.bind(lab.store.technologyArchive);
   let committed = 0;
-  // This hook runs strictly after the real SQL COMMIT. Closing the connection
-  // forces the subsequent PRAGMA optimization to fail without undoing persistence.
-  lab.store.technologyArchive.acknowledgeHostCommit = () => { acknowledge(); committed++; lab.close(); };
+  // Only the durable commit includes this input; a preparatory read-snapshot
+  // commit must not trigger the post-persistence fault injection.
+  lab.store.technologyArchive.acknowledgeHostCommit = () => {
+    acknowledge();
+    if (lab.store.result(gesture)) { committed++; lab.close(); }
+  };
   assert.doesNotThrow(() => lab.store.save(lab.world, [{ gesture, result }]));
   assert.equal(committed, 1); assert.equal(lab.world.technology.journal!.pending.length, 0);
   assert.equal(lab.world.technology.catalogue!.pending.length, 0);

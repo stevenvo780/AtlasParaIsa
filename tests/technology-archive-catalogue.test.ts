@@ -14,7 +14,8 @@ import { TECHNOLOGY_FUNCTION_WORDS, technologyFunctionCode, technologyFunctionCo
 const checksum = (body: string) => createHash('sha256').update(body).digest('hex');
 function fixture(t: TestContext) {
   const dir = mkdtempSync(join(tmpdir(), 'archive-catalogue-')), path = join(dir, 'archive.sqlite');
-  const db = new DatabaseSync(path), archive = new TechnologyArchive(db);
+  const db = new DatabaseSync(path); countQueries(db);
+  const archive = new TechnologyArchive(db);
   db.exec('PRAGMA journal_mode=WAL; BEGIN'); archive.installSchema(); db.exec('COMMIT');
   t.after(() => { db.close(); rmSync(dir, { force: true, recursive: true }); });
   return { db, archive, path };
@@ -45,10 +46,22 @@ function rewrite(db: DatabaseSync, id: number, mutate: (definition: TechnologyDe
   const value = definition(id); mutate(value); const body = JSON.stringify(value);
   db.prepare('UPDATE technology_definitions SET body=?,digest=? WHERE id=?').run(body, checksum(body), value.id);
 }
+const queryCounters = new WeakMap<DatabaseSync, { reset(): void; readonly count: number }>();
 function countQueries(db: DatabaseSync) {
+  const existing = queryCounters.get(db); if (existing) return existing;
   const original = db.prepare.bind(db); let count = 0;
-  db.prepare = sql => { count++; return original(sql); };
-  return { reset() { count = 0; }, get count() { return count; } };
+  // Count executions, including reused prepared programs. Counting prepare() would
+  // make this work bound silently stop observing the hot queries after caching.
+  db.prepare = sql => {
+    const statement = original(sql);
+    for (const name of ['get', 'all', 'run', 'iterate'] as const) {
+      const execute = statement[name];
+      Object.defineProperty(statement, name, { value(...args: unknown[]) { count++; return Reflect.apply(execute, statement, args); } });
+    }
+    return statement;
+  };
+  const counter = { reset() { count = 0; }, get count() { return count; } };
+  queryCounters.set(db, counter); return counter;
 }
 
 function physicalDefinitions(): TechnologyDefinition[] {

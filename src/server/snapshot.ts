@@ -16,11 +16,14 @@ const FIELDS = ['x','y','terrain','moisture','vegetation','food','biome','elevat
 export function encodeSnapshot(world: World, params: WorldParams = DEFAULT_PARAMS): string {
   // JSON null is reserved for absent optional fields. Never erase invalid present
   // values (JSON itself would turn NaN/Infinity into null) during compaction.
-  for (const tile of world.tiles) for (let i = 6; i < FIELDS.length; i++) {
-    const value = tile[FIELDS[i]!];
-    if (value === null || typeof value === 'number' && !Number.isFinite(value)) throw new Error('Invalid optional tile value. Snapshot was not written.');
-  }
-  const tiles = world.tiles.map(t => [t.x,t.y,t.terrain,t.moisture,t.vegetation,t.food,t.biome,t.elevation,t.wood,t.stone,t.feature,t.variety,t.growth,t.fertility,t.cultivation,t.traffic,t.drinkingWater,t.species,t.fauna,t.life]);
+  const tiles = world.tiles.map(t => {
+    const row = [t.x,t.y,t.terrain,t.moisture,t.vegetation,t.food,t.biome,t.elevation,t.wood,t.stone,t.feature,t.variety,t.growth,t.fertility,t.cultivation,t.traffic,t.drinkingWater,t.species,t.fauna,t.life];
+    for (let i = 6; i < row.length; i++) {
+      const value = row[i];
+      if (value === null || typeof value === 'number' && !Number.isFinite(value)) throw new Error('Invalid optional tile value. Snapshot was not written.');
+    }
+    return row;
+  });
   const body = JSON.stringify(params);
   const encoded: Record<string, unknown> = { ...world, retiredChunks: [], retiredLegacy: [], tiles, tileEncoding: ENCODING };
   // Los defaults no se escriben: con ellos la instantánea es bit a bit la de siempre.

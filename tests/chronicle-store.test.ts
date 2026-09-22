@@ -60,7 +60,7 @@ test('a failed commit preserves every queue and database row; clone and retry ac
   store.db.exec = (sql: string) => {
     if (sql === 'COMMIT') {
       writesObserved = Number(store.db.prepare('SELECT COUNT(*) n FROM events').get()!.n) === draft.eventCounter;
-      throw new Error('injected before durable commit');
+      if (writesObserved) throw new Error('injected before durable commit');
     }
     return exec(sql);
   };
@@ -274,7 +274,11 @@ test('losing the chronicle cache after COMMIT does not report a false transactio
   const internal = store as unknown as { chronicleStamp: () => unknown };
   const stamp = internal.chronicleStamp.bind(store), exec = store.db.exec.bind(store.db); let committed = false;
   internal.chronicleStamp = () => { if (committed) throw new Error('cache only'); return stamp(); };
-  store.db.exec = (sql: string) => { const result = exec(sql); if (sql === 'COMMIT') committed = true; return result; };
+  store.db.exec = (sql: string) => {
+    const result = exec(sql);
+    if (sql === 'COMMIT' && Number(store.db.prepare('SELECT COUNT(*) n FROM events').get()!.n) === world.eventCounter) committed = true;
+    return result;
+  };
   store.save(world); assert.ok(committed); assert.equal(world.chronicleJournal!.pending.length, 0);
   internal.chronicleStamp = stamp; store.db.exec = exec;
   assert.deepEqual(store.load()!.world, world);

@@ -83,6 +83,12 @@ function definitionOf(recipe: TechnologyRecipe): TechnologyDefinition {
   const { uses: _uses, utility: _utility, manufactured: _manufactured, ...definition } = recipe;
   return { ...definition, lawsVersion: TECHNOLOGY_ARCHIVE_LAWS_VERSION };
 }
+/** Archive definitions have already passed the closed V1 field/schema checks.
+ * Copy every mutable branch without re-running a general structured serializer. */
+function copyArchivedRecipe(recipe: TechnologyRecipe): TechnologyRecipe {
+  return { ...recipe, program: { ...recipe.program, inputs: recipe.program.inputs.map(input => ({ ...input })),
+    steps: recipe.program.steps.map(step => ({ ...step })) }, parents: [...recipe.parents], capacities: { ...recipe.capacities } };
+}
 const sameStats = (a: { uses: number; utility: number; manufactured: number }, b: TechnologyRecipe) =>
   a.uses === b.uses && a.utility === b.utility && a.manufactured === b.manufactured;
 const technologyFailure = (message: string): never => { throw new Error(`Technology archive ${message}. Explicit recovery required.`); };
@@ -173,6 +179,7 @@ export class Store {
   private verifiedTechnology: { startsAfter: number; through: number; catalogueThrough: number; dataVersion: number; totalChanges: number; schemaCookie: number } | null = null;
   private verifiedRecipes = new Map<string, { body: string; uses: number; utility: number; manufactured: number }>();
   private verifiedCatalogue: { totals: TechnologyCatalogueTotals; functions: number[] } | null = null;
+  private technologyReads: { limit: number; recipes: Map<string, TechnologyRecipe> } | null = null;
   constructor(readonly path: string, options: { readOnly?: boolean } = {}) {
     const existed = path !== ':memory:' && existsSync(path);
     if (path !== ':memory:' && !options.readOnly) mkdirSync(dirname(resolve(path)), { recursive: true, mode: 0o700 });
@@ -240,24 +247,55 @@ export class Store {
   }
   private readTechnologyRecipe(id: string, atTick: number): TechnologyRecipe | null {
     if (this.schemaVersion < 4) return null;
+    const reads = typeof atTick === 'number' && typeof id === 'string' ? this.technologyReads : null, key = `${atTick}:${id}`;
+    if (reads?.recipes.has(key)) return copyArchivedRecipe(reads.recipes.get(key)!);
     const definition = this.technologyArchive.getDefinition(id, atTick);
     if (!definition) return null;
     const stats = this.technologyArchive.getStats(id, atTick);
     if (!stats) technologyFailure('definition has no statistics at the requested tick');
     const { lawsVersion: _lawsVersion, ...recipe } = definition;
-    return { ...recipe, uses: stats!.uses, utility: stats!.utility, manufactured: stats!.manufactured };
+    const value = { ...recipe, uses: stats!.uses, utility: stats!.utility, manufactured: stats!.manufactured };
+    if (reads) {
+      if (reads.recipes.size >= reads.limit) reads.recipes.delete(reads.recipes.keys().next().value!);
+      reads.recipes.set(key, copyArchivedRecipe(value));
+    }
+    return value;
+  }
+  /** Only this synchronous validation owns the read snapshot and its temporary
+   * resolution memory. Neither caller-owned transactions nor subsequent saves
+   * can reuse it. Every miss keeps the archive's complete validation path. */
+  private withTechnologyReads(world: World, validate: () => void): void {
+    if (this.db.isTransaction || this.schemaVersion < 4) { validate(); return; }
+    this.db.exec('BEGIN');
+    try {
+      this.db.prepare('SELECT 1 FROM main.sqlite_schema LIMIT 1').get();
+      const before = this.chronicleStamp();
+      this.technologyArchive.beginHostTransaction();
+      this.technologyReads = { limit: Math.max(1, world.technology.recipes.length), recipes: new Map() };
+      validate();
+      if (!this.db.isTransaction || !sameChronicleStamp(before, this.chronicleStamp()))
+        technologyFailure('database changed during technology validation');
+      this.db.exec('COMMIT');
+      this.technologyArchive.acknowledgeHostCommit();
+    } catch (error) {
+      if (this.db.isTransaction) this.db.exec('ROLLBACK');
+      this.technologyArchive.invalidateVerification();
+      throw error;
+    } finally { this.technologyReads = null; }
   }
   /** Validate the old complete representation before adopting bounded local memory.
    * An existing catalogue is never repaired or pruned to make corrupted input load. */
   private prepareTechnology(world: World, committedThrough = 0): void {
-    bindWorldContext(world, this.context);
-    if (this.schemaVersion >= 4 && world.technology.catalogue === undefined) {
-      assertWorld(world, world.version, this.context);
-      enableTechnologyCatalogue(world.technology, { committedThrough });
-      for (const actor of world.people) maintainTechnologyMemory(world, actor);
-    }
-    assertTechnologyCatalogueState(world);
-    assertTechnology(world);
+    this.withTechnologyReads(world, () => {
+      bindWorldContext(world, this.context);
+      if (this.schemaVersion >= 4 && world.technology.catalogue === undefined) {
+        assertWorld(world, world.version, this.context);
+        enableTechnologyCatalogue(world.technology, { committedThrough });
+        for (const actor of world.people) maintainTechnologyMemory(world, actor);
+      }
+      assertTechnologyCatalogueState(world);
+      assertTechnology(world);
+    });
   }
   /** C10: leer es una transacción. Una copia en caliente o un guardado de otra
    * conexión ya no puede convertir una lectura correcta en «corrupción»: la

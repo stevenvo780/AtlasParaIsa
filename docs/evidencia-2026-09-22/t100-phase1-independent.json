@@ -1,0 +1,65 @@
+{
+  "results": [
+    {
+      "case": "V1 physical water with persisted override",
+      "cuencas": 0.05,
+      "readOnlyByteIdentity": true,
+      "writableSaveReload": true
+    },
+    {
+      "case": "V1 physical water with persisted override",
+      "cuencas": 1,
+      "readOnlyByteIdentity": true,
+      "writableSaveReload": true
+    },
+    {
+      "case": "warm external semantic corruption",
+      "action": "load",
+      "mutation": "encoding",
+      "allDurableTablesUnchanged": true
+    },
+    {
+      "case": "warm external semantic corruption",
+      "action": "load",
+      "mutation": "tuple",
+      "allDurableTablesUnchanged": true
+    },
+    {
+      "case": "warm external semantic corruption",
+      "action": "load",
+      "mutation": "params",
+      "allDurableTablesUnchanged": true
+    },
+    {
+      "case": "warm external semantic corruption",
+      "action": "load",
+      "mutation": "version",
+      "allDurableTablesUnchanged": true
+    },
+    {
+      "case": "warm external semantic corruption",
+      "action": "save",
+      "mutation": "encoding",
+      "allDurableTablesUnchanged": true
+    },
+    {
+      "case": "warm external semantic corruption",
+      "action": "save",
+      "mutation": "tuple",
+      "allDurableTablesUnchanged": true
+    },
+    {
+      "case": "warm external semantic corruption",
+      "action": "save",
+      "mutation": "params",
+      "allDurableTablesUnchanged": true
+    },
+    {
+      "case": "warm external semantic corruption",
+      "action": "save",
+      "mutation": "version",
+      "allDurableTablesUnchanged": true
+    }
+  ],
+  "scope": "Independent Store-boundary checks; phase1 only. Reuses historical fixture shape, not the new migration test."
+}

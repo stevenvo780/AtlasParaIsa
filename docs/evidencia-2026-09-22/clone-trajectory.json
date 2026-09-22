@@ -1,0 +1,142 @@
+{
+  "scope": "Full clone versus dormant sharing on identical current laws, every step cloned, SQLite every20, reload1200/2400. Not a timing benchmark or T103 performance closure.",
+  "node": "v22.23.1",
+  "sourceHashes": {
+    "world/agua.ts": "3f3be7cac9fffe40a31bd7d38b223b1d9398dd1d310d2170825b3b40bb031e0e",
+    "world/animals.ts": "0e9cce23504715a370f74c24b8f0c0e82d0cb1447945b3486ff8843ee1af0a7a",
+    "world/body.ts": "00643e43be3f11a5804772e9d0ccc405c447d23377997a5a4269937ecc2101cb",
+    "world/chronicle-journal.ts": "880f5298474445f435e820fc034b7019ca80007823cfa3607fa551f4b3ffedee",
+    "world/demography.ts": "09fececd55349ee7e48db5b632ddb1f06e6f8143a669a9f8611bfd3cbc531dfe",
+    "world/digesto.ts": "a94e90d74b3942d6ced54256a0bab7f4283d50e3e42492bff9351e5bf6082d74",
+    "world/diversidad.ts": "57b104be0efbd12d188dc352123c2982e83a15d27fa5d9bfcbf965f9cc33e6d3",
+    "world/ecosystem-kernel.ts": "b1cb946781e204fd9db31520c61699f4f91cf431d1b735351984f6e2e3bf9b78",
+    "world/ecosystem.ts": "24444f458e70e6c41bb0e9fc5f88290ee50fbe1edbd3b44109805ce89baeee10",
+    "world/family.ts": "0ba24f3399c5cda9400b431ff373bdc7ce98572993ee04fcd5a9db45734471d4",
+    "world/forest.ts": "9c6c32126a74a35896038994f5988cb7b6490ef440b67fc741b7ce13e1e54212",
+    "world/genetics.ts": "6303faa03b11d4f5d659055947955aa16ff82f75a0e8cff143d6ad336da7e12e",
+    "world/index.ts": "5d925107b8115c61f218b7ae5b0236324758dccdc3bd7b88262a1f5f20d5ffe7",
+    "world/inventions.ts": "c45cd3b84f74c46eb9a1158c4fc3a52716ff0eafe5dfc2039aefe350f02c14a4",
+    "world/lineage.ts": "e24706e14642c4aa5144de8abd8e76d3d63977829328b0f6cd5d1a0e74f01862",
+    "world/material-affordances.ts": "0bb5041204409e1545ec2f783862a46de325246520b4025c49ed7ef4cfc0e142",
+    "world/needs.ts": "40990c1ad6e824e247f70e217dad1bda0d986ab3d80d0d4c1c8561844061c292",
+    "world/organization.ts": "e6e3597bf46474fcfec908f01eb562089f37000b14ebea14b40e4eb91901b7b8",
+    "world/params.ts": "06f8a3dc77c82d2f16c46629e2d1fb4674d22c3b2cf240b88cedf88157231acb",
+    "world/society.ts": "6828319b26060bec728de7643a4f9becc63282fb09872d117292e3dde7fcadf3",
+    "world/spatial.ts": "17861e50a4e6ade76981a06541ab86bd8f87e42e5612ef7ec4c0fecc69d652e9",
+    "world/statistics.ts": "c4f8374433a8121c998c421d0eb044a2e4c0c860d214240f6552ed3a8ab4d0c0",
+    "world/technology-catalogue.ts": "7b3fd17ea57181b8aad059a9ae19f0e9f03e89f3d73c0a3c15e17aa246dcffc6",
+    "world/technology-checkpoint.ts": "34f16cc74a700265f2e5407ba3e52e984b74474c2fbd6444e99196586ce9469f",
+    "world/technology-execution.ts": "5d1423ee670dd034c5f50d3bd7b612e39eab40ba7181725aec42ab945c6e41a4",
+    "world/technology-journal.ts": "2687af97e425c1a13d9fc8a0c229eb12c544673f2ab04e3514cd4974be0abacf",
+    "world/technology-memory.ts": "8fdf32db2628ad7b311701fdac4067966f5e3fe2ad187d78a2eaf63cc20490fb",
+    "world/technology-organization.ts": "3840fa5602012386dc705e9fc7f46f0c18e3983a731481b05e1ca0bb8fa12dde",
+    "world/technology-water.ts": "51bb48999be20e560056739158a0127cf3351b81adafda69f0c434f2465ea9d6",
+    "world/technology.ts": "c805c56b649754324bd30ed80bfa9f7cde879b28b892c621a1063c28b7cb6ff4",
+    "world/terrain.ts": "538280dba7df8ee07b6b8ada9d2e8ddd007b82bc8d1bae3196927709d3f14c97",
+    "world/validation.ts": "9b9f86d53786967c1138ed2c41b4a6a17a0695eab75ef2e28bc15f28b47cc3cd",
+    "server/app.ts": "8f0d87bf29635052aaa3d1bb7fd0a7e4f83c473d635e490d6d6745f765707257",
+    "server/auth.ts": "e8dc1eabf65ac7a5065d0582671be22813005f83c0cce00886a67c9d952c11d2",
+    "server/deployment-params.ts": "184bcd3f84781dc533bcb3cb5191d9bc4d3b5c308442dae71430906bae336608",
+    "server/governor.ts": "c122b0448c10ab444f7622b13912b91f9dc8fd87cc352006326dcfbdc2d713fb",
+    "server/lock.ts": "6818293ed97e2dc2862e7a06e42f8aa8c017a5f27e6656f338331f83a555f536",
+    "server/main.ts": "408733d7f78dc204a270b91ccaf06a72df6ed6b8a6e214b75529b1a08088fe10",
+    "server/snapshot.ts": "ca6f266357bb676aeadd16f078df7be8bb6eb08213e238b44cca03a07fea012c",
+    "server/store.ts": "afd60bff882129dcecc025689f68be97596a58620c5e386ca957d8daee0aed43",
+    "server/technology-archive.ts": "3820d2dbaf01ddb25e01debc320bd549c59d6b67e7eb56a72541cd01da0899d4",
+    "server/world-instance.ts": "0bb10082d68e29d900bad745f2e06ed284e79603ca49ab3c93792e27ed603969",
+    "shared/demography.ts": "a9e6d6f273957529e942d5358988171a7ab25327ced8d039706f7dfa5fb9fa6f",
+    "shared/life.ts": "7c2ee3924ddbae01f55c22ff52ac2bd208e8877284c1ee48782f33239f1070bf",
+    "shared/organization.ts": "30d8869086faf0754002e240b3bef1fcec9600d51ab3b40c6bce7ef977f4a2bd",
+    "shared/param-syntax.ts": "c3c04b84c0f011357785ad8b8162e7a4f6d55865326c92b478504f8f90e19dd7",
+    "shared/technology-archive.ts": "4d9ad0b9f1be01e95fbfb5365b6a1391b3321f39c5bcfce0806d5cb2d0079354",
+    "shared/technology.ts": "2c82e88f4ce4fd4b1660cbc83b898066c726df4c7bd80118b151127c7304239d",
+    "shared/types.ts": "0f80432ee9f19026e7aae9e5c5f65ea31f901ad394f23e5dcd0076e73b685920",
+    "shared/world-instance.ts": "09967c006226f2fca8fd04af2ca3c310db67278e95d0cfaccbd193d241605349"
+  },
+  "results": [
+    {
+      "seed": 1,
+      "ticks": 2400,
+      "pendingCloneCount": 568,
+      "pendingChunkCount": 1031,
+      "milestones": [
+        {
+          "tick": 1200,
+          "digest": "46ec8c401f5776c10070ca333e47a258e70bb7bb7a495b19cd4c2603e599bb36"
+        },
+        {
+          "tick": 2400,
+          "digest": "d72cf134505c308f1217fec27d08949ec079886d468e2ee9c194e9e32cc6bf08"
+        }
+      ],
+      "equalArchiveTables": [
+        "chunks",
+        "events",
+        "inputs",
+        "legacy",
+        "metadata",
+        "sessions",
+        "technology_definitions",
+        "technology_executions",
+        "technology_origin",
+        "technology_stats"
+      ]
+    },
+    {
+      "seed": 7,
+      "ticks": 2400,
+      "pendingCloneCount": 535,
+      "pendingChunkCount": 1002,
+      "milestones": [
+        {
+          "tick": 1200,
+          "digest": "a846f74ad4dc3e1f4207ffc1e5eb5360e37cab446a0a0feabc2974c28b6a7136"
+        },
+        {
+          "tick": 2400,
+          "digest": "e87c7576a98bc6371df7a8e0bd164e1877cfc54caa42269b0779ef1d24604aa6"
+        }
+      ],
+      "equalArchiveTables": [
+        "chunks",
+        "events",
+        "inputs",
+        "legacy",
+        "metadata",
+        "sessions",
+        "technology_definitions",
+        "technology_executions",
+        "technology_origin",
+        "technology_stats"
+      ]
+    },
+    {
+      "seed": 51926,
+      "ticks": 2400,
+      "pendingCloneCount": 391,
+      "pendingChunkCount": 648,
+      "milestones": [
+        {
+          "tick": 1200,
+          "digest": "36f73ae213f0db0c26fc46ae1ea9349b2cdcd5c37b6746ef65b33717f5932205"
+        },
+        {
+          "tick": 2400,
+          "digest": "b6e63281681dc75552fa81cad7dc3051117382a60f08561b4919e0abc3d6c480"
+        }
+      ],
+      "equalArchiveTables": [
+        "chunks",
+        "events",
+        "inputs",
+        "legacy",
+        "metadata",
+        "sessions",
+        "technology_definitions",
+        "technology_executions",
+        "technology_origin",
+        "technology_stats"
+      ]
+    }
+  ]
+}

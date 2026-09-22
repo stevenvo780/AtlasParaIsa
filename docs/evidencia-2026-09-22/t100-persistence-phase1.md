@@ -33,6 +33,15 @@ Evidencia de la sesión: `/tmp/atlas-t100-preflight/phase1-boundary-before.tap`,
 `phase1-boundary-after.tap`, `phase1-recovery.tap`, `phase1-typecheck.log`.
 Las pruebas nuevas permanecen en el repositorio para repetir el contraste.
 
+Revisión independiente de integración: diez controles adicionales en
+`t100-phase1-independent.json`. Dos bases SQLite V1 con cuencas 0.05/1 conservan el
+archivo byte a byte al abrir readonly; la migración SQL writable conserva el cuerpo
+original hasta guardar, y el agua física coincide tras guardar/recargar. Ocho casos
+de corrupción checksum-válido desde otra conexión, después de cinco guardados
+calientes, cubren encoding/tupla/params/versión × load/save: rechazo, todas las tablas
+durables intactas y transacción cerrada. Instrumento de sesión:
+`/tmp/atlas-phase1-independent.mts`, reutilizando sólo el fixture V1 histórico.
+
 Esta unidad no corrige todavía `-0`, no segmenta snapshots ni activa límites nuevos,
 no modifica reglas reproductivas, cadencia, gobernador o familia V8. No acredita
 2M ni rendimiento. La suite completa queda para integración conjunta, según la

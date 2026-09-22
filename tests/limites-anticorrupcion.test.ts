@@ -41,7 +41,7 @@ test('T100: 65792 teselas y 257 chunks conservan el digesto confirmado al reabri
     store.save(world); digest = digestoCanonico(world);
     const manifest = JSON.parse((store.db.prepare('SELECT body FROM snapshots WHERE slot=0').get() as { body: string }).body);
     assert.equal(manifest.snapshotEncoding, 'snapshot-parts-v1');
-    assert.deepEqual(manifest.world.limitsProfile, { version: 1, ...paramsOf(world).limites });
+    assert.deepEqual(manifest.world.limitsProfile, { version: 2, ...paramsOf(world).limites });
   } finally { store.close(); }
   const reopened = new Store(path);
   try { assert.equal(digestoCanonico(reopened.load()!.world), digest); }
@@ -82,8 +82,8 @@ for (const paged of [false, true]) for (const corruption of ['unknown', 'partial
       store.save(world);
       const value = JSON.parse((store.db.prepare('SELECT body FROM snapshots WHERE slot=0').get() as { body: string }).body);
       const metadata = paged ? value.world : value;
-      metadata.limitsProfile = { version: 1, ...DEFAULT_PARAMS.limites };
-      if (corruption === 'unknown') metadata.limitsProfile.version = 2;
+      metadata.limitsProfile = { version: 2, ...DEFAULT_PARAMS.limites };
+      if (corruption === 'unknown') metadata.limitsProfile.version = 3;
       if (corruption === 'partial') delete metadata.limitsProfile.fauna;
       if (corruption === 'contradiction') metadata.limitsProfile.chunks++;
       if (corruption === 'extra') metadata.limitsProfile.hostRam = 1;
@@ -101,6 +101,7 @@ for (const paged of [false, true]) for (const corruption of ['unknown', 'partial
 test('T100: snapshot sin perfil no evade bounds históricos mediante params amplios', () => {
   const world = wideWorld(), value = JSON.parse(encodeSnapshot(world, paramsOf(world)));
   delete value.limitsProfile;
+  delete value.params.limites.aplicacion;
   assert.throws(() => decodeSnapshot(JSON.stringify(value)), SnapshotSemanticError);
   value.version = 4;
   assert.throws(() => decodeSnapshot(JSON.stringify(value)), SnapshotSemanticError);
@@ -108,8 +109,8 @@ test('T100: snapshot sin perfil no evade bounds históricos mediante params ampl
 
 test('T100: perfil exacto desaparece del World y los defaults siguen siendo deterministas', () => {
   const world = createWorld(), before = digestoCanonico(world), body = encodeSnapshot(world, paramsOf(world));
-  assert.deepEqual(JSON.parse(body).limitsProfile, { version: 1, ...DEFAULT_PARAMS.limites });
+  assert.deepEqual(JSON.parse(body).limitsProfile, { version: 2, ...DEFAULT_PARAMS.limites });
   const value = decodeSnapshot(body) as World, params = takeSnapshotParams(value); setParams(value, params);
   assert.equal(Object.hasOwn(value, 'limitsProfile'), false);
-  assert.equal(digestoCanonico(value), before); assert.equal(params, DEFAULT_PARAMS);
+  assert.equal(digestoCanonico(value), before); assert.deepEqual(params, DEFAULT_PARAMS);
 });

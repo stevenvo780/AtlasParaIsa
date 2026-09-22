@@ -162,8 +162,10 @@ for (const format of formats) for (const boundary of boundaries) {
         const tuples = draft.tiles.map(t => [t.x,t.y,t.terrain,t.moisture,t.vegetation,t.food,t.biome,t.elevation,
           t.wood,t.stone,t.feature,t.variety,t.growth,t.fertility,t.cultivation,t.traffic,t.drinkingWater,t.species,t.fauna,t.life]);
         if (format === 'inline default') {
+          const { aplicacion, ...limits } = paramsOf(draft).limites;
           assert.ok(saved.body === JSON.stringify({ ...draft, retiredChunks: [], retiredLegacy: [], tiles: tuples,
-            tileEncoding: 'tiles-tuple-v1', limitsProfile: { version: 1, ...paramsOf(draft).limites } }), 'exact inline bytes include the explicit limits profile');
+            tileEncoding: 'tiles-tuple-v1', paramsEncoding: 'params-v1', params: paramsOf(draft),
+            limitsProfile: { version: 2, aplicacion, ...limits } }), 'exact inline bytes include explicit parameters and limits profile');
         } else {
           const page = JSON.parse(saved.body).tiles.pages[0] as { digest: string; bytes: number };
           const body = (lab.store.db.prepare('SELECT body FROM snapshot_parts WHERE digest=?').get(page.digest) as { body: string }).body;

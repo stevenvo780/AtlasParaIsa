@@ -35,7 +35,7 @@ export interface WorldParams {
   motor: { clonPorPaso: boolean; hilos: number; soaTerreno: boolean; particionarPersonas: boolean; gpu: number[]; orden: 'natural' | 'inverso' | 'adversarial' };
   red: { deltas: boolean };
   /** T100: admisión de colecciones; no son una política silenciosa de natalidad. */
-  limites: { teselasActivas: number; chunks: number; comunidades: number; fauna: number };
+  limites: { teselasActivas: number; chunks: number; comunidades: number; fauna: number; aplicacion: 'historicos' | 'parametros' };
 }
 
 function deepFreeze<T>(value: T): T {
@@ -61,28 +61,35 @@ const RAW_DEFAULTS: WorldParams = {
   gobernador: { presupuestoMs: 50, senales: ['p95'] },
   motor: { clonPorPaso: true, hilos: 1, soaTerreno: false, particionarPersonas: false, gpu: [], orden: 'natural' },
   red: { deltas: false },
-  limites: { teselasActivas: 65536, chunks: 256, comunidades: 8, fauna: 393216 },
+  limites: { teselasActivas: 65536, chunks: 256, comunidades: 8, fauna: 393216, aplicacion: 'parametros' },
 };
 
 /** Objeto congelado en profundidad: nunca se muta; `parseParams` clona para cada override. */
 export const DEFAULT_PARAMS: WorldParams = deepFreeze(RAW_DEFAULTS);
-export type WorldLimits = WorldParams['limites'];
+export type WorldLimits = Omit<WorldParams['limites'], 'aplicacion'>;
 /** Historical admission bounds, independent of the machine reading an old world. */
-export const LEGACY_WORLD_LIMITS: Readonly<WorldLimits> = DEFAULT_PARAMS.limites;
+export const LEGACY_WORLD_LIMITS: Readonly<WorldLimits> = deepFreeze({ teselasActivas: DEFAULT_PARAMS.limites.teselasActivas,
+  chunks: DEFAULT_PARAMS.limites.chunks, comunidades: DEFAULT_PARAMS.limites.comunidades, fauna: DEFAULT_PARAMS.limites.fauna });
 export const PARAMETER_LIMITS_RULES_VERSION = 9;
 export const WORLD_LIMIT_KEYS = ['teselasActivas', 'chunks', 'comunidades', 'fauna'] as const;
 
-export function assertWorldLimits(value: unknown): asserts value is WorldLimits {
+export function assertWorldLimits(value: unknown, configured = false): asserts value is WorldLimits {
   if (!value || typeof value !== 'object' || Array.isArray(value)
-    || Object.keys(value).length !== WORLD_LIMIT_KEYS.length
+    || Object.keys(value).length !== WORLD_LIMIT_KEYS.length + Number(configured)
+    || configured && !['historicos', 'parametros'].includes((value as WorldParams['limites']).aplicacion)
     || WORLD_LIMIT_KEYS.some(key => !Object.hasOwn(value, key)
       || !Number.isSafeInteger((value as WorldLimits)[key]) || (value as WorldLimits)[key] < 1))
     throw new Error('Límites de admisión inválidos: se requieren cuatro enteros seguros positivos.');
 }
 
-/** Old rules must be validated before migration can activate stored T102 options. */
+/** A declared historical mode preserves previously inactive T102 numbers verbatim. */
+export function effectiveLimits(params: WorldParams): Readonly<WorldLimits> {
+  return params.limites.aplicacion === 'historicos' ? LEGACY_WORLD_LIMITS : params.limites;
+}
+
+/** Old rules are admitted under their historical bounds before migration. */
 export function limitsOf(world: object, version?: number): Readonly<WorldLimits> {
-  return version !== undefined && version < PARAMETER_LIMITS_RULES_VERSION ? LEGACY_WORLD_LIMITS : paramsOf(world).limites;
+  return version !== undefined && version < PARAMETER_LIMITS_RULES_VERSION ? LEGACY_WORLD_LIMITS : effectiveLimits(paramsOf(world));
 }
 
 /** Rango [mínimo, máximo] permitido por clave punteada. Usado por `parseParams`. */
@@ -137,6 +144,7 @@ export const PARAM_DESCRIPTORS: Readonly<Record<string, ParamDescriptor>> = deep
   'motor.particionarPersonas': { kind: 'boolean' },
   'motor.gpu': { kind: 'array', element: { kind: 'number', range: [0, Number.MAX_SAFE_INTEGER], integer: true }, minLength: 0, unique: true },
   'motor.orden': { kind: 'enum', values: ['natural', 'inverso', 'adversarial'] },
+  'limites.aplicacion': { kind: 'enum', values: ['historicos', 'parametros'] },
   'persistencia.paginasSucias': { kind: 'boolean' },
   'red.deltas': { kind: 'boolean' },
   'gobernador.senales': { kind: 'array', element: { kind: 'enum', values: ['p95'] }, minLength: 1, unique: true },
@@ -300,6 +308,6 @@ export function paramsOf(world: object): WorldParams {
  * aquí y no sólo en `parseParams`. */
 export function setParams(world: object, params: WorldParams): void {
   assertLongevityLaw(params.cuerpo);
-  assertWorldLimits(params.limites);
+  assertWorldLimits(params.limites, true);
   worldParams.set(world, params);
 }

@@ -6,7 +6,7 @@ import type { Gesture, GestureResult } from '../shared/types.js';
 import { assertWorld, bindWorldContext, migrateWorld, type World, type WorldContext } from '../world/index.js';
 import { CHUNK_SIZE, MAX_COORDINATE, type Chunk } from '../world/terrain.js';
 import { assertEcosystemTile, assertChunkLife } from '../world/validation.js';
-import { takeSnapshotParams, SnapshotPhysicalError } from './snapshot.js';
+import { takeSnapshotParams, SnapshotPhysicalError, SnapshotSemanticError } from './snapshot.js';
 import { SnapshotParts, assertSnapshotPartsSchema, SNAPSHOT_INLINE_TILE_LIMIT } from './snapshot-parts.js';
 import type { LegacyRecord } from '../shared/demography.js';
 import { assertLegacyRecord } from '../world/lineage.js';
@@ -1014,8 +1014,9 @@ export class Store {
 
   /** Verificación previa de un candidato de la cadena, ANTES de copiar nada al destino:
    * una recuperación imposible no deja una copia a medias. */
-  private verifyPrevious(row: Row): { world: World; declaredJournal: boolean } {
-    const decoded = this.snapshotParts.read(row.body) as World, declaredChronicle = decoded.chronicleJournal !== undefined;
+  private verifyPrevious(decoded: World): { world: World; declaredJournal: boolean } {
+    if (!decoded || typeof decoded !== 'object' || Array.isArray(decoded)) throw new SnapshotSemanticError('Invalid snapshot world. Explicit recovery required.');
+    const declaredChronicle = decoded.chronicleJournal !== undefined;
     const world = this.migrateSnapshot(decoded);
     this.assertChronicleOrigin(world, declaredChronicle, true);
     this.assertChronicleArchive(world, true);
@@ -1046,8 +1047,22 @@ export class Store {
       if (checksum(candidate.body) !== candidate.digest) { refusals.push(`slot ${slot}: snapshot checksum mismatch`); continue; }
       // Aquí sí se salta un respaldo que infringe una ley: quien pidió recuperar ya
       // aceptó retroceder, y el destino es una copia nueva que se poda y se valida.
-      try { this.verifyPrevious(candidate); chosen = { slot, row: candidate }; break; }
-      catch (error) { refusals.push(`slot ${slot}: ${error instanceof Error ? error.message : String(error)}`); }
+      let decoded: World;
+      try { decoded = this.snapshotParts.read(candidate.body) as World; }
+      catch (error) {
+        // The reader may throw ordinary operational errors too. Only declared
+        // codec faults justify skipping its bytes; do not classify by message.
+        if (!(error instanceof SnapshotPhysicalError) && !(error instanceof SnapshotSemanticError)) throw error;
+        refusals.push(`slot ${slot}: ${error.message}`); continue;
+      }
+      try { this.verifyPrevious(decoded); chosen = { slot, row: candidate }; break; }
+      catch (error) {
+        // Existing validators report plain Error; codec faults are typed. Resource,
+        // programming and coded Node/SQLite failures do not authorize a rewind.
+        if (!(error instanceof SnapshotPhysicalError) && !(error instanceof SnapshotSemanticError)
+          && (!(error instanceof Error) || error.constructor !== Error || 'code' in error)) throw error;
+        refusals.push(`slot ${slot}: ${error.message}`);
+      }
     }
     this.db.exec('COMMIT');
     } catch (error) { if (this.db.isTransaction) this.db.exec('ROLLBACK'); throw error; }
@@ -1062,7 +1077,7 @@ export class Store {
       const copied = recovered.db.prepare('SELECT body,digest,saved_at FROM snapshots WHERE slot=?').get(chosen.slot) as Row | undefined;
       if (!copied || copied.body !== chosen.row.body || copied.digest !== chosen.row.digest || copied.saved_at !== chosen.row.saved_at)
         throw new Error('Selected previous checkpoint changed before backup. Explicit recovery required.');
-      const { world, declaredJournal } = recovered.verifyPrevious(copied);
+      const { world, declaredJournal } = recovered.verifyPrevious(recovered.snapshotParts.read(copied.body) as World);
       recovered.technologyArchive.beginHostTransaction();
       bindWorldContext(world, recovered.context);
       // Two snapshots may share a tick. Their serial/recipe boundaries still differ.
@@ -1098,7 +1113,18 @@ export class Store {
       recovered.snapshotParts.collect();
       if (recovered.chronicleHasTriggers()) recovered.snapshotParts.verifyRetained();
       else if (prepared.inline === undefined) recovered.snapshotParts.verify(body);
-      recovered.db.exec('COMMIT'); recovered.technologyArchive.acknowledgeHostCommit(); recovered.load();
+      // Self-consistency is insufficient: a trigger could substitute a different
+      // valid world with a recomputed digest. Keep the exact selected checkpoint.
+      const final = recovered.db.prepare('SELECT body,digest,saved_at FROM snapshots WHERE slot=0').get() as Row | undefined;
+      if (!final || final.body !== body || final.digest !== checksum(body) || final.saved_at !== chosen.row.saved_at)
+        throw new Error('Trigger changed the selected recovery snapshot. Explicit recovery required.');
+      // All writes, including revocation and GC triggers, precede this full read.
+      // A failed archive check must roll back the copy, not report failure after
+      // committing an already damaged recovery destination.
+      const verified = recovered.load();
+      if (!verified || verified.slot !== 0) throw new Error('Selected recovery snapshot is not readable. Explicit recovery required.');
+      recovered.assertNothingNewerThan(verified.world);
+      recovered.db.exec('COMMIT'); recovered.technologyArchive.acknowledgeHostCommit();
     } catch (error) {
       if (recovered.db.isTransaction) recovered.db.exec('ROLLBACK');
       recovered.technologyArchive.invalidateVerification(); throw error;

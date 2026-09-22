@@ -6,7 +6,7 @@ import type { World } from '../world/index.js';
 import type { WorldParams } from '../world/params.js';
 import { decodeSnapshotValue, decodeSnapshotTileRows, encodeSnapshot, encodeSnapshotTileRows,
   LEGACY_SNAPSHOT_TILE_LIMIT, parseSnapshotJSON, readSnapshotParams, snapshotRecord,
-  SNAPSHOT_TILE_ENCODING, SnapshotPhysicalError } from './snapshot.js';
+  SNAPSHOT_TILE_ENCODING, SnapshotPhysicalError, SnapshotSemanticError } from './snapshot.js';
 
 // Transport bounds, independent of world laws and available host hardware.
 export const SNAPSHOT_INLINE_TILE_LIMIT = 32768;
@@ -15,7 +15,7 @@ export const SNAPSHOT_METADATA_BYTES = 8 * 1024 * 1024;
 const PAGE_BYTES = 4 * 1024 * 1024;
 const ENCODING = 'snapshot-parts-v1';
 const checksum = (body: string): string => createHash('sha256').update(body).digest('hex');
-class SnapshotPartsFormatError extends Error {}
+class SnapshotPartsFormatError extends SnapshotSemanticError {}
 function failure(message: string): never { throw new SnapshotPartsFormatError(`Invalid snapshot parts ${message}. Explicit recovery required.`); }
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const keys = (value: Record<string, unknown>, expected: string[]): boolean =>

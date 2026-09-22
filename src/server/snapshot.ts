@@ -17,6 +17,8 @@ const DEFAULT_PARAMS_BODY = stringifyExact(DEFAULT_PARAMS);
 const FIELDS = ['x','y','terrain','moisture','vegetation','food','biome','elevation','wood','stone','feature','variety','growth','fertility','cultivation','traffic','drinkingWater','species','fauna','life'] as const;
 /** Only unreadable bytes justify trying an older checkpoint automatically. */
 export class SnapshotPhysicalError extends Error {}
+/** Readable bytes with an explicitly recognized codec/parameter violation. */
+export class SnapshotSemanticError extends Error {}
 export function encodeSnapshotTileRows(tiles: readonly Tile[]): unknown[][] {
   // JSON null is reserved for absent optional fields. Never erase invalid present
   // values (JSON itself would turn NaN/Infinity into null) during compaction.
@@ -65,9 +67,12 @@ export function readSnapshotParams(value: unknown): WorldParams {
   const record = value as Record<string, unknown>;
   if (!('params' in record) && !('paramsEncoding' in record)) return DEFAULT_PARAMS;
   const { params, paramsEncoding } = record;
-  if (paramsEncoding !== PARAMS_ENCODING || !params || typeof params !== 'object' || Array.isArray(params)) throw new Error('Invalid snapshot parameter encoding. Explicit recovery required.');
+  if (paramsEncoding !== PARAMS_ENCODING || !params || typeof params !== 'object' || Array.isArray(params)) throw new SnapshotSemanticError('Invalid snapshot parameter encoding. Explicit recovery required.');
   try { return parseParams(params as Record<string, string>); }
-  catch (error) { throw new Error(`Invalid snapshot parameters: ${(error as Error).message} Explicit recovery required.`); }
+  catch (error) {
+    if (!(error instanceof Error) || error.constructor !== Error || 'code' in error) throw error;
+    throw new SnapshotSemanticError(`Invalid snapshot parameters: ${error.message} Explicit recovery required.`, { cause: error });
+  }
 }
 export function takeSnapshotParams(value: unknown): WorldParams {
   const params = readSnapshotParams(value);
@@ -87,7 +92,7 @@ export function parseSnapshotJSON(body: string): unknown {
 }
 export function decodeSnapshotTileRows(rows: unknown[]): Tile[] {
   return rows.map(row => {
-    if (!Array.isArray(row) || row.length !== FIELDS.length) throw new Error('Invalid snapshot tile tuple. Explicit recovery required.');
+    if (!Array.isArray(row) || row.length !== FIELDS.length) throw new SnapshotSemanticError('Invalid snapshot tile tuple. Explicit recovery required.');
     const tile: Record<string, unknown> = {};
     for (let i = 0; i < FIELDS.length; i++) if (row[i] !== null || i < 6) tile[FIELDS[i]!] = row[i];
     return tile as unknown as Tile;
@@ -96,9 +101,9 @@ export function decodeSnapshotTileRows(rows: unknown[]): Tile[] {
 export function decodeSnapshotValue(value: unknown): unknown {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
   const record = value as Record<string, unknown>;
-  if ('snapshotEncoding' in record) throw new Error('Snapshot parts require a durable reader. Explicit recovery required.');
+  if ('snapshotEncoding' in record) throw new SnapshotSemanticError('Snapshot parts require a durable reader. Explicit recovery required.');
   if (!('tileEncoding' in record)) return value;
-  if (record.tileEncoding !== SNAPSHOT_TILE_ENCODING || !Array.isArray(record.tiles) || record.tiles.length > LEGACY_SNAPSHOT_TILE_LIMIT) throw new Error('Invalid snapshot tile encoding. Explicit recovery required.');
+  if (record.tileEncoding !== SNAPSHOT_TILE_ENCODING || !Array.isArray(record.tiles) || record.tiles.length > LEGACY_SNAPSHOT_TILE_LIMIT) throw new SnapshotSemanticError('Invalid snapshot tile encoding. Explicit recovery required.');
   record.tiles = decodeSnapshotTileRows(record.tiles);
   delete record.tileEncoding;
   return value;

@@ -1201,6 +1201,88 @@ export function cloneWorld(world: World, context: WorldContext = worldContext(wo
   return draft;
 }
 
+/** T104. Copia profunda especializada en el estado del mundo: objetos llanos, arrays y
+ * primitivas, que es todo lo que un mundo serializable contiene. `structuredClone` resuelve
+ * además ciclos, `Map`, `Set`, binarios y transferencias que aquí no existen, y ese recorrido
+ * genérico es el que se paga en cada paso. Un prototipo que no sea el de `Object` se rechaza
+ * en vez de copiarse mal en silencio. */
+function copiaProfunda(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    const length = value.length, copy: unknown[] = new Array(length);
+    for (let index = 0; index < length; index++) {
+      const item = value[index];
+      copy[index] = item === null || typeof item !== 'object' ? item : copiaProfunda(item);
+    }
+    return copy;
+  }
+  const prototype = Object.getPrototypeOf(value as object);
+  if (prototype !== Object.prototype && prototype !== null) throw new TypeError('Estado del mundo con prototipo no copiable en el punto de restauración.');
+  const source = value as Record<string, unknown>, copy: Record<string, unknown> = {};
+  for (const key in source) {
+    const item = source[key];
+    copy[key] = item === null || typeof item !== 'object' ? item : copiaProfunda(item);
+  }
+  return copy;
+}
+
+/** T104: lo que hace falta para deshacer un paso que no llegó a confirmarse. */
+export interface PuntoDeRestauracion {
+  /** Deja el mundo exactamente como estaba cuando se tomó el punto. Se usa una sola vez:
+   * al restaurar, el mundo se queda con los objetos del punto y este deja de ser válido. */
+  restaurar(): void;
+}
+
+/** T104 — clon estructural **acotado** a lo que un paso puede tocar, para que `stepOnce` pueda
+ * simular sobre el mundo vigente (`motor.clonPorPaso=false`) sin perder la atomicidad del paso.
+ *
+ * Tres decisiones y su razón en el código:
+ * · **teselas**: se copian una a una y **la copia se la queda el mundo**, no el punto. El clon de
+ *   hoy hacía dos cosas a la vez y solo una se veía: además de reservar la vuelta atrás, entregaba
+ *   al paso teselas recién construidas. `syncFauna` hace `delete tile.species` (`animals.ts`), que
+ *   deja el objeto en modo diccionario para siempre; un mundo que avanza en sitio acumula ese daño
+ *   y recorrerlo se encarece. Medido a 2 400 pasos con el mismo mundo (digesto idéntico) por los
+ *   dos caminos: `tiles.map(t => ({...t}))` cuesta 3,41 ms si el mundo se reconstruyó cada paso y
+ *   29,15 ms si avanzó en sitio (8,6×); animales, tecnología y personas no se degradan. Así que el
+ *   punto guarda las teselas confirmadas y el paso trabaja sobre las nuevas: mismo recorrido de
+ *   antes, misma higiene de formas, y restaurar es devolver el array viejo.
+ * · **`retiredChunks`**: array nuevo y chunks **compartidos por referencia**. `activate` clona en
+ *   profundidad el chunk que reanima antes de exponer sus animales, estructuras y lugares a las
+ *   leyes (T103), y `maintainRegions` solo **añade** chunks nuevos; ningún chunk dormido del punto
+ *   se muta durante el paso.
+ * · **el resto**: copia profunda especializada; el estado del mundo es serializable por contrato
+ *   (lo exige la instantánea durable), de modo que objetos llanos y arrays lo cubren entero.
+ *
+ * Tomar el punto deja además el mundo listo para simular: recibe las teselas nuevas y el punto se
+ * queda con las confirmadas. El punto no lee el reloj ni el hardware: su contenido depende solo
+ * del mundo recibido. */
+export function puntoDeRestauracion(world: World): PuntoDeRestauracion {
+  const campos: Record<string, unknown> = {};
+  for (const key in world) {
+    if (key === 'tiles' || key === 'retiredChunks') continue;
+    const value = (world as unknown as Record<string, unknown>)[key];
+    campos[key] = value === null || typeof value !== 'object' ? value : copiaProfunda(value);
+  }
+  const tiles = world.tiles;
+  world.tiles = tiles.map(tile => ({ ...tile }));
+  const retiredChunks = [...world.retiredChunks];
+  let usado = false;
+  return {
+    restaurar() {
+      if (usado) throw new Error('El punto de restauración ya se consumió.');
+      usado = true;
+      const objetivo = world as unknown as Record<string, unknown>;
+      // Un paso a medias pudo añadir campos que antes no existían: deshacer es también quitarlos.
+      for (const key of Object.keys(objetivo)) if (key !== 'tiles' && key !== 'retiredChunks' && !(key in campos)) delete objetivo[key];
+      Object.assign(objetivo, campos);
+      world.tiles = tiles; world.retiredChunks = retiredChunks;
+      // El lector del catálogo vive en un WeakMap indexado por el `technology` del mundo, y
+      // `technology` acaba de volver a ser otro objeto: sin esto el mundo restaurado perdería
+      // el archivo de recetas del anfitrión.
+      bindWorldContext(world, worldContext(world));
+    },
+  };
+}
+
 /** Explicit allow-list: no PRNG, habit internals, private provenance or session data cross the wire. */
 const organizationViews = new WeakMap<World, { tick: number; executionCounter: number; checkpoint: TechnologyState['checkpoint']; value: NonNullable<WorldView['organization']> }>();
 /** Windows of the projection, not of the world: the chronicle and the letter keep their own bounds. */

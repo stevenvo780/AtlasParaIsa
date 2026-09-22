@@ -3,7 +3,7 @@ import { readFileSync, statSync } from 'node:fs';
 import { resolve, extname, sep } from 'node:path';
 import { isIP } from 'node:net';
 import { WebSocketServer, WebSocket } from 'ws';
-import { createWorld, stepWorld, projectWorld, normalizeViewport, cloneWorld, personDetail, fraccionSerial, type World, type FaseMedicion } from '../world/index.js';
+import { createWorld, stepWorld, projectWorld, normalizeViewport, cloneWorld, puntoDeRestauracion, personDetail, fraccionSerial, type PuntoDeRestauracion, type World, type FaseMedicion } from '../world/index.js';
 import { paramsOf, type WorldParams } from '../world/params.js';
 import { technologyRecipeDetail } from '../world/technology.js';
 import type { ClientMessage, Gesture, GestureResult, ServerMessage, Viewport, WorldView, RuntimeStats, FaseNombre } from '../shared/types.js';
@@ -238,6 +238,8 @@ export function createApp(options: AppOptions) {
     runtime.tickHz = span > 0 ? (beats.length - 1) * 1000 / span : 0;
     const batch = [...pending.values()];
     const valid: Pending[] = [];
+    // T104: sin clon, el paso corre sobre el mundo vigente y la atomicidad la sostiene esto.
+    let punto: PuntoDeRestauracion | null = null;
     try {
       for (const [socket, client] of clients) if (!store.sessionValid(client.hash)) socket.close(4001, 'La sesión terminó.');
       for (const item of batch) {
@@ -245,7 +247,13 @@ export function createApp(options: AppOptions) {
         else { item.reject(new HttpError(401, 'La sesión terminó antes de aplicar el gesto.')); pending.delete(item.gesture.id); }
       }
       const cloneStarted = monotonicNow();
-      const draft = cloneWorld(world, context);
+      // T104. `motor.clonPorPaso=true` (default) conserva el camino de hoy: se simula sobre un
+      // clon y el mundo vigente no se toca hasta que el guardado confirma. En `false` se toma un
+      // punto de restauración y se simula sobre el mundo vigente; `cloneMs` mide lo que costó
+      // reservar la vuelta atrás, que es lo que sustituye al clon.
+      const clonar = paramsOf(world).motor.clonPorPaso;
+      if (!clonar) punto = puntoDeRestauracion(world);
+      const draft = clonar ? cloneWorld(world, context) : world;
       runtime.cloneMs = monotonicNow() - cloneStarted;
       const simulationStarted = monotonicNow();
       // T107: `medicion.fases` empieza vacío en cada paso (nunca se arrastra el del anterior).
@@ -285,7 +293,14 @@ export function createApp(options: AppOptions) {
       runtime.fases = fases;
       runtime.fraccionSerial = fraccionSerial(fases);
     } catch (error) {
-      if (error instanceof SessionRevoked) {
+      // T104: deshacer va PRIMERO, y vale para las dos salidas. Sin clon, llegar aquí significa
+      // que el mundo vigente está a medio paso; un mundo que no se pudo deshacer ya no puede
+      // seguir avanzando aunque el error fuera recuperable.
+      let restaurado = true;
+      if (punto) { try { punto.restaurar(); } catch { restaurado = false; } }
+      if (restaurado && error instanceof SessionRevoked) {
+        // La sesión se revocó entre aceptar el gesto y confirmarlo: el mundo no avanza con un
+        // gesto aplicado y no guardado, así que este paso queda deshecho y se reintenta el siguiente.
         for (const item of pending.values()) if (!store.sessionValid(item.hash)) {
           item.reject(new HttpError(401, 'La sesión terminó antes de guardar el gesto.')); pending.delete(item.gesture.id);
         }

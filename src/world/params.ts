@@ -44,7 +44,8 @@ export interface WorldParams {
    * de hoy paso a paso, y sólo un laboratorio que las mueva mide otra cosa.
    */
   conducta: { habituacion: number };
-  social: { disputaNecesidad: number; disputaEscasez: number; disputaRadio: number; ensenanzaRareza: number; confianzaSalida: number; distanciaAlternativa: number };
+  social: { disputaNecesidad: number; disputaEscasez: number; disputaRadio: number; disputaDestino: number; disputaEspera: number;
+    ensenanzaRareza: number; confianzaSalida: number; distanciaAlternativa: number };
 }
 
 function deepFreeze<T>(value: T): T {
@@ -72,10 +73,12 @@ const RAW_DEFAULTS: WorldParams = {
   red: { deltas: false },
   limites: { teselasActivas: 65536, chunks: 256, comunidades: 8, fauna: 393216, aplicacion: 'parametros' },
   // Leyes candidatas: cada default es la constante que hoy está escrita en el código
-  // (`index.ts` no descuenta saciedad; `society.ts` usa 0,65 / ×1 / 2 celdas / sin rareza /
-  // 0,35 de confianza / 0,2 de distancia cultural), así que abrirlas no cambia el mundo.
+  // (`index.ts` no descuenta saciedad; `society.ts` usa 0,65 / ×1 / 2 celdas / 0,5 de
+  // destino / 180 ticks de espera / sin rareza / 0,35 de confianza / 0,2 de distancia
+  // cultural), así que abrirlas no cambia el mundo.
   conducta: { habituacion: 0 },
-  social: { disputaNecesidad: 0.65, disputaEscasez: 1, disputaRadio: 2, ensenanzaRareza: 0, confianzaSalida: 0.35, distanciaAlternativa: 0.2 },
+  social: { disputaNecesidad: 0.65, disputaEscasez: 1, disputaRadio: 2, disputaDestino: 0.5, disputaEspera: 180,
+    ensenanzaRareza: 0, confianzaSalida: 0.35, distanciaAlternativa: 0.2 },
 };
 
 /** Objeto congelado en profundidad: nunca se muta; `parseParams` clona para cada override. */
@@ -150,6 +153,11 @@ export const PARAM_RANGES: Record<string, [number, number]> = {
   'social.disputaNecesidad': [0.1, 1],
   'social.disputaEscasez': [0.1, 20],
   'social.disputaRadio': [1, 8],
+  // `disputaDestino` es la coincidencia de destino, no la distancia entre personas: con
+  // 0,5 sólo disputan quienes apuntan A LA MISMA celda. `disputaEspera` son los ticks de
+  // calma tras una disputa, en ambos lados; entera, porque se compara con `world.tick`.
+  'social.disputaDestino': [0.1, 8],
+  'social.disputaEspera': [1, 10000],
   'social.ensenanzaRareza': [0, 5],
   'social.confianzaSalida': [0, 1],
   'social.distanciaAlternativa': [0, 1],
@@ -163,7 +171,7 @@ type ParamValue = number | boolean | string | (number | boolean | string)[];
 /** PARAM_RANGES conserva sus tuplas numéricas; cada hoja declara además su tipo. */
 export const PARAM_DESCRIPTORS: Readonly<Record<string, ParamDescriptor>> = deepFreeze({
   ...Object.fromEntries(Object.entries(PARAM_RANGES).map(([key, range]) => [key,
-    { kind: 'number', range, integer: key === 'motor.hilos' || key.startsWith('limites.') }])),
+    { kind: 'number', range, integer: key === 'motor.hilos' || key === 'social.disputaEspera' || key.startsWith('limites.') }])),
   'motor.clonPorPaso': { kind: 'boolean' },
   'motor.soaTerreno': { kind: 'boolean' },
   'motor.particionarPersonas': { kind: 'boolean' },

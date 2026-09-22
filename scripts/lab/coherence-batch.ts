@@ -7,6 +7,7 @@ import { chmodSync, closeSync, copyFileSync, existsSync, mkdirSync, openSync, re
 import { dirname, join, relative, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { readStoredSnapshot } from '../../src/server/snapshot-parts.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const RESERVED = join(ROOT, 'artifacts/coherence-20260922/reserved-long');
@@ -118,8 +119,8 @@ export function verifyEvidence(batch: Batch, job: Job): string | undefined {
     if (run.params?.persistencia?.cadaTicks !== 20 || !existsSync(join(job.output, 'world.sqlite'))) return 'Missing production database or incorrect persistence cadence.';
     const db = new DatabaseSync(join(job.output, 'world.sqlite'), { readOnly: true });
     try {
-      const snapshot = db.prepare('SELECT body,digest FROM snapshots WHERE slot=0').get() as { body: string; digest: string } | undefined;
-      if (!snapshot || hash(snapshot.body) !== snapshot.digest || JSON.parse(snapshot.body).tick !== batch.ticks) return 'Final SQLite checkpoint is absent, damaged or behind the horizon.';
+      const snapshot = readStoredSnapshot(db);
+      if (!snapshot || (snapshot.value as { tick?: unknown }).tick !== batch.ticks) return 'Final SQLite checkpoint is absent, damaged or behind the horizon.';
     } finally { db.close(); }
     for (let day = 1; day <= batch.days; day++) {
       const record = json(join(job.output, `day-${String(day).padStart(3, '0')}.json`));

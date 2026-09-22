@@ -204,7 +204,7 @@ test('V1 schema migration preserves old snapshots, cells, bodies, experiences an
   const path = join(dir, 'legacy.sqlite'); const legacy = createV1Database(path);
   const store = new Store(path);
   try {
-    assert.equal((store.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 4);
+    assert.equal((store.db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version, 5);
     const migrated = store.load()!.world;
     assert.equal(migrated.version, RULES_VERSION); assert.equal(migrated.tick, legacy.tick); assert.equal(migrated.rng, legacy.rng);
     for (const tile of legacy.tiles) {

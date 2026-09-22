@@ -6,7 +6,8 @@ import type { Gesture, GestureResult } from '../shared/types.js';
 import { assertWorld, bindWorldContext, migrateWorld, type World, type WorldContext } from '../world/index.js';
 import { CHUNK_SIZE, MAX_COORDINATE, type Chunk } from '../world/terrain.js';
 import { assertEcosystemTile, assertChunkLife } from '../world/validation.js';
-import { decodeSnapshot, encodeSnapshot, takeSnapshotParams, SnapshotPhysicalError } from './snapshot.js';
+import { takeSnapshotParams, SnapshotPhysicalError } from './snapshot.js';
+import { SnapshotParts, assertSnapshotPartsSchema, SNAPSHOT_INLINE_TILE_LIMIT } from './snapshot-parts.js';
 import type { LegacyRecord } from '../shared/demography.js';
 import { assertLegacyRecord } from '../world/lineage.js';
 import { TechnologyArchive } from './technology-archive.js';
@@ -153,6 +154,15 @@ function assertChunk(value: unknown, key: string, atTick: number): asserts value
 }
 export class GestureConflict extends Error {}
 export class SessionRevoked extends Error {}
+export interface StoreOptions { readOnly?: boolean; snapshotInlineTileLimit?: number; }
+function validateStoreOptions(options: StoreOptions): void {
+  if (!options || typeof options !== 'object' || Array.isArray(options)
+    || Object.keys(options).some(key => !['readOnly', 'snapshotInlineTileLimit'].includes(key))
+    || options.readOnly !== undefined && typeof options.readOnly !== 'boolean'
+    || options.snapshotInlineTileLimit !== undefined && (!Number.isSafeInteger(options.snapshotInlineTileLimit)
+      || options.snapshotInlineTileLimit < 0 || options.snapshotInlineTileLimit > SNAPSHOT_INLINE_TILE_LIMIT))
+    throw new Error('Invalid StoreOptions: readOnly must be boolean and snapshotInlineTileLimit an integer from 0 to 32768.');
+}
 export class Store {
   readonly db: DatabaseSync;
   readonly technologyArchive: TechnologyArchive;
@@ -176,22 +186,26 @@ export class Store {
   private slot0Readable: boolean | null = null;
   private lastPruneTick = -1;
   private readonly schemaVersion: number;
+  private readonly snapshotParts: SnapshotParts;
+  private readonly snapshotInlineTileLimit: number;
   private verifiedChronicle: ChronicleProof | null = null;
   private verifiedTechnology: { startsAfter: number; through: number; catalogueThrough: number; dataVersion: number; totalChanges: number; schemaCookie: number } | null = null;
   private verifiedRecipes = new Map<string, { body: string; uses: number; utility: number; manufactured: number }>();
   private verifiedCatalogue: { totals: TechnologyCatalogueTotals; functions: number[] } | null = null;
   private technologyReads: { limit: number; recipes: Map<string, TechnologyRecipe> } | null = null;
-  constructor(readonly path: string, options: { readOnly?: boolean } = {}) {
+  constructor(readonly path: string, options: StoreOptions = {}) {
+    validateStoreOptions(options);
+    this.snapshotInlineTileLimit = options.snapshotInlineTileLimit ?? SNAPSHOT_INLINE_TILE_LIMIT;
     const existed = path !== ':memory:' && existsSync(path);
     if (path !== ':memory:' && !options.readOnly) mkdirSync(dirname(resolve(path)), { recursive: true, mode: 0o700 });
     this.db = new DatabaseSync(path, { readOnly: options.readOnly ?? false });
     this.technologyArchive = new TechnologyArchive(this.db);
-    let schemaVersion = existed ? 0 : 4;
+    let schemaVersion = existed ? 0 : 5;
     try {
       if (existed) {
         const marker = this.db.prepare('PRAGMA application_id').get() as { application_id: number };
         const version = this.db.prepare('PRAGMA user_version').get() as { user_version: number };
-        if (marker.application_id !== 1128354388 || ![1, 2, 3, 4].includes(version.user_version)) throw new Error('Unrecognized database or schema version. Explicit recovery required.');
+        if (marker.application_id !== 1128354388 || ![1, 2, 3, 4, 5].includes(version.user_version)) throw new Error('Unrecognized database or schema version. Explicit recovery required.');
         schemaVersion = version.user_version;
         for (const [table, columns] of Object.entries(BASE_TABLES)) {
           const actual = (this.db.prepare(`PRAGMA table_info(${table})`).all() as SchemaColumn[]).map(row => row.name);
@@ -207,6 +221,7 @@ export class Store {
           if (JSON.stringify(columns.map(c=>c.name))!==JSON.stringify(['id','tick','body','digest']) || columns.find(c=>c.name==='id')?.pk!==1) throw new Error('Identity archive schema is incomplete. Explicit recovery required.');
         }
         if (schemaVersion >= 4) assertTechnologySchema(this.db);
+        if (schemaVersion >= 5) assertSnapshotPartsSchema(this.db);
       }
       if (!options.readOnly) {
         // WAL + synchronous=NORMAL: un corte de luz puede costar el último commit
@@ -218,7 +233,7 @@ export class Store {
         // varios guardados en lugar de en todos: mismo trabajo total, un WAL acotado
         // y un p95 que deja de heredar el checkpoint en cada guardado.
         this.db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=3000; PRAGMA wal_autocheckpoint=4000;');
-        if (!existed || schemaVersion < 4) {
+        if (!existed || schemaVersion < 5) {
           this.db.exec('BEGIN IMMEDIATE');
           try {
             if (!existed) this.db.exec(`
@@ -229,9 +244,10 @@ export class Store {
               CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);`);
             if (!existed || schemaVersion === 1) this.db.exec(ARCHIVE_SCHEMA);
             if (!existed || schemaVersion < 3) this.db.exec(LEGACY_SCHEMA);
-            this.technologyArchive.installSchema();
-            this.db.exec('PRAGMA application_id=1128354388; PRAGMA user_version=4; COMMIT;');
-            schemaVersion = 4;
+            if (!existed || schemaVersion < 4) this.technologyArchive.installSchema();
+            SnapshotParts.install(this.db);
+            this.db.exec('PRAGMA application_id=1128354388; PRAGMA user_version=5; COMMIT;');
+            schemaVersion = 5;
           } catch (error) {
             if (this.db.isTransaction) this.db.exec('ROLLBACK');
             throw error;
@@ -239,6 +255,7 @@ export class Store {
         }
       }
       this.schemaVersion = schemaVersion;
+      this.snapshotParts = new SnapshotParts(this.db, schemaVersion);
     } catch (error) { this.db.close(); throw error; }
   }
   get context(): WorldContext {
@@ -352,7 +369,7 @@ export class Store {
       const refuse = (reason: string) => { refusals.push(`slot ${slot}: ${reason}`); supersededAt ??= row.saved_at; };
       if (checksum(row.body) !== row.digest) { refuse('snapshot checksum mismatch'); continue; }
       let decoded: World;
-      try { decoded = decodeSnapshot(row.body) as World; }
+      try { decoded = this.snapshotParts.read(row.body) as World; }
       catch (error) {
         if (!(error instanceof SnapshotPhysicalError)) throw error;
         refuse(error.message); continue;
@@ -418,7 +435,14 @@ export class Store {
    * propagar, así que la rotación —que copiaría cero filas— no hace daño. */
   private readSlot0(): boolean {
     const row = this.db.prepare('SELECT body,digest FROM snapshots WHERE slot=0').get() as Row | undefined;
-    return this.slot0Readable = !row || checksum(row.body) === row.digest;
+    if (!row) return this.slot0Readable = true;
+    if (checksum(row.body) !== row.digest) return this.slot0Readable = false;
+    try { this.snapshotParts.read(row.body); }
+    catch (error) {
+      if (!(error instanceof SnapshotPhysicalError)) throw error;
+      return this.slot0Readable = false;
+    }
+    return this.slot0Readable = true;
   }
   /** Un respaldo solo se adopta EN CALIENTE si el archivo durable acaba donde acaba él.
    * En cuanto el archivo guarda un suceso, un gesto, una región, una identidad o una
@@ -474,7 +498,7 @@ export class Store {
     return !!this.db.prepare("SELECT 1 FROM main.sqlite_schema WHERE type='trigger' UNION ALL SELECT 1 FROM temp.sqlite_schema WHERE type='trigger' LIMIT 1").get();
   }
   private assertChronicleSchema(): void {
-    if (this.db.prepare("SELECT 1 FROM temp.sqlite_schema WHERE name IN ('events','metadata','snapshots') LIMIT 1").get()) chronicleFailure('temporary objects shadow durable tables');
+    if (this.db.prepare("SELECT 1 FROM temp.sqlite_schema WHERE name IN ('events','metadata','snapshots','snapshot_parts') LIMIT 1").get()) chronicleFailure('temporary objects shadow durable tables');
     for (const [table, fields] of [['events',['id','tick','body']],['metadata',['key','value']]] as const) {
       const columns = this.db.prepare(`PRAGMA main.table_info(${table})`).all() as { name: string; type: string; pk: number; notnull: number }[];
       if (columns.length !== fields.length || columns.some((column,index) => column.name !== fields[index]
@@ -564,7 +588,7 @@ export class Store {
         if (journal.committedThrough !== journal.startsAfter || journal.committedDigest !== EMPTY_CHRONICLE_DIGEST) chronicleFailure('committed history has no baseline');
       } else {
         if (checksum(row.body) !== row.digest) chronicleFailure('baseline snapshot checksum mismatch');
-        const baseline = decodeSnapshot(row.body) as World, declared = baseline.chronicleJournal !== undefined;
+        const baseline = this.snapshotParts.read(row.body) as World, declared = baseline.chronicleJournal !== undefined;
         enableChronicleJournal(baseline); this.assertChronicleOrigin(baseline, declared); this.assertChronicleArchive(baseline);
         this.rememberChronicle(baseline, this.chronicleStamp());
       }
@@ -738,7 +762,7 @@ export class Store {
         if (!row && this.db.prepare("SELECT 1 FROM metadata WHERE key='initialized'").get()) technologyFailure('baseline snapshot is missing');
         if (row) {
           if (checksum(row.body) !== row.digest) technologyFailure('baseline snapshot checksum mismatch');
-          const baseline = this.migrateSnapshot(decodeSnapshot(row.body) as World);
+          const baseline = this.migrateSnapshot(this.snapshotParts.read(row.body) as World);
           if (baseline.technology.journal !== undefined) {
             const committed = baseline.technology.journal;
             assertTechnologyJournal(baseline.technology, baseline.tick);
@@ -820,8 +844,8 @@ export class Store {
     const window = paramsOf(world).persistencia.ventanaEventosTicks;
     const prunes = window > 0 && world.tick - this.lastPruneTick >= window;
     // Los params vigentes viajan con el mundo: `load()` no puede medirlo con otros (R8).
-    const body = encodeSnapshot({ ...world, chronicleJournal: committedChronicle, technology: technologyCatalogueStateForCommit(technologyStateForCommit(world.technology)) }, paramsOf(world));
-    this.lastSnapshotBytes = Buffer.byteLength(body);
+    const prepared = this.snapshotParts.prepare({ ...world, chronicleJournal: committedChronicle, technology: technologyCatalogueStateForCommit(technologyStateForCommit(world.technology)) }, paramsOf(world), this.snapshotInlineTileLimit);
+    let body = '';
     this.db.exec('BEGIN IMMEDIATE');
     let chronicleTriggers = false;
     try {
@@ -865,10 +889,14 @@ export class Store {
         this.db.exec('INSERT OR REPLACE INTO snapshots SELECT 1,body,digest,saved_at FROM snapshots WHERE slot=0');
         if ((this.saves + 1) % DEEP_CHECKPOINT_EVERY_SAVES === 0) this.db.exec('INSERT OR REPLACE INTO snapshots SELECT 2,body,digest,saved_at FROM snapshots WHERE slot=0');
       }
+      const written = this.snapshotParts.write(prepared);
+      body = written.body;
+      this.lastSnapshotBytes = written.bytes;
       this.db.prepare('INSERT OR REPLACE INTO snapshots VALUES (0,?,?,?)').run(body, checksum(body), Date.now());
       this.db.prepare("INSERT OR REPLACE INTO metadata VALUES ('initialized','1')").run();
       const insertInput = this.db.prepare('INSERT INTO inputs VALUES (?,?,?,?,?,?)');
       for (const { gesture, result } of inputs) insertInput.run(gesture.id, fingerprint(gesture), result.tick, result.order, JSON.stringify(gesture), JSON.stringify(result));
+      this.snapshotParts.collect();
       });
       if (chronicleTriggers) {
         this.assertChronicleOrigin({ ...world, chronicleJournal: committedChronicle }, true);
@@ -876,6 +904,8 @@ export class Store {
         const saved = this.db.prepare('SELECT body,digest FROM snapshots WHERE slot=0').get() as Row | undefined;
         if (!saved || saved.body !== body || saved.digest !== checksum(body)) chronicleFailure('trigger changed committed snapshot');
       }
+      if (chronicleTriggers) this.snapshotParts.verifyRetained();
+      else if (prepared.inline === undefined) this.snapshotParts.verify(body);
       this.db.exec('COMMIT');
       this.saves++;
       // Confirmado: el slot 0 es ahora este cuerpo, escrito y verificado por esta misma
@@ -942,7 +972,7 @@ export class Store {
     // Unverifiable metadata is not permission to reconstruct a damaged retained prefix.
     if (origin) {
       if (!current || checksum(current.body) !== current.digest) technologyFailure('cannot verify recovery history origin');
-      const baseline = this.migrateSnapshot(decodeSnapshot(current!.body) as World), journal = baseline.technology.journal;
+      const baseline = this.migrateSnapshot(this.snapshotParts.read(current!.body) as World), journal = baseline.technology.journal;
       if (!journal || journal.startsAfter !== origin.startsAfter || journal.pending.length
         || journal.committedThrough !== baseline.technology.executionCounter) technologyFailure('recovery history origin disagrees with committed snapshot');
       assertTechnologyJournal(baseline.technology, baseline.tick);
@@ -961,7 +991,7 @@ export class Store {
     } else {
       if (['technology_definitions', 'technology_stats', 'technology_executions'].some(table => this.db.prepare(`SELECT 1 FROM ${table} LIMIT 1`).get())) technologyFailure('recovery archive has records but no origin');
       if (current && checksum(current.body) === current.digest) {
-        const baseline = this.migrateSnapshot(decodeSnapshot(current.body) as World);
+        const baseline = this.migrateSnapshot(this.snapshotParts.read(current.body) as World);
         if (baseline.technology.journal !== undefined) technologyFailure('recovery lost its declared history origin');
       }
     }
@@ -985,7 +1015,7 @@ export class Store {
   /** Verificación previa de un candidato de la cadena, ANTES de copiar nada al destino:
    * una recuperación imposible no deja una copia a medias. */
   private verifyPrevious(row: Row): { world: World; declaredJournal: boolean } {
-    const decoded = decodeSnapshot(row.body) as World, declaredChronicle = decoded.chronicleJournal !== undefined;
+    const decoded = this.snapshotParts.read(row.body) as World, declaredChronicle = decoded.chronicleJournal !== undefined;
     const world = this.migrateSnapshot(decoded);
     this.assertChronicleOrigin(world, declaredChronicle, true);
     this.assertChronicleArchive(world, true);
@@ -1004,8 +1034,11 @@ export class Store {
    * el slot que restauró, para que quien lo pidió sepa cuánto retrocedió.
    */
   previous(destination: string, fromSlot: SnapshotSlot = 1): SnapshotSlot {
+    if (this.db.isTransaction) throw new Error('Store.previous requires its own transaction.');
     const refusals: string[] = [];
-    let chosen: { slot: SnapshotSlot; savedAt: number; world: World; declaredJournal: boolean } | undefined;
+    let chosen: { slot: SnapshotSlot; row: Row } | undefined;
+    this.db.exec('BEGIN');
+    try {
     for (const slot of SNAPSHOT_SLOTS) {
       if (slot < fromSlot) continue;
       const candidate = this.db.prepare('SELECT body,digest,saved_at FROM snapshots WHERE slot=?').get(slot) as Row | undefined;
@@ -1013,15 +1046,23 @@ export class Store {
       if (checksum(candidate.body) !== candidate.digest) { refusals.push(`slot ${slot}: snapshot checksum mismatch`); continue; }
       // Aquí sí se salta un respaldo que infringe una ley: quien pidió recuperar ya
       // aceptó retroceder, y el destino es una copia nueva que se poda y se valida.
-      try { chosen = { slot, savedAt: candidate.saved_at, ...this.verifyPrevious(candidate) }; break; }
+      try { this.verifyPrevious(candidate); chosen = { slot, row: candidate }; break; }
       catch (error) { refusals.push(`slot ${slot}: ${error instanceof Error ? error.message : String(error)}`); }
     }
+    this.db.exec('COMMIT');
+    } catch (error) { if (this.db.isTransaction) this.db.exec('ROLLBACK'); throw error; }
     if (!chosen) throw new Error(`No valid previous checkpoint (${refusals.join('; ')}).`);
-    const { world, declaredJournal } = chosen;
     this.backup(destination);
-    const recovered = new Store(destination);
+    const recovered = new Store(destination, { snapshotInlineTileLimit: this.snapshotInlineTileLimit });
     try {
       recovered.db.exec('BEGIN IMMEDIATE');
+      // VACUUM cannot run inside the source read transaction. Another writer may
+      // rotate a checkpoint or remove its pages in that interval. Never silently
+      // substitute its new slot occupant or reuse the previously decoded world.
+      const copied = recovered.db.prepare('SELECT body,digest,saved_at FROM snapshots WHERE slot=?').get(chosen.slot) as Row | undefined;
+      if (!copied || copied.body !== chosen.row.body || copied.digest !== chosen.row.digest || copied.saved_at !== chosen.row.saved_at)
+        throw new Error('Selected previous checkpoint changed before backup. Explicit recovery required.');
+      const { world, declaredJournal } = recovered.verifyPrevious(copied);
       recovered.technologyArchive.beginHostTransaction();
       bindWorldContext(world, recovered.context);
       // Two snapshots may share a tick. Their serial/recipe boundaries still differ.
@@ -1036,8 +1077,9 @@ export class Store {
       recovered.prepareTechnology(world, declaredJournal ? world.technology.recipeCounter : 0);
       // A pre-journal checkpoint has surviving receipts in memory, not a backed watermark.
       recovered.flushTechnology(world, true);
-      const body = encodeSnapshot({ ...world, technology: technologyCatalogueStateForCommit(technologyStateForCommit(world.technology)) }, paramsOf(world));
-      recovered.db.prepare('UPDATE snapshots SET body=?,digest=?,saved_at=? WHERE slot=0').run(body, checksum(body), chosen.savedAt);
+      const prepared = recovered.snapshotParts.prepare({ ...world, technology: technologyCatalogueStateForCommit(technologyStateForCommit(world.technology)) }, paramsOf(world), recovered.snapshotInlineTileLimit);
+      const { body } = recovered.snapshotParts.write(prepared);
+      recovered.db.prepare('INSERT OR REPLACE INTO snapshots VALUES (0,?,?,?)').run(body, checksum(body), chosen.row.saved_at);
       // La copia empieza su propia cadena: heredar los respaldos del original dejaría
       // ahí puntos POSTERIORES al que se acaba de restaurar (o los que fallaron).
       recovered.db.prepare('DELETE FROM snapshots WHERE slot<>0').run();
@@ -1052,7 +1094,11 @@ export class Store {
       // Recovery changes only the explicit destination's coverage epoch.
       recovered.db.prepare("INSERT OR REPLACE INTO metadata VALUES ('chronicle-origin-v1',?)").run(JSON.stringify({ version: 1, startsAfter: world.chronicleJournal!.startsAfter }));
       recovered.assertChronicleOrigin(world, true); recovered.assertChronicleArchive(world);
-      recovered.revoke(); recovered.db.exec('COMMIT'); recovered.technologyArchive.acknowledgeHostCommit(); recovered.load();
+      recovered.revoke();
+      recovered.snapshotParts.collect();
+      if (recovered.chronicleHasTriggers()) recovered.snapshotParts.verifyRetained();
+      else if (prepared.inline === undefined) recovered.snapshotParts.verify(body);
+      recovered.db.exec('COMMIT'); recovered.technologyArchive.acknowledgeHostCommit(); recovered.load();
     } catch (error) {
       if (recovered.db.isTransaction) recovered.db.exec('ROLLBACK');
       recovered.technologyArchive.invalidateVerification(); throw error;

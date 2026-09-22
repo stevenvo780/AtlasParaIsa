@@ -7,6 +7,7 @@ import { availableParallelism, cpus, loadavg, platform, release, tmpdir } from '
 import { join } from 'node:path';
 import { Store } from '../src/server/store.js';
 import { encodeSnapshot, decodeSnapshot } from '../src/server/snapshot.js';
+import { readStoredSnapshot, SNAPSHOT_INLINE_TILE_LIMIT } from '../src/server/snapshot-parts.js';
 import { assertWorld, cloneWorld, createWorld, stepWorld, type World } from '../src/world/index.js';
 import { generateTile } from '../src/world/terrain.js';
 import { maintainRegions } from '../src/world/spatial.js';
@@ -14,7 +15,7 @@ import { maintainRegions } from '../src/world/spatial.js';
 const samples = Number(process.env.CPU_BENCH_STEPS ?? 24), warmup = 4, seed = 51926;
 assert.ok(Number.isInteger(samples) && samples >= 24 && samples <= 60, 'CPU_BENCH_STEPS must be 24–60');
 const digest = (body: string | Buffer) => createHash('sha256').update(body).digest('hex');
-const sourceFiles = ['src/server/snapshot.ts', 'src/server/store.ts', 'src/world/index.ts', 'src/world/spatial.ts'];
+const sourceFiles = ['src/server/snapshot.ts', 'src/server/snapshot-parts.ts', 'src/server/store.ts', 'src/world/index.ts', 'src/world/spatial.ts'];
 const sourceHashes = Object.fromEntries(sourceFiles.map(path => [path, digest(readFileSync(path))]));
 const readOptional = (path: string) => { try { return readFileSync(path, 'utf8').trim(); } catch { return null; } };
 type Measure = { wallMs: number[]; cpuMs: number[] };
@@ -57,9 +58,11 @@ function fixture(population: 16 | 32): World {
   assertWorld(world); return world;
 }
 
-/** Same WAL/NORMAL snapshot/previous/metadata/event transaction as Store.save, empty inputs/archive. */
+/** Inline-codec microbenchmark, not Store.save or its paged transport. These
+ * fixtures explicitly stay below the default transport threshold. */
 function saveEncoded(store: Store, world: World, body: string): void {
   assert.equal(world.retiredChunks.length, 0);
+  assert.ok(world.tiles.length <= SNAPSHOT_INLINE_TILE_LIMIT, 'inline comparison requires a small fixture');
   const db = store.db;
   db.exec('BEGIN IMMEDIATE');
   try {
@@ -73,12 +76,12 @@ function saveEncoded(store: Store, world: World, body: string): void {
   } catch (error) { if (db.isTransaction) db.exec('ROLLBACK'); throw error; }
 }
 
-function verifyCheckpoint(store: Store, expectedCurrent: World, previousBody: string | undefined, codec: 'plain' | 'tuple') {
+function verifyCheckpoint(store: Store, expectedCurrent: World, previousBody: string | undefined) {
   const rows = store.db.prepare('SELECT slot,body,digest FROM snapshots ORDER BY slot').all() as { slot: number; body: string; digest: string }[];
   assert.equal(rows.length, 2); assert.equal(rows[0]!.slot, 0); assert.equal(rows[1]!.slot, 1);
   for (const row of rows) assert.equal(digest(row.body), row.digest);
   assert.equal(rows[1]!.body, previousBody, 'previous checkpoint is exactly the preceding committed body');
-  const parsed = codec === 'plain' ? JSON.parse(rows[0]!.body) : decodeSnapshot(rows[0]!.body);
+  const parsed = readStoredSnapshot(store.db)!.value;
   assert.deepEqual(parsed, JSON.parse(JSON.stringify(expectedCurrent)));
   assert.equal(Object.values(store.db.prepare('PRAGMA quick_check').get()!)[0], 'ok');
 }
@@ -130,7 +133,7 @@ try {
         }
         await new Promise<void>(resolve => setImmediate(resolve));
       }
-      for (const codec of ['plain', 'tuple'] as const) verifyCheckpoint(stores[codec], world, previousBodies[codec], codec);
+      for (const codec of ['plain', 'tuple'] as const) verifyCheckpoint(stores[codec], world, previousBodies[codec]);
       const codecs = Object.fromEntries((['plain', 'tuple'] as const).map(codec => {
         const m = metrics[codec];
         const encodePlusTransaction = { wallMs: m.encode.wallMs.map((value, index) => value + m.transaction.wallMs[index]!),
@@ -153,7 +156,7 @@ try {
     sourceCommit: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), sourceHashes,
     seed, wallSeconds: (performance.now() - started) / 1000, peakRssMiB: process.resourceUsage().maxRSS / 1024, scenarios,
     method: 'Paired identical live states; codecs and clones alternate order. Encoding, decoding, SQLite transaction and simulation are timed separately. CPU uses process.cpuUsage(user+system); wall uses performance.now. Fidelity and integrity assertions are outside measured regions. WAL and synchronous=NORMAL on separate temporary files; same previous/current snapshot, digest, metadata and event SQL for both encodings.',
-    limits: '24–60 steps are a short synthetic comparison, not a soak. No browser, GPU, threads, sessions, gestures, archival writes, concurrent clients or power-loss test. CPU samples may include V8 GC/runtime threads. Files use the current temporary filesystem and host cache. Other processes/soak may contend: wall time is not isolated. Encode+transaction is a paired sum of separate intervals, not end-to-end request latency.', failures: 0 };
+    limits: 'Inline snapshots only, below the default transport threshold; this does not measure Store.save or segmented writes. 24–60 steps are a short synthetic comparison, not a soak. No browser, GPU, threads, sessions, gestures, archival writes, concurrent clients or power-loss test. CPU samples may include V8 GC/runtime threads. Files use the current temporary filesystem and host cache. Other processes/soak may contend: wall time is not isolated. Encode+transaction is a paired sum of separate intervals, not end-to-end request latency.', failures: 0 };
   mkdirSync('artifacts', { recursive: true }); writeFileSync('artifacts/cpu-v3-comparison.json', JSON.stringify(report, null, 2) + '\n');
   console.log('Saved artifacts/cpu-v3-comparison.json');
 } finally { rmSync(dir, { recursive: true, force: true }); }

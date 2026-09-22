@@ -7,6 +7,7 @@ import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { readStoredSnapshot } from '../src/server/snapshot-parts.js';
 import type { GestureResult, WorldView } from '../src/shared/types.js';
 
 // Exercise the built entrypoint and credential CLI in a disposable world, never real data.
@@ -48,8 +49,8 @@ try {
   const checkpoint=new DatabaseSync(join(dir,'world.sqlite'),{readOnly:true});
   let durableTick:number;
   try {
-    const row=checkpoint.prepare('SELECT body FROM snapshots WHERE slot=0').get() as {body:string};
-    durableTick=(JSON.parse(row.body) as {tick:number}).tick;
+    const snapshot=readStoredSnapshot(checkpoint);assert.ok(snapshot);
+    durableTick=(snapshot.value as {tick:number}).tick;
     assert.ok(durableTick>=receipt.tick,'an acknowledged gesture must survive the abrupt stop');
   } finally {checkpoint.close();}
   const restartStarted=performance.now();await start();

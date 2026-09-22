@@ -77,7 +77,7 @@ function oldDatabase(path: string, version: 1 | 2 | 3, worlds: World[]) {
     }
     store.db.prepare("INSERT INTO metadata VALUES ('initialized','1')").run();
     store.addSession('old-session', Date.now() + 60_000);
-    store.db.exec(`DROP TABLE technology_executions; DROP TABLE technology_stats; DROP TABLE technology_definitions; DROP TABLE technology_origin; PRAGMA user_version=${version};`);
+    store.db.exec(`DROP TABLE snapshot_parts; DROP TABLE technology_executions; DROP TABLE technology_stats; DROP TABLE technology_definitions; DROP TABLE technology_origin; PRAGMA user_version=${version};`);
     if (version < 3) store.db.exec('DROP TABLE legacy');
     if (version < 2) store.db.exec('DROP TABLE chunks');
   } finally { store.close(); }
@@ -85,7 +85,7 @@ function oldDatabase(path: string, version: 1 | 2 | 3, worlds: World[]) {
 
 test('new stores install SQLite schema 4 and initial coverage zero in the first atomic snapshot', t => {
   const { store } = fixture(t), world = createWorld(51926);
-  assert.equal(store.db.prepare('PRAGMA user_version').get()!.user_version, 4);
+  assert.equal(store.db.prepare('PRAGMA user_version').get()!.user_version, 5);
   store.save(world);
   assert.deepEqual(world.technology.journal, { version: 1, startsAfter: 0, committedThrough: 0, pending: [] });
   assert.equal(count(store, 'technology_executions'), 0); assert.equal(count(store, 'technology_definitions'), 0);
@@ -163,7 +163,7 @@ test('schema 1, 2 and 3 migrate in a transaction; old journal coverage starts ex
     const path = join(directory, `v${version}.sqlite`); oldDatabase(path, version, [world]);
     const store = new Store(path);
     try {
-      assert.equal(store.db.prepare('PRAGMA user_version').get()!.user_version, 4);
+      assert.equal(store.db.prepare('PRAGMA user_version').get()!.user_version, 5);
       assert.equal(count(store, 'technology_executions'), 0); assert.ok(store.sessionValid('old-session'));
       const loaded = store.load()!.world, dropped = loaded.technology.historyDropped;
       assert.equal(loaded.technology.journal!.startsAfter, dropped);

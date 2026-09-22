@@ -5,7 +5,9 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { Store } from '../src/server/store.js';
-import { decodeSnapshot, takeSnapshotParams } from '../src/server/snapshot.js';
+import { takeSnapshotParams } from '../src/server/snapshot.js';
+import { readStoredSnapshot } from '../src/server/snapshot-parts.js';
+import { digestoCanonico } from '../src/world/digesto.js';
 import { stepWorld, type World } from '../src/world/index.js';
 import { paramsOf } from '../src/world/params.js';
 
@@ -23,13 +25,18 @@ mkdirSync(directory, { recursive: true });
 // The source connection cannot write. VACUUM INTO refuses an existing destination
 // database instead of overwriting it, including an accidentally reused source.
 const copy = new DatabaseSync(source, { readOnly: true });
-let expectedParams;
 try {
-  const snapshot = copy.prepare('SELECT body FROM snapshots WHERE slot=0').get();
-  if (!snapshot || typeof snapshot.body !== 'string') throw new Error('Source snapshot is missing');
-  expectedParams = takeSnapshotParams(decodeSnapshot(snapshot.body));
   copy.prepare('VACUUM INTO ?').run(database);
 } finally { copy.close(); }
+// Bind controls to the actual copied checkpoint if the source was still writing
+// when VACUUM ran. Resolve every page inside one read transaction.
+const inspection = new DatabaseSync(database, { readOnly: true });
+let expectedParams;
+try {
+  const snapshot = readStoredSnapshot(inspection);
+  if (!snapshot) throw new Error('Copied source snapshot is missing');
+  expectedParams = takeSnapshotParams(snapshot.value);
+} finally { inspection.close(); }
 
 let Constructor = Store;
 let variant: string | null = null;
@@ -95,7 +102,7 @@ try {
       { calls: value.calls - (before[name]?.calls ?? 0), ms: value.ms - (before[name]?.ms ?? 0) }]));
     samples.push({ round, tick: world.tick, population: world.people.length, tiles: world.tiles.length, simulationMs, saveMs, phases });
   }
-  const body = store.db.prepare('SELECT body FROM snapshots WHERE slot=0').get()!.body as string;
+  const snapshot = readStoredSnapshot(store.db)!;
   const archiveHashes: Record<string, { rows: number; sha256: string }> = {};
   for (const [table, order] of [['technology_definitions', 'length(id),id'], ['technology_stats', 'recipeId,tick'],
     ['technology_executions', 'serial'], ['technology_origin', 'id']]) {
@@ -108,7 +115,9 @@ try {
   const sourceHashesAfter = hashes();
   if (!isDeepStrictEqual(sourceHashesBefore, sourceHashesAfter)) throw new Error('Profile source changed during measurement');
   const result = { source, mode, cadence, rounds, sourceHashesBefore, sourceHashesAfter, loadMs, samples,
-    finalTick: world.tick, finalStateHash: createHash('sha256').update(body).digest('hex'), archiveHashes, snapshotBytes: store.lastSnapshotBytes };
+    finalTick: world.tick, finalStateHash: digestoCanonico(world), finalStateHashEncoding: 'digestoCanonico',
+    snapshotBodyHash: snapshot.bodyDigest, snapshotBodyBytes: snapshot.bodyBytes,
+    archiveHashes, snapshotBytes: snapshot.snapshotBytes };
   writeFileSync(join(directory, 'profile.json'), JSON.stringify(result, null, 2) + '\n');
   const ordered = samples.map(sample => sample.saveMs).sort((a, b) => a - b);
   console.log(JSON.stringify({ mode, cadence, medianSaveMs: (ordered[Math.floor((rounds - 1) / 2)]! + ordered[Math.floor(rounds / 2)]!) / 2,

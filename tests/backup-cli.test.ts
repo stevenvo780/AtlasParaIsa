@@ -16,7 +16,7 @@ test('backup CLI keeps an older service schema and source bytes unchanged',()=>{
   for(const person of prior.people as Record<string,unknown>[]) {delete person.demography;delete person.technology;}
   const body=JSON.stringify(prior),digest=createHash('sha256').update(body).digest('hex');
   store.db.prepare('UPDATE snapshots SET body=?,digest=? WHERE slot=0').run(body,digest);
-  store.db.exec('DROP TABLE legacy; PRAGMA user_version=2;');store.close();
+  store.db.exec('DROP TABLE snapshot_parts; DROP TABLE legacy; PRAGMA user_version=2;');store.close();
   try {
     const before=readFileSync(source);
     const result=spawnSync(process.execPath,['--import','tsx','scripts/storage.ts','backup',destination],{env:{...process.env,CARTA_DATA_DIR:directory},encoding:'utf8'});

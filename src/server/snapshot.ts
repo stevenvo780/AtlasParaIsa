@@ -13,6 +13,8 @@ const ENCODING = 'tiles-tuple-v1';
 const PARAMS_ENCODING = 'params-v1';
 const DEFAULT_PARAMS_BODY = JSON.stringify(DEFAULT_PARAMS);
 const FIELDS = ['x','y','terrain','moisture','vegetation','food','biome','elevation','wood','stone','feature','variety','growth','fertility','cultivation','traffic','drinkingWater','species','fauna','life'] as const;
+/** Only unreadable bytes justify trying an older checkpoint automatically. */
+export class SnapshotPhysicalError extends Error {}
 export function encodeSnapshot(world: World, params: WorldParams = DEFAULT_PARAMS): string {
   // JSON null is reserved for absent optional fields. Never erase invalid present
   // values (JSON itself would turn NaN/Infinity into null) during compaction.
@@ -49,7 +51,12 @@ export function takeSnapshotParams(value: unknown): WorldParams {
   catch (error) { throw new Error(`Invalid snapshot parameters: ${(error as Error).message} Explicit recovery required.`); }
 }
 export function decodeSnapshot(body: string): unknown {
-  const value: unknown = JSON.parse(body);
+  let value: unknown;
+  try { value = JSON.parse(body); }
+  catch (error) {
+    if (error instanceof SyntaxError) throw new SnapshotPhysicalError(error.message, { cause: error });
+    throw error;
+  }
   if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
   const record = value as Record<string, unknown>;
   if (!('tileEncoding' in record)) return value;

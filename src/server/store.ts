@@ -6,7 +6,7 @@ import type { Gesture, GestureResult } from '../shared/types.js';
 import { assertWorld, bindWorldContext, migrateWorld, type World, type WorldContext } from '../world/index.js';
 import { CHUNK_SIZE, MAX_COORDINATE, type Chunk } from '../world/terrain.js';
 import { assertEcosystemTile, assertChunkLife } from '../world/validation.js';
-import { decodeSnapshot, encodeSnapshot, takeSnapshotParams } from './snapshot.js';
+import { decodeSnapshot, encodeSnapshot, takeSnapshotParams, SnapshotPhysicalError } from './snapshot.js';
 import type { LegacyRecord } from '../shared/demography.js';
 import { assertLegacyRecord } from '../world/lineage.js';
 import { TechnologyArchive } from './technology-archive.js';
@@ -352,7 +352,10 @@ export class Store {
       if (checksum(row.body) !== row.digest) { refuse('snapshot checksum mismatch'); continue; }
       let decoded: World;
       try { decoded = decodeSnapshot(row.body) as World; }
-      catch (error) { refuse(error instanceof Error ? error.message : String(error)); continue; }
+      catch (error) {
+        if (!(error instanceof SnapshotPhysicalError)) throw error;
+        refuse(error.message); continue;
+      }
       // Un slot 0 que se lee entero es el único cuerpo que `save()` puede copiar a un
       // respaldo. Si adoptamos un respaldo, el slot 0 queda marcado como NO fiable.
       this.slot0Readable = slot === 0;

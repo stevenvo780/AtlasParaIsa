@@ -1304,6 +1304,9 @@ function migrateWorldState(value: unknown, context: WorldContext = {}): World {
   }
   assertCommon(value, true);
   const world = structuredClone(value);
+  // V1 is the one migration that cannot use cloneWorld yet. Preserve its laws
+  // before generating any terrain or ecosystem fields; WeakMaps do not clone.
+  setParams(world, paramsOf(value));
   bindWorldContext(world, context);
   world.version = RULES_VERSION; world.chunks = {}; world.retiredChunks = [];
   world.discoveredChunks = 6; world.settlementCount = 0;

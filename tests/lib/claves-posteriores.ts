@@ -14,7 +14,11 @@ import type { World } from '../../src/world/index.js';
  * params reproduce el digesto de esos árboles. Una ley nueva con default 0 añade aquí su clave, y sus
  * propios controles se miden en el árbol anterior quitando las claves que ya estaban en esta lista.
  */
-export const CLAVES_POSTERIORES = ['social.memoriaDisputa', 'agua.rebano', 'social.reencuentro'] as const;
+/** Valor con el que cada clave no actúa: el mundo es el de antes y la clave se puede quitar del hash. */
+export const NEUTRO_POSTERIOR: Readonly<Record<string, unknown>> = {
+  'social.memoriaDisputa': 0, 'agua.rebano': 0, 'social.reencuentro': 0, 'poblacion.fundadores': 16,
+};
+export const CLAVES_POSTERIORES = Object.keys(NEUTRO_POSTERIOR);
 
 /** Valor de una clave punteada `seccion.hoja`. */
 function valor(params: WorldParams, clave: string): unknown {
@@ -26,7 +30,7 @@ function valor(params: WorldParams, clave: string): unknown {
 export function clavesPosterioresApagadas(params: WorldParams): void {
   for (const clave of CLAVES_POSTERIORES) {
     const actual = valor(params, clave);
-    if (actual !== 0) throw new Error(`${clave} = ${String(actual)}: con la ley activa el digesto no es comparable`);
+    if (actual !== NEUTRO_POSTERIOR[clave]) throw new Error(`${clave} = ${String(actual)}: con la ley activa el digesto no es comparable`);
   }
 }
 

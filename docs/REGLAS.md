@@ -14,6 +14,7 @@ de natalidad medido esa noche. Ninguna ley cambia para un mundo que ya existe.
 | :--- | ---: | ---: | :--- |
 | `poblacion.cortejo` | 2 | 0 | Cortejo: quien está en edad fértil y recuerda un vínculo mutuo ≥ 0,3 con otra persona fértil y no emparentada que está fuera de `radioPareja` pero dentro de `radioCortejo` puede ir hacia ella (acción `approach`, puntuación `cortejo · (0,5 + vínculo/2)`). Cuesta el mismo movimiento que cualquier desplazamiento; no crea recursos ni garantiza un nacimiento, y hambre, sed y descanso siguen ganando cuando urgen |
 | `poblacion.radioCortejo` | 128 | 24 | Alcance del cortejo, en celdas. En la semilla 31337 los fértiles tienen pareja con vínculo mutuo a 55–140 celdas (mediana ≈ 105): con 24 hubo un solo nacimiento en 30 días; con 128, 11 nacimientos y 19 habitantes al día 10 |
+| `poblacion.fundadores` | 16 | [16, 256] (entero) | **Condición inicial de escala, no ley.** Fundadores al crear el mundo: los 16 de la carta (S, I y los 14 vecinos con nombre) salen siempre primero e idénticos; los que pasan de 16 son vecinos `neighbor-15`, `neighbor-16`… del mismo molde que los 14, con nombre de sílabas determinista, repartidos en turno entre los lugares iniciales (anillos de tierra libre, sin agua ni refugio). No actúa después de `createWorld` | Hipótesis FUND, noche 2026-09-22 |
 | `poblacion.exigeComunidad` | `false` | `true` | Reproducirse ya no exige pertenecer a una comunidad; la cría hereda la del progenitor `a`, o ninguna |
 | `poblacion.comprobacionContinua` | `true` | `false` | `reproduce()` mira cada paso en vez de cada 120; descuenta los nacimientos de la ventana móvil, así que el techo sigue siendo `nacimientosPorComprobacion` (2) por ventana de `intervaloComprobacionTicks` (120) pasos |
 | `conducta.habituacion` | 0,35 | 0 | Descuento por saciedad en la elección: resta `habituacion · (0,5 + curiosity) · share` a cada acción, con `share` = su fracción vitalicia en `activity` |
@@ -880,3 +881,20 @@ Advertencia honesta sobre la profundidad: el contador de guardados que gobierna 
 El motor SQLite corre con `PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;` (antes `FULL`, cuyo fsync por tick consumía el 48 % del tiempo de paso — hallazgo C3), de modo que un corte de luz arriesga como máximo el último commit (≤`cadaTicks` pasos, ≤2 s en producción), nunca una base corrupta. El bucle del servidor usa un `setTimeout` re-planificado con compensación de deriva (`app.ts:333-336`) en vez de `setInterval`, apoyado en la métrica `runtime.tickHz`. Esta ley resuelve las causas C3/C12 (`app.ts:142-146`, p95 de 131,9 ms por clonado y guardado síncrono en cada paso con 32 habitantes, sobre un presupuesto constitucional de p95 < 50 ms), C5 (`store.ts:598-603`, crecimiento sin poda de ~7 KB/tick, unos 260 MB por hora real) y H2 (`store.save()` aceptaba antes un estado que `load()` rechazaría; reproducido). La refutación corre en `tests/server.test.ts`, `tests/store-*.test.ts` y `tests/chronicle-store.test.ts`: con cadencia 20, un gesto fuerza guardado inmediato; la poda conserva la última versión de cada chunk y los eventos dentro de la ventana; y `load()` bajo escritura concurrente no falla. La cadena de respaldo tiene su propia refutación en `tests/store-persistence.test.ts`: con el slot 0 dañado se adopta el slot 1; con los slots 0 y 1 dañados se llega al slot 2 y `previous()` lo restaura (devolviendo `2`) en una copia que arranca con un único respaldo; si el archivo durable guardó algo posterior al respaldo, el arranque se niega en vez de tirar lo ya vivido; y el guardado que sigue a un rescate deja intacto el respaldo que lo salvó —también el profundo— y reanuda la rotación en cuanto la cadena está sana.
 
 *Los defaults de la tabla de arriba están calibrados y desplegados en producción desde el 2026-09-19 (commit `835f3d5`), pero como fallback analítico de `research.md`: el barrido empírico T031 (rejilla de calibración con réplicas del laboratorio) todavía no se ejecutó por el límite de tiempo del sprint y queda pendiente post-evento junto con T032; sus resultados, si difieren, se registrarán aquí y en EVIDENCIA.md.*
+
+#### Condición inicial: escala de la comunidad fundadora (hipótesis FUND, 2026-09-22)
+
+`poblacion.fundadores` no es una ley del mundo: no decide nada en ningún paso, sólo cuánta gente hay
+cuando el mundo empieza. Nada es gratis: cada fundador adicional llega con el mismo cuerpo, edad,
+inventario (0,14) y necesidades que los 14 vecinos con nombre, y come y bebe del mismo
+terreno. La carta no cambia: S, I y los 14 conservan identidad, nombre, rol, rasgos, celda y las tiradas
+de `random(world)` de su creación, porque los adicionales se crean después, en el mismo bucle. Cada uno
+recibe `seededTraits(seed, n)`, `founderGenome`, color cíclico, la edad de `genes.edadFundadores*` y un
+nombre de dos o tres sílabas tirado con `localRandom(seed, 'fundador:'+id)` (distinto de los ya
+repartidos). Su celda es pura geometría: turno rotatorio entre los lugares que existen al crear el mundo
+(los tres de la carta y los hitos de los seis chunks iniciales, si los hay) y, alrededor de cada uno, la
+primera celda de tierra libre —ni agua ni refugio ni ocupada— en anillos de Chebyshev de radio creciente.
+Con el default 16 el mundo es el de siempre bit a bit (control en `tests/leyes-candidatas.test.ts` (i) y
+`tests/fundadores.test.ts`). Límite propio: en las semillas con hitos lejanos (p. ej. 42: (39,5)) un
+grupo pequeño de adicionales empieza lejos del resto; es parte de la condición y el laboratorio lo
+mide junto con la escala.

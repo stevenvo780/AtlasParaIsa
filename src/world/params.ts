@@ -43,7 +43,11 @@ export interface WorldParams {
     /** Cortejo (2026-09-22): peso con que una persona fértil busca a otra fértil, no emparentada y con
      * vínculo mutuo ≥ 0,3 que está fuera de `radioPareja` pero dentro de `radioCortejo`. Histórico 0 / 24
      * (apagado); reglas 10 adopta 2 / 128 para mundos nuevos. */
-    cortejo: number; radioCortejo: number };
+    cortejo: number; radioCortejo: number;
+    /** Condición inicial de escala, no ley: cuántos fundadores tiene el mundo al crearse. Los 16 de la carta
+     * (S, I y los 14 vecinos con nombre) no cambian nunca; los que pasan de 16 son vecinos `neighbor-15`,
+     * `neighbor-16`… creados después con el mismo molde que los 14. 16 = el mundo de siempre. */
+    fundadores: number };
   recursos: { capacidadBosque: number; capacidadPastizal: number; capacidadOtros: number; velocidadRegeneracion: number; decaimientoFertilidad: number; decaimientoComida: number };
   persistencia: { cadaTicks: number; ventanaEventosTicks: number; paginasSucias: boolean };
   /** Agua superficial concentrada en cuencas: 1 = generación actual (todas las charcas/manantiales); < 1 conserva solo las de las cuencas más húmedas (T035).
@@ -140,7 +144,8 @@ const RAW_HISTORICAL: WorldParams = {
   // Ruling R17: `maxima` ya no es un tope de diseño (era 40); por defecto no limita y el
   // freno lo ponen el entorno y el gobernador. Sigue siendo parámetro para el laboratorio.
   poblacion: { maxima: 1_000_000, intervaloComprobacionTicks: 120, nacimientosPorComprobacion: 2,
-    exigeComunidad: true, radioPareja: 3, radioLugar: 4, comprobacionContinua: false, cortejo: 0, radioCortejo: 24 },
+    exigeComunidad: true, radioPareja: 3, radioLugar: 4, comprobacionContinua: false, cortejo: 0, radioCortejo: 24,
+    fundadores: 16 },
   recursos: { capacidadBosque: 1, capacidadPastizal: 0.7, capacidadOtros: 0.35, velocidadRegeneracion: 1, decaimientoFertilidad: 0.001, decaimientoComida: 0.0001 },
   persistencia: { cadaTicks: 1, ventanaEventosTicks: 0, paginasSucias: false },
   agua: { cuencas: 0.4, memoria: 1, rebano: 0 },
@@ -262,6 +267,9 @@ export const PARAM_RANGES: Record<string, [number, number]> = {
   'poblacion.radioLugar': [1, 64],
   'poblacion.cortejo': [0, 5],
   'poblacion.radioCortejo': [1, 128],
+  // Condición inicial de escala (entero): nunca menos que los 16 de la carta, que siempre están; 256 es una
+  // cota anticorrupción, no un tope de diseño (ruling R17: el límite de población lo pone el hardware).
+  'poblacion.fundadores': [16, 256],
   'recursos.capacidadBosque': [0, 10],
   'recursos.capacidadPastizal': [0, 10],
   'recursos.capacidadOtros': [0, 10],
@@ -322,7 +330,7 @@ type ParamValue = number | boolean | string | (number | boolean | string)[];
 /** PARAM_RANGES conserva sus tuplas numéricas; cada hoja declara además su tipo. */
 export const PARAM_DESCRIPTORS: Readonly<Record<string, ParamDescriptor>> = deepFreeze({
   ...Object.fromEntries(Object.entries(PARAM_RANGES).map(([key, range]) => [key,
-    { kind: 'number', range, integer: key === 'motor.hilos' || key === 'social.disputaEspera' || key === 'social.maxComunidades' || key.startsWith('limites.') }])),
+    { kind: 'number', range, integer: key === 'motor.hilos' || key === 'social.disputaEspera' || key === 'social.maxComunidades' || key === 'poblacion.fundadores' || key.startsWith('limites.') }])),
   'poblacion.exigeComunidad': { kind: 'boolean' },
   'poblacion.comprobacionContinua': { kind: 'boolean' },
   'motor.clonPorPaso': { kind: 'boolean' },

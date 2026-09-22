@@ -182,14 +182,18 @@ export function createWorld(seed = 20260905, params?: WorldParams): World {
   const names = ['S', 'I', 'Luma', 'Nilo', 'Duna', 'Bruma', 'Olmo', 'Vera', 'Tilo', 'Cora', 'Lino', 'Nara', 'Río', 'Alba', 'Mora', 'Sol'];
   const colors = ['#f4ce7a', '#e7a8b9', '#9dc8ae', '#9ebacc', '#d8ba91', '#b8a6cc'];
   const varianzaFundadores = (params ?? DEFAULT_PARAMS).genes.varianzaFundadores;
-  for (let n = 0; n < names.length; n++) {
+  // Hipótesis FUND: `poblacion.fundadores` (≥ 16) alarga este mismo bucle. Los 16 de la carta salen
+  // primero y exactamente como siempre —mismas celdas, nombres, rasgos y tiradas de `random(world)`—;
+  // los adicionales vienen DESPUÉS, así que no mueven el generador de ninguno de los originales.
+  const fundadores = (params ?? DEFAULT_PARAMS).poblacion.fundadores;
+  for (let n = 0; n < fundadores; n++) {
+    const original = n < names.length;
     const place = world.places[Math.floor(n / 6) % world.places.length]!;
-    const x = place.x + n % 3 - 1;
-    const y = place.y + Math.floor(n % 6 / 3) - 1;
+    const { x, y } = original ? { x: place.x + n % 3 - 1, y: place.y + Math.floor(n % 6 / 3) - 1 } : extraFounderCell(world, n - names.length);
     const traits = seededTraits(normalizedSeed, n);
     const id = n === 0 ? 's' : n === 1 ? 'i' : `neighbor-${n - 1}`;
     world.people.push({
-      id, name: names[n]!,
+      id, name: original ? names[n]! : extraFounderName(world, id),
       role: n === 0 ? 'S' : n === 1 ? 'I' : 'neighbor', x, y, color: colors[n % colors.length]!,
       action: 'explore', reason: 'Observa las posibilidades cercanas.', energy: 0.78 + random(world) * 0.18,
       hunger: n === 3 || n === 5 ? 0.72 : 0.2 + random(world) * 0.28, fatigue: n === 0 ? 0.52 : 0.1 + random(world) * 0.2,
@@ -219,6 +223,43 @@ export function createWorld(seed = 20260905, params?: WorldParams): World {
   world.structures.push(...legacyStructures(world.tiles, world.tick));
   addEvent(world, { kind: 'memory', actors: [], source: 'sample', text: 'Este mundo comienza con S, I y una vecindad ficticia. Los cinco recuerdos son ejemplos, pendientes de la historia de Steven e Isa.', cause: 'Contenido sintético identificado; no se importaron conversaciones ni biografía.' });
   return world;
+}
+
+/**
+ * Hipótesis FUND (2026-09-22): celda del fundador adicional `k` (0 = el decimoséptimo). Turno rotatorio
+ * entre los lugares que existen al crear el mundo —los tres de la carta y, si los seis chunks iniciales
+ * tienen hitos, también éstos— y, alrededor de cada uno, anillos de Chebyshev de radio creciente hasta la
+ * primera celda de tierra que no sea refugio ni esté ocupada por otro fundador. Sólo geometría del terreno
+ * ya generado: no consume `world.rng` ni ninguna tirada.
+ */
+function extraFounderCell(world: World, k: number): Point {
+  const place = world.places[k % world.places.length]!;
+  for (let r = 1; r <= 16; r++) {
+    for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+      if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+      const cell = { x: place.x + dx, y: place.y + dy }, tile = tileAt(world, cell);
+      if (tile && tile.terrain !== 'water' && tile.terrain !== 'shelter' && !world.people.some(p => p.x === cell.x && p.y === cell.y)) return cell;
+    }
+  }
+  throw new Error(`No hay celda libre para el fundador adicional ${k} a menos de 16 celdas de ${place.id}.`);
+}
+
+const FOUNDER_SYLLABLES = ['ba', 'be', 'ca', 'co', 'da', 'di', 'du', 'la', 'le', 'li', 'lo', 'lu', 'ma', 'me', 'mi', 'mo', 'na', 'ne', 'ni', 'no',
+  'ra', 're', 'ri', 'ro', 'sa', 'se', 'si', 'so', 'ta', 'te', 'ti', 'to', 'va', 've', 'vi'] as const;
+
+/** Hipótesis FUND: nombre de dos o tres sílabas, determinista por semilla e identidad
+ * (`localRandom(seed, 'fundador:'+id)`), distinto de los ya repartidos; no toca `world.rng`. */
+function extraFounderName(world: World, id: string): string {
+  const draw = localRandom(world.seed, `fundador:${id}`), taken = new Set(world.people.map(p => p.name));
+  let name = '';
+  for (let attempt = 0; attempt < 16; attempt++) {
+    const syllables = 2 + Math.floor(draw() * 2);
+    name = '';
+    for (let i = 0; i < syllables; i++) name += FOUNDER_SYLLABLES[Math.floor(draw() * FOUNDER_SYLLABLES.length)]!;
+    name = name[0]!.toUpperCase() + name.slice(1);
+    if (!taken.has(name)) return name;
+  }
+  return `${name} ${id.slice('neighbor-'.length)}`;
 }
 
 function initializePerson(world: World, person: Person, varianzaFundadores: number = paramsOf(world).genes.varianzaFundadores): void {

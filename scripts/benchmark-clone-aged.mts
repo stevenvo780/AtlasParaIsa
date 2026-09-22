@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Store } from '../src/server/store.js';
+import { readStoredSnapshot } from '../src/server/snapshot-parts.js';
 import { cloneWorld, stepWorld, type World } from '../src/world/index.js';
 import { paramsOf, setParams } from '../src/world/params.js';
 import { bindWorldContext, worldContext } from '../src/world/spatial.js';
@@ -30,8 +31,8 @@ const results = [];
 for (const path of paths) {
   const before = { db: sha(path), wal: sha(`${path}-wal`) }, store = new Store(path, { readOnly: true });
   try {
-    const row = store.db.prepare('SELECT body,digest FROM snapshots WHERE slot=0').get() as {body:string;digest:string};
-    const source = JSON.parse(row.body), loaded = store.load()!;
+    const stored = readStoredSnapshot(store.db)!;
+    const source = stored.value as World, loaded = store.load()!;
     assert.equal(loaded.slot, 0); assert.equal(loaded.skipped.length, 0);
     const world = loaded.world, stages = [];
     assert.equal(world.tick, source.tick); assert.equal(paramsOf(world).persistencia.cadaTicks, 20);
@@ -57,7 +58,8 @@ for (const path of paths) {
         processCPU: { full: summarize(cpu.full), shared: summarize(cpu.shared) } });
     }
     results.push({ path, sourceVersion: source.version, loadedVersion: world.version,
-      seed: world.seed, sourceTick: source.tick, sourceSnapshotDigest: row.digest,
+      seed: world.seed, sourceTick: source.tick, sourceSnapshotDigest: stored.bodyDigest,
+      sourceBodyBytes: stored.bodyBytes, sourceSnapshotBytes: stored.snapshotBytes,
       archivedChunks: store.db.prepare('SELECT COUNT(*) AS n FROM chunks').get()!.n, before, stages });
   } finally { store.close(); }
   assert.deepEqual({db:sha(path),wal:sha(`${path}-wal`)},before);
@@ -65,5 +67,5 @@ for (const path of paths) {
 console.log(JSON.stringify({at:new Date().toISOString(),node:process.version,
   instrumentSha256:sha(fileURLToPath(import.meta.url)),
   sourceHashes:Object.fromEntries(['src/world/index.ts','src/world/spatial.ts','src/world/statistics.ts','src/server/store.ts'].map(p=>[p,sha(resolve(p))])),
-  scope:'Clone only, real aged checkpoints at load and 19 unsaved physical steps (cadence20), alternating order, 10 warmups and60 measured rounds. Shared host, no forced GC, CPU includes runtime overhead. Historical V6 fixture migrates in memory to V7; original SQLite/WAL unchanged. No synthetic dormant terrain, server latency or timing reproduction of the historical 10.25ms baseline.',
+  scope:'Clone only, checkpoints at load and 19 unsaved physical steps (cadence20), alternating order, 10 warmups and60 measured rounds. Shared host, no forced GC, CPU includes runtime overhead. Historical fixtures migrate in memory to loadedVersion; original SQLite/WAL unchanged. No injected dormant terrain, server latency or timing reproduction of the historical 10.25ms baseline.',
   results},null,2));

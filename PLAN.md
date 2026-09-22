@@ -23,7 +23,10 @@ T100 sigue abierto por segmentación y límites persistidos, incluida la puerta 
 dos millones de teselas. La provisión familiar V8 y la contención local V9 se
 integraron sobre esa base:981/981 pruebas sin omisiones,18/18 Chromium y seis controles
 de estado/archivo; [gate V9](docs/REVISION-INTEGRACION-V9-2026-09-22.md). El contraste
-V8 de trece días terminó mixto y el de V9 sigue abierto. El perfil de tres mundos
+V8 de trece días terminó mixto; el contraste V8→V9 terminó con mortales
+0→0,24→14 y20→20, sin acreditar mejora demográfica. Sus78 ventanas diarias están
+validadas; [resultado adverso](docs/REVISION-CONTENCION-V9-RESULTADOS-2026-09-22.md).
+El perfil de tres mundos
 envejecidos tampoco alcanza el presupuesto del clon: [T103 continúa abierto](docs/REVISION-CLON-ENVEJECIDO-2026-09-22.md).
 
 La comparación reservada fija32 semillas, control y candidato, a30 días simulados.

@@ -1,5 +1,15 @@
 # Evidencia vigente
 
+## Resultado del contraste V8→V9, 22 de septiembre de 2026
+
+Seis corridas completas de13 días;78 ventanas verificadas. Mortales finales:
+1007,0→0;1012,24→14;1013,20→20. En1007 retrasa la extinción del tick29568 al30682,
+sin nacimientos. En1012 reduce nacimientos y generaciones vivas. En1013 las13
+ventanas físicas coinciden. El brazo V8 reproduce las39 ventanas del experimento
+anterior. Son semillas diagnósticas observadas, sin gobernador: este resultado
+no demuestra mejora demográfica ni justifica publicar V9 como solución al recambio.
+[Análisis y límites](REVISION-CONTENCION-V9-RESULTADOS-2026-09-22.md).
+
 ## Mundo público V7: recambio insuficiente, 22 de septiembre de 2026
 
 Censo coherente readonly de las12:08:20UTC: semilla51926, tick50900/día21,21,
@@ -46,7 +56,7 @@ V8 y produce 4 fallos esperados con 5 controles verdes. En el microperfil, V9 si
 índice pasa de CPU media .186 a .196 ms con 16 personas y de .751 a .292 ms con 64 y
 fuentes densas. Es coste del selector en fixtures, no rendimiento del servidor.
 
-El siguiente contraste fija V8 `eaa2709` frente a V9, 1007/1012/1013, 13 días, seis
+El contraste completado fijó V8 `eaa2709` frente a V9, 1007/1012/1013, 13 días, seis
 procesos, una hora simétrica por réplica y Store cada 20. Son semillas diagnósticas
 ya observadas; no constituyen otro conjunto reservado. Conserva sin cambios el
 instrumento `12053834befc95ebedc4bf1bf4c4308ff49c040c21d233f585aa02d3f894f542`.

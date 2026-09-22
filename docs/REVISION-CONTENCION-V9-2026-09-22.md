@@ -149,6 +149,10 @@ está en `microprofile.json`. Fuente final con índice:
 
 ## Contraste posterior fijado
 
+**Resultado completado:** las seis corridas terminaron. La revisión de78 ventanas
+no acredita mejora demográfica: mortales0→0,24→14 y20→20. Véanse
+[resultados y límites](REVISION-CONTENCION-V9-RESULTADOS-2026-09-22.md).
+
 Base V8 `eaa2709`, candidata V9 comprometida y copias de todas las fuentes congeladas.
 Semillas 1007/1012/1013, 13 días, 31200 ticks, seis procesos a nice 10 incremental, deadline
 idéntico de una hora por trabajo, `engine=world`, `persistencia.cadaTicks=20` y directorios

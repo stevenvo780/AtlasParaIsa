@@ -1,0 +1,495 @@
+{
+  "at": "2026-09-22T12:37:02.995Z",
+  "batch": "/datos/workspaces/personal/AtlasParaIsa-family-v9-20260922/artifacts/family-contention-v9-20260922/batch-2026-09-22T11-52-59-233Z",
+  "manifestHash": "c7bd4462ab7709c3e63aba8b8e9e789749bda9ef972e306742cc0ee6c125634b",
+  "instrumentHash": "12053834befc95ebedc4bf1bf4c4308ff49c040c21d233f585aa02d3f894f542",
+  "runnerHash": "a4b4717410100e216cb1c45063ac207bf51e899d727414a651f695868abfdc34",
+  "sourceHashes": {
+    "baseline": {
+      "sourceHash": "43399ac163978a1ccaf5b3f30fbbc9e3e590c99a2da0cb1365cbfd87e8d2cbde",
+      "fullHash": "e204dbe2d833db4833abc85a2e2bf69aa465d07fcadc8d532c3b622016c90895"
+    },
+    "candidate": {
+      "sourceHash": "cd11a32b26ffbce2e28c6b0e9bf97196180a1219aefb0e0577b007d669603125",
+      "fullHash": "9addd8f10de65b86b579800bf31b9f2f10a39788aa9251527817de32bd9e704d"
+    }
+  },
+  "controlFilesBefore": {
+    "batch.json": "c7bd4462ab7709c3e63aba8b8e9e789749bda9ef972e306742cc0ee6c125634b",
+    "summary.json": "a4c01c4f0050b94b3bfe5b3cc5f832943a50c4707129a1f54c27f3bd32c8aa03",
+    "progress.json": "f171aae59bcb99d5b5481f66333833193cf77795937005d0e2c1a8b0a3ace918",
+    "started.json": "65f3241a8ad83bad95f94c1de3e59659ee8f69ac7d6ca9e6c6f13b3827e4954b",
+    "family-contention-batch.mts": "a4b4717410100e216cb1c45063ac207bf51e899d727414a651f695868abfdc34"
+  },
+  "controlFilesAfter": {
+    "batch.json": "c7bd4462ab7709c3e63aba8b8e9e789749bda9ef972e306742cc0ee6c125634b",
+    "summary.json": "a4c01c4f0050b94b3bfe5b3cc5f832943a50c4707129a1f54c27f3bd32c8aa03",
+    "progress.json": "f171aae59bcb99d5b5481f66333833193cf77795937005d0e2c1a8b0a3ace918",
+    "started.json": "65f3241a8ad83bad95f94c1de3e59659ee8f69ac7d6ca9e6c6f13b3827e4954b",
+    "family-contention-batch.mts": "a4b4717410100e216cb1c45063ac207bf51e899d727414a651f695868abfdc34"
+  },
+  "allPassed": true,
+  "results": [
+    {
+      "id": "baseline-1007",
+      "seed": 1007,
+      "side": "baseline",
+      "expectedVersion": 8,
+      "originalBefore": {
+        "db": "6948f97fc418e3b4bade401dd4c0ba17d9d8242c24524bed98d75a7918bfa6b1",
+        "wal": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "shmExists": true
+      },
+      "method": "byte-identical private DB/WAL copy; original never opened by SQLite; frozen Store readOnly, no save/step/migration of rules requested",
+      "artifactHashes": {
+        "run": "1bb273ad76fa81e14708e226a6d32f9d3e712a10f3338ec2c2d95c2d5bbe9d8b",
+        "day13": "ff9ebc2c1c4a4e77daf75f248f44455b65d6edad696b4b0e58bce8bc000f7040"
+      },
+      "snapshotDigest": "ea355cededc33925e4306776454e99bcb7a0f4f26bdb98803320c1291236445a",
+      "decodedCanonicalDigest": "64cbe7436cb7b6e64d0355879353542f09f8e374697d3623fb60c4c6a0bb86d4",
+      "loadedCanonicalDigest": "64cbe7436cb7b6e64d0355879353542f09f8e374697d3623fb60c4c6a0bb86d4",
+      "version": 8,
+      "tick": 31200,
+      "slot": 0,
+      "skipped": [],
+      "params": {
+        "cuerpo": {
+          "longevidadBaseDias": 11,
+          "longevidadPorResiliencia": 4,
+          "longevidadPorActividad": 1,
+          "senescenciaInicioFraccion": 0.75,
+          "riesgoSenescenciaDiario": 0.04,
+          "riesgoSenescenciaPendiente": 10,
+          "cuidadoReduceRiesgo": 0.6
+        },
+        "genes": {
+          "varianzaFundadores": 0.15,
+          "tasaMutacion": 1
+        },
+        "poblacion": {
+          "maxima": 1000000,
+          "intervaloComprobacionTicks": 120,
+          "nacimientosPorComprobacion": 2
+        },
+        "recursos": {
+          "capacidadBosque": 1,
+          "capacidadPastizal": 0.7,
+          "capacidadOtros": 0.35,
+          "velocidadRegeneracion": 1,
+          "decaimientoFertilidad": 0.001,
+          "decaimientoComida": 0.0001
+        },
+        "persistencia": {
+          "cadaTicks": 20,
+          "ventanaEventosTicks": 0
+        },
+        "agua": {
+          "cuencas": 0.4
+        },
+        "gobernador": {
+          "presupuestoMs": 50
+        }
+      },
+      "runAndDay13Agree": true,
+      "noInputs": true,
+      "unchangedByLoad": true,
+      "passed": true,
+      "originalAfter": {
+        "db": "6948f97fc418e3b4bade401dd4c0ba17d9d8242c24524bed98d75a7918bfa6b1",
+        "wal": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "shmExists": true
+      },
+      "originalUnchanged": true,
+      "privateAfter": {
+        "db": "6948f97fc418e3b4bade401dd4c0ba17d9d8242c24524bed98d75a7918bfa6b1",
+        "wal": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "privateDbWalUnchanged": true
+    },
+    {
+      "id": "candidate-1007",
+      "seed": 1007,
+      "side": "candidate",
+      "expectedVersion": 9,
+      "originalBefore": {
+        "db": "e2332e824f93c1408bf0bf743cca6c97cfcdc37778e3ea057c38f5b0d3d7bb6e",
+        "wal": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "shmExists": true
+      },
+      "method": "byte-identical private DB/WAL copy; original never opened by SQLite; frozen Store readOnly, no save/step/migration of rules requested",
+      "artifactHashes": {
+        "run": "c990b83cf11d9c5f724644ecf9ae5f4b0fb29b04cf78ccb4f1e2c940d2badd01",
+        "day13": "b15a5025bcc01cbef4eb4918fa0f972bf89a6005d64596a7309abe4518dd9e76"
+      },
+      "snapshotDigest": "35f07c9393720172406e870ae44bd24ac21ff2992344fbfe6239d8afd562ab35",
+      "decodedCanonicalDigest": "eb91cfa7a27aef2a331dd344dd62228c6db2276ef434c2920588b4935cd3a1ea",
+      "loadedCanonicalDigest": "eb91cfa7a27aef2a331dd344dd62228c6db2276ef434c2920588b4935cd3a1ea",
+      "version": 9,
+      "tick": 31200,
+      "slot": 0,
+      "skipped": [],
+      "params": {
+        "cuerpo": {
+          "longevidadBaseDias": 11,
+          "longevidadPorResiliencia": 4,
+          "longevidadPorActividad": 1,
+          "senescenciaInicioFraccion": 0.75,
+          "riesgoSenescenciaDiario": 0.04,
+          "riesgoSenescenciaPendiente": 10,
+          "cuidadoReduceRiesgo": 0.6
+        },
+        "genes": {
+          "varianzaFundadores": 0.15,
+          "tasaMutacion": 1
+        },
+        "poblacion": {
+          "maxima": 1000000,
+          "intervaloComprobacionTicks": 120,
+          "nacimientosPorComprobacion": 2
+        },
+        "recursos": {
+          "capacidadBosque": 1,
+          "capacidadPastizal": 0.7,
+          "capacidadOtros": 0.35,
+          "velocidadRegeneracion": 1,
+          "decaimientoFertilidad": 0.001,
+          "decaimientoComida": 0.0001
+        },
+        "persistencia": {
+          "cadaTicks": 20,
+          "ventanaEventosTicks": 0
+        },
+        "agua": {
+          "cuencas": 0.4
+        },
+        "gobernador": {
+          "presupuestoMs": 50
+        }
+      },
+      "runAndDay13Agree": true,
+      "noInputs": true,
+      "unchangedByLoad": true,
+      "passed": true,
+      "originalAfter": {
+        "db": "e2332e824f93c1408bf0bf743cca6c97cfcdc37778e3ea057c38f5b0d3d7bb6e",
+        "wal": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "shmExists": true
+      },
+      "originalUnchanged": true,
+      "privateAfter": {
+        "db": "e2332e824f93c1408bf0bf743cca6c97cfcdc37778e3ea057c38f5b0d3d7bb6e",
+        "wal": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "privateDbWalUnchanged": true
+    },
+    {
+      "id": "baseline-1012",
+      "seed": 1012,
+      "side": "baseline",
+      "expectedVersion": 8,
+      "originalBefore": {
+        "db": "a0cb114f5218cc9a567c49cd886a0a60f6fc5fb95f444b1c97494f64a609807f",
+        "wal": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "shmExists": true
+      },
+      "method": "byte-identical private DB/WAL copy; original never opened by SQLite; frozen Store readOnly, no save/step/migration of rules requested",
+      "artifactHashes": {
+        "run": "a4df8db8b529dfaad657eb33e0aa5ced8c50411d633b878794d73bff5f6c46a2",
+        "day13": "c8c76f851886a5280b4a606f69b821b155211d333550b53afcbb334272923e8d"
+      },
+      "snapshotDigest": "b8bf147094b820a5559d6e577ded4ef0026d82431178d46fe14d3479a28d350e",
+      "decodedCanonicalDigest": "da93d2facb7557ee900967cc09906e77421c0cbad50ee46d4557867536e11bf7",
+      "loadedCanonicalDigest": "da93d2facb7557ee900967cc09906e77421c0cbad50ee46d4557867536e11bf7",
+      "version": 8,
+      "tick": 31200,
+      "slot": 0,
+      "skipped": [],
+      "params": {
+        "cuerpo": {
+          "longevidadBaseDias": 11,
+          "longevidadPorResiliencia": 4,
+          "longevidadPorActividad": 1,
+          "senescenciaInicioFraccion": 0.75,
+          "riesgoSenescenciaDiario": 0.04,
+          "riesgoSenescenciaPendiente": 10,
+          "cuidadoReduceRiesgo": 0.6
+        },
+        "genes": {
+          "varianzaFundadores": 0.15,
+          "tasaMutacion": 1
+        },
+        "poblacion": {
+          "maxima": 1000000,
+          "intervaloComprobacionTicks": 120,
+          "nacimientosPorComprobacion": 2
+        },
+        "recursos": {
+          "capacidadBosque": 1,
+          "capacidadPastizal": 0.7,
+          "capacidadOtros": 0.35,
+          "velocidadRegeneracion": 1,
+          "decaimientoFertilidad": 0.001,
+          "decaimientoComida": 0.0001
+        },
+        "persistencia": {
+          "cadaTicks": 20,
+          "ventanaEventosTicks": 0
+        },
+        "agua": {
+          "cuencas": 0.4
+        },
+        "gobernador": {
+          "presupuestoMs": 50
+        }
+      },
+      "runAndDay13Agree": true,
+      "noInputs": true,
+      "unchangedByLoad": true,
+      "passed": true,
+      "originalAfter": {
+        "db": "a0cb114f5218cc9a567c49cd886a0a60f6fc5fb95f444b1c97494f64a609807f",
+        "wal": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "shmExists": true
+      },
+      "originalUnchanged": true,
+      "privateAfter": {
+        "db": "a0cb114f5218cc9a567c49cd886a0a60f6fc5fb95f444b1c97494f64a609807f",
+        "wal": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "privateDbWalUnchanged": true
+    },
+    {
+      "id": "candidate-1012",
+      "seed": 1012,
+      "side": "candidate",
+      "expectedVersion": 9,
+      "originalBefore": {
+        "db": "79cae98a55f44b12eb4f40aade227c2e4a36f941cfaec0e1fd60f525168a9a95",
+        "wal": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "shmExists": true
+      },
+      "method": "byte-identical private DB/WAL copy; original never opened by SQLite; frozen Store readOnly, no save/step/migration of rules requested",
+      "artifactHashes": {
+        "run": "96d2952c70212dedc6540b1797b5dc9547e62a88335343de693bbdeb6ef84d64",
+        "day13": "00755ec9f64e1ce99aa082fe3d3b60597ab4ae20c7f528186aad380bbb9848d2"
+      },
+      "snapshotDigest": "1b895f6d4e8c26bb7858272fc0d341198b70316b2f2661dd016bfcd16ebaa6c4",
+      "decodedCanonicalDigest": "ee6f466c111ebb9e4518837955a346100a73a4224aec3bbc0ad22f183d1e5e70",
+      "loadedCanonicalDigest": "ee6f466c111ebb9e4518837955a346100a73a4224aec3bbc0ad22f183d1e5e70",
+      "version": 9,
+      "tick": 31200,
+      "slot": 0,
+      "skipped": [],
+      "params": {
+        "cuerpo": {
+          "longevidadBaseDias": 11,
+          "longevidadPorResiliencia": 4,
+          "longevidadPorActividad": 1,
+          "senescenciaInicioFraccion": 0.75,
+          "riesgoSenescenciaDiario": 0.04,
+          "riesgoSenescenciaPendiente": 10,
+          "cuidadoReduceRiesgo": 0.6
+        },
+        "genes": {
+          "varianzaFundadores": 0.15,
+          "tasaMutacion": 1
+        },
+        "poblacion": {
+          "maxima": 1000000,
+          "intervaloComprobacionTicks": 120,
+          "nacimientosPorComprobacion": 2
+        },
+        "recursos": {
+          "capacidadBosque": 1,
+          "capacidadPastizal": 0.7,
+          "capacidadOtros": 0.35,
+          "velocidadRegeneracion": 1,
+          "decaimientoFertilidad": 0.001,
+          "decaimientoComida": 0.0001
+        },
+        "persistencia": {
+          "cadaTicks": 20,
+          "ventanaEventosTicks": 0
+        },
+        "agua": {
+          "cuencas": 0.4
+        },
+        "gobernador": {
+          "presupuestoMs": 50
+        }
+      },
+      "runAndDay13Agree": true,
+      "noInputs": true,
+      "unchangedByLoad": true,
+      "passed": true,
+      "originalAfter": {
+        "db": "79cae98a55f44b12eb4f40aade227c2e4a36f941cfaec0e1fd60f525168a9a95",
+        "wal": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "shmExists": true
+      },
+      "originalUnchanged": true,
+      "privateAfter": {
+        "db": "79cae98a55f44b12eb4f40aade227c2e4a36f941cfaec0e1fd60f525168a9a95",
+        "wal": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "privateDbWalUnchanged": true
+    },
+    {
+      "id": "baseline-1013",
+      "seed": 1013,
+      "side": "baseline",
+      "expectedVersion": 8,
+      "originalBefore": {
+        "db": "6f23d3cb9515e8c8542413eed345652be389802f4da4a1d2679a9474f832b439",
+        "wal": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "shmExists": true
+      },
+      "method": "byte-identical private DB/WAL copy; original never opened by SQLite; frozen Store readOnly, no save/step/migration of rules requested",
+      "artifactHashes": {
+        "run": "46e68532a610b829e947c0a1d2155e6609bbcc9747d134c6af1aaec15bffbd16",
+        "day13": "4e2e066bcd0b4f42c172895a437d13c562ca2b585928ace568edf0d55a04e656"
+      },
+      "snapshotDigest": "ddece868aed588e40979f315be295455fa360f6f123ced030854c00c5450eabb",
+      "decodedCanonicalDigest": "1f19698e449334c7f3c35391b921b818b7cf4767cd35ce0139b7ceaa4384888b",
+      "loadedCanonicalDigest": "1f19698e449334c7f3c35391b921b818b7cf4767cd35ce0139b7ceaa4384888b",
+      "version": 8,
+      "tick": 31200,
+      "slot": 0,
+      "skipped": [],
+      "params": {
+        "cuerpo": {
+          "longevidadBaseDias": 11,
+          "longevidadPorResiliencia": 4,
+          "longevidadPorActividad": 1,
+          "senescenciaInicioFraccion": 0.75,
+          "riesgoSenescenciaDiario": 0.04,
+          "riesgoSenescenciaPendiente": 10,
+          "cuidadoReduceRiesgo": 0.6
+        },
+        "genes": {
+          "varianzaFundadores": 0.15,
+          "tasaMutacion": 1
+        },
+        "poblacion": {
+          "maxima": 1000000,
+          "intervaloComprobacionTicks": 120,
+          "nacimientosPorComprobacion": 2
+        },
+        "recursos": {
+          "capacidadBosque": 1,
+          "capacidadPastizal": 0.7,
+          "capacidadOtros": 0.35,
+          "velocidadRegeneracion": 1,
+          "decaimientoFertilidad": 0.001,
+          "decaimientoComida": 0.0001
+        },
+        "persistencia": {
+          "cadaTicks": 20,
+          "ventanaEventosTicks": 0
+        },
+        "agua": {
+          "cuencas": 0.4
+        },
+        "gobernador": {
+          "presupuestoMs": 50
+        }
+      },
+      "runAndDay13Agree": true,
+      "noInputs": true,
+      "unchangedByLoad": true,
+      "passed": true,
+      "originalAfter": {
+        "db": "6f23d3cb9515e8c8542413eed345652be389802f4da4a1d2679a9474f832b439",
+        "wal": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "shmExists": true
+      },
+      "originalUnchanged": true,
+      "privateAfter": {
+        "db": "6f23d3cb9515e8c8542413eed345652be389802f4da4a1d2679a9474f832b439",
+        "wal": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "privateDbWalUnchanged": true
+    },
+    {
+      "id": "candidate-1013",
+      "seed": 1013,
+      "side": "candidate",
+      "expectedVersion": 9,
+      "originalBefore": {
+        "db": "6e35e08737bbd818ef8086d96385c5fe2ee1fb2c1393bfd0373957c9ef49d5ab",
+        "wal": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "shmExists": true
+      },
+      "method": "byte-identical private DB/WAL copy; original never opened by SQLite; frozen Store readOnly, no save/step/migration of rules requested",
+      "artifactHashes": {
+        "run": "016c5fe77edd4bde59773184904822d8cfc815a3d84cbdee6a583d48784deca3",
+        "day13": "8826bdf9a4551860db6a50d7c5f15046b4e9539acd5567585d6dc0bdf8219b20"
+      },
+      "snapshotDigest": "d4247335d6019438be643f1243daaa46234567401b9311a217a9dd65d74db053",
+      "decodedCanonicalDigest": "9cfb02aca2757f29755cfb44bd6d9ab1c2c06860aad07685b40d9a8508271fd8",
+      "loadedCanonicalDigest": "9cfb02aca2757f29755cfb44bd6d9ab1c2c06860aad07685b40d9a8508271fd8",
+      "version": 9,
+      "tick": 31200,
+      "slot": 0,
+      "skipped": [],
+      "params": {
+        "cuerpo": {
+          "longevidadBaseDias": 11,
+          "longevidadPorResiliencia": 4,
+          "longevidadPorActividad": 1,
+          "senescenciaInicioFraccion": 0.75,
+          "riesgoSenescenciaDiario": 0.04,
+          "riesgoSenescenciaPendiente": 10,
+          "cuidadoReduceRiesgo": 0.6
+        },
+        "genes": {
+          "varianzaFundadores": 0.15,
+          "tasaMutacion": 1
+        },
+        "poblacion": {
+          "maxima": 1000000,
+          "intervaloComprobacionTicks": 120,
+          "nacimientosPorComprobacion": 2
+        },
+        "recursos": {
+          "capacidadBosque": 1,
+          "capacidadPastizal": 0.7,
+          "capacidadOtros": 0.35,
+          "velocidadRegeneracion": 1,
+          "decaimientoFertilidad": 0.001,
+          "decaimientoComida": 0.0001
+        },
+        "persistencia": {
+          "cadaTicks": 20,
+          "ventanaEventosTicks": 0
+        },
+        "agua": {
+          "cuencas": 0.4
+        },
+        "gobernador": {
+          "presupuestoMs": 50
+        }
+      },
+      "runAndDay13Agree": true,
+      "noInputs": true,
+      "unchangedByLoad": true,
+      "passed": true,
+      "originalAfter": {
+        "db": "6e35e08737bbd818ef8086d96385c5fe2ee1fb2c1393bfd0373957c9ef49d5ab",
+        "wal": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "shmExists": true
+      },
+      "originalUnchanged": true,
+      "privateAfter": {
+        "db": "6e35e08737bbd818ef8086d96385c5fe2ee1fb2c1393bfd0373957c9ef49d5ab",
+        "wal": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "privateDbWalUnchanged": true
+    }
+  ],
+  "omissions": [
+    "Only six final checkpoints and six run/day13 records checked, not the78 daily histories.",
+    "No demographic interpretation, performance claim, replay, save or step.",
+    "No active default25d batch or other jobs inspected."
+  ]
+}

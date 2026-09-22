@@ -65,6 +65,8 @@ export interface Person extends PersonView {
   culture: Culture; communityId: string | null; bonds: Record<string, number>;
   lastInvention?: number;
   home?: { x: number; y: number; quality: number; observedAt: number };
+  /** Ley candidata `agua.memoria`: último lugar donde bebió agua del entorno. Sólo existe con la ley activa. */
+  waterMemory?: { x: number; y: number };
   technology: TechnologyKnowledge; demography: DemographicState;
 }
 export interface Memory extends MemoryView {
@@ -476,6 +478,28 @@ function choose(world: World, person: Person): void {
   const localWater = waterAvailable(world, person) > 0;
   const recoverWater = carriedWater && !portableWater && !localWater && canRecoverWaterHandling(world, person);
   const seekingWater = !water && !portableWater && !localWater && !recoverWater && person.thirst > 0.6;
+  // Memoria del agua (2026-09-22, `agua.memoria`, default 1 = conducta de hoy). Diagnóstico en la
+  // semilla 42 (base del laboratorio de la noche): quien muere de sed lleva 850–1100 pasos con sed > 0,7
+  // EXPLORANDO, a 117–186 celdas de donde bebió por última vez y a 130 del agua más cercana: la búsqueda
+  // de hoy elige celdas nuevas y aleja a la gente de la cuenca. Recordar sólo dónde se bebió no basta
+  // (medido: el recuerdo se pierde en cuanto esa charca se agota y 3 de 4 muertos no tenían ninguno).
+  // Ley local: cada cual recuerda la última celda con agua que VIO (o donde bebió); la olvida si la ve
+  // seca; y sin agua a la vista, cuando la sed prevista AL LLEGAR allí —la de ahora, menos la que cubre el
+  // agua que lleva, más la del camino a 6 pasos por celda— supera el umbral, emprende la vuelta. No revela
+  // agua lejana (el recuerdo puede estar agotado), no hidrata ni ahorra el camino, que se paga igual.
+  const umbralMemoria = paramsOf(world).agua.memoria;
+  let aguaRecordada: Point | undefined, sedAlLlegar = 0;
+  if (umbralMemoria < 1) {
+    if (water) person.waterMemory = { x: water.x, y: water.y };
+    const recuerdo = person.waterMemory;
+    if (recuerdo && distance(person, recuerdo) <= RADIUS && waterAvailable(world, recuerdo) <= 0.005) delete person.waterMemory;
+    else if (recuerdo && !water && !localWater && distance(person, recuerdo) >= 0.5) {
+      const sedPorPaso = bodilyNeedRates(world, tileAt(world, person)!, demographicTraits(person.genome, paramsOf(world).cuerpo)).thirst;
+      sedAlLlegar = person.thirst - containedWaterQuanta(person) / WATER_QUANTA_PER_UNIT * 3 + distance(person, recuerdo) * 6 * sedPorPaso;
+      if (sedAlLlegar > umbralMemoria) aguaRecordada = { x: recuerdo.x, y: recuerdo.y };
+    }
+  }
+  let volverAlAgua: Candidate | undefined;
   if (portableWater) candidates.push({ action: 'drink', target: { x: person.x, y: person.y }, score: Math.max(0, person.thirst - 0.18) * 3.1,
     reason: 'Lleva agua en un objeto y puede beber su contenido finito aquí.' });
   if (water) candidates.push({ action: 'drink', target: water, score: Math.max(0, person.thirst - 0.18) * 3.1 - distance(person, water) * 0.015, reason: 'La sed orienta su camino hacia una reserva finita de agua dulce.' });
@@ -484,10 +508,17 @@ function choose(world: World, person: Person): void {
     // uses the existing local exploration and movement costs; it reveals no distant
     // water and provides no thirst relief until a real reserve is reached and debited.
     const soughtWater = { ...body }; hydrateBody(soughtWater, .006);
-    candidates[0]!.score = Math.max(candidates[0]!.score, (person.thirst - 0.18) * 3.1
-      + avoidedDamageScore(person, damage, bodilyDamage(world, person, soughtWater, protection)));
-    candidates[0]!.reason = 'La sed persiste y no encuentra una reserva accesible; recorre el entorno cercano para buscar agua.';
+    const motive = (person.thirst - 0.18) * 3.1 + avoidedDamageScore(person, damage, bodilyDamage(world, person, soughtWater, protection));
+    if (aguaRecordada) volverAlAgua = { action: 'explore', target: aguaRecordada, score: motive,
+      reason: 'La sed persiste y no ve agua; vuelve hacia el último lugar donde vio agua, aunque no sabe si sigue ahí.' };
+    else {
+      candidates[0]!.score = Math.max(candidates[0]!.score, motive);
+      candidates[0]!.reason = 'La sed persiste y no encuentra una reserva accesible; recorre el entorno cercano para buscar agua.';
+    }
   }
+  if (aguaRecordada && !volverAlAgua) volverAlAgua = { action: 'explore', target: aguaRecordada, score: Math.max(0, sedAlLlegar - 0.18) * 3.1,
+    reason: 'Calcula que, si se aleja más, llegaría con demasiada sed al último lugar donde vio agua; vuelve antes de que la sed apriete.' };
+  if (volverAlAgua) candidates.push(volverAlAgua);
   if (waterAvailable(world, person) > 0 && damage > 0) candidates.push({ action: 'drink', target: person,
     score: Math.max(0, person.thirst - .18) * 3.1, reason: 'Puede beber una reserva local ahora para aliviar la privación corporal.' });
   const huntPlan = (() => {
@@ -684,7 +715,7 @@ function choose(world: World, person: Person): void {
   }
   candidates.sort((a, b) => b.score - a.score);
   const selected = candidates[0]!;
-  if (selected.action === 'explore' && !selected.directed) {
+  if (selected.action === 'explore' && !selected.directed && selected !== volverAlAgua) {
     // Urgent thirst reconsiders every tick. Replacing a still viable waypoint
     // each time can reverse the route before either endpoint is ever visited.
     // Keep the paid local search leg; visible water and bodily recovery still
@@ -894,6 +925,7 @@ function bodyAndAction(world: World, person: Person): void {
     const needed = Math.min(0.006, person.thirst / 3);
     const ambient = takeWater(world, person, needed);
     hydrateBody(person, ambient);
+    if (ambient > 0 && paramsOf(world).agua.memoria < 1) person.waterMemory = { x: person.x, y: person.y };
     const remaining = Math.max(0, Math.floor((needed - ambient) * WATER_QUANTA_PER_UNIT));
     const contained = remaining > 0 ? drinkContainedWater(world, person, remaining) / WATER_QUANTA_PER_UNIT : 0;
     const water = contained + ambient;
@@ -1188,6 +1220,9 @@ function reproduce(world: World): void {
       technology: initialTechnologyKnowledge(), demography: initialDemography(),
     };
     delete child.home;
+    // `agua.memoria`: la cría nace junto a sus padres y conserva el aguadero de `a` (copiado arriba con el
+    // resto de su estado); es información, no agua: si está seco lo olvidará al verlo, como cualquiera.
+    if (a.waterMemory) child.waterMemory = { x: a.waterMemory.x, y: a.waterMemory.y };
     a.inventory -= 0.08; b.inventory -= 0.08; a.energy = clamp(a.energy - 0.08); b.energy = clamp(b.energy - 0.08); a.lastBirth = world.tick; b.lastBirth = world.tick;
     world.people.push(child);
     // El evento de fundación de una comunidad comparte el arreglo con `group.members`

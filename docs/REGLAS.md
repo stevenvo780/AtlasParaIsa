@@ -433,6 +433,7 @@ estado completo, orden, aliases, `undefined` y bits numéricos frente a V7, sin 
 | `social.ensenanzaRareza` | 0 | [0, 5] | Peso de la rareza al elegir qué receta enseñar: clave `gain + ensenanzaRareza · (1 − conocedores/vivos)` | Noche de ciencia 2026-09-22 |
 | `social.confianzaSalida` | 0.35 | [0, 1] | Confianza media con los pares por debajo de la cual se puede dejar una comunidad | Noche de ciencia 2026-09-22 |
 | `social.distanciaAlternativa` | 0.2 | [0, 1] | Distancia cultural máxima que puede tener una alternativa para contar como refugio al salir | Noche de ciencia 2026-09-22 |
+| `social.radioConvivencia` | 0 | [0, 64] | Comunidades vivas: con > 0 la pertenencia sigue a la convivencia. Quien vive a más de este radio (celdas) del centro de su comunidad y tiene ≥ 2 vecinos de confianza de ella funda con ellos una nueva (fisión, con los requisitos de una fundación); quien tiene ≥ 2 vecinos de confianza de otra comunidad, y más que de la suya, pasa a ella; quien no tiene comunidad se une a la de la mayoría de sus vecinos de confianza. 0 = hoy: la pertenencia sólo cambia por `confianzaSalida` | Hipótesis COM, noche 2026-09-22 |
 | `poblacion.exigeComunidad` | `true` | booleano | Si reproducirse exige pertenecer a una comunidad; con `false` la cría hereda la del progenitor `a`, o ninguna | Noche de ciencia 2026-09-22 |
 | `poblacion.radioPareja` | 3 | [1, 32] | Distancia máxima entre progenitores en `reproduce()`; es también la escala espacial de `pairAffinity` | Noche de ciencia 2026-09-22 |
 | `poblacion.radioLugar` | 4 | [1, 64] | Distancia máxima a un lugar compartido para que un nacimiento tenga sitio | Noche de ciencia 2026-09-22 |
@@ -465,6 +466,38 @@ disputa que ocurre ya cumplía «mismo destino» y «180 ticks de calma», así 
 eran lo que mantenía el contador en cero; lo que lo mantenía es la conjunción de necesidad, escasez y
 proximidad. Ambas quedan parametrizadas igualmente para que el barrido pueda descartarlas con datos.
 Refutación en `tests/leyes-candidatas.test.ts`.
+
+#### Comunidades vivas: `social.radioConvivencia` (hipótesis COM, noche 2026-09-22)
+
+Hoy la pertenencia es una etiqueta: se fija el día 1 (3–4 comunidades por semilla), la cría hereda la del
+progenitor `a` y nadie cambia en 6 días (0 cambios, 0 fisiones, 0 disoluciones en las cuatro semillas del
+carril), aunque los miembros acaben viviendo lejos entre sí (distancia media al centro de su comunidad al
+día 6: 44 / 98 / 81 / 21 celdas en las semillas 7 / 42 / 51926 / 1). La ley hace que la pertenencia siga a
+la **convivencia y la confianza**, con el predicado de «vecino de confianza» que `updateCommunities` ya
+usaba para unir y fundar (≤ 6 celdas, confianza ≥ 0,25, prácticas a < 0,3) y un único número nuevo, el radio:
+
+1. **Fisión.** Quien vive a más de `radioConvivencia` celdas del centro de su comunidad y tiene ≥ 2 vecinos de
+   confianza de ella funda con ellos una nueva, con los mismos requisitos que una fundación (tres personas,
+   un lugar a ≤ 7 celdas y el tope `social.maxComunidades`) y sólo si el grupo de origen conserva a alguien.
+2. **Mayoría.** Quien tiene ≥ 2 vecinos de confianza de otra comunidad, y más que de la suya, pasa a ella; quien
+   no tiene comunidad (una cría, un recién llegado) se une a la de la mayoría de sus vecinos de confianza (hoy:
+   a la del primero que aparece en `world.people`). Se revisa en orden de `world.people`: un par aislado no se
+   intercambia. El aislamiento por sí solo no cambia nada.
+
+Nada se crea ni se cobra; cada cambio deja un evento `community` con su causa. Con 0 el mundo es el de antes
+bit a bit (`tests/comunidades-vivas.test.ts`, semilla 42, 1200 pasos, defaults y params del carril).
+
+**Medido** (carril de la noche, 4 semillas × 6 días, `radioConvivencia=12`; comunidades con
+`scripts/lab/observa-comunidades.ts`, cuyo control reproduce la base byte a byte): las comunidades pasan de
+3/4/3/4 constantes a 7/6/8/8 al día 6 (series 3→6→7, 4→3→6, 3→3→5→8, 4→6→7→7→5→8), con 24 fisiones
+después del día 1, 214 cambios de comunidad, 10 disoluciones y 9 de las 14 comunidades del día 1 vivas al
+día 6; la distancia media al centro baja a 18 / 48 / 61 / 8 celdas. En el resto, sumando las 4 semillas,
+población 182 → 185, nacimientos 126 → 130, muertes 8 → 9, enseñanza 1900 → 2384 (sube en 3 de 4),
+intercambio 290 → 281, ayuda de obra 380 → 340, conflictos 9 → 0; `diversidadConducta` media 0,365 → 0,397
+(+0,17 en la 42, ±0,03 en las otras tres; ninguna llega a 0,6). **Sin el tope de fundación** (brazo con
+`maxComunidades=32`) la semilla 51926 se fragmenta: 3→3→5→10→15→18 comunidades, 10 de ≤ 2 miembros y la
+serie sin estabilizarse; los restos de una fisión no se disuelven solos (quien queda aislado conserva su
+etiqueta). Por eso el tope sigue siendo parte de la ley mientras no exista una regla local de disolución.
 
 #### El embudo de natalidad (instrumento `scripts/lab/diagnostico-natalidad.ts`, 2026-09-22)
 

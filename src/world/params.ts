@@ -67,7 +67,12 @@ export interface WorldParams {
   /** `social.maxComunidades`: tope de FUNDACIÓN de comunidades (`society.ts`), regla de conducta separada
    * de la admisión `limites.comunidades` (revisión de T100, 2026-09-22). */
   social: { maxComunidades: number; disputaNecesidad: number; disputaEscasez: number; disputaRadio: number; disputaDestino: number; disputaEspera: number;
-    ensenanzaRareza: number; confianzaSalida: number; distanciaAlternativa: number };
+    ensenanzaRareza: number; confianzaSalida: number; distanciaAlternativa: number;
+    /** Comunidades vivas (hipótesis COM, 2026-09-22): radio, en celdas alrededor del centro de su comunidad,
+     * dentro del cual un miembro convive con ella. Con > 0 la pertenencia se revisa por convivencia y confianza
+     * (se une a la comunidad de la mayoría de sus vecinos de confianza; un núcleo que vive a más de este radio
+     * del centro funda la suya). 0 = hoy (la pertenencia sólo cambia por `confianzaSalida`). */
+    radioConvivencia: number };
 }
 
 function deepFreeze<T>(value: T): T {
@@ -101,7 +106,7 @@ const RAW_DEFAULTS: WorldParams = {
   // cultural), así que abrirlas no cambia el mundo.
   conducta: { habituacion: 0 },
   social: { maxComunidades: 8, disputaNecesidad: 0.65, disputaEscasez: 1, disputaRadio: 2, disputaDestino: 0.5, disputaEspera: 180,
-    ensenanzaRareza: 0, confianzaSalida: 0.35, distanciaAlternativa: 0.2 },
+    ensenanzaRareza: 0, confianzaSalida: 0.35, distanciaAlternativa: 0.2, radioConvivencia: 0 },
 };
 
 /** Objeto congelado en profundidad: nunca se muta; `parseParams` clona para cada override. */
@@ -192,6 +197,8 @@ export const PARAM_RANGES: Record<string, [number, number]> = {
   'social.ensenanzaRareza': [0, 5],
   'social.confianzaSalida': [0, 1],
   'social.distanciaAlternativa': [0, 1],
+  // 0 apaga la ley (conducta de hoy); en celdas, como el radio de contacto (6) de `updateCommunities`.
+  'social.radioConvivencia': [0, 64],
 };
 
 type ScalarDescriptor = { kind: 'number'; range: readonly [number, number]; integer?: boolean }

@@ -272,6 +272,67 @@ export function cooperate(world: World, person: Person, emit: Emit): boolean {
   return true;
 }
 
+const COMMUNITY_SYLLABLES = ['Sauce','Brisa','Lumbre','Junco','Piedra','Semilla','Rocío','Sendero'];
+const COMMUNITY_COLORS = ['#dfba67','#76b8be','#c498b8','#a3bb6c'];
+/** Vecino de confianza: el mismo predicado con el que `updateCommunities` une y funda (≤ 6 celdas,
+ * confianza propia ≥ 0,25, prácticas a menos de 0,3). */
+const trustedNeighbor = (person: Person, other: Person): boolean => other !== person && distance(person, other) <= 6
+  && (person.bonds[other.id] ?? 0) >= 0.25 && culturalDistance(person.culture, other.culture) < 0.3;
+/** Comunidad a la que pertenecen más vecinos de confianza; empate por id. */
+function trustedMajority(nearby: readonly Person[]): { id: string; count: number } | undefined {
+  const counts = new Map<string, number>();
+  for (const p of nearby) if (p.communityId) counts.set(p.communityId, (counts.get(p.communityId) ?? 0) + 1);
+  let best: { id: string; count: number } | undefined;
+  for (const [id, n] of counts) if (!best || n > best.count || (n === best.count && id < best.id)) best = { id, count: n };
+  return best;
+}
+
+/**
+ * Ley candidata `social.radioConvivencia` (hipótesis COM, 2026-09-22): la pertenencia es con quién
+ * convivo y en quién confío, no una etiqueta de nacimiento. Dos reglas locales, sin umbrales nuevos
+ * salvo el radio:
+ * 1. Fisión: quien vive a más de `radius` celdas del centro de su comunidad y tiene al menos dos vecinos
+ *    de confianza de su misma comunidad funda con ellos una propia (mismos requisitos que una fundación:
+ *    tres personas, un lugar a ≤ 7 celdas y el tope `social.maxComunidades`), siempre que el grupo de
+ *    origen conserve a alguien. Una fisión por comunidad y revisión.
+ * 2. Mayoría: quien tiene al menos dos vecinos de confianza de otra comunidad, y más que de la suya,
+ *    pasa a esa comunidad (se revisa en orden de `world.people`, así que un par aislado no se intercambia).
+ * Nada se crea ni se paga: sólo cambia a qué grupo cuenta cada uno. Cada cambio deja un evento con causa.
+ */
+function reviseByCohabitation(world: World, emit: Emit, radius: number): void {
+  const cap = paramsOf(world).social.maxComunidades;
+  for (const group of [...world.communities]) {
+    const members = world.people.filter(p => p.communityId === group.id);
+    if (members.length < 4 || world.communities.length >= cap) continue;
+    const center = { x: members.reduce((sum, p) => sum + p.x, 0) / members.length, y: members.reduce((sum, p) => sum + p.y, 0) / members.length };
+    for (const person of members) {
+      const away = distance(person, center);
+      if (away <= radius) continue;
+      const core = members.filter(p => trustedNeighbor(person, p));
+      if (core.length < 2 || core.length + 1 >= members.length || !world.places.some(place => distance(person, place) <= 7)) continue;
+      const founders = [person, ...core], id = `community-${++world.communityCounter}`;
+      const random = localRandom(world.seed, id), name = `Círculo de ${COMMUNITY_SYLLABLES[Math.floor(random() * COMMUNITY_SYLLABLES.length)]}`;
+      const ids = founders.map(p => p.id);
+      world.communities.push({ id, name, x: person.x, y: person.y, members: ids, color: COMMUNITY_COLORS[world.communityCounter % 4]!, culture: { ...person.culture }, formedAt: world.tick, cooperation: 0, disputes: 0 });
+      for (const p of founders) p.communityId = id;
+      // Arreglo propio para el evento: la fisión no reproduce el alias de la fundación (nota de abajo).
+      emit({ kind: 'community', actors: [...ids], x: person.x, y: person.y, source: 'simulation', text: `${name} se separó de ${group.name} entre ${founders.map(p => p.name).join(', ')}.`, cause: `Viven a ${away.toFixed(1)} celdas del centro de ${group.name} (más de ${radius}) y confían entre sí; la pertenencia sigue a la convivencia, no a la etiqueta de origen. Mismos requisitos que una fundación: tres personas, un lugar cercano y el tope de comunidades.` });
+      break;
+    }
+  }
+  for (const person of world.people) {
+    if (!person.communityId) continue;
+    const nearby = world.people.filter(p => trustedNeighbor(person, p));
+    const own = nearby.filter(p => p.communityId === person.communityId).length;
+    const best = trustedMajority(nearby.filter(p => p.communityId !== person.communityId));
+    if (!best || best.count < 2 || best.count <= own) continue;
+    const from = world.communities.find(c => c.id === person.communityId), to = world.communities.find(c => c.id === best.id);
+    if (!to) continue;
+    person.communityId = to.id;
+    emit({ kind: 'community', actors: [person.id], x: person.x, y: person.y, source: 'simulation', text: `${person.name} dejó ${from?.name ?? 'su comunidad'} y se unió a ${to.name}.`, cause: `${best.count} de sus vecinos de confianza son de ${to.name} y ${own} de la suya; la pertenencia sigue a la convivencia y la confianza.` });
+  }
+}
+
 /** Local trust and cultural similarity form groups; group identity alone never causes a dispute. */
 export function updateCommunities(world: World, emit: Emit): void {
   if (!world.cooperationEnabled || world.tick % 120 !== 0) return;
@@ -281,7 +342,7 @@ export function updateCommunities(world: World, emit: Emit): void {
   // cooperación suma +0,12 de confianza, así que la media satura y la salida queda
   // cerrada; y las alternativas vienen de grupos que divergen, así que exigirles menos
   // de 0,2 de distancia cultural las descarta siempre. Los defaults son esos dos números.
-  const { confianzaSalida, distanciaAlternativa } = paramsOf(world).social;
+  const { confianzaSalida, distanciaAlternativa, radioConvivencia } = paramsOf(world).social;
   for (const person of world.people) {
     const group = world.communities.find(c => c.id === person.communityId);
     if (!group || culturalDistance(person.culture, group.culture) < 0.3) continue;
@@ -292,6 +353,7 @@ export function updateCommunities(world: World, emit: Emit): void {
     person.communityId = null;
     emit({ kind: 'community', actors: [person.id], x: person.x, y: person.y, source: 'simulation', text: `${person.name} dejó ${group.name} y buscó otra comunidad cercana.`, cause: 'Prácticas distintas, confianza interna baja y al menos dos contactos cercanos compatibles; la pertenencia es revisable.' });
   }
+  if (radioConvivencia > 0) reviseByCohabitation(world, emit, radioConvivencia);
   for (const group of world.communities) {
     const members = world.people.filter(p => p.communityId === group.id);
     group.members = members.map(p => p.id);
@@ -303,16 +365,17 @@ export function updateCommunities(world: World, emit: Emit): void {
   for (const person of world.people) {
     if (person.communityId) continue;
     const nearby = world.people.filter(p => p !== person && distance(person, p) <= 6 && (person.bonds[p.id] ?? 0) >= 0.25 && culturalDistance(person.culture, p.culture) < 0.3);
-    const known = nearby.find(p => p.communityId);
-    if (known) { person.communityId = known.communityId; world.communities.find(c => c.id === known.communityId)?.members.push(person.id); continue; }
+    // Con `social.radioConvivencia` > 0 quien no tiene comunidad (una cría, un recién llegado) se une a la
+    // de la mayoría de sus vecinos de confianza; con 0, a la del primero que encuentra, como siempre.
+    const joined = radioConvivencia > 0 ? trustedMajority(nearby)?.id : nearby.find(p => p.communityId)?.communityId;
+    if (joined) { person.communityId = joined; world.communities.find(c => c.id === joined)?.members.push(person.id); continue; }
     const free = nearby.filter(p => !p.communityId);
     // Tope de FUNDACIÓN = `social.maxComunidades` (regla de conducta; default 8 = la de siempre).
     // La admisión `limites.comunidades` es otra cosa: lanza al validar, nunca decide aquí.
     if (free.length < 2 || world.communities.length >= paramsOf(world).social.maxComunidades || !world.places.some(place => distance(person, place) <= 7)) continue;
     const members = [person, ...free], id = `community-${++world.communityCounter}`;
-    const syllables = ['Sauce','Brisa','Lumbre','Junco','Piedra','Semilla','Rocío','Sendero'];
-    const random = localRandom(world.seed, id), name = `Círculo de ${syllables[Math.floor(random() * syllables.length)]}`;
-    const group: CommunityView = { id, name, x: person.x, y: person.y, members: members.map(p => p.id), color: ['#dfba67','#76b8be','#c498b8','#a3bb6c'][world.communityCounter % 4]!, culture: { ...person.culture }, formedAt: world.tick, cooperation: 0, disputes: 0 };
+    const random = localRandom(world.seed, id), name = `Círculo de ${COMMUNITY_SYLLABLES[Math.floor(random() * COMMUNITY_SYLLABLES.length)]}`;
+    const group: CommunityView = { id, name, x: person.x, y: person.y, members: members.map(p => p.id), color: COMMUNITY_COLORS[world.communityCounter % 4]!, culture: { ...person.culture }, formedAt: world.tick, cooperation: 0, disputes: 0 };
     for (const p of members) p.communityId = id;
     world.communities.push(group);
     // NOTA (2026-09-22): este evento COMPARTE el arreglo con `group.members`. Un nacimiento

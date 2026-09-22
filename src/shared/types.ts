@@ -90,10 +90,26 @@ export interface WorldStats { population: number; meanEnergy: number; meanHunger
   /** Fracción [0,1] de regiones con tierra sin ninguna celda de agua potable superficial; las
    * regiones 100% océano no cuentan. SC-004 parte 2 (objetivo ≥ 0,30). */
   regionesSinAgua?: number; }
+/**
+ * T107 (perfil por fase y fracción serial): nombres fijos de las fases medidas del paso.
+ * `maintainRegions`…`muestreo` se miden dentro de `stepWorld` (`world/index.ts`); `save` y
+ * `broadcast` se miden en `stepOnce` (`server/app.ts`). El clon del paso ya tiene su propio
+ * campo (`cloneMs`) y queda fuera a propósito: FR-021/D21 piden la fracción serial de las
+ * fases nombradas, no del `stepOnce` entero (que además incluye E/S de red).
+ */
+export type FaseNombre = 'maintainRegions' | 'ecologia' | 'kernel' | 'fauna' | 'personas' | 'encuentros' | 'demografia' | 'comunidades' | 'reproduccion' | 'checkpoint' | 'muestreo' | 'save' | 'broadcast';
 /** `tickHz`: ritmo real medido en reloj de pared sobre los últimos pasos, no el ritmo pedido. */
 export interface RuntimeStats { stepMs: number; p95StepMs: number; saveMs: number; projectionMs: number; snapshotBytes: number; activeTiles: number; processRssMiB: number; tickHz: number;
   /** Coste del borrador y de las leyes, separado del guardado del mismo paso. */
   cloneMs?: number; simulationMs?: number;
+  /**
+   * T107: ms por fase (cero cuando esa fase no corrió en el paso, p.ej. `broadcast` fuera de
+   * su cadencia) y fracción de esas fases que es serial **por diseño** (fases 0/D/E de
+   * `plan.md`, lista irreducible de `research.md` D21) sobre la suma de las 13 fases — no
+   * sobre `stepMs`, que además incluye el clon (ver arriba). Con 320 hilos manda Amdahl: un
+   * 5 % de fracción serial topa la aceleración en 20×, un 10 % en 10×.
+   */
+  fases: Record<FaseNombre, number>; fraccionSerial: number;
   /**
    * Ruling R17: el hardware, no un tope fijo, limita la población. `activo` es el valor
    * vigente de `world.reproductionEnabled`; el gobernador lo apaga cuando `p95StepMs`

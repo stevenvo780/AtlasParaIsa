@@ -2,18 +2,17 @@
  * scripts/lab/resumen.ts — T018. Agrega un directorio de barrido (T017: `scripts/lab/barrido.ts`,
  * que encola réplicas de T016: `scripts/lab/replica.ts`) en `resumen.json` + `resumen.md`.
  *
- * CONTRATO DE ENTRADA ASUMIDO — T016/T017 no estaban implementados en este worktree al escribir
- * T018 (tareas [P] en paralelo); si sus nombres de campo difieren en la integración, el único
- * ajuste necesario es `leerReplica`/`leerDia` más abajo. Documentado también en el informe T018.
+ * Lee el contrato real de replica.ts y el contrato histórico de fixtures de T018.
  *   - Cada réplica vive en un subdirectorio (a cualquier profundidad) de `--entrada` que contiene
  *     un fichero `replica.json`: `{ seed, params, sha, digest, dias, resumen?, abortada? }`
  *     (`digest` = sha256 de los ficheros de `src/world`, ya calculado por `replica.ts`).
- *   - Ese mismo subdirectorio contiene `dia-NNN.json`, uno por día simulado 0..dias-1:
- *     `{ tick, poblacion, nacimientos, muertes: Record<causa, n>, fundadoresVivos,
- *        generacionesVivas, diversidadOficios, recetasDistintasEnUso, cooperaciones,
+ *   - Ese mismo subdirectorio contiene `dia-NNN.json`, desde el día 1 (tick / 2400):
+ *     `{ tick, poblacion, nacimientos, muertesPorCausa: Record<causa, acumulado>, fundadoresVivos,
+ *        generacionesVivas, diversidadConducta, diversidadOficios, recetasDistintasEnUso, cooperaciones,
  *        gini, fraccionComida, distanciaAgua, regionesSinAgua, p50Ms, p95Ms, rss }`;
  *        `gini`/`fraccionComida`/`distanciaAgua`/`regionesSinAgua` son `null` si `worldStatistics`
- *        todavía no los calculaba al correr (T013; `regionesSinAgua` desde R1 SC-004 parte 2).
+ *        todavía no los calculaba al correr. El legado `muertes` contiene incrementos diarios.
+ *        diversidadOficios es Shannon en bits; nunca sustituye diversidadConducta (0..1).
  *   - `--control <dir>`: mismo formato que `--entrada`; si se omite, el grupo cuyos `params`
  *     sean `{}` (si lo hay) actúa de control.
  *
@@ -37,8 +36,9 @@ type Params = Record<string, unknown>;
 
 interface DiaMetrica {
   tick: number; poblacion: number; nacimientos: number; muertes: Record<string, number>;
-  fundadoresVivos: number; generacionesVivas: number; diversidadOficios: number;
-  recetasDistintasEnUso: number; cooperaciones: number;
+  fundadoresVivos: number; generacionesVivas: number; diversidadOficios: number | null; diversidadConducta: number | null;
+  vecinosMortales: number | null; fundadoresMortalesVivos: number | null;
+  recetasDistintasEnUso: number | null; recetasCreadasAcumuladas: number | null; cooperaciones: number;
   gini: number | null; fraccionComida: number | null; distanciaAgua: number | null;
   /** R1 (SC-004 parte 2): fracción de regiones con tierra sin agua potable; `null` si no viajó. */
   regionesSinAgua: number | null;
@@ -48,6 +48,8 @@ interface DiaMetrica {
 interface ReplicaLeida {
   directorio: string; seed: number; params: Params; sha: string; digest: string;
   diasDeclarados: number; abortada: boolean; dias: DiaMetrica[];
+  poblacionInicial: number | null; vecinosMortalesIniciales: number | null; fundadoresMortalesIniciales: number | null;
+  metricasVersion: number;
 }
 
 // Réplica ya etiquetada con su procedencia (`--entrada` o `--control`). Necesario para que dos
@@ -59,17 +61,18 @@ interface Agregado { mediana: number; p10: number; p90: number; n: number }
 
 interface MetricasReplica {
   supervivenciaFundadores: number | null; poblacionFinalSobreInicial: number | null;
+  supervivenciaDia10: number | null;
   diversidadFinal: number | null; diaDiversidadUsado: number | null;
+  diversidadDia5: number | null; alcanceSupervivencia: 'mortales' | 'todos' | 'desconocido';
+  recetasDistintasEnUsoFinal: number | null; recetasCreadasAcumuladasFinal: number | null;
   giniFinal: number | null; fraccionComidaFinal: number | null;
   distanciaAguaFinal: number | null; regionesSinAguaFinal: number | null; p95Ms: number | null;
   muertesPorCausa: Record<string, number>; muertesDesconocidas: number;
   colapsoTemprano: boolean;
 }
 
-// SC-003 (spec.md): "diversidad ≥ 0,6 en la mediana de réplicas AL DÍA 5", no en el último día del
-// barrido (que en T031/T032 es el día 10 o 25). Si la réplica tiene menos de 6 días registrados
-// (día 0..5), se cae al último día disponible y se documenta cuál se usó realmente.
-const INDICE_DIA_DIVERSIDAD_SC003 = 5;
+// El día se deriva del reloj simulado, no del índice ni del nombre del archivo.
+const TICKS_POR_DIA = 2400, TICK_DIVERSIDAD_SC003 = 5 * TICKS_POR_DIA;
 
 interface ConflictoDeterminismo { firma: string; seed: number; digest: string; replicas: string[]; primeraDiferencia: string }
 
@@ -102,32 +105,56 @@ function agregar(valores: (number | null)[]): Agregado | null {
   return { mediana: indice(0.5), p10: indice(0.1), p90: indice(0.9), n: finitos.length };
 }
 
-function leerDia(ruta: string): DiaMetrica {
-  const dia = leerJson<Partial<DiaMetrica>>(ruta);
-  if (typeof dia.tick !== 'number' || typeof dia.poblacion !== 'number' || typeof dia.muertes !== 'object' || dia.muertes === null) {
-    throw new Error(`${ruta}: faltan campos mínimos (tick, poblacion, muertes).`);
+function leerDia(ruta: string, anteriores: Record<string, number>, metricasVersion: number, tipoAnterior?: string): { dia: DiaMetrica; acumuladas: Record<string, number>; tipo: string } {
+  const dia = leerJson<Partial<DiaMetrica> & { muertesPorCausa?: Record<string, number> }>(ruta);
+  const fuente = dia.muertesPorCausa ?? dia.muertes, tipo = dia.muertesPorCausa !== undefined ? 'acumuladas' : 'diarias';
+  if (!Number.isSafeInteger(dia.tick) || dia.tick! < 0 || !Number.isSafeInteger(dia.poblacion) || dia.poblacion! < 0 || typeof fuente !== 'object' || fuente === null || Array.isArray(fuente)) {
+    throw new Error(`${ruta}: faltan campos mínimos válidos (tick, poblacion, muertesPorCausa o muertes).`);
   }
-  return {
-    tick: dia.tick, poblacion: dia.poblacion, nacimientos: dia.nacimientos ?? 0, muertes: dia.muertes as Record<string, number>,
+  if (tipoAnterior && tipoAnterior !== tipo) throw new Error(`${ruta}: la serie mezcla muertes diarias y acumuladas.`);
+  if (Object.values(fuente).some(n => !Number.isSafeInteger(n) || n < 0)) throw new Error(`${ruta}: conteo de muertes inválido.`);
+  const muertes: Record<string, number> = {};
+  for (const causa of new Set([...Object.keys(anteriores), ...Object.keys(fuente)])) {
+    const n = fuente[causa] ?? 0;
+    if (tipo === 'acumuladas' && n < (anteriores[causa] ?? 0)) throw new Error(`${ruta}: muertes acumuladas decrecientes para ${causa}.`);
+    muertes[causa] = tipo === 'acumuladas' ? n - (anteriores[causa] ?? 0) : n;
+  }
+  if (dia.diversidadConducta !== undefined && dia.diversidadConducta !== null &&
+    (!Number.isFinite(dia.diversidadConducta) || dia.diversidadConducta < 0 || dia.diversidadConducta > 1)) throw new Error(`${ruta}: diversidadConducta debe estar entre 0 y 1.`);
+  return { tipo, acumuladas: tipo === 'acumuladas' ? fuente : {}, dia: {
+    tick: dia.tick!, poblacion: dia.poblacion!, nacimientos: dia.nacimientos ?? 0, muertes,
     fundadoresVivos: dia.fundadoresVivos ?? 0, generacionesVivas: dia.generacionesVivas ?? 0,
-    diversidadOficios: dia.diversidadOficios ?? 0, recetasDistintasEnUso: dia.recetasDistintasEnUso ?? 0,
+    diversidadOficios: dia.diversidadOficios ?? null, diversidadConducta: dia.diversidadConducta ?? null,
+    vecinosMortales: dia.vecinosMortales ?? null, fundadoresMortalesVivos: dia.fundadoresMortalesVivos ?? null,
+    recetasDistintasEnUso: metricasVersion >= 2 ? dia.recetasDistintasEnUso ?? null : null,
+    recetasCreadasAcumuladas: dia.recetasCreadasAcumuladas ?? (metricasVersion < 2 ? dia.recetasDistintasEnUso ?? null : null),
     cooperaciones: dia.cooperaciones ?? 0, gini: dia.gini ?? null, fraccionComida: dia.fraccionComida ?? null,
     distanciaAgua: dia.distanciaAgua ?? null, regionesSinAgua: dia.regionesSinAgua ?? null,
     p50Ms: dia.p50Ms ?? 0, p95Ms: dia.p95Ms ?? 0, rss: dia.rss ?? 0,
-  };
+  } };
 }
 
 function leerReplica(directorio: string): ReplicaLeida {
-  const meta = leerJson<Partial<ReplicaLeida> & { seed?: number; params?: Params; sha?: string; digest?: string; dias?: number; abortada?: boolean }>(
+  const meta = leerJson<{ seed?: number; params?: Params; sha?: string; digest?: string; dias?: number; abortada?: boolean; metricasVersion?: number;
+    resumen?: { poblacionInicial?: number; vecinosMortalesIniciales?: number; fundadoresMortalesIniciales?: number } | null }>(
     join(directorio, 'replica.json'));
   if (typeof meta.seed !== 'number' || typeof meta.digest !== 'string' || typeof meta.sha !== 'string') {
     throw new Error(`${directorio}/replica.json: faltan campos mínimos (seed, sha, digest).`);
   }
   const nombresDia = readdirSync(directorio, { withFileTypes: true })
-    .filter(e => e.isFile() && /^dia-\d+\.json$/.test(e.name)).map(e => e.name).sort();
-  const dias = nombresDia.map(nombre => leerDia(join(directorio, nombre)));
+    .filter(e => e.isFile() && /^dia-\d+\.json$/.test(e.name)).map(e => e.name).sort((a, b) => Number(a.slice(4, -5)) - Number(b.slice(4, -5)));
+  let anteriores: Record<string, number> = {}, tipo: string | undefined;
+  const metricasVersion = meta.metricasVersion ?? 1;
+  const dias = nombresDia.map(nombre => {
+    const leido = leerDia(join(directorio, nombre), anteriores, metricasVersion, tipo); anteriores = leido.acumuladas; tipo = leido.tipo;
+    return leido.dia;
+  });
+  if (dias.some((dia, index) => index > 0 && dia.tick <= dias[index - 1]!.tick)) throw new Error(`${directorio}: días fuera de orden o repetidos.`);
   return { directorio, seed: meta.seed, params: meta.params ?? {}, sha: meta.sha, digest: meta.digest,
-    diasDeclarados: meta.dias ?? dias.length, abortada: meta.abortada === true, dias };
+    diasDeclarados: meta.dias ?? dias.length, abortada: meta.abortada === true, dias, metricasVersion,
+    poblacionInicial: meta.resumen?.poblacionInicial ?? (dias[0]?.tick === 0 ? dias[0].poblacion : null),
+    vecinosMortalesIniciales: meta.resumen?.vecinosMortalesIniciales ?? null,
+    fundadoresMortalesIniciales: meta.resumen?.fundadoresMortalesIniciales ?? null };
 }
 
 /** Recorre `raiz` a cualquier profundidad y devuelve una réplica por cada `replica.json` hallado. */
@@ -143,6 +170,9 @@ function metricasReplica(replica: ReplicaLeida): MetricasReplica {
   const { dias } = replica;
   if (dias.length === 0) {
     return { supervivenciaFundadores: null, poblacionFinalSobreInicial: null, diversidadFinal: null,
+      supervivenciaDia10: null,
+      diversidadDia5: null, alcanceSupervivencia: 'desconocido',
+      recetasDistintasEnUsoFinal: null, recetasCreadasAcumuladasFinal: null,
       diaDiversidadUsado: null, giniFinal: null, fraccionComidaFinal: null, distanciaAguaFinal: null,
       regionesSinAguaFinal: null, p95Ms: null,
       muertesPorCausa: {}, muertesDesconocidas: 0, colapsoTemprano: false };
@@ -155,17 +185,24 @@ function metricasReplica(replica: ReplicaLeida): MetricasReplica {
     if (!(CAUSAS_CONOCIDAS as readonly string[]).includes(causa)) muertesDesconocidas += n;
   }
   // SC-002 (segunda cláusula): colapso > 50 % en los 2 primeros días simulados (día 0, 1 o 2).
-  const primerosDias = dias.slice(0, 3);
-  const colapsoTemprano = primero.poblacion > 0 && primerosDias.some(d => d.poblacion < primero.poblacion * 0.5);
+  const primerosDias = dias.filter(dia => dia.tick <= 2 * TICKS_POR_DIA);
+  const colapsoTemprano = replica.poblacionInicial !== null && replica.poblacionInicial > 0 && primerosDias.some(d => d.poblacion < replica.poblacionInicial! * 0.5);
   const p95Serie = agregar(dias.map(d => d.p95Ms));
-  // SC-003: diversidad AL DÍA 5, no en el último día del barrido; con < 6 días registrados se cae
-  // al último disponible y se reporta el índice realmente usado.
-  const indiceDiversidad = Math.min(INDICE_DIA_DIVERSIDAD_SC003, dias.length - 1);
-  const diaDiversidad = dias[indiceDiversidad]!;
+  const dia5 = dias.find(dia => dia.tick === TICK_DIVERSIDAD_SC003);
+  const diaDiversidad = dia5 ?? dias.filter(dia => dia.tick < TICK_DIVERSIDAD_SC003).at(-1);
+  const mortales = replica.fundadoresMortalesIniciales !== null && ultimo.fundadoresMortalesVivos !== null;
+  const inicialFundadores = mortales ? replica.fundadoresMortalesIniciales : primero.tick === 0 ? primero.fundadoresVivos : null;
+  const finalesFundadores = mortales ? ultimo.fundadoresMortalesVivos! : ultimo.fundadoresVivos;
+  const dia10 = dias.find(dia => dia.tick === 10 * TICKS_POR_DIA);
+  const fundadoresDia10 = dia10 ? mortales ? dia10.fundadoresMortalesVivos : dia10.fundadoresVivos : null;
   return {
-    supervivenciaFundadores: primero.fundadoresVivos > 0 ? ultimo.fundadoresVivos / primero.fundadoresVivos : null,
-    poblacionFinalSobreInicial: primero.poblacion > 0 ? ultimo.poblacion / primero.poblacion : null,
-    diversidadFinal: diaDiversidad.diversidadOficios, diaDiversidadUsado: indiceDiversidad,
+    supervivenciaFundadores: inicialFundadores !== null && inicialFundadores > 0 ? finalesFundadores / inicialFundadores : null,
+    supervivenciaDia10: inicialFundadores !== null && inicialFundadores > 0 && fundadoresDia10 !== null ? fundadoresDia10 / inicialFundadores : null,
+    alcanceSupervivencia: mortales ? 'mortales' : inicialFundadores !== null ? 'todos' : 'desconocido',
+    poblacionFinalSobreInicial: replica.poblacionInicial !== null && replica.poblacionInicial > 0 ? ultimo.poblacion / replica.poblacionInicial : null,
+    diversidadFinal: diaDiversidad?.diversidadConducta ?? null, diaDiversidadUsado: diaDiversidad ? diaDiversidad.tick / TICKS_POR_DIA : null,
+    diversidadDia5: dia5?.diversidadConducta ?? null,
+    recetasDistintasEnUsoFinal: ultimo.recetasDistintasEnUso, recetasCreadasAcumuladasFinal: ultimo.recetasCreadasAcumuladas,
     giniFinal: ultimo.gini, fraccionComidaFinal: ultimo.fraccionComida,
     distanciaAguaFinal: ultimo.distanciaAgua, regionesSinAguaFinal: ultimo.regionesSinAgua,
     p95Ms: p95Serie?.mediana ?? null,
@@ -188,7 +225,7 @@ function primeraDiferenciaDias(a: DiaMetrica[], b: DiaMetrica[]): string | null 
     for (const campo of Object.keys(da) as (keyof DiaMetrica)[]) {
       if (CAMPOS_NO_DETERMINISTAS.has(campo)) continue;
       const va = da[campo], vb = db[campo];
-      const iguales = typeof va === 'object' ? JSON.stringify(va) === JSON.stringify(vb) : va === vb;
+      const iguales = typeof va === 'object' ? firmaEstable(va) === firmaEstable(vb) : va === vb;
       if (!iguales) return `día ${i}, campo "${campo}": ${JSON.stringify(va)} vs ${JSON.stringify(vb)}`;
     }
   }
@@ -201,7 +238,8 @@ function detectarRoturaDeterminismo(replicas: ReplicaLeida[]): ConflictoDetermin
   const grupos = new Map<string, ReplicaLeida[]>();
   for (const replica of replicas) {
     if (replica.abortada || replica.dias.length === 0) continue;
-    const clave = `${firmaEstable(replica.params)}::${replica.seed}::${replica.digest}`;
+    // A change of measurement schema is not a change of the simulated laws.
+    const clave = `${firmaEstable(replica.params)}::${replica.seed}::${replica.digest}::v${replica.metricasVersion}`;
     grupos.set(clave, [...(grupos.get(clave) ?? []), replica]);
   }
   const conflictos: ConflictoDeterminismo[] = [];
@@ -238,8 +276,11 @@ interface GrupoResumen {
   // Índice del día realmente usado para `diversidadFinal` (SC-003 pide el día 5; con réplicas más
   // cortas se cae al último día disponible). `null` si el grupo no tiene ninguna réplica válida.
   diaDiversidadUsado: number | null;
+  alcancesSupervivencia: MetricasReplica['alcanceSupervivencia'][];
   metricas: { supervivenciaFundadores: Agregado | null; poblacionFinalSobreInicial: Agregado | null;
-    diversidadFinal: Agregado | null; giniFinal: Agregado | null; fraccionComidaFinal: Agregado | null;
+    supervivenciaDia10: Agregado | null;
+    recetasDistintasEnUsoFinal: Agregado | null; recetasCreadasAcumuladasFinal: Agregado | null;
+    diversidadFinal: Agregado | null; diversidadDia5: Agregado | null; giniFinal: Agregado | null; fraccionComidaFinal: Agregado | null;
     distanciaAguaFinal: Agregado | null; regionesSinAguaFinal: Agregado | null; p95Ms: Agregado | null;
     muertesPorCausa: Record<string, Agregado | null> };
   colapsoTemprano: { detectado: boolean; replicas: string[] };
@@ -252,8 +293,12 @@ function agregarGrupo(replicas: ReplicaLeida[], causas: string[]): GrupoResumen[
   const metricas = replicas.map(metricasReplica);
   return {
     supervivenciaFundadores: agregar(metricas.map(m => m.supervivenciaFundadores)),
+    supervivenciaDia10: agregar(metricas.map(m => m.supervivenciaDia10)),
+    recetasDistintasEnUsoFinal: agregar(metricas.map(m => m.recetasDistintasEnUsoFinal)),
+    recetasCreadasAcumuladasFinal: agregar(metricas.map(m => m.recetasCreadasAcumuladasFinal)),
     poblacionFinalSobreInicial: agregar(metricas.map(m => m.poblacionFinalSobreInicial)),
     diversidadFinal: agregar(metricas.map(m => m.diversidadFinal)),
+    diversidadDia5: agregar(metricas.map(m => m.diversidadDia5)),
     giniFinal: agregar(metricas.map(m => m.giniFinal)),
     fraccionComidaFinal: agregar(metricas.map(m => m.fraccionComidaFinal)),
     distanciaAguaFinal: agregar(metricas.map(m => m.distanciaAguaFinal)),
@@ -290,9 +335,10 @@ function construirGrupos(replicas: ReplicaConOrigen[], huboControlExplicito: boo
   const grupos: GrupoResumen[] = [];
   for (const [clave, replicasGrupo] of porGrupo) {
     const firma = firmaEstable(replicasGrupo[0]!.params);
-    const vivas = replicasGrupo.filter(r => !r.abortada);
+    const vivas = replicasGrupo.filter(r => !r.abortada && r.dias.length > 0);
     const metricasVivas = vivas.map(metricasReplica);
     const metricas = agregarGrupo(vivas, causas);
+    const alcancesSupervivencia = [...new Set(metricasVivas.map(m => m.alcanceSupervivencia))];
     const colapsoReplicas = vivas.filter((_, i) => metricasVivas[i]!.colapsoTemprano).map(r => r.directorio);
     const muertesDesconocidas = metricasVivas.reduce((total, m) => total + m.muertesDesconocidas, 0);
     const esControl = clave === claveControl;
@@ -307,23 +353,32 @@ function construirGrupos(replicas: ReplicaConOrigen[], huboControlExplicito: boo
     // (todas sus réplicas devolvieron `null` para esa métrica): sin datos ≠ cumple el umbral.
     const sinReplicasValidas = vivas.length === 0;
     const metricaSinDatos = !sinReplicasValidas &&
-      (metricas.supervivenciaFundadores === null || metricas.diversidadFinal === null || metricas.giniFinal === null);
+      (metricas.supervivenciaDia10?.n !== vivas.length || metricas.diversidadDia5?.n !== vivas.length || metricas.giniFinal?.n !== vivas.length || metricas.regionesSinAguaFinal?.n !== vivas.length || alcancesSupervivencia.length > 1);
 
-    const semSuperv = semaforoUmbral(metricas.supervivenciaFundadores?.mediana ?? null, 0.70);
-    const semDiv = semaforoUmbral(metricas.diversidadFinal?.mediana ?? null, 0.60);
+    const semSuperv = semaforoUmbral(metricas.supervivenciaDia10?.mediana ?? null, 0.70);
+    const semDiv = semaforoUmbral(metricas.diversidadDia5?.mediana ?? null, 0.60);
     const semGini = semaforoUmbral(metricas.giniFinal?.mediana ?? null, 0.35);
+    const semRegionesSecas = semaforoUmbral(metricas.regionesSinAguaFinal?.mediana ?? null, 0.30);
     const semDesconocidas: Semaforo | null = muertesDesconocidas > 0 ? '🔴' : null;
     const semColapso: Semaforo | null = colapsoReplicas.length > 0 ? '🔴' : null;
     const semDeterminismo: Semaforo | null = firmasConConflicto.has(firma) ? '🔴' : null;
     const semSinDatos: Semaforo | null = (sinReplicasValidas || metricaSinDatos) ? '🔴' : null;
-    const semaforo = peor(semSuperv, semDiv, semGini, semDesconocidas, semColapso, semDeterminismo, semSinDatos);
+    const semaforo = peor(semSuperv, semDiv, semGini, semRegionesSecas, semDesconocidas, semColapso, semDeterminismo, semSinDatos);
 
     const motivos: string[] = [];
     if (sinReplicasValidas) motivos.push('sin réplicas válidas (todas abortadas o sin días registrados): SC-002..005 no evaluables, no puede salir verde');
     else if (metricaSinDatos) motivos.push('una o más métricas con umbral SC-002..005 no tienen mediana calculable (sin datos)');
-    if (semSuperv === '🔴' || semSuperv === '🟡') motivos.push(`supervivencia de fundadores ${((metricas.supervivenciaFundadores?.mediana ?? 0) * 100).toFixed(1)} % (SC-002 ≥ 70 %)`);
+    if (metricas.diversidadFinal === null) motivos.push('diversidadConducta normalizada desconocida; la entropía diversidadOficios en bits no evalúa SC-003');
+    if (metricas.diversidadDia5?.n !== vivas.length) motivos.push('SC-003 pendiente: falta diversidadConducta en tick 12000 (día 5) para todas las réplicas válidas');
+    if (metricas.supervivenciaDia10?.n !== vivas.length) motivos.push('SC-002 pendiente: falta supervivencia de fundadores en tick 24000 (día 10) con base inicial comprobable');
+    if (metricas.regionesSinAguaFinal?.n !== vivas.length) motivos.push('SC-004 pendiente: falta la fracción de regiones sin agua');
+    if (alcancesSupervivencia.includes('todos')) motivos.push('supervivencia histórica de todos los fundadores: incluye S e I protegidos');
+    if (alcancesSupervivencia.includes('desconocido')) motivos.push('supervivencia desconocida: falta una población fundadora inicial comprobable');
+    if (alcancesSupervivencia.length > 1) motivos.push('alcances de supervivencia distintos: no acreditan un umbral conjunto');
+    if (semSuperv === '🔴' || semSuperv === '🟡') motivos.push(`supervivencia de fundadores al día 10 ${((metricas.supervivenciaDia10?.mediana ?? 0) * 100).toFixed(1)} % (SC-002 ≥ 70 %)`);
     if (semDiv === '🔴' || semDiv === '🟡') motivos.push(`diversidad día ${diaDiversidadUsado ?? '?'} = ${(metricas.diversidadFinal?.mediana ?? 0).toFixed(2)} (SC-003 ≥ 0,60 al día 5)`);
     if (semGini === '🔴' || semGini === '🟡') motivos.push(`gini ${(metricas.giniFinal?.mediana ?? 0).toFixed(2)} (SC-004 ≥ 0,35)`);
+    if (semRegionesSecas === '🔴' || semRegionesSecas === '🟡') motivos.push(`regiones sin agua ${((metricas.regionesSinAguaFinal?.mediana ?? 0) * 100).toFixed(1)} % (SC-004 ≥ 30 %)`);
     if (semDesconocidas) motivos.push(`${muertesDesconocidas} muerte(s) con causa desconocida (SC-005 = 0)`);
     if (semColapso) motivos.push(`colapso > 50 % en los 2 primeros días en ${colapsoReplicas.length} réplica(s)`);
     if (semDeterminismo) motivos.push('rotura de determinismo: misma semilla + mismo digest con métricas distintas');
@@ -333,16 +388,22 @@ function construirGrupos(replicas: ReplicaConOrigen[], huboControlExplicito: boo
       const delta = (a: Agregado | null, b: Agregado | null) => a && b ? a.mediana - b.mediana : null;
       const conSemaforo = (valor: number | null, sem: Semaforo | null) => valor === null ? null : { delta: valor, semaforo: sem };
       comparacionControl = {
-        supervivenciaFundadores: conSemaforo(delta(metricas.supervivenciaFundadores, metricasControl.supervivenciaFundadores), semSuperv),
-        diversidadFinal: conSemaforo(delta(metricas.diversidadFinal, metricasControl.diversidadFinal), semDiv),
+        supervivenciaFundadores: conSemaforo(delta(metricas.supervivenciaFundadores, metricasControl.supervivenciaFundadores), null),
+        supervivenciaDia10: conSemaforo(delta(metricas.supervivenciaDia10, metricasControl.supervivenciaDia10), semSuperv),
+        diversidadFinal: conSemaforo(delta(metricas.diversidadDia5, metricasControl.diversidadDia5), semDiv),
         giniFinal: conSemaforo(delta(metricas.giniFinal, metricasControl.giniFinal), semGini),
         poblacionFinalSobreInicial: conSemaforo(delta(metricas.poblacionFinalSobreInicial, metricasControl.poblacionFinalSobreInicial), null),
         p95Ms: conSemaforo(delta(metricas.p95Ms, metricasControl.p95Ms), null),
       };
+      const alcancesControl = [...new Set(gruposControl!.map(replica => metricasReplica(replica).alcanceSupervivencia))];
+      if (alcancesSupervivencia.length !== 1 || alcancesControl.length !== 1 || alcancesSupervivencia[0] !== alcancesControl[0] || alcancesSupervivencia[0] === 'desconocido') {
+        comparacionControl.supervivenciaFundadores = null; comparacionControl.supervivenciaDia10 = null;
+        motivos.push('supervivencia no comparable con el control: distinto alcance de fundadores');
+      }
     }
 
-    grupos.push({ params: replicasGrupo[0]!.params, firma, esControl, replicas: vivas.length, abortadas: replicasGrupo.length - vivas.length,
-      diaDiversidadUsado,
+    grupos.push({ params: replicasGrupo[0]!.params, firma, esControl, replicas: vivas.length, abortadas: replicasGrupo.filter(replica => replica.abortada).length,
+      diaDiversidadUsado, alcancesSupervivencia,
       metricas, colapsoTemprano: { detectado: colapsoReplicas.length > 0, replicas: colapsoReplicas }, muertesDesconocidas,
       comparacionControl, semaforo, motivos });
   }
@@ -384,7 +445,7 @@ function generarMarkdown(resultado: ResultadoResumen): string {
     `Generado: ${resultado.generadoEn} · Entrada: \`${resultado.entrada}\` · Control: ${resultado.control ? `\`${resultado.control}\`` : 'ninguno declarado'}\n\n` +
     `Réplicas: ${resultado.totalReplicas} (${resultado.replicasAbortadas} abortadas) en ${resultado.grupos.length} grupo(s) de parámetros.\n\n` +
     `## Por grupo de parámetros\n\n` +
-    `| Grupo | Réplicas | Superv. fundadores | Δ vs control | Población final/inicial | Diversidad | Gini | % celdas comida | Dist. agua | Regiones sin agua | p95 ms | Muertes desconocidas | Semáforo |\n` +
+    `| Grupo | Réplicas | Superv. fundadores | Δ vs control | Población final/inicial | Diversidad normalizada observada | Gini | % celdas comida | Dist. agua | Regiones sin agua | p95 ms | Muertes desconocidas | Semáforo |\n` +
     `|---|---|---|---|---|---|---|---|---|---|---|---|---|\n${filas}\n\n` +
     `## Muertes por causa (mediana por réplica del grupo)\n\n` +
     `| Causa | ${resultado.grupos.map(g => g.esControl ? 'control' : JSON.stringify(g.params)).join(' | ')} |\n` +
@@ -395,7 +456,8 @@ function generarMarkdown(resultado: ResultadoResumen): string {
     `_Semáforo: verde cumple el umbral SC-002/003/004 de \`spec.md\`; rojo, por debajo de la mitad del umbral (o incumplimiento` +
     ` duro SC-005 / colapso temprano / rotura de determinismo / grupo sin réplicas válidas o sin datos para una métrica con` +
     ` umbral SC); ámbar, la zona intermedia — banda no fijada en \`spec.md\`. Diversidad: SC-003 se mide al día 5; con réplicas` +
-    ` más cortas se usa el último día disponible (indicado entre paréntesis)._\n`;
+    ` más cortas se informa el último día observado (indicado entre paréntesis), pero SC-003 queda pendiente. ` +
+    `La entropía de oficios en bits no se usa como índice normalizado._\n`;
 }
 
 function resumirBarrido(entrada: string, opciones: { control?: string | null; salida?: string } = {}): ResultadoResumen {

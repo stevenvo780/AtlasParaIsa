@@ -245,13 +245,17 @@ async function runJob(job: Job, timeoutMs: number): Promise<JobResult> {
   const logFd = openSync(join(job.dir, 'proceso.log'), 'a');
   const { child, done } = spawnAwait('npx', args, ROOT, ['ignore', logFd, logFd], true);
   let timedOut = false;
+  let killGrace: Promise<void> | undefined;
   const timer = setTimeout(() => {
     timedOut = true;
     killGroup(child, 'SIGTERM');
-    setTimeout(() => { if (child.exitCode === null && child.signalCode === null) killGroup(child, 'SIGKILL'); }, 2000);
+    // El líder puede terminar antes que sus descendientes. La gracia pertenece
+    // al grupo completo y debe acabar antes de liberar este puesto en la cola.
+    killGrace = new Promise(resolve => setTimeout(() => { killGroup(child, 'SIGKILL'); resolve(); }, 2000));
   }, timeoutMs);
   const outcome = await done;
   clearTimeout(timer);
+  if (killGrace) await killGrace;
   closeSync(logFd);
   const status: JobStatus = timedOut ? 'abortada' : (outcome.code === 0 ? 'ok' : 'error');
   const result: JobResult = { job, status, code: outcome.code, signal: outcome.signal, durationMs: Date.now() - startedAt };

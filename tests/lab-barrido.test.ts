@@ -64,11 +64,22 @@ function writeOrphanGuardStub(dir: string, pidFile: string): string {
   writeFileSync(
     replicaPath,
     "import { spawn } from 'node:child_process';\n" +
+    "import { writeFileSync } from 'node:fs';\n" +
     "process.on('SIGTERM', () => {});\n" +
+    `writeFileSync(${JSON.stringify(`${pidFile}.parent`)}, String(process.pid));\n` +
     `spawn(${JSON.stringify(process.execPath)}, [${JSON.stringify(grandchildPath)}], { stdio: 'ignore' });\n` +
     'setInterval(() => {}, 1000);\n',
   );
   return replicaPath;
+}
+
+function cleanOrphanGuardStub(pidFile: string): void {
+  for (const path of [pidFile, `${pidFile}.parent`]) {
+    if (!existsSync(path)) continue;
+    const pid = Number(readFileSync(path, 'utf8').trim());
+    if (!Number.isSafeInteger(pid) || pid <= 0) continue;
+    try { process.kill(pid, 'SIGKILL'); } catch { /* ya terminado */ }
+  }
 }
 
 function sleepSync(ms: number): void {
@@ -204,7 +215,42 @@ test('barrido: una réplica que supera --timeout mata TODO el árbol de procesos
     const desde = Date.now();
     while (vivo() && Date.now() - desde < 5000) sleepSync(100);
     assert.ok(!vivo(), `el nieto (pid ${nietoPid}) quedó huérfano vivo tras marcarse "abortada": el SIGKILL no llegó a todo el grupo de procesos`);
-  } finally { rmSync(salida, { recursive: true, force: true }); rmSync(stubDir, { recursive: true, force: true }); }
+  } finally { cleanOrphanGuardStub(pidFile); rmSync(salida, { recursive: true, force: true }); rmSync(stubDir, { recursive: true, force: true }); }
+});
+
+test('barrido: el padre termina con SIGTERM pero la gracia mata al nieto que lo ignora', () => {
+  const salida = mkdtempSync(join(tmpdir(), 'carta-barrido-'));
+  const stubDir = newStubDir(), pidFile = join(stubDir, 'nieto.pid'), parentExit = join(stubDir, 'padre-termino');
+  const replicaStub = writeOrphanGuardStub(stubDir, pidFile), resumenStub = join(stubDir, 'resumen.ts');
+  writeFileSync(resumenStub, STUB_RESUMEN_OK);
+  // El hijo directo es este npx controlado: sale 0 al recibir SIGTERM mientras
+  // la réplica y su nieto siguen vivos. No depende del reenvío de npm/tsx.
+  writeFileSync(join(stubDir, 'npx'), `#!${process.execPath}\n` +
+    "const { spawn } = require('node:child_process');\n" +
+    "process.on('SIGTERM', () => {\n" +
+    `  require('node:fs').writeFileSync(${JSON.stringify(parentExit)}, String(process.pid)); process.exit(0);\n` +
+    "});\n" +
+    "const child = spawn(process.execPath, ['--import', 'tsx', ...process.argv.slice(3)], { stdio: 'inherit' });\n" +
+    "child.once('error', () => process.exit(1)); child.once('exit', code => process.exit(code ?? 1));\n", { mode: 0o700 });
+  try {
+    const outcome = runBarrido(
+      ['--replicas', '1', '--dias', '1', '--concurrencia', '1', '--timeout', '2', '--seed-base', '901', '--salida', salida],
+      { CARTA_REPLICA_SCRIPT: replicaStub, CARTA_RESUMEN_SCRIPT: resumenStub, PATH: `${stubDir}:${process.env.PATH ?? ''}` },
+    );
+    assert.notEqual(outcome.status, 0, 'el padre saliendo 0 no convierte una réplica abortada en éxito');
+    assert.ok(existsSync(parentExit), 'el hijo directo recibió SIGTERM y terminó voluntariamente');
+    assert.ok(existsSync(pidFile), 'el nieto alcanzó a instalar su handler y arrancar');
+    const marker = JSON.parse(readFileSync(join(salida, 'base', 'seed-901', 'replica.json'), 'utf8'));
+    assert.equal(marker.abortada, true);
+    assert.equal(marker.barrido.codigo, 0, 'el hijo directo terminó antes del SIGKILL de gracia');
+    assert.equal(marker.barrido.senal, null);
+    assert.match(readFileSync(join(salida, 'progreso.log'), 'utf8'), /estado=abortada/);
+    const nietoPid = Number(readFileSync(pidFile, 'utf8').trim());
+    const vivo = (): boolean => { try { process.kill(nietoPid, 0); return true; } catch { return false; } };
+    const desde = Date.now();
+    while (vivo() && Date.now() - desde < 5000) sleepSync(100);
+    assert.ok(!vivo(), `el nieto (pid ${nietoPid}) sobrevivió a la gracia porque su padre ya había terminado`);
+  } finally { cleanOrphanGuardStub(pidFile); rmSync(salida, { recursive: true, force: true }); rmSync(stubDir, { recursive: true, force: true }); }
 });
 
 test('barrido: invoca resumen.ts con --entrada (no --salida) y no marca error si produce resumen.json/md', () => {

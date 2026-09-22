@@ -33,6 +33,7 @@ import { assertWorld, createWorld, projectWorld, stepWorld, TICKS_PER_DAY } from
 import { catalogueEnabled, technologyCatalogueTotals } from '../../src/world/technology-catalogue.js';
 import { worldStatistics } from '../../src/world/statistics.js';
 import { parseParams, type WorldParams } from '../../src/world/params.js';
+import { durableActivityMetrics } from './metrics.js';
 
 const CAUSES = ['starvation', 'dehydration', 'exposure', 'senescence'] as const;
 type Cause = typeof CAUSES[number];
@@ -67,7 +68,7 @@ function worldSourceDigest(): string {
 }
 
 /** Métricas leídas del mundo vivo para el archivo `dia-NNN.json`; sin campos de tiempo real. */
-function dailyMetrics(world: ReturnType<typeof createWorld>) {
+function dailyMetrics(world: ReturnType<typeof createWorld>, store: Store) {
   const stats = worldStatistics(world), loose = stats as unknown as Record<string, unknown>;
   const gini = typeof loose.giniRecursosPorRegion === 'number' ? loose.giniRecursosPorRegion : null;
   const fraccionComida = typeof loose.fraccionCeldasConComida === 'number' ? loose.fraccionCeldasConComida : null;
@@ -88,13 +89,15 @@ function dailyMetrics(world: ReturnType<typeof createWorld>) {
   return {
     poblacion: world.people.length, nacimientos: world.totals.births ?? 0, muertesPorCausa,
     fundadoresVivos: generaciones['0'] ?? 0, generacionesVivas: Object.keys(generaciones).length,
-    diversidadOficios: specialtyEntropy(specialties), recetasDistintasEnUso: catalogo.recipes,
+    diversidadOficios: specialtyEntropy(specialties), recetasCreadasAcumuladas: catalogo.recipes,
+    diversidadConducta: stats.diversidad?.total ?? null,
     diversidadFuncional: catalogo.functionalDiversity,
     // Instrumento directo: true ⇔ el mundo tiene el catálogo de producción activo
     // (`enableTechnologyCatalogue`, ver Store.save). Esta réplica SIEMPRE lo deja en
     // true; si alguien quita el Store este campo lo delata (y el test de abajo lo afirma).
     catalogoActivo: catalogueEnabled(world.technology),
     cooperaciones: world.totals.cooperation ?? 0, gini, fraccionComida, distanciaAgua, regionesSinAgua,
+    ...durableActivityMetrics(world, store.db, world.tick - TICKS_PER_DAY),
   };
 }
 
@@ -112,6 +115,8 @@ async function main(): Promise<void> {
   try {
     const world = createWorld(seed, params);
     const poblacionInicial = world.people.length;
+    const vecinosMortalesIniciales = world.people.filter(person => person.role === 'neighbor').length;
+    const fundadoresMortalesIniciales = world.people.filter(person => person.role === 'neighbor' && person.genome.generation === 0).length;
     // P3: adjuntar y guardar el Store ANTES de simular fija las leyes de tecnología de producción
     // (enableTechnologyCatalogue) y liga el WorldContext (loadChunk/catalogueReader) al mundo.
     store.save(world);
@@ -124,10 +129,11 @@ async function main(): Promise<void> {
       stepTimes.push(performance.now() - started);
       if (tick % params.persistencia.cadaTicks === 0) store.save(world);
       if (tick % TICKS_PER_DAY === 0) {
+        if (tick % params.persistencia.cadaTicks !== 0) store.save(world);
         assertWorld(world);
         const dia = tick / TICKS_PER_DAY, rss = process.memoryUsage().rss, { p50, p95 } = distribution(stepTimes.slice(-TICKS_PER_DAY));
         maxRss = Math.max(maxRss, rss);
-        const metrics = dailyMetrics(world);
+        const metrics = dailyMetrics(world, store);
         ultimoDia = metrics;
         const body = { tick, ...metrics, p50Ms: Math.round(p50 * 100) / 100, p95Ms: Math.round(p95 * 100) / 100, rss };
         writeFileSync(join(salida, `dia-${String(dia).padStart(3, '0')}.json`), JSON.stringify(body, null, 2) + '\n');
@@ -138,6 +144,7 @@ async function main(): Promise<void> {
 
     const { p50, p95 } = distribution(stepTimes);
     const resumen = {
+      vecinosMortalesIniciales, fundadoresMortalesIniciales,
       poblacionInicial, poblacionFinal: ultimoDia.poblacion, nacimientosTotal: ultimoDia.nacimientos,
       muertesPorCausaTotal: ultimoDia.muertesPorCausa, fundadoresVivosFinal: ultimoDia.fundadoresVivos,
       generacionesVivasFinal: ultimoDia.generacionesVivas, diversidadOficiosFinal: ultimoDia.diversidadOficios,
@@ -147,6 +154,7 @@ async function main(): Promise<void> {
       p50Ms: Math.round(p50 * 100) / 100, p95Ms: Math.round(p95 * 100) / 100, rssMaximo: maxRss,
     };
     const replica = {
+      metricasVersion: 2, gobernador: 'no-ejecutado; replica de leyes, no del servidor',
       seed, params, sha: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
       digest: worldSourceDigest(), dias, resumen,
     };

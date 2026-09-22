@@ -58,7 +58,7 @@ function manifest(store: Store, slot = 0): Manifest {
   const value = JSON.parse(snapshot(store, slot).body) as Manifest;
   assert.equal(value.snapshotEncoding, 'snapshot-parts-v1');
   assert.equal(value.world.tileEncoding, 'tiles-tuple-v1');
-  assert.equal(Object.hasOwn(value.world, 'tiles'), false, 'los tiles sólo aparecen en las piezas');
+  assert.equal(value.world.tiles, null, 'los datos de tiles sólo aparecen en las piezas; null conserva el orden raíz');
   assert.ok(Array.isArray(value.tiles.pages));
   return value;
 }

@@ -82,8 +82,9 @@ export class SnapshotParts {
 
   prepare(world: World, params: WorldParams, inlineLimit: number): PreparedSnapshot {
     if (world.tiles.length <= inlineLimit) return { inline: encodeSnapshot(world, params), tiles: [] };
-    const metadata = snapshotRecord(world, params, undefined);
-    delete metadata.tiles;
+    // Keep a validated null placeholder: deleting/reinserting tiles changes the
+    // world's enumerable property order when a paged checkpoint is reloaded.
+    const metadata = snapshotRecord(world, params, null);
     const body = stringifyExact(metadata);
     if (Buffer.byteLength(body) > SNAPSHOT_METADATA_BYTES) failure('metadata exceeds transport size');
     return { metadata, tiles: world.tiles };
@@ -127,7 +128,7 @@ export class SnapshotParts {
     if (!keys(value, ['snapshotEncoding', 'world', 'tiles']) || value.snapshotEncoding !== ENCODING
       || !object(value.world) || !object(value.tiles)) failure('manifest encoding');
     const world = value.world as Record<string, unknown>, tiles = value.tiles as Record<string, unknown>;
-    if (Object.hasOwn(world, 'tiles') || Object.hasOwn(world, 'snapshotEncoding')
+    if (!Object.hasOwn(world, 'tiles') || world.tiles !== null || Object.hasOwn(world, 'snapshotEncoding')
       || world.tileEncoding !== SNAPSHOT_TILE_ENCODING) failure('metadata tile encoding');
     if (validateParams) readSnapshotParams(world);
     if (!keys(tiles, ['count', 'pages']) || !Number.isSafeInteger(tiles.count) || (tiles.count as number) < 1

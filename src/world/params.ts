@@ -27,10 +27,20 @@ export interface WorldParams {
   agua: { cuencas: number };
   /**
    * Ruling R17: el límite de población lo pone el hardware. `presupuestoMs` es el p95
-   * del paso (ms) que el servidor se permite; por encima el gobernador apaga la
-   * reproducción, por debajo del 70 % la reenciende. Default 50 ms = constitución V.
+   * del paso (ms) que el servidor se permite. `politica` decide qué hace el gobernador
+   * por encima del presupuesto (revisión 2026-09-22, extinción del mundo público V7):
+   * · `apagar` = el gobernador de 2026-09-19: apaga la reproducción por encima y la
+   *   reenciende por debajo del 70 %. Con un paso caro por causas ajenas a la población
+   *   (clon + guardado de un mundo envejecido) dejó cero nacimientos durante 15 días y el
+   *   mundo se extinguió por senescencia sin que el hardware estuviera saturado por la gente.
+   * · `techo` (default): el hardware limita el CRECIMIENTO, no el reemplazo. Al cruzar el
+   *   presupuesto se fija un techo = población de ese momento y solo se permiten nacimientos
+   *   mientras la población esté por debajo del techo; con p95 > 2× presupuesto sostenido el
+   *   techo baja una unidad por ventana de 120 pasos (la población decrece por muertes no
+   *   repuestas, nunca por muertes provocadas); por debajo del 70 % el techo se retira.
+   * Default 50 ms = constitución V.
    */
-  gobernador: { presupuestoMs: number; senales: string[] };
+  gobernador: { presupuestoMs: number; senales: string[]; politica: 'apagar' | 'techo' };
   /** T102: configuración reservada; todavía no selecciona otro backend. */
   motor: { clonPorPaso: boolean; hilos: number; soaTerreno: boolean; particionarPersonas: boolean; gpu: number[]; orden: 'natural' | 'inverso' | 'adversarial' };
   red: { deltas: boolean };
@@ -58,7 +68,7 @@ const RAW_DEFAULTS: WorldParams = {
   recursos: { capacidadBosque: 1, capacidadPastizal: 0.7, capacidadOtros: 0.35, velocidadRegeneracion: 1, decaimientoFertilidad: 0.001, decaimientoComida: 0.0001 },
   persistencia: { cadaTicks: 1, ventanaEventosTicks: 0, paginasSucias: false },
   agua: { cuencas: 0.4 },
-  gobernador: { presupuestoMs: 50, senales: ['p95'] },
+  gobernador: { presupuestoMs: 50, senales: ['p95'], politica: 'techo' },
   motor: { clonPorPaso: true, hilos: 1, soaTerreno: false, particionarPersonas: false, gpu: [], orden: 'natural' },
   red: { deltas: false },
   limites: { teselasActivas: 65536, chunks: 256, comunidades: 8, fauna: 393216, aplicacion: 'parametros' },
@@ -149,6 +159,7 @@ export const PARAM_DESCRIPTORS: Readonly<Record<string, ParamDescriptor>> = deep
   'persistencia.paginasSucias': { kind: 'boolean' },
   'red.deltas': { kind: 'boolean' },
   'gobernador.senales': { kind: 'array', element: { kind: 'enum', values: ['p95'] }, minLength: 1, unique: true },
+  'gobernador.politica': { kind: 'enum', values: ['apagar', 'techo'] },
 });
 const PARAM_KEYS = Object.keys(PARAM_DESCRIPTORS);
 

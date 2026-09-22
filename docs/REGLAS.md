@@ -360,8 +360,32 @@ claves desconocidas y elementos duplicados en las listas se rechazan.
 | `motor.orden` | `natural` | `natural`, `inverso`, `adversarial` |
 | `persistencia.paginasSucias`, `red.deltas` | `false` | booleano |
 | `gobernador.senales` | `["p95"]` | lista no vacía, sin duplicados; sólo `p95` hasta T161 |
+| `gobernador.politica` | `techo` | `apagar` (gobernador de 2026-09-19) o `techo` (2026-09-22: el hardware limita el crecimiento, no el reemplazo) |
 | `limites.teselasActivas`, `limites.chunks` | `65536`, `256` | enteros de 1 a `Number.MAX_SAFE_INTEGER` |
 | `limites.comunidades`, `limites.fauna` | `8`, `393216` | enteros de 1 a `Number.MAX_SAFE_INTEGER` |
+
+### Gobernador: política `techo` (2026-09-22)
+
+El mundo público V7 se extinguió al día 21 con solo S e I vivos: siete nacimientos y veintiún
+fallecidos, dieciocho por senescencia. La causa material no fue biológica: la política `apagar`
+del gobernador (ruling R17, 2026-09-19) apagó `reproductionEnabled` desde el paso 16 300 porque el
+p95 del paso completo —clon del mundo envejecido (20–47 ms) más simulación y guardado— superó los
+50 ms, y una población de veintidós habitantes no puede bajar ese coste muriendo. Con cero
+nacimientos durante quince días, la senescencia (edad máxima 10,5–14,7 días) vació el mundo. En el
+laboratorio, sin gobernador, la misma semilla llega a 25 días con 137–144 vecinos y generaciones 2–10.
+
+La política `techo` conserva el presupuesto y la histéresis de R17 y cambia qué se frena: por
+encima del presupuesto se fija un **techo = población del frenazo** y sólo se permiten nacimientos
+mientras la población esté **por debajo** del techo (reponer, no crecer); una muerte no baja el techo.
+Si el rojo es grave (p95 > 2× presupuesto) y persiste, el techo baja una unidad por ventana de 120
+pasos: la población decrece por muertes no repuestas, jamás por muertes provocadas. Por debajo del
+70 % del presupuesto el techo se retira. `decidirConTecho` es una función pura (`src/server/governor.ts`);
+el estado del techo vive en el proceso del servidor, no en el mundo ni en su digesto. El último frenazo
+se publica en `performance.gobernador.techoObservado` (p95, población, teselas activas, teselas por
+habitante, paso y motivo legible) y no se borra al volver a verde. `gobernador.politica=apagar`
+reproduce exactamente el gobernador anterior; la orden humana (`manual`) sigue mandando sobre ambas.
+Refutación en `tests/gobernador.test.ts`: bajo carga sostenida el mundo no crece; una muerte real por
+deshidratación se repone aunque siga en rojo; con `apagar` la misma muerte no se repone.
 
 Estas opciones se validan y persisten, pero **T102 no activa backends, deltas ni nuevas señales,
 ni cambia los topes de validación o fundación de comunidades**. La ejecución sigue usando el

@@ -100,7 +100,11 @@ export interface RuntimeStats { stepMs: number; p95StepMs: number; saveMs: numbe
    * supera `presupuestoMs` y lo reenciende por debajo del 70 % de ese presupuesto.
    * `manual` guarda una orden humana (null = sin orden); mientras no sea null, manda ella.
    */
-  gobernador?: { activo: boolean; presupuestoMs: number; p95StepMs: number; manual: boolean | null }; }
+  gobernador?: { activo: boolean; presupuestoMs: number; p95StepMs: number; manual: boolean | null;
+    /** Política vigente (`gobernador.politica`), techo de población vigente con la política `techo`
+     * (null = sin freno) y el último frenazo registrado (T164; no se borra al volver a verde). */
+    politica?: 'apagar' | 'techo'; techo?: number | null;
+    techoObservado?: { p95: number; poblacion: number; teselasActivas: number; teselasPorHabitante: number; senal: 'p95'; tick: number; motivo: string } | null }; }
 export type GestureKind = 'plant' | 'invite' | 'remember' | 'command';
 export interface Gesture { id: string; kind: GestureKind; x: number; y: number; memoryId?: string; agentId?: string; order?: Order; }
 export interface GestureResult {

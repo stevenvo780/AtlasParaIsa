@@ -17,9 +17,75 @@ export class RollingStepPerformance {
 /**
  * R17: preserve the hardware budget and its hysteresis. Load in [70 %, 100 %]
  * keeps the current state; falling below 70 % permits births again, never forces them.
+ * Política `gobernador.politica = 'apagar'` (la de 2026-09-19).
  */
 export function decideReproduction(p95StepMs: number, presupuestoMs: number, actual: boolean): boolean {
   if (p95StepMs > presupuestoMs) return false;
   if (p95StepMs < presupuestoMs * 0.7) return true;
   return actual;
+}
+
+/** Estado de la política `techo`: el techo vigente (null = sin freno) y los pasos seguidos en rojo. */
+export interface EstadoTecho { techo: number | null; pasosEnRojo: number }
+export const ESTADO_TECHO_INICIAL: Readonly<EstadoTecho> = Object.freeze({ techo: null, pasosEnRojo: 0 });
+
+/**
+ * Política `gobernador.politica = 'techo'` (revisión 2026-09-22; T162/T164 parciales de la feature 002).
+ * El hardware limita el CRECIMIENTO, no el reemplazo:
+ * · Verde (p95 < 70 % del presupuesto): sin techo, la reproducción queda permitida.
+ * · Rojo (p95 > presupuesto): si no había techo se fija en la población actual; solo se permiten
+ *   nacimientos mientras la población esté por debajo del techo (reponer muertes, no crecer).
+ *   Si el rojo es grave (p95 > 2× presupuesto) y persiste, el techo baja una unidad por ventana
+ *   de `GOVERNOR_WINDOW_STEPS` pasos: la población decrece por muertes no repuestas.
+ * · Banda muerta [70 %, 100 %]: el techo vigente se conserva tal cual (histéresis de R17).
+ * Función pura: no toca el mundo ni relojes; el estado viaja como argumento y como resultado.
+ */
+export function decidirConTecho(p95StepMs: number, presupuestoMs: number, poblacion: number, estado: Readonly<EstadoTecho>): { reproduccion: boolean; estado: EstadoTecho } {
+  if (p95StepMs < presupuestoMs * 0.7) return { reproduccion: true, estado: { techo: null, pasosEnRojo: 0 } };
+  let techo = estado.techo, pasosEnRojo = estado.pasosEnRojo;
+  if (p95StepMs > presupuestoMs) {
+    if (techo === null) techo = poblacion;
+    pasosEnRojo += 1;
+    if (p95StepMs > presupuestoMs * 2 && pasosEnRojo % GOVERNOR_WINDOW_STEPS === 0) techo = Math.max(0, techo - 1);
+  } else pasosEnRojo = 0;
+  return { reproduccion: techo === null || poblacion < techo, estado: { techo, pasosEnRojo } };
+}
+
+/** T164: registro del último frenazo (no se borra al volver a verde). Es publicación, no regla. */
+export interface TechoObservado { p95: number; poblacion: number; teselasActivas: number; teselasPorHabitante: number; senal: 'p95'; tick: number; motivo: string }
+
+export function describirFrenazo(p95: number, presupuestoMs: number, poblacion: number, teselasActivas: number, tick: number): TechoObservado {
+  const teselasPorHabitante = poblacion > 0 ? teselasActivas / poblacion : 0;
+  return { p95, poblacion, teselasActivas, teselasPorHabitante, senal: 'p95', tick,
+    motivo: `frenado por p95 = ${p95.toFixed(1)} ms > ${presupuestoMs} ms con ${poblacion} habitantes y ${teselasActivas} teselas activas (paso ${tick})` };
+}
+
+/**
+ * Gobernador completo, compartido por el servidor (`app.ts`) y el laboratorio (`scripts/lab/replica.ts`)
+ * para que ambos apliquen exactamente la misma política sobre la misma ventana. Guarda solo estado de
+ * ejecución (nada entra en el mundo ni en su digesto); `manual` (orden humana) lo administra quien lo usa.
+ */
+export class Gobernador {
+  readonly medidas = new RollingStepPerformance();
+  p95StepMs = 0;
+  estado: EstadoTecho = { ...ESTADO_TECHO_INICIAL };
+  techoObservado: TechoObservado | null = null;
+  private enRojo = false;
+
+  registrar(stepMs: number): number { this.p95StepMs = this.medidas.record(stepMs); return this.p95StepMs; }
+
+  /**
+   * Decide `reproductionEnabled` para el paso siguiente. `actual` es el valor vigente del mundo.
+   * Sin mediciones todavía (primer paso) no se afirma nada sobre el hardware y se devuelve `actual`.
+   */
+  decidir(params: { presupuestoMs: number; politica: 'apagar' | 'techo' }, actual: boolean, poblacion: number, teselasActivas: number, tick: number): boolean {
+    if (this.medidas.count === 0) return actual;
+    const rojo = this.p95StepMs > params.presupuestoMs;
+    if (rojo && !this.enRojo) this.techoObservado = describirFrenazo(this.p95StepMs, params.presupuestoMs, poblacion, teselasActivas, tick);
+    this.enRojo = rojo;
+    if (params.politica === 'apagar') { this.estado = { ...ESTADO_TECHO_INICIAL }; return decideReproduction(this.p95StepMs, params.presupuestoMs, actual); }
+    const decision = decidirConTecho(this.p95StepMs, params.presupuestoMs, poblacion, this.estado);
+    this.estado = decision.estado;
+    return decision.reproduccion;
+  }
 }

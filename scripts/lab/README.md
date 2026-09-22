@@ -180,6 +180,21 @@ Con `--gobernador servidor`, cada `dia-NNN.json` añade (ninguno de estos campos
 `scripts/lab/barrido.ts` acepta `--gobernador no|servidor` y lo reenvía tal cual a cada réplica del
 barrido (omitido ⇒ no se pasa nada ⇒ comportamiento de siempre).
 
+## Observador de comunidades (`observa-comunidades.ts`, hipótesis COM 2026-09-22)
+
+`dia-NNN.json` no lleva el censo de comunidades y su conjunto de claves está fijado por
+`tests/lab.test.ts`. Para medirlo sin tocar la réplica se precarga un observador:
+
+```sh
+npx tsx --import ./scripts/lab/observa-comunidades.ts scripts/lab/replica.ts --seed 42 --dias 6 --params "..." --salida DIR
+```
+
+Envuelve `Store.prototype.save` y, en cada guardado, añade una línea a `DIR/comunidades.jsonl`
+(número de comunidades, fundadas en total, sin comunidad, cambios/salidas/entradas desde la
+observación anterior, fundadas/disueltas y, por comunidad, miembros, distancia media y máxima al
+centro y grupos espaciales a ≤ 6 celdas). Sólo lee campos planos: los `dia-NNN.json` salen
+idénticos con y sin observador (comprobado contra la base de la noche, semillas 7/42/51926/1).
+
 ## Rendimiento
 
 Con `persistencia.cadaTicks = 1` (el valor por defecto, igual que producción hoy), guardar en cada

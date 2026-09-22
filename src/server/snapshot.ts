@@ -84,7 +84,8 @@ export function snapshotRecord(world: World, params: WorldParams, tiles: unknown
   return encoded;
 }
 export function encodeSnapshot(world: World, params: WorldParams = DEFAULT_PARAMS): string {
-  const encoded = snapshotRecord(world, params, encodeSnapshotTileRows(world.tiles));
+  const encoded = snapshotRecord(world, params, undefined);
+  encoded.tiles = encodeSnapshotTileRows(world.tiles);
   // Tile scalars were checked above. Keep their native serializer fast instead
   // of running a JS replacer for every scalar a second time. Metadata still uses
   // the exact scalar writer. Property order and ordinary bytes remain unchanged.

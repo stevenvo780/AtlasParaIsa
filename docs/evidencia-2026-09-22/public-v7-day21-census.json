@@ -1,0 +1,40 @@
+{
+  "at": "2026-09-22T12:08:20.194095+00:00",
+  "source": "public V7 world; readonly coherent SQLite transaction",
+  "snapshotDigest": "ffb656eb3fcff8e2756deaf0bb55fcaf637595088fcd205249e985474c054032",
+  "tick": 50900,
+  "days": 21.208333333333332,
+  "seed": 51926,
+  "rules": 7,
+  "roles": {
+    "S": 1,
+    "I": 1
+  },
+  "births": 7,
+  "demography": {
+    "deaths": 21,
+    "causes": {
+      "starvation": 0,
+      "dehydration": 0,
+      "exposure": 3,
+      "senescence": 18
+    },
+    "foodLost": 3.593950325594446,
+    "woodLost": 86.21195898258074,
+    "stoneLost": 52
+  },
+  "reproductionEnabledNow": true,
+  "legacyCount": 21,
+  "governorParams": {
+    "presupuestoMs": 50
+  },
+  "persistenceParams": {
+    "cadaTicks": 100,
+    "ventanaEventosTicks": 24000
+  },
+  "limits": [
+    "Health is process availability, not demographic success",
+    "Current reproductionEnabled does not reconstruct past governor pauses",
+    "No causal attribution of extinction from a census alone"
+  ]
+}

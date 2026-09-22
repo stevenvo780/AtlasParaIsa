@@ -7,6 +7,10 @@ reúne las correcciones de parentesco, enseñanza útil, fabricación por depend
 expresión genética inicial y búsqueda física de agua. La publicación `3dd615e` está
 activa con reglas 7, protocolo 9 y SQLite 4. El mundo nuevo avanza y conserva identidad
 y checkpoint tras reiniciar el servicio; el respaldo horario está habilitado.
+Al día21,21 el censo público dejó sólo S e I, tras siete nacimientos y21 muertes;
+no sostuvo el recambio mortal. Se conserva el resultado y su
+[evidencia](docs/evidencia-2026-09-22/public-v7-day21-census.json), sin atribuir una
+causa que el censo aislado no demuestra.
 La suite integrada y la publicación se documentan en
 [EVIDENCIA](docs/EVIDENCIA.md#revisión-y-ejecución-2026-09-22); los estados de servicio
 y cifras de las secciones históricas siguientes pertenecen a sus fechas.

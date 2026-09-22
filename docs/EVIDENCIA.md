@@ -1,5 +1,18 @@
 # Evidencia vigente
 
+## Mundo público V7: recambio insuficiente, 22 de septiembre de 2026
+
+Censo coherente readonly de las12:08:20UTC: semilla51926, tick50900/día21,21,
+**sólo S e I vivos**, siete nacimientos y21 fallecidos mortales;18 por senescencia y
+tres por exposición, sin muertes por hambre o sed. Los21 legados están archivados.
+Cadencia pública100, ventana de eventos24000 y presupuesto del gobernador50ms.
+`reproductionEnabled=true` en ese instante no permite reconstruir pausas pasadas.
+[Censo y checksum](evidencia-2026-09-22/public-v7-day21-census.json).
+La disponibilidad HTTP no demuestra éxito demográfico. No se reinició, repobló ni
+modificó este mundo para ocultar el resultado. El mecanismo de extinción requiere
+comparación causal; este censo por sí solo no se la atribuye al gobernador ni a V9,
+que todavía no está en el build público.
+
 ## Integración familiar V9, 22 de septiembre de 2026
 
 La integración `96e89b1` sobre la persistencia vigente pasó **981/981 pruebas sin

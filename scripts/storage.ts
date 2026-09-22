@@ -18,7 +18,17 @@ try {
     if (!existsSync(db)) throw new Error('No existe el mundo que se quiere copiar.');
     // Backing up an older running service must not migrate its schema underneath it.
     const store = new Store(db, { readOnly: true });
-    try { store.load(); store.backup(resolve(argument)); chmodSync(resolve(argument), 0o600); }
+    try {
+      if (!store.load()) throw new Error('Copia sin mundo.');
+      const destination = resolve(argument);
+      store.backup(destination); chmodSync(destination, 0o600);
+      // VACUUM copies a coherent SQLite version, possibly newer than the preload.
+      // Validate those copied bytes and archives through a fresh readonly reader.
+      // On rejection keep the copy as evidence and never print nominal success.
+      const copied = new Store(destination, { readOnly: true });
+      try { if (!copied.load()) throw new Error('Copia sin mundo.'); }
+      finally { copied.close(); }
+    }
     finally { store.close(); }
     console.log('Copia coherente creada. Conserva su acceso privado.');
   } else if (action === 'previous') {

@@ -1,0 +1,183 @@
+{
+  "started": "2026-09-22T11:35:16.587Z",
+  "finished": "2026-09-22T11:35:16.745Z",
+  "source": "/datos/workspaces/personal/AtlasParaIsa-family-v8-20260922/artifacts/family-reserve-v8-20260922/batch-2026-09-22T10-44-21-140Z",
+  "progress": {
+    "state": "succeeded",
+    "completed": 6,
+    "allSucceeded": true
+  },
+  "summary": {
+    "finishedAt": "2026-09-22T11:30:31.223Z",
+    "allSucceeded": true,
+    "interrupted": false,
+    "results": [
+      {
+        "id": "baseline-1007",
+        "side": "baseline",
+        "seed": 1007,
+        "status": "success",
+        "code": 0,
+        "signal": null,
+        "durationMs": 808201.258274
+      },
+      {
+        "id": "candidate-1007",
+        "side": "candidate",
+        "seed": 1007,
+        "status": "success",
+        "code": 0,
+        "signal": null,
+        "durationMs": 827754.306179
+      },
+      {
+        "id": "baseline-1012",
+        "side": "baseline",
+        "seed": 1012,
+        "status": "success",
+        "code": 0,
+        "signal": null,
+        "durationMs": 2091700.2581359998
+      },
+      {
+        "id": "candidate-1012",
+        "side": "candidate",
+        "seed": 1012,
+        "status": "success",
+        "code": 0,
+        "signal": null,
+        "durationMs": 2194451.418842
+      },
+      {
+        "id": "candidate-1013",
+        "side": "candidate",
+        "seed": 1013,
+        "status": "success",
+        "code": 0,
+        "signal": null,
+        "durationMs": 2701019.6933
+      },
+      {
+        "id": "baseline-1013",
+        "side": "baseline",
+        "seed": 1013,
+        "status": "success",
+        "code": 0,
+        "signal": null,
+        "durationMs": 2748155.454471
+      }
+    ]
+  },
+  "manifest": {
+    "version": 1,
+    "createdAt": "2026-09-22T10:44:21.807Z",
+    "directory": "/datos/workspaces/personal/AtlasParaIsa-family-v8-20260922/artifacts/family-reserve-v8-20260922/batch-2026-09-22T10-44-21-140Z",
+    "sourceWorkspace": "/datos/workspaces/personal/AtlasParaIsa-family-v8-20260922",
+    "days": 13,
+    "ticks": 31200,
+    "workers": 6,
+    "timeoutMs": 3600000,
+    "engine": "world",
+    "params": "persistencia.cadaTicks=20",
+    "metricasVersion": 2,
+    "sources": {
+      "baseline": {
+        "root": "/datos/workspaces/personal/AtlasParaIsa-family-v8-20260922/artifacts/family-reserve-v8-20260922/batch-2026-09-22T10-44-21-140Z/sources/baseline",
+        "originSha": "3dd615ee069d9d61f51a4c74f85d33c15a4583e0",
+        "rootDirty": false,
+        "sourceHash": "783b2dc78b0361a51e390c2e015429a984c50f8b1b6ce73bbd941d7e4d30778d",
+        "fullHash": "776ae07aa9a037e4d656f5abfc57d5cf770792d1102698e23ef68a4f9eadb4c7"
+      },
+      "candidate": {
+        "root": "/datos/workspaces/personal/AtlasParaIsa-family-v8-20260922/artifacts/family-reserve-v8-20260922/batch-2026-09-22T10-44-21-140Z/sources/candidate",
+        "originSha": "3dd615ee069d9d61f51a4c74f85d33c15a4583e0",
+        "rootDirty": true,
+        "sourceHash": "43399ac163978a1ccaf5b3f30fbbc9e3e590c99a2da0cb1365cbfd87e8d2cbde",
+        "fullHash": "e204dbe2d833db4833abc85a2e2bf69aa465d07fcadc8d532c3b622016c90895"
+      }
+    },
+    "instrumentRoot": "/datos/workspaces/personal/AtlasParaIsa-family-v8-20260922/artifacts/family-reserve-v8-20260922/batch-2026-09-22T10-44-21-140Z/instrument",
+    "instrumentHash": "12053834befc95ebedc4bf1bf4c4308ff49c040c21d233f585aa02d3f894f542",
+    "runnerHash": "51cca7ca31602cc40f361432bd42e65e5fab4edc4e8ba65787b1d97ed949fddb",
+    "jobs": [
+      {
+        "id": "baseline-1007",
+        "side": "baseline",
+        "seed": 1007,
+        "output": "/datos/workspaces/personal/AtlasParaIsa-family-v8-20260922/artifacts/family-reserve-v8-20260922/batch-2026-09-22T10-44-21-140Z/runs/baseline-1007",
+        "log": "/datos/workspaces/personal/AtlasParaIsa-family-v8-20260922/artifacts/family-reserve-v8-20260922/batch-2026-09-22T10-44-21-140Z/logs/baseline-1007.log"
+      },
+      {
+        "id": "candidate-1007",
+        "side": "candidate",
+        "seed": 1007,
+        "output": "/datos/workspaces/personal/AtlasParaIsa-family-v8-20260922/artifacts/family-reserve-v8-20260922/batch-2026-09-22T10-44-21-140Z/runs/candidate-1007",
+        "log": "/datos/workspaces/personal/AtlasParaIsa-family-v8-20260922/artifacts/family-reserve-v8-20260922/batch-2026-09-22T10-44-21-140Z/logs/candidate-1007.log"
+      },
+      {
+        "id": "baseline-1012",
+        "side": "baseline",
+        "seed": 1012,
+        "output": "/datos/workspaces/personal/AtlasParaIsa-family-v8-20260922/artifacts/family-reserve-v8-20260922/batch-2026-09-22T10-44-21-140Z/runs/baseline-1012",
+        "log": "/datos/workspaces/personal/AtlasParaIsa-family-v8-20260922/artifacts/family-reserve-v8-20260922/batch-2026-09-22T10-44-21-140Z/logs/baseline-1012.log"
+      },
+      {
+        "id": "candidate-1012",
+        "side": "candidate",
+        "seed": 1012,
+        "output": "/datos/workspaces/personal/AtlasParaIsa-family-v8-20260922/artifacts/family-reserve-v8-20260922/batch-2026-09-22T10-44-21-140Z/runs/candidate-1012",
+        "log": "/datos/workspaces/personal/AtlasParaIsa-family-v8-20260922/artifacts/family-reserve-v8-20260922/batch-2026-09-22T10-44-21-140Z/logs/candidate-1012.log"
+      },
+      {
+        "id": "baseline-1013",
+        "side": "baseline",
+        "seed": 1013,
+        "output": "/datos/workspaces/personal/AtlasParaIsa-family-v8-20260922/artifacts/family-reserve-v8-20260922/batch-2026-09-22T10-44-21-140Z/runs/baseline-1013",
+        "log": "/datos/workspaces/personal/AtlasParaIsa-family-v8-20260922/artifacts/family-reserve-v8-20260922/batch-2026-09-22T10-44-21-140Z/logs/baseline-1013.log"
+      },
+      {
+        "id": "candidate-1013",
+        "side": "candidate",
+        "seed": 1013,
+        "output": "/datos/workspaces/personal/AtlasParaIsa-family-v8-20260922/artifacts/family-reserve-v8-20260922/batch-2026-09-22T10-44-21-140Z/runs/candidate-1013",
+        "log": "/datos/workspaces/personal/AtlasParaIsa-family-v8-20260922/artifacts/family-reserve-v8-20260922/batch-2026-09-22T10-44-21-140Z/logs/candidate-1013.log"
+      }
+    ],
+    "scope": "Three predeclared pairs 1007/1012/1013, 13 days, V7 versus V8. 1007 is a diagnostic seed, not a holdout. Six children at nice 10, identical one-hour deadlines. stepWorld and production SQLite every 20 ticks; no governor, scheduler, clients or network. Concurrent timings are not a server performance gate."
+  },
+  "sourceHashes": {
+    "baseline": {
+      "sourceHash": "783b2dc78b0361a51e390c2e015429a984c50f8b1b6ce73bbd941d7e4d30778d",
+      "fullHash": "776ae07aa9a037e4d656f5abfc57d5cf770792d1102698e23ef68a4f9eadb4c7"
+    },
+    "candidate": {
+      "sourceHash": "43399ac163978a1ccaf5b3f30fbbc9e3e590c99a2da0cb1365cbfd87e8d2cbde",
+      "fullHash": "e204dbe2d833db4833abc85a2e2bf69aa465d07fcadc8d532c3b622016c90895"
+    }
+  },
+  "errors": [],
+  "artifacts": [
+    {
+      "path": "/tmp/atlas-family-v8-final/capture.json",
+      "sha256": "ba02e35697e647d51a71b6928e5f034a45371924667ff81c9d5d8b5b0f96d678"
+    },
+    {
+      "path": "/tmp/atlas-family-v8-final-capture.mjs",
+      "sha256": "8ee3efc72b18e96a79a05f1f9ecc111d8ff1c13e71d3d7ce730765fa07154285"
+    },
+    {
+      "path": "/tmp/atlas-family-v8-final/analyze.py",
+      "sha256": "62eed45b97c035cf915569620536dd9a5ff704d9398462cc326fe7b95ba9748b"
+    },
+    {
+      "path": "/tmp/atlas-family-v8-final/checkpoints.mjs",
+      "sha256": "c8f2228199f36861a2ca8491ce576cf40b55ec6b546a5ecce174d6ee21867655"
+    }
+  ],
+  "limits": [
+    "Three diagnostic seeds selected from prior observations; not reserved validation",
+    "Concurrent world engine without server governor",
+    "Candidate captured dirty before commit eaa2709: content hashes identify frozen bytes",
+    "No conclusion of general superiority or sustainability"
+  ]
+}

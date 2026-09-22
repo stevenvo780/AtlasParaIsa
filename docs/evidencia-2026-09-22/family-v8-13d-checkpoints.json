@@ -1,0 +1,95 @@
+{
+  "checkedAt": "2026-09-22T11:37:42.211Z",
+  "results": [
+    {
+      "id": "baseline-1007",
+      "slot": 0,
+      "version": 7,
+      "tick": 31200,
+      "mortals": 0,
+      "births": 0,
+      "deaths": 14,
+      "digest": "cc7faf10bbe60c7f38a460831bb3240ec422a7e7f7459f8070f6fa3e8630bbe8",
+      "before": {
+        "db": "481ea378cdbd198b0849899948d7042cfc893389ca6929c77b6bf144ff95efab",
+        "wal": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "filesUnchanged": true
+    },
+    {
+      "id": "candidate-1007",
+      "slot": 0,
+      "version": 8,
+      "tick": 31200,
+      "mortals": 0,
+      "births": 0,
+      "deaths": 14,
+      "digest": "64cbe7436cb7b6e64d0355879353542f09f8e374697d3623fb60c4c6a0bb86d4",
+      "before": {
+        "db": "8572e3a52bab890bac366804a6410815916dd29e4d9a5df70f6a644c6e60c7a1",
+        "wal": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "filesUnchanged": true
+    },
+    {
+      "id": "baseline-1012",
+      "slot": 0,
+      "version": 7,
+      "tick": 31200,
+      "mortals": 15,
+      "births": 11,
+      "deaths": 10,
+      "digest": "e92d14265e8b923cfc6e631ac08e814a70b20a1753010c8030768e936c7ff37b",
+      "before": {
+        "db": "439852db79eeced604d40a7bcba085bd0253daa89c7716a0b71962c8f10db27e",
+        "wal": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "filesUnchanged": true
+    },
+    {
+      "id": "candidate-1012",
+      "slot": 0,
+      "version": 8,
+      "tick": 31200,
+      "mortals": 24,
+      "births": 19,
+      "deaths": 9,
+      "digest": "da93d2facb7557ee900967cc09906e77421c0cbad50ee46d4557867536e11bf7",
+      "before": {
+        "db": "da30cf84c60e0e37131ea7f962ad4337b4f9ee84e7d0297e98be8054cbd5b39f",
+        "wal": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "filesUnchanged": true
+    },
+    {
+      "id": "baseline-1013",
+      "slot": 0,
+      "version": 7,
+      "tick": 31200,
+      "mortals": 22,
+      "births": 25,
+      "deaths": 17,
+      "digest": "d46d5bbd3a7bdf882761de0e7773ad3f8fa3fd41b4f005a111699a39f32df05f",
+      "before": {
+        "db": "678d74637bcbe4188b36906a97369d866dac8585934140d252cc2b4ba2386c52",
+        "wal": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "filesUnchanged": true
+    },
+    {
+      "id": "candidate-1013",
+      "slot": 0,
+      "version": 8,
+      "tick": 31200,
+      "mortals": 20,
+      "births": 27,
+      "deaths": 21,
+      "digest": "1f19698e449334c7f3c35391b921b818b7cf4767cd35ce0139b7ceaa4384888b",
+      "before": {
+        "db": "13caa15c47794f3458f04d18d3aa78a16cf7a9e5938c728ce8fe3407f7464e4d",
+        "wal": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "filesUnchanged": true
+    }
+  ]
+}

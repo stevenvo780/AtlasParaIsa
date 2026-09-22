@@ -3,10 +3,10 @@ import { readFileSync, statSync } from 'node:fs';
 import { resolve, extname, sep } from 'node:path';
 import { isIP } from 'node:net';
 import { WebSocketServer, WebSocket } from 'ws';
-import { createWorld, stepWorld, projectWorld, normalizeViewport, cloneWorld, personDetail, type World } from '../world/index.js';
+import { createWorld, stepWorld, projectWorld, normalizeViewport, cloneWorld, personDetail, fraccionSerial, type World, type FaseMedicion } from '../world/index.js';
 import { paramsOf, type WorldParams } from '../world/params.js';
 import { technologyRecipeDetail } from '../world/technology.js';
-import type { ClientMessage, Gesture, GestureResult, ServerMessage, Viewport, WorldView, RuntimeStats } from '../shared/types.js';
+import type { ClientMessage, Gesture, GestureResult, ServerMessage, Viewport, WorldView, RuntimeStats, FaseNombre } from '../shared/types.js';
 import { Store, fingerprint, GestureConflict, SessionRevoked } from './store.js';
 import { cookie, hashToken, makeToken, passwordVerifier, sessionHash } from './auth.js';
 import { ensureWorldInstance, readWorldInstance } from './world-instance.js';
@@ -129,7 +129,12 @@ export function createApp(options: AppOptions) {
   const context = store.context;
   const measurements = new RollingStepPerformance();
   const beats: number[] = [];
+  // T107: nombres fijos de `FaseNombre`, listados una vez para no repetir el literal en cada
+  // reinicio del registro (uno nuevo por paso; nunca se reutiliza el del paso anterior).
+  const FASE_NOMBRES: readonly FaseNombre[] = ['maintainRegions', 'ecologia', 'kernel', 'fauna', 'personas', 'encuentros', 'demografia', 'comunidades', 'reproduccion', 'checkpoint', 'muestreo', 'save', 'broadcast'];
+  const fasesEnCero = (): Record<FaseNombre, number> => Object.fromEntries(FASE_NOMBRES.map(nombre => [nombre, 0])) as Record<FaseNombre, number>;
   const runtime: RuntimeStats = { stepMs: 0, p95StepMs: 0, cloneMs: 0, simulationMs: 0, saveMs: 0, projectionMs: 0, snapshotBytes: 0, activeTiles: world.tiles.length, processRssMiB: process.memoryUsage.rss() / 1048576, tickHz: 0,
+    fases: fasesEnCero(), fraccionSerial: 0,
     gobernador: { activo: world.reproductionEnabled, presupuestoMs: paramsOf(world).gobernador.presupuestoMs, p95StepMs: 0, manual: null } };
   /**
    * Ruling R17: la población la limita el HARDWARE, no un tope fijo. Tras medir el paso,
@@ -229,7 +234,13 @@ export function createApp(options: AppOptions) {
       const draft = cloneWorld(world, context);
       runtime.cloneMs = monotonicNow() - cloneStarted;
       const simulationStarted = monotonicNow();
-      const results = stepWorld(draft, valid.map(item => item.gesture), context);
+      // T107: `medicion.fases` empieza vacío en cada paso (nunca se arrastra el del anterior).
+      // Reloj propio, **no** `monotonicNow`: perfilar por fase es observabilidad de hardware
+      // real, nunca la variable de la que dependen las cuentas exactas de paso/gobernador con
+      // reloj inyectado en pruebas (`tests/gobernador.test.ts`); compartir el contador falso
+      // haría que instrumentar sumara ticks fantasma a `simulationMs`/`stepMs`.
+      const medicion: FaseMedicion = { clock: () => performance.now(), fases: {} };
+      const results = stepWorld(draft, valid.map(item => item.gesture), context, medicion);
       runtime.simulationMs = monotonicNow() - simulationStarted;
       if (results.length !== valid.length) throw new Error('Gesture result count mismatch');
       // C3/C12: persistir es una transacción por cadencia, no por tick. Un gesto
@@ -247,7 +258,18 @@ export function createApp(options: AppOptions) {
       governReproduction(world);
       runtime.activeTiles = world.tiles.length; runtime.processRssMiB = process.memoryUsage.rss() / 1048576; runtime.snapshotBytes = store.lastSnapshotBytes;
       for (let i=0; i<valid.length; i++) { pending.delete(valid[i].gesture.id); valid[i].resolve(results[i]); }
-      if (world.tick % 5 === 0 || valid.length) broadcast();
+      // T107: `broadcast` mide su propio tramo porque corre después de que `stepMs` ya cerró
+      // (siempre corrió así; instrumentarlo no adelanta ni retrasa el envío ni cambia su cadencia).
+      // Reloj real, no `monotonicNow` — mismo motivo que `medicion` arriba.
+      const fases = fasesEnCero();
+      Object.assign(fases, medicion.fases, { save: runtime.saveMs });
+      if (world.tick % 5 === 0 || valid.length) {
+        const broadcastStarted = performance.now();
+        broadcast();
+        fases.broadcast = performance.now() - broadcastStarted;
+      }
+      runtime.fases = fases;
+      runtime.fraccionSerial = fraccionSerial(fases);
     } catch (error) {
       if (error instanceof SessionRevoked) {
         for (const item of pending.values()) if (!store.sessionValid(item.hash)) {

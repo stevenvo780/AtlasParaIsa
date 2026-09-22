@@ -1,5 +1,5 @@
 import { recordChronicleEvent, enableChronicleJournal, assertChronicleJournal, type ChronicleJournal } from './chronicle-journal.js';
-import { PROTOCOL_VERSION, type Action, type ChronicleEvent, type Gesture, type GestureResult, type MemoryView, type PersonView, type PersonDetail, type PlaceView, type Tile, type WorldView, type Viewport, type Order, type CommunityView, type WorldSample } from '../shared/types.js';
+import { PROTOCOL_VERSION, type Action, type ChronicleEvent, type Gesture, type GestureResult, type MemoryView, type PersonView, type PersonDetail, type PlaceView, type Tile, type WorldView, type Viewport, type Order, type CommunityView, type WorldSample, type FaseNombre } from '../shared/types.js';
 import { activate, bindWorldContext, maintainRegions, normalizeViewport, projectTerrain, tileAt, validCoordinate, worldContext, type ChunkMeta, type WorldContext } from './spatial.js';
 import { chunkKey, generateChunk, proceduralPlaceName, legacyStructures, type Chunk } from './terrain.js';
 import { assertGenome, DEFAULT_MUTATION_RATE, expressGenome, founderGenome, inheritGenome, type Genome } from './genetics.js';
@@ -1020,37 +1020,68 @@ function applyGesture(world: World, gesture: Gesture, order: number): GestureRes
 }
 
 /** One fixed 100 ms step. Browser presence and wall-clock time are never inputs. */
-export function stepWorld(world: World, inputs: Gesture[] = [], context: WorldContext = worldContext(world)): GestureResult[] {
+/**
+ * T107 (perfil por fase y fracción serial): reloj inyectado por el llamador —nunca
+ * `performance.now()`/`Date.now()` aquí, regla 3— y el registro mutable donde se acumulan los
+ * milisegundos por fase de este paso. Sin instrumentación (`medicion` ausente) el coste es un
+ * único `if`; con ella, dos lecturas de reloj por fase.
+ */
+export interface FaseMedicion { clock: () => number; fases: Partial<Record<FaseNombre, number>>; }
+function medirFase<T>(medicion: FaseMedicion | undefined, nombre: FaseNombre, fn: () => T): T {
+  if (!medicion) return fn();
+  const start = medicion.clock();
+  const value = fn();
+  medicion.fases[nombre] = (medicion.fases[nombre] ?? 0) + (medicion.clock() - start);
+  return value;
+}
+/**
+ * T107/FR-021: qué fases son serie **por diseño** hoy, según la tabla de fases de `plan.md`
+ * (0 · Coordinador y D/E · Global y barrera) y la lista irreducible de `research.md` D21
+ * (nacimientos, muertes, comunidades, checkpoint tecnológico, muestreo, `Store.save`). El resto
+ * son las que la etapa B/C planean mover a workers (percepción/decisión por región). No incluye
+ * el clon del paso (`cloneMs`): esa fase no está en la lista de `FaseNombre` de esta tarea.
+ */
+export const FASES_SERIALES: ReadonlySet<FaseNombre> = new Set(['maintainRegions', 'demografia', 'comunidades', 'reproduccion', 'checkpoint', 'muestreo', 'save', 'broadcast']);
+/** T107: fracción de la suma de fases nombradas que es serie por diseño; 0 con suma cero para no dividir por cero ni devolver fuera de [0,1]. */
+export function fraccionSerial(fases: Partial<Record<FaseNombre, number>>): number {
+  let serie = 0, total = 0;
+  for (const [nombre, ms] of Object.entries(fases) as [FaseNombre, number][]) { total += ms; if (FASES_SERIALES.has(nombre)) serie += ms; }
+  return total > 0 ? serie / total : 0;
+}
+export function stepWorld(world: World, inputs: Gesture[] = [], context: WorldContext = worldContext(world), medicion?: FaseMedicion): GestureResult[] {
   bindWorldContext(world, context);
   if (world.technology.checkpoint === undefined) world.technology.checkpoint = captureTechnologyCheckpoint(world.technology, world.people, world.tick, 'migration');
   world.tick++;
-  maintainRegions(world, context);
+  medirFase(medicion, 'maintainRegions', () => maintainRegions(world, context));
   const results = inputs.map((gesture, order) => applyGesture(world, gesture, order));
   world.invitations = world.invitations.filter(invitation => invitation.until > world.tick);
   world.reminders = world.reminders.filter(reminder => reminder.until > world.tick);
-  ecology(world);
+  medirFase(medicion, 'ecologia', () => ecology(world));
   // T013 (decaimiento de fertilidad) + T035 (gateo de cuenca duradero: la lluvia no rellena
   // una tesela fuera de cuenca) viajan juntos en las mismas opciones de ecología.
-  stepEcosystem(world.tiles, world.tick, world.weather, phaseAt(world.tick), false,
-    { decaimientoFertilidad: paramsOf(world).recursos.decaimientoFertilidad, seed: world.seed, cuencas: paramsOf(world).agua.cuencas });
-  stepAnimals(world,event=>addEvent(world,event));
-  stepStructures(world,event=>addEvent(world,event));
-  for (const person of world.people) bodyAndAction(world, person);
-  for (const person of world.people) {
-    const chunk = world.chunks[chunkKey(person.x, person.y)]!;
-    if (!chunk.discovered) {
-      chunk.discovered = true; world.discoveredChunks++;
-      const event = addEvent(world, { kind: 'discovery', actors: [person.id], x: person.x, y: person.y, source: 'simulation', text: `${person.name} descubrió ${proceduralPlaceName(world.seed, chunk.cx * 16, chunk.cy * 16)}.`, cause: 'Entró físicamente en una región que ningún habitante había recorrido; mirar con la cámara no cuenta como exploración.' });
-      remember(person, world, 'Un nuevo territorio amplió los caminos posibles.', event.id);
+  medirFase(medicion, 'kernel', () => stepEcosystem(world.tiles, world.tick, world.weather, phaseAt(world.tick), false,
+    { decaimientoFertilidad: paramsOf(world).recursos.decaimientoFertilidad, seed: world.seed, cuencas: paramsOf(world).agua.cuencas }));
+  medirFase(medicion, 'fauna', () => { stepAnimals(world,event=>addEvent(world,event)); stepStructures(world,event=>addEvent(world,event)); });
+  medirFase(medicion, 'personas', () => {
+    for (const person of world.people) bodyAndAction(world, person);
+    for (const person of world.people) {
+      const chunk = world.chunks[chunkKey(person.x, person.y)]!;
+      if (!chunk.discovered) {
+        chunk.discovered = true; world.discoveredChunks++;
+        const event = addEvent(world, { kind: 'discovery', actors: [person.id], x: person.x, y: person.y, source: 'simulation', text: `${person.name} descubrió ${proceduralPlaceName(world.seed, chunk.cx * 16, chunk.cy * 16)}.`, cause: 'Entró físicamente en una región que ningún habitante había recorrido; mirar con la cámara no cuenta como exploración.' });
+        remember(person, world, 'Un nuevo territorio amplió los caminos posibles.', event.id);
+      }
     }
-  }
-  encounters(world);
-  advancePopulation(world,{emit:event=>addEvent(world,event.kind==='death'?deathContext(world,event):event),beforeDeath:transferEstate});
-  updateCommunities(world, event => addEvent(world, event));
-  reproduce(world);
-  if (catalogueEnabled(world.technology)) for (const person of world.people) maintainTechnologyMemory(world, person);
-  advanceTechnologyCheckpoint(world.technology, world.people, world.tick);
-  recordSample(world);
+  });
+  medirFase(medicion, 'encuentros', () => encounters(world));
+  medirFase(medicion, 'demografia', () => advancePopulation(world,{emit:event=>addEvent(world,event.kind==='death'?deathContext(world,event):event),beforeDeath:transferEstate}));
+  medirFase(medicion, 'comunidades', () => updateCommunities(world, event => addEvent(world, event)));
+  medirFase(medicion, 'reproduccion', () => reproduce(world));
+  medirFase(medicion, 'checkpoint', () => {
+    if (catalogueEnabled(world.technology)) for (const person of world.people) maintainTechnologyMemory(world, person);
+    advanceTechnologyCheckpoint(world.technology, world.people, world.tick);
+  });
+  medirFase(medicion, 'muestreo', () => recordSample(world));
   return results;
 }
 

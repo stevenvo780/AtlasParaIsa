@@ -75,9 +75,10 @@ export const WORLD_LIMIT_KEYS = ['teselasActivas', 'chunks', 'comunidades', 'fau
 
 export function assertWorldLimits(value: unknown, configured = false): asserts value is WorldLimits {
   if (!value || typeof value !== 'object' || Array.isArray(value)
-    || Object.keys(value).length !== WORLD_LIMIT_KEYS.length + Number(configured)
-    || configured && !['historicos', 'parametros'].includes((value as WorldParams['limites']).aplicacion)
-    || WORLD_LIMIT_KEYS.some(key => !Object.hasOwn(value, key)
+    || Reflect.ownKeys(value).length !== WORLD_LIMIT_KEYS.length + Number(configured)
+    || configured && (!Object.prototype.propertyIsEnumerable.call(value, 'aplicacion')
+      || !['historicos', 'parametros'].includes((value as WorldParams['limites']).aplicacion))
+    || WORLD_LIMIT_KEYS.some(key => !Object.prototype.propertyIsEnumerable.call(value, key)
       || !Number.isSafeInteger((value as WorldLimits)[key]) || (value as WorldLimits)[key] < 1))
     throw new Error('Límites de admisión inválidos: se requieren cuatro enteros seguros positivos.');
 }

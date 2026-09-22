@@ -1,0 +1,190 @@
+{
+  "candidateRoot": "/tmp/atlas-t100-limits-independent-r3/fixed-ac0703d",
+  "directory": "/tmp/atlas-t100-limits-independent-r3/compatibility-chain-1lMWL2",
+  "results": [
+    {
+      "key": "teselasActivas",
+      "status": "passed",
+      "phases": [
+        {
+          "phase": "load",
+          "tick": 0,
+          "physicalHash": "f5fd66a1d0d709f20d1d34c8bd24c8533a32b545f564220445c399511847b730",
+          "baselineFullDigest": "15d7e1aee201166b1932d80252a3fd9831f9adc2bf7c1a62d41da46b91927c8e",
+          "candidateFullDigest": "42ac6ec59f4017875ea5803a43c31c00909b5dcd1c24ddaf9ecd68d6a7cb8858",
+          "fullDigestComparable": false
+        },
+        {
+          "phase": "step",
+          "tick": 1,
+          "physicalHash": "16e4b422d745f5bb897267d86c9024a1fba046cdfc50c5a57ffbd86512c6621a",
+          "baselineFullDigest": "f79e6e8aad21b75d4d2178bbba2c930e0fb2a2ebf20ce2bccb17fff95bd25e19",
+          "candidateFullDigest": "7511399082db7452121743c490e5706111bc80558a2c1995f866f338bb2a298d",
+          "fullDigestComparable": false
+        },
+        {
+          "phase": "save",
+          "tick": 1,
+          "physicalHash": "58fc031c83b86db2bd00f55f2df369fad9c27d0be975564de6daa8420be59d7d",
+          "baselineFullDigest": "00502dfd59abb8d83cf2b13028d5cb489016ca127e8fd2a7a92a690a32af2eab",
+          "candidateFullDigest": "79cf98b7ba4a4a06cfab7dbc7a5975b1c3c7239afb659f0d9d0d9b87fcd249ad",
+          "fullDigestComparable": false
+        },
+        {
+          "phase": "reopen",
+          "tick": 1,
+          "physicalHash": "762c29d0d78ccfa2199bcd6858a2e71f99f70af5908a88af381f29f8c7555ffe",
+          "baselineFullDigest": "00502dfd59abb8d83cf2b13028d5cb489016ca127e8fd2a7a92a690a32af2eab",
+          "candidateFullDigest": "79cf98b7ba4a4a06cfab7dbc7a5975b1c3c7239afb659f0d9d0d9b87fcd249ad",
+          "fullDigestComparable": false
+        }
+      ],
+      "profile": {
+        "version": 2,
+        "aplicacion": "historicos",
+        "teselasActivas": 65536,
+        "chunks": 256,
+        "comunidades": 8,
+        "fauna": 393216
+      }
+    },
+    {
+      "key": "chunks",
+      "status": "passed",
+      "phases": [
+        {
+          "phase": "load",
+          "tick": 0,
+          "physicalHash": "f5fd66a1d0d709f20d1d34c8bd24c8533a32b545f564220445c399511847b730",
+          "baselineFullDigest": "d17b3407becdbb56ed9f1fcfa50cb238b626387c37c4f4582282f9aa0c352b27",
+          "candidateFullDigest": "6b8e77946457e5a052b2c54c9fc1178a73a08dd144d70a1964c3636c7d1b3517",
+          "fullDigestComparable": false
+        },
+        {
+          "phase": "step",
+          "tick": 1,
+          "physicalHash": "16e4b422d745f5bb897267d86c9024a1fba046cdfc50c5a57ffbd86512c6621a",
+          "baselineFullDigest": "9cccf399962ed7c78b4b4b77bac01225c9d47119520d8e67181e701f01782fd2",
+          "candidateFullDigest": "2646f6df44effd97b10fcc66418e6907afa3ef53da046bb49f6cd5f45571145f",
+          "fullDigestComparable": false
+        },
+        {
+          "phase": "save",
+          "tick": 1,
+          "physicalHash": "58fc031c83b86db2bd00f55f2df369fad9c27d0be975564de6daa8420be59d7d",
+          "baselineFullDigest": "fd5de2eb94b7f8c279c4210d30dfae979f29ee024b60e4f21f9241a8500beddc",
+          "candidateFullDigest": "ede90f086eecf3f368dba435b74171b6164c1bbc101d4609e7dcabda78f66f23",
+          "fullDigestComparable": false
+        },
+        {
+          "phase": "reopen",
+          "tick": 1,
+          "physicalHash": "762c29d0d78ccfa2199bcd6858a2e71f99f70af5908a88af381f29f8c7555ffe",
+          "baselineFullDigest": "fd5de2eb94b7f8c279c4210d30dfae979f29ee024b60e4f21f9241a8500beddc",
+          "candidateFullDigest": "ede90f086eecf3f368dba435b74171b6164c1bbc101d4609e7dcabda78f66f23",
+          "fullDigestComparable": false
+        }
+      ],
+      "profile": {
+        "version": 2,
+        "aplicacion": "historicos",
+        "teselasActivas": 65536,
+        "chunks": 256,
+        "comunidades": 8,
+        "fauna": 393216
+      }
+    },
+    {
+      "key": "comunidades",
+      "status": "passed",
+      "phases": [
+        {
+          "phase": "load",
+          "tick": 0,
+          "physicalHash": "55b0f58e79a7cab1c22e485debdd314e2807e49c0c525db12f5272749d347471",
+          "baselineFullDigest": "b462e9249eed76d8ec35c49efc922b70878ba6a5a0e8da89c71854c993e16e32",
+          "candidateFullDigest": "704733e31331ded2eedc3107be8389fcbf9e5446c405d003afbb5db40a222427",
+          "fullDigestComparable": false
+        },
+        {
+          "phase": "step",
+          "tick": 1,
+          "physicalHash": "6b3c0b82d075b5a0ea8ca8e86090c3a81184b5676fb38a202311e8a3225c3e25",
+          "baselineFullDigest": "17d5ae6ffba3391e6cde11771625ecd22c66f6b615e8254f3f1dbb6aad775e80",
+          "candidateFullDigest": "7d5b354456a71a7534861c71f8304549fd476eefa0af02bae1b5e55af28e6ab9",
+          "fullDigestComparable": false
+        },
+        {
+          "phase": "save",
+          "tick": 1,
+          "physicalHash": "545bd12a093d86b7509e38aabc3439d3b86048118880fdd6362a2df6061acd8a",
+          "baselineFullDigest": "23fb5f2ee3235dd3e6d953e35424bd7aa5b28567dad65ac04fe434ba477dbbcb",
+          "candidateFullDigest": "f04e62a82310220a47d286c6f6d239f691d6ebf39894bd640b9d399d79d10a47",
+          "fullDigestComparable": false
+        },
+        {
+          "phase": "reopen",
+          "tick": 1,
+          "physicalHash": "deabcfd3265c9fa3f94d58d13271735354f3421161a485fe923ce7bae960a487",
+          "baselineFullDigest": "23fb5f2ee3235dd3e6d953e35424bd7aa5b28567dad65ac04fe434ba477dbbcb",
+          "candidateFullDigest": "f04e62a82310220a47d286c6f6d239f691d6ebf39894bd640b9d399d79d10a47",
+          "fullDigestComparable": false
+        }
+      ],
+      "profile": {
+        "version": 2,
+        "aplicacion": "historicos",
+        "teselasActivas": 65536,
+        "chunks": 256,
+        "comunidades": 8,
+        "fauna": 393216
+      }
+    },
+    {
+      "key": "fauna",
+      "status": "passed",
+      "phases": [
+        {
+          "phase": "load",
+          "tick": 0,
+          "physicalHash": "f5fd66a1d0d709f20d1d34c8bd24c8533a32b545f564220445c399511847b730",
+          "baselineFullDigest": "9cea14e2805d89c3b00e4fb28d3dabe9e0dd531d3543d93ac8cdf58f6fb56c07",
+          "candidateFullDigest": "c721f8acb8c884c1a2f9907dfa78436810406783ecbca2416c34e9e7d72d81af",
+          "fullDigestComparable": false
+        },
+        {
+          "phase": "step",
+          "tick": 1,
+          "physicalHash": "16e4b422d745f5bb897267d86c9024a1fba046cdfc50c5a57ffbd86512c6621a",
+          "baselineFullDigest": "d413c95dfa9eb45c2901c5adfb72f022960e3d2defa0cde0edbba320818d8460",
+          "candidateFullDigest": "cdc982af3e1125dbaf24e2d71049494b75eb2d6874be5d9557fcf625a0813e4d",
+          "fullDigestComparable": false
+        },
+        {
+          "phase": "save",
+          "tick": 1,
+          "physicalHash": "58fc031c83b86db2bd00f55f2df369fad9c27d0be975564de6daa8420be59d7d",
+          "baselineFullDigest": "cb5fdc61f6606497958bc1f8164c810bc7e64c2bd0939caa9631401afb8d2b1f",
+          "candidateFullDigest": "e42c25f98fe15a818b11d9516ea64f6b0332a205d118482469f46bd03bc844bb",
+          "fullDigestComparable": false
+        },
+        {
+          "phase": "reopen",
+          "tick": 1,
+          "physicalHash": "762c29d0d78ccfa2199bcd6858a2e71f99f70af5908a88af381f29f8c7555ffe",
+          "baselineFullDigest": "cb5fdc61f6606497958bc1f8164c810bc7e64c2bd0939caa9631401afb8d2b1f",
+          "candidateFullDigest": "e42c25f98fe15a818b11d9516ea64f6b0332a205d118482469f46bd03bc844bb",
+          "fullDigestComparable": false
+        }
+      ],
+      "profile": {
+        "version": 2,
+        "aplicacion": "historicos",
+        "teselasActivas": 65536,
+        "chunks": 256,
+        "comunidades": 8,
+        "fauna": 393216
+      }
+    }
+  ]
+}

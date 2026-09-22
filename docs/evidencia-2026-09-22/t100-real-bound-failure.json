@@ -1,0 +1,16 @@
+{
+  "tick": 62400,
+  "seed": 1001,
+  "version": 6,
+  "lengths": {
+    "tiles": 65792,
+    "people": 212,
+    "places": 156,
+    "events": 120,
+    "memories": 5,
+    "invitations": 0,
+    "reminders": 0
+  },
+  "tileEncoding": "tiles-tuple-v1",
+  "snapshotDigest": "6c30cbb33629d901bf8c872049d15e88e9e300bc76b0d1fea2fa908263fd30c9"
+}

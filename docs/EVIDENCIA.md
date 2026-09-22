@@ -1,5 +1,16 @@
 # Evidencia vigente
 
+## Límites persistidos compatibles, 22 de septiembre de 2026
+
+`39ac4b8`:1251/1251 pruebas sin omisiones, typecheck y build/smoke exactos.
+Cuatro límites declarados se validan mediante perfilv2 y el nuevo parámetro
+limites.aplicacion. Los valores reservados antiguos permanecen intactos en modo
+historicos; el digesto incorpora esa clave. Seis paridades físicas de1200 ticks,
+diez tablas exactas,42+2 controles independientes y cuatro cadenas legacy verdes.
+El ensayo2M y la resolución por hardware/admisión al activar todavía no cierran
+T100/A0. Una réplica V6 real falló en65792 teselas contra el límite viejo65536;
+ese resultado se conserva. [Gates y límites](REVISION-LIMITES-PERSISTIDOS-2026-09-22.md).
+
 ## Copias verificadas y semilla pública a25 días, 22 de septiembre de 2026
 
 `efed3c7` valida la copia posterior a VACUUM y todos los registros diferidos de

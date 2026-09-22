@@ -1,0 +1,168 @@
+{
+  "sourceSha": "39ac4b8e04113f18a60da7814645ae5825d5eb11",
+  "independentSourceSha": "ac0703d64d9067a16155e23fb388c1eca55b0c05",
+  "sourceBlobsMatchIndependent": true,
+  "sourceBlobs": {
+    "src/client/assets.d.ts": "da5bf71d48cf909584a01c80b445f730507068f5b34c920f352e2bfcf0315e4c",
+    "src/client/calor.ts": "0badff9eee93ea8bf3139e951add2c34441918bee20e00c8395928fa61f8cc50",
+    "src/client/connection.ts": "00bbf18a09af54ae5c8255478ae32a093c3b8e17fecd9eea1f8a6d0a9d6674c0",
+    "src/client/game.ts": "4ce4cb53b6619c8e9191be2aa13e5dd771f39f209bfab8522dc52c530a145fe6",
+    "src/client/gpu-terrain.ts": "6358268d850b9d7f9fc9eaaf71465af9f80eb45af26747ab9d6d02c132610344",
+    "src/client/icons.ts": "ac93abdf11d9e9af66a2c7ff0a065830f8ab296282fab8475c2c4020628232c2",
+    "src/client/inspector-view.ts": "8e73f336b357c2b4f5c3b7e77c3d447d130b8a0f4f35f0c244246e48fd98d9cd",
+    "src/client/landscape.ts": "56a8c9516714f15e205c6d5caf8900cc3a237e66ac74d4801a9a95ab21914127",
+    "src/client/life-art.ts": "b91f5329d5f2682acfafdba53f1a1d5c61773542d7898a4587938a694d471554",
+    "src/client/luz.ts": "a32c9a414821356ad9a92026ccd88d9c0172c22a983a36ae83c9973529c07fc5",
+    "src/client/main.ts": "1ee4d5f1660a7b563f9cc2c0fa34001a66196cb743d8cfd82d5f695cd2d8e7c5",
+    "src/client/modo.ts": "da299cfb83a3a5b7d98af8ad8bcf8daec3187c020341e5198bf15941adcc717a",
+    "src/client/notebook.ts": "2a402e8296984667e2d09940acba3d8db933b3ce79867b19abb704e041a65865",
+    "src/client/technology-art.ts": "352b915b170932af2c07e569b9901942dd0661c22af7bd3a10e735bfeaed9d8e",
+    "src/client/ui-catalog.ts": "2c575046663adfff12ef0b329df60e1e768d9325eed2a075cb9cb8558ef0485b",
+    "src/client/view-state.ts": "d277ab560a3dd27a1121e0a5b9d59275e93bc083cd9c5d0834bfa4c48fd65af5",
+    "src/client/visit-memory.ts": "59779ab05cb463e4251881315dd56058fff576bba334f5dc59dd0bb8164d879a",
+    "src/client/visual-state.ts": "4ae8b5f0189b325c070d95b31263aae23f8a1e158d5e78b3b2571b31cbba0d35",
+    "src/client/world-evidence.ts": "0931f518021743c5506ba22cbcb72d51c4612cf876fef24112a35bf26af1fe98",
+    "src/client/world-shell.ts": "e23460194a952687f08fe93bfb0ba04760dd6d7ca2e7b1dc07920097eee6b69f",
+    "src/server/app.ts": "8f0d87bf29635052aaa3d1bb7fd0a7e4f83c473d635e490d6d6745f765707257",
+    "src/server/auth.ts": "e8dc1eabf65ac7a5065d0582671be22813005f83c0cce00886a67c9d952c11d2",
+    "src/server/deployment-params.ts": "184bcd3f84781dc533bcb3cb5191d9bc4d3b5c308442dae71430906bae336608",
+    "src/server/governor.ts": "c122b0448c10ab444f7622b13912b91f9dc8fd87cc352006326dcfbdc2d713fb",
+    "src/server/lock.ts": "6818293ed97e2dc2862e7a06e42f8aa8c017a5f27e6656f338331f83a555f536",
+    "src/server/main.ts": "408733d7f78dc204a270b91ccaf06a72df6ed6b8a6e214b75529b1a08088fe10",
+    "src/server/snapshot-parts.ts": "1f2edc507e46146100f761d67052be0067b79dbb8aa52f9ec4d453174107688a",
+    "src/server/snapshot.ts": "127671fc6915d7365994eda49a85c4fd7c8f1d9ad7d4e1501dea3d2bda671fc8",
+    "src/server/store.ts": "85623bded999dca138b624a723453455c5c8649c592ef01d759cf5a21562e299",
+    "src/server/technology-archive.ts": "3820d2dbaf01ddb25e01debc320bd549c59d6b67e7eb56a72541cd01da0899d4",
+    "src/server/world-instance.ts": "0bb10082d68e29d900bad745f2e06ed284e79603ca49ab3c93792e27ed603969",
+    "src/shared/demography.ts": "a9e6d6f273957529e942d5358988171a7ab25327ced8d039706f7dfa5fb9fa6f",
+    "src/shared/exact-json.ts": "23fe2b1b8f9510f1e2474dc815ef2192fba9e78276690a7f9e5da1ba59a15194",
+    "src/shared/life.ts": "7c2ee3924ddbae01f55c22ff52ac2bd208e8877284c1ee48782f33239f1070bf",
+    "src/shared/organization.ts": "30d8869086faf0754002e240b3bef1fcec9600d51ab3b40c6bce7ef977f4a2bd",
+    "src/shared/param-syntax.ts": "c3c04b84c0f011357785ad8b8162e7a4f6d55865326c92b478504f8f90e19dd7",
+    "src/shared/technology-archive.ts": "4d9ad0b9f1be01e95fbfb5365b6a1391b3321f39c5bcfce0806d5cb2d0079354",
+    "src/shared/technology.ts": "2c82e88f4ce4fd4b1660cbc83b898066c726df4c7bd80118b151127c7304239d",
+    "src/shared/types.ts": "0f80432ee9f19026e7aae9e5c5f65ea31f901ad394f23e5dcd0076e73b685920",
+    "src/shared/world-instance.ts": "09967c006226f2fca8fd04af2ca3c310db67278e95d0cfaccbd193d241605349",
+    "src/world/agua.ts": "3f3be7cac9fffe40a31bd7d38b223b1d9398dd1d310d2170825b3b40bb031e0e",
+    "src/world/animals.ts": "fcd1cd2ba4969d0d2f59543aad95238d45c949019baf16dbc004bc8adcd25375",
+    "src/world/body.ts": "00643e43be3f11a5804772e9d0ccc405c447d23377997a5a4269937ecc2101cb",
+    "src/world/chronicle-journal.ts": "880f5298474445f435e820fc034b7019ca80007823cfa3607fa551f4b3ffedee",
+    "src/world/demography.ts": "09fececd55349ee7e48db5b632ddb1f06e6f8143a669a9f8611bfd3cbc531dfe",
+    "src/world/digesto.ts": "a94e90d74b3942d6ced54256a0bab7f4283d50e3e42492bff9351e5bf6082d74",
+    "src/world/diversidad.ts": "57b104be0efbd12d188dc352123c2982e83a15d27fa5d9bfcbf965f9cc33e6d3",
+    "src/world/ecosystem-kernel.ts": "b1cb946781e204fd9db31520c61699f4f91cf431d1b735351984f6e2e3bf9b78",
+    "src/world/ecosystem.ts": "24444f458e70e6c41bb0e9fc5f88290ee50fbe1edbd3b44109805ce89baeee10",
+    "src/world/family.ts": "ffb7f229b6e78f025f7062b399376ccdf5be621be450f0106802b360b17e84b5",
+    "src/world/forest.ts": "9c6c32126a74a35896038994f5988cb7b6490ef440b67fc741b7ce13e1e54212",
+    "src/world/genetics.ts": "6303faa03b11d4f5d659055947955aa16ff82f75a0e8cff143d6ad336da7e12e",
+    "src/world/index.ts": "bca236b54ce589ad1dde6ac0759acb483d9741d46ccfccc17957d07449c7e854",
+    "src/world/inventions.ts": "c45cd3b84f74c46eb9a1158c4fc3a52716ff0eafe5dfc2039aefe350f02c14a4",
+    "src/world/lineage.ts": "95bdd5495ceabe6e2988e03d31fb4fbb0c516b2af722710063f38f2d3fffb6c2",
+    "src/world/material-affordances.ts": "0bb5041204409e1545ec2f783862a46de325246520b4025c49ed7ef4cfc0e142",
+    "src/world/needs.ts": "40990c1ad6e824e247f70e217dad1bda0d986ab3d80d0d4c1c8561844061c292",
+    "src/world/organization.ts": "e6e3597bf46474fcfec908f01eb562089f37000b14ebea14b40e4eb91901b7b8",
+    "src/world/params.ts": "f146942ac31eadd1c2ebd82563e6a5217c17de2928bef9ee62cea0e8205ad608",
+    "src/world/society.ts": "6828319b26060bec728de7643a4f9becc63282fb09872d117292e3dde7fcadf3",
+    "src/world/spatial.ts": "17861e50a4e6ade76981a06541ab86bd8f87e42e5612ef7ec4c0fecc69d652e9",
+    "src/world/statistics.ts": "c4f8374433a8121c998c421d0eb044a2e4c0c860d214240f6552ed3a8ab4d0c0",
+    "src/world/technology-catalogue.ts": "7b3fd17ea57181b8aad059a9ae19f0e9f03e89f3d73c0a3c15e17aa246dcffc6",
+    "src/world/technology-checkpoint.ts": "34f16cc74a700265f2e5407ba3e52e984b74474c2fbd6444e99196586ce9469f",
+    "src/world/technology-execution.ts": "5d1423ee670dd034c5f50d3bd7b612e39eab40ba7181725aec42ab945c6e41a4",
+    "src/world/technology-journal.ts": "2687af97e425c1a13d9fc8a0c229eb12c544673f2ab04e3514cd4974be0abacf",
+    "src/world/technology-memory.ts": "8fdf32db2628ad7b311701fdac4067966f5e3fe2ad187d78a2eaf63cc20490fb",
+    "src/world/technology-organization.ts": "3840fa5602012386dc705e9fc7f46f0c18e3983a731481b05e1ca0bb8fa12dde",
+    "src/world/technology-water.ts": "51bb48999be20e560056739158a0127cf3351b81adafda69f0c434f2465ea9d6",
+    "src/world/technology.ts": "c805c56b649754324bd30ed80bfa9f7cde879b28b892c621a1063c28b7cb6ff4",
+    "src/world/terrain.ts": "538280dba7df8ee07b6b8ada9d2e8ddd007b82bc8d1bae3196927709d3f14c97",
+    "src/world/validation.ts": "3169589355b9f95dfaf3dfc149ce563631720831bf4caa15c130f697cceb4716"
+  },
+  "tests": {
+    "passed": 1251,
+    "failed": 0,
+    "skipped": 0,
+    "durationMs": 170868.149879
+  },
+  "previousFull": {
+    "passed": 1233,
+    "failed": 1,
+    "skipped": 0,
+    "reason": "Codec test assumed absent default params; repaired explicit complete parameter check, retaining complete world assertion."
+  },
+  "typecheckExitCode": 0,
+  "bounds": {
+    "memoryMaxBytes": 12884901888,
+    "heapMiB": 4096,
+    "swapMaxBytes": 0,
+    "testConcurrency": 8
+  },
+  "independent": {
+    "limitsAndPropertyTests": 42,
+    "versionAndAdmissionTests": 2,
+    "legacyChains": 4,
+    "failed": 0,
+    "skipped": 0
+  },
+  "parity": "t100-limits-integration-parity.json",
+  "parityMaxRssKiB": 575520,
+  "parityDigestContract": "Physical bytes and all prior law values exact. Full digest differs by declared limites.aplicacion=parametros; candidate equals independent old full digest after adding exactly that key to a non-simulated baseline view. No production field is excluded.",
+  "exactGate": {
+    "repository": "/datos/workspaces/personal/AtlasParaIsa-t100-integrated-20260922",
+    "revision": "39ac4b8e04113f18a60da7814645ae5825d5eb11",
+    "helperSha256": "6e944c787553f36fed2841f190e4ef7936f9b024658e8d8e42833a1657382d46",
+    "dependencies": "/datos/workspaces/personal/AtlasParaIsa/node_modules",
+    "worktree": "/tmp/atlas-deploy-check.mFctgr/worktree",
+    "startedAt": "2026-09-22T13:38:29Z",
+    "finishedAt": "2026-09-22T13:38:34.023Z",
+    "status": "passed",
+    "phase": "complete",
+    "exitCode": 0,
+    "buildExitCode": 0,
+    "smokeExitCode": 0,
+    "cleanup": true
+  },
+  "logs": [
+    {
+      "path": "/tmp/atlas-t100-r3-full.log",
+      "sha256": "9b5ccb242f45c9a2535600a8d4e69851be7a3b42ca26b2835131921374649fff"
+    },
+    {
+      "path": "/tmp/atlas-t100-r3-checkpoint.log",
+      "sha256": "359d8cb2ec675bcbee2ba4016275fff5969a0e87f19487149ded7abf5915b07b"
+    },
+    {
+      "path": "/tmp/atlas-t100-r3-combined-typecheck.log",
+      "sha256": "952d0130b7edf4ed056e0ba0cd962126c2acad44de8ab0c4f30ed3babd21bfe2"
+    },
+    {
+      "path": "/tmp/atlas-t100-r3-combined-full.log",
+      "sha256": "3a884afe2a27f05202072812a13920f2f1cd83f90d9ecab2ee478bf48d201093"
+    },
+    {
+      "path": "/tmp/atlas-t100-r3-parity.log",
+      "sha256": "2a239bf585c3496963cb90f2bc49673390cfa328c3038f51d2b6a7d6ce8f6cde"
+    },
+    {
+      "path": "/tmp/atlas-t100-r3-parity.mts",
+      "sha256": "40a3d418a329814a7b1734c827ba3118de2bde8280c9a8f02d8d4110e7771e84"
+    },
+    {
+      "path": "/tmp/atlas-t100-r3-combined-exact-gate.log",
+      "sha256": "504f32a4dd8c5a9895b3c470ade27904edccdf4b5635f18af8751c7f38d5610a"
+    },
+    {
+      "path": "/tmp/atlas-t100-limits-independent-r3/fixed-ac0703d/independent-final.tap",
+      "sha256": "83f105fed271ed6b00edeafb13543e329b3dda75b0355a2709dafa2c515d4b7a"
+    },
+    {
+      "path": "/tmp/atlas-t100-limits-independent-r3/fixed-ac0703d/r1-r2-final.tap",
+      "sha256": "d8bb2ed62f9f84e591185dabb1afc67149982ae7adc9535a541ade9bb5bfa38f"
+    }
+  ],
+  "pending": [
+    "Host resolver",
+    "Activation/materialization admission before mutation",
+    "Behavioral gates and rules10",
+    "Isolated2M gate",
+    "T100 and GateA0"
+  ]
+}

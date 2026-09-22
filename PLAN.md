@@ -15,7 +15,8 @@ La suite integrada y la publicación se documentan en
 [EVIDENCIA](docs/EVIDENCIA.md#revisión-y-ejecución-2026-09-22); los estados de servicio
 y cifras de las secciones históricas siguientes pertenecen a sus fechas.
 
-T102 ya dispone de parámetros tipados e inactivos. Tras los controles de Store y
+T102 dispone de parámetros tipados; los de límites ya distinguen aplicación
+histórica y explícita, mientras los backends futuros siguen inactivos. Tras los controles de Store y
 digesto, la integración técnica V7 alcanzó 946/946 pruebas sin omisiones, typecheck
 y build/smoke exactos. Recuperación estricta, migración V1 y números exactos tienen
 controles independientes; [persistencia](docs/REVISION-PERSISTENCIA-2026-09-22.md).
@@ -23,6 +24,10 @@ T100 ya tiene snapshots paginados en SQLite5:1153/1153 pruebas sin omisiones,
 typecheck, build/smoke exactos y seis paridades completas de1200 ticks. Siguen
 pendientes los límites persistidos por hardware y la puerta de dos millones de
 teselas; [gate técnico](docs/REVISION-PERSISTENCIA-PAGINADA-2026-09-22.md).
+La admisión persistida posterior conserva los valores reservados de copias antiguas
+mediante un modo explícito, incluido en el digesto:1251/1251 pruebas conjuntas,
+seis paridades físicas y revisión independiente. Faltan resolución por hardware,
+admisión previa a materialización y ley10; [contrato](docs/REVISION-LIMITES-PERSISTIDOS-2026-09-22.md).
 El backup verifica ahora la copia terminada, incluidos chunks e identidades
 diferidos:1170/1170 pruebas y build/smoke exactos;
 [alcance](docs/REVISION-BACKUP-2026-09-22.md).

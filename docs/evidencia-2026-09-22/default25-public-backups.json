@@ -1,0 +1,59 @@
+{
+  "at": "2026-09-22T13:30:59.655218+00:00",
+  "method": "Read private decompressed backups; verify slot0 checksum; aggregate selected fields only. No live DB read or change.",
+  "scope": "Four checkpoints, not governor history or causal attribution. Snapshot is saved before that step governor decision.",
+  "rows": [
+    {
+      "backup": "world-20260922-0532.sqlite.gz",
+      "compressedSha256": "4099364f2d08bc02b5857176dd0a87214797233ace9ac1857a54adfb628d4740",
+      "snapshotDigest": "9303ffb2879f921f7f200a1bac72c6b29aa2e6676a53f2b9fcbbbc95878b194c",
+      "tick": 2900,
+      "version": 7,
+      "seed": 51926,
+      "mortals": 20,
+      "births": 6,
+      "deaths": 0,
+      "reproductionEnabledAtSnapshot": true,
+      "inputCount": 0
+    },
+    {
+      "backup": "world-20260922-0601.sqlite.gz",
+      "compressedSha256": "1395c0e85a7d78e7c12c1fb0b92d3e2b871d5aa4232df013c5fca9d538c50fd6",
+      "snapshotDigest": "fc39651bf93f8918824eaed6b883991454495dd8fb1482bd6f75951625e9e7a8",
+      "tick": 16300,
+      "version": 7,
+      "seed": 51926,
+      "mortals": 21,
+      "births": 7,
+      "deaths": 0,
+      "reproductionEnabledAtSnapshot": false,
+      "inputCount": 0
+    },
+    {
+      "backup": "world-20260922-0700.sqlite.gz",
+      "compressedSha256": "79a659ba997dbedb6dd5157d5ac7ff7e8fcdd6d1ab14bc5fe005520d073501c8",
+      "snapshotDigest": "afbe87a380eb0af91eb517a22c8bc2f46e1a1f4e74e63548087d731b5a777c0b",
+      "tick": 46100,
+      "version": 7,
+      "seed": 51926,
+      "mortals": 2,
+      "births": 7,
+      "deaths": 19,
+      "reproductionEnabledAtSnapshot": true,
+      "inputCount": 0
+    },
+    {
+      "backup": "world-20260922-0800.sqlite.gz",
+      "compressedSha256": "164f8e10fcae8e0c9b26612b5831b1ccdf6803a6ad16bdac0ceb41cde985d34a",
+      "snapshotDigest": "6de4ab32542b1a7b0314611c94018b3a9f5975f13183e1307b0f8bfbe96efca4",
+      "tick": 82000,
+      "version": 7,
+      "seed": 51926,
+      "mortals": 0,
+      "births": 7,
+      "deaths": 21,
+      "reproductionEnabledAtSnapshot": true,
+      "inputCount": 0
+    }
+  ]
+}

@@ -23,12 +23,20 @@ T100 ya tiene snapshots paginados en SQLite5:1153/1153 pruebas sin omisiones,
 typecheck, build/smoke exactos y seis paridades completas de1200 ticks. Siguen
 pendientes los límites persistidos por hardware y la puerta de dos millones de
 teselas; [gate técnico](docs/REVISION-PERSISTENCIA-PAGINADA-2026-09-22.md).
+El backup verifica ahora la copia terminada, incluidos chunks e identidades
+diferidos:1170/1170 pruebas y build/smoke exactos;
+[alcance](docs/REVISION-BACKUP-2026-09-22.md).
 La provisión familiar V8 y la contención local V9 se
 integraron sobre esa base:981/981 pruebas sin omisiones,18/18 Chromium y seis controles
 de estado/archivo; [gate V9](docs/REVISION-INTEGRACION-V9-2026-09-22.md). El contraste
 V8 de trece días terminó mixto; el contraste V8→V9 terminó con mortales
 0→0,24→14 y20→20, sin acreditar mejora demográfica. Sus78 ventanas diarias están
 validadas; [resultado adverso](docs/REVISION-CONTENCION-V9-RESULTADOS-2026-09-22.md).
+El contraste V7→V9 de51926 a25 días terminó con137→144 vecinos y generaciones2–10,
+sin gobernador;50 ventanas y dos checkpoints verificados. No reproduce la
+extinción pública. Un backup histórico confirma reproducción desactivada en
+t16300, sin reconstruir la duración de las pausas;
+[comparación y límites](docs/REVISION-SEMILLA-PUBLICA-25D-2026-09-22.md).
 El perfil de tres mundos
 envejecidos tampoco alcanza el presupuesto del clon: [T103 continúa abierto](docs/REVISION-CLON-ENVEJECIDO-2026-09-22.md).
 

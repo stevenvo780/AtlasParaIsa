@@ -1,0 +1,205 @@
+{
+  "publicParameterLeaves": 22,
+  "scope": "Final durable checkpoints of new laboratory worlds, no governor; no public replay or causal attribution",
+  "at": "2026-09-22T13:30:24.537Z",
+  "batch": "/datos/workspaces/personal/AtlasParaIsa-default-seed-audit-20260922/artifacts/default-seed-v7-v9-20260922/batch-2026-09-22T12-20-00-472Z",
+  "manifestHash": "f89ade903e46fc1d59abd1e355cfc461d93233b2e84aef8fe0dfaa7d2d6f2690",
+  "instrumentHash": "12053834befc95ebedc4bf1bf4c4308ff49c040c21d233f585aa02d3f894f542",
+  "runnerHash": "68bdccf3e50e9cd990ca061dfcc5e82b7ce69f029fec07efae1b094600166733",
+  "sourceHashes": {
+    "baseline": {
+      "sourceHash": "783b2dc78b0361a51e390c2e015429a984c50f8b1b6ce73bbd941d7e4d30778d",
+      "fullHash": "776ae07aa9a037e4d656f5abfc57d5cf770792d1102698e23ef68a4f9eadb4c7"
+    },
+    "candidate": {
+      "sourceHash": "cd11a32b26ffbce2e28c6b0e9bf97196180a1219aefb0e0577b007d669603125",
+      "fullHash": "9addd8f10de65b86b579800bf31b9f2f10a39788aa9251527817de32bd9e704d"
+    }
+  },
+  "controlFilesBefore": {
+    "batch.json": "f89ade903e46fc1d59abd1e355cfc461d93233b2e84aef8fe0dfaa7d2d6f2690",
+    "summary.json": "c401b13c88add3d4c439e9920405b7b49751aa952b039ccd1ebb249c9d49f730",
+    "progress.json": "82473e5c1cf842448a6e45afea53ad7fd45e26a42594857f5fde1ccdee694ffb",
+    "started.json": "9beb4e81944e4a78474e91537411f1a0714128204d840e3fe38778569306d43a",
+    "default-seed-batch.mts": "68bdccf3e50e9cd990ca061dfcc5e82b7ce69f029fec07efae1b094600166733",
+    "public-params.json": "272ec788ba8dbb4fdb7e813c201b4bca83298497f960097a0eecba1f512b0b6a"
+  },
+  "controlFilesAfter": {
+    "batch.json": "f89ade903e46fc1d59abd1e355cfc461d93233b2e84aef8fe0dfaa7d2d6f2690",
+    "summary.json": "c401b13c88add3d4c439e9920405b7b49751aa952b039ccd1ebb249c9d49f730",
+    "progress.json": "82473e5c1cf842448a6e45afea53ad7fd45e26a42594857f5fde1ccdee694ffb",
+    "started.json": "9beb4e81944e4a78474e91537411f1a0714128204d840e3fe38778569306d43a",
+    "default-seed-batch.mts": "68bdccf3e50e9cd990ca061dfcc5e82b7ce69f029fec07efae1b094600166733",
+    "public-params.json": "272ec788ba8dbb4fdb7e813c201b4bca83298497f960097a0eecba1f512b0b6a"
+  },
+  "allPassed": true,
+  "results": [
+    {
+      "id": "baseline-51926",
+      "seed": 51926,
+      "side": "baseline",
+      "expectedVersion": 7,
+      "originalBefore": {
+        "db": "3a432665b9282a69f5f836ec9b05b3994e591ad08ace17dd6fd0944e6162b01c",
+        "wal": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "shmExists": true
+      },
+      "method": "byte-identical private DB/WAL copy; original never opened by SQLite; frozen Store readOnly, no save/step/migration of rules requested",
+      "artifactHashes": {
+        "run": "a5dd5678986dbdd4675e4a51d3c594f4b2640c95b4061a68a58342aacdd5f517",
+        "day25": "6e7e8bb76956bf2d0fbf1e7a3f36b902ec3a1e2ec03791299aedb5ff8369019c"
+      },
+      "snapshotDigest": "b37e8d7e25ff2d185fc433e26821e5bf5ed1f7ab644d0769615e4284152f9b9b",
+      "decodedCanonicalDigest": "3139630c534073223d7aae8e74fbb3ea20661caa630517032e6b98f725f1f61e",
+      "loadedCanonicalDigest": "3139630c534073223d7aae8e74fbb3ea20661caa630517032e6b98f725f1f61e",
+      "population": 139,
+      "mortals": 137,
+      "protected": 2,
+      "births": 190,
+      "deaths": 67,
+      "version": 7,
+      "tick": 60000,
+      "slot": 0,
+      "skipped": [],
+      "params": {
+        "cuerpo": {
+          "longevidadBaseDias": 11,
+          "longevidadPorResiliencia": 4,
+          "longevidadPorActividad": 1,
+          "senescenciaInicioFraccion": 0.75,
+          "riesgoSenescenciaDiario": 0.04,
+          "riesgoSenescenciaPendiente": 10,
+          "cuidadoReduceRiesgo": 0.6
+        },
+        "genes": {
+          "varianzaFundadores": 0.15,
+          "tasaMutacion": 1
+        },
+        "poblacion": {
+          "maxima": 1000000,
+          "intervaloComprobacionTicks": 120,
+          "nacimientosPorComprobacion": 2
+        },
+        "recursos": {
+          "capacidadBosque": 1,
+          "capacidadPastizal": 0.7,
+          "capacidadOtros": 0.35,
+          "velocidadRegeneracion": 1,
+          "decaimientoFertilidad": 0.001,
+          "decaimientoComida": 0.0001
+        },
+        "persistencia": {
+          "cadaTicks": 100,
+          "ventanaEventosTicks": 24000
+        },
+        "agua": {
+          "cuencas": 0.4
+        },
+        "gobernador": {
+          "presupuestoMs": 50
+        }
+      },
+      "runAndDay25Agree": true,
+      "noInputs": true,
+      "unchangedByLoad": true,
+      "passed": true,
+      "originalAfter": {
+        "db": "3a432665b9282a69f5f836ec9b05b3994e591ad08ace17dd6fd0944e6162b01c",
+        "wal": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "shmExists": true
+      },
+      "originalUnchanged": true,
+      "privateAfter": {
+        "db": "3a432665b9282a69f5f836ec9b05b3994e591ad08ace17dd6fd0944e6162b01c",
+        "wal": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "privateDbWalUnchanged": true
+    },
+    {
+      "id": "candidate-51926",
+      "seed": 51926,
+      "side": "candidate",
+      "expectedVersion": 9,
+      "originalBefore": {
+        "db": "6c21bbb339585d606726b2d6cddfe2e41170e192bede2a0aad68272e29a705cc",
+        "wal": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "shmExists": true
+      },
+      "method": "byte-identical private DB/WAL copy; original never opened by SQLite; frozen Store readOnly, no save/step/migration of rules requested",
+      "artifactHashes": {
+        "run": "b1a86327ce9176a33709e0b60019e80a283291438047e94aff61a82d7ce486d8",
+        "day25": "6106d123d450bbcff5b2af23fb971910659a4aca13124524ef8144d646bcfd9c"
+      },
+      "snapshotDigest": "ad645ee0d7e53fdc962ed5b60b1a83a58e06ae115d4f8480fcf3212be016babb",
+      "decodedCanonicalDigest": "92d70914b7a7a2a8e1a06d0e5cd55ef2cf7711ef50693feead4fb761eb41b467",
+      "loadedCanonicalDigest": "92d70914b7a7a2a8e1a06d0e5cd55ef2cf7711ef50693feead4fb761eb41b467",
+      "population": 146,
+      "mortals": 144,
+      "protected": 2,
+      "births": 179,
+      "deaths": 49,
+      "version": 9,
+      "tick": 60000,
+      "slot": 0,
+      "skipped": [],
+      "params": {
+        "cuerpo": {
+          "longevidadBaseDias": 11,
+          "longevidadPorResiliencia": 4,
+          "longevidadPorActividad": 1,
+          "senescenciaInicioFraccion": 0.75,
+          "riesgoSenescenciaDiario": 0.04,
+          "riesgoSenescenciaPendiente": 10,
+          "cuidadoReduceRiesgo": 0.6
+        },
+        "genes": {
+          "varianzaFundadores": 0.15,
+          "tasaMutacion": 1
+        },
+        "poblacion": {
+          "maxima": 1000000,
+          "intervaloComprobacionTicks": 120,
+          "nacimientosPorComprobacion": 2
+        },
+        "recursos": {
+          "capacidadBosque": 1,
+          "capacidadPastizal": 0.7,
+          "capacidadOtros": 0.35,
+          "velocidadRegeneracion": 1,
+          "decaimientoFertilidad": 0.001,
+          "decaimientoComida": 0.0001
+        },
+        "persistencia": {
+          "cadaTicks": 100,
+          "ventanaEventosTicks": 24000
+        },
+        "agua": {
+          "cuencas": 0.4
+        },
+        "gobernador": {
+          "presupuestoMs": 50
+        }
+      },
+      "runAndDay25Agree": true,
+      "noInputs": true,
+      "unchangedByLoad": true,
+      "passed": true,
+      "originalAfter": {
+        "db": "6c21bbb339585d606726b2d6cddfe2e41170e192bede2a0aad68272e29a705cc",
+        "wal": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "shmExists": true
+      },
+      "originalUnchanged": true,
+      "privateAfter": {
+        "db": "6c21bbb339585d606726b2d6cddfe2e41170e192bede2a0aad68272e29a705cc",
+        "wal": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "privateDbWalUnchanged": true
+    }
+  ],
+  "omissions": [
+    "Only six final checkpoints and six run/day25 records checked, not the78 daily histories.",
+    "No demographic interpretation, performance claim, replay, save or step.",
+    "No live public world or other batch inspected. These new worlds do not execute the server governor and are not a replay of public extinction."
+  ]
+}

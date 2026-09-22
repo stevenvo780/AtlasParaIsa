@@ -73,9 +73,9 @@ de checkpoints con semilla/versión ajena aunque su checksum sea correcto.
   acotada; no demuestra capacidad del servidor envejecido.
 - Los validadores antiguos todavía pueden usar Error ordinario sin código como
   rechazo semántico. No se afirma clasificación universal de errores inesperados.
-- El comando de backup valida la fuente antes de copiar; ese preflight no prueba
-  por sí solo la semántica de una copia bajo mutación concurrente. VACUUM produce
-  una copia SQLite consistente; no se presenta eso como validación del mundo.
+- El hueco del preflight de backup se cerró después en `efed3c7`: lectura de la
+  copia terminada y recorrido de chunks e identidades diferidos. La revisión
+  sigue siendo acotada a esos consumidores; [controles y límites](REVISION-BACKUP-2026-09-22.md).
 - No se repitió Chromium en este cambio de persistencia; el gate anterior V9
   conserva18/18. No se publicó este build ni se reinició o repobló el mundo público.
 - Los resultados demográficos siguen siendo una evidencia distinta; el contraste

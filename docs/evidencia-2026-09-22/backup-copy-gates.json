@@ -1,0 +1,83 @@
+{
+  "sourceSha": "efed3c719bfe498341922b7d8c9bd1869d237913",
+  "tests": {
+    "passed": 1170,
+    "failed": 0,
+    "skipped": 0,
+    "durationMs": 166563.388946
+  },
+  "focal": {
+    "passed": 18,
+    "failed": 0,
+    "skipped": 0
+  },
+  "typecheckExitCode": 0,
+  "limits": {
+    "memoryMaxBytes": 12884901888,
+    "swapMaxBytes": 0,
+    "heapMiB": 4096,
+    "testConcurrency": 8,
+    "nvrtc": "/opt/cuda/lib64/libnvrtc.so"
+  },
+  "exactGate": {
+    "repository": "/datos/workspaces/personal/AtlasParaIsa-backup-validation-20260922",
+    "revision": "efed3c719bfe498341922b7d8c9bd1869d237913",
+    "helperSha256": "6e944c787553f36fed2841f190e4ef7936f9b024658e8d8e42833a1657382d46",
+    "dependencies": "/datos/workspaces/personal/AtlasParaIsa/node_modules",
+    "worktree": "/tmp/atlas-deploy-check.yufAJ2/worktree",
+    "startedAt": "2026-09-22T13:25:34Z",
+    "finishedAt": "2026-09-22T13:25:36.537Z",
+    "status": "passed",
+    "phase": "complete",
+    "exitCode": 0,
+    "buildExitCode": 0,
+    "smokeExitCode": 0,
+    "cleanup": true
+  },
+  "independentFinalReviewPending": false,
+  "logs": [
+    {
+      "path": "/tmp/atlas-backup-copy-independent/results.json",
+      "sha256": "d6e9b417c3e998a566d67ed4f960f742fb25653a3cd85130646099df2fc76c44"
+    },
+    {
+      "path": "/tmp/atlas-backup-lazy-red.log",
+      "sha256": "de3133bf9f560bb2a8514c6c5b7a454238dd07171f0cc1174ac82f2f4138f98e"
+    },
+    {
+      "path": "/tmp/atlas-backup-lazy-red2.log",
+      "sha256": "dd576640ff01c30096559543d167621fe72b041df140e6a4d7cda3d5c9999116"
+    },
+    {
+      "path": "/tmp/atlas-backup-lazy-green.log",
+      "sha256": "9244b3f558b251315c3e793edab4ebe21d605c5ce5dcf98c9e7ef1a2eca0b5f8"
+    },
+    {
+      "path": "/tmp/atlas-backup-lazy-typecheck.log",
+      "sha256": "952d0130b7edf4ed056e0ba0cd962126c2acad44de8ab0c4f30ed3babd21bfe2"
+    },
+    {
+      "path": "/tmp/atlas-backup-lazy-full.log",
+      "sha256": "02ce9f63138caf74dd1cc84b6dd2039205f3e9e0d5eaa8a96a365b2c44e75ea9"
+    },
+    {
+      "path": "/tmp/atlas-backup-lazy-full2.log",
+      "sha256": "4a347778351fc70e9c62faa8448b32e66b6dfb919271600bc87ea305d2992ade"
+    },
+    {
+      "path": "/tmp/atlas-backup-lazy-exact-gate.log",
+      "sha256": "5c8fb2e5d5b541a683890aca3123a73b22c68332e0a1b85f8da78264ca079a37"
+    }
+  ],
+  "independentFinalReview": {
+    "sourceSha": "efed3c719bfe498341922b7d8c9bd1869d237913",
+    "passed": 22,
+    "failed": 0,
+    "skipped": 0,
+    "originalIndependentNegatives": 4,
+    "authorControls": 18,
+    "tapPath": "/tmp/atlas-backup-copy-independent/fixed-efed3c7/independent-backup-fixed.tap",
+    "tapSha256": "b51937a801b7d04ddde018c6410cc6ebdb786c9928f52515666a3e6e5fc61d2c",
+    "scope": "Readonly coherent transaction, lazy archive readers, iteration without accumulating bodies, schema2 compatibility; four original independent post-preload corruption cases now reject."
+  }
+}

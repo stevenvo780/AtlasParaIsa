@@ -23,11 +23,35 @@ try {
       const destination = resolve(argument);
       store.backup(destination); chmodSync(destination, 0o600);
       // VACUUM copies a coherent SQLite version, possibly newer than the preload.
-      // Validate those copied bytes and archives through a fresh readonly reader.
+      // Validate those copied bytes through a fresh readonly reader. Loading the
+      // resident world alone does not visit dormant chunks or uncached identities.
       // On rejection keep the copy as evidence and never print nominal success.
       const copied = new Store(destination, { readOnly: true });
-      try { if (!copied.load()) throw new Error('Copia sin mundo.'); }
-      finally { copied.close(); }
+      try {
+        copied.db.exec('BEGIN');
+        const loaded = copied.load();
+        if (!loaded) throw new Error('Copia sin mundo.');
+        // Stream keys, including older retained chunk versions, without keeping
+        // a second world in memory. Older schemas may lack either archive table.
+        const tableExists = (name: string): boolean => !!copied.db.prepare("SELECT 1 FROM main.sqlite_schema WHERE type='table' AND name=?").get(name);
+        const validateTick = (tick: unknown): number => {
+          if (typeof tick !== 'number' || !Number.isSafeInteger(tick) || tick < 0 || tick > loaded.world.tick)
+            throw new Error('Invalid backup archive tick. Explicit recovery required.');
+          return tick;
+        };
+        if (tableExists('chunks')) for (const row of copied.db.prepare('SELECT key,tick FROM chunks ORDER BY key,tick').iterate()) {
+          if (typeof row.key !== 'string' || !copied.loadChunk(row.key, validateTick(row.tick)))
+            throw new Error('Invalid backup chunk. Explicit recovery required.');
+        }
+        if (tableExists('legacy')) for (const row of copied.db.prepare('SELECT id,tick FROM legacy ORDER BY id').iterate()) {
+          if (typeof row.id !== 'string' || !copied.loadLegacy(row.id, validateTick(row.tick)))
+            throw new Error('Invalid backup identity. Explicit recovery required.');
+        }
+        copied.db.exec('COMMIT');
+      } finally {
+        if (copied.db.isTransaction) copied.db.exec('ROLLBACK');
+        copied.close();
+      }
     }
     finally { store.close(); }
     console.log('Copia coherente creada. Conserva su acceso privado.');

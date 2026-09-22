@@ -4,9 +4,10 @@ import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
 import { EcosystemKernel } from '../src/world/ecosystem-kernel.js';
 import { generateChunk } from '../src/world/terrain.js';
+import { ruidoCuenca } from '../src/world/agua.js';
 // Isolated .mjs benchmark helpers intentionally have no application wiring.
 // @ts-ignore benchmark-only JavaScript module
-import { topology, pack, unpack, stepArrays, compare } from '../scripts/compute-ecology-core.mjs';
+import { topology, pack, unpack, stepArrays, compare, basinNoise, validateLiveKernel } from '../scripts/compute-ecology-core.mjs';
 // @ts-ignore benchmark-only JavaScript module
 import { CPUWorkers, GPUWorker } from '../scripts/compute-ecology-clients.mjs';
 import type { Tile } from '../src/shared/types.js';
@@ -16,6 +17,7 @@ function fixture():Tile[] {
   const tiles=generateChunk(51926,-1,0).tiles.filter((_,i)=>i%17!==0);
   tiles.push({x:200,y:-200,terrain:'water',biome:'ocean',moisture:0.9,vegetation:0.4,food:0.3,drinkingWater:0.7});
   tiles.push({x:201,y:-200,terrain:'meadow',biome:'mountain',feature:'stump',wood:0.999,growth:0.9,fertility:0.9,moisture:0.9,vegetation:0.7,food:0.5});
+  for(const x of [-49,-25,-24,-1,0,23,24,49]) tiles.push({x,y:-300,terrain:'meadow',biome:'grassland',feature:'spring',fertility:0.9,moisture:0.9,vegetation:0.7,food:0.5,drinkingWater:0.2});
   return tiles;
 }
 test('missing Python rejects GPU setup and completes owned cleanup without an exit event',()=>{
@@ -52,16 +54,39 @@ test('GPU requests cover stdin backpressure and close escalates only their owned
     await completed;
   }
 });
-test('SoA port agrees exactly with the unchanged engine through 120 varied updates, gaps and feature transitions',()=>{
+test('the live contract accepts the engine and rejects a changed physical result',()=>{
+  const kernel=new EcosystemKernel();
+  const reference=(tiles:Tile[],tick:number,rain:boolean,light:number,options:import('../src/world/ecosystem-kernel.js').EcosystemOptions)=>
+    kernel.step(tiles,tick,rain?'rain':'clear',light===1?'day':light===0?'night':'dawn',options);
+  const result=validateLiveKernel(reference);
+  assert.equal(result.comparisons,192);
+  assert.equal(result.differentValues,0);
+  assert.throws(()=>validateLiveKernel((...args:Parameters<typeof reference>)=>{
+    reference(...args); args[0][0].fertility!+=0.01;
+  }),/Live ecology contract.*differs/);
+  assert.throws(()=>validateLiveKernel((...args:Parameters<typeof reference>)=>{
+    reference(...args); args[0][0].food+=0.125;
+  }),/Live ecology contract.*tile fields differ/,'una regla nueva sobre un campo no empaquetado también invalida el port');
+});
+
+test('basin hashing preserves signed seeds, negative floors and boundaries exactly',()=>{
+  for(const seed of [0,42,51926,-1,2147483647,4294967295])
+    for(const x of [-10000000,-49,-48,-25,-24,-1,0,1,23,24,25,9999999])
+      for(const y of [-49,-24,-1,0,23,24,49])
+        assert.ok(Object.is(basinNoise(seed,x,y),ruidoCuenca(seed,x,y)),`${seed},${x},${y}`);
+});
+
+for(const cuencas of [1,0.4])for(const decaimientoFertilidad of [0,0.001])test(`SoA agrees with live engine over 120 varied updates, basins=${cuencas}, decay=${decaimientoFertilidad}`,()=>{
   let actual=fixture(),expected=clone(actual);const kernel=new EcosystemKernel();
+  const options={seed:51926,cuencas,decaimientoFertilidad};
   for(let j=0;j<120;j++){
     const tick=(j+1)*10,phase=['day','night','dawn'][j%3],rain=j%4===0;
     if(j===30){actual.reverse();expected.reverse();}
     if(j===60){actual[3].x+=1000;expected[3].x+=1000;}
     actual=clone(actual);expected=clone(expected);
     const input=pack(actual),output=new Float64Array(input.length);
-    stepArrays(input,output,topology(actual),actual.length,tick,rain,phase==='day'?1:phase==='night'?0:0.4);
-    unpack(output,actual,tick);kernel.step(expected,tick,rain?'rain':'clear',phase);
+    stepArrays(input,output,topology(actual),actual.length,tick,rain,phase==='day'?1:phase==='night'?0:0.4,0,actual.length,options);
+    unpack(output,actual,tick);kernel.step(expected,tick,rain?'rain':'clear',phase,options);
     assert.deepStrictEqual(actual,expected,`update ${j}`);
   }
 });
@@ -70,9 +95,10 @@ test('worker partitions read old neighbor state across partition boundaries and 
   const workers=await CPUWorkers.create(actual.length,neighbors,4);
   try{
     for(let j=0;j<12;j++){
+      const options={seed:51926,cuencas:j%2===0?0.4:1,decaimientoFertilidad:j%4<2?0:0.001};
       const tick=(j+1)*100;pack(actual,workers.input);
-      const result=await workers.step(tick,j%2===0,1);unpack(result.data,actual,tick);
-      new EcosystemKernel().step(expected,tick,j%2===0?'rain':'clear','day');
+      const result=await workers.step(tick,j%2===0,1,options);unpack(result.data,actual,tick);
+      new EcosystemKernel().step(expected,tick,j%2===0?'rain':'clear','day',options);
       assert.deepStrictEqual(actual,expected);
     }
   }finally{await workers.close();}
@@ -111,9 +137,11 @@ for(const devices of ['0','1','0,1'])test(`CUDA ${devices} agrees with live-stat
     const actual=fixture(),expected=clone(actual);await gpu.setup(actual.length,topology(actual));
     const kernel=new EcosystemKernel();
     for(let j=0;j<12;j++){
-      const tick=(j+1)*100,light=j%3===0?0:j%3===1?0.4:1,rain=j%2===0;
-      const result=await gpu.step(pack(actual),tick,rain,light);unpack(result.data,actual,tick);
-      kernel.step(expected,tick,rain?'rain':'clear',light===0?'night':light===1?'day':'dawn');
+      const options={seed:j%2===0?51926:4294967295,cuencas:j%2===0?0.4:1,decaimientoFertilidad:j%4<2?0:0.001};
+      const tick=j===0?1:(j+1)*100,light=j%3===0?0:j%3===1?0.4:1,rain=j%2===0;
+      const result=await gpu.step(pack(actual),tick,rain,light,options);unpack(result.data,actual,tick);
+      kernel.step(expected,tick,rain?'rain':'clear',light===0?'night':light===1?'day':'dawn',options);
+      assert.deepEqual(compare(pack(expected),result.data),{different:0,maximumAbsoluteError:0},'incluye la respuesta cruda cuando unpack no hace nada');
       assert.deepStrictEqual(actual,expected,`GPU ${devices} update ${j}`);
     }
   }finally{await gpu.close();}

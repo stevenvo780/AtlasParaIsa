@@ -16,6 +16,8 @@ import time
 import numpy as np
 
 clock = time.perf_counter
+FIELDS = 17
+MAX_CELLS = 4_000_000
 
 def bind(lib, name, args):
     fn = getattr(lib, name)
@@ -85,17 +87,17 @@ class Device:
         for pointer in self.pointers: checked(self.free(pointer))
         self.pointers=[]; self.n=n; self.begin=begin; self.end=end
         started=clock()
-        for amount in [n*15*8,(end-begin)*15*8,n*8*4]:
+        for amount in [n*FIELDS*8,(end-begin)*FIELDS*8,n*8*4]:
             pointer=C.c_uint64(); checked(self.alloc(C.byref(pointer),amount)); self.pointers.append(pointer)
-        self.result=np.empty((15,end-begin),dtype=np.float64)
+        self.result=np.empty((FIELDS,end-begin),dtype=np.float64)
         checked(self.upload(self.pointers[2],neighbors.ctypes.data,neighbors.nbytes))
-        return {'index':self.index,'allocationAndTopologyUploadMs':(clock()-started)*1000,'residentBytes':n*15*8+(end-begin)*15*8+n*8*4}
+        return {'index':self.index,'allocationAndTopologyUploadMs':(clock()-started)*1000,'residentBytes':n*FIELDS*8+(end-begin)*FIELDS*8+n*8*4}
 
-    def step(self,data,tick,rain,light):
+    def step(self,data,tick,rain,light,options):
         checked(self.current(self.context))
         started=clock(); checked(self.upload(self.pointers[0],data.ctypes.data,data.nbytes))
         upload_end=clock()
-        values=[self.pointers[0],self.pointers[1],self.pointers[2],C.c_int(self.n),C.c_int(tick),C.c_int(rain),C.c_double(light),C.c_int(self.begin),C.c_int(self.end)]
+        values=[self.pointers[0],self.pointers[1],self.pointers[2],C.c_int(self.n),C.c_int(tick),C.c_int(rain),C.c_double(light),C.c_int(self.begin),C.c_int(self.end),C.c_double(options.get('decaimientoFertilidad',0)),C.c_uint(options.get('seed',0)),C.c_double(options.get('cuencas',1))]
         args=(C.c_void_p*len(values))(*(C.cast(C.byref(value),C.c_void_p) for value in values))
         checked(self.event_record(self.start_event,None))
         checked(self.launch(self.kernel,(self.end-self.begin+255)//256,1,1,256,1,1,0,None,args,None))
@@ -140,23 +142,23 @@ def main():
                 length=struct.unpack('<I',read_exact(4))[0]
                 if length>65536: raise ValueError('Oversized header')
                 request=json.loads(read_exact(length)); amount=request.get('bytes',0)
-                if amount<0 or amount>120_000_000: raise ValueError('Oversized body')
+                if amount<0 or amount>MAX_CELLS*FIELDS*8: raise ValueError('Oversized body')
                 data=read_exact(amount)
                 if request['kind']=='close': break
                 if request['kind']=='setup':
                     n=request['n']
-                    if not isinstance(n,int) or n<1 or n>1_000_000 or amount!=n*8*4: raise ValueError('Invalid topology')
+                    if not isinstance(n,int) or n<1 or n>MAX_CELLS or amount!=n*8*4: raise ValueError('Invalid topology')
                     neighbors=np.frombuffer(data,dtype=np.int32)
                     if np.any(neighbors < -1) or np.any(neighbors >= n): raise ValueError('Invalid neighbor index')
                     started=clock(); parts=[]
                     for j,d in enumerate(devices): parts.append(d.setup(n,neighbors,n*j//len(devices),n*(j+1)//len(devices)))
-                    output=np.empty((15,n),dtype=np.float64)
+                    output=np.empty((FIELDS,n),dtype=np.float64)
                     emit({'setupMs':(clock()-started)*1000,'devices':parts})
                 elif request['kind']=='step':
-                    if not devices[0].n or amount!=devices[0].n*15*8: raise ValueError('Invalid input shape')
+                    if not devices[0].n or amount!=devices[0].n*FIELDS*8: raise ValueError('Invalid input shape')
                     input_state=np.frombuffer(data,dtype=np.float64)
                     started=clock()
-                    futures=[executor.submit(d.step,input_state,request['tick'],int(request['rain']),request['light']) for d in devices]
+                    futures=[executor.submit(d.step,input_state,request['tick'],int(request['rain']),request['light'],request.get('options',{})) for d in devices]
                     phases=[future.result() for future in futures]
                     assembly=clock()
                     for d in devices: output[:,d.begin:d.end]=d.result

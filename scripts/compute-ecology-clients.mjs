@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { Worker } from 'node:worker_threads';
 import { once } from 'node:events';
 import { performance } from 'node:perf_hooks';
-import { FIELDS } from './compute-ecology-core.mjs';
+import { FIELDS, MAX_CELLS } from './compute-ecology-core.mjs';
 
 function requestWorker(worker, message) {
   return new Promise((resolve,reject)=>{
@@ -26,9 +26,9 @@ export class CPUWorkers {
       result.startupMs=performance.now()-started; return result;
     } catch(error) { await result.close();throw error; }
   }
-  async step(tick,rain,light) {
+  async step(tick,rain,light,options={}) {
     const start=performance.now(), count=this.workers.length;
-    const phases=await Promise.all(this.workers.map((worker,j)=>requestWorker(worker,{kind:'step',tick,rain,light,begin:Math.floor(this.n*j/count),end:Math.floor(this.n*(j+1)/count)})));
+    const phases=await Promise.all(this.workers.map((worker,j)=>requestWorker(worker,{kind:'step',tick,rain,light,options,begin:Math.floor(this.n*j/count),end:Math.floor(this.n*(j+1)/count)})));
     return {data:this.output,phases:{dispatchAndComputeMs:performance.now()-start,workerComputeMs:phases.map(x=>x.computeMs)}};
   }
   async close() { await Promise.all(this.workers.map(worker=>worker.terminate())); }
@@ -59,7 +59,7 @@ class BinaryReader {
     const size=(await this.read(4)).readUInt32LE();if(size>65536)throw new Error('Oversized reply header');
     const header=JSON.parse((await this.read(size)).toString());
     if(header.error)throw new Error(header.error);
-    if(!Number.isSafeInteger(header.bytes)||header.bytes<0||header.bytes>120000000)throw new Error('Oversized reply');
+    if(!Number.isSafeInteger(header.bytes)||header.bytes<0||header.bytes>MAX_CELLS*FIELDS*8)throw new Error('Oversized reply');
     const body=await this.read(header.bytes);
     return {header,data:new Float64Array(body.buffer,body.byteOffset,body.byteLength/8)};
   }
@@ -95,9 +95,9 @@ export class GPUWorker {
     const reply=await this.deadline((async()=>{await this.send({kind:'setup',n},neighbors);return this.reader.frame();})());
     return {...reply.header,nodeSetupMs:performance.now()-start};
   }
-  async step(data,tick,rain,light) {
+  async step(data,tick,rain,light,options={}) {
     const start=performance.now();
-    const result=await this.deadline((async()=>{await this.send({kind:'step',tick,rain,light},data);return this.reader.frame();})());
+    const result=await this.deadline((async()=>{await this.send({kind:'step',tick,rain,light,options},data);return this.reader.frame();})());
     return {data:result.data,phases:{...result.header,nodeIPCRoundTripMs:performance.now()-start}};
   }
   async close() {

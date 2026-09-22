@@ -8,36 +8,34 @@ import os from 'node:os';
 import path from 'node:path';
 import { EcosystemKernel } from '../src/world/ecosystem-kernel.ts';
 import { generateChunk } from '../src/world/terrain.ts';
-import { FIELDS, topology, pack, unpack, stepArrays, compare } from './compute-ecology-core.mjs';
+import { DEFAULT_PARAMS } from '../src/world/params.ts';
+import { FIELDS, MAX_CELLS, ECOLOGY_CONTRACT, validateLiveKernel, topology, pack, unpack, stepArrays, compare } from './compute-ecology-core.mjs';
 import { CPUWorkers, GPUWorker } from './compute-ecology-clients.mjs';
 
-const SOURCE='95ff0d20aad5a12f08b37aaedd98abe84acfd163';
 const args=process.argv.slice(2);
 function option(name,fallback){const index=args.indexOf(name);return index<0?fallback:args[index+1];}
 if(args.includes('--help')||!args.includes('--output')){
-  process.stdout.write('node --import tsx scripts/compute-ecology-benchmark.mjs --output NEW_DIRECTORY --nvrtc /tmp/.../libnvrtc.so.12 [--sizes 256,1024,4096,65536,262144,1000000] [--repetitions 8]\n');process.exit(0);
+  process.stdout.write('node --import tsx scripts/compute-ecology-benchmark.mjs --output NEW_DIRECTORY [--nvrtc /opt/cuda/lib64/libnvrtc.so] [--sizes 256,1024,4096,65536,262144,1000000,4000000] [--repetitions 8]\n');process.exit(0);
 }
 const directory=path.resolve(option('--output')), nvrtc=option('--nvrtc');
 const sizes=option('--sizes','256,1024,4096,65536,262144,1000000').split(',').map(Number);
 const repetitions=Number(option('--repetitions','8'));
-if(sizes.some(n=>!Number.isInteger(n)||n<1||n>1_000_000)||!Number.isInteger(repetitions)||repetitions<3||repetitions>20)throw new Error('Invalid bounded workload');
+if(sizes.some(n=>!Number.isInteger(n)||n<1||n>MAX_CELLS)||!Number.isInteger(repetitions)||repetitions<3||repetitions>20)throw new Error('Invalid bounded workload');
 await mkdir(directory,{recursive:false,mode:0o700});
 const sha=data=>createHash('sha256').update(data).digest('hex');
 const source=execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();
-const base=execFileSync('git',['merge-base',SOURCE,'HEAD'],{encoding:'utf8'}).trim();
-if(base!==SOURCE)throw new Error('Benchmark source is not descended from the fixed baseline');
-const coreFiles=['src/world/ecosystem-kernel.ts','src/world/ecosystem.ts','src/world/terrain.ts'];
+const coreFiles=['src/world/ecosystem-kernel.ts','src/world/ecosystem.ts','src/world/terrain.ts','src/world/agua.ts','src/world/params.ts'];
 const hashes=async()=>Object.fromEntries(await Promise.all(coreFiles.map(async file=>[file,sha(await readFile(file))])));
 const initialHashes=await hashes();
 const benchmarkFiles=['scripts/compute-ecology-core.mjs','scripts/compute-ecology-worker.mjs','scripts/compute-ecology-clients.mjs','scripts/compute-ecology-benchmark.mjs','scripts/compute-ecology-gpu.py','scripts/compute-ecology.cu'];
 const benchmarkHashes=Object.fromEntries(await Promise.all(benchmarkFiles.map(async file=>[file,sha(await readFile(file))])));
-for(const file of coreFiles)if(sha(execFileSync('git',['show',`${SOURCE}:${file}`]))!==initialHashes[file])throw new Error('Baseline core changed: '+file);
 async function hardware(){
-  const cpuMax=await readFile('/sys/fs/cgroup/cpu.max','utf8');
-  const ramMax=await readFile('/sys/fs/cgroup/memory.max','utf8');
-  const ramCurrent=await readFile('/sys/fs/cgroup/memory.current','utf8');
+  const resource=async file=>{try{return (await readFile(file,'utf8')).trim();}catch(error){return {available:false,error:error.code??String(error)};}};
+  const cpuMax=await resource('/sys/fs/cgroup/cpu.max');
+  const ramMax=await resource('/sys/fs/cgroup/memory.max');
+  const ramCurrent=await resource('/sys/fs/cgroup/memory.current');
   let gpu;try{gpu=execFileSync('nvidia-smi',['--query-gpu=index,name,memory.total,memory.free,utilization.gpu,driver_version','--format=csv,noheader,nounits'],{encoding:'utf8',timeout:10000}).trim().split('\n');}catch(error){gpu={unavailable:error.code??'probe-failed'};}
-  return {at:new Date().toISOString(),cpuModel:os.cpus()[0]?.model,logicalCPUs:os.cpus().length,parallelism:os.availableParallelism(),cpuMax:cpuMax.trim(),memoryMax:ramMax.trim(),memoryCurrent:ramCurrent.trim(),hostLoadAverage:os.loadavg(),gpu};
+  return {at:new Date().toISOString(),cpuModel:os.cpus()[0]?.model,logicalCPUs:os.cpus().length,parallelism:os.availableParallelism(),cpuMax,memoryMax:ramMax,memoryCurrent:ramCurrent,hostLoadAverage:os.loadavg(),gpu};
 }
 function makeTiles(n,seed){
   const chunks=Math.ceil(n/256),width=Math.ceil(Math.sqrt(chunks)),tiles=[];
@@ -51,11 +49,14 @@ function coordinates(tiles){const result=new Float64Array(tiles.length*2);for(le
 function checkCoordinates(tiles,coords){for(let i=0;i<tiles.length;i++)if(!Object.is(tiles[i].x,coords[2*i])||!Object.is(tiles[i].y,coords[2*i+1]))throw new Error('Topology changed; rebuild required');}
 const clone=tiles=>tiles.map(tile=>({...tile}));
 function summary(values){const sorted=[...values].sort((a,b)=>a-b);return {min:sorted[0],median:sorted[Math.floor(sorted.length/2)],max:sorted.at(-1),mean:values.reduce((a,b)=>a+b,0)/values.length};}
-const result={version:2,startedAt:new Date().toISOString(),source,baseline:SOURCE,coreHashes:initialHashes,benchmarkHashes,hardwareBefore:await hardware(),sizes,repetitions,precision:'Float64; NVRTC --fmad=false; no fast-math',scope:'EcosystemKernel only. Does not include stepWorld, raw resource updater, fauna, cloneWorld beyond tiles, JSON, projection or SQLite. Shared host; no exclusive hardware allocation.',coldDefinition:'First invocation after process/context and topology setup; startup, NVRTC compilation and topology allocation/upload are separately charged. Driver disk JIT cache is not disabled. Warm summaries exclude the first invocation but do not hide later JIT/GC outliers.',gpuTransport:'Persistent Python ctypes worker over binary stdio; pageable HtoD and DtoH, synchronized kernel, CUDA event interval, output assembly and Node IPC measured. Dual mode partitions outputs 50/50 and duplicates complete old input uploads, including halo life; no transfers omitted.',sources:['https://docs.nvidia.com/cuda/nvrtc/index.html','https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__EXEC.html','https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__EVENT.html'],cases:[],gpu:[]};
+const kernelOptions={seed:51926,cuencas:DEFAULT_PARAMS.agua.cuencas,decaimientoFertilidad:DEFAULT_PARAMS.recursos.decaimientoFertilidad};
+const result={version:3,startedAt:new Date().toISOString(),source,contract:ECOLOGY_CONTRACT,kernelOptions,coreHashes:initialHashes,benchmarkHashes,hardwareBefore:await hardware(),sizes,repetitions,precision:'Float64; NVRTC --fmad=false; no fast-math',scope:'Live EcosystemKernel only, with current default basin and fertility-decay options. Does not include stepWorld, raw resource updater, fauna, cloneWorld beyond tiles, JSON, projection or SQLite. Shared host; no exclusive hardware allocation.',coldDefinition:'First invocation after process/context and topology setup; startup, NVRTC compilation and topology allocation/upload are separately charged. Driver disk JIT cache is not disabled. Warm summaries exclude the first invocation but do not hide later JIT/GC outliers.',gpuTransport:'Persistent Python ctypes worker over binary stdio; pageable HtoD and DtoH, synchronized kernel, CUDA event interval, output assembly and Node IPC measured. Dual mode partitions outputs 50/50 and duplicates complete old input uploads, including halo life; no transfers omitted.',sources:['https://docs.nvidia.com/cuda/nvrtc/index.html','https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__EXEC.html','https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__EVENT.html'],cases:[],gpu:[]};
 const gpus=[];
 try{
+  const validationKernel=new EcosystemKernel();
+  result.liveContract=validateLiveKernel((tiles,tick,rain,light,options)=>validationKernel.step(tiles,tick,rain?'rain':'clear',light===1?'day':light===0?'night':'dawn',options));
   if(nvrtc){
-    result.nvrtc={path:nvrtc,sha256:sha(await readFile(nvrtc)),package:'nvidia-cuda-nvrtc-cu12==12.9.86'};
+    result.nvrtc={path:nvrtc,sha256:sha(await readFile(nvrtc))};
     for(const devices of ['0','1','0,1']){
       try{const gpu=await GPUWorker.create(devices,nvrtc);gpus.push({name:'gpu-'+devices,gpu});result.gpu.push({devices,startupMs:gpu.startupMs,...gpu.initialization});}
       catch(error){result.gpu.push({devices,error:String(error),available:false});}
@@ -76,7 +77,7 @@ try{
       for(let trial=0;trial<repetitions;trial++){
         const tick=(trial+1)*100,rain=trial%2===0,light=[1,0,0.4][trial%3],phase=light===1?'day':light===0?'night':'dawn';
         const started=performance.now(),expected=clone(tiles),cloned=performance.now();
-        kernel.step(expected,tick,rain?'rain':'clear',phase);const finished=performance.now();
+        kernel.step(expected,tick,rain?'rain':'clear',phase,kernelOptions);const finished=performance.now();
         const expectedState=pack(expected);
         entry.trials.push({trial,tick,rain,light,mode:'node-reference',cold:trial===0,totalMs:finished-started,cloneMs:cloned-started,computeMs:finished-cloned,different:0,maximumAbsoluteError:0});
         const order=[...modes.slice(trial%modes.length),...modes.slice(0,trial%modes.length)];
@@ -85,9 +86,9 @@ try{
           checkCoordinates(actual,coords);const indexEnd=performance.now();
           const sourceState=pack(actual,mode.pool?.input??input),packEnd=performance.now();
           let response;
-          if(mode.pool)response=await mode.pool.step(tick,rain,light);
-          else if(mode.gpu)response=await mode.gpu.step(sourceState,tick,rain,light);
-          else{const computeStart=performance.now();stepArrays(sourceState,output,neighbors,n,tick,rain,light);response={data:output,phases:{computeMs:performance.now()-computeStart}};}
+          if(mode.pool)response=await mode.pool.step(tick,rain,light,kernelOptions);
+          else if(mode.gpu)response=await mode.gpu.step(sourceState,tick,rain,light,kernelOptions);
+          else{const computeStart=performance.now();stepArrays(sourceState,output,neighbors,n,tick,rain,light,0,n,kernelOptions);response={data:output,phases:{computeMs:performance.now()-computeStart}};}
           const computed=performance.now();unpack(response.data,actual,tick);const end=performance.now();
           const fidelity=compare(expectedState,response.data);
           if(fidelity.different)throw new Error(`${mode.name} differs at ${n} cells: ${JSON.stringify(fidelity)}`);

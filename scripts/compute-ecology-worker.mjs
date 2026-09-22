@@ -9,7 +9,7 @@ parentPort.on('message', request => {
       parentPort.postMessage({ready:true}); return;
     }
     const start=performance.now();
-    stepArrays(buffers.input,buffers.output,buffers.neighbors,buffers.n,request.tick,request.rain,request.light,request.begin,request.end);
+    stepArrays(buffers.input,buffers.output,buffers.neighbors,buffers.n,request.tick,request.rain,request.light,request.begin,request.end,request.options);
     parentPort.postMessage({computeMs:performance.now()-start});
   } catch(error) { parentPort.postMessage({error:String(error)}); }
 });

@@ -1,5 +1,24 @@
-// Isolated benchmark port of EcosystemKernel at 95ff0d2; never imported by the app.
-export const FIELDS = 15;
+// Isolated benchmark port, checked against the live EcosystemKernel; never imported by the app.
+import { isDeepStrictEqual } from 'node:util';
+export const ECOLOGY_CONTRACT = Object.freeze({
+  version: 3,
+  fields: ['growth', 'fertility', 'life', 'moisture', 'drinkingWater', 'cultivation', 'traffic', 'vegetation', 'wood', 'feature', 'aquatic', 'ocean', 'mountain', 'wetland', 'woodPresent', 'x', 'y'],
+  options: { decaimientoFertilidad: 0, seed: 0, cuencas: 1 },
+  terms: {
+    life: 'old 8-neighbor life >= 0.45; fertile at 3 neighbors or alive with 2; light/moisture/fertility growth minus drought and traffic',
+    fertility: 'clamp(fertility + life*0.0012 - traffic*0.0007 - cultivation*0.0002 - decaimientoFertilidad*fertility)',
+    growth: 'light*moisture*fertility*(0.25+life*0.75)*(1-growth)*(1-traffic*0.9)*0.005; losses 0.0002, traffic*0.002, drought 0.001',
+    vegetation: 'land only: clamp(vegetation + produced*0.25 - traffic*0.001)',
+    traffic: 'clamp(traffic - 0.0005); cultivation: clamp(cultivation - 0.00002)',
+    moisture: 'aquatic only: clamp(moisture + (ocean ? 0.003 : 0) + (rain ? 0.008 : 0))',
+    water: 'rain and spring recharge require reservoir AND (aquatic OR ruidoCuenca(seed,x,y)<cuencas); ocean forced to zero',
+    basin: '32-bit imul hash; salt1400; scale24; floor negative coordinates; quintic fade and bilinear lerp in original order',
+    wood: '100-tick regrowth debits updated growth; uses old fertility/moisture/growth; stump transitions preserved',
+    cadence: 'no updates except tick%10==0; read old neighbor life; Float64 with FMA disabled',
+  },
+});
+export const FIELDS = ECOLOGY_CONTRACT.fields.length;
+export const MAX_CELLS = 4_000_000;
 export const FEATURES = [undefined, 'none', 'tree', 'pine', 'palm', 'cactus', 'reeds', 'stump', 'spring', 'pool', 'berries', 'flowers', 'rock', 'clay'];
 export const clamp = n => Math.max(0, Math.min(1, n));
 
@@ -34,6 +53,7 @@ export function pack(tiles, into = new Float64Array(tiles.length * FIELDS)) {
     into[10*n+i] = +(t.terrain === 'water'); into[11*n+i] = +(t.biome === 'ocean');
     into[12*n+i] = +(t.biome === 'mountain'); into[13*n+i] = +(t.biome === 'wetland');
     into[14*n+i] = +(t.wood !== undefined);
+    into[15*n+i] = t.x; into[16*n+i] = t.y;
   }
   return into;
 }
@@ -53,7 +73,22 @@ export function unpack(data, tiles, tick) {
   return tiles;
 }
 
-export function stepArrays(input, output, neighbors, n, tick, rain, light, begin = 0, end = n) {
+function basinUnit(seed, x, y) {
+  let value = seed ^ 1400 ^ Math.imul(x, 0x9e3779b1) ^ Math.imul(y, 0x85ebca77);
+  value = Math.imul(value ^ (value >>> 16), 0x7feb352d);
+  value = Math.imul(value ^ (value >>> 15), 0x846ca68b);
+  return ((value ^ (value >>> 16)) >>> 0) / 0x1_0000_0000;
+}
+const fade = t => t * t * t * (t * (t * 6 - 15) + 10);
+const lerp = (a, b, t) => a + (b - a) * t;
+export function basinNoise(seed, x, y) {
+  const px = x / 24, py = y / 24, ix = Math.floor(px), iy = Math.floor(py);
+  const tx = fade(px - ix), ty = fade(py - iy);
+  return lerp(lerp(basinUnit(seed, ix, iy), basinUnit(seed, ix + 1, iy), tx), lerp(basinUnit(seed, ix, iy + 1), basinUnit(seed, ix + 1, iy + 1), tx), ty);
+}
+
+export function stepArrays(input, output, neighbors, n, tick, rain, light, begin = 0, end = n, options = {}) {
+  const { decaimientoFertilidad = 0, seed = 0, cuencas = 1 } = options;
   for (let f=0; f<FIELDS; f++) output.set(input.subarray(f*n+begin,f*n+end),f*n+begin);
   if (tick % 10) return;
   for (let i=begin; i<end; i++) {
@@ -66,13 +101,13 @@ export function stepArrays(input, output, neighbors, n, tick, rain, light, begin
     const fertilePattern=living===3 || (life>=0.45 && living===2);
     const cellularEnergy=light*moisture*(0.6+fertility*0.4);
     output[2*n+i]=clamp(life+((fertilePattern?1:0)-life)*0.2*cellularEnergy-(moisture<0.15?0.015:0)-traffic*0.004);
-    output[n+i]=clamp(fertility+life*0.0012-traffic*0.0007-cultivation*0.0002);
+    output[n+i]=clamp(fertility+life*0.0012-traffic*0.0007-cultivation*0.0002-decaimientoFertilidad*fertility);
     const produced=light*moisture*fertility*(0.25+life*0.75)*(1-growth)*(1-traffic*0.9)*0.005;
     output[i]=clamp(growth+produced-0.0002-traffic*0.002-(moisture<0.15?0.001:0));
     if(!aquatic) output[7*n+i]=clamp(vegetation+produced*0.25-traffic*0.001);
     output[6*n+i]=clamp(traffic-0.0005); output[5*n+i]=clamp(cultivation-0.00002);
-    const reservoir=feature===9 || feature===8 || wetland || aquatic;
-    output[4*n+i]=ocean?0:clamp(water+(reservoir&&rain?0.008*(0.4+fertility*0.6):0)+(feature===8?0.002:0)-(light?0.00015:0.00003));
+    const reservoir=(feature===9 || feature===8 || wetland || aquatic) && (aquatic || basinNoise(seed,input[15*n+i],input[16*n+i])<cuencas);
+    output[4*n+i]=ocean?0:clamp(water+(reservoir&&rain?0.008*(0.4+fertility*0.6):0)+(reservoir&&feature===8?0.002:0)-(light?0.00015:0.00003));
     if(aquatic) output[3*n+i]=clamp(moisture+(ocean?0.003:0)+(rain?0.008:0));
     if(tick%100===0 && feature>=2 && feature<=7 && growth>0.65 && fertility>0.4 && moisture>0.35 && traffic<0.35 && light>0) {
       const capacity=feature===6||feature===5?2:feature===4?6:12;
@@ -95,4 +130,33 @@ export function compare(expected, actual) {
     maximumAbsoluteError=Math.max(maximumAbsoluteError,Math.abs(expected[i]-actual[i]));
   }
   return {different,maximumAbsoluteError};
+}
+
+/** The benchmark refuses timings if these versioned physical cases differ from the live engine. */
+export function validateLiveKernel(referenceStep) {
+  const coordinates = [-49, -24, -1, 0, 23, 24, 49];
+  const fixture = coordinates.flatMap((y, j) => coordinates.map((x, i) => ({
+    x, y, terrain: i % 4 === 0 ? 'water' : 'meadow', biome: j % 3 === 0 ? 'ocean' : j % 3 === 1 ? 'wetland' : 'mountain',
+    feature: FEATURES[2 + (i + j) % 12], wood: 0.999, growth: 0.9, fertility: 0.9,
+    life: i % 2 === 0 ? 0.45 : 0.44999999999999996, moisture: 0.9, vegetation: 0.7, food: 0.5, drinkingWater: 0.2,
+  })));
+  const neighbors = topology(fixture);
+  let comparisons = 0;
+  for (const seed of [42, 51926, -1, 4294967295]) for (const cuencas of [0, 0.4, 1]) for (const decaimientoFertilidad of [0, 0.001]) {
+    const options = { seed, cuencas, decaimientoFertilidad };
+    let cells = fixture.map(tile => ({ ...tile }));
+    for (let j = 0; j < 8; j++) {
+      const tick = j === 0 ? 1 : j * 100, rain = j % 2 === 0, light = [1, 0, 0.4][j % 3];
+      const expected = cells.map(tile => ({ ...tile })), input = pack(cells), actual = new Float64Array(input.length);
+      referenceStep(expected, tick, rain, light, options);
+      stepArrays(input, actual, neighbors, cells.length, tick, rain, light, 0, cells.length, options);
+      const fidelity = compare(pack(expected), actual);
+      if (fidelity.different) throw new Error(`Live ecology contract v${ECOLOGY_CONTRACT.version} differs: ${JSON.stringify({ options, tick, ...fidelity })}`);
+      const unpacked = unpack(actual, cells.map(tile => ({ ...tile })), tick);
+      if (!isDeepStrictEqual(unpacked, expected)) throw new Error(`Live ecology contract v${ECOLOGY_CONTRACT.version} tile fields differ: ${JSON.stringify({ options, tick })}`);
+      comparisons++;
+      cells = expected;
+    }
+  }
+  return { version: ECOLOGY_CONTRACT.version, comparisons, differentValues: 0 };
 }

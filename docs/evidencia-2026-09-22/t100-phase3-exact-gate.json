@@ -1,0 +1,15 @@
+{
+  "repository": "/datos/workspaces/personal/AtlasParaIsa-t100-integrated-20260922",
+  "revision": "b7b858399e55adaabfe8da82491cb1d6ebcc1ead",
+  "helperSha256": "6e944c787553f36fed2841f190e4ef7936f9b024658e8d8e42833a1657382d46",
+  "dependencies": "/datos/workspaces/personal/AtlasParaIsa/node_modules",
+  "worktree": "/tmp/atlas-deploy-check.w3wDhE/worktree",
+  "startedAt": "2026-09-22T12:44:42Z",
+  "finishedAt": "2026-09-22T12:44:44.685Z",
+  "status": "passed",
+  "phase": "complete",
+  "exitCode": 0,
+  "buildExitCode": 0,
+  "smokeExitCode": 0,
+  "cleanup": true
+}

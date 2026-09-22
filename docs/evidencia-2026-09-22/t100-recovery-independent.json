@@ -1,0 +1,36 @@
+{
+  "at": "2026-09-22T12:29:09.873403+00:00",
+  "commit": "1256d7993c504d5bbf13dc16c932d31cf83401f1",
+  "parent": "d27b8bef870515d6bcce1b7113795fba1dd88791",
+  "sourceFiles": 75,
+  "sourceBlobsMatchCommit": true,
+  "tests": {
+    "independentNegatives": {
+      "passed": 6,
+      "failed": 0
+    },
+    "authorRecoveryFocal": {
+      "passed": 12,
+      "failed": 0
+    },
+    "independentPositives": {
+      "passed": 6,
+      "failed": 0
+    },
+    "typecheck": "passed"
+  },
+  "R1": "reproduced cases closed",
+  "R2": "reproduced codec/lookup cases closed; legacy plain-Error validator limitation documented",
+  "sharedRepoWrites": false,
+  "continuationJobsInspected": false,
+  "scale2MGate": false,
+  "sha256": {
+    "REVIEW.md": "c11baa6e3e17f960ce6de98408e9c2d436dfe5dbc904afaeb4e7fb6af750de56",
+    "adversarial-review.test.ts": "5d0acfabc3caf38f35af5286549e0928f38820134960b25e46f3f659c7b024dc",
+    "positive-review.test.ts": "739cd287c65c7e6f68adb8895e0661d7e2210acd8d2e608df7e3713db2936674",
+    "adversarial-fixed.tap": "bf6a0c86f9d4f322d63ff3e11e9d59eaa2dde62169d0044d3bea77b8a89e11f9",
+    "recovery-boundary.tap": "8e5f7ce2c41e8cc39a9cd89137ca1297bacf40fbbb9d7433914c2120bff33fe7",
+    "positive-fixed.tap": "275711b27ecce85b892faa691da56cb4e3167935143c9a9b37c4dc823cbebe88",
+    "typecheck.log": "952d0130b7edf4ed056e0ba0cd962126c2acad44de8ab0c4f30ed3babd21bfe2"
+  }
+}

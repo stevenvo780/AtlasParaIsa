@@ -19,8 +19,11 @@ T102 ya dispone de parámetros tipados e inactivos. Tras los controles de Store 
 digesto, la integración técnica V7 alcanzó 946/946 pruebas sin omisiones, typecheck
 y build/smoke exactos. Recuperación estricta, migración V1 y números exactos tienen
 controles independientes; [persistencia](docs/REVISION-PERSISTENCIA-2026-09-22.md).
-T100 sigue abierto por segmentación y límites persistidos, incluida la puerta de
-dos millones de teselas. La provisión familiar V8 y la contención local V9 se
+T100 ya tiene snapshots paginados en SQLite5:1153/1153 pruebas sin omisiones,
+typecheck, build/smoke exactos y seis paridades completas de1200 ticks. Siguen
+pendientes los límites persistidos por hardware y la puerta de dos millones de
+teselas; [gate técnico](docs/REVISION-PERSISTENCIA-PAGINADA-2026-09-22.md).
+La provisión familiar V8 y la contención local V9 se
 integraron sobre esa base:981/981 pruebas sin omisiones,18/18 Chromium y seis controles
 de estado/archivo; [gate V9](docs/REVISION-INTEGRACION-V9-2026-09-22.md). El contraste
 V8 de trece días terminó mixto; el contraste V8→V9 terminó con mortales

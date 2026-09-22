@@ -1,5 +1,16 @@
 # Evidencia vigente
 
+## Persistencia paginada, 22 de septiembre de 2026
+
+Integración `b7b8583`: SQLite5, páginas transaccionales, rechazo de valores
+numéricos no finitos y recuperación validada antes de COMMIT. Suite final
+**1153/1153, cero omisiones**, typecheck, build/smoke exactos y seis paridades de
+1200 ticks, conservando estado, orden, bits, aliases, parámetros y diez tablas.
+Se corrigió una diferencia de orden que la suite inicial no detectó; el primer
+verificador sufrió OOM y se reemplazó por uno acotado sin relajar su comparación.
+[Gates, incidente y límites](REVISION-PERSISTENCIA-PAGINADA-2026-09-22.md).
+T100/A0 siguen abiertos por límites y escala2M. El build público continúa en V7.
+
 ## Resultado del contraste V8→V9, 22 de septiembre de 2026
 
 Seis corridas completas de13 días;78 ventanas verificadas. Mortales finales:

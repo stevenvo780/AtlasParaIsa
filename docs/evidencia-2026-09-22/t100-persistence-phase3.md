@@ -19,8 +19,12 @@ pendientes de la fase de límites. La fuente pública y sus datos no se tocaron.
   `snapshot-parts-v1` y cada página contiene hasta **4.096 tuplas**, en su orden
   original. El mundo reconstruido conserva sus valores, parámetros y `-0`.
 - El manifiesto contiene `{snapshotEncoding, world, tiles:{count,pages}}`; `world`
-  incluye `tileEncoding: 'tiles-tuple-v1'`, pero nunca otro `tiles` ni otro
-  `snapshotEncoding`. Cada descriptor lleva `index`, `digest`, `count`, `bytes`.
+  incluye `tileEncoding: 'tiles-tuple-v1'` y, tras la reparación de integración
+  `b7b8583`, exige `tiles:null` como marcador de posición; nunca otro terreno ni
+  otro `snapshotEncoding`. El marcador conserva el orden enumerable raíz al
+  sustituirlo por las páginas. La versión inicial eliminaba la propiedad y falló
+  ese control externo, documentado en [orden exacto](t100-snapshot-order.md).
+  Cada descriptor lleva `index`, `digest`, `count`, `bytes`.
   Se exigen índices consecutivos, conteos exactos, SHA-256 y bytes UTF-8 reales.
   No se permiten claves JSON duplicadas, incluidas claves escapadas equivalentes.
 - El manifiesto/metadatos tienen un guard de **8 MiB** y cada página de **4 MiB**.

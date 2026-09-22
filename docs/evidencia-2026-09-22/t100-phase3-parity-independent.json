@@ -1,0 +1,332 @@
+{
+  "baselineCommit": "ed4a6e0622417c0a7d787391db7266243744a4c9",
+  "candidateSourceCommit": "b7b858399e55adaabfe8da82491cb1d6ebcc1ead",
+  "candidateHeadAfterRun": "e0b12f9ef7256dce1a1bf2e6ba541e4f5f4fa127",
+  "node": "v22.23.1",
+  "limits": {
+    "MemoryMax": "6G",
+    "MemorySwapMax": 0,
+    "nodeMaxOldSpaceSizeMiB": 4096,
+    "timeoutSeconds": 600,
+    "killAfterSeconds": 5,
+    "parallelSimulationProcesses": 1
+  },
+  "runs": [
+    {
+      "name": "pilot",
+      "exitCode": 0,
+      "cases": 6,
+      "ticksPerCase": 120,
+      "maxRssKiB": 310268,
+      "start": "2026-09-22T12:44:03.101Z",
+      "end": "2026-09-22T12:44:07.515Z",
+      "lastEvent": "complete",
+      "results": [
+        {
+          "seed": 1,
+          "mode": "default",
+          "partRows": 0,
+          "ticks": 120,
+          "physicalSha256": "778087518d5254e1058afe1bda8879f94685dd4f4b456583ad0f6bbf0691eaa3",
+          "equalArchiveTables": [
+            "chunks",
+            "events",
+            "inputs",
+            "legacy",
+            "metadata",
+            "sessions",
+            "technology_definitions",
+            "technology_executions",
+            "technology_origin",
+            "technology_stats"
+          ],
+          "baselineDigest": "6a2ade9ba441763f5ee237a4e307cad5f80afe21debb9e51e325fe205b38ce83",
+          "candidateDigest": "6a2ade9ba441763f5ee237a4e307cad5f80afe21debb9e51e325fe205b38ce83"
+        },
+        {
+          "seed": 1,
+          "mode": "forced-parts",
+          "partRows": 2,
+          "ticks": 120,
+          "physicalSha256": "778087518d5254e1058afe1bda8879f94685dd4f4b456583ad0f6bbf0691eaa3",
+          "equalArchiveTables": [
+            "chunks",
+            "events",
+            "inputs",
+            "legacy",
+            "metadata",
+            "sessions",
+            "technology_definitions",
+            "technology_executions",
+            "technology_origin",
+            "technology_stats"
+          ],
+          "baselineDigest": "6a2ade9ba441763f5ee237a4e307cad5f80afe21debb9e51e325fe205b38ce83",
+          "candidateDigest": "6a2ade9ba441763f5ee237a4e307cad5f80afe21debb9e51e325fe205b38ce83"
+        },
+        {
+          "seed": 51926,
+          "mode": "default",
+          "partRows": 0,
+          "ticks": 120,
+          "physicalSha256": "281db8342f03a343603793ec9c07cdf7c94e196807c0051d2a4a492612b41c7f",
+          "equalArchiveTables": [
+            "chunks",
+            "events",
+            "inputs",
+            "legacy",
+            "metadata",
+            "sessions",
+            "technology_definitions",
+            "technology_executions",
+            "technology_origin",
+            "technology_stats"
+          ],
+          "baselineDigest": "377ff4c670d8e2d60a6d57c9699e80646be78d5d531a8ad4a270030c7807fc5b",
+          "candidateDigest": "377ff4c670d8e2d60a6d57c9699e80646be78d5d531a8ad4a270030c7807fc5b"
+        },
+        {
+          "seed": 51926,
+          "mode": "forced-parts",
+          "partRows": 2,
+          "ticks": 120,
+          "physicalSha256": "281db8342f03a343603793ec9c07cdf7c94e196807c0051d2a4a492612b41c7f",
+          "equalArchiveTables": [
+            "chunks",
+            "events",
+            "inputs",
+            "legacy",
+            "metadata",
+            "sessions",
+            "technology_definitions",
+            "technology_executions",
+            "technology_origin",
+            "technology_stats"
+          ],
+          "baselineDigest": "377ff4c670d8e2d60a6d57c9699e80646be78d5d531a8ad4a270030c7807fc5b",
+          "candidateDigest": "377ff4c670d8e2d60a6d57c9699e80646be78d5d531a8ad4a270030c7807fc5b"
+        },
+        {
+          "seed": 20260905,
+          "mode": "default",
+          "partRows": 0,
+          "ticks": 120,
+          "physicalSha256": "f58d4ab42446bc201a18bec5abe502f782f3f14016881ab2c84d9baec26f3dc3",
+          "equalArchiveTables": [
+            "chunks",
+            "events",
+            "inputs",
+            "legacy",
+            "metadata",
+            "sessions",
+            "technology_definitions",
+            "technology_executions",
+            "technology_origin",
+            "technology_stats"
+          ],
+          "baselineDigest": "d143c5b0ba0a892720c3f3ec64b2512b0ed688d76564c7a77451b49ea8f736ff",
+          "candidateDigest": "d143c5b0ba0a892720c3f3ec64b2512b0ed688d76564c7a77451b49ea8f736ff"
+        },
+        {
+          "seed": 20260905,
+          "mode": "forced-parts",
+          "partRows": 2,
+          "ticks": 120,
+          "physicalSha256": "f58d4ab42446bc201a18bec5abe502f782f3f14016881ab2c84d9baec26f3dc3",
+          "equalArchiveTables": [
+            "chunks",
+            "events",
+            "inputs",
+            "legacy",
+            "metadata",
+            "sessions",
+            "technology_definitions",
+            "technology_executions",
+            "technology_origin",
+            "technology_stats"
+          ],
+          "baselineDigest": "d143c5b0ba0a892720c3f3ec64b2512b0ed688d76564c7a77451b49ea8f736ff",
+          "candidateDigest": "d143c5b0ba0a892720c3f3ec64b2512b0ed688d76564c7a77451b49ea8f736ff"
+        }
+      ],
+      "changedModules": [
+        "server/snapshot-parts.ts",
+        "server/snapshot.ts",
+        "server/store.ts"
+      ],
+      "sourceFilesPerRoot": {
+        "baseline": 71,
+        "candidate": 72
+      }
+    },
+    {
+      "name": "full",
+      "exitCode": 0,
+      "cases": 6,
+      "ticksPerCase": 1200,
+      "maxRssKiB": 609760,
+      "start": "2026-09-22T12:44:53.598Z",
+      "end": "2026-09-22T12:46:04.574Z",
+      "lastEvent": "complete",
+      "results": [
+        {
+          "seed": 1,
+          "mode": "default",
+          "partRows": 0,
+          "ticks": 1200,
+          "physicalSha256": "08c7c0f213c27f80627014bd0a399e41c670b6f327f4db9dd4b4982ad50d2ce3",
+          "equalArchiveTables": [
+            "chunks",
+            "events",
+            "inputs",
+            "legacy",
+            "metadata",
+            "sessions",
+            "technology_definitions",
+            "technology_executions",
+            "technology_origin",
+            "technology_stats"
+          ],
+          "baselineDigest": "77a7e4689fffee770b6acf024b37a06d04532bf934f55db1929de512d3bd8948",
+          "candidateDigest": "77a7e4689fffee770b6acf024b37a06d04532bf934f55db1929de512d3bd8948"
+        },
+        {
+          "seed": 1,
+          "mode": "forced-parts",
+          "partRows": 2,
+          "ticks": 1200,
+          "physicalSha256": "08c7c0f213c27f80627014bd0a399e41c670b6f327f4db9dd4b4982ad50d2ce3",
+          "equalArchiveTables": [
+            "chunks",
+            "events",
+            "inputs",
+            "legacy",
+            "metadata",
+            "sessions",
+            "technology_definitions",
+            "technology_executions",
+            "technology_origin",
+            "technology_stats"
+          ],
+          "baselineDigest": "77a7e4689fffee770b6acf024b37a06d04532bf934f55db1929de512d3bd8948",
+          "candidateDigest": "77a7e4689fffee770b6acf024b37a06d04532bf934f55db1929de512d3bd8948"
+        },
+        {
+          "seed": 51926,
+          "mode": "default",
+          "partRows": 0,
+          "ticks": 1200,
+          "physicalSha256": "e020ccc9158473d849a609cc1f4293b8b5b758d607f11f291dbb59caab26b583",
+          "equalArchiveTables": [
+            "chunks",
+            "events",
+            "inputs",
+            "legacy",
+            "metadata",
+            "sessions",
+            "technology_definitions",
+            "technology_executions",
+            "technology_origin",
+            "technology_stats"
+          ],
+          "baselineDigest": "65939d0663d16177601ce372175df21e42ff7a72a0d71674fbdc7d8db014ec65",
+          "candidateDigest": "65939d0663d16177601ce372175df21e42ff7a72a0d71674fbdc7d8db014ec65"
+        },
+        {
+          "seed": 51926,
+          "mode": "forced-parts",
+          "partRows": 2,
+          "ticks": 1200,
+          "physicalSha256": "e020ccc9158473d849a609cc1f4293b8b5b758d607f11f291dbb59caab26b583",
+          "equalArchiveTables": [
+            "chunks",
+            "events",
+            "inputs",
+            "legacy",
+            "metadata",
+            "sessions",
+            "technology_definitions",
+            "technology_executions",
+            "technology_origin",
+            "technology_stats"
+          ],
+          "baselineDigest": "65939d0663d16177601ce372175df21e42ff7a72a0d71674fbdc7d8db014ec65",
+          "candidateDigest": "65939d0663d16177601ce372175df21e42ff7a72a0d71674fbdc7d8db014ec65"
+        },
+        {
+          "seed": 20260905,
+          "mode": "default",
+          "partRows": 0,
+          "ticks": 1200,
+          "physicalSha256": "95b63b02be6db8f408f4919ed94e6c31e21af3d4a559da7c9131bdb29f9438d9",
+          "equalArchiveTables": [
+            "chunks",
+            "events",
+            "inputs",
+            "legacy",
+            "metadata",
+            "sessions",
+            "technology_definitions",
+            "technology_executions",
+            "technology_origin",
+            "technology_stats"
+          ],
+          "baselineDigest": "5f7cc16b71aa17c76831f5366cf0e9a36bc888d24b9fc38d8933fb814d5384c6",
+          "candidateDigest": "5f7cc16b71aa17c76831f5366cf0e9a36bc888d24b9fc38d8933fb814d5384c6"
+        },
+        {
+          "seed": 20260905,
+          "mode": "forced-parts",
+          "partRows": 4,
+          "ticks": 1200,
+          "physicalSha256": "95b63b02be6db8f408f4919ed94e6c31e21af3d4a559da7c9131bdb29f9438d9",
+          "equalArchiveTables": [
+            "chunks",
+            "events",
+            "inputs",
+            "legacy",
+            "metadata",
+            "sessions",
+            "technology_definitions",
+            "technology_executions",
+            "technology_origin",
+            "technology_stats"
+          ],
+          "baselineDigest": "5f7cc16b71aa17c76831f5366cf0e9a36bc888d24b9fc38d8933fb814d5384c6",
+          "candidateDigest": "5f7cc16b71aa17c76831f5366cf0e9a36bc888d24b9fc38d8933fb814d5384c6"
+        }
+      ],
+      "changedModules": [
+        "server/snapshot-parts.ts",
+        "server/snapshot.ts",
+        "server/store.ts"
+      ],
+      "sourceFilesPerRoot": {
+        "baseline": 71,
+        "candidate": 72
+      }
+    }
+  ],
+  "adversarial": {
+    "pass": 3,
+    "fail": 0,
+    "skip": 0
+  },
+  "filesSha256": {
+    "atlas-t100-integration-parity-bounded.mts": "e45ef54d9b24bc653fe4b904ac436bcf0ef52caa6a9c85225a8332436e5bcd8b",
+    "atlas-t100-integration-parity-order-fixed-pilot.json": "c9c458bbe906f793574c82cf8e1436b96d7ecc88be7726f827044f0fbb2b2af2",
+    "atlas-t100-integration-parity-order-fixed-pilot.log": "098b3e9f9f6ca61542d44db8ce7f811e661e2adb178a007e30eca51cd93eced2",
+    "atlas-t100-integration-parity-order-fixed-full.json": "5326300910c67d09723e021e00b7cc6d032c3bc8bc6cb737979d2c741ea92587",
+    "atlas-t100-integration-parity-order-fixed-full.log": "80450a3965e497d2bd30a63d946b6d0abbf9269fe5851118fd0958b153a0e65d",
+    "atlas-t100-root-order-adversarial-b7b8583.test.mts": "2c288bfa31b6818d731daba1213b15b2122133f2800e6baec08de1acde6fa4be",
+    "atlas-t100-root-order-adversarial-b7b8583.tap": "7b7df26875615301f774cfc00c3b87b2c0260802c1ce89375f4a0a69c90552da",
+    "atlas-t100-root-order-adversarial-b7b8583.log": "c312d66105054cf39a47bbeee5a40c381b04462a650eb3124b06448b3559ccba"
+  },
+  "limitations": [
+    "No certification of 2M capacity; current transport bounds remain unchanged.",
+    "No deliberate repeat of the original host OOM or proof of its exact heap allocation stack.",
+    "No full suite/build by this reviewer; coordinator owns those gates.",
+    "Elapsed concurrent wall time is diagnostic only, not a performance gate.",
+    "Experimental manifests written before the null placeholder are rejected; schema5 format is not yet public."
+  ]
+}

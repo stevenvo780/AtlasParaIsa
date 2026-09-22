@@ -1,0 +1,92 @@
+{
+  "recordedAt": "2026-09-22T12:49:27.879169+00:00",
+  "sourceRevision": "b7b858399e55adaabfe8da82491cb1d6ebcc1ead",
+  "baselineRevision": "ed4a6e0622417c0a7d787391db7266243744a4c9",
+  "node": "v22.23.1",
+  "fullSuite": {
+    "tests": 1153,
+    "pass": 1153,
+    "fail": 0,
+    "skipped": 0,
+    "durationMs": 192503.6271,
+    "exitCode": 0,
+    "command": "systemd-run --user --scope --quiet --unit=atlas-t100-final-tests-20260922 -p MemoryMax=12G -p MemorySwapMax=0 env COMPUTE_NVRTC=/opt/cuda/lib64/libnvrtc.so NODE_OPTIONS=--max-old-space-size=4096 timeout 1200 npm test -- --test-concurrency=8",
+    "groupMemoryMaxBytes": 12884901888,
+    "groupSwapMaxBytes": 0,
+    "midRunObservedPeakBytes": 5815562240,
+    "peakScope": "Observed while active, not asserted as final peak"
+  },
+  "typecheck": {
+    "passed": true,
+    "exitCode": 0
+  },
+  "parity": {
+    "cases": 6,
+    "ticksPerCase": 1200,
+    "seeds": [
+      1,
+      51926,
+      20260905
+    ],
+    "modes": [
+      "default",
+      "forced-parts"
+    ],
+    "saveEvery": 20,
+    "reloadEvery": 600,
+    "cloneEvery": 120,
+    "equalDurableTables": 10,
+    "parameters": "same in both; complete digest equality",
+    "peakRssKiB": 609760,
+    "independentAdditionalControls": 3
+  },
+  "priorGate": {
+    "revision": "3d1b6444a0f3ccce329c404902347c774f9070fe",
+    "fullSuitePass": 1142,
+    "fail": 0,
+    "skip": 0,
+    "externalParity": "failed: enumerable root order differed; original unbounded verifier was killed by global OOM",
+    "correction": "validated null tile placeholder preserves exact property order"
+  },
+  "focused": {
+    "orderBefore": {
+      "pass": 0,
+      "fail": 8
+    },
+    "orderAndStorageAfter": {
+      "pass": 169,
+      "fail": 0,
+      "skip": 0
+    },
+    "independentRecovery": {
+      "pass": 24,
+      "fail": 0
+    },
+    "portableDiagnostic": {
+      "pass": 3,
+      "fail": 0,
+      "skip": 0,
+      "wrongCheckpointIdentityMutations": 4
+    }
+  },
+  "exactBuildSmoke": "t100-phase3-exact-gate.json",
+  "commandCorrection": "First attempt used absent historical .superpowers path and exited127 without executing a gate. Correct scripts/deploy-check.sh invocation passed. Both logs retained.",
+  "limitations": [
+    "No new Chromium run; prior V9 integration18/18 only.",
+    "No public publication/restart or data changes.",
+    "No2M roundtrip or hardware-derived effective limits yet.",
+    "No p95<50ms performance claim.",
+    "Plain Error in inherited validators retains semantic classification."
+  ],
+  "logHashes": {
+    "/tmp/atlas-t100-integrated-full.log": "3f5befcd3e74e7b180c1f0932400fafbb9a98b615e2b303d8f7ae2af745f61a9",
+    "/tmp/atlas-t100-final-full.log": "521626c8d969ace46e01d28457859a66273a16a6baef04f33bfd70cc6617ea56",
+    "/tmp/atlas-snapshot-parts-order-typecheck.log": "952d0130b7edf4ed056e0ba0cd962126c2acad44de8ab0c4f30ed3babd21bfe2",
+    "/tmp/atlas-snapshot-parts-order-red.log": "6283b466a3d106026655929c1b7b2d9483761c5280ca1d9fab272acddb7dc40f",
+    "/tmp/atlas-snapshot-parts-order-focal.log": "35537be6a10156d6ff03b9f6abd6cfe2428ef2240646d4944f2bd1ca109948b3",
+    "/tmp/atlas-default-seed-identity-red.log": "8afe9f220f31d143080c318a78e4300bb7019d47a0d5321e455fd1cce5add9fc",
+    "/tmp/atlas-default-seed-identity-green.log": "600d260364e2835814adb2cf31a5a2b2e69be52ec85200d35f5e7ef06ad67d7b",
+    "/tmp/atlas-t100-final-exact-gate.log": "dfad366ad21f6322d1240f33440badeb41217d509595d0dfbb36a9ccb75968ad",
+    "/tmp/atlas-t100-final-exact-gate-corrected.log": "bfda73aea588fc4f4af5d3c961e44969b8592925f5cb3418d39f5802d5023099"
+  }
+}

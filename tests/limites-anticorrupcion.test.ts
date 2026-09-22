@@ -1,19 +1,23 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { assertWorld, createWorld, type World } from '../src/world/index.js';
+import { updateCommunities } from '../src/world/society.js';
+import { materializeAnimals, stepAnimals, syncFauna, type AnimalWorld } from '../src/world/animals.js';
+import type { Tile } from '../src/shared/types.js';
 import { digestoCanonico } from '../src/world/digesto.js';
 import { DEFAULT_PARAMS, paramsOf, parseParams, setParams } from '../src/world/params.js';
 import { decodeSnapshot, encodeSnapshot, takeSnapshotParams, SnapshotSemanticError } from '../src/server/snapshot.js';
 import { Store } from '../src/server/store.js';
 
-function wideWorld(): World {
-  const world = createWorld(51926, parseParams('limites.teselasActivas=65792,limites.chunks=257,limites.comunidades=12'));
+/** `chunks` regiones completas: la geometría estructural fija 256 teselas por chunk. */
+function wideWorld(chunks = 257): World {
+  const world = createWorld(51926, parseParams({ limites: { teselasActivas: chunks * 256, chunks, comunidades: 12 } }));
   const template = world.tiles.find(tile => tile.terrain === 'meadow')!;
-  for (let cx = 100; Object.keys(world.chunks).length < 257; cx++) {
+  for (let cx = 100; Object.keys(world.chunks).length < chunks; cx++) {
     const cy = 100, key = `${cx},${cy}`;
     world.chunks[key] = { key, cx, cy, discovered: false, places: [], lastTick: 0 };
     for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++)
@@ -48,7 +52,7 @@ test('T100: 65792 teselas y 257 chunks conservan el digesto confirmado al reabri
   finally { reopened.close(); }
 });
 
-test('T100: doce comunidades son admisibles sin cambiar la ley de fundación', () => {
+test('T100: doce comunidades son admisibles y viajan enteras en la instantánea', () => {
   const world = createWorld(51926, parseParams('limites.comunidades=12'));
   world.communities = Array.from({ length: 12 }, (_, index) => ({ id: `test-${index}`, name: `Grupo ${index}`, x: 17, y: 13,
     color: '#ffffff', members: [], culture: { sharing: 0, stewardship: 0, openness: 0 }, formedAt: 0, cooperation: 0, disputes: 0 }));
@@ -113,4 +117,88 @@ test('T100: perfil exacto desaparece del World y los defaults siguen siendo dete
   const value = decodeSnapshot(body) as World, params = takeSnapshotParams(value); setParams(value, params);
   assert.equal(Object.hasOwn(value, 'limitsProfile'), false);
   assert.equal(digestoCanonico(value), before); assert.deepEqual(params, DEFAULT_PARAMS);
+});
+
+const escala = process.env.CARTA_TEST_ESCALA === '1';
+
+test('T100: 2 097 152 teselas y 8192 chunks conservan el digesto confirmado al reabrir SQLite',
+  { skip: escala ? false : 'prueba lenta: exige CARTA_TEST_ESCALA=1' }, t => {
+  const directory = mkdtempSync(join(tmpdir(), 'atlas-limits-2m-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const started = performance.now(), world = wideWorld(8192), path = join(directory, 'world.sqlite');
+  assert.equal(world.tiles.length, 2_097_152); assert.equal(Object.keys(world.chunks).length, 8192);
+  assertWorld(world);
+  const store = new Store(path);
+  let digest: string;
+  try { store.save(world); digest = digestoCanonico(world); } finally { store.close(); }
+  const reopened = new Store(path);
+  try { assert.equal(digestoCanonico(reopened.load()!.world), digest); } finally { reopened.close(); }
+  console.log(`2M teselas: ${Math.round(performance.now() - started)} ms, RSS pico ${(process.memoryUsage.rss() / 1048576).toFixed(0)} MiB, ${statSync(path).size} bytes en disco.`);
+});
+
+/** El techo de cría animal es el límite efectivo del mundo, no una constante del binario.
+ * Rebaño sintético: sin activación de chunks, la población sólo crece por reproducción. */
+const meadow = (x: number, y: number): Tile => ({ x, y, terrain: 'meadow', biome: 'grassland', moisture: 0.9,
+  vegetation: 0.9, growth: 0.9, food: 0.2, fauna: 0, drinkingWater: 0.9, fertility: 0.8 });
+function herd(limit?: number): AnimalWorld {
+  const tiles = Array.from({ length: 49 }, (_, n) => meadow(n % 7, Math.floor(n / 7)));
+  const seeds: [string, number, number][] = [['a', 1, 1], ['b', 1, 1], ['c', 5, 5], ['d', 5, 5]];
+  const animals = seeds.map(([suffix, x, y]) => {
+    const born = materializeAnimals(42, [{ ...meadow(x, y), fauna: 1, species: 'hare' }], 0)[0]!;
+    born.id += `-${suffix}`; born.hunger = 0.2; born.thirst = 0.2; born.age = 1200; born.lastBirthAge = 0;
+    return born;
+  });
+  syncFauna(tiles, animals);
+  const world: AnimalWorld = { seed: 42, tick: 0, tiles, animals, animalCounter: 0, reproductionEnabled: true,
+    animalDynamics: { births: 0, deaths: 0, predations: 0, humanHunts: 0, waterConsumed: 0, plantConsumed: 0 } };
+  if (limit !== undefined) setParams(world, parseParams(`limites.fauna=${limit}`));
+  return world;
+}
+function grazed(world: AnimalWorld, ticks = 2000): number {
+  let peak = world.animals.length;
+  for (let n = 0; n < ticks; n++) { world.tick++; stepAnimals(world); peak = Math.max(peak, world.animals.length); }
+  return peak;
+}
+
+test('T100: la capacidad de cría animal deriva del límite efectivo', () => {
+  assert.equal(grazed(herd()), 6);
+  assert.equal(grazed(herd(5)), 5);
+});
+
+/** Trío conviviente y compatible: sólo el tope de fundación puede impedir la comunidad. */
+function foundingWorld(params?: string): World {
+  const world = createWorld(51926, params === undefined ? undefined : parseParams(params));
+  world.tick = 0; world.cooperationEnabled = true;
+  const base = world.people[0]!;
+  const trio = [base, ...[1, 2].map(index => ({ ...structuredClone(base), id: `vecino-${index}`, name: `Vecino ${index}` }))];
+  for (const person of trio) {
+    person.communityId = null; person.x = base.x; person.y = base.y; person.culture = { ...base.culture };
+    person.bonds = Object.fromEntries(trio.filter(other => other !== person).map(other => [other.id, 0.5]));
+  }
+  world.people = trio;
+  assert.ok(world.places.some(place => Math.hypot(base.x - place.x, base.y - place.y) <= 7), 'el trío vive junto a un lugar compartido');
+  return world;
+}
+const emit = ((event: object) => ({ ...event, id: 'evento', tick: 0 })) as unknown as Parameters<typeof updateCommunities>[1];
+const filled = (world: World, count: number): World => {
+  world.communities = Array.from({ length: count }, (_, index) => ({ id: `previo-${index}`, name: `Grupo ${index}`, x: 17, y: 13,
+    color: '#ffffff', members: [], culture: { sharing: 0, stewardship: 0, openness: 0 }, formedAt: 0, cooperation: 0, disputes: 0 }));
+  return world;
+};
+
+test('T100: con el default de hoy la fundación se detiene en ocho comunidades', () => {
+  const blocked = filled(foundingWorld(), 8);
+  updateCommunities(blocked, emit);
+  assert.deepEqual(blocked.people.map(person => person.communityId), [null, null, null]);
+  const open = filled(foundingWorld(), 7);
+  updateCommunities(open, emit);
+  assert.equal(new Set(open.people.map(person => person.communityId)).size, 1);
+  assert.equal(open.people.every(person => !!person.communityId), true);
+});
+
+test('T100: elevar limites.comunidades cambia la conducta de fundación', () => {
+  const world = filled(foundingWorld('limites.comunidades=9'), 8);
+  updateCommunities(world, emit);
+  assert.equal(world.people.every(person => !!person.communityId), true);
+  assert.equal(world.communities.length, 1);
 });

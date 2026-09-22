@@ -108,3 +108,34 @@ no se cambiará el servicio público. La prueba de 65792 celdas no cierra este r
 El hardware sólo puede elegir parámetros al crear un mundo nuevo por una entrada host.
 Una vez persistidos, los mismos parámetros y estado dan la misma ejecución con
 independencia de la memoria de la máquina que los carga.
+
+## 4b/4c ejecutados (2026-09-22, cierre de T100)
+
+**Ley conductual.** El tope de fundación de `society.ts` deja de ser el literal `>= 8` y pasa
+a leer `limitsOf(world).comunidades`. El default sigue siendo 8, así que todo mundo existente
+y todo mundo nuevo con params por defecto reproduce HOY bit a bit: el digesto canónico de
+`createWorld(seed)` es idéntico antes y después en las semillas 1, 7 y 51926 a 2400 pasos.
+**Elevar `limites.comunidades` es un CAMBIO DE CONDUCTA declarado**, no una relajación de
+validación: con 9 se funda una novena comunidad donde antes no se fundaba ninguna, y eso
+altera pertenencia, cultura y el gate de reproducción (`reproduce` exige `communityId`).
+Quien lo suba debe contrastarlo como cambio de reglas, no como admisión. Por eso el resolver
+del host **no** deriva `comunidades` de la máquina: el hardware no decide conductas.
+Reglas 10 siguen siendo el lugar para retirar el tope, no este commit.
+
+**Techo de cría animal.** `reproduce` calcula su capacidad con `limitsOf(world).fauna` en vez de
+`MAX_STORED_ANIMALS`. La constante sobrevive sólo como valor histórico de admisión (`assertAnimals`
+por defecto, informe de `scripts/soak.ts`), ya derivada de `DEFAULT_PARAMS`, y no gobierna ninguna
+ley. El `throw` de `stepAnimals` sigue siendo anticorrupción: la activación de un chunk puede
+materializar fauna dormida, así que un límite por debajo de la fauna ya existente falla ruidoso.
+
+**Resolver del host** (`src/server/hardware-limits.ts`). `presupuesto = min(RAM física, cgroup v2)
+· 0,5`, acotado por `heap de V8 · 0,6`; de ahí regiones enteras a `1750 B` por tesela activa, y de
+las regiones las teselas (`×256`) y la fauna (`×6`, ley estructural). `1750 B` es medida, no
+estimación: la prueba de escala de 2 097 152 teselas / 8192 chunks dio RSS pico 3415 MiB
+(1707 B/tesela) y 240 783 360 bytes en SQLite (115 B/tesela). Nunca por debajo de los defaults
+de hoy. Es admisión, no garantía de RSS ni de latencia (eso lo gobierna el p95, ruling R17).
+Se evalúa **sólo** al crear mundo nuevo: `AppOptions.params` acepta una función y `app.ts` la
+llama únicamente en la rama `?? createWorld(...)`; `load`, `previous`, migración y validación de
+respaldos jamás preguntan por la máquina. Precedencia: defaults deterministas → límites resueltos
+→ overrides explícitos de `deploymentParams` (`CARTA_PARAMS`), que mandan aunque repitan el default.
+El laboratorio (`scripts/lab/*`) todavía no llama al resolver: sus réplicas siguen con los defaults.

@@ -19,8 +19,10 @@ export interface AppOptions {
   secure?: boolean; staticDir?: string; tickMs?: number; seed?: number; manual?: boolean;
   /** Params con los que se GENERA un mundo nuevo (R6: antes llegaban después de que
    * `createApp` ya hubiera generado el terreno). Un mundo cargado conserva los suyos,
-   * los de su instantánea; quien quiera imponerlos llama `setParams` después. */
-  params?: WorldParams;
+   * los de su instantánea; quien quiera imponerlos llama `setParams` después.
+   * Una función se evalúa SOLO si no hay mundo que cargar (T100, fase 4b): así el
+   * resolver de límites del host no se consulta en `load`, `previous` ni migración. */
+  params?: WorldParams | (() => WorldParams);
   /** Instance-local monotonic clock; tests can measure work without patching global timers. */
   monotonicNow?: () => number;
 }
@@ -90,7 +92,7 @@ export function createApp(options: AppOptions) {
   if (options.secure && !origin.startsWith('https://')) throw new Error('Private hosted access requires an HTTPS origin.');
   const loaded = store.load();
   const existingInstanceId = readWorldInstance(store.db);
-  let world = loaded?.world ?? createWorld(options.seed ?? 51926, options.params);
+  let world = loaded?.world ?? createWorld(options.seed ?? 51926, typeof options.params === 'function' ? options.params() : options.params);
   // Arrancar desde un respaldo es un retroceso: la crónica que Isa lee no puede decir que
   // el mundo «retoma desde su último momento guardado», y el operador tiene que ver que el
   // eslabón vigente está podrido. El retroceso solo se puede medir en tiempo de servicio:

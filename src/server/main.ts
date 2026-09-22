@@ -4,6 +4,7 @@ import { Store } from './store.js';
 import { acquireLock } from './lock.js';
 import { paramsOf, setParams } from '../world/params.js';
 import { deploymentParams } from './deployment-params.js';
+import { hostParams } from './hardware-limits.js';
 
 process.umask(0o077);
 const port = Number(process.env.PORT ?? 3000);
@@ -19,9 +20,10 @@ try {
   store = new Store(resolve(dataPath, 'world.sqlite'));
   // Los params llegan ANTES de que `createApp` genere un mundo nuevo (R6: `agua.cuencas`
   // decide el terreno en la generación, así que fijarlos después no servía de nada).
-  const app = createApp({ store, password: process.env.CARTA_PASSWORD, credentialPath: resolve(dataPath, 'access.scrypt'), origin, secure, params: deploymentParams() });
+  const app = createApp({ store, password: process.env.CARTA_PASSWORD, credentialPath: resolve(dataPath, 'access.scrypt'), origin, secure, params: () => deploymentParams(hostParams()) });
   // Precedencia: un mundo cargado trae los params de su instantánea y esta línea aplica
   // ENCIMA la configuración explícita del despliegue, solo en las claves que nombra.
+  // Los límites del host NO vuelven a resolverse aquí: los del mundo cargado son los suyos.
   setParams(app.world, deploymentParams(paramsOf(app.world)));
   let closing = false;
   const shutdown = async () => {

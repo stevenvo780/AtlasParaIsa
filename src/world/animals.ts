@@ -8,7 +8,8 @@ import { LEGACY_WORLD_LIMITS, limitsOf } from './params.js';
 
 export const MAX_ACTIVE_ANIMALS = 8192;
 export const MAX_ANIMALS_PER_TILE = 6;
-// Rules 9 still use this historical value in births; admission is parameterized.
+// Historical ceiling, kept only for legacy admission defaults and reporting: the live
+// breeding ceiling is `limitsOf(world).fauna`, resolved per world, never this constant.
 export const MAX_STORED_ANIMALS = LEGACY_WORLD_LIMITS.fauna;
 export const MAX_ANIMAL_MEMORY = 12;
 export const MAX_ANIMAL_DECISIONS_PER_TICK = 1024;
@@ -256,7 +257,7 @@ function reproduce(world: AnimalWorld, state: LocalState, active: Animal[], emit
     const neighbors = [[0, 0], [0, -1], [-1, 0], [1, 0], [0, 1]].flatMap(([dx, dy]) => state.occupants.get(`${a.x + dx},${a.y + dy}`) ?? []);
     const b = neighbors.filter(b => b.id !== a.id && b.species === a.species && eligible(b)).sort(canonical)[0];
     if (!b) continue;
-    capacity ??= Math.min(MAX_STORED_ANIMALS, world.tiles.filter(t => t.terrain !== 'shelter' && (t.growth ?? 0) > 0.04).length * 3);
+    capacity ??= Math.min(limitsOf(world).fauna, world.tiles.filter(t => t.terrain !== 'shelter' && (t.growth ?? 0) > 0.04).length * 3);
     if (world.animals.length >= capacity) break;
     const parents = [a.id, b.id].sort(), id = `animal-born-${world.seed >>> 0}-${world.tick}-${++world.animalCounter}`;
     const inherited = Object.fromEntries(Object.keys(a.genes).map(name => {

@@ -1,0 +1,299 @@
+{
+  "statusCapture": "2026-09-22T12:17:46.794791+00:00",
+  "originalCounts": {
+    "timeout": 34,
+    "success": 30
+  },
+  "originalPairedCompleteSeeds": [
+    1002,
+    1006,
+    1007,
+    1014,
+    1015,
+    1024,
+    1025,
+    1026,
+    1027,
+    1028,
+    1029,
+    1030,
+    1031
+  ],
+  "completedEndpointsOnly": [
+    {
+      "id": "baseline-1002",
+      "seed": 1002,
+      "side": "baseline",
+      "mortals": 0,
+      "births": 21,
+      "runSHA256": "e7b4b9b6972c9da9dee171c8a8c7e767db2bf3d06aebbc2656520f930ce8f392",
+      "daySHA256": "afdd7efd09c6bfcd724ad3054af864333a5fde9022b6491e149eae19a802489b"
+    },
+    {
+      "id": "baseline-1006",
+      "seed": 1006,
+      "side": "baseline",
+      "mortals": 0,
+      "births": 7,
+      "runSHA256": "8cd19acbbce9a5e2ed9cf487753ddad6df27ce1844756efae4db35120d59afaa",
+      "daySHA256": "70ba8bdeb35c84e09482c1bd792ad43d2ab6c83070cdf28b5dc4c1a0d63e0010"
+    },
+    {
+      "id": "baseline-1007",
+      "seed": 1007,
+      "side": "baseline",
+      "mortals": 0,
+      "births": 3,
+      "runSHA256": "bd78abb1735958acdfc373cd88257628f2a3717588687b8ca445aa44ef3d4aa2",
+      "daySHA256": "6013f10a81b3617744dcf1cdd2a0578574bca4dc7e419054589b6e7bd79d5039"
+    },
+    {
+      "id": "baseline-1011",
+      "seed": 1011,
+      "side": "baseline",
+      "mortals": 0,
+      "births": 18,
+      "runSHA256": "36ad50da9c860d7aea4ea6ff488e3bbf18d7eee699c17d5f87488e8d9dc47f8c",
+      "daySHA256": "78f645aedd6364d8c4a5ff2807ac69135ae988dc7d2822559166d0b37b2bd9b4"
+    },
+    {
+      "id": "baseline-1014",
+      "seed": 1014,
+      "side": "baseline",
+      "mortals": 0,
+      "births": 11,
+      "runSHA256": "a69adca5fbbca1802d21249f7cac21e7a970f5aadda92bbe51ea1b1eeffdedaf",
+      "daySHA256": "02da08734e8d69bb4aa0906250995bccf964fab154b190cda03f2c36d6c428fe"
+    },
+    {
+      "id": "baseline-1015",
+      "seed": 1015,
+      "side": "baseline",
+      "mortals": 0,
+      "births": 10,
+      "runSHA256": "f8c2e434f4c7b3c04f70458040756f27ba79d90caf4ea607f2b3980d86ef5f4c",
+      "daySHA256": "fff397350c40bf7d0855276b507e7dc80d7e0ca6bfe51f4262cca236a4dd6067"
+    },
+    {
+      "id": "baseline-1024",
+      "seed": 1024,
+      "side": "baseline",
+      "mortals": 0,
+      "births": 3,
+      "runSHA256": "75491ee45b5d6b1a532e264c7fa35d4bb93de403b823045507433ee070bb7158",
+      "daySHA256": "59c9d56cf134f61d75a9919a5e47ef110e2309e688bf10e6782be69d68fdc5f6"
+    },
+    {
+      "id": "baseline-1025",
+      "seed": 1025,
+      "side": "baseline",
+      "mortals": 0,
+      "births": 13,
+      "runSHA256": "74e68e197f37127f454b6e1780faa8d076a45abc968965ee2de96de39c4b6957",
+      "daySHA256": "127ae984e4dd26c26fb44e7db33269760ee192b93623fc703c3be17e72ff1c35"
+    },
+    {
+      "id": "baseline-1026",
+      "seed": 1026,
+      "side": "baseline",
+      "mortals": 0,
+      "births": 5,
+      "runSHA256": "7dafc2b955f257781f054e2196a4386b8d03470cc7a584798adb5e269742d4f4",
+      "daySHA256": "2fc2160ef6257c9cdfb706ef590e6f65c8c434460cfee1f10de0220a4154faf1"
+    },
+    {
+      "id": "baseline-1027",
+      "seed": 1027,
+      "side": "baseline",
+      "mortals": 0,
+      "births": 12,
+      "runSHA256": "1744e918ddc2558e55af11bbe87c075276e70746e6786e54d8f259c0df3fbc52",
+      "daySHA256": "2b96277e9fe3d94cc98bc044041b3fccc1f8c23e68f38d5b55f90ec868b3962a"
+    },
+    {
+      "id": "baseline-1028",
+      "seed": 1028,
+      "side": "baseline",
+      "mortals": 0,
+      "births": 0,
+      "runSHA256": "40fe918913f5e79d393e0d80431a618ccd578b1234dcf3522ba7448192e6cb8a",
+      "daySHA256": "02c850c516050978b93113262fa985664914a42c8ddf932c8602d2d5e8adfb76"
+    },
+    {
+      "id": "baseline-1029",
+      "seed": 1029,
+      "side": "baseline",
+      "mortals": 0,
+      "births": 3,
+      "runSHA256": "412d0b73ca60599588e6ff04c3650488891d6683070822351a079d6f1b9de502",
+      "daySHA256": "a6c94bdefad8ac8cdab353c8d7d8953fe666fa0ec0097671e20356391073d0c0"
+    },
+    {
+      "id": "baseline-1030",
+      "seed": 1030,
+      "side": "baseline",
+      "mortals": 0,
+      "births": 18,
+      "runSHA256": "c91956f54d292976b5dce2c8f169afa504729e6f79cff6be88b0671924d7d7fe",
+      "daySHA256": "ed9f0050b37db659618f3898615689ed1c2300dbb3576c2f34dfd87f7eb687da"
+    },
+    {
+      "id": "baseline-1031",
+      "seed": 1031,
+      "side": "baseline",
+      "mortals": 0,
+      "births": 19,
+      "runSHA256": "2aeda08aff645a0bfb49d739eec40541046f92df5d64375b9925d77a493483f0",
+      "daySHA256": "45c0856f4929f478c3f6ada6526fb58f7691bb13675b608ed15f0e655098e740"
+    },
+    {
+      "id": "candidate-1002",
+      "seed": 1002,
+      "side": "candidate",
+      "mortals": 0,
+      "births": 13,
+      "runSHA256": "373f6fb84a2ecb663f1e066d192799899b6264f0627c64e9e883594386644e89",
+      "daySHA256": "384e4be2e86ea72baa1b4e442af1e4a67fd144566428d25fb8ad79608b410502"
+    },
+    {
+      "id": "candidate-1004",
+      "seed": 1004,
+      "side": "candidate",
+      "mortals": 0,
+      "births": 16,
+      "runSHA256": "c8c86061e661022d23e2d40a993c1a61d48495dbdf6380061ab0705b49e817c9",
+      "daySHA256": "d1e8e897aa557920c95ef145cd392b24a52d4112f9a20c678af6d8bc9c2bb2a3"
+    },
+    {
+      "id": "candidate-1005",
+      "seed": 1005,
+      "side": "candidate",
+      "mortals": 0,
+      "births": 6,
+      "runSHA256": "6493579cfc4dd98d72efe18568364facd44b55f4a2e10cb73aa87c5a3d07ec95",
+      "daySHA256": "46cd48f8f0be2f60504c74075c736e101c68ee98e2659a5e539a1344ac304eb3"
+    },
+    {
+      "id": "candidate-1006",
+      "seed": 1006,
+      "side": "candidate",
+      "mortals": 0,
+      "births": 14,
+      "runSHA256": "163c1d3de346c5acb6fb032e076bdb1a596f66679533911670a9057ba7e1bf90",
+      "daySHA256": "0d33a4657af2cfb3ce968e379366106d7bbb5a095e8742b93f0fb42c4683e0f0"
+    },
+    {
+      "id": "candidate-1007",
+      "seed": 1007,
+      "side": "candidate",
+      "mortals": 0,
+      "births": 0,
+      "runSHA256": "2db368a61711d38842a3d6f7387f317b25b68a80d5f7d188f9a70a23fa053bd5",
+      "daySHA256": "37b06bc2af917609355086694629d70bbaa4f65140289cb9c052c4454b137ef6"
+    },
+    {
+      "id": "candidate-1012",
+      "seed": 1012,
+      "side": "candidate",
+      "mortals": 0,
+      "births": 11,
+      "runSHA256": "826e2f681735034a6dcc2097d862f5b6b296ad5453d99b1932b3a623bdeb42ff",
+      "daySHA256": "aae484b8056983fa7cb13c95f560788adc396a62feeb5bd1451545049d4f9f41"
+    },
+    {
+      "id": "candidate-1014",
+      "seed": 1014,
+      "side": "candidate",
+      "mortals": 0,
+      "births": 2,
+      "runSHA256": "39797feef8fe45bffe7e51630f66544aae1fc9173702ff42f5bb2a58263f8a41",
+      "daySHA256": "4ef7e235ea41a791ec937b5e3f15a7d42e81c9fd8f4920a2c41328fe195ce9c5"
+    },
+    {
+      "id": "candidate-1015",
+      "seed": 1015,
+      "side": "candidate",
+      "mortals": 0,
+      "births": 12,
+      "runSHA256": "32a53c44f6c1284dbe8f07af40aa5bb37e095b0fd9658c66ed9ec437e88d64bb",
+      "daySHA256": "3330f3a809655d129703990479be51eeb03fcf1f839e12671263dafc75b88b57"
+    },
+    {
+      "id": "candidate-1024",
+      "seed": 1024,
+      "side": "candidate",
+      "mortals": 0,
+      "births": 1,
+      "runSHA256": "aa3d78fd1580c116f452e93e0f8de5fd6bab05dc8e4531ca07a8a12fb000712d",
+      "daySHA256": "0d763f6cd345105e920085f2e4e790d5a826a49e226ca558ad9e295affd59953"
+    },
+    {
+      "id": "candidate-1025",
+      "seed": 1025,
+      "side": "candidate",
+      "mortals": 1,
+      "births": 32,
+      "runSHA256": "be2402be0f04dc88775feb4296341cae32817b3c975c3ca400724ebb58eb1930",
+      "daySHA256": "5261d5a15103379952c63530d3cdbd7ebe9604ee130313918a0bc77fa18f1983"
+    },
+    {
+      "id": "candidate-1026",
+      "seed": 1026,
+      "side": "candidate",
+      "mortals": 0,
+      "births": 8,
+      "runSHA256": "245c782c726c219cfc80b8950b4ba8703895c021b2d0c62a88a815cea56e50d4",
+      "daySHA256": "4d70a143981e2a4d8a11d8ac615e08a10e4487942343cfc5c54462b801b7a7ea"
+    },
+    {
+      "id": "candidate-1027",
+      "seed": 1027,
+      "side": "candidate",
+      "mortals": 0,
+      "births": 8,
+      "runSHA256": "7eae947e030bc8cad5408076943de044c17eedb82bdffcbf3189a502db988920",
+      "daySHA256": "bd9c46986e691db5710fec19ca9c15474eb625228a675b60092f5abaa970e867"
+    },
+    {
+      "id": "candidate-1028",
+      "seed": 1028,
+      "side": "candidate",
+      "mortals": 0,
+      "births": 0,
+      "runSHA256": "b64f1a42a6dd7efaddeadc2608e506c7b5da99456effcf6cf174183640918fe1",
+      "daySHA256": "33a31d95558f71474fa0f1551abb35292838484131a6bdc5e6ce9fdfe150aafe"
+    },
+    {
+      "id": "candidate-1029",
+      "seed": 1029,
+      "side": "candidate",
+      "mortals": 0,
+      "births": 2,
+      "runSHA256": "152aa2f8312dd84d74af969275de227b6abeb3ca3fd3d0e8ae5780a493993b48",
+      "daySHA256": "b77722975407880217445f35b74966a39a6f23d522095c66ba2f89579fa75333"
+    },
+    {
+      "id": "candidate-1030",
+      "seed": 1030,
+      "side": "candidate",
+      "mortals": 0,
+      "births": 16,
+      "runSHA256": "0da81ec374745b6a4731eab94a13e5db9ac519246019ad1b3250388c4837756a",
+      "daySHA256": "9970c68410a23c23888a6f610269a06916617787e7aa7397102a039e72e363e0"
+    },
+    {
+      "id": "candidate-1031",
+      "seed": 1031,
+      "side": "candidate",
+      "mortals": 222,
+      "births": 253,
+      "runSHA256": "5d065d288d48ad3e69c6d38c437bad3d536463218f845cc2da7c0b996c4c0544",
+      "daySHA256": "2b19b3e411e52c760a4c28a2f52f968927567142ffa67e2ee7fb8b4703a66f75"
+    }
+  ],
+  "limits": [
+    "Completed endpoints are a selected cohort; timeout is not mortality or survival",
+    "JSON endpoint provenance checked; no new full Store/archive audit in this census",
+    "Continuation manifest unchanged: 24 complete then, 34 selected timeouts, 6 active excluded at its cut"
+  ]
+}

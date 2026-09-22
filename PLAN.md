@@ -26,11 +26,13 @@ de estado/archivo; [gate V9](docs/REVISION-INTEGRACION-V9-2026-09-22.md). El con
 V8 de trece días terminó mixto y el de V9 sigue abierto. El perfil de tres mundos
 envejecidos tampoco alcanza el presupuesto del clon: [T103 continúa abierto](docs/REVISION-CLON-ENVEJECIDO-2026-09-22.md).
 
-La comparación reservada fija 32 semillas, control y candidato, a 30 días simulados.
-Se ejecuta en copias inmutables con 24 procesos; no emplea el gobernador del servidor
-y sus tiempos concurrentes no acreditan rendimiento de producción. Una réplica sin
-terminar no se cuenta como supervivencia a 30 días. Las primeras comparaciones tienen
-resultados mixtos, incluida pérdida de población; no prueban superioridad general.
+La comparación reservada fija32 semillas, control y candidato, a30 días simulados.
+El intento original con24 procesos finalizó30 corridas y agotó el tiempo en34;
+éstas continúan aparte desde checkpoints con cuatro procesos. No emplea el
+gobernador del servidor y sus tiempos concurrentes no acreditan rendimiento de
+producción. Una réplica sin terminar no se cuenta como supervivencia. Trece pares
+completos son una cohorte seleccionada: once0→0 mortales, uno0→1 y otro0→222;
+los19 pares restantes siguen censurados. No prueban superioridad general.
 
 Sigue abierto GOAL.md: selección frente a neutralidad, continuidad y diversidad
 multigeneracional, reposición autónoma de insumos, territorio multiescala, etapas A–F

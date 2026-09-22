@@ -1,0 +1,30 @@
+{
+  "revision": "595461669547df87028ecb9f9c04eac5984400ad",
+  "addedInstrumentTests": {
+    "tests": 8,
+    "pass": 8,
+    "fail": 0,
+    "skipped": 0,
+    "exitCode": 0,
+    "durationMs": 7449.497516,
+    "command": "node --import tsx --test tests/lab-continuation.test.ts",
+    "logSha256": "cdb9622b91e8a46338bdcbf961b36ce35368cc5d975b421b923a1553ddf0797e"
+  },
+  "typecheckExitCode": 0,
+  "exactGate": {
+    "repository": "/datos/workspaces/personal/AtlasParaIsa-storage-integration-20260922",
+    "revision": "595461669547df87028ecb9f9c04eac5984400ad",
+    "helperSha256": "6e944c787553f36fed2841f190e4ef7936f9b024658e8d8e42833a1657382d46",
+    "dependencies": "/datos/workspaces/personal/AtlasParaIsa/node_modules",
+    "worktree": "/tmp/atlas-deploy-check.utzXmI/worktree",
+    "startedAt": "2026-09-22T11:51:32Z",
+    "finishedAt": "2026-09-22T11:51:34.489Z",
+    "status": "passed",
+    "phase": "complete",
+    "exitCode": 0,
+    "buildExitCode": 0,
+    "smokeExitCode": 0,
+    "cleanup": true
+  },
+  "scope": "Additive lab instrument integrated after the 946-test storage gate; no second full-suite claim. Active frozen experiment driver predates the final-checkpoint guard and needs independent end audit."
+}

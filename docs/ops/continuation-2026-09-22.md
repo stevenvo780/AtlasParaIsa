@@ -54,3 +54,8 @@ final con las mismas condiciones. Se admitieron 34 timeouts, se conservaron 24
 completos originales y se excluyeron seis activos en ese único corte.
 
 Validación focal: copia SQLite real con WAL y apóstrofe, rechazo de checkpoint corrupto/retroceso/cambio, huecos diarios, actor muerto versus inventor y S/I, proceso resistente a TERM, descendiente resistente tras salida del líder, fallo al registrar un proceso recién creado, y trayectoria real recargada frente a ininterrumpida. Ninguno de esos controles prueba supervivencia a treinta días ni equivalencia universal: cada checkpoint requiere admisión individual.
+
+Integración `5954616`: **8/8 controles focales sin omisiones**, typecheck y
+build/smoke del commit exacto verdes. Se añadió después del gate de 946 pruebas de
+persistencia, sin cambios nuevos en `src/`; no se presenta como una nueva suite
+completa de 954 pruebas. [Registro](../evidencia-2026-09-22/continuation-integration-gate.json).

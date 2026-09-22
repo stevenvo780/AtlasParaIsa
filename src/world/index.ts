@@ -448,6 +448,28 @@ function choose(world: World, person: Person): void {
     action: 'approach', target: familyPlace ?? family.partner, score: 0.85 + person.traits.care * 0.2,
     reason: `Tiene reservas y busca ${familyPlace ? `reunirse con ${family.partner.name} en ${familyPlace.name}` : `acercarse a ${family.partner.name}`}; el vínculo y el cuidado corporal permiten intentar una crianza.`,
   });
+  // Cortejo (2026-09-22, `poblacion.cortejo`, default 0 = conducta de hoy). Diagnóstico: en la semilla 7
+  // hay adultos fértiles con vínculo mutuo, pero la pareja válida más cercana de toda la corrida está a
+  // 18 celdas; nadie la busca y el mundo se extingue sin nacer nadie. Ley local: quien está en edad fértil
+  // y recuerda un vínculo mutuo con otra persona fértil no emparentada, fuera de `radioPareja` pero dentro
+  // de `radioCortejo`, puede ir hacia ella. Cuesta el mismo movimiento que cualquier desplazamiento, no
+  // crea recursos ni garantiza un nacimiento; hambre, sed y descanso siguen ganando cuando urgen.
+  const leyPoblacion = paramsOf(world).poblacion;
+  if (leyPoblacion.cortejo > 0 && !family && world.reproductionEnabled && person.role === 'neighbor' && reproductiveReadiness(world, person)) {
+    let cortejado: Person | undefined, vinculo = 0;
+    for (const [id, strength] of Object.entries(person.bonds)) {
+      if (strength < 0.3) continue;
+      const other = world.people.find(p => p.id === id);
+      if (!other || other.role !== 'neighbor' || (other.bonds[person.id] ?? 0) < 0.3 || closeKin(person, other)) continue;
+      const away = distance(person, other);
+      if (away <= leyPoblacion.radioPareja || away > leyPoblacion.radioCortejo || !reproductiveReadiness(world, other)) continue;
+      if (!cortejado || away < distance(person, cortejado) || (away === distance(person, cortejado) && other.id < cortejado.id)) {
+        cortejado = other; vinculo = (strength + (other.bonds[person.id] ?? 0)) / 2;
+      }
+    }
+    if (cortejado) candidates.push({ action: 'approach', target: { x: cortejado.x, y: cortejado.y }, score: leyPoblacion.cortejo * (0.5 + vinculo * 0.5),
+      reason: `Recuerda el vínculo con ${cortejado.name} y lo busca; ambos están en edad de criar y la cercanía hace posible una familia.` });
+  }
   const water = reachableTiles.filter(t => waterAvailable(world,t) > 0.005 && planAffordable(stepsTo(t)!, 0)).sort((a, b) => distance(person, a) - distance(person, b))[0];
   const carriedWater = containedWaterQuanta(person) > 0;
   const portableWater = carriedWater && canHandleContainedWater(person, world.tick);

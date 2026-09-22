@@ -28,7 +28,10 @@ export interface WorldParams {
    * `intervaloComprobacionTicks` pasos.
    */
   poblacion: { maxima: number; intervaloComprobacionTicks: number; nacimientosPorComprobacion: number;
-    exigeComunidad: boolean; radioPareja: number; radioLugar: number; comprobacionContinua: boolean };
+    exigeComunidad: boolean; radioPareja: number; radioLugar: number; comprobacionContinua: boolean;
+    /** Cortejo (2026-09-22): peso con que una persona fértil busca a otra fértil, no emparentada y con
+     * vínculo mutuo ≥ 0,3 que está fuera de `radioPareja` pero dentro de `radioCortejo`. 0 = hoy. */
+    cortejo: number; radioCortejo: number };
   recursos: { capacidadBosque: number; capacidadPastizal: number; capacidadOtros: number; velocidadRegeneracion: number; decaimientoFertilidad: number; decaimientoComida: number };
   persistencia: { cadaTicks: number; ventanaEventosTicks: number; paginasSucias: boolean };
   /** Agua superficial concentrada en cuencas: 1 = generación actual (todas las charcas/manantiales); < 1 conserva solo las de las cuencas más húmedas (T035). */
@@ -73,7 +76,7 @@ const RAW_DEFAULTS: WorldParams = {
   // Ruling R17: `maxima` ya no es un tope de diseño (era 40); por defecto no limita y el
   // freno lo ponen el entorno y el gobernador. Sigue siendo parámetro para el laboratorio.
   poblacion: { maxima: 1_000_000, intervaloComprobacionTicks: 120, nacimientosPorComprobacion: 2,
-    exigeComunidad: true, radioPareja: 3, radioLugar: 4, comprobacionContinua: false },
+    exigeComunidad: true, radioPareja: 3, radioLugar: 4, comprobacionContinua: false, cortejo: 0, radioCortejo: 24 },
   recursos: { capacidadBosque: 1, capacidadPastizal: 0.7, capacidadOtros: 0.35, velocidadRegeneracion: 1, decaimientoFertilidad: 0.001, decaimientoComida: 0.0001 },
   persistencia: { cadaTicks: 1, ventanaEventosTicks: 0, paginasSucias: false },
   agua: { cuencas: 0.4 },
@@ -144,6 +147,8 @@ export const PARAM_RANGES: Record<string, [number, number]> = {
   // así que mover uno mueve también cómo se ordenan las parejas candidatas.
   'poblacion.radioPareja': [1, 32],
   'poblacion.radioLugar': [1, 64],
+  'poblacion.cortejo': [0, 5],
+  'poblacion.radioCortejo': [1, 128],
   'recursos.capacidadBosque': [0, 10],
   'recursos.capacidadPastizal': [0, 10],
   'recursos.capacidadOtros': [0, 10],

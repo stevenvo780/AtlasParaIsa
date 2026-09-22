@@ -45,8 +45,12 @@ test('same generation and age can have different life stages because inherited t
 test('the age-stage census includes every human regardless of camera and is not a snapshot field', () => {
   const world = createWorld(42), before = structuredClone(world);
   const local = projectWorld(world), distant = projectWorld(world, { x: 500, y: -500, width: 20, height: 20 });
-  assert.deepEqual(local.people, distant.people);
+  // T134 (FR-017/FR-026): `people` now follows the camera — `distant` is far from every founder and
+  // sees nobody. The invariant this test protects (a census of every human, regardless of camera)
+  // moved to `stats.census`, computed on the server over the WHOLE population.
   assert.equal(local.people.length, world.people.length);
+  assert.equal(distant.people.length, 0, 'a camera far from every inhabitant sees nobody, by design');
+  assert.deepEqual(local.stats!.census, distant.stats!.census, 'the census itself stays camera-independent');
   assert.ok(local.people.every(p => p.lifeStage !== undefined));
   local.people[0]!.lifeStage = 'senescent';
   assert.deepEqual(world, before);

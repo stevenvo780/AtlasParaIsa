@@ -256,7 +256,14 @@ test('six day/night cycles retain bounded bodies, terrain, history and valid lan
   const view = projectWorld(world);
   assert.equal(view.sequence, world.tick);
   assert.equal('rng' in view, false);
-  assert.equal('inventory' in view.people[0]!, false);
+  // T134 (FR-017): `people` now follows the camera; after 6 simulated days `world.people[0]` may
+  // have wandered outside the default viewport, so the wire-omission check needs a camera that
+  // guarantees it is in frame (centered on the actor's own position), not the default window.
+  const target = world.people[0]!;
+  const centered = projectWorld(world, { x: target.x - 6, y: target.y - 4, width: 12, height: 8 });
+  const projectedTarget = centered.people.find(p => p.id === target.id)!;
+  assert.ok(projectedTarget, 'a camera centered on the actor must show them');
+  assert.equal('inventory' in projectedTarget, false);
   assert.ok(view.memories.every(m => m.source === 'sample'));
 });
 

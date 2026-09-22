@@ -1225,12 +1225,26 @@ export function projectWorld(world: World, viewport?: Viewport, context: WorldCo
   }
   // La ley de longevidad del mundo, leída una vez por proyección: decide `lifeStage` de cada persona.
   const cuerpo = paramsOf(world).cuerpo;
+  // T134 (FR-017/FR-026): `people` se recorta con la MISMA prueba de cámara que `projectTerrain`
+  // ya usa para `tiles` (`spatial.ts:121`: `p.x >= v.x && p.y >= v.y && p.x < v.x+v.width && p.y <
+  // v.y+v.height`), con un margen de una celda (quien está a punto de entrar en cuadro no debe
+  // parpadear al aparecer). `spatial.ts` no es fichero de esta tarea; se repite la prueba aquí en
+  // vez de exportarla desde allí. Los agregados de censo (`stats.census`) siguen viendo TODA la
+  // población, calculados en `worldStatistics` sobre `world.people` sin recortar.
+  const visible = (p: { x: number; y: number }, margin: number): boolean =>
+    p.x >= v.x - margin && p.y >= v.y - margin && p.x < v.x + v.width + margin && p.y < v.y + v.height + margin;
+  const peopleInView = world.people.filter(p => visible(p, 1));
+  const visibleIds = new Set(peopleInView.map(p => p.id));
+  // Solo los planos que alguna estructura VISIBLE referencia viajan enteros; el resto se pide a
+  // demanda (mismo patrón que `technologyRecipeDetail`), porque el catálogo entero crece con el
+  // mundo y no con la cámara.
+  const referencedBlueprintIds = new Set(projected.structures.map(s => s.blueprintId).filter((id): id is string => typeof id === 'string'));
   return {
     version: PROTOCOL_VERSION, sequence: world.tick, tick: world.tick, day: Math.floor(world.tick / TICKS_PER_DAY) + 1,
     phase: phaseAt(world.tick), weather: world.weather, width: v.width, height: v.height,
     originX: v.x, originY: v.y, infinite: true, activeChunks: Object.keys(world.chunks).length, discoveredChunks: world.discoveredChunks, settlementCount: world.settlementCount,
     tiles: projected.tiles.map(t => ({ x: t.x, y: t.y, terrain: t.terrain, biome: t.biome, elevation: viewNumber(t.elevation), moisture: viewNumber(t.moisture), food: viewNumber(t.food), vegetation: viewNumber(t.vegetation), feature: t.feature, growth: viewNumber(t.growth), fertility: viewNumber(t.fertility), species: t.species, ...amount('wood', t.wood), ...amount('stone', t.stone), ...amount('variety', t.variety), ...amount('cultivation', t.cultivation), ...amount('traffic', t.traffic), ...amount('drinkingWater', t.drinkingWater), ...amount('fauna', t.fauna), ...amount('life', t.life) })),
-    people: world.people.map((p): PersonView => {
+    people: peopleInView.map((p): PersonView => {
       const life = demographicTraits(p.genome, cuerpo);
       return { id: p.id, name: p.name, role: p.role, x: p.x, y: p.y, color: p.color, action: p.action, reason: p.reason, energy: p.energy, hunger: p.hunger, fatigue: p.fatigue, thirst: p.thirst, need: p.need, recentMemory: p.recentMemory, traits: { ...p.traits }, skills: { ...p.skills }, materials: { ...p.materials }, specialty: specialty(p), controlMode: p.controlMode, blueprintId:p.blueprintId??null,
       target: { x:p.target.x,y:p.target.y }, foodReserve:p.inventory, foodReserveCapacity:0.25, working: !!p.technology.waterPreparation || ['gather','farm','build','hunt','invent','repair','research','craft','forage'].includes(p.action) && distance(p,p.target)<0.5,
@@ -1242,8 +1256,8 @@ export function projectWorld(world: World, viewport?: Viewport, context: WorldCo
     }),
     places: projected.places.map(p => ({ id: p.id, name: p.name, x: p.x, y: p.y, description: p.description, gatherings: p.gatherings })), events: world.events.slice(-VIEW_EVENTS).map(e => ({ id: e.id, tick: e.tick, kind: e.kind, actors: [...e.actors], ...(e.x === undefined ? {} : { x: e.x }), ...(e.y === undefined ? {} : { y: e.y }), text: e.text, cause: e.cause, source: e.source, ...(e.death === undefined ? {} : { death: { ...e.death, previous: [...e.death.previous] } }) })),
     memories: world.memories.slice(-VIEW_MEMORIES).map(m => ({ id: m.id, title: m.title, text: m.text, source: m.source, placeId: m.placeId })),
-    animals: projected.animals, structures: projected.structures, blueprints: world.blueprints.map(b=>({id:b.id,name:b.name,components:[...b.components],generation:b.generation,parents:[...b.parents],inventorId:b.inventorId,tick:b.tick,uses:b.uses,usefulness:b.usefulness,cost:{wood:b.cost.wood,stone:b.cost.stone,work:b.cost.work}})),
-    stats: worldStatistics(world), communities: world.communities.map(c => ({ id: c.id, name: c.name, x: c.x, y: c.y, color: c.color, members: [...c.members], culture: { ...c.culture }, formedAt: c.formedAt, cooperation: c.cooperation, disputes: c.disputes })),
+    animals: projected.animals, structures: projected.structures, blueprints: world.blueprints.filter(b=>referencedBlueprintIds.has(b.id)).map(b=>({id:b.id,name:b.name,components:[...b.components],generation:b.generation,parents:[...b.parents],inventorId:b.inventorId,tick:b.tick,uses:b.uses,usefulness:b.usefulness,cost:{wood:b.cost.wood,stone:b.cost.stone,work:b.cost.work}})),
+    stats: worldStatistics(world), communities: world.communities.map(c => ({ id: c.id, name: c.name, x: c.x, y: c.y, color: c.color, members: c.members.filter(id=>visibleIds.has(id)), memberCount: c.members.length, culture: { ...c.culture }, formedAt: c.formedAt, cooperation: c.cooperation, disputes: c.disputes })),
     technology: projectTechnology(world), organization: (({ resources: _resources, ...summary }) => structuredClone(summary))(organization.value),
     demography: {deaths:world.demographyDynamics.deaths,causes:{...world.demographyDynamics.causes},recent:world.legacy.slice(0,32).map(p=>({id:p.id,name:p.name,generation:p.generation,parents:[...p.parents],bornAt:p.bornAt,diedAt:p.diedAt,cause:p.cause}))},
   };

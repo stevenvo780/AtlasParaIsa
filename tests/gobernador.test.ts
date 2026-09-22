@@ -171,7 +171,7 @@ test('el software ya no pone tope: `poblacion.maxima` por defecto no limita y el
 // el hardware limita el crecimiento, no el reemplazo.
 // ---------------------------------------------------------------------------------------------
 
-import { decidirConTecho, ESTADO_TECHO_INICIAL, Gobernador, type EstadoTecho } from '../src/server/governor.js';
+import { decidirConTecho, ESTADO_TECHO_INICIAL, GOVERNOR_DECLINE_STEPS, Gobernador, type EstadoTecho } from '../src/server/governor.js';
 import type { Person } from '../src/world/index.js';
 
 /** Igual que `fatalThirst` en tests/muerte.test.ts: sed total y salud mínima ⇒ muerte real por deshidratación en el paso auténtico. */
@@ -195,15 +195,16 @@ test('techo: por encima del presupuesto se fija el techo en la población y solo
   assert.equal(decidirConTecho(50, 50, 22, ESTADO_TECHO_INICIAL).estado.techo, null, 'el presupuesto exacto todavía no frena');
 });
 
-test('techo: un rojo grave y sostenido baja el techo una unidad por ventana; nunca por debajo de cero ni por muertes provocadas', () => {
+test('techo: un rojo grave y sostenido baja el techo una unidad por día simulado; nunca por debajo de cero ni por muertes provocadas', () => {
+  assert.equal(GOVERNOR_DECLINE_STEPS, 2400, 'un día simulado a 10 Hz');
   let estado = { ...ESTADO_TECHO_INICIAL };
-  for (let n = 0; n < GOVERNOR_WINDOW_STEPS - 1; n++) estado = decidirConTecho(120, 50, 30, estado).estado;
-  assert.equal(estado.techo, 30, 'antes de completar la ventana el techo no cambia');
+  for (let n = 0; n < GOVERNOR_DECLINE_STEPS - 1; n++) estado = decidirConTecho(120, 50, 30, estado).estado;
+  assert.equal(estado.techo, 30, 'antes de completar el día el techo no cambia');
   estado = decidirConTecho(120, 50, 30, estado).estado;
-  assert.equal(estado.techo, 29, 'p95 > 2× presupuesto durante 120 pasos baja el techo en uno');
-  for (let n = 0; n < GOVERNOR_WINDOW_STEPS; n++) estado = decidirConTecho(80, 50, 30, estado).estado;
+  assert.equal(estado.techo, 29, 'p95 > 2× presupuesto durante 2400 pasos baja el techo en uno');
+  for (let n = 0; n < GOVERNOR_DECLINE_STEPS; n++) estado = decidirConTecho(80, 50, 30, estado).estado;
   assert.equal(estado.techo, 29, 'un rojo leve (< 2×) no sigue bajando el techo');
-  let cero: EstadoTecho = { techo: 0, pasosEnRojo: GOVERNOR_WINDOW_STEPS - 1 };
+  let cero: EstadoTecho = { techo: 0, pasosEnRojo: GOVERNOR_DECLINE_STEPS - 1 };
   cero = decidirConTecho(120, 50, 0, cero).estado;
   assert.equal(cero.techo, 0);
 });

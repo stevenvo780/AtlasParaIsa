@@ -377,8 +377,8 @@ laboratorio, sin gobernador, la misma semilla llega a 25 días con 137–144 vec
 La política `techo` conserva el presupuesto y la histéresis de R17 y cambia qué se frena: por
 encima del presupuesto se fija un **techo = población del frenazo** y sólo se permiten nacimientos
 mientras la población esté **por debajo** del techo (reponer, no crecer); una muerte no baja el techo.
-Si el rojo es grave (p95 > 2× presupuesto) y persiste, el techo baja una unidad por ventana de 120
-pasos: la población decrece por muertes no repuestas, jamás por muertes provocadas. Por debajo del
+Si el rojo es grave (p95 > 2× presupuesto: el servidor ya no sostiene 10 Hz) y persiste, el techo baja una
+unidad por día simulado (2 400 pasos): la población decrece por muertes no repuestas, jamás por muertes provocadas. Por debajo del
 70 % del presupuesto el techo se retira. `decidirConTecho` es una función pura (`src/server/governor.ts`);
 el estado del techo vive en el proceso del servidor, no en el mundo ni en su digesto. El último frenazo
 se publica en `performance.gobernador.techoObservado` (p95, población, teselas activas, teselas por

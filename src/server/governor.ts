@@ -1,5 +1,9 @@
 /** Recent completed steps, including persistence. This is not a lifetime percentile. */
 export const GOVERNOR_WINDOW_STEPS = 120;
+/** Política `techo`: pasos seguidos en rojo grave (p95 > 2× presupuesto) que bajan el techo una unidad
+ * (= un día simulado a 10 Hz, `TICKS_PER_DAY`). Con un rojo grave el servidor ya no sostiene 10 Hz; la
+ * población decrece por muertes no repuestas, despacio: el instrumento cambia el crecimiento, no mata. */
+export const GOVERNOR_DECLINE_STEPS = 20 * GOVERNOR_WINDOW_STEPS;
 
 /** Shared by the server and experiments so both use the same window and percentile. */
 export class RollingStepPerformance {
@@ -35,8 +39,8 @@ export const ESTADO_TECHO_INICIAL: Readonly<EstadoTecho> = Object.freeze({ techo
  * · Verde (p95 < 70 % del presupuesto): sin techo, la reproducción queda permitida.
  * · Rojo (p95 > presupuesto): si no había techo se fija en la población actual; solo se permiten
  *   nacimientos mientras la población esté por debajo del techo (reponer muertes, no crecer).
- *   Si el rojo es grave (p95 > 2× presupuesto) y persiste, el techo baja una unidad por ventana
- *   de `GOVERNOR_WINDOW_STEPS` pasos: la población decrece por muertes no repuestas.
+ *   Si el rojo es grave (p95 > 2× presupuesto) y persiste, el techo baja una unidad cada
+ *   `GOVERNOR_DECLINE_STEPS` pasos (un día simulado): la población decrece por muertes no repuestas.
  * · Banda muerta [70 %, 100 %]: el techo vigente se conserva tal cual (histéresis de R17).
  * Función pura: no toca el mundo ni relojes; el estado viaja como argumento y como resultado.
  */
@@ -46,7 +50,7 @@ export function decidirConTecho(p95StepMs: number, presupuestoMs: number, poblac
   if (p95StepMs > presupuestoMs) {
     if (techo === null) techo = poblacion;
     pasosEnRojo += 1;
-    if (p95StepMs > presupuestoMs * 2 && pasosEnRojo % GOVERNOR_WINDOW_STEPS === 0) techo = Math.max(0, techo - 1);
+    if (p95StepMs > presupuestoMs * 2 && pasosEnRojo % GOVERNOR_DECLINE_STEPS === 0) techo = Math.max(0, techo - 1);
   } else pasosEnRojo = 0;
   return { reproduccion: techo === null || poblacion < techo, estado: { techo, pasosEnRojo } };
 }

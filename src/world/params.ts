@@ -36,7 +36,7 @@ export interface WorldParams {
    * · `techo` (default): el hardware limita el CRECIMIENTO, no el reemplazo. Al cruzar el
    *   presupuesto se fija un techo = población de ese momento y solo se permiten nacimientos
    *   mientras la población esté por debajo del techo; con p95 > 2× presupuesto sostenido el
-   *   techo baja una unidad por ventana de 120 pasos (la población decrece por muertes no
+   *   techo baja una unidad por día simulado (la población decrece por muertes no
    *   repuestas, nunca por muertes provocadas); por debajo del 70 % el techo se retira.
    * Default 50 ms = constitución V.
    */

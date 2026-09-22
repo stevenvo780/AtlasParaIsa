@@ -195,6 +195,46 @@ observación anterior, fundadas/disueltas y, por comunidad, miembros, distancia 
 centro y grupos espaciales a ≤ 6 celdas). Sólo lee campos planos: los `dia-NNN.json` salen
 idénticos con y sin observador (comprobado contra la base de la noche, semillas 7/42/51926/1).
 
+## Criterio de terminado (`criterio-terminado.mts`, Steven 2026-09-22)
+
+> «En el laboratorio, la mayoría de semillas mantiene población y recambio durante al menos 60 días
+> simulados con varias generaciones vivas, más de un tipo de cooperación relevante, conflictos y
+> muertes con causa legible, tecnología que se transmite y diversidad de conducta creciente.»
+
+Evalúa ese criterio sobre un conjunto de réplicas **ya producidas** (solo lee `dia-NNN.json` y
+`replica.json`; no simula): un directorio con un subdirectorio `<brazo>-<semilla>` por réplica.
+
+```sh
+npx tsx scripts/lab/criterio-terminado.mts --entrada <conjunto> [--dia 60|comun] [--ventana 10] [--salida informe.json]
+# p. ej. corte intermedio de un conjunto en marcha:
+npx tsx scripts/lab/criterio-terminado.mts --entrada $SCRATCH/r2 --dia 10 --salida $SCRATCH/criterio-r2-d10.json
+```
+
+Por semilla, al día D (por defecto 60; `--dia comun` = último día que ya escribieron todas las no
+extinguidas), con ventana = los 10 días que terminan en D. Umbrales por defecto (todos ajustables; la
+justificación de cada uno está en la cabecera del script y se repite en la salida):
+
+| # | criterio | cumple si… | banderas |
+|---|---|---|---|
+| C1 | supervivencia | `poblacion(D) ≥ 16` (14 fundadores mortales + S e I) | `--poblacion-min` |
+| C2 | recambio | nacimientos en la ventana ≥ 1 **y** `fundadoresMortalesVivos(D) ≤ 1` | `--nacimientos-min --fundadores-max` |
+| C3 | varias generaciones | `generacionesMortalesVivas(D)` ≥ 3 (sin S e I, que mantienen viva la generación 0) | `--generaciones-min` |
+| C4 | cooperación variada | ≥ 2 tipos de `cooperacionAcumuladaPorTipo` (+ `foodShared` si existe), cada uno ≥ 10 % de los actos de la ventana | `--coop-tipos-min --coop-fraccion-min` |
+| C5 | conflictos | `conflictosAcumulados` crece ≥ 1 en la ventana (si es 0 en toda la réplica lo dice) | `--conflictos-min` |
+| C6 | muertes legibles | 0 muertes fuera de starvation/dehydration/exposure/senescence, ≥ 2 causas en 1..D y balance `Δpoblación = Δnacimientos − Δmuertes` | `--causas-min --causas-conocidas` |
+| C7 | tecnología transmitida | Σ`usosDeInventorAjeno` / Σ(`usosUtiles` − `usosSinAutorResuelto`) en la ventana ≥ 0,15 y uso ajeno en ≥ 50 % de sus días | `--uso-ajeno-min --dias-uso-ajeno-min` |
+| C8 | diversidad creciente | pendiente MCO de `diversidadConducta` en días 5..D ≥ 0 **o** valor(D) ≥ valor(5) | `--pendiente-min --dia-base-diversidad --diversidad-regla o\|y` |
+
+- Cada criterio es cumple / falla / **desconocido** (campo ausente): nunca se aprueba por defecto.
+- **Extinguida** (algún día ≤ D con 0 `vecinosMortales`): cuenta y falla los 8. **En curso** (sin
+  `replica.json` y sin dia-D) y **corta** (terminó antes de D sin extinguirse): excluidas, se dice
+  cuántas y por qué día van. Una réplica que sigue corriendo pero ya escribió dia-D se evalúa.
+- Veredicto por brazo (`--mayoria 0.5`): «mayoría» si cumplen los 8 ≥ 50 % de las semillas del brazo
+  aunque todas las excluidas fallaran; «no mayoría» si ni contando como aprobadas las excluidas y las
+  desconocidas se llega; si no, «indeterminado». También se da la fracción literal sobre evaluadas.
+- Salida: tabla por brazo (cumplen/evaluadas por criterio y los 8 a la vez), una línea por réplica
+  con el motivo de cada fallo, y el informe completo en JSON con `--salida`.
+
 ## Rendimiento
 
 Con `persistencia.cadaTicks = 1` (el valor por defecto, igual que producción hoy), guardar en cada

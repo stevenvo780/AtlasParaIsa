@@ -1,5 +1,19 @@
 # Evidencia vigente
 
+## Copias verificadas y semilla pública a25 días, 22 de septiembre de 2026
+
+`efed3c7` valida la copia posterior a VACUUM y todos los registros diferidos de
+chunks e identidades. Diez negativos adicionales reproducían éxito incorrecto;
+ahora fallan cerrado. Suite1170/1170 sin omisiones, typecheck y build/smoke exactos.
+[Revisión y alcance](REVISION-BACKUP-2026-09-22.md).
+
+Dos mundos nuevos V7/V9 con seed51926 y los22 parámetros públicos llegan a25 días:
+137→144 mortales,190→179 nacimientos,67→49 muertes y generaciones2–10 en ambos.
+Se verificaron50 ventanas y dos checkpoints con sus motores congelados. El
+gobernador no se ejecutó; no es una reproducción del resultado público. Cuatro
+backups públicos incluyen reproducción desactivada en t16300, pero no la historia
+completa de pausas. [Contraste y límites](REVISION-SEMILLA-PUBLICA-25D-2026-09-22.md).
+
 ## Persistencia paginada, 22 de septiembre de 2026
 
 Integración `b7b8583`: SQLite5, páginas transaccionales, rechazo de valores

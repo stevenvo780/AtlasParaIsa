@@ -1,0 +1,78 @@
+{
+  "source": {
+    "root": "/datos/workspaces/personal/AtlasParaIsa-default-seed-audit-20260922/artifacts/default-seed-v7-v9-20260922/batch-2026-09-22T12-20-00-472Z/sources/baseline",
+    "originSha": "3dd615ee069d9d61f51a4c74f85d33c15a4583e0",
+    "rootDirty": false,
+    "sourceHash": "783b2dc78b0361a51e390c2e015429a984c50f8b1b6ce73bbd941d7e4d30778d",
+    "fullHash": "776ae07aa9a037e4d656f5abfc57d5cf770792d1102698e23ef68a4f9eadb4c7"
+  },
+  "scope": "V7 seed51926 identical 22 params, no inputs; world direct vs world with Store context vs createApp with births manually enabled. Up to1200 ticks, stops at first full digest difference. No public world touched.",
+  "results": [
+    {
+      "tick": 0,
+      "app": "303c656f476d080f66c2406ebf8fce366605d57f90214ee1a00472e9b74c8c40",
+      "world": "303c656f476d080f66c2406ebf8fce366605d57f90214ee1a00472e9b74c8c40",
+      "context": "303c656f476d080f66c2406ebf8fce366605d57f90214ee1a00472e9b74c8c40"
+    },
+    {
+      "tick": 120,
+      "app": "0561d69f6a0b9a7987f6d550c28e4ee175f5c8daebc4093f3b1f060c5f1c4b16",
+      "world": "0561d69f6a0b9a7987f6d550c28e4ee175f5c8daebc4093f3b1f060c5f1c4b16",
+      "context": "0561d69f6a0b9a7987f6d550c28e4ee175f5c8daebc4093f3b1f060c5f1c4b16"
+    },
+    {
+      "tick": 240,
+      "app": "5d5ec2dc568253b8baf04a0e1f28cce6c5e1ec8c877f3c4acc5771a6faffa76f",
+      "world": "5d5ec2dc568253b8baf04a0e1f28cce6c5e1ec8c877f3c4acc5771a6faffa76f",
+      "context": "5d5ec2dc568253b8baf04a0e1f28cce6c5e1ec8c877f3c4acc5771a6faffa76f"
+    },
+    {
+      "tick": 360,
+      "app": "d340d391394d51a2bb076c5ae564f1938944e413b788be63b8e1efb764673f93",
+      "world": "d340d391394d51a2bb076c5ae564f1938944e413b788be63b8e1efb764673f93",
+      "context": "d340d391394d51a2bb076c5ae564f1938944e413b788be63b8e1efb764673f93"
+    },
+    {
+      "tick": 480,
+      "app": "27017f766f20034ccd7a29c257cae4458490a78a4c13e37fd16d39077d89afd9",
+      "world": "27017f766f20034ccd7a29c257cae4458490a78a4c13e37fd16d39077d89afd9",
+      "context": "27017f766f20034ccd7a29c257cae4458490a78a4c13e37fd16d39077d89afd9"
+    },
+    {
+      "tick": 600,
+      "app": "28e1444289e8d703f63a60c612ba018ffca15d4788a4aa2aa2417edc233fa090",
+      "world": "28e1444289e8d703f63a60c612ba018ffca15d4788a4aa2aa2417edc233fa090",
+      "context": "28e1444289e8d703f63a60c612ba018ffca15d4788a4aa2aa2417edc233fa090"
+    },
+    {
+      "tick": 720,
+      "app": "71a74b2fc4ff1f40c0e45526afadf6c666b629d86586768cc6f678a01ca72de7",
+      "world": "71a74b2fc4ff1f40c0e45526afadf6c666b629d86586768cc6f678a01ca72de7",
+      "context": "71a74b2fc4ff1f40c0e45526afadf6c666b629d86586768cc6f678a01ca72de7"
+    },
+    {
+      "tick": 840,
+      "app": "0bb60602198cacfef9cf776345480a156a00719fe0c2d1844636574d49c259a8",
+      "world": "0bb60602198cacfef9cf776345480a156a00719fe0c2d1844636574d49c259a8",
+      "context": "0bb60602198cacfef9cf776345480a156a00719fe0c2d1844636574d49c259a8"
+    },
+    {
+      "tick": 960,
+      "app": "33309bc6233cd881dcd5366ce22b3e76ae6e959bea7d1c889d9cc1995b0c8930",
+      "world": "33309bc6233cd881dcd5366ce22b3e76ae6e959bea7d1c889d9cc1995b0c8930",
+      "context": "33309bc6233cd881dcd5366ce22b3e76ae6e959bea7d1c889d9cc1995b0c8930"
+    },
+    {
+      "tick": 1080,
+      "app": "29ac44db6eb2ffed0c0228f34765617c91a7463c8329d184c4a63e4c8803a5a7",
+      "world": "29ac44db6eb2ffed0c0228f34765617c91a7463c8329d184c4a63e4c8803a5a7",
+      "context": "29ac44db6eb2ffed0c0228f34765617c91a7463c8329d184c4a63e4c8803a5a7"
+    },
+    {
+      "tick": 1200,
+      "app": "168d6e331667c515f01f122f7b17206ecc5786a82c9579861420aea34b7f441c",
+      "world": "168d6e331667c515f01f122f7b17206ecc5786a82c9579861420aea34b7f441c",
+      "context": "168d6e331667c515f01f122f7b17206ecc5786a82c9579861420aea34b7f441c"
+    }
+  ]
+}

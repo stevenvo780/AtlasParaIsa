@@ -133,3 +133,17 @@ tick cuesta caro: ~32 ms/tick medidos en esta torre (un día completo, ~78 s). P
 (T017/T018) conviene pasar `--params "persistencia.cadaTicks=200"` (o el valor que se calibre en
 T031) para acelerar sin dejar de ejercitar el guardado periódico con `Store`; los tests de este
 fichero usan `persistencia.cadaTicks=300` por la misma razón.
+
+## El techo del hardware — `../curva-techo.mts` (T109)
+
+`replica.ts` mide **leyes** (población, tecnología, cooperación…) a una escala fija; hermana con
+`../curva-techo.mts` (`npm run techo -- --seed S --escala habitantes|teselas --hasta N --salida
+<dir>`), que en cambio hace **crecer la escala** (habitantes o teselas activas, clonando
+estructuralmente fundadores reales — no una fábrica de personas paralela) hasta que el p95 del
+paso, medido con la MISMA ventana de 120 pasos y el MISMO percentil que usa el gobernador de
+producción (`RollingStepPerformance`, `src/server/governor.ts`), toca `gobernador.presupuestoMs`.
+Igual que aquí, SIEMPRE adjunta un `Store` temporal (P3): sin él se mediría una física de
+tecnología distinta, y `persistencia.cadaTicks=1` (el guardado en cada paso) es justo lo que hace
+caro «el paso» que el gobernador vigila. Escribe un `punto-NNN.json` por escalón y un `curva.json`
+resumen; ver la cabecera del propio fichero para el detalle de cómo se coloca cada sintético sin
+violar `assertWorld` (siempre sobre tesela transitable, nunca duplicando los roles únicos S/I).

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 import { chromium } from '@playwright/test';
-import { createServer } from 'vite';
+import { createBrowserTestServer as createServer } from './lib/vite.js';
 import { treeForm } from '../src/client/life-art.js';
 import { generateChunk } from '../src/world/terrain.js';
 import type { Tile } from '../src/shared/types.js';
@@ -26,7 +26,7 @@ test('new forest visibility follows real woody sites, while mature bodies retain
 
 test('non-canopy wood stays visible as a size-dependent deposit beside pools, rock and old clearings', {timeout:30_000}, async t => {
   if(!existsSync(chromium.executablePath())){t.skip('Chromium absent: deposited wood, water co-visibility and raster controls were not exercised.');return;}
-  const server=await createServer({configFile:false,server:{host:'127.0.0.1',port:0},logLevel:'error'});await server.listen();
+  const server=await createServer();await server.listen();
   const browser=await chromium.launch({headless:true});
   try{
     const page=await browser.newPage({viewport:{width:640,height:480},reducedMotion:'reduce'});

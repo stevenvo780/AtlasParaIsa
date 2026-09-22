@@ -8,7 +8,7 @@ import { createServer } from 'node:net';
 import { createApp } from '../src/server/app.js';
 import { Store } from '../src/server/store.js';
 import { assertWorld } from '../src/world/index.js';
-import type { Gesture, WorldView } from '../src/shared/types.js';
+import { PROTOCOL_VERSION, type Gesture, type WorldView } from '../src/shared/types.js';
 import { materializeAnimals, syncFauna } from '../src/world/animals.js';
 import { researchTechnology, technologyWorkCost } from '../src/world/technology.js';
 import type { TechnologyProgram } from '../src/shared/technology.js';
@@ -102,6 +102,38 @@ function observeMessages(page: Page) {
     socket.on('framereceived', event => { try { const message = JSON.parse(String(event.payload)); if (message.type === 'state') views.push(message.world as WorldView); } catch { /* Transport control frame. */ } });
   });
   return { gestures, views, errors };
+}
+
+/** Manual-step fixtures can request the current subscribed camera without
+ * moving it, changing follow mode, issuing a gesture or changing wall time. */
+async function captureCameraRequests(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const captured: { socket?: WebSocket; viewport?: unknown } = {};
+    Object.assign(window, { __e2eCameraRequest: captured });
+    const send = WebSocket.prototype.send;
+    WebSocket.prototype.send = function (this: WebSocket, data: Parameters<WebSocket['send']>[0]) {
+      if (typeof data === 'string') {
+        try {
+          const message = JSON.parse(data);
+          if (message.type === 'viewport') { captured.socket = this; captured.viewport = message.viewport; }
+        } catch { /* Only remember actual JSON camera requests from the client. */ }
+      }
+      return send.call(this, data);
+    };
+  });
+}
+async function refreshCurrentView(page: Page, observed: ReturnType<typeof observeMessages>): Promise<void> {
+  const tick = app.world.tick, gestures = observed.gestures.length;
+  await expect.poll(() => page.evaluate(() => {
+    const captured = (window as unknown as { __e2eCameraRequest?: { socket?: WebSocket; viewport?: unknown } }).__e2eCameraRequest;
+    return captured?.socket?.readyState === WebSocket.OPEN && captured.viewport !== undefined;
+  })).toBe(true);
+  await page.evaluate(() => {
+    const captured = (window as unknown as { __e2eCameraRequest: { socket: WebSocket; viewport: unknown } }).__e2eCameraRequest;
+    captured.socket.send(JSON.stringify({ type: 'viewport', viewport: captured.viewport }));
+  });
+  await expect.poll(() => observed.views.at(-1)?.tick).toBe(tick);
+  expect(app.world.tick).toBe(tick); expect(observed.gestures).toHaveLength(gestures);
 }
 
 test('desktop full-screen HUD, keyboard population selection and physical neighbor control', async ({ page }) => {
@@ -282,7 +314,7 @@ test('drink, hunt and cooperate orders use confirmed protocol and return to auto
   for (const inhabitant of app.world.people) { inhabitant.action = 'rest'; inhabitant.target = { x: inhabitant.x, y: inhabitant.y }; inhabitant.decisionAt = 5000; }
   const actor = app.world.people.find(p => p.id === 's')!, learner = app.world.people.find(p => p.role === 'neighbor')!;
   for (const inhabitant of [actor, learner]) { inhabitant.x = 25; inhabitant.y = 8; inhabitant.target = { x: 25, y: 8 }; inhabitant.hunger = .3; inhabitant.energy = .9; inhabitant.fatigue = .1; }
-  actor.thirst = .65; actor.skills.gather = .8; actor.inventory = 0; actor.bonds[learner.id] = .8; learner.skills = {};
+  actor.thirst = .65; actor.skills.farm = .8; actor.activity.farm = 1; actor.inventory = 0; actor.bonds[learner.id] = .8; learner.skills = {};
   const resource = app.world.tiles.find(tile => tile.x === 25 && tile.y === 8)!; resource.drinkingWater = 1; resource.species = 'hare'; resource.fauna = 1; resource.growth = 1;
   const prey = materializeAnimals(app.world.seed, [resource], app.world.tick)[0]!; prey.hunger = .95; prey.thirst = .1;
   app.world.animals = [prey]; syncFauna(app.world.tiles, app.world.animals);
@@ -294,8 +326,21 @@ test('drink, hunt and cooperate orders use confirmed protocol and return to auto
     const currentActor = () => app.world.people.find(p => p.id === actor.id)!;
     const currentLearner = () => app.world.people.find(p => p.id === learner.id)!;
     const currentResource = () => app.world.tiles.find(tile => tile.x === 25 && tile.y === 8)!;
+    if (order === 'cooperate') {
+      // A practised farmer can teach a neighbour undertaking a locally viable
+      // cultivation. Resting with an empty skill table is not a material need.
+      const pupil = currentLearner(), teacher = currentActor();
+      const field = app.world.tiles.find(tile => tile.terrain !== 'water' && tile.terrain !== 'shelter'
+        && Math.hypot(tile.x - teacher.x, tile.y - teacher.y) <= 1.5)!;
+      expect(field).toBeDefined();
+      pupil.x = field.x; pupil.y = field.y;
+      pupil.action = 'farm'; pupil.target = { x: field.x, y: field.y }; pupil.work = 0;
+      pupil.decisionAt = app.world.tick + 5000; pupil.materials = { wood: 2, stone: 0 };
+      field.moisture = .8; field.vegetation = .2; field.cultivation = 0;
+      assertWorld(app.world);
+    }
     const before = { water: currentResource().drinkingWater!, fauna: currentResource().fauna!, thirst: currentActor().thirst,
-      inventory: currentActor().inventory, skill: currentLearner().skills.gather ?? 0, trust: currentActor().bonds[learner.id] ?? 0, tick: app.world.tick };
+      inventory: currentActor().inventory, skill: currentLearner().skills.farm ?? 0, trust: currentActor().bonds[learner.id] ?? 0, tick: app.world.tick };
     await issueTask(page, order);
     await expect.poll(() => observed.gestures.some(gesture => gesture.order === order)).toBe(true);
     await expect(page.locator('#gesture-result')).toContainText('Tarea recibida');
@@ -309,7 +354,7 @@ test('drink, hunt and cooperate orders use confirmed protocol and return to auto
       expect(app.world.events.some(event => event.kind === 'animal' && event.actors.includes(prey.id) && event.actors.includes(actor.id) && event.cause === 'caza humana')).toBe(true);
       expect(currentActor().inventory).toBeGreaterThan(before.inventory);
     } else {
-      expect(currentLearner().skills.gather).toBeGreaterThan(before.skill);
+      expect(currentLearner().skills.farm).toBeGreaterThan(before.skill);
       expect(currentActor().bonds[learner.id]).toBeGreaterThan(before.trust);
       const event = app.world.events.find(item => item.kind === 'cooperation' && item.tick > before.tick && item.actors.includes(actor.id) && item.actors.includes(learner.id));
       expect(event).toBeTruthy(); expect(event!.cause).toContain('teach');
@@ -328,14 +373,16 @@ test('drink, hunt and cooperate orders use confirmed protocol and return to auto
 
 test('V4 mobile animal search, inspection and follow preserve human authority boundaries', async ({ browser }) => {
   const tile = app.world.tiles.find(t => t.x === 25 && t.y === 8)!;
-  for (const t of app.world.tiles) if (Math.abs(t.x - tile.x) <= 6 && Math.abs(t.y - tile.y) <= 6) { t.drinkingWater = 0; if (t.y === 8 && t.x >= 25 && t.x <= 28) t.terrain = 'meadow'; }
+  for (const t of app.world.tiles) if (Math.abs(t.x - tile.x) <= 6 && Math.abs(t.y - tile.y) <= 6) { t.drinkingWater = 0; if (t.y === 8 && t.x >= 25 && t.x <= 28 && t.terrain === 'water') t.terrain = 'meadow'; }
   tile.species = 'deer'; tile.fauna = 1;
   const animal = materializeAnimals(app.world.seed, [tile], app.world.tick)[0]!; animal.hunger = .1; animal.thirst = .8;
   app.world.animals = [animal]; syncFauna(app.world.tiles, app.world.animals);
   app.world.tiles.find(t => t.x === 28 && t.y === 8)!.drinkingWater = .8;
+  assertWorld(app.world);
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, reducedMotion: 'reduce' });
   const page = await context.newPage(), observed = observeMessages(page);
   try {
+    await captureCameraRequests(page);
     await enter(page); await page.locator('#population-toggle').tap(); await page.getByRole('button', {name:'Fauna',exact:true}).tap();
     await page.getByRole('combobox', {name:'Especie',exact:true}).selectOption('wolf'); await expect(page.locator('[data-animal]')).toHaveCount(0);
     await page.getByRole('combobox', {name:'Especie',exact:true}).selectOption('deer'); await page.getByLabel('Buscar animal').fill(animal.id);
@@ -347,8 +394,10 @@ test('V4 mobile animal search, inspection and follow preserve human authority bo
     await page.locator('#follow-toggle').tap(); await expect(page.locator('#inspector-drawer')).toBeHidden(); await expect(page.locator('#mode-indicator')).toContainText('Siguiendo a Venado');
     await expect(page.locator('#camera-coordinates')).toHaveText('25, 8');
     for (let i=0;i<25;i++) app.stepOnce(); expect(app.failed).toBe(false);
+    await refreshCurrentView(page, observed);
     await expect.poll(() => observed.views.some(view => view.animals?.some(a => a.id===animal.id && a.x>25))).toBe(true);
     await expect(page.locator('#camera-coordinates')).not.toHaveText('25, 8');
+    await expect(page.locator('#follow-toggle')).toHaveAttribute('aria-pressed', 'true');
     await page.locator('#landscape').focus(); await page.keyboard.press('d'); expect(observed.gestures).toHaveLength(0);
     await page.locator('#landscape').press('ArrowRight'); await expect(page.locator('#follow-toggle')).toHaveAttribute('aria-pressed','false');
     await page.locator('#population-toggle').tap(); await page.getByRole('button',{name:'Habitantes',exact:true}).tap(); await expect(page.locator('#population-count')).toHaveText(String(app.world.people.length));
@@ -395,6 +444,11 @@ test('V5 a keyboard harvest stores real food once, shows progress and respects t
   await expect.poll(()=>observed.gestures.length).toBe(1);
   for(let i=0;i<5;i++)app.stepOnce();expect(app.failed).toBe(false);
   await expect(page.locator('#gesture-result')).toContainText('Tarea recibida');
+  // The mobile observer subscribes every five wall-clock seconds. Manual ticks
+  // need a read-only camera request to project this intermediate state now.
+  await page.locator('#landscape').press('ArrowRight');
+  await expect.poll(()=>observed.views.at(-1)?.tick).toBe(app.world.tick);
+  expect(observed.views.at(-1)?.people.find(person=>person.id==='s')?.action).toBe('forage');
   await expect(page.locator('.game-current-action')).toContainText('Cosechando alimento');
   await expect(page.getByRole('meter',{name:'Progreso de la tarea'})).toBeVisible();
   await expect(reserve).toHaveAttribute('value','0.24');expect(current().inventory).toBe(.24);
@@ -407,6 +461,8 @@ test('V5 a keyboard harvest stores real food once, shows progress and respects t
   expect(current().command).toBeNull();expect(current().controlMode).toBe('auto');expect(current().work).toBe(0);
   current().action='rest';current().decisionAt=app.world.tick+5000;
   for(let i=0;i<5;i++)app.stepOnce();expect(current().inventory).toBe(.25);
+  await page.locator('#landscape').press('ArrowRight');
+  await expect.poll(()=>observed.views.at(-1)?.tick).toBe(app.world.tick);
   await expect(reserve).toHaveAttribute('value','0.25');await expect(page.locator('.agency-state')).toContainText('Actuando por su cuenta');
   await expect(page.getByRole('meter',{name:'Progreso de la tarea'})).toHaveCount(0);
   await reserve.scrollIntoViewIfNeeded();await page.screenshot({path:'artifacts/forage-after-v5.png'});
@@ -586,6 +642,7 @@ test('V6 a paid vessel prepares water autonomously and shows actual progress and
   const held = current().technology.items[0]!, target = current().technology.waterPreparation!;
   expect(held.contents!.water).toBeGreaterThan(0); expect(app.world.technology.water!.consumed).toBe(0);
   const observed = observeMessages(page); await page.setViewportSize({ width: 1440, height: 900 });
+  await captureCameraRequests(page);
   await page.emulateMedia({ reducedMotion: 'reduce' }); await enter(page);
   await page.locator('#population-toggle').click(); await page.getByLabel('Buscar habitante').fill(current().name);
   await page.locator(`[data-person="${makerId}"]`).click();
@@ -593,7 +650,7 @@ test('V6 a paid vessel prepares water autonomously and shows actual progress and
   await expect(page.locator('.game-needs h3')).toContainText('preparar agua para el camino');
   const progress = page.getByRole('meter', { name: 'Progreso de la tarea' });
   await expect(progress).toHaveAttribute('value', String(Math.round((held.contents!.water - target.initialQuanta) / (target.targetQuanta - target.initialQuanta) * 100)));
-  await expect.poll(() => observed.views.at(-1)?.version).toBe(6);
+  await expect.poll(() => observed.views.at(-1)?.version).toBe(PROTOCOL_VERSION);
   const projected = observed.views.at(-1)!.people.find(person => person.id === makerId)!;
   expect(projected.working).toBe(true); expect(projected.workProgress).toBeGreaterThan(0);
   await page.screenshot({ path: 'artifacts/contained-water-preparation-desktop.png' });
@@ -609,13 +666,13 @@ test('V6 a paid vessel prepares water autonomously and shows actual progress and
   await page.screenshot({ path: 'artifacts/contained-water-real-mobile.png' });
   const before = app.world.technology.water!.filled; app.stepOnce();
   expect(app.world.technology.water!.filled).toBeGreaterThan(before);
+  await refreshCurrentView(page, observed);
   await expect(card.locator('meter')).toHaveAttribute('value', String(current().technology.items[0]!.contents!.water));
   for (let tick = 0; tick < 16 && current().technology.waterPreparation; tick++) app.stepOnce();
   expect(current().technology.waterPreparation).toBeUndefined(); expect(app.failed).toBe(false);
-  // Normal broadcasts occur every five ticks. A read-only camera request obtains
-  // the completed snapshot without advancing past its short completion phase.
-  await page.locator('#landscape').focus(); await page.keyboard.press('ArrowRight');
-  await expect.poll(() => observed.views.at(-1)?.tick).toBe(app.world.tick);
+  // Request the completion snapshot without moving the camera or advancing past
+  // this short phase; mobile broadcasts remain governed by their real cadence.
+  await refreshCurrentView(page, observed);
   await page.locator('#inspector-tab-now').click();
   await expect(page.locator('.game-reason')).toContainText('Preparó una reserva finita de agua');
   await expect(progress).toHaveCount(0);

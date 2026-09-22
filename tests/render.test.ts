@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chromium } from '@playwright/test';
-import { createServer } from 'vite';
+import { createBrowserTestServer as createServer } from './lib/vite.js';
 import { existsSync } from 'node:fs';
 import { BoundedCache, classifyRenderer } from '../src/client/gpu-terrain.js';
 import { animalPose, daylightAt, newEventAccents, VISUAL_BUDGET } from '../src/client/visual-state.js';
@@ -70,7 +70,7 @@ test('render diagnostics distinguish software WebGL from physical GPU and withhe
 
 test('render browser: dirty chunks, negative coordinates, selection, bounded caches and WebGL context recovery', { timeout: 60_000 }, async t => {
   if (!existsSync(chromium.executablePath())) { t.skip('Chromium executable absent: browser dirty-chunk, selection, WebGL recovery and travel-memory checks were not run.'); return; }
-  const server = await createServer({ configFile: false, server: { host: '127.0.0.1', port: 0 }, logLevel: 'error' });
+  const server = await createServer();
   await server.listen();
   const browser = await chromium.launch({ headless: true });
   try {
@@ -238,7 +238,7 @@ test('render browser: dirty chunks, negative coordinates, selection, bounded cac
 
 test('render browser: modo observador limita dpr a 1×, throttlea a 30 fps y fuerza reduceMotion (T024, P1)', { timeout: 60_000 }, async t => {
   if (!existsSync(chromium.executablePath())) { t.skip('Chromium executable absent: dpr/fps/reduceMotion de modo observador no se ejecutaron.'); return; }
-  const server = await createServer({ configFile: false, server: { host: '127.0.0.1', port: 0 }, logLevel: 'error' });
+  const server = await createServer();
   await server.listen();
   const browser = await chromium.launch({ headless: true });
   try {

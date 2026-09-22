@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {existsSync, mkdirSync, writeFileSync} from 'node:fs';
 import {chromium, expect, type WebSocketRoute} from '@playwright/test';
-import {createServer} from 'vite';
+import {createBrowserTestServer as createServer} from './lib/vite.js';
 import {createWorld, projectWorld} from '../src/world/index.js';
 import type {PersonView} from '../src/shared/types.js';
 import {inheritedAndLearned} from '../src/client/inspector-view.js';
@@ -25,7 +25,7 @@ test('global mortality remains visible beside protected identities and a short t
   let server:Awaited<ReturnType<typeof createServer>>|undefined,browser:Awaited<ReturnType<typeof chromium.launch>>|undefined;
   const report:{scenario:string;viewport:number[];mortalityVisible:boolean;orders:number;worldUnchanged:boolean}[]=[];
   try{
-    server=await createServer({configFile:false,server:{host:'127.0.0.1',port:0},logLevel:'error'});await server.listen();
+    server=await createServer();await server.listen();
     browser=await chromium.launch({headless:true});mkdirSync('artifacts',{recursive:true});
     for(const[width,height]of[[390,844],[1440,900]])for(const extinct of[true,false]){
       const context=await browser.newContext({viewport:{width:width!,height:height!},reducedMotion:'reduce'}),page=await context.newPage();
@@ -107,7 +107,7 @@ test('global life-stage summary and inspector update without disturbing focus, s
   let server:Awaited<ReturnType<typeof createServer>>|undefined,browser:Awaited<ReturnType<typeof chromium.launch>>|undefined;
   const controls:unknown[]=[];
   try {
-    server=await createServer({configFile:false,server:{host:'127.0.0.1',port:0},logLevel:'error'});await server.listen();
+    server=await createServer();await server.listen();
     browser=await chromium.launch({headless:true});mkdirSync('artifacts',{recursive:true});
     for(const [width,height] of [[390,844],[320,568],[1440,900]] as const) {
       const context=await browser.newContext({viewport:{width,height},reducedMotion:'reduce'}),page=await context.newPage();

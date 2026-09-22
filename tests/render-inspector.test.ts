@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { chromium, expect, type WebSocketRoute } from '@playwright/test';
-import { createServer } from 'vite';
+import { createBrowserTestServer as createServer } from './lib/vite.js';
 import { createWorld, projectWorld } from '../src/world/index.js';
 import { destinationLink, inheritedAndLearned } from '../src/client/inspector-view.js';
 import { technologyPane } from '../src/client/technology-art.js';
@@ -66,7 +66,7 @@ test('remembered identity, received details and carried objects are distinct fac
 
 test('catalogue metadata and personal learning refresh independently without commanding the world', { timeout: 30_000 }, async t => {
   if (!existsSync(chromium.executablePath())) { t.skip('Chromium absent: partial catalogue, remembered identities and independent snapshot refresh not run.'); return; }
-  const server = await createServer({ configFile: false, server: { host: '127.0.0.1', port: 0 }, logLevel: 'error' });
+  const server = await createServer();
   await server.listen(); const browser = await chromium.launch({ headless: true });
   try {
     const page = await browser.newPage({ viewport: { width: 960, height: 800 }, reducedMotion: 'reduce' });
@@ -135,7 +135,7 @@ test('destination wording follows authoritative control state and never invents 
 
 test('inspector destination changes with received intent; viewing, focusing and mobile controls send no gestures', { timeout: 30_000 }, async t => {
   if (!existsSync(chromium.executablePath())) { t.skip('Chromium absent: inspector labels, camera navigation and no-gesture browser control not run.'); return; }
-  const server = await createServer({ configFile: false, server: { host: '127.0.0.1', port: 0 }, logLevel: 'error' });
+  const server = await createServer();
   await server.listen(); const browser = await chromium.launch({ headless: true });
   try {
     const page = await browser.newPage({ viewport: { width: 1200, height: 800 }, reducedMotion: 'reduce' });

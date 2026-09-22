@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { chromium } from '@playwright/test';
-import { createServer } from 'vite';
+import { createBrowserTestServer as createServer } from './lib/vite.js';
 import { treeForm } from '../src/client/life-art.js';
 import type { Tile } from '../src/shared/types.js';
 
@@ -29,7 +29,7 @@ test('woody art requires declared stock and keeps growth, depletion and seeded v
 
 test('material raster keeps local transitions, exhausted cover and cache dependency boundaries honest', { timeout: 60_000 }, async t => {
   if (!existsSync(chromium.executablePath())) { t.skip('Chromium absent: material continuity, exhaustion and cache boundary controls not run.'); return; }
-  const server = await createServer({ configFile: false, server: { host: '127.0.0.1', port: 0 }, logLevel: 'error' });
+  const server = await createServer();
   await server.listen(); const browser = await chromium.launch({ headless: true });
   try {
     const page = await browser.newPage({ viewport: { width: 640, height: 480 }, reducedMotion: 'reduce' });
@@ -109,7 +109,7 @@ test('landscape state: ecological surfaces, material structures and canopy cutaw
   if (!existsSync(chromium.executablePath())) {
     t.skip('Chromium absent: ecological raster, structure stock, occlusion, hit-target and cache checks not run.'); return;
   }
-  const server = await createServer({ configFile: false, server: { host: '127.0.0.1', port: 0 }, logLevel: 'error' });
+  const server = await createServer();
   await server.listen();
   const browser = await chromium.launch({ headless: true });
   try {

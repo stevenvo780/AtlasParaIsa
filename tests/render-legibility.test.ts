@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import {existsSync} from 'node:fs';
 import assert from 'node:assert/strict';
 import {chromium, expect, type WebSocketRoute} from '@playwright/test';
-import {createServer} from 'vite';
+import {createBrowserTestServer as createServer} from './lib/vite.js';
 import {structureCard, resourceQuantity} from '../src/client/inspector-view.js';
 import {treeForm} from '../src/client/life-art.js';
 import {createWorld, projectWorld} from '../src/world/index.js';
@@ -30,7 +30,7 @@ test('selected facility is visible in the mobile first fold and reserve-only cha
  if(!existsSync(chromium.executablePath())){t.skip('Chromium absent: mobile first-fold facility visibility and reserve-only focus checks not run.');return;}
  let server:Awaited<ReturnType<typeof createServer>>|undefined,browser:Awaited<ReturnType<typeof chromium.launch>>|undefined;
  try{
-  server=await createServer({configFile:false,server:{host:'127.0.0.1',port:0},logLevel:'error'});await server.listen();browser=await chromium.launch({headless:true});
+  server=await createServer();await server.listen();browser=await chromium.launch({headless:true});
   const p=await browser.newPage({viewport:{width:390,height:844},reducedMotion:'reduce'}),w=projectWorld(createWorld(51926));
   w.structures=[structuredClone(structure)];w.tiles[0]={...w.tiles[0]!,x:0,y:0,terrain:'meadow',drinkingWater:0};w.places=[{id:'fixture',x:0,y:0,name:'Refugio',description:'Componentes frame, roof, cistern, hearth.',gatherings:0}];
   const preserved=JSON.stringify(w),messages:{type:string}[]=[],errors:string[]=[];let socket:WebSocketRoute|undefined;
@@ -52,7 +52,7 @@ test('cutaways reveal only selected material and leafless wood keeps determinist
  if(!existsSync(chromium.executablePath())){t.skip('Chromium absent: cutaway material reveal and deterministic tree rendering checks not run.');return;}
  let server:Awaited<ReturnType<typeof createServer>>|undefined,browser:Awaited<ReturnType<typeof chromium.launch>>|undefined;
  try{
-  server=await createServer({configFile:false,server:{host:'127.0.0.1',port:0},logLevel:'error'});await server.listen();browser=await chromium.launch({headless:true});
+  server=await createServer();await server.listen();browser=await chromium.launch({headless:true});
   const p=await browser.newPage({viewport:{width:640,height:480},reducedMotion:'reduce'});await p.addInitScript('window.__name = value => value');
   await p.route('**/__legibility',r=>r.fulfill({contentType:'text/html',body:'<canvas style="width:640px;height:480px"></canvas>'}));await p.goto(new URL('__legibility',server.resolvedUrls!.local[0]).href);
   const result=await p.evaluate(async ({structure,version})=>{

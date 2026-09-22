@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { chromium, expect, type WebSocketRoute } from '@playwright/test';
-import { createServer } from 'vite';
+import { createBrowserTestServer as createServer } from './lib/vite.js';
 import { carriedWaterCard } from '../src/client/technology-art.js';
 import { inheritedAndLearned } from '../src/client/inspector-view.js';
 import { createWorld, projectWorld } from '../src/world/index.js';
@@ -12,6 +12,9 @@ type Item = TechnologyView['items'][number];
 const water = (quanta: number, capacityQuanta = 2000, leakageNumerator = 1000) => ({
   version: 1 as const, quanta, capacityQuanta, quantaPerUnit: 50000 as const,
   leakageNumerator, leakageDenominator: 1000000 as const,
+});
+const compactWater = (quanta: number, capacityQuanta = 2000, leakageNumerator = 1000) => ({
+  version: 1 as const, quanta, capacityQuanta, leakageNumerator,
 });
 // Deliberately admit malformed transport data in the negative rendering controls.
 const item = (contents?: unknown): Item => Object.assign({ id: 'fixture-vessel', ownerId: 's', x: 16, y: 12,
@@ -23,7 +26,7 @@ const item = (contents?: unknown): Item => Object.assign({ id: 'fixture-vessel',
 // person filled these vessels, paid a process or lost water in a real world step.
 function fixture() {
   const view = projectWorld(createWorld(51926));
-  view.technology!.items = [item(water(0))];
+  view.technology!.items = [item(compactWater(0))];
   view.technology!.knowledge = [{ actorId: 's', recipeIds: [] }];
   view.technology!.recipes = [];
   return view;
@@ -59,11 +62,28 @@ test('the smallest water quantum stays visible and permeability is a coefficient
   assert.match(carriedWaterCard(item(water(500, 2000, 0))), /Fuga prevista: 0 %/);
 });
 
+test('protocol 9 compact v1 water renders exactly like complete metadata without mutating either representation', () => {
+  for (const complete of [water(0, 0), water(0), water(1, 2000, 1), water(750), water(2000), water(500, 2000, 0), water(1, 2000, 1000000)]) {
+    const expected = carriedWaterCard(item(complete)), original = structuredClone(complete);
+    for (const omitted of [['quantaPerUnit'], ['leakageDenominator'], ['quantaPerUnit', 'leakageDenominator']] as const) {
+      const compact: Partial<typeof complete> = { ...complete };
+      for (const key of omitted) delete compact[key];
+      const before = structuredClone(compact);
+      assert.equal(carriedWaterCard(item(compact)), expected);
+      assert.deepEqual(compact, before); assert.deepEqual(complete, original);
+    }
+  }
+});
+
 test('unsafe quantities or unsupported units produce an unavailable state instead of a plausible false gauge', () => {
+  const compact = { version: 1, quanta: 0, capacityQuanta: 2000, leakageNumerator: 1000 };
   const invalid: unknown[] = [null, [], {}, { ...water(0), version: 2 }, { ...water(0), quantaPerUnit: 1000 },
     { ...water(0), leakageDenominator: 0 }, { ...water(0), leakageNumerator: -1 },
     { ...water(0), leakageNumerator: 1000001 }, water(-1), water(.5), water(NaN), water(Infinity),
-    water(Number.MAX_SAFE_INTEGER + 1, Number.MAX_SAFE_INTEGER + 1), water(2, 1), water(0, -1)];
+    water(Number.MAX_SAFE_INTEGER + 1, Number.MAX_SAFE_INTEGER + 1), water(2, 1), water(0, -1),
+    ...['version', 'quanta', 'capacityQuanta', 'leakageNumerator'].map(field => ({ ...compact, [field]: undefined })),
+    { ...compact, version: 2 }, { ...compact, version: null },
+    ...['quantaPerUnit', 'leakageDenominator'].flatMap(field => [null, 0, '50000', NaN, Infinity].map(value => ({ ...compact, [field]: value })))];
   for (const contents of invalid) {
     const html = carriedWaterCard(item(contents));
     assert.match(html, /data-water-state="unavailable"/);
@@ -86,7 +106,7 @@ test('rendering keeps matter, drinkable payload and remembered instructions sepa
 
 test('content-only snapshots retain inspector focus, scroll and camera across empty, partial, full, leakage and legacy views', { timeout: 40_000 }, async t => {
   if (!existsSync(chromium.executablePath())) { t.skip('Chromium absent: water content refresh, focus, camera, screenshots and mobile layout were not exercised.'); return; }
-  const server = await createServer({ configFile: false, server: { host: '127.0.0.1', port: 0 }, logLevel: 'error' });
+  const server = await createServer();
   await server.listen(); const browser = await chromium.launch({ headless: true });
   try {
     const page = await browser.newPage({ viewport: { width: 1100, height: 820 }, reducedMotion: 'reduce' });
@@ -111,14 +131,14 @@ test('content-only snapshots retain inspector focus, scroll and camera across em
     const scroll = await card.evaluate(element => element.scrollTop);
     mkdirSync('artifacts', { recursive: true });
     await page.screenshot({ path: 'artifacts/contained-water-empty.png' });
-    const publish = (contents?: ReturnType<typeof water>) => {
+    const publish = (contents?: Item['water']) => {
       current.technology!.items = [item(contents)]; current.sequence++;
       socket!.send(JSON.stringify({ type: 'state', world: current }));
     };
     for (const [name, contents, expected] of [
       ['partial', water(750), '0,015 u. de agua'],
-      ['full', water(2000), 'Agua transportada · Lleno'],
-      ['leakage', water(500, 2000, 5000), 'Fuga prevista: 0,5 % por paso'],
+      ['full', compactWater(2000), 'Agua transportada · Lleno'],
+      ['leakage', compactWater(500, 2000, 5000), 'Fuga prevista: 0,5 % por paso'],
       ['legacy', undefined, 'Contenido de agua no recibido en esta vista'],
     ] as const) {
       publish(contents); await expect(products).toContainText(expected);
@@ -129,7 +149,7 @@ test('content-only snapshots retain inspector focus, scroll and camera across em
       await page.screenshot({ path: `artifacts/contained-water-${name}.png` });
     }
     await page.setViewportSize({ width: 320, height: 568 });
-    publish(water(1)); await expect(products).toContainText('0,00002 u. de agua'); await expect(summary).toBeFocused();
+    publish(compactWater(1)); await expect(products).toContainText('0,00002 u. de agua'); await expect(summary).toBeFocused();
     const vessel = page.locator('[data-water-item="fixture-vessel"]');
     await vessel.scrollIntoViewIfNeeded();
     await expect(vessel).toContainText('0,00002 u. de agua'); await expect(vessel).toContainText('0,04 u. de agua');
@@ -147,6 +167,7 @@ test('content-only snapshots retain inspector focus, scroll and camera across em
     assert.equal(JSON.stringify(received), original); assert.deepEqual(errors, []);
     writeFileSync('artifacts/contained-water-ui-controls.json', `${JSON.stringify({ syntheticProjectionOnly: true,
       waterProjectionVersion: 1, protocolVersion: received.version, quantumPerWaterUnit: 50000,
+      waterRepresentations: ['compact-v1', 'complete-v1'],
       states: ['empty', 'partial', 'full', 'leakage-coefficient', 'legacy-unavailable'],
       unchangedPeople: true, contentOnlyRefresh: true, focusAndScrollPreserved: true, cameraPreserved: true,
       mobileWaterCardFullyVisible: readable.fullyVisible, minimumWaterTextPixels: readable.minimumTextSize,

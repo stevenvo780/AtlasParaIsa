@@ -425,6 +425,7 @@ estado completo, orden, aliases, `undefined` y bits numéricos frente a V7, sin 
 | `persistencia.ventanaEventosTicks` | 0 (sin poda; abrir con `CARTA_PARAMS`) | [0, 1000000] | Ventana de retención temporal para la poda de eventos y chunks | T021 |
 | `agua.cuencas` | 0.4 | [0.05, 1] | Umbral de ruido de cuenca bajo el cual una tesela conserva su agua potable de origen | T035 |
 | `conducta.habituacion` | 0 | [0, 2] | Descuento por saciedad en la elección de acción: resta `habituacion · (0,5 + curiosity) · share`, con `share` = fracción vitalicia de esa acción en `activity` | Noche de ciencia 2026-09-22 |
+| `conducta.aptitud` | 0 | [0, 2] | Ventaja comparativa heredable: sin urgencias corporales (sed, hambre y cansancio ≤ 0,5), cada oficio suma `aptitud · (rasgo del oficio − media de los cinco rasgos de la persona)`; comer, beber, descansar, vínculos y provisión para crianza no son oficios | Ley DIV, noche 2026-09-22 |
 | `social.disputaNecesidad` | 0.65 | [0.1, 1] | Necesidad (máximo de hambre y sed) que exige `resourceDispute` a los dos implicados | Noche de ciencia 2026-09-22 |
 | `social.disputaEscasez` | 1 | [0.1, 20] | Multiplicador de los tres umbrales de stock de la disputa (0,06 comida · 0,12 agua · 1 fauna) | Noche de ciencia 2026-09-22 |
 | `social.disputaRadio` | 2 | [1, 8] | Distancia máxima, en celdas, entre dos personas que compiten por el mismo destino | Noche de ciencia 2026-09-22 |
@@ -465,6 +466,33 @@ disputa que ocurre ya cumplía «mismo destino» y «180 ticks de calma», así 
 eran lo que mantenía el contador en cero; lo que lo mantenía es la conjunción de necesidad, escasez y
 proximidad. Ambas quedan parametrizadas igualmente para que el barrido pueda descartarlas con datos.
 Refutación en `tests/leyes-candidatas.test.ts`.
+
+#### Ley DIV: ventaja comparativa heredable (`conducta.aptitud`, 2026-09-22)
+
+**Por qué.** SC-003 se queda en 0,3–0,5 y cae con los días; el oficio dominante converge a explorar,
+cooperar o investigar. La habituación sube la riqueza de oficios pero hace **generalista** a cada
+persona (la distancia media entre repertorios baja de 0,43 a 0,35, arriba): es realimentación
+negativa individual. La división del trabajo necesita lo contrario, una diferencia **estable** entre
+personas. Los genes la dan: sin urgencias corporales, cada oficio suma `aptitud · (rasgo del oficio −
+media de los cinco rasgos de la persona)` (explorar/investigar/inventar ← `curiosity`;
+recolectar/cultivar/construir/reparar/fabricar ← `industriousness`; cazar ← `resilience`; compartir ←
+`care`; cooperar ← `sociability`). Suma cero por persona: no premia trabajar más, sólo ordena los
+oficios de cada cual. Comer, beber, descansar, los vínculos y la provisión para una crianza no son
+oficios; explorar la recibe antes de que la lluvia lo convierta en búsqueda de techo.
+
+**Carril (4 semillas × 6 días, params del carril base + la clave; día 6, base → `aptitud=1` →
+`aptitud=2`).** SC-003: 7 → 0,445 / 0,535 / 0,542; 42 → 0,248 / 0,484 / 0,442; 51926 → 0,268 /
+0,426 / 0,378; 1 → 0,500 / 0,468 / 0,497; media 0,365 / 0,478 / 0,465. Población total 182 / 178 /
+137, nacimientos 126 / 120 / 83, muertes 8 / 6 / 10, enseñanzas 1900 / 911 / 412, ayuda en
+construcción 380 / 670 / 407. **Con 1 sube la diversidad en 3 de 4 semillas sin coste de
+supervivencia; con 2 cuesta un cuarto de la población.** Ninguna semilla llega a 0,6. El coste común
+es la enseñanza: el atractor «todos cooperan/investigan» se rompe y, con él, la mitad de los actos de
+enseñar. Dos correcciones medidas en el camino: aplicada también cuando la sed aprieta, un oficio
+aplazaba la bebida (semilla 42: 4 muertes por sed en 2 días frente a 1); de ahí la guarda `ready`
+(sed, hambre y cansancio ≤ 0,5). Descartado en el piloto: el **nicho** (restar lo que ya hacen los
+vecinos) baja la distancia entre repertorios: rota a todos en vez de especializarlos. Con el default 0
+el mundo es el de antes bit a bit (semilla 51926 a 1200 pasos `d7e173a1…`; semilla 7 con los params
+del carril, `47e0d511…`). Refutación en `tests/ley-aptitud.test.ts`.
 
 #### El embudo de natalidad (instrumento `scripts/lab/diagnostico-natalidad.ts`, 2026-09-22)
 

@@ -384,6 +384,12 @@ function choose(world: World, person: Person): void {
   const nearbyPeople = world.people.filter(other => other.id !== person.id && distance(person, other) <= RADIUS);
   const partner = nearbyPeople.find(other => person.role !== 'neighbor' && other.role !== 'neighbor');
   const candidates: Candidate[] = [{ action: 'explore', target: person.target, score: 0.33 + person.curiosity * 0.18, reason: 'Tiene energía y curiosidad por lo que hay cerca.' }];
+  // Ley DIV (`conducta.aptitud`): la ventaja comparativa entra en el apetito de explorar AQUÍ, antes
+  // de que la sed, el hambre o la lluvia conviertan este candidato en una búsqueda corporal con
+  // `Math.max`: así la aptitud ordena el ocio, pero nunca frena la búsqueda de agua, comida o techo
+  // (medido: aplicada después, la semilla 7 perdía 2 personas por sed y 1 por intemperie en 2 días).
+  const aptitud = paramsOf(world).conducta.aptitud;
+  if (aptitud > 0) candidates[0]!.score += aptitud * ventajaComparativa(person.traits, 'explore');
   const home = settlementOpportunity(world,person);
   if (home) candidates.push({action:'approach',...home});
   const food = reachableTiles.filter(tile => tile.food > 0.025 && planAffordable(stepsTo(tile)!, 0)).sort((a, b) => (distance(person, a) - a.food * 2) - (distance(person, b) - b.food * 2))[0];
@@ -696,11 +702,12 @@ function choose(world: World, person: Person): void {
   // más para quien tiene su rasgo por encima de la media de SUS cinco rasgos y menos para quien lo
   // tiene por debajo (`ventajaComparativa`): sólo reparte la atención de cada persona entre
   // oficios —comer, beber, descansar y los actos de vínculo no se tocan—, no crea recursos ni
-  // revela nada lejano. Con el default 0 no se suma nada y el orden es el de siempre.
-  const aptitud = paramsOf(world).conducta.aptitud;
+  // revela nada lejano. Explorar ya la recibió al nacer el candidato (arriba). Los demás oficios
+  // no llevan búsquedas corporales con `Math.max`: su alivio corporal es un sumando, y la ley
+  // también. Con el default 0 no se suma nada y el orden es el de siempre.
   if (aptitud > 0) {
     for (const candidate of candidates) {
-      if (!RASGO_DEL_OFICIO[candidate.action]) continue;
+      if (candidate === candidates[0] || !RASGO_DEL_OFICIO[candidate.action]) continue;
       candidate.score += aptitud * ventajaComparativa(person.traits, candidate.action);
     }
   }

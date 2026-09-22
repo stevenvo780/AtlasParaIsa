@@ -290,14 +290,14 @@ function runDays(days: number, params?: WorldParams, seed = 51926): { world: Ret
   return { world, digests };
 }
 
-/** Trajectory regression for the declared 2026-09-22 behavioral corrections, not
- * a claim of equality to 99fac6d. Historical hashes and paired controls are recorded
- * in docs/REVISION-2026-09-22.md; longevity formulas/defaults themselves are unchanged. */
-const CONTROL_51926 = ['32969bf8a6c5fd01', 'cc29d3747073ab13', '1ca1c608cd4a071f'];
+/** V8 trajectory: paid local family provisioning can change later choices.
+ * Historical V7 hashes and paired controls: docs/REVISION-FAMILIA-V8-2026-09-22.md.
+ * Longevity, work/food costs and reproduction gates themselves are unchanged. */
+const CONTROL_51926 = ['32969bf8a6c5fd01', '93a4fb6e74d7fec3', '3e1459914a7a5078'];
 
-test('3 días con defaults conservan la trayectoria demográfica declarada el 2026-09-22', context => {
+test('3 días con defaults conservan la trayectoria demográfica declarada V8 el 2026-09-22', context => {
   const { world, digests } = runDays(3);
-  assert.deepEqual(digests, CONTROL_51926, 'cambió la trayectoria de las correcciones declaradas el 2026-09-22');
+  assert.deepEqual(digests, CONTROL_51926, 'cambió la trayectoria V8 declarada el 2026-09-22');
   context.diagnostic(JSON.stringify({ seed: 51926, dias: 3, digests, poblacion: world.people.length,
     nacimientos: world.totals.births, muertes: world.demographyDynamics.deaths, causas: world.demographyDynamics.causes }));
 });

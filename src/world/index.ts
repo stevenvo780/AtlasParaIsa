@@ -28,9 +28,9 @@ import { DEFAULT_PARAMS, paramsOf, setParams, type WorldParams } from './params.
 export { bindWorldContext, tileAt, normalizeViewport, worldContext } from './spatial.js';
 export type { WorldContext } from './spatial.js';
 
-// V7 declares the 2026-09-22 choice, kinship, phenotype and material-learning laws.
-// It does not claim the parallel-world feature is complete or change the wire protocol.
-export const RULES_VERSION = 7;
+// V8 declares costed local provisioning for a viable family, including small harvests.
+// Physical work, consumption and reproduction gates retain their existing laws.
+export const RULES_VERSION = 8;
 /**
  * Ruling R17: ya no hay tope de población en el software. `POPULATION_HARD_LIMIT`
  * (1.000.000) solo protege `assertWorld` de un snapshot corrupto; el freno real es el
@@ -355,6 +355,10 @@ function choose(world: World, person: Person): void {
   const reachableTiles = nearbyTiles.filter(t => stepsTo(t) !== undefined), payload = containedWaterQuanta(person) / 1000;
   // A nominal effort budget for planning; the bodily law itself still saturates
   // readiness at zero. It is not a new physical prohibition or a future guarantee.
+  const plannedEffort = (steps: number, work: number) => ({
+    energy: steps * (.0008 + payload * .0008) + workEffort(person, work).energy,
+    fatigue: steps * (.0007 * (1.2 - person.traits.resilience * .4) + payload * .0007) + workEffort(person, work).fatigue,
+  });
   const planAffordable = (steps: number, work: number) => person.energy >= steps * (.0008 + payload * .0008) + work * .0003
     && person.fatigue + steps * (.0007 * (1.2 - person.traits.resilience * .4) + payload * .0007) + work * .00025 * (1.2 - person.traits.resilience * .4) < 1;
   const nearbyPeople = world.people.filter(other => other.id !== person.id && distance(person, other) <= RADIUS);
@@ -375,11 +379,60 @@ function choose(world: World, person: Person): void {
   const family = familyOpportunity(world, person);
   const familyPlace = family ? world.places.filter(place => distance(person,place)<=RADIUS && distance(family.partner,place)<=RADIUS)
     .sort((a,b) => (distance(person,a)+distance(family.partner,a))-(distance(person,b)+distance(family.partner,b)) || a.id.localeCompare(b.id))[0] : undefined;
-  if (family && person.inventory < family.reserveTarget && food) candidates.push({
-    action: 'forage', target: food,
-    score: 0.85 + person.traits.care * 0.2 + (family.reserveTarget - person.inventory) / family.reserveTarget * 0.4 - distance(person, food) * 0.02,
+  // A small local harvest may improve a viable family reserve below the meal-search
+  // filter. Preview finite observed biomass; no future regeneration is promised.
+  const familyFood = (() => {
+    if (!family || person.inventory >= family.reserveTarget) return;
+    const sources = reachableTiles.filter(tile => tile.food >= MIN_FORAGE_STOCK && distance(tile, family.partner) <= RADIUS);
+    if (!sources.length) return;
+    const physiology = demographicTraits(person.genome, paramsOf(world).cuerpo);
+    // The exact future route climate is unknown. The largest perceived basal
+    // rates give a conservative desert/rain forecast without reading remote land.
+    const worst = bodilyNeedRates(world, reachableTiles[0]!, physiology);
+    for (const tile of reachableTiles) {
+      const rates = bodilyNeedRates(world, tile, physiology);
+      worst.hunger = Math.max(worst.hunger, rates.hunger); worst.thirst = Math.max(worst.thirst, rates.thirst);
+      worst.energy = Math.max(worst.energy, rates.energy); worst.stressEnergy = Math.max(worst.stressEnergy, rates.stressEnergy);
+      worst.fatigue = Math.max(worst.fatigue, rates.fatigue);
+    }
+    let best: { tile: Tile; value: number; distance: number } | undefined;
+    for (const tile of sources) {
+      const steps = stepsTo(tile)!;
+      const work = Math.max(1, workDuration(world, person, 'forage')
+        - (person.action === 'forage' && distance(person.target, tile) === 0 ? person.work : 0));
+      if (!planAffordable(steps, work)) continue;
+      const delay = steps * 6 + work;
+      const decay = (Math.floor((world.tick + delay) / 10) - Math.floor(world.tick / 10)) * paramsOf(world).recursos.decaimientoComida;
+      const available = Math.max(0, tile.food - decay);
+      if (available < MIN_FORAGE_STOCK) continue;
+      const harvest = Math.min(available, FORAGE_AMOUNT, 0.25 - person.inventory);
+      if (harvest <= 0) continue;
+      const paid = { ...body };
+      advanceNeeds(paid, worst, delay);
+      exertBody(paid, plannedEffort(steps, work));
+      const eligibility = updateDemography({ state: { ...person.demography, age: person.demography.age + delay },
+        traits: physiology, ...paid }, { exposure: 0, shelter: 0, protected: false }, 0);
+      if (!eligibility.offspringEligible) continue;
+      // Consumption equivalent discriminates effort from potential usefulness.
+      // The real action stores biomass; this private preview grants no energy.
+      // Use an empty readiness probe so a currently rested body does not mask
+      // the reserve's future yield through the energy ceiling.
+      const fed = { ...paid, energy: 0 }; assimilateFood(fed, harvest, { hungerPerUnit: 4.8, energyPerUnit: 1.2 });
+      const benefit = fed.energy - (body.energy - paid.energy);
+      if (benefit <= 0) continue;
+      const value = benefit / Math.max(1, delay), away = distance(person, tile);
+      if (!best || value > best.value || (value === best.value && (away < best.distance
+        || (away === best.distance && (tile.x < best.tile.x || (tile.x === best.tile.x && tile.y < best.tile.y))))))
+        best = { tile, value, distance: away };
+    }
+    return best?.tile;
+  })();
+  const familyForage: Candidate | undefined = family && person.inventory < family.reserveTarget && familyFood ? {
+    action: 'forage', target: familyFood,
+    score: 0.85 + person.traits.care * 0.2 + (family.reserveTarget - person.inventory) / family.reserveTarget * 0.4 - distance(person, familyFood) * 0.02,
     reason: `Prepara alimento para una posible crianza con ${family.partner.name}; debe recogerlo del entorno y conservar una reserva.`,
-  });
+  } : undefined;
+  if (familyForage) candidates.push(familyForage);
   if (family && person.inventory >= family.reserveTarget && family.partner.inventory >= 0.1) candidates.push({
     action: 'approach', target: familyPlace ?? family.partner, score: 0.85 + person.traits.care * 0.2,
     reason: `Tiene reservas y busca ${familyPlace ? `reunirse con ${family.partner.name} en ${familyPlace.name}` : `acercarse a ${family.partner.name}`}; el vínculo y el cuidado corporal permiten intentar una crianza.`,
@@ -600,7 +653,8 @@ function choose(world: World, person: Person): void {
   // after its route, function and cost have already been evaluated.
   if (selected.action===person.action && ['build','invent','repair','farm','forage'].includes(selected.action) && person.work>0
     && (!exposed || distance(person.target, selected.target) === 0)
-    && (selected.action!=='forage' || (tileAt(world,person.target)?.food??0)>=0.005)) selected.target=person.target;
+    && (selected !== familyForage || distance(person.target, selected.target) === 0)
+    && (selected.action!=='forage' || (tileAt(world,person.target)?.food??0)>=MIN_FORAGE_STOCK)) selected.target=person.target;
   if (person.action !== selected.action || distance(person.target, selected.target) > 0) person.work = 0;
   person.action = selected.action;
   if (selected.action !== 'drink') delete person.technology.waterPreparation;
@@ -763,7 +817,7 @@ function bodyAndAction(world: World, person: Person): void {
     }
   }
   const emptyFood = person.action === 'eat' && (tileAt(world, person.target)?.food ?? 0) < 0.005 && person.inventory < 0.01 && foodAvailable(world,person)<0.001;
-  const emptyHarvest = person.action === 'forage' && (tileAt(world, person.target)?.food ?? 0) < 0.005;
+  const emptyHarvest = person.action === 'forage' && (tileAt(world, person.target)?.food ?? 0) < MIN_FORAGE_STOCK;
   const emptyWater = person.action === 'drink' && containedWaterQuanta(person) === 0 && waterAvailable(world,person.target) < 0.003;
   const blockedCarriedWater = person.action === 'drink' && distance(person, person.target) < 0.5
     && containedWaterQuanta(person) > 0 && !canHandleContainedWater(person, world.tick) && waterAvailable(world, person) <= 0;
@@ -832,10 +886,20 @@ function bodyAndAction(world: World, person: Person): void {
   person.need = person.thirst > 0.6 ? 'Agua dulce' : person.hunger > 0.6 ? 'Alimento' : person.fatigue > 0.55 || person.energy < 0.35 ? 'Descanso' : person.socialLoad > 0.7 ? 'Espacio propio' : person.closeness > 0.5 && person.role !== 'neighbor' ? 'Compañía' : 'Recorrer';
 }
 
+const MIN_FORAGE_STOCK = 0.005;
+const FORAGE_AMOUNT = 0.06;
+function workEffort(person: Person, work = 1) {
+  return { energy: work * 0.0003, fatigue: work * 0.00025 * (1.2 - person.traits.resilience * 0.4) };
+}
+function workDuration(world: World, person: Person, action = person.action): number {
+  return action === 'build' ? constructionCost(world, person).work : action === 'invent' ? 60 : action === 'repair' ? 30
+    : ['farm', 'hunt'].includes(action) ? Math.ceil(45 * (1 - (person.skills[action] ?? 0) * 0.25))
+      : Math.ceil(18 * (1 - (person.skills[action] ?? 0) * 0.25));
+}
 function performWork(world: World, person: Person, tile: Tile): void {
-  exertBody(person, { energy: 0.0003, fatigue: 0.00025 * (1.2 - person.traits.resilience * 0.4) });
+  exertBody(person, workEffort(person));
   person.work++;
-  const duration = person.action === 'build' ? constructionCost(world,person).work : person.action==='invent'?60:person.action==='repair'?30:['farm','hunt'].includes(person.action) ? Math.ceil(45*(1-(person.skills[person.action]??0)*0.25)) : Math.ceil(18*(1-(person.skills[person.action]??0)*0.25));
+  const duration = workDuration(world, person);
   if (person.work < duration) return;
   let success = false;
   if (person.action === 'gather') {
@@ -850,7 +914,7 @@ function performWork(world: World, person: Person, tile: Tile): void {
       recordTechnologyBenefit(world,person,receipt,amount-baseline); success = amount > 0; break;
     }
   } else if (person.action === 'forage') {
-    const harvested = Math.min(tile.food, 0.06, Math.max(0, 0.25 - person.inventory));
+    const harvested = Math.min(tile.food, FORAGE_AMOUNT, Math.max(0, 0.25 - person.inventory));
     tile.food = clamp(tile.food - harvested);
     tile.vegetation = clamp(tile.vegetation - harvested * 0.1);
     person.inventory += harvested;
@@ -1278,29 +1342,34 @@ function migrateWorldState(value: unknown, context: WorldContext = {}): World {
     if (catalogueEnabled(world.technology)) for (const person of world.people) maintainTechnologyMemory(world, person);
     assertWorld(world); return world;
   }
+  if (version === 7) {
+    assertWorld(value, 7, context);
+    const world = cloneWorld(value, context); upgradeV8(world);
+    return migrateWorldState(world, context);
+  }
   if (version === 6) {
     // Recovery tools may read a valid old world without rewriting its history or
     // founders. Published test versions still start a separate world by policy.
     assertWorld(value, 6, context);
-    const world = cloneWorld(value, context); upgradeV7(world);
+    const world = cloneWorld(value, context); upgradeV7(world); upgradeV8(world);
     return migrateWorldState(world, context);
   }
   if (version === 5) {
     assertWorld(value, 5, context);
-    const world = cloneWorld(value, context); upgradeV6(world); upgradeV7(world);
+    const world = cloneWorld(value, context); upgradeV6(world); upgradeV7(world); upgradeV8(world);
     if (world.technology.checkpoint === undefined) world.technology.checkpoint = captureTechnologyCheckpoint(world.technology, world.people, world.tick, 'migration');
     if (catalogueEnabled(world.technology)) for (const person of world.people) maintainTechnologyMemory(world, person);
     assertWorld(world); return world;
   }
-  if (version===4) { assertWorld(value,4,context); const world=cloneWorld(value,context); upgradeV5(world); upgradeV6(world); upgradeV7(world); assertWorld(world); return world; }
+  if (version===4) { assertWorld(value,4,context); const world=cloneWorld(value,context); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); assertWorld(world); return world; }
   if(version===3) {
     assertWorld(value,3,context);
-    const world=cloneWorld(value,context); upgradeV4(world); upgradeV5(world); upgradeV6(world); upgradeV7(world); assertWorld(world); return world;
+    const world=cloneWorld(value,context); upgradeV4(world); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); assertWorld(world); return world;
   }
   if (version === 2) {
     assertWorld(value, 2, context);
     const world = cloneWorld(value, context);
-    upgradeV3(world); upgradeV4(world); upgradeV5(world); upgradeV6(world); upgradeV7(world); assertWorld(world); return world;
+    upgradeV3(world); upgradeV4(world); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); assertWorld(world); return world;
   }
   assertCommon(value, true);
   const world = structuredClone(value);
@@ -1328,7 +1397,7 @@ function migrateWorldState(value: unknown, context: WorldContext = {}): World {
     p.skills = {}; p.values = {}; p.activity = {}; p.materials = { wood: 0, stone: 0 }; p.visited = [];
     p.heading = index * 2.399963229728653; p.command = null; p.work = 0; p.lastOutcome = world.tick; p.intentContext = p.hunger > 0.5 ? 'hungry' : p.fatigue > 0.5 ? 'tired' : 'ready'; p.controlMode = 'auto';
   });
-  upgradeV3(world); upgradeV4(world); upgradeV5(world); upgradeV6(world); upgradeV7(world); assertWorld(world); return world;
+  upgradeV3(world); upgradeV4(world); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); assertWorld(world); return world;
 }
 function upgradeV3(world: World): void {
   world.version = 3; world.cooperationEnabled = true; world.reproductionEnabled = true;
@@ -1356,3 +1425,5 @@ function upgradeV6(world: World): void {
   world.version = 6; world.technology.water = emptyWaterLedger();
 }
 function upgradeV7(world: World): void { world.version = 7; }
+
+function upgradeV8(world: World): void { world.version = 8; }

@@ -29,7 +29,9 @@ function run(world: ReturnType<typeof createWorld>, ticks: number): void {
 // 2026-09-22: baseline changed deliberately by founder expression, local teaching,
 // viable family intent and paid water recovery; see docs/REVISION-2026-09-22.md.
 // Generator and isolated water controls below retain their original assertions.
-const HASH_AGUA_MUNDO_4821_DIA1_CUENCAS1 = '6a049c8502a8b22cd7d6792b7a20f49f0a4e0641002d63e92cf5f9573e74dac9';
+// V8: paid family provisioning changes routes/consumption. V7's historical digest
+// remains recorded in docs/REVISION-FAMILIA-V8-2026-09-22.md; no water law changes.
+const HASH_AGUA_MUNDO_4821_DIA1_CUENCAS1 = 'ad4b5dd88eba765a3df24ccb96296ddfcc740312f4f4842f51c2ba25a4c5270b';
 
 test('T035 control: agua.cuencas=1 EXPLÍCITO (no el default global) deja el agua/feature de las teselas bit a bit igual a hoy tras 1 día', () => {
   const world = createWorld(4821, parseParams('agua.cuencas=1'));

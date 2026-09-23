@@ -30,9 +30,12 @@ pendientes los límites persistidos por hardware y la puerta de dos millones de
 teselas; [gate técnico](docs/REVISION-PERSISTENCIA-PAGINADA-2026-09-22.md).
 La admisión persistida posterior conserva los valores reservados de copias antiguas
 mediante un modo explícito, incluido en el digesto:1251/1251 pruebas conjuntas,
-seis paridades físicas y revisión independiente. Faltan resolución por hardware y
-admisión previa a materialización (T100); la ley 10 se adoptó después (`688e0a6`, reglas 10);
-[contrato](docs/REVISION-LIMITES-PERSISTIDOS-2026-09-22.md).
+seis paridades físicas y revisión independiente. Faltan resolución por hardware,
+admisión previa a materialización (T100) y que la ley 10 exija el modo y el perfil de
+límites en toda instantánea nueva: `RULES_VERSION` 10 (`688e0a6`) se adoptó sin esa
+exigencia, y una instantánea sin `limitsProfile` ni modo declarado se sigue leyendo como
+legado sea cual sea su versión (`readSnapshotLimits`); [contrato](docs/REVISION-LIMITES-PERSISTIDOS-2026-09-22.md) y
+[T100](docs/T100-LIMITES-CONTRATO.md).
 El backup verifica ahora la copia terminada, incluidos chunks e identidades
 diferidos:1170/1170 pruebas y build/smoke exactos;
 [alcance](docs/REVISION-BACKUP-2026-09-22.md).
@@ -123,7 +126,7 @@ Lo que el hardware permite hoy (medido): un hilo Node sostiene 10 Hz hasta ~35 h
 
 **Prioridad de afinación, reiterada por Steven el 7 de septiembre:** corregir supervivencia, utilidad de las construcciones y legibilidad antes de incorporar nuevos sistemas. Se conservó y analizó el mundo V5 cuya población mortal se extinguió; la fuente para grabar incorpora correcciones de decisiones y representación. Su copia acredita **113,35 días con recambio: 29 vecinos mortales de generaciones 21–24**, sin órdenes, y se mantiene intacta. La [matriz V6 cerrada](docs/EVIDENCIA.md#matriz-v6-cerrada-a-veinticinco-días) completó tres semillas de 60000 pasos y terminó con **30, 18 y 1 vecinos mortales**. La tercera no conserva ningún vecino anterior a la senescencia, incluidos inmaduros: no puede producir otra generación sin nuevos entrantes. No son tres casos viables ni evidencia de continuidad indefinida. El candidato experimental `292f17a` contrasta una barrera comunitaria en otra rama; su evaluación larga sigue pendiente y no está publicado. V7 y neuroevolución siguen pendientes.
 
-La versión para grabación es **`03470e3`, con SQLite 4 y reglas/protocolo 6**, activa en la revisión privada desde el 6 de septiembre de 2026 a las 15:18:36 UTC. Comenzó un mundo normal nuevo con semilla `51926` y dieciséis habitantes; conservó contraseña, TLS y bloqueo de instancia, sin heredar sesiones. Reúne catálogo resoluble, memoria técnica finita, cuerpo compartido, agua transportable, claros, identidad de ejecución y afinación corporal, constructiva y visual. Pasó 567/567 pruebas Node, 18/18 de navegador compilado y smoke completo. [REGLAS.md](docs/REGLAS.md) define mecanismos y [EVIDENCIA.md](docs/EVIDENCIA.md#publicación-para-grabación) registra la fuente exacta y el resultado operativo. El reemplazo generacional de dos réplicas de veinticinco días corresponde al cierre biológico anterior `6d0e53b`; no demuestra continuidad indefinida ni incluye estos cambios.
+La versión para grabación fue **`03470e3`, con SQLite 4 y reglas/protocolo 6**, activa en la revisión privada desde el 6 de septiembre de 2026 a las 15:18:36 UTC hasta que la sustituyeron publicaciones posteriores (lo vigente, en [ESTADO](docs/ESTADO.md)). Comenzó un mundo normal nuevo con semilla `51926` y dieciséis habitantes; conservó contraseña, TLS y bloqueo de instancia, sin heredar sesiones. Reúne catálogo resoluble, memoria técnica finita, cuerpo compartido, agua transportable, claros, identidad de ejecución y afinación corporal, constructiva y visual. Pasó 567/567 pruebas Node, 18/18 de navegador compilado y smoke completo. [REGLAS.md](docs/REGLAS.md) define mecanismos y [EVIDENCIA.md](docs/EVIDENCIA.md#publicación-para-grabación) registra la fuente exacta y el resultado operativo. El reemplazo generacional de dos réplicas de veinticinco días corresponde al cierre biológico anterior `6d0e53b`; no demuestra continuidad indefinida ni incluye estos cambios.
 
 Estado documental: 7 de septiembre de 2026. El inicio V5 del día 5 a las 21:08 creó un mundo nuevo autorizado y conservó el V4 inválido; no fue una migración V4→V5 exitosa. La actualización posterior a SQLite 4 conservó aquel mundo V5 sin reiniciarlo; la publicación de `7d8777c`, comprobada a las 01:46:49 UTC, lo archivó e inició otro. La publicación para grabación tiene evidencia independiente. Cierre personal de la carta, móvil físico y alojamiento definitivo pendientes.
 

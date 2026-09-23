@@ -19,7 +19,7 @@ el contrato.
 | Parámetros persistidos | `persistencia.cadaTicks=100`, `gobernador.politica=techo` y el paquete de reglas 10 (lista completa en el contrato) |
 | Respaldos | `/datos/workspaces/personal/AtlasParaIsa-publications/20260922-v10/backups` (timer horario `atlas-respaldo.timer`) |
 | Servicios | `atlas-servidor.service` y `atlas-respaldo.service` de usuario; leen `~/.config/atlas-para-isa/runtime.env` (solo `CARTA_DATA_DIR` y `DEST`). Copias versionadas de las unidades (las instaladas son copias, no enlaces): `scripts/systemd/` |
-| Gate | `scripts/deploy-check.sh eeb4bcf` verde: typecheck, suite 1362/1366 (4 omitidos, 0 fallos, 201,5 s), build y smoke del commit exacto |
+| Gate | `scripts/deploy-check.sh eeb4bcf` verde: solo build y smoke del commit exacto (01:45:54–01:45:58Z; el script no corre más fases). Typecheck verde y suite 1362/1366 (4 omitidos, 0 fallos, 201,5 s) salieron de otra ejecución, aunque el contrato los anida bajo `gate` |
 | Contrato | [publication-v10.json](evidencia-2026-09-22/publication-v10.json) |
 
 Lo que esta publicación **no** acredita: el criterio de 60 días de [GOAL.md](../GOAL.md) no se ha
@@ -38,7 +38,9 @@ por hardware ([revisión de la noche](REVISION-NOCHE-2026-09-22.md)).
 - Revisiones vigentes: [REVISION-2026-09-22](REVISION-2026-09-22.md) y
   [REVISION-NOCHE-2026-09-22](REVISION-NOCHE-2026-09-22.md).
 - `specs/002-mundo-ilimitado/`: etapas B–F congeladas hasta que los 16 fundadores lleguen a 100 días
-  con 3 generaciones en el 90 % de las semillas; de la etapa A sigue abierta T100.
+  con 3 generaciones en el 90 % de las semillas. La etapa A está integrada en `main`; siguen abiertas
+  T100 (topes de anticorrupción), T103 y T104 (gates de rendimiento sin cumplir) y el Gate A (T110), según
+  [tasks.md](../specs/002-mundo-ilimitado/tasks.md).
 - `specs/001-mundo-solido-masivo/`: cerrada el 2026-09-19.
 
 ## Cómo se actualiza

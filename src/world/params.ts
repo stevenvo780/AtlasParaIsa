@@ -83,7 +83,16 @@ export interface WorldParams {
     /** Ventaja comparativa heredable (DIV, 2026-09-22), `index.ts` → `choose`: sin urgencias
      * corporales (sed, hambre y cansancio ≤ 0,5), cada OFICIO suma `aptitud · (rasgo del oficio −
      * media de los cinco rasgos de la persona)`. 0 = hoy. */
-    aptitud: number };
+    aptitud: number;
+    /** Vocación heredable (VOC, 2026-09-23): amplitud del error centrado que cada descendiente
+     * recibe en sus diez oficios (sin explorar). 0 = hoy, sin campo nuevo ni consumo de azar. */
+    vocacion: number;
+    /** Práctica de oficios (PO1, 2026-09-23): en contexto listo, pondera la habilidad de cada
+     * oficio contra la media de los diez oficios, siempre sin explorar. 0 = hoy. */
+    practicaOficios: number;
+    /** Saturación local (SL1, 2026-09-23): penaliza un oficio por la fracción visible que ya lo
+     * está ejerciendo, sólo con al menos dos vecinos y sin urgencias. 0 = hoy. */
+    saturacionLocal: number };
   /** `social.maxComunidades`: tope de FUNDACIÓN de comunidades (`society.ts`), regla de conducta separada
    * de la admisión `limites.comunidades` (revisión de T100, 2026-09-22). */
   social: { maxComunidades: number; disputaNecesidad: number; disputaEscasez: number; disputaRadio: number; disputaDestino: number; disputaEspera: number;
@@ -96,6 +105,11 @@ export interface WorldParams {
      * (se une a la comunidad de la mayoría de sus vecinos de confianza; un núcleo que vive a más de este radio
      * del centro funda la suya). 0 = hoy (la pertenencia sólo cambia por `confianzaSalida`). */
     radioConvivencia: number;
+    /** Cohesión de banda (B1, 2026-09-23): peso circular del rumbo de compañeros mortales que
+     * exploran a la vista. La ley completa, incluida su correa, se apaga con 0. */
+    banda: number;
+    /** Máximo de una expedición pequeña para `social.banda`; no influye cuando `banda=0`. */
+    bandaMax: number;
     /** Conflicto legible (hipótesis CONFL, 2026-09-22), `society.ts` → `resourceDispute` e `index.ts` → `choose`.
      * Con > 0, en una disputa (o un turno) cede quien MENOS lo necesita —máximo de hambre y sed; empate, el de id
      * mayor— y no queda inmóvil treinta pasos: vuelve a elegir al paso siguiente. Quien cede recuerda un día la
@@ -139,9 +153,10 @@ const RAW_HISTORICAL: WorldParams = {
   // (`index.ts` no descuenta saciedad; `society.ts` usa 0,65 / ×1 / 2 celdas / 0,5 de
   // destino / 180 ticks de espera / sin rareza / 0,35 de confianza / 0,2 de distancia
   // cultural), así que abrirlas no cambia el mundo.
-  conducta: { habituacion: 0, aptitud: 0 },
+  conducta: { habituacion: 0, aptitud: 0, vocacion: 0, practicaOficios: 0, saturacionLocal: 0 },
   social: { maxComunidades: 8, disputaNecesidad: 0.65, disputaEscasez: 1, disputaRadio: 2, disputaDestino: 0.5, disputaEspera: 180,
-    ensenanzaRareza: 0, confianzaSalida: 0.35, distanciaAlternativa: 0.2, vinculoConvivencia: 0, radioConvivencia: 0, memoriaDisputa: 0 },
+    ensenanzaRareza: 0, confianzaSalida: 0.35, distanciaAlternativa: 0.2, vinculoConvivencia: 0, radioConvivencia: 0,
+    banda: 0, bandaMax: 6, memoriaDisputa: 0 },
 };
 
 /**
@@ -176,8 +191,9 @@ export const DEFAULT_PARAMS: WorldParams = deepFreeze(RAW_DEFAULTS);
  * `poblacion.comprobacionContinua` false y `conducta.habituacion` 0. Las demás claves añadidas la
  * noche del 2026-09-22 ya tienen por default su valor histórico y aquí valen lo mismo:
  * `genes.edadFundadoresMin/MaxDias` 2/2, `poblacion.radioPareja` 3, `poblacion.radioLugar` 4,
- * `agua.memoria` 1, `conducta.aptitud` 0, `social.*` (disputas 0,65/×1/2/0,5/180, rareza 0, confianza
- * 0,35, distancia 0,2, `maxComunidades` 8, `vinculoConvivencia` 0, `radioConvivencia` 0).
+ * `agua.memoria` 1, `conducta.aptitud/vocacion/practicaOficios/saturacionLocal` 0, `social.*`
+ * (disputas 0,65/×1/2/0,5/180, rareza 0, confianza 0,35, distancia 0,2, `maxComunidades` 8,
+ * `vinculoConvivencia` 0, `radioConvivencia` 0, `banda` 0 y `bandaMax` 6).
  *
  * Única excepción deliberada: `gobernador.politica` vale `techo` también aquí. El gobernador no es
  * una ley del mundo (no entra en `stepWorld`: decide por el p95 de reloj del servidor, ruling R17) y
@@ -274,6 +290,13 @@ export const PARAM_RANGES: Record<string, [number, number]> = {
   // ni de los actos de vínculo). Rasgo menos media de los cinco cae en [−0,8, 0,8], así que con
   // el máximo 2 la ley mueve un oficio a lo sumo ±1,6, la escala de `habituacion`.
   'conducta.aptitud': [0, 2],
+  // VOC: el preregistro acota el error heredable y el campo resultante a ±0,3.
+  'conducta.vocacion': [0, 0.3],
+  // PO1 reutiliza el dominio medido por el prototipo: una diferencia de habilidad en [−1,1]
+  // puede mover la puntuación hasta cuatro unidades, sin alterar explorar ni necesidades.
+  'conducta.practicaOficios': [0, 4],
+  // SL1 resta como máximo una unidad de puntuación cuando todo el vecindario ejerce el oficio.
+  'conducta.saturacionLocal': [0, 1],
   'social.disputaNecesidad': [0.1, 1],
   'social.disputaEscasez': [0.1, 20],
   'social.disputaRadio': [1, 8],
@@ -290,6 +313,10 @@ export const PARAM_RANGES: Record<string, [number, number]> = {
   'social.vinculoConvivencia': [0, 0.01],
   // 0 apaga la ley (conducta de hoy); en celdas, como el radio de contacto (6) de `updateCommunities`.
   'social.radioConvivencia': [0, 64],
+  // B1 pondera cada rumbo compañero frente al peso propio 1. El máximo 4 permite medir desde
+  // una influencia suave hasta una alineación dominante; el tamaño es entero y al menos 1.
+  'social.banda': [0, 4],
+  'social.bandaMax': [1, 64],
   // Penalización, en celdas, de la fuente donde se cedió una disputa. La percepción llega a 7 celdas:
   // con ≥ 8 cualquier otra fuente percibida va antes; el máximo 32 es «nunca, si hay otra». 0 apaga la ley.
   'social.memoriaDisputa': [0, 32],
@@ -303,7 +330,8 @@ type ParamValue = number | boolean | string | (number | boolean | string)[];
 /** PARAM_RANGES conserva sus tuplas numéricas; cada hoja declara además su tipo. */
 export const PARAM_DESCRIPTORS: Readonly<Record<string, ParamDescriptor>> = deepFreeze({
   ...Object.fromEntries(Object.entries(PARAM_RANGES).map(([key, range]) => [key,
-    { kind: 'number', range, integer: key === 'motor.hilos' || key === 'social.disputaEspera' || key === 'social.maxComunidades' || key.startsWith('limites.') }])),
+    { kind: 'number', range, integer: key === 'motor.hilos' || key === 'social.disputaEspera' || key === 'social.maxComunidades'
+      || key === 'social.bandaMax' || key.startsWith('limites.') }])),
   'poblacion.exigeComunidad': { kind: 'boolean' },
   'poblacion.comprobacionContinua': { kind: 'boolean' },
   'motor.clonPorPaso': { kind: 'boolean' },

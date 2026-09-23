@@ -558,6 +558,9 @@ la clave (`HISTORICAL_PARAMS`); en todas las demás filas default e histórico c
 | `agua.memoria` | 1 (apagada) | [0, 1] | Sed prevista al llegar al último lugar con agua que vio (sed actual − agua que lleva + sed del camino a 6 pasos por celda) por encima de la cual, sin agua a la vista, emprende la vuelta; el recuerdo se renueva al ver o beber agua y se olvida al verlo seco | Noche 2026-09-22 (SED) |
 | `conducta.habituacion` | **0,35** (reglas 10; histórico 0) | [0, 2] | Descuento por saciedad en la elección de acción: resta `habituacion · (0,5 + curiosity) · share`, con `share` = fracción vitalicia de esa acción en `activity` | Noche de ciencia 2026-09-22 · reglas 10 |
 | `conducta.aptitud` | 0 | [0, 2] | Ventaja comparativa heredable: sin urgencias corporales (sed, hambre y cansancio ≤ 0,5), cada oficio suma `aptitud · (rasgo del oficio − media de los cinco rasgos de la persona)`; comer, beber, descansar, vínculos y provisión para crianza no son oficios | Ley DIV, noche 2026-09-22 |
+| `conducta.vocacion` | 0 (histórico y nuevo) | [0, 0.3] | Amplitud ε del error de copia uniparental de una vocación centrada y acotada a ±0,3 para los diez oficios sin explorar; los fundadores no tienen campo | Preregistro `docs/preregistros/2026-09-23-vocacion-banda.md` · VOC |
+| `conducta.practicaOficios` | 0 (histórico y nuevo) | [0, 4] | En contexto ready suma `p · (habilidad del oficio − media de habilidades de los diez oficios)`, sin explorar | Preregistro 2026-09-23 · PO1 |
+| `conducta.saturacionLocal` | 0 (histórico y nuevo) | [0, 1] | En ready y con ≥ 2 personas visibles resta `s · fracción visible que ejerce el mismo oficio`; excluye explorar | Preregistro 2026-09-23 · SL1 |
 | `social.disputaNecesidad` | 0.65 | [0.1, 1] | Necesidad (máximo de hambre y sed) que exige `resourceDispute` a los dos implicados | Noche de ciencia 2026-09-22 |
 | `social.disputaEscasez` | 1 | [0.1, 20] | Multiplicador de los tres umbrales de stock de la disputa (0,06 comida · 0,12 agua · 1 fauna) | Noche de ciencia 2026-09-22 |
 | `social.disputaRadio` | 2 | [1, 8] | Distancia máxima, en celdas, entre dos personas que compiten por el mismo destino | Noche de ciencia 2026-09-22 |
@@ -568,6 +571,7 @@ la clave (`HISTORICAL_PARAMS`); en todas las demás filas default e histórico c
 | `social.distanciaAlternativa` | 0.2 | [0, 1] | Distancia cultural máxima que puede tener una alternativa para contar como refugio al salir | Noche de ciencia 2026-09-22 |
 | `social.vinculoConvivencia` | 0 | [0, 0.01] | Vínculo mutuo que ganan por paso dos personas a ≤ 2 celdas, `vinculoConvivencia · sociabilidad media`, con techo (medido neutro, no adoptado) | Hipótesis cohorte, noche 2026-09-22 |
 | `social.radioConvivencia` | 0 | [0, 64] | Comunidades vivas: con > 0 la pertenencia sigue a la convivencia. Quien vive a más de este radio (celdas) del centro de su comunidad y tiene ≥ 2 vecinos de confianza de ella funda con ellos una nueva (fisión, con los requisitos de una fundación); quien tiene ≥ 2 vecinos de confianza de otra comunidad, y más que de la suya, pasa a ella; quien no tiene comunidad se une a la de la mayoría de sus vecinos de confianza. 0 = hoy: la pertenencia sólo cambia por `confianzaSalida` | Hipótesis COM, noche 2026-09-22 |
+| `social.banda`, `social.bandaMax` | 0, 6 (históricos y nuevos) | [0, 4], [1, 64] entero | Con `banda>0`, expediciones de 1 a `bandaMax−1` compañeros mortales exploradores alinean el rumbo por media circular y conservan al menos un destino a ≤ 6 de la banda; `banda=0` apaga ambas reglas | Preregistro `docs/preregistros/2026-09-23-vocacion-banda.md` · B1 |
 | `social.memoriaDisputa` | 0 | [0, 32] | Conflicto legible: con > 0, en una disputa o un turno cede quien menos lo necesita (máximo de hambre y sed; empate, el de id mayor) y vuelve a elegir al paso siguiente en vez de quedar treinta pasos inmóvil; quien cede una disputa recuerda un día la fuente (la celda y las que la disputa llama «el mismo destino»), que al elegir dónde comer, beber o cazar le parece este número de celdas más lejos. Sólo reordena fuentes percibidas: si no hay otra, vuelve. 0 = hoy | Hipótesis CONFL, noche 2026-09-22 |
 | `poblacion.exigeComunidad` | **`false`** (reglas 10; histórico `true`) | booleano | Si reproducirse exige pertenecer a una comunidad; con `false` la cría hereda la del progenitor `a`, o ninguna | Noche de ciencia 2026-09-22 · reglas 10 |
 | `poblacion.radioPareja` | 3 | [1, 32] | Distancia máxima entre progenitores en `reproduce()`; es también la escala espacial de `pairAffinity` | Noche de ciencia 2026-09-22 |
@@ -630,6 +634,48 @@ aplazaba la bebida (semilla 42: 4 muertes por sed en 2 días frente a 1); de ah�
 vecinos) baja la distancia entre repertorios: rota a todos en vez de especializarlos. Con el default 0
 el mundo es el de antes bit a bit (semilla 51926 a 1200 pasos `d7e173a1…`; semilla 7 con los params
 del carril, `47e0d511…`). Refutación en `tests/ley-aptitud.test.ts`.
+
+#### Ley VOC: oficio de linaje (`conducta.vocacion`, 2026-09-23)
+
+**Por qué.** La aptitud heredada existe ya al fundar y la práctica adquirida se satura en una vida;
+ninguna produce una diferencia lenta que crezca con las generaciones. El preregistro
+`docs/preregistros/2026-09-23-vocacion-banda.md` propone transmisión cultural vertical uniparental:
+cada cría copia los diez oficios de un progenitor fijado por identidad, añade un error uniforme de
+amplitud ε indexado por `(seed,id)`, centra el vector y lo proyecta a ±0,3. Explorar se excluye para
+no repetir la mortalidad juvenil de PRAC1. Los fundadores carecen del campo y, con el default
+histórico y nuevo 0 (rango [0, 0,3]), el nacimiento no consume azar ni crea estado.
+
+#### Ley PO1: práctica de oficios (`conducta.practicaOficios`, 2026-09-23)
+
+**Por qué.** La vocación necesita persistencia conductual para que un sesgo pequeño no sea absorbido
+por el ganador global del día. En contexto ready, cada candidato de oficio salvo explorar suma
+`p · (skills[oficio] − media(skills de los diez oficios))`: refuerza experiencia relativa, no crea
+habilidad ni recursos y deja intactas necesidades y vínculos. Reutiliza la variante PO1 del prototipo
+que excluye explorar; no incorpora `conducta.practica` ni herencia de habilidades, descartadas por el
+preregistro. Default histórico y nuevo 0; rango [0, 4].
+
+#### Ley SL1: saturación local (`conducta.saturacionLocal`, 2026-09-23)
+
+**Por qué.** H2 conserva el motor lento VOC pero reemplaza la práctica por dependencia negativa de
+frecuencia: si al menos dos personas son visibles a radio 7, un oficio pierde
+`s · (vecinos que lo ejercen / vecinos visibles)`. Sólo actúa en ready y nunca sobre explorar,
+comer, beber, descansar, vínculos ni provisión familiar. Así puede romper sincronías locales como
+«todos investigan» sin leer fuera de la vista. Default histórico y nuevo 0; rango [0, 1]. Fuente y
+criterios de refutación: `docs/preregistros/2026-09-23-vocacion-banda.md`.
+
+#### Ley B1: cohesión de banda (`social.banda`, 2026-09-23)
+
+**Por qué.** Las familias que exploran solas se separan en islas de parentesco. Con `banda>0`, una
+persona que ve entre 1 y `bandaMax−1` vecinos mortales explorando usa como rumbo efectivo la media
+circular de su heading (peso 1) y los de sus compañeros (peso `banda`). En ready descarta destinos
+que queden a más de 6 celdas de todos ellos, pero sólo si sobrevive alguna opción. Acciones,
+posiciones y headings se leen de una instantánea efímera tomada al comienzo de la fase de personas,
+por lo que el orden del tick no altera la decisión; S e I nunca son compañeros. Con grupos de tamaño
+≥ `bandaMax` no alinea. El guard maestro `banda>0` contiene **las dos** subreglas: por eso cambiar
+`bandaMax` con peso 0 no activa la correa ni mueve el estado histórico. Defaults histórico/nuevo 0 y
+6; rangos [0, 4] y [1, 64] entero. Diseño y puertas:
+`docs/preregistros/2026-09-23-vocacion-banda.md`.
+
 #### Comunidades vivas: `social.radioConvivencia` (hipótesis COM, noche 2026-09-22)
 
 Hoy la pertenencia es una etiqueta: se fija el día 1 (3–4 comunidades por semilla), la cría hereda la del

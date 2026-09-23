@@ -73,6 +73,9 @@ export interface Person extends PersonView {
   /** Ley candidata `social.memoriaDisputa` (CONFL): fuente donde cedió su última disputa y paso en que la cedió.
    * Sólo existe con la ley activa; se olvida un día después. */
   conflictMemory?: { x: number; y: number; tick: number };
+  /** Ley candidata `conducta.vocacion`: sesgo heredado, centrado y acotado, de los diez oficios.
+   * Sólo existe con la ley activa. */
+  vocacion?: Record<string, number>;
   technology: TechnologyKnowledge; demography: DemographicState;
 }
 export interface Memory extends MemoryView {
@@ -299,6 +302,54 @@ const RASGO_DEL_OFICIO: Partial<Record<Action, keyof NonNullable<PersonView['tra
   gather: 'industriousness', farm: 'industriousness', build: 'industriousness', repair: 'industriousness', craft: 'industriousness',
   hunt: 'resilience', share: 'care', cooperate: 'sociability',
 };
+/** Orden canónico de los oficios a los que se aplican vocación y práctica. `explore` queda fuera
+ * por diseño del preregistro; derivarlo una sola vez conserva el orden del literal anterior. */
+export const OFICIOS_DE_LINAJE = Object.freeze((Object.keys(RASGO_DEL_OFICIO) as Action[])
+  .filter((action): action is Exclude<Action, 'explore'> => action !== 'explore'));
+
+const MAX_VOCACION = 0.3;
+const acotarVocacion = (value: number): number => Math.max(-MAX_VOCACION, Math.min(MAX_VOCACION, value));
+
+/** Error de copia heredable e indexado sólo por seed/id. La proyección conserva suma cero incluso
+ * cuando alguna componente alcanza ±0,3; no se debe llamar con epsilon=0. */
+export function heredarVocacion(seed: number, id: string, progenitor: Pick<Person, 'vocacion'>, epsilon: number): Record<string, number> {
+  const random = localRandom(seed, `vocacion:${id}`);
+  const raw = OFICIOS_DE_LINAJE.map(oficio => (progenitor.vocacion?.[oficio] ?? 0) + epsilon * (2 * random() - 1));
+  const mean = raw.reduce((sum, value) => sum + value, 0) / raw.length;
+  const centered = raw.map(value => value - mean);
+  let low = Math.min(...centered) - MAX_VOCACION, high = Math.max(...centered) + MAX_VOCACION;
+  for (let iteration = 0; iteration < 80; iteration++) {
+    const middle = (low + high) / 2;
+    const sum = centered.reduce((total, value) => total + acotarVocacion(value - middle), 0);
+    if (sum > 0) low = middle; else high = middle;
+  }
+  const projected = centered.map(value => acotarVocacion(value - (low + high) / 2));
+  const residual = projected.reduce((sum, value) => sum + value, 0);
+  const correction = projected.findIndex(value => value - residual >= -MAX_VOCACION && value - residual <= MAX_VOCACION);
+  if (correction >= 0) projected[correction] = projected[correction]! - residual;
+  return Object.fromEntries(OFICIOS_DE_LINAJE.map((oficio, index) => [oficio, projected[index]!]));
+}
+
+export function ajustePracticaOficios(skills: Readonly<Record<string, number>>, action: Action, peso: number): number {
+  if (action === 'explore' || !RASGO_DEL_OFICIO[action] || peso <= 0) return 0;
+  const media = OFICIOS_DE_LINAJE.reduce((sum, oficio) => sum + (skills[oficio] ?? 0), 0) / OFICIOS_DE_LINAJE.length;
+  return peso * ((skills[action] ?? 0) - media);
+}
+
+export function ajusteVocacion(person: Pick<Person, 'vocacion'>, action: Action, epsilon: number): number {
+  return epsilon > 0 && action !== 'explore' && !!RASGO_DEL_OFICIO[action] ? person.vocacion?.[action] ?? 0 : 0;
+}
+
+export function ajusteSaturacionLocal(action: Action, vecinos: readonly Pick<Person, 'action'>[], peso: number): number {
+  if (action === 'explore' || !RASGO_DEL_OFICIO[action] || peso <= 0 || vecinos.length < 2) return 0;
+  return -peso * vecinos.filter(person => person.action === action).length / vecinos.length;
+}
+
+export function rumboCircularBanda(propio: number, companeros: readonly number[], peso: number): number {
+  let x = Math.cos(propio), y = Math.sin(propio);
+  for (const heading of companeros) { x += peso * Math.cos(heading); y += peso * Math.sin(heading); }
+  return Math.hypot(x, y) > Number.EPSILON ? Math.atan2(y, x) : propio;
+}
 /** Ventaja comparativa de `traits` en `action` (ley DIV): el rasgo del oficio menos la media de los
  * cinco rasgos de la MISMA persona. Suma cero sobre los cinco rasgos: quien es bueno en todo no
  * gana nada por serlo, sólo ordena sus oficios; 0 para lo que no es un oficio. Pura y exportada
@@ -415,6 +466,20 @@ function personById(world: World, id: string): Person | undefined {
   return index.byId.get(id);
 }
 
+interface BandSnapshotPerson { id: string; role: Person['role']; action: Action; x: number; y: number; heading: number; }
+const bandSnapshots = new WeakMap<World, { tick: number; people: Map<string, BandSnapshotPerson> }>();
+function captureBandSnapshot(world: World): Map<string, BandSnapshotPerson> {
+  const people = new Map(world.people.map(person => [person.id, {
+    id: person.id, role: person.role, action: person.action, x: person.x, y: person.y, heading: person.heading,
+  }]));
+  bandSnapshots.set(world, { tick: world.tick, people });
+  return people;
+}
+function bandSnapshot(world: World): Map<string, BandSnapshotPerson> {
+  const snapshot = bandSnapshots.get(world);
+  return snapshot?.tick === world.tick ? snapshot.people : captureBandSnapshot(world);
+}
+
 function choose(world: World, person: Person): void {
   const nearbyTiles: Tile[] = [];
   for (let dy = -RADIUS; dy <= RADIUS; dy++) for (let dx = -RADIUS; dx <= RADIUS; dx++) {
@@ -440,7 +505,8 @@ function choose(world: World, person: Person): void {
   // aplazaba la bebida y la semilla 42 perdía 4 personas por sed en 2 días; la base, 1). Y entra en
   // el apetito de explorar AQUÍ, antes de que la lluvia lo convierta en una búsqueda de techo con
   // `Math.max`: ordena el ocio, nunca frena una búsqueda corporal.
-  const aptitud = person.thirst <= 0.5 && person.hunger <= 0.5 && person.fatigue <= 0.5 ? paramsOf(world).conducta.aptitud : 0;
+  const ready = person.thirst <= 0.5 && person.hunger <= 0.5 && person.fatigue <= 0.5;
+  const aptitud = ready ? paramsOf(world).conducta.aptitud : 0;
   if (aptitud > 0) candidates[0]!.score += aptitud * ventajaComparativa(person.traits, 'explore');
   const home = settlementOpportunity(world,person);
   if (home) candidates.push({action:'approach',...home});
@@ -811,6 +877,25 @@ function choose(world: World, person: Person): void {
       candidate.score += aptitud * ventajaComparativa(person.traits, candidate.action);
     }
   }
+  // VOC/PO1/SL1 (preregistro 2026-09-23): tres leyes de especialización que sólo ordenan
+  // oficios en contexto ready. Ninguna toca explorar, necesidades corporales ni actos de vínculo.
+  // Cada bloque tiene su propio guard > 0 para que los defaults reproduzcan el mundo bit a bit.
+  const { vocacion, practicaOficios, saturacionLocal } = paramsOf(world).conducta;
+  if (ready && vocacion > 0 && person.vocacion) {
+    for (const candidate of candidates) {
+      candidate.score += ajusteVocacion(person, candidate.action, vocacion);
+    }
+  }
+  if (ready && saturacionLocal > 0 && nearbyPeople.length >= 2) {
+    for (const candidate of candidates) {
+      candidate.score += ajusteSaturacionLocal(candidate.action, nearbyPeople, saturacionLocal);
+    }
+  }
+  if (ready && practicaOficios > 0) {
+    for (const candidate of candidates) {
+      candidate.score += ajustePracticaOficios(person.skills, candidate.action, practicaOficios);
+    }
+  }
   if (person.command && person.hunger < 0.85 && person.thirst < 0.85 && person.fatigue < 0.88 && person.energy > 0.15) {
     const command = person.command;
     const directed: Candidate = { action: command.order === 'move' ? 'explore' : command.order, target: { x: command.x, y: command.y }, score: 5, directed: true, reason: `Tarea solicitada: ${command.order === 'move' ? 'ir al destino' : actionLabel(command.order)}. Conserva sus necesidades corporales.` };
@@ -863,9 +948,27 @@ function resourceDistance(person: Person, tile: Tile): number {
   const useful = person.materials.wood < 6 ? (tile.wood ?? 0) >= 1 : (tile.stone ?? 0) >= 1;
   return distance(person, tile) + (useful ? 0 : 20);
 }
-function explorationTarget(world: World, person: Person, tiles: Tile[]): Point {
-  const options = tiles.filter(t => distance(person, t) >= 3 && distance(person, t) <= 6);
-  const heading = { x: Math.cos(person.heading), y: Math.sin(person.heading) };
+export function explorationTarget(world: World, person: Person, tiles: Tile[]): Point {
+  let options = tiles.filter(t => distance(person, t) >= 3 && distance(person, t) <= 6);
+  let effectiveHeading = person.heading;
+  // B1: toda la ley —alineación y correa— comparte el guard `banda > 0`. Las posiciones,
+  // acciones y orientaciones vienen de la instantánea previa a la fase de personas, no del estado
+  // que ya pudo modificar otro actor en este tick. S/I nunca cuentan como compañeros.
+  const { banda, bandaMax } = paramsOf(world).social;
+  if (banda > 0) {
+    const snapshot = bandSnapshot(world), origin = snapshot.get(person.id) ?? person;
+    const band = [...snapshot.values()].filter(other => other.id !== person.id && other.role === 'neighbor'
+      && other.action === 'explore' && distance(origin, other) <= RADIUS).sort((a, b) => a.id.localeCompare(b.id));
+    if (band.length >= 1 && band.length <= bandaMax - 1) {
+      effectiveHeading = rumboCircularBanda(person.heading, band.map(companion => companion.heading), banda);
+      const ready = person.thirst <= 0.5 && person.hunger <= 0.5 && person.fatigue <= 0.5;
+      if (ready) {
+        const leashed = options.filter(tile => band.some(companion => distance(tile, companion) <= RADIUS - 1));
+        if (leashed.length) options = leashed;
+      }
+    }
+  }
+  const heading = { x: Math.cos(effectiveHeading), y: Math.sin(effectiveHeading) };
   const companions = world.cooperationEnabled ? world.people.filter(p => p.id !== person.id && distance(person, p) <= 7 && (person.bonds[p.id] ?? 0) > 0.3) : [];
   const score = (t: Tile) => ((t.x - person.x) * heading.x + (t.y - person.y) * heading.y) * 0.2 + (world.noveltyEnabled && !person.visited.includes(`${t.x},${t.y}`) ? 2 : 0)
     + (t.traffic ?? 0) * 0.1 + (companions.length ? (distance(person, companions[0]!) - distance(t, companions[0]!)) * person.sociability * (1 - person.curiosity) * 0.18 : 0);
@@ -1247,6 +1350,9 @@ function advanceTick(world: World, inputs: Gesture[], context: WorldContext, med
     { decaimientoFertilidad: paramsOf(world).recursos.decaimientoFertilidad, seed: world.seed, cuencas: paramsOf(world).agua.cuencas }));
   medirFase(medicion, 'fauna', () => { stepAnimals(world,event=>addEvent(world,event)); stepStructures(world,event=>addEvent(world,event)); });
   medirFase(medicion, 'personas', () => {
+    // B1 lee una sola fotografía del comienzo de la fase: el resultado no depende de qué persona
+    // visitó antes `bodyAndAction` dentro del mismo tick. Es efímera y nunca entra al snapshot.
+    if (paramsOf(world).social.banda > 0) captureBandSnapshot(world);
     for (const person of world.people) bodyAndAction(world, person);
     for (const person of world.people) {
       const chunk = world.chunks[chunkKey(person.x, person.y)]!;
@@ -1338,6 +1444,14 @@ function reproduce(world: World): void {
       technology: initialTechnologyKnowledge(), demography: initialDemography(),
     };
     delete child.home;
+    // `structuredClone(a)` copiaría la vocación del progenitor sin error. La cría la elimina
+    // siempre y sólo crea su propio vector cuando epsilon está activo; con 0 no consume azar.
+    delete child.vocacion;
+    const epsilonVocacion = paramsOf(world).conducta.vocacion;
+    // La transmisión sigue siendo uniparental, pero el progenitor se fija por identidad para que
+    // invertir el recorrido de `world.people` no cambie el linaje transmisor.
+    const progenitorVocacion = a.id < b.id ? a : b;
+    if (epsilonVocacion > 0) child.vocacion = heredarVocacion(world.seed, id, progenitorVocacion, epsilonVocacion);
     // `agua.memoria`: la cría nace junto a sus padres y conserva el aguadero de `a` (copiado arriba con el
     // resto de su estado); es información, no agua: si está seco lo olvidará al verlo, como cualquiera.
     if (a.waterMemory) child.waterMemory = { x: a.waterMemory.x, y: a.waterMemory.y };
@@ -1673,6 +1787,7 @@ export function assertWorld(value: unknown, expectedVersion = RULES_VERSION, con
     }
     if (!['ready','hungry','thirsty','tired'].includes(p.intentContext)) fail();
     if (!p.traits || !['curiosity','sociability','industriousness','care','resilience'].every(k => typeof p.traits[k as keyof typeof p.traits] === 'number') || !numericMap(p.traits, 0, 1, 5) || !numericMap(p.skills, 0, 1, expectedVersion>=5?18:15) || !numericMap(p.values, -0.3, 0.3, expectedVersion>=5?72:60) || !numericMap(p.activity, 0, 1_000_000, expectedVersion>=5?18:15) || !p.materials || !Number.isFinite(p.materials.wood) || p.materials.wood < 0 || p.materials.wood > 12 || !Number.isFinite(p.materials.stone) || p.materials.stone < 0 || p.materials.stone > 8 || !Array.isArray(p.visited) || p.visited.length > 192 || !p.visited.every(k => typeof k === 'string' && /^-?\d+,-?\d+$/.test(k)) || !Number.isFinite(p.heading) || !Number.isSafeInteger(p.work) || p.work < 0 || p.work > (expectedVersion>=4?600:90) || !Number.isSafeInteger(p.lastOutcome) || p.lastOutcome < 0 || p.lastOutcome > w.tick || !['auto','directed'].includes(p.controlMode)) fail();
+    if (p.vocacion !== undefined && !numericMap(p.vocacion, -MAX_VOCACION, MAX_VOCACION, OFICIOS_DE_LINAJE.length)) fail();
     if (p.command !== null && (!p.command || !['move','explore','gather','farm','build','rest','hunt','drink','cooperate',...(expectedVersion>=4?['invent','repair']:[]), ...(expectedVersion>=5?['research','craft','forage']:[])].includes(p.command.order) || !validCoordinate(p.command.x) || !validCoordinate(p.command.y))) fail();
     if ((p.command === null) !== (p.controlMode === 'auto')) fail();
   }

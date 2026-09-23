@@ -42,7 +42,16 @@ const http: { t: number; url: string; status?: number; ms?: number; fallo?: stri
 page.on('websocket', ws => {
   sockets.push({ t: Date.now(), ev: 'abre' });
   ws.on('framesent', f => { const s = String(f.payload); let d: unknown; try { d = JSON.parse(s); } catch { d = s.slice(0, 80); } frames.push({ t: Date.now(), dir: 'out', bytes: Buffer.byteLength(s), tipo: (d as { type?: string })?.type ?? '?', detalle: d }); });
-  ws.on('framereceived', f => { const s = String(f.payload); frames.push({ t: Date.now(), dir: 'in', bytes: Buffer.byteLength(s), tipo: /^\{"type":"([a-z]+)"/.exec(s)?.[1] ?? '?' }); });
+  // Con la contrapresión un `state` grande llega como `{"type":"trozos","partes":k}` + k marcos: se
+  // cuenta como UN `state` con la suma de sus bytes (el primer trozo empieza por `{"type":"state"`).
+  let trozos: { faltan: number; bytes: number } | null = null;
+  ws.on('framereceived', f => {
+    const s = String(f.payload), bytes = Buffer.byteLength(s);
+    if (trozos) { trozos.bytes += bytes; if (--trozos.faltan === 0) { frames.push({ t: Date.now(), dir: 'in', bytes: trozos.bytes, tipo: 'state' }); trozos = null; } return; }
+    const tipo = /^\{"type":"([a-z]+)"/.exec(s)?.[1] ?? '?';
+    if (tipo === 'trozos') { trozos = { faltan: Number(/"partes":(\d+)/.exec(s)?.[1] ?? 0), bytes: 0 }; return; }
+    frames.push({ t: Date.now(), dir: 'in', bytes, tipo });
+  });
   ws.on('close', () => sockets.push({ t: Date.now(), ev: 'cierra' }));
   ws.on('socketerror', e => sockets.push({ t: Date.now(), ev: `error ${e}` }));
 });

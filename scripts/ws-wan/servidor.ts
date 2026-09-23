@@ -15,8 +15,14 @@
  * Cada evento lleva `peer` = puerto remoto del socket TCP (el del proxy que lo abrió): así el
  * banco une servidor ↔ escenario sin tocar el protocolo.
  *
+ *   evento `flujo`     → cada segundo, la contrapresión por socket (`app.flujo`: enviados,
+ *                        aplazados, acuses, último acuse) — solo existe desde la contrapresión.
+ *
+ * Compresión: sin opción, la de producción (se negocia; solo los `state` hacia clientes con acuse);
+ * `--deflate` = comprimir todo a todos (T136); `--sin-deflate` = no negociar.
+ *
  * Uso: CARTA_DATA_DIR=/datos/tmp-atlas-lab/wsfix/mundo CARTA_PASSWORD=x \
- *        npx tsx scripts/ws-wan/servidor.ts [--poblacion 30..60] [--deflate] [--port N]
+ *        npx tsx scripts/ws-wan/servidor.ts [--poblacion 30..60] [--deflate|--sin-deflate] [--port N]
  * Imprime en stdout una línea JSON {port, origin, host, cookie, people, tick} cuando está listo.
  */
 import { appendFileSync, mkdirSync } from 'node:fs';
@@ -42,10 +48,11 @@ const password = process.env.CARTA_PASSWORD;
 if (!password) throw new Error('Define CARTA_PASSWORD desechable.');
 const [minPeople, maxPeople] = arg('poblacion', '30..60')!.split('..').map(Number) as [number, number];
 const deflate = arg('deflate') === 'true';
+const sinDeflate = arg('sin-deflate') === 'true';
 const port = Number(arg('port', '0'));
 const host = 'atlas-wan.test', origin = `http://${host}`;
 mkdirSync(dataDir, { recursive: true });
-const telemetryPath = resolve(dataDir, `telemetria-${deflate ? 'deflate' : 'plano'}-${process.pid}.jsonl`);
+const telemetryPath = resolve(dataDir, `telemetria-${deflate ? 'deflate' : sinDeflate ? 'plano' : 'produccion'}-${process.pid}.jsonl`);
 
 // ---------------------------------------------------------------- telemetría del servidor
 type Tagged = WebSocket & { _isServer?: boolean; __reads?: number; __lastRead?: number; __sent?: boolean; __checkPending?: boolean };
@@ -77,7 +84,8 @@ WebSocket.prototype.send = function (this: Tagged, data: unknown, ...rest: unkno
   if (this._isServer) {
     this.__sent = true;
     const text = typeof data === 'string' ? data : '';
-    const type = /^\{"type":"([a-z]+)"/.exec(text)?.[1] ?? 'binario';
+    // Un trozo de un `state` partido no empieza por `{"type"` (salvo el primero, que es el `state`).
+    const type = /^\{"type":"([a-z]+)"/.exec(text)?.[1] ?? (text ? 'trozo' : 'binario');
     const sequence = type === 'state' ? Number(/"sequence":(\d+)/.exec(text)?.[1] ?? NaN) : undefined;
     log({ ev: 'send', peer: peerOf(this), type, bytes: Buffer.byteLength(text), bufferedAmount: bufferedGet.call(this), sequence });
   }
@@ -106,7 +114,7 @@ const store = new Store(resolve(dataDir, 'world.sqlite'));
 }
 
 // ---------------------------------------------------------------- servidor vivo
-const app = createApp({ store, password, origin, params: () => deploymentParams(hostParams()), perMessageDeflate: deflate });
+const app = createApp({ store, password, origin, params: () => deploymentParams(hostParams()), ...(deflate ? { perMessageDeflate: true } : sinDeflate ? { perMessageDeflate: false } : {}) });
 setParams(app.world, deploymentParams(paramsOf(app.world)));
 await new Promise<void>(yes => app.server.listen(port, '127.0.0.1', () => yes()));
 const address = app.server.address() as { port: number };
@@ -123,6 +131,7 @@ setInterval(() => {
   const r = app.runtime;
   log({ ev: 'runtime', tick: app.world.tick, people: app.world.people.length, tickHz: r.tickHz, stepMs: r.stepMs, p95StepMs: r.p95StepMs, broadcastMs: r.fases?.broadcast, projectionMs: r.projectionMs });
 }, 5000).unref();
+setInterval(() => { const conexiones = app.flujo; if (conexiones.length) log({ ev: 'flujo', conexiones }); }, 1000).unref();
 process.stdout.write(JSON.stringify({ port: address.port, origin, host, cookie, people: app.world.people.length, tick: app.world.tick, deflate, telemetry: telemetryPath }) + '\n');
 const shutdown = async () => { await app.close(); store.close(); process.exit(0); };
 process.once('SIGINT', () => void shutdown()); process.once('SIGTERM', () => void shutdown());

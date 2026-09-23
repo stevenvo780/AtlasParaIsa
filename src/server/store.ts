@@ -847,6 +847,10 @@ export class Store {
       technologyFailure('execution chain head escapes declared coverage');
     if (head?.version === 2 && head.pruneSeal !== (boundary?.seal ?? null))
       technologyFailure('execution chain head disagrees with prune boundary seal');
+    // Cada guardado escribe la cabeza V2 en la transacción de su instantánea: una V2 atrasada no la dejó
+    // ningún binario (los anteriores a la retención solo conocen la V1) y aceptarla como prefijo dejaría
+    // sin autenticar las filas que vienen detrás.
+    if (head?.version === 2 && head.through !== through) technologyFailure('execution chain head V2 is not the snapshot head');
     if (boundary && this.db.prepare('SELECT 1 FROM technology_executions WHERE serial<=? LIMIT 1').get(boundary.through))
       technologyFailure('pruned executions are still archived');
     const firstRetained = boundary && this.db.prepare('SELECT tick FROM technology_executions WHERE serial=?').get(boundary.through + 1) as
@@ -857,7 +861,7 @@ export class Store {
     let serial = from, digest = boundary ? boundary.digest : TECHNOLOGY_CHAIN_EMPTY;
     let legacyDigest = TECHNOLOGY_CHAIN_EMPTY;
     const headDisagrees = (): boolean => !!head && head.digest !== (head.version === 1 ? legacyDigest : digest);
-    // Una cabeza atrasada (la escribió un binario anterior que no la mantenía) se comprueba como prefijo.
+    // Una cabeza V1 atrasada (la escribió un binario anterior que no la mantenía) se comprueba como prefijo.
     if (head && head.through === serial && headDisagrees()) technologyFailure('execution chain disagrees with archive');
     const recent = new Map(state.history.map(receipt => [receipt.id, receipt]));
     while (serial < through) {
@@ -1390,6 +1394,8 @@ export class Store {
       technologyFailure('prune boundary disagrees with history origin');
     if (boundary && !head) technologyFailure('prune boundary has no execution chain head');
     if (boundary && head?.version !== 2) technologyFailure('prune boundary has no V2 execution chain head');
+    // La cabeza V2 es la de la última instantánea: nunca queda por detrás de un punto anterior que se recupera.
+    if (head?.version === 2 && head.through < target) technologyFailure('execution chain head V2 is behind the recovered coverage');
     if (head?.version === 2 && head.pruneSeal !== (boundary?.seal ?? null))
       technologyFailure('execution chain head disagrees with prune boundary seal');
     const firstRetained = boundary && this.db.prepare('SELECT tick FROM technology_executions WHERE serial=?').get(boundary.through + 1) as

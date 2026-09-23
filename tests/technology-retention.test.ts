@@ -287,6 +287,14 @@ test('un respaldo profundo viejo frena la poda y previous() lo recupera con el a
   assert.deepEqual(store.load()!.world, world);
 });
 
+test('previous() no recupera detrás de una cabeza V2 retrocedida por debajo del punto que devuelve', t => {
+  const { dir, store, world } = grow(t, { window: 0, steps: 2 });
+  const early = chainRecord(store)!;
+  for (let step = 0; step < 2; step++) { fixtureTick(world, world.tick + 1000); useMany(world, 50); store.save(world); }
+  store.db.prepare("UPDATE metadata SET value=? WHERE key='technology-chain-v1'").run(JSON.stringify(early));
+  assert.throws(() => store.previous(join(dir, 'previous.sqlite'), 1), /head V2 is behind the recovered coverage/);
+});
+
 test('un inicio de sesión no tira la verificación de la carga; una escritura ajena cuesta un solo barrido', t => {
   const { path, world } = grow(t, { steps: 4 });
   const store = open(t, path), loaded = store.load()!.world; store.save(loaded);
@@ -312,7 +320,7 @@ test('un inicio de sesión no tira la verificación de la carga; una escritura a
   assert.ok(world.tick < loaded.tick);
 });
 
-test('un archivo sin cabeza (anterior a la retención) se carga y el primer guardado la escribe; una cabeza atrasada es un prefijo', t => {
+test('un archivo sin cabeza (anterior a la retención) se carga y el primer guardado la escribe; solo una cabeza V1 atrasada es un prefijo', t => {
   const { path, store, world } = grow(t, { window: 0, steps: 3 });
   const early = chainRecord(store)!;
   fixtureTick(world, world.tick + 10); useMany(world, 20); store.save(world);
@@ -322,12 +330,20 @@ test('un archivo sin cabeza (anterior a la retención) se carga y el primer guar
   legacy.save(loaded);
   assert.deepEqual(chainRecord(legacy), { version: 2, startsAfter: 0, through: loaded.technology.executionCounter,
     digest: foldRetained(legacy), pruneSeal: null });
-  // Cabeza de un binario anterior que siguió guardando sin mantenerla: se comprueba hasta donde llega.
-  legacy.db.prepare("UPDATE metadata SET value=? WHERE key='technology-chain-v1'").run(JSON.stringify(early));
+  // Cabeza V1 de un binario anterior que siguió guardando sin mantenerla: se comprueba hasta donde llega.
+  let legacyDigest = TECHNOLOGY_CHAIN_EMPTY;
+  for (const row of legacy.db.prepare('SELECT digest FROM technology_executions WHERE serial<=? ORDER BY serial')
+    .all(early.through) as { digest: string }[]) legacyDigest = legacyTechnologyChainStep(legacyDigest, row.digest);
+  const stale = { version: 1, startsAfter: early.startsAfter, through: early.through, digest: legacyDigest };
+  legacy.db.prepare("UPDATE metadata SET value=? WHERE key='technology-chain-v1'").run(JSON.stringify(stale));
   assert.deepEqual(open(t, path).load()!.world, loaded);
   legacy.db.prepare("UPDATE metadata SET value=? WHERE key='technology-chain-v1'")
-    .run(JSON.stringify({ ...early, digest: '2'.repeat(64) }));
+    .run(JSON.stringify({ ...stale, digest: '2'.repeat(64) }));
   assert.throws(() => open(t, path).load(), /chain disagrees/);
+  // Una V2 atrasada solo puede venir de retroceder la cabeza: dejaría sin autenticar lo posterior (una fila
+  // reescrita detrás de ella con su digesto recalculado pasaría). Falla cerrada.
+  legacy.db.prepare("UPDATE metadata SET value=? WHERE key='technology-chain-v1'").run(JSON.stringify(early));
+  assert.throws(() => open(t, path).load(), /head V2 is not the snapshot head/);
 });
 
 test('el archivo acepta una anidada ausente sólo dentro del prefijo podado que declara el anfitrión', t => {

@@ -14,6 +14,8 @@ import { decidirModo, setModo, type Modo } from './modo.js';
 import { capasDeCalor, leyendaCalor, type Capa } from './calor.js';
 import { ausenteEstado, demographicSummary, rotuloRecuento } from './censo-view.js';
 import { estadoCrecimiento, ritmo, ultimoFrenazo } from './gobernador-view.js';
+import { distribution, sparkline, statCard } from './charts.js';
+import { notaAcercamientos, seccionNacimientos } from './natalidad-view.js';
 import { idDeRol, nombreConocido, olvidarVistos, recordarPersona, recordarVistos, visto } from './vistos.js';
 import './style.css';
 import './game.css';
@@ -380,7 +382,8 @@ function renderInspector(): void {
       if (estado === 'comprobando' || (estado === 'fuera' && (!cachedAbsent || world.tick - cachedAbsent.tick >= PERSONA_REFRESCO))) connection?.requestPersona(id);
       el('person-controls').hidden = true; el('person-primary').hidden = true; el('direct-toggle').hidden = true;
       el('inspector-tabs').hidden = true;
-      const name = legacy?.name ?? nombreConocido(id, world);
+      // S e I se llaman así en el mundo (createWorld); su botón ya lo dice aunque aún no se les haya visto.
+      const name = legacy?.name ?? nombreConocido(id, world) ?? (id === idDeRol('S', world) ? 'S' : id === idDeRol('I', world) ? 'I' : undefined);
       el('inspector-title').textContent = name ?? 'Fuera de esta vista';
       // M3: la posición exacta llega con la ficha a demanda; si no, la última en que se la vio.
       const detail = cachedAbsent?.detail, known = visto(id);
@@ -398,7 +401,7 @@ function renderInspector(): void {
     const persona = cached?.detail ?? undefined;
     const signature = JSON.stringify([p, persona ?? null, world.events.map(event => event.id), world.communities, world.blueprints, world.technology?.items.filter(item=>item.ownerId===p.id), world.technology?.knowledge?.find(entry=>entry.actorId===p.id) ?? null, world.technology?.recipes]); if (signature === inspectorSignature) return; inspectorSignature = signature;
     el('inspector-title').textContent = p.name; el('person-controls').hidden = false; el('person-primary').hidden = false; const source = world.memories.find(m => m.text === p.recentMemory)?.source;
-    const sections = inheritedAndLearned(persona ? { ...p, experiences: persona.experiences, trust: persona.trust } : p, world, persona?.recipeIds);
+    const sections = inheritedAndLearned(persona ? { ...p, experiences: persona.experiences, trust: persona.trust } : p, world, persona?.recipeIds, persona ?? null);
     const color = /^#[\da-f]{3,8}$/i.test(p.color) ? p.color : '#a4805b';
     replacePersonCard(`<section id="inspector-section-now" role="tabpanel" aria-labelledby="inspector-tab-now"><div class="game-person-heading"><div class="pixel-portrait ${p.role === 'I' ? 'portrait-i' : ''}" style="--person-color:${color}" aria-hidden="true"><span class="pixel-body"></span></div><div><strong>${esc(p.specialty ?? 'Su camino está tomando forma')}</strong><span class="agency-state ${p.controlMode === 'directed' ? 'is-directed' : ''}">${p.controlMode === 'directed' ? 'Siguiendo una orden' : 'Actuando por su cuenta'}</span></div></div><p class="game-current-action">${actions[p.action]} <span>· ${esc(p.x)}, ${esc(p.y)}</span></p><p class="game-reason">${esc(p.reason)}</p><div class="game-needs"><h3>Ahora necesita ${esc(p.need.toLocaleLowerCase('es'))}</h3>${meter('Energía', p.energy)}${meter('Hambre', p.hunger)}${p.thirst === undefined ? '' : meter('Sed', p.thirst)}${meter('Cansancio', p.fatigue)}</div>${destinationLink(p)}${sections.now}</section><section id="inspector-section-kit" role="tabpanel" aria-labelledby="inspector-tab-kit"><h3 class="section-title">Lo que lleva y sabe hacer</h3><div class="material-pouch"><span>${icon.leaf}<strong>${number(p.materials?.wood)}</strong> madera</span><span>${icon.hammer}<strong>${number(p.materials?.stone)}</strong> piedra</span></div>${personBlueprint(p, world) ? `<details class="person-detail" data-detail="blueprint"><summary>Proyecto que sabe construir</summary>${blueprintCard(personBlueprint(p, world)!, world)}</details>` : ''}${sections.kit}</section><section id="inspector-section-story" role="tabpanel" aria-labelledby="inspector-tab-story"><h3 class="section-title">Una vida entre otras</h3>${sections.story}${recentEvidence(world, p.id)}${p.recentMemory ? `<details class="person-detail memory-detail" data-detail="memory"><summary>Algo que lleva consigo</summary><p>${esc(p.recentMemory)}</p><small>${source === 'sample' ? 'RECUERDO DE PRUEBA · NO ES BIOGRAFÍA' : source === 'approved' ? 'RECUERDO APROBADO' : 'EXPERIENCIA DEL MUNDO SIMULADO'}</small></details>` : ''}</section>`);
   } else {
@@ -458,29 +461,6 @@ function selectStatsTab(tab: typeof statsTab): void {
   statsTab = tab;
   for (const button of root.querySelectorAll<HTMLButtonElement>('[data-stats]')) { const active = button.dataset.stats === tab; button.setAttribute('aria-selected', String(active)); button.tabIndex = active ? 0 : -1; }
   el('stats-content').setAttribute('aria-labelledby', `stats-tab-${tab}`); renderStats();
-}
-
-function statCard(label: string, value: string, note: string, accent = ''): string { return `<article class="stat-card ${accent}"><span>${esc(label)}</span><strong>${esc(value)}</strong><small>${esc(note)}</small></article>`; }
-
-/** Charts use the server's sample ticks, not evenly spaced invented timestamps. */
-function sparkline(points: { tick: number; value: number }[], title: string, unit: string, fixedRange?: [number, number]): string {
-  const safe = points.filter(p => Number.isFinite(p.tick) && Number.isFinite(p.value)).slice(-96);
-  if (!safe.length) return `<figure class="history-chart"><figcaption>${esc(title)}</figcaption><p class="stats-empty">Todavía no hay muestras de esta serie.</p></figure>`;
-  const width = 280, height = 92, padding = 8;
-  const start = safe[0]!.tick, end = safe.at(-1)!.tick;
-  const minimum = fixedRange?.[0] ?? 0, maximum = fixedRange?.[1] ?? Math.max(1, ...safe.map(p => p.value)) * 1.1;
-  const span = Math.max(0.0001, maximum - minimum);
-  const mapped = safe.map(p => ({ x: safe.length === 1 ? width / 2 : padding + (p.tick - start) / Math.max(1, end - start) * (width - padding * 2), y: height - padding - Math.max(0, Math.min(1, (p.value - minimum) / span)) * (height - padding * 2) }));
-  const coordinates = mapped.map(p => `${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(' ');
-  const latest = safe.at(-1)!; const label = `${title}. ${safe.length} ${safe.length === 1 ? 'muestra' : 'muestras'}, pasos ${start} a ${end}. Último valor ${number(latest.value, 2)} ${unit}.`;
-  return `<figure class="history-chart"><figcaption><span>${esc(title)}</span><strong>${esc(number(latest.value, 1))}<small>${esc(unit)}</small></strong></figcaption><svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${esc(label)}"><title>${esc(label)}</title><path class="chart-grid" d="M8 8H272M8 46H272M8 84H272"/><polyline class="chart-line" points="${coordinates}" fill="none"/><circle class="chart-point" cx="${mapped.at(-1)!.x.toFixed(2)}" cy="${mapped.at(-1)!.y.toFixed(2)}" r="3"/></svg><div class="chart-axis"><span>Paso ${start}</span><span>${safe.length} ${safe.length === 1 ? 'muestra' : 'muestras'}</span><span>${end}</span></div></figure>`;
-}
-
-function distribution(data: Record<string, number> | undefined, labels: Record<string, string>, unit: string): string {
-  const rows = Object.entries(data ?? {}).filter(([, value]) => Number.isFinite(value) && value >= 0).sort((a, b) => b[1] - a[1]);
-  if (!rows.length) return '<p class="stats-empty">Aún no hay datos registrados.</p>';
-  const maximum = Math.max(1, ...rows.map(([, value]) => value));
-  return `<div class="distribution">${rows.map(([key, value]) => `<div class="distribution-row"><div><span>${esc(labels[key] ?? key)}</span><strong>${esc(number(value, 1))}<small>${esc(unit)}</small></strong></div><span class="distribution-track" aria-hidden="true"><i style="width:${(value / maximum * 100).toFixed(2)}%"></i></span></div>`).join('')}</div>`;
 }
 
 interface GraphicsDiagnostics {
@@ -574,7 +554,7 @@ function renderStatsContent(): void {
   const accumulated = `<section class="stats-section"><div class="stats-section-heading"><h3>Lo que han hecho juntos</h3><span>Acumulado del mundo</span></div><div class="stats-facts">${([['teaching', 'Aprendizajes compartidos'], ['trade', 'Intercambios'], ['constructionHelp', 'Ayudas en tareas'], ['conflicts', 'Desacuerdos'], ['hunts', 'Animales cazados'], ['cultivations', 'Acciones de cultivo']] as const).map(([key, label]) => `<span>${label}<strong>${number(stats.totals[key])}</strong></span>`).join('')}</div></section>`;
   const growth = estadoCrecimiento(world.performance?.gobernador, stats.population);
   const growthLine = growth ? `<p class="growth-status" data-growth="${esc(growth.estado)}"><strong>${esc(growth.titulo)}</strong>${esc(growth.explicacion)}</p>` : '';
-  panel.innerHTML = `${stamp}${growthLine}${demographicSummary(world)}<div class="stats-grid">${statCard('Energía media', percentage(stats.meanEnergy), 'Estado corporal, no afecto')}${statCard('Hambre media', percentage(stats.meanHunger), 'Necesidad de alimento')}${statCard('Sed media', percentage(stats.meanThirst), 'Necesidad de agua')}${statCard('Cooperaciones', number(stats.totals.cooperation), 'Acciones acumuladas')}</div>${recentEvidence(world)}${populationWindow(history.map(p => ({ tick: p.tick, value: p.population })))}<div class="stats-chart-grid">${sparkline(history.map(p => ({ tick: p.tick, value: p.population })), 'Población · ventana recibida', 'habitantes')}${sparkline(history.map(p => ({ tick: p.tick, value: p.energy * 100 })), 'Energía media', '% media', [0, 100])}</div><section class="stats-section"><div class="stats-section-heading"><h3>Qué están haciendo</h3><span>Habitantes ahora</span></div>${distribution(stats.actions, actionLabels, '')}</section><div class="stats-two-columns"><section class="stats-section"><div class="stats-section-heading"><h3>Generaciones</h3><span>Habitantes</span></div>${distribution(stats.generations, Object.fromEntries(Object.keys(stats.generations).map(key => [key, `Generación ${key}`])), '')}</section><section class="stats-section"><div class="stats-section-heading"><h3>Historia que se acumula</h3></div><div class="stats-facts"><span>Regiones descubiertas<strong>${number(world.discoveredChunks)}</strong></span><span>Asentamientos construidos<strong>${number(world.settlementCount)}</strong></span><span>Cansancio medio<strong>${percentage(stats.meanFatigue)}</strong></span></div></section></div>${accumulated}${scope}`;
+  panel.innerHTML = `${stamp}${growthLine}${demographicSummary(world)}<div class="stats-grid">${statCard('Energía media', percentage(stats.meanEnergy), 'Estado corporal, no afecto')}${statCard('Hambre media', percentage(stats.meanHunger), 'Necesidad de alimento')}${statCard('Sed media', percentage(stats.meanThirst), 'Necesidad de agua')}${statCard('Cooperaciones', number(stats.totals.cooperation), 'Acciones acumuladas')}</div>${recentEvidence(world)}${populationWindow(history.map(p => ({ tick: p.tick, value: p.population })))}<div class="stats-chart-grid">${sparkline(history.map(p => ({ tick: p.tick, value: p.population })), 'Población · ventana recibida', 'habitantes')}${sparkline(history.map(p => ({ tick: p.tick, value: p.energy * 100 })), 'Energía media', '% media', [0, 100])}</div>${seccionNacimientos(world)}<section class="stats-section"><div class="stats-section-heading"><h3>Qué están haciendo</h3><span>Todo el mundo, ahora</span></div>${distribution(stats.actions, actionLabels, '')}${notaAcercamientos(world)}</section><div class="stats-two-columns"><section class="stats-section"><div class="stats-section-heading"><h3>Generaciones</h3><span>Habitantes</span></div>${distribution(stats.generations, Object.fromEntries(Object.keys(stats.generations).map(key => [key, `Generación ${key}`])), '')}</section><section class="stats-section"><div class="stats-section-heading"><h3>Historia que se acumula</h3></div><div class="stats-facts"><span>Regiones descubiertas<strong>${number(world.discoveredChunks)}</strong></span><span>Asentamientos construidos<strong>${number(world.settlementCount)}</strong></span><span>Cansancio medio<strong>${percentage(stats.meanFatigue)}</strong></span></div></section></div>${accumulated}${scope}`;
 }
 window.addEventListener('pagehide', saveVisit); document.addEventListener('visibilitychange', () => { if (document.hidden) saveVisit(); });
 async function boot(): Promise<void> { root.innerHTML = '<main class="boot-screen"><span>✧</span><p>Abriendo la carta…</p></main>'; try { const response = await fetch('/api/session', { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(10_000) }); const session = await response.json() as { authenticated: boolean }; if (response.ok && session.authenticated) enterWorld(); else loginScreen(); } catch { loginScreen('No hay conexión con el servidor. Puedes volver a intentar.'); } }

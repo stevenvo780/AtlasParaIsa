@@ -1,4 +1,5 @@
-import type { AnimalView, BlueprintView, ChronicleEvent, PersonView, StructureView, WorldView } from '../shared/types.js';
+import type { AnimalView, BlueprintView, ChronicleEvent, PersonDetail, PersonView, StructureView, WorldView } from '../shared/types.js';
+import { fertilidadFicha } from './natalidad-view.js';
 import { componentNames, componentPurpose } from './life-art.js';
 import { carriedWaterCard, recipeLabel } from './technology-art.js';
 import { esc, svg, icon, number, percentage } from './ui-catalog.js';
@@ -56,7 +57,7 @@ function procedureReference(recipeId: string, technology: WorldView['technology'
 /** T036(h): `p.experiences`, `p.trust` y el repertorio (`recipeIds`) ya no viajan en el `state`:
  * llegan con `{type:'persona'}`. `undefined` significa «todavía no ha llegado» y se dibuja como
  * «cargando…»; una lista vacía sí significa «no hay nada», y se dice con esas palabras. */
-export function inheritedAndLearned(p: PersonView, world: WorldView, recipeIds?: string[]): { now: string; kit: string; story: string } {
+export function inheritedAndLearned(p: PersonView, world: WorldView, recipeIds?: string[], extra?: Pick<PersonDetail, 'fertil' | 'busca'> | null): { now: string; kit: string; story: string } {
   const skillNames: Record<string, string> = { gather: 'Recolección', gathering: 'Recolección', forage: 'Cosecha', farm: 'Cultivo', farming: 'Cultivo', build: 'Construcción', building: 'Construcción', explore: 'Exploración', exploration: 'Exploración', care: 'Cuidado', cooperate: 'Cooperación', hunt: 'Caza', drink: 'Búsqueda de agua' };
   const skills = Object.entries(p.skills ?? {}).sort((a, b) => b[1] - a[1]);
   const traitNames: Record<string, string> = { curiosity: 'Curiosidad', sociability: 'Sociabilidad', industriousness: 'Constancia', care: 'Cuidado', resilience: 'Resiliencia' };
@@ -81,6 +82,6 @@ export function inheritedAndLearned(p: PersonView, world: WorldView, recipeIds?:
   const progress = p.working && p.workProgress !== undefined ? `<div class="game-needs task-progress">${meter('Progreso de la tarea',p.workProgress)}</div>` : '';
   const reserve = p.foodReserve !== undefined ? `<div class="food-reserve"><div><span>${icon.bag} Reserva de alimento</span><strong>${number(p.foodReserve,2)}${p.foodReserveCapacity !== undefined ? ` / ${number(p.foodReserveCapacity,2)}` : ''} u.</strong></div>${p.foodReserveCapacity !== undefined && p.foodReserveCapacity > 0 ? `<meter aria-label="Alimento reservado" min="0" max="${esc(p.foodReserveCapacity)}" value="${esc(p.foodReserve)}"></meter>` : ''}<p>Unidades de alimento del mundo.</p></div>` : '';
   const lifeStage = p.lifeStage === 'juvenile' ? 'En crecimiento' : p.lifeStage === 'adult' ? 'Edad de crianza' : p.lifeStage === 'senescent' ? 'Vejez' : 'Sin dato';
-  const body = `<details class="person-detail" data-detail="vitality"><summary>Salud y ciclo de vida</summary><div class="skill-row" data-person-life-stage><span>Etapa del modelo</span><strong>${lifeStage}</strong></div>${p.health !== undefined?meter('Salud',p.health):''}${p.vitality !== undefined?meter('Vitalidad',p.vitality):''}<p>La etapa describe la edad del modelo; no garantiza una crianza. El alimento, el agua, el descanso y la exposición dejan consecuencias en el cuerpo.</p>${p.continuityProtected?'<p class="drawer-note">La continuidad de esta identidad está protegida por la configuración del mundo.</p>':''}</details>`;
+  const body = `<details class="person-detail" data-detail="vitality"><summary>Salud y ciclo de vida</summary><div class="skill-row" data-person-life-stage><span>Etapa del modelo</span><strong>${lifeStage}</strong></div>${fertilidadFicha(extra, world)}${p.health !== undefined?meter('Salud',p.health):''}${p.vitality !== undefined?meter('Vitalidad',p.vitality):''}<p>La etapa describe la edad del modelo; no garantiza una crianza. El alimento, el agua, el descanso y la exposición dejan consecuencias en el cuerpo.</p>${p.continuityProtected?'<p class="drawer-note">La continuidad de esta identidad está protegida por la configuración del mundo.</p>':''}</details>`;
   return { now: reserve + progress + body, kit: toolkit + remembered + learned, story: genetics + social + experiences };
 }

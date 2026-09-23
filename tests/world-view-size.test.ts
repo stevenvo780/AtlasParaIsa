@@ -5,6 +5,7 @@ import { captureTechnologyCheckpoint } from '../src/world/technology-checkpoint.
 import type { Viewport } from '../src/shared/types.js';
 import { projectTechnology, technologyRecipeDetail } from '../src/world/technology.js';
 import type { TechnologyRecipe } from '../src/shared/technology.js';
+import { resumenVivo } from '../src/server/resumen-vivo.js';
 
 const KIB = 1024;
 const encodedBytes = (value: unknown): number => Buffer.byteLength(JSON.stringify(value), 'utf8');
@@ -224,4 +225,20 @@ test('FR-026: bytes por campo con 10 000 habitantes, viewport medio y máximo, m
   // tampoco en esta tarea) también escala algo con la población vía diagnósticos por actor.
   const itemsBytes = encodedBytes(m.view.technology?.items ?? []);
   t.diagnostic(`FR-026 · HALLAZGO fuera de alcance: technology.items = ${(itemsBytes/KIB).toFixed(1)} KiB con 10 025 habitantes (escala con TODA la población, no con la cámara; src/world/technology.ts:projectTechnology, no tocado por T134).`);
+});
+
+/** UI 2026-09-22 (M2, M4): lo que la interfaz añade a `RuntimeStats` se mide aquí. `tickHzObjetivo` es un
+ * número fijo; `natalidad` (resumen-vivo.ts) son enteros y la ley de natalidad: su tamaño NO crece con la
+ * población (se comprueba con 10 000 habitantes sintéticos más). */
+test('UI: los resúmenes de RuntimeStats para la interfaz pesan < 250 B y no crecen con la población', t => {
+  const world = grownWorld(300);
+  const medir = (): number => encodedBytes({ tickHzObjetivo: 10, ...resumenVivo(world) });
+  const antes = medir();
+  injectMassCommunity(world, 10_000, { x: 1, y: 1 }, { x: 500, y: 500 });
+  const despues = medir();
+  t.diagnostic(`UI · RuntimeStats añadido: ${antes} B con ${world.people.length - 10_000} habitantes, ${despues} B con ${world.people.length}`);
+  assert.ok(antes < 250 && despues < 250, `resúmenes de la UI: ${antes} B / ${despues} B`);
+  assert.ok(despues - antes <= 12, 'solo cambian los dígitos de los recuentos, no la forma');
+  // Frente a un estado típico de 150–400 KiB, menos de una milésima.
+  assert.ok(despues / (150 * KIB) < 0.002);
 });

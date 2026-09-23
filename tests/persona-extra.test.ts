@@ -21,7 +21,7 @@ test('M3: la ficha a demanda trae nombre y posición exacta de alguien fuera de 
   assert.equal(ficha.x, s.x); assert.equal(ficha.y, s.y);
   assert.equal(ficha.vivo, true);
   // La biografía es la misma que ya se servía: solo se añaden campos.
-  const { name: _n, x: _x, y: _y, vivo: _v, ...resto } = ficha;
+  const { name: _n, x: _x, y: _y, vivo: _v, fertil: _f, busca: _b, ...resto } = ficha;
   assert.deepEqual(resto, personDetail(world, s.id));
   assert.equal(enriquecerPersona(world, 'descendant-999999'), undefined, 'una identidad que no vive no se inventa');
   assert.equal(enriquecerPersona(world, '../s'), undefined);

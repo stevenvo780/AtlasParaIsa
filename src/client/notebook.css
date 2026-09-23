@@ -263,3 +263,10 @@
 }
 /* M3: enlaces a quien está fuera de la cámara o murió: legibles como enlace, sin parecer presentes. */
 .entity-link.is-absent, .lineage-person.is-absent { font-style: italic; color: #6b7a58; }
+/* M4: escalera causal de los nacimientos. */
+.natality-ladder { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 6px; counter-reset: paso; }
+.natality-ladder > li { position: relative; padding: 9px 11px 9px 34px; border: 1px solid #dce4cc; border-radius: 6px; background: #f6f7ec; font-size: 12px; line-height: 1.5; color: #5e7051; counter-increment: paso; }
+.natality-ladder > li:before { content: counter(paso); position: absolute; left: 10px; top: 9px; width: 16px; height: 16px; border-radius: 50%; background: #dfe7cd; color: #4f6436; font-size: 10px; display: grid; place-items: center; }
+.natality-ladder > li strong { display: block; color: #425f35; font-size: 13px; font-weight: 600; }
+.natality-ladder > li.is-blocked { border-color: #e2c79d; background: #f8eedb; }
+.natality-ladder > li.is-blocked strong { color: #6d4518; }

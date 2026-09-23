@@ -12,6 +12,7 @@ import { cookie, hashToken, makeToken, passwordVerifier, sessionHash } from './a
 import { ensureWorldInstance, readWorldInstance } from './world-instance.js';
 import { Gobernador } from './governor.js';
 import { enriquecerPersona } from './persona-extra.js';
+import { CADA_PASOS, resumenVivo } from './resumen-vivo.js';
 export { decideReproduction, decidirConTecho } from './governor.js';
 
 class HttpError extends Error { constructor(readonly status: number, message: string) { super(message); } }
@@ -279,6 +280,7 @@ export function createApp(options: AppOptions) {
       runtime.p95StepMs = gobernador.registrar(runtime.stepMs);
       // El gobernador decide sobre el mundo ya vigente: la próxima `reproduce()` lo lee.
       governReproduction(world);
+      if (world.tick % CADA_PASOS === 0 || !runtime.natalidad) Object.assign(runtime, resumenVivo(world));
       runtime.activeTiles = world.tiles.length; runtime.processRssMiB = process.memoryUsage.rss() / 1048576; runtime.snapshotBytes = store.lastSnapshotBytes;
       for (let i=0; i<valid.length; i++) { pending.delete(valid[i].gesture.id); valid[i].resolve(results[i]); }
       // T107: `broadcast` mide su propio tramo porque corre después de que `stepMs` ya cerró

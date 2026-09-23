@@ -58,6 +58,12 @@ export interface PersonDetail {
   /** M3 (persona-extra, opcionales): nombre y posición exacta para encontrar a alguien fuera de la cámara.
    * `vivo` es true cuando la ficha sale de las vidas del mundo servido. Ausentes en servidores antiguos. */
   name?: string; x?: number; y?: number; vivo?: boolean;
+  /** M4: si puede criar ahora y, si no, la primera causa con las condiciones de la ley (juventud, vejez,
+   * enfriamiento tras su última cría, cuerpo, reserva de alimento, comunidad exigida o techo del gobernador). */
+  fertil?: { ahora: boolean; bloqueo: 'no-vecino' | 'joven' | 'vejez' | 'enfriamiento' | 'cuerpo' | 'reserva' | 'comunidad' | 'techo' | null;
+    faltanPasos?: number; cuerpo?: string[]; reserva: number; necesita: number };
+  /** M4: a quién busca si su intención es de cortejo o de crianza (nombre único en el mundo vivo). */
+  busca?: { id: string; name: string; motivo: 'cortejo' | 'reunion' | 'prepara' };
 }
 export interface PlaceView { id: string; name: string; x: number; y: number; description: string; gatherings: number; }
 export interface ChronicleEvent {
@@ -139,6 +145,11 @@ export interface RuntimeStats { stepMs: number; p95StepMs: number; saveMs: numbe
    * presupuesto y lo reenciende bajo el 70 %.
    * `manual` guarda una orden humana (null = sin orden); mientras no sea null, manda ella.
    */
+  /** M4 (resumen-vivo.ts, cada 50 pasos, O(población), tamaño constante): vecinos fértiles ahora, quién
+   * corteja, prepara reservas o se reúne para criar (por el `reason` que escribe la ley) y la ley de
+   * natalidad de este mundo en números (si nacer está permitido lo dice `gobernador.activo`). `tick` = paso medido. */
+  natalidad?: { tick: number; fertiles: number; cortejando: number; preparando: number; reuniendose: number;
+    ley: { radioPareja: number; radioLugar: number; radioCortejo: number; exigeComunidad: boolean; reserva: number } };
   gobernador?: { activo: boolean; presupuestoMs: number; p95StepMs: number; manual: boolean | null;
     /** Política vigente (`gobernador.politica`), techo de población vigente con la política `techo`
      * (null = sin freno) y el último frenazo registrado (T164; no se borra al volver a verde). */

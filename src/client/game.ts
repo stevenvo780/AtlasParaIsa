@@ -13,6 +13,7 @@ import { readWorldVisit, saveWorldVisit } from './visit-memory.js';
 import { decidirModo, setModo, type Modo } from './modo.js';
 import { capasDeCalor, leyendaCalor, type Capa } from './calor.js';
 import { ausenteEstado, demographicSummary, rotuloRecuento } from './censo-view.js';
+import { estadoCrecimiento, ritmo, ultimoFrenazo } from './gobernador-view.js';
 import './style.css';
 import './game.css';
 import './notebook.css';
@@ -31,6 +32,8 @@ let tool: 'plant' | 'invite' | 'remember' = 'plant';
 let lastVisit: number | null = null;
 let populationSignature = '', inspectorSignature = '', memorySignature = '';
 let statsTab: 'life' | 'land' | 'communities' | 'technology' | 'performance' = 'life';
+/** M2: modo de dibujo decidido al entrar; el HUD dice «cada 5 s (ligero)» en observador. */
+let modoActual: Modo = 'completo';
 let populationKind: 'people' | 'animals' = 'people';
 let notebook: Notebook | null = null;
 let inspectorTab: 'now' | 'kit' | 'story' = 'now';
@@ -70,7 +73,8 @@ function syncModo(): Modo {
   const active = modo === 'observador';
   const button = el('modo-toggle');
   button.setAttribute('aria-pressed', String(active));
-  button.title = active ? 'Modo ligero activo: toca para volver al completo' : 'Activar el modo ligero para móviles lentos';
+  button.title = active ? 'Modo ligero activo: el mundo llega cada 5 s y se dibuja con menos detalle. Toca para volver al completo.' : 'Activar el modo ligero para móviles lentos';
+  button.setAttribute('aria-label', active ? 'Modo ligero activo (toca para volver al completo)' : 'Modo ligero para móviles lentos');
   return modo;
 }
 
@@ -79,7 +83,7 @@ function enterWorld(): void {
   root.innerHTML = worldShell();
   notebook = new Notebook(el('game')); inspectorTab = 'now';
   focusedRecipe = null; recipeDetails.clear(); personaDetails.clear(); personaVivo.clear();
-  const modo = syncModo();
+  const modo = syncModo(); modoActual = modo;
   connection = new Connection({ world: receiveWorld, status: value => { status = value; renderStatus(); }, pending: value => { pending = value; if (!value) landscape?.setPendingTarget(null); renderControls(); }, result: result => message(result.message, result.accepted), error: text => message(text, false), expired: () => loginScreen('La sesión terminó. Vuelve a entrar para ver la carta.'), recipe: (id, recipe) => { recipeDetails.set(id, recipe); if (statsTab === 'technology' && !el('stats-drawer').hidden) renderStats(); }, persona: (id, persona) => { personaDetails.set(id, persona); personaVivo.set(id, persona !== null); if (selected?.kind === 'person' && selected.id === id) { inspectorSignature = ''; renderInspector(); } } });
   landscape = new Landscape(el<HTMLCanvasElement>('landscape'), pick, viewport => { connection?.setViewport(viewport); el('camera-coordinates').textContent = `${viewport.x + Math.floor(viewport.width / 2)}, ${viewport.y + Math.floor(viewport.height / 2)}`; }, () => { following = false; renderControls(); }, { modo });
   // T036(a): en observador el mundo llega cada 5 s (el servidor acota a 1000 ms) y el terreno se
@@ -173,6 +177,7 @@ function wire(): void {
   el('landscape').addEventListener('keydown', event => { const keyboard = event as KeyboardEvent; if (control !== 'direct' || keyboard.ctrlKey || keyboard.metaKey || keyboard.altKey || keyboard.repeat) return; const key = keyboard.key.toLowerCase(); const offsets: Record<string, [number, number]> = { w: [0, -1], a: [-1, 0], s: [0, 1], d: [1, 0] }; const offset = offsets[key], p = person(); if (!offset || !p) return; event.preventDefault(); sendCommand('move', { x: p.x + offset[0], y: p.y + offset[1] }); });
   el('game').addEventListener('keydown', event => { if ((event as KeyboardEvent).key === 'Escape') { if (!el('inspector-drawer').hidden && !el('task-palette').hidden) { toggleTasks(false); el('task-toggle').focus(); return; } if (control === 'direct') { control = 'inspect'; renderControls(); if (!el('inspector-drawer').hidden) el('direct-toggle').focus(); else el('landscape').focus(); return; } notebook?.close(); } });
   el('heat-button').addEventListener('click', () => cicloCalor());
+  el('growth-chip').addEventListener('click', () => { selectStatsTab('life'); drawer('stats', true); });
   document.addEventListener('keydown', event => {
     if (event.key.toLowerCase() !== 'h' || event.ctrlKey || event.metaKey || event.altKey || event.repeat) return;
     const focus = event.target as HTMLElement | null;
@@ -283,9 +288,17 @@ function replacePersonCard(html: string): void {
   const restore = retainViewState(card);
   card.innerHTML = html;
   selectInspectorTab(inspectorTab, false);
-  el('selection-label').textContent = el('inspector-title').textContent;
-  el('inspector-toggle').setAttribute('aria-label', `Ficha de ${el('inspector-title').textContent}`);
+  syncSelectionLabel();
   restore();
+}
+/** M2: «IR A S I · Ficha». El botón de ficha no repite S o I (ya tienen su botón, que queda marcado). */
+function syncSelectionLabel(): void {
+  const title = el('inspector-title').textContent ?? '';
+  const selection = selected, role = selection.kind === 'person' ? world?.people.find(p => p.id === selection.id)?.role : undefined;
+  el('selection-label').textContent = role === 'S' || role === 'I' ? 'Ficha' : title;
+  el('inspector-toggle').setAttribute('aria-label', `Ficha de ${title}`);
+  el('focus-s').setAttribute('aria-pressed', String(role === 'S'));
+  el('focus-i').setAttribute('aria-pressed', String(role === 'I'));
 }
 function selectInspectorTab(tab: typeof inspectorTab, resetScroll = true): void {
   if (!document.getElementById(`inspector-section-${tab}`)) tab = 'now';
@@ -370,7 +383,25 @@ function renderControls(): void {
 }
 function renderStatus(): void {
   if (!document.getElementById('connection-label')) return; const paused = !!world?.paused; el('connection-label').textContent = paused ? 'En pausa' : status === 'live' ? 'En vivo' : status === 'offline' ? 'Reconectando' : 'Conectando'; el('connection-label').dataset.live = String(status === 'live' && !paused);
-  el('connection-notice').hidden = status === 'live' && !paused; el('connection-notice').textContent = paused ? world?.pauseReason ?? 'El mundo está en pausa para proteger lo guardado.' : status === 'offline' ? 'Sin conexión. Ves el último estado recibido; las órdenes esperan hasta reconectar.' : 'Conectando con el mundo…'; renderControls(); if (!el('stats-drawer').hidden) renderStats();
+  el('connection-notice').hidden = status === 'live' && !paused; el('connection-notice').textContent = paused ? world?.pauseReason ?? 'El mundo está en pausa para proteger lo guardado.' : status === 'offline' ? 'Sin conexión. Ves el último estado recibido; las órdenes esperan hasta reconectar.' : 'Conectando con el mundo…';
+  renderRhythm(); renderControls(); if (!el('stats-drawer').hidden) renderStats();
+}
+/** M2: el HUD dice cómo llega el mundo (cada 5 s en modo ligero, o más lento de lo pedido) y si su
+ * crecimiento está frenado por el gobernador. Todo sale de `performance` y del modo elegido. */
+function renderRhythm(): void {
+  const rhythm = el('world-rhythm'), live = status === 'live' && !world?.paused;
+  const pace = ritmo(world?.performance?.tickHz, world?.performance?.tickHzObjetivo);
+  const text = !live ? '' : modoActual === 'observador' ? (pace?.lento ? 'cada 5 s · mundo lento' : 'cada 5 s · modo ligero') : pace?.lento ? `${pace.pasosPorSegundo} · más lento` : '';
+  rhythm.hidden = !text; rhythm.textContent = text; rhythm.dataset.kind = modoActual === 'observador' ? 'light' : 'slow';
+  const growth = estadoCrecimiento(world?.performance?.gobernador, world?.stats?.population);
+  const chip = el('growth-chip');
+  chip.hidden = !growth?.chip;
+  if (growth?.chip) {
+    chip.dataset.growth = growth.estado;
+    el('growth-chip-text').textContent = growth.chip;
+    el('growth-chip-detail').textContent = growth.detalle;
+    chip.title = `${growth.detalle} Toca para ver Mundo › Vida.`;
+  }
 }
 function renderTool(): void {
   if (!document.getElementById('gesture-title')) return;
@@ -437,6 +468,24 @@ function populationWindow(points: { tick: number; value: number }[]): string {
   const days = (last - first) / 2400;
   return `<p class="stats-note stats-scope-note" data-population-window>Ventana recibida: pasos ${number(first)}–${number(last)} · ${number(days, 2)} días simulados entre muestras (${samples.length} ${samples.length === 1 ? 'muestra' : 'muestras'}). La curva incluye S/I y vecinos; no es un registro completo de nacimientos y muertes.</p>`;
 }
+/** M2: Rendimiento honesto. El p95 frente al presupuesto con barra, el ritmo real y cuánto dura un día,
+ * el gobernador en claro (mismo módulo que el HUD), el último frenazo compuesto desde sus campos y lo
+ * que recibe este navegador. Todo sale de `performance` y de la conexión; nada se supone. */
+function serverPerformance(runtime: WorldView['performance']): string {
+  if (!runtime) return '<section class="stats-section"><div class="stats-section-heading"><h3>Servidor · CPU y persistencia</h3><span>Mediciones reales</span></div><p class="stats-empty">El servidor todavía no envió sus medidas de rendimiento.</p></section>';
+  const g = runtime.gobernador, growth = estadoCrecimiento(g, world?.stats?.population), frenazo = ultimoFrenazo(g);
+  const pace = ritmo(runtime.tickHz, runtime.tickHzObjetivo);
+  const budget = g?.presupuestoMs;
+  const p95Card = budget !== undefined && Number.isFinite(budget) && budget > 0
+    ? `<article class="stat-card" data-p95><span>Paso p95</span><strong>${esc(number(runtime.p95StepMs, 1))} ms <small>de ${esc(number(budget, 0))} ms</small></strong><meter class="stat-meter" min="0" max="${esc(budget)}" low="${esc(budget * 0.7)}" high="${esc(budget)}" optimum="0" value="${esc(Math.min(runtime.p95StepMs, budget * 1.5))}" aria-label="Paso p95 frente al presupuesto del gobernador"></meter><small>Presupuesto del gobernador; por encima frena el crecimiento.</small></article>`
+    : statCard('Paso p95', `${number(runtime.p95StepMs, 2)} ms`, 'Ventana medida por el servidor');
+  const paceCard = pace ? `<article class="stat-card" data-rhythm><span>Ritmo real</span><strong>${esc(pace.pasosPorSegundo)}</strong><small>Un día del mundo dura ~${esc(pace.diaDura)}.${pace.lento && runtime.tickHzObjetivo ? ` Más lento de lo pedido (${esc(number(runtime.tickHzObjetivo, 1))} pasos/s).` : ''}</small></article>` : statCard('Ritmo real', '—', 'Aún sin pasos medidos');
+  const growthCard = growth ? `<article class="stat-card" data-growth-card="${esc(growth.estado)}"><span>Gobernador · crecimiento</span><strong>${esc(growth.titulo)}</strong><small>${esc(growth.explicacion)}</small></article>` : '';
+  const brakeCard = frenazo ? `<article class="stat-card" data-last-brake><span>Último frenazo <b class="stat-state" data-vigente="${frenazo.vigente}">${frenazo.vigente ? 'vigente' : 'ya retirado'}</b></span><strong>${esc(number(g!.techoObservado!.poblacion))} vidas</strong><small>${esc(frenazo.texto)}</small></article>` : '';
+  const received = connection?.reception();
+  const receivedCard = received ? statCard('Recibido por este navegador', `≈ ${number(received.meanBytes / 1024, 0)} KiB`, `Por actualización (media de las últimas)${received.perSecond ? ` · ${number(received.perSecond, 1)} actualizaciones/s` : ''}. Tamaño del JSON recibido, sin cabeceras.`) : statCard('Recibido por este navegador', '—', 'Aún no llegó ninguna actualización por la conexión en vivo.');
+  return `<section class="stats-section"><div class="stats-section-heading"><h3>Servidor · CPU y persistencia</h3><span>Mediciones reales</span></div><p class="stats-note">Duración del trabajo y memoria del proceso. No representan el porcentaje de uso total de la CPU.</p><div class="stats-grid">${p95Card}${paceCard}${growthCard}${brakeCard}${statCard('Paso de simulación', `${number(runtime.stepMs, 2)} ms`, 'Último paso')}${statCard('Guardado', `${number(runtime.saveMs, 2)} ms`, 'Persistencia')}${statCard('Proyección', `${number(runtime.projectionMs, 2)} ms`, 'Preparación de una vista')}${statCard('Memoria del proceso', `${number(runtime.processRssMiB, 1)} MiB`, 'RSS del servidor')}${statCard('Instantánea guardada en disco', `${number(runtime.snapshotBytes / 1024, 1)} KiB`, 'Tamaño del último guardado del mundo')}${receivedCard}</div></section>`;
+}
 function renderStats(): void {
   const panel = document.getElementById('stats-content'); if (!panel) return;
   const restore = retainViewState(panel);
@@ -458,7 +507,7 @@ function renderStatsContent(): void {
   if (statsTab === 'performance') {
     const graphics = (landscape as (Landscape & { getDiagnostics?: () => GraphicsDiagnostics }) | null)?.getDiagnostics?.();
     const gpuLabels: Record<string, string> = { hardware: 'WebGL · adaptador físico reconocido', software: 'Respaldo Canvas2D · adaptador de software', unverified: 'WebGL activo · hardware sin verificar', 'context-lost': 'Contexto perdido · respaldo Canvas2D', active: 'GPU activa', ready: 'GPU preparada', available: 'GPU disponible', pending: 'Consultando GPU', initializing: 'Inicializando GPU', unavailable: 'GPU no disponible', unsupported: 'GPU no compatible', disabled: 'GPU desactivada', failed: 'GPU no disponible', lost: 'Dispositivo perdido', 'device-lost': 'Dispositivo perdido', fallback: 'Respaldo gráfico activo' };
-    panel.innerHTML = `${stamp}<section class="stats-section"><div class="stats-section-heading"><h3>Servidor · CPU y persistencia</h3><span>Mediciones reales</span></div><p class="stats-note">Duración del trabajo y memoria del proceso. No representan el porcentaje de uso total de la CPU.</p>${runtime ? `<div class="stats-grid">${statCard('Paso de simulación', `${number(runtime.stepMs, 2)} ms`, 'Último paso')}${statCard('Paso p95', `${number(runtime.p95StepMs, 2)} ms`, 'Ventana medida por el servidor')}${statCard('Guardado', `${number(runtime.saveMs, 2)} ms`, 'Persistencia')}${statCard('Proyección', `${number(runtime.projectionMs, 2)} ms`, 'Preparación de una vista')}${statCard('Memoria del proceso', `${number(runtime.processRssMiB, 1)} MiB`, 'RSS del servidor')}${statCard('Estado serializado', `${number(runtime.snapshotBytes / 1024, 1)} KiB`, 'Tamaño de la muestra medida')}${runtime.gobernador ? statCard('Gobernador', runtime.gobernador.manual !== null ? `manual: ${runtime.gobernador.manual ? 'nacimientos permitidos' : 'nacimientos detenidos'}` : runtime.gobernador.activo ? 'nacimientos permitidos' : runtime.gobernador.techo != null ? `reponiendo hasta ${runtime.gobernador.techo}` : 'nacimientos detenidos', `${runtime.gobernador.politica ?? 'p95'} · presupuesto ${number(runtime.gobernador.presupuestoMs, 0)} ms${runtime.gobernador.techo != null ? ` · techo ${number(runtime.gobernador.techo, 0)}` : ''}`) : ''}${runtime.gobernador?.techoObservado ? statCard('Último frenazo', `${number(runtime.gobernador.techoObservado.poblacion, 0)} habitantes`, runtime.gobernador.techoObservado.motivo) : ''}</div>` : '<p class="stats-empty">El servidor todavía no envió sus medidas de rendimiento.</p>'}</section><section class="stats-section"><div class="stats-section-heading"><h3>Este navegador · gráficos</h3><span>${esc(graphics?.backend === 'canvas2d-cached' ? 'Canvas2D con caché' : graphics?.backend === 'webgl2' ? 'WebGL2' : 'Esperando diagnóstico')}</span></div>${graphics ? `<div class="gpu-state"><span>${icon.layers}</span><div><strong>${esc(gpuLabels[graphics.gpuStatus ?? ''] ?? graphics.gpuStatus ?? 'Estado gráfico sin informar')}</strong><p>${esc(graphics.gpuLabel ?? 'El navegador no informó un nombre de dispositivo.')}</p></div></div><div class="stats-grid">${statCard('Dibujo', `${number(graphics.fps, 1)} FPS`, 'Frecuencia observada en esta pestaña')}${statCard('CPU por cuadro', `${number(graphics.frameMs, 2)} ms`, 'Preparación y envío del dibujo')}${statCard('Casillas visibles', number(graphics.visibleTiles), 'Trabajo de esta cámara')}${statCard('Animales visibles', number(graphics.visibleAnimals), 'Cuerpos dibujados en esta cámara')}${statCard('Construcciones visibles', number(graphics.visibleStructures), 'Componentes de estructuras')}${statCard('Composiciones', number(graphics.drawCalls), 'Sprites y texturas, no todas las operaciones')}${statCard('Caché gráfico', `${number(graphics.cacheBytes === undefined ? undefined : graphics.cacheBytes / 1048576, 2)} MiB`, `${number(graphics.cacheEntries)} entradas · ${number(graphics.cacheBuilds)} construcciones`)}</div>` : '<p class="stats-empty">Todavía no hay diagnóstico del renderizador. No se puede afirmar que la GPU esté activa.</p>'}<p class="stats-note">La CPU del servidor decide lo que ocurre; los gráficos de esta pestaña dibujan el estado recibido. Los tiempos de dibujo no miden la ocupación de la GPU. Cerrar la pestaña no detiene el mundo.</p></section>`;
+    panel.innerHTML = `${stamp}${serverPerformance(runtime)}`+`<section class="stats-section"><div class="stats-section-heading"><h3>Este navegador · gráficos</h3><span>${esc(graphics?.backend === 'canvas2d-cached' ? 'Canvas2D con caché' : graphics?.backend === 'webgl2' ? 'WebGL2' : 'Esperando diagnóstico')}</span></div>${graphics ? `<div class="gpu-state"><span>${icon.layers}</span><div><strong>${esc(gpuLabels[graphics.gpuStatus ?? ''] ?? graphics.gpuStatus ?? 'Estado gráfico sin informar')}</strong><p>${esc(graphics.gpuLabel ?? 'El navegador no informó un nombre de dispositivo.')}</p></div></div><div class="stats-grid">${statCard('Dibujo', `${number(graphics.fps, 1)} FPS`, 'Frecuencia observada en esta pestaña')}${statCard('CPU por cuadro', `${number(graphics.frameMs, 2)} ms`, 'Preparación y envío del dibujo')}${statCard('Casillas visibles', number(graphics.visibleTiles), 'Trabajo de esta cámara')}${statCard('Animales visibles', number(graphics.visibleAnimals), 'Cuerpos dibujados en esta cámara')}${statCard('Construcciones visibles', number(graphics.visibleStructures), 'Componentes de estructuras')}${statCard('Composiciones', number(graphics.drawCalls), 'Sprites y texturas, no todas las operaciones')}${statCard('Caché gráfico', `${number(graphics.cacheBytes === undefined ? undefined : graphics.cacheBytes / 1048576, 2)} MiB`, `${number(graphics.cacheEntries)} entradas · ${number(graphics.cacheBuilds)} construcciones`)}</div>` : '<p class="stats-empty">Todavía no hay diagnóstico del renderizador. No se puede afirmar que la GPU esté activa.</p>'}<p class="stats-note">La CPU del servidor decide lo que ocurre; los gráficos de esta pestaña dibujan el estado recibido. Los tiempos de dibujo no miden la ocupación de la GPU. Cerrar la pestaña no detiene el mundo.</p></section>`;
     return;
   }
   if (statsTab === 'communities') {
@@ -485,7 +534,9 @@ function renderStatsContent(): void {
   const history = stats.history ?? [];
   const actionLabels = Object.fromEntries(Object.entries(actions).map(([key, text]) => [key, text]));
   const accumulated = `<section class="stats-section"><div class="stats-section-heading"><h3>Lo que han hecho juntos</h3><span>Acumulado del mundo</span></div><div class="stats-facts">${([['teaching', 'Aprendizajes compartidos'], ['trade', 'Intercambios'], ['constructionHelp', 'Ayudas en tareas'], ['conflicts', 'Desacuerdos'], ['hunts', 'Animales cazados'], ['cultivations', 'Acciones de cultivo']] as const).map(([key, label]) => `<span>${label}<strong>${number(stats.totals[key])}</strong></span>`).join('')}</div></section>`;
-  panel.innerHTML = `${stamp}${demographicSummary(world)}<div class="stats-grid">${statCard('Energía media', percentage(stats.meanEnergy), 'Estado corporal, no afecto')}${statCard('Hambre media', percentage(stats.meanHunger), 'Necesidad de alimento')}${statCard('Sed media', percentage(stats.meanThirst), 'Necesidad de agua')}${statCard('Cooperaciones', number(stats.totals.cooperation), 'Acciones acumuladas')}</div>${recentEvidence(world)}${populationWindow(history.map(p => ({ tick: p.tick, value: p.population })))}<div class="stats-chart-grid">${sparkline(history.map(p => ({ tick: p.tick, value: p.population })), 'Población · ventana recibida', 'habitantes')}${sparkline(history.map(p => ({ tick: p.tick, value: p.energy * 100 })), 'Energía media', '% media', [0, 100])}</div><section class="stats-section"><div class="stats-section-heading"><h3>Qué están haciendo</h3><span>Habitantes ahora</span></div>${distribution(stats.actions, actionLabels, '')}</section><div class="stats-two-columns"><section class="stats-section"><div class="stats-section-heading"><h3>Generaciones</h3><span>Habitantes</span></div>${distribution(stats.generations, Object.fromEntries(Object.keys(stats.generations).map(key => [key, `Generación ${key}`])), '')}</section><section class="stats-section"><div class="stats-section-heading"><h3>Historia que se acumula</h3></div><div class="stats-facts"><span>Regiones descubiertas<strong>${number(world.discoveredChunks)}</strong></span><span>Asentamientos construidos<strong>${number(world.settlementCount)}</strong></span><span>Cansancio medio<strong>${percentage(stats.meanFatigue)}</strong></span></div></section></div>${accumulated}${scope}`;
+  const growth = estadoCrecimiento(world.performance?.gobernador, stats.population);
+  const growthLine = growth ? `<p class="growth-status" data-growth="${esc(growth.estado)}"><strong>${esc(growth.titulo)}</strong>${esc(growth.explicacion)}</p>` : '';
+  panel.innerHTML = `${stamp}${growthLine}${demographicSummary(world)}<div class="stats-grid">${statCard('Energía media', percentage(stats.meanEnergy), 'Estado corporal, no afecto')}${statCard('Hambre media', percentage(stats.meanHunger), 'Necesidad de alimento')}${statCard('Sed media', percentage(stats.meanThirst), 'Necesidad de agua')}${statCard('Cooperaciones', number(stats.totals.cooperation), 'Acciones acumuladas')}</div>${recentEvidence(world)}${populationWindow(history.map(p => ({ tick: p.tick, value: p.population })))}<div class="stats-chart-grid">${sparkline(history.map(p => ({ tick: p.tick, value: p.population })), 'Población · ventana recibida', 'habitantes')}${sparkline(history.map(p => ({ tick: p.tick, value: p.energy * 100 })), 'Energía media', '% media', [0, 100])}</div><section class="stats-section"><div class="stats-section-heading"><h3>Qué están haciendo</h3><span>Habitantes ahora</span></div>${distribution(stats.actions, actionLabels, '')}</section><div class="stats-two-columns"><section class="stats-section"><div class="stats-section-heading"><h3>Generaciones</h3><span>Habitantes</span></div>${distribution(stats.generations, Object.fromEntries(Object.keys(stats.generations).map(key => [key, `Generación ${key}`])), '')}</section><section class="stats-section"><div class="stats-section-heading"><h3>Historia que se acumula</h3></div><div class="stats-facts"><span>Regiones descubiertas<strong>${number(world.discoveredChunks)}</strong></span><span>Asentamientos construidos<strong>${number(world.settlementCount)}</strong></span><span>Cansancio medio<strong>${percentage(stats.meanFatigue)}</strong></span></div></section></div>${accumulated}${scope}`;
 }
 window.addEventListener('pagehide', saveVisit); document.addEventListener('visibilitychange', () => { if (document.hidden) saveVisit(); });
 async function boot(): Promise<void> { root.innerHTML = '<main class="boot-screen"><span>✧</span><p>Abriendo la carta…</p></main>'; try { const response = await fetch('/api/session', { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(10_000) }); const session = await response.json() as { authenticated: boolean }; if (response.ok && session.authenticated) enterWorld(); else loginScreen(); } catch { loginScreen('No hay conexión con el servidor. Puedes volver a intentar.'); } }

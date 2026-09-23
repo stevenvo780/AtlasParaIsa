@@ -112,8 +112,10 @@ export interface WorldStats { population: number; meanEnergy: number; meanHunger
  * fases nombradas, no del `stepOnce` entero (que además incluye E/S de red).
  */
 export type FaseNombre = 'maintainRegions' | 'ecologia' | 'kernel' | 'fauna' | 'personas' | 'encuentros' | 'demografia' | 'comunidades' | 'reproduccion' | 'checkpoint' | 'muestreo' | 'save' | 'broadcast';
-/** `tickHz`: ritmo real medido en reloj de pared sobre los últimos pasos, no el ritmo pedido. */
-export interface RuntimeStats { stepMs: number; p95StepMs: number; saveMs: number; projectionMs: number; snapshotBytes: number; activeTiles: number; processRssMiB: number; tickHz: number;
+/** `tickHz`: ritmo real medido en reloj de pared sobre los últimos pasos, no el ritmo pedido.
+ * `tickHzObjetivo` (M2, opcional): el ritmo pedido (1000 / tickMs), fijado al arrancar; permite decir
+ * «más lento de lo normal» sin suponer 10 Hz. Ausente = el servidor no lo informa. */
+export interface RuntimeStats { stepMs: number; p95StepMs: number; saveMs: number; projectionMs: number; snapshotBytes: number; activeTiles: number; processRssMiB: number; tickHz: number; tickHzObjetivo?: number;
   /** Coste del borrador y de las leyes, separado del guardado del mismo paso. */
   cloneMs?: number; simulationMs?: number;
   /**
@@ -126,8 +128,12 @@ export interface RuntimeStats { stepMs: number; p95StepMs: number; saveMs: numbe
   fases: Record<FaseNombre, number>; fraccionSerial: number;
   /**
    * Ruling R17: el hardware, no un tope fijo, limita la población. `activo` es el valor
-   * vigente de `world.reproductionEnabled`; el gobernador lo apaga cuando `p95StepMs`
-   * supera `presupuestoMs` y lo reenciende por debajo del 70 % de ese presupuesto.
+   * vigente de `world.reproductionEnabled`. Con la política `techo` (la de hoy) el gobernador no
+   * apaga la natalidad: cuando `p95StepMs` supera `presupuestoMs` fija un techo en la población de
+   * ese momento y solo permite nacimientos por debajo de él (reponer, no crecer); `activo` es false
+   * mientras la población está EN el techo. Bajo el 70 % del presupuesto el techo se retira; en la
+   * banda muerta se conserva y nunca baja. Con `apagar` (histórica) lo apaga por encima del
+   * presupuesto y lo reenciende bajo el 70 %.
    * `manual` guarda una orden humana (null = sin orden); mientras no sea null, manda ella.
    */
   gobernador?: { activo: boolean; presupuestoMs: number; p95StepMs: number; manual: boolean | null;

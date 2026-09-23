@@ -279,3 +279,6 @@
 .return-summary { font-size: 13px; line-height: 1.6; margin: 6px 0 8px; }
 .return-toast ul small { display: block; font-size: 10px; color: #6e805e; }
 .return-note { font-size: 11px; color: #6e805e; margin: 6px 0 0; }
+/* M7: notas bajo cada barra de cooperación y el enlace a una comunidad. */
+.distribution-row .distribution-note { display: block; font-size: 11px; line-height: 1.5; margin: 4px 0 0; color: #6e805e; }
+.community-counts .entity-link { margin-left: auto; }

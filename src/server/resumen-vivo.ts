@@ -6,6 +6,7 @@
  *
  * M4 (natalidad): cuántos vecinos son fértiles ahora, cuántos buscan a su pareja (cortejo), cuántos
  * preparan reservas para criar y cuántos se reúnen para intentarlo, más la ley de este mundo en números.
+ * M7 (comidaCompartida): Σ `gatherings` de los lugares vivos.
  */
 import type { PersonDetail, RuntimeStats } from '../shared/types.js';
 import type { Person, World } from '../world/index.js';
@@ -37,9 +38,15 @@ export function resumenNatalidad(world: World): Natalidad {
     ley: { radioPareja: ley.radioPareja, radioLugar: ley.radioLugar, radioCortejo: ley.cortejo > 0 ? ley.radioCortejo : 0, exigeComunidad: ley.exigeComunidad, reserva: RESERVA_PARA_CRIAR } };
 }
 
+/** M7: veces que se compartió comida en los lugares de las regiones vivas. Exacto para ellos: `share()`
+ * (world/index.ts) solo comparte a ≤ 3 casillas de un lugar y suma allí `gatherings`. */
+export function comidaCompartida(world: World): number {
+  return world.places.reduce((sum, place) => sum + (Number.isFinite(place.gatherings) ? place.gatherings : 0), 0);
+}
+
 /** Lo que el servidor añade a `RuntimeStats` cada `CADA_PASOS` pasos. */
-export function resumenVivo(world: World): Pick<RuntimeStats, 'natalidad'> {
-  return { natalidad: resumenNatalidad(world) };
+export function resumenVivo(world: World): Pick<RuntimeStats, 'natalidad' | 'comidaCompartida'> {
+  return { natalidad: resumenNatalidad(world), comidaCompartida: comidaCompartida(world) };
 }
 
 type Fertil = NonNullable<PersonDetail['fertil']>;

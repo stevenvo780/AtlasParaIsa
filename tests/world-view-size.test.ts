@@ -227,9 +227,10 @@ test('FR-026: bytes por campo con 10 000 habitantes, viewport medio y máximo, m
   t.diagnostic(`FR-026 · HALLAZGO fuera de alcance: technology.items = ${(itemsBytes/KIB).toFixed(1)} KiB con 10 025 habitantes (escala con TODA la población, no con la cámara; src/world/technology.ts:projectTechnology, no tocado por T134).`);
 });
 
-/** UI 2026-09-22 (M2, M4): lo que la interfaz añade a `RuntimeStats` se mide aquí. `tickHzObjetivo` es un
- * número fijo; `natalidad` (resumen-vivo.ts) son enteros y la ley de natalidad: su tamaño NO crece con la
- * población (se comprueba con 10 000 habitantes sintéticos más). */
+/** UI 2026-09-22 (M2, M4, M7): lo que la interfaz añade a `RuntimeStats` se mide aquí. `tickHzObjetivo` es
+ * un número fijo; `natalidad` (resumen-vivo.ts) son enteros y la ley de natalidad, y `comidaCompartida` un
+ * entero: su tamaño NO crece con la población (se comprueba con 10 000 habitantes sintéticos más).
+ * Medido 2026-09-22: 222 B con 17 y con 10 017 habitantes. */
 test('UI: los resúmenes de RuntimeStats para la interfaz pesan < 250 B y no crecen con la población', t => {
   const world = grownWorld(300);
   const medir = (): number => encodedBytes({ tickHzObjetivo: 10, ...resumenVivo(world) });

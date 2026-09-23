@@ -150,6 +150,8 @@ export interface RuntimeStats { stepMs: number; p95StepMs: number; saveMs: numbe
    * natalidad de este mundo en números (si nacer está permitido lo dice `gobernador.activo`). `tick` = paso medido. */
   natalidad?: { tick: number; fertiles: number; cortejando: number; preparando: number; reuniendose: number;
     ley: { radioPareja: number; radioLugar: number; radioCortejo: number; exigeComunidad: boolean; reserva: number } };
+  /** M7 (resumen-vivo.ts, mismo ritmo): veces que se compartió comida en los lugares de las regiones vivas. */
+  comidaCompartida?: number;
   gobernador?: { activo: boolean; presupuestoMs: number; p95StepMs: number; manual: boolean | null;
     /** Política vigente (`gobernador.politica`), techo de población vigente con la política `techo`
      * (null = sin freno) y el último frenazo registrado (T164; no se borra al volver a verde). */

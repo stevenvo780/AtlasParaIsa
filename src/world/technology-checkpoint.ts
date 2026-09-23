@@ -92,15 +92,37 @@ export function technologyHistoryGap(state: TechnologyState): boolean {
   return previous !== state.executionCounter;
 }
 
+/** Compares ids by content, reading the elements in the order the legacy predicate did, so a
+ * null or forged element fails with the same TypeError at the same point. Allocates nothing. */
+function sameIds<T>(list: readonly T[], ids: readonly string[], key: (element: T) => string): boolean {
+  if (list.length !== ids.length) return false;
+  for (let n = 0; n < ids.length; n++) if (key(list[n]!) !== ids[n]) return false;
+  return true;
+}
+
+// T143: último par (ids de actores, actorId de la apertura) para el que el padrón no había cambiado.
+// El predicado sólo depende de esas dos secuencias, así que si ambas coinciden posición a posición el
+// resultado es el mismo sin construir el Set: exacto por contenido, sobrevive a `cloneWorld` y a mundos
+// intercalados (fallan y se recalcula). Sigue siendo O(P) comparaciones sin memoria nueva; bajar a O(1)
+// exige una señal de altas y bajas desde el paso. La rotación (aserción + captura) es O(P) por definición.
+let steady: { actors: string[]; inventories: string[] } | undefined;
+
 /** Called only after the whole world tick, including all estates and births.
  * The new opening is prospective: it never verifies the interval that was lost. */
 export function advanceTechnologyCheckpoint(state: TechnologyState, actors: readonly TechnologyStockActor[], tick: number): void {
   const checkpoint = state.checkpoint;
   if (checkpoint === undefined) { state.checkpoint = captureTechnologyCheckpoint(state, actors, tick, 'migration'); return; }
-  const current = new Set(actors.map(actor => actor.id));
-  const rosterChanged = current.size !== checkpoint.inventories.length || checkpoint.inventories.some(inventory => !current.has(inventory.actorId));
+  let rosterChanged = false, unique = false;
+  if (!steady || !sameIds(actors, steady.actors, actor => actor.id) || !sameIds(checkpoint.inventories, steady.inventories, inventory => inventory.actorId)) {
+    const current = new Set(actors.map(actor => actor.id));
+    unique = current.size === actors.length;
+    rosterChanged = current.size !== checkpoint.inventories.length || checkpoint.inventories.some(inventory => !current.has(inventory.actorId));
+    if (!rosterChanged) steady = { actors: actors.map(actor => actor.id), inventories: checkpoint.inventories.map(inventory => inventory.actorId) };
+  }
   if (rosterChanged || technologyHistoryGap(state)) {
     assertTechnologyCheckpoint(state, tick); // Never normalize a malformed boundary by rotating it.
     state.checkpoint = captureTechnologyCheckpoint(state, actors, tick, rosterChanged ? 'roster-change' : 'history-gap');
+    // Sin ids repetidos, la apertura recién capturada contiene exactamente el padrón: el tick siguiente no rota.
+    if (rosterChanged && unique) steady = { actors: actors.map(actor => actor.id), inventories: state.checkpoint.inventories.map(inventory => inventory.actorId) };
   }
 }

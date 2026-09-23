@@ -13,6 +13,7 @@ import type { Person, World } from '../world/index.js';
 import { reproductiveReadiness } from '../world/family.js';
 import { demographicTraits } from '../world/demography.js';
 import { paramsOf } from '../world/params.js';
+import { POPULATION_HARD_LIMIT } from '../shared/life.js';
 
 export const CADA_PASOS = 50;
 /** Reserva mínima de alimento de cada progenitor para criar (`fertile()`, world/index.ts). Fijada por prueba. */
@@ -34,8 +35,13 @@ export function resumenNatalidad(world: World): Natalidad {
     else if (person.action === 'forage' && person.reason.startsWith(RAZON_PREPARA)) preparando++;
   }
   const ley = paramsOf(world).poblacion;
+  // El cupo y la ventana son los de `reproduce()` (world/index.ts): como mucho `nacimientosPorComprobacion`
+  // nacimientos por ventana. `maxima` solo viaja si de verdad limita (R17: por defecto no hay tope propio).
   return { tick: world.tick, fertiles, cortejando, preparando, reuniendose,
-    ley: { radioPareja: ley.radioPareja, radioLugar: ley.radioLugar, radioCortejo: ley.cortejo > 0 ? ley.radioCortejo : 0, exigeComunidad: ley.exigeComunidad, reserva: RESERVA_PARA_CRIAR } };
+    ley: { radioPareja: ley.radioPareja, radioLugar: ley.radioLugar, radioCortejo: ley.cortejo > 0 ? ley.radioCortejo : 0,
+      exigeComunidad: ley.exigeComunidad, reserva: RESERVA_PARA_CRIAR,
+      cupo: ley.nacimientosPorComprobacion, ventana: ley.intervaloComprobacionTicks, continua: ley.comprobacionContinua,
+      ...(ley.maxima < POPULATION_HARD_LIMIT ? { maxima: ley.maxima } : {}) } };
 }
 
 /** M7: veces que se compartió comida en los lugares de las regiones vivas. Exacto para ellos: `share()`
@@ -44,9 +50,10 @@ export function comidaCompartida(world: World): number {
   return world.places.reduce((sum, place) => sum + (Number.isFinite(place.gatherings) ? place.gatherings : 0), 0);
 }
 
-/** Lo que el servidor añade a `RuntimeStats` cada `CADA_PASOS` pasos. */
-export function resumenVivo(world: World): Pick<RuntimeStats, 'natalidad' | 'comidaCompartida'> {
-  return { natalidad: resumenNatalidad(world), comidaCompartida: comidaCompartida(world) };
+/** Lo que el servidor añade a `RuntimeStats` cada `CADA_PASOS` pasos. `conducta` es O(1): un parámetro. */
+export function resumenVivo(world: World): Pick<RuntimeStats, 'natalidad' | 'comidaCompartida' | 'conducta'> {
+  return { natalidad: resumenNatalidad(world), comidaCompartida: comidaCompartida(world),
+    conducta: { habituacion: paramsOf(world).conducta.habituacion } };
 }
 
 type Fertil = NonNullable<PersonDetail['fertil']>;

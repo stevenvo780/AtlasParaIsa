@@ -166,7 +166,16 @@ export interface RuntimeStats { stepMs: number; p95StepMs: number; saveMs: numbe
    * corteja, prepara reservas o se reúne para criar (por el `reason` que escribe la ley) y la ley de
    * natalidad de este mundo en números (si nacer está permitido lo dice `gobernador.activo`). `tick` = paso medido. */
   natalidad?: { tick: number; fertiles: number; cortejando: number; preparando: number; reuniendose: number;
-    ley: { radioPareja: number; radioLugar: number; radioCortejo: number; exigeComunidad: boolean; reserva: number } };
+    /** `cupo` = `poblacion.nacimientosPorComprobacion` por ventana de `ventana` =
+     * `poblacion.intervaloComprobacionTicks` pasos; `continua` = `poblacion.comprobacionContinua` (ventana
+     * móvil mirada cada paso, o una comprobación por ventana). `maxima` = `poblacion.maxima` SOLO si limita
+     * por debajo del tope anticorrupción `POPULATION_HARD_LIMIT`; ausente = no hay tope propio del mundo
+     * (o un servidor anterior no lo informa). Las tres primeras son opcionales por la misma razón. */
+    ley: { radioPareja: number; radioLugar: number; radioCortejo: number; exigeComunidad: boolean; reserva: number;
+      cupo?: number; ventana?: number; continua?: boolean; maxima?: number } };
+  /** Mismo ritmo que `natalidad`: `conducta.habituacion` del mundo servido (0 = ley apagada), para no afirmar
+   * en la interfaz una ley de conducta que ese mundo no aplica. */
+  conducta?: { habituacion: number };
   /** M7 (resumen-vivo.ts, mismo ritmo): veces que se compartió comida en los lugares de las regiones vivas. */
   comidaCompartida?: number;
   gobernador?: { activo: boolean; presupuestoMs: number; p95StepMs: number; manual: boolean | null;

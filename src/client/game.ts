@@ -582,7 +582,8 @@ function renderStatsContent(): void {
     const listed = world.technology?.recipes.slice(-20).some(recipe=>recipe.id===focusedRecipe) ?? false;
     const targeted = listed ? undefined : (focusedRecipe ? recipeDetails.get(focusedRecipe) : null) ?? world.technology?.recipes.find(recipe=>recipe.id===focusedRecipe);
     const missing = focusedRecipe && recipeDetails.get(focusedRecipe) === null ? `<p class="stats-note">Los pasos de ${esc(focusedRecipe)} no están disponibles en este mundo ahora.</p>` : '';
-    panel.innerHTML = stamp + missing + (targeted ? recipeCard(targeted, world.technology) : '') + technologyPane(world.technology,world.organization,recipeDetails,world.stats);
+    panel.innerHTML = stamp + missing + (targeted ? recipeCard(targeted, world.technology) : '')
+      + technologyPane(world.technology, world.organization, recipeDetails, world.stats, world.performance?.conducta);
     return;
   }
   if (statsTab === 'performance') {

@@ -25,6 +25,26 @@ export function nacimientosPorIntervalo(history: { tick: number; births: number 
   return out;
 }
 
+type Ley = NonNullable<NonNullable<WorldView['performance']>['natalidad']>['ley'];
+
+/** El cupo de `reproduce()` (world/index.ts) y el tope de población, con los números del mundo mostrado.
+ * Con un servidor que no los informa no se dice nada: ni que hay cupo ni que no lo hay. */
+export function cupoDeNacimientos(ley: Ley): string {
+  const partes: string[] = [];
+  if (ley.cupo !== undefined && ley.ventana !== undefined) {
+    const pasos = `${number(ley.ventana)} ${ley.ventana === 1 ? 'paso' : 'pasos'}`;
+    if (ley.cupo === 0) partes.push('Este mundo tiene el cupo de nacimientos en 0: nadie puede nacer.');
+    // Con la comprobación continua la ventana es móvil y cuenta los vecinos nacidos en ella que siguen vivos.
+    else if (ley.continua) {
+      partes.push(`Hay un cupo: nace alguien solo si en los últimos ${pasos} nacieron menos de ${number(ley.cupo)} vecinos`
+        + ' que siguen con vida; se comprueba en cada paso.');
+    }
+    else partes.push(`Hay un cupo: una vez cada ${pasos} pueden nacer hasta ${number(ley.cupo)} ${ley.cupo === 1 ? 'vida' : 'vidas'}.`);
+  }
+  if (ley.maxima !== undefined) partes.push(`Este mundo tiene un tope de ${number(ley.maxima)} vidas: con esa población no nace nadie.`);
+  return partes.length ? ` ${partes.join(' ')}` : '';
+}
+
 /** Mundo › Vida › Nacimientos: la escalera causal, la curva y la ley en claro. */
 export function seccionNacimientos(view: WorldView): string {
   const natalidad = view.performance?.natalidad, censo = censoDe(view);
@@ -45,7 +65,13 @@ export function seccionNacimientos(view: WorldView): string {
   const serie = nacimientosPorIntervalo(view.stats?.history ?? []);
   const enVentana = serie.reduce((sum, point) => sum + point.value, 0);
   const ley = natalidad?.ley;
-  const leyTexto = ley ? `Para que nazca alguien hacen falta dos vecinos fértiles con un vínculo de confianza mutuo, que no sean parientes cercanos, a ${number(ley.radioPareja)} casillas o menos uno del otro y a ${number(ley.radioLugar)} o menos de un lugar, cada uno con al menos ${number(ley.reserva, 2)} de reserva de alimento${ley.exigeComunidad ? ' y con comunidad' : ''}. Tras criar, cada progenitor descansa un tiempo antes de poder volver a hacerlo.${ley.radioCortejo > 0 ? ` Quien es fértil puede ir a buscar a su pareja hasta ${number(ley.radioCortejo)} casillas.` : ''} Hambre, sed y descanso urgentes siguen pasando primero.` : 'La ley de natalidad de este mundo no llegó con este estado.';
+  const leyTexto = ley ? 'Para que nazca alguien hacen falta dos vecinos fértiles con un vínculo de confianza mutuo, que no sean'
+    + ` parientes cercanos, a ${number(ley.radioPareja)} casillas o menos uno del otro y a ${number(ley.radioLugar)} o menos de un lugar,`
+    + ` cada uno con al menos ${number(ley.reserva, 2)} de reserva de alimento${ley.exigeComunidad ? ' y con comunidad' : ''}.`
+    + ' Tras criar, cada progenitor descansa un tiempo antes de poder volver a hacerlo.'
+    + `${ley.radioCortejo > 0 ? ` Quien es fértil puede ir a buscar a su pareja hasta ${number(ley.radioCortejo)} casillas.` : ''}`
+    + `${cupoDeNacimientos(ley)} Hambre, sed y descanso urgentes siguen pasando primero.`
+    : 'La ley de natalidad de este mundo no llegó con este estado.';
   return `<section class="stats-section" data-natality><div class="stats-section-heading"><h3>Nacimientos</h3><span>${natalidad ? `medido en el paso ${esc(number(natalidad.tick))}` : 'sin resumen'}</span></div><ol class="natality-ladder">${pasos.join('')}</ol>${sparkline(serie, `Nacimientos por intervalo · ${number(enVentana)} en la ventana`, 'nacimientos')}<details class="person-detail" data-detail="natality-law"><summary>La ley en claro</summary><p>${leyTexto}</p></details></section>`;
 }
 

@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import { createWorld, projectWorld, stepWorld } from '../src/world/index.js';
 import { resumenVivo } from '../src/server/resumen-vivo.js';
 import { enriquecerPersona } from '../src/server/persona-extra.js';
-import { fertilidadFicha, nacimientosPorIntervalo, notaAcercamientos, seccionNacimientos } from '../src/client/natalidad-view.js';
+import { cupoDeNacimientos, fertilidadFicha, nacimientosPorIntervalo, notaAcercamientos, seccionNacimientos }
+  from '../src/client/natalidad-view.js';
+import { parseParams } from '../src/world/params.js';
 import type { RuntimeStats, WorldView } from '../src/shared/types.js';
 
 function vista(ticks = 120): { view: WorldView; world: ReturnType<typeof createWorld> } {
@@ -68,4 +70,29 @@ test('M4: «Acercándose» se desglosa solo con el resumen medido y dice en qué
   assert.match(notaAcercamientos(view), new RegExp(`en el paso ${view.performance!.natalidad!.tick}`));
   delete view.performance!.natalidad;
   assert.equal(notaAcercamientos(view), '');
+});
+
+test('La ley en claro dice el cupo de nacimientos y el tope con los params del mundo mostrado', () => {
+  const { view, world } = vista();
+  assert.ok(world);
+  const pop = view.performance!.natalidad!.ley;
+  // Defaults de un mundo nuevo (reglas 10): 2 por ventana móvil de 120 pasos, sin tope propio.
+  assert.equal(pop.cupo, 2); assert.equal(pop.ventana, 120); assert.equal(pop.continua, true); assert.equal(pop.maxima, undefined);
+  const html = seccionNacimientos(view);
+  assert.match(html, /Hay un cupo: nace alguien solo si en los últimos 120 pasos nacieron menos de 2 vecinos que siguen con vida;/);
+  assert.match(html, /que siguen con vida; se comprueba en cada paso\./);
+  assert.doesNotMatch(html, /tope de/, 'sin tope propio (solo el anticorrupción) no se habla de un máximo');
+
+  // Params históricos y un tope real: una comprobación por ventana y la población máxima.
+  const otro = createWorld(51926, parseParams('poblacion.comprobacionContinua=false,poblacion.maxima=60,'
+    + 'poblacion.nacimientosPorComprobacion=3,poblacion.intervaloComprobacionTicks=240'));
+  const ley = resumenVivo(otro).natalidad!.ley;
+  assert.deepEqual([ley.cupo, ley.ventana, ley.continua, ley.maxima], [3, 240, false, 60]);
+  assert.equal(cupoDeNacimientos(ley), ' Hay un cupo: una vez cada 240 pasos pueden nacer hasta 3 vidas.'
+    + ' Este mundo tiene un tope de 60 vidas: con esa población no nace nadie.');
+  assert.equal(cupoDeNacimientos({ ...ley, cupo: 0, maxima: undefined }),
+    ' Este mundo tiene el cupo de nacimientos en 0: nadie puede nacer.');
+  // Un servidor que no informa el cupo: no se afirma que lo haya ni que no.
+  const { cupo: _c, ventana: _v, continua: _k, maxima: _m, ...sinCupo } = ley;
+  assert.equal(cupoDeNacimientos(sinCupo), '');
 });

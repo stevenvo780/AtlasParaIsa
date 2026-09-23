@@ -29,15 +29,20 @@ test('M4: el resumen de natalidad coincide con un recuento a mano y su tamaño n
   assert.equal(n.fertiles, fertilesAMano(world));
   assert.equal(n.cortejando, world.people.filter(p => p.action === 'approach' && p.reason.startsWith(RAZON_CORTEJO)).length);
   const ley = paramsOf(world).poblacion;
-  assert.deepEqual(n.ley, { radioPareja: ley.radioPareja, radioLugar: ley.radioLugar, radioCortejo: ley.cortejo > 0 ? ley.radioCortejo : 0, exigeComunidad: ley.exigeComunidad, reserva: RESERVA_PARA_CRIAR });
+  assert.equal(n.ley.maxima, undefined, `maxima ${ley.maxima} es el tope anticorrupción: no viaja`);
+  assert.deepEqual(n.ley, { radioPareja: ley.radioPareja, radioLugar: ley.radioLugar, radioCortejo: ley.cortejo > 0 ? ley.radioCortejo : 0,
+    exigeComunidad: ley.exigeComunidad, reserva: RESERVA_PARA_CRIAR,
+    cupo: ley.nacimientosPorComprobacion, ventana: ley.intervaloComprobacionTicks, continua: ley.comprobacionContinua });
+  assert.deepEqual(resumenVivo(world).conducta, { habituacion: paramsOf(world).conducta.habituacion });
   // Cada ficha explica su bloqueo; «ahora» o un bloqueo posterior a la ley corporal = fértil.
   for (const p of world.people.filter(p => p.role === 'neighbor')) {
     const f = fertilidad(world, p);
     assert.equal(f.ahora || ['reserva', 'comunidad', 'techo'].includes(String(f.bloqueo)), fertilesAMano({ ...world, people: [p] } as World) === 1, `${p.id}: ${f.bloqueo}`);
   }
   assert.equal(fertilidad(world, world.people.find(p => p.role === 'S')!).bloqueo, 'no-vecino');
+  // Medido 2026-09-23: 202 B antes; 267 B con el cupo, la ventana y la habituación (+65 B cada 50 pasos).
   const bytes = Buffer.byteLength(JSON.stringify(resumenVivo(world)));
-  assert.ok(bytes < 220, `el resumen pesa ${bytes} B`);
+  assert.ok(bytes < 290, `el resumen pesa ${bytes} B`);
 });
 
 test('M4: consultar la natalidad y las fichas no cambia el mundo ni su trayectoria', () => {

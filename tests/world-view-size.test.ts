@@ -231,15 +231,17 @@ test('FR-026: bytes por campo con 10 000 habitantes, viewport medio y máximo, m
 /** UI 2026-09-22 (M2, M4, M7): lo que la interfaz añade a `RuntimeStats` se mide aquí. `tickHzObjetivo` es
  * un número fijo; `natalidad` (resumen-vivo.ts) son enteros y la ley de natalidad, y `comidaCompartida` un
  * entero: su tamaño NO crece con la población (se comprueba con 10 000 habitantes sintéticos más).
- * Medido 2026-09-22: 222 B con 17 y con 10 017 habitantes. */
-test('UI: los resúmenes de RuntimeStats para la interfaz pesan < 250 B y no crecen con la población', t => {
+ * Medido 2026-09-22: 222 B con 17 y con 10 017 habitantes. 2026-09-23: 293 B al sumar el cupo de
+ * nacimientos (`cupo`, `ventana`, `continua`; `maxima` solo si limita) y `conducta.habituacion`, que la
+ * interfaz necesita para no afirmar leyes que el mundo no aplica: +71 B cada 50 pasos, O(1). */
+test('UI: los resúmenes de RuntimeStats para la interfaz pesan < 320 B y no crecen con la población', t => {
   const world = grownWorld(300);
   const medir = (): number => encodedBytes({ tickHzObjetivo: 10, ...resumenVivo(world) });
   const antes = medir();
   injectMassCommunity(world, 10_000, { x: 1, y: 1 }, { x: 500, y: 500 });
   const despues = medir();
   t.diagnostic(`UI · RuntimeStats añadido: ${antes} B con ${world.people.length - 10_000} habitantes, ${despues} B con ${world.people.length}`);
-  assert.ok(antes < 250 && despues < 250, `resúmenes de la UI: ${antes} B / ${despues} B`);
+  assert.ok(antes < 320 && despues < 320, `resúmenes de la UI: ${antes} B / ${despues} B`);
   assert.ok(despues - antes <= 12, 'solo cambian los dígitos de los recuentos, no la forma');
   // Frente a un estado típico de 150–400 KiB, menos de una milésima.
   assert.ok(despues / (150 * KIB) < 0.002);

@@ -20,7 +20,7 @@ class BrowserSocket {
   onclose: ((event: { code: number }) => void) | null = null;
   onerror: (() => void) | null = null;
   sent: string[] = [];
-  constructor() { BrowserSocket.instances.push(this); }
+  constructor(readonly url = '') { BrowserSocket.instances.push(this); }
   open(): void { this.readyState = 1; this.onopen?.(); }
   send(value: string): void { this.sent.push(value); }
   message(message: ServerMessage): void { this.onmessage?.({ data: JSON.stringify(message) }); }
@@ -227,7 +227,11 @@ test('camera requests debounce to the latest bounded absolute viewport and persi
   first.close(); t.mock.timers.tick(1000); await flush(); BrowserSocket.instances[1]!.open();
   const query = new URL(h.worldQueries[1]!, 'http://example.test').searchParams;
   assert.deepEqual(Object.fromEntries(query), { x: '-81', y: '206', width: '96', height: '64' });
-  assert.deepEqual(BrowserSocket.instances[1]!.sent.map(value => JSON.parse(value)), [{ type: 'viewport', viewport: expected }]);
+  // The reconnecting socket carries the camera in its URL (its first state is already this view), so
+  // it is not requested again on open; the first socket, opened before any camera, carried none.
+  assert.deepEqual(Object.fromEntries(new URL(first.url).searchParams), { ack: '1' });
+  assert.deepEqual(Object.fromEntries(new URL(BrowserSocket.instances[1]!.url).searchParams), { ack: '1', x: '-81', y: '206', width: '96', height: '64' });
+  assert.deepEqual(BrowserSocket.instances[1]!.sent, []);
 });
 
 test('changing the visible region at the same world tick updates the landscape without accepting old ticks', async t => {

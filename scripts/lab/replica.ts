@@ -36,6 +36,8 @@ import { indiceDiversidad } from '../../src/world/diversidad.js';
 import { parseParams, type WorldParams } from '../../src/world/params.js';
 import { decideReproduction, RollingStepPerformance } from '../../src/server/governor.js';
 import { durableActivityMetrics } from './metrics.js';
+import { InstrumentosConducta } from './instrumentos.js';
+import { digestoCanonico } from '../../src/world/digesto.js';
 
 type ModoGobernador = 'no' | 'servidor';
 
@@ -161,6 +163,10 @@ async function main(): Promise<void> {
   const gobernadorArg = arg('--gobernador') ?? 'no';
   if (gobernadorArg !== 'no' && gobernadorArg !== 'servidor') throw new Error('Uso: --gobernador no|servidor (por defecto "no").');
   const gobernadorModo: ModoGobernador = gobernadorArg;
+  // Instrumentos de medida (scripts/lab/instrumentos.ts): conducta por tiempo y comida compartida.
+  // Por defecto activos; `--instrumentos no` da EXACTAMENTE los dia-NNN.json de antes (mismas claves).
+  const instrumentosArg = arg('--instrumentos') ?? 'si';
+  if (instrumentosArg !== 'si' && instrumentosArg !== 'no') throw new Error('Uso: --instrumentos si|no (por defecto "si").');
   const params: WorldParams = parseParams(arg('--params'));
   mkdirSync(salida, { recursive: true });
 
@@ -175,6 +181,7 @@ async function main(): Promise<void> {
     // P3: adjuntar y guardar el Store ANTES de simular fija las leyes de tecnología de producción
     // (enableTechnologyCatalogue) y liga el WorldContext (loadChunk/catalogueReader) al mundo.
     store.save(world);
+    const instrumentos = instrumentosArg === 'si' ? new InstrumentosConducta(world) : null;
 
     // Solo con --gobernador servidor: p95 de la ventana de 120 pasos (mismo mecanismo que
     // src/server/app.ts) y acumuladores del DÍA en curso, reiniciados en cada dia-NNN.json.
@@ -188,6 +195,7 @@ async function main(): Promise<void> {
       if (gobernadorModo === 'servidor') {
         // Imita src/server/app.ts:stepOnce — clon+paso, guardado por cadencia DENTRO de la
         // medición, y el gobernador decidiendo sobre el paso ya medido (governReproduction).
+        instrumentos?.antesDelPaso(world);
         const stepStarted = performance.now();
         let cloneMs = 0;
         if (params.motor.clonPorPaso) {
@@ -199,22 +207,29 @@ async function main(): Promise<void> {
         } else {
           stepWorld(world);
         }
+        // Antes del guardado (vacía chronicleJournal.pending) y FUERA de la medida: su coste se
+        // descuenta de stepMs para que el gobernador decida sobre el mismo paso que sin instrumentos.
+        const observadoAntes = instrumentos ? instrumentos.costeMs : 0;
+        instrumentos?.despuesDelPaso(world);
+        const observacionMs = instrumentos ? instrumentos.costeMs - observadoAntes : 0;
         let saveMs = 0;
         if (tick % params.persistencia.cadaTicks === 0) {
           const saveStarted = performance.now();
           store.save(world);
           saveMs = performance.now() - saveStarted;
         }
-        const stepMs = performance.now() - stepStarted;
+        const stepMs = performance.now() - stepStarted - observacionMs;
         stepTimes.push(stepMs);
         p95GobernadorActual = gobernadorPerf.record(stepMs);
         world.reproductionEnabled = decideReproduction(p95GobernadorActual, params.gobernador.presupuestoMs, world.reproductionEnabled);
         ticksDia++; if (world.reproductionEnabled) reproduccionActivaTicksDia++;
         cloneMsDia.push(cloneMs); saveMsDia.push(saveMs);
       } else {
+        instrumentos?.antesDelPaso(world);
         const started = performance.now();
         stepWorld(world);
         stepTimes.push(performance.now() - started);
+        instrumentos?.despuesDelPaso(world);
         if (tick % params.persistencia.cadaTicks === 0) store.save(world);
       }
       if (tick % TICKS_PER_DAY === 0) {
@@ -224,8 +239,14 @@ async function main(): Promise<void> {
         maxRss = Math.max(maxRss, rss);
         const metrics = dailyMetrics(world, store);
         ultimoDia = metrics;
+        // Campos nuevos de los instrumentos; foodShared entra como un tipo más de cooperación.
+        let medidas: Record<string, unknown> = metrics;
+        if (instrumentos) {
+          const { foodShared, ...conducta } = instrumentos.metricasDia(world);
+          medidas = { ...metrics, cooperacionAcumuladaPorTipo: { ...metrics.cooperacionAcumuladaPorTipo, foodShared }, ...conducta };
+        }
         const extra = gobernadorModo === 'servidor' ? metricasGobernador(world, reproduccionActivaTicksDia, ticksDia, p95GobernadorActual, cloneMsDia, saveMsDia) : {};
-        const body = { tick, ...metrics, ...extra, p50Ms: Math.round(p50 * 100) / 100, p95Ms: Math.round(p95 * 100) / 100, rss };
+        const body = { tick, ...medidas, ...extra, p50Ms: Math.round(p50 * 100) / 100, p95Ms: Math.round(p95 * 100) / 100, rss };
         writeFileSync(join(salida, `dia-${String(dia).padStart(3, '0')}.json`), JSON.stringify(body, null, 2) + '\n');
         if (gobernadorModo === 'servidor') { reproduccionActivaTicksDia = 0; ticksDia = 0; cloneMsDia.length = 0; saveMsDia.length = 0; }
       }
@@ -249,10 +270,18 @@ async function main(): Promise<void> {
       gobernador: gobernadorModo === 'servidor'
         ? 'servidor; imita stepOnce (clon+paso, guardado por cadencia, decideReproduction sobre p95) cada tick'
         : 'no-ejecutado; replica de leyes, no del servidor',
+      instrumentos: instrumentos ? 'si; solo lectura (scripts/lab/instrumentos.ts): conducta por tiempo y comida compartida' : 'no',
       seed, params, sha: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
-      digest: worldSourceDigest(), dias, resumen,
+      digest: worldSourceDigest(),
+      // Huella del ESTADO final (digestoCanonico de src/world/digesto.ts): con y sin instrumentos
+      // debe ser idéntica (tests/instrumentos-lab.test.ts). `digest` es la del CÓDIGO.
+      digestoMundoFinal: digestoCanonico(world), dias, resumen,
     };
     writeFileSync(join(salida, 'replica.json'), JSON.stringify(replica, null, 2) + '\n');
+    if (instrumentos) {
+      const pasoMedio = stepTimes.reduce((suma, ms) => suma + ms, 0) / stepTimes.length;
+      console.log(`Instrumentos: ${(instrumentos.costeMs / instrumentos.pasos).toFixed(4)} ms/paso de media (${instrumentos.costeMs.toFixed(0)} ms en ${instrumentos.pasos} pasos, incluidos los cálculos diarios) frente a ${pasoMedio.toFixed(2)} ms/paso de stepWorld (${(100 * instrumentos.costeMs / (pasoMedio * stepTimes.length)).toFixed(2)} %).`);
+    }
     console.log(`Réplica completa: ${dias} día(s), población final ${resumen.poblacionFinal}. Salida: ${salida}`);
   } finally { store.close(); rmSync(dataDir, { recursive: true, force: true }); }
 }

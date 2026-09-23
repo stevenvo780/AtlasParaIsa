@@ -65,13 +65,23 @@ export function estadoCrecimiento(g: Gobernador | undefined, poblacion: number |
 
 const mayuscula = (texto: string): string => texto.charAt(0).toLocaleUpperCase('es') + texto.slice(1);
 
-/** «Último frenazo», compuesto desde sus campos (coma decimal, día del mundo) y marcado vigente o retirado. */
-export function ultimoFrenazo(g: Gobernador | undefined, ticksPorDia = 2400): { texto: string; vigente: boolean } | null {
+/**
+ * «Último frenazo», compuesto desde sus campos (coma decimal, día del mundo). `texto` es HISTÓRICO: la
+ * población de `techoObservado` es la del último paso que entró en rojo, y el techo se fijó la primera
+ * vez sin techo y nunca baja (governor.ts), así que pueden diferir. `titular` dice lo vigente con la
+ * cifra del mismo campo que el chip (`gobernador.techo`), nunca con la del registro.
+ */
+export function ultimoFrenazo(g: Gobernador | undefined, ticksPorDia = 2400): { texto: string; vigente: boolean; titular: string } | null {
   const f = g?.techoObservado;
   if (!g || !f) return null;
-  const vigente = g.manual === null && (g.politica === 'apagar' ? !g.activo : (g.techo ?? null) !== null);
+  const techo = g.politica === 'apagar' ? null : g.techo ?? null;
+  const vigente = g.manual === null && (g.politica === 'apagar' ? !g.activo : techo !== null);
   const dia = Math.floor(f.tick / ticksPorDia) + 1;
-  return { vigente, texto: `Día ${number(dia)} (paso ${number(f.tick)}): paso p95 ${ms(f.p95)} > ${ms(g.presupuestoMs)} con ${number(f.poblacion)} ${f.poblacion === 1 ? 'habitante' : 'habitantes'} y ${number(f.teselasActivas)} casillas activas.` };
+  const titular = !vigente ? `Día ${number(dia)}`
+    : techo !== null ? `Techo vigente: ${number(techo)} ${techo === 1 ? 'vida' : 'vidas'}` : 'Nacimientos en pausa';
+  const habitantes = `${number(f.poblacion)} ${f.poblacion === 1 ? 'habitante' : 'habitantes'}`;
+  const medida = `paso p95 ${ms(f.p95)} > ${ms(g.presupuestoMs)} con ${habitantes} y ${number(f.teselasActivas)} casillas activas`;
+  return { vigente, titular, texto: `Día ${number(dia)} (paso ${number(f.tick)}): ${medida}.` };
 }
 
 /** Ritmo real del mundo frente al pedido. `objetivo` ausente: no se afirma que vaya lento. */

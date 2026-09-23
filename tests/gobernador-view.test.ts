@@ -49,7 +49,20 @@ test('tabla de estados del crecimiento con la política techo, paso a paso como 
   assert.match(e.detalle, /cerca del límite \(p95 40 ms; el freno se retira por debajo de 35 ms\)/);
   const frenazo = ultimoFrenazo(r.vista)!;
   assert.equal(frenazo.vigente, true);
+  assert.equal(frenazo.titular, 'Techo vigente: 23 vidas');
   assert.match(frenazo.texto, /^Día 2 \(paso 2\.400\): paso p95 53,6 ms > 50 ms con 23 habitantes y 1\.000 casillas activas\.$/);
+
+  // Vuelve a rojo con 21 vidas: el registro se reescribe con 21, pero el techo (el del chip) sigue en 23.
+  medir(g, 60);
+  r = publicar(g, 'techo', 50, r.activo, 21, 2650);
+  assert.equal(r.vista.techo, 23);
+  assert.equal(r.vista.techoObservado!.poblacion, 21, 'el registro es del último paso en rojo');
+  const otra = ultimoFrenazo(r.vista)!;
+  assert.equal(otra.titular, 'Techo vigente: 23 vidas', 'lo vigente se dice con la cifra del techo, no con la del registro');
+  assert.match(otra.texto, /con 21 habitantes/);
+  assert.equal(estadoCrecimiento(r.vista, 21)!.chip, 'Reponiendo 21 de 23', 'el chip y la tarjeta citan el mismo techo');
+  medir(g, 40);
+  r = publicar(g, 'techo', 50, r.activo, 23, 2660);
 
   // Verde de nuevo: se retira el techo; el frenazo queda como historia.
   medir(g, 20);
@@ -57,6 +70,7 @@ test('tabla de estados del crecimiento con la política techo, paso a paso como 
   assert.equal(r.vista.techo, null);
   assert.equal(estadoCrecimiento(r.vista, 23)!.estado, 'libre');
   assert.equal(ultimoFrenazo(r.vista)!.vigente, false);
+  assert.equal(ultimoFrenazo(r.vista)!.titular, 'Día 2', 'retirado: solo la fecha del último frenazo, como historia');
 });
 
 test('política apagar, órdenes manuales y ausencia de datos', () => {
@@ -69,6 +83,7 @@ test('política apagar, órdenes manuales y ausencia de datos', () => {
   assert.equal(e.chip, 'Nacimientos en pausa');
   assert.match(e.detalle, /Vuelven cuando el paso p95 baje de 35 ms/);
   assert.equal(ultimoFrenazo(r.vista)!.vigente, true);
+  assert.equal(ultimoFrenazo(r.vista)!.titular, 'Nacimientos en pausa', 'con apagar no hay techo que citar');
   assert.equal(estadoCrecimiento({ ...r.vista, manual: false }, 30)!.chip, 'Nacimientos detenidos a mano');
   assert.equal(estadoCrecimiento({ ...r.vista, manual: true }, 30)!.estado, 'manual');
   assert.equal(ultimoFrenazo({ ...r.vista, manual: true })!.vigente, false, 'con orden manual el freno automático no rige');

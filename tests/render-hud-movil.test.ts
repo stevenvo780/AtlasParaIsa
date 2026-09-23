@@ -63,6 +63,9 @@ test('390×844: la barra no desborda, los objetivos miden ≥44 px y el HUD dice
       await expect(content.locator('[data-rhythm]')).toContainText('Más lento de lo pedido');
       await expect(content.locator('[data-last-brake]')).toContainText('vigente');
       await expect(content.locator('[data-last-brake]')).toContainText('53,6 ms > 50 ms');
+      // Lo vigente se dice con el techo del chip; el registro del frenazo va aparte, como historia.
+      await expect(content.locator('[data-last-brake] strong')).toHaveText(`Techo vigente: ${current.performance!.gobernador!.techo} vidas`);
+      await expect(content.locator('[data-brake-history]')).toContainText('Registro histórico');
       await expect(content).toContainText('Instantánea guardada en disco');
       await expect(content).not.toContainText('reponiendo hasta');
       // Una muerte deja la población bajo el techo: el HUD pasa a «Reponiendo».

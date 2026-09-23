@@ -7,7 +7,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { isDeepStrictEqual } from 'node:util';
 import { Store, DEEP_CHECKPOINT_EVERY_SAVES } from '../src/server/store.js';
 import { encodeSnapshot, SnapshotPhysicalError, takeSnapshotParams } from '../src/server/snapshot.js';
-import { readStoredSnapshot, SnapshotParts } from '../src/server/snapshot-parts.js';
+import { readStoredSnapshot, SnapshotParts, SNAPSHOT_METADATA_BYTES } from '../src/server/snapshot-parts.js';
 import { stringifyExact } from '../src/shared/exact-json.js';
 import type { LegacyRecord } from '../src/shared/demography.js';
 import { assertWorld, cloneWorld, createWorld, type World } from '../src/world/index.js';
@@ -464,30 +464,40 @@ for (const level of ['raíz', 'metadata'] as const) {
   });
 }
 
-test('piezas: guard de metadata mayor que 8 MiB mide bytes UTF-8 y rechaza antes del guardado', t => {
+test('piezas: un mundo con más de 8 MiB fuera del terreno (el tope viejo) se guarda y se recarga igual', t => {
+  // El mundo público superó 8 MiB con 583 habitantes el 2026-09-23 y el guardado lo dejó en pausa.
+  const lab = laboratory(t), world = createWorld(42);
+  lab.store.save(world);
+  const grande = Object.assign(cloneWorld(world, lab.store.context), { transportFixture: 'é'.repeat(6 * 1024 * 1024) });
+  assert.ok(Buffer.byteLength(stringifyExact({ ...grande, tiles: undefined })) > 8 * 1024 * 1024);
+  lab.store.save(grande);
+  assert.equal(digestoCanonico(lab.reopen().load()!.world), digestoCanonico(grande));
+});
+
+test('piezas: guard de metadata mayor que el tope mide bytes UTF-8 y rechaza antes del guardado', t => {
   const lab = laboratory(t), world = createWorld(42);
   lab.store.save(world);
   const before = todasLasTablas(lab.store), committed = digestoCanonico(world);
-  const draft = Object.assign(cloneWorld(world, lab.store.context), { transportFixture: 'é'.repeat(4 * 1024 * 1024) });
+  const draft = Object.assign(cloneWorld(world, lab.store.context), { transportFixture: 'é'.repeat(SNAPSHOT_METADATA_BYTES / 2) });
   const metadata = { ...draft, tiles: undefined };
   const body = stringifyExact(metadata);
-  assert.ok(body.length < 8 * 1024 * 1024, 'el número de caracteres no excede el límite');
-  assert.ok(Buffer.byteLength(body) > 8 * 1024 * 1024, 'los bytes del metadata sí exceden el límite');
+  assert.ok(body.length < SNAPSHOT_METADATA_BYTES, 'el número de caracteres no excede el límite');
+  assert.ok(Buffer.byteLength(body) > SNAPSHOT_METADATA_BYTES, 'los bytes del metadata sí exceden el límite');
   const pending = draft.chronicleJournal!.pending;
   assert.throws(() => lab.store.save(draft), /metadata exceeds transport size/);
   assert.deepEqual(todasLasTablas(lab.store), before);
   assert.equal(draft.chronicleJournal!.pending, pending);
-  assert.equal(draft.transportFixture.length, 4 * 1024 * 1024);
+  assert.equal(draft.transportFixture.length, SNAPSHOT_METADATA_BYTES / 2);
   assert.equal(digestoCanonico(lab.reopen().load()!.world), committed);
 });
 
-test('piezas: manifest mayor que 8 MiB con checksum válido falla cerrado al reabrir', t => {
+test('piezas: manifest mayor que el tope con checksum válido falla cerrado al reabrir', t => {
   const { lab, current } = withBackup(t);
-  current.world.transportFixture = 'é'.repeat(4 * 1024 * 1024);
+  current.world.transportFixture = 'é'.repeat(SNAPSHOT_METADATA_BYTES / 2);
   rewriteManifest(lab.store, current);
   const body = snapshot(lab.store).body;
-  assert.ok(body.length < 8 * 1024 * 1024);
-  assert.ok(Buffer.byteLength(body) > 8 * 1024 * 1024);
+  assert.ok(body.length < SNAPSHOT_METADATA_BYTES);
+  assert.ok(Buffer.byteLength(body) > SNAPSHOT_METADATA_BYTES);
   const before = todasLasTablas(lab.store), reopened = lab.reopen();
   assert.throws(() => reopened.load(), /manifest exceeds transport size/);
   assert.deepEqual(todasLasTablas(reopened), before);

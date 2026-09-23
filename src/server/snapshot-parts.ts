@@ -11,7 +11,11 @@ import { decodeSnapshotValue, decodeSnapshotTileRows, encodeSnapshot, encodeSnap
 // Transport bounds, independent of world laws and available host hardware.
 export const SNAPSHOT_INLINE_TILE_LIMIT = 32768;
 export const SNAPSHOT_PAGE_TILES = 4096;
-export const SNAPSHOT_METADATA_BYTES = 8 * 1024 * 1024;
+/** Tope de la parte de la instantánea que no son teselas (personas, recuerdos, sucesos…). Era 8 MiB y el mundo público
+ * lo superó con 583 habitantes (2026-09-23): el guardado falló y el mundo quedó en pausa. El límite real lo pone V8,
+ * que no crea cadenas de más de ~512 MiB al serializar; se deja la mitad como defensa contra filas corruptas, no como
+ * techo de población (FR-013: el límite lo pone el hardware). */
+export const SNAPSHOT_METADATA_BYTES = 256 * 1024 * 1024;
 const PAGE_BYTES = 4 * 1024 * 1024;
 const ENCODING = 'snapshot-parts-v1';
 const checksum = (body: string): string => createHash('sha256').update(body).digest('hex');

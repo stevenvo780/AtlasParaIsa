@@ -145,6 +145,10 @@ for (const { seed, params, digestos } of REFERENCIA) {
  * abajo) la prueba se omite. Coste: ~30–55 s de carga y 600 pasos de 40–140 ms de CPU según la carga.
  * El control completo de cada optimización (tres semillas a 2400/4800 pasos y los mundos de 58 y 230
  * habitantes, base contra rama en el mismo proceso) es `scripts/perf/verificar.sh`.
+ *
+ * La instantánea declara TODAS sus params (`params-v1`, con las cinco leyes adoptadas y cadencia 300),
+ * así que `readSnapshotParams` no completa ninguna clave: ni `HISTORICAL_PARAMS` ni los defaults de un
+ * mundo nuevo cambian lo que se simula, y el digesto final esperado es el mismo con o sin reglas 10.
  */
 const MUNDO_ALTO = process.env.ATLAS_MUNDO_ALTO ?? '/datos/tmp-atlas-lab/perfil/psinagua3-d12.sqlite';
 const ALTO = { inicial: '6a139a78154ba92a1ef36b61bec00e68b32c23a37c15d3e2e28e1a54b150cf8d', pasos: 600,

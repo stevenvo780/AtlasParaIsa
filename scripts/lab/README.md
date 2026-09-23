@@ -583,7 +583,7 @@ BASE=/datos/tmp-atlas-lab/perf2-base REF=REF bash scripts/perf/verificar.sh SALI
 npx tsx scripts/perf/alterna.ts --base /datos/tmp-atlas-lab/perf2-base --db alto.sqlite --pasos 1200   # sólo CPU + digesto final
 ```
 
-`identidad.ts` da los digestos de control (51926 por defecto a 2400 pasos; 7 y 42 con las leyes de la etapa 1
+`identidad.ts` da los digestos de control (51926 con los params históricos a 2400 pasos; 7 y 42 con las leyes de la etapa 1
 a 4800). `alterna.ts` importa los DOS árboles en el mismo proceso, carga cada uno su copia de la base y los
 avanza por bloques alternados de 10 pasos: la CPU propia de cada bloque ve la misma carga de la torre (con carga
 60–100 los mismos pasos cuestan 2–3 veces más CPU que a carga 20, así que dos corridas separadas no se pueden

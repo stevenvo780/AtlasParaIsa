@@ -6,7 +6,9 @@
  *   TMPDIR=/datos/tmp-atlas-lab npx tsx scripts/perf/identidad.ts <caso> [--salida j.json]
  *
  * Casos:
- *   d51926   semilla 51926, parámetros por defecto (guarda en cada paso), cortes 1200 y 2400
+ *   d51926   semilla 51926, params históricos (guarda en cada paso), cortes 1200 y 2400. `digestosControl`
+ *            aplica los params sobre `HISTORICAL_PARAMS`, que en un árbol anterior a reglas 10 eran los
+ *            defaults: base vieja y rama nueva simulan el mismo mundo.
  *   s7       semilla 7, leyes de la etapa 1 (LEYES_CANDIDATAS), cortes 1200…4800
  *   s42      semilla 42, leyes de la etapa 1, cortes 1200…4800
  *
@@ -31,7 +33,8 @@ const salidaIndex = process.argv.indexOf('--salida'), salida = salidaIndex === -
 const cpuMs = (): number => { const { user, system } = process.cpuUsage(); return (user + system) / 1000; };
 const inicio = cpuMs();
 const digestos = digestosControl(definicion.seed, definicion.params, definicion.cortes);
-const resultado = { caso, seed: definicion.seed, params: definicion.params ?? 'defaults', digestos, cpuS: Math.round(cpuMs() - inicio) / 1000 };
+const resultado = { caso, seed: definicion.seed, params: definicion.params ?? 'historicos', digestos,
+  cpuS: Math.round(cpuMs() - inicio) / 1000 };
 const texto = JSON.stringify(resultado, null, 2);
 if (salida) writeFileSync(salida, texto + '\n');
 console.log(texto);

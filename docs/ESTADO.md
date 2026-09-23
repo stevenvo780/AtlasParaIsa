@@ -10,8 +10,8 @@ el contrato.
 | Qué | Valor |
 |---|---|
 | URL | <https://atlas.humanizar.tech> |
-| Código compilado y servido | `0ea1514` (reinicio del mismo mundo el 23-09 a las 10:37 -05; build tras detener el servicio; assets servidos = compilados). Sobre `4df4455` añade la retención verificable del archivo de recibos de tecnología (ventana de 24 000 ticks, frontera V2 sellada) |
-| `main` | `0ea1514` |
+| Código compilado y servido | `b754487` desde el 23-09 13:01 -05 en el portátil (tope de metadatos de la instantánea 8 → 256 MiB tras la pausa de las 12:53; [contrato](evidencia-2026-09-23/publication-v10-portatil-hotfix.json)). Antes `0ea1514` (reinicio del mismo mundo el 23-09 a las 10:37 -05; build tras detener el servicio; assets servidos = compilados). Sobre `4df4455` añade la retención verificable del archivo de recibos de tecnología (ventana de 24 000 ticks, frontera V2 sellada) |
+| `main` | ver `git log`; lo servido es `b754487` |
 | Reglas | `RULES_VERSION` 10: paquete de natalidad por defecto (cortejo 2, radio 128, comunidad opcional, comprobación continua, habituación 0,35) y gobernador `techo` |
 | Protocolo | `PROTOCOL_VERSION` 10 |
 | SQLite | `user_version` 5 (instantáneas paginadas) |

@@ -1,0 +1,39 @@
+{
+ "capturedAt": "2026-09-23T18:05:00+00:00",
+ "status": "published",
+ "kind": "same-world restart on the laptop (hotfix, no rules change)",
+ "codeRevision": "b754487",
+ "incident": {
+  "stoppedAt": "2026-09-23 ~12:53 -05",
+  "cause": "la parte de la instantánea que no son teselas superó el tope fijo SNAPSHOT_METADATA_BYTES = 8 MiB con 583 habitantes; store.save falló y el servidor quedó en pausa terminal (health = paused, dominio 503)",
+  "reproduced": "determinista sobre una copia del estado pausado: fallo al guardar el tick 353 300 (snapshot-parts.ts, 'metadata exceeds transport size')",
+  "fix": "tope a 256 MiB (el límite real es la cadena máxima de V8 al serializar, ~512 MiB); test de un mundo de más de 8 MiB que se guarda y recarga igual",
+  "futureReplay": "la réplica del futuro del público en la torre avanzó 6 000 pasos más (hasta el tick 359 200, 607 habitantes) sin tocar ningún otro tope"
+ },
+ "gate": {
+  "deployCheck": "scripts/deploy-check.sh b754487 verde (build y smoke)",
+  "tests": "snapshot*, store-*, server: 300/300"
+ },
+ "operation": {
+  "backupBeforeStop": "world-20260923-1300.sqlite.gz en ~/atlas-lab/respaldos del portátil (respaldo.sh verificada)",
+  "serviceStoppedAndPortFreedBeforeBuild": true,
+  "buildOnLaptopAfterStop": true,
+  "sameWorldDirectoryAndIdentity": true,
+  "previousCode": "~/atlas-lab/servidor-d803448 conservado"
+ },
+ "liveChecks": {
+  "healthAfterStartS": 44,
+  "domainHealth": "ok",
+  "unauthenticatedWorldStatus": 401,
+  "resumedFromTick": 353200,
+  "after": {
+   "tick": 358900,
+   "people": 607,
+   "births": 1267
+  }
+ },
+ "knownRisks": [
+  "el paso se encarece con la población (≈ 2 pasos/s con 600 habitantes) hasta integrar E.0; ≥ 22 000 teselas: el formato paginado ya está activo",
+  "portátil a 92 °C con el laboratorio encendido: estrangulamiento térmico; el público va fijado a los núcleos 0-5 y el laboratorio a 8-19"
+ ]
+}

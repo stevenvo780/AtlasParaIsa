@@ -43,11 +43,20 @@ test('CLI: --techo-lab exige un entero ≥ 16 y es incompatible con --gobernador
   const dir = mkdtempSync(join(tmpdir(), 'atlas-techo-cli-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const correr = (...extra: string[]) => spawnSync(process.execPath, ['--import', 'tsx', 'scripts/lab/replica.ts', '--seed', '1', '--dias', '1', ...extra, '--salida', dir], { encoding: 'utf8' });
-  for (const malo of ['15', '17.5', 'veinte', '', '-3']) {
+  // « 18», «1e2», «0x14», «+18» y «18.0» los aceptaba Number() como enteros ≥ 16: ahora solo dígitos.
+  for (const malo of ['15', '17.5', 'veinte', '', '-3', ' 18', '18 ', '1e2', '0x14', '+18', '18.0', '99999999999999999999']) {
     const r = correr('--techo-lab', malo);
     assert.notEqual(r.status, 0, `--techo-lab «${malo}» debe fallar`);
     assert.match(r.stderr, /--techo-lab N \(entero ≥ 16/);
   }
+  // Un --techo-lab final sin valor se ignoraba y la réplica corría sin techo; ahora es un error.
+  const sinValor = spawnSync(process.execPath, ['--import', 'tsx', 'scripts/lab/replica.ts', '--seed', '1', '--dias', '1', '--salida', dir, '--techo-lab'], { encoding: 'utf8' });
+  assert.notEqual(sinValor.status, 0, '--techo-lab sin valor debe fallar');
+  assert.match(sinValor.stderr, /--techo-lab N \(entero ≥ 16.*Falta el valor tras --techo-lab/);
+  // Seguida de otra bandera, el «valor» sería esa bandera: también falla.
+  const seguidaDeBandera = correr('--techo-lab', '--instrumentos', 'no');
+  assert.notEqual(seguidaDeBandera.status, 0);
+  assert.match(seguidaDeBandera.stderr, /Recibido «--instrumentos»/);
   const conServidor = correr('--techo-lab', '18', '--gobernador', 'servidor');
   assert.notEqual(conServidor.status, 0);
   assert.match(conServidor.stderr, /--techo-lab es incompatible con --gobernador servidor/);

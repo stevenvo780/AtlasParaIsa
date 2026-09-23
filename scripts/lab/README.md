@@ -22,9 +22,11 @@ npx tsx scripts/lab/replica.ts --seed 51926 --dias 10 --params "cuerpo.riesgoSen
 - `--instrumentos si|no` (opcional, por defecto `si`): instrumentos de medida de solo lectura
   (conducta por tiempo y comida compartida), ver «Instrumentos de medida» más abajo. `no` da
   exactamente los `dia-NNN.json` de antes (mismas claves, mismos valores).
-- `--techo-lab N` (opcional, entero ≥ 16): techo **determinista** de laboratorio, ver «Techo de
-  laboratorio» más abajo. Sin la bandera no cambia nada (ni el mundo ni las claves de salida).
-  Incompatible con `--gobernador servidor` (error explícito).
+- `--techo-lab N` (opcional, solo dígitos, ≥ 16): techo **determinista** de laboratorio, ver «Techo de
+  laboratorio» más abajo. Sin la bandera no cambia nada (ni el mundo ni las claves de salida). La
+  bandera sin valor (p. ej. al final de la línea) o con un valor que no sea solo dígitos (` 18`, `1e2`,
+  `0x14`, `+18`, `18.0`) es un error, no «sin techo». Incompatible con `--gobernador servidor` (error
+  explícito).
 
 ## Por qué SIEMPRE hay un `Store` (hallazgo P3)
 
@@ -229,7 +231,7 @@ justificación de cada uno está en la cabecera del script y se repite en la sal
 | C5 | conflictos | `conflictosAcumulados` crece ≥ 1 en la ventana (si es 0 en toda la réplica lo dice) | `--conflictos-min` |
 | C6 | muertes legibles | 0 muertes fuera de starvation/dehydration/exposure/senescence, ≥ 2 causas en 1..D y balance `Δpoblación = Δnacimientos − Δmuertes` desde el día 0 (16 habitantes, o `resumen.poblacionInicial`) | `--causas-min --causas-conocidas` |
 | C7 | tecnología transmitida | Σ`usosDeInventorAjeno` / Σ(`usosUtiles` − `usosSinAutorResuelto`) en la ventana ≥ 0,15 y uso ajeno en ≥ 50 % de sus días | `--uso-ajeno-min --dias-uso-ajeno-min` |
-| C8 | diversidad creciente | pendiente MCO del índice de conducta en días 5..D (≥ 3 días con dato) ≥ 0 **o** media de los k últimos días ≥ media de los k primeros, k = min(10, mitad del tramo) ≥ 2; una serie constante falla; con dato en < 80 % de los días 5..D es «desconocido». Serie (preregistro, ver abajo): `diversidadConductaActiva` si la réplica la trae, si no `diversidadConductaTiempo`, si no `diversidadConducta`; las otras se informan como secundarias (no deciden) | `--pendiente-min --dia-base-diversidad --diversidad-regla o\|y --diversidad-campo auto\|activa\|tiempo\|actividad` |
+| C8 | diversidad creciente | pendiente MCO del índice de conducta en días 5..D (≥ 3 días con dato) ≥ 0 **o** media de los k últimos días ≥ media de los k primeros, k = min(10, mitad del tramo) ≥ 2; una serie constante o casi constante (amplitud o \|pendiente\| ≤ 1e-9, relativas) falla; con dato en < 80 % de los días 5..D, o sin dato el día D o algún día de los dos bloques, es «desconocido»; con huecos en el medio, una pendiente favorable no decide. Serie (preregistro, ver abajo): `diversidadConductaActiva` si la réplica la trae, si no `diversidadConductaTiempo`, si no `diversidadConducta`; las otras se informan como secundarias (no deciden) | `--pendiente-min --dia-base-diversidad --diversidad-regla o\|y --diversidad-campo auto\|activa\|tiempo\|actividad` |
 
 - Cada criterio es cumple / falla / **desconocido** (campo ausente): nunca se aprueba por defecto.
 - Nada se decide con un día suelto: `diversidadConducta` salta ±0,1 de un día a otro en r2, así que
@@ -238,6 +240,19 @@ justificación de cada uno está en la cabecera del script y se repite en la sal
   de los días del tramo 5..D; si no, «desconocido», nunca «cumple». Cierra el hueco que encontró el
   verificador: una serie por tiempo presente solo los días 5-7 (creciente) decidía sola y aprobaba C8
   aunque la serie completa cayera.
+- C8 exige además los **extremos completos** (verificador de INSTR-2): dato el día D y en todos los días
+  de los dos bloques (los k primeros desde el día 5 y los k últimos); si falta alguno, «desconocido».
+  Con 81 % de cobertura pero los días finales (o los más bajos) ausentes, el bloque final no se podía
+  calcular y la regla «o» aprobaba solo con la pendiente de los días que quedaban. Si los huecos caen
+  en el medio del tramo, una pendiente **favorable** no aprueba sola (esconder días bajos del final del
+  medio la inclina): cuenta como desconocida y decide la comparación de bloques. Con la serie completa
+  (lo que escribe `replica.ts`) nada de esto cambia el resultado.
+- C8 no usa igualdad exacta para «constante»: amplitud (máx − mín) o |pendiente| ≤ 1e-9 × máx(1,
+  máx |valor|) ⇒ no crece ⇒ falla (0,3 constante con 1e-15 más el día D aprobaba por pendiente 2e-17).
+- Solo se aceptan ficheros `dia-NNN.json` con el nombre que escribe `replica.ts` (3 dígitos,
+  `padStart(3, '0')`). Dos ficheros que resuelven al mismo día (`dia-20.json` y `dia-020.json`) o un
+  nombre no canónico suelto hacen la réplica **ilegible** con un error que los nombra (los 8
+  «desconocido»); antes el último leído pisaba al otro en silencio.
 - `replica.ts` solo escribe las 4 causas conocidas en `muertesPorCausa`: la comprobación que de verdad
   detecta una muerte sin causa en C6 es el balance.
 - **Extinguida** (algún día ≤ D con 0 `vecinosMortales`): cuenta y falla los 8. **En curso** (sin

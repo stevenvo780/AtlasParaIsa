@@ -310,17 +310,34 @@ test('criterio de terminado: C8 con cobertura < 80 % del tramo es «desconocido�
     assert.equal(replica(evaluarConjunto(raiz, { dia: 20, diversidadCampo: 'diversidadConductaTiempo' }), 'H-1').criterios!.diversidad.estado, 'desconocido');
     assert.equal(replica(evaluarConjunto(raiz, { dia: 20, diversidadCampo: 'diversidadConducta' }), 'H-1').criterios!.diversidad.estado, 'falla');
 
-    // Frontera: tramo 5..20 = 16 días; 13 con dato (81 %) se evalúa, 12 (75 %) no.
-    const conHuecos = (sinDato: (d: number) => boolean) => rango(20).map(d => ({ ...diaSano(d), ...(sinDato(d) ? {} : { diversidadConductaActiva: 0.2 + 0.01 * d }) }));
-    escribir(raiz, 'H-2', conHuecos(d => d >= 9 && d <= 11), true);
-    escribir(raiz, 'H-3', conHuecos(d => d >= 9 && d <= 12), true);
+    // Tramo 5..20 = 16 días; 13 con dato (81 %) pasa la cobertura, 12 (75 %) no. Pero con D = 20 los
+    // bloques (k = 8: días 5..12 y 13..20) cubren todo el tramo, y los huecos 9-11 caen en el inicial:
+    // desconocido por extremos incompletos (verificador de INSTR-2), aunque la cobertura bastaría.
+    const conHuecos = (dias: number, sinDato: (d: number) => boolean) => rango(dias).map(d => ({ ...diaSano(d), ...(sinDato(d) ? {} : { diversidadConductaActiva: 0.2 + 0.01 * d }) }));
+    escribir(raiz, 'H-2', conHuecos(20, d => d >= 9 && d <= 11), true);
+    escribir(raiz, 'H-3', conHuecos(20, d => d >= 9 && d <= 12), true);
     const frontera = evaluarConjunto(raiz, { dia: 20 });
     const h2 = replica(frontera, 'H-2').criterios!.diversidad, h3 = replica(frontera, 'H-3').criterios!.diversidad;
     assert.equal(h2.valores.campo, 'diversidadConductaActiva');
-    assert.equal(h2.estado, 'cumple', h2.motivo);
+    assert.equal(h2.estado, 'desconocido', h2.motivo);
     assert.equal(h2.valores.cobertura, 13 / 16);
+    assert.match(h2.motivo, /sin dato en los días 9-11 de los extremos del tramo \(bloques días 5\.\.12 y 13\.\.20/);
     assert.equal(h3.estado, 'desconocido', h3.motivo);
     assert.match(h3.motivo, /12\/16 días .* sin dato: 9-12/);
+
+    // Frontera de cobertura con el medio libre: D = 40, tramo 5..40 = 36 días, bloques 5..14 y 31..40.
+    // Huecos 15-21 (29/36 = 81 %) se evalúa; 15-22 (28/36 = 78 %) no.
+    escribir(raiz, 'H-4', conHuecos(40, d => d >= 15 && d <= 21), true);
+    escribir(raiz, 'H-5', conHuecos(40, d => d >= 15 && d <= 22), true);
+    const frontera40 = evaluarConjunto(raiz, { dia: 40 });
+    const h4 = replica(frontera40, 'H-4').criterios!.diversidad, h5 = replica(frontera40, 'H-5').criterios!.diversidad;
+    assert.equal(h4.estado, 'cumple', h4.motivo);
+    assert.equal(h4.valores.cobertura, 29 / 36);
+    // Con huecos, la pendiente favorable no decide: aprueba la comparación de bloques (completos).
+    assert.equal(h4.valores.pendienteDecide, false);
+    assert.match(h4.motivo, /favorable pero con 7 día\(s\) sin dato \(15-21\): no decide; media días 5\.\.14 0\.295 → días 31\.\.40 0\.555/);
+    assert.equal(h5.estado, 'desconocido', h5.motivo);
+    assert.match(h5.motivo, /28\/36 días .* sin dato: 15-22/);
   } finally { rmSync(raiz, { recursive: true, force: true }); }
 });
 
@@ -354,5 +371,137 @@ test('criterio de terminado: C8 en auto decide con diversidadConductaActiva; tie
     assert.equal(cli.status, 0, cli.stderr);
     assert.match(cli.stdout, /C8 diversidad +pendiente MCO de diversidadConductaActiva \(si falta, diversidadConductaTiempo; si falta, diversidadConducta\) .*< 80 % de los días del tramo ⇒ desconocido/);
     assert.match(cli.stdout, /auto\|activa\|tiempo\|actividad|--diversidad-campo/);
+  } finally { rmSync(raiz, { recursive: true, force: true }); }
+});
+
+// Endurecimiento tras el verificador de INSTR-2 (noche 2026-09-22). Los sintéticos reproducen los suyos
+// (esconder-final-1, ocultar-bajos-2, epsilon-3, duplicado-6) con los mismos valores; con el código de
+// bce5a88 los cuatro daban C8 = «cumple».
+
+const cae = (d: number) => 0.6 - 0.01 * d;
+/** Serie ruidosa del verificador (índice = día): cae en conjunto; sus días más bajos (0,10) son 16, 18 y 20. */
+const RUIDO = [0, 0.30, 0.30, 0.30, 0.30, 0.40, 0.20, 0.39, 0.21, 0.38, 0.22, 0.37, 0.23, 0.36, 0.24, 0.35, 0.10, 0.34, 0.10, 0.33, 0.10];
+
+test('criterio de terminado: C8 exige el día D y los dos bloques completos (esconder el final o los días bajos no aprueba)', () => {
+  const raiz = mkdtempSync(join(tmpdir(), 'atlas-criterio-instr2-'));
+  try {
+    // esconder-final-1: la activa sube los días 5..17 y faltan 18..20 (13/16 = 81 % ≥ 80 %). Antes el
+    // bloque final era «¿?» y la regla «o» aprobaba con la pendiente de los días que quedaban.
+    escribir(raiz, 'esconder-final-1', rango(20).map(d => ({ ...diaSano(d), diversidadConducta: cae(d), diversidadConductaActiva: d <= 17 ? 0.3 + 0.01 * d : undefined })), true);
+    // ocultar-bajos-2: la serie completa cae (completa-22 falla); sin sus 3 días más bajos (16, 18, 20,
+    // escritos como null) la pendiente de los 13 restantes sale positiva.
+    escribir(raiz, 'ocultar-bajos-2', rango(20).map(d => ({ ...diaSano(d), diversidadConducta: cae(d), diversidadConductaActiva: [16, 18, 20].includes(d) ? null : RUIDO[d] })), true);
+    escribir(raiz, 'completa-22', rango(20).map(d => ({ ...diaSano(d), diversidadConducta: cae(d), diversidadConductaActiva: RUIDO[d] })), true);
+    // Solo falta el día D: tampoco.
+    escribir(raiz, 'sin-D-3', rango(20).map(d => ({ ...diaSano(d), diversidadConductaActiva: d === 20 ? null : 0.2 + 0.01 * d })), true);
+    for (const regla of ['o', 'y'] as const) {
+      const inf = evaluarConjunto(raiz, { dia: 20, diversidadRegla: regla });
+      const final = replica(inf, 'esconder-final-1').criterios!.diversidad;
+      assert.equal(final.estado, 'desconocido', `${regla}: ${final.motivo}`);
+      assert.equal(final.valores.cobertura, 13 / 16);
+      assert.deepEqual(final.valores.diasSinDatoEnExtremos, [18, 19, 20]);
+      assert.match(final.motivo, /^diversidadConductaActiva: sin dato en los días 18-20 de los extremos del tramo \(bloques días 5\.\.12 y 13\.\.20, que deben estar completos\)/);
+      assert.equal(replica(inf, 'esconder-final-1').todos, 'desconocido');
+      const bajos = replica(inf, 'ocultar-bajos-2').criterios!.diversidad;
+      assert.equal(bajos.estado, 'desconocido', `${regla}: ${bajos.motivo}`);
+      assert.match(bajos.motivo, /sin dato en los días 16, 18, 20 de los extremos/);
+      assert.equal(replica(inf, 'completa-22').criterios!.diversidad.estado, 'falla', 'la serie completa que los huecos escondían falla');
+      const sinD = replica(inf, 'sin-D-3').criterios!.diversidad;
+      assert.equal(sinD.estado, 'desconocido', `${regla}: ${sinD.motivo}`);
+      assert.match(sinD.motivo, /sin dato en el día 20 de los extremos/);
+    }
+  } finally { rmSync(raiz, { recursive: true, force: true }); }
+});
+
+test('criterio de terminado: C8 con huecos en el medio del tramo — una pendiente favorable no aprueba sola', () => {
+  const raiz = mkdtempSync(join(tmpdir(), 'atlas-criterio-instr2-'));
+  try {
+    // D = 40: bloques 5..14 (0,30) y 31..40 (0,29, completos; el final es más bajo). El medio baja a 0,10
+    // y a 0,0 los días 23..29; sin esos 7 días (29/36 = 81 % de cobertura) la pendiente pasa de −6,8e-4
+    // a +8,7e-4/día. Con la regla «o» eso aprobaba C8 aunque la serie completa falle.
+    const serie = (d: number) => d <= 14 ? 0.30 : d <= 22 ? 0.10 : d <= 29 ? 0.0 : d === 30 ? 0.25 : 0.29;
+    escribir(raiz, 'medio-1', rango(40).map(d => ({ ...diaSano(d), diversidadConductaActiva: d >= 23 && d <= 29 ? null : serie(d) })), true);
+    escribir(raiz, 'medio-completa-2', rango(40).map(d => ({ ...diaSano(d), diversidadConductaActiva: serie(d) })), true);
+    const inf = evaluarConjunto(raiz, { dia: 40 });
+    const medio = replica(inf, 'medio-1').criterios!.diversidad, completa = replica(inf, 'medio-completa-2').criterios!.diversidad;
+    assert.ok((medio.valores.pendiente as number) > 0, 'la pendiente con huecos sale favorable');
+    assert.equal(medio.valores.pendienteDecide, false);
+    assert.equal(medio.estado, 'desconocido', medio.motivo);
+    assert.match(medio.motivo, /favorable pero con 7 día\(s\) sin dato \(23-29\): no decide; media días 5\.\.14 0\.3 → días 31\.\.40 0\.29/);
+    assert.ok((completa.valores.pendiente as number) < 0);
+    assert.equal(completa.estado, 'falla', completa.motivo);
+    // Regla «y»: la pendiente con huecos no cuenta y los bloques caen ⇒ falla (la pendiente nunca aprueba).
+    assert.equal(replica(evaluarConjunto(raiz, { dia: 40, diversidadRegla: 'y' }), 'medio-1').criterios!.diversidad.estado, 'falla');
+  } finally { rmSync(raiz, { recursive: true, force: true }); }
+});
+
+test('criterio de terminado: C8 con una serie casi constante falla (tolerancia relativa, no igualdad exacta)', () => {
+  const raiz = mkdtempSync(join(tmpdir(), 'atlas-criterio-instr2-'));
+  try {
+    // epsilon-3: 0,3 constante y 0,3 + 1e-15 el día D. Antes: max ≠ min, pendiente 2,2e-17 ≥ 0 ⇒ cumple.
+    escribir(raiz, 'epsilon-3', rango(20).map(d => ({ ...diaSano(d), diversidadConducta: cae(d), diversidadConductaActiva: d === 20 ? 0.3 + 1e-15 : 0.3 })), true);
+    // Tolerancia relativa a la escala: 300 constante con 1e-7 más el día D (1e-7 ≤ 1e-9 · 300).
+    escribir(raiz, 'escala-4', rango(20).map(d => ({ ...diaSano(d), diversidadConductaActiva: d === 20 ? 300 + 1e-7 : 300 })), true);
+    // Amplitud grande pero sin tendencia: una V simétrica sobre el tramo 5..20 (pendiente 0) no crece.
+    escribir(raiz, 'uve-5', rango(20).map(d => ({ ...diaSano(d), diversidadConductaActiva: 0.3 + 0.05 * Math.abs(d - 12.5) })), true);
+    // Una tendencia pequeña pero real (1e-6/día, muy por encima de la tolerancia) sí crece.
+    escribir(raiz, 'leve-6', rango(20).map(d => ({ ...diaSano(d), diversidadConductaActiva: 0.3 + 1e-6 * d })), true);
+    for (const regla of ['o', 'y'] as const) {
+      const inf = evaluarConjunto(raiz, { dia: 20, diversidadRegla: regla });
+      const epsilon = replica(inf, 'epsilon-3').criterios!.diversidad;
+      assert.equal(epsilon.estado, 'falla', `${regla}: ${epsilon.motivo}`);
+      assert.match(epsilon.motivo, /^diversidadConductaActiva: serie constante \(0\.3; amplitud 1\.0e-15 ≤ 1\.0e-9\) en 16 días: no crece/);
+      const escala = replica(inf, 'escala-4').criterios!.diversidad;
+      assert.equal(escala.estado, 'falla', `${regla}: ${escala.motivo}`);
+      assert.match(escala.motivo, /serie constante \(300; amplitud 1\.0e-7 ≤ 3\.0e-7\)/);
+      const uve = replica(inf, 'uve-5').criterios!.diversidad;
+      assert.equal(uve.estado, 'falla', `${regla}: ${uve.motivo}`);
+      assert.match(uve.motivo, /serie sin tendencia \(\|pendiente\| .*≤ 1\.0e-9\) en 16 días: no crece/);
+      const leve = replica(inf, 'leve-6').criterios!.diversidad;
+      assert.equal(leve.estado, 'cumple', `${regla}: ${leve.motivo}`);
+    }
+    assert.match(evaluarConjunto(raiz, { dia: 20 }).descripcionCriterios.diversidad, /amplitud o \|pendiente\| ≤ 1e-9 \(relativas\) ⇒ falla/);
+  } finally { rmSync(raiz, { recursive: true, force: true }); }
+});
+
+test('criterio de terminado: dos ficheros para el mismo día o un nombre no canónico hacen la réplica ilegible con error explícito', () => {
+  const raiz = mkdtempSync(join(tmpdir(), 'atlas-criterio-instr2-'));
+  try {
+    // duplicado-6: además de dia-019.json y dia-020.json (serie que cae), dia-19.json y dia-20.json con la
+    // activa en 5. Antes el que se leía después pisaba al otro en silencio y C8 aprobaba.
+    escribir(raiz, 'duplicado-6', rango(20).map(d => ({ ...diaSano(d), diversidadConducta: cae(d), diversidadConductaActiva: cae(d) })), true, {
+      'dia-20.json': JSON.stringify({ ...diaSano(20), diversidadConducta: 1, diversidadConductaActiva: 5 }),
+      'dia-19.json': JSON.stringify({ ...diaSano(19), diversidadConductaActiva: 5 }),
+    });
+    // Un nombre no canónico suelto (sin su dia-NNN.json) tampoco se acepta: ni 1 dígito ni 4 con cero de más.
+    escribir(raiz, 'suelto-7', rango(20).filter(d => d !== 7).map(diaSano), true, { 'dia-7.json': JSON.stringify(diaSano(7)) });
+    escribir(raiz, 'cuatro-8', rango(20).filter(d => d !== 20).map(diaSano), true, { 'dia-0020.json': JSON.stringify(diaSano(20)) });
+    escribir(raiz, 'sana-9', rango(20).map(diaSano), true);
+    const inf = evaluarConjunto(raiz, { dia: 20 });
+    const dup = replica(inf, 'duplicado-6');
+    assert.equal(dup.estado, 'ilegible');
+    assert.equal(dup.nota, 'ficheros duplicados para el mismo día: dia-019.json y dia-19.json (día 19); dia-020.json y dia-20.json (día 20); no se elige uno');
+    assert.equal(dup.todos, 'desconocido');
+    assert.ok(Object.values(dup.criterios!).every(c => c.estado === 'desconocido'));
+    const suelto = replica(inf, 'suelto-7');
+    assert.equal(suelto.estado, 'ilegible');
+    assert.match(suelto.nota!, /^nombre de día no canónico: dia-7\.json \(se espera dia-007\.json\); solo se aceptan dia-NNN\.json de 3 dígitos/);
+    const cuatro = replica(inf, 'cuatro-8');
+    assert.equal(cuatro.estado, 'ilegible');
+    assert.match(cuatro.nota!, /dia-0020\.json \(se espera dia-020\.json\)/);
+    assert.equal(replica(inf, 'sana-9').todos, 'cumple');
+    assert.equal(inf.brazos.find(b => b.brazo === 'duplicado')!.ilegibles, 1);
+    // La CLI lo dice en la línea de la réplica.
+    const cli = spawnSync(process.execPath, ['--import', 'tsx', 'scripts/lab/criterio-terminado.mts', '--entrada', raiz, '--dia', '20'], { encoding: 'utf8' });
+    assert.equal(cli.status, 0, cli.stderr);
+    assert.match(cli.stdout, /duplicado-6 +\?{8} .*ficheros duplicados para el mismo día: dia-019\.json y dia-19\.json/);
+    // El nombre canónico desde el día 1000 (padStart(3) no recorta) sí se acepta.
+    const mil = mkdtempSync(join(tmpdir(), 'atlas-criterio-instr2-'));
+    try {
+      escribir(mil, 'larga-1', [998, 999, 1000].map(diaSano), true);
+      const larga = replica(evaluarConjunto(mil, { dia: 1000 }), 'larga-1');
+      assert.equal(larga.estado, 'evaluada', larga.nota ?? '');
+      assert.equal(larga.ultimoDia, 1000);
+    } finally { rmSync(mil, { recursive: true, force: true }); }
   } finally { rmSync(raiz, { recursive: true, force: true }); }
 });

@@ -23,8 +23,9 @@
  * `src/world/spatial.ts:18-22`), y vuelve a guardar cada `persistencia.cadaTicks` ticks
  * como haría el servidor.
  *
- * `--techo-lab N` (entero ≥ 16; sin la bandera, nada cambia): techo DETERMINISTA de laboratorio. Emula
- * la política `techo` del gobernador del servidor (`decidirConTecho`, src/server/governor.ts) con el
+ * `--techo-lab N` (solo dígitos, ≥ 16; sin la bandera, nada cambia; la bandera sin valor es un error):
+ * techo DETERMINISTA de laboratorio. Emula la política `techo` del gobernador del servidor
+ * (`decidirConTecho`, src/server/governor.ts) con el
  * techo YA FIJADO en N, en lugar del que dispara el p95 del paso (reloj de pared: no reproducible).
  * Antes de cada paso, `world.reproductionEnabled = población < N`, con la población contada como la
  * cuenta el servidor (`draft.people.length` en `governReproduction`, src/server/app.ts: todas las
@@ -176,9 +177,12 @@ async function main(): Promise<void> {
   const gobernadorModo: ModoGobernador = gobernadorArg;
   const techoArg = arg('--techo-lab');
   let techoLab: number | null = null;
-  if (techoArg !== undefined) {
+  // Presencia de la bandera, no de su valor: un `--techo-lab` final sin valor se ignoraba en silencio y la
+  // réplica corría SIN techo. Solo dígitos: Number() aceptaba « 18», «1e2», «0x14» o «+18».
+  if (process.argv.includes('--techo-lab')) {
+    if (techoArg === undefined) throw new Error(`${USO_TECHO} Falta el valor tras --techo-lab.`);
     const n = Number(techoArg);
-    if (techoArg.trim() === '' || !Number.isInteger(n) || n < TECHO_LAB_MINIMO) throw new Error(`${USO_TECHO} Recibido «${techoArg}».`);
+    if (!/^\d+$/.test(techoArg) || !Number.isSafeInteger(n) || n < TECHO_LAB_MINIMO) throw new Error(`${USO_TECHO} Recibido «${techoArg}».`);
     if (gobernadorModo === 'servidor') throw new Error('--techo-lab es incompatible con --gobernador servidor: el techo de laboratorio es fijo y determinista, el del servidor lo dispara el p95 del reloj. Usa uno u otro.');
     techoLab = n;
   }

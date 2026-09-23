@@ -75,8 +75,8 @@
  *     porque antes domina el asentamiento inicial (y es el día de SC-003). `--diversidad-regla y` exige
  *     las dos. El indicador diario es ruidoso (saltos de ±0,1 de un día a otro en r2), así que no se
  *     compara un día suelto con otro: la pendiente exige ≥ 3 días con dato y cada bloque ≥ 2 días
- *     completos (si no, esa parte es «desconocido»), y una serie constante FALLA (no crece, aunque su
- *     pendiente sea 0 ≥ 0).
+ *     completos (si no, esa parte es «desconocido»), y una serie constante o casi constante FALLA (no
+ *     crece, aunque su pendiente sea 0 ≥ 0; ver «Casi constante» abajo).
  *     Serie [--diversidad-campo auto] — PREREGISTRO del orquestador (noche 2026-09-22, decidido ANTES de
  *     ver corridas largas; ver scripts/lab/README.md §«Preregistro del criterio C8»): decide
  *     `diversidadConductaActiva` (el mismo índice con los ticks por acción SIN descansar: la conducta
@@ -88,6 +88,19 @@
  *     Cobertura: la serie debe tener dato en ≥ 80 % de los días del tramo (días base..D) [COBERTURA_MIN];
  *     si no, «desconocido», nunca «cumple» (vale para todas las series): una serie que solo existe unos
  *     pocos días del tramo no puede aprobar por su cuenta el crecimiento de todo el tramo.
+ *     Extremos completos (hallazgo MEDIO del verificador de INSTR-2): además, la serie debe tener dato
+ *     el día D y TODOS los días de los dos bloques (los k primeros desde el día base y los k últimos; con
+ *     k < 2, al menos el día base y el día D); si falta alguno, «desconocido». Antes, con ≥ 80 % de
+ *     cobertura pero los días finales (o los más bajos) ausentes, el bloque final no se podía calcular y
+ *     la regla «o» aprobaba solo con la pendiente de los días que quedaban.
+ *     Huecos en el medio: con algún día del tramo sin dato (fuera de los bloques, que ya están completos),
+ *     una pendiente FAVORABLE no aprueba sola: cuenta como «desconocida» (esconder días bajos del final
+ *     del medio la inclina hacia arriba) y decide la comparación de bloques, que sí está completa; una
+ *     pendiente desfavorable cuenta. Con la serie completa (lo normal: replica.ts escribe las tres
+ *     series todos los días) nada de esto cambia el resultado.
+ *     Casi constante: amplitud (máx − mín) ≤ 1e-9 o |pendiente| ≤ 1e-9/día [TOLERANCIA_PLANA], ambas
+ *     relativas a la escala de la serie (× máx(1, máx |valor|)) ⇒ no crece ⇒ FALLA. No se usa igualdad
+ *     exacta: una serie constante con un 1e-15 añadido el último día aprobaba por pendiente 2e-17 ≥ 0.
  *
  * Todo criterio es cumple / falla / desconocido. Un campo ausente o ilegible da «desconocido», NUNCA
  * «cumple»: una semilla solo «cumple todos» si los 8 cumplen.
@@ -98,8 +111,12 @@
  *     porque S e I son inmortales y la población nunca baja de 2; solo los vecinos se reproducen,
  *     family.ts, así que no hay vuelta atrás). Cuenta como evaluada que FALLA los 8 criterios, llegue
  *     o no a escribir dia-D;
- *   - ilegible: un dia-NNN.json intermedio no es JSON válido o su tick no es NNN·2400. Cuenta como
- *     evaluada con los 8 «desconocido» (nunca aprobada);
+ *   - ilegible: un dia-NNN.json intermedio no es JSON válido o su tick no es NNN·2400, o hay ficheros de
+ *     día con nombre no canónico: solo vale el nombre que escribe replica.ts, `dia-NNN.json` con 3
+ *     dígitos (`padStart(3, '0')`; desde el día 1000, los dígitos que haga falta, sin ceros de más).
+ *     `dia-20.json` junto a `dia-020.json` (dos ficheros para el mismo día) es un error explícito que
+ *     los nombra, no «el último gana»; un `dia-20.json` suelto también. Cuenta como evaluada con los 8
+ *     «desconocido» (nunca aprobada);
  *   - en curso: sin replica.json y aún sin dia-D → EXCLUIDA (se dice cuántas y por qué día van).
  *     Un último dia-NNN.json a medio escribir de una réplica en curso se ignora con aviso. Si lleva
  *     más de 3 h [--estancada-horas] sin escribir nada se avisa de que el proceso puede haber muerto
@@ -161,6 +178,9 @@ const POBLACION_INICIAL = 16, INMORTALES = 2;
 const PUNTOS_MIN_PENDIENTE = 3, DIAS_MIN_BLOQUE = 2;
 /** C8: fracción mínima de días del tramo (base..D) con dato en la serie evaluada; por debajo, «desconocido». */
 export const COBERTURA_MIN = 0.8;
+/** C8: amplitud o |pendiente| (por día) por debajo de la cual la serie no crece, relativa a su escala
+ * (× máx(1, máx |valor|)): no se compara con igualdad exacta (un 1e-15 no es crecimiento). */
+export const TOLERANCIA_PLANA = 1e-9;
 
 export interface ResultadoCriterio { estado: Estado; motivo: string; valores: Record<string, unknown> }
 export type EstadoReplica = 'evaluada' | 'extinguida' | 'ilegible' | 'en-curso' | 'corta';
@@ -199,8 +219,26 @@ interface ReplicaLeida {
 
 // ── lectura ─────────────────────────────────────────────────────────────────────────────────────
 
+/** Cualquier fichero con forma de día; solo se ACEPTA el nombre canónico (`nombreDia`). */
 const PATRON_DIA = /^dia-(\d+)\.json$/;
+/** Nombre que escribe replica.ts para el día `dia`: 3 dígitos con ceros a la izquierda (dia-020.json). */
+const nombreDia = (dia: number): string => `dia-${String(dia).padStart(3, '0')}.json`;
 const esObjeto = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
+
+/** Error explícito si dos ficheros resuelven al mismo día (dia-20.json y dia-020.json) o si alguno no
+ * tiene el nombre canónico; `null` si todos son canónicos y distintos. */
+function errorNombresDia(nombres: readonly string[]): string | null {
+  const porDia = new Map<number, string[]>();
+  for (const fichero of nombres) {
+    const dia = Number(PATRON_DIA.exec(fichero)![1]);
+    porDia.set(dia, [...(porDia.get(dia) ?? []), fichero]);
+  }
+  const duplicados = [...porDia].filter(([, ficheros]) => ficheros.length > 1).sort((a, b) => a[0] - b[0]);
+  if (duplicados.length) return `ficheros duplicados para el mismo día: ${duplicados.map(([dia, ficheros]) => `${[...ficheros].sort().join(' y ')} (día ${dia})`).join('; ')}; no se elige uno`;
+  const raros = [...porDia].filter(([dia, [fichero]]) => fichero !== nombreDia(dia)).sort((a, b) => a[0] - b[0]);
+  if (raros.length) return `nombre de día no canónico: ${raros.map(([dia, [fichero]]) => `${fichero} (se espera ${nombreDia(dia)})`).join(', ')}; solo se aceptan dia-NNN.json de 3 dígitos, como los escribe replica.ts`;
+  return null;
+}
 
 function leerReplica(directorio: string, nombre: string, brazo: string, semilla: number, avisos: string[]): ReplicaLeida {
   const r: ReplicaLeida = { nombre, brazo, semilla, directorio, terminada: false, abortada: false, dias: new Map(), error: null, ultimaEscritura: null, poblacionInicial: null };
@@ -216,6 +254,9 @@ function leerReplica(directorio: string, nombre: string, brazo: string, semilla:
   }
   const nombres = readdirSync(directorio).filter(n => PATRON_DIA.test(n))
     .sort((a, b) => Number(PATRON_DIA.exec(a)![1]) - Number(PATRON_DIA.exec(b)![1]));
+  // Antes, dia-20.json y dia-020.json entraban los dos y el que se leía después pisaba al otro en silencio.
+  const errorNombres = errorNombresDia(nombres);
+  if (errorNombres) { r.error = errorNombres; return r; }
   for (const [indice, fichero] of nombres.entries()) {
     const dia = Number(PATRON_DIA.exec(fichero)![1]);
     let cuerpo: unknown;
@@ -298,7 +339,7 @@ export function describirCriterios(u: Umbrales): Record<IdCriterio, string> {
     conflictos: `conflictos en la ventana ≥ ${u.conflictosMin}`,
     muertes: `0 muertes fuera de {${u.causasConocidas.join(', ')}}, ≥ ${u.causasMin} causas distintas en los días 1..D y balance población = nacimientos − muertes desde el día 0`,
     tecnologia: `usos de inventor ajeno / usos útiles con autor en la ventana ≥ ${u.usoAjenoMin} y uso ajeno en ≥ ${pct(u.diasUsoAjenoMin)} de sus días`,
-    diversidad: `pendiente MCO de ${u.diversidadCampo === 'auto' ? 'diversidadConductaActiva (si falta, diversidadConductaTiempo; si falta, diversidadConducta)' : u.diversidadCampo} días ${u.diaBaseDiversidad}..D (≥ ${PUNTOS_MIN_PENDIENTE} días) ≥ ${u.pendienteMin} ${u.diversidadRegla === 'o' ? 'o' : 'y'} media de los k últimos días ≥ media de los k primeros (k = min(ventana, mitad del tramo) ≥ ${DIAS_MIN_BLOQUE}); dato en < ${pct(COBERTURA_MIN)} de los días del tramo ⇒ desconocido; constante ⇒ falla`,
+    diversidad: `pendiente MCO de ${u.diversidadCampo === 'auto' ? 'diversidadConductaActiva (si falta, diversidadConductaTiempo; si falta, diversidadConducta)' : u.diversidadCampo} días ${u.diaBaseDiversidad}..D (≥ ${PUNTOS_MIN_PENDIENTE} días) ≥ ${u.pendienteMin} ${u.diversidadRegla === 'o' ? 'o' : 'y'} media de los k últimos días ≥ media de los k primeros (k = min(ventana, mitad del tramo) ≥ ${DIAS_MIN_BLOQUE}); dato en < ${pct(COBERTURA_MIN)} de los días del tramo ⇒ desconocido; sin dato el día D o algún día de los dos bloques ⇒ desconocido; con huecos, una pendiente favorable no decide; amplitud o |pendiente| ≤ ${TOLERANCIA_PLANA} (relativas) ⇒ falla`,
   };
 }
 
@@ -425,36 +466,54 @@ function tecnologia({ dias, diasVentana, u }: Contexto): ResultadoCriterio {
 /** C8 sobre una serie (`campo`) de dia-NNN.json; ver la cabecera. */
 function serieDiversidad({ dias, D, u }: Contexto, campo: string): ResultadoCriterio {
   const b = u.diaBaseDiversidad;
-  const puntos: [number, number][] = [];
-  for (let dia = b; dia <= D; dia++) { const v = num(dias.get(dia), campo); if (v !== null) puntos.push([dia, v]); }
+  const puntos: [number, number][] = [], sinDato: number[] = [];
+  for (let dia = b; dia <= D; dia++) { const v = num(dias.get(dia), campo); if (v === null) sinDato.push(dia); else puntos.push([dia, v]); }
   const valores = puntos.map(([, v]) => v);
   // Cobertura: una serie con dato solo en unos pocos días del tramo no representa el tramo (p. ej. un
   // instrumento que empezó a escribirse a mitad de la réplica): «desconocido», nunca «cumple».
   const diasTramo = D - b + 1, cobertura = puntos.length / diasTramo;
-  if (cobertura < COBERTURA_MIN) {
-    const sinDato: number[] = [];
-    for (let dia = b; dia <= D; dia++) if (num(dias.get(dia), campo) === null) sinDato.push(dia);
+  if (cobertura < COBERTURA_MIN)
     return { estado: 'desconocido', motivo: `dato en solo ${puntos.length}/${diasTramo} días del tramo ${b}..${D} (${pct(cobertura)} < ${pct(COBERTURA_MIN)}): no representa el tramo; sin dato: ${rangos(sinDato)}`,
       valores: { pendiente: null, puntos: puntos.length, cobertura, diasSinDato: sinDato } };
-  }
-  // Una serie plana no «crece» aunque su pendiente sea 0 ≥ 0 (p. ej. un indicador atascado en 0).
-  if (puntos.length >= 2 && Math.max(...valores) === Math.min(...valores))
-    return { estado: 'falla', motivo: `${campo} constante (${redondear(valores[0]!)}) en ${puntos.length} días: no crece`, valores: { pendiente: 0, puntos: puntos.length, cobertura } };
-  const pendiente = puntos.length >= PUNTOS_MIN_PENDIENTE ? pendienteMco(puntos) : null;
   // Bloques de k días en cada extremo, no un día suelto contra otro: el indicador diario es ruidoso.
-  const k = Math.min(u.ventana, Math.floor((D - b + 1) / 2));
+  const k = Math.min(u.ventana, Math.floor(diasTramo / 2));
+  // Extremos completos: el día D y todos los días de ambos bloques (con k < 2, al menos los días b y D).
+  // Con ≥ 80 % de cobertura pero el final (o los días más bajos) ausente, el bloque final no se calculaba
+  // y la regla «o» aprobaba con la pendiente de los días que quedaban (verificador de INSTR-2).
+  const kExtremo = Math.max(1, k), finInicio = b + kExtremo - 1, inicioFinal = D - kExtremo + 1;
+  const faltanExtremos = sinDato.filter(dia => dia <= finInicio || dia >= inicioFinal);
+  if (faltanExtremos.length)
+    return { estado: 'desconocido', motivo: `sin dato en ${faltanExtremos.length === 1 ? 'el día' : 'los días'} ${rangos(faltanExtremos)} de los extremos del tramo (bloques días ${b}..${finInicio} y ${inicioFinal}..${D}, que deben estar completos): sin ellos la pendiente decidiría sola con los días que quedan`,
+      valores: { pendiente: null, puntos: puntos.length, cobertura, diasPorBloque: k, diasSinDato: sinDato, diasSinDatoEnExtremos: faltanExtremos } };
+  const pendiente = puntos.length >= PUNTOS_MIN_PENDIENTE ? pendienteMco(puntos) : null;
+  // Una serie plana no «crece» aunque su pendiente sea 0 ≥ 0 (p. ej. un indicador atascado en 0); con
+  // tolerancia relativa, no igualdad exacta: 0,3 constante con 1e-15 más el día D tampoco crece.
+  const tolerancia = TOLERANCIA_PLANA * Math.max(1, ...valores.map(Math.abs));
+  const amplitud = Math.max(...valores) - Math.min(...valores);
+  if (puntos.length >= 2 && amplitud <= tolerancia)
+    return { estado: 'falla', motivo: `serie constante (${redondear(valores[0]!)}${amplitud > 0 ? `; amplitud ${amplitud.toExponential(1)} ≤ ${tolerancia.toExponential(1)}` : ''}) en ${puntos.length} días: no crece`,
+      valores: { pendiente, amplitud, puntos: puntos.length, cobertura } };
+  if (pendiente !== null && Math.abs(pendiente) <= tolerancia)
+    return { estado: 'falla', motivo: `serie sin tendencia (|pendiente| ${Math.abs(pendiente).toExponential(1)}/día ≤ ${tolerancia.toExponential(1)}) en ${puntos.length} días: no crece`,
+      valores: { pendiente, amplitud, puntos: puntos.length, cobertura } };
   const media = (desde: number): number | null => {
     if (k < DIAS_MIN_BLOQUE) return null;
     let s = 0;
-    for (let dia = desde; dia < desde + k; dia++) { const v = num(dias.get(dia), campo); if (v === null) return null; s += v; }
+    // Los días de los bloques están todos (comprobado arriba).
+    for (let dia = desde; dia < desde + k; dia++) s += num(dias.get(dia), campo)!;
     return s / k;
   };
   const inicio = media(b), final = media(D - k + 1);
-  const s1 = pendiente === null ? null : pendiente >= u.pendienteMin, s2 = inicio === null || final === null ? null : final >= inicio;
+  // Con huecos en el medio del tramo, una pendiente FAVORABLE no aprueba: esconder días bajos del final
+  // del medio la inclina hacia arriba. Cuenta como desconocida y decide la comparación de bloques
+  // (completos); una pendiente desfavorable sí cuenta (no puede aprobar nada).
+  const favorable = pendiente === null ? null : pendiente >= u.pendienteMin;
+  const pendienteConHuecos = favorable === true && sinDato.length > 0;
+  const s1 = pendienteConHuecos ? null : favorable, s2 = inicio === null || final === null ? null : final >= inicio;
   const estado = u.diversidadRegla === 'o' ? o(s1, s2) : y(s1, s2);
-  const bloques = k >= DIAS_MIN_BLOQUE ? `media días ${b}..${b + k - 1} ${inicio === null ? '¿?' : redondear(inicio)} → días ${D - k + 1}..${D} ${final === null ? '¿?' : redondear(final)}` : `tramo de ${D - b + 1} días: bloques de < ${DIAS_MIN_BLOQUE} días, sin comparar`;
-  const motivo = `pendiente ${pendiente === null ? `¿? (${puntos.length} días con dato, < ${PUNTOS_MIN_PENDIENTE})` : `${pendiente.toExponential(2)}/día (${puntos.length} días)`}; ${bloques}`;
-  return { estado, motivo, valores: { pendiente, puntos: puntos.length, cobertura, diasPorBloque: k, mediaInicio: inicio, mediaFinal: final } };
+  const bloques = k >= DIAS_MIN_BLOQUE ? `media días ${b}..${b + k - 1} ${redondear(inicio!)} → días ${D - k + 1}..${D} ${redondear(final!)}` : `tramo de ${diasTramo} días: bloques de < ${DIAS_MIN_BLOQUE} días, sin comparar`;
+  const motivo = `pendiente ${pendiente === null ? `¿? (${puntos.length} días con dato, < ${PUNTOS_MIN_PENDIENTE})` : `${pendiente.toExponential(2)}/día (${puntos.length} días)`}${pendienteConHuecos ? ` favorable pero con ${sinDato.length} día(s) sin dato (${rangos(sinDato)}): no decide` : ''}; ${bloques}`;
+  return { estado, motivo, valores: { pendiente, pendienteDecide: s1 !== null, puntos: puntos.length, cobertura, diasSinDato: sinDato, diasPorBloque: k, mediaInicio: inicio, mediaFinal: final } };
 }
 
 /** Días sueltos a texto compacto: [5, 6, 7, 9] → «5-7, 9». */

@@ -122,7 +122,7 @@ function operandoIzquierdo(texto: string, hasta: number): string {
     const c = texto[i]!, dos = texto.slice(i - 1, i + 1);
     if (')]}'.includes(c)) profundidad++;
     else if ('([{'.includes(c)) { if (profundidad === 0) break; profundidad--; }
-    else if (profundidad === 0 && (',;?:=!\n'.includes(c) || dos === '&&' || dos === '||')) break;
+    else if (profundidad === 0 && (',;?:=!\n'.includes(c) || dos === '&&' || dos === '||' || dos === '=>')) break;
   }
   return texto.slice(i + 1, hasta).trim();
 }

@@ -1,0 +1,78 @@
+{
+ "capturedAt": "2026-09-23T01:50:10.761598+00:00",
+ "status": "published",
+ "codeRevision": "eeb4bcfd0b431ef5aceed99a54324d2308c54bdc",
+ "url": "https://atlas.humanizar.tech",
+ "rulesVersion": 10,
+ "rulesSummary": "Reglas 10: paquete de natalidad por defecto (cortejo 2 radio 128, exigeComunidad=false, comprobacionContinua=true, habituacion 0.35) y gobernador techo; instantáneas anteriores con HISTORICAL_PARAMS",
+ "gate": {
+  "script": "scripts/deploy-check.sh",
+  "revision": "eeb4bcf",
+  "report": "/datos/tmp-atlas-lab/deploy-check/eeb4bcf",
+  "exitCode": 0,
+  "suite": {
+   "tests": 1366,
+   "pass": 1362,
+   "fail": 0,
+   "skipped": 4,
+   "durationMs": 201517
+  },
+  "typecheck": 0
+ },
+ "operation": {
+  "backupBeforeStop": "/datos/workspaces/personal/AtlasParaIsa-publications/20260922-v7/backups/world-20260922-2046.sqlite.gz (quick_check ok, 3 snapshots)",
+  "serviceStoppedAndPortFreedBeforeBuild": true,
+  "buildInPublicTreeAfterStop": true,
+  "newWorldFromInitiallyEmptyDirectory": "/datos/workspaces/personal/AtlasParaIsa-worlds/v10-20260922",
+  "newBackupDestination": "/datos/workspaces/personal/AtlasParaIsa-publications/20260922-v10/backups",
+  "oldDataDirectoryPreserved": "/datos/workspaces/personal/AtlasParaIsa-worlds/v7-20260922",
+  "runtimeEnvOnlyDataDirAndDest": true,
+  "credentialsAndWrapperUnchanged": true
+ },
+ "liveChecks": {
+  "health": {
+   "status": "ok"
+  },
+  "unauthenticatedWorldStatus": 401,
+  "assetsMatchCompiled": [
+   "/assets/index-Dac8DaPR.js sha256 2206246b19bdd137…",
+   "/assets/index-dDwXMXEk.css sha256 5a6fa359d99a3728…"
+  ],
+  "snapshots": [
+   {
+    "tick": 800,
+    "people": 22,
+    "births": 6
+   },
+   {
+    "tick": 1400,
+    "people": 23,
+    "births": 7
+   }
+  ],
+  "persistedParams": {
+   "poblacion.cortejo": 2,
+   "poblacion.radioCortejo": 128,
+   "poblacion.exigeComunidad": false,
+   "poblacion.comprobacionContinua": true,
+   "conducta.habituacion": 0.35,
+   "gobernador.politica": "techo",
+   "persistencia.cadaTicks": 100
+  },
+  "restart": {
+   "before": {
+    "tick": 1500,
+    "people": 23,
+    "births": 7
+   },
+   "after": {
+    "tick": 1700,
+    "people": 23,
+    "births": 7
+   },
+   "worldInstanceId": "63033163-3a01-45cb-829a-004a0dc0ce65",
+   "identityPreserved": true
+  },
+  "seed": 51926
+ }
+}

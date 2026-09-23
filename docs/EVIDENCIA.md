@@ -29,6 +29,11 @@ en 1 (20260919); 31337 llega al día 30 con 66 y las otras 14 crecían (43–255
 Lo que NO se logró todavía: el crecimiento es casi exponencial (×1,15–1,2 al día) hasta que lo frena
 el gobernador por hardware, y el criterio de 60 días no se ha evaluado. Suite 1361/1366 (4 omitidos;
 1 prueba de tiempos de `assertWorld` que falla solo con la torre cargada y pasa aislada).
+**Publicado** (20:46–20:50 -05): `main` = `eeb4bcf` sirve un mundo V10 nuevo (semilla 51926) desde un
+directorio inicialmente vacío (`AtlasParaIsa-worlds/v10-20260922`); el mundo V7 y su respaldo previo
+quedan intactos. deploy-check verde, suite 1362/1366 (4 omitidos, 0 fallos), assets servidos = compilados,
+7 nacimientos en los primeros 1400 pasos, reinicio con la misma identidad y las leyes persistidas.
+[Contrato](evidencia-2026-09-22/publication-v10.json).
 [Revisión completa](REVISION-NOCHE-2026-09-22.md).
 
 ## Límites persistidos compatibles, 22 de septiembre de 2026

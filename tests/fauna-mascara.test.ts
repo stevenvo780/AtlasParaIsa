@@ -125,7 +125,7 @@ test('el paso con la máscara del coordinador repartida entre 1 y 8 particiones 
     const seleccion = regiones(w2.animals, P).flatMap(region => seleccionDe(m, region)).sort(canonicalId);
     assert.equal(seleccion.length, m.seleccion.length);
     assert.ok(seleccion.every((a, i) => a === m.seleccion[i]));
-    const reconstruida: MascaraFauna = { tick: m.tick, animales: m.animales, poblacion: m.poblacion, seleccion, ids: new Set(seleccion.map(a => a.id)) };
+    const reconstruida: MascaraFauna = { tick: m.tick, animales: m.animales, poblacion: m.poblacion, orden: m.orden, seleccion, ids: new Set(seleccion.map(a => a.id)) };
     stepAnimals(w2, e => events2.push(e), reconstruida);
     const canonica = [...w.animals].sort(canonicalId); // lo que dejaba el `sort` de cierre de antes
     assert.ok(w.animals.every((a, i) => a === canonica[i]));
@@ -150,7 +150,48 @@ test('el orden canónico rápido da el mismo arreglo que ordenar: ordenado, inve
   }
 });
 
+/** Generador determinista para los tests de propiedades (nada de azar real en la suite). */
+function lcg(seed: number): (n: number) => number {
+  let x = seed >>> 0;
+  return n => { x = (Math.imul(x, 1664525) + 1013904223) >>> 0; return x % n; };
+}
+/** Copia profunda que comparte las cadenas, como `cloneState` de `cloneWorld` (motor.clonPorPaso). */
+function clonar<T>(v: T): T {
+  if (v === null || typeof v !== 'object') return v;
+  if (Array.isArray(v)) return v.map(clonar) as T;
+  const copia: Record<string, unknown> = {};
+  for (const k in v) copia[k] = clonar((v as Record<string, unknown>)[k]);
+  return copia as T;
+}
 const mismoArreglo = (a: readonly Animal[], b: readonly Animal[]): boolean => a.length === b.length && a.every((x, i) => x === b[i]);
+
+test('entre pasos, quitar, añadir, reordenar, clonar o repetir ids deja el mismo orden que sort', () => {
+  const r = lcg(20260923);
+  const w = herd(400);
+  let nuevos = 0;
+  const nacido = (id?: string): Animal => ({ ...w.animals[r(w.animals.length)]!, id: id ?? `animal-born-42-${r(40)}-${++nuevos}` });
+  const mutaciones: ((xs: Animal[]) => Animal[])[] = [
+    xs => xs.filter(() => r(9) > 0),                                              // caza o chunk retirado
+    xs => { for (let n = r(30); n > 0; n--) xs.push(nacido()); return xs; },        // chunk activado: cola al final
+    xs => { for (let n = 1 + r(5); n > 0; n--) xs.push(nacido(xs[r(xs.length)]!.id)); return xs; }, // ids repetidos
+    xs => { const a = r(xs.length), b = r(xs.length); [xs[a], xs[b]] = [xs[b]!, xs[a]!]; return xs; },
+    xs => xs.reverse(),
+    xs => xs.map(a => ({ ...a })),                                                  // clon: objetos nuevos, mismas cadenas
+    xs => structuredClone(xs),                                                      // clon con cadenas nuevas
+    xs => { const a = r(xs.length); xs.splice(a, 0, ...xs.splice(a, 1 + r(20)).reverse()); return xs; },
+    xs => xs,                                                                       // nada: el certificado basta
+  ];
+  for (let ronda = 0; ronda < 600; ronda++) {
+    const cuantas = 1 + r(3);
+    for (let n = 0; n < cuantas; n++) w.animals = mutaciones[r(mutaciones.length)]!(w.animals);
+    const antes = [...w.animals], esperado = [...antes].sort(canonicalId);
+    w.tick = ronda;
+    const m = mascaraFauna(w);
+    assert.ok(mismoArreglo(w.animals, esperado), `ronda ${ronda}`);
+    assert.ok(mismoArreglo(m.orden, w.animals));
+    if (w.animals.length > 300) w.animals = w.animals.filter(() => r(3) > 0);
+  }
+});
 
 test('la ventana que da la vuelta con ids repetidos entre sus dos tramos es la de hoy, objeto a objeto', () => {
   const w = herd(MAX_ACTIVE_ANIMALS + 1);
@@ -165,6 +206,32 @@ test('la ventana que da la vuelta con ids repetidos entre sus dos tramos es la d
   }
 });
 
+test('clonar el mundo en cada paso (motor.clonPorPaso) o alternar dos mundos da el mismo resultado', () => {
+  const pasos = 40, correr = (w: AnimalWorld, clonarCadaPaso: boolean, entre?: () => void): { w: AnimalWorld; eventos: unknown[] } => {
+    const eventos: unknown[] = [];
+    for (let n = 0; n < pasos; n++) {
+      if (clonarCadaPaso) w = clonar(w);
+      w.tick++; stepAnimals(w, e => eventos.push(e));
+      assert.ok(mismoArreglo(w.animals, [...w.animals].sort(canonicalId)));
+      entre?.();
+    }
+    return { w, eventos };
+  };
+  const persistente = correr(mundoVivo(), false);
+  assert.ok(persistente.w.animalDynamics.births > 0 && persistente.w.animalDynamics.deaths > 0, JSON.stringify(persistente.w.animalDynamics));
+  const huella = JSON.stringify(persistente.w), eventos = JSON.stringify(persistente.eventos);
+  // Solo, con el mundo clonado en cada paso: el certificado reconoce la fauna por sus ids.
+  const clonado = correr(mundoVivo(), true);
+  assert.equal(JSON.stringify(clonado.w), huella); assert.equal(JSON.stringify(clonado.eventos), eventos);
+  // Alternando con otro mundo, que ocupa el único hueco del certificado entre paso y paso.
+  const otro = mundoVivo();
+  otro.seed = 7; for (const a of otro.animals) a.id = a.id.replace('animal-42', 'animal-7');
+  for (const clonarCadaPaso of [false, true]) {
+    const alterno = correr(mundoVivo(), clonarCadaPaso, () => { otro.tick++; stepAnimals(otro); });
+    assert.equal(JSON.stringify(alterno.w), huella); assert.equal(JSON.stringify(alterno.eventos), eventos);
+  }
+});
+
 test('una fauna reordenada en sitio entre pasos no pasa por ordenada', () => {
   const w = mundoVivo();
   for (let n = 0; n < 3; n++) { w.tick++; stepAnimals(w); }
@@ -172,6 +239,7 @@ test('una fauna reordenada en sitio entre pasos no pasa por ordenada', () => {
   for (const mutar of mutaciones) {
     const control = structuredClone(w), eventos: unknown[] = [], eventosControl: unknown[] = [];
     mutar(w.animals); mutar(control.animals);
+    control.animals.sort(canonicalId); // lo que hacía el `sort` de antes al empezar el paso
     assert.equal(w.animals.length, control.animals.length);
     w.tick++; control.tick++;
     stepAnimals(w, e => eventos.push(e)); stepAnimals(control, e => eventosControl.push(e));

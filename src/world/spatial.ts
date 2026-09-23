@@ -31,11 +31,64 @@ export const validCoordinate = (n: unknown): n is number => typeof n === 'number
 export function tileAt(world: World, p: { x: number; y: number }): Tile | undefined {
   return lastTileAt(world.tiles, p.x, p.y);
 }
+
+/** T113 (b). `retiredChunks` por clave: primera aparición de cada clave, asociada a la identidad y la
+ * longitud del arreglo como el índice de teselas. Sólo `activate` (splice) y `maintainRegions` (push)
+ * lo cambian en sitio y lo mantienen aquí; `cloneWorld` y el Store lo reemplazan entero. Indexar
+ * cuesta unas diez veces un `findIndex`, así que un arreglo corto, o uno que se consulta pocas veces
+ * (la copia que `cloneWorld` hace en cada paso), se sigue recorriendo como siempre. */
+interface Archive { length: number; first: Map<string, Chunk>; duplicates: boolean; }
+const archives = new WeakMap<Chunk[], Archive>(), lookups = new WeakMap<Chunk[], number>();
+const ARCHIVE_MIN_LENGTH = 64, ARCHIVE_MIN_LOOKUPS = 8;
+function archiveOf(chunks: Chunk[]): Archive | undefined {
+  const archive = archives.get(chunks);
+  return archive && archive.length === chunks.length ? archive : undefined;
+}
+function indexArchive(chunks: Chunk[]): Archive | undefined {
+  if (chunks.length < ARCHIVE_MIN_LENGTH) return undefined;
+  const seen = (lookups.get(chunks) ?? 0) + 1;
+  lookups.set(chunks, seen < ARCHIVE_MIN_LOOKUPS ? seen : 0);
+  if (seen < ARCHIVE_MIN_LOOKUPS) return undefined;
+  const first = new Map<string, Chunk>();
+  let duplicates = false;
+  for (const chunk of chunks) { if (first.has(chunk.key)) duplicates = true; else first.set(chunk.key, chunk); }
+  const archive = { length: chunks.length, first, duplicates };
+  archives.set(chunks, archive);
+  return archive;
+}
+/** Igual que `chunks.findIndex(c => c.key === key)`. Lo reanimado suele ser lo último retirado:
+ * la posición se busca desde el final (con claves únicas es la misma). */
+function pendingIndex(chunks: Chunk[], key: string): number {
+  const archive = archiveOf(chunks) ?? indexArchive(chunks);
+  if (archive && !archive.duplicates) {
+    const chunk = archive.first.get(key);
+    if (!chunk) return -1;
+    const at = chunks.lastIndexOf(chunk);
+    if (at >= 0) return at;
+  }
+  return chunks.findIndex(c => c.key === key);
+}
+function archivedChunk(chunks: Chunk[], key: string): Chunk | undefined {
+  const at = pendingIndex(chunks, key);
+  return at >= 0 ? chunks[at] : undefined;
+}
+function takePending(chunks: Chunk[], at: number): Chunk {
+  const archive = archiveOf(chunks), chunk = chunks.splice(at, 1)[0]!;
+  if (archive && !archive.duplicates) { archive.first.delete(chunk.key); archive.length = chunks.length; } else archives.delete(chunks);
+  return chunk;
+}
+function retire(chunks: Chunk[], chunk: Chunk): void {
+  const archive = archiveOf(chunks);
+  chunks.push(chunk);
+  if (!archive) return;
+  if (archive.first.has(chunk.key)) archive.duplicates = true; else archive.first.set(chunk.key, chunk);
+  archive.length = chunks.length;
+}
 export function activate(world: World, x: number, y: number, context: WorldContext = worldContext(world)): void {
   if (!validCoordinate(x) || !validCoordinate(y)) return;
   const key = chunkKey(x, y);
   if (world.chunks[key]) return;
-  const pending = world.retiredChunks.findIndex(c => c.key === key);
+  const pending = pendingIndex(world.retiredChunks, key);
   const { cx, cy } = chunkCoords(x, y);
   // T035 ronda de arreglo (hallazgo crítico #2): `agua.cuencas` del MUNDO real, no el default
   // global de `generateChunk`/`initializeEcosystem` — este es el único sitio de producción que
@@ -43,7 +96,7 @@ export function activate(world: World, x: number, y: number, context: WorldConte
   const cuencas = paramsOf(world).agua.cuencas;
   // Both pending snapshots and host readers may share immutable archived objects.
   // Clone only the chunk being reactivated, before exposing animals/places/structures to laws.
-  const archived = pending >= 0 ? world.retiredChunks.splice(pending, 1)[0]! : context.loadChunk?.(key, world.tick);
+  const archived = pending >= 0 ? takePending(world.retiredChunks, pending) : context.loadChunk?.(key, world.tick);
   const chunk = archived ? structuredClone(archived) : generateChunk(world.seed, cx, cy, cuencas);
   const { tiles, animals, structures, ...meta } = chunk;
   world.chunks[key] = meta;
@@ -70,7 +123,7 @@ export function maintainRegions(world: World, context: WorldContext = worldConte
   for (const [key, meta] of Object.entries(world.chunks)) {
     if (needed.has(key)) continue;
     const chunk: Chunk = { ...meta, lifeVersion: 4, lastTick: world.tick, tiles: [], places: [], animals: [], structures: [] };
-    world.retiredChunks.push(chunk); detached.set(key, chunk);
+    retire(world.retiredChunks, chunk); detached.set(key, chunk);
     delete world.chunks[key]; retired.add(key);
   }
   if (retired.size) {
@@ -117,7 +170,7 @@ export function projectTerrain(world: World, viewport?: Viewport, context: World
     let chunk = archive.get(key);
     if (!chunk) {
       const { cx, cy } = chunkCoords(x, y);
-      chunk = world.retiredChunks.find(c => c.key === key) ?? context.loadChunk?.(key, world.tick) ?? generateChunk(world.seed, cx, cy, cuencas);
+      chunk = archivedChunk(world.retiredChunks, key) ?? context.loadChunk?.(key, world.tick) ?? generateChunk(world.seed, cx, cy, cuencas);
       archive.set(key, chunk);
       // Undiscovered landmarks are scenery, not recorded discoveries.
       for (const place of chunk.places) places.set(place.id, place);

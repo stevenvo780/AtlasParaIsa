@@ -16,9 +16,9 @@ el contrato.
 | Protocolo | `PROTOCOL_VERSION` 10 |
 | SQLite | `user_version` 5 (instantáneas paginadas) |
 | Mundo | V10 nuevo, semilla 51926, identidad `63033163-3a01-45cb-829a-004a0dc0ce65`, creado desde un directorio inicialmente vacío: `/datos/workspaces/personal/AtlasParaIsa-worlds/v10-20260922` |
-| Parámetros persistidos | `persistencia.cadaTicks=100`, `gobernador.politica=techo` y el paquete de reglas 10 (lista completa en el contrato) |
+| Parámetros persistidos | `persistencia.cadaTicks=100`, `gobernador.politica=techo`, `gobernador.presupuestoMs=5000` desde el 23-09 10:46 -05 (antes 50: el techo solo se fija si el p95 del paso pasa de 5 s; el mundo crece y se vuelve más lento a medida que crece) y el paquete de reglas 10 (lista completa en el contrato) |
 | Respaldos | `/datos/workspaces/personal/AtlasParaIsa-publications/20260922-v10/backups` (timer horario `atlas-respaldo.timer`) |
-| Servicios | `atlas-servidor.service` y `atlas-respaldo.service` de usuario; leen `~/.config/atlas-para-isa/runtime.env` (solo `CARTA_DATA_DIR` y `DEST`). Copias versionadas de las unidades (las instaladas son copias, no enlaces): `scripts/systemd/` |
+| Servicios | `atlas-servidor.service` y `atlas-respaldo.service` de usuario; leen `~/.config/atlas-para-isa/runtime.env` (solo `CARTA_DATA_DIR` y `DEST`); el servidor lleva el drop-in `crecimiento.conf` (`CPUWeight=10000`, `CARTA_PARAMS=gobernador.presupuestoMs=5000`). Copias versionadas de las unidades (las instaladas son copias, no enlaces): `scripts/systemd/` |
 | Gate | `scripts/deploy-check.sh 0ea1514` verde (build y smoke); suite 1433/1444 (7 omitidos a propósito, 4 cancelados por carga y verdes aislados 40/40, 0 fallos); verificación independiente de la poda por Codex y Grok (un alto corregido en `e1639d7`) |
 | Contrato | [publication-v10.json](evidencia-2026-09-22/publication-v10.json) (mundo), [publication-v10-pub2.json](evidencia-2026-09-23/publication-v10-pub2.json) y [publication-v10-pub3.json](evidencia-2026-09-23/publication-v10-pub3.json) (reinicios del 23-09) |
 

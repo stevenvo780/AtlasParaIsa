@@ -13,6 +13,7 @@ import { ensureWorldInstance, readWorldInstance } from './world-instance.js';
 import { Gobernador } from './governor.js';
 import { enriquecerPersona } from './persona-extra.js';
 import { CADA_PASOS, resumenVivo } from './resumen-vivo.js';
+import { clavesVivasEn } from './regiones-vivas.js';
 export { decideReproduction, decidirConTecho } from './governor.js';
 
 class HttpError extends Error { constructor(readonly status: number, message: string) { super(message); } }
@@ -173,7 +174,7 @@ export function createApp(options: AppOptions) {
   const view = (viewport?: Viewport) => {
     const start = monotonicNow(), projected = projectWorld(world, viewport, context);
     runtime.projectionMs = monotonicNow() - start;
-    return { ...projected, instanceId, performance: { ...runtime }, ...(failed ? { paused: true, pauseReason: 'No se pudo guardar. El mundo está en pausa para proteger lo ya vivido.' } : {}) };
+    return { ...projected, instanceId, regionesVivas: clavesVivasEn(world, { x: projected.originX ?? 0, y: projected.originY ?? 0, width: projected.width, height: projected.height }), performance: { ...runtime }, ...(failed ? { paused: true, pauseReason: 'No se pudo guardar. El mundo está en pausa para proteger lo ya vivido.' } : {}) };
   };
   function authorized(req: IncomingMessage) {
     const hash = sessionHash(req);

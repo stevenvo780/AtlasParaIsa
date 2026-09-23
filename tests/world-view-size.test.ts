@@ -6,6 +6,7 @@ import type { Viewport } from '../src/shared/types.js';
 import { projectTechnology, technologyRecipeDetail } from '../src/world/technology.js';
 import type { TechnologyRecipe } from '../src/shared/technology.js';
 import { resumenVivo } from '../src/server/resumen-vivo.js';
+import { clavesVivasEn } from '../src/server/regiones-vivas.js';
 
 const KIB = 1024;
 const encodedBytes = (value: unknown): number => Buffer.byteLength(JSON.stringify(value), 'utf8');
@@ -242,4 +243,17 @@ test('UI: los resúmenes de RuntimeStats para la interfaz pesan < 250 B y no cre
   assert.ok(despues - antes <= 12, 'solo cambian los dígitos de los recuentos, no la forma');
   // Frente a un estado típico de 150–400 KiB, menos de una milésima.
   assert.ok(despues / (150 * KIB) < 0.002);
+});
+
+/** UI 2026-09-22 (M10): `regionesVivas` la añade el servidor por cliente, junto a `instanceId`. Son claves de
+ * las regiones vivas que tocan la ventana: como mucho 7 × 5 con la ventana máxima, sin importar la población. */
+test('UI: regionesVivas pesa < 400 B por estado en cualquier ventana', t => {
+  const world = grownWorld(300);
+  for (const [label, viewport] of [['12x8', { x: 0, y: 0, width: 12, height: 8 }], ['40x28', { x: 0, y: 0, width: 40, height: 28 }], ['96x64', { x: -30, y: -20, width: 96, height: 64 }]] as const) {
+    const claves = clavesVivasEn(world, viewport), bytes = encodedBytes({ regionesVivas: claves });
+    t.diagnostic(`UI · regionesVivas cámara ${label}: ${claves.length} claves, ${bytes} B`);
+    assert.ok(bytes < 400, `${label}: ${bytes} B`);
+  }
+  injectMassCommunity(world, 10_000, { x: 1, y: 1 }, { x: 500, y: 500 });
+  assert.ok(encodedBytes({ regionesVivas: clavesVivasEn(world, { x: 0, y: 0, width: 40, height: 28 }) }) < 400, 'la población no cambia su tamaño');
 });

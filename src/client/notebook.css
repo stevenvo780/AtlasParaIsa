@@ -290,3 +290,12 @@
 /* M9: origen de cada procedimiento que recuerda. */
 .procedure-row { flex-wrap: wrap; }
 .procedure-origin { flex-basis: 100%; font-size: 11px; color: #6e805e; margin-top: 2px; }
+/* M10: zona en reposo y leyenda del mapa de calor legible (la superficie del HUD no la pisa). */
+.rest-zone-note { font-size: 12px; line-height: 1.6; color: #5d4a2c; background: #f3ead8; border-left: 3px solid #b99a64; padding: 8px 10px; border-radius: 0 4px 4px 0; margin: 6px 0 10px; }
+.game-shell .heat-legend.hud-surface { background: #243b30f2; border-color: #81977780; color: #f1f5e8; }
+.game-shell .heat-legend .eyebrow { color: #c9d8b8; }
+.game-shell .heat-legend .heat-stops li { font-size: 11px; color: #f1f5e8; }
+.game-shell .heat-legend .heat-range { font-size: 10px; color: #c9d8b8; margin: 6px 0 0; }
+/* La leyenda del calor vive a la izquierda: el cuaderno ocupa la derecha en escritorio. */
+@media (min-width: 761px) { .game-shell .heat-legend { left: 18px; right: auto; bottom: 96px; } }
+@media (max-width: 760px) { .game-shell .heat-legend { left: 10px; right: auto; bottom: 150px; max-width: 200px; } .game-shell.notebook-open .heat-legend { visibility: hidden; } }

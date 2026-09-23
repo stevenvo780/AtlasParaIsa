@@ -98,6 +98,10 @@ export interface WorldView {
   technology?: TechnologyView; organization?: OrganizationSummary;
   /** Identity of the served world; the projection omits it and the server adds it. */
   instanceId?: string;
+  /** M10: claves «cx,cy» (regiones de 16 × 16) que el servidor simula ahora dentro de esta ventana; el resto
+   * de las teselas recibidas son estado guardado o vista previa. La añade el servidor, como `instanceId`;
+   * como mucho 35 claves. Ausente = no se sabe (no se vela nada). */
+  regionesVivas?: string[];
   demography?: { deaths: number; causes: Record<string, number>; recent: { id: string; name: string; generation: number; parents: string[]; bornAt: number; diedAt: number; cause: string }[] };
 }
 /** `CommunityView` es a la vez la entidad interna (`World.communities`, `members` completo, sin

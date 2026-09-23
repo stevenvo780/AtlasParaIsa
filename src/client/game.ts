@@ -13,13 +13,15 @@ import { readHitos, readVisitCounters, readWorldVisit, saveHitos, saveVisitCount
 import { enClaro } from './textos.js';
 import { CronicaBuffer, GRUPOS, clasificar, contadoresDe, esHito, filtrar, momento, quienCedio, resumenDesdeVisita, type GrupoCronica } from './cronica.js';
 import { decidirModo, setModo, type Modo } from './modo.js';
-import { capasDeCalor, leyendaCalor, type Capa } from './calor.js';
+import { capasDeCalor, leyendaEnRango, rangoRecibido, type Capa } from './calor.js';
 import { ausenteEstado, demographicSummary, rotuloRecuento } from './censo-view.js';
 import { estadoCrecimiento, ritmo, ultimoFrenazo } from './gobernador-view.js';
 import { distribution, sparkline, statCard } from './charts.js';
 import { notaAcercamientos, seccionNacimientos } from './natalidad-view.js';
 import { seccionDesacuerdos, seccionJuntos } from './cooperacion-view.js';
 import { generacionMaxima, sinComunidad, vidasQueTerminaron } from './linaje-view.js';
+import { rotuloTerritorio, seccionTerritorio } from './territorio-view.js';
+import { enReposo } from './regiones.js';
 import { idDeRol, nombreConocido, olvidarVistos, recordarPersona, recordarVistos, visto } from './vistos.js';
 import './style.css';
 import './game.css';
@@ -78,7 +80,7 @@ function saveVisit(): void {
 }
 function readVisit(current: WorldView): number | null { try { return readWorldVisit(localStorage, current); } catch { return null; } }
 function stopSound(): void { clearTimeout(soundTimer); if (soundContext) void soundContext.close(); soundContext = null; document.getElementById('sound-toggle')?.setAttribute('aria-pressed', 'false'); }
-function clean(): void { saveVisit(); connection?.stop(); landscape?.destroy(); stopSound(); connection = null; landscape = null; world = null; pending = false; following = false; control = 'inspect'; populationSignature = ''; inspectorSignature = ''; memorySignature = ''; statsTab = 'life'; populationKind = 'people'; }
+function clean(): void { capaMapa = 'none'; capaCalor = null; saveVisit(); connection?.stop(); landscape?.destroy(); stopSound(); connection = null; landscape = null; world = null; pending = false; following = false; control = 'inspect'; populationSignature = ''; inspectorSignature = ''; memorySignature = ''; statsTab = 'life'; populationKind = 'people'; }
 
 function loginScreen(message = ''): void {
   clean(); root.innerHTML = `<main class="entry-page"><div class="entry-monogram">${icon.leaf}<span>UN MUNDO PRIVADO POR DESCUBRIR</span></div><section class="entry-card" aria-labelledby="entry-title"><div class="letter-stamp" aria-hidden="true">I<span>PARA TI</span></div><p class="eyebrow">UN LUGAR PARA ENCONTRARNOS</p><h1 id="entry-title">Una carta<br>para <em>Isa.</em></h1><p class="entry-intro">Un mundo que crece.<br>Muchas vidas. Tu forma de recorrerlo.</p><form id="login-form"><label for="password">Contraseña privada</label><input id="password" name="password" type="password" autocomplete="current-password" required placeholder="La llave de este lugar"><button class="button primary entry-submit" type="submit">Entrar a la carta ${icon.arrow}</button><p id="login-error" class="form-message" role="status">${esc(message)}</p></form><div class="entry-footnote">${icon.leaf}<span>Lo pequeño también puede contener un mundo.</span></div></section><p class="entry-footer">UNA CARTA PARA ISA · ACCESO PRIVADO</p></main>`;
@@ -219,7 +221,8 @@ function wire(): void {
   for (const button of root.querySelectorAll<HTMLButtonElement>('[data-gesture]')) button.addEventListener('click', () => { tool = button.dataset.gesture as typeof tool; control = 'inspect'; root.querySelectorAll('[data-gesture]').forEach(item => item.setAttribute('aria-pressed', String((item as HTMLElement).dataset.gesture === tool))); el('observe-tool').setAttribute('aria-pressed', 'false'); renderTool(); renderControls(); drawer('tool', true); });
   el('gesture-send').addEventListener('click', () => { const position = target(); if (position) send({ kind: tool, x: position.x, y: position.y, ...(tool === 'remember' ? { memoryId: el<HTMLSelectElement>('memory-select').value } : {}) }); });
   el('memory-select').addEventListener('change', renderTool);
-  el<HTMLSelectElement>('observation-layer').addEventListener('change', event => { const layer = (event.target as HTMLSelectElement).value as 'none' | 'moisture' | 'food'; landscape?.setLayer(layer); el('layer-explanation').textContent = layer === 'none' ? 'Agua, recursos y encuentros cambian las posibilidades.' : layer === 'food' ? 'Más dorado: más alimento. Inspecciona una casilla para ver su valor.' : 'Más azul: más humedad. Inspecciona una casilla para ver su valor.'; });
+  // M10: un solo selector de capas; el botón «Calor» y la tecla H recorren las mismas.
+  el<HTMLSelectElement>('observation-layer').addEventListener('change', event => aplicarCapa((event.target as HTMLSelectElement).value as CapaMapa));
   el<HTMLSelectElement>('person-select').addEventListener('change', event => choosePerson((event.target as HTMLSelectElement).value));
   el<HTMLSelectElement>('place-select').addEventListener('change', event => { const place = world?.places.find(p => p.id === (event.target as HTMLSelectElement).value); if (place) { selected = { kind: 'tile', x: place.x, y: place.y }; landscape?.focus(place.x, place.y); landscape?.select(selected); inspectorSignature = ''; renderInspector(); drawer('layer', false); drawer('inspector', true); } });
   el<HTMLFormElement>('tile-form').addEventListener('submit', event => { event.preventDefault(); const x = Number(el<HTMLInputElement>('tile-x').value), y = Number(el<HTMLInputElement>('tile-y').value); if (!Number.isInteger(x) || !Number.isInteger(y)) return; selected = { kind: 'tile', x, y }; following = false; landscape?.follow(null); landscape?.focus(x, y); landscape?.select(selected); inspectorSignature = ''; renderInspector(); renderTool(); drawer('inspector', true); });
@@ -238,27 +241,44 @@ function wire(): void {
   el('sound-toggle').addEventListener('click', async () => { if (soundContext) { stopSound(); return; } try { soundContext = new AudioContext(); await soundContext.resume(); el('sound-toggle').setAttribute('aria-pressed', 'true'); sound(); } catch { stopSound(); message('No se pudo activar el sonido. Puedes explorar sin él.', false); } });
 }
 
+/** M10: la capa del mapa, única para Explorar, el botón «Calor» y la tecla H. */
+type CapaMapa = 'none' | Capa | 'humedad';
+const capasMapa: CapaMapa[] = ['none', ...capasDeCalor, 'humedad'];
+let capaMapa: CapaMapa = 'none';
 let capaCalor: Capa | null = null;
 
-/** Cicla null → comida → vegetación → agua → fertilidad → madera → null (tecla H y botón «Calor»). */
-function cicloCalor(): void {
-  const siguiente = capaCalor === null ? 0 : capasDeCalor.indexOf(capaCalor) + 1;
-  capaCalor = siguiente >= capasDeCalor.length ? null : capasDeCalor[siguiente]!;
-  landscape?.setCapaCalor(capaCalor);
+/** Cicla sin capa → comida → vegetación → agua → fertilidad → madera → humedad → sin capa. */
+function cicloCalor(): void { aplicarCapa(capasMapa[(capasMapa.indexOf(capaMapa) + 1) % capasMapa.length]!); }
+
+function aplicarCapa(capa: CapaMapa): void {
+  capaMapa = capa;
+  capaCalor = capa === 'none' || capa === 'humedad' ? null : capa;
+  landscape?.setLayer(capa === 'humedad' ? 'moisture' : 'none');
+  landscape?.setCapaCalor(capaCalor, capaCalor && world ? rangoRecibido(world.tiles, capaCalor) : null);
+  const select = document.getElementById('observation-layer') as HTMLSelectElement | null;
+  if (select && select.value !== capa) select.value = capa;
+  const explicacion = document.getElementById('layer-explanation');
+  if (explicacion) explicacion.textContent = capa === 'none' ? 'Agua, recursos y encuentros cambian las posibilidades.' : capa === 'humedad' ? 'Más azul: más humedad. Inspecciona una casilla para ver su valor.' : 'Más intenso: más valor, entre el mínimo y el máximo de lo que ves. La leyenda da los valores reales.';
   renderLeyendaCalor();
 }
 
 function renderLeyendaCalor(): void {
   const panel = document.getElementById('heat-legend');
   const boton = document.getElementById('heat-button');
-  boton?.setAttribute('aria-pressed', String(capaCalor !== null));
+  boton?.setAttribute('aria-pressed', String(capaMapa !== 'none'));
   if (!panel) return;
-  panel.hidden = capaCalor === null;
-  if (!capaCalor) { panel.innerHTML = ''; return; }
-  const leyenda = leyendaCalor(capaCalor);
+  panel.hidden = capaMapa === 'none';
+  if (capaMapa === 'none') { panel.innerHTML = ''; return; }
+  if (capaMapa === 'humedad') {
+    const tiles = world?.tiles ?? [];
+    const valores = tiles.map(t => t.moisture).filter(Number.isFinite);
+    panel.innerHTML = `<p class="eyebrow">CAPA DEL MAPA</p><h3>Humedad</h3><p class="heat-range">Más azul, más humedad.${valores.length ? ` En lo que ves va de ${esc(percentage(Math.min(...valores)))} a ${esc(percentage(Math.max(...valores)))}.` : ''}</p>`;
+    return;
+  }
+  const leyenda = leyendaEnRango(capaMapa, world ? rangoRecibido(world.tiles, capaMapa) : null);
   panel.innerHTML = `<p class="eyebrow">MAPA DE CALOR</p><h3>${esc(leyenda.titulo)}</h3><ul class="heat-stops">${leyenda.paradas
     .map(parada => `<li><i style="background:${parada.color}" aria-hidden="true"></i><span>${esc(parada.etiqueta)}</span></li>`)
-    .join('')}</ul>`;
+    .join('')}</ul><p class="heat-range">${esc(leyenda.nota)}</p>`;
 }
 
 function navigateEntity(event: MouseEvent): void {
@@ -299,7 +319,7 @@ function receiveWorld(next: WorldView): void {
   recordarVistos(next);
   const sNow = next.people.find(p => p.role === 'S'); if (sNow) landscape?.setHome({ x: sNow.x, y: sNow.y });
   const first = world === null; world = next; landscape?.update(next); el('map-loading').hidden = true; el('world-day').textContent = `Día ${next.day}`; el('world-phase').textContent = `${phases[next.phase]}${next.weather === 'rain' ? ' · lluvia' : ''}`;
-  el('world-extent').textContent = next.infinite ? `${next.discoveredChunks ?? 0} regiones · ${next.settlementCount ?? 0} asentamientos` : 'Región inicial';
+  const territorio = rotuloTerritorio(next); el('world-extent').textContent = territorio.texto; el('world-extent').title = territorio.ayuda;
   cronica.acumular(next.events);
   if (first) {
     try { hitosGuardados = readHitos(localStorage, next); } catch { hitosGuardados = []; }
@@ -311,6 +331,7 @@ function receiveWorld(next: WorldView): void {
   }
   const memoryKey = JSON.stringify(next.memories); if (memoryKey !== memorySignature) { memorySignature = memoryKey; const old = el<HTMLSelectElement>('memory-select').value; el('memory-select').innerHTML = next.memories.map(m => `<option value="${esc(m.id)}">${esc(m.title)} · ${m.source === 'sample' ? 'prueba' : 'aprobado'}</option>`).join(''); if (next.memories.some(m => m.id === old)) el<HTMLSelectElement>('memory-select').value = old; }
   const places = el<HTMLSelectElement>('place-select'), oldPlace = places.value; const placesHtml = '<option value="">Un lugar de esta región</option>' + next.places.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join(''); if (places.innerHTML !== placesHtml) { places.innerHTML = placesHtml; places.value = oldPlace; }
+  if (capaMapa !== 'none') { if (capaCalor) landscape?.setCapaCalor(capaCalor, rangoRecibido(next.tiles, capaCalor)); renderLeyendaCalor(); }
   renderPopulation(); renderInspector(); renderStatus(); if (el<HTMLDialogElement>('chronicle-dialog').open) renderJournal();
 }
 function renderPopulation(): void {
@@ -428,8 +449,8 @@ function renderInspector(): void {
   } else {
     const position = selected, tile = world.tiles.find(t => t.x === position.x && t.y === position.y); el('person-controls').hidden = true; el('person-primary').hidden = true;
     if (!tile) { el('inspector-title').textContent = 'Otra región'; replacePersonCard('<p class="drawer-note">Esperando esta parte del paisaje. Recorrer con la cámara no añade hechos a la crónica.</p>'); return; }
-    const place = world.places.find(p => Math.hypot(p.x - tile.x, p.y - tile.y) < 1.5); const structures = world.structures?.filter(s => s.x === tile.x && s.y === tile.y) ?? []; const signature = JSON.stringify([tile, place, structures, world.blueprints, world.animals?.filter(a => a.x === tile.x && a.y === tile.y)]); if (signature === inspectorSignature) return; inspectorSignature = signature; el('inspector-title').textContent = place?.name ?? terrains[tile.terrain];
-    replacePersonCard(`<p class="tile-biome">${esc(biomes[tile.biome ?? ''] ?? terrains[tile.terrain])} <span>· ${esc(tile.x)}, ${esc(tile.y)}</span></p>${structures.map(structure=>structureCard(structure, world)).join('')}${structures.length ? '<details class="person-detail" data-detail="structure-ground"><summary>Suelo y recursos del lugar</summary>' : ''}<p class="game-reason">${esc((structures.length ? undefined : place?.description) ?? 'El terreno y los recursos abren posibilidades distintas para cada habitante.')}</p><div class="game-needs"><h3>Recursos del lugar</h3>${meter('Humedad', tile.moisture)}${meter('Vegetación', tile.vegetation)}${meter('Alimento', tile.food)}</div><div class="material-pouch"><span>${icon.leaf}<strong>${resourceQuantity(tile.wood ?? 0)}</strong> madera</span><span>${icon.hammer}<strong>${resourceQuantity(tile.stone ?? 0)}</strong> piedra</span></div><div class="tile-facts">${tile.drinkingWater !== undefined ? `<span>Agua en el terreno<strong>${resourceQuantity(tile.drinkingWater)} u.</strong></span>` : ''}${world.animals === undefined && tile.species && tile.fauna !== undefined ? `<span>${esc(({ hare: 'Liebres', deer: 'Venados', boar: 'Jabalíes', fish: 'Peces' } as Record<string, string>)[tile.species] ?? tile.species)}<strong>${number(tile.fauna)} animales</strong></span>` : ''}${tile.cultivation !== undefined ? `<span>Cultivo<strong>${percentage(tile.cultivation)}</strong></span>` : ''}${tile.fertility !== undefined ? `<span>Fertilidad<strong>${percentage(tile.fertility)}</strong></span>` : ''}${tile.traffic !== undefined ? `<span>Huellas de paso<strong>${number(tile.traffic, 1)}</strong></span>` : ''}</div>${structures.length ? '</details>' : ''}${world.animals ? `<p class="drawer-note">${world.animals.filter(a => a.x === tile.x && a.y === tile.y).length} animales individuales en esta casilla.</p>` : ''}${place ? `<p class="drawer-note" data-place-gatherings>${place.gatherings ? `Aquí se compartió comida ${number(place.gatherings)} ${place.gatherings === 1 ? 'vez' : 'veces'}.` : 'Aquí todavía no se ha compartido comida.'}</p>` : ''}<p class="drawer-note">Selecciona un habitante para dar una orden; usa las herramientas para intervenir en esta casilla.</p>`);
+    const place = world.places.find(p => Math.hypot(p.x - tile.x, p.y - tile.y) < 1.5); const structures = world.structures?.filter(s => s.x === tile.x && s.y === tile.y) ?? []; const reposo = enReposo(world, tile.x, tile.y) === true; const signature = JSON.stringify([tile, place, structures, world.blueprints, world.animals?.filter(a => a.x === tile.x && a.y === tile.y), reposo]); if (signature === inspectorSignature) return; inspectorSignature = signature; el('inspector-title').textContent = place?.name ?? (reposo ? biomes[tile.biome ?? ''] ?? terrains[tile.terrain] : terrains[tile.terrain]);
+    replacePersonCard(`<p class="tile-biome">${esc(biomes[tile.biome ?? ''] ?? terrains[tile.terrain])} <span>· ${esc(tile.x)}, ${esc(tile.y)}</span></p>${reposo ? '<p class="rest-zone-note" data-rest-zone>Zona en reposo: el servidor no simula esta región ahora; lo que ves es su estado guardado o una vista previa generada con la semilla. Cambiará cuando alguien llegue.</p>' : ''}${structures.map(structure=>structureCard(structure, world)).join('')}${structures.length ? '<details class="person-detail" data-detail="structure-ground"><summary>Suelo y recursos del lugar</summary>' : ''}<p class="game-reason">${esc((structures.length ? undefined : place?.description) ?? 'El terreno y los recursos abren posibilidades distintas para cada habitante.')}</p><div class="game-needs"><h3>Recursos del lugar</h3>${meter('Humedad', tile.moisture)}${meter('Vegetación', tile.vegetation)}${meter('Alimento', tile.food)}</div><div class="material-pouch"><span>${icon.leaf}<strong>${resourceQuantity(tile.wood ?? 0)}</strong> madera</span><span>${icon.hammer}<strong>${resourceQuantity(tile.stone ?? 0)}</strong> piedra</span></div><div class="tile-facts">${tile.drinkingWater !== undefined ? `<span>Agua en el terreno<strong>${resourceQuantity(tile.drinkingWater)} u.</strong></span>` : ''}${world.animals === undefined && tile.species && tile.fauna !== undefined ? `<span>${esc(({ hare: 'Liebres', deer: 'Venados', boar: 'Jabalíes', fish: 'Peces' } as Record<string, string>)[tile.species] ?? tile.species)}<strong>${number(tile.fauna)} animales</strong></span>` : ''}${tile.cultivation !== undefined ? `<span>Cultivo<strong>${percentage(tile.cultivation)}</strong></span>` : ''}${tile.fertility !== undefined ? `<span>Fertilidad<strong>${percentage(tile.fertility)}</strong></span>` : ''}${tile.traffic !== undefined ? `<span>Huellas de paso<strong>${number(tile.traffic, 1)}</strong></span>` : ''}</div>${structures.length ? '</details>' : ''}${world.animals ? `<p class="drawer-note">${world.animals.filter(a => a.x === tile.x && a.y === tile.y).length} animales individuales en esta casilla.</p>` : ''}${place ? `<p class="drawer-note" data-place-gatherings>${place.gatherings ? `Aquí se compartió comida ${number(place.gatherings)} ${place.gatherings === 1 ? 'vez' : 'veces'}.` : 'Aquí todavía no se ha compartido comida.'}</p>` : ''}<p class="drawer-note">Selecciona un habitante para dar una orden; usa las herramientas para intervenir en esta casilla.</p>`);
   }
 }
 function renderControls(): void {
@@ -585,7 +606,7 @@ function renderStatsContent(): void {
   if (statsTab === 'land') {
     const featureNames: Record<string, string> = { tree: 'Árboles', pine: 'Pinos', palm: 'Palmeras', cactus: 'Cactus', reeds: 'Juncos', berries: 'Bayas', flowers: 'Flores', rock: 'Rocas', clay: 'Arcilla', stump: 'Tocones', spring: 'Manantiales', pool: 'Pozas', none: 'Sin elemento destacado' };
     const species = speciesPlural;
-    panel.innerHTML = `${stamp}${scope}<div class="stats-grid">${statCard('Regiones activas', number(world.activeChunks), 'Cerca de los habitantes')}${statCard('Casillas activas', number(runtime?.activeTiles), 'Terreno en actividad')}${statCard('Agua dulce', number(stats.freshWater, 1), 'Unidades del modelo')}${statCard('Cultivos', number(stats.cultivatedTiles), 'Casillas cultivadas')}${statCard('Senderos', number(stats.trailTiles), 'Casillas con huellas')}${statCard('Madera y piedra', `${number(stats.materials.wood)} / ${number(stats.materials.stone)}`, 'Inventarios de habitantes')}</div><div class="stats-two-columns"><section class="stats-section"><div class="stats-section-heading"><h3>Biomas activos</h3><span>Casillas</span></div>${distribution(stats.biomes, biomes, '')}</section><section class="stats-section"><div class="stats-section-heading"><h3>Vida animal</h3><span>Individuos en regiones activas</span></div>${distribution(stats.wildlife, species, '')}<p class="stats-note">El censo cuenta cuerpos individuales. La caza, la depredación, el agua y las plantas influyen en su supervivencia.</p></section></div><section class="stats-section"><div class="stats-section-heading"><h3>Elementos del paisaje</h3><span>Casillas activas</span></div>${distribution(stats.features, featureNames, '')}</section>${lifeDynamics()}${inventionStats()}${world.structures?.length ? `<section class="stats-section"><h3 class="section-title">Construcciones en esta vista</h3>${world.structures.slice(0,24).map(structure=>`<button class="structure-link entity-link" data-place-x="${esc(structure.x)}" data-place-y="${esc(structure.y)}"><span>${esc(structure.name)}<small>${esc(structure.x)}, ${esc(structure.y)} · estado ${percentage(structure.condition)}</small></span>${icon.arrow}</button>`).join('')}</section>` : ''}`;
+    panel.innerHTML = `${stamp}${scope}${seccionTerritorio(world)}<div class="stats-grid">${statCard('Regiones activas', number(world.activeChunks), 'Cerca de los habitantes')}${statCard('Casillas activas', number(runtime?.activeTiles), 'Terreno en actividad')}${statCard('Agua dulce', number(stats.freshWater, 1), 'Unidades del modelo')}${statCard('Cultivos', number(stats.cultivatedTiles), 'Casillas cultivadas')}${statCard('Senderos', number(stats.trailTiles), 'Casillas con huellas')}${statCard('Madera y piedra', `${number(stats.materials.wood)} / ${number(stats.materials.stone)}`, 'Inventarios de habitantes')}</div><div class="stats-two-columns"><section class="stats-section"><div class="stats-section-heading"><h3>Biomas activos</h3><span>Casillas</span></div>${distribution(stats.biomes, biomes, '')}</section><section class="stats-section"><div class="stats-section-heading"><h3>Vida animal</h3><span>Individuos en regiones activas</span></div>${distribution(stats.wildlife, species, '')}<p class="stats-note">El censo cuenta cuerpos individuales. La caza, la depredación, el agua y las plantas influyen en su supervivencia.</p></section></div><section class="stats-section"><div class="stats-section-heading"><h3>Elementos del paisaje</h3><span>Casillas activas</span></div>${distribution(stats.features, featureNames, '')}</section>${lifeDynamics()}${inventionStats()}${world.structures?.length ? `<section class="stats-section"><h3 class="section-title">Construcciones en esta vista</h3>${world.structures.slice(0,24).map(structure=>`<button class="structure-link entity-link" data-place-x="${esc(structure.x)}" data-place-y="${esc(structure.y)}"><span>${esc(structure.name)}<small>${esc(structure.x)}, ${esc(structure.y)} · estado ${percentage(structure.condition)}</small></span>${icon.arrow}</button>`).join('')}</section>` : ''}`;
     return;
   }
   const history = stats.history ?? [];

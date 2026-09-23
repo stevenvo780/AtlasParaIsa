@@ -109,7 +109,13 @@ export interface WorldParams {
      * fuente disputada (la celda y las que la disputa llama «el mismo destino»), que al elegir dónde comer, beber
      * o cazar le parece `memoriaDisputa` celdas más lejos: prefiere otra que perciba, y si no hay otra vuelve.
      * 0 = hoy (cede quien llega a la comprobación, espera treinta pasos inmóvil y no recuerda nada). */
-    memoriaDisputa: number };
+    memoriaDisputa: number;
+    /** Reencuentro (hipótesis H2), `index.ts` → `choose`: peso del candidato `approach` con que un mortal sin
+     * urgencias (hambre y sed ≤ 0,45, energía ≥ 0,6, fatiga ≤ 0,65) que no ve a ≤ RADIUS a nadie con vínculo
+     * mutuo ≥ 0,3 va hacia el vinculado mutuo vivo más cercano que recuerde, a ≤ `poblacion.radioCortejo`.
+     * Puntuación `reencuentro · (0,5 + 0,5 · vínculo medio)`; a igual distancia, el de id menor. No mira edad ni
+     * parentesco, no toca `reproduce()` y el viaje se paga como cualquier otro. 0 = hoy. */
+    reencuentro: number };
 }
 
 function deepFreeze<T>(value: T): T {
@@ -148,7 +154,8 @@ const RAW_HISTORICAL: WorldParams = {
   // cultural), así que abrirlas no cambia el mundo.
   conducta: { habituacion: 0, aptitud: 0 },
   social: { maxComunidades: 8, disputaNecesidad: 0.65, disputaEscasez: 1, disputaRadio: 2, disputaDestino: 0.5, disputaEspera: 180,
-    ensenanzaRareza: 0, confianzaSalida: 0.35, distanciaAlternativa: 0.2, vinculoConvivencia: 0, radioConvivencia: 0, memoriaDisputa: 0 },
+    ensenanzaRareza: 0, confianzaSalida: 0.35, distanciaAlternativa: 0.2, vinculoConvivencia: 0, radioConvivencia: 0, memoriaDisputa: 0,
+    reencuentro: 0 },
 };
 
 /**
@@ -184,7 +191,7 @@ export const DEFAULT_PARAMS: WorldParams = deepFreeze(RAW_DEFAULTS);
  * noche del 2026-09-22 ya tienen por default su valor histórico y aquí valen lo mismo:
  * `genes.edadFundadoresMin/MaxDias` 2/2, `poblacion.radioPareja` 3, `poblacion.radioLugar` 4,
  * `agua.memoria` 1, `agua.rebano` 0, `conducta.aptitud` 0, `social.*` (disputas 0,65/×1/2/0,5/180, rareza 0,
- * confianza 0,35, distancia 0,2, `maxComunidades` 8, `vinculoConvivencia` 0, `radioConvivencia` 0).
+ * confianza 0,35, distancia 0,2, `maxComunidades` 8, `vinculoConvivencia` 0, `radioConvivencia` 0, `reencuentro` 0).
  *
  * Única excepción deliberada: `gobernador.politica` vale `techo` también aquí. El gobernador no es
  * una ley del mundo (no entra en `stepWorld`: decide por el p95 de reloj del servidor, ruling R17) y
@@ -302,6 +309,9 @@ export const PARAM_RANGES: Record<string, [number, number]> = {
   // Penalización, en celdas, de la fuente donde se cedió una disputa. La percepción llega a 7 celdas:
   // con ≥ 8 cualquier otra fuente percibida va antes; el máximo 32 es «nunca, si hay otra». 0 apaga la ley.
   'social.memoriaDisputa': [0, 32],
+  // Peso del reencuentro, en la escala del cortejo: con 2 y vínculo pleno puntúa como el cortejo que adopta
+  // reglas 10. Sólo actúa sin urgencias corporales, así que nunca compite con beber o comer. 0 apaga la ley.
+  'social.reencuentro': [0, 2],
 };
 
 type ScalarDescriptor = { kind: 'number'; range: readonly [number, number]; integer?: boolean }

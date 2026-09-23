@@ -14,7 +14,7 @@ import type { World } from '../../src/world/index.js';
  * params reproduce el digesto de esos árboles. Una ley nueva con default 0 añade aquí su clave, y sus
  * propios controles se miden en el árbol anterior quitando las claves que ya estaban en esta lista.
  */
-export const CLAVES_POSTERIORES = ['social.memoriaDisputa', 'agua.rebano'] as const;
+export const CLAVES_POSTERIORES = ['social.memoriaDisputa', 'agua.rebano', 'social.reencuentro'] as const;
 
 /** Valor de una clave punteada `seccion.hoja`. */
 function valor(params: WorldParams, clave: string): unknown {

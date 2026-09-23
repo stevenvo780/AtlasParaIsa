@@ -826,6 +826,24 @@ el umbral de 14); en 17: 8 → 1; en 1007: 1 → 2. La expedición se forma en l
 0,5–1; en control, 0,03–0,12 según el diagnóstico), pero sólo en 303 abre el cerrojo. La emulación en el mismo árbol, que
 alinea el rumbo de todos los buscadores en cada paso y no sólo al decidir, sí rescata 17 (38) y 1007 (45).
 
+#### Reencuentro (`social.reencuentro`, hipótesis H2)
+
+Diagnóstico (régimen de charcas: 13, 23): el grupo arranca junto al agua y se dispersa cuando se agotan las
+charcas finitas. Más allá de RADIUS sólo el cortejo acerca a dos mortales, y exige que los dos estén listos
+para criar a la vez; en los fundadores de 13 y 23 la pareja posible falla por distancia el 55–100 % de las
+veces y la generación 1 madura sin vínculo mutuo con ningún no pariente. La ley: en `choose`, un mortal sin
+urgencias (hambre y sed ≤ 0,45, energía ≥ 0,6, fatiga ≤ 0,65) que no ve a ≤ RADIUS a nadie con vínculo mutuo
+≥ 0,3 recibe el candidato `approach` hacia el vinculado mutuo vivo más cercano que recuerde, a
+≤ `poblacion.radioCortejo`, con puntuación `reencuentro · (0,5 + 0,5 · vínculo medio)` (a igual distancia, el
+de id menor). Se apaga en cuanto ve a uno de los suyos. No mira edad ni parentesco, no toca `reproduce()` (el
+nacimiento sigue exigiendo cuerpo, inventario, lugar y cupo) y el viaje se paga como cualquier otro. Default e
+histórico 0 = hoy, bit a bit (`tests/reencuentro.test.ts`).
+
+Réplica informativa, no prerregistrada (reglas 10 + `persistencia.cadaTicks=300`, `--techo-lab 100`,
+`social.reencuentro=1`, una réplica): nacimientos acumulados control → ley en 13: 18 → 24 el día 10 y 18 → 35 el
+día 14; en 23: 23 → 31 el día 10 y 29 → 36 el día 14. Son las cifras del contrafáctico `CF_COHESION=1`, así que
+el parámetro reproduce la emulación. El coste se ve: muertes por sed al día 10, 12 → 14 en 13 y 12 → 18 en 23.
+
 ### Leyes nuevas (calibradas 2026-09-19, fallback analítico; barrido T031 pendiente post-evento)
 
 Las cinco leyes descritas a continuación formalizan las dinámicas físicas, biológicas y de persistencia identificadas en la revisión técnica, ya desplegadas en producción con sus defaults calibrados (commit `835f3d5`, 11:19). Cada una responde a una causa confirmada, asume un coste explícito conforme al Principio I de la constitución y cuenta con pruebas automatizadas que delimitan su refutación. Los valores por defecto de la tabla anterior son el **fallback analítico** de `research.md` adoptado por el límite de tiempo del sprint (ruling R14 del ledger `.superpowers/sdd/tasks/progress.md`): el barrido empírico masivo T031 (rejilla de 16 combinaciones × 8 réplicas × 25 días sobre senescencia, más un barrido de entorno en paralelo) todavía no se ejecutó y queda pendiente post-evento junto con T032 (confirmación larga, 16 réplicas × 25 días).

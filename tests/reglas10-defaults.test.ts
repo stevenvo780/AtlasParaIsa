@@ -61,7 +61,8 @@ test('(b) createWorld() nuevo nace con los defaults de reglas 10 y todo lo demá
   assert.equal(DEFAULT_PARAMS.genes.edadFundadoresMinDias, 2); assert.equal(DEFAULT_PARAMS.genes.edadFundadoresMaxDias, 2);
   assert.equal(DEFAULT_PARAMS.gobernador.politica, 'techo');
   assert.deepEqual({ ...DEFAULT_PARAMS.social }, { maxComunidades: 8, disputaNecesidad: 0.65, disputaEscasez: 1, disputaRadio: 2, disputaDestino: 0.5,
-    disputaEspera: 180, ensenanzaRareza: 0, confianzaSalida: 0.35, distanciaAlternativa: 0.2, vinculoConvivencia: 0, radioConvivencia: 0, memoriaDisputa: 0 });
+    disputaEspera: 180, ensenanzaRareza: 0, confianzaSalida: 0.35, distanciaAlternativa: 0.2, vinculoConvivencia: 0, radioConvivencia: 0,
+    memoriaDisputa: 0, reencuentro: 0 });
   // Fuera de las cinco claves adoptadas, los defaults nuevos SON los históricos (mismo orden de claves).
   const sinAdoptadas = (params: WorldParams) => JSON.stringify({ ...params, poblacion: { ...params.poblacion, cortejo: 0, radioCortejo: 0,
     exigeComunidad: false, comprobacionContinua: false }, conducta: { ...params.conducta, habituacion: 0 } });

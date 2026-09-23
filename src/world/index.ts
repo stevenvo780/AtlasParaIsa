@@ -604,6 +604,29 @@ function choose(world: World, person: Person): void {
     if (cortejado) candidates.push({ action: 'approach', target: { x: cortejado.x, y: cortejado.y }, score: leyPoblacion.cortejo * (0.5 + vinculo * 0.5),
       reason: `Recuerda el vínculo con ${cortejado.name} y lo busca; ambos están en edad de criar y la cercanía hace posible una familia.` });
   }
+  // Reencuentro (`social.reencuentro`): más allá de RADIUS sólo el cortejo acerca a dos mortales, y exige que los
+  // dos estén listos para criar a la vez. Cuando un grupo se dispersa (se agotan sus charcas), nadie lo vuelve a
+  // reunir y los hijos maduran lejos de cualquier no pariente. Quien no tiene urgencias y no ve a ninguno de los
+  // suyos vuelve hacia el más cercano que recuerde; se apaga en cuanto ve a uno. No mira edad ni parentesco, no
+  // crea recursos ni garantiza un nacimiento, y el viaje cuesta sed, hambre y energía como cualquier otro.
+  const reencuentro = paramsOf(world).social.reencuentro;
+  if (reencuentro > 0 && person.role === 'neighbor' && person.hunger <= 0.45 && person.thirst <= 0.45
+    && person.energy >= 0.6 && person.fatigue <= 0.65) {
+    let suyoALaVista = false, destino: Person | undefined, vinculo = 0;
+    for (const [id, strength] of Object.entries(person.bonds)) {
+      if (strength < 0.3) continue;
+      const other = personById(world, id);
+      if (!other || other.role !== 'neighbor' || (other.bonds[person.id] ?? 0) < 0.3) continue;
+      const away = distance(person, other);
+      if (away <= RADIUS) { suyoALaVista = true; break; }
+      if (away > leyPoblacion.radioCortejo) continue;
+      if (!destino || away < distance(person, destino) || (away === distance(person, destino) && other.id < destino.id)) {
+        destino = other; vinculo = (strength + (other.bonds[person.id] ?? 0)) / 2;
+      }
+    }
+    if (!suyoALaVista && destino) candidates.push({ action: 'approach', target: { x: destino.x, y: destino.y },
+      score: reencuentro * (0.5 + vinculo * 0.5), reason: `Vuelve hacia ${destino.name}; no ve cerca a nadie de los suyos.` });
+  }
   const water = primeroConFiltroCaro(reachableTiles, disputada
     ? (a, b) => (distance(person, a) + recelo(a)) - (distance(person, b) + recelo(b))
     : (a, b) => distance(person, a) - distance(person, b), t => waterAvailable(world,t) > 0.005 && planAffordable(stepsTo(t)!, 0));

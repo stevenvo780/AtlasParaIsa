@@ -234,7 +234,7 @@ test('world statistics show real scopes, live series and keyboard-operated tabs'
   await expect(page.locator('#stats-tab-life')).toBeFocused();
   await expect(page.locator('#stats-content .stat-card').filter({ has: page.locator(':scope > span', { hasText: /^Vecinos vivos$/ }) }).locator('strong')).toHaveText(String(app.world.people.filter(person => person.role === 'neighbor').length));
   await expect(page.locator('#stats-content .stat-card').filter({ has: page.locator(':scope > span', { hasText: /^S\/I protegidos$/ }) }).locator('strong')).toHaveText(String(app.world.people.filter(person => person.role !== 'neighbor').length));
-  await expect(page.locator('[data-demographic-summary]')).toContainText(`${app.world.people.length} vidas · censo global`);
+  await expect(page.locator('[data-demographic-summary]')).toContainText(`${app.world.people.length} vidas en el mundo`);
   await expect(page.locator('#stats-content')).toContainText('Todavía no hay muestras');
   await expect.poll(() => observed.views.at(-1)?.stats?.history.length ?? 0, { timeout: 10_000 }).toBeGreaterThan(0);
   await expect(page.locator('.history-chart svg')).toHaveCount(2);
@@ -400,7 +400,7 @@ test('V4 mobile animal search, inspection and follow preserve human authority bo
     await expect(page.locator('#follow-toggle')).toHaveAttribute('aria-pressed', 'true');
     await page.locator('#landscape').focus(); await page.keyboard.press('d'); expect(observed.gestures).toHaveLength(0);
     await page.locator('#landscape').press('ArrowRight'); await expect(page.locator('#follow-toggle')).toHaveAttribute('aria-pressed','false');
-    await page.locator('#population-toggle').tap(); await page.getByRole('button',{name:'Habitantes',exact:true}).tap(); await expect(page.locator('#population-count')).toHaveText(String(app.world.people.length));
+    await page.locator('#population-toggle').tap(); await page.getByRole('button',{name:'Habitantes',exact:true}).tap(); await expect(page.locator('#population-count')).toContainText(`${app.world.people.length} en el mundo`);
     await fullscreen(page,390,844); expect(observed.errors).toEqual([]);
   } finally { await context.close(); }
 });

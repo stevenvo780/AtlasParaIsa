@@ -12,6 +12,7 @@ import { technologyPane, recipeCard } from './technology-art.js';
 import { readWorldVisit, saveWorldVisit } from './visit-memory.js';
 import { decidirModo, setModo, type Modo } from './modo.js';
 import { capasDeCalor, leyendaCalor, type Capa } from './calor.js';
+import { ausenteEstado, demographicSummary, rotuloRecuento } from './censo-view.js';
 import './style.css';
 import './game.css';
 import './notebook.css';
@@ -38,6 +39,9 @@ let focusedRecipe: string | null = null;
 const recipeDetails = new Map<string, TechnologyRecipe | null>();
 /** T036(h): biografías pedidas de una en una; el `state` sólo trae la identidad y el estado de ahora. */
 const personaDetails = new Map<string, PersonDetail | null>();
+/** M1: lo que el servidor contestó sobre cada identidad pedida (true = vive en el mundo servido). No caduca por tick:
+ * una muerte llega por `demography.recent`, que manda sobre este registro. */
+const personaVivo = new Map<string, boolean>();
 let soundContext: AudioContext | null = null;
 let soundTimer: ReturnType<typeof setTimeout> | undefined;
 const el = <T extends HTMLElement = HTMLElement>(id: string): T => document.getElementById(id) as T;
@@ -74,9 +78,9 @@ function enterWorld(): void {
   clean(); lastVisit = null; status = 'connecting';
   root.innerHTML = worldShell();
   notebook = new Notebook(el('game')); inspectorTab = 'now';
-  focusedRecipe = null; recipeDetails.clear(); personaDetails.clear();
+  focusedRecipe = null; recipeDetails.clear(); personaDetails.clear(); personaVivo.clear();
   const modo = syncModo();
-  connection = new Connection({ world: receiveWorld, status: value => { status = value; renderStatus(); }, pending: value => { pending = value; if (!value) landscape?.setPendingTarget(null); renderControls(); }, result: result => message(result.message, result.accepted), error: text => message(text, false), expired: () => loginScreen('La sesión terminó. Vuelve a entrar para ver la carta.'), recipe: (id, recipe) => { recipeDetails.set(id, recipe); if (statsTab === 'technology' && !el('stats-drawer').hidden) renderStats(); }, persona: (id, persona) => { personaDetails.set(id, persona); if (selected?.kind === 'person' && selected.id === id) { inspectorSignature = ''; renderInspector(); } } });
+  connection = new Connection({ world: receiveWorld, status: value => { status = value; renderStatus(); }, pending: value => { pending = value; if (!value) landscape?.setPendingTarget(null); renderControls(); }, result: result => message(result.message, result.accepted), error: text => message(text, false), expired: () => loginScreen('La sesión terminó. Vuelve a entrar para ver la carta.'), recipe: (id, recipe) => { recipeDetails.set(id, recipe); if (statsTab === 'technology' && !el('stats-drawer').hidden) renderStats(); }, persona: (id, persona) => { personaDetails.set(id, persona); personaVivo.set(id, persona !== null); if (selected?.kind === 'person' && selected.id === id) { inspectorSignature = ''; renderInspector(); } } });
   landscape = new Landscape(el<HTMLCanvasElement>('landscape'), pick, viewport => { connection?.setViewport(viewport); el('camera-coordinates').textContent = `${viewport.x + Math.floor(viewport.width / 2)}, ${viewport.y + Math.floor(viewport.height / 2)}`; }, () => { following = false; renderControls(); }, { modo });
   // T036(a): en observador el mundo llega cada 5 s (el servidor acota a 1000 ms) y el terreno se
   // dibuja en Canvas 2D: ni WebGL2 ni una cadencia que un móvil lento no puede sostener.
@@ -261,16 +265,18 @@ function renderPopulation(): void {
   if (fauna) {
     const species = el<HTMLSelectElement>('species-filter').value;
     const animals = (world.animals ?? []).filter(a => (!species || species === a.species) && `${speciesNames[a.species]} ${a.id} ${animalActions[a.action]}`.toLocaleLowerCase('es').includes(search));
-    const signature = JSON.stringify(['animals', search, species, selected, animals.map(a => [a.id, a.species, a.action])]); el('population-count').textContent = String(world.animals?.length ?? 0);
+    const signature = JSON.stringify(['animals', search, species, selected, animals.map(a => [a.id, a.species, a.action])]); el('population-count').textContent = `${number(world.animals?.length ?? 0)} en esta vista`;
     el('population-note').textContent = `Individuos de la región recibida por la cámara. ${animals.length} coincidencias${animals.length > 80 ? '; se muestran las primeras 80, afina la búsqueda' : ''}. Sus necesidades guían su actividad; puedes observarlos y seguirlos.`;
     if (signature === populationSignature) return; populationSignature = signature;
     el('population-list').innerHTML = animals.slice(0, 80).map(a => `<button class="population-person animal-row" data-animal="${esc(a.id)}" aria-pressed="${selected.kind === 'animal' && selected.id === a.id}"><span class="animal-avatar" style="--animal-color:${animalColors[a.species]}" aria-hidden="true">${animalSilhouette(a.species)}</span><span><strong>${speciesNames[a.species]}</strong><small>${animalActions[a.action]} · ${esc(a.id)}</small></span></button>`).join('') || '<p class="drawer-note">No hay animales que coincidan en esta región. Puedes recorrer el mapa o ampliar el filtro.</p>';
     return;
   }
-  el('population-note').textContent = 'Las habilidades cambian al practicar. Puedes observar o dar una orden.';
-  const signature = JSON.stringify([search, activePersonId, people.map(p => [p.id, p.name, p.specialty, p.action, p.controlMode])]); el('population-count').textContent = String(world.people.length); if (signature === populationSignature) return; populationSignature = signature;
-  el('population-list').innerHTML = people.map(p => `<button class="population-person" data-person="${esc(p.id)}" aria-pressed="${p.id === activePersonId}"><span class="person-avatar ${p.role === 'S' ? 'avatar-s' : p.role === 'I' ? 'avatar-i' : ''}">${esc(p.role === 'neighbor' ? p.name.slice(0, 1) : p.role)}</span><span><strong>${esc(p.name)}</strong><small>${esc(p.specialty ?? 'Aprendiendo su camino')}</small></span><span class="population-action">${p.controlMode === 'directed' ? icon.hand : icon.leaf}</span></button>`).join('') || '<p class="drawer-note">No hay habitantes que coincidan.</p>';
-  const select = el<HTMLSelectElement>('person-select'); select.innerHTML = '<option value="">Elige un habitante</option>' + world.people.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join(''); select.value = activePersonId;
+  // M1: `people` llega recortado a la cámara (protocolo 10); el total del mundo sale del censo.
+  el('population-count').textContent = rotuloRecuento(world);
+  el('population-note').textContent = 'La lista muestra a quien está en la cámara; el mundo tiene más vidas fuera de ella. Mueve el mapa o usa S e I para encontrar a otras. Las habilidades cambian al practicar.';
+  const signature = JSON.stringify([search, activePersonId, people.map(p => [p.id, p.name, p.specialty, p.action, p.controlMode])]); if (signature === populationSignature) return; populationSignature = signature;
+  el('population-list').innerHTML = people.map(p => `<button class="population-person" data-person="${esc(p.id)}" aria-pressed="${p.id === activePersonId}"><span class="person-avatar ${p.role === 'S' ? 'avatar-s' : p.role === 'I' ? 'avatar-i' : ''}">${esc(p.role === 'neighbor' ? p.name.slice(0, 1) : p.role)}</span><span><strong>${esc(p.name)}</strong><small>${esc(p.specialty ?? 'Aprendiendo su camino')}</small></span><span class="population-action">${p.controlMode === 'directed' ? icon.hand : icon.leaf}</span></button>`).join('') || (world.people.length ? '<p class="drawer-note">No hay habitantes de esta vista que coincidan.</p>' : '<p class="drawer-note">No hay nadie en esta vista. El censo del mundo está en Mundo › Vida; mueve el mapa o usa S e I para encontrar a alguien.</p>');
+  const select = el<HTMLSelectElement>('person-select'); select.innerHTML = `<option value="">${world.people.length ? 'Elige a alguien de esta vista' : 'Nadie en esta vista'}</option>` + world.people.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join(''); select.value = activePersonId;
 }
 function replacePersonCard(html: string): void {
   const card = el('inhabitant-card');
@@ -323,13 +329,17 @@ function renderInspector(): void {
     const p = person();
     if (!p) {
       const id = selected.id, legacy = world.demography?.recent.find(entry=>entry.id===id);
+      // M1: estar fuera de `people` no es morir. Solo `demography.recent` acredita una muerte; si no,
+      // se pregunta al servidor (la ficha a demanda mira el mundo entero) y se dice lo que contestó.
+      const estado = ausenteEstado(world, id, personaVivo.get(id));
+      if (estado === 'comprobando') connection?.requestPersona(id);
       el('person-controls').hidden = true; el('person-primary').hidden = true; el('direct-toggle').hidden = true;
       el('inspector-tabs').hidden = true;
       el('inspector-title').textContent = legacy?.name ?? 'Fuera de esta vista';
       // T036(b): la «Historia» de una identidad difunta es su contexto de muerte (FR-006). Un evento
       // sin campo `death` (crónica antigua) no dibuja nada, en vez de un hueco que parezca un dato.
       const farewell = world.events.find(event => event.kind === 'death' && event.actors.includes(id));
-      replacePersonCard(legacy ? `<p class="game-reason">Esta vida terminó en el paso ${esc(legacy.diedAt)}.</p><p class="drawer-note">${esc(deathCauses[legacy.cause] ?? legacy.cause)}</p><p class="drawer-note">Generación ${esc(legacy.generation)}. Su historia permanece en la crónica del mundo.</p>${farewell ? deathHistory(farewell) : ''}` : '<p class="drawer-note">Este habitante ya no aparece en el estado recibido.</p>');
+      replacePersonCard(legacy ? `<p class="game-reason">Esta vida terminó en el paso ${esc(legacy.diedAt)}.</p><p class="drawer-note">${esc(deathCauses[legacy.cause] ?? legacy.cause)}</p><p class="drawer-note">Generación ${esc(legacy.generation)}. Su historia permanece en la crónica del mundo.</p>${farewell ? deathHistory(farewell) : ''}` : estado === 'fuera' ? '<p class="game-reason" data-absent="fuera">Vive fuera de esta vista.</p><p class="drawer-note">Sigue en el mundo, fuera de la zona que muestra la cámara. Mueve el mapa para volver a encontrar su posición.</p>' : estado === 'no-servido' ? '<p class="drawer-note" data-absent="no-servido">El servidor no tiene ahora a esta identidad entre las vidas del mundo. Si murió hace tiempo, su despedida ya no está entre las 32 más recientes.</p>' : '<p class="drawer-note" data-absent="comprobando">Fuera de esta vista. Comprobando con el servidor si sigue en el mundo…</p>');
       if (following) { following=false; landscape?.follow(null); } control='inspect'; inspectorSignature='';return;
     }
     // T036(h): la biografía no viaja en el `state`; se pide al abrir la ficha y se cachea por tick.
@@ -419,24 +429,6 @@ function inventionStats(): string {
   const dynamics = stats.inventionDynamics;
   return `<section class="stats-section"><div class="stats-section-heading"><h3>Proyectos y construcciones</h3><span>Aprendidos en el mundo</span></div><div class="stats-grid">${statCard('Planos conocidos', number(stats.blueprints), 'Familias y variantes registradas')}${statCard('Investigaciones', number(dynamics?.attempts), 'Intentos acumulados')}${statCard('Variantes aceptadas', number(dynamics?.accepted), 'Proyectos viables')}${statCard('Reparaciones', number(dynamics?.repairs), 'Acciones con material y trabajo')}${statCard('Lluvia recogida', number(dynamics?.waterCollected, 2), 'Agua en cisternas')}${statCard('Alimento retirado', number(dynamics?.foodTaken, 2), 'Consumido desde graneros')}</div>${distribution(stats.structures, componentNames, 'componentes')}<p class="stats-note">Las estructuras combinan funciones. Se desgastan, conservan existencias reales y pueden repararse.</p>${world?.blueprints?.length ? `<details class="person-detail" data-detail="blueprints"><summary>Cuaderno de proyectos (${world.blueprints.length})</summary>${world.blueprints.slice(-24).map(blueprint=>blueprintCard(blueprint, world)).join('')}${world.blueprints.length > 24 ? '<p>Se muestran los 24 proyectos más recientes.</p>' : ''}</details>` : ''}</section>`;
 }
-function demographicSummary(received: WorldView): string {
-  // projectWorld sends every living human, independently of the camera viewport.
-  const people = received.people.filter(person => person.role === 'neighbor'), neighbors = people.length;
-  const identities = received.people.filter(person => person.role !== 'neighbor');
-  const protectedCount = identities.filter(person => person.continuityProtected === true).length;
-  const protectionKnown = identities.every(person => person.continuityProtected !== undefined);
-  const deaths = received.demography;
-  const causes = Object.entries(deaths?.causes ?? {}).filter(([, count]) => Number.isFinite(count) && count > 0);
-  const stages = { juvenile: 0, adult: 0, senescent: 0 };
-  for (const person of people) if (person.lifeStage === 'juvenile' || person.lifeStage === 'adult' || person.lifeStage === 'senescent') stages[person.lifeStage]++;
-  const known = stages.juvenile + stages.adult + stages.senescent, unknown = neighbors - known;
-  const replacement = !neighbors ? 'No hay vecinos para evaluar el recambio.' : unknown ? 'Faltan etapas de vida: no se puede evaluar el recambio por edad.'
-    : stages.juvenile + stages.adult < 2 ? 'No hay recambio posible entre los vecinos actuales.'
-    : 'La edad no garantiza una crianza: también hacen falta salud, recursos, confianza y cercanía.';
-  const stagesMarkup = `<div data-neighbor-life-stages><div class="stats-section-heading"><h3>Etapas de los vecinos</h3><span>${number(known)}/${number(neighbors)} con dato</span></div><div class="stats-facts"><span data-life-stage="juvenile">En crecimiento<strong>${known || !neighbors ? number(stages.juvenile) : '—'}</strong></span><span data-life-stage="adult">Edad de crianza<strong>${known || !neighbors ? number(stages.adult) : '—'}</strong></span><span data-life-stage="senescent">Vejez<strong>${known || !neighbors ? number(stages.senescent) : '—'}</strong></span>${unknown ? `<span data-life-stage="unknown">Etapa sin dato<strong>${number(unknown)}</strong></span>` : ''}</div><p class="stats-note" data-replacement-status>${replacement}</p></div>`;
-  return `<section data-demographic-summary><div class="stats-section-heading"><h3>${neighbors === 0 ? 'Sin vecinos vivos' : 'Población humana'}</h3><span>${number(received.people.length)} vidas · censo global</span></div><div class="stats-grid">${statCard('Vecinos vivos', number(neighbors), 'Sujetos a mortalidad')}${statCard('S/I protegidos', protectionKnown ? number(protectedCount) : '—', protectionKnown ? 'Continuidad por configuración' : 'Protección sin dato')}${statCard('Muertes humanas', number(deaths?.deaths), deaths ? 'Acumuladas en este mundo' : 'Acumulado no recibido')}${statCard('Nacimientos', number(received.stats?.totals.births), 'Acumulados en este mundo')}</div>${stagesMarkup}<p class="stats-note">${protectionKnown && protectedCount > 0 ? (neighbors === 0 ? 'La continuidad de S/I está protegida. Su presencia no demuestra que los vecinos hayan sobrevivido.' : 'S/I tienen continuidad protegida por la configuración del mundo. Los vecinos siguen un ciclo de vida con mortalidad.') : protectionKnown ? 'El censo distingue vecinos e identidades S/I; no hay protección de continuidad indicada.' : 'Esta vista no informa la protección de continuidad de S/I.'}</p>${deaths ? `<details class="person-detail" data-detail="human-death-causes"><summary>Causas de las muertes acumuladas</summary>${causes.length ? `<div class="stats-facts">${causes.map(([cause, count]) => `<span>${esc(deathCauses[cause] ?? cause)}<strong>${number(count)}</strong></span>`).join('')}</div>` : '<p>No hay causas de muerte registradas en el acumulado recibido.</p>'}</details>` : ''}</section>`;
-}
-
 function populationWindow(points: { tick: number; value: number }[]): string {
   const samples = points.filter(p => Number.isFinite(p.tick) && Number.isFinite(p.value)).slice(-96);
   if (!samples.length) return '<p class="stats-note" data-population-window>No se han recibido muestras de población. Los acumulados se muestran aparte.</p>';

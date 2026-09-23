@@ -7,11 +7,21 @@ import {createWorld, projectWorld} from '../src/world/index.js';
 import type {PersonView} from '../src/shared/types.js';
 import {inheritedAndLearned} from '../src/client/inspector-view.js';
 
+/** M1: el censo del servidor se calcula sobre TODA la población (statistics.ts); en estos fixtures la
+ * vista contiene a toda la población, así que el censo se rehace con las mismas reglas a partir de ella. */
+function syncCensus(view: ReturnType<typeof projectWorld>, people: PersonView[] = view.people) {
+  const lifeStage = {juvenile: 0, adult: 0, senescent: 0, unknown: 0};
+  const neighbors = people.filter(p => p.role === 'neighbor');
+  for (const p of neighbors) lifeStage[p.lifeStage ?? 'unknown']++;
+  view.stats!.census = {neighbors: neighbors.length, identities: people.length - neighbors.length, protectedCount: people.length - neighbors.length, lifeStage};
+  return view;
+}
+
 /** Presentation fixture, not an autonomous survival experiment. No engine step is run. */
 function populationFixture(extinct: boolean) {
   const view = projectWorld(createWorld(51926));
   if (!extinct) return view;
-  view.people = view.people.filter(person => person.role !== 'neighbor');
+  view.people = view.people.filter(person => person.role !== 'neighbor'); syncCensus(view);
   view.tick = view.sequence = 60000; view.day = 26;
   view.stats!.population = 2; view.stats!.totals.births = 18;
   view.stats!.actions = {rest: 2}; view.stats!.generations = {'0': 2};
@@ -60,8 +70,9 @@ test('global mortality remains visible beside protected identities and a short t
         current.sequence++;current.demography!.causes={starvation:0,dehydration:24,exposure:8,senescence:0};socket!.send(JSON.stringify({type:'state',world:current}));
         await expect(details).toContainText('24');await expect(toggle).toBeFocused();assert.equal(await panel.evaluate(e=>e.scrollTop),scroll);await expect(page.locator('#camera-coordinates')).toHaveText(camera!);
         await window.scrollIntoViewIfNeeded();await page.screenshot({path:`artifacts/demography-window-${width}.png`});
-        // Missing lifetime data must not be replaced by the recent cache or by zero.
-        current=structuredClone(current);current.sequence++;delete current.demography;for(const person of current.people)delete person.continuityProtected;
+        // Missing lifetime data must not be replaced by the recent cache or by zero; a missing census
+        // must not be replaced by counting the camera's `people` either (M1).
+        current=structuredClone(current);current.sequence++;delete current.demography;delete current.stats!.census;for(const person of current.people)delete person.continuityProtected;
         current.stats!.history=[];socket!.send(JSON.stringify({type:'state',world:current}));
         await expect(card('Muertes humanas').locator('strong')).toHaveText('—');await expect(card('S/I protegidos').locator('strong')).toHaveText('—');await expect(summary).toContainText('Acumulado no recibido');await expect(window).toContainText('No se han recibido muestras');
       } else await expect(page.locator('[data-population-window]')).toContainText('No se han recibido muestras');
@@ -83,7 +94,7 @@ function stageFixture(stages: Stage[]) {
   // Deliberately identical age/generation with different server stages: the client must not infer thresholds.
   view.people = [...identities, ...neighbors]; view.stats!.population = view.people.length;
   view.demography!.deaths = 14 - neighbors.length; view.demography!.causes.senescence = 14 - neighbors.length;
-  return view;
+  return syncCensus(view);
 }
 
 test('inspector labels server stages and missing data without guessing from age, generation or protection', () => {
@@ -120,7 +131,7 @@ test('global life-stage summary and inspector update without disturbing focus, s
       await page.route('**/api/gesture',r=>{messages.push({type:'gesture'});return r.fulfill({status:500});});
       await page.routeWebSocket('**/ws',s=>{socket=s;s.onMessage(m=>messages.push(JSON.parse(String(m))));});
       const publish=()=>{current.sequence++;socket!.send(JSON.stringify({type:'state',world:current}));};
-      const setStages=(stages:(Stage|undefined)[])=>{current.people.filter(p=>p.role==='neighbor').forEach((p,i)=>{p.lifeStage=stages[i];});publish();};
+      const setStages=(stages:(Stage|undefined)[])=>{current.people.filter(p=>p.role==='neighbor').forEach((p,i)=>{p.lifeStage=stages[i];});syncCensus(current);publish();};
       await page.goto(server.resolvedUrls!.local[0]!);await expect(page.locator('#connection-label')).toHaveText('En vivo');
       if(await page.locator('#letter-dialog').isVisible())await page.getByRole('button',{name:'Entrar al mundo'}).click();
       await page.locator('#stats-toggle').click();
@@ -178,5 +189,46 @@ test('global life-stage summary and inspector update without disturbing focus, s
       await context.close();
     }
     writeFileSync('artifacts/life-stage-controls.json',JSON.stringify({scope:'Synthetic presentation fixtures. No engine steps, paid births or autonomous sustainability claimed.',controls},null,2)+'\n');
+  } finally {await browser?.close();await server?.close();}
+});
+
+/** M1: con la cámara recortando `people`, la pantalla cuenta el mundo con `stats.census` y dice qué
+ * es «en esta vista»; la ficha de alguien fuera de cuadro no se confunde con una muerte. */
+test('una vista recortada dice 23 vidas en el mundo y no 0, y quien sale de cuadro sigue vivo', {timeout:90_000}, async t => {
+  if (!existsSync(chromium.executablePath())) { t.skip('Chromium absent: census scope checks not run.'); return; }
+  let server:Awaited<ReturnType<typeof createServer>>|undefined,browser:Awaited<ReturnType<typeof chromium.launch>>|undefined;
+  try {
+    server=await createServer();await server.listen();browser=await chromium.launch({headless:true});
+    for (const [width,height] of [[390,844],[1440,900]] as const) {
+      const context=await browser.newContext({viewport:{width,height},reducedMotion:'reduce'}),page=await context.newPage();
+      const full=projectWorld(createWorld(51926));
+      // Presentación: 13 en cuadro de un mundo de 23 (21 vecinos + S/I), como en la auditoría móvil.
+      const view=structuredClone(full);view.people=full.people.filter(p=>p.role!=='S').slice(0,13);
+      view.stats!.census={neighbors:21,identities:2,protectedCount:2,lifeStage:{juvenile:5,adult:14,senescent:2,unknown:0}};
+      let current=structuredClone(view),socket:WebSocketRoute|undefined;const errors:string[]=[],asked:string[]=[];
+      page.on('pageerror',e=>errors.push(e.message));
+      await page.route('**/api/session',r=>r.fulfill({json:{authenticated:true}}));await page.route('**/api/world**',r=>r.fulfill({json:current}));
+      await page.routeWebSocket('**/ws',ws=>{socket=ws;ws.onMessage(m=>{const message=JSON.parse(String(m));if(message.type==='persona'){asked.push(message.id);ws.send(JSON.stringify({type:'persona',id:message.id,persona:{id:message.id,experiences:[],trust:[],recipeIds:[]}}));}});});
+      await page.goto(server.resolvedUrls!.local[0]!);await expect(page.locator('#connection-label')).toHaveText('En vivo');
+      if(await page.locator('#letter-dialog').isVisible())await page.getByRole('button',{name:'Entrar al mundo'}).click();
+      await page.locator('#stats-toggle').click();
+      const summary=page.locator('[data-demographic-summary]');
+      await expect(summary).toContainText('23 vidas en el mundo · 13 en esta vista');
+      await expect(summary.locator('.stat-card').filter({hasText:'Vecinos vivos'}).locator('strong')).toHaveText('21');
+      await expect(summary).not.toContainText('Sin vecinos vivos');
+      // Cámara lejos de todos: el censo no cambia, la vista sí.
+      current=structuredClone(current);current.sequence++;current.people=[];socket!.send(JSON.stringify({type:'state',world:current}));
+      await expect(summary).toContainText('23 vidas en el mundo · 0 en esta vista');
+      await expect(summary.locator('.stat-card').filter({hasText:'S/I protegidos'}).locator('strong')).toHaveText('2');
+      await page.locator('#population-toggle').click();
+      await expect(page.locator('#population-count')).toHaveText('0 en esta vista · 23 en el mundo');
+      // S no está en cuadro: su ficha pregunta al servidor y dice que vive fuera de la vista.
+      await page.locator('#inspector-toggle').click();
+      await expect(page.locator('#inhabitant-card')).toContainText('Vive fuera de esta vista');
+      await expect(page.locator('#inhabitant-card')).not.toContainText('ya no aparece');
+      assert.ok(asked.length>0,'la ficha de un ausente se pide al servidor');
+      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+      assert.deepEqual(errors,[]);await context.close();
+    }
   } finally {await browser?.close();await server?.close();}
 });

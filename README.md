@@ -8,15 +8,18 @@ criterios de aceptación están en [GOAL.md](GOAL.md).
 [docs/ESTADO.md](docs/ESTADO.md), la única fuente de ese estado. [PLAN](PLAN.md#estado-actual)
 identifica lo pendiente, y las revisiones vigentes, la [del 22 de septiembre](docs/REVISION-2026-09-22.md)
 y la [de la noche del 22](docs/REVISION-NOCHE-2026-09-22.md), separan controles causales, resultados
-demográficos y rendimiento. No se declara autonomía sostenida ni cierre del proyecto. El servicio de
-usuario `atlas-servidor.service` y el respaldo horario están habilitados; cada versión publicada usa
-un directorio de mundo nuevo y los anteriores siguen separados.
+demográficos y rendimiento. No se declara autonomía sostenida ni cierre del proyecto. Histórico
+(hasta 2026-09-23): el servicio de usuario `atlas-servidor.service` y su respaldo horario corrían
+en la torre; hoy están **deshabilitados** ahí y el servicio activo es `atlas-publico.service` en el
+portátil de Steven (detalle en `docs/ESTADO.md`). Cada versión publicada usa un directorio de mundo
+nuevo y los anteriores siguen separados.
 
-El servidor de `atlas.humanizar.tech` sirve `dist/client` desde el árbol principal.
-Las compilaciones de prueba se hacen en worktrees aislados. Para publicar hay que
-validar el commit, verificar un respaldo, detener el servicio y sólo entonces compilar
-ese árbol. Cada versión de pruebas publicada usa un directorio de mundo nuevo;
-reiniciar la misma versión recupera su estado confirmado. La contraseña se conserva.
+El servidor de `atlas.humanizar.tech` corre en el portátil de Steven desde 2026-09-23 11:17; la
+torre solo reenvía el tráfico (`atlas-puente.service`). Histórico: hasta esa fecha servía
+`dist/client` desde el árbol principal de la torre. Las compilaciones de prueba se hacen en
+worktrees aislados. Para publicar hay que validar el commit, verificar un respaldo, detener el
+servicio y sólo entonces compilar ese árbol. Cada versión de pruebas publicada usa un directorio de
+mundo nuevo; reiniciar la misma versión recupera su estado confirmado. La contraseña se conserva.
 
 ## Antecedentes de septiembre de 2026
 
@@ -180,7 +183,7 @@ Se comprueba el backend en loopback antes de exponerlo por TLS. Si ya se intent�
 
 El mundo se genera por regiones de 16 × 16 celdas con coordenadas positivas y negativas; no conserva el borde de 40 × 28. El límite técnico es ±10 millones de celdas, con extremo superior excluido. La cámara recibe ventanas de hasta 96 × 64. Solo los alrededores de los habitantes avanzan: las regiones archivadas conservan sus cambios y congelan su ecología. El archivo en disco puede crecer con la exploración.
 
-La fuente para grabación usa reglas/protocolo **6** y SQLite **4**. El lector valida el origen antes de migrar; V5→V6 añade cuentas líquidas vacías y nunca llena recipientes. La actualización anterior a `bf6431b` conservó el mundo y sus sesiones al pasar de SQLite 3 a 4; `7d8777c` comenzó otro mundo según la política vigente. El archivo V4 anterior conserva su defecto de madera fuera de cota: el inicio V5 fue un mundo nuevo autorizado, no una migración exitosa de ese V4. El contrato de archivo y recuperación está en [CONSTRUCCION.md](docs/CONSTRUCCION.md#territorio-procedural-y-archivo); [EVIDENCIA.md](docs/EVIDENCIA.md#actualización-sin-reiniciar-el-mundo) registra aquel cambio de esquema.
+La fuente para grabación usaba reglas/protocolo **6** y SQLite **4** (histórico, `03470e3`); lo vigente es reglas/protocolo **10** y SQLite **5** con instantáneas paginadas (`docs/ESTADO.md`). El lector valida el origen antes de migrar; V5→V6 añade cuentas líquidas vacías y nunca llena recipientes. La actualización anterior a `bf6431b` conservó el mundo y sus sesiones al pasar de SQLite 3 a 4; `7d8777c` comenzó otro mundo según la política vigente. El archivo V4 anterior conserva su defecto de madera fuera de cota: el inicio V5 fue un mundo nuevo autorizado, no una migración exitosa de ese V4. El contrato de archivo y recuperación está en [CONSTRUCCION.md](docs/CONSTRUCCION.md#territorio-procedural-y-archivo); [EVIDENCIA.md](docs/EVIDENCIA.md#actualización-sin-reiniciar-el-mundo) registra aquel cambio de esquema.
 
 En `bf6431b`, 256 recetas y generación tecnológica 32 detenían la búsqueda. El catálogo publicado desde `7d8777c` separa esos límites de la historia durable y mantiene acotados caché, memoria, proyectos y colas pendientes. Snapshot, definiciones, estadísticas y recibos se confirman juntos; un fallo conserva las colas y no confirma órdenes. El disco puede crecer y no hay almacenamiento ilimitado ni reconstrucción de episodios perdidos. La construcción conserva su gramática de seis componentes. [REGLAS](docs/REGLAS.md#catálogo-resoluble-y-memoria-técnica) y [CONSTRUCCION](docs/CONSTRUCCION.md#archivo-tecnológico) detallan el contrato.
 

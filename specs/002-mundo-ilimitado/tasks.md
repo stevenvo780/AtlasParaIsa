@@ -1,8 +1,12 @@
 # Tasks: Mundo ilimitado — el techo lo pone el hardware
 
-> **Etapas B–F congeladas el 2026-09-22** hasta que la biología sostenga 100 días: los 16 fundadores
-> deben llegar a 100 días con 3 generaciones en el 90 % de las semillas antes de reanudarlas (ver
-> `docs/REVISION-NOCHE-2026-09-22.md`).
+> **Etapas B–F congeladas el 2026-09-22** (ver `docs/REVISION-NOCHE-2026-09-22.md`) y
+> **descongeladas el 2026-09-23 por Steven** para no probar solo mundos de techo bajo (decisión
+> del plan maestro del 23-09; el criterio de 100 días con 3 generaciones sigue siendo el objetivo
+> biológico, no una condición para reanudar). Ola 1 de la etapa B (T111–T113) y del bloque E.0
+> (T141–T143) ya fusionadas en `main` (`ff52c30`, `9a7913e`); la ola 2 de B (T115/T117/T120) queda
+> en espera porque el perfil a 700 habitantes (bitácora 23-09 18:05) no la señala como el coste
+> principal (decisión D4).
 
 **Input**: [spec.md](spec.md) + [plan.md](plan.md) + [research.md](research.md) + los 3 juicios y 4 mapas de `.superpowers/sdd/002/` · **Branch**: `002-mundo-ilimitado` (desde **`f30d528`**) · **Constitución**: manda.
 
@@ -18,7 +22,7 @@
 4. **Reducciones**: orden total **por contenido** — `(celda, slot)` en confirmación, `(regiónId, slot)` en la fase global, `id.localeCompare` donde ya se usa. Nunca «orden de llegada». `Atomics` solo para barreras, estado de worker y colas: **nunca** para acumular FP64, decidir ganadores ni asignar ids. Nunca sumas en árbol.
 5. **Puerta de calidad**: el digesto es `digestoCanonico` (T101), **no** `encodeSnapshot` — ese borra `retiredChunks` y depende del orden de inserción de las claves. Si tu tarea no declara un cambio de reglas, el digesto DEBE ser idéntico antes y después.
 6. **GPU**: FP64 siempre, `--fmad=false` siempre, fast-math jamás. Sin excepciones ni «tolerancias».
-7. Antes de terminar: `npm run typecheck` verde y `timeout 600 npx tsx --test <tus tests>` verde. **NO** ejecutes `npm test` completo (≈10 min; lo corre la integración) ni `npm run build`/`npm run check` en el árbol principal (**el servidor público sirve `dist/` en caliente desde aquí**).
+7. Antes de terminar: `npm run typecheck` verde y `timeout 600 npx tsx --test <tus tests>` verde. **NO** ejecutes `npm test` completo (≈10 min; lo corre la integración) ni `npm run build`/`npm run check` en el árbol principal (histórico hasta el 23-09: el servidor público servía `dist/` en caliente desde aquí; hoy corre en el portátil, pero la prohibición sigue por seguridad).
 8. No toques `data/`, `~/.local/bin/atlas-servidor*`, la carta (S e I, recuerdos, textos de `world-shell.ts`), ni las leyes de hambre/sed/senescencia/diversidad/costes materiales.
 9. Escribe código que lea como el circundante: denso, comentarios escasos y precisos, español en textos de usuario, inglés en identificadores.
 10. Informe final en `specs/002-mundo-ilimitado/informes/<TID>-report.md`: ficheros tocados, qué cambió y por qué, cómo se prueba, cifras medidas (ANTES/DESPUÉS con control) y **una frase explícita sobre si el hardware puede cambiar el resultado de tu cambio**.
@@ -74,6 +78,7 @@
 ### Etapa A en paralelo (worktrees desde Gate A0)
 
 - [ ] **T103** [P] [codex/gpt-5.6-sol · high] **Clon acotado: `retiredChunks` deja de clonarse en profundidad.**
+  **Nota 2026-09-23 (superada/reescribir)**: ARCH resolvió el crecimiento del archivo; PERF3 el clon por paso; el perfil a 700 habitantes (bitácora 23-09 18:05) muestra que el coste está en la enseñanza/recetas (20 %), fauna (13 %) y ecología (7 %), no en el halo/terreno.
   **Perfil real 2026-09-22:** tres bases envejecidas a5/13 días, en carga y tras19 pasos de cadencia20, conservan digestos y SQLite/WAL. El clon compartido dio p50 de19,94–33,53ms y p95 de29,28–47,00ms en la pasada final; no alcanza6,15/10ms. Dos pasadas e instrumento preservados, host compartido. [Informe](../../docs/REVISION-CLON-ENVEJECIDO-2026-09-22.md). La paridad está probada; **el gate de rendimiento sigue rojo**.
   **Preflight 2026-09-22:** la implementación ya está en V7. `scripts/verify-clone-trajectory.mts <repo>` compara el clon completo con el compartido en semillas 1/7/51926 durante 2400 ticks, clonando cada paso, guardando cada 20 y recargando en 1200/2400: digestos iguales y diez tablas durables iguales salvo snapshots. Hubo 568/535/391 pasos clonados con chunks pendientes, por lo que el control sí ejerce el cambio. [Resultados](../../docs/evidencia-2026-09-22/clone-trajectory.json). El banco previo de 65536 teselas dormidas era sintético; el perfil real posterior figura arriba y **T103 no se marca cerrado**.
   **Avance 2026-09-22 (noche):** fusionada en `n-INTEGRA` como parte de la Etapa A (orden de merge T103→T105→T106→T107→T108→T109→T104); la paridad de `digestoCanonico` está probada, pero el **gate de rendimiento sigue rojo**: las cifras objetivo de p50/p95 del clon no se alcanzaron en la integración. No se marca cerrada. Ver `docs/REVISION-NOCHE-2026-09-22.md` §d.
@@ -84,6 +89,7 @@
   · **Cierre**: digesto idéntico en 3 semillas y las dos cifras de p50/p95 alcanzadas.
 
 - [ ] **T104** [claude opus · high] **Punto de restauración y fuera el clon** (depende de T101 y T103). **La tarea más delicada de la etapa.**
+  **Nota 2026-09-23 (superada/reescribir)**: ARCH resolvió el crecimiento del archivo; PERF3 el clon por paso; el perfil a 700 habitantes (bitácora 23-09 18:05) muestra que el coste está en la enseñanza/recetas (20 %), fauna (13 %) y ecología (7 %), no en el halo/terreno.
   `stepOnce` (`src/server/app.ts:197-235`) deja de clonar cuando `motor.clonPorPaso=false`. La atomicidad del paso fallido se conserva con un punto de restauración.
   **Corrección 2026-09-19 (refutación R6, verificada — el texto anterior de esta tarea era falso y habría hecho escribir código contra una API inexistente)**: el punto de restauración **no puede ser el snapshot codificado**. Dos razones de código: (a) `store.lastSnapshotBytes` es **un número**, no el cuerpo — `store.ts:150` `lastSnapshotBytes = 0;` y `store.ts:774` `this.lastSnapshotBytes = Buffer.byteLength(body);`, y el cuerpo se descarta tras escribirlo (`app.ts:229` solo lo publica como `runtime.snapshotBytes`); (b) `encodeSnapshot` devuelve `{...world, retiredChunks: [], retiredLegacy: [], …}` (`snapshot.ts:25`), así que el mundo restaurado desde ese cuerpo **no tendría `retiredChunks`** y su `digestoCanonico` no coincidiría — justo el caso que la prueba (2) de abajo quiere cubrir. Elige **una** de estas dos, mide su coste y déjalo en el informe:
   · **Diario de deshacer** del paso (registro de las mutaciones, revertible en orden inverso), que además alimenta las páginas sucias de T132; o
@@ -139,7 +145,8 @@
 
 ## Etapa B — SoA de terreno y ecosistema en workers deterministas
 
-- [ ] **T111** [P] [claude sonnet · high] **`HALO_CELDAS = 13` y la prueba estática de alcance efectivo compuesto.**
+- [x] **T111** [P] [claude sonnet · high] **`HALO_CELDAS = 14` y la prueba estática de alcance efectivo compuesto.** **Fusionada en `main` (`ff52c30`, 2026-09-23, ola 1 de la etapa B).**
+  **Corrección 2026-09-23 (fusionada)**: el máximo compuesto real quedó en **14**, no 13: `evaluateCooperation` (dentro de `choose`, `society.ts`) mira a un vecino a ≤ 7 y desde ese vecino vuelve a mirar a ≤ 7 (`src/world/halo.ts:41`); la composición `settlementOpportunity` de abajo (13) es una cota distinta cubierta por el mismo `HALO_CELDAS=14`.
   Constante única en `src/world/halo.ts` con el **inventario explícito** del **alcance efectivo compuesto** de cada función —radio directo **más** los sub-escaneos que la propia función hace sobre lo que encontró— y una prueba que falla si alguno lo supera. Radios sueltos: `RADIUS=7` (`index.ts:43`), `CONSTRUCTION_RADIUS=7` (`inventions.ts:91`), fundación ≤7 (`society.ts:226`), reproducción ≤3+4 (`index.ts:945-952`), herencia ≤2, encuentro ≤1,5, percepción animal `1+⌊p·5⌋ ≤ 6` (`animals.ts:140`). **Incluir la activación**: `maintainRegions` activa el chunk que contiene `(x±8, y±8)`, de modo que el área **escrita** alcanza ~24 celdas desde la persona.
   **Corrección 2026-09-19 (refutación G2, verificada — por esto el halo sube de 8 a 13)**: `settlementOpportunity` (`society.ts:94-124`, llamada desde `choose` en `index.ts:327`, o sea dentro de la futura fase B de solo lectura) **compone** radios: `person → home` a ≤7 (`society.ts:111`) y luego `viable(home)` lee teselas ±4 (`:98-101`), estructuras ≤4 (`:104`) y **personas ≤6** (`:105`) **alrededor del home, no de la persona** ⇒ **13 celdas** en personas y **11** en teselas desde la persona. La rama hermana `world.places.filter(p => distance(person,p) <= 6)` (`:114`) da 12 con la misma composición. Ni `research.md` D3 ni `mapa-motor-paso.md` §2 lo registraban.
   **Lectura global replicada, no radio**: `index.ts:403` (`buildable`) recorre **todo** `world.places` sin filtro espacial (`!world.places.some(p => distance(p, t) < 5)` sobre teselas ya acotadas a `RADIUS=7`). `world.places` está acotado a 2 048 (`index.ts:1081`), así que la solución es replicarlo íntegro y de **solo lectura** en cada worker. El inventario debe registrarlo en una sección aparte: «lecturas globales replicadas», con su cota de tamaño.
@@ -148,7 +155,7 @@
   · **Control**: `digestoCanonico` intacto (es una constante y una prueba).
   · **Cierre**: prueba verde, el inventario citado en `docs/REGLAS.md`, y el coste del halo medido: sobre región 256×256 el borde pasa de 12,89 % (halo 8) a **21,3 %** (halo 13); si eso pesa en la métrica de T115, se declara y se pasa a región **512×512** (borde 10,4 %), que es un cambio de geometría, **no** de reglas, y T117 debe seguir dando digestos idénticos entre ambas.
 
-- [ ] **T112** [P] [codex/gpt-5.6-sol · xhigh] **`TileStore` SoA con máscara de presencia y doble buffer.**
+- [x] **T112** [P] [codex/gpt-5.6-sol · xhigh] **`TileStore` SoA con máscara de presencia y doble buffer.** **Fusionada en `main` (`ff52c30`, 2026-09-23, ola 1 de la etapa B).**
   SoA **por campo** (un buffer por campo y región de 256×256), estáticos como enteros, mutables FP64, doble buffer, versión `Uint32`, máscara sucia y **máscara de presencia**. Las coordenadas **no** se almacenan: se derivan de `(regionX, regionY, offset)`. **La máscara de presencia es obligatoria**: `buildTopology` pone `-1` a los vecinos fuera del conjunto activo (`ecosystem-kernel.ts:55-70`); sin ella, una región densa daría vecinos reales a celdas que hoy no los tienen y `livingNeighbors` cambiaría **en todo el borde del mundo activo**. Detrás de `motor.soaTerreno`.
   **Absorber la topología del kernel** (añadido 2026-09-19, refutación R12, verificada): `EcosystemKernel` mantiene una caché de hasta `MAX_TOPOLOGIES = 4` topologías (`ecosystem-kernel.ts:6`), valida el acierto con `sameCoordinates` —que compara **dos flotantes por tesela** (`:26-33`), hasta 147 M comparaciones por tick ecológico a 18,4 M teselas con las cuatro retenidas— y, en fallo, reconstruye el índice de posiciones y un `Int32Array(length * 8)` de vecinos (`:43-70`). Cuenta por topología: `coordinates` 2×8 B + `neighbors` 8×4 B + `life` 8 B = **56 B/tesela** ⇒ 1,03 GB a 18,4 M teselas, × 4 = **≈4,12 GB = 224 B/tesela solo de scratch**, que se suma al del `TileStore` y deja SC-009 (256 B/tesela) **sin margen**.
   *(Aritmética recalculada contra `f30d528`. La refutación R12 daba 1,92 GB por topología y 418 B/tesela porque medía el kernel anterior, que copiaba **siete** `Float64Array` por tesela; el commit `6fbefd2` del sprint del 2026-09-19 —«el kernel de ecología deja de reconstruir índices de cadena y de copiar siete instantáneas por tesela»— ya se llevó esa mitad y el índice de claves de cadena. Lo que queda por hacer aquí es la **validación de caché O(T)** y las **cuatro copias retenidas**.)* Con el SoA las coordenadas son implícitas en `(regionX, regionY, offset)`: `neighbors` se **calcula por aritmética y no se almacena**, y la validación de caché pasa a ser una **versión entera** del conjunto activo, no una comparación O(T).
@@ -157,7 +164,7 @@
   · **Control**: 2 400 pasos con `motor.soaTerreno` en `false` y en `true`: digesto **idéntico** en 3 semillas.
   · **Cierre**: digesto idéntico, **≤ 256 B/tesela** medidos **con el scratch dentro**, cero topologías retenidas, y una sola autoridad por página (aserción que rechaza objeto y SoA escribibles a la vez).
 
-- [ ] **T113** [P] [gemini/pro · high] **`tileAt` por aritmética, `activate` con índice, `maintainRegions` incremental.**
+- [x] **T113** [P] [gemini/pro · high] **`tileAt` por aritmética, `activate` con índice, `maintainRegions` incremental.** **Fusionada en `main` (`ff52c30`, 2026-09-23, ola 1 de la etapa B).**
   (a) `tileAt` (`spatial.ts:28-35`) **sustituye** el `Map<string,Tile>` por aritmética de offset por chunk (`chunkKey` + offset local ya dan una fórmula O(1)); hoy el índice se reconstruye entero en cada paso porque `cloneWorld` cambia la identidad de `world.tiles` — 3,15 % de la CPU. (b) `activate` (`spatial.ts:40`) escanea `retiredChunks` con `findIndex` ⇒ O(R) por chunk activado, con R creciendo con el territorio explorado: índice por clave. (c) `maintainRegions` (`spatial.ts:66`) hace `Object.entries(world.chunks)` **en cada tick**: recorrido incremental sobre lo que cambió.
   · **Ficheros**: `src/world/spatial.ts`, `tests/spatial-escala.test.ts` (nuevo).
   (d) **`terrainIndex` de fauna sobre ese mismo índice** (añadido 2026-09-19, refutación R4): `animals.ts:131-138` construye `new Map(world.tiles.map(t => [key(t), t]))` y lo invalida cuando cambia la identidad **o la longitud** de `world.tiles` — es decir, en cada paso mientras exista el clon (2,16 % del perfil de hoy) y, quitado el clon, **cada vez que alguien cruza una frontera de chunk** (`spatial.ts:50,80`). No debe sustituirse por otro `Map` paralelo: debe usar el índice aritmético de (a).
@@ -267,6 +274,7 @@
 ## Etapa D — Deltas de persistencia y de red (en paralelo a B y C; solo depende de A)
 
 - [ ] **T131** [P] [gemini/pro · high] **Esquema v5, `technology_checkpoints` y poda de prefijo.**
+  **Nota 2026-09-23 (superada/reescribir)**: ARCH resolvió el crecimiento del archivo; PERF3 el clon por paso; el perfil a 700 habitantes (bitácora 23-09 18:05) muestra que el coste está en la enseñanza/recetas (20 %), fauna (13 %) y ecología (7 %), no en el halo/terreno.
   Migración **aditiva** `user_version` 4 → 5 con `technology_checkpoints(serial, tick, aggregate_body, prefix_digest, digest)`. Tras validar un checkpoint se adelanta el origen lógico del journal y se elimina el prefijo de `technology_executions`, conservando el digest de frontera como evidencia — el mismo patrón con el que `pruneChronicle` ya poda `events` (`store.ts:457-477`). Hoy el origen es inmutable (`technology-archive.ts:264-275`) y la única `DELETE` es hacia adelante (`:535`), de modo que **cada arranque repite la vida entera del mundo**.
   · **Ficheros**: `src/server/technology-archive.ts`, `src/server/store.ts` (migración y `assertTechnologySchema`), `tests/store-v5.test.ts` (nuevo).
   · **Tests**: una base v4 migra y sigue cargando; el digest de frontera prueba lo podado; una base con un prefijo podado y un digest incorrecto se rechaza con «Explicit recovery required.».
@@ -335,7 +343,7 @@
 
 ### Bloque E.0 — Fuera los cuadráticos (bloqueante; solo depende de A, puede adelantarse a B)
 
-- [ ] **T141** [P] [codex/gpt-5.6-sol · xhigh] **Rejilla espacial de personas — la única vía de consulta por vecindad.**
+- [x] **T141** [P] [codex/gpt-5.6-sol · xhigh] **Rejilla espacial de personas — la única vía de consulta por vecindad.** **Fusionada en `main` (`9a7913e`, 2026-09-23, ola 1 del bloque E.0).**
   `Int32Array` de cabezas por celda + lista enlazada por slot, reconstruida en **O(P) una vez por paso**, no O(P) por persona. **Crítico**: la rejilla debe devolver los vecinos **en el mismo orden** en que hoy los devuelve el `filter` sobre `world.people` (orden de slot), porque `index.ts:324-325` toma el **primero** (`nearbyPeople.find(…)`) y `society.ts:242` hace lo mismo. *(Cita corregida: el `find` de `resourceDispute` está en `society.ts:242`, no en `:244`.)*
   **Alcance ampliado 2026-09-19 (refutación R11, verificada — con solo dos sitios sustituidos, el cierre «R² > 0,95 lineal» de T144 no podía darse)**: la rejilla es **la** vía de consulta «vecinos dentro de radio r» y hay que migrar **todos** estos sitios, todos llamados por persona y por tick desde `choose`/`bodyAndAction`:
 
@@ -368,14 +376,14 @@
   · **Control**: 2 400 pasos, `digestoCanonico` **idéntico** en 3 semillas.
   · **Cierre**: digesto idéntico y **ningún** barrido O(P)/O(estructuras)/O(territorio)/O(teselas) en el camino de decisión (grep del inventario de FR-027 vacío).
 
-- [ ] **T142** [P] [gemini/pro · high] **Poda incremental de vínculos.**
+- [x] **T142** [P] [gemini/pro · high] **Poda incremental de vínculos.** **Fusionada en `main` (`9a7913e`, 2026-09-23, ola 1 del bloque E.0).**
   `lineage.ts:141` recorre P × muertes para borrar `bonds` de los fallecidos. Mantener un índice inverso incremental (quién tiene vínculo con quién) y podar solo los afectados, conservando el orden de las claves restantes.
   · **Ficheros**: `src/world/lineage.ts`, `tests/lineage.test.ts` (ampliado).
   · **Tests**: tras 1 000 muertes en un mundo de 2 000 personas, los `bonds` resultantes son idénticos —**incluido el orden de claves**— a los de la versión de hoy.
   · **Control**: digesto idéntico en 3 semillas.
   · **Cierre**: digesto idéntico y coste lineal en muertes, no en P × muertes.
 
-- [ ] **T143** [P] [minimax/MiniMax-M3] **Roster incremental del checkpoint tecnológico.**
+- [x] **T143** [P] [minimax/MiniMax-M3] **Roster incremental del checkpoint tecnológico.** **Fusionada en `main` (`9a7913e`, 2026-09-23, ola 1 del bloque E.0; corregida en la integración).**
   `technology-checkpoint.ts:90-91` construye `new Set(actors.map(...))` en **cada** tick y recaptura O(población) en cada nacimiento o muerte. Mantener el roster de forma incremental.
   · **Ficheros**: `src/world/technology-checkpoint.ts`, `tests/technology-checkpoint.test.ts` (ampliado).
   · **Tests**: el checkpoint resultante es byte a byte el de hoy tras 2 400 pasos con nacimientos y muertes.
@@ -434,7 +442,7 @@
   · **Control**: el digesto no cambia al activar la guardia.
   · **Cierre**: la guardia activa en todas las corridas del laboratorio de la etapa E.
 
-- [ ] **T149** [claude opus · high] **`RULES_VERSION` 6 → 7 y migración.**
+- [ ] **T149** [claude opus · high] **`RULES_VERSION` → siguiente y migración** (vigente: 10, desde 2026-09-22; la versión siguiente es 11, no 7).
   Separar decidir de escribir hace **simultáneas** todas las decisiones: hoy la persona N+1 ve la cosecha de la persona N dentro del mismo tick (`index.ts:797-800,907`). Es un cambio de reglas: subir `RULES_VERSION`, escribir la migración y declarar en `docs/REGLAS.md` qué cambia y por qué. **A partir de aquí la puerta de calidad deja de ser «digesto idéntico al mundo de hoy» y pasa a ser «los 9 backends idénticos entre sí»**; eso debe quedar escrito en el propio test.
   · **Ficheros**: `src/world/index.ts` (`RULES_VERSION`, `migrateWorldState`), `docs/REGLAS.md`, `tests/migracion-v7.test.ts` (nuevo).
   · **Tests**: un mundo v6 guardado migra y pasa `assertWorld`; el digesto del mundo migrado es estable.

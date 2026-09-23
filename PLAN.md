@@ -3,12 +3,29 @@
 ## Estado actual
 
 Lo publicado (commit, reglas, protocolo, SQLite y mundo) está en [docs/ESTADO.md](docs/ESTADO.md),
-la única fuente de ese estado; este plan no lo repite. Las revisiones vigentes son la
+la única fuente de ese estado; este plan no lo repite. Resumen del 23 de septiembre de 2026 (~17:30):
+
+- Servidor público en el portátil de Steven, commit `b5def74` (PERF3 + E.0 ola 1); la torre solo reenvía tráfico (`atlas-puente.service`).
+- Mundo V10 vivo: ~día 167, 710 habitantes, 1957 nacimientos; la meseta ~690-710 es el cupo de software de 40 nacimientos/día, no el gobernador.
+- Las etapas B–F de la feature 002, congeladas el 22, las descongeló Steven el 23-09; la ola 1 de B y de E.0 ya están fusionadas en `main`.
+- Campaña de 60 días con el evaluador C8 v3: BANDA refutada (P1 0/4, P4 falla); H1b sin éxito preregistrado (único aprobado: semilla 606).
+- Plan maestro del 23-09 en marcha (reglas 11 sobre `main` + campaña en condición pública): [detalle](https://claude.ai/artifact/PZdkuXSpXMeQqdFeucDtR1).
+
+Las revisiones vigentes son la
 [del 22 de septiembre](docs/REVISION-2026-09-22.md), que reúne las correcciones de parentesco,
 enseñanza útil, fabricación por dependencias, expresión genética inicial y búsqueda física de
 agua, y la [de la noche del 22](docs/REVISION-NOCHE-2026-09-22.md): extinción de la V7 pública
-por la política `apagar` del gobernador, política `techo`, reglas 10 y congelación de las
-etapas B–F de la feature 002.
+por la política `apagar` del gobernador y adopción de la política `techo` y reglas 10 (esa
+revisión congeló las etapas B–F de la feature 002; Steven las descongeló el 23-09, ver arriba).
+
+### Orden de trabajo (plan maestro 23-09)
+
+- **F0 — limpieza**: worktrees y ramas ya fusionadas fuera de las conservadas explícitamente, documentación corregida (este barrido).
+- **F1 — reglas 11 + publicación en mundo nuevo**: ley de conflicto legible y cupo de nacimientos declarado como regulador de software; publicar en un directorio de mundo nuevo.
+- **F2 — campaña C8**: diagnóstico en condición pública → hipótesis preregistrada → panel de 12 semillas nuevas → veredicto; máximo 2 ciclos.
+- **F3 — cierre del frente biológico**: fijar el resultado de la campaña C8 con su evidencia.
+- Frentes paralelos: arte (rejilla del atlas pixel-art) y rendimiento (perfil de enseñanza/recetas a 700 habitantes).
+- Reglas contra la deriva: ≤ 4 ramas vivas a la vez, preregistro antes de correr un brazo, EVIDENCIA en cada puerta.
 
 Lo que sigue en esta sección es el registro de la tarde del 22, anterior a la publicación V10.
 En la V7 pública (`3dd615e`, reglas 7), al día21,21 el censo dejó sólo S e I, tras siete nacimientos y21 muertes;
@@ -63,7 +80,7 @@ los19 pares restantes siguen censurados. No prueban superioridad general.
 
 Sigue abierto GOAL.md: selección frente a neutralidad, continuidad y diversidad
 multigeneracional, reposición autónoma de insumos, territorio multiescala, T100 y las
-etapas B–F de la feature 002 (congeladas hasta sostener 100 días con 3 generaciones), teléfono físico y revisión personal de la carta. La medición del
+etapas B–F de la feature 002 (descongeladas el 23-09, ver Estado actual), teléfono físico y revisión personal de la carta. La medición del
 archivo mejoró el guardado, pero aún excede 50 ms en la carga envejecida ensayada.
 CPU y ambas GPU se midieron con datos equivalentes; el puente GPU no mejora el coste
 completo y permanece fuera del servidor. Ninguna corrección altera la carta de S/I.
@@ -162,7 +179,7 @@ Este texto propone el sentido de la obra; la redacción personal final pertenece
 | Ciencia y filosofía | Reglas explícitas, causas comprobables, necesidades que compiten y memoria que transforma conductas. Las preguntas sobre autonomía, identidad y cuidado aparecen en lo que sucede. |
 | Carta para Isa | S e I son reconocibles; hay recuerdos autorizados y lugares propios; la voz es íntima. Volver tiene significado y ausentarse no genera una obligación de cuidado. |
 
-El alcance ampliado permite recorrer territorio procedural más allá del mapa original, con juego a pantalla completa, control individual, habilidades adquiridas y construcción de lugares compartidos. V4 conecta agua potable finita, animales individuales con herencia y depredación, suelo vivo, cultivos, invenciones funcionales y hogares recordados con comunidades locales. La extensión se genera según necesidad; solo las regiones próximas a los habitantes avanzan y la población humana tiene un máximo de 32.
+El alcance ampliado permite recorrer territorio procedural más allá del mapa original, con juego a pantalla completa, control individual, habilidades adquiridas y construcción de lugares compartidos. V4 conecta agua potable finita, animales individuales con herencia y depredación, suelo vivo, cultivos, invenciones funcionales y hogares recordados con comunidades locales. La extensión se genera según necesidad; solo las regiones próximas a los habitantes avanzan y la población humana crece sin techo fijo, regulada por el gobernador y (hoy) por un cupo de nacimientos de software (ver `docs/ESTADO.md`).
 
 La arquitectura implementada mantiene **un mundo compartido por todos los clientes del servicio**: la CPU del backend lo simula a 10 Hz y cada navegador dibuja su vista, normalmente actualizada a 2 Hz. Cámaras distintas observan el mismo estado; abrir clientes no multiplica la simulación. El compositor WebGL2 utiliza, cuando está disponible, la GPU del dispositivo cliente. El servidor admite actualmente hasta 12 conexiones WebSocket simultáneas; aumentar esa escala requiere medición.
 
@@ -172,7 +189,7 @@ Una URL privada, cómoda en móvil y escritorio, que permita:
 
 1. Leer una apertura breve escrita para Isa y entrar al mundo.
 2. Recorrer territorio procedural con biomas, depósitos visibles de agua, suelo, vegetación, fauna, alimento, madera, piedra y refugios. Cosecha, caza, cultivo, construcción y tránsito dejan consecuencias.
-3. Reconocer a S e I y una vecindad pequeña: catorce vecinos iniciales, con descendientes posibles hasta 32 habitantes totales. La herencia transmite parámetros del modelo; la crianza y el aprendizaje tienen vías separadas.
+3. Reconocer a S e I y una vecindad pequeña: catorce vecinos iniciales, con descendientes posibles sin techo fijo (regulados por el gobernador y el cupo de nacimientos). La herencia transmite parámetros del modelo; la crianza y el aprendizaje tienen vías separadas.
 4. Observar cómo necesidades, predisposiciones, habilidades y resultados anteriores cambian decisiones y actividades. Los oficios describen una trayectoria de práctica; las etiquetas no asignan tareas.
 5. Ofrecer gestos e invitaciones, o dirigir temporalmente a cualquier habitante para desplazarse, explorar, recolectar, cultivar, construir, ensayar un diseño, reparar, cazar, beber, cooperar o descansar; devolverle después la elección autónoma. Inspeccionar y seguir animales con cuerpos y actividad propios.
 6. Descubrir una selección pequeña de recuerdos reales aprobados que influya en comportamientos, lugares y voz.
@@ -222,7 +239,7 @@ La fuente V6 para grabación conecta tecnología material, agua contenida, prác
 |---|---|---|
 | 1. Mundo y vínculo | Regiones de 16 × 16, depósitos de agua, recursos modificables, fauna individual y capa celular; dieciséis cuerpos humanos iniciales, decisiones locales, vínculo contextual, cámara y gestos. | Comprensión en el móvil físico destinatario. |
 | 2. Historia propia | Recuerdos sintéticos, práctica, hábitos observados, comunidades, ayuda y conflicto reversible; descendencia hasta octava generación, tecnología y legados observados en V5. | Continuidad fuera de la ventana estudiada, transmisión y redes productivas sostenidas; selección real de recuerdos, nombres y rasgos. |
-| 3. Continuidad | SQLite 4, archivo tecnológico y recuperación; agua V6 persistente, identidad de ejecución y política de mundo nuevo por publicación. Los archivos V4/V5 anteriores permanecen separados. | Continuidad durante varios días reales y alojamiento definitivo con proceso, HTTPS y disco persistentes. El archivo V4 conserva su defecto de validación. |
+| 3. Continuidad | SQLite 4 (V6, histórico; hoy SQLite 5, ver `docs/ESTADO.md`), archivo tecnológico y recuperación; agua V6 persistente, identidad de ejecución y política de mundo nuevo por publicación. Los archivos V4/V5 anteriores permanecen separados. | Continuidad durante varios días reales y alojamiento definitivo con proceso, HTTPS y disco persistentes. El archivo V4 conserva su defecto de validación. |
 | 4. La carta terminada | Interfaz y carta de prueba ejecutables para revisión. | Voz final del autor, revisión íntima, arte y ritmo finales, y recorrido en un teléfono real. |
 
 Las pruebas automáticas demuestran propiedades concretas del prototipo; no sustituyen los cierres personales y de experiencia. La carta terminada todavía no se acredita.

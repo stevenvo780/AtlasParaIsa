@@ -1,9 +1,13 @@
 # Implementation Plan: Mundo ilimitado — el techo lo pone el hardware
 
-> **Estado (2026-09-22): etapas B–F congeladas.** No se reanudan hasta que los 16 fundadores
-> lleguen a 100 días con 3 generaciones en el 90 % de las semillas
-> (`docs/REVISION-NOCHE-2026-09-22.md`). La etapa A está integrada en `main`; siguen abiertas T100
-> (topes de anticorrupción), T103 y T104 (gates de rendimiento sin cumplir) y el Gate A (T110). Este
+> **Estado: etapas B–F congeladas el 2026-09-22 y descongeladas el 2026-09-23 por Steven**, para no
+> probar solo mundos de techo bajo (decisión del plan maestro del 23-09); el criterio de 100 días
+> con 3 generaciones sigue siendo el objetivo biológico de `GOAL.md`, no una condición de reanudar.
+> La ola 1 de la etapa B (T111–T113) y del bloque E.0 (T141–T143) ya están fusionadas en `main`
+> (`ff52c30`, `9a7913e`); la ola 2 de B (T115/T117/T120) queda en espera porque el perfil a 700
+> habitantes (bitácora 23-09 18:05) no la señala como el coste principal (decisión D4). La etapa A
+> está integrada en `main`; T103 y T104 quedan superadas por ARCH/PERF3 y ese perfil (nota en
+> [tasks.md](tasks.md)); siguen abiertas T100 (topes de anticorrupción) y el Gate A (T110). Este
 > documento conserva el diseño original: el estado de cada tarea está en [tasks.md](tasks.md) y lo
 > publicado en `docs/ESTADO.md`. T116 y T135 siguen asignadas a `grok/*`, que la flota ya no
 > permite; se reasignan al descongelar.
@@ -22,7 +26,7 @@ La puerta de calidad transversal es **el digesto canónico**, no el hash de hoy:
 
 ## Technical Context
 
-**Language/Version**: TypeScript estricto sobre Node 22.23.1 · **Deps**: `ws`, `node:sqlite`, Vite, `tsx`; **sin deps nuevas** · **Storage**: SQLite WAL, esquema `user_version` 4 → 5 (aditivo) · **Testing**: `tsx --test --test-timeout=240000 tests/*.test.ts` (75 ficheros, **781 pruebas**; la suite completa ~10 min, `world.test.ts` ~5 min tras T013/T035) · **Target**: torre kratos (32 hilos, 125 GiB, RTX 5070 Ti 16 GiB + RTX 2060 6 GiB), navegador escritorio y móvil · **Performance Goals**: digesto idéntico en 9 backends; p50 del paso 206 → ≤ 25 ms a 40 hab/5 días; ≥ 4 000 habitantes a p95 < 50 ms con 28 workers; ≥ 18,4 M teselas en el tick ecológico **íntegro** (`ecology()` + kernel) ≤ 20 ms; `state` < 120 KiB con 10 000 habitantes **medido por campo**; `load()` ≤ 30 s en el mundo de 243 MB · **Constraints**: determinismo independiente del hardware (requisito no negociable), sin frameworks nuevos ni servicios externos, sin LLM en el bucle, params fuera del snapshot, **el servidor público sirve `dist/` en caliente desde este árbol** (nunca `npm run build`/`npm run check` en el árbol principal salvo al publicar) · **Scale**: de 40 habitantes y 15 k teselas activas hoy, a miles de habitantes y decenas de millones de teselas.
+**Language/Version**: TypeScript estricto sobre Node 22.23.1 · **Deps**: `ws`, `node:sqlite`, Vite, `tsx`; **sin deps nuevas** · **Storage**: SQLite WAL, esquema `user_version` 4 → 5 (aditivo) · **Testing**: `tsx --test --test-timeout=240000 tests/*.test.ts` (histórico 2026-09-19: 75 ficheros, 781 pruebas; hoy más de 1 400, ver `docs/ESTADO.md`; la suite completa ~10 min, `world.test.ts` ~5 min tras T013/T035) · **Target**: torre kratos (32 hilos, 125 GiB, RTX 5070 Ti 16 GiB + RTX 2060 6 GiB), navegador escritorio y móvil · **Performance Goals**: digesto idéntico en 9 backends; p50 del paso 206 → ≤ 25 ms a 40 hab/5 días; ≥ 4 000 habitantes a p95 < 50 ms con 28 workers; ≥ 18,4 M teselas en el tick ecológico **íntegro** (`ecology()` + kernel) ≤ 20 ms; `state` < 120 KiB con 10 000 habitantes **medido por campo**; `load()` ≤ 30 s en el mundo de 243 MB · **Constraints**: determinismo independiente del hardware (requisito no negociable), sin frameworks nuevos ni servicios externos, sin LLM en el bucle, params fuera del snapshot, histórico hasta el 23-09: el servidor público servía `dist/` en caliente desde este árbol; hoy corre en el portátil de Steven (nunca `npm run build`/`npm run check` en el árbol principal salvo al publicar) · **Scale**: de 40 habitantes y 15 k teselas activas hoy, a miles de habitantes y decenas de millones de teselas.
 
 ## Constitution Check
 
@@ -32,7 +36,7 @@ La puerta de calidad transversal es **el digesto canónico**, no el hash de hoy:
 - **IV (diversidad y muerte con sentido)**: el control de la etapa E compara supervivencia, diversidad, causas de muerte y Gini de paternidad, no solo bits ✔
 - **V (rendimiento medido, cómputo aprovechado)**: es la razón de la feature. Se mide por fase, se declara la **fracción serial** y se compara Node / workers / GPU con la misma escena ✔
 - **VI (experiencia que emociona sin mentir)**: el techo se publica en pantalla (US5); «billones activos en esta torre» queda **fuera de alcance por escrito**; la GPU que diverge se apaga sola en vez de fingir ✔
-- **Excepciones declaradas** (ver Complexity Tracking): derogación del supuesto de GPU del spec 001, `RULES_VERSION` 6→7 en la etapa E, convivencia de dos caminos (objeto y SoA) durante B–E, subproceso persistente de GPU, prueba larga fuera de `npm test`.
+- **Excepciones declaradas** (ver Complexity Tracking): derogación del supuesto de GPU del spec 001, `RULES_VERSION` → siguiente en la etapa E (vigente 10 desde 2026-09-22; la siguiente es 11, no 7), convivencia de dos caminos (objeto y SoA) durante B–E, subproceso persistente de GPU, prueba larga fuera de `npm test`.
 
 ## Arquitectura elegida
 
@@ -42,12 +46,12 @@ La puerta de calidad transversal es **el digesto canónico**, no el hash de hoy:
 |---|---|---|---|
 | 0 · Coordinador | hilo principal | clima (`world.rng`), gestos confirmados, roster, **máscara de fauna** (sort canónico global + ventana), reparto de regiones a workers | orden fijo; el reparto no entra en ninguna fórmula |
 | A · Ecología | workers / GPU | autómata celular sobre el buffer *previo*, escribe el *siguiente*; halo 1 | cero coordinación: cada celda se calcula del snapshot previo |
-| B · Percepción y decisión | workers | recorre personas y animales de su región, lee teselas propias y de halo 13 (`HALO_CELDAS`, alcance efectivo compuesto), **no escribe nada en el mundo**: emite `Intent` | solo lectura; en modo depuración los buffers están marcados de solo lectura |
+| B · Percepción y decisión | workers | recorre personas y animales de su región, lee teselas propias y de halo 14 (`HALO_CELDAS`, alcance efectivo compuesto), **no escribe nada en el mundo**: emite `Intent` | solo lectura; en modo depuración los buffers están marcados de solo lectura |
 | C · Confirmación | workers | aplica los intentos que tocan celdas de su región, ordenados por `(celda, slot)` | orden total **por contenido**, no por llegada |
 | D · Global | hilo principal | nacimientos, muertes, comunidades, `move` de fauna, checkpoint tecnológico, crónica, muestreo, **prefix-sum de identidades** | `(regiónId, slot)`; `Atomics` nunca para magnitudes |
 | E · Barrera y publicación | hilo principal | swap de buffers, versiones, `Store.save` por cadencia, `broadcast` por deltas | una sola barrera |
 
-**Geometría**: región de ejecución 256×256 teselas (16×16 chunks de `CHUNK_SIZE=16`), página durable = chunk, **halo humano 13** (constante única `HALO_CELDAS`, con prueba estática de **alcance efectivo compuesto**), halo ecológico 1. Con halo 13 sobre 256 el borde es `(282²−256²)/256² = 21,3 %` del área; con 512×512 baja a **10,4 %**, y es la geometría recomendada si el 21,3 % pesa en la medida de la etapa B. *(Corrección 2026-09-19, refutación G2: el halo era 8 porque se inventariaron los radios sueltos; el alcance real de `settlementOpportunity` es 13 celdas al componer `home` ≤7 con `viable()` ≤6, `society.ts:94-124`. Además `index.ts:403` recorre todo `world.places` sin filtro espacial: se resuelve replicando ese array —acotado a 2 048— de solo lectura en cada worker, no ampliando el halo.)*
+**Geometría**: región de ejecución 256×256 teselas (16×16 chunks de `CHUNK_SIZE=16`), página durable = chunk, **halo humano 14** (constante única `HALO_CELDAS`, con prueba estática de **alcance efectivo compuesto**), halo ecológico 1. Con halo 14 sobre 256 el borde es `(284²−256²)/256² = 23,1 %` del área (con halo 13 era 21,3 %); con 512×512 baja a `(540²−512²)/512² = 11,2 %`, y es la geometría recomendada si ese borde pesa en la medida de la etapa B. *(Corrección 2026-09-19, refutación G2: el halo era 8 porque se inventariaron los radios sueltos; el alcance de `settlementOpportunity` es 13 celdas al componer `home` ≤7 con `viable()` ≤6, `society.ts:94-124`. Corrección 2026-09-23, fusionada: el máximo real es **14**, porque `evaluateCooperation` compone ≤7 con ≤7 (`src/world/halo.ts:41`), cota que cubre también la de `settlementOpportunity`. Además `index.ts:403` recorre todo `world.places` sin filtro espacial: se resuelve replicando ese array —acotado a 2 048— de solo lectura en cada worker, no ampliando el halo.)*
 
 **Lo que NO se particiona**: clima (`world.rng`), comunidades, tecnología, crónica, demografía y el pase de `move` de fauna (es una cadena secuencial, no un recurso por celda). Esa fase D es O(eventos del paso) **solo si** se cumplen cuatro condiciones, tres de ellas corregidas el 2026-09-19:
 
@@ -109,7 +113,7 @@ Cada etapa: **métrica de aceptación medida con control**, fila en `docs/EVIDEN
 
 ### Etapa B — SoA de terreno y ecosistema en workers deterministas (2–4 días)
 
-**Qué entra**: `HALO_CELDAS=13` + prueba estática de **alcance efectivo compuesto** (incluida la activación a ±8, cuyo alcance escrito llega a ~24 celdas, y `settlementOpportunity`, cuyo alcance compuesto es 13) · `TileStore` SoA por campo con **máscara de presencia** y doble buffer, **absorbiendo la topología del kernel** (vecinos por aritmética, sin almacenar; validación de caché por versión entera) · `tileAt` por aritmética de offset (sustituir el `Map`, no extenderlo) · `terrainIndex` de fauna sobre ese mismo índice · **el bucle por tesela de `ecology()` al camino paralelo** (T120) · `activate` con índice por clave y `maintainRegions` incremental (FR-019) · port de T013/T035 a `compute-ecology-core.mjs` · ecología cableada a `worker_threads` · **`tests/determinismo-hardware.test.ts` con backend adversarial** (primera ejecución, backends de CPU) · máscara de fauna calculada en el coordinador.
+**Qué entra**: `HALO_CELDAS=14` + prueba estática de **alcance efectivo compuesto** (incluida la activación a ±8, cuyo alcance escrito llega a ~24 celdas, `settlementOpportunity` con alcance compuesto 13, y `evaluateCooperation` con alcance compuesto 14, el máximo) · `TileStore` SoA por campo con **máscara de presencia** y doble buffer, **absorbiendo la topología del kernel** (vecinos por aritmética, sin almacenar; validación de caché por versión entera) · `tileAt` por aritmética de offset (sustituir el `Map`, no extenderlo) · `terrainIndex` de fauna sobre ese mismo índice · **el bucle por tesela de `ecology()` al camino paralelo** (T120) · `activate` con índice por clave y `maintainRegions` incremental (FR-019) · port de T013/T035 a `compute-ecology-core.mjs` · ecología cableada a `worker_threads` · **`tests/determinismo-hardware.test.ts` con backend adversarial** (primera ejecución, backends de CPU) · máscara de fauna calculada en el coordinador.
 
 **Métrica de aceptación**: 1 M celdas dentro del motor de 47,30 ms (1 hilo) a **≤ 20 ms** (8 workers) · teselas activas a p95 < 50 ms **≥ 2 M** con 28 workers, **guardadas y recargadas con el mismo digesto** (la puerta nueva de SC-004) · bytes por tesela **≤ 256 B** sobre el buffer real **incluido el scratch del kernel** (hoy ≈348 B solo en JSON de teselas, más 418 B/tesela de topologías retenidas) · `tileAt` desaparece del perfil (hoy 3,15 %) · fracción serial declarada y medida, y **ninguna fase serial escala con `activeTiles`**.
 
@@ -155,7 +159,7 @@ Cada etapa: **métrica de aceptación medida con control**, fila en `docs/EVIDEN
 
 **Métrica de aceptación**: E.0 — el ajuste de `p95(P)` a P ∈ {50, 200, 800, 2 000} pasa de cuadrático a **lineal con R² > 0,95**, y ≥ **700** habitantes a p95 < 50 ms con 1 hilo. E.1 — ≥ **4 000** habitantes a p95 < 50 ms con 28 workers (objetivo declarado 8 000), aceleración ≥ 10× frente a 1 hilo en la misma escena, **fracción serial ≤ 5 %**, ocupación media de workers ≥ 70 %.
 
-**Control**: E.0 con digesto **idéntico** (es reordenar una búsqueda, no cambiar la regla). E.1 **no puede dar digesto idéntico al de hoy**: es un cambio de reglas declarado (FR-020, `RULES_VERSION` 6→7). Su control es doble: (a) los 9 backends idénticos **entre sí**, incluido el adversarial; (b) campaña científica con réplicas y control sobre el mundo anterior comparando supervivencia, diversidad, causas de muerte y Gini de paternidad — si la reducción canónica empeora alguna, se revisa la reducción, no se publica igual.
+**Control**: E.0 con digesto **idéntico** (es reordenar una búsqueda, no cambiar la regla). E.1 **no puede dar digesto idéntico al de hoy**: es un cambio de reglas declarado (FR-020, `RULES_VERSION` → siguiente; vigente 10, la siguiente es 11). Su control es doble: (a) los 9 backends idénticos **entre sí**, incluido el adversarial; (b) campaña científica con réplicas y control sobre el mundo anterior comparando supervivencia, diversidad, causas de muerte y Gini de paternidad — si la reducción canónica empeora alguna, se revisa la reducción, no se publica igual.
 
 **Se despliega**: sí, y con **mundo nuevo por versión publicada** (la política de la constitución para cambios de esquema/reglas durante pruebas). Steven decide el momento.
 
@@ -228,7 +232,7 @@ src/world/
 │                           # D/T134: projectWorld acota people, communities y blueprints
 │                           # E.1: bodyAndAction → fase B (Intent) + fase C (confirmación)
 ├── spatial.ts              # B: tileAt por aritmética, activate con índice, maintainRegions incremental
-├── halo.ts                 # B NUEVO: HALO_CELDAS=13 + inventario de alcance efectivo compuesto
+├── halo.ts                 # B NUEVO: HALO_CELDAS=14 + inventario de alcance efectivo compuesto
 ├── rejilla.ts              # E.0 NUEVO: rejilla espacial de personas (Int32Array + lista enlazada)
 ├── indices.ts              # E.0 NUEVO (T140): ids del archivo para nextIdentity, estructuras por
 │                           #   celda, teselas aptas para fauna — fuera del camino de decisión
@@ -275,7 +279,7 @@ tests/
 | Excepción | Motivo | Alternativa simple rechazada |
 |---|---|---|
 | **Deroga `specs/001-mundo-solido-masivo/spec.md:150`** («No hay presupuesto de GPU para la simulación en este bloque: la GPU se usa para render y, si sobra tiempo, para el benchmark de ecología») | La petición de Steven nombra «varias GPU» explícitamente, y el muro de DRAM (research §3.3) demuestra que el eje de teselas es de GPU: 10 M teselas son ~25–31 ms en CPU y ~2,8 ms en la 5070 Ti | Dejar la GPU fuera: el techo de teselas se queda capado por el ancho de banda de memoria de la torre en todo el plan. Se declara aquí para que dos specs del repo no se contradigan en silencio |
-| **`RULES_VERSION` 6 → 7 en la etapa E** | Separar decidir de escribir hace **simultáneas** todas las decisiones; hoy la persona N+1 ve la cosecha de la persona N dentro del mismo tick (`index.ts:797-800,907`). Es un cambio de reglas, no una optimización invisible | Afirmar que el orden `(celda, slot)` reproduce el orden de hoy: es cierto para las escrituras y **falso para la percepción**. Ocultarlo haría decorativa la puerta de calidad de la etapa y violaría los principios II y IV |
+| **`RULES_VERSION` → siguiente en la etapa E (vigente 10; la siguiente es 11, no 7)** | Separar decidir de escribir hace **simultáneas** todas las decisiones; hoy la persona N+1 ve la cosecha de la persona N dentro del mismo tick (`index.ts:797-800,907`). Es un cambio de reglas, no una optimización invisible | Afirmar que el orden `(celda, slot)` reproduce el orden de hoy: es cierto para las escrituras y **falso para la percepción**. Ocultarlo haría decorativa la puerta de calidad de la etapa y violaría los principios II y IV |
 | **Dos caminos conviviendo (objeto y SoA) durante B–E** | Migrar de golpe las ~40 funciones que mutan teselas es el mayor riesgo del plan; la convivencia permite revertir por página | Big-bang de SoA: el servidor público sirve este árbol en caliente y no admite un salto sin red |
 | **Subproceso persistente con memoria compartida para la GPU** | El puente de hoy gasta ~196 ms de IPC por paso sobre 0,40 ms de kernel: no sirve para producción. El subproceso persistente no mete toolchain nativa en `npm test` | Addon N-API/CUDA: es lo más cercano a un framework nuevo de todo el material y mete compilación nativa en el camino de las pruebas. Se reconsidera **con evidencia** si el subproceso no alcanza el punto de cruce medido |
 | **`tests/determinismo-hardware.test.ts` en modo largo fuera de `npm test`** | 9 backends × 4 semillas × 7 escenas × 2 400 pasos no cabe en una suite que ya tarda ~10 min | Meterlo entero: repetiría el desastre de `world.test.ts`. El modo corto (600 pasos, ≤ 3 min) sí entra en `npm test`; el largo va tras bandera y en el gate de etapa |

@@ -83,7 +83,12 @@ type Memorias = NonNullable<ContextoTexto['world']>['memories'];
  * sigue protegido cuando es el texto entero o va citado entre «». */
 function literalesDeCarta(memories: Memorias | undefined): string[] {
   const out = new Set<string>();
-  for (const m of memories ?? []) for (const literal of [m.text, m.title]) if (literal && literal.length >= 4) out.add(literal);
+  for (const m of memories ?? []) {
+    for (const literal of [m.text, m.title]) if (literal && literal.length >= 4) out.add(literal);
+    // La forma citada no parte identificadores de la ley, así que se protege sea cual sea su longitud:
+    // un título corto con comillas dentro rompería la regex de citas.
+    if (m.title) out.add(`«${m.title}»`);
+  }
   return [...out].sort((a, b) => b.length - a.length);
 }
 

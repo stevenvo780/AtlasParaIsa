@@ -201,3 +201,12 @@ test('M6: las coordenadas de la ley no se confunden con un decimal', () => {
   assert.equal(enClaro('Funcionó cosechar en (12, 5); 0.5 de beneficio.'), 'Funcionó cosechar en (12, 5); 0,5 de beneficio.');
   assert.equal(enClaro('Ocurrió en (-3,7), paso 40.'), 'Ocurrió en (-3, 7), paso 40.');
 });
+
+test('Constitución: un título corto de la carta con comillas dentro también se muestra literal', () => {
+  for (const title of ['»e1', 'e1«', 'ab', 'x']) {
+    const world = { memories: [{ id: 'm1', title, text: 'texto de la carta' }], people: [] } as never;
+    for (const texto of [`Influye «${title}» en su decisión`, `al recordar «${title}»`]) {
+      assert.equal(enClaro(texto, { world }), texto, `${title}: ${texto}`);
+    }
+  }
+});

@@ -4,7 +4,7 @@ import { once } from 'node:events';
 import { createServer } from 'node:net';
 import { WebSocket } from 'ws';
 import { Store } from '../src/server/store.js';
-import { createApp } from '../src/server/app.js';
+import { createApp, VISTA_RESERVA_PASOS } from '../src/server/app.js';
 import { digestoCanonico } from '../src/world/digesto.js';
 import { DEFAULT_PARAMS, parseParams } from '../src/world/params.js';
 import type { ServerMessage, WorldView } from '../src/shared/types.js';
@@ -166,22 +166,66 @@ test('PERF3: un paso sin gestos que falla en el sitio pausa, y nada a medio paso
   }
 });
 
-test('PERF3: sin ninguna vista anterior, un mundo a medio paso responde que está en pausa en vez de proyectarse', async () => {
-  const { app, store, origin, cookie, ws, recibir } = await servidorConSesion(42);
-  let nuevo: WebSocket | undefined;
+/** Verificación PERF3 (2026-09-23): el servicio pasa horas sin visores. Sin vista de reserva, un paso sin gestos
+ * que fallaba entonces dejaba `/api/world` en 503 para siempre y el cliente lo tomaba por «sin conexión»; la base
+ * servía el mundo en pausa. Ahora `createApp` proyecta una vista al arrancar y la renueva cada
+ * `VISTA_RESERVA_PASOS` pasos que nadie mira: lo servido es un estado completo, en pausa y con su paso. */
+test('PERF3: sin visores, un mundo a medio paso sirve la vista de reserva del arranque o la renovada', async () => {
+  for (const pasos of [3, VISTA_RESERVA_PASOS + 5]) {
+    const { app, store, origin, cookie, ws, recibir } = await servidorConSesion(42);
+    let nuevo: WebSocket | undefined;
+    try {
+      const inicio = app.world.tick, reserva = pasos < VISTA_RESERVA_PASOS ? inicio : inicio + VISTA_RESERVA_PASOS;
+      for (let n = 0; n < pasos; n++) app.stepOnce();
+      assert.equal(app.failed, false);
+      mudarLejos(app.world);
+      store.loadChunk = () => { throw new Error('synthetic mid-step failure'); };
+      app.stepOnce();
+      assert.equal(app.failed, true); assert.equal(app.world.tick, inicio + pasos + 1, 'el mundo en memoria quedó a medio paso');
+      for (const encoding of ['gzip', 'identity']) {
+        const respuesta = await fetch(origin + '/api/world', { headers: { Cookie: cookie, 'Accept-Encoding': encoding } });
+        assert.equal(respuesta.status, 200, `${pasos} pasos/${encoding}: en pausa, no «sin conexión»`);
+        const servida = await respuesta.json() as WorldView;
+        assert.equal(servida.tick, reserva, `${pasos} pasos/${encoding}`); assert.equal(servida.paused, true);
+        assert.match(servida.pauseReason!, new RegExp(`a medias.*paso ${reserva}\\)`));
+      }
+      nuevo = ws();
+      const estado = await recibir(nuevo);
+      assert.equal(estado.type === 'state' && estado.world.tick, reserva);
+      assert.equal(estado.type === 'state' && estado.world.paused, true);
+      assert.equal(store.load()!.world.tick, inicio + pasos, 'lo durable es el último paso confirmado');
+    } finally { nuevo?.terminate(); await app.close(); store.close(); }
+  }
+});
+
+test('PERF3: una región ilegible no impide arrancar; sin ninguna vista, un mundo a medio paso responde 503 «en pausa»', async () => {
+  const port = await freePort(), origin = `http://127.0.0.1:${port}`, store = new Store(':memory:');
+  const opciones = { store, origin, password: 'synthetic-failure-password', manual: true, seed: 42 };
+  // Como la primera prueba: con todos en la esquina, la cámara por defecto pasa a leer regiones archivadas.
+  const antes = createApp(opciones);
+  for (const p of antes.world.people) { p.x = 39; p.y = 27; p.target = { x: p.x, y: p.y }; p.action = 'rest'; p.decisionAt = 1000; }
+  for (let n = 0; n < 5; n++) antes.stepOnce();
+  await antes.close();
+  let lecturas = 0, nuevo: WebSocket | undefined;
+  store.loadChunk = () => { lecturas++; throw new Error('synthetic archive read failure'); };
+  const app = createApp(opciones);
   try {
-    for (let n = 0; n < 3; n++) app.stepOnce();
+    assert.ok(lecturas > 0, 'la vista de reserva del arranque leyó el archivo y falló, sin tumbar el arranque');
+    const tick = app.world.tick;
+    app.server.listen(port, '127.0.0.1'); await once(app.server, 'listening');
+    const login = await fetch(origin + '/api/login', { method: 'POST', headers: { Origin: origin, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: opciones.password }) });
+    const cookie = login.headers.get('set-cookie')!.split(';')[0]!;
     mudarLejos(app.world);
-    store.loadChunk = () => { throw new Error('synthetic mid-step failure'); };
     app.stepOnce();
-    assert.equal(app.failed, true); assert.equal(app.world.tick, 4);
+    assert.equal(app.failed, true); assert.equal(app.world.tick, tick + 1);
     const respuesta = await fetch(origin + '/api/world', { headers: { Cookie: cookie } });
     assert.equal(respuesta.status, 503);
     assert.match((await respuesta.json() as { error: string }).error, /pausa.*a medias/);
-    nuevo = ws();
-    const primero = await recibir(nuevo);
+    nuevo = new WebSocket(origin.replace('http:', 'ws:') + '/ws', { headers: { Origin: origin, Cookie: cookie } });
+    const primero = JSON.parse((await once(nuevo, 'message'))[0].toString()) as ServerMessage;
     assert.equal(primero.type, 'error');
     if (primero.type === 'error') assert.match(primero.message, /pausa.*a medias/);
-    assert.equal(store.load()!.world.tick, 3);
+    assert.equal(store.load()!.world.tick, tick);
   } finally { nuevo?.terminate(); await app.close(); store.close(); }
 });

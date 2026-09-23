@@ -81,6 +81,9 @@ export const TROZO_WS_COMPRIMIDO = 256 * 1024;
 /** Sin nada que mandar durante este tiempo (y sin `state` en vuelo), el servidor manda un latido.
  * Holgado frente a los 8 s de silencio que tolera `src/client/connection.ts`. */
 export const LATIDO_WS_MS = 3000;
+/** Edad máxima, en pasos, de la vista de reserva cuando nadie mira (ver `renovarReserva` en `createApp`):
+ * 10 s a ritmo nominal, por una proyección con la cámara por defecto cada tantos pasos. */
+export const VISTA_RESERVA_PASOS = 100;
 /** Parte `text` en trozos de a lo sumo `size` unidades sin separar nunca un par sustituto
  * (un trozo con medio carácter no sería UTF-8 válido y el navegador cerraría la conexión). */
 export function trocear(text: string, size = TROZO_WS): string[] {
@@ -224,10 +227,11 @@ export function createApp(options: AppOptions) {
   /** PERF3: `failed` con `world` a medio paso (un paso sin reserva, o un punto que no se pudo
    * restaurar, que falló). Terminal como `failed`; además, `world` ya no se proyecta ni se consulta. */
   let aMedioPaso = false;
-  /** La última vista proyectada (a cualquier cliente o por `/api/world`). Con el mundo a medio paso
-   * es lo único honesto que se puede enseñar: un estado que existió, marcado en pausa y con su paso.
-   * Recargar el último estado durable del Store no lo es menos, pero sobre la copia pública (3,3 GB)
-   * `load()` tardó 140–330 s con el hilo bloqueado (2026-09-23), y el fallo que pausó puede ser del disco. */
+  /** La última vista proyectada (a cualquier cliente, por `/api/world` o de reserva; ver `renovarReserva`).
+   * Con el mundo a medio paso es lo único honesto que se puede enseñar: un estado que existió, marcado en
+   * pausa y con su paso. Recargar el último estado durable del Store no lo es menos, pero sobre la copia
+   * pública (3,3 GB) `load()` tardó 140–330 s con el hilo bloqueado (2026-09-23), y el fallo que pausó puede
+   * ser del disco. Solo es `null` si ni la proyección del arranque pudo leer su región. */
   let ultimaVista: WorldView | null = null;
   const pending = new Map<string, Pending>();
   // T024 (P1): `subscribeMs` es la cadencia mínima que un cliente pidió (móvil observador) —
@@ -295,9 +299,23 @@ export function createApp(options: AppOptions) {
     if (!aMedioPaso) return ultimaVista = proyectar(viewport);
     // Ni la cámara pedida ni un mundo a medio paso: la última vista que existió, sea cual sea su cámara.
     if (!ultimaVista) throw new HttpError(503, 'El mundo está en pausa: un paso falló a medias y no hay un estado anterior que mostrar.');
-    const pauseReason = `El mundo está en pausa: un paso falló a medias. Se muestra el último estado enviado (paso ${ultimaVista.tick}).`;
+    const pauseReason = 'El mundo está en pausa: un paso falló a medias. '
+      + `Se muestra el último estado completo que se conserva (paso ${ultimaVista.tick}).`;
     return { ...ultimaVista, paused: true, pauseReason };
   };
+  /** Vista de reserva, con la cámara por defecto: al arrancar y cada `VISTA_RESERVA_PASOS` pasos que nadie
+   * mira. El servicio pasa horas sin visores, y sin ella un paso sin reserva que fallara entonces dejaba
+   * `/api/world` en 503 para siempre: el cliente lo toma por «sin conexión» y reintenta sin fin, cuando la
+   * base servía el mundo en pausa (verificación PERF3, 2026-09-23). Una región ilegible no puede impedir el
+   * arranque ni pausar un paso ya confirmado: si esta proyección falla, se conserva la vista anterior y se
+   * reintenta a los `VISTA_RESERVA_PASOS` pasos, no en cada paso. */
+  let intentoReserva = world.tick;
+  function renovarReserva() {
+    intentoReserva = world.tick;
+    try { ultimaVista = proyectar(); } catch { /* se conserva la anterior */ }
+  }
+  renovarReserva();
+  const reservaVieja = () => world.tick - Math.max(ultimaVista?.tick ?? 0, intentoReserva) >= VISTA_RESERVA_PASOS;
   /** Consultas de solo lectura sobre `world` (biografías, recetas): nunca sobre un mundo a medio paso. */
   function mundoConsultable(): World {
     if (aMedioPaso) throw new HttpError(503, 'El mundo está en pausa: un paso falló a medias y no se puede consultar.');
@@ -522,6 +540,8 @@ export function createApp(options: AppOptions) {
         broadcast();
         fases.broadcast = performance.now() - broadcastStarted;
       }
+      // Con visores, `broadcast` ya la renovó; sin ellos, una proyección cada `VISTA_RESERVA_PASOS` pasos.
+      if (reservaVieja()) renovarReserva();
       runtime.fases = fases;
       runtime.fraccionSerial = fraccionSerial(fases);
     } catch (error) {

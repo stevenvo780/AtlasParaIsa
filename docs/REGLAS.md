@@ -529,9 +529,16 @@ una clave nueva cambiaría el digesto de todos los mundos.
 fue el guardado) y se pausa como siempre. Ese mundo no es un estado del mundo, así que nada lo proyecta ni lo
 guarda. `avanzar` no pasa de `failed` y el cierre no guarda, como antes. `/api/world` y la vista de un
 cliente que llega por WS, o que cambia de cámara, reciben la **última vista proyectada**, marcada en pausa y
-con su paso («un paso falló a medias; se muestra el último estado enviado (paso N)»), sea cual sea su cámara.
-Si no se proyectó ninguna, responden 503 «en pausa», y las biografías y recetas responden con error. Los
-clientes conectados reciben su última vista en pausa, como siempre. Lo mismo vale ahora para un punto de
+con su paso («un paso falló a medias; se muestra el último estado completo que se conserva (paso N)»), sea cual
+sea su cámara. Las biografías y recetas responden con error. Los clientes conectados reciben su última vista en
+pausa, como siempre. El servicio pasa horas sin visores, así que siempre hay una vista que servir: `createApp`
+proyecta una **vista de reserva** con la cámara por defecto al arrancar, y la renueva cada
+`VISTA_RESERVA_PASOS` (100) pasos que nadie mira (con visores, la renueva la difusión). Sin ella, la primera
+versión respondía 503 para siempre si el fallo llegaba sin que nadie hubiera mirado, y el cliente lo tomaba por
+«sin conexión» y reintentaba sin fin, cuando la base servía el mundo en pausa (verificación del 2026-09-23). La
+proyección de reserva no puede tumbar el arranque ni pausar un paso confirmado: si su región no se puede leer,
+se conserva la anterior y se reintenta a los 100 pasos. Solo si ni la del arranque se pudo proyectar, y nadie
+miró antes del fallo, se responde 503 «en pausa». Lo mismo vale ahora para un punto de
 restauración que no se pudo restaurar, que antes seguía proyectándose a medias. Se descartó recargar el
 último estado durable del Store: sobre la copia pública (3,3 GB) `load()` tardó 140–330 s con el hilo
 bloqueado, y el fallo que pausó puede ser del propio disco. Al reiniciar, el mundo retoma de su último

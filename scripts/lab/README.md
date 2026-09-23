@@ -195,6 +195,19 @@ observación anterior, fundadas/disueltas y, por comunidad, miembros, distancia 
 centro y grupos espaciales a ≤ 6 celdas). Sólo lee campos planos: los `dia-NNN.json` salen
 idénticos con y sin observador (comprobado contra la base de la noche, semillas 7/42/51926/1).
 
+## Diagnóstico de disputas (`diagnostico-disputas.ts`, hipótesis CONFL 2026-09-22)
+
+```sh
+npx tsx scripts/lab/diagnostico-disputas.ts --seed 51926 --dias 5 --params "..." --salida fichero.json
+```
+
+Sigue cada evento `conflict` (el que cede es `actors[0]`): necesidad (máximo de hambre y sed) de
+cada lado antes del paso, si eran de la misma comunidad, sobre qué acción se disputó (la que conserva
+quien no cede), si quien cedió vuelve a la MISMA celda en los 240 pasos siguientes, cuántas disputas
+más encadena en un día y si alguno de los dos muere en el día siguiente, y de qué. Sólo lee el mundo;
+imprime una línea por día y un resumen al final. Midió el cerrojo que la ley `social.memoriaDisputa`
+corrige (ver `docs/REGLAS.md`, §Conflicto legible).
+
 ## Rendimiento
 
 Con `persistencia.cadaTicks = 1` (el valor por defecto, igual que producción hoy), guardar en cada

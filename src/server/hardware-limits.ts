@@ -25,8 +25,9 @@ const TILES_PER_CHUNK = CHUNK_SIZE * CHUNK_SIZE;
  * 2771 MiB (1386 B/tesela), RSS pico del proceso con el mundo escritor y el recargado a la
  * vez 3779 MiB (1888 B/tesela) y 520 249 344 bytes en SQLite (248 B/tesela).
  * Se toma 2000 B, redondeo del pico de DOS mundos residentes, porque esa es la forma real
- * del servidor de hoy: `motor.clonPorPaso=true` clona el mundo en cada paso (T103/T104
- * cambiarán eso, y entonces esta constante se vuelve a medir, no se adivina).
+ * del servidor de hoy: `motor.clonPorPaso=true` clona el mundo en cada paso con gestos (desde
+ * PERF3, 2026-09-23, solo en esos; el pico sigue dándose). Si el clon desaparece del todo, esta
+ * constante se vuelve a medir, no se adivina.
  * La medida anterior (1707 B/tesela) mezclaba ambos mundos en un RSS instantáneo sobre
  * 2 M copias de una sola tesela: ni era pico ni era de una fase.
  */

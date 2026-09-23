@@ -15,6 +15,7 @@ import { cloneWorld, createWorld, puntoDeRestauracion, stepWorld, type FaseMedic
 import { digestoCanonico, diferenciaCanonica } from '../src/world/digesto.js';
 import { DEFAULT_PARAMS, paramsOf, parseParams, setParams } from '../src/world/params.js';
 import { chunkKey } from '../src/world/terrain.js';
+import type { GestureResult } from '../src/shared/types.js';
 
 /** `digestoCanonico` incluye los params efectivos, y `motor.clonPorPaso` es uno de ellos: para
  * comparar dos motores hay que mirar el mundo, no la clave que eligió el motor. */
@@ -96,27 +97,58 @@ test('(3) `stepWorld` que lanza a mitad deja el mundo restaurado, no a medio pas
   } finally { await close(); }
 });
 
-test('(4) SessionRevoked: el mundo no avanza con un gesto aplicado y no confirmado', async () => {
-  const { app, store, origin, close } = await harness(false);
-  try {
-    for (let n = 0; n < 6; n++) app.stepOnce();
-    app.server.listen(Number(new URL(origin).port), '127.0.0.1'); await once(app.server, 'listening');
-    const login = await fetch(origin + '/api/login', { method: 'POST', headers: { Origin: origin, 'Content-Type': 'application/json' }, body: JSON.stringify({ password: 'restauracion-t104-password' }) });
-    const cookie = login.headers.get('set-cookie')!.split(';')[0]!;
-    const persona = app.world.people[0]!;
-    const gesture = { id: 'restauracion-t104-gesto', kind: 'plant', x: persona.x + 1, y: persona.y };
-    const enviado = fetch(origin + '/api/gesture', { method: 'POST', headers: { Origin: origin, 'Content-Type': 'application/json', Cookie: cookie }, body: JSON.stringify(gesture) });
-    for (let w = 0; w < 12; w++) await new Promise<void>(resolve => setImmediate(resolve));
-    const antes = digestoCanonico(app.world), tick = app.world.tick;
-    // Guardado real que revoca la sesión justo antes de confirmar: es la ruta viva, no un doble.
-    const original = store.save.bind(store);
-    store.save = (world, inputs, requiredSessions) => { store.revoke(requiredSessions?.[0]); return original(world, inputs, requiredSessions); };
-    assert.doesNotThrow(() => app.stepOnce());
-    assert.equal(app.failed, false, 'una sesión revocada no pausa el mundo');
-    assert.equal(app.world.tick, tick, 'el gesto no confirmado no puede dejar el mundo un tick por delante');
-    assert.equal(digestoCanonico(app.world), antes);
-    assert.equal((await enviado).status, 401);
-  } finally { await close(); }
+/** Sesión propia en el servidor del arnés (lo pone a escuchar). Cada llamada manda un `plant` junto a la
+ * primera persona y vuelve cuando el servidor ya lo tiene en su lote (`gestosPendientes`): entra en el
+ * paso SIGUIENTE, y `respuesta` resuelve cuando ese paso lo confirma o lo rechaza. */
+async function entrar(h: Harness): Promise<(id: string) => Promise<{ respuesta: Promise<Response> }>> {
+  if (!h.app.server.listening) { h.app.server.listen(Number(new URL(h.origin).port), '127.0.0.1'); await once(h.app.server, 'listening'); }
+  const login = await fetch(h.origin + '/api/login', { method: 'POST', headers: { Origin: h.origin, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password: 'restauracion-t104-password' }) });
+  const cookie = login.headers.get('set-cookie')!.split(';')[0]!;
+  return async id => {
+    const persona = h.app.world.people[0]!, antes = h.app.gestosPendientes;
+    const gesture = { id, kind: 'plant', x: Math.round(persona.x) + 1, y: Math.round(persona.y) };
+    const respuesta = fetch(h.origin + '/api/gesture', { method: 'POST',
+      headers: { Origin: h.origin, 'Content-Type': 'application/json', Cookie: cookie }, body: JSON.stringify(gesture) });
+    // Si el servidor lo rechaza antes de encolarlo, la respuesta llega sola y no hay nada que esperar.
+    let respondido = false;
+    void respuesta.then(() => { respondido = true; }, () => { respondido = true; });
+    while (h.app.gestosPendientes === antes && !respondido) await new Promise<void>(resolve => setTimeout(resolve, 1));
+    return { respuesta };
+  };
+}
+
+test('(4) SessionRevoked: el mundo no avanza con un gesto aplicado y no confirmado, con clon por paso y con punto', async () => {
+  for (const clonPorPaso of [true, false]) {
+    // PERF3: con clon por paso, el paso CON gestos sigue simulando sobre un clon, el único que puede
+    // deshacerse; el gemelo nunca vio el gesto y los dos tienen que seguir siendo el mismo mundo.
+    const presupuesto = ',gobernador.presupuestoMs=5000';
+    const h = await harness(clonPorPaso, presupuesto), gemelo = await harness(clonPorPaso, presupuesto);
+    const { app, store } = h;
+    try {
+      for (let n = 0; n < 6; n++) { app.stepOnce(); gemelo.app.stepOnce(); }
+      const gesto = await entrar(h);
+      const { respuesta: enviado } = await gesto('restauracion-t104-gesto');
+      const antes = digestoCanonico(app.world), tick = app.world.tick, mundo = app.world;
+      // Guardado real que revoca la sesión justo antes de confirmar: es la ruta viva, no un doble.
+      const original = store.save.bind(store);
+      store.save = (world, inputs, requiredSessions) => {
+        store.revoke(requiredSessions?.[0]); return original(world, inputs, requiredSessions);
+      };
+      assert.doesNotThrow(() => app.stepOnce());
+      store.save = original;
+      assert.equal(app.failed, false, 'una sesión revocada no pausa el mundo');
+      assert.equal(app.world.tick, tick, 'el gesto no confirmado no puede dejar el mundo un tick por delante');
+      assert.equal(digestoCanonico(app.world), antes);
+      assert.equal(app.world, mundo, `clonPorPaso=${clonPorPaso}: deshacer devuelve el mismo mundo vigente`);
+      assert.equal((await enviado).status, 401);
+      for (let n = 1; n <= 8; n++) {
+        app.stepOnce(); gemelo.app.stepOnce();
+        assert.equal(digestoCanonico(app.world), digestoCanonico(gemelo.app.world),
+          `clonPorPaso=${clonPorPaso}: divergencia en el paso ${n}`);
+      }
+    } finally { await h.close(); await gemelo.close(); }
+  }
 });
 
 test('(5) `motor.clonPorPaso=true` reproduce exactamente el mundo de hoy, tick a tick', async () => {
@@ -134,6 +166,35 @@ test('(5) `motor.clonPorPaso=true` reproduce exactamente el mundo de hoy, tick a
     assert.equal(sinClon.app.world.tick, 60);
   } finally { await conClon.close(); await sinClon.close(); }
 });
+
+test('(13) PERF3: con gestos y la cadencia de producción, clon por paso (en el sitio sin gestos) da el mundo del punto, en tres semillas',
+  { timeout: 1_800_000 }, async () => {
+    // El punto (T104) simula todo paso sobre el mundo vigente con reserva y ya se probó bit a bit igual al
+    // clon de siempre ((5), (10), `scripts/perf/trayectoria-punto.ts`); aquí el otro lado alterna sin reserva
+    // (sin gestos) y clon (con gestos). Cada 25 pasos un gesto real en los dos, que obliga a guardar.
+    const receta = `,${PRODUCTION_PARAMS},gobernador.presupuestoMs=5000`;
+    for (const seed of [7, 42, 51926]) {
+      const clon = await harness(true, receta, seed), punto = await harness(false, receta, seed);
+      try {
+        const gestos = [await entrar(clon), await entrar(punto)];
+        let aplicados = 0;
+        for (let n = 1; n <= 250; n++) {
+          const enviados = n % 25 === 0 ? await Promise.all(gestos.map(gesto => gesto(`perf3-${seed}-${n}`))) : null;
+          clon.app.stepOnce(); punto.app.stepOnce();
+          if (enviados) {
+            const [a, b] = await Promise.all(enviados.map(async ({ respuesta }) => (await respuesta).json() as Promise<GestureResult>));
+            assert.equal(a!.tick, clon.app.world.tick, `semilla ${seed}: el gesto del paso ${n} no entró en su paso`);
+            assert.deepEqual(a, b); aplicados++;
+            assert.equal(digestoDelMundo(clon.app.world), digestoDelMundo(punto.app.world), `semilla ${seed}: divergencia en el paso ${n}`);
+          }
+        }
+        assert.equal(aplicados, 10);
+        assert.equal(clon.app.failed || punto.app.failed, false);
+        assert.equal(digestoDelMundo(clon.store.load()!.world), digestoDelMundo(punto.store.load()!.world),
+          `semilla ${seed}: lo durable difiere`);
+      } finally { await clon.close(); await punto.close(); }
+    }
+  });
 
 test('el punto de restauración deshace un paso completo sin servidor, paso a paso y en tres semillas', () => {
   // Cinco digestos canónicos por paso (cada uno cuesta 30–90 pasos): 10 pasos por semilla bastan.
@@ -158,15 +219,33 @@ test('el punto de restauración deshace un paso completo sin servidor, paso a pa
   }
 });
 
-test('SessionRevoked con clon por paso sigue sin pausar el mundo ni avanzarlo', async () => {
+test('PERF3: con clon por paso, el paso sin gestos corre en el sitio y el paso con gestos sobre un clon', async () => {
+  const h = await harness(true, ',gobernador.presupuestoMs=5000');
+  try {
+    const mundo = h.app.world;
+    for (let n = 0; n < 4; n++) h.app.stepOnce();
+    assert.equal(h.app.world, mundo, 'sin gestos no hay reserva: el paso avanza el mismo mundo');
+    const gesto = await entrar(h);
+    const { respuesta: enviado } = await gesto('perf3-gesto-clon');
+    h.app.stepOnce();
+    assert.equal((await enviado).status, 200);
+    assert.notEqual(h.app.world, mundo, 'con gestos el paso corre sobre un clon, que pasa a ser el mundo vigente');
+    assert.equal(mundo.tick, 4, 'y el mundo anterior quedó intacto hasta que el guardado confirmó');
+    assert.equal(h.app.world.tick, 5);
+  } finally { await h.close(); }
+});
+
+test('PERF3: sin reserva no se finge deshacer; un SessionRevoked (imposible sin gestos) pausa el mundo', async () => {
+  // `Store.save` solo lanza `SessionRevoked` si recibe sesiones, y solo las recibe un paso con gestos, que
+  // con clon por paso siempre se clona. Forzado en un paso sin gestos, no hay con qué deshacer.
   const { app, store, close } = await harness(true);
   try {
     for (let n = 0; n < 4; n++) app.stepOnce();
-    const antes = digestoCanonico(app.world);
     store.save = () => { throw new SessionRevoked('Session revoked before commit.'); };
     assert.doesNotThrow(() => app.stepOnce());
-    assert.equal(app.failed, false);
-    assert.equal(digestoCanonico(app.world), antes);
+    assert.equal(app.failed, true, 'un paso sin reserva que falla no se reintenta');
+    assert.equal(app.world.tick, 5, 'el mundo en memoria quedó a medio paso (y ya no se sirve: projection-failure.test.ts)');
+    assert.equal(store.load()!.world.tick, 4);
   } finally { await close(); }
 });
 

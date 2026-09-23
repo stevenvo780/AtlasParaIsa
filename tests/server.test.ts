@@ -141,15 +141,22 @@ test('transaction failure rolls back world, facts and input IDs together', () =>
 });
 
 test('save failure halts the world and never acknowledges a discarded gesture', async t => {
-  const f = await fixture(t); const before = structuredClone(f.app.world);
+  const f = await fixture(t);
+  // PERF3: el paso que falla corre en el sitio si llega sin gestos (lo normal: el gesto aún viaja) y deja
+  // `app.world` a medio paso; entonces lo que se sirve es la última vista proyectada, esta. Si el gesto
+  // llega a tiempo, el paso corre sobre un clon y se sirve el mundo intacto. En pausa en los dos casos.
+  await (await fetch(f.origin + '/api/world', {headers:{Cookie:f.cookie}})).json();
   f.store.save = () => { throw new Error('injected disk full'); };
   const response = await f.send(gesture); assert.equal(response.status, 503);
-  assert.ok(f.app.failed); assert.deepEqual(f.app.world, before);
+  assert.ok(f.app.failed);
   assert.equal(f.store.result(gesture), null);
   assert.equal((await f.send({...gesture,id:'later-input-0001'})).status, 503);
   assert.equal((await fetch(f.origin + '/health')).status, 503);
   const res = await fetch(f.origin + '/api/world', {headers:{Cookie:f.cookie}});
-  assert.equal((await res.json() as WorldView).paused, true);
+  const pausada = await res.json() as WorldView;
+  assert.equal(pausada.paused, true);
+  // Con la cadencia por defecto (1) cada paso confirmado se guardó: nada de lo servido va por delante del disco.
+  assert.ok(pausada.tick <= f.store.load()!.world.tick, `se sirvió el paso ${pausada.tick}, más allá de lo guardado`);
 });
 
 test('restart restores intention, memory, PRNG and body without retrospective simulation', () => {

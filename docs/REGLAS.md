@@ -643,6 +643,56 @@ de la simulación (`simulationMs` p95 158–182 ms con carga), no la reserva. En
 prioridad idle (ananicy) y sus cifras se parecían a las de la torre cargada; el portátil al que se mudó el
 público el 23-09 no está medido con este código.
 
+### Motor: halo de las particiones (`src/world/halo.ts`, T111, 2026-09-23)
+
+Cuando el motor reparta el paso por regiones, cada región tendrá que leer de sus vecinas `HALO_CELDAS = 14`
+celdas por eje. `src/world/halo.ts` es el inventario que fija ese número: cada lectura del paso alrededor de
+un punto con su **alcance compuesto** (su radio más el de lo que la función mira alrededor de lo que encontró),
+las lecturas globales que se replican con su cota, las lecturas por id, rol o comunidad, los recorridos de
+fase y las escrituras de la activación y de la obra. Es una constante y una prueba: no cambia ninguna regla ni
+el digesto.
+
+`tests/halo-radios.test.ts` analiza el fuente de `src/world`. En las fases que se repartirían (decisión de cada
+persona, ecología, decisión de la fauna) sigue el grafo de llamadas desde la función raíz de la fase y calcula
+sobre él la composición de radios; en cada función alcanzada exige que estén fijadas enteras, por el texto de
+una entrada del inventario, todas las lecturas del mundo (colecciones con cualquier receptor, desestructuradas
+o entre corchetes, alias, primitivas de consulta, el estado de la fauna, llamadas con sus argumentos, barridos
+y sus reasignaciones), y que el resto de campos que se leen del mundo estén declarados como estado global. En
+las fases seriales la red es más laxa (cadenas que consultan una colección y primitivas) y sólo fija el
+máximo. Falla con una lectura nueva o cambiada, con un umbral o una constante de radio mayor que el halo y con
+una composición que lo supere; lo demuestran 34 mutaciones reales del árbol, entre ellas las siete de la
+verificación del 2026-09-23. **No** sigue el flujo de datos (si cambia de dónde sale una variable que una
+lectura fijada usa como punto, no lo ve) ni comprueba que el radio escrito en cada entrada sea el verdadero:
+eso lo contrasta la sonda dinámica del informe de T111, que altera todo lo que está a más de H celdas de quien
+decide y compara su decisión: con los parámetros históricos ninguna de 230 decisiones cambió con H ≥ 13, ni
+ninguna de 642 decisiones de la fauna con H ≥ 5; con reglas 10 cambian algunas hasta H = 28 por el cortejo.
+
+- **14, no 13.** El 13 de la refutación G2 (hogar a ≤ 7 y personas a ≤ 6 de él) sigue siendo el máximo para
+  personas. Las teselas llegan a 14: `evaluateCooperation` mira a quien está a ≤ 7 y, desde esa persona, la
+  tesela de su destino (≤ 7 de ella) y las teselas a ≤ 7 para los insumos de una receta. Por colección:
+  teselas 14, personas 13, lugares 12, estructuras 11 y animales 7.
+- **Lo que el halo no cubre.** Con reglas 10 el cortejo (`poblacion.cortejo` 2, `radioCortejo` 128) lee por id
+  a cada persona vinculada y decide sobre las que están a ≤ 128 celdas: la decisión exige un halo de **128**
+  (14 con el cortejo apagado, como en los mundos históricos). Los recuerdos de la fauna consultan la máscara
+  de presencia hasta 126 celdas; esa máscara no cambia durante el paso y se replica. La búsqueda de ruta de
+  `move` lee terreno a 24 celdas, la activación escribe hasta 23 y una orden deja el destino de alguien a
+  hasta 4 096; todo eso corre en fases seriales. `world.places` (≤ 2 048), invitaciones, recordatorios y
+  planos se replican enteros.
+- **Quién decide no lo decide el halo.** Qué animales deciden en un paso sale de dos selecciones sobre toda la
+  fauna activa: la ventana rotatoria de `MAX_ACTIVE_ANIMALS` (8 192) y los `MAX_ANIMAL_DECISIONS_PER_TICK`
+  (1 024) más atrasados. Con más atrasados que eso, que un animal decida depende de animales a cualquier
+  distancia. Las dos quedan inventariadas como lecturas globales que calcula el coordinador antes de repartir
+  la decisión (hoy latentes: los mundos del laboratorio no pasan de ~800 animales). De las personas decide su
+  turno (`decisionAt`) y un disparador que lee su propio destino, en la cadena serial. `choose` tampoco es de
+  solo lectura: al decidir por un recuerdo de S e I escribe un evento de crónica, y resolver recetas toca el
+  LRU del catálogo de tecnología; esas escrituras las tiene que ordenar la confirmación (E.1).
+- **Coste.** Con halo 14, una región llena de 256 × 256 lee de sus vecinas el 23,1 % de su área (12,9 % con
+  halo 8 y 21,3 % con 13); una de 512 × 512, el 11,2 %. En los mundos de hoy pesa más: a los 5 días (semillas 7,
+  42 y 51926, 16–33 habitantes, 10 000–18 000 teselas activas) cada región lee de sus vecinas el 26–50 % de las
+  teselas activas con halo 14 (15–27 % con halo 8), y con regiones de 512 igual o más, porque el mundo nace
+  en el origen, que es esquina de cuatro regiones de cualquier tamaño. Pasar a 512 cambia la geometría de las
+  regiones, no las reglas. Hay que decidirlo con la métrica de T115.
+
 Estas opciones se validan y persisten, pero **T102 no activa backends, deltas ni nuevas señales,
 ni cambia los topes de validación o fundación de comunidades**. La ejecución sigue usando el
 motor V7 y el gobernador p95 existentes. Los límites son declaraciones pendientes de T100;

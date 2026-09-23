@@ -16,6 +16,7 @@ export const ECOLOGY_CONTRACT = Object.freeze({
     basin: '32-bit imul hash; salt1400; scale24; floor negative coordinates; quintic fade and bilinear lerp in original order',
     wood: '100-tick regrowth debits updated growth; uses old fertility/moisture/growth; stump transitions preserved',
     cadence: 'no updates except tick%10==0; read old neighbor life; Float64 with FMA disabled',
+    tick: 'stepWorld runs ecology() first (moisture, vegetation, food; not ported here, T120) and then this kernel; tests/compute-ecology.test.ts compares that whole composition',
   },
 });
 export const FIELDS = ECOLOGY_CONTRACT.fields.length;
@@ -53,6 +54,9 @@ export const ECOLOGY_KERNEL_SPEC = Object.freeze({
     // Umbrales y factores del parche life
     lifeNeighborThreshold: 0.45,
     lifeFertileThreshold: 0.45,
+    // T112: mismo umbral de vecino vivo, leído por `livingNeighborCounts` cuando `motor.soaTerreno`
+    // usa el TileStore en vez de la topología de objetos. Tercera aparición textual del mismo 0,45.
+    lifeNeighborThresholdSoa: 0.45,
     fertileNeighborCount: 2,
     lifePatternFactor: 0.2,
     lifeDroughtThreshold: 0.15,
@@ -117,7 +121,11 @@ export const ECOLOGY_KERNEL_SPEC = Object.freeze({
   // SHA256 del cuerpo de step() con comentarios /* */, // y secuencias de
   // espacios colapsadas. Hay que bumpear la versión (y este hash) junto con
   // cualquier cambio intencional de reglas.
-  canonicalStepBodyHash: '88aa7c842b2d9756df8c72d4c0f9a3abd08d213922531450c112f4b20e7b494a',
+  // Recalculado tras T112 (topología SoA behind motor.soaTerreno, ecosystem-kernel.ts): las fórmulas
+  // no cambian (mismas operaciones, mismo orden; T112 lo prueba en tests/soa-terreno.test.ts), pero el
+  // texto normalizado de step() sí, por la rama `store` y `livingNeighborCounts(0.45)`. No se bumpea la
+  // versión: no es un cambio de regla, es la forma en que se llega al mismo umbral de vecino vivo.
+  canonicalStepBodyHash: 'ed7eecd166e75effc30300437278b4a0c36839090acb4ec280c4ef5c868cf47d',
 });
 
 // Conteos/índices que aparecen en el cuerpo de step() y NO son reglas

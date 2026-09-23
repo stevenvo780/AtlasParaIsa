@@ -212,6 +212,10 @@ function choose(animal: Animal, world: AnimalWorld, state: LocalState): void {
   if (animal.action !== action || animal.preyId !== preyId) animal.work = 0;
   animal.action = action; animal.target = { x: target.x, y: target.y }; animal.reason = reason; animal.preyId = preyId; animal.lastDecision = world.tick;
 }
+/** Cadena secuencial: cada movimiento libera y ocupa celdas en `state.counts`/`state.occupants`,
+ * que el siguiente `move` lee para el cupo `MAX_ANIMALS_PER_TILE`; liberar una celda habilita la
+ * entrada de otro. Permanece en la fase serial del coordinador: repartirlo por región cambiaría
+ * quién entra. */
 function move(animal: Animal, world: AnimalWorld, state: LocalState): void {
   const interval = Math.ceil(11 - animal.genes.speed * 7 + animal.fatigue * 3);
   if (animal.action === 'rest' || distance(animal, animal.target) === 0 || world.tick - animal.lastMove < interval || animal.energy < 0.06) return;
@@ -332,31 +336,167 @@ function reproduce(world: AnimalWorld, state: LocalState, active: Animal[], emit
   }
 }
 
-/** Active cells only; canonical decisions and flee-before-contact movement make array order irrelevant. */
-export function stepAnimals(world: AnimalWorld, emit?: AnimalEmitter): void {
+/** Certificado del orden canónico (T116): la fauna tal como quedó en orden y, si el mundo se clona entre
+ * pasos, también sus ids. Un arreglo cuyos elementos son, en el mismo orden, una subsecuencia de los
+ * certificados también está en orden: lo que otro código hace entre pasos es quitar (una caza, un chunk
+ * que se retira) o añadir al final (un chunk que se activa), y el orden por `id` de lo que queda no
+ * cambia. Por objeto, verlo compara punteros sin leer ningún animal (la premisa es que un `id` no se
+ * reasigna nunca: es la identidad). El clon de cada paso (`motor.clonPorPaso`) trae objetos nuevos, así
+ * que ahí se comparan los ids, que `cloneWorld` comparte (comparar es otra vez comparar punteros).
+ * Es solo una caché: decide qué parte hay que comprobar, nunca qué arreglo sale. Tiene un único
+ * hueco; si lo ocupa otro mundo, se comprueba por pares. */
+let certificado: { objetos: readonly Animal[]; ids: readonly string[] | null } = { objetos: [], ids: null };
+/** El certificado lleva ids: la última comprobación no reconoció la fauna por sus objetos y sí (o
+ * quizá) por sus ids, que es lo que pasa cuando el mundo se clona entre pasos. */
+let porIds = false;
+/** Los ids de `animals` al cerrar un paso con crías, sin leer los animales ya certificados: salvo las
+ * `crias`, `animals` es una subsecuencia de los objetos del certificado, cuyos ids ya se conocen. `null` si
+ * no lo es (el hueco es de otro mundo): entonces se leen. */
+function idsSinLeer(animals: readonly Animal[], crias: ReadonlySet<Animal>): string[] | null {
+  const { objetos, ids } = certificado, m = objetos.length;
+  if (!ids) return null;
+  const r = new Array<string>(animals.length);
+  for (let i = 0, k = 0; i < animals.length; i++) {
+    const animal = animals[i]!;
+    if (k < m && animal === objetos[k]) { r[i] = ids[k++]!; continue; }
+    if (crias.has(animal)) { r[i] = animal.id; continue; }
+    while (k < m && animal !== objetos[k]) k++;
+    if (k === m) return null;
+    r[i] = ids[k++]!;
+  }
+  return r;
+}
+function certificar(animals: readonly Animal[], ids: readonly string[] | null): void {
+  if (porIds && !ids) { const nuevos = new Array<string>(animals.length); for (let i = 0; i < animals.length; i++) nuevos[i] = animals[i]!.id; ids = nuevos; }
+  // Sin `Object.freeze`: leer un arreglo congelado en el recorrido cuesta ~3,6 veces más.
+  certificado = { objetos: animals.slice(), ids: porIds ? ids : null };
+}
+/** Hasta dónde el principio de `animals` es, en orden, una subsecuencia del certificado (por objeto o,
+ * si lo lleva, por id); `exacto` si es el mismo arreglo de objetos, y `mismosIds` si es la misma
+ * secuencia de ids, sin saltos, y el certificado la lleva. Los saltos por el certificado no pasan de
+ * `animals.length`, así que el recorrido es O(A) aunque el certificado sea de un mundo mayor. */
+function prefijoCertificado(animals: readonly Animal[]): { hasta: number; exacto: boolean; mismosIds: boolean } {
+  const { objetos, ids } = certificado, n = animals.length, m = objetos.length;
+  let i = 0;
+  while (i < n && i < m && animals[i] === objetos[i]) i++;
+  if (i === n && n === m) { porIds = false; return { hasta: n, exacto: true, mismosIds: false }; }
+  let k = i, saltos = 0, porId = false;
+  for (; i < n; i++, k++) {
+    const animal = animals[i]!, id = ids ? animal.id : undefined;
+    while (k < m && saltos <= n && animal !== objetos[k] && (id === undefined || id !== ids![k])) { k++; saltos++; }
+    if (k === m || saltos > n) break;
+    if (animal !== objetos[k]) porId = true;
+  }
+  // Sin ningún animal reconocido por objeto, o reconocidos por id: se clona entre pasos (o es otro mundo).
+  porIds = porId || i === 0 && n > 0 && m > 0;
+  return { hasta: i, exacto: false, mismosIds: !!ids && saltos === 0 && i === n && k === m };
+}
+/** Mete `cola`, en orden canónico, en `animals[0, hasta)`, también en orden, sobre el propio arreglo
+ * (que mide `hasta + cola.length`). Da lo mismo que el `sort` estable de `animals[0, hasta) ++ cola`:
+ * cada elemento de la cola va detrás de los de delante con su mismo id (el primer id mayor) y la cola
+ * conserva su orden. El sitio se busca galopando hacia atrás desde el anterior: las crías de un paso
+ * comparten prefijo de id y caen juntas, así que casi todas cuestan una comparación. */
+function mezclar(animals: Animal[], hasta: number, cola: readonly Animal[]): void {
+  let i = hasta; // animals[0, i) sigue en su sitio de origen
+  for (let c = cola.length - 1; c >= 0; c--) {
+    const animal = cola[c]!, id = animal.id;
+    let lo = i;
+    if (lo > 0 && id < animals[lo - 1]!.id) {
+      // animals[alto].id > id; se galopa hasta un `bajo` con id <= id (o -1) y se busca entre ambos.
+      let alto = lo - 1, bajo = -1, salto = 1;
+      for (let cand = alto - salto; cand >= 0; cand = alto - salto) {
+        if (id < animals[cand]!.id) { alto = cand; salto *= 2; } else { bajo = cand; break; }
+      }
+      let a = bajo + 1, b = alto;
+      while (a < b) { const mid = (a + b) >>> 1; if (id < animals[mid]!.id) b = mid; else a = mid + 1; }
+      lo = a;
+    }
+    while (i > lo) { i--; animals[i + c + 1] = animals[i]!; }
+    animals[lo + c] = animal;
+  }
+}
+/** Deja `animals` en orden canónico, en su sitio: el mismo arreglo que `animals.sort(canonical)`, y lo
+ * certifica. `animals[0, desde)` se sabe en orden; al empezar el paso (`desde` = 0) se sabe hasta donde
+ * llegue el certificado. Desde ahí se recorren los pares hasta el primer desorden, y lo que queda —las
+ * crías del paso, la fauna de un chunk recién activado, o todo si se perdió el orden— se ordena aparte
+ * y se mezcla. El `sort` O(A log A) de la fauna entera queda para cuando se pierde el orden entero.
+ * Al cerrar un paso sin crías no hay nada que hacer: lo que queda es una subsecuencia de lo certificado
+ * al empezarlo, y el paso siguiente lo reconoce así. */
+function ordenCanonico(animals: Animal[], desde = 0): void {
+  let ids: readonly string[] | null = null, crias: ReadonlySet<Animal> | null = null;
+  if (desde === 0) {
+    const prefijo = prefijoCertificado(animals);
+    if (prefijo.exacto) return;
+    if (prefijo.mismosIds) ids = certificado.ids;
+    desde = prefijo.hasta;
+  } else if (desde >= animals.length) return;
+  else if (porIds) crias = new Set(animals.slice(desde));
+  let j = Math.max(1, desde);
+  while (j < animals.length && animals[j - 1]!.id < animals[j]!.id) j++;
+  if (j < animals.length) { mezclar(animals, j, animals.slice(j).sort(canonical)); ids = null; }
+  certificar(animals, ids ?? (crias && idsSinLeer(animals, crias)));
+}
+
+/** Máscara de fauna del paso (T116), de solo lectura: quién piensa en este tick. La calcula el
+ * coordinador una vez, con la ventana sobre la población GLOBAL en orden canónico; las regiones sólo
+ * consultan pertenencia (`seleccionDe`). Una ventana o un offset por región cambiaría qué animales
+ * piensan en qué tick. `animales`, `tick`, `poblacion` y `orden` (toda la fauna en orden canónico, tal
+ * como estaba al calcularla) la atan al paso para el que se calculó. */
+export interface MascaraFauna {
+  readonly tick: number; readonly animales: readonly Animal[]; readonly poblacion: number; readonly orden: readonly Animal[];
+  readonly seleccion: readonly Animal[]; readonly ids: ReadonlySet<string>;
+}
+const mismosObjetos = (a: readonly Animal[], b: readonly Animal[]): boolean => {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+};
+/** La máscara del coordinador. Su `orden` es una copia congelada: el certificado no sale nunca del módulo. */
+export function mascaraFauna(world: AnimalWorld): MascaraFauna { return calcularMascara(world, true); }
+function calcularMascara(world: AnimalWorld, exportada: boolean): MascaraFauna {
+  ordenCanonico(world.animals);
+  const animals = world.animals, population = animals.length;
+  const offset = population ? ((world.tick % population) * MAX_ACTIVE_ANIMALS) % population : 0;
+  let selected: Animal[];
+  if (population <= MAX_ACTIVE_ANIMALS) selected = [...animals];
+  else {
+    // Los dos tramos ya están en orden canónico: si la vuelta queda entera por delante, el `sort` de la
+    // ventana los dejaría así; con ids repetidos entre ambos, lo decide el `sort`.
+    const tramo = animals.slice(offset, offset + MAX_ACTIVE_ANIMALS), vuelta = animals.slice(0, Math.max(0, offset + MAX_ACTIVE_ANIMALS - population));
+    selected = !vuelta.length ? tramo : vuelta[vuelta.length - 1]!.id < tramo[0]!.id ? [...vuelta, ...tramo] : [...tramo, ...vuelta].sort(canonical);
+  }
+  const orden = exportada ? Object.freeze(certificado.objetos.slice()) : certificado.objetos;
+  return Object.freeze({ tick: world.tick, animales: animals, poblacion: population, orden, seleccion: Object.freeze(selected), ids: new Set(selected.map(a => a.id)) });
+}
+/** Los animales de una región que la máscara selecciona, en orden canónico. */
+export function seleccionDe(mascara: MascaraFauna, animales: readonly Animal[]): Animal[] {
+  return animales.filter(a => mascara.ids.has(a.id)).sort(canonical);
+}
+
+/** Active cells only; canonical decisions and flee-before-contact movement make array order irrelevant.
+ * `mascara` es la del coordinador para este paso; sin ella se calcula aquí, con el mismo resultado. */
+export function stepAnimals(world: AnimalWorld, emit?: AnimalEmitter, mascara?: MascaraFauna): void {
   if (world.animals.length > limitsOf(world).fauna) throw new Error('Capacidad regional de fauna excedida.');
   const state: LocalState = { tile: tileLookup(world.tiles), occupants: new Map(), counts: new Map() };
-  world.animals.sort(canonical);
-  const population = world.animals.length;
-  const offset = population ? ((world.tick % population) * MAX_ACTIVE_ANIMALS) % population : 0;
-  const selected = population <= MAX_ACTIVE_ANIMALS ? [...world.animals]
-    : [...world.animals.slice(offset, offset + MAX_ACTIVE_ANIMALS), ...world.animals.slice(0, Math.max(0, offset + MAX_ACTIVE_ANIMALS - population))].sort(canonical);
-  const selectedIds = new Set(selected.map(a => a.id));
+  const m = mascara ?? calcularMascara(world, false);
+  if (m.tick !== world.tick || m.animales !== world.animals || m.poblacion !== world.animals.length || mascara && !mismosObjetos(world.animals, m.orden))
+    throw new Error('Máscara de fauna de otro paso.');
   for (const animal of world.animals) {
     const tile = state.tile(animal.x, animal.y);
     if (!tile) throw new Error('Animal fuera de las regiones activas.');
-    if (selectedIds.has(animal.id)) physiology(animal, tile, world, emit);
+    if (m.ids.has(animal.id)) physiology(animal, tile, world, emit);
     if (animal.health <= 0) continue;
     const p = cell(animal), here = state.occupants.get(p);
     if (here) here.push(animal); else state.occupants.set(p, [animal]);
     state.counts.set(p, (state.counts.get(p) ?? 0) + 1);
   }
   world.animals = world.animals.filter(a => a.health > 0);
-  const active = selected.filter(a => a.health > 0);
+  const active = m.seleccion.filter(a => a.health > 0);
   // Oldest decision first avoids starvation while preventing a synchronized migration from bursting every eighth tick.
   const due = active.filter(a => world.tick - a.lastDecision >= 8)
     .sort((a, b) => a.lastDecision - b.lastDecision || canonical(a, b)).slice(0, MAX_ANIMAL_DECISIONS_PER_TICK);
   for (const animal of due) choose(animal, world, state);
+  // Cadena secuencial (ver `move`): permanece en la fase serial del coordinador.
   for (const animal of [...active].sort((a, b) => Number(b.action === 'flee') - Number(a.action === 'flee') || canonical(a, b))) move(animal, world, state);
   const byId = new Map(world.animals.map(a => [a.id, a]));
   for (const animal of active) {
@@ -376,8 +516,10 @@ export function stepAnimals(world: AnimalWorld, emit?: AnimalEmitter): void {
     assimilateFood(animal, FOOD_PER_ANIMAL[prey.species], { hungerPerUnit: 4.8, assimilation: animal.genes.carnivory, energyPerUnit: 0.5 });
     animal.lastDecision = world.tick - 12;
   }
+  // Filtrar conserva el orden de la máscara: sólo las crías, al final, pueden estar fuera de sitio.
   world.animals = world.animals.filter(a => a.health > 0);
-  reproduce(world, state, active, emit); world.animals.sort(canonical); syncFauna(world.tiles, world.animals);
+  const previos = world.animals.length;
+  reproduce(world, state, active, emit); ordenCanonico(world.animals, previos); syncFauna(world.tiles, world.animals);
 }
 
 /** A human hunt removes exactly one living identity on the requested cell, at most once. */

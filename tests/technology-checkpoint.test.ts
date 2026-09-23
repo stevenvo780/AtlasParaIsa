@@ -7,10 +7,11 @@ import { Store } from '../src/server/store.js';
 import { decodeSnapshot, encodeSnapshot, takeSnapshotParams } from '../src/server/snapshot.js';
 import { paramsOf } from '../src/world/params.js';
 import { assertWorld, cloneWorld, createWorld, migrateWorld, projectWorld, stepWorld, POPULATION_HARD_LIMIT, type World } from '../src/world/index.js';
-import { captureTechnologyCheckpoint, advanceTechnologyCheckpoint, assertTechnologyCheckpoint } from '../src/world/technology-checkpoint.js';
+import { captureTechnologyCheckpoint, advanceTechnologyCheckpoint, assertTechnologyCheckpoint, technologyHistoryGap, type TechnologyStockActor } from '../src/world/technology-checkpoint.js';
 import { analyzeTechnologyOrganization } from '../src/world/technology-organization.js';
 import { defaultTechnologyState, initialTechnologyKnowledge, researchTechnology, useTool,
   recordTechnologyBenefit, transferTechnologyItem, type TechnologyActor, type TechnologyHost, type TechnologyProgram } from '../src/world/technology.js';
+import type { MaterialBatch, TechnologyState } from '../src/shared/technology.js';
 import { filaInstantanea } from './lib/store.js';
 import { proyectoInvestigacion } from './lib/escenas.js';
 
@@ -259,4 +260,121 @@ test('a new epoch invalidates a projection cached at the same tick and execution
   world.technology.checkpoint = captureTechnologyCheckpoint(world.technology, world.people, world.tick, 'migration');
   const view = projectWorld(world).organization!;
   assert.equal(view.window.complete, false); assert.ok(view.evidence.failures.includes('no-complete-epoch'));
+});
+
+// T143: el padrón deja de reconstruirse con un Set en cada tick. Oráculo = el `advanceTechnologyCheckpoint`
+// de 5e0556f, literal; la captura, la aserción y `technologyHistoryGap` no cambiaron.
+function legacyAdvance(state: TechnologyState, actors: readonly TechnologyStockActor[], tick: number): void {
+  const checkpoint = state.checkpoint;
+  if (checkpoint === undefined) { state.checkpoint = captureTechnologyCheckpoint(state, actors, tick, 'migration'); return; }
+  const current = new Set(actors.map(actor => actor.id));
+  const rosterChanged = current.size !== checkpoint.inventories.length || checkpoint.inventories.some(inventory => !current.has(inventory.actorId));
+  if (rosterChanged || technologyHistoryGap(state)) {
+    assertTechnologyCheckpoint(state, tick);
+    state.checkpoint = captureTechnologyCheckpoint(state, actors, tick, rosterChanged ? 'roster-change' : 'history-gap');
+  }
+}
+/** Avanza `oracle` con el oráculo y `state` con la función de hoy: mismos bytes, misma rotación, mismo error. */
+function lockstep(state: TechnologyState, oracle: TechnologyState, actors: readonly TechnologyStockActor[], tick: number, label: string): boolean {
+  const before = state.checkpoint, oracleBefore = oracle.checkpoint;
+  let expected: unknown, got: unknown;
+  try { legacyAdvance(oracle, actors, tick); } catch (error) { expected = error; }
+  try { advanceTechnologyCheckpoint(state, actors, tick); } catch (error) { got = error; }
+  assert.equal(String(got), String(expected), `${label}: error`);
+  assert.equal(JSON.stringify(state.checkpoint), JSON.stringify(oracle.checkpoint), `${label}: bytes`);
+  assert.equal(state.checkpoint !== before, oracle.checkpoint !== oracleBefore, `${label}: rotación`);
+  return expected !== undefined;
+}
+function stockActor(id: string, items: MaterialBatch[] = []): TechnologyStockActor {
+  return { id, technology: { items, residue: { wood: 0, stone: 0, water: 0 } } };
+}
+function mulberry32(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => { a = (a + 0x6d2b79f5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+
+test('T143: 2400 world steps with births, deaths and per-step clones keep the legacy checkpoint byte for byte', () => {
+  let world = createWorld(51926), births = 0, deaths = 0, rosterChanges = 0, withItems = 0;
+  for (let n = 1; n <= 2400; n++) {
+    if (n % 200 === 0) {
+      const dying = world.people.find(person => person.role === 'neighbor' && person.demography.deathCause === null)!;
+      dying.demography.health = 1e-10; dying.hunger = dying.thirst = 1; dying.energy = 0.1; dying.fatigue = 0.9;
+    }
+    if (n % 300 === 0) world = cloneWorld(world); // el servidor clona el mundo en cada paso: ninguna identidad sobrevive
+    const prev = world.technology.checkpoint, before = new Set(world.people.map(person => person.id));
+    stepWorld(world);
+    const after = new Set(world.people.map(person => person.id));
+    births += [...after].filter(id => !before.has(id)).length; deaths += [...before].filter(id => !after.has(id)).length;
+    const oracle: TechnologyState = { ...world.technology, checkpoint: prev };
+    legacyAdvance(oracle, world.people, world.tick);
+    assert.equal(JSON.stringify(world.technology.checkpoint), JSON.stringify(oracle.checkpoint), `tick ${world.tick}: bytes`);
+    assert.equal(world.technology.checkpoint !== prev, oracle.checkpoint !== prev, `tick ${world.tick}: rotación`);
+    if (world.technology.checkpoint !== prev && world.technology.checkpoint!.reason === 'roster-change') rosterChanges++;
+    if (world.technology.checkpoint!.inventories.some(inventory => inventory.items.length)) withItems++;
+  }
+  assert.ok(births >= 1 && deaths >= 5, `nacimientos ${births}, muertes ${deaths}`);
+  assert.ok(rosterChanges >= 6, `rotaciones por padrón ${rosterChanges}`); assert.ok(withItems > 0, 'las aperturas comparadas llevan objetos reales');
+  assertWorld(world);
+});
+
+test('T143: a seeded fuzz of roster edits, clones, forgeries and gaps matches the legacy predicate on every tick', () => {
+  const rnd = mulberry32(143), pick = <T>(list: readonly T[]): T => list[Math.floor(rnd() * list.length)]!;
+  let actors: TechnologyStockActor[] = ['a', 'b', 'c', 'd'].map(id => stockActor(id)), serial = 0, made = 0, throws = 0;
+  const item = (): MaterialBatch => ({ id: `product-${++made}`, recipeId: null, mass: 3, composition: { wood: 1, stone: 2, water: 0 } }) as MaterialBatch;
+  const state = defaultTechnologyState(); state.itemCounter = 1e6; // techo holgado: los objetos del fuzz se numeran después
+  actors[1]!.technology.items.push(item(), item());
+  state.checkpoint = captureTechnologyCheckpoint(state, actors, 0, 'initial');
+  let oracle = structuredClone(state), current = structuredClone(state);
+  const both = (edit: (value: TechnologyState) => void) => { edit(oracle); edit(current); };
+  const seen = new Set<string>(), reasons = new Set<string>();
+  for (let tick = 1; tick <= 2400; tick++) {
+    const op = pick(['none', 'none', 'birth', 'death', 'replace', 'shuffle', 'rename', 'duplicate', 'clone', 'items', 'gap', 'reorder', 'forge', 'twin'] as const);
+    seen.add(op);
+    if (op === 'birth') actors.push(stockActor(`n-${++serial}`, rnd() < 0.5 ? [item()] : []));
+    if (op === 'death' && actors.length > 1) { const victim = pick(actors); actors = actors.filter(actor => actor !== victim); }
+    if (op === 'replace') actors[Math.floor(rnd() * actors.length)] = stockActor(`n-${++serial}`); // alta y baja en el mismo tick, en sitio
+    if (op === 'shuffle') for (let n = actors.length - 1; n > 0; n--) { const k = Math.floor(rnd() * (n + 1)); [actors[n], actors[k]] = [actors[k]!, actors[n]!]; }
+    if (op === 'rename') pick(actors).id = `n-${++serial}`; // el mismo objeto cambia de id
+    if (op === 'duplicate') actors.push(stockActor(pick(actors).id));
+    if (op === 'clone') { actors = structuredClone(actors); oracle = structuredClone(oracle); current = structuredClone(current); }
+    if (op === 'items') pick(actors).technology.items.push(item());
+    if (op === 'gap') both(value => { value.executionCounter++; value.historyDropped++; });
+    if (op === 'reorder') both(value => value.checkpoint!.inventories.reverse()); // mismo padrón, otro orden: no rota
+    if (op === 'forge') { const at = Math.floor(rnd() * oracle.checkpoint!.inventories.length), id = `forged-${tick}`; both(value => { value.checkpoint!.inventories[at]!.actorId = id; }); }
+    if (op === 'twin') both(value => value.checkpoint!.inventories.push(structuredClone(value.checkpoint!.inventories[0]!)));
+    const opening = current.checkpoint;
+    if (lockstep(current, oracle, actors, tick, `tick ${tick} (${op})`)) {
+      throws++; actors = actors.filter((actor, n) => actors.findIndex(other => other.id === actor.id) === n);
+      both(value => { value.checkpoint = captureTechnologyCheckpoint(value, actors, tick, 'migration'); });
+    } else if (current.checkpoint !== opening) reasons.add(current.checkpoint!.reason);
+  }
+  assert.equal(seen.size, 13); assert.deepEqual([...reasons].sort(), ['history-gap', 'roster-change']);
+  assert.ok(throws > 0, 'el fuzz ejercita los errores de la aserción');
+});
+
+test('T143: interleaved worlds share the single-entry cache and still match the legacy predicate', () => {
+  const rosters = [['a1', 'a2', 'a3'], ['b1', 'b2']].map(ids => ids.map(id => stockActor(id)));
+  const states = rosters.map(actors => { const state = defaultTechnologyState(); state.checkpoint = captureTechnologyCheckpoint(state, actors, 0, 'initial'); return state; });
+  const oracles = states.map(state => structuredClone(state));
+  for (let tick = 1; tick <= 40; tick++) for (let w = 0; w < 2; w++) {
+    if (tick % 7 === w) rosters[w]!.push(stockActor(`w${w}-${tick}`));
+    lockstep(states[w]!, oracles[w]!, rosters[w]!, tick, `mundo ${w} tick ${tick}`);
+  }
+  assert.deepEqual(states.map(state => state.checkpoint!.inventories.length), [8, 8]);
+});
+
+test('T143: same-length turnover rotates, reordering does not, and the tick after a rotation keeps the opening', () => {
+  const actors = ['a', 'b', 'c'].map(id => stockActor(id)), state = defaultTechnologyState();
+  state.checkpoint = captureTechnologyCheckpoint(state, actors, 0, 'initial');
+  const opening = state.checkpoint;
+  actors.reverse(); advanceTechnologyCheckpoint(state, actors, 1);
+  assert.equal(state.checkpoint, opening, 'reordering the same roster is not a roster change');
+  actors[1] = stockActor('d'); advanceTechnologyCheckpoint(state, actors, 2);
+  const rotated = state.checkpoint!;
+  assert.notEqual(rotated, opening); assert.equal(rotated.reason, 'roster-change');
+  assert.deepEqual(rotated.inventories.map(inventory => inventory.actorId), ['a', 'c', 'd']);
+  advanceTechnologyCheckpoint(state, actors, 3); advanceTechnologyCheckpoint(state, structuredClone(actors), 4);
+  assert.equal(state.checkpoint, rotated, 'a stable roster, cloned or not, keeps its opening');
+  actors.push(stockActor('a')); advanceTechnologyCheckpoint(state, actors, 5); advanceTechnologyCheckpoint(state, actors, 6);
+  assert.equal(state.checkpoint, rotated, 'as before, the roster is a set of ids: a repeated id changes nothing');
 });

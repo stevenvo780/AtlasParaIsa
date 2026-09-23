@@ -5,13 +5,13 @@ estas cifras. Se actualiza en cada publicación, junto con su contrato
 `docs/evidencia-AAAA-MM-DD/publication*.json`; si este fichero y el contrato discrepan, manda
 el contrato.
 
-## Vigente (desde el 22 de septiembre de 2026, 20:46–20:50 -05)
+## Vigente (mundo V10 desde el 22 de septiembre de 2026, 20:46 -05; código actual desde el 23 de septiembre, 04:52 -05)
 
 | Qué | Valor |
 |---|---|
 | URL | <https://atlas.humanizar.tech> |
-| Código compilado y servido | `eeb4bcf` (build tras detener el servicio; assets servidos = compilados) |
-| `main` | `e385acb`. Desde `eeb4bcf` solo cambian documentación y el script `npm start`, que desde entonces ejecuta node con el nombre de proceso `carta-isa`; el proceso en marcha arrancó antes de ese commit y adopta el nombre en el próximo reinicio |
+| Código compilado y servido | `4df4455` (reinicio del mismo mundo el 23-09 a las 04:52 -05; build tras detener el servicio; assets servidos = compilados). Trae PERF2, interfaz que refleja el sistema, conexión con contrapresión por acuse y gzip, restauración exacta y el nombre de proceso `carta-isa` |
+| `main` | `4df4455` |
 | Reglas | `RULES_VERSION` 10: paquete de natalidad por defecto (cortejo 2, radio 128, comunidad opcional, comprobación continua, habituación 0,35) y gobernador `techo` |
 | Protocolo | `PROTOCOL_VERSION` 10 |
 | SQLite | `user_version` 5 (instantáneas paginadas) |
@@ -19,11 +19,10 @@ el contrato.
 | Parámetros persistidos | `persistencia.cadaTicks=100`, `gobernador.politica=techo` y el paquete de reglas 10 (lista completa en el contrato) |
 | Respaldos | `/datos/workspaces/personal/AtlasParaIsa-publications/20260922-v10/backups` (timer horario `atlas-respaldo.timer`) |
 | Servicios | `atlas-servidor.service` y `atlas-respaldo.service` de usuario; leen `~/.config/atlas-para-isa/runtime.env` (solo `CARTA_DATA_DIR` y `DEST`). Copias versionadas de las unidades (las instaladas son copias, no enlaces): `scripts/systemd/` |
-| Gate | `scripts/deploy-check.sh eeb4bcf` verde: solo build y smoke del commit exacto (01:45:54–01:45:58Z; el script no corre más fases). Typecheck verde y suite 1362/1366 (4 omitidos, 0 fallos, 201,5 s) salieron de otra ejecución, aunque el contrato los anida bajo `gate` |
-| Contrato | [publication-v10.json](evidencia-2026-09-22/publication-v10.json) |
+| Gate | `scripts/deploy-check.sh 4df4455` verde (build y smoke); suite 1460/1467 (7 omitidos a propósito, 0 fallos, 495 s); mundo idéntico a `37f9564` en 9 combinaciones |
+| Contrato | [publication-v10.json](evidencia-2026-09-22/publication-v10.json) (mundo) y [publication-v10-pub2.json](evidencia-2026-09-23/publication-v10-pub2.json) (reinicio del 23-09) |
 
-Lo que esta publicación **no** acredita: el criterio de 60 días de [GOAL.md](../GOAL.md) no se ha
-evaluado todavía; el crecimiento en laboratorio es casi exponencial hasta que lo frena el gobernador
+Lo que esta publicación **no** acredita: el criterio de 60 días de [GOAL.md](../GOAL.md) se evaluó en el laboratorio el 23-09 y **no se cumple** con estas reglas (ver [EVIDENCIA](EVIDENCIA.md)); el servidor corre en SCHED_IDLE y la base crece sin poda (arreglos en curso); el crecimiento en laboratorio es casi exponencial hasta que lo frena el gobernador
 por hardware ([revisión de la noche](REVISION-NOCHE-2026-09-22.md)).
 
 ## Anteriores, conservados

@@ -10,6 +10,43 @@
 > sus runbooks y los bancos de un solo uso se retiraron de main y se conservan en el tag
 > `archivo/campanas-20260922`; las evidencias JSON que produjeron siguen en `docs/evidencia-2026-09-22/`.
 
+## Criterio de terminado a 60 días — primera evaluación (23 de septiembre de 2026)
+
+Laboratorio con 12 semillas NUEVAS (5, 13, 17, 23, 29, 101, 202, 303, 404, 505, 606, 707; ninguna usada
+para ajustar), 60 días, techo determinista de laboratorio de 100 habitantes (`--techo-lab 100`: la política
+`techo` del gobernador con un techo fijo en lugar del disparado por el reloj), instrumentos que no tocan el
+mundo (diversidad por tiempo en cada acción, comida compartida como cooperación) y evaluador
+`scripts/lab/criterio-terminado.mts` v3 con C8 preregistrado dos veces ANTES de mirar los datos (la regla v1
+aprobaba ruido estacionario en el 58 % de las series; v2 = Mann-Kendall unilateral p < 0,05 con corrección
+por autocorrelación y subida de Sen ≥ 0,02; calibración: 4 % de falsos «cumple» con series planas, 100 % de
+potencia a 0,003/día).
+
+| Brazo | Extinguidas | Cumplen C1–C7 | C8 diversidad creciente | Los 8 |
+|---|---|---|---|---|
+| A: reglas 10 publicadas | 6 (13, 17, 23, 303, 606, 707) | 4 de 10 terminadas (5, 101, 202, 404; 29 y 505 en curso) | 0 | 0 |
+| B: reglas 10 + conflicto legible (disputas abiertas + «cede quien menos lo necesita» con memoria de un día) | 4 (13, 17, 23, 303) | **8 de 12 (67 %)** | **0 de 12** | 0 |
+
+**Lo que se logró** (B, 8 de 12 semillas en los días 51–60): población ≥ 16 todos los días, recambio completo
+(ningún fundador vivo y nacimientos en la ventana), ≥ 3 generaciones mortales a la vez, ≥ 2 tipos de
+cooperación relevantes (enseñanza, comida compartida, obra, trueque), conflictos en la ventana, muertes con
+causa legible y balance cerrado, y tecnología de otros inventores en ≥ 15 % de los usos útiles.
+
+**Lo que no:** (1) la diversidad de conducta ACTIVA (tiempo por acción sin descansar) BAJA con los días en
+las 12 semillas (subida de Sen entre −0,02 y −0,21; significativa en 202, 404, 505 y 606): al llegar al techo
+el tiempo se concentra en descansar, acercarse (cortejo) e investigar y cae la variedad de oficios; la serie
+por tiempo con descanso sí sube en 7 de 8, pero no decide. (2) Cuatro semillas se extinguen por un cerrojo
+de natalidad residual con dos raíces medidas: régimen seco (303, 17: arranque en desierto, sed sincronizada,
+estallido radial de rumbos y aislamiento en islas de parientes) y régimen de charcas (13, 23: dispersión
+cuando se secan las charcas y convalecencia lenta). (3) En A, además, el techo sincroniza cohortes: 606 llegó
+a 100 el día 9, envejeció entera y cayó en ola (senescencia 6 → 92 entre los días 15 y 30) sin recuperar la
+natalidad.
+
+**Siguiente:** ronda 5 (leyes H1 «agua en rebaño» y H2 «reencuentro» contra los dos regímenes, ley de
+aptitud contra la diversidad decreciente) y una versión local del cortejo (ir al último lugar donde se vio a
+la pareja, no a su posición actual). Datos: `scratchpad/l60`, `l60b`; informes JSON
+`/datos/tmp-atlas-lab/criterio-l60A.json` y `criterio-l60b.json`; bitácora
+[docs/ops/noche-20260922-bitacora.md](ops/noche-20260922-bitacora.md).
+
 ## Noche del 22 de septiembre de 2026
 
 La extinción de la V7 pública fue el gobernador en política `apagar` (p95 del paso > 50 ms por

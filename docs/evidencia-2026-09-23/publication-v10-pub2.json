@@ -1,0 +1,73 @@
+{
+ "capturedAt": "2026-09-23T09:53:23.230095+00:00",
+ "status": "published",
+ "kind": "same-world restart (no rules change)",
+ "codeRevision": "4df445561bd14e71399739bcdcad7578e59fc37a",
+ "contents": [
+  "PERF2: paso x1.37-1.46 con 230 habitantes, bit a bit",
+  "instrumentos del laboratorio y evaluador v3 del criterio",
+  "restauracion exacta de un paso fallido (cac1ce5)",
+  "interfaz que refleja el sistema (censo fiel, gobernador, natalidad, cooperacion por tipo, linaje, tecnica, carta literal)",
+  "conexion: contrapresion por acuse, trozos, gzip adaptativo, camara en la URL",
+  "nombre de proceso carta-isa (npm start)",
+  "ola 1 de limpieza"
+ ],
+ "gate": {
+  "deployCheck": {
+   "revision": "4df4455",
+   "status": "passed",
+   "build": 0,
+   "smoke": 0,
+   "report": "/datos/tmp-atlas-lab/deploy-check/pub2-4df4455"
+  },
+  "suite": {
+   "tests": 1467,
+   "pass": 1460,
+   "fail": 0,
+   "skipped": 7,
+   "durationS": 495
+  },
+  "worldIdentityVsPreviousMain": "9/9 combinaciones bit a bit (semillas 7/42/51926 x defaults/historicos/produccion, 2400 pasos) + app en modo manual"
+ },
+ "operation": {
+  "backupBeforeStop": "world-20260923-0450.sqlite.gz (respaldo.sh verificada, 97,7 MB)",
+  "labReplicasPausedDuringRestart": true,
+  "serviceStoppedAndPortFreedBeforeBuild": true,
+  "buildInPublicTreeAfterStop": true,
+  "sameWorldDirectoryAndIdentity": true
+ },
+ "liveChecks": {
+  "healthAfterStartS": 40,
+  "assetsMatchCompiled": [
+   "/assets/index-D_icAyK7.js",
+   "/assets/index-DN5qGCjJ.css"
+  ],
+  "unauthenticatedWorldStatus": 401,
+  "before": {
+   "tick": 174400,
+   "people": 75,
+   "births": 170
+  },
+  "after": [
+   {
+    "tick": 174500,
+    "people": 74,
+    "births": 170
+   },
+   {
+    "tick": 174800,
+    "people": 75,
+    "births": 171
+   }
+  ],
+  "worldInstanceId": "63033163-3a01-45cb-829a-004a0dc0ce65",
+  "persistedParamsKept": {
+   "poblacion.cortejo": 2
+  },
+  "processName": "carta-isa",
+  "scheduling": "SCHED_IDLE, E/S idle (heredado de npm por la regla de ananicy para node; falta la regla de root para carta-isa)"
+ },
+ "knownRisks": [
+  "base de 1,2 GB por technology_executions sin poda: carga 24-81 s y guardados con sello rancio 42-120 s; arreglo en curso (sprint/noche-arch-20260923)"
+ ]
+}

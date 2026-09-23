@@ -85,6 +85,14 @@ export const LATIDO_WS_MS = 3000;
 /** Edad máxima, en pasos, de la vista de reserva cuando nadie mira (ver `renovarReserva` en `createApp`):
  * 10 s a ritmo nominal, por una proyección con la cámara por defecto cada tantos pasos. */
 export const VISTA_RESERVA_PASOS = 100;
+/** Con clientes WS, citas de 1 ms que el planificador cede siempre tras un paso que se pasó del intervalo, haya
+ * o no E/S a la vista (ver `tic` en `createApp`). Lo que manda el navegador (acuses, cámara, biografías, gestos)
+ * llega comprimido, y `ws` solo lo entrega tras inflarlo en el threadpool, en varias idas y vueltas que nada
+ * público deja ver. La primera cita salta justo detrás de la vuelta del bucle que recogió lo llegado durante el
+ * paso, que puede ser larga (proyectar para `/api/world`); la segunda deja al menos 1 ms de bucle libre para
+ * que esas idas y vueltas vuelvan. Sin ellas, con pasos alargados 250 ms, un acuse esperaba ~3 pasos (831 ms
+ * p50) y el pong, detrás de él, 812 ms p95; con ellas, 44 y 96 ms (verificación PERF3, 2026-09-23). */
+export const VUELTAS_CON_CLIENTES_WS = 2;
 /** Parte `text` en trozos de a lo sumo `size` unidades sin separar nunca un par sustituto
  * (un trozo con medio carácter no sería UTF-8 válido y el navegador cerraría la conexión). */
 export function trocear(text: string, size = TROZO_WS): string[] {
@@ -349,7 +357,8 @@ export function createApp(options: AppOptions) {
    * habla la cierra `headersTimeout`; mientras tanto el planificador cede, como mucho `tickMs` por paso. */
   const conexionesNuevas = new Set<Duplex>();
   /** Queda E/S que necesita al hilo principal: una conexión o una solicitud HTTP sin responder del todo, o un
-   * socket WS con bytes sin entregar al kernel (`bufferedAmount` cuenta lo que `ws` aún está comprimiendo). */
+   * socket WS con bytes sin entregar al kernel (`bufferedAmount` cuenta lo que `ws` aún está comprimiendo). Lo
+   * que `ws` está inflando no se ve: lo cubre `VUELTAS_CON_CLIENTES_WS`. */
   function ioEnCurso(): boolean {
     if (solicitudesEnCurso > 0 || conexionesNuevas.size > 0) return true;
     for (const socket of clients.keys()) if (socket.bufferedAmount > 0) return true;
@@ -736,12 +745,15 @@ export function createApp(options: AppOptions) {
   let next = monotonicNow() + tickMs;
   /** Tras un paso que se pasó del intervalo: hasta cuándo puede esperar el siguiente a que acabe la E/S. */
   let cederHasta: number | null = null;
+  /** Citas cedidas desde ese paso: con clientes WS, nunca menos de `VUELTAS_CON_CLIENTES_WS`. */
+  let cedidas = 0;
   function citar(ms: number) { timer = setTimeout(tic, ms); timer.unref(); }
   function tic() {
     if (stopped) return;
     // Ceder a la E/S en curso: se vuelve a mirar cada milisegundo; entretanto el bucle atiende el poll.
-    if (cederHasta !== null && monotonicNow() < cederHasta && ioEnCurso()) { citar(1); return; }
-    cederHasta = null;
+    if (cederHasta !== null && monotonicNow() < cederHasta
+      && (cedidas < (clients.size > 0 ? VUELTAS_CON_CLIENTES_WS : 0) || ioEnCurso())) { cedidas++; citar(1); return; }
+    cederHasta = null; cedidas = 0;
     next += tickMs;
     stepOnce();
     // El corte se juzga DESPUÉS del paso. Un paso que duró más que el intervalo ya llega tarde a su cita, y
@@ -751,7 +763,8 @@ export function createApp(options: AppOptions) {
     // del bucle por paso, y el gzip de `/api/world`, el deflate de cada trozo WS (con el pong, que `ws`
     // encola detrás) o el cuerpo de un login necesitan varias idas y vueltas al threadpool o al poll: con
     // pasos de 250 ms el gzip pasó de ~0,1 a 2,6 s, y con pasos de 1,1 s a 12 s, más que el aborto de 10 s
-    // del cliente (verificación PERF3, 2026-09-23). Nunca una ráfaga: un paso por callback, y el retraso
+    // del cliente (verificación PERF3, 2026-09-23). Lo que llega por WS se infla sin dejarse ver: con clientes
+    // WS se ceden además `VUELTAS_CON_CLIENTES_WS` citas. Nunca una ráfaga: un paso por callback, y el retraso
     // acumulado no se recupera: a tiempo, la cita compensa la deriva.
     const now = monotonicNow();
     if (next < now) { next = now; cederHasta = now + tickMs; }

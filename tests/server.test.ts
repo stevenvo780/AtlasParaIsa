@@ -10,7 +10,7 @@ import { once } from 'node:events';
 import { connect, type Socket } from 'node:net';
 import { WebSocket } from 'ws';
 import { Store } from '../src/server/store.js';
-import { createApp, parseGesture, loginKey, trustedProxiesFromEnv, rate } from '../src/server/app.js';
+import { createApp, parseGesture, loginKey, trustedProxiesFromEnv, rate, VUELTAS_CON_CLIENTES_WS } from '../src/server/app.js';
 import { createWorld, stepWorld, projectWorld } from '../src/world/index.js';
 import { parseParams, setParams } from '../src/world/params.js';
 import { hashToken, makeToken, passwordRecord, passwordVerifier } from '../src/server/auth.js';
@@ -501,6 +501,54 @@ test('PERF3: tras un paso largo el siguiente cede a la E/S en curso, y como much
     globalThis.setTimeout=setTimeoutReal;
     for(const socket of sockets)socket.destroy();
     await app?.close();store.close();
+  }
+});
+test('PERF3: con clientes WS, tras un paso largo se ceden siempre VUELTAS_CON_CLIENTES_WS citas, sin E/S a la vista',async()=>{
+  // Verificación PERF3: lo que manda el navegador llega comprimido y `ws` lo infla en el threadpool sin que nada
+  // público lo deje ver; con pasos seguidos un acuse esperaba ~3 pasos. Aquí el cliente tiene su `state` en vuelo
+  // y no acusa: no queda nada que mandar ni que leer, y lo que se cede es solo ese mínimo.
+  const port=await freePort(),origin=`http://127.0.0.1:${port}`,store=new Store(':memory:');
+  let reloj=1000,duracion=0;
+  const citas:{fn:()=>void;ms:number}[]=[];
+  const setTimeoutReal=globalThis.setTimeout;
+  globalThis.setTimeout=((fn:()=>void,ms?:number)=>{
+    citas.push({fn,ms:ms??0});return {unref(){return this;},ref(){return this;}};
+  }) as unknown as typeof setTimeout;
+  let app:ReturnType<typeof createApp>|undefined,cliente:WebSocket|undefined;
+  const hasta=async(condicion:()=>boolean)=>{while(!condicion())await new Promise(resolve=>setImmediate(resolve));};
+  try{
+    app=createApp({store,password,origin,tickMs:100,seed:42,monotonicNow:()=>reloj});
+    app.server.listen(port,'127.0.0.1');await once(app.server,'listening');
+    const guardar=store.save.bind(store);
+    store.save=(...args)=>{reloj+=duracion;return guardar(...args);};
+    const disparar=(en:number,dura=0)=>{
+      reloj=en;duracion=dura;
+      const cita=citas.shift()!;assert.equal(citas.length,0);
+      cita.fn();
+      assert.equal(citas.length,1,'cada callback cita exactamente uno');
+      return citas[0]!.ms;
+    };
+    const tick=app.world.tick;
+    assert.equal(disparar(1100,250),0);
+    assert.equal(disparar(1350,250),0,'sin clientes WS no se cede nada: el paso va ya');
+    assert.equal(app.world.tick,tick+2);
+    const token=makeToken();store.addSession(hashToken(token),Date.now()+86400_000);
+    cliente=new WebSocket(`${origin.replace('http:','ws:')}/ws?ack=1`,{headers:{Origin:origin,Cookie:`carta_session=${token}`}});
+    await hasta(()=>app!.flujo.length===1&&app!.flujo[0]!.enVuelo&&app!.flujo[0]!.bufferedAmount===0);
+    assert.equal(disparar(1600),1,'con un cliente WS la primera cita tras el paso largo se cede, aunque no haya E/S a la vista');
+    for(let n=1;n<VUELTAS_CON_CLIENTES_WS;n++)assert.equal(disparar(1600+n),1,`y también la cita ${n+1}`);
+    assert.equal(app.world.tick,tick+2,'mientras cede, ningún paso');
+    const tras=1600+VUELTAS_CON_CLIENTES_WS;
+    assert.equal(disparar(tras,20),1700-tras-20,'cedido el mínimo y sin E/S, el paso va y la cita vuelve a su cadencia (1700)');
+    assert.equal(app.world.tick,tick+3);
+    assert.equal(disparar(1700,20),80,'a tiempo no se cede nada, con clientes o sin ellos');
+    assert.equal(app.world.tick,tick+4);
+    cliente.terminate();await hasta(()=>app!.flujo.length===0);
+    assert.equal(disparar(1800,300),0);assert.equal(disparar(2100,20),80,'sin clientes, otra vez sin ceder');
+    assert.equal(app.world.tick,tick+6);
+  }finally{
+    globalThis.setTimeout=setTimeoutReal;
+    cliente?.terminate();await app?.close();store.close();
   }
 });
 test('loginKey uses X-Forwarded-For when the socket is loopback',()=>{

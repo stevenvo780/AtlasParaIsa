@@ -698,10 +698,13 @@ export function createApp(options: AppOptions) {
     timer = setTimeout(() => {
       next += tickMs;
       stepOnce();
-      // El corte se juzga DESPUÉS del paso: un paso que duró más que el intervalo
-      // vuelve a citarse, nunca dispara una ráfaga para «recuperar» lo perdido.
+      // El corte se juzga DESPUÉS del paso. Un paso que duró más que el intervalo ya llega tarde a
+      // su cita: el siguiente se cita YA (setTimeout 0), no `tickMs` después (PERF3: con pasos de
+      // ~233 ms eso añadía 100 ms ociosos a cada uno y el mundo público iba a 3 pasos/s y no a ~4).
+      // Nunca una ráfaga: un paso por callback, así la E/S (vistas, gestos, acuses) corre entre dos
+      // pasos, y el retraso acumulado no se recupera: el paso siguiente cita otra vez `tickMs` después.
       const now = monotonicNow();
-      if (next < now) next = now + tickMs;
+      if (next < now) next = now;
       if (!stopped) schedule();
     }, Math.max(0, next - monotonicNow()));
     timer.unref();

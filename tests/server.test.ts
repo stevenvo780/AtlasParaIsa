@@ -399,6 +399,41 @@ test('el planificador cita cada paso con compensación de deriva y el cierre no 
   await new Promise<void>(resolve=>setTimeout(resolve,80));
   assert.equal(f.app.world.tick,stopped,'tras cerrar no se planifica ningún paso más');
 });
+test('PERF3: tras un paso que se pasa del intervalo el planificador cita el siguiente ya, sin ráfagas ni tickMs de más',async()=>{
+  // Reloj inyectado y citas grabadas: cada `setTimeout` del planificador queda aquí y se dispara a mano, así
+  // que la prueba lee el retraso exacto que pidió. Solo mientras duran las llamadas síncronas de abajo.
+  const store=new Store(':memory:');
+  let reloj=1000,duracion=0;
+  const citas:{fn:()=>void;ms:number}[]=[];
+  const setTimeoutReal=globalThis.setTimeout;
+  globalThis.setTimeout=((fn:()=>void,ms?:number)=>{
+    citas.push({fn,ms:ms??0});return {unref(){return this;},ref(){return this;}};
+  }) as unknown as typeof setTimeout;
+  let app:ReturnType<typeof createApp>|undefined;
+  try{
+    app=createApp({store,password,origin:'http://127.0.0.1:9',tickMs:100,seed:42,monotonicNow:()=>reloj});
+    // Con la cadencia por defecto (1) el paso guarda siempre: el guardado es lo que «dura» el paso.
+    const guardar=store.save.bind(store);
+    store.save=(...args)=>{reloj+=duracion;return guardar(...args);};
+    const disparar=(en:number,dura:number)=>{
+      reloj=en;duracion=dura;
+      const cita=citas.shift()!;assert.equal(citas.length,0);
+      cita.fn();
+      assert.equal(citas.length,1,'cada callback da un paso y cita exactamente el siguiente');
+      return citas[0]!.ms;
+    };
+    assert.deepEqual(citas.map(c=>c.ms),[100]);
+    assert.equal(disparar(1100,30),70,'a tiempo: la cita compensa lo que duró el paso');
+    assert.equal(disparar(1200,250),0,'un paso de 250 ms llega tarde a su cita: el siguiente va ya, no 100 ms después');
+    assert.equal(disparar(1450,30),70,'sin ráfaga: el paso siguiente vuelve a citar tickMs desde su comienzo');
+    const tick=app.world.tick;
+    assert.equal(disparar(1550,400),0);assert.equal(disparar(1950,400),0);
+    assert.equal(app.world.tick,tick+2,'dos pasos lentos seguidos son dos callbacks, uno por paso');
+  }finally{
+    globalThis.setTimeout=setTimeoutReal;
+    await app?.close();store.close();
+  }
+});
 test('loginKey uses X-Forwarded-For when the socket is loopback',()=>{
   assert.equal(loginKey('127.0.0.1','8.8.8.8'),'8.8.8.8');
   assert.equal(loginKey('::1','2001:db8::1'),'2001:db8::1');

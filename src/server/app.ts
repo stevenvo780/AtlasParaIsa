@@ -113,6 +113,8 @@ function esAcuse(data: RawData, sequence: number): boolean {
   const m = parsed as Record<string, unknown>;
   return m.type === 'ack' && m.sequence === sequence && Object.keys(m).length === 2;
 }
+/** Si este socket negoció permessage-deflate (lo ofrece todo navegador; decide el servidor). */
+function deflateNegociado(socket: WebSocket): boolean { return socket.extensions.includes('permessage-deflate'); }
 const gzipAsync = promisify(gzip);
 function aceptaGzip(req: IncomingMessage): boolean {
   const header = req.headers['accept-encoding'];
@@ -329,7 +331,9 @@ export function createApp(options: AppOptions) {
     }
     if (flujo.enVuelo && !forzar) { flujo.pendiente = true; flujo.aplazados++; return; }
     const text = JSON.stringify({ type: 'state', world } satisfies ServerMessage);
-    const compress = compresion !== 'nunca' && flujo.comprimir;
+    // Solo si el par negoció permessage-deflate: si no (un proxy que quita la cabecera), `ws` manda
+    // en claro y el trozo debe ser el de texto plano para seguir rearmando el silencio a tiempo.
+    const compress = compresion !== 'nunca' && flujo.comprimir && deflateNegociado(socket);
     const trozo = compress ? TROZO_WS_COMPRIMIDO : TROZO_WS;
     if (text.length <= trozo) emitir(socket, text, compress);
     else {
@@ -677,7 +681,7 @@ export function createApp(options: AppOptions) {
       return [...clients].map(([socket, c]) => ({ remotePort: (socket as unknown as { _socket?: { remotePort?: number } })._socket?.remotePort ?? null,
         acuse: !!c.flujo, subscribeMs: c.subscribeMs, enVuelo: !!c.flujo?.enVuelo, enviados: c.flujo?.enviados ?? 0, aplazados: c.flujo?.aplazados ?? 0,
         acuses: c.flujo?.acuses ?? 0, ultimoAcuseMs: c.flujo?.ultimoAcuseMs ?? null, ultimoEnlaceMs: c.flujo?.ultimoEnlaceMs ?? null,
-        comprime: compresion === 'siempre' || !!c.flujo?.comprimir, bufferedAmount: socket.bufferedAmount }));
+        comprime: deflateNegociado(socket) && (compresion === 'siempre' || !!c.flujo?.comprimir), bufferedAmount: socket.bufferedAmount }));
     },
     /** Copia de las métricas vivas (incluido el gobernador de ruling R17); solo lectura. */
     get runtime(): RuntimeStats { return { ...runtime, ...(runtime.gobernador ? { gobernador: { ...runtime.gobernador } } : {}) }; },

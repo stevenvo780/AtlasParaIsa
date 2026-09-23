@@ -58,8 +58,8 @@ async function fixture(t: TestContext, options: { perMessageDeflate?: boolean } 
 }
 
 /** Cliente WS crudo que reconstruye los `state` en trozos como lo hace `connection.ts`. */
-function abrir(f: { origin: string; cookie: string }, path: string) {
-  const socket = new WebSocket(f.origin.replace('http:', 'ws:') + path, { headers: { Origin: f.origin, Cookie: f.cookie } });
+function abrir(f: { origin: string; cookie: string }, path: string, ofreceDeflate = true) {
+  const socket = new WebSocket(f.origin.replace('http:', 'ws:') + path, { headers: { Origin: f.origin, Cookie: f.cookie }, perMessageDeflate: ofreceDeflate });
   const marcos: string[] = [];
   const mensajes: ServerMessage[] = [];
   let trozos: { total: number; partes: string[] } | null = null;
@@ -136,9 +136,11 @@ test('el cliente anterior (/ws, sin acuse) conserva su cadencia y recibe texto p
   assert.ok(cableNuevo[0]! * 3 < texto(nuevo.states()[1]!), `con acuse, el primero: ${cableNuevo[0]} B en cable para ${texto(nuevo.states()[1]!)} B de JSON`);
 });
 
-for (const [modo, perMessageDeflate, trozo] of [['comprimido', undefined, TROZO_WS_COMPRIMIDO], ['en claro', false, TROZO_WS]] as const) test(`un state grande viaja en trozos consecutivos que reconstruyen su JSON exacto (${modo})`, async t => {
+// «sin deflate negociado»: un par (o un proxy) que no ofrece permessage-deflate recibe en claro y con el
+// trozo de texto plano, aunque el servidor quisiera comprimir: así cada trozo sigue llegando a tiempo.
+for (const [modo, perMessageDeflate, trozo, ofreceDeflate] of [['comprimido', undefined, TROZO_WS_COMPRIMIDO, true], ['en claro', false, TROZO_WS, true], ['sin deflate negociado', undefined, TROZO_WS, false]] as const) test(`un state grande viaja en trozos consecutivos que reconstruyen su JSON exacto (${modo})`, async t => {
   const f = await fixture(t, { perMessageDeflate });
-  const c = abrir(f, '/ws?ack=1&x=-40&y=-30&width=96&height=64');
+  const c = abrir(f, '/ws?ack=1&x=-40&y=-30&width=96&height=64', ofreceDeflate);
   t.after(() => c.socket.terminate());
   await c.esperar(() => c.states().length === 1, 10_000, 'estado inicial grande');
   const cabecera = JSON.parse(c.marcos[0]!) as ServerMessage;
@@ -152,6 +154,7 @@ for (const [modo, perMessageDeflate, trozo] of [['comprimido', undefined, TROZO_
   const world = c.states()[0]!;
   assert.equal(world.originX, -40); assert.equal(world.originY, -30); assert.equal(world.width, 96); assert.equal(world.height, 64);
   assert.equal(c.marcos.slice(1).join(''), JSON.stringify({ type: 'state', world }), 'el JSON reconstruido es el mismo, byte a byte');
+  assert.equal(f.app.flujo[0]!.comprime, trozo === TROZO_WS_COMPRIMIDO, 'solo comprime si se negoció y no se desactivó');
 });
 
 test('trocear nunca parte un par sustituto', () => {

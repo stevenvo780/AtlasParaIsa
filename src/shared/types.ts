@@ -64,6 +64,12 @@ export interface PersonDetail {
     faltanPasos?: number; cuerpo?: string[]; reserva: number; necesita: number };
   /** M4: a quién busca si su intención es de cortejo o de crianza (nombre único en el mundo vivo). */
   busca?: { id: string; name: string; motivo: 'cortejo' | 'reunion' | 'prepara' };
+  /** M8: progenitores e hijos con nombre en todo el mundo servido (vivos y difuntos registrados). `nombre`
+   * y `vivo` null = el mundo ya no conserva ese registro. `hijos` nombra como mucho 24; `totalHijos` los cuenta todos. */
+  familia?: { progenitores: { id: string; nombre: string | null; vivo: boolean | null; generacion: number | null }[];
+    hijos: { id: string; nombre: string | null; vivo: boolean | null; generacion: number | null }[]; totalHijos: number; hijosVivos: number };
+  /** M8: edad corporal y umbrales de su cuerpo (demographicTraits), en pasos de edad. */
+  edades?: { edad: number; madurez: number; vejez: number; maxima: number };
 }
 export interface PlaceView { id: string; name: string; x: number; y: number; description: string; gatherings: number; }
 export interface ChronicleEvent {

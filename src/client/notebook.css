@@ -282,3 +282,8 @@
 /* M7: notas bajo cada barra de cooperación y el enlace a una comunidad. */
 .distribution-row .distribution-note { display: block; font-size: 11px; line-height: 1.5; margin: 4px 0 0; color: #6e805e; }
 .community-counts .entity-link { margin-left: auto; }
+/* M8: vidas que terminaron y descendencia. */
+.ended-lives { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 6px; }
+.ended-lives > li { display: flex; flex-direction: column; gap: 2px; padding: 6px 0; border-bottom: 1px dotted #d6e0c6; }
+.ended-lives small { font-size: 11px; color: #6e805e; line-height: 1.5; }
+.lineage-count { font-size: 12px; color: #4f6436; margin: 2px 0 6px; font-weight: 600; }

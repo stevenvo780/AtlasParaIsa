@@ -6,7 +6,7 @@
  * el mundo ni convierte una ausencia en cero.
  */
 import type { WorldView } from '../shared/types.js';
-import { deathCauses, esc, number } from './ui-catalog.js';
+import { esc, number } from './ui-catalog.js';
 
 export interface Censo {
   /** Vecinos + identidades S/I: todas las vidas humanas del mundo servido. */
@@ -44,7 +44,6 @@ const statCard = (label: string, value: string, note: string): string =>
 export function demographicSummary(received: WorldView): string {
   const censo = censoDe(received), enVista = received.people.length;
   const deaths = received.demography;
-  const causes = Object.entries(deaths?.causes ?? {}).filter(([, count]) => Number.isFinite(count) && count > 0);
   const neighbors = censo?.neighbors;
   const stages = censo?.lifeStage;
   const known = stages ? stages.juvenile + stages.adult + stages.senescent : 0;
@@ -61,7 +60,7 @@ export function demographicSummary(received: WorldView): string {
     : censo.protectedCount > 0 ? (censo.neighbors === 0 ? 'La continuidad de S/I está protegida. Su presencia no demuestra que los vecinos hayan sobrevivido.' : 'S/I tienen continuidad protegida por la configuración del mundo. Los vecinos siguen un ciclo de vida con mortalidad.')
     : 'El censo distingue vecinos e identidades S/I; ninguna identidad tiene continuidad protegida ahora.';
   const cameraNote = censo && enVista < censo.total ? `<p class="stats-note" data-census-scope>El censo cuenta a todas las vidas del mundo; la cámara muestra a ${number(enVista)}. La lista de Vidas enseña solo a quien está en cuadro.</p>` : '';
-  return `<section data-demographic-summary><div class="stats-section-heading"><h3>${heading}</h3><span>${scope}</span></div><div class="stats-grid">${statCard('Vecinos vivos', censo ? number(neighbors) : '—', censo ? 'Sujetos a mortalidad · todo el mundo' : 'Censo no recibido')}${statCard('S/I protegidos', censo ? number(censo.protectedCount) : '—', censo ? 'Continuidad por configuración' : 'Protección sin dato')}${statCard('Muertes humanas', number(deaths?.deaths), deaths ? 'Acumuladas en este mundo' : 'Acumulado no recibido')}${statCard('Nacimientos', number(received.stats?.totals.births), 'Acumulados en este mundo')}</div>${cameraNote}${stagesMarkup}<p class="stats-note">${protection}</p>${deaths ? `<details class="person-detail" data-detail="human-death-causes"><summary>Causas de las muertes acumuladas</summary>${causes.length ? `<div class="stats-facts">${causes.map(([cause, count]) => `<span>${esc(deathCauses[cause] ?? cause)}<strong>${number(count)}</strong></span>`).join('')}</div>` : '<p>No hay causas de muerte registradas en el acumulado recibido.</p>'}</details>` : ''}</section>`;
+  return `<section data-demographic-summary><div class="stats-section-heading"><h3>${heading}</h3><span>${scope}</span></div><div class="stats-grid">${statCard('Vecinos vivos', censo ? number(neighbors) : '—', censo ? 'Sujetos a mortalidad · todo el mundo' : 'Censo no recibido')}${statCard('S/I protegidos', censo ? number(censo.protectedCount) : '—', censo ? 'Continuidad por configuración' : 'Protección sin dato')}${statCard('Muertes humanas', number(deaths?.deaths), deaths ? 'Acumuladas en este mundo' : 'Acumulado no recibido')}${statCard('Nacimientos', number(received.stats?.totals.births), 'Acumulados en este mundo')}</div>${cameraNote}${stagesMarkup}<p class="stats-note">${protection}</p></section>`;
 }
 
 /** Ficha de alguien que no está en `people`: despedida si murió hace poco, «fuera de esta vista» si

@@ -150,6 +150,21 @@ test('el orden canónico rápido da el mismo arreglo que ordenar: ordenado, inve
   }
 });
 
+const mismoArreglo = (a: readonly Animal[], b: readonly Animal[]): boolean => a.length === b.length && a.every((x, i) => x === b[i]);
+
+test('la ventana que da la vuelta con ids repetidos entre sus dos tramos es la de hoy, objeto a objeto', () => {
+  const w = herd(MAX_ACTIVE_ANIMALS + 1);
+  for (const a of w.animals) a.id = 'animal-mismo';
+  const snapshot = [...w.animals];
+  for (let tick = 0; tick < 12; tick++) {
+    w.tick = tick;
+    const sorted = [...snapshot].sort(canonicalId), population = sorted.length;
+    const offset = ((tick % population) * MAX_ACTIVE_ANIMALS) % population;
+    const hoy = [...sorted.slice(offset, offset + MAX_ACTIVE_ANIMALS), ...sorted.slice(0, Math.max(0, offset + MAX_ACTIVE_ANIMALS - population))].sort(canonicalId);
+    assert.ok(mismoArreglo(mascaraFauna(w).seleccion, hoy), `tick ${tick}`);
+  }
+});
+
 test('una fauna reordenada en sitio entre pasos no pasa por ordenada', () => {
   const w = mundoVivo();
   for (let n = 0; n < 3; n++) { w.tick++; stepAnimals(w); }

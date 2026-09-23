@@ -352,11 +352,17 @@ export interface MascaraFauna {
 }
 export function mascaraFauna(world: AnimalWorld): MascaraFauna {
   ordenCanonico(world.animals);
-  const population = world.animals.length;
+  const animals = world.animals, population = animals.length;
   const offset = population ? ((world.tick % population) * MAX_ACTIVE_ANIMALS) % population : 0;
-  const selected = population <= MAX_ACTIVE_ANIMALS ? [...world.animals]
-    : [...world.animals.slice(offset, offset + MAX_ACTIVE_ANIMALS), ...world.animals.slice(0, Math.max(0, offset + MAX_ACTIVE_ANIMALS - population))].sort(canonical);
-  return Object.freeze({ tick: world.tick, animales: world.animals, poblacion: population, seleccion: Object.freeze(selected), ids: new Set(selected.map(a => a.id)) });
+  let selected: Animal[];
+  if (population <= MAX_ACTIVE_ANIMALS) selected = [...animals];
+  else {
+    // Los dos tramos ya están en orden canónico: si la vuelta queda entera por delante, el `sort` de la
+    // ventana los dejaría así; con ids repetidos entre ambos, lo decide el `sort`.
+    const tramo = animals.slice(offset, offset + MAX_ACTIVE_ANIMALS), vuelta = animals.slice(0, Math.max(0, offset + MAX_ACTIVE_ANIMALS - population));
+    selected = !vuelta.length ? tramo : vuelta[vuelta.length - 1]!.id < tramo[0]!.id ? [...vuelta, ...tramo] : [...tramo, ...vuelta].sort(canonical);
+  }
+  return Object.freeze({ tick: world.tick, animales: animals, poblacion: population, seleccion: Object.freeze(selected), ids: new Set(selected.map(a => a.id)) });
 }
 /** Los animales de una región que la máscara selecciona, en orden canónico. */
 export function seleccionDe(mascara: MascaraFauna, animales: readonly Animal[]): Animal[] {

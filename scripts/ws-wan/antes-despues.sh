@@ -66,13 +66,18 @@ lote() { # $1 = lado, $2 = lotes, $3… = extra
   (cd "$SALIDA/$lado-src" && nice -n 10 npx tsx scripts/ws-wan/banco.ts --cliente real --servidor "$SALIDA/servidor-$lado.out" --escenarios "$lotes" \
     --duracion "$DURACION" --paralelo 3 --salida "$SALIDA/$lado" "$@" > "$SALIDA/banco-$lado-${lotes//,/+}.out" 2> "$SALIDA/banco-$lado-${lotes//,/+}.err")
 }
-for lado in antes despues; do (lote $lado ancho,bajo,observador; lote $lado estancamiento --estancar 30@12) & done; wait
+# `wait` con los PID de los bancos: un `wait` a secas esperaría también a los servidores.
+bancos=()
+for lado in antes despues; do (lote $lado ancho,bajo,observador; lote $lado estancamiento --estancar 30@12) & bancos+=($!); done
+wait "${bancos[@]}"
 if [ $NAVEGADOR = 1 ]; then
   for args in "--mbps lan --pantalla 1920x969" "--mbps 5 --pantalla 1920x969" "--mbps 2 --pantalla 1920x969" "--mbps 1 --pantalla 1920x969" "--mbps 0.5 --pantalla 1920x969" "--mbps 2 --pantalla 390x750 --movil"; do
+    paginas=()
     for lado in antes despues; do
       # shellcheck disable=SC2086
       (cd "$SALIDA/$lado-src" && nice -n 10 npx tsx scripts/ws-wan/navegador.ts --servidor "$SALIDA/servidor-$lado.out" --duracion "$DURACION" --salida "$SALIDA/nav-$lado" $args > /dev/null 2>&1) &
-    done; wait
+      paginas+=($!)
+    done; wait "${paginas[@]}"
   done
 fi
 ORDEN="lanM-movil lanM-escritorio lanM-maximo 20M-movil 20M-escritorio 20M-maximo 10M-movil 10M-escritorio 10M-maximo 5M-movil 5M-escritorio 5M-maximo 2M-movil 2M-escritorio 2M-maximo 1.5M-escritorio 1.5M-maximo 1M-escritorio 1M-maximo 0.5M-escritorio 0.5M-maximo 2M-movil-obs5s 2M-escritorio-obs5s 1M-movil-obs5s 1M-escritorio-obs5s 0.5M-movil-obs5s 0.5M-escritorio-obs5s lanM-escritorio-estancado 10M-escritorio-estancado 5M-escritorio-estancado 2M-escritorio-estancado"

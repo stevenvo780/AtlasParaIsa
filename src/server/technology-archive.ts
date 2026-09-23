@@ -125,8 +125,23 @@ const monotone = (a: TechnologyStats, b: TechnologyStats) => a.uses <= b.uses &&
 export type TechnologyDefinitionSummary = TechnologyCatalogueTotals & { functions: number[] };
 /** Un recibo leído y verificado junto con el digesto de su fila: el anfitrión encadena esos digestos. */
 export interface TechnologyExecutionRecord { execution: TechnologyExecution; digest: string; }
-/** Lo que devuelve podar un prefijo: el pliegue de la cadena a través de lo borrado y su último tick. */
-export interface TechnologyPruneResult { digest: string; count: number; tick: number; }
+export const TECHNOLOGY_EXECUTION_KINDS = ['research', 'craft', 'use', 'recycle', 'estate', 'transfer', 'water'] as const;
+export type TechnologyExecutionCounts = Record<TechnologyExecution['kind'], number>;
+export const emptyTechnologyExecutionCounts = (): TechnologyExecutionCounts => ({
+  research: 0, craft: 0, use: 0, recycle: 0, estate: 0, transfer: 0, water: 0,
+});
+export const canonicalTechnologyExecutionCounts = (counts: TechnologyExecutionCounts): string =>
+  JSON.stringify(Object.fromEntries(TECHNOLOGY_EXECUTION_KINDS.map(kind => [kind, counts[kind]])));
+export interface TechnologyPruneSealInput {
+  startsAfter: number; through: number; tick: number; digest: string; count: number; byKind: TechnologyExecutionCounts;
+}
+/** La cabeza durable repite este sello: cambiar cualquier campo rompe también el enlace con esa cabeza. */
+export const technologyPruneSeal = (value: TechnologyPruneSealInput): string => checksum([
+  'technology-pruned-v2', value.digest, value.startsAfter, value.through, value.tick, value.count,
+  canonicalTechnologyExecutionCounts(value.byKind),
+].join('\n'));
+/** Lo que devuelve podar un prefijo: el pliegue de la cadena a través de lo borrado, su último tick y sus tipos. */
+export interface TechnologyPruneResult { digest: string; count: number; tick: number; byKind: TechnologyExecutionCounts; }
 /**
  * Lo que el archivo necesita saber del anfitrión (sprint noche-arch 2026-09-23). El anfitrión puede podar un
  * prefijo de recibos ya verificado (retención por ventana) y guarda esa frontera en sus propios metadatos;
@@ -135,9 +150,12 @@ export interface TechnologyPruneResult { digest: string; count: number; tick: nu
  * anfitrión (archivo suelto) no hay poda y la ley es la de siempre.
  */
 export interface TechnologyArchiveHost { prunedThrough(): number | null; }
-/** Cadena de digestos de fila: `sha256(anterior + "\n" + digesto)` en orden de serie, desde este valor. */
+/** Cadena V2: cada fila autentica tanto el cuerpo como el tick que ordena y limita los intervalos. */
 export const TECHNOLOGY_CHAIN_EMPTY = '0'.repeat(64);
-export const technologyChainStep = (previous: string, digest: string): string => checksum(`${previous}\n${digest}`);
+export const technologyChainStep = (previous: string, digest: string, atTick: number): string =>
+  checksum(`${previous}\n${digest}\n${atTick}`);
+/** Sólo para verificar y actualizar una cabeza V1 no podada; nunca se escribe de nuevo. */
+export const legacyTechnologyChainStep = (previous: string, digest: string): string => checksum(`${previous}\n${digest}`);
 interface ArchiveStamp { dataVersion: number; totalChanges: number; schemaCookie: number; tempSchemaCookie: number; transaction: boolean; }
 interface DefinitionProof {
   throughTick: number; recipes: number; maxGeneration: number; lastTick: number;
@@ -653,19 +671,21 @@ export class TechnologyArchive {
     if (throughSerial <= afterSerial || !/^[0-9a-f]{64}$/.test(digest)) fail('prune interval');
     const token = this.synchronize();
     let expected = afterSerial, lastTick = -1;
-    const rows = this.db.prepare('SELECT serial,tick,body,digest FROM technology_executions WHERE serial>? AND serial<=? ORDER BY serial');
-    for (const row of rows.iterate(afterSerial, throughSerial) as Iterable<Omit<ExecutionRow, 'id'>>) {
+    const byKind = emptyTechnologyExecutionCounts();
+    const rows = this.db.prepare('SELECT id,serial,tick,body,digest FROM technology_executions WHERE serial>? AND serial<=? ORDER BY serial');
+    for (const row of rows.iterate(afterSerial, throughSerial) as Iterable<ExecutionRow>) {
       if (row.serial !== ++expected) fail('prune interval has a gap');
-      if (typeof row.body !== 'string' || typeof row.digest !== 'string' || checksum(row.body) !== row.digest) fail('checksum');
-      tick(row.tick); if (row.tick < lastTick) fail('execution chronology');
-      lastTick = row.tick; digest = technologyChainStep(digest, row.digest);
+      const execution = this.execution(row);
+      if (execution.tick < lastTick) fail('execution chronology');
+      lastTick = execution.tick; byKind[execution.kind]++;
+      digest = technologyChainStep(digest, row.digest, execution.tick);
     }
     if (expected !== throughSerial) fail('prune interval has a gap');
     const result = this.db.prepare('DELETE FROM technology_executions WHERE serial>? AND serial<=?').run(afterSerial, throughSerial);
     const count = Number(result.changes);
     if (count !== throughSerial - afterSerial) fail('prune interval');
     this.ownMutation(token, count);
-    return { digest, count, tick: lastTick };
+    return { digest, count, tick: lastTick, byKind };
   }
 
   /** Recovery of a caller-owned copy. Validate retained references before deleting any future row. */

@@ -10,7 +10,9 @@ import { takeSnapshotParams, SnapshotPhysicalError, SnapshotSemanticError } from
 import { SnapshotParts, assertSnapshotPartsSchema, SNAPSHOT_INLINE_TILE_LIMIT } from './snapshot-parts.js';
 import type { LegacyRecord } from '../shared/demography.js';
 import { assertLegacyRecord } from '../world/lineage.js';
-import { TechnologyArchive, TECHNOLOGY_CHAIN_EMPTY, technologyChainStep } from './technology-archive.js';
+import { TechnologyArchive, TECHNOLOGY_CHAIN_EMPTY, TECHNOLOGY_EXECUTION_KINDS, emptyTechnologyExecutionCounts,
+  legacyTechnologyChainStep, technologyChainStep, technologyPruneSeal,
+  type TechnologyExecutionCounts } from './technology-archive.js';
 import { TECHNOLOGY_ARCHIVE_LAWS_VERSION, type TechnologyDefinition } from '../shared/technology-archive.js';
 import type { TechnologyCatalogueTotals, TechnologyRecipe } from '../shared/technology.js';
 import { enableTechnologyJournal, assertTechnologyJournal, technologyStateForCommit, markTechnologyJournalCommitted } from '../world/technology-journal.js';
@@ -94,17 +96,26 @@ type ChronicleStamp = { dataVersion: number; totalChanges: number; schemaCookie:
 const sameChronicleStamp = (a: ChronicleStamp, b: ChronicleStamp) => Object.keys(a).every(key => a[key as keyof ChronicleStamp] === b[key as keyof ChronicleStamp]);
 type ChronicleProof = { startsAfter: number; through: number; digest: string; tick: number; stamp: ChronicleStamp };
 type ChroniclePrune = { through: number; digest: string };
-/** Cabeza de la cadena de digestos de recibos: pliegue de `(startsAfter, through]` (ver `technologyChainStep`). */
+/** Cabeza V2 de la cadena de recibos: pliegue de `(startsAfter, through]` (ver `technologyChainStep`). */
 type TechnologyChain = { startsAfter: number; through: number; digest: string };
-/** Frontera de poda: los recibos `(startsAfter, through]` se borraron; `digest` es el pliegue a través de ellos
- * y `tick`, el del último podado (ningún recibo con tick ≤ `tick` sigue en el archivo). */
-type TechnologyPrune = TechnologyChain & { tick: number; count: number };
+type TechnologyChainRecord = TechnologyChain & ({ version: 1 } | { version: 2; pruneSeal: string | null });
+/** Frontera V2: `digest` pliega todo el prefijo desde el origen; `seal` autentica los campos acumulados y la
+ * cabeza durable lo repite, de modo que no pueda cambiar sin romper la prueba del archivo. */
+type TechnologyPrune = TechnologyChain & { tick: number; count: number; byKind: TechnologyExecutionCounts; seal: string };
 /** Lo que una instantánea exige del archivo para volver a cargarse o recuperarse: sus recibos confirmados y
  * los de su anillo residente (`ringTick`, tick del primero; `null` si está vacío). */
 type SlotBounds = { committed: number; ringTick: number | null };
 const TECHNOLOGY_PRUNED_KEY = 'technology-pruned-v1', TECHNOLOGY_CHAIN_KEY = 'technology-chain-v1';
 const hexDigest = (value: unknown): value is string => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value);
 const safeCount = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+const technologyCounts = (value: unknown): TechnologyExecutionCounts | null => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || Object.keys(value).sort().join(',') !== [...TECHNOLOGY_EXECUTION_KINDS].sort().join(',')) return null;
+  const counts = value as Partial<TechnologyExecutionCounts>;
+  return TECHNOLOGY_EXECUTION_KINDS.every(kind => safeCount(counts[kind])) ? counts as TechnologyExecutionCounts : null;
+};
+const addTechnologyCounts = (left: TechnologyExecutionCounts, right: TechnologyExecutionCounts): TechnologyExecutionCounts =>
+  Object.fromEntries(TECHNOLOGY_EXECUTION_KINDS.map(kind => [kind, left[kind] + right[kind]])) as TechnologyExecutionCounts;
 type SchemaColumn = { name: string; pk: number };
 const BASE_TABLES: Record<string, string[]> = {
   snapshots: ['slot', 'body', 'digest', 'saved_at'], events: ['id', 'tick', 'body'],
@@ -765,34 +776,49 @@ export class Store {
     if (!row) return null;
     let value: Record<string, unknown> | null = null;
     try { value = JSON.parse(row.value); } catch { technologyFailure('prune boundary is invalid'); }
+    if (value && value.version === 1
+      && Object.keys(value).sort().join(',') === 'count,digest,startsAfter,through,tick,version')
+      technologyFailure('legacy prune boundary has no authenticated V2 seal');
+    const byKind = value ? technologyCounts(value.byKind) : null;
     if (!value || typeof value !== 'object' || Array.isArray(value)
-      || Object.keys(value).sort().join(',') !== 'count,digest,startsAfter,through,tick,version' || value.version !== 1
+      || Object.keys(value).sort().join(',') !== 'byKind,count,digest,seal,startsAfter,through,tick,version' || value.version !== 2
       || !safeCount(value.startsAfter) || !safeCount(value.through) || !safeCount(value.tick) || !safeCount(value.count)
-      || !hexDigest(value.digest) || value.through <= value.startsAfter || value.count !== value.through - value.startsAfter)
+      || !hexDigest(value.digest) || !hexDigest(value.seal) || !byKind || value.through <= value.startsAfter
+      || value.count !== value.through - value.startsAfter
+      || TECHNOLOGY_EXECUTION_KINDS.reduce((sum, kind) => sum + byKind[kind], 0) !== value.count)
       technologyFailure('prune boundary is invalid');
-    return { startsAfter: value!.startsAfter as number, through: value!.through as number, tick: value!.tick as number,
-      digest: value!.digest as string, count: value!.count as number };
+    const boundary: TechnologyPrune = { startsAfter: value!.startsAfter as number, through: value!.through as number,
+      tick: value!.tick as number, digest: value!.digest as string, count: value!.count as number, byKind: byKind!,
+      seal: value!.seal as string };
+    if (technologyPruneSeal(boundary) !== boundary.seal) technologyFailure('prune boundary seal disagrees with its fields');
+    return boundary;
   }
   /** Cabeza durable de la cadena de recibos, escrita en la misma transacción que cada instantánea. `null` en
    * un archivo escrito antes de la retención: la primera carga la calcula y el primer guardado la escribe. */
-  private technologyChainRecord(): TechnologyChain | null {
+  private technologyChainRecord(): TechnologyChainRecord | null {
     const row = this.db.prepare('SELECT value FROM main.metadata WHERE key=?').get(TECHNOLOGY_CHAIN_KEY) as { value: string } | undefined;
     if (!row) return null;
     let value: Record<string, unknown> | null = null;
     try { value = JSON.parse(row.value); } catch { technologyFailure('execution chain head is invalid'); }
+    const version = value?.version;
+    const expectedKeys = version === 1 ? 'digest,startsAfter,through,version' : 'digest,pruneSeal,startsAfter,through,version';
     if (!value || typeof value !== 'object' || Array.isArray(value)
-      || Object.keys(value).sort().join(',') !== 'digest,startsAfter,through,version' || value.version !== 1
+      || Object.keys(value).sort().join(',') !== expectedKeys || ![1, 2].includes(version as number)
       || !safeCount(value.startsAfter) || !safeCount(value.through) || value.through < value.startsAfter || !hexDigest(value.digest))
       technologyFailure('execution chain head is invalid');
-    return { startsAfter: value!.startsAfter as number, through: value!.through as number, digest: value!.digest as string };
+    if (version === 2 && value!.pruneSeal !== null && !hexDigest(value!.pruneSeal))
+      technologyFailure('execution chain head is invalid');
+    const chain = { startsAfter: value!.startsAfter as number, through: value!.through as number, digest: value!.digest as string };
+    return version === 1 ? { version: 1, ...chain } : { version: 2, ...chain, pruneSeal: value!.pruneSeal as string | null };
   }
   /** Host write: cabeza de la cadena y, si hubo poda en este guardado, la nueva frontera. */
   private writeTechnologyMetadata(chain: TechnologyChain, pruned: TechnologyPrune | null): void {
     const put = this.db.prepare('INSERT OR REPLACE INTO main.metadata VALUES (?,?)');
-    put.run(TECHNOLOGY_CHAIN_KEY, JSON.stringify({ version: 1, startsAfter: chain.startsAfter, through: chain.through,
-      digest: chain.digest }));
-    if (pruned) put.run(TECHNOLOGY_PRUNED_KEY, JSON.stringify({ version: 1, startsAfter: pruned.startsAfter, through: pruned.through,
-      tick: pruned.tick, digest: pruned.digest, count: pruned.count }));
+    const boundary = pruned ?? this.prunedTechnology();
+    put.run(TECHNOLOGY_CHAIN_KEY, JSON.stringify({ version: 2, startsAfter: chain.startsAfter, through: chain.through,
+      digest: chain.digest, pruneSeal: boundary?.seal ?? null }));
+    if (pruned) put.run(TECHNOLOGY_PRUNED_KEY, JSON.stringify({ version: 2, startsAfter: pruned.startsAfter, through: pruned.through,
+      tick: pruned.tick, digest: pruned.digest, count: pruned.count, byKind: pruned.byKind, seal: pruned.seal }));
   }
   /** El anillo residente de una instantánea nunca queda dentro del prefijo podado: la poda se acota por el
    * primer recibo de cada anillo. Si lo estuviera, la frontera no es la que la poda pudo escribir. */
@@ -819,12 +845,20 @@ export class Store {
     const from = boundary ? boundary.through : startsAfter;
     if (head && (head.startsAfter !== startsAfter || head.through < from || head.through > through))
       technologyFailure('execution chain head escapes declared coverage');
+    if (head?.version === 2 && head.pruneSeal !== (boundary?.seal ?? null))
+      technologyFailure('execution chain head disagrees with prune boundary seal');
     if (boundary && this.db.prepare('SELECT 1 FROM technology_executions WHERE serial<=? LIMIT 1').get(boundary.through))
       technologyFailure('pruned executions are still archived');
+    const firstRetained = boundary && this.db.prepare('SELECT tick FROM technology_executions WHERE serial=?').get(boundary.through + 1) as
+      { tick: number } | undefined;
+    if (boundary && firstRetained && firstRetained.tick <= boundary.tick)
+      technologyFailure('prune boundary tick overlaps the first retained execution');
     this.assertRingOutsidePrune(world, startsAfter, from);
     let serial = from, digest = boundary ? boundary.digest : TECHNOLOGY_CHAIN_EMPTY;
+    let legacyDigest = TECHNOLOGY_CHAIN_EMPTY;
+    const headDisagrees = (): boolean => !!head && head.digest !== (head.version === 1 ? legacyDigest : digest);
     // Una cabeza atrasada (la escribió un binario anterior que no la mantenía) se comprueba como prefijo.
-    if (head && head.through === serial && head.digest !== digest) technologyFailure('execution chain disagrees with archive');
+    if (head && head.through === serial && headDisagrees()) technologyFailure('execution chain disagrees with archive');
     const recent = new Map(state.history.map(receipt => [receipt.id, receipt]));
     while (serial < through) {
       const page = this.technologyArchive.listExecutionRecords({ afterSerial: serial, asOfTick: world.tick,
@@ -832,8 +866,9 @@ export class Store {
       if (!page.length) technologyFailure('declared execution coverage is incomplete');
       for (const { execution: receipt, digest: rowDigest } of page) {
         if (receipt.id !== `process-${++serial}`) technologyFailure('declared execution coverage has a gap');
-        digest = technologyChainStep(digest, rowDigest);
-        if (head && head.through === serial && head.digest !== digest) technologyFailure('execution chain disagrees with archive');
+        digest = technologyChainStep(digest, rowDigest, receipt.tick);
+        if (!boundary) legacyDigest = legacyTechnologyChainStep(legacyDigest, rowDigest);
+        if (head && head.through === serial && headDisagrees()) technologyFailure('execution chain disagrees with archive');
         const cached = recent.get(receipt.id);
         if (cached && JSON.stringify(cached) !== JSON.stringify(receipt)) technologyFailure('cached execution disagrees with archive');
       }
@@ -914,7 +949,8 @@ export class Store {
    *   `previous()`) ni ninguno desde el primero de su anillo residente (que se compara con el archivo). Se
    *   mira cada respaldo, no se supone su edad: el slot 2 envejece si el servicio se reinicia a menudo;
    * - siempre en un tick completo (un padre y sus anidadas comparten tick) y como mucho
-   *   `technologyPruneRowsPerSave` recibos por guardado: un archivo que ya existía se poda poco a poco.
+   *   `technologyPruneRowsPerSave` recibos por guardado —o los de un único tick, si él solo lo supera—: un
+   *   archivo que ya existía se poda poco a poco.
    * El mundo no lee estos recibos (sólo definiciones y estadísticas, `catalogueReader`), así que nada de esto
    * cambia la simulación ni `digestoCanonico`.
    */
@@ -947,15 +983,23 @@ export class Store {
     }
     if (through === null || through <= from) return null;
     if (through - from > this.technologyPruneRowsPerSave) {
-      const next = this.executionTick(from + this.technologyPruneRowsPerSave + 1), first = this.executionTick(from + 1);
-      if (next === null || first === null) return null;
-      const cut = this.lastExecutionBefore(next);
-      // Un único tick con más recibos que el tope se poda entero: nunca se separa un padre de sus anidadas.
-      through = cut !== null && cut > from ? cut : this.lastExecutionAt(first);
+      const capTick = this.executionTick(from + this.technologyPruneRowsPerSave);
+      if (capTick === null) return null;
+      const capTickEnd = this.lastExecutionAt(capTick);
+      const cut = capTickEnd !== null && capTickEnd <= from + this.technologyPruneRowsPerSave
+        ? capTickEnd : this.lastExecutionBefore(capTick);
+      // Si ni el primer tick completo cabe, se poda ese tick entero y solo: nunca se parte un padre de sus
+      // anidadas y, si no se podara, la poda quedaría atascada para siempre en él. Su coste está acotado por
+      // lo que un solo paso escribió en un solo guardado.
+      const firstTick = this.executionTick(from + 1);
+      through = cut !== null && cut > from ? cut : firstTick === null ? null : this.lastExecutionAt(firstTick);
       if (through === null || through <= from) return null;
     }
     const pruned = this.technologyArchive.pruneExecutions(from, through, previous ? previous.digest : TECHNOLOGY_CHAIN_EMPTY);
-    return { startsAfter: origin.startsAfter, through, tick: pruned.tick, digest: pruned.digest, count: through - origin.startsAfter };
+    const byKind = addTechnologyCounts(previous?.byKind ?? emptyTechnologyExecutionCounts(), pruned.byKind);
+    const boundary = { startsAfter: origin.startsAfter, through, tick: pruned.tick, digest: pruned.digest,
+      count: through - origin.startsAfter, byKind };
+    return { ...boundary, seal: technologyPruneSeal(boundary) };
   }
 
   private assertTechnologyAuthor(world: World, definition: Pick<TechnologyDefinition, 'inventorId' | 'tick'>): void {
@@ -1135,7 +1179,8 @@ export class Store {
     if (!chain || chain.startsAfter !== journal.startsAfter || chain.through !== journal.committedThrough)
       technologyFailure('execution chain head is unknown');
     let digest = chain!.digest;
-    for (const receipt of journal.pending) digest = technologyChainStep(digest, this.technologyArchive.putExecution(receipt));
+    for (const receipt of journal.pending)
+      digest = technologyChainStep(digest, this.technologyArchive.putExecution(receipt), receipt.tick);
     return { startsAfter: journal.startsAfter, through: journal.committedThrough + journal.pending.length, digest };
   }
 
@@ -1344,19 +1389,29 @@ export class Store {
     if (boundary && boundary.startsAfter !== origin.startsAfter || head && head.startsAfter !== origin.startsAfter)
       technologyFailure('prune boundary disagrees with history origin');
     if (boundary && !head) technologyFailure('prune boundary has no execution chain head');
+    if (boundary && head?.version !== 2) technologyFailure('prune boundary has no V2 execution chain head');
+    if (head?.version === 2 && head.pruneSeal !== (boundary?.seal ?? null))
+      technologyFailure('execution chain head disagrees with prune boundary seal');
+    const firstRetained = boundary && this.db.prepare('SELECT tick FROM technology_executions WHERE serial=?').get(boundary.through + 1) as
+      { tick: number } | undefined;
+    if (boundary && firstRetained && firstRetained.tick <= boundary.tick)
+      technologyFailure('prune boundary tick overlaps the first retained execution');
     let serial = boundary ? boundary.through : origin.startsAfter, digest = boundary ? boundary.digest : TECHNOLOGY_CHAIN_EMPTY;
+    let legacyDigest = TECHNOLOGY_CHAIN_EMPTY;
     if (target < serial) technologyFailure('prune boundary escapes declared coverage');
-    let atTarget = target === serial ? digest : null, headChecked = !head || head.through === serial && head.digest === digest;
+    const currentHead = () => head?.version === 1 ? legacyDigest : digest;
+    let atTarget = target === serial ? digest : null, headChecked = !head || head.through === serial && head.digest === currentHead();
     if (head && head.through < serial) technologyFailure('execution chain head escapes declared coverage');
-    for (const row of this.db.prepare('SELECT serial,digest FROM technology_executions WHERE serial>? ORDER BY serial')
-      .iterate(serial) as Iterable<{ serial: number; digest: string }>) {
+    for (const row of this.db.prepare('SELECT serial,tick,digest FROM technology_executions WHERE serial>? ORDER BY serial')
+      .iterate(serial) as Iterable<{ serial: number; tick: number; digest: string }>) {
       // Lo posterior al punto recuperado se borra en la copia: un hueco ahí no impide recuperar (para eso
       // existe `previous()`), sólo deja sin comprobar una cabeza que caiga más allá.
       if (row.serial !== ++serial) { if (serial <= target) technologyFailure('declared execution coverage has a gap'); break; }
-      digest = technologyChainStep(digest, row.digest);
+      digest = technologyChainStep(digest, row.digest, row.tick);
+      if (!boundary) legacyDigest = legacyTechnologyChainStep(legacyDigest, row.digest);
       if (serial === target) atTarget = digest;
       if (head && head.through === serial) {
-        if (head.digest !== digest) technologyFailure('execution chain disagrees with archive');
+        if (head.digest !== currentHead()) technologyFailure('execution chain disagrees with archive');
         headChecked = true;
       }
     }

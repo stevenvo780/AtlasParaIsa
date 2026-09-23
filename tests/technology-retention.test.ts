@@ -16,7 +16,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { Store, TECHNOLOGY_RETENTION_MIN_TICKS } from '../src/server/store.js';
-import { TechnologyArchive, TECHNOLOGY_CHAIN_EMPTY, technologyChainStep } from '../src/server/technology-archive.js';
+import { TechnologyArchive, TECHNOLOGY_CHAIN_EMPTY, legacyTechnologyChainStep, technologyChainStep, technologyPruneSeal,
+  type TechnologyExecutionCounts } from '../src/server/technology-archive.js';
 import { assertWorld, createWorld, type World } from '../src/world/index.js';
 import { parseParams, setParams } from '../src/world/params.js';
 import { recordTechnologyBenefit, researchTechnology, technologyWorkCost, useTool } from '../src/world/technology.js';
@@ -59,18 +60,20 @@ function useMany(world: World, amount: number): { serial: number; tick: number }
 }
 const pruneRecord = (store: Store) => {
   const row = store.db.prepare("SELECT value FROM metadata WHERE key='technology-pruned-v1'").get() as { value: string } | undefined;
-  return row ? JSON.parse(row.value) as { startsAfter: number; through: number; tick: number; digest: string; count: number } : null;
+  return row ? JSON.parse(row.value) as { version: 2; startsAfter: number; through: number; tick: number; digest: string;
+    count: number; byKind: TechnologyExecutionCounts; seal: string } : null;
 };
 const chainRecord = (store: Store) => {
   const row = store.db.prepare("SELECT value FROM metadata WHERE key='technology-chain-v1'").get() as { value: string } | undefined;
-  return row ? JSON.parse(row.value) as { startsAfter: number; through: number; digest: string } : null;
+  return row ? JSON.parse(row.value) as { version: 1 | 2; startsAfter: number; through: number; digest: string;
+    pruneSeal?: string | null } : null;
 };
 /** Pliegue de la cadena sobre las filas retenidas, desde la frontera. */
 const foldRetained = (store: Store) => {
   const boundary = pruneRecord(store);
   let value = boundary?.digest ?? TECHNOLOGY_CHAIN_EMPTY;
-  for (const row of store.db.prepare('SELECT digest FROM technology_executions ORDER BY serial').all() as { digest: string }[])
-    value = technologyChainStep(value, row.digest);
+  for (const row of store.db.prepare('SELECT tick,digest FROM technology_executions ORDER BY serial').all() as { tick: number; digest: string }[])
+    value = technologyChainStep(value, row.digest, row.tick);
   return value;
 };
 const serial = (receipt: TechnologyExecution) => Number(receipt.id.slice(8));
@@ -106,7 +109,8 @@ test('la retención poda por ventana en ticks completos, la carga la verifica y 
   assert.equal(count(store, 'SELECT COUNT(*) AS n FROM technology_executions WHERE serial<=?', expected), 0);
   assert.equal(count(store), world.technology.executionCounter - expected, 'lo retenido es contiguo hasta el contador');
   assert.equal(count(store, 'SELECT COUNT(*) AS n FROM technology_executions WHERE tick<?', horizon), 0);
-  assert.deepEqual(chain, { version: 1, startsAfter: 0, through: world.technology.executionCounter, digest: foldRetained(store) });
+  assert.deepEqual(chain, { version: 2, startsAfter: 0, through: world.technology.executionCounter,
+    digest: foldRetained(store), pruneSeal: boundary!.seal });
   assert.deepEqual(store.load()!.world, world);
   const reopened = open(t, path, { readOnly: true });
   assert.deepEqual(reopened.load()!.world, world);
@@ -120,34 +124,44 @@ test('sin ventana no se poda nada y la cabeza de la cadena cubre el archivo ente
   const { store, world } = grow(t, { window: 0, steps: 4 });
   assert.equal(pruneRecord(store), null);
   assert.equal(count(store), world.technology.executionCounter);
-  assert.deepEqual(chainRecord(store), { version: 1, startsAfter: 0, through: world.technology.executionCounter,
-    digest: foldRetained(store) });
+  assert.deepEqual(chainRecord(store), { version: 2, startsAfter: 0, through: world.technology.executionCounter,
+    digest: foldRetained(store), pruneSeal: null });
   assert.deepEqual(store.load()!.world, world);
 });
 
-test('un archivo que ya existía se poda poco a poco: tope por guardado, ticks completos y un tick mayor que el tope entero', t => {
-  // 25 recibos por tick y tope 100: cada guardado poda cuatro ticks; el primer tick lleva 150 (más que el tope).
-  const dir = directory(t), path = join(dir, 'world.sqlite'), store = open(t, path, { technologyPruneRowsPerSave: 100 });
+test('una cabeza V1 sin poda se verifica y el siguiente guardado la actualiza a V2', t => {
+  const { store, world } = grow(t, { window: 0, steps: 3 });
+  let legacyDigest = TECHNOLOGY_CHAIN_EMPTY;
+  for (const row of store.db.prepare('SELECT digest FROM technology_executions ORDER BY serial').all() as { digest: string }[])
+    legacyDigest = legacyTechnologyChainStep(legacyDigest, row.digest);
+  store.db.prepare("UPDATE metadata SET value=? WHERE key='technology-chain-v1'").run(JSON.stringify({
+    version: 1, startsAfter: 0, through: world.technology.executionCounter, digest: legacyDigest,
+  }));
+  assert.deepEqual(store.load()!.world, world);
+  store.save(world);
+  assert.deepEqual(chainRecord(store), { version: 2, startsAfter: 0, through: world.technology.executionCounter,
+    digest: foldRetained(store), pruneSeal: null });
+});
+
+test('un archivo que ya existía se poda poco a poco sin superar el tope y sólo en ticks completos', t => {
+  // 25 recibos por tick y tope 60: cada guardado puede podar como máximo dos ticks (50 recibos).
+  const dir = directory(t), path = join(dir, 'world.sqlite'), store = open(t, path, { technologyPruneRowsPerSave: 60 });
   const world = createWorld(51926);
   store.save(world); makeTool(world); store.save(world);
   const ticks = new Map<number, number>();
   const mark = (receipts: { serial: number; tick: number }[]) => { for (const r of receipts) ticks.set(r.serial, r.tick); };
   mark(world.technology.history.map(r => ({ serial: serial(r), tick: r.tick })));
-  fixtureTick(world, world.tick + 10); const big = useMany(world, 150); mark(big); store.save(world);
-  for (let n = 0; n < 40; n++) { fixtureTick(world, world.tick + 10); mark(useMany(world, 25)); store.save(world); }
+  for (let n = 0; n < 30; n++) { fixtureTick(world, world.tick + 10); mark(useMany(world, 25)); store.save(world); }
   assert.equal(pruneRecord(store), null, 'sin ventana el archivo se conserva entero');
   // Se abre la ventana (como `CARTA_PARAMS` en producción) y el mundo sigue sin recibos nuevos.
   setParams(world, parseParams('persistencia.ventanaEventosTicks=2400'));
   const ringSerial = serial(world.technology.history[0]!);
-  let previous = 0, saves = 0, sawBigTick = false;
+  let previous = 0, saves = 0;
   for (; saves < 60; saves++) {
     fixtureTick(world, world.tick + 3000); store.save(world);
     const through = pruneRecord(store)?.through ?? 0;
     if (through === previous) break;
-    // Nunca más que el tope, salvo el tick de 150 recibos, que se poda entero y solo.
-    const wholeBigTick = previous + 1 === big[0]!.serial && through === big.at(-1)!.serial;
-    assert.ok(through - previous <= 100 || wholeBigTick, `guardado ${saves}: ${previous} → ${through}`);
-    if (through - previous > 100) sawBigTick = true;
+    assert.ok(through - previous <= 60, `guardado ${saves}: ${previous} → ${through}`);
     // Tick completo: el siguiente recibo retenido ya es de otro tick.
     const next = store.db.prepare('SELECT tick FROM technology_executions ORDER BY serial LIMIT 1').get() as { tick: number };
     assert.notEqual(next.tick, ticks.get(through));
@@ -155,9 +169,34 @@ test('un archivo que ya existía se poda poco a poco: tope por guardado, ticks c
     if (saves === 3) assert.deepEqual(store.load()!.world, world, 'a mitad de la migración la carga verifica');
   }
   assert.ok(saves > 5, 'la migración tiene que repartirse en varios guardados');
-  assert.ok(sawBigTick, 'el tick mayor que el tope se podó entero');
   // Converge al primer recibo del anillo: lo que el anillo residente compara con el archivo nunca se poda.
   assert.ok(previous < ringSerial && previous >= ringSerial - 25, `frontera ${previous}, anillo desde ${ringSerial}`);
+  assert.deepEqual(store.load()!.world, world);
+});
+
+test('un tick con más recibos que el tope se poda entero y solo: no se parte ni atasca la poda', t => {
+  const dir = directory(t), store = open(t, join(dir, 'world.sqlite'), { technologyPruneRowsPerSave: 10 });
+  const world = createWorld(51926);
+  store.save(world); makeTool(world); store.save(world);
+  fixtureTick(world, world.tick + 10); const oversized = useMany(world, 25); store.save(world);
+  for (let n = 0; n < 60; n++) { fixtureTick(world, world.tick + 10); useMany(world, 5); store.save(world); }
+  setParams(world, parseParams('persistencia.ventanaEventosTicks=2400'));
+  fixtureTick(world, world.tick + 3000); store.save(world);
+  const first = pruneRecord(store)!;
+  assert.ok(first.through < oversized[0]!.serial, 'el prefijo anterior se poda con el tope');
+  const oversizedTick = oversized[0]!.tick;
+  let boundary = first;
+  for (let n = 0; n < 20 && boundary.tick < oversizedTick; n++) {
+    const before = boundary;
+    fixtureTick(world, world.tick + 10); store.save(world);
+    boundary = pruneRecord(store)!;
+    assert.ok(boundary.through > before.through, 'cada guardado avanza la frontera');
+    assert.ok(boundary.through - before.through <= 10 || boundary.tick === oversizedTick,
+      'solo el tick gigante puede rebasar el tope');
+  }
+  assert.ok(boundary.tick >= oversizedTick, 'la poda cruza el tick de 25 recibos');
+  const retained = store.db.prepare('SELECT tick FROM technology_executions WHERE tick=? LIMIT 1').get(oversizedTick);
+  assert.equal(retained, undefined, 'el tick gigante se borró entero');
   assert.deepEqual(store.load()!.world, world);
 });
 
@@ -168,14 +207,27 @@ test('una frontera o cabeza falsificadas, una fila retenida alterada o borrada: 
   assert.ok(!world.technology.history.some(r => r.id === retained.id), 'la fila elegida no está en el anillo');
   const mutations: [string, (db: DatabaseSync) => void, RegExp][] = [
     ['digesto de frontera', db => db.prepare("UPDATE metadata SET value=? WHERE key='technology-pruned-v1'")
-      .run(JSON.stringify({ version: 1, ...boundary, digest: '1'.repeat(64) })), /chain disagrees/],
+      .run(JSON.stringify({ ...boundary, digest: '1'.repeat(64) })), /seal disagrees/],
+    ['tick de frontera', db => db.prepare("UPDATE metadata SET value=? WHERE key='technology-pruned-v1'")
+      .run(JSON.stringify({ ...boundary, tick: boundary.tick - 1 })), /seal disagrees/],
+    ['tick solapado con sello y cabeza recalculados', db => {
+      const first = db.prepare('SELECT tick FROM technology_executions WHERE serial=?').get(boundary.through + 1) as { tick: number };
+      const fields = { ...boundary, tick: first.tick }, seal = technologyPruneSeal(fields);
+      db.prepare("UPDATE metadata SET value=? WHERE key='technology-pruned-v1'").run(JSON.stringify({ ...fields, seal }));
+      const row = db.prepare("SELECT value FROM metadata WHERE key='technology-chain-v1'").get() as { value: string };
+      db.prepare("UPDATE metadata SET value=? WHERE key='technology-chain-v1'").run(JSON.stringify({ ...JSON.parse(row.value), pruneSeal: seal }));
+    }, /tick overlaps the first retained execution/],
+    ['conteo total de frontera', db => db.prepare("UPDATE metadata SET value=? WHERE key='technology-pruned-v1'")
+      .run(JSON.stringify({ ...boundary, count: boundary.count - 1 })), /prune boundary is invalid/],
+    ['conteo por tipo de frontera', db => db.prepare("UPDATE metadata SET value=? WHERE key='technology-pruned-v1'")
+      .run(JSON.stringify({ ...boundary, byKind: { ...boundary.byKind, use: boundary.byKind.use + 1 } })), /prune boundary is invalid/],
     ['frontera adelantada sin borrar', db => db.prepare("UPDATE metadata SET value=? WHERE key='technology-pruned-v1'")
-      .run(JSON.stringify({ version: 1, ...boundary, through: boundary.through + 1, count: boundary.count + 1 })), /still archived/],
+      .run(JSON.stringify({ ...boundary, through: boundary.through + 1, count: boundary.count + 1 })), /prune boundary is invalid|seal disagrees/],
     ['frontera adelantada borrando', db => {
       db.prepare('DELETE FROM technology_executions WHERE serial=?').run(boundary.through + 1);
       db.prepare("UPDATE metadata SET value=? WHERE key='technology-pruned-v1'")
-        .run(JSON.stringify({ version: 1, ...boundary, through: boundary.through + 1, count: boundary.count + 1 }));
-    }, /chain disagrees/],
+        .run(JSON.stringify({ ...boundary, through: boundary.through + 1, count: boundary.count + 1 }));
+    }, /prune boundary is invalid|seal disagrees/],
     ['cabeza ausente', db => db.exec("DELETE FROM metadata WHERE key='technology-chain-v1'"), /no execution chain head/],
     ['fila retenida reescrita con su digesto', db => {
       const row = db.prepare('SELECT body FROM technology_executions WHERE id=?').get(retained.id) as { body: string };
@@ -184,7 +236,7 @@ test('una frontera o cabeza falsificadas, una fila retenida alterada o borrada: 
     }, /chain disagrees/],
     ['fila retenida borrada', db => db.prepare('DELETE FROM technology_executions WHERE id=?').run(retained.id), /has a gap/],
     ['frontera con otra forma', db => db.prepare("UPDATE metadata SET value=? WHERE key='technology-pruned-v1'")
-      .run(JSON.stringify({ version: 1, ...boundary, extra: 1 })), /prune boundary is invalid/],
+      .run(JSON.stringify({ ...boundary, extra: 1 })), /prune boundary is invalid/],
   ];
   for (const [name, mutate, expected] of mutations) {
     const copy = join(dir, `${name.replaceAll(' ', '-')}.sqlite`); store.backup(copy);
@@ -195,6 +247,21 @@ test('una frontera o cabeza falsificadas, una fila retenida alterada o borrada: 
     assert.throws(() => damaged.save(draft), /[Tt]echnology archive/, `${name}: el guardado tampoco lo tapa`);
   }
   assert.deepEqual(store.load()!.world, world, 'el original sigue intacto');
+});
+
+test('una base ya podada con la frontera V1 falla cerrada y explica que necesita recuperación explícita', t => {
+  const { dir, store } = grow(t, { steps: 8 });
+  const boundary = pruneRecord(store)!;
+  const path = join(dir, 'legacy-pruned-v1.sqlite'); store.backup(path);
+  const db = new DatabaseSync(path);
+  try {
+    db.prepare("UPDATE metadata SET value=? WHERE key='technology-pruned-v1'").run(JSON.stringify({
+      version: 1, startsAfter: boundary.startsAfter, through: boundary.through, tick: boundary.tick,
+      digest: boundary.digest, count: boundary.count,
+    }));
+  } finally { db.close(); }
+  const legacy = open(t, path);
+  assert.throws(() => legacy.load(), /legacy prune boundary has no authenticated V2 seal.*Explicit recovery required/);
 });
 
 test('un respaldo profundo viejo frena la poda y previous() lo recupera con el archivo podado', t => {
@@ -253,8 +320,8 @@ test('un archivo sin cabeza (anterior a la retención) se carga y el primer guar
   const legacy = open(t, path), loaded = legacy.load()!.world;
   assert.equal(chainRecord(legacy), null, 'cargar no escribe');
   legacy.save(loaded);
-  assert.deepEqual(chainRecord(legacy), { version: 1, startsAfter: 0, through: loaded.technology.executionCounter,
-    digest: foldRetained(legacy) });
+  assert.deepEqual(chainRecord(legacy), { version: 2, startsAfter: 0, through: loaded.technology.executionCounter,
+    digest: foldRetained(legacy), pruneSeal: null });
   // Cabeza de un binario anterior que siguió guardando sin mantenerla: se comprueba hasta donde llega.
   legacy.db.prepare("UPDATE metadata SET value=? WHERE key='technology-chain-v1'").run(JSON.stringify(early));
   assert.deepEqual(open(t, path).load()!.world, loaded);
@@ -281,7 +348,7 @@ test('el archivo acepta una anidada ausente sólo dentro del prefijo podado que 
   assert.throws(() => archive.pruneExecutions(0, 9, TECHNOLOGY_CHAIN_EMPTY), /gap/);
   const result = archive.pruneExecutions(0, 3, TECHNOLOGY_CHAIN_EMPTY);
   db.exec('COMMIT');
-  assert.equal(result.digest, digests.reduce(technologyChainStep, TECHNOLOGY_CHAIN_EMPTY));
+  assert.equal(result.digest, digests.reduce((head, rowDigest) => technologyChainStep(head, rowDigest, 10), TECHNOLOGY_CHAIN_EMPTY));
   assert.deepEqual({ count: result.count, tick: result.tick }, { count: 3, tick: 10 });
   assert.throws(() => archive.getExecution('process-4'), /missing nested execution/, 'sin frontera declarada es un hueco');
   pruned = 3;

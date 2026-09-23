@@ -51,6 +51,7 @@ const PERSON_HIT = 0.65;
 /** Margen (en tiles) de mar visible alrededor de la isla al encuadrar. */
 const FIT_PADDING = 1.4;
 const FOCUS_MS = 380;
+const REST_VEIL_PHASE = 40;
 const MOISTURE_LAYER_PHASE = 41;
 const FOOD_LAYER_PHASE = 42;
 
@@ -1319,7 +1320,22 @@ export class Landscape {
     // guardado o una vista previa). Sin `regionesVivas` no se vela nada: no se sabe.
     if (this.vivas) {
       for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
-        if (this.tileAt(x, y) && !this.vivas.has(claveRegion(x, y))) px(g, x * ART, y * ART, ART, ART, 'rgba(24,38,32,0.34)');
+        if (!this.tileAt(x, y) || this.vivas.has(claveRegion(x, y))) continue;
+        let edgeDistance = 4;
+        findLive: for (let distance = 1; distance <= 3; distance++) {
+          for (const [dx, dy] of [[0, -distance], [distance, 0], [0, distance], [-distance, 0]] as const) {
+            if (this.vivas.has(claveRegion(x + dx, y + dy))) { edgeDistance = distance; break findLive; }
+          }
+        }
+        const ox = x * ART, oy = y * ART, color = css(P.shadow, .34);
+        if (edgeDistance === 4) { px(g, ox, oy, ART, ART, color); continue; }
+        // Tramado por tesela entera (halftone), igual que la capa de datos:
+        // un `fillRect` por tesela cuya aparición depende de Bayer, con
+        // densidad creciente según la distancia al borde vivo — sin corte
+        // recto de 16 en 16 teselas y sin el costo de tramar por píxel (ver
+        // el mismo razonamiento y medición en `drawLayerCell`).
+        const density = edgeDistance === 1 ? .25 : edgeDistance === 2 ? .5 : .75;
+        if (bayerThreshold(x, y, REST_VEIL_PHASE) < density) px(g, ox, oy, ART, ART, color);
       }
     }
     g.restore();

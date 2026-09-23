@@ -58,6 +58,11 @@ type ClienteWs = {
 export interface FlujoCliente { remotePort: number | null; acuse: boolean; subscribeMs: number; enVuelo: boolean; enviados: number; aplazados: number; acuses: number; ultimoAcuseMs: number | null; bufferedAmount: number }
 /** Un `state` más largo que esto (unidades UTF-16 del JSON) viaja en trozos hacia `/ws?ack=1`. */
 export const TROZO_WS = 64 * 1024;
+/** Trozo cuando se comprime: cada mensaje comprimido cuesta al menos dos idas y vueltas por el hilo
+ * principal (escribir y vaciar el deflate del threadpool), y con el hilo ocupado por pasos seguidos
+ * cada una espera un paso entero. Menos trozos y más grandes: 256 Ki unidades comprimen a ~35 KiB,
+ * que a 0,1 Mbit/s siguen llegando en ~3 s, lejos de los 8 s de silencio del cliente. */
+export const TROZO_WS_COMPRIMIDO = 256 * 1024;
 /** Sin nada que mandar durante este tiempo (y sin `state` en vuelo), el servidor manda un latido.
  * Holgado frente a los 8 s de silencio que tolera `src/client/connection.ts`. */
 export const LATIDO_WS_MS = 3000;
@@ -215,7 +220,9 @@ export function createApp(options: AppOptions) {
   // recibiendo texto plano, como antes.
   const compresion: Compresion = options.perMessageDeflate === undefined ? 'flujo' : options.perMessageDeflate ? 'siempre' : 'nunca';
   const ws = new WebSocketServer({ noServer: true, maxPayload: 4096,
-    perMessageDeflate: compresion === 'nunca' ? false : compresion === 'siempre' ? true : { zlibDeflateOptions: { level: 3 } } });
+    // `chunkSize` 128 KiB: la salida de un trozo (~35 KiB) cabe en un solo viaje al threadpool
+    // (con los 16 KiB por defecto, zlib vuelve al hilo principal por cada 16 KiB de salida).
+    perMessageDeflate: compresion === 'nunca' ? false : compresion === 'siempre' ? true : { zlibDeflateOptions: { level: 3, chunkSize: 128 * 1024 } } });
   const staticDir = resolve(options.staticDir ?? 'dist/client');
   const context = store.context;
   const gobernador = new Gobernador();
@@ -299,10 +306,11 @@ export function createApp(options: AppOptions) {
     if (flujo.enVuelo && !forzar) { flujo.pendiente = true; flujo.aplazados++; return; }
     const text = JSON.stringify({ type: 'state', world } satisfies ServerMessage);
     const compress = compresion !== 'nunca';
-    if (text.length <= TROZO_WS) emitir(socket, text, compress);
+    const trozo = compress ? TROZO_WS_COMPRIMIDO : TROZO_WS;
+    if (text.length <= trozo) emitir(socket, text, compress);
     else {
       // Todos los trozos se encolan en este mismo turno: ningún otro mensaje puede colarse entre ellos.
-      const partes = trocear(text);
+      const partes = trocear(text, trozo);
       emitir(socket, JSON.stringify({ type: 'trozos', partes: partes.length } satisfies ServerMessage), false);
       for (const parte of partes) emitir(socket, parte, compress);
     }

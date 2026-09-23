@@ -29,7 +29,7 @@ import { gunzipSync } from 'node:zlib';
 import { once } from 'node:events';
 import { WebSocket } from 'ws';
 import { Store } from '../src/server/store.js';
-import { createApp, solicitudWs, trocear, TROZO_WS, LATIDO_WS_MS } from '../src/server/app.js';
+import { createApp, solicitudWs, trocear, TROZO_WS, TROZO_WS_COMPRIMIDO, LATIDO_WS_MS } from '../src/server/app.js';
 import { Connection, type ConnectionStatus } from '../src/client/connection.js';
 import type { ServerMessage, WorldView } from '../src/shared/types.js';
 import { Enlace } from '../scripts/ws-wan/enlace.js';
@@ -133,8 +133,8 @@ test('el cliente anterior (/ws, sin acuse) conserva su cadencia y recibe texto p
   assert.ok(cable.nuevo * 3 < texto(nuevo.states()), `con acuse: ${cable.nuevo} B en cable para ${texto(nuevo.states())} B de JSON`);
 });
 
-test('un state grande viaja en trozos consecutivos que reconstruyen su JSON exacto', async t => {
-  const f = await fixture(t);
+for (const [modo, perMessageDeflate, trozo] of [['comprimido', undefined, TROZO_WS_COMPRIMIDO], ['en claro', false, TROZO_WS]] as const) test(`un state grande viaja en trozos consecutivos que reconstruyen su JSON exacto (${modo})`, async t => {
+  const f = await fixture(t, { perMessageDeflate });
   const c = abrir(f, '/ws?ack=1&x=-40&y=-30&width=96&height=64');
   t.after(() => c.socket.terminate());
   await c.esperar(() => c.states().length === 1, 10_000, 'estado inicial grande');
@@ -143,7 +143,9 @@ test('un state grande viaja en trozos consecutivos que reconstruyen su JSON exac
   const partes = cabecera.type === 'trozos' ? cabecera.partes : 0;
   assert.ok(partes > 1);
   assert.equal(c.marcos.length, 1 + partes, 'nada se cuela entre la cabecera y sus trozos');
-  assert.ok(c.marcos.slice(1).every(m => m.length <= TROZO_WS));
+  assert.ok(c.marcos.slice(1).every(m => m.length <= trozo));
+  const minimo = Math.ceil(c.marcos.slice(1).join('').length / trozo);
+  assert.ok(partes >= minimo && partes <= minimo + 1, `trozos llenos: ${partes} para ${minimo} como mínimo`);
   const world = c.states()[0]!;
   assert.equal(world.originX, -40); assert.equal(world.originY, -30); assert.equal(world.width, 96); assert.equal(world.height, 64);
   assert.equal(c.marcos.slice(1).join(''), JSON.stringify({ type: 'state', world }), 'el JSON reconstruido es el mismo, byte a byte');

@@ -1398,22 +1398,35 @@ export function cloneWorld(world: World, context: WorldContext = worldContext(wo
  * primitivas, que es todo lo que un mundo serializable contiene. `structuredClone` resuelve
  * además ciclos, `Map`, `Set`, binarios y transferencias que aquí no existen, y ese recorrido
  * genérico es el que se paga en cada paso. Un prototipo que no sea el de `Object` se rechaza
- * en vez de copiarse mal en silencio. */
-function copiaProfunda(value: unknown): unknown {
+ * en vez de copiarse mal en silencio.
+ *
+ * `copias` conserva la identidad compartida, como `cloneState`: entre guardados, un mismo objeto
+ * vive en el estado y en la cola que el Store confirmará (`technology.history` y
+ * `technology.journal.pending`, `technology.recipes` y `technology.catalogue.pending`, `events` y
+ * `chronicleJournal.pending`), y las leyes escriben por un solo camino contando con que el otro lo
+ * ve: `recordTechnologyBenefit` pone el beneficio en la ejecución pendiente y
+ * `updateTechnologyRecipeStats` las estadísticas en la receta pendiente. Una copia sin identidad
+ * dejaba, tras deshacer, dos objetos distintos donde había uno, y el primer beneficio o estadística
+ * posterior separaba el estado residente de lo que se archiva. */
+function copiaProfunda(value: object, copias: Map<object, unknown>): unknown {
+  const previa = copias.get(value);
+  if (previa !== undefined) return previa;
   if (Array.isArray(value)) {
     const length = value.length, copy: unknown[] = new Array(length);
+    copias.set(value, copy);
     for (let index = 0; index < length; index++) {
-      const item = value[index];
-      copy[index] = item === null || typeof item !== 'object' ? item : copiaProfunda(item);
+      const item: unknown = value[index];
+      copy[index] = item === null || typeof item !== 'object' ? item : copiaProfunda(item, copias);
     }
     return copy;
   }
-  const prototype = Object.getPrototypeOf(value as object);
+  const prototype = Object.getPrototypeOf(value);
   if (prototype !== Object.prototype && prototype !== null) throw new TypeError('Estado del mundo con prototipo no copiable en el punto de restauración.');
   const source = value as Record<string, unknown>, copy: Record<string, unknown> = {};
+  copias.set(value, copy);
   for (const key in source) {
     const item = source[key];
-    copy[key] = item === null || typeof item !== 'object' ? item : copiaProfunda(item);
+    copy[key] = item === null || typeof item !== 'object' ? item : copiaProfunda(item, copias);
   }
   return copy;
 }
@@ -1443,17 +1456,19 @@ export interface PuntoDeRestauracion {
  *   leyes (T103), y `maintainRegions` solo **añade** chunks nuevos; ningún chunk dormido del punto
  *   se muta durante el paso.
  * · **el resto**: copia profunda especializada; el estado del mundo es serializable por contrato
- *   (lo exige la instantánea durable), de modo que objetos llanos y arrays lo cubren entero.
+ *   (lo exige la instantánea durable), de modo que objetos llanos y arrays lo cubren entero. La
+ *   copia conserva la identidad compartida entre campos, igual que `cloneWorld` (ver `copiaProfunda`).
  *
  * Tomar el punto deja además el mundo listo para simular: recibe las teselas nuevas y el punto se
  * queda con las confirmadas. El punto no lee el reloj ni el hardware: su contenido depende solo
  * del mundo recibido. */
 export function puntoDeRestauracion(world: World): PuntoDeRestauracion {
-  const campos: Record<string, unknown> = {};
+  // Un solo mapa para todos los campos: la identidad compartida cruza de un campo a otro.
+  const campos: Record<string, unknown> = {}, copias = new Map<object, unknown>();
   for (const key in world) {
     if (key === 'tiles' || key === 'retiredChunks') continue;
     const value = (world as unknown as Record<string, unknown>)[key];
-    campos[key] = value === null || typeof value !== 'object' ? value : copiaProfunda(value);
+    campos[key] = value === null || typeof value !== 'object' ? value : copiaProfunda(value, copias);
   }
   const tiles = world.tiles;
   world.tiles = tiles.map(tile => ({ ...tile }));

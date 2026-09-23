@@ -274,6 +274,11 @@ export function createApp(options: AppOptions) {
         runtime.saveMs = monotonicNow() - saveStarted;
       }
       world = draft;
+      // Desde aquí el paso es el mundo vigente (y, si tocaba guardar, ya es durable): un fallo en lo
+      // que queda (gobernador, métricas, difusión) pausa el mundo pero no puede deshacerlo, igual que
+      // con el clon, donde `world` ya es el borrador. Sin esto la memoria volvería a un tick que el
+      // disco ya dejó atrás y los gestos resueltos en este paso quedarían fuera del mundo en memoria.
+      punto = null;
       runtime.stepMs = monotonicNow() - stepStarted;
       runtime.p95StepMs = gobernador.registrar(runtime.stepMs);
       // El gobernador decide sobre el mundo ya vigente: la próxima `reproduce()` lo lee.
@@ -293,9 +298,9 @@ export function createApp(options: AppOptions) {
       runtime.fases = fases;
       runtime.fraccionSerial = fraccionSerial(fases);
     } catch (error) {
-      // T104: deshacer va PRIMERO, y vale para las dos salidas. Sin clon, llegar aquí significa
-      // que el mundo vigente está a medio paso; un mundo que no se pudo deshacer ya no puede
-      // seguir avanzando aunque el error fuera recuperable.
+      // T104: deshacer va PRIMERO, y vale para las dos salidas. Sin clon, llegar aquí con punto
+      // significa que el mundo vigente está a medio paso; un mundo que no se pudo deshacer ya no
+      // puede seguir avanzando aunque el error fuera recuperable.
       let restaurado = true;
       if (punto) { try { punto.restaurar(); } catch { restaurado = false; } }
       if (restaurado && error instanceof SessionRevoked) {

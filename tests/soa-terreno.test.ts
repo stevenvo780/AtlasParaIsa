@@ -89,6 +89,20 @@ test('los vecinos por aritmética coinciden uno a uno con buildTopology en un co
   }
 });
 
+test('la versión Uint32 del conjunto activo da la vuelta sin resucitar celdas ni perder vecinos', () => {
+  const store = new TileStore(), tiles = sparse(), partial = tiles.filter((_, i) => i % 3 !== 0);
+  assert.ok(store.loadLife(tiles));
+  (store as unknown as { presence: { version: number } }).presence.version = 0xfffffffe;
+  for (const set of [tiles, partial, tiles, partial]) {
+    assert.ok(store.loadLife(set));
+    const topology = buildTopology(set), tileOf = new Map<number, number>(), out = new Int32Array(8);
+    for (let i = 0; i < set.length; i++) tileOf.set(store.cells[i]!, i);
+    for (let i = 0; i < set.length; i++)
+      assert.deepStrictEqual([...store.neighbors(store.cells[i]!, out)].map(c => c < 0 ? -1 : tileOf.get(c)!), [...topology.neighbors.subarray(i * 8, i * 8 + 8)]);
+  }
+  assert.ok(store.version > 0 && store.version < 4, `versión tras la vuelta: ${store.version}`);
+});
+
 test('la máscara de presencia existe por esto: sin ella una celda ausente aparece como vecina viva', () => {
   const full = chunk(7, 3, -2).map(tile => ({ ...tile, life: 1 }));
   const store = new TileStore();

@@ -8,7 +8,7 @@ import type { AnimalView, StructureView } from '../shared/life.js';
 import { projectAnimal } from './animals.js';
 import type { LegacyRecord } from '../shared/demography.js';
 import { bindTechnologyCatalogue, type TechnologyCatalogueReader } from './technology-catalogue.js';
-import { lastTileAt } from './tile-index.js';
+import { lastTileAt, splitTileBlocks, tileIndexAppended } from './tile-index.js';
 
 export interface WorldContext {
   loadChunk?: (key: string, atTick: number) => Chunk | null;
@@ -26,7 +26,8 @@ export function worldContext(world: World): WorldContext { return contexts.get(w
 export type ChunkMeta = Omit<Chunk, 'tiles' | 'animals' | 'structures'>;
 export const validCoordinate = (n: unknown): n is number => typeof n === 'number' && Number.isSafeInteger(n) && n >= -MAX_COORDINATE && n < MAX_COORDINATE;
 /** Índice compartido con la fauna (tile-index.ts): misma respuesta que el `Map` de claves
- * `"x,y"` que se construía aquí, sin crear una cadena por consulta. */
+ * `"x,y"` que se construía aquí, sin crear una cadena por consulta; en un mundo real, aritmética
+ * de chunk + posición dentro del chunk (T113). */
 export function tileAt(world: World, p: { x: number; y: number }): Tile | undefined {
   return lastTileAt(world.tiles, p.x, p.y);
 }
@@ -47,7 +48,9 @@ export function activate(world: World, x: number, y: number, context: WorldConte
   const { tiles, animals, structures, ...meta } = chunk;
   world.chunks[key] = meta;
   const initialized=tiles.map(tile => initializeEcosystem(world.seed, tile, cuencas));
+  const from = world.tiles.length;
   world.tiles.push(...initialized);
+  tileIndexAppended(world.tiles, from);
   world.animals.push(...(animals ?? materializeAnimals(world.seed, initialized, world.tick)));
   world.structures.push(...(structures ?? legacyStructures(tiles, world.tick)));
   for (const place of meta.places) if (!world.places.some(p => p.id === place.id)) world.places.push(place);
@@ -71,13 +74,17 @@ export function maintainRegions(world: World, context: WorldContext = worldConte
     delete world.chunks[key]; retired.add(key);
   }
   if (retired.size) {
-    const active: Tile[] = [];
-    for (const tile of world.tiles) {
-      const chunk = detached.get(chunkKey(tile.x, tile.y));
-      if (chunk) chunk.tiles.push(tile); else active.push(tile);
+    const byBlock = splitTileBlocks(world.tiles, first => detached.get(chunkKey(first.x, first.y))?.tiles);
+    if (byBlock) world.tiles = byBlock;
+    else {
+      const active: Tile[] = [];
+      for (const tile of world.tiles) {
+        const chunk = detached.get(chunkKey(tile.x, tile.y));
+        if (chunk) chunk.tiles.push(tile); else active.push(tile);
+      }
+      world.tiles = active;
     }
     for (const place of world.places) detached.get(chunkKey(place.x, place.y))?.places.push(place);
-    world.tiles = active;
     world.animals = world.animals.filter(animal => {
       const chunk = detached.get(chunkKey(animal.x, animal.y));
       if (chunk) chunk.animals!.push(animal);

@@ -29,7 +29,7 @@ Adendas 1 y 2 del día 60; y `/datos/tmp-atlas-lab/datos-lab/bitacora.md`.
 |---|---|---|
 | (1) Mayoría de C1–C8 en el laboratorio | no cumple | C1–C7 llega a 8/12 en el mejor brazo (B); C8 solo en 1 de ~17 réplicas supervivientes distintas evaluadas a 60 días (H1B-606) |
 | (2) El mundo publicado corre esas reglas y se ve vivo | parcial | el público corre A (reglas 10), sin la ley de conflicto de B (31 conflictos en 162 días); vivo, con 710 habitantes hacia el día ~167; nadie mide su C8 |
-| (3) EVIDENCIA lo cuenta con cifras | parcial | esta sección corrige la tabla de la mañana (C8 v2); quedan T141–T143 sin marcar en `tasks.md` y otras contradicciones documentales |
+| (3) EVIDENCIA lo cuenta con cifras | parcial | esta sección corrige la tabla de la mañana (C8 v2); CLAUDE, ESTADO, PLAN y `tasks.md` corregidos en `ccbad49`; faltan las cifras del diagnóstico en condición pública y de la publicación de reglas 11 |
 
 ### 2. C8 v3 y C1–C7 por brazo, 60 días (techo de laboratorio 100)
 
@@ -78,7 +78,7 @@ generaciones.
 ### 5. Mundo público (V10, portátil)
 
 Hacia el día ~167, el mundo público (código `b5def74`) tiene 710 habitantes y 1 957 nacimientos
-acumulados (`f0-inventario.json`, sobre el estado publicado). En el corte de ~162,6 días (686–687
+acumulados (consulta de solo lectura al estado publicado, 23-09 17:22, paso 400 300). En el corte de ~162,6 días (686–687
 habitantes) se contaron 1 121 muertes: 83,5 % por senescencia, 12,5 % por exposición, 4 % por sed y 0 %
 por hambre; cooperación acumulada 59 888 (enseñanza 45 776, trueque 8 179, ayuda en obras 5 831, cultivo
 3 351); y 31 conflictos en 162 días. Los nacimientos son exactamente 40,0 al día (1 696 → 1 791 en 2,375
@@ -117,8 +117,8 @@ Estado de los 14 frentes (`f0-inventario.json`):
 | 10. Nuevas versiones de pruebas | parcial | V7 congelada e intacta; V10 arrancó en directorio separado |
 | 11. Interfaz y experiencia visual | parcial | cliente de 150 KB JS y 76 KB CSS; sin cifras actuales de telemetría de interfaz |
 | 12. Rendimiento y hardware | parcial | PERF2 ×1,37, PERF3, ~1,9 → ~3,9 pasos/s; sigue en un solo hilo |
-| 13. Neuroevolución posterior a la afinación | parcial | brazo B con C8 v3 en 0/12; el evaluador de `main` sigue en v2 |
-| 14. Calidad y continuidad del trabajo | parcial | T141–T143 fusionadas en `main` pero sin marcar en `tasks.md` |
+| 13. Neuroevolución posterior a la afinación | sin empezar | posterior por diseño: exige antes afinar supervivencia y C8 |
+| 14. Calidad y continuidad del trabajo | parcial | preregistros antes de cada brazo; documentación corregida (`ccbad49`); ramas 165 → 11 y worktrees 69 → 7 (cerradas archivadas como etiquetas `archivo/*`) |
 
 ### 8. Pendiente (no acreditado)
 

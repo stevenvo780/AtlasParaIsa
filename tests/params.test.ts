@@ -109,9 +109,12 @@ test('setParams/paramsOf: identidad por mundo, no compartida entre mundos', () =
   assert.strictEqual(paramsOf(b), DEFAULT_PARAMS);
 });
 
-test('control: 200 stepWorld con y sin params explícitos (DEFAULT_PARAMS) da el mismo JSON', () => {
+test('control: 200 stepWorld con y sin params explícitos (una copia de DEFAULT_PARAMS) da el mismo JSON', () => {
+  // `parseParams('')` devuelve una copia estructural: compara dos objetos distintos, no la misma
+  // referencia, así que refuta cualquier dependencia de la identidad de DEFAULT_PARAMS.
   const implicit = createWorld(4821);
-  const explicit = createWorld(4821, DEFAULT_PARAMS);
+  const explicit = createWorld(4821, parseParams(''));
+  assert.notStrictEqual(paramsOf(explicit), DEFAULT_PARAMS);
   for (let n = 0; n < 200; n++) { stepWorld(implicit); stepWorld(explicit); }
   assert.equal(JSON.stringify(implicit), JSON.stringify(explicit));
 });

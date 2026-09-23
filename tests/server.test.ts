@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createServer } from 'node:net';
+import { freePort } from './lib/net.js';
 import { spawn, spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { once } from 'node:events';
@@ -35,11 +35,6 @@ function stateFrom(socket: WebSocket, tick: number): Promise<WorldView> {
   });
 }
 const gesture: Gesture = { id: 'test-plant-0001', kind: 'plant', x: 20, y: 14 };
-async function freePort() {
-  const probe = createServer(); probe.listen(0, '127.0.0.1'); await once(probe, 'listening');
-  const port = (probe.address() as {port:number}).port;
-  await new Promise<void>(resolve => probe.close(() => resolve())); return port;
-}
 async function fixture(t: { after: (f: () => unknown) => void }, manual = false) {
   const dir = mkdtempSync(join(tmpdir(), 'carta-test-'));
   const store = new Store(join(dir, 'world.sqlite'));

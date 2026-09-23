@@ -13,28 +13,12 @@ function run(world: ReturnType<typeof createWorld>, ticks: number): void {
   for (let n = 0; n < ticks; n++) stepWorld(world);
 }
 
-// Hash del estado de AGUA (solo x, y, feature, drinkingWater redondeado — no el JSON completo del
-// mundo) del mundo semilla 4821 tras 1 día (TICKS_PER_DAY) con `agua.cuencas=1` EXPLÍCITO. Acotado
-// al subsistema de agua a propósito (T035 ronda de arreglo, hallazgo importante: el control
-// original hasheaba `JSON.stringify(world)` completo — 6 004 820 caracteres — y se rompía con
-// cualquier cambio legítimo del motor ajeno a T035, además de depender del valor de
-// `DEFAULT_PARAMS.agua.cuencas`, que otras tareas del sprint recalibran). Con `cuencas=1` el ruido
-// nunca cruza el umbral (test "ruidoCuenca... cae en [0,1)" de abajo): esto debe ser un no-op.
-// RE-LÍNEA BASE 2026-09-19 (integración de los 20 workstreams T010–T036 + la calibración ab4d9fb):
-// el valor anterior (`ffa5012d…`) se midió en la rama de T035 aislada. Tras 1 día de simulación el
-// agua depende también de a dónde caminan y beben los habitantes, así que la ley de senescencia, la
-// varianza de fundadores y las capacidades de bioma lo mueven aunque `cuencas=1` siga siendo un no-op
-// del generador (lo prueban, sin hash, las pruebas «conserva toda el agua potable de origen» y
-// «`agua.cuencas` del MUNDO llega a createWorld→activate» de este mismo fichero). A partir de aquí
-// vuelve a ser un detector de deriva: si cambia, algo tocó el agua o el motor.
-// 2026-09-22: baseline changed deliberately by founder expression, local teaching,
-// viable family intent and paid water recovery; see docs/REVISION-2026-09-22.md.
-// Generator and isolated water controls below retain their original assertions.
-// V8: paid family provisioning changes routes/consumption. V7's historical digest
-// remains recorded in docs/REVISION-FAMILIA-V8-2026-09-22.md; no water law changes.
-// Reglas 10, etapa 1 (2026-09-22): el detector mide el mundo de ANTES, así que parte de
-// `HISTORICAL_PARAMS` explícitos; con los defaults nuevos (cortejo, habituación…) la gente camina y
-// bebe en otros sitios y el hash cambiaría sin que ninguna ley del agua lo hiciera.
+// Detector de deriva del agua: hash del estado de agua (x, y, feature y drinkingWater a 6 decimales, no
+// el mundo entero) de la semilla 4821 tras 1 día con `agua.cuencas=1` explícito sobre `HISTORICAL_PARAMS`.
+// Con cuencas=1 el ruido nunca cruza el umbral y el generador no filtra agua; el hash cambia igualmente
+// si cambia a dónde caminan y beben los habitantes. Se actualiza solo en el commit que cambie a
+// propósito una ley del agua o del movimiento, citando su evidencia (el historial está en git log y
+// en docs/REVISION-*). Los controles del generador y del agua aislada de abajo no dependen de él.
 const HASH_AGUA_MUNDO_4821_DIA1_CUENCAS1 = 'ad4b5dd88eba765a3df24ccb96296ddfcc740312f4f4842f51c2ba25a4c5270b';
 
 test('T035 control: agua.cuencas=1 EXPLÍCITO (no el default global) deja el agua/feature de las teselas bit a bit igual a hoy tras 1 día', () => {

@@ -52,6 +52,9 @@ const STUB_RESUMEN_FALLA = "throw new Error('resumen.ts (stub): simulo un fallo 
  * escribe su pid en `pidFile` antes de quedarse vivo. Modela el árbol real npx→tsx→node de forma
  * determinista (sin depender de cómo reenvíe señales la versión de npm/tsx instalada) para probar
  * que el SIGKILL de gracia de barrido.ts mata el GRUPO completo, no solo a su hijo directo. */
+/** --timeout de las dos pruebas del nieto huérfano: las dos esperan el plazo entero. */
+const TIMEOUT_NIETO_S = 8;
+
 function writeOrphanGuardStub(dir: string, pidFile: string): string {
   const grandchildPath = join(dir, 'nieto.cjs');
   writeFileSync(
@@ -272,7 +275,9 @@ test('barrido: una réplica que supera --timeout mata TODO el árbol de procesos
   const replicaStub = writeOrphanGuardStub(stubDir, pidFile);
   try {
     const outcome = runBarrido(
-      ['--replicas', '1', '--dias', '1', '--concurrencia', '1', '--timeout', '2', '--seed-base', '900', '--salida', salida],
+      // El plazo tiene que cubrir el arranque de npx + tsx del stub y de su nieto: con 2 s, bajo carga,
+      // el barrido mataba la réplica antes de que el nieto escribiera su pid.
+      ['--replicas', '1', '--dias', '1', '--concurrencia', '1', '--timeout', String(TIMEOUT_NIETO_S), '--seed-base', '900', '--salida', salida],
       { CARTA_REPLICA_SCRIPT: replicaStub },
     );
     assert.notEqual(outcome.status, 0, 'el barrido refleja en su código de salida que hubo una réplica abortada');
@@ -290,7 +295,7 @@ test('barrido: una réplica que supera --timeout mata TODO el árbol de procesos
 
     // Hallazgo 4 (revisión T017): el SIGKILL de gracia llega a TODO el grupo, no solo al hijo
     // directo; el nieto no debe quedar huérfano vivo.
-    assert.ok(existsSync(pidFile), 'el nieto llegó a arrancar y escribir su pid (si esto falla de forma intermitente, subir --timeout)');
+    assert.ok(existsSync(pidFile), `el nieto no escribió su pid en ${TIMEOUT_NIETO_S} s de --timeout`);
     const nietoPid = Number(readFileSync(pidFile, 'utf8').trim());
     const vivo = (): boolean => { try { process.kill(nietoPid, 0); return true; } catch { return false; } };
     const desde = Date.now();
@@ -315,7 +320,7 @@ test('barrido: el padre termina con SIGTERM pero la gracia mata al nieto que lo 
     "child.once('error', () => process.exit(1)); child.once('exit', code => process.exit(code ?? 1));\n", { mode: 0o700 });
   try {
     const outcome = runBarrido(
-      ['--replicas', '1', '--dias', '1', '--concurrencia', '1', '--timeout', '2', '--seed-base', '901', '--salida', salida],
+      ['--replicas', '1', '--dias', '1', '--concurrencia', '1', '--timeout', String(TIMEOUT_NIETO_S), '--seed-base', '901', '--salida', salida],
       { CARTA_REPLICA_SCRIPT: replicaStub, CARTA_RESUMEN_SCRIPT: resumenStub, PATH: `${stubDir}:${process.env.PATH ?? ''}` },
     );
     assert.notEqual(outcome.status, 0, 'el padre saliendo 0 no convierte una réplica abortada en éxito');

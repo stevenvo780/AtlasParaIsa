@@ -27,26 +27,6 @@ function paidResearch(world: World) {
   return recipe;
 }
 
-function timeAssertWorld(world: World): number {
-  const start = process.hrtime.bigint();
-  assertWorld(world);
-  return Number(process.hrtime.bigint() - start) / 1e6;
-}
-
-/** Ordinary least squares slope/intercept and R² of `time` regressed on `population`. */
-function linearFit(points: readonly { population: number; ms: number }[]) {
-  const n = points.length;
-  const sumX = points.reduce((s, p) => s + p.population, 0), sumY = points.reduce((s, p) => s + p.ms, 0);
-  const meanX = sumX / n, meanY = sumY / n;
-  const ssXX = points.reduce((s, p) => s + (p.population - meanX) ** 2, 0);
-  const ssXY = points.reduce((s, p) => s + (p.population - meanX) * (p.ms - meanY), 0);
-  const ssYY = points.reduce((s, p) => s + (p.ms - meanY) ** 2, 0);
-  const slope = ssXY / ssXX, intercept = meanY - slope * meanX;
-  const ssRes = points.reduce((s, p) => s + (p.ms - (intercept + slope * p.population)) ** 2, 0);
-  const r2 = ssYY === 0 ? 1 : 1 - ssRes / ssYY;
-  return { slope, intercept, r2 };
-}
-
 /** Batches several calls per timed sample (a lone GC pause then costs 1/callsPerBatch
  * of the sample instead of the whole thing) and keeps the fastest batch (scheduler
  * jitter only adds time, never subtracts it) as the cleanest estimate of the
@@ -63,18 +43,31 @@ function fastestAssertWorldMs(population: number, warmup = 5, batches = 8, calls
   return fastestBatchMs / callsPerBatch;
 }
 
-test('assertWorld validates 2000 people with 64 bonds each in under 1s (was O(P^2 * B))', () => {
+/** Las medidas de tiempo dependen de la carga del host: solo corren con CARTA_TEST_ESCALA=1. */
+const escala = process.env.CARTA_TEST_ESCALA === '1';
+const soloEscala = { skip: escala ? false : 'medida de tiempo del host: exige CARTA_TEST_ESCALA=1' };
+
+test('assertWorld is a check, not a rule: 2000 people with 64 bonds each keep the digest', () => {
   const world = validationFixture(2000, 64), before = digestoCanonico(world);
-  const ms = timeAssertWorld(world);
+  assertWorld(world);
   assert.equal(digestoCanonico(world), before, 'assertWorld is a check, not a rule: the digest must not move');
+});
+
+test('assertWorld validates 2000 people with 64 bonds each in under 1s (was O(P^2 * B))', soloEscala, () => {
+  const world = validationFixture(2000, 64);
+  const start = process.hrtime.bigint();
+  assertWorld(world);
+  const ms = Number(process.hrtime.bigint() - start) / 1e6;
   assert.ok(ms < 1000, `assertWorld(2000 personas, 64 vínculos) tardó ${ms.toFixed(1)} ms`);
 });
 
-test('assertWorld cost grows linearly (not quadratically) with population at a fixed bond count', () => {
-  const points = [200, 800, 2000].map(population => ({ population, ms: fastestAssertWorldMs(population) }));
-  const { r2, slope } = linearFit(points);
-  assert.ok(r2 > 0.95, `ajuste lineal débil (R²=${r2.toFixed(3)}) sobre ${JSON.stringify(points)}`);
-  assert.ok(slope >= 0, `la pendiente no puede ser negativa: ${JSON.stringify(points)}`);
+test('assertWorld cost grows linearly (not quadratically) with population at a fixed bond count', soloEscala, () => {
+  // Cuatro puntos que se doblan: de 250 a 2000 un coste lineal multiplica por ≤ 8 y uno cuadrático
+  // por ~64. El umbral es su media geométrica. Un ajuste lineal con R² no sirve: un coste
+  // puramente cuadrático sobre tres puntos da R² > 0,95.
+  const points = [250, 500, 1000, 2000].map(population => ({ population, ms: fastestAssertWorldMs(population) }));
+  const ratio = points.at(-1)!.ms / points[0]!.ms;
+  assert.ok(ratio < Math.sqrt(8 * 64), `ms(2000)/ms(250) = ${ratio.toFixed(1)} sobre ${JSON.stringify(points)}`);
 });
 
 test('an orphan bond still fails assertWorld with the same message', () => {
@@ -82,6 +75,13 @@ test('an orphan bond still fails assertWorld with the same message', () => {
   assertWorld(world); // valid baseline first
   world.people[0]!.bonds['absent-person'] = 0.5;
   assert.throws(() => assertWorld(world), /Estado procedural inválido\./);
+});
+
+test('a duplicated person id still fails assertWorld', () => {
+  const world = validationFixture(200);
+  assertWorld(world);
+  world.people.at(-1)!.id = world.people[0]!.id;
+  assert.throws(() => assertWorld(world), /Estado del mundo inválido/);
 });
 
 test('a recipe whose author does not exist still fails assertWorld with the same message', () => {

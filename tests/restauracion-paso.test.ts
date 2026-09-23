@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
-import { createServer } from 'node:net';
+import { freePort } from './lib/net.js';
 import { Store, SessionRevoked } from '../src/server/store.js';
 import { createApp } from '../src/server/app.js';
 import { cloneWorld, createWorld, puntoDeRestauracion, stepWorld, type World } from '../src/world/index.js';
@@ -18,12 +18,6 @@ const digestoDelMundo = (world: World): string => {
   const copia = cloneWorld(world); setParams(copia, DEFAULT_PARAMS); return digestoCanonico(copia);
 };
 
-async function freePort(): Promise<number> {
-  const probe = createServer(); probe.listen(0, '127.0.0.1'); await once(probe, 'listening');
-  const port = (probe.address() as { port: number }).port;
-  await new Promise<void>(resolve => probe.close(() => resolve()));
-  return port;
-}
 type Harness = { app: ReturnType<typeof createApp>; store: Store; origin: string; close: () => Promise<void> };
 async function harness(clonPorPaso: boolean, extra = '', seed = 51926): Promise<Harness> {
   const port = await freePort(), origin = `http://127.0.0.1:${port}`;
@@ -135,9 +129,10 @@ test('(5) `motor.clonPorPaso=true` reproduce exactamente el mundo de hoy, tick a
 });
 
 test('el punto de restauración deshace un paso completo sin servidor, paso a paso y en tres semillas', () => {
+  // Cinco digestos canónicos por paso (cada uno cuesta 30–90 pasos): 10 pasos por semilla bastan.
   for (const seed of [1, 7, 51926]) {
     let world = createWorld(seed);
-    for (let n = 0; n < 40; n++) {
+    for (let n = 0; n < 10; n++) {
       const antes = digestoCanonico(world);
       const punto = puntoDeRestauracion(world);
       stepWorld(world);

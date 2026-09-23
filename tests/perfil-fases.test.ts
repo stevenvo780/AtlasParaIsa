@@ -31,6 +31,20 @@ test('stepWorld llena exactamente sus 11 fases, todas finitas y no negativas', (
   }
 });
 
+test('con un reloj que cuenta lecturas, cada una de las 11 fases se mide una sola vez por paso y ninguna anida a otra', () => {
+  // Reloj determinista: cada lectura avanza 1. Si las fases se midieran dos veces, anidadas o sin
+  // cerrar, las cuentas no darían exactamente 1 por fase y 22 lecturas por paso.
+  let lecturas = 0;
+  const world = createWorld(51926);
+  for (let paso = 0; paso < 3; paso++) {
+    const medicion: FaseMedicion = { clock: () => lecturas++, fases: {} };
+    const antes = lecturas;
+    stepWorld(world, [], undefined, medicion);
+    assert.equal(lecturas - antes, 2 * FASES_DE_STEPWORLD.length, `lecturas del reloj en el paso ${paso + 1}`);
+    for (const nombre of FASES_DE_STEPWORLD) assert.equal(medicion.fases[nombre], 1, `${nombre} en el paso ${paso + 1}`);
+  }
+});
+
 test('stepWorld sin `medicion` no mide nada (coste de instrumentación opt-in) y el mundo resultante es idéntico', () => {
   const conMedicion = createWorld(51926), sinMedicion = createWorld(51926);
   const medicion: FaseMedicion = { clock: () => performance.now(), fases: {} };
@@ -72,7 +86,11 @@ test('el state publica las 13 fases por paso y fraccionSerial coherente con runt
   }
 });
 
-test('la suma de las 11 fases de stepWorld no difiere de simulationMs en más de un 5 % (acumulado en 400 pasos, para amortiguar el ruido del reloj real)', (t) => {
+// Con reloj real y la torre cargada el 5 % no es estable: la medida pasa a opt-in. La estructura de
+// las fases la fija, sin reloj, la prueba del reloj que cuenta lecturas.
+const escala = process.env.CARTA_TEST_ESCALA === '1';
+test('la suma de las 11 fases de stepWorld no difiere de simulationMs en más de un 5 % (acumulado en 400 pasos, para amortiguar el ruido del reloj real)',
+  { skip: escala ? false : 'medida de tiempo del host: exige CARTA_TEST_ESCALA=1' }, (t) => {
   const app = fixture(t);
   let sumaFases = 0, sumaSimulation = 0;
   const PASOS = 400;

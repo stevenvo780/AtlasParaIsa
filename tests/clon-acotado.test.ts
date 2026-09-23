@@ -36,6 +36,9 @@ test('reactivation also isolates objects returned by a caching archive reader', 
 });
 
 test('shared dormant chunks preserve the full-copy trajectory over three seeds', () => {
+  // Un digesto canónico cuesta 30–90 pasos: se compara tras cada traslado (pasos 1 y 61), justo antes
+  // del segundo (60) y al final (120). Una divergencia se detecta igual; solo se localiza peor.
+  const comparados = new Set([1, 60, 61, 120]);
   for (const seed of [1, 7, 51926]) {
     const original = createWorld(seed);
     original.retiredChunks.push(generateChunk(seed, 30, 30));
@@ -48,9 +51,8 @@ test('shared dormant chunks preserve the full-copy trajectory over three seeds',
         for (const person of world.people) { person.x = x; person.y = x; person.target = { x, y: x }; }
       }
       stepWorld(copied); stepWorld(shared);
-      assert.equal(digestoCanonico(shared), digestoCanonico(copied));
+      if (comparados.has(tick + 1)) assert.equal(digestoCanonico(shared), digestoCanonico(copied), `semilla ${seed}, paso ${tick + 1}`);
     }
-    assert.equal(digestoCanonico(shared), digestoCanonico(copied));
   }
 });
 

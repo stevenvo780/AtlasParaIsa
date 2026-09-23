@@ -88,11 +88,12 @@ test('with default parameters the new law reproduces the frozen pre-T013 ecology
   assert.notDeepStrictEqual(scarce.tiles, frozen.tiles);
 });
 
-test('implicit and explicit default resource parameters preserve the complete world bit for bit after two days', () => {
+test('implicit and explicit default resource parameters preserve the complete world bit for bit over 240 steps', () => {
   // Complementa (no sustituye) al oráculo de arriba: allí se refuta la ley de `ecology`, aquí se
   // comprueba que leer los parámetros no desvía el mundo entero, kernel y personas incluidos.
+  // `parseParams('')` es una copia estructural de los defaults, no el mismo objeto.
   const implicit = createWorld(51926), explicit = createWorld(51926, parseParams(''));
-  for (let tick = 0; tick < 2 * TICKS_PER_DAY; tick++) { stepWorld(implicit); stepWorld(explicit); }
+  for (let tick = 0; tick < 240; tick++) { stepWorld(implicit); stepWorld(explicit); }
   assert.deepStrictEqual(implicit, explicit);
 });
 

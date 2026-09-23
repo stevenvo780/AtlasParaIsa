@@ -246,17 +246,20 @@ test('gestures validate land, context and cooldown; invitations never teleport a
   assert.equal(stepWorld(world, [{ id: 'wrong-memory', kind: 'remember', x: 17, y: 13, memoryId: 'missing' }])[0]!.accepted, false);
 });
 
-test('six day/night cycles retain bounded bodies, terrain, history and valid land positions', () => {
+test('a day/night cycle retains bounded bodies, terrain, history and valid land positions', () => {
+  // Un día basta: en la semilla 23 genera ~390 sucesos y llena los anillos de sucesos (120),
+  // experiencias (8) y hábitos (3). El horizonte largo es de `npm run test:soak`.
   const world = createWorld(23);
-  run(world, TICKS_PER_DAY * 6);
+  run(world, TICKS_PER_DAY);
   assertWorld(world);
+  assert.ok(world.eventCounter > MAX_EVENTS, 'the day must overflow the event ring for its bound to mean something');
   assert.ok(world.events.length <= MAX_EVENTS);
   assert.ok(world.people.every(p => p.experiences.length <= MAX_EXPERIENCES && p.habits.length <= 3));
   assert.ok(world.people.every(p => tileAt(world, p)!.terrain !== 'water'));
   const view = projectWorld(world);
   assert.equal(view.sequence, world.tick);
   assert.equal('rng' in view, false);
-  // T134 (FR-017): `people` now follows the camera; after 6 simulated days `world.people[0]` may
+  // T134 (FR-017): `people` now follows the camera; after a simulated day `world.people[0]` may
   // have wandered outside the default viewport, so the wire-omission check needs a camera that
   // guarantees it is in frame (centered on the actor's own position), not the default window.
   const target = world.people[0]!;

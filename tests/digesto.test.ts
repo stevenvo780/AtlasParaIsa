@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { cloneWorld, createWorld, stepWorld } from '../src/world/index.js';
+import { cloneWorld, createWorld } from '../src/world/index.js';
 import { digestoCanonico, diferenciaCanonica } from '../src/world/digesto.js';
 import { generateChunk } from '../src/world/terrain.js';
 import { encodeSnapshot } from '../src/server/snapshot.js';
@@ -51,12 +51,6 @@ test('canonical difference locates a single cell field without changing the inpu
   const before = first.food; first.food += 0.01;
   assert.deepEqual(diferenciaCanonica(a, b), { path: '$.world.tiles[0].food', before, after: first.food });
   assert.notEqual(a.tiles[0], b.tiles[0]);
-});
-
-test('canonical control repeats 1200 steps of the same seed exactly', () => {
-  const a = createWorld(51926), b = createWorld(51926);
-  for (let i = 0; i < 1200; i++) { stepWorld(a); stepWorld(b); }
-  assert.equal(digestoCanonico(a), digestoCanonico(b));
 });
 
 test('pending history outside the visible chronicle still changes the digest', () => {

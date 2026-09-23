@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createServer } from 'node:net';
+import { freePort } from './lib/net.js';
 import { once } from 'node:events';
 import { Store } from '../src/server/store.js';
 import { createApp } from '../src/server/app.js';
@@ -16,11 +16,6 @@ import { createWorld, type World } from '../src/world/index.js';
  * un rescate es literalmente falso: se retrocede y se pierde lo simulado en medio.
  */
 const password = 'synthetic-test-password-only';
-async function freePort() {
-  const probe = createServer(); probe.listen(0, '127.0.0.1'); await once(probe, 'listening');
-  const port = (probe.address() as { port: number }).port;
-  await new Promise<void>(resolve => probe.close(() => resolve())); return port;
-}
 function laboratory(t: { after(callback: () => unknown): void }) {
   const directory = mkdtempSync(join(tmpdir(), 'atlas-rescate-test-'));
   const path = join(directory, 'world.sqlite');

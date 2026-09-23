@@ -22,6 +22,19 @@ const keys = (value: unknown, required: string[], optional: string[] = []): valu
   !!value && typeof value === 'object' && !Array.isArray(value) && required.every(k => Object.hasOwn(value, k))
   && Object.keys(value).every(k => required.includes(k) || optional.includes(k));
 function safe(n: number): number { if (!integer(n)) fail(); return n; }
+/** `host.people.includes(x)` on the decision path (T141 inventory: `technology-water.ts:224,283,298`):
+ * same cache as `technology.ts`, independent here to keep this file's scope self-contained. Keyed by
+ * the array itself and invalidated by length, like `tile-index.ts` and `rejilla.ts`: `host.people`
+ * (`world.people`) only ever gets reassigned to a new array (a death, `filter` in `lineage.ts`) or
+ * grown with `push` (a birth, T141), both of which change the reference or the length, so a stale
+ * entry can never be read. The `Set` holds the SAME references as the array, so `.has(x)` is exactly
+ * `.includes(x)`: both use SameValueZero, which for objects is `===`. */
+const peopleMemberships = new WeakMap<readonly TechnologyActor[], { length: number; members: Set<TechnologyActor> }>();
+function isHostMember(people: readonly TechnologyActor[], actor: TechnologyActor): boolean {
+  let cached = peopleMemberships.get(people);
+  if (!cached || cached.length !== people.length) { cached = { length: people.length, members: new Set(people) }; peopleMemberships.set(people, cached); }
+  return cached.members.has(actor);
+}
 export function emptyWaterLedger(): WaterLedger {
   return { version: 1, policyVersion: 1, filled: 0, consumed: 0, environmentalLoss: 0, work: 0, energy: 0 };
 }
@@ -221,7 +234,7 @@ export function canHandleContainedWater(actor: WaterActor, tick: number): boolea
     && actor.fatigue <= 1 - WATER_WORK_FATIGUE && [actor.hunger, actor.thirst, actor.energy, actor.fatigue].every(n => Number.isFinite(n) && n >= 0 && n <= 1);
 }
 function canHandle(host: TechnologyHost, actor: WaterActor): boolean {
-  return host.people.includes(actor) && canHandleContainedWater(actor, host.tick);
+  return isHostMember(host.people, actor) && canHandleContainedWater(actor, host.tick);
 }
 /** Backend action only: no planner or inventory lookup grants procedural knowledge. */
 export function fillContainedWater(host: TechnologyHost, actor: WaterActor, itemId: string, requestedQuanta = DEFAULT_WATER_POLICY.flowQuantaPerTick): number {
@@ -280,7 +293,7 @@ export function drinkContainedWater(host: TechnologyHost, actor: WaterActor, req
 }
 /** One actual movement can pay this payload cost; an exhausted carrier cannot move it for free. */
 export function payContainedWaterCarry(host: TechnologyHost, actor: WaterActor): boolean {
-  if (!host.people.includes(actor)) return false;
+  if (!isHostMember(host.people, actor)) return false;
   const water = containedWaterQuanta(actor); if (!water) return true;
   if (actor.technology.waterCarryAt === host.tick) return false;
   const energy = water / 1000 * 0.0008, fatigue = water / 1000 * 0.0007;
@@ -295,7 +308,7 @@ export function payContainedWaterCarry(host: TechnologyHost, actor: WaterActor):
 /** A preparatory plan predicts only its owner's bodily demand and observed material retention.
  * No remote source, destination or recipe classification is consulted. */
 export function beginWaterPreparation(host: TechnologyHost, actor: WaterActor, thirstPerTick: number): boolean {
-  if (!host.technology.water || !host.people.includes(actor) || actor.technology.waterPreparation || !preparationReady(actor)
+  if (!host.technology.water || !isHostMember(host.people, actor) || actor.technology.waterPreparation || !preparationReady(actor)
     || !Number.isFinite(thirstPerTick) || thirstPerTick <= 0) return false;
   const source = (host.tiles ? firstTileAt(host.tiles, actor.x, actor.y) : undefined);
   if (!source || (source.drinkingWater ?? 0) * WATER_QUANTA_PER_UNIT < DEFAULT_WATER_POLICY.flowQuantaPerTick) return false;

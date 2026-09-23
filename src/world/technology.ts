@@ -40,6 +40,19 @@ function add(a: Composition, b: Composition): void { for (const m of MATERIALS) 
 function subtract(a: Composition, b: Composition): void { for (const m of MATERIALS) a[m] -= b[m]; }
 const sum = (cs: Composition[]): Composition => { const c = empty(); for (const x of cs) add(c, x); return c; };
 const distance = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(a.x - b.x, a.y - b.y);
+/** `host.people.includes(x)` on the decision path (T141 inventory: `technology.ts:584,605`): a cache
+ * keyed by the array itself, invalidated by length, like `tile-index.ts` and `rejilla.ts`. Exact
+ * because `host.people` (`world.people`) only ever gets reassigned to a new array (a death, `filter`
+ * in `lineage.ts`) or grown with `push` (a birth, T141) — both change the reference or the length, so
+ * a stale entry can never be read. The `Set` holds the SAME references as the array, so `.has(x)` is
+ * exactly `.includes(x)`: `Array.prototype.includes` and `Set.prototype.has` both use SameValueZero,
+ * which for objects is `===`. */
+const peopleMemberships = new WeakMap<readonly TechnologyActor[], { length: number; members: Set<TechnologyActor> }>();
+function isHostMember(people: readonly TechnologyActor[], actor: TechnologyActor): boolean {
+  let cached = peopleMemberships.get(people);
+  if (!cached || cached.length !== people.length) { cached = { length: people.length, members: new Set(people) }; peopleMemberships.set(people, cached); }
+  return cached.members.has(actor);
+}
 export function defaultTechnologyState(): TechnologyState {
   return { version: 1, recipes: [], history: [], historyDropped: 0, recipeCounter: 0, itemCounter: 0, executionCounter: 0,
     ledger: { imported: empty(), estateLoss: empty(), work: 0, energy: 0, fuelMass: 0, attempts: 0, failures: 0, crafted: 0, toolUses: 0, shared: 0, recycled: 0 },
@@ -581,7 +594,7 @@ export function shareTechnology(host: TechnologyHost, teacher: TechnologyActor, 
 /** Move one existing lot; callers settle any agreed raw payment after this atomic check.
  * Raw inventories remain outside the technology ledger until a process consumes them. */
 export function transferTechnologyItem(host: TechnologyHost, from: TechnologyActor, to: TechnologyActor, itemId: string): boolean {
-  if (host.cooperationEnabled === false || from.id === to.id || !host.people.includes(from) || !host.people.includes(to) || distance(from, to) > 2 || to.technology.items.length >= host.technology.budgets.maxItems) return false;
+  if (host.cooperationEnabled === false || from.id === to.id || !isHostMember(host.people, from) || !isHostMember(host.people, to) || distance(from, to) > 2 || to.technology.items.length >= host.technology.budgets.maxItems) return false;
   const index = from.technology.items.findIndex(i => i.id === itemId); if (index < 0) return false;
   const item = from.technology.items[index]!, senderOpening = technologyStock(from), receiverOpening = technologyStock(to);
   const sentWater = item.contents?.water ?? 0;
@@ -602,7 +615,7 @@ export function transferTechnologyItem(host: TechnologyHost, from: TechnologyAct
 export function settleTechnologyEstate(host: TechnologyHost, actor: TechnologyActor, recipients: TechnologyActor[] = []): { transfers: { to: string; items: string[]; mass: number }[]; lost: Composition; executionIds: string[] } {
   delete actor.technology.waterPreparation;
   const result = { transfers: [] as { to: string; items: string[]; mass: number }[], lost: empty(), executionIds: [] as string[] };
-  const nearby = recipients.filter((p, index) => p !== actor && p.id !== actor.id && recipients.indexOf(p) === index && host.people.includes(p) && distance(actor, p) <= 2).sort((a, b) => distance(actor, a) - distance(actor, b) || a.id.localeCompare(b.id));
+  const nearby = recipients.filter((p, index) => p !== actor && p.id !== actor.id && recipients.indexOf(p) === index && isHostMember(host.people, p) && distance(actor, p) <= 2).sort((a, b) => distance(actor, a) - distance(actor, b) || a.id.localeCompare(b.id));
   for (const recipient of nearby) {
     const room = Math.max(0, host.technology.budgets.maxItems - recipient.technology.items.length);
     let free = freeWaterCarryQuanta(host, recipient);

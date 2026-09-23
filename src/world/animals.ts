@@ -180,8 +180,13 @@ function choose(animal: Animal, world: AnimalWorld, state: LocalState): void {
     action = 'flee'; target = escape && safety(escape) > safety(animal) ? escape : animal;
     reason = 'Percibe un depredador cercano y se aleja físicamente de su alcance.';
   } else {
+    // Sprint noche-perf2: «¿alguna celda visible es la del recuerdo?» con un conjunto de las celdas visibles
+    // (las claves `cell` son números enteros o cadenas: `Set.has` y `===` coinciden) en vez de recorrer
+    // lo visible por cada recuerdo.
+    let visibleCells: Set<Cell> | undefined;
     const resources = [...visible.map(t => ({ x: t.x, y: t.y, food: t.growth ?? t.vegetation, water: waterAt(animal, t) })),
-      ...animal.memory.filter(m => world.tick - m.tick <= MEMORY_TTL && state.tile(m.x, m.y) !== undefined && !visible.some(t => cell(t) === cell(m)))];
+      ...animal.memory.filter(m => world.tick - m.tick <= MEMORY_TTL && state.tile(m.x, m.y) !== undefined
+        && !(visibleCells ??= new Set(visible.map(cell))).has(cell(m)))];
     const water = primero(resources, (a, b) => distance(a, animal) - distance(b, animal) || b.water - a.water || a.y - b.y || a.x - b.x, t => t.water > 0.001);
     const food = primero(resources, (a, b) => distance(a, animal) - distance(b, animal) || b.food - a.food || a.y - b.y || a.x - b.x, t => t.food > 0.001);
     const prey = near.filter(a => edible(animal, a)).sort((a, b) => distance(a, animal) - distance(b, animal) || canonical(a, b))[0];
@@ -190,9 +195,16 @@ function choose(animal: Animal, world: AnimalWorld, state: LocalState): void {
     else if (animal.hunger > 0.38 && animal.genes.carnivory < 0.6 && food) { action = 'graze'; target = food; reason = 'El hambre orienta su camino hacia crecimiento vegetal finito.'; }
     else if (animal.energy < 0.4 || animal.fatigue > 0.55) { action = 'rest'; reason = 'El agotamiento requiere una pausa; descansar no elimina hambre ni sed.'; }
     else {
+      // Función pura de la tesela: se calcula una vez por tesela y no en cada comparación del `sort`.
+      const novelties = new Map<Tile, number>();
       const novelty = (t: Tile): number => {
-        const visit = animal.memory.find(m => m.visited && cell(m) === cell(t));
-        return (visit ? Math.min(1, (world.tick - visit.tick) / MEMORY_TTL) : 2) + hash(world.seed, `${animal.id}:${key(t)}:${Math.floor(world.tick / 60)}`) / 4294967296 * 0.2;
+        let value = novelties.get(t);
+        if (value === undefined) {
+          const visit = animal.memory.find(m => m.visited && cell(m) === cell(t));
+          value = (visit ? Math.min(1, (world.tick - visit.tick) / MEMORY_TTL) : 2) + hash(world.seed, `${animal.id}:${key(t)}:${Math.floor(world.tick / 60)}`) / 4294967296 * 0.2;
+          novelties.set(t, value);
+        }
+        return value;
       };
       target = adjacent.sort((a, b) => novelty(b) - novelty(a) || a.y - b.y || a.x - b.x)[0] ?? animal;
     }
@@ -215,7 +227,10 @@ function move(animal: Animal, world: AnimalWorld, state: LocalState): void {
   animal.x = next.x; animal.y = next.y; animal.lastMove = world.tick;
   const to = cell(animal);
   state.counts.set(to, (state.counts.get(to) ?? 0) + 1);
-  state.occupants.set(to, [...(state.occupants.get(to) ?? []), animal]);
+  // Nadie conserva los arreglos de ocupantes (quien los lee copia sus elementos): añadir en el sitio da
+  // el mismo contenido y el mismo orden que el arreglo nuevo de antes.
+  const arrived = state.occupants.get(to);
+  if (arrived) arrived.push(animal); else state.occupants.set(to, [animal]);
   exertBody(animal, { energy: animal.action === 'flee' ? 0.003 : 0.0015, fatigue: animal.action === 'flee' ? 0.004 : 0.002 });
   remember(animal, next, world.tick, true);
 }
@@ -318,7 +333,9 @@ export function stepAnimals(world: AnimalWorld, emit?: AnimalEmitter): void {
     if (!tile) throw new Error('Animal fuera de las regiones activas.');
     if (selectedIds.has(animal.id)) physiology(animal, tile, world, emit);
     if (animal.health <= 0) continue;
-    const p = cell(animal); state.occupants.set(p, [...(state.occupants.get(p) ?? []), animal]); state.counts.set(p, (state.counts.get(p) ?? 0) + 1);
+    const p = cell(animal), here = state.occupants.get(p);
+    if (here) here.push(animal); else state.occupants.set(p, [animal]);
+    state.counts.set(p, (state.counts.get(p) ?? 0) + 1);
   }
   world.animals = world.animals.filter(a => a.health > 0);
   const active = selected.filter(a => a.health > 0);

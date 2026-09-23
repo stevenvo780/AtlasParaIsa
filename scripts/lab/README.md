@@ -223,6 +223,41 @@ siempre antes/después en la misma sesión. Toda optimización del paso debe dej
 cabecera). Con el mundo de 6 días de la semilla 51926 (leyes candidatas), el paso bajó de 112 a 60 ms de CPU
 (×1,86) sin mover un bit (digestos idénticos a 1200 y 2400 pasos).
 
+### Escala con la población — `../perf/` (sprint noche-perf2 2026-09-22)
+
+```bash
+export TMPDIR=/datos/tmp-atlas-lab   # nunca /tmp: tiene cuota
+npx tsx scripts/perf/instantaneas.ts --seed 3 --dias 3,6,9,12.25 --salida DIR   # mundos de una misma semilla a varias poblaciones
+npx tsx scripts/perf/fases.ts --db DIR/d06/world.sqlite --pasos 600 [--digesto H]  # CPU propia por fase de cualquier base (se copia; el original no se toca)
+node --cpu-prof --cpu-prof-dir P --import tsx scripts/perf/fases.ts --db … --pasos 300
+npx tsx scripts/perf/cpuprof.ts resumen P/*.cpuprofile --pasos 300 --poblacion N --salida r.json  # ms/paso por función (línea real del .ts)
+npx tsx scripts/perf/cpuprof.ts comparar chico.json grande.json                                # exponente k de cada función con N
+scripts/perf/escalado.sh SALIDA chico.sqlite grande.sqlite    # todo lo anterior para dos mundos a la vez
+```
+
+`fases.ts` carga cualquier base con el `Store` del proyecto (los params viajan con el mundo), así sirve también
+para copias de réplicas (`sqlite3 .backup`). `cpuprof.ts` traduce las columnas del código que tsx entrega en una
+sola línea a la línea del `.ts` con los mapas de su caché (`$TMPDIR/tsx-<uid>`).
+
+**Control de una optimización** (identidad bit a bit + CPU base/rama). Exportar SIEMPRE el commit base con
+`git archive` (nunca comparar contra el propio árbol) y enlazarle `node_modules`:
+
+```bash
+git archive <base> | tar -x -C /datos/tmp-atlas-lab/perf2-base && ln -s "$PWD/node_modules" /datos/tmp-atlas-lab/perf2-base/
+(cd /datos/tmp-atlas-lab/perf2-base && for c in d51926 s7 s42; do npx tsx scripts/perf/identidad.ts $c --salida REF/base-id-$c.json; done)
+BASE=/datos/tmp-atlas-lab/perf2-base REF=REF bash scripts/perf/verificar.sh SALIDA [alto.sqlite] [bajo.sqlite] [pasos]
+npx tsx scripts/perf/alterna.ts --base /datos/tmp-atlas-lab/perf2-base --db alto.sqlite --pasos 1200   # sólo CPU + digesto final
+```
+
+`identidad.ts` da los digestos de control (51926 por defecto a 2400 pasos; 7 y 42 con las leyes de la etapa 1
+a 4800). `alterna.ts` importa los DOS árboles en el mismo proceso, carga cada uno su copia de la base y los
+avanza por bloques alternados de 10 pasos: la CPU propia de cada bloque ve la misma carga de la torre (con carga
+60–100 los mismos pasos cuestan 2–3 veces más CPU que a carga 20, así que dos corridas separadas no se pueden
+comparar), y al final exige el mismo `digestoCanonico`. Aun así una razón por debajo de ~3 % es ruido: para
+atribuir mejoras pequeñas, perfil V8 (`cpuprof.ts`) y la fracción del paso de cada función.
+`tests/rendimiento-identidad.test.ts` fija además el digesto del mundo de 230 habitantes (semilla 3, día 12,25)
+tras 600 pasos; se omite si falta la instantánea (`ATLAS_MUNDO_ALTO`).
+
 ## El techo del hardware — `../curva-techo.mts` (T109)
 
 `replica.ts` mide **leyes** (población, tecnología, cooperación…) a una escala fija; hermana con

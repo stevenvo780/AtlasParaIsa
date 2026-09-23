@@ -157,16 +157,30 @@ export class TechnologyArchive {
       tempSchemaCookie: (this.readStatement('PRAGMA temp.schema_version').get() as { schema_version: number }).schema_version,
       transaction: this.db.isTransaction };
   }
-  private clearProofs(): void { this.verifiedStamp = null; this.definitionProof = null; this.summaryProof = null; }
-  invalidateVerification(): void { this.clearProofs(); this.hostTransaction = false; }
+  private clearProofs(): void { this.verifiedStamp = null; this.definitionProof = null; this.summaryProof = null; this.referenceMemo = null; }
+  invalidateVerification(): void { this.clearProofs(); this.hostTransaction = false; this.epochMemo = null; }
   /** Sello de la base para la memoria de lecturas del anfitrión (Store, sprint noche-perf 2026-09-22):
    * el mismo `stamp()` que invalida las pruebas de este archivo, serializado; `null` dentro de una
    * transacción, donde el anfitrión no debe recordar nada. Cualquier escritura propia (total_changes),
    * ajena (data_version) o de esquema cambia el sello. */
   readEpoch(): string | null {
+    // Sprint noche-perf2 2026-09-22: con ~230 habitantes se piden ~900 sellos por paso y cada uno eran
+    // cuatro sentencias (5,8 µs). Ahora cada llamada lee sólo `data_version` (escrituras ajenas) y
+    // `total_changes()` (escrituras propias), 2,5 µs, y relee los dos esquemas cuando cualquiera de los
+    // dos cambia. Lo único que cambia un esquema sin mover ninguno de los dos es DDL propio fuera de una
+    // transacción: después de construir el Store sólo lo hace `installSchema`, que olvida el sello.
+    if (this.db.isTransaction) return null;
+    const dataVersion = (this.readStatement('PRAGMA main.data_version').get() as { data_version: number }).data_version;
+    const totalChanges = (this.readStatement('SELECT total_changes() AS n').get() as { n: number }).n;
+    const memo = this.epochMemo;
+    if (memo && memo.dataVersion === dataVersion && memo.totalChanges === totalChanges) return memo.epoch;
     const stamp = this.stamp();
-    return stamp.transaction ? null : `${stamp.dataVersion}:${stamp.totalChanges}:${stamp.schemaCookie}:${stamp.tempSchemaCookie}`;
+    if (stamp.transaction) return null;
+    const epoch = `${stamp.dataVersion}:${stamp.totalChanges}:${stamp.schemaCookie}:${stamp.tempSchemaCookie}`;
+    this.epochMemo = { dataVersion: stamp.dataVersion, totalChanges: stamp.totalChanges, epoch };
+    return epoch;
   }
+  private epochMemo: { dataVersion: number; totalChanges: number; epoch: string } | null = null;
   /** Tick más alto de cualquier definición o estadística archivada, o -1 si no hay ninguna. Una lectura
    * «a fecha de» un tick igual o posterior no depende de ese tick mientras el sello no cambie. */
   latestTick(): number {
@@ -241,7 +255,7 @@ export class TechnologyArchive {
   }
 
   installSchema(): void {
-    this.transaction();
+    this.transaction(); this.epochMemo = null;
     this.db.exec(`CREATE TABLE IF NOT EXISTS technology_definitions (
       id TEXT PRIMARY KEY NOT NULL, tick INTEGER NOT NULL, signature TEXT UNIQUE NOT NULL, body TEXT NOT NULL, digest TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS technology_stats (
@@ -494,12 +508,37 @@ export class TechnologyArchive {
     if (value.id !== row.id || value.tick !== row.tick || serialOf(value.id, 'process') !== row.serial) fail('execution key, serial or tick');
     return value;
   }
+  /**
+   * Referencias verificadas durante una transacción anfitriona (sprint noche-perf2 2026-09-22). Cada
+   * guardado archiva cientos de ejecuciones y cada una volvía a leer, decodificar y verificar —con dos
+   * sellos de cuatro sentencias— las mismas definiciones que referencia: 3–5 ms por paso amortizados
+   * con ~230 habitantes. Una definición archivada es inmutable (`putDefinition` rechaza cualquier otro
+   * cuerpo; sólo `truncateAfter`, de recuperación, borra filas y limpia las pruebas), así que dentro de
+   * la transacción anfitriona —donde toda escritura pasa por las mutaciones propias o por
+   * `observeHostWrites`, que mantienen el sello verificado— la respuesta de `getDefinition(id, t)` para
+   * un id ya verificado es siempre la misma: la definición si su tick ≤ t y si no `null`. La memoria va
+   * atada al OBJETO de prueba de definiciones vigente: cualquier `clearProofs` (sello inesperado,
+   * error, fin de la transacción) o un nuevo recorrido completo la invalida. La primera lectura de cada
+   * id sigue siendo la completa, con sellos y verificación. Nada de esto entra en el mundo ni en disco.
+   */
+  private referenceMemo: { proof: DefinitionProof; definitions: Map<string, { tick: number; signature: string }> } | null = null;
+  private referencedDefinition(id: string, asOfTick: number): { signature: string } | null {
+    const memo = this.hostTransaction && this.definitionProof && this.referenceMemo?.proof === this.definitionProof ? this.referenceMemo : null;
+    const known = memo?.definitions.get(id);
+    if (known) { tick(asOfTick); return known.tick <= asOfTick ? known : null; }
+    const definition = this.getDefinition(id, asOfTick);
+    if (definition && this.hostTransaction && this.definitionProof) {
+      if (this.referenceMemo?.proof !== this.definitionProof) this.referenceMemo = { proof: this.definitionProof, definitions: new Map() };
+      this.referenceMemo.definitions.set(id, { tick: definition.tick, signature: definition.signature });
+    }
+    return definition;
+  }
   private executionReferences(value: TechnologyExecution): void {
     const origin = this.getHistoryOrigin();
     const references = new Set([...value.parentRecipeIds, ...value.catalysts.flatMap(c => c.recipeId ? [c.recipeId] : []), ...(value.recipeId ? [value.recipeId] : [])]);
     for (const list of [value.inputs, value.outputs, ...Object.values(value.balance)]) for (const line of list) if (line.resourceId.startsWith('recipe:')) references.add(line.resourceId.slice(7));
-    for (const id of references) if (!this.getDefinition(id, value.tick)) fail('execution definition reference');
-    if (value.recipeId && ['research', 'craft'].includes(value.kind) && value.programSignature !== this.getDefinition(value.recipeId, value.tick)!.signature) fail('execution program signature');
+    for (const id of references) if (!this.referencedDefinition(id, value.tick)) fail('execution definition reference');
+    if (value.recipeId && ['research', 'craft'].includes(value.kind) && value.programSignature !== this.referencedDefinition(value.recipeId, value.tick)!.signature) fail('execution program signature');
     for (const id of value.nestedExecutionIds ?? []) {
       const row = this.executionRow(id);
       if (!row) {

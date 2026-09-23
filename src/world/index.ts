@@ -18,7 +18,7 @@ import { POPULATION_HARD_LIMIT } from '../shared/life.js';
 import type { TechnologyKnowledge, TechnologyState } from '../shared/technology.js';
 import type { DemographicState, LegacyRecord } from '../shared/demography.js';
 import { defaultTechnologyState, initialTechnologyKnowledge, technologyOpportunity, researchTechnology, craftTechnology, projectTechnology, assertTechnology, useTool, recordTechnologyBenefit, settleTechnologyEstate, cancelTechnologyProject, maintainTechnologyMemory } from './technology.js';
-import { catalogueEnabled, resolveTechnologyRecipe } from './technology-catalogue.js';
+import { catalogueEnabled, resolveTechnologyRecipe, withArchiveReadBatch } from './technology-catalogue.js';
 import { initialDemography, demographicTraits, updateDemography } from './demography.js';
 import { reproductiveReadiness, familyOpportunity, availableToShare, closeKin, chooseReproductivePartner, pairAffinity, pairTie, earlierForagerExhausts, observedForagersByCell } from './family.js';
 import { advancePopulation, assertLegacyRecord, assertPopulation } from './lineage.js';
@@ -27,6 +27,7 @@ import { captureTechnologyCheckpoint, advanceTechnologyCheckpoint } from './tech
 import { advanceWaterPreparation, beginWaterPreparation, canHandleContainedWater, containedWaterQuanta, drinkContainedWater, emptyWaterLedger, maintainContainedWater, payContainedWaterCarry, WATER_WORK_ENERGY, WATER_WORK_FATIGUE } from './technology-water.js';
 import { flowQuantized, WATER_QUANTA_PER_UNIT } from './material-affordances.js';
 import { DEFAULT_PARAMS, MAX_FOUNDER_AGE_TICKS, paramsOf, setParams, limitsOf, type WorldParams } from './params.js';
+import { algunoCerca, filtrarCerca, primeroCerca } from './indice-puntos.js';
 export { bindWorldContext, tileAt, normalizeViewport, worldContext } from './spatial.js';
 export type { WorldContext } from './spatial.js';
 
@@ -452,7 +453,7 @@ function choose(world: World, person: Person): void {
       reason: 'Puede comer una reserva local ahora; aliviar el daño corporal no requiere esperar una caza.' });
   }
   const family = familyOpportunity(world, person);
-  const familyPlace = family ? world.places.filter(place => distance(person,place)<=RADIUS && distance(family.partner,place)<=RADIUS)
+  const familyPlace = family ? filtrarCerca(world.places, person, RADIUS + 1, place => distance(person,place)<=RADIUS && distance(family.partner,place)<=RADIUS)
     .sort((a,b) => (distance(person,a)+distance(family.partner,a))-(distance(person,b)+distance(family.partner,b)) || a.id.localeCompare(b.id))[0] : undefined;
   // A small local harvest may improve a viable family reserve below the meal-search
   // filter. Preview finite observed biomass; no future regeneration is promised.
@@ -637,7 +638,7 @@ function choose(world: World, person: Person): void {
   const workBias = person.traits.industriousness;
   const cost = constructionCost(world,person);
   const buildable = primeroConFiltroCaro(nearbyTiles, (a, b) => distance(person, a) - distance(person, b),
-    t => t.terrain !== 'shelter' && t.moisture > 0.2 && t.vegetation > 0.15 && !world.places.some(p => distance(p, t) < 5));
+    t => t.terrain !== 'shelter' && t.moisture > 0.2 && t.vegetation > 0.15 && !algunoCerca(world.places, t, 6, p => distance(p, t) < 5));
   if (resource && (person.materials.wood < cost.wood || person.materials.stone < cost.stone)) candidates.push({ action: 'gather', target: resource, score: 0.15 + workBias * 0.4 + (!shelter ? 0.2 : 0), reason: 'Percibe materiales útiles para cultivar y levantar refugios.' });
   const construction = buildable ? constructionOpportunity(world, person) : undefined;
   if (buildable && construction && person.materials.wood >= cost.wood && person.materials.stone >= cost.stone) candidates.push({ action: 'build', target: buildable, ...construction });
@@ -661,7 +662,7 @@ function choose(world: World, person: Person): void {
   for (const invitation of world.invitations) {
     if (distance(person, invitation) <= RADIUS && person.hunger < 0.65 && person.fatigue < 0.7 && person.socialLoad < 0.7) candidates.push({ action: 'approach', target: invitation, score: 0.67 + person.sociability * 0.15, reason: 'Percibe una invitación y sus necesidades le permiten acercarse.' });
   }
-  const place = world.places.find(p => distance(person, p) <= 3);
+  const place = primeroCerca(world.places, person, 4, p => distance(person, p) <= 3);
   const hungry = nearbyPeople.filter(other => distance(person, other) <= 2 && other.hunger > 0.27).sort((a, b) => b.hunger - a.hunger)[0];
   const learned = place ? person.habits.find(habit => habit.placeId === place.id && habit.strength >= 0.5) : undefined;
   if (place && hungry && availableToShare(world, person, hungry) && person.hunger < 0.5 && world.tick - person.lastShared >= 30) candidates.push({
@@ -923,7 +924,7 @@ function move(world: World, person: Person): void {
 
 function share(world: World, donor: Person): void {
   if (donor.inventory < 0.025 || donor.hunger >= 0.5 || world.tick - donor.lastShared < 30) return;
-  const place = world.places.find(p => distance(donor, p) <= 3);
+  const place = primeroCerca(world.places, donor, 4, p => distance(donor, p) <= 3);
   const recipient = world.people.filter(p => p.id !== donor.id && p.hunger > 0.27 && distance(p, donor) <= 2).sort((a, b) => b.hunger - a.hunger)[0];
   if (!place || !recipient || !availableToShare(world, donor, recipient)) return;
   donor.inventory = clamp(donor.inventory - 0.025, 0.25);
@@ -1105,7 +1106,7 @@ function performWork(world: World, person: Person, tile: Tile): void {
   } else if(person.action==='invent') {
     success=invent(world,person,event=>addEvent(world,event));
   } else if(person.action==='repair') {
-    const structure=world.structures.find(s=>s.x===tile.x&&s.y===tile.y);
+    const structure=primeroCerca(world.structures, tile, 1, s=>s.x===tile.x&&s.y===tile.y);
     if(structure) success=repair(world,person,structure,event=>addEvent(world,event));
   }
   person.work = 0;
@@ -1129,7 +1130,7 @@ function encounters(world: World): void {
   }
   if (world.tick - s.lastMeeting < 240) return;
   s.lastMeeting = world.tick; i.lastMeeting = world.tick;
-  const place = world.places.find(p => distance(s, p) <= 3);
+  const place = primeroCerca(world.places, s, 4, p => distance(s, p) <= 3);
   const event = addEvent(world, { kind: 'meeting', actors: [s.id, i.id], source: 'simulation', x: s.x, y: s.y, text: 'S e I compartieron una pausa. Después podrán volver a sus propios caminos.', cause: 'Cercanía percibida, disposición de ambos y una acción de compañía; la pausa reduce cansancio, sin producir alimento.' });
   for (const person of [s, i]) remember(person, world, 'Una pausa acompañada ayudó a recuperar el ritmo.', event.id, place?.id);
 }
@@ -1209,6 +1210,13 @@ export function stepWorld(world: World, inputs: Gesture[] = [], context: WorldCo
   bindWorldContext(world, context);
   if (world.technology.checkpoint === undefined) world.technology.checkpoint = captureTechnologyCheckpoint(world.technology, world.people, world.tick, 'migration');
   world.tick++;
+  // Sprint noche-perf2 2026-09-22: el paso sólo LEE el archivo de recetas (nunca escribe en él: eso es
+  // del guardado, fuera del paso), así que sus lecturas a fecha de este tick van como un lote del
+  // anfitrión, con un solo sello de la memoria de lecturas del Store en vez de uno por lectura (~900 por
+  // paso con ~230 habitantes). El mundo resultante es el mismo; ver `readBatch` en store.ts.
+  return withArchiveReadBatch(world, () => advanceTick(world, inputs, context, medicion));
+}
+function advanceTick(world: World, inputs: Gesture[], context: WorldContext, medicion: FaseMedicion | undefined): GestureResult[] {
   medirFase(medicion, 'maintainRegions', () => maintainRegions(world, context));
   const results = inputs.map((gesture, order) => applyGesture(world, gesture, order));
   world.invitations = world.invitations.filter(invitation => invitation.until > world.tick);
@@ -1285,7 +1293,7 @@ function reproduce(world: World): void {
     let pair: { a: Person; b: Person } | undefined, place: (typeof world.places)[number] | undefined;
     for (const a of world.people) {
       if (!fit(a)) continue;
-      const here = world.places.find(p => distance(a, p) <= pop.radioLugar);
+      const here = primeroCerca(world.places, a, pop.radioLugar + 1, p => distance(a, p) <= pop.radioLugar);
       if (!here) continue;
       const b = chooseReproductivePartner(world, a, world.people.filter(p => match(a, p)), ELECCION_POR_AFINIDAD);
       if (!b) continue;

@@ -179,6 +179,7 @@ export class Store {
     // de una memoria que nunca se entrega): la resolución del mundo no necesita clonarlo otra vez.
     freshCopies: true,
     resolve: (id, atTick) => this.readTechnologyRecipe(id, atTick),
+    readBatch: (atTick, read) => this.readBatch(atTick, read),
     findBySignature: (signature, atTick) => {
       if (this.schemaVersion < 4) return null;
       const definition = this.technologyArchive.findDefinitionBySignature(signature, atTick);
@@ -310,9 +311,24 @@ export class Store {
    * entera la primera vez; después se devuelve una copia de ese mismo valor, como hace la memoria de
    * validación de arriba. Nada de esto entra en el mundo ni en el disco. */
   private archivedRecipes: ArchivedRecipeMemo | null = null;
+  /** Lote de lecturas (sprint noche-perf2 2026-09-22): `stepWorld` avanza un tick sin escribir nada en
+   * el archivo y sin ceder el hilo, y con ~230 habitantes hace ~900 lecturas de recetas archivadas: el
+   * sello de cada una era ~5 % del paso. Dentro del lote, las lecturas a fecha del tick del lote usan el
+   * sello tomado al empezarlo: el paso ve una sola foto del archivo. Una escritura propia es imposible
+   * dentro del lote (el mundo sólo lee; guardar es del anfitrión, entre pasos); una ajena a mitad del
+   * lote se ve en la primera lectura fuera de él, que vuelve a pedir el sello completo, y lo recordado
+   * dentro se olvida entonces. Las lecturas sueltas (`resolve` fuera de un lote) siguen validando el
+   * sello una por una. */
+  private batchEpoch: { atTick: number; epoch: string | null } | null = null;
+  private readBatch<T>(atTick: number, read: () => T): T {
+    if (this.batchEpoch || this.technologyReads !== null || this.schemaVersion < 4 || typeof atTick !== 'number' || !Number.isSafeInteger(atTick)) return read();
+    this.batchEpoch = { atTick, epoch: this.technologyArchive.readEpoch() };
+    try { return read(); } finally { this.batchEpoch = null; }
+  }
   private archivedRecipeMemo(id: unknown, atTick: unknown): ArchivedRecipeMemo | null {
     if (typeof id !== 'string' || typeof atTick !== 'number' || !Number.isSafeInteger(atTick)) return null;
-    const epoch = this.technologyArchive.readEpoch();
+    const batch = this.batchEpoch;
+    const epoch = batch && batch.atTick === atTick ? batch.epoch : this.technologyArchive.readEpoch();
     if (epoch === null) { this.archivedRecipes = null; return null; }
     let memo = this.archivedRecipes;
     if (!memo || memo.epoch !== epoch || memo.recipes.size >= ARCHIVED_RECIPE_MEMO_LIMIT) {

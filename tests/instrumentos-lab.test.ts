@@ -33,7 +33,8 @@ const CLAVES_ANTIGUAS = new Set([
   'cooperacionAcumuladaPorTipo', 'otrasCooperacionesAcumuladas', 'conflictosAcumulados',
   'p50Ms', 'p95Ms', 'rss',
 ]);
-const CLAVES_NUEVAS = ['diversidadConductaTiempo', 'diversidadConductaTiempoComponentes', 'diversidadConductaActiva', 'diversidadConductaActivaComponentes', 'diversidadConductaComponentes', 'diversidadConductaVentana', 'diversidadConductaVentanaComponentes', 'personasVentana', 'repartoTiempoPorAccion', 'repartoActividadPorAccion'];
+const CLAVES_NUEVAS = ['diversidadConductaTiempo', 'diversidadConductaTiempoComponentes', 'diversidadConductaActiva', 'diversidadConductaActivaComponentes', 'diversidadConductaComponentes', 'diversidadConductaVentana', 'diversidadConductaVentanaComponentes', 'personasVentana', 'repartoTiempoPorAccion', 'repartoActividadPorAccion',
+  'varianzaVocacion', 'fraccionResearchDominante', 'muertesDia', 'radioGiroDiario', 'embudoBanda'];
 
 type Json = Record<string, unknown>;
 const readJson = (path: string): Json => JSON.parse(readFileSync(path, 'utf8')) as Json;
@@ -201,6 +202,17 @@ test('CLI: réplica corta con y sin instrumentos — digestoCanonico idéntico y
   assert.deepEqual(Object.keys(reparto.fracciones), ACCIONES.filter(accion => accion in reparto.fracciones), 'claves en el orden fijo de ACCIONES');
   const foodShared = (con.cooperacionAcumuladaPorTipo as Json).foodShared as number;
   assert.ok(Number.isInteger(foodShared) && foodShared > 0);
+  assert.equal(con.varianzaVocacion, 0, 'sin VOC, los fundadores ausentes forman el vector cero');
+  assert.ok((con.fraccionResearchDominante as number) >= 0 && (con.fraccionResearchDominante as number) <= 1);
+  const muertes = con.muertesDia as { total: number; menores8Dias: number; porCausa: Json };
+  assert.ok(Number.isInteger(muertes.total) && Number.isInteger(muertes.menores8Dias));
+  assert.deepEqual(Object.keys(muertes.porCausa), ['starvation', 'dehydration', 'exposure', 'senescence']);
+  const giro = con.radioGiroDiario as { media: number; mediana: number; personas: number };
+  assert.ok(giro.media >= 0 && giro.mediana >= 0 && giro.personas > 0);
+  const embudo = con.embudoBanda as { gruposMortalesRadio8: number; tamanosGrupos: number[]; paresFertilesNoEmparentadosRadio3: number };
+  assert.equal(embudo.tamanosGrupos.reduce((sum, size) => sum + size, 0), con.vecinosMortales);
+  assert.equal(embudo.gruposMortalesRadio8, embudo.tamanosGrupos.length);
+  assert.ok(Number.isInteger(embudo.paresFertilesNoEmparentadosRadio3));
 });
 
 test('CLI: --instrumentos acepta solo "si"|"no"', t => {

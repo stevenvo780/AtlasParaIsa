@@ -22,10 +22,21 @@
  *    a un lugar. Se leen los sucesos nuevos del paso en `world.chronicleJournal.pending`, que el mundo
  *    ya emite; no cuentan la herencia al morir (`transferEstate`, suceso 'ecology') ni el depósito o
  *    la toma de comida en estructuras (almacén común, no una entrega entre personas).
+ * 3. Vocación: media de la varianza poblacional de cada uno de los diez componentes entre mortales
+ *    vivos; un campo ausente vale cero. `research` dominante usa los ticks activos de ESTE día,
+ *    desempata por `ACCIONES` y divide por todos los mortales vivos.
+ * 4. Seguridad: cada legado nuevo se agrupa por causa con su edad exacta en días y el subtotal < 8.
+ * 5. Movimiento: para cada mortal se acumulan posiciones tras cada paso; su radio de giro diario es
+ *    sqrt(E[(x-x̄)²+(y-ȳ)²]) y el JSON informa media, mediana y número de personas.
+ * 6. Embudo de banda: al cierre de cada día informa componentes conexas de mortales con enlaces a
+ *    ≤ 8 celdas y pares vivos, fértiles, no emparentados a ≤ 3. Los brazos leen grupos del día 1 y
+ *    pares del día 2. Todo se calcula en esta memoria auxiliar, nunca en `World`/`Person`.
  */
 import type { Action } from '../../src/shared/types.js';
-import type { Person, World } from '../../src/world/index.js';
+import { OFICIOS_DE_LINAJE, TICKS_PER_DAY, type Person, type World } from '../../src/world/index.js';
 import { indiceDiversidad } from '../../src/world/diversidad.js';
+import { closeKin, reproductiveReadiness } from '../../src/world/family.js';
+import type { DemographicDeathCause, LegacyRecord } from '../../src/shared/demography.js';
 
 /** Las 18 acciones de `Action`, en el orden de `ACTIONS` de src/world/diversidad.ts (no exportado):
  * fija el orden de las claves de las fracciones en el JSON. */
@@ -97,6 +108,19 @@ export interface MetricasInstrumentos {
   repartoTiempoPorAccion: { personaTicks: number; fracciones: Record<string, number> };
   repartoActividadPorAccion: { incrementos: number; fracciones: Record<string, number> };
   foodShared: number;
+  /** Media, entre los diez oficios, de la varianza poblacional de la vocación. Ausente = vector 0. */
+  varianzaVocacion: number;
+  /** Fracción de mortales vivos cuyo oficio dominante por tiempo activo del día es `research`. */
+  fraccionResearchDominante: number;
+  /** Muertes observadas durante el día; la edad se expresa en días simulados. */
+  muertesDia: {
+    total: number; menores8Dias: number;
+    porCausa: Record<string, { total: number; menores8Dias: number; edadMediaDias: number; edadesDias: number[] }>;
+  };
+  /** Radio de giro por persona = sqrt(E[(x-x̄)²+(y-ȳ)²]); se resumen los mortales del día. */
+  radioGiroDiario: { media: number; mediana: number; personas: number };
+  /** Embudo de banda: componentes conexas a radio 8 y pares fértiles no parientes a radio 3. */
+  embudoBanda: { gruposMortalesRadio8: number; tamanosGrupos: number[]; paresFertilesNoEmparentadosRadio3: number };
 }
 
 function mortalesVivos(world: World): Set<string> {
@@ -116,12 +140,18 @@ export class InstrumentosConducta {
   /** `activity` de cada vecino mortal al empezar el día (copia), para el reparto de activity del día. */
   private actividadInicioDia = new Map<string, Record<string, number>>();
   private comidaCompartida = 0;
+  private readonly muertesConocidas = new Set<string>();
+  private muertesDia: LegacyRecord[] = [];
+  private readonly movimientoDia = new Map<string, { n: number; x: number; y: number; x2: number; y2: number }>();
   private contadorAntes = 0;
   /** Coste de los instrumentos en ms de reloj (se informa por consola, nunca en el JSON). */
   costeMs = 0;
   pasos = 0;
 
-  constructor(world: World) { this.fotografiarActividad(world); this.vivosInicioDia = mortalesVivos(world); }
+  constructor(world: World) {
+    this.fotografiarActividad(world); this.vivosInicioDia = mortalesVivos(world);
+    for (const record of [...world.legacy, ...world.retiredLegacy]) this.muertesConocidas.add(record.id);
+  }
 
   private fotografiarActividad(world: World): void {
     this.actividadInicioDia = new Map(world.people.filter(p => p.role === 'neighbor').map(p => [p.id, { ...p.activity }]));
@@ -145,7 +175,15 @@ export class InstrumentosConducta {
       let dia = this.ticksDiaPorPersona.get(person.id);
       if (!dia) { dia = {}; this.ticksDiaPorPersona.set(person.id, dia); }
       dia[person.action] = (dia[person.action] ?? 0) + 1;
-      if (person.role === 'neighbor') { this.tiempoDia.set(person.action, (this.tiempoDia.get(person.action) ?? 0) + 1); this.personaTicksDia++; }
+      if (person.role === 'neighbor') {
+        this.tiempoDia.set(person.action, (this.tiempoDia.get(person.action) ?? 0) + 1); this.personaTicksDia++;
+        const movement = this.movimientoDia.get(person.id) ?? { n: 0, x: 0, y: 0, x2: 0, y2: 0 };
+        movement.n++; movement.x += person.x; movement.y += person.y; movement.x2 += person.x * person.x; movement.y2 += person.y * person.y;
+        this.movimientoDia.set(person.id, movement);
+      }
+    }
+    for (const record of world.retiredLegacy) if (!this.muertesConocidas.has(record.id)) {
+      this.muertesConocidas.add(record.id); this.muertesDia.push(record);
     }
     const nuevos = world.eventCounter - this.contadorAntes;
     if (nuevos > 0) {
@@ -182,6 +220,55 @@ export class InstrumentosConducta {
         if (n > 0) { incrementos.set(accion, (incrementos.get(accion) ?? 0) + n); totalIncrementos += n; }
       }
     }
+    const mortales = world.people.filter(person => person.role === 'neighbor');
+    let varianzaVocacion = 0;
+    if (mortales.length) for (const oficio of OFICIOS_DE_LINAJE) {
+      const media = mortales.reduce((sum, person) => sum + (person.vocacion?.[oficio] ?? 0), 0) / mortales.length;
+      varianzaVocacion += mortales.reduce((sum, person) => sum + ((person.vocacion?.[oficio] ?? 0) - media) ** 2, 0) / mortales.length;
+    }
+    varianzaVocacion /= OFICIOS_DE_LINAJE.length;
+    let researchDominante = 0;
+    for (const person of mortales) {
+      const ticks = sinDescanso(this.ticksDiaPorPersona.get(person.id) ?? vacio);
+      let dominant: Action | null = null;
+      for (const action of ACCIONES) if ((ticks[action] ?? 0) > (dominant ? ticks[dominant] ?? 0 : 0)) dominant = action;
+      if (dominant === 'research') researchDominante++;
+    }
+    const causas: DemographicDeathCause[] = ['starvation', 'dehydration', 'exposure', 'senescence'];
+    const porCausa: MetricasInstrumentos['muertesDia']['porCausa'] = {};
+    for (const cause of causas) {
+      const edadesDias = this.muertesDia.filter(record => record.cause === cause)
+        .map(record => (record.diedAt - record.bornAt) / TICKS_PER_DAY).sort((a, b) => a - b);
+      porCausa[cause] = { total: edadesDias.length, menores8Dias: edadesDias.filter(age => age < 8).length,
+        edadMediaDias: edadesDias.length ? edadesDias.reduce((sum, age) => sum + age, 0) / edadesDias.length : 0, edadesDias };
+    }
+    const radios = [...this.movimientoDia.values()].filter(value => value.n > 0).map(value => {
+      const variance = value.x2 / value.n - (value.x / value.n) ** 2 + value.y2 / value.n - (value.y / value.n) ** 2;
+      return Math.sqrt(Math.max(0, variance));
+    }).sort((a, b) => a - b);
+    const mediaRadio = radios.length ? radios.reduce((sum, radius) => sum + radius, 0) / radios.length : 0;
+    const medianaRadio = radios.length ? radios.length % 2 ? radios[(radios.length - 1) / 2]! : (radios[radios.length / 2 - 1]! + radios[radios.length / 2]!) / 2 : 0;
+    const pending = new Set(mortales.map(person => person.id));
+    const tamanosGrupos: number[] = [];
+    while (pending.size) {
+      const first = pending.values().next().value as string;
+      pending.delete(first); const queue = [first]; let size = 0;
+      while (queue.length) {
+        const id = queue.shift()!, person = mortales.find(candidate => candidate.id === id);
+        if (!person) continue;
+        size++;
+        for (const other of mortales) if (pending.has(other.id) && Math.hypot(person.x - other.x, person.y - other.y) <= 8) {
+          pending.delete(other.id); queue.push(other.id);
+        }
+      }
+      tamanosGrupos.push(size);
+    }
+    tamanosGrupos.sort((a, b) => b - a);
+    let paresFertiles = 0;
+    for (let i = 0; i < mortales.length; i++) for (let j = i + 1; j < mortales.length; j++) {
+      const a = mortales[i]!, b = mortales[j]!;
+      if (Math.hypot(a.x - b.x, a.y - b.y) <= 3 && reproductiveReadiness(world, a) && reproductiveReadiness(world, b) && !closeKin(a, b)) paresFertiles++;
+    }
     const metricas: MetricasInstrumentos = {
       diversidadConductaTiempo: tiempo.total,
       diversidadConductaTiempoComponentes: { conducta: tiempo.conducta, oficios: tiempo.oficios },
@@ -194,10 +281,17 @@ export class InstrumentosConducta {
       repartoTiempoPorAccion: { personaTicks: this.personaTicksDia, fracciones: fracciones(this.tiempoDia, this.personaTicksDia) },
       repartoActividadPorAccion: { incrementos: totalIncrementos, fracciones: fracciones(incrementos, totalIncrementos) },
       foodShared: this.comidaCompartida,
+      varianzaVocacion,
+      fraccionResearchDominante: mortales.length ? researchDominante / mortales.length : 0,
+      muertesDia: { total: this.muertesDia.length,
+        menores8Dias: this.muertesDia.filter(record => record.diedAt - record.bornAt < 8 * TICKS_PER_DAY).length, porCausa },
+      radioGiroDiario: { media: mediaRadio, mediana: medianaRadio, personas: radios.length },
+      embudoBanda: { gruposMortalesRadio8: tamanosGrupos.length, tamanosGrupos, paresFertilesNoEmparentadosRadio3: paresFertiles },
     };
     const vivos = new Set(world.people.map(person => person.id));
     for (const id of [...this.ticksPorPersona.keys()]) if (!vivos.has(id)) this.ticksPorPersona.delete(id);
     this.tiempoDia.clear(); this.personaTicksDia = 0;
+    this.muertesDia = []; this.movimientoDia.clear();
     this.ticksDiaPorPersona.clear(); this.vivosInicioDia = mortalesVivos(world);
     this.fotografiarActividad(world);
     this.costeMs += performance.now() - inicio;

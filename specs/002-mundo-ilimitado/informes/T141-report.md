@@ -158,6 +158,11 @@ muertes. El `digestoCanonico` final es **idéntico en las cinco poblaciones**, e
 
 ## Coste medido (ANTES = 5e0556f, DESPUÉS = T141)
 
+Scripts y salidas en crudo, fuera de git: `/datos/tmp-atlas-lab/t141-digestos/`. Contiene `run.sh`,
+los JSON de digestos, `banco-ab.mts`, `ab-*.jsonl`, `microbanco-consulta.mts` y `microbanco.jsonl`.
+El banco A/B se reproduce con
+`TMPDIR=/datos/tmp-atlas-lab npx tsx banco-ab.mts <árbol 5e0556f> <árbol T141> 50,200,800,2000 13 7`.
+
 **Consulta aislada** (`microbanco-consulta.mts`): densidad fija de una persona por cada 6 celdas;
 20 000 consultas con el predicado de `choose` (radio 7) y el de `share`/herencia (radio 2).
 

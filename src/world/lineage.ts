@@ -146,7 +146,11 @@ export function advancePopulation(world: World, callbacks: PopulationCallbacks):
   if (dying.length) {
     const departed = new Set(dying.map(result => result.person.id));
     world.people = world.people.filter(person => !departed.has(person.id));
-    for (const person of world.people) for (const id of departed) delete person.bonds[id];
+    // Un avistamiento (`poblacion.cortejoLocal`) vive lo que su vínculo: se borra con él.
+    for (const person of world.people) for (const id of departed) {
+      delete person.bonds[id];
+      if (person.sightings) delete person.sightings[id];
+    }
     const alive = new Set(world.people.map(person => person.id));
     for (const community of world.communities) community.members = community.members.filter(id => alive.has(id));
     world.communities = world.communities.filter(community => community.members.length > 0);

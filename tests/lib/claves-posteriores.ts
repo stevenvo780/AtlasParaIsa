@@ -11,10 +11,13 @@ import type { World } from '../../src/world/index.js';
  * Claves de params declaradas después de los árboles en que se midieron los digestos literales de las
  * pruebas de control. `digestoCanonico` hashea `{world, params}`, así que declarar una clave mueve el hash
  * aunque el mundo no se mueva; con su valor por defecto (0) ninguna actúa, y quitarlas de la forma de
- * params reproduce el digesto de esos árboles. Una ley nueva con default 0 añade aquí su clave, y sus
+ * params reproduce el digesto de esos árboles. Una ley nueva con default 0 (o `false`) añade aquí su clave, y sus
  * propios controles se miden en el árbol anterior quitando las claves que ya estaban en esta lista.
  */
-export const CLAVES_POSTERIORES = ['social.memoriaDisputa', 'agua.rebano', 'social.reencuentro'] as const;
+export const CLAVES_POSTERIORES = ['social.memoriaDisputa', 'agua.rebano', 'social.reencuentro', 'poblacion.cortejoLocal'] as const;
+
+/** Valor con que una clave posterior no actúa: 0 para los pesos, `false` para los interruptores. */
+const apagada = (valor: unknown): boolean => valor === 0 || valor === false;
 
 /** Valor de una clave punteada `seccion.hoja`. */
 function valor(params: WorldParams, clave: string): unknown {
@@ -22,11 +25,11 @@ function valor(params: WorldParams, clave: string): unknown {
   return (params as unknown as Record<string, Record<string, unknown>>)[seccion]?.[hoja];
 }
 
-/** Quitar una clave del hash sólo es legítimo si con el valor que tiene no actúa (0). */
+/** Quitar una clave del hash sólo es legítimo si con el valor que tiene no actúa (0 o `false`). */
 export function clavesPosterioresApagadas(params: WorldParams): void {
   for (const clave of CLAVES_POSTERIORES) {
     const actual = valor(params, clave);
-    if (actual !== 0) throw new Error(`${clave} = ${String(actual)}: con la ley activa el digesto no es comparable`);
+    if (!apagada(actual)) throw new Error(`${clave} = ${String(actual)}: con la ley activa el digesto no es comparable`);
   }
 }
 
@@ -43,7 +46,7 @@ export function quitarClavesPosteriores(forma: Record<string, Record<string, unk
     const [seccion, hoja] = clave.split('.') as [string, string];
     const nodo = forma[seccion];
     if (!nodo) continue;
-    if (nodo[hoja] !== 0) throw new Error(`${clave} = ${String(nodo[hoja])}: con la ley activa el digesto no es comparable`);
+    if (!apagada(nodo[hoja])) throw new Error(`${clave} = ${String(nodo[hoja])}: con la ley activa el digesto no es comparable`);
     delete nodo[hoja];
   }
 }

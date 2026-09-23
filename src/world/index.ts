@@ -73,8 +73,15 @@ export interface Person extends PersonView {
   /** Ley candidata `social.memoriaDisputa` (CONFL): fuente donde cedió su última disputa y paso en que la cedió.
    * Sólo existe con la ley activa; se olvida un día después. */
   conflictMemory?: { x: number; y: number; tick: number };
+  /** Ley `poblacion.cortejoLocal`: lo que recuerda de cada vinculado mutuo la última vez que lo VIO. Sólo existe
+   * con la ley activa; sus claves son un subconjunto de las de `bonds` y se borran con el vínculo. */
+  sightings?: Record<string, Sighting>;
   technology: TechnologyKnowledge; demography: DemographicState;
 }
+/** Un avistamiento (`poblacion.cortejoLocal`): dónde y en qué paso vio a un vinculado mutuo y lo que vio de él
+ * entonces: si era adulto en edad fértil, si es pariente cercano y el vínculo que le mostraba. `missed` marca
+ * que tuvo ese lugar a la vista sin encontrarlo allí; no se vuelve a buscar hasta verlo otra vez. */
+export interface Sighting { x: number; y: number; tick: number; fertile: boolean; kin: boolean; bond: number; missed: boolean }
 export interface Memory extends MemoryView {
   context: 'partner-tired' | 'shelter-tired' | 'food-hungry' | 'rain-shelter' | 'irrelevant';
   action: Action; weight: number; roles: ('S' | 'I')[];
@@ -415,6 +422,66 @@ function personById(world: World, id: string): Person | undefined {
   return index.byId.get(id);
 }
 
+/** Vínculo mutuo que exigen el cortejo y el reencuentro, en cada sentido. */
+const MUTUAL_BOND = 0.3;
+
+/** Ley `poblacion.cortejoLocal`, percepción: al decidir, quien ve (a ≤ RADIUS) a un vinculado mutuo anota dónde y
+ * cuándo lo ve y lo que se ve de él (etapa de vida, parentesco cercano, el vínculo que le muestra); si al verlo el
+ * vínculo ya no es mutuo, lo olvida. Un lugar recordado que tiene a la vista sin ver allí a su dueño queda `missed`:
+ * sabe que ya no está donde lo dejó. Devuelve cuántos vinculados mutuos ve ahora. */
+function recordSightings(world: World, person: Person, nearbyPeople: readonly Person[]): number {
+  const seen = new Set<string>();
+  for (const other of nearbyPeople) {
+    const own = person.bonds[other.id];
+    if (own === undefined || other.role !== 'neighbor') continue;
+    const theirs = other.bonds[person.id] ?? 0;
+    if (own < MUTUAL_BOND || theirs < MUTUAL_BOND) { if (person.sightings) delete person.sightings[other.id]; continue; }
+    seen.add(other.id);
+    (person.sightings ??= {})[other.id] = { x: other.x, y: other.y, tick: world.tick, fertile: fertileStage(world, other),
+      kin: closeKin(person, other), bond: theirs, missed: false };
+  }
+  const sightings = person.sightings;
+  if (!sightings) return 0;
+  let remembered = false;
+  for (const id in sightings) {
+    remembered = true;
+    const sighting = sightings[id]!;
+    if (!sighting.missed && !seen.has(id) && distance(person, sighting) <= RADIUS) sighting.missed = true;
+  }
+  // Sin nadie que recordar no queda memoria: la instantánea sólo guarda avistamientos reales.
+  if (!remembered) delete person.sightings;
+  return seen.size;
+}
+
+/** La etapa de vida que se ve en otro cuerpo: adulto en edad fértil (madurez ≤ edad < inicio de la vejez), la misma
+ * frontera que `lifeStage` enseña en la vista. El estado pasajero (hambre, sed, energía, salud, descanso tras una
+ * crianza) no se recuerda: `reproduce()` lo sigue exigiendo cuando los dos están juntos. */
+function fertileStage(world: World, other: Person): boolean {
+  const life = demographicTraits(other.genome, paramsOf(world).cuerpo);
+  return other.demography.age >= life.maturityAge && other.demography.age < life.senescenceStart;
+}
+
+/** Ley `poblacion.cortejoLocal`, elección: el vinculado mutuo cuyo último avistamiento queda más cerca, entre los que
+ * `admits` acepta; a igual distancia, el de id menor. Lee sólo la memoria y los vínculos propios: la distancia es al
+ * LUGAR recordado y nada dice dónde está ahora ni si vive. Las entradas `missed` no cuentan. */
+function nearestSighting(person: Person, admits: (sighting: Sighting, away: number) => boolean) {
+  let best: { id: string; sighting: Sighting; away: number; bond: number } | undefined;
+  for (const id in person.sightings) {
+    const sighting = person.sightings[id]!, own = person.bonds[id] ?? 0;
+    if (sighting.missed || own < MUTUAL_BOND || sighting.bond < MUTUAL_BOND) continue;
+    const away = distance(person, sighting);
+    if (!admits(sighting, away)) continue;
+    if (!best || away < best.away || (away === best.away && id < best.id)) best = { id, sighting, away, bond: (own + sighting.bond) / 2 };
+  }
+  return best;
+}
+
+/** Nombre de un recordado, sólo para el texto de la razón y después de elegir: es identidad fija, no estado. Sus
+ * avistamientos se borran con el vínculo cuando muere, así que siempre está en `world.people`. */
+function knownName(world: World, id: string): string {
+  return personById(world, id)?.name ?? id;
+}
+
 /** Land cells a person perceives: those within RADIUS of its cell, in row order. */
 function perceivedLand(world: World, person: Person): Tile[] {
   const tiles: Tile[] = [];
@@ -588,21 +655,37 @@ function choose(world: World, person: Person): void {
   // y recuerda un vínculo mutuo con otra persona fértil no emparentada, fuera de `radioPareja` pero dentro
   // de `radioCortejo`, puede ir hacia ella. Cuesta el mismo movimiento que cualquier desplazamiento, no
   // crea recursos ni garantiza un nacimiento; hambre, sed y descanso siguen ganando cuando urgen.
+  // Con `poblacion.cortejoLocal` el cortejo y el reencuentro dejan de saber a distancia: cada cual recuerda dónde
+  // vio por última vez a sus vinculados mutuos y va a ESE lugar; no lee la posición actual, el cuerpo ni la vida de
+  // nadie fuera de su vista. Sin la ley (default) nadie anota nada y la elección es la de siempre.
   const leyPoblacion = paramsOf(world).poblacion;
+  const suyosALaVista = leyPoblacion.cortejoLocal && person.role === 'neighbor' ? recordSightings(world, person, nearbyPeople) : 0;
   if (leyPoblacion.cortejo > 0 && !family && world.reproductionEnabled && person.role === 'neighbor' && reproductiveReadiness(world, person)) {
-    let cortejado: Person | undefined, vinculo = 0;
-    for (const [id, strength] of Object.entries(person.bonds)) {
-      if (strength < 0.3) continue;
-      const other = personById(world, id);
-      if (!other || other.role !== 'neighbor' || (other.bonds[person.id] ?? 0) < 0.3 || closeKin(person, other)) continue;
-      const away = distance(person, other);
-      if (away <= leyPoblacion.radioPareja || away > leyPoblacion.radioCortejo || !reproductiveReadiness(world, other)) continue;
-      if (!cortejado || away < distance(person, cortejado) || (away === distance(person, cortejado) && other.id < cortejado.id)) {
-        cortejado = other; vinculo = (strength + (other.bonds[person.id] ?? 0)) / 2;
+    if (leyPoblacion.cortejoLocal) {
+      // Lo exigible del otro es lo que vio: adulto fértil y no pariente cercano. La distancia es al lugar recordado.
+      const recuerdo = nearestSighting(person, (sighting, away) => sighting.fertile && !sighting.kin
+        && away > leyPoblacion.radioPareja && away <= leyPoblacion.radioCortejo);
+      if (recuerdo) candidates.push({ action: 'approach', target: { x: recuerdo.sighting.x, y: recuerdo.sighting.y },
+        score: leyPoblacion.cortejo * (0.5 + recuerdo.bond * 0.5),
+        reason: `Recuerda el vínculo con ${knownName(world, recuerdo.id)} y va a donde lo vio por última vez; `
+          + 'entonces estaba en edad de criar.' });
+    } else {
+      let cortejado: Person | undefined, vinculo = 0;
+      for (const [id, strength] of Object.entries(person.bonds)) {
+        if (strength < 0.3) continue;
+        const other = personById(world, id);
+        if (!other || other.role !== 'neighbor' || (other.bonds[person.id] ?? 0) < 0.3 || closeKin(person, other)) continue;
+        const away = distance(person, other);
+        if (away <= leyPoblacion.radioPareja || away > leyPoblacion.radioCortejo || !reproductiveReadiness(world, other)) continue;
+        if (!cortejado || away < distance(person, cortejado) || (away === distance(person, cortejado) && other.id < cortejado.id)) {
+          cortejado = other; vinculo = (strength + (other.bonds[person.id] ?? 0)) / 2;
+        }
       }
+      if (cortejado) candidates.push({ action: 'approach', target: { x: cortejado.x, y: cortejado.y },
+        score: leyPoblacion.cortejo * (0.5 + vinculo * 0.5),
+        reason: `Recuerda el vínculo con ${cortejado.name} y lo busca; ambos están en edad de criar y la cercanía hace posible `
+          + 'una familia.' });
     }
-    if (cortejado) candidates.push({ action: 'approach', target: { x: cortejado.x, y: cortejado.y }, score: leyPoblacion.cortejo * (0.5 + vinculo * 0.5),
-      reason: `Recuerda el vínculo con ${cortejado.name} y lo busca; ambos están en edad de criar y la cercanía hace posible una familia.` });
   }
   // Reencuentro (`social.reencuentro`): más allá de RADIUS sólo el cortejo acerca a dos mortales, y exige que los
   // dos estén listos para criar a la vez. Cuando un grupo se dispersa (se agotan sus charcas), nadie lo vuelve a
@@ -612,20 +695,27 @@ function choose(world: World, person: Person): void {
   const reencuentro = paramsOf(world).social.reencuentro;
   if (reencuentro > 0 && person.role === 'neighbor' && person.hunger <= 0.45 && person.thirst <= 0.45
     && person.energy >= 0.6 && person.fatigue <= 0.65) {
-    let suyoALaVista = false, destino: Person | undefined, vinculo = 0;
-    for (const [id, strength] of Object.entries(person.bonds)) {
-      if (strength < 0.3) continue;
-      const other = personById(world, id);
-      if (!other || other.role !== 'neighbor' || (other.bonds[person.id] ?? 0) < 0.3) continue;
-      const away = distance(person, other);
-      if (away <= RADIUS) { suyoALaVista = true; break; }
-      if (away > leyPoblacion.radioCortejo) continue;
-      if (!destino || away < distance(person, destino) || (away === distance(person, destino) && other.id < destino.id)) {
-        destino = other; vinculo = (strength + (other.bonds[person.id] ?? 0)) / 2;
+    if (leyPoblacion.cortejoLocal) {
+      const recuerdo = suyosALaVista > 0 ? undefined : nearestSighting(person, (_, away) => away <= leyPoblacion.radioCortejo);
+      if (recuerdo) candidates.push({ action: 'approach', target: { x: recuerdo.sighting.x, y: recuerdo.sighting.y },
+        score: reencuentro * (0.5 + recuerdo.bond * 0.5),
+        reason: `Vuelve a donde vio por última vez a ${knownName(world, recuerdo.id)}; no ve cerca a nadie de los suyos.` });
+    } else {
+      let suyoALaVista = false, destino: Person | undefined, vinculo = 0;
+      for (const [id, strength] of Object.entries(person.bonds)) {
+        if (strength < 0.3) continue;
+        const other = personById(world, id);
+        if (!other || other.role !== 'neighbor' || (other.bonds[person.id] ?? 0) < 0.3) continue;
+        const away = distance(person, other);
+        if (away <= RADIUS) { suyoALaVista = true; break; }
+        if (away > leyPoblacion.radioCortejo) continue;
+        if (!destino || away < distance(person, destino) || (away === distance(person, destino) && other.id < destino.id)) {
+          destino = other; vinculo = (strength + (other.bonds[person.id] ?? 0)) / 2;
+        }
       }
+      if (!suyoALaVista && destino) candidates.push({ action: 'approach', target: { x: destino.x, y: destino.y },
+        score: reencuentro * (0.5 + vinculo * 0.5), reason: `Vuelve hacia ${destino.name}; no ve cerca a nadie de los suyos.` });
     }
-    if (!suyoALaVista && destino) candidates.push({ action: 'approach', target: { x: destino.x, y: destino.y },
-      score: reencuentro * (0.5 + vinculo * 0.5), reason: `Vuelve hacia ${destino.name}; no ve cerca a nadie de los suyos.` });
   }
   const water = primeroConFiltroCaro(reachableTiles, disputada
     ? (a, b) => (distance(person, a) + recelo(a)) - (distance(person, b) + recelo(b))
@@ -1411,6 +1501,8 @@ function reproduce(world: World): void {
       technology: initialTechnologyKnowledge(), demography: initialDemography(),
     };
     delete child.home;
+    // Los avistamientos de `a` son de SUS vínculos; la cría nace sin vínculos y sin nadie que recordar.
+    delete child.sightings;
     // `agua.memoria`: la cría nace junto a sus padres y conserva el aguadero de `a` (copiado arriba con el
     // resto de su estado); es información, no agua: si está seco lo olvidará al verlo, como cualquiera.
     if (a.waterMemory) child.waterMemory = { x: a.waterMemory.x, y: a.waterMemory.y };

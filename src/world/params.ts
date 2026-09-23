@@ -43,7 +43,13 @@ export interface WorldParams {
     /** Cortejo (2026-09-22): peso con que una persona fértil busca a otra fértil, no emparentada y con
      * vínculo mutuo ≥ 0,3 que está fuera de `radioPareja` pero dentro de `radioCortejo`. Histórico 0 / 24
      * (apagado); reglas 10 adopta 2 / 128 para mundos nuevos. */
-    cortejo: number; radioCortejo: number };
+    cortejo: number; radioCortejo: number;
+    /** Cortejo y reencuentro locales (`index.ts` → `choose`). Con `true` cada cual recuerda, de cada vinculado mutuo,
+     * el último lugar y paso en que lo VIO (a ≤ RADIUS) y lo que vio: etapa de vida, parentesco cercano y el vínculo
+     * que le mostraba. Cortejo y reencuentro eligen entre esos recuerdos por distancia al LUGAR recordado y van allí;
+     * nunca leen la posición, el cuerpo ni la vida de quien no ven. Quien tiene ese lugar a la vista sin encontrarlo
+     * no lo vuelve a buscar hasta verlo otra vez. `false` = hoy (default e histórico). */
+    cortejoLocal: boolean };
   recursos: { capacidadBosque: number; capacidadPastizal: number; capacidadOtros: number; velocidadRegeneracion: number; decaimientoFertilidad: number; decaimientoComida: number };
   persistencia: { cadaTicks: number; ventanaEventosTicks: number; paginasSucias: boolean };
   /** Agua superficial concentrada en cuencas: 1 = generación actual (todas las charcas/manantiales); < 1 conserva solo las de las cuencas más húmedas (T035).
@@ -140,7 +146,7 @@ const RAW_HISTORICAL: WorldParams = {
   // Ruling R17: `maxima` ya no es un tope de diseño (era 40); por defecto no limita y el
   // freno lo ponen el entorno y el gobernador. Sigue siendo parámetro para el laboratorio.
   poblacion: { maxima: 1_000_000, intervaloComprobacionTicks: 120, nacimientosPorComprobacion: 2,
-    exigeComunidad: true, radioPareja: 3, radioLugar: 4, comprobacionContinua: false, cortejo: 0, radioCortejo: 24 },
+    exigeComunidad: true, radioPareja: 3, radioLugar: 4, comprobacionContinua: false, cortejo: 0, radioCortejo: 24, cortejoLocal: false },
   recursos: { capacidadBosque: 1, capacidadPastizal: 0.7, capacidadOtros: 0.35, velocidadRegeneracion: 1, decaimientoFertilidad: 0.001, decaimientoComida: 0.0001 },
   persistencia: { cadaTicks: 1, ventanaEventosTicks: 0, paginasSucias: false },
   agua: { cuencas: 0.4, memoria: 1, rebano: 0 },
@@ -189,7 +195,7 @@ export const DEFAULT_PARAMS: WorldParams = deepFreeze(RAW_DEFAULTS);
  * `poblacion.cortejo` 0, `poblacion.radioCortejo` 24, `poblacion.exigeComunidad` true,
  * `poblacion.comprobacionContinua` false y `conducta.habituacion` 0. Las demás claves añadidas la
  * noche del 2026-09-22 ya tienen por default su valor histórico y aquí valen lo mismo:
- * `genes.edadFundadoresMin/MaxDias` 2/2, `poblacion.radioPareja` 3, `poblacion.radioLugar` 4,
+ * `genes.edadFundadoresMin/MaxDias` 2/2, `poblacion.radioPareja` 3, `poblacion.radioLugar` 4, `poblacion.cortejoLocal` false,
  * `agua.memoria` 1, `agua.rebano` 0, `conducta.aptitud` 0, `social.*` (disputas 0,65/×1/2/0,5/180, rareza 0,
  * confianza 0,35, distancia 0,2, `maxComunidades` 8, `vinculoConvivencia` 0, `radioConvivencia` 0, `reencuentro` 0).
  *
@@ -325,6 +331,7 @@ export const PARAM_DESCRIPTORS: Readonly<Record<string, ParamDescriptor>> = deep
     { kind: 'number', range, integer: key === 'motor.hilos' || key === 'social.disputaEspera' || key === 'social.maxComunidades' || key.startsWith('limites.') }])),
   'poblacion.exigeComunidad': { kind: 'boolean' },
   'poblacion.comprobacionContinua': { kind: 'boolean' },
+  'poblacion.cortejoLocal': { kind: 'boolean' },
   'motor.clonPorPaso': { kind: 'boolean' },
   'motor.soaTerreno': { kind: 'boolean' },
   'motor.particionarPersonas': { kind: 'boolean' },

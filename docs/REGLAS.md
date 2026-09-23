@@ -575,6 +575,7 @@ la clave (`HISTORICAL_PARAMS`); en todas las demás filas default e histórico c
 | `poblacion.comprobacionContinua` | **`true`** (reglas 10; histórico `false`) | booleano | Muestrea `reproduce()` cada paso en vez de cada `intervaloComprobacionTicks`; el techo por ventana no cambia | Noche de ciencia 2026-09-22 · reglas 10 |
 | `poblacion.cortejo` | **2** (reglas 10; histórico 0) | [0, 5] | Peso con que una persona fértil busca a otra fértil, no emparentada y con vínculo mutuo ≥ 0,3 que está fuera de `radioPareja` pero dentro de `radioCortejo` (acción `approach`, puntuación `cortejo · (0,5 + vínculo/2)`); 0 = apagado | Noche 2026-09-22 · reglas 10 |
 | `poblacion.radioCortejo` | **128** (reglas 10; histórico 24) | [1, 128] | Alcance del cortejo, en celdas | Noche 2026-09-22 · reglas 10 |
+| `poblacion.cortejoLocal` | `false` | booleano | Cortejo y reencuentro locales: con `true` cada cual recuerda dónde y cuándo vio por última vez a cada vinculado mutuo (y lo que vio de él) y las dos leyes van a ese LUGAR, no a la posición actual; quien tiene el lugar a la vista sin encontrarlo allí no lo vuelve a buscar hasta verlo. `false` = hoy | Noche 2026-09-23 |
 
 #### Leyes candidatas (noche de ciencia, 2026-09-22)
 
@@ -843,6 +844,58 @@ Réplica informativa, no prerregistrada (reglas 10 + `persistencia.cadaTicks=300
 `social.reencuentro=1`, una réplica): nacimientos acumulados control → ley en 13: 18 → 24 el día 10 y 18 → 35 el
 día 14; en 23: 23 → 31 el día 10 y 29 → 36 el día 14. Son las cifras del contrafáctico `CF_COHESION=1`, así que
 el parámetro reproduce la emulación. El coste se ve: muertes por sed al día 10, 12 → 14 en 13 y 12 → 18 en 23.
+
+#### Cortejo y reencuentro locales (`poblacion.cortejoLocal`)
+
+Problema de coherencia (constitución III: leyes locales de cuerpo, necesidad, material y memoria). El cortejo de
+reglas 10 elige al vinculado mutuo fértil más cercano hasta `radioCortejo` (128 celdas) y pone como destino su
+posición ACTUAL, aunque la percepción llegue a 7 (RADIUS): sabe dónde está alguien a cien celdas. El reencuentro
+(H2) hace lo mismo. Los dos descartan además a los vinculados muertos buscándolos en el mundo, y el cortejo exige
+que el cuerpo del otro esté listo para criar AHORA (`reproductiveReadiness` del otro), cosa que tampoco se ve.
+
+La ley, en `choose`, con `true` (default e histórico `false`):
+
+1. **Avistamiento.** Al decidir, quien ve a ≤ RADIUS a un vinculado mutuo (vecino, vínculo ≥ 0,3 en los dos
+   sentidos) anota en `sightings[id]` el lugar, el paso y lo que ve de él: `fertile` (adulto en edad fértil:
+   madurez ≤ edad < inicio de la vejez, la misma frontera que `lifeStage` en la vista), `kin` (pariente cercano,
+   `closeKin`) y `bond` (el vínculo que le muestra). Si al verlo el vínculo ya no es mutuo, borra la entrada. Se
+   percibe al decidir, como todo lo que `choose` mira: un vinculado que cruza su vista entre dos decisiones no se
+   anota.
+2. **Buscado sin éxito.** Una entrada cuyo lugar tiene a la vista (≤ RADIUS) sin ver allí a su dueño queda
+   `missed`: sabe que ya no está donde lo dejó y no la vuelve a elegir hasta un nuevo avistamiento (no hay bucle de
+   ir y volver a un lugar vacío). Si lo ve marcharse, también lo sabe: su último lugar ya está a la vista y vacío.
+3. **Cortejo.** Entre los recuerdos no `missed`, con vínculo propio ≥ 0,3, `bond` ≥ 0,3, `fertile` y no `kin`,
+   cuyo LUGAR está a más de `radioPareja` y a ≤ `radioCortejo`, el más cercano (a igual distancia, el id menor); el
+   destino es ese lugar. Se sigue exigiendo la disposición propia (`reproductiveReadiness` de quien corteja).
+4. **Reencuentro.** El mismo umbral corporal de hoy. «Ve a uno de los suyos» es ver ahora a un vinculado mutuo; si
+   no ve a ninguno, va al recuerdo no `missed` más cercano a ≤ `radioCortejo`, sin mirar edad ni parentesco.
+
+Qué se lee. De quien no se ve, nada: ni su posición, ni su cuerpo, ni si vive; la distancia es al lugar recordado.
+Del recordado sólo se busca su nombre para el texto de la razón, después de elegir (identidad fija, no estado). De
+quien se ve se lee lo que se ve: posición, edad (con su genoma, para la etapa), padres y el vínculo que muestra. Lo
+pasajero del otro (hambre, sed, energía, salud, el descanso tras una crianza) no se recuerda: la edad fértil que el
+cortejo exige es la vista, y `reproduce()` sigue exigiendo el cuerpo listo cuando los dos están a ≤ `radioPareja`.
+
+Memoria acotada: sus claves son un subconjunto de `bonds` (tope = el de vínculos), la cría nace sin ella, viaja en
+la instantánea y `assertLifeState` (`validation.ts`) exige los siete campos, un paso no futuro y un vínculo propio
+detrás de cada entrada. El viaje se paga como cualquier otro: si el recuerdo es viejo, se pierde el camino.
+
+Resto no local, anterior a esta ley: al morir alguien todos borran su vínculo con él (`lineage.ts`), y con el
+vínculo se va el avistamiento, así que nadie sigue buscando a un muerto aunque no lo haya visto morir. Es el
+mecanismo de vínculos que comparten todas las leyes sociales; cambiarlo (vínculos con muertos, enterarse al llegar)
+queda fuera de esta ley.
+
+Con `false` el mundo es bit a bit el de antes: `tests/cortejo-local.test.ts` (i) compara a 2400 pasos las semillas
+13 y 1054 con reglas 10, el brazo B de la ronda 5 (reglas 10 + conflicto legible) y el brazo B con H2 contra los
+digestos de ace0bb1. Las escenas (ii)–(vi) prueban que va al lugar recordado aunque la pareja se haya ido, que su
+elección es la misma esté donde esté o aunque ya no exista, que la edad exigida es la vista y que deja de buscar tras
+no encontrarla; (vii)–(viii), la persistencia y la validación.
+
+Réplica informativa, no prerregistrada (una réplica por semilla, 8 días, `--techo-lab 100`; control = las réplicas
+de la ronda 5 en ace0bb1, idénticas bit a bit a esta rama con `false`): nacimientos acumulados al día 8, control →
+ley, con el brazo B + H2 en 13: 21 → 23 y en 23: 37 → 43; con el brazo B (sólo cortejo) en 1054: 2 → 4 y en 1055:
+2 → 1. Muertes por sed al día 8: 9 → 10, 5 → 5, 9 → 8 y 5 → 5. Quitar el conocimiento a distancia no hunde la
+natalidad en estas cuatro semillas; con una réplica no se distingue del ruido.
 
 ### Leyes nuevas (calibradas 2026-09-19, fallback analítico; barrido T031 pendiente post-evento)
 

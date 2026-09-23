@@ -60,6 +60,19 @@ function assertFaunaStock(tiles:Tile[],animals:World['animals']):void {
   const counts=new Map<string,number>();for(const a of animals){const key=`${a.x},${a.y}`;counts.set(key,(counts.get(key)??0)+1);}
   for(const tile of tiles)if((tile.fauna??0)!==(counts.get(`${tile.x},${tile.y}`)??0))fail();
 }
+const SIGHTING_KEYS = ['x', 'y', 'tick', 'fertile', 'kin', 'bond', 'missed'];
+/** Memoria de avistamientos (`poblacion.cortejoLocal`): sólo de vinculados propios (a lo sumo tantas entradas como
+ * vínculos, que `assertWorld` ya ató a gente viva), cada una con sus siete campos y un paso que no está en el futuro. */
+function assertSightings(value: unknown, bonds: Record<string, number>, tick: number): void {
+  if (!object(value)) return fail();
+  for (const [id, entry] of Object.entries(value)) {
+    if (!Object.hasOwn(bonds, id) || !object(entry)) return fail();
+    if (Object.keys(entry).length !== SIGHTING_KEYS.length
+      || SIGHTING_KEYS.some(key => !Object.hasOwn(entry, key)) || !coordinate(entry.x) || !coordinate(entry.y)
+      || !integer(entry.tick, tick) || typeof entry.fertile !== 'boolean' || typeof entry.kin !== 'boolean'
+      || !number(entry.bond) || typeof entry.missed !== 'boolean') fail();
+  }
+}
 export function assertLifeState(world: World): void {
   const limits=limitsOf(world,world.version);
   assertAnimals(world.animals,world.tick,world.tiles,limits.fauna);
@@ -91,6 +104,7 @@ export function assertLifeState(world: World): void {
     if(person.home!==undefined&&(!object(person.home)||!coordinate(person.home.x)||!coordinate(person.home.y)||!number(person.home.quality)||!integer(person.home.observedAt,world.tick)))fail();
     if(person.waterMemory!==undefined&&(!object(person.waterMemory)||Object.keys(person.waterMemory).length!==2||!coordinate(person.waterMemory.x)||!coordinate(person.waterMemory.y)))fail();
     if(person.conflictMemory!==undefined&&(!object(person.conflictMemory)||Object.keys(person.conflictMemory).length!==3||!coordinate(person.conflictMemory.x)||!coordinate(person.conflictMemory.y)||!integer(person.conflictMemory.tick,world.tick)))fail();
+    if(person.sightings!==undefined)assertSightings(person.sightings,person.bonds,world.tick);
   }
   const animalIds=new Set(world.animals.map(a=>a.id)),structureIds=new Set(world.structures.map(s=>s.id));
   for(const chunk of world.retiredChunks) {

@@ -28,6 +28,7 @@ import { advanceWaterPreparation, beginWaterPreparation, canHandleContainedWater
 import { flowQuantized, WATER_QUANTA_PER_UNIT } from './material-affordances.js';
 import { DEFAULT_PARAMS, MAX_FOUNDER_AGE_TICKS, paramsOf, setParams, limitsOf, type WorldParams } from './params.js';
 import { algunoCerca, filtrarCerca, primeroCerca } from './indice-puntos.js';
+import { conRejilla, personaMovida, vecinos } from './rejilla.js';
 export { bindWorldContext, tileAt, normalizeViewport, worldContext } from './spatial.js';
 export type { WorldContext } from './spatial.js';
 
@@ -428,7 +429,7 @@ function choose(world: World, person: Person): void {
   });
   const planAffordable = (steps: number, work: number) => person.energy >= steps * (.0008 + payload * .0008) + work * .0003
     && person.fatigue + steps * (.0007 * (1.2 - person.traits.resilience * .4) + payload * .0007) + work * .00025 * (1.2 - person.traits.resilience * .4) < 1;
-  const nearbyPeople = world.people.filter(other => other.id !== person.id && distance(person, other) <= RADIUS);
+  const nearbyPeople = vecinos(world, person, RADIUS + 1, other => other.id !== person.id && distance(person, other) <= RADIUS, 'choose');
   const partner = nearbyPeople.find(other => person.role !== 'neighbor' && other.role !== 'neighbor');
   const candidates: Candidate[] = [{ action: 'explore', target: person.target, score: 0.33 + person.curiosity * 0.18, reason: 'Tiene energía y curiosidad por lo que hay cerca.' }];
   // Ley DIV (`conducta.aptitud`): la especialización es para quien no tiene urgencias. Sólo actúa
@@ -847,7 +848,7 @@ function resourceDistance(person: Person, tile: Tile): number {
 function explorationTarget(world: World, person: Person, tiles: Tile[]): Point {
   const options = tiles.filter(t => distance(person, t) >= 3 && distance(person, t) <= 6);
   const heading = { x: Math.cos(person.heading), y: Math.sin(person.heading) };
-  const companions = world.cooperationEnabled ? world.people.filter(p => p.id !== person.id && distance(person, p) <= 7 && (person.bonds[p.id] ?? 0) > 0.3) : [];
+  const companions = world.cooperationEnabled ? vecinos(world, person, 8, p => p.id !== person.id && distance(person, p) <= 7 && (person.bonds[p.id] ?? 0) > 0.3, 'explorationTarget') : [];
   const score = (t: Tile) => ((t.x - person.x) * heading.x + (t.y - person.y) * heading.y) * 0.2 + (world.noveltyEnabled && !person.visited.includes(`${t.x},${t.y}`) ? 2 : 0)
     + (t.traffic ?? 0) * 0.1 + (companions.length ? (distance(person, companions[0]!) - distance(t, companions[0]!)) * person.sociability * (1 - person.curiosity) * 0.18 : 0);
   return primero(options, (a, b) => score(b) - score(a) || a.x - b.x || a.y - b.y) ?? person;
@@ -910,6 +911,7 @@ function move(world: World, person: Person): void {
   while (previous.get(key(best)) !== start) best = previous.get(key(best))!;
   if (!payContainedWaterCarry(world, person)) { person.reason = 'La carga de agua requiere más esfuerzo del que puede hacer ahora.'; return; }
   person.x = best.x; person.y = best.y;
+  personaMovida(world, person);
   trampleTile(tileAt(world, person)!);
   exertBody(person, { energy: 0.0008, fatigue: 0.0007 * (1.2 - person.traits.resilience * 0.4) });
   if (!person.visited.includes(key(person))) {
@@ -925,7 +927,7 @@ function move(world: World, person: Person): void {
 function share(world: World, donor: Person): void {
   if (donor.inventory < 0.025 || donor.hunger >= 0.5 || world.tick - donor.lastShared < 30) return;
   const place = primeroCerca(world.places, donor, 4, p => distance(donor, p) <= 3);
-  const recipient = world.people.filter(p => p.id !== donor.id && p.hunger > 0.27 && distance(p, donor) <= 2).sort((a, b) => b.hunger - a.hunger)[0];
+  const recipient = vecinos(world, donor, 3, p => p.id !== donor.id && p.hunger > 0.27 && distance(p, donor) <= 2, 'share:recipient').sort((a, b) => b.hunger - a.hunger)[0];
   if (!place || !recipient || !availableToShare(world, donor, recipient)) return;
   donor.inventory = clamp(donor.inventory - 0.025, 0.25);
   donor.energy = clamp(donor.energy - 0.001);
@@ -947,8 +949,7 @@ function share(world: World, donor: Person): void {
   remember(donor, world, `Compartió alimento en ${place.name}.`, event.id, place.id);
   remember(recipient, world, `Recibió alimento de ${donor.name}.`, event.id, place.id);
   if (!world.learningEnabled) return;
-  for (const observer of world.people) {
-    if (observer.id === donor.id || distance(observer, donor) > 3) continue;
+  for (const observer of vecinos(world, donor, 4, observer => !(observer.id === donor.id || distance(observer, donor) > 3), 'share:observers')) {
     let observed = observer.habits.find(h => h.placeId === place.id);
     if (!observed) {
       observed = { placeId: place.id, observations: 0, strength: 0, demonstrator: donor.id, sourceEvent: event.id, repetitions: 0, evidence: [] };
@@ -1214,7 +1215,7 @@ export function stepWorld(world: World, inputs: Gesture[] = [], context: WorldCo
   // del guardado, fuera del paso), así que sus lecturas a fecha de este tick van como un lote del
   // anfitrión, con un solo sello de la memoria de lecturas del Store en vez de uno por lectura (~900 por
   // paso con ~230 habitantes). El mundo resultante es el mismo; ver `readBatch` en store.ts.
-  return withArchiveReadBatch(world, () => advanceTick(world, inputs, context, medicion));
+  return withArchiveReadBatch(world, () => conRejilla(world, () => advanceTick(world, inputs, context, medicion)));
 }
 function advanceTick(world: World, inputs: Gesture[], context: WorldContext, medicion: FaseMedicion | undefined): GestureResult[] {
   medirFase(medicion, 'maintainRegions', () => maintainRegions(world, context));
@@ -1252,7 +1253,7 @@ function advanceTick(world: World, inputs: Gesture[], context: WorldContext, med
 
 function transferEstate(world: World, person: Person): void {
   cancelTechnologyProject(world,person);
-  const recipients=world.people.filter(other=>other!==person&&other.demography.deathCause===null&&distance(person,other)<=2).sort((a,b)=>distance(person,a)-distance(person,b)||a.id.localeCompare(b.id));
+  const recipients=vecinos(world,person,3,other=>other!==person&&other.demography.deathCause===null&&distance(person,other)<=2,'transferEstate').sort((a,b)=>distance(person,a)-distance(person,b)||a.id.localeCompare(b.id));
   let transferred=0;
   for (const other of recipients) {
     const food=Math.min(person.inventory,Math.max(0,0.25-other.inventory)); person.inventory-=food; other.inventory+=food; transferred+=food;
@@ -1295,7 +1296,7 @@ function reproduce(world: World): void {
       if (!fit(a)) continue;
       const here = primeroCerca(world.places, a, pop.radioLugar + 1, p => distance(a, p) <= pop.radioLugar);
       if (!here) continue;
-      const b = chooseReproductivePartner(world, a, world.people.filter(p => match(a, p)), ELECCION_POR_AFINIDAD);
+      const b = chooseReproductivePartner(world, a, vecinos(world, a, pop.radioPareja + 1, p => match(a, p), 'reproduce'), ELECCION_POR_AFINIDAD);
       if (!b) continue;
       if (!ELECCION_POR_AFINIDAD) { pair = { a, b }; place = here; break; }
       const afinidad = pairAffinity(a, b, pop.radioPareja), mejor = pair ? pairAffinity(pair.a, pair.b, pop.radioPareja) : -Infinity;

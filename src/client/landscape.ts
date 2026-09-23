@@ -19,7 +19,7 @@ import type { Capability } from '../shared/technology.js';
 import { decidirModo, rendererProfile, type Modo } from './modo.js';
 import { dibujarCalor, type Capa, type RangoCalor } from './calor.js';
 import { claveRegion } from './regiones.js';
-import { getTerrainAtlas, TERRAIN_ATLAS_TILE, TERRAIN_VARIANTS, type AtlasBiome, type AtlasCell, type WorkedGroundState } from './terrain-atlas.js';
+import { getTerrainAtlas, TERRAIN_ATLAS_TILE, TERRAIN_VARIANTS, threshold as bayerThreshold, type AtlasBiome, type AtlasCell, type WorkedGroundState } from './terrain-atlas.js';
 
 /* ------------------------------------------------------------------ */
 /* Tipos públicos                                                      */
@@ -51,6 +51,8 @@ const PERSON_HIT = 0.65;
 /** Margen (en tiles) de mar visible alrededor de la isla al encuadrar. */
 const FIT_PADDING = 1.4;
 const FOCUS_MS = 380;
+const MOISTURE_LAYER_PHASE = 41;
+const FOOD_LAYER_PHASE = 42;
 
 /* ------------------------------------------------------------------ */
 /* Utilidades de color                                                 */
@@ -1561,15 +1563,20 @@ export class Landscape {
 
   private drawLayerCell(g: CanvasRenderingContext2D, tile: Tile, ox: number, oy: number): void {
     if (this.layer === 'none') return;
-    if (this.layer === 'moisture') {
-      const v = clamp01(tile.moisture);
-      if (v < 0.05) return;
-      px(g, ox, oy, ART, ART, css(P.waterShallow, v * 0.45));
-    } else {
-      const v = clamp01(tile.food);
-      if (v < 0.05) return;
-      px(g, ox, oy, ART, ART, css(P.amber, v * 0.42));
-    }
+    const moisture = this.layer === 'moisture';
+    const v = clamp01(moisture ? tile.moisture : tile.food);
+    if (v <= 0) return;
+    const phase = moisture ? MOISTURE_LAYER_PHASE : FOOD_LAYER_PHASE;
+    // Tramado por tesela entera (halftone), no por píxel: un `fillRect` por
+    // tesela como antes, pero su aparición depende de una matriz de Bayer en
+    // vez de un corte binario en 0.05 — un valor bajo aparece disperso
+    // (algunas teselas sí, otras no) y crece hacia sólido con `v`, en vez de
+    // saltar de la nada a un bloque uniforme. Tramar por píxel (256 `fillRect`
+    // por tesela) medía ~103 ms/frame con esta capa activa sobre un visor
+    // típico de referencia (mundo 96×60 teselas, la mayoría visibles); por
+    // tesela entera el costo es el mismo que el bloque sólido que reemplaza.
+    if (bayerThreshold(tile.x, tile.y, phase) >= v) return;
+    px(g, ox, oy, ART, ART, css(moisture ? P.waterShallow : P.amber, moisture ? .45 : .42));
   }
 
   /* ---------------------------- personas --------------------------- */

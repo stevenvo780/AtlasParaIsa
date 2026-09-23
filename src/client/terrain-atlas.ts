@@ -77,7 +77,7 @@ const BAYER8 = [
  * distintas entre sí. Quien cambie esta sal debe re-verificar
  * `tests/landscape-state.test.ts`.
  */
-function threshold(x: number, y: number, phase: number): number {
+export function threshold(x: number, y: number, phase: number): number {
   const h = hash3(phase, 0, 1);
   return (BAYER8[(((y + ((h >>> 3) & 7)) & 7) * 8) + ((x + (h & 7)) & 7)]! + .5) / 64;
 }

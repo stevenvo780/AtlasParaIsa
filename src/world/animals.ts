@@ -277,6 +277,20 @@ function feed(animal: Animal, tile: Tile, world: AnimalWorld): void {
     if (animal.energy > 0.75 && animal.fatigue < 0.2) animal.lastDecision = world.tick - 12;
   }
 }
+/** Same number as `world.tiles.filter(t => t.terrain !== 'shelter' && (t.growth ?? 0) > 0.04).length`,
+ * without allocating the intermediate array. `reproduce` calls this at most once per tick, guarded by
+ * `capacity ??=` below, so it already runs once per `stepAnimals`, not once per animal. A cache kept
+ * ACROSS ticks (by `world.tiles` reference, as `tile-index.ts` does for position) would go stale the
+ * moment any tile's `growth` crosses 0,04: `stepEcosystem`, `trampleTile` and `cultivateTile`
+ * (`index.ts`, `ecosystem.ts`, `ecosystem-kernel.ts`) rewrite `growth` every tick, outside the fauna
+ * capacity's declared scope (regla 1) and unseen from here. Maintaining the count incrementally needs
+ * those sites to report their own deltas — proposed for T140 ("recuento incremental mantenido por el
+ * paso ecológico"), not attempted here: a wrong number would change `digestoCanonico`. */
+function faunaCapacity(tiles: readonly Tile[]): number {
+  let count = 0;
+  for (const t of tiles) if (t.terrain !== 'shelter' && (t.growth ?? 0) > 0.04) count++;
+  return count * 3;
+}
 function reproduce(world: AnimalWorld, state: LocalState, active: Animal[], emit?: AnimalEmitter): void {
   if (world.reproductionEnabled === false) return;
   // Eligibility uses biological time. A global modulo would permanently exclude some rotating cohorts.
@@ -295,7 +309,7 @@ function reproduce(world: AnimalWorld, state: LocalState, active: Animal[], emit
     if (!b) continue;
     // Capacidad de cría = capacidad NATURAL del terreno. `limites.fauna` es admisión (lanza en
     // `stepAnimals`), nunca una política silenciosa: la máquina no decide cuántos animales nacen.
-    capacity ??= world.tiles.filter(t => t.terrain !== 'shelter' && (t.growth ?? 0) > 0.04).length * 3;
+    capacity ??= faunaCapacity(world.tiles);
     if (world.animals.length >= capacity) break;
     const parents = [a.id, b.id].sort(), id = `animal-born-${world.seed >>> 0}-${world.tick}-${++world.animalCounter}`;
     const inherited = Object.fromEntries(Object.keys(a.genes).map(name => {

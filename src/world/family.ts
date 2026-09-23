@@ -3,6 +3,7 @@ import { demographicTraits, updateDemography } from './demography.js';
 import { localRandom } from './genetics.js';
 import { DEFAULT_PARAMS, paramsOf } from './params.js';
 import { algunoCerca } from './indice-puntos.js';
+import { vecinos } from './rejilla.js';
 
 export const FAMILY_RESERVE_TARGET = 0.12;
 const SHARE_AMOUNT = 0.025;
@@ -98,7 +99,7 @@ export function earlierForagerExhausts(
  * Both partners retain their communities; mutual local trust can cross their labels. */
 export function familyOpportunity(world: World, person: Person): FamilyOpportunity | null {
   if (!world.reproductionEnabled || !person.communityId || !reproductiveReadiness(world, person)) return null;
-  const partner = world.people.filter(other => other !== person && other.id !== person.id && !!other.communityId
+  const partner = vecinos(world, person, 8, other => other !== person && other.id !== person.id && !!other.communityId
     && distance(person, other) <= 7 && (person.bonds[other.id] ?? 0) >= 0.3 && (other.bonds[person.id] ?? 0) >= 0.3
     && !closeKin(person, other) && reproductiveReadiness(world, other)
     && algunoCerca(world.places, person, 8, place => distance(person, place) <= 7 && (distance(person, place) <= 4 || distance(other, place) <= 4)))

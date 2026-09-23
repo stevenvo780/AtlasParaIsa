@@ -882,9 +882,10 @@ export class Landscape {
     const water = clamp01(tile.drinkingWater ?? 0);
     const reservoir = tile.feature === 'spring' || tile.feature === 'pool';
     if (water > .04 && (reservoir || tile.biome === 'wetland' || tile.moisture > .65)) {
-      ellipse(g, ox+10, oy+11, 2 + water*3, 1+water*2, css(P.soilDark));
-      ellipse(g, ox+10, oy+10, 1 + water*3, .5+water*2, css(P.waterShallow));
-      px(g, ox+9, oy+9, Math.max(1,Math.round(water*3)), 1, css(P.waterGleam, .65));
+      const level = groundBucket(water), wide = level >= 8, cx = ox + 7 + hash3(x, y, 2100) % 4;
+      ellipse(g, cx, oy+11, wide ? 5 : 4, wide ? 3 : 2, css(P.soilDark, .72));
+      ellipse(g, cx, oy+10, wide ? 4 : 3, wide ? 2 : 1, css(P.water));
+      px(g, cx-1, oy+9, wide ? 3 : 2, 1, css(P.waterShallow, .72));
     }
     const feature = tile.feature;
     if (reservoir && water <= .04) {
@@ -903,14 +904,25 @@ export class Landscape {
     } else if (feature === 'rock' || feature === 'clay') {
       const stock = feature === 'rock' ? (tile.stone ?? 0) : (tile.fertility ?? .6) * 8;
       if (stock > .2) {
-        const size = Math.min(5, 2 + stock / 3), color = feature === 'clay' ? rgb(185,118,88) : P.stone;
-        ellipse(g,ox+8,oy+12,size+1,2,css(P.shadow,.2)); ellipse(g,ox+8,oy+9,size,size*.7,css(darken(color,.2)));
-        ellipse(g,ox+7,oy+8,size*.8,size*.5,css(color)); px(g,ox+6,oy+6,3,1,css(lighten(color,.2)));
+        const level = feature === 'rock' ? Math.round(stock * 2) : groundBucket(tile.fertility ?? .6);
+        const size = level >= 8 ? 4 : level >= 4 ? 3 : 2;
+        const cx = ox + 6 + hash3(x, y, 2200) % 5, cy = oy + 8 + hash3(x, y, 2220) % 3;
+        const base = feature === 'clay' ? P.soil : P.stone, shade = feature === 'clay' ? P.soilDark : P.stoneShade;
+        ellipse(g,cx+1,cy+3,size+1,2,css(P.shadow,.18)); ellipse(g,cx,cy+1,size,size-1,css(shade));
+        ellipse(g,cx-1,cy,size-1,1,css(base)); px(g,cx-2,cy-1,Math.max(1,size-2),1,css(feature === 'clay' ? P.soilLight : P.stone));
       }
     } else if (feature === 'reeds') {
       for(let i=0;i<4;i++){ const h = 2+Math.round(growth*5); px(g,ox+3+i*3,oy+12-h,1,h,css(P.reed));px(g,ox+3+i*3,oy+10-h,1,2,css(P.reedLight)); }
     } else if (feature === 'flowers') {
-      for(let i=0;i<3+Math.round(growth*4);i++){const fx=ox+2+Math.floor(rnd(x,y,1800+i)*12),fy=oy+3+Math.floor(rnd(x,y,1850+i)*10); px(g,fx,fy,1,2,css(P.reed));px(g,fx-1,fy-1,3,1,css(i%2?P.paper:P.berryLight));px(g,fx,fy-2,1,3,css(i%2?P.amber:P.coral));}
+      const level = groundBucket(growth), visible = hash3(x, y, 2260) % 12 < 3 + Math.floor(level / 2);
+      const count = visible ? 1 + (level >= 7 ? 1 : 0) + (level >= 11 && hash3(x, y, 2270) % 3 === 0 ? 1 : 0) : 0;
+      const petals = [P.sageLow, P.soilLight, P.stone] as const, centres = [P.amberDeep, P.berry, P.sandDark] as const;
+      for(let i=0;i<count;i++) {
+        const fx=ox+2+Math.floor(rnd(x,y,1800+i)*12), fy=oy+4+Math.floor(rnd(x,y,1850+i)*8);
+        const swatch = hash3(x, y, 2280+i) % petals.length;
+        px(g,fx-1,fy+1,3,1,css(P.grassDark,.42)); px(g,fx,fy,1,2,css(P.mossHigh));
+        px(g,fx-1,fy-1,3,1,css(petals[swatch]!)); px(g,fx,fy-2,1,2,css(centres[swatch]!));
+      }
     }
     if (feature === 'berries' || (!feature && tile.food > .3)) this.drawBerries(g,x,y,ox,oy,tile.food,0);
     // A reservoir, bare patch or building may retain legacy wood without a living
@@ -1439,14 +1451,15 @@ export class Landscape {
   ): void {
     const f = clamp01(food);
     if (f < 0.3) return;
-    const bushes = f > 0.72 ? 2 : 1;
+    const level = groundBucket(f);
+    const bushes = level >= 10 && hash3(x, y, 2300) % 4 === 0 ? 2 : 1;
     for (let b = 0; b < bushes; b++) {
       const bx = ox + 3 + Math.floor(rnd(x, y, 950 + b) * (ART - 7));
       const by = oy + 6 + Math.floor(rnd(x, y, 980 + b) * 7);
-      ellipse(g, bx + 2, by + 3, 3, 1.4, css(P.shadow, 0.16));
-      ellipse(g, bx + 2, by, 3, 2.4, css(P.berryLeaf));
-      ellipse(g, bx + 1, by - 1, 2, 1.4, css(lighten(P.berryLeaf, 0.18)));
-      const berries = 2 + Math.round(f * 3);
+      ellipse(g, bx + 2, by + 3, 4, 2, css(P.soilDark, 0.22));
+      ellipse(g, bx + 2, by, 3, 2, css(hash3(x, y, 2320+b) & 1 ? P.berryLeaf : P.mossHigh));
+      px(g, bx + 1, by - 1, 3, 1, css(P.sageLow));
+      const berries = level >= 9 ? 3 : level >= 6 ? 2 : 1;
       for (let i = 0; i < berries; i++) {
         const dx = bx + Math.floor(rnd(x, y, 1010 + b * 8 + i) * 5);
         const dy = by - 1 + Math.floor(rnd(x, y, 1050 + b * 8 + i) * 4);

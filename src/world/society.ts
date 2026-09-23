@@ -437,7 +437,7 @@ export function resourceDispute(world: World, person: Person, emit: Emit): boole
   // `disputaEscasez` multiplica los tres umbrales de stock (comida, agua, fauna) a la vez;
   // `disputaDestino` es cuánto tienen que coincidir los dos destinos y `disputaEspera` los
   // ticks de calma que guarda cada lado tras disputar.
-  const { disputaNecesidad, disputaEscasez, disputaRadio, disputaDestino, disputaEspera } = paramsOf(world).social;
+  const { disputaNecesidad, disputaEscasez, disputaRadio, disputaDestino, disputaEspera, memoriaDisputa } = paramsOf(world).social;
   if (!world.cooperationEnabled || !person.communityId || world.tick - person.lastDispute < disputaEspera || Math.max(person.hunger, person.thirst) < disputaNecesidad) return false;
   const source = tileAt(world, person.target);
   const stock = person.action === 'drink' ? waterAvailable(world,person.target) : person.action === 'hunt' ? source?.fauna ?? 0 : source?.food ?? 0;
@@ -445,12 +445,26 @@ export function resourceDispute(world: World, person: Person, emit: Emit): boole
   const other = world.people.find(p => p !== person && p.communityId && p.action === person.action && distance(person, p) <= disputaRadio && distance(person.target, p.target) < disputaDestino && Math.max(p.hunger, p.thirst) > disputaNecesidad && world.tick - p.lastDispute >= disputaEspera);
   if (!other) return false;
   const trust = person.bonds[other.id] ?? 0.2;
+  // Conflicto legible (hipótesis CONFL, `social.memoriaDisputa`, default 0 = hoy). Diagnóstico
+  // (`scripts/lab/diagnostico-disputas.ts`, base del carril de la noche): hoy cede quien llega antes a esta
+  // comprobación —el primero en `world.people`—, no quien menos lo necesita (en 12 de 27 disputas medidas cedió
+  // el MÁS necesitado), y queda treinta pasos inmóvil: ni sed ni hambre por encima de 0,9 le dejan volver a
+  // elegir (`agreedWait`, index.ts). Luego nada le aparta de la fuente perdida (en las disputas por agua de la
+  // semilla 51926, 5 de 8 vuelven a la misma celda). En una sequía eso puede costarle la vida a quien más sed
+  // tenía. Con la ley cede quien menos lo necesita (empate: el de id mayor), vuelve a elegir al paso siguiente
+  // y recuerda un día la fuente disputada (`choose`: le parece `memoriaDisputa` celdas más lejos). Nada se
+  // crea ni se regala: el coste de la disputa (fatiga, tensión, confianza) es el mismo para los dos.
+  const legible = memoriaDisputa > 0, necesidad = (p: Person) => Math.max(p.hunger, p.thirst);
+  const cedeOtro = legible && (necesidad(other) < necesidad(person) || (necesidad(other) === necesidad(person) && other.id > person.id));
+  const cede = cedeOtro ? other : person, sigue = cedeOtro ? person : other, fuente = { x: person.target.x, y: person.target.y };
   if (trust >= 0.55 || (person.culture.openness + other.culture.openness) / 2 >= 0.65) {
     bond(world, person, other, 0.04); person.lastDispute = other.lastDispute = world.tick;
-    person.action = 'retreat'; person.target = { x: person.x, y: person.y }; person.decisionAt = world.tick + 12;
-    person.reason = 'Acordó un turno ante la escasez: deja acceder primero a su vecino.';
+    cede.action = 'retreat'; cede.target = { x: cede.x, y: cede.y }; cede.decisionAt = world.tick + 12;
+    cede.reason = legible ? 'Acordó un turno ante la escasez: su vecino lo necesita más y accede primero.' : 'Acordó un turno ante la escasez: deja acceder primero a su vecino.';
     count(world, 'cooperation');
-    emit({ kind: 'cooperation', actors: [person.id, other.id], x: person.x, y: person.y, source: 'simulation', text: `${person.name} y ${other.name} acordaron turnarse ante una fuente escasa.`, cause: 'Confianza o apertura aprendida permiten coordinar el acceso; el primero espera doce pasos y el recurso no aumenta.' });
+    emit({ kind: 'cooperation', actors: [cede.id, sigue.id], x: cede.x, y: cede.y, source: 'simulation', text: `${cede.name} y ${sigue.name} acordaron turnarse ante una fuente escasa.`, cause: legible
+      ? 'Confianza o apertura aprendida permiten coordinar el acceso; espera doce pasos quien menos lo necesita y el recurso no aumenta.'
+      : 'Confianza o apertura aprendida permiten coordinar el acceso; el primero espera doce pasos y el recurso no aumenta.' });
     return true;
   }
   if (person.communityId === other.communityId && trust >= 0.25) return false;
@@ -460,7 +474,13 @@ export function resourceDispute(world: World, person: Person, emit: Emit): boole
   bond(world, person, other, -0.08); count(world, 'conflicts');
   for (const p of [person, other]) { const group = world.communities.find(c => c.id === p.communityId); if (group) group.disputes++; }
   // Yield one contested attempt, producing an observable cost without forced violence or theft.
-  person.action = 'retreat'; person.target = { x: person.x, y: person.y }; person.decisionAt = world.tick + 30;
+  cede.action = 'retreat'; cede.target = { x: cede.x, y: cede.y }; cede.decisionAt = world.tick + (legible ? 1 : 30);
+  if (legible) {
+    cede.conflictMemory = { x: fuente.x, y: fuente.y, tick: world.tick };
+    cede.reason = 'Cedió una fuente escasa a quien la necesitaba más; la recordará y buscará otra antes de volver.';
+    emit({ kind: 'conflict', actors: [cede.id, sigue.id], x: cede.x, y: cede.y, source: 'simulation', text: `${cede.name} y ${sigue.name} disputaron una fuente escasa; cedió ${cede.name}.`, cause: 'Necesidades urgentes, mismo destino, confianza baja y prácticas de apertura reducida. Fatiga y tensión aumentan en los dos; cede quien menos lo necesita, que recordará esa fuente un día y preferirá otra. La diferencia de grupo por sí sola no dispara conflicto.' });
+    return true;
+  }
   person.reason = 'Una fuente escasa quedó disputada; cede el intento y busca otra posibilidad.';
   emit({ kind: 'conflict', actors: [person.id, other.id], x: person.x, y: person.y, source: 'simulation', text: `${person.name} y ${other.name} disputaron una fuente escasa.`, cause: 'Necesidades urgentes, mismo destino, confianza baja y prácticas de apertura reducida. Fatiga y tensión aumentan; uno cede el intento. La diferencia de grupo por sí sola no dispara conflicto.' });
   return true;

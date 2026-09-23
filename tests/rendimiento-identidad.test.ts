@@ -18,6 +18,11 @@
  * Reglas 10, etapa 1 (2026-09-22): la semilla 42 era «parámetros por defecto» del árbol e1adaaf, que son
  * exactamente `HISTORICAL_PARAMS`; `digestosControl` parte ahora de esa base explícita, así que los
  * tres hashes de referencia se conservan sin regenerar.
+ *
+ * Fusión CONFL (`sprint/noche-lab60c-20260922`): `social.memoriaDisputa` (default e histórico 0 = hoy)
+ * no existía en e1adaaf. Con 0 la ley no actúa, pero declarar la clave mueve `digestoCanonico` (hashea
+ * `{world, params}`, T102); el control la quita de la forma de params al hashear (`CLAVES_POSTERIORES`),
+ * así que los hashes de e1adaaf se conservan y siguen demostrando que el MUNDO no se movió ni un bit.
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -72,6 +77,38 @@ test('primero, primeroConFiltroCaro y primerosDos dan los mismos elementos que f
   }
 });
 
+test('con el recelo de CONFL (`social.memoriaDisputa`), primero y primeroConFiltroCaro eligen la misma fuente que filter + sort estable', () => {
+  // Fusión CONFL + perf: `choose` elige comida y agua con `primero*` y un comparador que suma `recelo` a la
+  // fuente disputada. Sigue siendo diferencia de una clave finita por celda (preorden total), así que el
+  // elegido debe ser el menor y, entre iguales, el primero: lo que daba el `filter().sort()[0]` de la rama CONFL.
+  const r = aleatorio(51926);
+  type Celda = { x: number; y: number; food: number; ok: boolean };
+  const distance = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(a.x - b.x, a.y - b.y);
+  let conRecelo = 0;
+  for (let caso = 0; caso < 3000; caso++) {
+    const person = caso % 2 ? { x: Math.floor(r() * 20), y: Math.floor(r() * 20) } : { x: r() * 20, y: r() * 20 };
+    const celdas: Celda[] = Array.from({ length: Math.floor(r() * 60) }, () => ({
+      x: Math.floor(person.x) + Math.floor(r() * 15) - 7, y: Math.floor(person.y) + Math.floor(r() * 15) - 7,
+      food: Math.round(r() * 8) / 16, ok: r() < 0.8 }));
+    const memoriaDisputa = [1, 2.5, 8, 32][caso % 4]!, disputaDestino = [0.1, 0.5, 1.5, 8][Math.floor(caso / 4) % 4]!;
+    const disputada = celdas.length && r() < 0.8 ? { ...celdas[Math.floor(r() * celdas.length)]! } : { x: person.x + 3, y: person.y };
+    const recelo = (tile: { x: number; y: number }) => distance(tile, disputada) < disputaDestino ? memoriaDisputa : 0;
+    if (celdas.some(c => recelo(c) > 0)) conRecelo++;
+    const comida = (a: Celda, b: Celda) => (distance(person, a) - a.food * 2 + recelo(a)) - (distance(person, b) - b.food * 2 + recelo(b));
+    const agua = (a: Celda, b: Celda) => (distance(person, a) + recelo(a)) - (distance(person, b) + recelo(b));
+    const keep = (c: Celda) => c.food > 0.025 && c.ok;
+    for (const compare of [comida, agua]) {
+      const esperado = celdas.filter(keep).sort(compare)[0];
+      assert.equal(primero(celdas, compare, keep), esperado);
+      assert.equal(primeroConFiltroCaro(celdas, compare, keep), esperado);
+    }
+  }
+  assert.ok(conRecelo > 1000, 'la prueba ejerce el recelo');
+});
+
+/** Claves declaradas después de e1adaaf que, con su valor por defecto, no actúan (ver cabecera). */
+const CLAVES_POSTERIORES = ['social.memoriaDisputa'] as const;
+
 const REFERENCIA: readonly { seed: number; params?: string; digestos: Record<'1200' | '2400', string> }[] = [
   { seed: 51926, params: LEYES_CANDIDATAS, digestos: {
     1200: '846f36fe7b2766130429979704868dc301ea34f73ab0f511ec95395efeb74a77',
@@ -93,6 +130,10 @@ test('las leyes candidatas del laboratorio son las del control', () => {
 
 for (const { seed, params, digestos } of REFERENCIA) {
   test(`semilla ${seed} (${params ? 'leyes candidatas' : 'parámetros históricos'}): digestoCanonico idéntico al árbol sin optimizar tras 1200 y 2400 pasos`, { timeout: 3_600_000 }, () => {
-    assert.deepEqual(digestosControl(seed, params, [1200, 2400]), digestos);
+    for (const clave of CLAVES_POSTERIORES) {
+      const [seccion, hoja] = clave.split('.') as [string, string];
+      assert.equal((parseParams(params, HISTORICAL_PARAMS) as unknown as Record<string, Record<string, unknown>>)[seccion]![hoja], 0, `${clave} = 0: no actúa`);
+    }
+    assert.deepEqual(digestosControl(seed, params, [1200, 2400], CLAVES_POSTERIORES), digestos);
   });
 }

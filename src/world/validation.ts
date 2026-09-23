@@ -90,6 +90,7 @@ export function assertLifeState(world: World): void {
     if(person.lastInvention!==undefined&&(!Number.isSafeInteger(person.lastInvention)||person.lastInvention< -2400||person.lastInvention>world.tick))fail();
     if(person.home!==undefined&&(!object(person.home)||!coordinate(person.home.x)||!coordinate(person.home.y)||!number(person.home.quality)||!integer(person.home.observedAt,world.tick)))fail();
     if(person.waterMemory!==undefined&&(!object(person.waterMemory)||Object.keys(person.waterMemory).length!==2||!coordinate(person.waterMemory.x)||!coordinate(person.waterMemory.y)))fail();
+    if(person.conflictMemory!==undefined&&(!object(person.conflictMemory)||Object.keys(person.conflictMemory).length!==3||!coordinate(person.conflictMemory.x)||!coordinate(person.conflictMemory.y)||!integer(person.conflictMemory.tick,world.tick)))fail();
   }
   const animalIds=new Set(world.animals.map(a=>a.id)),structureIds=new Set(world.structures.map(s=>s.id));
   for(const chunk of world.retiredChunks) {

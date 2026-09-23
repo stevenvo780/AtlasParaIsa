@@ -309,8 +309,8 @@ export function ventajaComparativa(traits: NonNullable<PersonView['traits']>, ac
 
 /** Exact physical roof predicate used by population damage, independent of display labels. */
 function bodilyShelter(world: World, point: Point): number {
-  return world.shelterBenefitEnabled && tileAt(world, point)?.terrain === 'shelter' ? Math.max(0, ...world.structures
-    .filter(s => s.x === point.x && s.y === point.y && s.condition > BROKEN_CONDITION && s.components.includes('roof'))
+  return world.shelterBenefitEnabled && tileAt(world, point)?.terrain === 'shelter' ? Math.max(0, ...filtrarCerca(world.structures, point, 0,
+    s => s.x === point.x && s.y === point.y && s.condition > BROKEN_CONDITION && s.components.includes('roof'))
     .map(s => s.condition)) : 0;
 }
 

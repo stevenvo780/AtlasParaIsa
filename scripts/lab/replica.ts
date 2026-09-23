@@ -22,6 +22,14 @@
  * la catalogación y liga el `WorldContext`, ver `src/server/store.ts:195` y
  * `src/world/spatial.ts:18-22`), y vuelve a guardar cada `persistencia.cadaTicks` ticks
  * como haría el servidor.
+ *
+ * `--techo-lab N` (entero ≥ 16; sin la bandera, nada cambia): techo DETERMINISTA de laboratorio. Emula
+ * la política `techo` del gobernador del servidor (`decidirConTecho`, src/server/governor.ts) con el
+ * techo YA FIJADO en N, en lugar del que dispara el p95 del paso (reloj de pared: no reproducible).
+ * Antes de cada paso, `world.reproductionEnabled = población < N`, con la población contada como la
+ * cuenta el servidor (`draft.people.length` en `governReproduction`, src/server/app.ts: todas las
+ * personas vivas, S e I incluidas). Cota: ver `techoLabCota` (scripts/lab/techo-lab.ts) y scripts/lab/README.md §«Techo de
+ * laboratorio». Incompatible con `--gobernador servidor`.
  */
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -35,6 +43,7 @@ import { worldStatistics } from '../../src/world/statistics.js';
 import { indiceDiversidad } from '../../src/world/diversidad.js';
 import { parseParams, type WorldParams } from '../../src/world/params.js';
 import { decideReproduction, RollingStepPerformance } from '../../src/server/governor.js';
+import { decidirTechoLab, TECHO_LAB_MINIMO, techoLabCota } from './techo-lab.js';
 import { durableActivityMetrics } from './metrics.js';
 import { InstrumentosConducta } from './instrumentos.js';
 import { digestoCanonico } from '../../src/world/digesto.js';
@@ -155,6 +164,8 @@ function metricasGobernador(world: World, reproduccionActivaTicks: number, ticks
   };
 }
 
+const USO_TECHO = `Uso: --techo-lab N (entero ≥ ${TECHO_LAB_MINIMO}: techo fijo de laboratorio; sin la bandera no hay techo).`;
+
 async function main(): Promise<void> {
   const seed = Number(arg('--seed') ?? 51926), dias = Number(arg('--dias') ?? 1), salida = arg('--salida');
   if (!Number.isInteger(seed) || seed < 0) throw new Error('Uso: --seed N --dias D [--params "a.b=1,c.d=2"] --salida <dir> (seed entero ≥ 0).');
@@ -163,6 +174,14 @@ async function main(): Promise<void> {
   const gobernadorArg = arg('--gobernador') ?? 'no';
   if (gobernadorArg !== 'no' && gobernadorArg !== 'servidor') throw new Error('Uso: --gobernador no|servidor (por defecto "no").');
   const gobernadorModo: ModoGobernador = gobernadorArg;
+  const techoArg = arg('--techo-lab');
+  let techoLab: number | null = null;
+  if (techoArg !== undefined) {
+    const n = Number(techoArg);
+    if (techoArg.trim() === '' || !Number.isInteger(n) || n < TECHO_LAB_MINIMO) throw new Error(`${USO_TECHO} Recibido «${techoArg}».`);
+    if (gobernadorModo === 'servidor') throw new Error('--techo-lab es incompatible con --gobernador servidor: el techo de laboratorio es fijo y determinista, el del servidor lo dispara el p95 del reloj. Usa uno u otro.');
+    techoLab = n;
+  }
   // Instrumentos de medida (scripts/lab/instrumentos.ts): conducta por tiempo y comida compartida.
   // Por defecto activos; `--instrumentos no` da EXACTAMENTE los dia-NNN.json de antes (mismas claves).
   const instrumentosArg = arg('--instrumentos') ?? 'si';
@@ -188,6 +207,10 @@ async function main(): Promise<void> {
     const gobernadorPerf = new RollingStepPerformance();
     let reproduccionActivaTicksDia = 0, ticksDia = 0, p95GobernadorActual = 0;
     const cloneMsDia: number[] = [], saveMsDia: number[] = [];
+
+    // Solo con --techo-lab: ticks del día (y de toda la réplica) con reproducción habilitada y población
+    // máxima tras un paso, para comprobar la cota (`techoLabCota`) a resolución de paso.
+    let techoTicksActivosDia = 0, techoTicksDia = 0, techoTicksActivos = 0, techoPoblacionMaximaDia = 0, techoPoblacionMaxima = world.people.length;
 
     const totalTicks = dias * TICKS_PER_DAY, stepTimes: number[] = [];
     let maxRss = process.memoryUsage().rss, ultimoDia: ReturnType<typeof dailyMetrics> | null = null;
@@ -225,11 +248,19 @@ async function main(): Promise<void> {
         ticksDia++; if (world.reproductionEnabled) reproduccionActivaTicksDia++;
         cloneMsDia.push(cloneMs); saveMsDia.push(saveMs);
       } else {
+        if (techoLab !== null) {
+          // El servidor decide tras cada paso sobre el mundo vigente, para el paso siguiente; aquí se
+          // decide antes de cada paso sobre la misma población (la del final del paso anterior).
+          world.reproductionEnabled = decidirTechoLab(world.people.length, techoLab, params.gobernador.presupuestoMs);
+          techoTicksDia++;
+          if (world.reproductionEnabled) { techoTicksActivosDia++; techoTicksActivos++; }
+        }
         instrumentos?.antesDelPaso(world);
         const started = performance.now();
         stepWorld(world);
         stepTimes.push(performance.now() - started);
         instrumentos?.despuesDelPaso(world);
+        if (techoLab !== null) { techoPoblacionMaximaDia = Math.max(techoPoblacionMaximaDia, world.people.length); techoPoblacionMaxima = Math.max(techoPoblacionMaxima, world.people.length); }
         if (tick % params.persistencia.cadaTicks === 0) store.save(world);
       }
       if (tick % TICKS_PER_DAY === 0) {
@@ -245,7 +276,9 @@ async function main(): Promise<void> {
           const { foodShared, ...conducta } = instrumentos.metricasDia(world);
           medidas = { ...metrics, cooperacionAcumuladaPorTipo: { ...metrics.cooperacionAcumuladaPorTipo, foodShared }, ...conducta };
         }
-        const extra = gobernadorModo === 'servidor' ? metricasGobernador(world, reproduccionActivaTicksDia, ticksDia, p95GobernadorActual, cloneMsDia, saveMsDia) : {};
+        const extra = gobernadorModo === 'servidor' ? metricasGobernador(world, reproduccionActivaTicksDia, ticksDia, p95GobernadorActual, cloneMsDia, saveMsDia)
+          : techoLab !== null ? { techoLab, reproduccionActivaFraccion: techoTicksActivosDia / techoTicksDia, poblacionMaximaDia: techoPoblacionMaximaDia } : {};
+        techoTicksActivosDia = 0; techoTicksDia = 0; techoPoblacionMaximaDia = 0;
         const body = { tick, ...medidas, ...extra, p50Ms: Math.round(p50 * 100) / 100, p95Ms: Math.round(p95 * 100) / 100, rss };
         writeFileSync(join(salida, `dia-${String(dia).padStart(3, '0')}.json`), JSON.stringify(body, null, 2) + '\n');
         if (gobernadorModo === 'servidor') { reproduccionActivaTicksDia = 0; ticksDia = 0; cloneMsDia.length = 0; saveMsDia.length = 0; }
@@ -269,7 +302,17 @@ async function main(): Promise<void> {
       metricasVersion: 2,
       gobernador: gobernadorModo === 'servidor'
         ? 'servidor; imita stepOnce (clon+paso, guardado por cadencia, decideReproduction sobre p95) cada tick'
-        : 'no-ejecutado; replica de leyes, no del servidor',
+        : techoLab !== null ? `techo de laboratorio fijo en ${techoLab}; política techo del servidor sin reloj (reproductionEnabled = población < ${techoLab} antes de cada paso)`
+          : 'no-ejecutado; replica de leyes, no del servidor',
+      ...(techoLab !== null ? {
+        techoLab,
+        techoLabDetalle: {
+          reproduccionActivaFraccion: techoTicksActivos / totalTicks,
+          poblacionMaxima: techoPoblacionMaxima,
+          cotaPoblacion: techoLabCota(techoLab, poblacionInicial, params.poblacion.nacimientosPorComprobacion),
+          poblacionContada: 'world.people.length (todas las personas vivas, S e I incluidas), como governReproduction en src/server/app.ts',
+        },
+      } : {}),
       instrumentos: instrumentos ? 'si; solo lectura (scripts/lab/instrumentos.ts): conducta por tiempo y comida compartida' : 'no',
       seed, params, sha: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
       digest: worldSourceDigest(),

@@ -619,6 +619,18 @@ TMPDIR=/datos/tmp-atlas-lab npx tsx scripts/perf/paso-servidor.ts --seed 7 --pas
 
 Cifras: `docs/REGLAS.md`, «Motor: reserva del paso», apartado PERF3.
 
+**La E/S entre pasos largos** (verificación del planificador de PERF3, 2026-09-23): `es-servidor.ts` levanta el
+servidor real con el planificador y alarga cada paso `--lento` ms de CPU; `es-sonda.ts` (cadena HTTP, pong y
+`state` por WS) y `es-cliente.ts` (como `src/client/connection.ts`, con el aborto de 10 s) lo miden desde otro
+proceso. Para comparar dos árboles se corren a la vez, cada uno con su servidor:
+
+```bash
+TMPDIR=/datos/tmp-atlas-lab npx tsx scripts/perf/es-servidor.ts --lento 250 --info i.json &
+TMPDIR=/datos/tmp-atlas-lab npx tsx scripts/perf/es-sonda.ts --info i.json --segundos 30 [--rtt 90] --salida s.json
+TMPDIR=/datos/tmp-atlas-lab npx tsx scripts/perf/es-cliente.ts --info i.json --segundos 90 --salida c.json
+pkill -TERM -f '^/usr/bin/node.*es-servidor.ts'   # deja pasos/s en i.json.srv
+```
+
 ## El techo del hardware — `../curva-techo.mts` (T109)
 
 `replica.ts` mide **leyes** (población, tecnología, cooperación…) a una escala fija; hermana con

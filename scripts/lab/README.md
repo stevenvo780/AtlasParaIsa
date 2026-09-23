@@ -156,7 +156,10 @@ la reproducción según el p95 de los últimos 120 pasos.
 1. Si `params.motor.clonPorPaso` (por defecto `true`): `draft = cloneWorld(world, store.context)`,
    `stepWorld(draft)`, `world = draft`. Si es `false`, `stepWorld(world)` in situ (sin clonar) —
    `motor.clonPorPaso` es un parámetro ya definido en `src/world/params.ts` que ningún motor
-   consume todavía; esta réplica es el primer consumidor.
+   consume todavía; esta réplica es el primer consumidor. **Desde PERF3 (2026-09-23) el servidor
+   con `true` solo clona en los pasos con gestos** y el laboratorio no tiene gestos: para imitar el
+   coste del servidor de hoy, `--params motor.clonPorPaso=false` (paso en el sitio); con `true` se mide
+   el servidor anterior (ver `docs/REGLAS.md`, «Motor: reserva solo en los pasos con gestos»).
 2. `store.save(world)` cuando `tick % persistencia.cadaTicks === 0`, **dentro** de la ventana
    medida (igual que `stepOnce`: el coste de guardar cuenta para el presupuesto del gobernador).
 3. `p95 = new RollingStepPerformance().record(stepMs)` (ventana de 120 pasos, `src/server/governor.ts`,
@@ -603,6 +606,18 @@ npx tsx scripts/perf/trayectoria-punto.ts --seed 7 --cortes 2400,4800 --salida t
 luego desglosa la reserva (clon, punto, restaurar y sólo la copia de teselas); `trayectoria-punto.ts` corre dos
 servidores reales con la receta de producción y exige el mismo mundo, en memoria y en disco. Cifras y decisión:
 `docs/REGLAS.md`, «Motor: reserva del paso».
+
+**El paso del servidor con reloj real** (PERF3, 2026-09-23): `stepMs`, `cloneMs`, `simulationMs`, `saveMs` y
+pasos por segundo de `createApp`, con gestos reales opcionales y digestos cada `--cada` pasos. Se corre igual en
+este árbol y en un `git archive` del commit base (se copia el script allí); los digestos deben coincidir:
+
+```bash
+TMPDIR=/datos/tmp-atlas-lab npx tsx scripts/perf/paso-servidor.ts --db publico.sqlite --pasos 600 --salida m.json
+TMPDIR=/datos/tmp-atlas-lab npx tsx scripts/perf/paso-servidor.ts --db publico.sqlite --pasos 600 --planificado
+TMPDIR=/datos/tmp-atlas-lab npx tsx scripts/perf/paso-servidor.ts --seed 7 --pasos 1200 --gestos 50 --salida s.json
+```
+
+Cifras: `docs/REGLAS.md`, «Motor: reserva solo en los pasos con gestos».
 
 ## El techo del hardware — `../curva-techo.mts` (T109)
 

@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "tsx src/server/main.ts",
     "build": "vite build && tsc -p tsconfig.server.json",
-    "start": "node dist/server/server/main.js",
+    "start": "ln -sf \"$(command -v node)\" dist/carta-isa && exec ./dist/carta-isa dist/server/server/main.js",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test --test-timeout=600000 tests/*.test.ts",
     "test:e2e": "playwright test",

@@ -169,7 +169,7 @@ test('desktop full-screen HUD, keyboard population selection and physical neighb
 
 test('free camera requests signed distant terrain and layers without a finite map edge', async ({ page }) => {
   const observed = observeMessages(page); await page.setViewportSize({ width: 1440, height: 900 }); await enter(page);
-  await page.locator('#layer-toggle').click(); await page.locator('#observation-layer').selectOption('moisture'); await expect(page.locator('#layer-explanation')).toContainText('humedad');
+  await page.locator('#layer-toggle').click(); await page.locator('#observation-layer').selectOption('humedad'); await expect(page.locator('#layer-explanation')).toContainText('humedad');
   await page.locator('#observation-layer').selectOption('none'); await page.locator('#tile-x').fill('-384'); await page.locator('#tile-y').fill('240'); await page.locator('#tile-form button').click();
   await expect(page.locator('#camera-coordinates')).toHaveText('-384, 240');
   await expect.poll(() => observed.views.some(v => (v.originX ?? 0) < -350 && (v.originY ?? 0) > 200 && v.tiles.some(t => t.x < 0))).toBe(true);

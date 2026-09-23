@@ -11,7 +11,7 @@ import { animalActions, animalColors, componentNames, speciesNames, speciesPlura
 import { technologyPane, recipeCard } from './technology-art.js';
 import { readHitos, readVisitCounters, readWorldVisit, saveHitos, saveVisitCounters, saveWorldVisit, type HitoGuardado } from './visit-memory.js';
 import { enClaro } from './textos.js';
-import { CronicaBuffer, GRUPOS, clasificar, contadoresDe, esHito, filtrar, momento, quienCedio, resumenDesdeVisita, type GrupoCronica } from './cronica.js';
+import { CronicaBuffer, clasificar, contadoresDe, esHito, filtrar, momento, quienCedio, resumenDesdeVisita, type GrupoCronica } from './cronica.js';
 import { decidirModo, setModo, type Modo } from './modo.js';
 import { capasDeCalor, leyendaEnRango, rangoRecibido, type Capa } from './calor.js';
 import { ausenteEstado, demographicSummary, rotuloRecuento } from './censo-view.js';

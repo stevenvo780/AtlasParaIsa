@@ -212,6 +212,10 @@ function choose(animal: Animal, world: AnimalWorld, state: LocalState): void {
   if (animal.action !== action || animal.preyId !== preyId) animal.work = 0;
   animal.action = action; animal.target = { x: target.x, y: target.y }; animal.reason = reason; animal.preyId = preyId; animal.lastDecision = world.tick;
 }
+/** Cadena secuencial: cada movimiento libera y ocupa celdas en `state.counts`/`state.occupants`,
+ * que el siguiente `move` lee para el cupo `MAX_ANIMALS_PER_TILE`; liberar una celda habilita la
+ * entrada de otro. Permanece en la fase serial del coordinador: repartirlo por región cambiaría
+ * quién entra. */
 function move(animal: Animal, world: AnimalWorld, state: LocalState): void {
   const interval = Math.ceil(11 - animal.genes.speed * 7 + animal.fatigue * 3);
   if (animal.action === 'rest' || distance(animal, animal.target) === 0 || world.tick - animal.lastMove < interval || animal.energy < 0.06) return;
@@ -318,31 +322,51 @@ function reproduce(world: AnimalWorld, state: LocalState, active: Animal[], emit
   }
 }
 
-/** Active cells only; canonical decisions and flee-before-contact movement make array order irrelevant. */
-export function stepAnimals(world: AnimalWorld, emit?: AnimalEmitter): void {
-  if (world.animals.length > limitsOf(world).fauna) throw new Error('Capacidad regional de fauna excedida.');
-  const state: LocalState = { tile: tileLookup(world.tiles), occupants: new Map(), counts: new Map() };
+/** Máscara de fauna del paso (T116), de solo lectura: quién piensa en este tick. La calcula el
+ * coordinador una vez, con la ventana sobre la población GLOBAL en orden canónico; las regiones sólo
+ * consultan pertenencia (`seleccionDe`). Una ventana o un offset por región cambiaría qué animales
+ * piensan en qué tick. `animales`, `tick` y `poblacion` la atan al paso para el que se calculó. */
+export interface MascaraFauna {
+  readonly tick: number; readonly animales: readonly Animal[]; readonly poblacion: number;
+  readonly seleccion: readonly Animal[]; readonly ids: ReadonlySet<string>;
+}
+export function mascaraFauna(world: AnimalWorld): MascaraFauna {
   world.animals.sort(canonical);
   const population = world.animals.length;
   const offset = population ? ((world.tick % population) * MAX_ACTIVE_ANIMALS) % population : 0;
   const selected = population <= MAX_ACTIVE_ANIMALS ? [...world.animals]
     : [...world.animals.slice(offset, offset + MAX_ACTIVE_ANIMALS), ...world.animals.slice(0, Math.max(0, offset + MAX_ACTIVE_ANIMALS - population))].sort(canonical);
-  const selectedIds = new Set(selected.map(a => a.id));
+  return Object.freeze({ tick: world.tick, animales: world.animals, poblacion: population, seleccion: Object.freeze(selected), ids: new Set(selected.map(a => a.id)) });
+}
+/** Los animales de una región que la máscara selecciona, en orden canónico. */
+export function seleccionDe(mascara: MascaraFauna, animales: readonly Animal[]): Animal[] {
+  return animales.filter(a => mascara.ids.has(a.id)).sort(canonical);
+}
+
+/** Active cells only; canonical decisions and flee-before-contact movement make array order irrelevant.
+ * `mascara` es la del coordinador para este paso; sin ella se calcula aquí, con el mismo resultado. */
+export function stepAnimals(world: AnimalWorld, emit?: AnimalEmitter, mascara?: MascaraFauna): void {
+  if (world.animals.length > limitsOf(world).fauna) throw new Error('Capacidad regional de fauna excedida.');
+  const state: LocalState = { tile: tileLookup(world.tiles), occupants: new Map(), counts: new Map() };
+  const m = mascara ?? mascaraFauna(world);
+  if (m.tick !== world.tick || m.animales !== world.animals || m.poblacion !== world.animals.length)
+    throw new Error('Máscara de fauna de otro paso.');
   for (const animal of world.animals) {
     const tile = state.tile(animal.x, animal.y);
     if (!tile) throw new Error('Animal fuera de las regiones activas.');
-    if (selectedIds.has(animal.id)) physiology(animal, tile, world, emit);
+    if (m.ids.has(animal.id)) physiology(animal, tile, world, emit);
     if (animal.health <= 0) continue;
     const p = cell(animal), here = state.occupants.get(p);
     if (here) here.push(animal); else state.occupants.set(p, [animal]);
     state.counts.set(p, (state.counts.get(p) ?? 0) + 1);
   }
   world.animals = world.animals.filter(a => a.health > 0);
-  const active = selected.filter(a => a.health > 0);
+  const active = m.seleccion.filter(a => a.health > 0);
   // Oldest decision first avoids starvation while preventing a synchronized migration from bursting every eighth tick.
   const due = active.filter(a => world.tick - a.lastDecision >= 8)
     .sort((a, b) => a.lastDecision - b.lastDecision || canonical(a, b)).slice(0, MAX_ANIMAL_DECISIONS_PER_TICK);
   for (const animal of due) choose(animal, world, state);
+  // Cadena secuencial (ver `move`): permanece en la fase serial del coordinador.
   for (const animal of [...active].sort((a, b) => Number(b.action === 'flee') - Number(a.action === 'flee') || canonical(a, b))) move(animal, world, state);
   const byId = new Map(world.animals.map(a => [a.id, a]));
   for (const animal of active) {

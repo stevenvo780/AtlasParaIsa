@@ -1,12 +1,15 @@
 import type { Feature, Tile } from '../shared/types.js';
 import { enCuenca } from './agua.js';
+import { TileStore } from './soa/terreno.js';
 
 const clamp = (n: number): number => Math.max(0, Math.min(1, n));
 const TREE_FEATURES = new Set<Feature>(['tree', 'pine', 'palm', 'cactus', 'reeds', 'stump']);
 const MAX_TOPOLOGIES = 4;
+const NO_NEIGHBORS: Int32Array = new Int32Array(0), NO_LIFE: Float64Array = new Float64Array(0);
 
-/** Opciones de la ecología: T013 (`decaimientoFertilidad`) + T035 (`seed`/`cuencas`). */
-export interface EcosystemOptions { decaimientoFertilidad?: number; seed?: number; cuencas?: number }
+/** Opciones de la ecología: T013 (`decaimientoFertilidad`) + T035 (`seed`/`cuencas`) + T112 (`soaTerreno`,
+ * la topología sobre el SoA de terreno; `motor.soaTerreno`, default `false` = la caché de hoy). */
+export interface EcosystemOptions { decaimientoFertilidad?: number; seed?: number; cuencas?: number; soaTerreno?: boolean }
 
 /**
  * Índice ordenado de vecinos + la ÚNICA instantánea que la regla necesita.
@@ -17,7 +20,7 @@ export interface EcosystemOptions { decaimientoFertilidad?: number; seed?: numbe
  * los reescribiera, así que leerlos de la tesela da exactamente el mismo doble. Se conserva el
  * único campo que de verdad necesita una foto previa.
  */
-interface Topology {
+export interface Topology {
   coordinates: Float64Array;
   neighbors: Int32Array;
   life: Float64Array;
@@ -40,7 +43,7 @@ function sameCoordinates(topology: Topology, tiles: readonly Tile[]): boolean {
  * ningún rango de coordenadas) y conserva el mismo orden de vecinos, el mismo `-1` para los
  * ausentes y el mismo rechazo de coordenadas duplicadas antes de tocar nada.
  */
-function buildTopology(tiles: readonly Tile[]): Topology {
+export function buildTopology(tiles: readonly Tile[]): Topology {
   const length = tiles.length;
   const coordinates = new Float64Array(length * 2);
   const rows = new Map<number, Map<number, number>>();
@@ -73,8 +76,11 @@ function buildTopology(tiles: readonly Tile[]): Topology {
  */
 export class EcosystemKernel {
   private readonly topologies: Topology[] = [];
+  private soa: TileStore | null = null;
 
   get cachedTopologyCount(): number { return this.topologies.length; }
+  /** T112: el `TileStore` de la topología SoA, si alguna pasada lo usó (para medir sus bytes). */
+  get soaStore(): TileStore | null { return this.soa; }
 
   /**
    * `seed`/`cuencas` (T035 ronda de arreglo, hallazgo crítico #1): con el default `cuencas=1` el
@@ -88,16 +94,23 @@ export class EcosystemKernel {
     if (tick % 10 !== 0) return;
     const decaimientoFertilidad = options?.decaimientoFertilidad ?? 0;
     const seed = options?.seed ?? 0, cuencas = options?.cuencas ?? 1;
-    const index = this.topologies.findIndex(topology => sameCoordinates(topology, tiles));
-    // Build and reject duplicate coordinates before modifying any tile or cache.
-    const previous = index < 0 ? buildTopology(tiles) : this.topologies[index];
-    if (index >= 0) this.topologies.splice(index, 1);
-    this.topologies.unshift(previous);
-    if (this.topologies.length > MAX_TOPOLOGIES) this.topologies.pop();
-    const length = tiles.length, neighbors = previous.neighbors, lifeBefore = previous.life;
-    // La vecindad viva se lee de la foto previa; el resto de campos se lee de la propia tesela en
-    // su iteración, antes de que esa misma iteración los reescriba (mismo valor, mismo orden).
-    for (let i = 0; i < length; i++) lifeBefore[i] = tiles[i].life ?? 0;
+    // T112: con `soaTerreno` la foto de `life` y la presencia van al SoA y los vecinos salen por aritmética;
+    // no se retiene ninguna topología. Coordenadas fuera del dominio entero del SoA: camino de objetos.
+    const store = options?.soaTerreno === true ? this.soaTopology(tiles) : null;
+    const length = tiles.length, cells = store?.cells;
+    let neighbors = NO_NEIGHBORS, lifeBefore = NO_LIFE;
+    if (store === null) {
+      const index = this.topologies.findIndex(topology => sameCoordinates(topology, tiles));
+      // Build and reject duplicate coordinates before modifying any tile or cache.
+      const previous = index < 0 ? buildTopology(tiles) : this.topologies[index];
+      if (index >= 0) this.topologies.splice(index, 1);
+      this.topologies.unshift(previous);
+      if (this.topologies.length > MAX_TOPOLOGIES) this.topologies.pop();
+      neighbors = previous.neighbors; lifeBefore = previous.life;
+      // La vecindad viva se lee de la foto previa; el resto de campos se lee de la propia tesela en
+      // su iteración, antes de que esa misma iteración los reescriba (mismo valor, mismo orden).
+      for (let i = 0; i < length; i++) lifeBefore[i] = tiles[i].life ?? 0;
+    }
     const light = phase === 'day' ? 1 : phase === 'night' ? 0 : 0.4;
     for (let i = 0; i < length; i++) {
       const tile = tiles[i];
@@ -107,13 +120,19 @@ export class EcosystemKernel {
       // hash en vez de un acceso a ranura.
       const vegetation = tile.vegetation, moisture = tile.moisture;
       const terrain = tile.terrain, biome = tile.biome, feature = tile.feature;
-      const growth = tile.growth ?? vegetation, fertility = tile.fertility ?? 0, life = lifeBefore[i];
+      const growth = tile.growth ?? vegetation, fertility = tile.fertility ?? 0;
       const drinkingWater = tile.drinkingWater ?? 0, cultivation = tile.cultivation ?? 0, traffic = tile.traffic ?? 0;
-      let livingNeighbors = 0;
-      const base = i * 8;
-      for (let offset = 0; offset < 8; offset++) {
-        const neighbor = neighbors[base + offset];
-        if (neighbor >= 0 && lifeBefore[neighbor] >= 0.45) livingNeighbors++;
+      let livingNeighbors = 0, life: number;
+      if (store !== null) {
+        const cell = cells![i];
+        life = store.lifeAt(cell); livingNeighbors = store.livingNeighbors(cell, 0.45);
+      } else {
+        life = lifeBefore[i];
+        const base = i * 8;
+        for (let offset = 0; offset < 8; offset++) {
+          const neighbor = neighbors[base + offset];
+          if (neighbor >= 0 && lifeBefore[neighbor] >= 0.45) livingNeighbors++;
+        }
       }
       const fertilePattern = livingNeighbors === 3 || (life >= 0.45 && livingNeighbors === 2);
       const cellularEnergy = light * moisture * (0.6 + fertility * 0.4);
@@ -148,5 +167,14 @@ export class EcosystemKernel {
         }
       }
     }
+  }
+
+  /** Carga la topología en el SoA (sella presencia, copia `life`); `null` si alguna coordenada no cabe en su
+   * dominio entero. Con éxito, suelta la caché de topologías del camino de objetos. */
+  private soaTopology(tiles: readonly Tile[]): TileStore | null {
+    const store = this.soa ??= new TileStore();
+    if (!store.loadLife(tiles)) return null;
+    this.topologies.length = 0;
+    return store;
   }
 }

@@ -1,0 +1,39 @@
+{
+ "capturedAt": "2026-09-23T20:50:00+00:00",
+ "status": "published",
+ "kind": "same-world restart on the laptop (engine, no rules change)",
+ "codeRevision": "b5def74",
+ "contents": [
+  "PERF3 (c9fc701, 14:57): pasos sin gestos en el sitio, sin copia del mundo; planificador que cede a la E/S; vista de reserva si un paso falla",
+  "E.0 ola 1 (T141 rejilla de personas, T142 poda de vínculos, T143 roster) y ola 2 (identidad, pertenencia, estructuras y población indexadas)"
+ ],
+ "gate": {
+  "identity": "digestoCanonico idéntico a main en 3 semillas × 2400 pasos y en el banco de 2000 personas",
+  "suite": "1513/1520 (7 omitidos, 0 fallos) en la integración de E.0 ola 2; 1504/1511 en PERF3+E.0 ola 1",
+  "deployCheck": "scripts/deploy-check.sh b5def74 verde"
+ },
+ "measured": {
+  "PERF3": "copia pública con 151 hab.: paso p50 161,7 → 41,2 ms, CPU por paso 203 → 66 ms",
+  "E0W2": "banco de 2000 personas: knownBlueprints + depósito 307 → 96 ms",
+  "public": "con ~665-677 habitantes: 1,9 pasos/s antes de PERF3 → 3,3 pasos/s después"
+ },
+ "operation": {
+  "backups": [
+   "world-20260923-1454.sqlite.gz (antes de PERF3)",
+   "world-20260923-1545.sqlite.gz (antes de E.0 ola 2)"
+  ],
+  "serviceStoppedAndPortFreedBeforeBuild": true,
+  "buildOnLaptopAfterStop": true,
+  "sameWorldDirectoryAndIdentity": true
+ },
+ "liveChecks": {
+  "healthAfterStartS": 58,
+  "domainHealth": "ok",
+  "unauthenticatedWorldStatus": 401,
+  "after": {
+   "tick": 376800,
+   "people": 676,
+   "births": 1565
+  }
+ }
+}

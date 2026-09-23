@@ -2,10 +2,26 @@ import type { DatabaseSync } from 'node:sqlite';
 import type { World } from '../../src/world/index.js';
 import type { TechnologyExecution } from '../../src/shared/technology.js';
 
+/**
+ * El Store puede podar el archivo de recibos (`persistencia.ventanaEventosTicks` > 0, nunca a menos de un día;
+ * ver docs/REGLAS.md, «Retención del archivo de recibos»). Un intervalo que empieza antes del último recibo
+ * podado mediría de menos sin avisar: falla en voz alta. Sin tabla `metadata` (bases sintéticas de prueba) o
+ * sin frontera, no hay nada podado.
+ */
+export function assertExecutionsRetainedAfter(db: DatabaseSync, afterTick: number): void {
+  if (!db.prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='metadata'").get()) return;
+  const row = db.prepare("SELECT value FROM metadata WHERE key='technology-pruned-v1'").get() as { value: string } | undefined;
+  if (!row) return;
+  const tick = (JSON.parse(row.value) as { tick?: unknown }).tick;
+  if (typeof tick !== 'number' || !Number.isSafeInteger(tick) || tick > afterTick)
+    throw new Error(`Execution receipts up to tick ${String(tick)} were pruned; the interval after ${afterTick} is incomplete.`);
+}
+
 /** Complete committed interval, not the bounded live ring or lifetime catalogue count.
  * Call after store.save(). Empty use and unknown provenance remain explicit.
  */
 export function durableActivityMetrics(world: World, db: DatabaseSync, afterTick: number) {
+  assertExecutionsRetainedAfter(db, afterTick);
   const used = new Set<string>(), crafted = new Set<string>();
   let uses = 0, benefit = 0, foreignUses = 0, unknownAuthorUses = 0, learnedUses = 0;
   const people = new Map(world.people.map(person => [person.id, person]));

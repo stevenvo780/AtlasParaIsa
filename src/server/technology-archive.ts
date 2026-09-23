@@ -19,8 +19,12 @@ const text = (value: unknown, max = 100): value is string => typeof value === 's
 const identifier = (value: unknown): value is string => text(value) && !/\s/.test(value);
 const keys = (value: unknown, required: string[], optional: string[] = []): value is Record<string, unknown> => object(value)
   && required.every(key => Object.hasOwn(value, key)) && Object.keys(value).every(key => required.includes(key) || optional.includes(key));
-const serialOf = (value: unknown, prefix: string): number | null => {
-  if (typeof value !== 'string' || !new RegExp(`^${prefix}-[1-9]\\d*$`).test(value)) return null;
+// Precompiladas (sprint noche-arch 2026-09-23): `serialOf` construía un `new RegExp` en cada llamada y
+// con 296 495 recibos la carga pasaba 6,9 s de CPU propia sólo en eso. Mismo patrón, mismo resultado.
+const SERIAL_PATTERNS = { process: /^process-[1-9]\d*$/, recipe: /^recipe-[1-9]\d*$/, product: /^product-[1-9]\d*$/,
+  transfer: /^transfer-[1-9]\d*$/ } as const;
+const serialOf = (value: unknown, prefix: keyof typeof SERIAL_PATTERNS): number | null => {
+  if (typeof value !== 'string' || !SERIAL_PATTERNS[prefix].test(value)) return null;
   const serial = Number(value.slice(prefix.length + 1)); return integer(serial) ? serial : null;
 };
 const recipeId = (value: unknown): value is string => serialOf(value, 'recipe') !== null;
@@ -109,12 +113,31 @@ function assertExecution(value: unknown): asserts value is TechnologyExecution {
 type DefinitionRow = { id: string; tick: number; signature: string; body: string; digest: string };
 type StatsRow = { recipeId: string; tick: number; body: string; digest: string };
 type ExecutionRow = { id: string; serial: number; tick: number; body: string; digest: string };
+/** Vecinas de una fila entre las visibles a una fecha: la ley de cronología de los recibos. */
+const EXECUTION_BEFORE = 'SELECT id,serial,tick,body,digest FROM technology_executions'
+  + ' WHERE serial<? AND tick<=? ORDER BY serial DESC LIMIT 1';
+const EXECUTION_AFTER = 'SELECT id,serial,tick,body,digest FROM technology_executions WHERE serial>? AND tick<=? ORDER BY serial LIMIT 1';
 function decode(row: { body: string; digest: string }): unknown {
   if (typeof row.body !== 'string' || typeof row.digest !== 'string' || checksum(row.body) !== row.digest) fail('checksum');
   try { return JSON.parse(row.body); } catch { return fail('JSON'); }
 }
 const monotone = (a: TechnologyStats, b: TechnologyStats) => a.uses <= b.uses && a.utility <= b.utility && a.manufactured <= b.manufactured;
 export type TechnologyDefinitionSummary = TechnologyCatalogueTotals & { functions: number[] };
+/** Un recibo leído y verificado junto con el digesto de su fila: el anfitrión encadena esos digestos. */
+export interface TechnologyExecutionRecord { execution: TechnologyExecution; digest: string; }
+/** Lo que devuelve podar un prefijo: el pliegue de la cadena a través de lo borrado y su último tick. */
+export interface TechnologyPruneResult { digest: string; count: number; tick: number; }
+/**
+ * Lo que el archivo necesita saber del anfitrión (sprint noche-arch 2026-09-23). El anfitrión puede podar un
+ * prefijo de recibos ya verificado (retención por ventana) y guarda esa frontera en sus propios metadatos;
+ * el archivo la consulta cada vez que la necesita —nunca la recuerda— para aceptar una ejecución anidada
+ * ausente sólo si su serie quedó en el prefijo podado, igual que hoy acepta las anteriores al origen. Sin
+ * anfitrión (archivo suelto) no hay poda y la ley es la de siempre.
+ */
+export interface TechnologyArchiveHost { prunedThrough(): number | null; }
+/** Cadena de digestos de fila: `sha256(anterior + "\n" + digesto)` en orden de serie, desde este valor. */
+export const TECHNOLOGY_CHAIN_EMPTY = '0'.repeat(64);
+export const technologyChainStep = (previous: string, digest: string): string => checksum(`${previous}\n${digest}`);
 interface ArchiveStamp { dataVersion: number; totalChanges: number; schemaCookie: number; tempSchemaCookie: number; transaction: boolean; }
 interface DefinitionProof {
   throughTick: number; recipes: number; maxGeneration: number; lastTick: number;
@@ -140,7 +163,7 @@ export class TechnologyArchive {
    * still reads the current SQLite snapshot and every stamp check remains in place.
    * Streaming statements stay separate: a nested read must not reset an iterator. */
   private readonly readStatements = new Map<string, StatementSync>();
-  constructor(private readonly db: DatabaseSync) {}
+  constructor(private readonly db: DatabaseSync, private readonly host: TechnologyArchiveHost | null = null) {}
 
   private readStatement(sql: string): StatementSync {
     let statement = this.readStatements.get(sql);
@@ -533,27 +556,41 @@ export class TechnologyArchive {
     }
     return definition;
   }
-  private executionReferences(value: TechnologyExecution): void {
-    const origin = this.getHistoryOrigin();
+  /** Hasta qué serie una ejecución anidada ausente es una referencia conservada y no un hueco: el origen
+   * declarado o, si es mayor, la frontera de poda del anfitrión. `null` sin origen (todo hueco es error). */
+  private unverifiableThrough(origin: TechnologyHistoryOrigin | null): number | null {
+    if (!origin) return null;
+    const pruned = this.host?.prunedThrough() ?? null;
+    return pruned === null ? origin.startsAfter : Math.max(origin.startsAfter, pruned);
+  }
+  /** `origin`/`unverifiable` se leen una vez por página y no por fila (296 793 lecturas del origen, 6,1 s
+   * en la carga del mundo público); `page` son los recibos ya decodificados y verificados de esa misma
+   * página: una anidada comparte tick con su padre y casi siempre va justo antes, así que no se relee. */
+  private executionReferences(value: TechnologyExecution, origin = this.getHistoryOrigin(),
+    unverifiable = this.unverifiableThrough(origin), page?: ReadonlyMap<string, TechnologyExecution>): void {
     const references = new Set([...value.parentRecipeIds, ...value.catalysts.flatMap(c => c.recipeId ? [c.recipeId] : []), ...(value.recipeId ? [value.recipeId] : [])]);
     for (const list of [value.inputs, value.outputs, ...Object.values(value.balance)]) for (const line of list) if (line.resourceId.startsWith('recipe:')) references.add(line.resourceId.slice(7));
     for (const id of references) if (!this.referencedDefinition(id, value.tick)) fail('execution definition reference');
     if (value.recipeId && ['research', 'craft'].includes(value.kind) && value.programSignature !== this.referencedDefinition(value.recipeId, value.tick)!.signature) fail('execution program signature');
     for (const id of value.nestedExecutionIds ?? []) {
-      const row = this.executionRow(id);
-      if (!row) {
-        // Preserve the original reference, without manufacturing a receipt or
-        // certifying its causal meaning outside the explicitly archived interval.
-        if (origin && serialOf(id, 'process')! <= origin.startsAfter) continue;
-        fail('missing nested execution');
+      let child = page?.get(id);
+      if (!child) {
+        const row = this.executionRow(id);
+        if (!row) {
+          // Preserve the original reference, without manufacturing a receipt or
+          // certifying its causal meaning outside the explicitly archived interval
+          // (before the origin, or inside a verified prefix the host pruned).
+          if (unverifiable !== null && serialOf(id, 'process')! <= unverifiable) continue;
+          fail('missing nested execution');
+        }
+        child = this.execution(row);
       }
-      const child = this.execution(row);
       if (child.tick !== value.tick || child.actorId !== value.actorId || !['use', 'recycle'].includes(child.kind)) fail('nested execution reference');
     }
   }
   private executionTimeline(row: ExecutionRow, asOfTick = MAX_TICK): void {
-    const before = this.readStatement('SELECT id,serial,tick,body,digest FROM technology_executions WHERE serial<? AND tick<=? ORDER BY serial DESC LIMIT 1').get(row.serial, asOfTick) as ExecutionRow | undefined;
-    const after = this.readStatement('SELECT id,serial,tick,body,digest FROM technology_executions WHERE serial>? AND tick<=? ORDER BY serial LIMIT 1').get(row.serial, asOfTick) as ExecutionRow | undefined;
+    const before = this.readStatement(EXECUTION_BEFORE).get(row.serial, asOfTick) as ExecutionRow | undefined;
+    const after = this.readStatement(EXECUTION_AFTER).get(row.serial, asOfTick) as ExecutionRow | undefined;
     if (before && this.execution(before).tick > row.tick || after && this.execution(after).tick < row.tick) fail('execution chronology');
   }
   getExecution(id: string, asOfTick = MAX_TICK): TechnologyExecution | null {
@@ -563,28 +600,79 @@ export class TechnologyArchive {
     const value = this.execution(row); this.executionTimeline(row, asOfTick); this.executionReferences(value);
     return value;
   }
-  listExecutions({ afterSerial = 0, asOfTick = MAX_TICK, limit = 256 }: TechnologyExecutionQuery = {}): TechnologyExecution[] {
-    tick(afterSerial); tick(asOfTick); if (!integer(limit) || limit < 1 || limit > 10000) fail('execution page limit');
-    this.getHistoryOrigin();
-    const rows = this.db.prepare('SELECT id,serial,tick,body,digest FROM technology_executions WHERE serial>? AND tick<=? ORDER BY serial LIMIT ?').all(afterSerial, asOfTick, limit) as ExecutionRow[];
-    return rows.map(row => { const value = this.execution(row); this.executionTimeline(row, asOfTick); this.executionReferences(value); return value; });
+  listExecutions(query: TechnologyExecutionQuery = {}): TechnologyExecution[] {
+    return this.listExecutionRecords(query).map(record => record.execution);
   }
-  putExecution(value: TechnologyExecution): void {
+  /**
+   * Una página verificada con el digesto de cada fila. Mismas leyes que `getExecution` fila a fila, con el
+   * coste por fila recortado (sprint noche-arch 2026-09-23: 3,11 decodificaciones por fila en la carga):
+   * - Cronología: `executionTimeline` compara cada fila con su vecina anterior y posterior entre las filas
+   *   con `tick <= asOfTick`, en orden de serie. Dentro de la página esas vecinas SON la fila de al lado,
+   *   ya decodificada y verificada; sólo la primera y la última piden su vecina de fuera (2 por página).
+   * - El origen y la frontera de poda se leen una vez por página.
+   * - Una anidada que está en la página se toma de la página.
+   */
+  listExecutionRecords({ afterSerial = 0, asOfTick = MAX_TICK, limit = 256 }: TechnologyExecutionQuery = {}): TechnologyExecutionRecord[] {
+    tick(afterSerial); tick(asOfTick); if (!integer(limit) || limit < 1 || limit > 10000) fail('execution page limit');
+    const origin = this.getHistoryOrigin(), unverifiable = this.unverifiableThrough(origin);
+    const rows = this.db.prepare('SELECT id,serial,tick,body,digest FROM technology_executions WHERE serial>? AND tick<=? ORDER BY serial LIMIT ?').all(afterSerial, asOfTick, limit) as ExecutionRow[];
+    const values = rows.map(row => this.execution(row)), page = new Map(values.map(value => [value.id, value]));
+    for (let index = 1; index < values.length; index++) if (values[index - 1]!.tick > values[index]!.tick) fail('execution chronology');
+    if (rows.length) {
+      const first = rows[0]!, last = rows.at(-1)!;
+      const before = this.readStatement(EXECUTION_BEFORE).get(first.serial, asOfTick) as ExecutionRow | undefined;
+      const after = this.readStatement(EXECUTION_AFTER).get(last.serial, asOfTick) as ExecutionRow | undefined;
+      if (before && this.execution(before).tick > first.tick || after && this.execution(after).tick < last.tick)
+        fail('execution chronology');
+    }
+    for (const value of values) this.executionReferences(value, origin, unverifiable, page);
+    return values.map((execution, index) => ({ execution, digest: rows[index]!.digest }));
+  }
+  /** Devuelve el digesto de la fila (nueva o idéntica ya archivada): el anfitrión lo encadena. */
+  putExecution(value: TechnologyExecution): string {
     this.transaction(); assertExecution(value); this.executionReferences(value);
     const token = this.synchronize();
-    const body = JSON.stringify(value), prior = this.executionRow(value.id);
-    if (prior) { this.getExecution(value.id); if (prior.body !== body) fail('immutable execution conflict'); return; }
+    const body = JSON.stringify(value), digest = checksum(body), prior = this.executionRow(value.id);
+    if (prior) { this.getExecution(value.id); if (prior.body !== body) fail('immutable execution conflict'); return digest; }
     const serial = serialOf(value.id, 'process')!;
-    this.executionTimeline({ id: value.id, serial, tick: value.tick, body, digest: checksum(body) });
-    const result = this.db.prepare('INSERT INTO technology_executions VALUES (?,?,?,?,?)').run(value.id, serial, value.tick, body, checksum(body));
+    this.executionTimeline({ id: value.id, serial, tick: value.tick, body, digest });
+    const result = this.db.prepare('INSERT INTO technology_executions VALUES (?,?,?,?,?)').run(value.id, serial, value.tick, body, digest);
     this.ownMutation(token, Number(result.changes));
+    return digest;
+  }
+  /**
+   * Retención (sprint noche-arch 2026-09-23): borra los recibos de serie `(afterSerial, throughSerial]`,
+   * que el anfitrión ya verificó y que nada del mundo lee, y devuelve el pliegue de la cadena de digestos a
+   * través de ellos desde `digest`. Antes de borrar comprueba que el tramo está completo (series
+   * consecutivas), en orden cronológico y que cada cuerpo sigue siendo el de su digesto: lo que se descarta
+   * queda certificado por el pliegue, y un tramo exportado antes de podar se verificaría contra él. El
+   * anfitrión elige el tramo (ventana, anillos de los respaldos, tope por guardado) y guarda la frontera.
+   */
+  pruneExecutions(afterSerial: number, throughSerial: number, digest: string): TechnologyPruneResult {
+    this.transaction(); tick(afterSerial); tick(throughSerial);
+    if (throughSerial <= afterSerial || !/^[0-9a-f]{64}$/.test(digest)) fail('prune interval');
+    const token = this.synchronize();
+    let expected = afterSerial, lastTick = -1;
+    const rows = this.db.prepare('SELECT serial,tick,body,digest FROM technology_executions WHERE serial>? AND serial<=? ORDER BY serial');
+    for (const row of rows.iterate(afterSerial, throughSerial) as Iterable<Omit<ExecutionRow, 'id'>>) {
+      if (row.serial !== ++expected) fail('prune interval has a gap');
+      if (typeof row.body !== 'string' || typeof row.digest !== 'string' || checksum(row.body) !== row.digest) fail('checksum');
+      tick(row.tick); if (row.tick < lastTick) fail('execution chronology');
+      lastTick = row.tick; digest = technologyChainStep(digest, row.digest);
+    }
+    if (expected !== throughSerial) fail('prune interval has a gap');
+    const result = this.db.prepare('DELETE FROM technology_executions WHERE serial>? AND serial<=?').run(afterSerial, throughSerial);
+    const count = Number(result.changes);
+    if (count !== throughSerial - afterSerial) fail('prune interval');
+    this.ownMutation(token, count);
+    return { digest, count, tick: lastTick };
   }
 
   /** Recovery of a caller-owned copy. Validate retained references before deleting any future row. */
   truncateAfter(atTick: number): void {
     this.transaction(); tick(atTick);
     this.synchronize();
-    this.getHistoryOrigin();
+    const origin = this.getHistoryOrigin(), unverifiable = this.unverifiableThrough(origin);
     this.scanDefinitions(atTick);
     let previousStats: TechnologyStatsRecord | undefined, previousExecutionTick = -1;
     for (const row of this.db.prepare('SELECT recipeId,tick,body,digest FROM technology_stats WHERE tick<=? ORDER BY recipeId,tick').iterate(atTick) as Iterable<StatsRow>) {
@@ -593,7 +681,7 @@ export class TechnologyArchive {
       previousStats = value;
     }
     for (const row of this.db.prepare('SELECT id,serial,tick,body,digest FROM technology_executions WHERE tick<=? ORDER BY serial').iterate(atTick) as Iterable<ExecutionRow>) {
-      const value = this.execution(row); this.executionReferences(value);
+      const value = this.execution(row); this.executionReferences(value, origin, unverifiable);
       if (value.tick < previousExecutionTick) fail('retained execution chronology');
       previousExecutionTick = value.tick;
     }

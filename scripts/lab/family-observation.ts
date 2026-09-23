@@ -1,6 +1,7 @@
 import type { Person, World } from '../../src/world/index.js';
 import type * as Family from '../../src/world/family.js';
 import type { DatabaseSync } from 'node:sqlite';
+import { assertExecutionsRetainedAfter } from './metrics.js';
 
 const provisioning = (p: Person) => p.role === 'neighbor' && p.action === 'forage'
   && p.reason.startsWith('Prepara alimento para una posible crianza con ');
@@ -88,6 +89,7 @@ export function familySample(world: World, family: typeof Family) {
 /** S/I remain alive by the existing law, so endpoint identity suffices to split
  * every durable useful use in the interval, including actors who died meanwhile. */
 export function roleActivity(world: World, db: DatabaseSync, afterTick: number) {
+  assertExecutionsRetainedAfter(db, afterTick);
   const protectedIds = new Set(world.people.filter(p => p.role !== 'neighbor').map(p => p.id));
   const result = { mortals: { uses: 0, benefit: 0 }, protected: { uses: 0, benefit: 0 } };
   for (const row of db.prepare('SELECT body FROM technology_executions WHERE tick>? AND tick<=? ORDER BY serial').iterate(afterTick, world.tick)) {

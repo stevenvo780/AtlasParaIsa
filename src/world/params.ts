@@ -95,7 +95,14 @@ export interface WorldParams {
      * dentro del cual un miembro convive con ella. Con > 0 la pertenencia se revisa por convivencia y confianza
      * (se une a la comunidad de la mayoría de sus vecinos de confianza; un núcleo que vive a más de este radio
      * del centro funda la suya). 0 = hoy (la pertenencia sólo cambia por `confianzaSalida`). */
-    radioConvivencia: number };
+    radioConvivencia: number;
+    /** Conflicto legible (hipótesis CONFL, 2026-09-22), `society.ts` → `resourceDispute` e `index.ts` → `choose`.
+     * Con > 0, en una disputa (o un turno) cede quien MENOS lo necesita —máximo de hambre y sed; empate, el de id
+     * mayor— y no queda inmóvil treinta pasos: vuelve a elegir al paso siguiente. Quien cede recuerda un día la
+     * fuente disputada (la celda y las que la disputa llama «el mismo destino»), que al elegir dónde comer, beber
+     * o cazar le parece `memoriaDisputa` celdas más lejos: prefiere otra que perciba, y si no hay otra vuelve.
+     * 0 = hoy (cede quien llega a la comprobación, espera treinta pasos inmóvil y no recuerda nada). */
+    memoriaDisputa: number };
 }
 
 function deepFreeze<T>(value: T): T {
@@ -134,7 +141,7 @@ const RAW_HISTORICAL: WorldParams = {
   // cultural), así que abrirlas no cambia el mundo.
   conducta: { habituacion: 0, aptitud: 0 },
   social: { maxComunidades: 8, disputaNecesidad: 0.65, disputaEscasez: 1, disputaRadio: 2, disputaDestino: 0.5, disputaEspera: 180,
-    ensenanzaRareza: 0, confianzaSalida: 0.35, distanciaAlternativa: 0.2, vinculoConvivencia: 0, radioConvivencia: 0 },
+    ensenanzaRareza: 0, confianzaSalida: 0.35, distanciaAlternativa: 0.2, vinculoConvivencia: 0, radioConvivencia: 0, memoriaDisputa: 0 },
 };
 
 /**
@@ -283,6 +290,9 @@ export const PARAM_RANGES: Record<string, [number, number]> = {
   'social.vinculoConvivencia': [0, 0.01],
   // 0 apaga la ley (conducta de hoy); en celdas, como el radio de contacto (6) de `updateCommunities`.
   'social.radioConvivencia': [0, 64],
+  // Penalización, en celdas, de la fuente donde se cedió una disputa. La percepción llega a 7 celdas:
+  // con ≥ 8 cualquier otra fuente percibida va antes; el máximo 32 es «nunca, si hay otra». 0 apaga la ley.
+  'social.memoriaDisputa': [0, 32],
 };
 
 type ScalarDescriptor = { kind: 'number'; range: readonly [number, number]; integer?: boolean }

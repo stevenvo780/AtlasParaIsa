@@ -535,6 +535,20 @@ tipificados al día 4 y C4 (corte provisional, día 4, ventana 3) pasa de 2/4 a 
   corrieron SIN instrumentos y con `Store`, sobre el árbol anterior a la optimización del paso.
 - Con `--gobernador servidor` el tiempo del observador se descuenta del `stepMs` que decide el
   gobernador; ese modo depende del reloj y no es bit a bit reproducible con ni sin instrumentos.
+||||||| parent of 8f08a90 (Let the less needy yield a dispute and remember the contested source)
+
+## Diagnóstico de disputas (`diagnostico-disputas.ts`, hipótesis CONFL 2026-09-22)
+
+```sh
+npx tsx scripts/lab/diagnostico-disputas.ts --seed 51926 --dias 5 --params "..." --salida fichero.json
+```
+
+Sigue cada evento `conflict` (el que cede es `actors[0]`): necesidad (máximo de hambre y sed) de
+cada lado antes del paso, si eran de la misma comunidad, sobre qué acción se disputó (la que conserva
+quien no cede), si quien cedió vuelve a la MISMA celda en los 240 pasos siguientes, cuántas disputas
+más encadena en un día y si alguno de los dos muere en el día siguiente, y de qué. Sólo lee el mundo;
+imprime una línea por día y un resumen al final. Midió el cerrojo que la ley `social.memoriaDisputa`
+corrige (ver `docs/REGLAS.md`, §Conflicto legible).
 
 ## Rendimiento
 

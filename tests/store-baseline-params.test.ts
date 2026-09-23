@@ -1,6 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -8,17 +7,17 @@ import { Store } from '../src/server/store.js';
 import { encodeSnapshot } from '../src/server/snapshot.js';
 import { createWorld } from '../src/world/index.js';
 import { paramsOf, parseParams } from '../src/world/params.js';
+import { filaInstantanea, reescribirInstantanea, sha256 } from './lib/store.js';
 
-const digest = (body: string) => createHash('sha256').update(body).digest('hex');
 function rows(store: Store): unknown {
   const tables = store.db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as { name: string }[];
   return tables.map(({ name }) => [name, store.db.prepare(`SELECT * FROM "${name.replaceAll('"', '""')}"`).all()]);
 }
 type SnapshotRecord = { params: { agua: { cuencas: number }; [key: string]: unknown }; paramsEncoding?: string };
 function rewrite(store: Store, change: (value: SnapshotRecord) => void): void {
-  const row = store.db.prepare('SELECT body FROM snapshots WHERE slot=0').get() as { body: string };
+  const row = filaInstantanea(store);
   const value = JSON.parse(row.body); change(value); const body = JSON.stringify(value);
-  store.db.prepare('UPDATE snapshots SET body=?,digest=? WHERE slot=0').run(body, digest(body));
+  reescribirInstantanea(store, body);
 }
 const corruptions: [string, (value: SnapshotRecord) => void][] = [
   ['out of range', value => { value.params.agua.cuencas = 9; }],
@@ -48,10 +47,10 @@ for (const origin of [false, true]) for (const invalid of [false, true]) {
     const body = encodeSnapshot(old, params);
     assert.equal(old.technology.journal, undefined);
     for (const event of old.events) store.db.prepare('INSERT INTO events VALUES (?,?,?)').run(event.id, event.tick, JSON.stringify(event));
-    store.db.prepare('INSERT INTO snapshots VALUES (0,?,?,?)').run(body, digest(body), 1);
+    store.db.prepare('INSERT INTO snapshots VALUES (0,?,?,?)').run(body, sha256(body), 1);
     store.db.prepare("INSERT INTO metadata VALUES ('initialized','1')").run();
     if (origin) store.save(old); // Keeps the genuine pre-journal checkpoint in slot 1.
-    else store.db.prepare('INSERT INTO snapshots VALUES (1,?,?,?)').run(body, digest(body), 1);
+    else store.db.prepare('INSERT INTO snapshots VALUES (1,?,?,?)').run(body, sha256(body), 1);
     if (invalid) rewrite(store, value => { value.params.agua.cuencas = 9; });
     const before = rows(store), destination = join(directory, 'previous.sqlite');
     if (invalid) assert.throws(() => store.previous(destination), /Invalid snapshot parameters/);

@@ -1,15 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { cloneWorld, createWorld, stepWorld, type Person, type World } from '../src/world/index.js';
+import { cloneWorld, stepWorld, type Person, type World } from '../src/world/index.js';
 import { HISTORICAL_PARAMS } from '../src/world/params.js';
 import { cooperate, cooperationOpportunity } from '../src/world/society.js';
 import { assertTechnology, craftTechnology, researchTechnology, shareTechnology, technologyOpportunity, technologyStock, technologyWorkCost, type TechnologyProgram } from '../src/world/technology.js';
 import { recordChronicleEvent } from '../src/world/chronicle-journal.js';
 import type { ChronicleEvent } from '../src/shared/types.js';
+import { PROGRAMA_FILO as base, aula, proyectoInvestigacion } from './lib/escenas.js';
 
-const base: TechnologyProgram = { inputs: [{ source: 'raw', material: 'stone', mass: 1000 }],
-  steps: [{ op: 'form', intensity: 4, shape: 'edge' }, { op: 'compress', intensity: 2 }] };
 const intermediate: TechnologyProgram = { inputs: [{ source: 'residue', material: 'stone', mass: 60 }],
   steps: [{ op: 'form', intensity: 4, shape: 'edge' }] };
 
@@ -19,8 +18,7 @@ function nextTick(world: World) {
 }
 function discover(world: World, person: Person, program: TechnologyProgram) {
   const parents = [...new Set(program.inputs.flatMap(input => input.source === 'product' ? [input.recipeId!] : []))];
-  person.technology.project = { kind: 'research', program: structuredClone(program), parents, recipeId: null,
-    progress: 0, requiredWork: technologyWorkCost(program), energyPaid: 0, startedAt: world.tick };
+  person.technology.project = proyectoInvestigacion(structuredClone(program), world.tick, parents);
   let success = false;
   for (let n = 0; person.technology.project && n < 300; n++) { nextTick(world); success = researchTechnology(world, person); }
   assert.equal(success, true); assert.equal(person.technology.project, null);
@@ -34,13 +32,7 @@ function fabricate(world: World, person: Person, recipeId: string) {
 function scene(requiredTool = false) {
   // Reglas 10, etapa 1: escena medida en el mundo de antes; con el cortejo por defecto el aprendiz
   // sale a buscar pareja en vez de fabricar, así que parte de `HISTORICAL_PARAMS` explícitos.
-  const world = createWorld(51926, HISTORICAL_PARAMS), teacher = world.people[2]!, learner = world.people[3]!;
-  for (const person of world.people) {
-    person.x = 10; person.y = 20; person.target = { x: 10, y: 20 }; person.action = 'rest';
-    person.materials = { wood: 0, stone: 0 }; person.skills = {}; person.energy = 1;
-    person.hunger = person.thirst = person.fatigue = 0; person.lastSocial = -30;
-  }
-  for (const person of [teacher, learner]) { person.x = 36; person.y = 12; person.target = { x: 36, y: 12 }; }
+  const { world, maestro: teacher, aprendiz: learner } = aula({ params: HISTORICAL_PARAMS, cuerpo: { energy: 1, fatigue: 0, hunger: 0, thirst: 0 } });
   teacher.materials = { wood: 12, stone: 8 }; learner.materials = { wood: 1, stone: 1 };
   const foundation = discover(world, teacher, base), precursor = discover(world, teacher, intermediate);
   const final = discover(world, teacher, { inputs: [{ source: 'raw', material: 'wood', mass: 1000 }, { source: 'product', recipeId: precursor.id, mass: 50 }],

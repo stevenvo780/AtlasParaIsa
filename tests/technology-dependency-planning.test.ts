@@ -2,15 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { bindTechnologyCatalogue, enableTechnologyCatalogue } from '../src/world/technology-catalogue.js';
 import { assertTechnology, craftTechnology, defaultTechnologyState, initialTechnologyKnowledge, researchTechnology, shareTechnology,
-  technologyOpportunity, technologyWorkCost, toolCapacities, useTool, type TechnologyActor, type TechnologyHost, type TechnologyProgram } from '../src/world/technology.js';
+  technologyOpportunity, toolCapacities, useTool, type TechnologyActor, type TechnologyHost, type TechnologyProgram } from '../src/world/technology.js';
+import { PROGRAMA_FILO as foundation, proyectoInvestigacion } from './lib/escenas.js';
 
-const foundation: TechnologyProgram = { inputs: [{ source: 'raw', material: 'stone', mass: 1000 }],
-  steps: [{ op: 'form', intensity: 4, shape: 'edge' }, { op: 'compress', intensity: 2 }] };
 
 function discover(host: TechnologyHost, actor: TechnologyActor, program: TechnologyProgram) {
   const parents = [...new Set(program.inputs.flatMap(input => input.source === 'product' ? [input.recipeId!] : []))];
-  actor.technology.project = { kind: 'research', program: structuredClone(program), parents, recipeId: null,
-    progress: 0, requiredWork: technologyWorkCost(program), energyPaid: 0, startedAt: host.tick };
+  actor.technology.project = proyectoInvestigacion(structuredClone(program), host.tick, parents);
   let success = false;
   while (actor.technology.project) { host.tick++; success = researchTechnology(host, actor); }
   assert.equal(success, true);

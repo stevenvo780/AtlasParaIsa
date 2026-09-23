@@ -1,21 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { cloneWorld, createWorld, stepWorld, tileAt, type Person, type World } from '../src/world/index.js';
+import { cloneWorld, stepWorld, tileAt, type Person, type World } from '../src/world/index.js';
 import { cooperate, cooperationOpportunity } from '../src/world/society.js';
-import { assertTechnology, craftTechnology, researchTechnology, shareTechnology, technologyStock, technologyWorkCost, transferTechnologyItem, type TechnologyProgram } from '../src/world/technology.js';
+import { assertTechnology, craftTechnology, researchTechnology, shareTechnology, technologyStock, technologyWorkCost, transferTechnologyItem } from '../src/world/technology.js';
 import { recordChronicleEvent } from '../src/world/chronicle-journal.js';
 import type { ChronicleEvent } from '../src/shared/types.js';
+import { PROGRAMA_FILO as edge, aula, proyectoInvestigacion } from './lib/escenas.js';
 
-const edge: TechnologyProgram = { inputs: [{ source: 'raw', material: 'stone', mass: 1000 }], steps: [{ op: 'form', intensity: 4, shape: 'edge' }, { op: 'compress', intensity: 2 }] };
 function scene() {
-  const world = createWorld(51926), teacher = world.people[2]!, learner = world.people[3]!;
-  for (const person of world.people) {
-    person.x = 10; person.y = 20; person.target = { x: 10, y: 20 }; person.action = 'rest';
-    person.skills = {}; person.materials = { wood: 0, stone: 0 }; person.lastSocial = -30;
-    person.energy = 1; person.fatigue = person.hunger = person.thirst = 0;
-    person.decisionAt = 1_000_000;
-  }
-  for (const person of [teacher, learner]) { person.x = 36; person.y = 12; person.target = { x: 36, y: 12 }; }
+  const { world, maestro: teacher, aprendiz: learner } = aula({ cuerpo: { energy: 1, fatigue: 0, hunger: 0, thirst: 0 }, decisionAt: 1_000_000 });
   teacher.materials = { wood: 12, stone: 8 };
   return { world, teacher, learner };
 }
@@ -23,8 +16,7 @@ function emit(world: World) { return (event: Omit<ChronicleEvent, 'id' | 'tick'>
   const result = recordChronicleEvent(world, event); world.events.push(result); return result;
 }; }
 function discover(world: World, person: Person, program = edge) {
-  person.technology.project = { kind: 'research', program: structuredClone(program), parents: [], recipeId: null,
-    progress: 0, requiredWork: technologyWorkCost(program), energyPaid: 0, startedAt: world.tick };
+  person.technology.project = proyectoInvestigacion(structuredClone(program), world.tick);
   while (person.technology.project) { world.tick++; researchTechnology(world, person); }
   return world.technology.recipes.at(-1)!;
 }

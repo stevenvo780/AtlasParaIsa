@@ -13,6 +13,7 @@ import { digestoCanonico } from '../src/world/digesto.js';
 import { DEFAULT_PARAMS, paramsOf, parseParams, setParams } from '../src/world/params.js';
 import { decodeSnapshot, encodeSnapshot, takeSnapshotParams, SnapshotSemanticError } from '../src/server/snapshot.js';
 import { Store } from '../src/server/store.js';
+import { filaInstantanea, reescribirInstantanea } from './lib/store.js';
 
 /** `chunks` regiones completas: la geometría estructural fija 256 teselas por chunk.
  * Los cuerpos son HETEROGÉNEOS y de alta precisión a propósito: 2 M copias de una sola
@@ -42,7 +43,6 @@ function wideWorld(chunks = 257): World {
  * el instantáneo ni es el máximo ni distingue qué fase lo alcanzó. Es monótono, así que
  * leerlo tras la fase escritora da el pico de ESA fase. */
 const peakRssBytes = (): number => process.resourceUsage().maxRSS * 1024;
-const checksum = (body: string): string => createHash('sha256').update(body).digest('hex');
 function tables(store: Store): string {
   const names = store.db.prepare("SELECT name FROM sqlite_schema WHERE type='table' ORDER BY name").all() as { name: string }[];
   const hash = createHash('sha256');
@@ -60,7 +60,7 @@ test('T100: 65792 teselas y 257 chunks conservan el digesto confirmado al reabri
   let digest: string;
   try {
     store.save(world); digest = digestoCanonico(world);
-    const manifest = JSON.parse((store.db.prepare('SELECT body FROM snapshots WHERE slot=0').get() as { body: string }).body);
+    const manifest = JSON.parse(filaInstantanea(store).body);
     assert.equal(manifest.snapshotEncoding, 'snapshot-parts-v1');
     assert.deepEqual(manifest.world.limitsProfile, { version: 2, ...paramsOf(world).limites });
   } finally { store.close(); }
@@ -101,7 +101,7 @@ for (const paged of [false, true]) for (const corruption of ['unknown', 'partial
     const world = createWorld(), store = new Store(':memory:', { snapshotInlineTileLimit: paged ? 0 : 32768 });
     try {
       store.save(world);
-      const value = JSON.parse((store.db.prepare('SELECT body FROM snapshots WHERE slot=0').get() as { body: string }).body);
+      const value = JSON.parse(filaInstantanea(store).body);
       const metadata = paged ? value.world : value;
       metadata.limitsProfile = { version: 2, ...DEFAULT_PARAMS.limites };
       if (corruption === 'unknown') metadata.limitsProfile.version = 3;
@@ -110,7 +110,7 @@ for (const paged of [false, true]) for (const corruption of ['unknown', 'partial
       if (corruption === 'extra') metadata.limitsProfile.hostRam = 1;
       if (corruption === 'legacy version') metadata.version = 4;
       const body = JSON.stringify(value);
-      store.db.prepare('UPDATE snapshots SET body=?,digest=? WHERE slot=0').run(body, checksum(body));
+      reescribirInstantanea(store, body);
       const before = tables(store);
       assert.throws(() => store.load(), SnapshotSemanticError);
       assert.throws(() => store.save(world), SnapshotSemanticError);

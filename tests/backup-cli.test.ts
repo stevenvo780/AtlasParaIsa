@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../src/server/store.js';
 import { createWorld } from '../src/world/index.js';
+import { sha256 } from './lib/store.js';
 
 test('backup CLI keeps an older service schema and source bytes unchanged',()=>{
   const directory=mkdtempSync(join(tmpdir(),'atlas-backup-v4-')),source=join(directory,'world.sqlite'),destination=join(directory,'backup.sqlite');
@@ -14,7 +14,7 @@ test('backup CLI keeps an older service schema and source bytes unchanged',()=>{
   const prior=structuredClone(world) as unknown as Record<string,unknown>;prior.version=4;
   for(const key of ['technology','legacy','retiredLegacy','demographyDynamics'])delete prior[key];
   for(const person of prior.people as Record<string,unknown>[]) {delete person.demography;delete person.technology;}
-  const body=JSON.stringify(prior),digest=createHash('sha256').update(body).digest('hex');
+  const body=JSON.stringify(prior),digest=sha256(body);
   store.db.prepare('UPDATE snapshots SET body=?,digest=? WHERE slot=0').run(body,digest);
   store.db.exec('DROP TABLE snapshot_parts; DROP TABLE legacy; PRAGMA user_version=2;');store.close();
   try {

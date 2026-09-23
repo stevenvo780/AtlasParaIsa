@@ -2,12 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Store } from '../src/server/store.js';
 import { assertWorld, cloneWorld, createWorld, migrateWorld, projectWorld, stepWorld, type World } from '../src/world/index.js';
-import { assertTechnology, researchTechnology, settleTechnologyEstate, technologyWorkCost, transferTechnologyItem, useTool,
+import { assertTechnology, researchTechnology, settleTechnologyEstate, transferTechnologyItem, useTool,
   type TechnologyProgram } from '../src/world/technology.js';
 import { containedWaterQuanta, WATER_PREPARATION_MAX_TICKS } from '../src/world/technology-water.js';
 import { WATER_QUANTA_PER_UNIT } from '../src/world/material-affordances.js';
 import { bindWorldContext } from '../src/world/spatial.js';
 import { generateChunk } from '../src/world/terrain.js';
+import { proyectoInvestigacion } from './lib/escenas.js';
 
 /** Controlled laboratory: the experiment is selected, but all substrate and work
  * are paid. Subsequent choices use stepWorld with no gestures. The separate
@@ -22,8 +23,7 @@ function laboratory(shape: 'hollow' | 'rod' = 'hollow', source = 0.8) {
   actor.materials = { wood: 0, stone: 2 };
   const program: TechnologyProgram = { inputs: [{ source: 'raw', material: 'stone', mass: 2000 }],
     steps: [{ op: 'form', intensity: 4, shape }, { op: 'compress', intensity: 2 }] };
-  actor.technology.project = { kind: 'research', program, parents: [], recipeId: null, progress: 0,
-    requiredWork: technologyWorkCost(program), energyPaid: 0, startedAt: world.tick };
+  actor.technology.project = proyectoInvestigacion(program, world.tick);
   let success = false;
   while (actor.technology.project) {
     world.tick++; for (const person of world.people) person.demography.age = world.tick - person.bornAt;
@@ -182,8 +182,7 @@ test('commands, transfers, support transformation and death cancel the actor-own
     } else if (event === 'wear') useTool(lab.world, lab.actor, 'storage');
     else if (event === 'transform') {
       const program: TechnologyProgram = { inputs: [{ source: 'product', recipeId: lab.item.recipeId!, mass: 500 }], steps: [{ op: 'cool', intensity: 1 }] };
-      lab.actor.technology.project = { kind: 'research', program, parents: [lab.item.recipeId!], recipeId: null,
-        progress: 0, requiredWork: technologyWorkCost(program), energyPaid: 0, startedAt: lab.world.tick };
+      lab.actor.technology.project = proyectoInvestigacion(program, lab.world.tick, [lab.item.recipeId!]);
       while (lab.actor.technology.project) {
         lab.world.tick++; for (const person of lab.world.people) person.demography.age = lab.world.tick - person.bornAt;
         researchTechnology(lab.world, lab.actor);

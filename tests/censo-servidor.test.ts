@@ -4,29 +4,20 @@ import { createWorld, stepWorld, projectWorld, type World } from '../src/world/i
 import type { Viewport } from '../src/shared/types.js';
 import { demographicTraits } from '../src/world/demography.js';
 import { paramsOf } from '../src/world/params.js';
-import { captureTechnologyCheckpoint } from '../src/world/technology-checkpoint.js';
+import { clonarVecino, registrarInyectados } from './lib/escenas.js';
 
 const KIB = 1024;
 const encodedBytes = (value: unknown): number => Buffer.byteLength(JSON.stringify(value), 'utf8');
 
-/** Clones a real neighbor as a template so every injected synthetic person carries a valid,
- * fully-shaped `Person` (genome, technology, demography…) without recomputing genetics for a
- * scale test that only cares about wire size and visibility, not biology. */
+/** Vecinos sintéticos clonados de uno real (tests/lib/escenas.ts): esta prueba de escala solo mira
+ * tamaño en el cable y visibilidad, no biología. */
 function injectNeighbors(world: World, count: number, at: { x: number; y: number }, communityId: string | null, prefix: string): void {
-  const template = world.people.find(p => p.role === 'neighbor')!;
   for (let i = 0; i < count; i++) {
-    const clone = structuredClone(template);
-    clone.id = `${prefix}-${i}`; clone.name = `Sintético ${prefix} ${i}`;
-    clone.x = at.x; clone.y = at.y; clone.target = { x: at.x, y: at.y };
-    clone.communityId = communityId; clone.role = 'neighbor';
+    const clone = clonarVecino(world, `${prefix}-${i}`, `Sintético ${prefix} ${i}`, at, communityId);
     world.people.push(clone);
     if (communityId) world.communities.find(c => c.id === communityId)?.members.push(clone.id);
   }
-  // `stepWorld` keeps the technology checkpoint's roster current (`advanceTechnologyCheckpoint`);
-  // a direct injection must do the same, or `analyzeTechnologyOrganization` (unrelated to T134,
-  // still called by `projectWorld`) treats every injected id as never-checkpointed and floods
-  // `organization` with one diagnostic string per id — an artifact of skipping birth, not real.
-  world.technology.checkpoint = captureTechnologyCheckpoint(world.technology, world.people, world.tick, 'migration');
+  registrarInyectados(world);
 }
 
 /** The formula `demographicSummary` (`game.ts:419-437`) used to run per client over the WHOLE

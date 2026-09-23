@@ -13,6 +13,8 @@ import { assertWaterExecution, carriedTechnologyMass, containedWaterQuanta, drin
   maintainContainedWater, payContainedWaterCarry, WATER_WORK_ENERGY } from '../src/world/technology-water.js';
 import { containerAffordance, WATER_QUANTA_PER_UNIT } from '../src/world/material-affordances.js';
 import { captureTechnologyCheckpoint } from '../src/world/technology-checkpoint.js';
+import { filaInstantanea, sha256 } from './lib/store.js';
+import { proyectoInvestigacion } from './lib/escenas.js';
 
 const hollow: TechnologyProgram = { inputs: [{ source: 'raw', material: 'stone', mass: 2000 }],
   steps: [{ op: 'form', intensity: 4, shape: 'hollow' }, { op: 'compress', intensity: 2 }] };
@@ -22,8 +24,7 @@ function nextTick(world: World) {
 }
 function paid(world: World, program: TechnologyProgram, parents: string[] = []) {
   const actor = world.people[2]!;
-  actor.technology.project = { kind: 'research', program, parents, recipeId: null, progress: 0,
-    requiredWork: technologyWorkCost(program), energyPaid: 0, startedAt: world.tick };
+  actor.technology.project = proyectoInvestigacion(program, world.tick, parents);
   const before = world.technology.ledger.work;
   let success = false;
   for (let n = 0; actor.technology.project && n < 250; n++) { nextTick(world); success = researchTechnology(world, actor); }
@@ -315,10 +316,10 @@ test('checksum-consistent removal of a committed spill from snapshot and archive
   const lab = fixture(), store = new Store(':memory:');
   try {
     store.save(lab.world); fill(lab); nextTick(lab.world); useTool(lab.world, lab.actor, 'storage', 100_000); store.save(lab.world);
-    const row = store.db.prepare('SELECT body FROM snapshots WHERE slot=0').get() as { body: string };
+    const row = filaInstantanea(store);
     const altered = decodeSnapshot(row.body) as World, event = altered.technology.history.at(-1)!;
     assert.ok(event.water!.lost > 0); delete event.water;
-    const digest = (body: string) => createHash('sha256').update(body).digest('hex');
+    const digest = (body: string) => sha256(body);
     const body = encodeSnapshot(altered), receipt = JSON.stringify(event);
     store.db.prepare('UPDATE snapshots SET body=?,digest=? WHERE slot=0').run(body, digest(body));
     store.db.prepare('UPDATE technology_executions SET body=?,digest=? WHERE id=?').run(receipt, digest(receipt), event.id);

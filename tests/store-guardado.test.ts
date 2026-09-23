@@ -1,15 +1,16 @@
 import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { Store } from '../src/server/store.js';
 import { createWorld } from '../src/world/index.js';
-import { researchTechnology, technologyWorkCost } from '../src/world/technology.js';
+import { researchTechnology } from '../src/world/technology.js';
 import type { TechnologyDefinition } from '../src/shared/technology-archive.js';
 import type { TechnologyProgram } from '../src/shared/technology.js';
+import { filaInstantanea, sha256 } from './lib/store.js';
+import { proyectoInvestigacion } from './lib/escenas.js';
 
 function fixture(t: TestContext) {
   const directory = mkdtempSync(join(tmpdir(), 'atlas-save-statements-')), path = join(directory, 'world.sqlite');
@@ -20,8 +21,7 @@ function fixture(t: TestContext) {
   actor.materials.stone = 8; actor.energy = 1; actor.fatigue = 0.1;
   const program: TechnologyProgram = { inputs: [{ source: 'raw', material: 'stone', mass: 4000 }],
     steps: [{ op: 'form', shape: 'edge', intensity: 4 }, { op: 'compress', intensity: 2 }] };
-  actor.technology.project = { kind: 'research', program, parents: [], recipeId: null, progress: 0,
-    requiredWork: technologyWorkCost(program), energyPaid: 0, startedAt: world.tick };
+  actor.technology.project = proyectoInvestigacion(program, world.tick);
   for (let n = 0; n < 100 && actor.technology.project; n++) {
     world.tick++; for (const person of world.people) person.demography.age = world.tick - person.bornAt;
     researchTechnology(world, actor);
@@ -32,11 +32,11 @@ function fixture(t: TestContext) {
   assert.ok(recipe); assert.ok(store.technologyArchive.getStats(recipe.id));
   return { store, world, path, recipe };
 }
-const snapshot = (store: Store) => store.db.prepare('SELECT body,digest FROM snapshots WHERE slot=0').get();
+const snapshot = (store: Store) => filaInstantanea(store);
 function forgeGeneration(db: DatabaseSync, recipe: TechnologyDefinition): void {
   const body = JSON.stringify({ ...recipe, generation: recipe.generation + 1 });
   db.prepare('UPDATE technology_definitions SET body=?,digest=? WHERE id=?')
-    .run(body, createHash('sha256').update(body).digest('hex'), recipe.id);
+    .run(body, sha256(body), recipe.id);
 }
 
 test('reusing SQL programs preserves snapshot bytes and a cold verified restart', t => {
@@ -66,8 +66,7 @@ test('T105: recetas residentes sin cambios escriben las mismas filas de tecnolog
   actor.materials.wood = 8; actor.energy = 1; actor.fatigue = 0.1;
   const program: TechnologyProgram = { inputs: [{ source: 'raw', material: 'wood', mass: 4000 }],
     steps: [{ op: 'form', shape: 'rod', intensity: 3 }] };
-  actor.technology.project = { kind: 'research', program, parents: [], recipeId: null, progress: 0,
-    requiredWork: technologyWorkCost(program), energyPaid: 0, startedAt: world.tick };
+  actor.technology.project = proyectoInvestigacion(program, world.tick);
   for (let n = 0; n < 100 && actor.technology.project; n++) {
     world.tick++; for (const person of world.people) person.demography.age = world.tick - person.bornAt;
     researchTechnology(world, actor);
@@ -127,7 +126,7 @@ test('rollback after a warmed query discards a temporary repair and never credit
   store.db.exec('BEGIN');
   const body = JSON.stringify(recipe);
   store.db.prepare('UPDATE technology_definitions SET body=?,digest=? WHERE id=?')
-    .run(body, createHash('sha256').update(body).digest('hex'), recipe.id);
+    .run(body, sha256(body), recipe.id);
   assert.deepEqual(store.technologyArchive.getDefinition(recipe.id), recipe);
   store.db.exec('ROLLBACK');
   store.db.exec('BEGIN');

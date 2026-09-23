@@ -1,6 +1,5 @@
 import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -10,8 +9,8 @@ import type { TechnologyDefinition } from '../src/shared/technology-archive.js';
 import type { Capability, TechnologyProgram } from '../src/shared/technology.js';
 import { applyPhysicalOperation, materialCapacities, programSignature, rawMaterial, technologyWorkCost, validTechnologyProgram } from '../src/world/technology.js';
 import { TECHNOLOGY_FUNCTION_WORDS, technologyFunctionCode, technologyFunctionCount } from '../src/world/technology-catalogue.js';
+import { sha256 } from './lib/store.js';
 
-const checksum = (body: string) => createHash('sha256').update(body).digest('hex');
 function fixture(t: TestContext) {
   const dir = mkdtempSync(join(tmpdir(), 'archive-catalogue-')), path = join(dir, 'archive.sqlite');
   const db = new DatabaseSync(path); countQueries(db);
@@ -44,7 +43,7 @@ function populate(db: DatabaseSync, archive: TechnologyArchive, count: number): 
 }
 function rewrite(db: DatabaseSync, id: number, mutate: (definition: TechnologyDefinition) => void): void {
   const value = definition(id); mutate(value); const body = JSON.stringify(value);
-  db.prepare('UPDATE technology_definitions SET body=?,digest=? WHERE id=?').run(body, checksum(body), value.id);
+  db.prepare('UPDATE technology_definitions SET body=?,digest=? WHERE id=?').run(body, sha256(body), value.id);
 }
 const queryCounters = new WeakMap<DatabaseSync, { reset(): void; readonly count: number }>();
 function countQueries(db: DatabaseSync) {
@@ -115,7 +114,7 @@ test('novelty prefix validation rejects a forged repeated-function label even af
     const opening = archive.summarizeDefinitions(first!.tick);
     assert.equal(archive.summarizeDefinitions(repeated!.tick).functionalDiversity, 1);
     const body = JSON.stringify({ ...repeated!, novelty });
-    db.prepare('UPDATE technology_definitions SET body=?,digest=? WHERE id=?').run(body, checksum(body), repeated!.id);
+    db.prepare('UPDATE technology_definitions SET body=?,digest=? WHERE id=?').run(body, sha256(body), repeated!.id);
     assert.deepEqual(archive.summarizeDefinitions(first!.tick), opening, 'a future false label cannot rewrite a valid past prefix');
     assert.throws(() => archive.summarizeDefinitions(repeated!.tick), /definition novelty/);
     assert.throws(() => archive.getDefinition(repeated!.id), /definition novelty/);
@@ -136,7 +135,7 @@ test('legacy function novelty is preserved only for the first occurrence of its 
   assert.equal(archive.getDefinition(repeated!.id)!.novelty, 'program');
   assert.equal(archive.summarizeDefinitions(repeated!.tick).functionalDiversity, 1);
   const body = JSON.stringify({ ...first, novelty: 'program' });
-  db.prepare('UPDATE technology_definitions SET body=?,digest=? WHERE id=?').run(body, checksum(body), first.id);
+  db.prepare('UPDATE technology_definitions SET body=?,digest=? WHERE id=?').run(body, sha256(body), first.id);
   assert.throws(() => archive.summarizeDefinitions(first.tick), /definition novelty/);
 });
 
@@ -263,7 +262,7 @@ test('host rollback invalidation discards uncommitted statistics and COMMIT with
 for (const scope of ['main', 'temp'] as const) test(`${scope} triggers prevent non-technology host SQL from hiding archive changes`, t => {
   const { db, archive } = fixture(t); populate(db, archive, 4);
   db.exec('CREATE TABLE host_notes (body TEXT)');
-  db.exec(`CREATE ${scope === 'temp' ? 'TEMP ' : ''}TRIGGER corrupt_after_note AFTER INSERT ON main.host_notes BEGIN UPDATE technology_definitions SET body='null', digest='${checksum('null')}' WHERE id='recipe-1'; END`);
+  db.exec(`CREATE ${scope === 'temp' ? 'TEMP ' : ''}TRIGGER corrupt_after_note AFTER INSERT ON main.host_notes BEGIN UPDATE technology_definitions SET body='null', digest='${sha256('null')}' WHERE id='recipe-1'; END`);
   assert.equal(archive.summarizeDefinitions(4).recipes, 4);
   assert.doesNotThrow(() => host(db, archive, () => archive.observeHostWrites(() => db.prepare('INSERT INTO host_notes VALUES (?)').run('tick'))));
   assert.throws(() => archive.getDefinition('recipe-4'), /Invalid technology archive/);
@@ -278,10 +277,10 @@ test('historical summaries exclude future bodies but reject any corrupt statisti
   });
   const past = archive.summarizeDefinitions(4);
   const invalid = JSON.stringify({ recipeId: 'recipe-1', tick: 10, uses: 100, manufactured: 100, utility: 100 });
-  db.prepare('UPDATE technology_stats SET body=?,digest=? WHERE recipeId=? AND tick=?').run(invalid, checksum(invalid), 'recipe-1', 10);
+  db.prepare('UPDATE technology_stats SET body=?,digest=? WHERE recipeId=? AND tick=?').run(invalid, sha256(invalid), 'recipe-1', 10);
   assert.deepEqual(archive.summarizeDefinitions(4), past);
   assert.throws(() => archive.summarizeDefinitions(30), /statistics regression/);
-  db.prepare('UPDATE technology_stats SET body=?,digest=? WHERE tick=?').run('null', checksum('null'), 30);
+  db.prepare('UPDATE technology_stats SET body=?,digest=? WHERE tick=?').run('null', sha256('null'), 30);
   assert.deepEqual(archive.summarizeDefinitions(4), past); assert.throws(() => archive.summarizeDefinitions(30), /Invalid technology archive/);
 });
 
@@ -294,7 +293,7 @@ test('missing definitions, missing statistics, malformed costs and unsafe genera
     if (variant === 'generation') rewrite(db, 1, value => { value.generation = Number.MAX_SAFE_INTEGER + 1; });
     if (variant === 'gap') {
       const value = definition(4); value.id = 'recipe-5'; const body = JSON.stringify(value);
-      db.prepare("UPDATE technology_definitions SET id=?,body=?,digest=? WHERE id='recipe-4'").run(value.id, body, checksum(body));
+      db.prepare("UPDATE technology_definitions SET id=?,body=?,digest=? WHERE id='recipe-4'").run(value.id, body, sha256(body));
     }
     assert.throws(() => archive.summarizeDefinitions(4), /Invalid technology archive/, variant);
   }

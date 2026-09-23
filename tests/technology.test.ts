@@ -6,6 +6,7 @@ import type { Composition, OperationInstruction } from '../src/shared/technology
 // bodyAndAction) that C2 actually fixed; technology.ts's own craftTechnology/technologyOpportunity
 // were already correct before T014 and cannot exercise that line on their own (see the test below).
 import { createWorld, stepWorld } from '../src/world/index.js';
+import { PROGRAMA_FILO as edge, proyectoInvestigacion } from './lib/escenas.js';
 
 function scene(seed = 51926) {
   const actor = (id: string): TechnologyActor => ({ id, x: 0, y: 0, energy: 1, fatigue: 0, hunger: 0.1, thirst: 0.1, curiosity: 0.9, materials: { wood: 12, stone: 8 }, skills: {}, technology: initialTechnologyKnowledge() });
@@ -14,12 +15,11 @@ function scene(seed = 51926) {
   return { host, a, b };
 }
 function runProgram(host: TechnologyHost, actor: TechnologyActor, program: TechnologyProgram, parents: string[] = []): boolean {
-  actor.technology.project = { kind: 'research', program: structuredClone(program), parents, recipeId: null, progress: 0, requiredWork: technologyWorkCost(program), energyPaid: 0, startedAt: host.tick };
+  actor.technology.project = proyectoInvestigacion(structuredClone(program), host.tick, parents);
   let result = false;
   for (let n = 0; actor.technology.project && n < 250; n++) { host.tick++; result = researchTechnology(host, actor); }
   return result;
 }
-const edge: TechnologyProgram = { inputs: [{ source: 'raw', material: 'stone', mass: 1000 }], steps: [{ op: 'form', intensity: 4, shape: 'edge' }, { op: 'compress', intensity: 2 }] };
 const fibre: TechnologyProgram = { inputs: [{ source: 'raw', material: 'wood', mass: 1000 }], steps: [{ op: 'weave', intensity: 4 }, { op: 'form', intensity: 2, shape: 'sheet' }] };
 function conserved(before: Composition, product: Composition | undefined, residue: Composition) {
   for (const material of ['wood', 'stone', 'water'] as const) assert.equal((product?.[material] ?? 0) + residue[material], before[material], material);

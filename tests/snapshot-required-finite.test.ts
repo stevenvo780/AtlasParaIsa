@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import test, { type TestContext } from 'node:test';
-import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -12,20 +11,17 @@ import { recordChronicleEvent } from '../src/world/chronicle-journal.js';
 import { demographicTraits } from '../src/world/demography.js';
 import { digestoCanonico } from '../src/world/digesto.js';
 import { paramsOf } from '../src/world/params.js';
-import { researchTechnology, technologyWorkCost, useTool, type TechnologyProgram } from '../src/world/technology.js';
+import { researchTechnology, useTool, type TechnologyProgram } from '../src/world/technology.js';
 import { generateChunk } from '../src/world/terrain.js';
+import { filaInstantanea, sha256, todasLasTablas } from './lib/store.js';
+import { proyectoInvestigacion } from './lib/escenas.js';
 
 const fields = ['food', 'moisture', 'vegetation', 'x', 'y'] as const;
 const formats = ['inline default', 'piezas forzadas'] as const;
 const boundaries = ['warm', 'primer save tras load'] as const;
 type Format = typeof formats[number];
 type Boundary = typeof boundaries[number];
-const checksum = (body: string): string => createHash('sha256').update(body).digest('hex');
 
-function allTables(store: Store): unknown {
-  const tables = store.db.prepare("SELECT name FROM main.sqlite_schema WHERE type='table' ORDER BY name").all() as { name: string }[];
-  return tables.map(({ name }) => [name, store.db.prepare(`SELECT * FROM main."${name.replaceAll('"', '""')}" ORDER BY rowid`).all()]);
-}
 
 function advanceClock(world: World): void {
   world.tick++;
@@ -37,8 +33,7 @@ function worldWithTool(): World {
   actor.materials.stone = 8; actor.energy = 1; actor.fatigue = 0.1;
   const program: TechnologyProgram = { inputs: [{ source: 'raw', material: 'stone', mass: 4000 }],
     steps: [{ op: 'form', intensity: 4, shape: 'edge' }, { op: 'compress', intensity: 2 }] };
-  actor.technology.project = { kind: 'research', program, parents: [], recipeId: null, progress: 0,
-    requiredWork: technologyWorkCost(program), energyPaid: 0, startedAt: world.tick };
+  actor.technology.project = proyectoInvestigacion(program, world.tick);
   for (let attempt = 0; actor.technology.project && attempt < 100; attempt++) {
     advanceClock(world); researchTechnology(world, actor);
   }
@@ -99,7 +94,7 @@ function rejectPreserving(store: Store, draft: World, before: unknown): void {
   assert.throws(() => store.save(draft), /required|finite|obligatori|numeric/i,
     'un número obligatorio inválido debe rechazarse antes de perderse como null en JSON');
   assert.equal(store.db.isTransaction, false);
-  assert.deepEqual(allTables(store), before, 'el rechazo conserva TODAS las tablas, páginas y slots 0/1/2');
+  assert.deepEqual(todasLasTablas(store), before, 'el rechazo conserva TODAS las tablas, páginas y slots 0/1/2');
   assert.deepEqual(draft, expected, 'el candidato y el contenido de todas sus colas siguen intactos');
   pendingQueues(draft).forEach((queue, index) => assert.equal(queue, queues[index], 'no se sustituye ni confirma una cola pendiente'));
 }
@@ -107,19 +102,19 @@ function rejectPreserving(store: Store, draft: World, before: unknown): void {
 for (const format of formats) for (const boundary of boundaries) {
   for (const field of fields) for (const value of [NaN, Infinity, -Infinity]) {
     test(`required finite: ${format}, ${boundary}, ${field}=${String(value)} no confirma ni erosiona respaldos`, t => {
-      const lab = laboratory(t, format, boundary), before = allTables(lab.store), draft = pendingDraft(lab.world, lab.store);
+      const lab = laboratory(t, format, boundary), before = todasLasTablas(lab.store), draft = pendingDraft(lab.world, lab.store);
       draft.tiles[0]![field] = value;
       rejectPreserving(lab.store, draft, before);
       const reopened = lab.reopen(), loaded = reopened.load()!;
       assert.equal(loaded.slot, 0);
       assert.equal(digestoCanonico(loaded.world), lab.committedDigest);
-      assert.deepEqual(allTables(reopened), before, 'cerrar y reabrir confirma que el rechazo no escribió nada durable');
+      assert.deepEqual(todasLasTablas(reopened), before, 'cerrar y reabrir confirma que el rechazo no escribió nada durable');
     });
   }
 
   for (const value of [null, undefined, '0']) {
     test(`required finite: ${format}, ${boundary}, tipo ${String(value)} se rechaza en los cinco campos`, t => {
-      const lab = laboratory(t, format, boundary), before = allTables(lab.store);
+      const lab = laboratory(t, format, boundary), before = todasLasTablas(lab.store);
       for (const field of fields) {
         const draft = pendingDraft(lab.world, lab.store);
         (draft.tiles[0] as unknown as Record<string, unknown>)[field] = value;
@@ -127,12 +122,12 @@ for (const format of formats) for (const boundary of boundaries) {
       }
       const reopened = lab.reopen();
       assert.equal(digestoCanonico(reopened.load()!.world), lab.committedDigest);
-      assert.deepEqual(allTables(reopened), before);
+      assert.deepEqual(todasLasTablas(reopened), before);
     });
   }
 
   test(`required finite: ${format}, ${boundary}, quince intentos inválidos conservan la misma cadena`, t => {
-    const lab = laboratory(t, format, boundary), before = allTables(lab.store);
+    const lab = laboratory(t, format, boundary), before = todasLasTablas(lab.store);
     const snapshots = lab.store.db.prepare('SELECT * FROM snapshots ORDER BY slot').all();
     for (const field of fields) for (const value of [NaN, Infinity, -Infinity]) {
       const draft = pendingDraft(lab.world, lab.store);
@@ -143,7 +138,7 @@ for (const format of formats) for (const boundary of boundaries) {
     assert.equal(loaded.slot, 0);
     assert.equal(digestoCanonico(loaded.world), lab.committedDigest);
     assert.deepEqual(reopened.db.prepare('SELECT * FROM snapshots ORDER BY slot').all(), snapshots);
-    assert.deepEqual(allTables(reopened), before);
+    assert.deepEqual(todasLasTablas(reopened), before);
   });
 
   for (const control of ['-0', 'ordinary bytes'] as const) {
@@ -156,8 +151,8 @@ for (const format of formats) for (const boundary of boundaries) {
       lab.store.save(draft);
       for (const queue of pendingQueues(draft)) assert.equal(queue.length, 0);
       const committedDigest = digestoCanonico(draft);
-      const saved = lab.store.db.prepare('SELECT body,digest FROM snapshots WHERE slot=0').get() as { body: string; digest: string };
-      assert.equal(saved.digest, checksum(saved.body));
+      const saved = filaInstantanea(lab.store);
+      assert.equal(saved.digest, sha256(saved.body));
       if (control === 'ordinary bytes') {
         const tuples = draft.tiles.map(t => [t.x,t.y,t.terrain,t.moisture,t.vegetation,t.food,t.biome,t.elevation,
           t.wood,t.stone,t.feature,t.variety,t.growth,t.fertility,t.cultivation,t.traffic,t.drinkingWater,t.species,t.fauna,t.life]);
@@ -170,7 +165,7 @@ for (const format of formats) for (const boundary of boundaries) {
           const page = JSON.parse(saved.body).tiles.pages[0] as { digest: string; bytes: number };
           const body = (lab.store.db.prepare('SELECT body FROM snapshot_parts WHERE digest=?').get(page.digest) as { body: string }).body;
           assert.equal(body, JSON.stringify(tuples));
-          assert.equal(page.digest, checksum(body));
+          assert.equal(page.digest, sha256(body));
           assert.equal(page.bytes, Buffer.byteLength(body));
         }
       }

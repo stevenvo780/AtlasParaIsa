@@ -1,21 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { cloneWorld, createWorld, stepWorld, tileAt, type Person } from '../src/world/index.js';
-import { initialDemography } from '../src/world/demography.js';
+import { cloneWorld, stepWorld, tileAt, type Person } from '../src/world/index.js';
 import { familyOpportunity, reproductiveReadiness } from '../src/world/family.js';
-import { HISTORICAL_PARAMS } from '../src/world/params.js';
+import { escenaFamiliaSeca } from './lib/escenas.js';
 
 // Reglas 10, etapa 1 (2026-09-22): fixture medida con las leyes de antes; parte de `HISTORICAL_PARAMS`
 // explícitos (los defaults nuevos adoptan cortejo, comunidad opcional, muestreo continuo y habituación).
 /** Finite dry fixture, not a naturally reached population or survival claim. */
 function scene(seed: number, steps = 0) {
-  const world = createWorld(seed, HISTORICAL_PARAMS); world.tick = 1000; world.weather = 'clear'; world.animals = [];
-  for (const tile of world.tiles) { tile.food = tile.vegetation = tile.moisture = tile.fertility = tile.fauna = 0; }
-  for (const person of world.people) {
-    person.hunger = person.thirst = person.fatigue = .1; person.energy = .9; person.inventory = 0;
-    person.action = 'rest'; person.target = { x: person.x, y: person.y }; person.decisionAt = 100000;
-    person.communityId = null; person.bonds = {}; person.demography = initialDemography(world.tick - person.bornAt);
-  }
+  const world = escenaFamiliaSeca(seed);
   const [a, b] = world.people.filter(p => p.role === 'neighbor') as [Person, Person, ...Person[]];
   a.x = 17; a.y = 13; b.x = 18; b.y = 13; a.inventory = .095; b.inventory = .12;
   a.bonds[b.id] = b.bonds[a.id] = .5; a.communityId = b.communityId = 'fixture-family';

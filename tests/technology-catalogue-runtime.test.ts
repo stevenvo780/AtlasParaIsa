@@ -5,8 +5,8 @@ import { assertTechnology, cancelTechnologyProject, craftTechnology, defaultTech
   maintainTechnologyMemory, projectTechnology, proposeTechnologyProgram, recordTechnologyBenefit, researchTechnology,
   shareTechnology, technologyOpportunity, technologyWorkCost, transferTechnologyItem, useTool,
   type TechnologyActor, type TechnologyHost, type TechnologyProgram, type TechnologyRecipe } from '../src/world/technology.js';
+import { PROGRAMA_FILO as edge, proyectoInvestigacion } from './lib/escenas.js';
 
-const edge: TechnologyProgram = { inputs: [{ source: 'raw', material: 'stone', mass: 1000 }], steps: [{ op: 'form', intensity: 4, shape: 'edge' }, { op: 'compress', intensity: 2 }] };
 const fibre: TechnologyProgram = { inputs: [{ source: 'raw', material: 'wood', mass: 1000 }], steps: [{ op: 'weave', intensity: 4 }, { op: 'form', intensity: 2, shape: 'sheet' }] };
 const rod: TechnologyProgram = { inputs: [{ source: 'raw', material: 'wood', mass: 1000 }], steps: [{ op: 'form', intensity: 4, shape: 'rod' }] };
 function scene() {
@@ -16,8 +16,7 @@ function scene() {
   return { host, a, b };
 }
 function start(host: TechnologyHost, actor: TechnologyActor, program: TechnologyProgram, parents: string[] = []) {
-  actor.technology.project = { kind: 'research', program: structuredClone(program), parents, recipeId: null,
-    progress: 0, requiredWork: technologyWorkCost(program), energyPaid: 0, startedAt: host.tick };
+  actor.technology.project = proyectoInvestigacion(structuredClone(program), host.tick, parents);
 }
 function finish(host: TechnologyHost, actor: TechnologyActor): boolean {
   let success = false;

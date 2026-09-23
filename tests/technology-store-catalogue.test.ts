@@ -1,6 +1,5 @@
 import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -12,6 +11,8 @@ import { advanceTechnologyCheckpoint } from '../src/world/technology-checkpoint.
 import { assertTechnology, craftTechnology, maintainTechnologyMemory, projectTechnology, proposeTechnologyProgram,
   researchTechnology, technologyWorkCost, transferTechnologyItem, type TechnologyProgram, type TechnologyRecipe } from '../src/world/technology.js';
 import type { Gesture } from '../src/shared/types.js';
+import { filaInstantanea, sha256 } from './lib/store.js';
+import { proyectoInvestigacion } from './lib/escenas.js';
 
 interface Laboratory {
   directory: string;
@@ -94,8 +95,7 @@ function finish(lab: Laboratory, actor: Person): TechnologyRecipe {
 }
 function discover(lab: Laboratory, program: TechnologyProgram, parents: string[] = [], actorId = lab.inventorId): TechnologyRecipe {
   const actor = person(lab, actorId); supply(lab, actor);
-  actor.technology.project = { kind: 'research', program: structuredClone(program), parents: [...parents], recipeId: null,
-    progress: 0, requiredWork: technologyWorkCost(program), energyPaid: 0, startedAt: lab.world.tick };
+  actor.technology.project = proyectoInvestigacion(structuredClone(program), lab.world.tick, [...parents]);
   return finish(lab, actor);
 }
 function save(lab: Laboratory): void { lab.store.save(lab.world, [], [lab.session]); }
@@ -345,9 +345,9 @@ test('missing cold definitions and checksum-consistent fabricated lifetime total
     discover(lab, edgeProgram(0)); discover(lab, edgeProgram(1)); discover(lab, edgeProgram(2)); save(lab); coldFirst(lab); save(lab);
     if (corruption === 'definition') lab.store.db.prepare('DELETE FROM technology_definitions WHERE id=?').run('recipe-1');
     else {
-      const row = lab.store.db.prepare('SELECT body FROM snapshots WHERE slot=0').get() as { body: string };
+      const row = filaInstantanea(lab.store);
       const world = decodeSnapshot(row.body) as World; world.technology.catalogue!.totals.utility += 1;
-      const body = encodeSnapshot(world), digest = createHash('sha256').update(body).digest('hex');
+      const body = encodeSnapshot(world), digest = sha256(body);
       lab.store.db.prepare('UPDATE snapshots SET body=?,digest=? WHERE slot=0').run(body, digest);
     }
     assert.throws(() => lab.store.load());

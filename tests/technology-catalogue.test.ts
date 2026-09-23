@@ -6,11 +6,12 @@ import { assertTechnologyCatalogueState, bindTechnologyCatalogue, catalogueEnabl
   resolveTechnologyRecipe, TECHNOLOGY_FUNCTION_WORDS, technologyCatalogueStateForCommit,
   technologyCatalogueTotals, technologyFunctionCode, technologyFunctionCount, technologyMemoryCapacity,
   updateTechnologyRecipeStats, type TechnologyCatalogueReader } from '../src/world/technology-catalogue.js';
-import { defaultTechnologyState, initialTechnologyKnowledge, researchTechnology, technologyWorkCost,
+import { defaultTechnologyState, initialTechnologyKnowledge, researchTechnology,
   type TechnologyActor, type TechnologyHost, type TechnologyProgram } from '../src/world/technology.js';
+import { PROGRAMA_FILO, proyectoInvestigacion } from './lib/escenas.js';
 
 const programs: TechnologyProgram[] = [
-  { inputs: [{ source: 'raw', material: 'stone', mass: 1000 }], steps: [{ op: 'form', intensity: 4, shape: 'edge' }, { op: 'compress', intensity: 2 }] },
+  structuredClone(PROGRAMA_FILO),
   { inputs: [{ source: 'raw', material: 'wood', mass: 1000 }], steps: [{ op: 'weave', intensity: 4 }, { op: 'form', intensity: 2, shape: 'sheet' }] },
   { inputs: [{ source: 'raw', material: 'wood', mass: 1000 }], steps: [{ op: 'form', intensity: 4, shape: 'rod' }] },
   { inputs: [{ source: 'raw', material: 'stone', mass: 1000 }], steps: [{ op: 'form', intensity: 3, shape: 'hollow' }, { op: 'compress', intensity: 1 }] },
@@ -24,8 +25,7 @@ function paidDefinitions() {
   let prefix: TechnologyHost | undefined;
   for (const [index, program] of programs.entries()) {
     if (index === 3) prefix = structuredClone(host);
-    actor.technology.project = { kind: 'research', program: structuredClone(program), parents: [], recipeId: null,
-      progress: 0, requiredWork: technologyWorkCost(program), energyPaid: 0, startedAt: host.tick };
+    actor.technology.project = proyectoInvestigacion(structuredClone(program), host.tick);
     let result = false;
     while (actor.technology.project) { host.tick++; result = researchTechnology(host, actor); }
     assert.equal(result, true);
@@ -94,8 +94,7 @@ test('novelty labels follow the paid program history even after its function lea
   const reference: TechnologyHost = { seed: 731, tick: 0, people: [actor], technology: defaultTechnologyState() };
   for (const intensity of [1, 3, 2]) {
     const program: TechnologyProgram = { inputs: [{ source: 'raw', material: 'stone', mass: 1000 }], steps: [{ op: 'compress', intensity }] };
-    actor.technology.project = { kind: 'research', program, parents: [], recipeId: null,
-      progress: 0, requiredWork: technologyWorkCost(program), energyPaid: 0, startedAt: reference.tick };
+    actor.technology.project = proyectoInvestigacion(program, reference.tick);
     let completed = false;
     while (actor.technology.project) { reference.tick++; completed = researchTechnology(reference, actor); }
     assert.equal(completed, true);

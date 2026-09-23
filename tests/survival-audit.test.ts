@@ -1,8 +1,7 @@
-import test, { type TestContext } from 'node:test';
+import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { auditStep, bodySummary, parseConfig, reconcileChronicle, reproductiveObservation, runExperiment } from '../scripts/survival-audit.mjs';
@@ -11,14 +10,9 @@ import { materializeAnimals, syncFauna } from '../src/world/animals.js';
 import { Store } from '../src/server/store.js';
 import { demographicTraits } from '../src/world/demography.js';
 import { familyOpportunity, reproductiveReadiness } from '../src/world/family.js';
+import { directorioTemporal, filaInstantanea } from './lib/store.js';
 
 const source = fileURLToPath(new URL('../', import.meta.url));
-
-function temporary(t: TestContext, prefix: string): string {
-  const path = mkdtempSync(join(tmpdir(), prefix));
-  t.after(() => rmSync(path, { recursive: true, force: true }));
-  return path;
-}
 
 const event = (id: string, tick: number) => ({ id, tick, kind: 'animal', actors: [], text: 'synthetic', source: 'simulation' });
 
@@ -43,7 +37,7 @@ test('audit rejects intrastep truncation, duplicate, wrong tick and decreasing c
 });
 
 test('SQL reconciliation rejects missing bodies, tampering and extra events', async t => {
-  const path = join(temporary(t, 'atlas-audit-test-'), 'audit.jsonl'), db = eventTable();
+  const path = join(directorioTemporal(t, 'atlas-audit-test-'), 'audit.jsonl'), db = eventTable();
   const e = event('e1', 0);
   const row = { tick: 0, first: 1, last: 1, count: 1, events: auditStep(0, 1, [e], 0) };
   writeFileSync(path, JSON.stringify(row) + '\n');
@@ -59,7 +53,7 @@ test('SQL reconciliation rejects missing bodies, tampering and extra events', as
 });
 
 test('reconciliation requires every audit step including eventless intervals', async t => {
-  const path = join(temporary(t, 'atlas-audit-test-'), 'audit.jsonl'), db = eventTable();
+  const path = join(directorioTemporal(t, 'atlas-audit-test-'), 'audit.jsonl'), db = eventTable();
   const rows = [{ tick: 0, first: 1, last: 0, count: 0, events: [] }, { tick: 2, first: 1, last: 0, count: 0, events: [] }];
   writeFileSync(path, rows.map(r => JSON.stringify(r)).join('\n') + '\n');
   await assert.rejects(reconcileChronicle(db, path, 0, 2), /AUDIT_STEP_GAP/);
@@ -92,7 +86,7 @@ test('a physical burst larger than the event ring survives journal+clone+save wh
   world.animals = materializeAnimals(world.seed, world.tiles, world.tick); syncFauna(world.tiles, world.animals);
   for (const animal of world.animals.slice(0, 128)) { animal.thirst = 1; animal.health = .0001; }
   assertWorld(world);
-  const store = new Store(join(temporary(t, 'atlas-v3-burst-'), 'world.sqlite'));
+  const store = new Store(join(directorioTemporal(t, 'atlas-v3-burst-'), 'world.sqlite'));
   try {
     store.save(world);
     const draft = cloneWorld(world, store.context);
@@ -114,7 +108,7 @@ test('a physical burst larger than the event ring survives journal+clone+save wh
 });
 
 test('postcommit auditor failure reports durable snapshot separately from verified event prefix', async t => {
-  const directory = join(temporary(t, 'atlas-v3-postcommit-'), 'run');
+  const directory = join(directorioTemporal(t, 'atlas-v3-postcommit-'), 'run');
   // Parche global de Store.prototype.save dentro de este proceso de prueba; se restaura en finally.
   const original = Store.prototype.save;
   Store.prototype.save = function (world, ...args) {
@@ -129,7 +123,7 @@ test('postcommit auditor failure reports durable snapshot separately from verifi
     assert.ok(failure.durableEventCounter > failure.verifiedEventCounter);
     assert.equal(failure.verifiedEventCounter, 1);
     const db = new DatabaseSync(join(directory, 'world.sqlite'), { readOnly: true });
-    try { assert.equal(JSON.parse(String(db.prepare('SELECT body FROM snapshots WHERE slot=0').get()!.body)).tick, 120); }
+    try { assert.equal(JSON.parse(filaInstantanea(db).body).tick, 120); }
     finally { db.close(); }
   } finally { Store.prototype.save = original; }
 });

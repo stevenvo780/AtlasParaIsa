@@ -9,16 +9,12 @@ import { deploymentParams } from '../src/server/deployment-params.js';
 import { BYTES_PER_ACTIVE_TILE, HEAP_SHARE, HOST_RAM_SHARE, cgroupMemory, hostLimits, hostMemory, hostParams,
   type HostMemory } from '../src/server/hardware-limits.js';
 import { DEFAULT_PARAMS, LEGACY_WORLD_LIMITS, assertWorldLimits, paramsOf } from '../src/world/params.js';
+import { type ConLimpieza, directorioTemporal } from './lib/store.js';
 
 const GiB = 1024 ** 3;
 const password = 'synthetic-host-limits-password';
 const origin = 'http://127.0.0.1:3000';
-function laboratory(t: { after(callback: () => void): void }) {
-  const directory = mkdtempSync(join(tmpdir(), 'atlas-host-limits-'));
-  const path = join(directory, 'world.sqlite');
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
-  return path;
-}
+const laboratory = (t: ConLimpieza) => join(directorioTemporal(t, 'atlas-host-limits-'), 'world.sqlite');
 const chunksFor = (budget: number): number => Math.floor(budget / (BYTES_PER_ACTIVE_TILE * 256));
 
 test('T100/4b: la fórmula sale de la memoria del host y produce regiones enteras', () => {

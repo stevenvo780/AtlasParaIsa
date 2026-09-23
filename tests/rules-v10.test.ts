@@ -1,21 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { Store } from '../src/server/store.js';
 import { cloneWorld, createWorld, RULES_VERSION, stepWorld, type World } from '../src/world/index.js';
 import { HISTORICAL_PARAMS, parseParams, paramsOf } from '../src/world/params.js';
+import { type ConLimpieza, laboratorio } from './lib/store.js';
 
 /** Reglas 10, etapa 1 (2026-09-22): un mundo V9 es un mundo de antes, así que estas pruebas lo crean
  * con `HISTORICAL_PARAMS` explícitos; los defaults de un mundo NUEVO adoptan el paquete de natalidad. */
 
-function laboratory(t: { after(callback: () => void): void }): { path: string; store: Store } {
-  const directory = mkdtempSync(join(tmpdir(), 'atlas-reglas10-'));
-  const path = join(directory, 'world.sqlite'), store = new Store(path);
-  t.after(() => { try { store.close(); } catch { /* ya cerrado por la prueba */ } rmSync(directory, { recursive: true, force: true }); });
-  return { path, store };
-}
+const laboratory = (t: ConLimpieza) => laboratorio(t, 'atlas-reglas10-');
 
 test('un mundo V9 guardado por Store se recarga como V10 conservando todo salvo la versión', t => {
   // Control: el MISMO mundo guardado y recargado como V10. El Store archiva terreno dormido y

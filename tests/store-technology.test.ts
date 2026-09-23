@@ -1,6 +1,5 @@
 import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -8,11 +7,13 @@ import { DatabaseSync } from 'node:sqlite';
 import { Store, SessionRevoked } from '../src/server/store.js';
 import { decodeSnapshot, encodeSnapshot } from '../src/server/snapshot.js';
 import { assertWorld, createWorld, type World } from '../src/world/index.js';
-import { researchTechnology, technologyWorkCost, useTool, recordTechnologyBenefit, cancelTechnologyProject } from '../src/world/technology.js';
+import { researchTechnology, useTool, recordTechnologyBenefit, cancelTechnologyProject } from '../src/world/technology.js';
 import { enableTechnologyJournal } from '../src/world/technology-journal.js';
 import type { TechnologyProgram } from '../src/shared/technology.js';
+import { filaInstantanea, sha256 } from './lib/store.js';
+import { proyectoInvestigacion } from './lib/escenas.js';
 
-const digest = (body: string | Buffer) => createHash('sha256').update(body).digest('hex');
+const digest = (body: string | Buffer) => sha256(body);
 const count = (store: Store, table: string) => Number(store.db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get()!.n);
 function fixture(t: TestContext) {
   const directory = mkdtempSync(join(tmpdir(), 'atlas-store-technology-')), path = join(directory, 'world.sqlite');
@@ -30,8 +31,7 @@ function makeTool(world: World, parent?: string) {
   const program: TechnologyProgram = parent
     ? { inputs: [{ source: 'product', recipeId: parent, mass: 1000 }], steps: [{ op: 'form', shape: 'rod', intensity: 2 }] }
     : { inputs: [{ source: 'raw', material: 'stone', mass: 4000 }], steps: [{ op: 'form', shape: 'edge', intensity: 4 }, { op: 'compress', intensity: 2 }] };
-  person.technology.project = { kind: 'research', program, parents: parent ? [parent] : [], recipeId: null,
-    progress: 0, requiredWork: technologyWorkCost(program), energyPaid: 0, startedAt: world.tick };
+  person.technology.project = proyectoInvestigacion(program, world.tick, parent ? [parent] : []);
   for (let n = 0; n < 100 && person.technology.project; n++) { nextTick(world); researchTechnology(world, person); }
   assert.equal(person.technology.project, null); assert.ok(person.technology.items.length); assertWorld(world);
   return person;
@@ -48,8 +48,7 @@ function makeNestedTool(world: World) {
   actor.energy = 1; actor.fatigue = 0.1; actor.materials.wood = 4;
   const program: TechnologyProgram = { inputs: [{ source: 'raw', material: 'wood', mass: 1000 }],
     steps: [{ op: 'form', intensity: 3, shape: 'edge', requiredCatalyst: 'cutting' }] };
-  actor.technology.project = { kind: 'research', program, parents: [parentId], recipeId: null, progress: 0,
-    requiredWork: technologyWorkCost(program), energyPaid: 0, startedAt: world.tick };
+  actor.technology.project = proyectoInvestigacion(program, world.tick, [parentId]);
   for (let n = 0; n < 100 && actor.technology.project; n++) { nextTick(world); researchTechnology(world, actor); }
   assert.equal(actor.technology.project, null);
   const parent = world.technology.history.at(-1)!;
@@ -58,7 +57,7 @@ function makeNestedTool(world: World) {
   assertWorld(world); return parent;
 }
 function rewriteSnapshot(store: Store, slot: number, change: (world: World) => void) {
-  const row = store.db.prepare('SELECT body FROM snapshots WHERE slot=?').get(slot) as { body: string };
+  const row = filaInstantanea(store, slot);
   const world = decodeSnapshot(row.body) as World; change(world);
   const body = encodeSnapshot(world); store.db.prepare('UPDATE snapshots SET body=?,digest=? WHERE slot=?').run(body, digest(body), slot);
 }
@@ -283,11 +282,11 @@ test('same-connection and external archive corruption invalidate the save cache 
     const { store, path } = fixture(t), world = createWorld(51926); store.save(world); makeTool(world); store.save(world);
     const mutator = external ? new DatabaseSync(path) : store.db;
     try { mutator.exec(`DELETE FROM ${table}`); } finally { if (external) mutator.close(); }
-    nextTick(world); const before = store.db.prepare('SELECT body,digest FROM snapshots WHERE slot=0').get();
+    nextTick(world); const before = filaInstantanea(store);
     const pending = structuredClone(world.technology.journal);
     assert.throws(() => store.save(world), /[Tt]echnology archive/);
     assert.equal(count(store, table), 0, `${table} must remain missing after the refused save`);
-    assert.deepEqual(store.db.prepare('SELECT body,digest FROM snapshots WHERE slot=0').get(), before);
+    assert.deepEqual(filaInstantanea(store), before);
     assert.deepEqual(world.technology.journal, pending);
   }
 });
@@ -315,8 +314,7 @@ test('previous recovery honors serial boundaries even when two checkpoints share
   // initial opening checkpoint's whole-tick boundary before testing recovery.
   nextTick(world); store.save(world); const previous = structuredClone(world);
   const actor = world.people[2]!, program: TechnologyProgram = { inputs: [{ source: 'raw', material: 'stone', mass: 1000 }], steps: [{ op: 'form', shape: 'edge', intensity: 4 }] };
-  actor.technology.project = { kind: 'research', program, parents: [], recipeId: null, progress: 0,
-    requiredWork: technologyWorkCost(program), energyPaid: 0, startedAt: world.tick };
+  actor.technology.project = proyectoInvestigacion(program, world.tick);
   cancelTechnologyProject(world, actor); assert.equal(world.technology.executionCounter, 1); store.save(world);
   const path = join(directory, 'same-tick.sqlite'); store.previous(path); const recovered = new Store(path, { readOnly: true });
   try { assert.deepEqual(recovered.load()!.world, previous); assert.equal(count(recovered, 'technology_executions'), 0); }
@@ -328,12 +326,12 @@ test('a late input failure rolls back technology, events and snapshot together',
   const { store } = fixture(t), world = createWorld(51926); store.save(world);
   const gesture = { id: 'duplicate-input', kind: 'plant' as const, x: 17, y: 13 };
   const result = { id: gesture.id, accepted: true, tick: 0, order: 0, message: 'Storage transaction fixture' };
-  store.save(world, [{ gesture, result }]); const before = store.db.prepare('SELECT body,digest FROM snapshots WHERE slot=0').get();
+  store.save(world, [{ gesture, result }]); const before = filaInstantanea(store);
   makeTool(world); const queue = structuredClone(world.technology.journal), events = count(store, 'events');
   assert.throws(() => store.save(world, [{ gesture, result }]), /UNIQUE constraint failed: inputs.id/);
   assert.equal(count(store, 'technology_executions'), 0); assert.equal(count(store, 'technology_definitions'), 0);
   assert.equal(count(store, 'events'), events); assert.equal(count(store, 'inputs'), 1);
-  assert.deepEqual(store.db.prepare('SELECT body,digest FROM snapshots WHERE slot=0').get(), before);
+  assert.deepEqual(filaInstantanea(store), before);
   assert.deepEqual(world.technology.journal, queue); store.save(world); assert.equal(count(store, 'technology_executions'), 1);
 });
 
@@ -445,9 +443,9 @@ test('same-connection schema changes invalidate quiet-save caches without rebuil
   const changes = store.db.prepare('SELECT total_changes() AS n').get()!.n;
   store.db.exec('DROP TABLE technology_definitions');
   assert.equal(store.db.prepare('SELECT total_changes() AS n').get()!.n, changes, 'DDL is invisible to the row-change counter');
-  const before = store.db.prepare('SELECT body,digest FROM snapshots WHERE slot=0').get(); nextTick(world);
+  const before = filaInstantanea(store); nextTick(world);
   assert.throws(() => store.save(world), /schema is incomplete/);
-  assert.deepEqual(store.db.prepare('SELECT body,digest FROM snapshots WHERE slot=0').get(), before);
+  assert.deepEqual(filaInstantanea(store), before);
   assert.equal(store.db.prepare("SELECT name FROM sqlite_master WHERE name='technology_definitions'").get(), undefined);
 });
 

@@ -1,10 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import { Store } from '../src/server/store.js';
 import { createWorld } from '../src/world/index.js';
+import { filaInstantanea, reescribirInstantanea } from './lib/store.js';
 
-const checksum = (body: string) => createHash('sha256').update(body).digest('hex');
 function fixture(t: { after(callback: () => void): void }) {
   const store = new Store(':memory:'), world = createWorld(51926);
   t.after(() => store.close());
@@ -13,12 +12,12 @@ function fixture(t: { after(callback: () => void): void }) {
 }
 function rows(store: Store) { return store.db.prepare('SELECT * FROM snapshots ORDER BY slot').all(); }
 function rewrite(store: Store, body: string) {
-  store.db.prepare('UPDATE snapshots SET body=?,digest=? WHERE slot=0').run(body, checksum(body));
+  reescribirInstantanea(store, body);
 }
 
 for (const corruption of ['future encoding', 'short tuple', 'historical tile cap'] as const) {
   test(`a readable ${corruption} cannot silently select a healthy older checkpoint`, t => {
-    const store = fixture(t), row = store.db.prepare('SELECT body FROM snapshots WHERE slot=0').get() as { body: string };
+    const store = fixture(t), row = filaInstantanea(store);
     const value = JSON.parse(row.body) as { tileEncoding: string; tiles: unknown[][] };
     if (corruption === 'future encoding') value.tileEncoding = 'future-v999';
     if (corruption === 'short tuple') value.tiles[0]!.pop();
@@ -42,7 +41,7 @@ test('unreadable JSON still permits physical recovery to a verified checkpoint',
 });
 
 test('an unexpected decoder resource error is not permission to rewind', t => {
-  const store = fixture(t), row = store.db.prepare('SELECT body FROM snapshots WHERE slot=0').get() as { body: string };
+  const store = fixture(t), row = filaInstantanea(store);
   const originalParse = JSON.parse, failure = new RangeError('synthetic decoder resource failure');
   t.mock.method(JSON, 'parse', (body: string) => {
     if (body === row.body) throw failure;

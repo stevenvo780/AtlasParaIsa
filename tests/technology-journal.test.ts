@@ -1,10 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { assertTechnology, defaultTechnologyState, initialTechnologyKnowledge, recordTechnologyBenefit,
-  researchTechnology, technologyWorkCost, useTool, type TechnologyActor, type TechnologyHost,
+  researchTechnology, useTool, type TechnologyActor, type TechnologyHost,
   type TechnologyProgram } from '../src/world/technology.js';
 import { assertTechnologyJournal, enableTechnologyJournal, markTechnologyJournalCommitted,
   technologyStateForCommit } from '../src/world/technology-journal.js';
+import { proyectoInvestigacion } from './lib/escenas.js';
 
 function scene(journal = true): TechnologyHost {
   const actor: TechnologyActor = { id: 'a', x: 0, y: 0, energy: 1, fatigue: 0,
@@ -13,8 +14,7 @@ function scene(journal = true): TechnologyHost {
   if (journal) enableTechnologyJournal(host.technology);
   const program: TechnologyProgram = { inputs: [{ source: 'raw', material: 'stone', mass: 4000 }],
     steps: [{ op: 'form', intensity: 4, shape: 'edge' }, { op: 'compress', intensity: 2 }] };
-  actor.technology.project = { kind: 'research', program, parents: [], recipeId: null, progress: 0,
-    requiredWork: technologyWorkCost(program), energyPaid: 0, startedAt: 0 };
+  actor.technology.project = proyectoInvestigacion(program, 0);
   while (actor.technology.project) { host.tick++; researchTechnology(host, actor); }
   assert.equal(actor.technology.items.length, 1);
   return host;

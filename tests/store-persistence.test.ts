@@ -1,13 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, existsSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { Store, DEEP_CHECKPOINT_EVERY_SAVES, DEEP_VALIDATION_EVERY_SAVES, deepValidationDue } from '../src/server/store.js';
 import { createWorld, cloneWorld, type World } from '../src/world/index.js';
 import { parseParams, setParams } from '../src/world/params.js';
 import { recordChronicleEvent } from '../src/world/chronicle-journal.js';
 import { generateChunk } from '../src/world/terrain.js';
+import { type ConLimpieza, laboratorio } from './lib/store.js';
 
 /** Las pruebas fijan el momento del mundo sin simular: los cuerpos envejecen con él. */
 function fixtureTick(world: World, tick: number): void {
@@ -17,12 +17,7 @@ function emit(world: World): void {
   const event = recordChronicleEvent(world, { kind: 'ecology', actors: [], text: 'Observación sintética.', cause: 'Fixture de prueba.', source: 'simulation' });
   world.events.push(event); if (world.events.length > 120) world.events.shift();
 }
-function laboratory(t: { after(callback: () => void): void }) {
-  const directory = mkdtempSync(join(tmpdir(), 'atlas-persistence-test-'));
-  const path = join(directory, 'world.sqlite'), store = new Store(path);
-  t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
-  return { store, path };
-}
+const laboratory = (t: ConLimpieza) => laboratorio(t, 'atlas-persistence-test-');
 const serialsInArchive = (store: Store): number[] => (store.db.prepare("SELECT CAST(substr(id,2) AS INTEGER) AS serial FROM events WHERE id GLOB 'e[0-9]*' ORDER BY serial").all() as { serial: number }[]).map(row => row.serial);
 const savedBody = (store: Store, slot: number): string | undefined => (store.db.prepare('SELECT body FROM snapshots WHERE slot=?').get(slot) as { body: string } | undefined)?.body;
 

@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import { createWorld } from '../src/world/index.js';
 import { paramsOf } from '../src/world/params.js';
 import { digestoCanonico } from '../src/world/digesto.js';
+import { sha256 } from './lib/store.js';
 
 /** Previous 3dd615e byte contract, retained as an independent small-state oracle. */
 function previousCanonical(value: unknown): unknown {
@@ -29,7 +29,7 @@ for (const seed of [1, 51926, 0xffffffff]) test(`streamed digest preserves prior
   const bytes = previousJson(previousCanonical({ world, params: paramsOf(world) }));
   assert.ok(bytes.length > 64 * 1024, 'control crosses buffered emission boundaries');
   const before = structuredClone(world);
-  assert.equal(digestoCanonico(world), createHash('sha256').update(bytes).digest('hex'));
+  assert.equal(digestoCanonico(world), sha256(bytes));
   assert.deepEqual(world, before);
 });
 

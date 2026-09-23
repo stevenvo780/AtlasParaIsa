@@ -11,6 +11,7 @@ import { createWorld, stepWorld, projectWorld, assertWorld, tileAt } from '../sr
 import { activate } from '../src/world/spatial.js';
 import { chunkKey, generateChunk, MAX_COORDINATE } from '../src/world/terrain.js';
 import type { Gesture, GestureResult, ServerMessage, Viewport, WorldView } from '../src/shared/types.js';
+import { filaInstantanea } from './lib/store.js';
 
 async function fixture(t: { after: (callback: () => Promise<void>) => void }, manual = true) {
   const dir = mkdtempSync(join(tmpdir(), 'carta-viewport-'));
@@ -142,13 +143,13 @@ test('a constructed and modified region survives physical eviction, restart, rea
     const restarted = store.load()!.world;
     assert.equal(restarted.discoveredChunks, discovered); assert.equal(restarted.settlementCount, settlements);
     const beforeCamera = structuredClone(restarted);
-    const snapshotBefore = store.db.prepare('SELECT body,digest FROM snapshots WHERE slot=0').get();
+    const snapshotBefore = filaInstantanea(store);
     const view = projectWorld(restarted, { x: chunk.cx * 16, y: chunk.cy * 16, width: 16, height: 16 }, context);
     assert.equal(view.tiles.find(t => t.x === modified.x && t.y === modified.y)!.terrain, 'shelter');
     assert.equal(view.tiles.find(t => t.x === modified.x && t.y === modified.y)!.food, 0.098);
     assert.ok(view.places.some(p => p.id === settlement.id));
     assert.deepEqual(restarted, beforeCamera);
-    assert.deepEqual(store.db.prepare('SELECT body,digest FROM snapshots WHERE slot=0').get(), snapshotBefore);
+    assert.deepEqual(filaInstantanea(store), snapshotBefore);
 
     activate(restarted, destination.x, destination.y, context);
     assert.deepEqual(tileAt(restarted, destination), modified);

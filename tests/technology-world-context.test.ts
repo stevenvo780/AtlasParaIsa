@@ -9,8 +9,8 @@ import { observeTechnologyOrganization } from '../src/world/technology-organizat
 import { cooperate, cooperationOpportunity } from '../src/world/society.js';
 import { recordChronicleEvent } from '../src/world/chronicle-journal.js';
 import type { LegacyRecord } from '../src/shared/demography.js';
+import { PROGRAMA_FILO as edge, proyectoInvestigacion } from './lib/escenas.js';
 
-const edge: TechnologyProgram = { inputs: [{ source: 'raw', material: 'stone', mass: 1000 }], steps: [{ op: 'form', intensity: 4, shape: 'edge' }, { op: 'compress', intensity: 2 }] };
 const programs: TechnologyProgram[] = [edge,
   { inputs: [{ source: 'raw', material: 'wood', mass: 1000 }], steps: [{ op: 'weave', intensity: 4 }] },
   { inputs: [{ source: 'raw', material: 'wood', mass: 1000 }], steps: [{ op: 'form', intensity: 4, shape: 'rod' }] },
@@ -22,8 +22,7 @@ function fixture() {
   maker.materials = { wood: 12, stone: 8 };
   for (const program of programs) {
     maker.action = 'research';
-    maker.technology.project = { kind: 'research', program, parents: [], recipeId: null, progress: 0,
-      requiredWork: technologyWorkCost(program), energyPaid: 0, startedAt: world.tick };
+    maker.technology.project = proyectoInvestigacion(program, world.tick);
     while (maker.technology.project) stepWorld(world);
   }
   maker.action = 'rest';

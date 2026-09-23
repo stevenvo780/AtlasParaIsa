@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import { createWorld, assertWorld, stepWorld, projectWorld } from '../src/world/index.js';
 import { decodeSnapshot, encodeSnapshot, takeSnapshotParams } from '../src/server/snapshot.js';
 import { setParams } from '../src/world/params.js';
 import { Store } from '../src/server/store.js';
+import { reescribirInstantanea } from './lib/store.js';
 
 function restore(body: string): ReturnType<typeof createWorld> {
   const world = decodeSnapshot(body) as ReturnType<typeof createWorld>;
@@ -25,7 +25,7 @@ test('unknown tuple versions, truncated rows and semantically malformed fields f
   assert.throws(()=>decodeSnapshot(JSON.stringify({...encoded,tileEncoding:'future-v999'})));
   const short=structuredClone(encoded);short.tiles[0].pop();assert.throws(()=>decodeSnapshot(JSON.stringify(short)));
   const malformed=structuredClone(encoded);malformed.tiles[0][16]='a-lake';const body=JSON.stringify(malformed);
-  const store=new Store(':memory:');try{store.save(w);store.db.prepare('UPDATE snapshots SET body=?,digest=? WHERE slot=0').run(body,createHash('sha256').update(body).digest('hex'));assert.throws(()=>store.load());}finally{store.close();}
+  const store=new Store(':memory:');try{store.save(w);reescribirInstantanea(store, body);assert.throws(()=>store.load());}finally{store.close();}
 });
 
 test('invalid genealogies, incomplete history and asymmetric community membership are rejected', () => {
@@ -73,7 +73,7 @@ test('V4 animal identities, blueprint costs, counters and settlement memories fa
     (w:typeof valid)=>{w.blueprints.push({...structuredClone(w.blueprints[0]!),id:'blueprint-2',generation:1,parents:['blueprint-base'],inventorId:'s',components:['frame','roof','cistern'],cost:{wood:8,stone:6,work:130}});w.blueprintCounter=1;},
     (w:typeof valid)=>{w.people[2]!.home={x:17,y:13,quality:1,observedAt:1};},
   ];
-  try{store.save(valid);for(const mutate of mutations){const invalid=structuredClone(valid);mutate(invalid);const body=encodeSnapshot(invalid);store.db.prepare('UPDATE snapshots SET body=?,digest=? WHERE slot=0').run(body,createHash('sha256').update(body).digest('hex'));assert.throws(()=>store.load());}}
+  try{store.save(valid);for(const mutate of mutations){const invalid=structuredClone(valid);mutate(invalid);const body=encodeSnapshot(invalid);reescribirInstantanea(store, body);assert.throws(()=>store.load());}}
   finally{store.close();}
 });
 

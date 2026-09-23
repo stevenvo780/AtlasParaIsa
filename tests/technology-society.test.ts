@@ -1,23 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createWorld, type Person, type World } from '../src/world/index.js';
+import { type Person, type World } from '../src/world/index.js';
 import { cooperate, cooperationOpportunity } from '../src/world/society.js';
-import { assertTechnology, craftTechnology, materialCapacities, researchTechnology, shareTechnology, technologyWorkCost, toolCapacities, transferTechnologyItem, type TechnologyProgram } from '../src/world/technology.js';
+import { assertTechnology, craftTechnology, materialCapacities, researchTechnology, shareTechnology, toolCapacities, transferTechnologyItem, type TechnologyProgram } from '../src/world/technology.js';
 import { observeTechnologyOrganization } from '../src/world/technology-organization.js';
 import type { ChronicleEvent } from '../src/shared/types.js';
+import { PROGRAMA_FILO as edge, aula, proyectoInvestigacion } from './lib/escenas.js';
 
-const edge: TechnologyProgram = { inputs: [{ source: 'raw', material: 'stone', mass: 1000 }], steps: [{ op: 'form', intensity: 4, shape: 'edge' }, { op: 'compress', intensity: 2 }] };
 const fibre: TechnologyProgram = { inputs: [{ source: 'raw', material: 'wood', mass: 1000 }], steps: [{ op: 'weave', intensity: 4 }, { op: 'form', intensity: 2, shape: 'sheet' }] };
 function emit(w: World) { return (event: Omit<ChronicleEvent, 'id' | 'tick'>): ChronicleEvent => { const result = { ...event, id: `e${++w.eventCounter}`, tick: w.tick }; w.events.push(result); return result; }; }
 function scene() {
-  const w = createWorld(51926), a = w.people[2]!, b = w.people[3]!;
-  for (const p of w.people) { p.x = 10; p.y = 20; p.target = { x: 10, y: 20 }; p.action = 'rest'; p.energy = 1; p.fatigue = 0; p.hunger = p.thirst = 0.1; p.skills = {}; p.materials = { wood: 0, stone: 0 }; p.lastSocial = -30; }
-  for (const p of [a, b]) { p.x = 36; p.y = 12; p.target = { x: 36, y: 12 }; }
+  const { world: w, maestro: a, aprendiz: b } = aula({ cuerpo: { energy: 1, fatigue: 0, hunger: 0.1, thirst: 0.1 } });
   a.materials = { wood: 12, stone: 8 };
   return { w, a, b };
 }
 function start(w: World, p: Person, program: TechnologyProgram, parents: string[] = []) {
-  p.technology.project = { kind: 'research', program: structuredClone(program), parents, recipeId: null, progress: 0, requiredWork: technologyWorkCost(program), energyPaid: 0, startedAt: w.tick };
+  p.technology.project = proyectoInvestigacion(structuredClone(program), w.tick, parents);
 }
 function complete(w: World, p: Person) {
   let result = false;

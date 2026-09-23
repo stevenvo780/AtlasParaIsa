@@ -3,12 +3,12 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createHash } from 'node:crypto';
 import { Store, SessionRevoked } from '../src/server/store.js';
 import { assertWorld, cloneWorld, createWorld, migrateWorld, projectWorld, stepWorld, tileAt, type World } from '../src/world/index.js';
 import { initialDemography } from '../src/world/demography.js';
 import { technologyWorkCost, projectTechnology, settleTechnologyEstate } from '../src/world/technology.js';
 import type { TechnologyProgram } from '../src/shared/technology.js';
+import { filaInstantanea, sha256 } from './lib/store.js';
 
 function fixture(t: TestContext) {
   const directory=mkdtempSync(join(tmpdir(),'atlas-lifecycle-'));
@@ -96,7 +96,7 @@ test('previous checkpoint prunes future deaths only in its new recovery copy',t=
 test('checksum-consistent archive identity forgery still fails validation',t=>{
   const {store}=fixture(t),world=createWorld(51926);const id=setDying(world).id;stepWorld(world);store.save(world);
   const record=store.loadLegacy(id)!;record.diedAt=world.tick+10;
-  const body=JSON.stringify(record),digest=createHash('sha256').update(body).digest('hex');
+  const body=JSON.stringify(record),digest=sha256(body);
   store.db.prepare('UPDATE legacy SET body=?,digest=? WHERE id=?').run(body,digest,id);
   assert.throws(()=>store.load());
 });
@@ -106,9 +106,9 @@ test('a counter cannot move behind a living descendant, and a refused collision 
   world.birthCounter=0;assert.throws(()=>assertWorld(world));assert.throws(()=>store.save(world));
   assert.equal(store.load(),null,'an invalid birth counter must be rejected before the first snapshot');
   world.birthCounter=1;assertWorld(world);store.save(world);
-  const original=store.db.prepare('SELECT body,digest FROM snapshots WHERE slot=0').get() as {body:string;digest:string};
+  const original=filaInstantanea(store);
   const damaged=JSON.parse(original.body);damaged.birthCounter=0;
-  const body=JSON.stringify(damaged),digest=createHash('sha256').update(body).digest('hex');
+  const body=JSON.stringify(damaged),digest=sha256(body);
   store.db.prepare('UPDATE snapshots SET body=?,digest=? WHERE slot=0').run(body,digest);
   assert.throws(()=>store.load(),'a recomputed checksum must not conceal an invalid persisted birth counter');
   store.db.prepare('UPDATE snapshots SET body=?,digest=? WHERE slot=0').run(original.body,original.digest);
@@ -124,7 +124,7 @@ test('a deceased parent remains a valid identity, but cannot predate its own chi
   const parent=setDying(world);stepWorld(world);assertWorld(world);store.save(world);assert.deepEqual(store.load()!.world,world);
   const record=world.legacy.find(p=>p.id===parent.id)!;record.diedAt=child.bornAt-1;
   assert.throws(()=>assertWorld(world));
-  const body=JSON.stringify(record),digest=createHash('sha256').update(body).digest('hex');
+  const body=JSON.stringify(record),digest=sha256(body);
   store.db.prepare('UPDATE legacy SET tick=?,body=?,digest=? WHERE id=?').run(record.diedAt,body,digest,parent.id);
   assert.throws(()=>store.load());
 });

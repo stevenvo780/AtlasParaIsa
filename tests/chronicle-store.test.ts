@@ -1,14 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, existsSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { Store } from '../src/server/store.js';
 import { createWorld, stepWorld, cloneWorld, assertWorld, type World } from '../src/world/index.js';
 import { materializeAnimals, syncFauna } from '../src/world/animals.js';
 import { DatabaseSync } from 'node:sqlite';
-import { createHash } from 'node:crypto';
 import { recordChronicleEvent, assertChronicleJournal, MAX_PENDING_CHRONICLE_EVENTS, EMPTY_CHRONICLE_DIGEST } from '../src/world/chronicle-journal.js';
+import { type ConLimpieza, filaInstantanea, laboratorio, sha256 } from './lib/store.js';
 
 function emit(world: World): void {
   const event = recordChronicleEvent(world, { kind: 'ecology', actors: [], text: 'Synthetic observation.', cause: 'Test fixture.', source: 'simulation' });
@@ -19,12 +18,7 @@ function tables(store: Store): unknown {
   return names.map(({ name }) => [name, store.db.prepare(`SELECT * FROM "${name}"`).all()]);
 }
 
-function laboratory(t: { after(callback: () => void): void }) {
-  const directory = mkdtempSync(join(tmpdir(), 'atlas-chronicle-test-'));
-  const path = join(directory, 'world.sqlite'), store = new Store(path);
-  t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
-  return { store, path, directory };
-}
+const laboratory = (t: ConLimpieza) => laboratorio(t, 'atlas-chronicle-test-');
 function burstWorld(): World {
   const world = createWorld(51926);
   for (const tile of world.tiles) tile.fauna = 0;
@@ -107,9 +101,9 @@ test('previous cannot erase certified coverage by stripping its checkpoint journ
   const { store, directory } = laboratory(t), world = createWorld(42);
   for (let i = 0; i < 180; i++) emit(world);
   store.save(world); emit(world); store.save(world);
-  const checkpoint = JSON.parse(String(store.db.prepare('SELECT body FROM snapshots WHERE slot=1').get()!.body));
+  const checkpoint = JSON.parse(filaInstantanea(store, 1).body);
   delete checkpoint.chronicleJournal;
-  const body = JSON.stringify(checkpoint), digest = createHash('sha256').update(body).digest('hex');
+  const body = JSON.stringify(checkpoint), digest = sha256(body);
   store.db.prepare('UPDATE snapshots SET body=?,digest=? WHERE slot=1').run(body, digest);
   store.db.prepare("DELETE FROM events WHERE id='e2'").run();
   const before = tables(store), destination = join(directory, 'forged-previous.sqlite');
@@ -122,9 +116,9 @@ test('previous still recovers the authentic checkpoint that opened a journal epo
   const { store, directory } = laboratory(t), world = createWorld(42);
   for (let i = 0; i < 180; i++) emit(world);
   store.save(world);
-  const checkpoint = JSON.parse(String(store.db.prepare('SELECT body FROM snapshots WHERE slot=0').get()!.body));
+  const checkpoint = JSON.parse(filaInstantanea(store).body);
   delete checkpoint.chronicleJournal;
-  const body = JSON.stringify(checkpoint), digest = createHash('sha256').update(body).digest('hex');
+  const body = JSON.stringify(checkpoint), digest = sha256(body);
   store.db.prepare('UPDATE snapshots SET body=?,digest=? WHERE slot=0').run(body, digest);
   store.db.prepare("DELETE FROM metadata WHERE key='chronicle-origin-v1'").run();
   const adopted = store.load()!.world, opening = structuredClone(adopted);
@@ -138,7 +132,7 @@ for (const corruption of ['delete', 'valid-body', 'invalid-body', 'tick'] as con
   test(`cold load and warm save reject external ${corruption} inside a declared prefix`, t => {
     const { store, path } = laboratory(t), world = createWorld(42);
     for (let i = 0; i < 180; i++) emit(world);
-    store.save(world); const snapshot = store.db.prepare('SELECT body FROM snapshots WHERE slot=0').get()!.body;
+    store.save(world); const snapshot = filaInstantanea(store).body;
     const external = new DatabaseSync(path);
     if (corruption === 'delete') external.prepare("DELETE FROM events WHERE id='e2'").run();
     else if (corruption === 'tick') external.prepare("UPDATE events SET tick=1 WHERE id='e2'").run();
@@ -149,7 +143,7 @@ for (const corruption of ['delete', 'valid-body', 'invalid-body', 'tick'] as con
     }
     external.close();
     assert.throws(() => store.save(world), /Chronicle journal/);
-    assert.equal(store.db.prepare('SELECT body FROM snapshots WHERE slot=0').get()!.body, snapshot);
+    assert.equal(filaInstantanea(store).body, snapshot);
     const cold = new Store(path, { readOnly: true });
     try { assert.throws(() => cold.load(), /Chronicle journal/); } finally { cold.close(); }
   });
@@ -173,10 +167,10 @@ test('old unknown gaps survive adoption and only subsequent observations become 
   const { store } = laboratory(t), world = createWorld(42);
   for (let i = 0; i < 180; i++) emit(world);
   store.save(world);
-  const snapshot = JSON.parse(String(store.db.prepare('SELECT body FROM snapshots WHERE slot=0').get()!.body));
+  const snapshot = JSON.parse(filaInstantanea(store).body);
   delete snapshot.chronicleJournal;
   store.db.prepare("DELETE FROM metadata WHERE key='chronicle-origin-v1'").run();
-  const body = JSON.stringify(snapshot), digest = createHash('sha256').update(body).digest('hex');
+  const body = JSON.stringify(snapshot), digest = sha256(body);
   store.db.prepare('UPDATE snapshots SET body=?,digest=? WHERE slot=0').run(body,digest);
   store.db.prepare("DELETE FROM events WHERE id='e2'").run();
   const migrated = store.load()!.world;
@@ -218,9 +212,9 @@ for (const corruption of ['remove-snapshot-journal', 'remove-origin', 'forge-ori
   test(`${corruption} cannot disguise an already certified archive as old unknown history`, t => {
     const { store, path } = laboratory(t), world = createWorld(42); store.save(world);
     if (corruption === 'remove-snapshot-journal') {
-      const snapshot = JSON.parse(String(store.db.prepare('SELECT body FROM snapshots WHERE slot=0').get()!.body));
+      const snapshot = JSON.parse(filaInstantanea(store).body);
       delete snapshot.chronicleJournal;
-      const body = JSON.stringify(snapshot), digest = createHash('sha256').update(body).digest('hex');
+      const body = JSON.stringify(snapshot), digest = sha256(body);
       store.db.prepare('UPDATE snapshots SET body=?,digest=? WHERE slot=0').run(body,digest);
     } else if (corruption === 'remove-origin') store.db.prepare("DELETE FROM metadata WHERE key='chronicle-origin-v1'").run();
     else store.db.prepare("UPDATE metadata SET value=? WHERE key='chronicle-origin-v1'").run(JSON.stringify({version:1,startsAfter:world.eventCounter}));

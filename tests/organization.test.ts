@@ -4,7 +4,8 @@ import { analyzeOrganization } from '../src/world/organization.js';
 import type { OrganizationExecution, OrganizationObservation, OrganizationProcess } from '../src/shared/organization.js';
 import { analyzeTechnologyOrganization, observeTechnologyOrganization } from '../src/world/technology-organization.js';
 import { captureTechnologyCheckpoint, advanceTechnologyCheckpoint } from '../src/world/technology-checkpoint.js';
-import { defaultTechnologyState, initialTechnologyKnowledge, researchTechnology, technologyWorkCost, useTool, recordTechnologyBenefit, settleTechnologyEstate, type TechnologyActor, type TechnologyHost, type TechnologyProgram } from '../src/world/technology.js';
+import { defaultTechnologyState, initialTechnologyKnowledge, researchTechnology, useTool, recordTechnologyBenefit, settleTechnologyEstate, type TechnologyActor, type TechnologyHost, type TechnologyProgram } from '../src/world/technology.js';
+import { PROGRAMA_FILO as edgeProgram, proyectoInvestigacion } from './lib/escenas.js';
 
 const q = (resourceId: string, amount = 1) => ({ resourceId, amount });
 const process = (id: string, output: string, catalyst: string, parents: string[] = []): OrganizationProcess => ({
@@ -248,12 +249,10 @@ function technologyScene() {
 }
 function manufacture(host: TechnologyHost, actor: TechnologyActor, program: TechnologyProgram, parents: string[] = []): void {
   actor.energy = 1; actor.fatigue = 0;
-  actor.technology.project = { kind: 'research', program, parents, recipeId: null, progress: 0,
-    requiredWork: technologyWorkCost(program), energyPaid: 0, startedAt: host.tick };
+  actor.technology.project = proyectoInvestigacion(program, host.tick, parents);
   for (let n = 0; actor.technology.project && n < 500; n++) { host.tick++; researchTechnology(host, actor); }
   assert.equal(actor.technology.project, null);
 }
-const edgeProgram: TechnologyProgram = { inputs: [{ source: 'raw', material: 'stone', mass: 1000 }], steps: [{ op: 'form', intensity: 4, shape: 'edge' }, { op: 'compress', intensity: 2 }] };
 const bindingProgram: TechnologyProgram = { inputs: [{ source: 'raw', material: 'wood', mass: 1000 }], steps: [{ op: 'weave', intensity: 4 }, { op: 'form', intensity: 2, shape: 'sheet' }] };
 
 test('technology adapter measures real manufacture and independent tool wear without reconstructing fictional inventories', () => {

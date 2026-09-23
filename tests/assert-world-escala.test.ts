@@ -3,17 +3,16 @@ import assert from 'node:assert/strict';
 import { assertWorld, createWorld, type World } from '../src/world/index.js';
 import { digestoCanonico } from '../src/world/digesto.js';
 import { validationFixture } from '../scripts/lib/validation-fixture.js';
-import { researchTechnology, technologyWorkCost, type TechnologyProgram } from '../src/world/technology.js';
+import { researchTechnology, type TechnologyProgram } from '../src/world/technology.js';
+import { PROGRAMA_FILO, proyectoInvestigacion } from './lib/escenas.js';
 
 /** A real, paid research yields a fully valid recipe (program, signature, generation,
  * ancestry) that only `assertWorld`'s author-identity check can still reject. */
 function paidResearch(world: World) {
   const actor = world.people[2]!;
   actor.materials = { wood: 12, stone: 8 }; actor.energy = 1; actor.fatigue = 0;
-  const program: TechnologyProgram = { inputs: [{ source: 'raw', material: 'stone', mass: 1000 }],
-    steps: [{ op: 'form', intensity: 4, shape: 'edge' }, { op: 'compress', intensity: 2 }] };
-  actor.technology.project = { kind: 'research', program, parents: [], recipeId: null, progress: 0,
-    requiredWork: technologyWorkCost(program), energyPaid: 0, startedAt: world.tick };
+  const program: TechnologyProgram = structuredClone(PROGRAMA_FILO);
+  actor.technology.project = proyectoInvestigacion(program, world.tick);
   let succeeded = false, steps = 0;
   while (actor.technology.project && steps++ < 250) {
     world.tick++;

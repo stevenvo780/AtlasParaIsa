@@ -9,8 +9,10 @@ import { paramsOf } from '../src/world/params.js';
 import { assertWorld, cloneWorld, createWorld, migrateWorld, projectWorld, stepWorld, POPULATION_HARD_LIMIT, type World } from '../src/world/index.js';
 import { captureTechnologyCheckpoint, advanceTechnologyCheckpoint, assertTechnologyCheckpoint } from '../src/world/technology-checkpoint.js';
 import { analyzeTechnologyOrganization } from '../src/world/technology-organization.js';
-import { defaultTechnologyState, initialTechnologyKnowledge, researchTechnology, technologyWorkCost, useTool,
+import { defaultTechnologyState, initialTechnologyKnowledge, researchTechnology, useTool,
   recordTechnologyBenefit, transferTechnologyItem, type TechnologyActor, type TechnologyHost, type TechnologyProgram } from '../src/world/technology.js';
+import { filaInstantanea } from './lib/store.js';
+import { proyectoInvestigacion } from './lib/escenas.js';
 
 const edge: TechnologyProgram = { inputs: [{ source: 'raw', material: 'stone', mass: 4000 }],
   steps: [{ op: 'form', intensity: 4, shape: 'edge' }, { op: 'compress', intensity: 2 }] };
@@ -27,8 +29,7 @@ function scene() {
 }
 function manufacture(host: TechnologyHost, actor: TechnologyActor, program = edge, parents: string[] = []) {
   actor.energy = 1; actor.fatigue = 0;
-  actor.technology.project = { kind: 'research', program, parents, recipeId: null, progress: 0,
-    requiredWork: technologyWorkCost(program), energyPaid: 0, startedAt: host.tick };
+  actor.technology.project = proyectoInvestigacion(program, host.tick, parents);
   for (let n = 0; n < 100 && actor.technology.project; n++) { host.tick++; researchTechnology(host, actor); }
   assert.equal(actor.technology.project, null); assert.ok(actor.technology.items.length);
 }
@@ -53,8 +54,7 @@ function makeWorldTool(world: World) {
   const person = world.people[2]!;
   person.materials.stone = 8; person.energy = 1; person.fatigue = person.hunger = person.thirst = 0.1;
   person.command = { order: 'research', x: person.x, y: person.y }; person.controlMode = 'directed'; person.decisionAt = 0;
-  person.technology.project = { kind: 'research', program: edge, parents: [], recipeId: null, progress: 0,
-    requiredWork: technologyWorkCost(edge), energyPaid: 0, startedAt: world.tick };
+  person.technology.project = proyectoInvestigacion(edge, world.tick);
   for (let n = 0; n < 100 && !person.technology.items.length; n++) stepWorld(world);
   assert.ok(person.technology.items.length); assertWorld(world); return person;
 }
@@ -171,7 +171,7 @@ test('old V5 loads capture current physical stock without certifying or changing
   assert.equal(cp.reason, 'migration'); assert.equal(cp.tick, world.tick); assert.equal(cp.executionCounter, world.technology.executionCounter);
   assert.deepEqual(withoutCheckpoint(loaded), before); assert.equal(world.technology.checkpoint, undefined);
   assert.equal(report(loaded).window.complete, false); assert.equal(report(loaded).evidence.executed, 0);
-  const raw = store.db.prepare('SELECT body FROM snapshots WHERE slot=0').get() as { body: string };
+  const raw = filaInstantanea(store);
   assert.equal((decodeSnapshot(raw.body) as World).technology.checkpoint, undefined, 'read does not rewrite the source snapshot');
   store.save(loaded); const savedCheckpoint = structuredClone(cp); stepWorld(loaded); store.save(loaded);
   assert.deepEqual(store.load()!.world.technology.checkpoint, savedCheckpoint, 'reload must not reset an existing epoch');

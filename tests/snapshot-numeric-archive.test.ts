@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import test, { type TestContext } from 'node:test';
-import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -13,8 +12,8 @@ import { assertLegacyRecord } from '../src/world/lineage.js';
 import { paramsOf } from '../src/world/params.js';
 import { activate } from '../src/world/spatial.js';
 import { generateChunk } from '../src/world/terrain.js';
+import { sha256 } from './lib/store.js';
 
-const checksum = (body: string): string => createHash('sha256').update(body).digest('hex');
 interface ArchiveRow { body: string; digest: string; tick: number; }
 
 function laboratory(t: TestContext) {
@@ -62,7 +61,7 @@ for (const zero of [0, -0]) {
     const committedDigest = digestoCanonico(world);
     const saved = lab.store.db.prepare('SELECT body,digest,tick FROM chunks WHERE key=?').get(chunk.key) as unknown as ArchiveRow;
     assert.equal(saved.tick, world.tick);
-    assert.equal(saved.digest, checksum(saved.body), 'el checksum acredita los bytes efectivamente escritos');
+    assert.equal(saved.digest, sha256(saved.body), 'el checksum acredita los bytes efectivamente escritos');
     assert.equal(lab.store.db.prepare('SELECT COUNT(*) AS n FROM chunks').get()!.n, 1);
     if (!Object.is(zero, -0)) assert.equal(saved.body, JSON.stringify(expectedChunk), 'el caso ordinario conserva los bytes históricos');
 
@@ -83,7 +82,7 @@ for (const zero of [0, -0]) {
       activatedNegativeZero: Object.is(resumed.tiles.find(tile => tile.x === 0 && tile.y === 160)!.x, -0),
       digest: digestoCanonico(resumed),
     };
-    t.diagnostic(JSON.stringify({ kind: 'chunk', input: label, checksumValid: saved.digest === checksum(saved.body),
+    t.diagnostic(JSON.stringify({ kind: 'chunk', input: label, checksumValid: saved.digest === sha256(saved.body),
       rowPreservesNegativeZero: Object.is((JSON.parse(saved.body) as typeof chunk).tiles[0]!.x, -0), ...observed, expectedDigest }));
     assert.deepEqual(observed, {
       archivedNegativeZero: Object.is(zero, -0), activatedNegativeZero: Object.is(zero, -0), digest: expectedDigest,
@@ -103,7 +102,7 @@ for (const zero of [0, -0]) {
     const committedDigest = digestoCanonico(world);
     const saved = lab.store.db.prepare('SELECT body,digest,tick FROM legacy WHERE id=?').get(record.id) as unknown as ArchiveRow;
     assert.equal(saved.tick, world.tick);
-    assert.equal(saved.digest, checksum(saved.body));
+    assert.equal(saved.digest, sha256(saved.body));
     assert.equal(lab.store.db.prepare('SELECT COUNT(*) AS n FROM legacy').get()!.n, 1);
     if (!Object.is(zero, -0)) assert.equal(saved.body, JSON.stringify(record), 'las identidades ordinarias mantienen sus bytes');
     const expected = cloneWorld(world);
@@ -120,7 +119,7 @@ for (const zero of [0, -0]) {
     resumed.legacy = [restored];
     assertWorld(resumed);
     const observed = { archivedNegativeZero: Object.is(restored.generation, -0), digest: digestoCanonico(resumed) };
-    t.diagnostic(JSON.stringify({ kind: 'legacy', input: label, checksumValid: saved.digest === checksum(saved.body),
+    t.diagnostic(JSON.stringify({ kind: 'legacy', input: label, checksumValid: saved.digest === sha256(saved.body),
       rowPreservesNegativeZero: Object.is((JSON.parse(saved.body) as LegacyRecord).generation, -0), ...observed, expectedDigest }));
     assert.deepEqual(observed, { archivedNegativeZero: Object.is(zero, -0), digest: expectedDigest },
       'la identidad durable debe conservar el bit aunque no aparezca en el caché de la instantánea');
@@ -141,7 +140,7 @@ test('archivo numérico: cambiar sólo -0 a +0 no puede reescribir una identidad
   const signed = JSON.parse(negativeBody) as LegacyRecord;
   assert.equal(Object.is(signed.generation, -0), true);
   assertLegacyRecord(signed, world.tick);
-  lab.store.db.prepare('UPDATE legacy SET body=?,digest=? WHERE id=?').run(negativeBody, checksum(negativeBody), ordinary.id);
+  lab.store.db.prepare('UPDATE legacy SET body=?,digest=? WHERE id=?').run(negativeBody, sha256(negativeBody), ordinary.id);
   const reopened = lab.reopen(), resumed = reopened.load()!.world;
   assert.equal(digestoCanonico(resumed), committedDigest);
   assert.equal(Object.is(reopened.loadLegacy(ordinary.id)!.generation, -0), true, 'JSON.parse conserva un token -0 genuino');
@@ -149,7 +148,7 @@ test('archivo numérico: cambiar sólo -0 a +0 no puede reescribir una identidad
   let failure: unknown;
   try { reopened.save(resumed); } catch (error) { failure = error; }
   const preserved = reopened.db.prepare('SELECT body,digest,tick FROM legacy WHERE id=?').get(ordinary.id) as unknown as ArchiveRow;
-  assert.deepEqual({ ...preserved }, { ...saved, body: negativeBody, digest: checksum(negativeBody) });
+  assert.deepEqual({ ...preserved }, { ...saved, body: negativeBody, digest: sha256(negativeBody) });
   assert.equal(digestoCanonico(reopened.load()!.world), committedDigest, 'el estado confirmado permanece igual tras el intento');
   t.diagnostic(JSON.stringify({ kind: 'legacy-immutable', rejected: failure instanceof Error,
     archivedNegativeZero: Object.is(reopened.loadLegacy(ordinary.id)!.generation, -0), pending: resumed.retiredLegacy.length }));

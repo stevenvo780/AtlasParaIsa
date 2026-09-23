@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { assertWorld, cloneWorld, createWorld, stepWorld, type World } from '../src/world/index.js';
-import { researchTechnology, technologyWorkCost, type TechnologyProgram } from '../src/world/technology.js';
+import { researchTechnology, type TechnologyProgram } from '../src/world/technology.js';
 import { containedWaterQuanta, fillContainedWater } from '../src/world/technology-water.js';
+import { proyectoInvestigacion } from './lib/escenas.js';
 
 const vessel: TechnologyProgram = { inputs: [{ source: 'raw', material: 'stone', mass: 2000 }],
   steps: [{ op: 'form', intensity: 4, shape: 'hollow' }, { op: 'compress', intensity: 2 }] };
@@ -22,8 +23,7 @@ function preparedReserve() {
     person.hunger = person.thirst = 0.1; person.energy = 1; person.fatigue = 0;
   }
   actor.materials = { wood: 12, stone: 8 };
-  actor.technology.project = { kind: 'research', program: vessel, parents: [], recipeId: null, progress: 0,
-    requiredWork: technologyWorkCost(vessel), energyPaid: 0, startedAt: world.tick };
+  actor.technology.project = proyectoInvestigacion(vessel, world.tick);
   let success = false;
   for (let n = 0; actor.technology.project && n < 250; n++) { nextTick(world); success = researchTechnology(world, actor); }
   assert.equal(success, true);

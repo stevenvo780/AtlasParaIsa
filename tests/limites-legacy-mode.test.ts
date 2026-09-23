@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import test, { type TestContext } from 'node:test';
-import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import os, { tmpdir } from 'node:os';
 import v8 from 'node:v8';
@@ -10,6 +9,7 @@ import { stringifyExact } from '../src/shared/exact-json.js';
 import { assertWorld, cloneWorld, createWorld, stepWorld, type World } from '../src/world/index.js';
 import { digestoCanonico } from '../src/world/digesto.js';
 import { LEGACY_WORLD_LIMITS, WORLD_LIMIT_KEYS, limitsOf, paramsOf, parseParams, setParams, type WorldParams } from '../src/world/params.js';
+import { filaInstantanea, reescribirInstantanea, sha256, todasLasTablas } from './lib/store.js';
 
 type LimitKey = typeof WORLD_LIMIT_KEYS[number];
 type NumericLimits = Record<LimitKey, number>;
@@ -20,14 +20,9 @@ interface SnapshotRecord {
   limitsProfile?: NumericLimits & { version: number; aplicacion?: unknown; [key: string]: unknown };
   [key: string]: unknown;
 }
-const checksum = (body: string): string => createHash('sha256').update(body).digest('hex');
 const numeric = (limits: NumericLimits): NumericLimits => Object.fromEntries(WORLD_LIMIT_KEYS.map(key => [key, limits[key]])) as NumericLimits;
 const mode = (params: WorldParams): unknown => (params.limites as NumericLimits & { aplicacion?: unknown }).aplicacion;
 
-function allTables(store: Store): unknown {
-  const names = store.db.prepare("SELECT name FROM main.sqlite_schema WHERE type='table' ORDER BY name").all() as { name: string }[];
-  return names.map(({ name }) => [name, store.db.prepare(`SELECT * FROM main."${name.replaceAll('"', '""')}" ORDER BY rowid`).all()]);
-}
 
 function laboratory(t: TestContext, paged: boolean) {
   const directory = mkdtempSync(join(tmpdir(), 'atlas-limits-legacy-mode-'));
@@ -71,12 +66,12 @@ function legacyRecord(world: World, low: LimitKey): { record: SnapshotRecord; de
 
 function replaceSlot(store: Store, record: SnapshotRecord | Record<string, unknown>): void {
   const body = stringifyExact(record);
-  store.db.prepare('UPDATE snapshots SET body=?,digest=? WHERE slot=0').run(body, checksum(body));
+  reescribirInstantanea(store, body);
 }
 
 function storedMetadata(store: Store): SnapshotRecord {
-  const row = store.db.prepare('SELECT body,digest FROM snapshots WHERE slot=0').get() as { body: string; digest: string };
-  assert.equal(checksum(row.body), row.digest);
+  const row = filaInstantanea(store);
+  assert.equal(sha256(row.body), row.digest);
   const value = JSON.parse(row.body) as SnapshotRecord;
   return value.snapshotEncoding ? value.world as SnapshotRecord : value;
 }
@@ -109,13 +104,13 @@ for (const key of WORLD_LIMIT_KEYS) {
       assert.equal(Object.hasOwn(record.params.limites, 'aplicacion'), false);
       assert.ok(Array.isArray(record.tiles) && !Array.isArray(record.tiles[0]), 'las teselas de la fixture son objetos históricos');
       replaceSlot(lab.store, record);
-      const before = allTables(lab.store);
+      const before = todasLasTablas(lab.store);
       t.mock.method(os, 'totalmem', () => { throw new Error('load must not inspect physical RAM'); });
       t.mock.method(v8, 'getHeapStatistics', () => { throw new Error('load must not inspect V8 capacity'); });
       t.mock.method(process, 'constrainedMemory', () => { throw new Error('load must not inspect cgroup capacity'); });
       const reopened = lab.reopen(), loaded = reopened.load()!.world;
       assertHistoricalParams(loaded, declared, otherParams);
-      assert.deepEqual(allTables(reopened), before, 'inferir modo no reescribe el archivo durante load');
+      assert.deepEqual(todasLasTablas(reopened), before, 'inferir modo no reescribe el archivo durante load');
       assertWorld(loaded, loaded.version, reopened.context);
       stepWorld(loaded, [], reopened.context);
       assertHistoricalParams(loaded, declared, otherParams);
@@ -170,7 +165,7 @@ for (const paged of [false, true]) for (const [label, corrupt] of corruptions) {
   test(`R3: ${label} falla cerrado en load y save con ALLtables intactas (${paged ? 'páginas' : 'inline'})`, t => {
     const lab = laboratory(t, paged), world = worldWithCommunities();
     lab.store.save(world); lab.store.save(world);
-    const row = lab.store.db.prepare('SELECT body FROM snapshots WHERE slot=0').get() as { body: string };
+    const row = filaInstantanea(lab.store);
     const record = JSON.parse(row.body) as SnapshotRecord;
     const metadata = record.snapshotEncoding ? record.world as SnapshotRecord : record;
     metadata.params = structuredClone(paramsOf(world)) as unknown as ParametersRecord;
@@ -179,13 +174,13 @@ for (const paged of [false, true]) for (const [label, corrupt] of corruptions) {
     metadata.limitsProfile = { version: 2, aplicacion: 'parametros', ...numeric(metadata.params.limites) };
     corrupt(metadata);
     replaceSlot(lab.store, record);
-    const before = allTables(lab.store), reopened = lab.reopen();
+    const before = todasLasTablas(lab.store), reopened = lab.reopen();
     assert.throws(() => reopened.load(), /snapshot|limit|par[aá]metr|aplicacion/i);
     assert.equal(reopened.db.isTransaction, false);
-    assert.deepEqual(allTables(reopened), before, 'load no adopta silenciosamente el slot 1 sano');
+    assert.deepEqual(todasLasTablas(reopened), before, 'load no adopta silenciosamente el slot 1 sano');
     assert.throws(() => reopened.save(world), /snapshot|limit|par[aá]metr|aplicacion/i);
     assert.equal(reopened.db.isTransaction, false);
-    assert.deepEqual(allTables(reopened), before, 'save no repara marcas corruptas ni altera ninguna tabla');
+    assert.deepEqual(todasLasTablas(reopened), before, 'save no repara marcas corruptas ni altera ninguna tabla');
   });
 }
 

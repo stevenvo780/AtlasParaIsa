@@ -7,14 +7,14 @@ import { expressGenome, inheritGenome } from '../src/world/genetics.js';
 import { recordChronicleEvent } from '../src/world/chronicle-journal.js';
 import { recordSample, worldStatistics } from '../src/world/statistics.js';
 import type { ChronicleEvent } from '../src/shared/types.js';
+import { aula } from './lib/escenas.js';
 
 function emit(w: World) { return (event: Omit<ChronicleEvent, 'id' | 'tick'>) => {
   const result = recordChronicleEvent(w, event); w.events.push(result); return result;
 }; }
 function scene() {
-  const w = createWorld(51926), a = w.people[2]!, b = w.people[3]!;
-  for (const p of w.people) { p.x = 10; p.y = 20; p.action = 'rest'; p.target = {x:p.x,y:p.y}; p.decisionAt = 999; p.hunger = 0.1; p.thirst = 0.1; p.fatigue = 0.1; p.energy = 0.9; p.skills = {}; }
-  for (const p of [a,b]) { p.x = 36; p.y = 12; p.target = {x:36,y:12}; }
+  const { world: w, maestro: a, aprendiz: b } = aula({ cuerpo: { energy: 0.9, fatigue: 0.1, hunger: 0.1, thirst: 0.1 }, decisionAt: 999,
+    vaciarMateriales: false, sinEncuentroReciente: false });
   return { w,a,b };
 }
 function group(w: World, members: Person[], id: string) {

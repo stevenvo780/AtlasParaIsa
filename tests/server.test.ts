@@ -15,6 +15,7 @@ import { parseParams, setParams } from '../src/world/params.js';
 import { hashToken, makeToken, passwordRecord, passwordVerifier } from '../src/server/auth.js';
 import { acquireLock } from '../src/server/lock.js';
 import type { Gesture, ServerMessage, WorldView } from '../src/shared/types.js';
+import { filaInstantanea } from './lib/store.js';
 
 const password = 'synthetic-test-password-only';
 
@@ -362,7 +363,7 @@ test('a committed retry remains retrievable during a later storage pause',async 
 test('con cadencia 20 el paso no reescribe el mundo en cada tick, un gesto fuerza el guardado y el estado publica el ritmo real',async t=>{
   const f=await fixture(t,true);
   setParams(f.app.world,parseParams('persistencia.cadaTicks=20'));
-  const savedTick=()=>JSON.parse((f.store.db.prepare('SELECT body FROM snapshots WHERE slot=0').get() as {body:string}).body).tick as number;
+  const savedTick=()=>JSON.parse(filaInstantanea(f.store).body).tick as number;
   assert.equal(savedTick(),0);
   for(let n=0;n<5;n++)f.app.stepOnce();
   assert.equal(f.app.world.tick,5);assert.equal(savedTick(),0,'entre múltiplos de la cadencia no se persiste');

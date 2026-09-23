@@ -1,13 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { freePort } from './lib/net.js';
 import { once } from 'node:events';
 import { Store } from '../src/server/store.js';
 import { createApp } from '../src/server/app.js';
 import { createWorld, type World } from '../src/world/index.js';
+import { type ConLimpieza, directorioTemporal, filaInstantanea } from './lib/store.js';
 
 /**
  * R2 (ronda de corrección): arrancar desde un respaldo es un hecho que Isa lee en la
@@ -16,12 +15,7 @@ import { createWorld, type World } from '../src/world/index.js';
  * un rescate es literalmente falso: se retrocede y se pierde lo simulado en medio.
  */
 const password = 'synthetic-test-password-only';
-function laboratory(t: { after(callback: () => unknown): void }) {
-  const directory = mkdtempSync(join(tmpdir(), 'atlas-rescate-test-'));
-  const path = join(directory, 'world.sqlite');
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
-  return { path };
-}
+const laboratory = (t: ConLimpieza) => ({ path: join(directorioTemporal(t, 'atlas-rescate-test-'), 'world.sqlite') });
 /** Deja un archivo con dos guardados y el vigente ilegible; devuelve el retroceso simulado. */
 function archivoConElVigenteDaniado(path: string, retrocesoSegundos: number): void {
   const store = new Store(path);
@@ -66,7 +60,7 @@ test('arrancar desde un respaldo se dice en la crónica, en /health y por consol
   assert.match(avisos[0]!, /42 s/);
 
   // El guardado de `createApp` no destruye el respaldo del que acaba de salir.
-  const respaldo = store.db.prepare('SELECT body FROM snapshots WHERE slot=1').get() as { body: string };
+  const respaldo = filaInstantanea(store, 1);
   assert.equal(JSON.parse(respaldo.body).tick, 0);
 });
 

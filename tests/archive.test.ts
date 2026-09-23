@@ -1,6 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -15,8 +14,8 @@ import { harvestAt, materializeAnimals, syncFauna, stepAnimals, MAX_ACTIVE_ANIMA
 import { decodeSnapshot,encodeSnapshot } from '../src/server/snapshot.js';
 import { generateChunk, type Chunk } from '../src/world/terrain.js';
 import type { Gesture, GestureResult } from '../src/shared/types.js';
+import { filaInstantanea, reescribirInstantanea, sha256 } from './lib/store.js';
 
-const digest = (body: string): string => createHash('sha256').update(body).digest('hex');
 const gesture: Gesture = { id: 'archive-command-01', kind: 'command', x: 20, y: 14, agentId: 's', order: 'move' };
 const resultAt = (tick: number): GestureResult => ({ id: gesture.id, accepted: true, tick, order: 0, message: 'Orden sintética guardada.' });
 
@@ -46,14 +45,14 @@ test('archive versions restore exact edited terrain at the latest permitted worl
   world.retiredChunks = [first];
   const expected: World = { ...structuredClone(world), retiredChunks: [], chronicleJournal: {
     ...world.chronicleJournal!, committedThrough: world.eventCounter,
-    committedDigest: world.chronicleJournal!.pending.reduce((chain, event) => digest(`${chain}\n${JSON.stringify(event)}`), world.chronicleJournal!.committedDigest),
+    committedDigest: world.chronicleJournal!.pending.reduce((chain, event) => sha256(`${chain}\n${JSON.stringify(event)}`), world.chronicleJournal!.committedDigest),
     pending: [],
   } };
   store.save(world);
   assert.deepEqual(world, expected);
   assert.deepEqual(store.load()!.world, expected);
   assert.deepEqual(store.loadChunk(first.key), first);
-  assert.deepEqual(JSON.parse((store.db.prepare('SELECT body FROM snapshots WHERE slot=0').get() as { body: string }).body).retiredChunks, []);
+  assert.deepEqual(JSON.parse(filaInstantanea(store).body).retiredChunks, []);
 
   fixtureTick(world,20);
   const second = archived(world, 20, 0.0123);
@@ -103,7 +102,7 @@ test('archive checksum and structural corruption fail closed instead of generati
   assert.throws(() => store.loadChunk(chunk.key), /checksum/);
   const corrupt = structuredClone(chunk); corrupt.tiles[1]!.x = corrupt.tiles[0]!.x;
   const body = JSON.stringify(corrupt);
-  store.db.prepare('UPDATE chunks SET body=?,digest=?').run(body, digest(body));
+  store.db.prepare('UPDATE chunks SET body=?,digest=?').run(body, sha256(body));
   assert.throws(() => store.loadChunk(chunk.key), /Invalid archived chunk state/);
   assert.throws(() => store.loadChunk('00,0'), /key/);
   assert.throws(() => store.loadChunk(chunk.key, NaN), /tick/);
@@ -188,11 +187,11 @@ function createV1Database(path: string): ReturnType<typeof legacyWorld> {
       CREATE TABLE sessions (hash TEXT PRIMARY KEY, expires INTEGER NOT NULL);
       CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
       PRAGMA application_id=1128354388; PRAGMA user_version=1;`);
-    db.prepare('INSERT INTO snapshots VALUES (0,?,?,?)').run(body, digest(body), 1000);
-    db.prepare('INSERT INTO snapshots VALUES (1,?,?,?)').run(body, digest(body), 900);
+    db.prepare('INSERT INTO snapshots VALUES (0,?,?,?)').run(body, sha256(body), 1000);
+    db.prepare('INSERT INTO snapshots VALUES (1,?,?,?)').run(body, sha256(body), 900);
     db.prepare("INSERT INTO metadata VALUES ('initialized','1')").run();
     for (const event of legacy.events) db.prepare('INSERT INTO events VALUES (?,?,?)').run(event.id, event.tick, JSON.stringify(event));
-    const oldFingerprint = digest(JSON.stringify(['plant', 17, 13, null]));
+    const oldFingerprint = sha256(JSON.stringify(['plant', 17, 13, null]));
     const oldResult = { id: oldGesture.id, accepted: true, tick: 12, order: 0, message: 'Gesto sintético anterior.' };
     db.prepare('INSERT INTO inputs VALUES (?,?,?,?,?,?)').run(oldGesture.id, oldFingerprint, 12, 0, JSON.stringify(oldGesture), JSON.stringify(oldResult));
   } finally { db.close(); }
@@ -212,13 +211,13 @@ test('V1 schema migration preserves old snapshots, cells, bodies, experiences an
       for (const [field, value] of Object.entries(tile)) assert.equal(restored[field as keyof typeof restored], value);
     }
     for (const [field, value] of Object.entries(legacy.people[0]!)) assert.deepEqual(migrated.people[0]![field as keyof World['people'][number]], value);
-    assert.equal((store.db.prepare('SELECT body FROM snapshots WHERE slot=0').get() as { body: string }).body, JSON.stringify(legacy), 'schema migration must not rewrite the old evidence');
+    assert.equal(filaInstantanea(store).body, JSON.stringify(legacy), 'schema migration must not rewrite the old evidence');
     assert.equal(store.result(oldGesture)!.tick, 12);
-    assert.equal(fingerprint(oldGesture), digest(JSON.stringify(['plant', 17, 13, null])));
+    assert.equal(fingerprint(oldGesture), sha256(JSON.stringify(['plant', 17, 13, null])));
     assert.notEqual(fingerprint(gesture), fingerprint({ ...gesture, agentId: 'i' }));
     assert.notEqual(fingerprint(gesture), fingerprint({ ...gesture, order: 'rest' }));
     store.save(migrated);
-    assert.equal(JSON.parse((store.db.prepare('SELECT body FROM snapshots WHERE slot=0').get() as { body: string }).body).version, RULES_VERSION);
+    assert.equal(JSON.parse(filaInstantanea(store).body).version, RULES_VERSION);
   } finally { store.close(); }
 });
 
@@ -310,7 +309,7 @@ test('empty V4 archives stay empty, while old stock materializes lazily only on 
   assert.equal(world.animals.filter(a=>a.x===camera.x&&a.y===camera.y).length,2);
   const empty={...legacy,lifeVersion:4 as const,animals:[],structures:[]};for(const tile of empty.tiles){tile.fauna=0;delete tile.species;}
   world.retiredChunks=[empty];store.save(world);assert.deepEqual(store.loadChunk(empty.key)!.animals,[]);
-  for(const field of ['animals','structures'] as const){const invalid=structuredClone(empty);delete invalid[field];const body=JSON.stringify(invalid);store.db.prepare('UPDATE chunks SET body=?,digest=? WHERE key=?').run(body,digest(body),empty.key);assert.throws(()=>store.loadChunk(empty.key));}
+  for(const field of ['animals','structures'] as const){const invalid=structuredClone(empty);delete invalid[field];const body=JSON.stringify(invalid);store.db.prepare('UPDATE chunks SET body=?,digest=? WHERE key=?').run(body,sha256(body),empty.key);assert.throws(()=>store.loadChunk(empty.key));}
 });
 
 test('a structure counter cannot move backward behind an identity that only exists in an archived region', t=>{
@@ -318,8 +317,8 @@ test('a structure counter cannot move backward behind an identity that only exis
   const chunk=archived(world,10,0),tile=chunk.tiles[0]!;tile.terrain='shelter';
   chunk.structures=[{...structuredClone(world.structures[0]!),id:'structure-7',x:tile.x,y:tile.y}];world.retiredChunks=[chunk];store.save(world);
   assert.equal(store.load()!.world.structureCounter,7);
-  const saved=store.db.prepare('SELECT body FROM snapshots WHERE slot=0').get() as {body:string};const invalid=decodeSnapshot(saved.body) as World;invalid.structureCounter=6;
-  const body=encodeSnapshot(invalid);store.db.prepare('UPDATE snapshots SET body=?,digest=? WHERE slot=0').run(body,digest(body));
+  const saved=filaInstantanea(store);const invalid=decodeSnapshot(saved.body) as World;invalid.structureCounter=6;
+  const body=encodeSnapshot(invalid);reescribirInstantanea(store, body);
   assert.throws(()=>store.load(),/Archived structure identity exceeds snapshot counter/);
 });
 

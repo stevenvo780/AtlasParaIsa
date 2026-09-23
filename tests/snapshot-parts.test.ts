@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import test, { type TestContext } from 'node:test';
-import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -18,8 +17,8 @@ import { digestoCanonico } from '../src/world/digesto.js';
 import { paramsOf, parseParams, setParams } from '../src/world/params.js';
 import { activate } from '../src/world/spatial.js';
 import { generateChunk } from '../src/world/terrain.js';
+import { reescribirInstantanea, sha256, todasLasTablas } from './lib/store.js';
 
-const checksum = (body: string): string => createHash('sha256').update(body).digest('hex');
 type TransportOptions = { readOnly?: boolean; snapshotInlineTileLimit?: number };
 interface SnapshotRow { body: string; digest: string; saved_at: number; }
 interface Page { index: number; digest: string; count: number; bytes: number; }
@@ -50,7 +49,7 @@ function laboratory(t: TestContext, options: TransportOptions = { snapshotInline
 function snapshot(store: Store, slot = 0): SnapshotRow {
   const row = store.db.prepare('SELECT body,digest,saved_at FROM snapshots WHERE slot=?').get(slot) as unknown as SnapshotRow | undefined;
   assert.ok(row, `existe el slot ${slot}`);
-  assert.equal(checksum(row.body), row.digest);
+  assert.equal(sha256(row.body), row.digest);
   return row;
 }
 
@@ -67,7 +66,7 @@ function pageBody(store: Store, page: Page): string {
   const row = store.db.prepare('SELECT body FROM snapshot_parts WHERE digest=?').get(page.digest) as { body: string } | undefined;
   assert.ok(row, 'la página referenciada existe');
   assert.match(page.digest, /^[0-9a-f]{64}$/);
-  assert.equal(checksum(row.body), page.digest);
+  assert.equal(sha256(row.body), page.digest);
   assert.equal(Buffer.byteLength(row.body), page.bytes);
   const rows = JSON.parse(row.body) as unknown[][];
   assert.equal(rows.length, page.count);
@@ -76,10 +75,6 @@ function pageBody(store: Store, page: Page): string {
   return row.body;
 }
 
-function allTables(store: Store): unknown {
-  const tables = store.db.prepare("SELECT name FROM sqlite_schema WHERE type='table' ORDER BY name").all() as { name: string }[];
-  return tables.map(({ name }) => [name, store.db.prepare(`SELECT * FROM main."${name.replaceAll('"', '""')}" ORDER BY rowid`).all()]);
-}
 
 function partDigests(store: Store): string[] {
   return (store.db.prepare('SELECT digest FROM snapshot_parts ORDER BY digest').all() as { digest: string }[]).map(row => row.digest);
@@ -87,7 +82,7 @@ function partDigests(store: Store): string[] {
 
 function rewriteManifest(store: Store, value: Manifest): void {
   const body = stringifyExact(value);
-  store.db.prepare('UPDATE snapshots SET body=?,digest=? WHERE slot=0').run(body, checksum(body));
+  reescribirInstantanea(store, body);
 }
 
 function changeFood(world: World): void {
@@ -145,7 +140,7 @@ test('piezas: 1536 tiles, params y -0 sobreviven al archivo, close y reapertura 
   assert.equal(Object.is(rows.find(row => row[0] === 0)![0], -0), true);
   assert.equal(value.world.paramsEncoding, 'params-v1');
   assert.deepEqual(value.world.params, params);
-  const before = allTables(lab.store);
+  const before = todasLasTablas(lab.store);
   const reopened = lab.reopen({ readOnly: true }), loaded = reopened.load()!;
   assert.equal(loaded.slot, 0);
   assert.equal(digestoCanonico(loaded.world), committed);
@@ -153,7 +148,7 @@ test('piezas: 1536 tiles, params y -0 sobreviven al archivo, close y reapertura 
   assert.equal(Object.is(loaded.world.people[0]!.inventory, -0), true);
   assert.equal(Object.is(loaded.world.tiles.find(tile => tile.x === 0)!.x, -0), true);
   assert.equal(Object.is(paramsOf(loaded.world).motor.gpu[0], -0), true);
-  assert.deepEqual(allTables(reopened), before, 'la lectura no modifica páginas ni archivos');
+  assert.deepEqual(todasLasTablas(reopened), before, 'la lectura no modifica páginas ni archivos');
 });
 
 test('piezas: dos páginas conservan las 4352 tuplas en su orden exacto', t => {
@@ -228,13 +223,13 @@ for (const damage of ['missing page', 'checksum mismatch'] as const) {
     const { lab, current, backupDigest, backupParams } = withBackup(t), page = current.tiles.pages[0]!;
     if (damage === 'missing page') lab.store.db.prepare('DELETE FROM snapshot_parts WHERE digest=?').run(page.digest);
     else lab.store.db.prepare('UPDATE snapshot_parts SET body=? WHERE digest=?').run(`${pageBody(lab.store, page)} `, page.digest);
-    const before = allTables(lab.store), reopened = lab.reopen(), loaded = reopened.load()!;
+    const before = todasLasTablas(lab.store), reopened = lab.reopen(), loaded = reopened.load()!;
     assert.equal(loaded.slot, 1);
     assert.equal(loaded.skipped.length, 1);
     assert.match(loaded.skipped[0]!, /slot 0/i);
     assert.equal(digestoCanonico(loaded.world), backupDigest);
     assert.deepEqual(paramsOf(loaded.world), backupParams);
-    assert.deepEqual(allTables(reopened), before);
+    assert.deepEqual(todasLasTablas(reopened), before);
   });
 }
 
@@ -259,9 +254,9 @@ for (const [label, corrupt] of corruptions) {
     const { lab, current } = withBackup(t);
     corrupt(current);
     rewriteManifest(lab.store, current);
-    const before = allTables(lab.store), reopened = lab.reopen();
+    const before = todasLasTablas(lab.store), reopened = lab.reopen();
     assert.throws(() => reopened.load(), /invalid|snapshot|page|part|tile|parameter|encoding/i);
-    assert.deepEqual(allTables(reopened), before);
+    assert.deepEqual(todasLasTablas(reopened), before);
   });
 }
 
@@ -271,14 +266,14 @@ for (const damage of ['tupla incompleta', 'coordenada inválida'] as const) {
     const rows = JSON.parse(pageBody(lab.store, page)) as unknown[][];
     if (damage === 'tupla incompleta') rows[0]!.pop();
     else rows[0]![0] = 'not-a-coordinate';
-    const body = stringifyExact(rows), digest = checksum(body);
+    const body = stringifyExact(rows), digest = sha256(body);
     lab.store.db.prepare('INSERT INTO snapshot_parts(digest,body) VALUES (?,?)').run(digest, body);
     page.digest = digest; page.bytes = Buffer.byteLength(body);
     rewriteManifest(lab.store, current);
-    assert.equal(checksum(pageBodyUnchecked(lab.store, page)), page.digest, 'la corrupción no es un checksum roto');
-    const before = allTables(lab.store), reopened = lab.reopen();
+    assert.equal(sha256(pageBodyUnchecked(lab.store, page)), page.digest, 'la corrupción no es un checksum roto');
+    const before = todasLasTablas(lab.store), reopened = lab.reopen();
     assert.throws(() => reopened.load(), /invalid|snapshot|page|part|tile|tuple|procedural|Estado del mundo inválido/i);
-    assert.deepEqual(allTables(reopened), before);
+    assert.deepEqual(todasLasTablas(reopened), before);
   });
 }
 
@@ -309,11 +304,11 @@ test('piezas: fallo al insertar slot 0 revierte páginas, todas las tablas y tod
     SELECT CASE WHEN (SELECT COUNT(*) FROM snapshot_parts)<=${count} THEN RAISE(ABORT,'page insert was not observed') END;
     SELECT RAISE(ABORT,'injected after page insert');
   END`);
-  const before = allTables(lab.store), expected = structuredClone(draft);
+  const before = todasLasTablas(lab.store), expected = structuredClone(draft);
   const chunks = draft.retiredChunks, identities = draft.retiredLegacy, pending = draft.chronicleJournal!.pending;
   assert.throws(() => lab.store.save(draft), /injected after page insert/);
   assert.equal(lab.store.db.isTransaction, false);
-  assert.deepEqual(allTables(lab.store), before);
+  assert.deepEqual(todasLasTablas(lab.store), before);
   assert.deepEqual(draft, expected);
   assert.equal(draft.retiredChunks, chunks);
   assert.equal(draft.retiredLegacy, identities);
@@ -356,9 +351,9 @@ test('piezas: GC conserva referencias del slot 2 y páginas compartidas; elimina
 
 test('piezas: previous recupera el mundo seleccionado y sus params en una copia independiente', t => {
   const { lab, backupDigest, backupParams } = withBackup(t);
-  const before = allTables(lab.store), destination = join(dirname(lab.path), 'previous.sqlite');
+  const before = todasLasTablas(lab.store), destination = join(dirname(lab.path), 'previous.sqlite');
   assert.equal(lab.store.previous(destination), 1);
-  assert.deepEqual(allTables(lab.store), before, 'la recuperación explícita sólo escribe la copia');
+  assert.deepEqual(todasLasTablas(lab.store), before, 'la recuperación explícita sólo escribe la copia');
   lab.close();
   const recovered = openStore(destination, { readOnly: true });
   try {
@@ -398,7 +393,7 @@ for (const race of ['rotación de la fila seleccionada', 'página seleccionada e
         writer.db.prepare('DELETE FROM snapshot_parts WHERE digest=?').run(selectedPage);
         assert.deepEqual(snapshot(writer, 1), selected, 'la fila sigue igual; sólo desapareció una dependencia');
       }
-      afterInterference = allTables(writer);
+      afterInterference = todasLasTablas(writer);
       backup(destination);
     };
     try {
@@ -406,7 +401,7 @@ for (const race of ['rotación de la fila seleccionada', 'página seleccionada e
       assert.throws(() => lab.store.previous(destination), /changed|checkpoint|snapshot|page|part|recover|missing/i,
         'la copia debe volver a verificar la fila elegida y sus páginas, sin fabricar un mundo a partir de memoria obsoleta');
       assert.equal(interrupted, true, 'la interferencia ocurrió justo antes del VACUUM');
-      assert.deepEqual(allTables(lab.store), afterInterference, 'rechazar la copia no altera el escritor concurrente');
+      assert.deepEqual(todasLasTablas(lab.store), afterInterference, 'rechazar la copia no altera el escritor concurrente');
     } finally { lab.store.backup = backup; writer.close(); }
   });
 }
@@ -462,17 +457,17 @@ for (const level of ['raíz', 'metadata'] as const) {
       : saved.body.replace('"tileEncoding":', '"tileEncod\\u0069ng":"hidden-future","tileEncoding":');
     assert.notEqual(body, saved.body, 'la fixture realmente introduce la segunda clave');
     assert.deepEqual(JSON.parse(body), JSON.parse(saved.body), 'JSON.parse por sí solo perdería la primera declaración');
-    lab.store.db.prepare('UPDATE snapshots SET body=?,digest=? WHERE slot=0').run(body, checksum(body));
-    const before = allTables(lab.store), reopened = lab.reopen();
+    reescribirInstantanea(lab.store, body);
+    const before = todasLasTablas(lab.store), reopened = lab.reopen();
     assert.throws(() => reopened.load(), /duplicate.*key/i);
-    assert.deepEqual(allTables(reopened), before);
+    assert.deepEqual(todasLasTablas(reopened), before);
   });
 }
 
 test('piezas: guard de metadata mayor que 8 MiB mide bytes UTF-8 y rechaza antes del guardado', t => {
   const lab = laboratory(t), world = createWorld(42);
   lab.store.save(world);
-  const before = allTables(lab.store), committed = digestoCanonico(world);
+  const before = todasLasTablas(lab.store), committed = digestoCanonico(world);
   const draft = Object.assign(cloneWorld(world, lab.store.context), { transportFixture: 'é'.repeat(4 * 1024 * 1024) });
   const metadata = { ...draft, tiles: undefined };
   const body = stringifyExact(metadata);
@@ -480,7 +475,7 @@ test('piezas: guard de metadata mayor que 8 MiB mide bytes UTF-8 y rechaza antes
   assert.ok(Buffer.byteLength(body) > 8 * 1024 * 1024, 'los bytes del metadata sí exceden el límite');
   const pending = draft.chronicleJournal!.pending;
   assert.throws(() => lab.store.save(draft), /metadata exceeds transport size/);
-  assert.deepEqual(allTables(lab.store), before);
+  assert.deepEqual(todasLasTablas(lab.store), before);
   assert.equal(draft.chronicleJournal!.pending, pending);
   assert.equal(draft.transportFixture.length, 4 * 1024 * 1024);
   assert.equal(digestoCanonico(lab.reopen().load()!.world), committed);
@@ -493,9 +488,9 @@ test('piezas: manifest mayor que 8 MiB con checksum válido falla cerrado al rea
   const body = snapshot(lab.store).body;
   assert.ok(body.length < 8 * 1024 * 1024);
   assert.ok(Buffer.byteLength(body) > 8 * 1024 * 1024);
-  const before = allTables(lab.store), reopened = lab.reopen();
+  const before = todasLasTablas(lab.store), reopened = lab.reopen();
   assert.throws(() => reopened.load(), /manifest exceeds transport size/);
-  assert.deepEqual(allTables(reopened), before);
+  assert.deepEqual(todasLasTablas(reopened), before);
 });
 
 test('piezas: lastSnapshotBytes cuenta manifest y páginas lógicas incluso al reutilizarlas', t => {
@@ -532,12 +527,12 @@ for (const moment of ['después de INSERT page', 'después de INSERT snapshot0']
           UPDATE snapshot_parts SET body=body||' ' WHERE digest=json_extract(NEW.body,'$.tiles.pages[0].digest');
           SELECT observe_page_mutation();
         END`);
-    const before = allTables(lab.store), expected = structuredClone(draft);
+    const before = todasLasTablas(lab.store), expected = structuredClone(draft);
     const chunks = draft.retiredChunks, pending = draft.chronicleJournal!.pending;
     assert.throws(() => lab.store.save(draft), /page missing or checksum mismatch/i);
     assert.equal(touched, 1, 'el trigger cambió la página antes del rechazo, sin RAISE que falsee el resultado');
     assert.equal(lab.store.db.isTransaction, false);
-    assert.deepEqual(allTables(lab.store), before);
+    assert.deepEqual(todasLasTablas(lab.store), before);
     assert.deepEqual(draft, expected);
     assert.equal(draft.retiredChunks, chunks);
     assert.equal(draft.chronicleJournal!.pending, pending);
@@ -553,11 +548,11 @@ for (const operation of ['load', 'save'] as const) {
   test(`piezas: shadow TEMP snapshot_parts impide ${operation} sin tocar tablas durables`, t => {
     const lab = laboratory(t), world = createWorld(42);
     lab.store.save(world);
-    const before = allTables(lab.store), committed = digestoCanonico(world);
+    const before = todasLasTablas(lab.store), committed = digestoCanonico(world);
     lab.store.db.exec('CREATE TEMP TABLE snapshot_parts(digest TEXT PRIMARY KEY NOT NULL,body TEXT NOT NULL)');
     const draft = cloneWorld(world, lab.store.context); changeFood(draft);
     assert.throws(() => operation === 'load' ? lab.store.load() : lab.store.save(draft), /shadow|temporary|temp|schema/i);
-    assert.deepEqual(allTables(lab.store), before);
+    assert.deepEqual(todasLasTablas(lab.store), before);
     assert.equal(lab.store.db.prepare('SELECT COUNT(*) AS n FROM temp.snapshot_parts').get()!.n, 0);
     lab.store.db.exec('DROP TABLE temp.snapshot_parts');
     assert.equal(digestoCanonico(lab.reopen().load()!.world), committed);
@@ -612,7 +607,7 @@ for (const damage of ['checksum del slot', 'página ausente'] as const) {
     const { lab, current, backupDigest } = withBackup(t), db = lab.store.db;
     if (damage === 'checksum del slot') db.prepare("UPDATE snapshots SET body=body||' ' WHERE slot=0").run();
     else db.prepare('DELETE FROM snapshot_parts WHERE digest=?').run(current.tiles.pages[0]!.digest);
-    const before = allTables(lab.store);
+    const before = todasLasTablas(lab.store);
     assert.throws(() => readStoredSnapshot(db), SnapshotPhysicalError);
     assert.equal(db.isTransaction, false, 'el error revierte la transacción del propio lector');
     assert.equal(digestoCanonico(storedWorld(readStoredSnapshot(db, 1)!.value)), backupDigest, 'el slot 1 sí es legible cuando se solicita explícitamente');
@@ -623,7 +618,7 @@ for (const damage of ['checksum del slot', 'página ausente'] as const) {
       assert.equal(db.isTransaction, true, 'el error no cierra la transacción del caller');
       assert.equal(db.prepare("SELECT value FROM metadata WHERE key='reader-transaction-fixture'").get()!.value, 'pending');
     } finally { if (db.isTransaction) db.exec('ROLLBACK'); }
-    assert.deepEqual(allTables(lab.store), before, 'el caller todavía puede revertir su cambio');
+    assert.deepEqual(todasLasTablas(lab.store), before, 'el caller todavía puede revertir su cambio');
   });
 }
 
@@ -660,12 +655,12 @@ test('piezas: GC conserva páginas ante un respaldo ilegible y un rollback poste
   const first = snapshot(lab.store, 1), firstPage = manifest(lab.store, 1).tiles.pages[0]!.digest;
   const orphan = manifest(lab.store).tiles.pages[0]!.digest;
   // La cadencia real del slot 2 ya se prueba arriba; aquí se aísla su cuerpo ilegible.
-  lab.store.db.prepare('INSERT INTO snapshots(slot,body,digest,saved_at) VALUES (2,?,?,?)').run('{broken', checksum('{broken'), first.saved_at);
+  lab.store.db.prepare('INSERT INTO snapshots(slot,body,digest,saved_at) VALUES (2,?,?,?)').run('{broken', sha256('{broken'), first.saved_at);
   world.tiles[0]!.food = 0.5625; lab.store.save(world); lab.store.save(world);
   const latest = manifest(lab.store).tiles.pages[0]!.digest;
   assert.deepEqual(partDigests(lab.store), [firstPage, orphan, latest].sort(), 'un cuerpo opaco no demuestra que sus páginas sean huérfanas');
   lab.store.db.prepare('UPDATE snapshots SET body=?,digest=?,saved_at=? WHERE slot=2').run(first.body, first.digest, first.saved_at);
-  const before = allTables(lab.store), exec = lab.store.db.exec.bind(lab.store.db);
+  const before = todasLasTablas(lab.store), exec = lab.store.db.exec.bind(lab.store.db);
   let collected = false;
   lab.store.db.exec = (sql: string) => {
     // La preparación puede cerrar lecturas propias antes del guardado; sólo
@@ -680,7 +675,7 @@ test('piezas: GC conserva páginas ante un respaldo ilegible y un rollback poste
   finally { lab.store.db.exec = exec; }
   assert.equal(collected, true, 'el fallo ocurre después de borrar la página que ya no tiene referencias');
   assert.equal(lab.store.db.isTransaction, false);
-  assert.deepEqual(allTables(lab.store), before, 'ROLLBACK restaura también las páginas borradas por GC');
+  assert.deepEqual(todasLasTablas(lab.store), before, 'ROLLBACK restaura también las páginas borradas por GC');
   lab.store.save(world);
   assert.deepEqual(partDigests(lab.store), [firstPage, latest].sort(), 'el reintento conserva el slot profundo y recoge sólo la página huérfana');
   const committed = digestoCanonico(world);
@@ -702,11 +697,11 @@ for (const slot of [1, 2]) {
       UPDATE snapshot_parts SET body=body||' ' WHERE digest=json_extract((SELECT body FROM snapshots WHERE slot=${slot}),'$.tiles.pages[0].digest');
       SELECT observe_backup_page(json_extract((SELECT body FROM snapshots WHERE slot=${slot}),'$.tiles.pages[0].digest'));
     END`);
-    const before = allTables(lab.store), expected = structuredClone(draft), pending = draft.chronicleJournal!.pending;
+    const before = todasLasTablas(lab.store), expected = structuredClone(draft), pending = draft.chronicleJournal!.pending;
     assert.throws(() => lab.store.save(draft), /page missing or checksum mismatch/i);
     assert.equal(observed, expectedPage, 'el trigger dañó la página exclusiva del respaldo seleccionado');
     assert.equal(lab.store.db.isTransaction, false);
-    assert.deepEqual(allTables(lab.store), before);
+    assert.deepEqual(todasLasTablas(lab.store), before);
     assert.deepEqual(draft, expected);
     assert.equal(draft.chronicleJournal!.pending, pending);
     lab.store.db.exec('DROP TRIGGER mutate_backup_page');
@@ -716,7 +711,7 @@ for (const slot of [1, 2]) {
 
 test('piezas: GC propaga un RangeError del decoder del respaldo sin ocultarlo como corrupción física', t => {
   const { lab } = withBackup(t), oldBody = snapshot(lab.store, 1).body;
-  const gc = new SnapshotParts(lab.store.db, 5), before = allTables(lab.store);
+  const gc = new SnapshotParts(lab.store.db, 5), before = todasLasTablas(lab.store);
   const parse = JSON.parse, failure = new RangeError('synthetic GC decoder resource failure');
   let observed = false;
   const mock = t.mock.method(JSON, 'parse', (body: string) => {
@@ -729,7 +724,7 @@ test('piezas: GC propaga un RangeError del decoder del respaldo sin ocultarlo co
     assert.equal(observed, true);
     assert.equal(lab.store.db.isTransaction, true);
   } finally { mock.mock.restore(); lab.store.db.exec('ROLLBACK'); }
-  assert.deepEqual(allTables(lab.store), before);
+  assert.deepEqual(todasLasTablas(lab.store), before);
 });
 
 test('piezas: umbral default real conserva inline 32768 tiles y segmenta el siguiente chunk', t => {
@@ -765,12 +760,12 @@ test('piezas: previous revierte la copia completa si revocar sesiones dispara un
     UPDATE snapshot_parts SET body=body||' '
     WHERE digest=json_extract((SELECT body FROM snapshots WHERE slot=0),'$.tiles.pages[0].digest');
   END`);
-  const before = allTables(lab.store), destination = join(dirname(lab.path), 'revoke-trigger-previous.sqlite');
+  const before = todasLasTablas(lab.store), destination = join(dirname(lab.path), 'revoke-trigger-previous.sqlite');
   assert.throws(() => lab.store.previous(destination), /snapshot|page|checksum/i);
-  assert.deepEqual(allTables(lab.store), before, 'el trigger de la copia no altera el origen');
+  assert.deepEqual(todasLasTablas(lab.store), before, 'el trigger de la copia no altera el origen');
   const recovered = openStore(destination, { readOnly: true });
   try {
-    const after = allTables(recovered);
+    const after = todasLasTablas(recovered);
     t.diagnostic(`sesiones en copia tras rechazo: ${recovered.db.prepare('SELECT COUNT(*) AS n FROM sessions').get()!.n}`);
     assert.equal(isDeepStrictEqual(after, before), true,
       'el rechazo debe ocurrir antes del COMMIT: todas las tablas de la copia, incluidas sesiones, slots y páginas, vuelven al estado original');

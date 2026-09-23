@@ -1,6 +1,5 @@
 import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,8 +8,8 @@ import { TechnologyArchive } from '../src/server/technology-archive.js';
 import type { TechnologyDefinition } from '../src/shared/technology-archive.js';
 import type { TechnologyProgram } from '../src/shared/technology.js';
 import { programSignature } from '../src/world/technology.js';
+import { sha256 } from './lib/store.js';
 
-const digest = (body: string) => createHash('sha256').update(body).digest('hex');
 function definition(id: number, atTick = id * 10): TechnologyDefinition {
   const program: TechnologyProgram = { inputs: [id === 1 ? { source: 'raw', material: 'stone', mass: 1000 }
     : { source: 'product', recipeId: `recipe-${id - 1}`, mass: 1000 }], steps: [{ op: 'form', intensity: 2, shape: 'edge' }] };
@@ -49,7 +48,7 @@ function decodingWork(archive: TechnologyArchive) {
 function rewrite(db: DatabaseSync, id: number, mutate: (value: TechnologyDefinition) => void): void {
   const row = db.prepare('SELECT body FROM technology_definitions WHERE id=?').get(`recipe-${id}`) as { body: string };
   const value: TechnologyDefinition = JSON.parse(row.body); mutate(value); const body = JSON.stringify(value);
-  db.prepare('UPDATE technology_definitions SET body=?,digest=? WHERE id=?').run(body, digest(body), value.id);
+  db.prepare('UPDATE technology_definitions SET body=?,digest=? WHERE id=?').run(body, sha256(body), value.id);
 }
 
 test('851 increasing definition windows require linear decoding work with or without a declared read transaction', t => {
@@ -100,7 +99,7 @@ test('streaming inspectors still visit every author and validate statistics afte
   }
   assert.throws(() => archive.summarizeDefinitions(500, () => { throw new Error('author rejected'); }), /author rejected/);
   const body = JSON.stringify({ recipeId: 'recipe-20', tick: 200, uses: 3, manufactured: 0, utility: 0 });
-  db.prepare('UPDATE technology_stats SET body=?,digest=? WHERE recipeId=? AND tick=200').run(body, digest(body), 'recipe-20');
+  db.prepare('UPDATE technology_stats SET body=?,digest=? WHERE recipeId=? AND tick=200').run(body, sha256(body), 'recipe-20');
   assert.throws(() => archive.summarizeDefinitions(500), /statistics regression/);
 });
 

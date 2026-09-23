@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import test, { type TestContext } from 'node:test';
-import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,16 +8,12 @@ import { Store } from '../src/server/store.js';
 import { createWorld } from '../src/world/index.js';
 import { digestoCanonico } from '../src/world/digesto.js';
 import { paramsOf, parseParams } from '../src/world/params.js';
+import { filaInstantanea, reescribirInstantanea, sha256, todasLasTablas } from './lib/store.js';
 
-const checksum = (body: string): string => createHash('sha256').update(body).digest('hex');
 const sqlString = (value: string): string => `'${value.replaceAll("'", "''")}'`;
 interface SnapshotMetadata { params: { agua: { cuencas: number } }; }
 interface SnapshotBody extends SnapshotMetadata { snapshotEncoding?: string; world?: SnapshotMetadata; }
 
-function allTables(store: Store): unknown {
-  const names = store.db.prepare("SELECT name FROM main.sqlite_schema WHERE type='table' ORDER BY name").all() as { name: string }[];
-  return names.map(({ name }) => [name, store.db.prepare(`SELECT * FROM main."${name.replaceAll('"', '""')}" ORDER BY rowid`).all()]);
-}
 
 function fixture(t: TestContext, snapshotInlineTileLimit: number) {
   const directory = mkdtempSync(join(tmpdir(), 'atlas-snapshot-recovery-boundary-'));
@@ -37,7 +32,7 @@ function fixture(t: TestContext, snapshotInlineTileLimit: number) {
 
 for (const kind of ['RangeError', 'SQLite I/O', 'TypeError', 'Error ordinario'] as const) {
   test(`recovery boundary: ${kind} conserva la instancia, no visita slot 2 ni crea una copia`, t => {
-    const { store, destination } = fixture(t, 0), before = allTables(store);
+    const { store, destination } = fixture(t, 0), before = todasLasTablas(store);
     const injected = kind === 'RangeError' ? new RangeError('synthetic snapshot page allocation failure')
       : kind === 'TypeError' ? new TypeError('synthetic unexpected snapshot decoder failure')
         : kind === 'Error ordinario' ? new Error('synthetic ordinary page lookup failure')
@@ -64,7 +59,7 @@ for (const kind of ['RangeError', 'SQLite I/O', 'TypeError', 'Error ordinario'] 
     try { store.previous(destination); } catch (error) { caught = error; }
     finally { store.db.prepare = prepare; store.backup = backup; }
     t.diagnostic(JSON.stringify({ kind, injectedCount, slots, backupCalls, destinationExists: existsSync(destination), sameInstance: caught === injected }));
-    assert.deepEqual(allTables(store), before, 'el fallo operativo no modifica el origen');
+    assert.deepEqual(todasLasTablas(store), before, 'el fallo operativo no modifica el origen');
     assert.equal(injectedCount, 1);
     assert.equal(caught, injected, 'un fallo operativo o inesperado se propaga sin convertirse en permiso para retroceder');
     assert.deepEqual(slots, [1]);
@@ -79,25 +74,25 @@ for (const snapshotInlineTileLimit of [32768, 0]) {
 
   test(`recovery boundary: revoke que cambia agua 0.8 a 0.7 con checksum válido revierte ALLtables (${format})`, t => {
     const { store, destination, currentDigest } = fixture(t, snapshotInlineTileLimit);
-    const row = store.db.prepare('SELECT body FROM snapshots WHERE slot=1').get() as { body: string };
+    const row = filaInstantanea(store, 1);
     const changed = JSON.parse(row.body) as SnapshotBody;
     const metadata = changed.snapshotEncoding ? changed.world! : changed;
     assert.equal(metadata.params.agua.cuencas, 0.8);
     metadata.params.agua.cuencas = 0.7;
-    const body = JSON.stringify(changed), digest = checksum(body);
+    const body = JSON.stringify(changed), digest = sha256(body);
     store.db.prepare('INSERT INTO sessions(hash,expires) VALUES (?,?)').run('synthetic-recovery-session', Date.now() + 60_000);
     store.db.exec(`CREATE TRIGGER alter_recovered_laws AFTER DELETE ON sessions BEGIN
       UPDATE snapshots SET body=${sqlString(body)},digest=${sqlString(digest)} WHERE slot=0;
     END`);
-    const before = allTables(store);
+    const before = todasLasTablas(store);
     let caught: unknown;
     try { store.previous(destination); } catch (error) { caught = error; }
-    assert.deepEqual(allTables(store), before, 'la recuperación no ejecuta el trigger sobre el origen');
+    assert.deepEqual(todasLasTablas(store), before, 'la recuperación no ejecuta el trigger sobre el origen');
     const copy = new Store(destination, { readOnly: true });
     try {
-      const untouched = isDeepStrictEqual(allTables(copy), before);
-      const copiedRow = copy.db.prepare('SELECT body,digest FROM snapshots WHERE slot=0').get() as { body: string; digest: string };
-      assert.equal(checksum(copiedRow.body), copiedRow.digest, 'un checksum roto no explica el rechazo esperado');
+      const untouched = isDeepStrictEqual(todasLasTablas(copy), before);
+      const copiedRow = filaInstantanea(copy);
+      assert.equal(sha256(copiedRow.body), copiedRow.digest, 'un checksum roto no explica el rechazo esperado');
       const decoded = JSON.parse(copiedRow.body) as SnapshotBody;
       t.diagnostic(JSON.stringify({ format, rejected: caught instanceof Error, allTablesRestored: untouched,
         copiedWater: (decoded.snapshotEncoding ? decoded.world! : decoded).params.agua.cuencas }));
@@ -115,13 +110,13 @@ for (const snapshotInlineTileLimit of [32768, 0]) {
     assert.ok(Number(store.db.prepare('SELECT COUNT(*) AS n FROM events').get()!.n) > 0);
     store.db.prepare('INSERT INTO sessions(hash,expires) VALUES (?,?)').run('synthetic-recovery-session', Date.now() + 60_000);
     store.db.exec('CREATE TRIGGER erase_recovered_chronicle AFTER DELETE ON sessions BEGIN DELETE FROM events; END');
-    const before = allTables(store);
+    const before = todasLasTablas(store);
     let caught: unknown;
     try { store.previous(destination); } catch (error) { caught = error; }
-    assert.deepEqual(allTables(store), before, 'la crónica original permanece intacta');
+    assert.deepEqual(todasLasTablas(store), before, 'la crónica original permanece intacta');
     const copy = new Store(destination, { readOnly: true });
     try {
-      const untouched = isDeepStrictEqual(allTables(copy), before);
+      const untouched = isDeepStrictEqual(todasLasTablas(copy), before);
       t.diagnostic(JSON.stringify({ format, rejected: caught instanceof Error, allTablesRestored: untouched,
         copiedEvents: Number(copy.db.prepare('SELECT COUNT(*) AS n FROM events').get()!.n),
         copiedSessions: Number(copy.db.prepare('SELECT COUNT(*) AS n FROM sessions').get()!.n) }));
@@ -135,9 +130,9 @@ for (const snapshotInlineTileLimit of [32768, 0]) {
   test(`recovery boundary: recuperación ordinaria conserva el mundo elegido y sus parámetros (${format})`, t => {
     const { store, destination, previousDigest } = fixture(t, snapshotInlineTileLimit);
     store.db.prepare('INSERT INTO sessions(hash,expires) VALUES (?,?)').run('synthetic-recovery-session', Date.now() + 60_000);
-    const before = allTables(store);
+    const before = todasLasTablas(store);
     assert.equal(store.previous(destination), 1);
-    assert.deepEqual(allTables(store), before);
+    assert.deepEqual(todasLasTablas(store), before);
     const copy = new Store(destination, { readOnly: true });
     try {
       const loaded = copy.load()!;
@@ -155,15 +150,15 @@ for (const damage of ['checksum físico', 'params fuera de rango'] as const) {
     const { store, destination, previousDigest } = fixture(t, 0);
     if (damage === 'checksum físico') store.db.exec("UPDATE snapshots SET body=body||' ' WHERE slot=1");
     else {
-      const row = store.db.prepare('SELECT body FROM snapshots WHERE slot=1').get() as { body: string };
+      const row = filaInstantanea(store, 1);
       const value = JSON.parse(row.body) as SnapshotBody;
       value.world!.params.agua.cuencas = 9;
       const body = JSON.stringify(value);
-      store.db.prepare('UPDATE snapshots SET body=?,digest=? WHERE slot=1').run(body, checksum(body));
+      reescribirInstantanea(store, body, 1);
     }
-    const before = allTables(store);
+    const before = todasLasTablas(store);
     assert.equal(store.previous(destination), 2);
-    assert.deepEqual(allTables(store), before);
+    assert.deepEqual(todasLasTablas(store), before);
     const copy = new Store(destination, { readOnly: true });
     try { assert.equal(digestoCanonico(copy.load()!.world), previousDigest); }
     finally { copy.close(); }

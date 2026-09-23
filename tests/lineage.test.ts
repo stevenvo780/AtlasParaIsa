@@ -6,7 +6,7 @@ import type { ChronicleEvent, CommunityView } from '../src/shared/types.js';
 import { createWorld, type Person, type World } from '../src/world/index.js';
 import { demographicTraits, initialDemography } from '../src/world/demography.js';
 import { founderGenome, inheritGenome } from '../src/world/genetics.js';
-import { advancePopulation, assertLegacyRecord, assertPopulation, MAX_LEGACY_CACHE, RECENT_LEGACY_COUNT, referencedLegacy, retainLegacy } from '../src/world/lineage.js';
+import { advancePopulation, assertLegacyRecord, assertPopulation, MAX_LEGACY_CACHE, pruneBonds, RECENT_LEGACY_COUNT, referencedLegacy, retainLegacy } from '../src/world/lineage.js';
 
 function emitFor(world: World) {
   return (event: Omit<ChronicleEvent, 'id' | 'tick'>): ChronicleEvent => {
@@ -150,6 +150,81 @@ test('population validation rejects dead identities reappearing, duplicate rows 
   world.people.push({ ...a, demography: initialDemography(world.tick - a.bornAt) });
   const deaths = world.demographyDynamics.deaths;
   assert.throws(() => advancePopulation(world, { emit }), /fallecida reapareció/); assert.equal(world.demographyDynamics.deaths, deaths);
+});
+
+/** T142: la poda de siempre, literal, como referencia de identidad (valores y orden de claves). */
+function oldPrune(survivors: readonly Person[], departed: readonly Person[]) {
+  const ids = new Set(departed.map(person => person.id));
+  for (const person of survivors) for (const id of ids) delete person.bonds[id];
+}
+function mulberry32(seed: number) {
+  return () => { seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+}
+const entries = (people: readonly Person[]) => people.map(person => [person.id, Object.entries(person.bonds)]);
+
+test('T142: tras 1 000 muertes entre 2 000 personas los bonds quedan idénticos, orden de claves incluido, a la poda de siempre', () => {
+  const { world, s, i, a: template, emit } = scene(); const random = mulberry32(142);
+  const integerIds = new Map([[7, '7'], [42, '42'], [1000, '1000'], [1500, '3']]);
+  world.people = [s, i, ...Array.from({ length: 1998 }, (_, n): Person => ({ ...structuredClone(template), id: integerIds.get(n) ?? `t142-${n}`, bonds: {} }))];
+  const pick = () => world.people[Math.floor(random() * world.people.length)]!;
+  for (const person of world.people) for (let k = Math.floor(random() * 31); k > 0; k--) {
+    const other = pick(), value = Math.round(random() * 1000) / 1000;
+    person.bonds[other.id] = value; if (random() < 0.7) other.bonds[person.id] = value;
+  }
+  const neighbors = world.people.slice(2), dying = new Set<Person>();
+  while (dying.size < 1000) dying.add(neighbors[Math.floor(random() * neighbors.length)]!);
+  const hub = neighbors.find(person => !dying.has(person))!, lonely = [...dying][0]!;
+  for (const person of [...dying].slice(1, 301)) hub.bonds[person.id] = 0.5; // unidireccionales entrantes a fallecidos
+  for (const person of world.people) delete person.bonds[lonely.id];
+  lonely.bonds = {}; hub.bonds[hub.id] = 0.4;
+  for (const person of dying) fatal(person);
+  const reference = structuredClone(world.people), gone = new Set([...dying].map(person => person.id));
+  const departed = reference.filter(person => gone.has(person.id)), survivors = reference.filter(person => !gone.has(person.id));
+  const deadBonds = [...dying].map(person => Object.entries(person.bonds));
+  oldPrune(survivors, departed);
+  world.tick++; advancePopulation(world, { emit });
+  assert.equal(world.demographyDynamics.deaths, 1000); assert.equal(world.people.length, 1000);
+  assert.deepStrictEqual(entries(world.people), entries(survivors));
+  assert.deepStrictEqual([...dying].map(person => Object.entries(person.bonds)), deadBonds);
+  assert.deepStrictEqual(Object.keys(hub.bonds).filter(id => gone.has(id)), []);
+  assertPopulation(world);
+  // Una muerte más en el mismo mundo: el otro recorrido, contra la misma referencia.
+  const next = world.people.find(person => person.role === 'neighbor' && Object.keys(person.bonds).length > 0)!;
+  fatal(next); const again = structuredClone(world.people), kept = again.filter(person => person.id !== next.id);
+  oldPrune(kept, again.filter(person => person.id === next.id)); world.tick++; advancePopulation(world, { emit });
+  assert.deepStrictEqual(entries(world.people), entries(kept));
+});
+
+test('T142: pruneBonds da lo mismo que la poda de siempre por los dos recorridos, incluidos vínculos unidireccionales', () => {
+  const person = (id: string, bonds: Record<string, number> = {}) => ({ id, bonds }) as unknown as Person;
+  const check = (people: Person[], dead: string[], scanned: boolean) => {
+    const departed = people.filter(p => dead.includes(p.id)), survivors = people.filter(p => !dead.includes(p.id));
+    const reference = structuredClone(people), deadBonds = entries(departed);
+    oldPrune(reference.filter(p => !dead.includes(p.id)), reference.filter(p => dead.includes(p.id)));
+    const listed = new Set<string>();
+    const watched = survivors.map(p => { const bonds = p.bonds; p.bonds = new Proxy(bonds, { ownKeys: target => { listed.add(p.id); return Reflect.ownKeys(target); } }); return [p, bonds] as const; });
+    pruneBonds(survivors, departed);
+    for (const [p, bonds] of watched) p.bonds = bonds;
+    assert.deepStrictEqual(entries(survivors), entries(reference.filter(p => !dead.includes(p.id))));
+    assert.deepStrictEqual(entries(departed), deadBonds);
+    // Con muchas muertes y pocos vínculos, cada superviviente recorre sus claves (barrido); si no, sondeo.
+    assert.equal(survivors.every(p => listed.has(p.id)), scanned);
+  };
+  // Cero y una muerte: sondeo, con claves enteras mezcladas (JS las enumera antes y en orden numérico).
+  const small = () => [person('x', { '10': 0.1, b: 0.2, '2': 0.3, dead: 0.4, '3': 0.5 }), person('b', { x: 0.2, '3': 0.1 }), person('3', { dead: 0.9, x: 0.5 }),
+    person('dead', { x: 0.4 }), person('2'), person('10', { x: 0.1 })];
+  check(small(), [], false); check(small(), ['dead'], false); check(small(), ['3'], false); check(small(), ['dead', '3'], false);
+  // Cincuenta muertes con grado ~2: barrido. `keeper` guarda un vínculo unidireccional con un fallecido que no lo tiene.
+  const many = Array.from({ length: 200 }, (_, n) => person(n % 17 === 0 ? String(n) : `p-${n}`));
+  for (let n = 0; n < many.length; n++) { const a = many[n]!, b = many[(n * 7 + 3) % many.length]!; a.bonds[b.id] = 0.3; b.bonds[a.id] = 0.3; }
+  const dead = many.filter((_, n) => n % 4 === 1).map(p => p.id), keeper = many.find(p => !dead.includes(p.id))!;
+  keeper.bonds[dead[10]!] = 0.7; keeper.bonds[keeper.id] = 0.1; keeper.bonds[dead[20]!] = 0.2;
+  assert.ok(!Object.hasOwn(many.find(p => p.id === dead[10])!.bonds, keeper.id));
+  check(many, dead, true);
+  // Muchas muertes pero grado alto: sigue siendo sondeo (más supervivientes que la muestra), mismo resultado.
+  const dense = Array.from({ length: 100 }, (_, n) => person(`d-${n}`));
+  dense.forEach((a, n) => dense.forEach((b, m) => { if (a !== b && (n * 31 + m) % 3 !== 0) a.bonds[b.id] = 0.5; }));
+  check(dense, dense.filter((_, n) => n % 4 === 0).map(p => p.id), false);
 });
 
 test('herencia pura (mutationRate 0) combina alelos exactos de los dos padres', () => {

@@ -377,4 +377,9 @@ test('T143: same-length turnover rotates, reordering does not, and the tick afte
   assert.equal(state.checkpoint, rotated, 'a stable roster, cloned or not, keeps its opening');
   actors.push(stockActor('a')); advanceTechnologyCheckpoint(state, actors, 5); advanceTechnologyCheckpoint(state, actors, 6);
   assert.equal(state.checkpoint, rotated, 'as before, the roster is a set of ids: a repeated id changes nothing');
+  // Mismo array, misma longitud, misma apertura: sólo el contenido delata el cambio. Por eso el padrón no
+  // puede decidirse en O(1) con (estado, actores, tick): un atajo por identidad o longitud no rotaría aquí.
+  actors[0]!.id = 'e'; advanceTechnologyCheckpoint(state, actors, 7);
+  assert.notEqual(state.checkpoint, rotated, 'renaming an actor in place is a roster change');
+  assert.equal(state.checkpoint!.reason, 'roster-change');
 });

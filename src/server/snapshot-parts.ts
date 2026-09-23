@@ -5,7 +5,7 @@ import { stringifyExact } from '../shared/exact-json.js';
 import type { World } from '../world/index.js';
 import type { WorldLimits, WorldParams } from '../world/params.js';
 import { decodeSnapshotValue, decodeSnapshotTileRows, encodeSnapshot, encodeSnapshotTileRows,
-  assertSnapshotCounts, parseSnapshotJSON, readSnapshotLimits, retainSnapshotLimitMode, snapshotRecord,
+  assertSnapshotCounts, finishDecodedRecord, parseSnapshotJSON, readSnapshotLimits, snapshotRecord,
   SNAPSHOT_TILE_ENCODING, SnapshotPhysicalError, SnapshotSemanticError } from './snapshot.js';
 
 // Transport bounds, independent of world laws and available host hardware.
@@ -17,6 +17,10 @@ const ENCODING = 'snapshot-parts-v1';
 const checksum = (body: string): string => createHash('sha256').update(body).digest('hex');
 class SnapshotPartsFormatError extends SnapshotSemanticError {}
 function failure(message: string): never { throw new SnapshotPartsFormatError(`Invalid snapshot parts ${message}. Explicit recovery required.`); }
+/** Una regla de los metadatos ya se explica y pide recuperación: su texto va una sola vez, con el error original como `cause`. */
+function metadataFailure(error: SnapshotSemanticError): never {
+  throw new SnapshotPartsFormatError(`Invalid snapshot parts metadata: ${error.message}`, { cause: error });
+}
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const keys = (value: Record<string, unknown>, expected: string[]): boolean =>
   Object.keys(value).length === expected.length && expected.every(key => Object.hasOwn(value, key));
@@ -132,12 +136,12 @@ export class SnapshotParts {
       || world.tileEncoding !== SNAPSHOT_TILE_ENCODING) failure('metadata tile encoding');
     let limits: Readonly<WorldLimits>;
     try { limits = readSnapshotLimits(world, validateParams); }
-    catch (error) { if (error instanceof SnapshotSemanticError) failure(error.message); throw error; }
+    catch (error) { if (error instanceof SnapshotSemanticError) metadataFailure(error); throw error; }
     if (!keys(tiles, ['count', 'pages']) || !Number.isSafeInteger(tiles.count) || (tiles.count as number) < 1
       || !Array.isArray(tiles.pages)
       || tiles.pages.length !== Math.ceil((tiles.count as number) / SNAPSHOT_PAGE_TILES)) failure('tile count');
     try { assertSnapshotCounts(world, limits, tiles.count as number); }
-    catch (error) { if (error instanceof SnapshotSemanticError) failure(error.message); throw error; }
+    catch (error) { if (error instanceof SnapshotSemanticError) metadataFailure(error); throw error; }
     let count = 0;
     for (const [index, page] of (tiles.pages as unknown[]).entries()) {
       if (!object(page) || !keys(page, ['index', 'digest', 'count', 'bytes']) || page.index !== index
@@ -177,9 +181,7 @@ export class SnapshotParts {
       bytes += page.bytes;
     }
     const world = { ...manifest.world, tiles };
-    delete (world as Record<string, unknown>).tileEncoding;
-    retainSnapshotLimitMode(world);
-    delete (world as Record<string, unknown>).limitsProfile;
+    finishDecodedRecord(world);
     return { value: world, bytes };
   }
 

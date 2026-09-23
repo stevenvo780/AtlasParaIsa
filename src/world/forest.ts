@@ -1,8 +1,7 @@
 import type { Tile } from '../shared/types.js';
 
-/** Proposed landscape distribution, not an empirically calibrated forest model.
+/* Proposed landscape distribution, not an empirically calibrated forest model.
  * The site exists in global coordinates; chunk boundaries never reseed it. */
-export const FOREST_LAYOUT_VERSION = 1;
 
 function unit(seed: number, x: number, y: number, salt: number): number {
   let value = seed ^ salt ^ Math.imul(x, 0x9e3779b1) ^ Math.imul(y, 0x85ebca77);

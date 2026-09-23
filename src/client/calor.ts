@@ -3,8 +3,8 @@
  *
  * Módulo puro: sin DOM global, sin estado. `dibujarCalor` recibe la subselección
  * de teselas visibles que ya calculó el renderizador (mismo criterio que
- * `landscape.ts`) y pinta un rectángulo por tesela con `ctx.fillRect`. El
- * orquestador de T024 cablea la tecla `H`, el `view` real (cámara) y la leyenda.
+ * `landscape.ts`) y pinta un rectángulo por tesela con `ctx.fillRect`. La escena
+ * lo pinta con `pintarCalor` (landscape.ts) y game.ts pone el selector de capa y la leyenda.
  */
 import type { Tile } from '../shared/types.js';
 
@@ -40,7 +40,7 @@ const RAMPA: Record<Capa, readonly [readonly [number, number, number], readonly 
 const canal = (a: number, b: number, t: number): number => Math.round(a + (b - a) * t);
 const hex = (n: number): string => n.toString(16).padStart(2, '0');
 
-/** Rampa perceptual de 5 paradas (0, .25, .5, .75, 1) muestreada de forma continua. */
+/** Interpolación continua entre las dos paradas de `RAMPA`; la leyenda la muestrea en 5 valores. */
 export function colorCalor(capa: Capa, valor: number): string {
   const t = Math.max(0, Math.min(1, valor)), [desde, hasta] = RAMPA[capa];
   return `#${hex(canal(desde[0], hasta[0], t))}${hex(canal(desde[1], hasta[1], t))}${hex(canal(desde[2], hasta[2], t))}`;
@@ -71,14 +71,4 @@ export function leyendaCalor(capa: Capa): { titulo: string; paradas: { valor: nu
     return { valor, color: colorCalor(capa, valor), etiqueta };
   });
   return { titulo: TITULOS[capa], paradas };
-}
-
-/** Suma el valor crudo de la capa por región cuadrada de `tamRegion` teselas (clave `"rx:ry"`). */
-export function totalesPorRegion(tiles: readonly Tile[], capa: Capa, tamRegion = 16): Map<string, number> {
-  const totales = new Map<string, number>();
-  for (const tile of tiles) {
-    const clave = `${Math.floor(tile.x / tamRegion)}:${Math.floor(tile.y / tamRegion)}`;
-    totales.set(clave, (totales.get(clave) ?? 0) + valorCrudo(tile, capa));
-  }
-  return totales;
 }

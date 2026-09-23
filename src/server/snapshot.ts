@@ -7,7 +7,6 @@ import { exactJsonNumber, stringifyExact } from '../shared/exact-json.js';
 // Lossless JSON tuples avoid repeating twenty property names for every active tile
 // on every durable step. Old object snapshots remain readable. No float quantization.
 export const SNAPSHOT_TILE_ENCODING = 'tiles-tuple-v1';
-export const LEGACY_SNAPSHOT_TILE_LIMIT = LEGACY_WORLD_LIMITS.teselasActivas;
 /** R8: los `WorldParams` viven en un `WeakMap` por instancia (params.ts, ruling R3), así
  * que `load()` reconstruía el mundo desde JSON SIN ellos y volvía silenciosamente a
  * `DEFAULT_PARAMS`. Viajan en la instantánea como campo versionado y aparte del `World`:
@@ -23,7 +22,9 @@ export const LEGACY_SNAPSHOT_TILE_LIMIT = LEGACY_WORLD_LIMITS.teselasActivas;
 const PARAMS_ENCODING = 'params-v1';
 const LEGACY_PARAMS_BODY = stringifyExact({ ...HISTORICAL_PARAMS, limites: LEGACY_WORLD_LIMITS });
 const HISTORICAL_LIMIT_MODE_PARAMS = parseParams('limites.aplicacion=historicos', HISTORICAL_PARAMS);
-const FIELDS = ['x','y','terrain','moisture','vegetation','food','biome','elevation','wood','stone','feature','variety','growth','fertility','cultivation','traffic','drinkingWater','species','fauna','life'] as const;
+/** Orden de los campos de cada tupla de tesela. `encodeSnapshotTileRows` escribe el mismo orden a mano
+ * (camino caliente de cada guardado); tests/snapshot-tile-fields.test.ts comprueba que coinciden. */
+export const SNAPSHOT_TILE_FIELDS = ['x','y','terrain','moisture','vegetation','food','biome','elevation','wood','stone','feature','variety','growth','fertility','cultivation','traffic','drinkingWater','species','fauna','life'] as const;
 /** Only unreadable bytes justify trying an older checkpoint automatically. */
 export class SnapshotPhysicalError extends Error {}
 /** Readable bytes with an explicitly recognized codec/parameter violation. */
@@ -118,6 +119,20 @@ export function encodeSnapshot(world: World, params: WorldParams = DEFAULT_PARAM
   }
   return `{${fields.join(',')}}`;
 }
+/** Una instantánea declara su modo de admisión de límites dentro de sus params. */
+function hasSnapshotLimitMode(record: Record<string, unknown>): boolean {
+  const params = record.params as Record<string, unknown> | undefined;
+  return !!params && (Object.hasOwn(params, 'limites.aplicacion') || !!params.limites && typeof params.limites === 'object'
+    && Object.hasOwn(params.limites, 'aplicacion'));
+}
+
+/** Preserve a v1 profile's interpretation when its transport marker is removed. */
+function retainSnapshotLimitMode(record: Record<string, unknown>): void {
+  if (Object.hasOwn(record, 'limitsProfile') && !hasSnapshotLimitMode(record)) {
+    record.params = readSnapshotParams(record); record.paramsEncoding = PARAMS_ENCODING;
+  }
+}
+
 /**
  * Valida los parámetros sin modificar la instantánea. El `World` recibe sus leyes
  * con `setParams`, después de extraerlas. Sin campo ni perfil ⇒ params históricos,
@@ -127,19 +142,6 @@ export function encodeSnapshot(world: World, params: WorldParams = DEFAULT_PARAM
  * `HISTORICAL_PARAMS` (reglas 10, etapa 1), sea cual sea la versión de reglas: una
  * instantánea sólo omite una clave si se escribió antes de que existiera.
  */
-function hasSnapshotLimitMode(record: Record<string, unknown>): boolean {
-  const params = record.params as Record<string, unknown> | undefined;
-  return !!params && (Object.hasOwn(params, 'limites.aplicacion') || !!params.limites && typeof params.limites === 'object'
-    && Object.hasOwn(params.limites, 'aplicacion'));
-}
-
-/** Preserve a v1 profile's interpretation when its transport marker is removed. */
-export function retainSnapshotLimitMode(record: Record<string, unknown>): void {
-  if (Object.hasOwn(record, 'limitsProfile') && !hasSnapshotLimitMode(record)) {
-    record.params = readSnapshotParams(record); record.paramsEncoding = PARAMS_ENCODING;
-  }
-}
-
 export function readSnapshotParams(value: unknown): WorldParams {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return HISTORICAL_PARAMS;
   const record = value as Record<string, unknown>;
@@ -171,9 +173,9 @@ export function parseSnapshotJSON(body: string): unknown {
 }
 export function decodeSnapshotTileRows(rows: unknown[]): Tile[] {
   return rows.map(row => {
-    if (!Array.isArray(row) || row.length !== FIELDS.length) throw new SnapshotSemanticError('Invalid snapshot tile tuple. Explicit recovery required.');
+    if (!Array.isArray(row) || row.length !== SNAPSHOT_TILE_FIELDS.length) throw new SnapshotSemanticError('Invalid snapshot tile tuple. Explicit recovery required.');
     const tile: Record<string, unknown> = {};
-    for (let i = 0; i < FIELDS.length; i++) if (row[i] !== null || i < 6) tile[FIELDS[i]!] = row[i];
+    for (let i = 0; i < SNAPSHOT_TILE_FIELDS.length; i++) if (row[i] !== null || i < 6) tile[SNAPSHOT_TILE_FIELDS[i]!] = row[i];
     return tile as unknown as Tile;
   });
 }
@@ -186,10 +188,15 @@ export function decodeSnapshotValue(value: unknown): unknown {
   if ('tileEncoding' in record) {
     if (record.tileEncoding !== SNAPSHOT_TILE_ENCODING || !Array.isArray(record.tiles)) throw new SnapshotSemanticError('Invalid snapshot tile encoding. Explicit recovery required.');
     record.tiles = decodeSnapshotTileRows(record.tiles);
-    delete record.tileEncoding;
   }
+  finishDecodedRecord(record);
+  return value;
+}
+/** Último paso común de las lecturas en línea y por partes: quita las marcas de transporte
+ * (codificación de teselas y perfil de límites) conservando el modo que declaraba un perfil v1. */
+export function finishDecodedRecord(record: Record<string, unknown>): void {
+  delete record.tileEncoding;
   retainSnapshotLimitMode(record);
   delete record.limitsProfile;
-  return value;
 }
 export function decodeSnapshot(body: string): unknown { return decodeSnapshotValue(parseSnapshotJSON(body)); }

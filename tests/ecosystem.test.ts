@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { Tile } from '../src/shared/types.js';
 import { generateChunk, generateTile } from '../src/world/terrain.js';
-import { initializeEcosystem, stepEcosystem, harvestAnimal, harvestMaterial, cultivateTile, trampleTile } from '../src/world/ecosystem.js';
+import { initializeEcosystem, stepEcosystem, harvestMaterial, cultivateTile, trampleTile } from '../src/world/ecosystem.js';
 import { createWorld, stepWorld } from '../src/world/index.js';
 import { parseParams } from '../src/world/params.js';
 
@@ -163,19 +163,13 @@ test('a saturated dry cell above its carrying capacity loses vegetation and food
   assert.ok(Math.abs(tile.food - 0.2) < Math.abs(initial.food - 0.2));
 });
 
-test('hunting yields only actual bounded animal biomass and depletion never silently repopulates', () => {
-  const animals = cell(0, 0, { fauna: 2, species: 'deer' });
-  assert.equal(harvestAnimal(animals), 0.25); assert.equal(animals.fauna, 1);
-  assert.equal(harvestAnimal(animals), 0.25); assert.equal(animals.fauna, 0); assert.equal(animals.species, undefined);
-  assert.equal(harvestAnimal(animals), 0); assert.equal(animals.food, 0.2);
+test('an emptied animal tile never silently repopulates', () => {
+  // La caza real va por `harvestAt` (animals.ts) y la prueban animals.test.ts y la simulación; aquí
+  // solo queda la ley del terreno: una tesela sin fauna no la recupera sola.
+  const animals = cell(0, 0, { fauna: 0 });
   assert.equal(initializeEcosystem(42, animals).fauna, 0);
   for (let tick = 10; tick <= 1000; tick += 10) stepEcosystem([animals], tick, 'rain', 'day');
-  assert.equal(animals.fauna, 0);
-  for (const species of ['hare', 'boar', 'fish'] as const) {
-    const specimen = cell(0, 0, { fauna: 1, species });
-    const yieldFood = harvestAnimal(specimen);
-    assert.ok(yieldFood > 0 && yieldFood <= 0.25); assert.equal(specimen.fauna, 0);
-  }
+  assert.equal(animals.fauna, 0); assert.equal(animals.species, undefined);
 });
 
 test('competing migrations preserve biomass, respect six-animal capacity and are permutation independent', () => {

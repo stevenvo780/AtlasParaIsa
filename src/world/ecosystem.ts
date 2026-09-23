@@ -167,14 +167,6 @@ function stepFauna(tiles: Tile[], tick: number): void {
   }
 }
 
-export function harvestAnimal(tile: Tile): number {
-  if (!tile.species || !Number.isInteger(tile.fauna) || tile.fauna! <= 0) return 0;
-  const food = FOOD_PER_ANIMAL[tile.species];
-  tile.fauna = tile.fauna! - 1;
-  if (tile.fauna === 0) delete tile.species;
-  return food;
-}
-
 export function harvestMaterial(tile: Tile, material: 'wood' | 'stone', amount: number): number {
   if (!Number.isFinite(amount) || amount < 0) throw new RangeError('La extracción requiere una cantidad finita no negativa.');
   const harvested = Math.min(tile[material] ?? 0, amount);

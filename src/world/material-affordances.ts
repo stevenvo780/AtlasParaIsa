@@ -118,12 +118,6 @@ export function containerAffordance(batch: PhysicalMaterialBatch, policy: Readon
     structuralMass: batch.mass, solidMass };
 }
 
-/** Payload adds to structural mass; it never changes composition or initialMass. */
-export function carriedMassQuanta(batch: PhysicalMaterialBatch, contents: WaterContents, policy: Readonly<WaterInteractionPolicy> = DEFAULT_WATER_POLICY): number {
-  assertPolicy(policy); assertPhysicalBatch(batch); assertWaterContents(contents, policy.fixedPointDenominator);
-  return safeNumber(BigInt(batch.mass) + BigInt(contents.water), 'carried mass exceeds safe integer');
-}
-
 /** Two distinct reservoirs, already localized by the caller. Positive movement
  * requires both elapsed time and a finite work budget. Apply workSpent once;
  * body energy, ownership, reach and action eligibility remain caller duties.

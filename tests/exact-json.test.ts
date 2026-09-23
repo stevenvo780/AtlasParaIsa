@@ -15,14 +15,14 @@ test('exact JSON retains native syntax and only changes the signed zero token', 
   assert.equal(exactJsonNumber(-0), exactJsonNumber(-0));
 });
 
-test('client lighting imports without JSON.rawJSON and exact writes fail explicitly if unsupported', () => {
-  const lighting = new URL('../src/client/luz.ts', import.meta.url).href;
+test('the world engine imports without JSON.rawJSON and exact writes fail explicitly if unsupported', () => {
+  const world = new URL('../src/world/index.ts', import.meta.url).href;
   const exact = new URL('../src/shared/exact-json.ts', import.meta.url).href;
   const code = `
     Object.defineProperty(JSON, 'rawJSON', { value: undefined, configurable: true });
-    const { tinteDeFase } = await import(${JSON.stringify(lighting)});
+    const { TICKS_PER_DAY, phaseAt } = await import(${JSON.stringify(world)});
     const { stringifyExact } = await import(${JSON.stringify(exact)});
-    if (!Number.isFinite(tinteDeFase('dawn', 0).a)) throw new Error('lighting failed');
+    if (!Number.isFinite(TICKS_PER_DAY) || typeof phaseAt(0) !== 'string') throw new Error('world engine failed');
     if (stringifyExact({ ordinary: 1 }) !== '{"ordinary":1}') throw new Error('ordinary JSON changed');
     let rejected = false;
     try { stringifyExact({ signed: -0 }); } catch (error) { rejected = /JSON.rawJSON support/.test(error.message); }

@@ -5,8 +5,8 @@ import type { Tile } from '../shared/types.js';
  * agua potable (manantial/charca/humedal) de cada tesela con `ruidoCuenca`: fuera de la cuenca
  * (ruido ≥ `agua.cuencas`) la tesela pierde su agua potable de origen, aunque conserva `moisture`
  * (la lluvia sigue). Con `cuencas = 1` (default) el ruido nunca alcanza el umbral: comportamiento
- * bit a bit igual al actual. Este módulo también expone las métricas de SC-004 (regiones sin agua
- * superficial, distancia media a agua potable) para el orquestador de `worldStatistics`.
+ * bit a bit igual al actual. Este módulo también expone la métrica de SC-004 de regiones sin agua
+ * superficial; la distancia media a agua potable de `worldStatistics` es la BFS de `statistics.ts`.
  *
  * Ronda de arreglo (2026-09-19): el gateo por sí solo NO era duradero — `EcosystemKernel.step`
  * (`ecosystem-kernel.ts`) recargaba cualquier manantial/charca/humedal con la lluvia sin mirar la
@@ -78,41 +78,4 @@ export function regionesSinAgua(tiles: readonly Tile[], tamRegion = 16): number 
   let sinAgua = 0;
   for (const r of conTierra) if (!r.agua) sinAgua++;
   return sinAgua / conTierra.length;
-}
-
-/**
- * Distancia Manhattan EN LÍNEA RECTA media (en celdas) desde una muestra determinista de teselas
- * de tierra hasta la tesela de agua potable (`drinkingWater > 0`) más cercana de las mismas
- * `tiles`. La muestra toma como mucho `muestras` teselas de tierra repartidas uniformemente en el
- * orden recibido (sin `Math.random`). Si no hay ninguna tesela con agua potable, devuelve `-1`
- * (mismo centinela que la métrica de conectividad, ver nota). SC-004 parte 3: objetivo > 6.
- *
- * Nombre `distanciaMediaAguaManhattan`, no `distanciaMediaAgua` (T035 ronda de arreglo, hallazgo
- * importante «colisión con `statistics.ts`»): la rama del sprint ya trae `distanciaMediaAgua` en
- * `src/world/statistics.ts` (T013, ya fusionada), cableada en `worldStatistics`/`WorldStatsRecursos`
- * — una métrica DISTINTA: BFS de conectividad real (atraviesa solo celdas cargadas, sin cruzar mar
- * ni montaña; cuenta terreno de agua O `drinkingWater>0` como fuente; centinela `-1`). Esta de aquí
- * es una línea recta sin conectividad (puede atravesar mar/montaña), muestreada, y NO cuenta el mar
- * como fuente. Mismo nombre + semántica distinta habría chocado al integrar `worldStatistics` en
- * Gate 1+2 (dos funciones para «la» distancia media a agua, valores distintos, un solo campo
- * posible). Se adopta aquí el centinela `-1` de la función ya fusionada (no `Infinity`, que se
- * serializa como `null` en JSON) para que, si el orquestador decide exponer AMBAS métricas o
- * sustituir una por otra, no haya que reconciliar dos convenciones de "sin agua" distintas.
- */
-export function distanciaMediaAguaManhattan(tiles: readonly Tile[], muestras = 200): number {
-  const tierra = tiles.filter(tile => tile.terrain !== 'water');
-  const agua = tiles.filter(tile => (tile.drinkingWater ?? 0) > 0);
-  if (tierra.length === 0 || agua.length === 0) return -1;
-  const paso = Math.max(1, Math.floor(tierra.length / muestras));
-  let total = 0, contadas = 0;
-  for (let i = 0; i < tierra.length && contadas < muestras; i += paso) {
-    const origen = tierra[i]!;
-    let mejor = Infinity;
-    for (const destino of agua) {
-      const distancia = Math.abs(destino.x - origen.x) + Math.abs(destino.y - origen.y);
-      if (distancia < mejor) mejor = distancia;
-    }
-    total += mejor; contadas++;
-  }
-  return contadas === 0 ? -1 : total / contadas;
 }

@@ -11,7 +11,9 @@ export const PROTECTED_HEALTH_FLOOR = 0.05;
 export const PROTECTED_VITALITY_FLOOR = 0.08;
 /** Desgaste de vejez de la ley vigente: intacto (×1,00 del anterior), para que la vejez siga siendo legible. */
 export const SENESCENCE_WEAR_PER_DAY = 0.8;
-const SENESCENCE_GENE_RELIEF = 0.4; // TODO params: cuerpo.alivioGenSenescencia
+/** Cuánto alivia la resiliencia heredada el riesgo de senescencia (0,4 con resiliencia 1). Es una
+ * constante de la ley, no un parámetro: cambiarla cambia la trayectoria de todos los mundos. */
+const SENESCENCE_GENE_RELIEF = 0.4;
 const CAUSES: readonly DemographicDeathCause[] = ['starvation', 'dehydration', 'exposure', 'senescence'];
 const clamp = (value: number) => Math.max(0, Math.min(1, value));
 const unit = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1;

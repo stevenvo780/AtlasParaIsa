@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { applyPhysicalOperation, MASS_UNIT, rawMaterial } from '../src/world/technology.js';
 import type { MaterialBatch, MaterialShape } from '../src/shared/technology.js';
-import { assertWaterContents, capacityOverflowReturns, carriedMassQuanta, containerAffordance, DEFAULT_WATER_POLICY,
+import { assertWaterContents, capacityOverflowReturns, containerAffordance, DEFAULT_WATER_POLICY,
   flowQuantized, leakIntegerRemainder, MAX_WATER_STEP_TICKS, WATER_QUANTA_PER_UNIT,
   type WaterContents, type WaterFlowState, type WaterInteractionPolicy } from '../src/world/material-affordances.js';
 
@@ -76,7 +76,6 @@ test('structural water does not become free contents and fluid alone cannot acqu
   assert.ok(containerAffordance(wet).capacityQuanta < containerAffordance(original).capacityQuanta);
   const water = rawMaterial('water'); water.properties = { ...original.properties };
   assert.equal(containerAffordance(water).capacityQuanta, 0);
-  assert.equal(carriedMassQuanta(wet, { water: 350, leakRemainder: 0 }), wet.mass + 350);
   assert.equal(wet.composition.water, 100);
   assert.equal(WATER_QUANTA_PER_UNIT, MASS_UNIT * 50);
   assert.notEqual(WATER_QUANTA_PER_UNIT, MASS_UNIT);
@@ -171,7 +170,6 @@ test('all calls are deterministic and work with deeply frozen inputs', () => {
   const batch = formed(); Object.freeze(batch.properties); Object.freeze(batch.composition); Object.freeze(batch);
   const contents = Object.freeze({ water: 400, leakRemainder: 123 }), state = Object.freeze(flow());
   assert.deepEqual(containerAffordance(batch), containerAffordance(batch));
-  assert.equal(carriedMassQuanta(batch, contents), batch.mass + 400);
   assert.deepEqual(flowQuantized(state), flowQuantized(state));
   assert.deepEqual(leakIntegerRemainder(contents, 4), leakIntegerRemainder(contents, 4));
   assert.deepEqual(capacityOverflowReturns(contents, 200, 0, 100), capacityOverflowReturns(contents, 200, 0, 100));
@@ -218,7 +216,6 @@ test('large safe integers remain exact despite unsafe-number intermediate produc
   exact.properties = { ...exact.properties, containment: 1, cohesion: 1, porosity: 0 };
   assert.equal(containerAffordance(exact, policy({ capacityPerSolidMass: 1 })).capacityQuanta, max);
   assert.throws(() => containerAffordance(exact), RangeError);
-  assert.throws(() => carriedMassQuanta(exact, { water: 1, leakRemainder: 0 }), RangeError);
   const moved = flowQuantized(flow({ sourceWater: max, destinationWater: 0, destinationCapacity: max, requestedQuanta: max,
     carryFreeQuanta: max, elapsedTicks: MAX_WATER_STEP_TICKS, workAvailable: max }), policy({ flowQuantaPerTick: max, quantaPerWork: max }));
   assert.equal(moved.movedQuanta, max); assert.equal(moved.workSpent, 1); assert.equal(moved.destinationWater, max);

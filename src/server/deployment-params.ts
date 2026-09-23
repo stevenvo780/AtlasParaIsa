@@ -24,10 +24,9 @@ export const PRODUCTION_PARAMS = 'persistencia.cadaTicks=100,persistencia.ventan
  * Los overrides del despliegue aplicados ENCIMA de `base`, clave a clave. Para un mundo
  * nuevo `base` son los defaults (`DEFAULT_PARAMS`, reglas 10); para un mundo cargado son los
  * params de su instantánea (completados con `HISTORICAL_PARAMS`),
- * que solo ceden en las claves que el operador nombra de verdad. Antes de R2 esto era
- * `setParams(world, parseParams(cadena))`, que reemplazaba el objeto entero: un mundo
- * generado con `agua.cuencas=1` se recargaba, se medía y se volvía a guardar con 0,4 sin
- * decir nada, simulando un régimen distinto del que lo generó.
+ * que solo ceden en las claves que el operador nombra de verdad. Reemplazar el objeto entero
+ * por los overrides haría que un mundo generado con `agua.cuencas=1` se recargara, se midiera y
+ * se volviera a guardar con 0,4 sin decir nada, simulando un régimen distinto del que lo generó.
  */
 export function deploymentParams(base: WorldParams = DEFAULT_PARAMS, carta = process.env.CARTA_PARAMS): WorldParams {
   return parseParams(`${PRODUCTION_PARAMS}${carta ? `,${carta}` : ''}`, base);

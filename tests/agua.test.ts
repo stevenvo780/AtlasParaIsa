@@ -5,7 +5,8 @@ import { createWorld, stepWorld, TICKS_PER_DAY } from '../src/world/index.js';
 import { HISTORICAL_PARAMS, parseParams } from '../src/world/params.js';
 import { generateChunk } from '../src/world/terrain.js';
 import { stepEcosystem } from '../src/world/ecosystem.js';
-import { ruidoCuenca, enCuenca, regionesSinAgua, distanciaMediaAguaManhattan } from '../src/world/agua.js';
+import { ruidoCuenca, enCuenca, regionesSinAgua } from '../src/world/agua.js';
+import { distanciaMediaAguaManhattan } from './lib/agua.js';
 import type { Tile } from '../src/shared/types.js';
 
 function run(world: ReturnType<typeof createWorld>, ticks: number): void {

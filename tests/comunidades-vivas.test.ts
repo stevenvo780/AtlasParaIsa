@@ -57,7 +57,10 @@ function digestoSinLaClave(world: World): string {
   assert.equal(antes.social.memoriaDisputa, 0);
   delete antes.social.memoriaDisputa;
   setParams(world, antes as unknown as WorldParams);
-  try { return digestoCanonico(world); } finally { setParams(world, vigentes); }
+  const version = world.version;
+  // La referencia V10 mide este mismo estado; sólo normalizamos su etiqueta al hashear.
+  world.version = 10;
+  try { return digestoCanonico(world); } finally { world.version = version; setParams(world, vigentes); }
 }
 
 // Los hashes originales se midieron en `sprint/noche-hcom-20260922` @f666226 ANTES de tocar `src/world`,

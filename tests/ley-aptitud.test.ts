@@ -44,7 +44,10 @@ function digestoSinAptitud(world: World): string {
   assert.equal(comoPadre.social.memoriaDisputa, 0);
   delete comoPadre.social.memoriaDisputa;
   setParams(world, comoPadre as unknown as WorldParams);
-  try { return digestoCanonico(world); } finally { setParams(world, vigentes); }
+  const version = world.version;
+  // La referencia V10 mide este mismo estado; sólo normalizamos su etiqueta al hashear.
+  world.version = 10;
+  try { return digestoCanonico(world); } finally { world.version = version; setParams(world, vigentes); }
 }
 
 // Los hashes originales se midieron en el padre `f666226` (sprint/noche-integra), ANTES de la consolidación

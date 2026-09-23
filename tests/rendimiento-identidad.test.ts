@@ -23,6 +23,8 @@
  * no existía en e1adaaf. Con 0 la ley no actúa, pero declarar la clave mueve `digestoCanonico` (hashea
  * `{world, params}`, T102); el control la quita de la forma de params al hashear (`CLAVES_POSTERIORES`),
  * así que los hashes de e1adaaf se conservan y siguen demostrando que el MUNDO no se movió ni un bit.
+ * Reglas 11: el control sigue usando la base histórica y normaliza sólo `world.version` a 10 al
+ * comparar con esos hashes V10; el estado simulado y los params permanecen intactos.
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -165,15 +167,15 @@ const REFERENCIA: readonly { seed: number; params?: string; digestos: Record<'12
 
 test('las leyes candidatas del laboratorio son las del control', () => {
   assert.equal(LEYES_CANDIDATAS, 'persistencia.cadaTicks=300,poblacion.cortejo=2,poblacion.radioCortejo=128,poblacion.exigeComunidad=false,poblacion.comprobacionContinua=true,conducta.habituacion=0.35');
-  // Reglas 10: son los defaults nuevos (salvo la cadencia del laboratorio), y dan el mismo mundo sobre cualquier base.
-  assert.deepEqual(parseParams(LEYES_CANDIDATAS, HISTORICAL_PARAMS), parseParams(LEYES_CANDIDATAS));
+  // El control V10 midió las candidatas sobre la base histórica; reglas 11 sólo añade cuatro defaults sociales.
+  assert.deepEqual(parseParams(LEYES_CANDIDATAS, HISTORICAL_PARAMS), parseParams('persistencia.cadaTicks=300,social.disputaNecesidad=0.65,social.disputaEscasez=1,social.disputaRadio=2,social.memoriaDisputa=0', DEFAULT_PARAMS));
   assert.deepEqual(parseParams(LEYES_CANDIDATAS), parseParams('persistencia.cadaTicks=300', DEFAULT_PARAMS));
 });
 
 for (const { seed, params, digestos } of REFERENCIA) {
   test(`semilla ${seed} (${params ? 'leyes candidatas' : 'parámetros históricos'}): digestoCanonico idéntico al árbol sin optimizar tras 1200 y 2400 pasos`, { timeout: 3_600_000 }, () => {
     clavesPosterioresApagadas(parseParams(params, HISTORICAL_PARAMS));
-    assert.deepEqual(digestosControl(seed, params, [1200, 2400], CLAVES_POSTERIORES), digestos);
+    assert.deepEqual(digestosControl(seed, params, [1200, 2400], CLAVES_POSTERIORES, 10), digestos);
   });
 }
 
@@ -208,11 +210,11 @@ test('población alta (230 habitantes, semilla 3 día 12,25): digestoCanonico id
     try {
       const world = store.load()!.world;
       clavesPosterioresApagadas(paramsOf(world));
-      assert.equal(digestoSin(world, CLAVES_POSTERIORES), ALTO.inicial);
+      assert.equal(digestoSin(world, CLAVES_POSTERIORES, 10), ALTO.inicial);
       for (let n = 0; n < ALTO.pasos; n++) {
         stepWorld(world);
         if (world.tick % paramsOf(world).persistencia.cadaTicks === 0) store.save(world);
       }
-      assert.equal(digestoSin(world, CLAVES_POSTERIORES), ALTO.final);
+      assert.equal(digestoSin(world, CLAVES_POSTERIORES, 10), ALTO.final);
     } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
   });

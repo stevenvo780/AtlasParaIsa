@@ -62,18 +62,25 @@ function disputa(trust: number): { world: World; event: ChronicleEvent; person: 
 test('M5: «cedió» coincide con quien se retira en un resourceDispute real (desacuerdo y turno)', () => {
   const conflicto = disputa(0.1);
   assert.equal(conflicto.event.kind, 'conflict');
+  // Quién cede depende de la ley vigente (reglas 11: cede quien menos lo necesita), así que la etiqueta se
+  // contrasta con quien de verdad se retira en el mundo, no con el orden de los argumentos.
   const cedio = quienCedio(conflicto.event)!;
-  assert.equal(cedio.cede, conflicto.person.id);
-  assert.equal(conflicto.person.action, 'retreat', 'quien cede se retira');
-  assert.match(conflicto.person.reason, /cede el intento/);
-  assert.equal(cedio.sigue, conflicto.other.id);
+  assert.equal(cedio.cede, [conflicto.person.id, conflicto.other.id].sort().at(-1), 'con igual necesidad, reglas 11 hace ceder al id mayor');
+  const [cede, sigue] = cedio.cede === conflicto.person.id ? [conflicto.person, conflicto.other] : [conflicto.other, conflicto.person];
+  assert.equal(cedio.cede, cede.id);
+  assert.equal(cede.action, 'retreat', 'quien cede se retira');
+  assert.match(cede.reason, /cede el intento|Cedió una fuente escasa/);
+  assert.equal(cedio.sigue, sigue.id);
+  assert.notEqual(sigue.action, 'retreat');
   assert.equal(clasificar(conflicto.event).etiqueta, 'Desacuerdo');
   const turno = disputa(0.9);
   assert.equal(turno.event.kind, 'cooperation');
   assert.equal(clasificar(turno.event).etiqueta, 'Se turnaron');
   const espera = quienCedio(turno.event)!;
-  assert.equal(espera.cede, turno.person.id);
-  assert.match(turno.person.reason, /deja acceder primero/);
+  const quienEspera = espera.cede === turno.person.id ? turno.person : turno.other;
+  assert.equal(espera.cede, quienEspera.id);
+  // En reglas 11 el motivo del turno nombra la necesidad del vecino que accede primero.
+  assert.match(quienEspera.reason, /su vecino lo necesita más y accede primero/);
 });
 
 class Memoria { values = new Map<string, string>(); getItem(k: string) { return this.values.get(k) ?? null; } setItem(k: string, v: string) { this.values.set(k, v); } }

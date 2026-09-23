@@ -6,6 +6,7 @@ import { materializeAnimals, syncFauna } from '../src/world/animals.js';
 import { expressGenome, inheritGenome } from '../src/world/genetics.js';
 import { recordChronicleEvent } from '../src/world/chronicle-journal.js';
 import { recordSample, worldStatistics } from '../src/world/statistics.js';
+import { DEFAULT_PARAMS, paramsOf, parseParams, setParams } from '../src/world/params.js';
 import type { ChronicleEvent } from '../src/shared/types.js';
 import { aula } from './lib/escenas.js';
 
@@ -120,6 +121,9 @@ test('membership changes only with incompatible practice, low internal trust and
 test('resource conflicts require the same scarce stock and urgent bodies; trust permits a costly turn instead', () => {
   const {w,a,b}=scene(); a.action=b.action='drink';a.thirst=b.thirst=0.95;a.culture.openness=b.culture.openness=0.1;
   group(w,[a],'one');group(w,[b],'two');const source=tileAt(w,a)!;source.drinkingWater=0.05;
+  // El control del turno inmóvil se midió con reglas 10; fijamos sus cuatro parámetros sociales.
+  setParams(w, parseParams('social.disputaNecesidad=0.65,social.disputaEscasez=1,social.disputaRadio=2,social.memoriaDisputa=0', DEFAULT_PARAMS));
+  const vigente=cloneWorld(w);setParams(vigente, DEFAULT_PARAMS);
   const abundant=cloneWorld(w);tileAt(abundant,a)!.drinkingWater=0.8;assert.equal(resourceDispute(abundant,abundant.people[2]!,emit(abundant)),false);
   const differentResource=cloneWorld(w);differentResource.people[3]!.action='hunt';assert.equal(resourceDispute(differentResource,differentResource.people[2]!,emit(differentResource)),false);
   const satisfied=cloneWorld(w);satisfied.people[3]!.thirst=0.1;assert.equal(resourceDispute(satisfied,satisfied.people[2]!,emit(satisfied)),false);
@@ -127,6 +131,12 @@ test('resource conflicts require the same scarce stock and urgent bodies; trust 
   assert.equal(trust.totals.conflicts,0);assert.equal(trust.totals.cooperation,1);assert.equal(tileAt(trust,a)!.drinkingWater,0.05);
   stepWorld(trust);assert.equal(trust.people[2]!.action,'retreat','urgent thirst must respect the agreed turn');
   assert.equal(resourceDispute(w,a,emit(w)),true);assert.equal(w.totals.conflicts,1);assert.equal(source.drinkingWater,0.05);assert.ok(a.socialLoad>0);assert.equal(a.action,'retreat');
+  // Con reglas 11 y necesidad empatada cede el id mayor, vuelve a decidir y recuerda la fuente.
+  assert.equal(paramsOf(vigente).social.memoriaDisputa,8);
+  assert.equal(resourceDispute(vigente,vigente.people[2]!,emit(vigente)),true);
+  const cede=vigente.people[2]!.id>vigente.people[3]!.id?vigente.people[2]!:vigente.people[3]!;
+  assert.equal(cede.action,'retreat');assert.equal(cede.decisionAt,vigente.tick+1);
+  assert.deepEqual(cede.conflictMemory,{x:source.x,y:source.y,tick:vigente.tick});
 });
 
 test('diploid inheritance is deterministic, recombines both parents and mutation changes bounded alleles', () => {

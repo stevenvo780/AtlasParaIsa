@@ -10,6 +10,7 @@ import { recordChronicleEvent } from '../src/world/chronicle-journal.js';
 import { digestoCanonico } from '../src/world/digesto.js';
 import { DEFAULT_PARAMS, HISTORICAL_PARAMS, PARAM_RANGES, paramsOf, parseParams, setParams, type WorldParams } from '../src/world/params.js';
 import type { ChronicleEvent } from '../src/shared/types.js';
+import { borrarClavesPosteriores } from './lib/claves-posteriores.js';
 
 /**
  * Hipótesis COM (noche 2026-09-22), ley candidata `social.radioConvivencia`: la pertenencia a una
@@ -50,12 +51,15 @@ function replica(t: { after(callback: () => void): void }, pasos: number, params
  * el estado físico sea idéntico (T102). Quitarla reproduce el digesto de antes byte a byte. */
 function digestoSinLaClave(world: World): string {
   const vigentes = paramsOf(world);
-  const antes = structuredClone(vigentes) as unknown as { social: Record<string, unknown> };
-  delete antes.social.radioConvivencia;
+  const antes = structuredClone(vigentes) as unknown as Record<string, Record<string, unknown>>;
+  delete antes.social!.radioConvivencia;
   // Fusión CONFL (`sprint/noche-lab60c-20260922`): `social.memoriaDisputa` no existía en f2757fa, donde se
   // midieron los hashes; con su valor 0 no actúa, así que también se quita de la forma.
-  assert.equal(antes.social.memoriaDisputa, 0);
-  delete antes.social.memoriaDisputa;
+  assert.equal(antes.social!.memoriaDisputa, 0);
+  delete antes.social!.memoriaDisputa;
+  // Preregistro `docs/preregistros/2026-09-23-vocacion-banda.md` (VOC/PO1/SL1/B1): tampoco existían
+  // en f2757fa; con sus defaults no actúan.
+  borrarClavesPosteriores(vigentes as unknown as Record<string, Record<string, unknown>>, antes);
   setParams(world, antes as unknown as WorldParams);
   try { return digestoCanonico(world); } finally { setParams(world, vigentes); }
 }

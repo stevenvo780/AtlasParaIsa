@@ -36,6 +36,7 @@ import { DEFAULT_PARAMS, HISTORICAL_PARAMS, paramsOf, parseParams, type WorldPar
 import { firstTileAt, lastTileAt, tileLookup } from '../src/world/tile-index.js';
 import { primero, primeroConFiltroCaro, primerosDos } from '../src/world/orden.js';
 import { algunoCerca, filtrarCerca, primeroCerca } from '../src/world/indice-puntos.js';
+import { NOMBRES_CLAVES_POSTERIORES as CLAVES_POSTERIORES_VOC } from './lib/claves-posteriores.js';
 
 /** Generador determinista pequeño (xorshift32) para las pruebas de equivalencia. */
 function aleatorio(seed: number): () => number {
@@ -141,11 +142,17 @@ test('con el recelo de CONFL (`social.memoriaDisputa`), primero y primeroConFilt
   assert.ok(conRecelo > 1000, 'la prueba ejerce el recelo');
 });
 
-/** Claves declaradas después de e1adaaf que, con su valor por defecto, no actúan (ver cabecera). */
-const CLAVES_POSTERIORES = ['social.memoriaDisputa'] as const;
-/** Quitar una clave del hash sólo es legítimo si con el valor que tiene no actúa (0). */
+/** Claves declaradas después de e1adaaf que, con su valor por defecto, no actúan (ver cabecera).
+ * Las cinco del preregistro `docs/preregistros/2026-09-23-vocacion-banda.md` (VOC/PO1/SL1/B1,
+ * `tests/lib/claves-posteriores.ts`) se suman a `social.memoriaDisputa` (CONFL); todas mueven
+ * `digestoCanonico` (T102) sin mover el mundo mientras conserven su default. */
+const CLAVES_POSTERIORES = ['social.memoriaDisputa', ...CLAVES_POSTERIORES_VOC] as const;
+/** Quitar una clave del hash sólo es legítimo si con el valor que tiene no actúa. La mayoría deben
+ * valer 0; `social.bandaMax` es la excepción (default de schema 6, `docs/REGLAS.md` · B1): su
+ * propio valor no importa, sólo que el peso maestro `social.banda` esté apagado. */
 function clavesPosterioresApagadas(params: WorldParams): void {
   for (const clave of CLAVES_POSTERIORES) {
+    if (clave === 'social.bandaMax') { assert.equal(params.social.banda, 0, 'social.banda = 0: bandaMax no actúa'); continue; }
     const [seccion, hoja] = clave.split('.') as [string, string];
     assert.equal((params as unknown as Record<string, Record<string, unknown>>)[seccion]![hoja], 0, `${clave} = 0: no actúa`);
   }

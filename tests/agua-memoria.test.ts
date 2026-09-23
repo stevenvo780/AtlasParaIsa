@@ -10,6 +10,7 @@ import { digestoCanonico } from '../src/world/digesto.js';
 import { waterAvailable } from '../src/world/inventions.js';
 import { tileAt } from '../src/world/spatial.js';
 import { DEFAULT_PARAMS, HISTORICAL_PARAMS, PARAM_RANGES, paramsOf, parseParams, setParams, type WorldParams } from '../src/world/params.js';
+import { borrarClavesPosteriores } from './lib/claves-posteriores.js';
 
 /**
  * Ley candidata SED (noche 2026-09-22): `agua.memoria`. Diagnóstico con la base del laboratorio de
@@ -42,10 +43,13 @@ function replica(t: { after(callback: () => void): void }, seed: number, pasos: 
  * midieron los hashes, y con su valor 0 no actúa. */
 function digestoSinMemoria(world: World, conMemoria = false): string {
   const vigentes = paramsOf(world);
-  const antes = structuredClone(vigentes) as unknown as { agua: Record<string, unknown>; social: Record<string, unknown> };
-  assert.equal(antes.social.memoriaDisputa, 0);
-  if (!conMemoria) delete antes.agua.memoria;
-  delete antes.social.memoriaDisputa;
+  const antes = structuredClone(vigentes) as unknown as Record<string, Record<string, unknown>>;
+  assert.equal(antes.social!.memoriaDisputa, 0);
+  if (!conMemoria) delete antes.agua!.memoria;
+  delete antes.social!.memoriaDisputa;
+  // Preregistro `docs/preregistros/2026-09-23-vocacion-banda.md` (VOC/PO1/SL1/B1): tampoco existían
+  // en f2757fa; con sus defaults no actúan.
+  borrarClavesPosteriores(vigentes as unknown as Record<string, Record<string, unknown>>, antes);
   setParams(world, antes as unknown as WorldParams);
   try { return digestoCanonico(world); } finally { setParams(world, vigentes); }
 }

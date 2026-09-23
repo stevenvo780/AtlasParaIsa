@@ -8,6 +8,7 @@ import { createWorld, stepWorld, TICKS_PER_DAY, type Person, type World } from '
 import { digestoCanonico } from '../src/world/digesto.js';
 import { tileAt } from '../src/world/spatial.js';
 import { DEFAULT_PARAMS, HISTORICAL_PARAMS, PARAM_RANGES, paramsOf, parseParams, setParams, type WorldParams } from '../src/world/params.js';
+import { borrarClavesPosteriores } from './lib/claves-posteriores.js';
 
 /**
  * Hipótesis CONFL (noche 2026-09-22): conflicto legible no letal, `social.memoriaDisputa`.
@@ -41,8 +42,11 @@ function replica(t: { after(callback: () => void): void }, seed: number, pasos: 
  * hashea `{world, params}`, así que declarar la clave mueve el hash aunque el estado no se mueva (T102). */
 function digestoSinLaClave(world: World): string {
   const vigentes = paramsOf(world);
-  const antes = structuredClone(vigentes) as unknown as { social: Record<string, unknown> };
-  delete antes.social.memoriaDisputa;
+  const antes = structuredClone(vigentes) as unknown as Record<string, Record<string, unknown>>;
+  delete antes.social!.memoriaDisputa;
+  // Preregistro `docs/preregistros/2026-09-23-vocacion-banda.md` (VOC/PO1/SL1/B1): tampoco existían
+  // en e1adaaf; con sus defaults no actúan.
+  borrarClavesPosteriores(vigentes as unknown as Record<string, Record<string, unknown>>, antes);
   setParams(world, antes as unknown as WorldParams);
   try { return digestoCanonico(world); } finally { setParams(world, vigentes); }
 }

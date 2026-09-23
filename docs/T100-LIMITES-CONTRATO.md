@@ -189,8 +189,9 @@ Resultado (2026-09-22, heap configurado 6192 MiB, `CARTA_TEST_ESCALA=1`): escrit
 lectura 153 368 ms, **RSS pico del escritor 2771 MiB (1386 B/tesela)**, RSS pico del proceso con
 los dos mundos 3779 MiB (1888 B/tesela), 520 249 344 bytes en SQLite (248 B/tesela), digesto
 idéntico al reabrir. Se adopta 2000 B —el pico de DOS mundos residentes— porque es la forma real del servidor
-de hoy: `motor.clonPorPaso=true` clona el mundo en cada paso. Cuando T103/T104 quiten el clon,
-esta constante se vuelve a medir.
+de hoy: `motor.clonPorPaso=true` clona el mundo en cada paso (desde PERF3, 2026-09-23, solo en los pasos
+con gestos; el pico de dos mundos sigue dándose en ellos). Cuando el clon desaparezca del todo, esta
+constante se vuelve a medir.
 
 **Números de esta torre** (no son una constante del proyecto): `os.totalmem()` = 134 633 676 800 B,
 `heap_size_limit` = 4 345 298 944 B, sin tope de cgroup ⇒ **5092 chunks / 1 303 552 teselas /

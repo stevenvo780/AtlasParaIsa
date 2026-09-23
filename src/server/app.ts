@@ -1,7 +1,8 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { readFileSync, statSync } from 'node:fs';
 import { resolve, extname, sep } from 'node:path';
-import { isIP } from 'node:net';
+import { isIP, type Socket } from 'node:net';
+import type { Duplex } from 'node:stream';
 import { gzip } from 'node:zlib';
 import { promisify } from 'node:util';
 import { WebSocketServer, WebSocket, type RawData } from 'ws';
@@ -81,6 +82,17 @@ export const TROZO_WS_COMPRIMIDO = 256 * 1024;
 /** Sin nada que mandar durante este tiempo (y sin `state` en vuelo), el servidor manda un latido.
  * Holgado frente a los 8 s de silencio que tolera `src/client/connection.ts`. */
 export const LATIDO_WS_MS = 3000;
+/** Edad máxima, en pasos, de la vista de reserva cuando nadie mira (ver `renovarReserva` en `createApp`):
+ * 10 s a ritmo nominal, por una proyección con la cámara por defecto cada tantos pasos. */
+export const VISTA_RESERVA_PASOS = 100;
+/** Con clientes WS, citas de 1 ms que el planificador cede siempre tras un paso que se pasó del intervalo, haya
+ * o no E/S a la vista (ver `tic` en `createApp`). Lo que manda el navegador (acuses, cámara, biografías, gestos)
+ * llega comprimido, y `ws` solo lo entrega tras inflarlo en el threadpool, en varias idas y vueltas que nada
+ * público deja ver. La primera cita salta justo detrás de la vuelta del bucle que recogió lo llegado durante el
+ * paso, que puede ser larga (proyectar para `/api/world`); la segunda deja al menos 1 ms de bucle libre para
+ * que esas idas y vueltas vuelvan. Sin ellas, con pasos alargados 250 ms, un acuse esperaba ~3 pasos (831 ms
+ * p50) y el pong, detrás de él, 812 ms p95; con ellas, 44 y 96 ms (verificación PERF3, 2026-09-23). */
+export const VUELTAS_CON_CLIENTES_WS = 2;
 /** Parte `text` en trozos de a lo sumo `size` unidades sin separar nunca un par sustituto
  * (un trozo con medio carácter no sería UTF-8 válido y el navegador cerraría la conexión). */
 export function trocear(text: string, size = TROZO_WS): string[] {
@@ -221,6 +233,15 @@ export function createApp(options: AppOptions) {
   const instanceId = existingInstanceId ?? ensureWorldInstance(store.db);
   let stopped = false;
   let failed = false;
+  /** PERF3: `failed` con `world` a medio paso (un paso sin reserva, o un punto que no se pudo
+   * restaurar, que falló). Terminal como `failed`; además, `world` ya no se proyecta ni se consulta. */
+  let aMedioPaso = false;
+  /** La última vista proyectada (a cualquier cliente, por `/api/world` o de reserva; ver `renovarReserva`).
+   * Con el mundo a medio paso es lo único honesto que se puede enseñar: un estado que existió, marcado en
+   * pausa y con su paso. Recargar el último estado durable del Store no lo es menos, pero sobre la copia
+   * pública (3,3 GB) `load()` tardó 140–330 s con el hilo bloqueado (2026-09-23), y el fallo que pausó puede
+   * ser del disco. Solo es `null` si ni la proyección del arranque pudo leer su región. */
+  let ultimaVista: WorldView | null = null;
   const pending = new Map<string, Pending>();
   // T024 (P1): `subscribeMs` es la cadencia mínima que un cliente pidió (móvil observador) —
   // 0 = sin pedido, se manda con la cadencia normal. `lastBroadcastAt` la hace cumplir en `broadcast`.
@@ -278,11 +299,37 @@ export function createApp(options: AppOptions) {
     stats.techo = gobernador.estado.techo; stats.techoObservado = gobernador.techoObservado;
     stats.activo = draft.reproductionEnabled;
   }
-  const view = (viewport?: Viewport) => {
+  const proyectar = (viewport?: Viewport) => {
     const start = monotonicNow(), projected = projectWorld(world, viewport, context);
     runtime.projectionMs = monotonicNow() - start;
     return { ...projected, instanceId, regionesVivas: clavesVivasEn(world, { x: projected.originX ?? 0, y: projected.originY ?? 0, width: projected.width, height: projected.height }), performance: { ...runtime }, ...(failed ? { paused: true, pauseReason: 'No se pudo guardar. El mundo está en pausa para proteger lo ya vivido.' } : {}) };
   };
+  const view = (viewport?: Viewport): WorldView => {
+    if (!aMedioPaso) return ultimaVista = proyectar(viewport);
+    // Ni la cámara pedida ni un mundo a medio paso: la última vista que existió, sea cual sea su cámara.
+    if (!ultimaVista) throw new HttpError(503, 'El mundo está en pausa: un paso falló a medias y no hay un estado anterior que mostrar.');
+    const pauseReason = 'El mundo está en pausa: un paso falló a medias. '
+      + `Se muestra el último estado completo que se conserva (paso ${ultimaVista.tick}).`;
+    return { ...ultimaVista, paused: true, pauseReason };
+  };
+  /** Vista de reserva, con la cámara por defecto: al arrancar y cada `VISTA_RESERVA_PASOS` pasos que nadie
+   * mira. El servicio pasa horas sin visores, y sin ella un paso sin reserva que fallara entonces dejaba
+   * `/api/world` en 503 para siempre: el cliente lo toma por «sin conexión» y reintenta sin fin, cuando la
+   * base servía el mundo en pausa (verificación PERF3, 2026-09-23). Una región ilegible no puede impedir el
+   * arranque ni pausar un paso ya confirmado: si esta proyección falla, se conserva la vista anterior y se
+   * reintenta a los `VISTA_RESERVA_PASOS` pasos, no en cada paso. */
+  let intentoReserva = world.tick;
+  function renovarReserva() {
+    intentoReserva = world.tick;
+    try { ultimaVista = proyectar(); } catch { /* se conserva la anterior */ }
+  }
+  renovarReserva();
+  const reservaVieja = () => world.tick - Math.max(ultimaVista?.tick ?? 0, intentoReserva) >= VISTA_RESERVA_PASOS;
+  /** Consultas de solo lectura sobre `world` (biografías, recetas): nunca sobre un mundo a medio paso. */
+  function mundoConsultable(): World {
+    if (aMedioPaso) throw new HttpError(503, 'El mundo está en pausa: un paso falló a medias y no se puede consultar.');
+    return world;
+  }
   function authorized(req: IncomingMessage) {
     const hash = sessionHash(req);
     if (!hash || !store.sessionValid(hash)) throw new HttpError(401, 'Entra con la contraseña de la carta.');
@@ -302,6 +349,20 @@ export function createApp(options: AppOptions) {
     let total = 0;
     for (const [a, b] of ocupado) total += Math.max(0, Math.min(b, hasta) - Math.max(a, desde));
     return total;
+  }
+  /** Solicitudes HTTP con la respuesta sin terminar (incluida la lectura de su cuerpo). */
+  let solicitudesEnCurso = 0;
+  /** Conexiones aceptadas que aún no trajeron su primera solicitud (o su `upgrade`): libuv acepta en una vuelta
+   * del bucle y lee en la siguiente, así que entre las dos todavía no hay solicitud que contar. Una que nunca
+   * habla la cierra `headersTimeout`; mientras tanto el planificador cede, como mucho `tickMs` por paso. */
+  const conexionesNuevas = new Set<Duplex>();
+  /** Queda E/S que necesita al hilo principal: una conexión o una solicitud HTTP sin responder del todo, o un
+   * socket WS con bytes sin entregar al kernel (`bufferedAmount` cuenta lo que `ws` aún está comprimiendo). Lo
+   * que `ws` está inflando no se ve: lo cubre `VUELTAS_CON_CLIENTES_WS`. */
+  function ioEnCurso(): boolean {
+    if (solicitudesEnCurso > 0 || conexionesNuevas.size > 0) return true;
+    for (const socket of clients.keys()) if (socket.bufferedAmount > 0) return true;
+    return false;
   }
   function emitir(socket: WebSocket, text: string, compress: boolean) {
     socket.send(text, { compress: compress || compresion === 'siempre' });
@@ -391,9 +452,12 @@ export function createApp(options: AppOptions) {
       client.lastView = projected;
       client.lastBroadcastAt = Date.now();
       send(socket, { type: 'state', world: projected });
-    } catch {
+    } catch (error) {
       // A camera read is not a simulation transaction. Never retry the failing archive in a fallback.
-      send(socket, { type: 'error', message: 'No se pudo leer esa región guardada. Elige otra zona; su estado se conserva para recuperación.' });
+      // `HttpError`: un mundo a medio paso sin vista anterior (ver `view`), no una región ilegible.
+      const message = error instanceof HttpError ? error.message
+        : 'No se pudo leer esa región guardada. Elige otra zona; su estado se conserva para recuperación.';
+      send(socket, { type: 'error', message });
     } finally { if (!enPaso) anotarOcupado(desde); }
   }
   function requestGesture(gesture: Gesture, hash: string): Promise<GestureResult> {
@@ -433,6 +497,9 @@ export function createApp(options: AppOptions) {
     const valid: Pending[] = [];
     // T104: sin clon, el paso corre sobre el mundo vigente y la atomicidad la sostiene esto.
     let punto: PuntoDeRestauracion | null = null;
+    // PERF3: el paso corre sobre el mundo vigente sin nada con que deshacerlo. Mientras siga en
+    // `true`, un fallo deja `world` a medio paso (ver el `catch`).
+    let sinReserva = false;
     try {
       for (const [socket, client] of clients) if (!store.sessionValid(client.hash)) socket.close(4001, 'La sesión terminó.');
       for (const item of batch) {
@@ -440,13 +507,19 @@ export function createApp(options: AppOptions) {
         else { item.reject(new HttpError(401, 'La sesión terminó antes de aplicar el gesto.')); pending.delete(item.gesture.id); }
       }
       const cloneStarted = monotonicNow();
-      // T104. `motor.clonPorPaso=true` (default) conserva el camino de hoy: se simula sobre un
-      // clon y el mundo vigente no se toca hasta que el guardado confirma. En `false` se toma un
-      // punto de restauración y se simula sobre el mundo vigente; `cloneMs` mide lo que costó
-      // reservar la vuelta atrás, que es lo que sustituye al clon.
+      // T104/PERF3. La reserva solo sirve para deshacer el paso y seguir: el único fallo del que el
+      // servidor se recupera es `SessionRevoked`, y solo puede darse en un paso con gestos (`save`
+      // recibe sus sesiones). Cualquier otro fallo pausa el mundo para siempre (`failed`).
+      // · `motor.clonPorPaso=true` (default y producción): con gestos se simula sobre un clon y el
+      //   mundo vigente no se toca hasta que el guardado confirma; sin gestos se simula en el sitio,
+      //   como el laboratorio, y un fallo deja el mundo a medio paso: pausa y nada lo proyecta ni lo
+      //   guarda. Copiar el mundo costaba 40–245 ms por paso y casi nunca se usaba.
+      // · `false` (T104): punto de restauración en todo paso y simulación sobre el mundo vigente.
+      // `cloneMs` mide lo que costó reservar la vuelta atrás (0 sin reserva).
       const clonar = paramsOf(world).motor.clonPorPaso;
       if (!clonar) punto = puntoDeRestauracion(world);
-      const draft = clonar ? cloneWorld(world, context) : world;
+      else sinReserva = valid.length === 0;
+      const draft = clonar && !sinReserva ? cloneWorld(world, context) : world;
       runtime.cloneMs = monotonicNow() - cloneStarted;
       const simulationStarted = monotonicNow();
       // T107: `medicion.fases` empieza vacío en cada paso (nunca se arrastra el del anterior).
@@ -471,7 +544,8 @@ export function createApp(options: AppOptions) {
       // que queda (gobernador, métricas, difusión) pausa el mundo pero no puede deshacerlo, igual que
       // con el clon, donde `world` ya es el borrador. Sin esto la memoria volvería a un tick que el
       // disco ya dejó atrás y los gestos resueltos en este paso quedarían fuera del mundo en memoria.
-      punto = null;
+      // Tampoco lo deja a medio paso: sin reserva, lo que falle desde aquí pausa sobre un paso entero.
+      punto = null; sinReserva = false;
       runtime.stepMs = monotonicNow() - stepStarted;
       runtime.p95StepMs = gobernador.registrar(runtime.stepMs);
       // El gobernador decide sobre el mundo ya vigente: la próxima `reproduce()` lo lee.
@@ -489,13 +563,16 @@ export function createApp(options: AppOptions) {
         broadcast();
         fases.broadcast = performance.now() - broadcastStarted;
       }
+      // Con visores, `broadcast` ya la renovó; sin ellos, una proyección cada `VISTA_RESERVA_PASOS` pasos.
+      if (reservaVieja()) renovarReserva();
       runtime.fases = fases;
       runtime.fraccionSerial = fraccionSerial(fases);
     } catch (error) {
       // T104: deshacer va PRIMERO, y vale para las dos salidas. Sin clon, llegar aquí con punto
       // significa que el mundo vigente está a medio paso; un mundo que no se pudo deshacer ya no
       // puede seguir avanzando aunque el error fuera recuperable.
-      let restaurado = true;
+      // Sin reserva no hay nada que restaurar: el mundo se queda a medio paso.
+      let restaurado = !sinReserva;
       if (punto) { try { punto.restaurar(); } catch { restaurado = false; } }
       if (restaurado && error instanceof SessionRevoked) {
         // La sesión se revocó entre aceptar el gesto y confirmarlo: el mundo no avanza con un
@@ -506,6 +583,10 @@ export function createApp(options: AppOptions) {
         return;
       }
       failed = true;
+      // Un mundo a medio paso (sin reserva, o con un punto que no se pudo restaurar) no es un estado
+      // del mundo: desde aquí nada lo proyecta ni lo consulta (`view`, `persona`, `recipe`). Guardar ya
+      // no puede: `avanzar` no pasa de `failed` y el cierre no guarda.
+      aMedioPaso = !restaurado;
       for (const item of pending.values()) item.reject(new HttpError(503, 'No se pudo guardar; el gesto no fue confirmado.'));
       pending.clear();
       // Do not log snapshots, inputs, or personal content on failure.
@@ -518,6 +599,8 @@ export function createApp(options: AppOptions) {
     }
   }
   const server = createServer(async (req, res) => {
+    // Hasta que la respuesta termina (o se corta): el planificador cede a ella tras un paso largo.
+    solicitudesEnCurso++; res.once('close', () => { solicitudesEnCurso--; }); conexionesNuevas.delete(req.socket);
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'no-referrer');
@@ -588,7 +671,11 @@ export function createApp(options: AppOptions) {
   });
   server.requestTimeout = 10_000;
   server.headersTimeout = 10_000;
+  server.on('connection', (socket: Socket) => {
+    conexionesNuevas.add(socket); socket.once('close', () => conexionesNuevas.delete(socket));
+  });
   server.on('upgrade', (req, socket, head) => {
+    conexionesNuevas.delete(socket);
     try {
       checkOrigin(req);
       if (req.headers.host !== new URL(origin).host) throw new HttpError(403, 'Ruta no autorizada.');
@@ -625,13 +712,13 @@ export function createApp(options: AppOptions) {
             // T036(h): one inhabitant's biography at a time, read-only; the snapshot no longer carries it.
             if (parsed?.type === 'persona') {
               if (typeof parsed.id !== 'string' || !/^[A-Za-z0-9_:-]{1,50}$/.test(parsed.id)) throw new HttpError(400, 'Identificador de habitante no válido.');
-              send(client, { type: 'persona', id: parsed.id, persona: enriquecerPersona(world, parsed.id) ?? null });
+              send(client, { type: 'persona', id: parsed.id, persona: enriquecerPersona(mundoConsultable(), parsed.id) ?? null });
               return;
             }
             // One definition at a time, read-only: the snapshot carries summaries and this query never advances the world.
             if (parsed?.type === 'recipe') {
               if (typeof parsed.id !== 'string' || !/^recipe-[1-9]\d{0,9}$/.test(parsed.id)) throw new HttpError(400, 'Identificador de procedimiento no válido.');
-              send(client, { type: 'recipe', id: parsed.id, recipe: technologyRecipeDetail(world, parsed.id) ?? null });
+              send(client, { type: 'recipe', id: parsed.id, recipe: technologyRecipeDetail(mundoConsultable(), parsed.id) ?? null });
               return;
             }
             if (parsed?.type === 'suscripcion') {
@@ -656,19 +743,34 @@ export function createApp(options: AppOptions) {
   const tickMs = options.tickMs ?? 100;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let next = monotonicNow() + tickMs;
-  function schedule() {
-    timer = setTimeout(() => {
-      next += tickMs;
-      stepOnce();
-      // El corte se juzga DESPUÉS del paso: un paso que duró más que el intervalo
-      // vuelve a citarse, nunca dispara una ráfaga para «recuperar» lo perdido.
-      const now = monotonicNow();
-      if (next < now) next = now + tickMs;
-      if (!stopped) schedule();
-    }, Math.max(0, next - monotonicNow()));
-    timer.unref();
+  /** Tras un paso que se pasó del intervalo: hasta cuándo puede esperar el siguiente a que acabe la E/S. */
+  let cederHasta: number | null = null;
+  /** Citas cedidas desde ese paso: con clientes WS, nunca menos de `VUELTAS_CON_CLIENTES_WS`. */
+  let cedidas = 0;
+  function citar(ms: number) { timer = setTimeout(tic, ms); timer.unref(); }
+  function tic() {
+    if (stopped) return;
+    // Ceder a la E/S en curso: se vuelve a mirar cada milisegundo; entretanto el bucle atiende el poll.
+    if (cederHasta !== null && monotonicNow() < cederHasta
+      && (cedidas < (clients.size > 0 ? VUELTAS_CON_CLIENTES_WS : 0) || ioEnCurso())) { cedidas++; citar(1); return; }
+    cederHasta = null; cedidas = 0;
+    next += tickMs;
+    stepOnce();
+    // El corte se juzga DESPUÉS del paso. Un paso que duró más que el intervalo ya llega tarde a su cita, y
+    // el siguiente no espera `tickMs` ociosos (PERF3: con pasos de ~233 ms eran 100 ms por paso y el mundo
+    // público iba a 3 pasos/s): espera solo a que acabe la E/S en curso (`ioEnCurso`), y como mucho
+    // `tickMs`, lo que esperaba antes. Sin esa espera, con pasos seguidos a la E/S le quedaba una vuelta
+    // del bucle por paso, y el gzip de `/api/world`, el deflate de cada trozo WS (con el pong, que `ws`
+    // encola detrás) o el cuerpo de un login necesitan varias idas y vueltas al threadpool o al poll: con
+    // pasos de 250 ms el gzip pasó de ~0,1 a 2,6 s, y con pasos de 1,1 s a 12 s, más que el aborto de 10 s
+    // del cliente (verificación PERF3, 2026-09-23). Lo que llega por WS se infla sin dejarse ver: con clientes
+    // WS se ceden además `VUELTAS_CON_CLIENTES_WS` citas. Nunca una ráfaga: un paso por callback, y el retraso
+    // acumulado no se recupera: a tiempo, la cita compensa la deriva.
+    const now = monotonicNow();
+    if (next < now) { next = now; cederHasta = now + tickMs; }
+    if (!stopped) citar(Math.max(0, next - monotonicNow()));
   }
-  if (!options.manual) schedule();
+  if (!options.manual) citar(Math.max(0, next - monotonicNow()));
   const heartbeat = setInterval(() => {
     for (const [socket, client] of clients) {
       if (!client.alive || !store.sessionValid(client.hash)) { socket.terminate(); continue; }
@@ -689,7 +791,13 @@ export function createApp(options: AppOptions) {
   }, 1000);
   latido.unref();
   return {
+    /** `world` es el mundo vivo, para `main.ts` al arrancar (antes de ningún paso), bancos y pruebas. Tras un
+     * paso sin reserva que falló es el mundo a medio paso (PERF3): muerto, nadie lo proyecta ni lo guarda, y
+     * lo que se le haga ya no llega a ninguna parte; las pruebas lo leen justo para comprobarlo. */
     server, stepOnce, get world() { return world; }, get failed() { return failed; },
+    /** Gestos aceptados que esperan su paso (bancos y pruebas: saber que un gesto ya está en el lote
+     * del paso siguiente sin adivinarlo por tiempo). */
+    get gestosPendientes() { return pending.size; },
     /** Contrapresión por socket vivo (bancos y pruebas). */
     get flujo(): FlujoCliente[] {
       return [...clients].map(([socket, c]) => ({ remotePort: (socket as unknown as { _socket?: { remotePort?: number } })._socket?.remotePort ?? null,

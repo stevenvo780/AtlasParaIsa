@@ -462,7 +462,8 @@ deshidratación se repone aunque siga en rojo; con `apagar` la misma muerte no s
 ### Motor: reserva del paso (`motor.clonPorPaso`, 2026-09-23)
 
 `stepOnce` necesita poder deshacer un paso que falla. Con `motor.clonPorPaso=true` (default y producción)
-simula sobre `cloneWorld` y el mundo vigente no se toca hasta que el guardado confirma; con `false`
+simula sobre `cloneWorld` y el mundo vigente no se toca hasta que el guardado confirma (desde PERF3, solo
+en los pasos con gestos: ver el final de este apartado); con `false`
 (T104) toma un `puntoDeRestauracion`, simula sobre el mundo vigente y, si el paso lanza, `restaurar()`.
 Con pocos habitantes esa reserva ya cuesta tanto como el paso, así que el p95 supera los 50 ms del
 gobernador y el techo congela el crecimiento. **Se midió si el punto la abarata. No la abarata, y
@@ -512,6 +513,135 @@ guardado ya no deshace en memoria un paso que el disco dejó atrás: el punto se
 Para abaratar la reserva de verdad hay que dejar de copiar lo que el paso no toca. El primer blanco son las
 teselas: copiarlas sólo cuando un paso las escribe, o que `syncFauna` no las degrade con `delete`, para que el
 punto no tenga que reconstruirlas. Otra opción es que el gobernador no cuente la reserva como parte del paso.
+
+**Reserva solo en los pasos con gestos (PERF3, 2026-09-23).** El servidor público (mundo V10, 151 habitantes)
+tardaba unos 233 ms de pared por paso, iba a 3 pasos/s en vez de 10 y el gobernador había congelado la
+población. La reserva solo sirve para deshacer un paso **y seguir**, y el único fallo del que el servidor se
+recupera es `SessionRevoked`: la sesión de un gesto se revoca entre aceptarlo y guardarlo, el paso se deshace
+y se reintenta sin ese gesto. Solo puede darse en un paso con gestos, porque `Store.save` solo recibe sesiones
+que comprobar de los gestos del lote. Cualquier otro fallo pausa el mundo para siempre (`failed`). Por eso
+`motor.clonPorPaso=true` significa ahora **reserva por clon en los pasos con gestos**: un paso con gestos se
+simula sobre `cloneWorld` como siempre, y uno sin gestos (casi todos) se simula en el sitio, como el
+laboratorio. `motor.clonPorPaso=false` no cambia. No hay clave nueva: `paramsOf` entra en `digestoCanonico` y
+una clave nueva cambiaría el digesto de todos los mundos.
+
+*Si un paso sin reserva falla*, el mundo queda a medio paso (o completo pero sin confirmar, si lo que falló
+fue el guardado) y se pausa como siempre. Ese mundo no es un estado del mundo, así que nada lo proyecta ni lo
+guarda. `avanzar` no pasa de `failed` y el cierre no guarda, como antes. `/api/world` y la vista de un
+cliente que llega por WS, o que cambia de cámara, reciben la **última vista proyectada**, marcada en pausa y
+con su paso («un paso falló a medias; se muestra el último estado completo que se conserva (paso N)»), sea cual
+sea su cámara. Las biografías y recetas responden con error. Los clientes conectados reciben su última vista en
+pausa, como siempre. El servicio pasa horas sin visores, así que siempre hay una vista que servir: `createApp`
+proyecta una **vista de reserva** con la cámara por defecto al arrancar, y la renueva cada
+`VISTA_RESERVA_PASOS` (100) pasos que nadie mira (con visores, la renueva la difusión). Sin ella, la primera
+versión respondía 503 para siempre si el fallo llegaba sin que nadie hubiera mirado, y el cliente lo tomaba por
+«sin conexión» y reintentaba sin fin, cuando la base servía el mundo en pausa (verificación del 2026-09-23). La
+proyección de reserva no puede tumbar el arranque ni pausar un paso confirmado: si su región no se puede leer,
+se conserva la anterior y se reintenta a los 100 pasos. Solo si ni la del arranque se pudo proyectar, y nadie
+miró antes del fallo, se responde 503 «en pausa». Lo mismo vale ahora para un punto de
+restauración que no se pudo restaurar, que antes seguía proyectándose a medias. Se descartó recargar el
+último estado durable del Store: sobre la copia pública (3,3 GB) `load()` tardó 140–330 s con el hilo
+bloqueado, y el fallo que pausó puede ser del propio disco. Al reiniciar, el mundo retoma de su último
+guardado, como tras cualquier pausa. Pruebas en `tests/projection-failure.test.ts` (fallo a mitad del paso y
+al guardar, con y sin vista anterior) y `tests/restauracion-paso.test.ts` (`SessionRevoked` con gesto,
+con clon y con punto, deshace exacto y sigue como un gemelo que nunca vio el gesto).
+
+*Identidad.* `scripts/perf/paso-servidor.ts` corre `createApp` con reloj real y se copió a un `git archive`
+de la base (`0ea1514`). La receta de producción y un presupuesto del gobernador de 5 000 ms (el reloj de
+pared no entra en el mundo) dan los mismos `digestoCanonico` que la base:
+
+- Copia del respaldo público de las 10:01 (paso 306 400, 151 habitantes, 22 016 teselas): cada 100 pasos
+  hasta 600 y lo durable, sin gestos y con uno cada 50. Las corridas con el planificador real llegan al mismo
+  mundo del paso 307 000.
+- Semillas 7, 42 y 51926 con 1 200 pasos, sin gestos y con uno cada 50: los 12 cortes, el final y lo
+  durable son iguales en las seis corridas.
+
+Además, la prueba (13) compara el nuevo camino con el punto en esas tres semillas, con gestos y cadencia 100.
+Las pruebas (5), (9), (10) y (12) siguen comparando `true` con `false`. Comandos en `scripts/lab/README.md`.
+
+*Medida.* Misma copia, 600 pasos por lado y las dos corridas a la vez. La carga de la torre cambió mucho durante
+la mañana, así que solo se comparan corridas simultáneas. Las cifras son ms de pared de `stepOnce`, con dos
+pares de corridas: carga 70–80 y carga 45–60.
+
+| | Base `0ea1514` | PERF3 |
+|---|---|---|
+| `stepMs` p50 / p95 | 161,7 / 318,3 · 148,2 / 273,3 | 41,2 / 166,6 · 45,9 / 190,6 |
+| `stepMs` media | 199,3 · 180,7 | 82,6 · 88,1 |
+| `cloneMs` p50 | 91,3 · 85,3 | 0 · 0 |
+| `simulationMs` p50 / p95 | 64,0 / 195,7 · 58,6 / 172,2 | 41,2 / 158,2 · 45,9 / 182,2 |
+| `saveMs` media (6 guardados en 600 pasos) | 21,9 · 18,9 | 22,2 · 22,2 |
+| CPU por paso, media | 203,0 · 197,8 | 65,7 · 72,7 |
+| pasos/s seguidos (`stepOnce` tras `stepOnce`) | 5,0 · 5,5 | 12,1 · 11,3 |
+
+Con el planificador real (`tickMs` 100), 600 pasos y las corridas a la vez:
+
+| Carga | Base | Solo la reserva nueva | PERF3 (reserva y planificador) |
+|---|---|---|---|
+| 70–80 | 3,4 pasos/s | — | 7,3 pasos/s |
+| 20–25 | — | 9,1 pasos/s | 9,2 pasos/s |
+| 50–60 | 3,1 pasos/s | 5,0 pasos/s | 5,7 pasos/s |
+
+Simular en el sitio también abarata la simulación: no hay un mundo entero de basura por paso, y los índices
+por arreglo (teselas, fauna) sobreviven de un paso al siguiente. El punto (T104) reconstruye las teselas en cada
+paso porque `syncFauna` hace `delete tile.species`, y en el sitio esas teselas quedan en modo diccionario. En
+3 000 pasos en el sitio sobre la copia pública, la simulación media por bloque de 300 pasos osciló entre 54 y
+72 ms, sin tendencia. Reconstruir solo las teselas en cada paso costaba 23 ms p50.
+
+*Planificador.* Tras un paso más largo que `tickMs`, el siguiente se citaba `tickMs` después: con pasos de
+~233 ms, 100 ms ociosos por paso. La primera versión de PERF3 lo citaba ya (`setTimeout` 0): con carga, de 5,0
+a 5,7 pasos/s. Pero la verificación encontró que así, con pasos seguidos, a la E/S le queda **una sola vuelta
+del bucle por paso**, y lo que necesita varias idas y vueltas al threadpool o al poll avanza una por paso: el
+gzip de `/api/world` (trozos de 16 KiB), el deflate de cada trozo WS (y el pong, que `ws` encola detrás) y el
+cuerpo de un login. Con pasos de 250 ms el gzip pasaba de ~0,1 a 2,6 s y el pong a 3,6 s; con pasos de 1,1 s
+el gzip tardaba 12 s, más que el aborto de 10 s del cliente, y la reconexión fallaba.
+
+Ahora, tras un paso que se pasó del intervalo, el siguiente **cede a la E/S en curso** y como mucho `tickMs`
+(lo que la base esperaba siempre): mientras haya una solicitud HTTP sin responder del todo, una conexión
+aceptada que aún no trajo su solicitud (libuv acepta en una vuelta y lee en la siguiente) o un socket WS con
+`bufferedAmount` (que cuenta lo que `ws` aún comprime), mira otra vez cada milisegundo. Sin E/S, el paso va
+ya. Nunca hay ráfaga: un paso por callback, y a tiempo la cita compensa la deriva, como antes.
+
+Medido con `scripts/perf/es-servidor.ts` (servidor real, pasos alargados B ms, semilla 42) y las sondas en otro
+proceso, `es-sonda.ts` y `es-cliente.ts`, con los tres árboles corriendo a la vez. Las latencias son p50:
+
+| | Base `0ea1514` | PERF3 sin ceder | PERF3 |
+|---|---|---|---|
+| pasos/s, B 250, sin clientes | 2,83 | 3,93 | 3,93 |
+| pasos/s, B 250, con sondas | 2,69 | 3,74 | 3,44 |
+| B 250, cadena HTTP a 90 ms de RTT: gzip · login | 304 · 270 ms | 2 278 · 203 ms | 252 · 200 ms |
+| B 250: pong · intervalo entre `state` | 120 · 1 864 ms | 2 745 · 2 995 ms | 272 · 1 471 ms |
+| B 800, cadena HTTP a 90 ms: gzip | 866 ms | 7 181 ms | 774 ms |
+| B 800: pong · intervalo entre `state` | 664 · 4 580 ms | 9 522 · 9 772 ms | 634 · 4 192 ms |
+| B 1 100 / 2 500: `GET /api/world` del cliente | 970 / 1 831 ms | 5 584 / 9 284 ms | 971 / 1 755 ms |
+
+Una cadena de solicitudes desde la misma máquina (RTT 0) sí va mejor en la base: cabe entera en sus 100 ms
+ociosos (gzip 41 ms con B 250), y aquí cada solicitud espera el paso en curso (292 ms). Por el dominio la
+siguiente solicitud llega un RTT después y ese hueco ya no la recoge: con 90 ms, PERF3 responde antes que la base.
+
+La segunda verificación encontró un hueco en eso: **lo que llega por WS**. El navegador comprime lo que manda
+(acuses, cámara, biografías, gestos) y `ws` solo lo entrega tras inflarlo en el threadpool, en varias idas y
+vueltas que nada público deja ver. La primera cita tras un paso largo salta justo detrás de la vuelta del bucle
+que recogió lo llegado durante el paso, que puede ser larga (proyectar para `/api/world`, ~37 ms), y el paso
+siguiente arrancaba antes de que el inflado volviera: cada acuse esperaba 3–4 pasos (831 ms p50 con pasos de
+250 ms, medido en el servidor), y el pong, detrás de él en el receptor, lo mismo. Ahora, con clientes WS, tras
+un paso largo se ceden siempre al menos `VUELTAS_CON_CLIENTES_WS` (2) citas de 1 ms, y después lo de antes;
+el acuse baja a 44 ms p50. Sin clientes WS nada cambia. Medido igual, los tres árboles a la vez (p50 salvo
+donde dice p95):
+
+| | Base `0ea1514` | PERF3 `de213f2` | PERF3 |
+|---|---|---|---|
+| B 250, RTT 0: pasos/s | 2,66 | 3,38 | 3,34 |
+| B 250, RTT 0: pong p50 · p95 | 139 · 202 ms | 199 · 858 ms | 50 · 277 ms |
+| B 250, RTT 90: pong p50 · p95 | 119 · 170 ms | 79 · 588 ms | 37 · 53 ms |
+| B 250, RTT 90: gzip · login · intervalo entre `state` | 299 · 271 · 1 826 ms | 241 · 197 · 1 406 ms | 205 · 199 · 1 414 ms |
+| B 1 100, RTT 0: pong p50 · p95 | 978 · 1 044 ms | 931 · 4 244 ms | 888 · 974 ms |
+| B 2 500: `GET /api/world` del cliente · silencio más largo | 1 400 ms · 5,2 s | 1 308 ms · 7,5 s | 1 313 ms · 5,0 s |
+
+**Lo que queda.** El p95 sigue por encima de los 50 ms del gobernador: 63–67 ms con la torre tranquila y
+167–191 ms con carga. Con 150 habitantes el techo seguirá sin dejar crecer. Ahora lo fijan los pasos más caros
+de la simulación (`simulationMs` p95 158–182 ms con carga), no la reserva. En la torre el servidor corría con
+prioridad idle (ananicy) y sus cifras se parecían a las de la torre cargada; el portátil al que se mudó el
+público el 23-09 no está medido con este código.
 
 Estas opciones se validan y persisten, pero **T102 no activa backends, deltas ni nuevas señales,
 ni cambia los topes de validación o fundación de comunidades**. La ejecución sigue usando el

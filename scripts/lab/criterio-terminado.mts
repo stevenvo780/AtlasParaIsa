@@ -40,8 +40,12 @@
  *     generacionesVivas < el mínimo y, entre medias, «desconocido» (nunca aprobado por la inflación).
  *  C4 cooperación variada — ≥ 2 tipos [--coop-tipos-min], cada uno con ≥ 10 % [--coop-fraccion-min]
  *     de los actos tipificados de la ventana Y ≥ 5 actos en ella [--coop-actos-min]. Tipos = claves de
- *     `cooperacionAcumuladaPorTipo` (teaching, trade, constructionHelp) + `foodShared` si algún día
- *     aparece en el fichero. El 10 % evita que un tipo residual (un trueque entre cientos de
+ *     `cooperacionAcumuladaPorTipo` (teaching, trade, constructionHelp y, con los instrumentos de
+ *     replica.ts desde 2026-09-22, foodShared = actos de compartir comida, ver scripts/lab/instrumentos.ts)
+ *     + un `foodShared` de nivel superior si algún día aparece en el fichero (formato alternativo; si
+ *     está, manda sobre el anidado). Un tipo presente el día D y ausente en el fichero del día base
+ *     (formatos mezclados) da «desconocido»: restar 0 contaría todo su acumulado como de la ventana.
+ *     El 10 % evita que un tipo residual (un trueque entre cientos de
  *     enseñanzas) cuente como «relevante»; el mínimo absoluto evita lo contrario, que con pocos actos
  *     (2 trueques entre 12 actos = 17 %) un tipo casi ausente pase por la fracción (~1 acto cada 2 días).
  *     `otrasCooperacionesAcumuladas` (aporte de material y turnos ante escasez, mezclados) se informa
@@ -65,14 +69,20 @@
  *     por día) Y hay uso ajeno en ≥ 50 % de los días de la ventana [--dias-uso-ajeno-min]: como el
  *     campo es diario, «usosDeInventorAjeno crece» se lee como «su acumulado crece de forma sostenida»,
  *     no un solo día aislado.
- *  C8 diversidad creciente — pendiente por mínimos cuadrados de `diversidadConducta` sobre los días
- *     5..D ≥ 0 [--pendiente-min, --dia-base-diversidad] O media de los k últimos días ≥ media de los k
- *     primeros (desde el día 5), con k = min(ventana, ⌊(D−5+1)/2⌋). Día 5 como base porque antes
- *     domina el asentamiento inicial (y es el día de SC-003). `--diversidad-regla y` exige las dos.
- *     El indicador diario es ruidoso (saltos de ±0,1 de un día a otro en r2), así que no se compara
- *     un día suelto con otro: la pendiente exige ≥ 3 días con dato y cada bloque ≥ 2 días completos
- *     (si no, esa parte es «desconocido»), y una serie constante FALLA (no crece, aunque su pendiente
- *     sea 0 ≥ 0).
+ *  C8 diversidad creciente — pendiente por mínimos cuadrados del índice de diversidad de conducta
+ *     sobre los días 5..D ≥ 0 [--pendiente-min, --dia-base-diversidad] O media de los k últimos días ≥
+ *     media de los k primeros (desde el día 5), con k = min(ventana, ⌊(D−5+1)/2⌋). Día 5 como base
+ *     porque antes domina el asentamiento inicial (y es el día de SC-003). `--diversidad-regla y` exige
+ *     las dos. El indicador diario es ruidoso (saltos de ±0,1 de un día a otro en r2), así que no se
+ *     compara un día suelto con otro: la pendiente exige ≥ 3 días con dato y cada bloque ≥ 2 días
+ *     completos (si no, esa parte es «desconocido»), y una serie constante FALLA (no crece, aunque su
+ *     pendiente sea 0 ≥ 0).
+ *     Serie [--diversidad-campo auto]: `diversidadConductaTiempo` (el mismo índice con la actividad
+ *     medida en TIEMPO por acción, instrumento de 2026-09-22) si algún día del tramo la trae; si no,
+ *     `diversidadConducta` (la antigua: cuenta explorar una vez por celda nueva y lo sobrerrepresenta,
+ *     ver scripts/lab/README.md §Instrumentos). `tiempo`/`actividad` fuerzan una u otra. La otra serie
+ *     se evalúa igual y se informa como SECUNDARIA (no decide). La serie por tiempo tiene su propio
+ *     sesgo: descansar domina el tiempo (y el «oficio dominante») de casi todos; ver el README.
  *
  * Todo criterio es cumple / falla / desconocido. Un campo ausente o ilegible da «desconocido», NUNCA
  * «cumple»: una semilla solo «cumple todos» si los 8 cumplen.
@@ -118,9 +128,12 @@ export interface Umbrales {
   coopTiposMin: number; coopFraccionMin: number; coopActosMin: number; conflictosMin: number;
   causasMin: number; causasConocidas: string[];
   usoAjenoMin: number; diasUsoAjenoMin: number;
-  diaBaseDiversidad: number; pendienteMin: number; diversidadRegla: 'o' | 'y';
+  diaBaseDiversidad: number; pendienteMin: number; diversidadRegla: 'o' | 'y'; diversidadCampo: CampoDiversidad;
   mayoria: number; estancadaHoras: number;
 }
+
+/** Serie de C8: `auto` = `diversidadConductaTiempo` si el tramo la trae, si no `diversidadConducta`. */
+export type CampoDiversidad = 'auto' | 'diversidadConductaTiempo' | 'diversidadConducta';
 
 /** «durante al menos 60 días simulados»: un corte anterior no puede aprobar ni suspender el criterio. */
 export const DIAS_CRITERIO = 60;
@@ -131,7 +144,7 @@ export const UMBRALES_POR_DEFECTO: Readonly<Umbrales> = Object.freeze({
   coopTiposMin: 2, coopFraccionMin: 0.10, coopActosMin: 5, conflictosMin: 1,
   causasMin: 2, causasConocidas: ['starvation', 'dehydration', 'exposure', 'senescence'],
   usoAjenoMin: 0.15, diasUsoAjenoMin: 0.5,
-  diaBaseDiversidad: 5, pendienteMin: 0, diversidadRegla: 'o' as const,
+  diaBaseDiversidad: 5, pendienteMin: 0, diversidadRegla: 'o' as const, diversidadCampo: 'auto' as const,
   mayoria: 0.5, estancadaHoras: 3,
 });
 
@@ -278,7 +291,7 @@ export function describirCriterios(u: Umbrales): Record<IdCriterio, string> {
     conflictos: `conflictos en la ventana ≥ ${u.conflictosMin}`,
     muertes: `0 muertes fuera de {${u.causasConocidas.join(', ')}}, ≥ ${u.causasMin} causas distintas en los días 1..D y balance población = nacimientos − muertes desde el día 0`,
     tecnologia: `usos de inventor ajeno / usos útiles con autor en la ventana ≥ ${u.usoAjenoMin} y uso ajeno en ≥ ${pct(u.diasUsoAjenoMin)} de sus días`,
-    diversidad: `pendiente MCO de diversidadConducta días ${u.diaBaseDiversidad}..D (≥ ${PUNTOS_MIN_PENDIENTE} días) ≥ ${u.pendienteMin} ${u.diversidadRegla === 'o' ? 'o' : 'y'} media de los k últimos días ≥ media de los k primeros (k = min(ventana, mitad del tramo) ≥ ${DIAS_MIN_BLOQUE}); constante ⇒ falla`,
+    diversidad: `pendiente MCO de ${u.diversidadCampo === 'auto' ? 'diversidadConductaTiempo (si falta, diversidadConducta)' : u.diversidadCampo} días ${u.diaBaseDiversidad}..D (≥ ${PUNTOS_MIN_PENDIENTE} días) ≥ ${u.pendienteMin} ${u.diversidadRegla === 'o' ? 'o' : 'y'} media de los k últimos días ≥ media de los k primeros (k = min(ventana, mitad del tramo) ≥ ${DIAS_MIN_BLOQUE}); constante ⇒ falla`,
   };
 }
 
@@ -335,6 +348,12 @@ function cooperacion({ dias, D, base, u }: Contexto): ResultadoCriterio {
     const comidaB = acumulado(dias, base, d => num(d, 'foodShared'));
     if (comidaB === null) return { estado: 'desconocido', motivo: `falta foodShared en el día ${base}`, valores: {} };
     actual.foodShared = comidaD; previo.foodShared = comidaB;
+  }
+  // Día base con fichero pero sin un tipo que el día D sí trae (formatos mezclados): restar 0 contaría
+  // todo su acumulado desde el inicio como de la ventana.
+  if (dias.has(base)) {
+    const sinBase = Object.keys(actual).filter(tipo => !(tipo in previo));
+    if (sinBase.length) return { estado: 'desconocido', motivo: `falta ${sinBase.join(', ')} en el día ${base} (inicio de la ventana)`, valores: {} };
   }
   const porTipo: Record<string, number> = {};
   for (const [tipo, n] of Object.entries(actual)) porTipo[tipo] = n - (previo[tipo] ?? 0);
@@ -396,22 +415,22 @@ function tecnologia({ dias, diasVentana, u }: Contexto): ResultadoCriterio {
     valores: { usosDeInventorAjeno: ajenos, usosConAutor: conAutor, fraccionUsoAjeno: fraccion, fraccionDiasConUsoAjeno: fraccionDias } };
 }
 
-function diversidad({ dias, D, u }: Contexto): ResultadoCriterio {
+/** C8 sobre una serie (`campo`) de dia-NNN.json; ver la cabecera. */
+function serieDiversidad({ dias, D, u }: Contexto, campo: string): ResultadoCriterio {
   const b = u.diaBaseDiversidad;
-  if (D <= b) return { estado: 'desconocido', motivo: `D = ${D} ≤ día base ${b}: no hay tramo que medir`, valores: {} };
   const puntos: [number, number][] = [];
-  for (let dia = b; dia <= D; dia++) { const v = num(dias.get(dia), 'diversidadConducta'); if (v !== null) puntos.push([dia, v]); }
+  for (let dia = b; dia <= D; dia++) { const v = num(dias.get(dia), campo); if (v !== null) puntos.push([dia, v]); }
   const valores = puntos.map(([, v]) => v);
   // Una serie plana no «crece» aunque su pendiente sea 0 ≥ 0 (p. ej. un indicador atascado en 0).
   if (puntos.length >= 2 && Math.max(...valores) === Math.min(...valores))
-    return { estado: 'falla', motivo: `diversidadConducta constante (${redondear(valores[0]!)}) en ${puntos.length} días: no crece`, valores: { pendiente: 0, puntos: puntos.length } };
+    return { estado: 'falla', motivo: `${campo} constante (${redondear(valores[0]!)}) en ${puntos.length} días: no crece`, valores: { pendiente: 0, puntos: puntos.length } };
   const pendiente = puntos.length >= PUNTOS_MIN_PENDIENTE ? pendienteMco(puntos) : null;
   // Bloques de k días en cada extremo, no un día suelto contra otro: el indicador diario es ruidoso.
   const k = Math.min(u.ventana, Math.floor((D - b + 1) / 2));
   const media = (desde: number): number | null => {
     if (k < DIAS_MIN_BLOQUE) return null;
     let s = 0;
-    for (let dia = desde; dia < desde + k; dia++) { const v = num(dias.get(dia), 'diversidadConducta'); if (v === null) return null; s += v; }
+    for (let dia = desde; dia < desde + k; dia++) { const v = num(dias.get(dia), campo); if (v === null) return null; s += v; }
     return s / k;
   };
   const inicio = media(b), final = media(D - k + 1);
@@ -420,6 +439,25 @@ function diversidad({ dias, D, u }: Contexto): ResultadoCriterio {
   const bloques = k >= DIAS_MIN_BLOQUE ? `media días ${b}..${b + k - 1} ${inicio === null ? '¿?' : redondear(inicio)} → días ${D - k + 1}..${D} ${final === null ? '¿?' : redondear(final)}` : `tramo de ${D - b + 1} días: bloques de < ${DIAS_MIN_BLOQUE} días, sin comparar`;
   const motivo = `pendiente ${pendiente === null ? `¿? (${puntos.length} días con dato, < ${PUNTOS_MIN_PENDIENTE})` : `${pendiente.toExponential(2)}/día (${puntos.length} días)`}; ${bloques}`;
   return { estado, motivo, valores: { pendiente, puntos: puntos.length, diasPorBloque: k, mediaInicio: inicio, mediaFinal: final } };
+}
+
+const DIVERSIDAD_TIEMPO = 'diversidadConductaTiempo', DIVERSIDAD_ACTIVIDAD = 'diversidadConducta';
+
+function diversidad(contexto: Contexto): ResultadoCriterio {
+  const { dias, D, u } = contexto, b = u.diaBaseDiversidad;
+  if (D <= b) return { estado: 'desconocido', motivo: `D = ${D} ≤ día base ${b}: no hay tramo que medir`, valores: {} };
+  let conTiempo = false;
+  for (let dia = b; dia <= D && !conTiempo; dia++) conTiempo = num(dias.get(dia), DIVERSIDAD_TIEMPO) !== null;
+  const campo = u.diversidadCampo === 'auto' ? (conTiempo ? DIVERSIDAD_TIEMPO : DIVERSIDAD_ACTIVIDAD) : u.diversidadCampo;
+  const otro = campo === DIVERSIDAD_TIEMPO ? DIVERSIDAD_ACTIVIDAD : DIVERSIDAD_TIEMPO;
+  const principal = serieDiversidad(contexto, campo);
+  // La otra serie se informa (secundaria, no decide) solo si el tramo la trae algún día.
+  let otroConDato = false;
+  for (let dia = b; dia <= D && !otroConDato; dia++) otroConDato = num(dias.get(dia), otro) !== null;
+  const secundaria = otroConDato ? serieDiversidad(contexto, otro) : null;
+  return { estado: principal.estado,
+    motivo: `${campo}: ${principal.motivo}${secundaria ? ` · secundaria ${otro} (no decide): ${secundaria.estado}, ${secundaria.motivo}` : ''}`,
+    valores: { campo, ...principal.valores, secundaria: secundaria ? { campo: otro, estado: secundaria.estado, ...secundaria.valores } : null } };
 }
 
 const EVALUADORES: Record<IdCriterio, (c: Contexto) => ResultadoCriterio> = { supervivencia, recambio, generaciones, cooperacion, conflictos, muertes, tecnologia, diversidad };
@@ -519,7 +557,7 @@ const ETIQUETA: Record<IdCriterio, string> = { supervivencia: 'supervivencia', r
 const BANDERAS: Record<IdCriterio, string> = {
   supervivencia: '--poblacion-min', recambio: '--nacimientos-min --fundadores-max', generaciones: '--generaciones-min',
   cooperacion: '--coop-tipos-min --coop-fraccion-min --coop-actos-min', conflictos: '--conflictos-min', muertes: '--causas-min --causas-conocidas',
-  tecnologia: '--uso-ajeno-min --dias-uso-ajeno-min', diversidad: '--pendiente-min --dia-base-diversidad --diversidad-regla',
+  tecnologia: '--uso-ajeno-min --dias-uso-ajeno-min', diversidad: '--pendiente-min --dia-base-diversidad --diversidad-regla --diversidad-campo',
 };
 const MARCA: Record<Estado, string> = { cumple: '✓', falla: '✗', desconocido: '?' };
 const col = (texto: string | number, ancho: number, derecha = false) => { const t = String(texto); return derecha ? t.padStart(ancho) : t.padEnd(ancho); };
@@ -570,7 +608,14 @@ const USO = `Uso: npx tsx scripts/lab/criterio-terminado.mts --entrada <conjunto
   [--poblacion-min 16] [--nacimientos-min 1] [--fundadores-max 1] [--generaciones-min 3]
   [--coop-tipos-min 2] [--coop-fraccion-min 0.1] [--coop-actos-min 5] [--conflictos-min 1] [--causas-min 2]
   [--causas-conocidas starvation,dehydration,exposure,senescence] [--uso-ajeno-min 0.15] [--dias-uso-ajeno-min 0.5]
-  [--dia-base-diversidad 5] [--pendiente-min 0] [--diversidad-regla o|y] [--mayoria 0.5] [--estancada-horas 3]`;
+  [--dia-base-diversidad 5] [--pendiente-min 0] [--diversidad-regla o|y] [--diversidad-campo auto|tiempo|actividad]
+  [--mayoria 0.5] [--estancada-horas 3]`;
+
+/** `--diversidad-campo`: alias cortos y nombres de campo de dia-NNN.json. */
+const CAMPOS_DIVERSIDAD: Record<string, CampoDiversidad> = {
+  auto: 'auto', tiempo: 'diversidadConductaTiempo', diversidadConductaTiempo: 'diversidadConductaTiempo',
+  actividad: 'diversidadConducta', antigua: 'diversidadConducta', diversidadConducta: 'diversidadConducta',
+};
 
 function numero(valor: string, bandera: string, { entero = false, min = -Infinity, max = Infinity } = {}): number {
   const n = Number(valor);
@@ -601,6 +646,7 @@ export function parsearArgumentos(argv: readonly string[]): { entrada: string; s
     '--dia-base-diversidad': v => { u.diaBaseDiversidad = numero(v, '--dia-base-diversidad', { entero: true, min: 0 }); },
     '--pendiente-min': v => { u.pendienteMin = numero(v, '--pendiente-min'); },
     '--diversidad-regla': v => { if (v !== 'o' && v !== 'y') throw new Error(`--diversidad-regla: «o» o «y», no «${v}».\n${USO}`); u.diversidadRegla = v; },
+    '--diversidad-campo': v => { const campo = Object.hasOwn(CAMPOS_DIVERSIDAD, v) ? CAMPOS_DIVERSIDAD[v] : undefined; if (!campo) throw new Error(`--diversidad-campo: auto, tiempo o actividad, no «${v}».\n${USO}`); u.diversidadCampo = campo; },
     '--mayoria': v => { u.mayoria = numero(v, '--mayoria', { min: 0, max: 1 }); },
     '--estancada-horas': v => { u.estancadaHoras = numero(v, '--estancada-horas', { min: 0 }); },
   };

@@ -219,3 +219,71 @@ test('criterio de terminado: una réplica en curso que lleva horas sin escribir 
     assert.ok(!inf.avisos.some(a => a.startsWith('E-2:')));
   } finally { rmSync(raiz, { recursive: true, force: true }); }
 });
+
+// Instrumentos de 2026-09-22 (scripts/lab/instrumentos.ts): `foodShared` dentro de
+// `cooperacionAcumuladaPorTipo` y `diversidadConductaTiempo` junto a la serie antigua.
+
+test('criterio de terminado: C4 cuenta foodShared anidado en cooperacionAcumuladaPorTipo como un tipo más', () => {
+  const raiz = mkdtempSync(join(tmpdir(), 'atlas-criterio-instr-'));
+  try {
+    // Solo enseñanza tipificada por world.totals: sin foodShared es UN tipo (falla); con 4 actos de comida
+    // compartida por día (40 en la ventana, 29 % de 140) son dos tipos relevantes (cumple).
+    const soloEnsenanza = (d: number) => ({ ...diaSano(d), cooperacionAcumuladaPorTipo: { teaching: 10 * d, trade: 0, constructionHelp: 0 } });
+    escribir(raiz, 'F-1', rango(20).map(soloEnsenanza), true);
+    escribir(raiz, 'F-2', rango(20).map(d => ({ ...soloEnsenanza(d), cooperacionAcumuladaPorTipo: { teaching: 10 * d, trade: 0, constructionHelp: 0, foodShared: 4 * d } })), true);
+    // Formatos mezclados: el día base (10) no trae foodShared y el día D sí ⇒ desconocido, no 80 actos «de la ventana».
+    escribir(raiz, 'F-3', rango(20).map(d => d <= 10 ? soloEnsenanza(d) : { ...soloEnsenanza(d), cooperacionAcumuladaPorTipo: { teaching: 10 * d, trade: 0, constructionHelp: 0, foodShared: 4 * d } }), true);
+    const inf = evaluarConjunto(raiz, { dia: 20 });
+    const sin = replica(inf, 'F-1').criterios!.cooperacion, con = replica(inf, 'F-2').criterios!.cooperacion, mezcla = replica(inf, 'F-3').criterios!.cooperacion;
+    assert.equal(sin.estado, 'falla');
+    assert.deepEqual(sin.valores.relevantes, ['teaching']);
+    assert.equal(con.estado, 'cumple', con.motivo);
+    assert.deepEqual(con.valores.relevantes, ['teaching', 'foodShared']);
+    assert.deepEqual(con.valores.porTipo, { teaching: 100, trade: 0, constructionHelp: 0, foodShared: 40 });
+    assert.match(con.motivo, /foodShared 40 \(29 %\)/);
+    assert.equal(mezcla.estado, 'desconocido');
+    assert.match(mezcla.motivo, /falta foodShared en el día 10/);
+  } finally { rmSync(raiz, { recursive: true, force: true }); }
+});
+
+test('criterio de terminado: C8 usa diversidadConductaTiempo si está, informa la serie antigua como secundaria y --diversidad-campo elige', () => {
+  const raiz = mkdtempSync(join(tmpdir(), 'atlas-criterio-instr-'));
+  try {
+    // Serie antigua decreciente (explorar inflado) y serie por tiempo creciente en el mismo mundo.
+    escribir(raiz, 'T-1', rango(20).map(d => ({ ...diaSano(d), diversidadConducta: 0.6 - 0.01 * d, diversidadConductaTiempo: 0.2 + 0.01 * d })), true);
+    // Sin el instrumento: auto cae en la serie antigua y no hay secundaria.
+    escribir(raiz, 'T-2', rango(20).map(diaSano), true);
+    const auto = evaluarConjunto(raiz, { dia: 20 });
+    const t1 = replica(auto, 'T-1').criterios!.diversidad;
+    assert.equal(t1.estado, 'cumple', t1.motivo);
+    assert.equal(t1.valores.campo, 'diversidadConductaTiempo');
+    assert.equal((t1.valores.secundaria as Record<string, unknown>).campo, 'diversidadConducta');
+    assert.equal((t1.valores.secundaria as Record<string, unknown>).estado, 'falla');
+    assert.match(t1.motivo, /^diversidadConductaTiempo: pendiente .* · secundaria diversidadConducta \(no decide\): falla/);
+    const t2 = replica(auto, 'T-2').criterios!.diversidad;
+    assert.equal(t2.estado, 'cumple');
+    assert.equal(t2.valores.campo, 'diversidadConducta');
+    assert.equal(t2.valores.secundaria, null);
+    assert.match(auto.descripcionCriterios.diversidad, /diversidadConductaTiempo \(si falta, diversidadConducta\)/);
+
+    const antigua = evaluarConjunto(raiz, { dia: 20, diversidadCampo: 'diversidadConducta' });
+    const a1 = replica(antigua, 'T-1').criterios!.diversidad;
+    assert.equal(a1.estado, 'falla');
+    assert.equal(a1.valores.campo, 'diversidadConducta');
+    assert.equal((a1.valores.secundaria as Record<string, unknown>).estado, 'cumple');
+    // Forzar la serie por tiempo en una réplica que no la tiene: campo ausente ⇒ desconocido, nunca aprobado.
+    const tiempo = evaluarConjunto(raiz, { dia: 20, diversidadCampo: 'diversidadConductaTiempo' });
+    assert.equal(replica(tiempo, 'T-2').criterios!.diversidad.estado, 'desconocido');
+    assert.equal(replica(tiempo, 'T-1').criterios!.diversidad.estado, 'cumple');
+
+    assert.deepEqual(parsearArgumentos(['--entrada', 'x', '--diversidad-campo', 'tiempo']).umbrales, { diversidadCampo: 'diversidadConductaTiempo' });
+    assert.deepEqual(parsearArgumentos(['--entrada', 'x', '--diversidad-campo', 'actividad']).umbrales, { diversidadCampo: 'diversidadConducta' });
+    assert.deepEqual(parsearArgumentos(['--entrada', 'x', '--diversidad-campo', 'auto']).umbrales, { diversidadCampo: 'auto' });
+    for (const malo of ['otra', 'constructor', '__proto__']) assert.throws(() => parsearArgumentos(['--entrada', 'x', '--diversidad-campo', malo]), /--diversidad-campo/);
+
+    const cli = spawnSync(process.execPath, ['--import', 'tsx', 'scripts/lab/criterio-terminado.mts', '--entrada', raiz, '--dia', '20', '--diversidad-campo', 'actividad'], { encoding: 'utf8' });
+    assert.equal(cli.status, 0, cli.stderr);
+    assert.match(cli.stdout, /C8 diversidad +pendiente MCO de diversidadConducta días 5\.\.D/);
+    assert.match(cli.stdout, /--diversidad-campo/);
+  } finally { rmSync(raiz, { recursive: true, force: true }); }
+});

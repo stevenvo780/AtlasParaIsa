@@ -83,6 +83,12 @@ export class InstrumentosConducta {
 
   antesDelPaso(world: World): void { this.contadorAntes = world.eventCounter; }
 
+  /** Ticks por acción observados de una persona viva (copia; para tests y diagnóstico). */
+  ticksDe(id: string): Record<string, number> | undefined {
+    const ticks = this.ticksPorPersona.get(id);
+    return ticks ? { ...ticks } : undefined;
+  }
+
   /** Llamar tras `stepWorld` y ANTES de `store.save` (que vacía `chronicleJournal.pending`). */
   despuesDelPaso(world: World): void {
     const inicio = performance.now();

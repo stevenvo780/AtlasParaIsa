@@ -10,7 +10,129 @@
 > sus runbooks y los bancos de un solo uso se retiraron de main y se conservan en el tag
 > `archivo/campanas-20260922`; las evidencias JSON que produjeron siguen en `docs/evidencia-2026-09-22/`.
 
+## 23 de septiembre de 2026 — balance medido del criterio de 60 días (C8 v3)
+
+Este balance corresponde al criterio 3 de TERMINADO: «EVIDENCIA cuenta con cifras qué se logró y qué
+no». Para el criterio de 60 días, sustituye a la tabla C8 de la sección de la mañana de hoy (más abajo:
+serie v2). Fuentes: `/datos/tmp-atlas-lab/balance/balance-final.json` (síntesis del workflow
+balance-y-plan, con crítica adversarial aprobada con condiciones); los informes del evaluador congelado
+en la etiqueta `c8-v3-preregistro` — [`criterio-l60v3-d60.json`](evidencia-2026-09-23/criterio-l60v3-d60.json),
+[`criterio-bctrl-d60.json`](evidencia-2026-09-23/criterio-bctrl-d60.json),
+[`criterio-banda-d60.json`](evidencia-2026-09-23/criterio-banda-d60.json) y
+[`criterio-h1b-d60.json`](evidencia-2026-09-23/criterio-h1b-d60.json) —;
+[`preregistros/2026-09-23-vocacion-banda.md`](preregistros/2026-09-23-vocacion-banda.md), con sus
+Adendas 1 y 2 del día 60; y `/datos/tmp-atlas-lab/datos-lab/bitacora.md`.
+
+### 1. Los tres criterios de TERMINADO, hoy
+
+| Criterio | Estado | Cifra clave |
+|---|---|---|
+| (1) Mayoría de C1–C8 en el laboratorio | no cumple | C1–C7 llega a 8/12 en el mejor brazo (B); C8 solo en 1 de ~17 réplicas supervivientes distintas evaluadas a 60 días (H1B-606) |
+| (2) El mundo publicado corre esas reglas y se ve vivo | parcial | el público corre A (reglas 10), sin la ley de conflicto de B (31 conflictos en 162 días); vivo, con 710 habitantes hacia el día ~167; nadie mide su C8 |
+| (3) EVIDENCIA lo cuenta con cifras | parcial | esta sección corrige la tabla de la mañana (C8 v2); quedan T141–T143 sin marcar en `tasks.md` y otras contradicciones documentales |
+
+### 2. C8 v3 y C1–C7 por brazo, 60 días (techo de laboratorio 100)
+
+C8 se decide con `scripts/lab/criterio-terminado.mts` tal como está en la etiqueta `c8-v3-preregistro`
+(serie `diversidadConductaVentana`, Mann-Kendall unilateral p < 0,05 con corrección Hamed-Rao + AR(1) y
+subida de Sen ≥ 0,02 en los días 5..60; definición en `preregistros/2026-09-23-vocacion-banda.md`).
+
+| Brazo | Semillas | C1–C7 | C8 v3 | Extinguidas / nota | Fuente |
+|---|---|---|---|---|---|
+| A (reglas 10 publicadas) | 10 evaluadas | 4/10 | no evaluado con v3 | 6 extinguidas (13, 17, 23, 303, 606, 707) | `balance-final.json` |
+| B (reglas 10 + conflicto legible) | 12 | 8/12 (67 %) | 0/12 | 13 (día 24), 17 (26), 23 (26), 303 (16) | [`criterio-l60v3-d60.json`](evidencia-2026-09-23/criterio-l60v3-d60.json) |
+| BCTRL (código de B con las leyes nuevas a 0) | 8 | 4/8, mismas fechas que B | 0/8 | reproduce a B exactamente: mismas fechas de extinción y mismas subidas de C8 (404 −0,1328; 505 −0,0621; 606 −0,0872; 707 −0,0981) | [`criterio-bctrl-d60.json`](evidencia-2026-09-23/criterio-bctrl-d60.json) |
+| BANDA (B + expedición pequeña y correa) | 8 | 5/8 (conflictos 4/8) | 0 de 5 supervivientes | 17, 23 y 303 se extinguen (días 20, 35, 31); 13 se salva (89 habitantes, 327 nacimientos) pero no por el mecanismo previsto; REFUTADA (P1 falla 4/4, P4 falla) | [`criterio-banda-d60.json`](evidencia-2026-09-23/criterio-banda-d60.json) y Adenda 2 |
+| H1b (vocación 0,1 + práctica de oficios 1, fuera de muestra) | 4 | 3/4 | 1/4 (606, subida +0,140, p = 0,019) | 505 se extingue el día 43 (en B sobrevivía); REFUTADA | [`criterio-h1b-d60.json`](evidencia-2026-09-23/criterio-h1b-d60.json) y Adenda 2 |
+| BH0 / BC1 / BAPT, día 40 (habituación 0 / cortejo 1 / aptitud 1) | 6 / 6 / 8 | — | 0/6, 0/6, 0/8 | BH0: 2 extinguidas (404 d.25, 505 d.19); BC1: 2 extinguidas (202 d.30, 505 d.25); BAPT: 2 extinguidas | `preregistros/2026-09-23-vocacion-banda.md` y `bitacora.md` (12:40) |
+
+### 3. Leyes refutadas hoy, con la cifra que las refutó
+
+- **BH0** (habituación 0): C8 0/6 al día 40; dos extinguidas (404 día 25, 505 día 19).
+- **BC1** (cortejo 1): C8 0/6 al día 40; dos extinguidas (202 día 30, 505 día 25).
+- **BAPT** (aptitud 1): C8 0/8; dos extinguidas; pendiente más negativa que B en 6/8.
+- **PRAC1** (práctica de oficios con explorar): 39 muertes de menores de 8 días frente a 7 en la semilla 101; retrasa el techo entre 2 y 5 días.
+- **agua.rebaño**: sube los nacimientos al día 12 de 3 a 36 en la semilla 303, pero hunde 17 (7→2, con 9 muertes por sed), 505 (36→4) y 404 (101→55).
+- **Cortejo local v1**: polariza; en la semilla 404 pasa de 43 a 3 nacimientos.
+- **Arraigo**: sube la exposición de 11 a 34.
+- **BANDA** (expedición pequeña y correa): refutada por dos vías — P1 falla en 4/4 (grupos y pares fértiles no se forman) y P4 falla (ventana −0,091 en la semilla 29 y −0,052 en la 101; approach sube +0,062/+0,024/+0,023 en 29/101/202).
+- **H1b** (vocación + práctica de oficios): refutada — C8 1/4 (solo 606); pendiente de los días 20..60 ≤ 0 en 3/4; ganancia frente a B ≥ +0,08 solo en 2/4 (+0,121 en 404, +0,228 en 606); 505 extinguida el día 43.
+- **Memoria del agua, reencuentro, hogar ancestral, reciprocidad de saldo, cohorte escalonada**: refutadas o sin efecto (memoria del agua, fuera de muestra; reencuentro, por su no localidad); estas fuentes no traen una cifra propia para cada una.
+- **F32** (fundadores × 32): abandonada sin veredicto formal; las 8 réplicas quedaron en SIGSTOP desde las 11:02 y la lectura parcial iba camino de refutarse (mejora proporcional a la escala, no por cabeza; 303 y 505 ya extinguidas).
+
+### 4. Qué se sabe de C8
+
+Al llegar al techo de 100 la reproducción se apaga y la gente se vuelve sedentaria: la mediana del radio
+de giro diario cae de 4–8 celdas a 1,1–1,8, y approach/research absorben el tiempo que antes iba a
+cortejo y provisión familiar. La serie de diversidad tiene tres tramos: una joroba de crecimiento de
+0,42–0,45 en los días 5–14 (parte de la base de la serie), el escalón del techo (−0,03 a −0,08) y una
+deriva lenta de 60 días. La vocación heredada (H1/H1b) sí acumula varianza, ×4,4–5,8 entre los días 10 y
+60, y frena la caída en nivel (2–3 veces el ruido pareado de 0,06–0,07), pero no la convierte en subida
+en la mayoría de las semillas. La condición de laboratorio (techo determinista de 100) no es la del
+público (sin techo, cupo de 40 nacimientos/día): está en curso el diagnóstico en condición pública
+(F2.1), con una predicción anotada antes de ver los datos (`bitacora.md`, 17:40): si el escalón de C8 lo
+fabrica el techo, la subida de Sen sin techo debe superar a la de B con techo en ≥ 6 de 8 semillas; si
+no, el techo no explica el fallo y la hipótesis siguiente debe atacar la transmisión acumulable entre
+generaciones.
+
+### 5. Mundo público (V10, portátil)
+
+Hacia el día ~167, el mundo público (código `b5def74`) tiene 710 habitantes y 1 957 nacimientos
+acumulados (`f0-inventario.json`, sobre el estado publicado). En el corte de ~162,6 días (686–687
+habitantes) se contaron 1 121 muertes: 83,5 % por senescencia, 12,5 % por exposición, 4 % por sed y 0 %
+por hambre; cooperación acumulada 59 888 (enseñanza 45 776, trueque 8 179, ayuda en obras 5 831, cultivo
+3 351); y 31 conflictos en 162 días. Los nacimientos son exactamente 40,0 al día (1 696 → 1 791 en 2,375
+días): es el cupo global `poblacion.nacimientosPorComprobacion = 2` cada 120 pasos
+(`src/world/params.ts:122`, `src/world/index.ts:1288`), no una limitación ecológica ni de hardware — los
+cuatro mundos «grande» sin techo también se clavan en 40 nacimientos/día a partir de ~300 habitantes. La
+meseta de ~690–710 es un regulador de software.
+
+### 6. Motor y proceso
+
+PERF2 multiplica el paso por ×1,37. PERF3 deja los pasos sin gestos sin copiar el mundo. E.0, olas 1 y
+2, quitan los costes cuadráticos conocidos por habitante con digesto idéntico bit a bit. El público pasa
+de ~1,9 a ~3,9 pasos/s. ARCH reduce los recibos de 1 103 a 209 MiB. El tope de metadatos de instantánea
+que usaba `n-FUND2` (8 MiB, el mismo tope que hundió a los mundos «grande» y «grande2») queda en 256 MiB
+en `main`. Un perfil a 704 habitantes (torre cargada) dio 98 ms/paso (p50 86, p95 240): enseñanza en la
+cooperación 20,5 %, resolución de recetas del archivo 13 % + 9 %, fauna 13 %, ecología 6,7 %. La
+variante de caché por sesión para la enseñanza ganaba 9,7 % en p50 a 700 habitantes, por debajo del
+umbral del 15 %, y no se adoptó.
+
+### 7. Alcance: esto es el frente de biología
+
+Este balance mide un solo frente de `GOAL.md`, el criterio de 60 días («Cuerpos, ecología y recambio»).
+Estado de los 14 frentes (`f0-inventario.json`):
+
+| Frente | Estado | Nota |
+|---|---|---|
+| 1. Carta, vínculo y agencia | abierto | sin cifras del efecto de recuerdos o diálogos en decisiones |
+| 2. Invención funcional y construcción | abierto | 5 831 incidencias de «ayuda en obras»; sin invención no enumerada acreditada |
+| 3. Costes, reparación y utilidad | abierto | balance de materiales sin cerrar pese a 5 831 ayudas en obras y 3 351 de cultivo |
+| 4. Cuerpos, ecología y recambio | parcial | meseta ~690–710 por el cupo de nacimientos (software, no ecología) |
+| 5. Herencia, memoria y aprendizaje | parcial | 45 776 actos de enseñanza; H1b refutada en C8 |
+| 6. Comunidades, cultura y roles | parcial | 31 conflictos en 162 días y 8 179 trueques; la ley de conflicto no está en las reglas públicas |
+| 7. Organización que se mantiene | abierto | cero componentes mantenidas acreditadas; `autopoiesisEstablished` falso |
+| 8. Territorio y naturaleza | parcial | cuencas de agua causan el 4 % de las muertes por sed; sin métricas de bioma |
+| 9. Mundo compartido y persistencia | parcial | V10 mudado al portátil, 710 vivos hacia el día 167; sin pruebas de concurrencia de red |
+| 10. Nuevas versiones de pruebas | parcial | V7 congelada e intacta; V10 arrancó en directorio separado |
+| 11. Interfaz y experiencia visual | parcial | cliente de 150 KB JS y 76 KB CSS; sin cifras actuales de telemetría de interfaz |
+| 12. Rendimiento y hardware | parcial | PERF2 ×1,37, PERF3, ~1,9 → ~3,9 pasos/s; sigue en un solo hilo |
+| 13. Neuroevolución posterior a la afinación | parcial | brazo B con C8 v3 en 0/12; el evaluador de `main` sigue en v2 |
+| 14. Calidad y continuidad del trabajo | parcial | T141–T143 fusionadas en `main` pero sin marcar en `tasks.md` |
+
+### 8. Pendiente (no acreditado)
+
+- C8 en mayoría de las semillas del laboratorio.
+- El público corriendo las reglas del laboratorio: reglas 11 está preparada en
+  `sprint/reglas11-defaults-20260923`, sin publicar.
+- Medir el C8 del mundo público (el gemelo de laboratorio y el diagnóstico en condición pública siguen
+  en marcha).
+
 ## Criterio de terminado a 60 días — primera evaluación (23 de septiembre de 2026)
+
+**Superada por la sección de la tarde:** C8 se decide con la serie v3 (ventana diaria); ver
+[«23 de septiembre de 2026 — balance medido del criterio de 60 días (C8 v3)»](#23-de-septiembre-de-2026--balance-medido-del-criterio-de-60-días-c8-v3)
+arriba.
 
 Laboratorio con 12 semillas NUEVAS (5, 13, 17, 23, 29, 101, 202, 303, 404, 505, 606, 707; ninguna usada
 para ajustar), 60 días, techo determinista de laboratorio de 100 habitantes (`--techo-lab 100`: la política

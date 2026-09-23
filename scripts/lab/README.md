@@ -159,7 +159,7 @@ la reproducción según el p95 de los últimos 120 pasos.
    consume todavía; esta réplica es el primer consumidor. **Desde PERF3 (2026-09-23) el servidor
    con `true` solo clona en los pasos con gestos** y el laboratorio no tiene gestos: para imitar el
    coste del servidor de hoy, `--params motor.clonPorPaso=false` (paso en el sitio); con `true` se mide
-   el servidor anterior (ver `docs/REGLAS.md`, «Motor: reserva solo en los pasos con gestos»).
+   el servidor anterior (ver `docs/REGLAS.md`, «Motor: reserva del paso», apartado PERF3).
 2. `store.save(world)` cuando `tick % persistencia.cadaTicks === 0`, **dentro** de la ventana
    medida (igual que `stepOnce`: el coste de guardar cuenta para el presupuesto del gobernador).
 3. `p95 = new RollingStepPerformance().record(stepMs)` (ventana de 120 pasos, `src/server/governor.ts`,
@@ -617,7 +617,7 @@ TMPDIR=/datos/tmp-atlas-lab npx tsx scripts/perf/paso-servidor.ts --db publico.s
 TMPDIR=/datos/tmp-atlas-lab npx tsx scripts/perf/paso-servidor.ts --seed 7 --pasos 1200 --gestos 50 --salida s.json
 ```
 
-Cifras: `docs/REGLAS.md`, «Motor: reserva solo en los pasos con gestos».
+Cifras: `docs/REGLAS.md`, «Motor: reserva del paso», apartado PERF3.
 
 ## El techo del hardware — `../curva-techo.mts` (T109)
 

@@ -462,7 +462,8 @@ deshidratación se repone aunque siga en rojo; con `apagar` la misma muerte no s
 ### Motor: reserva del paso (`motor.clonPorPaso`, 2026-09-23)
 
 `stepOnce` necesita poder deshacer un paso que falla. Con `motor.clonPorPaso=true` (default y producción)
-simula sobre `cloneWorld` y el mundo vigente no se toca hasta que el guardado confirma; con `false`
+simula sobre `cloneWorld` y el mundo vigente no se toca hasta que el guardado confirma (desde PERF3, solo
+en los pasos con gestos: ver el final de este apartado); con `false`
 (T104) toma un `puntoDeRestauracion`, simula sobre el mundo vigente y, si el paso lanza, `restaurar()`.
 Con pocos habitantes esa reserva ya cuesta tanto como el paso, así que el p95 supera los 50 ms del
 gobernador y el techo congela el crecimiento. **Se midió si el punto la abarata. No la abarata, y
@@ -512,6 +513,83 @@ guardado ya no deshace en memoria un paso que el disco dejó atrás: el punto se
 Para abaratar la reserva de verdad hay que dejar de copiar lo que el paso no toca. El primer blanco son las
 teselas: copiarlas sólo cuando un paso las escribe, o que `syncFauna` no las degrade con `delete`, para que el
 punto no tenga que reconstruirlas. Otra opción es que el gobernador no cuente la reserva como parte del paso.
+
+**Reserva solo en los pasos con gestos (PERF3, 2026-09-23).** El servidor público (mundo V10, 151 habitantes)
+tardaba unos 233 ms de pared por paso, iba a 3 pasos/s en vez de 10 y el gobernador había congelado la
+población. La reserva solo sirve para deshacer un paso **y seguir**, y el único fallo del que el servidor se
+recupera es `SessionRevoked`: la sesión de un gesto se revoca entre aceptarlo y guardarlo, el paso se deshace
+y se reintenta sin ese gesto. Solo puede darse en un paso con gestos, porque `Store.save` solo recibe sesiones
+que comprobar de los gestos del lote. Cualquier otro fallo pausa el mundo para siempre (`failed`). Por eso
+`motor.clonPorPaso=true` significa ahora **reserva por clon en los pasos con gestos**: un paso con gestos se
+simula sobre `cloneWorld` como siempre, y uno sin gestos (casi todos) se simula en el sitio, como el
+laboratorio. `motor.clonPorPaso=false` no cambia. No hay clave nueva: `paramsOf` entra en `digestoCanonico` y
+una clave nueva cambiaría el digesto de todos los mundos.
+
+*Si un paso sin reserva falla*, el mundo queda a medio paso (o completo pero sin confirmar, si lo que falló
+fue el guardado) y se pausa como siempre. Ese mundo no es un estado del mundo, así que nada lo proyecta ni lo
+guarda. `avanzar` no pasa de `failed` y el cierre no guarda, como antes. `/api/world` y la vista de un
+cliente que llega por WS, o que cambia de cámara, reciben la **última vista proyectada**, marcada en pausa y
+con su paso («un paso falló a medias; se muestra el último estado enviado (paso N)»), sea cual sea su cámara.
+Si no se proyectó ninguna, responden 503 «en pausa», y las biografías y recetas responden con error. Los
+clientes conectados reciben su última vista en pausa, como siempre. Lo mismo vale ahora para un punto de
+restauración que no se pudo restaurar, que antes seguía proyectándose a medias. Se descartó recargar el
+último estado durable del Store: sobre la copia pública (3,3 GB) `load()` tardó 140–330 s con el hilo
+bloqueado, y el fallo que pausó puede ser del propio disco. Al reiniciar, el mundo retoma de su último
+guardado, como tras cualquier pausa. Pruebas en `tests/projection-failure.test.ts` (fallo a mitad del paso y
+al guardar, con y sin vista anterior) y `tests/restauracion-paso.test.ts` (`SessionRevoked` con gesto,
+con clon y con punto, deshace exacto y sigue como un gemelo que nunca vio el gesto).
+
+*Identidad.* `scripts/perf/paso-servidor.ts` corre `createApp` con reloj real y se copió a un `git archive`
+de la base (`0ea1514`). La receta de producción y un presupuesto del gobernador de 5 000 ms (el reloj de
+pared no entra en el mundo) dan los mismos `digestoCanonico` que la base:
+
+- Copia del respaldo público de las 10:01 (paso 306 400, 151 habitantes, 22 016 teselas): cada 100 pasos
+  hasta 600 y lo durable, sin gestos y con uno cada 50. Las corridas con el planificador real llegan al mismo
+  mundo del paso 307 000.
+- Semillas 7, 42 y 51926 con 1 200 pasos, sin gestos y con uno cada 50: los 12 cortes, el final y lo
+  durable son iguales en las seis corridas.
+
+Además, la prueba (13) compara el nuevo camino con el punto en esas tres semillas, con gestos y cadencia 100.
+Las pruebas (5), (9), (10) y (12) siguen comparando `true` con `false`. Comandos en `scripts/lab/README.md`.
+
+*Medida.* Misma copia, 600 pasos por lado y las dos corridas a la vez. La carga de la torre cambió mucho durante
+la mañana, así que solo se comparan corridas simultáneas. Las cifras son ms de pared de `stepOnce`, con dos
+pares de corridas: carga 70–80 y carga 45–60.
+
+| | Base `0ea1514` | PERF3 |
+|---|---|---|
+| `stepMs` p50 / p95 | 161,7 / 318,3 · 148,2 / 273,3 | 41,2 / 166,6 · 45,9 / 190,6 |
+| `stepMs` media | 199,3 · 180,7 | 82,6 · 88,1 |
+| `cloneMs` p50 | 91,3 · 85,3 | 0 · 0 |
+| `simulationMs` p50 / p95 | 64,0 / 195,7 · 58,6 / 172,2 | 41,2 / 158,2 · 45,9 / 182,2 |
+| `saveMs` media (6 guardados en 600 pasos) | 21,9 · 18,9 | 22,2 · 22,2 |
+| CPU por paso, media | 203,0 · 197,8 | 65,7 · 72,7 |
+| pasos/s seguidos (`stepOnce` tras `stepOnce`) | 5,0 · 5,5 | 12,1 · 11,3 |
+
+Con el planificador real (`tickMs` 100), 600 pasos y las corridas a la vez:
+
+| Carga | Base | Solo la reserva nueva | PERF3 (reserva y planificador) |
+|---|---|---|---|
+| 70–80 | 3,4 pasos/s | — | 7,3 pasos/s |
+| 20–25 | — | 9,1 pasos/s | 9,2 pasos/s |
+| 50–60 | 3,1 pasos/s | 5,0 pasos/s | 5,7 pasos/s |
+
+Simular en el sitio también abarata la simulación: no hay un mundo entero de basura por paso, y los índices
+por arreglo (teselas, fauna) sobreviven de un paso al siguiente. El punto (T104) reconstruye las teselas en cada
+paso porque `syncFauna` hace `delete tile.species`, y en el sitio esas teselas quedan en modo diccionario. En
+3 000 pasos en el sitio sobre la copia pública, la simulación media por bloque de 300 pasos osciló entre 54 y
+72 ms, sin tendencia. Reconstruir solo las teselas en cada paso costaba 23 ms p50.
+
+*Planificador.* Tras un paso más largo que `tickMs`, el siguiente se citaba `tickMs` después: con pasos de
+~233 ms, 100 ms ociosos por paso. Ahora se cita ya (`setTimeout` 0). Sigue habiendo un solo paso por
+callback, así que la E/S corre entre pasos, el retraso no se recupera en ráfaga y, a tiempo, la cita compensa
+la deriva. Con la torre tranquila casi ningún paso pasa de 100 ms y el cambio apenas se nota. Con carga
+cuenta: de 5,0 a 5,7 pasos/s.
+
+**Lo que queda.** El p95 sigue por encima de los 50 ms del gobernador: 63–67 ms con la torre tranquila y
+167–191 ms con carga. Con 150 habitantes el techo seguirá sin dejar crecer. Ahora lo fijan los pasos más caros
+de la simulación (`simulationMs` p95 158–182 ms con carga), no la reserva. En producción el servidor corre con
+prioridad idle (ananicy), así que sus cifras se parecen a las de la torre cargada.
 
 Estas opciones se validan y persisten, pero **T102 no activa backends, deltas ni nuevas señales,
 ni cambia los topes de validación o fundación de comunidades**. La ejecución sigue usando el

@@ -8,14 +8,16 @@ import { ajustePracticaOficios, ajusteSaturacionLocal, ajusteVocacion, assertWor
   explorationTarget, heredarVocacion, OFICIOS_DE_LINAJE, stepWorld, type Person, type World } from '../src/world/index.js';
 import { CLAVES_POSTERIORES } from './lib/claves-posteriores.js';
 
-const PARAMS_B = 'persistencia.cadaTicks=300,social.disputaNecesidad=0.45,social.disputaEscasez=3,social.disputaRadio=3';
+// La definición real del brazo B (l60v3/brazos-l60v3.txt y replica.json) incluye
+// social.memoriaDisputa=8 (CONFL encendida); un B sin esa clave mide conflicto legible apagado, no B.
+const PARAMS_B = 'persistencia.cadaTicks=300,social.disputaNecesidad=0.45,social.disputaEscasez=3,social.disputaRadio=3,social.memoriaDisputa=8';
 const DIGESTOS_5329242: Record<string, string> = {
   'default:7': '973fd1328507694db50329b07275116af8a8b0e907a0608a3c5460d2c652419e',
   'default:42': 'e7e0e8562d05d31931bd60679df60a07c873c33d9487979ebf01d8ad09dd455e',
   'default:51926': '690f0dd8bf9d680a102c01c17b91481c840dc139ff17bdc1989930b5f2b9f58d',
-  'B:7': 'a66d9363a7ad68368c0ae34f8f2b30ef0da43ad79eaaf21453c2b1db7085faf0',
-  'B:42': 'ece9c6c41f52003d1668c2b0f82e83952aed2b48bfdc1eec505c960a9d61ae6d',
-  'B:51926': '891f3c2912e0aa3dd14df37436fc2a9b7a383dcb07963ff6249257afd6cdda2f',
+  'B:7': 'd02e684d13ab9b3bc5899cb4881473eb6b384c088747eb43c07f07c0997149f8',
+  'B:42': 'a2323eeb23a66d4638694199865cfed9518589c122b014e0ed01ecfb7b764729',
+  'B:51926': 'ec5c11f3d15b20c8bbde727f9f7c1102b876159a64d43c7bfcbdad1ad23f92f1',
 };
 
 function digestoFisico(world: World): string {

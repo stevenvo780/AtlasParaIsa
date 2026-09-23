@@ -32,7 +32,7 @@ test('M10: el HUD y Paisaje explican el territorio con datos del estado', () => 
   for (let i = 0; i < 300; i++) stepWorld(world);
   const view = projectWorld(world);
   const hud = rotuloTerritorio(view);
-  assert.match(hud.texto, new RegExp(`^${view.discoveredChunks} regi(ón explorada|ones exploradas) · ${view.activeChunks} activas? · ${view.settlementCount} asentamientos?$`));
+  assert.match(hud.texto, new RegExp(`^${view.activeChunks} regi(ón activa|ones activas) · ${view.discoveredChunks} descubiertas? · ${view.settlementCount} asentamientos?$`));
   assert.match(hud.ayuda, /16 × 16/);
   const html = seccionTerritorio(view);
   assert.match(html, /Regiones descubiertas/); assert.match(html, /Asentamientos/);

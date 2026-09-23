@@ -7,13 +7,14 @@ import type { WorldView } from '../shared/types.js';
 import { esc, number } from './ui-catalog.js';
 import { sparkline, statCard } from './charts.js';
 
-/** HUD: «10 regiones exploradas · 3 activas · 5 asentamientos». */
+/** HUD: «13 regiones activas · 7 descubiertas · 1 asentamiento». Activas puede superar a descubiertas: el
+ * servidor mantiene vivas también las regiones vecinas de los habitantes, aunque nadie haya entrado en ellas. */
 export function rotuloTerritorio(view: Pick<WorldView, 'infinite' | 'discoveredChunks' | 'activeChunks' | 'settlementCount'>): { texto: string; ayuda: string } {
   if (!view.infinite) return { texto: 'Región inicial', ayuda: 'El mundo todavía es su región inicial.' };
   const exploradas = view.discoveredChunks ?? 0, activas = view.activeChunks, asentamientos = view.settlementCount ?? 0;
   return {
-    texto: `${number(exploradas)} ${exploradas === 1 ? 'región explorada' : 'regiones exploradas'}${activas !== undefined ? ` · ${number(activas)} ${activas === 1 ? 'activa' : 'activas'}` : ''} · ${number(asentamientos)} ${asentamientos === 1 ? 'asentamiento' : 'asentamientos'}`,
-    ayuda: 'Una región son 16 × 16 casillas. Exploradas: las que alguien descubrió. Activas: las que el servidor simula ahora, cerca de los habitantes; el resto descansa con su estado guardado. Asentamientos: construcciones levantadas.',
+    texto: `${activas !== undefined ? `${number(activas)} ${activas === 1 ? 'región activa' : 'regiones activas'} · ${number(exploradas)} ${exploradas === 1 ? 'descubierta' : 'descubiertas'}` : `${number(exploradas)} ${exploradas === 1 ? 'región descubierta' : 'regiones descubiertas'}`} · ${number(asentamientos)} ${asentamientos === 1 ? 'asentamiento' : 'asentamientos'}`,
+    ayuda: 'Una región son 16 × 16 casillas. Activas: las que el servidor simula ahora, alrededor de los habitantes (también las vecinas que nadie ha pisado); el resto descansa con su estado guardado. Descubiertas: aquellas en las que alguien entró. Asentamientos: construcciones levantadas.',
   };
 }
 

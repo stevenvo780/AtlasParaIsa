@@ -506,12 +506,16 @@ function returnCard(current: WorldView, since: number): void {
 }
 function renderJournal(): void {
   for (const chip of root.querySelectorAll<HTMLButtonElement>('[data-journal-filter]')) chip.setAttribute('aria-pressed', String(chip.dataset.journalFilter === journalFilter));
-  const todos = cronica.todos(), lista = filtrar(todos, journalFilter).reverse(), shown = lista.slice(0, 80);
-  el('journal-note').textContent = todos.length ? `Este navegador guarda ${number(todos.length)} episodios desde que abriste la carta${cronica.size >= cronica.max ? ' (los más viejos y comunes se van olvidando)' : ''}. ${lista.length > shown.length ? `Se muestran los ${shown.length} más recientes de ${number(lista.length)}.` : ''}` : '';
+  // Los hitos que este navegador vio en visitas anteriores (localStorage) no se pierden: se listan con su
+  // texto y su momento, sin causa (no se guardó), marcados como vistos antes.
+  const anteriores: ChronicleEvent[] = hitosGuardados.filter(h => !cronica.get(h.id)).map(h => ({ id: h.id, tick: h.tick, kind: h.kind as ChronicleEvent['kind'], actors: [], text: h.text, cause: '', source: 'simulation' }));
+  const previos = new Set(anteriores.map(e => e.id));
+  const todos = [...anteriores, ...cronica.todos()].sort((a, b) => a.tick - b.tick), lista = filtrar(todos, journalFilter).reverse(), shown = lista.slice(0, 80);
+  el('journal-note').textContent = todos.length ? `Este navegador guarda ${number(cronica.size)} episodios desde que abriste la carta${anteriores.length ? ` y ${number(anteriores.length)} ${anteriores.length === 1 ? 'hito' : 'hitos'} de visitas anteriores` : ''}${cronica.size >= cronica.max ? ' (los más viejos y comunes se van olvidando)' : ''}. ${lista.length > shown.length ? `Se muestran los ${shown.length} más recientes de ${number(lista.length)}.` : ''}` : '';
   el('journal-events').innerHTML = shown.length ? shown.map(event => {
     const tipo = clasificar(event), cedio = quienCedio(event);
     const who = (id: string) => world ? personLink(world, id) : esc(id);
-    return `<article class="chronicle-event" data-grupo="${tipo.grupo}"><div class="event-label"><span>${esc(tipo.etiqueta)}</span><span>${event.source === 'sample' ? 'Material de prueba' : event.source === 'approved' ? 'Contenido aprobado' : 'Ficción simulada'}</span></div><p>${esc(enClaro(event.text, { world }))}</p>${cedio ? `<p class="event-yield" data-yield>Cedió: ${who(cedio.cede)} (${esc(cedio.como)}); ${who(cedio.sigue)} siguió.</p>` : ''}<div class="event-cause"><strong>Qué influyó</strong> ${esc(enClaro(event.cause, { world }))}</div><span class="event-tick">${esc(momento(event.tick))}</span></article>`;
+    return `<article class="chronicle-event" data-grupo="${tipo.grupo}"><div class="event-label"><span>${esc(tipo.etiqueta)}</span><span>${event.source === 'sample' ? 'Material de prueba' : event.source === 'approved' ? 'Contenido aprobado' : 'Ficción simulada'}</span></div><p>${esc(enClaro(event.text, { world }))}</p>${cedio ? `<p class="event-yield" data-yield>Cedió: ${who(cedio.cede)} (${esc(cedio.como)}); ${who(cedio.sigue)} siguió.</p>` : ''}${previos.has(event.id) ? '<div class="event-cause">Visto por este navegador en una visita anterior; su causa no se guardó.</div>' : `<div class="event-cause"><strong>Qué influyó</strong> ${esc(enClaro(event.cause, { world }))}</div>`}<span class="event-tick">${esc(momento(event.tick))}</span></article>`;
   }).join('') : `<p class="quiet-event">${todos.length ? 'No hay episodios de este tipo entre los que recibió este navegador.' : 'Todavía no hay episodios guardados. El mundo también tiene silencios.'}</p>`;
 }
 

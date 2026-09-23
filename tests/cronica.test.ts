@@ -107,7 +107,7 @@ test('M5: «Desde tu última visita» dice lo que cambió con contadores del est
   const prev = { ...now, tick: 0, births: now.births - 3, regions: now.regions - 2, recipes: now.recipes };
   view.demography = { deaths: now.deaths + 1, causes: {}, recent: [{ id: 'descendant-3', name: 'Olmo 3', generation: 1, parents: [], bornAt: 0, diedAt: 30, cause: 'dehydration' }] };
   const r = resumenDesdeVisita(prev, 0, view);
-  assert.match(r.dias, /^Pasaron 0 días del mundo\.$/);
+  assert.match(r.dias, /^Pasaron 60 pasos del mundo\.$/, 'menos de una décima de día se dice en pasos');
   assert.ok(r.cambios.includes('+3 nacimientos'));
   assert.ok(r.cambios.includes('1 vida terminó (Olmo 3, de sed)'));
   assert.ok(r.cambios.includes('+2 regiones'));

@@ -54,8 +54,8 @@ export function genealogiaFicha(p: PersonView, view: WorldView, extra: Extra): {
   const familia = extra?.familia;
   if (!familia) return { progenitores: '', descendencia: '' };
   const progenitores = familia.progenitores.length ? familia.progenitores.map(pariente).join('') : '<span class="lineage-absent">Población inicial · sin progenitores registrados</span>';
-  const resumen = familia.totalHijos ? `${number(familia.totalHijos)} (${number(familia.hijosVivos)} ${familia.hijosVivos === 1 ? 'vive' : 'viven'})` : 'ninguna';
-  const descendencia = `<p class="lineage-count" data-offspring>Descendencia: ${esc(resumen)}</p>${familia.hijos.map(pariente).join('')}${familia.totalHijos > familia.hijos.length ? `<span class="lineage-absent">y ${number(familia.totalHijos - familia.hijos.length)} más</span>` : ''}`;
+  const resumen = familia.totalHijos ? `${number(familia.totalHijos)} en total · ${number(familia.hijosVivos)} ${familia.hijosVivos === 1 ? 'vive' : 'viven'}` : 'Ninguna';
+  const descendencia = `<p class="lineage-count" data-offspring>${esc(resumen)}</p>${familia.hijos.map(pariente).join('')}${familia.totalHijos > familia.hijos.length ? `<span class="lineage-absent">y ${number(familia.totalHijos - familia.hijos.length)} más</span>` : ''}`;
   return { progenitores, descendencia };
 }
 

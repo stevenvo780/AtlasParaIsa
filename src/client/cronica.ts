@@ -106,7 +106,7 @@ const plural = (n: number, uno: string, varios: string): string => `${number(n)}
  * de una versión anterior) solo se afirma el tiempo transcurrido y los episodios que siguen en la ventana. */
 export function resumenDesdeVisita(prev: ContadoresVisita | null, lastTick: number, view: WorldView): { dias: string; cambios: string[] } {
   const pasos = Math.max(0, view.tick - lastTick);
-  const dias = `Pasaron ${number(pasos / TICKS_POR_DIA, 1)} ${Math.abs(pasos / TICKS_POR_DIA - 1) < 0.05 ? 'día' : 'días'} del mundo.`;
+  const dias = pasos < TICKS_POR_DIA / 10 ? `Pasaron ${number(pasos)} ${pasos === 1 ? 'paso' : 'pasos'} del mundo.` : `Pasaron ${number(pasos / TICKS_POR_DIA, 1)} ${Math.abs(pasos / TICKS_POR_DIA - 1) < 0.05 ? 'día' : 'días'} del mundo.`;
   const now = contadoresDe(view), cambios: string[] = [];
   if (prev && now) {
     const nacidos = now.births - prev.births, muertes = now.deaths - prev.deaths;

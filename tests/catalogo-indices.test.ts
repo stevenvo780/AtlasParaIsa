@@ -9,7 +9,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { bindTechnologyCatalogue, enableTechnologyCatalogue, markTechnologyCatalogueCommitted, resolveTechnologyRecipe,
-  updateTechnologyRecipeStats, type TechnologyCatalogueReader } from '../src/world/technology-catalogue.js';
+  updateTechnologyRecipeStats, withRecipeSession, type TechnologyCatalogueReader } from '../src/world/technology-catalogue.js';
 import { defaultTechnologyState } from '../src/world/technology.js';
 import type { TechnologyRecipe, TechnologyState } from '../src/shared/technology.js';
 
@@ -102,4 +102,70 @@ test('con ids repetidos en la ventana vuelve el recorrido lineal de siempre', ()
   // Tras el toque ya no hay duplicados y vuelve el índice; la respuesta sigue siendo la de find.
   const otra = state.recipes[0]!;
   assert.equal(resolveTechnologyRecipe(host, otra.id), otra);
+});
+
+/** Procedencia de un objeto devuelto: el de `pending` (posición), uno ya devuelto antes (en qué
+ * operación apareció por primera vez) o una copia nueva. Comparable entre dos mundos gemelos. */
+function procedencia(objeto: TechnologyRecipe | undefined, pending: readonly TechnologyRecipe[], vistos: Map<TechnologyRecipe, number>, n: number): string {
+  if (!objeto) return 'nada';
+  const p = pending.indexOf(objeto);
+  if (p >= 0) return `pending ${p}`;
+  const visto = vistos.get(objeto);
+  if (visto !== undefined) return `visto ${visto}`;
+  vistos.set(objeto, n); return 'nuevo';
+}
+const huella = (state: TechnologyState) => JSON.stringify({ ventana: state.recipes, pending: state.catalogue!.pending,
+  compartidos: state.recipes.map(recipe => state.catalogue!.pending.indexOf(recipe)) });
+
+for (const [semilla, total, ventana] of [[11, 40, 8], [12, 300, 256], [13, 20, 20], [14, 30, 1]] as const) {
+  test(`una sesión de resolución deja la misma ventana que tocar uno a uno (semilla ${semilla}, ${total} recetas, ventana ${ventana})`, () => {
+    const r = aleatorio(semilla), a = mundo(total, ventana), b = mundo(total, ventana);
+    const A = a.host.technology, B = b.host.technology;
+    const vistosA = new Map(A.recipes.map((recipe, i) => [recipe, -1 - i])), vistosB = new Map(B.recipes.map((recipe, i) => [recipe, -1 - i]));
+    let n = 0;
+    for (let bloque = 0; bloque < 400; bloque++) {
+      const operaciones = Array.from({ length: 1 + Math.floor(r() * 40) }, () => ({ id: `recipe-${1 + Math.floor(r() * (total + 2))}`, cache: r() < 0.85, estadistica: r() < 0.03 }));
+      const antes = A.recipes;
+      const inicio = n;
+      const enSesion = withRecipeSession(a.host, () => operaciones.map(({ id, cache, estadistica }, k) => {
+        if (estadistica) { if (a.archivo.has(id)) updateTechnologyRecipeStats(a.host, id, { uses: 1 }); return 'estadística'; }
+        const pendingAntes = [...A.catalogue!.pending];
+        const resultado = resolveTechnologyRecipe(a.host, id, { cache });
+        return `${procedencia(resultado, pendingAntes, vistosA, inicio + k)} ${JSON.stringify(resultado ?? null)}`;
+      }));
+      const sinSesion = operaciones.map(({ id, cache, estadistica }, k) => {
+        if (estadistica) { if (b.archivo.has(id)) updateTechnologyRecipeStats(b.host, id, { uses: 1 }); return 'estadística'; }
+        const pendingAntes = [...B.catalogue!.pending];
+        const resultado = resolveTechnologyRecipe(b.host, id, { cache });
+        return `${procedencia(resultado, pendingAntes, vistosB, inicio + k)} ${JSON.stringify(resultado ?? null)}`;
+      });
+      n += operaciones.length;
+      for (const [recipe, i] of [...A.recipes.entries()].map(([i, recipe]) => [recipe, i] as const)) if (!vistosA.has(recipe)) vistosA.set(recipe, -1000 - i);
+      for (const [recipe, i] of [...B.recipes.entries()].map(([i, recipe]) => [recipe, i] as const)) if (!vistosB.has(recipe)) vistosB.set(recipe, -1000 - i);
+      assert.deepEqual(enSesion, sinSesion, `bloque ${bloque}`);
+      assert.equal(huella(A), huella(B), `bloque ${bloque}: ventana y pending`);
+      if (!operaciones.some(o => o.estadistica) && operaciones.some(o => o.cache && a.archivo.has(o.id))) assert.notEqual(A.recipes, antes);
+      if (r() < 0.1) {
+        for (const [host, archivo] of [[a.host, a.archivo], [b.host, b.archivo]] as const) {
+          for (const recipe of host.technology.catalogue!.pending) archivo.set(recipe.id, structuredClone(recipe));
+          markTechnologyCatalogueCommitted(host.technology);
+        }
+      }
+    }
+  });
+}
+
+test('mientras dura la sesión el arreglo de la ventana no cambia; al cerrar se materializa uno nuevo', () => {
+  const { host } = mundo(20, 5), state = host.technology, antes = state.recipes, copia = [...antes];
+  withRecipeSession(host, () => {
+    for (const id of ['recipe-1', 'recipe-2', 'recipe-19', 'recipe-3']) resolveTechnologyRecipe(host, id);
+    assert.equal(state.recipes, antes);
+    mismosObjetos(state.recipes, copia, 'intacto');
+  });
+  assert.notEqual(state.recipes, antes);
+  assert.deepEqual(state.recipes.map(recipe => recipe.id), ['recipe-20', 'recipe-1', 'recipe-2', 'recipe-19', 'recipe-3']);
+  // Sin toques no hay arreglo nuevo.
+  const quieto = state.recipes;
+  withRecipeSession(host, () => resolveTechnologyRecipe(host, 'recipe-4', { cache: false }));
+  assert.equal(state.recipes, quieto);
 });

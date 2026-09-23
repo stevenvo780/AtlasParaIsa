@@ -7,7 +7,7 @@ import { tileAt } from './spatial.js';
 import { constructionCost, waterAvailable } from './inventions.js';
 import { CAPABILITIES, itemCapacities, MASS_UNIT, materialCapacities, shareTechnology, transferTechnologyItem } from './technology.js';
 import type { Capability, MaterialBatch, TechnologyProgram, TechnologyRecipe } from '../shared/technology.js';
-import { resolveTechnologyRecipe } from './technology-catalogue.js';
+import { resolveTechnologyRecipe, withRecipeSession } from './technology-catalogue.js';
 import { algunoCerca, filtrarCerca } from './indice-puntos.js';
 
 type Emit = (event: Omit<ChronicleEvent, 'id' | 'tick'>) => ChronicleEvent;
@@ -265,6 +265,10 @@ export function settlementOpportunity(world: World, person: Person): { target: {
 }
 export function cooperationOpportunity(world: World, person: Person): Opportunity | undefined {
   if (!world.cooperationEnabled) return;
+  // Evaluación pura (nada del mundo cambia salvo la ventana de recetas): sesión de resolución.
+  return withRecipeSession(world, () => evaluateCooperation(world, person));
+}
+function evaluateCooperation(world: World, person: Person): Opportunity | undefined {
   const opportunities: Opportunity[] = [];
   let practiced: string[] | undefined;
   for (const other of world.people) {

@@ -322,6 +322,15 @@ function reproduce(world: AnimalWorld, state: LocalState, active: Animal[], emit
   }
 }
 
+/** Deja `animals` en orden canónico, en su sitio. El paso anterior ya lo dejó así salvo que una
+ * activación haya añadido fauna, y comprobarlo con un `<` por par cuesta un orden de magnitud menos que
+ * `sort` sobre un arreglo ordenado (el comparador se llama desde el motor dos veces por par). Mismo
+ * resultado: un arreglo de ids estrictamente crecientes es un punto fijo del `sort` estable; si no lo
+ * es (desorden o ids repetidos), se ordena como siempre. */
+function ordenCanonico(animals: Animal[]): void {
+  for (let i = 1; i < animals.length; i++) if (!(animals[i - 1]!.id < animals[i]!.id)) { animals.sort(canonical); return; }
+}
+
 /** Máscara de fauna del paso (T116), de solo lectura: quién piensa en este tick. La calcula el
  * coordinador una vez, con la ventana sobre la población GLOBAL en orden canónico; las regiones sólo
  * consultan pertenencia (`seleccionDe`). Una ventana o un offset por región cambiaría qué animales
@@ -331,7 +340,7 @@ export interface MascaraFauna {
   readonly seleccion: readonly Animal[]; readonly ids: ReadonlySet<string>;
 }
 export function mascaraFauna(world: AnimalWorld): MascaraFauna {
-  world.animals.sort(canonical);
+  ordenCanonico(world.animals);
   const population = world.animals.length;
   const offset = population ? ((world.tick % population) * MAX_ACTIVE_ANIMALS) % population : 0;
   const selected = population <= MAX_ACTIVE_ANIMALS ? [...world.animals]
@@ -387,7 +396,7 @@ export function stepAnimals(world: AnimalWorld, emit?: AnimalEmitter, mascara?: 
     animal.lastDecision = world.tick - 12;
   }
   world.animals = world.animals.filter(a => a.health > 0);
-  reproduce(world, state, active, emit); world.animals.sort(canonical); syncFauna(world.tiles, world.animals);
+  reproduce(world, state, active, emit); ordenCanonico(world.animals); syncFauna(world.tiles, world.animals);
 }
 
 /** A human hunt removes exactly one living identity on the requested cell, at most once. */

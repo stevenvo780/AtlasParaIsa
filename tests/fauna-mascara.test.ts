@@ -135,6 +135,19 @@ test('el paso con la máscara del coordinador repartida entre 1 y 8 particiones 
   assert.equal(JSON.stringify(events), JSON.stringify(events2));
 });
 
+test('el orden canónico rápido da el mismo arreglo que ordenar: ordenado, invertido, casi ordenado e ids repetidos', () => {
+  const base = herd(40).animals;
+  const repetido = base.map(a => ({ ...a }));
+  repetido[7]!.id = repetido[8]!.id; repetido[20]!.id = repetido[3]!.id; // corrupto a propósito: la estabilidad manda
+  const casos = [[...base], [...base].reverse(), [...base.slice(1), base[0]!], repetido, [...repetido].reverse(), [repetido[8]!, repetido[7]!]];
+  for (const caso of casos) {
+    const w = world([], caso), esperado = [...caso].sort(canonicalId);
+    mascaraFauna(w);
+    assert.equal(w.animals, caso);
+    assert.ok(w.animals.length === esperado.length && w.animals.every((a, i) => a === esperado[i]));
+  }
+});
+
 test('rechaza una máscara de otro paso', () => {
   const w = herd(12);
   const porTick = mascaraFauna(w);

@@ -1,0 +1,38 @@
+# Unidad systemd de USUARIO del servidor público de Una Carta Para Isa (atlas.humanizar.tech).
+# Habilitada desde el 2026-09-22 junto con atlas-respaldo.timer. La instalada en ~/.config/systemd/user
+# es una COPIA de este fichero, no un enlace: editarlo aquí no cambia el servicio. Solo se copia y se
+# hace daemon-reload dentro del procedimiento de publicación de CLAUDE.md. Estado vigente: docs/ESTADO.md.
+#
+# Instalación (no toca ~/.local/bin/atlas-servidor*):
+#   ~/.config/atlas-para-isa/runtime.env con CARTA_DATA_DIR absoluto (el mundo de esa versión, fuera de
+#   data/) y DEST (sus respaldos); sin credenciales.
+#   mkdir -p ~/.config/systemd/user && cp scripts/systemd/atlas-servidor.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload && systemctl --user enable --now atlas-servidor.service
+#   loginctl enable-linger stev        # para que arranque sin sesión abierta
+# No lanzar además el wrapper en tmux: dos procesos pelearían por el puerto y por el mismo mundo.
+# Publicar (CLAUDE.md): bash scripts/deploy-check.sh <sha> → systemctl --user start atlas-respaldo.service
+#   y verificar la copia → systemctl --user stop atlas-servidor.service y verificar proceso y puerto libres
+#   → compilar main → systemctl --user start atlas-servidor.service → health, assets y estado durable.
+#   Nunca compilar antes de detener: el servicio sirve dist/client en caliente desde este árbol.
+# Log: journalctl --user -u atlas-servidor -f
+[Unit]
+Description=Una Carta Para Isa — servidor público (atlas.humanizar.tech)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/atlas-servidor
+WorkingDirectory=/datos/workspaces/personal/AtlasParaIsa
+Restart=always
+RestartSec=5
+# El mundo se guarda por la cadencia configurada y al confirmar gestos; dar tiempo al cierre ordenado.
+TimeoutStopSec=60
+KillSignal=SIGINT
+Environment=NODE_ENV=production
+# Configuración operativa sin credenciales; permite separar los mundos publicados.
+# El respaldo carga el mismo archivo para copiar el mundo realmente servido.
+EnvironmentFile=%h/.config/atlas-para-isa/runtime.env
+
+[Install]
+WantedBy=default.target

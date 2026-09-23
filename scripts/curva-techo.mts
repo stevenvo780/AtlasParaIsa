@@ -23,11 +23,12 @@
  *
  * `--hilos`/`--gpu` se ACEPTAN y se REGISTRAN en `motor.hilos`/`motor.gpu` (T102, reservados
  * desde hoy) y en el punto/`curva.json`, pero ningún backend paralelo ni de GPU existe todavía
- * en `stepWorld`: el paso corre 100 % serial sea cual sea el valor pedido. `fraccionSerial` es
- * por eso `1` en cada punto — no una medición de fases (esa la trae T107 con
- * `runtime.fases`/`performance.fases`, que este árbol —partido de `694f6b6`— aún no tiene
- * integrado); cuando T107 aterrice en el Gate A y, más adelante, un backend paralelo real
- * exista, este campo debe leer esa instrumentación en vez de la constante de hoy.
+ * en `stepWorld`: el paso corre 100 % serial sea cual sea el valor pedido. `fraccionSerial` vale
+ * por eso `1` en cada punto, a propósito: dice «no hay backend paralelo», no es una medición. La
+ * medición de fases ya existe (T107: `runtime.fases` y `fraccionSerial(fases)` en `app.ts`), pero
+ * mide otra magnitud, la fracción del tiempo en FASES_SERIALES (la f de Amdahl, menor que 1), y
+ * `tests/curva-techo.test.ts` exige el 1. Este campo cambiará cuando exista un backend paralelo real;
+ * si se quiere registrar la f medida antes, va en un campo nuevo (p. ej. `fraccionSerialMedida`).
  *
  * Escala de habitantes: los sintéticos son CLONES ESTRUCTURALES de un fundador vivo
  * (generación 0, sin padres) del propio `createWorld` — la «misma vía que usa createWorld»
@@ -40,8 +41,9 @@
  * (`assertCommon` exige `walkable`, no solo pertenecer a un chunk activo) y, al no activar
  * chunks nuevos, mantiene aislado el eje de escala de habitantes del de teselas.
  * `world.reproductionEnabled = false` desde el arranque: el instrumento
- * decide la escala explícitamente, la reproducción orgánica (que sí mide
- * `scripts/curva-poblacion.mts`) solo metería ruido de emparejamiento no determinista.
+ * decide la escala explícitamente, la reproducción orgánica (que medía el antiguo
+ * `scripts/curva-poblacion.mts`, archivado en el tag `archivo/campanas-20260922`) solo metería
+ * ruido de emparejamiento no determinista.
  *
  * Escala de teselas: los sintéticos son «anclas» del mismo tipo, separadas 3 chunks entre sí
  * y centradas en su chunk, para que el bloque de hasta 3×3 chunks que `maintainRegions`

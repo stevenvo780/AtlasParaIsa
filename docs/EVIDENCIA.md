@@ -5,7 +5,10 @@
 > `MANIFEST.sha256`, a `/datos/workspaces/personal/AtlasParaIsa-archivo/evidencia-local-20260922`
 > (local, no versionado). Desde esa fecha, lo que solo existe en local se cita así, sin enlace, y
 > `npx tsx scripts/check-links.ts` comprueba los enlaces de todos los .md. El estado publicado está
-> en [ESTADO.md](ESTADO.md).
+> en [ESTADO.md](ESTADO.md). Los instrumentos de las campañas cerradas del 22 de septiembre
+> (coherencia, reserva familiar V8/V9, semilla por defecto y continuación de checkpoints), sus tests,
+> sus runbooks y los bancos de un solo uso se retiraron de main y se conservan en el tag
+> `archivo/campanas-20260922`; las evidencias JSON que produjeron siguen en `docs/evidencia-2026-09-22/`.
 
 ## Noche del 22 de septiembre de 2026
 
@@ -697,7 +700,7 @@ Corte de 8 s (carga 3 s). El mundo extinto queda en `data/world-20260919-1627-ex
 La sesión murió a las 17:17 del 19 (con ella el tmux y el servidor público) y el barrido quedó a medias: con `cuerpo.longevidadPorResiliencia=4` (default) llegaron a ≥ 28 días 4 semillas; las de resiliencia 12 no terminaron. Resultado a 28–30 días: **seed-1 población 284** (360 nacimientos; muertes 46 sed / 8 exposición / 38 senescencia), **seed-6 130** (179 nac.; 9/10/46), **seed-7 115** (138 nac.; 0/11/28), **seed-4 extinta** (2 vivos: S e I; 15 nac.; 20 sed / 6 exposición / 3 senescencia; cae de 20 a 3 entre los días 9 y 15 por sed). Lectura: **sin el tope de 40 la población se reemplaza y crece** (3 de 4 semillas ×7–18 en 30 días, ≥ 3 generaciones) — la extinción del mundo público la causó el tope, no la ley de senescencia; el riesgo residual es la **sed** en semillas con poca agua cerca del origen (seed-4), coherente con `agua.cuencas` 0,4 recién hecho real (T035/R1). Pendiente T051: repetir con 8 semillas completas, medir sed por semilla contra `regionesSinAgua` y decidir si el origen garantiza una reserva (exención) o si se sube `cuencas`.
 
 ### 2026-09-21 · caída de dos días y arranque con 478 MB
-El servidor público quedó parado desde el 19 a las 17:17 (la sesión y el tmux murieron con el apagado; la torre se reinició el 20 a las 09:16 y 09:33 y el 21 a las 04:16) hasta el 21 a las 18:10. Al recrear el tmux: carga de 478 MB (133 710 ejecuciones) en 44 s; el mundo estaba en el día 16 con 21 habitantes (12 muertes, día 10,6–15,3). **Primer guardado del proceso: 102,9 s** (revisión completa `assertWorld` sobre 5 k recetas, superlineal) con `tickHz` 1,04 durante ese minuto; después 9,5 Hz, paso 30 ms, guardado 567 ms cada 100 pasos, p95 49–52 → gobernador oscilando en el umbral. Arreglo: `deepValidationDue(saves, verifiedByLoad)` — `load()` ya aplica `assertWorld` entero, el guardado 0 no lo repite (cadencia de 10 intacta). Propuesta operativa: `docs/ops/atlas-servidor.service` (unidad `systemd --user`) para sobrevivir a reinicios.
+El servidor público quedó parado desde el 19 a las 17:17 (la sesión y el tmux murieron con el apagado; la torre se reinició el 20 a las 09:16 y 09:33 y el 21 a las 04:16) hasta el 21 a las 18:10. Al recrear el tmux: carga de 478 MB (133 710 ejecuciones) en 44 s; el mundo estaba en el día 16 con 21 habitantes (12 muertes, día 10,6–15,3). **Primer guardado del proceso: 102,9 s** (revisión completa `assertWorld` sobre 5 k recetas, superlineal) con `tickHz` 1,04 durante ese minuto; después 9,5 Hz, paso 30 ms, guardado 567 ms cada 100 pasos, p95 49–52 → gobernador oscilando en el umbral. Arreglo: `deepValidationDue(saves, verifiedByLoad)` — `load()` ya aplica `assertWorld` entero, el guardado 0 no lo repite (cadencia de 10 intacta). Propuesta operativa: `docs/ops/atlas-servidor.service` (hoy `scripts/systemd/atlas-servidor.service`; unidad `systemd --user`) para sobrevivir a reinicios.
 
 ### 2026-09-22 · T109 — instrumento `scripts/curva-techo.mts` (el techo que impone el hardware)
 

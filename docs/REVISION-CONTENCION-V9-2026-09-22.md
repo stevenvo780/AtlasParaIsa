@@ -162,7 +162,8 @@ son diagnósticos, no otro conjunto de semillas reservado.
 El instrumento sigue exactamente en
 `12053834befc95ebedc4bf1bf4c4308ff49c040c21d233f585aa02d3f894f542` (mismos
 `family-reserve.ts`, `metrics.ts`, `family-observation.ts`). La preparación y el
-arranque rechazan otro hash. `scripts/lab/family-reserve-batch.ts` sólo cambia base,
+arranque rechazan otro hash. `scripts/lab/family-reserve-batch.ts` (retirado de main con el resto del
+instrumento; se conserva en el tag `archivo/campanas-20260922`) sólo cambia base,
 versión candidata, ruta de artefactos y declaración del alcance; conserva semillas,
 cadencia, métricas, procesos y deadline. Se congela junto al manifiesto antes de
 ejecutar. Un error/timeout se conserva como tal; nunca se ajusta el horizonte a la

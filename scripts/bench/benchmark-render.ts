@@ -1,11 +1,17 @@
-/** Isolated, synthetic render benchmark. Does not connect to the app or touch its database. */
+/** Isolated, synthetic render benchmark. Does not connect to the app or touch its database.
+ *
+ * Banco A/B reutilizable del paisaje: `npx tsx scripts/bench/benchmark-render.ts` desde la raíz del
+ * repo. Variables: RENDER_LABEL (nombre de la salida), RENDER_GPU (default|hardware|disabled),
+ * RENDER_SCENE=moving (escena animada), RENDER_ANIMALS (0–8192) y RENDER_BASELINE_REF (commit cuyos
+ * landscape.ts, life-art.ts y gpu-terrain.ts se comparan con los del árbol). Escribe bajo artifacts/,
+ * que no está versionado. */
 import { chromium } from '@playwright/test';
 import { createServer } from 'vite';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import type { WorldView } from '../src/shared/types.js';
+import type { WorldView } from '../../src/shared/types.js';
 
 const label = (process.env.RENDER_LABEL ?? 'after').replace(/[^a-z0-9-]/gi, '');
 const gpuMode = process.env.RENDER_GPU ?? 'default';
@@ -20,7 +26,7 @@ const baselineModules = baselineRef ? new Map(['landscape.ts', 'life-art.ts', 'g
 const rendererSha256 = createHash('sha256').update(baseline ?? readFileSync('src/client/landscape.ts')).digest('hex');
 const moduleHashes = Object.fromEntries((baselineModules ? [...baselineModules] : ['landscape.ts','life-art.ts','gpu-terrain.ts','visual-state.ts'].map(name=>[name,readFileSync(`src/client/${name}`,'utf8')] as const)).map(([name,source])=>[name,createHash('sha256').update(source).digest('hex')]));
 const flags = gpuMode === 'hardware' ? ['--enable-gpu', '--use-angle=vulkan', '--enable-features=Vulkan', '--disable-vulkan-surface', '--ignore-gpu-blocklist'] : gpuMode === 'disabled' ? ['--disable-webgl'] : [];
-const server = await createServer({ configFile: false, plugins: baselineModules ? [{ name: 'render-baseline', enforce: 'pre', load(id) { for (const [name, source] of baselineModules) if (id.endsWith(`/src/client/${name}`)) return source; } }] : [], server: { host: '127.0.0.1', port: 0 }, logLevel: 'error' });
+const server = await createServer({ configFile: false, plugins: baselineModules ? [{ name: 'render-baseline', enforce: 'pre', load(id) { for (const [name, source] of baselineModules) if (id.endsWith(`/src/client/${name}`)) return source; return null; } }] : [], server: { host: '127.0.0.1', port: 0 }, logLevel: 'error' });
 await server.listen();
 const browser = await chromium.launch({ headless: true, args: flags });
 try {

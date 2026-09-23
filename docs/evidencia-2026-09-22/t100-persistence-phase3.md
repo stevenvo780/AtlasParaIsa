@@ -72,7 +72,7 @@ Todos los lectores internos de Store resuelven páginas: carga, comprobación pa
 rotar, baseline de crónica/tecnología y reconstrucción/selección de `previous`.
 `readStoredSnapshot(db, slot)` ofrece esa vista coherente a herramientas host,
 verifica transporte y no hace fallback; Store añade validación de mundo y archivo.
-Smoke, `coherence-batch` y `benchmark-store` lo usan. El último informa por separado
+Smoke, `coherence-batch` (retirado de main; en el tag `archivo/campanas-20260922`) y `benchmark-store` lo usan. El último informa por separado
 digesto canónico del mundo, hash del cuerpo, bytes del cuerpo y bytes lógicos de
 cuerpo más páginas. `lastSnapshotBytes` conserva esa medida lógica completa.
 `benchmark-simulation` sigue siendo una comparación inline con fixtures menores

@@ -42,7 +42,8 @@ Terminó a las13:00:48UTC; dos procesos, plazo simétrico2h y guardas de disco.
 El wrapper precede la comprobación portable posterior de seed/versión: aquí la
 auditoría independiente sí las comprueba. Se conserva el primer lanzamiento
 interrumpido por ENOENT del observador de disco, sin sumarlo como otra réplica.
-[Contrato operativo](ops/default-seed-2026-09-22.md).
+Contrato operativo: `docs/ops/default-seed-2026-09-22.md`, retirado de main con su instrumento y
+conservado en el tag `archivo/campanas-20260922`.
 
 ## Diferencia respecto al mundo público
 

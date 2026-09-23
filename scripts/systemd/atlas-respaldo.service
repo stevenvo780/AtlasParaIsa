@@ -1,15 +1,14 @@
-# T022 — Unidad de usuario systemd para el respaldo horario del mundo de Isa.
+# Unidad systemd de USUARIO: respaldo del mundo publicado con scripts/respaldo.sh (VACUUM INTO,
+# quick_check y gzip), disparada cada hora por atlas-respaldo.timer. Habilitadas desde el 2026-09-22.
+# Las instaladas en ~/.config/systemd/user son COPIAS de estos ficheros, no enlaces; solo se
+# actualizan dentro del procedimiento de publicación de CLAUDE.md.
 #
-# NO se activa desde el sprint: Steven la instala y habilita en T043
-# (checklist de publicación), junto con atlas-respaldo.timer:
-#
+# Instalación:
 #   mkdir -p ~/.config/systemd/user
-#   ln -sf /datos/workspaces/personal/AtlasParaIsa/scripts/systemd/atlas-respaldo.service \
-#          ~/.config/systemd/user/atlas-respaldo.service
-#   ln -sf /datos/workspaces/personal/AtlasParaIsa/scripts/systemd/atlas-respaldo.timer \
-#          ~/.config/systemd/user/atlas-respaldo.timer
+#   cp scripts/systemd/atlas-respaldo.service scripts/systemd/atlas-respaldo.timer ~/.config/systemd/user/
 #   systemctl --user daemon-reload
 #   systemctl --user enable --now atlas-respaldo.timer
+# Antes de publicar, un respaldo a mano: systemctl --user start atlas-respaldo.service, y verificar la copia.
 #
 # Verificación: systemctl --user status atlas-respaldo.timer
 #               journalctl --user -u atlas-respaldo.service -n 20

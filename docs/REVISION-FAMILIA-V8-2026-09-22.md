@@ -113,7 +113,8 @@ modificó la prueba ni se aumentó ningún presupuesto.
 
 ## Experimento fijado antes de resultados
 
-El lanzador histórico congelado `family-reserve-batch.ts` congela V7 de `3dd615e` y esta fuente
+El lanzador histórico congelado `family-reserve-batch.ts` (retirado de main; en el tag
+`archivo/campanas-20260922`) congela V7 de `3dd615e` y esta fuente
 V8, un instrumento común y sus hashes. `check <directorio>` verifica el contrato;
 `run <directorio>` ejecuta tres pares **1007/1012/1013**, **13 días/31200 ticks**,
 `engine=world`, Store real cada 20 ticks, seis procesos a nice 10, **una hora por

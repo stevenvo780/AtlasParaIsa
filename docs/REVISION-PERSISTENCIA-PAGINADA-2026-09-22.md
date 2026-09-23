@@ -63,7 +63,8 @@ El diagnóstico portable51926 también se integró: extrae ambos motores e instr
 por SHA, valida los22 parámetros públicos capturados y requiere un piloto. Tres
 pruebas incluyen dos pilotos reales de2400 ticks, contratos alterados y rechazo
 de checkpoints con semilla/versión ajena aunque su checksum sea correcto.
-[Protocolo y límites](ops/default-seed-2026-09-22.md).
+Protocolo y límites: `docs/ops/default-seed-2026-09-22.md`, retirado de main con su instrumento y
+conservado en el tag `archivo/campanas-20260922`.
 
 ## Lo que este bloque no acredita
 

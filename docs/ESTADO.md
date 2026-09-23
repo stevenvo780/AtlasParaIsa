@@ -18,7 +18,7 @@ el contrato.
 | Mundo | V10 nuevo, semilla 51926, identidad `63033163-3a01-45cb-829a-004a0dc0ce65`, creado desde un directorio inicialmente vacío: `/datos/workspaces/personal/AtlasParaIsa-worlds/v10-20260922` |
 | Parámetros persistidos | `persistencia.cadaTicks=100`, `gobernador.politica=techo` y el paquete de reglas 10 (lista completa en el contrato) |
 | Respaldos | `/datos/workspaces/personal/AtlasParaIsa-publications/20260922-v10/backups` (timer horario `atlas-respaldo.timer`) |
-| Servicios | `atlas-servidor.service` y `atlas-respaldo.service` de usuario; leen `~/.config/atlas-para-isa/runtime.env` (solo `CARTA_DATA_DIR` y `DEST`). Copias versionadas de las unidades (las instaladas son copias): `docs/ops/atlas-servidor.service` y `scripts/systemd/atlas-respaldo.{service,timer}` |
+| Servicios | `atlas-servidor.service` y `atlas-respaldo.service` de usuario; leen `~/.config/atlas-para-isa/runtime.env` (solo `CARTA_DATA_DIR` y `DEST`). Copias versionadas de las unidades (las instaladas son copias, no enlaces): `scripts/systemd/` |
 | Gate | `scripts/deploy-check.sh eeb4bcf` verde: typecheck, suite 1362/1366 (4 omitidos, 0 fallos, 201,5 s), build y smoke del commit exacto |
 | Contrato | [publication-v10.json](evidencia-2026-09-22/publication-v10.json) |
 

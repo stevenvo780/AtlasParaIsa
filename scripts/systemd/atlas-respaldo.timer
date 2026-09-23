@@ -1,6 +1,5 @@
-# T022 — Timer horario para atlas-respaldo.service. NO activar desde el sprint:
-# Steven lo instala y habilita en T043. Ver atlas-respaldo.service para las
-# instrucciones de instalación (systemctl --user enable --now atlas-respaldo.timer).
+# Timer horario de atlas-respaldo.service, habilitado desde el 2026-09-22 (la instalada en
+# ~/.config/systemd/user es una copia). Instalación y verificación: ver atlas-respaldo.service.
 
 [Unit]
 Description=Timer horario del respaldo del mundo de Isa (T022)

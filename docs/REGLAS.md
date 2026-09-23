@@ -459,6 +459,60 @@ reproduce exactamente el gobernador anterior; la orden humana (`manual`) sigue m
 Refutación en `tests/gobernador.test.ts`: bajo carga sostenida el mundo no crece; una muerte real por
 deshidratación se repone aunque siga en rojo; con `apagar` la misma muerte no se repone.
 
+### Motor: reserva del paso (`motor.clonPorPaso`, 2026-09-23)
+
+`stepOnce` necesita poder deshacer un paso que falla. Con `motor.clonPorPaso=true` (default y producción)
+simula sobre `cloneWorld` y el mundo vigente no se toca hasta que el guardado confirma; con `false`
+(T104) toma un `puntoDeRestauracion`, simula sobre el mundo vigente y, si el paso lanza, `restaurar()`.
+Con pocos habitantes esa reserva ya cuesta tanto como el paso, así que el p95 supera los 50 ms del
+gobernador y el techo congela el crecimiento. **Se midió si el punto la abarata. No la abarata, y
+producción sigue con el clon.**
+
+Medida (`scripts/perf/reserva-paso.ts`): CPU propia del proceso (`process.cpuUsage`), dos copias de cada
+base avanzando a la par con la receta de producción en bloques alternados de 10 pasos (600 pasos) y, sobre
+el mundo resultante, 30 rondas alternadas de cada operación con el montón recogido antes de cada una.
+Mediana en ms de CPU. «Sin identidad» es el punto de T104 tal como estaba; «con identidad» es el corregido
+(ver abajo). Cada columna de punto se midió en el mismo proceso que su `cloneWorld`, a la vez que la otra.
+
+| Mundo | Hab. | Teselas | `cloneWorld` | Punto sin identidad | Punto con identidad | Solo teselas | CPU por paso, clon → punto |
+|---|---|---|---|---|---|---|---|
+| semilla 3, día 3 | 34 | 8 192 | 40,9 / 44,8 | 31,2 (1,31×) | 40,9 (1,09×) | 25–29 | 102,6 → 103,8 |
+| semilla 51926, día 6 | 58 | 27 136 | 146,1 / 142,0 | 133,2 (1,10×) | 146,2 (0,97×) | 76–77 | 229,6 → 240,7 |
+| semilla 3, día 9 | 132 | 20 224 | 158,3 / 127,0 | 140,8 (1,12×) | 133,9 (0,95×) | 61–75 | 218,0 → 226,4 |
+| semilla 3, día 12,25 | 230 | 35 584 | 238,7 / 216,1 | 215,1 (1,11×) | 216,3 (1,00×) | 124–133 | 405,3 → 431,3 |
+
+La primera cifra de `cloneWorld` acompaña al punto sin identidad y la segunda al punto con identidad; entre
+paréntesis, `cloneWorld` ÷ punto. La última columna es la media de reserva + `stepWorld` + guardado del punto
+con identidad; con el punto sin identidad el paso completo bajaba sólo un 3–8 %. Restaurar cuesta 0,10–0,13 ms
+y sólo se paga cuando el paso falla. Torre con carga 70–80, `nice 10`.
+
+**Por qué no hay ganancia.** Los dos caminos copian el mundo entero. Las teselas son el 47–65 % de la reserva
+y el punto las copia a propósito (el paso trabaja sobre teselas recién construidas; ver el comentario de
+`puntoDeRestauracion`). El resto del estado también hay que copiarlo en profundidad, y su única ventaja era
+copiarlo **sin identidad**, que es incorrecto. Entre guardados un mismo objeto vive en el estado y en la cola
+que el Store confirmará: `technology.history` y `technology.journal.pending`, `technology.recipes` y
+`technology.catalogue.pending`, `events` y `chronicleJournal.pending`. Las leyes escriben por un solo camino
+contando con que el otro lo ve: `recordTechnologyBenefit` escribe en la ejecución pendiente y
+`updateTechnologyRecipeStats` en la receta pendiente. Tras deshacer, esos pares eran dos objetos (38 en la
+prueba (12) de `tests/restauracion-paso.test.ts`). Con las leyes de hoy no llegó a verse: el beneficio se
+anota en el mismo paso que el uso y `cacheRecipe` vuelve a enlazar la receta. En una base de 34 habitantes con
+tres restauraciones en 400 pasos, el mundo y lo durable salieron iguales a los del gemelo con clon. Aun así, el
+mundo restaurado no era el de antes del paso. La copia del punto conserva ahora la identidad con un mapa, como
+`cloneState`, y con eso cuesta lo mismo que `cloneWorld`.
+
+Corrección de `false`, para quien la retome: con la receta de producción y reglas 10, las semillas 7, 42 y
+51926 dan el mismo digesto con los dos motores cada 600 pasos hasta 4 800, en memoria y en disco
+(`scripts/perf/trayectoria-punto.ts`). Las pruebas (6)–(12) de `tests/restauracion-paso.test.ts` inyectan
+fallos al cerrar cada fase, a mitad de personas y de fauna y al confirmar el guardado, también con la cadencia
+100 de producción y en el mundo de 230 habitantes con archivo de recetas. En todos los casos el mundo vuelve
+exactamente al de antes del paso y después sigue igual que su gemelo con clon. Un fallo **después** de confirmar el
+guardado ya no deshace en memoria un paso que el disco dejó atrás: el punto se descarta en cuanto
+`world = draft`.
+
+Para abaratar la reserva de verdad hay que dejar de copiar lo que el paso no toca. El primer blanco son las
+teselas: copiarlas sólo cuando un paso las escribe, o que `syncFauna` no las degrade con `delete`, para que el
+punto no tenga que reconstruirlas. Otra opción es que el gobernador no cuente la reserva como parte del paso.
+
 Estas opciones se validan y persisten, pero **T102 no activa backends, deltas ni nuevas señales,
 ni cambia los topes de validación o fundación de comunidades**. La ejecución sigue usando el
 motor V7 y el gobernador p95 existentes. Los límites son declaraciones pendientes de T100;

@@ -592,6 +592,18 @@ atribuir mejoras pequeñas, perfil V8 (`cpuprof.ts`) y la fracción del paso de 
 `tests/rendimiento-identidad.test.ts` fija además el digesto del mundo de 230 habitantes (semilla 3, día 12,25)
 tras 600 pasos; se omite si falta la instantánea (`ATLAS_MUNDO_ALTO`).
 
+**Reserva del paso del servidor** (`motor.clonPorPaso`: clon frente a punto de restauración):
+
+```bash
+NODE_OPTIONS=--expose-gc npx tsx scripts/perf/reserva-paso.ts --db alto.sqlite --pasos 200 --salida r.json
+npx tsx scripts/perf/trayectoria-punto.ts --seed 7 --cortes 2400,4800 --salida t.json
+```
+
+`reserva-paso.ts` avanza dos copias de la base a la par (una con `cloneWorld`, otra con `puntoDeRestauracion`) y
+luego desglosa la reserva (clon, punto, restaurar y sólo la copia de teselas); `trayectoria-punto.ts` corre dos
+servidores reales con la receta de producción y exige el mismo mundo, en memoria y en disco. Cifras y decisión:
+`docs/REGLAS.md`, «Motor: reserva del paso».
+
 ## El techo del hardware — `../curva-techo.mts` (T109)
 
 `replica.ts` mide **leyes** (población, tecnología, cooperación…) a una escala fija; hermana con

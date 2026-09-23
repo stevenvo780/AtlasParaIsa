@@ -791,6 +791,9 @@ export function createApp(options: AppOptions) {
   }, 1000);
   latido.unref();
   return {
+    /** `world` es el mundo vivo, para `main.ts` al arrancar (antes de ningún paso), bancos y pruebas. Tras un
+     * paso sin reserva que falló es el mundo a medio paso (PERF3): muerto, nadie lo proyecta ni lo guarda, y
+     * lo que se le haga ya no llega a ninguna parte; las pruebas lo leen justo para comprobarlo. */
     server, stepOnce, get world() { return world; }, get failed() { return failed; },
     /** Gestos aceptados que esperan su paso (bancos y pruebas: saber que un gesto ya está en el lote
      * del paso siguiente sin adivinarlo por tiempo). */

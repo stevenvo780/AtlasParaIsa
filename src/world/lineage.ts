@@ -1,5 +1,6 @@
 import type { ChronicleEvent } from '../shared/types.js';
 import type { LegacyRecord, DemographicDeathCause } from '../shared/demography.js';
+import type { StructureView } from '../shared/life.js';
 import { stringifyExact } from '../shared/exact-json.js';
 import type { Person, World } from './index.js';
 import { assertGenome } from './genetics.js';
@@ -154,11 +155,16 @@ export function pruneBonds(survivors: readonly Person[], departed: readonly Pers
 export function advancePopulation(world: World, callbacks: PopulationCallbacks): void {
   const archived = new Set([...world.legacy, ...world.retiredLegacy].map(record => record.id));
   if (world.people.some(person => archived.has(person.id))) throw new Error('Una identidad fallecida reapareció entre los habitantes vivos.');
+  const structuresByCell = world.shelterBenefitEnabled ? new Map<string, StructureView[]>() : null;
+  if (structuresByCell) for (const structure of world.structures) {
+    if (!(structure.condition > BROKEN_CONDITION && structure.components.includes('roof'))) continue;
+    const key = `${structure.x},${structure.y}`, bucket = structuresByCell.get(key);
+    if (bucket) bucket.push(structure); else structuresByCell.set(key, [structure]);
+  }
   const transitions = world.people.map(person => {
     const tile = tileAt(world, person);
-    const shelter = world.shelterBenefitEnabled && tile?.terrain === 'shelter' ? Math.max(0, ...world.structures
-      .filter(structure => structure.x === person.x && structure.y === person.y && structure.condition > BROKEN_CONDITION && structure.components.includes('roof'))
-      .map(structure => structure.condition)) : 0;
+    const shelter = world.shelterBenefitEnabled && tile?.terrain === 'shelter' ? Math.max(0,
+      ...(structuresByCell!.get(`${person.x},${person.y}`) ?? []).map(structure => structure.condition)) : 0;
     return { person, transition: updateDemography({ id: person.id, state: person.demography, traits: demographicTraits(person.genome, paramsOf(world).cuerpo),
       hunger: person.hunger, thirst: person.thirst, fatigue: person.fatigue, energy: person.energy },
     { exposure: world.weather === 'rain' ? 1 : 0, shelter, protected: person.role === 'S' || person.role === 'I',
@@ -181,10 +187,11 @@ export function advancePopulation(world: World, callbacks: PopulationCallbacks):
     world.communities = world.communities.filter(community => community.members.length > 0);
     const communities = new Set(world.communities.map(community => community.id));
     for (const person of world.people) if (person.communityId !== null && !communities.has(person.communityId)) person.communityId = null;
+    const dyingById = new Map<string, Person>(dying.map(result => [result.person.id, result.person]));
     for (const record of records) {
       world.legacy.push(record); world.retiredLegacy.push(record);
       world.demographyDynamics.deaths++; world.demographyDynamics.causes[record.cause]++;
-      const person = dying.find(result => result.person.id === record.id)!.person;
+      const person = dyingById.get(record.id)!;
       callbacks.emit({ kind: 'death', actors: [record.id], x: person.x, y: person.y, source: 'simulation',
         text: `Terminó la vida simulada de ${record.name}.`,
         cause: `Causa del modelo: ${record.cause}; evaluación posterior a las acciones. Su identidad y parentesco se conservan; no aparece un sustituto ni recursos nuevos.` });

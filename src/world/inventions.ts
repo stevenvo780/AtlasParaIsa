@@ -5,6 +5,8 @@ import { localRandom } from './genetics.js';
 import { tileAt } from './spatial.js';
 import { chunkKey } from './terrain.js';
 import { algunoCerca, filtrarCerca } from './indice-puntos.js';
+import { esMiembro, techoDelArchivo } from './indices.js';
+import { vecinos } from './rejilla.js';
 
 type Emit = (event: Omit<ChronicleEvent, 'id' | 'tick'>) => ChronicleEvent;
 type Point = { x: number; y: number };
@@ -66,7 +68,7 @@ export function defaultBlueprint(): BlueprintView {
 }
 
 /** A caller may hold an outdated counter; active and pending archive identities remain reserved. */
-function nextIdentity(counter: number, prefix: 'blueprint' | 'structure', ids: readonly string[]): { id: string; counter: number } | undefined {
+function nextIdentity(counter: number, prefix: 'blueprint' | 'structure', ids: readonly string[], world: World): { id: string; counter: number } | undefined {
   if (!Number.isSafeInteger(counter) || counter < 0) return;
   let largest = counter;
   for (const id of ids) {
@@ -75,13 +77,21 @@ function nextIdentity(counter: number, prefix: 'blueprint' | 'structure', ids: r
     const reserved = Number(suffix); if (!Number.isSafeInteger(reserved)) return;
     largest = Math.max(largest, reserved);
   }
+  const archive = techoDelArchivo(world.retiredChunks);
+  if (prefix === 'blueprint') {
+    if (archive.blueprintCorrupto) return;
+    largest = Math.max(largest, archive.blueprint);
+  } else {
+    if (archive.structureCorrupto) return;
+    largest = Math.max(largest, archive.structure);
+  }
   if (largest >= Number.MAX_SAFE_INTEGER) return;
   return { id: `${prefix}-${largest + 1}`, counter: largest + 1 };
 }
 
 function blueprintIdentity(world: World) {
   return nextIdentity(world.blueprintCounter, 'blueprint', [...world.blueprints.map(b => b.id), ...world.blueprints.flatMap(b => b.parents),
-    ...world.structures.map(s => s.blueprintId), ...world.retiredChunks.flatMap(chunk => (chunk.structures ?? []).map(s => s.blueprintId))]);
+    ...world.structures.map(s => s.blueprintId)], world);
 }
 
 function selectedBlueprint(world: World, person: Person): BlueprintView {
@@ -109,8 +119,10 @@ function localServices(world: World, person: Person, replacement?: { structure: 
     result.food += Math.max(0, a.foodCapacity - food);
     result.irrigation += a.irrigation * condition;
   };
-  for (const structure of world.structures) {
-    if (distance(person, structure) > CONSTRUCTION_RADIUS || tileAt(world, structure)?.terrain !== 'shelter') continue;
+  // Negación literal del `continue` de siempre (no la forma positiva): preserva cómo se trata una
+  // distancia o condición NaN, igual que hizo T141 en `share`/`evaluateCooperation`.
+  for (const structure of filtrarCerca(world.structures, person, CONSTRUCTION_RADIUS + 1,
+    structure => !(distance(person, structure) > CONSTRUCTION_RADIUS || tileAt(world, structure)?.terrain !== 'shelter'))) {
     add(structure.components, replacement?.structure === structure ? replacement.condition : structure.condition, structure.water, structure.food);
   }
   if (added) add(added, 1);
@@ -118,7 +130,7 @@ function localServices(world: World, person: Person, replacement?: { structure: 
 }
 
 function constructionContext(world: World, person: Person) {
-  const nearby = world.people.filter(other => distance(person, other) <= CONSTRUCTION_RADIUS);
+  const nearby = vecinos(world, person, CONSTRUCTION_RADIUS + 1, other => distance(person, other) <= CONSTRUCTION_RADIUS);
   return { ...inventionContext(world, person),
     // Drinking lowers thirst by three times the debited water. One full body's
     // dose is a planning reserve; additional demand comes only from people seen.
@@ -147,8 +159,10 @@ function localMaterials(world: World, person: Person): Person['materials'] {
 
 function usefulRepairs(world: World, person: Person) {
   const context = constructionContext(world, person), before = serviceValue(localServices(world, person), context);
-  return world.structures.flatMap(structure => {
-    if (structure.condition >= REPAIR_CONDITION_LIMIT || distance(person, structure) > CONSTRUCTION_RADIUS || tileAt(world, structure)?.terrain !== 'shelter') return [];
+  // Negación literal del `return []` de siempre: una condición/distancia NaN no debe excluir aquí lo
+  // que el bucle de abajo (también insensible a NaN por `while (condition < LIMIT)`) habría procesado.
+  return filtrarCerca(world.structures, person, CONSTRUCTION_RADIUS + 1, structure => !(structure.condition >= REPAIR_CONDITION_LIMIT
+    || distance(person, structure) > CONSTRUCTION_RADIUS || tileAt(world, structure)?.terrain !== 'shelter')).flatMap(structure => {
     // Evaluate each physically legal paid prefix. A broken roof can need several
     // steps before it helps; a last top-up with no extra service earns no benefit.
     let condition = structure.condition, steps = 0;
@@ -192,7 +206,7 @@ export function inventionContext(world: World, person: Person): InventionContext
   }
   const average = (get: (tile: Tile) => number) => nearby.reduce((sum, tile) => sum + get(tile), 0) / Math.max(1, nearby.length);
   const moisture = average(tile => tile.moisture), food = average(tile => tile.food);
-  const portable = world.people.filter(p => distance(person, p) <= 4).reduce((sum, p) => sum + Math.max(0, p.inventory - 0.08), 0);
+  const portable = vecinos(world, person, 5, p => distance(person, p) <= 4).reduce((sum, p) => sum + Math.max(0, p.inventory - 0.08), 0);
   const reserve = Math.max(0, ...nearby.map(tile => tile.drinkingWater ?? 0));
   const roofs = filtrarCerca(world.structures, person, 5, s => distance(person, s) <= 4 && s.condition > BROKEN_CONDITION && tileAt(world, s)?.terrain === 'shelter');
   const quality = Math.max(0, ...roofs.map(s => blueprintAffordances(s.components).restQuality * s.condition));
@@ -208,10 +222,10 @@ export function inventionContext(world: World, person: Person): InventionContext
 /** Cultural parents must be known through ownership, nearby built examples, or trusted contacts. */
 function knownBlueprints(world: World, person: Person): BlueprintView[] {
   const ids = new Set(['blueprint-base', person.blueprintId]);
-  for (const structure of world.structures) if (distance(person, structure) <= 5 && structure.condition > BROKEN_CONDITION && tileAt(world, structure)?.terrain === 'shelter') ids.add(structure.blueprintId);
-  if (world.cooperationEnabled) for (const other of world.people) {
-    if (other !== person && distance(person, other) <= 3 && (person.bonds[other.id] ?? 0.2) >= 0.2 && person.culture.openness >= 0.15) ids.add(other.blueprintId);
-  }
+  for (const structure of filtrarCerca(world.structures, person, 6, structure => distance(person, structure) <= 5
+    && structure.condition > BROKEN_CONDITION && tileAt(world, structure)?.terrain === 'shelter')) ids.add(structure.blueprintId);
+  if (world.cooperationEnabled) for (const other of vecinos(world, person, 4, other => other !== person && distance(person, other) <= 3
+    && (person.bonds[other.id] ?? 0.2) >= 0.2 && person.culture.openness >= 0.15)) ids.add(other.blueprintId);
   return world.blueprints.filter(b => (ids.has(b.id) || b.inventorId === person.id) && validBlueprint(b.components));
 }
 
@@ -331,7 +345,7 @@ export function completeConstruction(world: World, person: Person, tile: Tile, e
   if (!validBlueprint(blueprint.components) || world.structures.length >= MAX_STRUCTURES || tileAt(world, tile) !== tile || distance(person, tile) > 0.5
     || tile.terrain === 'water' || tile.terrain === 'shelter' || algunoCerca(world.places, tile, 6, p => distance(p, tile) < 5)
     || algunoCerca(world.structures, tile, 1, s => s.x === tile.x && s.y === tile.y) || person.work < cost.work || person.materials.wood < cost.wood || person.materials.stone < cost.stone) return null;
-  const identity = nextIdentity(world.structureCounter, 'structure', [...world.structures.map(s => s.id), ...world.retiredChunks.flatMap(chunk => (chunk.structures ?? []).map(s => s.id))]);
+  const identity = nextIdentity(world.structureCounter, 'structure', world.structures.map(s => s.id), world);
   if (!identity) return null;
   person.materials.wood -= cost.wood; person.materials.stone -= cost.stone; person.work -= cost.work; world.structureCounter = identity.counter;
   const structure: StructureView = { id: identity.id, x: tile.x, y: tile.y, blueprintId: blueprint.id, name: blueprint.name,
@@ -363,12 +377,13 @@ export function foodAvailable(world: World, person: Point): number { return func
 /** Returns food removed, never also credits inventory. The consumer owns the sole matching credit. */
 export function takeFood(world: World, person: Point, requested: number): number {
   if (!Number.isFinite(requested) || requested <= 0) return 0;
+  const member = person as Person;
   let taken = 0;
   for (const structure of functionalNear(world, person).sort((a, b) => distance(person, a) - distance(person, b) || a.id.localeCompare(b.id))) {
     if (!blueprintAffordances(structure.components).foodCapacity) continue;
     const amount = Math.min(structure.food, requested - taken);
     structure.food -= amount; taken += amount; world.inventionDynamics.foodTaken += amount;
-    if (world.people.some(p => p === person && p.action === 'eat' && p.hunger > 0)) observeUse(world, structure, amount * 10);
+    if (esMiembro(world.people, member) && member.action === 'eat' && member.hunger > 0) observeUse(world, structure, amount * 10);
     if (taken >= requested) break;
   }
   return taken;
@@ -383,7 +398,7 @@ export function waterAvailable(world: World, point: Point): number {
 /** Sole drinking debit: use ambient water first, then credit only water delivered by a cistern.
  * The engine applies the matching thirst reduction immediately after this call. */
 export function takeWater(world: World, person: Person, requested: number): number {
-  if (!Number.isFinite(requested) || requested <= 0 || !world.people.includes(person) || person.action !== 'drink'
+  if (!Number.isFinite(requested) || requested <= 0 || !esMiembro(world.people, person) || person.action !== 'drink'
     || distance(person, person.target) > 0.5 || person.thirst <= 0) return 0;
   const tile = tileAt(world, person); if (!tile) return 0;
   const needed = Math.min(requested, person.thirst / 3), ambient = Math.min(tile.drinkingWater ?? 0, needed);
@@ -416,7 +431,7 @@ export function facilityRestQuality(world: World, person: Person): number {
  * counterfactual is evidence; saturated bodies and degraded roofs cannot earn fictitious utility. */
 export function recordFacilityRest(world: World, person: Person, before?: Pick<Person, 'fatigue' | 'energy'>): void {
   if (!world.shelterBenefitEnabled || !before || !Number.isFinite(before.fatigue) || !Number.isFinite(before.energy)
-    || before.fatigue < 0 || before.fatigue > 1 || before.energy < 0 || before.energy > 1 || !world.people.includes(person)
+    || before.fatigue < 0 || before.fatigue > 1 || before.energy < 0 || before.energy > 1 || !esMiembro(world.people, person)
     || person.action !== 'rest' || distance(person, person.target) > 0.5) return;
   const structure = restFacility(world, person); if (!structure) return;
   const outdoor = world.weather === 'rain' ? 0.2 : 0.55, quality = facilityRestQuality(world, person);
@@ -468,8 +483,8 @@ export function stepStructures(world: World, _emit: Emit): void {
         garden.moisture += amount; structure.water -= amount; budget -= amount;
       }
     }
-    if (a.foodCapacity > 0) for (const person of world.people) {
-      if (distance(person, structure) > 1.5 || person.hunger >= 0.5 || person.inventory <= 0.12) continue;
+    if (a.foodCapacity > 0) for (const person of vecinos(world, structure, 2.5,
+      person => !(distance(person, structure) > 1.5 || person.hunger >= 0.5 || person.inventory <= 0.12))) {
       const deposited = Math.max(0, Math.min(person.inventory - 0.12, a.foodCapacity - structure.food, 0.012));
       person.inventory -= deposited; structure.food += deposited; world.inventionDynamics.foodStored += deposited;
     }

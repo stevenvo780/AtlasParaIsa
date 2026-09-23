@@ -70,6 +70,10 @@ export interface PersonDetail {
     hijos: { id: string; nombre: string | null; vivo: boolean | null; generacion: number | null }[]; totalHijos: number; hijosVivos: number };
   /** M8: edad corporal y umbrales de su cuerpo (demographicTraits), en pasos de edad. */
   edades?: { edad: number; madurez: number; vejez: number; maxima: number };
+  /** M9: origen de los primeros 32 procedimientos que recuerda (el orden de `recipeIds`) y cuántas definiciones
+   * residentes inventó. `sin-registro` = el mundo no conserva de dónde vino; nunca se supone. */
+  procedimientos?: { id: string; origen: 'invento' | 'aprendido' | 'sin-registro'; tick?: number; maestro?: { id: string; nombre: string | null } }[];
+  inventadas?: number;
 }
 export interface PlaceView { id: string; name: string; x: number; y: number; description: string; gatherings: number; }
 export interface ChronicleEvent {
@@ -118,7 +122,10 @@ export interface WorldStats { population: number; meanEnergy: number; meanHunger
    * `identities` cuentan por rol; `lifeStage` solo suma vecinos, con `unknown` para los que no
    * tienen edad registrada; `protectedCount` son las identidades S/I (siempre protegidas por rol). */
   census?: { neighbors: number; identities: number; protectedCount: number;
-    lifeStage: { juvenile: number; adult: number; senescent: number; unknown: number } }; }
+    lifeStage: { juvenile: number; adult: number; senescent: number; unknown: number } };
+  /** Paso en que se midieron las estadísticas caras (diversidad, agua, reparto de comida): se recalculan
+   * cada 200 pasos y entre medias se reutiliza el último valor (statistics.ts). Ya viajaba; aquí se declara. */
+  statsTick?: number; }
 /**
  * T107 (perfil por fase y fracción serial): nombres fijos de las fases medidas del paso.
  * `maintainRegions`…`muestreo` se miden dentro de `stepWorld` (`world/index.ts`); `save` y

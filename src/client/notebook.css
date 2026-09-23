@@ -287,3 +287,6 @@
 .ended-lives > li { display: flex; flex-direction: column; gap: 2px; padding: 6px 0; border-bottom: 1px dotted #d6e0c6; }
 .ended-lives small { font-size: 11px; color: #6e805e; line-height: 1.5; }
 .lineage-count { font-size: 12px; color: #4f6436; margin: 2px 0 6px; font-weight: 600; }
+/* M9: origen de cada procedimiento que recuerda. */
+.procedure-row { flex-wrap: wrap; }
+.procedure-origin { flex-basis: 100%; font-size: 11px; color: #6e805e; margin-top: 2px; }

@@ -57,10 +57,20 @@ function procedureReference(recipeId: string, technology: WorldView['technology'
     : `<span>Procedimiento ${esc(recipeId)}<br><small>Detalles fuera de esta vista.</small></span>`;
 }
 
+/** M9: de dónde viene un procedimiento que recuerda: lo inventó, de quién lo aprendió y cuándo, o que no consta. */
+function origenProcedimiento(id: string, procedimientos: PersonDetail['procedimientos'], world: WorldView): string {
+  const origen = procedimientos?.find(entry => entry.id === id);
+  if (!origen) return '';
+  const dia = origen.tick !== undefined ? `, día ${number(Math.floor(origen.tick / 2400) + 1)}` : '';
+  const texto = origen.origen === 'invento' ? `Lo inventó${dia}` : origen.origen === 'aprendido'
+    ? `Aprendido de ${origen.maestro?.nombre ?? nombreConocido(origen.maestro?.id ?? '', world) ?? 'alguien que el mundo ya no conserva'}${dia}` : 'Origen no registrado';
+  return `<small class="procedure-origin" data-origin="${esc(origen.origen)}">${esc(texto)}</small>`;
+}
+
 /** T036(h): `p.experiences`, `p.trust` y el repertorio (`recipeIds`) ya no viajan en el `state`:
  * llegan con `{type:'persona'}`. `undefined` significa «todavía no ha llegado» y se dibuja como
  * «cargando…»; una lista vacía sí significa «no hay nada», y se dice con esas palabras. */
-export function inheritedAndLearned(p: PersonView, world: WorldView, recipeIds?: string[], extra?: Pick<PersonDetail, 'fertil' | 'busca' | 'familia' | 'edades'> | null, buscarEpisodio: (id: string) => ChronicleEvent | undefined = id => world.events.find(event => event.id === id)): { now: string; kit: string; story: string } {
+export function inheritedAndLearned(p: PersonView, world: WorldView, recipeIds?: string[], extra?: Pick<PersonDetail, 'fertil' | 'busca' | 'familia' | 'edades' | 'procedimientos' | 'inventadas'> | null, buscarEpisodio: (id: string) => ChronicleEvent | undefined = id => world.events.find(event => event.id === id)): { now: string; kit: string; story: string } {
   const skillNames: Record<string, string> = { gather: 'Recolección', gathering: 'Recolección', forage: 'Cosecha', farm: 'Cultivo', farming: 'Cultivo', build: 'Construcción', building: 'Construcción', explore: 'Exploración', exploration: 'Exploración', care: 'Cuidado', cooperate: 'Cooperación', hunt: 'Caza', drink: 'Búsqueda de agua',
     // M6: el resto de las prácticas que registra `outcome()` (world/index.ts), en claro.
     research: 'Investigación', share: 'Compartir', craft: 'Fabricación', technology: 'Técnica', invent: 'Invención', repair: 'Reparación', eat: 'Alimentarse', rest: 'Descanso', approach: 'Acercarse a otros', accompany: 'Compañía', retreat: 'Buscar espacio' };
@@ -81,7 +91,7 @@ export function inheritedAndLearned(p: PersonView, world: WorldView, recipeIds?:
   const knowledge = recipeIds ?? technology?.knowledge?.find(entry => entry.actorId === p.id)?.recipeIds;
   const remembered = `<details class="person-detail" data-detail="procedures"><summary>Procedimientos que recuerda${knowledge ? ` <span class="detail-badge">${knowledge.length}</span>` : ''}</summary>
     ${!knowledge ? '<p class="drawer-note" data-loading="procedures">Cargando su repertorio…</p>' : knowledge.length
-      ? `${knowledge.slice(0,32).map(id => `<div class="skill-row">${procedureReference(id, technology)}</div>`).join('')}${knowledge.length > 32 ? `<p>Aquí se muestran 32 de los ${number(knowledge.length)} procedimientos que recuerda.</p>` : ''}`
+      ? `${extra?.inventadas ? `<p class="drawer-note" data-invented>Inventó ${number(extra.inventadas)} ${extra.inventadas === 1 ? 'procedimiento' : 'procedimientos'} de los que el mundo conserva.</p>` : ''}${knowledge.slice(0,32).map(id => `<div class="skill-row procedure-row">${procedureReference(id, technology)}${origenProcedimiento(id, extra?.procedimientos, world)}</div>`).join('')}${knowledge.length > 32 ? `<p>Aquí se muestran 32 de los ${number(knowledge.length)} procedimientos que recuerda.</p>` : ''}`
       : '<p>No recuerda ningún procedimiento ahora.</p>'}
     <p>Este repertorio cambia al aprender y olvidar. Es distinto de los rasgos heredados. Recordar un procedimiento no asegura tener los materiales para realizarlo.</p></details>`;
   const products = technology?.items.filter(item=>item.ownerId===p.id) ?? [];

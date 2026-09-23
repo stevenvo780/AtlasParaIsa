@@ -21,7 +21,7 @@ test('M3: la ficha a demanda trae nombre y posición exacta de alguien fuera de 
   assert.equal(ficha.x, s.x); assert.equal(ficha.y, s.y);
   assert.equal(ficha.vivo, true);
   // La biografía es la misma que ya se servía: solo se añaden campos.
-  const { name: _n, x: _x, y: _y, vivo: _v, fertil: _f, busca: _b, familia: _fa, edades: _e, ...resto } = ficha;
+  const { name: _n, x: _x, y: _y, vivo: _v, fertil: _f, busca: _b, familia: _fa, edades: _e, procedimientos: _pr, inventadas: _in, ...resto } = ficha;
   assert.deepEqual(resto, personDetail(world, s.id));
   assert.equal(enriquecerPersona(world, 'descendant-999999'), undefined, 'una identidad que no vive no se inventa');
   assert.equal(enriquecerPersona(world, '../s'), undefined);
@@ -52,4 +52,26 @@ test('M8: la familia se nombra en todo el mundo: hijos fuera de cámara, difunto
   const edades = enriquecerPersona(world, a!.id)!.edades!;
   assert.ok(edades.madurez < edades.vejez && edades.vejez < edades.maxima);
   assert.equal(edades.edad, a!.demography.age);
+});
+
+test('M9: la ficha dice quién inventó y de quién se aprendió un procedimiento tras un shareTechnology real', async () => {
+  const { researchTechnology, shareTechnology, technologyWorkCost } = await import('../src/world/technology.js');
+  const { recordChronicleEvent } = await import('../src/world/chronicle-journal.js');
+  const world = createWorld(51926), teacher = world.people[2]!, learner = world.people[3]!;
+  for (const person of [teacher, learner]) { person.x = 36; person.y = 12; person.target = { x: 36, y: 12 }; person.energy = 1; person.fatigue = person.hunger = person.thirst = 0; }
+  teacher.materials = { wood: 12, stone: 8 };
+  const program = { inputs: [{ source: 'raw' as const, material: 'stone' as const, mass: 1000 }], steps: [{ op: 'form' as const, intensity: 4, shape: 'edge' as const }, { op: 'compress' as const, intensity: 2 }] };
+  teacher.technology.project = { kind: 'research', program, parents: [], recipeId: null, progress: 0, requiredWork: technologyWorkCost(program), energyPaid: 0, startedAt: world.tick };
+  while (teacher.technology.project) { world.tick++; researchTechnology(world, teacher); }
+  const recipe = world.technology.recipes.at(-1)!;
+  assert.equal(recipe.inventorId, teacher.id);
+  world.tick += 5;
+  assert.equal(shareTechnology(world, teacher, learner, e => { const r = recordChronicleEvent(world, e); world.events.push(r); return r; }, recipe.id), true);
+  const aprendio = enriquecerPersona(world, learner.id)!;
+  assert.deepEqual(aprendio.procedimientos!.find(p => p.id === recipe.id), { id: recipe.id, origen: 'aprendido', tick: world.tick, maestro: { id: teacher.id, nombre: teacher.name } });
+  const invento = enriquecerPersona(world, teacher.id)!;
+  assert.deepEqual(invento.procedimientos!.find(p => p.id === recipe.id), { id: recipe.id, origen: 'invento', tick: recipe.tick });
+  assert.ok(invento.inventadas! >= 1);
+  assert.ok(aprendio.procedimientos!.length <= 32);
+  assert.ok(Buffer.byteLength(JSON.stringify(aprendio.procedimientos)) <= 32 * 90, 'como mucho ~90 B por procedimiento');
 });

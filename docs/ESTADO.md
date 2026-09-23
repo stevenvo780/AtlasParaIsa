@@ -36,10 +36,10 @@ por hardware ([revisión de la noche](REVISION-NOCHE-2026-09-22.md)).
 
 - Revisiones vigentes: [REVISION-2026-09-22](REVISION-2026-09-22.md) y
   [REVISION-NOCHE-2026-09-22](REVISION-NOCHE-2026-09-22.md).
-- `specs/002-mundo-ilimitado/`: etapas B–F congeladas hasta que los 16 fundadores lleguen a 100 días
-  con 3 generaciones en el 90 % de las semillas. La etapa A está integrada en `main`; siguen abiertas
-  T100 (topes de anticorrupción), T103 y T104 (gates de rendimiento sin cumplir) y el Gate A (T110), según
-  [tasks.md](../specs/002-mundo-ilimitado/tasks.md).
+- `specs/002-mundo-ilimitado/`: etapas B–F descongeladas el 2026-09-23 (decisión de Steven: la escala en paralelo a
+  la biología). En curso: PERF3 (sin copia del mundo en los pasos sin gestos) y el bloque E.0 (T141–T143: fuera los
+  cuadráticos por habitante). La etapa A está integrada en `main`; siguen abiertas T100, T103, T104 y el Gate A (T110),
+  según [tasks.md](../specs/002-mundo-ilimitado/tasks.md).
 - `specs/001-mundo-solido-masivo/`: cerrada el 2026-09-19.
 
 ## Cómo se actualiza

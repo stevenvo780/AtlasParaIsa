@@ -5,12 +5,12 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../src/server/store.js';
-import { createWorld, stepWorld, type World } from '../src/world/index.js';
+import { createWorld, stepWorld, type Person, type World } from '../src/world/index.js';
 import { digestoCanonico } from '../src/world/digesto.js';
-import { CONDUCTA_DIMENSIONS } from '../src/world/diversidad.js';
+import { CONDUCTA_DIMENSIONS, indiceDiversidad } from '../src/world/diversidad.js';
 import { worldStatistics } from '../src/world/statistics.js';
 import { parseParams } from '../src/world/params.js';
-import { ACCIONES, indiceDiversidadConActividad, InstrumentosConducta } from '../scripts/lab/instrumentos.js';
+import { ACCIONES, indiceDiversidadConActividad, InstrumentosConducta, sinDescanso } from '../scripts/lab/instrumentos.js';
 
 /**
  * Instrumentos de medida del laboratorio (scripts/lab/instrumentos.ts, ronda INSTR 2026-09-22):
@@ -33,7 +33,7 @@ const CLAVES_ANTIGUAS = new Set([
   'cooperacionAcumuladaPorTipo', 'otrasCooperacionesAcumuladas', 'conflictosAcumulados',
   'p50Ms', 'p95Ms', 'rss',
 ]);
-const CLAVES_NUEVAS = ['diversidadConductaTiempo', 'diversidadConductaTiempoComponentes', 'diversidadConductaComponentes', 'repartoTiempoPorAccion', 'repartoActividadPorAccion'];
+const CLAVES_NUEVAS = ['diversidadConductaTiempo', 'diversidadConductaTiempoComponentes', 'diversidadConductaActiva', 'diversidadConductaActivaComponentes', 'diversidadConductaComponentes', 'repartoTiempoPorAccion', 'repartoActividadPorAccion'];
 
 type Json = Record<string, unknown>;
 const readJson = (path: string): Json => JSON.parse(readFileSync(path, 'utf8')) as Json;
@@ -61,6 +61,41 @@ test('ACCIONES cubre las 18 acciones del vector de conducta de src/world/diversi
   assert.equal(new Set(ACCIONES).size, 18);
   // CONDUCTA_DIMENSIONS = 2·|ACTIONS| + 5 (tecnología) + 6 (acciones de comida) + 6 (lugares).
   assert.equal(ACCIONES.length * 2 + 5 + 6 + 6, CONDUCTA_DIMENSIONS);
+});
+
+/** Persona mínima para `indiceDiversidad`: sin tecnología, alimento ni lugares (esos grupos del vector
+ * quedan en blanco), así que solo la actividad distingue a unas de otras. */
+function personaEnBlanco(id: string): Person {
+  return { id, activity: {}, technology: { competence: {}, knownRecipes: [], items: [] }, skills: {}, experiences: [] } as unknown as Person;
+}
+
+test('conducta activa: sinDescanso quita solo rest y el índice con ticks conocidos da el valor calculado a mano', () => {
+  assert.deepEqual(sinDescanso({ rest: 100, explore: 10, farm: 0 }), { explore: 10 });
+  assert.deepEqual(sinDescanso({ rest: 30 }), {}, 'solo descanso ⇒ actividad vacía, como quien aún no actuó');
+  assert.deepEqual(sinDescanso({}), {});
+  const entrada = { rest: 5, eat: 2 };
+  sinDescanso(entrada);
+  assert.deepEqual(entrada, { rest: 5, eat: 2 }, 'no modifica la entrada');
+
+  // A explora, B cultiva, C solo descansa. Conducta activa: A = explore, B = farm, C vacío.
+  const ticks: Record<string, Record<string, number>> = { a: { rest: 100, explore: 10 }, b: { rest: 50, farm: 5 }, c: { rest: 30 } };
+  const mundo = { people: ['a', 'b', 'c'].map(personaEnBlanco) } as unknown as World;
+  const activa = indiceDiversidadConActividad(mundo, person => sinDescanso(ticks[person.id]!));
+  // Vectores: A y B one-hot en acciones distintas (distancia coseno 1); C en blanco frente a otro con
+  // contenido: distancia 1 (diversidad.ts). Oficios: explore, farm y «sin oficio aún», 1/3 cada uno.
+  const oficiosActiva = Math.log(3) / Math.log(18);
+  assert.equal(activa.conducta, 1);
+  assert.ok(Math.abs(activa.oficios - oficiosActiva) < 1e-12, `oficios ${activa.oficios} ≠ ln3/ln18`);
+  assert.ok(Math.abs(activa.total - (1 + oficiosActiva) / 2) < 1e-12);
+
+  // Con descanso (índice por tiempo) los tres tienen rest como oficio dominante: oficios = 0, y el
+  // vector de actividad de A y B es (10, 1)/√101 sobre (rest, su acción) + one-hot rest.
+  const tiempo = indiceDiversidadConActividad(mundo, person => ticks[person.id]!);
+  const dAB = 1 - (100 / 101 + 1) / 2, dAC = 1 - (10 / Math.sqrt(101) + 1) / 2;
+  assert.equal(tiempo.oficios, 0);
+  assert.ok(Math.abs(tiempo.conducta - (dAB + 2 * dAC) / 3) < 1e-12, `conducta por tiempo ${tiempo.conducta}`);
+  // Con la activity de cada persona (aquí vacía) es el índice de siempre: indiceDiversidad sin sustituir nada.
+  assert.deepEqual(indiceDiversidadConActividad(mundo, person => person.activity), indiceDiversidad(mundo));
 });
 
 test('en proceso: el observador no mueve un bit del mundo, cuenta cada share() y sustituye solo la actividad del índice', { timeout: 1_800_000 }, t => {
@@ -114,6 +149,11 @@ test('en proceso: el observador no mueve un bit del mundo, cuenta cada share() y
   const porTiempo = indiceDiversidadConActividad(a.world, person => instrumentos.ticksDe(person.id)!);
   assert.equal(porTiempo.total, dia.diversidadConductaTiempo);
   assert.deepEqual({ conducta: porTiempo.conducta, oficios: porTiempo.oficios }, dia.diversidadConductaTiempoComponentes);
+  // Conducta activa: los mismos ticks sin descansar; quien solo descansó queda con la actividad vacía.
+  const activa = indiceDiversidadConActividad(a.world, person => sinDescanso(instrumentos.ticksDe(person.id)!));
+  assert.equal(activa.total, dia.diversidadConductaActiva);
+  assert.deepEqual({ conducta: activa.conducta, oficios: activa.oficios }, dia.diversidadConductaActivaComponentes);
+  assert.notEqual(dia.diversidadConductaActiva, dia.diversidadConductaTiempo, 'quitar descansar cambia la entrada');
 });
 
 /** Lanza replica.ts sin bloquear (las dos réplicas corren a la vez). */
@@ -145,12 +185,16 @@ test('CLI: réplica corta con y sin instrumentos — digestoCanonico idéntico y
   assert.deepEqual(sinTiempos(replicaCon.resumen as Json), sinTiempos(replicaSin.resumen as Json));
   assert.match(replicaCon.instrumentos as string, /^si/);
   assert.equal(replicaSin.instrumentos, 'no');
+  // Sin --techo-lab no aparece nada del techo de laboratorio (tests/lab-techo.test.ts).
+  for (const r of [replicaCon, replicaSin]) { assert.ok(!('techoLab' in r) && !('techoLabDetalle' in r)); assert.equal(r.gobernador, 'no-ejecutado; replica de leyes, no del servidor'); }
 
   // Coherencia de los campos nuevos.
   const componentes = con.diversidadConductaComponentes as { conducta: number; oficios: number };
   assert.equal((componentes.conducta + componentes.oficios) / 2, con.diversidadConducta, 'los componentes son los del índice antiguo');
   const tiempo = con.diversidadConductaTiempoComponentes as { conducta: number; oficios: number };
   assert.equal((tiempo.conducta + tiempo.oficios) / 2, con.diversidadConductaTiempo);
+  const activa = con.diversidadConductaActivaComponentes as { conducta: number; oficios: number };
+  assert.equal((activa.conducta + activa.oficios) / 2, con.diversidadConductaActiva);
   const reparto = con.repartoTiempoPorAccion as { personaTicks: number; fracciones: Record<string, number> };
   assert.ok(reparto.personaTicks >= 2400 * 14, 'al menos los 14 fundadores mortales observados cada paso del día (hay nacimientos, pocas muertes)');
   assert.ok(Math.abs(Object.values(reparto.fracciones).reduce((s, x) => s + x, 0) - 1) < 1e-12);

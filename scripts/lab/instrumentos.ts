@@ -11,6 +11,11 @@
  *    acumula ticks por acción; `diversidadConductaTiempo` es EL MISMO índice
  *    (`indiceDiversidad`, misma fórmula y mismos componentes) sobre vistas de las personas cuya
  *    `activity` se sustituye por esos ticks. Solo cambia la entrada de actividad.
+ *    `diversidadConductaActiva` (preregistro del orquestador, noche 2026-09-22): el MISMO índice con
+ *    esos ticks SIN `rest` (`sinDescanso`). Descansar es inactividad, no conducta, y domina el tiempo
+ *    (20-39 %) y el «oficio dominante» por tiempo de casi todos. Quien solo ha descansado queda con la
+ *    actividad vacía, como alguien que aún no actuó. Es la serie que decide C8 en
+ *    `criterio-terminado.mts` (modo auto); ver scripts/lab/README.md §«Preregistro del criterio C8».
  * 2. Comida compartida. Cuenta los actos de `share()` (src/world/index.ts): cada uno emite
  *    exactamente un suceso `kind: 'care'` (el único emisor de ese tipo en src/world) cuando una
  *    persona entrega 0,025 de su reserva (`inventory`) a otra con hambre > 0,27 a ≤ 2 celdas, junto
@@ -45,6 +50,20 @@ export function indiceDiversidadConActividad(world: World, actividad: (person: P
   return indiceDiversidad(mundo);
 }
 
+/** Acción excluida de la conducta ACTIVA: descansar es inactividad, no conducta. */
+export const ACCION_INACTIVA: Action = 'rest';
+
+/**
+ * Ticks por acción sin `rest` (copia; solo las acciones con ticks > 0). Si solo hay descanso devuelve
+ * `{}`: el vector de actividad queda vacío, igual que el de alguien que aún no actuó (`activity: {}`
+ * de un recién nacido), y su «oficio dominante» es «sin oficio aún» (`dominantAction` = null).
+ */
+export function sinDescanso(ticks: Readonly<Record<string, number>>): Record<string, number> {
+  const activa: Record<string, number> = {};
+  for (const [accion, n] of Object.entries(ticks)) if (accion !== ACCION_INACTIVA && n > 0) activa[accion] = n;
+  return activa;
+}
+
 function fracciones(conteo: ReadonlyMap<string, number>, total: number): Record<string, number> {
   const salida: Record<string, number> = {};
   for (const accion of ACCIONES) { const n = conteo.get(accion) ?? 0; if (n > 0) salida[accion] = n / total; }
@@ -55,6 +74,9 @@ function fracciones(conteo: ReadonlyMap<string, number>, total: number): Record<
 export interface MetricasInstrumentos {
   diversidadConductaTiempo: number;
   diversidadConductaTiempoComponentes: { conducta: number; oficios: number };
+  /** El mismo índice con los ticks por acción SIN `rest` (conducta activa). */
+  diversidadConductaActiva: number;
+  diversidadConductaActivaComponentes: { conducta: number; oficios: number };
   diversidadConductaComponentes: { conducta: number; oficios: number };
   repartoTiempoPorAccion: { personaTicks: number; fracciones: Record<string, number> };
   repartoActividadPorAccion: { incrementos: number; fracciones: Record<string, number> };
@@ -117,6 +139,7 @@ export class InstrumentosConducta {
     const inicio = performance.now();
     const vacio: Record<string, number> = {};
     const tiempo = indiceDiversidadConActividad(world, person => this.ticksPorPersona.get(person.id) ?? vacio);
+    const activa = indiceDiversidadConActividad(world, person => sinDescanso(this.ticksPorPersona.get(person.id) ?? vacio));
     const actividad = indiceDiversidadConActividad(world, person => person.activity);
     const incrementos = new Map<string, number>();
     let totalIncrementos = 0;
@@ -131,6 +154,8 @@ export class InstrumentosConducta {
     const metricas: MetricasInstrumentos = {
       diversidadConductaTiempo: tiempo.total,
       diversidadConductaTiempoComponentes: { conducta: tiempo.conducta, oficios: tiempo.oficios },
+      diversidadConductaActiva: activa.total,
+      diversidadConductaActivaComponentes: { conducta: activa.conducta, oficios: activa.oficios },
       diversidadConductaComponentes: { conducta: actividad.conducta, oficios: actividad.oficios },
       repartoTiempoPorAccion: { personaTicks: this.personaTicksDia, fracciones: fracciones(this.tiempoDia, this.personaTicksDia) },
       repartoActividadPorAccion: { incrementos: totalIncrementos, fracciones: fracciones(incrementos, totalIncrementos) },

@@ -85,6 +85,12 @@ const CLAVES_DIA_SIN_GOBERNADOR = new Set([
   'cooperacionAcumuladaPorTipo', 'otrasCooperacionesAcumuladas', 'conflictosAcumulados',
   'p50Ms', 'p95Ms', 'rss',
 ]);
+// Instrumentos de medida (scripts/lab/instrumentos.ts, ronda INSTR 2026-09-22): activos por defecto,
+// añaden estas claves (y `foodShared` dentro de `cooperacionAcumuladaPorTipo`); con
+// `--instrumentos no` el conjunto vuelve a ser EXACTAMENTE `CLAVES_DIA_SIN_GOBERNADOR`
+// (tests/instrumentos-lab.test.ts).
+const CLAVES_INSTRUMENTOS = ['diversidadConductaTiempo', 'diversidadConductaTiempoComponentes', 'diversidadConductaActiva', 'diversidadConductaActivaComponentes', 'diversidadConductaComponentes', 'repartoTiempoPorAccion', 'repartoActividadPorAccion'] as const;
+const CLAVES_DIA_POR_DEFECTO = new Set<string>([...CLAVES_DIA_SIN_GOBERNADOR, ...CLAVES_INSTRUMENTOS]);
 const CLAVES_GOBERNADOR_SERVIDOR = ['reproduccionActivaFraccion', 'p95GobernadorFinal', 'cloneMsP50', 'saveMsP50', 'indiceDiversidad', 'cooperacionPorTipo', 'comunidades', 'rasgosPorGeneracion', 'varianzaGenetica'] as const;
 
 test('--gobernador (default "no" y explícito "no") no añade ninguna clave nueva a dia-001.json', (t) => {
@@ -93,8 +99,8 @@ test('--gobernador (default "no" y explícito "no") no añade ninguna clave nuev
 
   const diaDefault = readJson(join(dirDefault, 'dia-001.json'));
   const diaNo = readJson(join(dirNo, 'dia-001.json'));
-  assert.deepEqual(new Set(Object.keys(diaDefault)), CLAVES_DIA_SIN_GOBERNADOR, 'sin --gobernador el conjunto de claves debe ser EXACTAMENTE el de antes de esta tarea');
-  assert.deepEqual(new Set(Object.keys(diaNo)), CLAVES_DIA_SIN_GOBERNADOR, '--gobernador no debe producir el mismo conjunto de claves que el default');
+  assert.deepEqual(new Set(Object.keys(diaDefault)), CLAVES_DIA_POR_DEFECTO, 'sin --gobernador el conjunto de claves debe ser EXACTAMENTE el de antes de esta tarea (+ instrumentos)');
+  assert.deepEqual(new Set(Object.keys(diaNo)), CLAVES_DIA_POR_DEFECTO, '--gobernador no debe producir el mismo conjunto de claves que el default');
   for (const clave of CLAVES_GOBERNADOR_SERVIDOR) { assert.ok(!(clave in diaDefault), `${clave} no debe existir sin --gobernador`); assert.ok(!(clave in diaNo), `${clave} no debe existir con --gobernador no`); }
   assert.deepEqual(stripTimings(diaDefault), stripTimings(diaNo), 'default y --gobernador no deben coincidir bit a bit salvo tiempos');
 

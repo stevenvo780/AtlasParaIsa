@@ -234,8 +234,13 @@ function withdraw(host: TechnologyHost, actor: TechnologyActor, plan: Withdrawal
 function itemResource(i: MaterialBatch): string { return i.recipeId ? `recipe:${i.recipeId}` : 'unclassified'; }
 function compositionResources(c: Composition, prefix: string): ResourceMass[] { return MATERIALS.filter(m => c[m]).map(m => ({ resourceId: `${prefix}:${m}`, mass: c[m] })); }
 export function toolCapacities(actor: TechnologyActor): Record<Capability, number> {
+  return itemCapacities(actor.technology.items);
+}
+/** Lo mismo que `toolCapacities` de un actor con esos objetos, sin construir el actor (sprint noche-perf2:
+ * los llamadores copiaban la persona entera sólo para cambiarle el inventario). */
+export function itemCapacities(items: readonly MaterialBatch[]): Record<Capability, number> {
   const result = Object.fromEntries(CAPABILITIES.map(c => [c, 0])) as Record<Capability, number>;
-  for (const item of actor.technology.items) { const powers = materialCapacities(item); for (const c of CAPABILITIES) result[c] = Math.max(result[c], powers[c]); }
+  for (const item of items) { const powers = materialCapacities(item); for (const c of CAPABILITIES) result[c] = Math.max(result[c], powers[c]); }
   return result;
 }
 export interface ToolReceipt { executionId: string; itemId: string; recipeId: string | null; capability: Capability; power: number; wear: number; }

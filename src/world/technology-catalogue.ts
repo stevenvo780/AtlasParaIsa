@@ -8,6 +8,10 @@ export interface TechnologyCatalogueReader {
    * necesita su propio `structuredClone` defensivo (sprint noche-perf 2026-09-22). Sin la marca, se
    * clona como siempre. */
   readonly freshCopies?: boolean;
+  /** Opcional (sprint noche-perf2 2026-09-22): ejecuta `read` —un paso del mundo, que SÓLO lee
+   * definiciones archivadas y nunca escribe en el archivo— como un lote a fecha de `atTick`: el anfitrión
+   * puede validar su memoria de lecturas una vez para todo el lote. Sin el método, cada lectura se valida sola. */
+  readonly readBatch?: <T>(atTick: number, read: () => T) => T;
 }
 export interface TechnologyCatalogueHost { technology: TechnologyState; tick: number; }
 export const MAX_PENDING_TECHNOLOGY_RECIPES = 65_536;
@@ -86,14 +90,133 @@ function checkedRecipe(host: TechnologyCatalogueHost, recipe: TechnologyRecipe, 
     !integer(recipe.manufactured) || !integer(recipe.uses) || !finite(recipe.utility)) fail('resolved identity, time or statistics');
   return recipe;
 }
+/**
+ * Índices de resolución (sprint noche-perf2 2026-09-22). Con ~230 habitantes cada paso hace ~2 300
+ * resoluciones, y cada una recorría `pending` (media 289 recetas, crece hasta el guardado) y la ventana
+ * residente (256) con `find`, y reconstruía la ventana entera con un bucle JS. Ahora:
+ *  - `pending` sólo crece por `push` entre guardados y se REEMPLAZA por `[]` al confirmar; su índice
+ *    id → PRIMERA receta con ese id (como `find`) va asociado a la identidad del arreglo y se extiende
+ *    cuando crece su longitud; si encoge, se reconstruye.
+ *  - la ventana (`state.recipes`) siempre se reemplaza por un arreglo nuevo en `cacheRecipe`; su índice
+ *    id → receta va asociado a la identidad y longitud del arreglo vigente y `cacheRecipe` lo traslada al
+ *    arreglo nuevo con los mismos cambios (fuera el id tocado, dentro al final, fuera los expulsados).
+ * Un índice sólo se usa si todas las entradas son objetos con id de texto y, en la ventana, los ids son
+ * únicos (lo exige `assertTechnologyCatalogueState`); si no, vuelve el recorrido lineal de siempre.
+ * Misma respuesta que `find`, mismo contenido y orden de la ventana tras cada toque, mismos objetos.
+ */
+interface RecipeIndex { length: number; byId: Map<string, TechnologyRecipe> | null; }
+const pendingIndexes = new WeakMap<TechnologyRecipe[], RecipeIndex>();
+const windowIndexes = new WeakMap<TechnologyRecipe[], RecipeIndex>();
+const indexable = (recipe: unknown): recipe is TechnologyRecipe =>
+  !!recipe && typeof recipe === 'object' && typeof (recipe as TechnologyRecipe).id === 'string';
+function pendingIndex(pending: TechnologyRecipe[]): Map<string, TechnologyRecipe> | null {
+  let index = pendingIndexes.get(pending);
+  if (!index || index.length > pending.length) { index = { length: 0, byId: new Map() }; pendingIndexes.set(pending, index); }
+  if (index.byId && index.length < pending.length) {
+    const byId = index.byId;
+    for (let n = index.length; n < pending.length; n++) {
+      const recipe = pending[n];
+      if (!(n in pending) || !indexable(recipe)) { index.byId = null; break; }
+      if (!byId.has(recipe.id)) byId.set(recipe.id, recipe);
+    }
+    index.length = pending.length;
+  }
+  return index.byId;
+}
+function windowIndex(recipes: TechnologyRecipe[]): Map<string, TechnologyRecipe> | null {
+  let index = windowIndexes.get(recipes);
+  if (!index || index.length !== recipes.length) {
+    let byId: Map<string, TechnologyRecipe> | null = new Map();
+    for (let n = 0; n < recipes.length; n++) {
+      const recipe = recipes[n];
+      if (!(n in recipes) || !indexable(recipe) || byId.has(recipe.id)) { byId = null; break; }
+      byId.set(recipe.id, recipe);
+    }
+    index = { length: recipes.length, byId };
+    windowIndexes.set(recipes, index);
+  }
+  return index.byId;
+}
+function pendingRecipe(pending: TechnologyRecipe[], id: string): TechnologyRecipe | undefined {
+  const byId = pendingIndex(pending);
+  return byId ? byId.get(id) : pending.find(recipe => recipe.id === id);
+}
+function residentRecipe(recipes: TechnologyRecipe[], id: string): TechnologyRecipe | undefined {
+  const byId = windowIndex(recipes);
+  return byId ? byId.get(id) : recipes.find(recipe => recipe.id === id);
+}
 function cacheRecipe(state: TechnologyState, recipe: TechnologyRecipe): void {
   // Replacing the array avoids extending an array currently being validated/iterated.
-  // Sprint noche-perf 2026-09-22: una sola pasada en vez de filter + spread + slice (tres arreglos por
-  // resolución); mismo contenido, mismo orden y, como antes, siempre un arreglo nuevo.
-  const current = state.recipes, max = state.budgets.maxRecipes, next: TechnologyRecipe[] = [];
-  current.forEach(cached => { if (cached.id !== recipe.id) next.push(cached); });
+  const current = state.recipes, max = state.budgets.maxRecipes, byId = windowIndex(current);
+  if (!byId) {
+    const next: TechnologyRecipe[] = [];
+    current.forEach(cached => { if (cached.id !== recipe.id) next.push(cached); });
+    next.push(recipe);
+    state.recipes = next.length > max ? next.slice(-max) : next;
+    return;
+  }
+  // Ids únicos: el `filter` de siempre quita exactamente al residente con ese id, si lo hay.
+  const resident = byId.get(recipe.id);
+  let next = current.slice();
+  if (resident !== undefined) next.splice(current.indexOf(resident), 1);
   next.push(recipe);
-  state.recipes = next.length > max ? next.slice(-max) : next;
+  if (next.length > max) {
+    const kept = next.slice(-max);
+    for (let n = 0; n < next.length - kept.length; n++) byId.delete(next[n]!.id);
+    next = kept;
+  }
+  byId.delete(recipe.id);
+  if (next[next.length - 1] === recipe) byId.set(recipe.id, recipe);
+  windowIndexes.delete(current);
+  windowIndexes.set(next, { length: next.length, byId });
+  state.recipes = next;
+}
+/**
+ * Sesión de resolución (sprint noche-perf2 2026-09-22). `cooperationOpportunity` evalúa, sin cambiar
+ * nada del mundo, a cada vecino a ≤ 7 celdas y resuelve por par ~45 recetas: con ~230 habitantes son
+ * ~2 000 toques de la ventana por paso, y cada toque copiaba la ventana entera (256) en un arreglo
+ * nuevo. Durante una sesión la ventana vive en un `Map` en el mismo orden (el orden de inserción de un
+ * `Map` es el orden de la ventana): tocar es borrar y volver a poner al final y, si sobra, quitar el
+ * primero —exactamente `filter` + `push` + `slice(-max)` con ids únicos y la ventana sin exceso—. Al
+ * terminar se materializa UNA vez en un arreglo nuevo. Mientras dura, `state.recipes` sigue siendo el
+ * arreglo de antes, intacto (como para quien lo estuviera recorriendo con el algoritmo de siempre); sólo
+ * lo leen este módulo y el Store, y toda función de aquí que lo lee o lo cambia fuera de la resolución
+ * cierra antes la sesión. Una sesión sólo se abre con el catálogo activo, ids únicos en la ventana,
+ * `maxRecipes` entero positivo y la ventana sin exceso; si no, todo sigue el camino de siempre.
+ */
+interface RecipeSession { lru: Map<string, TechnologyRecipe>; max: number; touched: boolean; }
+const sessions = new WeakMap<TechnologyState, RecipeSession>();
+function endRecipeSession(state: TechnologyState): void {
+  const session = sessions.get(state);
+  if (!session) return;
+  sessions.delete(state);
+  if (!session.touched) return;
+  const next = [...session.lru.values()];
+  windowIndexes.set(next, { length: next.length, byId: session.lru });
+  state.recipes = next;
+}
+export function withRecipeSession<T>(host: TechnologyCatalogueHost, evaluate: () => T): T {
+  const state = host.technology;
+  if (sessions.has(state) || !catalogueEnabled(state)) return evaluate();
+  const inSession = (): T => {
+    const max = state.budgets.maxRecipes;
+    if (!windowIndex(state.recipes) || !Number.isSafeInteger(max) || max < 1 || state.recipes.length > max) return evaluate();
+    const session: RecipeSession = { lru: new Map(state.recipes.map(recipe => [recipe.id, recipe])), max, touched: false };
+    sessions.set(state, session);
+    try { return evaluate(); } finally { if (sessions.get(state) === session) endRecipeSession(state); }
+  };
+  return inSession();
+}
+/** Ejecuta `read` como un lote de lecturas del anfitrión a fecha de `host.tick` (sprint noche-perf2):
+ * `stepWorld` lo usa para todo el paso, que sólo LEE el archivo. Sin anfitrión con lotes, llama y ya. */
+export function withArchiveReadBatch<T>(host: TechnologyCatalogueHost, read: () => T): T {
+  const reader = readers.get(host.technology);
+  return reader?.readBatch ? reader.readBatch(host.tick, read) : read();
+}
+function touchInSession(session: RecipeSession, recipe: TechnologyRecipe): void {
+  session.lru.delete(recipe.id); session.lru.set(recipe.id, recipe);
+  if (session.lru.size > session.max) session.lru.delete(session.lru.keys().next().value!);
+  session.touched = true;
 }
 export function resolveTechnologyRecipe(host: TechnologyCatalogueHost, id: string,
   options: { cache?: boolean } = {}): TechnologyRecipe | undefined {
@@ -101,7 +224,8 @@ export function resolveTechnologyRecipe(host: TechnologyCatalogueHost, id: strin
   if (!catalogueEnabled(state)) return state.recipes.find(recipe => recipe.id === id);
   const number = serial(id);
   if (number < 1 || number > state.recipeCounter) return undefined;
-  let recipe = state.catalogue!.pending.find(recipe => recipe.id === id) ?? state.recipes.find(recipe => recipe.id === id);
+  const session = sessions.get(state);
+  let recipe = pendingRecipe(state.catalogue!.pending, id) ?? (session ? session.lru.get(id) : residentRecipe(state.recipes, id));
   if (!recipe) {
     const reader = readers.get(state); if (!reader) fail('an archived reference requires its host reader');
     const archived = reader.resolve(id, host.tick);
@@ -109,11 +233,12 @@ export function resolveTechnologyRecipe(host: TechnologyCatalogueHost, id: strin
     recipe = reader.freshCopies === true ? checkedRecipe(host, archived, id) : structuredClone(checkedRecipe(host, archived, id));
   }
   checkedRecipe(host, recipe, id);
-  if (options.cache !== false) cacheRecipe(state, recipe);
+  if (options.cache !== false) { if (session) touchInSession(session, recipe); else cacheRecipe(state, recipe); }
   return recipe;
 }
 export function findTechnologyRecipe(host: TechnologyCatalogueHost, signature: string): TechnologyRecipe | undefined {
   const state = host.technology;
+  endRecipeSession(state);
   const local = state.catalogue?.pending.find(recipe => recipe.signature === signature) ?? state.recipes.find(recipe => recipe.signature === signature);
   if (local) return resolveTechnologyRecipe(host, local.id);
   if (!catalogueEnabled(state)) return undefined;
@@ -121,7 +246,7 @@ export function findTechnologyRecipe(host: TechnologyCatalogueHost, signature: s
   const archived = reader.findBySignature(signature, host.tick);
   if (!archived) return undefined;
   if (archived.signature !== signature) fail('resolved signature');
-  const recipe = state.catalogue!.pending.find(recipe => recipe.id === archived.id) ?? structuredClone(checkedRecipe(host, archived));
+  const recipe = pendingRecipe(state.catalogue!.pending, archived.id) ?? structuredClone(checkedRecipe(host, archived));
   checkedRecipe(host, recipe);
   cacheRecipe(state, recipe); return recipe;
 }
@@ -132,6 +257,7 @@ export function hasTechnologyFunction(host: TechnologyCatalogueHost, capacities:
 }
 export function registerTechnologyRecipe(host: TechnologyCatalogueHost, recipe: TechnologyRecipe): void {
   const state = host.technology, catalogue = state.catalogue;
+  endRecipeSession(state);
   if (!integer(state.recipeCounter + 1) || recipe.id !== `recipe-${state.recipeCounter + 1}` ||
     !integer(recipe.tick, host.tick) || !integer(recipe.generation) || !recipe.generation ||
     recipe.manufactured !== 0 || recipe.uses !== 0 || recipe.utility !== 0) fail('new recipe allocation');
@@ -152,13 +278,14 @@ export function updateTechnologyRecipeStats(host: TechnologyCatalogueHost, id: s
   delta: { manufactured?: number; uses?: number; utility?: number }): void {
   if (Object.keys(delta).some(key => !['manufactured', 'uses', 'utility'].includes(key)) ||
     !integer(delta.manufactured ?? 0) || !integer(delta.uses ?? 0) || !finite(delta.utility ?? 0)) fail('statistics delta');
+  endRecipeSession(host.technology);
   const state = host.technology, recipe = resolveTechnologyRecipe(host, id, { cache: false });
   if (!recipe) fail('statistics require a known definition');
   const next = { manufactured: recipe.manufactured + (delta.manufactured ?? 0), uses: recipe.uses + (delta.uses ?? 0), utility: recipe.utility + (delta.utility ?? 0) };
   if (!integer(next.manufactured) || !integer(next.uses) || !finite(next.utility)) fail('statistics overflow');
   const catalogue = state.catalogue;
   if (catalogue) {
-    const pending = catalogue.pending.some(record => record.id === id);
+    const pending = pendingRecipe(catalogue.pending, id) !== undefined;
     if (!pending && catalogue.pending.length >= MAX_PENDING_TECHNOLOGY_RECIPES) fail('pending statistics require a durable commit');
     const totals = { ...catalogue.totals, manufactured: catalogue.totals.manufactured + (delta.manufactured ?? 0),
       uses: catalogue.totals.uses + (delta.uses ?? 0), utility: catalogue.totals.utility + (delta.utility ?? 0) };
@@ -176,6 +303,7 @@ export function technologyCatalogueTotals(host: TechnologyCatalogueHost): Techno
 /** Local envelope validation; the Store independently proves the durable prefix and aggregates. */
 export function assertTechnologyCatalogueState(host: TechnologyCatalogueHost): void {
   const state = host.technology, catalogue = state.catalogue;
+  endRecipeSession(state);
   if (catalogue === undefined) return;
   if (!catalogue || catalogue.version !== 1 || !integer(catalogue.committedThrough, state.recipeCounter) ||
     !Array.isArray(catalogue.pending) || catalogue.pending.length > MAX_PENDING_TECHNOLOGY_RECIPES ||
@@ -204,9 +332,11 @@ export function assertTechnologyCatalogueState(host: TechnologyCatalogueHost): v
   }
 }
 export function technologyCatalogueStateForCommit(state: TechnologyState): TechnologyState {
+  endRecipeSession(state);
   return state.catalogue === undefined ? state : { ...state, catalogue: { ...state.catalogue, committedThrough: state.recipeCounter, pending: [] } };
 }
 /** The host calls this only after the transaction containing definitions and statistics commits. */
 export function markTechnologyCatalogueCommitted(state: TechnologyState): void {
+  endRecipeSession(state);
   if (state.catalogue) { state.catalogue.committedThrough = state.recipeCounter; state.catalogue.pending = []; }
 }

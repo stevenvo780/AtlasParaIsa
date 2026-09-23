@@ -42,11 +42,21 @@ export function assertTechnologyCheckpoint(state: TechnologyState, tick: number)
   }
   const actorIds = new Set<string>(), itemIds = new Set<string>();
   let contained = 0;
+  // Sprint noche-perf2 2026-09-22: con ~230 habitantes cada rotación resolvía ~1 800 objetos, casi todos
+  // de unas pocas decenas de recetas, y cada resolución fuera de la ventana va al archivo. Dentro de esta
+  // validación nada cambia (resolver sin caché no toca el mundo), así que la respuesta por id es la misma
+  // en cada objeto: se resuelve una vez por id y validación. Un id que falla sigue fallando en su primer uso.
+  const existed = new Map<string, boolean>();
   const recipeExisted = (id: string): boolean => {
-    // Resolve the current record, then check only its immutable birth date. A checkpoint
-    // is not a claim about recipe statistics at its historical opening tick.
-    const recipe = resolveTechnologyRecipe({ technology: state, tick }, id, { cache: false });
-    return !!recipe && recipe.tick <= checkpoint.tick;
+    let result = existed.get(id);
+    if (result === undefined) {
+      // Resolve the current record, then check only its immutable birth date. A checkpoint
+      // is not a claim about recipe statistics at its historical opening tick.
+      const recipe = resolveTechnologyRecipe({ technology: state, tick }, id, { cache: false });
+      result = !!recipe && recipe.tick <= checkpoint.tick;
+      existed.set(id, result);
+    }
+    return result;
   };
   for (const inventory of checkpoint.inventories) {
     if (!inventory || !identifier(inventory.actorId) || actorIds.has(inventory.actorId) || !composition(inventory.residue) ||

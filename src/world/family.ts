@@ -2,6 +2,7 @@ import type { Person, World } from './index.js';
 import { demographicTraits, updateDemography } from './demography.js';
 import { localRandom } from './genetics.js';
 import { DEFAULT_PARAMS, paramsOf } from './params.js';
+import { algunoCerca } from './indice-puntos.js';
 
 export const FAMILY_RESERVE_TARGET = 0.12;
 const SHARE_AMOUNT = 0.025;
@@ -100,7 +101,7 @@ export function familyOpportunity(world: World, person: Person): FamilyOpportuni
   const partner = world.people.filter(other => other !== person && other.id !== person.id && !!other.communityId
     && distance(person, other) <= 7 && (person.bonds[other.id] ?? 0) >= 0.3 && (other.bonds[person.id] ?? 0) >= 0.3
     && !closeKin(person, other) && reproductiveReadiness(world, other)
-    && world.places.some(place => distance(person, place) <= 7 && (distance(person, place) <= 4 || distance(other, place) <= 4)))
+    && algunoCerca(world.places, person, 8, place => distance(person, place) <= 7 && (distance(person, place) <= 4 || distance(other, place) <= 4)))
     .sort((a, b) => distance(person, a) - distance(person, b) || a.id.localeCompare(b.id))[0];
   return partner ? { partner, reserveTarget: FAMILY_RESERVE_TARGET } : null;
 }

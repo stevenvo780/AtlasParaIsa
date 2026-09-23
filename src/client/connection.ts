@@ -35,6 +35,10 @@ export class Connection {
   /** M2: tamaño (en caracteres UTF-16 ≈ bytes del JSON) y hora de llegada de los últimos estados recibidos.
    * Solo se mide; no cambia el protocolo ni lo que se pide al servidor. */
   private readonly received: { size: number; at: number }[] = [];
+  /** Un `state` que el servidor manda en trozos (`/ws?ack=1`): cuántos marcos faltan y los recibidos. */
+  private trozos: { total: number; partes: string[] } | null = null;
+  /** La cámara que viajó en la URL del socket actual: al abrir solo se manda si cambió desde entonces. */
+  private urlViewport = 'null';
   private status: ConnectionStatus = 'connecting';
   private browserOffline = false;
   private readonly onOffline = (): void => {
@@ -201,8 +205,14 @@ export class Connection {
     try {
       if (!await this.getWorld() || this.browserOffline) return;
       const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const socket = new WebSocket(`${protocol}//${location.host}/ws`);
+      // `ack=1`: este cliente acusa cada `state` y el servidor nunca le tiene más de uno en vuelo
+      // (contrapresión: por un enlace lento recibe menos estados, siempre el más reciente, en vez
+      // de acumular retraso hasta que el latido corta). La cámara ya conocida viaja en la URL para
+      // que el primer `state` sea el de esta pantalla y no la vista por defecto.
+      const query = new URLSearchParams({ ack: '1', ...(this.viewport ? Object.fromEntries(Object.entries(this.viewport).map(([key, value]) => [key, String(value)])) : {}) });
+      const socket = new WebSocket(`${protocol}//${location.host}/ws?${query}`);
       this.socket = socket;
+      this.trozos = null; this.urlViewport = JSON.stringify(this.viewport);
       this.watchSilence();
       socket.onopen = () => {
         if (this.stopped || this.socket !== socket) { socket.close(); return; }
@@ -210,15 +220,33 @@ export class Connection {
         this.updateStatus('live');
         this.watchSilence();
         if (this.subscribeMs) this.transmit({ type: 'suscripcion', intervaloMs: this.subscribeMs });
-        this.sendViewport();
+        // La cámara de la URL ya sirvió el primer `state`; repetirla pediría otro igual.
+        if (JSON.stringify(this.viewport) !== this.urlViewport) this.sendViewport();
         if (this.pending) this.deliver();
       };
       socket.onmessage = (event: MessageEvent<string>) => {
         if (this.stopped || this.socket !== socket) return;
+        // Cualquier marco rearma el silencio: un trozo de un `state` grande o un latido demuestran
+        // que la conexión vive aunque el `state` entero tarde más de 8 s por un enlace lento.
         this.watchSilence();
+        let data = event.data;
+        if (this.trozos) {
+          this.trozos.partes.push(data);
+          if (this.trozos.partes.length < this.trozos.total) return;
+          data = this.trozos.partes.join(''); this.trozos = null;
+        }
         try {
-          const message = JSON.parse(event.data) as ServerMessage;
-          if (message.type === 'state') { this.measure(event.data.length); this.accept(message.world); }
+          const message = JSON.parse(data) as ServerMessage;
+          if (message.type === 'trozos') {
+            if (Number.isInteger(message.partes) && message.partes > 0 && message.partes <= 4096) this.trozos = { total: message.partes, partes: [] };
+            return;
+          }
+          if (message.type === 'state') {
+            // El acuse sale antes de dibujar: mide el enlace, no el render, y libera el siguiente.
+            this.transmit({ type: 'ack', sequence: message.world.sequence });
+            // Se mide el `state` entero ya reensamblado, no el último trozo que lo completó.
+            this.measure(data.length); this.accept(message.world);
+          }
           else if (message.type === 'result') this.result(message.result);
           else if (message.type === 'recipe') { this.askedRecipes.delete(message.id); this.callbacks.recipe?.(message.id, message.recipe); }
           else if (message.type === 'persona') { this.askedPeople.delete(message.id); this.callbacks.persona?.(message.id, message.persona); }
@@ -229,7 +257,7 @@ export class Connection {
       socket.onclose = (event) => {
         if (this.stopped || this.socket !== socket) return;
         clearTimeout(this.silenceTimer);
-        this.socket = null;
+        this.socket = null; this.trozos = null;
         if (event.code === 1008 || event.code === 4001 || event.code === 4401) { this.expire(); return; }
         this.scheduleReconnect();
       };

@@ -99,7 +99,17 @@ function observeMessages(page: Page) {
   page.on('pageerror', error => errors.push(error.message));
   page.on('websocket', socket => {
     socket.on('framesent', event => { try { const message = JSON.parse(String(event.payload)); if (message.type === 'gesture') gestures.push(message.gesture as Gesture); } catch { /* Non-JSON frames are not our protocol. */ } });
-    socket.on('framereceived', event => { try { const message = JSON.parse(String(event.payload)); if (message.type === 'state') views.push(message.world as WorldView); } catch { /* Transport control frame. */ } });
+    // A large `state` arrives as `{type:'trozos', partes}` followed by that many raw text frames.
+    let trozos: { total: number; partes: string[] } | null = null;
+    socket.on('framereceived', event => {
+      let payload = String(event.payload);
+      if (trozos) { trozos.partes.push(payload); if (trozos.partes.length < trozos.total) return; payload = trozos.partes.join(''); trozos = null; }
+      try {
+        const message = JSON.parse(payload);
+        if (message.type === 'trozos') trozos = { total: message.partes as number, partes: [] };
+        else if (message.type === 'state') views.push(message.world as WorldView);
+      } catch { /* Transport control frame. */ }
+    });
   });
   return { gestures, views, errors };
 }

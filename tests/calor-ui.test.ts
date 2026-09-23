@@ -90,7 +90,7 @@ test('M10: leyenda del calor con contraste legible y un solo selector de capas',
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' });
     const view = projectWorld(createWorld(51926));
     await page.route('**/api/session', r => r.fulfill({ json: { authenticated: true } })); await page.route('**/api/world**', r => r.fulfill({ json: view }));
-    await page.routeWebSocket('**/ws', ws => { ws.onMessage(() => {}); });
+    await page.routeWebSocket(/\/ws(\?.*)?$/, ws => { ws.onMessage(() => {}); });
     await page.goto(server.resolvedUrls!.local[0]!); await expect(page.locator('#connection-label')).toHaveText('En vivo');
     if (await page.locator('#letter-dialog').isVisible()) await page.getByRole('button', { name: 'Entrar al mundo' }).click();
     await page.locator('#heat-button').click();

@@ -2,7 +2,9 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { readFileSync, statSync } from 'node:fs';
 import { resolve, extname, sep } from 'node:path';
 import { isIP } from 'node:net';
-import { WebSocketServer, WebSocket } from 'ws';
+import { gzip } from 'node:zlib';
+import { promisify } from 'node:util';
+import { WebSocketServer, WebSocket, type RawData } from 'ws';
 import { createWorld, stepWorld, projectWorld, normalizeViewport, cloneWorld, puntoDeRestauracion, fraccionSerial, type PuntoDeRestauracion, type World, type FaseMedicion } from '../world/index.js';
 import { paramsOf, type WorldParams } from '../world/params.js';
 import { technologyRecipeDetail } from '../world/technology.js';
@@ -29,9 +31,103 @@ export interface AppOptions {
   /** Instance-local monotonic clock; tests can measure work without patching global timers. */
   monotonicNow?: () => number;
   /** T136: permite alternar la compresión del `WebSocketServer` sin editar este fichero
-   * entre corridas del banco (`scripts/benchmark-ws-deflate.ts`). Default: ver la línea
-   * donde se usa, con la cifra medida. */
+   * entre corridas del banco (`scripts/benchmark-ws-deflate.ts`). `true` comprime todo
+   * mensaje a todo cliente (lo que midió T136), `false` no negocia compresión. Sin valor
+   * (producción): se negocia y solo se comprimen los `state` hacia clientes con acuse
+   * (`/ws?ack=1`) cuyo enlace no es de LAN; ver `compresion` en `createApp`, con la cifra. */
   perMessageDeflate?: boolean;
+}
+type Compresion = 'nunca' | 'flujo' | 'siempre';
+/** Contrapresión por cliente (2026-09-22, «por el dominio siempre dice sin conexión»). */
+interface Flujo {
+  /** El `state` enviado y aún sin acuse. Nunca hay más de uno. */
+  enVuelo: { sequence: number; sentAt: number; bytes: number } | null;
+  /** Hubo una difusión o un cambio de cámara mientras había un `state` en vuelo: al llegar el
+   * acuse se proyecta y se manda el mundo de ESE momento, no los intermedios. */
+  pendiente: boolean;
+  enviados: number; aplazados: number; acuses: number;
+  /** Del último acuse: cuánto tardó el `state` en salir, cruzar el enlace y volver confirmado. */
+  ultimoAcuseMs: number | null;
+  /** Lo mismo sin el tiempo en que el hilo principal estuvo ocupado en pasos o proyecciones
+   * (ahí esperan el envío de trozos y la lectura del acuse): lo que tarda el ENLACE. */
+  ultimoEnlaceMs: number | null;
+  /** Compresión adaptativa: empieza comprimiendo (lo seguro para un enlace lento) y pasa a texto
+   * plano cuando el enlace demuestra ser de LAN; vuelve a comprimir si deja de serlo. */
+  comprimir: boolean; rapidos: number; lentos: number;
+}
+/** Enlace de LAN: un `state` grande comprimido va y vuelve en menos de esto (sin el tiempo del hilo
+ * ocupado) tres veces seguidas. Por el dominio el RTT torre↔VPS ya es de 88 ms: nunca pasa. */
+export const ENLACE_RAPIDO_MS = 60;
+/** En texto plano, dos idas y vueltas por encima de esto (un `state` de escritorio a < ~25 Mbit/s)
+ * vuelven a comprimir. */
+export const ENLACE_LENTO_MS = 250;
+type ClienteWs = {
+  hash: string; alive: boolean; messages: number; window: number; viewport?: Viewport; lastView?: WorldView;
+  subscribeMs: number; lastBroadcastAt: number;
+  /** Último envío de cualquier mensaje: decide cuándo toca un latido de aplicación. */
+  lastSentAt: number;
+  /** `null` = cliente sin acuse (pestaña con el cliente anterior): conserva el camino de siempre. */
+  flujo: Flujo | null;
+};
+/** Estadística de un socket vivo, para bancos y pruebas; no expone sesión ni contenido. */
+export interface FlujoCliente { remotePort: number | null; acuse: boolean; subscribeMs: number; enVuelo: boolean; enviados: number; aplazados: number; acuses: number; ultimoAcuseMs: number | null; ultimoEnlaceMs: number | null; comprime: boolean; bufferedAmount: number }
+/** Un `state` más largo que esto (unidades UTF-16 del JSON) viaja en trozos hacia `/ws?ack=1`. */
+export const TROZO_WS = 64 * 1024;
+/** Trozo cuando se comprime: cada mensaje comprimido cuesta al menos dos idas y vueltas por el hilo
+ * principal (escribir y vaciar el deflate del threadpool), y con el hilo ocupado por pasos seguidos
+ * cada una espera un paso entero. Menos trozos y más grandes: 256 Ki unidades comprimen a ~35 KiB,
+ * que a 0,1 Mbit/s siguen llegando en ~3 s, lejos de los 8 s de silencio del cliente. */
+export const TROZO_WS_COMPRIMIDO = 256 * 1024;
+/** Sin nada que mandar durante este tiempo (y sin `state` en vuelo), el servidor manda un latido.
+ * Holgado frente a los 8 s de silencio que tolera `src/client/connection.ts`. */
+export const LATIDO_WS_MS = 3000;
+/** Parte `text` en trozos de a lo sumo `size` unidades sin separar nunca un par sustituto
+ * (un trozo con medio carácter no sería UTF-8 válido y el navegador cerraría la conexión). */
+export function trocear(text: string, size = TROZO_WS): string[] {
+  const partes: string[] = [];
+  for (let i = 0; i < text.length;) {
+    let fin = Math.min(text.length, i + size);
+    if (fin < text.length) { const c = text.charCodeAt(fin - 1); if (c >= 0xd800 && c <= 0xdbff) fin--; }
+    partes.push(text.slice(i, fin)); i = fin;
+  }
+  return partes;
+}
+const CAMARA_WS = ['x', 'y', 'width', 'height'] as const;
+/** `/ws` (cliente anterior, sin acuse) o `/ws?ack=1[&x=&y=&width=&height=]` (cliente con acuse; la
+ * cámara en la URL evita mandar primero la vista por defecto). Cualquier otra cosa se rechaza. */
+export function solicitudWs(url: string | undefined): { acuse: boolean; viewport?: Viewport } {
+  const raw = url ?? '', q = raw.indexOf('?');
+  if ((q < 0 ? raw : raw.slice(0, q)) !== '/ws') throw new HttpError(403, 'Ruta no autorizada.');
+  if (q < 0) return { acuse: false };
+  const params = new URLSearchParams(raw.slice(q + 1));
+  const keys = [...params.keys()];
+  if (new Set(keys).size !== keys.length || keys.some(k => k !== 'ack' && !(CAMARA_WS as readonly string[]).includes(k)) || params.get('ack') !== '1') throw new HttpError(403, 'Ruta no autorizada.');
+  const camara = CAMARA_WS.filter(k => params.has(k));
+  if (!camara.length) return { acuse: true };
+  if (camara.length !== CAMARA_WS.length || CAMARA_WS.some(k => !/^-?\d{1,8}$/.test(params.get(k)!))) throw new HttpError(400, 'Ventana de cámara no válida.');
+  try { return { acuse: true, viewport: normalizeViewport({ x: Number(params.get('x')), y: Number(params.get('y')), width: Number(params.get('width')), height: Number(params.get('height')) }) }; }
+  catch { throw new HttpError(400, 'Ventana de cámara no válida.'); }
+}
+/** El acuse que libera el `state` en vuelo: exactamente `{type:'ack', sequence}` con SU secuencia. */
+function esAcuse(data: RawData, sequence: number): boolean {
+  let parsed: unknown;
+  try { parsed = JSON.parse(data.toString()); } catch { return false; }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
+  const m = parsed as Record<string, unknown>;
+  return m.type === 'ack' && m.sequence === sequence && Object.keys(m).length === 2;
+}
+/** Si este socket negoció permessage-deflate (lo ofrece todo navegador; decide el servidor). */
+function deflateNegociado(socket: WebSocket): boolean { return socket.extensions.includes('permessage-deflate'); }
+const gzipAsync = promisify(gzip);
+/** Reloj real de la contrapresión y de los tramos ocupados, fijado al cargar el módulo. La medición de
+ * fases del paso llama a `performance.now()` y las pruebas de restauración lo sustituyen para contar en
+ * qué fase va el paso: una llamada más desde `stepOnce` correría esa cuenta y el fallo inyectado caería
+ * fuera de la fase que se quería probar. */
+const relojReal = performance.now.bind(performance);
+function aceptaGzip(req: IncomingMessage): boolean {
+  const header = req.headers['accept-encoding'];
+  if (typeof header !== 'string') return false;
+  return header.split(',').some(part => { const [token, ...rest] = part.trim().split(';'); return token!.trim().toLowerCase() === 'gzip' && !rest.some(p => /^\s*q\s*=\s*0(\.0*)?\s*$/.test(p)); });
 }
 type Pending = { gesture: Gesture; hash: string; resolve: (r: GestureResult) => void; reject: (e: Error) => void; promise: Promise<GestureResult> };
 export function parseGesture(value: unknown): Gesture {
@@ -128,18 +224,29 @@ export function createApp(options: AppOptions) {
   const pending = new Map<string, Pending>();
   // T024 (P1): `subscribeMs` es la cadencia mínima que un cliente pidió (móvil observador) —
   // 0 = sin pedido, se manda con la cadencia normal. `lastBroadcastAt` la hace cumplir en `broadcast`.
-  const clients = new Map<WebSocket, { hash: string; alive: boolean; messages: number; window: number; viewport?: Viewport; lastView?: WorldView; subscribeMs: number; lastBroadcastAt: number }>();
+  const clients = new Map<WebSocket, ClienteWs>();
   const loginAttempts = new Map<string, { count: number; reset: number }>();
   const gestureAttempts = new Map<string, { count: number; reset: number }>();
   const loginGlobal = new Map<string, { count: number; reset: number }>();
   const trustedProxies = trustedProxiesFromEnv();
   // T136: medido con `scripts/benchmark-ws-deflate.ts` (12 clientes, viewport 40x28,
-  // 1000 pasos, esta torre, 2026-09-22): activar la compresión ahorra 88.7% de bytes
+  // 1000 pasos, esta torre, 2026-09-22): comprimir TODO a TODOS ahorra 88.7% de bytes
   // (650.9 MB -> 73.3 MB) pero cuesta +15.3 s de CPU de proceso y +58.8 ms de p95 SOLO
-  // en el paso que difunde — ya por encima del presupuesto de 50 ms del gobernador, y
-  // ese coste es invisible para él porque `runtime.p95StepMs` se congela antes de
-  // `broadcast()`. No compensa: se deja en `false`. Detalle: T136-report.md.
-  const ws = new WebSocketServer({ noServer: true, maxPayload: 4096, perMessageDeflate: options.perMessageDeflate ?? false });
+  // en el paso que difunde. Eso sigue valiendo para `perMessageDeflate: true`.
+  // Contrapresión (2026-09-22, `scripts/ws-wan/`): por el dominio un `state` de escritorio
+  // pesa ~733 KiB y a ~2 states/s pide 12 Mbit/s por visor; comprimido a nivel 3 baja a
+  // ~105 KiB (7×) por ~3,6 ms de CPU del threadpool de libuv (no del hilo del paso;
+  // `scripts/ws-wan/coste-deflate.ts`). Por eso, por defecto, se negocia la compresión
+  // pero solo se comprimen los `state` hacia clientes con acuse, cuyo ritmo ya lo acota
+  // lo que su enlace drena (a lo sumo uno en vuelo), y solo mientras su enlace no sea de
+  // LAN (`ENLACE_RAPIDO_MS`): en LAN cada trozo comprimido espera al hilo principal y,
+  // con la torre cargada, llegaba 25–110 ms más tarde que en claro, sin ahorrar nada que
+  // importe. El cliente anterior sin acuse sigue recibiendo texto plano, como antes.
+  const compresion: Compresion = options.perMessageDeflate === undefined ? 'flujo' : options.perMessageDeflate ? 'siempre' : 'nunca';
+  const ws = new WebSocketServer({ noServer: true, maxPayload: 4096,
+    // `chunkSize` 128 KiB: la salida de un trozo (~35 KiB) cabe en un solo viaje al threadpool
+    // (con los 16 KiB por defecto, zlib vuelve al hilo principal por cada 16 KiB de salida).
+    perMessageDeflate: compresion === 'nunca' ? false : compresion === 'siempre' ? true : { zlibDeflateOptions: { level: 3, chunkSize: 128 * 1024 } } });
   const staticDir = resolve(options.staticDir ?? 'dist/client');
   const context = store.context;
   const gobernador = new Gobernador();
@@ -184,11 +291,86 @@ export function createApp(options: AppOptions) {
   function checkOrigin(req: IncomingMessage) {
     if (req.headers.origin !== origin) throw new HttpError(403, 'Origen no autorizado.');
   }
+  /** Único punto de salida: registra el último envío (para el latido). Los mensajes pequeños no
+   * se comprimen salvo con `perMessageDeflate: true` (T136). */
+  // Tramos en que el hilo principal estuvo ocupado (pasos y proyecciones fuera de ellos), en reloj
+  // real (`relojReal`): nunca `monotonicNow`, que las pruebas inyectan para contar el paso.
+  const ocupado: [number, number][] = [];
+  let enPaso = false;
+  function anotarOcupado(desde: number) { ocupado.push([desde, relojReal()]); if (ocupado.length > 256) ocupado.shift(); }
+  function ocupadoEntre(desde: number, hasta: number) {
+    let total = 0;
+    for (const [a, b] of ocupado) total += Math.max(0, Math.min(b, hasta) - Math.max(a, desde));
+    return total;
+  }
+  function emitir(socket: WebSocket, text: string, compress: boolean) {
+    socket.send(text, { compress: compress || compresion === 'siempre' });
+    const client = clients.get(socket); if (client) client.lastSentAt = Date.now();
+  }
+  /** Corte de seguridad ante un par que no lee: más de 2 MiB retenidos por `ws` además del `state`
+   * en vuelo (con acuse, uno como mucho; sin acuse, ninguno cuenta: la regla de siempre). */
+  function saturado(socket: WebSocket): boolean {
+    return socket.bufferedAmount > 2 * 1024 * 1024 + (clients.get(socket)?.flujo?.enVuelo?.bytes ?? 0);
+  }
   function send(socket: WebSocket, message: ServerMessage) {
     if (socket.readyState !== WebSocket.OPEN) return;
-    if (socket.bufferedAmount > 2 * 1024 * 1024) { socket.terminate(); return; }
-    if (socket.bufferedAmount > 256 * 1024 && message.type === 'state') return;
-    socket.send(JSON.stringify(message));
+    if (saturado(socket)) { socket.terminate(); return; }
+    if (message.type === 'state') { sendState(socket, message.world); return; }
+    emitir(socket, JSON.stringify(message), false);
+  }
+  /** Un `state` hacia `socket`.
+   *
+   * Sin acuse (cliente anterior): lo de siempre — se descarta si `ws` retiene más de 256 KiB. Esa
+   * regla no ve el búfer de envío del kernel (hasta 4 MiB) ni los del VPS: por un enlace más lento
+   * que la demanda el retraso crecía hasta 10–30 s y el latido de 20 s acababa cortando.
+   *
+   * Con acuse: nunca más de un `state` en vuelo. Si el anterior aún no llegó, se apunta que hay uno
+   * más reciente y se manda al llegar su acuse (`liberar`): el ritmo lo pone lo que el enlace de ESE
+   * cliente drena y lo que recibe siempre es el mundo más reciente. `forzar` salta la espera: solo
+   * para el aviso terminal de pausa, tras el cual no habrá más difusiones. */
+  function sendState(socket: WebSocket, world: WorldView, forzar = false) {
+    if (socket.readyState !== WebSocket.OPEN) return;
+    if (saturado(socket)) { socket.terminate(); return; }
+    const flujo = clients.get(socket)?.flujo;
+    if (!flujo) {
+      if (socket.bufferedAmount > 256 * 1024) return;
+      emitir(socket, JSON.stringify({ type: 'state', world } satisfies ServerMessage), false);
+      return;
+    }
+    if (flujo.enVuelo && !forzar) { flujo.pendiente = true; flujo.aplazados++; return; }
+    const text = JSON.stringify({ type: 'state', world } satisfies ServerMessage);
+    // Solo si el par negoció permessage-deflate: si no (un proxy que quita la cabecera), `ws` manda
+    // en claro y el trozo debe ser el de texto plano para seguir rearmando el silencio a tiempo.
+    const compress = compresion !== 'nunca' && flujo.comprimir && deflateNegociado(socket);
+    const trozo = compress ? TROZO_WS_COMPRIMIDO : TROZO_WS;
+    if (text.length <= trozo) emitir(socket, text, compress);
+    else {
+      // Todos los trozos se encolan en este mismo turno: ningún otro mensaje puede colarse entre ellos.
+      const partes = trocear(text, trozo);
+      emitir(socket, JSON.stringify({ type: 'trozos', partes: partes.length } satisfies ServerMessage), false);
+      for (const parte of partes) emitir(socket, parte, compress);
+    }
+    flujo.enVuelo = { sequence: world.sequence, sentAt: relojReal(), bytes: Buffer.byteLength(text) };
+    flujo.pendiente = false; flujo.enviados++;
+  }
+  /** Llegó el acuse del `state` en vuelo: si mientras tanto hubo difusión o cámara nueva, se manda
+   * ya el mundo de ahora (uno solo, por muchas difusiones que se hayan saltado). */
+  function liberar(socket: WebSocket, flujo: Flujo) {
+    const enVuelo = flujo.enVuelo!, ahora = relojReal();
+    flujo.enVuelo = null; flujo.acuses++;
+    flujo.ultimoAcuseMs = ahora - enVuelo.sentAt;
+    flujo.ultimoEnlaceMs = Math.max(0, flujo.ultimoAcuseMs - ocupadoEntre(enVuelo.sentAt, ahora));
+    // Solo un `state` grande dice algo del enlace; uno pequeño va y vuelve rápido por cualquiera.
+    if (compresion === 'flujo' && enVuelo.bytes >= TROZO_WS) {
+      if (flujo.comprimir) {
+        flujo.rapidos = flujo.ultimoEnlaceMs < ENLACE_RAPIDO_MS ? flujo.rapidos + 1 : 0;
+        if (flujo.rapidos >= 3) { flujo.comprimir = false; flujo.lentos = 0; }
+      } else {
+        flujo.lentos = flujo.ultimoEnlaceMs > ENLACE_LENTO_MS ? flujo.lentos + 1 : 0;
+        if (flujo.lentos >= 2) { flujo.comprimir = true; flujo.rapidos = 0; }
+      }
+    }
+    if (flujo.pendiente) sendView(socket);
   }
   function broadcast() {
     const now = Date.now();
@@ -201,6 +383,9 @@ export function createApp(options: AppOptions) {
   }
   function sendView(socket: WebSocket) {
     const client = clients.get(socket); if (!client) return;
+    // Con un `state` en vuelo no se proyecta: se proyectará el mundo de cuando llegue el acuse.
+    if (client.flujo?.enVuelo) { client.flujo.pendiente = true; client.flujo.aplazados++; return; }
+    const desde = relojReal();
     try {
       const projected = view(client.viewport);
       client.lastView = projected;
@@ -209,7 +394,7 @@ export function createApp(options: AppOptions) {
     } catch {
       // A camera read is not a simulation transaction. Never retry the failing archive in a fallback.
       send(socket, { type: 'error', message: 'No se pudo leer esa región guardada. Elige otra zona; su estado se conserva para recuperación.' });
-    }
+    } finally { if (!enPaso) anotarOcupado(desde); }
   }
   function requestGesture(gesture: Gesture, hash: string): Promise<GestureResult> {
     if (!store.sessionValid(hash)) throw new HttpError(401, 'La sesión terminó.');
@@ -231,6 +416,11 @@ export function createApp(options: AppOptions) {
     return promise;
   }
   function stepOnce() {
+    const desde = relojReal();
+    enPaso = true;
+    try { avanzar(); } finally { enPaso = false; anotarOcupado(desde); }
+  }
+  function avanzar() {
     if (failed || stopped) return;
     const stepStarted = monotonicNow();
     runtime.cloneMs = 0; runtime.simulationMs = 0; runtime.saveMs = 0;
@@ -322,7 +512,8 @@ export function createApp(options: AppOptions) {
       for (const socket of clients.keys()) {
         send(socket, { type: 'error', message: 'No se pudo guardar. El mundo está en pausa.' });
         const previous = clients.get(socket)?.lastView;
-        if (previous) send(socket, { type: 'state', world: { ...previous, paused: true, pauseReason: 'El mundo está en pausa: no se pudo confirmar el siguiente paso. Se muestra el último estado recibido.' } });
+        // Terminal: no habrá más difusiones, así que no espera al acuse del `state` en vuelo.
+        if (previous) sendState(socket, { ...previous, paused: true, pauseReason: 'El mundo está en pausa: no se pudo confirmar el siguiente paso. Se muestra el último estado recibido.' }, true);
       }
     }
   }
@@ -369,7 +560,12 @@ export function createApp(options: AppOptions) {
             try { viewport = normalizeViewport({ x: Number(url.searchParams.get('x')), y: Number(url.searchParams.get('y')), width: Number(url.searchParams.get('width')), height: Number(url.searchParams.get('height')) }); }
             catch { throw new HttpError(400, 'Ventana de cámara no válida.'); }
           }
-          return json(res, 200, view(viewport));
+          // Sin comprimir pesaba 0,45–1,4 MB y el cliente lo aborta a los 10 s: por un enlace lento
+          // la reconexión fallaba en bucle. gzip lo deja ~8× menor y corre en el threadpool.
+          if (!aceptaGzip(req)) return json(res, 200, view(viewport));
+          const cuerpo = await gzipAsync(Buffer.from(JSON.stringify(view(viewport))), { level: 3 });
+          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Encoding': 'gzip', Vary: 'Accept-Encoding' });
+          return res.end(cuerpo);
         }
         if (req.method === 'POST' && url.pathname === '/api/gesture') {
           const gesture = parseGesture(await body(req));
@@ -395,24 +591,35 @@ export function createApp(options: AppOptions) {
   server.on('upgrade', (req, socket, head) => {
     try {
       checkOrigin(req);
-      if (req.url !== '/ws' || req.headers.host !== new URL(origin).host) throw new HttpError(403, 'Ruta no autorizada.');
+      if (req.headers.host !== new URL(origin).host) throw new HttpError(403, 'Ruta no autorizada.');
+      const solicitud = solicitudWs(req.url);
       const hash = authorized(req);
       if (clients.size >= 12) throw new HttpError(429, 'Demasiadas conexiones.');
       ws.handleUpgrade(req, socket, head, client => {
-        clients.set(client, { hash, alive: true, messages: 0, window: Date.now(), subscribeMs: 0, lastBroadcastAt: 0 });
+        clients.set(client, { hash, alive: true, messages: 0, window: Date.now(), subscribeMs: 0, lastBroadcastAt: 0, lastSentAt: Date.now(),
+          ...(solicitud.viewport ? { viewport: solicitud.viewport } : {}),
+          flujo: solicitud.acuse ? { enVuelo: null, pendiente: false, enviados: 0, aplazados: 0, acuses: 0, ultimoAcuseMs: null, ultimoEnlaceMs: null, comprimir: compresion !== 'nunca', rapidos: 0, lentos: 0 } : null });
         client.on('error', () => client.terminate());
         client.on('pong', () => { const info = clients.get(client); if (info) info.alive = true; });
         client.on('close', () => clients.delete(client));
         client.on('message', async (data, binary) => {
           try {
             const info = clients.get(client)!;
+            // Cualquier mensaje prueba que el par vive: el pong puede venir detrás de un `state` grande.
+            info.alive = true;
             if (!store.sessionValid(hash)) { client.close(4001, 'La sesión terminó.'); return; }
             if (Date.now() - info.window >= 10_000) { info.window = Date.now(); info.messages = 0; }
+            // El acuse que libera el `state` en vuelo no gasta cupo: cada uno responde a un `state`
+            // que el servidor eligió mandar. Un acuse suelto o repetido sí cuenta (y no libera nada).
+            if (!binary && info.flujo?.enVuelo && esAcuse(data, info.flujo.enVuelo.sequence)) { liberar(client, info.flujo); return; }
             if (++info.messages > 120) { client.close(4008, 'Demasiados mensajes.'); return; }
             if (binary) throw new HttpError(400, 'Se requiere JSON.');
             const parsed = JSON.parse(data.toString()) as Partial<ClientMessage> & { gesture?: unknown; viewport?: Viewport; id?: unknown; intervaloMs?: unknown };
+            if (parsed?.type === 'ack') return;
             if (parsed?.type === 'viewport') {
               try { info.viewport = normalizeViewport(parsed.viewport); } catch { throw new HttpError(400, 'Ventana de cámara no válida.'); }
+              // Con acuse, si hay un `state` en vuelo esto solo lo apunta: al llegar el acuse sale uno
+              // con la cámara más reciente, por muchas que hayan llegado entretanto.
               sendView(client); return;
             }
             // T036(h): one inhabitant's biography at a time, read-only; the snapshot no longer carries it.
@@ -469,14 +676,33 @@ export function createApp(options: AppOptions) {
     }
   }, 20_000);
   heartbeat.unref();
+  // Latido de aplicación: sin él, un mundo en pausa (sin difusiones) o una suscripción lenta dejaban
+  // al cliente 8 s sin noticias y lo mostraban «Sin conexión». Nunca se encola detrás de un `state`
+  // en vuelo: ahí lo que demuestra que la conexión vive son sus trozos.
+  const latido = setInterval(() => {
+    const now = Date.now();
+    for (const [socket, client] of clients) {
+      if (socket.readyState !== WebSocket.OPEN || now - client.lastSentAt < LATIDO_WS_MS) continue;
+      if (client.flujo ? client.flujo.enVuelo : socket.bufferedAmount > 0) continue;
+      emitir(socket, JSON.stringify({ type: 'latido' } satisfies ServerMessage), false);
+    }
+  }, 1000);
+  latido.unref();
   return {
     server, stepOnce, get world() { return world; }, get failed() { return failed; },
+    /** Contrapresión por socket vivo (bancos y pruebas). */
+    get flujo(): FlujoCliente[] {
+      return [...clients].map(([socket, c]) => ({ remotePort: (socket as unknown as { _socket?: { remotePort?: number } })._socket?.remotePort ?? null,
+        acuse: !!c.flujo, subscribeMs: c.subscribeMs, enVuelo: !!c.flujo?.enVuelo, enviados: c.flujo?.enviados ?? 0, aplazados: c.flujo?.aplazados ?? 0,
+        acuses: c.flujo?.acuses ?? 0, ultimoAcuseMs: c.flujo?.ultimoAcuseMs ?? null, ultimoEnlaceMs: c.flujo?.ultimoEnlaceMs ?? null,
+        comprime: deflateNegociado(socket) && (compresion === 'siempre' || !!c.flujo?.comprimir), bufferedAmount: socket.bufferedAmount }));
+    },
     /** Copia de las métricas vivas (incluido el gobernador de ruling R17); solo lectura. */
     get runtime(): RuntimeStats { return { ...runtime, ...(runtime.gobernador ? { gobernador: { ...runtime.gobernador } } : {}) }; },
     /** Orden humana sobre la reproducción: manda sobre el gobernador. `null` la devuelve al hardware. */
     setReproduccionManual(value: boolean | null) { runtime.gobernador!.manual = value; if (value !== null) { world.reproductionEnabled = value; runtime.gobernador!.activo = value; } },
     async close() {
-      stopped = true; if (timer) clearTimeout(timer); clearInterval(heartbeat);
+      stopped = true; if (timer) clearTimeout(timer); clearInterval(heartbeat); clearInterval(latido);
       for (const item of pending.values()) item.reject(new HttpError(503, 'El servicio se está cerrando.'));
       pending.clear(); for (const socket of clients.keys()) socket.terminate(); ws.close();
       if (server.listening) await new Promise<void>((yes, no) => server.close(error => error ? no(error) : yes()));

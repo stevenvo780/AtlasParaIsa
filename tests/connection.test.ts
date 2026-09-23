@@ -20,7 +20,7 @@ class BrowserSocket {
   onclose: ((event: { code: number }) => void) | null = null;
   onerror: (() => void) | null = null;
   sent: string[] = [];
-  constructor() { BrowserSocket.instances.push(this); }
+  constructor(readonly url = '') { BrowserSocket.instances.push(this); }
   open(): void { this.readyState = 1; this.onopen?.(); }
   send(value: string): void { this.sent.push(value); }
   message(message: ServerMessage): void { this.onmessage?.({ data: JSON.stringify(message) }); }
@@ -154,6 +154,31 @@ test('a silent connection stops claiming live after eight seconds', async t => {
   assert.equal(h.connection.send(gesture), false);
 });
 
+test('a state in chunks is rebuilt once and acknowledged; any frame keeps the connection live', async t => {
+  // Contrapresión (/ws?ack=1): por un enlace lento un `state` entero puede tardar más de 8 s; sus
+  // trozos y los latidos del servidor prueban que la conexión vive, y el acuse libera el siguiente.
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const h = harness(t, [view(40)]);
+  h.connection.start(); await flush();
+  const socket = BrowserSocket.instances[0]!; socket.open();
+  assert.equal(new URL(socket.url).searchParams.get('ack'), '1');
+  const text = JSON.stringify({ type: 'state', world: view(41) } satisfies ServerMessage);
+  const partes = [text.slice(0, 10), text.slice(10, 50), text.slice(50)];
+  socket.message({ type: 'trozos', partes: partes.length });
+  for (const parte of partes) {
+    t.mock.timers.tick(7000); await flush(); // cada trozo llega a los 7 s del anterior: nunca 8 s de silencio
+    assert.equal(h.statuses.at(-1), 'live');
+    socket.onmessage?.({ data: parte });
+  }
+  assert.deepEqual(h.worlds.map(world => world.sequence), [40, 41], 'the state is delivered once, whole');
+  assert.deepEqual(socket.sent.map(value => JSON.parse(value)), [{ type: 'ack', sequence: 41 }]);
+  for (let n = 0; n < 3; n++) { t.mock.timers.tick(5000); await flush(); socket.message({ type: 'latido' }); }
+  assert.equal(h.statuses.at(-1), 'live', 'heartbeats every 5 s keep it live for 15 s without a state');
+  assert.deepEqual(h.worlds.map(world => world.sequence), [40, 41], 'a heartbeat is not a world');
+  t.mock.timers.tick(8000); await flush();
+  assert.equal(h.statuses.at(-1), 'offline', 'eight seconds without any frame is still silence');
+});
+
 for (const staleResponse of ['conflict', 'network-error'] as const) {
   test(`late HTTP ${staleResponse} for confirmed A cannot erase pending B`, async t => {
     t.mock.timers.enable({ apis: ['setTimeout'] });
@@ -227,7 +252,11 @@ test('camera requests debounce to the latest bounded absolute viewport and persi
   first.close(); t.mock.timers.tick(1000); await flush(); BrowserSocket.instances[1]!.open();
   const query = new URL(h.worldQueries[1]!, 'http://example.test').searchParams;
   assert.deepEqual(Object.fromEntries(query), { x: '-81', y: '206', width: '96', height: '64' });
-  assert.deepEqual(BrowserSocket.instances[1]!.sent.map(value => JSON.parse(value)), [{ type: 'viewport', viewport: expected }]);
+  // The reconnecting socket carries the camera in its URL (its first state is already this view), so
+  // it is not requested again on open; the first socket, opened before any camera, carried none.
+  assert.deepEqual(Object.fromEntries(new URL(first.url).searchParams), { ack: '1' });
+  assert.deepEqual(Object.fromEntries(new URL(BrowserSocket.instances[1]!.url).searchParams), { ack: '1', x: '-81', y: '206', width: '96', height: '64' });
+  assert.deepEqual(BrowserSocket.instances[1]!.sent, []);
 });
 
 test('changing the visible region at the same world tick updates the landscape without accepting old ticks', async t => {

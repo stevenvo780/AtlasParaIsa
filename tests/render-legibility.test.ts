@@ -35,7 +35,7 @@ test('selected facility is visible in the mobile first fold and reserve-only cha
   w.structures=[structuredClone(structure)];w.tiles[0]={...w.tiles[0]!,x:0,y:0,terrain:'meadow',drinkingWater:0};w.places=[{id:'fixture',x:0,y:0,name:'Refugio',description:'Componentes frame, roof, cistern, hearth.',gatherings:0}];
   const preserved=JSON.stringify(w),messages:{type:string}[]=[],errors:string[]=[];let socket:WebSocketRoute|undefined;
   p.on('pageerror',e=>errors.push(e.name));await p.route('**/api/session',r=>r.fulfill({json:{authenticated:true}}));await p.route('**/api/world**',r=>r.fulfill({json:w}));
-  await p.route('**/api/gesture',r=>{messages.push({type:'gesture'});return r.fulfill({status:500});});await p.routeWebSocket('**/ws',s=>{socket=s;s.onMessage(m=>messages.push(JSON.parse(String(m))));});
+  await p.route('**/api/gesture',r=>{messages.push({type:'gesture'});return r.fulfill({status:500});});await p.routeWebSocket(/\/ws(\?.*)?$/,s=>{socket=s;s.onMessage(m=>messages.push(JSON.parse(String(m))));});
   await p.goto(server.resolvedUrls!.local[0]!);await expect(p.locator('#connection-label')).toHaveText('En vivo');if(await p.locator('#letter-dialog').isVisible())await p.getByRole('button',{name:'Entrar al mundo'}).click();
   await p.locator('#layer-toggle').click();await p.locator('#tile-x').fill('0');await p.locator('#tile-y').fill('0');await p.locator('#tile-form button').click();await expect(p.locator('#camera-coordinates')).toHaveText('0, 0');
   const water=p.locator('[data-structure-water]');await expect(water).toContainText('0,6 / 0,6 u.');

@@ -43,7 +43,7 @@ test('global mortality remains visible beside protected identities and a short t
       const messages:{type:string}[]=[],errors:string[]=[];page.on('pageerror',e=>errors.push(e.name));
       await page.route('**/api/session',r=>r.fulfill({json:{authenticated:true}}));await page.route('**/api/world**',r=>r.fulfill({json:current}));
       await page.route('**/api/gesture',r=>{messages.push({type:'gesture'});return r.fulfill({status:500});});
-      await page.routeWebSocket('**/ws',s=>{socket=s;s.onMessage(m=>messages.push(JSON.parse(String(m))));});
+      await page.routeWebSocket(/\/ws(\?.*)?$/,s=>{socket=s;s.onMessage(m=>messages.push(JSON.parse(String(m))));});
       await page.goto(server.resolvedUrls!.local[0]!);await expect(page.locator('#connection-label')).toHaveText('En vivo');
       if(await page.locator('#letter-dialog').isVisible())await page.getByRole('button',{name:'Entrar al mundo'}).click();
       await page.locator('#stats-toggle').click();const panel=page.locator('#stats-content'),summary=page.locator('[data-demographic-summary]');
@@ -129,7 +129,7 @@ test('global life-stage summary and inspector update without disturbing focus, s
       await page.route('**/api/session',r=>r.fulfill({json:{authenticated:true}}));
       await page.route('**/api/world**',r=>r.fulfill({json:current}));
       await page.route('**/api/gesture',r=>{messages.push({type:'gesture'});return r.fulfill({status:500});});
-      await page.routeWebSocket('**/ws',s=>{socket=s;s.onMessage(m=>messages.push(JSON.parse(String(m))));});
+      await page.routeWebSocket(/\/ws(\?.*)?$/,s=>{socket=s;s.onMessage(m=>messages.push(JSON.parse(String(m))));});
       const publish=()=>{current.sequence++;socket!.send(JSON.stringify({type:'state',world:current}));};
       const setStages=(stages:(Stage|undefined)[])=>{current.people.filter(p=>p.role==='neighbor').forEach((p,i)=>{p.lifeStage=stages[i];});syncCensus(current);publish();};
       await page.goto(server.resolvedUrls!.local[0]!);await expect(page.locator('#connection-label')).toHaveText('En vivo');
@@ -208,7 +208,7 @@ test('una vista recortada dice 23 vidas en el mundo y no 0, y quien sale de cuad
       let current=structuredClone(view),socket:WebSocketRoute|undefined;const errors:string[]=[],asked:string[]=[];
       page.on('pageerror',e=>errors.push(e.message));
       await page.route('**/api/session',r=>r.fulfill({json:{authenticated:true}}));await page.route('**/api/world**',r=>r.fulfill({json:current}));
-      await page.routeWebSocket('**/ws',ws=>{socket=ws;ws.onMessage(m=>{const message=JSON.parse(String(m));if(message.type==='persona'){asked.push(message.id);ws.send(JSON.stringify({type:'persona',id:message.id,persona:{id:message.id,experiences:[],trust:[],recipeIds:[]}}));}});});
+      await page.routeWebSocket(/\/ws(\?.*)?$/,ws=>{socket=ws;ws.onMessage(m=>{const message=JSON.parse(String(m));if(message.type==='persona'){asked.push(message.id);ws.send(JSON.stringify({type:'persona',id:message.id,persona:{id:message.id,experiences:[],trust:[],recipeIds:[]}}));}});});
       await page.goto(server.resolvedUrls!.local[0]!);await expect(page.locator('#connection-label')).toHaveText('En vivo');
       if(await page.locator('#letter-dialog').isVisible())await page.getByRole('button',{name:'Entrar al mundo'}).click();
       await page.locator('#stats-toggle').click();

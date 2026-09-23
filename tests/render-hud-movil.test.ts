@@ -27,7 +27,7 @@ test('390×844: la barra no desborda, los objetivos miden ≥44 px y el HUD dice
       let current = enTecho(), socket: WebSocketRoute | undefined; const errors: string[] = [];
       page.on('pageerror', e => errors.push(e.message));
       await page.route('**/api/session', r => r.fulfill({ json: { authenticated: true } })); await page.route('**/api/world**', r => r.fulfill({ json: current }));
-      await page.routeWebSocket('**/ws', ws => { socket = ws; ws.onMessage(() => {}); });
+      await page.routeWebSocket(/\/ws(\?.*)?$/, ws => { socket = ws; ws.onMessage(() => {}); });
       await page.goto(server.resolvedUrls!.local[0]!); await expect(page.locator('#connection-label')).toHaveText('En vivo');
       if (await page.locator('#letter-dialog').isVisible()) await page.getByRole('button', { name: 'Entrar al mundo' }).click();
       // El chip del HUD: en el techo no se dice «reponiendo».

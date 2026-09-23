@@ -197,9 +197,20 @@ export type ClientMessage =
   /** T036(h): la biografía de un solo habitante, pedida al abrir su ficha. */
   | { type: 'persona'; id: string }
   /** Modo ligero móvil (T024): cadencia mínima pedida por ese cliente; el servidor acota a 1000 ms. */
-  | { type: 'suscripcion'; intervaloMs: number };
+  | { type: 'suscripcion'; intervaloMs: number }
+  /** Contrapresión (2026-09-22): acuse de un `state` ya recibido entero. Solo lo manda el cliente
+   * que abrió `/ws?ack=1`; con él el servidor nunca tiene más de un `state` en vuelo hacia ese
+   * cliente y, al llegar el acuse, le manda el más reciente. */
+  | { type: 'ack'; sequence: number };
 export type ServerMessage =
   | { type: 'state'; world: WorldView }
+  /** Solo hacia `/ws?ack=1`: el siguiente `state` llega partido en `partes` marcos de texto
+   * consecutivos que, concatenados, son su JSON. Así cada trozo que llega demuestra que la
+   * conexión vive aunque el `state` entero tarde más que el silencio tolerado. */
+  | { type: 'trozos'; partes: number }
+  /** Latido de aplicación: el servidor vive pero no tiene nada que mandar (mundo en pausa,
+   * suscripción lenta). Nunca se manda mientras hay un `state` en vuelo. */
+  | { type: 'latido' }
   | { type: 'result'; result: GestureResult }
   /** A null definition means the server cannot serve that program now, never that it is empty. */
   | { type: 'recipe'; id: string; recipe: TechnologyRecipe | null }

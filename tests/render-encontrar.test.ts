@@ -26,7 +26,7 @@ test('lejos de la gente, S e I se encuentran y la ficha no se pide en cada paso'
       page.on('pageerror', e => errors.push(e.message));
       await page.route('**/api/session', r => r.fulfill({ json: { authenticated: true } }));
       await page.route('**/api/world**', r => r.fulfill({ json: current }));
-      await page.routeWebSocket('**/ws', ws => { socket = ws; ws.onMessage(raw => {
+      await page.routeWebSocket(/\/ws(\?.*)?$/, ws => { socket = ws; ws.onMessage(raw => {
         const message = JSON.parse(String(raw));
         if (message.type === 'persona') { asked.push(message.id); ws.send(JSON.stringify({ type: 'persona', id: message.id, persona: enriquecerPersona(world, message.id) ?? null })); }
         if (message.type === 'viewport') { current = project(message.viewport); ws.send(JSON.stringify({ type: 'state', world: current })); }

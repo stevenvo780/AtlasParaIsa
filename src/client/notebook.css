@@ -270,3 +270,12 @@
 .natality-ladder > li strong { display: block; color: #425f35; font-size: 13px; font-weight: 600; }
 .natality-ladder > li.is-blocked { border-color: #e2c79d; background: #f8eedb; }
 .natality-ladder > li.is-blocked strong { color: #6d4518; }
+/* M5: crónica con filtros, quién cedió y el regreso con lo que cambió. */
+.journal-filters { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 6px; }
+.journal-filters button { min-height: 44px; padding: 0 14px; border-radius: 999px; border: 1px solid #d5dcc6; background: #f6f7ec; color: #56684e; font-size: 12px; }
+.journal-filters button[aria-pressed=true] { background: #294a3a; border-color: #294a3a; color: #fffbe9; }
+.journal-note { font-size: 11px; color: #6e805e; margin: 4px 0 10px; }
+.event-yield { font-size: 12px; color: #6d4518; background: #f8eedb; border-radius: 4px; padding: 6px 8px; margin: 6px 0; }
+.return-summary { font-size: 13px; line-height: 1.6; margin: 6px 0 8px; }
+.return-toast ul small { display: block; font-size: 10px; color: #6e805e; }
+.return-note { font-size: 11px; color: #6e805e; margin: 6px 0 0; }

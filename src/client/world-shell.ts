@@ -1,6 +1,7 @@
 import type { AnimalView } from '../shared/types.js';
 import { animalColors, speciesNames, speciesPlural } from './life-art.js';
 import { icon, orders } from './ui-catalog.js';
+import { GRUPOS } from './cronica.js';
 
 export function worldShell(): string {
   return `<main id="game" class="game-shell" aria-label="Mundo vivo de la carta">
@@ -38,5 +39,5 @@ export function worldShell(): string {
     <p class="map-hint" id="map-help">Arrastra para recorrer · toca para descubrir · rueda para acercar</p>
   </main>
   <dialog id="letter-dialog" class="letter-dialog" aria-labelledby="letter-title"><button class="dialog-close icon-button" aria-label="Cerrar la carta">×</button><span class="letter-index">01 / LA CARTA</span><div class="letter-flower">${icon.leaf}</div><p class="eyebrow">BORRADOR DE APERTURA · PENDIENTE DE STEVEN</p><h2 id="letter-title">Para ti, <em>Isa.</em></h2><blockquote>Te hice un mundo pequeño. Dejé en él algo de nuestra historia y espacio para lo que todavía no sabemos.</blockquote><p class="letter-note">La voz del autor y los recuerdos reales están pendientes de revisión. S e I son representaciones provisionales; los recuerdos de prueba están identificados.</p><p class="letter-signature">Hay espacio para tomar tu propio camino.</p><button id="enter-landscape" class="button primary">Entrar al mundo ${icon.arrow}</button></dialog>
-  <dialog id="chronicle-dialog" class="chronicle-dialog" aria-labelledby="journal-title"><button class="dialog-close icon-button" aria-label="Cerrar crónica">×</button><p class="eyebrow">LAS HUELLAS QUE VAN QUEDANDO</p><h2 id="journal-title">Una pequeña <em>crónica.</em></h2><p class="journal-intro">Hechos guardados por el mundo. Cada episodio conserva su causa y su origen.</p><div id="journal-events"></div></dialog>`;
+  <dialog id="chronicle-dialog" class="chronicle-dialog" aria-labelledby="journal-title"><button class="dialog-close icon-button" aria-label="Cerrar crónica">×</button><p class="eyebrow">LAS HUELLAS QUE VAN QUEDANDO</p><h2 id="journal-title">Una pequeña <em>crónica.</em></h2><p class="journal-intro">Hechos guardados por el mundo. Cada episodio conserva su causa y su origen.</p><div class="journal-filters" role="group" aria-label="Filtrar la crónica">${GRUPOS.map(g => `<button type="button" data-journal-filter="${g.id}" aria-pressed="${g.id === 'todo'}">${g.nombre}</button>`).join('')}</div><p id="journal-note" class="journal-note"></p><div id="journal-events"></div></dialog>`;
 }

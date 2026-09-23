@@ -9,7 +9,8 @@ import { personLink, recentEvidence } from './world-evidence.js';
 import { retainViewState } from './view-state.js';
 import { animalActions, animalColors, componentNames, speciesNames, speciesPlural } from './life-art.js';
 import { technologyPane, recipeCard } from './technology-art.js';
-import { readWorldVisit, saveWorldVisit } from './visit-memory.js';
+import { readHitos, readVisitCounters, readWorldVisit, saveHitos, saveVisitCounters, saveWorldVisit, type HitoGuardado } from './visit-memory.js';
+import { CronicaBuffer, GRUPOS, clasificar, contadoresDe, esHito, filtrar, momento, quienCedio, resumenDesdeVisita, type GrupoCronica } from './cronica.js';
 import { decidirModo, setModo, type Modo } from './modo.js';
 import { capasDeCalor, leyendaCalor, type Capa } from './calor.js';
 import { ausenteEstado, demographicSummary, rotuloRecuento } from './censo-view.js';
@@ -33,6 +34,11 @@ let status: ConnectionStatus = 'connecting';
 let pending = false;
 let tool: 'plant' | 'invite' | 'remember' = 'plant';
 let lastVisit: number | null = null;
+/** M5: los episodios que este navegador recibió en esta visita (sin duplicados, acotados) y los hitos
+ * guardados en visitas anteriores de este mismo mundo (localStorage, como mucho 80). */
+const cronica = new CronicaBuffer();
+let hitosGuardados: HitoGuardado[] = [];
+let journalFilter: GrupoCronica | 'todo' = 'todo';
 let populationSignature = '', inspectorSignature = '', memorySignature = '';
 let statsTab: 'life' | 'land' | 'communities' | 'technology' | 'performance' = 'life';
 /** M2: modo de dibujo decidido al entrar; el HUD dice «cada 5 s (ligero)» en observador. */
@@ -57,7 +63,16 @@ let soundContext: AudioContext | null = null;
 let soundTimer: ReturnType<typeof setTimeout> | undefined;
 const el = <T extends HTMLElement = HTMLElement>(id: string): T => document.getElementById(id) as T;
 const mobile = (): boolean => matchMedia('(max-width: 760px)').matches;
-function saveVisit(): void { if (world) try { saveWorldVisit(localStorage, world); } catch { /* Optional. */ } }
+function saveVisit(): void {
+  if (!world) return;
+  try {
+    saveWorldVisit(localStorage, world);
+    const counters = contadoresDe(world); if (counters) saveVisitCounters(localStorage, world, counters);
+    const vistos = new Map(hitosGuardados.map(h => [h.id, h]));
+    for (const event of cronica.todos()) if (esHito(event)) vistos.set(event.id, { id: event.id, tick: event.tick, kind: event.kind, text: event.text });
+    saveHitos(localStorage, world, [...vistos.values()].sort((a, b) => a.tick - b.tick));
+  } catch { /* Optional. */ }
+}
 function readVisit(current: WorldView): number | null { try { return readWorldVisit(localStorage, current); } catch { return null; } }
 function stopSound(): void { clearTimeout(soundTimer); if (soundContext) void soundContext.close(); soundContext = null; document.getElementById('sound-toggle')?.setAttribute('aria-pressed', 'false'); }
 function clean(): void { saveVisit(); connection?.stop(); landscape?.destroy(); stopSound(); connection = null; landscape = null; world = null; pending = false; following = false; control = 'inspect'; populationSignature = ''; inspectorSignature = ''; memorySignature = ''; statsTab = 'life'; populationKind = 'people'; }
@@ -87,7 +102,7 @@ function syncModo(): Modo {
 }
 
 function enterWorld(): void {
-  clean(); lastVisit = null; status = 'connecting';
+  clean(); lastVisit = null; status = 'connecting'; cronica.clear(); hitosGuardados = []; journalFilter = 'todo';
   root.innerHTML = worldShell();
   notebook = new Notebook(el('game')); inspectorTab = 'now';
   focusedRecipe = null; recipeDetails.clear(); personaDetails.clear(); personaVivo.clear(); olvidarVistos(); buscando = null;
@@ -178,6 +193,7 @@ function wire(): void {
   }
   el('letter-button').addEventListener('click', () => el<HTMLDialogElement>('letter-dialog').showModal());
   el('chronicle-button').addEventListener('click', () => { renderJournal(); el<HTMLDialogElement>('chronicle-dialog').showModal(); });
+  for (const chip of root.querySelectorAll<HTMLButtonElement>('[data-journal-filter]')) chip.addEventListener('click', () => { journalFilter = chip.dataset.journalFilter as typeof journalFilter; renderJournal(); });
   el('enter-landscape').addEventListener('click', () => { el<HTMLDialogElement>('letter-dialog').close(); el('landscape').focus(); });
   for (const dialog of root.querySelectorAll<HTMLDialogElement>('dialog')) dialog.querySelector('.dialog-close')!.addEventListener('click', () => dialog.close());
   el('modo-toggle').addEventListener('click', () => {
@@ -281,12 +297,14 @@ function receiveWorld(next: WorldView): void {
   const sNow = next.people.find(p => p.role === 'S'); if (sNow) landscape?.setHome({ x: sNow.x, y: sNow.y });
   const first = world === null; world = next; landscape?.update(next); el('map-loading').hidden = true; el('world-day').textContent = `Día ${next.day}`; el('world-phase').textContent = `${phases[next.phase]}${next.weather === 'rain' ? ' · lluvia' : ''}`;
   el('world-extent').textContent = next.infinite ? `${next.discoveredChunks ?? 0} regiones · ${next.settlementCount ?? 0} asentamientos` : 'Región inicial';
+  cronica.acumular(next.events);
   if (first) {
+    try { hitosGuardados = readHitos(localStorage, next); } catch { hitosGuardados = []; }
     lastVisit = readVisit(next);
     const p = next.people.find(p => p.role === 'S') ?? next.people[0]; if (p) { activePersonId = p.id; selected = { kind: 'person', id: p.id }; landscape?.select(selected); }
     if (!mobile()) drawer('inspector', true);
     if (lastVisit === null) el<HTMLDialogElement>('letter-dialog').showModal();
-    else { const events = next.events.filter(event => event.tick > lastVisit!).slice(-3).reverse(); if (events.length) { el('return-card').hidden = false; el('return-card').innerHTML = `<button class="icon-button" aria-label="Cerrar resumen de regreso">×</button><p class="eyebrow">DESDE TU ÚLTIMA VISITA</p><h2>El mundo siguió su camino.</h2><ul>${events.map(event => `<li>${esc(event.text)}</li>`).join('')}</ul>`; el('return-card').querySelector('button')!.addEventListener('click', () => { el('return-card').hidden = true; }); } }
+    else returnCard(next, lastVisit);
   }
   const memoryKey = JSON.stringify(next.memories); if (memoryKey !== memorySignature) { memorySignature = memoryKey; const old = el<HTMLSelectElement>('memory-select').value; el('memory-select').innerHTML = next.memories.map(m => `<option value="${esc(m.id)}">${esc(m.title)} · ${m.source === 'sample' ? 'prueba' : 'aprobado'}</option>`).join(''); if (next.memories.some(m => m.id === old)) el<HTMLSelectElement>('memory-select').value = old; }
   const places = el<HTMLSelectElement>('place-select'), oldPlace = places.value; const placesHtml = '<option value="">Un lugar de esta región</option>' + next.places.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join(''); if (places.innerHTML !== placesHtml) { places.innerHTML = placesHtml; places.value = oldPlace; }
@@ -401,9 +419,9 @@ function renderInspector(): void {
     const persona = cached?.detail ?? undefined;
     const signature = JSON.stringify([p, persona ?? null, world.events.map(event => event.id), world.communities, world.blueprints, world.technology?.items.filter(item=>item.ownerId===p.id), world.technology?.knowledge?.find(entry=>entry.actorId===p.id) ?? null, world.technology?.recipes]); if (signature === inspectorSignature) return; inspectorSignature = signature;
     el('inspector-title').textContent = p.name; el('person-controls').hidden = false; el('person-primary').hidden = false; const source = world.memories.find(m => m.text === p.recentMemory)?.source;
-    const sections = inheritedAndLearned(persona ? { ...p, experiences: persona.experiences, trust: persona.trust } : p, world, persona?.recipeIds, persona ?? null);
+    const sections = inheritedAndLearned(persona ? { ...p, experiences: persona.experiences, trust: persona.trust } : p, world, persona?.recipeIds, persona ?? null, id => cronica.get(id) ?? world?.events.find(event => event.id === id));
     const color = /^#[\da-f]{3,8}$/i.test(p.color) ? p.color : '#a4805b';
-    replacePersonCard(`<section id="inspector-section-now" role="tabpanel" aria-labelledby="inspector-tab-now"><div class="game-person-heading"><div class="pixel-portrait ${p.role === 'I' ? 'portrait-i' : ''}" style="--person-color:${color}" aria-hidden="true"><span class="pixel-body"></span></div><div><strong>${esc(p.specialty ?? 'Su camino está tomando forma')}</strong><span class="agency-state ${p.controlMode === 'directed' ? 'is-directed' : ''}">${p.controlMode === 'directed' ? 'Siguiendo una orden' : 'Actuando por su cuenta'}</span></div></div><p class="game-current-action">${actions[p.action]} <span>· ${esc(p.x)}, ${esc(p.y)}</span></p><p class="game-reason">${esc(p.reason)}</p><div class="game-needs"><h3>Ahora necesita ${esc(p.need.toLocaleLowerCase('es'))}</h3>${meter('Energía', p.energy)}${meter('Hambre', p.hunger)}${p.thirst === undefined ? '' : meter('Sed', p.thirst)}${meter('Cansancio', p.fatigue)}</div>${destinationLink(p)}${sections.now}</section><section id="inspector-section-kit" role="tabpanel" aria-labelledby="inspector-tab-kit"><h3 class="section-title">Lo que lleva y sabe hacer</h3><div class="material-pouch"><span>${icon.leaf}<strong>${number(p.materials?.wood)}</strong> madera</span><span>${icon.hammer}<strong>${number(p.materials?.stone)}</strong> piedra</span></div>${personBlueprint(p, world) ? `<details class="person-detail" data-detail="blueprint"><summary>Proyecto que sabe construir</summary>${blueprintCard(personBlueprint(p, world)!, world)}</details>` : ''}${sections.kit}</section><section id="inspector-section-story" role="tabpanel" aria-labelledby="inspector-tab-story"><h3 class="section-title">Una vida entre otras</h3>${sections.story}${recentEvidence(world, p.id)}${p.recentMemory ? `<details class="person-detail memory-detail" data-detail="memory"><summary>Algo que lleva consigo</summary><p>${esc(p.recentMemory)}</p><small>${source === 'sample' ? 'RECUERDO DE PRUEBA · NO ES BIOGRAFÍA' : source === 'approved' ? 'RECUERDO APROBADO' : 'EXPERIENCIA DEL MUNDO SIMULADO'}</small></details>` : ''}</section>`);
+    replacePersonCard(`<section id="inspector-section-now" role="tabpanel" aria-labelledby="inspector-tab-now"><div class="game-person-heading"><div class="pixel-portrait ${p.role === 'I' ? 'portrait-i' : ''}" style="--person-color:${color}" aria-hidden="true"><span class="pixel-body"></span></div><div><strong>${esc(p.specialty ?? 'Su camino está tomando forma')}</strong><span class="agency-state ${p.controlMode === 'directed' ? 'is-directed' : ''}">${p.controlMode === 'directed' ? 'Siguiendo una orden' : 'Actuando por su cuenta'}</span></div></div><p class="game-current-action">${actions[p.action]} <span>· ${esc(p.x)}, ${esc(p.y)}</span></p><p class="game-reason">${esc(p.reason)}</p><div class="game-needs"><h3>Ahora necesita ${esc(p.need.toLocaleLowerCase('es'))}</h3>${meter('Energía', p.energy)}${meter('Hambre', p.hunger)}${p.thirst === undefined ? '' : meter('Sed', p.thirst)}${meter('Cansancio', p.fatigue)}</div>${destinationLink(p)}${sections.now}</section><section id="inspector-section-kit" role="tabpanel" aria-labelledby="inspector-tab-kit"><h3 class="section-title">Lo que lleva y sabe hacer</h3><div class="material-pouch"><span>${icon.leaf}<strong>${number(p.materials?.wood)}</strong> madera</span><span>${icon.hammer}<strong>${number(p.materials?.stone)}</strong> piedra</span></div>${personBlueprint(p, world) ? `<details class="person-detail" data-detail="blueprint"><summary>Proyecto que sabe construir</summary>${blueprintCard(personBlueprint(p, world)!, world)}</details>` : ''}${sections.kit}</section><section id="inspector-section-story" role="tabpanel" aria-labelledby="inspector-tab-story"><h3 class="section-title">Una vida entre otras</h3>${sections.story}${recentEvidence(world, p.id, cronica.todos())}${p.recentMemory ? `<details class="person-detail memory-detail" data-detail="memory"><summary>Algo que lleva consigo</summary><p>${esc(p.recentMemory)}</p><small>${source === 'sample' ? 'RECUERDO DE PRUEBA · NO ES BIOGRAFÍA' : source === 'approved' ? 'RECUERDO APROBADO' : 'EXPERIENCIA DEL MUNDO SIMULADO'}</small></details>` : ''}</section>`);
   } else {
     const position = selected, tile = world.tiles.find(t => t.x === position.x && t.y === position.y); el('person-controls').hidden = true; el('person-primary').hidden = true;
     if (!tile) { el('inspector-title').textContent = 'Otra región'; replacePersonCard('<p class="drawer-note">Esperando esta parte del paisaje. Recorrer con la cámara no añade hechos a la crónica.</p>'); return; }
@@ -451,9 +469,26 @@ function renderTool(): void {
   el('memory-preview').textContent = memory ? `${memory.source === 'sample' ? 'Recuerdo de prueba, no biográfico' : 'Recuerdo aprobado'}: ${memory.text}` : 'No hay recuerdos disponibles.';
   const position = target(); el('gesture-target').textContent = position ? `casilla ${position.x}, ${position.y}` : 'toca una casilla'; const button = el<HTMLButtonElement>('gesture-send'); button.innerHTML = pending ? 'Esperando confirmación…' : `${labels[tool][2]} ${icon.arrow}`; button.disabled = status !== 'live' || !!world?.paused || pending || !position || (tool === 'remember' && !memory);
 }
+/** M5: «Desde tu última visita» con lo que cambió (contadores del estado real) y los hitos, no 3 episodios al azar. */
+function returnCard(current: WorldView, since: number): void {
+  let counters = null; try { counters = readVisitCounters(localStorage, current); } catch { counters = null; }
+  const resumen = resumenDesdeVisita(counters, since, current);
+  const hitos = [...hitosGuardados.filter(h => h.tick > since), ...current.events.filter(event => event.tick > since && esHito(event))]
+    .filter((h, i, all) => all.findIndex(other => other.id === h.id) === i).sort((a, b) => b.tick - a.tick).slice(0, 4);
+  if (current.tick <= since && !hitos.length) return;
+  const card = el('return-card'); card.hidden = false;
+  card.innerHTML = `<button class="icon-button" aria-label="Cerrar resumen de regreso">×</button><p class="eyebrow">DESDE TU ÚLTIMA VISITA</p><h2>El mundo siguió su camino.</h2><p class="return-summary">${esc(resumen.dias)}${resumen.cambios.length ? ` ${esc(resumen.cambios.join(' · '))}.` : counters ? ' Sin nacimientos, muertes ni regiones nuevas.' : ''}</p>${hitos.length ? `<ul>${hitos.map(h => `<li><small>${esc(momento(h.tick))} · ${esc(clasificar({ kind: h.kind as ChronicleEvent['kind'], text: h.text }).etiqueta)}</small> ${esc(h.text)}</li>`).join('')}</ul>` : ''}${counters ? '' : '<p class="return-note">Esta es la primera visita que guarda contadores: la próxima vez se verá qué cambió.</p>'}`;
+  card.querySelector('button')!.addEventListener('click', () => { card.hidden = true; });
+}
 function renderJournal(): void {
-  const names: Record<ChronicleEvent['kind'], string> = { ecology: 'Paisaje', meeting: 'Encuentro', care: 'Cuidado', learning: 'Aprendizaje', memory: 'Memoria', gesture: 'Tu gesto', pause: 'Pausa del servidor', discovery: 'Un descubrimiento', settlement: 'Un nuevo lugar', cooperation: 'Cooperación', birth: 'Una nueva vida', death: 'Una vida que terminó', animal: 'Vida animal', invention: 'Un proyecto aprendido', community: 'Comunidad', conflict: 'Un desacuerdo', adaptation: 'Adaptación local' };
-  el('journal-events').innerHTML = world?.events.length ? [...world.events].slice(-32).reverse().map(event => `<article class="chronicle-event"><div class="event-label"><span>${names[event.kind]}</span><span>${event.source === 'sample' ? 'Material de prueba' : event.source === 'approved' ? 'Contenido aprobado' : 'Ficción simulada'}</span></div><p>${esc(event.text)}</p><div class="event-cause"><strong>Qué influyó</strong> ${esc(event.cause)}</div><span class="event-tick">Momento ${event.tick} del mundo</span></article>`).join('') : '<p class="quiet-event">Todavía no hay episodios guardados. El mundo también tiene silencios.</p>';
+  for (const chip of root.querySelectorAll<HTMLButtonElement>('[data-journal-filter]')) chip.setAttribute('aria-pressed', String(chip.dataset.journalFilter === journalFilter));
+  const todos = cronica.todos(), lista = filtrar(todos, journalFilter).reverse(), shown = lista.slice(0, 80);
+  el('journal-note').textContent = todos.length ? `Este navegador guarda ${number(todos.length)} episodios desde que abriste la carta${cronica.size >= cronica.max ? ' (los más viejos y comunes se van olvidando)' : ''}. ${lista.length > shown.length ? `Se muestran los ${shown.length} más recientes de ${number(lista.length)}.` : ''}` : '';
+  el('journal-events').innerHTML = shown.length ? shown.map(event => {
+    const tipo = clasificar(event), cedio = quienCedio(event);
+    const who = (id: string) => world ? personLink(world, id) : esc(id);
+    return `<article class="chronicle-event" data-grupo="${tipo.grupo}"><div class="event-label"><span>${esc(tipo.etiqueta)}</span><span>${event.source === 'sample' ? 'Material de prueba' : event.source === 'approved' ? 'Contenido aprobado' : 'Ficción simulada'}</span></div><p>${esc(event.text)}</p>${cedio ? `<p class="event-yield" data-yield>Cedió: ${who(cedio.cede)} (${esc(cedio.como)}); ${who(cedio.sigue)} siguió.</p>` : ''}<div class="event-cause"><strong>Qué influyó</strong> ${esc(event.cause)}</div><span class="event-tick">${esc(momento(event.tick))}</span></article>`;
+  }).join('') : `<p class="quiet-event">${todos.length ? 'No hay episodios de este tipo entre los que recibió este navegador.' : 'Todavía no hay episodios guardados. El mundo también tiene silencios.'}</p>`;
 }
 
 function selectStatsTab(tab: typeof statsTab): void {
@@ -554,7 +589,7 @@ function renderStatsContent(): void {
   const accumulated = `<section class="stats-section"><div class="stats-section-heading"><h3>Lo que han hecho juntos</h3><span>Acumulado del mundo</span></div><div class="stats-facts">${([['teaching', 'Aprendizajes compartidos'], ['trade', 'Intercambios'], ['constructionHelp', 'Ayudas en tareas'], ['conflicts', 'Desacuerdos'], ['hunts', 'Animales cazados'], ['cultivations', 'Acciones de cultivo']] as const).map(([key, label]) => `<span>${label}<strong>${number(stats.totals[key])}</strong></span>`).join('')}</div></section>`;
   const growth = estadoCrecimiento(world.performance?.gobernador, stats.population);
   const growthLine = growth ? `<p class="growth-status" data-growth="${esc(growth.estado)}"><strong>${esc(growth.titulo)}</strong>${esc(growth.explicacion)}</p>` : '';
-  panel.innerHTML = `${stamp}${growthLine}${demographicSummary(world)}<div class="stats-grid">${statCard('Energía media', percentage(stats.meanEnergy), 'Estado corporal, no afecto')}${statCard('Hambre media', percentage(stats.meanHunger), 'Necesidad de alimento')}${statCard('Sed media', percentage(stats.meanThirst), 'Necesidad de agua')}${statCard('Cooperaciones', number(stats.totals.cooperation), 'Acciones acumuladas')}</div>${recentEvidence(world)}${populationWindow(history.map(p => ({ tick: p.tick, value: p.population })))}<div class="stats-chart-grid">${sparkline(history.map(p => ({ tick: p.tick, value: p.population })), 'Población · ventana recibida', 'habitantes')}${sparkline(history.map(p => ({ tick: p.tick, value: p.energy * 100 })), 'Energía media', '% media', [0, 100])}</div>${seccionNacimientos(world)}<section class="stats-section"><div class="stats-section-heading"><h3>Qué están haciendo</h3><span>Todo el mundo, ahora</span></div>${distribution(stats.actions, actionLabels, '')}${notaAcercamientos(world)}</section><div class="stats-two-columns"><section class="stats-section"><div class="stats-section-heading"><h3>Generaciones</h3><span>Habitantes</span></div>${distribution(stats.generations, Object.fromEntries(Object.keys(stats.generations).map(key => [key, `Generación ${key}`])), '')}</section><section class="stats-section"><div class="stats-section-heading"><h3>Historia que se acumula</h3></div><div class="stats-facts"><span>Regiones descubiertas<strong>${number(world.discoveredChunks)}</strong></span><span>Asentamientos construidos<strong>${number(world.settlementCount)}</strong></span><span>Cansancio medio<strong>${percentage(stats.meanFatigue)}</strong></span></div></section></div>${accumulated}${scope}`;
+  panel.innerHTML = `${stamp}${growthLine}${demographicSummary(world)}<div class="stats-grid">${statCard('Energía media', percentage(stats.meanEnergy), 'Estado corporal, no afecto')}${statCard('Hambre media', percentage(stats.meanHunger), 'Necesidad de alimento')}${statCard('Sed media', percentage(stats.meanThirst), 'Necesidad de agua')}${statCard('Cooperaciones', number(stats.totals.cooperation), 'Acciones acumuladas')}</div>${recentEvidence(world, undefined, cronica.todos())}${populationWindow(history.map(p => ({ tick: p.tick, value: p.population })))}<div class="stats-chart-grid">${sparkline(history.map(p => ({ tick: p.tick, value: p.population })), 'Población · ventana recibida', 'habitantes')}${sparkline(history.map(p => ({ tick: p.tick, value: p.energy * 100 })), 'Energía media', '% media', [0, 100])}</div>${seccionNacimientos(world)}<section class="stats-section"><div class="stats-section-heading"><h3>Qué están haciendo</h3><span>Todo el mundo, ahora</span></div>${distribution(stats.actions, actionLabels, '')}${notaAcercamientos(world)}</section><div class="stats-two-columns"><section class="stats-section"><div class="stats-section-heading"><h3>Generaciones</h3><span>Habitantes</span></div>${distribution(stats.generations, Object.fromEntries(Object.keys(stats.generations).map(key => [key, `Generación ${key}`])), '')}</section><section class="stats-section"><div class="stats-section-heading"><h3>Historia que se acumula</h3></div><div class="stats-facts"><span>Regiones descubiertas<strong>${number(world.discoveredChunks)}</strong></span><span>Asentamientos construidos<strong>${number(world.settlementCount)}</strong></span><span>Cansancio medio<strong>${percentage(stats.meanFatigue)}</strong></span></div></section></div>${accumulated}${scope}`;
 }
 window.addEventListener('pagehide', saveVisit); document.addEventListener('visibilitychange', () => { if (document.hidden) saveVisit(); });
 async function boot(): Promise<void> { root.innerHTML = '<main class="boot-screen"><span>✧</span><p>Abriendo la carta…</p></main>'; try { const response = await fetch('/api/session', { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(10_000) }); const session = await response.json() as { authenticated: boolean }; if (response.ok && session.authenticated) enterWorld(); else loginScreen(); } catch { loginScreen('No hay conexión con el servidor. Puedes volver a intentar.'); } }

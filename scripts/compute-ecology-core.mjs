@@ -16,6 +16,7 @@ export const ECOLOGY_CONTRACT = Object.freeze({
     basin: '32-bit imul hash; salt1400; scale24; floor negative coordinates; quintic fade and bilinear lerp in original order',
     wood: '100-tick regrowth debits updated growth; uses old fertility/moisture/growth; stump transitions preserved',
     cadence: 'no updates except tick%10==0; read old neighbor life; Float64 with FMA disabled',
+    tick: 'stepWorld runs ecology() first (moisture, vegetation, food; not ported here, T120) and then this kernel; tests/compute-ecology.test.ts compares that whole composition',
   },
 });
 export const FIELDS = ECOLOGY_CONTRACT.fields.length;

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { freePort, until } from './lib/net.js';
+import { createServer } from 'node:net';
 import { once } from 'node:events';
 import { WebSocket as NodeWebSocket } from 'ws';
 import { Connection, type ConnectionStatus } from '../src/client/connection.js';
@@ -268,12 +268,17 @@ test('a question asked to a socket that died does not silence the next one', asy
 
 /* ------------------------------------------------------------------ *
  * T024 (P1, modo ligero móvil): el servidor honra `{type:'suscripcion',
- * intervaloMs}` por cliente. En el cliente real lo envía
- * `Connection.suscribir` (src/client/connection.ts); aquí el contrato de red
- * se prueba directamente contra el servidor real con un WebSocket crudo
- * (`ws`). Las esperas son por condición, no por reloj: con la torre cargada
- * un plazo fijo de milisegundos no garantiza que el WebSocket haya entregado.
+ * intervaloMs}` por cliente. `Connection` (propiedad de T020) todavía no
+ * expone un envío genérico para mandar este mensaje desde el cliente real
+ * (ver TODO en src/client/game.ts); el contrato de red se prueba aquí
+ * directamente contra el servidor real con un WebSocket crudo (`ws`).
  * ------------------------------------------------------------------ */
+
+async function freePort(): Promise<number> {
+  const probe = createServer(); probe.listen(0, '127.0.0.1'); await once(probe, 'listening');
+  const port = (probe.address() as { port: number }).port;
+  await new Promise<void>(resolve => probe.close(() => resolve())); return port;
+}
 
 async function subscriptionFixture(t: TestContext) {
   const dir = mkdtempSync(join(tmpdir(), 'carta-suscripcion-'));
@@ -284,35 +289,29 @@ async function subscriptionFixture(t: TestContext) {
   const app = createApp({ store, password, origin, manual: true, seed: 7 });
   app.server.listen(port, '127.0.0.1'); await once(app.server, 'listening');
   t.after(async () => { await app.close(); store.close(); rmSync(dir, { recursive: true, force: true }); });
-  async function connect(): Promise<{ socket: NodeWebSocket; states: WorldView[]; replies: ServerMessage['type'][] }> {
+  async function connect(): Promise<{ socket: NodeWebSocket; states: WorldView[] }> {
     const login = await fetch(origin + '/api/login', { method: 'POST', headers: { Origin: origin, 'Content-Type': 'application/json' }, body: JSON.stringify({ password }) });
     const cookie = login.headers.get('set-cookie')!.split(';')[0];
     const socket = new NodeWebSocket(origin.replace('http:', 'ws:') + '/ws', { headers: { Origin: origin, Cookie: cookie } });
-    const states: WorldView[] = [], replies: ServerMessage['type'][] = [];
-    socket.on('message', data => { const message = JSON.parse(data.toString()) as ServerMessage; if (message.type === 'state') states.push(message.world); else replies.push(message.type); });
+    const states: WorldView[] = [];
+    socket.on('message', data => { const message = JSON.parse(data.toString()) as ServerMessage; if (message.type === 'state') states.push(message.world); });
     await once(socket, 'open');
-    await until(() => states.length >= 1, 'el estado inicial de la conexión no llegó');
-    return { socket, states, replies };
+    await new Promise(resolve => setTimeout(resolve, 20)); // deja llegar el estado inicial de la conexión.
+    return { socket, states };
   }
-  /** El servidor atiende los mensajes de un socket en orden y no confirma la suscripción: la respuesta
-   * a una consulta de receta enviada detrás prueba que la suscripción ya se aplicó. */
-  async function subscribe(client: Awaited<ReturnType<typeof connect>>, intervaloMs: number): Promise<void> {
-    const answered = client.replies.filter(type => type === 'recipe').length;
-    client.socket.send(JSON.stringify({ type: 'suscripcion', intervaloMs }));
-    client.socket.send(JSON.stringify({ type: 'recipe', id: 'recipe-1' }));
-    await until(() => client.replies.filter(type => type === 'recipe').length > answered, 'la suscripción no se procesó');
-  }
-  return { connect, subscribe, stepOnce: () => app.stepOnce() };
+  return { connect, stepOnce: () => app.stepOnce() };
 }
+const settle = (ms = 20): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
 test('un cliente suscrito no recibe estados más seguido que su intervaloMs', async t => {
   const f = await subscriptionFixture(t);
   const unSubscribed = await f.connect();
   const subscribed = await f.connect();
-  await f.subscribe(subscribed, 5000);
+  subscribed.socket.send(JSON.stringify({ type: 'suscripcion', intervaloMs: 5000 }));
+  await settle();
   unSubscribed.states.length = 0; subscribed.states.length = 0; // solo lo que llegue DESPUÉS de suscribirse.
   for (let tick = 0; tick < 25; tick++) f.stepOnce(); // sin gestos: broadcast solo en tick % 5 === 0 → 5 veces.
-  await until(() => unSubscribed.states.length >= 5, `solo llegaron ${unSubscribed.states.length} de 5 estados sin suscripción`);
+  await settle();
   assert.equal(unSubscribed.states.length, 5, 'sin suscripción, la cadencia normal (cada 5 ticks) no cambia');
   assert.equal(subscribed.states.length, 0, 'a los pocos ms de suscribirse a 5000 ms, ningún broadcast periódico debe llegar todavía');
   unSubscribed.socket.terminate(); subscribed.socket.terminate();
@@ -322,10 +321,11 @@ test('intervaloMs se acota a un piso de 1000 ms (no se puede pedir más frecuenc
   const f = await subscriptionFixture(t);
   const baseline = await f.connect(); // sin suscripción: referencia de la cadencia normal.
   const casi = await f.connect();
-  await f.subscribe(casi, 1); // de no acotarse, se comportaría como `baseline`.
+  casi.socket.send(JSON.stringify({ type: 'suscripcion', intervaloMs: 1 })); // de no acotarse, se comportaría como `baseline`.
+  await settle();
   baseline.states.length = 0; casi.states.length = 0;
   for (let tick = 0; tick < 25; tick++) f.stepOnce();
-  await until(() => baseline.states.length >= 5, `solo llegaron ${baseline.states.length} de 5 estados de control`);
+  await settle();
   assert.equal(baseline.states.length, 5, 'control: sin suscripción, los 5 broadcasts periódicos llegan');
   assert.ok(casi.states.length < baseline.states.length, `pedir 1 ms debe acotarse a 1000 ms, no comportarse como sin suscripción (recibió ${casi.states.length} de 5)`);
   baseline.socket.terminate(); casi.socket.terminate();
@@ -337,7 +337,7 @@ test('el mensaje de suscripción rechaza un intervaloMs inválido sin cerrar la 
   const errors: string[] = [];
   client.socket.on('message', data => { const message = JSON.parse(data.toString()) as ServerMessage; if (message.type === 'error') errors.push(message.message); });
   client.socket.send(JSON.stringify({ type: 'suscripcion', intervaloMs: 'pronto' }));
-  await until(() => errors.length >= 1, 'el servidor no respondió al intervalo inválido');
+  await settle();
   assert.equal(errors.length, 1);
   assert.equal(client.socket.readyState, NodeWebSocket.OPEN, 'un mensaje inválido no debe tumbar la conexión');
   client.socket.terminate();

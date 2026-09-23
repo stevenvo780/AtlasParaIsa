@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createWorld, stepWorld, projectWorld, personDetail, VIEW_EVENTS, VIEW_MEMORIES, TICKS_PER_DAY, type World } from '../src/world/index.js';
+import { captureTechnologyCheckpoint } from '../src/world/technology-checkpoint.js';
 import type { Viewport } from '../src/shared/types.js';
 import { projectTechnology, technologyRecipeDetail } from '../src/world/technology.js';
 import type { TechnologyRecipe } from '../src/shared/technology.js';
-import { clonarVecino, registrarInyectados } from './lib/escenas.js';
 
 const KIB = 1024;
 const encodedBytes = (value: unknown): number => Buffer.byteLength(JSON.stringify(value), 'utf8');
@@ -151,13 +151,22 @@ test('a program is served one at a time and reading it never touches the world',
 function injectMassCommunity(world: World, count: number, near: { x: number; y: number }, far: { x: number; y: number }): string {
   const id = 'community-medida-fr026';
   world.communities.push({ id, name: 'Comunidad de medida', x: near.x, y: near.y, color: '#8899aa', members: [], culture: { sharing: 0.5, stewardship: 0.5, openness: 0.5 }, formedAt: world.tick, cooperation: 0, disputes: 0 });
+  const template = world.people.find(p => p.role === 'neighbor')!;
   const nearCount = Math.min(40, count);
   for (let i = 0; i < count; i++) {
+    const clone = structuredClone(template);
+    clone.id = `medida-${i}`; clone.name = `Sintético medida ${i}`; clone.role = 'neighbor'; clone.communityId = id;
     const spot = i < nearCount ? { x: near.x + (i % 10), y: near.y + Math.floor(i / 10) } : { x: far.x + (i % 200), y: far.y + Math.floor(i / 200) };
-    world.people.push(clonarVecino(world, `medida-${i}`, `Sintético medida ${i}`, spot, id));
+    clone.x = spot.x; clone.y = spot.y; clone.target = { ...spot };
+    world.people.push(clone);
   }
   world.communities.find(c => c.id === id)!.members.push(...world.people.filter(p => p.communityId === id).map(p => p.id));
-  registrarInyectados(world);
+  // `stepWorld` refreshes the technology checkpoint's actor roster every tick
+  // (`advanceTechnologyCheckpoint`); a direct injection like this one must do the same, or
+  // `analyzeTechnologyOrganization` (unrelated to T134, still called by `projectWorld`) reads
+  // every injected actor as "never checkpointed" and floods `organization` with one diagnostic
+  // string per id — a test artifact of skipping birth, not a real 10,000-habitant behavior.
+  world.technology.checkpoint = captureTechnologyCheckpoint(world.technology, world.people, world.tick, 'migration');
   return id;
 }
 

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { capasDeCalor, colorCalor, dibujarCalor, leyendaCalor, type VistaCalor } from '../src/client/calor.js';
+import { capasDeCalor, colorCalor, dibujarCalor, leyendaCalor, totalesPorRegion, type VistaCalor } from '../src/client/calor.js';
 import type { Tile } from '../src/shared/types.js';
 
 function tile(x: number, y: number, overrides: Partial<Tile> = {}): Tile {
@@ -58,6 +58,27 @@ test('colorCalor: la luminancia crece monótonamente con el valor, en las 5 capa
 test('colorCalor recorta valores fuera de 0..1', () => {
   assert.equal(colorCalor('comida', -1), colorCalor('comida', 0));
   assert.equal(colorCalor('comida', 5), colorCalor('comida', 1));
+});
+
+test('totalesPorRegion suma exactamente food por región de 16×16', () => {
+  const tiles = [
+    tile(0, 0, { food: 0.1 }), tile(5, 5, { food: 0.2 }), tile(15, 15, { food: 0.05 }),
+    tile(16, 0, { food: 0.3 }), tile(20, 3, { food: 0.05 }),
+    tile(0, 16, { food: 0.4 }),
+  ];
+  const totales = totalesPorRegion(tiles, 'comida', 16);
+  assert.equal(totales.get('0:0'), 0.1 + 0.2 + 0.05);
+  assert.equal(totales.get('1:0'), 0.3 + 0.05);
+  assert.equal(totales.get('0:1'), 0.4);
+  const sumaTotal = [...totales.values()].reduce((a, b) => a + b, 0);
+  const sumaEsperada = tiles.reduce((a, t) => a + t.food, 0);
+  assert.ok(Math.abs(sumaTotal - sumaEsperada) < 1e-9);
+});
+
+test('totalesPorRegion respeta la capa pedida (madera usa tile.wood crudo, sin normalizar)', () => {
+  const tiles = [tile(0, 0, { wood: 3 }), tile(1, 1, { wood: 4.5 })];
+  const totales = totalesPorRegion(tiles, 'madera', 16);
+  assert.equal(totales.get('0:0'), 7.5);
 });
 
 test('leyendaCalor devuelve 5 paradas crecientes de 0 a 1, con colores de colorCalor', () => {

@@ -1,5 +1,19 @@
 # Reglas del prototipo
 
+## Reglas 11 (2026-09-23)
+
+Los mundos **nuevos** añaden al paquete de reglas 10 los cuatro defaults del brazo B de conflicto
+legible (`RULES_11_ADOPTED`): `social.disputaNecesidad=0,45`, `social.disputaEscasez=3`,
+`social.disputaRadio=3` y `social.memoriaDisputa=8`. A 60 días, B cumplió C1–C7 en 8/12
+semillas, frente a 4/10 con reglas 10. Es la adopción de defaults medidos, no una ley nueva;
+el resultado no acredita C8 (0/12). [Preregistro](preregistros/2026-09-23-vocacion-banda.md)
+y [bitácora](ops/noche-20260922-bitacora.md).
+
+La migración V10→V11 sólo cambia `world.version`: estado, dinámica y params persistidos quedan
+iguales. Toda clave ausente de una instantánea sigue completándose con `HISTORICAL_PARAMS`;
+los mundos existentes conservan su conducta. Los demás defaults de reglas 10 no cambian;
+`agua.memoria` sigue en 1, como en B. `PARAMETER_LIMITS_RULES_VERSION` sigue en 9.
+
 ## Reglas 10 (2026-09-22)
 
 **Reglas 10** (protocolo 9, SQLite 4) llega en dos pasos. El primero ya estaba en la rama de la noche:
@@ -18,12 +32,13 @@ de natalidad medido esa noche. Ninguna ley cambia para un mundo que ya existe.
 | `poblacion.comprobacionContinua` | `true` | `false` | `reproduce()` mira cada paso en vez de cada 120; descuenta los nacimientos de la ventana móvil, así que el techo sigue siendo `nacimientosPorComprobacion` (2) por ventana de `intervaloComprobacionTicks` (120) pasos |
 | `conducta.habituacion` | 0,35 | 0 | Descuento por saciedad en la elección: resta `habituacion · (0,5 + curiosity) · share` a cada acción, con `share` = su fracción vitalicia en `activity` |
 
-**No se adoptan** (su default sigue siendo el histórico): `agua.memoria` = 1 (apagada; refutada fuera de
+**No se adoptan en reglas 10** (su default era el histórico): `agua.memoria` = 1 (apagada; refutada fuera de
 muestra, bitácora 16:20: en 6 semillas no usadas para ajustarla, «sed 8 → 11, muertes 10 → 15 al día 8»;
 la mejora medida antes era ajuste a las semillas del diagnóstico), `conducta.aptitud` = 0, `social.radioConvivencia` = 0,
 `social.vinculoConvivencia` = 0, `genes.edadFundadoresMinDias`/`MaxDias` = 2/2 (la cohorte escalonada
 empeoró los nacimientos un 23–31 %), `poblacion.radioPareja` = 3, `poblacion.radioLugar` = 4 y las
-disputas en sus valores de siempre. `gobernador.politica` sigue en `techo`.
+disputas en sus valores de entonces. Reglas 11 adopta cuatro de ellas para mundos nuevos;
+`gobernador.politica` sigue en `techo`.
 
 **Evidencia** (laboratorio `scripts/lab/replica.ts`, sin gobernador, `persistencia.cadaTicks=300`; bitácora
 `docs/ops/noche-20260922-bitacora.md`). *Carriles* (6 semillas × 10 días, habitantes vivos al día 10,
@@ -42,7 +57,8 @@ y la senescencia de la cohorte fundadora (días 12–20, ≈ 10–15 muertes por
 para horizontes de 60 días. El paquete no alcanza SC-003 ≥ 0,6 ni cierra los criterios de terminado.
 
 **Compatibilidad histórica (obligatoria).** `HISTORICAL_PARAMS` (exportado, congelado) reproduce la
-conducta anterior a esta etapa: difiere de `DEFAULT_PARAMS` sólo en las cinco claves adoptadas, y es
+conducta anterior a esta etapa: difiere del `DEFAULT_PARAMS` de reglas 10 sólo en las cinco claves
+adoptadas (el default actual añade las cuatro de reglas 11), y es
 byte a byte el `DEFAULT_PARAMS` de la base `f2757fa`. Es la **base con que se completan las claves
 ausentes de cualquier instantánea** (`readSnapshotParams`, `src/server/snapshot.ts`), sea cual sea su
 versión de reglas: una instantánea V9 escrita por `main` —que no conoce ninguna clave de la noche— o una
@@ -373,7 +389,7 @@ Los hogares se eligen por calidad observada: agua, alimento, techo y confianza c
 
 Una disputa exige dos personas distintas con comunidad, próximas, con necesidad urgente en ambas, **misma acción de comer, beber o cazar y misma fuente aún disponible pero escasa**. Los umbrales de escasez son hasta 0.06 de alimento, 0.12 de agua o una unidad de fauna. Deben haber pasado 180 pasos desde sus disputas anteriores. La confianza de al menos 0.55 o la apertura media de al menos 0.65 permite acordar un turno: una persona espera doce pasos y deja el acceso a la otra sin aumentar la reserva. Dentro de un grupo, una confianza de al menos 0.25 también evita la disputa sin imponer ese acuerdo.
 
-Si no se dan esas protecciones, el conflicto reduce confianza, aumenta fatiga y tensión y hace que una persona ceda el intento durante treinta pasos. Puede ocurrir dentro de una comunidad o entre comunidades; la diferencia de grupo sola no lo causa. No hay violencia, robo, guerras ni gobiernos.
+Si no se dan esas protecciones, el conflicto reduce confianza, aumenta fatiga y tensión y hace que una persona ceda el intento durante treinta pasos. Puede ocurrir dentro de una comunidad o entre comunidades; la diferencia de grupo sola no lo causa. No hay violencia, robo, guerras ni gobiernos. Con la ley candidata `social.memoriaDisputa` (apagada por defecto; ver §Parámetros) cede, o espera el turno, quien menos lo necesita, vuelve a elegir al paso siguiente y recuerda un día la fuente que cedió.
 
 ## Gestos, tareas y una única verdad
 
@@ -748,6 +764,7 @@ la clave (`HISTORICAL_PARAMS`); en todas las demás filas default e histórico c
 | `social.distanciaAlternativa` | 0.2 | [0, 1] | Distancia cultural máxima que puede tener una alternativa para contar como refugio al salir | Noche de ciencia 2026-09-22 |
 | `social.vinculoConvivencia` | 0 | [0, 0.01] | Vínculo mutuo que ganan por paso dos personas a ≤ 2 celdas, `vinculoConvivencia · sociabilidad media`, con techo (medido neutro, no adoptado) | Hipótesis cohorte, noche 2026-09-22 |
 | `social.radioConvivencia` | 0 | [0, 64] | Comunidades vivas: con > 0 la pertenencia sigue a la convivencia. Quien vive a más de este radio (celdas) del centro de su comunidad y tiene ≥ 2 vecinos de confianza de ella funda con ellos una nueva (fisión, con los requisitos de una fundación); quien tiene ≥ 2 vecinos de confianza de otra comunidad, y más que de la suya, pasa a ella; quien no tiene comunidad se une a la de la mayoría de sus vecinos de confianza. 0 = hoy: la pertenencia sólo cambia por `confianzaSalida` | Hipótesis COM, noche 2026-09-22 |
+| `social.memoriaDisputa` | 0 | [0, 32] | Conflicto legible: con > 0, en una disputa o un turno cede quien menos lo necesita (máximo de hambre y sed; empate, el de id mayor) y vuelve a elegir al paso siguiente en vez de quedar treinta pasos inmóvil; quien cede una disputa recuerda un día la fuente (la celda y las que la disputa llama «el mismo destino»), que al elegir dónde comer, beber o cazar le parece este número de celdas más lejos. Sólo reordena fuentes percibidas: si no hay otra, vuelve. 0 = hoy | Hipótesis CONFL, noche 2026-09-22 |
 | `poblacion.exigeComunidad` | **`false`** (reglas 10; histórico `true`) | booleano | Si reproducirse exige pertenecer a una comunidad; con `false` la cría hereda la del progenitor `a`, o ninguna | Noche de ciencia 2026-09-22 · reglas 10 |
 | `poblacion.radioPareja` | 3 | [1, 32] | Distancia máxima entre progenitores en `reproduce()`; es también la escala espacial de `pairAffinity` | Noche de ciencia 2026-09-22 |
 | `poblacion.radioLugar` | 4 | [1, 64] | Distancia máxima a un lugar compartido para que un nacimiento tenga sitio | Noche de ciencia 2026-09-22 |
@@ -840,6 +857,74 @@ intercambio 290 → 281, ayuda de obra 380 → 340, conflictos 9 → 0; `diversi
 `maxComunidades=32`) la semilla 51926 se fragmenta: 3→3→5→10→15→18 comunidades, 10 de ≤ 2 miembros y la
 serie sin estabilizarse; los restos de una fisión no se disuelven solos (quien queda aislado conserva su
 etiqueta). Por eso el tope sigue siendo parte de la ley mientras no exista una regla local de disolución.
+
+#### Conflicto legible: `social.memoriaDisputa` (hipótesis CONFL, noche 2026-09-22)
+
+**Diagnóstico** (`scripts/lab/diagnostico-disputas.ts`). En la base del carril de la ronda 2 (P) los
+conflictos existen pero son raros —2 de 8 semillas con alguno al día 6, 3 de 8 al día 12; en las dos con
+disputas en los primeros cinco días, 8 de 9 fueron por caza, y la semilla 1 suma 18 el día 9, en plena
+sequía— porque `resourceDispute` exige a la vez necesidad ≥ 0,65 en los dos, fuente casi agotada y contacto a
+≤ 2 celdas. Abrirlo con las claves de la noche (`disputaNecesidad=0,45`, `disputaEscasez=3`,
+`disputaRadio=3`) los hace frecuentes, y la resolución de hoy muestra tres defectos, medidos en 27 disputas
+(4 semillas × 5 días sobre P) y en las 74 del brazo D sobre la base de control (semilla 1, 12 días):
+
+1. **Cede quien llega antes a la comprobación** (el primero en `world.people`), no quien menos lo necesita:
+   cedió el más necesitado en 12 de 27 y en 33 de 74, es decir, al azar respecto de la necesidad.
+2. **Quien cede queda treinta pasos inmóvil** sin poder volver a elegir (`agreedWait`), aunque su sed o su
+   hambre pasen de 0,9.
+3. **Nada le aparta de la fuente perdida:** 39 de 74 vuelven a la misma celda y, con `disputaEspera=60`, 29 de
+   74 encadenan otra disputa en el día. Caso extremo: una persona cedió cinco veces en 600 pasos, con sed de
+   hasta 0,94 frente a 0,63 de quien se quedaba el agua, y murió de sed.
+
+**Pero no es eso lo que mataba en el brazo D.** Las 44 muertes de la semilla 1 son una sequía: en la base P
+—sin tocar la disputa— la misma semilla pierde 40 personas por sed en el día 9 (8 → 48 acumuladas), y el
+brazo tratado 45 ese mismo día (1 → 46); en el brazo D sobre la base de control, con la ley, las 35 muertes
+de los días 9–11 caen en 35 celdas distintas de 17 regiones, no junto a las fuentes disputadas. Con la ley
+el brazo D de control sigue muriendo igual (38 muertes frente a 42): **las disputas son un síntoma de la
+sequía, no su causa**, y ninguna regla de reparto arregla una sequía.
+
+**La ley** (una clave, un número). Con `memoriaDisputa` > 0: (a) en una disputa o un turno cede —o espera—
+quien **menos lo necesita** (máximo de hambre y sed; empate, el de id mayor); (b) quien cede **vuelve a
+elegir al paso siguiente** en lugar de quedar inmóvil treinta pasos; (c) quien cede una disputa **recuerda un
+día la fuente** (la celda y las que la disputa llama «el mismo destino»): al elegir dónde comer, beber o cazar
+esa fuente le parece `memoriaDisputa` celdas más lejos. Sólo reordena fuentes percibidas —si no hay otra,
+vuelve—; no prohíbe, no revela nada lejano, no crea ni regala recurso; el coste de la disputa (fatiga +0,015,
+tensión +0,12, confianza −0,08 en los dos) y la condición de turno (confianza ≥ 0,55 o apertura ≥ 0,65) son
+los de siempre. El evento `conflict` conserva `actors[0]` = quien cede y dice quién cedió. Con 0 el mundo es el
+de antes bit a bit, también con disputas (`tests/conflicto-legible.test.ts`: semilla 42 con defaults y 51926
+con el disparador abierto, 4 conflictos en 2400 pasos). Brazo D de control con la ley: cede el más necesitado
+en 1 de 103 (medido con la necesidad del paso anterior), vuelve a la misma celda en 32 de 103 (31 %, frente al
+53 %); las cadenas **no** bajan (44 de 103).
+
+**Carril** (ronda 3: base P de la ronda 2 + `social.disputaNecesidad=0,45, disputaEscasez=3, disputaRadio=3,
+memoriaDisputa=8`; 8 semillas —7, 42, 51926, 1, 104729, 20260919, 2024, 31337— × 12 días, contra la base P;
+cuenta de semillas que mejoran/empeoran y medianas base → tratado; el sistema es caótico y una semilla sola no
+dice nada):
+
+| Métrica | Día 6 | Día 12 |
+| :--- | :--- | :--- |
+| Semillas con conflictos | 2/8 → **8/8** (suma 9 → 133) | 3/8 → **8/8** (suma 28 → 443, mediana 0 → 35,5) |
+| Muertes (todas las causas) | 5 mejor / 1 peor; 17 → 12 | 3 mejor / 4 peor / 1 igual; mediana 15 → 14,5; suma 156 → 168 |
+| Muertes por sed | 4 / 1; 13 → 9 | 4 / 3; mediana 4 → 3; suma 81 → 86 |
+| Nacimientos | 5 / 2; mediana 26,5 → 35,5 | 3 / 3 / 2 iguales; mediana 80,5 → 85; suma 627 → 615 |
+| Población | 6 / 2; mediana 42 → 51,5 | 4 / 3; mediana 75 → 81,5; suma 599 → 575 |
+| Generaciones vivas | 7 iguales, 1 peor | 5 iguales, 1 / 2 |
+| `diversidadConducta` | 7 / 1; mediana 0,225 → 0,318 | 4 / 4; mediana 0,395 → 0,402 |
+| Ayuda de obra | 6 / 2; 373 → 618 | **7 / 1**; mediana 172 → 219; suma 1825 → 3309 |
+| Enseñanza · intercambio | 5/3 · 4/4 | 3/4 · 4/4 (sumas −2 % · +2 %) |
+| `fraccionUsoAjeno` | 6 / 2 | 6 / 2; mediana 0,300 → 0,326 |
+
+**Lectura.** El objetivo de la hipótesis se cumple: hay conflictos en las 8 semillas (en la base, en 3) y
+muertes y nacimientos quedan dentro del rango de la base (por semilla, al día 12: muertes +5, +6, −3, +6, −2,
+−1, +1, 0; la semilla 1 suma 6 de las 12 muertes de más, todas por sed durante su sequía: en los días 9–12,
+64 en el tratado frente a 50 en la base, que antes de la sequía había perdido 8 frente a 1). La diversidad no se mueve al día 12 (sube al día 6 en 7 de 8 y la ventaja se diluye).
+Lo único que se mueve de forma consistente es la ayuda de obra (7 de 8 semillas, +81 %), sin mecanismo
+identificado todavía: no se afirma causa. **Qué no hace la ley:** no reduce la mortandad de una sequía, no
+reduce las cadenas de disputas (quien vuelve a tener menos necesidad vuelve a ceder) y no separa, en este
+carril, el efecto del disparador abierto del de la resolución: el contraste de resolución vieja frente a nueva
+con el mismo disparador sólo se midió en el diagnóstico (semilla 1 del brazo D, arriba) y allí no cambia las
+muertes. Reproducible: `tests/conflicto-legible.test.ts` (seis casos: control bit a bit, cesión de hoy, cesión
+del menos necesitado, vuelta sin alternativa, empate por id y olvido al día, turno).
 
 #### El embudo de natalidad (instrumento `scripts/lab/diagnostico-natalidad.ts`, 2026-09-22)
 

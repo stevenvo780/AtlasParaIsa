@@ -28,7 +28,7 @@ import { pathToFileURL } from 'node:url';
 import { Store } from '../../src/server/store.js';
 import { createWorld, stepWorld, TICKS_PER_DAY, type FaseMedicion, type World } from '../../src/world/index.js';
 import { digestoCanonico } from '../../src/world/digesto.js';
-import { HISTORICAL_PARAMS, paramsOf, parseParams } from '../../src/world/params.js';
+import { HISTORICAL_PARAMS, paramsOf, parseParams, setParams, type WorldParams } from '../../src/world/params.js';
 
 export const LEYES_CANDIDATAS = 'persistencia.cadaTicks=300,poblacion.cortejo=2,poblacion.radioCortejo=128,poblacion.exigeComunidad=false,poblacion.comprobacionContinua=true,conducta.habituacion=0.35';
 export const SEMILLAS_CONTROL: readonly { seed: number; params?: string }[] = [
@@ -48,9 +48,31 @@ function paso(world: World, store: Store, medicion?: FaseMedicion): void {
   if (world.tick % paramsOf(world).persistencia.cadaTicks === 0) store.save(world);
 }
 
+/** `digestoCanonico` con las claves `sin` (`seccion.hoja`) quitadas de la FORMA de params sólo al hashear.
+ * `digestoCanonico` hashea `{world, params}`, así que declarar una clave nueva mueve el hash aunque el mundo
+ * no se mueva (T102). Así se comparan con hashes medidos en un árbol que aún no la declaraba.
+ * `versionReferencia` normaliza sólo la etiqueta para comparar controles de otra versión; omitida,
+ * el digesto conserva exactamente la versión actual. */
+export function digestoSin(world: World, sin: readonly string[], versionReferencia?: number): string {
+  const vigentes = paramsOf(world), forma = structuredClone(vigentes) as unknown as Record<string, Record<string, unknown>>;
+  for (const clave of sin) {
+    const [seccion, hoja] = clave.split('.') as [string, string];
+    if (!forma[seccion] || !Object.hasOwn(forma[seccion]!, hoja)) throw new Error(`sin: la clave ${clave} no existe en este árbol`);
+    delete forma[seccion]![hoja];
+  }
+  const version = world.version;
+  if (sin.length > 0) setParams(world, forma as unknown as WorldParams);
+  // Sólo los controles V10 pasan versionReferencia: la etiqueta cambia el hash, no el estado medido.
+  if (versionReferencia !== undefined) world.version = versionReferencia;
+  try { return digestoCanonico(world); } finally { world.version = version; if (sin.length > 0) setParams(world, vigentes); }
+}
+
 /** Digestos tras cada corte de `pasos` desde `createWorld(seed, params)` con Store temporal. Los
- * `params` se aplican sobre `HISTORICAL_PARAMS`: sin ellos, el control es el mundo de antes. */
-export function digestosControl(seed: number, params: string | undefined, cortes: readonly number[]): Record<string, string> {
+ * `params` se aplican sobre `HISTORICAL_PARAMS`: sin ellos, el control es el mundo de antes.
+ * `sin`: claves que no entran en el hash (ver `digestoSin`). `versionReferencia` sólo afecta
+ * al cálculo del hash, nunca a la simulación ni al guardado. */
+export function digestosControl(seed: number, params: string | undefined, cortes: readonly number[],
+  sin: readonly string[] = [], versionReferencia?: number): Record<string, string> {
   const dir = mkdtempSync(join(tmpdir(), 'atlas-rendimiento-'));
   const store = new Store(join(dir, 'world.sqlite'));
   try {
@@ -59,7 +81,7 @@ export function digestosControl(seed: number, params: string | undefined, cortes
     const salida: Record<string, string> = {}, fin = Math.max(...cortes);
     for (let n = 1; n <= fin; n++) {
       paso(world, store);
-      if (cortes.includes(n)) salida[String(n)] = digestoCanonico(world);
+      if (cortes.includes(n)) salida[String(n)] = digestoSin(world, sin, versionReferencia);
     }
     return salida;
   } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }

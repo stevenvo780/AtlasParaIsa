@@ -46,7 +46,7 @@ const adoptadas = (params: WorldParams) => ({ cortejo: params.poblacion.cortejo,
 const HISTORICAS = { cortejo: 0, radioCortejo: 24, exigeComunidad: true, comprobacionContinua: false, habituacion: 0 };
 const NUEVAS = { cortejo: 2, radioCortejo: 128, exigeComunidad: false, comprobacionContinua: true, habituacion: 0.35 };
 
-test('(b) createWorld() nuevo nace con los defaults de reglas 10 y todo lo demás queda como antes', () => {
+test('(b) createWorld() nuevo conserva las cinco leyes adoptadas en reglas 10', () => {
   const world = createWorld();
   assert.strictEqual(paramsOf(world), DEFAULT_PARAMS);
   assert.strictEqual(parseParams(undefined), DEFAULT_PARAMS, 'sin base ni overrides, los defaults nuevos');
@@ -60,17 +60,16 @@ test('(b) createWorld() nuevo nace con los defaults de reglas 10 y todo lo demá
   assert.equal(DEFAULT_PARAMS.social.vinculoConvivencia, 0);
   assert.equal(DEFAULT_PARAMS.genes.edadFundadoresMinDias, 2); assert.equal(DEFAULT_PARAMS.genes.edadFundadoresMaxDias, 2);
   assert.equal(DEFAULT_PARAMS.gobernador.politica, 'techo');
-  assert.deepEqual({ ...DEFAULT_PARAMS.social }, { maxComunidades: 8, disputaNecesidad: 0.65, disputaEscasez: 1, disputaRadio: 2, disputaDestino: 0.5,
-    disputaEspera: 180, ensenanzaRareza: 0, confianzaSalida: 0.35, distanciaAlternativa: 0.2, vinculoConvivencia: 0, radioConvivencia: 0 });
-  // Fuera de las cinco claves adoptadas, los defaults nuevos SON los históricos (mismo orden de claves).
-  const sinAdoptadas = (params: WorldParams) => JSON.stringify({ ...params, poblacion: { ...params.poblacion, cortejo: 0, radioCortejo: 0,
-    exigeComunidad: false, comprobacionContinua: false }, conducta: { ...params.conducta, habituacion: 0 } });
-  assert.equal(sinAdoptadas(DEFAULT_PARAMS), sinAdoptadas(HISTORICAL_PARAMS));
+  // Las claves sociales de reglas 11 se prueban aparte; el paquete 10 sigue intacto.
+  const sinAdoptadas = (params: WorldParams) => ({ ...params, social: HISTORICAL_PARAMS.social,
+    poblacion: { ...params.poblacion, cortejo: 0, radioCortejo: 24, exigeComunidad: true, comprobacionContinua: false },
+    conducta: { ...params.conducta, habituacion: 0 } });
+  assert.deepEqual(sinAdoptadas(DEFAULT_PARAMS), sinAdoptadas(HISTORICAL_PARAMS));
   assert.ok(Object.isFrozen(HISTORICAL_PARAMS) && Object.isFrozen(HISTORICAL_PARAMS.poblacion) && Object.isFrozen(HISTORICAL_PARAMS.conducta));
   // Un servidor que genera un mundo nuevo parte de los defaults nuevos (los overrides del despliegue no los nombran).
   assert.deepEqual(adoptadas(deploymentParams(DEFAULT_PARAMS, undefined)), NUEVAS);
   // La receta documentada para medir el mundo de antes en el laboratorio da, byte a byte, los históricos.
-  const antes = parseParams('poblacion.cortejo=0,poblacion.radioCortejo=24,poblacion.exigeComunidad=true,poblacion.comprobacionContinua=false,conducta.habituacion=0');
+  const antes = parseParams('poblacion.cortejo=0,poblacion.radioCortejo=24,poblacion.exigeComunidad=true,poblacion.comprobacionContinua=false,conducta.habituacion=0,social.disputaNecesidad=0.65,social.disputaEscasez=1,social.disputaRadio=2,social.memoriaDisputa=0');
   assert.equal(JSON.stringify(antes), JSON.stringify(HISTORICAL_PARAMS));
 });
 
@@ -86,10 +85,12 @@ test('(c) parseParams de un objeto sin las claves nuevas sobre la base históric
 
   // Lectura de instantáneas: las claves que el campo no nombra se completan con los históricos, sea
   // cual sea la versión de reglas, y lo que sí nombra se conserva tal cual.
-  const actual = { version: 10, paramsEncoding: 'params-v1', params: { agua: { cuencas: 0.8 }, limites: { ...DEFAULT_PARAMS.limites } },
+  const actual = { version: 11, paramsEncoding: 'params-v1', params: { agua: { cuencas: 0.8 }, limites: { ...DEFAULT_PARAMS.limites } },
     limitsProfile: { version: 2, ...DEFAULT_PARAMS.limites } };
-  assert.deepEqual(adoptadas(readSnapshotParams(actual)), HISTORICAS, 'reglas 10 sin las claves ⇒ históricos');
+  assert.deepEqual(adoptadas(readSnapshotParams(actual)), HISTORICAS, 'reglas 11 sin las claves ⇒ históricos');
+  assert.deepEqual(readSnapshotParams(actual).social, HISTORICAL_PARAMS.social, 'reglas 11 sin claves sociales ⇒ históricos');
   assert.equal(readSnapshotParams(actual).agua.cuencas, 0.8);
+  assert.deepEqual(readSnapshotParams({ ...actual, version: 10 }).social, HISTORICAL_PARAMS.social, 'reglas 10 ⇒ históricos');
   assert.deepEqual(adoptadas(readSnapshotParams({ ...actual, version: 9 })), HISTORICAS, 'reglas 9 ⇒ históricos');
   const explicitas = { ...actual, params: { ...actual.params, poblacion: { cortejo: 2 } } };
   assert.equal(readSnapshotParams(explicitas).poblacion.cortejo, 2, 'una clave nombrada no se toca');
@@ -98,7 +99,7 @@ test('(c) parseParams de un objeto sin las claves nuevas sobre la base históric
     'sin campo ni perfil: históricos con admisión histórica');
 });
 
-test('(a) una instantánea V9 de antes de reglas 10 recarga, migra a V10 y sigue exactamente la trayectoria de las reglas anteriores', { timeout: 1_800_000 }, t => {
+test('(a) una instantánea V9 de antes de reglas 10 recarga, migra a V11 y sigue exactamente la trayectoria de las reglas anteriores', { timeout: 1_800_000 }, t => {
   const legado = laboratorio(t), control = laboratorio(t), otro = laboratorio(t);
   const world = createWorld(51926, HISTORICAL_PARAMS);
   for (let n = 0; n < 240; n++) stepWorld(world);
@@ -117,8 +118,8 @@ test('(a) una instantánea V9 de antes de reglas 10 recarga, migra a V10 y sigue
   const reabierto = new Store(legado.path), referencia = new Store(control.path), contraste = new Store(otro.path);
   t.after(() => { reabierto.close(); referencia.close(); contraste.close(); });
   const cargado = reabierto.load()!.world, esperado = referencia.load()!.world, nuevo = contraste.load()!.world;
-  assert.equal(cargado.version, 10, 'la migración V9→V10 sólo cambia la etiqueta');
-  assert.equal(esperado.version, 10);
+  assert.equal(cargado.version, 11, 'la migración V9→V11 sólo cambia la etiqueta');
+  assert.equal(esperado.version, 11);
   assert.deepEqual(paramsOf(cargado), HISTORICAL_PARAMS, 'las claves ausentes se completan con los históricos, no con los defaults nuevos');
   assert.deepEqual(paramsOf(esperado), HISTORICAL_PARAMS, 'la migración conserva tal cual los params persistidos');
   assert.equal(digestoCanonico(cargado), digestoCanonico(esperado));
@@ -132,7 +133,7 @@ test('(a) una instantánea V9 de antes de reglas 10 recarga, migra a V10 y sigue
   assert.notEqual(JSON.stringify(nuevo), JSON.stringify(cargado), 'con los defaults nuevos el mismo mundo toma otra trayectoria: el control tiene dientes');
 });
 
-test('la migración V9→V10 conserva los params persistidos tal cual, también si ya eran los nuevos', t => {
+test('la migración V9→V11 conserva los params persistidos tal cual, también si ya eran los nuevos', t => {
   const { path, store } = laboratorio(t);
   const world = createWorld(51926, parseParams('agua.cuencas=0.8'));
   world.version = 9;
@@ -140,7 +141,7 @@ test('la migración V9→V10 conserva los params persistidos tal cual, también 
   const reabierto = new Store(path);
   t.after(() => reabierto.close());
   const cargado = reabierto.load()!.world;
-  assert.equal(cargado.version, 10);
+  assert.equal(cargado.version, 11);
   assert.deepEqual(paramsOf(cargado), parseParams('agua.cuencas=0.8'), 'nada se inyecta ni se revierte al migrar');
   assert.deepEqual(adoptadas(paramsOf(cargado)), NUEVAS);
 });

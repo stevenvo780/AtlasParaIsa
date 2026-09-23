@@ -139,7 +139,7 @@ function retainSnapshotLimitMode(record: Record<string, unknown>): void {
  * con modo explícito; no se activa una opción T102 reservada al migrar. Un campo presente se valida contra
  * `PARAM_RANGES` como cualquier entrada: un dígeste recalculado no legitima un
  * parámetro imposible. Las claves que el campo NO nombra se completan SIEMPRE con
- * `HISTORICAL_PARAMS` (reglas 10, etapa 1), sea cual sea la versión de reglas: una
+ * `HISTORICAL_PARAMS` (reglas 10 y 11), sea cual sea la versión de reglas: una
  * instantánea sólo omite una clave si se escribió antes de que existiera.
  */
 export function readSnapshotParams(value: unknown): WorldParams {

@@ -36,13 +36,21 @@ function replica(t: { after(callback: () => void): void }, seed: number, pasos: 
 }
 
 /** Digesto con la FORMA de params anterior a esta ley (sin `agua.memoria`): `digestoCanonico`
- * hashea `{world, params}`, así que declarar la clave mueve el hash aunque el mundo no se mueva. */
-function digestoSinMemoria(world: World): string {
+ * hashea `{world, params}`, así que declarar la clave mueve el hash aunque el mundo no se mueva.
+ * `conMemoria` la conserva (digesto «completo» de f2757fa). En ambos casos se quita también
+ * `social.memoriaDisputa` (fusión CONFL, `sprint/noche-lab60c-20260922`): no existía en f2757fa, donde se
+ * midieron los hashes, y con su valor 0 no actúa. */
+function digestoSinMemoria(world: World, conMemoria = false): string {
   const vigentes = paramsOf(world);
-  const antes = structuredClone(vigentes) as unknown as { agua: Record<string, unknown> };
-  delete antes.agua.memoria;
+  const antes = structuredClone(vigentes) as unknown as { agua: Record<string, unknown>; social: Record<string, unknown> };
+  assert.equal(antes.social.memoriaDisputa, 0);
+  if (!conMemoria) delete antes.agua.memoria;
+  delete antes.social.memoriaDisputa;
   setParams(world, antes as unknown as WorldParams);
-  try { return digestoCanonico(world); } finally { setParams(world, vigentes); }
+  const version = world.version;
+  // La referencia V10 mide este mismo estado; sólo normalizamos su etiqueta al hashear.
+  world.version = 10;
+  try { return digestoCanonico(world); } finally { world.version = version; setParams(world, vigentes); }
 }
 
 // Los hashes originales se midieron en `sprint/noche-hsed-20260922` @f666226, ANTES de la consolidación
@@ -66,10 +74,10 @@ test('(i) con agua.memoria=1 el mundo es bit a bit el de antes (params históric
   assert.equal(HISTORICAL_PARAMS.agua.memoria, 1);
   const defecto = replica(t, 51926, 1200);
   assert.equal(digestoSinMemoria(defecto), FISICO_51926_1200, 'seed 51926, params históricos, 1200 pasos: el estado físico no se movió');
-  assert.equal(digestoCanonico(defecto), COMPLETO_51926_1200, 'el digesto completo sólo cambia por declarar la clave (T102)');
+  assert.equal(digestoSinMemoria(defecto, true), COMPLETO_51926_1200, 'el digesto completo sólo cambia por declarar la clave (T102)');
   const lab = replica(t, 42, 1200, BASE_LAB);
   assert.equal(digestoSinMemoria(lab), FISICO_42_BASE_1200, 'seed 42 con la base de la noche: el estado físico no se movió');
-  assert.equal(digestoCanonico(lab), COMPLETO_42_BASE_1200);
+  assert.equal(digestoSinMemoria(lab, true), COMPLETO_42_BASE_1200);
   for (const world of [defecto, lab]) assert.ok(world.people.every(person => person.waterMemory === undefined), 'sin la ley nadie recuerda aguaderos');
 });
 

@@ -52,8 +52,15 @@ function digestoSinLaClave(world: World): string {
   const vigentes = paramsOf(world);
   const antes = structuredClone(vigentes) as unknown as { social: Record<string, unknown> };
   delete antes.social.radioConvivencia;
+  // Fusión CONFL (`sprint/noche-lab60c-20260922`): `social.memoriaDisputa` no existía en f2757fa, donde se
+  // midieron los hashes; con su valor 0 no actúa, así que también se quita de la forma.
+  assert.equal(antes.social.memoriaDisputa, 0);
+  delete antes.social.memoriaDisputa;
   setParams(world, antes as unknown as WorldParams);
-  try { return digestoCanonico(world); } finally { setParams(world, vigentes); }
+  const version = world.version;
+  // La referencia V10 mide este mismo estado; sólo normalizamos su etiqueta al hashear.
+  world.version = 10;
+  try { return digestoCanonico(world); } finally { world.version = version; setParams(world, vigentes); }
 }
 
 // Los hashes originales se midieron en `sprint/noche-hcom-20260922` @f666226 ANTES de tocar `src/world`,

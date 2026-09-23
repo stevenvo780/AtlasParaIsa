@@ -601,6 +601,7 @@ export const UMBRALES_QUE_NO_SON_LECTURAS: readonly { fichero: string; funcion: 
   { fichero: 'index.ts', funcion: 'applyGesture', umbral: '4096', motivo: 'Rechaza una orden cuyo destino está a más de 4 096 celdas; no lee nada allí.' },
   { fichero: 'index.ts', funcion: 'choose', umbral: 'away', motivo: 'Compara las distancias a dos personas vinculadas ya leídas (`away < distance(person, cortejado)`) para elegir la más cercana.' },
   { fichero: 'family.ts', funcion: 'earlierForagerExhausts', umbral: 'physical.radius', motivo: 'Recorre personas ya percibidas (`choose` le pasa las de ≤ `RADIUS`) y `radius: RADIUS`: no lee el mundo.' },
+  { fichero: 'index.ts', funcion: 'choose', umbral: 'disputaDestino', motivo: 'Conflicto legible (`social.memoriaDisputa`): compara una celda que ya percibe (`reachableTiles`) con la fuente disputada que recuerda (`person.conflictMemory`); dos puntos ya leídos, no lee nada en el mundo.' },
 ];
 
 type ParamsDeRadio = Pick<WorldParams, 'poblacion' | 'social'>;

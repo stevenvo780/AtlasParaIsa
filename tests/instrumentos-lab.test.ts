@@ -33,7 +33,7 @@ const CLAVES_ANTIGUAS = new Set([
   'cooperacionAcumuladaPorTipo', 'otrasCooperacionesAcumuladas', 'conflictosAcumulados',
   'p50Ms', 'p95Ms', 'rss',
 ]);
-const CLAVES_NUEVAS = ['diversidadConductaTiempo', 'diversidadConductaTiempoComponentes', 'diversidadConductaActiva', 'diversidadConductaActivaComponentes', 'diversidadConductaComponentes', 'repartoTiempoPorAccion', 'repartoActividadPorAccion'];
+const CLAVES_NUEVAS = ['diversidadConductaTiempo', 'diversidadConductaTiempoComponentes', 'diversidadConductaActiva', 'diversidadConductaActivaComponentes', 'diversidadConductaComponentes', 'diversidadConductaVentana', 'diversidadConductaVentanaComponentes', 'personasVentana', 'repartoTiempoPorAccion', 'repartoActividadPorAccion'];
 
 type Json = Record<string, unknown>;
 const readJson = (path: string): Json => JSON.parse(readFileSync(path, 'utf8')) as Json;
@@ -209,4 +209,23 @@ test('CLI: --instrumentos acepta solo "si"|"no"', t => {
   const r = spawnSync(process.execPath, ['--import', 'tsx', 'scripts/lab/replica.ts', '--seed', '1', '--dias', '1', '--instrumentos', 'quizas', '--salida', dir], { encoding: 'utf8' });
   assert.notEqual(r.status, 0);
   assert.match(r.stderr, /--instrumentos si\|no/);
+});
+
+test('C8 v3: la diversidad de ventana usa solo a los mortales que vivieron el día completo y sus ticks de ese día', async () => {
+  const { createWorld, stepWorld } = await import('../src/world/index.js');
+  const { InstrumentosConducta, indiceDiversidadDe, sinDescanso } = await import('../scripts/lab/instrumentos.js');
+  const world = createWorld(7);
+  const inst = new InstrumentosConducta(world);
+  const dia: Record<string, Record<string, number>> = {};
+  const alInicio = new Set(world.people.filter(p => p.role === 'neighbor').map(p => p.id));
+  for (let i = 0; i < 2400; i++) {
+    inst.antesDelPaso(world); stepWorld(world); inst.despuesDelPaso(world);
+    for (const p of world.people) { const d = (dia[p.id] ??= {}); d[p.action] = (d[p.action] ?? 0) + 1; }
+  }
+  const m = inst.metricasDia(world);
+  const enVentana = world.people.filter(p => p.role === 'neighbor' && alInicio.has(p.id));
+  assert.equal(m.personasVentana, enVentana.length);
+  const esperado = indiceDiversidadDe(world, enVentana, p => sinDescanso(dia[p.id] ?? {}));
+  assert.equal(m.diversidadConductaVentana, esperado.total);
+  assert.deepEqual(m.diversidadConductaVentanaComponentes, { conducta: esperado.conducta, oficios: esperado.oficios });
 });

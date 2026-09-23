@@ -192,7 +192,7 @@ export type ReglaDiversidad = 'mk' | 'o' | 'y';
 export type CorreccionMk = 'hamed-rao-ar1' | 'hamed-rao' | 'ninguna';
 
 /** Serie de C8: `auto` = la primera de `PRIORIDAD_DIVERSIDAD` que el tramo trae (activa → tiempo → antigua). */
-export type CampoDiversidad = 'auto' | 'diversidadConductaActiva' | 'diversidadConductaTiempo' | 'diversidadConducta';
+export type CampoDiversidad = 'auto' | 'diversidadConductaVentana' | 'diversidadConductaActiva' | 'diversidadConductaTiempo' | 'diversidadConducta';
 
 /** «durante al menos 60 días simulados»: un corte anterior no puede aprobar ni suspender el criterio. */
 export const DIAS_CRITERIO = 60;
@@ -416,7 +416,7 @@ export function describirCriterios(u: Umbrales): Record<IdCriterio, string> {
     conflictos: `conflictos en la ventana ≥ ${u.conflictosMin}`,
     muertes: `0 muertes fuera de {${u.causasConocidas.join(', ')}}, ≥ ${u.causasMin} causas distintas en los días 1..D y balance población = nacimientos − muertes desde el día 0`,
     tecnologia: `usos de inventor ajeno / usos útiles con autor en la ventana ≥ ${u.usoAjenoMin} y uso ajeno en ≥ ${pct(u.diasUsoAjenoMin)} de sus días (con < ${u.usosConAutorMin} usos con autor conocido ⇒ desconocido; ninguno útil ⇒ falla)`,
-    diversidad: `${u.diversidadCampo === 'auto' ? 'diversidadConductaActiva (si falta, diversidadConductaTiempo; si falta, diversidadConducta)' : u.diversidadCampo} días ${u.diaBaseDiversidad}..D: ${u.diversidadRegla === 'mk'
+    diversidad: `${u.diversidadCampo === 'auto' ? 'diversidadConductaVentana [preregistro v3] (si falta, diversidadConductaActiva; si falta, diversidadConductaTiempo; si falta, diversidadConducta)' : u.diversidadCampo} días ${u.diaBaseDiversidad}..D: ${u.diversidadRegla === 'mk'
       ? `Mann-Kendall unilateral creciente p < ${ALFA_MK} (≥ ${N_MIN_MK} días con dato; Var(S) corregida por autocorrelación: ${u.correccionMk}) y subida de Sen (pendiente × (D − ${u.diaBaseDiversidad})) ≥ ${u.subidaMin} [preregistro v2]; con huecos en el medio, «cumple» solo si se sostiene con los días que faltan en su valor más desfavorable; las reglas v1 se informan, no deciden`
       : `REGLA v1 «${u.diversidadRegla}» (no preregistrada: aprueba ruido estacionario) pendiente MCO (≥ ${PUNTOS_MIN_PENDIENTE} días) ≥ ${u.pendienteMin} ${u.diversidadRegla} media de los k últimos días > media de los k primeros (k = min(ventana, mitad del tramo) ≥ ${DIAS_MIN_BLOQUE}, tolerancia ${TOLERANCIA_PLANA}); con huecos, una pendiente favorable no decide`}; índice fuera de [0, 1] ⇒ desconocido; dato en < ${pct(COBERTURA_MIN)} de los días del tramo ⇒ desconocido; sin dato el día D o algún día de los dos bloques extremos ⇒ desconocido; serie constante (amplitud ≤ ${TOLERANCIA_PLANA}, relativa) ⇒ falla`,
   };
@@ -852,7 +852,7 @@ function rangos(dias: readonly number[]): string {
 }
 
 /** Series de C8 por orden de preferencia en modo auto (preregistro 2026-09-22; ver la cabecera). */
-export const PRIORIDAD_DIVERSIDAD = ['diversidadConductaActiva', 'diversidadConductaTiempo', 'diversidadConducta'] as const;
+export const PRIORIDAD_DIVERSIDAD = ['diversidadConductaVentana', 'diversidadConductaActiva', 'diversidadConductaTiempo', 'diversidadConducta'] as const;
 
 function diversidad(contexto: Contexto): ResultadoCriterio {
   const { dias, D, u } = contexto, b = u.diaBaseDiversidad;
@@ -1026,7 +1026,7 @@ const USO = `Uso: npx tsx scripts/lab/criterio-terminado.mts --entrada <conjunto
 
 /** `--diversidad-campo`: alias cortos y nombres de campo de dia-NNN.json. */
 const CAMPOS_DIVERSIDAD: Record<string, CampoDiversidad> = {
-  auto: 'auto', activa: 'diversidadConductaActiva', diversidadConductaActiva: 'diversidadConductaActiva', tiempo: 'diversidadConductaTiempo', diversidadConductaTiempo: 'diversidadConductaTiempo',
+  auto: 'auto', ventana: 'diversidadConductaVentana', diversidadConductaVentana: 'diversidadConductaVentana', activa: 'diversidadConductaActiva', diversidadConductaActiva: 'diversidadConductaActiva', tiempo: 'diversidadConductaTiempo', diversidadConductaTiempo: 'diversidadConductaTiempo',
   actividad: 'diversidadConducta', antigua: 'diversidadConducta', diversidadConducta: 'diversidadConducta',
 };
 

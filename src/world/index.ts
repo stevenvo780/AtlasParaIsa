@@ -34,7 +34,7 @@ export type { WorldContext } from './spatial.js';
 
 // V9 accounts for an earlier visible forager when planning finite family reserves.
 // Physical work, consumption and reproduction gates retain their existing laws.
-export const RULES_VERSION = 10;
+export const RULES_VERSION = 11;
 /**
  * Ruling R17: ya no hay tope de población en el software. `POPULATION_HARD_LIMIT`
  * (1.000.000) solo protege `assertWorld` de un snapshot corrupto; el freno real es el
@@ -71,6 +71,9 @@ export interface Person extends PersonView {
   home?: { x: number; y: number; quality: number; observedAt: number };
   /** Ley candidata `agua.memoria`: último lugar donde bebió agua del entorno. Sólo existe con la ley activa. */
   waterMemory?: { x: number; y: number };
+  /** Ley candidata `social.memoriaDisputa` (CONFL): fuente donde cedió su última disputa y paso en que la cedió.
+   * Sólo existe con la ley activa; se olvida un día después. */
+  conflictMemory?: { x: number; y: number; tick: number };
   technology: TechnologyKnowledge; demography: DemographicState;
 }
 export interface Memory extends MemoryView {
@@ -442,8 +445,20 @@ function choose(world: World, person: Person): void {
   if (aptitud > 0) candidates[0]!.score += aptitud * ventajaComparativa(person.traits, 'explore');
   const home = settlementOpportunity(world,person);
   if (home) candidates.push({action:'approach',...home});
-  // Sprint noche-perf: `primero*` (orden.ts) da el mismo elemento que `filter(…).sort(…)[0]` sin ordenar.
-  const food = primero(reachableTiles, (a, b) => (distance(person, a) - a.food * 2) - (distance(person, b) - b.food * 2), tile => tile.food > 0.025 && planAffordable(stepsTo(tile)!, 0));
+  // Conflicto legible (`social.memoriaDisputa`, CONFL, default 0 = hoy): quien cedió una disputa recuerda un
+  // día la fuente; al elegir dónde comer, beber o cazar esa fuente (la celda y las que la disputa llama «el
+  // mismo destino») le parece `memoriaDisputa` celdas más lejos. Sólo reordena las fuentes que ya percibe: si
+  // no hay otra, vuelve; no prohíbe nada, no revela nada lejano y el camino se paga igual.
+  const { memoriaDisputa, disputaDestino } = paramsOf(world).social;
+  if (memoriaDisputa > 0 && person.conflictMemory && world.tick - person.conflictMemory.tick >= TICKS_PER_DAY) delete person.conflictMemory;
+  const disputada = memoriaDisputa > 0 ? person.conflictMemory : undefined;
+  const recelo = (tile: Point) => disputada && distance(tile, disputada) < disputaDestino ? memoriaDisputa : 0;
+  // Sprint noche-perf: `primero*` (orden.ts) da el mismo elemento que `filter(…).sort(…)[0]` sin ordenar. Con
+  // `recelo` el comparador sigue siendo diferencia de una clave finita por celda (preorden total), así que la
+  // fusión CONFL + perf elige exactamente la misma celda que el `filter().sort()[0]` de la rama CONFL.
+  const food = primero(reachableTiles, disputada
+    ? (a, b) => (distance(person, a) - a.food * 2 + recelo(a)) - (distance(person, b) - b.food * 2 + recelo(b))
+    : (a, b) => (distance(person, a) - a.food * 2) - (distance(person, b) - b.food * 2), tile => tile.food > 0.025 && planAffordable(stepsTo(tile)!, 0));
   if (food || person.inventory > 0.01 || foodAvailable(world,person)>0) candidates.push({ action: 'eat', target: food ?? person, score: Math.max(0, person.hunger - 0.22) * 2.5 - (food ? distance(person, food) * 0.02 : 0), reason: 'El hambre orienta su camino hacia alimento que puede percibir.' });
   const body = { hunger: person.hunger, thirst: person.thirst, fatigue: person.fatigue, energy: person.energy };
   const protection = bodilyShelter(world, person), damage = bodilyDamage(world, person, body, protection), meal = immediateMeal(world, person);
@@ -548,7 +563,9 @@ function choose(world: World, person: Person): void {
     if (cortejado) candidates.push({ action: 'approach', target: { x: cortejado.x, y: cortejado.y }, score: leyPoblacion.cortejo * (0.5 + vinculo * 0.5),
       reason: `Recuerda el vínculo con ${cortejado.name} y lo busca; ambos están en edad de criar y la cercanía hace posible una familia.` });
   }
-  const water = primeroConFiltroCaro(reachableTiles, (a, b) => distance(person, a) - distance(person, b), t => waterAvailable(world,t) > 0.005 && planAffordable(stepsTo(t)!, 0));
+  const water = primeroConFiltroCaro(reachableTiles, disputada
+    ? (a, b) => (distance(person, a) + recelo(a)) - (distance(person, b) + recelo(b))
+    : (a, b) => distance(person, a) - distance(person, b), t => waterAvailable(world,t) > 0.005 && planAffordable(stepsTo(t)!, 0));
   const carriedWater = containedWaterQuanta(person) > 0;
   const portableWater = carriedWater && canHandleContainedWater(person, world.tick);
   const localWater = waterAvailable(world, person) > 0;
@@ -598,7 +615,9 @@ function choose(world: World, person: Person): void {
   if (waterAvailable(world, person) > 0 && damage > 0) candidates.push({ action: 'drink', target: person,
     score: Math.max(0, person.thirst - .18) * 3.1, reason: 'Puede beber una reserva local ahora para aliviar la privación corporal.' });
   const huntPlan = (() => {
-    for (const tile of reachableTiles.filter(t => (t.fauna ?? 0) >= 1).sort((a, b) => distance(person, a) - distance(person, b))) {
+    for (const tile of reachableTiles.filter(t => (t.fauna ?? 0) >= 1).sort(disputada
+      ? (a, b) => (distance(person, a) + recelo(a)) - (distance(person, b) + recelo(b))
+      : (a, b) => distance(person, a) - distance(person, b))) {
       const victim = world.animals.filter(a => a.x === tile.x && a.y === tile.y && a.health > 0)
         .sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0)[0];
       const work = Math.max(0, Math.ceil(45 * (1 - (person.skills.hunt ?? 0) * .25))
@@ -1729,6 +1748,13 @@ function migrateWorldState(value: unknown, context: WorldContext = {}): World {
     if (catalogueEnabled(world.technology)) for (const person of world.people) maintainTechnologyMemory(world, person);
     assertWorld(world); return world;
   }
+  if (version === 10) {
+    // V10 → V11 sólo cambia la etiqueta; la rama de la versión vigente aplica después la misma
+    // normalización de carga que recibía un mundo V10 con el código de reglas 10.
+    assertWorld(value, 10, context);
+    const world = cloneWorld(value, context); upgradeV11(world);
+    return migrateWorldState(world, context);
+  }
   if (version === 9) {
     assertWorld(value, 9, context);
     const world = cloneWorld(value, context); upgradeV10(world);
@@ -1753,20 +1779,20 @@ function migrateWorldState(value: unknown, context: WorldContext = {}): World {
   }
   if (version === 5) {
     assertWorld(value, 5, context);
-    const world = cloneWorld(value, context); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); upgradeV10(world);
+    const world = cloneWorld(value, context); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); upgradeV10(world); upgradeV11(world);
     if (world.technology.checkpoint === undefined) world.technology.checkpoint = captureTechnologyCheckpoint(world.technology, world.people, world.tick, 'migration');
     if (catalogueEnabled(world.technology)) for (const person of world.people) maintainTechnologyMemory(world, person);
     assertWorld(world); return world;
   }
-  if (version===4) { assertWorld(value,4,context); const world=cloneWorld(value,context); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); upgradeV10(world); assertWorld(world); return world; }
+  if (version===4) { assertWorld(value,4,context); const world=cloneWorld(value,context); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); upgradeV10(world); upgradeV11(world); assertWorld(world); return world; }
   if(version===3) {
     assertWorld(value,3,context);
-    const world=cloneWorld(value,context); upgradeV4(world); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); upgradeV10(world); assertWorld(world); return world;
+    const world=cloneWorld(value,context); upgradeV4(world); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); upgradeV10(world); upgradeV11(world); assertWorld(world); return world;
   }
   if (version === 2) {
     assertWorld(value, 2, context);
     const world = cloneWorld(value, context);
-    upgradeV3(world); upgradeV4(world); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); upgradeV10(world); assertWorld(world); return world;
+    upgradeV3(world); upgradeV4(world); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); upgradeV10(world); upgradeV11(world); assertWorld(world); return world;
   }
   assertCommon(value, true);
   const world = structuredClone(value);
@@ -1794,7 +1820,7 @@ function migrateWorldState(value: unknown, context: WorldContext = {}): World {
     p.skills = {}; p.values = {}; p.activity = {}; p.materials = { wood: 0, stone: 0 }; p.visited = [];
     p.heading = index * 2.399963229728653; p.command = null; p.work = 0; p.lastOutcome = world.tick; p.intentContext = p.hunger > 0.5 ? 'hungry' : p.fatigue > 0.5 ? 'tired' : 'ready'; p.controlMode = 'auto';
   });
-  upgradeV3(world); upgradeV4(world); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); upgradeV10(world); assertWorld(world); return world;
+  upgradeV3(world); upgradeV4(world); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); upgradeV10(world); upgradeV11(world); assertWorld(world); return world;
 }
 function upgradeV3(world: World): void {
   world.version = 3; world.cooperationEnabled = true; world.reproductionEnabled = true;
@@ -1828,3 +1854,5 @@ function upgradeV8(world: World): void { world.version = 8; }
 function upgradeV9(world: World): void { world.version = 9; }
 /** V10 prepara las leyes nuevas; al migrar sólo cambia la etiqueta, el estado guardado queda intacto. */
 function upgradeV10(world: World): void { world.version = 10; }
+/** V11 adopta nuevos defaults sólo al crear mundos; al migrar no altera estado ni params. */
+function upgradeV11(world: World): void { world.version = 11; }

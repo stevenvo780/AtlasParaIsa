@@ -37,10 +37,17 @@ function replica(t: { after(callback: () => void): void }, pasos: number, params
  * estado físico sea idéntico, así que el control la quita antes de hashear. */
 function digestoSinAptitud(world: World): string {
   const vigentes = paramsOf(world);
-  const comoPadre = structuredClone(vigentes) as unknown as { conducta: Record<string, unknown> };
+  const comoPadre = structuredClone(vigentes) as unknown as { conducta: Record<string, unknown>; social: Record<string, unknown> };
   delete comoPadre.conducta.aptitud;
+  // Fusión CONFL (`sprint/noche-lab60c-20260922`): `social.memoriaDisputa` no existía en f2757fa, donde se
+  // midieron los hashes; con su valor 0 no actúa, así que también se quita de la forma.
+  assert.equal(comoPadre.social.memoriaDisputa, 0);
+  delete comoPadre.social.memoriaDisputa;
   setParams(world, comoPadre as unknown as WorldParams);
-  try { return digestoCanonico(world); } finally { setParams(world, vigentes); }
+  const version = world.version;
+  // La referencia V10 mide este mismo estado; sólo normalizamos su etiqueta al hashear.
+  world.version = 10;
+  try { return digestoCanonico(world); } finally { world.version = version; setParams(world, vigentes); }
 }
 
 // Los hashes originales se midieron en el padre `f666226` (sprint/noche-integra), ANTES de la consolidación

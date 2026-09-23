@@ -30,7 +30,8 @@ test('a snapshot carries procedure summaries, never their programs, and the savi
   // All payload ceilings and the reduction ratio below remain unchanged.
   // Reglas 10, etapa 1 (2026-09-22): el mundo que se envía hoy nace con los defaults nuevos (paquete
   // de natalidad): re-medido con 41 habitantes (29 con `HISTORICAL_PARAMS`); cotas y razón sin cambios.
-  assert.equal(world.people.length, 41, 'the measurement is stated for 41 inhabitants');
+  // Reglas 11 cambia el acceso a fuentes escasas; el mundo vigente se re-mide con 39 habitantes.
+  assert.equal(world.people.length, 39, 'the measurement is stated for 39 inhabitants');
   assert.ok(world.technology.recipes.length >= 200, `resident definitions: ${world.technology.recipes.length}`);
   const view = projectWorld(world), technology = view.technology!;
   assert.equal(technology.recipes.length, world.technology.recipes.length);

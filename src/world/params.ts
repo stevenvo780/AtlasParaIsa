@@ -8,6 +8,8 @@
  * Reglas 10, etapa 1 (2026-09-22): por primera vez un default CAMBIA la dinámica. Los mundos nuevos
  * nacen con `DEFAULT_PARAMS` (paquete de natalidad adoptado, `RULES_10_ADOPTED`); los mundos
  * anteriores conservan su conducta porque sus claves ausentes se completan con `HISTORICAL_PARAMS`.
+ * Reglas 11 (2026-09-23): los mundos nuevos adoptan además el paquete B de conflicto legible;
+ * `agua.memoria` permanece en 1. Los params históricos de instantáneas no cambian.
  */
 
 import { DEMOGRAPHY_TICKS_PER_DAY, longevityAges, type LongevityLaw } from '../shared/demography.js';
@@ -95,7 +97,15 @@ export interface WorldParams {
      * dentro del cual un miembro convive con ella. Con > 0 la pertenencia se revisa por convivencia y confianza
      * (se une a la comunidad de la mayoría de sus vecinos de confianza; un núcleo que vive a más de este radio
      * del centro funda la suya). 0 = hoy (la pertenencia sólo cambia por `confianzaSalida`). */
-    radioConvivencia: number };
+    radioConvivencia: number;
+    /** Conflicto legible (hipótesis CONFL, 2026-09-22), `society.ts` → `resourceDispute` e `index.ts` → `choose`.
+     * Con > 0, en una disputa (o un turno) cede quien MENOS lo necesita —máximo de hambre y sed; empate, el de id
+     * mayor— y no queda inmóvil treinta pasos: vuelve a elegir al paso siguiente. Quien cede recuerda un día la
+     * fuente disputada (la celda y las que la disputa llama «el mismo destino»), que al elegir dónde comer, beber
+     * o cazar le parece `memoriaDisputa` celdas más lejos: prefiere otra que perciba, y si no hay otra vuelve.
+     * 0 = conducta histórica (cede quien llega a la comprobación, espera treinta pasos inmóvil y no
+     * recuerda nada); reglas 11 adopta 8 para mundos nuevos. */
+    memoriaDisputa: number };
 }
 
 function deepFreeze<T>(value: T): T {
@@ -108,8 +118,8 @@ function deepFreeze<T>(value: T): T {
 
 /**
  * Params HISTÓRICOS: los que reproducen la conducta del mundo ANTES de reglas 10, etapa 1. Es el
- * literal de abajo tal cual; `DEFAULT_PARAMS` (mundos NUEVOS) se deriva de él cambiando sólo las
- * cinco leyes de natalidad adoptadas (`RULES_10_ADOPTED`).
+ * literal de abajo tal cual; `DEFAULT_PARAMS` (mundos NUEVOS) se deriva de él aplicando
+ * `RULES_10_ADOPTED` y después `RULES_11_ADOPTED`.
  */
 const RAW_HISTORICAL: WorldParams = {
   cuerpo: {
@@ -134,7 +144,7 @@ const RAW_HISTORICAL: WorldParams = {
   // cultural), así que abrirlas no cambia el mundo.
   conducta: { habituacion: 0, aptitud: 0 },
   social: { maxComunidades: 8, disputaNecesidad: 0.65, disputaEscasez: 1, disputaRadio: 2, disputaDestino: 0.5, disputaEspera: 180,
-    ensenanzaRareza: 0, confianzaSalida: 0.35, distanciaAlternativa: 0.2, vinculoConvivencia: 0, radioConvivencia: 0 },
+    ensenanzaRareza: 0, confianzaSalida: 0.35, distanciaAlternativa: 0.2, vinculoConvivencia: 0, radioConvivencia: 0, memoriaDisputa: 0 },
 };
 
 /**
@@ -149,9 +159,20 @@ export const RULES_10_ADOPTED = deepFreeze({
   conducta: { habituacion: 0.35 },
 } as const);
 
+/**
+ * Reglas 11 (2026-09-23): el paquete B de conflicto legible pasa a ser el default de mundos
+ * NUEVOS. En el laboratorio, C1–C7 se cumplió en 8/12 semillas a 60 días frente a 4/10 con
+ * reglas 10 (`docs/preregistros/2026-09-23-vocacion-banda.md` y
+ * `docs/ops/noche-20260922-bitacora.md`). `agua.memoria` sigue en 1, como en B.
+ */
+export const RULES_11_ADOPTED = deepFreeze({
+  social: { disputaNecesidad: 0.45, disputaEscasez: 3, disputaRadio: 3, memoriaDisputa: 8 },
+} as const);
+
 const RAW_DEFAULTS: WorldParams = structuredClone(RAW_HISTORICAL);
 Object.assign(RAW_DEFAULTS.poblacion, RULES_10_ADOPTED.poblacion);
 Object.assign(RAW_DEFAULTS.conducta, RULES_10_ADOPTED.conducta);
+Object.assign(RAW_DEFAULTS.social, RULES_11_ADOPTED.social);
 
 /**
  * Defaults de un mundo NUEVO (`createWorld` sin params, `parseParams` sin base, laboratorio sin
@@ -161,13 +182,14 @@ Object.assign(RAW_DEFAULTS.conducta, RULES_10_ADOPTED.conducta);
 export const DEFAULT_PARAMS: WorldParams = deepFreeze(RAW_DEFAULTS);
 
 /**
- * Params HISTÓRICOS (reglas 10, etapa 1): la BASE con que se completan las claves AUSENTES de una
- * instantánea (`readSnapshotParams` en `src/server/snapshot.ts`). Un mundo anterior —reglas < 10, o
+ * Params HISTÓRICOS (reglas 10 y 11): la BASE con que se completan las claves AUSENTES de una
+ * instantánea (`readSnapshotParams` en `src/server/snapshot.ts`). Un mundo anterior —reglas < 11, o
  * cualquiera cuyos params persistidos no nombren una clave— nunca recibe un default nuevo: recibe el
  * valor que reproduce su conducta de siempre. Difiere de `DEFAULT_PARAMS` sólo en las leyes adoptadas:
  * `poblacion.cortejo` 0, `poblacion.radioCortejo` 24, `poblacion.exigeComunidad` true,
- * `poblacion.comprobacionContinua` false y `conducta.habituacion` 0. Las demás claves añadidas la
- * noche del 2026-09-22 ya tienen por default su valor histórico y aquí valen lo mismo:
+ * `poblacion.comprobacionContinua` false y `conducta.habituacion` 0; además las cuatro de
+ * `RULES_11_ADOPTED` conservan aquí 0,65/1/2/0. Las demás claves añadidas la
+ * noche del 2026-09-22 mantienen su valor histórico:
  * `genes.edadFundadoresMin/MaxDias` 2/2, `poblacion.radioPareja` 3, `poblacion.radioLugar` 4,
  * `agua.memoria` 1, `conducta.aptitud` 0, `social.*` (disputas 0,65/×1/2/0,5/180, rareza 0, confianza
  * 0,35, distancia 0,2, `maxComunidades` 8, `vinculoConvivencia` 0, `radioConvivencia` 0).
@@ -283,6 +305,9 @@ export const PARAM_RANGES: Record<string, [number, number]> = {
   'social.vinculoConvivencia': [0, 0.01],
   // 0 apaga la ley (conducta de hoy); en celdas, como el radio de contacto (6) de `updateCommunities`.
   'social.radioConvivencia': [0, 64],
+  // Penalización, en celdas, de la fuente donde se cedió una disputa. La percepción llega a 7 celdas:
+  // con ≥ 8 cualquier otra fuente percibida va antes; el máximo 32 es «nunca, si hay otra». 0 apaga la ley.
+  'social.memoriaDisputa': [0, 32],
 };
 
 type ScalarDescriptor = { kind: 'number'; range: readonly [number, number]; integer?: boolean }

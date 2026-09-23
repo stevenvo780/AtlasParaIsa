@@ -18,17 +18,23 @@
  * Reglas 10, etapa 1 (2026-09-22): la semilla 42 era «parámetros por defecto» del árbol e1adaaf, que son
  * exactamente `HISTORICAL_PARAMS`; `digestosControl` parte ahora de esa base explícita, así que los
  * tres hashes de referencia se conservan sin regenerar.
+ *
+ * Fusión CONFL (`sprint/noche-lab60c-20260922`): `social.memoriaDisputa` (default e histórico 0 = hoy)
+ * no existía en e1adaaf. Con 0 la ley no actúa, pero declarar la clave mueve `digestoCanonico` (hashea
+ * `{world, params}`, T102); el control la quita de la forma de params al hashear (`CLAVES_POSTERIORES`),
+ * así que los hashes de e1adaaf se conservan y siguen demostrando que el MUNDO no se movió ni un bit.
+ * Reglas 11: el control sigue usando la base histórica y normaliza sólo `world.version` a 10 al
+ * comparar con esos hashes V10; el estado simulado y los params permanecen intactos.
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { copyFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { digestosControl, LEYES_CANDIDATAS } from '../scripts/lab/rendimiento.js';
+import { digestosControl, digestoSin, LEYES_CANDIDATAS } from '../scripts/lab/rendimiento.js';
 import { Store } from '../src/server/store.js';
 import { stepWorld } from '../src/world/index.js';
-import { digestoCanonico } from '../src/world/digesto.js';
-import { DEFAULT_PARAMS, HISTORICAL_PARAMS, paramsOf, parseParams } from '../src/world/params.js';
+import { DEFAULT_PARAMS, HISTORICAL_PARAMS, paramsOf, parseParams, type WorldParams } from '../src/world/params.js';
 import { firstTileAt, lastTileAt, tileLookup } from '../src/world/tile-index.js';
 import { primero, primeroConFiltroCaro, primerosDos } from '../src/world/orden.js';
 import { algunoCerca, filtrarCerca, primeroCerca } from '../src/world/indice-puntos.js';
@@ -107,6 +113,46 @@ test('indice-puntos da lo mismo que some, find y filter con el predicado exacto,
   assert.deepEqual(filtrarCerca(raros.slice(1, 2), { x: 1, y: 1 }, Infinity, () => true).map(p => p.n), [1]);
 });
 
+test('con el recelo de CONFL (`social.memoriaDisputa`), primero y primeroConFiltroCaro eligen la misma fuente '
+  + 'que filter + sort estable', () => {
+  // Fusión CONFL + perf: `choose` elige comida y agua con `primero*` y un comparador que suma `recelo` a la
+  // fuente disputada. Sigue siendo diferencia de una clave finita por celda (preorden total), así que el
+  // elegido debe ser el menor y, entre iguales, el primero: lo que daba el `filter().sort()[0]` de la rama CONFL.
+  const r = aleatorio(51926);
+  type Celda = { x: number; y: number; food: number; ok: boolean };
+  const distance = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(a.x - b.x, a.y - b.y);
+  let conRecelo = 0;
+  for (let caso = 0; caso < 3000; caso++) {
+    const person = caso % 2 ? { x: Math.floor(r() * 20), y: Math.floor(r() * 20) } : { x: r() * 20, y: r() * 20 };
+    const celdas: Celda[] = Array.from({ length: Math.floor(r() * 60) }, () => ({
+      x: Math.floor(person.x) + Math.floor(r() * 15) - 7, y: Math.floor(person.y) + Math.floor(r() * 15) - 7,
+      food: Math.round(r() * 8) / 16, ok: r() < 0.8 }));
+    const memoriaDisputa = [1, 2.5, 8, 32][caso % 4]!, disputaDestino = [0.1, 0.5, 1.5, 8][Math.floor(caso / 4) % 4]!;
+    const disputada = celdas.length && r() < 0.8 ? { ...celdas[Math.floor(r() * celdas.length)]! } : { x: person.x + 3, y: person.y };
+    const recelo = (tile: { x: number; y: number }) => distance(tile, disputada) < disputaDestino ? memoriaDisputa : 0;
+    if (celdas.some(c => recelo(c) > 0)) conRecelo++;
+    const comida = (a: Celda, b: Celda) => (distance(person, a) - a.food * 2 + recelo(a)) - (distance(person, b) - b.food * 2 + recelo(b));
+    const agua = (a: Celda, b: Celda) => (distance(person, a) + recelo(a)) - (distance(person, b) + recelo(b));
+    const keep = (c: Celda) => c.food > 0.025 && c.ok;
+    for (const compare of [comida, agua]) {
+      const esperado = celdas.filter(keep).sort(compare)[0];
+      assert.equal(primero(celdas, compare, keep), esperado);
+      assert.equal(primeroConFiltroCaro(celdas, compare, keep), esperado);
+    }
+  }
+  assert.ok(conRecelo > 1000, 'la prueba ejerce el recelo');
+});
+
+/** Claves declaradas después de e1adaaf que, con su valor por defecto, no actúan (ver cabecera). */
+const CLAVES_POSTERIORES = ['social.memoriaDisputa'] as const;
+/** Quitar una clave del hash sólo es legítimo si con el valor que tiene no actúa (0). */
+function clavesPosterioresApagadas(params: WorldParams): void {
+  for (const clave of CLAVES_POSTERIORES) {
+    const [seccion, hoja] = clave.split('.') as [string, string];
+    assert.equal((params as unknown as Record<string, Record<string, unknown>>)[seccion]![hoja], 0, `${clave} = 0: no actúa`);
+  }
+}
+
 const REFERENCIA: readonly { seed: number; params?: string; digestos: Record<'1200' | '2400', string> }[] = [
   { seed: 51926, params: LEYES_CANDIDATAS, digestos: {
     1200: '846f36fe7b2766130429979704868dc301ea34f73ab0f511ec95395efeb74a77',
@@ -121,14 +167,15 @@ const REFERENCIA: readonly { seed: number; params?: string; digestos: Record<'12
 
 test('las leyes candidatas del laboratorio son las del control', () => {
   assert.equal(LEYES_CANDIDATAS, 'persistencia.cadaTicks=300,poblacion.cortejo=2,poblacion.radioCortejo=128,poblacion.exigeComunidad=false,poblacion.comprobacionContinua=true,conducta.habituacion=0.35');
-  // Reglas 10: son los defaults nuevos (salvo la cadencia del laboratorio), y dan el mismo mundo sobre cualquier base.
-  assert.deepEqual(parseParams(LEYES_CANDIDATAS, HISTORICAL_PARAMS), parseParams(LEYES_CANDIDATAS));
+  // El control V10 midió las candidatas sobre la base histórica; reglas 11 sólo añade cuatro defaults sociales.
+  assert.deepEqual(parseParams(LEYES_CANDIDATAS, HISTORICAL_PARAMS), parseParams('persistencia.cadaTicks=300,social.disputaNecesidad=0.65,social.disputaEscasez=1,social.disputaRadio=2,social.memoriaDisputa=0', DEFAULT_PARAMS));
   assert.deepEqual(parseParams(LEYES_CANDIDATAS), parseParams('persistencia.cadaTicks=300', DEFAULT_PARAMS));
 });
 
 for (const { seed, params, digestos } of REFERENCIA) {
   test(`semilla ${seed} (${params ? 'leyes candidatas' : 'parámetros históricos'}): digestoCanonico idéntico al árbol sin optimizar tras 1200 y 2400 pasos`, { timeout: 3_600_000 }, () => {
-    assert.deepEqual(digestosControl(seed, params, [1200, 2400]), digestos);
+    clavesPosterioresApagadas(parseParams(params, HISTORICAL_PARAMS));
+    assert.deepEqual(digestosControl(seed, params, [1200, 2400], CLAVES_POSTERIORES, 10), digestos);
   });
 }
 
@@ -149,6 +196,8 @@ for (const { seed, params, digestos } of REFERENCIA) {
  * La instantánea declara TODAS sus params (`params-v1`, con las cinco leyes adoptadas y cadencia 300),
  * así que `readSnapshotParams` no completa ninguna clave: ni `HISTORICAL_PARAMS` ni los defaults de un
  * mundo nuevo cambian lo que se simula, y el digesto final esperado es el mismo con o sin reglas 10.
+ * Las `CLAVES_POSTERIORES` son la excepción: la instantánea es anterior a ellas, `readSnapshotParams` las
+ * completa con su valor histórico (que no actúa) y el control las quita al hashear, como en las semillas.
  */
 const MUNDO_ALTO = process.env.ATLAS_MUNDO_ALTO ?? '/datos/tmp-atlas-lab/perfil/psinagua3-d12.sqlite';
 const ALTO = { inicial: '6a139a78154ba92a1ef36b61bec00e68b32c23a37c15d3e2e28e1a54b150cf8d', pasos: 600,
@@ -160,11 +209,12 @@ test('población alta (230 habitantes, semilla 3 día 12,25): digestoCanonico id
     const store = new Store(join(dir, 'world.sqlite'));
     try {
       const world = store.load()!.world;
-      assert.equal(digestoCanonico(world), ALTO.inicial);
+      clavesPosterioresApagadas(paramsOf(world));
+      assert.equal(digestoSin(world, CLAVES_POSTERIORES, 10), ALTO.inicial);
       for (let n = 0; n < ALTO.pasos; n++) {
         stepWorld(world);
         if (world.tick % paramsOf(world).persistencia.cadaTicks === 0) store.save(world);
       }
-      assert.equal(digestoCanonico(world), ALTO.final);
+      assert.equal(digestoSin(world, CLAVES_POSTERIORES, 10), ALTO.final);
     } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
   });

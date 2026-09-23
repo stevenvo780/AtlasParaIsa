@@ -76,6 +76,8 @@ function replicaConGuardado(t: { after(callback: () => void): void }, pasos: num
 function digestoConParamsDeMain(world: World): string {
   const vigentes = paramsOf(world);
   const comoMain = structuredClone(HISTORICAL_PARAMS) as unknown as Record<string, unknown>;
+  // `social` entero no existe en `main`: con él se van también las claves que las hipótesis de la noche
+  // añadieron al grupo (vinculoConvivencia, radioConvivencia y memoriaDisputa, CONFL); con su default no actúan.
   delete comoMain.conducta; delete comoMain.social;
   // Claves nuevas de la integración de la noche (gobernador techo, cortejo, maxComunidades):
   // tampoco existen en `main`, y con su default tampoco actúan.
@@ -109,9 +111,9 @@ test('(i) con los params históricos las leyes candidatas no mueven el mundo: el
   const poblacion = HISTORICAL_PARAMS.poblacion as unknown as Record<string, unknown>;
   for (const [clave, valor] of Object.entries({ maxima: 1_000_000, intervaloComprobacionTicks: 120, nacimientosPorComprobacion: 2,
     exigeComunidad: true, radioPareja: 3, radioLugar: 4, comprobacionContinua: false, cortejo: 0, radioCortejo: 24 })) assert.equal(poblacion[clave], valor, `histórico de poblacion.${clave}`);
-  // Reglas 10: el mundo NUEVO adopta cinco de estas leyes; el resto de la sección no cambia.
+  // Reglas 10 adopta cinco leyes; reglas 11 adopta además el paquete B de conflicto.
   assert.deepEqual({ ...DEFAULT_PARAMS.poblacion }, { ...HISTORICAL_PARAMS.poblacion, cortejo: 2, radioCortejo: 128, exigeComunidad: false, comprobacionContinua: true });
-  assert.deepEqual({ ...DEFAULT_PARAMS.social }, { ...HISTORICAL_PARAMS.social });
+  assert.deepEqual({ ...DEFAULT_PARAMS.social }, { ...HISTORICAL_PARAMS.social, disputaNecesidad: 0.45, disputaEscasez: 3, disputaRadio: 3, memoriaDisputa: 8 });
   assert.equal(DEFAULT_PARAMS.conducta.habituacion, 0.35);
 });
 

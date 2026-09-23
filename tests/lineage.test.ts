@@ -1,12 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { LegacyRecord } from '../src/shared/demography.js';
+import type { StructureView } from '../src/shared/life.js';
 import type { TechnologyRecipe } from '../src/shared/technology.js';
 import type { ChronicleEvent, CommunityView } from '../src/shared/types.js';
 import { createWorld, type Person, type World } from '../src/world/index.js';
-import { demographicTraits, initialDemography } from '../src/world/demography.js';
+import { demographicTraits, initialDemography, updateDemography } from '../src/world/demography.js';
 import { founderGenome, inheritGenome } from '../src/world/genetics.js';
+import { BROKEN_CONDITION } from '../src/world/inventions.js';
 import { advancePopulation, assertLegacyRecord, assertPopulation, MAX_LEGACY_CACHE, pruneBonds, RECENT_LEGACY_COUNT, referencedLegacy, retainLegacy } from '../src/world/lineage.js';
+import { paramsOf } from '../src/world/params.js';
 
 function emitFor(world: World) {
   return (event: Omit<ChronicleEvent, 'id' | 'tick'>): ChronicleEvent => {
@@ -55,6 +58,53 @@ test('a death preserves immutable identity evidence and a pending archive row wh
   world.tick++; advancePopulation(world, { emit });
   assert.equal(world.retiredLegacy, queue); assert.equal(world.retiredLegacy.length, 2); assert.equal(world.demographyDynamics.deaths, deaths);
   assert.equal(world.events.filter(event => event.kind === 'death').length, 2);
+});
+
+test('simultaneous death events preserve the exact archived identity and position for every person', () => {
+  const { world, a: template, emit } = scene();
+  world.people = Array.from({ length: 160 }, (_, index): Person => {
+    const person = structuredClone(template);
+    person.id = `mass-death-${String(index).padStart(3, '0')}`; person.name = `Persona ${index}`;
+    person.x = index % 23 - 11; person.y = Math.floor(index / 23) - 3; fatal(person);
+    return person;
+  });
+  const before = new Map(world.people.map(person => [person.id, { x: person.x, y: person.y }]));
+  world.tick++; advancePopulation(world, { emit });
+  const events = world.events.filter(event => event.kind === 'death');
+  assert.equal(events.length, 160); assert.equal(world.retiredLegacy.length, 160);
+  for (let index = 0; index < events.length; index++) {
+    const event = events[index]!, record = world.retiredLegacy[index]!, position = before.get(record.id)!;
+    assert.deepEqual(event.actors, [record.id]); assert.equal(event.x, position.x); assert.equal(event.y, position.y);
+  }
+});
+
+test('indexed shelter lookup matches the original structure filter and maximum in every cell case', () => {
+  const { world, a: template, emit } = scene(), cells = world.tiles.slice(0, 5);
+  assert.equal(cells.length, 5); for (const tile of cells) tile.terrain = 'shelter';
+  world.people = cells.map((tile, index): Person => {
+    const person = structuredClone(template); person.id = `shelter-case-${index}`; person.name = `Caso ${index}`;
+    person.x = tile.x; person.y = tile.y; return person;
+  });
+  const structure = (id: string, cell: typeof cells[number], condition: number, components: StructureView['components']): StructureView =>
+    ({ id, x: cell.x, y: cell.y, blueprintId: 'blueprint-base', name: id, components, condition, water: 0, food: 0, uses: 0, builtAt: 0, builderId: null });
+  world.structures = [
+    structure('single-roof', cells[0]!, 0.6, ['frame', 'roof']),
+    structure('lower-roof', cells[1]!, 0.35, ['frame', 'roof']), structure('higher-roof', cells[1]!, 0.9, ['frame', 'roof']),
+    structure('broken-roof', cells[2]!, BROKEN_CONDITION, ['frame', 'roof']),
+    structure('roofless', cells[3]!, 0.95, ['frame']),
+  ];
+  world.weather = 'rain'; world.shelterBenefitEnabled = true; world.tick++;
+  const law = paramsOf(world).cuerpo;
+  const shelters = world.people.map(person => Math.max(0, ...world.structures
+    .filter(item => item.x === person.x && item.y === person.y && item.condition > BROKEN_CONDITION && item.components.includes('roof'))
+    .map(item => item.condition)));
+  assert.deepEqual(shelters, [0.6, 0.9, 0, 0, 0]);
+  const expected = new Map(world.people.map((person, index) => [person.id, updateDemography({ id: person.id, state: person.demography,
+    traits: demographicTraits(person.genome, law), hunger: person.hunger, thirst: person.thirst, fatigue: person.fatigue, energy: person.energy },
+  { exposure: 1, shelter: shelters[index]!, protected: false, seed: world.seed, tick: world.tick, senescence: law }, 1).state]));
+  advancePopulation(world, { emit });
+  assert.equal(world.people.length, expected.size);
+  for (const person of world.people) assert.deepEqual(person.demography, expected.get(person.id));
 });
 
 test('protected identities retain continuity while the same physiological crisis removes an ordinary neighbor', () => {

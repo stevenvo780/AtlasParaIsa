@@ -12,6 +12,7 @@ import { cooperationOpportunity } from '../src/world/society.js';
 import { researchTechnology, technologyWorkCost, type TechnologyProgram } from '../src/world/technology.js';
 import { resolveTechnologyRecipe } from '../src/world/technology-catalogue.js';
 import { DEFAULT_PARAMS, HISTORICAL_PARAMS, PARAM_DESCRIPTORS, PARAM_RANGES, paramsOf, parseParams, setParams, type WorldParams } from '../src/world/params.js';
+import { quitarClavesPosteriores } from './lib/claves-posteriores.js';
 
 /**
  * Noche de ciencia 2026-09-22 — cuatro leyes CANDIDATAS declaradas como parámetros.
@@ -86,6 +87,8 @@ function digestoConParamsDeMain(world: World): string {
   for (const clave of ['exigeComunidad', 'radioPareja', 'radioLugar', 'comprobacionContinua', 'cortejo', 'radioCortejo']) delete poblacion[clave];
   delete (comoMain.agua as Record<string, unknown>).memoria;
   for (const clave of ['edadFundadoresMinDias', 'edadFundadoresMaxDias']) delete (comoMain.genes as Record<string, unknown>)[clave];
+  // Y las declaradas después (tests/lib/claves-posteriores.ts): valen 0 y no actúan.
+  quitarClavesPosteriores(comoMain as Record<string, Record<string, unknown>>);
   setParams(world, comoMain as unknown as WorldParams);
   try { return digestoCanonico(world); } finally { setParams(world, vigentes); }
 }

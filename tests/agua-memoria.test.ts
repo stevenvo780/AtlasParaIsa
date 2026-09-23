@@ -6,10 +6,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../src/server/store.js';
 import { createWorld, stepWorld, type Person, type World } from '../src/world/index.js';
-import { digestoCanonico } from '../src/world/digesto.js';
 import { waterAvailable } from '../src/world/inventions.js';
 import { tileAt } from '../src/world/spatial.js';
-import { DEFAULT_PARAMS, HISTORICAL_PARAMS, PARAM_RANGES, paramsOf, parseParams, setParams, type WorldParams } from '../src/world/params.js';
+import { DEFAULT_PARAMS, HISTORICAL_PARAMS, PARAM_RANGES, paramsOf, parseParams } from '../src/world/params.js';
+import { digestoSinPosteriores } from './lib/claves-posteriores.js';
 
 /**
  * Ley candidata SED (noche 2026-09-22): `agua.memoria`. Diagnóstico con la base del laboratorio de
@@ -37,17 +37,10 @@ function replica(t: { after(callback: () => void): void }, seed: number, pasos: 
 
 /** Digesto con la FORMA de params anterior a esta ley (sin `agua.memoria`): `digestoCanonico`
  * hashea `{world, params}`, así que declarar la clave mueve el hash aunque el mundo no se mueva.
- * `conMemoria` la conserva (digesto «completo» de f2757fa). En ambos casos se quita también
- * `social.memoriaDisputa` (fusión CONFL, `sprint/noche-lab60c-20260922`): no existía en f2757fa, donde se
- * midieron los hashes, y con su valor 0 no actúa. */
+ * `conMemoria` la conserva (digesto «completo» de f2757fa). En ambos casos se quitan también las
+ * claves posteriores a f2757fa, donde se midieron los hashes: valen 0 y no actúan. */
 function digestoSinMemoria(world: World, conMemoria = false): string {
-  const vigentes = paramsOf(world);
-  const antes = structuredClone(vigentes) as unknown as { agua: Record<string, unknown>; social: Record<string, unknown> };
-  assert.equal(antes.social.memoriaDisputa, 0);
-  if (!conMemoria) delete antes.agua.memoria;
-  delete antes.social.memoriaDisputa;
-  setParams(world, antes as unknown as WorldParams);
-  try { return digestoCanonico(world); } finally { setParams(world, vigentes); }
+  return digestoSinPosteriores(world, conMemoria ? [] : ['agua.memoria']);
 }
 
 // Los hashes originales se midieron en `sprint/noche-hsed-20260922` @f666226, ANTES de la consolidación

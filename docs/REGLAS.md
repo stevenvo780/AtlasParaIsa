@@ -806,6 +806,26 @@ Lo que queda: quien ve seco su recuerdo lo olvida y vuelve a la búsqueda al aza
 15–30 celdas en ~1100 pasos (semilla 1: los 3 muertos del día 6 ya no tenían recuerdo). Refutación en
 `tests/agua-memoria.test.ts`.
 
+#### Búsqueda del agua en rebaño (`agua.rebano`, hipótesis H1)
+
+Diagnóstico (`/datos/tmp-atlas-lab/diagnostico-semillas.json`, régimen seco: 303, 17 y 1007 fuera de muestra):
+el grupo arranca en desierto sin agua a ≤ 30 celdas, todos con sed 0,15, y hacia el medio día 13–14 de cada 15
+pasan de 0,6 a la vez. Cada cual explora siguiendo su propio rumbo, que en los fundadores es n·ángulo áureo, así
+que el grupo estalla en abanico (concentración angular R ≈ 0,03 respecto del arranque) y cada pareja posible se
+asienta junto a una fuente distinta, a 70–180 celdas, de donde nadie vuelve. La ley: en `choose`, quien está en
+la rama `seekingWater` (sed > 0,6, sin agua alcanzable a la vista, sin agua propia utilizable) y ve a ≤ RADIUS a
+otras personas en ese mismo estado toma como rumbo la media circular de su rumbo y los de ellas
+(atan2(Σ sen, Σ cos), sumando en orden de id). Un valor intermedio r mezcla circularmente: el rumbo es la
+dirección de (1 − r)·(propio) + r·(media) como vectores unitarios; una resultante nula conserva el rumbo. Sólo
+usa lo que se percibe, no crea agua ni revela agua lejana, y el camino se paga igual: si el rebaño elige la
+dirección seca, cae entero. Default e histórico 0 = hoy, bit a bit (`tests/agua-rebano.test.ts`).
+
+Precondición prerregistrada (reglas 10 + `persistencia.cadaTicks=300`, `--techo-lab 100`, una réplica, día 12;
+la emulación de `eco2.mts` daba 303 → 28): nacimientos acumulados control → ley en 303: 3 → **36** (se cumple
+el umbral de 14); en 17: 8 → 1; en 1007: 1 → 2. La expedición se forma en las tres (R 0,61–0,85 en los días
+0,5–1; en control, 0,03–0,12 según el diagnóstico), pero sólo en 303 abre el cerrojo. La emulación en el mismo árbol, que
+alinea el rumbo de todos los buscadores en cada paso y no sólo al decidir, sí rescata 17 (38) y 1007 (45).
+
 ### Leyes nuevas (calibradas 2026-09-19, fallback analítico; barrido T031 pendiente post-evento)
 
 Las cinco leyes descritas a continuación formalizan las dinámicas físicas, biológicas y de persistencia identificadas en la revisión técnica, ya desplegadas en producción con sus defaults calibrados (commit `835f3d5`, 11:19). Cada una responde a una causa confirmada, asume un coste explícito conforme al Principio I de la constitución y cuenta con pruebas automatizadas que delimitan su refutación. Los valores por defecto de la tabla anterior son el **fallback analítico** de `research.md` adoptado por el límite de tiempo del sprint (ruling R14 del ledger `.superpowers/sdd/tasks/progress.md`): el barrido empírico masivo T031 (rejilla de 16 combinaciones × 8 réplicas × 25 días sobre senescencia, más un barrido de entorno en paralelo) todavía no se ejecutó y queda pendiente post-evento junto con T032 (confirmación larga, 16 réplicas × 25 días).

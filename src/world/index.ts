@@ -415,12 +415,55 @@ function personById(world: World, id: string): Person | undefined {
   return index.byId.get(id);
 }
 
-function choose(world: World, person: Person): void {
-  const nearbyTiles: Tile[] = [];
+/** Land cells a person perceives: those within RADIUS of its cell, in row order. */
+function perceivedLand(world: World, person: Person): Tile[] {
+  const tiles: Tile[] = [];
   for (let dy = -RADIUS; dy <= RADIUS; dy++) for (let dx = -RADIUS; dx <= RADIUS; dx++) {
     if (dx * dx + dy * dy > RADIUS * RADIUS) continue;
-    const tile = tileAt(world, { x: person.x + dx, y: person.y + dy }); if (tile && tile.terrain !== 'water') nearbyTiles.push(tile);
+    const tile = tileAt(world, { x: person.x + dx, y: person.y + dy }); if (tile && tile.terrain !== 'water') tiles.push(tile);
   }
+  return tiles;
+}
+
+/** Whether the body can pay a planned leg of `steps` cells plus `work` ticks carrying `payload` units. */
+function planAffordableBy(person: Person, payload: number, steps: number, work: number): boolean {
+  const strain = 1.2 - person.traits.resilience * .4;
+  return person.energy >= steps * (.0008 + payload * .0008) + work * .0003
+    && person.fatigue + steps * (.0007 * strain + payload * .0007) + work * .00025 * strain < 1;
+}
+
+/** The `seekingWater` state of `choose`, evaluated for anyone: thirst above 0.6 with no perceived water that
+ * is reachable and affordable, none on its own cell and no carried water it can drink or recover to handle. */
+function seekingWaterUnseen(world: World, person: Person): boolean {
+  if (person.thirst <= 0.6 || waterAvailable(world, person) > 0) return false;
+  const carried = containedWaterQuanta(person) > 0;
+  if (carried && canHandleContainedWater(person, world.tick)) return false;
+  const land = perceivedLand(world, person), routes = perceivedRoutes(person, land), payload = containedWaterQuanta(person) / 1000;
+  for (const tile of land) {
+    const steps = routes.get(`${tile.x},${tile.y}`);
+    if (steps !== undefined && waterAvailable(world, tile) > 0.005 && planAffordableBy(person, payload, steps, 0)) return false;
+  }
+  return !(carried && canRecoverWaterHandling(world, person));
+}
+
+/** Rumbo de la búsqueda en rebaño (`agua.rebano`): media circular del rumbo de `person` y de los buscadores que
+ * ve, sumada en orden de id para que el redondeo no dependa del orden de `world.people`. `rebano` mezcla el
+ * rumbo propio (0) con esa media (1) como vectores unitarios; una resultante nula conserva el rumbo. */
+function herdHeading(person: Person, seekers: readonly Person[], rebano: number): number {
+  let sin = 0, cos = 0;
+  for (const member of [person, ...seekers].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0)) {
+    sin += Math.sin(member.heading); cos += Math.cos(member.heading);
+  }
+  const norm = Math.hypot(sin, cos);
+  if (norm < 1e-9) return person.heading;
+  // El vector propio se escala por la norma de la resultante: así rebano = 1 da exactamente atan2(Σ sen, Σ cos).
+  const own = (1 - rebano) * norm;
+  const y = own * Math.sin(person.heading) + rebano * sin, x = own * Math.cos(person.heading) + rebano * cos;
+  return Math.hypot(x, y) < 1e-9 ? person.heading : Math.atan2(y, x);
+}
+
+function choose(world: World, person: Person): void {
+  const nearbyTiles = perceivedLand(world, person);
   const routes = perceivedRoutes(person, nearbyTiles), stepsTo = (point: Point) => routes.get(`${point.x},${point.y}`);
   const reachableTiles = nearbyTiles.filter(t => stepsTo(t) !== undefined), payload = containedWaterQuanta(person) / 1000;
   // A nominal effort budget for planning; the bodily law itself still saturates
@@ -429,8 +472,7 @@ function choose(world: World, person: Person): void {
     energy: steps * (.0008 + payload * .0008) + workEffort(person, work).energy,
     fatigue: steps * (.0007 * (1.2 - person.traits.resilience * .4) + payload * .0007) + workEffort(person, work).fatigue,
   });
-  const planAffordable = (steps: number, work: number) => person.energy >= steps * (.0008 + payload * .0008) + work * .0003
-    && person.fatigue + steps * (.0007 * (1.2 - person.traits.resilience * .4) + payload * .0007) + work * .00025 * (1.2 - person.traits.resilience * .4) < 1;
+  const planAffordable = (steps: number, work: number) => planAffordableBy(person, payload, steps, work);
   const nearbyPeople = world.people.filter(other => other.id !== person.id && distance(person, other) <= RADIUS);
   const partner = nearbyPeople.find(other => person.role !== 'neighbor' && other.role !== 'neighbor');
   const candidates: Candidate[] = [{ action: 'explore', target: person.target, score: 0.33 + person.curiosity * 0.18, reason: 'Tiene energía y curiosidad por lo que hay cerca.' }];
@@ -601,6 +643,14 @@ function choose(world: World, person: Person): void {
     // water and provides no thirst relief until a real reserve is reached and debited.
     const soughtWater = { ...body }; hydrateBody(soughtWater, .006);
     const motive = (person.thirst - 0.18) * 3.1 + avoidedDamageScore(person, damage, bodilyDamage(world, person, soughtWater, protection));
+    // Búsqueda en rebaño (`agua.rebano`): sin ella cada sediento sigue su propio rumbo y un grupo que arranca
+    // lejos del agua se dispersa en abanico, cada cual hacia una fuente distinta. Sólo cuentan los buscadores
+    // que ve; el rumbo común no revela agua y el camino se paga igual: si el rebaño elige mal, cae entero.
+    const rebano = paramsOf(world).agua.rebano;
+    if (rebano > 0) {
+      const seekers = nearbyPeople.filter(other => seekingWaterUnseen(world, other));
+      if (seekers.length) person.heading = herdHeading(person, seekers, rebano);
+    }
     if (aguaRecordada) volverAlAgua = { action: 'explore', target: aguaRecordada, score: motive,
       reason: 'La sed persiste y no ve agua; vuelve hacia el último lugar donde vio agua, aunque no sabe si sigue ahí.' };
     else {

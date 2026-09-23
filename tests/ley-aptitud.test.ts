@@ -8,7 +8,8 @@ import { Store } from '../src/server/store.js';
 import { createWorld, stepWorld, ventajaComparativa, type World } from '../src/world/index.js';
 import { digestoCanonico } from '../src/world/digesto.js';
 import { indiceDiversidad } from '../src/world/diversidad.js';
-import { DEFAULT_PARAMS, HISTORICAL_PARAMS, PARAM_RANGES, paramsOf, parseParams, setParams, type WorldParams } from '../src/world/params.js';
+import { DEFAULT_PARAMS, HISTORICAL_PARAMS, PARAM_RANGES, paramsOf, parseParams } from '../src/world/params.js';
+import { digestoSinPosteriores } from './lib/claves-posteriores.js';
 import type { Action } from '../src/shared/types.js';
 
 /**
@@ -36,15 +37,8 @@ function replica(t: { after(callback: () => void): void }, pasos: number, params
  * `digestoCanonico` hashea `{world, params}`: declarar la clave mueve el hash completo aunque el
  * estado físico sea idéntico, así que el control la quita antes de hashear. */
 function digestoSinAptitud(world: World): string {
-  const vigentes = paramsOf(world);
-  const comoPadre = structuredClone(vigentes) as unknown as { conducta: Record<string, unknown>; social: Record<string, unknown> };
-  delete comoPadre.conducta.aptitud;
-  // Fusión CONFL (`sprint/noche-lab60c-20260922`): `social.memoriaDisputa` no existía en f2757fa, donde se
-  // midieron los hashes; con su valor 0 no actúa, así que también se quita de la forma.
-  assert.equal(comoPadre.social.memoriaDisputa, 0);
-  delete comoPadre.social.memoriaDisputa;
-  setParams(world, comoPadre as unknown as WorldParams);
-  try { return digestoCanonico(world); } finally { setParams(world, vigentes); }
+  // Las claves posteriores a f2757fa, donde se midieron los hashes, valen 0 y tampoco actúan.
+  return digestoSinPosteriores(world, ['conducta.aptitud']);
 }
 
 // Los hashes originales se midieron en el padre `f666226` (sprint/noche-integra), ANTES de la consolidación

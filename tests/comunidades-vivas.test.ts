@@ -7,8 +7,8 @@ import { Store } from '../src/server/store.js';
 import { assertWorld, cloneWorld, createWorld, stepWorld, type Person, type World } from '../src/world/index.js';
 import { updateCommunities } from '../src/world/society.js';
 import { recordChronicleEvent } from '../src/world/chronicle-journal.js';
-import { digestoCanonico } from '../src/world/digesto.js';
-import { DEFAULT_PARAMS, HISTORICAL_PARAMS, PARAM_RANGES, paramsOf, parseParams, setParams, type WorldParams } from '../src/world/params.js';
+import { DEFAULT_PARAMS, HISTORICAL_PARAMS, PARAM_RANGES, parseParams, setParams } from '../src/world/params.js';
+import { digestoSinPosteriores } from './lib/claves-posteriores.js';
 import type { ChronicleEvent } from '../src/shared/types.js';
 
 /**
@@ -49,15 +49,8 @@ function replica(t: { after(callback: () => void): void }, pasos: number, params
  * `digestoCanonico` hashea también los params, así que declarar la clave mueve el hash completo aunque
  * el estado físico sea idéntico (T102). Quitarla reproduce el digesto de antes byte a byte. */
 function digestoSinLaClave(world: World): string {
-  const vigentes = paramsOf(world);
-  const antes = structuredClone(vigentes) as unknown as { social: Record<string, unknown> };
-  delete antes.social.radioConvivencia;
-  // Fusión CONFL (`sprint/noche-lab60c-20260922`): `social.memoriaDisputa` no existía en f2757fa, donde se
-  // midieron los hashes; con su valor 0 no actúa, así que también se quita de la forma.
-  assert.equal(antes.social.memoriaDisputa, 0);
-  delete antes.social.memoriaDisputa;
-  setParams(world, antes as unknown as WorldParams);
-  try { return digestoCanonico(world); } finally { setParams(world, vigentes); }
+  // Las claves posteriores a f2757fa, donde se midieron los hashes, valen 0 y tampoco actúan.
+  return digestoSinPosteriores(world, ['social.radioConvivencia']);
 }
 
 // Los hashes originales se midieron en `sprint/noche-hcom-20260922` @f666226 ANTES de tocar `src/world`,

@@ -19,10 +19,10 @@
  * exactamente `HISTORICAL_PARAMS`; `digestosControl` parte ahora de esa base explícita, así que los
  * tres hashes de referencia se conservan sin regenerar.
  *
- * Fusión CONFL (`sprint/noche-lab60c-20260922`): `social.memoriaDisputa` (default e histórico 0 = hoy)
- * no existía en e1adaaf. Con 0 la ley no actúa, pero declarar la clave mueve `digestoCanonico` (hashea
- * `{world, params}`, T102); el control la quita de la forma de params al hashear (`CLAVES_POSTERIORES`),
- * así que los hashes de e1adaaf se conservan y siguen demostrando que el MUNDO no se movió ni un bit.
+ * Las claves declaradas después de e1adaaf (`CLAVES_POSTERIORES`, tests/lib/claves-posteriores.ts) valen 0
+ * y no actúan, pero declararlas mueve `digestoCanonico` (hashea `{world, params}`, T102); el control las
+ * quita de la forma de params al hashear, así que los hashes de e1adaaf se conservan y siguen demostrando
+ * que el MUNDO no se movió ni un bit.
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -32,10 +32,11 @@ import { join } from 'node:path';
 import { digestosControl, digestoSin, LEYES_CANDIDATAS } from '../scripts/lab/rendimiento.js';
 import { Store } from '../src/server/store.js';
 import { stepWorld } from '../src/world/index.js';
-import { DEFAULT_PARAMS, HISTORICAL_PARAMS, paramsOf, parseParams, type WorldParams } from '../src/world/params.js';
+import { DEFAULT_PARAMS, HISTORICAL_PARAMS, paramsOf, parseParams } from '../src/world/params.js';
 import { firstTileAt, lastTileAt, tileLookup } from '../src/world/tile-index.js';
 import { primero, primeroConFiltroCaro, primerosDos } from '../src/world/orden.js';
 import { algunoCerca, filtrarCerca, primeroCerca } from '../src/world/indice-puntos.js';
+import { CLAVES_POSTERIORES, clavesPosterioresApagadas } from './lib/claves-posteriores.js';
 
 /** Generador determinista pequeño (xorshift32) para las pruebas de equivalencia. */
 function aleatorio(seed: number): () => number {
@@ -141,15 +142,6 @@ test('con el recelo de CONFL (`social.memoriaDisputa`), primero y primeroConFilt
   assert.ok(conRecelo > 1000, 'la prueba ejerce el recelo');
 });
 
-/** Claves declaradas después de e1adaaf que, con su valor por defecto, no actúan (ver cabecera). */
-const CLAVES_POSTERIORES = ['social.memoriaDisputa'] as const;
-/** Quitar una clave del hash sólo es legítimo si con el valor que tiene no actúa (0). */
-function clavesPosterioresApagadas(params: WorldParams): void {
-  for (const clave of CLAVES_POSTERIORES) {
-    const [seccion, hoja] = clave.split('.') as [string, string];
-    assert.equal((params as unknown as Record<string, Record<string, unknown>>)[seccion]![hoja], 0, `${clave} = 0: no actúa`);
-  }
-}
 
 const REFERENCIA: readonly { seed: number; params?: string; digestos: Record<'1200' | '2400', string> }[] = [
   { seed: 51926, params: LEYES_CANDIDATAS, digestos: {

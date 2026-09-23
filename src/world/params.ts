@@ -50,7 +50,14 @@ export interface WorldParams {
    * `memoria` (2026-09-22, ley candidata SED): quien no percibe agua vuelve hacia la última celda con agua que vio
    * (o donde bebió) cuando la sed prevista AL LLEGAR —sed actual − agua que lleva + sed del camino— supera este
    * umbral, en vez de explorar al azar; el recuerdo se olvida al verlo seco. 1 = nunca (hoy: ni recuerda ni vuelve). */
-  agua: { cuencas: number; memoria: number };
+  agua: { cuencas: number; memoria: number;
+    /** Búsqueda del agua en rebaño (hipótesis H1), `index.ts` → `choose`. Quien busca agua sin verla (rama
+     * `seekingWater`) y ve a ≤ RADIUS a otras personas que también la buscan sin verla orienta su rumbo hacia
+     * la media circular de su rumbo y los de ellas (Σ sen, Σ cos en orden de id). El valor es la mezcla
+     * circular entre el rumbo propio y esa media: con 1 el rumbo pasa a ser la media; con un valor intermedio
+     * r, la dirección de (1 − r)·(rumbo propio) + r·(media), ambos como vectores unitarios. 0 = hoy (cada cual
+     * sigue su rumbo). Sólo usa lo que se percibe: no crea agua ni revela agua lejana. */
+    rebano: number };
   /**
    * Ruling R17: el límite de población lo pone el hardware. `presupuestoMs` es el p95
    * del paso (ms) que el servidor se permite. `politica` decide qué hace el gobernador
@@ -130,7 +137,7 @@ const RAW_HISTORICAL: WorldParams = {
     exigeComunidad: true, radioPareja: 3, radioLugar: 4, comprobacionContinua: false, cortejo: 0, radioCortejo: 24 },
   recursos: { capacidadBosque: 1, capacidadPastizal: 0.7, capacidadOtros: 0.35, velocidadRegeneracion: 1, decaimientoFertilidad: 0.001, decaimientoComida: 0.0001 },
   persistencia: { cadaTicks: 1, ventanaEventosTicks: 0, paginasSucias: false },
-  agua: { cuencas: 0.4, memoria: 1 },
+  agua: { cuencas: 0.4, memoria: 1, rebano: 0 },
   gobernador: { presupuestoMs: 50, senales: ['p95'], politica: 'techo' },
   motor: { clonPorPaso: true, hilos: 1, soaTerreno: false, particionarPersonas: false, gpu: [], orden: 'natural' },
   red: { deltas: false },
@@ -176,8 +183,8 @@ export const DEFAULT_PARAMS: WorldParams = deepFreeze(RAW_DEFAULTS);
  * `poblacion.comprobacionContinua` false y `conducta.habituacion` 0. Las demás claves añadidas la
  * noche del 2026-09-22 ya tienen por default su valor histórico y aquí valen lo mismo:
  * `genes.edadFundadoresMin/MaxDias` 2/2, `poblacion.radioPareja` 3, `poblacion.radioLugar` 4,
- * `agua.memoria` 1, `conducta.aptitud` 0, `social.*` (disputas 0,65/×1/2/0,5/180, rareza 0, confianza
- * 0,35, distancia 0,2, `maxComunidades` 8, `vinculoConvivencia` 0, `radioConvivencia` 0).
+ * `agua.memoria` 1, `agua.rebano` 0, `conducta.aptitud` 0, `social.*` (disputas 0,65/×1/2/0,5/180, rareza 0,
+ * confianza 0,35, distancia 0,2, `maxComunidades` 8, `vinculoConvivencia` 0, `radioConvivencia` 0).
  *
  * Única excepción deliberada: `gobernador.politica` vale `techo` también aquí. El gobernador no es
  * una ley del mundo (no entra en `stepWorld`: decide por el p95 de reloj del servidor, ruling R17) y
@@ -259,6 +266,8 @@ export const PARAM_RANGES: Record<string, [number, number]> = {
   'agua.cuencas': [0.05, 1],
   // Umbral de sed prevista al llegar; 1 apaga la ley (el bloque entero se salta con 1, no sólo el disparo).
   'agua.memoria': [0, 1],
+  // Mezcla circular entre el rumbo propio (0, la ley apagada) y la media del rebaño (1).
+  'agua.rebano': [0, 1],
   'gobernador.presupuestoMs': [5, 5000],
   'motor.hilos': [1, 512],
   'limites.teselasActivas': [1, Number.MAX_SAFE_INTEGER],

@@ -5,9 +5,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../src/server/store.js';
 import { createWorld, stepWorld, TICKS_PER_DAY, type Person, type World } from '../src/world/index.js';
-import { digestoCanonico } from '../src/world/digesto.js';
 import { tileAt } from '../src/world/spatial.js';
-import { DEFAULT_PARAMS, HISTORICAL_PARAMS, PARAM_RANGES, paramsOf, parseParams, setParams, type WorldParams } from '../src/world/params.js';
+import { DEFAULT_PARAMS, HISTORICAL_PARAMS, PARAM_RANGES, parseParams } from '../src/world/params.js';
+import { digestoSinPosteriores } from './lib/claves-posteriores.js';
 
 /**
  * Hipótesis CONFL (noche 2026-09-22): conflicto legible no letal, `social.memoriaDisputa`.
@@ -37,15 +37,9 @@ function replica(t: { after(callback: () => void): void }, seed: number, pasos: 
   return world;
 }
 
-/** Digesto con la FORMA de params anterior a esta ley (sin `social.memoriaDisputa`): `digestoCanonico`
- * hashea `{world, params}`, así que declarar la clave mueve el hash aunque el estado no se mueva (T102). */
-function digestoSinLaClave(world: World): string {
-  const vigentes = paramsOf(world);
-  const antes = structuredClone(vigentes) as unknown as { social: Record<string, unknown> };
-  delete antes.social.memoriaDisputa;
-  setParams(world, antes as unknown as WorldParams);
-  try { return digestoCanonico(world); } finally { setParams(world, vigentes); }
-}
+/** Digesto con la FORMA de params anterior a esta ley: `digestoCanonico` hashea `{world, params}`, así que
+ * declarar la clave (y las posteriores, todas a 0) mueve el hash aunque el estado no se mueva (T102). */
+const digestoSinLaClave = (world: World): string => digestoSinPosteriores(world);
 
 // Medidos en `sprint/noche-r3confl-20260922` @e1adaaf ANTES de tocar `src/world`, con la réplica de arriba.
 const PREVIO_42_DEFAULTS_1200 = 'de0bfc68040849eb0b0c906d023a4625893b816b50a7659d14b03ad73616c99f';

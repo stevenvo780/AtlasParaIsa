@@ -35,7 +35,7 @@ const reescribir = (store: Store, value: unknown) => {
  * 2026-09-22 no las nombra (las secciones `conducta` y `social` enteras no existían). */
 function comoInstantaneaDeMain(params: Record<string, Record<string, unknown>>): void {
   delete params.conducta; delete params.social;
-  delete params.gobernador!.politica; delete params.agua!.memoria;
+  delete params.gobernador!.politica; delete params.agua!.memoria; delete params.agua!.rebano;
   for (const clave of ['edadFundadoresMinDias', 'edadFundadoresMaxDias']) delete params.genes![clave];
   for (const clave of ['exigeComunidad', 'radioPareja', 'radioLugar', 'comprobacionContinua', 'cortejo', 'radioCortejo']) delete params.poblacion![clave];
 }

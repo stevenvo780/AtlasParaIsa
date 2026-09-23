@@ -480,7 +480,7 @@ function bandSnapshot(world: World): Map<string, BandSnapshotPerson> {
   return snapshot?.tick === world.tick ? snapshot.people : captureBandSnapshot(world);
 }
 
-function choose(world: World, person: Person): void {
+export function choose(world: World, person: Person): void {
   const nearbyTiles: Tile[] = [];
   for (let dy = -RADIUS; dy <= RADIUS; dy++) for (let dx = -RADIUS; dx <= RADIUS; dx++) {
     if (dx * dx + dy * dy > RADIUS * RADIUS) continue;
@@ -886,9 +886,19 @@ function choose(world: World, person: Person): void {
       candidate.score += ajusteVocacion(person, candidate.action, vocacion);
     }
   }
-  if (ready && saturacionLocal > 0 && nearbyPeople.length >= 2) {
-    for (const candidate of candidates) {
-      candidate.score += ajusteSaturacionLocal(candidate.action, nearbyPeople, saturacionLocal);
+  // SL1 (`conducta.saturacionLocal`): igual que B1, la instantánea previa a la fase de personas evita
+  // depender de qué persona ya procesó `choose()` en este mismo tick (el defecto que el verificador
+  // encontró aquí: `nearbyPeople` es una relectura en vivo de `world.people`, ya mutada por los
+  // vecinos procesados antes en el mismo paso), y sólo cuentan vecinos mortales (role === 'neighbor'),
+  // nunca S ni I.
+  if (ready && saturacionLocal > 0) {
+    const saturacionSnapshot = bandSnapshot(world), saturacionOrigin = saturacionSnapshot.get(person.id) ?? person;
+    const vecinosSaturacion = [...saturacionSnapshot.values()].filter(other => other.id !== person.id
+      && other.role === 'neighbor' && distance(saturacionOrigin, other) <= RADIUS);
+    if (vecinosSaturacion.length >= 2) {
+      for (const candidate of candidates) {
+        candidate.score += ajusteSaturacionLocal(candidate.action, vecinosSaturacion, saturacionLocal);
+      }
     }
   }
   if (ready && practicaOficios > 0) {
@@ -1350,9 +1360,11 @@ function advanceTick(world: World, inputs: Gesture[], context: WorldContext, med
     { decaimientoFertilidad: paramsOf(world).recursos.decaimientoFertilidad, seed: world.seed, cuencas: paramsOf(world).agua.cuencas }));
   medirFase(medicion, 'fauna', () => { stepAnimals(world,event=>addEvent(world,event)); stepStructures(world,event=>addEvent(world,event)); });
   medirFase(medicion, 'personas', () => {
-    // B1 lee una sola fotografía del comienzo de la fase: el resultado no depende de qué persona
-    // visitó antes `bodyAndAction` dentro del mismo tick. Es efímera y nunca entra al snapshot.
-    if (paramsOf(world).social.banda > 0) captureBandSnapshot(world);
+    // B1 y SL1 leen una sola fotografía del comienzo de la fase: el resultado no depende de qué
+    // persona visitó antes `bodyAndAction` dentro del mismo tick. Es efímera y nunca entra al
+    // snapshot durable. (Verificador 2026-09-23: SL1 usaba antes `world.people` en vivo, así que el
+    // recuento de saturación sí dependía del orden de actualización dentro del mismo tick.)
+    if (paramsOf(world).social.banda > 0 || paramsOf(world).conducta.saturacionLocal > 0) captureBandSnapshot(world);
     for (const person of world.people) bodyAndAction(world, person);
     for (const person of world.people) {
       const chunk = world.chunks[chunkKey(person.x, person.y)]!;

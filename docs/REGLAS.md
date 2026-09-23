@@ -657,11 +657,17 @@ preregistro. Default histórico y nuevo 0; rango [0, 4].
 #### Ley SL1: saturación local (`conducta.saturacionLocal`, 2026-09-23)
 
 **Por qué.** H2 conserva el motor lento VOC pero reemplaza la práctica por dependencia negativa de
-frecuencia: si al menos dos personas son visibles a radio 7, un oficio pierde
-`s · (vecinos que lo ejercen / vecinos visibles)`. Sólo actúa en ready y nunca sobre explorar,
-comer, beber, descansar, vínculos ni provisión familiar. Así puede romper sincronías locales como
-«todos investigan» sin leer fuera de la vista. Default histórico y nuevo 0; rango [0, 1]. Fuente y
-criterios de refutación: `docs/preregistros/2026-09-23-vocacion-banda.md`.
+frecuencia: si al menos dos vecinos mortales (`role === 'neighbor'`, nunca S ni I) son visibles a
+radio 7, un oficio pierde `s · (vecinos que lo ejercen / vecinos visibles)`. Sólo actúa en ready y
+nunca sobre explorar, comer, beber, descansar, vínculos ni provisión familiar. Acciones, posiciones
+y roles se leen de la misma instantánea efímera de comienzo de fase que usa B1 (`bandSnapshot`), no
+de `world.people` en vivo: así el recuento no depende de qué vecino ya procesó `choose()` en este
+mismo tick. **Corrección 2026-09-23 (verificador):** la implementación original leía `world.people`
+en vivo sin filtrar por `role`, así que el recuento de saturación dependía del orden de actualización
+dentro del tick y podía contar a S o I como «compañeros»; se corrigió reutilizando `bandSnapshot`
+filtrado a `role === 'neighbor'`, igual que B1. Así puede romper sincronías locales como «todos
+investigan» sin leer fuera de la vista. Default histórico y nuevo 0; rango [0, 1]. Fuente y criterios
+de refutación: `docs/preregistros/2026-09-23-vocacion-banda.md`.
 
 #### Ley B1: cohesión de banda (`social.banda`, 2026-09-23)
 

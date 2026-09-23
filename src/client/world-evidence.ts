@@ -1,5 +1,6 @@
 import type { ChronicleEvent, WorldView } from '../shared/types.js';
 import { momento } from './cronica.js';
+import { enClaro } from './textos.js';
 import { esc, icon } from './ui-catalog.js';
 import { nombreConocido } from './vistos.js';
 
@@ -19,5 +20,5 @@ export function personLink(world: WorldView, id: string): string {
 export function recentEvidence(world: WorldView, personId?: string, received: readonly ChronicleEvent[] = world.events): string {
   const events = received.filter(event => !personId || event.actors.includes(personId)).slice(-4).reverse();
   const opening = personId ? '<section class="recent-evidence"><h3 class="section-title">Huellas de esta vida</h3>' : `<details class="recent-evidence" data-detail="world-events"><summary>Qué está ocurriendo <span>${events.length} episodios recientes</span></summary>`;
-  return `${opening}<p class="stats-note">Episodios recibidos, con su causa registrada.</p>${events.length ? events.map(event => `<article data-event-id="${esc(event.id)}"><span class="experience-tick">${esc(momento(event.tick).toLocaleUpperCase('es'))} · ${event.source === 'sample' ? 'PRUEBA' : event.source === 'approved' ? 'APROBADO' : 'SIMULACIÓN'}</span><p>${esc(event.text)}</p><small><strong>Qué influyó:</strong> ${esc(event.cause)}</small><div class="evidence-links">${event.actors.slice(0,4).map(id=>personLink(world,id)).join('')}${event.x !== undefined && event.y !== undefined ? `<button class="entity-link" data-place-x="${esc(event.x)}" data-place-y="${esc(event.y)}">Ver lugar ${icon.arrow}</button>` : ''}</div></article>`).join('') : '<p class="stats-empty">No hay episodios de esta selección entre los que recibió este navegador.</p>'}${personId ? '</section>' : '</details>'}`;
+  return `${opening}<p class="stats-note">Episodios recibidos, con su causa registrada.</p>${events.length ? events.map(event => `<article data-event-id="${esc(event.id)}"><span class="experience-tick">${esc(momento(event.tick).toLocaleUpperCase('es'))} · ${event.source === 'sample' ? 'PRUEBA' : event.source === 'approved' ? 'APROBADO' : 'SIMULACIÓN'}</span><p>${esc(enClaro(event.text, { world }))}</p><small><strong>Qué influyó:</strong> ${esc(enClaro(event.cause, { world }))}</small><div class="evidence-links">${event.actors.slice(0,4).map(id=>personLink(world,id)).join('')}${event.x !== undefined && event.y !== undefined ? `<button class="entity-link" data-place-x="${esc(event.x)}" data-place-y="${esc(event.y)}">Ver lugar ${icon.arrow}</button>` : ''}</div></article>`).join('') : '<p class="stats-empty">No hay episodios de esta selección entre los que recibió este navegador.</p>'}${personId ? '</section>' : '</details>'}`;
 }

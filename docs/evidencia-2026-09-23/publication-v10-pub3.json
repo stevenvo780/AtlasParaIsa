@@ -1,0 +1,77 @@
+{
+ "capturedAt": "2026-09-23T15:40:00+00:00",
+ "status": "published",
+ "kind": "same-world restart (no rules change)",
+ "codeRevision": "0ea15144ab248ab9236602c66d3254bea1ad22bb",
+ "contents": [
+  "retencion verificable del archivo de recibos de tecnologia (ventana 24 000 ticks, tope 4 096 recibos por guardado, un tick gigante se poda entero)",
+  "frontera V2 sellada y cadena con tick; cabeza V2 atrasada rechazada en carga y en previous()",
+  "node_modules enlazado ignorado en worktrees"
+ ],
+ "gate": {
+  "deployCheck": {
+   "revision": "0ea1514",
+   "status": "passed",
+   "build": 0,
+   "smoke": 0,
+   "report": "/datos/tmp-atlas-lab/deploy-check/pub3-0ea1514"
+  },
+  "suite": {
+   "tests": 1444,
+   "pass": 1433,
+   "fail": 0,
+   "skipped": 7,
+   "cancelledByLoad": 4,
+   "cancelledRerunIsolated": "40/40 (demography, leyes-candidatas, reglas10-defaults, world-view-size)",
+   "durationS": 645
+  },
+  "focusedSuite": "store, technology, snapshot, servidor y laboratorio 489/489",
+  "independentVerification": "Codex gpt-5.6-sol xhigh y Grok 4.6 encontraron el mismo defecto alto (cabeza V2 retrocedida aceptada como prefijo), corregido en e1639d7; Codex ademas el alcance del sello sin clave, documentado en REGLAS.md",
+  "worldIdentity": "la poda no toca la simulacion (identidad en docs/evidencia-2026-09-23-retencion/identidad-semillas.json)"
+ },
+ "operation": {
+  "backupBeforeStop": "world-20260923-1028.sqlite.gz (respaldo.sh verificada, gzip -t correcto, 249 MB)",
+  "labReplicasPausedDuringRestart": true,
+  "serviceStoppedAndPortFreedBeforeBuild": true,
+  "buildInPublicTreeAfterStop": true,
+  "sameWorldDirectoryAndIdentity": true,
+  "cpuWeight": "systemctl --user set-property --runtime atlas-servidor.service CPUWeight=10000 (runtime, sin root; se pierde al reiniciar la sesion de usuario)"
+ },
+ "liveChecks": {
+  "healthAfterStartS": 45,
+  "assetsMatchCompiled": [
+   "/assets/index-D_icAyK7.js",
+   "/assets/index-DN5qGCjJ.css"
+  ],
+  "unauthenticatedWorldStatus": 401,
+  "before": {
+   "tick": 311700,
+   "people": 150,
+   "births": 591
+  },
+  "after": [
+   {
+    "tick": 311800,
+    "people": 150,
+    "births": 591
+   },
+   {
+    "tick": 313400,
+    "people": 150,
+    "births": 596
+   }
+  ],
+  "worldInstanceId": "63033163-3a01-45cb-829a-004a0dc0ce65",
+  "pruneBoundaryAfterRestart": {
+   "version": 2,
+   "through": 73705,
+   "tick": 25907,
+   "chainThrough": 1014666
+  }
+ },
+ "knownRisks": [
+  "la base ocupa 3,2 GB en disco: la poda libera paginas que SQLite reutiliza pero el fichero no encoge sin VACUUM (las copias de respaldo usan VACUUM INTO y si encogen)",
+  "el gobernador techo mantiene 150-151 habitantes: paso de ~230 ms frente a presupuesto de 50 ms (PERF3 en curso)",
+  "servidor en SCHED_IDLE hasta que exista la regla de root de ananicy"
+ ]
+}

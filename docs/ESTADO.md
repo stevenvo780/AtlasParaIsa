@@ -5,13 +5,13 @@ estas cifras. Se actualiza en cada publicación, junto con su contrato
 `docs/evidencia-AAAA-MM-DD/publication*.json`; si este fichero y el contrato discrepan, manda
 el contrato.
 
-## Vigente (mundo V10 desde el 22 de septiembre de 2026, 20:46 -05; código actual desde el 23 de septiembre, 04:52 -05)
+## Vigente (mundo V10 desde el 22 de septiembre de 2026, 20:46 -05; código actual desde el 23 de septiembre, 10:37 -05)
 
 | Qué | Valor |
 |---|---|
 | URL | <https://atlas.humanizar.tech> |
-| Código compilado y servido | `4df4455` (reinicio del mismo mundo el 23-09 a las 04:52 -05; build tras detener el servicio; assets servidos = compilados). Trae PERF2, interfaz que refleja el sistema, conexión con contrapresión por acuse y gzip, restauración exacta y el nombre de proceso `carta-isa` |
-| `main` | `4df4455` |
+| Código compilado y servido | `0ea1514` (reinicio del mismo mundo el 23-09 a las 10:37 -05; build tras detener el servicio; assets servidos = compilados). Sobre `4df4455` añade la retención verificable del archivo de recibos de tecnología (ventana de 24 000 ticks, frontera V2 sellada) |
+| `main` | `0ea1514` |
 | Reglas | `RULES_VERSION` 10: paquete de natalidad por defecto (cortejo 2, radio 128, comunidad opcional, comprobación continua, habituación 0,35) y gobernador `techo` |
 | Protocolo | `PROTOCOL_VERSION` 10 |
 | SQLite | `user_version` 5 (instantáneas paginadas) |
@@ -19,10 +19,10 @@ el contrato.
 | Parámetros persistidos | `persistencia.cadaTicks=100`, `gobernador.politica=techo` y el paquete de reglas 10 (lista completa en el contrato) |
 | Respaldos | `/datos/workspaces/personal/AtlasParaIsa-publications/20260922-v10/backups` (timer horario `atlas-respaldo.timer`) |
 | Servicios | `atlas-servidor.service` y `atlas-respaldo.service` de usuario; leen `~/.config/atlas-para-isa/runtime.env` (solo `CARTA_DATA_DIR` y `DEST`). Copias versionadas de las unidades (las instaladas son copias, no enlaces): `scripts/systemd/` |
-| Gate | `scripts/deploy-check.sh 4df4455` verde (build y smoke); suite 1460/1467 (7 omitidos a propósito, 0 fallos, 495 s); mundo idéntico a `37f9564` en 9 combinaciones |
-| Contrato | [publication-v10.json](evidencia-2026-09-22/publication-v10.json) (mundo) y [publication-v10-pub2.json](evidencia-2026-09-23/publication-v10-pub2.json) (reinicio del 23-09) |
+| Gate | `scripts/deploy-check.sh 0ea1514` verde (build y smoke); suite 1433/1444 (7 omitidos a propósito, 4 cancelados por carga y verdes aislados 40/40, 0 fallos); verificación independiente de la poda por Codex y Grok (un alto corregido en `e1639d7`) |
+| Contrato | [publication-v10.json](evidencia-2026-09-22/publication-v10.json) (mundo), [publication-v10-pub2.json](evidencia-2026-09-23/publication-v10-pub2.json) y [publication-v10-pub3.json](evidencia-2026-09-23/publication-v10-pub3.json) (reinicios del 23-09) |
 
-Lo que esta publicación **no** acredita: el criterio de 60 días de [GOAL.md](../GOAL.md) se evaluó en el laboratorio el 23-09 y **no se cumple** con estas reglas (ver [EVIDENCIA](EVIDENCIA.md)); el servidor corre en SCHED_IDLE y la base crece sin poda (arreglos en curso); el crecimiento en laboratorio es casi exponencial hasta que lo frena el gobernador
+Lo que esta publicación **no** acredita: el criterio de 60 días de [GOAL.md](../GOAL.md) se evaluó en el laboratorio el 23-09 y **no se cumple** con estas reglas (ver [EVIDENCIA](EVIDENCIA.md)); el servidor corre en SCHED_IDLE (falta la regla de root) y la base ocupa 3,2 GB aunque ya se poda (no encoge sin VACUUM); el gobernador mantiene ~150 habitantes porque el paso tarda ~230 ms frente a 50 ms de presupuesto (PERF3 en curso); el crecimiento en laboratorio es casi exponencial hasta que lo frena el gobernador
 por hardware ([revisión de la noche](REVISION-NOCHE-2026-09-22.md)).
 
 ## Anteriores, conservados

@@ -11,7 +11,7 @@ import { indiceDiversidad } from '../src/world/diversidad.js';
 import { cooperationOpportunity } from '../src/world/society.js';
 import { researchTechnology, technologyWorkCost, type TechnologyProgram } from '../src/world/technology.js';
 import { resolveTechnologyRecipe } from '../src/world/technology-catalogue.js';
-import { DEFAULT_PARAMS, PARAM_DESCRIPTORS, PARAM_RANGES, paramsOf, parseParams, setParams, type WorldParams } from '../src/world/params.js';
+import { DEFAULT_PARAMS, HISTORICAL_PARAMS, PARAM_DESCRIPTORS, PARAM_RANGES, paramsOf, parseParams, setParams, type WorldParams } from '../src/world/params.js';
 
 /**
  * Noche de ciencia 2026-09-22 — cuatro leyes CANDIDATAS declaradas como parámetros.
@@ -24,7 +24,12 @@ import { DEFAULT_PARAMS, PARAM_DESCRIPTORS, PARAM_RANGES, paramsOf, parseParams,
  * Las cifras literales de este fichero se midieron con un script equivalente a `replica()`
  * (Store temporal adjunto y guardado ANTES del primer paso, como `scripts/lab/replica.ts`,
  * para que rijan las leyes de tecnología de producción y no las del catálogo aislado).
+ *
+ * Reglas 10, etapa 1 (2026-09-22): los defaults de un mundo NUEVO adoptan cinco de estas leyes.
+ * Todo este fichero mide las leyes candidatas A PARTIR DEL MUNDO DE ANTES, así que sus réplicas
+ * parten de `HISTORICAL_PARAMS` explícitos (`BASE`): «defaults» aquí significa «params históricos».
  */
+const BASE = HISTORICAL_PARAMS;
 
 /** Réplica mínima de laboratorio: Store temporal y `save` antes de simular (como
  * `scripts/lab/replica.ts`). Devuelve el mundo y el tick de CADA nacimiento. */
@@ -32,7 +37,7 @@ function replicaDetallada(t: { after(callback: () => void): void }, pasos: numbe
   const directory = mkdtempSync(join(tmpdir(), 'atlas-leyes-'));
   const store = new Store(join(directory, 'world.sqlite'));
   t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
-  const world = createWorld(seed, parseParams(params));
+  const world = createWorld(seed, parseParams(params, BASE));
   // Reglas 10 corrige el alias del evento `community`; los controles contra `main` corren
   // el mismo mundo etiquetado V9 para comprobar que la historia V9 se reproduce byte a byte.
   if (version !== undefined) world.version = version;
@@ -54,7 +59,7 @@ function replicaConGuardado(t: { after(callback: () => void): void }, pasos: num
   const directory = mkdtempSync(join(tmpdir(), 'atlas-leyes-durable-'));
   const store = new Store(join(directory, 'world.sqlite'));
   t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
-  const world = createWorld(seed, parseParams(params));
+  const world = createWorld(seed, parseParams(params, BASE));
   store.save(world);
   for (let tick = 1; tick <= pasos; tick++) { stepWorld(world); store.save(world); }
   return { world };
@@ -70,7 +75,7 @@ function replicaConGuardado(t: { after(callback: () => void): void }, pasos: num
  */
 function digestoConParamsDeMain(world: World): string {
   const vigentes = paramsOf(world);
-  const comoMain = structuredClone(DEFAULT_PARAMS) as unknown as Record<string, unknown>;
+  const comoMain = structuredClone(HISTORICAL_PARAMS) as unknown as Record<string, unknown>;
   delete comoMain.conducta; delete comoMain.social;
   // Claves nuevas de la integración de la noche (gobernador techo, cortejo, maxComunidades):
   // tampoco existen en `main`, y con su default tampoco actúan.
@@ -88,21 +93,26 @@ function digestoConParamsDeMain(world: World): string {
 const DIGESTO_MAIN_1200 = 'b194b096c0dd4c555ca9ebf4e560bb293809b97947109f116833cf79ebbf60cf';
 const DIGESTO_MAIN_2400 = 'ee6fb78c55d2a43effebe696314ca5f5eecefbc1b8b03150f61bb381ab1779e8';
 
-test('(i) con los defaults las leyes candidatas no mueven el mundo: el digesto físico es el de main', { timeout: 900000 }, t => {
+test('(i) con los params históricos las leyes candidatas no mueven el mundo: el digesto físico es el de main', { timeout: 900000 }, t => {
   const world = replica(t, 1200, undefined, 9);
   assert.equal(digestoConParamsDeMain(world), DIGESTO_MAIN_1200,
     'el estado del mundo tras 1200 pasos es bit a bit el de main: ninguna ley candidata actúa con su default');
   assert.notEqual(digestoCanonico(world), DIGESTO_MAIN_1200,
     'el digesto completo sí cambia, y sólo por declarar configuración nueva (T102)');
+  assert.deepEqual(paramsOf(world), HISTORICAL_PARAMS, 'la réplica corre con los params históricos explícitos');
   // Sólo las claves originales de cada ley: las hipótesis posteriores añaden claves a los mismos
   // grupos y comparar el objeto entero rompía el test con cada una sin que nada cambiara.
-  assert.equal(DEFAULT_PARAMS.conducta.habituacion, 0);
-  const social = DEFAULT_PARAMS.social as unknown as Record<string, unknown>;
+  assert.equal(HISTORICAL_PARAMS.conducta.habituacion, 0);
+  const social = HISTORICAL_PARAMS.social as unknown as Record<string, unknown>;
   for (const [clave, valor] of Object.entries({ maxComunidades: 8, disputaNecesidad: 0.65, disputaEscasez: 1, disputaRadio: 2, disputaDestino: 0.5,
-    disputaEspera: 180, ensenanzaRareza: 0, confianzaSalida: 0.35, distanciaAlternativa: 0.2 })) assert.equal(social[clave], valor, `default de social.${clave}`);
-  const poblacion = DEFAULT_PARAMS.poblacion as unknown as Record<string, unknown>;
+    disputaEspera: 180, ensenanzaRareza: 0, confianzaSalida: 0.35, distanciaAlternativa: 0.2 })) assert.equal(social[clave], valor, `histórico de social.${clave}`);
+  const poblacion = HISTORICAL_PARAMS.poblacion as unknown as Record<string, unknown>;
   for (const [clave, valor] of Object.entries({ maxima: 1_000_000, intervaloComprobacionTicks: 120, nacimientosPorComprobacion: 2,
-    exigeComunidad: true, radioPareja: 3, radioLugar: 4, comprobacionContinua: false, cortejo: 0, radioCortejo: 24 })) assert.equal(poblacion[clave], valor, `default de poblacion.${clave}`);
+    exigeComunidad: true, radioPareja: 3, radioLugar: 4, comprobacionContinua: false, cortejo: 0, radioCortejo: 24 })) assert.equal(poblacion[clave], valor, `histórico de poblacion.${clave}`);
+  // Reglas 10: el mundo NUEVO adopta cinco de estas leyes; el resto de la sección no cambia.
+  assert.deepEqual({ ...DEFAULT_PARAMS.poblacion }, { ...HISTORICAL_PARAMS.poblacion, cortejo: 2, radioCortejo: 128, exigeComunidad: false, comprobacionContinua: true });
+  assert.deepEqual({ ...DEFAULT_PARAMS.social }, { ...HISTORICAL_PARAMS.social });
+  assert.equal(DEFAULT_PARAMS.conducta.habituacion, 0.35);
 });
 
 test('(ii) conducta.habituacion=0.35 cambia el mundo y no reduce la diversidad de conducta', { timeout: 600000 }, t => {
@@ -143,7 +153,7 @@ test('(viii) abrir el embudo de natalidad hace nacer a alguien en la semilla 7 s
   // el par fértil, no consanguíneo y con vínculo mutuo ≥ 0,3 MÁS CERCANO de toda la corrida
   // está a 18,38 celdas. Por eso `radioPareja=6` (ni 12) abre nada y hace falta 20.
   const hoy = replicaDetallada(t, 3 * DIA, undefined, 7);
-  assert.equal(hoy.world.birthCounter, 0, 'con las leyes de hoy la semilla 7 no pare a nadie en 3 días');
+  assert.equal(hoy.world.birthCounter, 0, 'con las leyes históricas la semilla 7 no pare a nadie en 3 días');
   assert.equal(replicaDetallada(t, 3 * DIA,
     'poblacion.exigeComunidad=false,poblacion.radioPareja=6,poblacion.radioLugar=8,poblacion.comprobacionContinua=true', 7).world.birthCounter,
     0, 'con radioPareja=6 la semilla 7 SIGUE sin parir: el cerrojo no eran 3 celdas, eran 18');
@@ -188,7 +198,7 @@ test('(vii) abrir también la coincidencia de destino y la espera sigue producie
   const defecto = disputas(replica(t, 2400));
   const abierto = disputas(replica(t, 2400,
     'social.disputaNecesidad=0.45,social.disputaEscasez=3,social.disputaRadio=3,social.disputaDestino=1.5,social.disputaEspera=60'));
-  assert.deepEqual(defecto, { conflictos: 0, turnos: 0, cooperaciones: 58 }, 'con los defaults la disputa sigue sin ocurrir jamás');
+  assert.deepEqual(defecto, { conflictos: 0, turnos: 0, cooperaciones: 58 }, 'con los params históricos la disputa sigue sin ocurrir jamás');
   assert.ok(abierto.conflictos + abierto.turnos > defecto.conflictos + defecto.turnos,
     `abierto=${JSON.stringify(abierto)} no supera a defecto=${JSON.stringify(defecto)}`);
   // Medido: 1 conflicto, 0 turnos y 63 cooperaciones, EXACTAMENTE lo mismo que con
@@ -279,7 +289,7 @@ test('(v) parseParams acota las trece claves nuevas y rechaza lo que cae fuera d
   assert.equal(parseParams('social.disputaRadio=8,conducta.habituacion=2').social.disputaRadio, 8);
 });
 
-test('(vi) una instantánea anterior a estas leyes las completa con sus defaults (patrón T102)', t => {
+test('(vi) una instantánea anterior a estas leyes las completa con sus valores históricos (patrón T102, reglas 10)', t => {
   const directory = mkdtempSync(join(tmpdir(), 'atlas-leyes-snapshot-'));
   const path = join(directory, 'world.sqlite'), store = new Store(path);
   t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
@@ -293,8 +303,12 @@ test('(vi) una instantánea anterior a estas leyes las completa con sus defaults
   const reopened = new Store(path);
   t.after(() => reopened.close());
   const vigentes = paramsOf(reopened.load()!.world);
-  assert.deepEqual(vigentes.conducta, DEFAULT_PARAMS.conducta);
-  assert.deepEqual(vigentes.social, DEFAULT_PARAMS.social, 'sin campo se rellena con el comportamiento de siempre');
+  // El mundo se creó con los defaults NUEVOS (habituación 0,35), pero su instantánea no nombra
+  // `conducta`: al recargar rige el valor histórico 0, nunca el default de un mundo nuevo.
+  assert.deepEqual(vigentes.conducta, HISTORICAL_PARAMS.conducta);
+  assert.equal(vigentes.conducta.habituacion, 0);
+  assert.deepEqual(vigentes.social, HISTORICAL_PARAMS.social, 'sin campo se rellena con el comportamiento de siempre');
+  assert.equal(vigentes.poblacion.cortejo, DEFAULT_PARAMS.poblacion.cortejo, 'lo que la instantánea sí nombra se conserva tal cual');
   assert.equal(vigentes.agua.cuencas, 0.8, 'y los overrides históricos sobreviven intactos');
 });
 

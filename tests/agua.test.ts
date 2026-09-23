@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { createWorld, stepWorld, TICKS_PER_DAY } from '../src/world/index.js';
-import { parseParams } from '../src/world/params.js';
+import { HISTORICAL_PARAMS, parseParams } from '../src/world/params.js';
 import { generateChunk } from '../src/world/terrain.js';
 import { stepEcosystem } from '../src/world/ecosystem.js';
 import { ruidoCuenca, enCuenca, regionesSinAgua, distanciaMediaAguaManhattan } from '../src/world/agua.js';
@@ -31,10 +31,13 @@ function run(world: ReturnType<typeof createWorld>, ticks: number): void {
 // Generator and isolated water controls below retain their original assertions.
 // V8: paid family provisioning changes routes/consumption. V7's historical digest
 // remains recorded in docs/REVISION-FAMILIA-V8-2026-09-22.md; no water law changes.
+// Reglas 10, etapa 1 (2026-09-22): el detector mide el mundo de ANTES, así que parte de
+// `HISTORICAL_PARAMS` explícitos; con los defaults nuevos (cortejo, habituación…) la gente camina y
+// bebe en otros sitios y el hash cambiaría sin que ninguna ley del agua lo hiciera.
 const HASH_AGUA_MUNDO_4821_DIA1_CUENCAS1 = 'ad4b5dd88eba765a3df24ccb96296ddfcc740312f4f4842f51c2ba25a4c5270b';
 
 test('T035 control: agua.cuencas=1 EXPLÍCITO (no el default global) deja el agua/feature de las teselas bit a bit igual a hoy tras 1 día', () => {
-  const world = createWorld(4821, parseParams('agua.cuencas=1'));
+  const world = createWorld(4821, parseParams('agua.cuencas=1', HISTORICAL_PARAMS));
   assert.equal(world.tiles.length > 0, true);
   run(world, TICKS_PER_DAY);
   const aguaTeselas = world.tiles.map(t => ({ x: t.x, y: t.y, feature: t.feature ?? 'none', drinkingWater: Number((t.drinkingWater ?? 0).toFixed(6)) }));

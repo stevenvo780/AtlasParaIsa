@@ -9,7 +9,7 @@ import { createWorld, stepWorld, type Person, type World } from '../src/world/in
 import { digestoCanonico } from '../src/world/digesto.js';
 import { waterAvailable } from '../src/world/inventions.js';
 import { tileAt } from '../src/world/spatial.js';
-import { DEFAULT_PARAMS, PARAM_RANGES, paramsOf, parseParams, setParams, type WorldParams } from '../src/world/params.js';
+import { DEFAULT_PARAMS, HISTORICAL_PARAMS, PARAM_RANGES, paramsOf, parseParams, setParams, type WorldParams } from '../src/world/params.js';
 
 /**
  * Ley candidata SED (noche 2026-09-22): `agua.memoria`. Diagnóstico con la base del laboratorio de
@@ -22,12 +22,14 @@ import { DEFAULT_PARAMS, PARAM_RANGES, paramsOf, parseParams, setParams, type Wo
 
 const BASE_LAB = 'persistencia.cadaTicks=300,poblacion.cortejo=1,poblacion.exigeComunidad=false,poblacion.comprobacionContinua=true,conducta.habituacion=0.35';
 
-/** Réplica mínima como `scripts/lab/replica.ts`: Store temporal y `save` antes del primer paso. */
+/** Réplica mínima como `scripts/lab/replica.ts`: Store temporal y `save` antes del primer paso. Parte de
+ * `HISTORICAL_PARAMS` explícitos (reglas 10, etapa 1): esta ley se midió sobre el mundo de antes, y con
+ * los defaults nuevos `BASE_LAB` heredaría además `poblacion.radioCortejo=128`. */
 function replica(t: { after(callback: () => void): void }, seed: number, pasos: number, params?: string): World {
   const directory = mkdtempSync(join(tmpdir(), 'atlas-agua-memoria-'));
   const store = new Store(join(directory, 'world.sqlite'));
   t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
-  const world = createWorld(seed, parseParams(params));
+  const world = createWorld(seed, parseParams(params, HISTORICAL_PARAMS));
   store.save(world);
   for (let tick = 1; tick <= pasos; tick++) stepWorld(world);
   return world;
@@ -43,17 +45,27 @@ function digestoSinMemoria(world: World): string {
   try { return digestoCanonico(world); } finally { setParams(world, vigentes); }
 }
 
-// Medidos en `sprint/noche-hsed-20260922` @f666226 ANTES de tocar nada, con la réplica de arriba.
-const FISICO_51926_1200 = 'd7e173a1f4610463929ed8128f2006a04833a477b6712800585e070edc95a9d9';
-const FISICO_42_BASE_1200 = '844e82c55b5cf0e4bf6b00e2a55e64b5add18c27270c5d12f00a472214f346cc';
+// Los hashes originales se midieron en `sprint/noche-hsed-20260922` @f666226, ANTES de la consolidación
+// R2; allí la forma de params y la etiqueta V10 (alias de fundación) aún no existían, así que dejaron de
+// corresponder en la propia base f2757fa (d7e173a1…, 844e82c5…, 7a33a032…, 4ee4b82b… fallaban ya allí).
+// Regenerados el 2026-09-22 (reglas 10, etapa 1) DESDE UNA EXPORTACIÓN LIMPIA de la base f2757fa, nunca
+// desde el árbol modificado, con la misma réplica (Store temporal, guardado antes del primer paso):
+//   git archive f2757fa | tar -x -C /tmp/base-f2757fa && ln -s "$PWD/node_modules" /tmp/base-f2757fa/node_modules \
+//     && cp scripts/lab/digesto-control.ts /tmp/base-f2757fa/scripts/lab/ && cd /tmp/base-f2757fa \
+//     && npx tsx scripts/lab/digesto-control.ts --seed 51926 --pasos 1200 --sin agua.memoria \
+//     && npx tsx scripts/lab/digesto-control.ts --seed 42 --pasos 1200 --params "$BASE_LAB" --sin agua.memoria
+// (`fisico` → FISICO_*, `completo` → COMPLETO_*; en f2757fa `DEFAULT_PARAMS` es exactamente `HISTORICAL_PARAMS`).
+const FISICO_51926_1200 = 'cd99990ad944bdf7ce9004da8c92d2f5d3e0e64a841dc1d470c06a61065d64eb';
+const FISICO_42_BASE_1200 = '955227fac6184fd65ff2d663c576d527cd1b88b5b49d37cc65ef9a615457597b';
 // Los mismos mundos con la clave ya declarada (default 1): sólo cambia el hash, no el estado.
-const COMPLETO_51926_1200 = '7a33a032143f0faeb610702d50c4411292d0c52158874d3a5997c260d1102f4b';
-const COMPLETO_42_BASE_1200 = '4ee4b82be1ed69821b5f71d1a6ad75b94cc0fff94b8b432fb11c46844894defc';
+const COMPLETO_51926_1200 = 'ff1913ab7046d79ca2dcc2a05b23268f99212ee30187778bcb705e11a770df9a';
+const COMPLETO_42_BASE_1200 = 'e2c5b02334ff74228f79d05d9f6b121378d302f17d0141cc19f3eb2d94a93f71';
 
-test('(i) con el default agua.memoria=1 el mundo es bit a bit el de antes (defaults y régimen del laboratorio)', { timeout: 1_800_000 }, t => {
-  assert.equal(DEFAULT_PARAMS.agua.memoria, 1);
+test('(i) con agua.memoria=1 el mundo es bit a bit el de antes (params históricos y régimen del laboratorio)', { timeout: 1_800_000 }, t => {
+  assert.equal(DEFAULT_PARAMS.agua.memoria, 1, 'reglas 10 no adopta la memoria del agua');
+  assert.equal(HISTORICAL_PARAMS.agua.memoria, 1);
   const defecto = replica(t, 51926, 1200);
-  assert.equal(digestoSinMemoria(defecto), FISICO_51926_1200, 'seed 51926, defaults, 1200 pasos: el estado físico no se movió');
+  assert.equal(digestoSinMemoria(defecto), FISICO_51926_1200, 'seed 51926, params históricos, 1200 pasos: el estado físico no se movió');
   assert.equal(digestoCanonico(defecto), COMPLETO_51926_1200, 'el digesto completo sólo cambia por declarar la clave (T102)');
   const lab = replica(t, 42, 1200, BASE_LAB);
   assert.equal(digestoSinMemoria(lab), FISICO_42_BASE_1200, 'seed 42 con la base de la noche: el estado físico no se movió');
@@ -67,7 +79,7 @@ test('(i) con el default agua.memoria=1 el mundo es bit a bit el de antes (defau
  */
 const SECO = { x: 16, y: 0 }, CHARCA = { x: 14, y: 11 };
 function escena(params?: string): { world: World; person: Person } {
-  const world = createWorld(42, parseParams(params)); world.weather = 'clear';
+  const world = createWorld(42, parseParams(params, HISTORICAL_PARAMS)); world.weather = 'clear';
   world.people = world.people.slice(0, 3); world.communities = [];
   const person = world.people[2]!;
   for (let dy = -8; dy <= 8; dy++) for (let dx = -8; dx <= 8; dx++) {

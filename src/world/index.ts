@@ -523,7 +523,8 @@ function choose(world: World, person: Person): void {
     action: 'approach', target: familyPlace ?? family.partner, score: 0.85 + person.traits.care * 0.2,
     reason: `Tiene reservas y busca ${familyPlace ? `reunirse con ${family.partner.name} en ${familyPlace.name}` : `acercarse a ${family.partner.name}`}; el vínculo y el cuidado corporal permiten intentar una crianza.`,
   });
-  // Cortejo (2026-09-22, `poblacion.cortejo`, default 0 = conducta de hoy). Diagnóstico: en la semilla 7
+  // Cortejo (2026-09-22, `poblacion.cortejo`; histórico 0 = apagado, reglas 10 lo adopta con 2 y radio 128
+  // para mundos nuevos). Diagnóstico: en la semilla 7
   // hay adultos fértiles con vínculo mutuo, pero la pareja válida más cercana de toda la corrida está a
   // 18 celdas; nadie la busca y el mundo se extingue sin nacer nadie. Ley local: quien está en edad fértil
   // y recuerda un vínculo mutuo con otra persona fértil no emparentada, fuera de `radioPareja` pero dentro

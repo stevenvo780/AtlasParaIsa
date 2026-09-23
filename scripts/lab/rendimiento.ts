@@ -6,8 +6,10 @@
  *
  *   digestos    [--pasos 1200,2400]
  *       `digestoCanonico` tras cada número de pasos, en las tres semillas de control
- *       (51926 y 7 con LEYES_CANDIDATAS, 42 con los parámetros por defecto). Es lo que fija
- *       `tests/rendimiento-identidad.test.ts`.
+ *       (51926 y 7 con LEYES_CANDIDATAS, 42 con los params HISTÓRICOS). Es lo que fija
+ *       `tests/rendimiento-identidad.test.ts`. Reglas 10, etapa 1: el control se mide sobre
+ *       `HISTORICAL_PARAMS` (el mundo de antes); LEYES_CANDIDATAS nombra las cinco leyes adoptadas,
+ *       así que con ellas el mundo es el mismo sobre la base histórica o sobre los defaults nuevos.
  *   instantanea --seed S [--params P] --dias D --salida DIR
  *       Avanza D días y deja en DIR la base SQLite (con el mundo guardado en el último tick) y
  *       `meta.json` con el digesto del mundo en memoria.
@@ -26,7 +28,7 @@ import { pathToFileURL } from 'node:url';
 import { Store } from '../../src/server/store.js';
 import { createWorld, stepWorld, TICKS_PER_DAY, type FaseMedicion, type World } from '../../src/world/index.js';
 import { digestoCanonico } from '../../src/world/digesto.js';
-import { paramsOf, parseParams } from '../../src/world/params.js';
+import { HISTORICAL_PARAMS, paramsOf, parseParams } from '../../src/world/params.js';
 
 export const LEYES_CANDIDATAS = 'persistencia.cadaTicks=300,poblacion.cortejo=2,poblacion.radioCortejo=128,poblacion.exigeComunidad=false,poblacion.comprobacionContinua=true,conducta.habituacion=0.35';
 export const SEMILLAS_CONTROL: readonly { seed: number; params?: string }[] = [
@@ -46,12 +48,13 @@ function paso(world: World, store: Store, medicion?: FaseMedicion): void {
   if (world.tick % paramsOf(world).persistencia.cadaTicks === 0) store.save(world);
 }
 
-/** Digestos tras cada corte de `pasos` desde `createWorld(seed, params)` con Store temporal. */
+/** Digestos tras cada corte de `pasos` desde `createWorld(seed, params)` con Store temporal. Los
+ * `params` se aplican sobre `HISTORICAL_PARAMS`: sin ellos, el control es el mundo de antes. */
 export function digestosControl(seed: number, params: string | undefined, cortes: readonly number[]): Record<string, string> {
   const dir = mkdtempSync(join(tmpdir(), 'atlas-rendimiento-'));
   const store = new Store(join(dir, 'world.sqlite'));
   try {
-    const world = createWorld(seed, parseParams(params));
+    const world = createWorld(seed, parseParams(params, HISTORICAL_PARAMS));
     store.save(world);
     const salida: Record<string, string> = {}, fin = Math.max(...cortes);
     for (let n = 1; n <= fin; n++) {
@@ -67,7 +70,7 @@ function digestos(): void {
   const resultado = SEMILLAS_CONTROL.map(({ seed, params }) => {
     const started = cpuMs();
     const digestos = digestosControl(seed, params, cortes);
-    return { seed, params: params ?? 'defaults', digestos, cpuS: Math.round(cpuMs() - started) / 1000 };
+    return { seed, params: params ?? 'historicos', digestos, cpuS: Math.round(cpuMs() - started) / 1000 };
   });
   console.log(JSON.stringify(resultado, null, 2));
 }

@@ -4,6 +4,10 @@
  * cambia ninguna dinámica. Los 13 workstreams paralelos importan estas claves; nadie
  * más que T001 edita este fichero. Los params viven en un WeakMap por mundo (no se
  * añaden campos a `World`, así se evita migrar snapshots guardados).
+ *
+ * Reglas 10, etapa 1 (2026-09-22): por primera vez un default CAMBIA la dinámica. Los mundos nuevos
+ * nacen con `DEFAULT_PARAMS` (paquete de natalidad adoptado, `RULES_10_ADOPTED`); los mundos
+ * anteriores conservan su conducta porque sus claves ausentes se completan con `HISTORICAL_PARAMS`.
  */
 
 import { DEMOGRAPHY_TICKS_PER_DAY, longevityAges, type LongevityLaw } from '../shared/demography.js';
@@ -28,15 +32,17 @@ export interface WorldParams {
   genes: { varianzaFundadores: number; tasaMutacion: number; edadFundadoresMinDias: number; edadFundadoresMaxDias: number };
   /**
    * `exigeComunidad`, `radioPareja`, `radioLugar` y `comprobacionContinua` son leyes
-   * candidatas del embudo de natalidad (diagnóstico 2026-09-22, `scripts/lab/diagnostico-natalidad.ts`):
-   * con sus defaults `reproduce()` es la de hoy. Ninguna levanta el techo de nacimientos:
+   * del embudo de natalidad (diagnóstico 2026-09-22, `scripts/lab/diagnostico-natalidad.ts`):
+   * con sus valores HISTÓRICOS (`true`, 3, 4, `false`) `reproduce()` es la de antes de reglas 10; reglas
+   * 10 adopta `exigeComunidad=false` y `comprobacionContinua=true` para mundos nuevos. Ninguna levanta el techo de nacimientos:
    * el calendario máximo sigue siendo `nacimientosPorComprobacion` por ventana de
    * `intervaloComprobacionTicks` pasos.
    */
   poblacion: { maxima: number; intervaloComprobacionTicks: number; nacimientosPorComprobacion: number;
     exigeComunidad: boolean; radioPareja: number; radioLugar: number; comprobacionContinua: boolean;
     /** Cortejo (2026-09-22): peso con que una persona fértil busca a otra fértil, no emparentada y con
-     * vínculo mutuo ≥ 0,3 que está fuera de `radioPareja` pero dentro de `radioCortejo`. 0 = hoy. */
+     * vínculo mutuo ≥ 0,3 que está fuera de `radioPareja` pero dentro de `radioCortejo`. Histórico 0 / 24
+     * (apagado); reglas 10 adopta 2 / 128 para mundos nuevos. */
     cortejo: number; radioCortejo: number };
   recursos: { capacidadBosque: number; capacidadPastizal: number; capacidadOtros: number; velocidadRegeneracion: number; decaimientoFertilidad: number; decaimientoComida: number };
   persistencia: { cadaTicks: number; ventanaEventosTicks: number; paginasSucias: boolean };
@@ -69,8 +75,9 @@ export interface WorldParams {
    * Leyes candidatas (noche de ciencia, 2026-09-22). `docs/ANALISIS-DINAMICAS-2026-09-21.md`
    * mide tres cierres: la elección refuerza al ganador y se traba en cooperar, las disputas
    * por recursos nunca se disparan y la pertenencia a una comunidad no vuelve a revisarse.
-   * Estas claves abren esos tres cerrojos SIN decidir nada: con sus defaults el mundo es el
-   * de hoy paso a paso, y sólo un laboratorio que las mueva mide otra cosa.
+   * Estas claves abren esos tres cerrojos SIN decidir nada: con sus valores HISTÓRICOS el mundo es
+   * el de antes paso a paso. Reglas 10 adopta `habituacion=0,35` para mundos nuevos; las demás
+   * siguen con su valor histórico como default.
    */
   conducta: { habituacion: number;
     /** Ventaja comparativa heredable (DIV, 2026-09-22), `index.ts` → `choose`: sin urgencias
@@ -99,7 +106,12 @@ function deepFreeze<T>(value: T): T {
   return value;
 }
 
-const RAW_DEFAULTS: WorldParams = {
+/**
+ * Params HISTÓRICOS: los que reproducen la conducta del mundo ANTES de reglas 10, etapa 1. Es el
+ * literal de abajo tal cual; `DEFAULT_PARAMS` (mundos NUEVOS) se deriva de él cambiando sólo las
+ * cinco leyes de natalidad adoptadas (`RULES_10_ADOPTED`).
+ */
+const RAW_HISTORICAL: WorldParams = {
   cuerpo: {
     longevidadBaseDias: 11, longevidadPorResiliencia: 4, longevidadPorActividad: 1, senescenciaInicioFraccion: 0.75,
     riesgoSenescenciaDiario: 0.04, riesgoSenescenciaPendiente: 10, cuidadoReduceRiesgo: 0.6,
@@ -125,8 +137,49 @@ const RAW_DEFAULTS: WorldParams = {
     ensenanzaRareza: 0, confianzaSalida: 0.35, distanciaAlternativa: 0.2, vinculoConvivencia: 0, radioConvivencia: 0 },
 };
 
-/** Objeto congelado en profundidad: nunca se muta; `parseParams` clona para cada override. */
+/**
+ * Reglas 10, etapa 1 (2026-09-22): el paquete de natalidad medido la noche del 2026-09-22
+ * (`docs/REGLAS.md` § «Reglas 10», `docs/ops/noche-20260922-bitacora.md`) pasa a ser el default
+ * de los mundos NUEVOS. Con él, al día 10 el 93 % de 15 semillas sostiene ≥ 16 habitantes
+ * (mediana 63), frente al 82 % (mediana 21) con los params históricos. `agua.memoria` quedó
+ * refutada fuera de muestra y NO se adopta (sigue en 1 = apagada).
+ */
+export const RULES_10_ADOPTED = deepFreeze({
+  poblacion: { cortejo: 2, radioCortejo: 128, exigeComunidad: false, comprobacionContinua: true },
+  conducta: { habituacion: 0.35 },
+} as const);
+
+const RAW_DEFAULTS: WorldParams = structuredClone(RAW_HISTORICAL);
+Object.assign(RAW_DEFAULTS.poblacion, RULES_10_ADOPTED.poblacion);
+Object.assign(RAW_DEFAULTS.conducta, RULES_10_ADOPTED.conducta);
+
+/**
+ * Defaults de un mundo NUEVO (`createWorld` sin params, `parseParams` sin base, laboratorio sin
+ * `--params`, servidor que genera un mundo). Objeto congelado en profundidad: nunca se muta;
+ * `parseParams` clona para cada override.
+ */
 export const DEFAULT_PARAMS: WorldParams = deepFreeze(RAW_DEFAULTS);
+
+/**
+ * Params HISTÓRICOS (reglas 10, etapa 1): la BASE con que se completan las claves AUSENTES de una
+ * instantánea (`readSnapshotParams` en `src/server/snapshot.ts`). Un mundo anterior —reglas < 10, o
+ * cualquiera cuyos params persistidos no nombren una clave— nunca recibe un default nuevo: recibe el
+ * valor que reproduce su conducta de siempre. Difiere de `DEFAULT_PARAMS` sólo en las leyes adoptadas:
+ * `poblacion.cortejo` 0, `poblacion.radioCortejo` 24, `poblacion.exigeComunidad` true,
+ * `poblacion.comprobacionContinua` false y `conducta.habituacion` 0. Las demás claves añadidas la
+ * noche del 2026-09-22 ya tienen por default su valor histórico y aquí valen lo mismo:
+ * `genes.edadFundadoresMin/MaxDias` 2/2, `poblacion.radioPareja` 3, `poblacion.radioLugar` 4,
+ * `agua.memoria` 1, `conducta.aptitud` 0, `social.*` (disputas 0,65/×1/2/0,5/180, rareza 0, confianza
+ * 0,35, distancia 0,2, `maxComunidades` 8, `vinculoConvivencia` 0, `radioConvivencia` 0).
+ *
+ * Única excepción deliberada: `gobernador.politica` vale `techo` también aquí. El gobernador no es
+ * una ley del mundo (no entra en `stepWorld`: decide por el p95 de reloj del servidor, ruling R17) y
+ * su conducta anterior, `apagar`, es el defecto que extinguió el mundo público V7 (bitácora 09:58,
+ * brazo `apagar` 4/4 extinciones). Recargar un mundo viejo con `apagar` reinstalaría ese defecto.
+ * `limites.aplicacion` también coincide con el default: el modo histórico de admisión lo declara
+ * aparte `readSnapshotParams` para las instantáneas sin perfil de límites.
+ */
+export const HISTORICAL_PARAMS: WorldParams = deepFreeze(RAW_HISTORICAL);
 export type WorldLimits = Omit<WorldParams['limites'], 'aplicacion'>;
 /** Historical admission bounds, independent of the machine reading an old world. */
 export const LEGACY_WORLD_LIMITS: Readonly<WorldLimits> = deepFreeze({ teselasActivas: DEFAULT_PARAMS.limites.teselasActivas,

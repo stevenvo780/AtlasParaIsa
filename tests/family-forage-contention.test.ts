@@ -8,12 +8,14 @@ import { initialDemography } from '../src/world/demography.js';
 import { earlierForagerExhausts, familyOpportunity, observedForagersByCell } from '../src/world/family.js';
 import { digestoCanonico } from '../src/world/digesto.js';
 import { Store } from '../src/server/store.js';
-import { parseParams } from '../src/world/params.js';
+import { HISTORICAL_PARAMS, parseParams } from '../src/world/params.js';
 
+// Reglas 10, etapa 1 (2026-09-22): fixture medida con las leyes de antes; parte de `HISTORICAL_PARAMS`
+// explícitos (los defaults nuevos adoptan cortejo, comunidad opcional, muestreo continuo y habituación).
 /** Finite fixture, not a demographic outcome: the observed work is actually paid
  * during preparation. Only the deciding actor is released afterwards. */
 function scene(options: { food?: number; ownWork?: number; otherWork?: number; inventory?: number } = {}) {
-  const world = createWorld(51926); world.tick = 1000; world.weather = 'clear'; world.animals = [];
+  const world = createWorld(51926, HISTORICAL_PARAMS); world.tick = 1000; world.weather = 'clear'; world.animals = [];
   for (const tile of world.tiles) { tile.food = tile.vegetation = tile.moisture = tile.fertility = tile.fauna = 0; }
   for (const person of world.people) {
     person.hunger = person.thirst = person.fatigue = .1; person.energy = .9; person.inventory = 0;
@@ -140,7 +142,7 @@ test('seed 1007 prefix 131: autonomy collects the paid alternative without comma
   const directory = mkdtempSync(join(tmpdir(), 'atlas-family-contention-'));
   const store = new Store(join(directory, 'world.sqlite'));
   try {
-    const world = createWorld(1007, parseParams('persistencia.cadaTicks=20')); store.save(world);
+    const world = createWorld(1007, parseParams('persistencia.cadaTicks=20', HISTORICAL_PARAMS)); store.save(world);
     for (let i = 0; i < 131; i++) { stepWorld(world); if (world.tick % 20 === 0) store.save(world); }
     const a = world.people.find(p => p.id === 'neighbor-4')!, worker = world.people.find(p => p.id === 'neighbor-2')!;
     assert.equal(a.inventory, .060948499999999926); assert.equal(worker.work, 7);

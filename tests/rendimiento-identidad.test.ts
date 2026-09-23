@@ -14,10 +14,15 @@
  *
  * Coste: ~25 s + ~50 s + ~195 s de CPU (la semilla 42 usa `persistencia.cadaTicks` = 1 por defecto:
  * guarda en cada paso). Con la torre cargada el reloj de pared puede multiplicarse; de ahí el tope propio.
+ *
+ * Reglas 10, etapa 1 (2026-09-22): la semilla 42 era «parámetros por defecto» del árbol e1adaaf, que son
+ * exactamente `HISTORICAL_PARAMS`; `digestosControl` parte ahora de esa base explícita, así que los
+ * tres hashes de referencia se conservan sin regenerar.
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { digestosControl, LEYES_CANDIDATAS } from '../scripts/lab/rendimiento.js';
+import { DEFAULT_PARAMS, HISTORICAL_PARAMS, parseParams } from '../src/world/params.js';
 import { firstTileAt, lastTileAt, tileLookup } from '../src/world/tile-index.js';
 import { primero, primeroConFiltroCaro, primerosDos } from '../src/world/orden.js';
 
@@ -81,10 +86,13 @@ const REFERENCIA: readonly { seed: number; params?: string; digestos: Record<'12
 
 test('las leyes candidatas del laboratorio son las del control', () => {
   assert.equal(LEYES_CANDIDATAS, 'persistencia.cadaTicks=300,poblacion.cortejo=2,poblacion.radioCortejo=128,poblacion.exigeComunidad=false,poblacion.comprobacionContinua=true,conducta.habituacion=0.35');
+  // Reglas 10: son los defaults nuevos (salvo la cadencia del laboratorio), y dan el mismo mundo sobre cualquier base.
+  assert.deepEqual(parseParams(LEYES_CANDIDATAS, HISTORICAL_PARAMS), parseParams(LEYES_CANDIDATAS));
+  assert.deepEqual(parseParams(LEYES_CANDIDATAS), parseParams('persistencia.cadaTicks=300', DEFAULT_PARAMS));
 });
 
 for (const { seed, params, digestos } of REFERENCIA) {
-  test(`semilla ${seed} (${params ? 'leyes candidatas' : 'parámetros por defecto'}): digestoCanonico idéntico al árbol sin optimizar tras 1200 y 2400 pasos`, { timeout: 3_600_000 }, () => {
+  test(`semilla ${seed} (${params ? 'leyes candidatas' : 'parámetros históricos'}): digestoCanonico idéntico al árbol sin optimizar tras 1200 y 2400 pasos`, { timeout: 3_600_000 }, () => {
     assert.deepEqual(digestosControl(seed, params, [1200, 2400]), digestos);
   });
 }

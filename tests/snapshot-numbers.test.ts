@@ -7,7 +7,7 @@ import { Store } from '../src/server/store.js';
 import { decodeSnapshot, encodeSnapshot, takeSnapshotParams } from '../src/server/snapshot.js';
 import { assertWorld, createWorld, type World } from '../src/world/index.js';
 import { digestoCanonico } from '../src/world/digesto.js';
-import { DEFAULT_PARAMS, paramsOf, parseParams, setParams } from '../src/world/params.js';
+import { DEFAULT_PARAMS, HISTORICAL_PARAMS, paramsOf, parseParams, setParams } from '../src/world/params.js';
 
 function restore(body: string): World {
   const world = decodeSnapshot(body) as World;
@@ -50,19 +50,22 @@ test('snapshot preserves signed zero in tile, person and community values', () =
 });
 
 test('ordinary compact bytes declare parameters and limits profile; historical bytes stay compatible', () => {
-  for (const params of [DEFAULT_PARAMS, parseParams('agua.cuencas=0.9,motor.gpu=[2,0]')]) {
+  // Reglas 10, etapa 1: los escritores históricos (reglas < 9) omitían el campo cuando los params eran
+  // los suyos por defecto, que son `HISTORICAL_PARAMS`; un mundo viejo con los defaults NUEVOS sí los
+  // declara, porque sin campo se leería como histórico.
+  for (const params of [HISTORICAL_PARAMS, DEFAULT_PARAMS, parseParams('agua.cuencas=0.9,motor.gpu=[2,0]')]) {
     const world = createWorld(51926, params);
     const tiles = world.tiles.map(t => [t.x,t.y,t.terrain,t.moisture,t.vegetation,t.food,t.biome,t.elevation,
       t.wood,t.stone,t.feature,t.variety,t.growth,t.fertility,t.cultivation,t.traffic,t.drinkingWater,t.species,t.fauna,t.life]);
     const expected = { ...world, retiredChunks: [], retiredLegacy: [], tiles, tileEncoding: 'tiles-tuple-v1',
-      ...(params === DEFAULT_PARAMS ? {} : { paramsEncoding: 'params-v1', params }) };
+      ...(params === HISTORICAL_PARAMS ? {} : { paramsEncoding: 'params-v1', params }) };
     const { aplicacion, ...numericLimits } = params.limites;
     assert.ok(encodeSnapshot(world, params) === JSON.stringify({ ...expected, paramsEncoding: 'params-v1', params,
       limitsProfile: { version: 2, aplicacion, ...numericLimits } }), 'current bytes declare exact parameters and limits profile');
     assert.equal(digestoCanonico(restore(encodeSnapshot(world, params))), digestoCanonico(world));
     const historical = { ...world, version: 8 };
     const historicalExpected = { ...expected, version: 8,
-      ...(params === DEFAULT_PARAMS ? {} : { params: { ...params, limites: numericLimits } }) };
+      ...(params === HISTORICAL_PARAMS ? {} : { params: { ...params, limites: numericLimits } }) };
     assert.ok(encodeSnapshot(historical, params) === JSON.stringify(historicalExpected), 'historical writers preserve ordinary bytes and never emit a new mode without its profile');
   }
 });

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { cloneWorld, createWorld, stepWorld, type Person, type World } from '../src/world/index.js';
+import { HISTORICAL_PARAMS } from '../src/world/params.js';
 import { cooperate, cooperationOpportunity } from '../src/world/society.js';
 import { assertTechnology, craftTechnology, researchTechnology, shareTechnology, technologyOpportunity, technologyStock, technologyWorkCost, type TechnologyProgram } from '../src/world/technology.js';
 import { recordChronicleEvent } from '../src/world/chronicle-journal.js';
@@ -31,7 +32,9 @@ function fabricate(world: World, person: Person, recipeId: string) {
   assert.equal(success, true); assert.equal(person.technology.project, null);
 }
 function scene(requiredTool = false) {
-  const world = createWorld(51926), teacher = world.people[2]!, learner = world.people[3]!;
+  // Reglas 10, etapa 1: escena medida en el mundo de antes; con el cortejo por defecto el aprendiz
+  // sale a buscar pareja en vez de fabricar, así que parte de `HISTORICAL_PARAMS` explícitos.
+  const world = createWorld(51926, HISTORICAL_PARAMS), teacher = world.people[2]!, learner = world.people[3]!;
   for (const person of world.people) {
     person.x = 10; person.y = 20; person.target = { x: 10, y: 20 }; person.action = 'rest';
     person.materials = { wood: 0, stone: 0 }; person.skills = {}; person.energy = 1;

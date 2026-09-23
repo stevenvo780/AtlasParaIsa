@@ -98,7 +98,11 @@ test('access is mandatory, origin is enforced, private projections exclude inter
   const res = await fetch(f.origin + '/api/world', {headers:{Cookie:f.cookie}});
   assert.equal(res.status, 200); assert.equal(res.headers.get('cache-control'), 'no-store');
   const view = await res.json() as WorldView;
-  assert.equal(view.people.length, 16);
+  // Reglas 10, etapa 1: el servidor genera el mundo nuevo con los defaults nuevos, y con el muestreo
+  // continuo la semilla 42 puede parir en los primeros pasos de reloj real. La proyección lleva a los
+  // 16 fundadores y a quien ya haya nacido.
+  assert.equal(view.people.filter(person => !person.id.startsWith('descendant-')).length, 16);
+  assert.ok(view.people.length >= 16);
   assert.ok(!('rng' in view)); assert.ok(!('seed' in view));
   assert.ok(!JSON.stringify(view).includes('privateSource'));
   assert.ok(view.memories.every(m => m.source === 'sample'));

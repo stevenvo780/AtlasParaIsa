@@ -26,7 +26,9 @@ test('a snapshot carries procedure summaries, never their programs, and the savi
   // sobre la población real de hoy y sigue siendo refutable: si cambia, la medición debe rehacerse.
   // Re-measured after the declared V7 behavior corrections: 29 people.
   // All payload ceilings and the reduction ratio below remain unchanged.
-  assert.equal(world.people.length, 29, 'the measurement is stated for 29 inhabitants');
+  // Reglas 10, etapa 1 (2026-09-22): el mundo que se envía hoy nace con los defaults nuevos (paquete
+  // de natalidad): re-medido con 41 habitantes (29 con `HISTORICAL_PARAMS`); cotas y razón sin cambios.
+  assert.equal(world.people.length, 41, 'the measurement is stated for 41 inhabitants');
   assert.ok(world.technology.recipes.length >= 200, `resident definitions: ${world.technology.recipes.length}`);
   const view = projectWorld(world), technology = view.technology!;
   assert.equal(technology.recipes.length, world.technology.recipes.length);

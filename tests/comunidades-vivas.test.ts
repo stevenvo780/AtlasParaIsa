@@ -8,7 +8,7 @@ import { assertWorld, cloneWorld, createWorld, stepWorld, type Person, type Worl
 import { updateCommunities } from '../src/world/society.js';
 import { recordChronicleEvent } from '../src/world/chronicle-journal.js';
 import { digestoCanonico } from '../src/world/digesto.js';
-import { DEFAULT_PARAMS, PARAM_RANGES, paramsOf, parseParams, setParams, type WorldParams } from '../src/world/params.js';
+import { DEFAULT_PARAMS, HISTORICAL_PARAMS, PARAM_RANGES, paramsOf, parseParams, setParams, type WorldParams } from '../src/world/params.js';
 import type { ChronicleEvent } from '../src/shared/types.js';
 
 /**
@@ -23,12 +23,13 @@ const LAB = 'poblacion.cortejo=1,poblacion.exigeComunidad=false,poblacion.compro
 
 /** Réplica mínima de laboratorio (Store temporal guardado ANTES del primer paso, como
  * `scripts/lab/replica.ts`). Cuenta, en cada revisión de comunidades, los cambios de pertenencia
- * de una comunidad a otra. */
+ * de una comunidad a otra. Parte de `HISTORICAL_PARAMS` explícitos (reglas 10, etapa 1): la ley se
+ * midió sobre el mundo de antes, y con los defaults nuevos `LAB` heredaría además `poblacion.radioCortejo=128`. */
 function replica(t: { after(callback: () => void): void }, pasos: number, params: string | undefined, seed: number) {
   const directory = mkdtempSync(join(tmpdir(), 'atlas-com-'));
   const store = new Store(join(directory, 'world.sqlite'));
   t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
-  const world = createWorld(seed, parseParams(params));
+  const world = createWorld(seed, parseParams(params, HISTORICAL_PARAMS));
   store.save(world);
   let cambios = 0;
   let antes = new Map(world.people.map(p => [p.id, p.communityId]));
@@ -55,13 +56,22 @@ function digestoSinLaClave(world: World): string {
   try { return digestoCanonico(world); } finally { setParams(world, vigentes); }
 }
 
-// Medidos en `sprint/noche-hcom-20260922` @f666226 ANTES de tocar `src/world`, con la réplica de
-// arriba (seed 42, 1200 pasos): con los defaults y con los params del carril de la noche.
-const DIGESTO_PREVIO_DEFAULTS = '6d37cc5a419932d6cda82c30b1719530a53341ec3c89e94848b07ffeef6d13a2';
-const DIGESTO_PREVIO_LAB = 'a98872e93f5bc249c4afde73528d751b7f4b35878054a9789308141b12fdc26d';
+// Los hashes originales se midieron en `sprint/noche-hcom-20260922` @f666226 ANTES de tocar `src/world`,
+// antes de la consolidación R2; allí la forma de params y la etiqueta V10 (alias de fundación) aún no
+// existían, así que dejaron de corresponder en la propia base f2757fa (6d37cc5a… y a98872e9… fallaban ya
+// allí). Regenerados el 2026-09-22 (reglas 10, etapa 1) DESDE UNA EXPORTACIÓN LIMPIA de la base f2757fa,
+// nunca desde el árbol modificado, con la misma réplica (seed 42, 1200 pasos), campo `fisico`:
+//   git archive f2757fa | tar -x -C /tmp/base-f2757fa && ln -s "$PWD/node_modules" /tmp/base-f2757fa/node_modules \
+//     && cp scripts/lab/digesto-control.ts /tmp/base-f2757fa/scripts/lab/ && cd /tmp/base-f2757fa \
+//     && npx tsx scripts/lab/digesto-control.ts --seed 42 --pasos 1200 --sin social.radioConvivencia \
+//     && npx tsx scripts/lab/digesto-control.ts --seed 42 --pasos 1200 --params "$LAB" --sin social.radioConvivencia
+// (en f2757fa `DEFAULT_PARAMS` es exactamente `HISTORICAL_PARAMS`).
+const DIGESTO_PREVIO_DEFAULTS = '481e7358b62d0bead6b96848574eb7dbc8992c8226893fea42c6cfd606096a03';
+const DIGESTO_PREVIO_LAB = '48e7eacfeb9b2d06f0167ca36f198fcbe0858a980b878f019a978fc93b291751';
 
-test('(i) con radioConvivencia=0 el mundo es el de antes bit a bit, con defaults y con los params del carril', { timeout: 2_800_000 }, t => {
-  assert.equal(DEFAULT_PARAMS.social.radioConvivencia, 0);
+test('(i) con radioConvivencia=0 el mundo es el de antes bit a bit, con params históricos y con los params del carril', { timeout: 2_800_000 }, t => {
+  assert.equal(DEFAULT_PARAMS.social.radioConvivencia, 0, 'reglas 10 no adopta las comunidades vivas');
+  assert.equal(HISTORICAL_PARAMS.social.radioConvivencia, 0);
   const defecto = replica(t, 1200, undefined, 42);
   assert.equal(digestoSinLaClave(defecto.world), DIGESTO_PREVIO_DEFAULTS);
   const carril = replica(t, 1200, LAB, 42);

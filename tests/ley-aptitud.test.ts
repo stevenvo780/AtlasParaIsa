@@ -8,7 +8,7 @@ import { Store } from '../src/server/store.js';
 import { createWorld, stepWorld, ventajaComparativa, type World } from '../src/world/index.js';
 import { digestoCanonico } from '../src/world/digesto.js';
 import { indiceDiversidad } from '../src/world/diversidad.js';
-import { DEFAULT_PARAMS, PARAM_RANGES, paramsOf, parseParams, setParams, type WorldParams } from '../src/world/params.js';
+import { DEFAULT_PARAMS, HISTORICAL_PARAMS, PARAM_RANGES, paramsOf, parseParams, setParams, type WorldParams } from '../src/world/params.js';
 import type { Action } from '../src/shared/types.js';
 
 /**
@@ -18,13 +18,15 @@ import type { Action } from '../src/shared/types.js';
  * distancia media entre repertorios BAJA, test (ii) de `leyes-candidatas.test.ts`). La ley suma a
  * cada OFICIO `aptitud · (rasgo del oficio − media de los cinco rasgos de la persona)`.
  *
- * Réplica como la de `scripts/lab/replica.ts`: Store temporal guardado ANTES del primer paso.
+ * Réplica como la de `scripts/lab/replica.ts`: Store temporal guardado ANTES del primer paso. Parte de
+ * `HISTORICAL_PARAMS` explícitos (reglas 10, etapa 1): la ley se midió sobre el mundo de antes, y con
+ * los defaults nuevos `CARRIL` heredaría además `poblacion.radioCortejo=128`.
  */
 function replica(t: { after(callback: () => void): void }, pasos: number, params?: string, seed = 51926): World {
   const directory = mkdtempSync(join(tmpdir(), 'atlas-aptitud-'));
   const store = new Store(join(directory, 'world.sqlite'));
   t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
-  const world = createWorld(seed, parseParams(params));
+  const world = createWorld(seed, parseParams(params, HISTORICAL_PARAMS));
   store.save(world);
   for (let tick = 1; tick <= pasos; tick++) stepWorld(world);
   return world;
@@ -41,15 +43,25 @@ function digestoSinAptitud(world: World): string {
   try { return digestoCanonico(world); } finally { setParams(world, vigentes); }
 }
 
-// Medidos en el padre `f666226` (sprint/noche-integra) con esta misma réplica, ANTES de tocar nada.
-const PADRE_DEFECTO_1200 = 'd7e173a1f4610463929ed8128f2006a04833a477b6712800585e070edc95a9d9';
+// Los hashes originales se midieron en el padre `f666226` (sprint/noche-integra), ANTES de la consolidación
+// R2; allí la forma de params y la etiqueta V10 (alias de fundación) aún no existían, así que dejaron de
+// corresponder en la propia base f2757fa (d7e173a1… y 47e0d511… fallaban ya allí). Regenerados el
+// 2026-09-22 (reglas 10, etapa 1) DESDE UNA EXPORTACIÓN LIMPIA de la base f2757fa, nunca desde el árbol
+// modificado, con la misma réplica (Store temporal, guardado antes del primer paso), campo `fisico`:
+//   git archive f2757fa | tar -x -C /tmp/base-f2757fa && ln -s "$PWD/node_modules" /tmp/base-f2757fa/node_modules \
+//     && cp scripts/lab/digesto-control.ts /tmp/base-f2757fa/scripts/lab/ && cd /tmp/base-f2757fa \
+//     && npx tsx scripts/lab/digesto-control.ts --seed 51926 --pasos 1200 --sin conducta.aptitud \
+//     && npx tsx scripts/lab/digesto-control.ts --seed 7 --pasos 1200 --params "$CARRIL" --sin conducta.aptitud
+// (en f2757fa `DEFAULT_PARAMS` es exactamente `HISTORICAL_PARAMS`).
+const PADRE_DEFECTO_1200 = '599f30e4dba17c1f46615d870496311a43dfd8ae8d6f5ae2558a2d17a58ae541';
 const CARRIL = 'persistencia.cadaTicks=300,poblacion.cortejo=1,poblacion.exigeComunidad=false,poblacion.comprobacionContinua=true,conducta.habituacion=0.35';
-const PADRE_CARRIL_SEMILLA7_1200 = '47e0d5111877ceb77ad532a1542d03d7c17a0a50e347ab01d8345b8976f01dae';
+const PADRE_CARRIL_SEMILLA7_1200 = '51595624213966fae231495c8a62b3c05d5eee894a0db65d28950a7e164de87d';
 
-test('(i) con aptitud=0 el mundo es bit a bit el del padre, con defaults y con los params del carril', { timeout: 2_800_000 }, t => {
-  assert.equal(DEFAULT_PARAMS.conducta.aptitud, 0);
+test('(i) con aptitud=0 el mundo es bit a bit el de antes, con params históricos y con los params del carril', { timeout: 2_800_000 }, t => {
+  assert.equal(DEFAULT_PARAMS.conducta.aptitud, 0, 'reglas 10 no adopta la aptitud');
+  assert.equal(HISTORICAL_PARAMS.conducta.aptitud, 0);
   const defecto = replica(t, 1200);
-  assert.equal(digestoSinAptitud(defecto), PADRE_DEFECTO_1200, 'semilla 51926, 1200 pasos, defaults: el estado físico no se movió');
+  assert.equal(digestoSinAptitud(defecto), PADRE_DEFECTO_1200, 'semilla 51926, 1200 pasos, params históricos: el estado físico no se movió');
   assert.notEqual(digestoCanonico(defecto), PADRE_DEFECTO_1200, 'el digesto completo sí cambia, sólo por declarar la clave (T102)');
   const carril = replica(t, 1200, CARRIL, 7);
   assert.equal(digestoSinAptitud(carril), PADRE_CARRIL_SEMILLA7_1200, 'semilla 7 con los params del carril y habituación 0,35: idéntico');

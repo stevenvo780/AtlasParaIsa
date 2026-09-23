@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { cloneWorld, createWorld, stepWorld, type World } from '../src/world/index.js';
 import { activate, maintainRegions, bindWorldContext, worldContext } from '../src/world/spatial.js';
-import { paramsOf, setParams } from '../src/world/params.js';
+import { HISTORICAL_PARAMS, paramsOf, setParams } from '../src/world/params.js';
 import { digestoCanonico } from '../src/world/digesto.js';
 import { generateChunk } from '../src/world/terrain.js';
 
@@ -81,9 +81,11 @@ function clonEstructural(world: World): World {
 }
 
 /** Un mundo con cola de chunks dormidos y lugares reanimados: los habitantes se mudan lejos
- * (retira el barrio de origen) y vuelven (reanima y republica sus lugares). */
+ * (retira el barrio de origen) y vuelven (reanima y republica sus lugares). La fixture se midió en el
+ * mundo de antes de reglas 10 y parte de `HISTORICAL_PARAMS` explícitos: con los defaults nuevos
+ * ninguna de las tres semillas comparte un lugar entre `places` y `chunks` a los 600 pasos. */
 function mundoEnvejecido(seed: number, pasos = 600): World {
-  const world = createWorld(seed);
+  const world = createWorld(seed, HISTORICAL_PARAMS);
   for (let tick = 0; tick < pasos; tick++) {
     if (tick === 100 || tick === 300) {
       const d = tick === 100 ? 400 : 16;

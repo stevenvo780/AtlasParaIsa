@@ -6,6 +6,7 @@ import { EcosystemKernel } from '../src/world/ecosystem-kernel.js';
 import { initializeEcosystem } from '../src/world/ecosystem.js';
 import { generateChunk } from '../src/world/terrain.js';
 import type { Tile } from '../src/shared/types.js';
+import { HISTORICAL_PARAMS } from '../src/world/params.js';
 
 /**
  * Control bit a bit del bucle caliente (R4, perfilado del kernel de ecología).
@@ -45,7 +46,8 @@ const huella = (valor: unknown): string => createHash('sha256').update(JSON.stri
 const huellaMundo = (world: World): string => huella({ tiles: world.tiles, people: world.people, animals: world.animals });
 
 test('600 pasos conservan la trayectoria declarada de 2026-09-22; el kernel aislado conserva su ley', () => {
-  const world = createWorld(51926);
+  // Reglas 10, etapa 1: la trayectoria declarada es la del mundo de antes (`HISTORICAL_PARAMS`).
+  const world = createWorld(51926, HISTORICAL_PARAMS);
   for (let paso = 0; paso < 600; paso++) stepWorld(world);
   // Founder expression/social/family/water corrections change routes and ecology
   // exposure. This new world baseline is documented; the kernel-only hash below is unchanged.

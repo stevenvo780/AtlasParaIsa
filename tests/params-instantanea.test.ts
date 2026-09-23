@@ -8,7 +8,7 @@ import { Store } from '../src/server/store.js';
 import { createApp } from '../src/server/app.js';
 import { encodeSnapshot } from '../src/server/snapshot.js';
 import { cloneWorld, createWorld, type World } from '../src/world/index.js';
-import { DEFAULT_PARAMS, paramsOf, parseParams, setParams } from '../src/world/params.js';
+import { DEFAULT_PARAMS, HISTORICAL_PARAMS, paramsOf, parseParams, setParams } from '../src/world/params.js';
 import { deploymentParams } from '../src/server/deployment-params.js';
 
 /** R8: los `WorldParams` viven en un WeakMap por instancia, así que un mundo recargado
@@ -56,7 +56,8 @@ test('los defaults actuales son explícitos y una instantánea legacy sin params
   delete antigua.params; delete antigua.paramsEncoding; delete antigua.limitsProfile;
   rewrite(store, JSON.stringify(antigua));
   const reopened = new Store(path);
-  try { assert.deepEqual(paramsOf(reopened.load()!.world), parseParams('limites.aplicacion=historicos'), 'sin campo, se conservan números y se declara su aplicación histórica'); }
+  // Reglas 10, etapa 1: sin campo rigen los params HISTÓRICOS, no los defaults de un mundo nuevo.
+  try { assert.deepEqual(paramsOf(reopened.load()!.world), parseParams('limites.aplicacion=historicos', HISTORICAL_PARAMS), 'sin campo, se conservan números y se declara su aplicación histórica'); }
   finally { reopened.close(); }
 });
 

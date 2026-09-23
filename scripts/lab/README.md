@@ -13,7 +13,11 @@ npx tsx scripts/lab/replica.ts --seed 51926 --dias 10 --params "cuerpo.riesgoSen
 - `--dias D` (opcional, por defecto `1`; entero ≥ 1). Un día son `TICKS_PER_DAY = 2400` ticks.
 - `--params "a.b=1,c.d=2"` (opcional): overrides de `WorldParams` (ver `src/world/params.ts`), en el
   mismo formato que acepta `parseParams` (pares punteados separados por comas, o JSON anidado/plano).
-  Sin `--params`, corre con `DEFAULT_PARAMS` (el comportamiento actual).
+  Sin `--params`, corre con `DEFAULT_PARAMS`: desde reglas 10, etapa 1 (2026-09-22), los defaults de un
+  mundo NUEVO (cortejo 2 con radio 128, comunidad opcional, muestreo continuo, habituación 0,35). Para medir
+  el mundo de antes: `--params "poblacion.cortejo=0,poblacion.radioCortejo=24,poblacion.exigeComunidad=true,poblacion.comprobacionContinua=false,conducta.habituacion=0"`
+  (= `HISTORICAL_PARAMS`). `scripts/lab/digesto-control.ts` mide el digesto de una réplica sobre la base
+  histórica, también en una exportación (`git archive`) de un commit anterior.
 - `--salida <dir>` (obligatorio): directorio donde se escriben `dia-NNN.json` (uno por día) y, al
   terminar, `replica.json`. Se crea si no existe.
 - `--gobernador no|servidor` (opcional, por defecto `no`): ver «Gobernador consciente del servidor»

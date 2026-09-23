@@ -5,7 +5,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../src/server/store.js';
 import { cloneWorld, createWorld, RULES_VERSION, stepWorld, type World } from '../src/world/index.js';
-import { parseParams, paramsOf } from '../src/world/params.js';
+import { HISTORICAL_PARAMS, parseParams, paramsOf } from '../src/world/params.js';
+
+/** Reglas 10, etapa 1 (2026-09-22): un mundo V9 es un mundo de antes, así que estas pruebas lo crean
+ * con `HISTORICAL_PARAMS` explícitos; los defaults de un mundo NUEVO adoptan el paquete de natalidad. */
 
 function laboratory(t: { after(callback: () => void): void }): { path: string; store: Store } {
   const directory = mkdtempSync(join(tmpdir(), 'atlas-reglas10-'));
@@ -18,7 +21,7 @@ test('un mundo V9 guardado por Store se recarga como V10 conservando todo salvo 
   // Control: el MISMO mundo guardado y recargado como V10. El Store archiva terreno dormido y
   // sella diarios al guardar, así que la comparación justa es contra ese viaje de ida y vuelta.
   const legacy = laboratory(t), control = laboratory(t);
-  const world = createWorld(51926);
+  const world = createWorld(51926, HISTORICAL_PARAMS);
   for (let n = 0; n < 120; n++) stepWorld(world);
   const current = cloneWorld(world);
   world.version = 9;
@@ -35,11 +38,11 @@ test('un mundo V9 guardado por Store se recarga como V10 conservando todo salvo 
   } finally { reopened.close(); reference.close(); }
 });
 
-for (const params of ['poblacion.comprobacionContinua=true', undefined]) test(`V10: el evento de fundación conserva sus actores aunque luego nazca alguien (${params ?? 'leyes por defecto'})`, { timeout: 900000 }, t => {
+for (const params of ['poblacion.comprobacionContinua=true', undefined]) test(`V10: el evento de fundación conserva sus actores aunque luego nazca alguien (${params ?? 'leyes históricas'})`, { timeout: 900000 }, t => {
   // Semilla 42: funda comunidades y pare dentro de 400 pasos; con comprobación continua el
   // nacimiento caía después de archivar el evento y `Store.save` abortaba (defecto de alias).
   const { store } = laboratory(t);
-  const world: World = createWorld(42, parseParams(params));
+  const world: World = createWorld(42, parseParams(params, HISTORICAL_PARAMS));
   assert.equal(world.version, 10);
   const founding = new Map<string, string[]>();
   const record = (): void => { for (const event of world.events) if (event.kind === 'community' && !founding.has(event.id)) founding.set(event.id, [...event.actors]); };
@@ -67,7 +70,7 @@ function sinAliasDeFundacion(world: World): string {
 /** Réplica de laboratorio (Store temporal, guardado antes del primer paso) con la etiqueta dada. */
 function replica(t: { after(callback: () => void): void }, version: number, pasos: number): World {
   const { store } = laboratory(t);
-  const world = createWorld(51926); world.version = version;
+  const world = createWorld(51926, HISTORICAL_PARAMS); world.version = version;
   store.save(world);
   for (let n = 0; n < pasos; n++) stepWorld(world);
   return world;

@@ -1,6 +1,6 @@
 import type { Tile } from '../shared/types.js';
 import { RULES_VERSION, type World } from '../world/index.js';
-import { DEFAULT_PARAMS, LEGACY_WORLD_LIMITS, PARAMETER_LIMITS_RULES_VERSION, WORLD_LIMIT_KEYS,
+import { DEFAULT_PARAMS, HISTORICAL_PARAMS, LEGACY_WORLD_LIMITS, PARAMETER_LIMITS_RULES_VERSION, WORLD_LIMIT_KEYS,
   assertWorldLimits, effectiveLimits, parseParams, type WorldLimits, type WorldParams } from '../world/params.js';
 import { exactJsonNumber, stringifyExact } from '../shared/exact-json.js';
 
@@ -12,10 +12,17 @@ export const LEGACY_SNAPSHOT_TILE_LIMIT = LEGACY_WORLD_LIMITS.teselasActivas;
  * que `load()` reconstruía el mundo desde JSON SIN ellos y volvía silenciosamente a
  * `DEFAULT_PARAMS`. Viajan en la instantánea como campo versionado y aparte del `World`:
  * el objeto del mundo sigue sin llevarlos. Una instantánea SIN campo usa los valores
- * históricos y declara ahora su modo de admisión histórico. */
+ * históricos y declara ahora su modo de admisión histórico.
+ *
+ * Reglas 10, etapa 1 (2026-09-22): «valores históricos» son `HISTORICAL_PARAMS`, nunca
+ * `DEFAULT_PARAMS`. Desde que los defaults de un mundo NUEVO adoptan el paquete de natalidad,
+ * completar una instantánea antigua con ellos le cambiaría las leyes en silencio. Los
+ * escritores históricos (reglas < 9) omitían el campo cuando los params eran los suyos por
+ * defecto, es decir los históricos: `LEGACY_PARAMS_BODY` es ese cuerpo, y un mundo viejo con
+ * los defaults NUEVOS sí declara sus params para no volver al leerse como histórico. */
 const PARAMS_ENCODING = 'params-v1';
-const LEGACY_PARAMS_BODY = stringifyExact({ ...DEFAULT_PARAMS, limites: LEGACY_WORLD_LIMITS });
-const HISTORICAL_DEFAULT_PARAMS = parseParams('limites.aplicacion=historicos');
+const LEGACY_PARAMS_BODY = stringifyExact({ ...HISTORICAL_PARAMS, limites: LEGACY_WORLD_LIMITS });
+const HISTORICAL_LIMIT_MODE_PARAMS = parseParams('limites.aplicacion=historicos', HISTORICAL_PARAMS);
 const FIELDS = ['x','y','terrain','moisture','vegetation','food','biome','elevation','wood','stone','feature','variety','growth','fertility','cultivation','traffic','drinkingWater','species','fauna','life'] as const;
 /** Only unreadable bytes justify trying an older checkpoint automatically. */
 export class SnapshotPhysicalError extends Error {}
@@ -113,10 +120,12 @@ export function encodeSnapshot(world: World, params: WorldParams = DEFAULT_PARAM
 }
 /**
  * Valida los parámetros sin modificar la instantánea. El `World` recibe sus leyes
- * con `setParams`, después de extraerlas. Sin campo ni perfil ⇒ defaults históricos,
+ * con `setParams`, después de extraerlas. Sin campo ni perfil ⇒ params históricos,
  * con modo explícito; no se activa una opción T102 reservada al migrar. Un campo presente se valida contra
  * `PARAM_RANGES` como cualquier entrada: un dígeste recalculado no legitima un
- * parámetro imposible.
+ * parámetro imposible. Las claves que el campo NO nombra se completan SIEMPRE con
+ * `HISTORICAL_PARAMS` (reglas 10, etapa 1), sea cual sea la versión de reglas: una
+ * instantánea sólo omite una clave si se escribió antes de que existiera.
  */
 function hasSnapshotLimitMode(record: Record<string, unknown>): boolean {
   const params = record.params as Record<string, unknown> | undefined;
@@ -132,9 +141,9 @@ export function retainSnapshotLimitMode(record: Record<string, unknown>): void {
 }
 
 export function readSnapshotParams(value: unknown): WorldParams {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return DEFAULT_PARAMS;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return HISTORICAL_PARAMS;
   const record = value as Record<string, unknown>;
-  const base = !Object.hasOwn(record, 'limitsProfile') && !hasSnapshotLimitMode(record) ? HISTORICAL_DEFAULT_PARAMS : DEFAULT_PARAMS;
+  const base = !Object.hasOwn(record, 'limitsProfile') && !hasSnapshotLimitMode(record) ? HISTORICAL_LIMIT_MODE_PARAMS : HISTORICAL_PARAMS;
   if (!('params' in record) && !('paramsEncoding' in record)) return base;
   const { params, paramsEncoding } = record;
   if (paramsEncoding !== PARAMS_ENCODING || !params || typeof params !== 'object' || Array.isArray(params)) throw new SnapshotSemanticError('Invalid snapshot parameter encoding. Explicit recovery required.');

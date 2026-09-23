@@ -1,5 +1,77 @@
 # Reglas del prototipo
 
+## Reglas 10 (2026-09-22)
+
+**Reglas 10** (protocolo 9, SQLite 4) llega en dos pasos. El primero ya estaba en la rama de la noche:
+la migración V9→V10 sólo cambia la etiqueta y, desde V10, el evento `community` guarda su propia copia
+de los miembros fundadores (defecto de alias descrito en «El embudo de natalidad», más abajo). La
+**etapa 1** (este apartado) cambia por primera vez los **defaults de un mundo NUEVO**: adopta el paquete
+de natalidad medido esa noche. Ninguna ley cambia para un mundo que ya existe.
+
+**Leyes adoptadas** (`RULES_10_ADOPTED` en `src/world/params.ts`; `DEFAULT_PARAMS` las lleva, `HISTORICAL_PARAMS` no):
+
+| Clave | Mundo nuevo | Histórico | Ley |
+| :--- | ---: | ---: | :--- |
+| `poblacion.cortejo` | 2 | 0 | Cortejo: quien está en edad fértil y recuerda un vínculo mutuo ≥ 0,3 con otra persona fértil y no emparentada que está fuera de `radioPareja` pero dentro de `radioCortejo` puede ir hacia ella (acción `approach`, puntuación `cortejo · (0,5 + vínculo/2)`). Cuesta el mismo movimiento que cualquier desplazamiento; no crea recursos ni garantiza un nacimiento, y hambre, sed y descanso siguen ganando cuando urgen |
+| `poblacion.radioCortejo` | 128 | 24 | Alcance del cortejo, en celdas. En la semilla 31337 los fértiles tienen pareja con vínculo mutuo a 55–140 celdas (mediana ≈ 105): con 24 hubo un solo nacimiento en 30 días; con 128, 11 nacimientos y 19 habitantes al día 10 |
+| `poblacion.exigeComunidad` | `false` | `true` | Reproducirse ya no exige pertenecer a una comunidad; la cría hereda la del progenitor `a`, o ninguna |
+| `poblacion.comprobacionContinua` | `true` | `false` | `reproduce()` mira cada paso en vez de cada 120; descuenta los nacimientos de la ventana móvil, así que el techo sigue siendo `nacimientosPorComprobacion` (2) por ventana de `intervaloComprobacionTicks` (120) pasos |
+| `conducta.habituacion` | 0,35 | 0 | Descuento por saciedad en la elección: resta `habituacion · (0,5 + curiosity) · share` a cada acción, con `share` = su fracción vitalicia en `activity` |
+
+**No se adoptan** (su default sigue siendo el histórico): `agua.memoria` = 1 (apagada; refutada fuera de
+muestra, bitácora 16:20: en 6 semillas no usadas para ajustarla, «sed 8 → 11, muertes 10 → 15 al día 8»;
+la mejora medida antes era ajuste a las semillas del diagnóstico), `conducta.aptitud` = 0, `social.radioConvivencia` = 0,
+`social.vinculoConvivencia` = 0, `genes.edadFundadoresMinDias`/`MaxDias` = 2/2 (la cohorte escalonada
+empeoró los nacimientos un 23–31 %), `poblacion.radioPareja` = 3, `poblacion.radioLugar` = 4 y las
+disputas en sus valores de siempre. `gobernador.politica` sigue en `techo`.
+
+**Evidencia** (laboratorio `scripts/lab/replica.ts`, sin gobernador, `persistencia.cadaTicks=300`; bitácora
+`docs/ops/noche-20260922-bitacora.md`). *Carriles* (6 semillas × 10 días, habitantes vivos al día 10,
+suma, radio de cortejo 24): params históricos 194; cortejo 1 + comunidad opcional + muestreo continuo +
+habituación 312; lo mismo con cortejo 2, 354 (semilla 7: 74 frente a 18; semilla 42: 45 frente a 16). El
+radio 128 superó a 64 en las 4 semillas del carril 3. *Ronda 2* (30 días,
+brazo «paquete sin memoria del agua» frente a control con los params históricos): al **día 10**, 14 de
+15 semillas (**93 %**) sostienen ≥ 16 habitantes, con **mediana 63**, frente al **82 %** y **mediana 21**
+del control en el corte usado para decidir. Recuento al cerrar esta etapa, con las réplicas de control
+relanzadas tras el incidente de disco: control 10 de 12 (83 %), mediana 27; en las 11 semillas con los dos
+brazos al día 10 el paquete supera al control en 9 (7: 92 frente a 18; 42: 42 / 16; 31337: 19 / 10;
+51926: 102 / 50; 11: 39 / 20; 99: 142 / 85; 256: 95 / 47; 777: 115 / 48; 2024: 35 / 21) y queda por
+debajo en 2 (1: 63 / 64; 20260919: 8 / 13). Con las reglas históricas la semilla 7 no pare a nadie en 3
+días; con los defaults nuevos sí (`tests/reglas10-defaults.test.ts`). **Lo que esto no acredita:** al día
+15 el corte parcial da 4 de 5 réplicas del paquete (mediana 63) frente a 5 de 10 del control (mediana 14),
+y la senescencia de la cohorte fundadora (días 12–20, ≈ 10–15 muertes por réplica) sigue siendo el muro
+para horizontes de 60 días. El paquete no alcanza SC-003 ≥ 0,6 ni cierra los criterios de terminado.
+
+**Compatibilidad histórica (obligatoria).** `HISTORICAL_PARAMS` (exportado, congelado) reproduce la
+conducta anterior a esta etapa: difiere de `DEFAULT_PARAMS` sólo en las cinco claves adoptadas, y es
+byte a byte el `DEFAULT_PARAMS` de la base `f2757fa`. Es la **base con que se completan las claves
+ausentes de cualquier instantánea** (`readSnapshotParams`, `src/server/snapshot.ts`), sea cual sea su
+versión de reglas: una instantánea V9 escrita por `main` —que no conoce ninguna clave de la noche— o una
+V10 a la que le falte una clave se recarga con el valor histórico, nunca con el default nuevo. Una
+instantánea sin campo de params recibe `HISTORICAL_PARAMS` con `limites.aplicacion=historicos`; los
+escritores de reglas < 9 omiten el campo sólo si sus params son los históricos. La migración V9→V10
+conserva tal cual los params persistidos (no inyecta ni revierte ninguna ley), y el despliegue
+(`deploymentParams`) sólo pisa las claves que `CARTA_PARAMS` nombra. Un mundo nuevo —`createWorld()` sin
+params, `parseParams()` sin base, el laboratorio sin `--params`, el servidor al generar un mundo— nace con
+los defaults nuevos. Única excepción deliberada: `gobernador.politica` vale `techo` también en
+`HISTORICAL_PARAMS`, porque el gobernador no es una ley del mundo (no entra en `stepWorld`; decide por el
+p95 de reloj del servidor) y su conducta anterior, `apagar`, es el defecto que extinguió el mundo público
+V7. Como cada versión publicada empieza un mundo nuevo, el mundo público de reglas 10 nacerá con estas
+leyes; reiniciar la misma versión conserva su mundo y sus leyes.
+
+Refutación: `tests/reglas10-defaults.test.ts` (una instantánea V9 de antes de esta etapa, sin ninguna clave
+de la noche, recarga como V10 con los params históricos y sigue 1200 pasos con el mismo digesto que la
+misma instantánea con los params históricos explícitos, mientras que con los defaults nuevos toma otra
+trayectoria; `createWorld()` nace con los defaults nuevos; `parseParams` sobre la base histórica devuelve
+los valores históricos; la semilla 7 pare en 3 días y dos corridas dan el mismo digesto). Los controles que
+miden «el mundo de antes» (`leyes-candidatas`, `rules-v10`, `rendimiento-identidad`, `agua-memoria`,
+`ley-aptitud`, `comunidades-vivas`, `agua`, `demography`, `kernel-digest` y las escenas de
+`family-forage-*`, `forage`, `survival-risk`, `cultural-chain`, `clon-acotado`) parten ahora de
+`HISTORICAL_PARAMS` explícitos y conservan sus hashes; los tres controles (i) de `agua-memoria`,
+`ley-aptitud` y `comunidades-vivas`, fijados antes de la consolidación y ya rotos en `f2757fa`, se
+regeneraron desde una exportación limpia de `f2757fa` (`git archive`) con `scripts/lab/digesto-control.ts`.
+Para correr el laboratorio con el mundo de antes: `--params "poblacion.cortejo=0,poblacion.radioCortejo=24,poblacion.exigeComunidad=true,poblacion.comprobacionContinua=false,conducta.habituacion=0"`.
+
 ## Candidato V9: competencia observada al preparar reservas
 
 Sobre V8 `eaa2709`, esta propuesta declara **reglas 9**, conservando protocolo 9 y
@@ -332,7 +404,7 @@ Estos resultados acreditan propiedades del modelo. No demuestran conciencia, una
 
 ## Parámetros del mundo (`src/world/params.ts`, sprint 2026-09-19)
 
-El módulo `src/world/params.ts` introduce la interfaz `WorldParams` para parametrizar de forma desacoplada la biología, genética, demografía, ecología y persistencia de la simulación. La configuración vive en un `WeakMap` asociado a la instancia de cada mundo sin alterar la estructura del objeto `World`, y se inicializa con `DEFAULT_PARAMS`, un objeto congelado cuyos valores reproducen el comportamiento previo bit a bit. La función `parseParams` procesa diccionarios, cadenas clave-valor o cadenas JSON, validando estrictamente cada parámetro contra los intervalos definidos en `PARAM_RANGES` y lanzando una excepción con un mensaje claro si alguna clave no existe o si el valor numérico queda fuera de rango.
+El módulo `src/world/params.ts` introduce la interfaz `WorldParams` para parametrizar de forma desacoplada la biología, genética, demografía, ecología y persistencia de la simulación. La configuración vive en un `WeakMap` asociado a la instancia de cada mundo sin alterar la estructura del objeto `World`, y se inicializa con `DEFAULT_PARAMS`, un objeto congelado cuyos valores reproducían el comportamiento previo bit a bit (desde reglas 10, etapa 1, lo reproduce `HISTORICAL_PARAMS`; `DEFAULT_PARAMS` son los defaults de un mundo nuevo, ver «Reglas 10» al principio). La función `parseParams` procesa diccionarios, cadenas clave-valor o cadenas JSON, validando estrictamente cada parámetro contra los intervalos definidos en `PARAM_RANGES` y lanzando una excepción con un mensaje claro si alguna clave no existe o si el valor numérico queda fuera de rango.
 
 **Los params viajan en la instantánea (R8, 2026-09-19).** Como viven en un `WeakMap` por instancia, un mundo reconstruido desde JSON los perdía: `load()` devolvía un mundo medido con `DEFAULT_PARAMS` aunque se hubiera guardado con otros, y la misma `assertWorld` que aprueba el mundo vivo podía rechazar su archivo. `encodeSnapshot` escribe ahora un campo versionado (`paramsEncoding: 'params-v1'`, `params`) junto a la instantánea —fuera del objeto `World`, que sigue sin llevarlos— y `load()` los restaura con `setParams` **antes** de la validación. Dos consecuencias explícitas: (a) **con los defaults no se escribe nada**, así que la instantánea de un mundo por defecto es bit a bit la de antes de esta ley, y toda instantánea sin campo —cualquiera anterior a R8— se lee como `DEFAULT_PARAMS`; (b) un campo presente se valida contra `PARAM_RANGES` como cualquier entrada: un dígeste recalculado no legitima un parámetro imposible (`Invalid snapshot parameters`).
 
@@ -395,13 +467,18 @@ no se calculan con memoria o CPU del host. El rango de un índice GPU no acredit
 ese dispositivo. Las etapas posteriores deben validar su capacidad real al conectarlas.
 
 El formato `params-v1` sigue siendo legible: un snapshot anterior completa las claves nuevas
-con estos defaults y conserva sus overrides históricos. Los defaults siguen sin ocupar un
+con sus valores históricos (`HISTORICAL_PARAMS` desde reglas 10, etapa 1; antes, estos defaults, que
+coincidían con ellos) y conserva sus overrides históricos. Los defaults siguen sin ocupar un
 campo en el snapshot; los overrides antiguos incorporan las nuevas claves al próximo guardado.
 `digestoCanonico` conserva todos los parámetros: añadir configuración cambia su hash aunque
 el estado físico sea igual. El control separado `scripts/verify-params-baseline.ts` compara
 estado completo, orden, aliases, `undefined` y bits numéricos frente a V7, sin debilitar ese digesto.
 
-| Parámetro | Default (calibrado 2026-09-19) | Rango | Ley que controla | Tarea |
+Los defaults de esta tabla son los de un mundo NUEVO. Desde reglas 10, etapa 1 (2026-09-22), cinco de
+ellos (marcados «reglas 10») difieren del valor histórico con que se completa una instantánea que no nombra
+la clave (`HISTORICAL_PARAMS`); en todas las demás filas default e histórico coinciden.
+
+| Parámetro | Default de un mundo nuevo | Rango | Ley que controla | Tarea |
 | :--- | :--- | :--- | :--- | :--- |
 | `cuerpo.longevidadBaseDias` | 11 | [4, 60] | Longevidad base para el cálculo de edad máxima | T001 · R3 |
 | `cuerpo.longevidadPorResiliencia` | 4 | [0, 20] | Aumento de longevidad por rasgo de resiliencia | T001 |
@@ -412,7 +489,8 @@ estado completo, orden, aliases, `undefined` y bits numéricos frente a V7, sin 
 | `cuerpo.cuidadoReduceRiesgo` | 0.6 | [0, 1] | Fracción de riesgo/desgaste mitigable por salud y vitalidad plenas | T010 |
 | `genes.varianzaFundadores` | 0.15 | [0, 1] | Varianza gaussiana del desplazamiento alélico de los fundadores (heterocigosis inicial) | T011 |
 | `genes.tasaMutacion` | 1 | [0, 10] | Multiplicador de la tasa de mutación en linajes | T011 |
-| `poblacion.maxima` | 40 | [1, 128] | Techo de crecimiento reproductivo (distinto del techo estructural `MAX_POPULATION=128`) | T012 |
+| `genes.edadFundadoresMinDias`, `genes.edadFundadoresMaxDias` | 2, 2 | [0.5, 30] (min ≤ max) | Condición inicial: edad de cada fundador mortal repartida de forma determinista en `[min, max]` días; 2 y 2 = los 4800 ticks de siempre (cohorte escalonada medida y no adoptada) | Hipótesis cohorte, noche 2026-09-22 |
+| `poblacion.maxima` | 1 000 000 | [1, 1 000 000] | Ya no es un tope de diseño (ruling R17, antes 40): el freno lo ponen el entorno y el gobernador; sigue siendo parámetro para el laboratorio | T012 · R17 |
 | `poblacion.intervaloComprobacionTicks` | 120 | [1, 10000] | Intervalo de ticks entre comprobaciones de reproducción | T001 |
 | `poblacion.nacimientosPorComprobacion` | 2 | [0, 20] | Nacimientos máximos generados por comprobación | T012 |
 | `recursos.capacidadBosque` | 1 | [0, 10] | Capacidad de carga (`K`) de vegetación y comida en bosque | T013 |
@@ -425,7 +503,7 @@ estado completo, orden, aliases, `undefined` y bits numéricos frente a V7, sin 
 | `persistencia.ventanaEventosTicks` | 0 (sin poda; abrir con `CARTA_PARAMS`) | [0, 1000000] | Ventana de retención temporal para la poda de eventos y chunks | T021 |
 | `agua.cuencas` | 0.4 | [0.05, 1] | Umbral de ruido de cuenca bajo el cual una tesela conserva su agua potable de origen | T035 |
 | `agua.memoria` | 1 (apagada) | [0, 1] | Sed prevista al llegar al último lugar con agua que vio (sed actual − agua que lleva + sed del camino a 6 pasos por celda) por encima de la cual, sin agua a la vista, emprende la vuelta; el recuerdo se renueva al ver o beber agua y se olvida al verlo seco | Noche 2026-09-22 (SED) |
-| `conducta.habituacion` | 0 | [0, 2] | Descuento por saciedad en la elección de acción: resta `habituacion · (0,5 + curiosity) · share`, con `share` = fracción vitalicia de esa acción en `activity` | Noche de ciencia 2026-09-22 |
+| `conducta.habituacion` | **0,35** (reglas 10; histórico 0) | [0, 2] | Descuento por saciedad en la elección de acción: resta `habituacion · (0,5 + curiosity) · share`, con `share` = fracción vitalicia de esa acción en `activity` | Noche de ciencia 2026-09-22 · reglas 10 |
 | `conducta.aptitud` | 0 | [0, 2] | Ventaja comparativa heredable: sin urgencias corporales (sed, hambre y cansancio ≤ 0,5), cada oficio suma `aptitud · (rasgo del oficio − media de los cinco rasgos de la persona)`; comer, beber, descansar, vínculos y provisión para crianza no son oficios | Ley DIV, noche 2026-09-22 |
 | `social.disputaNecesidad` | 0.65 | [0.1, 1] | Necesidad (máximo de hambre y sed) que exige `resourceDispute` a los dos implicados | Noche de ciencia 2026-09-22 |
 | `social.disputaEscasez` | 1 | [0.1, 20] | Multiplicador de los tres umbrales de stock de la disputa (0,06 comida · 0,12 agua · 1 fauna) | Noche de ciencia 2026-09-22 |
@@ -435,11 +513,14 @@ estado completo, orden, aliases, `undefined` y bits numéricos frente a V7, sin 
 | `social.ensenanzaRareza` | 0 | [0, 5] | Peso de la rareza al elegir qué receta enseñar: clave `gain + ensenanzaRareza · (1 − conocedores/vivos)` | Noche de ciencia 2026-09-22 |
 | `social.confianzaSalida` | 0.35 | [0, 1] | Confianza media con los pares por debajo de la cual se puede dejar una comunidad | Noche de ciencia 2026-09-22 |
 | `social.distanciaAlternativa` | 0.2 | [0, 1] | Distancia cultural máxima que puede tener una alternativa para contar como refugio al salir | Noche de ciencia 2026-09-22 |
+| `social.vinculoConvivencia` | 0 | [0, 0.01] | Vínculo mutuo que ganan por paso dos personas a ≤ 2 celdas, `vinculoConvivencia · sociabilidad media`, con techo (medido neutro, no adoptado) | Hipótesis cohorte, noche 2026-09-22 |
 | `social.radioConvivencia` | 0 | [0, 64] | Comunidades vivas: con > 0 la pertenencia sigue a la convivencia. Quien vive a más de este radio (celdas) del centro de su comunidad y tiene ≥ 2 vecinos de confianza de ella funda con ellos una nueva (fisión, con los requisitos de una fundación); quien tiene ≥ 2 vecinos de confianza de otra comunidad, y más que de la suya, pasa a ella; quien no tiene comunidad se une a la de la mayoría de sus vecinos de confianza. 0 = hoy: la pertenencia sólo cambia por `confianzaSalida` | Hipótesis COM, noche 2026-09-22 |
-| `poblacion.exigeComunidad` | `true` | booleano | Si reproducirse exige pertenecer a una comunidad; con `false` la cría hereda la del progenitor `a`, o ninguna | Noche de ciencia 2026-09-22 |
+| `poblacion.exigeComunidad` | **`false`** (reglas 10; histórico `true`) | booleano | Si reproducirse exige pertenecer a una comunidad; con `false` la cría hereda la del progenitor `a`, o ninguna | Noche de ciencia 2026-09-22 · reglas 10 |
 | `poblacion.radioPareja` | 3 | [1, 32] | Distancia máxima entre progenitores en `reproduce()`; es también la escala espacial de `pairAffinity` | Noche de ciencia 2026-09-22 |
 | `poblacion.radioLugar` | 4 | [1, 64] | Distancia máxima a un lugar compartido para que un nacimiento tenga sitio | Noche de ciencia 2026-09-22 |
-| `poblacion.comprobacionContinua` | `false` | booleano | Muestrea `reproduce()` cada paso en vez de cada `intervaloComprobacionTicks`; el techo por ventana no cambia | Noche de ciencia 2026-09-22 |
+| `poblacion.comprobacionContinua` | **`true`** (reglas 10; histórico `false`) | booleano | Muestrea `reproduce()` cada paso en vez de cada `intervaloComprobacionTicks`; el techo por ventana no cambia | Noche de ciencia 2026-09-22 · reglas 10 |
+| `poblacion.cortejo` | **2** (reglas 10; histórico 0) | [0, 5] | Peso con que una persona fértil busca a otra fértil, no emparentada y con vínculo mutuo ≥ 0,3 que está fuera de `radioPareja` pero dentro de `radioCortejo` (acción `approach`, puntuación `cortejo · (0,5 + vínculo/2)`); 0 = apagado | Noche 2026-09-22 · reglas 10 |
+| `poblacion.radioCortejo` | **128** (reglas 10; histórico 24) | [1, 128] | Alcance del cortejo, en celdas | Noche 2026-09-22 · reglas 10 |
 
 #### Leyes candidatas (noche de ciencia, 2026-09-22)
 

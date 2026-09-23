@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createWorld, stepWorld, tileAt, projectWorld, assertWorld, cloneWorld, type World } from '../src/world/index.js';
 import { parseGesture } from '../src/server/app.js';
+import { HISTORICAL_PARAMS } from '../src/world/params.js';
 
 function scene() {
   const world=createWorld(51926), person=world.people[2]!;
@@ -67,8 +68,10 @@ test('the forage command crosses both allowlists and ends after one paid harvest
   assert.equal(person.action,'drink'); assert.ok(person.thirst<0.99); assert.equal(world.people[2]!.command?.order,'forage');
 });
 
+// Reglas 10, etapa 1 (2026-09-22): fixture medida con las leyes de antes; parte de `HISTORICAL_PARAMS`
+// explícitos (los defaults nuevos adoptan cortejo, comunidad opcional, muestreo continuo y habituación).
 function familyScene() {
-  const world=createWorld(51926), a=world.people[2]!, b=world.people[3]!;
+  const world=createWorld(51926, HISTORICAL_PARAMS), a=world.people[2]!, b=world.people[3]!;
   for(const p of world.people) {
     p.x=10; p.y=20; p.target={x:10,y:20}; p.action='rest'; p.decisionAt=10000;
     p.hunger=p.thirst=p.fatigue=0.1; p.energy=0.95;

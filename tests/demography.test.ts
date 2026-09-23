@@ -7,7 +7,7 @@ import { demographicTraits, DEMOGRAPHY_TICKS_PER_DAY as DAY, initialDemography, 
 import { assertGenome, founderGenome, inheritGenome, localRandom, type Genome } from '../src/world/genetics.js';
 import { createWorld, projectWorld, stepWorld, type Person } from '../src/world/index.js';
 import { closeKin } from '../src/world/family.js';
-import { DEFAULT_PARAMS, PARAM_RANGES, parseParams, type WorldParams } from '../src/world/params.js';
+import { DEFAULT_PARAMS, HISTORICAL_PARAMS, PARAM_RANGES, parseParams, type WorldParams } from '../src/world/params.js';
 
 const safe: DemographicEnvironment = { exposure: 0, shelter: 0, protected: false, seed: 431, tick: 0, senescence: DEFAULT_PARAMS.cuerpo };
 function genome(resilience = 0.5, activity = 0.5, id = 'founder'): Genome {
@@ -292,11 +292,14 @@ function runDays(days: number, params?: WorldParams, seed = 51926): { world: Ret
 
 /** V8 trajectory: paid local family provisioning can change later choices.
  * Historical V7 hashes and paired controls: docs/REVISION-FAMILIA-V8-2026-09-22.md.
- * Longevity, work/food costs and reproduction gates themselves are unchanged. */
+ * Longevity, work/food costs and reproduction gates themselves are unchanged.
+ * Reglas 10, etapa 1 (2026-09-22): la trayectoria declarada es la del mundo de antes, así que el
+ * control y sus contrastes R3 corren sobre `HISTORICAL_PARAMS` explícitos (los defaults nuevos
+ * adoptan el paquete de natalidad y moverían el control sin que la longevidad cambiara). */
 const CONTROL_51926 = ['32969bf8a6c5fd01', '93a4fb6e74d7fec3', '3e1459914a7a5078'];
 
-test('3 días con defaults conservan la trayectoria demográfica declarada V8 el 2026-09-22', context => {
-  const { world, digests } = runDays(3);
+test('3 días con params históricos conservan la trayectoria demográfica declarada V8 el 2026-09-22', context => {
+  const { world, digests } = runDays(3, HISTORICAL_PARAMS);
   assert.deepEqual(digests, CONTROL_51926, 'cambió la trayectoria V8 declarada el 2026-09-22');
   context.diagnostic(JSON.stringify({ seed: 51926, dias: 3, digests, poblacion: world.people.length,
     nacimientos: world.totals.births, muertes: world.demographyDynamics.deaths, causas: world.demographyDynamics.causes }));
@@ -308,7 +311,7 @@ test('3 días con defaults conservan la trayectoria demográfica declarada V8 el
  * con 6 la vejez empieza el día 3,8 y haría falta una corrida de laboratorio. La sensibilidad con 6
  * se mide sobre la ley pura en tests/senescencia.test.ts. */
 test('R3: cuerpo.longevidadBaseDias llega hasta el mundo vivo y lo cambia', context => {
-  const corta = parseParams('cuerpo.longevidadBaseDias=4');
+  const corta = parseParams('cuerpo.longevidadBaseDias=4', HISTORICAL_PARAMS);
   const { world, digests } = runDays(3, corta);
   assert.notDeepEqual(digests, CONTROL_51926, 'acortar la vida 7 días no cambió el mundo: el param sigue sin lector');
   assert.notEqual(digests[2], CONTROL_51926[2]);
@@ -320,7 +323,7 @@ test('R3: cuerpo.longevidadBaseDias llega hasta el mundo vivo y lo cambia', cont
 });
 
 test('R3: senescenciaInicioFraccion llega hasta el mundo vivo y lo cambia', context => {
-  const { digests } = runDays(3, parseParams('cuerpo.senescenciaInicioFraccion=0.25'));
+  const { digests } = runDays(3, parseParams('cuerpo.senescenciaInicioFraccion=0.25', HISTORICAL_PARAMS));
   assert.notDeepEqual(digests, CONTROL_51926, 'adelantar la vejez no cambió el mundo: el param sigue sin lector');
   context.diagnostic(JSON.stringify({ seed: 51926, dias: 3, params: 'cuerpo.senescenciaInicioFraccion=0.25', digests }));
 });

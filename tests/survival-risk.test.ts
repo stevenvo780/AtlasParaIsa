@@ -4,9 +4,12 @@ import { createWorld, stepWorld, cloneWorld } from '../src/world/index.js';
 import { tileAt } from '../src/world/spatial.js';
 import { demographicTraits } from '../src/world/demography.js';
 import { BROKEN_CONDITION, constructionCost, constructionOpportunity } from '../src/world/inventions.js';
-import { parseParams, type WorldParams } from '../src/world/params.js';
+import { HISTORICAL_PARAMS, parseParams, type WorldParams } from '../src/world/params.js';
 
-function scene(role: 'neighbor' | 'S' = 'neighbor', params?: WorldParams) {
+// Reglas 10, etapa 1 (2026-09-22): estas escenas de supervivencia se midieron con las leyes de antes y
+// parten de `HISTORICAL_PARAMS` explícitos (los defaults nuevos adoptan cortejo, comunidad opcional,
+// muestreo continuo y habituación, que compiten con la búsqueda de comida y techo).
+function scene(role: 'neighbor' | 'S' = 'neighbor', params: WorldParams = HISTORICAL_PARAMS) {
   const world = createWorld(42, params), person = world.people.find(p => p.role === role)!;
   // Isolate the actor's own consumption from a neighbor feeding it first.
   for (const p of world.people) { p.inventory = 0; p.hunger = .2; }
@@ -271,7 +274,7 @@ test('protective rest still competes when no meal is needed and hunger search is
 // biome capacities, fertility decay, agua.cuencas) move this outcome — isolated testing confirmed only
 // genes.varianzaFundadores drives it. Pinning the old value keeps this a determinism control instead of
 // a referendum on the new genetic variance; the underlying rain/food trade-off is exercised elsewhere.
-const LEGACY_FOUNDER_DETERMINISM = parseParams('genes.varianzaFundadores=0');
+const LEGACY_FOUNDER_DETERMINISM = parseParams('genes.varianzaFundadores=0', HISTORICAL_PARAMS);
 test('the hungry search control with enough initial health reaches a meal and remains alive for 180 steps', () => {
   const { world, person } = emptyRoofLaboratory(1, LEGACY_FOUNDER_DETERMINISM), food = tileAt(world, { x: 33, y: 8 })!;
   person.demography.health = .12; food.terrain = 'meadow'; food.food = .9;

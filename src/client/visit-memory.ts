@@ -58,9 +58,25 @@ export function readVisitCounters(storage: VisitStorage, world: WorldInstanceVie
   } catch { return null; }
 }
 
+export const MAX_TEXTO_HITO = 400;
+/** Acota un hito a `max` caracteres sin partir una cita de la carta: la ley cita los recuerdos entre «»
+ * (world/index.ts) y un título cortado a medias ya no sería el de la carta. Si el corte cae dentro de una
+ * cita, se corta antes de ella y se marca con «…». */
+export function recortarHito(text: string, max = MAX_TEXTO_HITO): string {
+  if (text.length <= max) return text;
+  let cut = text.slice(0, max - 1), depth = 0, start = -1;
+  // Profundidad de «»: un título de la carta puede llevar sus propias comillas dentro de la cita.
+  for (let i = 0; i < cut.length; i++) {
+    if (cut[i] === '«') { if (depth++ === 0) start = i; } else if (cut[i] === '»' && depth > 0) depth--;
+  }
+  if (depth > 0) cut = cut.slice(0, start).trimEnd();
+  return `${cut}…`;
+}
+
 export function saveHitos(storage: VisitStorage, world: WorldInstanceView, hitos: readonly HitoGuardado[]): void {
   if (!validWorldInstanceId(world.instanceId)) return;
-  const bounded = hitos.slice(-MAX_HITOS_GUARDADOS).map(h => ({ id: String(h.id).slice(0, 100), tick: h.tick, kind: String(h.kind).slice(0, 20), text: String(h.text).slice(0, 400) }));
+  const bounded = hitos.slice(-MAX_HITOS_GUARDADOS)
+    .map(h => ({ id: String(h.id).slice(0, 100), tick: h.tick, kind: String(h.kind).slice(0, 20), text: recortarHito(String(h.text)) }));
   try { storage.setItem(KEY_HITOS, JSON.stringify({ version: 1, instanceId: world.instanceId, hitos: bounded })); } catch { /* Opcional. */ }
 }
 

@@ -5,7 +5,7 @@
 > del plan maestro del 23-09; el criterio de 100 días con 3 generaciones sigue siendo el objetivo
 > biológico, no una condición para reanudar). Ola 1 de la etapa B (T111–T113) y del bloque E.0
 > (T141–T143) ya fusionadas en `main` (`ff52c30`, `9a7913e`); la ola 2 de B (T115/T117/T120) queda
-> en espera porque el perfil a 700 habitantes (bitácora 23-09 18:05) no la señala como el coste
+> en espera porque el perfil a 700 habitantes (bitácora 23-09 17:50) no la señala como el coste
 > principal (decisión D4).
 
 **Input**: [spec.md](spec.md) + [plan.md](plan.md) + [research.md](research.md) + los 3 juicios y 4 mapas de `.superpowers/sdd/002/` · **Branch**: `002-mundo-ilimitado` (desde **`f30d528`**) · **Constitución**: manda.
@@ -78,7 +78,7 @@
 ### Etapa A en paralelo (worktrees desde Gate A0)
 
 - [ ] **T103** [P] [codex/gpt-5.6-sol · high] **Clon acotado: `retiredChunks` deja de clonarse en profundidad.**
-  **Nota 2026-09-23 (superada/reescribir)**: ARCH resolvió el crecimiento del archivo; PERF3 el clon por paso; el perfil a 700 habitantes (bitácora 23-09 18:05) muestra que el coste está en la enseñanza/recetas (20 %), fauna (13 %) y ecología (7 %), no en el halo/terreno.
+  **Nota 2026-09-23 (superada/reescribir)**: ARCH resolvió el crecimiento del archivo; PERF3 el clon por paso; el perfil a 700 habitantes (bitácora 23-09 17:50) muestra que el coste está en la enseñanza/recetas (20 %), fauna (13 %) y ecología (7 %), no en el halo/terreno.
   **Perfil real 2026-09-22:** tres bases envejecidas a5/13 días, en carga y tras19 pasos de cadencia20, conservan digestos y SQLite/WAL. El clon compartido dio p50 de19,94–33,53ms y p95 de29,28–47,00ms en la pasada final; no alcanza6,15/10ms. Dos pasadas e instrumento preservados, host compartido. [Informe](../../docs/REVISION-CLON-ENVEJECIDO-2026-09-22.md). La paridad está probada; **el gate de rendimiento sigue rojo**.
   **Preflight 2026-09-22:** la implementación ya está en V7. `scripts/verify-clone-trajectory.mts <repo>` compara el clon completo con el compartido en semillas 1/7/51926 durante 2400 ticks, clonando cada paso, guardando cada 20 y recargando en 1200/2400: digestos iguales y diez tablas durables iguales salvo snapshots. Hubo 568/535/391 pasos clonados con chunks pendientes, por lo que el control sí ejerce el cambio. [Resultados](../../docs/evidencia-2026-09-22/clone-trajectory.json). El banco previo de 65536 teselas dormidas era sintético; el perfil real posterior figura arriba y **T103 no se marca cerrado**.
   **Avance 2026-09-22 (noche):** fusionada en `n-INTEGRA` como parte de la Etapa A (orden de merge T103→T105→T106→T107→T108→T109→T104); la paridad de `digestoCanonico` está probada, pero el **gate de rendimiento sigue rojo**: las cifras objetivo de p50/p95 del clon no se alcanzaron en la integración. No se marca cerrada. Ver `docs/REVISION-NOCHE-2026-09-22.md` §d.
@@ -89,7 +89,7 @@
   · **Cierre**: digesto idéntico en 3 semillas y las dos cifras de p50/p95 alcanzadas.
 
 - [ ] **T104** [claude opus · high] **Punto de restauración y fuera el clon** (depende de T101 y T103). **La tarea más delicada de la etapa.**
-  **Nota 2026-09-23 (superada/reescribir)**: ARCH resolvió el crecimiento del archivo; PERF3 el clon por paso; el perfil a 700 habitantes (bitácora 23-09 18:05) muestra que el coste está en la enseñanza/recetas (20 %), fauna (13 %) y ecología (7 %), no en el halo/terreno.
+  **Nota 2026-09-23 (superada/reescribir)**: ARCH resolvió el crecimiento del archivo; PERF3 el clon por paso; el perfil a 700 habitantes (bitácora 23-09 17:50) muestra que el coste está en la enseñanza/recetas (20 %), fauna (13 %) y ecología (7 %), no en el halo/terreno.
   `stepOnce` (`src/server/app.ts:197-235`) deja de clonar cuando `motor.clonPorPaso=false`. La atomicidad del paso fallido se conserva con un punto de restauración.
   **Corrección 2026-09-19 (refutación R6, verificada — el texto anterior de esta tarea era falso y habría hecho escribir código contra una API inexistente)**: el punto de restauración **no puede ser el snapshot codificado**. Dos razones de código: (a) `store.lastSnapshotBytes` es **un número**, no el cuerpo — `store.ts:150` `lastSnapshotBytes = 0;` y `store.ts:774` `this.lastSnapshotBytes = Buffer.byteLength(body);`, y el cuerpo se descarta tras escribirlo (`app.ts:229` solo lo publica como `runtime.snapshotBytes`); (b) `encodeSnapshot` devuelve `{...world, retiredChunks: [], retiredLegacy: [], …}` (`snapshot.ts:25`), así que el mundo restaurado desde ese cuerpo **no tendría `retiredChunks`** y su `digestoCanonico` no coincidiría — justo el caso que la prueba (2) de abajo quiere cubrir. Elige **una** de estas dos, mide su coste y déjalo en el informe:
   · **Diario de deshacer** del paso (registro de las mutaciones, revertible en orden inverso), que además alimenta las páginas sucias de T132; o
@@ -274,7 +274,7 @@
 ## Etapa D — Deltas de persistencia y de red (en paralelo a B y C; solo depende de A)
 
 - [ ] **T131** [P] [gemini/pro · high] **Esquema v5, `technology_checkpoints` y poda de prefijo.**
-  **Nota 2026-09-23 (superada/reescribir)**: ARCH resolvió el crecimiento del archivo; PERF3 el clon por paso; el perfil a 700 habitantes (bitácora 23-09 18:05) muestra que el coste está en la enseñanza/recetas (20 %), fauna (13 %) y ecología (7 %), no en el halo/terreno.
+  **Nota 2026-09-23 (superada/reescribir)**: ARCH resolvió el crecimiento del archivo; PERF3 el clon por paso; el perfil a 700 habitantes (bitácora 23-09 17:50) muestra que el coste está en la enseñanza/recetas (20 %), fauna (13 %) y ecología (7 %), no en el halo/terreno.
   Migración **aditiva** `user_version` 4 → 5 con `technology_checkpoints(serial, tick, aggregate_body, prefix_digest, digest)`. Tras validar un checkpoint se adelanta el origen lógico del journal y se elimina el prefijo de `technology_executions`, conservando el digest de frontera como evidencia — el mismo patrón con el que `pruneChronicle` ya poda `events` (`store.ts:457-477`). Hoy el origen es inmutable (`technology-archive.ts:264-275`) y la única `DELETE` es hacia adelante (`:535`), de modo que **cada arranque repite la vida entera del mundo**.
   · **Ficheros**: `src/server/technology-archive.ts`, `src/server/store.ts` (migración y `assertTechnologySchema`), `tests/store-v5.test.ts` (nuevo).
   · **Tests**: una base v4 migra y sigue cargando; el digest de frontera prueba lo podado; una base con un prefijo podado y un digest incorrecto se rechaza con «Explicit recovery required.».

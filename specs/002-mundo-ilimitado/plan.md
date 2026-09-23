@@ -5,7 +5,7 @@
 > con 3 generaciones sigue siendo el objetivo biológico de `GOAL.md`, no una condición de reanudar.
 > La ola 1 de la etapa B (T111–T113) y del bloque E.0 (T141–T143) ya están fusionadas en `main`
 > (`ff52c30`, `9a7913e`); la ola 2 de B (T115/T117/T120) queda en espera porque el perfil a 700
-> habitantes (bitácora 23-09 18:05) no la señala como el coste principal (decisión D4). La etapa A
+> habitantes (bitácora 23-09 17:50) no la señala como el coste principal (decisión D4). La etapa A
 > está integrada en `main`; T103 y T104 quedan superadas por ARCH/PERF3 y ese perfil (nota en
 > [tasks.md](tasks.md)); siguen abiertas T100 (topes de anticorrupción) y el Gate A (T110). Este
 > documento conserva el diseño original: el estado de cada tarea está en [tasks.md](tasks.md) y lo

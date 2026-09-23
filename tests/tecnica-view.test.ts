@@ -26,4 +26,6 @@ test('M9: Oficios muestra la transmisión, la diversidad con su paso y nunca «P
   assert.doesNotMatch(html, /Proceso \d/);
   assert.doesNotMatch(html, /1 ejecuciones/);
   assert.match(origenReceta({ inventorId: 'neighbor-desconocido', tick: 2500 }), /^Inventada por un habitante que este navegador no ha visto el día 2\.$/);
+  assert.equal(origenReceta({}), '', 'sin autor no se dice nada');
+  assert.equal(origenReceta({ inventorId: 'neighbor-x' }), 'Inventada por un habitante que este navegador no ha visto.', 'sin paso no se inventa un día');
 });

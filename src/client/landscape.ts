@@ -1761,13 +1761,14 @@ export class Landscape {
     if (world.weather !== 'rain') return;
     const g = this.labelCtx, count = Math.min(VISUAL_BUDGET.rain, Math.ceil(this.cssW * this.cssH / 12500));
     const time = this.reduceMotion ? 0 : Math.floor(now / 85) * .085;
-    g.save(); g.scale(this.dpr, this.dpr); g.strokeStyle = 'rgba(211,232,223,.30)'; g.lineWidth = 1; g.beginPath();
+    g.save(); g.scale(this.dpr, this.dpr); g.fillStyle = 'rgba(211,232,223,.34)';
     for (let i = 0; i < count; i++) {
-      const x = (rnd(i, 0, 991) * this.cssW + time * 38) % this.cssW;
-      const y = (rnd(i, 1, 993) * this.cssH + time * 210) % this.cssH;
-      g.moveTo(x, y); g.lineTo(x + 2, y + 8); this.effects.rain++;
+      const x = Math.round((rnd(i, 0, 991) * this.cssW + time * 38) % this.cssW);
+      const y = Math.round((rnd(i, 1, 993) * this.cssH + time * 210) % this.cssH);
+      g.fillRect(x, y, 1, 3); g.fillRect(x + 1, y + 3, 1, 3); g.fillRect(x + 2, y + 6, 1, 2);
+      this.effects.rain++;
     }
-    g.stroke(); g.restore();
+    g.restore();
   }
 
   private drawEventAccents(now: number): void {

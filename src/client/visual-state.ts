@@ -8,9 +8,9 @@ export const EVENT_LIFETIME_MS = 2400;
 export function daylightAt(tick: number): { color: string; alpha: number; shadowX: number; shadowY: number; shadowAlpha: number } {
   const phase = ((tick % 2400) + 2400) % 2400;
   const stops = [
-    [0, 138, 153, 191, .34], [140, 248, 193, 150, .22], [340, 255, 249, 226, .03],
-    [1300, 255, 249, 226, .03], [1590, 240, 178, 135, .23], [1840, 117, 137, 192, .48],
-    [2220, 111, 133, 183, .49], [2400, 138, 153, 191, .34],
+    [0, 68, 84, 145, .60], [140, 248, 193, 150, .22], [340, 255, 249, 226, .03],
+    [1300, 255, 249, 226, .03], [1590, 240, 178, 135, .23], [1840, 73, 91, 158, .58],
+    [2220, 55, 72, 137, .64], [2400, 68, 84, 145, .60],
   ];
   const index = Math.max(0, stops.findIndex((stop, i) => i < stops.length - 1 && phase >= stop[0]! && phase < stops[i + 1]![0]!));
   const from = stops[index]!, to = stops[index + 1]!;

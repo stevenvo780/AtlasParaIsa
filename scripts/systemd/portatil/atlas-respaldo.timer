@@ -1,0 +1,7 @@
+[Unit]
+Description=Respaldo horario del mundo público (portátil)
+[Timer]
+OnCalendar=hourly
+Persistent=true
+[Install]
+WantedBy=timers.target

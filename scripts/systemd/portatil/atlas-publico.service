@@ -1,0 +1,12 @@
+[Unit]
+Description=Una Carta Para Isa — servidor público (atlas.humanizar.tech) en el portátil
+ConditionPathExists=%h/atlas-lab/mundos/v10-20260922/access.scrypt
+[Service]
+Type=simple
+ExecStart=%h/atlas-lab/publico.sh
+Restart=always
+RestartSec=5
+TimeoutStopSec=60
+KillSignal=SIGINT
+[Install]
+WantedBy=default.target

@@ -1,0 +1,11 @@
+[Unit]
+Description=Una Carta Para Isa — puente TCP del dominio (100.64.0.1:3000, torre) al servidor público del portátil (100.64.0.2:3000)
+After=network-online.target tailscaled.service
+Wants=network-online.target
+[Service]
+Type=simple
+ExecStart=/usr/bin/env node /datos/workspaces/personal/AtlasParaIsa/scripts/systemd/portatil/puente-tcp.mjs
+Restart=always
+RestartSec=5
+[Install]
+WantedBy=default.target

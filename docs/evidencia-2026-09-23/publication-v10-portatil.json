@@ -1,0 +1,56 @@
+{
+ "capturedAt": "2026-09-23T16:20:00+00:00",
+ "status": "published",
+ "kind": "same-world move to another host (no rules or code change)",
+ "codeRevision": "0ea15144ab248ab9236602c66d3254bea1ad22bb",
+ "decision": "Steven 2026-09-23: la torre queda solo como laboratorio; el público corre en su portátil",
+ "host": {
+  "machine": "portátil de Steven, Intel i7-12700H (6P+8E, 20 hilos), 38 GB, Fedora 44, Node 22.23.1",
+  "service": "atlas-publico.service (usuario, linger); ~/atlas-lab/publico.sh; drop-in prioridad.conf (CPUWeight/IOWeight 10000, CPUAffinity 0-11)",
+  "listen": "100.64.0.2:3000 (tailnet, zona trusted)",
+  "origin": "https://atlas.humanizar.tech",
+  "params": "CARTA_PARAMS=gobernador.presupuestoMs=5000 sobre PRODUCTION_PARAMS",
+  "credential": "access.scrypt (hash scrypt generado por scripts/access.ts leyendo la contraseña por tubería; nunca en claro)",
+  "backups": "atlas-respaldo.timer horario del portátil, DEST ~/atlas-lab/respaldos, RETENCION 48",
+  "route": "el proxy del dominio sigue apuntando a 100.64.0.1:3000 (torre); atlas-puente.service de la torre reenvía TCP a 100.64.0.2:3000. Un túnel SSH -L falló: SELinux del portátil impide a sshd conectar al puerto 3000"
+ },
+ "move": {
+  "towerStopped": "11:14:15 -05, servicio y timer de respaldo deshabilitados",
+  "finalState": {
+   "tick": 322800,
+   "people": 187,
+   "births": 677
+  },
+  "backup": "world-20260923-1114.sqlite.gz (respaldo.sh verificada tras detener), sha256 51e3470828cff924… idéntico en la torre y el portátil",
+  "worldInstanceId": "63033163-3a01-45cb-829a-004a0dc0ce65",
+  "downtime": "≈ 3 min (11:14:15 → 11:17:22)"
+ },
+ "liveChecks": {
+  "domainHealth": 200,
+  "assetsMatchCompiled": [
+   "/assets/index-D_icAyK7.js",
+   "/assets/index-DN5qGCjJ.css"
+  ],
+  "unauthenticatedWorldStatus": 401,
+  "lanProxyTower1762": 200,
+  "after": [
+   {
+    "t": "11:17:33",
+    "tick": 323500,
+    "people": 192,
+    "births": 685
+   },
+   {
+    "t": "11:18:34",
+    "tick": 324000,
+    "people": 198,
+    "births": 691
+   }
+  ]
+ },
+ "knownRisks": [
+  "el público depende de que el portátil siga encendido, sin suspender y en la tailnet",
+  "motor de un solo hilo: usa un núcleo del portátil; el reloj del mundo tope 10 pasos/s",
+  "la copia de la torre queda congelada en el tick 322 800: no arrancar atlas-servidor.service en la torre"
+ ]
+}

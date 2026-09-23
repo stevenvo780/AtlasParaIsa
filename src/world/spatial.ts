@@ -84,9 +84,41 @@ function retire(chunks: Chunk[], chunk: Chunk): void {
   if (archive.first.has(chunk.key)) archive.duplicates = true; else archive.first.set(chunk.key, chunk);
   archive.length = chunks.length;
 }
+
+/** T113 (c). Lo que `maintainRegions` sabe de `world.chunks`, asociado a la identidad de ese objeto:
+ * la secuencia de inserción de cada clave viva (el orden de `Object.entries`), cuántas celdas del
+ * alcance de alguien piden cada clave (`refs`), las claves que pidió cada habitante en su última
+ * posición y las que `activate` añadió desde la última vez. Tras cada llamada las claves vivas son
+ * exactamente las pedidas (`refs` > 0), así que sólo puede sobrar una clave cuyo `refs` acaba de
+ * llegar a cero o que se activó desde entonces: nada más se mira, y quien no se movió no cuesta
+ * nada. Fuera de `activate`/`maintainRegions` nadie añade ni quita claves de un `world.chunks` vivo:
+ * las migraciones, el Store, el clon y el punto de restauración ponen un objeto nuevo, que se relee
+ * entero una vez. */
+interface Presence { x: number; y: number; keys: string[]; stamp: number; }
+interface Regions { order: Map<string, number>; next: number; refs: Map<string, number>; people: Map<object, Presence>; stamp: number; added: string[]; }
+const regions = new WeakMap<Record<string, ChunkMeta>, Regions>();
+function regionsOf(chunks: Record<string, ChunkMeta>): Regions {
+  let state = regions.get(chunks);
+  if (!state) {
+    const keys = Object.keys(chunks);
+    state = { order: new Map(keys.map((key, i) => [key, i])), next: keys.length, refs: new Map(), people: new Map(), stamp: 0, added: keys };
+    regions.set(chunks, state);
+  }
+  return state;
+}
+function release(state: Regions, keys: readonly string[], zeroed: string[]): void {
+  for (const key of keys) {
+    const refs = state.refs.get(key)! - 1;
+    if (refs > 0) state.refs.set(key, refs); else { state.refs.delete(key); zeroed.push(key); }
+  }
+}
+const REACH = [-8, 0, 8] as const;
+
 export function activate(world: World, x: number, y: number, context: WorldContext = worldContext(world)): void {
   if (!validCoordinate(x) || !validCoordinate(y)) return;
-  const key = chunkKey(x, y);
+  activateChunk(world, chunkKey(x, y), x, y, context);
+}
+function activateChunk(world: World, key: string, x: number, y: number, context: WorldContext): void {
   if (world.chunks[key]) return;
   const pending = pendingIndex(world.retiredChunks, key);
   const { cx, cy } = chunkCoords(x, y);
@@ -100,6 +132,8 @@ export function activate(world: World, x: number, y: number, context: WorldConte
   const chunk = archived ? structuredClone(archived) : generateChunk(world.seed, cx, cy, cuencas);
   const { tiles, animals, structures, ...meta } = chunk;
   world.chunks[key] = meta;
+  const state = regions.get(world.chunks);
+  if (state) { state.order.set(key, state.next++); state.added.push(key); }
   const initialized=tiles.map(tile => initializeEcosystem(world.seed, tile, cuencas));
   const from = world.tiles.length;
   world.tiles.push(...initialized);
@@ -110,21 +144,47 @@ export function activate(world: World, x: number, y: number, context: WorldConte
 }
 /** Only agent neighborhoods advance ecology. Camera queries never call this function. */
 export function maintainRegions(world: World, context: WorldContext = worldContext(world)): void {
-  const needed = new Set<string>();
+  const state = regionsOf(world.chunks), stamp = ++state.stamp, zeroed: string[] = [];
+  let seen = 0;
   for (const person of world.people) {
-    for (const dx of [-8, 0, 8]) for (const dy of [-8, 0, 8]) {
+    const presence = state.people.get(person);
+    if (presence) {
+      if (presence.stamp !== stamp) { presence.stamp = stamp; seen++; }
+      // Sus celdas siguen pedidas y por tanto vivas: `activate` no haría nada.
+      if (presence.x === person.x && presence.y === person.y) continue;
+    }
+    const keys: string[] = [];
+    for (const dx of REACH) for (const dy of REACH) {
       const x = person.x + dx, y = person.y + dy;
       if (!validCoordinate(x) || !validCoordinate(y)) continue;
-      needed.add(chunkKey(x, y)); activate(world, x, y, context);
+      const key = chunkKey(x, y);
+      keys.push(key); state.refs.set(key, (state.refs.get(key) ?? 0) + 1);
+      activateChunk(world, key, x, y, context);
     }
+    if (!presence) { state.people.set(person, { x: person.x, y: person.y, keys, stamp }); seen++; continue; }
+    release(state, presence.keys, zeroed);
+    presence.x = person.x; presence.y = person.y; presence.keys = keys;
   }
+  if (seen !== state.people.size) {
+    for (const [person, presence] of state.people) if (presence.stamp !== stamp) { release(state, presence.keys, zeroed); state.people.delete(person); }
+  }
+  for (const key of state.added) zeroed.push(key);
+  state.added.length = 0;
+  if (!zeroed.length) return;
+  const stale: string[] = [];
+  for (const key of new Set(zeroed)) {
+    if (state.refs.has(key)) continue;
+    if (Object.hasOwn(world.chunks, key)) stale.push(key); else state.order.delete(key);
+  }
+  // Mismo orden que `Object.entries(world.chunks)`: el de inserción.
+  stale.sort((a, b) => state.order.get(a)! - state.order.get(b)!);
   const retired = new Set<string>();
   const detached = new Map<string, Chunk>();
-  for (const [key, meta] of Object.entries(world.chunks)) {
-    if (needed.has(key)) continue;
+  for (const key of stale) {
+    const meta = world.chunks[key]!;
     const chunk: Chunk = { ...meta, lifeVersion: 4, lastTick: world.tick, tiles: [], places: [], animals: [], structures: [] };
     retire(world.retiredChunks, chunk); detached.set(key, chunk);
-    delete world.chunks[key]; retired.add(key);
+    delete world.chunks[key]; retired.add(key); state.order.delete(key);
   }
   if (retired.size) {
     const byBlock = splitTileBlocks(world.tiles, first => detached.get(chunkKey(first.x, first.y))?.tiles);

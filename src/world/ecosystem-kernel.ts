@@ -97,7 +97,7 @@ export class EcosystemKernel {
     // T112: con `soaTerreno` la foto de `life` y la presencia van al SoA y los vecinos salen por aritmética;
     // no se retiene ninguna topología. Coordenadas fuera del dominio entero del SoA: camino de objetos.
     const store = options?.soaTerreno === true ? this.soaTopology(tiles) : null;
-    const length = tiles.length, cells = store?.cells;
+    const length = tiles.length, cells = store?.cells, living = store?.livingNeighborCounts(0.45), front = store?.lifeFront;
     let neighbors = NO_NEIGHBORS, lifeBefore = NO_LIFE;
     if (store === null) {
       const index = this.topologies.findIndex(topology => sameCoordinates(topology, tiles));
@@ -124,8 +124,7 @@ export class EcosystemKernel {
       const drinkingWater = tile.drinkingWater ?? 0, cultivation = tile.cultivation ?? 0, traffic = tile.traffic ?? 0;
       let livingNeighbors = 0, life: number;
       if (store !== null) {
-        const cell = cells![i];
-        life = store.lifeAt(cell); livingNeighbors = store.livingNeighbors(cell, 0.45);
+        life = front![cells![i]]; livingNeighbors = living![i];
       } else {
         life = lifeBefore[i];
         const base = i * 8;

@@ -68,6 +68,8 @@ export class TileStore {
   private fields: Elements[] = [];
   /** Tesela `i` de la última carga → celda. Scratch: se mide con el resto. */
   private cellsOf = new Int32Array(0);
+  /** Vecinas vivas por tesela de la última `livingNeighborCounts` (0‥8). Scratch. */
+  private counts = new Uint8Array(0);
   private loaded = 0;
   private mode: 'none' | 'life' | 'full' = 'none';
   private presentPages = 0;
@@ -89,7 +91,7 @@ export class TileStore {
   get lifeFront(): Float64Array { return this.lives[this.parity]!; }
 
   /** Bytes reservados de verdad: arena (con holgura de crecimiento), tablas de región y scratch. */
-  get bytes(): number { return this.arena.bytes + this.regions.bytes + this.cellsOf.byteLength; }
+  get bytes(): number { return this.arena.bytes + this.regions.bytes + this.cellsOf.byteLength + this.counts.byteLength; }
   get bytesPerTile(): number { return this.loaded ? this.bytes / this.loaded : 0; }
 
   /**
@@ -199,6 +201,42 @@ export class TileStore {
     return pages;
   }
   clearDirty(): void { this.dirty.fill(0); }
+
+  /**
+   * `livingNeighbors` de cada tesela de la última carga, en su orden, en una sola pasada con los arrays
+   * en variables locales: es la única lectura entre celdas de la ley y la que T115 repartirá por regiones.
+   */
+  livingNeighborCounts(threshold: number): Uint8Array {
+    if (this.counts.length < this.loaded) this.counts = new Uint8Array(Math.max(this.loaded, Math.ceil(this.counts.length * 1.25)));
+    const counts = this.counts, cells = this.cellsOf, stamps = this.presence.stamps, version = this.presence.version;
+    const life = this.lives[this.parity]!, around = this.around;
+    for (let i = 0; i < this.loaded; i++) {
+      const cell = cells[i]!, lx = cell & 15, ly = (cell >> 4) & 15;
+      let count = 0;
+      if (lx > 0 && lx < 15 && ly > 0 && ly < 15) {
+        if (stamps[cell - 17] === version && life[cell - 17]! >= threshold) count++;
+        if (stamps[cell - 16] === version && life[cell - 16]! >= threshold) count++;
+        if (stamps[cell - 15] === version && life[cell - 15]! >= threshold) count++;
+        if (stamps[cell - 1] === version && life[cell - 1]! >= threshold) count++;
+        if (stamps[cell + 1] === version && life[cell + 1]! >= threshold) count++;
+        if (stamps[cell + 15] === version && life[cell + 15]! >= threshold) count++;
+        if (stamps[cell + 16] === version && life[cell + 16]! >= threshold) count++;
+        if (stamps[cell + 17] === version && life[cell + 17]! >= threshold) count++;
+      } else {
+        const at = (cell >>> 8) * 9;
+        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+          if (dx === 0 && dy === 0) continue;
+          const nx = lx + dx, ny = ly + dy;
+          const target = around[at + (ny < 0 ? 0 : ny > 15 ? 6 : 3) + (nx < 0 ? 0 : nx > 15 ? 2 : 1)]!;
+          if (target < 0) continue;
+          const neighbor = (target << 8) | ((ny & 15) << 4) | (nx & 15);
+          if (stamps[neighbor] === version && life[neighbor]! >= threshold) count++;
+        }
+      }
+      counts[i] = count;
+    }
+    return counts;
+  }
 
   /** Cuántas de las 8 vecinas presentes tienen `life` (frente) ≥ `threshold`. */
   livingNeighbors(cell: number, threshold: number): number {

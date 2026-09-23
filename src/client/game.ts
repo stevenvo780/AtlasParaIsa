@@ -9,9 +9,20 @@ import { personLink, recentEvidence } from './world-evidence.js';
 import { retainViewState } from './view-state.js';
 import { animalActions, animalColors, componentNames, speciesNames, speciesPlural } from './life-art.js';
 import { technologyPane, recipeCard } from './technology-art.js';
-import { readWorldVisit, saveWorldVisit } from './visit-memory.js';
+import { readHitos, readVisitCounters, readWorldVisit, saveHitos, saveVisitCounters, saveWorldVisit, type HitoGuardado } from './visit-memory.js';
+import { enClaro } from './textos.js';
+import { CronicaBuffer, clasificar, contadoresDe, esHito, filtrar, momento, quienCedio, resumenDesdeVisita, type GrupoCronica } from './cronica.js';
 import { decidirModo, setModo, type Modo } from './modo.js';
-import { capasDeCalor, leyendaCalor, type Capa } from './calor.js';
+import { capasDeCalor, leyendaEnRango, rangoRecibido, type Capa } from './calor.js';
+import { ausenteEstado, demographicSummary, rotuloRecuento } from './censo-view.js';
+import { estadoCrecimiento, ritmo, ultimoFrenazo } from './gobernador-view.js';
+import { distribution, sparkline, statCard } from './charts.js';
+import { notaAcercamientos, seccionNacimientos } from './natalidad-view.js';
+import { seccionDesacuerdos, seccionJuntos } from './cooperacion-view.js';
+import { generacionMaxima, sinComunidad, vidasQueTerminaron } from './linaje-view.js';
+import { rotuloTerritorio, seccionTerritorio } from './territorio-view.js';
+import { enReposo } from './regiones.js';
+import { idDeRol, nombreConocido, olvidarVistos, recordarPersona, recordarVistos, visto } from './vistos.js';
 import './style.css';
 import './game.css';
 import './notebook.css';
@@ -28,24 +39,48 @@ let status: ConnectionStatus = 'connecting';
 let pending = false;
 let tool: 'plant' | 'invite' | 'remember' = 'plant';
 let lastVisit: number | null = null;
+/** M5: los episodios que este navegador recibió en esta visita (sin duplicados, acotados) y los hitos
+ * guardados en visitas anteriores de este mismo mundo (localStorage, como mucho 80). */
+const cronica = new CronicaBuffer();
+let hitosGuardados: HitoGuardado[] = [];
+let journalFilter: GrupoCronica | 'todo' = 'todo';
 let populationSignature = '', inspectorSignature = '', memorySignature = '';
 let statsTab: 'life' | 'land' | 'communities' | 'technology' | 'performance' = 'life';
+/** M2: modo de dibujo decidido al entrar; el HUD dice «cada 5 s (ligero)» en observador. */
+let modoActual: Modo = 'completo';
 let populationKind: 'people' | 'animals' = 'people';
 let notebook: Notebook | null = null;
 let inspectorTab: 'now' | 'kit' | 'story' = 'now';
 let focusedRecipe: string | null = null;
 /** Steps requested one by one: the snapshot only carries each procedure's identity and capacities. */
 const recipeDetails = new Map<string, TechnologyRecipe | null>();
-/** T036(h): biografías pedidas de una en una; el `state` sólo trae la identidad y el estado de ahora. */
-const personaDetails = new Map<string, PersonDetail | null>();
+/** T036(h): biografías pedidas de una en una; el `state` sólo trae la identidad y el estado de ahora.
+ * M3: cada ficha recuerda el paso en que llegó y se vuelve a pedir como mucho cada `PERSONA_REFRESCO`
+ * pasos (antes se borraba en cada paso y la ficha abierta se pedía ~10 veces por segundo). */
+const personaDetails = new Map<string, { detail: PersonDetail | null; tick: number }>();
+const PERSONA_REFRESCO = 20;
+/** M3: a quién estamos yendo a buscar fuera de la cámara; su ficha trae la posición exacta. */
+let buscando: string | null = null;
+/** M1: lo que el servidor contestó sobre cada identidad pedida (true = vive en el mundo servido). No caduca por tick:
+ * una muerte llega por `demography.recent`, que manda sobre este registro. */
+const personaVivo = new Map<string, boolean>();
 let soundContext: AudioContext | null = null;
 let soundTimer: ReturnType<typeof setTimeout> | undefined;
 const el = <T extends HTMLElement = HTMLElement>(id: string): T => document.getElementById(id) as T;
 const mobile = (): boolean => matchMedia('(max-width: 760px)').matches;
-function saveVisit(): void { if (world) try { saveWorldVisit(localStorage, world); } catch { /* Optional. */ } }
+function saveVisit(): void {
+  if (!world) return;
+  try {
+    saveWorldVisit(localStorage, world);
+    const counters = contadoresDe(world); if (counters) saveVisitCounters(localStorage, world, counters);
+    const vistos = new Map(hitosGuardados.map(h => [h.id, h]));
+    for (const event of cronica.todos()) if (esHito(event)) vistos.set(event.id, { id: event.id, tick: event.tick, kind: event.kind, text: event.text });
+    saveHitos(localStorage, world, [...vistos.values()].sort((a, b) => a.tick - b.tick));
+  } catch { /* Optional. */ }
+}
 function readVisit(current: WorldView): number | null { try { return readWorldVisit(localStorage, current); } catch { return null; } }
 function stopSound(): void { clearTimeout(soundTimer); if (soundContext) void soundContext.close(); soundContext = null; document.getElementById('sound-toggle')?.setAttribute('aria-pressed', 'false'); }
-function clean(): void { saveVisit(); connection?.stop(); landscape?.destroy(); stopSound(); connection = null; landscape = null; world = null; pending = false; following = false; control = 'inspect'; populationSignature = ''; inspectorSignature = ''; memorySignature = ''; statsTab = 'life'; populationKind = 'people'; }
+function clean(): void { capaMapa = 'none'; capaCalor = null; saveVisit(); connection?.stop(); landscape?.destroy(); stopSound(); connection = null; landscape = null; world = null; pending = false; following = false; control = 'inspect'; populationSignature = ''; inspectorSignature = ''; memorySignature = ''; statsTab = 'life'; populationKind = 'people'; }
 
 function loginScreen(message = ''): void {
   clean(); root.innerHTML = `<main class="entry-page"><div class="entry-monogram">${icon.leaf}<span>UN MUNDO PRIVADO POR DESCUBRIR</span></div><section class="entry-card" aria-labelledby="entry-title"><div class="letter-stamp" aria-hidden="true">I<span>PARA TI</span></div><p class="eyebrow">UN LUGAR PARA ENCONTRARNOS</p><h1 id="entry-title">Una carta<br>para <em>Isa.</em></h1><p class="entry-intro">Un mundo que crece.<br>Muchas vidas. Tu forma de recorrerlo.</p><form id="login-form"><label for="password">Contraseña privada</label><input id="password" name="password" type="password" autocomplete="current-password" required placeholder="La llave de este lugar"><button class="button primary entry-submit" type="submit">Entrar a la carta ${icon.arrow}</button><p id="login-error" class="form-message" role="status">${esc(message)}</p></form><div class="entry-footnote">${icon.leaf}<span>Lo pequeño también puede contener un mundo.</span></div></section><p class="entry-footer">UNA CARTA PARA ISA · ACCESO PRIVADO</p></main>`;
@@ -66,17 +101,18 @@ function syncModo(): Modo {
   const active = modo === 'observador';
   const button = el('modo-toggle');
   button.setAttribute('aria-pressed', String(active));
-  button.title = active ? 'Modo ligero activo: toca para volver al completo' : 'Activar el modo ligero para móviles lentos';
+  button.title = active ? 'Modo ligero activo: el mundo llega cada 5 s y se dibuja con menos detalle. Toca para volver al completo.' : 'Activar el modo ligero para móviles lentos';
+  button.setAttribute('aria-label', active ? 'Modo ligero activo (toca para volver al completo)' : 'Modo ligero para móviles lentos');
   return modo;
 }
 
 function enterWorld(): void {
-  clean(); lastVisit = null; status = 'connecting';
+  clean(); lastVisit = null; status = 'connecting'; cronica.clear(); hitosGuardados = []; journalFilter = 'todo';
   root.innerHTML = worldShell();
   notebook = new Notebook(el('game')); inspectorTab = 'now';
-  focusedRecipe = null; recipeDetails.clear(); personaDetails.clear();
-  const modo = syncModo();
-  connection = new Connection({ world: receiveWorld, status: value => { status = value; renderStatus(); }, pending: value => { pending = value; if (!value) landscape?.setPendingTarget(null); renderControls(); }, result: result => message(result.message, result.accepted), error: text => message(text, false), expired: () => loginScreen('La sesión terminó. Vuelve a entrar para ver la carta.'), recipe: (id, recipe) => { recipeDetails.set(id, recipe); if (statsTab === 'technology' && !el('stats-drawer').hidden) renderStats(); }, persona: (id, persona) => { personaDetails.set(id, persona); if (selected?.kind === 'person' && selected.id === id) { inspectorSignature = ''; renderInspector(); } } });
+  focusedRecipe = null; recipeDetails.clear(); personaDetails.clear(); personaVivo.clear(); olvidarVistos(); buscando = null;
+  const modo = syncModo(); modoActual = modo;
+  connection = new Connection({ world: receiveWorld, status: value => { status = value; renderStatus(); }, pending: value => { pending = value; if (!value) landscape?.setPendingTarget(null); renderControls(); }, result: result => message(result.message, result.accepted), error: text => message(text, false), expired: () => loginScreen('La sesión terminó. Vuelve a entrar para ver la carta.'), recipe: (id, recipe) => { recipeDetails.set(id, recipe); if (statsTab === 'technology' && !el('stats-drawer').hidden) renderStats(); }, persona: (id, persona) => { personaDetails.set(id, { detail: persona, tick: world?.tick ?? 0 }); personaVivo.set(id, persona !== null); if (persona) recordarPersona(persona, world?.tick ?? 0); llegoPersona(id, persona); if (selected?.kind === 'person' && selected.id === id) { inspectorSignature = ''; renderInspector(); } } });
   landscape = new Landscape(el<HTMLCanvasElement>('landscape'), pick, viewport => { connection?.setViewport(viewport); el('camera-coordinates').textContent = `${viewport.x + Math.floor(viewport.width / 2)}, ${viewport.y + Math.floor(viewport.height / 2)}`; }, () => { following = false; renderControls(); }, { modo });
   // T036(a): en observador el mundo llega cada 5 s (el servidor acota a 1000 ms) y el terreno se
   // dibuja en Canvas 2D: ni WebGL2 ni una cadencia que un móvil lento no puede sostener.
@@ -93,10 +129,31 @@ function drawer(name: Drawer, open?: boolean): void {
 }
 function syncPickingMode(): void { landscape?.setPickMode(control !== 'direct' && el('tool-drawer').hidden ? 'inspect' : 'ground'); }
 function choosePerson(id: string, focus = true): void {
-  const person = world?.people.find(p => p.id === id); if (!person) return;
+  const person = world?.people.find(p => p.id === id); if (!person) { irAPersona(id); return; }
+  buscando = null;
   inspectorTab = 'now'; toggleTasks(false); activePersonId = person.id; selected = { kind: 'person', id }; control = 'inspect'; following = false; landscape?.follow(null); landscape?.select(selected);
   if (focus) landscape?.focus(person.x, person.y);
   inspectorSignature = ''; renderInspector(); renderPopulation(); renderControls(); drawer('inspector', true); el('inspector-tab-now').focus({ preventScroll: true }); if (!pending) message('');
+}
+/** M3: seleccionar a alguien que no está en la cámara. Si murió hace poco se abre su despedida; si no,
+ * se centra la cámara en la última posición conocida y se pide su ficha, que trae la posición exacta.
+ * Cuando entra en cuadro, la ficha completa aparece sola (la selección ya es suya). */
+function irAPersona(id: string): void {
+  if (!world) return;
+  inspectorTab = 'now'; toggleTasks(false); activePersonId = id; selected = { kind: 'person', id }; control = 'inspect'; following = false; landscape?.follow(null); landscape?.select(selected);
+  const muerto = world.demography?.recent.some(entry => entry.id === id);
+  buscando = muerto ? null : id;
+  const known = visto(id);
+  if (!muerto && known?.x !== undefined && known.y !== undefined) landscape?.focus(known.x, known.y);
+  if (!muerto) connection?.requestPersona(id);
+  inspectorSignature = ''; renderInspector(); renderPopulation(); renderControls(); drawer('inspector', true); el('inspector-tab-now').focus({ preventScroll: true }); if (!pending) message('');
+}
+/** M3: respuesta de una ficha. Si íbamos a buscar a esa persona, la cámara va a su posición exacta. */
+function llegoPersona(id: string, persona: PersonDetail | null): void {
+  if (persona?.x !== undefined && persona.y !== undefined && persona.id === idDeRol('S', world)) landscape?.setHome({ x: persona.x, y: persona.y });
+  if (buscando !== id) return;
+  buscando = null;
+  if (persona?.x !== undefined && persona.y !== undefined) landscape?.focus(persona.x, persona.y);
 }
 function chooseAnimal(id: string, focus = true): void {
   const animal = world?.animals?.find(a => a.id === id); if (!animal) return;
@@ -141,6 +198,7 @@ function wire(): void {
   }
   el('letter-button').addEventListener('click', () => el<HTMLDialogElement>('letter-dialog').showModal());
   el('chronicle-button').addEventListener('click', () => { renderJournal(); el<HTMLDialogElement>('chronicle-dialog').showModal(); });
+  for (const chip of root.querySelectorAll<HTMLButtonElement>('[data-journal-filter]')) chip.addEventListener('click', () => { journalFilter = chip.dataset.journalFilter as typeof journalFilter; renderJournal(); });
   el('enter-landscape').addEventListener('click', () => { el<HTMLDialogElement>('letter-dialog').close(); el('landscape').focus(); });
   for (const dialog of root.querySelectorAll<HTMLDialogElement>('dialog')) dialog.querySelector('.dialog-close')!.addEventListener('click', () => dialog.close());
   el('modo-toggle').addEventListener('click', () => {
@@ -153,8 +211,9 @@ function wire(): void {
     location.reload();
   });
   el('logout-button').addEventListener('click', async () => { try { const response = await fetch('/api/logout', { method: 'POST', credentials: 'same-origin', signal: AbortSignal.timeout(10_000) }); if (!response.ok) throw new Error(); loginScreen(); } catch { loginScreen('Ocultamos la carta, pero no pudimos revocar la sesión. Vuelve a conectar para cerrar la sesión.'); } });
-  el('zoom-in').addEventListener('click', () => landscape?.zoom(1)); el('zoom-out').addEventListener('click', () => landscape?.zoom(-1)); el('map-reset').addEventListener('click', () => { following = false; landscape?.follow(null); landscape?.fit(); renderControls(); });
-  for (const role of ['S', 'I']) el(`focus-${role.toLowerCase()}`).addEventListener('click', () => { const p = world?.people.find(p => p.role === role); if (p) choosePerson(p.id); });
+  el('zoom-in').addEventListener('click', () => landscape?.zoom(1)); el('zoom-out').addEventListener('click', () => landscape?.zoom(-1)); el('map-reset').addEventListener('click', () => { following = false; landscape?.follow(null); const s = world?.people.find(p => p.role === 'S'); if (s) { landscape?.fit(); renderControls(); return; } irAPersona(idDeRol('S', world)); });
+  // M3: S e I se encuentran aunque estén fuera de la cámara (la ficha a demanda trae su posición).
+  for (const role of ['S', 'I'] as const) el(`focus-${role.toLowerCase()}`).addEventListener('click', () => choosePerson(idDeRol(role, world)));
   el('follow-toggle').addEventListener('click', () => { if (selected.kind === 'tile') return; following = !following; landscape?.follow(following ? selected.id : null, selected.kind); renderControls(); if (mobile()) drawer('inspector', false); });
   el('direct-toggle').addEventListener('click', () => { control = control === 'direct' ? 'inspect' : 'direct'; renderControls(); if (control === 'direct' && mobile()) drawer('inspector', false); });
   for (const button of root.querySelectorAll<HTMLButtonElement>('[data-order]')) button.addEventListener('click', () => sendCommand(button.dataset.order as Order));
@@ -162,13 +221,15 @@ function wire(): void {
   for (const button of root.querySelectorAll<HTMLButtonElement>('[data-gesture]')) button.addEventListener('click', () => { tool = button.dataset.gesture as typeof tool; control = 'inspect'; root.querySelectorAll('[data-gesture]').forEach(item => item.setAttribute('aria-pressed', String((item as HTMLElement).dataset.gesture === tool))); el('observe-tool').setAttribute('aria-pressed', 'false'); renderTool(); renderControls(); drawer('tool', true); });
   el('gesture-send').addEventListener('click', () => { const position = target(); if (position) send({ kind: tool, x: position.x, y: position.y, ...(tool === 'remember' ? { memoryId: el<HTMLSelectElement>('memory-select').value } : {}) }); });
   el('memory-select').addEventListener('change', renderTool);
-  el<HTMLSelectElement>('observation-layer').addEventListener('change', event => { const layer = (event.target as HTMLSelectElement).value as 'none' | 'moisture' | 'food'; landscape?.setLayer(layer); el('layer-explanation').textContent = layer === 'none' ? 'Agua, recursos y encuentros cambian las posibilidades.' : layer === 'food' ? 'Más dorado: más alimento. Inspecciona una casilla para ver su valor.' : 'Más azul: más humedad. Inspecciona una casilla para ver su valor.'; });
+  // M10: un solo selector de capas; el botón «Calor» y la tecla H recorren las mismas.
+  el<HTMLSelectElement>('observation-layer').addEventListener('change', event => aplicarCapa((event.target as HTMLSelectElement).value as CapaMapa));
   el<HTMLSelectElement>('person-select').addEventListener('change', event => choosePerson((event.target as HTMLSelectElement).value));
   el<HTMLSelectElement>('place-select').addEventListener('change', event => { const place = world?.places.find(p => p.id === (event.target as HTMLSelectElement).value); if (place) { selected = { kind: 'tile', x: place.x, y: place.y }; landscape?.focus(place.x, place.y); landscape?.select(selected); inspectorSignature = ''; renderInspector(); drawer('layer', false); drawer('inspector', true); } });
   el<HTMLFormElement>('tile-form').addEventListener('submit', event => { event.preventDefault(); const x = Number(el<HTMLInputElement>('tile-x').value), y = Number(el<HTMLInputElement>('tile-y').value); if (!Number.isInteger(x) || !Number.isInteger(y)) return; selected = { kind: 'tile', x, y }; following = false; landscape?.follow(null); landscape?.focus(x, y); landscape?.select(selected); inspectorSignature = ''; renderInspector(); renderTool(); drawer('inspector', true); });
   el('landscape').addEventListener('keydown', event => { const keyboard = event as KeyboardEvent; if (control !== 'direct' || keyboard.ctrlKey || keyboard.metaKey || keyboard.altKey || keyboard.repeat) return; const key = keyboard.key.toLowerCase(); const offsets: Record<string, [number, number]> = { w: [0, -1], a: [-1, 0], s: [0, 1], d: [1, 0] }; const offset = offsets[key], p = person(); if (!offset || !p) return; event.preventDefault(); sendCommand('move', { x: p.x + offset[0], y: p.y + offset[1] }); });
   el('game').addEventListener('keydown', event => { if ((event as KeyboardEvent).key === 'Escape') { if (!el('inspector-drawer').hidden && !el('task-palette').hidden) { toggleTasks(false); el('task-toggle').focus(); return; } if (control === 'direct') { control = 'inspect'; renderControls(); if (!el('inspector-drawer').hidden) el('direct-toggle').focus(); else el('landscape').focus(); return; } notebook?.close(); } });
   el('heat-button').addEventListener('click', () => cicloCalor());
+  el('growth-chip').addEventListener('click', () => { selectStatsTab('life'); drawer('stats', true); });
   document.addEventListener('keydown', event => {
     if (event.key.toLowerCase() !== 'h' || event.ctrlKey || event.metaKey || event.altKey || event.repeat) return;
     const focus = event.target as HTMLElement | null;
@@ -180,27 +241,44 @@ function wire(): void {
   el('sound-toggle').addEventListener('click', async () => { if (soundContext) { stopSound(); return; } try { soundContext = new AudioContext(); await soundContext.resume(); el('sound-toggle').setAttribute('aria-pressed', 'true'); sound(); } catch { stopSound(); message('No se pudo activar el sonido. Puedes explorar sin él.', false); } });
 }
 
+/** M10: la capa del mapa, única para Explorar, el botón «Calor» y la tecla H. */
+type CapaMapa = 'none' | Capa | 'humedad';
+const capasMapa: CapaMapa[] = ['none', ...capasDeCalor, 'humedad'];
+let capaMapa: CapaMapa = 'none';
 let capaCalor: Capa | null = null;
 
-/** Cicla null → comida → vegetación → agua → fertilidad → madera → null (tecla H y botón «Calor»). */
-function cicloCalor(): void {
-  const siguiente = capaCalor === null ? 0 : capasDeCalor.indexOf(capaCalor) + 1;
-  capaCalor = siguiente >= capasDeCalor.length ? null : capasDeCalor[siguiente]!;
-  landscape?.setCapaCalor(capaCalor);
+/** Cicla sin capa → comida → vegetación → agua → fertilidad → madera → humedad → sin capa. */
+function cicloCalor(): void { aplicarCapa(capasMapa[(capasMapa.indexOf(capaMapa) + 1) % capasMapa.length]!); }
+
+function aplicarCapa(capa: CapaMapa): void {
+  capaMapa = capa;
+  capaCalor = capa === 'none' || capa === 'humedad' ? null : capa;
+  landscape?.setLayer(capa === 'humedad' ? 'moisture' : 'none');
+  landscape?.setCapaCalor(capaCalor, capaCalor && world ? rangoRecibido(world.tiles, capaCalor) : null);
+  const select = document.getElementById('observation-layer') as HTMLSelectElement | null;
+  if (select && select.value !== capa) select.value = capa;
+  const explicacion = document.getElementById('layer-explanation');
+  if (explicacion) explicacion.textContent = capa === 'none' ? 'Agua, recursos y encuentros cambian las posibilidades.' : capa === 'humedad' ? 'Más azul: más humedad. Inspecciona una casilla para ver su valor.' : 'Más intenso: más valor, entre el mínimo y el máximo de lo que ves. La leyenda da los valores reales.';
   renderLeyendaCalor();
 }
 
 function renderLeyendaCalor(): void {
   const panel = document.getElementById('heat-legend');
   const boton = document.getElementById('heat-button');
-  boton?.setAttribute('aria-pressed', String(capaCalor !== null));
+  boton?.setAttribute('aria-pressed', String(capaMapa !== 'none'));
   if (!panel) return;
-  panel.hidden = capaCalor === null;
-  if (!capaCalor) { panel.innerHTML = ''; return; }
-  const leyenda = leyendaCalor(capaCalor);
+  panel.hidden = capaMapa === 'none';
+  if (capaMapa === 'none') { panel.innerHTML = ''; return; }
+  if (capaMapa === 'humedad') {
+    const tiles = world?.tiles ?? [];
+    const valores = tiles.map(t => t.moisture).filter(Number.isFinite);
+    panel.innerHTML = `<p class="eyebrow">CAPA DEL MAPA</p><h3>Humedad</h3><p class="heat-range">Más azul, más humedad.${valores.length ? ` En lo que ves va de ${esc(percentage(Math.min(...valores)))} a ${esc(percentage(Math.max(...valores)))}.` : ''}</p>`;
+    return;
+  }
+  const leyenda = leyendaEnRango(capaMapa, world ? rangoRecibido(world.tiles, capaMapa) : null);
   panel.innerHTML = `<p class="eyebrow">MAPA DE CALOR</p><h3>${esc(leyenda.titulo)}</h3><ul class="heat-stops">${leyenda.paradas
     .map(parada => `<li><i style="background:${parada.color}" aria-hidden="true"></i><span>${esc(parada.etiqueta)}</span></li>`)
-    .join('')}</ul>`;
+    .join('')}</ul><p class="heat-range">${esc(leyenda.nota)}</p>`;
 }
 
 function navigateEntity(event: MouseEvent): void {
@@ -236,22 +314,28 @@ function sound(): void {
 function receiveWorld(next: WorldView): void {
   // T036(g): un procedimiento puede reformularse mientras el mundo avanza. La caché describe un
   // paso concreto: al cambiar `tick` deja de ser válida y se vuelve a preguntar bajo demanda.
-  if (world !== null && next.tick !== world.tick) personaDetails.clear(); // las definiciones de receta son inmutables por id: no se invalidan por tick (T041)
+  // M3: la ficha a demanda ya no se borra en cada paso (ver PERSONA_REFRESCO); las definiciones de receta
+  // son inmutables por id y nunca se invalidan por tick (T041).
+  recordarVistos(next);
+  const sNow = next.people.find(p => p.role === 'S'); if (sNow) landscape?.setHome({ x: sNow.x, y: sNow.y });
   const first = world === null; world = next; landscape?.update(next); el('map-loading').hidden = true; el('world-day').textContent = `Día ${next.day}`; el('world-phase').textContent = `${phases[next.phase]}${next.weather === 'rain' ? ' · lluvia' : ''}`;
-  el('world-extent').textContent = next.infinite ? `${next.discoveredChunks ?? 0} regiones · ${next.settlementCount ?? 0} asentamientos` : 'Región inicial';
+  const territorio = rotuloTerritorio(next); el('world-extent').textContent = territorio.texto; el('world-extent').title = territorio.ayuda;
+  cronica.acumular(next.events);
   if (first) {
+    try { hitosGuardados = readHitos(localStorage, next); } catch { hitosGuardados = []; }
     lastVisit = readVisit(next);
     const p = next.people.find(p => p.role === 'S') ?? next.people[0]; if (p) { activePersonId = p.id; selected = { kind: 'person', id: p.id }; landscape?.select(selected); }
     if (!mobile()) drawer('inspector', true);
     if (lastVisit === null) el<HTMLDialogElement>('letter-dialog').showModal();
-    else { const events = next.events.filter(event => event.tick > lastVisit!).slice(-3).reverse(); if (events.length) { el('return-card').hidden = false; el('return-card').innerHTML = `<button class="icon-button" aria-label="Cerrar resumen de regreso">×</button><p class="eyebrow">DESDE TU ÚLTIMA VISITA</p><h2>El mundo siguió su camino.</h2><ul>${events.map(event => `<li>${esc(event.text)}</li>`).join('')}</ul>`; el('return-card').querySelector('button')!.addEventListener('click', () => { el('return-card').hidden = true; }); } }
+    else returnCard(next, lastVisit);
   }
   const memoryKey = JSON.stringify(next.memories); if (memoryKey !== memorySignature) { memorySignature = memoryKey; const old = el<HTMLSelectElement>('memory-select').value; el('memory-select').innerHTML = next.memories.map(m => `<option value="${esc(m.id)}">${esc(m.title)} · ${m.source === 'sample' ? 'prueba' : 'aprobado'}</option>`).join(''); if (next.memories.some(m => m.id === old)) el<HTMLSelectElement>('memory-select').value = old; }
   const places = el<HTMLSelectElement>('place-select'), oldPlace = places.value; const placesHtml = '<option value="">Un lugar de esta región</option>' + next.places.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join(''); if (places.innerHTML !== placesHtml) { places.innerHTML = placesHtml; places.value = oldPlace; }
+  if (capaMapa !== 'none') { if (capaCalor) landscape?.setCapaCalor(capaCalor, rangoRecibido(next.tiles, capaCalor)); renderLeyendaCalor(); }
   renderPopulation(); renderInspector(); renderStatus(); if (el<HTMLDialogElement>('chronicle-dialog').open) renderJournal();
 }
 function renderPopulation(): void {
-  if (!world) return; const search = el<HTMLInputElement>('population-search').value.toLocaleLowerCase('es'); const people = world.people.filter(p => `${p.name} ${p.specialty ?? ''}`.toLocaleLowerCase('es').includes(search));
+  if (!world) return; const search = el<HTMLInputElement>('population-search').value.toLocaleLowerCase('es'); const people = world.people.filter(p => `${p.name} ${p.specialty ?? ''} ${p.specialty ? enClaro(p.specialty, {}, 'especialidad') : ''}`.toLocaleLowerCase('es').includes(search));
   const fauna = populationKind === 'animals';
   el('population-heading').textContent = fauna ? 'Fauna' : 'Habitantes';
   el('population-search-label').textContent = fauna ? 'Buscar animal' : 'Buscar habitante';
@@ -261,25 +345,35 @@ function renderPopulation(): void {
   if (fauna) {
     const species = el<HTMLSelectElement>('species-filter').value;
     const animals = (world.animals ?? []).filter(a => (!species || species === a.species) && `${speciesNames[a.species]} ${a.id} ${animalActions[a.action]}`.toLocaleLowerCase('es').includes(search));
-    const signature = JSON.stringify(['animals', search, species, selected, animals.map(a => [a.id, a.species, a.action])]); el('population-count').textContent = String(world.animals?.length ?? 0);
+    const signature = JSON.stringify(['animals', search, species, selected, animals.map(a => [a.id, a.species, a.action])]); el('population-count').textContent = `${number(world.animals?.length ?? 0)} en esta vista`;
     el('population-note').textContent = `Individuos de la región recibida por la cámara. ${animals.length} coincidencias${animals.length > 80 ? '; se muestran las primeras 80, afina la búsqueda' : ''}. Sus necesidades guían su actividad; puedes observarlos y seguirlos.`;
     if (signature === populationSignature) return; populationSignature = signature;
-    el('population-list').innerHTML = animals.slice(0, 80).map(a => `<button class="population-person animal-row" data-animal="${esc(a.id)}" aria-pressed="${selected.kind === 'animal' && selected.id === a.id}"><span class="animal-avatar" style="--animal-color:${animalColors[a.species]}" aria-hidden="true">${animalSilhouette(a.species)}</span><span><strong>${speciesNames[a.species]}</strong><small>${animalActions[a.action]} · ${esc(a.id)}</small></span></button>`).join('') || '<p class="drawer-note">No hay animales que coincidan en esta región. Puedes recorrer el mapa o ampliar el filtro.</p>';
+    el('population-list').innerHTML = animals.slice(0, 80).map(a => `<button class="population-person animal-row" data-animal="${esc(a.id)}" aria-pressed="${selected.kind === 'animal' && selected.id === a.id}"><span class="animal-avatar" style="--animal-color:${animalColors[a.species]}" aria-hidden="true">${animalSilhouette(a.species)}</span><span><strong>${speciesNames[a.species]}</strong><small>${animalActions[a.action]} · generación ${esc(a.generation)}</small></span></button>`).join('') || '<p class="drawer-note">No hay animales que coincidan en esta región. Puedes recorrer el mapa o ampliar el filtro.</p>';
     return;
   }
-  el('population-note').textContent = 'Las habilidades cambian al practicar. Puedes observar o dar una orden.';
-  const signature = JSON.stringify([search, activePersonId, people.map(p => [p.id, p.name, p.specialty, p.action, p.controlMode])]); el('population-count').textContent = String(world.people.length); if (signature === populationSignature) return; populationSignature = signature;
-  el('population-list').innerHTML = people.map(p => `<button class="population-person" data-person="${esc(p.id)}" aria-pressed="${p.id === activePersonId}"><span class="person-avatar ${p.role === 'S' ? 'avatar-s' : p.role === 'I' ? 'avatar-i' : ''}">${esc(p.role === 'neighbor' ? p.name.slice(0, 1) : p.role)}</span><span><strong>${esc(p.name)}</strong><small>${esc(p.specialty ?? 'Aprendiendo su camino')}</small></span><span class="population-action">${p.controlMode === 'directed' ? icon.hand : icon.leaf}</span></button>`).join('') || '<p class="drawer-note">No hay habitantes que coincidan.</p>';
-  const select = el<HTMLSelectElement>('person-select'); select.innerHTML = '<option value="">Elige un habitante</option>' + world.people.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join(''); select.value = activePersonId;
+  // M1: `people` llega recortado a la cámara (protocolo 10); el total del mundo sale del censo.
+  el('population-count').textContent = rotuloRecuento(world);
+  el('population-note').textContent = 'La lista muestra a quien está en la cámara; el mundo tiene más vidas fuera de ella. Mueve el mapa o usa S e I para encontrar a otras. Las habilidades cambian al practicar.';
+  const signature = JSON.stringify([search, activePersonId, people.map(p => [p.id, p.name, p.specialty, p.action, p.controlMode])]); if (signature === populationSignature) return; populationSignature = signature;
+  el('population-list').innerHTML = people.map(p => `<button class="population-person" data-person="${esc(p.id)}" aria-pressed="${p.id === activePersonId}"><span class="person-avatar ${p.role === 'S' ? 'avatar-s' : p.role === 'I' ? 'avatar-i' : ''}">${esc(p.role === 'neighbor' ? p.name.slice(0, 1) : p.role)}</span><span><strong>${esc(p.name)}</strong><small>${esc(p.specialty ? enClaro(p.specialty, {}, 'especialidad') : 'Aprendiendo su camino')}</small></span><span class="population-action">${p.controlMode === 'directed' ? icon.hand : icon.leaf}</span></button>`).join('') || (world.people.length ? '<p class="drawer-note">No hay habitantes de esta vista que coincidan.</p>' : '<p class="drawer-note">No hay nadie en esta vista. El censo del mundo está en Mundo › Vida; mueve el mapa o usa S e I para encontrar a alguien.</p>');
+  const select = el<HTMLSelectElement>('person-select'); select.innerHTML = `<option value="">${world.people.length ? 'Elige a alguien de esta vista' : 'Nadie en esta vista'}</option>` + world.people.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join(''); select.value = activePersonId;
 }
 function replacePersonCard(html: string): void {
   const card = el('inhabitant-card');
   const restore = retainViewState(card);
   card.innerHTML = html;
   selectInspectorTab(inspectorTab, false);
-  el('selection-label').textContent = el('inspector-title').textContent;
-  el('inspector-toggle').setAttribute('aria-label', `Ficha de ${el('inspector-title').textContent}`);
+  syncSelectionLabel();
   restore();
+}
+/** M2: «IR A S I · Ficha». El botón de ficha no repite S o I (ya tienen su botón, que queda marcado). */
+function syncSelectionLabel(): void {
+  const title = el('inspector-title').textContent ?? '';
+  const selection = selected, role = selection.kind === 'person' ? world?.people.find(p => p.id === selection.id)?.role ?? visto(selection.id)?.role ?? (selection.id === idDeRol('S', world) ? 'S' : selection.id === idDeRol('I', world) ? 'I' : undefined) : undefined;
+  el('selection-label').textContent = role === 'S' || role === 'I' ? 'Ficha' : title;
+  el('inspector-toggle').setAttribute('aria-label', `Ficha de ${title}`);
+  el('focus-s').setAttribute('aria-pressed', String(role === 'S'));
+  el('focus-i').setAttribute('aria-pressed', String(role === 'I'));
 }
 function selectInspectorTab(tab: typeof inspectorTab, resetScroll = true): void {
   if (!document.getElementById(`inspector-section-${tab}`)) tab = 'now';
@@ -323,28 +417,40 @@ function renderInspector(): void {
     const p = person();
     if (!p) {
       const id = selected.id, legacy = world.demography?.recent.find(entry=>entry.id===id);
+      // M1: estar fuera de `people` no es morir. Solo `demography.recent` acredita una muerte; si no,
+      // se pregunta al servidor (la ficha a demanda mira el mundo entero) y se dice lo que contestó.
+      const estado = ausenteEstado(world, id, personaVivo.get(id));
+      const cachedAbsent = personaDetails.get(id);
+      if (estado === 'comprobando' || (estado === 'fuera' && (!cachedAbsent || world.tick - cachedAbsent.tick >= PERSONA_REFRESCO))) connection?.requestPersona(id);
       el('person-controls').hidden = true; el('person-primary').hidden = true; el('direct-toggle').hidden = true;
       el('inspector-tabs').hidden = true;
-      el('inspector-title').textContent = legacy?.name ?? 'Fuera de esta vista';
+      // S e I se llaman así en el mundo (createWorld); su botón ya lo dice aunque aún no se les haya visto.
+      const name = legacy?.name ?? nombreConocido(id, world) ?? (id === idDeRol('S', world) ? 'S' : id === idDeRol('I', world) ? 'I' : undefined);
+      el('inspector-title').textContent = name ?? 'Fuera de esta vista';
+      // M3: la posición exacta llega con la ficha a demanda; si no, la última en que se la vio.
+      const detail = cachedAbsent?.detail, known = visto(id);
+      const where = detail?.x !== undefined && detail.y !== undefined ? { x: detail.x, y: detail.y, exact: true } : known?.x !== undefined && known.y !== undefined ? { x: known.x, y: known.y, exact: false } : null;
+      const away = `<p class="game-reason" data-absent="fuera">Vive fuera de esta vista${where ? `, en ${esc(number(where.x))}, ${esc(number(where.y))}` : ''}.</p><p class="drawer-note">${buscando === id ? 'Yendo a su posición; la ficha completa aparece al entrar en cuadro.' : where && !where.exact ? `Última posición vista en esta visita (paso ${esc(number(known?.tick))}).` : 'Sigue en el mundo, fuera de la zona que muestra la cámara.'}</p>${buscando === id ? '' : `<button class="button secondary" data-person-link="${esc(id)}">${icon.focus} Ir a ${esc(name ?? 'su posición')}</button>`}`;
       // T036(b): la «Historia» de una identidad difunta es su contexto de muerte (FR-006). Un evento
       // sin campo `death` (crónica antigua) no dibuja nada, en vez de un hueco que parezca un dato.
       const farewell = world.events.find(event => event.kind === 'death' && event.actors.includes(id));
-      replacePersonCard(legacy ? `<p class="game-reason">Esta vida terminó en el paso ${esc(legacy.diedAt)}.</p><p class="drawer-note">${esc(deathCauses[legacy.cause] ?? legacy.cause)}</p><p class="drawer-note">Generación ${esc(legacy.generation)}. Su historia permanece en la crónica del mundo.</p>${farewell ? deathHistory(farewell) : ''}` : '<p class="drawer-note">Este habitante ya no aparece en el estado recibido.</p>');
+      replacePersonCard(legacy ? `<p class="game-reason">Esta vida terminó en el paso ${esc(legacy.diedAt)}.</p><p class="drawer-note">${esc(deathCauses[legacy.cause] ?? legacy.cause)}</p><p class="drawer-note">Generación ${esc(legacy.generation)}. Su historia permanece en la crónica del mundo.</p>${farewell ? deathHistory(farewell) : ''}` : estado === 'fuera' ? away : estado === 'no-servido' ? '<p class="drawer-note" data-absent="no-servido">El servidor no tiene ahora a esta identidad entre las vidas del mundo. Si murió hace tiempo, su despedida ya no está entre las 32 más recientes.</p>' : `<p class="drawer-note" data-absent="comprobando">${buscando === id ? 'Buscando su posición en el mundo…' : 'Fuera de esta vista. Comprobando con el servidor si sigue en el mundo…'}</p>`);
       if (following) { following=false; landscape?.follow(null); } control='inspect'; inspectorSignature='';return;
     }
     // T036(h): la biografía no viaja en el `state`; se pide al abrir la ficha y se cachea por tick.
-    if (!personaDetails.has(p.id)) connection?.requestPersona(p.id);
-    const persona = personaDetails.get(p.id) ?? undefined;
+    const cached = personaDetails.get(p.id);
+    if (!cached || world.tick - cached.tick >= PERSONA_REFRESCO || world.tick < cached.tick) connection?.requestPersona(p.id);
+    const persona = cached?.detail ?? undefined;
     const signature = JSON.stringify([p, persona ?? null, world.events.map(event => event.id), world.communities, world.blueprints, world.technology?.items.filter(item=>item.ownerId===p.id), world.technology?.knowledge?.find(entry=>entry.actorId===p.id) ?? null, world.technology?.recipes]); if (signature === inspectorSignature) return; inspectorSignature = signature;
     el('inspector-title').textContent = p.name; el('person-controls').hidden = false; el('person-primary').hidden = false; const source = world.memories.find(m => m.text === p.recentMemory)?.source;
-    const sections = inheritedAndLearned(persona ? { ...p, experiences: persona.experiences, trust: persona.trust } : p, world, persona?.recipeIds);
+    const sections = inheritedAndLearned(persona ? { ...p, experiences: persona.experiences, trust: persona.trust } : p, world, persona?.recipeIds, persona ?? null, id => cronica.get(id) ?? world?.events.find(event => event.id === id));
     const color = /^#[\da-f]{3,8}$/i.test(p.color) ? p.color : '#a4805b';
-    replacePersonCard(`<section id="inspector-section-now" role="tabpanel" aria-labelledby="inspector-tab-now"><div class="game-person-heading"><div class="pixel-portrait ${p.role === 'I' ? 'portrait-i' : ''}" style="--person-color:${color}" aria-hidden="true"><span class="pixel-body"></span></div><div><strong>${esc(p.specialty ?? 'Su camino está tomando forma')}</strong><span class="agency-state ${p.controlMode === 'directed' ? 'is-directed' : ''}">${p.controlMode === 'directed' ? 'Siguiendo una orden' : 'Actuando por su cuenta'}</span></div></div><p class="game-current-action">${actions[p.action]} <span>· ${esc(p.x)}, ${esc(p.y)}</span></p><p class="game-reason">${esc(p.reason)}</p><div class="game-needs"><h3>Ahora necesita ${esc(p.need.toLocaleLowerCase('es'))}</h3>${meter('Energía', p.energy)}${meter('Hambre', p.hunger)}${p.thirst === undefined ? '' : meter('Sed', p.thirst)}${meter('Cansancio', p.fatigue)}</div>${destinationLink(p)}${sections.now}</section><section id="inspector-section-kit" role="tabpanel" aria-labelledby="inspector-tab-kit"><h3 class="section-title">Lo que lleva y sabe hacer</h3><div class="material-pouch"><span>${icon.leaf}<strong>${number(p.materials?.wood)}</strong> madera</span><span>${icon.hammer}<strong>${number(p.materials?.stone)}</strong> piedra</span></div>${personBlueprint(p, world) ? `<details class="person-detail" data-detail="blueprint"><summary>Proyecto que sabe construir</summary>${blueprintCard(personBlueprint(p, world)!, world)}</details>` : ''}${sections.kit}</section><section id="inspector-section-story" role="tabpanel" aria-labelledby="inspector-tab-story"><h3 class="section-title">Una vida entre otras</h3>${sections.story}${recentEvidence(world, p.id)}${p.recentMemory ? `<details class="person-detail memory-detail" data-detail="memory"><summary>Algo que lleva consigo</summary><p>${esc(p.recentMemory)}</p><small>${source === 'sample' ? 'RECUERDO DE PRUEBA · NO ES BIOGRAFÍA' : source === 'approved' ? 'RECUERDO APROBADO' : 'EXPERIENCIA DEL MUNDO SIMULADO'}</small></details>` : ''}</section>`);
+    replacePersonCard(`<section id="inspector-section-now" role="tabpanel" aria-labelledby="inspector-tab-now"><div class="game-person-heading"><div class="pixel-portrait ${p.role === 'I' ? 'portrait-i' : ''}" style="--person-color:${color}" aria-hidden="true"><span class="pixel-body"></span></div><div><strong>${esc(p.specialty ? enClaro(p.specialty, {}, 'especialidad') : 'Su camino está tomando forma')}</strong><span class="agency-state ${p.controlMode === 'directed' ? 'is-directed' : ''}">${p.controlMode === 'directed' ? 'Siguiendo una orden' : 'Actuando por su cuenta'}</span></div></div><p class="game-current-action">${actions[p.action]} <span>· ${esc(p.x)}, ${esc(p.y)}</span></p><p class="game-reason">${esc(enClaro(p.reason, { world }))}</p><div class="game-needs"><h3>Ahora necesita ${esc(p.need.toLocaleLowerCase('es'))}</h3>${meter('Energía', p.energy)}${meter('Hambre', p.hunger)}${p.thirst === undefined ? '' : meter('Sed', p.thirst)}${meter('Cansancio', p.fatigue)}</div>${destinationLink(p)}${sections.now}</section><section id="inspector-section-kit" role="tabpanel" aria-labelledby="inspector-tab-kit"><h3 class="section-title">Lo que lleva y sabe hacer</h3><div class="material-pouch"><span>${icon.leaf}<strong>${number(p.materials?.wood)}</strong> madera</span><span>${icon.hammer}<strong>${number(p.materials?.stone)}</strong> piedra</span></div>${personBlueprint(p, world) ? `<details class="person-detail" data-detail="blueprint"><summary>Proyecto que sabe construir</summary>${blueprintCard(personBlueprint(p, world)!, world)}</details>` : ''}${sections.kit}</section><section id="inspector-section-story" role="tabpanel" aria-labelledby="inspector-tab-story"><h3 class="section-title">Una vida entre otras</h3>${sections.story}${recentEvidence(world, p.id, cronica.todos())}${p.recentMemory ? `<details class="person-detail memory-detail" data-detail="memory"><summary>Algo que lleva consigo</summary><p>${esc(source ? p.recentMemory : enClaro(p.recentMemory, { world }))}</p><small>${source === 'sample' ? 'RECUERDO DE PRUEBA · NO ES BIOGRAFÍA' : source === 'approved' ? 'RECUERDO APROBADO' : 'EXPERIENCIA DEL MUNDO SIMULADO'}</small></details>` : ''}</section>`);
   } else {
     const position = selected, tile = world.tiles.find(t => t.x === position.x && t.y === position.y); el('person-controls').hidden = true; el('person-primary').hidden = true;
     if (!tile) { el('inspector-title').textContent = 'Otra región'; replacePersonCard('<p class="drawer-note">Esperando esta parte del paisaje. Recorrer con la cámara no añade hechos a la crónica.</p>'); return; }
-    const place = world.places.find(p => Math.hypot(p.x - tile.x, p.y - tile.y) < 1.5); const structures = world.structures?.filter(s => s.x === tile.x && s.y === tile.y) ?? []; const signature = JSON.stringify([tile, place, structures, world.blueprints, world.animals?.filter(a => a.x === tile.x && a.y === tile.y)]); if (signature === inspectorSignature) return; inspectorSignature = signature; el('inspector-title').textContent = place?.name ?? terrains[tile.terrain];
-    replacePersonCard(`<p class="tile-biome">${esc(biomes[tile.biome ?? ''] ?? terrains[tile.terrain])} <span>· ${esc(tile.x)}, ${esc(tile.y)}</span></p>${structures.map(structure=>structureCard(structure, world)).join('')}${structures.length ? '<details class="person-detail" data-detail="structure-ground"><summary>Suelo y recursos del lugar</summary>' : ''}<p class="game-reason">${esc((structures.length ? undefined : place?.description) ?? 'El terreno y los recursos abren posibilidades distintas para cada habitante.')}</p><div class="game-needs"><h3>Recursos del lugar</h3>${meter('Humedad', tile.moisture)}${meter('Vegetación', tile.vegetation)}${meter('Alimento', tile.food)}</div><div class="material-pouch"><span>${icon.leaf}<strong>${resourceQuantity(tile.wood ?? 0)}</strong> madera</span><span>${icon.hammer}<strong>${resourceQuantity(tile.stone ?? 0)}</strong> piedra</span></div><div class="tile-facts">${tile.drinkingWater !== undefined ? `<span>Agua en el terreno<strong>${resourceQuantity(tile.drinkingWater)} u.</strong></span>` : ''}${world.animals === undefined && tile.species && tile.fauna !== undefined ? `<span>${esc(({ hare: 'Liebres', deer: 'Venados', boar: 'Jabalíes', fish: 'Peces' } as Record<string, string>)[tile.species] ?? tile.species)}<strong>${number(tile.fauna)} animales</strong></span>` : ''}${tile.cultivation !== undefined ? `<span>Cultivo<strong>${percentage(tile.cultivation)}</strong></span>` : ''}${tile.fertility !== undefined ? `<span>Fertilidad<strong>${percentage(tile.fertility)}</strong></span>` : ''}${tile.traffic !== undefined ? `<span>Huellas de paso<strong>${number(tile.traffic, 1)}</strong></span>` : ''}</div>${structures.length ? '</details>' : ''}${world.animals ? `<p class="drawer-note">${world.animals.filter(a => a.x === tile.x && a.y === tile.y).length} animales individuales en esta casilla.</p>` : ''}${place ? `<p class="drawer-note">${place.gatherings} encuentros registrados aquí.</p>` : ''}<p class="drawer-note">Selecciona un habitante para dar una orden; usa las herramientas para intervenir en esta casilla.</p>`);
+    const place = world.places.find(p => Math.hypot(p.x - tile.x, p.y - tile.y) < 1.5); const structures = world.structures?.filter(s => s.x === tile.x && s.y === tile.y) ?? []; const reposo = enReposo(world, tile.x, tile.y) === true; const signature = JSON.stringify([tile, place, structures, world.blueprints, world.animals?.filter(a => a.x === tile.x && a.y === tile.y), reposo]); if (signature === inspectorSignature) return; inspectorSignature = signature; el('inspector-title').textContent = place?.name ?? (reposo ? biomes[tile.biome ?? ''] ?? terrains[tile.terrain] : terrains[tile.terrain]);
+    replacePersonCard(`<p class="tile-biome">${esc(biomes[tile.biome ?? ''] ?? terrains[tile.terrain])} <span>· ${esc(tile.x)}, ${esc(tile.y)}</span></p>${reposo ? '<p class="rest-zone-note" data-rest-zone>Zona en reposo: el servidor no simula esta región ahora; lo que ves es su estado guardado o una vista previa generada con la semilla. Cambiará cuando alguien llegue.</p>' : ''}${structures.map(structure=>structureCard(structure, world)).join('')}${structures.length ? '<details class="person-detail" data-detail="structure-ground"><summary>Suelo y recursos del lugar</summary>' : ''}<p class="game-reason">${esc((structures.length ? undefined : place?.description) ?? 'El terreno y los recursos abren posibilidades distintas para cada habitante.')}</p><div class="game-needs"><h3>Recursos del lugar</h3>${meter('Humedad', tile.moisture)}${meter('Vegetación', tile.vegetation)}${meter('Alimento', tile.food)}</div><div class="material-pouch"><span>${icon.leaf}<strong>${resourceQuantity(tile.wood ?? 0)}</strong> madera</span><span>${icon.hammer}<strong>${resourceQuantity(tile.stone ?? 0)}</strong> piedra</span></div><div class="tile-facts">${tile.drinkingWater !== undefined ? `<span>Agua en el terreno<strong>${resourceQuantity(tile.drinkingWater)} u.</strong></span>` : ''}${world.animals === undefined && tile.species && tile.fauna !== undefined ? `<span>${esc(({ hare: 'Liebres', deer: 'Venados', boar: 'Jabalíes', fish: 'Peces' } as Record<string, string>)[tile.species] ?? tile.species)}<strong>${number(tile.fauna)} animales</strong></span>` : ''}${tile.cultivation !== undefined ? `<span>Cultivo<strong>${percentage(tile.cultivation)}</strong></span>` : ''}${tile.fertility !== undefined ? `<span>Fertilidad<strong>${percentage(tile.fertility)}</strong></span>` : ''}${tile.traffic !== undefined ? `<span>Huellas de paso<strong>${number(tile.traffic, 1)}</strong></span>` : ''}</div>${structures.length ? '</details>' : ''}${world.animals ? `<p class="drawer-note">${world.animals.filter(a => a.x === tile.x && a.y === tile.y).length} animales individuales en esta casilla.</p>` : ''}${place ? `<p class="drawer-note" data-place-gatherings>${place.gatherings ? `Aquí se compartió comida ${number(place.gatherings)} ${place.gatherings === 1 ? 'vez' : 'veces'}.` : 'Aquí todavía no se ha compartido comida.'}</p>` : ''}<p class="drawer-note">Selecciona un habitante para dar una orden; usa las herramientas para intervenir en esta casilla.</p>`);
   }
 }
 function renderControls(): void {
@@ -360,7 +466,25 @@ function renderControls(): void {
 }
 function renderStatus(): void {
   if (!document.getElementById('connection-label')) return; const paused = !!world?.paused; el('connection-label').textContent = paused ? 'En pausa' : status === 'live' ? 'En vivo' : status === 'offline' ? 'Reconectando' : 'Conectando'; el('connection-label').dataset.live = String(status === 'live' && !paused);
-  el('connection-notice').hidden = status === 'live' && !paused; el('connection-notice').textContent = paused ? world?.pauseReason ?? 'El mundo está en pausa para proteger lo guardado.' : status === 'offline' ? 'Sin conexión. Ves el último estado recibido; las órdenes esperan hasta reconectar.' : 'Conectando con el mundo…'; renderControls(); if (!el('stats-drawer').hidden) renderStats();
+  el('connection-notice').hidden = status === 'live' && !paused; el('connection-notice').textContent = paused ? world?.pauseReason ?? 'El mundo está en pausa para proteger lo guardado.' : status === 'offline' ? 'Sin conexión. Ves el último estado recibido; las órdenes esperan hasta reconectar.' : 'Conectando con el mundo…';
+  renderRhythm(); renderControls(); if (!el('stats-drawer').hidden) renderStats();
+}
+/** M2: el HUD dice cómo llega el mundo (cada 5 s en modo ligero, o más lento de lo pedido) y si su
+ * crecimiento está frenado por el gobernador. Todo sale de `performance` y del modo elegido. */
+function renderRhythm(): void {
+  const rhythm = el('world-rhythm'), live = status === 'live' && !world?.paused;
+  const pace = ritmo(world?.performance?.tickHz, world?.performance?.tickHzObjetivo);
+  const text = !live ? '' : modoActual === 'observador' ? (pace?.lento ? 'cada 5 s · mundo lento' : 'cada 5 s · modo ligero') : pace?.lento ? `${pace.pasosPorSegundo} · más lento` : '';
+  rhythm.hidden = !text; rhythm.textContent = text; rhythm.dataset.kind = modoActual === 'observador' ? 'light' : 'slow';
+  const growth = estadoCrecimiento(world?.performance?.gobernador, world?.stats?.population);
+  const chip = el('growth-chip');
+  chip.hidden = !growth?.chip;
+  if (growth?.chip) {
+    chip.dataset.growth = growth.estado;
+    el('growth-chip-text').textContent = growth.chip;
+    el('growth-chip-detail').textContent = growth.detalle;
+    chip.title = `${growth.detalle} Toca para ver Mundo › Vida.`;
+  }
 }
 function renderTool(): void {
   if (!document.getElementById('gesture-title')) return;
@@ -369,9 +493,30 @@ function renderTool(): void {
   el('memory-preview').textContent = memory ? `${memory.source === 'sample' ? 'Recuerdo de prueba, no biográfico' : 'Recuerdo aprobado'}: ${memory.text}` : 'No hay recuerdos disponibles.';
   const position = target(); el('gesture-target').textContent = position ? `casilla ${position.x}, ${position.y}` : 'toca una casilla'; const button = el<HTMLButtonElement>('gesture-send'); button.innerHTML = pending ? 'Esperando confirmación…' : `${labels[tool][2]} ${icon.arrow}`; button.disabled = status !== 'live' || !!world?.paused || pending || !position || (tool === 'remember' && !memory);
 }
+/** M5: «Desde tu última visita» con lo que cambió (contadores del estado real) y los hitos, no 3 episodios al azar. */
+function returnCard(current: WorldView, since: number): void {
+  let counters = null; try { counters = readVisitCounters(localStorage, current); } catch { counters = null; }
+  const resumen = resumenDesdeVisita(counters, since, current);
+  const hitos = [...hitosGuardados.filter(h => h.tick > since), ...current.events.filter(event => event.tick > since && esHito(event))]
+    .filter((h, i, all) => all.findIndex(other => other.id === h.id) === i).sort((a, b) => b.tick - a.tick).slice(0, 4);
+  if (current.tick <= since && !hitos.length) return;
+  const card = el('return-card'); card.hidden = false;
+  card.innerHTML = `<button class="icon-button" aria-label="Cerrar resumen de regreso">×</button><p class="eyebrow">DESDE TU ÚLTIMA VISITA</p><h2>El mundo siguió su camino.</h2><p class="return-summary">${esc(resumen.dias)}${resumen.cambios.length ? ` ${esc(resumen.cambios.join(' · '))}.` : counters ? ' Sin nacimientos, muertes ni regiones nuevas.' : ''}</p>${hitos.length ? `<ul>${hitos.map(h => `<li><small>${esc(momento(h.tick))} · ${esc(clasificar({ kind: h.kind as ChronicleEvent['kind'], text: h.text }).etiqueta)}</small> ${esc(enClaro(h.text, { world: current }))}</li>`).join('')}</ul>` : ''}${counters ? '' : '<p class="return-note">Esta es la primera visita que guarda contadores: la próxima vez se verá qué cambió.</p>'}`;
+  card.querySelector('button')!.addEventListener('click', () => { card.hidden = true; });
+}
 function renderJournal(): void {
-  const names: Record<ChronicleEvent['kind'], string> = { ecology: 'Paisaje', meeting: 'Encuentro', care: 'Cuidado', learning: 'Aprendizaje', memory: 'Memoria', gesture: 'Tu gesto', pause: 'Pausa del servidor', discovery: 'Un descubrimiento', settlement: 'Un nuevo lugar', cooperation: 'Cooperación', birth: 'Una nueva vida', death: 'Una vida que terminó', animal: 'Vida animal', invention: 'Un proyecto aprendido', community: 'Comunidad', conflict: 'Un desacuerdo', adaptation: 'Adaptación local' };
-  el('journal-events').innerHTML = world?.events.length ? [...world.events].slice(-32).reverse().map(event => `<article class="chronicle-event"><div class="event-label"><span>${names[event.kind]}</span><span>${event.source === 'sample' ? 'Material de prueba' : event.source === 'approved' ? 'Contenido aprobado' : 'Ficción simulada'}</span></div><p>${esc(event.text)}</p><div class="event-cause"><strong>Qué influyó</strong> ${esc(event.cause)}</div><span class="event-tick">Momento ${event.tick} del mundo</span></article>`).join('') : '<p class="quiet-event">Todavía no hay episodios guardados. El mundo también tiene silencios.</p>';
+  for (const chip of root.querySelectorAll<HTMLButtonElement>('[data-journal-filter]')) chip.setAttribute('aria-pressed', String(chip.dataset.journalFilter === journalFilter));
+  // Los hitos que este navegador vio en visitas anteriores (localStorage) no se pierden: se listan con su
+  // texto y su momento, sin causa (no se guardó), marcados como vistos antes.
+  const anteriores: ChronicleEvent[] = hitosGuardados.filter(h => !cronica.get(h.id)).map(h => ({ id: h.id, tick: h.tick, kind: h.kind as ChronicleEvent['kind'], actors: [], text: h.text, cause: '', source: 'simulation' }));
+  const previos = new Set(anteriores.map(e => e.id));
+  const todos = [...anteriores, ...cronica.todos()].sort((a, b) => a.tick - b.tick), lista = filtrar(todos, journalFilter).reverse(), shown = lista.slice(0, 80);
+  el('journal-note').textContent = todos.length ? `Este navegador guarda ${number(cronica.size)} episodios desde que abriste la carta${anteriores.length ? ` y ${number(anteriores.length)} ${anteriores.length === 1 ? 'hito' : 'hitos'} de visitas anteriores` : ''}${cronica.size >= cronica.max ? ' (los más viejos y comunes se van olvidando)' : ''}. ${lista.length > shown.length ? `Se muestran los ${shown.length} más recientes de ${number(lista.length)}.` : ''}` : '';
+  el('journal-events').innerHTML = shown.length ? shown.map(event => {
+    const tipo = clasificar(event), cedio = quienCedio(event);
+    const who = (id: string) => world ? personLink(world, id) : esc(id);
+    return `<article class="chronicle-event" data-grupo="${tipo.grupo}"><div class="event-label"><span>${esc(tipo.etiqueta)}</span><span>${event.source === 'sample' ? 'Material de prueba' : event.source === 'approved' ? 'Contenido aprobado' : 'Ficción simulada'}</span></div><p>${esc(enClaro(event.text, { world }))}</p>${cedio ? `<p class="event-yield" data-yield>Cedió: ${who(cedio.cede)} (${esc(cedio.como)}); ${who(cedio.sigue)} siguió.</p>` : ''}${previos.has(event.id) ? '<div class="event-cause">Visto por este navegador en una visita anterior; su causa no se guardó.</div>' : `<div class="event-cause"><strong>Qué influyó</strong> ${esc(enClaro(event.cause, { world }))}</div>`}<span class="event-tick">${esc(momento(event.tick))}</span></article>`;
+  }).join('') : `<p class="quiet-event">${todos.length ? 'No hay episodios de este tipo entre los que recibió este navegador.' : 'Todavía no hay episodios guardados. El mundo también tiene silencios.'}</p>`;
 }
 
 function selectStatsTab(tab: typeof statsTab): void {
@@ -379,29 +524,6 @@ function selectStatsTab(tab: typeof statsTab): void {
   statsTab = tab;
   for (const button of root.querySelectorAll<HTMLButtonElement>('[data-stats]')) { const active = button.dataset.stats === tab; button.setAttribute('aria-selected', String(active)); button.tabIndex = active ? 0 : -1; }
   el('stats-content').setAttribute('aria-labelledby', `stats-tab-${tab}`); renderStats();
-}
-
-function statCard(label: string, value: string, note: string, accent = ''): string { return `<article class="stat-card ${accent}"><span>${esc(label)}</span><strong>${esc(value)}</strong><small>${esc(note)}</small></article>`; }
-
-/** Charts use the server's sample ticks, not evenly spaced invented timestamps. */
-function sparkline(points: { tick: number; value: number }[], title: string, unit: string, fixedRange?: [number, number]): string {
-  const safe = points.filter(p => Number.isFinite(p.tick) && Number.isFinite(p.value)).slice(-96);
-  if (!safe.length) return `<figure class="history-chart"><figcaption>${esc(title)}</figcaption><p class="stats-empty">Todavía no hay muestras de esta serie.</p></figure>`;
-  const width = 280, height = 92, padding = 8;
-  const start = safe[0]!.tick, end = safe.at(-1)!.tick;
-  const minimum = fixedRange?.[0] ?? 0, maximum = fixedRange?.[1] ?? Math.max(1, ...safe.map(p => p.value)) * 1.1;
-  const span = Math.max(0.0001, maximum - minimum);
-  const mapped = safe.map(p => ({ x: safe.length === 1 ? width / 2 : padding + (p.tick - start) / Math.max(1, end - start) * (width - padding * 2), y: height - padding - Math.max(0, Math.min(1, (p.value - minimum) / span)) * (height - padding * 2) }));
-  const coordinates = mapped.map(p => `${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(' ');
-  const latest = safe.at(-1)!; const label = `${title}. ${safe.length} ${safe.length === 1 ? 'muestra' : 'muestras'}, pasos ${start} a ${end}. Último valor ${number(latest.value, 2)} ${unit}.`;
-  return `<figure class="history-chart"><figcaption><span>${esc(title)}</span><strong>${esc(number(latest.value, 1))}<small>${esc(unit)}</small></strong></figcaption><svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${esc(label)}"><title>${esc(label)}</title><path class="chart-grid" d="M8 8H272M8 46H272M8 84H272"/><polyline class="chart-line" points="${coordinates}" fill="none"/><circle class="chart-point" cx="${mapped.at(-1)!.x.toFixed(2)}" cy="${mapped.at(-1)!.y.toFixed(2)}" r="3"/></svg><div class="chart-axis"><span>Paso ${start}</span><span>${safe.length} ${safe.length === 1 ? 'muestra' : 'muestras'}</span><span>${end}</span></div></figure>`;
-}
-
-function distribution(data: Record<string, number> | undefined, labels: Record<string, string>, unit: string): string {
-  const rows = Object.entries(data ?? {}).filter(([, value]) => Number.isFinite(value) && value >= 0).sort((a, b) => b[1] - a[1]);
-  if (!rows.length) return '<p class="stats-empty">Aún no hay datos registrados.</p>';
-  const maximum = Math.max(1, ...rows.map(([, value]) => value));
-  return `<div class="distribution">${rows.map(([key, value]) => `<div class="distribution-row"><div><span>${esc(labels[key] ?? key)}</span><strong>${esc(number(value, 1))}<small>${esc(unit)}</small></strong></div><span class="distribution-track" aria-hidden="true"><i style="width:${(value / maximum * 100).toFixed(2)}%"></i></span></div>`).join('')}</div>`;
 }
 
 interface GraphicsDiagnostics {
@@ -419,24 +541,6 @@ function inventionStats(): string {
   const dynamics = stats.inventionDynamics;
   return `<section class="stats-section"><div class="stats-section-heading"><h3>Proyectos y construcciones</h3><span>Aprendidos en el mundo</span></div><div class="stats-grid">${statCard('Planos conocidos', number(stats.blueprints), 'Familias y variantes registradas')}${statCard('Investigaciones', number(dynamics?.attempts), 'Intentos acumulados')}${statCard('Variantes aceptadas', number(dynamics?.accepted), 'Proyectos viables')}${statCard('Reparaciones', number(dynamics?.repairs), 'Acciones con material y trabajo')}${statCard('Lluvia recogida', number(dynamics?.waterCollected, 2), 'Agua en cisternas')}${statCard('Alimento retirado', number(dynamics?.foodTaken, 2), 'Consumido desde graneros')}</div>${distribution(stats.structures, componentNames, 'componentes')}<p class="stats-note">Las estructuras combinan funciones. Se desgastan, conservan existencias reales y pueden repararse.</p>${world?.blueprints?.length ? `<details class="person-detail" data-detail="blueprints"><summary>Cuaderno de proyectos (${world.blueprints.length})</summary>${world.blueprints.slice(-24).map(blueprint=>blueprintCard(blueprint, world)).join('')}${world.blueprints.length > 24 ? '<p>Se muestran los 24 proyectos más recientes.</p>' : ''}</details>` : ''}</section>`;
 }
-function demographicSummary(received: WorldView): string {
-  // projectWorld sends every living human, independently of the camera viewport.
-  const people = received.people.filter(person => person.role === 'neighbor'), neighbors = people.length;
-  const identities = received.people.filter(person => person.role !== 'neighbor');
-  const protectedCount = identities.filter(person => person.continuityProtected === true).length;
-  const protectionKnown = identities.every(person => person.continuityProtected !== undefined);
-  const deaths = received.demography;
-  const causes = Object.entries(deaths?.causes ?? {}).filter(([, count]) => Number.isFinite(count) && count > 0);
-  const stages = { juvenile: 0, adult: 0, senescent: 0 };
-  for (const person of people) if (person.lifeStage === 'juvenile' || person.lifeStage === 'adult' || person.lifeStage === 'senescent') stages[person.lifeStage]++;
-  const known = stages.juvenile + stages.adult + stages.senescent, unknown = neighbors - known;
-  const replacement = !neighbors ? 'No hay vecinos para evaluar el recambio.' : unknown ? 'Faltan etapas de vida: no se puede evaluar el recambio por edad.'
-    : stages.juvenile + stages.adult < 2 ? 'No hay recambio posible entre los vecinos actuales.'
-    : 'La edad no garantiza una crianza: también hacen falta salud, recursos, confianza y cercanía.';
-  const stagesMarkup = `<div data-neighbor-life-stages><div class="stats-section-heading"><h3>Etapas de los vecinos</h3><span>${number(known)}/${number(neighbors)} con dato</span></div><div class="stats-facts"><span data-life-stage="juvenile">En crecimiento<strong>${known || !neighbors ? number(stages.juvenile) : '—'}</strong></span><span data-life-stage="adult">Edad de crianza<strong>${known || !neighbors ? number(stages.adult) : '—'}</strong></span><span data-life-stage="senescent">Vejez<strong>${known || !neighbors ? number(stages.senescent) : '—'}</strong></span>${unknown ? `<span data-life-stage="unknown">Etapa sin dato<strong>${number(unknown)}</strong></span>` : ''}</div><p class="stats-note" data-replacement-status>${replacement}</p></div>`;
-  return `<section data-demographic-summary><div class="stats-section-heading"><h3>${neighbors === 0 ? 'Sin vecinos vivos' : 'Población humana'}</h3><span>${number(received.people.length)} vidas · censo global</span></div><div class="stats-grid">${statCard('Vecinos vivos', number(neighbors), 'Sujetos a mortalidad')}${statCard('S/I protegidos', protectionKnown ? number(protectedCount) : '—', protectionKnown ? 'Continuidad por configuración' : 'Protección sin dato')}${statCard('Muertes humanas', number(deaths?.deaths), deaths ? 'Acumuladas en este mundo' : 'Acumulado no recibido')}${statCard('Nacimientos', number(received.stats?.totals.births), 'Acumulados en este mundo')}</div>${stagesMarkup}<p class="stats-note">${protectionKnown && protectedCount > 0 ? (neighbors === 0 ? 'La continuidad de S/I está protegida. Su presencia no demuestra que los vecinos hayan sobrevivido.' : 'S/I tienen continuidad protegida por la configuración del mundo. Los vecinos siguen un ciclo de vida con mortalidad.') : protectionKnown ? 'El censo distingue vecinos e identidades S/I; no hay protección de continuidad indicada.' : 'Esta vista no informa la protección de continuidad de S/I.'}</p>${deaths ? `<details class="person-detail" data-detail="human-death-causes"><summary>Causas de las muertes acumuladas</summary>${causes.length ? `<div class="stats-facts">${causes.map(([cause, count]) => `<span>${esc(deathCauses[cause] ?? cause)}<strong>${number(count)}</strong></span>`).join('')}</div>` : '<p>No hay causas de muerte registradas en el acumulado recibido.</p>'}</details>` : ''}</section>`;
-}
-
 function populationWindow(points: { tick: number; value: number }[]): string {
   const samples = points.filter(p => Number.isFinite(p.tick) && Number.isFinite(p.value)).slice(-96);
   if (!samples.length) return '<p class="stats-note" data-population-window>No se han recibido muestras de población. Los acumulados se muestran aparte.</p>';
@@ -444,6 +548,28 @@ function populationWindow(points: { tick: number; value: number }[]): string {
   // The existing simulation and daylight presentation use 2,400 ticks per model day.
   const days = (last - first) / 2400;
   return `<p class="stats-note stats-scope-note" data-population-window>Ventana recibida: pasos ${number(first)}–${number(last)} · ${number(days, 2)} días simulados entre muestras (${samples.length} ${samples.length === 1 ? 'muestra' : 'muestras'}). La curva incluye S/I y vecinos; no es un registro completo de nacimientos y muertes.</p>`;
+}
+/** M2: Rendimiento honesto. El p95 frente al presupuesto con barra, el ritmo real y cuánto dura un día,
+ * el gobernador en claro (mismo módulo que el HUD), el último frenazo compuesto desde sus campos y lo
+ * que recibe este navegador. Todo sale de `performance` y de la conexión; nada se supone. */
+function serverPerformance(runtime: WorldView['performance']): string {
+  if (!runtime) return '<section class="stats-section"><div class="stats-section-heading"><h3>Servidor · CPU y persistencia</h3><span>Mediciones reales</span></div><p class="stats-empty">El servidor todavía no envió sus medidas de rendimiento.</p></section>';
+  const g = runtime.gobernador, growth = estadoCrecimiento(g, world?.stats?.population), frenazo = ultimoFrenazo(g);
+  const pace = ritmo(runtime.tickHz, runtime.tickHzObjetivo);
+  const budget = g?.presupuestoMs;
+  const p95Card = budget !== undefined && Number.isFinite(budget) && budget > 0
+    ? `<article class="stat-card" data-p95><span>Paso p95</span><strong>${esc(number(runtime.p95StepMs, 1))} ms <small>de ${esc(number(budget, 0))} ms</small></strong><meter class="stat-meter" min="0" max="${esc(budget)}" low="${esc(budget * 0.7)}" high="${esc(budget)}" optimum="0" value="${esc(Math.min(runtime.p95StepMs, budget * 1.5))}" aria-label="Paso p95 frente al presupuesto del gobernador"></meter><small>Presupuesto del gobernador; por encima frena el crecimiento.</small></article>`
+    : statCard('Paso p95', `${number(runtime.p95StepMs, 2)} ms`, 'Ventana medida por el servidor');
+  const paceCard = pace ? `<article class="stat-card" data-rhythm><span>Ritmo real</span><strong>${esc(pace.pasosPorSegundo)}</strong><small>Un día del mundo dura ~${esc(pace.diaDura)}.${pace.lento && runtime.tickHzObjetivo ? ` Más lento de lo pedido (${esc(number(runtime.tickHzObjetivo, 1))} pasos/s).` : ''}</small></article>` : statCard('Ritmo real', '—', 'Aún sin pasos medidos');
+  const growthCard = growth ? `<article class="stat-card" data-growth-card="${esc(growth.estado)}"><span>Gobernador · crecimiento</span><strong>${esc(growth.titulo)}</strong><small>${esc(growth.explicacion)}</small></article>` : '';
+  // El titular es lo vigente (el techo del chip); el registro del último frenazo va aparte, como historia.
+  const brakeCard = frenazo ? '<article class="stat-card" data-last-brake><span>Último frenazo '
+    + `<b class="stat-state" data-vigente="${frenazo.vigente}">${frenazo.vigente ? 'freno vigente' : 'ya retirado'}</b></span>`
+    + `<strong>${esc(frenazo.titular)}</strong>`
+    + `<small data-brake-history>Registro histórico · ${esc(frenazo.texto)}</small></article>` : '';
+  const received = connection?.reception();
+  const receivedCard = received ? statCard('Recibido por este navegador', `≈ ${number(received.meanBytes / 1024, 0)} KiB`, `Por actualización (media de las últimas)${received.perSecond ? ` · ${number(received.perSecond, 1)} actualizaciones/s` : ''}. Tamaño del JSON recibido, sin cabeceras.`) : statCard('Recibido por este navegador', '—', 'Aún no llegó ninguna actualización por la conexión en vivo.');
+  return `<section class="stats-section"><div class="stats-section-heading"><h3>Servidor · CPU y persistencia</h3><span>Mediciones reales</span></div><p class="stats-note">Duración del trabajo y memoria del proceso. No representan el porcentaje de uso total de la CPU.</p><div class="stats-grid">${p95Card}${paceCard}${growthCard}${brakeCard}${statCard('Paso de simulación', `${number(runtime.stepMs, 2)} ms`, 'Último paso')}${statCard('Guardado', `${number(runtime.saveMs, 2)} ms`, 'Persistencia')}${statCard('Proyección', `${number(runtime.projectionMs, 2)} ms`, 'Preparación de una vista')}${statCard('Memoria del proceso', `${number(runtime.processRssMiB, 1)} MiB`, 'RSS del servidor')}${statCard('Instantánea guardada en disco', `${number(runtime.snapshotBytes / 1024, 1)} KiB`, 'Tamaño del último guardado del mundo')}${receivedCard}</div></section>`;
 }
 function renderStats(): void {
   const panel = document.getElementById('stats-content'); if (!panel) return;
@@ -460,17 +586,19 @@ function renderStatsContent(): void {
     const listed = world.technology?.recipes.slice(-20).some(recipe=>recipe.id===focusedRecipe) ?? false;
     const targeted = listed ? undefined : (focusedRecipe ? recipeDetails.get(focusedRecipe) : null) ?? world.technology?.recipes.find(recipe=>recipe.id===focusedRecipe);
     const missing = focusedRecipe && recipeDetails.get(focusedRecipe) === null ? `<p class="stats-note">Los pasos de ${esc(focusedRecipe)} no están disponibles en este mundo ahora.</p>` : '';
-    panel.innerHTML = stamp + missing + (targeted ? recipeCard(targeted) : '') + technologyPane(world.technology,world.organization,recipeDetails);
+    panel.innerHTML = stamp + missing + (targeted ? recipeCard(targeted, world.technology) : '')
+      + technologyPane(world.technology, world.organization, recipeDetails, world.stats, world.performance?.conducta);
     return;
   }
   if (statsTab === 'performance') {
     const graphics = (landscape as (Landscape & { getDiagnostics?: () => GraphicsDiagnostics }) | null)?.getDiagnostics?.();
     const gpuLabels: Record<string, string> = { hardware: 'WebGL · adaptador físico reconocido', software: 'Respaldo Canvas2D · adaptador de software', unverified: 'WebGL activo · hardware sin verificar', 'context-lost': 'Contexto perdido · respaldo Canvas2D', active: 'GPU activa', ready: 'GPU preparada', available: 'GPU disponible', pending: 'Consultando GPU', initializing: 'Inicializando GPU', unavailable: 'GPU no disponible', unsupported: 'GPU no compatible', disabled: 'GPU desactivada', failed: 'GPU no disponible', lost: 'Dispositivo perdido', 'device-lost': 'Dispositivo perdido', fallback: 'Respaldo gráfico activo' };
-    panel.innerHTML = `${stamp}<section class="stats-section"><div class="stats-section-heading"><h3>Servidor · CPU y persistencia</h3><span>Mediciones reales</span></div><p class="stats-note">Duración del trabajo y memoria del proceso. No representan el porcentaje de uso total de la CPU.</p>${runtime ? `<div class="stats-grid">${statCard('Paso de simulación', `${number(runtime.stepMs, 2)} ms`, 'Último paso')}${statCard('Paso p95', `${number(runtime.p95StepMs, 2)} ms`, 'Ventana medida por el servidor')}${statCard('Guardado', `${number(runtime.saveMs, 2)} ms`, 'Persistencia')}${statCard('Proyección', `${number(runtime.projectionMs, 2)} ms`, 'Preparación de una vista')}${statCard('Memoria del proceso', `${number(runtime.processRssMiB, 1)} MiB`, 'RSS del servidor')}${statCard('Estado serializado', `${number(runtime.snapshotBytes / 1024, 1)} KiB`, 'Tamaño de la muestra medida')}${runtime.gobernador ? statCard('Gobernador', runtime.gobernador.manual !== null ? `manual: ${runtime.gobernador.manual ? 'nacimientos permitidos' : 'nacimientos detenidos'}` : runtime.gobernador.activo ? 'nacimientos permitidos' : runtime.gobernador.techo != null ? `reponiendo hasta ${runtime.gobernador.techo}` : 'nacimientos detenidos', `${runtime.gobernador.politica ?? 'p95'} · presupuesto ${number(runtime.gobernador.presupuestoMs, 0)} ms${runtime.gobernador.techo != null ? ` · techo ${number(runtime.gobernador.techo, 0)}` : ''}`) : ''}${runtime.gobernador?.techoObservado ? statCard('Último frenazo', `${number(runtime.gobernador.techoObservado.poblacion, 0)} habitantes`, runtime.gobernador.techoObservado.motivo) : ''}</div>` : '<p class="stats-empty">El servidor todavía no envió sus medidas de rendimiento.</p>'}</section><section class="stats-section"><div class="stats-section-heading"><h3>Este navegador · gráficos</h3><span>${esc(graphics?.backend === 'canvas2d-cached' ? 'Canvas2D con caché' : graphics?.backend === 'webgl2' ? 'WebGL2' : 'Esperando diagnóstico')}</span></div>${graphics ? `<div class="gpu-state"><span>${icon.layers}</span><div><strong>${esc(gpuLabels[graphics.gpuStatus ?? ''] ?? graphics.gpuStatus ?? 'Estado gráfico sin informar')}</strong><p>${esc(graphics.gpuLabel ?? 'El navegador no informó un nombre de dispositivo.')}</p></div></div><div class="stats-grid">${statCard('Dibujo', `${number(graphics.fps, 1)} FPS`, 'Frecuencia observada en esta pestaña')}${statCard('CPU por cuadro', `${number(graphics.frameMs, 2)} ms`, 'Preparación y envío del dibujo')}${statCard('Casillas visibles', number(graphics.visibleTiles), 'Trabajo de esta cámara')}${statCard('Animales visibles', number(graphics.visibleAnimals), 'Cuerpos dibujados en esta cámara')}${statCard('Construcciones visibles', number(graphics.visibleStructures), 'Componentes de estructuras')}${statCard('Composiciones', number(graphics.drawCalls), 'Sprites y texturas, no todas las operaciones')}${statCard('Caché gráfico', `${number(graphics.cacheBytes === undefined ? undefined : graphics.cacheBytes / 1048576, 2)} MiB`, `${number(graphics.cacheEntries)} entradas · ${number(graphics.cacheBuilds)} construcciones`)}</div>` : '<p class="stats-empty">Todavía no hay diagnóstico del renderizador. No se puede afirmar que la GPU esté activa.</p>'}<p class="stats-note">La CPU del servidor decide lo que ocurre; los gráficos de esta pestaña dibujan el estado recibido. Los tiempos de dibujo no miden la ocupación de la GPU. Cerrar la pestaña no detiene el mundo.</p></section>`;
+    panel.innerHTML = `${stamp}${serverPerformance(runtime)}`+`<section class="stats-section"><div class="stats-section-heading"><h3>Este navegador · gráficos</h3><span>${esc(graphics?.backend === 'canvas2d-cached' ? 'Canvas2D con caché' : graphics?.backend === 'webgl2' ? 'WebGL2' : 'Esperando diagnóstico')}</span></div>${graphics ? `<div class="gpu-state"><span>${icon.layers}</span><div><strong>${esc(gpuLabels[graphics.gpuStatus ?? ''] ?? graphics.gpuStatus ?? 'Estado gráfico sin informar')}</strong><p>${esc(graphics.gpuLabel ?? 'El navegador no informó un nombre de dispositivo.')}</p></div></div><div class="stats-grid">${statCard('Dibujo', `${number(graphics.fps, 1)} FPS`, 'Frecuencia observada en esta pestaña')}${statCard('CPU por cuadro', `${number(graphics.frameMs, 2)} ms`, 'Preparación y envío del dibujo')}${statCard('Casillas visibles', number(graphics.visibleTiles), 'Trabajo de esta cámara')}${statCard('Animales visibles', number(graphics.visibleAnimals), 'Cuerpos dibujados en esta cámara')}${statCard('Construcciones visibles', number(graphics.visibleStructures), 'Componentes de estructuras')}${statCard('Composiciones', number(graphics.drawCalls), 'Sprites y texturas, no todas las operaciones')}${statCard('Caché gráfico', `${number(graphics.cacheBytes === undefined ? undefined : graphics.cacheBytes / 1048576, 2)} MiB`, `${number(graphics.cacheEntries)} entradas · ${number(graphics.cacheBuilds)} construcciones`)}</div>` : '<p class="stats-empty">Todavía no hay diagnóstico del renderizador. No se puede afirmar que la GPU esté activa.</p>'}<p class="stats-note">La CPU del servidor decide lo que ocurre; los gráficos de esta pestaña dibujan el estado recibido. Los tiempos de dibujo no miden la ocupación de la GPU. Cerrar la pestaña no detiene el mundo.</p></section>`;
     return;
   }
   if (statsTab === 'communities') {
-    panel.innerHTML = `${stamp}<p class="stats-note">Las comunidades se forman en el mundo simulado. Su cultura y confianza cambian con las interacciones; pertenecer a grupos distintos no implica hostilidad.</p>${world.communities?.length ? world.communities.map(community => {
+    const sueltos = sinComunidad(world);
+    panel.innerHTML = `${stamp}<p class="stats-note">Las comunidades se forman en el mundo simulado. Su cultura y confianza cambian con las interacciones; pertenecer a grupos distintos no implica hostilidad.</p>${sueltos !== null ? `<p class="stats-note stats-scope-note" data-without-community>${number(sueltos)} ${sueltos === 1 ? 'vida no pertenece' : 'vidas no pertenecen'} a ninguna comunidad (pertenecer es opcional).</p>` : ''}${world.communities?.length ? world.communities.map(community => {
       const color = /^#[\da-f]{3,8}$/i.test(community.color) ? community.color : '#779264';
       // T134 (FR-026): `members` ya no viaja completo — solo quien está en la cámara. `memberCount`
       // trae el total real; si faltan miembros por estar fuera de vista, se dice explícitamente
@@ -478,22 +606,25 @@ function renderStatsContent(): void {
       const total = community.memberCount ?? community.members.length;
       const members = community.members.map(id => personLink(world!,id));
       const hidden = total - community.members.length;
-      return `<article class="community-card" data-community-card="${esc(community.id)}" tabindex="-1"><header><span class="community-swatch" style="background:${color}" aria-hidden="true"></span><div><h3>${esc(community.name)}</h3><p>${number(total)} habitantes · desde el paso ${community.formedAt}</p></div></header><p class="community-members">${members.join(' ')}${hidden > 0 ? `<span class="community-members-more">y ${number(hidden)} más fuera de esta vista</span>` : ''}</p><div class="community-counts"><span><strong>${number(community.cooperation)}</strong> cooperaciones</span><span><strong>${number(community.disputes)}</strong> desacuerdos</span></div>${meter('Compartir', community.culture.sharing)}${meter('Cuidar el entorno', community.culture.stewardship)}${meter('Apertura', community.culture.openness)}</article>`;
+      return `<article class="community-card" data-community-card="${esc(community.id)}" tabindex="-1"><header><span class="community-swatch" style="background:${color}" aria-hidden="true"></span><div><h3>${esc(community.name)}</h3><p>${number(total)} habitantes · desde el paso ${community.formedAt}</p></div></header><p class="community-members">${members.join(' ')}${hidden > 0 ? `<span class="community-members-more">y ${number(hidden)} más fuera de esta vista</span>` : ''}</p><div class="community-counts"><span><strong>${number(community.cooperation)}</strong> cooperaciones</span><span><strong>${number(community.disputes)}</strong> desacuerdos</span><button class="entity-link" data-place-x="${esc(community.x)}" data-place-y="${esc(community.y)}">Ver lugar ${icon.arrow}</button></div>${meter('Compartir', community.culture.sharing)}${meter('Cuidar el entorno', community.culture.stewardship)}${meter('Apertura', community.culture.openness)}</article>`;
     }).join('') : '<div class="stats-empty illustrated-empty">Todavía no se ha formado una comunidad. Los encuentros y las acciones locales pueden dejar costumbres compartidas.</div>'}`;
     return;
   }
   if (!stats) { panel.innerHTML = `${stamp}<p class="stats-empty">El servidor todavía no envió estas estadísticas.</p>`; return; }
   const scope = '<p class="stats-note stats-scope-note">Paisaje y recursos: regiones activas del servidor, no todo el territorio posible ni solo la cámara. Los acumulados se identifican aparte.</p>';
   if (statsTab === 'land') {
-    const featureNames: Record<string, string> = { tree: 'Árboles', pine: 'Pinos', palm: 'Palmeras', cactus: 'Cactus', reeds: 'Juncos', berries: 'Bayas', flowers: 'Flores', rock: 'Rocas', clay: 'Arcilla', stump: 'Tocones', spring: 'Manantiales', none: 'Sin elemento destacado' };
+    const featureNames: Record<string, string> = { tree: 'Árboles', pine: 'Pinos', palm: 'Palmeras', cactus: 'Cactus', reeds: 'Juncos', berries: 'Bayas', flowers: 'Flores', rock: 'Rocas', clay: 'Arcilla', stump: 'Tocones', spring: 'Manantiales', pool: 'Pozas', none: 'Sin elemento destacado' };
     const species = speciesPlural;
-    panel.innerHTML = `${stamp}${scope}<div class="stats-grid">${statCard('Regiones activas', number(world.activeChunks), 'Cerca de los habitantes')}${statCard('Casillas activas', number(runtime?.activeTiles), 'Terreno en actividad')}${statCard('Agua dulce', number(stats.freshWater, 1), 'Unidades del modelo')}${statCard('Cultivos', number(stats.cultivatedTiles), 'Casillas cultivadas')}${statCard('Senderos', number(stats.trailTiles), 'Casillas con huellas')}${statCard('Madera y piedra', `${number(stats.materials.wood)} / ${number(stats.materials.stone)}`, 'Inventarios de habitantes')}</div><div class="stats-two-columns"><section class="stats-section"><div class="stats-section-heading"><h3>Biomas activos</h3><span>Casillas</span></div>${distribution(stats.biomes, biomes, '')}</section><section class="stats-section"><div class="stats-section-heading"><h3>Vida animal</h3><span>Individuos en regiones activas</span></div>${distribution(stats.wildlife, species, '')}<p class="stats-note">El censo cuenta cuerpos individuales. La caza, la depredación, el agua y las plantas influyen en su supervivencia.</p></section></div><section class="stats-section"><div class="stats-section-heading"><h3>Elementos del paisaje</h3><span>Casillas activas</span></div>${distribution(stats.features, featureNames, '')}</section>${lifeDynamics()}${inventionStats()}${world.structures?.length ? `<section class="stats-section"><h3 class="section-title">Construcciones en esta vista</h3>${world.structures.slice(0,24).map(structure=>`<button class="structure-link entity-link" data-place-x="${esc(structure.x)}" data-place-y="${esc(structure.y)}"><span>${esc(structure.name)}<small>${esc(structure.x)}, ${esc(structure.y)} · estado ${percentage(structure.condition)}</small></span>${icon.arrow}</button>`).join('')}</section>` : ''}`;
+    panel.innerHTML = `${stamp}${scope}${seccionTerritorio(world)}<div class="stats-grid">${statCard('Regiones activas', number(world.activeChunks), 'Cerca de los habitantes')}${statCard('Casillas activas', number(runtime?.activeTiles), 'Terreno en actividad')}${statCard('Agua dulce', number(stats.freshWater, 1), 'Unidades del modelo')}${statCard('Cultivos', number(stats.cultivatedTiles), 'Casillas cultivadas')}${statCard('Senderos', number(stats.trailTiles), 'Casillas con huellas')}${statCard('Madera y piedra', `${number(stats.materials.wood)} / ${number(stats.materials.stone)}`, 'Inventarios de habitantes')}</div><div class="stats-two-columns"><section class="stats-section"><div class="stats-section-heading"><h3>Biomas activos</h3><span>Casillas</span></div>${distribution(stats.biomes, biomes, '')}</section><section class="stats-section"><div class="stats-section-heading"><h3>Vida animal</h3><span>Individuos en regiones activas</span></div>${distribution(stats.wildlife, species, '')}<p class="stats-note">El censo cuenta cuerpos individuales. La caza, la depredación, el agua y las plantas influyen en su supervivencia.</p></section></div><section class="stats-section"><div class="stats-section-heading"><h3>Elementos del paisaje</h3><span>Casillas activas</span></div>${distribution(stats.features, featureNames, '')}</section>${lifeDynamics()}${inventionStats()}${world.structures?.length ? `<section class="stats-section"><h3 class="section-title">Construcciones en esta vista</h3>${world.structures.slice(0,24).map(structure=>`<button class="structure-link entity-link" data-place-x="${esc(structure.x)}" data-place-y="${esc(structure.y)}"><span>${esc(structure.name)}<small>${esc(structure.x)}, ${esc(structure.y)} · estado ${percentage(structure.condition)}</small></span>${icon.arrow}</button>`).join('')}</section>` : ''}`;
     return;
   }
   const history = stats.history ?? [];
   const actionLabels = Object.fromEntries(Object.entries(actions).map(([key, text]) => [key, text]));
-  const accumulated = `<section class="stats-section"><div class="stats-section-heading"><h3>Lo que han hecho juntos</h3><span>Acumulado del mundo</span></div><div class="stats-facts">${([['teaching', 'Aprendizajes compartidos'], ['trade', 'Intercambios'], ['constructionHelp', 'Ayudas en tareas'], ['conflicts', 'Desacuerdos'], ['hunts', 'Animales cazados'], ['cultivations', 'Acciones de cultivo']] as const).map(([key, label]) => `<span>${label}<strong>${number(stats.totals[key])}</strong></span>`).join('')}</div></section>`;
-  panel.innerHTML = `${stamp}${demographicSummary(world)}<div class="stats-grid">${statCard('Energía media', percentage(stats.meanEnergy), 'Estado corporal, no afecto')}${statCard('Hambre media', percentage(stats.meanHunger), 'Necesidad de alimento')}${statCard('Sed media', percentage(stats.meanThirst), 'Necesidad de agua')}${statCard('Cooperaciones', number(stats.totals.cooperation), 'Acciones acumuladas')}</div>${recentEvidence(world)}${populationWindow(history.map(p => ({ tick: p.tick, value: p.population })))}<div class="stats-chart-grid">${sparkline(history.map(p => ({ tick: p.tick, value: p.population })), 'Población · ventana recibida', 'habitantes')}${sparkline(history.map(p => ({ tick: p.tick, value: p.energy * 100 })), 'Energía media', '% media', [0, 100])}</div><section class="stats-section"><div class="stats-section-heading"><h3>Qué están haciendo</h3><span>Habitantes ahora</span></div>${distribution(stats.actions, actionLabels, '')}</section><div class="stats-two-columns"><section class="stats-section"><div class="stats-section-heading"><h3>Generaciones</h3><span>Habitantes</span></div>${distribution(stats.generations, Object.fromEntries(Object.keys(stats.generations).map(key => [key, `Generación ${key}`])), '')}</section><section class="stats-section"><div class="stats-section-heading"><h3>Historia que se acumula</h3></div><div class="stats-facts"><span>Regiones descubiertas<strong>${number(world.discoveredChunks)}</strong></span><span>Asentamientos construidos<strong>${number(world.settlementCount)}</strong></span><span>Cansancio medio<strong>${percentage(stats.meanFatigue)}</strong></span></div></section></div>${accumulated}${scope}`;
+  // M7: cooperación por tipo (identidad de society.ts), comida compartida, graneros y desacuerdos con quién cedió.
+  const accumulated = `${seccionJuntos(world, cronica.todos())}${seccionDesacuerdos(world, cronica.todos())}`;
+  const growth = estadoCrecimiento(world.performance?.gobernador, stats.population);
+  const growthLine = growth ? `<p class="growth-status" data-growth="${esc(growth.estado)}"><strong>${esc(growth.titulo)}</strong>${esc(growth.explicacion)}</p>` : '';
+  panel.innerHTML = `${stamp}${growthLine}${demographicSummary(world)}${vidasQueTerminaron(world)}<div class="stats-grid">${statCard('Energía media', percentage(stats.meanEnergy), 'Estado corporal, no afecto')}${statCard('Hambre media', percentage(stats.meanHunger), 'Necesidad de alimento')}${statCard('Sed media', percentage(stats.meanThirst), 'Necesidad de agua')}${statCard('Cansancio medio', percentage(stats.meanFatigue), 'Necesidad de descanso')}</div>${recentEvidence(world, undefined, cronica.todos())}${populationWindow(history.map(p => ({ tick: p.tick, value: p.population })))}<div class="stats-chart-grid">${sparkline(history.map(p => ({ tick: p.tick, value: p.population })), 'Población · ventana recibida', 'habitantes')}${sparkline(history.map(p => ({ tick: p.tick, value: p.energy * 100 })), 'Energía media', '% media', [0, 100])}</div>${seccionNacimientos(world)}<section class="stats-section"><div class="stats-section-heading"><h3>Qué están haciendo</h3><span>Todo el mundo, ahora</span></div>${distribution(stats.actions, actionLabels, '')}${notaAcercamientos(world)}</section><div class="stats-two-columns"><section class="stats-section"><div class="stats-section-heading"><h3>Generaciones</h3><span>${generacionMaxima(world) !== null ? `La más alta viva: G${generacionMaxima(world)}` : 'Habitantes'}</span></div>${distribution(stats.generations, Object.fromEntries(Object.keys(stats.generations).map(key => [key, `Generación ${key}`])), '')}</section><section class="stats-section"><div class="stats-section-heading"><h3>Historia que se acumula</h3></div><div class="stats-facts"><span>Regiones descubiertas<strong>${number(world.discoveredChunks)}</strong></span><span>Asentamientos construidos<strong>${number(world.settlementCount)}</strong></span><span>Animales cazados<strong>${number(stats.totals.hunts)}</strong></span><span>Acciones de cultivo<strong>${number(stats.totals.cultivations)}</strong></span></div></section></div>${accumulated}${scope}`;
 }
 window.addEventListener('pagehide', saveVisit); document.addEventListener('visibilitychange', () => { if (document.hidden) saveVisit(); });
 async function boot(): Promise<void> { root.innerHTML = '<main class="boot-screen"><span>✧</span><p>Abriendo la carta…</p></main>'; try { const response = await fetch('/api/session', { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(10_000) }); const session = await response.json() as { authenticated: boolean }; if (response.ok && session.authenticated) enterWorld(); else loginScreen(); } catch { loginScreen('No hay conexión con el servidor. Puedes volver a intentar.'); } }

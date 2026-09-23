@@ -5,6 +5,8 @@ import { captureTechnologyCheckpoint } from '../src/world/technology-checkpoint.
 import type { Viewport } from '../src/shared/types.js';
 import { projectTechnology, technologyRecipeDetail } from '../src/world/technology.js';
 import type { TechnologyRecipe } from '../src/shared/technology.js';
+import { resumenVivo } from '../src/server/resumen-vivo.js';
+import { clavesVivasEn } from '../src/server/regiones-vivas.js';
 
 const KIB = 1024;
 const encodedBytes = (value: unknown): number => Buffer.byteLength(JSON.stringify(value), 'utf8');
@@ -224,4 +226,36 @@ test('FR-026: bytes por campo con 10 000 habitantes, viewport medio y máximo, m
   // tampoco en esta tarea) también escala algo con la población vía diagnósticos por actor.
   const itemsBytes = encodedBytes(m.view.technology?.items ?? []);
   t.diagnostic(`FR-026 · HALLAZGO fuera de alcance: technology.items = ${(itemsBytes/KIB).toFixed(1)} KiB con 10 025 habitantes (escala con TODA la población, no con la cámara; src/world/technology.ts:projectTechnology, no tocado por T134).`);
+});
+
+/** UI 2026-09-22 (M2, M4, M7): lo que la interfaz añade a `RuntimeStats` se mide aquí. `tickHzObjetivo` es
+ * un número fijo; `natalidad` (resumen-vivo.ts) son enteros y la ley de natalidad, y `comidaCompartida` un
+ * entero: su tamaño NO crece con la población (se comprueba con 10 000 habitantes sintéticos más).
+ * Medido 2026-09-22: 222 B con 17 y con 10 017 habitantes. 2026-09-23: 293 B al sumar el cupo de
+ * nacimientos (`cupo`, `ventana`, `continua`; `maxima` solo si limita) y `conducta.habituacion`, que la
+ * interfaz necesita para no afirmar leyes que el mundo no aplica: +71 B cada 50 pasos, O(1). */
+test('UI: los resúmenes de RuntimeStats para la interfaz pesan < 320 B y no crecen con la población', t => {
+  const world = grownWorld(300);
+  const medir = (): number => encodedBytes({ tickHzObjetivo: 10, ...resumenVivo(world) });
+  const antes = medir();
+  injectMassCommunity(world, 10_000, { x: 1, y: 1 }, { x: 500, y: 500 });
+  const despues = medir();
+  t.diagnostic(`UI · RuntimeStats añadido: ${antes} B con ${world.people.length - 10_000} habitantes, ${despues} B con ${world.people.length}`);
+  assert.ok(antes < 320 && despues < 320, `resúmenes de la UI: ${antes} B / ${despues} B`);
+  assert.ok(despues - antes <= 12, 'solo cambian los dígitos de los recuentos, no la forma');
+  // Frente a un estado típico de 150–400 KiB, menos de una milésima.
+  assert.ok(despues / (150 * KIB) < 0.002);
+});
+
+/** UI 2026-09-22 (M10): `regionesVivas` la añade el servidor por cliente, junto a `instanceId`. Son claves de
+ * las regiones vivas que tocan la ventana: como mucho 7 × 5 con la ventana máxima, sin importar la población. */
+test('UI: regionesVivas pesa < 400 B por estado en cualquier ventana', t => {
+  const world = grownWorld(300);
+  for (const [label, viewport] of [['12x8', { x: 0, y: 0, width: 12, height: 8 }], ['40x28', { x: 0, y: 0, width: 40, height: 28 }], ['96x64', { x: -30, y: -20, width: 96, height: 64 }]] as const) {
+    const claves = clavesVivasEn(world, viewport), bytes = encodedBytes({ regionesVivas: claves });
+    t.diagnostic(`UI · regionesVivas cámara ${label}: ${claves.length} claves, ${bytes} B`);
+    assert.ok(bytes < 400, `${label}: ${bytes} B`);
+  }
+  injectMassCommunity(world, 10_000, { x: 1, y: 1 }, { x: 500, y: 500 });
+  assert.ok(encodedBytes({ regionesVivas: clavesVivasEn(world, { x: 0, y: 0, width: 40, height: 28 }) }) < 400, 'la población no cambia su tamaño');
 });

@@ -169,7 +169,7 @@ test('desktop full-screen HUD, keyboard population selection and physical neighb
 
 test('free camera requests signed distant terrain and layers without a finite map edge', async ({ page }) => {
   const observed = observeMessages(page); await page.setViewportSize({ width: 1440, height: 900 }); await enter(page);
-  await page.locator('#layer-toggle').click(); await page.locator('#observation-layer').selectOption('moisture'); await expect(page.locator('#layer-explanation')).toContainText('humedad');
+  await page.locator('#layer-toggle').click(); await page.locator('#observation-layer').selectOption('humedad'); await expect(page.locator('#layer-explanation')).toContainText('humedad');
   await page.locator('#observation-layer').selectOption('none'); await page.locator('#tile-x').fill('-384'); await page.locator('#tile-y').fill('240'); await page.locator('#tile-form button').click();
   await expect(page.locator('#camera-coordinates')).toHaveText('-384, 240');
   await expect.poll(() => observed.views.some(v => (v.originX ?? 0) < -350 && (v.originY ?? 0) > 200 && v.tiles.some(t => t.x < 0))).toBe(true);
@@ -234,7 +234,7 @@ test('world statistics show real scopes, live series and keyboard-operated tabs'
   await expect(page.locator('#stats-tab-life')).toBeFocused();
   await expect(page.locator('#stats-content .stat-card').filter({ has: page.locator(':scope > span', { hasText: /^Vecinos vivos$/ }) }).locator('strong')).toHaveText(String(app.world.people.filter(person => person.role === 'neighbor').length));
   await expect(page.locator('#stats-content .stat-card').filter({ has: page.locator(':scope > span', { hasText: /^S\/I protegidos$/ }) }).locator('strong')).toHaveText(String(app.world.people.filter(person => person.role !== 'neighbor').length));
-  await expect(page.locator('[data-demographic-summary]')).toContainText(`${app.world.people.length} vidas · censo global`);
+  await expect(page.locator('[data-demographic-summary]')).toContainText(`${app.world.people.length} vidas en el mundo`);
   await expect(page.locator('#stats-content')).toContainText('Todavía no hay muestras');
   await expect.poll(() => observed.views.at(-1)?.stats?.history.length ?? 0, { timeout: 10_000 }).toBeGreaterThan(0);
   await expect(page.locator('.history-chart svg')).toHaveCount(2);
@@ -400,7 +400,7 @@ test('V4 mobile animal search, inspection and follow preserve human authority bo
     await expect(page.locator('#follow-toggle')).toHaveAttribute('aria-pressed', 'true');
     await page.locator('#landscape').focus(); await page.keyboard.press('d'); expect(observed.gestures).toHaveLength(0);
     await page.locator('#landscape').press('ArrowRight'); await expect(page.locator('#follow-toggle')).toHaveAttribute('aria-pressed','false');
-    await page.locator('#population-toggle').tap(); await page.getByRole('button',{name:'Habitantes',exact:true}).tap(); await expect(page.locator('#population-count')).toHaveText(String(app.world.people.length));
+    await page.locator('#population-toggle').tap(); await page.getByRole('button',{name:'Habitantes',exact:true}).tap(); await expect(page.locator('#population-count')).toContainText(`${app.world.people.length} en el mundo`);
     await fullscreen(page,390,844); expect(observed.errors).toEqual([]);
   } finally { await context.close(); }
 });

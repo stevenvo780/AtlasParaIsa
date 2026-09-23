@@ -17,7 +17,7 @@ const MADERA_MAXIMA = 12;
 const COTA: Record<Capa, number> = { comida: 1, vegetacion: 1, agua: 1, fertilidad: 1, madera: MADERA_MAXIMA };
 
 /** Valor crudo de la capa tal cual llega en la tesela (mismas unidades que el servidor). */
-function valorCrudo(tile: Tile, capa: Capa): number {
+export function valorCrudo(tile: Tile, capa: Capa): number {
   switch (capa) {
     case 'comida': return tile.food;
     case 'vegetacion': return tile.vegetation;
@@ -52,17 +52,25 @@ function conAlpha(colorHex: string, alpha: number): string {
 }
 
 export interface VistaCalor { x0: number; y0: number; tileSize: number; scale: number; }
+/** M10: rango de valores realmente recibido (mínimo y máximo crudos) sobre el que se estira la rampa. */
+export interface RangoCalor { min: number; max: number }
+
+/** Posición 0..1 de un valor crudo: sobre el rango recibido si lo hay (y no es plano), si no sobre la cota. */
+export function posicionEnRampa(valor: number, capa: Capa, rango?: RangoCalor | null): number {
+  if (rango && rango.max - rango.min > 1e-9) return (valor - rango.min) / (rango.max - rango.min);
+  return valor / COTA[capa];
+}
 
 /** Pinta un rectángulo por tesela recibida (ya filtrada a las visibles por el llamador). */
-export function dibujarCalor(ctx: CanvasRenderingContext2D, tiles: readonly Tile[], capa: Capa, view: VistaCalor, alpha = 0.55): void {
+export function dibujarCalor(ctx: CanvasRenderingContext2D, tiles: readonly Tile[], capa: Capa, view: VistaCalor, alpha = 0.55, rango?: RangoCalor | null): void {
   const lado = Math.max(1, view.tileSize * view.scale);
   for (const tile of tiles) {
-    ctx.fillStyle = conAlpha(colorCalor(capa, valorCrudo(tile, capa) / COTA[capa]), alpha);
+    ctx.fillStyle = conAlpha(colorCalor(capa, posicionEnRampa(valorCrudo(tile, capa), capa, rango)), alpha);
     ctx.fillRect(Math.round((tile.x - view.x0) * lado), Math.round((tile.y - view.y0) * lado), Math.ceil(lado), Math.ceil(lado));
   }
 }
 
-const TITULOS: Record<Capa, string> = { comida: 'Comida', vegetacion: 'Vegetación', agua: 'Agua', fertilidad: 'Fertilidad', madera: 'Madera' };
+export const TITULOS: Record<Capa, string> = { comida: 'Comida', vegetacion: 'Vegetación', agua: 'Agua potable', fertilidad: 'Fertilidad', madera: 'Madera' };
 const ETIQUETAS = ['nulo', 'escaso', 'moderado', 'abundante', 'máximo'] as const;
 
 export function leyendaCalor(capa: Capa): { titulo: string; paradas: { valor: number; color: string; etiqueta: string }[] } {
@@ -81,4 +89,27 @@ export function totalesPorRegion(tiles: readonly Tile[], capa: Capa, tamRegion =
     totales.set(clave, (totales.get(clave) ?? 0) + valorCrudo(tile, capa));
   }
   return totales;
+}
+
+/** M10: mínimo y máximo crudos de la capa en las teselas recibidas (null si no llegó ninguna). */
+export function rangoRecibido(tiles: readonly Tile[], capa: Capa): RangoCalor | null {
+  if (!tiles.length) return null;
+  let min = Infinity, max = -Infinity;
+  for (const tile of tiles) { const v = valorCrudo(tile, capa); if (!Number.isFinite(v)) continue; if (v < min) min = v; if (v > max) max = v; }
+  return Number.isFinite(min) ? { min, max } : null;
+}
+
+const formato: Record<Capa, (v: number) => string> = {
+  comida: v => `${Math.round(v * 100)} %`, vegetacion: v => `${Math.round(v * 100)} %`, fertilidad: v => `${Math.round(v * 100)} %`,
+  agua: v => `${v.toLocaleString('es-CO', { maximumFractionDigits: 2 })} u.`, madera: v => `${v.toLocaleString('es-CO', { maximumFractionDigits: 1 })} u.`,
+};
+
+/** M10: leyenda con los valores reales de lo que se ve: cinco paradas entre el mínimo y el máximo recibidos,
+ * con el mismo color que la rampa estirada. Si todo vale lo mismo, una sola parada. */
+export function leyendaEnRango(capa: Capa, rango: RangoCalor | null): { titulo: string; paradas: { color: string; etiqueta: string }[]; nota: string } {
+  const titulo = TITULOS[capa];
+  if (!rango) return { titulo, paradas: [], nota: 'Sin casillas recibidas en esta vista.' };
+  if (rango.max - rango.min <= 1e-9) return { titulo, paradas: [{ color: colorCalor(capa, posicionEnRampa(rango.max, capa)), etiqueta: formato[capa](rango.max) }], nota: 'Todo lo que ves tiene el mismo valor.' };
+  const paradas = [0, 0.25, 0.5, 0.75, 1].map(t => { const v = rango.min + (rango.max - rango.min) * t; return { color: colorCalor(capa, t), etiqueta: formato[capa](v) }; });
+  return { titulo, paradas, nota: 'La rampa se estira entre el mínimo y el máximo de lo que ves.' };
 }

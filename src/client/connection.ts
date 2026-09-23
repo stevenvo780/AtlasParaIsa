@@ -32,6 +32,9 @@ export class Connection {
   private readonly askedRecipes = new Set<string>();
   private readonly askedPeople = new Set<string>();
   private subscribeMs = 0;
+  /** M2: tamaño (en caracteres UTF-16 ≈ bytes del JSON) y hora de llegada de los últimos estados recibidos.
+   * Solo se mide; no cambia el protocolo ni lo que se pide al servidor. */
+  private readonly received: { size: number; at: number }[] = [];
   private status: ConnectionStatus = 'connecting';
   private browserOffline = false;
   private readonly onOffline = (): void => {
@@ -121,6 +124,20 @@ export class Connection {
     return true;
   }
 
+  /** M2: lo que este navegador recibe por actualización (media de las últimas 20) y cuántas llegan por segundo. */
+  reception(): { lastBytes: number; meanBytes: number; perSecond: number | null } | null {
+    if (!this.received.length) return null;
+    const last = this.received.at(-1)!, first = this.received[0]!;
+    const meanBytes = this.received.reduce((sum, item) => sum + item.size, 0) / this.received.length;
+    const span = last.at - first.at;
+    return { lastBytes: last.size, meanBytes, perSecond: this.received.length > 1 && span > 0 ? (this.received.length - 1) * 1000 / span : null };
+  }
+
+  private measure(size: number): void {
+    this.received.push({ size, at: typeof performance !== 'undefined' ? performance.now() : Date.now() });
+    if (this.received.length > 20) this.received.shift();
+  }
+
   private transmit(message: ClientMessage): boolean {
     if (this.stopped || this.browserOffline || this.socket?.readyState !== WebSocket.OPEN) return false;
     this.socket.send(JSON.stringify(message));
@@ -201,7 +218,7 @@ export class Connection {
         this.watchSilence();
         try {
           const message = JSON.parse(event.data) as ServerMessage;
-          if (message.type === 'state') this.accept(message.world);
+          if (message.type === 'state') { this.measure(event.data.length); this.accept(message.world); }
           else if (message.type === 'result') this.result(message.result);
           else if (message.type === 'recipe') { this.askedRecipes.delete(message.id); this.callbacks.recipe?.(message.id, message.recipe); }
           else if (message.type === 'persona') { this.askedPeople.delete(message.id); this.callbacks.persona?.(message.id, message.persona); }

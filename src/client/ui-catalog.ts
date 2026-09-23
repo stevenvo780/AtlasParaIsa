@@ -15,6 +15,11 @@ export const icon = { ...icons,
   cooperate: svg('<path d="m3 11 4-5 5 2 5-2 4 5-6 8h-6l-6-8ZM7 12l4 4m6-4-4 4m-6-5 5-3 3 3-3 3-2-1"/>'),
   water: svg('<path d="M12 2C9 7 5 10 5 15a7 7 0 0 0 14 0c0-5-4-8-7-13Z"/><path d="M8 15a4 4 0 0 0 4 4"/>'),
   hunt: svg('<path d="M5 3c13 0 13 18 0 18L15 12 5 3Zm0 9h17m-3-3 3 3-3 3"/>'),
+  /** M2: mapa de calor (rejilla con intensidades), distinto de las capas de Explorar. */
+  heat: svg('<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/><path d="M4 4h4v4H4zM10 10h4v4h-4zM16 16h4v4h-4z" fill="currentColor" stroke="none" opacity=".45"/>'),
+  /** M2: modo ligero (pluma), distinto del icono de capas de Explorar. */
+  light: svg('<path d="M20 4C11 4 6 9 5 19"/><path d="M20 4c0 8-5 13-12 13"/><path d="M9 15l5-5"/>'),
+  logout: svg('<path d="M14 4h5v16h-5"/><path d="M10 8l-4 4 4 4M6 12h10"/>'),
 };
 export const actions: Record<PersonView['action'], string> = { explore: 'Explorando', eat: 'Buscando alimento', forage: 'Cosechando alimento', drink: 'Buscando agua', hunt: 'Cazando', rest: 'Descansando', approach: 'Acercándose', accompany: 'Acompañando', retreat: 'Buscando espacio', share: 'Compartiendo', gather: 'Recolectando', farm: 'Cultivando', build: 'Construyendo', cooperate: 'Cooperando', invent: 'Investigando un proyecto', repair: 'Reparando', research: 'Probando materiales', craft: 'Fabricando un producto' };
 export const phases = { dawn: 'Amanecer', day: 'Día', dusk: 'Atardecer', night: 'Noche' };

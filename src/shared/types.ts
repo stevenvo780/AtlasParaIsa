@@ -55,6 +55,26 @@ export interface PersonDetail {
   trust: { id: string; value: number }[];
   /** Repertorio de procedimientos que recuerda; antes `TechnologyView.knowledge`. */
   recipeIds: string[];
+  /** M3 (persona-extra, opcionales): nombre y posición exacta para encontrar a alguien fuera de la cámara.
+   * `vivo` es true cuando la ficha sale de las vidas del mundo servido. Ausentes en servidores antiguos. */
+  name?: string; x?: number; y?: number; vivo?: boolean;
+  /** M4: si puede criar ahora y, si no, la primera causa con las condiciones de la ley (juventud, vejez,
+   * enfriamiento tras su última cría, cuerpo, reserva de alimento, comunidad exigida o techo del gobernador). */
+  fertil?: { ahora: boolean; bloqueo: 'no-vecino' | 'joven' | 'vejez' | 'enfriamiento' | 'cuerpo' | 'reserva' | 'comunidad' | 'techo' | null;
+    faltanPasos?: number; cuerpo?: string[]; reserva: number; necesita: number };
+  /** M4: a quién busca si su intención es de cortejo o de crianza (nombre único en el mundo vivo). */
+  busca?: { id: string; name: string; motivo: 'cortejo' | 'reunion' | 'prepara' };
+  /** M8: progenitores e hijos con nombre en todo el mundo servido (vivos y difuntos registrados). `nombre`
+   * y `vivo` null = el mundo ya no conserva ese registro. `hijos` nombra como mucho 24; `totalHijos` cuenta
+   * todos los que el mundo aún registra (los difuntos se archivan con el tiempo: es lo conocido). */
+  familia?: { progenitores: { id: string; nombre: string | null; vivo: boolean | null; generacion: number | null }[];
+    hijos: { id: string; nombre: string | null; vivo: boolean | null; generacion: number | null }[]; totalHijos: number; hijosVivos: number };
+  /** M8: edad corporal y umbrales de su cuerpo (demographicTraits), en pasos de edad. */
+  edades?: { edad: number; madurez: number; vejez: number; maxima: number };
+  /** M9: origen de los primeros 32 procedimientos que recuerda (el orden de `recipeIds`) y cuántas definiciones
+   * residentes inventó. `sin-registro` = el mundo no conserva de dónde vino; nunca se supone. */
+  procedimientos?: { id: string; origen: 'invento' | 'aprendido' | 'sin-registro'; tick?: number; maestro?: { id: string; nombre: string | null } }[];
+  inventadas?: number;
 }
 export interface PlaceView { id: string; name: string; x: number; y: number; description: string; gatherings: number; }
 export interface ChronicleEvent {
@@ -79,6 +99,10 @@ export interface WorldView {
   technology?: TechnologyView; organization?: OrganizationSummary;
   /** Identity of the served world; the projection omits it and the server adds it. */
   instanceId?: string;
+  /** M10: claves «cx,cy» (regiones de 16 × 16) que el servidor simula ahora dentro de esta ventana; el resto
+   * de las teselas recibidas son estado guardado o vista previa. La añade el servidor, como `instanceId`;
+   * como mucho 35 claves. Ausente = no se sabe (no se vela nada). */
+  regionesVivas?: string[];
   demography?: { deaths: number; causes: Record<string, number>; recent: { id: string; name: string; generation: number; parents: string[]; bornAt: number; diedAt: number; cause: string }[] };
 }
 /** `CommunityView` es a la vez la entidad interna (`World.communities`, `members` completo, sin
@@ -103,7 +127,10 @@ export interface WorldStats { population: number; meanEnergy: number; meanHunger
    * `identities` cuentan por rol; `lifeStage` solo suma vecinos, con `unknown` para los que no
    * tienen edad registrada; `protectedCount` son las identidades S/I (siempre protegidas por rol). */
   census?: { neighbors: number; identities: number; protectedCount: number;
-    lifeStage: { juvenile: number; adult: number; senescent: number; unknown: number } }; }
+    lifeStage: { juvenile: number; adult: number; senescent: number; unknown: number } };
+  /** Paso en que se midieron las estadísticas caras (diversidad, agua, reparto de comida): se recalculan
+   * cada 200 pasos y entre medias se reutiliza el último valor (statistics.ts). Ya viajaba; aquí se declara. */
+  statsTick?: number; }
 /**
  * T107 (perfil por fase y fracción serial): nombres fijos de las fases medidas del paso.
  * `maintainRegions`…`muestreo` se miden dentro de `stepWorld` (`world/index.ts`); `save` y
@@ -112,8 +139,10 @@ export interface WorldStats { population: number; meanEnergy: number; meanHunger
  * fases nombradas, no del `stepOnce` entero (que además incluye E/S de red).
  */
 export type FaseNombre = 'maintainRegions' | 'ecologia' | 'kernel' | 'fauna' | 'personas' | 'encuentros' | 'demografia' | 'comunidades' | 'reproduccion' | 'checkpoint' | 'muestreo' | 'save' | 'broadcast';
-/** `tickHz`: ritmo real medido en reloj de pared sobre los últimos pasos, no el ritmo pedido. */
-export interface RuntimeStats { stepMs: number; p95StepMs: number; saveMs: number; projectionMs: number; snapshotBytes: number; activeTiles: number; processRssMiB: number; tickHz: number;
+/** `tickHz`: ritmo real medido en reloj de pared sobre los últimos pasos, no el ritmo pedido.
+ * `tickHzObjetivo` (M2, opcional): el ritmo pedido (1000 / tickMs), fijado al arrancar; permite decir
+ * «más lento de lo normal» sin suponer 10 Hz. Ausente = el servidor no lo informa. */
+export interface RuntimeStats { stepMs: number; p95StepMs: number; saveMs: number; projectionMs: number; snapshotBytes: number; activeTiles: number; processRssMiB: number; tickHz: number; tickHzObjetivo?: number;
   /** Coste del borrador y de las leyes, separado del guardado del mismo paso. */
   cloneMs?: number; simulationMs?: number;
   /**
@@ -126,10 +155,30 @@ export interface RuntimeStats { stepMs: number; p95StepMs: number; saveMs: numbe
   fases: Record<FaseNombre, number>; fraccionSerial: number;
   /**
    * Ruling R17: el hardware, no un tope fijo, limita la población. `activo` es el valor
-   * vigente de `world.reproductionEnabled`; el gobernador lo apaga cuando `p95StepMs`
-   * supera `presupuestoMs` y lo reenciende por debajo del 70 % de ese presupuesto.
+   * vigente de `world.reproductionEnabled`. Con la política `techo` (la de hoy) el gobernador no
+   * apaga la natalidad: cuando `p95StepMs` supera `presupuestoMs` fija un techo en la población de
+   * ese momento y solo permite nacimientos por debajo de él (reponer, no crecer); `activo` es false
+   * mientras la población está EN el techo. Bajo el 70 % del presupuesto el techo se retira; en la
+   * banda muerta se conserva y nunca baja. Con `apagar` (histórica) lo apaga por encima del
+   * presupuesto y lo reenciende bajo el 70 %.
    * `manual` guarda una orden humana (null = sin orden); mientras no sea null, manda ella.
    */
+  /** M4 (resumen-vivo.ts, cada 50 pasos, O(población), tamaño constante): vecinos fértiles ahora, quién
+   * corteja, prepara reservas o se reúne para criar (por el `reason` que escribe la ley) y la ley de
+   * natalidad de este mundo en números (si nacer está permitido lo dice `gobernador.activo`). `tick` = paso medido. */
+  natalidad?: { tick: number; fertiles: number; cortejando: number; preparando: number; reuniendose: number;
+    /** `cupo` = `poblacion.nacimientosPorComprobacion` por ventana de `ventana` =
+     * `poblacion.intervaloComprobacionTicks` pasos; `continua` = `poblacion.comprobacionContinua` (ventana
+     * móvil mirada cada paso, o una comprobación por ventana). `maxima` = `poblacion.maxima` SOLO si limita
+     * por debajo del tope anticorrupción `POPULATION_HARD_LIMIT`; ausente = no hay tope propio del mundo
+     * (o un servidor anterior no lo informa). Las tres primeras son opcionales por la misma razón. */
+    ley: { radioPareja: number; radioLugar: number; radioCortejo: number; exigeComunidad: boolean; reserva: number;
+      cupo?: number; ventana?: number; continua?: boolean; maxima?: number } };
+  /** Mismo ritmo que `natalidad`: `conducta.habituacion` del mundo servido (0 = ley apagada), para no afirmar
+   * en la interfaz una ley de conducta que ese mundo no aplica. */
+  conducta?: { habituacion: number };
+  /** M7 (resumen-vivo.ts, mismo ritmo): veces que se compartió comida en los lugares de las regiones vivas. */
+  comidaCompartida?: number;
   gobernador?: { activo: boolean; presupuestoMs: number; p95StepMs: number; manual: boolean | null;
     /** Política vigente (`gobernador.politica`), techo de población vigente con la política `techo`
      * (null = sin freno) y el último frenazo registrado (T164; no se borra al volver a verde). */

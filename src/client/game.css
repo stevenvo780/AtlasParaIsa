@@ -59,3 +59,5 @@ html:has(.game-shell),body:has(.game-shell){width:100%;height:100%;overflow:hidd
 
 .heat-legend{position:absolute;right:18px;bottom:78px;z-index:11;padding:10px 13px;background:#2e493bdf;border-color:#81977750;color:#e4ecd8;max-width:190px}.heat-legend .eyebrow{font-size:8px;letter-spacing:1.5px;color:#b3c6a1;margin:0}.heat-legend h3{font-family:var(--serif);font-size:15px;margin:3px 0 8px;font-weight:400}.heat-stops{list-style:none;margin:0;padding:0;display:grid;gap:4px}.heat-stops li{display:flex;align-items:center;gap:7px;font-size:10px}.heat-stops i{width:14px;height:10px;border-radius:2px;display:inline-block;flex-shrink:0}
 @media(max-width:760px){.heat-legend{right:12px;bottom:152px;max-width:150px}.game-shell:has(.game-drawer:not([hidden])) .heat-legend{visibility:hidden}}
+/* M1: el recuento de Vidas distingue la cámara del mundo. */
+.population-drawer h2>#population-count{display:block;margin:6px 0 0;font-size:13px;line-height:1.4}

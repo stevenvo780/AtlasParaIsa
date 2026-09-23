@@ -209,3 +209,93 @@
 .carried-water meter::-webkit-meter-bar { background: #c5d8d4; }
 .carried-water meter::-webkit-meter-optimum-value { background: #547e89; }
 .carried-water meter::-moz-meter-bar { background: #547e89; }
+/* M2 — barra superior honesta: ritmo real, crecimiento frenado y acciones con texto, sin desbordar en 390 px. */
+.visually-hidden { position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.clock-status { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.world-rhythm { font-size: 10px; line-height: 1.3; color: #7a5a2d; white-space: nowrap; }
+.world-rhythm[data-kind="slow"] { color: #9a4f22; }
+.growth-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 4px 10px; border-radius: 999px; border: 1px solid #d9b98a; background: #f6e7cc; color: #6d4518; font-size: 11px; line-height: 1.25; text-align: left; white-space: nowrap; }
+.growth-chip:before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: #c0782f; flex-shrink: 0; }
+.growth-chip[data-growth="reponiendo"] { background: #eef0da; border-color: #c9d2a4; color: #4f6236; }
+.growth-chip[data-growth="reponiendo"]:before { background: #8aa05a; }
+.growth-chip:hover { filter: brightness(.97); }
+.game-actions .action-button { display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-width: 44px; width: 48px; min-height: 44px; padding: 3px 2px; margin: 0; position: static; color: #5d6f50; font-size: 9px; }
+.game-actions .action-button svg { width: 18px; height: 18px; }
+.game-actions .action-label { font-size: 9px; line-height: 1; letter-spacing: .1px; font-family: inherit; }
+.game-actions .action-button[aria-pressed=true] { background: #294a3a; color: #fffbe9; }
+.game-actions .logout { font-size: 9px !important; font-family: inherit; }
+.growth-status { margin: 0 0 14px; padding: 10px 12px; border-radius: 6px; border: 1px solid #dce4cc; background: #f3f5e8; font-size: 12px; line-height: 1.6; color: #4f6436; }
+.growth-status[data-growth="en-techo"], .growth-status[data-growth="apagado"], .growth-status[data-growth="manual"] { border-color: #e2c79d; background: #f8eedb; color: #6d4518; }
+.growth-status strong { display: block; font-family: var(--serif); font-size: 16px; font-weight: 400; margin-bottom: 2px; }
+.stat-card .stat-meter { width: 100%; height: 8px; }
+.stat-card > strong > small { font-family: inherit; font-size: 12px; color: #6e805e; white-space: nowrap; }
+.stats-grid > [data-growth-card], .stats-grid > [data-last-brake] { grid-column: 1 / -1; }
+.stats-grid > [data-growth-card] > strong, .stats-grid > [data-last-brake] > strong { font-size: 21px; }
+.growth-status[data-growth="libre"] { padding: 0; border: 0; background: none; font-size: 11px; color: #6e805e; }
+.growth-status[data-growth="libre"] strong { display: inline; font-family: inherit; font-size: 11px; font-weight: 600; margin-right: 4px; }
+.stat-card .stat-state { font-size: 10px; font-weight: 600; letter-spacing: .3px; }
+.stat-card .stat-state[data-vigente="true"] { color: #9a4f22; }
+.stat-card .stat-state[data-vigente="false"] { color: #5f7a45; }
+/* Pestañas de Mundo: nunca parten una palabra; si no caben, la lista se desplaza. */
+.stats-tabs { display: flex; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; scroll-snap-type: x proximity; }
+.stats-tabs::-webkit-scrollbar { display: none; }
+.stats-tabs button { flex: 1 0 auto; white-space: nowrap; overflow-wrap: normal; padding: 0 9px; min-width: 44px; scroll-snap-align: start; }
+@media (max-width: 760px) {
+  .game-brand { flex: 1 1 auto; min-width: 0; max-width: none; }
+  .game-brand > span { white-space: normal; line-height: 1.1; font-size: 17px; }
+  .game-brand > span > em { display: block; }
+  .game-actions { flex: 0 0 auto; padding: 2px; }
+  .game-actions .action-button { width: 44px; min-width: 44px; min-height: 45px; }
+  .game-actions .action-button svg { width: 17px; height: 17px; }
+  .game-clock { contain: none; }
+  .game-clock .growth-chip { position: absolute; top: calc(100% + 6px); right: 0; min-height: 44px; max-width: 220px; white-space: normal; box-shadow: 0 3px 12px #18302530; }
+  .world-rhythm { font-size: 9px; }
+  .game-shell:has(#growth-chip:not([hidden])) .game-message-stack, .game-shell:has(#growth-chip:not([hidden])) .return-toast { top: 186px; }
+  .selection-shortcuts .role-button { width: 44px; min-height: 44px; height: 44px; font-size: 20px; }
+  #inspector-toggle { min-height: 44px; }
+  .stats-tabs button { font-size: 11px; padding: 0 10px; }
+}
+/* En pantallas con altura suficiente, las pestañas de la ficha y «Todas las vidas» también llegan a 44 px;
+ * en pantallas bajas (≤ 650 px) se conserva la altura previa para no esconder el contenido de la ficha. */
+@media (max-width: 760px) and (min-height: 651px) {
+  .inspector-tabs button, .task-groups button { min-height: 44px; }
+  .notebook-back { min-height: 44px; }
+}
+/* M3: enlaces a quien está fuera de la cámara o murió: legibles como enlace, sin parecer presentes. */
+.entity-link.is-absent, .lineage-person.is-absent { font-style: italic; color: #6b7a58; }
+/* M4: escalera causal de los nacimientos. */
+.natality-ladder { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 6px; counter-reset: paso; }
+.natality-ladder > li { position: relative; padding: 9px 11px 9px 34px; border: 1px solid #dce4cc; border-radius: 6px; background: #f6f7ec; font-size: 12px; line-height: 1.5; color: #5e7051; counter-increment: paso; }
+.natality-ladder > li:before { content: counter(paso); position: absolute; left: 10px; top: 9px; width: 16px; height: 16px; border-radius: 50%; background: #dfe7cd; color: #4f6436; font-size: 10px; display: grid; place-items: center; }
+.natality-ladder > li strong { display: block; color: #425f35; font-size: 13px; font-weight: 600; }
+.natality-ladder > li.is-blocked { border-color: #e2c79d; background: #f8eedb; }
+.natality-ladder > li.is-blocked strong { color: #6d4518; }
+/* M5: crónica con filtros, quién cedió y el regreso con lo que cambió. */
+.journal-filters { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 6px; }
+.journal-filters button { min-height: 44px; padding: 0 14px; border-radius: 999px; border: 1px solid #d5dcc6; background: #f6f7ec; color: #56684e; font-size: 12px; }
+.journal-filters button[aria-pressed=true] { background: #294a3a; border-color: #294a3a; color: #fffbe9; }
+.journal-note { font-size: 11px; color: #6e805e; margin: 4px 0 10px; }
+.event-yield { font-size: 12px; color: #6d4518; background: #f8eedb; border-radius: 4px; padding: 6px 8px; margin: 6px 0; }
+.return-summary { font-size: 13px; line-height: 1.6; margin: 6px 0 8px; }
+.return-toast ul small { display: block; font-size: 10px; color: #6e805e; }
+.return-note { font-size: 11px; color: #6e805e; margin: 6px 0 0; }
+/* M7: notas bajo cada barra de cooperación y el enlace a una comunidad. */
+.distribution-row .distribution-note { display: block; font-size: 11px; line-height: 1.5; margin: 4px 0 0; color: #6e805e; }
+.community-counts .entity-link { margin-left: auto; }
+/* M8: vidas que terminaron y descendencia. */
+.ended-lives { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 6px; }
+.ended-lives > li { display: flex; flex-direction: column; gap: 2px; padding: 6px 0; border-bottom: 1px dotted #d6e0c6; }
+.ended-lives small { font-size: 11px; color: #6e805e; line-height: 1.5; }
+.lineage-count { font-size: 12px; color: #4f6436; margin: 2px 0 6px; font-weight: 600; }
+/* M9: origen de cada procedimiento que recuerda. */
+.procedure-row { flex-wrap: wrap; }
+.procedure-origin { flex-basis: 100%; font-size: 11px; color: #6e805e; margin-top: 2px; }
+/* M10: zona en reposo y leyenda del mapa de calor legible (la superficie del HUD no la pisa). */
+.rest-zone-note { font-size: 12px; line-height: 1.6; color: #5d4a2c; background: #f3ead8; border-left: 3px solid #b99a64; padding: 8px 10px; border-radius: 0 4px 4px 0; margin: 6px 0 10px; }
+.game-shell .heat-legend.hud-surface { background: #243b30f2; border-color: #81977780; color: #f1f5e8; }
+.game-shell .heat-legend .eyebrow { color: #c9d8b8; }
+.game-shell .heat-legend .heat-stops li { font-size: 11px; color: #f1f5e8; }
+.game-shell .heat-legend .heat-range { font-size: 10px; color: #c9d8b8; margin: 6px 0 0; }
+/* La leyenda del calor vive a la izquierda: el cuaderno ocupa la derecha en escritorio. */
+@media (min-width: 761px) { .game-shell .heat-legend { left: 18px; right: auto; bottom: 96px; } }
+@media (max-width: 760px) { .game-shell .heat-legend { left: 10px; right: auto; bottom: 150px; max-width: 200px; } .game-shell.notebook-open .heat-legend { visibility: hidden; } }

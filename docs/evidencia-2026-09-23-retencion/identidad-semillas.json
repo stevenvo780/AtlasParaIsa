@@ -1,0 +1,128 @@
+{
+ "descripcion": "scripts/perf/identidad-retencion.ts, 4800 pasos, Store temporal, base 715958f frente a la rama; -v = ventana 2400.",
+ "casos": {
+  "42-v": {
+   "params": "persistencia.ventanaEventosTicks=2400",
+   "digestosIguales": true,
+   "digestos": {
+    "1200": "85edb8fe245605eddaf5a0ebca4682c9eb4d042fb11756aa2562c6254a468bbf",
+    "2400": "be142e5fc24130831046833103b0e3e3756c316b88665666de277ec010b1baf4",
+    "3600": "1c715b4b70d46e6fc1f506d64094312aafc9b4b5f13818e613e124e7c7b5b33a",
+    "4800": "263efcdc226ba5d8ca98f48699fe3b17e30a0040163f06525a8ffbabf8a99608"
+   },
+   "poblacion": 20,
+   "executionCounter": 4441,
+   "recibosRetenidos": {
+    "base": 4441,
+    "rama": 2661
+   },
+   "fronteraRama": {
+    "version": 1,
+    "startsAfter": 0,
+    "through": 1780,
+    "tick": 2399,
+    "digest": "83789040b78879d0f1428fe543bc319ed9ddf12a2d64e372854d408be391d15a",
+    "count": 1780
+   }
+  },
+  "42": {
+   "params": "historicos",
+   "digestosIguales": true,
+   "digestos": {
+    "1200": "b58515151286b85a7e8bfc29ceb8da04f0adce10aa9b991daa00721344fd9f25",
+    "2400": "a74f2704b25bbc382c4ead56c86434c76ff271ee7660c91b0c9eea931112e844",
+    "3600": "b3b3a064941cc42aee225413c3df3ae20ab5704b134c3b8f232c00cc8ea89d7f",
+    "4800": "4baf57017547bba3dbbb50d0f8977ce42a9f33ad48ac48c08c438ce3b57462bf"
+   },
+   "poblacion": 20,
+   "executionCounter": 4441,
+   "recibosRetenidos": {
+    "base": 4441,
+    "rama": 4441
+   },
+   "fronteraRama": null
+  },
+  "51926-v": {
+   "params": "persistencia.cadaTicks=300,poblacion.cortejo=2,poblacion.radioCortejo=128,poblacion.exigeComunidad=false,poblacion.comprobacionContinua=true,conducta.habituacion=0.35,persistencia.ventanaEventosTicks=2400",
+   "digestosIguales": true,
+   "digestos": {
+    "1200": "2fba99a26f0d429d09a80a6b61eceebadc9845db946f4e3b741082ba18581a1f",
+    "2400": "949b48046dded6781c1a356a7165ab242e7ca358dfe1da5250701459557cb254",
+    "3600": "65f674596fba29c3dd5a9df87e7d00329f7898a472ec1645baa37154d75719d3",
+    "4800": "27fe591188faf946698fe451940fcc3c1341ab66b952f0da4d5ac0ee27268e91"
+   },
+   "poblacion": 29,
+   "executionCounter": 10528,
+   "recibosRetenidos": {
+    "base": 10528,
+    "rama": 8114
+   },
+   "fronteraRama": {
+    "version": 1,
+    "startsAfter": 0,
+    "through": 2414,
+    "tick": 2399,
+    "digest": "5b0412295755955628d2186a6b29eeaedd5825078a3f2e3b5e1c1c569c613eec",
+    "count": 2414
+   }
+  },
+  "51926": {
+   "params": "persistencia.cadaTicks=300,poblacion.cortejo=2,poblacion.radioCortejo=128,poblacion.exigeComunidad=false,poblacion.comprobacionContinua=true,conducta.habituacion=0.35",
+   "digestosIguales": true,
+   "digestos": {
+    "1200": "846f36fe7b2766130429979704868dc301ea34f73ab0f511ec95395efeb74a77",
+    "2400": "3629949dd8df3432faf3df0b77f82a5683bc3fadcbca7ddc5fb153c03023b2eb",
+    "3600": "9b4fe75af79d3d723e684c52de6d122ef9c6c997346b9ad2c6303eac1f5552d6",
+    "4800": "2fc1cf02c4ba8f1266bc128e9e1090a0934caf8d50546fa264cc65d4953ded01"
+   },
+   "poblacion": 29,
+   "executionCounter": 10528,
+   "recibosRetenidos": {
+    "base": 10528,
+    "rama": 10528
+   },
+   "fronteraRama": null
+  },
+  "7-v": {
+   "params": "persistencia.cadaTicks=300,poblacion.cortejo=2,poblacion.radioCortejo=128,poblacion.exigeComunidad=false,poblacion.comprobacionContinua=true,conducta.habituacion=0.35,persistencia.ventanaEventosTicks=2400",
+   "digestosIguales": true,
+   "digestos": {
+    "1200": "4d20be940f88f3cd91a90690046bf6dd1853aab0f7f5c0611ed76173c2d55113",
+    "2400": "00dc16c93450fbaf63bd442ad7f0cf2c7b0f0ecce3891661c9dce9857fce5c9e",
+    "3600": "6a16aad5255901a82f4ac9da8c2e0e9095b4e824dcc1dd1fddc1e259d5478aee",
+    "4800": "34adefd8f4146e9d1189ced97aaf268ada46a1fa1746ad93d776cc2ffb855ade"
+   },
+   "poblacion": 22,
+   "executionCounter": 8657,
+   "recibosRetenidos": {
+    "base": 8657,
+    "rama": 6207
+   },
+   "fronteraRama": {
+    "version": 1,
+    "startsAfter": 0,
+    "through": 2450,
+    "tick": 2399,
+    "digest": "314713f9d634ab4680b5dfd2377709ca017dc15f4085d42464c7149f6545d624",
+    "count": 2450
+   }
+  },
+  "7": {
+   "params": "persistencia.cadaTicks=300,poblacion.cortejo=2,poblacion.radioCortejo=128,poblacion.exigeComunidad=false,poblacion.comprobacionContinua=true,conducta.habituacion=0.35",
+   "digestosIguales": true,
+   "digestos": {
+    "1200": "6e378d73d46b90df176a42f31d4f86c4f566d35db365ddb0163159f81a94618a",
+    "2400": "ea9cb210139a3cf75c8fe9cac66bfd6e3497b02fefd9480df215a38286975b11",
+    "3600": "4f49ea94c42343b99d128ad031aa392918ec8f3eb86a37b3df8200ea01c91853",
+    "4800": "388a3bc2960f27e7d9d551d07351c9fba54b2281b4dceac4ef622828558a9c96"
+   },
+   "poblacion": 22,
+   "executionCounter": 8657,
+   "recibosRetenidos": {
+    "base": 8657,
+    "rama": 8657
+   },
+   "fronteraRama": null
+  }
+ }
+}

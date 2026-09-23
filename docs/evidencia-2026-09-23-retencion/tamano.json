@@ -1,0 +1,49 @@
+{
+ "descripcion": "scripts/perf/tamano-retencion.sh; MB = MiB. Antes: copia pública sin podar. Después: la misma tras 9000 pasos con la rama (retención convergida).",
+ "antes": {
+  "fichero vivo": 1199.0,
+  "paginasLibres": "0.0 MB",
+  "recibos": [
+   "351486",
+   "1",
+   "351486",
+   "81",
+   "158600"
+  ],
+  "tablas": {
+   "technology_executions": "1103.0 MB",
+   "chunks": "26.0 MB",
+   "technology_definitions": "22.8 MB",
+   "snapshots": "12.4 MB",
+   "technology_stats": "8.7 MB",
+   "events": "5.6 MB"
+  },
+  "respaldo (VACUUM INTO)": 1199.0,
+  "respaldo comprimido (gzip, como respaldo.sh)": 79.7,
+  "respaldo con páginas de 8 KiB": 910.0,
+  "respaldo con páginas de 8 KiB, comprimido": 72.7
+ },
+ "despues": {
+  "fichero vivo": 1199.0,
+  "paginasLibres": "898.7 MB",
+  "recibos": [
+   "74941",
+   "310273",
+   "385213",
+   "143601",
+   "167598"
+  ],
+  "tablas": {
+   "technology_executions": "209.0 MB",
+   "chunks": "29.2 MB",
+   "technology_definitions": "25.1 MB",
+   "snapshots": "12.3 MB",
+   "technology_stats": "9.5 MB",
+   "events": "5.6 MB"
+  },
+  "respaldo (VACUUM INTO)": 299.4,
+  "respaldo comprimido (gzip, como respaldo.sh)": 31.6,
+  "respaldo con páginas de 8 KiB": 252.8,
+  "respaldo con páginas de 8 KiB, comprimido": 30.3
+ }
+}

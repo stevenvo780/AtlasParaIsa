@@ -1,0 +1,1681 @@
+{
+ "descripcion": "Copia pública (respaldo 04:00), 9000 pasos con el régimen de main.ts; base = 715958f, rama = retención.",
+ "carga": {
+  "base": {
+   "paredMs": 49291.4,
+   "cpuMs": 54229
+  },
+  "rama": {
+   "paredMs": 22825.2,
+   "cpuMs": 29948.4
+  }
+ },
+ "primerGuardado": {
+  "base": {
+   "paredMs": 309.2,
+   "cpuMs": 324.9
+  },
+  "rama": {
+   "paredMs": 634.7,
+   "cpuMs": 502.1
+  }
+ },
+ "inicial": {
+  "tick": 158600,
+  "poblacion": 75,
+  "executionCounter": 351486,
+  "digesto": "d3322406827095b05b9d5734c8a6d755edc7de1f860a91c98e7d837b5c883c6b"
+ },
+ "guardados": [
+  {
+   "k": 1,
+   "tick": 158700,
+   "digestoIgual": true,
+   "digesto": "b2d9dcf342b412b6bb0bf36df5b45a759c85c664b06dc3ec932dfa9de98771b1",
+   "sesion": false,
+   "base": {
+    "paredMs": 514.7,
+    "cpuMs": 506.1,
+    "recibos": 351917
+   },
+   "rama": {
+    "paredMs": 635.9,
+    "cpuMs": 601.6,
+    "recibos": 343728,
+    "frontera": 8189
+   }
+  },
+  {
+   "k": 2,
+   "tick": 158800,
+   "digestoIgual": true,
+   "digesto": "ef8242cafb993c32d7fa537d7357cc6a083885946930853ed10280569220450b",
+   "sesion": false,
+   "base": {
+    "paredMs": 369.8,
+    "cpuMs": 465.2,
+    "recibos": 352381
+   },
+   "rama": {
+    "paredMs": 612.4,
+    "cpuMs": 585.3,
+    "recibos": 340098,
+    "frontera": 12283
+   }
+  },
+  {
+   "k": 3,
+   "tick": 158900,
+   "digestoIgual": true,
+   "digesto": "9a165b5da1b1cb02a6ce0827b6fd6da2590007c30163d99079adcd6328eec919",
+   "sesion": false,
+   "base": {
+    "paredMs": 427.3,
+    "cpuMs": 395.9,
+    "recibos": 352882
+   },
+   "rama": {
+    "paredMs": 406.1,
+    "cpuMs": 436.7,
+    "recibos": 336504,
+    "frontera": 16378
+   }
+  },
+  {
+   "k": 4,
+   "tick": 159000,
+   "digestoIgual": true,
+   "digesto": "25cc9f487c37ab37d8c13d7f9d461e08a1a5da97b6eae213bf68b6f8af453155",
+   "sesion": false,
+   "base": {
+    "paredMs": 397.1,
+    "cpuMs": 461.2,
+    "recibos": 353427
+   },
+   "rama": {
+    "paredMs": 566,
+    "cpuMs": 472.6,
+    "recibos": 332953,
+    "frontera": 20474
+   }
+  },
+  {
+   "k": 5,
+   "tick": 159100,
+   "digestoIgual": true,
+   "digesto": "b5214f098078a511cd8b43583e4883e163601edb7729c50fb79ff4c83008100d",
+   "sesion": false,
+   "base": {
+    "paredMs": 608.4,
+    "cpuMs": 402.1,
+    "recibos": 353815
+   },
+   "rama": {
+    "paredMs": 456.2,
+    "cpuMs": 484.5,
+    "recibos": 329245,
+    "frontera": 24570
+   }
+  },
+  {
+   "k": 6,
+   "tick": 159200,
+   "digestoIgual": true,
+   "digesto": "386de0a44aa922876a71d6a9d4f8e8a1fbf4f8d3719f81249f38037cf0c13bfe",
+   "sesion": false,
+   "base": {
+    "paredMs": 483.1,
+    "cpuMs": 471.9,
+    "recibos": 354262
+   },
+   "rama": {
+    "paredMs": 876.8,
+    "cpuMs": 578.5,
+    "recibos": 325600,
+    "frontera": 28662
+   }
+  },
+  {
+   "k": 7,
+   "tick": 159300,
+   "digestoIgual": true,
+   "digesto": "d8023c7103fdbc083d7155ba68d0123d77e22c54d99389e8b67973aef0b01de2",
+   "sesion": false,
+   "base": {
+    "paredMs": 1293.8,
+    "cpuMs": 352.3,
+    "recibos": 354743
+   },
+   "rama": {
+    "paredMs": 493.7,
+    "cpuMs": 530.3,
+    "recibos": 321988,
+    "frontera": 32755
+   }
+  },
+  {
+   "k": 8,
+   "tick": 159400,
+   "digestoIgual": true,
+   "digesto": "6da8d46b810ac64f287ed4582c8d5f8e7119545f4a2e3c8040b4ae5e5e648514",
+   "sesion": false,
+   "base": {
+    "paredMs": 327.7,
+    "cpuMs": 319.5,
+    "recibos": 355192
+   },
+   "rama": {
+    "paredMs": 1289.7,
+    "cpuMs": 604.2,
+    "recibos": 318342,
+    "frontera": 36850
+   }
+  },
+  {
+   "k": 9,
+   "tick": 159500,
+   "digestoIgual": true,
+   "digesto": "473bd13244d8e8a9212c2e4843191a516ef58b19e9945d235afed5cbd1da07e0",
+   "sesion": false,
+   "base": {
+    "paredMs": 680.3,
+    "cpuMs": 438.7,
+    "recibos": 355583
+   },
+   "rama": {
+    "paredMs": 612.4,
+    "cpuMs": 456.9,
+    "recibos": 314638,
+    "frontera": 40945
+   }
+  },
+  {
+   "k": 10,
+   "tick": 159600,
+   "digestoIgual": true,
+   "digesto": "25de3030481278cf5c7acc883f1456cf21a485d10c0ae75bba12995b76af5414",
+   "sesion": false,
+   "base": {
+    "paredMs": 515.8,
+    "cpuMs": 646.8,
+    "recibos": 355948
+   },
+   "rama": {
+    "paredMs": 669.1,
+    "cpuMs": 742,
+    "recibos": 310907,
+    "frontera": 45041
+   }
+  },
+  {
+   "k": 11,
+   "tick": 159700,
+   "digestoIgual": true,
+   "digesto": "c8950cb6dcdba1e7d09f6066a302b1d857e8b54980dd47c6fc2e914c71ce48ea",
+   "sesion": false,
+   "base": {
+    "paredMs": 539.5,
+    "cpuMs": 397.8,
+    "recibos": 356300
+   },
+   "rama": {
+    "paredMs": 489.3,
+    "cpuMs": 455.9,
+    "recibos": 307164,
+    "frontera": 49136
+   }
+  },
+  {
+   "k": 12,
+   "tick": 159800,
+   "digestoIgual": true,
+   "digesto": "fa161ccccf48e0c2332269ba82d5a1ffde8c7daf490b59b99736af8ec61db730",
+   "sesion": false,
+   "base": {
+    "paredMs": 428.5,
+    "cpuMs": 438.4,
+    "recibos": 356679
+   },
+   "rama": {
+    "paredMs": 557.8,
+    "cpuMs": 628.6,
+    "recibos": 303453,
+    "frontera": 53226
+   }
+  },
+  {
+   "k": 13,
+   "tick": 159900,
+   "digestoIgual": true,
+   "digesto": "c963bc08de4a5b45475ffb171065701fd4d5372139ddde97daae1cfb66a3c3c0",
+   "sesion": false,
+   "base": {
+    "paredMs": 494.6,
+    "cpuMs": 412.1,
+    "recibos": 357059
+   },
+   "rama": {
+    "paredMs": 579.2,
+    "cpuMs": 601.2,
+    "recibos": 299737,
+    "frontera": 57322
+   }
+  },
+  {
+   "k": 14,
+   "tick": 160000,
+   "digestoIgual": true,
+   "digesto": "2db77fa3876c5ecc1c56c0bd6156715c98b75e86518a276f8a20c2605d7c2559",
+   "sesion": false,
+   "base": {
+    "paredMs": 389,
+    "cpuMs": 355.3,
+    "recibos": 357414
+   },
+   "rama": {
+    "paredMs": 1241.3,
+    "cpuMs": 442.1,
+    "recibos": 295996,
+    "frontera": 61418
+   }
+  },
+  {
+   "k": 15,
+   "tick": 160100,
+   "digestoIgual": true,
+   "digesto": "a16dbae86eb4894fdd5d14654f77093a9ecbaaa85cf857c105d18f6521292d95",
+   "sesion": false,
+   "base": {
+    "paredMs": 1643.5,
+    "cpuMs": 451,
+    "recibos": 357751
+   },
+   "rama": {
+    "paredMs": 747.8,
+    "cpuMs": 515.6,
+    "recibos": 292237,
+    "frontera": 65514
+   }
+  },
+  {
+   "k": 16,
+   "tick": 160200,
+   "digestoIgual": true,
+   "digesto": "a80fa0bbe0da221979af4406c37f4adb1b2fefbd85f0536aac9c409137f081dc",
+   "sesion": false,
+   "base": {
+    "paredMs": 391.4,
+    "cpuMs": 300.4,
+    "recibos": 358064
+   },
+   "rama": {
+    "paredMs": 529.9,
+    "cpuMs": 362.7,
+    "recibos": 288454,
+    "frontera": 69610
+   }
+  },
+  {
+   "k": 17,
+   "tick": 160300,
+   "digestoIgual": true,
+   "digesto": "03f0ddcc19816e098122a99c854275ac2fa394311ec04d259ec622d768e02d9b",
+   "sesion": false,
+   "base": {
+    "paredMs": 724.3,
+    "cpuMs": 474.2,
+    "recibos": 358349
+   },
+   "rama": {
+    "paredMs": 435.3,
+    "cpuMs": 453.7,
+    "recibos": 284644,
+    "frontera": 73705
+   }
+  },
+  {
+   "k": 18,
+   "tick": 160400,
+   "digestoIgual": true,
+   "digesto": "17f7525e4e066049eecdbd37714d8727087284cee5225d6e52eff44100afd99f",
+   "sesion": false,
+   "base": {
+    "paredMs": 415.6,
+    "cpuMs": 318.9,
+    "recibos": 358629
+   },
+   "rama": {
+    "paredMs": 785.3,
+    "cpuMs": 431.5,
+    "recibos": 280828,
+    "frontera": 77801
+   }
+  },
+  {
+   "k": 19,
+   "tick": 160500,
+   "digestoIgual": true,
+   "digesto": "500d137c7a3ba3b2a85c8f7f60efad9a03fb18b33ea962d2f319cedbd0558919",
+   "sesion": false,
+   "base": {
+    "paredMs": 789.9,
+    "cpuMs": 348.2,
+    "recibos": 358926
+   },
+   "rama": {
+    "paredMs": 491,
+    "cpuMs": 468.4,
+    "recibos": 277037,
+    "frontera": 81889
+   }
+  },
+  {
+   "k": 20,
+   "tick": 160600,
+   "digestoIgual": true,
+   "digesto": "322bc2b1a212e92325be70a0b9e3310346e61202613616d941ed85ce472f5e24",
+   "sesion": false,
+   "base": {
+    "paredMs": 562.4,
+    "cpuMs": 582.6,
+    "recibos": 359239
+   },
+   "rama": {
+    "paredMs": 861.6,
+    "cpuMs": 723.8,
+    "recibos": 273254,
+    "frontera": 85985
+   }
+  },
+  {
+   "k": 21,
+   "tick": 160700,
+   "digestoIgual": true,
+   "digesto": "75e6c420064ca4a96ef708cc52c914f8bb511813a4193ca1bf351827d52a01a4",
+   "sesion": false,
+   "base": {
+    "paredMs": 552.7,
+    "cpuMs": 450.7,
+    "recibos": 359582
+   },
+   "rama": {
+    "paredMs": 524,
+    "cpuMs": 505.1,
+    "recibos": 269501,
+    "frontera": 90081
+   }
+  },
+  {
+   "k": 22,
+   "tick": 160800,
+   "digestoIgual": true,
+   "digesto": "954b171a96a58624aeec90ae4b6795a4be35225b48dddbdb95e7a92090db3fdd",
+   "sesion": false,
+   "base": {
+    "paredMs": 422.2,
+    "cpuMs": 492.3,
+    "recibos": 359870
+   },
+   "rama": {
+    "paredMs": 642.4,
+    "cpuMs": 683.4,
+    "recibos": 265694,
+    "frontera": 94176
+   }
+  },
+  {
+   "k": 23,
+   "tick": 160900,
+   "digestoIgual": true,
+   "digesto": "2f492a5084c500ede3391b103699f825626bad76c437291935f9d4a6fa7adf33",
+   "sesion": false,
+   "base": {
+    "paredMs": 503.5,
+    "cpuMs": 445.8,
+    "recibos": 360211
+   },
+   "rama": {
+    "paredMs": 656.1,
+    "cpuMs": 548.3,
+    "recibos": 261939,
+    "frontera": 98272
+   }
+  },
+  {
+   "k": 24,
+   "tick": 161000,
+   "digestoIgual": true,
+   "digesto": "eebb19ffb7640300d756c1cb3a154518c1c5ec5c4739496d2d4c143f89acc1d3",
+   "sesion": false,
+   "base": {
+    "paredMs": 401.2,
+    "cpuMs": 409.3,
+    "recibos": 360533
+   },
+   "rama": {
+    "paredMs": 644.4,
+    "cpuMs": 561.3,
+    "recibos": 258171,
+    "frontera": 102362
+   }
+  },
+  {
+   "k": 25,
+   "tick": 161100,
+   "digestoIgual": true,
+   "digesto": "4a3521b406d2a1f2940725e6106c5c5ce17382c12f250c9c36acc9ec77ab046a",
+   "sesion": false,
+   "base": {
+    "paredMs": 438.5,
+    "cpuMs": 379.3,
+    "recibos": 360906
+   },
+   "rama": {
+    "paredMs": 521.8,
+    "cpuMs": 414,
+    "recibos": 254453,
+    "frontera": 106453
+   }
+  },
+  {
+   "k": 26,
+   "tick": 161200,
+   "digestoIgual": true,
+   "digesto": "05fbc2f5c337670e3f4511fd0dd89710ce22bf4b6b7adbe89ea0094e9167dae5",
+   "sesion": false,
+   "base": {
+    "paredMs": 399,
+    "cpuMs": 403.3,
+    "recibos": 361291
+   },
+   "rama": {
+    "paredMs": 1763.7,
+    "cpuMs": 412.1,
+    "recibos": 250747,
+    "frontera": 110544
+   }
+  },
+  {
+   "k": 27,
+   "tick": 161300,
+   "digestoIgual": true,
+   "digesto": "7ef55f5050cc4826424b25a8ec3dea23748371004e2ecc3b90208c7685037378",
+   "sesion": false,
+   "base": {
+    "paredMs": 517.9,
+    "cpuMs": 465.8,
+    "recibos": 361670
+   },
+   "rama": {
+    "paredMs": 584.2,
+    "cpuMs": 476.8,
+    "recibos": 247035,
+    "frontera": 114635
+   }
+  },
+  {
+   "k": 28,
+   "tick": 161400,
+   "digestoIgual": true,
+   "digesto": "4a24a3af7c08f179d42a51cf576a2aa82a6ec55ec765efd8355a500f306ee209",
+   "sesion": false,
+   "base": {
+    "paredMs": 345,
+    "cpuMs": 359,
+    "recibos": 362082
+   },
+   "rama": {
+    "paredMs": 756.1,
+    "cpuMs": 448.4,
+    "recibos": 243353,
+    "frontera": 118729
+   }
+  },
+  {
+   "k": 29,
+   "tick": 161500,
+   "digestoIgual": true,
+   "digesto": "8f7994752e3960b36395e5bd979bcbc52c525ab5e0a83a5b08689fda43a58d55",
+   "sesion": false,
+   "base": {
+    "paredMs": 1033.2,
+    "cpuMs": 442.2,
+    "recibos": 362465
+   },
+   "rama": {
+    "paredMs": 489.3,
+    "cpuMs": 397.5,
+    "recibos": 239640,
+    "frontera": 122825
+   }
+  },
+  {
+   "k": 30,
+   "tick": 161600,
+   "digestoIgual": true,
+   "digesto": "e5e1666fdcfc036fce081cddfbfe73a5c67c4b1fbf4617a6e73fe4850559c020",
+   "sesion": false,
+   "base": {
+    "paredMs": 515.1,
+    "cpuMs": 501.3,
+    "recibos": 362836
+   },
+   "rama": {
+    "paredMs": 724.3,
+    "cpuMs": 696.3,
+    "recibos": 235917,
+    "frontera": 126919
+   }
+  },
+  {
+   "k": 31,
+   "tick": 161700,
+   "digestoIgual": true,
+   "digesto": "2b335471b804006d6ba8b8fcaf03cc7ce68a41625d6dc7a52462a98d053379ea",
+   "sesion": false,
+   "base": {
+    "paredMs": 480.9,
+    "cpuMs": 400.9,
+    "recibos": 363156
+   },
+   "rama": {
+    "paredMs": 452.2,
+    "cpuMs": 430.5,
+    "recibos": 232144,
+    "frontera": 131012
+   }
+  },
+  {
+   "k": 32,
+   "tick": 161800,
+   "digestoIgual": true,
+   "digesto": "f1bc5382631152dcf0cf8515b46b8a99707a7219cce83428270a43350a26c623",
+   "sesion": false,
+   "base": {
+    "paredMs": 585,
+    "cpuMs": 543.3,
+    "recibos": 363504
+   },
+   "rama": {
+    "paredMs": 582.7,
+    "cpuMs": 573.8,
+    "recibos": 228397,
+    "frontera": 135107
+   }
+  },
+  {
+   "k": 33,
+   "tick": 161900,
+   "digestoIgual": true,
+   "digesto": "ab41ce771fb90af53ab4f99ab4392a84d034ca3104fa5e4d47d3119460186f19",
+   "sesion": false,
+   "base": {
+    "paredMs": 2728,
+    "cpuMs": 618.6,
+    "recibos": 363867
+   },
+   "rama": {
+    "paredMs": 428.3,
+    "cpuMs": 424.5,
+    "recibos": 224669,
+    "frontera": 139198
+   }
+  },
+  {
+   "k": 34,
+   "tick": 162000,
+   "digestoIgual": true,
+   "digesto": "64703679baf9d63ae3868386e1495b1472479a804d55ecf70e54339caddc2af8",
+   "sesion": false,
+   "base": {
+    "paredMs": 2101.3,
+    "cpuMs": 637.7,
+    "recibos": 364200
+   },
+   "rama": {
+    "paredMs": 647.7,
+    "cpuMs": 590.3,
+    "recibos": 220906,
+    "frontera": 143294
+   }
+  },
+  {
+   "k": 35,
+   "tick": 162100,
+   "digestoIgual": true,
+   "digesto": "fde30a1c87565953b104776d3acb8c0124c456570017304e6be556827865cd18",
+   "sesion": false,
+   "base": {
+    "paredMs": 4163,
+    "cpuMs": 868.6,
+    "recibos": 364612
+   },
+   "rama": {
+    "paredMs": 429.1,
+    "cpuMs": 441,
+    "recibos": 217222,
+    "frontera": 147390
+   }
+  },
+  {
+   "k": 36,
+   "tick": 162200,
+   "digestoIgual": true,
+   "digesto": "6a3e701efb56bc5291e27ffd522330f6be7b98056d54ee65dea5fe9b391a9b54",
+   "sesion": false,
+   "base": {
+    "paredMs": 1392.1,
+    "cpuMs": 600.4,
+    "recibos": 364946
+   },
+   "rama": {
+    "paredMs": 509.2,
+    "cpuMs": 459.4,
+    "recibos": 213463,
+    "frontera": 151483
+   }
+  },
+  {
+   "k": 37,
+   "tick": 162300,
+   "digestoIgual": true,
+   "digesto": "35f44a512eb1e2debbd74db2ab29a16c7aa8cbb4a95560c93f8ca28a47a03d18",
+   "sesion": false,
+   "base": {
+    "paredMs": 2332.8,
+    "cpuMs": 681.3,
+    "recibos": 365350
+   },
+   "rama": {
+    "paredMs": 412.1,
+    "cpuMs": 431,
+    "recibos": 209771,
+    "frontera": 155579
+   }
+  },
+  {
+   "k": 38,
+   "tick": 162400,
+   "digestoIgual": true,
+   "digesto": "1039c817c3197d06d3f18cd8a48d1f1f682ab6bcffc1a9d4d93d8be270cdbe62",
+   "sesion": false,
+   "base": {
+    "paredMs": 976.5,
+    "cpuMs": 539.2,
+    "recibos": 365639
+   },
+   "rama": {
+    "paredMs": 480.6,
+    "cpuMs": 452.8,
+    "recibos": 205972,
+    "frontera": 159667
+   }
+  },
+  {
+   "k": 39,
+   "tick": 162500,
+   "digestoIgual": true,
+   "digesto": "b963c6344dc3148ad17c9503d57a2fa9866a114353c6477a71dee45dccf5fd78",
+   "sesion": false,
+   "base": {
+    "paredMs": 1821.8,
+    "cpuMs": 685.2,
+    "recibos": 366040
+   },
+   "rama": {
+    "paredMs": 479.7,
+    "cpuMs": 500.6,
+    "recibos": 202277,
+    "frontera": 163763
+   }
+  },
+  {
+   "k": 40,
+   "tick": 162600,
+   "digestoIgual": true,
+   "digesto": "2bfdd240ea65d80b4ea06162c85b4e21ef9d0e5de5b513409ab349ded28eeba4",
+   "sesion": false,
+   "base": {
+    "paredMs": 1586.8,
+    "cpuMs": 824.2,
+    "recibos": 366518
+   },
+   "rama": {
+    "paredMs": 633,
+    "cpuMs": 585.4,
+    "recibos": 198664,
+    "frontera": 167854
+   }
+  },
+  {
+   "k": 41,
+   "tick": 162700,
+   "digestoIgual": true,
+   "digesto": "25fb6fac4fe7f4202f31b850c26c5ccec97a34cd4f529657ae1a718b2e45f012",
+   "sesion": false,
+   "base": {
+    "paredMs": 998.5,
+    "cpuMs": 540.5,
+    "recibos": 366933
+   },
+   "rama": {
+    "paredMs": 555.6,
+    "cpuMs": 624.2,
+    "recibos": 194985,
+    "frontera": 171948
+   }
+  },
+  {
+   "k": 42,
+   "tick": 162800,
+   "digestoIgual": true,
+   "digesto": "2947dcbebd89da22a8c86a239dbaecdc64dc3b6cf1cdd1af331ae04bc7ecc510",
+   "sesion": false,
+   "base": {
+    "paredMs": 979.9,
+    "cpuMs": 535.5,
+    "recibos": 367510
+   },
+   "rama": {
+    "paredMs": 917,
+    "cpuMs": 661.1,
+    "recibos": 191472,
+    "frontera": 176038
+   }
+  },
+  {
+   "k": 43,
+   "tick": 162900,
+   "digestoIgual": true,
+   "digesto": "0984b92dc9520785f525d071357e0678788e51404c773d489d91b6c636e31130",
+   "sesion": false,
+   "base": {
+    "paredMs": 1061,
+    "cpuMs": 614,
+    "recibos": 368065
+   },
+   "rama": {
+    "paredMs": 2805.7,
+    "cpuMs": 782.8,
+    "recibos": 187932,
+    "frontera": 180133
+   }
+  },
+  {
+   "k": 44,
+   "tick": 163000,
+   "digestoIgual": true,
+   "digesto": "6a074426ebea5a770f0b2ea225c561ebf698c559a89858096de193bd78d5266b",
+   "sesion": false,
+   "base": {
+    "paredMs": 1289.4,
+    "cpuMs": 616.3,
+    "recibos": 368605
+   },
+   "rama": {
+    "paredMs": 1528.4,
+    "cpuMs": 760,
+    "recibos": 184382,
+    "frontera": 184223
+   }
+  },
+  {
+   "k": 45,
+   "tick": 163100,
+   "digestoIgual": true,
+   "digesto": "19164be151bf4e4b49b360f79a80b77b15634cae2593652edd385f8c08bf4576",
+   "sesion": false,
+   "base": {
+    "paredMs": 957.5,
+    "cpuMs": 567.5,
+    "recibos": 369132
+   },
+   "rama": {
+    "paredMs": 1796.4,
+    "cpuMs": 795.3,
+    "recibos": 180814,
+    "frontera": 188318
+   }
+  },
+  {
+   "k": 46,
+   "tick": 163200,
+   "digestoIgual": true,
+   "digesto": "ef2aad50f7dc801f69130c759310927e590865488a3c289a285167148733659d",
+   "sesion": false,
+   "base": {
+    "paredMs": 1228.9,
+    "cpuMs": 594.1,
+    "recibos": 369666
+   },
+   "rama": {
+    "paredMs": 1265.3,
+    "cpuMs": 695.8,
+    "recibos": 177252,
+    "frontera": 192414
+   }
+  },
+  {
+   "k": 47,
+   "tick": 163300,
+   "digestoIgual": true,
+   "digesto": "7795c5d83e996b4378d41b488eaea752c59c9b7f533d8c3bb8be6d16206f5f93",
+   "sesion": false,
+   "base": {
+    "paredMs": 1262.8,
+    "cpuMs": 681,
+    "recibos": 370193
+   },
+   "rama": {
+    "paredMs": 1545.6,
+    "cpuMs": 705.8,
+    "recibos": 173686,
+    "frontera": 196507
+   }
+  },
+  {
+   "k": 48,
+   "tick": 163400,
+   "digestoIgual": true,
+   "digesto": "3b5c56dbd940172d3e3d7996924cd7cc7782a5136eba2a68cd64e01f3bdab745",
+   "sesion": false,
+   "base": {
+    "paredMs": 1525.8,
+    "cpuMs": 656.5,
+    "recibos": 370750
+   },
+   "rama": {
+    "paredMs": 2014.3,
+    "cpuMs": 829.5,
+    "recibos": 170149,
+    "frontera": 200601
+   }
+  },
+  {
+   "k": 49,
+   "tick": 163500,
+   "digestoIgual": true,
+   "digesto": "0638f6df96d2a699119495e4fcecc6d4ba2ac3cc64d34858a1c71ab39c62c3cf",
+   "sesion": false,
+   "base": {
+    "paredMs": 1268.9,
+    "cpuMs": 619.9,
+    "recibos": 371310
+   },
+   "rama": {
+    "paredMs": 833.7,
+    "cpuMs": 758.7,
+    "recibos": 166613,
+    "frontera": 204697
+   }
+  },
+  {
+   "k": 50,
+   "tick": 163600,
+   "digestoIgual": true,
+   "digesto": "98ace71d2b3825554f80c94deb2477fc8f3cd9de58c1d6aad654c0738db47acd",
+   "sesion": false,
+   "base": {
+    "paredMs": 1665.7,
+    "cpuMs": 1055.4,
+    "recibos": 371933
+   },
+   "rama": {
+    "paredMs": 1608.4,
+    "cpuMs": 1197.7,
+    "recibos": 163142,
+    "frontera": 208791
+   }
+  },
+  {
+   "k": 51,
+   "tick": 163700,
+   "digestoIgual": true,
+   "digesto": "df2fa3db8174d2be7e10aa4610fb361a612279f33a95390c736d704bd33e510e",
+   "sesion": false,
+   "base": {
+    "paredMs": 1163.7,
+    "cpuMs": 727.2,
+    "recibos": 372522
+   },
+   "rama": {
+    "paredMs": 1833.8,
+    "cpuMs": 720.8,
+    "recibos": 159638,
+    "frontera": 212884
+   }
+  },
+  {
+   "k": 52,
+   "tick": 163800,
+   "digestoIgual": true,
+   "digesto": "dd37ffb6958b3f7d01bb9eaae0e8f93ee424a06779659f4cfdb7b03ad78116b2",
+   "sesion": false,
+   "base": {
+    "paredMs": 860.9,
+    "cpuMs": 594.2,
+    "recibos": 373044
+   },
+   "rama": {
+    "paredMs": 1314.5,
+    "cpuMs": 684.1,
+    "recibos": 156069,
+    "frontera": 216975
+   }
+  },
+  {
+   "k": 53,
+   "tick": 163900,
+   "digestoIgual": true,
+   "digesto": "e1d1d7b573d362779305a09b3e519057553366109223b94d8c2847054eff74f7",
+   "sesion": false,
+   "base": {
+    "paredMs": 1217.8,
+    "cpuMs": 623.6,
+    "recibos": 373348
+   },
+   "rama": {
+    "paredMs": 1042.7,
+    "cpuMs": 660.4,
+    "recibos": 152287,
+    "frontera": 221061
+   }
+  },
+  {
+   "k": 54,
+   "tick": 164000,
+   "digestoIgual": true,
+   "digesto": "768d80e37220554f474ef2836bb866a471642501165780a6f6769d937f3b2005",
+   "sesion": false,
+   "base": {
+    "paredMs": 1771.6,
+    "cpuMs": 831.1,
+    "recibos": 373670
+   },
+   "rama": {
+    "paredMs": 966.5,
+    "cpuMs": 763.9,
+    "recibos": 148515,
+    "frontera": 225155
+   }
+  },
+  {
+   "k": 55,
+   "tick": 164100,
+   "digestoIgual": true,
+   "digesto": "730f870710db7b01db24f62c3b1979937f5c178b25711d6e8a5817afaf7a01d4",
+   "sesion": false,
+   "base": {
+    "paredMs": 1342.4,
+    "cpuMs": 690.4,
+    "recibos": 373976
+   },
+   "rama": {
+    "paredMs": 1182.3,
+    "cpuMs": 685,
+    "recibos": 144727,
+    "frontera": 229249
+   }
+  },
+  {
+   "k": 56,
+   "tick": 164200,
+   "digestoIgual": true,
+   "digesto": "f83e358e4ac86463b1e8b8662dffe1137de462ec1bbcf5597a09c8c4b3219873",
+   "sesion": false,
+   "base": {
+    "paredMs": 918.1,
+    "cpuMs": 624.8,
+    "recibos": 374297
+   },
+   "rama": {
+    "paredMs": 1433.2,
+    "cpuMs": 801.3,
+    "recibos": 140954,
+    "frontera": 233343
+   }
+  },
+  {
+   "k": 57,
+   "tick": 164300,
+   "digestoIgual": true,
+   "digesto": "a74d76b979672509889d094f50790e5e551d928e5b222bf585ab15480a6fa570",
+   "sesion": false,
+   "base": {
+    "paredMs": 868.5,
+    "cpuMs": 604.1,
+    "recibos": 374552
+   },
+   "rama": {
+    "paredMs": 1819.8,
+    "cpuMs": 756.2,
+    "recibos": 137113,
+    "frontera": 237439
+   }
+  },
+  {
+   "k": 58,
+   "tick": 164400,
+   "digestoIgual": true,
+   "digesto": "6873dd99ac72dc9ede2e7e8cafd0c57238c404b4d244de2fab6e89cf13f81caa",
+   "sesion": false,
+   "base": {
+    "paredMs": 993.6,
+    "cpuMs": 612.5,
+    "recibos": 374837
+   },
+   "rama": {
+    "paredMs": 1134.1,
+    "cpuMs": 685.3,
+    "recibos": 133302,
+    "frontera": 241535
+   }
+  },
+  {
+   "k": 59,
+   "tick": 164500,
+   "digestoIgual": true,
+   "digesto": "b3565dee21b17d344104e04d5fed3d2ee9b22e3e14acc5945c1fae0cda9572ea",
+   "sesion": false,
+   "base": {
+    "paredMs": 1157.5,
+    "cpuMs": 669.4,
+    "recibos": 375209
+   },
+   "rama": {
+    "paredMs": 1145.3,
+    "cpuMs": 693.2,
+    "recibos": 129580,
+    "frontera": 245629
+   }
+  },
+  {
+   "k": 60,
+   "tick": 164600,
+   "digestoIgual": true,
+   "digesto": "33bde81e1892179ef9c279de1e79db30356e248ffd472bee148eb5a9d95aa568",
+   "sesion": false,
+   "base": {
+    "paredMs": 2258,
+    "cpuMs": 890.7,
+    "recibos": 375567
+   },
+   "rama": {
+    "paredMs": 1335.8,
+    "cpuMs": 955.3,
+    "recibos": 125843,
+    "frontera": 249724
+   }
+  },
+  {
+   "k": 61,
+   "tick": 164700,
+   "digestoIgual": true,
+   "digesto": "74e882b51526013e2eb0ee29063fe45d3a4e5449a7e2c820d15de4ca860dd137",
+   "sesion": false,
+   "base": {
+    "paredMs": 1295.4,
+    "cpuMs": 866.1,
+    "recibos": 375932
+   },
+   "rama": {
+    "paredMs": 1031.3,
+    "cpuMs": 713.9,
+    "recibos": 122113,
+    "frontera": 253819
+   }
+  },
+  {
+   "k": 62,
+   "tick": 164800,
+   "digestoIgual": true,
+   "digesto": "549500fa20076aa79feb33eb916470ed2c7da9f8f27744fb871096e4fb1f71d5",
+   "sesion": false,
+   "base": {
+    "paredMs": 618.4,
+    "cpuMs": 553,
+    "recibos": 376276
+   },
+   "rama": {
+    "paredMs": 1222.5,
+    "cpuMs": 713.3,
+    "recibos": 118364,
+    "frontera": 257912
+   }
+  },
+  {
+   "k": 63,
+   "tick": 164900,
+   "digestoIgual": true,
+   "digesto": "6b336332b0a3518ee84c476d6d550708aa8b3c05179ecb1172bab8d2e02fa6b9",
+   "sesion": false,
+   "base": {
+    "paredMs": 1234.7,
+    "cpuMs": 583.8,
+    "recibos": 376648
+   },
+   "rama": {
+    "paredMs": 1279.5,
+    "cpuMs": 695,
+    "recibos": 114645,
+    "frontera": 262003
+   }
+  },
+  {
+   "k": 64,
+   "tick": 165000,
+   "digestoIgual": true,
+   "digesto": "d77dcffdf6a1312eebc01bcd1db3a52f20745e02c619afce511200aafd1533bc",
+   "sesion": false,
+   "base": {
+    "paredMs": 1123,
+    "cpuMs": 709.9,
+    "recibos": 377016
+   },
+   "rama": {
+    "paredMs": 1406.5,
+    "cpuMs": 886.4,
+    "recibos": 110918,
+    "frontera": 266098
+   }
+  },
+  {
+   "k": 65,
+   "tick": 165100,
+   "digestoIgual": true,
+   "digesto": "abe8061531ccfe8816ec758793bd5175396df4beeca7bd8b14e95aab1ed24410",
+   "sesion": false,
+   "base": {
+    "paredMs": 1302.6,
+    "cpuMs": 726.7,
+    "recibos": 377251
+   },
+   "rama": {
+    "paredMs": 748.3,
+    "cpuMs": 639.7,
+    "recibos": 107062,
+    "frontera": 270189
+   }
+  },
+  {
+   "k": 66,
+   "tick": 165200,
+   "digestoIgual": true,
+   "digesto": "0eaecbb66e488b7b57c892f43044b4ac8682c9800877a2fe69931b966e2d3b05",
+   "sesion": false,
+   "base": {
+    "paredMs": 1122.3,
+    "cpuMs": 623.3,
+    "recibos": 377504
+   },
+   "rama": {
+    "paredMs": 1283.1,
+    "cpuMs": 677.1,
+    "recibos": 103219,
+    "frontera": 274285
+   }
+  },
+  {
+   "k": 67,
+   "tick": 165300,
+   "digestoIgual": true,
+   "digesto": "3816e8a795f1f7f2eea089f54062c453dc42a75c4e5be400a2b61095aca2b1e0",
+   "sesion": false,
+   "base": {
+    "paredMs": 1315.3,
+    "cpuMs": 612.2,
+    "recibos": 377717
+   },
+   "rama": {
+    "paredMs": 1372,
+    "cpuMs": 687,
+    "recibos": 99340,
+    "frontera": 278377
+   }
+  },
+  {
+   "k": 68,
+   "tick": 165400,
+   "digestoIgual": true,
+   "digesto": "79c5d9e2aadded3bacc9f9373b06fdbd49cc8d40a1b38586db6b233f530dd390",
+   "sesion": false,
+   "base": {
+    "paredMs": 745.7,
+    "cpuMs": 573.5,
+    "recibos": 377958
+   },
+   "rama": {
+    "paredMs": 1664.1,
+    "cpuMs": 770.2,
+    "recibos": 95485,
+    "frontera": 282473
+   }
+  },
+  {
+   "k": 69,
+   "tick": 165500,
+   "digestoIgual": true,
+   "digesto": "0022c2e6f6cf0ad1094df3ad3ada276747480436606919a712d69b9f68f1355d",
+   "sesion": false,
+   "base": {
+    "paredMs": 1593.6,
+    "cpuMs": 662.7,
+    "recibos": 378220
+   },
+   "rama": {
+    "paredMs": 737.6,
+    "cpuMs": 641.6,
+    "recibos": 91654,
+    "frontera": 286566
+   }
+  },
+  {
+   "k": 70,
+   "tick": 165600,
+   "digestoIgual": true,
+   "digesto": "1f5f3b6d9ac8722c520625b04d6109b3e6e7a1108c98e6c13a9785bb89680e87",
+   "sesion": false,
+   "base": {
+    "paredMs": 1315.2,
+    "cpuMs": 963.7,
+    "recibos": 378474
+   },
+   "rama": {
+    "paredMs": 2432.9,
+    "cpuMs": 1114.1,
+    "recibos": 87815,
+    "frontera": 290659
+   }
+  },
+  {
+   "k": 71,
+   "tick": 165700,
+   "digestoIgual": true,
+   "digesto": "6dfe0358f2a311a0913a225eeb24491bf023af05e10d8f2fd58b36c4d782e784",
+   "sesion": false,
+   "base": {
+    "paredMs": 1330.2,
+    "cpuMs": 694.1,
+    "recibos": 378805
+   },
+   "rama": {
+    "paredMs": 1148.7,
+    "cpuMs": 664.6,
+    "recibos": 84050,
+    "frontera": 294755
+   }
+  },
+  {
+   "k": 72,
+   "tick": 165800,
+   "digestoIgual": true,
+   "digesto": "f8535fbfaea6ea96040a8bd912e5db90b6efaf223a1b67c1db3c0ed0968baa9b",
+   "sesion": false,
+   "base": {
+    "paredMs": 1092.2,
+    "cpuMs": 613.6,
+    "recibos": 379156
+   },
+   "rama": {
+    "paredMs": 2224.9,
+    "cpuMs": 866.1,
+    "recibos": 80305,
+    "frontera": 298851
+   }
+  },
+  {
+   "k": 73,
+   "tick": 165900,
+   "digestoIgual": true,
+   "digesto": "836abe8db4ecafc2c02c5c0420d9548cb14191c8ee4a8d6f3f1d74ac5da73cb6",
+   "sesion": false,
+   "base": {
+    "paredMs": 1478.1,
+    "cpuMs": 733.2,
+    "recibos": 379521
+   },
+   "rama": {
+    "paredMs": 1047.4,
+    "cpuMs": 871.4,
+    "recibos": 76575,
+    "frontera": 302946
+   }
+  },
+  {
+   "k": 74,
+   "tick": 166000,
+   "digestoIgual": true,
+   "digesto": "d773164fa84e21a088eccfab0f4270d965afb7b50c6db3c1ae497f10ce5992cc",
+   "sesion": false,
+   "base": {
+    "paredMs": 1431,
+    "cpuMs": 636.3,
+    "recibos": 379843
+   },
+   "rama": {
+    "paredMs": 1675.8,
+    "cpuMs": 703.3,
+    "recibos": 72801,
+    "frontera": 307042
+   }
+  },
+  {
+   "k": 75,
+   "tick": 166100,
+   "digestoIgual": true,
+   "digesto": "eef412eeb5afe931c310cd3712802134b2b9748ff3ef10d9c949b67c18d4ba33",
+   "sesion": false,
+   "base": {
+    "paredMs": 975.7,
+    "cpuMs": 619.1,
+    "recibos": 380174
+   },
+   "rama": {
+    "paredMs": 884.9,
+    "cpuMs": 575.9,
+    "recibos": 72324,
+    "frontera": 307850
+   }
+  },
+  {
+   "k": 76,
+   "tick": 166200,
+   "digestoIgual": true,
+   "digesto": "d0d1eeb22e7cf984023c6f5d100688430b9948bec2a1e5eccb6641ac11c29aea",
+   "sesion": false,
+   "base": {
+    "paredMs": 1161.8,
+    "cpuMs": 749,
+    "recibos": 380478
+   },
+   "rama": {
+    "paredMs": 1061.3,
+    "cpuMs": 646,
+    "recibos": 72442,
+    "frontera": 308036
+   }
+  },
+  {
+   "k": 77,
+   "tick": 166300,
+   "digestoIgual": true,
+   "digesto": "0699ab2061fa18c694b78b52289269a8a9da3bb1ac0e00cd9dbb356fda73f9ce",
+   "sesion": false,
+   "base": {
+    "paredMs": 795.4,
+    "cpuMs": 652.2,
+    "recibos": 380782
+   },
+   "rama": {
+    "paredMs": 1112.5,
+    "cpuMs": 621.5,
+    "recibos": 72551,
+    "frontera": 308231
+   }
+  },
+  {
+   "k": 78,
+   "tick": 166400,
+   "digestoIgual": true,
+   "digesto": "3c4512b83f041e63d1215e7009c92f268a478f86acc3779a5eea5c7c37fbdd16",
+   "sesion": false,
+   "base": {
+    "paredMs": 899.1,
+    "cpuMs": 563.1,
+    "recibos": 381141
+   },
+   "rama": {
+    "paredMs": 1279.8,
+    "cpuMs": 577.5,
+    "recibos": 72719,
+    "frontera": 308422
+   }
+  },
+  {
+   "k": 79,
+   "tick": 166500,
+   "digestoIgual": true,
+   "digesto": "15835c852482b827a5a016916b8a1376d15a67a334ad5a24c7db45c0fe957e27",
+   "sesion": false,
+   "base": {
+    "paredMs": 1031.4,
+    "cpuMs": 560.2,
+    "recibos": 381470
+   },
+   "rama": {
+    "paredMs": 983.1,
+    "cpuMs": 569.1,
+    "recibos": 72859,
+    "frontera": 308611
+   }
+  },
+  {
+   "k": 80,
+   "tick": 166600,
+   "digestoIgual": true,
+   "digesto": "b3cef83f35e7ae60b6bdbfaabcda28e972fb65c830ee1a79cb1dfc239916c646",
+   "sesion": false,
+   "base": {
+    "paredMs": 1223.7,
+    "cpuMs": 811.3,
+    "recibos": 381823
+   },
+   "rama": {
+    "paredMs": 1241.8,
+    "cpuMs": 909.3,
+    "recibos": 73012,
+    "frontera": 308811
+   }
+  },
+  {
+   "k": 81,
+   "tick": 166700,
+   "digestoIgual": true,
+   "digesto": "a08a1cf83a365690856a7fcde33c8407217fcb8ded357fb63a0af3939e0e5c9f",
+   "sesion": false,
+   "base": {
+    "paredMs": 1064.9,
+    "cpuMs": 591.8,
+    "recibos": 382194
+   },
+   "rama": {
+    "paredMs": 1130.8,
+    "cpuMs": 771.4,
+    "recibos": 73215,
+    "frontera": 308979
+   }
+  },
+  {
+   "k": 82,
+   "tick": 166800,
+   "digestoIgual": true,
+   "digesto": "9e679fabb1365b442f2f60f857487662c8478ca06f6c1b48f6756ac3bcbde58e",
+   "sesion": false,
+   "base": {
+    "paredMs": 862.5,
+    "cpuMs": 614.8,
+    "recibos": 382594
+   },
+   "rama": {
+    "paredMs": 1269.5,
+    "cpuMs": 607.1,
+    "recibos": 73462,
+    "frontera": 309132
+   }
+  },
+  {
+   "k": 83,
+   "tick": 166900,
+   "digestoIgual": true,
+   "digesto": "990ef4c047f98a0f64745b3364ae7a123671fc70b9bdbf65edc254438f1823a4",
+   "sesion": false,
+   "base": {
+    "paredMs": 1029.5,
+    "cpuMs": 621.1,
+    "recibos": 382843
+   },
+   "rama": {
+    "paredMs": 862.1,
+    "cpuMs": 549.5,
+    "recibos": 73584,
+    "frontera": 309259
+   }
+  },
+  {
+   "k": 84,
+   "tick": 167000,
+   "digestoIgual": true,
+   "digesto": "89a71ac645dd8dc86fd5ad5bb6a2f1f914f18a58597efee3b91fda93efd1cc54",
+   "sesion": false,
+   "base": {
+    "paredMs": 1166.1,
+    "cpuMs": 562.3,
+    "recibos": 383153
+   },
+   "rama": {
+    "paredMs": 1386.6,
+    "cpuMs": 693.4,
+    "recibos": 73786,
+    "frontera": 309367
+   }
+  },
+  {
+   "k": 85,
+   "tick": 167100,
+   "digestoIgual": true,
+   "digesto": "5ddbed9deee92a36d36f17219f190d6ea99df63194247f0a21fcbbe7aeb5d130",
+   "sesion": false,
+   "base": {
+    "paredMs": 2500.4,
+    "cpuMs": 655.7,
+    "recibos": 383494
+   },
+   "rama": {
+    "paredMs": 1148.2,
+    "cpuMs": 782.2,
+    "recibos": 73970,
+    "frontera": 309524
+   }
+  },
+  {
+   "k": 86,
+   "tick": 167200,
+   "digestoIgual": true,
+   "digesto": "0e08576cf934c5f285057eb47f88e8a7aed62b813f6682f4cfe85d59f34f3973",
+   "sesion": false,
+   "base": {
+    "paredMs": 978.4,
+    "cpuMs": 658.6,
+    "recibos": 383814
+   },
+   "rama": {
+    "paredMs": 898.6,
+    "cpuMs": 605.7,
+    "recibos": 74143,
+    "frontera": 309671
+   }
+  },
+  {
+   "k": 87,
+   "tick": 167300,
+   "digestoIgual": true,
+   "digesto": "87a05266a322dee6741222c38c29a51949bfe51e75707bcb91bfd62c0997f53f",
+   "sesion": false,
+   "base": {
+    "paredMs": 857.7,
+    "cpuMs": 613.7,
+    "recibos": 384128
+   },
+   "rama": {
+    "paredMs": 870.6,
+    "cpuMs": 610.9,
+    "recibos": 74290,
+    "frontera": 309838
+   }
+  },
+  {
+   "k": 88,
+   "tick": 167400,
+   "digestoIgual": true,
+   "digesto": "0b70a37f30c195827044e4eafdf7ae7a0869ec18bd0a149b2955ba53f7f5a39f",
+   "sesion": false,
+   "base": {
+    "paredMs": 1048.3,
+    "cpuMs": 635.5,
+    "recibos": 384414
+   },
+   "rama": {
+    "paredMs": 1066.2,
+    "cpuMs": 833.9,
+    "recibos": 74433,
+    "frontera": 309981
+   }
+  },
+  {
+   "k": 89,
+   "tick": 167500,
+   "digestoIgual": true,
+   "digesto": "b1e6ac2d7d1536305bdd71ebdfe4758a3ed7309c8e170ade5bb923f088efa71f",
+   "sesion": false,
+   "base": {
+    "paredMs": 2071.6,
+    "cpuMs": 652.7,
+    "recibos": 384807
+   },
+   "rama": {
+    "paredMs": 817.5,
+    "cpuMs": 593.7,
+    "recibos": 74652,
+    "frontera": 310155
+   }
+  },
+  {
+   "k": 90,
+   "tick": 167600,
+   "digestoIgual": true,
+   "digesto": "44325671e02984287d4441fb541943b284d4458e950951f5a3b40b82647d743e",
+   "sesion": false,
+   "base": {
+    "paredMs": 1039.4,
+    "cpuMs": 838.2,
+    "recibos": 385213
+   },
+   "rama": {
+    "paredMs": 1373.1,
+    "cpuMs": 851,
+    "recibos": 74941,
+    "frontera": 310272
+   }
+  }
+ ],
+ "final": {
+  "base": {
+   "tick": 167600,
+   "poblacion": 67,
+   "digesto": "44325671e02984287d4441fb541943b284d4458e950951f5a3b40b82647d743e",
+   "archivo": {
+    "recibos": 385213,
+    "primeraSerie": 1,
+    "ultimaSerie": 385213,
+    "frontera": null
+   },
+   "pasoCpuMsMedio": 25.9,
+   "pasoParedMsMedio": 36.7,
+   "bytes": 1371807744
+  },
+  "rama": {
+   "tick": 167600,
+   "poblacion": 67,
+   "digesto": "44325671e02984287d4441fb541943b284d4458e950951f5a3b40b82647d743e",
+   "archivo": {
+    "recibos": 74941,
+    "primeraSerie": 310273,
+    "ultimaSerie": 385213,
+    "frontera": 310272
+   },
+   "pasoCpuMsMedio": 24.5,
+   "pasoParedMsMedio": 33.4,
+   "bytes": 1257246720
+  }
+ }
+}

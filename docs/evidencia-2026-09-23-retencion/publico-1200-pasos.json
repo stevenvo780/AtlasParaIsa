@@ -1,0 +1,277 @@
+{
+ "descripcion": "Copia pública (respaldo 04:00), 1200 pasos con el régimen de main.ts; base = 715958f, rama = retención.",
+ "carga": {
+  "base": {
+   "paredMs": 59145.3,
+   "cpuMs": 63954.1
+  },
+  "rama": {
+   "paredMs": 28086.4,
+   "cpuMs": 34397.9
+  }
+ },
+ "primerGuardado": {
+  "base": {
+   "paredMs": 580.9,
+   "cpuMs": 447.5
+  },
+  "rama": {
+   "paredMs": 796.7,
+   "cpuMs": 832.6
+  }
+ },
+ "inicial": {
+  "tick": 158600,
+  "poblacion": 75,
+  "executionCounter": 351486,
+  "digesto": "d3322406827095b05b9d5734c8a6d755edc7de1f860a91c98e7d837b5c883c6b"
+ },
+ "guardados": [
+  {
+   "k": 1,
+   "tick": 158700,
+   "digestoIgual": true,
+   "digesto": "b2d9dcf342b412b6bb0bf36df5b45a759c85c664b06dc3ec932dfa9de98771b1",
+   "sesion": false,
+   "base": {
+    "paredMs": 1190.3,
+    "cpuMs": 542.5,
+    "recibos": 351917
+   },
+   "rama": {
+    "paredMs": 657.2,
+    "cpuMs": 698.3,
+    "recibos": 343728,
+    "frontera": 8189
+   }
+  },
+  {
+   "k": 2,
+   "tick": 158800,
+   "digestoIgual": true,
+   "digesto": "ef8242cafb993c32d7fa537d7357cc6a083885946930853ed10280569220450b",
+   "sesion": false,
+   "base": {
+    "paredMs": 504.1,
+    "cpuMs": 427.6,
+    "recibos": 352381
+   },
+   "rama": {
+    "paredMs": 1024.5,
+    "cpuMs": 577.7,
+    "recibos": 340098,
+    "frontera": 12283
+   }
+  },
+  {
+   "k": 3,
+   "tick": 158900,
+   "digestoIgual": true,
+   "digesto": "9a165b5da1b1cb02a6ce0827b6fd6da2590007c30163d99079adcd6328eec919",
+   "sesion": true,
+   "base": {
+    "paredMs": 80822.7,
+    "cpuMs": 92978.3,
+    "recibos": 352882
+   },
+   "rama": {
+    "paredMs": 580.6,
+    "cpuMs": 715.4,
+    "recibos": 336504,
+    "frontera": 16378
+   }
+  },
+  {
+   "k": 4,
+   "tick": 159000,
+   "digestoIgual": true,
+   "digesto": "25cc9f487c37ab37d8c13d7f9d461e08a1a5da97b6eae213bf68b6f8af453155",
+   "sesion": false,
+   "base": {
+    "paredMs": 557.5,
+    "cpuMs": 539.8,
+    "recibos": 353427
+   },
+   "rama": {
+    "paredMs": 858.8,
+    "cpuMs": 612.2,
+    "recibos": 332953,
+    "frontera": 20474
+   }
+  },
+  {
+   "k": 5,
+   "tick": 159100,
+   "digestoIgual": true,
+   "digesto": "b5214f098078a511cd8b43583e4883e163601edb7729c50fb79ff4c83008100d",
+   "sesion": false,
+   "base": {
+    "paredMs": 1392.6,
+    "cpuMs": 502.8,
+    "recibos": 353815
+   },
+   "rama": {
+    "paredMs": 620.4,
+    "cpuMs": 507.3,
+    "recibos": 329245,
+    "frontera": 24570
+   }
+  },
+  {
+   "k": 6,
+   "tick": 159200,
+   "digestoIgual": true,
+   "digesto": "386de0a44aa922876a71d6a9d4f8e8a1fbf4f8d3719f81249f38037cf0c13bfe",
+   "sesion": false,
+   "base": {
+    "paredMs": 730.8,
+    "cpuMs": 537.8,
+    "recibos": 354262
+   },
+   "rama": {
+    "paredMs": 947.1,
+    "cpuMs": 739,
+    "recibos": 325600,
+    "frontera": 28662
+   }
+  },
+  {
+   "k": 7,
+   "tick": 159300,
+   "digestoIgual": true,
+   "digesto": "d8023c7103fdbc083d7155ba68d0123d77e22c54d99389e8b67973aef0b01de2",
+   "sesion": false,
+   "base": {
+    "paredMs": 652.2,
+    "cpuMs": 529.2,
+    "recibos": 354743
+   },
+   "rama": {
+    "paredMs": 637.6,
+    "cpuMs": 657,
+    "recibos": 321988,
+    "frontera": 32755
+   }
+  },
+  {
+   "k": 8,
+   "tick": 159400,
+   "digestoIgual": true,
+   "digesto": "6da8d46b810ac64f287ed4582c8d5f8e7119545f4a2e3c8040b4ae5e5e648514",
+   "sesion": false,
+   "base": {
+    "paredMs": 444.7,
+    "cpuMs": 360,
+    "recibos": 355192
+   },
+   "rama": {
+    "paredMs": 867.2,
+    "cpuMs": 706.2,
+    "recibos": 318342,
+    "frontera": 36850
+   }
+  },
+  {
+   "k": 9,
+   "tick": 159500,
+   "digestoIgual": true,
+   "digesto": "473bd13244d8e8a9212c2e4843191a516ef58b19e9945d235afed5cbd1da07e0",
+   "sesion": false,
+   "base": {
+    "paredMs": 775.2,
+    "cpuMs": 462.9,
+    "recibos": 355583
+   },
+   "rama": {
+    "paredMs": 923.2,
+    "cpuMs": 775,
+    "recibos": 314638,
+    "frontera": 40945
+   }
+  },
+  {
+   "k": 10,
+   "tick": 159600,
+   "digestoIgual": true,
+   "digesto": "25de3030481278cf5c7acc883f1456cf21a485d10c0ae75bba12995b76af5414",
+   "sesion": false,
+   "base": {
+    "paredMs": 568.3,
+    "cpuMs": 728.1,
+    "recibos": 355948
+   },
+   "rama": {
+    "paredMs": 1543.8,
+    "cpuMs": 808.9,
+    "recibos": 310907,
+    "frontera": 45041
+   }
+  },
+  {
+   "k": 11,
+   "tick": 159700,
+   "digestoIgual": true,
+   "digesto": "c8950cb6dcdba1e7d09f6066a302b1d857e8b54980dd47c6fc2e914c71ce48ea",
+   "sesion": false,
+   "base": {
+    "paredMs": 1145.5,
+    "cpuMs": 493.8,
+    "recibos": 356300
+   },
+   "rama": {
+    "paredMs": 621.9,
+    "cpuMs": 535.5,
+    "recibos": 307164,
+    "frontera": 49136
+   }
+  },
+  {
+   "k": 12,
+   "tick": 159800,
+   "digestoIgual": true,
+   "digesto": "fa161ccccf48e0c2332269ba82d5a1ffde8c7daf490b59b99736af8ec61db730",
+   "sesion": false,
+   "base": {
+    "paredMs": 679.8,
+    "cpuMs": 436.9,
+    "recibos": 356679
+   },
+   "rama": {
+    "paredMs": 926.7,
+    "cpuMs": 496.9,
+    "recibos": 303453,
+    "frontera": 53226
+   }
+  }
+ ],
+ "final": {
+  "base": {
+   "tick": 159800,
+   "poblacion": 72,
+   "digesto": "fa161ccccf48e0c2332269ba82d5a1ffde8c7daf490b59b99736af8ec61db730",
+   "archivo": {
+    "recibos": 356679,
+    "primeraSerie": 1,
+    "ultimaSerie": 356679,
+    "frontera": null
+   },
+   "pasoCpuMsMedio": 24.2,
+   "pasoParedMsMedio": 18.6,
+   "bytes": 1277186048
+  },
+  "rama": {
+   "tick": 159800,
+   "poblacion": 72,
+   "digesto": "fa161ccccf48e0c2332269ba82d5a1ffde8c7daf490b59b99736af8ec61db730",
+   "archivo": {
+    "recibos": 303453,
+    "primeraSerie": 53227,
+    "ultimaSerie": 356679,
+    "frontera": 53226
+   },
+   "pasoCpuMsMedio": 26.6,
+   "pasoParedMsMedio": 20.8,
+   "bytes": 1257246720
+  }
+ }
+}

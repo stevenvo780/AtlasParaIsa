@@ -84,11 +84,13 @@ function envolver(prototipo: object, prefijo: string, metodos: string[], soloCon
 }
 envolver(Store.prototype, 'Store', ['load', 'loadVerified', 'loadSlot', 'migrateSnapshot', 'assertChronicleArchive',
   'assertTechnologyCoverage', 'assertTechnologyReceipts', 'assertTechnologyCache', 'prepareTechnology', 'rememberTechnology',
-  'save', 'flushTechnology', 'assertChronicleChanges', 'flushChronicle', 'pruneChronicle', 'assertTechnologyChanges', 'readSlot0']);
+  'save', 'flushTechnology', 'assertChronicleChanges', 'flushChronicle', 'pruneChronicle', 'assertTechnologyChanges', 'readSlot0',
+  // Retención (sprint noche-arch 2026-09-23): poda por guardado, anillo del candidato en el camino frío, recuperación.
+  'pruneTechnology', 'assertTechnologyRing', 'slotBoundsOf', 'technologyChainAt']);
 envolver(Store.prototype, 'Store', ['loadLegacy', 'loadChunk', 'readTechnologyRecipe', 'assertTechnologyAuthor',
   'assertLegacyParents'], true);
-envolver(TechnologyArchive.prototype, 'Archivo', ['listExecutions', 'putExecution', 'putDefinition', 'putStats',
-  'summarizeDefinitions', 'scanDefinitions']);
+envolver(TechnologyArchive.prototype, 'Archivo', ['listExecutions', 'listExecutionRecords', 'putExecution', 'putDefinition', 'putStats',
+  'summarizeDefinitions', 'scanDefinitions', 'pruneExecutions']);
 envolver(TechnologyArchive.prototype, 'Archivo', ['getDefinition', 'getStats', 'executionReferences', 'executionTimeline',
   'execution', 'referencedDefinition', 'getHistoryOrigin', 'definitionParents', 'readEpoch'], true);
 envolver(SnapshotParts.prototype, 'Instantanea', ['read', 'prepare', 'write', 'verify', 'collect']);

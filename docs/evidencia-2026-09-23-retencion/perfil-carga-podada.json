@@ -1,0 +1,592 @@
+{
+ "origen": "/datos/tmp-atlas-lab/arch/rama-podada-vacuum.sqlite",
+ "ruta": "/datos/tmp-atlas-lab/atlas-arch-DTsZ04/world.sqlite",
+ "cadencia": 100,
+ "guardados": 2,
+ "sesionAntes": [],
+ "inicial": {
+  "tick": 167600,
+  "poblacion": 67,
+  "executionCounter": 385213,
+  "recipeCounter": 19830,
+  "journal": {
+   "startsAfter": 0,
+   "committedThrough": 385213
+  },
+  "filas": {
+   "technology_executions": 74941,
+   "technology_definitions": 19830,
+   "technology_stats": 53948,
+   "events": 14966,
+   "chunks": 301
+  },
+  "params": {
+   "cadaTicks": 100,
+   "ventanaEventosTicks": 24000,
+   "paginasSucias": false
+  }
+ },
+ "digestoCarga": "44325671e02984287d4441fb541943b284d4458e950951f5a3b40b82647d743e",
+ "final": {
+  "tick": 167800,
+  "poblacion": 67,
+  "filas": {
+   "technology_executions": 75337,
+   "technology_definitions": 19848,
+   "technology_stats": 54007,
+   "events": 11595,
+   "chunks": 301
+  },
+  "digesto": "d666f660380ad075697deb823174c37fb4e9be6623957e9fd0a80d5256b45e78",
+  "bytesBase": 318406656,
+  "bytesWal": 20991432
+ },
+ "fases": [
+  {
+   "nombre": "abrir",
+   "paredMs": 90.5,
+   "cpuMs": 1.3,
+   "tramos": {}
+  },
+  {
+   "nombre": "load",
+   "paredMs": 7820.7,
+   "cpuMs": 6721.9,
+   "tramos": {
+    "Store.load": {
+     "llamadas": 1,
+     "paredMs": 7820.7,
+     "cpuMs": 6721.8
+    },
+    "Store.loadVerified": {
+     "llamadas": 1,
+     "paredMs": 7820.3,
+     "cpuMs": 6721.4
+    },
+    "Store.loadSlot": {
+     "llamadas": 1,
+     "paredMs": 7688.1,
+     "cpuMs": 6562.6
+    },
+    "Store.assertTechnologyCache": {
+     "llamadas": 1,
+     "paredMs": 3671.9,
+     "cpuMs": 2118.3
+    },
+    "Archivo.summarizeDefinitions": {
+     "llamadas": 1,
+     "paredMs": 3313.4,
+     "cpuMs": 2009.1
+    },
+    "Store.assertTechnologyCoverage": {
+     "llamadas": 1,
+     "paredMs": 1771.8,
+     "cpuMs": 2593.6
+    },
+    "Store.assertTechnologyReceipts": {
+     "llamadas": 1,
+     "paredMs": 1771.7,
+     "cpuMs": 2593.5
+    },
+    "Archivo.listExecutionRecords": {
+     "llamadas": 75,
+     "paredMs": 1688.9,
+     "cpuMs": 2487.5
+    },
+    "Archivo.scanDefinitions": {
+     "llamadas": 17,
+     "paredMs": 1312.5,
+     "cpuMs": 1413.8
+    },
+    "Store.migrateSnapshot": {
+     "llamadas": 1,
+     "paredMs": 1017.4,
+     "cpuMs": 1155.5
+    },
+    "Store.prepareTechnology": {
+     "llamadas": 1,
+     "paredMs": 774.6,
+     "cpuMs": 494.5
+    },
+    "Store.assertChronicleArchive": {
+     "llamadas": 1,
+     "paredMs": 80.1,
+     "cpuMs": 89.5
+    },
+    "Instantanea.read": {
+     "llamadas": 1,
+     "paredMs": 30.3,
+     "cpuMs": 57.2
+    },
+    "Store.rememberTechnology": {
+     "llamadas": 1,
+     "paredMs": 2.1,
+     "cpuMs": 2.1
+    },
+    "Store.readTechnologyRecipe": {
+     "llamadas": 13028,
+     "paredMs": 0,
+     "cpuMs": 0
+    },
+    "Archivo.readEpoch": {
+     "llamadas": 13028,
+     "paredMs": 0,
+     "cpuMs": 0
+    },
+    "Archivo.getDefinition": {
+     "llamadas": 37013,
+     "paredMs": 0,
+     "cpuMs": 0
+    },
+    "Archivo.definitionParents": {
+     "llamadas": 39660,
+     "paredMs": 0,
+     "cpuMs": 0
+    },
+    "Archivo.getStats": {
+     "llamadas": 13284,
+     "paredMs": 0,
+     "cpuMs": 0
+    },
+    "Store.loadLegacy": {
+     "llamadas": 10637,
+     "paredMs": 0,
+     "cpuMs": 0
+    },
+    "Archivo.getHistoryOrigin": {
+     "llamadas": 76,
+     "paredMs": 0,
+     "cpuMs": 0
+    },
+    "Archivo.execution": {
+     "llamadas": 75117,
+     "paredMs": 0,
+     "cpuMs": 0
+    },
+    "Archivo.executionReferences": {
+     "llamadas": 74941,
+     "paredMs": 0,
+     "cpuMs": 0
+    },
+    "Archivo.referencedDefinition": {
+     "llamadas": 900496,
+     "paredMs": 0,
+     "cpuMs": 0
+    },
+    "Store.assertTechnologyAuthor": {
+     "llamadas": 19830,
+     "paredMs": 0,
+     "cpuMs": 0
+    },
+    "Store.assertLegacyParents": {
+     "llamadas": 39,
+     "paredMs": 0,
+     "cpuMs": 0
+    }
+   }
+  },
+  {
+   "nombre": "primerGuardado",
+   "paredMs": 701.2,
+   "cpuMs": 532.9,
+   "tramos": {
+    "Store.save": {
+     "llamadas": 1,
+     "paredMs": 701.1,
+     "cpuMs": 532.8
+    },
+    "Store.prepareTechnology": {
+     "llamadas": 1,
+     "paredMs": 380.1,
+     "cpuMs": 311.2
+    },
+    "Instantanea.prepare": {
+     "llamadas": 1,
+     "paredMs": 78.7,
+     "cpuMs": 62.4
+    },
+    "Store.pruneTechnology": {
+     "llamadas": 1,
+     "paredMs": 72.8,
+     "cpuMs": 52.2
+    },
+    "Store.slotBoundsOf": {
+     "llamadas": 2,
+     "paredMs": 64.5,
+     "cpuMs": 47
+    },
+    "Store.pruneChronicle": {
+     "llamadas": 1,
+     "paredMs": 41.2,
+     "cpuMs": 26.9
+    },
+    "Instantanea.read": {
+     "llamadas": 1,
+     "paredMs": 41.1,
+     "cpuMs": 27.4
+    },
+    "Instantanea.write": {
+     "llamadas": 1,
+     "paredMs": 12.7,
+     "cpuMs": 8.1
+    },
+    "Store.flushChronicle": {
+     "llamadas": 1,
+     "paredMs": 7.4,
+     "cpuMs": 7
+    },
+    "Store.flushTechnology": {
+     "llamadas": 1,
+     "paredMs": 4.6,
+     "cpuMs": 2.3
+    },
+    "Instantanea.collect": {
+     "llamadas": 1,
+     "paredMs": 0.5,
+     "cpuMs": 0.5
+    },
+    "Store.assertTechnologyChanges": {
+     "llamadas": 1,
+     "paredMs": 0.4,
+     "cpuMs": 0.4
+    },
+    "Store.rememberTechnology": {
+     "llamadas": 1,
+     "paredMs": 0.4,
+     "cpuMs": 0.4
+    },
+    "Store.assertChronicleChanges": {
+     "llamadas": 1,
+     "paredMs": 0.3,
+     "cpuMs": 0.3
+    },
+    "Store.readTechnologyRecipe": {
+     "llamadas": 5697,
+     "paredMs": 0,
+     "cpuMs": 0
+    },
+    "Archivo.getDefinition": {
+     "llamadas": 6146,
+     "paredMs": 0,
+     "cpuMs": 0
+    },
+    "Archivo.getStats": {
+     "llamadas": 2507,
+     "paredMs": 0,
+     "cpuMs": 0
+    },
+    "Archivo.getHistoryOrigin": {
+     "llamadas": 2,
+     "paredMs": 0,
+     "cpuMs": 0
+    }
+   }
+  },
+  {
+   "nombre": "guardado1",
+   "paredMs": 918.3,
+   "cpuMs": 655.8,
+   "tramos": {
+    "Store.save": {
+     "llamadas": 1,
+     "paredMs": 918.1,
+     "cpuMs": 654.7
+    },
+    "Store.prepareTechnology": {
+     "llamadas": 1,
+     "paredMs": 363.2,
+     "cpuMs": 321.8
+    },
+    "Store.flushTechnology": {
+     "llamadas": 1,
+     "paredMs": 135.2,
+     "cpuMs": 123.2
+    },
+    "Instantanea.prepare": {
+     "llamadas": 1,
+     "paredMs": 91.4,
+     "cpuMs": 70.8
+    },
+    "Archivo.putExecution": {
+     "llamadas": 346,
+     "paredMs": 81.8,
+     "cpuMs": 83
+    },
+    "Instantanea.write": {
+     "llamadas": 1,
+     "paredMs": 11.9,
+     "cpuMs": 7.8
+    },
+    "Store.rememberTechnology": {
+     "llamadas": 1,
+     "paredMs": 7.2,
+     "cpuMs": 9.7
+    },
+    "Store.pruneTechnology": {
+     "llamadas": 1,
+     "paredMs": 6.8,
+     "cpuMs": 6.7
+    },
+    "Archivo.putStats": {
+     "llamadas": 34,
+     "paredMs": 5.6,
+     "cpuMs": 4.5
+    },
+    "Archivo.putDefinition": {
+     "llamadas": 26,
+     "paredMs": 3.5,
+     "cpuMs": 4.2
+    },
+    "Store.assertTechnologyChanges": {
+     "llamadas": 1,
+     "paredMs": 3.2,
+     "cpuMs": 3.2
+    },
+    "Store.flushChronicle": {
+     "llamadas": 1,
+     "paredMs": 1.3,
+     "cpuMs": 1
+    },
+    "Archivo.pruneExecutions": {
+     "llamadas": 1,
+     "paredMs": 1.3,
+     "cpuMs": 1.3
+    },
+    "Store.assertChronicleChanges": {
+     "llamadas": 1,
+     "paredMs": 0.2,
+     "cpuMs": 0.2
+    },
+    "Instantanea.collect": {
+     "llamadas": 1,
+     "paredMs": 0.1,
+     "cpuMs": 0.1
+    },
+    "Store.slotBoundsOf": {
+     "llamadas": 2,
+     "paredMs": 0,
+     "cpuMs": 0
+    },
+    "Store.readTechnologyRecipe": {
+     "llamadas": 5868,
+     "paredMs": 0,
+     "cpuMs": 0
+    },
+    "Archivo.getDefinition": {
+     "llamadas": 7247,
+     "paredMs": 0,
+     "cpuMs": 0
+    },
+    "Archivo.getStats": {
+     "llamadas": 2819,
+     "paredMs": 0,
+     "cpuMs": 0
+    },
+    "Store.assertTechnologyAuthor": {
+     "llamadas": 68,
+     "paredMs": 0,
+     "cpuMs": 0
+    },
+    "Store.loadLegacy": {
+     "llamadas": 2,
+     "paredMs": 0,
+     "cpuMs": 0
+    },
+    "Archivo.getHistoryOrigin": {
+     "llamadas": 348,
+     "paredMs": 0,
+     "cpuMs": 0
+    },
+    "Archivo.readEpoch": {
+     "llamadas": 262,
+     "paredMs": 0,
+     "cpuMs": 0
+    },
+    "Archivo.definitionParents": {
+     "llamadas": 26,
+     "paredMs": 0,
+     "cpuMs": 0
+    },
+    "Archivo.executionReferences": {
+     "llamadas": 346,
+     "paredMs": 0,
+     "cpuMs": 0
+    },
+    "Archivo.referencedDefinition": {
+     "llamadas": 4733,
+     "paredMs": 0,
+     "cpuMs": 0
+    },
+    "Archivo.executionTimeline": {
+     "llamadas": 346,
+     "paredMs": 0,
+     "cpuMs": 0
+    },
+    "Archivo.execution": {
+     "llamadas": 385,
+     "paredMs": 0,
+     "cpuMs": 0
+    }
+   },
+   "extra": {
+    "tick": 167700,
+    "pasos": 100,
+    "ejecucionesPendientes": 346,
+    "pasoCpuMsMedio": 34.6
+   }
+  },
+  {
+   "nombre": "guardado2",
+   "paredMs": 655.1,
+   "cpuMs": 612,
+   "tramos": {
+    "Store.save": {
+     "llamadas": 1,
+     "paredMs": 655.1,
+     "cpuMs": 612
+    },
+    "Store.prepareTechnology": {
+     "llamadas": 1,
+     "paredMs": 297.5,
+     "cpuMs": 284.9
+    },
+    "Store.flushTechnology": {
+     "llamadas": 1,
+     "paredMs": 113,
+     "cpuMs": 132.4
+    },
+    "Instantanea.prepare": {
+     "llamadas": 1,
+     "paredMs": 79.4,
+     "cpuMs": 70.2
+    },
+    "Archivo.putExecution": {
+     "llamadas": 308,
+     "paredMs": 59.3,
+     "cpuMs": 88.4
+    },
+    "Instantanea.write": {
+     "llamadas": 1,
+     "paredMs": 9.3,
+     "cpuMs": 7.4
+    },
+    "Store.pruneTechnology": {
+     "llamadas": 1,
+     "paredMs": 7.2,
+     "cpuMs": 11
+    },
+    "Archivo.putStats": {
+     "llamadas": 25,
+     "paredMs": 3.3,
+     "cpuMs": 2.8
+    },
+    "Archivo.putDefinition": {
+     "llamadas": 21,
+     "paredMs": 2.5,
+     "cpuMs": 2.5
+    },
+    "Store.rememberTechnology": {
+     "llamadas": 1,
+     "paredMs": 2,
+     "cpuMs": 2
+    },
+    "Store.assertTechnologyChanges": {
+     "llamadas": 1,
+     "paredMs": 1.6,
+     "cpuMs": 2
+    },
+    "Archivo.pruneExecutions": {
+     "llamadas": 1,
+     "paredMs": 1.3,
+     "cpuMs": 2.3
+    },
+    "Store.flushChronicle": {
+     "llamadas": 1,
+     "paredMs": 1.3,
+     "cpuMs": 2.3
+    },
+    "Store.assertChronicleChanges": {
+     "llamadas": 1,
+     "paredMs": 0.1,
+     "cpuMs": 0.1
+    },
+    "Instantanea.collect": {
+     "llamadas": 1,
+     "paredMs": 0.1,
+     "cpuMs": 0.1
+    },
+    "Store.slotBoundsOf": {
+     "llamadas": 2,
+     "paredMs": 0,
+     "cpuMs": 0
+    },
+    "Store.readTechnologyRecipe": {
+     "llamadas": 5844,
+     "paredMs": 0,
+     "cpuMs": 0
+    },
+    "Archivo.getDefinition": {
+     "llamadas": 6831,
+     "paredMs": 0,
+     "cpuMs": 0
+    },
+    "Archivo.getStats": {
+     "llamadas": 2803,
+     "paredMs": 0,
+     "cpuMs": 0
+    },
+    "Store.assertTechnologyAuthor": {
+     "llamadas": 50,
+     "paredMs": 0,
+     "cpuMs": 0
+    },
+    "Store.loadLegacy": {
+     "llamadas": 2,
+     "paredMs": 0,
+     "cpuMs": 0
+    },
+    "Archivo.getHistoryOrigin": {
+     "llamadas": 310,
+     "paredMs": 0,
+     "cpuMs": 0
+    },
+    "Archivo.readEpoch": {
+     "llamadas": 257,
+     "paredMs": 0,
+     "cpuMs": 0
+    },
+    "Archivo.definitionParents": {
+     "llamadas": 21,
+     "paredMs": 0,
+     "cpuMs": 0
+    },
+    "Archivo.executionReferences": {
+     "llamadas": 308,
+     "paredMs": 0,
+     "cpuMs": 0
+    },
+    "Archivo.referencedDefinition": {
+     "llamadas": 4258,
+     "paredMs": 0,
+     "cpuMs": 0
+    },
+    "Archivo.executionTimeline": {
+     "llamadas": 308,
+     "paredMs": 0,
+     "cpuMs": 0
+    },
+    "Archivo.execution": {
+     "llamadas": 331,
+     "paredMs": 0,
+     "cpuMs": 0
+    }
+   },
+   "extra": {
+    "tick": 167800,
+    "pasos": 100,
+    "ejecucionesPendientes": 308,
+    "pasoCpuMsMedio": 28.8
+   }
+  }
+ ]
+}

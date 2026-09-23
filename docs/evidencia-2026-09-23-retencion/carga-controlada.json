@@ -1,0 +1,213 @@
+{
+ "descripcion": "Carga controlada: cuatro procesos a la vez por ronda (scripts/perf/retencion-publico.ts --pasos 200 --sesion-antes 1).",
+ "corridas": {
+  "base-sinpodar-1": {
+   "carga": {
+    "paredMs": 92560.1,
+    "cpuMs": 64033.9
+   },
+   "primerGuardado": {
+    "paredMs": 904.5,
+    "cpuMs": 490.2
+   },
+   "recibos": 351486,
+   "bytes": 1257246720,
+   "guardados": [
+    {
+     "k": 1,
+     "sesion": true,
+     "paredMs": 145339.7,
+     "cpuMs": 122757.5
+    },
+    {
+     "k": 2,
+     "sesion": false,
+     "paredMs": 662.6,
+     "cpuMs": 577.6
+    }
+   ]
+  },
+  "base-sinpodar-2": {
+   "carga": {
+    "paredMs": 50518.7,
+    "cpuMs": 48330.9
+   },
+   "primerGuardado": {
+    "paredMs": 260.4,
+    "cpuMs": 297.1
+   },
+   "recibos": 351486,
+   "bytes": 1257246720,
+   "guardados": [
+    {
+     "k": 1,
+     "sesion": true,
+     "paredMs": 64157.8,
+     "cpuMs": 74102.8
+    },
+    {
+     "k": 2,
+     "sesion": false,
+     "paredMs": 236.5,
+     "cpuMs": 295.2
+    }
+   ]
+  },
+  "rama-podada-1": {
+   "carga": {
+    "paredMs": 21269.6,
+    "cpuMs": 12351.6
+   },
+   "primerGuardado": {
+    "paredMs": 1120.6,
+    "cpuMs": 694.1
+   },
+   "recibos": 74941,
+   "bytes": 1257246720,
+   "guardados": [
+    {
+     "k": 1,
+     "sesion": true,
+     "paredMs": 803.8,
+     "cpuMs": 655.2
+    },
+    {
+     "k": 2,
+     "sesion": false,
+     "paredMs": 840.6,
+     "cpuMs": 643.9
+    }
+   ]
+  },
+  "rama-podada-2": {
+   "carga": {
+    "paredMs": 16645,
+    "cpuMs": 11175.1
+   },
+   "primerGuardado": {
+    "paredMs": 722.7,
+    "cpuMs": 610.5
+   },
+   "recibos": 74941,
+   "bytes": 1257246720,
+   "guardados": [
+    {
+     "k": 1,
+     "sesion": true,
+     "paredMs": 1058.2,
+     "cpuMs": 669.7
+    },
+    {
+     "k": 2,
+     "sesion": false,
+     "paredMs": 821.1,
+     "cpuMs": 609.2
+    }
+   ]
+  },
+  "rama-sinpodar-1": {
+   "carga": {
+    "paredMs": 40085.6,
+    "cpuMs": 32143.2
+   },
+   "primerGuardado": {
+    "paredMs": 1371.6,
+    "cpuMs": 638.6
+   },
+   "recibos": 351486,
+   "bytes": 1257246720,
+   "guardados": [
+    {
+     "k": 1,
+     "sesion": true,
+     "paredMs": 1071.1,
+     "cpuMs": 739.2
+    },
+    {
+     "k": 2,
+     "sesion": false,
+     "paredMs": 1566.7,
+     "cpuMs": 652.9
+    }
+   ]
+  },
+  "rama-sinpodar-2": {
+   "carga": {
+    "paredMs": 31115.8,
+    "cpuMs": 29110.8
+   },
+   "primerGuardado": {
+    "paredMs": 1154.5,
+    "cpuMs": 575.1
+   },
+   "recibos": 351486,
+   "bytes": 1257246720,
+   "guardados": [
+    {
+     "k": 1,
+     "sesion": true,
+     "paredMs": 341.6,
+     "cpuMs": 400.7
+    },
+    {
+     "k": 2,
+     "sesion": false,
+     "paredMs": 552.3,
+     "cpuMs": 346.8
+    }
+   ]
+  },
+  "rama-vacuum-1": {
+   "carga": {
+    "paredMs": 24809.4,
+    "cpuMs": 12320.4
+   },
+   "primerGuardado": {
+    "paredMs": 1938.3,
+    "cpuMs": 629.4
+   },
+   "recibos": 74941,
+   "bytes": 313991168,
+   "guardados": [
+    {
+     "k": 1,
+     "sesion": true,
+     "paredMs": 919.8,
+     "cpuMs": 681.9
+    },
+    {
+     "k": 2,
+     "sesion": false,
+     "paredMs": 758.4,
+     "cpuMs": 621.4
+    }
+   ]
+  },
+  "rama-vacuum-2": {
+   "carga": {
+    "paredMs": 18079.3,
+    "cpuMs": 11531
+   },
+   "primerGuardado": {
+    "paredMs": 836.2,
+    "cpuMs": 641.3
+   },
+   "recibos": 74941,
+   "bytes": 313991168,
+   "guardados": [
+    {
+     "k": 1,
+     "sesion": true,
+     "paredMs": 1112.3,
+     "cpuMs": 671.1
+    },
+    {
+     "k": 2,
+     "sesion": false,
+     "paredMs": 1075.1,
+     "cpuMs": 588.5
+    }
+   ]
+  }
+ }
+}

@@ -246,7 +246,7 @@ test('criterio de terminado: C4 cuenta foodShared anidado en cooperacionAcumulad
   } finally { rmSync(raiz, { recursive: true, force: true }); }
 });
 
-test('criterio de terminado: C8 usa diversidadConductaTiempo si está, informa la serie antigua como secundaria y --diversidad-campo elige', () => {
+test('criterio de terminado: C8 usa diversidadConductaTiempo si está (y no hay activa), informa la serie antigua como secundaria y --diversidad-campo elige', () => {
   const raiz = mkdtempSync(join(tmpdir(), 'atlas-criterio-instr-'));
   try {
     // Serie antigua decreciente (explorar inflado) y serie por tiempo creciente en el mismo mundo.
@@ -257,20 +257,19 @@ test('criterio de terminado: C8 usa diversidadConductaTiempo si está, informa l
     const t1 = replica(auto, 'T-1').criterios!.diversidad;
     assert.equal(t1.estado, 'cumple', t1.motivo);
     assert.equal(t1.valores.campo, 'diversidadConductaTiempo');
-    assert.equal((t1.valores.secundaria as Record<string, unknown>).campo, 'diversidadConducta');
-    assert.equal((t1.valores.secundaria as Record<string, unknown>).estado, 'falla');
+    assert.deepEqual((t1.valores.secundarias as Record<string, unknown>[]).map(s => [s.campo, s.estado]), [['diversidadConducta', 'falla']]);
     assert.match(t1.motivo, /^diversidadConductaTiempo: pendiente .* · secundaria diversidadConducta \(no decide\): falla/);
     const t2 = replica(auto, 'T-2').criterios!.diversidad;
     assert.equal(t2.estado, 'cumple');
     assert.equal(t2.valores.campo, 'diversidadConducta');
-    assert.equal(t2.valores.secundaria, null);
-    assert.match(auto.descripcionCriterios.diversidad, /diversidadConductaTiempo \(si falta, diversidadConducta\)/);
+    assert.deepEqual(t2.valores.secundarias, []);
+    assert.match(auto.descripcionCriterios.diversidad, /diversidadConductaActiva \(si falta, diversidadConductaTiempo; si falta, diversidadConducta\)/);
 
     const antigua = evaluarConjunto(raiz, { dia: 20, diversidadCampo: 'diversidadConducta' });
     const a1 = replica(antigua, 'T-1').criterios!.diversidad;
     assert.equal(a1.estado, 'falla');
     assert.equal(a1.valores.campo, 'diversidadConducta');
-    assert.equal((a1.valores.secundaria as Record<string, unknown>).estado, 'cumple');
+    assert.deepEqual((a1.valores.secundarias as Record<string, unknown>[]).map(s => [s.campo, s.estado]), [['diversidadConductaTiempo', 'cumple']]);
     // Forzar la serie por tiempo en una réplica que no la tiene: campo ausente ⇒ desconocido, nunca aprobado.
     const tiempo = evaluarConjunto(raiz, { dia: 20, diversidadCampo: 'diversidadConductaTiempo' });
     assert.equal(replica(tiempo, 'T-2').criterios!.diversidad.estado, 'desconocido');
@@ -285,5 +284,75 @@ test('criterio de terminado: C8 usa diversidadConductaTiempo si está, informa l
     assert.equal(cli.status, 0, cli.stderr);
     assert.match(cli.stdout, /C8 diversidad +pendiente MCO de diversidadConducta días 5\.\.D/);
     assert.match(cli.stdout, /--diversidad-campo/);
+  } finally { rmSync(raiz, { recursive: true, force: true }); }
+});
+
+// Preregistro del criterio C8 (orquestador, noche 2026-09-22, decidido antes de ver corridas largas):
+// en modo auto decide `diversidadConductaActiva` (ticks por acción sin descansar) si está; las demás
+// series se informan como secundarias; y la serie evaluada debe tener dato en ≥ 80 % de los días del
+// tramo (días base..D), si no C8 es «desconocido», nunca «cumple».
+
+test('criterio de terminado: C8 con cobertura < 80 % del tramo es «desconocido», nunca «cumple» (hueco del verificador)', () => {
+  const raiz = mkdtempSync(join(tmpdir(), 'atlas-criterio-activa-'));
+  try {
+    // Caso del verificador: la serie por tiempo solo existe los días 5-7 (creciente) y la antigua está
+    // completa y cae. Antes, auto elegía la serie por tiempo (aparecía algún día) y la aprobaba con 3 puntos.
+    escribir(raiz, 'H-1', rango(20).map(d => ({ ...diaSano(d), diversidadConducta: 0.6 - 0.01 * d, ...(d >= 5 && d <= 7 ? { diversidadConductaTiempo: 0.2 + 0.01 * d } : {}) })), true);
+    const inf = evaluarConjunto(raiz, { dia: 20 });
+    const c8 = replica(inf, 'H-1').criterios!.diversidad;
+    assert.equal(c8.estado, 'desconocido', c8.motivo);
+    assert.equal(c8.valores.campo, 'diversidadConductaTiempo');
+    assert.equal(c8.valores.puntos, 3);
+    assert.equal(c8.valores.cobertura, 3 / 16);
+    assert.match(c8.motivo, /^diversidadConductaTiempo: dato en solo 3\/16 días del tramo 5\.\.20 \(19 % < 80 %\): no representa el tramo; sin dato: 8-20 · secundaria diversidadConducta \(no decide\): falla/);
+    assert.equal(replica(inf, 'H-1').todos, 'desconocido', 'una semilla con C8 desconocido no «cumple todos»');
+    // Forzada, cualquier serie con poca cobertura también es «desconocido» (se aplica a todas).
+    assert.equal(replica(evaluarConjunto(raiz, { dia: 20, diversidadCampo: 'diversidadConductaTiempo' }), 'H-1').criterios!.diversidad.estado, 'desconocido');
+    assert.equal(replica(evaluarConjunto(raiz, { dia: 20, diversidadCampo: 'diversidadConducta' }), 'H-1').criterios!.diversidad.estado, 'falla');
+
+    // Frontera: tramo 5..20 = 16 días; 13 con dato (81 %) se evalúa, 12 (75 %) no.
+    const conHuecos = (sinDato: (d: number) => boolean) => rango(20).map(d => ({ ...diaSano(d), ...(sinDato(d) ? {} : { diversidadConductaActiva: 0.2 + 0.01 * d }) }));
+    escribir(raiz, 'H-2', conHuecos(d => d >= 9 && d <= 11), true);
+    escribir(raiz, 'H-3', conHuecos(d => d >= 9 && d <= 12), true);
+    const frontera = evaluarConjunto(raiz, { dia: 20 });
+    const h2 = replica(frontera, 'H-2').criterios!.diversidad, h3 = replica(frontera, 'H-3').criterios!.diversidad;
+    assert.equal(h2.valores.campo, 'diversidadConductaActiva');
+    assert.equal(h2.estado, 'cumple', h2.motivo);
+    assert.equal(h2.valores.cobertura, 13 / 16);
+    assert.equal(h3.estado, 'desconocido', h3.motivo);
+    assert.match(h3.motivo, /12\/16 días .* sin dato: 9-12/);
+  } finally { rmSync(raiz, { recursive: true, force: true }); }
+});
+
+test('criterio de terminado: C8 en auto decide con diversidadConductaActiva; tiempo y antigua son secundarias', () => {
+  const raiz = mkdtempSync(join(tmpdir(), 'atlas-criterio-activa-'));
+  try {
+    // Activa completa y creciente; la de tiempo (dominada por descansar) y la antigua (explorar inflado) caen.
+    escribir(raiz, 'A-1', rango(20).map(d => ({ ...diaSano(d), diversidadConducta: 0.6 - 0.01 * d, diversidadConductaTiempo: 0.5 - 0.01 * d, diversidadConductaActiva: 0.3 + 0.01 * d })), true);
+    // Y al revés: la activa completa cae aunque las otras dos crezcan ⇒ falla (no se elige la que aprueba).
+    escribir(raiz, 'A-2', rango(20).map(d => ({ ...diaSano(d), diversidadConductaTiempo: 0.2 + 0.01 * d, diversidadConductaActiva: 0.6 - 0.01 * d })), true);
+    const inf = evaluarConjunto(raiz, { dia: 20 });
+    const a1 = replica(inf, 'A-1').criterios!.diversidad, a2 = replica(inf, 'A-2').criterios!.diversidad;
+    assert.equal(a1.estado, 'cumple', a1.motivo);
+    assert.equal(a1.valores.campo, 'diversidadConductaActiva');
+    assert.equal(a1.valores.cobertura, 1);
+    assert.deepEqual((a1.valores.secundarias as Record<string, unknown>[]).map(s => [s.campo, s.estado]), [['diversidadConductaTiempo', 'falla'], ['diversidadConducta', 'falla']]);
+    assert.match(a1.motivo, /^diversidadConductaActiva: pendiente .* · secundaria diversidadConductaTiempo \(no decide\): falla, .* · secundaria diversidadConducta \(no decide\): falla/);
+    assert.equal(replica(inf, 'A-1').todos, 'cumple');
+    assert.equal(a2.estado, 'falla', a2.motivo);
+    assert.equal(a2.valores.campo, 'diversidadConductaActiva');
+    assert.deepEqual((a2.valores.secundarias as Record<string, unknown>[]).map(s => [s.campo, s.estado]), [['diversidadConductaTiempo', 'cumple'], ['diversidadConducta', 'cumple']]);
+    // --diversidad-campo fuerza otra serie; la activa pasa a secundaria.
+    const tiempo = replica(evaluarConjunto(raiz, { dia: 20, diversidadCampo: 'diversidadConductaTiempo' }), 'A-2').criterios!.diversidad;
+    assert.equal(tiempo.estado, 'cumple');
+    assert.deepEqual((tiempo.valores.secundarias as Record<string, unknown>[]).map(s => s.campo), ['diversidadConductaActiva', 'diversidadConducta']);
+
+    assert.deepEqual(parsearArgumentos(['--entrada', 'x', '--diversidad-campo', 'activa']).umbrales, { diversidadCampo: 'diversidadConductaActiva' });
+    assert.deepEqual(parsearArgumentos(['--entrada', 'x', '--diversidad-campo', 'diversidadConductaActiva']).umbrales, { diversidadCampo: 'diversidadConductaActiva' });
+    assert.throws(() => parsearArgumentos(['--entrada', 'x', '--diversidad-campo', 'activo']), /auto, activa, tiempo o actividad/);
+    const cli = spawnSync(process.execPath, ['--import', 'tsx', 'scripts/lab/criterio-terminado.mts', '--entrada', raiz, '--dia', '20'], { encoding: 'utf8' });
+    assert.equal(cli.status, 0, cli.stderr);
+    assert.match(cli.stdout, /C8 diversidad +pendiente MCO de diversidadConductaActiva \(si falta, diversidadConductaTiempo; si falta, diversidadConducta\) .*< 80 % de los días del tramo ⇒ desconocido/);
+    assert.match(cli.stdout, /auto\|activa\|tiempo\|actividad|--diversidad-campo/);
   } finally { rmSync(raiz, { recursive: true, force: true }); }
 });

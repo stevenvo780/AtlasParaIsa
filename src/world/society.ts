@@ -9,6 +9,7 @@ import { CAPABILITIES, itemCapacities, MASS_UNIT, materialCapacities, shareTechn
 import type { Capability, MaterialBatch, TechnologyProgram, TechnologyRecipe } from '../shared/technology.js';
 import { resolveTechnologyRecipe, withRecipeSession } from './technology-catalogue.js';
 import { algunoCerca, filtrarCerca } from './indice-puntos.js';
+import { primerVecino, vecinos } from './rejilla.js';
 
 type Emit = (event: Omit<ChronicleEvent, 'id' | 'tick'>) => ChronicleEvent;
 export type Culture = NonNullable<PersonView['culture']>;
@@ -241,7 +242,7 @@ export function settlementOpportunity(world: World, person: Person): { target: {
     }
     const facilities = filtrarCerca(world.structures, place, 5, s=>distance(s,place)<=4 && s.condition>0.1);
     food += facilities.reduce((sum,s)=>sum+s.food,0); water += facilities.reduce((sum,s)=>sum+s.water,0);
-    const peers = world.people.filter(p=>p!==person && distance(p,place)<=6);
+    const peers = vecinos(world, place, 7, p=>p!==person && distance(p,place)<=6, 'settlementOpportunity');
     const trust = peers.reduce((sum,p)=>sum+(person.bonds[p.id]??0.15),0)/Math.max(1,peers.length);
     const provision = Math.min(clamp(food/0.8),clamp(water/0.12));
     return provision * (0.45 + (facilities.length ? 0.25 : 0) + trust*0.3);
@@ -271,8 +272,8 @@ export function cooperationOpportunity(world: World, person: Person): Opportunit
 function evaluateCooperation(world: World, person: Person): Opportunity | undefined {
   const opportunities: Opportunity[] = [];
   let practiced: string[] | undefined;
-  for (const other of world.people) {
-    if (other === person || distance(person, other) > 7 || world.tick - person.lastSocial < 30) continue;
+  if (world.tick - person.lastSocial < 30) return;
+  for (const other of vecinos(world, person, 8, other => !(other === person || distance(person, other) > 7), 'cooperationOpportunity')) {
     const same = person.communityId && person.communityId === other.communityId;
     const trust = person.bonds[other.id] ?? 0.2;
     const openness = other.communityId !== person.communityId && !same ? person.culture.openness : 1;
@@ -353,6 +354,18 @@ function trustedMajority(nearby: readonly Person[]): { id: string; count: number
   return best;
 }
 
+/** Personas por `communityId` en orden de slot, en una pasada: sustituye un `world.people.filter(p =>
+ * p.communityId === id)` por grupo (O(P·G)). Una lista sigue valiendo mientras nadie ENTRE en su grupo:
+ * quien sale se descarta al leerla con `p.communityId === id`, y el orden de slot se conserva. */
+function porComunidad(people: readonly Person[]): Map<string | null, Person[]> {
+  const grupos = new Map<string | null, Person[]>();
+  for (const person of people) {
+    const lista = grupos.get(person.communityId);
+    if (lista) lista.push(person); else grupos.set(person.communityId, [person]);
+  }
+  return grupos;
+}
+
 /**
  * Ley candidata `social.radioConvivencia` (hipótesis COM, 2026-09-22): la pertenencia es con quién
  * convivo y en quién confío, no una etiqueta de nacimiento. Dos reglas locales, sin umbrales nuevos
@@ -365,16 +378,19 @@ function trustedMajority(nearby: readonly Person[]): { id: string; count: number
  *    pasa a esa comunidad (se revisa en orden de `world.people`, así que un par aislado no se intercambia).
  * Nada se crea ni se paga: sólo cambia a qué grupo cuenta cada uno. Cada cambio deja un evento con causa.
  */
-function reviseByCohabitation(world: World, emit: Emit, radius: number): void {
+function reviseByCohabitation(world: World, emit: Emit, radius: number, iniciales: Map<string | null, Person[]>): void {
   const cap = paramsOf(world).social.maxComunidades;
   for (const group of [...world.communities]) {
-    const members = world.people.filter(p => p.communityId === group.id);
+    // Hasta aquí sólo hubo salidas (a null) y fisiones de grupos anteriores (hacia ids nuevos, que esta
+    // copia de `world.communities` no recorre): nadie entró en `group` desde que se hizo `iniciales`.
+    const members = (iniciales.get(group.id) ?? []).filter(p => p.communityId === group.id);
     if (members.length < 4 || world.communities.length >= cap) continue;
     const center = { x: members.reduce((sum, p) => sum + p.x, 0) / members.length, y: members.reduce((sum, p) => sum + p.y, 0) / members.length };
+    const memberSet = new Set(members);
     for (const person of members) {
       const away = distance(person, center);
       if (away <= radius) continue;
-      const core = members.filter(p => trustedNeighbor(person, p));
+      const core = vecinos(world, person, 7, p => memberSet.has(p) && trustedNeighbor(person, p), 'updateCommunities:cohabitation');
       if (core.length < 2 || core.length + 1 >= members.length || !algunoCerca(world.places, person, 8, place => distance(person, place) <= 7)) continue;
       const founders = [person, ...core], id = `community-${++world.communityCounter}`;
       const random = localRandom(world.seed, id), name = `Círculo de ${COMMUNITY_SYLLABLES[Math.floor(random() * COMMUNITY_SYLLABLES.length)]}`;
@@ -388,7 +404,7 @@ function reviseByCohabitation(world: World, emit: Emit, radius: number): void {
   }
   for (const person of world.people) {
     if (!person.communityId) continue;
-    const nearby = world.people.filter(p => trustedNeighbor(person, p));
+    const nearby = vecinos(world, person, 7, p => trustedNeighbor(person, p), 'updateCommunities:cohabitation');
     const own = nearby.filter(p => p.communityId === person.communityId).length;
     const best = trustedMajority(nearby.filter(p => p.communityId !== person.communityId));
     if (!best || best.count < 2 || best.count <= own) continue;
@@ -409,19 +425,23 @@ export function updateCommunities(world: World, emit: Emit): void {
   // cerrada; y las alternativas vienen de grupos que divergen, así que exigirles menos
   // de 0,2 de distancia cultural las descarta siempre. Los defaults son esos dos números.
   const { confianzaSalida, distanciaAlternativa, radioConvivencia } = paramsOf(world).social;
+  const iniciales = porComunidad(world.people);
   for (const person of world.people) {
     const group = world.communities.find(c => c.id === person.communityId);
     if (!group || culturalDistance(person.culture, group.culture) < 0.3) continue;
-    const peers = world.people.filter(p => p !== person && p.communityId === group.id);
+    // En este bucle sólo se sale (a null): la lista inicial filtrada por la pertenencia actual es el `filter` de siempre.
+    const peers = (iniciales.get(group.id) ?? []).filter(p => p !== person && p.communityId === group.id);
     const trust = peers.length ? peers.reduce((sum, p) => sum + (person.bonds[p.id] ?? 0.2), 0) / peers.length : 0.2;
-    const alternatives = world.people.filter(p => p !== person && p.communityId !== group.id && distance(person, p) <= 6 && (person.bonds[p.id] ?? 0) >= 0.3 && culturalDistance(person.culture, p.culture) < distanciaAlternativa);
+    const alternatives = vecinos(world, person, 7, p => p !== person && p.communityId !== group.id && distance(person, p) <= 6 && (person.bonds[p.id] ?? 0) >= 0.3 && culturalDistance(person.culture, p.culture) < distanciaAlternativa, 'updateCommunities:alternatives');
     if (trust >= confianzaSalida || alternatives.length < 2) continue;
     person.communityId = null;
     emit({ kind: 'community', actors: [person.id], x: person.x, y: person.y, source: 'simulation', text: `${person.name} dejó ${group.name} y buscó otra comunidad cercana.`, cause: 'Prácticas distintas, confianza interna baja y al menos dos contactos cercanos compatibles; la pertenencia es revisable.' });
   }
-  if (radioConvivencia > 0) reviseByCohabitation(world, emit, radioConvivencia);
+  if (radioConvivencia > 0) reviseByCohabitation(world, emit, radioConvivencia, iniciales);
+  // La mayoría de la convivencia AÑADE miembros a grupos existentes: se reagrupa, una pasada.
+  const actuales = porComunidad(world.people);
   for (const group of world.communities) {
-    const members = world.people.filter(p => p.communityId === group.id);
+    const members = actuales.get(group.id) ?? [];
     group.members = members.map(p => p.id);
     if (members.length) {
       for (const key of ['sharing','stewardship','openness'] as const) group.culture[key] = members.reduce((sum, p) => sum + p.culture[key], 0) / members.length;
@@ -430,7 +450,7 @@ export function updateCommunities(world: World, emit: Emit): void {
   }
   for (const person of world.people) {
     if (person.communityId) continue;
-    const nearby = world.people.filter(p => p !== person && distance(person, p) <= 6 && (person.bonds[p.id] ?? 0) >= 0.25 && culturalDistance(person.culture, p.culture) < 0.3);
+    const nearby = vecinos(world, person, 7, p => p !== person && distance(person, p) <= 6 && (person.bonds[p.id] ?? 0) >= 0.25 && culturalDistance(person.culture, p.culture) < 0.3, 'updateCommunities:foundation');
     // Con `social.radioConvivencia` > 0 quien no tiene comunidad (una cría, un recién llegado) se une a la
     // de la mayoría de sus vecinos de confianza; con 0, a la del primero que encuentra, como siempre.
     const joined = radioConvivencia > 0 ? trustedMajority(nearby)?.id : nearby.find(p => p.communityId)?.communityId;
@@ -467,7 +487,7 @@ export function resourceDispute(world: World, person: Person, emit: Emit): boole
   const source = tileAt(world, person.target);
   const stock = person.action === 'drink' ? waterAvailable(world,person.target) : person.action === 'hunt' ? source?.fauna ?? 0 : source?.food ?? 0;
   if (!source || !['eat','drink','hunt'].includes(person.action) || stock <= 0 || stock > disputaEscasez * (person.action === 'drink' ? 0.12 : person.action === 'hunt' ? 1 : 0.06)) return false;
-  const other = world.people.find(p => p !== person && p.communityId && p.action === person.action && distance(person, p) <= disputaRadio && distance(person.target, p.target) < disputaDestino && Math.max(p.hunger, p.thirst) > disputaNecesidad && world.tick - p.lastDispute >= disputaEspera);
+  const other = primerVecino(world, person, disputaRadio + 1, p => p !== person && !!p.communityId && p.action === person.action && distance(person, p) <= disputaRadio && distance(person.target, p.target) < disputaDestino && Math.max(p.hunger, p.thirst) > disputaNecesidad && world.tick - p.lastDispute >= disputaEspera, 'resourceDispute');
   if (!other) return false;
   const trust = person.bonds[other.id] ?? 0.2;
   if (trust >= 0.55 || (person.culture.openness + other.culture.openness) / 2 >= 0.65) {

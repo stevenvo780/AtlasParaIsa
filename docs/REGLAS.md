@@ -618,10 +618,30 @@ Una cadena de solicitudes desde la misma máquina (RTT 0) sí va mejor en la bas
 ociosos (gzip 41 ms con B 250), y aquí cada solicitud espera el paso en curso (292 ms). Por el dominio la
 siguiente solicitud llega un RTT después y ese hueco ya no la recoge: con 90 ms, PERF3 responde antes que la base.
 
+La segunda verificación encontró un hueco en eso: **lo que llega por WS**. El navegador comprime lo que manda
+(acuses, cámara, biografías, gestos) y `ws` solo lo entrega tras inflarlo en el threadpool, en varias idas y
+vueltas que nada público deja ver. La primera cita tras un paso largo salta justo detrás de la vuelta del bucle
+que recogió lo llegado durante el paso, que puede ser larga (proyectar para `/api/world`, ~37 ms), y el paso
+siguiente arrancaba antes de que el inflado volviera: cada acuse esperaba 3–4 pasos (831 ms p50 con pasos de
+250 ms, medido en el servidor), y el pong, detrás de él en el receptor, lo mismo. Ahora, con clientes WS, tras
+un paso largo se ceden siempre al menos `VUELTAS_CON_CLIENTES_WS` (2) citas de 1 ms, y después lo de antes;
+el acuse baja a 44 ms p50. Sin clientes WS nada cambia. Medido igual, los tres árboles a la vez (p50 salvo
+donde dice p95):
+
+| | Base `0ea1514` | PERF3 `de213f2` | PERF3 |
+|---|---|---|---|
+| B 250, RTT 0: pasos/s | 2,66 | 3,38 | 3,34 |
+| B 250, RTT 0: pong p50 · p95 | 139 · 202 ms | 199 · 858 ms | 50 · 277 ms |
+| B 250, RTT 90: pong p50 · p95 | 119 · 170 ms | 79 · 588 ms | 37 · 53 ms |
+| B 250, RTT 90: gzip · login · intervalo entre `state` | 299 · 271 · 1 826 ms | 241 · 197 · 1 406 ms | 205 · 199 · 1 414 ms |
+| B 1 100, RTT 0: pong p50 · p95 | 978 · 1 044 ms | 931 · 4 244 ms | 888 · 974 ms |
+| B 2 500: `GET /api/world` del cliente · silencio más largo | 1 400 ms · 5,2 s | 1 308 ms · 7,5 s | 1 313 ms · 5,0 s |
+
 **Lo que queda.** El p95 sigue por encima de los 50 ms del gobernador: 63–67 ms con la torre tranquila y
 167–191 ms con carga. Con 150 habitantes el techo seguirá sin dejar crecer. Ahora lo fijan los pasos más caros
-de la simulación (`simulationMs` p95 158–182 ms con carga), no la reserva. En producción el servidor corre con
-prioridad idle (ananicy), así que sus cifras se parecen a las de la torre cargada.
+de la simulación (`simulationMs` p95 158–182 ms con carga), no la reserva. En la torre el servidor corría con
+prioridad idle (ananicy) y sus cifras se parecían a las de la torre cargada; el portátil al que se mudó el
+público el 23-09 no está medido con este código.
 
 Estas opciones se validan y persisten, pero **T102 no activa backends, deltas ni nuevas señales,
 ni cambia los topes de validación o fundación de comunidades**. La ejecución sigue usando el

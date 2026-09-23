@@ -34,7 +34,7 @@ export type { WorldContext } from './spatial.js';
 
 // V9 accounts for an earlier visible forager when planning finite family reserves.
 // Physical work, consumption and reproduction gates retain their existing laws.
-export const RULES_VERSION = 10;
+export const RULES_VERSION = 11;
 /**
  * Ruling R17: ya no hay tope de población en el software. `POPULATION_HARD_LIMIT`
  * (1.000.000) solo protege `assertWorld` de un snapshot corrupto; el freno real es el
@@ -1748,6 +1748,13 @@ function migrateWorldState(value: unknown, context: WorldContext = {}): World {
     if (catalogueEnabled(world.technology)) for (const person of world.people) maintainTechnologyMemory(world, person);
     assertWorld(world); return world;
   }
+  if (version === 10) {
+    // V10 → V11 sólo cambia la etiqueta; la rama de la versión vigente aplica después la misma
+    // normalización de carga que recibía un mundo V10 con el código de reglas 10.
+    assertWorld(value, 10, context);
+    const world = cloneWorld(value, context); upgradeV11(world);
+    return migrateWorldState(world, context);
+  }
   if (version === 9) {
     assertWorld(value, 9, context);
     const world = cloneWorld(value, context); upgradeV10(world);
@@ -1772,20 +1779,20 @@ function migrateWorldState(value: unknown, context: WorldContext = {}): World {
   }
   if (version === 5) {
     assertWorld(value, 5, context);
-    const world = cloneWorld(value, context); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); upgradeV10(world);
+    const world = cloneWorld(value, context); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); upgradeV10(world); upgradeV11(world);
     if (world.technology.checkpoint === undefined) world.technology.checkpoint = captureTechnologyCheckpoint(world.technology, world.people, world.tick, 'migration');
     if (catalogueEnabled(world.technology)) for (const person of world.people) maintainTechnologyMemory(world, person);
     assertWorld(world); return world;
   }
-  if (version===4) { assertWorld(value,4,context); const world=cloneWorld(value,context); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); upgradeV10(world); assertWorld(world); return world; }
+  if (version===4) { assertWorld(value,4,context); const world=cloneWorld(value,context); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); upgradeV10(world); upgradeV11(world); assertWorld(world); return world; }
   if(version===3) {
     assertWorld(value,3,context);
-    const world=cloneWorld(value,context); upgradeV4(world); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); upgradeV10(world); assertWorld(world); return world;
+    const world=cloneWorld(value,context); upgradeV4(world); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); upgradeV10(world); upgradeV11(world); assertWorld(world); return world;
   }
   if (version === 2) {
     assertWorld(value, 2, context);
     const world = cloneWorld(value, context);
-    upgradeV3(world); upgradeV4(world); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); upgradeV10(world); assertWorld(world); return world;
+    upgradeV3(world); upgradeV4(world); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); upgradeV10(world); upgradeV11(world); assertWorld(world); return world;
   }
   assertCommon(value, true);
   const world = structuredClone(value);
@@ -1813,7 +1820,7 @@ function migrateWorldState(value: unknown, context: WorldContext = {}): World {
     p.skills = {}; p.values = {}; p.activity = {}; p.materials = { wood: 0, stone: 0 }; p.visited = [];
     p.heading = index * 2.399963229728653; p.command = null; p.work = 0; p.lastOutcome = world.tick; p.intentContext = p.hunger > 0.5 ? 'hungry' : p.fatigue > 0.5 ? 'tired' : 'ready'; p.controlMode = 'auto';
   });
-  upgradeV3(world); upgradeV4(world); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); upgradeV10(world); assertWorld(world); return world;
+  upgradeV3(world); upgradeV4(world); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); upgradeV10(world); upgradeV11(world); assertWorld(world); return world;
 }
 function upgradeV3(world: World): void {
   world.version = 3; world.cooperationEnabled = true; world.reproductionEnabled = true;
@@ -1847,3 +1854,5 @@ function upgradeV8(world: World): void { world.version = 8; }
 function upgradeV9(world: World): void { world.version = 9; }
 /** V10 prepara las leyes nuevas; al migrar sólo cambia la etiqueta, el estado guardado queda intacto. */
 function upgradeV10(world: World): void { world.version = 10; }
+/** V11 adopta nuevos defaults sólo al crear mundos; al migrar no altera estado ni params. */
+function upgradeV11(world: World): void { world.version = 11; }

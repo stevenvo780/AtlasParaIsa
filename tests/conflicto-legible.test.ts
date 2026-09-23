@@ -7,7 +7,7 @@ import { Store } from '../src/server/store.js';
 import { createWorld, stepWorld, TICKS_PER_DAY, type Person, type World } from '../src/world/index.js';
 import { digestoCanonico } from '../src/world/digesto.js';
 import { tileAt } from '../src/world/spatial.js';
-import { DEFAULT_PARAMS, PARAM_RANGES, paramsOf, parseParams, setParams, type WorldParams } from '../src/world/params.js';
+import { HISTORICAL_PARAMS, PARAM_RANGES, paramsOf, parseParams, setParams, type WorldParams } from '../src/world/params.js';
 
 /**
  * Hipótesis CONFL (noche 2026-09-22): conflicto legible no letal, `social.memoriaDisputa`.
@@ -16,19 +16,21 @@ import { DEFAULT_PARAMS, PARAM_RANGES, paramsOf, parseParams, setParams, type Wo
  * treinta pasos inmóvil sin poder volver a elegir aunque su sed o su hambre pasen de 0,9. La ley: cede
  * quien menos lo necesita (empate: el de id mayor), vuelve a elegir al paso siguiente y recuerda un día
  * la fuente disputada, que al elegir dónde comer, beber o cazar le parece `memoriaDisputa` celdas más
- * lejos. Default 0 = hoy.
+ * lejos. El histórico es 0; reglas 11 adopta 8 para mundos nuevos.
  */
 
 /** Carril de la ronda 3 (base P de la ronda 2) con el disparador de disputas abierto (claves de la noche). */
 const CARRIL_D = 'persistencia.cadaTicks=300,poblacion.cortejo=2,poblacion.radioCortejo=128,poblacion.exigeComunidad=false,'
   + 'poblacion.comprobacionContinua=true,conducta.habituacion=0.35,agua.memoria=0.6,social.disputaNecesidad=0.45,social.disputaEscasez=3,social.disputaRadio=3';
+const REGLAS10 = parseParams('social.disputaNecesidad=0.65,social.disputaEscasez=1,social.disputaRadio=2,social.memoriaDisputa=0');
 
 /** Réplica mínima como `scripts/lab/replica.ts`: Store temporal y `save` antes del primer paso. */
 function replica(t: { after(callback: () => void): void }, seed: number, pasos: number, params?: string): World {
   const directory = mkdtempSync(join(tmpdir(), 'atlas-conflicto-'));
   const store = new Store(join(directory, 'world.sqlite'));
   t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
-  const world = createWorld(seed, parseParams(params));
+  const world = createWorld(seed, parseParams(params, REGLAS10));
+  world.version = 10; // El digesto previo fue medido con esa etiqueta y los defaults de reglas 10.
   store.save(world);
   for (let tick = 1; tick <= pasos; tick++) stepWorld(world);
   return world;
@@ -50,7 +52,7 @@ const PREVIO_42_DEFAULTS_1200 = 'd4c91223e9105cfb29abfae2f31571a68e46eb1ec70b45e
 const PREVIO_51926_CARRIL_D_2400 = 'ea56cf5a7901ec169e228bdae9838c8e6b646dd485d2849974b1f8c602cb3e72';
 
 test('(i) con memoriaDisputa=0 el mundo es bit a bit el de antes, también cuando hay disputas', { timeout: 2_800_000 }, t => {
-  assert.equal(DEFAULT_PARAMS.social.memoriaDisputa, 0);
+  assert.equal(HISTORICAL_PARAMS.social.memoriaDisputa, 0);
   assert.deepEqual(PARAM_RANGES['social.memoriaDisputa'], [0, 32]);
   const defecto = replica(t, 42, 1200);
   assert.equal(digestoSinLaClave(defecto), PREVIO_42_DEFAULTS_1200, 'seed 42, defaults, 1200 pasos');
@@ -66,7 +68,7 @@ test('(i) con memoriaDisputa=0 el mundo es bit a bit el de antes, también cuand
  * (0,70). A 5 celdas hay otra fuente G con alimento de sobra. Nada más de comer alrededor.
  */
 function escena(params?: string, hambreA = 0.88, hambreB = 0.7) {
-  const world = createWorld(42, parseParams(params)); world.weather = 'clear';
+  const world = createWorld(42, parseParams(params, REGLAS10)); world.weather = 'clear';
   world.people = world.people.filter(p => p.role === 'neighbor').slice(0, 2);
   const [a, b] = world.people as [Person, Person];
   // Busca una celda de tierra F con vecina de tierra al oeste y otra celda de tierra G a 5 al este.

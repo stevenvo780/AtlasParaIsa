@@ -260,3 +260,16 @@ test('rechaza una máscara de otro paso', () => {
   w.animals.reverse();
   assert.throws(() => stepAnimals(w, undefined, porOrden), { message: 'Máscara de fauna de otro paso.' });
 });
+
+test('el orden de la máscara es una copia congelada: tocarlo no engaña al certificado ni a la validación', () => {
+  const w = herd(12);
+  w.animals.reverse();
+  const m = mascaraFauna(w);
+  assert.ok(Object.isFrozen(m.orden) && mismoArreglo(m.orden, w.animals));
+  assert.throws(() => Array.prototype.reverse.call(m.orden), TypeError);
+  w.animals.reverse();
+  assert.throws(() => stepAnimals(w, undefined, m), { message: 'Máscara de fauna de otro paso.' });
+  const invertida = [...w.animals];
+  mascaraFauna(w);
+  assert.ok(mismoArreglo(w.animals, [...invertida].sort(canonicalId)));
+});

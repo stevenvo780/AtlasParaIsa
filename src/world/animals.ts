@@ -342,22 +342,23 @@ function certificar(animals: readonly Animal[], ids: readonly string[] | null): 
 }
 /** Hasta dónde el principio de `animals` es, en orden, una subsecuencia del certificado (por objeto o,
  * si lo lleva, por id); `exacto` si es el mismo arreglo de objetos, y `mismosIds` si es la misma
- * secuencia de ids, sin saltos, y el certificado la lleva. */
+ * secuencia de ids, sin saltos, y el certificado la lleva. Los saltos por el certificado no pasan de
+ * `animals.length`, así que el recorrido es O(A) aunque el certificado sea de un mundo mayor. */
 function prefijoCertificado(animals: readonly Animal[]): { hasta: number; exacto: boolean; mismosIds: boolean } {
   const { objetos, ids } = certificado, n = animals.length, m = objetos.length;
   let i = 0;
   while (i < n && i < m && animals[i] === objetos[i]) i++;
   if (i === n && n === m) { porIds = false; return { hasta: n, exacto: true, mismosIds: false }; }
-  let k = i, saltos = false, porId = false;
+  let k = i, saltos = 0, porId = false;
   for (; i < n; i++, k++) {
     const animal = animals[i]!, id = ids ? animal.id : undefined;
-    while (k < m && animal !== objetos[k] && (id === undefined || id !== ids![k])) { k++; saltos = true; }
-    if (k === m) break;
+    while (k < m && saltos <= n && animal !== objetos[k] && (id === undefined || id !== ids![k])) { k++; saltos++; }
+    if (k === m || saltos > n) break;
     if (animal !== objetos[k]) porId = true;
   }
   // Sin ningún animal reconocido por objeto, o reconocidos por id: se clona entre pasos (o es otro mundo).
   porIds = porId || i === 0 && n > 0 && m > 0;
-  return { hasta: i, exacto: false, mismosIds: !!ids && !saltos && i === n && k === m };
+  return { hasta: i, exacto: false, mismosIds: !!ids && saltos === 0 && i === n && k === m };
 }
 /** Mete `cola`, en orden canónico, en `animals[0, hasta)`, también en orden, sobre el propio arreglo
  * (que mide `hasta + cola.length`). Da lo mismo que el `sort` estable de `animals[0, hasta) ++ cola`:
@@ -418,7 +419,9 @@ const mismosObjetos = (a: readonly Animal[], b: readonly Animal[]): boolean => {
   for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
   return true;
 };
-export function mascaraFauna(world: AnimalWorld): MascaraFauna {
+/** La máscara del coordinador. Su `orden` es una copia congelada: el certificado no sale nunca del módulo. */
+export function mascaraFauna(world: AnimalWorld): MascaraFauna { return calcularMascara(world, true); }
+function calcularMascara(world: AnimalWorld, exportada: boolean): MascaraFauna {
   ordenCanonico(world.animals);
   const animals = world.animals, population = animals.length;
   const offset = population ? ((world.tick % population) * MAX_ACTIVE_ANIMALS) % population : 0;
@@ -430,7 +433,8 @@ export function mascaraFauna(world: AnimalWorld): MascaraFauna {
     const tramo = animals.slice(offset, offset + MAX_ACTIVE_ANIMALS), vuelta = animals.slice(0, Math.max(0, offset + MAX_ACTIVE_ANIMALS - population));
     selected = !vuelta.length ? tramo : vuelta[vuelta.length - 1]!.id < tramo[0]!.id ? [...vuelta, ...tramo] : [...tramo, ...vuelta].sort(canonical);
   }
-  return Object.freeze({ tick: world.tick, animales: animals, poblacion: population, orden: certificado.objetos, seleccion: Object.freeze(selected), ids: new Set(selected.map(a => a.id)) });
+  const orden = exportada ? Object.freeze(certificado.objetos.slice()) : certificado.objetos;
+  return Object.freeze({ tick: world.tick, animales: animals, poblacion: population, orden, seleccion: Object.freeze(selected), ids: new Set(selected.map(a => a.id)) });
 }
 /** Los animales de una región que la máscara selecciona, en orden canónico. */
 export function seleccionDe(mascara: MascaraFauna, animales: readonly Animal[]): Animal[] {
@@ -442,7 +446,7 @@ export function seleccionDe(mascara: MascaraFauna, animales: readonly Animal[]):
 export function stepAnimals(world: AnimalWorld, emit?: AnimalEmitter, mascara?: MascaraFauna): void {
   if (world.animals.length > limitsOf(world).fauna) throw new Error('Capacidad regional de fauna excedida.');
   const state: LocalState = { tile: tileLookup(world.tiles), occupants: new Map(), counts: new Map() };
-  const m = mascara ?? mascaraFauna(world);
+  const m = mascara ?? calcularMascara(world, false);
   if (m.tick !== world.tick || m.animales !== world.animals || m.poblacion !== world.animals.length || mascara && !mismosObjetos(world.animals, m.orden))
     throw new Error('Máscara de fauna de otro paso.');
   for (const animal of world.animals) {

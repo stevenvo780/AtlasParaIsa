@@ -20,6 +20,7 @@ import assert from 'node:assert/strict';
 import { digestosControl, LEYES_CANDIDATAS } from '../scripts/lab/rendimiento.js';
 import { firstTileAt, lastTileAt, tileLookup } from '../src/world/tile-index.js';
 import { primero, primeroConFiltroCaro, primerosDos } from '../src/world/orden.js';
+import { algunoCerca, filtrarCerca, primeroCerca } from '../src/world/indice-puntos.js';
 
 /** Generador determinista pequeño (xorshift32) para las pruebas de equivalencia. */
 function aleatorio(seed: number): () => number {
@@ -65,6 +66,34 @@ test('primero, primeroConFiltroCaro y primerosDos dan los mismos elementos que f
     assert.deepEqual(primerosDos(items, compare, keep), ordenados.slice(0, 2));
     assert.equal(primero(items, compare), [...items].sort(compare)[0]);
   }
+});
+
+test('indice-puntos da lo mismo que some, find y filter con el predicado exacto, también en los bordes', () => {
+  const r = aleatorio(20260923);
+  type P = { x: number; y: number; n: number };
+  const distancia = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(a.x - b.x, a.y - b.y);
+  for (let caso = 0; caso < 300; caso++) {
+    const puntos: P[] = Array.from({ length: Math.floor(r() * 200) }, (_, n) => ({ x: Math.floor(r() * 90) - 45, y: Math.floor(r() * 70) - 35, n }));
+    if (caso % 7 === 0) puntos.push({ x: -0, y: 8, n: -1 }, { x: 7.5, y: -8.25, n: -2 }, { x: -8, y: -9, n: -3 }, { x: 2 ** 22, y: 3, n: -4 });
+    for (let consulta = 0; consulta < 40; consulta++) {
+      const centro = { x: Math.floor(r() * 100) - 50 + (consulta % 5 === 0 ? 0.5 : 0), y: Math.floor(r() * 80) - 40 };
+      const radio = [0, 0.5, 1.5, 3, 4, 5, 6, 7, 20][consulta % 9]!, estricto = consulta % 2 === 0;
+      const pred = (p: P) => estricto ? distancia(p, centro) < radio : distancia(p, centro) <= radio;
+      assert.equal(algunoCerca(puntos, centro, radio + 1, pred), puntos.some(pred));
+      assert.equal(primeroCerca(puntos, centro, radio + 1, pred), puntos.find(pred));
+      assert.deepEqual(filtrarCerca(puntos, centro, radio + 1, pred), puntos.filter(pred));
+      const exacto = (p: P) => p.x === Math.round(centro.x) && p.y === centro.y;
+      assert.equal(primeroCerca(puntos, centro, 1, exacto), puntos.find(exacto));
+    }
+    // El índice sigue al arreglo: crece por push y se reconstruye.
+    puntos.push({ x: 1, y: 1, n: 999 });
+    assert.equal(primeroCerca(puntos, { x: 1, y: 1 }, 1, p => p.n === 999)?.n, 999);
+  }
+  // Coordenadas no finitas o centro no finito: recorrido lineal de siempre.
+  const raros = [{ x: NaN, y: 0, n: 0 }, { x: 1, y: 1, n: 1 }, { x: Infinity, y: 2, n: 2 }];
+  assert.equal(primeroCerca(raros, { x: 1, y: 1 }, 2, p => distancia(p, { x: 1, y: 1 }) <= 1)?.n, 1);
+  assert.equal(primeroCerca(raros.slice(1, 2), { x: NaN, y: 1 }, 2, p => p.n === 1)?.n, 1);
+  assert.deepEqual(filtrarCerca(raros.slice(1, 2), { x: 1, y: 1 }, Infinity, () => true).map(p => p.n), [1]);
 });
 
 const REFERENCIA: readonly { seed: number; params?: string; digestos: Record<'1200' | '2400', string> }[] = [

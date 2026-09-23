@@ -8,6 +8,7 @@ import { constructionCost, waterAvailable } from './inventions.js';
 import { CAPABILITIES, MASS_UNIT, materialCapacities, shareTechnology, toolCapacities, transferTechnologyItem } from './technology.js';
 import type { Capability, MaterialBatch, TechnologyProgram } from '../shared/technology.js';
 import { resolveTechnologyRecipe } from './technology-catalogue.js';
+import { algunoCerca, filtrarCerca } from './indice-puntos.js';
 
 type Emit = (event: Omit<ChronicleEvent, 'id' | 'tick'>) => ChronicleEvent;
 export type Culture = NonNullable<PersonView['culture']>;
@@ -219,7 +220,7 @@ export function settlementOpportunity(world: World, person: Person): { target: {
       const tile = tileAt(world,{x:place.x+dx,y:place.y+dy});
       if (tile && tile.terrain !== 'water') { food += tile.food; water += tile.drinkingWater ?? 0; }
     }
-    const facilities = world.structures.filter(s=>distance(s,place)<=4 && s.condition>0.1);
+    const facilities = filtrarCerca(world.structures, place, 5, s=>distance(s,place)<=4 && s.condition>0.1);
     food += facilities.reduce((sum,s)=>sum+s.food,0); water += facilities.reduce((sum,s)=>sum+s.water,0);
     const peers = world.people.filter(p=>p!==person && distance(p,place)<=6);
     const trust = peers.reduce((sum,p)=>sum+(person.bonds[p.id]??0.15),0)/Math.max(1,peers.length);
@@ -230,7 +231,7 @@ export function settlementOpportunity(world: World, person: Person): { target: {
     person.home.quality = viable(person.home); person.home.observedAt = world.tick;
     if (person.home.quality < 0.12) delete person.home;
   }
-  const nearby = world.places.filter(p=>distance(person,p)<=6).map(p=>({place:p,quality:viable(p)}))
+  const nearby = filtrarCerca(world.places, person, 7, p=>distance(person,p)<=6).map(p=>({place:p,quality:viable(p)}))
     .sort((a,b)=>b.quality-a.quality || distance(person,a.place)-distance(person,b.place));
   const best = nearby[0];
   if (best && best.quality>0.4 && (!person.home || best.quality>person.home.quality+0.12)) person.home={x:best.place.x,y:best.place.y,quality:best.quality,observedAt:world.tick};
@@ -350,7 +351,7 @@ function reviseByCohabitation(world: World, emit: Emit, radius: number): void {
       const away = distance(person, center);
       if (away <= radius) continue;
       const core = members.filter(p => trustedNeighbor(person, p));
-      if (core.length < 2 || core.length + 1 >= members.length || !world.places.some(place => distance(person, place) <= 7)) continue;
+      if (core.length < 2 || core.length + 1 >= members.length || !algunoCerca(world.places, person, 8, place => distance(person, place) <= 7)) continue;
       const founders = [person, ...core], id = `community-${++world.communityCounter}`;
       const random = localRandom(world.seed, id), name = `Círculo de ${COMMUNITY_SYLLABLES[Math.floor(random() * COMMUNITY_SYLLABLES.length)]}`;
       const ids = founders.map(p => p.id);
@@ -413,7 +414,7 @@ export function updateCommunities(world: World, emit: Emit): void {
     const free = nearby.filter(p => !p.communityId);
     // Tope de FUNDACIÓN = `social.maxComunidades` (regla de conducta; default 8 = la de siempre).
     // La admisión `limites.comunidades` es otra cosa: lanza al validar, nunca decide aquí.
-    if (free.length < 2 || world.communities.length >= paramsOf(world).social.maxComunidades || !world.places.some(place => distance(person, place) <= 7)) continue;
+    if (free.length < 2 || world.communities.length >= paramsOf(world).social.maxComunidades || !algunoCerca(world.places, person, 8, place => distance(person, place) <= 7)) continue;
     const members = [person, ...free], id = `community-${++world.communityCounter}`;
     const random = localRandom(world.seed, id), name = `Círculo de ${COMMUNITY_SYLLABLES[Math.floor(random() * COMMUNITY_SYLLABLES.length)]}`;
     const group: CommunityView = { id, name, x: person.x, y: person.y, members: members.map(p => p.id), color: COMMUNITY_COLORS[world.communityCounter % 4]!, culture: { ...person.culture }, formedAt: world.tick, cooperation: 0, disputes: 0 };

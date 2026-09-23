@@ -4,6 +4,7 @@ import type { Person, World } from './index.js';
 import { localRandom } from './genetics.js';
 import { tileAt } from './spatial.js';
 import { chunkKey } from './terrain.js';
+import { algunoCerca, filtrarCerca } from './indice-puntos.js';
 
 type Emit = (event: Omit<ChronicleEvent, 'id' | 'tick'>) => ChronicleEvent;
 type Point = { x: number; y: number };
@@ -193,7 +194,7 @@ export function inventionContext(world: World, person: Person): InventionContext
   const moisture = average(tile => tile.moisture), food = average(tile => tile.food);
   const portable = world.people.filter(p => distance(person, p) <= 4).reduce((sum, p) => sum + Math.max(0, p.inventory - 0.08), 0);
   const reserve = Math.max(0, ...nearby.map(tile => tile.drinkingWater ?? 0));
-  const roofs = world.structures.filter(s => distance(person, s) <= 4 && s.condition > BROKEN_CONDITION && tileAt(world, s)?.terrain === 'shelter');
+  const roofs = filtrarCerca(world.structures, person, 5, s => distance(person, s) <= 4 && s.condition > BROKEN_CONDITION && tileAt(world, s)?.terrain === 'shelter');
   const quality = Math.max(0, ...roofs.map(s => blueprintAffordances(s.components).restQuality * s.condition));
   return { water: clamp(0.65 * (1 - clamp(reserve * 5)) + person.thirst * 0.35),
     food: clamp(0.65 * (1 - clamp(food * 4)) + person.hunger * 0.35),
@@ -328,8 +329,8 @@ export function invent(world: World, person: Person, emit: Emit): boolean {
 export function completeConstruction(world: World, person: Person, tile: Tile, emit: Emit): StructureView | null {
   const blueprint = selectedBlueprint(world, person), cost = blueprintCost(blueprint.components);
   if (!validBlueprint(blueprint.components) || world.structures.length >= MAX_STRUCTURES || tileAt(world, tile) !== tile || distance(person, tile) > 0.5
-    || tile.terrain === 'water' || tile.terrain === 'shelter' || world.places.some(p => distance(p, tile) < 5)
-    || world.structures.some(s => s.x === tile.x && s.y === tile.y) || person.work < cost.work || person.materials.wood < cost.wood || person.materials.stone < cost.stone) return null;
+    || tile.terrain === 'water' || tile.terrain === 'shelter' || algunoCerca(world.places, tile, 6, p => distance(p, tile) < 5)
+    || algunoCerca(world.structures, tile, 1, s => s.x === tile.x && s.y === tile.y) || person.work < cost.work || person.materials.wood < cost.wood || person.materials.stone < cost.stone) return null;
   const identity = nextIdentity(world.structureCounter, 'structure', [...world.structures.map(s => s.id), ...world.retiredChunks.flatMap(chunk => (chunk.structures ?? []).map(s => s.id))]);
   if (!identity) return null;
   person.materials.wood -= cost.wood; person.materials.stone -= cost.stone; person.work -= cost.work; world.structureCounter = identity.counter;
@@ -355,7 +356,8 @@ function observeUse(world: World, structure: StructureView, benefit: number): vo
 // Sprint noche-perf 2026-09-22: se descarta primero lo que está a más de `radius + 1` en algún eje (entonces
 // `Math.hypot` supera `radius` sin duda de redondeo) y el filtro completo, puro, decide igual que antes sobre
 // el resto; el orden de `world.structures` se conserva. Evita un `tileAt` por estructura en cada consulta.
-const functionalNear = (world: World, point: Point, radius = 1.5) => world.structures.filter(s => Math.abs(s.x - point.x) <= radius + 1
+// Sprint noche-perf2: los candidatos salen del índice por casillas (indice-puntos.ts), en el orden del arreglo.
+const functionalNear = (world: World, point: Point, radius = 1.5) => filtrarCerca(world.structures, point, radius + 1, s => Math.abs(s.x - point.x) <= radius + 1
   && Math.abs(s.y - point.y) <= radius + 1 && s.condition > BROKEN_CONDITION && tileAt(world, s)?.terrain === 'shelter' && distance(s, point) <= radius);
 export function foodAvailable(world: World, person: Point): number { return functionalNear(world, person).reduce((sum, s) => sum + (blueprintAffordances(s.components).foodCapacity ? s.food : 0), 0); }
 /** Returns food removed, never also credits inventory. The consumer owns the sole matching credit. */

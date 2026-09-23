@@ -232,6 +232,26 @@ test('clonar el mundo en cada paso (motor.clonPorPaso) o alternar dos mundos da 
   }
 });
 
+test('con crías y el mundo clonado en cada paso, desordenar la fauna entre pasos da lo mismo que ordenarla', () => {
+  const pasos = 40, correr = (clonarCadaPaso: boolean): { w: AnimalWorld; eventos: unknown[] } => {
+    const r = lcg(51926), eventos: unknown[] = [];
+    let w = mundoVivo();
+    for (let n = 0; n < pasos; n++) {
+      if (clonarCadaPaso) w = clonar(w);
+      const xs = w.animals, a = r(xs.length - 1), largo = 2 + r(6);
+      if (r(3) === 0) [xs[a], xs[a + 1]] = [xs[a + 1]!, xs[a]!];              // vecinos intercambiados
+      else if (r(2) === 0) xs.splice(a, largo, ...xs.slice(a, a + largo).reverse()); // tramo invertido
+      if (!clonarCadaPaso) xs.sort(canonicalId);                                  // el control: lo que hacía el `sort` de antes
+      w.tick++; stepAnimals(w, e => eventos.push(e));
+    }
+    return { w, eventos };
+  };
+  const clonado = correr(true), control = correr(false);
+  assert.ok(control.w.animalDynamics.births > 0, JSON.stringify(control.w.animalDynamics));
+  assert.equal(JSON.stringify(clonado.w), JSON.stringify(control.w));
+  assert.equal(JSON.stringify(clonado.eventos), JSON.stringify(control.eventos));
+});
+
 test('una fauna reordenada en sitio entre pasos no pasa por ordenada', () => {
   const w = mundoVivo();
   for (let n = 0; n < 3; n++) { w.tick++; stepAnimals(w); }

@@ -335,6 +335,23 @@ let certificado: { objetos: readonly Animal[]; ids: readonly string[] | null } =
 /** El certificado lleva ids: la última comprobación no reconoció la fauna por sus objetos y sí (o
  * quizá) por sus ids, que es lo que pasa cuando el mundo se clona entre pasos. */
 let porIds = false;
+/** Los ids de `animals` al cerrar un paso con crías, sin leer los animales ya certificados: salvo las
+ * `crias`, `animals` es una subsecuencia de los objetos del certificado, cuyos ids ya se conocen. `null` si
+ * no lo es (el hueco es de otro mundo): entonces se leen. */
+function idsSinLeer(animals: readonly Animal[], crias: ReadonlySet<Animal>): string[] | null {
+  const { objetos, ids } = certificado, m = objetos.length;
+  if (!ids) return null;
+  const r = new Array<string>(animals.length);
+  for (let i = 0, k = 0; i < animals.length; i++) {
+    const animal = animals[i]!;
+    if (k < m && animal === objetos[k]) { r[i] = ids[k++]!; continue; }
+    if (crias.has(animal)) { r[i] = animal.id; continue; }
+    while (k < m && animal !== objetos[k]) k++;
+    if (k === m) return null;
+    r[i] = ids[k++]!;
+  }
+  return r;
+}
 function certificar(animals: readonly Animal[], ids: readonly string[] | null): void {
   if (porIds && !ids) { const nuevos = new Array<string>(animals.length); for (let i = 0; i < animals.length; i++) nuevos[i] = animals[i]!.id; ids = nuevos; }
   // Sin `Object.freeze`: leer un arreglo congelado en el recorrido cuesta ~3,6 veces más.
@@ -392,17 +409,18 @@ function mezclar(animals: Animal[], hasta: number, cola: readonly Animal[]): voi
  * Al cerrar un paso sin crías no hay nada que hacer: lo que queda es una subsecuencia de lo certificado
  * al empezarlo, y el paso siguiente lo reconoce así. */
 function ordenCanonico(animals: Animal[], desde = 0): void {
-  let ids: readonly string[] | null = null;
+  let ids: readonly string[] | null = null, crias: ReadonlySet<Animal> | null = null;
   if (desde === 0) {
     const prefijo = prefijoCertificado(animals);
     if (prefijo.exacto) return;
     if (prefijo.mismosIds) ids = certificado.ids;
     desde = prefijo.hasta;
   } else if (desde >= animals.length) return;
+  else if (porIds) crias = new Set(animals.slice(desde));
   let j = Math.max(1, desde);
   while (j < animals.length && animals[j - 1]!.id < animals[j]!.id) j++;
   if (j < animals.length) { mezclar(animals, j, animals.slice(j).sort(canonical)); ids = null; }
-  certificar(animals, ids);
+  certificar(animals, ids ?? (crias && idsSinLeer(animals, crias)));
 }
 
 /** Máscara de fauna del paso (T116), de solo lectura: quién piensa en este tick. La calcula el

@@ -25,21 +25,42 @@ const recipeId = (value: unknown): value is string => {
 };
 const fail = (): never => { throw new TypeError('Invalid recipe memory input.'); };
 
-/** Validate the fields read or changed here; physical laws remain the host's responsibility. */
-function assertMemory(knowledge: TechnologyKnowledge, id?: string): void {
-  if (!record(knowledge) || (id !== undefined && !recipeId(id)) || !Array.isArray(knowledge.knownRecipes) || knowledge.knownRecipes.length > 256 ||
-    ![...knowledge.knownRecipes].every(recipeId) || new Set(knowledge.knownRecipes).size !== knowledge.knownRecipes.length ||
-    !Array.isArray(knowledge.items) || ![...knowledge.items].every(item => record(item) && (item.recipeId === null || recipeId(item.recipeId))) ||
-    !Array.isArray(knowledge.learnedFrom) || !record(knowledge.competence)) fail();
+/** Validate the fields read or changed here; physical laws remain the host's responsibility.
+ * Sprint noche-perf2 2026-09-22: se llama para cada persona en cada paso (`maintainTechnologyMemory`).
+ * Una sola pasada sin copias: las mismas comprobaciones que antes (`[...x].every`, `new Set(x).size`,
+ * `includes`, `Object.entries`) y el mismo error en los mismos casos —todas las ramas lanzan el mismo
+ * `TypeError` y ninguna tiene efectos—. Devuelve el conjunto de recetas conocidas y las claves de
+ * `competence` para que la poda no las recalcule. */
+function assertMemory(knowledge: TechnologyKnowledge, id?: string): { known: Set<string>; practiced: string[] } {
+  if (!record(knowledge) || (id !== undefined && !recipeId(id))) fail();
+  const knownRecipes = knowledge.knownRecipes;
+  if (!Array.isArray(knownRecipes) || knownRecipes.length > 256) fail();
+  const known = new Set<string>();
+  for (let n = 0; n < knownRecipes.length; n++) {
+    // Un hueco se lee como `undefined`, igual que en la copia `[...x]`: no es un id.
+    const value: unknown = knownRecipes[n];
+    if (!recipeId(value) || known.has(value)) fail();
+    known.add(value as string);
+  }
+  const items = knowledge.items;
+  if (!Array.isArray(items)) fail();
+  for (let n = 0; n < items.length; n++) {
+    const item: unknown = items[n];
+    if (!record(item) || (item.recipeId !== null && !recipeId(item.recipeId))) fail();
+  }
+  if (!Array.isArray(knowledge.learnedFrom) || !record(knowledge.competence)) fail();
   for (const learned of knowledge.learnedFrom) {
-    if (!record(learned) || !recipeId(learned.recipeId) || !knowledge.knownRecipes.includes(learned.recipeId) ||
+    if (!record(learned) || !recipeId(learned.recipeId) || !known.has(learned.recipeId) ||
       typeof learned.teacherId !== 'string' || !learned.teacherId.length || learned.teacherId.length > 100 || !integer(learned.tick)) fail();
   }
-  for (const [key, practice] of Object.entries(knowledge.competence)) {
+  const practiced = Object.keys(knowledge.competence);
+  for (const key of practiced) {
+    const practice: unknown = knowledge.competence[key];
     if (!recipeId(key) || !record(practice) || !integer(practice.attempts) || !integer(practice.successes) ||
       practice.successes > practice.attempts || !integer(practice.work) || typeof practice.benefit !== 'number' ||
       !Number.isFinite(practice.benefit) || practice.benefit < 0) fail();
   }
+  return { known, practiced };
 }
 
 /** Work in progress pins instructions, never grants them to an unfamiliar holder. */
@@ -50,9 +71,12 @@ export function technologyProjectPins(knowledge: TechnologyKnowledge): string[] 
 
 /** Forget practice once neither instructions, an artifact nor a paid project supports it. */
 export function pruneTechnologyCompetence(knowledge: TechnologyKnowledge): void {
-  assertMemory(knowledge);
-  const supported = new Set([...knowledge.knownRecipes, ...knowledge.items.flatMap(item => item.recipeId ? [item.recipeId] : []), ...technologyProjectPins(knowledge)]);
-  for (const id of Object.keys(knowledge.competence)) if (!supported.has(id)) delete knowledge.competence[id];
+  // Mismo conjunto que `new Set([...conocidas, ...recetas de los objetos, ...pines])` y las mismas
+  // claves de `competence` (nada cambia entre la validación y la poda), sin copias intermedias.
+  const { known: supported, practiced } = assertMemory(knowledge);
+  for (const item of knowledge.items) if (item.recipeId) supported.add(item.recipeId);
+  if (knowledge.project) for (const pin of technologyProjectPins(knowledge)) supported.add(pin);
+  for (const id of practiced) if (!supported.has(id)) delete knowledge.competence[id];
 }
 
 /** Refresh instructions already held, oldest first. An unknown ID is never admitted. */

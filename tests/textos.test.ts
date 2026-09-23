@@ -16,6 +16,7 @@ const PROHIBIDOS: [string, RegExp][] = [
   ['identificador', /\b(neighbor|descendant|animal|recipe|blueprint|product)-/],
   ['episodio', /\be\d+\b/],
   ['decimal inglés', /\d\.\d/],
+  ['coordenadas que parecen un decimal', /\(-?\d+,-?\d+\)/],
 ];
 
 test('M6: tras enClaro, ningún texto de un mundo sembrado real conserva claves en inglés ni identificadores', () => {
@@ -195,3 +196,8 @@ test('Constitución: un hito guardado por el navegador no parte una cita de la c
   assert.ok(!recortarHito(anidado, 400).includes('«'), 'una cita con comillas dentro también se deja fuera entera');
 });
 
+test('M6: las coordenadas de la ley no se confunden con un decimal', () => {
+  assert.equal(enClaro('Olmo y Vera junto a El claro de las vueltas (12,5).'), 'Olmo y Vera junto a El claro de las vueltas (12, 5).');
+  assert.equal(enClaro('Funcionó cosechar en (12, 5); 0.5 de beneficio.'), 'Funcionó cosechar en (12, 5); 0,5 de beneficio.');
+  assert.equal(enClaro('Ocurrió en (-3,7), paso 40.'), 'Ocurrió en (-3, 7), paso 40.');
+});

@@ -135,6 +135,9 @@ export function enClaro(texto: string, ctx: ContextoTexto = {}, contexto: 'texto
   // Secuencias de operaciones («abrade → combine») en minúscula, dentro de la frase; luego los nombres.
   t = t.replace(reOpsFlecha, (op: string) => operaciones[op]!.toLocaleLowerCase('es'));
   t = t.replace(reOpsNombre, (match: string) => match.split('·').filter(Boolean).map(op => operaciones[op] ?? op).join(' · '));
+  // Un par de coordenadas enteras sin espacio («junto a La huerta (12,5)», nacimientos en world/index.ts)
+  // se leería como el decimal 12,5 una vez que los decimales llevan coma: se separa como «(12, 5)».
+  t = t.replace(/\((-?\d+),(-?\d+)\)/g, '($1, $2)');
   // Coma decimal: «0.120» → «0,120» (los textos del servidor no usan separador de miles).
   t = t.replace(/(\d)\.(\d)/g, '$1,$2');
   // Más tramos que caracteres de uso privado no ocurre con la carta real; si ocurriera, el texto sale

@@ -76,7 +76,7 @@ test('catalogue metadata and personal learning refresh independently without com
     await page.route('**/api/session', route => route.fulfill({ json: { authenticated: true } }));
     await page.route('**/api/world**', route => route.fulfill({ json: received }));
     await page.route('**/api/gesture', route => { messages.push({ type: 'gesture' }); return route.fulfill({ status: 500 }); });
-    await page.routeWebSocket('**/ws', ws => { socket = ws; ws.onMessage(message => messages.push(JSON.parse(String(message)))); });
+    await page.routeWebSocket(/\/ws(\?.*)?$/, ws => { socket = ws; ws.onMessage(message => messages.push(JSON.parse(String(message)))); });
     await page.goto(server.resolvedUrls!.local[0]!); await expect(page.locator('#connection-label')).toHaveText('En vivo');
     if (await page.locator('#letter-dialog').isVisible()) await page.getByRole('button', { name: 'Entrar al mundo' }).click();
     await page.locator('#inspector-tab-kit').click();
@@ -147,7 +147,7 @@ test('inspector destination changes with received intent; viewing, focusing and 
     await page.route('**/api/session', route => route.fulfill({ json: { authenticated: true } }));
     await page.route('**/api/world**', route => route.fulfill({ json: received }));
     await page.route('**/api/gesture', route => { messages.push({ type: 'gesture' }); return route.fulfill({ status: 500 }); });
-    await page.routeWebSocket('**/ws', ws => { socket = ws; ws.onMessage(message => messages.push(JSON.parse(String(message)))); });
+    await page.routeWebSocket(/\/ws(\?.*)?$/, ws => { socket = ws; ws.onMessage(message => messages.push(JSON.parse(String(message)))); });
     await page.goto(server.resolvedUrls!.local[0]!);
     await expect(page.locator('#connection-label')).toHaveText('En vivo');
     if (await page.locator('#letter-dialog').isVisible()) await page.getByRole('button', { name: 'Entrar al mundo' }).click();

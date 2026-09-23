@@ -158,15 +158,29 @@ export class TechnologyArchive {
       transaction: this.db.isTransaction };
   }
   private clearProofs(): void { this.verifiedStamp = null; this.definitionProof = null; this.summaryProof = null; }
-  invalidateVerification(): void { this.clearProofs(); this.hostTransaction = false; }
+  invalidateVerification(): void { this.clearProofs(); this.hostTransaction = false; this.epochMemo = null; }
   /** Sello de la base para la memoria de lecturas del anfitrión (Store, sprint noche-perf 2026-09-22):
    * el mismo `stamp()` que invalida las pruebas de este archivo, serializado; `null` dentro de una
    * transacción, donde el anfitrión no debe recordar nada. Cualquier escritura propia (total_changes),
    * ajena (data_version) o de esquema cambia el sello. */
   readEpoch(): string | null {
+    // Sprint noche-perf2 2026-09-22: con ~230 habitantes se piden ~900 sellos por paso y cada uno eran
+    // cuatro sentencias (5,8 µs). Ahora cada llamada lee sólo `data_version` (escrituras ajenas) y
+    // `total_changes()` (escrituras propias), 2,5 µs, y relee los dos esquemas cuando cualquiera de los
+    // dos cambia. Lo único que cambia un esquema sin mover ninguno de los dos es DDL propio fuera de una
+    // transacción: después de construir el Store sólo lo hace `installSchema`, que olvida el sello.
+    if (this.db.isTransaction) return null;
+    const dataVersion = (this.readStatement('PRAGMA main.data_version').get() as { data_version: number }).data_version;
+    const totalChanges = (this.readStatement('SELECT total_changes() AS n').get() as { n: number }).n;
+    const memo = this.epochMemo;
+    if (memo && memo.dataVersion === dataVersion && memo.totalChanges === totalChanges) return memo.epoch;
     const stamp = this.stamp();
-    return stamp.transaction ? null : `${stamp.dataVersion}:${stamp.totalChanges}:${stamp.schemaCookie}:${stamp.tempSchemaCookie}`;
+    if (stamp.transaction) return null;
+    const epoch = `${stamp.dataVersion}:${stamp.totalChanges}:${stamp.schemaCookie}:${stamp.tempSchemaCookie}`;
+    this.epochMemo = { dataVersion: stamp.dataVersion, totalChanges: stamp.totalChanges, epoch };
+    return epoch;
   }
+  private epochMemo: { dataVersion: number; totalChanges: number; epoch: string } | null = null;
   /** Tick más alto de cualquier definición o estadística archivada, o -1 si no hay ninguna. Una lectura
    * «a fecha de» un tick igual o posterior no depende de ese tick mientras el sello no cambie. */
   latestTick(): number {
@@ -241,7 +255,7 @@ export class TechnologyArchive {
   }
 
   installSchema(): void {
-    this.transaction();
+    this.transaction(); this.epochMemo = null;
     this.db.exec(`CREATE TABLE IF NOT EXISTS technology_definitions (
       id TEXT PRIMARY KEY NOT NULL, tick INTEGER NOT NULL, signature TEXT UNIQUE NOT NULL, body TEXT NOT NULL, digest TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS technology_stats (

@@ -75,3 +75,29 @@ test('la memoria de recetas archivadas entrega copias nuevas y se invalida con e
   try { other.prepare('DELETE FROM technology_stats WHERE recipeId=?').run(recipe.id); } finally { other.close(); }
   assert.throws(() => reader.resolve(recipe.id, world.tick), /no statistics/);
 });
+
+test('un lote de lecturas usa un solo sello: dentro ve una foto del archivo y al salir ve la escritura ajena', t => {
+  const { path, store, world } = fixture(t);
+  const recipe = paidResearch(world);
+  store.save(world);
+  const reader = store.catalogueReader;
+  assert.equal(typeof reader.readBatch, 'function');
+  const suelta = reader.resolve(recipe.id, world.tick)!;
+  const other = new DatabaseSync(path);
+  t.after(() => other.close());
+  const dentro = reader.readBatch!(world.tick, () => {
+    const antes = reader.resolve(recipe.id, world.tick)!;
+    // Escritura ajena A MITAD del lote: el lote conserva la foto con la que empezó.
+    other.prepare('DELETE FROM technology_stats WHERE recipeId=?').run(recipe.id);
+    const despues = reader.resolve(recipe.id, world.tick)!;
+    // Un lote anidado no toma otro sello; el valor del lote es el de la evaluación.
+    const anidado = reader.readBatch!(world.tick, () => reader.resolve(recipe.id, world.tick)!);
+    return { antes, despues, anidado };
+  });
+  assert.deepEqual(dentro.antes, suelta); assert.deepEqual(dentro.despues, suelta); assert.deepEqual(dentro.anidado, suelta);
+  assert.notEqual(dentro.antes, dentro.despues);
+  // Fuera del lote, la primera lectura vuelve a pedir el sello completo: la escritura ajena se ve.
+  assert.throws(() => reader.resolve(recipe.id, world.tick), /no statistics/);
+  // Un lote a otra fecha no reutiliza su sello para lecturas de otro tick.
+  assert.throws(() => reader.readBatch!(world.tick + 1, () => reader.resolve(recipe.id, world.tick)), /no statistics/);
+});

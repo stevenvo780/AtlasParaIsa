@@ -9,7 +9,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { bindTechnologyCatalogue, enableTechnologyCatalogue, markTechnologyCatalogueCommitted, resolveTechnologyRecipe,
-  updateTechnologyRecipeStats, withRecipeSession, type TechnologyCatalogueReader } from '../src/world/technology-catalogue.js';
+  updateTechnologyRecipeStats, withArchiveReadBatch, withRecipeSession, type TechnologyCatalogueReader } from '../src/world/technology-catalogue.js';
 import { defaultTechnologyState } from '../src/world/technology.js';
 import type { TechnologyRecipe, TechnologyState } from '../src/shared/technology.js';
 
@@ -168,4 +168,19 @@ test('mientras dura la sesión el arreglo de la ventana no cambia; al cerrar se 
   const quieto = state.recipes;
   withRecipeSession(host, () => resolveTechnologyRecipe(host, 'recipe-4', { cache: false }));
   assert.equal(state.recipes, quieto);
+});
+
+test('withArchiveReadBatch pide al anfitrión un lote a la fecha del mundo; sin lotes, sólo evalúa', () => {
+  const { host, archivo } = mundo(20, 5), state = host.technology, lotes: number[] = [];
+  assert.equal(withArchiveReadBatch(host, () => 7), 7);
+  const reader: TechnologyCatalogueReader = {
+    resolve: id => { const recipe = archivo.get(id); return recipe ? structuredClone(recipe) : null; },
+    findBySignature: () => null, freshCopies: true,
+    readBatch: (atTick, read) => { lotes.push(atTick); return read(); },
+  };
+  bindTechnologyCatalogue(state, reader);
+  const resultado = withArchiveReadBatch(host, () => withRecipeSession(host, () => resolveTechnologyRecipe(host, 'recipe-1')!.id));
+  assert.equal(resultado, 'recipe-1');
+  assert.deepEqual(lotes, [host.tick]);
+  assert.equal(state.recipes.at(-1)!.id, 'recipe-1');
 });

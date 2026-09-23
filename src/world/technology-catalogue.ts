@@ -8,6 +8,10 @@ export interface TechnologyCatalogueReader {
    * necesita su propio `structuredClone` defensivo (sprint noche-perf 2026-09-22). Sin la marca, se
    * clona como siempre. */
   readonly freshCopies?: boolean;
+  /** Opcional (sprint noche-perf2 2026-09-22): ejecuta `read` —un paso del mundo, que SÓLO lee
+   * definiciones archivadas y nunca escribe en el archivo— como un lote a fecha de `atTick`: el anfitrión
+   * puede validar su memoria de lecturas una vez para todo el lote. Sin el método, cada lectura se valida sola. */
+  readonly readBatch?: <T>(atTick: number, read: () => T) => T;
 }
 export interface TechnologyCatalogueHost { technology: TechnologyState; tick: number; }
 export const MAX_PENDING_TECHNOLOGY_RECIPES = 65_536;
@@ -194,11 +198,20 @@ function endRecipeSession(state: TechnologyState): void {
 export function withRecipeSession<T>(host: TechnologyCatalogueHost, evaluate: () => T): T {
   const state = host.technology;
   if (sessions.has(state) || !catalogueEnabled(state)) return evaluate();
-  const max = state.budgets.maxRecipes;
-  if (!windowIndex(state.recipes) || !Number.isSafeInteger(max) || max < 1 || state.recipes.length > max) return evaluate();
-  const session: RecipeSession = { lru: new Map(state.recipes.map(recipe => [recipe.id, recipe])), max, touched: false };
-  sessions.set(state, session);
-  try { return evaluate(); } finally { if (sessions.get(state) === session) endRecipeSession(state); }
+  const inSession = (): T => {
+    const max = state.budgets.maxRecipes;
+    if (!windowIndex(state.recipes) || !Number.isSafeInteger(max) || max < 1 || state.recipes.length > max) return evaluate();
+    const session: RecipeSession = { lru: new Map(state.recipes.map(recipe => [recipe.id, recipe])), max, touched: false };
+    sessions.set(state, session);
+    try { return evaluate(); } finally { if (sessions.get(state) === session) endRecipeSession(state); }
+  };
+  return inSession();
+}
+/** Ejecuta `read` como un lote de lecturas del anfitrión a fecha de `host.tick` (sprint noche-perf2):
+ * `stepWorld` lo usa para todo el paso, que sólo LEE el archivo. Sin anfitrión con lotes, llama y ya. */
+export function withArchiveReadBatch<T>(host: TechnologyCatalogueHost, read: () => T): T {
+  const reader = readers.get(host.technology);
+  return reader?.readBatch ? reader.readBatch(host.tick, read) : read();
 }
 function touchInSession(session: RecipeSession, recipe: TechnologyRecipe): void {
   session.lru.delete(recipe.id); session.lru.set(recipe.id, recipe);

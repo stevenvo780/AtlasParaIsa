@@ -15,8 +15,21 @@ domina la simulación). El A/B de ciencia de 15 días muestra que la habituació
 7 y 42 pero frena a la semilla 1, que las disputas cuestan vidas sin ganar diversidad, y que ningún
 brazo alcanza SC-003 ≥ 0,6. Se decide congelar las etapas B–F de `002-mundo-ilimitado` hasta sostener
 100 días con 3 generaciones en el 90 % de las semillas, y priorizar diagnóstico barato sobre escala.
-PENDIENTE: la completa el orquestador con las cifras del carril de cortejo. [Revisión
-completa](REVISION-NOCHE-2026-09-22.md).
+**Reglas 10 (`688e0a6`, publicadas como mundo nuevo).** Los mundos nuevos nacen con el paquete de
+natalidad: cortejo 2 con radio 128, comunidad opcional para criar, comprobación continua de pareja y
+habituación 0,35; la memoria del agua quedó refutada fuera de muestra y no se adopta. Las instantáneas
+anteriores completan las claves ausentes con `HISTORICAL_PARAMS` y siguen su trayectoria bit a bit
+(12 pares main/V9/V10 comprobados por un verificador independiente). Ronda 2, 16 semillas por brazo,
+30 días sin gobernador: al día 10 el paquete sostiene ≥ 16 habitantes en 15/16 semillas (mediana 63)
+frente a 14/16 (mediana 24,5) con las reglas de hoy, y queda por encima en 14 de 16 pares (por debajo
+en 1 y 20260919). Hacia el día 30 las reglas de hoy dejan solo a S e I en 10 de 16 semillas; el paquete,
+en 1 (20260919); 31337 llega al día 30 con 66 y las otras 14 crecían (43–255 habitantes entre los días
+13 y 24, corridas aún abiertas). Con la vida alargada (longevidad base 20 o 30 días) ninguna semilla pierde a sus mortales: 6 de 7 con
+≥ 16 al día 10, y la séptima (20260919) crece después hasta 136 el día 27.
+Lo que NO se logró todavía: el crecimiento es casi exponencial (×1,15–1,2 al día) hasta que lo frena
+el gobernador por hardware, y el criterio de 60 días no se ha evaluado. Suite 1361/1366 (4 omitidos;
+1 prueba de tiempos de `assertWorld` que falla solo con la torre cargada y pasa aislada).
+[Revisión completa](REVISION-NOCHE-2026-09-22.md).
 
 ## Límites persistidos compatibles, 22 de septiembre de 2026
 

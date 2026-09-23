@@ -179,4 +179,37 @@ publicación por protocolo.
 
 ## g. Resultado del carril de cortejo y adopción en reglas 10
 
-PENDIENTE: la completa el orquestador con las cifras del carril.
+**Diseño.** Ronda 2: 16 semillas (7, 42, 51926, 1, 104729, 20260919, 2024, 31337, 3, 11, 99, 256, 777,
+1234, 4242, 9001) × 30 días, sin gobernador, `persistencia.cadaTicks=300`. Brazos: `control` (reglas de
+hoy), `Psinagua` (el paquete adoptado: cortejo 2, radio 128, `exigeComunidad=false`,
+`comprobacionContinua=true`, habituación 0,35), `P` (lo mismo + `agua.memoria=0.6`), `Papt` (P + aptitud +
+convivencia), `Pcoh` (P + cohorte de fundadores escalonada; retirado por dañino) y `Plong20`/`Plong30`
+(Psinagua + longevidad base 20/30 días). 35 réplicas cayeron por la cuota de `/tmp` (tmpfs); las de
+`control` y `Psinagua` se relanzaron sobre `/datos` y sus datos parciales se conservan: el fallo es de
+E/S, no del mundo, y la simulación es determinista.
+
+**Cifras (recuento final desde los `dia-NNN.json`).**
+
+| día | brazo | semillas con dato | ≥ 16 habitantes | mediana | solo S e I |
+|---|---|---|---|---|---|
+| 10 | control | 16 | 14 | 24,5 | 0 |
+| 10 | paquete | 16 | 15 | 63 | 0 |
+| 15 | control | 15 | 7 | 13 | 0 |
+| 15 | paquete | 10 | 9 | 68 | 0 |
+| 30 | control | 16 (10 terminadas) | — | — | 10 |
+| 30 | paquete | 16 (2 terminadas) | — | — | 1 |
+
+Pares al día 10: el paquete supera al control en 14 de 16 semillas (por debajo en 1: 63 frente a 64, y en
+20260919: 8 frente a 13). Las corridas de crecimiento son las más lentas (un día simulado con 150–250
+habitantes tarda 20–60 min con la torre cargada), así que los cortes tardíos quedan sesgados hacia las
+semillas pequeñas; por eso el día 30 se informa solo como extinciones terminadas. La memoria del agua
+mejoró dentro de muestra y se refutó fuera de ella; `Papt` quedó por debajo de `P` al día 10 (6/8,
+mediana 54 frente a 88). Con la vida alargada ninguna semilla pierde a sus mortales: 6 de 7 con ≥ 16 al día 10 (la séptima,
+20260919, crece después hasta 136 el día 27), y crecen todas las que llegaron más lejos
+(Plong30-31337: 139 habitantes el día 28; con el paquete solo, 66 el día 30).
+
+**Adopción.** `688e0a6` hace del paquete los defaults de los mundos nuevos (`RULES_10_ADOPTED`); las
+instantáneas antiguas completan lo ausente con `HISTORICAL_PARAMS` (conducta de antes, bit a bit). La
+semilla 7 pasa de 0 a 11 nacimientos en 3 días. Queda abierto: el crecimiento es casi exponencial hasta
+que lo frena el gobernador por hardware, y el criterio de 60 días necesita un techo determinista de
+laboratorio (`--techo-lab`) y un motor más rápido con población alta (PERF2), en curso.

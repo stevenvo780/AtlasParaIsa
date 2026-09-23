@@ -40,7 +40,7 @@ El mundo empieza con S, I y catorce vecinos ficticios. La descendencia requiere 
 
 No hacen falta química molecular, hidrodinámica completa ni evolución de especies para comprobar estas dependencias. La primera pregunta experimental es sencilla: **si cambia la disponibilidad de alimento o refugio, ¿cambian las rutas, los encuentros y las decisiones?**
 
-El bosque de la versión para grabación deja ver suelo, fuentes y fauna mediante claros y grupos de árboles con existencias físicas distintas. Cuando una fuente, roca o construcción conserva madera sin árbol vivo, se ven restos del depósito; no desaparece el recurso para despejar la escena. La [comparación inicial de escritorio](../artifacts/forest-candidate/51926-1440.png) y [móvil emulado](../artifacts/forest-candidate/51926-390.png) documenta el cambio de génesis; EVIDENCIA conserva por separado la afinación posterior del dibujo.
+El bosque de la versión para grabación deja ver suelo, fuentes y fauna mediante claros y grupos de árboles con existencias físicas distintas. Cuando una fuente, roca o construcción conserva madera sin árbol vivo, se ven restos del depósito; no desaparece el recurso para despejar la escena. La comparación inicial de escritorio (`artifacts/forest-candidate/51926-1440.png`) y de móvil emulado (`artifacts/forest-candidate/51926-390.png`), ambas locales y no versionadas, documentan el cambio de génesis; EVIDENCIA conserva por separado la afinación posterior del dibujo.
 
 ## Cuerpos y decisiones
 

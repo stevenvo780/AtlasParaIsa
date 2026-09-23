@@ -21,7 +21,7 @@
 7. Antes de terminar: `npm run typecheck` verde y `timeout 600 npx tsx --test <tus tests>` verde. **NO** ejecutes `npm test` completo (≈10 min; lo corre la integración) ni `npm run build`/`npm run check` en el árbol principal (**el servidor público sirve `dist/` en caliente desde aquí**).
 8. No toques `data/`, `~/.local/bin/atlas-servidor*`, la carta (S e I, recuerdos, textos de `world-shell.ts`), ni las leyes de hambre/sed/senescencia/diversidad/costes materiales.
 9. Escribe código que lea como el circundante: denso, comentarios escasos y precisos, español en textos de usuario, inglés en identificadores.
-10. Informe final en `.superpowers/sdd/002/tareas/<TID>-report.md`: ficheros tocados, qué cambió y por qué, cómo se prueba, cifras medidas (ANTES/DESPUÉS con control) y **una frase explícita sobre si el hardware puede cambiar el resultado de tu cambio**.
+10. Informe final en `specs/002-mundo-ilimitado/informes/<TID>-report.md`: ficheros tocados, qué cambió y por qué, cómo se prueba, cifras medidas (ANTES/DESPUÉS con control) y **una frase explícita sobre si el hardware puede cambiar el resultado de tu cambio**.
 11. **Las citas `fichero:línea` son indicativas**: están reescritas contra `f30d528` (2026-09-19), pero el árbol se mueve. **Localiza por contenido con `grep`, no por número**, y si el código que tu tarea describe ya no está donde dice, escríbelo en el informe antes de tocarlo — puede que otro sprint ya lo haya arreglado (le pasó a la refutación R12).
 12. **Aislamiento de las tareas `[P]`** (regla añadida 2026-09-19, refutación G5): dos tareas `[P]` de la **misma oleada** no pueden declarar en su alcance la misma **función**, ni un bloque de código que la otra reescribe por completo, aunque el fichero se reparta «en partes distintas». Cada worktree parte del mismo commit base y no ve el parche del otro: el conflicto aparece en el gate y un merge limpio puede descartar en silencio el trabajo de uno de los dos. Si tu tarea se solapa así con otra `[P]`, dilo en el informe **antes** de empezar.
 13. **Acumuladores y contadores**: PROHIBIDO tocar `world.totals` (`statistics.ts:97` `count()`), `world.demographyDynamics`, `world.inventionDynamics`, `world.animalDynamics`, `world.technology.ledger` ni ninguno de los **nueve** contadores de identidad (FR-006) desde código que corra en un worker. La suma FP64 no es asociativa y todos entran en el digesto.
@@ -45,7 +45,7 @@
   · **Cierre**: los tres tests verdes y el digesto adoptado como puerta en `tasks.md` (ninguna tarea posterior usa `encodeSnapshot` para probar paridad).
 
 - [x] **T102** [claude sonnet · high; ejecutado y revisado con Codex disponible, 2026-09-22] **Parámetros de motor y reversión por etapa.**
-  **Cierre 2026-09-22:** implementación desde `3dd615e`; Codex nativo como fallback explícito porque la ruta Claude/cloud-offload no estaba disponible. Focal 45/45, seis controles físicos de 1200 ticks contra V7 y otros seis contra la candidata familiar V8, con tablas durables iguales. Gate conjunto: typecheck, **939/939 tests, cero skips**, build, 18/18 E2E y smoke verdes. Informe: `.superpowers/sdd/002/tareas/T102-report.md`; [evidencia conjunta](../../docs/REVISION-INTEGRACION-A0-2026-09-22.md). El alcance incluye lexer compartido, barrido, snapshots y documentación. Son opciones reservadas, sin consumidores activos: **T100 y Gate A0 permanecen abiertos**.
+  **Cierre 2026-09-22:** implementación desde `3dd615e`; Codex nativo como fallback explícito porque la ruta Claude/cloud-offload no estaba disponible. Focal 45/45, seis controles físicos de 1200 ticks contra V7 y otros seis contra la candidata familiar V8, con tablas durables iguales. Gate conjunto: typecheck, **939/939 tests, cero skips**, build, 18/18 E2E y smoke verdes. Informe: `specs/002-mundo-ilimitado/informes/T102-report.md`; [evidencia conjunta](../../docs/REVISION-INTEGRACION-A0-2026-09-22.md). El alcance incluye lexer compartido, barrido, snapshots y documentación. Son opciones reservadas, sin consumidores activos: **T100 y Gate A0 permanecen abiertos**.
   **Preflight 2026-09-22:** el parser y el barrido actuales separan comas sin reconocer arrays; ampliar ambos con descriptores tipados y un separador compartido, conservando sweeps numéricos, precedencia y congelación profunda. `motor.gpu=[],[0],[0,1]` son tres valores del barrido. Mantener los defaults deterministas; aceptar una opción no acredita un backend activo.
   Añadir a `WorldParams`: `motor: { clonPorPaso: boolean /*true = hoy*/; hilos: number /*1*/; soaTerreno: boolean /*false*/; particionarPersonas: boolean /*false*/; gpu: number[] /*[]*/; orden: 'natural'|'inverso'|'adversarial' /*'natural'*/ }`, `persistencia.paginasSucias: boolean /*false*/`, `red.deltas: boolean /*false*/`, `gobernador.senales: string[] /*['p95']*/` y **`limites: { teselasActivas: number; chunks: number; comunidades: number; fauna: number }`** (para T100; defaults = los topes de hoy, de modo que T102 por sí sola no cambia nada). Todos con **default = comportamiento de hoy**, sus rangos en `PARAM_RANGES` y su documentación.
   · **Ficheros**: `src/world/params.ts`, `tests/params.test.ts`.
@@ -120,7 +120,7 @@
 
 - [x] **T108** [P] [minimax/MiniMax-M3] **Desbloquear el banco de cómputo y perfilar el kernel vivo.**
   `scripts/compute-ecology-benchmark.mjs:34` exige identidad de **bytes** de `src/world/ecosystem-kernel.ts`, `ecosystem.ts` y `terrain.ts` con `95ff0d2` y hoy lanza `Baseline core changed`: **no protege nada desde el 6 de septiembre**. Sustituir el candado de bytes por una **especificación versionada de las fórmulas** (lista de campos y términos, con su versión) validada contra el kernel vivo. Con el banco desbloqueado, medir `EcosystemKernel.step` **dentro del motor** a 65 k, 1 M y 4 M celdas y dejar las cifras en el informe.
-  · **Ficheros**: `scripts/compute-ecology-benchmark.mjs`, `.superpowers/sdd/002/tareas/T108-report.md`.
+  · **Ficheros**: `scripts/compute-ecology-benchmark.mjs`, `specs/002-mundo-ilimitado/informes/T108-report.md`.
   · **Tests**: el banco corre en verde contra HEAD; cambiar un término del kernel hace fallar la especificación versionada.
   · **Control**: las cifras del banco a 1 M celdas reproducen 47,30 / 23,97 / 19,41 ms (1 / 4 / 8 hilos) dentro de ±15 %.
   · **Cierre**: banco verde + tabla de coste del kernel por número de celdas, que es la línea base de las etapas B y C.
@@ -306,7 +306,7 @@
 
 - [x] **T136** [P] [minimax/MiniMax-M3] **Medir `perMessageDeflate` y decidir con el número.**
   Hoy está en `false` explícito (`app.ts:102/113`) sobre el JSON más repetitivo posible. Medir CPU y memoria **por conexión** con 12 clientes a 2 Hz y decidir: si el coste cabe en el presupuesto de 50 ms, se activa; si no, se deja y se documenta por qué. Revisar los umbrales de `send()` (256 KiB / 2 MiB, `app.ts:123-124/153-154`) — **sin subirlos**: si un mensaje no cabe, el arreglo es el delta, no el umbral.
-  · **Ficheros**: `src/server/app.ts` (solo la opción del `WebSocketServer` y un comentario con la cifra), `.superpowers/sdd/002/tareas/T136-report.md`.
+  · **Ficheros**: `src/server/app.ts` (solo la opción del `WebSocketServer` y un comentario con la cifra), `specs/002-mundo-ilimitado/informes/T136-report.md`.
   · **Tests**: el banco de red de T138 con y sin compresión.
   · **Control**: mismo mundo, mismo viewport, mismos 1 000 pasos.
   · **Cierre**: decisión tomada **con la cifra escrita** en evidencia, sea cual sea.
@@ -383,7 +383,7 @@
 
 - [ ] **T144** [claude sonnet · high] **Cierre medido de E.0: la curva se vuelve lineal** (depende de T140, T141, T142 y T143).
   Correr `scripts/curva-techo.mts --escala habitantes --hilos 1` a P ∈ {50, 200, 800, 2 000} con y sin el bloque E.0, ajustar lineal y cuadrático, y dejar el R² de ambos en evidencia. **Medir además el máximo por ventana**, no solo el p95: `updateCommunities` corre cada 120 ticks y su pico no aparece en el p95 de 120 muestras (refutación R8).
-  · **Ficheros**: `docs/EVIDENCIA.md`, `.superpowers/sdd/002/tareas/T144-report.md`.
+  · **Ficheros**: `docs/EVIDENCIA.md`, `specs/002-mundo-ilimitado/informes/T144-report.md`.
   · **Control**: el commit anterior a T141 como control.
   · **Cierre**: **R² > 0,95 sobre el ajuste lineal** y **≥ 700 habitantes** a p95 < 50 ms con 1 hilo. **Si el R² no se alcanza, el informe debe nombrar el término cuadrático que quedó vivo** (con fichero:línea) y la tarea no cierra: la lista de FR-027 es el punto de partida de esa búsqueda, no su final.
 
@@ -442,7 +442,7 @@
 
 - [ ] **T150** [orquestador + gemini/pro para leer `resumen.md`] **Campaña de evidencia del cambio de reglas.**
   16 réplicas × 25 días con reglas v7, contra 16 réplicas × 25 días con reglas v6 (control), mismas semillas. Métricas fijadas **antes**: supervivencia de fundadores, población final/inicial, muertes por causa, índice de diversidad, Gini de nº de hijos por progenitor, generaciones vivas, `edadMuerte.cv`. Si la reducción canónica empeora alguna, **se revisa la reducción**; no se publica igual.
-  · **Ficheros**: `docs/EVIDENCIA.md`, `.superpowers/sdd/002/tareas/T150-report.md`.
+  · **Ficheros**: `docs/EVIDENCIA.md`, `specs/002-mundo-ilimitado/informes/T150-report.md`.
   · **Control**: el commit anterior a T145.
   · **Cierre**: ninguna métrica de vida empeora fuera de su banda declarada (SC-002..SC-005 del spec 001 se mantienen), y la fila está en `docs/EVIDENCIA.md` con SHA, semillas, réplicas y duración.
 

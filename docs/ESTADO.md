@@ -44,5 +44,6 @@ por hardware ([revisión de la noche](REVISION-NOCHE-2026-09-22.md)).
 ## Cómo se actualiza
 
 Al publicar, con el procedimiento de CLAUDE.md: nuevo `publication-*.json` con el commit, el gate y las
-comprobaciones en vivo; después, esta tabla y la sección de anteriores. Ningún otro documento repite
+comprobaciones en vivo; después, esta tabla y la sección de anteriores, y `npx tsx scripts/check-links.ts`
+para no dejar enlaces rotos. Ningún otro documento repite
 el commit vigente; CLAUDE.md nombra además el directorio del mundo para que ningún agente lo toque.

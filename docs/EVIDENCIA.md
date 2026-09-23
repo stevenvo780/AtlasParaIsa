@@ -1,5 +1,12 @@
 # Evidencia vigente
 
+> Los enlaces a `../artifacts/…` de este registro apuntan a un directorio local que git ignora: no
+> están versionados y no existen en otros clones. Los que existían el 2026-09-22 se copiaron, con su
+> `MANIFEST.sha256`, a `/datos/workspaces/personal/AtlasParaIsa-archivo/evidencia-local-20260922`
+> (local, no versionado). Desde esa fecha, lo que solo existe en local se cita así, sin enlace, y
+> `npx tsx scripts/check-links.ts` comprueba los enlaces de todos los .md. El estado publicado está
+> en [ESTADO.md](ESTADO.md).
+
 ## Noche del 22 de septiembre de 2026
 
 La extinción de la V7 pública fue el gobernador en política `apagar` (p95 del paso > 50 ms por

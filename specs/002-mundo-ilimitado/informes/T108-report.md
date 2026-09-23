@@ -82,7 +82,7 @@ node --import tsx scripts/compute-ecology-benchmark.mjs \
 ## Nota de alcance
 
 La tarea T108 declara ficheros: `scripts/compute-ecology-benchmark.mjs` y
-`.superpowers/sdd/002/tareas/T108-report.md`. La implementación creó además:
+`specs/002-mundo-ilimitado/informes/T108-report.md`. La implementación creó además:
 - `scripts/compute-ecology-core.mjs` (+258 líneas) — especificación y validación
 - `tests/compute-ecology-benchmark.test.ts` (+114 líneas) — tests TDD de la validación
 

@@ -185,7 +185,7 @@ Cada etapa: **métrica de aceptación medida con control**, fila en `docs/EVIDEN
    - `ln -s <repo>/node_modules node_modules` en su worktree; lee su tarea en `tasks.md` y las secciones de `research.md` que la sostienen.
    - Si su modelo es externo: `delegar_a_cloud(model, effort, access:'write', cwd:<worktree>, timeout_s: 1800)` con prompt **autocontenido** (texto literal de la tarea + reglas de ejecución + fragmentos actuales de los ficheros a tocar + la decisión de `research.md` que la justifica). Si es Claude, implementa él mismo.
    - Verifica: `npm run typecheck` + `timeout 600 npx tsx --test <sus tests>`. **Nunca** `npm test` completo (≈10 min; lo corre la integración) ni `npm run build`/`npm run check` en el árbol principal.
-   - Commit en la rama del worktree; informe en `.superpowers/sdd/002/tareas/<TID>-report.md`.
+   - Commit en la rama del worktree; informe en `specs/002-mundo-ilimitado/informes/<TID>-report.md`.
 2. **Revisor adversarial por tarea** (Claude Opus, o `codex/gpt-5.6-sol` para las tareas de determinismo): lee `git diff <base>..HEAD` del worktree con **tres lentes fijas**: (a) ¿alguna fórmula del mundo toca el número de hilos, particiones o GPU? (b) ¿alguna reducción depende del orden de llegada? (c) ¿cambia el mundo sin declararlo? Veredicto ✅/❌ + una ronda de arreglo con el mismo modelo + re-revisión acotada.
 3. **Gate de etapa** (orquestador): merge en el orden de `tasks.md` (menos → más conflictivo), `npm run typecheck && npm test` en un worktree, `tests/determinismo-hardware.test.ts` en modo corto, barrido de control del laboratorio, fila en `docs/EVIDENCIA.md`, commit.
 4. **Corrección**: todo hallazgo CONFIRMADO se arregla **antes** del merge, delegando al modelo del workstream original. Los menores van al ledger `.superpowers/sdd/002/progress.md`.
@@ -206,7 +206,7 @@ Cada etapa: **métrica de aceptación medida con control**, fila en `docs/EVIDEN
 specs/002-mundo-ilimitado/{spec,plan,research,tasks,quickstart}.md
 .superpowers/sdd/002/{juicio-*,propuesta-*,mapa-*}.md   # material de entrada (git-ignored)
 .superpowers/sdd/002/progress.md                        # ledger: rulings, rondas, completados
-.superpowers/sdd/002/tareas/<TID>-report.md             # informe por tarea
+specs/002-mundo-ilimitado/informes/<TID>-report.md     # informe por tarea (versionado)
 .specify/workflows/002-etapa-{a,b,c,d,e,f}.js           # workflows por etapa
 docs/EVIDENCIA.md                                       # una sección por etapa, con SHA y semillas
 ```

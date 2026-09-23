@@ -4,7 +4,7 @@ import { Store } from '../src/server/store.js';
 import { digestoCanonico } from '../src/world/digesto.js';
 import { initialDemography } from '../src/world/demography.js';
 import { paramsOf, parseParams, setParams, DEFAULT_PARAMS, HISTORICAL_PARAMS, PARAM_RANGES } from '../src/world/params.js';
-import { ajustePracticaOficios, ajusteSaturacionLocal, ajusteVocacion, assertWorld, cloneWorld, createWorld,
+import { ajustePracticaOficios, ajusteSaturacionLocal, ajusteVocacion, assertWorld, choose, cloneWorld, createWorld,
   explorationTarget, heredarVocacion, OFICIOS_DE_LINAJE, stepWorld, type Person, type World } from '../src/world/index.js';
 import { CLAVES_POSTERIORES } from './lib/claves-posteriores.js';
 
@@ -141,6 +141,63 @@ test('B1 converge el destino hacia compañeros exploradores y no depende del ord
   assert.ok(alineado.x - actor.x > hoy.x - actor.x, `el rumbo no se acercó al este: hoy ${JSON.stringify(hoy)}, B1 ${JSON.stringify(alineado)}`);
   const inverso = cloneWorld(con); inverso.people.reverse();
   assert.deepEqual(explorationTarget(inverso, inverso.people.find(person => person.id === actor.id)!, tiles), alineado);
+});
+
+function mundoParaSaturacion(): { world: World; x: Person } {
+  const world = createWorld(42, parseParams('conducta.saturacionLocal=0.6'));
+  world.cooperationEnabled = false;
+  const [x, w1, w2] = world.people.filter(person => person.role === 'neighbor').slice(0, 3) as [Person, Person, Person];
+  for (const person of [x, w1, w2]) {
+    person.x = 20; person.y = 20; person.target = { x: 20, y: 20 }; person.bonds = {};
+    person.hunger = person.thirst = person.fatigue = 0.1; person.energy = 0.9;
+    person.decisionAt = 0; person.materials.wood = 0; person.materials.stone = 0;
+  }
+  x.traits.industriousness = 1; x.curiosity = 0;
+  w1.action = 'explore'; w2.action = 'explore';
+  world.tiles.find(tile => tile.x === x.x && tile.y === x.y)!.wood = 8;
+  return { world, x };
+}
+
+test('SL1 lee la instantánea de comienzo de fase, no world.people en vivo (verificador 2026-09-23)', () => {
+  // Reproduce el defecto encontrado: `choose()` de un vecino procesado antes en el mismo tick no
+  // debe cambiar el recuento de saturación de quien decide después. Con los defaults del preregistro
+  // (industriousness=1, curiosity=0, una tesela con madera cerca) `x` prefiere 'gather' cuando nadie
+  // más lo hace.
+  const { world, x } = mundoParaSaturacion();
+  choose(world, x);
+  const primero = x.action;
+  assert.equal(primero, 'gather', 'sin saturación, x elige recolectar (fija el resto del experimento)');
+  // Un vecino "procesado antes en este mismo tick" ya habría escrito su nueva acción en el objeto
+  // vivo de `world.people` (index.ts:931). Simulamos justo eso mutando la acción en vivo, SIN pasar
+  // por su propio `choose()`, y repetimos la decisión de x dentro del mismo tick (mismo `world.tick`,
+  // así que la instantánea ya capturada se reutiliza si la ley es correcta).
+  const [, w1, w2] = world.people.filter(person => person.role === 'neighbor').slice(0, 3) as [Person, Person, Person];
+  w1.action = 'gather'; w2.action = 'gather';
+  x.decisionAt = 0;
+  choose(world, x);
+  assert.equal(x.action, primero, 'la decisión de x no cambia aunque un vecino mute su acción en vivo dentro del mismo tick');
+});
+
+test('SL1 sólo cuenta vecinos mortales (role === neighbor): S e I nunca son compañeros de saturación', () => {
+  const build = (companionRole: 'S/I' | 'neighbor') => {
+    const world = createWorld(42, parseParams('conducta.saturacionLocal=0.6'));
+    world.cooperationEnabled = false;
+    const s = world.people.find(person => person.role === 'S')!, i = world.people.find(person => person.role === 'I')!;
+    const [x, w1, w2] = world.people.filter(person => person.role === 'neighbor').slice(0, 3) as [Person, Person, Person];
+    const companions = companionRole === 'S/I' ? [s, i] : [w1, w2];
+    for (const person of [x, ...companions]) {
+      person.x = 20; person.y = 20; person.target = { x: 20, y: 20 }; person.bonds = {};
+      person.hunger = person.thirst = person.fatigue = 0.1; person.energy = 0.9;
+      person.decisionAt = 0; person.materials.wood = 0; person.materials.stone = 0; person.action = 'gather';
+    }
+    x.traits.industriousness = 1; x.curiosity = 0;
+    world.tiles.find(tile => tile.x === x.x && tile.y === x.y)!.wood = 8;
+    return { world, x };
+  };
+  const conSyI = build('S/I'); choose(conSyI.world, conSyI.x);
+  assert.equal(conSyI.x.action, 'gather', 'con S e I ejerciendo el mismo oficio, no cuentan como saturación');
+  const conVecinos = build('neighbor'); choose(conVecinos.world, conVecinos.x);
+  assert.notEqual(conVecinos.x.action, 'gather', 'con dos vecinos mortales ejerciendo el mismo oficio, la saturación sí actúa');
 });
 
 test('con banda=0, cambiar bandaMax no mueve el mundo', () => {

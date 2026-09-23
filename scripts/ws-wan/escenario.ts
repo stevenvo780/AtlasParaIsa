@@ -52,7 +52,7 @@ cliente.stop();
 await enlace.cerrar();
 // Telemetría del servidor de ESTE escenario: sus puertos y su ventana de tiempo.
 type Tel = { t: number; ev: string; peer?: number; type?: string; bytes?: number; bufferedAmount?: number; sequence?: number; tickHz?: number; people?: number; stepMs?: number; p95StepMs?: number; broadcastMs?: number;
-  conexiones?: { remotePort: number | null; acuse: boolean; enviados: number; aplazados: number; acuses: number; ultimoAcuseMs: number | null; bufferedAmount: number }[] };
+  conexiones?: { remotePort: number | null; acuse: boolean; enviados: number; aplazados: number; acuses: number; ultimoAcuseMs: number | null; ultimoEnlaceMs?: number | null; comprime?: boolean; bufferedAmount: number }[] };
 const tel = readFileSync(srv.telemetry, 'utf8').split('\n').filter(Boolean).map(l => JSON.parse(l) as Tel).filter(x => x.t >= t0 && x.t <= t1 + 50);
 const mios = tel.filter(x => x.peer !== undefined && enlace.puertosHaciaServidor.has(x.peer));
 const envios = mios.filter(x => x.ev === 'send' && x.type === 'state');
@@ -60,10 +60,10 @@ const drops = mios.filter(x => x.ev === 'drop');
 const cortes = mios.filter(x => x.ev === 'terminate');
 // Contrapresión (servidor nuevo): el último registro de cada socket propio.
 const flujoPorSocket = new Map<number, NonNullable<Tel['conexiones']>[number]>();
-const acuseMs: number[] = [];
+const acuseMs: number[] = [], enlaceMs: number[] = [];
 for (const x of tel.filter(x => x.ev === 'flujo')) for (const c of x.conexiones ?? []) if (c.remotePort !== null && enlace.puertosHaciaServidor.has(c.remotePort)) {
   const previo = flujoPorSocket.get(c.remotePort);
-  if (c.ultimoAcuseMs !== null && c.acuses !== previo?.acuses) acuseMs.push(c.ultimoAcuseMs);
+  if (c.ultimoAcuseMs !== null && c.acuses !== previo?.acuses) { acuseMs.push(c.ultimoAcuseMs); if (c.ultimoEnlaceMs != null) enlaceMs.push(c.ultimoEnlaceMs); }
   flujoPorSocket.set(c.remotePort, c);
 }
 const flujo = [...flujoPorSocket.values()];
@@ -81,6 +81,9 @@ const r = {
     pctDescartados: envios.length + drops.length ? 100 * drops.length / (envios.length + drops.length) : 0,
     aplazados: flujo.reduce((s, c) => s + c.aplazados, 0), acuses: flujo.reduce((s, c) => s + c.acuses, 0), conAcuse: flujo.some(c => c.acuse),
     acuseMs: { p50: q(acuseMs, 0.5), max: acuseMs.length ? Math.max(...acuseMs) : null },
+    enlaceMs: { p50: q(enlaceMs, 0.5), max: enlaceMs.length ? Math.max(...enlaceMs) : null },
+    /** Si al final el servidor comprimía para este cliente (compresión adaptativa). */
+    comprimeAlFinal: flujo.map(c => c.comprime ?? null),
     cortes2MiB: cortes.length, cortesDetalle: cortes.map(c => ({ bufferedKiB: Math.round((c.bufferedAmount ?? 0) / 1024), by: (c as { by?: string }).by })),
     bufferedKiB: { p50: (q(mios.filter(x => x.ev === 'send').map(x => x.bufferedAmount ?? 0), 0.5) ?? 0) / 1024, max: Math.max(0, ...mios.map(x => x.bufferedAmount ?? 0)) / 1024 },
     tickHz: q(runtime.map(x => x.tickHz ?? 0), 0.5), habitantes: runtime.at(-1)?.people,

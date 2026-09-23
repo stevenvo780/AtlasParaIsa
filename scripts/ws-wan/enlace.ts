@@ -23,7 +23,8 @@ class Sentido {
    * fraccionarios pueden dispararse desordenados y romper el flujo TCP emulado). */
   private readonly pendientes: { sale: number; llega: number; n: number; trozo: Trozo; salio: boolean }[] = [];
   private timer: NodeJS.Timeout | null = null;
-  constructor(private readonly bps: number, private readonly retardoMs: number, private readonly colaBytes: number) {}
+  /** `bps` se puede cambiar en marcha (un enlace que empeora); rige para lo que se encole después. */
+  constructor(public bps: number, private readonly retardoMs: number, private readonly colaBytes: number) {}
   empujar(origen: Socket, trozo: Trozo): void {
     const ahora = performance.now();
     const n = trozo.datos.length;

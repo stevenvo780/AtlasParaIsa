@@ -31,7 +31,7 @@ export interface AppOptions {
    * entre corridas del banco (`scripts/benchmark-ws-deflate.ts`). `true` comprime todo
    * mensaje a todo cliente (lo que midió T136), `false` no negocia compresión. Sin valor
    * (producción): se negocia y solo se comprimen los `state` hacia clientes con acuse
-   * (`/ws?ack=1`); ver `compresion` en `createApp`, con la cifra medida. */
+   * (`/ws?ack=1`) cuyo enlace no es de LAN; ver `compresion` en `createApp`, con la cifra. */
   perMessageDeflate?: boolean;
 }
 type Compresion = 'nunca' | 'flujo' | 'siempre';
@@ -45,7 +45,19 @@ interface Flujo {
   enviados: number; aplazados: number; acuses: number;
   /** Del último acuse: cuánto tardó el `state` en salir, cruzar el enlace y volver confirmado. */
   ultimoAcuseMs: number | null;
+  /** Lo mismo sin el tiempo en que el hilo principal estuvo ocupado en pasos o proyecciones
+   * (ahí esperan el envío de trozos y la lectura del acuse): lo que tarda el ENLACE. */
+  ultimoEnlaceMs: number | null;
+  /** Compresión adaptativa: empieza comprimiendo (lo seguro para un enlace lento) y pasa a texto
+   * plano cuando el enlace demuestra ser de LAN; vuelve a comprimir si deja de serlo. */
+  comprimir: boolean; rapidos: number; lentos: number;
 }
+/** Enlace de LAN: un `state` grande comprimido va y vuelve en menos de esto (sin el tiempo del hilo
+ * ocupado) tres veces seguidas. Por el dominio el RTT torre↔VPS ya es de 88 ms: nunca pasa. */
+export const ENLACE_RAPIDO_MS = 60;
+/** En texto plano, dos idas y vueltas por encima de esto (un `state` de escritorio a < ~25 Mbit/s)
+ * vuelven a comprimir. */
+export const ENLACE_LENTO_MS = 250;
 type ClienteWs = {
   hash: string; alive: boolean; messages: number; window: number; viewport?: Viewport; lastView?: WorldView;
   subscribeMs: number; lastBroadcastAt: number;
@@ -55,7 +67,7 @@ type ClienteWs = {
   flujo: Flujo | null;
 };
 /** Estadística de un socket vivo, para bancos y pruebas; no expone sesión ni contenido. */
-export interface FlujoCliente { remotePort: number | null; acuse: boolean; subscribeMs: number; enVuelo: boolean; enviados: number; aplazados: number; acuses: number; ultimoAcuseMs: number | null; bufferedAmount: number }
+export interface FlujoCliente { remotePort: number | null; acuse: boolean; subscribeMs: number; enVuelo: boolean; enviados: number; aplazados: number; acuses: number; ultimoAcuseMs: number | null; ultimoEnlaceMs: number | null; comprime: boolean; bufferedAmount: number }
 /** Un `state` más largo que esto (unidades UTF-16 del JSON) viaja en trozos hacia `/ws?ack=1`. */
 export const TROZO_WS = 64 * 1024;
 /** Trozo cuando se comprime: cada mensaje comprimido cuesta al menos dos idas y vueltas por el hilo
@@ -216,8 +228,10 @@ export function createApp(options: AppOptions) {
   // ~105 KiB (7×) por ~3,6 ms de CPU del threadpool de libuv (no del hilo del paso;
   // `scripts/ws-wan/coste-deflate.ts`). Por eso, por defecto, se negocia la compresión
   // pero solo se comprimen los `state` hacia clientes con acuse, cuyo ritmo ya lo acota
-  // lo que su enlace drena (a lo sumo uno en vuelo). El cliente anterior sin acuse sigue
-  // recibiendo texto plano, como antes.
+  // lo que su enlace drena (a lo sumo uno en vuelo), y solo mientras su enlace no sea de
+  // LAN (`ENLACE_RAPIDO_MS`): en LAN cada trozo comprimido espera al hilo principal y,
+  // con la torre cargada, llegaba 25–110 ms más tarde que en claro, sin ahorrar nada que
+  // importe. El cliente anterior sin acuse sigue recibiendo texto plano, como antes.
   const compresion: Compresion = options.perMessageDeflate === undefined ? 'flujo' : options.perMessageDeflate ? 'siempre' : 'nunca';
   const ws = new WebSocketServer({ noServer: true, maxPayload: 4096,
     // `chunkSize` 128 KiB: la salida de un trozo (~35 KiB) cabe en un solo viaje al threadpool
@@ -269,6 +283,16 @@ export function createApp(options: AppOptions) {
   }
   /** Único punto de salida: registra el último envío (para el latido). Los mensajes pequeños no
    * se comprimen salvo con `perMessageDeflate: true` (T136). */
+  // Tramos en que el hilo principal estuvo ocupado (pasos y proyecciones fuera de ellos), en reloj
+  // real: nunca `monotonicNow`, que las pruebas inyectan para contar el paso (ver `medicion`).
+  const ocupado: [number, number][] = [];
+  let enPaso = false;
+  function anotarOcupado(desde: number) { ocupado.push([desde, performance.now()]); if (ocupado.length > 256) ocupado.shift(); }
+  function ocupadoEntre(desde: number, hasta: number) {
+    let total = 0;
+    for (const [a, b] of ocupado) total += Math.max(0, Math.min(b, hasta) - Math.max(a, desde));
+    return total;
+  }
   function emitir(socket: WebSocket, text: string, compress: boolean) {
     socket.send(text, { compress: compress || compresion === 'siempre' });
     const client = clients.get(socket); if (client) client.lastSentAt = Date.now();
@@ -305,7 +329,7 @@ export function createApp(options: AppOptions) {
     }
     if (flujo.enVuelo && !forzar) { flujo.pendiente = true; flujo.aplazados++; return; }
     const text = JSON.stringify({ type: 'state', world } satisfies ServerMessage);
-    const compress = compresion !== 'nunca';
+    const compress = compresion !== 'nunca' && flujo.comprimir;
     const trozo = compress ? TROZO_WS_COMPRIMIDO : TROZO_WS;
     if (text.length <= trozo) emitir(socket, text, compress);
     else {
@@ -314,15 +338,26 @@ export function createApp(options: AppOptions) {
       emitir(socket, JSON.stringify({ type: 'trozos', partes: partes.length } satisfies ServerMessage), false);
       for (const parte of partes) emitir(socket, parte, compress);
     }
-    flujo.enVuelo = { sequence: world.sequence, sentAt: monotonicNow(), bytes: Buffer.byteLength(text) };
+    flujo.enVuelo = { sequence: world.sequence, sentAt: performance.now(), bytes: Buffer.byteLength(text) };
     flujo.pendiente = false; flujo.enviados++;
   }
   /** Llegó el acuse del `state` en vuelo: si mientras tanto hubo difusión o cámara nueva, se manda
    * ya el mundo de ahora (uno solo, por muchas difusiones que se hayan saltado). */
   function liberar(socket: WebSocket, flujo: Flujo) {
-    const enVuelo = flujo.enVuelo!;
+    const enVuelo = flujo.enVuelo!, ahora = performance.now();
     flujo.enVuelo = null; flujo.acuses++;
-    flujo.ultimoAcuseMs = monotonicNow() - enVuelo.sentAt;
+    flujo.ultimoAcuseMs = ahora - enVuelo.sentAt;
+    flujo.ultimoEnlaceMs = Math.max(0, flujo.ultimoAcuseMs - ocupadoEntre(enVuelo.sentAt, ahora));
+    // Solo un `state` grande dice algo del enlace; uno pequeño va y vuelve rápido por cualquiera.
+    if (compresion === 'flujo' && enVuelo.bytes >= TROZO_WS) {
+      if (flujo.comprimir) {
+        flujo.rapidos = flujo.ultimoEnlaceMs < ENLACE_RAPIDO_MS ? flujo.rapidos + 1 : 0;
+        if (flujo.rapidos >= 3) { flujo.comprimir = false; flujo.lentos = 0; }
+      } else {
+        flujo.lentos = flujo.ultimoEnlaceMs > ENLACE_LENTO_MS ? flujo.lentos + 1 : 0;
+        if (flujo.lentos >= 2) { flujo.comprimir = true; flujo.rapidos = 0; }
+      }
+    }
     if (flujo.pendiente) sendView(socket);
   }
   function broadcast() {
@@ -338,6 +373,7 @@ export function createApp(options: AppOptions) {
     const client = clients.get(socket); if (!client) return;
     // Con un `state` en vuelo no se proyecta: se proyectará el mundo de cuando llegue el acuse.
     if (client.flujo?.enVuelo) { client.flujo.pendiente = true; client.flujo.aplazados++; return; }
+    const desde = performance.now();
     try {
       const projected = view(client.viewport);
       client.lastView = projected;
@@ -346,7 +382,7 @@ export function createApp(options: AppOptions) {
     } catch {
       // A camera read is not a simulation transaction. Never retry the failing archive in a fallback.
       send(socket, { type: 'error', message: 'No se pudo leer esa región guardada. Elige otra zona; su estado se conserva para recuperación.' });
-    }
+    } finally { if (!enPaso) anotarOcupado(desde); }
   }
   function requestGesture(gesture: Gesture, hash: string): Promise<GestureResult> {
     if (!store.sessionValid(hash)) throw new HttpError(401, 'La sesión terminó.');
@@ -368,6 +404,11 @@ export function createApp(options: AppOptions) {
     return promise;
   }
   function stepOnce() {
+    const desde = performance.now();
+    enPaso = true;
+    try { avanzar(); } finally { enPaso = false; anotarOcupado(desde); }
+  }
+  function avanzar() {
     if (failed || stopped) return;
     const stepStarted = monotonicNow();
     runtime.cloneMs = 0; runtime.simulationMs = 0; runtime.saveMs = 0;
@@ -539,7 +580,7 @@ export function createApp(options: AppOptions) {
       ws.handleUpgrade(req, socket, head, client => {
         clients.set(client, { hash, alive: true, messages: 0, window: Date.now(), subscribeMs: 0, lastBroadcastAt: 0, lastSentAt: Date.now(),
           ...(solicitud.viewport ? { viewport: solicitud.viewport } : {}),
-          flujo: solicitud.acuse ? { enVuelo: null, pendiente: false, enviados: 0, aplazados: 0, acuses: 0, ultimoAcuseMs: null } : null });
+          flujo: solicitud.acuse ? { enVuelo: null, pendiente: false, enviados: 0, aplazados: 0, acuses: 0, ultimoAcuseMs: null, ultimoEnlaceMs: null, comprimir: compresion !== 'nunca', rapidos: 0, lentos: 0 } : null });
         client.on('error', () => client.terminate());
         client.on('pong', () => { const info = clients.get(client); if (info) info.alive = true; });
         client.on('close', () => clients.delete(client));
@@ -635,7 +676,8 @@ export function createApp(options: AppOptions) {
     get flujo(): FlujoCliente[] {
       return [...clients].map(([socket, c]) => ({ remotePort: (socket as unknown as { _socket?: { remotePort?: number } })._socket?.remotePort ?? null,
         acuse: !!c.flujo, subscribeMs: c.subscribeMs, enVuelo: !!c.flujo?.enVuelo, enviados: c.flujo?.enviados ?? 0, aplazados: c.flujo?.aplazados ?? 0,
-        acuses: c.flujo?.acuses ?? 0, ultimoAcuseMs: c.flujo?.ultimoAcuseMs ?? null, bufferedAmount: socket.bufferedAmount }));
+        acuses: c.flujo?.acuses ?? 0, ultimoAcuseMs: c.flujo?.ultimoAcuseMs ?? null, ultimoEnlaceMs: c.flujo?.ultimoEnlaceMs ?? null,
+        comprime: compresion === 'siempre' || !!c.flujo?.comprimir, bufferedAmount: socket.bufferedAmount }));
     },
     /** Copia de las métricas vivas (incluido el gobernador de ruling R17); solo lectura. */
     get runtime(): RuntimeStats { return { ...runtime, ...(runtime.gobernador ? { gobernador: { ...runtime.gobernador } } : {}) }; },

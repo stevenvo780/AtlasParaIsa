@@ -115,22 +115,25 @@ test('el cliente anterior (/ws, sin acuse) conserva su cadencia y recibe texto p
   const nuevo = abrir(f, '/ws?ack=1');
   t.after(() => { antiguo.socket.terminate(); nuevo.socket.terminate(); });
   await antiguo.esperar(() => antiguo.states().length === 1 && nuevo.states().length === 1, 5000, 'estados iniciales');
-  const cable0 = { antiguo: antiguo.bytesCable(), nuevo: nuevo.bytesCable() };
+  const cable0 = antiguo.bytesCable();
+  const cableNuevo: number[] = [];
   for (let ronda = 0; ronda < 5; ronda++) {
     nuevo.ack(nuevo.states().at(-1)!.sequence);
+    const antes = nuevo.bytesCable();
     for (let n = 0; n < 5; n++) f.app.stepOnce();
     await nuevo.esperar(() => nuevo.states().length === ronda + 2, 5000, `state ${ronda} del cliente con acuse`);
+    cableNuevo.push(nuevo.bytesCable() - antes);
   }
   await antiguo.esperar(() => antiguo.states().length === 6, 5000, 'las cinco difusiones del cliente anterior');
   assert.deepEqual(antiguo.states().slice(1).map(s => s.tick), [5, 10, 15, 20, 25]);
   assert.ok(antiguo.marcos.every(m => m.startsWith('{')), 'el cliente anterior nunca recibe trozos');
   assert.equal(f.app.flujo.find(x => !x.acuse)!.aplazados, 0);
-  const texto = (w: WorldView[]) => w.slice(1).reduce((s, v) => s + Buffer.byteLength(JSON.stringify({ type: 'state', world: v })), 0);
-  const cable = { antiguo: antiguo.bytesCable() - cable0.antiguo, nuevo: nuevo.bytesCable() - cable0.nuevo };
+  const texto = (w: WorldView) => Buffer.byteLength(JSON.stringify({ type: 'state', world: w }));
+  const cableAntiguo = antiguo.bytesCable() - cable0, textoAntiguo = antiguo.states().slice(1).reduce((s, v) => s + texto(v), 0);
   // permessage-deflate se negocia con los dos (el cliente `ws`, como un navegador, lo ofrece), pero
-  // solo se comprimen los `state` hacia quien acusa.
-  assert.ok(cable.antiguo >= texto(antiguo.states()), `anterior: ${cable.antiguo} B en cable para ${texto(antiguo.states())} B de JSON`);
-  assert.ok(cable.nuevo * 3 < texto(nuevo.states()), `con acuse: ${cable.nuevo} B en cable para ${texto(nuevo.states())} B de JSON`);
+  // al cliente anterior nunca se le comprime; al que acusa, sí mientras su enlace no demuestre ser de LAN.
+  assert.ok(cableAntiguo >= textoAntiguo, `anterior: ${cableAntiguo} B en cable para ${textoAntiguo} B de JSON`);
+  assert.ok(cableNuevo[0]! * 3 < texto(nuevo.states()[1]!), `con acuse, el primero: ${cableNuevo[0]} B en cable para ${texto(nuevo.states()[1]!)} B de JSON`);
 });
 
 for (const [modo, perMessageDeflate, trozo] of [['comprimido', undefined, TROZO_WS_COMPRIMIDO], ['en claro', false, TROZO_WS]] as const) test(`un state grande viaja en trozos consecutivos que reconstruyen su JSON exacto (${modo})`, async t => {
@@ -236,6 +239,50 @@ test('latido de aplicación cuando no hay nada que mandar, nunca detrás de un s
   const latidos = (c: ReturnType<typeof abrir>) => c.mensajes.filter(m => m.type === 'latido').length;
   await acusa.esperar(() => latidos(acusa) > 0 && latidos(antiguo) > 0, LATIDO_WS_MS + 3000, 'latido');
   assert.equal(latidos(noAcusa), 0, 'con el state en vuelo no se encola un latido detrás');
+});
+
+test('compresión adaptativa: un enlace de LAN pasa a texto plano; si empeora, vuelve a comprimir', async t => {
+  const f = await fixture(t);
+  // Enlace en proceso: primero rápido y sin retardo (LAN); luego se degrada a 2 Mbit/s.
+  const enlace = new Enlace({ host: '127.0.0.1', port: f.port }, { bajadaBps: 1e9, subidaBps: 1e9, retardoMs: 0, colaBytes: 256 * 1024 });
+  const puerto = await enlace.abrir();
+  t.after(() => enlace.cerrar());
+  const socket = new WebSocket(`ws://127.0.0.1:${puerto}/ws?ack=1`, { headers: { Host: f.host, Origin: f.origin, Cookie: f.cookie } });
+  t.after(() => socket.terminate());
+  const llegadas: { world: WorldView; cable: number; texto: number }[] = [];
+  let trozos: { total: number; partes: string[] } | null = null, cableAntes = 0;
+  const cable = () => (socket as unknown as { _socket?: { bytesRead: number } })._socket?.bytesRead ?? 0;
+  socket.on('message', data => {
+    let texto = data.toString();
+    if (trozos) { trozos.partes.push(texto); if (trozos.partes.length < trozos.total) return; texto = trozos.partes.join(''); trozos = null; }
+    const m = JSON.parse(texto) as ServerMessage;
+    if (m.type === 'trozos') { trozos = { total: m.partes, partes: [] }; return; }
+    if (m.type !== 'state') return;
+    llegadas.push({ world: m.world, cable: cable() - cableAntes, texto: Buffer.byteLength(texto) }); cableAntes = cable();
+    socket.send(JSON.stringify({ type: 'ack', sequence: m.world.sequence }));
+  });
+  const ronda = async (n: number) => {
+    const hasta = Date.now() + 15_000;
+    for (let i = 0; i < 5; i++) f.app.stepOnce();
+    while (llegadas.length < n) { if (Date.now() > hasta) throw new Error(`sin el state ${n}`); await settle(10); }
+    await settle(20);
+  };
+  await ronda(1);
+  assert.equal(f.app.flujo[0]!.comprime, true, 'empieza comprimiendo: es lo seguro si el enlace resulta lento');
+  assert.ok(llegadas[0]!.cable * 3 < llegadas[0]!.texto, `el primero viaja comprimido (${llegadas[0]!.cable} B por ${llegadas[0]!.texto} B)`);
+  // Tres idas y vueltas de LAN seguidas (con holgura por si la torre cargada retrasa alguna).
+  let n = 1;
+  while (f.app.flujo[0]!.comprime && n < 12) await ronda(++n);
+  assert.equal(f.app.flujo[0]!.comprime, false, `las idas y vueltas de LAN apagan la compresión (${f.app.flujo[0]!.ultimoEnlaceMs} ms)`);
+  await ronda(++n);
+  assert.ok(llegadas.at(-1)!.cable >= llegadas.at(-1)!.texto, 'y lo siguiente viaja en claro, como antes de la contrapresión');
+  enlace.bajada.bps = 2e6; enlace.subida.bps = 2e6;
+  const degradado = n;
+  while (!f.app.flujo[0]!.comprime && n < degradado + 6) await ronda(++n);
+  assert.equal(f.app.flujo[0]!.comprime, true, `por 2 Mbit/s vuelve a comprimir (${f.app.flujo[0]!.ultimoEnlaceMs} ms)`);
+  assert.ok(n - degradado <= 3, `en cuanto dos states tardan (${n - degradado} rondas)`);
+  await ronda(++n);
+  assert.ok(llegadas.at(-1)!.cable * 3 < llegadas.at(-1)!.texto, `comprimido otra vez (${llegadas.at(-1)!.cable} B por ${llegadas.at(-1)!.texto} B)`);
 });
 
 test('/api/world viaja con gzip si el navegador lo acepta, y en claro si no', async t => {

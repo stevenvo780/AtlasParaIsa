@@ -84,7 +84,7 @@ test('los vecinos por aritmética coinciden uno a uno con buildTopology en un co
     const counts = store.livingNeighborCounts(threshold);
     for (let i = 0; i < tiles.length; i++) {
       const expected = [...topology.neighbors.subarray(i * 8, i * 8 + 8)].filter(n => n >= 0 && (tiles[n]!.life ?? 0) >= threshold).length;
-      assert.equal(counts[i], expected); assert.equal(store.livingNeighbors(store.cells[i]!, threshold), expected);
+      assert.equal(counts[i], expected);
     }
   }
 });
@@ -118,8 +118,7 @@ test('la máscara de presencia existe por esto: sin ella una celda ausente apare
   assert.equal(masked[3], -1, 'con máscara conserva el -1');
   assert.ok(unmasked[3]! >= 0, 'sin máscara la ranura reservada aparece como vecina');
   const living = (cells: number[]) => cells.filter(c => c >= 0 && store.lifeFront[c]! >= 0.45).length;
-  assert.equal(living(masked), 7); assert.equal(store.livingNeighbors(probeCell, 0.45), 7);
-  assert.equal(store.livingNeighborCounts(0.45)[probe], 7);
+  assert.equal(living(masked), 7); assert.equal(store.livingNeighborCounts(0.45)[probe], 7);
   assert.equal(living(unmasked), 8, 'sin máscara livingNeighbors cambia de 7 a 8');
   // Y el kernel con SoA reproduce el de objetos sobre el conjunto parcial.
   const soa = cloneTiles(partial), objects = cloneTiles(partial);

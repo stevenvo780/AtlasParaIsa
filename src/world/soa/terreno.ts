@@ -238,31 +238,6 @@ export class TileStore {
     return counts;
   }
 
-  /** Cuántas de las 8 vecinas presentes tienen `life` (frente) ≥ `threshold`. */
-  livingNeighbors(cell: number, threshold: number): number {
-    const stamps = this.presence.stamps, version = this.presence.version, life = this.lives[this.parity]!;
-    const lx = cell & 15, ly = (cell >> 4) & 15;
-    let count = 0;
-    if (lx > 0 && lx < 15 && ly > 0 && ly < 15) {
-      // Interior de la página: las ocho vecinas están en la misma ranura.
-      if (stamps[cell - 17] === version && life[cell - 17]! >= threshold) count++;
-      if (stamps[cell - 16] === version && life[cell - 16]! >= threshold) count++;
-      if (stamps[cell - 15] === version && life[cell - 15]! >= threshold) count++;
-      if (stamps[cell - 1] === version && life[cell - 1]! >= threshold) count++;
-      if (stamps[cell + 1] === version && life[cell + 1]! >= threshold) count++;
-      if (stamps[cell + 15] === version && life[cell + 15]! >= threshold) count++;
-      if (stamps[cell + 16] === version && life[cell + 16]! >= threshold) count++;
-      if (stamps[cell + 17] === version && life[cell + 17]! >= threshold) count++;
-      return count;
-    }
-    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-      if (dx === 0 && dy === 0) continue;
-      const neighbor = this.neighborCell(cell, dx, dy);
-      if (neighbor >= 0 && stamps[neighbor] === version && life[neighbor]! >= threshold) count++;
-    }
-    return count;
-  }
-
   /**
    * Las 8 vecinas de `cell` en el orden de `buildTopology` (dy −1‥1, dx −1‥1), como celdas o `-1`. Con
    * `masked = false` (sólo diagnóstico) se omite la máscara de presencia y se devuelve cualquier ranura

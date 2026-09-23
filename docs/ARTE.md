@@ -77,6 +77,20 @@ familia (eso volvería a inflar la paleta hacia el degradado continuo del diagn�
   el tono base o `LUZ` tramado sobre él; la cara inferior-derecha usa el tono base o `SOMBRA`
   tramado. Consistente en todo sprite nuevo, para que la escena entera lea una sola fuente de luz.
 
+## Nota técnica: fases del tramado
+
+`bakeTileBase` toma varias decisiones tramadas por píxel (qué esquina gana,
+suelo o cobertura, sombreado…) y cada una necesita su propio desplazamiento
+(`phase`) sobre la matriz de Bayer 8×8; si no, dos decisiones distintas caen
+en el mismo umbral y quedan correlacionadas sin querer (un bug real de esta
+misma corrección: un desplazamiento lineal `(x + fase·k) & 7` repite cada 8
+fases porque ésa es la mayor cota del período de cualquier paso coprimo con
+8, así que la fase 8 caía exactamente sobre la fase 0). `bayerThreshold` usa
+en cambio un desplazamiento por hash determinista de la fase, verificado sin
+colisiones para las fases 0–31. Quien añada una decisión tramada más debe
+usar una fase nueva (no reciclar una ya usada) y, si se acerca a ese límite,
+volver a verificar que no haya colisiones.
+
 ## Qué cambia y qué no
 
 - `src/world`, `src/server` y la carta de S e I no se tocan por esto: es puramente el cliente

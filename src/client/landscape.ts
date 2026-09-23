@@ -19,6 +19,7 @@ import type { Capability } from '../shared/technology.js';
 import { decidirModo, rendererProfile, type Modo } from './modo.js';
 import { dibujarCalor, type Capa, type RangoCalor } from './calor.js';
 import { claveRegion } from './regiones.js';
+import { PRADERA, BOSQUE, HUMEDAL, DESIERTO, MONTANA, SUELO, SOMBRA, LUZ } from './paleta.js';
 
 /* ------------------------------------------------------------------ */
 /* Tipos públicos                                                      */
@@ -62,7 +63,11 @@ interface RGB {
 }
 
 interface GroundMaterial {
-  soil: RGB; leaf: RGB; cover: number; moisture: number; traffic: number;
+  /** Suelo desnudo: tramado entre estos dos swatches de paleta, nunca mezclado. */
+  soilBase: RGB; soilShade: RGB; soilT: number;
+  /** Cobertura viva: ídem, entre el tono vivo y el seco/sombreado. */
+  leafBase: RGB; leafShade: RGB; leafT: number;
+  cover: number; moisture: number; traffic: number;
 }
 
 /** The raster and its cache key must observe the same received-state buckets. */
@@ -188,6 +193,31 @@ const P = {
   rule: rgb(185, 173, 147),
 } as const;
 
+/** Hex de `paleta.ts` (siempre válido) a RGB interno; sin fallback real. */
+function swatch(hex: string): RGB {
+  return parseColor(hex, BLACK);
+}
+
+const SOMBRA_RGB = swatch(SOMBRA);
+const LUZ_RGB = swatch(LUZ);
+
+interface GroundSwatches {
+  soilBase: RGB; soilShade: RGB; leafBase: RGB; leafShade: RGB;
+}
+
+/**
+ * Suelo y cobertura por bioma, sólo con colores de `paleta.ts`. `bakeTileBase`
+ * trama entre `*Base` y `*Shade` según fertilidad/humedad; nunca los mezcla.
+ */
+const GROUND_SWATCHES: Record<string, GroundSwatches> = {
+  desert: { soilBase: swatch(DESIERTO.base), soilShade: swatch(DESIERTO.sombra), leafBase: swatch(PRADERA.seca), leafShade: swatch(DESIERTO.sombra) },
+  mountain: { soilBase: swatch(MONTANA.base), soilShade: swatch(MONTANA.sombra), leafBase: swatch(PRADERA.seca), leafShade: swatch(BOSQUE.sombra) },
+  wetland: { soilBase: swatch(HUMEDAL.sombra), soilShade: swatch(SUELO.cultivo), leafBase: swatch(HUMEDAL.base), leafShade: swatch(BOSQUE.base) },
+  forest: { soilBase: swatch(SUELO.pisado), soilShade: swatch(BOSQUE.sombra), leafBase: swatch(BOSQUE.base), leafShade: swatch(BOSQUE.sombra) },
+  grassland: { soilBase: swatch(SUELO.pisado), soilShade: swatch(SUELO.arado), leafBase: swatch(PRADERA.base), leafShade: swatch(PRADERA.seca) },
+};
+const DEFAULT_GROUND_SWATCHES = GROUND_SWATCHES.grassland!;
+
 interface Tint {
   color: string;
   alpha: number;
@@ -218,6 +248,74 @@ function materialNoise(x: number, y: number, scale: number, salt: number): numbe
   const top = rnd(gx, gy, salt) * (1 - u) + rnd(gx + 1, gy, salt) * u;
   const bottom = rnd(gx, gy + 1, salt) * (1 - u) + rnd(gx + 1, gy + 1, salt) * u;
   return top * (1 - v) + bottom * v;
+}
+
+/* ------------------------------------------------------------------ */
+/* Tramado ordenado (Bayer): convierte una fracción continua en una    */
+/* elección discreta entre dos colores de la paleta. Nunca se mezclan  */
+/* canales; el terreno pinta sólo con los swatches, tramados por       */
+/* posición de mundo (embaldosable, sin costuras entre chunks).        */
+/* ------------------------------------------------------------------ */
+
+// Matriz de Bayer 8×8 clásica (64 niveles), en orden de fila.
+const BAYER8 = [
+  0, 32, 8, 40, 2, 34, 10, 42,
+  48, 16, 56, 24, 50, 18, 58, 26,
+  12, 44, 4, 36, 14, 46, 6, 38,
+  60, 28, 52, 20, 62, 30, 54, 22,
+  3, 35, 11, 43, 1, 33, 9, 41,
+  51, 19, 59, 27, 49, 17, 57, 25,
+  15, 47, 7, 39, 13, 45, 5, 37,
+  63, 31, 55, 23, 61, 29, 53, 21,
+];
+
+/**
+ * Umbral de tramado en (0,1) para el píxel de mundo `(x, y)`. `phase`
+ * desplaza qué ventana de la matriz cae en cada píxel, para que varias
+ * decisiones tramadas en el mismo píxel (suelo, cobertura, desgaste…) no
+ * queden todas correlacionadas con el mismo patrón.
+ */
+function bayerThreshold(x: number, y: number, phase: number): number {
+  // A linear stride mod 8 repeats every 8 phases (8 = period of any stride
+  // coprime with 8), which would silently alias unrelated decisions onto the
+  // very same threshold. A hashed offset avoids that; the salt below was
+  // checked to give phases 0..31 distinct (dx, dy) offsets (see
+  // docs/ARTE.md), well past the handful this file actually uses.
+  const h = hash3(phase, 0, 15050);
+  const bx = (x + (h & 7)) & 7;
+  const by = (y + ((h >>> 3) & 7)) & 7;
+  return (BAYER8[by * 8 + bx]! + 0.5) / 64;
+}
+
+/** Elige `hi` cuando `t` supera el umbral tramado en `(x, y)`; si no, `lo`. Nunca mezcla. */
+function dither(x: number, y: number, phase: number, t: number, lo: RGB, hi: RGB): RGB {
+  return t > bayerThreshold(x, y, phase) ? hi : lo;
+}
+
+/**
+ * Tramado bilineal separable: como una interpolación bilineal de libro de
+ * texto, pero cada paso ELIGE uno de los dos colores en vez de promediarlos.
+ * El resultado sigue siendo siempre uno de `a`, `b`, `c` o `d` — jamás un
+ * tono intermedio inventado.
+ */
+function ditherQuad(x: number, y: number, phase: number, u: number, v: number, a: RGB, b: RGB, c: RGB, d: RGB): RGB {
+  const top = dither(x, y, phase, u, a, b);
+  const bottom = dither(x, y, phase + 1, u, c, d);
+  return dither(x, y, phase + 2, v, top, bottom);
+}
+
+/**
+ * Ancho de franja de playa (2..4 px) por ondulación de baja frecuencia,
+ * correlada entre columnas/filas vecinas, con el paso final tramado por
+ * Bayer. Reemplaza un salto aleatorio independiente por columna (una
+ * escalera de ruido) por una orilla con intención, con la firma de
+ * `dither`/`materialNoise`: determinista y embaldosable en mundo.
+ */
+function coastWidth(wx: number, wy: number, salt: number): number {
+  const wave = materialNoise(wx, wy, 6, salt) * 2; // continuo en [0, 2)
+  const base = 2 + Math.floor(wave);
+  const frac = wave - Math.floor(wave);
+  return frac > bayerThreshold(wx, wy, 20) ? base + 1 : base;
 }
 
 function clamp(v: number, lo: number, hi: number): number {
@@ -811,13 +909,14 @@ export class Landscape {
     const cached = this.groundMaterials.get(tile); if (cached) return cached;
     const fertility = groundValue(tile.fertility ?? .5), moisture = groundValue(tile.moisture);
     const cultivation = groundValue(tile.cultivation ?? 0), traffic = groundValue(tile.traffic ?? 0);
-    const mineral = tile.biome === 'desert' ? P.sand : tile.biome === 'mountain' ? P.stoneShade : P.soilLight;
-    const humus = tile.biome === 'wetland' ? rgb(83, 88, 65) : rgb(103, 83, 57);
-    const green = tile.biome === 'wetland' ? rgb(78, 112, 93)
-      : tile.biome === 'forest' ? rgb(88, 119, 70) : rgb(126, 151, 88);
-    const material = {
-      soil: darken(mix(mineral, humus, fertility * .72), moisture * .2),
-      leaf: mix(green, rgb(180, 161, 100), (1 - moisture) * .6),
+    const ground = (tile.biome && GROUND_SWATCHES[tile.biome]) ?? DEFAULT_GROUND_SWATCHES;
+    const material: GroundMaterial = {
+      soilBase: ground.soilBase, soilShade: ground.soilShade,
+      // Más fértil y más húmedo → más swatch "shade" (tierra rica, oscurecida).
+      soilT: clamp01(fertility * .75 + moisture * .25),
+      leafBase: ground.leafBase, leafShade: ground.leafShade,
+      // Más seco → más swatch "shade" (cobertura seca/mustia), nunca al revés.
+      leafT: clamp01((1 - moisture) * .85),
       cover: groundValue(tile.vegetation) * (1 - cultivation * .6) * (1 - traffic * .88) * (tile.terrain === 'shelter' ? .25 : 1),
       moisture, traffic,
     };
@@ -874,29 +973,36 @@ export class Landscape {
       const rooted = owner.cover === 0 ? 0 : smooth((cover - patch * .55 + .02) / .52);
       const traffic = owner.traffic > 0 ? a.traffic * wa + b.traffic * wb + c.traffic * wc + d.traffic * wd : 0;
       const wear = smooth((traffic - patch * .16) / .85);
-      const soilR = a.soil.r * wa + b.soil.r * wb + c.soil.r * wc + d.soil.r * wd;
-      const soilG = a.soil.g * wa + b.soil.g * wb + c.soil.g * wc + d.soil.g * wd;
-      const soilB = a.soil.b * wa + b.soil.b * wb + c.soil.b * wc + d.soil.b * wd;
-      const leafR = a.leaf.r * wa + b.leaf.r * wb + c.leaf.r * wc + d.leaf.r * wd;
-      const leafG = a.leaf.g * wa + b.leaf.g * wb + c.leaf.g * wc + d.leaf.g * wd;
-      const leafB = a.leaf.b * wa + b.leaf.b * wb + c.leaf.b * wc + d.leaf.b * wd;
       const pigment = rooted * (1 - wear * .65);
-      // A compacted surface replaces material; no centre node, edge, footstep or
-      // claimed route is manufactured from the scalar traffic field.
-      const grainSeed = rnd(wx, wy, 358);
-      const grain = (grainSeed - .5) * (1 - wear) * 4;
+      // Cada esquina resuelve primero su propio swatch (tramado base/shade por
+      // fertilidad y humedad); recién entonces se elige entre esquinas. Ningún
+      // paso mezcla canales: siempre se elige uno de los colores de la paleta.
+      const soilA = dither(wx, wy, 0, a.soilT, a.soilBase, a.soilShade);
+      const soilB = dither(wx, wy, 1, b.soilT, b.soilBase, b.soilShade);
+      const soilC = dither(wx, wy, 2, c.soilT, c.soilBase, c.soilShade);
+      const soilD = dither(wx, wy, 3, d.soilT, d.soilBase, d.soilShade);
+      const leafA = dither(wx, wy, 4, a.leafT, a.leafBase, a.leafShade);
+      const leafB = dither(wx, wy, 5, b.leafT, b.leafBase, b.leafShade);
+      const leafC = dither(wx, wy, 6, c.leafT, c.leafBase, c.leafShade);
+      const leafD = dither(wx, wy, 7, d.leafT, d.leafBase, d.leafShade);
+      const soil = ditherQuad(wx, wy, 8, u, v, soilA, soilB, soilC, soilD);
+      const leaf = ditherQuad(wx, wy, 11, u, v, leafA, leafB, leafC, leafD);
+      // El desgaste ya se lee en `pigment` (más tránsito → menos hoja, más
+      // suelo desnudo, arriba): no hace falta una segunda mota de luz sobre
+      // un corredor entero muy trillado, que sólo repetiría en cuadrícula el
+      // mismo tramado del suelo/hoja y volvería a leerse como ruido.
+      let color = dither(wx, wy, 14, pigment, soil, leaf);
       // Sparse fibres and granules live on a world lattice incommensurate with
-      // cells. They symbolize existing cover/soil, never countable extra plants.
+      // cells. They symbolize existing cover/soil, never countable extra plants:
+      // a solid palette pixel, never a brightness nudge.
+      const grainSeed = rnd(wx, wy, 358);
       const fx = Math.floor(wx / 5), fy = Math.floor(wy / 7);
       const tx = fx * 5 + Math.floor(rnd(fx, fy, 364) * 5), ty = fy * 7 + 2 + Math.floor(rnd(fx, fy, 365) * 4);
       const fibre = owner.cover > 0 && rooted > .6 && rnd(fx, fy, 366) < cover * .8 && wx === tx && wy >= ty - 1 && wy <= ty;
-      const granule = rooted < .35 && grainSeed < .035 ? (owner.moisture > .5 ? -8 : 8) : 0;
-      const relief = Math.round((fine - .5) * 3) * 3 + (broad - .5) * 6 + grain + granule + (fibre ? 15 : 0);
+      if (fibre) color = leaf;
+      else if (rooted < .35 && grainSeed < .012) color = owner.moisture > .5 ? SOMBRA_RGB : LUZ_RGB;
       const offset = (by * ART + bx) * 4;
-      data[offset] = soilR + (leafR - soilR) * pigment + wear * 9 + relief;
-      data[offset + 1] = soilG + (leafG - soilG) * pigment + wear * 6 + relief;
-      data[offset + 2] = soilB + (leafB - soilB) * pigment + wear * 3 + relief;
-      data[offset + 3] = 255;
+      data[offset] = color.r; data[offset + 1] = color.g; data[offset + 2] = color.b; data[offset + 3] = 255;
     }
     this.groundStampContext.putImageData(this.groundPixels, 0, 0);
     g.drawImage(this.groundStamp, ox, oy);
@@ -989,24 +1095,14 @@ export class Landscape {
     const west = this.terrainAt(x - 1, y) === 'water';
     const east = this.terrainAt(x + 1, y) === 'water';
 
+    // Ancho de playa: una ondulación de baja frecuencia y correlada entre
+    // columnas vecinas (nunca un salto aleatorio independiente por columna,
+    // que es lo que lee como una escalera) y el resto tramado con Bayer.
     for (let i = 0; i < ART; i++) {
-      const j = 2 + Math.floor(rnd(x * 31 + i, y, 610) * 3); // borde irregular, no una regla
-      if (north) {
-        px(g, ox + i, oy, 1, j, sand);
-        px(g, ox + i, oy + j - 1, 1, 1, sandEdge);
-      }
-      if (south) {
-        px(g, ox + i, oy + ART - j, 1, j, sand);
-        px(g, ox + i, oy + ART - j, 1, 1, sandEdge);
-      }
-      if (west) {
-        px(g, ox, oy + i, j, 1, sand);
-        px(g, ox + j - 1, oy + i, 1, 1, sandEdge);
-      }
-      if (east) {
-        px(g, ox + ART - j, oy + i, j, 1, sand);
-        px(g, ox + ART - j, oy + i, 1, 1, sandEdge);
-      }
+      if (north) { const j = coastWidth(ox + i, oy, 610); px(g, ox + i, oy, 1, j, sand); px(g, ox + i, oy + j - 1, 1, 1, sandEdge); }
+      if (south) { const j = coastWidth(ox + i, oy + ART, 630); px(g, ox + i, oy + ART - j, 1, j, sand); px(g, ox + i, oy + ART - j, 1, 1, sandEdge); }
+      if (west) { const j = coastWidth(ox, oy + i, 650); px(g, ox, oy + i, j, 1, sand); px(g, ox + j - 1, oy + i, 1, 1, sandEdge); }
+      if (east) { const j = coastWidth(ox + ART, oy + i, 670); px(g, ox + ART - j, oy + i, j, 1, sand); px(g, ox + ART - j, oy + i, 1, 1, sandEdge); }
     }
     // Esquinas diagonales, para que la playa no tenga muescas.
     if (!north && !west && this.terrainAt(x - 1, y - 1) === 'water') px(g, ox, oy, 3, 3, sand);

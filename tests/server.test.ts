@@ -7,6 +7,7 @@ import { freePort } from './lib/net.js';
 import { spawn, spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { once } from 'node:events';
+import { connect, type Socket } from 'node:net';
 import { WebSocket } from 'ws';
 import { Store } from '../src/server/store.js';
 import { createApp, parseGesture, loginKey, trustedProxiesFromEnv, rate } from '../src/server/app.js';
@@ -399,7 +400,7 @@ test('el planificador cita cada paso con compensación de deriva y el cierre no 
   await new Promise<void>(resolve=>setTimeout(resolve,80));
   assert.equal(f.app.world.tick,stopped,'tras cerrar no se planifica ningún paso más');
 });
-test('PERF3: tras un paso que se pasa del intervalo el planificador cita el siguiente ya, sin ráfagas ni tickMs de más',async()=>{
+test('PERF3: tras un paso que se pasa del intervalo, sin E/S en curso, el planificador cita el siguiente ya, sin ráfagas',async()=>{
   // Reloj inyectado y citas grabadas: cada `setTimeout` del planificador queda aquí y se dispara a mano, así
   // que la prueba lee el retraso exacto que pidió. Solo mientras duran las llamadas síncronas de abajo.
   const store=new Store(':memory:');
@@ -431,6 +432,74 @@ test('PERF3: tras un paso que se pasa del intervalo el planificador cita el sigu
     assert.equal(app.world.tick,tick+2,'dos pasos lentos seguidos son dos callbacks, uno por paso');
   }finally{
     globalThis.setTimeout=setTimeoutReal;
+    await app?.close();store.close();
+  }
+});
+test('PERF3: tras un paso largo el siguiente cede a la E/S en curso, y como mucho tickMs',async()=>{
+  // Verificación PERF3: con pasos seguidos, a la E/S le quedaba una vuelta del bucle por paso y lo que necesita
+  // varias (gzip, deflate, el cuerpo de un login) tardaba varios pasos. Aquí un login real queda a medias (su
+  // cuerpo llega en dos partes) y las citas del planificador se disparan a mano, como en la prueba anterior.
+  const port=await freePort(),origin=`http://127.0.0.1:${port}`,store=new Store(':memory:');
+  let reloj=1000,duracion=0;
+  const citas:{fn:()=>void;ms:number}[]=[];
+  const setTimeoutReal=globalThis.setTimeout;
+  globalThis.setTimeout=((fn:()=>void,ms?:number)=>{
+    citas.push({fn,ms:ms??0});return {unref(){return this;},ref(){return this;}};
+  }) as unknown as typeof setTimeout;
+  let app:ReturnType<typeof createApp>|undefined;
+  const sockets:Socket[]=[];
+  try{
+    app=createApp({store,password,origin,tickMs:100,seed:42,monotonicNow:()=>reloj});
+    app.server.listen(port,'127.0.0.1');await once(app.server,'listening');
+    const guardar=store.save.bind(store);
+    store.save=(...args)=>{reloj+=duracion;return guardar(...args);};
+    const disparar=(en:number,dura=0)=>{
+      reloj=en;duracion=dura;
+      const cita=citas.shift()!;assert.equal(citas.length,0);
+      cita.fn();
+      assert.equal(citas.length,1,'cada callback cita exactamente uno');
+      return citas[0]!.ms;
+    };
+    /** Un login con la mitad del cuerpo: el servidor ya lo atiende y espera el resto. Devuelve cómo terminarlo. */
+    const aMedias=async()=>{
+      const socket=connect(port,'127.0.0.1');sockets.push(socket);await once(socket,'connect');
+      socket.resume(); // se lee y se descarta la respuesta: sin eso el cliente nunca ve el fin ni el cierre
+      const cuerpo=JSON.stringify({password:'no-es-la-contrasena'}),atendida=once(app!.server,'request');
+      socket.write(`POST /api/login HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nOrigin: ${origin}\r\nContent-Type: application/json\r\n`
+        +`Content-Length: ${cuerpo.length}\r\nConnection: close\r\n\r\n${cuerpo.slice(0,5)}`);
+      await atendida;
+      return async()=>{const cerrada=once(socket,'close');socket.write(cuerpo.slice(5));await cerrada;};
+    };
+    assert.deepEqual(citas.map(c=>c.ms),[100]);
+    const tick=app.world.tick;
+    assert.equal(disparar(1100,250),0,'el paso llegó tarde y nada espera: el siguiente va ya');
+    const terminar=await aMedias();
+    assert.equal(disparar(1350),1,'con una solicitud a medias no hay paso: se vuelve a mirar en 1 ms');
+    assert.equal(disparar(1400),1);
+    assert.equal(app.world.tick,tick+1,'mientras cede, ningún paso');
+    await terminar();
+    assert.equal(disparar(1410,20),20,'respondida la solicitud, el paso va y la cita vuelve a su cadencia (1450)');
+    assert.equal(app.world.tick,tick+2);
+    // Una conexión recién aceptada aún no trae solicitud (libuv la lee una vuelta después) y también cuenta.
+    assert.equal(disparar(1450,300),0);
+    const nueva=connect(port,'127.0.0.1');sockets.push(nueva);nueva.resume();
+    await Promise.all([once(nueva,'connect'),once(app.server,'connection')]);
+    assert.equal(disparar(1750),1,'con una conexión sin solicitud todavía, se cede');
+    assert.equal(app.world.tick,tick+3);
+    const cerrada=once(nueva,'close');
+    nueva.write(`GET /health HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nConnection: close\r\n\r\n`);await cerrada;
+    assert.equal(disparar(1760,20),70,'atendida, el paso va');
+    assert.equal(app.world.tick,tick+4);
+    // El tope: tras otro paso largo nunca cede más de `tickMs`, lo que la base esperaba siempre.
+    assert.equal(disparar(1850,300),0);
+    await aMedias();
+    assert.equal(disparar(2150),1);assert.equal(disparar(2249),1);
+    assert.equal(app.world.tick,tick+5);
+    disparar(2250);
+    assert.equal(app.world.tick,tick+6,'a los tickMs de ceder, el paso va aunque la solicitud siga a medias');
+  }finally{
+    globalThis.setTimeout=setTimeoutReal;
+    for(const socket of sockets)socket.destroy();
     await app?.close();store.close();
   }
 });

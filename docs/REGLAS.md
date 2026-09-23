@@ -588,10 +588,35 @@ paso porque `syncFauna` hace `delete tile.species`, y en el sitio esas teselas q
 72 ms, sin tendencia. Reconstruir solo las teselas en cada paso costaba 23 ms p50.
 
 *Planificador.* Tras un paso más largo que `tickMs`, el siguiente se citaba `tickMs` después: con pasos de
-~233 ms, 100 ms ociosos por paso. Ahora se cita ya (`setTimeout` 0). Sigue habiendo un solo paso por
-callback, así que la E/S corre entre pasos, el retraso no se recupera en ráfaga y, a tiempo, la cita compensa
-la deriva. Con la torre tranquila casi ningún paso pasa de 100 ms y el cambio apenas se nota. Con carga
-cuenta: de 5,0 a 5,7 pasos/s.
+~233 ms, 100 ms ociosos por paso. La primera versión de PERF3 lo citaba ya (`setTimeout` 0): con carga, de 5,0
+a 5,7 pasos/s. Pero la verificación encontró que así, con pasos seguidos, a la E/S le queda **una sola vuelta
+del bucle por paso**, y lo que necesita varias idas y vueltas al threadpool o al poll avanza una por paso: el
+gzip de `/api/world` (trozos de 16 KiB), el deflate de cada trozo WS (y el pong, que `ws` encola detrás) y el
+cuerpo de un login. Con pasos de 250 ms el gzip pasaba de ~0,1 a 2,6 s y el pong a 3,6 s; con pasos de 1,1 s
+el gzip tardaba 12 s, más que el aborto de 10 s del cliente, y la reconexión fallaba.
+
+Ahora, tras un paso que se pasó del intervalo, el siguiente **cede a la E/S en curso** y como mucho `tickMs`
+(lo que la base esperaba siempre): mientras haya una solicitud HTTP sin responder del todo, una conexión
+aceptada que aún no trajo su solicitud (libuv acepta en una vuelta y lee en la siguiente) o un socket WS con
+`bufferedAmount` (que cuenta lo que `ws` aún comprime), mira otra vez cada milisegundo. Sin E/S, el paso va
+ya. Nunca hay ráfaga: un paso por callback, y a tiempo la cita compensa la deriva, como antes.
+
+Medido con `scripts/perf/es-servidor.ts` (servidor real, pasos alargados B ms, semilla 42) y las sondas en otro
+proceso, `es-sonda.ts` y `es-cliente.ts`, con los tres árboles corriendo a la vez. Las latencias son p50:
+
+| | Base `0ea1514` | PERF3 sin ceder | PERF3 |
+|---|---|---|---|
+| pasos/s, B 250, sin clientes | 2,83 | 3,93 | 3,93 |
+| pasos/s, B 250, con sondas | 2,69 | 3,74 | 3,44 |
+| B 250, cadena HTTP a 90 ms de RTT: gzip · login | 304 · 270 ms | 2 278 · 203 ms | 252 · 200 ms |
+| B 250: pong · intervalo entre `state` | 120 · 1 864 ms | 2 745 · 2 995 ms | 272 · 1 471 ms |
+| B 800, cadena HTTP a 90 ms: gzip | 866 ms | 7 181 ms | 774 ms |
+| B 800: pong · intervalo entre `state` | 664 · 4 580 ms | 9 522 · 9 772 ms | 634 · 4 192 ms |
+| B 1 100 / 2 500: `GET /api/world` del cliente | 970 / 1 831 ms | 5 584 / 9 284 ms | 971 / 1 755 ms |
+
+Una cadena de solicitudes desde la misma máquina (RTT 0) sí va mejor en la base: cabe entera en sus 100 ms
+ociosos (gzip 41 ms con B 250), y aquí cada solicitud espera el paso en curso (292 ms). Por el dominio la
+siguiente solicitud llega un RTT después y ese hueco ya no la recoge: con 90 ms, PERF3 responde antes que la base.
 
 **Lo que queda.** El p95 sigue por encima de los 50 ms del gobernador: 63–67 ms con la torre tranquila y
 167–191 ms con carga. Con 150 habitantes el techo seguirá sin dejar crecer. Ahora lo fijan los pasos más caros

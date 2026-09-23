@@ -1,7 +1,8 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { readFileSync, statSync } from 'node:fs';
 import { resolve, extname, sep } from 'node:path';
-import { isIP } from 'node:net';
+import { isIP, type Socket } from 'node:net';
+import type { Duplex } from 'node:stream';
 import { gzip } from 'node:zlib';
 import { promisify } from 'node:util';
 import { WebSocketServer, WebSocket, type RawData } from 'ws';
@@ -341,6 +342,19 @@ export function createApp(options: AppOptions) {
     for (const [a, b] of ocupado) total += Math.max(0, Math.min(b, hasta) - Math.max(a, desde));
     return total;
   }
+  /** Solicitudes HTTP con la respuesta sin terminar (incluida la lectura de su cuerpo). */
+  let solicitudesEnCurso = 0;
+  /** Conexiones aceptadas que aún no trajeron su primera solicitud (o su `upgrade`): libuv acepta en una vuelta
+   * del bucle y lee en la siguiente, así que entre las dos todavía no hay solicitud que contar. Una que nunca
+   * habla la cierra `headersTimeout`; mientras tanto el planificador cede, como mucho `tickMs` por paso. */
+  const conexionesNuevas = new Set<Duplex>();
+  /** Queda E/S que necesita al hilo principal: una conexión o una solicitud HTTP sin responder del todo, o un
+   * socket WS con bytes sin entregar al kernel (`bufferedAmount` cuenta lo que `ws` aún está comprimiendo). */
+  function ioEnCurso(): boolean {
+    if (solicitudesEnCurso > 0 || conexionesNuevas.size > 0) return true;
+    for (const socket of clients.keys()) if (socket.bufferedAmount > 0) return true;
+    return false;
+  }
   function emitir(socket: WebSocket, text: string, compress: boolean) {
     socket.send(text, { compress: compress || compresion === 'siempre' });
     const client = clients.get(socket); if (client) client.lastSentAt = Date.now();
@@ -576,6 +590,8 @@ export function createApp(options: AppOptions) {
     }
   }
   const server = createServer(async (req, res) => {
+    // Hasta que la respuesta termina (o se corta): el planificador cede a ella tras un paso largo.
+    solicitudesEnCurso++; res.once('close', () => { solicitudesEnCurso--; }); conexionesNuevas.delete(req.socket);
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'no-referrer');
@@ -646,7 +662,11 @@ export function createApp(options: AppOptions) {
   });
   server.requestTimeout = 10_000;
   server.headersTimeout = 10_000;
+  server.on('connection', (socket: Socket) => {
+    conexionesNuevas.add(socket); socket.once('close', () => conexionesNuevas.delete(socket));
+  });
   server.on('upgrade', (req, socket, head) => {
+    conexionesNuevas.delete(socket);
     try {
       checkOrigin(req);
       if (req.headers.host !== new URL(origin).host) throw new HttpError(403, 'Ruta no autorizada.');
@@ -714,22 +734,30 @@ export function createApp(options: AppOptions) {
   const tickMs = options.tickMs ?? 100;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let next = monotonicNow() + tickMs;
-  function schedule() {
-    timer = setTimeout(() => {
-      next += tickMs;
-      stepOnce();
-      // El corte se juzga DESPUÉS del paso. Un paso que duró más que el intervalo ya llega tarde a
-      // su cita: el siguiente se cita YA (setTimeout 0), no `tickMs` después (PERF3: con pasos de
-      // ~233 ms eso añadía 100 ms ociosos a cada uno y el mundo público iba a 3 pasos/s y no a ~4).
-      // Nunca una ráfaga: un paso por callback, así la E/S (vistas, gestos, acuses) corre entre dos
-      // pasos, y el retraso acumulado no se recupera: el paso siguiente cita otra vez `tickMs` después.
-      const now = monotonicNow();
-      if (next < now) next = now;
-      if (!stopped) schedule();
-    }, Math.max(0, next - monotonicNow()));
-    timer.unref();
+  /** Tras un paso que se pasó del intervalo: hasta cuándo puede esperar el siguiente a que acabe la E/S. */
+  let cederHasta: number | null = null;
+  function citar(ms: number) { timer = setTimeout(tic, ms); timer.unref(); }
+  function tic() {
+    if (stopped) return;
+    // Ceder a la E/S en curso: se vuelve a mirar cada milisegundo; entretanto el bucle atiende el poll.
+    if (cederHasta !== null && monotonicNow() < cederHasta && ioEnCurso()) { citar(1); return; }
+    cederHasta = null;
+    next += tickMs;
+    stepOnce();
+    // El corte se juzga DESPUÉS del paso. Un paso que duró más que el intervalo ya llega tarde a su cita, y
+    // el siguiente no espera `tickMs` ociosos (PERF3: con pasos de ~233 ms eran 100 ms por paso y el mundo
+    // público iba a 3 pasos/s): espera solo a que acabe la E/S en curso (`ioEnCurso`), y como mucho
+    // `tickMs`, lo que esperaba antes. Sin esa espera, con pasos seguidos a la E/S le quedaba una vuelta
+    // del bucle por paso, y el gzip de `/api/world`, el deflate de cada trozo WS (con el pong, que `ws`
+    // encola detrás) o el cuerpo de un login necesitan varias idas y vueltas al threadpool o al poll: con
+    // pasos de 250 ms el gzip pasó de ~0,1 a 2,6 s, y con pasos de 1,1 s a 12 s, más que el aborto de 10 s
+    // del cliente (verificación PERF3, 2026-09-23). Nunca una ráfaga: un paso por callback, y el retraso
+    // acumulado no se recupera: a tiempo, la cita compensa la deriva.
+    const now = monotonicNow();
+    if (next < now) { next = now; cederHasta = now + tickMs; }
+    if (!stopped) citar(Math.max(0, next - monotonicNow()));
   }
-  if (!options.manual) schedule();
+  if (!options.manual) citar(Math.max(0, next - monotonicNow()));
   const heartbeat = setInterval(() => {
     for (const [socket, client] of clients) {
       if (!client.alive || !store.sessionValid(client.hash)) { socket.terminate(); continue; }

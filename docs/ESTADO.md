@@ -16,9 +16,9 @@ el contrato.
 | Protocolo | `PROTOCOL_VERSION` 10 |
 | SQLite | `user_version` 5 (instantáneas paginadas) |
 | Máquina | **Portátil de Steven** (i7-12700H, servicio `atlas-publico.service`, 100.64.0.2:3000 por tailnet) desde el 23-09 11:17 -05; el dominio llega por el puente TCP `atlas-puente.service` de la torre (100.64.0.1:3000 → 100.64.0.2:3000). La torre queda solo como laboratorio |
-| Mundo | V10, semilla 51926, identidad `63033163-3a01-45cb-829a-004a0dc0ce65`, creado desde un directorio inicialmente vacío en la torre y mudado al portátil con su estado final (tick 322 800, 187 habitantes; respaldo `world-20260923-1114`, mismo sha256 a ambos lados): `~/atlas-lab/mundos/v10-20260922` del portátil. La copia de la torre (`/datos/workspaces/personal/AtlasParaIsa-worlds/v10-20260922`) queda congelada en ese tick y su servicio deshabilitado |
+| Mundo | V10, semilla 51926, identidad `63033163-3a01-45cb-829a-004a0dc0ce65`, creado desde un directorio inicialmente vacío en la torre y mudado al portátil con su estado final (tick 322 800, 187 habitantes; respaldo `world-20260923-1114`, mismo sha256 a ambos lados): `~/atlas-lab/mundos/v10-20260922` del portátil. La copia de la torre (`/datos/workspaces/personal/AtlasParaIsa-anexo/mundos/v10-20260922`) queda congelada en ese tick y su servicio deshabilitado |
 | Parámetros persistidos | `persistencia.cadaTicks=100`, `gobernador.politica=techo`, `gobernador.presupuestoMs=5000` desde el 23-09 10:46 -05 (antes 50: el techo solo se fija si el p95 del paso pasa de 5 s; el mundo crece y se vuelve más lento a medida que crece) y el paquete de reglas 10 (lista completa en el contrato) |
-| Respaldos | Portátil: `~/atlas-lab/respaldos` (timer horario `atlas-respaldo.timer` del portátil). Torre, hasta la mudanza: `/datos/workspaces/personal/AtlasParaIsa-publications/20260922-v10/backups` |
+| Respaldos | Portátil: `~/atlas-lab/respaldos` (timer horario `atlas-respaldo.timer` del portátil). Torre, hasta la mudanza: `/datos/workspaces/personal/AtlasParaIsa-anexo/publicaciones/20260922-v10/backups` |
 | Servicios | Portátil: `atlas-publico.service` (`~/atlas-lab/publico.sh`, drop-in `prioridad.conf`: CPUWeight/IOWeight 10000, P-cores 0-11) y `atlas-respaldo.timer`, con linger. Torre: `atlas-puente.service` (puente TCP, `scripts/systemd/portatil/`); `atlas-servidor.service` y `atlas-respaldo.timer` deshabilitados |
 | Gate | `scripts/deploy-check.sh 0ea1514` verde (build y smoke); suite 1433/1444 (7 omitidos a propósito, 4 cancelados por carga y verdes aislados 40/40, 0 fallos); verificación independiente de la poda por Codex y Grok (un alto corregido en `e1639d7`) |
 | Contrato | [publication-v10.json](evidencia-2026-09-22/publication-v10.json) (mundo), [publication-v10-pub2.json](evidencia-2026-09-23/publication-v10-pub2.json), [publication-v10-pub3.json](evidencia-2026-09-23/publication-v10-pub3.json) (reinicios del 23-09) y [publication-v10-portatil.json](evidencia-2026-09-23/publication-v10-portatil.json) (mudanza al portátil) |
@@ -29,7 +29,7 @@ por hardware ([revisión de la noche](REVISION-NOCHE-2026-09-22.md)).
 ## Anteriores, conservados
 
 - V7 (`3dd615e`, reglas 7, protocolo 9, SQLite 4): mundo en
-  `/datos/workspaces/personal/AtlasParaIsa-worlds/v7-20260922`, intacto; se extinguió por la política
+  `/datos/workspaces/personal/AtlasParaIsa-anexo/mundos/v7-20260922`, intacto; se extinguió por la política
   `apagar` del gobernador. Contrato: [publication.json](evidencia-2026-09-22/publication.json).
 - Publicaciones anteriores a V7: registros históricos en [EVIDENCIA](EVIDENCIA.md).
 

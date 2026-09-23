@@ -38,6 +38,8 @@
  *     los fundadores). Si falta la primera se usa la segunda como COTA: generacionesVivas − 1 ≤
  *     mortales ≤ generacionesVivas, así que cumple solo si generacionesVivas − 1 ≥ el mínimo, falla si
  *     generacionesVivas < el mínimo y, entre medias, «desconocido» (nunca aprobado por la inflación).
+ *     La lista debe ser de enteros ≥ 0 DISTINTOS (metrics.ts escribe un Set ordenado): se cuenta un Set, y
+ *     basura (no lista, no enteros ≥ 0) o repetidas ([2, 2, 2] no son 3 generaciones) ⇒ «desconocido».
  *  C4 cooperación variada — ≥ 2 tipos [--coop-tipos-min], cada uno con ≥ 10 % [--coop-fraccion-min]
  *     de los actos tipificados de la ventana Y ≥ 5 actos en ella [--coop-actos-min]. Tipos = claves de
  *     `cooperacionAcumuladaPorTipo` (teaching, trade, constructionHelp y, con los instrumentos de
@@ -49,7 +51,9 @@
  *     enseñanzas) cuente como «relevante»; el mínimo absoluto evita lo contrario, que con pocos actos
  *     (2 trueques entre 12 actos = 17 %) un tipo casi ausente pase por la fracción (~1 acto cada 2 días).
  *     `otrasCooperacionesAcumuladas` (aporte de material y turnos ante escasez, mezclados) se informa
- *     pero no cuenta como tipo: mezcla dos mecanismos.
+ *     pero no cuenta como tipo: mezcla dos mecanismos. Solo cuentan los tipos de la lista CERRADA
+ *     {teaching, trade, constructionHelp, foodShared} [TIPOS_COOPERACION]: otra clave («Teaching», un
+ *     alias del mismo mecanismo) se informa en `clavesNoContadas` y no fabrica un segundo tipo.
  *  C5 conflictos — conflictos en la ventana ≥ 1 [--conflictos-min]: el conflicto sigue existiendo al
  *     final. Si `conflictosAcumulados` es 0 en D, el criterio falla y lo dice («ningún conflicto en
  *     toda la réplica»), distinto de «hubo conflictos pero ninguno en la ventana».
@@ -68,15 +72,34 @@
  *     conocido es de un invento de OTRA persona; las réplicas de la noche 2026-09-22 dan 0,05–0,40
  *     por día) Y hay uso ajeno en ≥ 50 % de los días de la ventana [--dias-uso-ajeno-min]: como el
  *     campo es diario, «usosDeInventorAjeno crece» se lee como «su acumulado crece de forma sostenida»,
- *     no un solo día aislado.
- *  C8 diversidad creciente — pendiente por mínimos cuadrados del índice de diversidad de conducta
- *     sobre los días 5..D ≥ 0 [--pendiente-min, --dia-base-diversidad] O media de los k últimos días ≥
- *     media de los k primeros (desde el día 5), con k = min(ventana, ⌊(D−5+1)/2⌋). Día 5 como base
- *     porque antes domina el asentamiento inicial (y es el día de SC-003). `--diversidad-regla y` exige
- *     las dos. El indicador diario es ruidoso (saltos de ±0,1 de un día a otro en r2), así que no se
- *     compara un día suelto con otro: la pendiente exige ≥ 3 días con dato y cada bloque ≥ 2 días
- *     completos (si no, esa parte es «desconocido»), y una serie constante o casi constante FALLA (no
- *     crece, aunque su pendiente sea 0 ≥ 0; ver «Casi constante» abajo).
+ *     no un solo día aislado. Coherencia: cada día usosSinAutorResuelto ≤ usosUtiles y usosDeInventorAjeno
+ *     ≤ usosUtiles − usosSinAutorResuelto (si no, «desconocido»); sin ningún uso útil en la ventana, falla;
+ *     con usos pero < 20 con autor conocido [--usos-con-autor-min], «desconocido» (muestra insuficiente:
+ *     5 de 10 usos ajenos no es una fracción medida).
+ *  C8 diversidad creciente — PREREGISTRO v2 (orquestador, 2026-09-22 21:45, fijado ANTES de mirar C8 en
+ *     los conjuntos de 60 días; ver scripts/lab/README.md §«Preregistro v2 de C8»). Sobre la serie que
+ *     decide (abajo), días base..D (base = --dia-base-diversidad [5]: el día de SC-003; antes domina el
+ *     asentamiento inicial), cumple si y solo si:
+ *       - Mann-Kendall de tendencia CRECIENTE, unilateral, p < 0,05: S = Σ_{i<j} sgn(x_j − x_i), con los
+ *         empates (|diferencia| ≤ 1e-9 relativa, clases de enlace simple) corregidos en Var(S) =
+ *         [n(n−1)(2n+5) − Σ t(t−1)(2t+5)] / 18 y aproximación normal con corrección de continuidad
+ *         (z = (S − 1)/√Var(S)). Con n < 10 días con dato la normal no vale: «desconocido».
+ *         Var(S) se multiplica por el MAYOR de dos factores de autocorrelación, ambos ≥ 1
+ *         [--correccion-mk hamed-rao-ar1]: Hamed y Rao (1998; autocorrelaciones significativas de los
+ *         rangos del residuo sin tendencia) y AR(1) paramétrico con los mismos pesos (ρ_k = r*^k, r* =
+ *         (n·r₁ + 1)/(n − 4) del residuo, corrección de sesgo de Yue y Wang). Solo con Hamed-Rao un AR(1)
+ *         φ = 0,7 sin tendencia aprobaba el 15-17 % (> 10 %, el tope del preregistro); con los dos, el 7 %;
+ *       - Y subida = pendiente de Sen (mediana de las pendientes entre pares) × (D − base) ≥ 0,02
+ *         [--subida-min]: un test significativo con una subida despreciable (una serie constante con un
+ *         pico el día D) no es «diversidad creciente».
+ *     Calibración (scripts/lab/calibrar-c8.mts: 1000 series sintéticas por caso, semilla fija): ruido
+ *     estacionario 0,3 ± 0,1 aprueba el 4,0 % (D = 60) y el 3,2 % (D = 30); AR(1) φ = 0,7, el 7,2 % y el
+ *     7,4 %; tendencia 0,003/día, el 100 % y el 51 %. La regla v1 aprobaba ese ruido en el 58 %.
+ *     Las reglas v1 (pendiente MCO ≥ --pendiente-min «o»/«y» media de los k últimos días > media de los k
+ *     primeros, k = min(ventana, ⌊(D−base+1)/2⌋), bloques comparados con tolerancia 1e-9) se calculan y se
+ *     informan en `valores.reglasAntiguas`; NO deciden salvo con --diversidad-regla o|y (solo para
+ *     reproducir informes antiguos; el informe lo avisa).
+ *     Se mantienen de v1:
  *     Serie [--diversidad-campo auto] — PREREGISTRO del orquestador (noche 2026-09-22, decidido ANTES de
  *     ver corridas largas; ver scripts/lab/README.md §«Preregistro del criterio C8»): decide
  *     `diversidadConductaActiva` (el mismo índice con los ticks por acción SIN descansar: la conducta
@@ -88,22 +111,22 @@
  *     Cobertura: la serie debe tener dato en ≥ 80 % de los días del tramo (días base..D) [COBERTURA_MIN];
  *     si no, «desconocido», nunca «cumple» (vale para todas las series): una serie que solo existe unos
  *     pocos días del tramo no puede aprobar por su cuenta el crecimiento de todo el tramo.
- *     Extremos completos (hallazgo MEDIO del verificador de INSTR-2): además, la serie debe tener dato
- *     el día D y TODOS los días de los dos bloques (los k primeros desde el día base y los k últimos; con
- *     k < 2, al menos el día base y el día D); si falta alguno, «desconocido». Antes, con ≥ 80 % de
- *     cobertura pero los días finales (o los más bajos) ausentes, el bloque final no se podía calcular y
- *     la regla «o» aprobaba solo con la pendiente de los días que quedaban.
- *     Huecos en el medio: con algún día del tramo sin dato (fuera de los bloques, que ya están completos),
- *     una pendiente FAVORABLE no aprueba sola: cuenta como «desconocida» (esconder días bajos del final
- *     del medio la inclina hacia arriba) y decide la comparación de bloques, que sí está completa; una
- *     pendiente desfavorable cuenta. Con la serie completa (lo normal: replica.ts escribe las tres
- *     series todos los días) nada de esto cambia el resultado.
- *     Casi constante: amplitud (máx − mín) ≤ 1e-9 o |pendiente| ≤ 1e-9/día [TOLERANCIA_PLANA], ambas
- *     relativas a la escala de la serie (× máx(1, máx |valor|)) ⇒ no crece ⇒ FALLA. No se usa igualdad
- *     exacta: una serie constante con un 1e-15 añadido el último día aprobaba por pendiente 2e-17 ≥ 0.
+ *     Extremos completos (verificador de INSTR-2): además, la serie debe tener dato el día D y TODOS los
+ *     días de los dos bloques de k días (los k primeros desde el día base y los k últimos; con k < 2, al
+ *     menos el día base y el día D); si falta alguno, «desconocido».
+ *     Huecos en el medio (fuera de los bloques, que ya están completos): un «cumple» debe sostenerse con los
+ *     días que faltan en su valor MÁS DESFAVORABLE (cota inferior de S: cada día que falta toma el valor que
+ *     minimiza su suma de signos y los pares entre días que faltan cuentan −1; Var(S) con n completo); si
+ *     no, «desconocido»: esconder los días bajos del final del medio no puede aprobar. Con la serie
+ *     completa (lo normal: replica.ts escribe las tres series todos los días) no actúa.
+ *     Coherencia: un índice fuera de [0, 1] o no numérico en el tramo ⇒ «desconocido». Serie constante
+ *     (una sola clase de empate: amplitud ≤ 1e-9 relativa) ⇒ falla: S = 0 y Sen = 0, no crece.
+ *     Se documentan en `valores`: S, Var(S), z, p (y sin corrección), factores, r₁*, pendiente de Sen,
+ *     subida, p pesimista con huecos y las reglas v1.
  *
  * Todo criterio es cumple / falla / desconocido. Un campo ausente o ilegible da «desconocido», NUNCA
- * «cumple»: una semilla solo «cumple todos» si los 8 cumplen.
+ * «cumple»: una semilla solo «cumple todos» si los 8 cumplen. Un acumulado que DECRECE (nacimientos,
+ * conflictos, una causa de muerte, un tipo de cooperación) es incoherente: «desconocido».
  *
  * Estados de réplica al día D:
  *   - evaluada: tiene dia-D (aunque siga corriendo: los días 1..D ya no cambian);
@@ -111,7 +134,12 @@
  *     porque S e I son inmortales y la población nunca baja de 2; solo los vecinos se reproducen,
  *     family.ts, así que no hay vuelta atrás). Cuenta como evaluada que FALLA los 8 criterios, llegue
  *     o no a escribir dia-D;
- *   - ilegible: un dia-NNN.json intermedio no es JSON válido o su tick no es NNN·2400, o hay ficheros de
+ *   - ilegible: un dia-NNN.json intermedio no es JSON válido, su tick falta, no es numérico o no es
+ *     NNN·2400 (tick estrictamente creciente con el día), algún contador o población que decide un
+ *     criterio (poblacion, nacimientos, vecinosMortales, fundadores*, generacionesVivas,
+ *     conflictosAcumulados, usos*, foodShared, cada causa de muertesPorCausa, cada tipo de la lista cerrada
+ *     de cooperacionAcumuladaPorTipo) está pero no es un entero ≥ 0, dos directorios del mismo brazo
+ *     resuelven a la misma semilla (x-1, x-01, x-001: todos ilegibles, error explícito), o hay ficheros de
  *     día con nombre no canónico: solo vale el nombre que escribe replica.ts, `dia-NNN.json` con 3
  *     dígitos (`padStart(3, '0')`; desde el día 1000, los dígitos que haga falta, sin ceros de más).
  *     `dia-20.json` junto a `dia-020.json` (dos ficheros para el mismo día) es un error explícito que
@@ -149,10 +177,19 @@ export interface Umbrales {
   poblacionMin: number; nacimientosMin: number; fundadoresMax: number; generacionesMin: number;
   coopTiposMin: number; coopFraccionMin: number; coopActosMin: number; conflictosMin: number;
   causasMin: number; causasConocidas: string[];
-  usoAjenoMin: number; diasUsoAjenoMin: number;
-  diaBaseDiversidad: number; pendienteMin: number; diversidadRegla: 'o' | 'y'; diversidadCampo: CampoDiversidad;
+  usoAjenoMin: number; diasUsoAjenoMin: number; usosConAutorMin: number;
+  diaBaseDiversidad: number; pendienteMin: number; diversidadRegla: ReglaDiversidad; diversidadCampo: CampoDiversidad;
+  subidaMin: number; correccionMk: CorreccionMk;
   mayoria: number; estancadaHoras: number;
 }
+
+/** C8: `mk` = preregistro v2 (Mann-Kendall + subida de Sen), el que decide por defecto; `o`/`y` = reglas
+ * v1 (pendiente MCO / bloques), solo para reproducir informes antiguos: aprueban ruido estacionario. */
+export type ReglaDiversidad = 'mk' | 'o' | 'y';
+/** Corrección de la varianza de S por autocorrelación: `hamed-rao-ar1` (por defecto) = el mayor de los
+ * factores de Hamed y Rao (1998, autocorrelaciones empíricas de rangos) y AR(1) (ρ_k = r₁*^k, r₁ del
+ * residuo sin tendencia corregido por sesgo); `hamed-rao` = solo el empírico; `ninguna`. Ver calibrar-c8.mts. */
+export type CorreccionMk = 'hamed-rao-ar1' | 'hamed-rao' | 'ninguna';
 
 /** Serie de C8: `auto` = la primera de `PRIORIDAD_DIVERSIDAD` que el tramo trae (activa → tiempo → antigua). */
 export type CampoDiversidad = 'auto' | 'diversidadConductaActiva' | 'diversidadConductaTiempo' | 'diversidadConducta';
@@ -165,8 +202,9 @@ export const UMBRALES_POR_DEFECTO: Readonly<Umbrales> = Object.freeze({
   poblacionMin: 16, nacimientosMin: 1, fundadoresMax: 1, generacionesMin: 3,
   coopTiposMin: 2, coopFraccionMin: 0.10, coopActosMin: 5, conflictosMin: 1,
   causasMin: 2, causasConocidas: ['starvation', 'dehydration', 'exposure', 'senescence'],
-  usoAjenoMin: 0.15, diasUsoAjenoMin: 0.5,
-  diaBaseDiversidad: 5, pendienteMin: 0, diversidadRegla: 'o' as const, diversidadCampo: 'auto' as const,
+  usoAjenoMin: 0.15, diasUsoAjenoMin: 0.5, usosConAutorMin: 20,
+  diaBaseDiversidad: 5, pendienteMin: 0, diversidadRegla: 'mk' as const, diversidadCampo: 'auto' as const,
+  subidaMin: 0.02, correccionMk: 'hamed-rao-ar1' as const,
   mayoria: 0.5, estancadaHoras: 3,
 });
 
@@ -224,6 +262,31 @@ const PATRON_DIA = /^dia-(\d+)\.json$/;
 /** Nombre que escribe replica.ts para el día `dia`: 3 dígitos con ceros a la izquierda (dia-020.json). */
 const nombreDia = (dia: number): string => `dia-${String(dia).padStart(3, '0')}.json`;
 const esObjeto = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
+const esContador = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 0;
+
+/** C4: los ÚNICOS tipos de cooperación que cuentan (world.totals de replica.ts + foodShared de
+ * instrumentos.ts). Otra clave de `cooperacionAcumuladaPorTipo` («Teaching», «ayuda»…) se informa y no
+ * cuenta: un alias del mismo mecanismo no puede fabricar un segundo tipo. */
+export const TIPOS_COOPERACION = ['teaching', 'trade', 'constructionHelp', 'foodShared'] as const;
+/** Contadores y poblaciones que deciden algún criterio: si están (no null), enteros ≥ 0. */
+const CONTADORES = ['poblacion', 'nacimientos', 'vecinosMortales', 'fundadoresMortalesVivos', 'fundadoresVivos', 'generacionesVivas',
+  'conflictosAcumulados', 'usosUtiles', 'usosDeInventorAjeno', 'usosSinAutorResuelto', 'foodShared'] as const;
+
+/** Coherencia de un dia-NNN.json: los contadores (y cada causa de `muertesPorCausa`, y cada tipo de
+ * cooperación de la lista cerrada) presentes son enteros ≥ 0. Un campo AUSENTE no es incoherente (el
+ * criterio que lo use dirá «desconocido»); uno presente con −5, 2,5 o "7" sí: fichero roto ⇒ ilegible. */
+function errorContadores(dia: Dia): string | null {
+  const malos: string[] = [];
+  const ver = (nombre: string, v: unknown) => { if (v !== undefined && v !== null && !esContador(v)) malos.push(`${nombre} = ${JSON.stringify(v)}`); };
+  for (const clave of CONTADORES) ver(clave, dia[clave]);
+  for (const [clave, soloTipos] of [['muertesPorCausa', false], ['cooperacionAcumuladaPorTipo', true]] as const) {
+    const m = dia[clave];
+    if (m === undefined || m === null) continue;
+    if (!esObjeto(m)) { malos.push(`${clave} = ${JSON.stringify(m)} (no es un objeto)`); continue; }
+    for (const [k, v] of Object.entries(m)) if (!soloTipos || (TIPOS_COOPERACION as readonly string[]).includes(k)) ver(`${clave}.${k}`, v);
+  }
+  return malos.length ? `${malos.slice(0, 4).join(', ')}${malos.length > 4 ? ` (y ${malos.length - 4} más)` : ''}: contadores y poblaciones deben ser enteros ≥ 0` : null;
+}
 
 /** Error explícito si dos ficheros resuelven al mismo día (dia-20.json y dia-020.json) o si alguno no
  * tiene el nombre canónico; `null` si todos son canónicos y distintos. */
@@ -266,7 +329,12 @@ function leerReplica(directorio: string, nombre: string, brazo: string, semilla:
       r.error = `${fichero} no es JSON válido`; return r;
     }
     if (!esObjeto(cuerpo)) { r.error = `${fichero} no es un objeto JSON`; return r; }
-    if (typeof cuerpo.tick === 'number' && cuerpo.tick !== dia * TICKS_POR_DIA) { r.error = `${fichero}: tick ${cuerpo.tick} ≠ ${dia}·${TICKS_POR_DIA}`; return r; }
+    // El tick ata el fichero a su día: numérico e igual a día·2400 (luego estrictamente creciente con el
+    // día). Sin tick, o con tick "x", el orden de los días no se puede comprobar (verificador de INSTR-3).
+    if (typeof cuerpo.tick !== 'number' || !Number.isFinite(cuerpo.tick)) { r.error = `${fichero}: tick ${cuerpo.tick === undefined ? 'ausente' : `no numérico (${JSON.stringify(cuerpo.tick)})`}; se espera ${dia}·${TICKS_POR_DIA} = ${dia * TICKS_POR_DIA}`; return r; }
+    if (cuerpo.tick !== dia * TICKS_POR_DIA) { r.error = `${fichero}: tick ${cuerpo.tick} ≠ ${dia}·${TICKS_POR_DIA}`; return r; }
+    const incoherente = errorContadores(cuerpo);
+    if (incoherente) { r.error = `${fichero}: ${incoherente}`; return r; }
     r.dias.set(dia, cuerpo);
   }
   // Sin ningún dia-NNN.json, la «última escritura» es la del directorio (creado al lanzar la réplica).
@@ -283,6 +351,15 @@ function descubrir(conjunto: string, avisos: string[]): { replicas: ReplicaLeida
     const m = /^(.+)-(\d+)$/.exec(nombre);
     if (!m) { ignorados.push(`${nombre} (el nombre no es <brazo>-<semilla>)`); continue; }
     replicas.push(leerReplica(join(conjunto, nombre), nombre, m[1]!, Number(m[2]), avisos));
+  }
+  // Semillas duplicadas en un brazo (x-1, x-01 y x-001 son la semilla 1): no se elige una ni se cuenta
+  // tres veces el mismo experimento; todas ilegibles con error explícito (verificador de INSTR-3).
+  const porSemilla = new Map<string, ReplicaLeida[]>();
+  for (const r of replicas) porSemilla.set(`${r.brazo}\0${r.semilla}`, [...(porSemilla.get(`${r.brazo}\0${r.semilla}`) ?? []), r]);
+  for (const grupo of porSemilla.values()) if (grupo.length > 1) {
+    const error = `semilla duplicada en el brazo «${grupo[0]!.brazo}»: ${grupo.map(r => r.nombre).sort().join(', ')} resuelven a la semilla ${grupo[0]!.semilla}; no se elige una`;
+    for (const r of grupo) r.error = error;
+    avisos.push(error);
   }
   return { replicas, ignorados };
 }
@@ -334,12 +411,14 @@ export function describirCriterios(u: Umbrales): Record<IdCriterio, string> {
   return {
     supervivencia: `poblacion ≥ ${u.poblacionMin} todos los días de la ventana`,
     recambio: `nacimientos en la ventana ≥ ${u.nacimientosMin} y fundadoresMortalesVivos(D) ≤ ${u.fundadoresMax}`,
-    generaciones: `generaciones mortales vivas(D) ≥ ${u.generacionesMin}`,
-    cooperacion: `≥ ${u.coopTiposMin} tipos de cooperación con ≥ ${pct(u.coopFraccionMin)} de los actos tipificados de la ventana y ≥ ${u.coopActosMin} actos`,
+    generaciones: `generaciones mortales vivas(D) ≥ ${u.generacionesMin} (lista de enteros ≥ 0 distintos; si no, desconocido)`,
+    cooperacion: `≥ ${u.coopTiposMin} tipos de {${TIPOS_COOPERACION.join(', ')}} con ≥ ${pct(u.coopFraccionMin)} de los actos tipificados de la ventana y ≥ ${u.coopActosMin} actos (otras claves no cuentan)`,
     conflictos: `conflictos en la ventana ≥ ${u.conflictosMin}`,
     muertes: `0 muertes fuera de {${u.causasConocidas.join(', ')}}, ≥ ${u.causasMin} causas distintas en los días 1..D y balance población = nacimientos − muertes desde el día 0`,
-    tecnologia: `usos de inventor ajeno / usos útiles con autor en la ventana ≥ ${u.usoAjenoMin} y uso ajeno en ≥ ${pct(u.diasUsoAjenoMin)} de sus días`,
-    diversidad: `pendiente MCO de ${u.diversidadCampo === 'auto' ? 'diversidadConductaActiva (si falta, diversidadConductaTiempo; si falta, diversidadConducta)' : u.diversidadCampo} días ${u.diaBaseDiversidad}..D (≥ ${PUNTOS_MIN_PENDIENTE} días) ≥ ${u.pendienteMin} ${u.diversidadRegla === 'o' ? 'o' : 'y'} media de los k últimos días ≥ media de los k primeros (k = min(ventana, mitad del tramo) ≥ ${DIAS_MIN_BLOQUE}); dato en < ${pct(COBERTURA_MIN)} de los días del tramo ⇒ desconocido; sin dato el día D o algún día de los dos bloques ⇒ desconocido; con huecos, una pendiente favorable no decide; amplitud o |pendiente| ≤ ${TOLERANCIA_PLANA} (relativas) ⇒ falla`,
+    tecnologia: `usos de inventor ajeno / usos útiles con autor en la ventana ≥ ${u.usoAjenoMin} y uso ajeno en ≥ ${pct(u.diasUsoAjenoMin)} de sus días (con < ${u.usosConAutorMin} usos con autor conocido ⇒ desconocido; ninguno útil ⇒ falla)`,
+    diversidad: `${u.diversidadCampo === 'auto' ? 'diversidadConductaActiva (si falta, diversidadConductaTiempo; si falta, diversidadConducta)' : u.diversidadCampo} días ${u.diaBaseDiversidad}..D: ${u.diversidadRegla === 'mk'
+      ? `Mann-Kendall unilateral creciente p < ${ALFA_MK} (≥ ${N_MIN_MK} días con dato; Var(S) corregida por autocorrelación: ${u.correccionMk}) y subida de Sen (pendiente × (D − ${u.diaBaseDiversidad})) ≥ ${u.subidaMin} [preregistro v2]; con huecos en el medio, «cumple» solo si se sostiene con los días que faltan en su valor más desfavorable; las reglas v1 se informan, no deciden`
+      : `REGLA v1 «${u.diversidadRegla}» (no preregistrada: aprueba ruido estacionario) pendiente MCO (≥ ${PUNTOS_MIN_PENDIENTE} días) ≥ ${u.pendienteMin} ${u.diversidadRegla} media de los k últimos días > media de los k primeros (k = min(ventana, mitad del tramo) ≥ ${DIAS_MIN_BLOQUE}, tolerancia ${TOLERANCIA_PLANA}); con huecos, una pendiente favorable no decide`}; índice fuera de [0, 1] ⇒ desconocido; dato en < ${pct(COBERTURA_MIN)} de los días del tramo ⇒ desconocido; sin dato el día D o algún día de los dos bloques extremos ⇒ desconocido; serie constante (amplitud ≤ ${TOLERANCIA_PLANA}, relativa) ⇒ falla`,
   };
 }
 
@@ -362,6 +441,7 @@ function recambio({ dias, D, base, u }: Contexto): ResultadoCriterio {
   const nacD = num(dias.get(D), 'nacimientos'), nacB = acumulado(dias, base, d => num(d, 'nacimientos'));
   const nacimientos = nacD !== null && nacB !== null ? nacD - nacB : null;
   const fundadores = num(dias.get(D), 'fundadoresMortalesVivos');
+  if (nacimientos !== null && nacimientos < 0) return { estado: 'desconocido', motivo: `nacimientos acumulados decrecen (${nacB} el día ${base} → ${nacD} el día ${D}): datos incoherentes`, valores: { nacimientosVentana: nacimientos, fundadoresMortalesVivos: fundadores } };
   const partes = [
     nacimientos === null ? `faltan nacimientos (día ${D} o ${base})` : `${nacimientos} nacimientos en la ventana${nacimientos >= u.nacimientosMin ? '' : ` (< ${u.nacimientosMin})`}`,
     fundadores === null ? 'falta fundadoresMortalesVivos (fundadoresVivos incluye a S e I, inmortales: no sirve)' : `${fundadores} fundadores mortales vivos${fundadores <= u.fundadoresMax ? '' : ` (> ${u.fundadoresMax})`}`,
@@ -372,8 +452,14 @@ function recambio({ dias, D, base, u }: Contexto): ResultadoCriterio {
 
 function generaciones({ dias, D, u }: Contexto): ResultadoCriterio {
   const d = dias.get(D), mortales = d?.generacionesMortalesVivas;
-  if (Array.isArray(mortales)) {
-    const g = mortales.length;
+  if (mortales !== undefined && mortales !== null) {
+    // Lista de generaciones DISTINTAS (metrics.ts: [...new Set(...)].sort()); se cuenta un Set. Basura
+    // (no lista, no enteros ≥ 0) o repetidas ([2, 2, 2] no son 3 generaciones) ⇒ incoherente ⇒ desconocido.
+    if (!Array.isArray(mortales)) return { estado: 'desconocido', motivo: `generacionesMortalesVivas no es una lista (${JSON.stringify(mortales)}): datos incoherentes`, valores: { generaciones: null, fuente: 'generacionesMortalesVivas' } };
+    const malos = mortales.filter(g => !esContador(g));
+    if (malos.length) return { estado: 'desconocido', motivo: `generacionesMortalesVivas con valores que no son enteros ≥ 0 (${malos.slice(0, 3).map(g => JSON.stringify(g)).join(', ')}): datos incoherentes`, valores: { generaciones: null, fuente: 'generacionesMortalesVivas' } };
+    const g = new Set(mortales as number[]).size;
+    if (g !== mortales.length) return { estado: 'desconocido', motivo: `generacionesMortalesVivas repite generaciones [${mortales.join(', ')}] (${g} distinta(s) de ${mortales.length}): datos incoherentes`, valores: { generaciones: null, generacionesDistintas: g, fuente: 'generacionesMortalesVivas' } };
     return { estado: g >= u.generacionesMin ? 'cumple' : 'falla', motivo: `${g} generaciones vivas [${mortales.join(', ')}]`, valores: { generaciones: g, fuente: 'generacionesMortalesVivas' } };
   }
   // generacionesVivas = generaciones mortales ∪ {0}: S e I son la generación 0 y no mueren. Sin saber si
@@ -385,11 +471,26 @@ function generaciones({ dias, D, u }: Contexto): ResultadoCriterio {
     valores: { generaciones: null, cotaInferior: Math.max(0, todas - 1), cotaSuperior: todas, fuente: 'generacionesVivas' } };
 }
 
+/** Tipos de la lista cerrada presentes en `cooperacionAcumuladaPorTipo` (enteros ≥ 0, validados al leer)
+ * y las otras claves, que no cuentan; `null` si el campo falta o no es un objeto. */
+function tiposCooperacion(d: Dia | undefined): { tipos: Record<string, number>; otras: string[] } | null {
+  const v = d?.cooperacionAcumuladaPorTipo;
+  if (!esObjeto(v)) return null;
+  const tipos: Record<string, number> = {}, otras: string[] = [];
+  for (const [clave, n] of Object.entries(v)) {
+    if ((TIPOS_COOPERACION as readonly string[]).includes(clave)) { if (esContador(n)) tipos[clave] = n; }
+    else otras.push(clave);
+  }
+  return { tipos, otras };
+}
+
 function cooperacion({ dias, D, base, u }: Contexto): ResultadoCriterio {
-  const tiposD = mapa(dias.get(D), 'cooperacionAcumuladaPorTipo');
-  if (!tiposD) return { estado: 'desconocido', motivo: 'falta cooperacionAcumuladaPorTipo en el día D', valores: {} };
-  const tiposB = base <= 0 && !dias.has(base) ? {} : mapa(dias.get(base), 'cooperacionAcumuladaPorTipo');
-  if (!tiposB) return { estado: 'desconocido', motivo: `falta cooperacionAcumuladaPorTipo en el día ${base} (inicio de la ventana)`, valores: {} };
+  const leidoD = tiposCooperacion(dias.get(D));
+  if (!leidoD) return { estado: 'desconocido', motivo: 'falta cooperacionAcumuladaPorTipo en el día D', valores: {} };
+  const leidoB = base <= 0 && !dias.has(base) ? { tipos: {}, otras: [] } : tiposCooperacion(dias.get(base));
+  if (!leidoB) return { estado: 'desconocido', motivo: `falta cooperacionAcumuladaPorTipo en el día ${base} (inicio de la ventana)`, valores: {} };
+  const tiposD = leidoD.tipos, tiposB = leidoB.tipos, clavesNoContadas = leidoD.otras.sort();
+  const noContadas = clavesNoContadas.length ? ` (claves fuera de {${TIPOS_COOPERACION.join(', ')}}, no cuentan: ${clavesNoContadas.join(', ')})` : '';
   const actual: Record<string, number> = { ...tiposD }, previo: Record<string, number> = { ...tiposB };
   const comidaD = num(dias.get(D), 'foodShared');
   if (comidaD !== null) {
@@ -409,19 +510,20 @@ function cooperacion({ dias, D, base, u }: Contexto): ResultadoCriterio {
   const otrasD = num(dias.get(D), 'otrasCooperacionesAcumuladas'), otrasB = acumulado(dias, base, d => num(d, 'otrasCooperacionesAcumuladas'));
   const otras = otrasD !== null && otrasB !== null ? otrasD - otrasB : null;
   const total = Object.values(porTipo).reduce((s, n) => s + n, 0);
-  if (total <= 0) return { estado: 'falla', motivo: 'ningún acto de cooperación tipificado en la ventana', valores: { porTipo, total, otras } };
+  if (total <= 0) return { estado: 'falla', motivo: `ningún acto de cooperación tipificado en la ventana${noContadas}`, valores: { porTipo, total, otras, clavesNoContadas } };
   const fracciones = Object.fromEntries(Object.entries(porTipo).map(([t, n]) => [t, redondear(n / total)]));
   const relevantes = Object.entries(porTipo).filter(([, n]) => n > 0 && n >= u.coopActosMin && n / total >= u.coopFraccionMin).map(([t]) => t);
   const detalle = Object.entries(porTipo).sort((a, b) => b[1] - a[1]).map(([t, n]) => `${t} ${n} (${pct(n / total)})`).join(', ');
   return { estado: relevantes.length >= u.coopTiposMin ? 'cumple' : 'falla',
-    motivo: `${relevantes.length} tipo(s) con ≥ ${pct(u.coopFraccionMin)} y ≥ ${u.coopActosMin} de ${total} actos: ${detalle}`,
-    valores: { porTipo, fracciones, total, relevantes, otrasNoTipificadas: otras } };
+    motivo: `${relevantes.length} tipo(s) con ≥ ${pct(u.coopFraccionMin)} y ≥ ${u.coopActosMin} de ${total} actos: ${detalle}${noContadas}`,
+    valores: { porTipo, fracciones, total, relevantes, otrasNoTipificadas: otras, clavesNoContadas } };
 }
 
 function conflictos({ dias, D, base, u }: Contexto): ResultadoCriterio {
   const cD = num(dias.get(D), 'conflictosAcumulados'), cB = acumulado(dias, base, d => num(d, 'conflictosAcumulados'));
   if (cD === null || cB === null) return { estado: 'desconocido', motivo: `falta conflictosAcumulados (día ${cD === null ? D : base})`, valores: { conflictosVentana: null, conflictosAcumulados: cD } };
   const ventana = cD - cB;
+  if (ventana < 0) return { estado: 'desconocido', motivo: `conflictosAcumulados decrece (${cB} el día ${base} → ${cD} el día ${D}): datos incoherentes`, valores: { conflictosVentana: ventana, conflictosAcumulados: cD } };
   const motivo = cD === 0 ? 'ningún conflicto en toda la réplica (conflictosAcumulados = 0)'
     : ventana >= u.conflictosMin ? `${ventana} conflictos en la ventana (${cD} acumulados)` : `${cD} conflictos acumulados pero ${ventana} en la ventana`;
   return { estado: ventana >= u.conflictosMin ? 'cumple' : 'falla', motivo, valores: { conflictosVentana: ventana, conflictosAcumulados: cD } };
@@ -437,6 +539,9 @@ function muertes({ dias, D, u, poblacionInicial }: Contexto): ResultadoCriterio 
   const d0: Dia = dias.get(0) ?? { poblacion: poblacionInicial, nacimientos: 0, muertesPorCausa: {} }, dD = dias.get(D)!;
   const m0 = mapa(d0, 'muertesPorCausa'), p0 = num(d0, 'poblacion'), n0 = num(d0, 'nacimientos'), pD = num(dD, 'poblacion'), nD = num(dD, 'nacimientos');
   const suma = (m: Record<string, number>) => Object.values(m).reduce((s, n) => s + n, 0);
+  // Acumulados que decrecen desde el día 0 (una causa o los nacimientos): datos incoherentes.
+  const decrecen = [...(m0 ? Object.keys({ ...m0, ...mD }).filter(c => (mD[c] ?? 0) < (m0[c] ?? 0)).map(c => `muertesPorCausa.${c}`) : []), ...(n0 !== null && nD !== null && nD < n0 ? ['nacimientos'] : [])];
+  if (decrecen.length) return { estado: 'desconocido', motivo: `${decrecen.join(', ')} decrece(n) entre el día 0 y el día ${D}: datos incoherentes`, valores: { muertesPorCausa: mD } };
   const residuo = m0 && p0 !== null && n0 !== null && pD !== null && nD !== null ? (pD - p0) - ((nD - n0) - (suma(mD) - suma(m0))) : null;
   const partes = [
     causas.length ? `causas: ${causas.map(c => `${c} ${mD[c]}`).join(', ')}${causas.length >= u.causasMin ? '' : ` (< ${u.causasMin} distintas)`}` : 'ninguna muerte registrada',
@@ -448,72 +553,290 @@ function muertes({ dias, D, u, poblacionInicial }: Contexto): ResultadoCriterio 
 }
 
 function tecnologia({ dias, diasVentana, u }: Contexto): ResultadoCriterio {
-  const faltan: number[] = [];
-  let ajenos = 0, conAutor = 0, diasConAjeno = 0;
+  const faltan: number[] = [], incoherentes: number[] = [];
+  let ajenos = 0, conAutor = 0, usosTotales = 0, diasConAjeno = 0;
   for (const dia of diasVentana) {
     const d = dias.get(dia), a = num(d, 'usosDeInventorAjeno'), usos = num(d, 'usosUtiles'), sinAutor = num(d, 'usosSinAutorResuelto');
     if (a === null || usos === null || sinAutor === null) { faltan.push(dia); continue; }
-    ajenos += a; conAutor += usos - sinAutor; if (a > 0) diasConAjeno++;
+    // Cada día: sin autor ≤ usos útiles y de inventor ajeno ≤ usos con autor conocido (metrics.ts los
+    // cuenta sobre los mismos usos). Si no, el cociente no significa nada (verificador de INSTR-3).
+    if (sinAutor > usos || a > usos - sinAutor) incoherentes.push(dia);
+    ajenos += a; conAutor += usos - sinAutor; usosTotales += usos; if (a > 0) diasConAjeno++;
   }
   if (faltan.length) return { estado: 'desconocido', motivo: `faltan usosDeInventorAjeno/usosUtiles/usosSinAutorResuelto los días ${faltan.join(', ')}`, valores: { diasSinDato: faltan } };
-  const fraccion = conAutor > 0 ? ajenos / conAutor : null, fraccionDias = diasConAjeno / diasVentana.length;
-  if (fraccion === null) return { estado: 'falla', motivo: 'ningún uso útil con autor conocido en la ventana', valores: { usosDeInventorAjeno: ajenos, usosConAutor: 0, fraccionUsoAjeno: null, fraccionDiasConUsoAjeno: fraccionDias } };
+  if (incoherentes.length) return { estado: 'desconocido', motivo: `usosDeInventorAjeno > usosUtiles − usosSinAutorResuelto (o usosSinAutorResuelto > usosUtiles) los días ${rangos(incoherentes)}: datos incoherentes`, valores: { diasIncoherentes: incoherentes } };
+  const fraccionDias = diasConAjeno / diasVentana.length;
+  // Sin ningún uso útil no hay tecnología que se transmita: falla. Con usos pero < usosConAutorMin de autor
+  // conocido, la fracción es de una muestra demasiado pequeña (o el autor no se resolvió): desconocido.
+  if (usosTotales === 0) return { estado: 'falla', motivo: 'ningún uso útil en la ventana', valores: { usosDeInventorAjeno: 0, usosConAutor: 0, usosUtiles: 0, fraccionUsoAjeno: null, fraccionDiasConUsoAjeno: fraccionDias } };
+  if (conAutor < u.usosConAutorMin) return { estado: 'desconocido', motivo: `solo ${conAutor} usos útiles con autor conocido en la ventana (< ${u.usosConAutorMin}; ${usosTotales} usos útiles): muestra insuficiente para medir la transmisión`, valores: { usosDeInventorAjeno: ajenos, usosConAutor: conAutor, usosUtiles: usosTotales, fraccionUsoAjeno: conAutor > 0 ? ajenos / conAutor : null, fraccionDiasConUsoAjeno: fraccionDias } };
+  const fraccion = ajenos / conAutor;
   return { estado: y(fraccion >= u.usoAjenoMin, fraccionDias >= u.diasUsoAjenoMin),
     motivo: `uso ajeno ${redondear(fraccion)} (${ajenos}/${conAutor})${fraccion >= u.usoAjenoMin ? '' : ` < ${u.usoAjenoMin}`}; en ${diasConAjeno}/${diasVentana.length} días${fraccionDias >= u.diasUsoAjenoMin ? '' : ` (< ${pct(u.diasUsoAjenoMin)})`}`,
     valores: { usosDeInventorAjeno: ajenos, usosConAutor: conAutor, fraccionUsoAjeno: fraccion, fraccionDiasConUsoAjeno: fraccionDias } };
 }
 
-/** C8 sobre una serie (`campo`) de dia-NNN.json; ver la cabecera. */
-function serieDiversidad({ dias, D, u }: Contexto, campo: string): ResultadoCriterio {
+// ── C8: Mann-Kendall + pendiente de Sen (preregistro v2) ──────────────────────────────────────────
+
+/** Nivel del test de Mann-Kendall (unilateral, tendencia creciente) y n mínimo para la aproximación
+ * normal (preregistro v2: con n < 10 la normal no vale y C8 es «desconocido»). */
+export const ALFA_MK = 0.05, N_MIN_MK = 10;
+/** z_{0,975}: banda de significación de las autocorrelaciones de rangos en Hamed y Rao (±z/√n). */
+const Z_975 = 1.959963984540054;
+
+/** erfc con la aproximación de Chebyshev de Numerical Recipes (erfcc): error relativo < 1,2e-7. */
+function erfc(x: number): number {
+  const z = Math.abs(x), t = 1 / (1 + 0.5 * z);
+  const r = t * Math.exp(-z * z - 1.26551223 + t * (1.00002368 + t * (0.37409196 + t * (0.09678418 + t * (-0.18628806 + t * (0.27886807
+    + t * (-1.13520398 + t * (1.48851587 + t * (-0.82215223 + t * 0.17087277)))))))));
+  return x >= 0 ? r : 2 - r;
+}
+/** P(Z ≥ z) de la normal estándar. */
+export const colaNormalSuperior = (z: number): number => 0.5 * erfc(z / Math.SQRT2);
+
+/** Clases de empate: valores ordenados, uno nuevo abre clase si se separa del anterior > `tolerancia`
+ * (enlace simple). Mann-Kendall, su varianza y Sen usan las MISMAS clases: un 1e-15 no es subida. */
+function clasesDeEmpate(valores: readonly number[], tolerancia: number): { clase: number[]; tamanos: number[] } {
+  const orden = valores.map((_, i) => i).sort((a, b) => valores[a]! - valores[b]!);
+  const clase = new Array<number>(valores.length), tamanos: number[] = [];
+  let previo = 0;
+  for (const i of orden) {
+    if (!tamanos.length || valores[i]! - previo > tolerancia) tamanos.push(0);
+    clase[i] = tamanos.length - 1; tamanos[tamanos.length - 1]!++; previo = valores[i]!;
+  }
+  return { clase, tamanos };
+}
+
+/** Var(S) de Mann-Kendall con corrección por empates: [n(n−1)(2n+5) − Σ t(t−1)(2t+5)] / 18. */
+const varianzaS = (n: number, tamanos: readonly number[]): number =>
+  (n * (n - 1) * (2 * n + 5) - tamanos.reduce((s, t) => s + t * (t - 1) * (2 * t + 5), 0)) / 18;
+
+/** Pendiente de Sen: mediana de (x_j − x_i)/(t_j − t_i), i < j; un par empatado (misma clase) da 0. */
+export function pendienteSen(puntos: readonly (readonly [number, number])[], tolerancia = 0): number | null {
+  if (puntos.length < 2) return null;
+  const { clase } = clasesDeEmpate(puntos.map(([, v]) => v), tolerancia);
+  const pendientes: number[] = [];
+  for (let i = 0; i < puntos.length; i++) for (let j = i + 1; j < puntos.length; j++)
+    pendientes.push(clase[i] === clase[j] ? 0 : (puntos[j]![1] - puntos[i]![1]) / (puntos[j]![0] - puntos[i]![0]));
+  pendientes.sort((a, b) => a - b);
+  const m = pendientes.length >> 1;
+  return pendientes.length % 2 ? pendientes[m]! : (pendientes[m - 1]! + pendientes[m]!) / 2;
+}
+
+/** Rangos 1..n con los empates (clases de `clasesDeEmpate`, misma tolerancia) al rango medio. */
+function rangosMedios(valores: readonly number[], tolerancia: number): { rangos: number[]; clases: number } {
+  const { clase, tamanos } = clasesDeEmpate(valores, tolerancia), medio: number[] = [];
+  let antes = 0;
+  for (const t of tamanos) { medio.push(antes + (t + 1) / 2); antes += t; }
+  return { rangos: clase.map(c => medio[c]!), clases: tamanos.length };
+}
+
+/** Factor de Hamed y Rao (1998) para Var(S) bajo autocorrelación: n/n*_s = 1 + 2/(n(n−1)(n−2)) ·
+ * Σ_k (n−k)(n−k−1)(n−k−2) ρ_k, con ρ_k la autocorrelación de los RANGOS de la serie sin tendencia
+ * (x − β·t, β = Sen) y solo los retardos significativos (|ρ_k| > z_{0,975}/√n), como pyMannKendall
+ * (`hamed_rao_modification_test`, todos los retardos). Los días con dato se toman seguidos (un hueco
+ * del medio no rompe la secuencia, como quien descarta los NaN). Acotado a ≥ 1: una autocorrelación
+ * negativa espuria no puede ESTRECHAR la varianza y hacer más fácil aprobar. */
+function factorHamedRao(puntos: readonly (readonly [number, number])[], sen: number, tolerancia: number): number {
+  const n = puntos.length;
+  if (n < 4) return 1;
+  // Residuos empatados con la misma tolerancia que S: el residuo de una recta exacta es ruido de coma
+  // flotante (1e-17), no autocorrelación.
+  const { rangos, clases } = rangosMedios(puntos.map(([t, v]) => v - sen * t), tolerancia), media = (n + 1) / 2;
+  if (clases < 2) return 1;
+  const den = rangos.reduce((s, r) => s + (r - media) ** 2, 0);
+  if (den <= 0) return 1;
+  const limite = Z_975 / Math.sqrt(n);
+  return Math.max(1, pesosHamedRao(n, k => {
+    let cov = 0;
+    for (let i = 0; i + k < n; i++) cov += (rangos[i]! - media) * (rangos[i + k]! - media);
+    const rho = cov / den;
+    return Math.abs(rho) > limite ? rho : 0;
+  }));
+}
+
+/** Suma de pesos de Hamed y Rao con autocorrelaciones `rho(k)`: 1 + 2/(n(n−1)(n−2)) Σ_k (n−k)(n−k−1)(n−k−2) ρ_k. */
+function pesosHamedRao(n: number, rho: (k: number) => number): number {
+  let suma = 0;
+  for (let k = 1; k <= n - 3; k++) suma += (n - k) * (n - k - 1) * (n - k - 2) * rho(k);
+  return 1 + 2 * suma / (n * (n - 1) * (n - 2));
+}
+
+/** Factor AR(1) paramétrico: el de Hamed y Rao con ρ_k = r^k, r = autocorrelación de retardo 1 del residuo
+ * sin tendencia (x − β·t, β = Sen) corregida por sesgo, r* = (n·r₁ + 1)/(n − 4) (Yue et al., 2002; Yue y
+ * Wang, 2004), acotada a [0; 0,95]. El estimador empírico de Hamed y Rao subestima la autocorrelación con
+ * n ≈ 25-55 (sesgo ≈ −(1 + 4φ)/n y solo cuenta retardos significativos): con AR(1) φ = 0,7 dejaba el falso
+ * positivo en el 15-17 %; con este, en el 6-9 % (calibrar-c8.mts). Acotado a ≥ 1. */
+function factorAr1(puntos: readonly (readonly [number, number])[], sen: number, tolerancia: number): { factor: number; r1: number } {
+  const n = puntos.length;
+  const residuos = puntos.map(([t, v]) => v - sen * t), media = residuos.reduce((s, v) => s + v, 0) / n;
+  // Sin ruido (residuos dentro de la tolerancia: una recta exacta) no hay autocorrelación que corregir.
+  if (n < 5 || Math.max(...residuos) - Math.min(...residuos) <= tolerancia) return { factor: 1, r1: 0 };
+  let cov = 0, den = 0;
+  for (let i = 0; i < n; i++) { den += (residuos[i]! - media) ** 2; if (i + 1 < n) cov += (residuos[i]! - media) * (residuos[i + 1]! - media); }
+  const r1 = den > 0 ? Math.min(0.95, Math.max(0, (n * (cov / den) + 1) / (n - 4))) : 0;
+  return { factor: Math.max(1, pesosHamedRao(n, k => r1 ** k)), r1 };
+}
+
+/** z con corrección de continuidad y p unilateral (H1: tendencia creciente). */
+function zYp(S: number, varS: number): { z: number; p: number } {
+  if (!(varS > 0)) return { z: 0, p: 0.5 };
+  const z = S > 0 ? (S - 1) / Math.sqrt(varS) : S < 0 ? (S + 1) / Math.sqrt(varS) : 0;
+  return { z, p: colaNormalSuperior(z) };
+}
+
+export interface MannKendall {
+  n: number; S: number; clases: number; varS: number; z: number; p: number;
+  /** Factor aplicado a Var(S) (1 sin corrección) y sus dos candidatos: Hamed y Rao empírico y AR(1) con r₁*. */
+  factor: number; factorHamedRao: number; factorAr1: number; r1: number;
+  /** Sin la corrección por autocorrelación (se informa siempre). */
+  varSinCorreccion: number; zSinCorreccion: number; pSinCorreccion: number;
+  pendienteSen: number | null;
+}
+
+/** Mann-Kendall unilateral (tendencia creciente) sobre (día, valor) ordenados por día; empates por
+ * `tolerancia` (clases de enlace simple) en S y en Var(S). Aproximación normal con corrección de
+ * continuidad; `correccion` = hamed-rao multiplica Var(S) por su factor (≥ 1). */
+export function mannKendall(puntos: readonly (readonly [number, number])[], tolerancia = 0, correccion: CorreccionMk = 'hamed-rao-ar1'): MannKendall {
+  const n = puntos.length;
+  const { clase, tamanos } = clasesDeEmpate(puntos.map(([, v]) => v), tolerancia);
+  let S = 0;
+  for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) S += Math.sign(clase[j]! - clase[i]!);
+  const sen = pendienteSen(puntos, tolerancia);
+  const varSinCorreccion = varianzaS(n, tamanos);
+  const conDatos = sen !== null && tamanos.length > 1;
+  const hr = conDatos ? factorHamedRao(puntos, sen, tolerancia) : 1, ar1 = conDatos ? factorAr1(puntos, sen, tolerancia) : { factor: 1, r1: 0 };
+  const factor = correccion === 'hamed-rao-ar1' ? Math.max(hr, ar1.factor) : correccion === 'hamed-rao' ? hr : 1;
+  const sin = zYp(S, varSinCorreccion), con = zYp(S, varSinCorreccion * factor);
+  return { n, S, clases: tamanos.length, varS: varSinCorreccion * factor, z: con.z, p: con.p,
+    factor, factorHamedRao: hr, factorAr1: ar1.factor, r1: ar1.r1,
+    varSinCorreccion, zSinCorreccion: sin.z, pSinCorreccion: sin.p, pendienteSen: sen };
+}
+
+/** Cota inferior de S si los días `faltan` (huecos del medio) tuvieran su valor MÁS desfavorable: cada día
+ * que falta toma, por separado, el valor que minimiza su suma de signos con los días con dato, y los
+ * pares entre días que faltan cuentan −1. Con esa S, n = días con dato + días que faltan (sin empates
+ * nuevos: Var(S) máxima) y el mismo factor de corrección. */
+function mannKendallPesimista(puntos: readonly (readonly [number, number])[], faltan: readonly number[], tolerancia: number, mk: MannKendall): { S: number; z: number; p: number } {
+  const { clase, tamanos } = clasesDeEmpate(puntos.map(([, v]) => v), tolerancia);
+  let S = mk.S;
+  for (const t of faltan) {
+    let peor = Infinity;
+    // En el espacio de clases basta probar cada clase (empate) y cada hueco entre clases, y los dos extremos.
+    for (let c2 = -1; c2 <= 2 * tamanos.length - 1; c2++) {
+      const c = c2 / 2;
+      let s = 0;
+      for (let i = 0; i < puntos.length; i++) s += puntos[i]![0] < t ? Math.sign(c - clase[i]!) : Math.sign(clase[i]! - c);
+      peor = Math.min(peor, s);
+    }
+    S += peor;
+  }
+  S -= faltan.length * (faltan.length - 1) / 2;
+  const n = puntos.length + faltan.length;
+  return { S, ...zYp(S, varianzaS(n, [...tamanos, ...faltan.map(() => 1)]) * mk.factor) };
+}
+
+/** Reglas v1 de C8 (pendiente MCO ≥ pendienteMin «o»/«y» media de los k últimos días > media de los k
+ * primeros), sobre una serie ya validada (cobertura y extremos completos). Desde el preregistro v2 solo
+ * se informan (`reglasAntiguas`) salvo con --diversidad-regla o|y: aprueban ruido estacionario. */
+function reglasV1(puntos: readonly [number, number][], sinDato: readonly number[], b: number, D: number, k: number, tolerancia: number, u: Umbrales) {
+  const valores = puntos.map(([, v]) => v), porDia = new Map(puntos);
+  const pendiente = puntos.length >= PUNTOS_MIN_PENDIENTE ? pendienteMco(puntos) : null;
+  const amplitud = Math.max(...valores) - Math.min(...valores);
+  const base = { pendiente, amplitud, pendienteDecide: false, mediaInicio: null as number | null, mediaFinal: null as number | null, diasPorBloque: k };
+  // Una serie plana no «crece» aunque su pendiente sea 0 ≥ 0 (tolerancia relativa, no igualdad exacta).
+  if (puntos.length >= 2 && amplitud <= tolerancia)
+    return { o: 'falla' as Estado, y: 'falla' as Estado, ...base, motivo: `serie constante (${redondear(valores[0]!)}${amplitud > 0 ? `; amplitud ${amplitud.toExponential(1)} ≤ ${tolerancia.toExponential(1)}` : ''}) en ${puntos.length} días: no crece` };
+  if (pendiente !== null && Math.abs(pendiente) <= tolerancia)
+    return { o: 'falla' as Estado, y: 'falla' as Estado, ...base, motivo: `serie sin tendencia (|pendiente| ${Math.abs(pendiente).toExponential(1)}/día ≤ ${tolerancia.toExponential(1)}) en ${puntos.length} días: no crece` };
+  // Los días de los bloques están todos (extremos completos, comprobado antes).
+  const media = (desde: number): number | null => {
+    if (k < DIAS_MIN_BLOQUE) return null;
+    let s = 0;
+    for (let dia = desde; dia < desde + k; dia++) s += porDia.get(dia)!;
+    return s / k;
+  };
+  const inicio = media(b), final = media(D - k + 1);
+  // Con huecos en el medio, una pendiente FAVORABLE no decide (esconder días bajos la inclina).
+  const favorable = pendiente === null ? null : pendiente >= u.pendienteMin;
+  const pendienteConHuecos = favorable === true && sinDato.length > 0;
+  // Bloques con tolerancia (hallazgo del verificador de INSTR-3): bloques iguales, o el final 1e-12 por
+  // encima, no son «crecer»; con ≥ la regla «o» aprobaba una serie con pendiente negativa.
+  const s1 = pendienteConHuecos ? null : favorable, s2 = inicio === null || final === null ? null : final - inicio > tolerancia;
+  const bloques = k >= DIAS_MIN_BLOQUE ? `media días ${b}..${b + k - 1} ${redondear(inicio!)} → días ${D - k + 1}..${D} ${redondear(final!)}` : `tramo de ${D - b + 1} días: bloques de < ${DIAS_MIN_BLOQUE} días, sin comparar`;
+  const motivo = `pendiente ${pendiente === null ? `¿? (${puntos.length} días con dato, < ${PUNTOS_MIN_PENDIENTE})` : `${pendiente.toExponential(2)}/día (${puntos.length} días)`}${pendienteConHuecos ? ` favorable pero con ${sinDato.length} día(s) sin dato (${rangos(sinDato)}): no decide` : ''}; ${bloques}`;
+  return { o: o(s1, s2), y: y(s1, s2), ...base, pendienteDecide: s1 !== null, mediaInicio: inicio, mediaFinal: final, motivo };
+}
+
+const fmtP = (p: number) => p < 1e-4 ? p.toExponential(1) : String(redondear(p, 4));
+/** Número pequeño legible: 4 decimales, o notación exponencial por debajo de 1e-3 (una subida de 1,5e-5 no es «0»). */
+const fmtNum = (x: number) => x === 0 || Math.abs(x) >= 1e-3 ? String(redondear(x, 4)) : x.toExponential(2);
+
+/** C8 sobre una serie: `valor(dia)` es el dato del día (undefined/null = sin dato). Exportada para la
+ * calibración (scripts/lab/calibrar-c8.mts): la tabla mide ESTA función, no una copia. */
+export function evaluarSerieDiversidad(valor: (dia: number) => unknown, D: number, u: Umbrales): ResultadoCriterio {
   const b = u.diaBaseDiversidad;
-  const puntos: [number, number][] = [], sinDato: number[] = [];
-  for (let dia = b; dia <= D; dia++) { const v = num(dias.get(dia), campo); if (v === null) sinDato.push(dia); else puntos.push([dia, v]); }
-  const valores = puntos.map(([, v]) => v);
+  const puntos: [number, number][] = [], sinDato: number[] = [], invalidos: string[] = [];
+  for (let dia = b; dia <= D; dia++) {
+    const v = valor(dia);
+    if (v === undefined || v === null) sinDato.push(dia);
+    else if (typeof v !== 'number' || !Number.isFinite(v) || v < 0 || v > 1) invalidos.push(`día ${dia} = ${JSON.stringify(v)}`);
+    else puntos.push([dia, v]);
+  }
+  // Coherencia: el índice (src/world/diversidad.ts, resumen.ts) está en [0, 1]; otra cosa es un fichero roto.
+  if (invalidos.length)
+    return { estado: 'desconocido', motivo: `índice de diversidad fuera de [0, 1] o no numérico (${invalidos.slice(0, 3).join(', ')}${invalidos.length > 3 ? `, … ${invalidos.length} días` : ''}): datos incoherentes`,
+      valores: { puntos: puntos.length, diasInvalidos: invalidos.length } };
   // Cobertura: una serie con dato solo en unos pocos días del tramo no representa el tramo (p. ej. un
   // instrumento que empezó a escribirse a mitad de la réplica): «desconocido», nunca «cumple».
   const diasTramo = D - b + 1, cobertura = puntos.length / diasTramo;
   if (cobertura < COBERTURA_MIN)
     return { estado: 'desconocido', motivo: `dato en solo ${puntos.length}/${diasTramo} días del tramo ${b}..${D} (${pct(cobertura)} < ${pct(COBERTURA_MIN)}): no representa el tramo; sin dato: ${rangos(sinDato)}`,
       valores: { pendiente: null, puntos: puntos.length, cobertura, diasSinDato: sinDato } };
-  // Bloques de k días en cada extremo, no un día suelto contra otro: el indicador diario es ruidoso.
+  // Extremos completos: el día D y todos los días de los bloques de k días de cada extremo (con k < 2, al
+  // menos los días b y D). Sin ellos, las reglas v1 decidían con los días que quedaban (INSTR-2).
   const k = Math.min(u.ventana, Math.floor(diasTramo / 2));
-  // Extremos completos: el día D y todos los días de ambos bloques (con k < 2, al menos los días b y D).
-  // Con ≥ 80 % de cobertura pero el final (o los días más bajos) ausente, el bloque final no se calculaba
-  // y la regla «o» aprobaba con la pendiente de los días que quedaban (verificador de INSTR-2).
   const kExtremo = Math.max(1, k), finInicio = b + kExtremo - 1, inicioFinal = D - kExtremo + 1;
   const faltanExtremos = sinDato.filter(dia => dia <= finInicio || dia >= inicioFinal);
   if (faltanExtremos.length)
-    return { estado: 'desconocido', motivo: `sin dato en ${faltanExtremos.length === 1 ? 'el día' : 'los días'} ${rangos(faltanExtremos)} de los extremos del tramo (bloques días ${b}..${finInicio} y ${inicioFinal}..${D}, que deben estar completos): sin ellos la pendiente decidiría sola con los días que quedan`,
+    return { estado: 'desconocido', motivo: `sin dato en ${faltanExtremos.length === 1 ? 'el día' : 'los días'} ${rangos(faltanExtremos)} de los extremos del tramo (bloques días ${b}..${finInicio} y ${inicioFinal}..${D}, que deben estar completos): sin ellos la tendencia se mediría solo con los días que quedan`,
       valores: { pendiente: null, puntos: puntos.length, cobertura, diasPorBloque: k, diasSinDato: sinDato, diasSinDatoEnExtremos: faltanExtremos } };
-  const pendiente = puntos.length >= PUNTOS_MIN_PENDIENTE ? pendienteMco(puntos) : null;
-  // Una serie plana no «crece» aunque su pendiente sea 0 ≥ 0 (p. ej. un indicador atascado en 0); con
-  // tolerancia relativa, no igualdad exacta: 0,3 constante con 1e-15 más el día D tampoco crece.
-  const tolerancia = TOLERANCIA_PLANA * Math.max(1, ...valores.map(Math.abs));
-  const amplitud = Math.max(...valores) - Math.min(...valores);
-  if (puntos.length >= 2 && amplitud <= tolerancia)
-    return { estado: 'falla', motivo: `serie constante (${redondear(valores[0]!)}${amplitud > 0 ? `; amplitud ${amplitud.toExponential(1)} ≤ ${tolerancia.toExponential(1)}` : ''}) en ${puntos.length} días: no crece`,
-      valores: { pendiente, amplitud, puntos: puntos.length, cobertura } };
-  if (pendiente !== null && Math.abs(pendiente) <= tolerancia)
-    return { estado: 'falla', motivo: `serie sin tendencia (|pendiente| ${Math.abs(pendiente).toExponential(1)}/día ≤ ${tolerancia.toExponential(1)}) en ${puntos.length} días: no crece`,
-      valores: { pendiente, amplitud, puntos: puntos.length, cobertura } };
-  const media = (desde: number): number | null => {
-    if (k < DIAS_MIN_BLOQUE) return null;
-    let s = 0;
-    // Los días de los bloques están todos (comprobado arriba).
-    for (let dia = desde; dia < desde + k; dia++) s += num(dias.get(dia), campo)!;
-    return s / k;
-  };
-  const inicio = media(b), final = media(D - k + 1);
-  // Con huecos en el medio del tramo, una pendiente FAVORABLE no aprueba: esconder días bajos del final
-  // del medio la inclina hacia arriba. Cuenta como desconocida y decide la comparación de bloques
-  // (completos); una pendiente desfavorable sí cuenta (no puede aprobar nada).
-  const favorable = pendiente === null ? null : pendiente >= u.pendienteMin;
-  const pendienteConHuecos = favorable === true && sinDato.length > 0;
-  const s1 = pendienteConHuecos ? null : favorable, s2 = inicio === null || final === null ? null : final >= inicio;
-  const estado = u.diversidadRegla === 'o' ? o(s1, s2) : y(s1, s2);
-  const bloques = k >= DIAS_MIN_BLOQUE ? `media días ${b}..${b + k - 1} ${redondear(inicio!)} → días ${D - k + 1}..${D} ${redondear(final!)}` : `tramo de ${diasTramo} días: bloques de < ${DIAS_MIN_BLOQUE} días, sin comparar`;
-  const motivo = `pendiente ${pendiente === null ? `¿? (${puntos.length} días con dato, < ${PUNTOS_MIN_PENDIENTE})` : `${pendiente.toExponential(2)}/día (${puntos.length} días)`}${pendienteConHuecos ? ` favorable pero con ${sinDato.length} día(s) sin dato (${rangos(sinDato)}): no decide` : ''}; ${bloques}`;
-  return { estado, motivo, valores: { pendiente, pendienteDecide: s1 !== null, puntos: puntos.length, cobertura, diasSinDato: sinDato, diasPorBloque: k, mediaInicio: inicio, mediaFinal: final } };
+  const tolerancia = TOLERANCIA_PLANA * Math.max(1, ...puntos.map(([, v]) => Math.abs(v)));
+  const v1 = reglasV1(puntos, sinDato, b, D, k, tolerancia, u);
+  const reglasAntiguas = { o: v1.o, y: v1.y, pendiente: v1.pendiente, pendienteDecide: v1.pendienteDecide, mediaInicio: v1.mediaInicio, mediaFinal: v1.mediaFinal, diasPorBloque: k, motivo: v1.motivo };
+  const comun = { regla: u.diversidadRegla, puntos: puntos.length, cobertura, diasSinDato: sinDato, diasPorBloque: k };
+  if (u.diversidadRegla !== 'mk') {
+    // Reproducción de la regla v1 (no preregistrada para v2): decide la pedida; se avisa en el informe.
+    return { estado: v1[u.diversidadRegla], motivo: `regla v1 «${u.diversidadRegla}»: ${v1.motivo}`,
+      valores: { ...comun, pendiente: v1.pendiente, pendienteDecide: v1.pendienteDecide, amplitud: v1.amplitud, mediaInicio: v1.mediaInicio, mediaFinal: v1.mediaFinal, reglasAntiguas } };
+  }
+  const antiguas = ` · reglas v1 (no deciden): «o» ${v1.o}, «y» ${v1.y}`;
+  if (puntos.length < N_MIN_MK)
+    return { estado: 'desconocido', motivo: `${puntos.length} días con dato (< ${N_MIN_MK}): Mann-Kendall no se aproxima por la normal${antiguas}`, valores: { ...comun, reglasAntiguas } };
+  const mk = mannKendall(puntos, tolerancia, u.correccionMk);
+  const valoresMk = { S: mk.S, varS: mk.varS, z: mk.z, p: mk.p, alfa: ALFA_MK, correccion: u.correccionMk, factor: mk.factor, factorHamedRao: mk.factorHamedRao, factorAr1: mk.factorAr1, r1: mk.r1,
+    pSinCorreccion: mk.pSinCorreccion, pendienteSen: mk.pendienteSen, subida: mk.pendienteSen === null ? null : mk.pendienteSen * (D - b), subidaMin: u.subidaMin, diasSubida: D - b };
+  // Serie constante (una sola clase de empate): S = 0, Var(S) = 0 y Sen = 0; no crece.
+  if (mk.clases === 1)
+    return { estado: 'falla', motivo: `serie constante (${redondear(puntos[0]![1])}${v1.amplitud > 0 ? `; amplitud ${v1.amplitud.toExponential(1)} ≤ ${tolerancia.toExponential(1)}` : ''}) en ${puntos.length} días: no crece${antiguas}`,
+      valores: { ...comun, ...valoresMk, pPesimista: null, reglasAntiguas } };
+  const subida = valoresMk.subida!, significativa = mk.p < ALFA_MK, sube = subida >= u.subidaMin;
+  let estado: Estado = significativa && sube ? 'cumple' : 'falla', pPesimista: number | null = null, nota = '';
+  // Huecos en el medio (los extremos ya están completos): un «cumple» debe sostenerse con los días que
+  // faltan en su valor más desfavorable; esconder días bajos del final del medio no puede aprobar.
+  if (estado === 'cumple' && sinDato.length) {
+    pPesimista = mannKendallPesimista(puntos, sinDato, tolerancia, mk).p;
+    if (pPesimista >= ALFA_MK) { estado = 'desconocido'; nota = `; con ${sinDato.length} día(s) sin dato (${rangos(sinDato)}) en su valor más desfavorable p = ${fmtP(pPesimista)} ≥ ${ALFA_MK}: no se sostiene`; }
+    else nota = `; se sostiene con los ${sinDato.length} día(s) sin dato (${rangos(sinDato)}) en su valor más desfavorable (p = ${fmtP(pPesimista)})`;
+  }
+  const correccion = u.correccionMk === 'ninguna' ? '' : `, Var(S) ×${redondear(mk.factor, 2)} por autocorrelación (${u.correccionMk === 'hamed-rao' ? 'Hamed-Rao' : `Hamed-Rao ×${redondear(mk.factorHamedRao, 2)}, AR(1) r₁* = ${redondear(mk.r1, 2)} ×${redondear(mk.factorAr1, 2)}`})`;
+  const motivo = `Mann-Kendall S = ${mk.S}, z = ${redondear(mk.z, 2)}, p = ${fmtP(mk.p)} ${significativa ? '<' : '≥'} ${ALFA_MK} (n = ${mk.n}${correccion}); Sen ${mk.pendienteSen!.toExponential(2)}/día × ${D - b} días = subida ${fmtNum(subida)} ${sube ? '≥' : '<'} ${u.subidaMin}${nota}${antiguas}`;
+  return { estado, motivo, valores: { ...comun, ...valoresMk, pPesimista, reglasAntiguas } };
+}
+
+/** C8 sobre una serie (`campo`) de dia-NNN.json; ver la cabecera. */
+function serieDiversidad({ dias, D, u }: Contexto, campo: string): ResultadoCriterio {
+  return evaluarSerieDiversidad(dia => dias.get(dia)?.[campo], D, u);
 }
 
 /** Días sueltos a texto compacto: [5, 6, 7, 9] → «5-7, 9». */
@@ -534,7 +857,9 @@ export const PRIORIDAD_DIVERSIDAD = ['diversidadConductaActiva', 'diversidadCond
 function diversidad(contexto: Contexto): ResultadoCriterio {
   const { dias, D, u } = contexto, b = u.diaBaseDiversidad;
   if (D <= b) return { estado: 'desconocido', motivo: `D = ${D} ≤ día base ${b}: no hay tramo que medir`, valores: {} };
-  const presente = (campo: string): boolean => { for (let dia = b; dia <= D; dia++) if (num(dias.get(dia), campo) !== null) return true; return false; };
+  // «Trae la serie» = algún día del tramo tiene el campo (no null), sea o no un número válido: una serie
+  // preferida con basura se elige y da «desconocido»; no se cae a otra que apruebe.
+  const presente = (campo: string): boolean => { for (let dia = b; dia <= D; dia++) { const v = dias.get(dia)?.[campo]; if (v !== undefined && v !== null) return true; } return false; };
   // auto: la primera serie que el tramo trae algún día. Su cobertura la juzga serieDiversidad: una serie
   // preferida pero incompleta da «desconocido»; no se cae a otra que apruebe (eso sería elegir la medida).
   const campo = u.diversidadCampo === 'auto' ? PRIORIDAD_DIVERSIDAD.find(presente) ?? PRIORIDAD_DIVERSIDAD.at(-1)! : u.diversidadCampo;
@@ -631,6 +956,7 @@ export function evaluarConjunto(conjunto: string, parcial: Partial<Umbrales> = {
     .sort((a, b) => a.brazo.localeCompare(b.brazo) || a.semilla - b.semilla);
   const brazos = [...new Set(replicas.map(r => r.brazo))].map(brazo => resumirBrazo(brazo, replicas.filter(r => r.brazo === brazo), u));
   const desde = Math.max(1, D - u.ventana + 1);
+  if (u.diversidadRegla !== 'mk') avisos.unshift(`C8 decidido con la regla v1 «${u.diversidadRegla}», NO la preregistrada (v2: Mann-Kendall + subida de Sen): con ruido estacionario 0,3 ± 0,1 aprueba el ${u.diversidadRegla === 'o' ? '54-58' : '41-43'} % de las series (scripts/lab/calibrar-c8.mts). Solo para reproducir informes antiguos.`);
   if (D < DIAS_CRITERIO) avisos.unshift(`D = ${D} < ${DIAS_CRITERIO}: el criterio exige al menos ${DIAS_CRITERIO} días simulados; los veredictos son del corte en el día ${D} (provisionales), no del criterio.`);
   return { criterio: CRITERIO_STEVEN, conjunto: resolve(conjunto), diaPedido: u.dia, dia: D, ventana: { desde, hasta: D, dias: D - desde + 1 },
     umbrales: { ...u, dia: D }, descripcionCriterios: describirCriterios(u), brazos, replicas, ignorados, avisos };
@@ -643,7 +969,7 @@ const ETIQUETA: Record<IdCriterio, string> = { supervivencia: 'supervivencia', r
 const BANDERAS: Record<IdCriterio, string> = {
   supervivencia: '--poblacion-min', recambio: '--nacimientos-min --fundadores-max', generaciones: '--generaciones-min',
   cooperacion: '--coop-tipos-min --coop-fraccion-min --coop-actos-min', conflictos: '--conflictos-min', muertes: '--causas-min --causas-conocidas',
-  tecnologia: '--uso-ajeno-min --dias-uso-ajeno-min', diversidad: '--pendiente-min --dia-base-diversidad --diversidad-regla --diversidad-campo',
+  tecnologia: '--uso-ajeno-min --dias-uso-ajeno-min --usos-con-autor-min', diversidad: '--subida-min --correccion-mk --dia-base-diversidad --diversidad-campo --diversidad-regla (--pendiente-min: v1)',
 };
 const MARCA: Record<Estado, string> = { cumple: '✓', falla: '✗', desconocido: '?' };
 const col = (texto: string | number, ancho: number, derecha = false) => { const t = String(texto); return derecha ? t.padStart(ancho) : t.padEnd(ancho); };
@@ -693,8 +1019,9 @@ export function informeTexto(inf: Informe): string {
 const USO = `Uso: npx tsx scripts/lab/criterio-terminado.mts --entrada <conjunto> [--dia N|comun] [--ventana 10] [--salida informe.json]
   [--poblacion-min 16] [--nacimientos-min 1] [--fundadores-max 1] [--generaciones-min 3]
   [--coop-tipos-min 2] [--coop-fraccion-min 0.1] [--coop-actos-min 5] [--conflictos-min 1] [--causas-min 2]
-  [--causas-conocidas starvation,dehydration,exposure,senescence] [--uso-ajeno-min 0.15] [--dias-uso-ajeno-min 0.5]
-  [--dia-base-diversidad 5] [--pendiente-min 0] [--diversidad-regla o|y] [--diversidad-campo auto|activa|tiempo|actividad]
+  [--causas-conocidas starvation,dehydration,exposure,senescence] [--uso-ajeno-min 0.15] [--dias-uso-ajeno-min 0.5] [--usos-con-autor-min 20]
+  [--dia-base-diversidad 5] [--subida-min 0.02] [--correccion-mk hamed-rao-ar1|hamed-rao|ninguna]
+  [--diversidad-regla mk|o|y] [--pendiente-min 0] [--diversidad-campo auto|activa|tiempo|actividad]
   [--mayoria 0.5] [--estancada-horas 3]`;
 
 /** `--diversidad-campo`: alias cortos y nombres de campo de dia-NNN.json. */
@@ -731,7 +1058,10 @@ export function parsearArgumentos(argv: readonly string[]): { entrada: string; s
     '--dias-uso-ajeno-min': v => { u.diasUsoAjenoMin = numero(v, '--dias-uso-ajeno-min', fraccion); },
     '--dia-base-diversidad': v => { u.diaBaseDiversidad = numero(v, '--dia-base-diversidad', { entero: true, min: 0 }); },
     '--pendiente-min': v => { u.pendienteMin = numero(v, '--pendiente-min'); },
-    '--diversidad-regla': v => { if (v !== 'o' && v !== 'y') throw new Error(`--diversidad-regla: «o» o «y», no «${v}».\n${USO}`); u.diversidadRegla = v; },
+    '--usos-con-autor-min': v => { u.usosConAutorMin = numero(v, '--usos-con-autor-min', noNegativo); },
+    '--subida-min': v => { u.subidaMin = numero(v, '--subida-min'); },
+    '--correccion-mk': v => { if (v !== 'hamed-rao-ar1' && v !== 'hamed-rao' && v !== 'ninguna') throw new Error(`--correccion-mk: hamed-rao-ar1, hamed-rao o ninguna, no «${v}».\n${USO}`); u.correccionMk = v; },
+    '--diversidad-regla': v => { if (v !== 'mk' && v !== 'o' && v !== 'y') throw new Error(`--diversidad-regla: «mk» (preregistro v2), «o» o «y» (v1), no «${v}».\n${USO}`); u.diversidadRegla = v; },
     '--diversidad-campo': v => { const campo = Object.hasOwn(CAMPOS_DIVERSIDAD, v) ? CAMPOS_DIVERSIDAD[v] : undefined; if (!campo) throw new Error(`--diversidad-campo: auto, activa, tiempo o actividad, no «${v}».\n${USO}`); u.diversidadCampo = campo; },
     '--mayoria': v => { u.mayoria = numero(v, '--mayoria', { min: 0, max: 1 }); },
     '--estancada-horas': v => { u.estancadaHoras = numero(v, '--estancada-horas', { min: 0 }); },

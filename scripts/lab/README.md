@@ -226,16 +226,26 @@ justificación de cada uno está en la cabecera del script y se repite en la sal
 |---|---|---|---|
 | C1 | supervivencia | `poblacion ≥ 16` **todos** los días de la ventana, no solo el día D (14 fundadores mortales + S e I) | `--poblacion-min` |
 | C2 | recambio | nacimientos en la ventana ≥ 1 **y** `fundadoresMortalesVivos(D) ≤ 1` | `--nacimientos-min --fundadores-max` |
-| C3 | varias generaciones | `generacionesMortalesVivas(D)` ≥ 3 (sin S e I, que mantienen viva la generación 0; si falta, `generacionesVivas` solo como cota: cumple si `generacionesVivas − 1 ≥ 3`, si no «desconocido» o falla) | `--generaciones-min` |
-| C4 | cooperación variada | ≥ 2 tipos de `cooperacionAcumuladaPorTipo` (teaching, trade, constructionHelp y, con instrumentos, `foodShared`), cada uno ≥ 10 % de los actos de la ventana **y** ≥ 5 actos en ella; un tipo que falta en el día base da «desconocido» | `--coop-tipos-min --coop-fraccion-min --coop-actos-min` |
+| C3 | varias generaciones | `generacionesMortalesVivas(D)` ≥ 3 (sin S e I, que mantienen viva la generación 0; si falta, `generacionesVivas` solo como cota: cumple si `generacionesVivas − 1 ≥ 3`, si no «desconocido» o falla). La lista debe ser de enteros ≥ 0 distintos (se cuenta un Set): basura o repetidas (`[2, 2, 2]`) ⇒ «desconocido» | `--generaciones-min` |
+| C4 | cooperación variada | ≥ 2 tipos de la lista **cerrada** {teaching, trade, constructionHelp, foodShared} (otra clave de `cooperacionAcumuladaPorTipo`, p. ej. el alias `Teaching`, se informa y no cuenta), cada uno ≥ 10 % de los actos de la ventana **y** ≥ 5 actos en ella; un tipo que falta en el día base da «desconocido» | `--coop-tipos-min --coop-fraccion-min --coop-actos-min` |
 | C5 | conflictos | `conflictosAcumulados` crece ≥ 1 en la ventana (si es 0 en toda la réplica lo dice) | `--conflictos-min` |
 | C6 | muertes legibles | 0 muertes fuera de starvation/dehydration/exposure/senescence, ≥ 2 causas en 1..D y balance `Δpoblación = Δnacimientos − Δmuertes` desde el día 0 (16 habitantes, o `resumen.poblacionInicial`) | `--causas-min --causas-conocidas` |
-| C7 | tecnología transmitida | Σ`usosDeInventorAjeno` / Σ(`usosUtiles` − `usosSinAutorResuelto`) en la ventana ≥ 0,15 y uso ajeno en ≥ 50 % de sus días | `--uso-ajeno-min --dias-uso-ajeno-min` |
-| C8 | diversidad creciente | pendiente MCO del índice de conducta en días 5..D (≥ 3 días con dato) ≥ 0 **o** media de los k últimos días ≥ media de los k primeros, k = min(10, mitad del tramo) ≥ 2; una serie constante o casi constante (amplitud o \|pendiente\| ≤ 1e-9, relativas) falla; con dato en < 80 % de los días 5..D, o sin dato el día D o algún día de los dos bloques, es «desconocido»; con huecos en el medio, una pendiente favorable no decide. Serie (preregistro, ver abajo): `diversidadConductaActiva` si la réplica la trae, si no `diversidadConductaTiempo`, si no `diversidadConducta`; las otras se informan como secundarias (no deciden) | `--pendiente-min --dia-base-diversidad --diversidad-regla o\|y --diversidad-campo auto\|activa\|tiempo\|actividad` |
+| C7 | tecnología transmitida | Σ`usosDeInventorAjeno` / Σ(`usosUtiles` − `usosSinAutorResuelto`) en la ventana ≥ 0,15 y uso ajeno en ≥ 50 % de sus días. Cada día `usosDeInventorAjeno ≤ usosUtiles − usosSinAutorResuelto` (si no, «desconocido»); ningún uso útil ⇒ falla; < 20 usos con autor conocido ⇒ «desconocido» (muestra insuficiente) | `--uso-ajeno-min --dias-uso-ajeno-min --usos-con-autor-min` |
+| C8 | diversidad creciente | **Preregistro v2** (ver abajo): Mann-Kendall unilateral de tendencia creciente, p < 0,05, sobre los días 5..D (≥ 10 días con dato; Var(S) con empates y corregida por autocorrelación) **y** subida de Sen (pendiente × (D − 5)) ≥ 0,02. Se mantienen: serie `diversidadConductaActiva` → `diversidadConductaTiempo` → `diversidadConducta` (las otras, secundarias), cobertura ≥ 80 % y extremos completos (si no, «desconocido»). Con huecos en el medio, «cumple» solo si se sostiene con los días que faltan en su valor más desfavorable. Índice fuera de [0, 1] ⇒ «desconocido»; serie constante ⇒ falla. Las reglas v1 (pendiente MCO «o»/«y» bloques) se informan en `valores.reglasAntiguas`, no deciden | `--subida-min --correccion-mk --dia-base-diversidad --diversidad-campo auto\|activa\|tiempo\|actividad --diversidad-regla mk\|o\|y` |
 
 - Cada criterio es cumple / falla / **desconocido** (campo ausente): nunca se aprueba por defecto.
 - Nada se decide con un día suelto: `diversidadConducta` salta ±0,1 de un día a otro en r2, así que
-  C8 compara medias de bloques y exige ≥ 3 puntos para la pendiente; C1 mira toda la ventana.
+  C8 usa un test de tendencia sobre todo el tramo (≥ 10 días) y C1 mira toda la ventana.
+- **Coherencia** (verificador de INSTR-3; cualquier fallo da «ilegible» o «desconocido», nunca «cumple»):
+  el `tick` de cada `dia-NNN.json` debe existir, ser numérico y valer NNN·2400 (si no, ilegible);
+  contadores y poblaciones que deciden algo (`poblacion`, `nacimientos`, `vecinosMortales`,
+  `fundadores*`, `generacionesVivas`, `conflictosAcumulados`, `usos*`, `foodShared`, cada causa de
+  `muertesPorCausa` y cada tipo de la lista cerrada de cooperación) deben ser enteros ≥ 0 cuando están
+  (si no, ilegible); dos directorios del mismo brazo que resuelven a la misma semilla (`x-1`, `x-01`,
+  `x-001`) son todos ilegibles con un error que los nombra; un acumulado que decrece (nacimientos,
+  conflictos, una causa de muerte, un tipo de cooperación) da «desconocido»; el índice de diversidad
+  debe estar en [0, 1]; y la comparación de bloques de las reglas v1 usa tolerancia 1e-9 (bloques
+  iguales no son «crecer»).
 - C8 exige cobertura: la serie evaluada (la que decide y cada secundaria) debe tener dato en ≥ 80 %
   de los días del tramo 5..D; si no, «desconocido», nunca «cumple». Cierra el hueco que encontró el
   verificador: una serie por tiempo presente solo los días 5-7 (creciente) decidía sola y aprobaba C8
@@ -246,9 +256,11 @@ justificación de cada uno está en la cabecera del script y se repite en la sal
   calcular y la regla «o» aprobaba solo con la pendiente de los días que quedaban. Si los huecos caen
   en el medio del tramo, una pendiente **favorable** no aprueba sola (esconder días bajos del final del
   medio la inclina): cuenta como desconocida y decide la comparación de bloques. Con la serie completa
-  (lo que escribe `replica.ts`) nada de esto cambia el resultado.
-- C8 no usa igualdad exacta para «constante»: amplitud (máx − mín) o |pendiente| ≤ 1e-9 × máx(1,
-  máx |valor|) ⇒ no crece ⇒ falla (0,3 constante con 1e-15 más el día D aprobaba por pendiente 2e-17).
+  (lo que escribe `replica.ts`) nada de esto cambia el resultado. (Eso era la v1; en v2 los huecos del
+  medio se tratan con la cota pesimista de S, ver «Preregistro v2 de C8».)
+- C8 no usa igualdad exacta: dos valores a ≤ 1e-9 × máx(1, máx |valor|) son un empate para
+  Mann-Kendall, su varianza y Sen; una serie de una sola clase de empate es constante ⇒ falla (0,3
+  constante con 1e-15 más el día D aprobaba la v1 por pendiente 2e-17).
 - Solo se aceptan ficheros `dia-NNN.json` con el nombre que escribe `replica.ts` (3 dígitos,
   `padStart(3, '0')`). Dos ficheros que resuelven al mismo día (`dia-20.json` y `dia-020.json`) o un
   nombre no canónico suelto hacen la réplica **ilegible** con un error que los nombra (los 8
@@ -297,6 +309,91 @@ dato; si no, «desconocido») están en la cabecera de `criterio-terminado.mts` 
 (`tests/criterio-terminado.test.ts`: el caso sintético del verificador da «desconocido»; una activa
 completa y creciente da «cumple» aunque tiempo y antigua caigan; una activa completa que cae da
 «falla» aunque las otras dos crezcan).
+
+## Preregistro v2 de C8 (orquestador, 2026-09-22 21:45)
+
+Fijado **antes** de mirar C8 en los conjuntos de 60 días (y registrado en la bitácora de la noche).
+La razón: la regla v1 («pendiente MCO ≥ 0 **o** media de los 10 últimos días ≥ media de los 10
+primeros») aprobaba **ruido estacionario** en el ~60 % de las series: con 0,3 ± 0,1 uniforme cada día,
+la pendiente de mínimos cuadrados sale ≥ 0 la mitad de las veces y la comparación de bloques otra
+mitad, y la «o» suma las dos. Medido: 58 % a D = 60 (1000 series) y 180 de las 300 réplicas de ruido del
+verificador de INSTR-3, que la v1 declaraba «mayoría». Un criterio que aprueba el azar no distingue un
+mundo cuya conducta se diversifica de uno que no cambia.
+
+**C8 v2** (`scripts/lab/criterio-terminado.mts`, regla `mk`, la de por defecto). Sobre la serie que
+decide (activa > tiempo > actividad, sin caer a otra), días base..D (base = `--dia-base-diversidad`, 5):
+
+1. **Mann-Kendall** de tendencia creciente, unilateral, **p < 0,05**. S = Σ_{i<j} sgn(x_j − x_i); Var(S) =
+   [n(n−1)(2n+5) − Σ t(t−1)(2t+5)] / 18 con corrección por empates (empate = diferencia ≤ 1e-9);
+   aproximación normal con corrección de continuidad, z = (S − 1)/√Var(S). Con n < 10 días con dato,
+   «desconocido».
+2. **Corrección por autocorrelación** (`--correccion-mk hamed-rao-ar1`): Var(S) × el mayor de dos
+   factores, ambos acotados a ≥ 1 (una autocorrelación negativa espuria nunca estrecha la varianza):
+   Hamed y Rao (1998; autocorrelaciones significativas, |ρ_k| > 1,96/√n, de los rangos del residuo sin
+   tendencia x − β·t con β = Sen) y el mismo factor con un AR(1) paramétrico, ρ_k = r*^k, con r* = (n·r₁
+   + 1)/(n − 4) (corrección de sesgo de Yue y Wang) del residuo, acotado a [0; 0,95]. El preregistro pedía
+   añadir Hamed-Rao si el AR(1) φ = 0,7 superaba el 10 %: sin corrección daba 21-25 %, con Hamed-Rao
+   solo, 15-17 % (su estimador empírico subestima la autocorrelación con n = 26-56); con el factor AR(1),
+   7 %. Por eso el defecto es el mayor de los dos.
+3. **Y subida de Sen** (mediana de las pendientes entre pares × (D − base)) **≥ 0,02** (`--subida-min`):
+   un test significativo con una subida despreciable no es «diversidad creciente» (una serie constante
+   con un 1e-6 más el día D da p ≈ 0,05 y subida 0).
+
+Se mantienen de la v1: la elección de la serie (preregistro anterior, arriba), la cobertura ≥ 80 % de
+los días base..D y los extremos completos (dato el día D y en todos los días de los bloques de k días de
+cada extremo); si no, «desconocido». **Huecos en el medio**: un «cumple» debe sostenerse con los días
+que faltan en su valor **más desfavorable** (cota inferior de S: cada día que falta toma el valor que
+minimiza su suma de signos con los días con dato, los pares entre días que faltan cuentan −1, Var(S) con
+n completo); si no, «desconocido». Así, esconder los 11 días más bajos de 30..50 de una serie de ruido
+(p = 0,0099 con los días que quedan) da p pesimista 0,35 ⇒ «desconocido» (test «esconder los días
+bajos»). Un índice fuera de [0, 1] o no numérico en el tramo ⇒ «desconocido».
+
+`valores` documenta S, Var(S), z, p (y `pSinCorreccion`), `factor`, `factorHamedRao`, `factorAr1`,
+`r1`, `pendienteSen`, `subida`, `pPesimista` (con huecos) y `reglasAntiguas` (estado «o» y «y» de la
+v1, pendiente MCO y medias de bloques: se informan, **no deciden**). `--diversidad-regla o|y` vuelve a
+decidir con la v1 solo para reproducir informes antiguos, y el informe lo avisa en cabeza.
+
+### Calibración (`scripts/lab/calibrar-c8.mts`)
+
+```sh
+npx tsx scripts/lab/calibrar-c8.mts [--series 1000] [--semilla 20260922] [--salida calibracion.json]
+```
+
+1000 series sintéticas por caso con un PRNG determinista propio (mulberry32, una semilla por caso y
+horizonte derivada de 20260922), evaluadas con la MISMA función que usa el evaluador
+(`evaluarSerieDiversidad`). Tasa de C8 = «cumple» (días 5..D; ruido U(±0,1) = 0,3 ± 0,1 uniforme):
+
+| caso | D | v2 por defecto (MK, Hamed-Rao + AR(1)) | MK, solo Hamed-Rao | MK sin corrección | v1 «o» | v1 «y» |
+|---|---|---:|---:|---:|---:|---:|
+| estacionaria — 0,3 ± 0,1 uniforme, independiente | 60 | 4,0 % | 4,5 % | 4,5 % | 58,1 % | 40,8 % |
+| ar1 — AR(1) φ = 0,7, innovación U(±0,1) (σ marginal 0,081) | 60 | 7,2 % | 15,1 % | 23,3 % | 55,8 % | 42,0 % |
+| ar1-var — AR(1) φ = 0,7, σ marginal 0,058 (= estacionaria) | 60 | 6,9 % | 16,3 % | 24,5 % | 56,0 % | 41,1 % |
+| sube-0.001 — creciente 0,001/día + ruido U(±0,1) | 60 | 58,6 % | 61,7 % | 62,8 % | 99,3 % | 95,6 % |
+| sube-0.003 — creciente 0,003/día + ruido U(±0,1) | 60 | 100,0 % | 100,0 % | 100,0 % | 100,0 % | 100,0 % |
+| baja-0.001 — decreciente 0,001/día + ruido U(±0,1) | 60 | 0,0 % | 0,0 % | 0,0 % | 3,9 % | 0,9 % |
+| paseo — informativo: paseo aleatorio 0,3 + Σ U(±0,03) (no estacionario, sin tendencia) | 60 | 19,7 % | 32,7 % | 40,0 % | 50,5 % | 46,5 % |
+| satura — informativo: sube 0,2 saturando, 0,3 + 0,2·(1 − e^{−(d−5)/10}) + ruido U(±0,1) | 60 | 99,0 % | 99,2 % | 100,0 % | 100,0 % | 100,0 % |
+| estacionaria — 0,3 ± 0,1 uniforme, independiente | 30 | 3,2 % | 3,7 % | 3,7 % | 54,2 % | 42,8 % |
+| ar1 — AR(1) φ = 0,7, innovación U(±0,1) (σ marginal 0,081) | 30 | 7,4 % | 16,6 % | 20,9 % | 52,6 % | 45,7 % |
+| ar1-var — AR(1) φ = 0,7, σ marginal 0,058 (= estacionaria) | 30 | 7,3 % | 17,4 % | 21,9 % | 54,0 % | 47,4 % |
+| sube-0.001 — creciente 0,001/día + ruido U(±0,1) | 30 | 10,7 % | 12,8 % | 13,2 % | 76,8 % | 68,9 % |
+| sube-0.003 — creciente 0,003/día + ruido U(±0,1) | 30 | 50,9 % | 55,6 % | 56,1 % | 98,8 % | 97,0 % |
+| baja-0.001 — decreciente 0,001/día + ruido U(±0,1) | 30 | 1,2 % | 1,3 % | 1,3 % | 31,8 % | 23,1 % |
+| paseo — informativo: paseo aleatorio 0,3 + Σ U(±0,03) (no estacionario, sin tendencia) | 30 | 20,9 % | 34,7 % | 39,5 % | 53,2 % | 50,8 % |
+| satura — informativo: sube 0,2 saturando, 0,3 + 0,2·(1 − e^{−(d−5)/10}) + ruido U(±0,1) | 30 | 95,6 % | 97,8 % | 98,4 % | 100,0 % | 100,0 % |
+
+Requisitos del preregistro: estacionaria independiente ≤ 7 % (**4,0 % y 3,2 %**); AR(1) φ = 0,7 ≤ 10 %
+tras la corrección (**7,2 % y 7,4 %**; 6,9 % y 7,3 % con la misma varianza marginal que la
+estacionaria). **Potencia para 0,003/día: 100 % a D = 60 y 51 % a D = 30** (25 días de tramo; la subida
+de 0,075 queda cerca del ruido ±0,1); para 0,001/día, 59 % y 11 %. Decreciente: 0 % y 1,2 %. El test
+`calibración de C8` de `tests/criterio-terminado.test.ts` recalcula la tabla y la compara con estas cifras
+y con las cotas.
+
+Límites conocidos (filas informativas, sin cota en el preregistro): un **paseo aleatorio** (no
+estacionario, sin tendencia) aprueba el ~20 %: si la serie real deriva como un paseo, una deriva
+ascendente es indistinguible de una tendencia con 26-56 días; la corrección lo baja del 40 % sin
+corrección. Un crecimiento que **se aplana** (satura) conserva la potencia (99 % y 96 %) aunque la
+corrección AR(1) lea la curvatura como autocorrelación.
 
 ## Techo de laboratorio (`--techo-lab N`, noche 2026-09-22)
 

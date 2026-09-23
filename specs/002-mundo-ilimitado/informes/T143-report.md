@@ -11,6 +11,15 @@ comprobación sigue siendo lineal (≈6 ns por habitante frente a ≈35–65 ns)
 nacimiento o muerte sigue siendo O(P·objetos): 4–6,5 ms con P = 2000 y 33–47 ms con P = 8000. A partir de
 unos cientos de habitantes es el coste real de este sitio. Ver «Qué falta».
 
+**Segunda vuelta (2026-09-23), tras el rechazo del verificador:** su hallazgo es cierto como observación
+(el coste del sitio sigue siendo lineal en P) y **no es un defecto corregible dentro de T143**. Con los
+ficheros de la tarea, la firma de hoy y un checkpoint byte a byte igual, «no depender de P» es
+inalcanzable: hay una cota inferior Ω(P) para el padrón y Ω(P·objetos) para la rotación. Los tests
+fijados rechazan dos mutantes sublineales, y también un tercero que compara identidades en vez de ids. Lo que el bloque E.0 necesita de este
+sitio, que no haya término cuadrático, se cumple antes y después: el ajuste lineal da R² de 0,96 a
+0,9997. El resto se eleva a la integración con una propuesta medida. No hay cambio de código en esta
+vuelta, sólo un caso límite más en los tests. Ver «Segunda vuelta».
+
 ## Localización (regla 11)
 
 La cita `technology-checkpoint.ts:90-91` era de `f30d528`. En `5e0556f` el mismo código seguía en
@@ -139,8 +148,9 @@ Lectura:
    Eso toca `src/world/index.ts`, fuera de los ficheros de T143 (regla 1). Se deja propuesto para T144,
    T145 o la integración.
 2. **La rotación sigue siendo O(P·objetos).** El checkpoint es por definición una foto completa de las
-   existencias en la frontera. Con P = 8000 casi cada tick tiene un nacimiento o una muerte, y la rotación
-   cuesta 33–47 ms por tick, del orden del presupuesto entero del gobernador (50 ms). Hay dos formas de
+   existencias en la frontera. Con P = 8000, aproximadamente la mitad de los ticks tienen un nacimiento o una muerte
+   (estimación corregida en la segunda vuelta: ≈47 %), y la rotación cuesta 33–47 ms, del orden del
+   presupuesto entero del gobernador (50 ms). Hay dos formas de
    bajarla sin cambiar la regla, las dos fuera de este fichero y con riesgo semántico que merece su propia
    tarea y revisión adversarial:
    - (a) llevar en `technology.ts` qué inventarios cambiaron desde la última captura, para recapturar
@@ -150,6 +160,164 @@ Lectura:
 
    Espaciar las rotaciones sería un cambio de regla (FR-020).
 3. No se marcan casillas de `tasks.md`: lo hace la integración.
+
+## Segunda vuelta (2026-09-23): el rechazo del verificador
+
+**Hallazgo** (gravedad alta, reproducido por el verificador): el cierre «el coste por tick deja de depender
+de P» no se cumple. El tick quieto hace 2P comparaciones y la rotación en cada nacimiento o muerte no
+mejora. Sus medianas en µs para P = 100/400/1600/6400/25600 están en
+`/datos/tmp-atlas-lab/e0-verif/T143/out/bench-{base,t143}.json`:
+
+- quieto: T143 1,44 / 5,49 / 21,1 / 87,7 / 375,5, frente a 6,0 / 17,6 / 58,8 / 370 / 2611 en la base;
+- un alta por tick: T143 149 / 279 / 836 / 3724 / 31 441, frente a 138 / 256 / 756 / 4183 / 25 602.
+
+**Comprobación: cierto como observación, no corregible dentro de T143.**
+
+1. **El padrón tiene una cota inferior de Ω(P).**
+   - `advanceTechnologyCheckpoint(state, actors, tick)` debe decidir `rosterChanged` de forma exacta.
+   - Un algoritmo que lea menos de P ids deja un actor sin mirar. Renombrarlo en sitio (mismo array,
+     misma longitud, misma apertura) cambia la respuesta de «no» a «sí» sin que el algoritmo lo note.
+   - Ninguna caché de módulo lo evita: arrays y objetos son mutables entre llamadas, y el clon por paso
+     rompe cualquier identidad.
+   - Bajar de P exige una entrada nueva en la que confiar: una señal de altas y bajas que mantenga quien
+     muta `world.people`.
+   - Esa señal vive en `index.ts` (`reproduce`, `cloneWorld`) y en `lineage.ts` (las muertes). Está fuera
+     de los ficheros de T143 (regla 1) y en funciones que reescriben T141 (`reproduce`) y T142
+     (`lineage.ts`) en esta misma oleada (regla 12).
+2. **La rotación tiene una cota inferior de Ω(P·objetos).**
+   - Por regla, una rotación es una foto de todos los inventarios en ese tick, y el control exige los
+     mismos bytes.
+   - Cualquier inventario no leído pudo cambiar desde la apertura anterior. Sin un registro fiable de qué
+     inventarios cambiaron, hay que leerlos todos. Las mutaciones están en `technology.ts`, que T140
+     toca en esta oleada.
+   - Lo mismo vale para la aserción de la apertura vieja. La única salida sería memorizarla, y eso
+     debilita la garantía anticorrupción («Never normalize a malformed boundary by rotating it») frente a
+     una apertura editada en sitio.
+3. **Los tests fijados ya rechazan los atajos sublineales.** Los mutantes viven en copias fuera del
+   árbol y no se integran: `/datos/tmp-atlas-lab/t143b/m1` guarda A2, que sustituyó a A1 en la misma
+   copia, y `m2` guarda A3.
+
+   | Mutante | Qué hace | Resultado con `tests/technology-checkpoint.test.ts` |
+   |---|---|---|
+   | A1, padrón O(1) | Salta el predicado si el array, su longitud y la apertura son los mismos objetos. | 2 fallos: fuzz en el tick 4 (`replace`) y caso límite del relevo en sitio. |
+   | A2, padrón por identidad | Compara punteros de cada actor, no ids. | 2 fallos: fuzz en el tick 5 (`forge`) y el caso nuevo «renombrar en sitio». |
+   | A3, rotación sin releer | En un cambio de padrón conserva las entradas de los que siguen y sólo captura a los nuevos. | 2 fallos: mundo de 2400 pasos en el tick 150 y fuzz en el tick 26 (`birth`). En el mundo, `neighbor-2` había fabricado `product-1` y otros tenían residuo de agua desde la apertura anterior. |
+
+   Se añade un caso límite explícito al test del relevo: renombrar un actor en sitio rota. Pasa contra
+   `5e0556f` (18/18) y contra T143, y falla con A2.
+
+**Lo que E.0 pide de este sitio sí se cumple.** El bloque es «fuera los cuadráticos», y T144 cierra con
+R² > 0,95 lineal.
+
+- Hay como mucho una rotación por tick, así que el sitio cuesta O(P·objetos + P log P) por tick: lineal
+  salvo el logaritmo.
+- Ajuste lineal de µs frente a P (100–25 600) sobre las cifras del propio verificador:
+
+| Escenario | 5e0556f | T143 |
+|---|---|---|
+| quieto | 103,8 ns/hab, R² 0,989 | **14,7 ns/hab**, R² 0,9997 |
+| clonado con `structuredClone` | 313 ns/hab, R² 0,999 | 110 ns/hab, R² 0,960 |
+| un alta por tick (rotación) | 1013 ns/hab, R² 0,993 | 1247 ns/hab, R² 0,983 (misma función: ruido) |
+
+- El escenario «clonado» del banco es pesimista. `structuredClone` crea strings nuevas, mientras que
+  `cloneWorld` (`cloneState`) devuelve los primitivos tal cual. Tras el clon real los ids son las mismas
+  strings y la comparación por contenido se resuelve por puntero.
+
+**Peso en el paso real.** Banco nuevo, `/datos/tmp-atlas-lab/t143b/paso.mts`:
+
+- Montaje: `createWorld(51926)`, 600 pasos de calentamiento y clones sintéticos de un fundador con
+  objetos, como `curva-techo`.
+- Ejecución: `cloneWorld` en cada paso, como el servidor; 40 ticks sin cambio de padrón y 40 con una
+  muerte forzada, es decir, con rotación.
+- Condiciones: base y T143 corrieron a la vez, con la torre a carga 16–23.
+
+Medianas en ms (base / T143):
+
+| P final | Objetos | Paso quieto | Fase `checkpoint`, quieto | Paso con rotación | Fase `checkpoint`, con rotación |
+|---:|---:|---:|---:|---:|---:|
+| 760 | 810 | 36,5 / 40,0 | 0,97 / 0,77 | 39,0 / 33,6 | 1,86 / 1,53 |
+| 1960 | 2017 | 96,6 / 84,7 | 2,85 / 2,68 | 95,5 / 87,6 | 5,78 / 5,80 |
+| 6360 | 6488 | 425 / 482 | 14,5 / 14,2 | 426 / 440 | 35,6 / 38,5 |
+
+- La fase pesa ≈3 % del paso en un tick quieto y 5–9 % en uno con rotación, igual en los dos árboles.
+- El paso crece más que linealmente: ×2,6 de P da ×2,1–2,6 de paso, y ×3,2 de P da ×4,4–5,7. Eso es
+  lo cuadrático que ataca T141, no este sitio.
+- En un tick quieto la fase no es el padrón. El microbanco da ≈11 µs para el sitio con P = 2000, y la
+  fase mide ≈2,7 ms.
+  - El resto, inferido por diferencia, es el bucle `maintainTechnologyMemory` sobre toda la población
+    (`technology.ts`, ≈1,4–2,2 µs por habitante y tick). También es O(P) y queda fuera de T143.
+  - **Aviso para T144**: la fase se llama `checkpoint`, pero casi todo su coste en un tick quieto es ese
+    bucle.
+- La rotación añade al paso ≈1 ms con P = 760, ≈3 ms con P = 1960 y ≈22 ms con P = 6360.
+
+**Frecuencia de rotaciones (estimación, no medida).**
+
+- Supuestos: la ley de longevidad por defecto da una edad máxima de 10–15 días de 2400 ticks. Con una
+  vida media de ≈25 000 ticks en régimen estacionario, altas ≈ bajas ≈ P/25 000 por tick.
+- Fracción de ticks con rotación: 1 − e^(−2P/25 000).
+  - ≈6 % con P = 760;
+  - ≈15 % con P = 2000;
+  - ≈40 % con P = 6400;
+  - ≈47 % con P = 8000;
+  - ≈87 % con P = 25 600.
+- Por encima de ≈640 habitantes (más del 5 % de los ticks) la rotación entra en el p95 del gobernador.
+  Por encima de ≈19 000, rota más del 95 % de los ticks.
+- Para la meta de mundos mucho mayores, **el coste que importa de este sitio es la rotación, no el
+  padrón.**
+
+**Dónde se va la rotación.** Microbanco `/datos/tmp-atlas-lab/t143b/perfil.mts`: llamada aislada, torre
+cargada, p50 en ms, k = objetos por habitante.
+
+| P | k | Aserción | Captura | De ella, ordenar ids con `localeCompare` |
+|---:|---:|---:|---:|---:|
+| 2000 | 2 | 0,97 | 2,07 | 0,47 |
+| 6400 | 2 | 6,6 | 7,3 | 1,6 |
+| 25 600 | 2 | 45,8 | 30,0 | 6,0 |
+| 6400 | 8 | 12,4 | 14,6 | 1,7 |
+| 25 600 | 8 | 175 | 99 | 5,7 |
+
+- Dominan la aserción y la copia por objeto; ordenar es secundario.
+- Un orden incremental (inserción binaria de las altas, con guarda de empates) sería exacto. Con objetos
+  reales ahorra un 10–20 % de la rotación y no cambia su orden de magnitud.
+- No compensa el código que añade en un módulo anticorrupción, así que no se hace.
+
+**Propuesta para la integración.** Es una tarea nueva, a ejecutar después de T140, T141 y T142 por la
+regla 12. `tasks.md` no se toca.
+
+1. **Señal de padrón.**
+   - Una época de padrón por mundo, en una caché lateral como la de `heredarEstadisticas`
+     (`statistics.ts`).
+   - La suben `reproduce` (altas), la poda de `lineage.ts` (bajas) y toda carga o migración. `cloneWorld`
+     la hereda, y `advanceTechnologyCheckpoint` la recibe como argumento.
+   - Sólo se salta el predicado cuando la época coincide con la de la última apertura sincronizada.
+   - El contrato nuevo tiene que quedar escrito y comprobado en tests, con el predicado completo en
+     sombra: `person.id` es inmutable, y `world.people` sólo se sustituye o crece con `push`.
+   - Ganancia: ≤15 ns por habitante y tick. Sola no compensa; sólo tiene sentido junto con el punto 2.
+2. **Rotación incremental.**
+   - Marcar como sucio el inventario de un actor en cada mutación de `items` o `residue`: en
+     `technology.ts`, en `technology-water.ts` y en la herencia de `transferEstate`.
+   - En la rotación, reutilizar las entradas limpias de la apertura anterior (inmutables tras la captura)
+     e insertar las altas en el orden.
+   - Memorizar la aserción sólo para entradas propias que nadie haya tocado.
+   - Coste: O(sucios·objetos + altas·log P) más P copias de punteros.
+   - Necesita su propia revisión adversarial:
+     - el orden de claves;
+     - el `-0`;
+     - un `recipeId` ausente frente a uno `undefined`;
+     - entradas forjadas con claves de más, que la aserción de hoy no rechaza y la captura de hoy
+       descarta.
+   - Es lo que hace falta a partir de unos miles de habitantes.
+
+**Controles de la segunda vuelta.**
+
+- Digesto repetido: 12 corridas nuevas, 3 semillas × 2 juegos × 2 árboles, 2400 pasos, en un worktree
+  base nuevo `/datos/tmp-atlas-lab/e0-base-T143`, retirado al terminar.
+  - Resultado: **6/6 idénticos, `completo` y `fisico`**, con los mismos valores de la tabla de arriba.
+  - Salidas en `/datos/tmp-atlas-lab/t143b/dig/`.
+- `npm run typecheck`: verde.
+- Los seis ficheros de test del módulo: **90/90**.
+- El fichero de T143 contra `5e0556f`: **18/18**.
+- No hubo delegación de código en esta vuelta: no hay arreglo que delegar dentro del alcance.
 
 ## ¿Puede el hardware cambiar el resultado?
 

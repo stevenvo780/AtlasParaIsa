@@ -77,7 +77,7 @@ function nextIdentity(counter: number, prefix: 'blueprint' | 'structure', ids: r
     const reserved = Number(suffix); if (!Number.isSafeInteger(reserved)) return;
     largest = Math.max(largest, reserved);
   }
-  const archive = techoDelArchivo(world.retiredChunks);
+  const archive = techoDelArchivo(world.retiredChunks, world.tick);
   if (prefix === 'blueprint') {
     if (archive.blueprintCorrupto) return;
     largest = Math.max(largest, archive.blueprint);
@@ -383,7 +383,7 @@ export function takeFood(world: World, person: Point, requested: number): number
     if (!blueprintAffordances(structure.components).foodCapacity) continue;
     const amount = Math.min(structure.food, requested - taken);
     structure.food -= amount; taken += amount; world.inventionDynamics.foodTaken += amount;
-    if (esMiembro(world.people, member) && member.action === 'eat' && member.hunger > 0) observeUse(world, structure, amount * 10);
+    if (esMiembro(world.people, member, world.tick) && member.action === 'eat' && member.hunger > 0) observeUse(world, structure, amount * 10);
     if (taken >= requested) break;
   }
   return taken;
@@ -398,7 +398,7 @@ export function waterAvailable(world: World, point: Point): number {
 /** Sole drinking debit: use ambient water first, then credit only water delivered by a cistern.
  * The engine applies the matching thirst reduction immediately after this call. */
 export function takeWater(world: World, person: Person, requested: number): number {
-  if (!Number.isFinite(requested) || requested <= 0 || !esMiembro(world.people, person) || person.action !== 'drink'
+  if (!Number.isFinite(requested) || requested <= 0 || !esMiembro(world.people, person, world.tick) || person.action !== 'drink'
     || distance(person, person.target) > 0.5 || person.thirst <= 0) return 0;
   const tile = tileAt(world, person); if (!tile) return 0;
   const needed = Math.min(requested, person.thirst / 3), ambient = Math.min(tile.drinkingWater ?? 0, needed);
@@ -431,7 +431,7 @@ export function facilityRestQuality(world: World, person: Person): number {
  * counterfactual is evidence; saturated bodies and degraded roofs cannot earn fictitious utility. */
 export function recordFacilityRest(world: World, person: Person, before?: Pick<Person, 'fatigue' | 'energy'>): void {
   if (!world.shelterBenefitEnabled || !before || !Number.isFinite(before.fatigue) || !Number.isFinite(before.energy)
-    || before.fatigue < 0 || before.fatigue > 1 || before.energy < 0 || before.energy > 1 || !esMiembro(world.people, person)
+    || before.fatigue < 0 || before.fatigue > 1 || before.energy < 0 || before.energy > 1 || !esMiembro(world.people, person, world.tick)
     || person.action !== 'rest' || distance(person, person.target) > 0.5) return;
   const structure = restFacility(world, person); if (!structure) return;
   const outdoor = world.weather === 'rain' ? 0.2 : 0.55, quality = facilityRestQuality(world, person);

@@ -44,8 +44,9 @@ function digestoSinLaClave(world: World): string {
   try { return digestoCanonico(world); } finally { setParams(world, vigentes); }
 }
 
-// Medidos en `sprint/noche-r3confl-20260922` @e1adaaf ANTES de tocar `src/world`, con la réplica de arriba.
-const PREVIO_42_DEFAULTS_1200 = 'de0bfc68040849eb0b0c906d023a4625893b816b50a7659d14b03ad73616c99f';
+// Medidos con la réplica de arriba ANTES de la ley: el carril en `sprint/noche-r3confl-20260922` @e1adaaf y los
+// defaults en `main` @ff52c30 (reglas 11 se monta sobre ese main; el carril da el mismo digesto en ambos).
+const PREVIO_42_DEFAULTS_1200 = 'd4c91223e9105cfb29abfae2f31571a68e46eb1ec70b45e57f5f3c11d582984c';
 const PREVIO_51926_CARRIL_D_2400 = 'ea56cf5a7901ec169e228bdae9838c8e6b646dd485d2849974b1f8c602cb3e72';
 
 test('(i) con memoriaDisputa=0 el mundo es bit a bit el de antes, también cuando hay disputas', { timeout: 2_800_000 }, t => {

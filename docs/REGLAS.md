@@ -513,6 +513,35 @@ Para abaratar la reserva de verdad hay que dejar de copiar lo que el paso no toc
 teselas: copiarlas sólo cuando un paso las escribe, o que `syncFauna` no las degrade con `delete`, para que el
 punto no tenga que reconstruirlas. Otra opción es que el gobernador no cuente la reserva como parte del paso.
 
+### Motor: halo de las particiones (`src/world/halo.ts`, T111, 2026-09-23)
+
+Cuando el motor reparta el paso por regiones, cada región tendrá que leer de sus vecinas `HALO_CELDAS = 14`
+celdas por eje. `src/world/halo.ts` es el inventario que fija ese número: cada lectura del paso alrededor de
+un punto con su **alcance compuesto** (su radio más el de lo que la función mira alrededor de lo que encontró),
+las lecturas globales que se replican con su cota, las lecturas por id, rol o comunidad, los recorridos de
+fase y la escritura de la activación. `tests/halo-radios.test.ts` lo cruza línea a línea con `src/world` y
+falla si aparece una lectura sin inventariar, un umbral de distancia mayor que el halo o una composición que
+lo supere en una fase repartida (decisión de cada persona, ecología, decisión de la fauna). Es una constante
+y una prueba: no cambia ninguna regla ni el digesto.
+
+- **14, no 13.** El 13 de la refutación G2 (hogar a ≤ 7 y personas a ≤ 6 de él) sigue siendo el máximo para
+  personas. Las teselas llegan a 14: `evaluateCooperation` mira a quien está a ≤ 7 y, desde esa persona, la
+  tesela de su destino (≤ 7 de ella) y las teselas a ≤ 7 para los insumos de una receta. Por colección:
+  teselas 14, personas 13, lugares 12, estructuras 11 y animales 7.
+- **Lo que el halo no cubre.** Con reglas 10 el cortejo (`poblacion.cortejo` 2, `radioCortejo` 128) lee por id
+  a cada persona vinculada y decide sobre las que están a ≤ 128 celdas: la decisión exige un halo de **128**
+  (14 con el cortejo apagado, como en los mundos históricos). Los recuerdos de la fauna consultan la máscara
+  de presencia hasta 126 celdas; esa máscara no cambia durante el paso y se replica. La búsqueda de ruta de
+  `move` lee terreno a 24 celdas, la activación escribe hasta 23 y una orden deja el destino de alguien a
+  hasta 4 096; todo eso corre en fases seriales. `world.places` (≤ 2 048), invitaciones, recordatorios y
+  planos se replican enteros.
+- **Coste.** Con halo 14, una región llena de 256 × 256 lee de sus vecinas el 23,1 % de su área (12,9 % con
+  halo 8 y 21,3 % con 13); una de 512 × 512, el 11,2 %. En los mundos de hoy pesa más: a los 5 días (semillas 7,
+  42 y 51926, 16–33 habitantes, 10 000–18 000 teselas activas) cada región lee de sus vecinas el 26–50 % de las
+  teselas activas con halo 14 (15–27 % con halo 8), y con regiones de 512 igual o más, porque el mundo nace
+  en el origen, que es esquina de cuatro regiones de cualquier tamaño. Pasar a 512 cambia la geometría de las
+  regiones, no las reglas. Hay que decidirlo con la métrica de T115.
+
 Estas opciones se validan y persisten, pero **T102 no activa backends, deltas ni nuevas señales,
 ni cambia los topes de validación o fundación de comunidades**. La ejecución sigue usando el
 motor V7 y el gobernador p95 existentes. Los límites son declaraciones pendientes de T100;

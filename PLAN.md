@@ -2,12 +2,16 @@
 
 ## Estado actual
 
-Actualización del 22 de septiembre de 2026. La [revisión vigente](docs/REVISION-2026-09-22.md)
-reúne las correcciones de parentesco, enseñanza útil, fabricación por dependencias,
-expresión genética inicial y búsqueda física de agua. La publicación `3dd615e` está
-activa con reglas 7, protocolo 9 y SQLite 4. El mundo nuevo avanza y conserva identidad
-y checkpoint tras reiniciar el servicio; el respaldo horario está habilitado.
-Al día21,21 el censo público dejó sólo S e I, tras siete nacimientos y21 muertes;
+Lo publicado (commit, reglas, protocolo, SQLite y mundo) está en [docs/ESTADO.md](docs/ESTADO.md),
+la única fuente de ese estado; este plan no lo repite. Las revisiones vigentes son la
+[del 22 de septiembre](docs/REVISION-2026-09-22.md), que reúne las correcciones de parentesco,
+enseñanza útil, fabricación por dependencias, expresión genética inicial y búsqueda física de
+agua, y la [de la noche del 22](docs/REVISION-NOCHE-2026-09-22.md): extinción de la V7 pública
+por la política `apagar` del gobernador, política `techo`, reglas 10 y congelación de las
+etapas B–F de la feature 002.
+
+Lo que sigue en esta sección es el registro de la tarde del 22, anterior a la publicación V10.
+En la V7 pública (`3dd615e`, reglas 7), al día21,21 el censo dejó sólo S e I, tras siete nacimientos y21 muertes;
 no sostuvo el recambio mortal. Se conserva el resultado y su
 [evidencia](docs/evidencia-2026-09-22/public-v7-day21-census.json), sin atribuir una
 causa que el censo aislado no demuestra.
@@ -26,8 +30,9 @@ pendientes los límites persistidos por hardware y la puerta de dos millones de
 teselas; [gate técnico](docs/REVISION-PERSISTENCIA-PAGINADA-2026-09-22.md).
 La admisión persistida posterior conserva los valores reservados de copias antiguas
 mediante un modo explícito, incluido en el digesto:1251/1251 pruebas conjuntas,
-seis paridades físicas y revisión independiente. Faltan resolución por hardware,
-admisión previa a materialización y ley10; [contrato](docs/REVISION-LIMITES-PERSISTIDOS-2026-09-22.md).
+seis paridades físicas y revisión independiente. Faltan resolución por hardware y
+admisión previa a materialización (T100); la ley 10 se adoptó después (`688e0a6`, reglas 10);
+[contrato](docs/REVISION-LIMITES-PERSISTIDOS-2026-09-22.md).
 El backup verifica ahora la copia terminada, incluidos chunks e identidades
 diferidos:1170/1170 pruebas y build/smoke exactos;
 [alcance](docs/REVISION-BACKUP-2026-09-22.md).
@@ -54,8 +59,8 @@ completos son una cohorte seleccionada: once0→0 mortales, uno0→1 y otro0→2
 los19 pares restantes siguen censurados. No prueban superioridad general.
 
 Sigue abierto GOAL.md: selección frente a neutralidad, continuidad y diversidad
-multigeneracional, reposición autónoma de insumos, territorio multiescala, etapas A–F
-de la feature 002, teléfono físico y revisión personal de la carta. La medición del
+multigeneracional, reposición autónoma de insumos, territorio multiescala, T100 y las
+etapas B–F de la feature 002 (congeladas hasta sostener 100 días con 3 generaciones), teléfono físico y revisión personal de la carta. La medición del
 archivo mejoró el guardado, pero aún excede 50 ms en la carga envejecida ensayada.
 CPU y ambas GPU se midieron con datos equivalentes; el puente GPU no mejora el coste
 completo y permanece fuera del servidor. Ninguna corrección altera la carta de S/I.

@@ -33,7 +33,7 @@ La revisión integral (12 dimensiones + refutación adversarial, todo con ejecuc
 ```text
 specs/001-mundo-solido-masivo/{spec,plan,research,tasks,quickstart}.md · checklists/requirements.md
 docs/REVISION-2026-09-19.md                 # informe de la revisión (fuente de verdad de los hallazgos)
-.specify/workflows/fase12-vida-servidor.js  # workflow paralelo de Fase 1+2 (tool Workflow, scriptPath)
+docs/historial/fase12-vida-servidor.js  # workflow paralelo de Fase 1+2 (tool Workflow, scriptPath); archivado
 .superpowers/sdd/tasks/progress.md          # ledger SDD (git-ignored): rulings, rondas, completados
 ```
 
@@ -64,7 +64,7 @@ tests/{params,senescencia,genetics,recursos,muerte,lab,lab-barrido,lab-resumen,w
 **Principio**: paralelismo máximo con aislamiento por worktree; calidad por revisión adversarial por tarea; evidencia por laboratorio. Token cost no es restricción (Steven, 2026-09-19).
 
 0. **Fase 0** (workflow `fase0-desbloqueo`, ya lanzado 2026-09-19 09:40): T001 ∥ T002 ∥ T004 en el árbol principal (ficheros disjuntos) → Gate 0 (`typecheck` + suite completa) → **commit «Gate 0»**. T003 hecho (Chromium instalado).
-1. **Fase 1+2** (workflow `.specify/workflows/fase12-vida-servidor.js`, tool `Workflow` con `scriptPath`): **14 agentes en paralelo**, uno por tarea, cada uno con `isolation: 'worktree'` desde el commit Gate 0. Cada agente:
+1. **Fase 1+2** (workflow `docs/historial/fase12-vida-servidor.js`, archivado; tool `Workflow` con `scriptPath`): **14 agentes en paralelo**, uno por tarea, cada uno con `isolation: 'worktree'` desde el commit Gate 0. Cada agente:
    - `ln -s <repo>/node_modules node_modules` en su worktree; lee su tarea en `tasks.md`; lee `docs/REVISION-2026-09-19.md` §de su hallazgo.
    - Si su modelo es externo (`codex/*`, `gemini/*`, `grok/*`, `minimax/*`): delega con `delegar_a_cloud(model, effort, access:'write', cwd:<worktree>, timeout_s: 1500)` con un prompt **autocontenido** (texto literal de la tarea + reglas de ejecución + fragmentos actuales de los ficheros a tocar). Si es Claude, implementa él mismo.
    - Verifica: `npm run typecheck` + `timeout 300 npx tsx --test <sus tests>`; una ronda de corrección si falla; **commit en la rama del worktree**; informe en `.superpowers/sdd/tasks/<TID>-report.md` (en el repo principal).

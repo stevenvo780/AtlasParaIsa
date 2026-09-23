@@ -1,3 +1,5 @@
+// Archivado: workflow de un solo uso del sprint 001 (2026-09-19). No se mantiene ni se ejecuta:
+// fija el árbol público como REPO y cita informes y un ledger de .superpowers/ que no están versionados.
 export const meta = {
   name: 'fase4-revision-diff',
   description: 'T041: revision adversarial del diff completo Gate 0 -> HEAD con 3 lentes Opus (determinismo, conservacion de materia, regresion de supervivencia) + refutacion cruzada',

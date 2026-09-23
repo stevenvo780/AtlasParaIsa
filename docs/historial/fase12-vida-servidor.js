@@ -1,3 +1,5 @@
+// Archivado: workflow de un solo uso del sprint 001 (2026-09-19). No se mantiene ni se ejecuta:
+// fija el árbol público como REPO, un ledger en .superpowers/ y modelos que la flota ya no permite.
 export const meta = {
   name: 'fase12-vida-servidor',
   description: 'Fase 1+2 del sprint 001: 14 workstreams en worktrees paralelos (Codex/Gemini/Grok/MiniMax/Claude), revision adversarial por tarea y una ronda de arreglo',

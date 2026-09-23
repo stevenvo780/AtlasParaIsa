@@ -1,5 +1,12 @@
 # Implementation Plan: Mundo ilimitado — el techo lo pone el hardware
 
+> **Estado (2026-09-22): etapas B–F congeladas.** No se reanudan hasta que los 16 fundadores
+> lleguen a 100 días con 3 generaciones en el 90 % de las semillas
+> (`docs/REVISION-NOCHE-2026-09-22.md`). La etapa A está integrada y solo sigue abierta T100. Este
+> documento conserva el diseño original: el estado de cada tarea está en [tasks.md](tasks.md) y lo
+> publicado en `docs/ESTADO.md`. T116 y T135 siguen asignadas a `grok/*`, que la flota ya no
+> permite; se reasignan al descongelar.
+
 **Branch**: `002-mundo-ilimitado` (desde `001-mundo-solido-masivo`, HEAD **`f30d528`**; la primera redacción se hizo sobre `ab2b376`) | **Date**: 2026-09-19 | **Spec**: [spec.md](spec.md) | **Research**: [research.md](research.md) | **Tareas**: [tasks.md](tasks.md) | **Quickstart**: [quickstart.md](quickstart.md)
 
 ## Summary

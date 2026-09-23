@@ -1,5 +1,12 @@
 # Feature Specification: Mundo ilimitado — el techo lo pone el hardware
 
+> **Estado (2026-09-22): etapas B–F congeladas.** No se reanudan hasta que los 16 fundadores
+> lleguen a 100 días con 3 generaciones en el 90 % de las semillas
+> (`docs/REVISION-NOCHE-2026-09-22.md`). La etapa A está integrada y solo sigue abierta T100. Este
+> documento conserva el diseño original: el estado de cada tarea está en [tasks.md](tasks.md) y lo
+> publicado en `docs/ESTADO.md`. T116 y T135 siguen asignadas a `grok/*`, que la flota ya no
+> permite; se reasignan al descongelar.
+
 **Feature Branch**: `002-mundo-ilimitado`
 
 **Created**: 2026-09-19

@@ -62,8 +62,10 @@ function origenProcedimiento(id: string, procedimientos: PersonDetail['procedimi
   const origen = procedimientos?.find(entry => entry.id === id);
   if (!origen) return '';
   const dia = origen.tick !== undefined ? `, día ${number(Math.floor(origen.tick / 2400) + 1)}` : '';
-  const texto = origen.origen === 'invento' ? `Lo inventó${dia}` : origen.origen === 'aprendido'
-    ? `Aprendido de ${origen.maestro?.nombre ?? nombreConocido(origen.maestro?.id ?? '', world) ?? 'alguien que el mundo ya no conserva'}${dia}` : 'Origen no registrado';
+  // Sin nombre en el servidor ni en este navegador no se dice que «el mundo ya no lo conserva»: solo que no consta.
+  const maestro = origen.maestro?.nombre ?? nombreConocido(origen.maestro?.id ?? '', world) ?? 'alguien cuyo nombre ya no consta';
+  const texto = origen.origen === 'invento' ? `Lo inventó${dia}`
+    : origen.origen === 'aprendido' ? `Aprendido de ${maestro}${dia}` : 'Origen no registrado';
   return `<small class="procedure-origin" data-origin="${esc(origen.origen)}">${esc(texto)}</small>`;
 }
 

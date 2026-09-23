@@ -54,7 +54,11 @@ export function genealogiaFicha(p: PersonView, view: WorldView, extra: Extra): {
   const familia = extra?.familia;
   if (!familia) return { progenitores: '', descendencia: '' };
   const progenitores = familia.progenitores.length ? familia.progenitores.map(pariente).join('') : '<span class="lineage-absent">Población inicial · sin progenitores registrados</span>';
-  const resumen = familia.totalHijos ? `${number(familia.totalHijos)} en total · ${number(familia.hijosVivos)} ${familia.hijosVivos === 1 ? 'vive' : 'viven'}` : 'Ninguna';
+  // `totalHijos` cuenta vivos y los difuntos que el mundo aún registra (`legacy` + `retiredLegacy`); el
+  // registro de difuntos se archiva con el tiempo, así que es lo conocido, no un total de por vida.
+  const conocidos = `${number(familia.totalHijos)} ${familia.totalHijos === 1 ? 'conocido' : 'conocidos'}`;
+  const vivos = `${number(familia.hijosVivos)} ${familia.hijosVivos === 1 ? 'vive' : 'viven'}`;
+  const resumen = familia.totalHijos ? `${conocidos} · ${vivos}` : 'Ninguna conocida';
   const descendencia = `<p class="lineage-count" data-offspring>${esc(resumen)}</p>${familia.hijos.map(pariente).join('')}${familia.totalHijos > familia.hijos.length ? `<span class="lineage-absent">y ${number(familia.totalHijos - familia.hijos.length)} más</span>` : ''}`;
   return { progenitores, descendencia };
 }

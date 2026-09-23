@@ -74,4 +74,12 @@ test('M9: la ficha dice quién inventó y de quién se aprendió un procedimient
   assert.ok(invento.inventadas! >= 1);
   assert.ok(aprendio.procedimientos!.length <= 32);
   assert.ok(Buffer.byteLength(JSON.stringify(aprendio.procedimientos)) <= 32 * 90, 'como mucho ~90 B por procedimiento');
+  // El maestro murió y su registro pasó a `retiredLegacy`: su nombre sigue constando. Fuera de todo registro, null.
+  const maestroDe = (): unknown => enriquecerPersona(world, learner.id)!.procedimientos!.find(p => p.id === recipe.id)!.maestro;
+  world.people.splice(world.people.indexOf(teacher), 1);
+  world.retiredLegacy.push({ id: teacher.id, name: teacher.name, role: 'neighbor', generation: 0, parents: [], bornAt: 0,
+    diedAt: world.tick, cause: 'senescence', communityId: null } as unknown as (typeof world.retiredLegacy)[number]);
+  assert.deepEqual(maestroDe(), { id: teacher.id, nombre: teacher.name });
+  world.retiredLegacy.pop();
+  assert.deepEqual(maestroDe(), { id: teacher.id, nombre: null });
 });

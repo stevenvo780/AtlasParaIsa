@@ -65,7 +65,8 @@ export interface PersonDetail {
   /** M4: a quién busca si su intención es de cortejo o de crianza (nombre único en el mundo vivo). */
   busca?: { id: string; name: string; motivo: 'cortejo' | 'reunion' | 'prepara' };
   /** M8: progenitores e hijos con nombre en todo el mundo servido (vivos y difuntos registrados). `nombre`
-   * y `vivo` null = el mundo ya no conserva ese registro. `hijos` nombra como mucho 24; `totalHijos` los cuenta todos. */
+   * y `vivo` null = el mundo ya no conserva ese registro. `hijos` nombra como mucho 24; `totalHijos` cuenta
+   * todos los que el mundo aún registra (los difuntos se archivan con el tiempo: es lo conocido). */
   familia?: { progenitores: { id: string; nombre: string | null; vivo: boolean | null; generacion: number | null }[];
     hijos: { id: string; nombre: string | null; vivo: boolean | null; generacion: number | null }[]; totalHijos: number; hijosVivos: number };
   /** M8: edad corporal y umbrales de su cuerpo (demographicTraits), en pasos de edad. */

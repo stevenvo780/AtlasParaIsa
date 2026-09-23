@@ -33,6 +33,7 @@ test('M8: generación más alta, vidas sin comunidad y edad en días, del estado
   const g = genealogiaFicha(p, view, { familia: { progenitores: [{ id: 'a', nombre: 'Lino', vivo: true, generacion: 0 }, { id: 'b', nombre: 'Vera', vivo: false, generacion: 0 }], hijos: [{ id: 'c', nombre: 'Olmo 7', vivo: true, generacion: 2 }], totalHijos: 3, hijosVivos: 2 } });
   assert.match(g.progenitores, /Lino · G0 · fuera de esta vista/);
   assert.match(g.progenitores, /Vera · G0 · murió/);
-  assert.match(g.descendencia, /3 en total · 2 viven/);
+  assert.match(g.descendencia, /3 conocidos · 2 viven/, 'los difuntos se archivan: es lo que el mundo aún registra, no un total');
+  assert.doesNotMatch(g.descendencia, /en total/);
   assert.match(g.descendencia, /y 2 más/);
 });

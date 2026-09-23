@@ -48,12 +48,19 @@ export function tecnica(world: World, id: string): Pick<PersonDetail, 'procedimi
   const person = world.people.find(p => p.id === id);
   if (!person) return undefined;
   const recetas = new Map(world.technology.recipes.map(recipe => [recipe.id, recipe]));
+  const nombreDe = (pid: string): string | null => world.people.find(p => p.id === pid)?.name
+    ?? world.legacy.find(r => r.id === pid)?.name ?? world.retiredLegacy.find(r => r.id === pid)?.name ?? null;
   const maestros = new Map<string, { teacherId: string; tick: number }>();
   for (const learned of person.technology.learnedFrom) maestros.set(learned.recipeId, { teacherId: learned.teacherId, tick: learned.tick });
   const procedimientos = person.technology.knownRecipes.slice(0, MAX_PROCEDIMIENTOS).map(recipeId => {
     const recipe = recetas.get(recipeId), maestro = maestros.get(recipeId);
     if (recipe?.inventorId === id) return { id: recipeId, origen: 'invento' as const, tick: recipe.tick };
-    if (maestro) return { id: recipeId, origen: 'aprendido' as const, tick: maestro.tick, maestro: { id: maestro.teacherId, nombre: world.people.find(p => p.id === maestro.teacherId)?.name ?? world.legacy.find(r => r.id === maestro.teacherId)?.name ?? null } };
+    // El maestro puede haber muerto: se busca también entre los difuntos retirados que el mundo aún
+    // conserva (como `familia`); si ya no consta, `nombre` null y la interfaz no lo inventa.
+    if (maestro) {
+      const nombre = nombreDe(maestro.teacherId);
+      return { id: recipeId, origen: 'aprendido' as const, tick: maestro.tick, maestro: { id: maestro.teacherId, nombre } };
+    }
     return { id: recipeId, origen: 'sin-registro' as const };
   });
   return { procedimientos, inventadas: world.technology.recipes.filter(recipe => recipe.inventorId === id).length };

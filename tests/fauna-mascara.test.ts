@@ -127,6 +127,8 @@ test('el paso con la máscara del coordinador repartida entre 1 y 8 particiones 
     assert.ok(seleccion.every((a, i) => a === m.seleccion[i]));
     const reconstruida: MascaraFauna = { tick: m.tick, animales: m.animales, poblacion: m.poblacion, seleccion, ids: new Set(seleccion.map(a => a.id)) };
     stepAnimals(w2, e => events2.push(e), reconstruida);
+    const canonica = [...w.animals].sort(canonicalId); // lo que dejaba el `sort` de cierre de antes
+    assert.ok(w.animals.every((a, i) => a === canonica[i]));
   }
   // El escenario ejerce muertes por fisiología, depredación y nacimientos con la ventana rotando.
   assert.ok(w.animalDynamics.deaths > w.animalDynamics.predations && w.animalDynamics.predations > 0 && w.animalDynamics.births > 0,
@@ -148,6 +150,20 @@ test('el orden canónico rápido da el mismo arreglo que ordenar: ordenado, inve
   }
 });
 
+test('una fauna reordenada en sitio entre pasos no pasa por ordenada', () => {
+  const w = mundoVivo();
+  for (let n = 0; n < 3; n++) { w.tick++; stepAnimals(w); }
+  const mutaciones: ((xs: Animal[]) => void)[] = [xs => xs.reverse(), xs => { [xs[10], xs[20]] = [xs[20]!, xs[10]!]; }, xs => { xs[5] = xs.pop()!; xs.push(xs[6]!); xs[6] = xs[xs.length - 2]!; }];
+  for (const mutar of mutaciones) {
+    const control = structuredClone(w), eventos: unknown[] = [], eventosControl: unknown[] = [];
+    mutar(w.animals); mutar(control.animals);
+    assert.equal(w.animals.length, control.animals.length);
+    w.tick++; control.tick++;
+    stepAnimals(w, e => eventos.push(e)); stepAnimals(control, e => eventosControl.push(e));
+    assert.equal(JSON.stringify(w), JSON.stringify(control)); assert.equal(JSON.stringify(eventos), JSON.stringify(eventosControl));
+  }
+});
+
 test('rechaza una máscara de otro paso', () => {
   const w = herd(12);
   const porTick = mascaraFauna(w);
@@ -157,4 +173,7 @@ test('rechaza una máscara de otro paso', () => {
   const porIdentidad = mascaraFauna(w);
   w.animals = [...w.animals];
   assert.throws(() => stepAnimals(w, undefined, porIdentidad), { message: 'Máscara de fauna de otro paso.' });
+  const porOrden = mascaraFauna(w);
+  w.animals.reverse();
+  assert.throws(() => stepAnimals(w, undefined, porOrden), { message: 'Máscara de fauna de otro paso.' });
 });

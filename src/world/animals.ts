@@ -322,13 +322,24 @@ function reproduce(world: AnimalWorld, state: LocalState, active: Animal[], emit
   }
 }
 
-/** Deja `animals` en orden canónico, en su sitio. El paso anterior ya lo dejó así salvo que una
- * activación haya añadido fauna, y comprobarlo con un `<` por par cuesta un orden de magnitud menos que
- * `sort` sobre un arreglo ordenado (el comparador se llama desde el motor dos veces por par). Mismo
- * resultado: un arreglo de ids estrictamente crecientes es un punto fijo del `sort` estable; si no lo
- * es (desorden o ids repetidos), se ordena como siempre. */
-function ordenCanonico(animals: Animal[]): void {
-  for (let i = 1; i < animals.length; i++) if (!(animals[i - 1]!.id < animals[i]!.id)) { animals.sort(canonical); return; }
+/** Fauna que se sabe en orden canónico: cada arreglo con la copia de sus elementos al comprobarlo.
+ * Mientras conserve esos mismos elementos en ese orden sigue en orden —un `id` no se reasigna nunca:
+ * es la identidad—, y verlo compara punteros sin leer ningún animal. */
+const canonicas = new WeakMap<Animal[], Animal[]>();
+function certificada(animals: Animal[]): boolean {
+  const copia = canonicas.get(animals);
+  if (copia?.length !== animals.length) return false;
+  for (let i = 0; i < animals.length; i++) if (animals[i] !== copia[i]) return false;
+  return true;
+}
+/** Deja `animals` en orden canónico, en su sitio, y lo certifica. Lo anterior a `desde` se sabe en
+ * orden; a partir de ahí basta un `<` por par en vez de `sort`, que sobre fauna ya ordenada (el caso de
+ * cada paso) llama al comparador desde el motor dos veces por par: un arreglo en orden es un punto
+ * fijo del `sort` estable. Si un par falla (desorden o ids repetidos), se ordena como siempre. */
+function ordenCanonico(animals: Animal[], desde = 0): void {
+  if (!desde && certificada(animals)) return;
+  for (let i = Math.max(1, desde); i < animals.length; i++) if (!(animals[i - 1]!.id < animals[i]!.id)) { animals.sort(canonical); break; }
+  canonicas.set(animals, animals.slice());
 }
 
 /** Máscara de fauna del paso (T116), de solo lectura: quién piensa en este tick. La calcula el
@@ -358,7 +369,7 @@ export function stepAnimals(world: AnimalWorld, emit?: AnimalEmitter, mascara?: 
   if (world.animals.length > limitsOf(world).fauna) throw new Error('Capacidad regional de fauna excedida.');
   const state: LocalState = { tile: tileLookup(world.tiles), occupants: new Map(), counts: new Map() };
   const m = mascara ?? mascaraFauna(world);
-  if (m.tick !== world.tick || m.animales !== world.animals || m.poblacion !== world.animals.length)
+  if (m.tick !== world.tick || m.animales !== world.animals || m.poblacion !== world.animals.length || mascara && !certificada(world.animals))
     throw new Error('Máscara de fauna de otro paso.');
   for (const animal of world.animals) {
     const tile = state.tile(animal.x, animal.y);
@@ -395,8 +406,10 @@ export function stepAnimals(world: AnimalWorld, emit?: AnimalEmitter, mascara?: 
     assimilateFood(animal, FOOD_PER_ANIMAL[prey.species], { hungerPerUnit: 4.8, assimilation: animal.genes.carnivory, energyPerUnit: 0.5 });
     animal.lastDecision = world.tick - 12;
   }
+  // Filtrar conserva el orden de la máscara: sólo las crías, al final, pueden estar fuera de sitio.
   world.animals = world.animals.filter(a => a.health > 0);
-  reproduce(world, state, active, emit); ordenCanonico(world.animals); syncFauna(world.tiles, world.animals);
+  const previos = world.animals.length;
+  reproduce(world, state, active, emit); ordenCanonico(world.animals, previos); syncFauna(world.tiles, world.animals);
 }
 
 /** A human hunt removes exactly one living identity on the requested cell, at most once. */

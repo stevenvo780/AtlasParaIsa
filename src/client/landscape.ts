@@ -405,6 +405,7 @@ export class Landscape {
   private originY = 0;
   private reportedViewport = '';
   private followedId: string | null = null;
+  private home: { x: number; y: number } | null = null;
   private grid: (Tile | undefined)[] = [];
   private prevPeople = new Map<string, PersonView>();
   private prevAnimals = new Map<string, AnimalView>();
@@ -630,6 +631,12 @@ export class Landscape {
 
   /** Extra pequeño: permite que la barra lateral resalte a quien se elige en una tarjeta. */
   fit(): void { this.fitWorld(); }
+
+  /** M3: última posición conocida de S (en cuadro, o la que trajo su ficha a demanda). `fit()` y la tecla
+   * Inicio vuelven a ella aunque S no esté en `people`, que llega recortado a la cámara. */
+  setHome(position: { x: number; y: number } | null): void {
+    this.home = position && Number.isFinite(position.x) && Number.isFinite(position.y) ? { x: position.x, y: position.y } : null;
+  }
 
   select(selection: Selection): void { this.selection = selection; }
 
@@ -1011,7 +1018,7 @@ export class Landscape {
   private fitWorld(): void {
     this.recomputeMinZoom();
     this.cam.zoom = Math.max(this.minZoom, this.cssW < 600 ? 24 : 32);
-    const person = this.curr?.people.find(p => p.role === 'S');
+    const person = this.curr?.people.find(p => p.role === 'S') ?? this.home;
     this.cam.x = person ? person.x + 0.5 : this.originX + this.worldW / 2;
     this.cam.y = person ? person.y + 0.5 : this.originY + this.worldH / 2;
     this.clampCamera();
@@ -2013,7 +2020,7 @@ export class Landscape {
         this.zoom(-1);
         break;
       case 'Home': {
-        const s = this.curr?.people.find((p) => p.role === 'S');
+        const s = this.curr?.people.find((p) => p.role === 'S') ?? this.home;
         if (s) this.focus(s.x, s.y);
         else this.focus(this.worldW / 2, this.worldH / 2);
         break;

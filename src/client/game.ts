@@ -14,6 +14,7 @@ import { decidirModo, setModo, type Modo } from './modo.js';
 import { capasDeCalor, leyendaCalor, type Capa } from './calor.js';
 import { ausenteEstado, demographicSummary, rotuloRecuento } from './censo-view.js';
 import { estadoCrecimiento, ritmo, ultimoFrenazo } from './gobernador-view.js';
+import { idDeRol, nombreConocido, olvidarVistos, recordarPersona, recordarVistos, visto } from './vistos.js';
 import './style.css';
 import './game.css';
 import './notebook.css';
@@ -40,8 +41,13 @@ let inspectorTab: 'now' | 'kit' | 'story' = 'now';
 let focusedRecipe: string | null = null;
 /** Steps requested one by one: the snapshot only carries each procedure's identity and capacities. */
 const recipeDetails = new Map<string, TechnologyRecipe | null>();
-/** T036(h): biografías pedidas de una en una; el `state` sólo trae la identidad y el estado de ahora. */
-const personaDetails = new Map<string, PersonDetail | null>();
+/** T036(h): biografías pedidas de una en una; el `state` sólo trae la identidad y el estado de ahora.
+ * M3: cada ficha recuerda el paso en que llegó y se vuelve a pedir como mucho cada `PERSONA_REFRESCO`
+ * pasos (antes se borraba en cada paso y la ficha abierta se pedía ~10 veces por segundo). */
+const personaDetails = new Map<string, { detail: PersonDetail | null; tick: number }>();
+const PERSONA_REFRESCO = 20;
+/** M3: a quién estamos yendo a buscar fuera de la cámara; su ficha trae la posición exacta. */
+let buscando: string | null = null;
 /** M1: lo que el servidor contestó sobre cada identidad pedida (true = vive en el mundo servido). No caduca por tick:
  * una muerte llega por `demography.recent`, que manda sobre este registro. */
 const personaVivo = new Map<string, boolean>();
@@ -82,9 +88,9 @@ function enterWorld(): void {
   clean(); lastVisit = null; status = 'connecting';
   root.innerHTML = worldShell();
   notebook = new Notebook(el('game')); inspectorTab = 'now';
-  focusedRecipe = null; recipeDetails.clear(); personaDetails.clear(); personaVivo.clear();
+  focusedRecipe = null; recipeDetails.clear(); personaDetails.clear(); personaVivo.clear(); olvidarVistos(); buscando = null;
   const modo = syncModo(); modoActual = modo;
-  connection = new Connection({ world: receiveWorld, status: value => { status = value; renderStatus(); }, pending: value => { pending = value; if (!value) landscape?.setPendingTarget(null); renderControls(); }, result: result => message(result.message, result.accepted), error: text => message(text, false), expired: () => loginScreen('La sesión terminó. Vuelve a entrar para ver la carta.'), recipe: (id, recipe) => { recipeDetails.set(id, recipe); if (statsTab === 'technology' && !el('stats-drawer').hidden) renderStats(); }, persona: (id, persona) => { personaDetails.set(id, persona); personaVivo.set(id, persona !== null); if (selected?.kind === 'person' && selected.id === id) { inspectorSignature = ''; renderInspector(); } } });
+  connection = new Connection({ world: receiveWorld, status: value => { status = value; renderStatus(); }, pending: value => { pending = value; if (!value) landscape?.setPendingTarget(null); renderControls(); }, result: result => message(result.message, result.accepted), error: text => message(text, false), expired: () => loginScreen('La sesión terminó. Vuelve a entrar para ver la carta.'), recipe: (id, recipe) => { recipeDetails.set(id, recipe); if (statsTab === 'technology' && !el('stats-drawer').hidden) renderStats(); }, persona: (id, persona) => { personaDetails.set(id, { detail: persona, tick: world?.tick ?? 0 }); personaVivo.set(id, persona !== null); if (persona) recordarPersona(persona, world?.tick ?? 0); llegoPersona(id, persona); if (selected?.kind === 'person' && selected.id === id) { inspectorSignature = ''; renderInspector(); } } });
   landscape = new Landscape(el<HTMLCanvasElement>('landscape'), pick, viewport => { connection?.setViewport(viewport); el('camera-coordinates').textContent = `${viewport.x + Math.floor(viewport.width / 2)}, ${viewport.y + Math.floor(viewport.height / 2)}`; }, () => { following = false; renderControls(); }, { modo });
   // T036(a): en observador el mundo llega cada 5 s (el servidor acota a 1000 ms) y el terreno se
   // dibuja en Canvas 2D: ni WebGL2 ni una cadencia que un móvil lento no puede sostener.
@@ -101,10 +107,31 @@ function drawer(name: Drawer, open?: boolean): void {
 }
 function syncPickingMode(): void { landscape?.setPickMode(control !== 'direct' && el('tool-drawer').hidden ? 'inspect' : 'ground'); }
 function choosePerson(id: string, focus = true): void {
-  const person = world?.people.find(p => p.id === id); if (!person) return;
+  const person = world?.people.find(p => p.id === id); if (!person) { irAPersona(id); return; }
+  buscando = null;
   inspectorTab = 'now'; toggleTasks(false); activePersonId = person.id; selected = { kind: 'person', id }; control = 'inspect'; following = false; landscape?.follow(null); landscape?.select(selected);
   if (focus) landscape?.focus(person.x, person.y);
   inspectorSignature = ''; renderInspector(); renderPopulation(); renderControls(); drawer('inspector', true); el('inspector-tab-now').focus({ preventScroll: true }); if (!pending) message('');
+}
+/** M3: seleccionar a alguien que no está en la cámara. Si murió hace poco se abre su despedida; si no,
+ * se centra la cámara en la última posición conocida y se pide su ficha, que trae la posición exacta.
+ * Cuando entra en cuadro, la ficha completa aparece sola (la selección ya es suya). */
+function irAPersona(id: string): void {
+  if (!world) return;
+  inspectorTab = 'now'; toggleTasks(false); activePersonId = id; selected = { kind: 'person', id }; control = 'inspect'; following = false; landscape?.follow(null); landscape?.select(selected);
+  const muerto = world.demography?.recent.some(entry => entry.id === id);
+  buscando = muerto ? null : id;
+  const known = visto(id);
+  if (!muerto && known?.x !== undefined && known.y !== undefined) landscape?.focus(known.x, known.y);
+  if (!muerto) connection?.requestPersona(id);
+  inspectorSignature = ''; renderInspector(); renderPopulation(); renderControls(); drawer('inspector', true); el('inspector-tab-now').focus({ preventScroll: true }); if (!pending) message('');
+}
+/** M3: respuesta de una ficha. Si íbamos a buscar a esa persona, la cámara va a su posición exacta. */
+function llegoPersona(id: string, persona: PersonDetail | null): void {
+  if (persona?.x !== undefined && persona.y !== undefined && persona.id === idDeRol('S', world)) landscape?.setHome({ x: persona.x, y: persona.y });
+  if (buscando !== id) return;
+  buscando = null;
+  if (persona?.x !== undefined && persona.y !== undefined) landscape?.focus(persona.x, persona.y);
 }
 function chooseAnimal(id: string, focus = true): void {
   const animal = world?.animals?.find(a => a.id === id); if (!animal) return;
@@ -161,8 +188,9 @@ function wire(): void {
     location.reload();
   });
   el('logout-button').addEventListener('click', async () => { try { const response = await fetch('/api/logout', { method: 'POST', credentials: 'same-origin', signal: AbortSignal.timeout(10_000) }); if (!response.ok) throw new Error(); loginScreen(); } catch { loginScreen('Ocultamos la carta, pero no pudimos revocar la sesión. Vuelve a conectar para cerrar la sesión.'); } });
-  el('zoom-in').addEventListener('click', () => landscape?.zoom(1)); el('zoom-out').addEventListener('click', () => landscape?.zoom(-1)); el('map-reset').addEventListener('click', () => { following = false; landscape?.follow(null); landscape?.fit(); renderControls(); });
-  for (const role of ['S', 'I']) el(`focus-${role.toLowerCase()}`).addEventListener('click', () => { const p = world?.people.find(p => p.role === role); if (p) choosePerson(p.id); });
+  el('zoom-in').addEventListener('click', () => landscape?.zoom(1)); el('zoom-out').addEventListener('click', () => landscape?.zoom(-1)); el('map-reset').addEventListener('click', () => { following = false; landscape?.follow(null); const s = world?.people.find(p => p.role === 'S'); if (s) { landscape?.fit(); renderControls(); return; } irAPersona(idDeRol('S', world)); });
+  // M3: S e I se encuentran aunque estén fuera de la cámara (la ficha a demanda trae su posición).
+  for (const role of ['S', 'I'] as const) el(`focus-${role.toLowerCase()}`).addEventListener('click', () => choosePerson(idDeRol(role, world)));
   el('follow-toggle').addEventListener('click', () => { if (selected.kind === 'tile') return; following = !following; landscape?.follow(following ? selected.id : null, selected.kind); renderControls(); if (mobile()) drawer('inspector', false); });
   el('direct-toggle').addEventListener('click', () => { control = control === 'direct' ? 'inspect' : 'direct'; renderControls(); if (control === 'direct' && mobile()) drawer('inspector', false); });
   for (const button of root.querySelectorAll<HTMLButtonElement>('[data-order]')) button.addEventListener('click', () => sendCommand(button.dataset.order as Order));
@@ -245,7 +273,10 @@ function sound(): void {
 function receiveWorld(next: WorldView): void {
   // T036(g): un procedimiento puede reformularse mientras el mundo avanza. La caché describe un
   // paso concreto: al cambiar `tick` deja de ser válida y se vuelve a preguntar bajo demanda.
-  if (world !== null && next.tick !== world.tick) personaDetails.clear(); // las definiciones de receta son inmutables por id: no se invalidan por tick (T041)
+  // M3: la ficha a demanda ya no se borra en cada paso (ver PERSONA_REFRESCO); las definiciones de receta
+  // son inmutables por id y nunca se invalidan por tick (T041).
+  recordarVistos(next);
+  const sNow = next.people.find(p => p.role === 'S'); if (sNow) landscape?.setHome({ x: sNow.x, y: sNow.y });
   const first = world === null; world = next; landscape?.update(next); el('map-loading').hidden = true; el('world-day').textContent = `Día ${next.day}`; el('world-phase').textContent = `${phases[next.phase]}${next.weather === 'rain' ? ' · lluvia' : ''}`;
   el('world-extent').textContent = next.infinite ? `${next.discoveredChunks ?? 0} regiones · ${next.settlementCount ?? 0} asentamientos` : 'Región inicial';
   if (first) {
@@ -345,19 +376,26 @@ function renderInspector(): void {
       // M1: estar fuera de `people` no es morir. Solo `demography.recent` acredita una muerte; si no,
       // se pregunta al servidor (la ficha a demanda mira el mundo entero) y se dice lo que contestó.
       const estado = ausenteEstado(world, id, personaVivo.get(id));
-      if (estado === 'comprobando') connection?.requestPersona(id);
+      const cachedAbsent = personaDetails.get(id);
+      if (estado === 'comprobando' || (estado === 'fuera' && (!cachedAbsent || world.tick - cachedAbsent.tick >= PERSONA_REFRESCO))) connection?.requestPersona(id);
       el('person-controls').hidden = true; el('person-primary').hidden = true; el('direct-toggle').hidden = true;
       el('inspector-tabs').hidden = true;
-      el('inspector-title').textContent = legacy?.name ?? 'Fuera de esta vista';
+      const name = legacy?.name ?? nombreConocido(id, world);
+      el('inspector-title').textContent = name ?? 'Fuera de esta vista';
+      // M3: la posición exacta llega con la ficha a demanda; si no, la última en que se la vio.
+      const detail = cachedAbsent?.detail, known = visto(id);
+      const where = detail?.x !== undefined && detail.y !== undefined ? { x: detail.x, y: detail.y, exact: true } : known?.x !== undefined && known.y !== undefined ? { x: known.x, y: known.y, exact: false } : null;
+      const away = `<p class="game-reason" data-absent="fuera">Vive fuera de esta vista${where ? `, en ${esc(number(where.x))}, ${esc(number(where.y))}` : ''}.</p><p class="drawer-note">${buscando === id ? 'Yendo a su posición; la ficha completa aparece al entrar en cuadro.' : where && !where.exact ? `Última posición vista en esta visita (paso ${esc(number(known?.tick))}).` : 'Sigue en el mundo, fuera de la zona que muestra la cámara.'}</p>${buscando === id ? '' : `<button class="button secondary" data-person-link="${esc(id)}">${icon.focus} Ir a ${esc(name ?? 'su posición')}</button>`}`;
       // T036(b): la «Historia» de una identidad difunta es su contexto de muerte (FR-006). Un evento
       // sin campo `death` (crónica antigua) no dibuja nada, en vez de un hueco que parezca un dato.
       const farewell = world.events.find(event => event.kind === 'death' && event.actors.includes(id));
-      replacePersonCard(legacy ? `<p class="game-reason">Esta vida terminó en el paso ${esc(legacy.diedAt)}.</p><p class="drawer-note">${esc(deathCauses[legacy.cause] ?? legacy.cause)}</p><p class="drawer-note">Generación ${esc(legacy.generation)}. Su historia permanece en la crónica del mundo.</p>${farewell ? deathHistory(farewell) : ''}` : estado === 'fuera' ? '<p class="game-reason" data-absent="fuera">Vive fuera de esta vista.</p><p class="drawer-note">Sigue en el mundo, fuera de la zona que muestra la cámara. Mueve el mapa para volver a encontrar su posición.</p>' : estado === 'no-servido' ? '<p class="drawer-note" data-absent="no-servido">El servidor no tiene ahora a esta identidad entre las vidas del mundo. Si murió hace tiempo, su despedida ya no está entre las 32 más recientes.</p>' : '<p class="drawer-note" data-absent="comprobando">Fuera de esta vista. Comprobando con el servidor si sigue en el mundo…</p>');
+      replacePersonCard(legacy ? `<p class="game-reason">Esta vida terminó en el paso ${esc(legacy.diedAt)}.</p><p class="drawer-note">${esc(deathCauses[legacy.cause] ?? legacy.cause)}</p><p class="drawer-note">Generación ${esc(legacy.generation)}. Su historia permanece en la crónica del mundo.</p>${farewell ? deathHistory(farewell) : ''}` : estado === 'fuera' ? away : estado === 'no-servido' ? '<p class="drawer-note" data-absent="no-servido">El servidor no tiene ahora a esta identidad entre las vidas del mundo. Si murió hace tiempo, su despedida ya no está entre las 32 más recientes.</p>' : `<p class="drawer-note" data-absent="comprobando">${buscando === id ? 'Buscando su posición en el mundo…' : 'Fuera de esta vista. Comprobando con el servidor si sigue en el mundo…'}</p>`);
       if (following) { following=false; landscape?.follow(null); } control='inspect'; inspectorSignature='';return;
     }
     // T036(h): la biografía no viaja en el `state`; se pide al abrir la ficha y se cachea por tick.
-    if (!personaDetails.has(p.id)) connection?.requestPersona(p.id);
-    const persona = personaDetails.get(p.id) ?? undefined;
+    const cached = personaDetails.get(p.id);
+    if (!cached || world.tick - cached.tick >= PERSONA_REFRESCO || world.tick < cached.tick) connection?.requestPersona(p.id);
+    const persona = cached?.detail ?? undefined;
     const signature = JSON.stringify([p, persona ?? null, world.events.map(event => event.id), world.communities, world.blueprints, world.technology?.items.filter(item=>item.ownerId===p.id), world.technology?.knowledge?.find(entry=>entry.actorId===p.id) ?? null, world.technology?.recipes]); if (signature === inspectorSignature) return; inspectorSignature = signature;
     el('inspector-title').textContent = p.name; el('person-controls').hidden = false; el('person-primary').hidden = false; const source = world.memories.find(m => m.text === p.recentMemory)?.source;
     const sections = inheritedAndLearned(persona ? { ...p, experiences: persona.experiences, trust: persona.trust } : p, world, persona?.recipeIds);

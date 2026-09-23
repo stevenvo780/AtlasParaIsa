@@ -55,6 +55,9 @@ export interface PersonDetail {
   trust: { id: string; value: number }[];
   /** Repertorio de procedimientos que recuerda; antes `TechnologyView.knowledge`. */
   recipeIds: string[];
+  /** M3 (persona-extra, opcionales): nombre y posición exacta para encontrar a alguien fuera de la cámara.
+   * `vivo` es true cuando la ficha sale de las vidas del mundo servido. Ausentes en servidores antiguos. */
+  name?: string; x?: number; y?: number; vivo?: boolean;
 }
 export interface PlaceView { id: string; name: string; x: number; y: number; description: string; gatherings: number; }
 export interface ChronicleEvent {

@@ -3,7 +3,7 @@ import { readFileSync, statSync } from 'node:fs';
 import { resolve, extname, sep } from 'node:path';
 import { isIP } from 'node:net';
 import { WebSocketServer, WebSocket } from 'ws';
-import { createWorld, stepWorld, projectWorld, normalizeViewport, cloneWorld, puntoDeRestauracion, personDetail, fraccionSerial, type PuntoDeRestauracion, type World, type FaseMedicion } from '../world/index.js';
+import { createWorld, stepWorld, projectWorld, normalizeViewport, cloneWorld, puntoDeRestauracion, fraccionSerial, type PuntoDeRestauracion, type World, type FaseMedicion } from '../world/index.js';
 import { paramsOf, type WorldParams } from '../world/params.js';
 import { technologyRecipeDetail } from '../world/technology.js';
 import type { ClientMessage, Gesture, GestureResult, ServerMessage, Viewport, WorldView, RuntimeStats, FaseNombre } from '../shared/types.js';
@@ -11,6 +11,7 @@ import { Store, fingerprint, GestureConflict, SessionRevoked } from './store.js'
 import { cookie, hashToken, makeToken, passwordVerifier, sessionHash } from './auth.js';
 import { ensureWorldInstance, readWorldInstance } from './world-instance.js';
 import { Gobernador } from './governor.js';
+import { enriquecerPersona } from './persona-extra.js';
 export { decideReproduction, decidirConTecho } from './governor.js';
 
 class HttpError extends Error { constructor(readonly status: number, message: string) { super(message); } }
@@ -409,7 +410,7 @@ export function createApp(options: AppOptions) {
             // T036(h): one inhabitant's biography at a time, read-only; the snapshot no longer carries it.
             if (parsed?.type === 'persona') {
               if (typeof parsed.id !== 'string' || !/^[A-Za-z0-9_:-]{1,50}$/.test(parsed.id)) throw new HttpError(400, 'Identificador de habitante no válido.');
-              send(client, { type: 'persona', id: parsed.id, persona: personDetail(world, parsed.id) ?? null });
+              send(client, { type: 'persona', id: parsed.id, persona: enriquecerPersona(world, parsed.id) ?? null });
               return;
             }
             // One definition at a time, read-only: the snapshot carries summaries and this query never advances the world.

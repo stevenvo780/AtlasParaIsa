@@ -261,3 +261,5 @@
   .inspector-tabs button, .task-groups button { min-height: 44px; }
   .notebook-back { min-height: 44px; }
 }
+/* M3: enlaces a quien está fuera de la cámara o murió: legibles como enlace, sin parecer presentes. */
+.entity-link.is-absent, .lineage-person.is-absent { font-style: italic; color: #6b7a58; }

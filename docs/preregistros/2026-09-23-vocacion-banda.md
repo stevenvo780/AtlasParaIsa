@@ -261,7 +261,7 @@ Escrita ANTES de correr H1b y el control B instrumentado.
 
 **BANDA a mitad de camino (no decide; se decide en el día 60).** P2 3/4 (13, 23, 303), P5 4/4, P4 por ahora sin extinciones y con techo a ≤ 2 días de B; P3 1/4 (13 con 87 mortales el día 40; 23 extinta el día 35, 303 el 31, 17 el 20).
 
-## Adenda 2 (23-09, 18:00) — veredictos del día 60
+## Adenda 2 (23-09, 17:48) — veredictos del día 60
 
 Calculados con el evaluador de la etiqueta `c8-v3-preregistro`, byte a byte igual al de la rama del experimento (sha256 comprobado), sobre los `dia-NNN.json` crudos. Salidas: [`criterio-h1b-d60.json`](../evidencia-2026-09-23/criterio-h1b-d60.json), [`criterio-banda-d60.json`](../evidencia-2026-09-23/criterio-banda-d60.json), [`criterio-bctrl-d60.json`](../evidencia-2026-09-23/criterio-bctrl-d60.json) y [`criterio-l60v3-d60.json`](../evidencia-2026-09-23/criterio-l60v3-d60.json).
 

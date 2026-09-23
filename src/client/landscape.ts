@@ -19,7 +19,7 @@ import type { Capability } from '../shared/technology.js';
 import { decidirModo, rendererProfile, type Modo } from './modo.js';
 import { dibujarCalor, type Capa, type RangoCalor } from './calor.js';
 import { claveRegion } from './regiones.js';
-import { PRADERA, BOSQUE, HUMEDAL, DESIERTO, MONTANA, SUELO, SOMBRA, LUZ } from './paleta.js';
+import { getTerrainAtlas, TERRAIN_ATLAS_TILE, TERRAIN_VARIANTS, type AtlasBiome, type AtlasCell, type WorkedGroundState } from './terrain-atlas.js';
 
 /* ------------------------------------------------------------------ */
 /* Tipos públicos                                                      */
@@ -41,7 +41,7 @@ export type SelectHandler = (selection: LandscapeSelection) => void;
 /* ------------------------------------------------------------------ */
 
 /** Píxeles de arte por tile: la resolución nativa del pixel-art. */
-const ART = 16;
+const ART = TERRAIN_ATLAS_TILE;
 const CHUNK_ART_TILES = 8;
 const TERRAIN_CACHE_LIMIT = 128; // 8 MiB CPU rasters; at most 8 MiB GPU textures.
 const SPRITE_CACHE_LIMIT = 320; // At most 1.875 MiB of 32 × 48 RGBA sprites.
@@ -62,18 +62,8 @@ interface RGB {
   b: number;
 }
 
-interface GroundMaterial {
-  /** Suelo desnudo: tramado entre estos dos swatches de paleta, nunca mezclado. */
-  soilBase: RGB; soilShade: RGB; soilT: number;
-  /** Cobertura viva: ídem, entre el tono vivo y el seco/sombreado. */
-  leafBase: RGB; leafShade: RGB; leafT: number;
-  cover: number; moisture: number; traffic: number;
-}
-
 /** The raster and its cache key must observe the same received-state buckets. */
 function groundBucket(value: number): number { return Math.round(clamp01(value) * 12); }
-function groundValue(value: number): number { return groundBucket(value) / 12; }
-function smooth(value: number): number { const t = clamp01(value); return t * t * (3 - 2 * t); }
 
 function rgb(r: number, g: number, b: number): RGB {
   return { r, g, b };
@@ -193,31 +183,6 @@ const P = {
   rule: rgb(185, 173, 147),
 } as const;
 
-/** Hex de `paleta.ts` (siempre válido) a RGB interno; sin fallback real. */
-function swatch(hex: string): RGB {
-  return parseColor(hex, BLACK);
-}
-
-const SOMBRA_RGB = swatch(SOMBRA);
-const LUZ_RGB = swatch(LUZ);
-
-interface GroundSwatches {
-  soilBase: RGB; soilShade: RGB; leafBase: RGB; leafShade: RGB;
-}
-
-/**
- * Suelo y cobertura por bioma, sólo con colores de `paleta.ts`. `bakeTileBase`
- * trama entre `*Base` y `*Shade` según fertilidad/humedad; nunca los mezcla.
- */
-const GROUND_SWATCHES: Record<string, GroundSwatches> = {
-  desert: { soilBase: swatch(DESIERTO.base), soilShade: swatch(DESIERTO.sombra), leafBase: swatch(PRADERA.seca), leafShade: swatch(DESIERTO.sombra) },
-  mountain: { soilBase: swatch(MONTANA.base), soilShade: swatch(MONTANA.sombra), leafBase: swatch(PRADERA.seca), leafShade: swatch(BOSQUE.sombra) },
-  wetland: { soilBase: swatch(HUMEDAL.sombra), soilShade: swatch(SUELO.cultivo), leafBase: swatch(HUMEDAL.base), leafShade: swatch(BOSQUE.base) },
-  forest: { soilBase: swatch(SUELO.pisado), soilShade: swatch(BOSQUE.sombra), leafBase: swatch(BOSQUE.base), leafShade: swatch(BOSQUE.sombra) },
-  grassland: { soilBase: swatch(SUELO.pisado), soilShade: swatch(SUELO.arado), leafBase: swatch(PRADERA.base), leafShade: swatch(PRADERA.seca) },
-};
-const DEFAULT_GROUND_SWATCHES = GROUND_SWATCHES.grassland!;
-
 interface Tint {
   color: string;
   alpha: number;
@@ -241,81 +206,26 @@ function rnd(x: number, y: number, salt: number): number {
   return hash3(x, y, salt) / 4294967296;
 }
 
-/** Stable world-space variation of material, never a source of ecological state. */
-function materialNoise(x: number, y: number, scale: number, salt: number): number {
-  const gx = Math.floor(x / scale), gy = Math.floor(y / scale);
-  const u = smooth(x / scale - gx), v = smooth(y / scale - gy);
-  const top = rnd(gx, gy, salt) * (1 - u) + rnd(gx + 1, gy, salt) * u;
-  const bottom = rnd(gx, gy + 1, salt) * (1 - u) + rnd(gx + 1, gy + 1, salt) * u;
-  return top * (1 - v) + bottom * v;
+function atlasBiome(tile: Tile): AtlasBiome {
+  if (tile.terrain === 'water') return 'ocean';
+  return tile.biome && tile.biome !== 'ocean' ? tile.biome : 'grassland';
 }
 
-/* ------------------------------------------------------------------ */
-/* Tramado ordenado (Bayer): convierte una fracción continua en una    */
-/* elección discreta entre dos colores de la paleta. Nunca se mezclan  */
-/* canales; el terreno pinta sólo con los swatches, tramados por       */
-/* posición de mundo (embaldosable, sin costuras entre chunks).        */
-/* ------------------------------------------------------------------ */
-
-// Matriz de Bayer 8×8 clásica (64 niveles), en orden de fila.
-const BAYER8 = [
-  0, 32, 8, 40, 2, 34, 10, 42,
-  48, 16, 56, 24, 50, 18, 58, 26,
-  12, 44, 4, 36, 14, 46, 6, 38,
-  60, 28, 52, 20, 62, 30, 54, 22,
-  3, 35, 11, 43, 1, 33, 9, 41,
-  51, 19, 59, 27, 49, 17, 57, 25,
-  15, 47, 7, 39, 13, 45, 5, 37,
-  63, 31, 55, 23, 61, 29, 53, 21,
-];
-
-/**
- * Umbral de tramado en (0,1) para el píxel de mundo `(x, y)`. `phase`
- * desplaza qué ventana de la matriz cae en cada píxel, para que varias
- * decisiones tramadas en el mismo píxel (suelo, cobertura, desgaste…) no
- * queden todas correlacionadas con el mismo patrón.
- */
-function bayerThreshold(x: number, y: number, phase: number): number {
-  // A linear stride mod 8 repeats every 8 phases (8 = period of any stride
-  // coprime with 8), which would silently alias unrelated decisions onto the
-  // very same threshold. A hashed offset avoids that; the salt below was
-  // checked to give phases 0..31 distinct (dx, dy) offsets (see
-  // docs/ARTE.md), well past the handful this file actually uses.
-  const h = hash3(phase, 0, 15050);
-  const bx = (x + (h & 7)) & 7;
-  const by = (y + ((h >>> 3) & 7)) & 7;
-  return (BAYER8[by * 8 + bx]! + 0.5) / 64;
+/** Cuatro estados exactos; el umbral 0.25 deja estable el corredor retirado 0.119↔0.121. */
+function workedGroundState(tile: Tile): WorkedGroundState {
+  const cultivation = clamp01(tile.cultivation ?? 0);
+  if (cultivation >= .67) return 'cultivated';
+  if (cultivation >= .25) return 'ploughed';
+  return clamp01(tile.traffic ?? 0) >= .25 ? 'trodden' : 'wild';
 }
 
-/** Elige `hi` cuando `t` supera el umbral tramado en `(x, y)`; si no, `lo`. Nunca mezcla. */
-function dither(x: number, y: number, phase: number, t: number, lo: RGB, hi: RGB): RGB {
-  return t > bayerThreshold(x, y, phase) ? hi : lo;
+function terrainVariant(x: number, y: number): number {
+  return hash3(x, y, 7321) % TERRAIN_VARIANTS;
 }
 
-/**
- * Tramado bilineal separable: como una interpolación bilineal de libro de
- * texto, pero cada paso ELIGE uno de los dos colores en vez de promediarlos.
- * El resultado sigue siendo siempre uno de `a`, `b`, `c` o `d` — jamás un
- * tono intermedio inventado.
- */
-function ditherQuad(x: number, y: number, phase: number, u: number, v: number, a: RGB, b: RGB, c: RGB, d: RGB): RGB {
-  const top = dither(x, y, phase, u, a, b);
-  const bottom = dither(x, y, phase + 1, u, c, d);
-  return dither(x, y, phase + 2, v, top, bottom);
-}
-
-/**
- * Ancho de franja de playa (2..4 px) por ondulación de baja frecuencia,
- * correlada entre columnas/filas vecinas, con el paso final tramado por
- * Bayer. Reemplaza un salto aleatorio independiente por columna (una
- * escalera de ruido) por una orilla con intención, con la firma de
- * `dither`/`materialNoise`: determinista y embaldosable en mundo.
- */
-function coastWidth(wx: number, wy: number, salt: number): number {
-  const wave = materialNoise(wx, wy, 6, salt) * 2; // continuo en [0, 2)
-  const base = 2 + Math.floor(wave);
-  const frac = wave - Math.floor(wave);
-  return frac > bayerThreshold(wx, wy, 20) ? base + 1 : base;
+function drawAtlasCell(g: CanvasRenderingContext2D, cell: AtlasCell, dx: number, dy: number): void {
+  const atlas = getTerrainAtlas();
+  g.drawImage(atlas.canvas, cell.sx, cell.sy, ART, ART, dx, dy, ART, ART);
 }
 
 function clamp(v: number, lo: number, hi: number): number {
@@ -462,10 +372,6 @@ export class Landscape {
   private readonly terrainCache = new BoundedCache<GroundChunk>(TERRAIN_CACHE_LIMIT, (chunk, key) => {
     this.gpu?.drop(key); chunk.canvas.width = chunk.canvas.height = 0;
   });
-  private readonly groundStamp = Object.assign(document.createElement('canvas'), { width: ART, height: ART });
-  private readonly groundStampContext = this.groundStamp.getContext('2d')!;
-  private readonly groundPixels = this.groundStampContext.createImageData(ART, ART);
-  private groundMaterials = new WeakMap<Tile, GroundMaterial>();
   private spriteBytes = 0;
   private readonly spriteCache = new BoundedCache<HTMLCanvasElement>(SPRITE_CACHE_LIMIT, canvas => { this.spriteBytes -= canvas.width * canvas.height * 4; canvas.width = canvas.height = 0; });
   private chunks: GroundChunk[] = [];
@@ -794,7 +700,6 @@ export class Landscape {
     this.prev = null;
     this.curr = null;
     this.terrainCache.clear(); this.spriteCache.clear(); this.chunks = []; this.gpu?.destroy();
-    this.groundStamp.width = this.groundStamp.height = 0;
     this.scene.width = this.scene.height = 0;
     this.labels.width = this.labels.height = 0; this.labels.remove(); this.phaseLayer.remove(); this.rainLayer.remove();
   }
@@ -858,7 +763,9 @@ export class Landscape {
       const t = this.tileAt(x, y);
       if (!t) { acc(-1); continue; }
       for (const value of `${t.terrain}:${t.biome ?? ''}:${t.feature ?? ''}`) acc(value.charCodeAt(0));
-      for (const value of [t.moisture, t.vegetation, t.food, t.growth ?? 1, t.fertility ?? .5, t.cultivation ?? 0, t.traffic ?? 0, t.drinkingWater ?? 0, t.life ?? 0]) acc(groundBucket(value));
+      for (const value of [t.moisture, t.vegetation, t.food, t.growth ?? 1, t.fertility ?? .5, t.cultivation ?? 0, t.drinkingWater ?? 0, t.life ?? 0]) acc(groundBucket(value));
+      const worked = workedGroundState(t);
+      acc(worked === 'wild' ? 0 : worked === 'trodden' ? 1 : worked === 'ploughed' ? 2 : 3);
       // Preserve visible on/off boundaries even when both values share a coarse color bucket.
       for (const active of [(t.cultivation ?? 0) > .08, (t.drinkingWater ?? 0) > .04,
         (t.growth ?? t.vegetation) > .15, (t.growth ?? t.vegetation) > .25, t.vegetation > .04,
@@ -875,8 +782,6 @@ export class Landscape {
 
   private bakeGround(): void {
     if (this.worldW === 0 || this.worldH === 0) return;
-    // Input objects may be reused by callers; palette memoization lasts only this bake.
-    this.groundMaterials = new WeakMap();
     this.chunks = [];
     for (let cy = Math.floor(this.originY / CHUNK_ART_TILES); cy <= Math.floor((this.originY + this.worldH - 1) / CHUNK_ART_TILES); cy++) {
       for (let cx = Math.floor(this.originX / CHUNK_ART_TILES); cx <= Math.floor((this.originX + this.worldW - 1) / CHUNK_ART_TILES); cx++) {
@@ -905,32 +810,14 @@ export class Landscape {
     this.groundBaked = true;
   }
 
-  private groundMaterial(tile: Tile): GroundMaterial {
-    const cached = this.groundMaterials.get(tile); if (cached) return cached;
-    const fertility = groundValue(tile.fertility ?? .5), moisture = groundValue(tile.moisture);
-    const cultivation = groundValue(tile.cultivation ?? 0), traffic = groundValue(tile.traffic ?? 0);
-    const ground = (tile.biome && GROUND_SWATCHES[tile.biome]) ?? DEFAULT_GROUND_SWATCHES;
-    const material: GroundMaterial = {
-      soilBase: ground.soilBase, soilShade: ground.soilShade,
-      // Más fértil y más húmedo → más swatch "shade" (tierra rica, oscurecida).
-      soilT: clamp01(fertility * .75 + moisture * .25),
-      leafBase: ground.leafBase, leafShade: ground.leafShade,
-      // Más seco → más swatch "shade" (cobertura seca/mustia), nunca al revés.
-      leafT: clamp01((1 - moisture) * .85),
-      cover: groundValue(tile.vegetation) * (1 - cultivation * .6) * (1 - traffic * .88) * (tile.terrain === 'shelter' ? .25 : 1),
-      moisture, traffic,
-    };
-    this.groundMaterials.set(tile, material); return material;
-  }
-
   private bakeTileBase(g: CanvasRenderingContext2D, x: number, y: number): void {
     const tile = this.tileAt(x, y);
     const ox = x * ART;
     const oy = y * ART;
     const terrain: Terrain = tile ? tile.terrain : 'water';
+    const atlas = getTerrainAtlas();
 
     if (terrain === 'water') {
-      // Profundidad legible: cuanto más agua alrededor, más oscuro el teal.
       let neighbours = 0;
       for (let dy = -1; dy <= 1; dy++) {
         for (let dx = -1; dx <= 1; dx++) {
@@ -938,74 +825,42 @@ export class Landscape {
           if (this.terrainAt(x + dx, y + dy) === 'water') neighbours++;
         }
       }
-      const depth = neighbours / 8;
-      const base = mix(P.waterShallow, P.waterDeep, depth * depth);
-      px(g, ox, oy, ART, ART, css(base));
-      for (let i = 0; i < 2; i++) {
-        const rx = ox + Math.floor(rnd(x, y, 10 + i) * ART);
-        const ry = oy + Math.floor(rnd(x, y, 40 + i) * ART);
-        const up = rnd(x, y, 70 + i) > 0.5;
-        px(g, rx, ry, 1 + Math.floor(rnd(x, y, 90 + i) * 2), 1, css(up ? lighten(base, 0.1) : darken(base, 0.08)));
-      }
+      const depth = neighbours >= 6 ? 2 : neighbours >= 3 ? 1 : 0;
+      drawAtlasCell(g, atlas.water(depth, terrainVariant(x, y)), ox, oy);
       return;
     }
 
     if (!tile) return;
-    const owner = this.groundMaterial(tile), samples: GroundMaterial[] = [];
-    // Four surrounding cell centres per pixel, inside a one-cell stencil. Unknown
-    // land repeats the known edge; water never lends a green cover or a soil palette.
-    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-      const neighbour = this.tileAt(x + dx, y + dy);
-      samples.push(neighbour && neighbour.terrain !== 'water' ? this.groundMaterial(neighbour) : owner);
+    const biome = atlasBiome(tile), variant = terrainVariant(x, y);
+    const moisture = groundBucket(tile.moisture), fertility = groundBucket(tile.fertility ?? .5);
+    const vegetation = tile.terrain === 'shelter' ? Math.round(groundBucket(tile.vegetation) * .25) : groundBucket(tile.vegetation);
+    drawAtlasCell(g, atlas.soil(biome, variant, moisture, fertility), ox, oy);
+    drawAtlasCell(g, atlas.leaf(biome, variant, moisture, vegetation), ox, oy);
+    const state = workedGroundState(tile);
+    if (state !== 'wild') drawAtlasCell(g, atlas.worked(state, variant), ox, oy);
+
+    // Dentro del mismo bioma sólo el suelo ecológico alcanza un píxel de la
+    // tesela vecina. La cobertura agotada y el tránsito cero nunca se prestan.
+    if (state === 'wild') this.bakeEcologicalContacts(g, tile, biome, moisture, fertility, ox, oy);
+  }
+
+  private bakeEcologicalContacts(g: CanvasRenderingContext2D, owner: Tile, biome: AtlasBiome, moisture: number, fertility: number, ox: number, oy: number): void {
+    const atlas = getTerrainAtlas();
+    const contacts = [
+      { dx: 0, dy: -1, sx: 0, sy: ART - 1, sw: ART, sh: 1, tx: 0, ty: 0 },
+      { dx: 1, dy: 0, sx: 0, sy: 0, sw: 1, sh: ART, tx: ART - 1, ty: 0 },
+      { dx: 0, dy: 1, sx: 0, sy: 0, sw: ART, sh: 1, tx: 0, ty: ART - 1 },
+      { dx: -1, dy: 0, sx: ART - 1, sy: 0, sw: 1, sh: ART, tx: 0, ty: 0 },
+    ];
+    for (const contact of contacts) {
+      const neighbour = this.tileAt(owner.x + contact.dx, owner.y + contact.dy);
+      if (!neighbour || neighbour.terrain === 'water' || atlasBiome(neighbour) !== biome) continue;
+      const neighbourMoisture = groundBucket(neighbour.moisture), neighbourFertility = groundBucket(neighbour.fertility ?? .5);
+      if (neighbourMoisture === moisture && neighbourFertility === fertility) continue;
+      const cell = atlas.soil(biome, terrainVariant(neighbour.x, neighbour.y), neighbourMoisture, neighbourFertility);
+      g.drawImage(atlas.canvas, cell.sx + contact.sx, cell.sy + contact.sy, contact.sw, contact.sh,
+        ox + contact.tx, oy + contact.ty, contact.sw, contact.sh);
     }
-    const data = this.groundPixels.data;
-    for (let by = 0; by < ART; by++) for (let bx = 0; bx < ART; bx++) {
-      const u = smooth(((bx + .5) / ART + .5) % 1), v = smooth(((by + .5) / ART + .5) % 1);
-      const index = (by < ART / 2 ? 0 : 3) + (bx < ART / 2 ? 0 : 1);
-      const a = samples[index]!, b = samples[index + 1]!, c = samples[index + 3]!, d = samples[index + 4]!;
-      const wa = (1 - u) * (1 - v), wb = u * (1 - v), wc = (1 - u) * v, wd = u * v;
-      const wx = ox + bx, wy = oy + by;
-      const broad = materialNoise(wx, wy, 29, 348), fine = materialNoise(wx, wy, 7, 351);
-      const patch = broad * .68 + fine * .32;
-      // An exhausted cell cannot borrow living cover from its neighbours. Subcell
-      // distribution is a stable symbol of a cell-average stock, not extra biomass.
-      const cover = Math.min(owner.cover * 1.5, a.cover * wa + b.cover * wb + c.cover * wc + d.cover * wd);
-      const rooted = owner.cover === 0 ? 0 : smooth((cover - patch * .55 + .02) / .52);
-      const traffic = owner.traffic > 0 ? a.traffic * wa + b.traffic * wb + c.traffic * wc + d.traffic * wd : 0;
-      const wear = smooth((traffic - patch * .16) / .85);
-      const pigment = rooted * (1 - wear * .65);
-      // Cada esquina resuelve primero su propio swatch (tramado base/shade por
-      // fertilidad y humedad); recién entonces se elige entre esquinas. Ningún
-      // paso mezcla canales: siempre se elige uno de los colores de la paleta.
-      const soilA = dither(wx, wy, 0, a.soilT, a.soilBase, a.soilShade);
-      const soilB = dither(wx, wy, 1, b.soilT, b.soilBase, b.soilShade);
-      const soilC = dither(wx, wy, 2, c.soilT, c.soilBase, c.soilShade);
-      const soilD = dither(wx, wy, 3, d.soilT, d.soilBase, d.soilShade);
-      const leafA = dither(wx, wy, 4, a.leafT, a.leafBase, a.leafShade);
-      const leafB = dither(wx, wy, 5, b.leafT, b.leafBase, b.leafShade);
-      const leafC = dither(wx, wy, 6, c.leafT, c.leafBase, c.leafShade);
-      const leafD = dither(wx, wy, 7, d.leafT, d.leafBase, d.leafShade);
-      const soil = ditherQuad(wx, wy, 8, u, v, soilA, soilB, soilC, soilD);
-      const leaf = ditherQuad(wx, wy, 11, u, v, leafA, leafB, leafC, leafD);
-      // El desgaste ya se lee en `pigment` (más tránsito → menos hoja, más
-      // suelo desnudo, arriba): no hace falta una segunda mota de luz sobre
-      // un corredor entero muy trillado, que sólo repetiría en cuadrícula el
-      // mismo tramado del suelo/hoja y volvería a leerse como ruido.
-      let color = dither(wx, wy, 14, pigment, soil, leaf);
-      // Sparse fibres and granules live on a world lattice incommensurate with
-      // cells. They symbolize existing cover/soil, never countable extra plants:
-      // a solid palette pixel, never a brightness nudge.
-      const grainSeed = rnd(wx, wy, 358);
-      const fx = Math.floor(wx / 5), fy = Math.floor(wy / 7);
-      const tx = fx * 5 + Math.floor(rnd(fx, fy, 364) * 5), ty = fy * 7 + 2 + Math.floor(rnd(fx, fy, 365) * 4);
-      const fibre = owner.cover > 0 && rooted > .6 && rnd(fx, fy, 366) < cover * .8 && wx === tx && wy >= ty - 1 && wy <= ty;
-      if (fibre) color = leaf;
-      else if (rooted < .35 && grainSeed < .012) color = owner.moisture > .5 ? SOMBRA_RGB : LUZ_RGB;
-      const offset = (by * ART + bx) * 4;
-      data[offset] = color.r; data[offset + 1] = color.g; data[offset + 2] = color.b; data[offset + 3] = 255;
-    }
-    this.groundStampContext.putImageData(this.groundPixels, 0, 0);
-    g.drawImage(this.groundStamp, ox, oy);
   }
 
   /** Resource art follows server stock/growth. Depleted resources do not remain lush props. */
@@ -1072,43 +927,22 @@ export class Landscape {
     }
   }
 
-  /** Orillas arenosas por adyacencia: la arena se pinta en el borde que da al agua. */
+  /** Autotile de contacto para todos los biomas, incluida la costa tierra/agua. */
   private bakeCoast(g: CanvasRenderingContext2D, x: number, y: number): void {
-    const here = this.terrainAt(x, y);
-    const ox = x * ART;
-    const oy = y * ART;
-
-    if (here === 'water') {
-      // Bajío luminoso mirando a la tierra.
-      const gleam = css(mix(P.waterShallow, P.waterGleam, 0.35), 0.55);
-      if (this.terrainAt(x, y - 1) !== 'water') px(g, ox, oy, ART, 1, gleam);
-      if (this.terrainAt(x, y + 1) !== 'water') px(g, ox, oy + ART - 1, ART, 1, gleam);
-      if (this.terrainAt(x - 1, y) !== 'water') px(g, ox, oy, 1, ART, gleam);
-      if (this.terrainAt(x + 1, y) !== 'water') px(g, ox + ART - 1, oy, 1, ART, gleam);
-      return;
+    const tile = this.tileAt(x, y); if (!tile) return;
+    const owner = atlasBiome(tile), masks = new Map<AtlasBiome, number>();
+    const directions = [
+      { dx: 0, dy: -1, bit: 1 }, { dx: 1, dy: 0, bit: 2 },
+      { dx: 0, dy: 1, bit: 4 }, { dx: -1, dy: 0, bit: 8 },
+    ];
+    for (const direction of directions) {
+      const neighbour = this.tileAt(x + direction.dx, y + direction.dy);
+      if (!neighbour) continue;
+      const target = atlasBiome(neighbour); if (target === owner) continue;
+      masks.set(target, (masks.get(target) ?? 0) | direction.bit);
     }
-
-    const sand = css(P.sand);
-    const sandEdge = css(P.sandDark);
-    const north = this.terrainAt(x, y - 1) === 'water';
-    const south = this.terrainAt(x, y + 1) === 'water';
-    const west = this.terrainAt(x - 1, y) === 'water';
-    const east = this.terrainAt(x + 1, y) === 'water';
-
-    // Ancho de playa: una ondulación de baja frecuencia y correlada entre
-    // columnas vecinas (nunca un salto aleatorio independiente por columna,
-    // que es lo que lee como una escalera) y el resto tramado con Bayer.
-    for (let i = 0; i < ART; i++) {
-      if (north) { const j = coastWidth(ox + i, oy, 610); px(g, ox + i, oy, 1, j, sand); px(g, ox + i, oy + j - 1, 1, 1, sandEdge); }
-      if (south) { const j = coastWidth(ox + i, oy + ART, 630); px(g, ox + i, oy + ART - j, 1, j, sand); px(g, ox + i, oy + ART - j, 1, 1, sandEdge); }
-      if (west) { const j = coastWidth(ox, oy + i, 650); px(g, ox, oy + i, j, 1, sand); px(g, ox + j - 1, oy + i, 1, 1, sandEdge); }
-      if (east) { const j = coastWidth(ox + ART, oy + i, 670); px(g, ox + ART - j, oy + i, j, 1, sand); px(g, ox + ART - j, oy + i, 1, 1, sandEdge); }
-    }
-    // Esquinas diagonales, para que la playa no tenga muescas.
-    if (!north && !west && this.terrainAt(x - 1, y - 1) === 'water') px(g, ox, oy, 3, 3, sand);
-    if (!north && !east && this.terrainAt(x + 1, y - 1) === 'water') px(g, ox + ART - 3, oy, 3, 3, sand);
-    if (!south && !west && this.terrainAt(x - 1, y + 1) === 'water') px(g, ox, oy + ART - 3, 3, 3, sand);
-    if (!south && !east && this.terrainAt(x + 1, y + 1) === 'water') px(g, ox + ART - 3, oy + ART - 3, 3, 3, sand);
+    const atlas = getTerrainAtlas(), ox = x * ART, oy = y * ART, variant = terrainVariant(x, y);
+    for (const [target, mask] of masks) drawAtlasCell(g, atlas.edge(owner, target, variant, mask), ox, oy);
   }
 
   /* ---------------------------------------------------------------- */

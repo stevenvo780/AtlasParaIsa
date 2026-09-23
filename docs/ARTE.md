@@ -24,9 +24,9 @@ marrón derretida» y «la orilla en escalera»):
    (`rnd(...) * 3`) sin ningún patrón: ruido en vez de un borde diseñado, lo que se lee como una
    orilla en escalera irregular en vez de una costa con intención.
 
-La corrección (mismo commit que esta guía referencia en su historial) no es cosmética por encima:
-cambia el mecanismo. Ya no hay una función continua de fertilidad/humedad a color; hay una paleta
-fija y un patrón de tramado determinista para pasar de una tesela a otra.
+La corrección no es cosmética por encima: cambia el mecanismo. Ya no hay una función continua de
+fertilidad/humedad a color. `src/client/terrain-atlas.ts` genera una sola vez un atlas fuera del DOM
+con paleta fija y tramado determinista; el horneado de chunks sólo compone teselas de ese atlas.
 
 ## Paleta
 
@@ -77,24 +77,66 @@ familia (eso volvería a inflar la paleta hacia el degradado continuo del diagn�
   el tono base o `LUZ` tramado sobre él; la cara inferior-derecha usa el tono base o `SOMBRA`
   tramado. Consistente en todo sprite nuevo, para que la escena entera lea una sola fuente de luz.
 
+## Atlas y autotiling
+
+El atlas usa teselas 16×16 y se memoiza en el primer uso. Para cada bioma terrestre contiene tres
+variantes de textura elegidas por `hash3(x,y,sal)`, capas separadas de suelo (humedad × fertilidad) y
+cobertura (humedad × vegetación), y overlays para los estados discretos de trabajo. El agua tiene
+tres bandas de profundidad (somera, media, profunda), cada una con tres fases de textura; sus brillos
+son `AGUA.espuma`, nunca un `lighten()` de un color mezclado. Las capas transparentes sólo revelan el
+suelo opaco inferior: cada píxel visible sigue siendo un swatch exacto de `paleta.ts`.
+
+Las fronteras se indexan por `(bioma dueño, bioma vecino, variante, máscara NESO de 4 bits)`. Cada
+autotile de transición sólo pinta una franja de contacto de hasta 3 px con Bayer y transparencia; al
+componerse sobre la tesela dueña aparecen exactamente los colores de ambos biomas. Agua es el bioma
+`ocean`, así que la costa usa el mismo camino y no tiene una rutina de franjas aleatorias aparte.
+Cuando cambia humedad o fertilidad dentro del mismo bioma, un borde ecológico de 1 px toma suelo de
+la tesela vecina directamente del atlas. Nunca toma cobertura ni desgaste: una celda agotada no pide
+verde prestado y una celda con tránsito cero no hereda un sendero.
+
+El suelo trabajado tiene cuatro estados por función escalón: silvestre; pisado cuando
+`traffic >= 0.25`; arado cuando `cultivation >= 0.25`; y cultivo cuando `cultivation >= 0.67`.
+Cultivo tiene precedencia sobre arado y ambos sobre tránsito. En particular, no hay umbral entre
+`traffic=.119` y `.121`; ambos valores permanecen silvestres y comparten firma de caché.
+
+`chunkSignature` conserva el borde de dependencia de una celda alrededor de cada chunk. Humedad,
+fertilidad y vegetación usan los mismos 13 buckets que las claves del atlas; tránsito firma sólo el
+estado escalonado que realmente pinta. Los campos que todavía consume `bakeFeatures` conservan sus
+buckets históricos. Así una mutación relevante invalida los chunks vecinos exactos sin rehornear por
+un cambio invisible.
+
 ## Nota técnica: fases del tramado
 
-`bakeTileBase` toma varias decisiones tramadas por píxel (qué esquina gana,
-suelo o cobertura, sombreado…) y cada una necesita su propio desplazamiento
+La generación única de `terrain-atlas.ts` toma varias decisiones tramadas por píxel (swatch de
+suelo, cobertura, estado trabajado y borde) y cada una necesita su propio desplazamiento
 (`phase`) sobre la matriz de Bayer 8×8; si no, dos decisiones distintas caen
 en el mismo umbral y quedan correlacionadas sin querer (un bug real de esta
 misma corrección: un desplazamiento lineal `(x + fase·k) & 7` repite cada 8
 fases porque ésa es la mayor cota del período de cualquier paso coprimo con
-8, así que la fase 8 caía exactamente sobre la fase 0). `bayerThreshold` usa
-en cambio un desplazamiento por hash determinista de la fase, verificado sin
-colisiones para las fases 0–31. Quien añada una decisión tramada más debe
-usar una fase nueva (no reciclar una ya usada) y, si se acerca a ese límite,
-volver a verificar que no haya colisiones.
+8, así que la fase 8 caía exactamente sobre la fase 0). `threshold` (en
+`terrain-atlas.ts`) usa en cambio un desplazamiento por hash determinista de
+la fase. Quien añada una decisión tramada más debe usar una fase nueva (no
+reciclar una ya usada) y, si se acerca a ese límite, volver a verificar que
+no haya colisiones.
+
+Con las fases ya decorrelacionadas queda un segundo bug, más sutil, del mismo
+origen (capas independientes): con la sal original heredada del tramado
+por-píxel anterior, una tesela con `fertility=0` y otra con `moisture=0`
+(resto de valores por defecto) horneaban al mismo raster. No era una colisión
+de fase — cada capa (`soil`, `leaf`) sí difería internamente — sino que la
+franja de píxeles donde el suelo de ambas teselas discrepaba caía, para esa
+combinación exacta de variante y fases, enteramente bajo la máscara de
+cobertura de `leaf`, que la ocultaba por igual en los dos casos. La capa de
+arriba puede volver indistinguibles a dos capas de abajo distintas aunque
+cada una sea internamente correcta. La sal de `threshold` (`1`, no `15050`)
+se eligió verificando explícitamente contra `tests/landscape-state.test.ts`
+(las 9 variantes ecológicas de esa prueba) en vez de asumir que decorrelar
+las fases alcanzaba; quien la cambie debe repetir esa verificación.
 
 ## Qué cambia y qué no
 
 - `src/world`, `src/server` y la carta de S e I no se tocan por esto: es puramente el cliente
   (`src/client`), y sólo cómo se pinta lo que el servidor ya decidió.
-- La migración de `life-art.ts` y del resto de `landscape.ts` (agua, costas ya cubiertas, HUD) a
+- La migración de `life-art.ts` y del resto de `landscape.ts` (decoraciones de `bakeFeatures`, HUD) a
   `paleta.ts` es incremental; esta guía es el contrato para el código nuevo y para lo que se toque,
   no una reescritura de una sola vez.

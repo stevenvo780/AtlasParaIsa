@@ -120,6 +120,35 @@ function carriesEstate(person: Person): boolean {
     || person.technology.items.some(item => item.mass > 0) || Object.values(person.technology.residue).some(mass => mass > 0);
 }
 
+/** Sólo deciden el coste, nunca el resultado: muestra con que se estima el grado medio de los vínculos y
+ * cuántas muertes por vínculo medio hacen falta para que recorrer las claves salga más barato que sondear
+ * (medido 2026-09-23 con vínculos copiados como en `cloneState`: entre 3 y 8 según el tamaño del objeto). */
+const BOND_DEGREE_SAMPLE = 64, BOND_SCAN_RATIO = 4;
+function sampledBondDegree(people: readonly Person[]): number {
+  const m = Math.min(BOND_DEGREE_SAMPLE, people.length);
+  let keys = 0;
+  for (let k = 0; k < m; k++) keys += Object.keys(people[Math.floor(k * people.length / m)]!.bonds).length;
+  return m ? keys / m : 0;
+}
+
+/** T142: borra de cada superviviente sus vínculos con los fallecidos. Mismo resultado que el bucle de siempre
+ * (`delete` de cada id fallecido en cada superviviente): se borran exactamente las claves propias que son ids
+ * fallecidos, y borrar nunca reordena las que quedan. Sólo cambia el coste: con pocas muertes se sondea
+ * (vivos × muertes consultas, y `delete` sólo donde la clave existe); con muchas, cada superviviente recorre sus
+ * claves una vez (Σ claves, independiente de las muertes). La reciprocidad de `bond()`/`convivir` no sirve de
+ * índice inverso: el contrato admite vínculos unidireccionales y el mundo se clona en cada paso. */
+export function pruneBonds(survivors: readonly Person[], departed: readonly Person[]): void {
+  if (!departed.length) return;
+  const ids = new Set(departed.map(person => person.id));
+  if (ids.size > BOND_SCAN_RATIO && ids.size > BOND_SCAN_RATIO * (sampledBondDegree(survivors) + 1)) {
+    for (const person of survivors) {
+      let hits: string[] | undefined;
+      for (const id of Object.keys(person.bonds)) if (ids.has(id)) (hits ??= []).push(id);
+      if (hits) for (const id of hits) delete person.bonds[id];
+    }
+  } else for (const person of survivors) for (const id of ids) if (Object.hasOwn(person.bonds, id)) delete person.bonds[id];
+}
+
 /** One post-action tick. Bodies are evaluated simultaneously; this module creates neither
  * descendants nor resources, and a vacant population slot does not itself create a replacement. */
 export function advancePopulation(world: World, callbacks: PopulationCallbacks): void {
@@ -146,7 +175,7 @@ export function advancePopulation(world: World, callbacks: PopulationCallbacks):
   if (dying.length) {
     const departed = new Set(dying.map(result => result.person.id));
     world.people = world.people.filter(person => !departed.has(person.id));
-    for (const person of world.people) for (const id of departed) delete person.bonds[id];
+    pruneBonds(world.people, dying.map(result => result.person));
     const alive = new Set(world.people.map(person => person.id));
     for (const community of world.communities) community.members = community.members.filter(id => alive.has(id));
     world.communities = world.communities.filter(community => community.members.length > 0);

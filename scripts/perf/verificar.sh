@@ -38,7 +38,7 @@ for (const caso of ["d51926", "s7", "s42"]) {
 }
 for (const mundo of ["alto", "bajo"]) {
   const r = JSON.parse(fs.readFileSync(`${salida}/alterna-${mundo}.json`)); ok &&= r.identico;
-  console.log(`${mundo}: N ${r.poblacionInicial}→${r.poblacionFinal} ${r.identico ? "idéntico" : "DISTINTO"} ${r.digestoFinalRama}; paso base ${r.base.cpuMsPorPaso} rama ${r.rama.cpuMsPorPaso} ms (x${r.razonPaso}); guardado base ${r.base.saveCpuMsPorPaso} rama ${r.rama.saveCpuMsPorPaso}; paso+guardado x${r.razonPasoYGuardado}`);
+  console.log(`${mundo}: N ${r.poblacionInicial}→${r.poblacionFinal} ${r.identico ? "idéntico" : "DISTINTO"} ${r.digestoFinalRama}; paso base ${r.base.cpuMsPorPaso} rama ${r.rama.cpuMsPorPaso} ms (x${r.razonPaso}, mediana por bloque x${r.razonPasoMediana}); guardado base ${r.base.saveCpuMsPorPaso} rama ${r.rama.saveCpuMsPorPaso}; paso+guardado x${r.razonPasoYGuardado}`);
 }
 process.exit(ok ? 0 : 1);
 ' "$SALIDA" "$REF" || fallos=$((fallos + 1))

@@ -17,7 +17,14 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { copyFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { digestosControl, LEYES_CANDIDATAS } from '../scripts/lab/rendimiento.js';
+import { Store } from '../src/server/store.js';
+import { stepWorld } from '../src/world/index.js';
+import { digestoCanonico } from '../src/world/digesto.js';
+import { paramsOf } from '../src/world/params.js';
 import { firstTileAt, lastTileAt, tileLookup } from '../src/world/tile-index.js';
 import { primero, primeroConFiltroCaro, primerosDos } from '../src/world/orden.js';
 import { algunoCerca, filtrarCerca, primeroCerca } from '../src/world/indice-puntos.js';
@@ -117,3 +124,36 @@ for (const { seed, params, digestos } of REFERENCIA) {
     assert.deepEqual(digestosControl(seed, params, [1200, 2400]), digestos);
   });
 }
+
+/**
+ * Población alta (sprint noche-perf2 2026-09-22). Las optimizaciones de este sprint (índices del
+ * catálogo de recetas, sesión de resolución, índice de lugares y estructuras…) sólo trabajan de verdad
+ * con cientos de habitantes, que ninguna semilla alcanza en pocos miles de pasos. Por eso se controla
+ * una instantánea: la semilla 3 con las leyes de la etapa 1 en el tick 29 400 (día 12,25; 230
+ * habitantes, 816 animales, 34 304 teselas), que `scripts/perf/instantaneas.ts --seed 3 --dias 12.25`
+ * regenera desde la semilla (digesto inicial 6a139a78…). Se avanza 600 pasos con el régimen del
+ * laboratorio y el digesto final debe ser el del commit base f2757fa (`git archive` a
+ * /datos/tmp-atlas-lab/perf2-base; `scripts/perf/fases.ts` y `scripts/perf/alterna.ts` dieron el mismo).
+ * La base pesa 350 MB y vive fuera del repositorio: sin ella (variable `ATLAS_MUNDO_ALTO` o la ruta de
+ * abajo) la prueba se omite. Coste: ~30–55 s de carga y 600 pasos de 40–140 ms de CPU según la carga.
+ * El control completo de cada optimización (tres semillas a 2400/4800 pasos y los mundos de 58 y 230
+ * habitantes, base contra rama en el mismo proceso) es `scripts/perf/verificar.sh`.
+ */
+const MUNDO_ALTO = process.env.ATLAS_MUNDO_ALTO ?? '/datos/tmp-atlas-lab/perfil/psinagua3-d12.sqlite';
+const ALTO = { inicial: '6a139a78154ba92a1ef36b61bec00e68b32c23a37c15d3e2e28e1a54b150cf8d', pasos: 600,
+  final: '52276b50b61dde3c0fdea45cd4faa2a1fcf7674ef0fdd7f7fe1ff0d3c257b365' };
+test('población alta (230 habitantes, semilla 3 día 12,25): digestoCanonico idéntico a la base tras 600 pasos',
+  { timeout: 3_600_000, skip: existsSync(MUNDO_ALTO) ? false : `falta la instantánea ${MUNDO_ALTO}` }, () => {
+    const dir = mkdtempSync(join(tmpdir(), 'atlas-rendimiento-alto-'));
+    for (const sufijo of ['', '-wal', '-shm']) if (existsSync(MUNDO_ALTO + sufijo)) copyFileSync(MUNDO_ALTO + sufijo, join(dir, 'world.sqlite' + sufijo));
+    const store = new Store(join(dir, 'world.sqlite'));
+    try {
+      const world = store.load()!.world;
+      assert.equal(digestoCanonico(world), ALTO.inicial);
+      for (let n = 0; n < ALTO.pasos; n++) {
+        stepWorld(world);
+        if (world.tick % paramsOf(world).persistencia.cadaTicks === 0) store.save(world);
+      }
+      assert.equal(digestoCanonico(world), ALTO.final);
+    } finally { store.close(); rmSync(dir, { recursive: true, force: true }); }
+  });

@@ -1520,21 +1520,32 @@ export class Landscape {
     const species = tile.species, stock = tile.fauna ?? 0;
     if (!species || stock <= .04) return;
     const count = stock > .65 ? 2 : 1;
+    const lane = hash3(tile.x, tile.y, 2580) & 1;
     for (let i=0;i<count;i++) {
-      const x = tile.x*ART+4+Math.floor(rnd(tile.x,tile.y,2010+i)*8), y = tile.y*ART+7+i*5;
-      const pose = this.reduceMotion ? 0 : Math.floor(t*1.6 + rnd(tile.x,tile.y,2040+i)*4)%2;
+      const x = tile.x*ART + (count === 1
+        ? 3 + Math.floor(rnd(tile.x,tile.y,2600+i)*10)
+        : 2 + ((i + lane) & 1) * 7 + Math.floor(rnd(tile.x,tile.y,2600+i)*5));
+      const y = tile.y*ART + 6 + Math.floor(rnd(tile.x,tile.y,2620+i)*7);
+      const left = (hash3(tile.x,tile.y,2640+i) & 1) === 1;
+      const compact = hash3(tile.x,tile.y,2660+i) % 3 === 0;
+      const phase = hash3(tile.x,tile.y,2680+i) & 1;
+      const pose = this.reduceMotion ? phase : (Math.floor(t*1.6 + phase) & 1);
+      g.save(); g.translate(x, y); if (left) g.scale(-1, 1);
       if (species === 'fish') {
-        ellipse(g,x,y,3,1.5,css(P.waterGleam,.8)); px(g,x-4,y-1+pose,2,2,css(P.waterGleam,.7)); px(g,x+2,y,1,1,css(P.waterDeep));
+        ellipse(g,0,0,compact?2:3,compact?1:1.5,css(P.waterGleam,.8)); px(g,compact?-3:-4,-1+pose,2,2,css(P.waterGleam,.7)); px(g,compact?1:2,0,1,1,css(P.waterDeep));
       } else if (species === 'hare') {
-        ellipse(g,x,y+2,3,1,css(P.shadow,.2)); ellipse(g,x,y,3,2,css(P.soilLight));px(g,x+1,y-4-pose,1,3,css(P.paper));px(g,x+3,y-4,1,3,css(P.soilLight));px(g,x+2,y-1,1,1,css(P.ink));px(g,x-3,y,1,1,css(P.paper));
+        ellipse(g,0,2,compact?2:3,1,css(P.shadow,.2)); ellipse(g,0,0,compact?2:3,compact?1:2,css(P.soilLight));
+        px(g,1,-3-pose,1,compact?2:3,css(P.paper));px(g,compact?2:3,-4,1,compact?2:3,css(P.soilLight));px(g,2,-1,1,1,css(P.ink));px(g,compact?-2:-3,0,1,1,css(P.paper));
       } else {
         const deer = species === 'deer', coat = deer ? P.soil : P.trunkLight;
-        ellipse(g,x,y+4,5,1.5,css(P.shadow,.2));ellipse(g,x,y,4,2.5,css(coat));
-        px(g,x-3,y+1,1,3,css(darken(coat,.25)));px(g,x+2,y+1,1,3,css(darken(coat,.25)));
-        px(g,x+3,y-3,3,3,css(lighten(coat,.12)));px(g,x+4,y-2,1,1,css(P.ink));
-        if(deer){px(g,x+3,y-6,1,3,css(P.trunk));px(g,x+5,y-6,1,3,css(P.trunk));px(g,x+2,y-6,4,1,css(P.trunk));}
-        else {px(g,x+5,y,2,1,css(P.paper));px(g,x-4,y-1-pose,1,2,css(P.trunk));}
+        const body = compact ? 3 : 4;
+        ellipse(g,0,4,compact?4:5,compact?1:1.5,css(P.shadow,.2));ellipse(g,0,0,body,compact?2:2.5,css(coat));
+        px(g,-body+1,1,1,compact?2:3,css(darken(coat,.25)));px(g,body-2,1,1,compact?2:3,css(darken(coat,.25)));
+        px(g,body-1,-3,compact?2:3,compact?2:3,css(lighten(coat,.12)));px(g,body,-2,1,1,css(P.ink));
+        if(deer){px(g,body-1,-6,1,3,css(P.trunk));px(g,body+1,-6,1,3,css(P.trunk));px(g,body-2,-6,4,1,css(P.trunk));}
+        else {px(g,body+1,0,2,1,css(P.paper));px(g,-body,-1-pose,1,2,css(P.trunk));}
       }
+      g.restore();
     }
   }
 

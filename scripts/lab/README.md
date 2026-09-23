@@ -23,6 +23,12 @@ npx tsx scripts/lab/replica.ts --seed 51926 --dias 10 --params "cuerpo.riesgoSen
 - `--gobernador no|servidor` (opcional, por defecto `no`): ver «Gobernador consciente del servidor»
   más abajo. `no` es EXACTAMENTE el comportamiento de siempre (salida bit a bit idéntica); pasar
   explícitamente `no` es equivalente a omitir la bandera.
+- `--instrumentos si|no` (opcional, por defecto `si`): instrumentos de medida de solo lectura
+  (conducta por tiempo y comida compartida), ver «Instrumentos de medida» más abajo. `no` da
+  exactamente los `dia-NNN.json` de antes (mismas claves, mismos valores).
+- `--techo-lab N` (opcional, entero ≥ 16): techo **determinista** de laboratorio, ver «Techo de
+  laboratorio» más abajo. Sin la bandera no cambia nada (ni el mundo ni las claves de salida).
+  Incompatible con `--gobernador servidor` (error explícito).
 
 ## Por qué SIEMPRE hay un `Store` (hallazgo P3)
 
@@ -198,6 +204,222 @@ Envuelve `Store.prototype.save` y, en cada guardado, añade una línea a `DIR/co
 observación anterior, fundadas/disueltas y, por comunidad, miembros, distancia media y máxima al
 centro y grupos espaciales a ≤ 6 celdas). Sólo lee campos planos: los `dia-NNN.json` salen
 idénticos con y sin observador (comprobado contra la base de la noche, semillas 7/42/51926/1).
+
+## Criterio de terminado (`criterio-terminado.mts`, Steven 2026-09-22)
+
+> «En el laboratorio, la mayoría de semillas mantiene población y recambio durante al menos 60 días
+> simulados con varias generaciones vivas, más de un tipo de cooperación relevante, conflictos y
+> muertes con causa legible, tecnología que se transmite y diversidad de conducta creciente.»
+
+Evalúa ese criterio sobre un conjunto de réplicas **ya producidas** (solo lee `dia-NNN.json` y
+`replica.json`; no simula): un directorio con un subdirectorio `<brazo>-<semilla>` por réplica.
+
+```sh
+npx tsx scripts/lab/criterio-terminado.mts --entrada <conjunto> [--dia 60|comun] [--ventana 10] [--salida informe.json]
+# p. ej. corte intermedio de un conjunto en marcha:
+npx tsx scripts/lab/criterio-terminado.mts --entrada $SCRATCH/r2 --dia 10 --salida $SCRATCH/criterio-r2-d10.json
+```
+
+Por semilla, al día D (por defecto 60; `--dia comun` = último día que ya escribieron todas las no
+extinguidas), con ventana = los 10 días que terminan en D. Umbrales por defecto (todos ajustables; la
+justificación de cada uno está en la cabecera del script y se repite en la salida):
+
+| # | criterio | cumple si… | banderas |
+|---|---|---|---|
+| C1 | supervivencia | `poblacion ≥ 16` **todos** los días de la ventana, no solo el día D (14 fundadores mortales + S e I) | `--poblacion-min` |
+| C2 | recambio | nacimientos en la ventana ≥ 1 **y** `fundadoresMortalesVivos(D) ≤ 1` | `--nacimientos-min --fundadores-max` |
+| C3 | varias generaciones | `generacionesMortalesVivas(D)` ≥ 3 (sin S e I, que mantienen viva la generación 0; si falta, `generacionesVivas` solo como cota: cumple si `generacionesVivas − 1 ≥ 3`, si no «desconocido» o falla) | `--generaciones-min` |
+| C4 | cooperación variada | ≥ 2 tipos de `cooperacionAcumuladaPorTipo` (teaching, trade, constructionHelp y, con instrumentos, `foodShared`), cada uno ≥ 10 % de los actos de la ventana **y** ≥ 5 actos en ella; un tipo que falta en el día base da «desconocido» | `--coop-tipos-min --coop-fraccion-min --coop-actos-min` |
+| C5 | conflictos | `conflictosAcumulados` crece ≥ 1 en la ventana (si es 0 en toda la réplica lo dice) | `--conflictos-min` |
+| C6 | muertes legibles | 0 muertes fuera de starvation/dehydration/exposure/senescence, ≥ 2 causas en 1..D y balance `Δpoblación = Δnacimientos − Δmuertes` desde el día 0 (16 habitantes, o `resumen.poblacionInicial`) | `--causas-min --causas-conocidas` |
+| C7 | tecnología transmitida | Σ`usosDeInventorAjeno` / Σ(`usosUtiles` − `usosSinAutorResuelto`) en la ventana ≥ 0,15 y uso ajeno en ≥ 50 % de sus días | `--uso-ajeno-min --dias-uso-ajeno-min` |
+| C8 | diversidad creciente | pendiente MCO del índice de conducta en días 5..D (≥ 3 días con dato) ≥ 0 **o** media de los k últimos días ≥ media de los k primeros, k = min(10, mitad del tramo) ≥ 2; una serie constante falla; con dato en < 80 % de los días 5..D es «desconocido». Serie (preregistro, ver abajo): `diversidadConductaActiva` si la réplica la trae, si no `diversidadConductaTiempo`, si no `diversidadConducta`; las otras se informan como secundarias (no deciden) | `--pendiente-min --dia-base-diversidad --diversidad-regla o\|y --diversidad-campo auto\|activa\|tiempo\|actividad` |
+
+- Cada criterio es cumple / falla / **desconocido** (campo ausente): nunca se aprueba por defecto.
+- Nada se decide con un día suelto: `diversidadConducta` salta ±0,1 de un día a otro en r2, así que
+  C8 compara medias de bloques y exige ≥ 3 puntos para la pendiente; C1 mira toda la ventana.
+- C8 exige cobertura: la serie evaluada (la que decide y cada secundaria) debe tener dato en ≥ 80 %
+  de los días del tramo 5..D; si no, «desconocido», nunca «cumple». Cierra el hueco que encontró el
+  verificador: una serie por tiempo presente solo los días 5-7 (creciente) decidía sola y aprobaba C8
+  aunque la serie completa cayera.
+- `replica.ts` solo escribe las 4 causas conocidas en `muertesPorCausa`: la comprobación que de verdad
+  detecta una muerte sin causa en C6 es el balance.
+- **Extinguida** (algún día ≤ D con 0 `vecinosMortales`): cuenta y falla los 8. **En curso** (sin
+  `replica.json` y sin dia-D) y **corta** (terminó antes de D sin extinguirse): excluidas, se dice
+  cuántas y por qué día van. Una réplica que sigue corriendo pero ya escribió dia-D se evalúa. Sin
+  `vecinosMortales` la extinción se lee como `poblacion ≤ 2` (S e I son inmortales). Una «en curso»
+  que lleva > 3 h sin escribir (`--estancada-horas`) se avisa como posible proceso muerto.
+- Veredicto por brazo (`--mayoria 0.5`): «mayoría» si cumplen los 8 ≥ 50 % de las semillas del brazo
+  aunque todas las excluidas fallaran; «no mayoría» si ni contando como aprobadas las excluidas y las
+  desconocidas se llega; si no, «indeterminado». También se da la fracción literal sobre evaluadas.
+- Con D < 60 la salida avisa de que el corte es **provisional**: el criterio exige 60 días, así que un
+  «no mayoría» al día 10 es del corte, no del criterio.
+- Salida: tabla por brazo (cumplen/evaluadas por criterio y los 8 a la vez), una línea por réplica
+  con el motivo de cada fallo, y el informe completo en JSON con `--salida`.
+
+## Preregistro del criterio C8 (orquestador, noche 2026-09-22)
+
+Decisión tomada **antes** de ver corridas largas, para que no sea elegir, a posteriori, la medida que
+aprueba. «Diversidad de conducta creciente» se lee con **`diversidadConductaActiva`**: el mismo
+`indiceDiversidad` (`src/world/diversidad.ts`, misma fórmula y mismos grupos del vector) con la
+actividad sustituida por los ticks por acción del observador **sin `rest`**. En modo `auto` decide esa
+serie si la réplica la trae; si no, `diversidadConductaTiempo`; si no, `diversidadConducta`. Las demás
+series que haya se evalúan igual y se informan como secundarias: no deciden.
+
+Por qué, serie por serie:
+
+- **`diversidadConducta` (antigua, `person.activity`)**: `move()` suma +1 a `activity.explore` por
+  **cada celda nueva**, mientras los demás oficios suman 1 por trabajo terminado. Explorar infla el
+  índice: es el 45-61 % de la activity con el 10-21 % del tiempo y el «oficio dominante» de la mayoría
+  (ver «Por qué el índice antiguo sobrerrepresenta explorar» más abajo).
+- **`diversidadConductaTiempo` (ticks por acción)**: corrige ese sesgo pero cae en otro: descansar ocupa
+  el 20-39 % del tiempo y es el oficio dominante por tiempo de casi todos, así que su componente
+  `oficios` tiende a 0 y el índice mide sobre todo cuánto se descansa.
+- **`diversidadConductaActiva` (ticks por acción sin `rest`)**: descansar es inactividad, no conducta.
+  Quitarlo deja el reparto del tiempo **activo** entre las 17 acciones restantes, que es la lectura más
+  fiel de «diversidad de conducta». Quien en el tramo observado solo descansó queda con la actividad
+  vacía, igual que alguien que aún no actuó (`dominantAction` = «sin oficio aún»).
+
+Solo se excluye `rest`: las otras 17 acciones, comer y beber incluidas, cuentan como conducta (el
+preregistro no quita nada más). La decisión y la regla de cobertura (≥ 80 % de los días 5..D con
+dato; si no, «desconocido») están en la cabecera de `criterio-terminado.mts` y en sus tests
+(`tests/criterio-terminado.test.ts`: el caso sintético del verificador da «desconocido»; una activa
+completa y creciente da «cumple» aunque tiempo y antigua caigan; una activa completa que cae da
+«falla» aunque las otras dos crezcan).
+
+## Techo de laboratorio (`--techo-lab N`, noche 2026-09-22)
+
+`replica.ts --techo-lab N` emula la política `techo` del gobernador del servidor
+(`gobernador.politica = 'techo'`, `decidirConTecho` en `src/server/governor.ts`) con el techo **ya
+fijado en N**, en lugar del que dispara el p95 del paso. Antes de cada paso:
+
+```
+world.reproductionEnabled = decidirConTecho(rojo, presupuesto, población, { techo: N }).reproduccion
+                          = población < N
+```
+
+con la población contada **exactamente** como la cuenta el servidor: `world.people.length`, todas las
+personas vivas con S e I incluidas (`governReproduction` en `src/server/app.ts` pasa
+`draft.people.length` a `gobernador.decidir`). Se reutiliza la función del servidor, no se reimplementa
+(`scripts/lab/techo-lab.ts`). El servidor decide tras cada paso para el siguiente; aquí se decide antes
+de cada paso sobre la misma población (la del final del paso anterior).
+
+**Por qué**: el techo del servidor depende del reloj de pared (carga de la torre, otras réplicas en
+paralelo), así que dos corridas de la misma semilla no frenan en el mismo sitio. Para corridas de 60
+días **comparables** entre semillas y brazos y **reproducibles** bit a bit hace falta un techo fijo:
+con él, una vez alcanzado N los nacimientos solo reponen muertes, como en el servidor bajo rojo.
+
+**Qué NO es**: no es una ley del mundo (no toca `src/world` ni los params; solo `reproductionEnabled`,
+el mismo interruptor que ya gobierna el servidor) ni un tope del servidor. El servidor sigue gobernado
+por hardware (ruling R17, FR-013: sin topes fijos de población; `POPULATION_HARD_LIMIT` es solo
+anticorrupción). N es una condición experimental del laboratorio y debe declararse junto a cada
+resultado que la use.
+
+**Cota que garantiza** (`techoLabCota`): solo `reproduce()` (`src/world/index.ts`) añade personas y solo
+con `reproductionEnabled`; en un paso nacen como mucho `poblacion.nacimientosPorComprobacion` (2 por
+defecto: el cupo menos los nacidos en la ventana de `intervaloComprobacionTicks`). Si antes del paso
+hay P ≥ N no nace nadie; si P ≤ N − 1, tras el paso hay ≤ N − 1 + nacidos del paso. Por inducción, tras
+cualquier paso:
+
+```
+población ≤ max(poblaciónInicial, N − 1 + nacimientosPorComprobacion)
+```
+
+Es decir, se pasa de N como mucho en los nacidos de **un** paso menos uno (los que ya estaban
+decididos cuando aún había sitio). `tests/lab-techo.test.ts` lo comprueba a resolución de paso con
+N = 18 en la semilla 42 (etapa 1): máximo 18 ≤ 19, reproducción habilitada el 7 % de los ticks del
+día; sin techo el mismo mundo llega a 23. Dos corridas dan el mismo `digestoMundoFinal`.
+
+Efectos colaterales, los mismos que en el servidor con el techo puesto: `reproductionEnabled = false`
+también apaga la cría de fauna (`src/world/animals.ts`), el cortejo (`poblacion.cortejo`) y la
+intención de reservar comida para criar (`familyOpportunity`, `src/world/family.ts`).
+
+Salida (solo con la bandera):
+
+- cada `dia-NNN.json`: `techoLab` (N), `reproduccionActivaFraccion` (fracción de los ticks **de ese
+  día** con `reproductionEnabled`, mismo nombre que con `--gobernador servidor`) y `poblacionMaximaDia`
+  (máximo de `world.people.length` tras cada paso del día);
+- `replica.json`: `techoLab`, `techoLabDetalle` (`reproduccionActivaFraccion` de toda la réplica,
+  `poblacionMaxima`, `cotaPoblacion`, cómo se cuenta la población) y `gobernador` lo describe.
+
+## Instrumentos de medida (`instrumentos.ts`, ronda INSTR 2026-09-22)
+
+Dos instrumentos **de medida**, no de mundo: solo leen `World`/`Person` y acumulan en memoria del
+laboratorio (nunca en `World` ni en `Person`). Activos por defecto en `replica.ts`;
+`--instrumentos no` los apaga y devuelve los `dia-NNN.json` de siempre.
+
+### Por qué el índice antiguo sobrerrepresenta explorar
+
+`diversidadConducta` es `indiceDiversidad` (`src/world/diversidad.ts`): media de la distancia coseno
+entre vectores de conducta y de la entropía del «oficio dominante», ambos leídos de
+`person.activity`. Pero `activity` no mide lo mismo para todos los oficios: `move()` llama a
+`outcome('explore')` (+1 en `activity.explore`) por **cada celda nueva** que pisa quien explora,
+mientras los demás oficios suman 1 por **trabajo terminado**. Cifras (verificadas por dos agentes en
+la ronda EXPL, params del carril R2): semilla 42 día 2, explorar es el 44,5 % de la activity con el
+10,2 % del tiempo y es el oficio dominante de 18 de 23 personas (día 4: 54 %, 22 de 26); semilla 7
+día 1, el 61 % de la activity con el 21 % del tiempo, dominante en 16 de 21. Recontar explorar una
+vez por tramo sobre el MISMO mundo sube el índice (día 6: semilla 2024 0,099 → 0,383; 31337 0,098 →
+0,342; 42 0,198 → 0,444). Con estos instrumentos, en las 4 semillas × 4 días de abajo explorar es el
+4-32 % del tiempo de los mortales y el 18-82 % de sus incrementos de activity.
+
+### 1. Conducta por tiempo
+
+Tras **cada** paso (`K = 1`), antes del guardado, se anota la acción (`person.action`) de cada persona
+viva y se acumulan ticks por acción desde que el laboratorio la ve (tick 0 o su nacimiento). Coste
+medido: 0,014-0,022 ms por paso (0,18-0,23 % de `stepWorld`), así que no hace falta muestrear. Campos
+nuevos por día:
+
+- `diversidadConductaTiempo`: **el mismo** `indiceDiversidad` (misma fórmula, mismos grupos del vector:
+  tecnología, alimento, lugares) sobre vistas de las personas (`Object.create(person)`) cuya `activity`
+  se sustituye por esos ticks. Solo cambia la entrada de actividad; con la `activity` original la vista
+  da exactamente `worldStatistics(world).diversidad` (test). Personas: las de `world.people`, como el
+  índice antiguo (incluye a S e I).
+- `diversidadConductaActiva` (+ `diversidadConductaActivaComponentes`): el mismo índice con esos ticks
+  **sin `rest`** (`sinDescanso`); quien solo descansó queda con la actividad vacía. Es la serie que
+  decide C8 (ver «Preregistro del criterio C8»).
+- `diversidadConductaTiempoComponentes` / `diversidadConductaActivaComponentes` /
+  `diversidadConductaComponentes`: `{conducta, oficios}` de cada índice (su media es el total).
+- `repartoTiempoPorAccion`: `{personaTicks, fracciones}` del **día** entre los vecinos mortales vivos
+  en cada paso (fracciones en el orden fijo de las 18 acciones, solo las > 0).
+- `repartoActividadPorAccion`: `{incrementos, fracciones}` de lo que creció `activity` ese día entre los
+  mortales vivos al final del día (lo de quien murió durante el día no se cuenta): el contraste directo
+  con el reparto de tiempo.
+- `diversidadConducta` se conserva tal cual (compatibilidad).
+
+**Ojo, el índice por tiempo tiene su propio sesgo**: descansar (`rest`) ocupa el 20-39 % del tiempo de
+los mortales y, acumulado, es el oficio dominante por tiempo de casi todos (día 4: 32 de 34 personas en
+la semilla 7, 28 de 31 en la 42, 20 de 21 en la 2024; 28 de 28 en la 42 día 3), igual que explorar lo
+es por activity (15-21 personas al día 4). Su componente `oficios` colapsa (0,00 en la semilla 42 día
+3) y la pendiente MCO de los días 1-4 es negativa en 3 de 4 semillas, mientras la del índice antiguo es
+positiva en 3 de 4. No es «el bueno»: mide en qué se va el tiempo, no qué se produce. Por eso existe la
+serie activa (sin descansar), que es la que decide C8, y el criterio informa las tres.
+
+### 2. Comida compartida (`cooperacionAcumuladaPorTipo.foodShared`)
+
+`share()` (`src/world/index.ts`) es la única entrega de comida entre personas vivas: el donante da 0,025
+de su reserva (`inventory`) a otra persona con hambre > 0,27 a ≤ 2 celdas, junto a un lugar, y el mundo
+emite **un** suceso `kind: 'care'` (único emisor de ese tipo en `src/world`). Un acto = un suceso `care`
+nuevo en `world.chronicleJournal.pending` tras el paso (la serie `e<antes+1>..e<después>`; si no está
+entera, la réplica falla en voz alta). Acumulado desde el tick 0 de la réplica, de cualquier donante
+(S, I o vecino, como `world.totals`). **No** cuentan: la herencia al morir (`transferEstate`, suceso
+`ecology`), ni depositar o tomar comida de estructuras (almacén común, no una entrega entre personas).
+Contraprueba en el test: coincide con los donantes que acaban el paso con `lastShared = tick`. No
+entra en `world.totals.cooperation`, así que `otrasCooperacionesAcumuladas` no cambia. Sin este instrumento
+la cooperación tipificada se leía casi solo como enseñanza (79-100 % de los actos acumulados al día 4
+en las semillas de abajo; «97 %» en r2); con él, compartir comida es el 43-66 % de los actos
+tipificados al día 4 y C4 (corte provisional, día 4, ventana 3) pasa de 2/4 a 4/4 semillas.
+
+### Garantía: cambia la MEDIDA, no el mundo
+
+- `tests/instrumentos-lab.test.ts`: en proceso, dos mundos en paralelo (con y sin observador) dan el
+  mismo `digestoCanonico` cada 300 pasos; por CLI, una réplica de 1 día con y sin instrumentos da el
+  mismo `digestoMundoFinal` (nuevo en `replica.json`) y los mismos `dia-001.json` salvo los campos
+  nuevos (y `foodShared`).
+- Medición de la ronda: 4 semillas (7, 42, 2024, 31337) × 4 días con el paquete de la etapa 1: los 16
+  `dia-NNN.json` coinciden campo a campo (salvo tiempos) con los de `r2/Psinagua-<semilla>`, que
+  corrieron SIN instrumentos y con `Store`, sobre el árbol anterior a la optimización del paso.
+- Con `--gobernador servidor` el tiempo del observador se descuenta del `stepMs` que decide el
+  gobernador; ese modo depende del reloj y no es bit a bit reproducible con ni sin instrumentos.
 
 ## Rendimiento
 

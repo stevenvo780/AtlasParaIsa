@@ -219,6 +219,22 @@ siempre antes/después en la misma sesión. Toda optimización del paso debe dej
 cabecera). Con el mundo de 6 días de la semilla 51926 (leyes candidatas), el paso bajó de 112 a 60 ms de CPU
 (×1,86) sin mover un bit (digestos idénticos a 1200 y 2400 pasos).
 
+### Escala con la población — `../perf/` (sprint noche-perf2 2026-09-22)
+
+```bash
+export TMPDIR=/datos/tmp-atlas-lab   # nunca /tmp: tiene cuota
+npx tsx scripts/perf/instantaneas.ts --seed 3 --dias 3,6,9,12.25 --salida DIR   # mundos de una misma semilla a varias poblaciones
+npx tsx scripts/perf/fases.ts --db DIR/d06/world.sqlite --pasos 600 [--digesto H]  # CPU propia por fase de cualquier base (se copia; el original no se toca)
+node --cpu-prof --cpu-prof-dir P --import tsx scripts/perf/fases.ts --db … --pasos 300
+npx tsx scripts/perf/cpuprof.ts resumen P/*.cpuprofile --pasos 300 --poblacion N --salida r.json  # ms/paso por función (línea real del .ts)
+npx tsx scripts/perf/cpuprof.ts comparar chico.json grande.json                                # exponente k de cada función con N
+scripts/perf/escalado.sh SALIDA chico.sqlite grande.sqlite    # todo lo anterior para dos mundos a la vez
+```
+
+`fases.ts` carga cualquier base con el `Store` del proyecto (los params viajan con el mundo), así sirve también
+para copias de réplicas (`sqlite3 .backup`). `cpuprof.ts` traduce las columnas del código que tsx entrega en una
+sola línea a la línea del `.ts` con los mapas de su caché (`$TMPDIR/tsx-<uid>`).
+
 ## El techo del hardware — `../curva-techo.mts` (T109)
 
 `replica.ts` mide **leyes** (población, tecnología, cooperación…) a una escala fija; hermana con

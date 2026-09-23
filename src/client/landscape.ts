@@ -19,7 +19,7 @@ import type { Capability } from '../shared/technology.js';
 import { decidirModo, rendererProfile, type Modo } from './modo.js';
 import { dibujarCalor, type Capa, type RangoCalor } from './calor.js';
 import { claveRegion } from './regiones.js';
-import { getTerrainAtlas, TERRAIN_ATLAS_TILE, TERRAIN_VARIANTS, threshold as bayerThreshold, type AtlasBiome, type AtlasCell, type WorkedGroundState } from './terrain-atlas.js';
+import { getTerrainAtlas, terrainAtlasWindow, TERRAIN_ATLAS_TILE, TERRAIN_VARIANTS, threshold as bayerThreshold, type AtlasBiome, type AtlasCell, type WorkedGroundState } from './terrain-atlas.js';
 
 /* ------------------------------------------------------------------ */
 /* Tipos públicos                                                      */
@@ -223,12 +223,15 @@ function workedGroundState(tile: Tile): WorkedGroundState {
 }
 
 function terrainVariant(x: number, y: number): number {
-  return hash3(x, y, 7321) % TERRAIN_VARIANTS;
+  return ((hash3(x, y, 7321) ^ hash3(y, x, 7331)) >>> 0) % TERRAIN_VARIANTS;
 }
 
-function drawAtlasCell(g: CanvasRenderingContext2D, cell: AtlasCell, dx: number, dy: number): void {
+/** `tile`: casilla del MUNDO cuya posición elige la ventana del atlas (así dos vecinas del mismo cubo no repiten
+ * el mismo bitmap y el patrón tampoco se repite de un chunk al siguiente); sin ella se pega la celda tal cual. */
+function drawAtlasCell(g: CanvasRenderingContext2D, cell: AtlasCell, dx: number, dy: number, tile?: { x: number; y: number }): void {
   const atlas = getTerrainAtlas();
-  g.drawImage(atlas.canvas, cell.sx, cell.sy, ART, ART, dx, dy, ART, ART);
+  const source = tile ? terrainAtlasWindow(cell, tile.x, tile.y) : cell;
+  g.drawImage(atlas.canvas, source.sx, source.sy, ART, ART, dx, dy, ART, ART);
 }
 
 function clamp(v: number, lo: number, hi: number): number {
@@ -801,7 +804,7 @@ export class Landscape {
           }
           for (let y = y0; y < y0 + CHUNK_ART_TILES; y++) for (let x = x0; x < x0 + CHUNK_ART_TILES; x++) {
             const tile = this.tileAt(x, y);
-            if (tile) { this.bakeCoast(g, x, y); this.bakeFeatures(g, tile); }
+            if (tile) { this.bakeCoast(g, x, y); this.bakeShore(g, x, y); this.bakeFeatures(g, tile); }
           }
           g.restore();
           if (chunk) { chunk.signature = signature; chunk.revision = ++this.cacheBuilds; }
@@ -829,7 +832,7 @@ export class Landscape {
         }
       }
       const depth = neighbours >= 6 ? 2 : neighbours >= 3 ? 1 : 0;
-      drawAtlasCell(g, atlas.water(depth, terrainVariant(x, y)), ox, oy);
+      drawAtlasCell(g, atlas.water(depth, terrainVariant(x, y)), ox, oy, { x, y });
       return;
     }
 
@@ -837,10 +840,10 @@ export class Landscape {
     const biome = atlasBiome(tile), variant = terrainVariant(x, y);
     const moisture = groundBucket(tile.moisture), fertility = groundBucket(tile.fertility ?? .5);
     const vegetation = tile.terrain === 'shelter' ? Math.round(groundBucket(tile.vegetation) * .25) : groundBucket(tile.vegetation);
-    drawAtlasCell(g, atlas.soil(biome, variant, moisture, fertility), ox, oy);
-    drawAtlasCell(g, atlas.leaf(biome, variant, moisture, vegetation), ox, oy);
+    drawAtlasCell(g, atlas.soil(biome, variant, moisture, fertility), ox, oy, { x, y });
+    drawAtlasCell(g, atlas.leaf(biome, variant, moisture, vegetation), ox, oy, { x, y });
     const state = workedGroundState(tile);
-    if (state !== 'wild') drawAtlasCell(g, atlas.worked(state, variant), ox, oy);
+    if (state !== 'wild') drawAtlasCell(g, atlas.worked(state, variant), ox, oy, { x, y });
 
     // Dentro del mismo bioma sólo el suelo ecológico alcanza un píxel de la
     // tesela vecina. La cobertura agotada y el tránsito cero nunca se prestan.
@@ -861,7 +864,8 @@ export class Landscape {
       const neighbourMoisture = groundBucket(neighbour.moisture), neighbourFertility = groundBucket(neighbour.fertility ?? .5);
       if (neighbourMoisture === moisture && neighbourFertility === fertility) continue;
       const cell = atlas.soil(biome, terrainVariant(neighbour.x, neighbour.y), neighbourMoisture, neighbourFertility);
-      g.drawImage(atlas.canvas, cell.sx + contact.sx, cell.sy + contact.sy, contact.sw, contact.sh,
+      const source = terrainAtlasWindow(cell, neighbour.x, neighbour.y);
+      g.drawImage(atlas.canvas, source.sx + contact.sx, source.sy + contact.sy, contact.sw, contact.sh,
         ox + contact.tx, oy + contact.ty, contact.sw, contact.sh);
     }
   }
@@ -912,7 +916,15 @@ export class Landscape {
         ellipse(g,cx-1,cy,size-1,1,css(base)); px(g,cx-2,cy-1,Math.max(1,size-2),1,css(feature === 'clay' ? P.soilLight : P.stone));
       }
     } else if (feature === 'reeds') {
-      for(let i=0;i<4;i++){ const h = 2+Math.round(growth*5); px(g,ox+3+i*3,oy+12-h,1,h,css(P.reed));px(g,ox+3+i*3,oy+10-h,1,2,css(P.reedLight)); }
+      if (hash3(x, y, 2240) % 5 < 3 && growth > .15) {
+        const count = 2 + (hash3(x, y, 2241) % 3);
+        for (let i = 0; i < count; i++) {
+          const rx = ox + 2 + hash3(x, y, 2242 + i) % 12;
+          const h = 2 + Math.round(growth * 5) + hash3(x, y, 2250 + i) % 2;
+          px(g, rx, oy + 12 - h, 1, h, css(P.reed));
+          px(g, rx, oy + 10 - h, 1, 2, css(P.reedLight));
+        }
+      }
     } else if (feature === 'flowers') {
       const level = groundBucket(growth), visible = hash3(x, y, 2260) % 12 < 3 + Math.floor(level / 2);
       const count = visible ? 1 + (level >= 7 ? 1 : 0) + (level >= 11 && hash3(x, y, 2270) % 3 === 0 ? 1 : 0) : 0;
@@ -958,6 +970,16 @@ export class Landscape {
     }
     const atlas = getTerrainAtlas(), ox = x * ART, oy = y * ART, variant = terrainVariant(x, y);
     for (const [target, mask] of masks) drawAtlasCell(g, atlas.edge(owner, target, variant, mask), ox, oy);
+  }
+
+  /** Franja clara sobre la tierra; el escalón y el contacto entre biomas quedan intactos. */
+  private bakeShore(g: CanvasRenderingContext2D, x: number, y: number): void {
+    if (this.terrainAt(x, y) === 'water') return;
+    const ox = x * ART, oy = y * ART, sand = css(P.sand);
+    if (this.terrainAt(x, y - 1) === 'water') px(g, ox, oy, ART, 1, sand);
+    if (this.terrainAt(x + 1, y) === 'water') px(g, ox + ART - 1, oy, 1, ART, sand);
+    if (this.terrainAt(x, y + 1) === 'water') px(g, ox, oy + ART - 1, ART, 1, sand);
+    if (this.terrainAt(x - 1, y) === 'water') px(g, ox, oy, 1, ART, sand);
   }
 
   /* ---------------------------------------------------------------- */
@@ -1428,7 +1450,8 @@ export class Landscape {
       this.terrainAt(x - 1, y) !== 'water' ||
       this.terrainAt(x + 1, y) !== 'water';
     if (!touches) return;
-    const n = Math.floor(rnd(x, y, 810) * 4);
+    if (hash3(x, y, 810) % 5 >= 2) return;
+    const n = 1 + hash3(x, y, 811) % 3;
     for (let i = 0; i < n; i++) {
       const rx = ox + 2 + Math.floor(rnd(x, y, 830 + i) * (ART - 4));
       const ry = oy + 6 + Math.floor(rnd(x, y, 860 + i) * 6);

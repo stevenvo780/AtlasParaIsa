@@ -6,7 +6,8 @@ import type { Biome } from '../shared/types.js';
 import { AGUA, BOSQUE, DESIERTO, HUMEDAL, MONTANA, PRADERA, SUELO } from './paleta.js';
 
 export const TERRAIN_ATLAS_TILE = 16;
-export const TERRAIN_VARIANTS = 3;
+export const TERRAIN_VARIANTS = 4;
+const ATLAS_STRIDE = TERRAIN_ATLAS_TILE + 8;
 
 export type AtlasBiome = Biome;
 export type WorkedGroundState = 'wild' | 'trodden' | 'ploughed' | 'cultivated';
@@ -32,6 +33,7 @@ const CELLS = LAND_BIOMES.length * TERRAIN_VARIANTS * 13 * 13 * 2
   + 3 * TERRAIN_VARIANTS
   + 3 * TERRAIN_VARIANTS
   + BIOMES.length * (BIOMES.length - 1) * TERRAIN_VARIANTS * 15;
+// 8 584 celdas de 24×24: raster de 1 536×3 240 RGBA, unos 19 MiB.
 
 function colour(hex: string): Colour {
   const value = Number.parseInt(hex.slice(1), 16);
@@ -55,6 +57,11 @@ function hash3(x: number, y: number, salt: number): number {
   h = (h ^ (h >>> 13)) >>> 0;
   h = Math.imul(h, 1274126177) >>> 0;
   return (h ^ (h >>> 16)) >>> 0;
+}
+
+/** Ventana 16×16 con fase propia de la casilla; cabe en el margen cíclico de 8 px. */
+export function terrainAtlasWindow(cell: AtlasCell, x: number, y: number): AtlasCell {
+  return { sx: cell.sx + (hash3(x, y, 3101) & 7), sy: cell.sy + (hash3(x, y, 3102) & 7) };
 }
 
 const BAYER8 = [
@@ -95,20 +102,21 @@ export function getTerrainAtlas(): TerrainAtlas {
   if (memo) return memo;
 
   const canvas = document.createElement('canvas');
-  canvas.width = ATLAS_COLUMNS * TERRAIN_ATLAS_TILE;
-  canvas.height = Math.ceil(CELLS / ATLAS_COLUMNS) * TERRAIN_ATLAS_TILE;
+  canvas.width = ATLAS_COLUMNS * ATLAS_STRIDE;
+  canvas.height = Math.ceil(CELLS / ATLAS_COLUMNS) * ATLAS_STRIDE;
   const context = canvas.getContext('2d')!;
   const image = context.createImageData(canvas.width, canvas.height);
   const pixels = image.data;
   const cells = new Map<string, AtlasCell>();
   let cursor = 0;
 
-  const add = (id: string, paint: (x: number, y: number) => Colour | undefined): void => {
+  const add = (id: string, paint: (x: number, y: number) => Colour | undefined, wrapped = false): void => {
     const column = cursor % ATLAS_COLUMNS, row = Math.floor(cursor / ATLAS_COLUMNS);
-    const sx = column * TERRAIN_ATLAS_TILE, sy = row * TERRAIN_ATLAS_TILE;
+    const sx = column * ATLAS_STRIDE, sy = row * ATLAS_STRIDE;
     cells.set(id, { sx, sy }); cursor++;
-    for (let y = 0; y < TERRAIN_ATLAS_TILE; y++) for (let x = 0; x < TERRAIN_ATLAS_TILE; x++) {
-      const value = paint(x, y); if (!value) continue;
+    const size = wrapped ? ATLAS_STRIDE : TERRAIN_ATLAS_TILE;
+    for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+      const value = paint(x & 15, y & 15); if (!value) continue;
       const offset = ((sy + y) * canvas.width + sx + x) * 4;
       pixels[offset] = value.r; pixels[offset + 1] = value.g; pixels[offset + 2] = value.b; pixels[offset + 3] = 255;
     }
@@ -120,16 +128,16 @@ export function getTerrainAtlas(): TerrainAtlas {
       add(key('soil', biome, variant, moisture, fertility), (x, y) => {
         // Fertilidad y humedad tienen fases independientes: dos cambios
         // ecológicos distintos nunca colapsan accidentalmente al mismo raster.
-        const fertile = choose(x, y, variant, fertility / 12 * .68, palette.soil, palette.shade);
-        return choose(x, y, 3 + variant, moisture / 12 * .32, fertile, palette.shade);
-      });
+        const fertile = choose(x, y, variant, fertility / 12 * .42, palette.soil, palette.shade);
+        return choose(x, y, 3 + variant, moisture / 12 * .18, fertile, palette.shade);
+      }, true);
     }
     for (let moisture = 0; moisture <= 12; moisture++) for (let vegetation = 0; vegetation <= 12; vegetation++) {
       const cover = vegetation / 12;
       add(key('leaf', biome, variant, moisture, vegetation), (x, y) => {
         if (cover <= threshold(x, y, 6 + variant)) return undefined;
-        return choose(x, y, 9 + variant, (12 - moisture) / 12 * .82, palette.leaf, palette.leafShade);
-      });
+        return choose(x, y, 9 + variant, (12 - moisture) / 12 * .58, palette.leaf, palette.leafShade);
+      }, true);
     }
   }
 
@@ -140,7 +148,7 @@ export function getTerrainAtlas(): TerrainAtlas {
       if (state === 'trodden') return .54 > threshold(x, y, phase) ? WORKED[state] : undefined;
       if (state === 'ploughed') return ((y + variant) & 3) < 2 || .18 > threshold(x, y, phase) ? WORKED[state] : undefined;
       return ((y + variant) & 3) !== 3 || .3 > threshold(x, y, phase) ? WORKED[state] : undefined;
-    });
+    }, true);
   }
 
   for (let depth = 0; depth < 3; depth++) for (let variant = 0; variant < TERRAIN_VARIANTS; variant++) {
@@ -148,7 +156,7 @@ export function getTerrainAtlas(): TerrainAtlas {
     add(key('water', depth, variant), (x, y) => {
       if (((x + variant * 5) % 13 === 2 || (x + variant * 7) % 13 === 3) && (y + depth * 3) % 11 === 2) return COLOURS.ocean.leaf;
       return choose(x, y, 21 + variant, shallow, COLOURS.ocean.soil, COLOURS.ocean.shade);
-    });
+    }, true);
   }
 
   for (const owner of BIOMES) for (const neighbour of BIOMES) {

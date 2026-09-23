@@ -3,6 +3,43 @@ import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 import { chromium } from '@playwright/test';
 import { createBrowserTestServer as createServer } from './lib/vite.js';
+import { getTerrainAtlas, terrainAtlasWindow } from '../src/client/terrain-atlas.js';
+
+test('neighbouring tiles in one ecological bucket read distinct atlas windows', () => {
+  const cell = { sx: 24, sy: 48 };
+  const left = terrainAtlasWindow(cell, 0, 0), right = terrainAtlasWindow(cell, 1, 0);
+  assert.notDeepEqual(left, right);
+  for (const source of [left, right]) {
+    assert.ok(source.sx >= cell.sx && source.sx + 16 <= cell.sx + 24);
+    assert.ok(source.sy >= cell.sy && source.sy + 16 <= cell.sy + 24);
+  }
+});
+
+test('atlas margins wrap every shifted terrain window inside its own cell', () => {
+  const originalDocument = globalThis.document;
+  let pixels: Uint8ClampedArray<ArrayBufferLike> = new Uint8ClampedArray();
+  const canvas = { width: 0, height: 0, getContext: () => ({
+    createImageData: (width: number, height: number) => ({ data: new Uint8ClampedArray(width * height * 4) }),
+    putImageData: (image: { data: Uint8ClampedArray }) => { pixels = image.data; },
+  }) } as unknown as HTMLCanvasElement;
+  globalThis.document = { createElement: () => canvas } as unknown as Document;
+  try {
+    const atlas = getTerrainAtlas();
+    assert.ok(atlas.canvas.width * atlas.canvas.height * 4 < 20 * 1024 * 1024);
+    const sample = (x: number, y: number) => Array.from(pixels.slice((y * atlas.canvas.width + x) * 4, (y * atlas.canvas.width + x) * 4 + 4));
+    for (const cell of [atlas.soil('grassland', 0, 6, 6), atlas.leaf('grassland', 0, 6, 6), atlas.water(1, 0)]) {
+      for (let offsetY = 0; offsetY < 8; offsetY++) for (let offsetX = 0; offsetX < 8; offsetX++) {
+        for (let v = 0; v < 16; v++) for (let u = 0; u < 16; u++) {
+          assert.deepEqual(sample(cell.sx + offsetX + u, cell.sy + offsetY + v),
+            sample(cell.sx + ((offsetX + u) & 15), cell.sy + ((offsetY + v) & 15)));
+        }
+      }
+    }
+  } finally {
+    if (originalDocument) globalThis.document = originalDocument;
+    else delete (globalThis as { document?: Document }).document;
+  }
+});
 
 test('terrain atlas and biome contacts use palette colours exactly', { timeout: 60_000 }, async t => {
   if (!existsSync(chromium.executablePath())) { t.skip('Chromium absent: atlas palette raster not inspected.'); return; }

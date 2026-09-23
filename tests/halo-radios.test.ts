@@ -466,7 +466,9 @@ test('quién actúa en una fase con halo lo decide la fase serial: el destino pr
   assert.equal(Math.max(...decision.seleccion.map(id => alcanceSerial(id)!)), 4096, 'el disparador de destino agotado lee el destino propio');
   for (const id of fauna.seleccion) {
     const e = LECTURAS_GLOBALES.find(g => g.id === id)!;
-    assert.equal(e.fase, 'fauna'); assert.equal(e.funcion, 'stepAnimals');
+    // T116: el coordinador (`mascaraFauna`/`calcularMascara`) calcula la ventana antes de repartir
+    // `choose`; `fauna.turno` sigue en `stepAnimals`, `fauna.ventana` se movió a `calcularMascara`.
+    assert.equal(e.fase, 'fauna'); assert.ok(['stepAnimals', 'calcularMascara'].includes(e.funcion), e.funcion);
   }
   assert.match(FUENTES['animals.ts']!, /export const MAX_ACTIVE_ANIMALS = 8192;/);
   assert.match(FUENTES['animals.ts']!, /export const MAX_ANIMAL_DECISIONS_PER_TICK = 1024;/);
@@ -569,11 +571,13 @@ test('la prueba muerde: las siete mutaciones de la verificación, una composici�
   // Una lectura fijada que cambia por dentro: umbral 3 → 30 (el patrón casa en frontera de símbolo), un predicado que
   // se amplía, una sentencia antes del filtro que acota un `for`, un desplazamiento reasignado dentro del barrido.
   detecta(mutar([['inventions.ts', 'distance(person, other) <= 3', 'distance(person, other) <= 30']]), /inventions\.ts \(knownBlueprints\) el patrón aparece 0 veces/);
+  // T141: la búsqueda de personas ahora pasa por `vecinos` (rejilla.ts), una primitiva; el predicado
+  // ampliado se detecta como esa primitiva fijada a medias, no ya como una colección suelta.
   detecta(mutar([['family.ts', '    && !closeKin(person, other) && reproductiveReadiness(world, other)', '    && !closeKin(person, other) && reproductiveReadiness(world, other) || Math.abs(other.x - person.x) < 40 && other.hunger > 2']]),
-    /family\.ts:\d+ \(familyOpportunity\) coleccion people fijada a medias/);
-  detecta(mutar([['society.ts', '  for (const other of world.people) {\n    if (other === person || distance(person, other) > 7',
-    '  for (const other of world.people) {\n    if (other.hunger > 0.99 && Math.abs(other.x - person.x) < 40) break;\n    if (other === person || distance(person, other) > 7']]),
-  /society\.ts:\d+ \(evaluateCooperation\) coleccion people fijada a medias/);
+    /family\.ts:\d+ \(familyOpportunity\) primitiva vecinos fijada a medias/);
+  detecta(mutar([['society.ts', "for (const other of vecinos(world, person, 8, other => !(other === person || distance(person, other) > 7), 'cooperationOpportunity')) {",
+    "for (const other of vecinos(world, person, 8, other => !(other === person || distance(person, other) > 7) || Math.abs(other.x - person.x) < 40 && other.hunger > 2, 'cooperationOpportunity')) {"]]),
+  /society\.ts:\d+ \(evaluateCooperation\) primitiva vecinos sin inventariar/);
   detecta(mutar([['index.ts', "    const tile = tileAt(world, { x: person.x + dx, y: person.y + dy }); if (tile && tile.terrain !== 'water') nearbyTiles.push(tile);",
     "    dx += 20; const tile = tileAt(world, { x: person.x + dx, y: person.y + dy }); if (tile && tile.terrain !== 'water') nearbyTiles.push(tile);"]]), /index\.ts:\d+ \(choose\) barrido dx sin inventariar/);
   // El mundo por otro camino: un campo global nuevo, el mundo con otro tipo, y una lectura serial repartida en dos líneas.

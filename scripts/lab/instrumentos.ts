@@ -50,6 +50,13 @@ export function indiceDiversidadConActividad(world: World, actividad: (person: P
   return indiceDiversidad(mundo);
 }
 
+/** El mismo índice sobre un subconjunto de personas (vista del mundo con `people` = `personas`). */
+export function indiceDiversidadDe(world: World, personas: readonly Person[], actividad: (person: Person) => Readonly<Record<string, number>>): Indice {
+  const mundo = Object.create(world) as World;
+  Object.defineProperty(mundo, 'people', { value: personas, enumerable: true });
+  return indiceDiversidadConActividad(mundo, actividad);
+}
+
 /** Acción excluida de la conducta ACTIVA: descansar es inactividad, no conducta. */
 export const ACCION_INACTIVA: Action = 'rest';
 
@@ -78,14 +85,31 @@ export interface MetricasInstrumentos {
   diversidadConductaActiva: number;
   diversidadConductaActivaComponentes: { conducta: number; oficios: number };
   diversidadConductaComponentes: { conducta: number; oficios: number };
+  /**
+   * C8 v3: el índice sobre perfiles de VENTANA FIJA — ticks por acción de cada mortal durante ESE día, sin
+   * `rest`, solo de quienes vivieron el día completo. Con perfiles acumulados desde el nacimiento el índice
+   * baja al envejecer la población aunque nadie cambie de conducta (modelo nulo en el README); con una
+   * ventana de longitud fija el ruido de fondo es el mismo cada día. `null` con menos de 2 personas.
+   */
+  diversidadConductaVentana: number | null;
+  diversidadConductaVentanaComponentes: { conducta: number; oficios: number } | null;
+  personasVentana: number;
   repartoTiempoPorAccion: { personaTicks: number; fracciones: Record<string, number> };
   repartoActividadPorAccion: { incrementos: number; fracciones: Record<string, number> };
   foodShared: number;
 }
 
+function mortalesVivos(world: World): Set<string> {
+  return new Set(world.people.filter(person => person.role === 'neighbor').map(person => person.id));
+}
+
 export class InstrumentosConducta {
   /** Ticks por acción de cada persona viva desde que el laboratorio la ve (tick 0 o su nacimiento). */
   private readonly ticksPorPersona = new Map<string, Record<string, number>>();
+  /** Ticks por acción de cada persona en el día en curso (ventana fija de C8 v3). */
+  private readonly ticksDiaPorPersona = new Map<string, Record<string, number>>();
+  /** Mortales vivos al empezar el día: solo ellos, si siguen vivos al acabarlo, entran en la ventana. */
+  private vivosInicioDia = new Set<string>();
   /** Persona-ticks por acción de los vecinos mortales en el día en curso. */
   private readonly tiempoDia = new Map<string, number>();
   private personaTicksDia = 0;
@@ -97,7 +121,7 @@ export class InstrumentosConducta {
   costeMs = 0;
   pasos = 0;
 
-  constructor(world: World) { this.fotografiarActividad(world); }
+  constructor(world: World) { this.fotografiarActividad(world); this.vivosInicioDia = mortalesVivos(world); }
 
   private fotografiarActividad(world: World): void {
     this.actividadInicioDia = new Map(world.people.filter(p => p.role === 'neighbor').map(p => [p.id, { ...p.activity }]));
@@ -118,6 +142,9 @@ export class InstrumentosConducta {
       let ticks = this.ticksPorPersona.get(person.id);
       if (!ticks) { ticks = {}; this.ticksPorPersona.set(person.id, ticks); }
       ticks[person.action] = (ticks[person.action] ?? 0) + 1;
+      let dia = this.ticksDiaPorPersona.get(person.id);
+      if (!dia) { dia = {}; this.ticksDiaPorPersona.set(person.id, dia); }
+      dia[person.action] = (dia[person.action] ?? 0) + 1;
       if (person.role === 'neighbor') { this.tiempoDia.set(person.action, (this.tiempoDia.get(person.action) ?? 0) + 1); this.personaTicksDia++; }
     }
     const nuevos = world.eventCounter - this.contadorAntes;
@@ -141,6 +168,10 @@ export class InstrumentosConducta {
     const tiempo = indiceDiversidadConActividad(world, person => this.ticksPorPersona.get(person.id) ?? vacio);
     const activa = indiceDiversidadConActividad(world, person => sinDescanso(this.ticksPorPersona.get(person.id) ?? vacio));
     const actividad = indiceDiversidadConActividad(world, person => person.activity);
+    const enVentana = world.people.filter(person => person.role === 'neighbor' && this.vivosInicioDia.has(person.id));
+    const ventana = enVentana.length >= 2
+      ? indiceDiversidadDe(world, enVentana, person => sinDescanso(this.ticksDiaPorPersona.get(person.id) ?? vacio))
+      : null;
     const incrementos = new Map<string, number>();
     let totalIncrementos = 0;
     for (const person of world.people) {
@@ -157,6 +188,9 @@ export class InstrumentosConducta {
       diversidadConductaActiva: activa.total,
       diversidadConductaActivaComponentes: { conducta: activa.conducta, oficios: activa.oficios },
       diversidadConductaComponentes: { conducta: actividad.conducta, oficios: actividad.oficios },
+      diversidadConductaVentana: ventana ? ventana.total : null,
+      diversidadConductaVentanaComponentes: ventana ? { conducta: ventana.conducta, oficios: ventana.oficios } : null,
+      personasVentana: enVentana.length,
       repartoTiempoPorAccion: { personaTicks: this.personaTicksDia, fracciones: fracciones(this.tiempoDia, this.personaTicksDia) },
       repartoActividadPorAccion: { incrementos: totalIncrementos, fracciones: fracciones(incrementos, totalIncrementos) },
       foodShared: this.comidaCompartida,
@@ -164,6 +198,7 @@ export class InstrumentosConducta {
     const vivos = new Set(world.people.map(person => person.id));
     for (const id of [...this.ticksPorPersona.keys()]) if (!vivos.has(id)) this.ticksPorPersona.delete(id);
     this.tiempoDia.clear(); this.personaTicksDia = 0;
+    this.ticksDiaPorPersona.clear(); this.vivosInicioDia = mortalesVivos(world);
     this.fotografiarActividad(world);
     this.costeMs += performance.now() - inicio;
     return metricas;

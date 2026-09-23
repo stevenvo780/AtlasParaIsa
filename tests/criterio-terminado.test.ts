@@ -264,7 +264,7 @@ test('criterio de terminado: C8 usa diversidadConductaTiempo si está (y no hay 
     assert.equal(t2.estado, 'cumple');
     assert.equal(t2.valores.campo, 'diversidadConducta');
     assert.deepEqual(t2.valores.secundarias, []);
-    assert.match(auto.descripcionCriterios.diversidad, /diversidadConductaActiva \(si falta, diversidadConductaTiempo; si falta, diversidadConducta\)/);
+    assert.match(auto.descripcionCriterios.diversidad, /diversidadConductaVentana \[preregistro v3\] \(si falta, diversidadConductaActiva; si falta, diversidadConductaTiempo; si falta, diversidadConducta\)/);
 
     const antigua = evaluarConjunto(raiz, { dia: 20, diversidadCampo: 'diversidadConducta' });
     const a1 = replica(antigua, 'T-1').criterios!.diversidad;
@@ -375,7 +375,7 @@ test('criterio de terminado: C8 en auto decide con diversidadConductaActiva; tie
     assert.throws(() => parsearArgumentos(['--entrada', 'x', '--diversidad-campo', 'activo']), /auto, activa, tiempo o actividad/);
     const cli = spawnSync(process.execPath, ['--import', 'tsx', 'scripts/lab/criterio-terminado.mts', '--entrada', raiz, '--dia', '20'], { encoding: 'utf8' });
     assert.equal(cli.status, 0, cli.stderr);
-    assert.match(cli.stdout, /C8 diversidad +diversidadConductaActiva \(si falta, diversidadConductaTiempo; si falta, diversidadConducta\) días 5\.\.D: Mann-Kendall .*< 80 % de los días del tramo ⇒ desconocido/);
+    assert.match(cli.stdout, /C8 diversidad +diversidadConductaVentana \[preregistro v3\] \(si falta, diversidadConductaActiva; si falta, diversidadConductaTiempo; si falta, diversidadConducta\) días 5\.\.D: Mann-Kendall .*< 80 % de los días del tramo ⇒ desconocido/);
     assert.match(cli.stdout, /auto\|activa\|tiempo\|actividad|--diversidad-campo/);
   } finally { rmSync(raiz, { recursive: true, force: true }); }
 });

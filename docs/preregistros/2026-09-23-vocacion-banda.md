@@ -260,3 +260,29 @@ Escrita ANTES de correr H1b y el control B instrumentado.
 **Control B instrumentado (BCTRL).** El código de la rama con todas las leyes en 0 (bit a bit igual a B) en 13, 17, 23, 303, 404, 505, 606 y 707 × 60 días, para tener con los instrumentos nuevos los valores de B que piden P1 de banda (grupos el día 1, pares fértiles el día 2) y la puerta de seguridad de H1b.
 
 **BANDA a mitad de camino (no decide; se decide en el día 60).** P2 3/4 (13, 23, 303), P5 4/4, P4 por ahora sin extinciones y con techo a ≤ 2 días de B; P3 1/4 (13 con 87 mortales el día 40; 23 extinta el día 35, 303 el 31, 17 el 20).
+
+## Adenda 2 (23-09, 18:00) — veredictos del día 60
+
+Calculados con el evaluador de la etiqueta `c8-v3-preregistro`, byte a byte igual al de la rama del experimento (sha256 comprobado), sobre los `dia-NNN.json` crudos. Salidas: [`criterio-h1b-d60.json`](../evidencia-2026-09-23/criterio-h1b-d60.json), [`criterio-banda-d60.json`](../evidencia-2026-09-23/criterio-banda-d60.json), [`criterio-bctrl-d60.json`](../evidencia-2026-09-23/criterio-bctrl-d60.json) y [`criterio-l60v3-d60.json`](../evidencia-2026-09-23/criterio-l60v3-d60.json).
+
+**BANDA: REFUTADA por dos vías independientes.**
+- P1 falla en 4/4. Grupos de mortales el día 1: 6 frente a 7 en B, 10 frente a 13, 8 frente a 7 y 13 frente a 13; ninguno llega a ≤ 0,6× B. Pares fértiles no emparentados el día 2: 0, 0, 2 y 0, frente a 1, 0, 13 y 0 en B.
+- P4 falla. La ventana media de los días 15–60 baja −0,091 en 29 y −0,052 en 101, y approach al techo sube +0,062, +0,024 y +0,023 en 29, 101 y 202. La ley sí toca C8, en contra de su propio diseño.
+- Las demás: P2 3/4, P3 1/4 y P5 4/4.
+- 13 se salva: 89 habitantes, 327 nacimientos y generaciones 9–19 al día 60. No es por el mecanismo previsto, porque P1 no se cumple. 17, 23 y 303 se extinguen (días 20, 35 y 31).
+- C8 en 0 de 5 supervivientes. No se fusiona a main.
+
+**H1b: REFUTADA.**
+- C8 oficial 1/4: solo 606, con subida +0,140 y p = 0,019. 404 da −0,012, 707 −0,024, y 505 se extingue el día 43, cuando en B sobrevivía.
+- Pendiente de Sen de los días 20..60: −1,3·10⁻³ (404), −1,8·10⁻² (505, hasta su extinción), +4,1·10⁻³ (606) y −3,5·10⁻⁴ (707). Es ≤ 0 en 3/4, así que se cumple la condición de refutación («≤ 0 en ≥ 2/4»).
+- Ganancia pareada frente a B: +0,121 (404), +0,228 (606) y +0,075 (707). Supera +0,08 en 2/4, y el éxito exigía 3/4.
+- Natalidad al día 20: 404 da 60 nacimientos frente a 127 en B, y 505 da 22 frente a 50. La puerta de seguridad corregida sí pasó en 4/4 (muertes de menores de 8 días ≤ 1,5× control); la ley frena la reproducción sin matar crías.
+- 606 es un caso aislado y no se presenta como éxito. Con 4–7 % de falsos «cumple» por semilla (calibración de C8 v3), un aprobado entre 4 no distingue la ley del azar.
+- Lo que sí queda medido: la vocación heredada acumula varianza (×4,4–5,8 del día 10 al 60) y frena la caída de la ventana en nivel (2–3 veces el ruido pareado de 0,06–0,07). No la convierte en subida en la mayoría.
+- Conforme a la Adenda 1, se abandona la vía de transmisión tal como está diseñada. La vocación solo vuelve como base de una hipótesis nueva, con preregistro nuevo y semillas nuevas, nunca reajustada sobre 404–707.
+
+**Desviación declarada.** La puerta dura de la crítica (ventana calculada solo con mortales de generación ≥ 1) y la ICC por linaje del oficio dominante nunca se instrumentaron. No cambian ningún veredicto, porque ambos brazos ya fallan con los criterios instrumentados, pero la predicción intermedia de la ICC queda sin evaluar.
+
+**BCTRL** (el código de la rama con todas las leyes en 0) reproduce l60v3-B exactamente en sus 8 semillas: mismas fechas de extinción y mismas subidas de C8 (404 −0,1328; 505 −0,0621; 606 −0,0872; 707 −0,0981). Queda demostrado el determinismo entre versiones del código.
+
+**Siguiente paso** (plan maestro del 23-09, bitácora del laboratorio 17:40): diagnóstico de C8 en condición pública. Es B sin techo de laboratorio, con el cupo público, en las 8 semillas que sobrevivieron en B, pareado con l60v3. Predicción anotada antes de ver datos: si el escalón de C8 lo fabrica el techo, la subida sin techo supera a la de B con techo en ≥ 6/8. Si no, el techo no explica el fallo y la hipótesis siguiente debe atacar la transmisión acumulable entre generaciones.

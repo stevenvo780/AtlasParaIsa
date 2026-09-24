@@ -19,6 +19,7 @@ import type { Capability } from '../shared/technology.js';
 import { decidirModo, rendererProfile, type Modo } from './modo.js';
 import { dibujarCalor, type Capa, type RangoCalor } from './calor.js';
 import { claveRegion } from './regiones.js';
+import { classifyTerrainPixel, hash3, newFieldPixel, prepareTerrainStencil, rnd, waterDepthTone, type FieldSample } from './terrain-field.js';
 
 /* ------------------------------------------------------------------ */
 /* Tipos públicos                                                      */
@@ -61,14 +62,13 @@ interface RGB {
   b: number;
 }
 
-interface GroundMaterial {
+interface GroundMaterial extends FieldSample {
   soil: RGB; leaf: RGB; cover: number; moisture: number; traffic: number;
 }
 
 /** The raster and its cache key must observe the same received-state buckets. */
 function groundBucket(value: number): number { return Math.round(clamp01(value) * 12); }
 function groundValue(value: number): number { return groundBucket(value) / 12; }
-function smooth(value: number): number { const t = clamp01(value); return t * t * (3 - 2 * t); }
 
 function rgb(r: number, g: number, b: number): RGB {
   return { r, g, b };
@@ -194,31 +194,6 @@ interface Tint {
 }
 
 const RAIN_TINT: Tint = { color: 'rgb(159,179,189)', alpha: 0.2 };
-
-/* ------------------------------------------------------------------ */
-/* Aleatoriedad determinista (misma isla en todos los clientes)        */
-/* ------------------------------------------------------------------ */
-
-function hash3(x: number, y: number, salt: number): number {
-  let h = Math.imul(x | 0, 374761393) + Math.imul(y | 0, 668265263) + Math.imul(salt | 0, 2246822519);
-  h = (h ^ (h >>> 13)) >>> 0;
-  h = Math.imul(h, 1274126177) >>> 0;
-  return (h ^ (h >>> 16)) >>> 0;
-}
-
-/** [0,1) determinista. */
-function rnd(x: number, y: number, salt: number): number {
-  return hash3(x, y, salt) / 4294967296;
-}
-
-/** Stable world-space variation of material, never a source of ecological state. */
-function materialNoise(x: number, y: number, scale: number, salt: number): number {
-  const gx = Math.floor(x / scale), gy = Math.floor(y / scale);
-  const u = smooth(x / scale - gx), v = smooth(y / scale - gy);
-  const top = rnd(gx, gy, salt) * (1 - u) + rnd(gx + 1, gy, salt) * u;
-  const bottom = rnd(gx, gy + 1, salt) * (1 - u) + rnd(gx + 1, gy + 1, salt) * u;
-  return top * (1 - v) + bottom * v;
-}
 
 function clamp(v: number, lo: number, hi: number): number {
   return v < lo ? lo : v > hi ? hi : v;
@@ -367,7 +342,12 @@ export class Landscape {
   private readonly groundStamp = Object.assign(document.createElement('canvas'), { width: ART, height: ART });
   private readonly groundStampContext = this.groundStamp.getContext('2d')!;
   private readonly groundPixels = this.groundStampContext.createImageData(ART, ART);
+  private readonly restVeil = Object.assign(document.createElement('canvas'), { width: 1, height: 1 });
+  private readonly restVeilContext = this.restVeil.getContext('2d')!;
+  private restVeilPixels: ImageData | null = null;
   private groundMaterials = new WeakMap<Tile, GroundMaterial>();
+  private biomeFractions = new WeakMap<Tile, number>();
+  private treeForms = new WeakMap<Tile, TreeForm>();
   private spriteBytes = 0;
   private readonly spriteCache = new BoundedCache<HTMLCanvasElement>(SPRITE_CACHE_LIMIT, canvas => { this.spriteBytes -= canvas.width * canvas.height * 4; canvas.width = canvas.height = 0; });
   private chunks: GroundChunk[] = [];
@@ -697,6 +677,7 @@ export class Landscape {
     this.curr = null;
     this.terrainCache.clear(); this.spriteCache.clear(); this.chunks = []; this.gpu?.destroy();
     this.groundStamp.width = this.groundStamp.height = 0;
+    this.restVeil.width = this.restVeil.height = 0;
     this.scene.width = this.scene.height = 0;
     this.labels.width = this.labels.height = 0; this.labels.remove(); this.phaseLayer.remove(); this.rainLayer.remove();
   }
@@ -779,6 +760,8 @@ export class Landscape {
     if (this.worldW === 0 || this.worldH === 0) return;
     // Input objects may be reused by callers; palette memoization lasts only this bake.
     this.groundMaterials = new WeakMap();
+    this.biomeFractions = new WeakMap();
+    this.treeForms = new WeakMap();
     this.chunks = [];
     for (let cy = Math.floor(this.originY / CHUNK_ART_TILES); cy <= Math.floor((this.originY + this.worldH - 1) / CHUNK_ART_TILES); cy++) {
       for (let cx = Math.floor(this.originX / CHUNK_ART_TILES); cx <= Math.floor((this.originX + this.worldW - 1) / CHUNK_ART_TILES); cx++) {
@@ -795,11 +778,19 @@ export class Landscape {
           }
           for (let y = y0; y < y0 + CHUNK_ART_TILES; y++) for (let x = x0; x < x0 + CHUNK_ART_TILES; x++) {
             const tile = this.tileAt(x, y);
-            if (tile) { this.bakeCoast(g, x, y); this.bakeFeatures(g, tile); }
+            if (tile) this.bakeFeatures(g, tile);
           }
           g.restore();
           if (chunk) { chunk.signature = signature; chunk.revision = ++this.cacheBuilds; }
           else { chunk = { key, signature, revision: ++this.cacheBuilds, canvas, x: x0, y: y0 }; this.terrainCache.set(key, chunk); }
+        }
+        // Sprite forms share this update's tile and neighbour state, even when the
+        // ground raster itself came from the chunk cache.
+        for (let y = y0; y < y0 + CHUNK_ART_TILES; y++) for (let x = x0; x < x0 + CHUNK_ART_TILES; x++) {
+          const tile = this.tileAt(x, y);
+          if (!tile || (tile.wood ?? 0) <= .05) continue;
+          const form = treeForm(tile, this.biomeEdgeFraction(tile));
+          if (form) this.treeForms.set(tile, form);
         }
         this.chunks.push(chunk);
       }
@@ -812,90 +803,97 @@ export class Landscape {
     const fertility = groundValue(tile.fertility ?? .5), moisture = groundValue(tile.moisture);
     const cultivation = groundValue(tile.cultivation ?? 0), traffic = groundValue(tile.traffic ?? 0);
     const mineral = tile.biome === 'desert' ? P.sand : tile.biome === 'mountain' ? P.stoneShade : P.soilLight;
-    const humus = tile.biome === 'wetland' ? rgb(83, 88, 65) : rgb(103, 83, 57);
-    const green = tile.biome === 'wetland' ? rgb(78, 112, 93)
-      : tile.biome === 'forest' ? rgb(88, 119, 70) : rgb(126, 151, 88);
+    const humus = tile.biome === 'wetland' ? mix(P.soilDark, P.mossHigh, .55) : darken(P.soil, .38);
+    const green = tile.biome === 'wetland' ? mix(P.mossHigh, P.waterShallow, .25)
+      : tile.biome === 'forest' ? mix(P.mossHigh, P.sageLow, .3) : mix(P.sageLow, P.mossHigh, .32);
     const material = {
       soil: darken(mix(mineral, humus, fertility * .72), moisture * .2),
-      leaf: mix(green, rgb(180, 161, 100), (1 - moisture) * .6),
-      cover: groundValue(tile.vegetation) * (1 - cultivation * .6) * (1 - traffic * .88) * (tile.terrain === 'shelter' ? .25 : 1),
-      moisture, traffic,
+      leaf: mix(green, P.sandDark, (1 - moisture) * .6),
+      cover: tile.terrain === 'water' ? 0 : groundValue(tile.vegetation) * (1 - cultivation * .6) * (1 - traffic * .88) * (tile.terrain === 'shelter' ? .25 : 1),
+      moisture, traffic: tile.terrain === 'water' ? 0 : traffic,
+      biome: tile.biome ?? 'grassland', water: tile.terrain === 'water',
     };
     this.groundMaterials.set(tile, material); return material;
   }
 
+  private biomeEdgeFraction(tile: Tile): number {
+    const cached = this.biomeFractions.get(tile); if (cached !== undefined) return cached;
+    if (!tile.biome) return 1;
+    let same = 0;
+    for (const [dx, dy] of [[0, -1], [0, 1], [-1, 0], [1, 0]] as const) {
+      if (this.tileAt(tile.x + dx, tile.y + dy)?.biome === tile.biome) same++;
+    }
+    const fraction = Math.max(.4, same / 4);
+    this.biomeFractions.set(tile, fraction);
+    return fraction;
+  }
+
   private bakeTileBase(g: CanvasRenderingContext2D, x: number, y: number): void {
     const tile = this.tileAt(x, y);
+    if (!tile) return;
     const ox = x * ART;
     const oy = y * ART;
-    const terrain: Terrain = tile ? tile.terrain : 'water';
-
-    if (terrain === 'water') {
-      // Profundidad legible: cuanto más agua alrededor, más oscuro el teal.
-      let neighbours = 0;
-      for (let dy = -1; dy <= 1; dy++) {
-        for (let dx = -1; dx <= 1; dx++) {
-          if (dx === 0 && dy === 0) continue;
-          if (this.terrainAt(x + dx, y + dy) === 'water') neighbours++;
-        }
-      }
-      const depth = neighbours / 8;
-      const base = mix(P.waterShallow, P.waterDeep, depth * depth);
-      px(g, ox, oy, ART, ART, css(base));
+    const owner = this.groundMaterial(tile), samples: GroundMaterial[] = [];
+    // Only the immediate 3 × 3 neighbours affect this cell and its one-pixel edges.
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const neighbour = this.tileAt(x + dx, y + dy);
+      samples.push(neighbour ? this.groundMaterial(neighbour) : owner);
+    }
+    if (owner.water && samples.every(sample => sample.water)) {
+      px(g, ox, oy, ART, ART, css(P.waterDeep));
       for (let i = 0; i < 2; i++) {
         const rx = ox + Math.floor(rnd(x, y, 10 + i) * ART);
         const ry = oy + Math.floor(rnd(x, y, 40 + i) * ART);
-        const up = rnd(x, y, 70 + i) > 0.5;
-        px(g, rx, ry, 1 + Math.floor(rnd(x, y, 90 + i) * 2), 1, css(up ? lighten(base, 0.1) : darken(base, 0.08)));
+        px(g, rx, ry, 1 + Math.floor(rnd(x, y, 90 + i) * 2), 1, css(lighten(P.waterDeep, .1)));
       }
       return;
     }
-
-    if (!tile) return;
-    const owner = this.groundMaterial(tile), samples: GroundMaterial[] = [];
-    // Four surrounding cell centres per pixel, inside a one-cell stencil. Unknown
-    // land repeats the known edge; water never lends a green cover or a soil palette.
-    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-      const neighbour = this.tileAt(x + dx, y + dy);
-      samples.push(neighbour && neighbour.terrain !== 'water' ? this.groundMaterial(neighbour) : owner);
-    }
+    const stencil = prepareTerrainStencil(samples);
+    const waveX0 = Math.floor(rnd(x, y, 10) * ART), waveY0 = Math.floor(rnd(x, y, 40) * ART);
+    const waveX1 = Math.floor(rnd(x, y, 11) * ART), waveY1 = Math.floor(rnd(x, y, 41) * ART);
+    const pixel = newFieldPixel();
     const data = this.groundPixels.data;
     for (let by = 0; by < ART; by++) for (let bx = 0; bx < ART; bx++) {
-      const u = smooth(((bx + .5) / ART + .5) % 1), v = smooth(((by + .5) / ART + .5) % 1);
-      const index = (by < ART / 2 ? 0 : 3) + (bx < ART / 2 ? 0 : 1);
-      const a = samples[index]!, b = samples[index + 1]!, c = samples[index + 3]!, d = samples[index + 4]!;
-      const wa = (1 - u) * (1 - v), wb = u * (1 - v), wc = (1 - u) * v, wd = u * v;
       const wx = ox + bx, wy = oy + by;
-      const broad = materialNoise(wx, wy, 29, 348), fine = materialNoise(wx, wy, 7, 351);
-      const patch = broad * .68 + fine * .32;
-      // An exhausted cell cannot borrow living cover from its neighbours. Subcell
-      // distribution is a stable symbol of a cell-average stock, not extra biomass.
-      const cover = Math.min(owner.cover * 1.5, a.cover * wa + b.cover * wb + c.cover * wc + d.cover * wd);
-      const rooted = owner.cover === 0 ? 0 : smooth((cover - patch * .55 + .02) / .52);
-      const traffic = owner.traffic > 0 ? a.traffic * wa + b.traffic * wb + c.traffic * wc + d.traffic * wd : 0;
-      const wear = smooth((traffic - patch * .16) / .85);
-      const soilR = a.soil.r * wa + b.soil.r * wb + c.soil.r * wc + d.soil.r * wd;
-      const soilG = a.soil.g * wa + b.soil.g * wb + c.soil.g * wc + d.soil.g * wd;
-      const soilB = a.soil.b * wa + b.soil.b * wb + c.soil.b * wc + d.soil.b * wd;
-      const leafR = a.leaf.r * wa + b.leaf.r * wb + c.leaf.r * wc + d.leaf.r * wd;
-      const leafG = a.leaf.g * wa + b.leaf.g * wb + c.leaf.g * wc + d.leaf.g * wd;
-      const leafB = a.leaf.b * wa + b.leaf.b * wb + c.leaf.b * wc + d.leaf.b * wd;
-      const pigment = rooted * (1 - wear * .65);
-      // A compacted surface replaces material; no centre node, edge, footstep or
-      // claimed route is manufactured from the scalar traffic field.
+      classifyTerrainPixel(wx, wy, x, y, stencil, pixel);
+      const offset = (by * ART + bx) * 4;
+      if (pixel.water) {
+        const tone = waterDepthTone(wx, wy, x, y, stencil, pixel.waterValue);
+        let color = mix(P.waterShallow, P.waterDeep, tone / 3);
+        if ((bx === waveX0 && by === waveY0) || (bx === waveX1 && by === waveY1)) color = lighten(color, .1);
+        data[offset] = color.r; data[offset + 1] = color.g; data[offset + 2] = color.b; data[offset + 3] = 255;
+        continue;
+      }
+      if (pixel.sand) {
+        const color = pixel.sandEdge ? P.sandDark : P.sand;
+        data[offset] = color.r; data[offset + 1] = color.g; data[offset + 2] = color.b; data[offset + 3] = 255;
+        continue;
+      }
+      let soilR = 0, soilG = 0, soilB = 0, leafR = 0, leafG = 0, leafB = 0, total = 0;
+      for (let j = 0; j < 4; j++) {
+        const sample = samples[pixel.corners[j]!]!;
+        if (sample.water || sample.biome !== pixel.biome) continue;
+        const weight = pixel.weights[j]!;
+        soilR += sample.soil.r * weight; soilG += sample.soil.g * weight; soilB += sample.soil.b * weight;
+        leafR += sample.leaf.r * weight; leafG += sample.leaf.g * weight; leafB += sample.leaf.b * weight;
+        total += weight;
+      }
+      if (total > 0) { soilR /= total; soilG /= total; soilB /= total; leafR /= total; leafG /= total; leafB /= total; }
+      else { soilR = owner.soil.r; soilG = owner.soil.g; soilB = owner.soil.b; leafR = owner.leaf.r; leafG = owner.leaf.g; leafB = owner.leaf.b; }
       const grainSeed = rnd(wx, wy, 358);
-      const grain = (grainSeed - .5) * (1 - wear) * 4;
+      const pigment = pixel.grass && !pixel.wear ? 1 : pixel.grass && pixel.wear ? .35 : 0;
+      const grain = (grainSeed - .5) * (pixel.wear ? 1 : 4);
       // Sparse fibres and granules live on a world lattice incommensurate with
       // cells. They symbolize existing cover/soil, never countable extra plants.
       const fx = Math.floor(wx / 5), fy = Math.floor(wy / 7);
       const tx = fx * 5 + Math.floor(rnd(fx, fy, 364) * 5), ty = fy * 7 + 2 + Math.floor(rnd(fx, fy, 365) * 4);
-      const fibre = owner.cover > 0 && rooted > .6 && rnd(fx, fy, 366) < cover * .8 && wx === tx && wy >= ty - 1 && wy <= ty;
-      const granule = rooted < .35 && grainSeed < .035 ? (owner.moisture > .5 ? -8 : 8) : 0;
-      const relief = Math.round((fine - .5) * 3) * 3 + (broad - .5) * 6 + grain + granule + (fibre ? 15 : 0);
-      const offset = (by * ART + bx) * 4;
-      data[offset] = soilR + (leafR - soilR) * pigment + wear * 9 + relief;
-      data[offset + 1] = soilG + (leafG - soilG) * pigment + wear * 6 + relief;
-      data[offset + 2] = soilB + (leafB - soilB) * pigment + wear * 3 + relief;
+      const fibre = pixel.grass && !pixel.wear && rnd(fx, fy, 366) < pixel.cover * .8 && wx === tx && wy >= ty - 1 && wy <= ty;
+      const granule = !pixel.grass && grainSeed < .035 ? (owner.moisture > .5 ? -8 : 8) : 0;
+      const relief = Math.round((pixel.fine - .5) * 3) * 3 + (pixel.fine - .5) * 6 + grain + granule + (fibre ? 15 : 0);
+      const edge = pixel.grassEdge ? -12 : pixel.wearEdge ? -9 : 0;
+      data[offset] = soilR + (leafR - soilR) * pigment + (pixel.wear ? 9 : 0) + relief + edge;
+      data[offset + 1] = soilG + (leafG - soilG) * pigment + (pixel.wear ? 6 : 0) + relief + edge;
+      data[offset + 2] = soilB + (leafB - soilB) * pigment + (pixel.wear ? 3 : 0) + relief + edge;
       data[offset + 3] = 255;
     }
     this.groundStampContext.putImageData(this.groundPixels, 0, 0);
@@ -907,6 +905,7 @@ export class Landscape {
     const { x, y } = tile, ox = x * ART, oy = y * ART;
     const growth = clamp01(tile.growth ?? tile.vegetation);
     if (tile.terrain === 'water') { this.drawReeds(g, x, y, ox, oy, 0); return; }
+    const edge = this.biomeEdgeFraction(tile);
     const cultivation = clamp01(tile.cultivation ?? 0);
     if (cultivation > .08) {
       for (let row = 0; row < 2 + Math.round(cultivation * 2); row++) {
@@ -932,21 +931,33 @@ export class Landscape {
       px(g, ox+5, oy+8, 6, 4, css(P.trunk)); px(g, ox+6, oy+8, 4, 2, css(P.soilLight)); px(g, ox+7, oy+8, 2, 1, css(P.trunkLight));
       if (growth > .25) px(g,ox+11,oy+6,1,4,css(P.reedLight));
     } else if (feature === 'cactus') {
-      const h = 3 + Math.round(growth*8), color = css(mix(P.canopyDark,P.reed,growth));
-      px(g,ox+7,oy+12-h,3,h,color); px(g,ox+4,oy+7,4,2,color); px(g,ox+4,oy+4,2,4,color);
-      px(g,ox+9,oy+9,4,2,color); px(g,ox+11,oy+6,2,4,color); px(g,ox+8,oy+13-h,1,h-2,css(P.reedLight));
+      const h = Math.max(2, Math.round((3 + growth*8) * edge)), color = css(mix(P.canopyDark,P.reed,growth));
+      px(g,ox+7,oy+12-h,3,h,color);
+      if (h >= 7) {
+        const leftY = oy + 12 - Math.round(h * .45), rightY = oy + 12 - Math.round(h * .27);
+        px(g,ox+4,leftY,4,2,color); px(g,ox+4,leftY-3,2,4,color);
+        px(g,ox+9,rightY,4,2,color); px(g,ox+11,rightY-3,2,4,color);
+      }
+      px(g,ox+8,oy+13-h,1,h-2,css(P.reedLight));
       if (tile.food > .3) px(g,ox+7,oy+11-h,2,1,css(P.berryLight));
     } else if (feature === 'rock' || feature === 'clay') {
       const stock = feature === 'rock' ? (tile.stone ?? 0) : (tile.fertility ?? .6) * 8;
       if (stock > .2) {
-        const size = Math.min(5, 2 + stock / 3), color = feature === 'clay' ? rgb(185,118,88) : P.stone;
-        ellipse(g,ox+8,oy+12,size+1,2,css(P.shadow,.2)); ellipse(g,ox+8,oy+9,size,size*.7,css(darken(color,.2)));
-        ellipse(g,ox+7,oy+8,size*.8,size*.5,css(color)); px(g,ox+6,oy+6,3,1,css(lighten(color,.2)));
+        const size = Math.min(5, 2 + Math.min(stock / 3, 2.5) + rnd(x,y,2600) - .5) * edge;
+        const cx = ox + 8 + Math.floor(rnd(x,y,2601)*5) - 2;
+        const cy = oy + 9 + Math.floor(rnd(x,y,2602)*3) - 1;
+        const aspect = .6 + rnd(x,y,2603)*.2;
+        const color = feature === 'clay' ? mix(P.soilDark,P.coralDeep,.25) : P.stone;
+        ellipse(g,cx,cy+3,size+1,Math.max(1,2*edge),css(P.shadow,.2));
+        ellipse(g,cx,cy,size,size*aspect,css(darken(color,.2)));
+        ellipse(g,cx-1,cy-1,size*.8,size*aspect*.72,css(color));
+        px(g,cx-2,cy-3,Math.max(1,Math.round(size*.6)),1,css(lighten(color,.2)));
       }
     } else if (feature === 'reeds') {
-      for(let i=0;i<4;i++){ const h = 2+Math.round(growth*5); px(g,ox+3+i*3,oy+12-h,1,h,css(P.reed));px(g,ox+3+i*3,oy+10-h,1,2,css(P.reedLight)); }
+      const count = Math.max(1,Math.round(4*edge));
+      for(let i=0;i<count;i++){ const h = 2+Math.round(growth*5); const rx = ox + (count === 1 ? 8 : 3 + Math.round(i*9/(count-1))); px(g,rx,oy+12-h,1,h,css(P.reed));px(g,rx,oy+10-h,1,2,css(P.reedLight)); }
     } else if (feature === 'flowers') {
-      for(let i=0;i<3+Math.round(growth*4);i++){const fx=ox+2+Math.floor(rnd(x,y,1800+i)*12),fy=oy+3+Math.floor(rnd(x,y,1850+i)*10); px(g,fx,fy,1,2,css(P.reed));px(g,fx-1,fy-1,3,1,css(i%2?P.paper:P.berryLight));px(g,fx,fy-2,1,3,css(i%2?P.amber:P.coral));}
+      for(let i=0;i<Math.max(1,Math.round((3+growth*4)*edge));i++){const fx=ox+2+Math.floor(rnd(x,y,1800+i)*12),fy=oy+3+Math.floor(rnd(x,y,1850+i)*10); px(g,fx,fy,1,2,css(P.reed));px(g,fx-1,fy-1,3,1,css(i%2?P.paper:P.berryLight));px(g,fx,fy-2,1,3,css(i%2?P.amber:P.coral));}
     }
     if (feature === 'berries' || (!feature && tile.food > .3)) this.drawBerries(g,x,y,ox,oy,tile.food,0);
     // A reservoir, bare patch or building may retain legacy wood without a living
@@ -964,55 +975,6 @@ export class Landscape {
     if ((tile.life ?? 0) > .45 && tile.vegetation > .25) {
       for(let i=0;i<3;i++) px(g, ox+2+Math.floor(rnd(x,y,1900+i)*12), oy+2+Math.floor(rnd(x,y,1920+i)*12), 1, 1, css(P.grassLight,.8));
     }
-  }
-
-  /** Orillas arenosas por adyacencia: la arena se pinta en el borde que da al agua. */
-  private bakeCoast(g: CanvasRenderingContext2D, x: number, y: number): void {
-    const here = this.terrainAt(x, y);
-    const ox = x * ART;
-    const oy = y * ART;
-
-    if (here === 'water') {
-      // Bajío luminoso mirando a la tierra.
-      const gleam = css(mix(P.waterShallow, P.waterGleam, 0.35), 0.55);
-      if (this.terrainAt(x, y - 1) !== 'water') px(g, ox, oy, ART, 1, gleam);
-      if (this.terrainAt(x, y + 1) !== 'water') px(g, ox, oy + ART - 1, ART, 1, gleam);
-      if (this.terrainAt(x - 1, y) !== 'water') px(g, ox, oy, 1, ART, gleam);
-      if (this.terrainAt(x + 1, y) !== 'water') px(g, ox + ART - 1, oy, 1, ART, gleam);
-      return;
-    }
-
-    const sand = css(P.sand);
-    const sandEdge = css(P.sandDark);
-    const north = this.terrainAt(x, y - 1) === 'water';
-    const south = this.terrainAt(x, y + 1) === 'water';
-    const west = this.terrainAt(x - 1, y) === 'water';
-    const east = this.terrainAt(x + 1, y) === 'water';
-
-    for (let i = 0; i < ART; i++) {
-      const j = 2 + Math.floor(rnd(x * 31 + i, y, 610) * 3); // borde irregular, no una regla
-      if (north) {
-        px(g, ox + i, oy, 1, j, sand);
-        px(g, ox + i, oy + j - 1, 1, 1, sandEdge);
-      }
-      if (south) {
-        px(g, ox + i, oy + ART - j, 1, j, sand);
-        px(g, ox + i, oy + ART - j, 1, 1, sandEdge);
-      }
-      if (west) {
-        px(g, ox, oy + i, j, 1, sand);
-        px(g, ox + j - 1, oy + i, 1, 1, sandEdge);
-      }
-      if (east) {
-        px(g, ox + ART - j, oy + i, j, 1, sand);
-        px(g, ox + ART - j, oy + i, 1, 1, sandEdge);
-      }
-    }
-    // Esquinas diagonales, para que la playa no tenga muescas.
-    if (!north && !west && this.terrainAt(x - 1, y - 1) === 'water') px(g, ox, oy, 3, 3, sand);
-    if (!north && !east && this.terrainAt(x + 1, y - 1) === 'water') px(g, ox + ART - 3, oy, 3, 3, sand);
-    if (!south && !west && this.terrainAt(x - 1, y + 1) === 'water') px(g, ox, oy + ART - 3, 3, 3, sand);
-    if (!south && !east && this.terrainAt(x + 1, y + 1) === 'water') px(g, ox + ART - 3, oy + ART - 3, 3, 3, sand);
   }
 
   /* ---------------------------------------------------------------- */
@@ -1386,9 +1348,27 @@ export class Landscape {
     // M10: un velo tenue sobre las zonas en reposo (el servidor no las simula ahora; se ve su estado
     // guardado o una vista previa). Sin `regionesVivas` no se vela nada: no se sabe.
     if (this.vivas) {
-      for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
-        if (this.tileAt(x, y) && !this.vivas.has(claveRegion(x, y))) px(g, x * ART, y * ART, ART, ART, 'rgba(24,38,32,0.34)');
+      // One mask pixel per cell, plus a one-cell halo so a region crossing the
+      // visible edge blends against its real neighbours. Reuse the mask storage.
+      const maskX = x0 - 1, maskY = y0 - 1;
+      const maskW = x1 - x0 + 3, maskH = y1 - y0 + 3;
+      if (this.restVeil.width < maskW || this.restVeil.height < maskH || !this.restVeilPixels) {
+        this.restVeil.width = Math.max(this.restVeil.width, maskW);
+        this.restVeil.height = Math.max(this.restVeil.height, maskH);
+        this.restVeilPixels = this.restVeilContext.createImageData(this.restVeil.width, this.restVeil.height);
       }
+      const mask = this.restVeilPixels.data;
+      const stride = this.restVeil.width;
+      for (let y = 0; y < maskH; y++) for (let x = 0; x < maskW; x++) {
+        const worldX = maskX + x, worldY = maskY + y;
+        const offset = (y * stride + x) * 4;
+        mask[offset] = 24; mask[offset + 1] = 38; mask[offset + 2] = 32;
+        mask[offset + 3] = this.tileAt(worldX, worldY) && !this.vivas.has(claveRegion(worldX, worldY)) ? 87 : 0;
+      }
+      this.restVeilContext.putImageData(this.restVeilPixels, 0, 0, 0, 0, maskW, maskH);
+      g.save(); g.imageSmoothingEnabled = true;
+      g.drawImage(this.restVeil, 0, 0, maskW, maskH, maskX * ART, maskY * ART, maskW * ART, maskH * ART);
+      g.restore();
     }
     g.restore();
   }
@@ -1516,7 +1496,7 @@ export class Landscape {
   }
 
   private treeSprite(tile: Tile, ox = tile.x * ART, oy = tile.y * ART): Sprite | null {
-    const form = treeForm(tile);
+    const form = this.treeForms.get(tile);
     if (!form) return null;
     const {x,y} = tile;
     // One visible woody patch per occupied cell; coordinate/variety jitter is stable while stocks change.

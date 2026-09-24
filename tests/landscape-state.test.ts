@@ -21,6 +21,9 @@ test('woody art requires declared stock and keeps growth, depletion and seeded v
   assert.ok(treeForm({ ...tree, wood: .5 })!.height < mature.height);
   assert.ok(treeForm({ ...tree, growth: .1 })!.height < mature.height);
   assert.equal(treeForm({ ...tree, vegetation: 0 })!.foliage, 0);
+  assert.ok(treeForm(tree, .5)!.height < mature.height);
+  assert.ok(treeForm(tree, .5)!.width < mature.width);
+  assert.deepEqual(treeForm(tree, 0), treeForm(tree, .4), 'the biome border keeps a visible minimum form');
   const saved = JSON.stringify(tree);
   assert.deepEqual(treeForm(JSON.parse(saved) as Tile), mature);
   assert.equal(JSON.stringify(tree), saved);
@@ -85,10 +88,10 @@ test('material raster keeps local transitions, exhausted cover and cache depende
       return {
         sameBucketStable: baseline.join(',') === sameBucket.join(','), buildsBefore, buildsSame, buildsChanged, changedChunks,
         neighbourChanges: neighbourBefore.join(',') !== neighbourAfter.join(','), distantStable: distantBefore.join(',') === distantAfter.join(','),
-        unknownRepeatsKnown: neighbourBefore.join(',') === missingNeighbour.join(','), waterDoesNotLendSoil: neighbourBefore.join(',') === waterNeighbour.join(','),
+        unknownRepeatsKnown: neighbourBefore.join(',') === missingNeighbour.join(','), waterCreatesShore: neighbourBefore.join(',') !== waterNeighbour.join(','),
         arrivalRebakes: buildsArrived > buildsMissing && arrivedNeighbour.join(',') !== missingNeighbour.join(','),
-        exhaustedDoesNotBorrowGreen: depletedAmongGreen.join(',') === depletedAmongBare.join(','),
-        zeroTrafficDoesNotBorrowWear: baselineZeroTraffic.join(',') === noBorrowedTraffic.join(','),
+        exhaustedEdgeReceivesGrass: depletedAmongGreen.join(',') !== depletedAmongBare.join(','),
+        zeroTrafficEdgeReceivesWear: baselineZeroTraffic.join(',') !== noBorrowedTraffic.join(','),
         realTrafficChangesMaterial: baseline.join(',') !== worn.join(','), cameraIndependent: baseline.join(',') === movedCamera.join(','),
         evictionDeterministic: JSON.stringify(chunksBefore) === JSON.stringify(afterEviction), mutableInputsRebake: beforeInPlace.join(',') !== afterInPlace.join(','),
         removedTrailThresholdStable: trafficBefore.join(',') === trafficAfter.join(',') && trafficBuildsBefore === trafficBuildsAfter,
@@ -98,8 +101,8 @@ test('material raster keeps local transitions, exhausted cover and cache depende
     assert.equal(result.sameBucketStable, true); assert.equal(result.buildsSame, result.buildsBefore, 'within-bucket changes neither alter the raster nor rebuild the cache');
     assert.equal(result.buildsChanged - result.buildsSame, 2, 'a changed edge cell invalidates exactly its two dependent chunks');
     assert.deepEqual(result.changedChunks.sort(), ['0:0', '1:0']);
-    for (const key of ['neighbourChanges','distantStable','unknownRepeatsKnown','waterDoesNotLendSoil','arrivalRebakes','exhaustedDoesNotBorrowGreen',
-      'zeroTrafficDoesNotBorrowWear','realTrafficChangesMaterial','cameraIndependent','evictionDeterministic','mutableInputsRebake','removedTrailThresholdStable','authoritativeStateUnchanged'] as const) assert.equal(result[key], true, key);
+    for (const key of ['neighbourChanges','distantStable','unknownRepeatsKnown','waterCreatesShore','arrivalRebakes','exhaustedEdgeReceivesGrass',
+      'zeroTrafficEdgeReceivesWear','realTrafficChangesMaterial','cameraIndependent','evictionDeterministic','mutableInputsRebake','removedTrailThresholdStable','authoritativeStateUnchanged'] as const) assert.equal(result[key], true, key);
     assert.ok(result.cacheBytes < 10 * 1024 * 1024);
     mkdirSync('artifacts', { recursive: true }); writeFileSync('artifacts/material-ground-controls.json', JSON.stringify(result, null, 2) + '\n');
   } finally { await browser.close(); await server.close(); }

@@ -23,6 +23,10 @@
  * `src/world/spatial.ts:18-22`), y vuelve a guardar cada `persistencia.cadaTicks` ticks
  * como haría el servidor.
  *
+ * Los límites `limites.*` son de admisión, no cambian la dinámica. La réplica parte de los
+ * límites que `hostParams()` deriva del hardware, igual que un mundo nuevo del servidor; los
+ * overrides de `--params` siguen prevaleciendo. `replica.json` ya registra los params completos.
+ *
  * `--techo-lab N` (solo dígitos, ≥ 16; sin la bandera, nada cambia; la bandera sin valor es un error):
  * techo DETERMINISTA de laboratorio. Emula la política `techo` del gobernador del servidor
  * (`decidirConTecho`, src/server/governor.ts) con el
@@ -38,6 +42,7 @@ import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../../src/server/store.js';
+import { hostParams } from '../../src/server/hardware-limits.js';
 import { assertWorld, cloneWorld, createWorld, projectWorld, stepWorld, TICKS_PER_DAY, type World } from '../../src/world/index.js';
 import { catalogueEnabled, technologyCatalogueTotals } from '../../src/world/technology-catalogue.js';
 import { worldStatistics } from '../../src/world/statistics.js';
@@ -190,7 +195,7 @@ async function main(): Promise<void> {
   // Por defecto activos; `--instrumentos no` da EXACTAMENTE los dia-NNN.json de antes (mismas claves).
   const instrumentosArg = arg('--instrumentos') ?? 'si';
   if (instrumentosArg !== 'si' && instrumentosArg !== 'no') throw new Error('Uso: --instrumentos si|no (por defecto "si").');
-  const params: WorldParams = parseParams(arg('--params'));
+  const params: WorldParams = parseParams(arg('--params'), hostParams());
   mkdirSync(salida, { recursive: true });
 
   const dataDir = mkdtempSync(join(tmpdir(), 'atlas-lab-'));

@@ -1,0 +1,42 @@
+{
+  "capturedAt": "2026-09-24T07:37:00+00:00",
+  "status": "published",
+  "kind": "new world (rules 11) on the laptop",
+  "codeRevision": "5a36ce6",
+  "rules": {
+    "RULES_VERSION": 11,
+    "adopted": "RULES_11_ADOPTED = social { disputaNecesidad 0.45, disputaEscasez 3, disputaRadio 3, memoriaDisputa 8 } (conflicto legible: cede el menos necesitado y recuerda la fuente disputada)",
+    "defaultOffCandidates": "conducta.vocacion/vocacionTope, social.hogarTrabajo (C8 ciclo 1) y poblacion.natalidadLocal/radioProvision (NAT-L) presentes en el código con valor 0: el mundo por defecto es bit a bit el de reglas 11 (pruebas de identidad por digesto)",
+    "client": "arte del suelo por campo con umbral (bordes de bioma, desgaste y orillas orgánicos; agua sin cuadros; velo de reposo difuminado)"
+  },
+  "gate": {
+    "twin": "Réplica de laboratorio SEM2-51926 (reglas 11, semilla 51926, límites del anfitrión, sin techo, 2ee2658) al día 60: C1–C7 cumplen, C8 falla (Sen×55 = −0,068); 631 vecinos, 1 910 nacimientos, generaciones mortales 11–18 vivas, muertes por senescencia 1 068, exposición 205, sed 20, hambre 0; 5 770 conflictos (criterio-f1c-d60.json)",
+    "deployCheck": "scripts/deploy-check.sh 5a36ce6 verde (build y humo, 11/11)",
+    "suite": "arte: 1 583 pass, 0 fallos, 2 cancelados por carga y verdes aislados (6/6, 10/10); ley NAT-L: 1 591 pass, 4 cancelados por carga y verdes aislados, 1 fallo intermitente de tiempos (connection.test.ts, 0/3 aislado en la rama y en main)",
+    "identity": "con los candidatos a 0: digestos de 1 200 pasos (semillas 42 y 2001) iguales a main antes de las leyes; CTRL/CTRL2 de C8 idénticos 152 días"
+  },
+  "operation": {
+    "backupBeforeStop": "~/atlas-lab/respaldos/world-20260924-0232.sqlite.gz (V10, gzip íntegro, sha256 9257f6a00eef39470ae464308b68da4db08ec9a08e1f3bee22d14e72bb550be2)",
+    "serviceStoppedAndPortFreedBeforeSwap": true,
+    "codeSwap": "~/atlas-lab/servidor = git archive 5a36ce6 + node_modules del servidor anterior (dependencias sin cambios) + npm run build (hecho antes del corte); anterior conservado en ~/atlas-lab/servidor-b5def74",
+    "newWorldDirectory": "~/atlas-lab/mundos/v11-20260924 (vacío al arrancar; access.scrypt copiado del de V10: misma credencial con hash, sin manejar la contraseña en claro)",
+    "previousWorld": "~/atlas-lab/mundos/v10-20260922 intacto (V10 detenido el 24-09 02:35 en su último estado; respaldo de arriba)",
+    "servicesRepointed": ["~/atlas-lab/publico.sh (CARTA_DATA_DIR)", "~/.config/systemd/user/atlas-respaldo.service (CARTA_DATA_DIR)"],
+    "downtime": "02:35:13 → 02:35:31 -05"
+  },
+  "liveChecks": {
+    "domainHealth": "ok",
+    "unauthenticatedWorldStatus": 401,
+    "servedAssetEqualsCompiled": "assets/index-C5qWx4Ne.js sha256 d12fcc8e… igual en el dominio y en dist/client",
+    "world": {
+      "instanceId": "42704a7e-d5b7-4ee9-bef0-7c7ced2cb3b3",
+      "seed": 51926,
+      "version": 11,
+      "tickAtCheck": 600,
+      "peopleAtCheck": 17,
+      "firstBirthAtCheck": true
+    },
+    "persistedParams": "gobernador { presupuestoMs 5000, politica techo, senales p95 }, limites del anfitrión { teselasActivas 1303552, chunks 5092, fauna 7821312, comunidades 8 }, persistencia { cadaTicks 100 }, reglas 11"
+  },
+  "notClaimed": "El criterio de 60 días de GOAL.md no se cumple: C8 (diversidad de conducta creciente) falla en todas las semillas del laboratorio con estas reglas. El gemelo de laboratorio no es el mundo público: coinciden semilla, reglas y límites, pero el público recibe gestos y guarda cada 100 pasos (el laboratorio, cada 300)."
+}

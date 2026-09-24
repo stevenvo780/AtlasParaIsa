@@ -2,5 +2,5 @@
 Description=Respaldo horario del mundo público (portátil)
 [Service]
 Type=oneshot
-Environment=CARTA_DATA_DIR=%h/atlas-lab/mundos/v10-20260922 DEST=%h/atlas-lab/respaldos RETENCION=48
+Environment=CARTA_DATA_DIR=%h/atlas-lab/mundos/v11-20260924 DEST=%h/atlas-lab/respaldos RETENCION=48
 ExecStart=/usr/bin/bash %h/atlas-lab/servidor/scripts/respaldo.sh

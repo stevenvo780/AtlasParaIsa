@@ -101,7 +101,7 @@ Umbrales por brazo sin cambios (mecanismo en ≥ 10/12). En la Etapa 1, la puert
 
 **4. Coherencia de la Etapa 1.** Los nacimientos acumulados del día 20 se cuentan con `nacimientosDia`, y las muertes por sed con las causas del registro de muertes, igual en ambos brazos.
 
-## Revisión 2 (24-09, ~01:30; antes de lanzar nada) — correcciones de la revisión adversarial
+## Revisión 2 (24-09 01:27; antes de lanzar nada) — correcciones de la revisión adversarial
 
 Motivo: revisión de la ley ya fusionada (workflow de 5 lentes, 19 agentes; cada hallazgo, contrastado por 2 escépticos): 3 de 7 hallazgos confirmados. Se conservan la hipótesis, α, R, brazos, semillas, condición y umbrales.
 
@@ -110,7 +110,7 @@ Motivo: revisión de la ley ya fusionada (workflow de 5 lentes, 19 agentes; cada
 3. **Mecanismo simétrico.** El evaluador aceptaba «brecha(NAT) > 0» cuando CTRL no tenía 20 días válidos; ese umbral no estaba en este preregistro (lo introdujo el encargo del evaluador). Ahora los dos brazos necesitan ≥ 20 días válidos; si no, la semilla no cumple mecanismo.
 4. **Definición declarada de `bloqueadasPorLey`** (hallazgo no confirmado, pero la definición se fija aquí): cuenta evaluaciones, no parejas. Cada `a` apta y con lugar que la ley rechaza por intervalo (aunque no tenga pareja posible) y cada candidato `b` que pasó `match` pero no el intervalo; las reevaluaciones del mismo paso vuelven a contar. «La ley actúa» (≥ 15 de 31 días con > 0) significa que hubo fértiles frenados por hacinamiento.
 
-## Manifiesto de la Etapa 1 (congelado antes de lanzar; 24-09 ~01:40)
+## Manifiesto de la Etapa 1 (congelado antes de lanzar; 24-09 01:28)
 
 - Código de las réplicas: `de72ab4` (`main`, con la ley, las Revisiones 1 y 2 y el evaluador), en el worktree `anexo/worktrees/lab-nat` (detached). Evaluador: `scripts/lab/decision-natalidad.mts --etapa 1` en ese mismo commit.
 - Parámetros comunes: `persistencia.cadaTicks=300,limites.teselasActivas=1303552,limites.chunks=5092,limites.fauna=7821312` (límites del anfitrión) y `--techo-lab 5000`; 20 días; semillas 4101–4104. Brazos: CTRL = comunes; NAT = comunes + `poblacion.natalidadLocal=1,poblacion.radioProvision=16`; NATR12 y NATR24 = ídem con R = 12 y 24 (descriptivos). Lanzador: `datos-lab/lanzar-nat1.sh` (salida `datos-lab/nat1/<BRAZO>-<semilla>/`).

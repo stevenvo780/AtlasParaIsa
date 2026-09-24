@@ -43,6 +43,8 @@ function digestoSinAptitud(world: World): string {
   // midieron los hashes; con su valor 0 no actúa, así que también se quita de la forma.
   assert.equal(comoPadre.social.memoriaDisputa, 0);
   delete comoPadre.social.memoriaDisputa;
+  assert.equal(comoPadre.social.hogarTrabajo, 0);
+  delete comoPadre.social.hogarTrabajo;
   setParams(world, comoPadre as unknown as WorldParams);
   const version = world.version;
   // La referencia V10 mide este mismo estado; sólo normalizamos su etiqueta al hashear.

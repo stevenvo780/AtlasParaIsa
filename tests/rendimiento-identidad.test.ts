@@ -25,6 +25,8 @@
  * así que los hashes de e1adaaf se conservan y siguen demostrando que el MUNDO no se movió ni un bit.
  * Reglas 11: el control sigue usando la base histórica y normaliza sólo `world.version` a 10 al
  * comparar con esos hashes V10; el estado simulado y los params permanecen intactos.
+ * H-B: `social.hogarTrabajo=0` tampoco actúa; se quita sólo de la forma de params al comparar
+ * con referencias anteriores a su declaración.
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -144,7 +146,7 @@ test('con el recelo de CONFL (`social.memoriaDisputa`), primero y primeroConFilt
 });
 
 /** Claves declaradas después de e1adaaf que, con su valor por defecto, no actúan (ver cabecera). */
-const CLAVES_POSTERIORES = ['social.memoriaDisputa', 'conducta.vocacion', 'conducta.vocacionTope'] as const;
+const CLAVES_POSTERIORES = ['social.memoriaDisputa', 'conducta.vocacion', 'conducta.vocacionTope', 'social.hogarTrabajo'] as const;
 /** Quitar una clave del hash sólo es legítimo si con el valor que tiene no actúa (0). */
 function clavesPosterioresApagadas(params: WorldParams): void {
   for (const clave of CLAVES_POSTERIORES) {

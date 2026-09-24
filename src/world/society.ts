@@ -233,18 +233,22 @@ function productExchange(world: World, seller: Person, buyer: Person): Opportuni
 /** A home is an observed useful place, not a birth faction or a movement boundary. */
 export function settlementOpportunity(world: World, person: Person): { target: {x:number;y:number}; score: number; reason: string } | undefined {
   if (!world.cooperationEnabled) return;
+  const r = paramsOf(world).social.hogarTrabajo;
   const viable = (place: {x:number;y:number}) => {
-    let food = 0, water = 0;
+    let food = 0, water = 0, wood = 0, stone = 0, fauna = 0;
     for (let dy=-4;dy<=4;dy++) for (let dx=-4;dx<=4;dx++) {
       if (dx*dx+dy*dy>16) continue;
       const tile = tileAt(world,{x:place.x+dx,y:place.y+dy});
       if (tile && tile.terrain !== 'water') { food += tile.food; water += tile.drinkingWater ?? 0; }
+      if (r > 0 && tile) { wood += tile.wood ?? 0; stone += tile.stone ?? 0; fauna += tile.fauna ?? 0; }
     }
     const facilities = filtrarCerca(world.structures, place, 5, s=>distance(s,place)<=4 && s.condition>0.1);
     food += facilities.reduce((sum,s)=>sum+s.food,0); water += facilities.reduce((sum,s)=>sum+s.water,0);
     const peers = vecinos(world, place, 7, p=>p!==person && distance(p,place)<=6, 'settlementOpportunity');
     const trust = peers.reduce((sum,p)=>sum+(person.bonds[p.id]??0.15),0)/Math.max(1,peers.length);
-    const provision = Math.min(clamp(food/0.8),clamp(water/0.12));
+    let provision = Math.min(clamp(food/0.8),clamp(water/0.12));
+    // H-B: sólo el parche ya percibido modifica la provisión; con r=0 no se lee trabajo.
+    if (r > 0) provision *= 1 - r * (1 - clamp((wood + stone) / 12 + fauna / 2));
     return provision * (0.45 + (facilities.length ? 0.25 : 0) + trust*0.3);
   };
   if (person.home && distance(person,person.home)<=7) {

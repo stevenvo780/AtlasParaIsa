@@ -44,8 +44,10 @@ function digestoSinMemoria(world: World, conMemoria = false): string {
   const vigentes = paramsOf(world);
   const antes = structuredClone(vigentes) as unknown as { agua: Record<string, unknown>; social: Record<string, unknown> };
   assert.equal(antes.social.memoriaDisputa, 0);
+  assert.equal(antes.social.hogarTrabajo, 0);
   if (!conMemoria) delete antes.agua.memoria;
   delete antes.social.memoriaDisputa;
+  delete antes.social.hogarTrabajo;
   setParams(world, antes as unknown as WorldParams);
   const version = world.version;
   // La referencia V10 mide este mismo estado; sólo normalizamos su etiqueta al hashear.

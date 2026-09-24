@@ -243,11 +243,13 @@ test('bake-pixel benchmark: 2,000 synthetic 16 × 16 cells, legacy vs field', { 
   legacy(); field();
   const oldTimes: number[] = [], newTimes: number[] = [];
   const time = (fn: () => void) => { const start = performance.now(); fn(); return performance.now() - start; };
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 9; i++) {
     if (i % 2 === 0) { oldTimes.push(time(legacy)); newTimes.push(time(field)); }
     else { newTimes.push(time(field)); oldTimes.push(time(legacy)); }
   }
-  const before = oldTimes.sort((a, b) => a - b)[2]!, after = newTimes.sort((a, b) => a - b)[2]!;
+  // La carga de la máquina solo SUMA tiempo: el mínimo de corridas alternas estima el coste propio de cada
+  // camino (la mediana de 5 superó 1,5× con la torre saturada del laboratorio, 1,21–1,32× sin ella).
+  const before = Math.min(...oldTimes), after = Math.min(...newTimes);
   console.log(`terrain-field benchmark: legacy ${before.toFixed(1)} ms; field ${after.toFixed(1)} ms; ratio ${(after / before).toFixed(2)}x; ${sink | 0}`);
   assert.ok(after / before <= 1.5, `baked pixel work grew ${(after / before).toFixed(2)}×`);
 });

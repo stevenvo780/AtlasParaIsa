@@ -368,6 +368,8 @@ export class Landscape {
   private readonly groundStampContext = this.groundStamp.getContext('2d')!;
   private readonly groundPixels = this.groundStampContext.createImageData(ART, ART);
   private groundMaterials = new WeakMap<Tile, GroundMaterial>();
+  private biomeFractions = new WeakMap<Tile, number>();
+  private treeForms = new WeakMap<Tile, TreeForm>();
   private spriteBytes = 0;
   private readonly spriteCache = new BoundedCache<HTMLCanvasElement>(SPRITE_CACHE_LIMIT, canvas => { this.spriteBytes -= canvas.width * canvas.height * 4; canvas.width = canvas.height = 0; });
   private chunks: GroundChunk[] = [];
@@ -779,6 +781,8 @@ export class Landscape {
     if (this.worldW === 0 || this.worldH === 0) return;
     // Input objects may be reused by callers; palette memoization lasts only this bake.
     this.groundMaterials = new WeakMap();
+    this.biomeFractions = new WeakMap();
+    this.treeForms = new WeakMap();
     this.chunks = [];
     for (let cy = Math.floor(this.originY / CHUNK_ART_TILES); cy <= Math.floor((this.originY + this.worldH - 1) / CHUNK_ART_TILES); cy++) {
       for (let cx = Math.floor(this.originX / CHUNK_ART_TILES); cx <= Math.floor((this.originX + this.worldW - 1) / CHUNK_ART_TILES); cx++) {
@@ -795,11 +799,19 @@ export class Landscape {
           }
           for (let y = y0; y < y0 + CHUNK_ART_TILES; y++) for (let x = x0; x < x0 + CHUNK_ART_TILES; x++) {
             const tile = this.tileAt(x, y);
-            if (tile) { this.bakeCoast(g, x, y); this.bakeFeatures(g, tile); }
+            if (tile) { this.bakeCoast(g, x, y); this.bakeBiomeEdge(g, x, y); this.bakeFeatures(g, tile); }
           }
           g.restore();
           if (chunk) { chunk.signature = signature; chunk.revision = ++this.cacheBuilds; }
           else { chunk = { key, signature, revision: ++this.cacheBuilds, canvas, x: x0, y: y0 }; this.terrainCache.set(key, chunk); }
+        }
+        // Sprite forms share this update's tile and neighbour state, even when the
+        // ground raster itself came from the chunk cache.
+        for (let y = y0; y < y0 + CHUNK_ART_TILES; y++) for (let x = x0; x < x0 + CHUNK_ART_TILES; x++) {
+          const tile = this.tileAt(x, y);
+          if (!tile || (tile.wood ?? 0) <= .05) continue;
+          const form = treeForm(tile, this.biomeEdgeFraction(tile));
+          if (form) this.treeForms.set(tile, form);
         }
         this.chunks.push(chunk);
       }
@@ -822,6 +834,18 @@ export class Landscape {
       moisture, traffic,
     };
     this.groundMaterials.set(tile, material); return material;
+  }
+
+  private biomeEdgeFraction(tile: Tile): number {
+    const cached = this.biomeFractions.get(tile); if (cached !== undefined) return cached;
+    if (!tile.biome) return 1;
+    let same = 0;
+    for (const [dx, dy] of [[0, -1], [0, 1], [-1, 0], [1, 0]] as const) {
+      if (this.tileAt(tile.x + dx, tile.y + dy)?.biome === tile.biome) same++;
+    }
+    const fraction = Math.max(.4, same / 4);
+    this.biomeFractions.set(tile, fraction);
+    return fraction;
   }
 
   private bakeTileBase(g: CanvasRenderingContext2D, x: number, y: number): void {
@@ -880,10 +904,11 @@ export class Landscape {
       const leafR = a.leaf.r * wa + b.leaf.r * wb + c.leaf.r * wc + d.leaf.r * wd;
       const leafG = a.leaf.g * wa + b.leaf.g * wb + c.leaf.g * wc + d.leaf.g * wd;
       const leafB = a.leaf.b * wa + b.leaf.b * wb + c.leaf.b * wc + d.leaf.b * wd;
-      const pigment = rooted * (1 - wear * .65);
       // A compacted surface replaces material; no centre node, edge, footstep or
       // claimed route is manufactured from the scalar traffic field.
       const grainSeed = rnd(wx, wy, 358);
+      const ditheredWear = grainSeed < wear ? 1 : 0;
+      const pigment = rooted * (1 - ditheredWear * .65);
       const grain = (grainSeed - .5) * (1 - wear) * 4;
       // Sparse fibres and granules live on a world lattice incommensurate with
       // cells. They symbolize existing cover/soil, never countable extra plants.
@@ -893,9 +918,9 @@ export class Landscape {
       const granule = rooted < .35 && grainSeed < .035 ? (owner.moisture > .5 ? -8 : 8) : 0;
       const relief = Math.round((fine - .5) * 3) * 3 + (broad - .5) * 6 + grain + granule + (fibre ? 15 : 0);
       const offset = (by * ART + bx) * 4;
-      data[offset] = soilR + (leafR - soilR) * pigment + wear * 9 + relief;
-      data[offset + 1] = soilG + (leafG - soilG) * pigment + wear * 6 + relief;
-      data[offset + 2] = soilB + (leafB - soilB) * pigment + wear * 3 + relief;
+      data[offset] = soilR + (leafR - soilR) * pigment + ditheredWear * 9 + relief;
+      data[offset + 1] = soilG + (leafG - soilG) * pigment + ditheredWear * 6 + relief;
+      data[offset + 2] = soilB + (leafB - soilB) * pigment + ditheredWear * 3 + relief;
       data[offset + 3] = 255;
     }
     this.groundStampContext.putImageData(this.groundPixels, 0, 0);
@@ -907,6 +932,7 @@ export class Landscape {
     const { x, y } = tile, ox = x * ART, oy = y * ART;
     const growth = clamp01(tile.growth ?? tile.vegetation);
     if (tile.terrain === 'water') { this.drawReeds(g, x, y, ox, oy, 0); return; }
+    const edge = this.biomeEdgeFraction(tile);
     const cultivation = clamp01(tile.cultivation ?? 0);
     if (cultivation > .08) {
       for (let row = 0; row < 2 + Math.round(cultivation * 2); row++) {
@@ -932,21 +958,33 @@ export class Landscape {
       px(g, ox+5, oy+8, 6, 4, css(P.trunk)); px(g, ox+6, oy+8, 4, 2, css(P.soilLight)); px(g, ox+7, oy+8, 2, 1, css(P.trunkLight));
       if (growth > .25) px(g,ox+11,oy+6,1,4,css(P.reedLight));
     } else if (feature === 'cactus') {
-      const h = 3 + Math.round(growth*8), color = css(mix(P.canopyDark,P.reed,growth));
-      px(g,ox+7,oy+12-h,3,h,color); px(g,ox+4,oy+7,4,2,color); px(g,ox+4,oy+4,2,4,color);
-      px(g,ox+9,oy+9,4,2,color); px(g,ox+11,oy+6,2,4,color); px(g,ox+8,oy+13-h,1,h-2,css(P.reedLight));
+      const h = Math.max(2, Math.round((3 + growth*8) * edge)), color = css(mix(P.canopyDark,P.reed,growth));
+      px(g,ox+7,oy+12-h,3,h,color);
+      if (h >= 7) {
+        const leftY = oy + 12 - Math.round(h * .45), rightY = oy + 12 - Math.round(h * .27);
+        px(g,ox+4,leftY,4,2,color); px(g,ox+4,leftY-3,2,4,color);
+        px(g,ox+9,rightY,4,2,color); px(g,ox+11,rightY-3,2,4,color);
+      }
+      px(g,ox+8,oy+13-h,1,h-2,css(P.reedLight));
       if (tile.food > .3) px(g,ox+7,oy+11-h,2,1,css(P.berryLight));
     } else if (feature === 'rock' || feature === 'clay') {
       const stock = feature === 'rock' ? (tile.stone ?? 0) : (tile.fertility ?? .6) * 8;
       if (stock > .2) {
-        const size = Math.min(5, 2 + stock / 3), color = feature === 'clay' ? rgb(185,118,88) : P.stone;
-        ellipse(g,ox+8,oy+12,size+1,2,css(P.shadow,.2)); ellipse(g,ox+8,oy+9,size,size*.7,css(darken(color,.2)));
-        ellipse(g,ox+7,oy+8,size*.8,size*.5,css(color)); px(g,ox+6,oy+6,3,1,css(lighten(color,.2)));
+        const size = Math.min(5, 2 + Math.min(stock / 3, 2.5) + rnd(x,y,2600) - .5) * edge;
+        const cx = ox + 8 + Math.floor(rnd(x,y,2601)*5) - 2;
+        const cy = oy + 9 + Math.floor(rnd(x,y,2602)*3) - 1;
+        const aspect = .6 + rnd(x,y,2603)*.2;
+        const color = feature === 'clay' ? mix(P.soilDark,P.coralDeep,.25) : P.stone;
+        ellipse(g,cx,cy+3,size+1,Math.max(1,2*edge),css(P.shadow,.2));
+        ellipse(g,cx,cy,size,size*aspect,css(darken(color,.2)));
+        ellipse(g,cx-1,cy-1,size*.8,size*aspect*.72,css(color));
+        px(g,cx-2,cy-3,Math.max(1,Math.round(size*.6)),1,css(lighten(color,.2)));
       }
     } else if (feature === 'reeds') {
-      for(let i=0;i<4;i++){ const h = 2+Math.round(growth*5); px(g,ox+3+i*3,oy+12-h,1,h,css(P.reed));px(g,ox+3+i*3,oy+10-h,1,2,css(P.reedLight)); }
+      const count = Math.max(1,Math.round(4*edge));
+      for(let i=0;i<count;i++){ const h = 2+Math.round(growth*5); const rx = ox + (count === 1 ? 8 : 3 + Math.round(i*9/(count-1))); px(g,rx,oy+12-h,1,h,css(P.reed));px(g,rx,oy+10-h,1,2,css(P.reedLight)); }
     } else if (feature === 'flowers') {
-      for(let i=0;i<3+Math.round(growth*4);i++){const fx=ox+2+Math.floor(rnd(x,y,1800+i)*12),fy=oy+3+Math.floor(rnd(x,y,1850+i)*10); px(g,fx,fy,1,2,css(P.reed));px(g,fx-1,fy-1,3,1,css(i%2?P.paper:P.berryLight));px(g,fx,fy-2,1,3,css(i%2?P.amber:P.coral));}
+      for(let i=0;i<Math.max(1,Math.round((3+growth*4)*edge));i++){const fx=ox+2+Math.floor(rnd(x,y,1800+i)*12),fy=oy+3+Math.floor(rnd(x,y,1850+i)*10); px(g,fx,fy,1,2,css(P.reed));px(g,fx-1,fy-1,3,1,css(i%2?P.paper:P.berryLight));px(g,fx,fy-2,1,3,css(i%2?P.amber:P.coral));}
     }
     if (feature === 'berries' || (!feature && tile.food > .3)) this.drawBerries(g,x,y,ox,oy,tile.food,0);
     // A reservoir, bare patch or building may retain legacy wood without a living
@@ -1008,11 +1046,43 @@ export class Landscape {
         px(g, ox + ART - j, oy + i, 1, 1, sandEdge);
       }
     }
-    // Esquinas diagonales, para que la playa no tenga muescas.
-    if (!north && !west && this.terrainAt(x - 1, y - 1) === 'water') px(g, ox, oy, 3, 3, sand);
-    if (!north && !east && this.terrainAt(x + 1, y - 1) === 'water') px(g, ox + ART - 3, oy, 3, 3, sand);
-    if (!south && !west && this.terrainAt(x - 1, y + 1) === 'water') px(g, ox, oy + ART - 3, 3, 3, sand);
-    if (!south && !east && this.terrainAt(x + 1, y + 1) === 'water') px(g, ox + ART - 3, oy + ART - 3, 3, 3, sand);
+    // Una diagonal aislada crea una rampa que se afina hacia el interior.
+    for (let corner = 0; corner < 4; corner++) {
+      const upper = corner < 2, left = corner % 2 === 0;
+      if ((upper ? north : south) || (left ? west : east)
+        || this.terrainAt(x + (left ? -1 : 1), y + (upper ? -1 : 1)) !== 'water') continue;
+      const j = 2 + Math.floor(rnd(x * 31 + corner, y, 2500 + corner) * 3);
+      for (let i = 0; i < 4; i++) {
+        const width = Math.max(0, j - i);
+        if (width === 0) continue;
+        const bx = left ? ox : ox + ART - width, by = upper ? oy + i : oy + ART - 1 - i;
+        px(g, bx, by, width, 1, sand);
+        px(g, left ? bx + width - 1 : bx, by, 1, 1, sandEdge);
+      }
+    }
+  }
+
+  /** Franja mineral y vegetal común a dos biomas terrestres. */
+  private bakeBiomeEdge(g: CanvasRenderingContext2D, x: number, y: number): void {
+    const tile = this.tileAt(x, y);
+    if (!tile?.biome || tile.terrain === 'water') return;
+    const here = this.groundMaterial(tile), ox = x * ART, oy = y * ART;
+    for (const [side, dx, dy] of [[0,0,-1], [1,0,1], [2,-1,0], [3,1,0]] as const) {
+      const neighbour = this.tileAt(x + dx, y + dy);
+      if (!neighbour?.biome || neighbour.biome === tile.biome || neighbour.terrain === 'water') continue;
+      const there = this.groundMaterial(neighbour);
+      const soil = mix(here.soil, there.soil, .5), leaf = mix(here.leaf, there.leaf, .5);
+      const color = mix(soil, leaf, (here.cover + there.cover) * .5);
+      const mottled = css(darken(color, .12)), plain = css(color);
+      for (let i = 0; i < ART; i++) {
+        const width = 1 + Math.floor(rnd(x * 31 + i, y * 17 + side, 2700 + side) * 2);
+        for (let d = 0; d < width; d++) {
+          const wx = dx === 0 ? ox + i : ox + (dx < 0 ? d : ART - 1 - d);
+          const wy = dy === 0 ? oy + i : oy + (dy < 0 ? d : ART - 1 - d);
+          px(g, wx, wy, 1, 1, rnd(wx, wy, 2710 + side) < .25 ? mottled : plain);
+        }
+      }
+    }
   }
 
   /* ---------------------------------------------------------------- */
@@ -1516,7 +1586,7 @@ export class Landscape {
   }
 
   private treeSprite(tile: Tile, ox = tile.x * ART, oy = tile.y * ART): Sprite | null {
-    const form = treeForm(tile);
+    const form = this.treeForms.get(tile);
     if (!form) return null;
     const {x,y} = tile;
     // One visible woody patch per occupied cell; coordinate/variety jitter is stable while stocks change.

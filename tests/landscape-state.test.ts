@@ -21,6 +21,9 @@ test('woody art requires declared stock and keeps growth, depletion and seeded v
   assert.ok(treeForm({ ...tree, wood: .5 })!.height < mature.height);
   assert.ok(treeForm({ ...tree, growth: .1 })!.height < mature.height);
   assert.equal(treeForm({ ...tree, vegetation: 0 })!.foliage, 0);
+  assert.ok(treeForm(tree, .5)!.height < mature.height);
+  assert.ok(treeForm(tree, .5)!.width < mature.width);
+  assert.deepEqual(treeForm(tree, 0), treeForm(tree, .4), 'the biome border keeps a visible minimum form');
   const saved = JSON.stringify(tree);
   assert.deepEqual(treeForm(JSON.parse(saved) as Tile), mature);
   assert.equal(JSON.stringify(tree), saved);

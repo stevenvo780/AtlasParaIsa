@@ -24,6 +24,8 @@
  *    la toma de comida en estructuras (almacén común, no una entrega entre personas).
  */
 import type { Action } from '../../src/shared/types.js';
+import type { DatabaseSync } from 'node:sqlite';
+import type { Capability, TechnologyExecution } from '../../src/shared/technology.js';
 import { OFICIOS_DE_LINAJE, TICKS_PER_DAY, type Person, type World } from '../../src/world/index.js';
 import { indiceDiversidad } from '../../src/world/diversidad.js';
 import { reproductiveReadiness } from '../../src/world/family.js';
@@ -98,6 +100,111 @@ export function diversidadPerfilesJS(perfiles: readonly Readonly<Record<string, 
   return suma / pares;
 }
 
+const CAPACIDADES: readonly Capability[] = ['cutting', 'storage', 'insulation', 'cultivation', 'binding', 'abrasion'];
+export interface UsoUtil { recipeId: string; capacities: Readonly<Record<Capability, number>> }
+export interface RepertorioAbierto { usos: number; clasesR100: number; recetasR100: number; clasesHill2: number }
+
+/** B: cada uso exitoso con benefit>0 pesa uno. Clase = máscara de las seis capacidades en
+ * CAPACIDADES cuyo valor es >=0,2. R100 = Σ_i [1-C(N-N_i,100)/C(N,100)] (sin reemplazo);
+ * el producto de 100 razones evita factoriales y overflow. Hill-2 = 1/Σ_i(N_i/N)^2.
+ * Los cuatro campos son null en conjunto si N<100; no hay muestreo ni azar. */
+export function repertorioAbierto(usos: readonly UsoUtil[]): RepertorioAbierto | null {
+  const N = usos.length, n = 100;
+  if (N < n) return null;
+  const recetas = new Map<string, number>(), clases = new Map<number, number>();
+  for (const uso of usos) {
+    recetas.set(uso.recipeId, (recetas.get(uso.recipeId) ?? 0) + 1);
+    let clase = 0;
+    for (let i = 0; i < CAPACIDADES.length; i++) if ((uso.capacities[CAPACIDADES[i]!] ?? 0) >= 0.2) clase |= 1 << i;
+    clases.set(clase, (clases.get(clase) ?? 0) + 1);
+  }
+  const rareza = (cuentas: ReadonlyMap<unknown, number>): number => {
+    let suma = 0;
+    for (const Ni of cuentas.values()) {
+      let ausente = 1;
+      for (let k = 0; k < n; k++) { ausente *= (N - Ni - k) / (N - k); if (ausente <= 0) break; }
+      suma += 1 - Math.max(0, ausente);
+    }
+    return suma;
+  };
+  return { usos: N, clasesR100: rareza(clases), recetasR100: rareza(recetas),
+    clasesHill2: 1 / [...clases.values()].reduce((s, Ni) => s + (Ni / N) ** 2, 0) };
+}
+
+/** Lee exactamente el intervalo y el predicado de usosUtiles en metrics.ts, después de save().
+ * JOIN con la definición archivada: la receta puede haber salido de la ventana LRU del mundo.
+ * Una definición ausente invalida la medida; nunca se agrupa silenciosamente como clase cero. */
+export function repertorioAbiertoDurable(db: DatabaseSync, desdeTickExclusivo: number, hastaTickInclusivo: number): RepertorioAbierto | null {
+  const usos: UsoUtil[] = [];
+  const rows = db.prepare(`SELECT e.body AS execution, d.body AS recipe FROM technology_executions e
+    LEFT JOIN technology_definitions d ON d.id=json_extract(e.body,'$.recipeId')
+    WHERE e.tick>? AND e.tick<=? ORDER BY e.serial`);
+  for (const row of rows.iterate(desdeTickExclusivo, hastaTickInclusivo)) {
+    const execution = JSON.parse(row.execution as string) as TechnologyExecution;
+    if (!execution.success || !execution.recipeId || execution.kind !== 'use' || execution.benefit <= 0) continue;
+    if (row.recipe === null) throw new Error(`Instrumentos: falta la definición de ${execution.recipeId}.`);
+    const recipe = JSON.parse(row.recipe as string) as { capacities: Record<Capability, number> };
+    usos.push({ recipeId: execution.recipeId, capacities: recipe.capacities });
+  }
+  return repertorioAbierto(usos);
+}
+
+export interface PerfilGrupo { ticks: Readonly<Record<string, number>>; grupo: string | null }
+/** Cuenta cada comunidad registrada al cierre, incluso si hoy no tiene mortales vivos. */
+export function censoComunidades(comunidades: readonly { id: string }[], personas: readonly Pick<Person, 'role' | 'communityId'>[]): { n: number; tamanos: number[]; sinComunidad: number } {
+  const cuentas = new Map<string, number>(comunidades.map(comunidad => [comunidad.id, 0]));
+  let sinComunidad = 0;
+  for (const person of personas) if (person.role === 'neighbor') {
+    if (person.communityId === null) sinComunidad++;
+    else if (cuentas.has(person.communityId)) cuentas.set(person.communityId, cuentas.get(person.communityId)! + 1);
+  }
+  return { n: comunidades.length, tamanos: [...cuentas.values()].sort((a, b) => b - a), sinComunidad };
+}
+/** C: W(d) = mortales vivos tanto al comienzo como al cierre. Perfil = ticks de acciones
+ * del día sin rest, normalizados a suma 1; un perfil sin actividad es el vector cero.
+ * Distancia declarada: L1/2. SS_total=Σ_{i<j}d(i,j)^2/N y
+ * SS_intra=Σ_g Σ_{i<j∈g}d(i,j)^2/n_g; F=1-SS_intra/SS_total (0 si SS_total=0).
+ * Se excluyen etiquetas null. Se exige >=2 grupos con >=2 personas. El resultado resta la media
+ * de 20 F tras barajar etiquetas entre personas, preservando tamaños, con xorshift32 local
+ * sembrado por semilla del mundo, día y canal. Nunca usa ni escribe world.rng. */
+export function diversidadEntreGrupos(perfiles: readonly PerfilGrupo[], seed: number, dia: number, canal = 0): number | null {
+  const validos = perfiles.filter(p => p.grupo !== null);
+  const N = validos.length, etiquetas = validos.map(p => p.grupo!);
+  const tamanos = new Map<string, number>();
+  for (const g of etiquetas) tamanos.set(g, (tamanos.get(g) ?? 0) + 1);
+  if ([...tamanos.values()].filter(n => n >= 2).length < 2) return null;
+  const acciones = ACCIONES.filter(a => a !== 'rest');
+  const vectores = validos.map(({ ticks }) => {
+    const total = acciones.reduce((s, a) => s + (ticks[a] ?? 0), 0);
+    return acciones.map(a => total ? (ticks[a] ?? 0) / total : 0);
+  });
+  const pares: { i: number; j: number; d2: number }[] = [];
+  let totalDistancia = 0;
+  for (let i = 0; i < N; i++) for (let j = i + 1; j < N; j++) {
+    let d = 0;
+    for (let k = 0; k < acciones.length; k++) d += Math.abs(vectores[i]![k]! - vectores[j]![k]!);
+    const d2 = (d / 2) ** 2;
+    pares.push({ i, j, d2 }); totalDistancia += d2;
+  }
+  if (totalDistancia === 0) return 0;
+  const fraccion = (labels: readonly string[]): number => {
+    let intra = 0;
+    for (const { i, j, d2 } of pares) if (labels[i] === labels[j]) intra += d2 / tamanos.get(labels[i]!)!;
+    return 1 - N * intra / totalDistancia;
+  };
+  const observado = fraccion(etiquetas);
+  let estado = (seed ^ Math.imul(dia, 0x9e3779b9) ^ Math.imul(canal + 1, 0x85ebca6b)) >>> 0;
+  if (estado === 0) estado = 0x6d2b79f5;
+  const azar = (): number => { estado ^= estado << 13; estado ^= estado >>> 17; estado ^= estado << 5; return estado >>> 0; };
+  let nulo = 0;
+  for (let r = 0; r < 20; r++) {
+    const perm = [...etiquetas];
+    for (let i = N - 1; i > 0; i--) { const j = azar() % (i + 1); [perm[i], perm[j]] = [perm[j]!, perm[i]!]; }
+    nulo += fraccion(perm);
+  }
+  return observado - nulo / 20;
+}
+
 function fracciones(conteo: ReadonlyMap<string, number>, total: number): Record<string, number> {
   const salida: Record<string, number> = {};
   for (const accion of ACCIONES) { const n = conteo.get(accion) ?? 0; if (n > 0) salida[accion] = n / total; }
@@ -145,6 +252,12 @@ export interface MetricasInstrumentos {
   diversidadPerfilesJS: number | null;
   linajesVivos: number;
   linajesHerfindahl: number | null;
+  /** Comunidades registradas al cierre; el tamaño de una comunidad sin mortales es cero. */
+  censoComunidades: { n: number; tamanos: number[]; sinComunidad: number };
+  /** Alternativa B, null si hubo menos de 100 usos útiles en el día. */
+  repertorioAbierto: RepertorioAbierto | null;
+  /** Alternativa C; cada canal es null si no hay dos grupos de al menos dos personas. */
+  diversidadEntreGrupos: { comunidades: number | null; linajes: number | null };
 }
 
 function mortalesVivos(world: World): Set<string> {
@@ -184,7 +297,7 @@ export class InstrumentosConducta {
   /** Mundo donde se registró el observador de natalidad (su contexto pasa a los clones del paso). */
   private readonly mundoObservado: World;
 
-  constructor(world: World) {
+  constructor(world: World, db?: DatabaseSync) {
     this.mundoObservado = world;
     setObservadorNatalidad(world, { nacimiento: (x, limitante) => {
       this.nacimientosDia++; this.xNacimientos.push(x); this.limitante[limitante]++;
@@ -192,10 +305,15 @@ export class InstrumentosConducta {
     this.fotografiarActividad(world); this.vivosInicioDia = mortalesVivos(world);
     const identidades = new Map([...world.legacy, ...world.retiredLegacy, ...world.people]
       .filter(person => person.role === 'neighbor').map(person => [person.id, person] as const));
+    const legadoArchivado = db?.prepare('SELECT body FROM legacy WHERE id=?');
     const raiz = (id: string): string => {
       const conocida = this.raizPorId.get(id);
       if (conocida) return conocida;
-      const persona = identidades.get(id);
+      let persona = identidades.get(id);
+      if (!persona && legadoArchivado) {
+        const fila = legadoArchivado.get(id) as { body: string } | undefined;
+        if (fila) { persona = JSON.parse(fila.body) as Person; identidades.set(id, persona); }
+      }
       if (!persona) throw new Error(`Instrumentos: falta el progenitor transmisor ${id}.`);
       // reproduce() clona a `a` e inheritGenome([a,b]) conserva ese orden: parents[0] es `a`.
       const transmisor = persona.genome.parents[0];
@@ -281,7 +399,7 @@ export class InstrumentosConducta {
   }
 
   /** Métricas del día que acaba en `world.tick`; reinicia los acumuladores del día. */
-  metricasDia(world: World): MetricasInstrumentos {
+  metricasDia(world: World, db?: DatabaseSync): MetricasInstrumentos {
     const inicio = performance.now();
     const vacio: Record<string, number> = {};
     const tiempo = indiceDiversidadConActividad(world, person => this.ticksPorPersona.get(person.id) ?? vacio);
@@ -324,6 +442,10 @@ export class InstrumentosConducta {
       linajes.set(raiz, (linajes.get(raiz) ?? 0) + 1);
     }
     const mortales = [...linajes.values()].reduce((suma, n) => suma + n, 0);
+    const comunidades = censoComunidades(world.communities, world.people);
+    const comunidadPerfiles = enVentana.map(person => ({ ticks: this.ticksDiaPorPersona.get(person.id) ?? vacio, grupo: person.communityId }));
+    const linajePerfiles = enVentana.map(person => ({ ticks: this.ticksDiaPorPersona.get(person.id) ?? vacio, grupo: this.raizPorId.get(person.id) ?? null }));
+    const dia = Math.ceil(world.tick / TICKS_PER_DAY);
     const ticksActivos = this.personaTicksDia - (this.tiempoDia.get('rest') ?? 0);
     const pop = paramsOf(world).poblacion;
     const reposicion = reposicionTerritorioOcupado(world, world.people.filter(p => p.role === 'neighbor'), pop.radioProvision);
@@ -388,6 +510,12 @@ export class InstrumentosConducta {
       diversidadPerfilesJS: diversidadPerfilesJS(enVentana.map(person => this.ticksDiaPorPersona.get(person.id) ?? vacio)),
       linajesVivos: linajes.size,
       linajesHerfindahl: mortales ? [...linajes.values()].reduce((suma, n) => suma + (n / mortales) ** 2, 0) : null,
+      censoComunidades: comunidades,
+      repertorioAbierto: db ? repertorioAbiertoDurable(db, world.tick - TICKS_PER_DAY, world.tick) : null,
+      diversidadEntreGrupos: {
+        comunidades: diversidadEntreGrupos(comunidadPerfiles, world.seed, dia, 0),
+        linajes: diversidadEntreGrupos(linajePerfiles, world.seed, dia, 1),
+      },
     };
     const vivos = new Set(world.people.map(person => person.id));
     for (const id of [...this.ticksPorPersona.keys()]) if (!vivos.has(id)) this.ticksPorPersona.delete(id);

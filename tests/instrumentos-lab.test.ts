@@ -4,13 +4,14 @@ import { spawn } from 'node:child_process';
 import { closeSync, mkdtempSync, openSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { Store } from '../src/server/store.js';
 import { createWorld, stepWorld, type Person, type World } from '../src/world/index.js';
 import { digestoCanonico } from '../src/world/digesto.js';
 import { CONDUCTA_DIMENSIONS, indiceDiversidad } from '../src/world/diversidad.js';
 import { worldStatistics } from '../src/world/statistics.js';
 import { parseParams } from '../src/world/params.js';
-import { ACCIONES, indiceDiversidadConActividad, InstrumentosConducta, sinDescanso } from '../scripts/lab/instrumentos.js';
+import { ACCIONES, censoComunidades, diversidadEntreGrupos, indiceDiversidadConActividad, InstrumentosConducta, repertorioAbierto, repertorioAbiertoDurable, sinDescanso } from '../scripts/lab/instrumentos.js';
 
 /**
  * Instrumentos de medida del laboratorio (scripts/lab/instrumentos.ts, ronda INSTR 2026-09-22):
@@ -33,7 +34,7 @@ const CLAVES_ANTIGUAS = new Set([
   'cooperacionAcumuladaPorTipo', 'otrasCooperacionesAcumuladas', 'conflictosAcumulados', 'faunaTotal',
   'p50Ms', 'p95Ms', 'rss',
 ]);
-const CLAVES_NUEVAS = ['natalidadLocal', 'diversidadConductaTiempo', 'diversidadConductaTiempoComponentes', 'diversidadConductaActiva', 'diversidadConductaActivaComponentes', 'diversidadConductaComponentes', 'diversidadConductaVentana', 'diversidadConductaVentanaComponentes', 'personasVentana', 'repartoTiempoPorAccion', 'repartoActividadPorAccion', 'vocacionVarianza', 'vocacionEntropiaArgmax', 'vocacionCoincidencia', 'diversidadConductaVentanaGen1', 'approachHogar', 'maderaMediaAdultos', 'piedraMediaAdultos', 'muertesMenores8Dias', 'cambiosHogar', 'diversidadPerfilesJS', 'linajesVivos', 'linajesHerfindahl'];
+const CLAVES_NUEVAS = ['natalidadLocal', 'diversidadConductaTiempo', 'diversidadConductaTiempoComponentes', 'diversidadConductaActiva', 'diversidadConductaActivaComponentes', 'diversidadConductaComponentes', 'diversidadConductaVentana', 'diversidadConductaVentanaComponentes', 'personasVentana', 'repartoTiempoPorAccion', 'repartoActividadPorAccion', 'vocacionVarianza', 'vocacionEntropiaArgmax', 'vocacionCoincidencia', 'diversidadConductaVentanaGen1', 'approachHogar', 'maderaMediaAdultos', 'piedraMediaAdultos', 'muertesMenores8Dias', 'cambiosHogar', 'diversidadPerfilesJS', 'linajesVivos', 'linajesHerfindahl', 'censoComunidades', 'repertorioAbierto', 'diversidadEntreGrupos'];
 
 type Json = Record<string, unknown>;
 const readJson = (path: string): Json => JSON.parse(readFileSync(path, 'utf8')) as Json;
@@ -61,6 +62,66 @@ test('ACCIONES cubre las 18 acciones del vector de conducta de src/world/diversi
   assert.equal(new Set(ACCIONES).size, 18);
   // CONDUCTA_DIMENSIONS = 2·|ACTIONS| + 5 (tecnología) + 6 (acciones de comida) + 6 (lugares).
   assert.equal(ACCIONES.length * 2 + 5 + 6 + 6, CONDUCTA_DIMENSIONS);
+});
+
+test('comunidades: censo sintético de vivos, orden descendente y sin comunidad', () => {
+  const p = (role: Person['role'], communityId: string | null) => ({ role, communityId });
+  assert.deepEqual(censoComunidades([{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }], [p('neighbor', 'a'), p('neighbor', 'b'), p('neighbor', 'a'),
+    p('neighbor', null), p('neighbor', 'c'), p('neighbor', 'b'), p('neighbor', 'a'), p('S', 'z')]),
+  { n: 4, tamanos: [3, 2, 1, 0], sinComunidad: 1 });
+});
+
+test('repertorio B: rarefacción hipergeométrica exacta y Hill-2 frente a cuentas manuales', () => {
+  const cutting = { cutting: 0.2, storage: 0, insulation: 0, cultivation: 0, binding: 0, abrasion: 0 };
+  const storage = { ...cutting, cutting: 0.199999, storage: 0.2 };
+  const usos = [...Array.from({ length: 101 }, () => ({ recipeId: 'r1', capacities: cutting })),
+    { recipeId: 'r2', capacities: storage }];
+  assert.equal(repertorioAbierto(usos.slice(0, 99)), null);
+  const r = repertorioAbierto(usos)!;
+  assert.equal(r.usos, 102);
+  assert.ok(Math.abs(r.clasesR100 - (1 + 100 / 102)) < 1e-12);
+  assert.ok(Math.abs(r.recetasR100 - (1 + 100 / 102)) < 1e-12);
+  assert.ok(Math.abs(r.clasesHill2 - 102 ** 2 / (101 ** 2 + 1)) < 1e-12);
+  assert.deepEqual(usos[0]!.capacities, cutting, 'la receta no se modifica');
+});
+
+test('repertorio B: recibos durables usan el mismo predicado e intervalo que usosUtiles', () => {
+  const db = new DatabaseSync(':memory:');
+  try {
+    db.exec('CREATE TABLE technology_definitions (id TEXT, body TEXT); CREATE TABLE technology_executions (serial INTEGER, tick INTEGER, body TEXT)');
+    const def = db.prepare('INSERT INTO technology_definitions VALUES (?,?)');
+    def.run('r1', JSON.stringify({ capacities: { cutting: 0.2 } }));
+    def.run('r2', JSON.stringify({ capacities: { storage: 0.2 } }));
+    const ins = db.prepare('INSERT INTO technology_executions VALUES (?,?,?)');
+    let serial = 0;
+    const receipt = (tick: number, recipeId: string, kind = 'use', success = true, benefit = 1) =>
+      ins.run(++serial, tick, JSON.stringify({ recipeId, kind, success, benefit }));
+    for (let i = 0; i < 101; i++) receipt(i + 1, 'r1');
+    receipt(2400, 'r2');
+    receipt(0, 'r2'); receipt(2401, 'r2'); receipt(1, 'r2', 'craft');
+    receipt(2, 'r2', 'use', false); receipt(3, 'r2', 'use', true, 0);
+    const r = repertorioAbiertoDurable(db, 0, 2400)!;
+    assert.equal(r.usos, 102);
+    assert.ok(Math.abs(r.clasesR100 - (1 + 100 / 102)) < 1e-12);
+    assert.equal(repertorioAbiertoDurable(db, 2400, 2401), null);
+  } finally { db.close(); }
+});
+
+test('diversidad C: grupos separados altos; etiquetas independientes centradas en cero en media', () => {
+  const perfiles = Array.from({ length: 40 }, (_, i) => ({ ticks: (i < 20 ? { explore: 10, rest: 50 } : { farm: 10 }) as Record<string, number>, grupo: i < 20 ? 'a' : 'b' }));
+  const separado = diversidadEntreGrupos(perfiles, 7, 1);
+  assert.ok(separado !== null && separado > 0.7, `separado=${separado}`);
+  assert.equal(diversidadEntreGrupos(perfiles.map(p => ({ ...p, grupo: 'a' })), 7, 1), null);
+  const centrados = Array.from({ length: 100 }, (_, s) => {
+    // Etiquetas balanceadas barajadas con un generador local independiente del instrumento.
+    const labels: string[] = Array.from({ length: 40 }, (_, i) => i < 20 ? 'a' : 'b');
+    let state = (s + 1) * 747796405 >>> 0;
+    for (let i = 39; i > 0; i--) { state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+      const j = state % (i + 1); [labels[i], labels[j]] = [labels[j]!, labels[i]!]; }
+    return diversidadEntreGrupos(perfiles.map((p, i) => ({ ...p, grupo: labels[i]! })), s + 1, 1)!;
+  });
+  const media = centrados.reduce((s, v) => s + v, 0) / centrados.length;
+  assert.ok(Math.abs(media) < 0.08, `media nula=${media}`);
 });
 
 /** Persona mínima para `indiceDiversidad`: sin tecnología, alimento ni lugares (esos grupos del vector
@@ -123,6 +184,8 @@ test('en proceso: el observador no mueve un bit del mundo, cuenta cada share() y
   }
   const dia = instrumentos.metricasDia(a.world);
   assert.equal(digestoCanonico(a.world), digestoCanonico(b.world), 'metricasDia no debe tocar el mundo');
+  assert.deepEqual(dia.censoComunidades, censoComunidades(a.world.communities, a.world.people));
+  assert.ok('comunidades' in dia.diversidadEntreGrupos && 'linajes' in dia.diversidadEntreGrupos);
   assert.ok(dia.foodShared > 0, 'en 600 pasos de la semilla 7 hay comida compartida');
   assert.equal(dia.foodShared, porLastShared, 'un acto de compartir = un suceso care = un donante con lastShared = tick');
   // Cada paso cuenta un tick por vecino mortal vivo; las fracciones suman 1.
@@ -202,6 +265,10 @@ test('CLI: réplica corta con y sin instrumentos — digestoCanonico idéntico y
   assert.deepEqual(Object.keys(reparto.fracciones), ACCIONES.filter(accion => accion in reparto.fracciones), 'claves en el orden fijo de ACCIONES');
   const foodShared = (con.cooperacionAcumuladaPorTipo as Json).foodShared as number;
   assert.ok(Number.isInteger(foodShared) && foodShared > 0);
+  assert.deepEqual((con.repertorioAbierto as Json | null)?.usos ?? null,
+    (con.usosUtiles as number) >= 100 ? con.usosUtiles : null);
+  assert.equal((con.censoComunidades as { tamanos: number[]; sinComunidad: number }).tamanos.reduce((a, b) => a + b, 0)
+    + (con.censoComunidades as { sinComunidad: number }).sinComunidad, con.vecinosMortales);
 });
 
 test('CLI: --instrumentos acepta solo "si"|"no"', async t => {

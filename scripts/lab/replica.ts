@@ -195,7 +195,7 @@ async function main(): Promise<void> {
     if (gobernadorModo === 'servidor') throw new Error('--techo-lab es incompatible con --gobernador servidor: el techo de laboratorio es fijo y determinista, el del servidor lo dispara el p95 del reloj. Usa uno u otro.');
     techoLab = n;
   }
-  // Instrumentos de medida (scripts/lab/instrumentos.ts): conducta por tiempo y comida compartida.
+  // Instrumentos de medida (scripts/lab/instrumentos.ts): conducta, cooperación y panel C8.
   // Por defecto activos; `--instrumentos no` da EXACTAMENTE los dia-NNN.json de antes (mismas claves).
   const instrumentosArg = arg('--instrumentos') ?? 'si';
   if (instrumentosArg !== 'si' && instrumentosArg !== 'no') throw new Error('Uso: --instrumentos si|no (por defecto "si").');
@@ -215,7 +215,7 @@ async function main(): Promise<void> {
     // (enableTechnologyCatalogue) y liga el WorldContext (loadChunk/catalogueReader) al mundo.
     registrarFaunaRetirada(world, censosFauna);
     store.save(world);
-    const instrumentos = instrumentosArg === 'si' ? new InstrumentosConducta(world) : null;
+    const instrumentos = instrumentosArg === 'si' ? new InstrumentosConducta(world, store.db) : null;
 
     // Solo con --gobernador servidor: p95 de la ventana de 120 pasos (mismo mecanismo que
     // src/server/app.ts) y acumuladores del DÍA en curso, reiniciados en cada dia-NNN.json.
@@ -289,7 +289,7 @@ async function main(): Promise<void> {
         // Campos nuevos de los instrumentos; foodShared entra como un tipo más de cooperación.
         let medidas: Record<string, unknown> = metrics;
         if (instrumentos) {
-          const { foodShared, ...conducta } = instrumentos.metricasDia(world);
+          const { foodShared, ...conducta } = instrumentos.metricasDia(world, store.db);
           medidas = { ...metrics, cooperacionAcumuladaPorTipo: { ...metrics.cooperacionAcumuladaPorTipo, foodShared }, ...conducta };
         }
         const extra = gobernadorModo === 'servidor' ? metricasGobernador(world, reproduccionActivaTicksDia, ticksDia, p95GobernadorActual, cloneMsDia, saveMsDia)
@@ -330,7 +330,7 @@ async function main(): Promise<void> {
           poblacionContada: 'world.people.length (todas las personas vivas, S e I incluidas), como governReproduction en src/server/app.ts',
         },
       } : {}),
-      instrumentos: instrumentos ? 'si; solo lectura (scripts/lab/instrumentos.ts): conducta por tiempo, comida compartida y natalidad local' : 'no',
+      instrumentos: instrumentos ? 'si; solo lectura (scripts/lab/instrumentos.ts): conducta por tiempo, comida compartida, natalidad local y panel C8' : 'no',
       seed, params, sha: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
       digest: worldSourceDigest(),
       // Huella del ESTADO final (digestoCanonico de src/world/digesto.ts): con y sin instrumentos

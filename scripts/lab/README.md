@@ -535,7 +535,6 @@ tipificados al día 4 y C4 (corte provisional, día 4, ventana 3) pasa de 2/4 a 
   corrieron SIN instrumentos y con `Store`, sobre el árbol anterior a la optimización del paso.
 - Con `--gobernador servidor` el tiempo del observador se descuenta del `stepMs` que decide el
   gobernador; ese modo depende del reloj y no es bit a bit reproducible con ni sin instrumentos.
-||||||| parent of 8f08a90 (Let the less needy yield a dispute and remember the contested source)
 
 ## Diagnóstico de disputas (`diagnostico-disputas.ts`, hipótesis CONFL 2026-09-22)
 

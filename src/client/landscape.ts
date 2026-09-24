@@ -19,7 +19,7 @@ import type { Capability } from '../shared/technology.js';
 import { decidirModo, rendererProfile, type Modo } from './modo.js';
 import { dibujarCalor, type Capa, type RangoCalor } from './calor.js';
 import { claveRegion } from './regiones.js';
-import { classifyTerrainPixel, newFieldPixel, prepareTerrainStencil, rnd, type FieldSample } from './terrain-field.js';
+import { classifyTerrainPixel, hash3, newFieldPixel, prepareTerrainStencil, rnd, waterDepthTone, type FieldSample } from './terrain-field.js';
 
 /* ------------------------------------------------------------------ */
 /* Tipos públicos                                                      */
@@ -195,17 +195,6 @@ interface Tint {
 
 const RAIN_TINT: Tint = { color: 'rgb(159,179,189)', alpha: 0.2 };
 
-/* ------------------------------------------------------------------ */
-/* Aleatoriedad determinista (misma isla en todos los clientes)        */
-/* ------------------------------------------------------------------ */
-
-function hash3(x: number, y: number, salt: number): number {
-  let h = Math.imul(x | 0, 374761393) + Math.imul(y | 0, 668265263) + Math.imul(salt | 0, 2246822519);
-  h = (h ^ (h >>> 13)) >>> 0;
-  h = Math.imul(h, 1274126177) >>> 0;
-  return (h ^ (h >>> 16)) >>> 0;
-}
-
 function clamp(v: number, lo: number, hi: number): number {
   return v < lo ? lo : v > hi ? hi : v;
 }
@@ -353,6 +342,9 @@ export class Landscape {
   private readonly groundStamp = Object.assign(document.createElement('canvas'), { width: ART, height: ART });
   private readonly groundStampContext = this.groundStamp.getContext('2d')!;
   private readonly groundPixels = this.groundStampContext.createImageData(ART, ART);
+  private readonly restVeil = Object.assign(document.createElement('canvas'), { width: 1, height: 1 });
+  private readonly restVeilContext = this.restVeil.getContext('2d')!;
+  private restVeilPixels: ImageData | null = null;
   private groundMaterials = new WeakMap<Tile, GroundMaterial>();
   private biomeFractions = new WeakMap<Tile, number>();
   private treeForms = new WeakMap<Tile, TreeForm>();
@@ -685,6 +677,7 @@ export class Landscape {
     this.curr = null;
     this.terrainCache.clear(); this.spriteCache.clear(); this.chunks = []; this.gpu?.destroy();
     this.groundStamp.width = this.groundStamp.height = 0;
+    this.restVeil.width = this.restVeil.height = 0;
     this.scene.width = this.scene.height = 0;
     this.labels.width = this.labels.height = 0; this.labels.remove(); this.phaseLayer.remove(); this.rainLayer.remove();
   }
@@ -856,9 +849,6 @@ export class Landscape {
       return;
     }
     const stencil = prepareTerrainStencil(samples);
-    let neighbours = 0;
-    for (const sample of samples) if (sample.water) neighbours++;
-    const depth = Math.max(0, neighbours - (owner.water ? 1 : 0)) / 8;
     const waveX0 = Math.floor(rnd(x, y, 10) * ART), waveY0 = Math.floor(rnd(x, y, 40) * ART);
     const waveX1 = Math.floor(rnd(x, y, 11) * ART), waveY1 = Math.floor(rnd(x, y, 41) * ART);
     const pixel = newFieldPixel();
@@ -868,8 +858,8 @@ export class Landscape {
       classifyTerrainPixel(wx, wy, x, y, stencil, pixel);
       const offset = (by * ART + bx) * 4;
       if (pixel.water) {
-        const shore = clamp01((pixel.waterValue - .5) * 4);
-        let color = mix(P.waterShallow, P.waterDeep, depth * depth * shore);
+        const tone = waterDepthTone(wx, wy, x, y, stencil, pixel.waterValue);
+        let color = mix(P.waterShallow, P.waterDeep, tone / 3);
         if ((bx === waveX0 && by === waveY0) || (bx === waveX1 && by === waveY1)) color = lighten(color, .1);
         data[offset] = color.r; data[offset + 1] = color.g; data[offset + 2] = color.b; data[offset + 3] = 255;
         continue;
@@ -1358,9 +1348,27 @@ export class Landscape {
     // M10: un velo tenue sobre las zonas en reposo (el servidor no las simula ahora; se ve su estado
     // guardado o una vista previa). Sin `regionesVivas` no se vela nada: no se sabe.
     if (this.vivas) {
-      for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
-        if (this.tileAt(x, y) && !this.vivas.has(claveRegion(x, y))) px(g, x * ART, y * ART, ART, ART, 'rgba(24,38,32,0.34)');
+      // One mask pixel per cell, plus a one-cell halo so a region crossing the
+      // visible edge blends against its real neighbours. Reuse the mask storage.
+      const maskX = x0 - 1, maskY = y0 - 1;
+      const maskW = x1 - x0 + 3, maskH = y1 - y0 + 3;
+      if (this.restVeil.width < maskW || this.restVeil.height < maskH || !this.restVeilPixels) {
+        this.restVeil.width = Math.max(this.restVeil.width, maskW);
+        this.restVeil.height = Math.max(this.restVeil.height, maskH);
+        this.restVeilPixels = this.restVeilContext.createImageData(this.restVeil.width, this.restVeil.height);
       }
+      const mask = this.restVeilPixels.data;
+      const stride = this.restVeil.width;
+      for (let y = 0; y < maskH; y++) for (let x = 0; x < maskW; x++) {
+        const worldX = maskX + x, worldY = maskY + y;
+        const offset = (y * stride + x) * 4;
+        mask[offset] = 24; mask[offset + 1] = 38; mask[offset + 2] = 32;
+        mask[offset + 3] = this.tileAt(worldX, worldY) && !this.vivas.has(claveRegion(worldX, worldY)) ? 87 : 0;
+      }
+      this.restVeilContext.putImageData(this.restVeilPixels, 0, 0, 0, 0, maskW, maskH);
+      g.save(); g.imageSmoothingEnabled = true;
+      g.drawImage(this.restVeil, 0, 0, maskW, maskH, maskX * ART, maskY * ART, maskW * ART, maskH * ART);
+      g.restore();
     }
     g.restore();
   }

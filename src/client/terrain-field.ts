@@ -36,7 +36,12 @@ interface FieldQuad {
   saddle: 0 | 1 | 2;
   biomes: BiomeGroup[];
 }
-export interface TerrainStencil { owner: FieldSample; samples: readonly FieldSample[]; quads: [FieldQuad, FieldQuad, FieldQuad, FieldQuad]; }
+export interface TerrainStencil {
+  owner: FieldSample;
+  samples: readonly FieldSample[];
+  quads: [FieldQuad, FieldQuad, FieldQuad, FieldQuad];
+  waterDepthCorners: [number, number, number, number];
+}
 
 function biomeBias(biome: string): number {
   switch (biome) {
@@ -76,7 +81,14 @@ export function prepareTerrainStencil(samples: readonly FieldSample[]): TerrainS
       saddle: a.water && d.water && !b.water && !c.water ? 1 : b.water && c.water && !a.water && !d.water ? 2 : 0,
       biomes });
   }
-  return { owner: samples[4]!, samples, quads: quads as TerrainStencil['quads'] };
+  // Each corner belongs to four cells. Adjacent tiles compute the same shared
+  // corner from their own 3 × 3 stencil, so depth cannot jump at a tile edge.
+  const corner = (a: number, b: number, c: number, d: number): number =>
+    (Number(samples[a]!.water) + Number(samples[b]!.water)
+      + Number(samples[c]!.water) + Number(samples[d]!.water)) / 4;
+  return { owner: samples[4]!, samples, quads: quads as TerrainStencil['quads'],
+    waterDepthCorners: [corner(0, 1, 3, 4), corner(1, 2, 4, 5),
+      corner(3, 4, 6, 7), corner(4, 5, 7, 8)] };
 }
 
 export function newFieldPixel(): FieldPixel {
@@ -87,12 +99,14 @@ export function newFieldPixel(): FieldPixel {
 
 function smooth(value: number): number { return value * value * (3 - 2 * value); }
 
-export function rnd(x: number, y: number, salt: number): number {
+export function hash3(x: number, y: number, salt: number): number {
   let h = Math.imul(x | 0, 374761393) + Math.imul(y | 0, 668265263) + Math.imul(salt | 0, 2246822519);
   h = (h ^ (h >>> 13)) >>> 0;
   h = Math.imul(h, 1274126177) >>> 0;
-  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+  return (h ^ (h >>> 16)) >>> 0;
 }
+
+export function rnd(x: number, y: number, salt: number): number { return hash3(x, y, salt) / 4294967296; }
 
 /** Smooth value noise; the seed lattice is fixed in world pixels. */
 export function materialNoise(x: number, y: number, scale: number, salt: number): number {
@@ -101,6 +115,26 @@ export function materialNoise(x: number, y: number, scale: number, salt: number)
   const top = rnd(gx, gy, salt) * (1 - u) + rnd(gx + 1, gy, salt) * u;
   const bottom = rnd(gx, gy + 1, salt) * (1 - u) + rnd(gx + 1, gy + 1, salt) * u;
   return top * (1 - v) + bottom * v;
+}
+
+const BAYER_4X4 = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5] as const;
+
+/** Four water tones from the shared 3 × 3 corners; ordered transitions stay in world space. */
+export function waterDepthTone(
+  wx: number, wy: number, cellX: number, cellY: number, stencil: TerrainStencil, waterValue: number,
+): number {
+  const u = (wx - cellX * TERRAIN_ART + .5) / TERRAIN_ART;
+  const v = (wy - cellY * TERRAIN_ART + .5) / TERRAIN_ART;
+  const [a, b, c, d] = stencil.waterDepthCorners;
+  const upper = a * (1 - u) + b * u;
+  const lower = c * (1 - u) + d * u;
+  const base = upper * (1 - v) + lower * v;
+  const noise = (materialNoise(wx, wy, 23, 372) - .5) * .12 * (1 - base);
+  const shore = Math.max(0, Math.min(1, (waterValue - .5) * 4));
+  const scaled = Math.max(0, Math.min(1, base + noise)) * shore * 3;
+  const whole = Math.floor(scaled);
+  const threshold = (BAYER_4X4[((wy & 3) << 2) | (wx & 3)]! + .5) / 16;
+  return Math.min(3, whole + Number(scaled - whole > threshold));
 }
 
 interface PixelGeometry {

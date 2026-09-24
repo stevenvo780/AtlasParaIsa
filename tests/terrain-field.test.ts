@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { performance } from 'node:perf_hooks';
-import { classifyTerrainPixel, materialNoise, newFieldPixel, prepareTerrainStencil, rnd, type FieldSample } from '../src/client/terrain-field.js';
+import { classifyTerrainPixel, materialNoise, newFieldPixel, prepareTerrainStencil, rnd, waterDepthTone, type FieldSample } from '../src/client/terrain-field.js';
 
 type Cell = FieldSample;
 const land = (biome = 'grassland', cover = 0, traffic = 0): Cell => ({ biome, water: false, cover, traffic });
@@ -151,6 +151,42 @@ test('biome colors stay on their selected side and boundary bends off the cell g
     if (edge === 16) grid++;
   }
   assert.ok(grid < 48, `${grid}/96 biome-edge pixels coincide with the tile grid`);
+});
+
+test('a 5 × 5 lake deepens inward without depth-tone seams on tile lines', () => {
+  const get = (x: number, y: number): Cell => x >= 0 && x < 5 && y >= 0 && y < 5 ? water : land();
+  const tones = new Uint8Array(80 * 80), wet = new Uint8Array(80 * 80);
+  const pixel = newFieldPixel();
+  for (let cy = 0; cy < 5; cy++) for (let cx = 0; cx < 5; cx++) {
+    const stencil = prepareTerrainStencil(sampleAt(get, cx, cy));
+    for (let by = 0; by < 16; by++) for (let bx = 0; bx < 16; bx++) {
+      const wx = cx * 16 + bx, wy = cy * 16 + by, index = wy * 80 + wx;
+      classifyTerrainPixel(wx, wy, cx, cy, stencil, pixel);
+      wet[index] = Number(pixel.water);
+      if (pixel.water) tones[index] = waterDepthTone(wx, wy, cx, cy, stencil, pixel.waterValue);
+    }
+  }
+  const mean = (cx: number, cy: number): number => {
+    let sum = 0, count = 0;
+    for (let by = 0; by < 16; by++) for (let bx = 0; bx < 16; bx++) {
+      const index = (cy * 16 + by) * 80 + cx * 16 + bx;
+      if (wet[index]) { sum += tones[index]!; count++; }
+    }
+    return sum / count;
+  };
+  assert.ok(mean(0, 0) < mean(0, 2), 'lake corner should be shallower than its side');
+  assert.ok(mean(0, 2) < mean(2, 2), 'lake side should be shallower than its centre');
+  for (let grid = 16; grid < 80; grid += 16) {
+    let vertical = 0, horizontal = 0;
+    for (let p = 0; p < 80; p++) {
+      const left = p * 80 + grid - 1, right = left + 1;
+      if (wet[left] && wet[right] && tones[left] !== tones[right]) vertical++;
+      const above = (grid - 1) * 80 + p, below = above + 80;
+      if (wet[above] && wet[below] && tones[above] !== tones[below]) horizontal++;
+    }
+    assert.ok(vertical <= 40, `vertical grid ${grid} has ${vertical}/80 depth jumps`);
+    assert.ok(horizontal <= 40, `horizontal grid ${grid} has ${horizontal}/80 depth jumps`);
+  }
 });
 
 test('bake-pixel benchmark: 2,000 synthetic 16 × 16 cells, legacy vs field', { timeout: 60_000 }, () => {

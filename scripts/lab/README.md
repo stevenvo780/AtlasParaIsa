@@ -180,7 +180,7 @@ Con `--gobernador servidor`, cada `dia-NNN.json` añade (ninguno de estos campos
     la misma que cablea `src/world/statistics.ts`).
   - `cooperacionPorTipo`: `{cooperation, teaching, trade, constructionHelp, conflicts}` de
     `world.totals` (acumulados desde el inicio, como el resto de `world.totals`).
-  - `comunidades`: `world.communities.length`.
+  - `comunidades`: `world.communities.length` (el censo detallado es `censoComunidades`, abajo).
   - `rasgosPorGeneracion`: media, por generación **viva**, de `resilience`/`curiosity`/
     `sociability`/`care` (`person.traits`) y `learningRate` (`person.genome`).
   - `varianzaGenetica`: varianza media de los 14 alelos (`GENE_COUNT*2`, `src/world/genetics.ts`)
@@ -459,7 +459,7 @@ Salida (solo con la bandera):
 
 ## Instrumentos de medida (`instrumentos.ts`, ronda INSTR 2026-09-22)
 
-Dos instrumentos **de medida**, no de mundo: solo leen `World`/`Person` y acumulan en memoria del
+Instrumentos **de medida**, no de mundo: solo leen `World`/`Person` y acumulan en memoria del
 laboratorio (nunca en `World` ni en `Person`). Activos por defecto en `replica.ts`;
 `--instrumentos no` los apaga y devuelve los `dia-NNN.json` de siempre.
 
@@ -566,6 +566,43 @@ se usa ese estado inicial y no su historia; sus cisternas no cuentan.
   incluido el inicial; una reactivación cuenta por `world.animals` y no suma el censo anterior.
 - Garantía: el observador vive fuera del mundo (no se serializa); `tests/natalidad-integracion.test.ts`
   comprueba el mismo digesto con y sin él, con α = 0 y α = 1.
+
+### 4. Panel C8 de 60 días: comunidades, repertorio y conducta entre grupos
+
+Estos campos se escriben al cierre en cada `dia-NNN.json` con los instrumentos activos. `censoComunidades`
+es `{n, tamanos, sinComunidad}`: número de comunidades registradas al cierre, tamaños de sus
+miembros mortales vivos ordenados de mayor a menor y mortales vivos sin `communityId`. S e I
+quedan fuera de los tamaños; una comunidad vacía aporta un cero. Va con otro nombre para no chocar con el contador numérico `comunidades` de `--gobernador servidor`.
+
+`repertorioAbierto` (B) lee los **mismos** recibos durables del día que `usosUtiles`:
+`kind=use`, `success=true`, `recipeId` presente y `benefit>0`, con
+`tick ∈ (world.tick−TICKS_PER_DAY, world.tick]`. Cada recibo pesa un uso; la definición se une
+desde `technology_definitions` aunque la receta haya salido de la memoria residente. Una clase
+funcional gruesa es la máscara de seis capacidades (`cutting`, `storage`, `insulation`,
+`cultivation`, `binding`, `abrasion`) con valor ≥ 0,2. El objeto contiene `usos`,
+`clasesR100`, `recetasR100`, `clasesHill2`; es `null` completo con menos de 100 usos.
+La riqueza rarificada es la esperanza exacta sin reemplazo
+Σᵢ[1 − C(N−Nᵢ,100)/C(N,100)], calculada mediante productos de razones; Hill-2 es
+1/Σᵢ(Nᵢ/N)². No hay muestreo.
+
+`diversidadEntreGrupos` (C) es `{comunidades, linajes}`. Usa W(d): mortales vivos al principio
+y al cierre del día. Para cada uno toma su reparto de ticks del día entre las 17 acciones activas,
+sin `rest`; el que no actuó tiene vector cero. La distancia declarada es L1/2 entre repartos.
+Con sus distancias al cuadrado, `SS_total = Σ(i<j) d²/N` y
+`SS_intra = Σ_g Σ(i<j∈g) d²/n_g`; la fracción observada es
+`F = 1 − SS_intra/SS_total` (cero cuando `SS_total=0`). Se resta la media de 20 fracciones
+tras permutar etiquetas entre personas, conservando tamaños. Cada canal usa un PRNG xorshift32
+local sembrado por semilla del mundo, día y canal: no toca `world.rng`. Para comunidades se
+excluyen quienes no tienen `communityId`; para linajes se usa la raíz fundadora transmisora de
+`linajesVivos`. Cada canal es `null` si tiene menos de dos grupos con al menos dos miembros.
+
+Medición `nice -n 19` a 600 personas (582 de una instantánea PUB más 18 copias solo en memoria):
+observación por paso 0,193 ms; cálculo diario completo 564,5 ms. Forzar ambos canales C con
+600 perfiles y dos grupos añadió 83,2 ms al día. Amortizado en 2400 pasos:
+0,193 + (564,5 + 83,2)/2400 ≈ 0,463 ms/paso. El control PUB-5 día 29 con 599 personas
+registra `p50Ms=113,82`; la proporción aproximada es 0,41 %, por debajo del presupuesto de 5 %.
+La población de la medición se amplió en memoria para fijar exactamente 600 y no representa
+un día de simulación completo; `instrumentos.costeMs` sigue informando el coste real de cada réplica.
 
 ## Diagnóstico de disputas (`diagnostico-disputas.ts`, hipótesis CONFL 2026-09-22)
 

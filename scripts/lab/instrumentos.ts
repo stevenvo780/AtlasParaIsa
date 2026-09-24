@@ -26,6 +26,11 @@
 import type { Action } from '../../src/shared/types.js';
 import { OFICIOS_DE_LINAJE, TICKS_PER_DAY, type Person, type World } from '../../src/world/index.js';
 import { indiceDiversidad } from '../../src/world/diversidad.js';
+import { reproductiveReadiness } from '../../src/world/family.js';
+import { HAMBRE_POR_PASO, HAMBRE_POR_UNIDAD, SED_POR_PASO, SED_POR_UNIDAD } from '../../src/world/ecologia-constantes.js';
+import { primeroCerca } from '../../src/world/indice-puntos.js';
+import { capacidadLocal, hacinamientoLocal, intervaloCumplido, reposicionLocal, reposicionTerritorioOcupado } from '../../src/world/natalidad.js';
+import { paramsOf, setParams } from '../../src/world/params.js';
 
 /** Las 18 acciones de `Action`, en el orden de `ACTIONS` de src/world/diversidad.ts (no exportado):
  * fija el orden de las claves de las fracciones en el JSON. */
@@ -103,6 +108,8 @@ function fracciones(conteo: ReadonlyMap<string, number>, total: number): Record<
 
 /** Campos nuevos de `dia-NNN.json` (ver README del laboratorio, «Instrumentos de medida»). */
 export interface MetricasInstrumentos {
+  natalidadLocal?: { nacimientosDia: number; xNacimientos: { p10: number | null; p50: number | null; p90: number | null };
+    bloqueadasPorLey: number; kOcupado: number; nSobreKOcupado: number | null; limitante: { agua: number; comida: number } };
   diversidadConductaTiempo: number;
   diversidadConductaTiempoComponentes: { conducta: number; oficios: number };
   /** El mismo índice con los ticks por acción SIN `rest` (conducta activa). */
@@ -162,6 +169,10 @@ export class InstrumentosConducta {
   /** Raíz estable aun cuando el registro del antepasado salga de `world.legacy`. */
   private readonly raizPorId = new Map<string, string>();
   private contadorAntes = 0;
+  private nacimientosDia = 0;
+  private readonly xNacimientos: number[] = [];
+  private bloqueadasPorLey = 0;
+  private limitante = { agua: 0, comida: 0 };
   /** Coste de los instrumentos en ms de reloj (se informa por consola, nunca en el JSON). */
   costeMs = 0;
   pasos = 0;
@@ -196,7 +207,27 @@ export class InstrumentosConducta {
     this.actividadInicioDia = new Map(world.people.filter(p => p.role === 'neighbor').map(p => [p.id, { ...p.activity }]));
   }
 
-  antesDelPaso(world: World): void { this.contadorAntes = world.eventCounter; }
+  antesDelPaso(world: World): void {
+    this.contadorAntes = world.eventCounter;
+    const pop = paramsOf(world).poblacion;
+    if (!(pop.natalidadLocal > 0) || !world.reproductionEnabled
+      || !pop.comprobacionContinua && (world.tick + 1) % pop.intervaloComprobacionTicks !== 0) return;
+    // Sonda de candidatos físicamente listos al inicio del paso; no modifica el emparejamiento.
+    const siguiente = Object.create(world) as World;
+    Object.defineProperty(siguiente, 'tick', { value: world.tick + 1 });
+    setParams(siguiente, paramsOf(world));
+    const xPorLugar = new Map<string, number>();
+    for (const person of world.people) {
+      if (person.role !== 'neighbor' || person.inventory < 0.1 || !reproductiveReadiness(siguiente, person)
+        || pop.exigeComunidad && !person.communityId) continue;
+      const lugar = primeroCerca(world.places, person, pop.radioLugar + 1,
+        place => Math.hypot(person.x - place.x, person.y - place.y) <= pop.radioLugar);
+      if (!lugar) continue;
+      let x = xPorLugar.get(lugar.id);
+      if (x === undefined) { x = hacinamientoLocal(world, lugar, pop.radioProvision, pop.natalidadLocal); xPorLugar.set(lugar.id, x); }
+      if (!intervaloCumplido(siguiente, person, x)) this.bloqueadasPorLey++;
+    }
+  }
 
   /** Ticks por acción observados de una persona viva (copia; para tests y diagnóstico). */
   ticksDe(id: string): Record<string, number> | undefined {
@@ -207,6 +238,27 @@ export class InstrumentosConducta {
   /** Llamar tras `stepWorld` y ANTES de `store.save` (que vacía `chronicleJournal.pending`). */
   despuesDelPaso(world: World): void {
     const inicio = performance.now();
+    const pop = paramsOf(world).poblacion;
+    if (pop.natalidadLocal > 0) {
+      const nacidos = world.people.filter(person => person.role === 'neighbor' && person.bornAt === world.tick);
+      this.nacimientosDia += nacidos.length;
+      for (let i = 0; i < nacidos.length; i++) {
+        const child = nacidos[i]!;
+        const parent = world.people.find(person => person.id === child.genome.parents[0]);
+        if (!parent) continue;
+        const lugar = primeroCerca(world.places, parent, pop.radioLugar + 1,
+          place => Math.hypot(parent.x - place.x, parent.y - place.y) <= pop.radioLugar);
+        if (!lugar) continue;
+        const reposicion = reposicionLocal(world, lugar, pop.radioProvision);
+        const K = capacidadLocal(reposicion, pop.natalidadLocal);
+        const posteriores = nacidos.slice(i).filter(p => Math.hypot(p.x - lugar.x, p.y - lugar.y) <= pop.radioProvision).length;
+        const xAlConcebir = K > 0 ? hacinamientoLocal(world, lugar, pop.radioProvision, pop.natalidadLocal) - posteriores / K : Infinity;
+        this.xNacimientos.push(xAlConcebir);
+        const agua = reposicion.agua / (SED_POR_PASO * TICKS_PER_DAY / SED_POR_UNIDAD);
+        const comida = reposicion.comida / (HAMBRE_POR_PASO * TICKS_PER_DAY / HAMBRE_POR_UNIDAD);
+        this.limitante[agua <= comida ? 'agua' : 'comida']++;
+      }
+    }
     for (const person of world.people) {
       let ticks = this.ticksPorPersona.get(person.id);
       if (!ticks) { ticks = {}; this.ticksPorPersona.set(person.id, ticks); }
@@ -298,6 +350,18 @@ export class InstrumentosConducta {
     }
     const mortales = [...linajes.values()].reduce((suma, n) => suma + n, 0);
     const ticksActivos = this.personaTicksDia - (this.tiempoDia.get('rest') ?? 0);
+    const pop = paramsOf(world).poblacion;
+    let natalidadLocal: MetricasInstrumentos['natalidadLocal'];
+    if (pop.natalidadLocal > 0) {
+      const reposicion = reposicionTerritorioOcupado(world, world.people, pop.radioProvision);
+      const K = capacidadLocal(reposicion, pop.natalidadLocal);
+      const xs = [...this.xNacimientos].sort((a, b) => a - b);
+      const percentil = (p: number): number | null => xs.length ? xs[Math.floor((xs.length - 1) * p)]! : null;
+      natalidadLocal = { nacimientosDia: this.nacimientosDia,
+        xNacimientos: { p10: percentil(0.1), p50: percentil(0.5), p90: percentil(0.9) },
+        bloqueadasPorLey: this.bloqueadasPorLey, kOcupado: K,
+        nSobreKOcupado: K > 0 ? world.people.length / K : null, limitante: { ...this.limitante } };
+    }
     const incrementos = new Map<string, number>();
     let totalIncrementos = 0;
     for (const person of world.people) {
@@ -309,6 +373,7 @@ export class InstrumentosConducta {
       }
     }
     const metricas: MetricasInstrumentos = {
+      ...(natalidadLocal ? { natalidadLocal } : {}),
       diversidadConductaTiempo: tiempo.total,
       diversidadConductaTiempoComponentes: { conducta: tiempo.conducta, oficios: tiempo.oficios },
       diversidadConductaActiva: activa.total,
@@ -336,6 +401,8 @@ export class InstrumentosConducta {
     const vivos = new Set(world.people.map(person => person.id));
     for (const id of [...this.ticksPorPersona.keys()]) if (!vivos.has(id)) this.ticksPorPersona.delete(id);
     this.tiempoDia.clear(); this.personaTicksDia = 0; this.approachHogarTicks = 0;
+    this.nacimientosDia = 0; this.xNacimientos.length = 0; this.bloqueadasPorLey = 0;
+    this.limitante = { agua: 0, comida: 0 };
     this.cambiosHogar = { adopta: 0, pierde: 0 };
     this.ticksDiaPorPersona.clear(); this.vivosInicioDia = mortalesVivos(world);
     this.fotografiarActividad(world);

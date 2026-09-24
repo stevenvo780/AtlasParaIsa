@@ -59,8 +59,8 @@ export interface PersonDetail {
    * `vivo` es true cuando la ficha sale de las vidas del mundo servido. Ausentes en servidores antiguos. */
   name?: string; x?: number; y?: number; vivo?: boolean;
   /** M4: si puede criar ahora y, si no, la primera causa con las condiciones de la ley (juventud, vejez,
-   * enfriamiento tras su última cría, cuerpo, reserva de alimento, comunidad exigida o techo del gobernador). */
-  fertil?: { ahora: boolean; bloqueo: 'no-vecino' | 'joven' | 'vejez' | 'enfriamiento' | 'cuerpo' | 'reserva' | 'comunidad' | 'techo' | null;
+   * enfriamiento tras su última cría, cuerpo, reserva de alimento, comunidad exigida, natalidad local o techo del gobernador). */
+  fertil?: { ahora: boolean; bloqueo: 'no-vecino' | 'joven' | 'vejez' | 'enfriamiento' | 'cuerpo' | 'reserva' | 'comunidad' | 'techo' | 'natalidad-local' | null;
     faltanPasos?: number; cuerpo?: string[]; reserva: number; necesita: number };
   /** M4: a quién busca si su intención es de cortejo o de crianza (nombre único en el mundo vivo). */
   busca?: { id: string; name: string; motivo: 'cortejo' | 'reunion' | 'prepara' };
@@ -171,8 +171,11 @@ export interface RuntimeStats { stepMs: number; p95StepMs: number; saveMs: numbe
      * `poblacion.intervaloComprobacionTicks` pasos; `continua` = `poblacion.comprobacionContinua` (ventana
      * móvil mirada cada paso, o una comprobación por ventana). `maxima` = `poblacion.maxima` SOLO si limita
      * por debajo del tope anticorrupción `POPULATION_HARD_LIMIT`; ausente = no hay tope propio del mundo
-     * (o un servidor anterior no lo informa). Las tres primeras son opcionales por la misma razón. */
+     * (o un servidor anterior no lo informa). Las tres primeras faltan también cuando rige
+     * `natalidadLocal`; los servidores anteriores pueden omitirlas por completo. */
     ley: { radioPareja: number; radioLugar: number; radioCortejo: number; exigeComunidad: boolean; reserva: number;
+      /** Si es positivo, reemplaza el cupo: reposición diaria local dentro de `radioProvision`. */
+      natalidadLocal?: number; radioProvision?: number;
       cupo?: number; ventana?: number; continua?: boolean; maxima?: number } };
   /** Mismo ritmo que `natalidad`: `conducta.habituacion` del mundo servido (0 = ley apagada), para no afirmar
    * en la interfaz una ley de conducta que ese mundo no aplica. */

@@ -28,17 +28,18 @@ export function decidirTechoLab(poblacion: number, techo: number, presupuestoMs:
 
 /**
  * Cota de población que garantiza el techo de laboratorio. Solo `reproduce()` (src/world/index.ts) añade
- * personas a `world.people`, y solo con `reproductionEnabled`; en un paso nacen como mucho
- * `poblacion.nacimientosPorComprobacion` (su cupo menos los nacidos en la ventana de
- * `intervaloComprobacionTicks`). Así, si antes del paso hay P ≥ N personas, tras él hay ≤ P (ningún
- * nacimiento); si P ≤ N − 1, hay ≤ N − 1 + nacidos del paso ≤ N − 1 + nacimientosPorComprobacion.
+ * personas a `world.people`, y solo con `reproductionEnabled`; con NAT-L nacen como mucho
+ * ⌊fértiles/2⌋ (cada progenitor se usa una vez), y sin ella rige
+ * `poblacion.nacimientosPorComprobacion`. Así, si antes del paso hay P ≥ N personas, tras él hay ≤ P (ningún
+ * nacimiento); si P ≤ N − 1, hay ≤ N − 1 + nacidos del paso. La cota segura de fértiles es P,
+ * porque solo se conoce la población máxima admisible antes del paso, no su edad ni su cuerpo.
  * Por inducción, tras cualquier paso:
  *
- *   población ≤ max(poblaciónInicial, N − 1 + nacimientosPorComprobacion).
+ *   población ≤ max(poblaciónInicial, N − 1 + (α > 0 ? ⌊(N − 1)/2⌋ : cupo)).
  *
  * Es decir: se pasa de N como mucho en los nacidos de UN paso menos uno (los que ya estaban decididos
  * cuando aún había sitio), nunca más.
  */
-export function techoLabCota(techo: number, poblacionInicial: number, nacimientosPorComprobacion: number): number {
-  return Math.max(poblacionInicial, techo - 1 + nacimientosPorComprobacion);
+export function techoLabCota(techo: number, poblacionInicial: number, nacimientosPorComprobacion: number, natalidadLocal = 0): number {
+  return Math.max(poblacionInicial, techo - 1 + (natalidadLocal > 0 ? Math.floor((techo - 1) / 2) : nacimientosPorComprobacion));
 }

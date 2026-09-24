@@ -318,11 +318,11 @@ async function main(): Promise<void> {
         techoLabDetalle: {
           reproduccionActivaFraccion: techoTicksActivos / totalTicks,
           poblacionMaxima: techoPoblacionMaxima,
-          cotaPoblacion: techoLabCota(techoLab, poblacionInicial, params.poblacion.nacimientosPorComprobacion),
+          cotaPoblacion: techoLabCota(techoLab, poblacionInicial, params.poblacion.nacimientosPorComprobacion, params.poblacion.natalidadLocal),
           poblacionContada: 'world.people.length (todas las personas vivas, S e I incluidas), como governReproduction en src/server/app.ts',
         },
       } : {}),
-      instrumentos: instrumentos ? 'si; solo lectura (scripts/lab/instrumentos.ts): conducta por tiempo y comida compartida' : 'no',
+      instrumentos: instrumentos ? 'si; solo lectura (scripts/lab/instrumentos.ts): conducta por tiempo, comida compartida y natalidad local' : 'no',
       seed, params, sha: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
       digest: worldSourceDigest(),
       // Huella del ESTADO final (digestoCanonico de src/world/digesto.ts): con y sin instrumentos

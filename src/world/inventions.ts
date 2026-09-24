@@ -4,6 +4,7 @@ import type { Person, World } from './index.js';
 import { localRandom } from './genetics.js';
 import { tileAt } from './spatial.js';
 import { chunkKey } from './terrain.js';
+import { INTERVALO_ECOLOGIA_TICKS, SED_POR_UNIDAD } from './ecologia-constantes.js';
 import { algunoCerca, filtrarCerca } from './indice-puntos.js';
 import { esMiembro, techoDelArchivo } from './indices.js';
 import { vecinos } from './rejilla.js';
@@ -134,7 +135,7 @@ function constructionContext(world: World, person: Person) {
   return { ...inventionContext(world, person),
     // Drinking lowers thirst by three times the debited water. One full body's
     // dose is a planning reserve; additional demand comes only from people seen.
-    waterDemand: Math.max(1 / 3, nearby.reduce((sum, other) => sum + other.thirst / 3, 0)),
+    waterDemand: Math.max(1 / SED_POR_UNIDAD, nearby.reduce((sum, other) => sum + other.thirst / SED_POR_UNIDAD, 0)),
     foodSurplus: nearby.reduce((sum, other) => sum + Math.max(0, other.inventory - 0.12), 0) };
 }
 
@@ -401,7 +402,7 @@ export function takeWater(world: World, person: Person, requested: number): numb
   if (!Number.isFinite(requested) || requested <= 0 || !esMiembro(world.people, person, world.tick) || person.action !== 'drink'
     || distance(person, person.target) > 0.5 || person.thirst <= 0) return 0;
   const tile = tileAt(world, person); if (!tile) return 0;
-  const needed = Math.min(requested, person.thirst / 3), ambient = Math.min(tile.drinkingWater ?? 0, needed);
+  const needed = Math.min(requested, person.thirst / SED_POR_UNIDAD), ambient = Math.min(tile.drinkingWater ?? 0, needed);
   tile.drinkingWater = (tile.drinkingWater ?? 0) - ambient;
   let taken = ambient;
   for (const structure of functionalNear(world, person, 0.5)) {
@@ -463,7 +464,7 @@ export function repair(world: World, person: Person, structure: StructureView, e
 
 /** Bounded active structures only. Inflow, transfers and irrigation all have explicit debits. */
 export function stepStructures(world: World, _emit: Emit): void {
-  if (world.tick % 10 !== 0) return;
+  if (world.tick % INTERVALO_ECOLOGIA_TICKS !== 0) return;
   for (const structure of world.structures) {
     const tile = tileAt(world, structure); if (!tile || tile.terrain !== 'shelter') continue;
     const a = blueprintAffordances(structure.components);

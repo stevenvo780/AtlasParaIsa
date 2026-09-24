@@ -1,6 +1,7 @@
 import type { Feature, Tile } from '../shared/types.js';
 import { enCuenca } from './agua.js';
 import { TileStore } from './soa/terreno.js';
+import { EVAPORACION_LUZ, EVAPORACION_OSCURIDAD, INTERVALO_ECOLOGIA_TICKS, LUZ_CREPSCULO, RECARGA_LLUVIA, RECARGA_MANANTIAL } from './ecologia-constantes.js';
 
 const clamp = (n: number): number => Math.max(0, Math.min(1, n));
 const TREE_FEATURES = new Set<Feature>(['tree', 'pine', 'palm', 'cactus', 'reeds', 'stump']);
@@ -91,7 +92,7 @@ export class EcosystemKernel {
    * siguiente lluvia).
    */
   step(tiles: Tile[], tick: number, weather: 'clear' | 'rain', phase: string, options?: EcosystemOptions): void {
-    if (tick % 10 !== 0) return;
+    if (tick % INTERVALO_ECOLOGIA_TICKS !== 0) return;
     const decaimientoFertilidad = options?.decaimientoFertilidad ?? 0;
     const seed = options?.seed ?? 0, cuencas = options?.cuencas ?? 1;
     // T112: con `soaTerreno` la foto de `life` y la presencia van al SoA y los vecinos salen por aritmética;
@@ -111,7 +112,7 @@ export class EcosystemKernel {
       // su iteración, antes de que esa misma iteración los reescriba (mismo valor, mismo orden).
       for (let i = 0; i < length; i++) lifeBefore[i] = tiles[i].life ?? 0;
     }
-    const light = phase === 'day' ? 1 : phase === 'night' ? 0 : 0.4;
+    const light = phase === 'day' ? 1 : phase === 'night' ? 0 : LUZ_CREPSCULO;
     for (let i = 0; i < length; i++) {
       const tile = tiles[i];
       // R4: cada campo se lee UNA vez. `terrain`, `biome` y `feature` se leían entre dos y tres
@@ -151,8 +152,8 @@ export class EcosystemKernel {
       // ruido, igual que en la generación, y de todos modos su `drinkingWater` se fuerza a 0 abajo.
       const reservoir = reservoirSource && (terrain === 'water' || enCuenca(seed, tile.x, tile.y, cuencas));
       tile.drinkingWater = biome === 'ocean' ? 0 : clamp(drinkingWater
-        + (reservoir && weather === 'rain' ? 0.008 * (0.4 + fertility * 0.6) : 0)
-        + (reservoir && feature === 'spring' ? 0.002 : 0) - (light ? 0.00015 : 0.00003));
+        + (reservoir && weather === 'rain' ? RECARGA_LLUVIA * (0.4 + fertility * 0.6) : 0)
+        + (reservoir && feature === 'spring' ? RECARGA_MANANTIAL : 0) - (light ? EVAPORACION_LUZ : EVAPORACION_OSCURIDAD));
       if (terrain === 'water') tile.moisture = clamp(moisture + (biome === 'ocean' ? 0.003 : 0) + (weather === 'rain' ? 0.008 : 0));
       // Wood consumes local growth; feature changes still use this tile's old growth.
       if (tick % 100 === 0 && TREE_FEATURES.has(feature ?? 'none') && growth > 0.65

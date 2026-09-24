@@ -28,10 +28,13 @@ export function nacimientosPorIntervalo(history: { tick: number; births: number 
 type Ley = NonNullable<NonNullable<WorldView['performance']>['natalidad']>['ley'];
 
 /** El cupo de `reproduce()` (world/index.ts) y el tope de población, con los números del mundo mostrado.
- * Con un servidor que no los informa no se dice nada: ni que hay cupo ni que no lo hay. */
+ * Con un servidor que no los informa no se afirma una ley que quizá no rija. */
 export function cupoDeNacimientos(ley: Ley): string {
   const partes: string[] = [];
-  if (ley.cupo !== undefined && ley.ventana !== undefined) {
+  if (ley.natalidadLocal !== undefined && ley.natalidadLocal > 0 && ley.radioProvision !== undefined) {
+    partes.push(`Hay natalidad local: alrededor de cada lugar se mide cuánto se reponen el agua y la comida a ${number(ley.radioProvision)} casillas.`
+      + ' Cuanta más gente comparte esos recursos, más tiempo necesitan ambos progenitores antes de otra cría; si no alcanzan, no nace nadie.');
+  } else if (ley.cupo !== undefined && ley.ventana !== undefined) {
     const pasos = `${number(ley.ventana)} ${ley.ventana === 1 ? 'paso' : 'pasos'}`;
     if (ley.cupo === 0) partes.push('Este mundo tiene el cupo de nacimientos en 0: nadie puede nacer.');
     // Con la comprobación continua la ventana es móvil y cuenta los vecinos nacidos en ella que siguen vivos.
@@ -97,6 +100,7 @@ export function fertilidadFicha(detail: Pick<PersonDetail, 'fertil' | 'busca'> |
     : f.bloqueo === 'cuerpo' ? `No: su cuerpo no está listo${f.cuerpo?.length ? ` (${f.cuerpo.join(', ')})` : ''}.`
     : f.bloqueo === 'reserva' ? `No: le falta reserva de alimento (${number(f.reserva, 2)} de ${number(f.necesita, 2)}).`
     : f.bloqueo === 'comunidad' ? 'No: este mundo exige comunidad para criar y no tiene.'
+    : f.bloqueo === 'natalidad-local' ? 'No: la reposición local de agua y comida pide más tiempo entre crías.'
     : f.bloqueo === 'techo' ? 'No: el crecimiento está en pausa por el servidor.' : 'Sin dato.';
   const busca = detail.busca ? `<p class="drawer-note" data-seeking>${detail.busca.motivo === 'cortejo' ? 'Busca a su pareja' : detail.busca.motivo === 'reunion' ? 'Va a reunirse para criar con' : 'Prepara reservas para criar con'}: ${personLink(view, detail.busca.id)}</p>` : '';
   return `<div class="skill-row" data-person-fertility="${f.ahora ? 'si' : esc(f.bloqueo ?? '')}"><span>Puede criar ahora</span><strong>${f.ahora ? 'Sí' : 'No'}</strong></div><p class="drawer-note">${esc(texto)}</p>${busca}`;

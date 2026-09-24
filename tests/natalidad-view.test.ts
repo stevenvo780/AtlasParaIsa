@@ -96,3 +96,17 @@ test('La ley en claro dice el cupo de nacimientos y el tope con los params del m
   const { cupo: _c, ventana: _v, continua: _k, maxima: _m, ...sinCupo } = ley;
   assert.equal(cupoDeNacimientos(sinCupo), '');
 });
+
+test('14: la interfaz explica la natalidad local sin presentar un cupo', () => {
+  const { view } = vista(0);
+  const local = createWorld(51926, parseParams('poblacion.natalidadLocal=1,poblacion.radioProvision=16'));
+  view.performance!.natalidad = resumenVivo(local).natalidad;
+  const ley = view.performance!.natalidad!.ley;
+  assert.match(cupoDeNacimientos(ley), /natalidad local/);
+  assert.match(cupoDeNacimientos(ley), /16 casillas/);
+  const html = seccionNacimientos(view);
+  assert.match(html, /natalidad local/);
+  assert.doesNotMatch(html, /Hay un cupo|cupo de nacimientos/);
+  assert.match(fertilidadFicha({ fertil: { ahora: false, bloqueo: 'natalidad-local', reserva: 0.2, necesita: 0.1 } }, view),
+    /reposición local de agua y comida/);
+});

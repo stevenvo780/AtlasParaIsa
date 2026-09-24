@@ -2,6 +2,7 @@ import type { ContainedWater, MaterialBatch, TechnologyExecution, WaterExecution
 import type { TechnologyActor, TechnologyHost } from './technology.js';
 import type { BodyState } from './body.js';
 import { exertBody, hydrateBody } from './body.js';
+import { SED_POR_UNIDAD } from './ecologia-constantes.js';
 import { appendTechnologyExecution, technologyStock } from './technology-execution.js';
 import { MAX_PENDING_TECHNOLOGY_EXECUTIONS } from './technology-journal.js';
 import { touchKnownRecipe } from './technology-memory.js';
@@ -268,7 +269,7 @@ export function drinkContainedWater(host: TechnologyHost, actor: WaterActor, req
   const item = actor.technology.items.find(item => (item.contents?.water ?? 0) > 0);
   if (!item) return 0;
   assertContainedWater(item.contents, host.tick);
-  const requested = Math.min(requestedQuanta, Math.floor(actor.thirst / 3 * WATER_QUANTA_PER_UNIT));
+  const requested = Math.min(requestedQuanta, Math.floor(actor.thirst / SED_POR_UNIDAD * WATER_QUANTA_PER_UNIT));
   const flow = flowQuantized({ sourceWater: item.contents.water, destinationWater: 0, destinationCapacity: requested,
     requestedQuanta: requested, carryFreeQuanta: requested, elapsedTicks: 1, workAvailable: 1 });
   if (!flow.movedQuanta) return 0;

@@ -144,12 +144,12 @@ test('con el recelo de CONFL (`social.memoriaDisputa`), primero y primeroConFilt
 });
 
 /** Claves declaradas después de e1adaaf que, con su valor por defecto, no actúan (ver cabecera). */
-const CLAVES_POSTERIORES = ['social.memoriaDisputa'] as const;
+const CLAVES_POSTERIORES = ['social.memoriaDisputa', 'conducta.vocacion', 'conducta.vocacionTope'] as const;
 /** Quitar una clave del hash sólo es legítimo si con el valor que tiene no actúa (0). */
 function clavesPosterioresApagadas(params: WorldParams): void {
   for (const clave of CLAVES_POSTERIORES) {
     const [seccion, hoja] = clave.split('.') as [string, string];
-    assert.equal((params as unknown as Record<string, Record<string, unknown>>)[seccion]![hoja], 0, `${clave} = 0: no actúa`);
+    assert.equal((params as unknown as Record<string, Record<string, unknown>>)[seccion]![hoja], clave === 'conducta.vocacionTope' ? 0.9 : 0, `${clave}: no actúa`);
   }
 }
 

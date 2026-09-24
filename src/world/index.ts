@@ -13,7 +13,7 @@ import { materializeAnimals, stepAnimals, harvestAt, type Animal } from './anima
 import { advanceNeeds } from './needs.js';
 import { assimilateFood, exertBody, hydrateBody, restBody } from './body.js';
 import { CRECIMIENTO_COMIDA, HAMBRE_POR_PASO, HAMBRE_POR_UNIDAD, INTERVALO_ECOLOGIA_TICKS, INTERVALO_TIEMPO_TICKS, LUZ_CREPSCULO, PROB_LLUVIA, SED_POR_PASO, SED_POR_UNIDAD } from './ecologia-constantes.js';
-import { hacinamientoLocal, intervaloCumplido } from './natalidad.js';
+import { hacinamientoLocal, intervaloCumplido, presionLocal, observadorNatalidad } from './natalidad.js';
 import { defaultBlueprint, constructionCost, constructionOpportunity, inventionOpportunity, invent, completeConstruction, stepStructures, repairOpportunity, repair, facilityRestQuality, recordFacilityRest, foodAvailable, takeFood, waterAvailable, takeWater, REST_FATIGUE_RATE, REST_ENERGY_RATE, BROKEN_CONDITION } from './inventions.js';
 import type { AnimalDynamics, BlueprintView, StructureView, InventionDynamics } from '../shared/life.js';
 import { POPULATION_HARD_LIMIT } from '../shared/life.js';
@@ -32,6 +32,7 @@ import { DEFAULT_PARAMS, MAX_FOUNDER_AGE_TICKS, paramsOf, setParams, limitsOf, t
 import { algunoCerca, filtrarCerca, primeroCerca } from './indice-puntos.js';
 import { conRejilla, personaMovida, vecinos } from './rejilla.js';
 export { bindWorldContext, tileAt, normalizeViewport, worldContext } from './spatial.js';
+export { demandaDiaria } from './natalidad.js';
 export type { WorldContext } from './spatial.js';
 
 // V9 accounts for an earlier visible forager when planning finite family reserves.
@@ -405,7 +406,7 @@ function drinkingBody(world: World, person: Person, point: Point) {
   return body;
 }
 
-function bodilyNeedRates(world: World, tile: Tile, physiology: ReturnType<typeof demographicTraits>) {
+export function bodilyNeedRates(world: World, tile: Tile, physiology: ReturnType<typeof demographicTraits>) {
   return { hunger: HAMBRE_POR_PASO * physiology.foodDemand, thirst: (SED_POR_PASO + (tile.biome === 'desert' ? 0.0002 : 0)) * physiology.waterDemand,
     energy: 0.00007, stressEnergy: 0.00015, fatigue: 0.00009 + (world.weather === 'rain' && tile.terrain !== 'shelter' ? 0.0001 : 0) };
 }
@@ -1359,8 +1360,12 @@ function reproduce(world: World): void {
       const here = primeroCerca(world.places, a, pop.radioLugar + 1, p => distance(a, p) <= pop.radioLugar);
       if (!here) continue;
       const x = ley > 0 ? xDe(here) : 0;
-      if (ley > 0 && !intervaloCumplido(world, a, x)) continue;
-      const b = chooseReproductivePartner(world, a, vecinos(world, a, pop.radioPareja + 1, p => match(a, p) && (ley === 0 || intervaloCumplido(world, p, x)), 'reproduce'), ELECCION_POR_AFINIDAD);
+      if (ley > 0 && !intervaloCumplido(world, a, x)) { observadorNatalidad()?.bloqueo(); continue; }
+      const b = chooseReproductivePartner(world, a, vecinos(world, a, pop.radioPareja + 1, p => {
+        if (!match(a, p)) return false;
+        if (ley > 0 && !intervaloCumplido(world, p, x)) { observadorNatalidad()?.bloqueo(); return false; }
+        return true;
+      }, 'reproduce'), ELECCION_POR_AFINIDAD);
       if (!b) continue;
       if (!ELECCION_POR_AFINIDAD) { pair = { a, b }; place = here; break; }
       const afinidad = pairAffinity(a, b, pop.radioPareja), mejor = pair ? pairAffinity(pair.a, pair.b, pop.radioPareja) : -Infinity;
@@ -1370,6 +1375,11 @@ function reproduce(world: World): void {
     }
     if (!pair || !place) break;
     const { a, b } = pair;
+    if (observadorNatalidad()) {
+      // CTRL se sondea sólo tras decidir la pareja. La sonda no participa en el embudo.
+      const presion = presionLocal(world, place, pop.radioProvision, ley > 0 ? ley : 1);
+      observadorNatalidad()?.nacimiento(ley > 0 ? xDe(place) : presion.x, presion.limitante);
+    }
     const serial=world.birthCounter+1, id=`descendant-${serial}`;
     if(!Number.isSafeInteger(serial)||[...world.people,...world.legacy,...world.retiredLegacy].some(p=>p.id===id)) throw new Error('La identidad de un nacimiento ya existe; no se gastaron reservas.');
     const genome=inheritGenome(world.seed,id,[a,b],DEFAULT_MUTATION_RATE*paramsOf(world).genes.tasaMutacion); world.birthCounter=serial;

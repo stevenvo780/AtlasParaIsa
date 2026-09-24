@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createWorld, phaseAt, TICKS_PER_DAY } from '../src/world/index.js';
+import { createWorld, demandaDiaria, phaseAt, TICKS_PER_DAY } from '../src/world/index.js';
 import { demographicTraits } from '../src/world/demography.js';
 import { EcosystemKernel } from '../src/world/ecosystem-kernel.js';
 import { enCuenca } from '../src/world/agua.js';
-import { capacidadLocal, hacinamientoLocal, intervaloCumplido, reposicionLocal } from '../src/world/natalidad.js';
+import { hacinamientoLocal, intervaloCumplido, reposicionLocal, reposicionTerritorioOcupado } from '../src/world/natalidad.js';
 import { parseParams } from '../src/world/params.js';
 import type { Tile } from '../src/shared/types.js';
 
@@ -27,7 +27,7 @@ test('6: el intervalo empieza exactamente en ceil(T/(1−x)); x≥1 y K=0 bloque
   assert.equal(intervaloCumplido(world, p, 1), false);
   assert.equal(intervaloCumplido(world, p, Infinity), false);
   world.tiles = [tile(0, 0, { feature: 'none', moisture: 0, vegetation: 0 })];
-  world.people = [p];
+  p.x = p.y = 0; world.people = [p];
   assert.equal(hacinamientoLocal(world, { x: 0, y: 0 }, 4, 1), Infinity);
 });
 
@@ -43,8 +43,7 @@ test('7 y 10: más consumidores retrasan; manantial y fertilidad ayudan; fuentes
   const x2 = hacinamientoLocal(world, c, 4, 1);
   assert.ok(x2 > x1);
   world.people.push({ ...p, id: 'S-local', role: 'S' }, { ...p, id: 'I-local', role: 'I' });
-  const K = capacidadLocal(base, 1);
-  assert.ok(Math.abs(hacinamientoLocal(world, c, 4, 1) - x2 - 2 / K) < 1e-12);
+  assert.ok(Math.abs(hacinamientoLocal(world, c, 4, 1) - 2 * x2) < 1e-12);
   world.people = [];
   world.tiles.push(tile(1, 0));
   assert.ok(reposicionLocal(world, c, 4).agua > base.agua, 'una segunda charca en cuenca añade agua');
@@ -72,6 +71,26 @@ test('7 y 10: más consumidores retrasan; manantial y fertilidad ayudan; fuentes
   // Una estructura rota jamás capta lluvia.
   world.structures = [structure];
   assert.equal(reposicionLocal(world, c, 4).agua, 0);
+});
+
+test('la sed diaria del desierto es 0,00065/0,00045 de la pradera', () => {
+  const world = escena(), p = createWorld(42).people[0]!;
+  p.x = p.y = 0; world.people = [p];
+  const pradera = demandaDiaria(world, p).agua;
+  world.tiles[0]!.biome = 'desert';
+  assert.ok(Math.abs(demandaDiaria(world, p).agua / pradera - 0.00065 / 0.00045) < 1e-12);
+});
+
+test('sin consumidores x=0; la unión ocupada cuenta una cisterna compartida una vez', () => {
+  const world = escena();
+  assert.equal(hacinamientoLocal(world, { x: 0, y: 0 }, 4, 1), 0);
+  world.tiles[0] = tile(0, 0, { terrain: 'shelter', feature: 'none' });
+  world.structures = [{ ...createWorld(42).structures[0]!, x: 0, y: 0, condition: 1,
+    components: ['frame', 'roof', 'cistern'] }];
+  const una = reposicionTerritorioOcupado(world, [{ x: 0, y: 0 }], 1);
+  const dos = reposicionTerritorioOcupado(world, [{ x: 0, y: 0 }, { x: 1, y: 0 }], 1);
+  assert.ok(una.agua > 0);
+  assert.deepEqual(dos, una);
 });
 
 test('11: una charca simulada por el kernel sigue la recarga media esperada', () => {

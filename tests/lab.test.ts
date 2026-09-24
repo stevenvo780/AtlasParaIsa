@@ -96,14 +96,14 @@ const CLAVES_DIA_SIN_GOBERNADOR = new Set([
   'ventanaActividad', 'vecinosMortales', 'fundadoresMortalesVivos', 'generacionesMortalesVivas',
   'recetasDistintasEnUso', 'recetasDistintasFabricadas', 'usosUtiles', 'beneficioUso',
   'usosDeInventorAjeno', 'usosSinAutorResuelto', 'fraccionUsoAjeno', 'usosConEnsenanzaRecordada',
-  'cooperacionAcumuladaPorTipo', 'otrasCooperacionesAcumuladas', 'conflictosAcumulados',
+  'cooperacionAcumuladaPorTipo', 'otrasCooperacionesAcumuladas', 'conflictosAcumulados', 'faunaTotal',
   'p50Ms', 'p95Ms', 'rss',
 ]);
 // Instrumentos de medida (scripts/lab/instrumentos.ts, ronda INSTR 2026-09-22): activos por defecto,
 // añaden estas claves (y `foodShared` dentro de `cooperacionAcumuladaPorTipo`); con
 // `--instrumentos no` el conjunto vuelve a ser EXACTAMENTE `CLAVES_DIA_SIN_GOBERNADOR`
 // (tests/instrumentos-lab.test.ts).
-const CLAVES_INSTRUMENTOS = ['diversidadConductaTiempo', 'diversidadConductaTiempoComponentes', 'diversidadConductaActiva', 'diversidadConductaActivaComponentes', 'diversidadConductaComponentes', 'diversidadConductaVentana', 'diversidadConductaVentanaComponentes', 'personasVentana', 'repartoTiempoPorAccion', 'repartoActividadPorAccion', 'vocacionVarianza', 'vocacionEntropiaArgmax', 'vocacionCoincidencia', 'diversidadConductaVentanaGen1', 'approachHogar', 'maderaMediaAdultos', 'piedraMediaAdultos', 'muertesMenores8Dias', 'cambiosHogar', 'diversidadPerfilesJS', 'linajesVivos', 'linajesHerfindahl'] as const;
+const CLAVES_INSTRUMENTOS = ['natalidadLocal', 'diversidadConductaTiempo', 'diversidadConductaTiempoComponentes', 'diversidadConductaActiva', 'diversidadConductaActivaComponentes', 'diversidadConductaComponentes', 'diversidadConductaVentana', 'diversidadConductaVentanaComponentes', 'personasVentana', 'repartoTiempoPorAccion', 'repartoActividadPorAccion', 'vocacionVarianza', 'vocacionEntropiaArgmax', 'vocacionCoincidencia', 'diversidadConductaVentanaGen1', 'approachHogar', 'maderaMediaAdultos', 'piedraMediaAdultos', 'muertesMenores8Dias', 'cambiosHogar', 'diversidadPerfilesJS', 'linajesVivos', 'linajesHerfindahl'] as const;
 const CLAVES_DIA_POR_DEFECTO = new Set<string>([...CLAVES_DIA_SIN_GOBERNADOR, ...CLAVES_INSTRUMENTOS]);
 const CLAVES_GOBERNADOR_SERVIDOR = ['reproduccionActivaFraccion', 'p95GobernadorFinal', 'cloneMsP50', 'saveMsP50', 'indiceDiversidad', 'cooperacionPorTipo', 'comunidades', 'rasgosPorGeneracion', 'varianzaGenetica'] as const;
 

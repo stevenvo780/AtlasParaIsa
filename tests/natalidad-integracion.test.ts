@@ -4,10 +4,11 @@ import { cloneWorld, createWorld, puntoDeRestauracion, stepWorld, type World } f
 import { digestoCanonico } from '../src/world/digesto.js';
 import { digestoSin } from '../scripts/lab/rendimiento.js';
 import { DEFAULT_PARAMS, HISTORICAL_PARAMS, paramsOf, parseParams, setParams } from '../src/world/params.js';
-import { capacidadLocal, hacinamientoLocal, reposicionLocal } from '../src/world/natalidad.js';
+import { hacinamientoLocal, setObservadorNatalidad } from '../src/world/natalidad.js';
 import { tileAt } from '../src/world/spatial.js';
 import { initialDemography } from '../src/world/demography.js';
 import { InstrumentosConducta } from '../scripts/lab/instrumentos.js';
+import { decidirTechoLab, techoLabCota } from '../scripts/lab/techo-lab.js';
 import { encodeSnapshot, readSnapshotParams } from '../src/server/snapshot.js';
 
 const REFERENCIAS_1200 = {
@@ -119,14 +120,25 @@ test('8: un cambio lejano al lugar y a la pareja no altera la decisión local', 
 
 test('9: la segunda pareja ve la cría de la primera en el mismo lugar y paso', () => {
   const world = escena(2, 1), centro = world.places[0]!;
-  const kBase = capacidadLocal(reposicionLocal(world, centro, 16), 1);
-  const alfa = 6.5 / kBase; // S, I y cuatro adultos: x=6/6,5; una cría lleva x a 7/6,5.
+  const alfa = hacinamientoLocal(world, centro, 16, 1) / 0.92;
   assert.ok(alfa > 0 && alfa <= 4);
   setParams(world, parseParams(`poblacion.natalidadLocal=${alfa}`, paramsOf(world)));
   assert.ok(hacinamientoLocal(world, centro, 16, alfa) < 1);
   stepWorld(world);
   assert.equal(world.birthCounter, 1);
   assert.ok(hacinamientoLocal(world, centro, 16, alfa) >= 1);
+});
+
+test('techoLabCota acota un paso con natalidad local y nacimientos múltiples', () => {
+  const world = escena(5, 1), inicial = world.people.length, techo = 16;
+  world.reproductionEnabled = decidirTechoLab(inicial, techo, 5000);
+  assert.equal(world.reproductionEnabled, true);
+  stepWorld(world);
+  assert.ok(world.birthCounter > 2, 'NAT-L puede superar el cupo CTRL en un paso');
+  const cota = techoLabCota(techo, inicial, paramsOf(world).poblacion.nacimientosPorComprobacion, 1);
+  assert.ok(world.people.length <= cota, `${world.people.length} > ${cota}`);
+  world.reproductionEnabled = decidirTechoLab(world.people.length, techo, 5000);
+  if (world.people.length >= techo) assert.equal(world.reproductionEnabled, false);
 });
 
 test('12: los dos parámetros se validan en sus bordes', () => {
@@ -141,12 +153,45 @@ test('13: la observación de natalidad local conserva el digesto del mundo', () 
   const antes = digestoCanonico(world);
   instrumento.antesDelPaso(world);
   assert.equal(digestoCanonico(world), antes);
-  stepWorld(world); stepWorld(control);
+  stepWorld(world); instrumento.cerrar(); stepWorld(control);
   instrumento.despuesDelPaso(world);
   assert.equal(digestoCanonico(world), digestoCanonico(control));
   const metricas = instrumento.metricasDia(world);
   assert.equal(digestoCanonico(world), digestoCanonico(control));
-  assert.equal(metricas.natalidadLocal?.nacimientosDia, world.birthCounter);
-  assert.ok(metricas.natalidadLocal!.kOcupado > 0);
-  assert.equal(metricas.natalidadLocal!.limitante.agua + metricas.natalidadLocal!.limitante.comida, world.birthCounter);
+  assert.equal(metricas.natalidadLocal.nacimientosDia, world.birthCounter);
+  assert.ok(metricas.natalidadLocal.kOcupado.agua > 0);
+  assert.ok(metricas.natalidadLocal.kOcupado.comida > 0);
+  assert.equal(metricas.natalidadLocal.limitante.agua + metricas.natalidadLocal.limitante.comida, 1);
+  instrumento.cerrar();
+});
+
+for (const alfa of [0, 1]) test(`observador conserva el digesto en 1200 pasos con alfa=${alfa}`, { timeout: 600000 }, () => {
+  const inicial = createWorld(42, parseParams(`poblacion.natalidadLocal=${alfa}`));
+  const observado = cloneWorld(inicial), control = cloneWorld(inicial);
+  const instrumento = new InstrumentosConducta(observado);
+  try {
+    for (let n = 0; n < 1200; n++) {
+      instrumento.antesDelPaso(observado); stepWorld(observado); instrumento.despuesDelPaso(observado);
+    }
+    instrumento.cerrar();
+    for (let n = 0; n < 1200; n++) stepWorld(control);
+    assert.equal(digestoCanonico(observado), digestoCanonico(control));
+  } finally { instrumento.cerrar(); }
+});
+
+test('CTRL con sonda pasiva registra xNacimientos sin alterar los nacimientos', () => {
+  const observado = escena(20, 0), control = cloneWorld(observado);
+  const instrumento = new InstrumentosConducta(observado);
+  try {
+    stepWorld(observado);
+    instrumento.despuesDelPaso(observado);
+    setObservadorNatalidad(null); stepWorld(control);
+    assert.equal(observado.birthCounter, control.birthCounter);
+    assert.deepEqual(observado.people.filter(p => p.bornAt === observado.tick).map(p => p.genome.parents),
+      control.people.filter(p => p.bornAt === control.tick).map(p => p.genome.parents));
+    const metricas = instrumento.metricasDia(observado).natalidadLocal;
+    assert.equal(metricas.nacimientosDia, observado.birthCounter);
+    assert.notEqual(metricas.xNacimientos.p50, null);
+    assert.equal(metricas.bloqueadasPorLey, 0);
+  } finally { instrumento.cerrar(); }
 });

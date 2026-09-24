@@ -370,7 +370,7 @@ export const ALCANCES_SERIALES: readonly AlcanceSerial[] = [
   s('convivencia.fision', 'comunidades', 'lugares', 'actor', 7, 'society.ts', 'reviseByCohabitation', ['algunoCerca(world.places, person, 8, place => distance(person, place) <= 7)']),
   s('reproduccion.lugar', 'reproduccion', 'lugares', 'actor', { param: 'poblacion.radioLugar' }, 'index.ts', 'reproduce', ['primeroCerca(world.places, a, pop.radioLugar + 1, p => distance(a, p) <= pop.radioLugar)']),
   s('reproduccion.pareja', 'reproduccion', 'personas', 'actor', { param: 'poblacion.radioPareja' }, 'index.ts', 'reproduce',
-    ["const b = chooseReproductivePartner(world, a, vecinos(world, a, pop.radioPareja + 1, p => match(a, p) && (ley === 0 || intervaloCumplido(world, p, x)), 'reproduce'), ELECCION_POR_AFINIDAD);", 'distance(a, b) <= pop.radioPareja'],
+    ["const b = chooseReproductivePartner(world, a, vecinos(world, a, pop.radioPareja + 1, p => {", 'distance(a, b) <= pop.radioPareja'],
     { nota: 'Pareja (≤ radioPareja) y lugar (≤ radioLugar) se miden los dos desde `a`: no se componen.' }),
   s('reproduccion.provisionTeselas', 'reproduccion', 'teselas', 'reproduccion.lugar', { param: 'poblacion.radioProvision', activa: 'poblacion.natalidadLocal' }, 'natalidad.ts', 'reposicionLocal',
     ['const t = tileAt(world, { x: cx + dx, y: cy + dy });', 'if (dx * dx + dy * dy > radio * radio) continue;'],
@@ -379,8 +379,10 @@ export const ALCANCES_SERIALES: readonly AlcanceSerial[] = [
     ['filtrarCerca(world.structures, centro, radio + 1, s => (s.x - centro.x) ** 2 + (s.y - centro.y) ** 2 <= radio * radio']),
   s('reproduccion.provisionTecho', 'reproduccion', 'teselas', 'reproduccion.lugar', { param: 'poblacion.radioProvision', activa: 'poblacion.natalidadLocal' }, 'natalidad.ts', 'reposicionLocal',
     ["tileAt(world, s)?.terrain === 'shelter'"]),
-  s('reproduccion.provisionPersonas', 'reproduccion', 'personas', 'reproduccion.lugar', { param: 'poblacion.radioProvision', activa: 'poblacion.natalidadLocal' }, 'natalidad.ts', 'hacinamientoLocal',
-    ["vecinos(world, centro, radio + 1, p => (p.x - centro.x) ** 2 + (p.y - centro.y) ** 2 <= radio * radio, 'natalidadLocal')"]),
+  s('reproduccion.provisionPersonas', 'reproduccion', 'personas', 'reproduccion.lugar', { param: 'poblacion.radioProvision', activa: 'poblacion.natalidadLocal' }, 'natalidad.ts', 'presionLocal',
+    ["vecinos(world, centro, radio + 1,", "'natalidadLocal'))"]),
+  s('reproduccion.demandaTesela', 'reproduccion', 'teselas', 'reproduccion.lugar', { param: 'poblacion.radioProvision', activa: 'poblacion.natalidadLocal' }, 'natalidad.ts', 'demandaDiaria',
+    ['tileAt(world, person)!'], { nota: 'La fisiología se evalúa en la tesela de cada consumidor del disco local.' }),
 ];
 
 /** Lecturas que no dependen de dónde está nadie: colecciones acotadas que cada región recibe enteras y

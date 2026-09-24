@@ -56,3 +56,46 @@ Manipulación y acoplamiento:
 - Selección de linajes: una vocación ventajosa podría dominar y bajar la varianza; se mide con la entropía del argmax.
 - El juguete reprodujo el éxito de «vocación + práctica» que el mundo refutó, así que sus tasas son cotas superiores.
 - Tras dos ciclos fallidos de F2 se vuelve a Steven con los datos, sin tercer ciclo (plan maestro).
+
+## Revisión 1 (antes de correr ningún brazo) — sustituye las reglas de decisión y las puertas de arriba
+
+Motivo: crítica adversarial de GPT-6 Astra (23-09 ~20:00; veredicto «rehacer las reglas de decisión antes de correr»). Se conservan las leyes, los cuatro brazos, las semillas, la condición y C8 congelado. Todo lo de esta sección prevalece sobre las secciones «Puerta del día 20» y «Decisión del día 60» de arriba.
+
+**Declaración sobre el control.** CTRL (reglas 11, `main` 2ee2658) se lanzó a las 19:18. Al escribir el preregistro original y esta revisión NO se leyó ningún dato suyo: solo se listó un directorio (existía `dia-022.json` de CTRL-2001 al hacer el commit 4726307). Como CTRL no tiene los instrumentos nuevos, se repite como **CTRL2** sobre la rama de las leyes con las leyes a 0 (misma dinámica), y el CTRL original sirve como comprobación de identidad a 60 días: todas sus claves de `dia-NNN.json` (fuera de p50Ms, p95Ms, rss y las claves nuevas) deben ser iguales a las de CTRL2, día a día. Las comparaciones con el control usan CTRL2.
+
+**Congelación.** Antes de leer cualquier dato de VOC, HOG, VOCHOG o CTRL2 se congelan en `main`: el commit de la rama de las leyes (manifiesto: sha, parámetros exactos por brazo, orden de lanzamiento) y un evaluador ejecutable de esta decisión (`scripts/lab/decision-c8-linaje.mts`), probado con casos sintéticos contradictorios. Solo hay dos cortes: día 20 (seguridad) y día 60 (decisión). Una réplica que falle por causa técnica se repite idéntica (es determinista); si no se puede reproducir, cuenta como fallo.
+
+**Instrumentos (definiciones exactas).** Cohorte W(d) = los mortales que cuentan para `diversidadConductaVentana` el día d (vivieron el día completo). Oficios de linaje L = oficios de `RASGO_DEL_OFICIO` sin `explore` (10).
+- `vocacionVarianza`(d) = media sobre k ∈ L de la varianza poblacional (divisor n) de `vocacion[k]` entre los vivos con campo al final del día; null si n < 2.
+- `vocacionEntropiaArgmax`(d) = −Σ p·ln p / ln|L| de la distribución del argmax (empate: el primero en el orden de L) entre los vivos con campo; null si nadie.
+- `vocacionCoincidencia`(d) = entre las personas de W(d) con campo, fracción cuyo oficio dominante del día (más ticks entre L; empate: el primero en L; sin ticks en L = no coincide) es su argmax. CTRL2 no tiene vocación: su valor es null y NO se usa como base.
+- `diversidadConductaVentanaGen1`(d) = la función oficial del índice sobre W(d) ∩ {generación ≥ 1}.
+- `approachHogar`(d) = ticks de `approach` con destino de hogar (candidato de `settlementOpportunity`) / ticks sin `rest`, sumados sobre W(d).
+- `maderaMediaAdultos`(d), `piedraMediaAdultos`(d) = media de `materials.wood`/`materials.stone` de los mortales vivos con edad ≥ 5 días al final del día.
+- `muertesMenores8Dias` = acumulado de muertes de mortales con < 8 días de edad.
+- `cambiosHogar`(d) = número de veces en el día que un mortal adopta un hogar distinto o pierde el suyo (dos contadores).
+- `diversidadPerfilesJS`(d) = media, sobre pares de W(d), de la distancia de Jensen-Shannon (base 2) entre sus repartos de tiempo por acción sin `rest` (sin argmax ni componentes one-hot). Comprobación secundaria de diversidad sustantiva.
+- Linajes: para cada mortal, su raíz = el fundador al que se llega siguiendo al progenitor transmisor. `linajesVivos`(d) = número de raíces con descendientes vivos; `linajesHerfindahl`(d) = Σ (cuota de vivos por raíz)².
+
+**Evaluación por semilla.** C1–C8 con el evaluador de la etiqueta, forzando `--diversidad-campo` a la ventana. Gen1: la misma función de C8 (Mann-Kendall unilateral, Hamed-Rao + AR(1), p < 0,05, días 5..60, subida = pendiente de Sen × 55 ≥ 0,02) sobre `diversidadConductaVentanaGen1`. Tardía: pendiente de Sen de la ventana oficial en los días 20..60 > 0.
+- **Éxito de semilla** (booleano conjunto) = cumple los 8 criterios Y Gen1 Y tardía.
+- **Semilla segura en el día d** (booleano conjunto frente a CTRL2 en la misma semilla) = no extinguida Y nacimientos acumulados ≥ 0,8× CTRL2 Y (muertes con < 8 días / nacimientos) ≤ 1,5× la razón de CTRL2 + 0,02 Y cooperaciones de los días d−9..d ≥ 0,6× CTRL2 (0,5× en el día 60). Si CTRL2 se extingue en esa semilla, la semilla solo exige no extinguirse.
+
+**Día 20 (único corte intermedio).** Un brazo se detiene si hay más de 3 semillas no seguras (menos de 9/12 seguras). Manipulación y acoplamiento (varianza, coincidencia, madera, ganancia de la ventana) se registran como diagnóstico y NO detienen: su falta de potencia no refuta el mecanismo.
+
+**Día 60 — función de decisión por brazo, con precedencia (cada brazo recibe una sola salida).**
+1. DATOS INCOMPLETOS: falta un `dia-060.json` que no sea por extinción, o un campo requerido → se repite la réplica; si no se puede, cuenta como fallo.
+2. INSEGURO: menos de 9/12 semillas seguras en el día 60, o ≥ 2 extinciones más que CTRL2 → refutado por seguridad (no adoptable, sea cual sea C8).
+3. ÉXITO EN PANEL: éxito de semilla en ≥ 7/12.
+4. En cualquier otro caso → NO ÉXITO (sin categoría «inconcluso» ni rescate). Se registra como refutado si el éxito de semilla es ≤ 4/12.
+VOCHOG hereda ambas: si en VOCHOG `approachHogar` de los días 46–60 no baja al menos 0,02 frente a CTRL2 en ≥ 5/12 semillas, se informa que el componente HOG no actuó.
+
+**Fuera de muestra (confirmación única).** Si uno o más brazos obtienen ÉXITO EN PANEL, se elige UNO antes de abrir 2013–2016: el de más éxitos de semilla; en empate, el más simple (VOC, después HOG, después VOCHOG). Se corren ese brazo y CTRL2 en 2013–2016 y la adopción exige éxito de semilla en ≥ 3/4 Y las 4 seguras. No se prueba ningún otro candidato en esas semillas.
+
+**Contraste frente al control (para atribuir el efecto a la ley).** Diferencia pareada por semilla de la subida de C8 (Sen × 55, días 5..60): brazo − CTRL2. «Mejora atribuible» si la diferencia es > 0 en ≥ 11/12 (prueba de signos unilateral, p = 0,0032 < 0,05/3). Además se informa la estimación factorial (VOC, HOG, interacción) con las 12 semillas. Cumplir terminado y atribuir la mejora son afirmaciones distintas y se informan por separado.
+
+**Multiplicidad, con sus supuestos.** Si cada semilla tuviera, bajo la hipótesis nula, una probabilidad q de un falso «cumple» de C8 (calibración: q = 0,04–0,07 con series planas AR(1)), P(≥ 7 de 12) = 1,1·10⁻⁷ a 4,8·10⁻⁶ por brazo, y la cota de la unión para tres brazos es ≤ 1,4·10⁻⁵. Esa q viene de series sintéticas: no es una garantía para estas poblaciones. El panel acredita estas 12 semillas en esta condición; generalizar exige el fuera de muestra.
+
+**Alcance de las conclusiones.** Todo resultado vale para reglas 11 en la condición pública con cupo global de 40 nacimientos/día y sin gobernador activo. «Deriva neutra» solo se afirma si la concentración de linajes (`linajesHerfindahl`) no sube frente a CTRL2 y la subida de la ventana aparece también estratificando por generación. «Conducta cada vez más diversa» solo se afirma si `diversidadPerfilesJS` también sube (Sen de los días 5..60 > 0) en ≥ 7/12 y, para «sostenida al final», si su pendiente de Sen en los días 35..60 es > 0 en ≥ 7/12. Para HOG, «reubicación productiva» exige `cambiosHogar` > CTRL2 y madera/piedra de los adultos ≥ CTRL2, además de menos `approachHogar`.
+
+**Presupuesto.** Este ciclo prueba exactamente estos tres brazos. Un segundo ciclo (el último antes de volver a Steven) es otro preregistro con semillas nuevas.

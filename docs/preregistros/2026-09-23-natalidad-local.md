@@ -109,3 +109,10 @@ Motivo: revisión de la ley ya fusionada (workflow de 5 lentes, 19 agentes; cada
 2. **faunaTotal.** Nunca incluía la fauna dormida (el guardado vacía `retiredChunks` antes de medir). Ahora: animales vivos activos + el último censo vivo de cada chunk retirado que sigue inactivo, tomado antes de cada guardado.
 3. **Mecanismo simétrico.** El evaluador aceptaba «brecha(NAT) > 0» cuando CTRL no tenía 20 días válidos; ese umbral no estaba en este preregistro (lo introdujo el encargo del evaluador). Ahora los dos brazos necesitan ≥ 20 días válidos; si no, la semilla no cumple mecanismo.
 4. **Definición declarada de `bloqueadasPorLey`** (hallazgo no confirmado, pero la definición se fija aquí): cuenta evaluaciones, no parejas. Cada `a` apta y con lugar que la ley rechaza por intervalo (aunque no tenga pareja posible) y cada candidato `b` que pasó `match` pero no el intervalo; las reevaluaciones del mismo paso vuelven a contar. «La ley actúa» (≥ 15 de 31 días con > 0) significa que hubo fértiles frenados por hacinamiento.
+
+## Manifiesto de la Etapa 1 (congelado antes de lanzar; 24-09 ~01:40)
+
+- Código de las réplicas: `de72ab4` (`main`, con la ley, las Revisiones 1 y 2 y el evaluador), en el worktree `anexo/worktrees/lab-nat` (detached). Evaluador: `scripts/lab/decision-natalidad.mts --etapa 1` en ese mismo commit.
+- Parámetros comunes: `persistencia.cadaTicks=300,limites.teselasActivas=1303552,limites.chunks=5092,limites.fauna=7821312` (límites del anfitrión) y `--techo-lab 5000`; 20 días; semillas 4101–4104. Brazos: CTRL = comunes; NAT = comunes + `poblacion.natalidadLocal=1,poblacion.radioProvision=16`; NATR12 y NATR24 = ídem con R = 12 y 24 (descriptivos). Lanzador: `datos-lab/lanzar-nat1.sh` (salida `datos-lab/nat1/<BRAZO>-<semilla>/`).
+- Máquina: torre, CPUs 1-15,17-31 (el 0/16 queda para el gemelo del público), 16 réplicas a la vez, nice 19.
+- Identidad previa: la réplica CTRL (α = 0) de `de72ab4` y la de `d2ebf11` (src idéntico a `main` antes de la ley) en la semilla 4001 dan `dia-001/002.json` iguales en las 53 claves comunes (solo añaden `natalidadLocal` y `faunaTotal`), fuera de p50Ms, p95Ms y rss.

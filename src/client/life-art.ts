@@ -6,7 +6,7 @@ export interface TreeForm {
 }
 
 /** A cell is a resource patch, not a census of trees. One glyph retains every woody patch. */
-export function treeForm(tile: Tile): TreeForm | null {
+export function treeForm(tile: Tile, edgeFraction = 1): TreeForm | null {
   if (tile.terrain === 'water' || tile.terrain === 'shelter' || !(tile.wood !== undefined && tile.wood > .05)) return null;
   if (tile.feature && tile.feature !== 'tree' && tile.feature !== 'pine' && tile.feature !== 'palm') return null;
   const bounded = (n: number) => Math.max(0, Math.min(1, n));
@@ -14,12 +14,13 @@ export function treeForm(tile: Tile): TreeForm | null {
   const growth = bounded(tile.growth ?? tile.vegetation), vegetation = bounded(tile.vegetation);
   const kind = tile.feature === 'pine' || tile.feature === 'palm' ? tile.feature : 'tree';
   const variant = (Math.abs(tile.variety ?? 0) + (tile.biome === 'wetland' ? 2 : tile.biome === 'grassland' ? 1 : 0)) % 4;
+  const edge = Math.max(.4, bounded(edgeFraction));
   return {
     kind,
     // Root spacing comes from real stock distribution, not omitted trees.
     // Mature forms retain roughly 2–3 standing human heights (14 art pixels).
-    height: Math.min(44, 12 + Math.round(stock * (15 + growth * 14 + (kind === 'pine' ? 3 : variant)) / 2) * 2),
-    width: 6 + Math.round(stock * (5 + vegetation * 7) / 3) * 3,
+    height: Math.round(Math.min(44, 12 + Math.round(stock * (15 + growth * 14 + (kind === 'pine' ? 3 : variant)) / 2) * 2) * edge),
+    width: Math.round((6 + Math.round(stock * (5 + vegetation * 7) / 3) * 3) * edge),
     foliage: Math.round(growth * vegetation * 3),
     variant,
   };

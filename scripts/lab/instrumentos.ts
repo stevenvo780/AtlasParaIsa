@@ -71,6 +71,30 @@ export function sinDescanso(ticks: Readonly<Record<string, number>>): Record<str
   return activa;
 }
 
+/** Media de la distancia de Jensen-Shannon entre perfiles activos; es la raíz de la
+ * divergencia JS en base 2, NO la divergencia. Los perfiles sin ticks activos no forman pares. */
+export function diversidadPerfilesJS(perfiles: readonly Readonly<Record<string, number>>[]): number | null {
+  const accionesActivas = ACCIONES.filter(accion => accion !== ACCION_INACTIVA);
+  const proporciones = perfiles.map(ticks => {
+    const total = accionesActivas.reduce((suma, accion) => suma + (ticks[accion] ?? 0), 0);
+    return total > 0 ? accionesActivas.map(accion => (ticks[accion] ?? 0) / total) : null;
+  }).filter((perfil): perfil is number[] => perfil !== null);
+  if (proporciones.length < 2) return null;
+  let suma = 0, pares = 0;
+  for (let i = 0; i < proporciones.length; i++) for (let j = i + 1; j < proporciones.length; j++) {
+    const a = proporciones[i]!, b = proporciones[j]!;
+    let divergencia = 0;
+    for (let k = 0; k < a.length; k++) {
+      const p = a[k]!, q = b[k]!, mezcla = (p + q) / 2;
+      if (p > 0) divergencia += p * Math.log2(p / mezcla) / 2;
+      if (q > 0) divergencia += q * Math.log2(q / mezcla) / 2;
+    }
+    suma += Math.sqrt(Math.max(0, Math.min(1, divergencia)));
+    pares++;
+  }
+  return suma / pares;
+}
+
 function fracciones(conteo: ReadonlyMap<string, number>, total: number): Record<string, number> {
   const salida: Record<string, number> = {};
   for (const accion of ACCIONES) { const n = conteo.get(accion) ?? 0; if (n > 0) salida[accion] = n / total; }
@@ -106,6 +130,10 @@ export interface MetricasInstrumentos {
   maderaMediaAdultos: number | null;
   piedraMediaAdultos: number | null;
   muertesMenores8Dias: number;
+  cambiosHogar: { adopta: number; pierde: number };
+  diversidadPerfilesJS: number | null;
+  linajesVivos: number;
+  linajesHerfindahl: number | null;
 }
 
 function mortalesVivos(world: World): Set<string> {
@@ -128,6 +156,11 @@ export class InstrumentosConducta {
   private approachHogarTicks = 0;
   private readonly muertesConocidas = new Set<string>();
   private muertesMenores8Dias = 0;
+  /** Solo posiciones, nunca referencias a `home` mutables del mundo. */
+  private readonly hogarAnterior = new Map<string, string | null>();
+  private cambiosHogar = { adopta: 0, pierde: 0 };
+  /** Raíz estable aun cuando el registro del antepasado salga de `world.legacy`. */
+  private readonly raizPorId = new Map<string, string>();
   private contadorAntes = 0;
   /** Coste de los instrumentos en ms de reloj (se informa por consola, nunca en el JSON). */
   costeMs = 0;
@@ -135,6 +168,23 @@ export class InstrumentosConducta {
 
   constructor(world: World) {
     this.fotografiarActividad(world); this.vivosInicioDia = mortalesVivos(world);
+    const identidades = new Map([...world.legacy, ...world.retiredLegacy, ...world.people]
+      .filter(person => person.role === 'neighbor').map(person => [person.id, person] as const));
+    const raiz = (id: string): string => {
+      const conocida = this.raizPorId.get(id);
+      if (conocida) return conocida;
+      const persona = identidades.get(id);
+      if (!persona) throw new Error(`Instrumentos: falta el progenitor transmisor ${id}.`);
+      // reproduce() clona a `a` e inheritGenome([a,b]) conserva ese orden: parents[0] es `a`.
+      const transmisor = persona.genome.parents[0];
+      const resultado = transmisor === undefined ? id : raiz(transmisor);
+      this.raizPorId.set(id, resultado);
+      return resultado;
+    };
+    for (const person of world.people) if (person.role === 'neighbor') {
+      raiz(person.id);
+      this.hogarAnterior.set(person.id, person.home ? `${person.home.x},${person.home.y}` : null);
+    }
     for (const record of [...world.legacy, ...world.retiredLegacy]) {
       if (this.muertesConocidas.has(record.id)) continue;
       this.muertesConocidas.add(record.id);
@@ -165,11 +215,26 @@ export class InstrumentosConducta {
       if (!dia) { dia = {}; this.ticksDiaPorPersona.set(person.id, dia); }
       dia[person.action] = (dia[person.action] ?? 0) + 1;
       if (person.role === 'neighbor') {
+        if (!this.raizPorId.has(person.id)) {
+          const transmisor = person.genome.parents[0];
+          if (!transmisor || !this.raizPorId.has(transmisor))
+            throw new Error(`Instrumentos: falta la raíz del progenitor transmisor de ${person.id}.`);
+          this.raizPorId.set(person.id, this.raizPorId.get(transmisor)!);
+        }
+        const hogar = person.home ? `${person.home.x},${person.home.y}` : null;
+        const anterior = this.hogarAnterior.get(person.id) ?? null;
+        if (hogar !== anterior) {
+          if (hogar === null) this.cambiosHogar.pierde++;
+          else this.cambiosHogar.adopta++;
+        }
+        this.hogarAnterior.set(person.id, hogar);
         this.tiempoDia.set(person.action, (this.tiempoDia.get(person.action) ?? 0) + 1); this.personaTicksDia++;
         // El motivo exacto lo emite sólo `settlementOpportunity`, antes de cualquier recuerdo añadido.
         if (person.action === 'approach' && person.reason.startsWith('Vuelve a un lugar conocido con agua, alimento, techo o cooperación;')) this.approachHogarTicks++;
       }
     }
+    const vivos = new Set(world.people.filter(person => person.role === 'neighbor').map(person => person.id));
+    for (const id of this.hogarAnterior.keys()) if (!vivos.has(id)) this.hogarAnterior.delete(id);
     for (const record of world.retiredLegacy) if (!this.muertesConocidas.has(record.id)) {
       this.muertesConocidas.add(record.id);
       if (record.role === 'neighbor' && record.diedAt - record.bornAt < 8 * TICKS_PER_DAY) this.muertesMenores8Dias++;
@@ -225,6 +290,13 @@ export class InstrumentosConducta {
     const adultos = world.people.filter(person => person.role === 'neighbor' && world.tick - person.bornAt >= 5 * TICKS_PER_DAY);
     const mediaAdultos = (material: 'wood' | 'stone'): number | null => adultos.length
       ? adultos.reduce((suma, person) => suma + person.materials[material], 0) / adultos.length : null;
+    const linajes = new Map<string, number>();
+    for (const person of world.people) if (person.role === 'neighbor') {
+      const raiz = this.raizPorId.get(person.id);
+      if (!raiz) throw new Error(`Instrumentos: falta la raíz de ${person.id}.`);
+      linajes.set(raiz, (linajes.get(raiz) ?? 0) + 1);
+    }
+    const mortales = [...linajes.values()].reduce((suma, n) => suma + n, 0);
     const ticksActivos = this.personaTicksDia - (this.tiempoDia.get('rest') ?? 0);
     const incrementos = new Map<string, number>();
     let totalIncrementos = 0;
@@ -256,10 +328,15 @@ export class InstrumentosConducta {
       maderaMediaAdultos: mediaAdultos('wood'),
       piedraMediaAdultos: mediaAdultos('stone'),
       muertesMenores8Dias: this.muertesMenores8Dias,
+      cambiosHogar: { ...this.cambiosHogar },
+      diversidadPerfilesJS: diversidadPerfilesJS(enVentana.map(person => this.ticksDiaPorPersona.get(person.id) ?? vacio)),
+      linajesVivos: linajes.size,
+      linajesHerfindahl: mortales ? [...linajes.values()].reduce((suma, n) => suma + (n / mortales) ** 2, 0) : null,
     };
     const vivos = new Set(world.people.map(person => person.id));
     for (const id of [...this.ticksPorPersona.keys()]) if (!vivos.has(id)) this.ticksPorPersona.delete(id);
     this.tiempoDia.clear(); this.personaTicksDia = 0; this.approachHogarTicks = 0;
+    this.cambiosHogar = { adopta: 0, pierde: 0 };
     this.ticksDiaPorPersona.clear(); this.vivosInicioDia = mortalesVivos(world);
     this.fotografiarActividad(world);
     this.costeMs += performance.now() - inicio;

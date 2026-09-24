@@ -18,7 +18,8 @@ for (const seed of [42, 2001] as const) test(`H-B apagada conserva el mundo de 2
   const world = createWorld(seed);
   for (let n = 0; n < 1200; n++) stepWorld(world);
   // La clave nueva sólo se quita de la FORMA hasheada, no del mundo simulado.
-  assert.equal(digestoSin(world, ['social.hogarTrabajo']), REFERENCIAS_1200[seed]);
+  // Se quitan de la forma de params TODAS las claves posteriores a 2ee2658 (H-B y H-A conviven en la rama de la campaña).
+  assert.equal(digestoSin(world, ['social.hogarTrabajo', 'conducta.vocacion', 'conducta.vocacionTope']), REFERENCIAS_1200[seed]);
 });
 
 function escenaHogar(r: number, abundanteEnCasa = false): World {

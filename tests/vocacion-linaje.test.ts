@@ -7,11 +7,12 @@ import { join } from 'node:path';
 import { Store } from '../src/server/store.js';
 import { initialDemography } from '../src/world/demography.js';
 import { digestoSin } from '../scripts/lab/rendimiento.js';
-import { InstrumentosConducta } from '../scripts/lab/instrumentos.js';
+import { diversidadPerfilesJS, InstrumentosConducta } from '../scripts/lab/instrumentos.js';
 import { assertWorld, cloneWorld, createWorld, heredarVocacion, OFICIOS_DE_LINAJE, stepWorld, type Person, type World } from '../src/world/index.js';
 import { DEFAULT_PARAMS, HISTORICAL_PARAMS, PARAM_RANGES, paramsOf, parseParams, setParams } from '../src/world/params.js';
 
-const CLAVES = ['conducta.vocacion', 'conducta.vocacionTope'] as const;
+// Claves posteriores a 2ee2658 en la rama de la campaña (H-A y H-B); todas a su valor inactivo.
+const CLAVES = ['conducta.vocacion', 'conducta.vocacionTope', 'social.hogarTrabajo'] as const;
 // Medidos con `git archive 2ee2658` en /tmp, Store SQLite guardado antes del primer paso y
 // con la cadencia de DEFAULT_PARAMS (1 tick); `digestoCanonico` tras exactamente 1200 pasos.
 const REFERENCIAS = {
@@ -171,5 +172,56 @@ test('la réplica corta escribe los ocho instrumentos H-A con dominios válidos'
     for (const clave of ['vocacionEntropiaArgmax', 'vocacionCoincidencia', 'diversidadConductaVentanaGen1', 'approachHogar'] as const)
       assert.ok(dia[clave] === null || (dia[clave] as number) <= 1, clave);
     assert.ok(Number.isSafeInteger(dia.muertesMenores8Dias) && (dia.muertesMenores8Dias as number) >= 0);
+    const cambios = dia.cambiosHogar as { adopta: number; pierde: number };
+    assert.ok(Number.isSafeInteger(cambios.adopta) && cambios.adopta >= 0);
+    assert.ok(Number.isSafeInteger(cambios.pierde) && cambios.pierde >= 0);
+    assert.ok(dia.diversidadPerfilesJS === null || typeof dia.diversidadPerfilesJS === 'number'
+      && dia.diversidadPerfilesJS >= 0 && dia.diversidadPerfilesJS <= 1);
+    assert.ok(Number.isSafeInteger(dia.linajesVivos) && (dia.linajesVivos as number) >= 0
+      && (dia.linajesVivos as number) <= (dia.vecinosMortales as number));
+    assert.ok(dia.linajesHerfindahl === null || typeof dia.linajesHerfindahl === 'number'
+      && dia.linajesHerfindahl >= 0 && dia.linajesHerfindahl <= 1);
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('JS usa proporciones activas y la raíz de la divergencia en base 2', () => {
+  assert.equal(diversidadPerfilesJS([{ rest: 100, explore: 1, gather: 1 }, { explore: 10, gather: 10 }]), 0);
+  assert.equal(diversidadPerfilesJS([{ rest: 4 }, { explore: 1 }]), null);
+  assert.equal(diversidadPerfilesJS([{ explore: 1 }, { gather: 1 }]), 1);
+  const distancia = diversidadPerfilesJS([{ explore: 3, gather: 1 }, { explore: 1, gather: 3 }]);
+  assert.ok(distancia !== null && distancia > 0 && distancia < 1);
+});
+
+test('un solo linaje da Herfindahl 1; cambiosHogar cuenta adopción, traslado y pérdida', () => {
+  const world = createWorld(42);
+  const fundador = world.people.find(person => person.role === 'neighbor')!;
+  world.people = world.people.filter(person => person.role !== 'neighbor' || person.id === fundador.id);
+  const inst = new InstrumentosConducta(world);
+  inst.antesDelPaso(world); inst.despuesDelPaso(world);
+  assert.equal(inst.metricasDia(world).linajesHerfindahl, 1);
+  fundador.home = { x: 10, y: 20, quality: 0.8, observedAt: world.tick };
+  inst.antesDelPaso(world); inst.despuesDelPaso(world);
+  fundador.home.x = 11;
+  inst.antesDelPaso(world); inst.despuesDelPaso(world);
+  delete fundador.home;
+  inst.antesDelPaso(world); inst.despuesDelPaso(world);
+  assert.deepEqual(inst.metricasDia(world).cambiosHogar, { adopta: 2, pierde: 1 });
+});
+
+test('el linaje de una cría sigue al primer progenitor de genome.parents', () => {
+  const world = createWorld(42);
+  const [a, b] = world.people.filter(person => person.role === 'neighbor') as [Person, Person];
+  world.people = world.people.filter(person => person.role !== 'neighbor' || person === a || person === b);
+  const inst = new InstrumentosConducta(world);
+  const cria = structuredClone(a);
+  cria.id = 'descendant-prueba';
+  cria.genome.parents = [a.id, b.id];
+  cria.genome.generation = 1;
+  cria.bornAt = world.tick;
+  delete cria.home;
+  world.people.push(cria);
+  inst.antesDelPaso(world); inst.despuesDelPaso(world);
+  const medidas = inst.metricasDia(world);
+  assert.equal(medidas.linajesVivos, 2);
+  assert.ok(Math.abs(medidas.linajesHerfindahl! - 5 / 9) < 1e-12);
 });

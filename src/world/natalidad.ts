@@ -1,11 +1,14 @@
 /** Reposición esperada y espaciado reproductivo. Sólo lee el mundo y no consume azar. */
 import type { Person, World } from './index.js';
+import type { Tile } from '../shared/types.js';
 import { bodilyNeedRates, phaseAt, TICKS_PER_DAY } from './index.js';
 import { enCuenca } from './agua.js';
 import { blueprintAffordances, BROKEN_CONDITION } from './inventions.js';
 import { filtrarCerca } from './indice-puntos.js';
 import { vecinos } from './rejilla.js';
-import { bindWorldContext, tileAt, worldContext, type ObservadorNatalidad } from './spatial.js';
+import { bindWorldContext, tileAt, validCoordinate, worldContext, type ObservadorNatalidad } from './spatial.js';
+import { generateTile } from './terrain.js';
+import { initializeEcosystem } from './ecosystem.js';
 import { demographicTraits } from './demography.js';
 import { paramsOf } from './params.js';
 import { CRECIMIENTO_COMIDA, EVAPORACION_LUZ, EVAPORACION_OSCURIDAD,
@@ -52,6 +55,30 @@ function ciclo(): { pasos: number; luz: number; evaporacion: number } {
 }
 let cicloMedido: ReturnType<typeof ciclo> | undefined;
 
+type TeselaProvision = Pick<Tile, 'x' | 'y' | 'terrain' | 'biome' | 'moisture' | 'vegetation' | 'feature' | 'fertility'>;
+const CACHE_GENERACION_MAX = 8192;
+const cacheGeneracion = new Map<string, TeselaProvision>();
+/** Sólo para pruebas de determinismo; la expulsión FIFO y el vaciado no alteran el valor generado. */
+export function vaciarCacheGeneracionNatalidad(): void { cacheGeneracion.clear(); }
+export function teselaProvision(world: World, x: number, y: number): TeselaProvision | undefined {
+  const active = tileAt(world, { x, y });
+  if (active) return active;
+  if (!validCoordinate(x) || !validCoordinate(y)) return undefined;
+  const cuencas = paramsOf(world).agua.cuencas;
+  const key = `${world.seed},${cuencas},${x},${y}`;
+  let tile = cacheGeneracion.get(key);
+  if (!tile) {
+    // activateChunk materializa un chunk nuevo con generateChunk (que llama generateTile)
+    // y aplica initializeEcosystem a cada tesela con estas mismas semilla y cuencas.
+    const generated = initializeEcosystem(world.seed, generateTile(world.seed, x, y, cuencas), cuencas);
+    tile = { x, y, terrain: generated.terrain, biome: generated.biome, moisture: generated.moisture,
+      vegetation: generated.vegetation, feature: generated.feature, fertility: generated.fertility };
+    if (cacheGeneracion.size >= CACHE_GENERACION_MAX) cacheGeneracion.delete(cacheGeneracion.keys().next().value!);
+    cacheGeneracion.set(key, tile);
+  }
+  return tile;
+}
+
 /** Producción diaria esperada en el disco; existencias actuales no entran en la capacidad. */
 export function reposicionLocal(world: World, centro: PuntoProvision, radio: number): Reposicion {
   const { cuencas } = paramsOf(world).agua;
@@ -63,7 +90,7 @@ export function reposicionLocal(world: World, centro: PuntoProvision, radio: num
   const cx = Math.round(centro.x), cy = Math.round(centro.y);
   for (let dy = -radio; dy <= radio; dy++) for (let dx = -radio; dx <= radio; dx++) {
     if (dx * dx + dy * dy > radio * radio) continue;
-    const t = tileAt(world, { x: cx + dx, y: cy + dy });
+    const t = teselaProvision(world, cx + dx, cy + dy);
     if (!t || t.terrain === 'water') continue;
     comida += Math.max(0, velocidadRegeneracion * CRECIMIENTO_COMIDA * 0.5 * luz * t.moisture * t.vegetation - pasos * decaimientoComida);
     const fuente = t.feature === 'pool' || t.feature === 'spring' || t.biome === 'wetland';
@@ -98,7 +125,7 @@ export function reposicionTerritorioOcupado(world: World, centros: readonly Punt
   const pasosLluvia = PROB_LLUVIA * pasos;
   for (const key of celdas) {
     const [x, y] = key.split(',').map(Number);
-    const t = tileAt(world, { x: x!, y: y! });
+    const t = teselaProvision(world, x!, y!);
     if (!t || t.terrain === 'water') continue;
     comida += Math.max(0, velocidadRegeneracion * CRECIMIENTO_COMIDA * 0.5 * luz * t.moisture * t.vegetation - pasos * decaimientoComida);
     const fuente = t.feature === 'pool' || t.feature === 'spring' || t.biome === 'wetland';

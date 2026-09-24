@@ -161,7 +161,10 @@ function seguridad(nat: Replica, ctrl: Replica): boolean {
 }
 function fila(nat: Replica, ctrl: Replica, criterios: Map<string, EvaluacionReplica>) {
   const bn = brecha(nat), bc = brecha(ctrl), reg = regulacion(nat);
-  const mecanismo = bn.diasValidos >= 20 && bn.valor !== null && (bc.diasValidos >= 20 ? bc.valor !== null && bn.valor > bc.valor : bn.valor > 0) && bn.bloqueadas >= 15;
+  // Revisión 1, punto 3: la brecha se mide igual en los dos brazos y cada uno necesita ≥ 20 días válidos;
+  // si cualquiera no llega, la semilla NO cumple mecanismo (sin umbral alternativo).
+  const mecanismo = bn.diasValidos >= 20 && bc.diasValidos >= 20 && bn.valor !== null && bc.valor !== null
+    && bn.valor > bc.valor && bn.bloqueadas >= 15;
   // Nivel = media de vecinos mortales de los días 50–60; una réplica extinta aporta 0 (no desaparece del cociente).
   const nivel = (r: Replica) => r.extinta && r.ultimo < 50 ? 0
     : media(entre(50, 60).map(d => mortales(dia(r, d))).filter((x): x is number => x !== null));

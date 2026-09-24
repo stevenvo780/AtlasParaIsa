@@ -53,6 +53,7 @@ import { decidirTechoLab, TECHO_LAB_MINIMO, techoLabCota } from './techo-lab.js'
 import { durableActivityMetrics } from './metrics.js';
 import { InstrumentosConducta } from './instrumentos.js';
 import { digestoCanonico } from '../../src/world/digesto.js';
+import { faunaTotal, registrarFaunaRetirada } from './fauna-total.js';
 
 type ModoGobernador = 'no' | 'servidor';
 
@@ -89,7 +90,7 @@ function worldSourceDigest(): string {
 }
 
 /** Métricas leídas del mundo vivo para el archivo `dia-NNN.json`; sin campos de tiempo real. */
-function dailyMetrics(world: ReturnType<typeof createWorld>, store: Store) {
+function dailyMetrics(world: ReturnType<typeof createWorld>, store: Store, censosFauna: ReadonlyMap<string, number>) {
   const stats = worldStatistics(world), loose = stats as unknown as Record<string, unknown>;
   const gini = typeof loose.giniRecursosPorRegion === 'number' ? loose.giniRecursosPorRegion : null;
   const fraccionComida = typeof loose.fraccionCeldasConComida === 'number' ? loose.fraccionCeldasConComida : null;
@@ -109,9 +110,9 @@ function dailyMetrics(world: ReturnType<typeof createWorld>, store: Store) {
   const catalogo = technologyCatalogueTotals(world);
   return {
     poblacion: world.people.length, nacimientos: world.totals.births ?? 0, muertesPorCausa,
-    // Fauna viva del mundo conocido: activa (`world.animals`, de la que `tile.fauna` es espejo) más la
-    // congelada en los chunks en reposo, para no depender de cuánto territorio esté activo (NAT-L).
-    faunaTotal: world.animals.filter(a => a.health > 0).length + world.retiredChunks.reduce((n, c) => n + (c.animals?.length ?? 0), 0),
+    // Activos vivos más el último censo vivo de cada chunk retirado que sigue inactivo.
+    // El censo se toma antes de cada Store.save, que vacía world.retiredChunks.
+    faunaTotal: faunaTotal(world, censosFauna),
     fundadoresVivos: generaciones['0'] ?? 0, generacionesVivas: Object.keys(generaciones).length,
     diversidadOficios: specialtyEntropy(specialties), recetasCreadasAcumuladas: catalogo.recipes,
     diversidadConducta: stats.diversidad?.total ?? null,
@@ -206,11 +207,13 @@ async function main(): Promise<void> {
   const store = new Store(join(dataDir, 'world.sqlite'));
   try {
     let world = createWorld(seed, params);
+    const censosFauna = new Map<string, number>();
     const poblacionInicial = world.people.length;
     const vecinosMortalesIniciales = world.people.filter(person => person.role === 'neighbor').length;
     const fundadoresMortalesIniciales = world.people.filter(person => person.role === 'neighbor' && person.genome.generation === 0).length;
     // P3: adjuntar y guardar el Store ANTES de simular fija las leyes de tecnología de producción
     // (enableTechnologyCatalogue) y liga el WorldContext (loadChunk/catalogueReader) al mundo.
+    registrarFaunaRetirada(world, censosFauna);
     store.save(world);
     const instrumentos = instrumentosArg === 'si' ? new InstrumentosConducta(world) : null;
 
@@ -250,6 +253,7 @@ async function main(): Promise<void> {
         let saveMs = 0;
         if (tick % params.persistencia.cadaTicks === 0) {
           const saveStarted = performance.now();
+          registrarFaunaRetirada(world, censosFauna);
           store.save(world);
           saveMs = performance.now() - saveStarted;
         }
@@ -273,14 +277,14 @@ async function main(): Promise<void> {
         stepTimes.push(performance.now() - started);
         instrumentos?.despuesDelPaso(world);
         if (techoLab !== null) { techoPoblacionMaximaDia = Math.max(techoPoblacionMaximaDia, world.people.length); techoPoblacionMaxima = Math.max(techoPoblacionMaxima, world.people.length); }
-        if (tick % params.persistencia.cadaTicks === 0) store.save(world);
+        if (tick % params.persistencia.cadaTicks === 0) { registrarFaunaRetirada(world, censosFauna); store.save(world); }
       }
       if (tick % TICKS_PER_DAY === 0) {
-        if (tick % params.persistencia.cadaTicks !== 0) store.save(world);
+        if (tick % params.persistencia.cadaTicks !== 0) { registrarFaunaRetirada(world, censosFauna); store.save(world); }
         assertWorld(world);
         const dia = tick / TICKS_PER_DAY, rss = process.memoryUsage().rss, { p50, p95 } = distribution(stepTimes.slice(-TICKS_PER_DAY));
         maxRss = Math.max(maxRss, rss);
-        const metrics = dailyMetrics(world, store);
+        const metrics = dailyMetrics(world, store, censosFauna);
         ultimoDia = metrics;
         // Campos nuevos de los instrumentos; foodShared entra como un tipo más de cooperación.
         let medidas: Record<string, unknown> = metrics;
@@ -296,6 +300,7 @@ async function main(): Promise<void> {
         if (gobernadorModo === 'servidor') { reproduccionActivaTicksDia = 0; ticksDia = 0; cloneMsDia.length = 0; saveMsDia.length = 0; }
       }
     }
+    registrarFaunaRetirada(world, censosFauna);
     store.save(world);
     if (!ultimoDia) throw new Error('No se completó ningún día; --dias debe producir al menos un dia-NNN.json.');
 

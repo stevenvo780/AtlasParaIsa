@@ -55,9 +55,9 @@ test('7 y 10: más consumidores retrasan; manantial y fertilidad ayudan; fuentes
   world.tiles = [tile(0, 0, { fertility: 0.9 })];
   assert.ok(reposicionLocal(world, c, 4).agua > base.agua);
   world.tiles = [tile(0, 0, { feature: 'none' })];
-  assert.equal(reposicionLocal(world, c, 4).agua, 0);
+  assert.equal(reposicionLocal(world, c, 0).agua, 0);
   world.tiles = [tile(0, 0, { terrain: 'water' })];
-  assert.deepEqual(reposicionLocal(world, c, 4), { agua: 0, comida: 0 });
+  assert.deepEqual(reposicionLocal(world, c, 0), { agua: 0, comida: 0 });
   const fuera = createWorld(42, parseParams('agua.cuencas=0.05'));
   fuera.tiles = [tile()]; fuera.structures = [];
   if (enCuenca(fuera.seed, 0, 0, 0.05)) {
@@ -66,13 +66,13 @@ test('7 y 10: más consumidores retrasan; manantial y fertilidad ayudan; fuentes
   }
   const t = fuera.tiles[0]!;
   assert.equal(enCuenca(fuera.seed, t.x, t.y, 0.05), false);
-  assert.equal(reposicionLocal(fuera, t, 4).agua, 0);
+  assert.equal(reposicionLocal(fuera, t, 0).agua, 0);
   world.tiles = [tile(0, 0, { terrain: 'shelter', feature: 'none' })];
   const structure = { ...createWorld(42).structures[0]!, x: 0, y: 0, condition: 0.1,
     components: ['frame', 'roof', 'cistern'] as ('frame' | 'roof' | 'cistern')[] };
   // Una estructura rota jamás capta lluvia.
   world.structures = [structure];
-  assert.equal(reposicionLocal(world, c, 4).agua, 0);
+  assert.equal(reposicionLocal(world, c, 0).agua, 0);
 });
 
 test('la sed diaria del desierto es 0,00065/0,00045 de la pradera', () => {
@@ -96,7 +96,7 @@ test('sin consumidores x=0; la unión ocupada cuenta una cisterna compartida una
 });
 
 test('11: una charca simulada por el kernel sigue la recarga media esperada', () => {
-  const world = escena(), estimate = reposicionLocal(world, { x: 0, y: 0 }, 4).agua;
+  const world = escena(), estimate = reposicionLocal(world, { x: 0, y: 0 }, 0).agua;
   const pool = tile(), kernel = new EcosystemKernel();
   const days = 120;
   let weather: 'rain' | 'clear' = 'clear', rng = 42, gained = 0;

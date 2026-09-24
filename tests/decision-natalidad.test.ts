@@ -98,17 +98,16 @@ test('regulación distingue crecimiento exponencial de oscilación y tolera cuat
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('19 días pareados no prueban mecanismo; CTRL con menos de 20 exige brecha NAT positiva', () => {
+test('19 días pareados no prueban mecanismo, tampoco si le faltan a CTRL', () => {
   const root = campana();
   try {
     const s = panel[0]!;
     modificar(root, 'NAT', s, dias(30, 41), x => { x.natalidadLocal.xNacimientos = null; });
     assert.equal(evaluarDecision(root, 2, stub()).panel![0]?.mecanismo, false);
     modificar(root, 'NAT', s, dias(30, 41), x => { x.natalidadLocal.xNacimientos = { p10: 0.2, p50: 0.3, p90: 0.6 }; });
-    modificar(root, 'CTRL', s, dias(30, 41), x => { x.natalidadLocal.xFertiles = null; });
     assert.equal(evaluarDecision(root, 2, stub()).panel![0]?.mecanismo, true);
-    modificar(root, 'NAT', s, dias(30, 60), x => { x.natalidadLocal.xNacimientos.p50 = 0.7; });
-    assert.equal(evaluarDecision(root, 2, stub()).panel![0]?.mecanismo, false);
+    modificar(root, 'CTRL', s, dias(30, 41), x => { x.natalidadLocal.xFertiles = null; });
+    assert.equal(evaluarDecision(root, 2, stub()).panel![0]?.mecanismo, false, 'CTRL con 19 días válidos: la semilla no cumple');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

@@ -543,6 +543,10 @@ Definiciones congeladas por `docs/preregistros/2026-09-23-natalidad-local.md` (R
 de x vienen de una sonda pasiva con α = 1, calculada en `reproduce()` DESPUÉS de elegir la pareja, que
 no decide nada ni consume azar.
 
+Las teselas de chunks inactivos dentro de los discos se evalúan con su estado de generación,
+función pura de semilla, `agua.cuencas` y coordenada. Si un chunk ya visitado está dormido,
+se usa ese estado inicial y no su historia; sus cisternas no cuentan.
+
 - `natalidadLocal.nacimientosDia`: nacimientos del día que informa `reproduce()`.
 - `natalidadLocal.xNacimientos` {p10, p50, p90}: x = máx(W/(α·A), F/(α·C)) en el lugar de cada
   concepción (A, C = reposición diaria de agua y comida a ≤ R; W, F = demanda diaria de las personas a
@@ -556,8 +560,10 @@ no decide nada ni consume azar.
   de TODAS las personas vivas (S e I incluidos), null si falta reposición con demanda.
 - `natalidadLocal.limitante` {agua, comida}: fracción de los nacimientos del día cuyo término máximo
   fue el agua o la comida (empate: agua).
-- `faunaTotal` (también con `--instrumentos no`): animales vivos de las zonas activas
-  (`world.animals`, de la que `tile.fauna` es espejo) más los congelados en chunks en reposo.
+- `faunaTotal` (también con `--instrumentos no`): animales con `health > 0` en `world.animals`
+  más la suma del último censo de animales con `health > 0` de cada chunk retirado cuya clave
+  no esté en `world.chunks`. El laboratorio actualiza ese censo antes de cada `Store.save`,
+  incluido el inicial; una reactivación cuenta por `world.animals` y no suma el censo anterior.
 - Garantía: el observador vive fuera del mundo (no se serializa); `tests/natalidad-integracion.test.ts`
   comprueba el mismo digesto con y sin él, con α = 0 y α = 1.
 

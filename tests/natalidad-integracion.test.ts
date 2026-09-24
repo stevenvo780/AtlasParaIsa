@@ -4,8 +4,9 @@ import { cloneWorld, createWorld, puntoDeRestauracion, stepWorld, type World } f
 import { digestoCanonico } from '../src/world/digesto.js';
 import { digestoSin } from '../scripts/lab/rendimiento.js';
 import { DEFAULT_PARAMS, HISTORICAL_PARAMS, paramsOf, parseParams, setParams } from '../src/world/params.js';
-import { hacinamientoLocal } from '../src/world/natalidad.js';
-import { tileAt } from '../src/world/spatial.js';
+import { hacinamientoLocal, teselaProvision, vaciarCacheGeneracionNatalidad } from '../src/world/natalidad.js';
+import { activate, maintainRegions, tileAt } from '../src/world/spatial.js';
+import { chunkKey } from '../src/world/terrain.js';
 import { initialDemography } from '../src/world/demography.js';
 import { InstrumentosConducta } from '../scripts/lab/instrumentos.js';
 import { decidirTechoLab, techoLabCota } from '../scripts/lab/techo-lab.js';
@@ -88,9 +89,11 @@ test('2: con α=0 la escena de 40 fértiles conserva dos nacimientos por ventana
 
 test('6: sin reposición de agua ni comida no hay nacimientos', () => {
   const world = escena(2, 1);
+  // R=4 queda enteramente en chunks activos; la escena sólo agota esas teselas.
+  setParams(world, parseParams('poblacion.radioProvision=4', paramsOf(world)));
   world.structures = [];
   for (const t of world.tiles) { t.feature = 'none'; t.biome = 'grassland'; t.moisture = t.vegetation = t.food = 0; }
-  assert.equal(hacinamientoLocal(world, world.places[0]!, 16, 1), Infinity);
+  assert.equal(hacinamientoLocal(world, world.places[0]!, 4, 1), Infinity);
   stepWorld(world);
   assert.equal(world.birthCounter, 0);
 });
@@ -116,6 +119,47 @@ test('8: un cambio lejano al lugar y a la pareja no altera la decisión local', 
   stepWorld(a); stepWorld(b);
   assert.equal(a.birthCounter, b.birthCounter);
   assert.deepEqual(a.people.filter(p => p.bornAt === 120).map(p => p.genome.parents), b.people.filter(p => p.bornAt === 120).map(p => p.genome.parents));
+});
+
+test('localidad: activar desde lejos un chunk virgen del disco de la huerta conserva x bit a bit', () => {
+  const world = createWorld(42, parseParams('poblacion.natalidadLocal=1,poblacion.radioProvision=16'));
+  for (let n = 0; n < 3; n++) stepWorld(world);
+  const huerta = world.places.find(place => place.id === 'huerta')!;
+  const remoto = { x: 10, y: 45 }, interior = { x: 10, y: 35 };
+  const key = chunkKey(interior.x, interior.y);
+  assert.equal(key, chunkKey(remoto.x, remoto.y));
+  assert.ok(Math.hypot(remoto.x - huerta.x, remoto.y - huerta.y) > paramsOf(world).poblacion.radioLugar + 16);
+  assert.ok(Math.hypot(interior.x - huerta.x, interior.y - huerta.y) <= 16);
+  assert.equal(world.chunks[key], undefined);
+  assert.equal(world.retiredChunks.some(chunk => chunk.key === key), false);
+  const antes = hacinamientoLocal(world, huerta, 16, 1);
+  const persona = structuredClone(world.people.find(p => p.role === 'neighbor')!);
+  persona.id = 'remota'; persona.x = remoto.x; persona.y = remoto.y;
+  world.people.push(persona);
+  maintainRegions(world);
+  assert.ok(world.chunks[key]);
+  assert.ok(tileAt(world, interior));
+  assert.ok(Object.is(hacinamientoLocal(world, huerta, 16, 1), antes));
+});
+
+test('tesela dormida de la ley coincide con la primera activación del motor', () => {
+  const world = createWorld(2001, parseParams('agua.cuencas=0.37'));
+  const point = { x: 10, y: 35 }, key = chunkKey(point.x, point.y);
+  assert.equal(world.chunks[key], undefined);
+  const generated = teselaProvision(world, point.x, point.y)!;
+  activate(world, point.x, point.y);
+  const active = tileAt(world, point)!;
+  assert.ok(active);
+  for (const field of ['x', 'y', 'terrain', 'biome', 'moisture', 'vegetation', 'feature', 'fertility'] as const)
+    assert.equal(generated[field], active[field], field);
+});
+
+test('α=1: vaciar la caché entre pasos conserva el digesto', { timeout: 600000 }, () => {
+  const warm = createWorld(42, parseParams('poblacion.natalidadLocal=1'));
+  const cold = cloneWorld(warm);
+  for (let n = 0; n < 120; n++) stepWorld(warm);
+  for (let n = 0; n < 120; n++) { vaciarCacheGeneracionNatalidad(); stepWorld(cold); }
+  assert.equal(digestoCanonico(warm), digestoCanonico(cold));
 });
 
 test('9: la segunda pareja ve la cría de la primera en el mismo lugar y paso', () => {

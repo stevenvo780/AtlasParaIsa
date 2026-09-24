@@ -56,6 +56,8 @@ function digestoSinLaClave(world: World): string {
   // midieron los hashes; con su valor 0 no actúa, así que también se quita de la forma.
   assert.equal(antes.social.memoriaDisputa, 0);
   delete antes.social.memoriaDisputa;
+  assert.equal(antes.social.hogarTrabajo, 0);
+  delete antes.social.hogarTrabajo;
   setParams(world, antes as unknown as WorldParams);
   const version = world.version;
   // La referencia V10 mide este mismo estado; sólo normalizamos su etiqueta al hashear.

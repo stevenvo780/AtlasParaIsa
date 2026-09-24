@@ -105,7 +105,11 @@ export interface WorldParams {
      * o cazar le parece `memoriaDisputa` celdas más lejos: prefiere otra que perciba, y si no hay otra vuelve.
      * 0 = conducta histórica (cede quien llega a la comprobación, espera treinta pasos inmóvil y no
      * recuerda nada); reglas 11 adopta 8 para mundos nuevos. */
-    memoriaDisputa: number };
+    memoriaDisputa: number;
+    /** Hogar por rendimiento marginal (H-B, 2026-09-23): reduce la provisión percibida de cada
+     * lugar según la madera, piedra y fauna a ≤ 4 celdas. 0 conserva la elección histórica;
+     * 1 aplica toda la reducción cuando ya no quedan insumos locales. */
+    hogarTrabajo: number };
 }
 
 function deepFreeze<T>(value: T): T {
@@ -144,7 +148,7 @@ const RAW_HISTORICAL: WorldParams = {
   // cultural), así que abrirlas no cambia el mundo.
   conducta: { habituacion: 0, aptitud: 0 },
   social: { maxComunidades: 8, disputaNecesidad: 0.65, disputaEscasez: 1, disputaRadio: 2, disputaDestino: 0.5, disputaEspera: 180,
-    ensenanzaRareza: 0, confianzaSalida: 0.35, distanciaAlternativa: 0.2, vinculoConvivencia: 0, radioConvivencia: 0, memoriaDisputa: 0 },
+    ensenanzaRareza: 0, confianzaSalida: 0.35, distanciaAlternativa: 0.2, vinculoConvivencia: 0, radioConvivencia: 0, memoriaDisputa: 0, hogarTrabajo: 0 },
 };
 
 /**
@@ -308,6 +312,8 @@ export const PARAM_RANGES: Record<string, [number, number]> = {
   // Penalización, en celdas, de la fuente donde se cedió una disputa. La percepción llega a 7 celdas:
   // con ≥ 8 cualquier otra fuente percibida va antes; el máximo 32 es «nunca, si hay otra». 0 apaga la ley.
   'social.memoriaDisputa': [0, 32],
+  // 0 conserva la provisión histórica; 1 deja que la falta de trabajo local la reduzca por completo.
+  'social.hogarTrabajo': [0, 1],
 };
 
 type ScalarDescriptor = { kind: 'number'; range: readonly [number, number]; integer?: boolean }

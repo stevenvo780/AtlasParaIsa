@@ -42,6 +42,8 @@ function digestoSinLaClave(world: World): string {
   const vigentes = paramsOf(world);
   const antes = structuredClone(vigentes) as unknown as { social: Record<string, unknown> };
   delete antes.social.memoriaDisputa;
+  assert.equal(antes.social.hogarTrabajo, 0);
+  delete antes.social.hogarTrabajo;
   setParams(world, antes as unknown as WorldParams);
   try { return digestoCanonico(world); } finally { setParams(world, vigentes); }
 }

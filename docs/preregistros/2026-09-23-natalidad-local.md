@@ -85,3 +85,18 @@ Población y nacimientos al día, `kOcupado` y chunks explorados, `limitante` (s
 Antes de leer cualquier dato de NAT se congelan en `main`: el commit de la rama de la ley (manifiesto: sha, parámetros exactos por brazo, máquinas y orden de lanzamiento) y un evaluador ejecutable de estas reglas (`scripts/lab/decision-natalidad.mts`), probado con casos sintéticos contradictorios. Hay dos cortes: día 20 de la Etapa 1 y día 60 de la Etapa 2. Una réplica que falle por causa técnica se repite idéntica.
 
 **Alcance.** El resultado vale para las reglas vigentes al lanzar, en la condición pública, sin gobernador activo y con α = 1, R = 16. «La ecología regula la población» solo se afirma si mecanismo y regulación se cumplen; «el límite lo pone el hardware» no se afirma con esta campaña (la población no llega a la escala del hardware).
+
+## Revisión 1 (antes de lanzar nada y antes de fusionar la ley) — prevalece sobre lo de arriba
+
+Motivo: crítica adversarial de Gemini 3.1 Pro (23-09 ~22:05; «congelar con estas correcciones»), comprobada contra el código. Se conservan la hipótesis, α, R, los brazos, las semillas y la condición.
+
+**1. Demanda real, no constante.** La sed por paso depende de la tesela y de la fisiología (`bodilyNeedRates`: 0,00045 + 0,0002 en desierto, por `waterDemand` genético; el hambre, por `foodDemand`). El diseño usaba 0,36 fijo (y 0,38 en su propio diagnóstico): sobrestimaba K hasta un 45 % en desierto. Nueva definición: x_L = máx(W_L/(α·A_L), F_L/(α·C_L)), donde W_L y F_L son la suma de la demanda diaria de agua y de comida de las personas vivas a ≤ R de L, cada una calculada con la MISMA función del motor (`bodilyNeedRates` en su tesela, con su fisiología; S e I con la suya) × pasos por día / unidades por trago o bocado. Con A_L = 0 o C_L = 0 y alguien que demande, x_L = ∞. `K`, `kOcupado` y `nSobreKOcupado` se sustituyen por sus equivalentes de demanda: `kOcupado` = {agua: A, comida: C} sobre la unión ocupada y `nSobreKOcupado` = máx(W/A, F/C) sobre esa unión (α = 1). `limitante` es el término que da el máximo.
+
+**2. El CV no demuestra el mecanismo.** A 12–40 nacimientos al día el ruido de Poisson ya da un CV de 0,16–0,29. El CV > 0,15 se queda como comprobación de que no hay cupo (se informa) y **sale de la decisión**. Mecanismo (por semilla) pasa a ser:
+- brecha = mediana, sobre los días 30–60, de (`xFertiles.p50` − `xNacimientos.p50`) del mismo día; en CTRL se mide igual con la sonda pasiva (α = 1 sin decidir). Exige brecha(NAT) > brecha(CTRL): la ley desplaza los nacimientos hacia donde se repone más de lo que se consume, más de lo que ya ocurre sin ella;
+- Y `bloqueadasPorLey` > 0 en al menos 15 de los 31 días 30–60 (la ley actúa, no es decorativa).
+Umbrales por brazo sin cambios (mecanismo en ≥ 10/12). En la Etapa 1, la puerta de `xNacimientos` se mantiene.
+
+**3. Nulos.** Las medianas y los mínimos de una ventana se calculan sobre los días con valor no nulo. Si en los días 30–60 hay menos de 20 días con `xNacimientos` y `xFertiles` a la vez no nulos, la semilla NO cumple mecanismo (no es «datos incompletos»: una clave presente con null es un dato). Para la amplitud y `nSobreKOcupado` se usan todos los días con población > 0; una semilla extinguida ya es no segura.
+
+**4. Coherencia de la Etapa 1.** Los nacimientos acumulados del día 20 se cuentan con `nacimientosDia`, y las muertes por sed con las causas del registro de muertes, igual en ambos brazos.

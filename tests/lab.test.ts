@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { hostParams } from '../src/server/hardware-limits.js';
 
 const CAUSES = ['starvation', 'dehydration', 'exposure', 'senescence'] as const;
 // Una cadencia de guardado grande mantiene la réplica de 1 día dentro del presupuesto del test
@@ -51,6 +52,19 @@ test('réplica de 1 día produce dia-001.json y replica.json con las claves espe
   const resumen = replica.resumen as Json;
   for (const key of ['poblacionInicial', 'poblacionFinal', 'nacimientosTotal', 'fundadoresVivosFinal', 'generacionesVivasFinal', 'p50Ms', 'p95Ms', 'rssMaximo'])
     assert.equal(typeof resumen[key], 'number', `replica.json.resumen.${key} debe ser number`);
+});
+
+test('réplica registra límites de host por defecto y respeta limites.chunks explícito', (t) => {
+  const limitesHost = hostParams().limites;
+  const dirHost = runReplica(t, ['--seed', '1', '--dias', '1']);
+  const paramsHost = readJson(join(dirHost, 'replica.json')).params as Json;
+  const limitesRegistrados = paramsHost.limites as Json;
+  for (const clave of ['teselasActivas', 'chunks', 'fauna'])
+    assert.equal(limitesRegistrados[clave], limitesHost[clave as keyof typeof limitesHost], `límite host ${clave}`);
+
+  const dirOverride = runReplica(t, ['--seed', '1', '--dias', '1', '--params', 'limites.chunks=300']);
+  const limitesOverride = (readJson(join(dirOverride, 'replica.json')).params as Json).limites as Json;
+  assert.equal(limitesOverride.chunks, 300, '--params explícito debe prevalecer sobre los límites del host');
 });
 
 test('dos réplicas con la misma semilla y params dan métricas idénticas salvo tiempos', (t) => {

@@ -19,6 +19,7 @@ import type { Capability } from '../shared/technology.js';
 import { decidirModo, rendererProfile, type Modo } from './modo.js';
 import { dibujarCalor, type Capa, type RangoCalor } from './calor.js';
 import { claveRegion } from './regiones.js';
+import { classifyTerrainPixel, newFieldPixel, prepareTerrainStencil, rnd, type FieldSample } from './terrain-field.js';
 
 /* ------------------------------------------------------------------ */
 /* Tipos públicos                                                      */
@@ -61,14 +62,13 @@ interface RGB {
   b: number;
 }
 
-interface GroundMaterial {
+interface GroundMaterial extends FieldSample {
   soil: RGB; leaf: RGB; cover: number; moisture: number; traffic: number;
 }
 
 /** The raster and its cache key must observe the same received-state buckets. */
 function groundBucket(value: number): number { return Math.round(clamp01(value) * 12); }
 function groundValue(value: number): number { return groundBucket(value) / 12; }
-function smooth(value: number): number { const t = clamp01(value); return t * t * (3 - 2 * t); }
 
 function rgb(r: number, g: number, b: number): RGB {
   return { r, g, b };
@@ -204,20 +204,6 @@ function hash3(x: number, y: number, salt: number): number {
   h = (h ^ (h >>> 13)) >>> 0;
   h = Math.imul(h, 1274126177) >>> 0;
   return (h ^ (h >>> 16)) >>> 0;
-}
-
-/** [0,1) determinista. */
-function rnd(x: number, y: number, salt: number): number {
-  return hash3(x, y, salt) / 4294967296;
-}
-
-/** Stable world-space variation of material, never a source of ecological state. */
-function materialNoise(x: number, y: number, scale: number, salt: number): number {
-  const gx = Math.floor(x / scale), gy = Math.floor(y / scale);
-  const u = smooth(x / scale - gx), v = smooth(y / scale - gy);
-  const top = rnd(gx, gy, salt) * (1 - u) + rnd(gx + 1, gy, salt) * u;
-  const bottom = rnd(gx, gy + 1, salt) * (1 - u) + rnd(gx + 1, gy + 1, salt) * u;
-  return top * (1 - v) + bottom * v;
 }
 
 function clamp(v: number, lo: number, hi: number): number {
@@ -799,7 +785,7 @@ export class Landscape {
           }
           for (let y = y0; y < y0 + CHUNK_ART_TILES; y++) for (let x = x0; x < x0 + CHUNK_ART_TILES; x++) {
             const tile = this.tileAt(x, y);
-            if (tile) { this.bakeCoast(g, x, y); this.bakeBiomeEdge(g, x, y); this.bakeFeatures(g, tile); }
+            if (tile) this.bakeFeatures(g, tile);
           }
           g.restore();
           if (chunk) { chunk.signature = signature; chunk.revision = ++this.cacheBuilds; }
@@ -824,14 +810,15 @@ export class Landscape {
     const fertility = groundValue(tile.fertility ?? .5), moisture = groundValue(tile.moisture);
     const cultivation = groundValue(tile.cultivation ?? 0), traffic = groundValue(tile.traffic ?? 0);
     const mineral = tile.biome === 'desert' ? P.sand : tile.biome === 'mountain' ? P.stoneShade : P.soilLight;
-    const humus = tile.biome === 'wetland' ? rgb(83, 88, 65) : rgb(103, 83, 57);
-    const green = tile.biome === 'wetland' ? rgb(78, 112, 93)
-      : tile.biome === 'forest' ? rgb(88, 119, 70) : rgb(126, 151, 88);
+    const humus = tile.biome === 'wetland' ? mix(P.soilDark, P.mossHigh, .55) : darken(P.soil, .38);
+    const green = tile.biome === 'wetland' ? mix(P.mossHigh, P.waterShallow, .25)
+      : tile.biome === 'forest' ? mix(P.mossHigh, P.sageLow, .3) : mix(P.sageLow, P.mossHigh, .32);
     const material = {
       soil: darken(mix(mineral, humus, fertility * .72), moisture * .2),
-      leaf: mix(green, rgb(180, 161, 100), (1 - moisture) * .6),
-      cover: groundValue(tile.vegetation) * (1 - cultivation * .6) * (1 - traffic * .88) * (tile.terrain === 'shelter' ? .25 : 1),
-      moisture, traffic,
+      leaf: mix(green, P.sandDark, (1 - moisture) * .6),
+      cover: tile.terrain === 'water' ? 0 : groundValue(tile.vegetation) * (1 - cultivation * .6) * (1 - traffic * .88) * (tile.terrain === 'shelter' ? .25 : 1),
+      moisture, traffic: tile.terrain === 'water' ? 0 : traffic,
+      biome: tile.biome ?? 'grassland', water: tile.terrain === 'water',
     };
     this.groundMaterials.set(tile, material); return material;
   }
@@ -850,77 +837,73 @@ export class Landscape {
 
   private bakeTileBase(g: CanvasRenderingContext2D, x: number, y: number): void {
     const tile = this.tileAt(x, y);
+    if (!tile) return;
     const ox = x * ART;
     const oy = y * ART;
-    const terrain: Terrain = tile ? tile.terrain : 'water';
-
-    if (terrain === 'water') {
-      // Profundidad legible: cuanto más agua alrededor, más oscuro el teal.
-      let neighbours = 0;
-      for (let dy = -1; dy <= 1; dy++) {
-        for (let dx = -1; dx <= 1; dx++) {
-          if (dx === 0 && dy === 0) continue;
-          if (this.terrainAt(x + dx, y + dy) === 'water') neighbours++;
-        }
-      }
-      const depth = neighbours / 8;
-      const base = mix(P.waterShallow, P.waterDeep, depth * depth);
-      px(g, ox, oy, ART, ART, css(base));
+    const owner = this.groundMaterial(tile), samples: GroundMaterial[] = [];
+    // Only the immediate 3 × 3 neighbours affect this cell and its one-pixel edges.
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const neighbour = this.tileAt(x + dx, y + dy);
+      samples.push(neighbour ? this.groundMaterial(neighbour) : owner);
+    }
+    if (owner.water && samples.every(sample => sample.water)) {
+      px(g, ox, oy, ART, ART, css(P.waterDeep));
       for (let i = 0; i < 2; i++) {
         const rx = ox + Math.floor(rnd(x, y, 10 + i) * ART);
         const ry = oy + Math.floor(rnd(x, y, 40 + i) * ART);
-        const up = rnd(x, y, 70 + i) > 0.5;
-        px(g, rx, ry, 1 + Math.floor(rnd(x, y, 90 + i) * 2), 1, css(up ? lighten(base, 0.1) : darken(base, 0.08)));
+        px(g, rx, ry, 1 + Math.floor(rnd(x, y, 90 + i) * 2), 1, css(lighten(P.waterDeep, .1)));
       }
       return;
     }
-
-    if (!tile) return;
-    const owner = this.groundMaterial(tile), samples: GroundMaterial[] = [];
-    // Four surrounding cell centres per pixel, inside a one-cell stencil. Unknown
-    // land repeats the known edge; water never lends a green cover or a soil palette.
-    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-      const neighbour = this.tileAt(x + dx, y + dy);
-      samples.push(neighbour && neighbour.terrain !== 'water' ? this.groundMaterial(neighbour) : owner);
-    }
+    const stencil = prepareTerrainStencil(samples);
+    let neighbours = 0;
+    for (const sample of samples) if (sample.water) neighbours++;
+    const depth = Math.max(0, neighbours - (owner.water ? 1 : 0)) / 8;
+    const waveX0 = Math.floor(rnd(x, y, 10) * ART), waveY0 = Math.floor(rnd(x, y, 40) * ART);
+    const waveX1 = Math.floor(rnd(x, y, 11) * ART), waveY1 = Math.floor(rnd(x, y, 41) * ART);
+    const pixel = newFieldPixel();
     const data = this.groundPixels.data;
     for (let by = 0; by < ART; by++) for (let bx = 0; bx < ART; bx++) {
-      const u = smooth(((bx + .5) / ART + .5) % 1), v = smooth(((by + .5) / ART + .5) % 1);
-      const index = (by < ART / 2 ? 0 : 3) + (bx < ART / 2 ? 0 : 1);
-      const a = samples[index]!, b = samples[index + 1]!, c = samples[index + 3]!, d = samples[index + 4]!;
-      const wa = (1 - u) * (1 - v), wb = u * (1 - v), wc = (1 - u) * v, wd = u * v;
       const wx = ox + bx, wy = oy + by;
-      const broad = materialNoise(wx, wy, 29, 348), fine = materialNoise(wx, wy, 7, 351);
-      const patch = broad * .68 + fine * .32;
-      // An exhausted cell cannot borrow living cover from its neighbours. Subcell
-      // distribution is a stable symbol of a cell-average stock, not extra biomass.
-      const cover = Math.min(owner.cover * 1.5, a.cover * wa + b.cover * wb + c.cover * wc + d.cover * wd);
-      const rooted = owner.cover === 0 ? 0 : smooth((cover - patch * .55 + .02) / .52);
-      const traffic = owner.traffic > 0 ? a.traffic * wa + b.traffic * wb + c.traffic * wc + d.traffic * wd : 0;
-      const wear = smooth((traffic - patch * .16) / .85);
-      const soilR = a.soil.r * wa + b.soil.r * wb + c.soil.r * wc + d.soil.r * wd;
-      const soilG = a.soil.g * wa + b.soil.g * wb + c.soil.g * wc + d.soil.g * wd;
-      const soilB = a.soil.b * wa + b.soil.b * wb + c.soil.b * wc + d.soil.b * wd;
-      const leafR = a.leaf.r * wa + b.leaf.r * wb + c.leaf.r * wc + d.leaf.r * wd;
-      const leafG = a.leaf.g * wa + b.leaf.g * wb + c.leaf.g * wc + d.leaf.g * wd;
-      const leafB = a.leaf.b * wa + b.leaf.b * wb + c.leaf.b * wc + d.leaf.b * wd;
-      // A compacted surface replaces material; no centre node, edge, footstep or
-      // claimed route is manufactured from the scalar traffic field.
+      classifyTerrainPixel(wx, wy, x, y, stencil, pixel);
+      const offset = (by * ART + bx) * 4;
+      if (pixel.water) {
+        const shore = clamp01((pixel.waterValue - .5) * 4);
+        let color = mix(P.waterShallow, P.waterDeep, depth * depth * shore);
+        if ((bx === waveX0 && by === waveY0) || (bx === waveX1 && by === waveY1)) color = lighten(color, .1);
+        data[offset] = color.r; data[offset + 1] = color.g; data[offset + 2] = color.b; data[offset + 3] = 255;
+        continue;
+      }
+      if (pixel.sand) {
+        const color = pixel.sandEdge ? P.sandDark : P.sand;
+        data[offset] = color.r; data[offset + 1] = color.g; data[offset + 2] = color.b; data[offset + 3] = 255;
+        continue;
+      }
+      let soilR = 0, soilG = 0, soilB = 0, leafR = 0, leafG = 0, leafB = 0, total = 0;
+      for (let j = 0; j < 4; j++) {
+        const sample = samples[pixel.corners[j]!]!;
+        if (sample.water || sample.biome !== pixel.biome) continue;
+        const weight = pixel.weights[j]!;
+        soilR += sample.soil.r * weight; soilG += sample.soil.g * weight; soilB += sample.soil.b * weight;
+        leafR += sample.leaf.r * weight; leafG += sample.leaf.g * weight; leafB += sample.leaf.b * weight;
+        total += weight;
+      }
+      if (total > 0) { soilR /= total; soilG /= total; soilB /= total; leafR /= total; leafG /= total; leafB /= total; }
+      else { soilR = owner.soil.r; soilG = owner.soil.g; soilB = owner.soil.b; leafR = owner.leaf.r; leafG = owner.leaf.g; leafB = owner.leaf.b; }
       const grainSeed = rnd(wx, wy, 358);
-      const ditheredWear = grainSeed < wear ? 1 : 0;
-      const pigment = rooted * (1 - ditheredWear * .65);
-      const grain = (grainSeed - .5) * (1 - wear) * 4;
+      const pigment = pixel.grass && !pixel.wear ? 1 : pixel.grass && pixel.wear ? .35 : 0;
+      const grain = (grainSeed - .5) * (pixel.wear ? 1 : 4);
       // Sparse fibres and granules live on a world lattice incommensurate with
       // cells. They symbolize existing cover/soil, never countable extra plants.
       const fx = Math.floor(wx / 5), fy = Math.floor(wy / 7);
       const tx = fx * 5 + Math.floor(rnd(fx, fy, 364) * 5), ty = fy * 7 + 2 + Math.floor(rnd(fx, fy, 365) * 4);
-      const fibre = owner.cover > 0 && rooted > .6 && rnd(fx, fy, 366) < cover * .8 && wx === tx && wy >= ty - 1 && wy <= ty;
-      const granule = rooted < .35 && grainSeed < .035 ? (owner.moisture > .5 ? -8 : 8) : 0;
-      const relief = Math.round((fine - .5) * 3) * 3 + (broad - .5) * 6 + grain + granule + (fibre ? 15 : 0);
-      const offset = (by * ART + bx) * 4;
-      data[offset] = soilR + (leafR - soilR) * pigment + ditheredWear * 9 + relief;
-      data[offset + 1] = soilG + (leafG - soilG) * pigment + ditheredWear * 6 + relief;
-      data[offset + 2] = soilB + (leafB - soilB) * pigment + ditheredWear * 3 + relief;
+      const fibre = pixel.grass && !pixel.wear && rnd(fx, fy, 366) < pixel.cover * .8 && wx === tx && wy >= ty - 1 && wy <= ty;
+      const granule = !pixel.grass && grainSeed < .035 ? (owner.moisture > .5 ? -8 : 8) : 0;
+      const relief = Math.round((pixel.fine - .5) * 3) * 3 + (pixel.fine - .5) * 6 + grain + granule + (fibre ? 15 : 0);
+      const edge = pixel.grassEdge ? -12 : pixel.wearEdge ? -9 : 0;
+      data[offset] = soilR + (leafR - soilR) * pigment + (pixel.wear ? 9 : 0) + relief + edge;
+      data[offset + 1] = soilG + (leafG - soilG) * pigment + (pixel.wear ? 6 : 0) + relief + edge;
+      data[offset + 2] = soilB + (leafB - soilB) * pigment + (pixel.wear ? 3 : 0) + relief + edge;
       data[offset + 3] = 255;
     }
     this.groundStampContext.putImageData(this.groundPixels, 0, 0);
@@ -1001,87 +984,6 @@ export class Landscape {
     }
     if ((tile.life ?? 0) > .45 && tile.vegetation > .25) {
       for(let i=0;i<3;i++) px(g, ox+2+Math.floor(rnd(x,y,1900+i)*12), oy+2+Math.floor(rnd(x,y,1920+i)*12), 1, 1, css(P.grassLight,.8));
-    }
-  }
-
-  /** Orillas arenosas por adyacencia: la arena se pinta en el borde que da al agua. */
-  private bakeCoast(g: CanvasRenderingContext2D, x: number, y: number): void {
-    const here = this.terrainAt(x, y);
-    const ox = x * ART;
-    const oy = y * ART;
-
-    if (here === 'water') {
-      // Bajío luminoso mirando a la tierra.
-      const gleam = css(mix(P.waterShallow, P.waterGleam, 0.35), 0.55);
-      if (this.terrainAt(x, y - 1) !== 'water') px(g, ox, oy, ART, 1, gleam);
-      if (this.terrainAt(x, y + 1) !== 'water') px(g, ox, oy + ART - 1, ART, 1, gleam);
-      if (this.terrainAt(x - 1, y) !== 'water') px(g, ox, oy, 1, ART, gleam);
-      if (this.terrainAt(x + 1, y) !== 'water') px(g, ox + ART - 1, oy, 1, ART, gleam);
-      return;
-    }
-
-    const sand = css(P.sand);
-    const sandEdge = css(P.sandDark);
-    const north = this.terrainAt(x, y - 1) === 'water';
-    const south = this.terrainAt(x, y + 1) === 'water';
-    const west = this.terrainAt(x - 1, y) === 'water';
-    const east = this.terrainAt(x + 1, y) === 'water';
-
-    for (let i = 0; i < ART; i++) {
-      const j = 2 + Math.floor(rnd(x * 31 + i, y, 610) * 3); // borde irregular, no una regla
-      if (north) {
-        px(g, ox + i, oy, 1, j, sand);
-        px(g, ox + i, oy + j - 1, 1, 1, sandEdge);
-      }
-      if (south) {
-        px(g, ox + i, oy + ART - j, 1, j, sand);
-        px(g, ox + i, oy + ART - j, 1, 1, sandEdge);
-      }
-      if (west) {
-        px(g, ox, oy + i, j, 1, sand);
-        px(g, ox + j - 1, oy + i, 1, 1, sandEdge);
-      }
-      if (east) {
-        px(g, ox + ART - j, oy + i, j, 1, sand);
-        px(g, ox + ART - j, oy + i, 1, 1, sandEdge);
-      }
-    }
-    // Una diagonal aislada crea una rampa que se afina hacia el interior.
-    for (let corner = 0; corner < 4; corner++) {
-      const upper = corner < 2, left = corner % 2 === 0;
-      if ((upper ? north : south) || (left ? west : east)
-        || this.terrainAt(x + (left ? -1 : 1), y + (upper ? -1 : 1)) !== 'water') continue;
-      const j = 2 + Math.floor(rnd(x * 31 + corner, y, 2500 + corner) * 3);
-      for (let i = 0; i < 4; i++) {
-        const width = Math.max(0, j - i);
-        if (width === 0) continue;
-        const bx = left ? ox : ox + ART - width, by = upper ? oy + i : oy + ART - 1 - i;
-        px(g, bx, by, width, 1, sand);
-        px(g, left ? bx + width - 1 : bx, by, 1, 1, sandEdge);
-      }
-    }
-  }
-
-  /** Franja mineral y vegetal común a dos biomas terrestres. */
-  private bakeBiomeEdge(g: CanvasRenderingContext2D, x: number, y: number): void {
-    const tile = this.tileAt(x, y);
-    if (!tile?.biome || tile.terrain === 'water') return;
-    const here = this.groundMaterial(tile), ox = x * ART, oy = y * ART;
-    for (const [side, dx, dy] of [[0,0,-1], [1,0,1], [2,-1,0], [3,1,0]] as const) {
-      const neighbour = this.tileAt(x + dx, y + dy);
-      if (!neighbour?.biome || neighbour.biome === tile.biome || neighbour.terrain === 'water') continue;
-      const there = this.groundMaterial(neighbour);
-      const soil = mix(here.soil, there.soil, .5), leaf = mix(here.leaf, there.leaf, .5);
-      const color = mix(soil, leaf, (here.cover + there.cover) * .5);
-      const mottled = css(darken(color, .12)), plain = css(color);
-      for (let i = 0; i < ART; i++) {
-        const width = 1 + Math.floor(rnd(x * 31 + i, y * 17 + side, 2700 + side) * 2);
-        for (let d = 0; d < width; d++) {
-          const wx = dx === 0 ? ox + i : ox + (dx < 0 ? d : ART - 1 - d);
-          const wy = dy === 0 ? oy + i : oy + (dy < 0 ? d : ART - 1 - d);
-          px(g, wx, wy, 1, 1, rnd(wx, wy, 2710 + side) < .25 ? mottled : plain);
-        }
-      }
     }
   }
 

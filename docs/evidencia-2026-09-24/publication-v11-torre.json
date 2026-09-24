@@ -1,0 +1,23 @@
+{
+  "capturedAt": "2026-09-24T13:37:00+00:00",
+  "status": "published",
+  "kind": "same-world move from the laptop to the tower (no rules change)",
+  "reason": "Steven, 24-09: sin tokens; liberar el portátil y dejar una sola instancia en la torre con todos sus recursos",
+  "codeRevision": "5a36ce6",
+  "operation": {
+    "labStopped": "todas las réplicas de laboratorio (torre y portátil), vigilantes y sincronizador detenidos a las 08:07; estado en la bitácora (entrada 08:07 PAUSA)",
+    "backupBeforeStop": "portátil ~/atlas-lab/respaldos/world-20260924-0834.sqlite.gz (gzip íntegro)",
+    "laptopServiceStoppedAndDisabled": "atlas-publico.service y atlas-respaldo.timer parados y deshabilitados; puerto 3000 libre; base sin WAL; la copia del portátil renombrada a ~/atlas-lab/mundos/v11-20260924-MUDADO-A-TORRE-0835 para que no pueda arrancarse",
+    "worldCopy": "world.sqlite sha256 8e5ce02ad47c5eb84df5941a51ec588931744f7699fd0e9f67f01d06fd02665a y access.scrypt 26532bcd… idénticos en portátil y torre",
+    "towerWorld": "/datos/workspaces/personal/AtlasParaIsa-anexo/mundos/v11-20260924",
+    "towerCode": "worktree detached /datos/workspaces/personal/AtlasParaIsa-anexo/worktrees/publico-v11 en 5a36ce6, node_modules propio, npm run build (asset idéntico al del portátil)",
+    "towerUnits": "atlas-publico.service (scripts/systemd/torre/publico.sh, drop-in CPUWeight/IOWeight 10000, proceso «carta-isa»), atlas-respaldo-publico.timer → anexo/publicaciones/v11-respaldos; atlas-puente.service parado y deshabilitado; atlas-servidor.service y atlas-respaldo.timer (V10) siguen deshabilitados",
+    "downtime": "≈ 08:34 → 08:35:48 -05"
+  },
+  "liveChecks": {
+    "domainHealth": "ok",
+    "unauthenticatedWorldStatus": 401,
+    "servedAssetEqualsCompiled": "assets/index-C5qWx4Ne.js sha256 d12fcc8e… igual en el dominio y en dist/client",
+    "world": { "instanceId": "42704a7e-d5b7-4ee9-bef0-7c7ced2cb3b3", "version": 11, "tickAfterMove": 92800, "day": 38.7, "mortals": 631, "births": 1057, "communities": 3 }
+  }
+}

@@ -1,0 +1,7 @@
+[Unit]
+Description=Respaldo horario del mundo público (torre, V11)
+[Timer]
+OnCalendar=hourly
+Persistent=true
+[Install]
+WantedBy=timers.target

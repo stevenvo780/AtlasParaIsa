@@ -1,0 +1,14 @@
+[Unit]
+Description=Una Carta Para Isa — servidor público (atlas.humanizar.tech) en la torre
+ConditionPathExists=/datos/workspaces/personal/AtlasParaIsa-anexo/mundos/v11-20260924/access.scrypt
+After=network-online.target tailscaled.service
+Wants=network-online.target
+[Service]
+Type=simple
+ExecStart=/datos/workspaces/personal/AtlasParaIsa/scripts/systemd/torre/publico.sh
+Restart=always
+RestartSec=5
+TimeoutStopSec=60
+KillSignal=SIGINT
+[Install]
+WantedBy=default.target

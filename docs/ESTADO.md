@@ -5,25 +5,25 @@ estas cifras. Se actualiza en cada publicación, junto con su contrato
 `docs/evidencia-AAAA-MM-DD/publication*.json`; si este fichero y el contrato discrepan, manda
 el contrato.
 
-## Vigente (mundo V11 desde el 24 de septiembre de 2026, 02:35 -05, en el portátil)
+## Vigente (mundo V11 desde el 24 de septiembre de 2026, 02:35 -05; en la TORRE desde las 08:35 -05)
 
 | Qué | Valor |
 |---|---|
 | URL | <https://atlas.humanizar.tech> |
-| Código compilado y servido | `5a36ce6` desde el 24-09 02:35 -05 en el portátil ([contrato](evidencia-2026-09-24/publication-v11.json)): reglas 11 (conflicto legible) y el arte del suelo por campo (bordes orgánicos de biomas, desgaste y orillas; agua sin cuadros). Contiene también, **a 0**, las leyes candidatas de C8 (`conducta.vocacion`, `social.hogarTrabajo`) y de natalidad local (`poblacion.natalidadLocal`): el mundo por defecto es bit a bit el de reglas 11 |
-| `main` | ver `git log`; lo servido en el portátil es `5a36ce6`, no necesariamente el HEAD de `main` |
+| Código compilado y servido | `5a36ce6` desde el 24-09 02:35 -05 (en el portátil hasta las 08:34, en la torre desde las 08:35: [contrato de la publicación](evidencia-2026-09-24/publication-v11.json), [contrato de la mudanza](evidencia-2026-09-24/publication-v11-torre.json)): reglas 11 (conflicto legible) y el arte del suelo por campo (bordes orgánicos de biomas, desgaste y orillas; agua sin cuadros). Contiene también, **a 0**, las leyes candidatas de C8 (`conducta.vocacion`, `social.hogarTrabajo`) y de natalidad local (`poblacion.natalidadLocal`): el mundo por defecto es bit a bit el de reglas 11 |
+| `main` | ver `git log`; lo servido es `5a36ce6`, no necesariamente el HEAD de `main` |
 | Reglas | `RULES_VERSION` 11: reglas 10 + `social` { disputaNecesidad 0,45, disputaEscasez 3, disputaRadio 3, memoriaDisputa 8 } y gobernador `techo` |
 | Protocolo | `PROTOCOL_VERSION` 10 |
 | SQLite | `user_version` 5 (instantáneas paginadas) |
-| Máquina | **Portátil de Steven** (i7-12700H, servicio `atlas-publico.service`, 100.64.0.2:3000 por tailnet); el dominio llega por el puente TCP `atlas-puente.service` de la torre (100.64.0.1:3000 → 100.64.0.2:3000). La torre es solo laboratorio |
-| Mundo | V11, semilla 51926, identidad `42704a7e-d5b7-4ee9-bef0-7c7ced2cb3b3`, creado desde un directorio vacío el 24-09 02:35 -05: `~/atlas-lab/mundos/v11-20260924` del portátil (credencial `access.scrypt` copiada de V10: misma contraseña, solo el hash) |
+| Máquina | **Torre** desde el 24-09 08:35 (Steven: portátil liberado, una sola instancia en la torre con todos sus recursos): servicio de usuario `atlas-publico.service` en 100.64.0.1:3000 (la IP que usa el dominio), código en el worktree `AtlasParaIsa-anexo/worktrees/publico-v11`; el puente `atlas-puente.service` quedó parado y deshabilitado. En el portátil, `atlas-publico.service` y su timer están deshabilitados y la copia del mundo renombrada a `v11-20260924-MUDADO-A-TORRE-0835`: **no arrancarlos** (bifurcaría el mundo) |
+| Mundo | V11, semilla 51926, identidad `42704a7e-d5b7-4ee9-bef0-7c7ced2cb3b3`, creado vacío el 24-09 02:35 -05 en el portátil y mudado con el servicio parado (mismo sha256): `/datos/workspaces/personal/AtlasParaIsa-anexo/mundos/v11-20260924` de la torre (credencial `access.scrypt` copiada de V10: misma contraseña, solo el hash). Al mudarse: día 38,7, 631 vecinos, 1 057 nacimientos |
 | Parámetros persistidos | `persistencia.cadaTicks=100`, `gobernador.politica=techo`, `gobernador.presupuestoMs=5000` (`CARTA_PARAMS`), límites de admisión del anfitrión y el paquete de reglas 11 (contrato) |
-| Respaldos | Portátil: `~/atlas-lab/respaldos` (timer horario `atlas-respaldo.timer`, ya apuntado a V11). Último respaldo de V10: `world-20260924-0232.sqlite.gz` |
-| Servicios | Portátil: `atlas-publico.service` (`~/atlas-lab/publico.sh`, drop-in `prioridad.conf`) y `atlas-respaldo.timer`, con linger; copias versionadas en `scripts/systemd/portatil/`. Torre: `atlas-puente.service`; `atlas-servidor.service` y su timer deshabilitados |
+| Respaldos | Torre: `AtlasParaIsa-anexo/publicaciones/v11-respaldos` (timer horario `atlas-respaldo-publico.timer`). Portátil (ya sin servicio): `~/atlas-lab/respaldos` con el último de V10 (`world-20260924-0232`) y el de V11 antes de la mudanza (`world-20260924-0834`) |
+| Servicios | Torre: `atlas-publico.service` (`scripts/systemd/torre/publico.sh`, drop-in CPUWeight/IOWeight 10000) y `atlas-respaldo-publico.timer`; copias en `scripts/systemd/torre/`. Deshabilitados: `atlas-puente.service`, `atlas-servidor.service` y `atlas-respaldo.timer` de la torre (V10), y los del portátil |
 | Gate | Gemelo de laboratorio SEM2-51926 (reglas 11, semilla 51926, 60 días): C1–C7 cumplen, C8 falla; `scripts/deploy-check.sh 5a36ce6` verde; suites del arte y de la ley de natalidad sin fallos reales (contrato) |
-| Contrato | [publication-v11.json](evidencia-2026-09-24/publication-v11.json) |
+| Contrato | [publication-v11.json](evidencia-2026-09-24/publication-v11.json) y [publication-v11-torre.json](evidencia-2026-09-24/publication-v11-torre.json) (mudanza) |
 
-Lo que esta publicación **no** acredita: el criterio de 60 días de [GOAL.md](../GOAL.md) **no se cumple**: C8 (diversidad de conducta creciente) falla en todas las semillas del laboratorio con estas reglas (ver [EVIDENCIA](EVIDENCIA.md)). La meseta de población (~630–700) la pone el cupo global de 40 nacimientos/día (`poblacion.nacimientosPorComprobacion`), un regulador de software; la alternativa local NAT-L quedó refutada en su cribado del 24-09. El público depende de que el portátil siga encendido, y el motor de un solo hilo se frenará cuando el mundo crezca.
+Lo que esta publicación **no** acredita: el criterio de 60 días de [GOAL.md](../GOAL.md) **no se cumple**: C8 (diversidad de conducta creciente) falla en todas las semillas del laboratorio con estas reglas (ver [EVIDENCIA](EVIDENCIA.md)). La meseta de población (~630–700) la pone el cupo global de 40 nacimientos/día (`poblacion.nacimientosPorComprobacion`), un regulador de software; la alternativa local NAT-L quedó refutada en su cribado del 24-09. El motor es de un solo hilo y se frenará cuando el mundo crezca.
 
 ## Anteriores, conservados
 

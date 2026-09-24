@@ -1,0 +1,6 @@
+[Unit]
+Description=Respaldo horario del mundo público (torre, V11)
+[Service]
+Type=oneshot
+Environment=CARTA_DATA_DIR=/datos/workspaces/personal/AtlasParaIsa-anexo/mundos/v11-20260924 DEST=/datos/workspaces/personal/AtlasParaIsa-anexo/publicaciones/v11-respaldos RETENCION=48
+ExecStart=/usr/bin/bash /datos/workspaces/personal/AtlasParaIsa-anexo/worktrees/publico-v11/scripts/respaldo.sh

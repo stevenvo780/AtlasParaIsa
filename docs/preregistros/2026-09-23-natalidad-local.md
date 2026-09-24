@@ -116,3 +116,16 @@ Motivo: revisión de la ley ya fusionada (workflow de 5 lentes, 19 agentes; cada
 - Parámetros comunes: `persistencia.cadaTicks=300,limites.teselasActivas=1303552,limites.chunks=5092,limites.fauna=7821312` (límites del anfitrión) y `--techo-lab 5000`; 20 días; semillas 4101–4104. Brazos: CTRL = comunes; NAT = comunes + `poblacion.natalidadLocal=1,poblacion.radioProvision=16`; NATR12 y NATR24 = ídem con R = 12 y 24 (descriptivos). Lanzador: `datos-lab/lanzar-nat1.sh` (salida `datos-lab/nat1/<BRAZO>-<semilla>/`).
 - Máquina: torre, CPUs 1-15,17-31 (el 0/16 queda para el gemelo del público), 16 réplicas a la vez, nice 19.
 - Identidad previa: la réplica CTRL (α = 0) de `de72ab4` y la de `d2ebf11` (src idéntico a `main` antes de la ley) en la semilla 4001 dan `dia-001/002.json` iguales en las 53 claves comunes (solo añaden `natalidadLocal` y `faunaTotal`), fuera de p50Ms, p95Ms y rss.
+
+## Resultado de la Etapa 1 (24-09 01:51; evaluador congelado, `balance/decision-nat1.json`): DETENER
+
+| Semilla | Nacimientos NAT/CTRL (días 1–20) | Vecinos día 20 NAT/CTRL | Muertes por sed NAT/CTRL | Mediana de `xNacimientos.p50` (días 10–20) |
+|---|---|---|---|---|
+| 4101 | 61/123 (< 0,5×) | 47/109 | 5/2 | 0,15 |
+| 4102 | 0/10 | 0/3 (NAT extinta, CTRL viva) | 4/5 | sin nacimientos |
+| 4103 | 64/26 | 60/10 | 3/5 | 0,12 |
+| 4104 | 35/173 (< 0,5×) | 18/136 | 7/13 | 0,36 |
+
+- La Etapa 2 no se lanza. **H-N con α = 1 y R = 16 queda refutada por seguridad en el cribado** (3 de las 5 puertas fallan en 3/4 semillas).
+- Diagnóstico descriptivo (no decide): la gente fértil vive donde x es bajo (`xFertiles.p50` mediano 0,03–0,33), y los nacimientos que ocurren también (0,12–0,36). El freno está en los LUGARES: un nacimiento exige un lugar a ≤ 4 celdas, y un lugar sin fuentes en cuenca a ≤ R tiene A = 0 y x = ∞, así que ahí no se concibe nunca. Es el «arranque seco» declarado como riesgo. `bloqueadasPorLey` es de decenas de miles por réplica. R = 24 recupera 4101 (125/123), pero no 4104 (46/173); R = 12 empeora todo. El control ya es frágil en 4102 y 4103 (3 y 10 vecinos el día 20).
+- Siguiente paso posible (otro preregistro, otras semillas): una capacidad que no sea binaria en los lugares secos. Por ejemplo, contar el agua que el grupo puede transportar o almacenar, o frenar por el estado corporal y la reserva del hogar en vez de por la reposición del lugar. Queda para después de C8.

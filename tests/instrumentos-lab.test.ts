@@ -30,10 +30,10 @@ const CLAVES_ANTIGUAS = new Set([
   'ventanaActividad', 'vecinosMortales', 'fundadoresMortalesVivos', 'generacionesMortalesVivas',
   'recetasDistintasEnUso', 'recetasDistintasFabricadas', 'usosUtiles', 'beneficioUso',
   'usosDeInventorAjeno', 'usosSinAutorResuelto', 'fraccionUsoAjeno', 'usosConEnsenanzaRecordada',
-  'cooperacionAcumuladaPorTipo', 'otrasCooperacionesAcumuladas', 'conflictosAcumulados',
+  'cooperacionAcumuladaPorTipo', 'otrasCooperacionesAcumuladas', 'conflictosAcumulados', 'faunaTotal',
   'p50Ms', 'p95Ms', 'rss',
 ]);
-const CLAVES_NUEVAS = ['diversidadConductaTiempo', 'diversidadConductaTiempoComponentes', 'diversidadConductaActiva', 'diversidadConductaActivaComponentes', 'diversidadConductaComponentes', 'diversidadConductaVentana', 'diversidadConductaVentanaComponentes', 'personasVentana', 'repartoTiempoPorAccion', 'repartoActividadPorAccion', 'vocacionVarianza', 'vocacionEntropiaArgmax', 'vocacionCoincidencia', 'diversidadConductaVentanaGen1', 'approachHogar', 'maderaMediaAdultos', 'piedraMediaAdultos', 'muertesMenores8Dias', 'cambiosHogar', 'diversidadPerfilesJS', 'linajesVivos', 'linajesHerfindahl'];
+const CLAVES_NUEVAS = ['natalidadLocal', 'diversidadConductaTiempo', 'diversidadConductaTiempoComponentes', 'diversidadConductaActiva', 'diversidadConductaActivaComponentes', 'diversidadConductaComponentes', 'diversidadConductaVentana', 'diversidadConductaVentanaComponentes', 'personasVentana', 'repartoTiempoPorAccion', 'repartoActividadPorAccion', 'vocacionVarianza', 'vocacionEntropiaArgmax', 'vocacionCoincidencia', 'diversidadConductaVentanaGen1', 'approachHogar', 'maderaMediaAdultos', 'piedraMediaAdultos', 'muertesMenores8Dias', 'cambiosHogar', 'diversidadPerfilesJS', 'linajesVivos', 'linajesHerfindahl'];
 
 type Json = Record<string, unknown>;
 const readJson = (path: string): Json => JSON.parse(readFileSync(path, 'utf8')) as Json;
@@ -101,6 +101,7 @@ test('conducta activa: sinDescanso quita solo rest y el √≠ndice con ticks conoci
 test('en proceso: el observador no mueve un bit del mundo, cuenta cada share() y sustituye solo la actividad del √≠ndice', { timeout: 1_800_000 }, t => {
   const a = mundo(t, 7, ETAPA1), b = mundo(t, 7, ETAPA1);
   const instrumentos = new InstrumentosConducta(a.world);
+  t.after(() => instrumentos.cerrar());
   const pasos = 600, cadencia = 300;
   let porLastShared = 0, mortalesPorPaso = 0;
   const vistoDesde = new Map<string, number>();
@@ -222,6 +223,7 @@ test('C8 v3: la diversidad de ventana usa solo a los mortales que vivieron el d√
   const { InstrumentosConducta, indiceDiversidadDe, sinDescanso } = await import('../scripts/lab/instrumentos.js');
   const world = createWorld(7);
   const inst = new InstrumentosConducta(world);
+  try {
   const dia: Record<string, Record<string, number>> = {};
   const alInicio = new Set(world.people.filter(p => p.role === 'neighbor').map(p => p.id));
   for (let i = 0; i < 2400; i++) {
@@ -234,4 +236,5 @@ test('C8 v3: la diversidad de ventana usa solo a los mortales que vivieron el d√
   const esperado = indiceDiversidadDe(world, enVentana, p => sinDescanso(dia[p.id] ?? {}));
   assert.equal(m.diversidadConductaVentana, esperado.total);
   assert.deepEqual(m.diversidadConductaVentanaComponentes, { conducta: esperado.conducta, oficios: esperado.oficios });
+  } finally { inst.cerrar(); }
 });

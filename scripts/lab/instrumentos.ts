@@ -26,6 +26,9 @@
 import type { Action } from '../../src/shared/types.js';
 import { OFICIOS_DE_LINAJE, TICKS_PER_DAY, type Person, type World } from '../../src/world/index.js';
 import { indiceDiversidad } from '../../src/world/diversidad.js';
+import { reproductiveReadiness } from '../../src/world/family.js';
+import { demandaTotal, hacinamientoLocal, reposicionTerritorioOcupado, setObservadorNatalidad } from '../../src/world/natalidad.js';
+import { paramsOf } from '../../src/world/params.js';
 
 /** Las 18 acciones de `Action`, en el orden de `ACTIONS` de src/world/diversidad.ts (no exportado):
  * fija el orden de las claves de las fracciones en el JSON. */
@@ -103,6 +106,14 @@ function fracciones(conteo: ReadonlyMap<string, number>, total: number): Record<
 
 /** Campos nuevos de `dia-NNN.json` (ver README del laboratorio, «Instrumentos de medida»). */
 export interface MetricasInstrumentos {
+  /** NAT-L se emite en CTRL y NAT: percentiles por rango más cercano inferior, con infinitos
+   * ordenados al final y representados como null sólo en el percentil que los selecciona. */
+  natalidadLocal: { nacimientosDia: number; xNacimientos: { p10: number | null; p50: number | null; p90: number | null };
+    xFertiles: { p10: number | null; p50: number | null; p90: number | null };
+    /** Cada rechazo de `a` por intervaloCumplido y cada `b` que pasó match pero falló
+     * intervaloCumplido durante reproduce(); se cuentan de nuevo si se reevalúan. CTRL = 0. */
+    bloqueadasPorLey: number; kOcupado: { agua: number; comida: number }; nSobreKOcupado: number | null;
+    limitante: { agua: number; comida: number } };
   diversidadConductaTiempo: number;
   diversidadConductaTiempoComponentes: { conducta: number; oficios: number };
   /** El mismo índice con los ticks por acción SIN `rest` (conducta activa). */
@@ -162,11 +173,22 @@ export class InstrumentosConducta {
   /** Raíz estable aun cuando el registro del antepasado salga de `world.legacy`. */
   private readonly raizPorId = new Map<string, string>();
   private contadorAntes = 0;
+  private nacimientosDia = 0;
+  private readonly xNacimientos: number[] = [];
+  private bloqueadasPorLey = 0;
+  private limitante = { agua: 0, comida: 0 };
   /** Coste de los instrumentos en ms de reloj (se informa por consola, nunca en el JSON). */
   costeMs = 0;
   pasos = 0;
 
+  /** Mundo donde se registró el observador de natalidad (su contexto pasa a los clones del paso). */
+  private readonly mundoObservado: World;
+
   constructor(world: World) {
+    this.mundoObservado = world;
+    setObservadorNatalidad(world, { nacimiento: (x, limitante) => {
+      this.nacimientosDia++; this.xNacimientos.push(x); this.limitante[limitante]++;
+    }, bloqueo: () => { this.bloqueadasPorLey++; } });
     this.fotografiarActividad(world); this.vivosInicioDia = mortalesVivos(world);
     const identidades = new Map([...world.legacy, ...world.retiredLegacy, ...world.people]
       .filter(person => person.role === 'neighbor').map(person => [person.id, person] as const));
@@ -196,7 +218,12 @@ export class InstrumentosConducta {
     this.actividadInicioDia = new Map(world.people.filter(p => p.role === 'neighbor').map(p => [p.id, { ...p.activity }]));
   }
 
-  antesDelPaso(world: World): void { this.contadorAntes = world.eventCounter; }
+  antesDelPaso(world: World): void {
+    this.contadorAntes = world.eventCounter;
+  }
+
+  /** Retira el observador de natalidad del mundo en que se registró (los clones ya tomados lo conservan). */
+  cerrar(): void { setObservadorNatalidad(this.mundoObservado, null); }
 
   /** Ticks por acción observados de una persona viva (copia; para tests y diagnóstico). */
   ticksDe(id: string): Record<string, number> | undefined {
@@ -298,6 +325,34 @@ export class InstrumentosConducta {
     }
     const mortales = [...linajes.values()].reduce((suma, n) => suma + n, 0);
     const ticksActivos = this.personaTicksDia - (this.tiempoDia.get('rest') ?? 0);
+    const pop = paramsOf(world).poblacion;
+    const reposicion = reposicionTerritorioOcupado(world, world.people.filter(p => p.role === 'neighbor'), pop.radioProvision);
+    const demanda = demandaTotal(world, world.people);
+    const agua = demanda.agua === 0 ? 0 : reposicion.agua === 0 ? Infinity : demanda.agua / reposicion.agua;
+    const comida = demanda.comida === 0 ? 0 : reposicion.comida === 0 ? Infinity : demanda.comida / reposicion.comida;
+    const percentiles = (values: readonly number[]) => {
+      const xs = [...values].sort((a, b) => a - b);
+      const at = (p: number): number | null => {
+        const x = xs[Math.floor((xs.length - 1) * p)];
+        return x !== undefined && Number.isFinite(x) ? x : null;
+      };
+      return { p10: at(0.1), p50: at(0.5), p90: at(0.9) };
+    };
+    const xPorPosicion = new Map<string, number>();
+    const xFertiles: number[] = [];
+    for (const person of world.people) if (person.role === 'neighbor' && person.inventory >= 0.1 && reproductiveReadiness(world, person)) {
+      const key = `${Math.round(person.x)},${Math.round(person.y)}`;
+      let x = xPorPosicion.get(key);
+      if (x === undefined) { x = hacinamientoLocal(world, { x: Math.round(person.x), y: Math.round(person.y) }, pop.radioProvision, 1); xPorPosicion.set(key, x); }
+      xFertiles.push(x);
+    }
+    const natalidadLocal: MetricasInstrumentos['natalidadLocal'] = {
+      nacimientosDia: this.nacimientosDia, xNacimientos: percentiles(this.xNacimientos), xFertiles: percentiles(xFertiles),
+      bloqueadasPorLey: this.bloqueadasPorLey, kOcupado: reposicion,
+      nSobreKOcupado: Number.isFinite(Math.max(agua, comida)) ? Math.max(agua, comida) : null,
+      limitante: { agua: this.nacimientosDia ? this.limitante.agua / this.nacimientosDia : 0,
+        comida: this.nacimientosDia ? this.limitante.comida / this.nacimientosDia : 0 },
+    };
     const incrementos = new Map<string, number>();
     let totalIncrementos = 0;
     for (const person of world.people) {
@@ -309,6 +364,7 @@ export class InstrumentosConducta {
       }
     }
     const metricas: MetricasInstrumentos = {
+      natalidadLocal,
       diversidadConductaTiempo: tiempo.total,
       diversidadConductaTiempoComponentes: { conducta: tiempo.conducta, oficios: tiempo.oficios },
       diversidadConductaActiva: activa.total,
@@ -336,6 +392,8 @@ export class InstrumentosConducta {
     const vivos = new Set(world.people.map(person => person.id));
     for (const id of [...this.ticksPorPersona.keys()]) if (!vivos.has(id)) this.ticksPorPersona.delete(id);
     this.tiempoDia.clear(); this.personaTicksDia = 0; this.approachHogarTicks = 0;
+    this.nacimientosDia = 0; this.xNacimientos.length = 0; this.bloqueadasPorLey = 0;
+    this.limitante = { agua: 0, comida: 0 };
     this.cambiosHogar = { adopta: 0, pierde: 0 };
     this.ticksDiaPorPersona.clear(); this.vivosInicioDia = mortalesVivos(world);
     this.fotografiarActividad(world);

@@ -83,7 +83,7 @@ function digestoConParamsDeMain(world: World): string {
   // tampoco existen en `main`, y con su default tampoco actúan.
   delete (comoMain.gobernador as Record<string, unknown>).politica;
   const poblacion = comoMain.poblacion as Record<string, unknown>;
-  for (const clave of ['exigeComunidad', 'radioPareja', 'radioLugar', 'comprobacionContinua', 'cortejo', 'radioCortejo']) delete poblacion[clave];
+  for (const clave of ['exigeComunidad', 'radioPareja', 'radioLugar', 'comprobacionContinua', 'cortejo', 'radioCortejo', 'natalidadLocal', 'radioProvision']) delete poblacion[clave];
   delete (comoMain.agua as Record<string, unknown>).memoria;
   for (const clave of ['edadFundadoresMinDias', 'edadFundadoresMaxDias']) delete (comoMain.genes as Record<string, unknown>)[clave];
   setParams(world, comoMain as unknown as WorldParams);

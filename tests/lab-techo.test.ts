@@ -35,6 +35,7 @@ test('decidirTechoLab es la rama roja de decidirConTecho con el techo fijado: re
   assert.equal(TECHO_LAB_MINIMO, 16);
   // Cota: N − 1 + nacidos de un paso (≤ nacimientosPorComprobacion), o la población inicial si ya era mayor.
   assert.equal(techoLabCota(18, 16, 2), 19);
+  assert.equal(techoLabCota(18, 16, 2, 1), 25);
   assert.equal(techoLabCota(16, 16, 0), 16);
   assert.equal(techoLabCota(16, 32, 2), 32);
 });

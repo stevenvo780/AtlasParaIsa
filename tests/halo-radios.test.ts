@@ -493,13 +493,13 @@ test('radios de parÃ¡metros: el cortejo de reglas 10 exige 128 celdas y el histÃ
   assert.deepEqual(haloRequerido(DEFAULT_PARAMS), { celdas: DEFAULT_PARAMS.poblacion.radioCortejo, causa: 'decision.cortejo' });
   assert.equal(DEFAULT_PARAMS.poblacion.radioCortejo, 128);
   assert.equal(haloRequerido(parseParams('poblacion.cortejo=0,poblacion.radioCortejo=128', DEFAULT_PARAMS)).celdas, HALO_CELDAS);
-  const claves: ClaveDeRadio[] = ['poblacion.radioPareja', 'poblacion.radioLugar', 'poblacion.radioCortejo', 'social.disputaRadio'];
+  const claves: ClaveDeRadio[] = ['poblacion.radioPareja', 'poblacion.radioLugar', 'poblacion.radioCortejo', 'poblacion.radioProvision', 'social.disputaRadio'];
   const exceden = claves.filter(clave => {
-    const params = parseParams(`${clave}=${PARAM_RANGES[clave]![1]},poblacion.cortejo=1`, HISTORICAL_PARAMS);
+    const params = parseParams(`${clave}=${PARAM_RANGES[clave]![1]},poblacion.cortejo=1,poblacion.natalidadLocal=1`, HISTORICAL_PARAMS);
     return ALCANCES_SERIALES.some(e => typeof e.radio !== 'number' && e.radio.param === clave && alcanceSerial(e.id, ALCANCES_SERIALES, params)! > HALO_CELDAS)
       || ALCANCES.some(e => typeof e.radio !== 'number' && e.radio.param === clave && alcancesDeFase('decision', params).get(e.id)! > HALO_CELDAS);
   });
-  assert.deepEqual(exceden, ['poblacion.radioPareja', 'poblacion.radioLugar', 'poblacion.radioCortejo']);
+  assert.deepEqual(exceden, ['poblacion.radioPareja', 'poblacion.radioLugar', 'poblacion.radioCortejo', 'poblacion.radioProvision']);
   assert.deepEqual(excesos(INVENTARIO, HALO_CELDAS, DEFAULT_PARAMS), [{ id: 'decision.cortejo', fase: 'decision', alcance: 128 }]);
 });
 

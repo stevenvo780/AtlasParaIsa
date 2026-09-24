@@ -109,6 +109,9 @@ function dailyMetrics(world: ReturnType<typeof createWorld>, store: Store) {
   const catalogo = technologyCatalogueTotals(world);
   return {
     poblacion: world.people.length, nacimientos: world.totals.births ?? 0, muertesPorCausa,
+    // Fauna viva del mundo conocido: activa (`world.animals`, de la que `tile.fauna` es espejo) más la
+    // congelada en los chunks en reposo, para no depender de cuánto territorio esté activo (NAT-L).
+    faunaTotal: world.animals.filter(a => a.health > 0).length + world.retiredChunks.reduce((n, c) => n + (c.animals?.length ?? 0), 0),
     fundadoresVivos: generaciones['0'] ?? 0, generacionesVivas: Object.keys(generaciones).length,
     diversidadOficios: specialtyEntropy(specialties), recetasCreadasAcumuladas: catalogo.recipes,
     diversidadConducta: stats.diversidad?.total ?? null,
@@ -318,11 +321,11 @@ async function main(): Promise<void> {
         techoLabDetalle: {
           reproduccionActivaFraccion: techoTicksActivos / totalTicks,
           poblacionMaxima: techoPoblacionMaxima,
-          cotaPoblacion: techoLabCota(techoLab, poblacionInicial, params.poblacion.nacimientosPorComprobacion),
+          cotaPoblacion: techoLabCota(techoLab, poblacionInicial, params.poblacion.nacimientosPorComprobacion, params.poblacion.natalidadLocal),
           poblacionContada: 'world.people.length (todas las personas vivas, S e I incluidas), como governReproduction en src/server/app.ts',
         },
       } : {}),
-      instrumentos: instrumentos ? 'si; solo lectura (scripts/lab/instrumentos.ts): conducta por tiempo y comida compartida' : 'no',
+      instrumentos: instrumentos ? 'si; solo lectura (scripts/lab/instrumentos.ts): conducta por tiempo, comida compartida y natalidad local' : 'no',
       seed, params, sha: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
       digest: worldSourceDigest(),
       // Huella del ESTADO final (digestoCanonico de src/world/digesto.ts): con y sin instrumentos

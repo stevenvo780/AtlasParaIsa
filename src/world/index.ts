@@ -12,6 +12,8 @@ import { assertEcosystemTile, assertLifeState, assertDormantTerrain } from './va
 import { materializeAnimals, stepAnimals, harvestAt, type Animal } from './animals.js';
 import { advanceNeeds } from './needs.js';
 import { assimilateFood, exertBody, hydrateBody, restBody } from './body.js';
+import { CRECIMIENTO_COMIDA, HAMBRE_POR_PASO, HAMBRE_POR_UNIDAD, INTERVALO_ECOLOGIA_TICKS, INTERVALO_TIEMPO_TICKS, LUZ_CREPSCULO, PROB_LLUVIA, SED_POR_PASO, SED_POR_UNIDAD } from './ecologia-constantes.js';
+import { hacinamientoLocal, intervaloCumplido, presionLocal, observadorNatalidad } from './natalidad.js';
 import { defaultBlueprint, constructionCost, constructionOpportunity, inventionOpportunity, invent, completeConstruction, stepStructures, repairOpportunity, repair, facilityRestQuality, recordFacilityRest, foodAvailable, takeFood, waterAvailable, takeWater, REST_FATIGUE_RATE, REST_ENERGY_RATE, BROKEN_CONDITION } from './inventions.js';
 import type { AnimalDynamics, BlueprintView, StructureView, InventionDynamics } from '../shared/life.js';
 import { POPULATION_HARD_LIMIT } from '../shared/life.js';
@@ -30,6 +32,7 @@ import { DEFAULT_PARAMS, MAX_FOUNDER_AGE_TICKS, paramsOf, setParams, limitsOf, t
 import { algunoCerca, filtrarCerca, primeroCerca } from './indice-puntos.js';
 import { conRejilla, personaMovida, vecinos } from './rejilla.js';
 export { bindWorldContext, tileAt, normalizeViewport, worldContext } from './spatial.js';
+export { demandaDiaria } from './natalidad.js';
 export type { WorldContext } from './spatial.js';
 
 // V9 accounts for an earlier visible forager when planning finite family reserves.
@@ -257,18 +260,18 @@ function seededTraits(seed: number, index: number): Person['traits'] {
 
 /** Exportada para que la evidencia de T013 aplique la ley real a un mapa amplio sin pagar el coste del paso completo. */
 export function ecology(world: World): void {
-  if (world.tick % 600 === 0) {
+  if (world.tick % INTERVALO_TIEMPO_TICKS === 0) {
     const previous = world.weather;
-    world.weather = random(world) < 0.4 ? 'rain' : 'clear';
+    world.weather = random(world) < PROB_LLUVIA ? 'rain' : 'clear';
     if (world.weather !== previous) addEvent(world, {
       kind: 'ecology', actors: [], source: 'simulation',
       text: world.weather === 'rain' ? 'La lluvia humedece la tierra; el alimento crecerá si también hay luz.' : 'La lluvia deja paso al cielo abierto.',
       cause: 'Cambio de tiempo del generador guardado; la lluvia aporta agua, no alimento instantáneo.',
     });
   }
-  if (world.tick % 10 !== 0) return;
+  if (world.tick % INTERVALO_ECOLOGIA_TICKS !== 0) return;
   const phase = phaseAt(world.tick);
-  const light = phase === 'day' ? 1 : phase === 'night' ? 0 : 0.4;
+  const light = phase === 'day' ? 1 : phase === 'night' ? 0 : LUZ_CREPSCULO;
   const { capacidadBosque, capacidadPastizal, capacidadOtros, velocidadRegeneracion, decaimientoComida } = paramsOf(world).recursos;
   // Índice fijado antes del recorrido (sprint noche-perf 2026-09-22): este bucle sólo cambia campos de
   // las teselas, nunca `world.tiles`, así que es la misma tesela que devolvería `tileAt` en cada vuelta,
@@ -285,7 +288,7 @@ export function ecology(world: World): void {
     const growth = velocidadRegeneracion * light * tile.moisture * 0.007 * headroom;
     tile.vegetation = clamp(tile.vegetation + growth - (tile.moisture < 0.15 ? 0.0015 : 0.0001));
     const foodHeadroom = K > 0 ? 1 - tile.food / K : 0;
-    tile.food = clamp(tile.food + velocidadRegeneracion * light * tile.moisture * tile.vegetation * 0.006 * foodHeadroom - decaimientoComida);
+    tile.food = clamp(tile.food + velocidadRegeneracion * light * tile.moisture * tile.vegetation * CRECIMIENTO_COMIDA * foodHeadroom - decaimientoComida);
   }
 }
 
@@ -390,11 +393,11 @@ function perceivedRoutes(person: Person, tiles: Tile[]): Map<string, number> {
  * Content was maintained before choose; handling still requires its real effort. */
 function drinkingBody(world: World, person: Person, point: Point) {
   const body = { hunger: person.hunger, thirst: person.thirst, fatigue: person.fatigue, energy: person.energy };
-  const needed = Math.min(.006, body.thirst / 3), ambient = Math.min(waterAvailable(world, point), needed);
+  const needed = Math.min(.006, body.thirst / SED_POR_UNIDAD), ambient = Math.min(waterAvailable(world, point), needed);
   hydrateBody(body, ambient);
   const item = person.technology.items.find(item => (item.contents?.water ?? 0) > 0);
   if (item && distance(person, point) === 0 && canHandleContainedWater(person, world.tick)) {
-    const requested = Math.min(Math.max(0, Math.floor((needed - ambient) * WATER_QUANTA_PER_UNIT)), Math.floor(body.thirst / 3 * WATER_QUANTA_PER_UNIT));
+    const requested = Math.min(Math.max(0, Math.floor((needed - ambient) * WATER_QUANTA_PER_UNIT)), Math.floor(body.thirst / SED_POR_UNIDAD * WATER_QUANTA_PER_UNIT));
     const flow = flowQuantized({ sourceWater: item.contents!.water, destinationWater: 0, destinationCapacity: requested,
       requestedQuanta: requested, carryFreeQuanta: requested, elapsedTicks: 1, workAvailable: 1 });
     exertBody(body, { energy: flow.workSpent * WATER_WORK_ENERGY, fatigue: flow.workSpent * WATER_WORK_FATIGUE });
@@ -403,8 +406,8 @@ function drinkingBody(world: World, person: Person, point: Point) {
   return body;
 }
 
-function bodilyNeedRates(world: World, tile: Tile, physiology: ReturnType<typeof demographicTraits>) {
-  return { hunger: 0.00027 * physiology.foodDemand, thirst: (0.00045 + (tile.biome === 'desert' ? 0.0002 : 0)) * physiology.waterDemand,
+export function bodilyNeedRates(world: World, tile: Tile, physiology: ReturnType<typeof demographicTraits>) {
+  return { hunger: HAMBRE_POR_PASO * physiology.foodDemand, thirst: (SED_POR_PASO + (tile.biome === 'desert' ? 0.0002 : 0)) * physiology.waterDemand,
     energy: 0.00007, stressEnergy: 0.00015, fatigue: 0.00009 + (world.weather === 'rain' && tile.terrain !== 'shelter' ? 0.0001 : 0) };
 }
 
@@ -490,7 +493,7 @@ function choose(world: World, person: Person): void {
   const body = { hunger: person.hunger, thirst: person.thirst, fatigue: person.fatigue, energy: person.energy };
   const protection = bodilyShelter(world, person), damage = bodilyDamage(world, person, body, protection), meal = immediateMeal(world, person);
   if (meal > 0) {
-    const fed = { ...body }; assimilateFood(fed, meal, { hungerPerUnit: 4.8, energyPerUnit: 1.2 });
+    const fed = { ...body }; assimilateFood(fed, meal, { hungerPerUnit: HAMBRE_POR_UNIDAD, energyPerUnit: 1.2 });
     const relief = avoidedDamageScore(person, damage, bodilyDamage(world, person, fed, protection));
     if (relief > 0) candidates.push({ action: 'eat', target: person, score: Math.max(0, person.hunger - 0.22) * 2.5,
       reason: 'Puede comer una reserva local ahora; aliviar el daño corporal no requiere esperar una caza.' });
@@ -547,7 +550,7 @@ function choose(world: World, person: Person): void {
       // The real action stores biomass; this private preview grants no energy.
       // Use an empty readiness probe so a currently rested body does not mask
       // the reserve's future yield through the energy ceiling.
-      const fed = { ...paid, energy: 0 }; assimilateFood(fed, harvest, { hungerPerUnit: 4.8, energyPerUnit: 1.2 });
+      const fed = { ...paid, energy: 0 }; assimilateFood(fed, harvest, { hungerPerUnit: HAMBRE_POR_UNIDAD, energyPerUnit: 1.2 });
       const benefit = fed.energy - (body.energy - paid.energy);
       if (benefit <= 0) continue;
       const value = benefit / Math.max(1, delay), away = distance(person, tile);
@@ -658,7 +661,7 @@ function choose(world: World, person: Person): void {
   if (!food && !prey && meal === 0 && person.hunger > .6) {
     // Like thirst, deprivation still motivates a paid search when perception is
     // empty. This potential small meal is a need score, never a stock or reward.
-    const soughtFood = { ...body }; assimilateFood(soughtFood, .002, { hungerPerUnit: 4.8, energyPerUnit: 1.2 });
+    const soughtFood = { ...body }; assimilateFood(soughtFood, .002, { hungerPerUnit: HAMBRE_POR_UNIDAD, energyPerUnit: 1.2 });
     const motive = (person.hunger - .22) * 2.5 + avoidedDamageScore(person, damage, bodilyDamage(world, person, soughtFood, protection));
     if (motive > candidates[0]!.score) {
       candidates[0]!.score = motive;
@@ -789,14 +792,14 @@ function choose(world: World, person: Person): void {
     if (candidate === coverGather) { cover = 1; work = gatherWork; travel = gatherSteps; }
     if (cover > 0 && exposed) protectionPlan = true;
     let forecast = { ...body };
-    if (candidate.action === 'eat') assimilateFood(forecast, immediateMeal(world, { ...person, ...candidate.target }), { hungerPerUnit: 4.8, energyPerUnit: 1.2 });
+    if (candidate.action === 'eat') assimilateFood(forecast, immediateMeal(world, { ...person, ...candidate.target }), { hungerPerUnit: HAMBRE_POR_UNIDAD, energyPerUnit: 1.2 });
     if (candidate.action === 'drink') forecast = drinkingBody(world, person, candidate.target);
     // A speculative pursuit must not displace a meal that can already be eaten.
     if (candidate.action === 'hunt' && !food && meal === 0 && huntPlan) {
       // Conditional on that visible animal remaining until the paid hunt ends.
       // The real action must still remove its identity before feeding the body.
       const meat = FOOD_PER_ANIMAL[huntPlan.victim.species], saved = Math.min(.25 - person.inventory, meat * .5);
-      assimilateFood(forecast, meat - saved, { hungerPerUnit: 4.8, energyPerUnit: 0 }); work = huntPlan.work;
+      assimilateFood(forecast, meat - saved, { hungerPerUnit: HAMBRE_POR_UNIDAD, energyPerUnit: 0 }); work = huntPlan.work;
     }
     const relief = avoidedDamageScore(person, outdoorDamage, bodilyDamage(world, person, forecast, cover), travel * 6 + work);
     candidate.score += relief;
@@ -1060,12 +1063,12 @@ function bodyAndAction(world: World, person: Person): void {
       const carried = Math.min(person.inventory, 0.002);
       person.inventory -= carried; consumed += carried;
     }
-    assimilateFood(person, consumed, { hungerPerUnit: 4.8, energyPerUnit: 1.2 });
+    assimilateFood(person, consumed, { hungerPerUnit: HAMBRE_POR_UNIDAD, energyPerUnit: 1.2 });
     if (consumed > 0 && world.tick - person.lastOutcome >= 30) outcome(world, person, 'eat', consumed * 30);
     if (person.hunger < 0.12) person.decisionAt = world.tick + 1;
   }
   if (person.action === 'drink' && distance(person, person.target) < 0.5) {
-    const needed = Math.min(0.006, person.thirst / 3);
+    const needed = Math.min(0.006, person.thirst / SED_POR_UNIDAD);
     const ambient = takeWater(world, person, needed);
     hydrateBody(person, ambient);
     if (ambient > 0 && paramsOf(world).agua.memoria < 1) person.waterMemory = { x: person.x, y: person.y };
@@ -1078,7 +1081,7 @@ function bodyAndAction(world: World, person: Person): void {
       if (person.command?.order === 'drink') { person.command = null; person.controlMode = 'auto'; }
       person.decisionAt = world.tick + 1;
       if (ambient > 0 && !person.command && beginWaterPreparation(world, person,
-        (0.00045 + (current.biome === 'desert' ? 0.0002 : 0)) * physiology.waterDemand)) {
+        (SED_POR_PASO + (current.biome === 'desert' ? 0.0002 : 0)) * physiology.waterDemand)) {
         person.reason = 'Ya bebió de la fuente local; prepara una reserva útil para cuando se aleje.';
       }
     }
@@ -1152,7 +1155,7 @@ function performWork(world: World, person: Person, tile: Tile): void {
     }
   } else if (person.action === 'hunt' && (tile.fauna ?? 0) >= 1) {
     const food = harvestAt(world,tile,person.id,event=>addEvent(world,event)); const stored = Math.min(0.25 - person.inventory, food * 0.5);
-    person.inventory += stored; assimilateFood(person, food - stored, { hungerPerUnit: 4.8, energyPerUnit: 0 }); if(food>0) count(world, 'hunts'); count(world, 'foodHarvested', food); success = food > 0;
+    person.inventory += stored; assimilateFood(person, food - stored, { hungerPerUnit: HAMBRE_POR_UNIDAD, energyPerUnit: 0 }); if(food>0) count(world, 'hunts'); count(world, 'foodHarvested', food); success = food > 0;
   } else if (person.action === 'build') {
     success=!!completeConstruction(world,person,tile,event=>addEvent(world,event));
   } else if(person.action==='invent') {
@@ -1325,6 +1328,7 @@ function transferEstate(world: World, person: Person): void {
 const ELECCION_POR_AFINIDAD = true;
 function reproduce(world: World): void {
   const pop = paramsOf(world).poblacion;
+  const ley = pop.natalidadLocal;
   if (!world.reproductionEnabled || world.people.length >= pop.maxima) return;
   // Leyes candidatas del embudo de natalidad (diagnóstico 2026-09-22). `comprobacionContinua`
   // cambia SÓLO el muestreo: en vez de mirar una vez cada `intervaloComprobacionTicks` pasos,
@@ -1334,20 +1338,34 @@ function reproduce(world: World): void {
   // fundadores (`bornAt ≤ −1200`, `genes.edadFundadoresMinDias` ≥ 0,5 días) no caen dentro
   // de ella con el intervalo por defecto.
   if (!pop.comprobacionContinua && world.tick % pop.intervaloComprobacionTicks !== 0) return;
-  const recientes = pop.comprobacionContinua
+  const recientes = ley === 0 && pop.comprobacionContinua
     ? world.people.filter(p => p.role === 'neighbor' && p.bornAt > world.tick - pop.intervaloComprobacionTicks).length : 0;
-  const cupo = pop.nacimientosPorComprobacion - recientes;
+  const cupo = ley > 0 ? Infinity : pop.nacimientosPorComprobacion - recientes;
   if (cupo <= 0) return;
   const used = new Set<string>();
-  const fit = (p: Person): boolean => !used.has(p.id) && fertile(world, p) && (!pop.exigeComunidad || !!p.communityId);
+  // El mínimo genético de recuperación es 0,8 días; este filtro barato no puede excluir a un fértil.
+  const fit = (p: Person): boolean => !used.has(p.id) && (ley === 0 || world.tick - p.lastBirth >= 0.8 * TICKS_PER_DAY)
+    && fertile(world, p) && (!pop.exigeComunidad || !!p.communityId);
   const match = (a: Person, b: Person): boolean => b !== a && fit(b) && distance(a, b) <= pop.radioPareja && (a.bonds[b.id] ?? 0) >= 0.3 && (b.bonds[a.id] ?? 0) >= 0.3 && !closeKin(a, b);
+  const memo = new Map<string, number>();
+  const xDe = (l: (typeof world.places)[number]): number => {
+    let x = memo.get(l.id);
+    if (x === undefined) { x = hacinamientoLocal(world, l, pop.radioProvision, ley); memo.set(l.id, x); }
+    return x;
+  };
   for (let n = 0; n < cupo && world.people.length < pop.maxima; n++) {
     let pair: { a: Person; b: Person } | undefined, place: (typeof world.places)[number] | undefined;
     for (const a of world.people) {
       if (!fit(a)) continue;
       const here = primeroCerca(world.places, a, pop.radioLugar + 1, p => distance(a, p) <= pop.radioLugar);
       if (!here) continue;
-      const b = chooseReproductivePartner(world, a, vecinos(world, a, pop.radioPareja + 1, p => match(a, p), 'reproduce'), ELECCION_POR_AFINIDAD);
+      const x = ley > 0 ? xDe(here) : 0;
+      if (ley > 0 && !intervaloCumplido(world, a, x)) { observadorNatalidad(world)?.bloqueo(); continue; }
+      const b = chooseReproductivePartner(world, a, vecinos(world, a, pop.radioPareja + 1, p => {
+        if (!match(a, p)) return false;
+        if (ley > 0 && !intervaloCumplido(world, p, x)) { observadorNatalidad(world)?.bloqueo(); return false; }
+        return true;
+      }, 'reproduce'), ELECCION_POR_AFINIDAD);
       if (!b) continue;
       if (!ELECCION_POR_AFINIDAD) { pair = { a, b }; place = here; break; }
       const afinidad = pairAffinity(a, b, pop.radioPareja), mejor = pair ? pairAffinity(pair.a, pair.b, pop.radioPareja) : -Infinity;
@@ -1357,6 +1375,12 @@ function reproduce(world: World): void {
     }
     if (!pair || !place) break;
     const { a, b } = pair;
+    const observador = observadorNatalidad(world);
+    if (observador) {
+      // CTRL se sondea sólo tras decidir la pareja. La sonda no participa en el embudo.
+      const presion = presionLocal(world, place, pop.radioProvision, ley > 0 ? ley : 1);
+      observador.nacimiento(ley > 0 ? xDe(place) : presion.x, presion.limitante);
+    }
     const serial=world.birthCounter+1, id=`descendant-${serial}`;
     if(!Number.isSafeInteger(serial)||[...world.people,...world.legacy,...world.retiredLegacy].some(p=>p.id===id)) throw new Error('La identidad de un nacimiento ya existe; no se gastaron reservas.');
     const genome=inheritGenome(world.seed,id,[a,b],DEFAULT_MUTATION_RATE*paramsOf(world).genes.tasaMutacion); world.birthCounter=serial;
@@ -1379,6 +1403,7 @@ function reproduce(world: World): void {
     if (a.waterMemory) child.waterMemory = { x: a.waterMemory.x, y: a.waterMemory.y };
     a.inventory -= 0.08; b.inventory -= 0.08; a.energy = clamp(a.energy - 0.08); b.energy = clamp(b.energy - 0.08); a.lastBirth = world.tick; b.lastBirth = world.tick;
     world.people.push(child);
+    if (ley > 0) memo.clear();
     // El evento de fundación de una comunidad comparte el arreglo con `group.members`
     // (society.ts). Con la comprobación periódica un nacimiento cae siempre en el mismo paso
     // que ese evento, así que empujar aquí lo extiende ANTES de que se archive y la crónica

@@ -1,3 +1,5 @@
+import { SED_POR_UNIDAD } from './ecologia-constantes.js';
+
 /** Normalized bodily needs and readiness for activity. Energy is not a thermodynamic measurement;
  * rates are per simulation tick. Species, inherited traits, age and action feasibility belong to the caller.
  */
@@ -60,7 +62,7 @@ export function assimilateFood(body: BodyState, consumed: number, profile: FoodA
 }
 
 /** consumed has already been debited; habitat moisture and potable water retain their caller's conversion. */
-export function hydrateBody(body: BodyState, consumed: number, thirstPerUnit = 3): void {
+export function hydrateBody(body: BodyState, consumed: number, thirstPerUnit = SED_POR_UNIDAD): void {
   assertBody(body);
   if (!nonnegative(consumed) || !nonnegative(thirstPerUnit)) throw new RangeError('Hidratación corporal inválida.');
   body.thirst = clamp(body.thirst - consumed * thirstPerUnit);

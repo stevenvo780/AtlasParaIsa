@@ -536,6 +536,31 @@ tipificados al día 4 y C4 (corte provisional, día 4, ventana 3) pasa de 2/4 a 
 - Con `--gobernador servidor` el tiempo del observador se descuenta del `stepMs` que decide el
   gobernador; ese modo depende del reloj y no es bit a bit reproducible con ni sin instrumentos.
 
+### 3. Natalidad local (`natalidadLocal`) y fauna (`faunaTotal`), campaña NAT-L 2026-09-23
+
+Definiciones congeladas por `docs/preregistros/2026-09-23-natalidad-local.md` (Revisión 1); las lee
+`decision-natalidad.mts`. Se escriben en CTRL y en NAT: con `poblacion.natalidadLocal` = 0 los valores
+de x vienen de una sonda pasiva con α = 1, calculada en `reproduce()` DESPUÉS de elegir la pareja, que
+no decide nada ni consume azar.
+
+- `natalidadLocal.nacimientosDia`: nacimientos del día que informa `reproduce()`.
+- `natalidadLocal.xNacimientos` {p10, p50, p90}: x = máx(W/(α·A), F/(α·C)) en el lugar de cada
+  concepción (A, C = reposición diaria de agua y comida a ≤ R; W, F = demanda diaria de las personas a
+  ≤ R con `bodilyNeedRates`). Percentil = índice ⌊(n−1)·p⌋; un x infinito se ordena al final y el
+  percentil que cae en él se escribe null; sin nacimientos, null.
+- `natalidadLocal.xFertiles`: igual, en la posición redondeada de cada mortal con `fertile` al cierre.
+- `natalidadLocal.bloqueadasPorLey`: cada `a` que la ley rechaza y cada candidato `b` que pasó `match`
+  pero no el intervalo; las reevaluaciones del mismo paso vuelven a contar. 0 con α = 0.
+- `natalidadLocal.kOcupado` {agua, comida}: reposición de la unión de discos de radio R alrededor de
+  los mortales vivos (cada tesela y cisterna una vez); `nSobreKOcupado` = máx(W/A, F/C) con la demanda
+  de TODAS las personas vivas (S e I incluidos), null si falta reposición con demanda.
+- `natalidadLocal.limitante` {agua, comida}: fracción de los nacimientos del día cuyo término máximo
+  fue el agua o la comida (empate: agua).
+- `faunaTotal` (también con `--instrumentos no`): animales vivos de las zonas activas
+  (`world.animals`, de la que `tile.fauna` es espejo) más los congelados en chunks en reposo.
+- Garantía: el observador vive fuera del mundo (no se serializa); `tests/natalidad-integracion.test.ts`
+  comprueba el mismo digesto con y sin él, con α = 0 y α = 1.
+
 ## Diagnóstico de disputas (`diagnostico-disputas.ts`, hipótesis CONFL 2026-09-22)
 
 ```sh

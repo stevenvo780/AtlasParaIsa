@@ -10,8 +10,12 @@ import type { LegacyRecord } from '../shared/demography.js';
 import { bindTechnologyCatalogue, type TechnologyCatalogueReader } from './technology-catalogue.js';
 import { lastTileAt, splitTileBlocks, tileIndexAppended } from './tile-index.js';
 
+/** Observador de laboratorio de la natalidad local (NAT-L): solo lee; vive en el contexto, no en el mundo. */
+export interface ObservadorNatalidad { nacimiento(x: number, limitante: 'agua' | 'comida'): void; bloqueo(): void }
 export interface WorldContext {
   loadChunk?: (key: string, atTick: number) => Chunk | null;
+  /** Se copia a cada clon del paso (`cloneWorld`) con el resto del contexto; null lo retira. */
+  observadorNatalidad?: ObservadorNatalidad | null;
   catalogueReader?: TechnologyCatalogueReader;
   loadLegacy?: (id: string, atTick: number) => LegacyRecord | null;
 }

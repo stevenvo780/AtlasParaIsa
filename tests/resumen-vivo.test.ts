@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { createWorld, stepWorld, type World } from '../src/world/index.js';
 import { digestoCanonico } from '../src/world/digesto.js';
 import { demographicTraits } from '../src/world/demography.js';
-import { paramsOf } from '../src/world/params.js';
+import { paramsOf, parseParams } from '../src/world/params.js';
 import { RAZON_CORTEJO, RAZON_PREPARA, RAZON_REUNION, RESERVA_PARA_CRIAR, aQuienBusca, fertilidad, resumenNatalidad, resumenVivo } from '../src/server/resumen-vivo.js';
 import { enriquecerPersona } from '../src/server/persona-extra.js';
 
@@ -43,6 +43,24 @@ test('M4: el resumen de natalidad coincide con un recuento a mano y su tamaño n
   // Medido 2026-09-23: 202 B antes; 267 B con el cupo, la ventana y la habituación (+65 B cada 50 pasos).
   const bytes = Buffer.byteLength(JSON.stringify(resumenVivo(world)));
   assert.ok(bytes < 290, `el resumen pesa ${bytes} B`);
+});
+
+test('14: el resumen anuncia natalidad local y omite el cupo cuando está activa', () => {
+  const world = createWorld(51926, parseParams('poblacion.natalidadLocal=1,poblacion.radioProvision=24'));
+  const ley = resumenNatalidad(world).ley;
+  assert.equal(ley.natalidadLocal, 1);
+  assert.equal(ley.radioProvision, 24);
+  assert.equal(ley.cupo, undefined);
+  assert.equal(ley.ventana, undefined);
+  assert.equal(ley.continua, undefined);
+  world.tick = 5000;
+  const person = world.people.find(p => p.role === 'neighbor')!;
+  person.demography.age = world.tick - person.bornAt;
+  person.lastBirth = -100000; person.inventory = 0.2;
+  person.hunger = person.thirst = person.fatigue = 0.05; person.energy = 0.95;
+  world.structures = [];
+  for (const tile of world.tiles) { tile.feature = 'none'; tile.biome = 'grassland'; tile.moisture = tile.vegetation = tile.food = 0; }
+  assert.equal(fertilidad(world, person).bloqueo, 'natalidad-local');
 });
 
 test('M4: consultar la natalidad y las fichas no cambia el mundo ni su trayectoria', () => {

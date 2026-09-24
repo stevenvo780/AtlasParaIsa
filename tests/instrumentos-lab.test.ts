@@ -1,7 +1,7 @@
 import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { closeSync, mkdtempSync, openSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../src/server/store.js';
@@ -33,7 +33,7 @@ const CLAVES_ANTIGUAS = new Set([
   'cooperacionAcumuladaPorTipo', 'otrasCooperacionesAcumuladas', 'conflictosAcumulados',
   'p50Ms', 'p95Ms', 'rss',
 ]);
-const CLAVES_NUEVAS = ['diversidadConductaTiempo', 'diversidadConductaTiempoComponentes', 'diversidadConductaActiva', 'diversidadConductaActivaComponentes', 'diversidadConductaComponentes', 'diversidadConductaVentana', 'diversidadConductaVentanaComponentes', 'personasVentana', 'repartoTiempoPorAccion', 'repartoActividadPorAccion'];
+const CLAVES_NUEVAS = ['diversidadConductaTiempo', 'diversidadConductaTiempoComponentes', 'diversidadConductaActiva', 'diversidadConductaActivaComponentes', 'diversidadConductaComponentes', 'diversidadConductaVentana', 'diversidadConductaVentanaComponentes', 'personasVentana', 'repartoTiempoPorAccion', 'repartoActividadPorAccion', 'vocacionVarianza', 'vocacionEntropiaArgmax', 'vocacionCoincidencia', 'diversidadConductaVentanaGen1', 'approachHogar', 'maderaMediaAdultos', 'piedraMediaAdultos', 'muertesMenores8Dias', 'cambiosHogar', 'diversidadPerfilesJS', 'linajesVivos', 'linajesHerfindahl'];
 
 type Json = Record<string, unknown>;
 const readJson = (path: string): Json => JSON.parse(readFileSync(path, 'utf8')) as Json;
@@ -203,10 +203,16 @@ test('CLI: réplica corta con y sin instrumentos — digestoCanonico idéntico y
   assert.ok(Number.isInteger(foodShared) && foodShared > 0);
 });
 
-test('CLI: --instrumentos acepta solo "si"|"no"', t => {
+test('CLI: --instrumentos acepta solo "si"|"no"', async t => {
   const dir = mkdtempSync(join(tmpdir(), 'atlas-instr-cli-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
-  const r = spawnSync(process.execPath, ['--import', 'tsx', 'scripts/lab/replica.ts', '--seed', '1', '--dias', '1', '--instrumentos', 'quizas', '--salida', dir], { encoding: 'utf8' });
+  const r = await new Promise<{ status: number | null; stderr: string }>((resolve, reject) => {
+    const errores = join(dir, 'stderr');
+    const err = openSync(errores, 'w');
+    const hijo = spawn(process.execPath, ['--import', 'tsx', 'scripts/lab/replica.ts', '--seed', '1', '--dias', '1', '--instrumentos', 'quizas', '--salida', dir], { stdio: ['ignore', 'ignore', err] });
+    hijo.on('error', reject);
+    hijo.on('close', status => { closeSync(err); resolve({ status, stderr: readFileSync(errores, 'utf8') }); });
+  });
   assert.notEqual(r.status, 0);
   assert.match(r.stderr, /--instrumentos si\|no/);
 });

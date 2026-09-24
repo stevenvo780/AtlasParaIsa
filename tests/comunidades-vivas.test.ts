@@ -56,6 +56,10 @@ function digestoSinLaClave(world: World): string {
   // midieron los hashes; con su valor 0 no actúa, así que también se quita de la forma.
   assert.equal(antes.social.memoriaDisputa, 0);
   delete antes.social.memoriaDisputa;
+  assert.equal(antes.social.hogarTrabajo, 0);
+  delete antes.social.hogarTrabajo;
+  // Campaña C8 (H-A, `conducta.vocacion`/`vocacionTope`): claves posteriores a la medida; con ε = 0 no actúan.
+  { const c = (antes as unknown as { conducta: Record<string, unknown> }).conducta; assert.equal(c.vocacion, 0); assert.equal(c.vocacionTope, 0.9); delete c.vocacion; delete c.vocacionTope; }
   setParams(world, antes as unknown as WorldParams);
   const version = world.version;
   // La referencia V10 mide este mismo estado; sólo normalizamos su etiqueta al hashear.

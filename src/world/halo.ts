@@ -176,7 +176,7 @@ export const ALCANCES: readonly Alcance[] = [
   a('asentamiento.lugares', 'lugares', 'entrada', 6, 'society.ts', 'settlementOpportunity', ['const nearby = filtrarCerca(world.places, person, 7, p=>distance(person,p)<=6).map(p=>({place:p,quality:viable(p)}))',
     '.sort((a,b)=>b.quality-a.quality || distance(person,a.place)-distance(person,b.place));']),
   ...(['asentamiento.hogar', 'asentamiento.lugares'] as const).flatMap(centro => [
-    a(`${centro}.teselas`, 'teselas', centro, 4, 'society.ts', 'settlementOpportunity', ['for (let dy=-4;dy<=4;dy++) for (let dx=-4;dx<=4;dx++) {', 'if (dx*dx+dy*dy>16) continue;', 'const tile = tileAt(world,{x:place.x+dx,y:place.y+dy});']),
+    a(`${centro}.teselas`, 'teselas', centro, 4, 'society.ts', 'settlementOpportunity', ['for (let dy=-4;dy<=4;dy++) for (let dx=-4;dx<=4;dx++) {', 'if (dx*dx+dy*dy>16) continue;', 'const tile = tileAt(world,{x:place.x+dx,y:place.y+dy});', 'if (r > 0 && tile) { wood += tile.wood ?? 0; stone += tile.stone ?? 0; fauna += tile.fauna ?? 0; }']),
     a(`${centro}.estructuras`, 'estructuras', centro, 4, 'society.ts', 'settlementOpportunity', ['const facilities = filtrarCerca(world.structures, place, 5, s=>distance(s,place)<=4 && s.condition>0.1);']),
     a(`${centro}.personas`, 'personas', centro, 6, 'society.ts', 'settlementOpportunity', ["const peers = vecinos(world, place, 7, p=>p!==person && distance(p,place)<=6, 'settlementOpportunity');"]),
   ]),

@@ -85,7 +85,12 @@ export interface WorldParams {
     /** Ventaja comparativa heredable (DIV, 2026-09-22), `index.ts` → `choose`: sin urgencias
      * corporales (sed, hambre y cansancio ≤ 0,5), cada OFICIO suma `aptitud · (rasgo del oficio −
      * media de los cinco rasgos de la persona)`. 0 = hoy. */
-    aptitud: number };
+    aptitud: number;
+    /** Error de copia de la vocación heredada por oficio (H-A). 0 apaga la ley y no añade
+     * estado ni consume azar. Sólo altera oficios de linaje en contexto listo. */
+    vocacion: number;
+    /** Cota absoluta de cada componente de vocación; inerte con `vocacion=0`. */
+    vocacionTope: number };
   /** `social.maxComunidades`: tope de FUNDACIÓN de comunidades (`society.ts`), regla de conducta separada
    * de la admisión `limites.comunidades` (revisión de T100, 2026-09-22). */
   social: { maxComunidades: number; disputaNecesidad: number; disputaEscasez: number; disputaRadio: number; disputaDestino: number; disputaEspera: number;
@@ -105,7 +110,11 @@ export interface WorldParams {
      * o cazar le parece `memoriaDisputa` celdas más lejos: prefiere otra que perciba, y si no hay otra vuelve.
      * 0 = conducta histórica (cede quien llega a la comprobación, espera treinta pasos inmóvil y no
      * recuerda nada); reglas 11 adopta 8 para mundos nuevos. */
-    memoriaDisputa: number };
+    memoriaDisputa: number;
+    /** Hogar por rendimiento marginal (H-B, 2026-09-23): reduce la provisión percibida de cada
+     * lugar según la madera, piedra y fauna a ≤ 4 celdas. 0 conserva la elección histórica;
+     * 1 aplica toda la reducción cuando ya no quedan insumos locales. */
+    hogarTrabajo: number };
 }
 
 function deepFreeze<T>(value: T): T {
@@ -142,9 +151,9 @@ const RAW_HISTORICAL: WorldParams = {
   // (`index.ts` no descuenta saciedad; `society.ts` usa 0,65 / ×1 / 2 celdas / 0,5 de
   // destino / 180 ticks de espera / sin rareza / 0,35 de confianza / 0,2 de distancia
   // cultural), así que abrirlas no cambia el mundo.
-  conducta: { habituacion: 0, aptitud: 0 },
+  conducta: { habituacion: 0, aptitud: 0, vocacion: 0, vocacionTope: 0.9 },
   social: { maxComunidades: 8, disputaNecesidad: 0.65, disputaEscasez: 1, disputaRadio: 2, disputaDestino: 0.5, disputaEspera: 180,
-    ensenanzaRareza: 0, confianzaSalida: 0.35, distanciaAlternativa: 0.2, vinculoConvivencia: 0, radioConvivencia: 0, memoriaDisputa: 0 },
+    ensenanzaRareza: 0, confianzaSalida: 0.35, distanciaAlternativa: 0.2, vinculoConvivencia: 0, radioConvivencia: 0, memoriaDisputa: 0, hogarTrabajo: 0 },
 };
 
 /**
@@ -191,7 +200,8 @@ export const DEFAULT_PARAMS: WorldParams = deepFreeze(RAW_DEFAULTS);
  * `RULES_11_ADOPTED` conservan aquí 0,65/1/2/0. Las demás claves añadidas la
  * noche del 2026-09-22 mantienen su valor histórico:
  * `genes.edadFundadoresMin/MaxDias` 2/2, `poblacion.radioPareja` 3, `poblacion.radioLugar` 4,
- * `agua.memoria` 1, `conducta.aptitud` 0, `social.*` (disputas 0,65/×1/2/0,5/180, rareza 0, confianza
+ * `agua.memoria` 1, `conducta.aptitud/vocacion` 0, `conducta.vocacionTope` 0,9, `social.*`
+ * (disputas 0,65/×1/2/0,5/180, rareza 0, confianza
  * 0,35, distancia 0,2, `maxComunidades` 8, `vinculoConvivencia` 0, `radioConvivencia` 0).
  *
  * Única excepción deliberada: `gobernador.politica` vale `techo` también aquí. El gobernador no es
@@ -289,6 +299,8 @@ export const PARAM_RANGES: Record<string, [number, number]> = {
   // ni de los actos de vínculo). Rasgo menos media de los cinco cae en [−0,8, 0,8], así que con
   // el máximo 2 la ley mueve un oficio a lo sumo ±1,6, la escala de `habituacion`.
   'conducta.aptitud': [0, 2],
+  'conducta.vocacion': [0, 1],
+  'conducta.vocacionTope': [0, 2],
   'social.disputaNecesidad': [0.1, 1],
   'social.disputaEscasez': [0.1, 20],
   'social.disputaRadio': [1, 8],
@@ -308,6 +320,8 @@ export const PARAM_RANGES: Record<string, [number, number]> = {
   // Penalización, en celdas, de la fuente donde se cedió una disputa. La percepción llega a 7 celdas:
   // con ≥ 8 cualquier otra fuente percibida va antes; el máximo 32 es «nunca, si hay otra». 0 apaga la ley.
   'social.memoriaDisputa': [0, 32],
+  // 0 conserva la provisión histórica; 1 deja que la falta de trabajo local la reduzca por completo.
+  'social.hogarTrabajo': [0, 1],
 };
 
 type ScalarDescriptor = { kind: 'number'; range: readonly [number, number]; integer?: boolean }

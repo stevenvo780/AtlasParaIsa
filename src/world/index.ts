@@ -71,6 +71,8 @@ export interface Person extends PersonView {
   home?: { x: number; y: number; quality: number; observedAt: number };
   /** Ley candidata `agua.memoria`: último lugar donde bebió agua del entorno. Sólo existe con la ley activa. */
   waterMemory?: { x: number; y: number };
+  /** H-A: vector heredado sólo por descendientes cuando la ley está activa. */
+  vocacion?: Record<string, number>;
   /** Ley candidata `social.memoriaDisputa` (CONFL): fuente donde cedió su última disputa y paso en que la cedió.
    * Sólo existe con la ley activa; se olvida un día después. */
   conflictMemory?: { x: number; y: number; tick: number };
@@ -300,6 +302,31 @@ const RASGO_DEL_OFICIO: Partial<Record<Action, keyof NonNullable<PersonView['tra
   gather: 'industriousness', farm: 'industriousness', build: 'industriousness', repair: 'industriousness', craft: 'industriousness',
   hunt: 'resilience', share: 'care', cooperate: 'sociability',
 };
+/** Oficios heredables del mapa de aptitudes; explorar queda fuera del preregistro H-A. */
+export const OFICIOS_DE_LINAJE = Object.freeze((Object.keys(RASGO_DEL_OFICIO) as Action[])
+  .filter((action): action is Exclude<Action, 'explore'> => action !== 'explore'));
+
+/** Copia uniparental con error local por identidad y proyección acotada a suma cero. */
+export function heredarVocacion(seed: number, id: string, progenitor: Pick<Person, 'vocacion'>,
+  epsilon: number, tope: number): Record<string, number> {
+  const azar = localRandom(seed, `vocacion:${id}`);
+  const bruto = OFICIOS_DE_LINAJE.map(oficio => (progenitor.vocacion?.[oficio] ?? 0) + epsilon * (2 * azar() - 1));
+  const media = bruto.reduce((suma, valor) => suma + valor, 0) / bruto.length;
+  const centrado = bruto.map(valor => valor - media);
+  if (tope === 0) return Object.fromEntries(OFICIOS_DE_LINAJE.map(oficio => [oficio, 0]));
+  // La traslación común preserva el orden de preferencias y permite recortar cada componente.
+  let inferior = Math.min(...centrado) - tope, superior = Math.max(...centrado) + tope;
+  for (let n = 0; n < 80; n++) {
+    const medio = (inferior + superior) / 2;
+    const suma = centrado.reduce((total, valor) => total + Math.max(-tope, Math.min(tope, valor - medio)), 0);
+    if (suma > 0) inferior = medio; else superior = medio;
+  }
+  const proyectado = centrado.map(valor => Math.max(-tope, Math.min(tope, valor - (inferior + superior) / 2)));
+  const residuo = proyectado.reduce((suma, valor) => suma + valor, 0);
+  const corregible = proyectado.findIndex(valor => valor - residuo >= -tope && valor - residuo <= tope);
+  if (corregible >= 0) proyectado[corregible] = proyectado[corregible]! - residuo;
+  return Object.fromEntries(OFICIOS_DE_LINAJE.map((oficio, n) => [oficio, proyectado[n]!]));
+}
 /** Ventaja comparativa de `traits` en `action` (ley DIV): el rasgo del oficio menos la media de los
  * cinco rasgos de la MISMA persona. Suma cero sobre los cinco rasgos: quien es bueno en todo no
  * gana nada por serlo, sólo ordena sus oficios; 0 para lo que no es un oficio. Pura y exportada
@@ -811,6 +838,11 @@ function choose(world: World, person: Person): void {
       if (candidate === candidates[0] || !RASGO_DEL_OFICIO[candidate.action]) continue;
       candidate.score += aptitud * ventajaComparativa(person.traits, candidate.action);
     }
+  }
+  const epsilonVocacion = paramsOf(world).conducta.vocacion;
+  if (epsilonVocacion > 0 && person.role === 'neighbor' && person.vocacion && person.thirst <= 0.5 && person.hunger <= 0.5 && person.fatigue <= 0.5) {
+    for (const candidate of candidates) if (OFICIOS_DE_LINAJE.includes(candidate.action as typeof OFICIOS_DE_LINAJE[number]))
+      candidate.score += person.vocacion[candidate.action] ?? 0;
   }
   if (person.command && person.hunger < 0.85 && person.thirst < 0.85 && person.fatigue < 0.88 && person.energy > 0.15) {
     const command = person.command;
@@ -1339,6 +1371,9 @@ function reproduce(world: World): void {
       technology: initialTechnologyKnowledge(), demography: initialDemography(),
     };
     delete child.home;
+    delete child.vocacion;
+    const leyVocacion = paramsOf(world).conducta;
+    if (leyVocacion.vocacion > 0) child.vocacion = heredarVocacion(world.seed, id, a, leyVocacion.vocacion, leyVocacion.vocacionTope);
     // `agua.memoria`: la cría nace junto a sus padres y conserva el aguadero de `a` (copiado arriba con el
     // resto de su estado); es información, no agua: si está seco lo olvidará al verlo, como cualquiera.
     if (a.waterMemory) child.waterMemory = { x: a.waterMemory.x, y: a.waterMemory.y };
@@ -1674,6 +1709,7 @@ export function assertWorld(value: unknown, expectedVersion = RULES_VERSION, con
     }
     if (!['ready','hungry','thirsty','tired'].includes(p.intentContext)) fail();
     if (!p.traits || !['curiosity','sociability','industriousness','care','resilience'].every(k => typeof p.traits[k as keyof typeof p.traits] === 'number') || !numericMap(p.traits, 0, 1, 5) || !numericMap(p.skills, 0, 1, expectedVersion>=5?18:15) || !numericMap(p.values, -0.3, 0.3, expectedVersion>=5?72:60) || !numericMap(p.activity, 0, 1_000_000, expectedVersion>=5?18:15) || !p.materials || !Number.isFinite(p.materials.wood) || p.materials.wood < 0 || p.materials.wood > 12 || !Number.isFinite(p.materials.stone) || p.materials.stone < 0 || p.materials.stone > 8 || !Array.isArray(p.visited) || p.visited.length > 192 || !p.visited.every(k => typeof k === 'string' && /^-?\d+,-?\d+$/.test(k)) || !Number.isFinite(p.heading) || !Number.isSafeInteger(p.work) || p.work < 0 || p.work > (expectedVersion>=4?600:90) || !Number.isSafeInteger(p.lastOutcome) || p.lastOutcome < 0 || p.lastOutcome > w.tick || !['auto','directed'].includes(p.controlMode)) fail();
+    if (p.vocacion !== undefined && !numericMap(p.vocacion, -paramsOf(w).conducta.vocacionTope, paramsOf(w).conducta.vocacionTope, OFICIOS_DE_LINAJE.length)) fail();
     if (p.command !== null && (!p.command || !['move','explore','gather','farm','build','rest','hunt','drink','cooperate',...(expectedVersion>=4?['invent','repair']:[]), ...(expectedVersion>=5?['research','craft','forage']:[])].includes(p.command.order) || !validCoordinate(p.command.x) || !validCoordinate(p.command.y))) fail();
     if ((p.command === null) !== (p.controlMode === 'auto')) fail();
   }

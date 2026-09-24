@@ -42,6 +42,10 @@ function digestoSinLaClave(world: World): string {
   const vigentes = paramsOf(world);
   const antes = structuredClone(vigentes) as unknown as { social: Record<string, unknown> };
   delete antes.social.memoriaDisputa;
+  assert.equal(antes.social.hogarTrabajo, 0);
+  delete antes.social.hogarTrabajo;
+  // Campaña C8 (H-A, `conducta.vocacion`/`vocacionTope`): claves posteriores a la medida; con ε = 0 no actúan.
+  { const c = (antes as unknown as { conducta: Record<string, unknown> }).conducta; assert.equal(c.vocacion, 0); assert.equal(c.vocacionTope, 0.9); delete c.vocacion; delete c.vocacionTope; }
   setParams(world, antes as unknown as WorldParams);
   try { return digestoCanonico(world); } finally { setParams(world, vigentes); }
 }

@@ -10,6 +10,79 @@
 > sus runbooks y los bancos de un solo uso se retiraron de main y se conservan en el tag
 > `archivo/campanas-20260922`; las evidencias JSON que produjeron siguen en `docs/evidencia-2026-09-22/`.
 
+## 24 de septiembre de 2026 (noche) — V11 publicado, C8 v3 auditado, NAT-L refutada en el cribado
+
+Resumen y decisión pendiente en [REVISION-2026-09-24](REVISION-2026-09-24.md). Fuentes: bitácora del laboratorio;
+[`decision-c8-d20.json`](evidencia-2026-09-24/decision-c8-d20.json),
+[`decision-nat1.json`](evidencia-2026-09-24/decision-nat1.json) y
+[`criterio-f1c-d60.json`](evidencia-2026-09-24/criterio-f1c-d60.json) (evaluadores congelados); salidas de los
+workflows en `/datos/tmp-atlas-lab/c8-ciclo2/` (local).
+
+### 1. Los tres criterios de TERMINADO, hoy
+
+| Criterio | Estado | Cifra clave |
+|---|---|---|
+| (1) Mayoría de C1–C8 en el laboratorio | no cumple | C1–C7 sí: gemelo 51926 a 60 días ✓✓✓✓✓✓✓, y la mayoría de semillas del panel C8 el día 20. C8 v3 falla en todas, y la auditoría concluye que un mundo sano estacionario no lo aprueba más que por azar (0/13 controles con ≥ 56 días; nulo estacionario 0,8 %) |
+| (2) El mundo publicado corre esas reglas y se ve vivo | sí para C1–C7 | V11 (reglas 11, las del gemelo que cumple C1–C7) publicado el 24-09 02:35 con mundo nuevo; 17 habitantes y el primer nacimiento a los 600 pasos ([contrato](evidencia-2026-09-24/publication-v11.json)) |
+| (3) EVIDENCIA lo cuenta con cifras | esta sección | — |
+
+### 2. Gemelo del público a 60 días (SEM2-51926, reglas 11, límites del anfitrión, sin techo)
+
+631 vecinos mortales el día 60; 1 910 nacimientos; generaciones mortales 11–18 vivas; muertes: senescencia 1 068,
+exposición 205, sed 20, hambre 0; 5 770 conflictos acumulados. C1–C7 cumplen. C8 falla (Mann-Kendall S = −598,
+p = 0,9999; Sen×55 = −0,068).
+
+### 3. C8 ciclo 1, corte del día 20 (evaluador congelado)
+
+| Brazo | Seguras | Salida | Causa |
+|---|---|---|---|
+| VOC (vocación de linaje) | 7/12 | DETENER | nacimientos < 0,8× CTRL2 en 2003 (114/159), 2004 (32/329), 2005 (9/80), 2008 (120/171) y 2009 (300/408); cooperación 535/11 896 (2004) y 146/1 986 (2005) |
+| VOCHOG | 7/12 | DETENER | la misma |
+| HOG (hogar por rendimiento marginal) | 11/12 | continúa hasta el día 60 | idéntico a CTRL2 en 5/12 (madera ×1,00, ganancia 0) |
+
+Identidad CTRL/CTRL2: 152 días, 0 diferencias. Mecanismo del daño: la suma cero de la vocación restaba a
+cooperate/share (2004 día 20: 0,032 frente a 0,115 del tiempo), la infraestructura de reparto de la reproducción.
+
+### 4. NAT-L, Etapa 1 (cribado de 20 días): DETENER
+
+Nacimientos NAT/CTRL: 4101 61/123, 4102 0/10 (NAT extinta), 4103 64/26, 4104 35/173. La ley frena en los lugares
+secos (A = 0 → x = ∞): la gente fértil vive donde x es bajo (xFertiles.p50 0,03–0,33). R = 24 recupera 4101
+(125/123) pero no 4104 (46/173). La Etapa 2 no se lanzó. Antes del cribado, una revisión adversarial (19 agentes)
+confirmó y corrigió tres defectos: teselas dormidas contadas como 0, fauna dormida no contada y un umbral
+asimétrico del evaluador.
+
+### 5. C8 ciclo 2: cinco diseños descartados antes de lanzarse
+
+| Diseño | P(éxito) del crítico | Medido por el crítico en una copia aislada |
+|---|---|---|
+| Pioneros (colonización por hacinamiento) | 0,02 | el approach que crece con la densidad no es la vuelta a casa; no hay pendiente tras el día 25 |
+| Costumbre de casa (crianza oblicua) | 0,03 | +0,008 de ganancia con la costumbre ya madura |
+| Etapas vitales (explorar de joven, explotar de viejo) | 0,04 | va contra la tendencia: la fracción juvenil es máxima al principio |
+| Círculos de convivencia con oficio propio | 0,01 | ΔV −0,019/−0,013; los círculos convergen (0,29 → 0,09); la disolución corta la vía de familia |
+| Oficio de plaza | 0,02 | ΔV media −0,030 en 6 semillas; empuja hacia research |
+
+### 6. Auditoría de C8 v3 (solo datos)
+
+- Controles vivos con al menos 56 días: 0/13 aprueban (subidas −0,133 … +0,037).
+- Nulo estacionario con la estructura real: 0,8 % (4,4 % sin el transitorio de fundación).
+- Efecto necesario: rampa mediana de +0,10 después del día 25 (+0,045 sin el transitorio).
+- Única aprobación en 27 controles: CTRL2-2005 con D = 51, tras casi extinguirse (8–20 habitantes en los días
+  5–14).
+- Artefactos:
+  - transitorio de fundación dentro de la ventana;
+  - el oficio dominante del día (argmax sobre 18 etiquetas) pesa el 60 % del índice;
+  - grupos saturados (tecnología 0,04–0,11, lugares 0,79–0,83);
+  - la corrección Hamed-Rao castiga los saltos.
+- Comunidades medidas esta noche:
+  - público V10: 702 personas en una sola comunidad;
+  - réplicas de reglas 11: 3–4 comunidades de 100–320 personas.
+
+### 7. Otros resultados verificados
+
+- Arte del suelo por campo con umbral (bordes orgánicos de biomas, desgaste y orillas; agua sin cuadros; velo
+  de reposo difuminado). Capturas antes/después en `/datos/tmp-atlas-lab/arte/biomas/` (local). Suite sin fallos
+  reales; coste por píxel 1,35×. Servido en V11.
+
 ## 23 de septiembre de 2026 — balance medido del criterio de 60 días (C8 v3)
 
 Este balance corresponde al criterio 3 de TERMINADO: «EVIDENCIA cuenta con cifras qué se logró y qué

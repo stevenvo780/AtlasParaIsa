@@ -1,0 +1,145 @@
+{
+  "etapa": 1,
+  "entrada": "/datos/tmp-atlas-lab/datos-lab/nat1",
+  "decision": "DETENER",
+  "motivos": [
+    "semilla 4101: nacimientos 61 < 0,5 × 123",
+    "semilla 4102: NAT extinta y CTRL viva",
+    "semilla 4102: nacimientos 0 < 0,5 × 10",
+    "semilla 4104: nacimientos 35 < 0,5 × 173"
+  ],
+  "semillas": [
+    {
+      "semilla": 4101,
+      "nacimientosNat": 61,
+      "nacimientosCtrl": 123,
+      "sedNat": 5,
+      "sedCtrl": 2,
+      "xNacimientosMediana": 0.1481858867100047,
+      "extintaNat": false,
+      "extintaCtrl": false,
+      "incompletos": [],
+      "sensibilidad": [
+        {
+          "brazo": "NATR12-4101",
+          "poblacionDia20": 27,
+          "nacimientos": 34,
+          "sed": 3,
+          "xNacimientosMediana": 0.2391032602423943,
+          "extinta": false,
+          "alarma": false,
+          "incompletos": []
+        },
+        {
+          "brazo": "NATR24-4101",
+          "poblacionDia20": 109,
+          "nacimientos": 125,
+          "sed": 2,
+          "xNacimientosMediana": 0.318990990939466,
+          "extinta": false,
+          "alarma": false,
+          "incompletos": []
+        }
+      ]
+    },
+    {
+      "semilla": 4102,
+      "nacimientosNat": 0,
+      "nacimientosCtrl": 10,
+      "sedNat": 4,
+      "sedCtrl": 5,
+      "xNacimientosMediana": null,
+      "extintaNat": true,
+      "extintaCtrl": false,
+      "incompletos": [],
+      "sensibilidad": [
+        {
+          "brazo": "NATR12-4102",
+          "poblacionDia20": 2,
+          "nacimientos": 0,
+          "sed": 4,
+          "xNacimientosMediana": null,
+          "extinta": true,
+          "alarma": false,
+          "incompletos": []
+        },
+        {
+          "brazo": "NATR24-4102",
+          "poblacionDia20": 2,
+          "nacimientos": 0,
+          "sed": 4,
+          "xNacimientosMediana": null,
+          "extinta": true,
+          "alarma": false,
+          "incompletos": []
+        }
+      ]
+    },
+    {
+      "semilla": 4103,
+      "nacimientosNat": 64,
+      "nacimientosCtrl": 26,
+      "sedNat": 3,
+      "sedCtrl": 5,
+      "xNacimientosMediana": 0.12124648210149652,
+      "extintaNat": false,
+      "extintaCtrl": false,
+      "incompletos": [],
+      "sensibilidad": [
+        {
+          "brazo": "NATR12-4103",
+          "poblacionDia20": 7,
+          "nacimientos": 12,
+          "sed": 5,
+          "xNacimientosMediana": null,
+          "extinta": false,
+          "alarma": false,
+          "incompletos": []
+        },
+        {
+          "brazo": "NATR24-4103",
+          "poblacionDia20": 40,
+          "nacimientos": 47,
+          "sed": 3,
+          "xNacimientosMediana": 0.12613677272417317,
+          "extinta": false,
+          "alarma": false,
+          "incompletos": []
+        }
+      ]
+    },
+    {
+      "semilla": 4104,
+      "nacimientosNat": 35,
+      "nacimientosCtrl": 173,
+      "sedNat": 7,
+      "sedCtrl": 13,
+      "xNacimientosMediana": 0.3567212309329905,
+      "extintaNat": false,
+      "extintaCtrl": false,
+      "incompletos": [],
+      "sensibilidad": [
+        {
+          "brazo": "NATR12-4104",
+          "poblacionDia20": 13,
+          "nacimientos": 15,
+          "sed": 5,
+          "xNacimientosMediana": 0.26046204842047904,
+          "extinta": false,
+          "alarma": false,
+          "incompletos": []
+        },
+        {
+          "brazo": "NATR24-4104",
+          "poblacionDia20": 29,
+          "nacimientos": 46,
+          "sed": 7,
+          "xNacimientosMediana": 0.11277271240805037,
+          "extinta": false,
+          "alarma": false,
+          "incompletos": []
+        }
+      ]
+    }
+  ]
+}

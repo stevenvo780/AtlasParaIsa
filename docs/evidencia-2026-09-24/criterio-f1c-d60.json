@@ -1,0 +1,557 @@
+{
+  "criterio": "En el laboratorio, la mayoría de semillas mantiene población y recambio durante al menos 60 días simulados con varias generaciones vivas, más de un tipo de cooperación relevante, conflictos y muertes con causa legible, tecnología que se transmite y diversidad de conducta creciente.",
+  "conjunto": "/datos/tmp-atlas-lab/datos-lab/f1c",
+  "diaPedido": 60,
+  "dia": 60,
+  "ventana": {
+    "desde": 51,
+    "hasta": 60,
+    "dias": 10
+  },
+  "umbrales": {
+    "dia": 60,
+    "ventana": 10,
+    "poblacionMin": 16,
+    "nacimientosMin": 1,
+    "fundadoresMax": 1,
+    "generacionesMin": 3,
+    "coopTiposMin": 2,
+    "coopFraccionMin": 0.1,
+    "coopActosMin": 5,
+    "conflictosMin": 1,
+    "causasMin": 2,
+    "causasConocidas": [
+      "starvation",
+      "dehydration",
+      "exposure",
+      "senescence"
+    ],
+    "usoAjenoMin": 0.15,
+    "diasUsoAjenoMin": 0.5,
+    "usosConAutorMin": 20,
+    "diaBaseDiversidad": 5,
+    "pendienteMin": 0,
+    "diversidadRegla": "mk",
+    "diversidadCampo": "auto",
+    "subidaMin": 0.02,
+    "correccionMk": "hamed-rao-ar1",
+    "mayoria": 0.5,
+    "estancadaHoras": 3
+  },
+  "descripcionCriterios": {
+    "supervivencia": "poblacion ≥ 16 todos los días de la ventana",
+    "recambio": "nacimientos en la ventana ≥ 1 y fundadoresMortalesVivos(D) ≤ 1",
+    "generaciones": "generaciones mortales vivas(D) ≥ 3 (lista de enteros ≥ 0 distintos; si no, desconocido)",
+    "cooperacion": "≥ 2 tipos de {teaching, trade, constructionHelp, foodShared} con ≥ 10 % de los actos tipificados de la ventana y ≥ 5 actos (otras claves no cuentan)",
+    "conflictos": "conflictos en la ventana ≥ 1",
+    "muertes": "0 muertes fuera de {starvation, dehydration, exposure, senescence}, ≥ 2 causas distintas en los días 1..D y balance población = nacimientos − muertes desde el día 0",
+    "tecnologia": "usos de inventor ajeno / usos útiles con autor en la ventana ≥ 0.15 y uso ajeno en ≥ 50 % de sus días (con < 20 usos con autor conocido ⇒ desconocido; ninguno útil ⇒ falla)",
+    "diversidad": "diversidadConductaVentana [preregistro v3] (si falta, diversidadConductaActiva; si falta, diversidadConductaTiempo; si falta, diversidadConducta) días 5..D: Mann-Kendall unilateral creciente p < 0.05 (≥ 10 días con dato; Var(S) corregida por autocorrelación: hamed-rao-ar1) y subida de Sen (pendiente × (D − 5)) ≥ 0.02 [preregistro v2]; con huecos en el medio, «cumple» solo si se sostiene con los días que faltan en su valor más desfavorable; las reglas v1 se informan, no deciden; índice fuera de [0, 1] ⇒ desconocido; dato en < 80 % de los días del tramo ⇒ desconocido; sin dato el día D o algún día de los dos bloques extremos ⇒ desconocido; serie constante (amplitud ≤ 1e-9, relativa) ⇒ falla"
+  },
+  "brazos": [
+    {
+      "brazo": "SEM",
+      "semillas": 4,
+      "evaluadas": 2,
+      "extinguidas": 2,
+      "ilegibles": 0,
+      "enCurso": 2,
+      "cortas": 0,
+      "evaluadasAunCorriendo": 0,
+      "porCriterio": {
+        "supervivencia": {
+          "cumple": 0,
+          "falla": 2,
+          "desconocido": 0
+        },
+        "recambio": {
+          "cumple": 0,
+          "falla": 2,
+          "desconocido": 0
+        },
+        "generaciones": {
+          "cumple": 0,
+          "falla": 2,
+          "desconocido": 0
+        },
+        "cooperacion": {
+          "cumple": 0,
+          "falla": 2,
+          "desconocido": 0
+        },
+        "conflictos": {
+          "cumple": 0,
+          "falla": 2,
+          "desconocido": 0
+        },
+        "muertes": {
+          "cumple": 0,
+          "falla": 2,
+          "desconocido": 0
+        },
+        "tecnologia": {
+          "cumple": 0,
+          "falla": 2,
+          "desconocido": 0
+        },
+        "diversidad": {
+          "cumple": 0,
+          "falla": 2,
+          "desconocido": 0
+        }
+      },
+      "cumplenTodos": 0,
+      "todosDesconocido": 0,
+      "fraccionSobreEvaluadas": 0,
+      "veredicto": "indeterminado",
+      "explicacion": "0/4 cumplen; lo decidirán 2 excluida(s)"
+    },
+    {
+      "brazo": "SEM2",
+      "semillas": 1,
+      "evaluadas": 1,
+      "extinguidas": 0,
+      "ilegibles": 0,
+      "enCurso": 0,
+      "cortas": 0,
+      "evaluadasAunCorriendo": 0,
+      "porCriterio": {
+        "supervivencia": {
+          "cumple": 1,
+          "falla": 0,
+          "desconocido": 0
+        },
+        "recambio": {
+          "cumple": 1,
+          "falla": 0,
+          "desconocido": 0
+        },
+        "generaciones": {
+          "cumple": 1,
+          "falla": 0,
+          "desconocido": 0
+        },
+        "cooperacion": {
+          "cumple": 1,
+          "falla": 0,
+          "desconocido": 0
+        },
+        "conflictos": {
+          "cumple": 1,
+          "falla": 0,
+          "desconocido": 0
+        },
+        "muertes": {
+          "cumple": 1,
+          "falla": 0,
+          "desconocido": 0
+        },
+        "tecnologia": {
+          "cumple": 1,
+          "falla": 0,
+          "desconocido": 0
+        },
+        "diversidad": {
+          "cumple": 0,
+          "falla": 1,
+          "desconocido": 0
+        }
+      },
+      "cumplenTodos": 0,
+      "todosDesconocido": 0,
+      "fraccionSobreEvaluadas": 0,
+      "veredicto": "no mayoría",
+      "explicacion": "como mucho 0/1 podrían cumplir (< 50 %)"
+    }
+  ],
+  "replicas": [
+    {
+      "nombre": "SEM-1618",
+      "brazo": "SEM",
+      "semilla": 1618,
+      "directorio": "/datos/tmp-atlas-lab/datos-lab/f1c/SEM-1618",
+      "terminada": true,
+      "ultimoDia": 60,
+      "ultimaEscritura": "2026-09-23T22:56:09.663Z",
+      "estado": "extinguida",
+      "diaExtincion": 22,
+      "nota": "extinguida el día 22 (0 vecinos mortales)",
+      "todos": "falla",
+      "criterios": {
+        "supervivencia": {
+          "estado": "falla",
+          "motivo": "extinguida el día 22",
+          "valores": {}
+        },
+        "recambio": {
+          "estado": "falla",
+          "motivo": "extinguida el día 22",
+          "valores": {}
+        },
+        "generaciones": {
+          "estado": "falla",
+          "motivo": "extinguida el día 22",
+          "valores": {}
+        },
+        "cooperacion": {
+          "estado": "falla",
+          "motivo": "extinguida el día 22",
+          "valores": {}
+        },
+        "conflictos": {
+          "estado": "falla",
+          "motivo": "extinguida el día 22",
+          "valores": {}
+        },
+        "muertes": {
+          "estado": "falla",
+          "motivo": "extinguida el día 22",
+          "valores": {}
+        },
+        "tecnologia": {
+          "estado": "falla",
+          "motivo": "extinguida el día 22",
+          "valores": {}
+        },
+        "diversidad": {
+          "estado": "falla",
+          "motivo": "extinguida el día 22",
+          "valores": {}
+        }
+      }
+    },
+    {
+      "nombre": "SEM-2718",
+      "brazo": "SEM",
+      "semilla": 2718,
+      "directorio": "/datos/tmp-atlas-lab/datos-lab/f1c/SEM-2718",
+      "terminada": true,
+      "ultimoDia": 60,
+      "ultimaEscritura": "2026-09-23T22:51:03.552Z",
+      "estado": "extinguida",
+      "diaExtincion": 27,
+      "nota": "extinguida el día 27 (0 vecinos mortales)",
+      "todos": "falla",
+      "criterios": {
+        "supervivencia": {
+          "estado": "falla",
+          "motivo": "extinguida el día 27",
+          "valores": {}
+        },
+        "recambio": {
+          "estado": "falla",
+          "motivo": "extinguida el día 27",
+          "valores": {}
+        },
+        "generaciones": {
+          "estado": "falla",
+          "motivo": "extinguida el día 27",
+          "valores": {}
+        },
+        "cooperacion": {
+          "estado": "falla",
+          "motivo": "extinguida el día 27",
+          "valores": {}
+        },
+        "conflictos": {
+          "estado": "falla",
+          "motivo": "extinguida el día 27",
+          "valores": {}
+        },
+        "muertes": {
+          "estado": "falla",
+          "motivo": "extinguida el día 27",
+          "valores": {}
+        },
+        "tecnologia": {
+          "estado": "falla",
+          "motivo": "extinguida el día 27",
+          "valores": {}
+        },
+        "diversidad": {
+          "estado": "falla",
+          "motivo": "extinguida el día 27",
+          "valores": {}
+        }
+      }
+    },
+    {
+      "nombre": "SEM-3141",
+      "brazo": "SEM",
+      "semilla": 3141,
+      "directorio": "/datos/tmp-atlas-lab/datos-lab/f1c/SEM-3141",
+      "terminada": false,
+      "ultimoDia": 30,
+      "ultimaEscritura": "2026-09-24T00:01:46.452Z",
+      "estado": "en-curso",
+      "diaExtincion": null,
+      "todos": null,
+      "criterios": null,
+      "nota": "en curso: va por el día 30, última escritura hace 7.5 h (¿muerta?)"
+    },
+    {
+      "nombre": "SEM-51926",
+      "brazo": "SEM",
+      "semilla": 51926,
+      "directorio": "/datos/tmp-atlas-lab/datos-lab/f1c/SEM-51926",
+      "terminada": false,
+      "ultimoDia": 41,
+      "ultimaEscritura": "2026-09-24T01:58:48.450Z",
+      "estado": "en-curso",
+      "diaExtincion": null,
+      "todos": null,
+      "criterios": null,
+      "nota": "en curso: va por el día 41, última escritura hace 5.6 h (¿muerta?)"
+    },
+    {
+      "nombre": "SEM2-51926",
+      "brazo": "SEM2",
+      "semilla": 51926,
+      "directorio": "/datos/tmp-atlas-lab/datos-lab/f1c/SEM2-51926",
+      "terminada": true,
+      "ultimoDia": 60,
+      "ultimaEscritura": "2026-09-24T07:30:51.715Z",
+      "estado": "evaluada",
+      "diaExtincion": null,
+      "nota": null,
+      "todos": "falla",
+      "criterios": {
+        "supervivencia": {
+          "estado": "cumple",
+          "motivo": "población mínima 616 (día 55) ≥ 16; día D: 633",
+          "valores": {
+            "poblacion": 633,
+            "poblacionMinima": 616,
+            "diaPoblacionMinima": 55,
+            "diasSinDato": []
+          }
+        },
+        "recambio": {
+          "estado": "cumple",
+          "motivo": "400 nacimientos en la ventana; 0 fundadores mortales vivos",
+          "valores": {
+            "nacimientosVentana": 400,
+            "fundadoresMortalesVivos": 0
+          }
+        },
+        "generaciones": {
+          "estado": "cumple",
+          "motivo": "8 generaciones vivas [11, 12, 13, 14, 15, 16, 17, 18]",
+          "valores": {
+            "generaciones": 8,
+            "fuente": "generacionesMortalesVivas"
+          }
+        },
+        "cooperacion": {
+          "estado": "cumple",
+          "motivo": "2 tipo(s) con ≥ 10 % y ≥ 5 de 37725 actos: foodShared 27029 (72 %), teaching 8690 (23 %), constructionHelp 1433 (4 %), trade 573 (2 %)",
+          "valores": {
+            "porTipo": {
+              "teaching": 8690,
+              "trade": 573,
+              "constructionHelp": 1433,
+              "foodShared": 27029
+            },
+            "fracciones": {
+              "teaching": 0.23,
+              "trade": 0.015,
+              "constructionHelp": 0.038,
+              "foodShared": 0.716
+            },
+            "total": 37725,
+            "relevantes": [
+              "teaching",
+              "foodShared"
+            ],
+            "otrasNoTipificadas": 459,
+            "clavesNoContadas": []
+          }
+        },
+        "conflictos": {
+          "estado": "cumple",
+          "motivo": "662 conflictos en la ventana (5770 acumulados)",
+          "valores": {
+            "conflictosVentana": 662,
+            "conflictosAcumulados": 5770
+          }
+        },
+        "muertes": {
+          "estado": "cumple",
+          "motivo": "causas: dehydration 20, exposure 205, senescence 1068",
+          "valores": {
+            "muertesPorCausa": {
+              "starvation": 0,
+              "dehydration": 20,
+              "exposure": 205,
+              "senescence": 1068
+            },
+            "causasDistintas": 3,
+            "muertesDesconocidas": {},
+            "residuoBalance": 0,
+            "poblacionInicial": 16
+          }
+        },
+        "tecnologia": {
+          "estado": "cumple",
+          "motivo": "uso ajeno 0.457 (15303/33485); en 10/10 días",
+          "valores": {
+            "usosDeInventorAjeno": 15303,
+            "usosConAutor": 33485,
+            "fraccionUsoAjeno": 0.457010601761983,
+            "fraccionDiasConUsoAjeno": 1
+          }
+        },
+        "diversidad": {
+          "estado": "falla",
+          "motivo": "diversidadConductaVentana: Mann-Kendall S = -598, z = -3.79, p = 0.9999 ≥ 0.05 (n = 56, Var(S) ×1.24 por autocorrelación (Hamed-Rao ×1.21, AR(1) r₁* = 0.11 ×1.24)); Sen -1.24e-3/día × 55 días = subida -0.0682 < 0.02 · reglas v1 (no deciden): «o» falla, «y» falla · secundaria diversidadConductaActiva (no decide): falla, Mann-Kendall S = -1024, z = -2.2, p = 0.9861 ≥ 0.05 (n = 56, Var(S) ×10.8 por autocorrelación (Hamed-Rao ×5.73, AR(1) r₁* = 0.88 ×10.8)); Sen -4.43e-3/día × 55 días = subida -0.2435 < 0.02 · reglas v1 (no deciden): «o» falla, «y» falla · secundaria diversidadConductaTiempo (no decide): falla, Mann-Kendall S = 336, z = 0.86, p = 0.1961 ≥ 0.05 (n = 56, Var(S) ×7.66 por autocorrelación (Hamed-Rao ×3.15, AR(1) r₁* = 0.82 ×7.66)); Sen 5.38e-4/día × 55 días = subida 0.0296 ≥ 0.02 · reglas v1 (no deciden): «o» cumple, «y» cumple · secundaria diversidadConducta (no decide): falla, Mann-Kendall S = -210, z = -0.58, p = 0.7202 ≥ 0.05 (n = 56, Var(S) ×6.41 por autocorrelación (Hamed-Rao ×1.77, AR(1) r₁* = 0.77 ×6.41)); Sen -6.10e-4/día × 55 días = subida -0.0335 < 0.02 · reglas v1 (no deciden): «o» cumple, «y» falla",
+          "valores": {
+            "campo": "diversidadConductaVentana",
+            "regla": "mk",
+            "puntos": 56,
+            "cobertura": 1,
+            "diasSinDato": [],
+            "diasPorBloque": 10,
+            "S": -598,
+            "varS": 24766.76860234368,
+            "z": -3.7934962393580243,
+            "p": 0.9999257295526018,
+            "alfa": 0.05,
+            "correccion": "hamed-rao-ar1",
+            "factor": 1.2371013287883956,
+            "factorHamedRao": 1.2056753355249596,
+            "factorAr1": 1.2371013287883956,
+            "r1": 0.11199888692702549,
+            "pSinCorreccion": 0.9999877478961632,
+            "pendienteSen": -0.0012397606338804064,
+            "subida": -0.06818683486342235,
+            "subidaMin": 0.02,
+            "diasSubida": 55,
+            "pPesimista": null,
+            "reglasAntiguas": {
+              "o": "falla",
+              "y": "falla",
+              "pendiente": -0.001333872299359161,
+              "pendienteDecide": true,
+              "mediaInicio": 0.44617610989732814,
+              "mediaFinal": 0.37399896846957076,
+              "diasPorBloque": 10,
+              "motivo": "pendiente -1.33e-3/día (56 días); media días 5..14 0.446 → días 51..60 0.374"
+            },
+            "secundarias": [
+              {
+                "campo": "diversidadConductaActiva",
+                "estado": "falla",
+                "regla": "mk",
+                "puntos": 56,
+                "cobertura": 1,
+                "diasSinDato": [],
+                "diasPorBloque": 10,
+                "S": -1024,
+                "varS": 216181.10657949036,
+                "z": -2.2002233327081155,
+                "p": 0.9861044744437878,
+                "alfa": 0.05,
+                "correccion": "hamed-rao-ar1",
+                "factor": 10.798257071902615,
+                "factorHamedRao": 5.733386055161518,
+                "factorAr1": 10.798257071902615,
+                "r1": 0.8827382644826471,
+                "pSinCorreccion": 0.9999999999997586,
+                "pendienteSen": -0.004428158118215099,
+                "subida": -0.24354869650183045,
+                "subidaMin": 0.02,
+                "diasSubida": 55,
+                "pPesimista": null,
+                "reglasAntiguas": {
+                  "o": "falla",
+                  "y": "falla",
+                  "pendiente": -0.004571657388221037,
+                  "pendienteDecide": true,
+                  "mediaInicio": 0.44984060143721327,
+                  "mediaFinal": 0.2505837373422296,
+                  "diasPorBloque": 10,
+                  "motivo": "pendiente -4.57e-3/día (56 días); media días 5..14 0.45 → días 51..60 0.251"
+                }
+              },
+              {
+                "campo": "diversidadConductaTiempo",
+                "estado": "falla",
+                "regla": "mk",
+                "puntos": 56,
+                "cobertura": 1,
+                "diasSinDato": [],
+                "diasPorBloque": 10,
+                "S": 336,
+                "varS": 153254.19833523413,
+                "z": 0.8557336630475233,
+                "p": 0.19607255717408098,
+                "alfa": 0.05,
+                "correccion": "hamed-rao-ar1",
+                "factor": 7.655054861899806,
+                "factorHamedRao": 3.1478191321475664,
+                "factorAr1": 7.655054861899806,
+                "r1": 0.8155856229310449,
+                "pSinCorreccion": 0.00895135431622524,
+                "pendienteSen": 0.0005380076177604132,
+                "subida": 0.029590418976822727,
+                "subidaMin": 0.02,
+                "diasSubida": 55,
+                "pPesimista": null,
+                "reglasAntiguas": {
+                  "o": "cumple",
+                  "y": "cumple",
+                  "pendiente": 0.0016372113850900297,
+                  "pendienteDecide": true,
+                  "mediaInicio": 0.2004264487172101,
+                  "mediaFinal": 0.3053368812340417,
+                  "diasPorBloque": 10,
+                  "motivo": "pendiente 1.64e-3/día (56 días); media días 5..14 0.2 → días 51..60 0.305"
+                }
+              },
+              {
+                "campo": "diversidadConducta",
+                "estado": "falla",
+                "regla": "mk",
+                "puntos": 56,
+                "cobertura": 1,
+                "diasSinDato": [],
+                "diasPorBloque": 10,
+                "S": -210,
+                "varS": 128368.6087778777,
+                "z": -0.5833334339496379,
+                "p": 0.7201655938928159,
+                "alfa": 0.05,
+                "correccion": "hamed-rao-ar1",
+                "factor": 6.412018420473411,
+                "factorHamedRao": 1.7676130162083676,
+                "factorAr1": 6.412018420473411,
+                "r1": 0.7738716540089995,
+                "pSinCorreccion": 0.9301775653445686,
+                "pendienteSen": -0.0006095076603860291,
+                "subida": -0.0335229213212316,
+                "subidaMin": 0.02,
+                "diasSubida": 55,
+                "pPesimista": null,
+                "reglasAntiguas": {
+                  "o": "cumple",
+                  "y": "falla",
+                  "pendiente": 0.00007719803181211554,
+                  "pendienteDecide": true,
+                  "mediaInicio": 0.398868496449015,
+                  "mediaFinal": 0.3922107514618345,
+                  "diasPorBloque": 10,
+                  "motivo": "pendiente 7.72e-5/día (56 días); media días 5..14 0.399 → días 51..60 0.392"
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "ignorados": [],
+  "avisos": [
+    "SEM-3141: sin replica.json y sin escribir desde hace 7.5 h (> 3 h): ¿proceso muerto? Sigue excluida como «en curso»; revisar su .log.",
+    "SEM-51926: sin replica.json y sin escribir desde hace 5.6 h (> 3 h): ¿proceso muerto? Sigue excluida como «en curso»; revisar su .log."
+  ]
+}

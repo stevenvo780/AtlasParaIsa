@@ -4,7 +4,7 @@ import { cloneWorld, createWorld, puntoDeRestauracion, stepWorld, type World } f
 import { digestoCanonico } from '../src/world/digesto.js';
 import { digestoSin } from '../scripts/lab/rendimiento.js';
 import { DEFAULT_PARAMS, HISTORICAL_PARAMS, paramsOf, parseParams, setParams } from '../src/world/params.js';
-import { hacinamientoLocal, setObservadorNatalidad } from '../src/world/natalidad.js';
+import { hacinamientoLocal } from '../src/world/natalidad.js';
 import { tileAt } from '../src/world/spatial.js';
 import { initialDemography } from '../src/world/demography.js';
 import { InstrumentosConducta } from '../scripts/lab/instrumentos.js';
@@ -185,7 +185,7 @@ test('CTRL con sonda pasiva registra xNacimientos sin alterar los nacimientos', 
   try {
     stepWorld(observado);
     instrumento.despuesDelPaso(observado);
-    setObservadorNatalidad(null); stepWorld(control);
+    stepWorld(control); // el clon se tomó antes de registrar el observador: no tiene
     assert.equal(observado.birthCounter, control.birthCounter);
     assert.deepEqual(observado.people.filter(p => p.bornAt === observado.tick).map(p => p.genome.parents),
       control.people.filter(p => p.bornAt === control.tick).map(p => p.genome.parents));

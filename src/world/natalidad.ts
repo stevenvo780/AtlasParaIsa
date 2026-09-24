@@ -5,7 +5,7 @@ import { enCuenca } from './agua.js';
 import { blueprintAffordances, BROKEN_CONDITION } from './inventions.js';
 import { filtrarCerca } from './indice-puntos.js';
 import { vecinos } from './rejilla.js';
-import { tileAt } from './spatial.js';
+import { bindWorldContext, tileAt, worldContext, type ObservadorNatalidad } from './spatial.js';
 import { demographicTraits } from './demography.js';
 import { paramsOf } from './params.js';
 import { CRECIMIENTO_COMIDA, EVAPORACION_LUZ, EVAPORACION_OSCURIDAD,
@@ -15,11 +15,11 @@ import { CRECIMIENTO_COMIDA, EVAPORACION_LUZ, EVAPORACION_OSCURIDAD,
 export type PuntoProvision = { readonly x: number; readonly y: number };
 export interface Reposicion { agua: number; comida: number }
 export interface Demanda { agua: number; comida: number }
-export interface ObservadorNatalidad { nacimiento(x: number, limitante: 'agua' | 'comida'): void; bloqueo(): void }
-let observador: ObservadorNatalidad | null = null;
-/** Estado efímero del proceso: no pertenece al mundo ni se serializa. */
-export function setObservadorNatalidad(value: ObservadorNatalidad | null): void { observador = value; }
-export function observadorNatalidad(): ObservadorNatalidad | null { return observador; }
+export type { ObservadorNatalidad } from './spatial.js';
+/** Por mundo, en su contexto de anfitrión (no se serializa y pasa a los clones del paso): dos mundos en el
+ * mismo proceso no comparten observador. */
+export function setObservadorNatalidad(world: World, value: ObservadorNatalidad | null): void { bindWorldContext(world, { observadorNatalidad: value }); }
+export function observadorNatalidad(world: World): ObservadorNatalidad | null { return worldContext(world).observadorNatalidad ?? null; }
 
 /** Misma fisiología basal que bodyAndAction, inclusive S e I. */
 export function demandaDiaria(world: World, person: Person): Demanda {

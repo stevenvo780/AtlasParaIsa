@@ -47,6 +47,8 @@ function digestoSinAptitud(world: World): string {
   delete comoPadre.social.hogarTrabajo;
   // Campaña C8 (H-A, `conducta.vocacion`/`vocacionTope`): claves posteriores a la medida; con ε = 0 no actúan.
   { const c = (comoPadre as unknown as { conducta: Record<string, unknown> }).conducta; assert.equal(c.vocacion, 0); assert.equal(c.vocacionTope, 0.9); delete c.vocacion; delete c.vocacionTope; }
+  // Campaña NAT-L (`poblacion.natalidadLocal`/`radioProvision`): posteriores a la medida; con α = 0 no actúan.
+  { const p = (comoPadre as unknown as { poblacion: Record<string, unknown> }).poblacion; assert.equal(p.natalidadLocal, 0); assert.equal(p.radioProvision, 16); delete p.natalidadLocal; delete p.radioProvision; }
   setParams(world, comoPadre as unknown as WorldParams);
   const version = world.version;
   // La referencia V10 mide este mismo estado; sólo normalizamos su etiqueta al hashear.

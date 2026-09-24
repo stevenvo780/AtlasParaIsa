@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { EVAPORACION_LUZ, EVAPORACION_OSCURIDAD, INTERVALO_ECOLOGIA_TICKS, LUZ_CREPSCULO, RECARGA_LLUVIA, RECARGA_MANANTIAL } from '../src/world/ecologia-constantes.js';
 import { createWorld, demandaDiaria, phaseAt, TICKS_PER_DAY } from '../src/world/index.js';
 import { demographicTraits } from '../src/world/demography.js';
 import { EcosystemKernel } from '../src/world/ecosystem-kernel.js';
@@ -106,4 +108,15 @@ test('11: una charca simulada por el kernel sigue la recarga media esperada', ()
     gained += pool.drinkingWater! - 0.5;
   }
   assert.ok(Math.abs(gained / days - estimate) < estimate * 0.09, `${gained / days} frente a ${estimate}`);
+});
+
+test('las constantes de reposición siguen siendo los literales del núcleo ecológico (no se separan en silencio)', () => {
+  // El núcleo conserva sus literales porque la especificación del kernel (scripts/compute-ecology-core.mjs)
+  // los exige en el texto; esta guarda ata ecologia-constantes.ts a ese mismo texto.
+  const fuente = readFileSync(new URL('../src/world/ecosystem-kernel.ts', import.meta.url), 'utf8');
+  assert.ok(fuente.includes(`weather === 'rain' ? ${RECARGA_LLUVIA} * (0.4 + fertility * 0.6)`), 'recarga por lluvia');
+  assert.ok(fuente.includes(`feature === 'spring' ? ${RECARGA_MANANTIAL} : 0`), 'recarga del manantial');
+  assert.ok(fuente.includes(`(light ? ${EVAPORACION_LUZ} : ${EVAPORACION_OSCURIDAD})`), 'evaporación');
+  assert.ok(fuente.includes(`phase === 'night' ? 0 : ${LUZ_CREPSCULO};`), 'luz del crepúsculo');
+  assert.ok(fuente.includes(`if (tick % ${INTERVALO_ECOLOGIA_TICKS} !== 0) return;`), 'intervalo ecológico');
 });

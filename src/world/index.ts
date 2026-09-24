@@ -1360,10 +1360,10 @@ function reproduce(world: World): void {
       const here = primeroCerca(world.places, a, pop.radioLugar + 1, p => distance(a, p) <= pop.radioLugar);
       if (!here) continue;
       const x = ley > 0 ? xDe(here) : 0;
-      if (ley > 0 && !intervaloCumplido(world, a, x)) { observadorNatalidad()?.bloqueo(); continue; }
+      if (ley > 0 && !intervaloCumplido(world, a, x)) { observadorNatalidad(world)?.bloqueo(); continue; }
       const b = chooseReproductivePartner(world, a, vecinos(world, a, pop.radioPareja + 1, p => {
         if (!match(a, p)) return false;
-        if (ley > 0 && !intervaloCumplido(world, p, x)) { observadorNatalidad()?.bloqueo(); return false; }
+        if (ley > 0 && !intervaloCumplido(world, p, x)) { observadorNatalidad(world)?.bloqueo(); return false; }
         return true;
       }, 'reproduce'), ELECCION_POR_AFINIDAD);
       if (!b) continue;
@@ -1375,10 +1375,11 @@ function reproduce(world: World): void {
     }
     if (!pair || !place) break;
     const { a, b } = pair;
-    if (observadorNatalidad()) {
+    const observador = observadorNatalidad(world);
+    if (observador) {
       // CTRL se sondea sólo tras decidir la pareja. La sonda no participa en el embudo.
       const presion = presionLocal(world, place, pop.radioProvision, ley > 0 ? ley : 1);
-      observadorNatalidad()?.nacimiento(ley > 0 ? xDe(place) : presion.x, presion.limitante);
+      observador.nacimiento(ley > 0 ? xDe(place) : presion.x, presion.limitante);
     }
     const serial=world.birthCounter+1, id=`descendant-${serial}`;
     if(!Number.isSafeInteger(serial)||[...world.people,...world.legacy,...world.retiredLegacy].some(p=>p.id===id)) throw new Error('La identidad de un nacimiento ya existe; no se gastaron reservas.');

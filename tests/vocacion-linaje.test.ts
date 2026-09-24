@@ -12,7 +12,7 @@ import { assertWorld, cloneWorld, createWorld, heredarVocacion, OFICIOS_DE_LINAJ
 import { DEFAULT_PARAMS, HISTORICAL_PARAMS, PARAM_RANGES, paramsOf, parseParams, setParams } from '../src/world/params.js';
 
 // Claves posteriores a 2ee2658 en la rama de la campaña (H-A y H-B); todas a su valor inactivo.
-const CLAVES = ['conducta.vocacion', 'conducta.vocacionTope', 'social.hogarTrabajo'] as const;
+const CLAVES = ['conducta.vocacion', 'conducta.vocacionTope', 'social.hogarTrabajo', 'poblacion.natalidadLocal', 'poblacion.radioProvision'] as const;
 // Medidos con `git archive 2ee2658` en /tmp, Store SQLite guardado antes del primer paso y
 // con la cadencia de DEFAULT_PARAMS (1 tick); `digestoCanonico` tras exactamente 1200 pasos.
 const REFERENCIAS = {

@@ -181,8 +181,12 @@ export class InstrumentosConducta {
   costeMs = 0;
   pasos = 0;
 
+  /** Mundo donde se registró el observador de natalidad (su contexto pasa a los clones del paso). */
+  private readonly mundoObservado: World;
+
   constructor(world: World) {
-    setObservadorNatalidad({ nacimiento: (x, limitante) => {
+    this.mundoObservado = world;
+    setObservadorNatalidad(world, { nacimiento: (x, limitante) => {
       this.nacimientosDia++; this.xNacimientos.push(x); this.limitante[limitante]++;
     }, bloqueo: () => { this.bloqueadasPorLey++; } });
     this.fotografiarActividad(world); this.vivosInicioDia = mortalesVivos(world);
@@ -218,8 +222,8 @@ export class InstrumentosConducta {
     this.contadorAntes = world.eventCounter;
   }
 
-  /** Retira el observador del módulo al terminar la réplica. */
-  cerrar(): void { setObservadorNatalidad(null); }
+  /** Retira el observador de natalidad del mundo en que se registró (los clones ya tomados lo conservan). */
+  cerrar(): void { setObservadorNatalidad(this.mundoObservado, null); }
 
   /** Ticks por acción observados de una persona viva (copia; para tests y diagnóstico). */
   ticksDe(id: string): Record<string, number> | undefined {

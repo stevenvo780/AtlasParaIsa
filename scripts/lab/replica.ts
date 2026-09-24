@@ -204,7 +204,6 @@ async function main(): Promise<void> {
   const dataDir = mkdtempSync(join(tmpdir(), 'atlas-lab-'));
   process.env.CARTA_DATA_DIR = dataDir;
   const store = new Store(join(dataDir, 'world.sqlite'));
-  let instrumentos: InstrumentosConducta | null = null;
   try {
     let world = createWorld(seed, params);
     const poblacionInicial = world.people.length;
@@ -213,7 +212,7 @@ async function main(): Promise<void> {
     // P3: adjuntar y guardar el Store ANTES de simular fija las leyes de tecnología de producción
     // (enableTechnologyCatalogue) y liga el WorldContext (loadChunk/catalogueReader) al mundo.
     store.save(world);
-    instrumentos = instrumentosArg === 'si' ? new InstrumentosConducta(world) : null;
+    const instrumentos = instrumentosArg === 'si' ? new InstrumentosConducta(world) : null;
 
     // Solo con --gobernador servidor: p95 de la ventana de 120 pasos (mismo mecanismo que
     // src/server/app.ts) y acumuladores del DÍA en curso, reiniciados en cada dia-NNN.json.
@@ -339,7 +338,7 @@ async function main(): Promise<void> {
       console.log(`Instrumentos: ${(instrumentos.costeMs / instrumentos.pasos).toFixed(4)} ms/paso de media (${instrumentos.costeMs.toFixed(0)} ms en ${instrumentos.pasos} pasos, incluidos los cálculos diarios) frente a ${pasoMedio.toFixed(2)} ms/paso de stepWorld (${(100 * instrumentos.costeMs / (pasoMedio * stepTimes.length)).toFixed(2)} %).`);
     }
     console.log(`Réplica completa: ${dias} día(s), población final ${resumen.poblacionFinal}. Salida: ${salida}`);
-  } finally { instrumentos?.cerrar(); store.close(); rmSync(dataDir, { recursive: true, force: true }); }
+  } finally { store.close(); rmSync(dataDir, { recursive: true, force: true }); }
 }
 
 main().catch(error => { console.error((error as Error).message); process.exitCode = 1; });

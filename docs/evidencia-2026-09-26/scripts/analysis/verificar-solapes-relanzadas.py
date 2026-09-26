@@ -12,6 +12,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import stat
 import sys
 
 
@@ -48,15 +49,19 @@ def canonical(value):
 
 
 def inventory(folder: Path) -> tuple[dict[int, Path], list[str]]:
-    if not folder.is_dir():
-        return {}, [f"directorio ausente: {folder}"]
+    try:
+        regular_directory = stat.S_ISDIR(folder.lstat().st_mode)
+    except FileNotFoundError:
+        regular_directory = False
+    if not regular_directory:
+        return {}, [f"directorio real ausente o symlink: {folder}"]
     days: dict[int, Path] = {}
     errors: list[str] = []
     for path in folder.iterdir():
         if not path.name.startswith("dia-"):
             continue
         match = DAY_NAME.fullmatch(path.name)
-        if not match or not path.is_file():
+        if not match or not stat.S_ISREG(path.lstat().st_mode):
             errors.append(f"nombre o tipo inválido: {path}")
             continue
         day = int(match.group(1))

@@ -17,6 +17,29 @@ BALANCE = Path('/datos/tmp-atlas-lab/balance')
 SHA_V4 = '667454d5e0232885d78c37775d6a5619f516872d'
 SHA_C8 = 'd2ebf11d51c3221477d88c7045faeafa2a229683'
 LIMITS = {'teselasActivas': 1303552, 'chunks': 5092, 'fauna': 7821312}
+GOVERNOR = 'no-ejecutado; replica de leyes, no del servidor'
+EXPECTED = {
+    'CTRLV4': {
+        'digest': 'd896b52065e33463ecb824137431e896432da83d14be01a1233443325c5f0b74',
+        'paramsSha256': '5b1bbb549e7dec5bfd7fdac11dcf8e89b33d2bfea5d80ac0a5865d17871338bb',
+        'instrumentos': 'si; solo lectura (scripts/lab/instrumentos.ts): conducta por tiempo, comida compartida, natalidad local y panel C8',
+    },
+    'HOG': {
+        'digest': '63d4fc53b1a4c92e9c10bebed763958183ac22f246d8af744ba6a6ebfc840f0a',
+        'paramsSha256': '9a60a0576abbfd10bf9fad79e53c5d98550efc8d18c9cafe7c756b8833265b42',
+        'instrumentos': 'si; solo lectura (scripts/lab/instrumentos.ts): conducta por tiempo y comida compartida',
+    },
+    'CTRL2': {
+        'digest': '63d4fc53b1a4c92e9c10bebed763958183ac22f246d8af744ba6a6ebfc840f0a',
+        'paramsSha256': '3d7a05d5d1d2ee6ee0ee6feaeb18bbc8a2599db1b64c7365a6569bfec7e43b36',
+        'instrumentos': 'si; solo lectura (scripts/lab/instrumentos.ts): conducta por tiempo y comida compartida',
+    },
+    'PUB2': {
+        'digest': '63d4fc53b1a4c92e9c10bebed763958183ac22f246d8af744ba6a6ebfc840f0a',
+        'paramsSha256': '3d7a05d5d1d2ee6ee0ee6feaeb18bbc8a2599db1b64c7365a6569bfec7e43b36',
+        'instrumentos': 'si; solo lectura (scripts/lab/instrumentos.ts): conducta por tiempo y comida compartida',
+    },
+}
 GROUPS = (
     ('CTRLV4', BASE / 'ctrlv4', range(6001, 6021), SHA_V4,
      {6004, 6009, 6010, 6011, 6012, 6013, 6015, 6017, 6018}, 'tower'),
@@ -30,6 +53,21 @@ GROUPS = (
 
 def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def params_sha256(params):
+    if not isinstance(params, dict):
+        raise ValueError('params no es objeto')
+    packed = json.dumps(params, ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode()
+    return hashlib.sha256(packed).hexdigest()
+
+
+def overlap_evidence():
+    # Importación read-only sin generar __pycache__ en el worktree compartido.
+    path = Path(__file__).with_name('verificar-solapes-relanzadas.py')
+    namespace = {'__name__': 'verificar_solapes', '__file__': str(path)}
+    exec(compile(path.read_bytes(), str(path), 'exec'), namespace)
+    return namespace['verify'](BASE)
 
 
 def progress(path):
@@ -61,8 +99,11 @@ def progress(path):
 def audit():
     p_tower, tower_finished = progress(BASE / 'codex-tower-20260926.tsv')
     p_laptop, laptop_finished = progress(BALANCE / 'codex-laptop-20260926.tsv')
+    overlaps = overlap_evidence()
+    overlap_by_name = {row['replica']: row for row in overlaps['replicas']}
     out = {'tipo': 'auditoria_campanas_codex_20260926',
            'gestores': {'torreFin': tower_finished, 'portatilFin': laptop_finished},
+           'solapes': {'estado': overlaps['estado'], **overlaps['resumen']},
            'grupos': {}, 'faltantes': [], 'fallos': []}
     for arm, root, seeds, sha, reruns, host in GROUPS:
         rows = []
@@ -70,10 +111,23 @@ def audit():
             name = f'{arm}-{seed}'
             folder = root / name
             missing = []
+            if folder.is_symlink():
+                missing.append('directorio de réplica es symlink; no se lee')
+                out['faltantes'].append({'replica': name, 'errores': missing})
+                rows.append({'replica': name, 'diasEncontrados': 0, 'sha': None,
+                             'relaunch': seed in reruns, 'parcialArchivado': False,
+                             'identidadDias': [], 'solapeAcreditado': False,
+                             'ultimoEstadoGestor': None, 'fallosHistoricosGestor': [],
+                             'hashesDia': {}, 'errores': missing, 'estado': 'incompleta'})
+                continue
+            if not folder.is_dir():
+                missing.append('directorio de réplica ausente')
             day_hashes = {}
             meta_path = folder / 'replica.json'
             meta = None
-            if meta_path.is_file():
+            if meta_path.is_symlink():
+                missing.append('replica.json es symlink')
+            if meta_path.is_file() and not meta_path.is_symlink():
                 try:
                     meta = json.loads(meta_path.read_text())
                     if not isinstance(meta, dict):
@@ -87,6 +141,18 @@ def audit():
             else:
                 if meta.get('seed') != seed or meta.get('dias') != 60 or meta.get('sha') != sha:
                     missing.append('manifiesto no corresponde a semilla/días/SHA')
+                expected = EXPECTED[arm]
+                if meta.get('digest') != expected['digest']:
+                    missing.append('digest de código distinto del brazo congelado')
+                try:
+                    if params_sha256(meta.get('params')) != expected['paramsSha256']:
+                        missing.append('parámetros completos distintos del brazo congelado')
+                except ValueError as exc:
+                    missing.append(str(exc))
+                if meta.get('gobernador') != GOVERNOR or 'techoLab' in meta or 'techoLabDetalle' in meta:
+                    missing.append('modo de réplica distinto de leyes sin gobernador/techo')
+                if meta.get('instrumentos') != expected['instrumentos']:
+                    missing.append('instrumentos distintos del brazo congelado')
                 params = meta.get('params', {})
                 if not isinstance(params, dict):
                     params = {}
@@ -105,6 +171,9 @@ def audit():
             days_found = 0
             for day in range(1, 61):
                 path = folder / f'dia-{day:03}.json'
+                if path.is_symlink():
+                    missing.append(f'dia-{day:03}.json es symlink')
+                    continue
                 if not path.is_file():
                     missing.append(f'dia-{day:03}.json')
                     continue
@@ -126,6 +195,9 @@ def audit():
             if seed in reruns:
                 if not (archived / 'dia-003.json').is_file():
                     missing.append('parcial previo no archivado')
+                overlap = overlap_by_name.get(name)
+                if not overlap or not overlap['solapeAcreditado']:
+                    missing.append('solape archivado/relanzado no acreditado')
                 if p.get('identidad') != {1, 2, 3}:
                     missing.append('identidad días 1–3 no acreditada en gestor')
                 if terminal != 'COMPLETA':
@@ -140,6 +212,7 @@ def audit():
                          'sha': meta.get('sha') if meta else None,
                          'relaunch': seed in reruns, 'parcialArchivado': archived.is_dir(),
                          'identidadDias': sorted(p.get('identidad', [])),
+                         'solapeAcreditado': overlap_by_name.get(name, {}).get('solapeAcreditado') if seed in reruns else None,
                          'ultimoEstadoGestor': terminal, 'fallosHistoricosGestor': p.get('fallos', []),
                          'hashesDia': day_hashes, 'errores': missing,
                          'estado': 'fallo' if terminal == 'FALLO' else 'completa' if not missing else 'incompleta'})
@@ -150,7 +223,7 @@ def audit():
                                         else 'completo' if all(row['estado'] == 'completa' for row in rows)
                                         else 'incompleta',
                               'replicas': rows}
-    out['estado'] = ('fallo' if out['fallos'] else
+    out['estado'] = ('fallo' if out['fallos'] or overlaps['resumen']['diferencias'] else
                      'completo' if not out['faltantes'] and tower_finished and laptop_finished else 'incompleta')
     return out
 
@@ -165,7 +238,7 @@ def main():
                          {'grupos': {k: {'requeridas': v['requeridas'], 'completas': v['completas'],
                                          'fallidas': v['fallidas'], 'estado': v['estado']}
                                      for k, v in result['grupos'].items()}}, ensure_ascii=False, indent=2))
-        return 0
+        return 0 if result['estado'] == 'completo' else 2
     target = BALANCE / 'auditoria-campanas-codex.json'
     target.write_text(json.dumps(result, ensure_ascii=False, indent=2) + '\n')
     print(f'{target}: {result["estado"]}; {len(result["faltantes"])} réplicas con errores; '

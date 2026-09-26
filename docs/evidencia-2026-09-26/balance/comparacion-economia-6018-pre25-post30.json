@@ -1,0 +1,239 @@
+{
+  "alcance": "comparación descriptiva de dos snapshots agregados de la misma semilla; no identifica causa",
+  "semilla": 6018,
+  "fuente_temporal": "/datos/tmp-atlas-lab/atlas-lab-QzFOr1/world.sqlite",
+  "metodo": {
+    "radios": [
+      7,
+      16
+    ],
+    "centro": "coordenadas guardadas de cada comunidad",
+    "teselas": "snapshot.tiles activo; wood/stone/fauna índices 8/9/18 de tiles-tuple-v1",
+    "funcional": "materialCapacities > 0.07 por capacidad; objetos de vecinos miembros",
+    "superposicion": "radios de comunidades pueden solaparse; no sumar entre ellas"
+  },
+  "antes": {
+    "archivo": "/datos/tmp-atlas-lab/balance/diagnostico-economia-snapshot-6018-pre25.json",
+    "tick": 58500,
+    "dia": 24.375,
+    "sha256": "02ef18f04d6dad294f365591b6aa3ebda4f3717e5108a26f9267e6d76c1647ef"
+  },
+  "despues": {
+    "archivo": "/datos/tmp-atlas-lab/balance/diagnostico-economia-snapshot-6018-post30.json",
+    "tick": 74700,
+    "dia": 31.125,
+    "sha256": "8764e262d43c9496340023c6a6e66e17b3191bec515855610af5dff68463565a"
+  },
+  "global": {
+    "poblacion_vecina": {
+      "antes": 447,
+      "despues": 510,
+      "cambio": 63
+    },
+    "planos": {
+      "antes": 12,
+      "despues": 12,
+      "cambio": 0
+    },
+    "estructuras": {
+      "antes": 108,
+      "despues": 236,
+      "cambio": 128
+    }
+  },
+  "comunidades": [
+    {
+      "id": "community-1",
+      "miembros_vecinos": {
+        "antes": 305,
+        "despues": 383
+      },
+      "objetos_funcionales_por_vecino": {
+        "antes": 5.773770491803279,
+        "despues": 7.775456919060052,
+        "cambio": 2.0016864272567734
+      },
+      "madera_personal_por_vecino": {
+        "antes": 1.4186515765161407,
+        "despues": 3.4521267049017843,
+        "cambio": 2.0334751283856436
+      },
+      "radios": {
+        "7": {
+          "estado": "no_comparable",
+          "motivos": [
+            "centro_diferente"
+          ],
+          "observado_antes": {
+            "centro": [
+              124,
+              41
+            ],
+            "celdas_observadas": 149,
+            "celdas_esperadas": 149,
+            "stock_observado": {
+              "madera": 352.981777443508,
+              "piedra": 71,
+              "fauna": 1,
+              "celdas_madera_cosechable": 33,
+              "celdas_piedra_cosechable": 71,
+              "celdas_fauna": 1
+            }
+          },
+          "observado_despues": {
+            "centro": [
+              149,
+              53
+            ],
+            "celdas_observadas": 149,
+            "celdas_esperadas": 149,
+            "stock_observado": {
+              "madera": 320.4778619469995,
+              "piedra": 34,
+              "fauna": 0,
+              "celdas_madera_cosechable": 34,
+              "celdas_piedra_cosechable": 34,
+              "celdas_fauna": 0
+            }
+          }
+        },
+        "16": {
+          "estado": "no_comparable",
+          "motivos": [
+            "centro_diferente",
+            "cobertura_incompleta"
+          ],
+          "observado_antes": {
+            "centro": [
+              124,
+              41
+            ],
+            "celdas_observadas": 751,
+            "celdas_esperadas": 797,
+            "stock_observado": {
+              "madera": 1916.9171983773547,
+              "piedra": 283,
+              "fauna": 1,
+              "celdas_madera_cosechable": 222,
+              "celdas_piedra_cosechable": 283,
+              "celdas_fauna": 1
+            }
+          },
+          "observado_despues": {
+            "centro": [
+              149,
+              53
+            ],
+            "celdas_observadas": 797,
+            "celdas_esperadas": 797,
+            "stock_observado": {
+              "madera": 1603.87092505109,
+              "piedra": 117,
+              "fauna": 6,
+              "celdas_madera_cosechable": 166,
+              "celdas_piedra_cosechable": 117,
+              "celdas_fauna": 4
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "community-2",
+      "miembros_vecinos": {
+        "antes": 142,
+        "despues": 127
+      },
+      "objetos_funcionales_por_vecino": {
+        "antes": 4.795774647887324,
+        "despues": 5.897637795275591,
+        "cambio": 1.1018631473882667
+      },
+      "madera_personal_por_vecino": {
+        "antes": 0.882589999904307,
+        "despues": 0.9683368159054953,
+        "cambio": 0.08574681600118828
+      },
+      "radios": {
+        "7": {
+          "estado": "no_comparable",
+          "motivos": [
+            "centro_diferente",
+            "cobertura_incompleta"
+          ],
+          "observado_antes": {
+            "centro": [
+              90,
+              43
+            ],
+            "celdas_observadas": 124,
+            "celdas_esperadas": 149,
+            "stock_observado": {
+              "madera": 222.34939221303205,
+              "piedra": 57,
+              "fauna": 0,
+              "celdas_madera_cosechable": 22,
+              "celdas_piedra_cosechable": 57,
+              "celdas_fauna": 0
+            }
+          },
+          "observado_despues": {
+            "centro": [
+              89,
+              46
+            ],
+            "celdas_observadas": 149,
+            "celdas_esperadas": 149,
+            "stock_observado": {
+              "madera": 132.3420342910517,
+              "piedra": 70,
+              "fauna": 1,
+              "celdas_madera_cosechable": 14,
+              "celdas_piedra_cosechable": 70,
+              "celdas_fauna": 1
+            }
+          }
+        },
+        "16": {
+          "estado": "no_comparable",
+          "motivos": [
+            "centro_diferente",
+            "cobertura_incompleta"
+          ],
+          "observado_antes": {
+            "centro": [
+              90,
+              43
+            ],
+            "celdas_observadas": 413,
+            "celdas_esperadas": 797,
+            "stock_observado": {
+              "madera": 465.73539738387996,
+              "piedra": 188,
+              "fauna": 1,
+              "celdas_madera_cosechable": 54,
+              "celdas_piedra_cosechable": 188,
+              "celdas_fauna": 1
+            }
+          },
+          "observado_despues": {
+            "centro": [
+              89,
+              46
+            ],
+            "celdas_observadas": 797,
+            "celdas_esperadas": 797,
+            "stock_observado": {
+              "madera": 755.5751758189921,
+              "piedra": 312,
+              "fauna": 5,
+              "celdas_madera_cosechable": 78,
+              "celdas_piedra_cosechable": 312,
+              "celdas_fauna": 5
+            }
+          }
+        }
+      }
+    }
+  ]
+}

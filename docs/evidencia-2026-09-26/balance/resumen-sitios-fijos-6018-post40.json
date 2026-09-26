@@ -1,0 +1,170 @@
+{
+  "metodo": "Sitios fijos pre25 de la misma réplica; radios solapados no se suman; comparación descriptiva sin inferencia causal",
+  "pares": [
+    {
+      "seed": 6018,
+      "fuente_temporal": "/datos/tmp-atlas-lab/atlas-lab-QzFOr1/world.sqlite",
+      "antes": {
+        "dia": 24.375,
+        "sha256": "02ef18f04d6dad294f365591b6aa3ebda4f3717e5108a26f9267e6d76c1647ef",
+        "planos": 12,
+        "estructuras": 108,
+        "poblacion_vecina": 447
+      },
+      "despues": {
+        "dia": 41.625,
+        "sha256": "a65014c7b6942afdf32225c5d90bce1b367e82272ce5f2cc0ea0e649c75f9419",
+        "planos": 12,
+        "estructuras": 314,
+        "poblacion_vecina": 598
+      },
+      "comunidades": [
+        {
+          "id": "community-1",
+          "estado": "continua",
+          "centro_sitio_fijo": [
+            124,
+            41
+          ],
+          "centro_comunidad_actual_antes": [
+            124,
+            41
+          ],
+          "centro_comunidad_actual_despues": [
+            168,
+            69
+          ],
+          "funcionales_por_vecino": {
+            "antes": 5.773770491803279,
+            "despues": 7.686868686868687,
+            "delta": 1.913098195065408
+          },
+          "radio_7": {
+            "antes_observado": {
+              "celdas_esperadas": 149,
+              "celdas_observadas": 149,
+              "madera": 352.981777443508,
+              "piedra": 71,
+              "fauna": 1,
+              "celdas_madera_cosechable": 33,
+              "celdas_piedra_cosechable": 71,
+              "celdas_fauna": 1
+            },
+            "despues_observado": {
+              "celdas_esperadas": 149,
+              "celdas_observadas": 149,
+              "madera": 339.351307534862,
+              "piedra": 50,
+              "fauna": 0,
+              "celdas_madera_cosechable": 31,
+              "celdas_piedra_cosechable": 50,
+              "celdas_fauna": 0
+            },
+            "stock_fisico_comparable": true,
+            "delta_stock_fisico_si_comparable": {
+              "madera": -13.630469908646035,
+              "piedra": -21,
+              "fauna": -1,
+              "celdas_madera_cosechable": -2,
+              "celdas_piedra_cosechable": -21,
+              "celdas_fauna": -1
+            }
+          },
+          "radio_16": {
+            "antes_observado": {
+              "celdas_esperadas": 797,
+              "celdas_observadas": 751,
+              "madera": 1916.9171983773547,
+              "piedra": 283,
+              "fauna": 1,
+              "celdas_madera_cosechable": 222,
+              "celdas_piedra_cosechable": 283,
+              "celdas_fauna": 1
+            },
+            "despues_observado": {
+              "celdas_esperadas": 797,
+              "celdas_observadas": 793,
+              "madera": 1911.7393826100558,
+              "piedra": 216,
+              "fauna": 1,
+              "celdas_madera_cosechable": 240,
+              "celdas_piedra_cosechable": 216,
+              "celdas_fauna": 1
+            },
+            "stock_fisico_comparable": false,
+            "delta_stock_fisico_si_comparable": null
+          }
+        },
+        {
+          "id": "community-2",
+          "estado": "continua",
+          "centro_sitio_fijo": [
+            90,
+            43
+          ],
+          "centro_comunidad_actual_antes": [
+            90,
+            43
+          ],
+          "centro_comunidad_actual_despues": [
+            99,
+            49
+          ],
+          "funcionales_por_vecino": {
+            "antes": 4.795774647887324,
+            "despues": 7.87378640776699,
+            "delta": 3.078011759879666
+          },
+          "radio_7": {
+            "antes_observado": {
+              "celdas_esperadas": 149,
+              "celdas_observadas": 124,
+              "madera": 222.34939221303205,
+              "piedra": 57,
+              "fauna": 0,
+              "celdas_madera_cosechable": 22,
+              "celdas_piedra_cosechable": 57,
+              "celdas_fauna": 0
+            },
+            "despues_observado": {
+              "celdas_esperadas": 149,
+              "celdas_observadas": 132,
+              "madera": 242.5893315372894,
+              "piedra": 51,
+              "fauna": 0,
+              "celdas_madera_cosechable": 24,
+              "celdas_piedra_cosechable": 51,
+              "celdas_fauna": 0
+            },
+            "stock_fisico_comparable": false,
+            "delta_stock_fisico_si_comparable": null
+          },
+          "radio_16": {
+            "antes_observado": {
+              "celdas_esperadas": 797,
+              "celdas_observadas": 413,
+              "madera": 465.73539738387996,
+              "piedra": 188,
+              "fauna": 1,
+              "celdas_madera_cosechable": 54,
+              "celdas_piedra_cosechable": 188,
+              "celdas_fauna": 1
+            },
+            "despues_observado": {
+              "celdas_esperadas": 797,
+              "celdas_observadas": 561,
+              "madera": 737.0590526524944,
+              "piedra": 179,
+              "fauna": 4,
+              "celdas_madera_cosechable": 98,
+              "celdas_piedra_cosechable": 179,
+              "celdas_fauna": 2
+            },
+            "stock_fisico_comparable": false,
+            "delta_stock_fisico_si_comparable": null
+          }
+        }
+      ]
+    }
+  ]
+}

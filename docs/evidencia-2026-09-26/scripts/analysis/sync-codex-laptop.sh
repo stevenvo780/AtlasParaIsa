@@ -122,15 +122,23 @@ for seed in 5 29 101 202 404 606 707; do
   seeds+=("$seed")
 done
 
-# Preflight de todas las réplicas antes del primer rsync.
+# Preflight de todas las réplicas antes del primer rsync. Un destino de un
+# intento anterior solo se reutiliza si sus 61 huellas igualan el origen.
 manifests=()
+already=()
 for i in "${!names[@]}"; do
   destination=${destinations[$i]}
-  if [[ -e $destination || -L $destination ]]; then
-    echo "Destino ya existe; se conserva: $destination" >&2
-    exit 1
-  fi
   manifests+=("$(validate_remote "${sources[$i]}" "${seeds[$i]}")")
+  if [[ -e $destination || -L $destination ]]; then
+    local_manifest=$(validate_local "$destination" "${seeds[$i]}")
+    [[ $local_manifest == "${manifests[$i]}" ]] || {
+      echo "Destino existente difiere del origen; se conserva: $destination" >&2
+      exit 1
+    }
+    already+=(1)
+  else
+    already+=(0)
+  fi
   echo "Preflight completo: ${names[$i]}"
 done
 
@@ -139,6 +147,16 @@ for day in $(seq -w 1 60); do files+=("dia-0${day}.json"); done
 files+=(replica.json)
 for i in "${!names[@]}"; do
   destination=${destinations[$i]}
+  if [[ ${already[$i]} == 1 ]]; then
+    local_manifest=$(validate_local "$destination" "${seeds[$i]}")
+    remote_manifest=$(validate_remote "${sources[$i]}" "${seeds[$i]}")
+    [[ $local_manifest == "${manifests[$i]}" && $remote_manifest == "${manifests[$i]}" ]] || {
+      echo "Origen o destino cambió tras el preflight: ${names[$i]}" >&2
+      exit 1
+    }
+    echo "Ya estaba copiada y validada: ${names[$i]}"
+    continue
+  fi
   parent=${destination%/*}
   mkdir -p -- "$parent"
   if [[ -e $destination || -L $destination ]]; then
@@ -159,10 +177,51 @@ done
 balance=/datos/tmp-atlas-lab/balance
 mkdir -p -- "$balance"
 progress_target=$balance/codex-laptop-20260926.tsv
+progress_sha=$("${SSH[@]}" "$REMOTE" "python3 - '$PROGRESS'" <<'PY'
+import hashlib
+from pathlib import Path
+import stat
+import sys
+p = Path(sys.argv[1])
+if not stat.S_ISREG(p.lstat().st_mode):
+    raise SystemExit('Bitácora remota no regular')
+print(hashlib.sha256(p.read_bytes()).hexdigest())
+PY
+)
 if [[ -e $progress_target || -L $progress_target ]]; then
-  echo "Bitácora ya existe; se conserva: $progress_target" >&2
-  exit 1
+  local_progress_sha=$(python3 - "$progress_target" <<'PY'
+import hashlib
+from pathlib import Path
+import stat
+import sys
+p = Path(sys.argv[1])
+if not stat.S_ISREG(p.lstat().st_mode):
+    raise SystemExit('Bitácora local no regular')
+print(hashlib.sha256(p.read_bytes()).hexdigest())
+PY
+)
+  [[ $local_progress_sha == "$progress_sha" ]] || {
+    echo "Bitácora local difiere de la remota; se conserva: $progress_target" >&2
+    exit 1
+  }
+  echo "Bitácora ya estaba copiada y validada: $progress_target"
+  exit 0
 fi
 progress_stage=$(mktemp "$balance/.codex-laptop-20260926.XXXXXX")
 rsync -a --no-links -e "$RSYNC_SSH" "$REMOTE:$PROGRESS" "$progress_stage"
+local_progress_sha=$(python3 - "$progress_stage" <<'PY'
+import hashlib
+from pathlib import Path
+import stat
+import sys
+p = Path(sys.argv[1])
+if not stat.S_ISREG(p.lstat().st_mode):
+    raise SystemExit('Bitácora copiada no regular')
+print(hashlib.sha256(p.read_bytes()).hexdigest())
+PY
+)
+[[ $local_progress_sha == "$progress_sha" ]] || {
+  echo "Bitácora cambió durante la copia; staging conservado: $progress_stage" >&2
+  exit 1
+}
 publish_new "$progress_stage" "$progress_target"

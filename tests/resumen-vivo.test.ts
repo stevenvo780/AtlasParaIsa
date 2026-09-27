@@ -4,7 +4,8 @@ import { readFileSync } from 'node:fs';
 import { createWorld, stepWorld, type World } from '../src/world/index.js';
 import { digestoCanonico } from '../src/world/digesto.js';
 import { demographicTraits } from '../src/world/demography.js';
-import { paramsOf, parseParams } from '../src/world/params.js';
+import { paramsOf, parseParams, setParams } from '../src/world/params.js';
+import { hacinamientoLocal } from '../src/world/natalidad.js';
 import { RAZON_CORTEJO, RAZON_PREPARA, RAZON_REUNION, RESERVA_PARA_CRIAR, aQuienBusca, fertilidad, resumenNatalidad, resumenVivo } from '../src/server/resumen-vivo.js';
 import { enriquecerPersona } from '../src/server/persona-extra.js';
 
@@ -53,6 +54,9 @@ test('14: el resumen anuncia natalidad local y omite el cupo cuando está activa
   assert.equal(ley.cupo, undefined);
   assert.equal(ley.ventana, undefined);
   assert.equal(ley.continua, undefined);
+  // R=4 queda dentro de los chunks activos; con R=24 se generarían recursos en celdas
+  // inactivas, que vaciar solo world.tiles no alcanza a agotar.
+  setParams(world, parseParams('poblacion.radioProvision=4', paramsOf(world)));
   world.tick = 5000;
   const person = world.people.find(p => p.role === 'neighbor')!;
   person.demography.age = world.tick - person.bornAt;
@@ -60,6 +64,9 @@ test('14: el resumen anuncia natalidad local y omite el cupo cuando está activa
   person.hunger = person.thirst = person.fatigue = 0.05; person.energy = 0.95;
   world.structures = [];
   for (const tile of world.tiles) { tile.feature = 'none'; tile.biome = 'grassland'; tile.moisture = tile.vegetation = tile.food = 0; }
+  const place = world.places.find(p => Math.hypot(person.x - p.x, person.y - p.y) <= paramsOf(world).poblacion.radioLugar);
+  assert.ok(place, 'la persona tiene un lugar compartido cercano');
+  assert.equal(hacinamientoLocal(world, place, 4, 1), Infinity);
   assert.equal(fertilidad(world, person).bloqueo, 'natalidad-local');
 });
 

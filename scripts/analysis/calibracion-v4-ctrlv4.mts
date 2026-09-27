@@ -1,19 +1,25 @@
 /** Calibración descriptiva de C8 en CTRLV4. Solo lee datos; nunca decide una lectura v4.
- * Uso: npx tsx scripts/analysis/calibracion-v4-ctrlv4.mts [--muestra]
- * Sin --muestra exige los 20 días 1..60 completos y escribe JSON y Markdown en balance/.
+ * Uso: npx tsx scripts/analysis/calibracion-v4-ctrlv4.mts [--muestra] [--panel 40]
+ * Sin --muestra exige todos los días 1..60 y escribe JSON y Markdown en balance/.
  */
-import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { readFileSync, existsSync, lstatSync, mkdirSync, writeFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { evaluarConjunto, evaluarSerieDiversidad, mannKendall, UMBRALES_POR_DEFECTO,
   COBERTURA_MIN, TOLERANCIA_PLANA, type ResultadoCriterio } from '../lab/criterio-terminado.mjs';
 
 const RAIZ = '/datos/tmp-atlas-lab/datos-lab/ctrlv4';
+const RAIZ_B = '/datos/tmp-atlas-lab/datos-lab/ctrlv4b';
 const SALIDA = '/datos/tmp-atlas-lab/balance';
 const SHA_CTRLV4 = '667454d5e0232885d78c37775d6a5619f516872d';
 const TICKS_POR_DIA = 2400;
-const MUESTRA = process.argv.slice(2).includes('--muestra');
-if (process.argv.slice(2).some(x => x !== '--muestra')) throw new Error('Uso: script [--muestra]');
+const argumentos = process.argv.slice(2);
+const MUESTRA = argumentos.includes('--muestra');
+const PANEL = argumentos.includes('--panel') ? 40 : 20;
+const esperados = PANEL === 40 ? ['--panel', '40', ...(MUESTRA ? ['--muestra'] : [])] : MUESTRA ? ['--muestra'] : [];
+if (argumentos.length !== esperados.length || argumentos.filter(x => x === '--panel').length > 1
+  || argumentos.filter(x => x === '--muestra').length > 1
+  || argumentos.some(x => !esperados.includes(x))) throw new Error('Uso: script [--muestra] [--panel 40]');
 type Dia = Record<string, unknown>;
 type Estado = 'cumple' | 'falla' | 'desconocido';
 type Medida = { estado: Estado; base: number; campo: string; puntos: number; media: number | null;
@@ -38,8 +44,8 @@ const paramsReferencia = referencia.params;
 
 /** El manifiesto se escribe después del día 60. Los JSON diarios no llevan seed: los
  * contadores acumulados y el resumen final añaden controles contra mezclas accidentales. */
-function verificarReplica(semilla: number, dias: Map<number, Dia>): string[] {
-  const ruta = join(RAIZ, `CTRLV4-${semilla}`, 'replica.json');
+function verificarReplica(raiz: string, semilla: number, dias: Map<number, Dia>): string[] {
+  const ruta = join(raiz, `CTRLV4-${semilla}`, 'replica.json');
   if (!existsSync(ruta)) return ['falta replica.json final'];
   let manifiesto: unknown;
   try { manifiesto = JSON.parse(readFileSync(ruta, 'utf8')) as unknown; }
@@ -144,10 +150,20 @@ function wilson(exitos: number, total: number): [number, number] | null {
 
 const incompletas: { semilla: number; diasFaltantes: number[]; problemas: string[] }[] = [];
 const datos = new Map<number, Map<number, Dia>>();
-for (let s = 6001; s <= 6020; s++) {
+for (let s = 6001; s < 6001 + PANEL; s++) {
   const dias = new Map<number, Dia>(), faltantes: number[] = [], problemas: string[] = [];
+  const raiz = s <= 6020 ? RAIZ : RAIZ_B;
+  if (PANEL === 40) {
+    const directorio = join(raiz, `CTRLV4-${s}`);
+    if (!existsSync(directorio) || !lstatSync(directorio).isDirectory()) {
+      incompletas.push({ semilla: s, diasFaltantes: Array.from({ length: 60 }, (_, i) => i + 1),
+        problemas: ['falta directorio real CTRLV4 de la semilla'] });
+      datos.set(s, dias);
+      continue;
+    }
+  }
   for (let i = 1; i <= 60; i++) {
-    const f = join(RAIZ, `CTRLV4-${s}`, `dia-${String(i).padStart(3, '0')}.json`);
+    const f = join(raiz, `CTRLV4-${s}`, `dia-${String(i).padStart(3, '0')}.json`);
     if (!existsSync(f)) { faltantes.push(i); continue; }
     try {
       const dia = JSON.parse(readFileSync(f, 'utf8')) as unknown;
@@ -155,21 +171,32 @@ for (let s = 6001; s <= 6020; s++) {
       else dias.set(i, dia);
     } catch { problemas.push(`día ${i} ilegible`); }
   }
-  if (!faltantes.length && !problemas.length) problemas.push(...verificarReplica(s, dias));
+  if (!faltantes.length && !problemas.length) problemas.push(...verificarReplica(raiz, s, dias));
   if (faltantes.length || problemas.length) incompletas.push({ semilla: s, diasFaltantes: faltantes, problemas });
   datos.set(s, dias);
 }
 if (incompletas.length && !MUESTRA) throw new Error(`Panel incompleto o no verificado; no se escriben salidas: ${incompletas.map(x => `${x.semilla}: faltan ${x.diasFaltantes.length}, problemas ${x.problemas.join(', ') || 'ninguno'}`).join('; ')}`);
 
 const oficial = evaluarConjunto(RAIZ, { dia: 60, diversidadCampo: 'diversidadConductaVentana' });
-const porSemilla = new Map(oficial.replicas.map(x => [x.semilla, x]));
+const oficialB = PANEL === 40 ? evaluarConjunto(RAIZ_B, { dia: 60, diversidadCampo: 'diversidadConductaVentana' }) : null;
+if (oficialB) for (const [informe, primero] of [[oficial, 6001], [oficialB, 6021]] as const) {
+  const replicas = informe.replicas.filter(x => x.brazo === 'CTRLV4');
+  const semillas = Array.from({ length: 20 }, (_, i) => primero + i);
+  if (replicas.length !== 20 || semillas.some(s =>
+    replicas.filter(x => x.semilla === s && x.nombre === `CTRLV4-${s}`).length !== 1))
+    throw new Error(`Membresía CTRLV4 inválida en ${informe.conjunto}: se exigen exactamente ${primero}..${primero + 19}, sin duplicados`);
+}
+const porSemilla = new Map((oficialB ? [...oficial.replicas.filter(x => x.brazo === 'CTRLV4'),
+  ...oficialB.replicas.filter(x => x.brazo === 'CTRLV4')] : oficial.replicas).map(x => [x.semilla, x]));
 const filas: Record<string, unknown>[] = [];
 for (const [semilla, dias] of datos) {
   if (incompletas.some(x => x.semilla === semilla)) continue;
   const extinta = [...dias.values()].some(d => d.vecinosMortales === 0);
   const base = [...dias].find(([, d]) => d.fundadoresMortalesVivos === 0)?.[0];
   const replica = porSemilla.get(semilla);
-  if (!replica?.criterios) throw new Error(`Evaluador sin C8 para ${semilla}`);
+  if (!replica?.criterios || !replica.terminada || replica.ultimoDia !== 60
+    || (replica.estado !== 'evaluada' && replica.estado !== 'extinguida'))
+    throw new Error(`Evaluador sin réplica completa y legible para ${semilla}: ${replica?.estado ?? 'ausente'} (${replica?.nota ?? 'sin nota'})`);
   const v3 = estadoC8(replica.criterios.diversidad, 5, 'diversidadConductaVentana');
   const a = base === undefined ? null : estadoC8(evaluarSerieDiversidad(
     i => dias.get(i)?.diversidadConductaVentana, 60, { ...UMBRALES_POR_DEFECTO, diaBaseDiversidad: base,
@@ -195,6 +222,8 @@ for (const [semilla, dias] of datos) {
   filas.push({ semilla, extinta, baseSinFundadores: base ?? null, lecturas });
 }
 const claves = Object.keys((filas[0]?.lecturas ?? {}) as Record<string, unknown>);
+if (PANEL === 40 && !MUESTRA && (filas.length !== 40 || filas.some((f, i) => f.semilla !== 6001 + i)))
+  throw new Error('El panel 40 debe contener exactamente las semillas 6001..6040, una vez cada una');
 function resumir(subconjunto: Record<string, unknown>[], totalPanel?: number) {
   return Object.fromEntries(claves.map(clave => {
     const resultados = subconjunto.map(f => (f.lecturas as Record<string, Medida | null>)[clave]);
@@ -212,27 +241,28 @@ function resumir(subconjunto: Record<string, unknown>[], totalPanel?: number) {
         fraccionPanelIdentificada: [cumple / totalPanel, (cumple + desconocido + sinCompletar) / totalPanel] }) }];
   }));
 }
-const resumen = resumir(filas, 20), resumenVivos = resumir(filas.filter(x => !x.extinta));
-const resultado = { tipo: 'calibracion_descriptiva_control', panel: 'CTRLV4 6001..6020', corte: 60,
+const resumen = resumir(filas, PANEL), resumenVivos = resumir(filas.filter(x => !x.extinta));
+const resultado = { tipo: 'calibracion_descriptiva_control', panel: `CTRLV4 6001..${6000 + PANEL}`, corte: 60,
   estado: incompletas.length ? 'muestra_provisional' : 'panel_completo', incompletas,
   metodo: { v3: 'evaluarConjunto congelado, campo ventana', A: 'mismo evaluador, base primer día sin fundadores mortales',
     A_prima: 'A con solo componente conducta y mismo umbral absoluto 0.02; elimina la entropía agregada de oficios, pero el vector de conducta conserva un one-hot del oficio dominante',
     B: 'clasesR100, subida Sen >= 5% de media del tramo', C: 'comunidades y linajes separados, Sen >= 0.02',
     variantes: 'base 5 y base sin fundadores para B/C; ninguna elegida',
     faltantes: 'desconocido; aprobado exige serie completa, cobertura >=80% y extremos completos; el panel exige 60 JSON con ticks válidos y manifiesto final de SHA, seed, días y params correctos',
-    intervalos: 'Wilson bilateral 95% entre clasificados; fracción de completas y fracción del panel de 20 separadas; esta última cuenta incompletas y desconocidos como 0 o 1' },
+    intervalos: `Wilson bilateral 95% entre clasificados; fracción de completas y fracción del panel de ${PANEL} separadas; esta última cuenta incompletas y desconocidos como 0 o 1` },
   resumen, resumenVivos, semillas: filas };
 if (MUESTRA) console.log(JSON.stringify(resultado, null, 2));
 else {
   mkdirSync(SALIDA, { recursive: true });
-  writeFileSync(resolve(SALIDA, 'calibracion-v4-ctrlv4.json'), JSON.stringify(resultado, null, 2) + '\n');
+  const nombreSalida = PANEL === 40 ? 'calibracion-v4-ctrlv4-40' : 'calibracion-v4-ctrlv4';
+  writeFileSync(resolve(SALIDA, `${nombreSalida}.json`), JSON.stringify(resultado, null, 2) + '\n');
   const lineas = ['# Calibración descriptiva CTRLV4 a 60 días', '',
-    'Solo controles, sin elección de lectura ni preregistro. Wilson 95 % se calcula entre resultados conocidos. La fracción identificada del panel usa siempre 20 semillas: una incompleta o desconocida puede fallar o aprobar.', '',
-    '| Lectura | Aprueban / 20 | n conocido | Desconocido completo | Incompletas | Cota panel / 20 | Fracción conocida | Wilson 95 % conocidos |', '|---|---:|---:|---:|---:|---:|---:|---:|'];
+    `Solo controles, sin elección de lectura ni preregistro. Wilson 95 % se calcula entre resultados conocidos. La fracción identificada del panel usa siempre ${PANEL} semillas: una incompleta o desconocida puede fallar o aprobar.`, '',
+    `| Lectura | Aprueban / ${PANEL} | n conocido | Desconocido completo | Incompletas | Cota panel / ${PANEL} | Fracción conocida | Wilson 95 % conocidos |`, '|---|---:|---:|---:|---:|---:|---:|---:|'];
   for (const [k, v] of Object.entries(resumen)) {
     const x = v;
     if (x.incompletas === undefined || !x.fraccionPanelIdentificada) throw new Error(`Resumen del panel ausente: ${k}`);
-    lineas.push(`| ${k} | ${x.cumple}/20 | ${x.cumple + x.falla} | ${x.desconocido} | ${x.incompletas} | ${x.fraccionPanelIdentificada.map(n => n.toFixed(3)).join('–')} | ${x.fraccionConocida?.toFixed(3) ?? '—'} | ${x.intervaloWilson95Conocidos?.map(n => n.toFixed(3)).join('–') ?? '—'} |`);
+    lineas.push(`| ${k} | ${x.cumple}/${PANEL} | ${x.cumple + x.falla} | ${x.desconocido} | ${x.incompletas} | ${x.fraccionPanelIdentificada.map(n => n.toFixed(3)).join('–')} | ${x.fraccionConocida?.toFixed(3) ?? '—'} | ${x.intervaloWilson95Conocidos?.map(n => n.toFixed(3)).join('–') ?? '—'} |`);
   }
   lineas.push('', '## Solo controles vivos al día 60', '',
     'Desglose de sensibilidad: las extinciones no prueban especificidad de la lectura entre mundos vivos.', '',
@@ -250,6 +280,6 @@ else {
     '- Una serie con nulos o huecos interiores no puede aprobar: queda desconocida. El evaluador congelado aplica además una cota pesimista a esos huecos, que aquí no está exportada.',
     '- Los intervalos de Wilson son descriptivos y no corrigen la selección de alternativas ni prueban generalización. Hay que atender también a los desconocidos.',
     '- Esta tabla no prueba potencia frente a leyes nuevas ni reemplaza un preregistro v4 decidido por Steven.', '');
-  writeFileSync(resolve(SALIDA, 'calibracion-v4-ctrlv4.md'), lineas.join('\n'));
-  console.log(`Escritos ${resolve(SALIDA, 'calibracion-v4-ctrlv4.json')} y .md`);
+  writeFileSync(resolve(SALIDA, `${nombreSalida}.md`), lineas.join('\n'));
+  console.log(`Escritos ${resolve(SALIDA, `${nombreSalida}.json`)} y .md`);
 }

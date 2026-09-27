@@ -1,0 +1,1203 @@
+{
+  "tipo": "auditoria_campanas_codex_20260926",
+  "fuente14Relanzadas": "portatil",
+  "gestores": {
+    "torreFin": true,
+    "portatilFin": false,
+    "portatilInterrumpidoCon14Lanzadas": true,
+    "pub2TorreProcedencia": true,
+    "hedgeTorreProcedencia": false
+  },
+  "solapes": {
+    "estado": "solapes_acreditados",
+    "replicas": 26,
+    "solapesAcreditados": 26,
+    "solapes": 1109,
+    "diferencias": 0,
+    "errores": 0
+  },
+  "procedencia": {
+    "pub2Torre": {
+      "estado": "completo",
+      "replicas": 2,
+      "identidadesTSV": 6,
+      "solapesComparados": 71
+    },
+    "portatil14": {
+      "estado": "completo",
+      "replicas": 14,
+      "identidadesTSV": 42,
+      "solapesComparados": 550
+    }
+  },
+  "grupos": {
+    "CTRLV4": {
+      "replicas": [
+        {
+          "replica": "CTRLV4-6001",
+          "diasEncontrados": 60,
+          "sha": "667454d5e0232885d78c37775d6a5619f516872d",
+          "relaunch": false,
+          "parcialArchivado": false,
+          "identidadDias": [],
+          "solapeAcreditado": null,
+          "ultimoEstadoGestor": null,
+          "fallosHistoricosGestor": [],
+          "hashesDia": {
+            "1": "875ac907e4e1f377fb146291ba7de8d923efc030afd6be43601b3bbf3eee1764",
+            "3": "c00c420acbac5d85d1e258b24037b7c1e65426f2593f356c866ac8e83e18a16a",
+            "60": "71e842e2a7dce03499743288b2552c8ac4f48e01d832494fdcabd5f6bf2d5cee"
+          },
+          "errores": [],
+          "estado": "completa"
+        },
+        {
+          "replica": "CTRLV4-6002",
+          "diasEncontrados": 60,
+          "sha": "667454d5e0232885d78c37775d6a5619f516872d",
+          "relaunch": false,
+          "parcialArchivado": false,
+          "identidadDias": [],
+          "solapeAcreditado": null,
+          "ultimoEstadoGestor": null,
+          "fallosHistoricosGestor": [],
+          "hashesDia": {
+            "1": "e47fa1bb2b44f7fc619a1e9050dfd6d96a4f6c2241d056884aaa02ee991e7067",
+            "3": "eee1e6b84655b67a80d75b433bfa902b21d90f1b2dea05b9f4962844be6267e6",
+            "60": "17284f92a21bef6314b74277cd88e1579d3db50b08b3c639f4cca4166f4ea991"
+          },
+          "errores": [],
+          "estado": "completa"
+        },
+        {
+          "replica": "CTRLV4-6003",
+          "diasEncontrados": 60,
+          "sha": "667454d5e0232885d78c37775d6a5619f516872d",
+          "relaunch": false,
+          "parcialArchivado": false,
+          "identidadDias": [],
+          "solapeAcreditado": null,
+          "ultimoEstadoGestor": null,
+          "fallosHistoricosGestor": [],
+          "hashesDia": {
+            "1": "1b10dc94f9dcde3253fe4b079c15057cf882a87eb0e982a45bef71d23926be10",
+            "3": "b541f8cf3bd3a7f9b0494be3c0adbd1820fe44bc220e799862d699bfda2c03ac",
+            "60": "c56a77bbd228bbef37409089a83a469ae7ba5c97c3723b590cc8c9e7ca464d6a"
+          },
+          "errores": [],
+          "estado": "completa"
+        },
+        {
+          "replica": "CTRLV4-6004",
+          "diasEncontrados": 60,
+          "sha": "667454d5e0232885d78c37775d6a5619f516872d",
+          "relaunch": true,
+          "parcialArchivado": true,
+          "identidadDias": [
+            1,
+            2,
+            3
+          ],
+          "solapeAcreditado": true,
+          "ultimoEstadoGestor": "COMPLETA",
+          "fallosHistoricosGestor": [],
+          "hashesDia": {
+            "1": "86dd72de64c609b153c4505b5d183f15574cbf2f4fffde6382302729361b06de",
+            "3": "7d0ab5fee49bba454968888746113bb595c13b0d1718c275bc30d1f73e2d7d88",
+            "60": "1a49d2f6759db5c9effdaa32a66660e87915dbe21aa068fed58a5ba9d6e01e45"
+          },
+          "errores": [],
+          "estado": "completa"
+        },
+        {
+          "replica": "CTRLV4-6005",
+          "diasEncontrados": 60,
+          "sha": "667454d5e0232885d78c37775d6a5619f516872d",
+          "relaunch": false,
+          "parcialArchivado": false,
+          "identidadDias": [],
+          "solapeAcreditado": null,
+          "ultimoEstadoGestor": null,
+          "fallosHistoricosGestor": [],
+          "hashesDia": {
+            "1": "de783b997e2346c8a2bc1620895f62d34888939073a05cf1405468415a979c42",
+            "3": "b9cc399aed1a0ab4604d203461d8da1c0e8e9fd46236b9e39812ad778b4fbda4",
+            "60": "8c944e6b6529590fd1a75437d5a0e1cdc0f906cfaabce63caf02c2027435fca8"
+          },
+          "errores": [],
+          "estado": "completa"
+        },
+        {
+          "replica": "CTRLV4-6006",
+          "diasEncontrados": 60,
+          "sha": "667454d5e0232885d78c37775d6a5619f516872d",
+          "relaunch": false,
+          "parcialArchivado": false,
+          "identidadDias": [],
+          "solapeAcreditado": null,
+          "ultimoEstadoGestor": null,
+          "fallosHistoricosGestor": [],
+          "hashesDia": {
+            "1": "68e5c198fd18c3adb2d8e286633ee008532d581cd7fe36dae585c7266be08cc0",
+            "3": "fa82a9282585d4397b7544e401c0b38fc434ef8cacc100faebbaabd4ccddab74",
+            "60": "fce4eea6ad1b38a8761e2230fca87d2aaea9a36614ef1f8126a80521a160be0e"
+          },
+          "errores": [],
+          "estado": "completa"
+        },
+        {
+          "replica": "CTRLV4-6007",
+          "diasEncontrados": 60,
+          "sha": "667454d5e0232885d78c37775d6a5619f516872d",
+          "relaunch": false,
+          "parcialArchivado": false,
+          "identidadDias": [],
+          "solapeAcreditado": null,
+          "ultimoEstadoGestor": null,
+          "fallosHistoricosGestor": [],
+          "hashesDia": {
+            "1": "3ef239ebfdc7eabb36ade3fe89174cfa17c78ac57ec31b73e24228c748e9a15d",
+            "3": "ac0ac043895430ada9438661ede58ed6f5fbeca01a3bc292901694c571dfea42",
+            "60": "d888d566d44a0318c30618fb37071b303240fd85ff99e9622786d81104f0b807"
+          },
+          "errores": [],
+          "estado": "completa"
+        },
+        {
+          "replica": "CTRLV4-6008",
+          "diasEncontrados": 60,
+          "sha": "667454d5e0232885d78c37775d6a5619f516872d",
+          "relaunch": false,
+          "parcialArchivado": false,
+          "identidadDias": [],
+          "solapeAcreditado": null,
+          "ultimoEstadoGestor": null,
+          "fallosHistoricosGestor": [],
+          "hashesDia": {
+            "1": "3e4c70dc6ed06678dfcfa0a89ffdd860898f1c6de37862f6c12527d911cb0a90",
+            "3": "f41d911c9c285dd3545bc499b197fd8f1e6758c7041dc144ebedec1bcef29732",
+            "60": "8c6f682d59de34005ae152668297e64e85c5971ba57d0dcea85a0e21113c6f94"
+          },
+          "errores": [],
+          "estado": "completa"
+        },
+        {
+          "replica": "CTRLV4-6009",
+          "diasEncontrados": 60,
+          "sha": "667454d5e0232885d78c37775d6a5619f516872d",
+          "relaunch": true,
+          "parcialArchivado": true,
+          "identidadDias": [
+            1,
+            2,
+            3
+          ],
+          "solapeAcreditado": true,
+          "ultimoEstadoGestor": "COMPLETA",
+          "fallosHistoricosGestor": [],
+          "hashesDia": {
+            "1": "45c11c6ba32c2d876aa1fa9b3541193b637d368e0f625caa3d3ba7b16a253cac",
+            "3": "53e8a45d837aa7d4122b599e9aa50f89b6e245e2921fcb2117627d0275783422",
+            "60": "b2b6a158bca6dffe7f53641b9109a75dc129dd5acf3314fc36c57e69cdd20aa9"
+          },
+          "errores": [],
+          "estado": "completa"
+        },
+        {
+          "replica": "CTRLV4-6010",
+          "diasEncontrados": 60,
+          "sha": "667454d5e0232885d78c37775d6a5619f516872d",
+          "relaunch": true,
+          "parcialArchivado": true,
+          "identidadDias": [
+            1,
+            2,
+            3
+          ],
+          "solapeAcreditado": true,
+          "ultimoEstadoGestor": "COMPLETA",
+          "fallosHistoricosGestor": [],
+          "hashesDia": {
+            "1": "822732dd23a615580af6ca37cb170f4bca20a8b496d2ba2c048f3574be67289f",
+            "3": "62960355470290682280dcdc31530324dd05018984a8cfbdedb539a85402d3dc",
+            "60": "a9cb7747900ceed6d3c9ee7bc7550fec8f3c2a396adfd4cfac13d76310d1b4f0"
+          },
+          "errores": [],
+          "estado": "completa"
+        },
+        {
+          "replica": "CTRLV4-6011",
+          "diasEncontrados": 60,
+          "sha": "667454d5e0232885d78c37775d6a5619f516872d",
+          "relaunch": true,
+          "parcialArchivado": true,
+          "identidadDias": [
+            1,
+            2,
+            3
+          ],
+          "solapeAcreditado": true,
+          "ultimoEstadoGestor": "COMPLETA",
+          "fallosHistoricosGestor": [],
+          "hashesDia": {
+            "1": "3319cca8678ab8d7fc528b8ed5b98523b8710edd7e5128fca07c3e334cb3cd69",
+            "3": "96b0a7249371e947e5fb65f07497e8be0131c815754ca22f5d4b13895284d7bc",
+            "60": "9669c7f896a30e57a4e56e1d07ec10367ab514e75b369bd22c0d00332e3a7cae"
+          },
+          "errores": [],
+          "estado": "completa"
+        },
+        {
+          "replica": "CTRLV4-6012",
+          "diasEncontrados": 60,
+          "sha": "667454d5e0232885d78c37775d6a5619f516872d",
+          "relaunch": true,
+          "parcialArchivado": true,
+          "identidadDias": [
+            1,
+            2,
+            3
+          ],
+          "solapeAcreditado": true,
+          "ultimoEstadoGestor": "COMPLETA",
+          "fallosHistoricosGestor": [],
+          "hashesDia": {
+            "1": "5e23cf572c6256e7af25133d4b091e19ce9fc3183d3c35d7dbaa735e77c9803b",
+            "3": "4cea460c9d69dd5b5d459af1d4f0fc87349035f908dd68e85b1297880a264601",
+            "60": "2ca061a46c84a99b1841b9dbcfd5bb4bd4607e2497fa17d7c78868fe0c1454ad"
+          },
+          "errores": [],
+          "estado": "completa"
+        },
+        {
+          "replica": "CTRLV4-6013",
+          "diasEncontrados": 60,
+          "sha": "667454d5e0232885d78c37775d6a5619f516872d",
+          "relaunch": true,
+          "parcialArchivado": true,
+          "identidadDias": [
+            1,
+            2,
+            3
+          ],
+          "solapeAcreditado": true,
+          "ultimoEstadoGestor": "COMPLETA",
+          "fallosHistoricosGestor": [],
+          "hashesDia": {
+            "1": "ba6d0160c98a73699d7c58a382d5d02e1de0fc4d0d74708ac9cb78971652177d",
+            "3": "3405556e3701d2ee842ab121080918b6676bf0349b8a40d039b0d61826cc4373",
+            "60": "b0372a102f4023c87d7bffcf2bab496e50b02cc868926168ac94e56220efdb36"
+          },
+          "errores": [],
+          "estado": "completa"
+        },
+        {
+          "replica": "CTRLV4-6014",
+          "diasEncontrados": 60,
+          "sha": "667454d5e0232885d78c37775d6a5619f516872d",
+          "relaunch": false,
+          "parcialArchivado": false,
+          "identidadDias": [],
+          "solapeAcreditado": null,
+          "ultimoEstadoGestor": null,
+          "fallosHistoricosGestor": [],
+          "hashesDia": {
+            "1": "f01a555c110204f0e9258479eeb4f3ba5cc22808d35843177177349b25c94639",
+            "3": "3b0f2bf632d75951ec61fbbf22bd3f5d16c3dd99f621387522a24893aa5a57a8",
+            "60": "65fa29e15667b3e063aa84764db75219a43740ec22c24439524494826ac6679f"
+          },
+          "errores": [],
+          "estado": "completa"
+        },
+        {
+          "replica": "CTRLV4-6015",
+          "diasEncontrados": 60,
+          "sha": "667454d5e0232885d78c37775d6a5619f516872d",
+          "relaunch": true,
+          "parcialArchivado": true,
+          "identidadDias": [
+            1,
+            2,
+            3
+          ],
+          "solapeAcreditado": true,
+          "ultimoEstadoGestor": "COMPLETA",
+          "fallosHistoricosGestor": [],
+          "hashesDia": {
+            "1": "f2de0c31f0a8320690e60b06bd57d46df464821b0d1bde7729c29f9f45905e1d",
+            "3": "1ebbc56b43c41dd5197a26085b1bb891c7d1ae9ba6a173fe3e909c92b4f085ae",
+            "60": "9f2f986007efbdb73bcee615628bed7adf04956b587b38234bda1907f591aace"
+          },
+          "errores": [],
+          "estado": "completa"
+        },
+        {
+          "replica": "CTRLV4-6016",
+          "diasEncontrados": 60,
+          "sha": "667454d5e0232885d78c37775d6a5619f516872d",
+          "relaunch": false,
+          "parcialArchivado": false,
+          "identidadDias": [],
+          "solapeAcreditado": null,
+          "ultimoEstadoGestor": null,
+          "fallosHistoricosGestor": [],
+          "hashesDia": {
+            "1": "8bca757db8746eae74c1f53abe80c40f11a41d96a221d8d36ed8f3bb6653cbbe",
+            "3": "82d0246c0fd5ddce90a8cbcd6499be04c4e7fdacf7ede6cc314515cd37ab5fe1",
+            "60": "a98cd20be665f19d24842810d1bfbc552e1860981cfc896eec580c6480ac2739"
+          },
+          "errores": [],
+          "estado": "completa"
+        },
+        {
+          "replica": "CTRLV4-6017",
+          "diasEncontrados": 60,
+          "sha": "667454d5e0232885d78c37775d6a5619f516872d",
+          "relaunch": true,
+          "parcialArchivado": true,
+          "identidadDias": [
+            1,
+            2,
+            3
+          ],
+          "solapeAcreditado": true,
+          "ultimoEstadoGestor": "COMPLETA",
+          "fallosHistoricosGestor": [],
+          "hashesDia": {
+            "1": "b4931f66516fc1c155e420b54502b51f672dc570c97c993881782878e3cacf15",
+            "3": "c34393045f4459a7d6894e0fdea5c69c5d22a032670ad24c9ebec3f5e6ebcb7e",
+            "60": "fb1d193ec001e99a5b4d7a374ee9bc8c6a9f2bcb6aa2378decf28b16909200a1"
+          },
+          "errores": [],
+          "estado": "completa"
+        },
+        {
+          "replica": "CTRLV4-6018",
+          "diasEncontrados": 60,
+          "sha": "667454d5e0232885d78c37775d6a5619f516872d",
+          "relaunch": true,
+          "parcialArchivado": true,
+          "identidadDias": [
+            1,
+            2,
+            3
+          ],
+          "solapeAcreditado": true,
+          "ultimoEstadoGestor": "COMPLETA",
+          "fallosHistoricosGestor": [],
+          "hashesDia": {
+            "1": "87d004254d9a041afc675fb39c31cd7c12aee3f718b0e986ec0bb045d28b06b1",
+            "3": "21f34976040f3d219298f40cc5b9f59e3a655c28bd533d545b35d56cc30e1d8b",
+            "60": "100d7be75c4cb2c2278beb0ee9bc8318add76f9875ac38dfc2feeacdfa4cdd82"
+          },
+          "errores": [],
+          "estado": "completa"
+        },
+        {
+          "replica": "CTRLV4-6019",
+          "diasEncontrados": 60,
+          "sha": "667454d5e0232885d78c37775d6a5619f516872d",
+          "relaunch": false,
+          "parcialArchivado": false,
+          "identidadDias": [],
+          "solapeAcreditado": null,
+          "ultimoEstadoGestor": null,
+          "fallosHistoricosGestor": [],
+          "hashesDia": {
+            "1": "399493863c6c14fa84087cc467d5e254cb8899a6aeb87867777205d254f66d6d",
+            "3": "0644c3f291ef27fe3718e837e89cd7e87a82061b11da4f1c0c124ed8cc4483b5",
+            "60": "1fb0fc780141f04a21fba4b6d3c5659a2be261a1cce3025a4dab36f0aa4ff8be"
+          },
+          "errores": [],
+          "estado": "completa"
+        },
+        {
+          "replica": "CTRLV4-6020",
+          "diasEncontrados": 60,
+          "sha": "667454d5e0232885d78c37775d6a5619f516872d",
+          "relaunch": false,
+          "parcialArchivado": false,
+          "identidadDias": [],
+          "solapeAcreditado": null,
+          "ultimoEstadoGestor": null,
+          "fallosHistoricosGestor": [],
+          "hashesDia": {
+            "1": "3d71c0dec0bfb71625fedffe919107433daba30b028c88895ceccccd39660cba",
+            "3": "23f1bc2a0ad2d3734e804d66288dbbda7294b48edf4ba611fc08c551da8df05f",
+            "60": "05c8e2512115d5e700372c73ba2b48ef237dbf93c99eb4aecd3fe5b16390deb2"
+          },
+          "errores": [],
+          "estado": "completa"
+        }
+      ],
+      "requeridas": 20,
+      "completas": 20,
+      "fallidas": 0,
+      "estado": "completo"
+    },
+    "HOG": {
+      "replicas": [
+        {
+          "replica": "HOG-2001",
+          "diasEncontrados": 60,
+          "sha": "d2ebf11d51c3221477d88c7045faeafa2a229683",
+          "relaunch": false,
+          "parcialArchivado": false,
+          "identidadDias": [],
+          "solapeAcreditado": null,
+          "ultimoEstadoGestor": null,
+          "fallosHistoricosGestor": [],
+          "hashesDia": {
+            "1": "f51141d22ceaa960a80565abc8ccd352011699ec764908c29eca360de2288f4e",
+            "3": "3b31be053cb9d903daa61f6451e4459705f5ae75c44cb3ba6aa794d089ea448a",
+            "60": "d02a140dea40e83b1c9848e900355d44aca2993ed62ed47e497ec14917da9a97"
+          },
+          "errores": [],
+          "estado": "completa"
+        },
+        {
+          "replica": "HOG-2002",
+          "diasEncontrados": 60,
+          "sha": "d2ebf11d51c3221477d88c7045faeafa2a229683",
+          "relaunch": false,
+          "parcialArchivado": false,
+          "identidadDias": [],
+          "solapeAcreditado": null,
+          "ultimoEstadoGestor": null,
+          "fallosHistoricosGestor": [],
+          "hashesDia": {
+            "1": "95aed1d7e25ac704505a40abeadd3c443b69abdd1c4b3ab759c79f89a1446271",
+            "3": "226fc602d6f989b0afddb2ec153a2886891ffb93d78c0801e4c785ebc1765b58",
+            "60": "cba1736e1c06c860a4456bb65328da66df5c412b4aed6557452eab56423edeed"
+          },
+          "errores": [],
+          "estado": "completa"
+        },
+        {
+          "replica": "HOG-2003",
+          "diasEncontrados": 60,
+          "sha": "d2ebf11d51c3221477d88c7045faeafa2a229683",
+          "relaunch": false,
+          "parcialArchivado": false,
+          "identidadDias": [],
+          "solapeAcreditado": null,
+          "ultimoEstadoGestor": null,
+          "fallosHistoricosGestor": [],
+          "hashesDia": {
+            "1": "848e0554fedc099a6e549e5b13e953469e4aaf368afe486bf3a354240d5bb866",
+            "3": "1cd9d0a2927b896a731291ea0f8c52972de515ca616a4783806c981acdf2f6b3",
+            "60": "024e03c38406d3b1964d92b8205f65a5fa6235b6745a88690517297e4f4890b6"
+          },
+          "errores": [],
+          "estado": "completa"
+        },
+        {
+          "replica": "HOG-2004",
+          "diasEncontrados": 60,
+          "sha": "d2ebf11d51c3221477d88c7045faeafa2a229683",
+          "relaunch": false,
+          "parcialArchivado": false,
+          "identidadDias": [],
+          "solapeAcreditado": null,
+          "ultimoEstadoGestor": null,
+          "fallosHistoricosGestor": [],
+          "hashesDia": {
+            "1": "3df5336f09b8295535a37b76f81c6b61927494fad4d87682d4324a9304de4cf4",
+            "3": "972fedfd2653ed680d22282818357f5e52678c9a74723c64325e6edd9da0dc8c",
+            "60": "d237ebe789ef502717adc8d0a057d5da7e87378bd46311f20c4afbb5311c28f9"
+          },
+          "errores": [],
+          "estado": "completa"
+        },
+        {
+          "replica": "HOG-2005",
+          "diasEncontrados": 60,
+          "sha": "d2ebf11d51c3221477d88c7045faeafa2a229683",
+          "relaunch": false,
+          "parcialArchivado": false,
+          "identidadDias": [],
+          "solapeAcreditado": null,
+          "ultimoEstadoGestor": null,
+          "fallosHistoricosGestor": [],
+          "hashesDia": {
+            "1": "ed37a1baa956c7c22f1494551a727ddef22f5c2728393af653713e304820fe5d",
+            "3": "56cf0f97b95cf8883de284b1179eae07b1b942ed74a32cfb74ea4c5f7d35c383",
+            "60": "8b3709e576f9e775acc0eb62884ee49ecb0aba777d088921a8279a4b3a7d661c"
+          },
+          "errores": [],
+          "estado": "completa"
+        },
+        {
+          "replica": "HOG-2006",
+          "diasEncontrados": 60,
+          "sha": "d2ebf11d51c3221477d88c7045faeafa2a229683",
+          "relaunch": false,
+          "parcialArchivado": false,
+          "identidadDias": [],
+          "solapeAcreditado": null,
+          "ultimoEstadoGestor": null,
+          "fallosHistoricosGestor": [],
+          "hashesDia": {
+            "1": "6aef3212cb8ef5911e0d63df44aecb779fde150f301422d82d1c0d91fab31f7c",
+            "3": "6796f1badd0885f5c6770c234c183b4e55c6ddd85e97235fa0444f92d40c5748",
+            "60": "f93ba09690f6f3d6f6fadcce48db5a1ba7b51c38e89c9a78da7709458c7078ad"
+          },
+          "errores": [],
+          "estado": "completa"
+        },
+        {
+          "replica": "HOG-2007",
+          "diasEncontrados": 60,
+          "sha": "d2ebf11d51c3221477d88c7045faeafa2a229683",
+          "relaunch": false,
+          "parcialArchivado": false,
+          "identidadDias": [],
+          "solapeAcreditado": null,
+          "ultimoEstadoGestor": null,
+          "fallosHistoricosGestor": [],
+          "hashesDia": {
+            "1": "548e8b45a5d19bb3024ded8119571ffbf7189a5d0630b4f108c1e8832ad01569",
+            "3": "38c053eb33946e1060d9cd9e9f345de169a58000d1baadb422bdc43b8310acfc",
+            "60": "bf472c1afdc7fa0d1e371eb3b8e94a558b6546576a69718aac3267950174df49"
+          },
+          "errores": [],
+          "estado": "completa"
+        },
+        {
+          "replica": "HOG-2008",
+          "diasEncontrados": 60,
+          "sha": "d2ebf11d51c3221477d88c7045faeafa2a229683",
+          "relaunch": false,
+          "parcialArchivado": false,
+          "identidadDias": [],
+          "solapeAcreditado": null,
+          "ultimoEstadoGestor": null,
+          "fallosHistoricosGestor": [],
+          "hashesDia": {
+            "1": "ba2ce950916cc3aeb5918d74e86e76a28cf0e5bc594a596dd943e5e86129bc7b",
+            "3": "929a89cd8d53389de4cbad1ea1689f7eeaf72a6ff9cf5b46c025a30c9879555a",
+            "60": "0b5aeff928ff9be5706486369ac96317eded4d8a380fe5b7e340bf10aebc44b0"
+          },
+          "errores": [],
+          "estado": "completa"
+        },
+        {
+          "replica": "HOG-2009",
+          "diasEncontrados": 60,
+          "sha": "d2ebf11d51c3221477d88c7045faeafa2a229683",
+          "relaunch": false,
+          "parcialArchivado": false,
+          "identidadDias": [],
+          "solapeAcreditado": null,
+          "ultimoEstadoGestor": null,
+          "fallosHistoricosGestor": [],
+          "hashesDia": {
+            "1": "8b76905d3586576ee62c4973d9d8f20aeb8c48354e59f4eec12357fc509e8989",
+            "3": "9d78b74bfe6813c8760f78e4ef3598acb9f7ab28f0e6afb6bec9b6ca624342f9",
+            "60": "e6b5cda9922465cc5a35ebc0e15e002b2627167b1d7cd35b2245d92979a078b5"
+          },
+          "errores": [],
+          "estado": "completa"
+        },
+        {
+          "replica": "HOG-2010",
+          "diasEncontrados": 24,
+          "sha": null,
+          "relaunch": true,
+          "parcialArchivado": true,
+          "identidadDias": [
+            1,
+            2,
+            3
+          ],
+          "solapeAcreditado": true,
+          "ultimoEstadoGestor": "FALLO",
+          "fallosHistoricosGestor": [
+            "exit=1 identidad=[1, 2, 3] día60=False"
+          ],
+          "hashesDia": {
+            "1": "58fe6c9bdcefb0ef0bd19cc2b8402f8e69d0b6d51c26a8b9fe7357e57d3e0f1b",
+            "3": "3fe2e1236fc4b61676052c2c519833abbe1db447273e4262cc3a47a07eb89d3b"
+          },
+          "errores": [
+            "inventario de réplica distinto de 60 días + replica.json",
+            "replica.json",
+            "dia-025.json",
+            "dia-026.json",
+            "dia-027.json",
+            "dia-028.json",
+            "dia-029.json",
+            "dia-030.json",
+            "dia-031.json",
+            "dia-032.json",
+            "dia-033.json",
+            "dia-034.json",
+            "dia-035.json",
+            "dia-036.json",
+            "dia-037.json",
+            "dia-038.json",
+            "dia-039.json",
+            "dia-040.json",
+            "dia-041.json",
+            "dia-042.json",
+            "dia-043.json",
+            "dia-044.json",
+            "dia-045.json",
+            "dia-046.json",
+            "dia-047.json",
+            "dia-048.json",
+            "dia-049.json",
+            "dia-050.json",
+            "dia-051.json",
+            "dia-052.json",
+            "dia-053.json",
+            "dia-054.json",
+            "dia-055.json",
+            "dia-056.json",
+            "dia-057.json",
+            "dia-058.json",
+            "dia-059.json",
+            "dia-060.json",
+            "gestor sin COMPLETA final (último terminal: FALLO)",
+            "gestor marcó FALLO final: exit=1 identidad=[1, 2, 3] día60=False"
+          ],
+          "estado": "fallo"
+        },
+        {
+          "replica": "HOG-2011",
+          "diasEncontrados": 60,
+          "sha": "d2ebf11d51c3221477d88c7045faeafa2a229683",
+          "relaunch": false,
+          "parcialArchivado": false,
+          "identidadDias": [],
+          "solapeAcreditado": null,
+          "ultimoEstadoGestor": null,
+          "fallosHistoricosGestor": [],
+          "hashesDia": {
+            "1": "118438bf1ac777c28309f4090b985a26fbbdd59ec85b89512d35da3279ca3d80",
+            "3": "72a0c9847d05b6fe3b5c60add4768ef0cad688a07d1ac47e12ca9cfbc542cdf7",
+            "60": "17c639da007ca02e7cb02c735999cdd5188a7cb3a10cc07a7312a484b0ed600c"
+          },
+          "errores": [],
+          "estado": "completa"
+        },
+        {
+          "replica": "HOG-2012",
+          "diasEncontrados": 60,
+          "sha": "d2ebf11d51c3221477d88c7045faeafa2a229683",
+          "relaunch": false,
+          "parcialArchivado": false,
+          "identidadDias": [],
+          "solapeAcreditado": null,
+          "ultimoEstadoGestor": null,
+          "fallosHistoricosGestor": [],
+          "hashesDia": {
+            "1": "3aa3c397288c98923543ebe51f3e1074885ae37f69e19c6c3a80b4a4628e4590",
+            "3": "e681f31adb95f3cb8c8578674381b7aea2a39664437d4a8738c68da64574fcc2",
+            "60": "1387d4401358cf0133e646394895fa3abb0cb4ee9abb78ba4989b34d4739467c"
+          },
+          "errores": [],
+          "estado": "completa"
+        }
+      ],
+      "requeridas": 12,
+      "completas": 11,
+      "fallidas": 1,
+      "estado": "fallo"
+    },
+    "CTRL2": {
+      "replicas": [
+        {
+          "replica": "CTRL2-2001",
+          "diasEncontrados": 60,
+          "sha": "d2ebf11d51c3221477d88c7045faeafa2a229683",
+          "relaunch": false,
+          "parcialArchivado": false,
+          "identidadDias": [],
+          "solapeAcreditado": null,
+          "ultimoEstadoGestor": null,
+          "fallosHistoricosGestor": [],
+          "hashesDia": {
+            "1": "832fdf9e7cac074c130e080ab2d49f619f12414c6045377e6477631ec62a39e9",
+            "3": "70b3cf5bd6e2cbcd73dca1a6511f8a525752c3eaabde4355c69c854089b78fe9",
+            "60": "f67de6c94ed052aa316a2e366b1507f373ef1ebb68c921227330bef215bd3c2c"
+          },
+          "errores": [],
+          "estado": "completa"
+        },
+        {
+          "replica": "CTRL2-2002",
+          "diasEncontrados": 60,
+          "sha": "d2ebf11d51c3221477d88c7045faeafa2a229683",
+          "relaunch": true,
+          "parcialArchivado": true,
+          "identidadDias": [
+            1,
+            2,
+            3
+          ],
+          "solapeAcreditado": true,
+          "ultimoEstadoGestor": null,
+          "fallosHistoricosGestor": [],
+          "hashesDia": {
+            "1": "e013dcddcaf24cdcbb0222ddf75cc6ee1889e8ea5eee6e13da323795718141ea",
+            "3": "863ca1fcfd99328605901337a6075eed555b10c747cbbc49767b33bd2e8ee677",
+            "60": "2060f42b8ba9112dd87d166e0df5a3368b8c9aabe0cd87e8c027a687cfb4cb85"
+          },
+          "errores": [],
+          "estado": "completa"
+        },
+        {
+          "replica": "CTRL2-2003",
+          "diasEncontrados": 60,
+          "sha": "d2ebf11d51c3221477d88c7045faeafa2a229683",
+          "relaunch": false,
+          "parcialArchivado": false,
+          "identidadDias": [],
+          "solapeAcreditado": null,
+          "ultimoEstadoGestor": null,
+          "fallosHistoricosGestor": [],
+          "hashesDia": {
+            "1": "8ffe21bd708eddd6e3af1004cec1fdd75e6c42a2b18c9d714e160e3e8886a4ff",
+            "3": "a35e8c41568712224d34c432ceecfebdd9d35a72099e0f70322b681b01e262be",
+            "60": "64beb8fee35e00af8c6ad5aa2a47b6d7b8fe82709f1efffb906a7ab34afda4dd"
+          },
+          "errores": [],
+          "estado": "completa"
+        },
+        {
+          "replica": "CTRL2-2004",
+          "diasEncontrados": 60,
+          "sha": "d2ebf11d51c3221477d88c7045faeafa2a229683",
+          "relaunch": true,
+          "parcialArchivado": true,
+          "identidadDias": [
+            1,
+            2,
+            3
+          ],
+          "solapeAcreditado": true,
+          "ultimoEstadoGestor": null,
+          "fallosHistoricosGestor": [],
+          "hashesDia": {
+            "1": "ffa9a5a1275d6743878151019f52090e1c8583411816ee6c0c16252fd0f959a1",
+            "3": "a5d3f9b4e832a6cb6be02df93f10c46547c4f1def5675d605da854a52008867f",
+            "60": "a85762123eb1b7ef355bd4952f127a3c3b83c715f6b228040862206c50a1d567"
+          },
+          "errores": [],
+          "estado": "completa"
+        },
+        {
+          "replica": "CTRL2-2005",
+          "diasEncontrados": 60,
+          "sha": "d2ebf11d51c3221477d88c7045faeafa2a229683",
+          "relaunch": false,
+          "parcialArchivado": false,
+          "identidadDias": [],
+          "solapeAcreditado": null,
+          "ultimoEstadoGestor": null,
+          "fallosHistoricosGestor": [],
+          "hashesDia": {
+            "1": "649c885602a692eeb69f1970ccc86128954f52c8ef066cb8f22236b1951f6fd0",
+            "3": "1c2e91a9231180de9310e9b509ac06ce9abb744f34d33a5653664b934996ade6",
+            "60": "941dad592047d9722817bbc0ba104a634f96982a8b0d71d86b91f245b548fb9c"
+          },
+          "errores": [],
+          "estado": "completa"
+        },
+        {
+          "replica": "CTRL2-2006",
+          "diasEncontrados": 60,
+          "sha": "d2ebf11d51c3221477d88c7045faeafa2a229683",
+          "relaunch": true,
+          "parcialArchivado": true,
+          "identidadDias": [
+            1,
+            2,
+            3
+          ],
+          "solapeAcreditado": true,
+          "ultimoEstadoGestor": null,
+          "fallosHistoricosGestor": [],
+          "hashesDia": {
+            "1": "51ce508d49b7a25207f469c775fbc1aa15252f0076859256a357278b928e0491",
+            "3": "ff54030b7f8660a45d80d781217aed82e1aa2bca6e5aa96cbf87bd3688b0a37b",
+            "60": "8fef749a3de31602b594ec2c8bf2ddf02bd80849e38134e33f337e0f56adedae"
+          },
+          "errores": [],
+          "estado": "completa"
+        },
+        {
+          "replica": "CTRL2-2007",
+          "diasEncontrados": 60,
+          "sha": "d2ebf11d51c3221477d88c7045faeafa2a229683",
+          "relaunch": true,
+          "parcialArchivado": true,
+          "identidadDias": [
+            1,
+            2,
+            3
+          ],
+          "solapeAcreditado": true,
+          "ultimoEstadoGestor": null,
+          "fallosHistoricosGestor": [],
+          "hashesDia": {
+            "1": "bbcc9d212a71c22e4b11cbd9c9788c31fb39fa83c71420bc51ae9ae4da8083c0",
+            "3": "339bbc97168547b62667a1c6a789fdd0945a0cc529d036dddc29b0030d69c075",
+            "60": "c1590c2a81940a7b8620529724972a7fb56fe008e6cea7e259b6dbcd33c3a177"
+          },
+          "errores": [],
+          "estado": "completa"
+        },
+        {
+          "replica": "CTRL2-2008",
+          "diasEncontrados": 60,
+          "sha": "d2ebf11d51c3221477d88c7045faeafa2a229683",
+          "relaunch": true,
+          "parcialArchivado": true,
+          "identidadDias": [
+            1,
+            2,
+            3
+          ],
+          "solapeAcreditado": true,
+          "ultimoEstadoGestor": null,
+          "fallosHistoricosGestor": [],
+          "hashesDia": {
+            "1": "9ee4c26fd094b5731555fa3634f7a93cc4de3dbc0526b15e375b83c5e69b77a8",
+            "3": "e001c87ef3920207df1a095b338b164de3d5cf9d4bae58fd74b6e16badf65d1d",
+            "60": "463f814ad581df6e4f625f3173c594d8ef288797464f56307fd6f8facaa2df57"
+          },
+          "errores": [],
+          "estado": "completa"
+        },
+        {
+          "replica": "CTRL2-2009",
+          "diasEncontrados": 60,
+          "sha": "d2ebf11d51c3221477d88c7045faeafa2a229683",
+          "relaunch": true,
+          "parcialArchivado": true,
+          "identidadDias": [
+            1,
+            2,
+            3
+          ],
+          "solapeAcreditado": true,
+          "ultimoEstadoGestor": null,
+          "fallosHistoricosGestor": [],
+          "hashesDia": {
+            "1": "8316d088683c45d49eee3d5a9acf7f7ca828ab48cafb660710c22331110e31d5",
+            "3": "3dc5e4522b1d070198e2258bb968036a8a382ef6ec862ab424c0297b9ee3bf8f",
+            "60": "319f91d521aa85596f840db0fee76256a892fe82cd1afa82d85e2a6ce7b7ed3a"
+          },
+          "errores": [],
+          "estado": "completa"
+        },
+        {
+          "replica": "CTRL2-2010",
+          "diasEncontrados": 60,
+          "sha": "d2ebf11d51c3221477d88c7045faeafa2a229683",
+          "relaunch": true,
+          "parcialArchivado": true,
+          "identidadDias": [
+            1,
+            2,
+            3
+          ],
+          "solapeAcreditado": true,
+          "ultimoEstadoGestor": null,
+          "fallosHistoricosGestor": [],
+          "hashesDia": {
+            "1": "611f88e9ec75b8d88b4fe3e14c6431dfc5acbb9c654a14cc302b35d5a7caa914",
+            "3": "c0c1f61fa3365f2fbc2053e85a850d0ac782796adf463d119d91a763c2efb16f",
+            "60": "3d146d44a944f19ec9e7d3773842a89edcb324c32831859db11c3722b8488df2"
+          },
+          "errores": [],
+          "estado": "completa"
+        },
+        {
+          "replica": "CTRL2-2011",
+          "diasEncontrados": 60,
+          "sha": "d2ebf11d51c3221477d88c7045faeafa2a229683",
+          "relaunch": true,
+          "parcialArchivado": true,
+          "identidadDias": [
+            1,
+            2,
+            3
+          ],
+          "solapeAcreditado": true,
+          "ultimoEstadoGestor": null,
+          "fallosHistoricosGestor": [],
+          "hashesDia": {
+            "1": "38de127297d4250d73482630737d7147910f5d449ae60ba63b50752779fcc6d6",
+            "3": "442951ba22bee1ca51d287cb94b0736277f8077053b6d54c428dab392afb7e94",
+            "60": "53d794cf023f20d3888f6b0724875f58eb308880e5ecc45f3959b2b20084802f"
+          },
+          "errores": [],
+          "estado": "completa"
+        },
+        {
+          "replica": "CTRL2-2012",
+          "diasEncontrados": 60,
+          "sha": "d2ebf11d51c3221477d88c7045faeafa2a229683",
+          "relaunch": true,
+          "parcialArchivado": true,
+          "identidadDias": [
+            1,
+            2,
+            3
+          ],
+          "solapeAcreditado": true,
+          "ultimoEstadoGestor": null,
+          "fallosHistoricosGestor": [],
+          "hashesDia": {
+            "1": "6c4382899cd11d96cf79452a6099012cc275a380a5ee96b72b9db90c3e6315af",
+            "3": "3f851429f02fa2affa7ad728da4f07141a28a30bc1eedcc31761a030754178c4",
+            "60": "a569b4bfae335d07bf7b1a44c7060f3763707d2cfb02f9746bf9c25e972aa05e"
+          },
+          "errores": [],
+          "estado": "completa"
+        }
+      ],
+      "requeridas": 12,
+      "completas": 12,
+      "fallidas": 0,
+      "estado": "completo"
+    },
+    "PUB2": {
+      "replicas": [
+        {
+          "replica": "PUB2-5",
+          "diasEncontrados": 60,
+          "sha": "d2ebf11d51c3221477d88c7045faeafa2a229683",
+          "relaunch": true,
+          "parcialArchivado": true,
+          "identidadDias": [
+            1,
+            2,
+            3
+          ],
+          "solapeAcreditado": true,
+          "ultimoEstadoGestor": null,
+          "fallosHistoricosGestor": [],
+          "hashesDia": {
+            "1": "29bf7deacef61d8012b0b2d9ede16268957acf872a50d2a1928aba6bd6819372",
+            "3": "84274bff8c4293a1265f0675df920d8e562e6ad73e05bc89b1e351e5ad703900",
+            "60": "8e0f84ad7e085c78768a78450702876a3e7ea1f912ece78edd1a92fdd7d3ca27"
+          },
+          "errores": [],
+          "estado": "completa"
+        },
+        {
+          "replica": "PUB2-29",
+          "diasEncontrados": 60,
+          "sha": "d2ebf11d51c3221477d88c7045faeafa2a229683",
+          "relaunch": true,
+          "parcialArchivado": true,
+          "identidadDias": [
+            1,
+            2,
+            3
+          ],
+          "solapeAcreditado": true,
+          "ultimoEstadoGestor": null,
+          "fallosHistoricosGestor": [],
+          "hashesDia": {
+            "1": "0a9399bd545b0eb526623be8e0a6a9713f836df4afd78b47b921f0dcb67e13c4",
+            "3": "be9420f465aa6174beb8c34ce85fb8299712debd02eff5a7a2ef5b0789ed9010",
+            "60": "903a0190bfae3ed8334e9c77f94762badf30f489ff4514250812732ad6ea308d"
+          },
+          "errores": [],
+          "estado": "completa"
+        },
+        {
+          "replica": "PUB2-101",
+          "diasEncontrados": 60,
+          "sha": "d2ebf11d51c3221477d88c7045faeafa2a229683",
+          "relaunch": true,
+          "parcialArchivado": true,
+          "identidadDias": [
+            1,
+            2,
+            3
+          ],
+          "solapeAcreditado": true,
+          "ultimoEstadoGestor": null,
+          "fallosHistoricosGestor": [],
+          "hashesDia": {
+            "1": "cca16bc6980f0586e9dff92665d8aff1afff2436d0a3327ddf1a29c07efec0dd",
+            "3": "a39877609ee8c73674d320097a1d49b9b197a62a1edbf42befad63aa3eaf4c1f",
+            "60": "9298e705d7b6c786dab4a6242323190fa9a92ae0727bfc2b77b36ce6e3f2963b"
+          },
+          "errores": [],
+          "estado": "completa"
+        },
+        {
+          "replica": "PUB2-202",
+          "diasEncontrados": 60,
+          "sha": "d2ebf11d51c3221477d88c7045faeafa2a229683",
+          "relaunch": true,
+          "parcialArchivado": true,
+          "identidadDias": [
+            1,
+            2,
+            3
+          ],
+          "solapeAcreditado": true,
+          "ultimoEstadoGestor": null,
+          "fallosHistoricosGestor": [],
+          "hashesDia": {
+            "1": "19abb0ba34d1d68973a0f7a1de51a2f80f39adb762f8bb51df810f58e90074c6",
+            "3": "3a1d511c5c303fd84badb9e7b3af75b3f0b67b560f57df1983732460ab57f04a",
+            "60": "2d272bdf31148fe8c9b508471dff9fb28e279af4d71b56bf805aa2d3264238e7"
+          },
+          "errores": [],
+          "estado": "completa"
+        },
+        {
+          "replica": "PUB2-404",
+          "diasEncontrados": 60,
+          "sha": "d2ebf11d51c3221477d88c7045faeafa2a229683",
+          "relaunch": true,
+          "parcialArchivado": true,
+          "identidadDias": [
+            1,
+            2,
+            3
+          ],
+          "solapeAcreditado": true,
+          "ultimoEstadoGestor": null,
+          "fallosHistoricosGestor": [],
+          "hashesDia": {
+            "1": "c8e82e4a9b04b1568bb8a77ec7f79c5da18e8f21ab10557d542055125c10346b",
+            "3": "b93fba40ff078585ac1835ad52d8ebea29013cf91485075aef82a9cfe4a3df73",
+            "60": "9f48ef9cf173d27a367562fa205e5840276474539e2bd93e7198acfcacf50cee"
+          },
+          "errores": [],
+          "estado": "completa"
+        },
+        {
+          "replica": "PUB2-505",
+          "diasEncontrados": 60,
+          "sha": "d2ebf11d51c3221477d88c7045faeafa2a229683",
+          "relaunch": false,
+          "parcialArchivado": false,
+          "identidadDias": [],
+          "solapeAcreditado": null,
+          "ultimoEstadoGestor": null,
+          "fallosHistoricosGestor": [],
+          "hashesDia": {
+            "1": "6b96af2b4228a09b6c6f079aa32d2e999e5dd646dc7c1bd6b1ffd821d4b17484",
+            "3": "f469005ab7249e28eae9e08a856bc8089c8b618f2bc37b9ddd2d5659a8d78874",
+            "60": "239fb887bdd685f933f8b958f165ee23f2c8e271341381c7def2d8409b0a052c"
+          },
+          "errores": [],
+          "estado": "completa"
+        },
+        {
+          "replica": "PUB2-606",
+          "diasEncontrados": 60,
+          "sha": "d2ebf11d51c3221477d88c7045faeafa2a229683",
+          "relaunch": true,
+          "parcialArchivado": true,
+          "identidadDias": [
+            1,
+            2,
+            3
+          ],
+          "solapeAcreditado": true,
+          "ultimoEstadoGestor": null,
+          "fallosHistoricosGestor": [],
+          "hashesDia": {
+            "1": "c150b70e7ff7d16599d064261b2f01f12a95705be68076908a77775e28db0ccc",
+            "3": "196a8f8d59cf4b9af627658ec5fb4ae2520d785ddee98e98c3740ff51f901cc8",
+            "60": "f2c80b86dace2de49192b066031b4bda3f5c764251b62e4529c9fa20f5d20578"
+          },
+          "errores": [],
+          "estado": "completa"
+        },
+        {
+          "replica": "PUB2-707",
+          "diasEncontrados": 60,
+          "sha": "d2ebf11d51c3221477d88c7045faeafa2a229683",
+          "relaunch": true,
+          "parcialArchivado": true,
+          "identidadDias": [
+            1,
+            2,
+            3
+          ],
+          "solapeAcreditado": true,
+          "ultimoEstadoGestor": null,
+          "fallosHistoricosGestor": [],
+          "hashesDia": {
+            "1": "266b1b8ad91975141a12bb0d1e8f76bdb6fa49c45aa4bea4af276230e580b532",
+            "3": "04c50ba7204f6cc44a1ce8f3cd164676e124239234d98b5c7396e549ac09cc56",
+            "60": "0b541a63fa00abdbca92dae60b5f035adba0c775d12d421bb05fc726398e1ab1"
+          },
+          "errores": [],
+          "estado": "completa"
+        }
+      ],
+      "requeridas": 8,
+      "completas": 8,
+      "fallidas": 0,
+      "estado": "completo"
+    }
+  },
+  "faltantes": [
+    {
+      "replica": "HOG-2010",
+      "errores": [
+        "inventario de réplica distinto de 60 días + replica.json",
+        "replica.json",
+        "dia-025.json",
+        "dia-026.json",
+        "dia-027.json",
+        "dia-028.json",
+        "dia-029.json",
+        "dia-030.json",
+        "dia-031.json",
+        "dia-032.json",
+        "dia-033.json",
+        "dia-034.json",
+        "dia-035.json",
+        "dia-036.json",
+        "dia-037.json",
+        "dia-038.json",
+        "dia-039.json",
+        "dia-040.json",
+        "dia-041.json",
+        "dia-042.json",
+        "dia-043.json",
+        "dia-044.json",
+        "dia-045.json",
+        "dia-046.json",
+        "dia-047.json",
+        "dia-048.json",
+        "dia-049.json",
+        "dia-050.json",
+        "dia-051.json",
+        "dia-052.json",
+        "dia-053.json",
+        "dia-054.json",
+        "dia-055.json",
+        "dia-056.json",
+        "dia-057.json",
+        "dia-058.json",
+        "dia-059.json",
+        "dia-060.json",
+        "gestor sin COMPLETA final (último terminal: FALLO)",
+        "gestor marcó FALLO final: exit=1 identidad=[1, 2, 3] día60=False"
+      ]
+    }
+  ],
+  "fallos": [
+    {
+      "replica": "HOG-2010",
+      "detalleGestor": "exit=1 identidad=[1, 2, 3] día60=False"
+    }
+  ],
+  "estado": "fallo"
+}

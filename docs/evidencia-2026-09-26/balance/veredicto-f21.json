@@ -1,0 +1,1038 @@
+{
+  "estado": "completo",
+  "prediccionDireccional": {
+    "estado": "refutada",
+    "criterio": "subida Sen de diversidadConductaVentana 5..60 PUB2 > B en al menos 6/8"
+  },
+  "prediccionConjunta": {
+    "estado": "refutada",
+    "motivo": "la dirección se mide; reproduccionActivaFraccion=1 en PUB2 se infiere del modo congelado y no tiene observación diaria"
+  },
+  "atribucionCausalTecho": {
+    "estado": "no_identificada",
+    "condicion": "para atribuir causalmente se requiere equivalencia dinámica demostrada además del pareado",
+    "motivo": "PUB2 y B tienen SHA, digest de código y parámetros distintos; la concordancia inicial de métricas no demuestra equivalencia dinámica"
+  },
+  "semillasMayor": 4,
+  "semillasIndeterminadas": 0,
+  "semillas": [
+    5,
+    29,
+    101,
+    202,
+    404,
+    505,
+    606,
+    707
+  ],
+  "origenPUB2PorFuente": {
+    "f21b-portatil": [
+      5,
+      29,
+      101,
+      202,
+      404,
+      505
+    ],
+    "f21b-torre": [
+      606,
+      707
+    ]
+  },
+  "reproduccionActivaFraccionPUB2": {
+    "observada": null,
+    "deducida": 1,
+    "alcance": "inferencia del modo de ejecución congelado, no medición ni prueba empírica de la conjunción del prerregistro",
+    "fundamento": "replica.ts d2ebf11 inicializa reproductionEnabled=true; PUB2 sin --techo-lab y con gobernador no-ejecutado; no se escribe fraccion diaria"
+  },
+  "advertenciaCausal": "El contraste pareado responde a la predicción direccional. Con SHA o parámetros distintos no identifica el efecto aislado del techo.",
+  "auditoriaCodigo": [
+    {
+      "pub2Sha": "d2ebf11d51c3221477d88c7045faeafa2a229683",
+      "bSha": "1710b350a1801910718afb8214cfe787cd5e0a8e",
+      "archivosDinamicaModificados": [
+        "scripts/lab/instrumentos.ts",
+        "src/world/agua.ts",
+        "src/world/animals.ts",
+        "src/world/demography.ts",
+        "src/world/ecosystem-kernel.ts",
+        "src/world/ecosystem.ts",
+        "src/world/family.ts",
+        "src/world/forest.ts",
+        "src/world/halo.ts",
+        "src/world/index.ts",
+        "src/world/indices.ts",
+        "src/world/inventions.ts",
+        "src/world/lineage.ts",
+        "src/world/material-affordances.ts",
+        "src/world/params.ts",
+        "src/world/rejilla.ts",
+        "src/world/soa/arena.ts",
+        "src/world/soa/presencia.ts",
+        "src/world/soa/region.ts",
+        "src/world/soa/terreno.ts",
+        "src/world/society.ts",
+        "src/world/spatial.ts",
+        "src/world/technology-checkpoint.ts",
+        "src/world/technology-water.ts",
+        "src/world/technology.ts",
+        "src/world/tile-index.ts"
+      ],
+      "error": null
+    }
+  ],
+  "pares": [
+    {
+      "semilla": 5,
+      "pub2": {
+        "ruta": "/datos/tmp-atlas-lab/datos-lab/f21b-portatil/PUB2-5",
+        "host": "portatil",
+        "fuente": "f21b-portatil",
+        "sha": "d2ebf11d51c3221477d88c7045faeafa2a229683",
+        "sha256ReplicaJson": "749eff9d6756d40e304e7c9f948f34a33270bd2fb285eaf5914b7cdda6272358",
+        "digestCodigo": "63d4fc53b1a4c92e9c10bebed763958183ac22f246d8af744ba6a6ebfc840f0a",
+        "sha256Parametros": "3d7a05d5d1d2ee6ee0ee6feaeb18bbc8a2599db1b64c7365a6569bfec7e43b36",
+        "subidaSen": {
+          "subidaSen": -0.05967155160220013,
+          "pendienteSenPorDia": -0.0010849373018581843,
+          "diasValidos": 56,
+          "diasNulos": [],
+          "diasExtincion": []
+        },
+        "poblacionDia60": 644,
+        "vecinosMortalesDia60": 642,
+        "nacimientosDia60": 2044,
+        "reproduccionActivaFraccionObservada": null,
+        "reproduccionActivaFraccionDeducida": 1
+      },
+      "b": {
+        "ruta": "/datos/tmp-atlas-lab/datos-lab/l60v3/B-5",
+        "sha": "1710b350a1801910718afb8214cfe787cd5e0a8e",
+        "sha256ReplicaJson": "3de776f4f4f6c80e2ab063fd0a0038b376d99a467050cf3aca1e488b7d3e18a4",
+        "digestCodigo": "9fc876125e804b9d601f546b2423d142ddd112fa089efe3e36226580f6d39d16",
+        "sha256Parametros": "e8eff161e688c7fe8c2a26ec948fc83a6de10939b23a3ddde1509b78e851cbd8",
+        "subidaSen": {
+          "subidaSen": 0.021167081246611257,
+          "pendienteSenPorDia": 0.0003848560226656592,
+          "diasValidos": 56,
+          "diasNulos": [],
+          "diasExtincion": []
+        },
+        "poblacionDia60": 100,
+        "vecinosMortalesDia60": 98,
+        "nacimientosDia60": 365,
+        "reproduccionActivaFraccionGlobal": 0.5423541666666667,
+        "reproduccionActivaFraccionDia60": 0.06583333333333333
+      },
+      "diferenciaSubida": -0.08083863284881139,
+      "sinTechoMayor": false,
+      "shaIgual": false,
+      "diferenciasParametros": [
+        {
+          "parametro": "agua.rebano",
+          "pub2": null,
+          "b": 0
+        },
+        {
+          "parametro": "conducta.vocacion",
+          "pub2": 0,
+          "b": null
+        },
+        {
+          "parametro": "conducta.vocacionTope",
+          "pub2": 0.9,
+          "b": null
+        },
+        {
+          "parametro": "limites.chunks",
+          "pub2": 5092,
+          "b": 256
+        },
+        {
+          "parametro": "limites.fauna",
+          "pub2": 7821312,
+          "b": 393216
+        },
+        {
+          "parametro": "limites.teselasActivas",
+          "pub2": 1303552,
+          "b": 65536
+        },
+        {
+          "parametro": "social.hogarTrabajo",
+          "pub2": 0,
+          "b": null
+        },
+        {
+          "parametro": "social.reencuentro",
+          "pub2": null,
+          "b": 0
+        }
+      ],
+      "equivalenciaConfiguracionAcreditada": false,
+      "evidenciaCronologica": {
+        "primerDiaDiferenciaMetricasComunes": 10,
+        "primerDiaReproduccionBMenorQueUno": 10,
+        "excluidosDeComparacion": [
+          "p50Ms",
+          "p95Ms",
+          "rss"
+        ],
+        "alcance": "igualdad de campos diarios comunes; no acredita identidad de estado interno ni equivalencia dinámica"
+      }
+    },
+    {
+      "semilla": 29,
+      "pub2": {
+        "ruta": "/datos/tmp-atlas-lab/datos-lab/f21b-portatil/PUB2-29",
+        "host": "portatil",
+        "fuente": "f21b-portatil",
+        "sha": "d2ebf11d51c3221477d88c7045faeafa2a229683",
+        "sha256ReplicaJson": "83161ced777cc53dd250f69b57bce08685182766fefc7245d0578358185d87d9",
+        "digestCodigo": "63d4fc53b1a4c92e9c10bebed763958183ac22f246d8af744ba6a6ebfc840f0a",
+        "sha256Parametros": "3d7a05d5d1d2ee6ee0ee6feaeb18bbc8a2599db1b64c7365a6569bfec7e43b36",
+        "subidaSen": {
+          "subidaSen": -0.054941750933347966,
+          "pendienteSenPorDia": -0.0009989409260608721,
+          "diasValidos": 56,
+          "diasNulos": [],
+          "diasExtincion": []
+        },
+        "poblacionDia60": 653,
+        "vecinosMortalesDia60": 651,
+        "nacimientosDia60": 1991,
+        "reproduccionActivaFraccionObservada": null,
+        "reproduccionActivaFraccionDeducida": 1
+      },
+      "b": {
+        "ruta": "/datos/tmp-atlas-lab/datos-lab/l60v3/B-29",
+        "sha": "1710b350a1801910718afb8214cfe787cd5e0a8e",
+        "sha256ReplicaJson": "cd09231eef40d268c3b3a644b50f39b7d72dd68eb4f001d1128fbc7ebda0458b",
+        "digestCodigo": "9fc876125e804b9d601f546b2423d142ddd112fa089efe3e36226580f6d39d16",
+        "sha256Parametros": "e8eff161e688c7fe8c2a26ec948fc83a6de10939b23a3ddde1509b78e851cbd8",
+        "subidaSen": {
+          "subidaSen": -0.023469972297561936,
+          "pendienteSenPorDia": -0.00042672676904658064,
+          "diasValidos": 56,
+          "diasNulos": [],
+          "diasExtincion": []
+        },
+        "poblacionDia60": 101,
+        "vecinosMortalesDia60": 99,
+        "nacimientosDia60": 370,
+        "reproduccionActivaFraccionGlobal": 0.356125,
+        "reproduccionActivaFraccionDia60": 0.08541666666666667
+      },
+      "diferenciaSubida": -0.03147177863578603,
+      "sinTechoMayor": false,
+      "shaIgual": false,
+      "diferenciasParametros": [
+        {
+          "parametro": "agua.rebano",
+          "pub2": null,
+          "b": 0
+        },
+        {
+          "parametro": "conducta.vocacion",
+          "pub2": 0,
+          "b": null
+        },
+        {
+          "parametro": "conducta.vocacionTope",
+          "pub2": 0.9,
+          "b": null
+        },
+        {
+          "parametro": "limites.chunks",
+          "pub2": 5092,
+          "b": 256
+        },
+        {
+          "parametro": "limites.fauna",
+          "pub2": 7821312,
+          "b": 393216
+        },
+        {
+          "parametro": "limites.teselasActivas",
+          "pub2": 1303552,
+          "b": 65536
+        },
+        {
+          "parametro": "social.hogarTrabajo",
+          "pub2": 0,
+          "b": null
+        },
+        {
+          "parametro": "social.reencuentro",
+          "pub2": null,
+          "b": 0
+        }
+      ],
+      "equivalenciaConfiguracionAcreditada": false,
+      "evidenciaCronologica": {
+        "primerDiaDiferenciaMetricasComunes": 11,
+        "primerDiaReproduccionBMenorQueUno": 11,
+        "excluidosDeComparacion": [
+          "p50Ms",
+          "p95Ms",
+          "rss"
+        ],
+        "alcance": "igualdad de campos diarios comunes; no acredita identidad de estado interno ni equivalencia dinámica"
+      }
+    },
+    {
+      "semilla": 101,
+      "pub2": {
+        "ruta": "/datos/tmp-atlas-lab/datos-lab/f21b-portatil/PUB2-101",
+        "host": "portatil",
+        "fuente": "f21b-portatil",
+        "sha": "d2ebf11d51c3221477d88c7045faeafa2a229683",
+        "sha256ReplicaJson": "56acc3e90fc732309fd6ad80c6b3225e7f33e9c68aaf995b26b91f24e76fc921",
+        "digestCodigo": "63d4fc53b1a4c92e9c10bebed763958183ac22f246d8af744ba6a6ebfc840f0a",
+        "sha256Parametros": "3d7a05d5d1d2ee6ee0ee6feaeb18bbc8a2599db1b64c7365a6569bfec7e43b36",
+        "subidaSen": {
+          "subidaSen": -0.04044687186902763,
+          "pendienteSenPorDia": -0.0007353976703459569,
+          "diasValidos": 56,
+          "diasNulos": [],
+          "diasExtincion": []
+        },
+        "poblacionDia60": 647,
+        "vecinosMortalesDia60": 645,
+        "nacimientosDia60": 2073,
+        "reproduccionActivaFraccionObservada": null,
+        "reproduccionActivaFraccionDeducida": 1
+      },
+      "b": {
+        "ruta": "/datos/tmp-atlas-lab/datos-lab/l60v3/B-101",
+        "sha": "1710b350a1801910718afb8214cfe787cd5e0a8e",
+        "sha256ReplicaJson": "fe4d7e1d59cd404b3a8205cb1470113ac21f6d0aaf8c0e222675d68dfae91b1a",
+        "digestCodigo": "9fc876125e804b9d601f546b2423d142ddd112fa089efe3e36226580f6d39d16",
+        "sha256Parametros": "e8eff161e688c7fe8c2a26ec948fc83a6de10939b23a3ddde1509b78e851cbd8",
+        "subidaSen": {
+          "subidaSen": 0.03658694683755528,
+          "pendienteSenPorDia": 0.0006652172152282778,
+          "diasValidos": 56,
+          "diasNulos": [],
+          "diasExtincion": []
+        },
+        "poblacionDia60": 100,
+        "vecinosMortalesDia60": 98,
+        "nacimientosDia60": 386,
+        "reproduccionActivaFraccionGlobal": 0.4752638888888889,
+        "reproduccionActivaFraccionDia60": 0.18458333333333332
+      },
+      "diferenciaSubida": -0.07703381870658291,
+      "sinTechoMayor": false,
+      "shaIgual": false,
+      "diferenciasParametros": [
+        {
+          "parametro": "agua.rebano",
+          "pub2": null,
+          "b": 0
+        },
+        {
+          "parametro": "conducta.vocacion",
+          "pub2": 0,
+          "b": null
+        },
+        {
+          "parametro": "conducta.vocacionTope",
+          "pub2": 0.9,
+          "b": null
+        },
+        {
+          "parametro": "limites.chunks",
+          "pub2": 5092,
+          "b": 256
+        },
+        {
+          "parametro": "limites.fauna",
+          "pub2": 7821312,
+          "b": 393216
+        },
+        {
+          "parametro": "limites.teselasActivas",
+          "pub2": 1303552,
+          "b": 65536
+        },
+        {
+          "parametro": "social.hogarTrabajo",
+          "pub2": 0,
+          "b": null
+        },
+        {
+          "parametro": "social.reencuentro",
+          "pub2": null,
+          "b": 0
+        }
+      ],
+      "equivalenciaConfiguracionAcreditada": false,
+      "evidenciaCronologica": {
+        "primerDiaDiferenciaMetricasComunes": 9,
+        "primerDiaReproduccionBMenorQueUno": 9,
+        "excluidosDeComparacion": [
+          "p50Ms",
+          "p95Ms",
+          "rss"
+        ],
+        "alcance": "igualdad de campos diarios comunes; no acredita identidad de estado interno ni equivalencia dinámica"
+      }
+    },
+    {
+      "semilla": 202,
+      "pub2": {
+        "ruta": "/datos/tmp-atlas-lab/datos-lab/f21b-portatil/PUB2-202",
+        "host": "portatil",
+        "fuente": "f21b-portatil",
+        "sha": "d2ebf11d51c3221477d88c7045faeafa2a229683",
+        "sha256ReplicaJson": "75b3c3de0d53f378aa67e67429e5f392dc31be6ec5c3520deb235f8149b432ad",
+        "digestCodigo": "63d4fc53b1a4c92e9c10bebed763958183ac22f246d8af744ba6a6ebfc840f0a",
+        "sha256Parametros": "3d7a05d5d1d2ee6ee0ee6feaeb18bbc8a2599db1b64c7365a6569bfec7e43b36",
+        "subidaSen": {
+          "subidaSen": -0.03590812896781377,
+          "pendienteSenPorDia": -0.0006528750721420686,
+          "diasValidos": 56,
+          "diasNulos": [],
+          "diasExtincion": []
+        },
+        "poblacionDia60": 550,
+        "vecinosMortalesDia60": 548,
+        "nacimientosDia60": 1667,
+        "reproduccionActivaFraccionObservada": null,
+        "reproduccionActivaFraccionDeducida": 1
+      },
+      "b": {
+        "ruta": "/datos/tmp-atlas-lab/datos-lab/l60v3/B-202",
+        "sha": "1710b350a1801910718afb8214cfe787cd5e0a8e",
+        "sha256ReplicaJson": "64496442530dfeb46f64fb1139cfed2dedb218d69388a335aad89b0ef54bca93",
+        "digestCodigo": "9fc876125e804b9d601f546b2423d142ddd112fa089efe3e36226580f6d39d16",
+        "sha256Parametros": "e8eff161e688c7fe8c2a26ec948fc83a6de10939b23a3ddde1509b78e851cbd8",
+        "subidaSen": {
+          "subidaSen": -0.08821196564110323,
+          "pendienteSenPorDia": -0.0016038539207473314,
+          "diasValidos": 56,
+          "diasNulos": [],
+          "diasExtincion": []
+        },
+        "poblacionDia60": 100,
+        "vecinosMortalesDia60": 98,
+        "nacimientosDia60": 406,
+        "reproduccionActivaFraccionGlobal": 0.4086666666666667,
+        "reproduccionActivaFraccionDia60": 0.1225
+      },
+      "diferenciaSubida": 0.05230383667328946,
+      "sinTechoMayor": true,
+      "shaIgual": false,
+      "diferenciasParametros": [
+        {
+          "parametro": "agua.rebano",
+          "pub2": null,
+          "b": 0
+        },
+        {
+          "parametro": "conducta.vocacion",
+          "pub2": 0,
+          "b": null
+        },
+        {
+          "parametro": "conducta.vocacionTope",
+          "pub2": 0.9,
+          "b": null
+        },
+        {
+          "parametro": "limites.chunks",
+          "pub2": 5092,
+          "b": 256
+        },
+        {
+          "parametro": "limites.fauna",
+          "pub2": 7821312,
+          "b": 393216
+        },
+        {
+          "parametro": "limites.teselasActivas",
+          "pub2": 1303552,
+          "b": 65536
+        },
+        {
+          "parametro": "social.hogarTrabajo",
+          "pub2": 0,
+          "b": null
+        },
+        {
+          "parametro": "social.reencuentro",
+          "pub2": null,
+          "b": 0
+        }
+      ],
+      "equivalenciaConfiguracionAcreditada": false,
+      "evidenciaCronologica": {
+        "primerDiaDiferenciaMetricasComunes": 17,
+        "primerDiaReproduccionBMenorQueUno": 17,
+        "excluidosDeComparacion": [
+          "p50Ms",
+          "p95Ms",
+          "rss"
+        ],
+        "alcance": "igualdad de campos diarios comunes; no acredita identidad de estado interno ni equivalencia dinámica"
+      }
+    },
+    {
+      "semilla": 404,
+      "pub2": {
+        "ruta": "/datos/tmp-atlas-lab/datos-lab/f21b-portatil/PUB2-404",
+        "host": "portatil",
+        "fuente": "f21b-portatil",
+        "sha": "d2ebf11d51c3221477d88c7045faeafa2a229683",
+        "sha256ReplicaJson": "306713f7292df3f8d8cbd4ec5a7c1c8737e723f063d5df07e7d19b33e44e4cb4",
+        "digestCodigo": "63d4fc53b1a4c92e9c10bebed763958183ac22f246d8af744ba6a6ebfc840f0a",
+        "sha256Parametros": "3d7a05d5d1d2ee6ee0ee6feaeb18bbc8a2599db1b64c7365a6569bfec7e43b36",
+        "subidaSen": {
+          "subidaSen": -0.12216075574620334,
+          "pendienteSenPorDia": -0.00222110464993097,
+          "diasValidos": 56,
+          "diasNulos": [],
+          "diasExtincion": []
+        },
+        "poblacionDia60": 619,
+        "vecinosMortalesDia60": 617,
+        "nacimientosDia60": 1674,
+        "reproduccionActivaFraccionObservada": null,
+        "reproduccionActivaFraccionDeducida": 1
+      },
+      "b": {
+        "ruta": "/datos/tmp-atlas-lab/datos-lab/l60v3/B-404",
+        "sha": "1710b350a1801910718afb8214cfe787cd5e0a8e",
+        "sha256ReplicaJson": "23146cf5233b72d5cb15fd9d84bf9b7f8d41098f3fda93c38a94627812323163",
+        "digestCodigo": "9fc876125e804b9d601f546b2423d142ddd112fa089efe3e36226580f6d39d16",
+        "sha256Parametros": "e8eff161e688c7fe8c2a26ec948fc83a6de10939b23a3ddde1509b78e851cbd8",
+        "subidaSen": {
+          "subidaSen": -0.1328316248477546,
+          "pendienteSenPorDia": -0.002415120451777356,
+          "diasValidos": 56,
+          "diasNulos": [],
+          "diasExtincion": []
+        },
+        "poblacionDia60": 100,
+        "vecinosMortalesDia60": 98,
+        "nacimientosDia60": 390,
+        "reproduccionActivaFraccionGlobal": 0.419125,
+        "reproduccionActivaFraccionDia60": 0.14458333333333334
+      },
+      "diferenciaSubida": 0.010670869101551253,
+      "sinTechoMayor": true,
+      "shaIgual": false,
+      "diferenciasParametros": [
+        {
+          "parametro": "agua.rebano",
+          "pub2": null,
+          "b": 0
+        },
+        {
+          "parametro": "conducta.vocacion",
+          "pub2": 0,
+          "b": null
+        },
+        {
+          "parametro": "conducta.vocacionTope",
+          "pub2": 0.9,
+          "b": null
+        },
+        {
+          "parametro": "limites.chunks",
+          "pub2": 5092,
+          "b": 256
+        },
+        {
+          "parametro": "limites.fauna",
+          "pub2": 7821312,
+          "b": 393216
+        },
+        {
+          "parametro": "limites.teselasActivas",
+          "pub2": 1303552,
+          "b": 65536
+        },
+        {
+          "parametro": "social.hogarTrabajo",
+          "pub2": 0,
+          "b": null
+        },
+        {
+          "parametro": "social.reencuentro",
+          "pub2": null,
+          "b": 0
+        }
+      ],
+      "equivalenciaConfiguracionAcreditada": false,
+      "evidenciaCronologica": {
+        "primerDiaDiferenciaMetricasComunes": 19,
+        "primerDiaReproduccionBMenorQueUno": 19,
+        "excluidosDeComparacion": [
+          "p50Ms",
+          "p95Ms",
+          "rss"
+        ],
+        "alcance": "igualdad de campos diarios comunes; no acredita identidad de estado interno ni equivalencia dinámica"
+      }
+    },
+    {
+      "semilla": 505,
+      "pub2": {
+        "ruta": "/datos/tmp-atlas-lab/datos-lab/f21b-portatil/PUB2-505",
+        "host": "portatil",
+        "fuente": "f21b-portatil",
+        "sha": "d2ebf11d51c3221477d88c7045faeafa2a229683",
+        "sha256ReplicaJson": "f13ebac90006726baf61b2b39f9f740558b9bd2430a8893b8311665e2d099a4e",
+        "digestCodigo": "63d4fc53b1a4c92e9c10bebed763958183ac22f246d8af744ba6a6ebfc840f0a",
+        "sha256Parametros": "3d7a05d5d1d2ee6ee0ee6feaeb18bbc8a2599db1b64c7365a6569bfec7e43b36",
+        "subidaSen": {
+          "subidaSen": -0.01821150792046163,
+          "pendienteSenPorDia": -0.00033111832582657507,
+          "diasValidos": 56,
+          "diasNulos": [],
+          "diasExtincion": []
+        },
+        "poblacionDia60": 237,
+        "vecinosMortalesDia60": 235,
+        "nacimientosDia60": 471,
+        "reproduccionActivaFraccionObservada": null,
+        "reproduccionActivaFraccionDeducida": 1
+      },
+      "b": {
+        "ruta": "/datos/tmp-atlas-lab/datos-lab/l60v3/B-505",
+        "sha": "1710b350a1801910718afb8214cfe787cd5e0a8e",
+        "sha256ReplicaJson": "2c45139b9218e41d83bb5851bf3dc4f324bb163ed9467c3558588569cb420afb",
+        "digestCodigo": "9fc876125e804b9d601f546b2423d142ddd112fa089efe3e36226580f6d39d16",
+        "sha256Parametros": "e8eff161e688c7fe8c2a26ec948fc83a6de10939b23a3ddde1509b78e851cbd8",
+        "subidaSen": {
+          "subidaSen": -0.06213472750081158,
+          "pendienteSenPorDia": -0.0011297223181965742,
+          "diasValidos": 56,
+          "diasNulos": [],
+          "diasExtincion": []
+        },
+        "poblacionDia60": 100,
+        "vecinosMortalesDia60": 98,
+        "nacimientosDia60": 292,
+        "reproduccionActivaFraccionGlobal": 0.8223055555555555,
+        "reproduccionActivaFraccionDia60": 0.09416666666666666
+      },
+      "diferenciaSubida": 0.04392321958034995,
+      "sinTechoMayor": true,
+      "shaIgual": false,
+      "diferenciasParametros": [
+        {
+          "parametro": "agua.rebano",
+          "pub2": null,
+          "b": 0
+        },
+        {
+          "parametro": "conducta.vocacion",
+          "pub2": 0,
+          "b": null
+        },
+        {
+          "parametro": "conducta.vocacionTope",
+          "pub2": 0.9,
+          "b": null
+        },
+        {
+          "parametro": "limites.chunks",
+          "pub2": 5092,
+          "b": 256
+        },
+        {
+          "parametro": "limites.fauna",
+          "pub2": 7821312,
+          "b": 393216
+        },
+        {
+          "parametro": "limites.teselasActivas",
+          "pub2": 1303552,
+          "b": 65536
+        },
+        {
+          "parametro": "social.hogarTrabajo",
+          "pub2": 0,
+          "b": null
+        },
+        {
+          "parametro": "social.reencuentro",
+          "pub2": null,
+          "b": 0
+        }
+      ],
+      "equivalenciaConfiguracionAcreditada": false,
+      "evidenciaCronologica": {
+        "primerDiaDiferenciaMetricasComunes": 49,
+        "primerDiaReproduccionBMenorQueUno": 49,
+        "excluidosDeComparacion": [
+          "p50Ms",
+          "p95Ms",
+          "rss"
+        ],
+        "alcance": "igualdad de campos diarios comunes; no acredita identidad de estado interno ni equivalencia dinámica"
+      }
+    },
+    {
+      "semilla": 606,
+      "pub2": {
+        "ruta": "/datos/tmp-atlas-lab/datos-lab/f21b-torre/PUB2-606",
+        "host": "torre",
+        "fuente": "f21b-torre",
+        "sha": "d2ebf11d51c3221477d88c7045faeafa2a229683",
+        "sha256ReplicaJson": "6180a3e9a20a0a4a2b9d6eb4613712292854c752f8669d698fe2cb36eec62b7c",
+        "digestCodigo": "63d4fc53b1a4c92e9c10bebed763958183ac22f246d8af744ba6a6ebfc840f0a",
+        "sha256Parametros": "3d7a05d5d1d2ee6ee0ee6feaeb18bbc8a2599db1b64c7365a6569bfec7e43b36",
+        "subidaSen": {
+          "subidaSen": -0.0515733389052328,
+          "pendienteSenPorDia": -0.0009376970710042328,
+          "diasValidos": 56,
+          "diasNulos": [],
+          "diasExtincion": []
+        },
+        "poblacionDia60": 619,
+        "vecinosMortalesDia60": 617,
+        "nacimientosDia60": 2101,
+        "reproduccionActivaFraccionObservada": null,
+        "reproduccionActivaFraccionDeducida": 1
+      },
+      "b": {
+        "ruta": "/datos/tmp-atlas-lab/datos-lab/l60v3/B-606",
+        "sha": "1710b350a1801910718afb8214cfe787cd5e0a8e",
+        "sha256ReplicaJson": "4117332465b016c30bfb20102dae9a72a9693540edd441e24dddeb2eaffe21ed",
+        "digestCodigo": "9fc876125e804b9d601f546b2423d142ddd112fa089efe3e36226580f6d39d16",
+        "sha256Parametros": "e8eff161e688c7fe8c2a26ec948fc83a6de10939b23a3ddde1509b78e851cbd8",
+        "subidaSen": {
+          "subidaSen": -0.08718244547073642,
+          "pendienteSenPorDia": -0.0015851353721952077,
+          "diasValidos": 56,
+          "diasNulos": [],
+          "diasExtincion": []
+        },
+        "poblacionDia60": 99,
+        "vecinosMortalesDia60": 97,
+        "nacimientosDia60": 324,
+        "reproduccionActivaFraccionGlobal": 0.5661666666666667,
+        "reproduccionActivaFraccionDia60": 0.034583333333333334
+      },
+      "diferenciaSubida": 0.03560910656550362,
+      "sinTechoMayor": true,
+      "shaIgual": false,
+      "diferenciasParametros": [
+        {
+          "parametro": "agua.rebano",
+          "pub2": null,
+          "b": 0
+        },
+        {
+          "parametro": "conducta.vocacion",
+          "pub2": 0,
+          "b": null
+        },
+        {
+          "parametro": "conducta.vocacionTope",
+          "pub2": 0.9,
+          "b": null
+        },
+        {
+          "parametro": "limites.chunks",
+          "pub2": 5092,
+          "b": 256
+        },
+        {
+          "parametro": "limites.fauna",
+          "pub2": 7821312,
+          "b": 393216
+        },
+        {
+          "parametro": "limites.teselasActivas",
+          "pub2": 1303552,
+          "b": 65536
+        },
+        {
+          "parametro": "social.hogarTrabajo",
+          "pub2": 0,
+          "b": null
+        },
+        {
+          "parametro": "social.reencuentro",
+          "pub2": null,
+          "b": 0
+        }
+      ],
+      "equivalenciaConfiguracionAcreditada": false,
+      "evidenciaCronologica": {
+        "primerDiaDiferenciaMetricasComunes": 8,
+        "primerDiaReproduccionBMenorQueUno": 8,
+        "excluidosDeComparacion": [
+          "p50Ms",
+          "p95Ms",
+          "rss"
+        ],
+        "alcance": "igualdad de campos diarios comunes; no acredita identidad de estado interno ni equivalencia dinámica"
+      }
+    },
+    {
+      "semilla": 707,
+      "pub2": {
+        "ruta": "/datos/tmp-atlas-lab/datos-lab/f21b-torre/PUB2-707",
+        "host": "torre",
+        "fuente": "f21b-torre",
+        "sha": "d2ebf11d51c3221477d88c7045faeafa2a229683",
+        "sha256ReplicaJson": "306caef766aca96d6eb48830645fbc9caf2fb0ae61d29f2079a3788d44e1309b",
+        "digestCodigo": "63d4fc53b1a4c92e9c10bebed763958183ac22f246d8af744ba6a6ebfc840f0a",
+        "sha256Parametros": "3d7a05d5d1d2ee6ee0ee6feaeb18bbc8a2599db1b64c7365a6569bfec7e43b36",
+        "subidaSen": {
+          "subidaSen": -0.11829416008254104,
+          "pendienteSenPorDia": -0.0021508029105916553,
+          "diasValidos": 56,
+          "diasNulos": [],
+          "diasExtincion": []
+        },
+        "poblacionDia60": 571,
+        "vecinosMortalesDia60": 569,
+        "nacimientosDia60": 1937,
+        "reproduccionActivaFraccionObservada": null,
+        "reproduccionActivaFraccionDeducida": 1
+      },
+      "b": {
+        "ruta": "/datos/tmp-atlas-lab/datos-lab/l60v3/B-707",
+        "sha": "1710b350a1801910718afb8214cfe787cd5e0a8e",
+        "sha256ReplicaJson": "ba0f421af27efcadc0e196cda1b2e9b63246c997863c2a5841f8c44f24892d88",
+        "digestCodigo": "9fc876125e804b9d601f546b2423d142ddd112fa089efe3e36226580f6d39d16",
+        "sha256Parametros": "e8eff161e688c7fe8c2a26ec948fc83a6de10939b23a3ddde1509b78e851cbd8",
+        "subidaSen": {
+          "subidaSen": -0.09814158066216845,
+          "pendienteSenPorDia": -0.00178439237567579,
+          "diasValidos": 56,
+          "diasNulos": [],
+          "diasExtincion": []
+        },
+        "poblacionDia60": 100,
+        "vecinosMortalesDia60": 98,
+        "nacimientosDia60": 384,
+        "reproduccionActivaFraccionGlobal": 0.3697916666666667,
+        "reproduccionActivaFraccionDia60": 0.03958333333333333
+      },
+      "diferenciaSubida": -0.020152579420372588,
+      "sinTechoMayor": false,
+      "shaIgual": false,
+      "diferenciasParametros": [
+        {
+          "parametro": "agua.rebano",
+          "pub2": null,
+          "b": 0
+        },
+        {
+          "parametro": "conducta.vocacion",
+          "pub2": 0,
+          "b": null
+        },
+        {
+          "parametro": "conducta.vocacionTope",
+          "pub2": 0.9,
+          "b": null
+        },
+        {
+          "parametro": "limites.chunks",
+          "pub2": 5092,
+          "b": 256
+        },
+        {
+          "parametro": "limites.fauna",
+          "pub2": 7821312,
+          "b": 393216
+        },
+        {
+          "parametro": "limites.teselasActivas",
+          "pub2": 1303552,
+          "b": 65536
+        },
+        {
+          "parametro": "social.hogarTrabajo",
+          "pub2": 0,
+          "b": null
+        },
+        {
+          "parametro": "social.reencuentro",
+          "pub2": null,
+          "b": 0
+        }
+      ],
+      "equivalenciaConfiguracionAcreditada": false,
+      "evidenciaCronologica": {
+        "primerDiaDiferenciaMetricasComunes": 13,
+        "primerDiaReproduccionBMenorQueUno": 13,
+        "excluidosDeComparacion": [
+          "p50Ms",
+          "p95Ms",
+          "rss"
+        ],
+        "alcance": "igualdad de campos diarios comunes; no acredita identidad de estado interno ni equivalencia dinámica"
+      }
+    }
+  ],
+  "fechaCorte": "2026-09-27T12:09:51-05:00",
+  "verificacionProcedencia": {
+    "pub2Torre": {
+      "tipo": "procedencia_torre",
+      "raiz": "/datos/tmp-atlas-lab/datos-lab/f21b-torre",
+      "estado": "completo",
+      "replicas": [
+        {
+          "replica": "PUB2-606",
+          "diasActuales": 60,
+          "diasArchivados": 35,
+          "solapesComparados": 35,
+          "manifiesto": true,
+          "estado": "completo"
+        },
+        {
+          "replica": "PUB2-707",
+          "diasActuales": 60,
+          "diasArchivados": 36,
+          "solapesComparados": 36,
+          "manifiesto": true,
+          "estado": "completo"
+        }
+      ],
+      "identidadesTSV": 6,
+      "solapesComparados": 71
+    },
+    "portatil": {
+      "tipo": "procedencia_portatil_interrumpido",
+      "raiz": "/datos/tmp-atlas-lab/datos-lab",
+      "estado": "completo",
+      "replicas": [
+        {
+          "replica": "CTRL2-2002",
+          "diasActuales": 60,
+          "diasArchivados": 36,
+          "solapesComparados": 36,
+          "manifiesto": true,
+          "estado": "completo"
+        },
+        {
+          "replica": "CTRL2-2004",
+          "diasActuales": 60,
+          "diasArchivados": 38,
+          "solapesComparados": 38,
+          "manifiesto": true,
+          "estado": "completo"
+        },
+        {
+          "replica": "CTRL2-2006",
+          "diasActuales": 60,
+          "diasArchivados": 44,
+          "solapesComparados": 44,
+          "manifiesto": true,
+          "estado": "completo"
+        },
+        {
+          "replica": "CTRL2-2007",
+          "diasActuales": 60,
+          "diasArchivados": 36,
+          "solapesComparados": 36,
+          "manifiesto": true,
+          "estado": "completo"
+        },
+        {
+          "replica": "CTRL2-2008",
+          "diasActuales": 60,
+          "diasArchivados": 46,
+          "solapesComparados": 46,
+          "manifiesto": true,
+          "estado": "completo"
+        },
+        {
+          "replica": "CTRL2-2009",
+          "diasActuales": 60,
+          "diasArchivados": 39,
+          "solapesComparados": 39,
+          "manifiesto": true,
+          "estado": "completo"
+        },
+        {
+          "replica": "CTRL2-2010",
+          "diasActuales": 60,
+          "diasArchivados": 36,
+          "solapesComparados": 36,
+          "manifiesto": true,
+          "estado": "completo"
+        },
+        {
+          "replica": "CTRL2-2011",
+          "diasActuales": 60,
+          "diasArchivados": 51,
+          "solapesComparados": 51,
+          "manifiesto": true,
+          "estado": "completo"
+        },
+        {
+          "replica": "CTRL2-2012",
+          "diasActuales": 60,
+          "diasArchivados": 31,
+          "solapesComparados": 31,
+          "manifiesto": true,
+          "estado": "completo"
+        },
+        {
+          "replica": "PUB2-5",
+          "diasActuales": 60,
+          "diasArchivados": 33,
+          "solapesComparados": 33,
+          "manifiesto": true,
+          "estado": "completo"
+        },
+        {
+          "replica": "PUB2-29",
+          "diasActuales": 60,
+          "diasArchivados": 35,
+          "solapesComparados": 35,
+          "manifiesto": true,
+          "estado": "completo"
+        },
+        {
+          "replica": "PUB2-101",
+          "diasActuales": 60,
+          "diasArchivados": 33,
+          "solapesComparados": 33,
+          "manifiesto": true,
+          "estado": "completo"
+        },
+        {
+          "replica": "PUB2-202",
+          "diasActuales": 60,
+          "diasArchivados": 45,
+          "solapesComparados": 45,
+          "manifiesto": true,
+          "estado": "completo"
+        },
+        {
+          "replica": "PUB2-404",
+          "diasActuales": 60,
+          "diasArchivados": 47,
+          "solapesComparados": 47,
+          "manifiesto": true,
+          "estado": "completo"
+        }
+      ],
+      "identidadesTSV": 42,
+      "solapesComparados": 550
+    },
+    "seleccionF21": {
+      "estado": "completo",
+      "fuente": "portatil",
+      "replicas": [
+        "PUB2-101",
+        "PUB2-202",
+        "PUB2-29",
+        "PUB2-404",
+        "PUB2-5"
+      ]
+    }
+  }
+}

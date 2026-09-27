@@ -1,6 +1,19 @@
 # Evidencia del laboratorio — 26 de septiembre de 2026
 
-Este directorio reúne **copias de scripts y resultados agregados** de la tanda de laboratorio. Es un índice de procedencia, no un veredicto final. Los datos diarios, manifiestos de réplica y logs permanecen en los directorios de las campañas; aquí no se copiaron mundos SQLite, páginas de snapshot ni estado personal crudo. Las rutas de origen dentro de algunos JSON identifican el almacén temporal leído y pueden dejar de existir cuando termine una réplica.
+Este directorio reúne copias de scripts y resultados agregados del cierre del laboratorio. F2.1 y T5 tienen fuentes completas verificadas; C8 día 60 conserva el estado documental `DATOS_INCOMPLETOS`. Los datos diarios, manifiestos y logs permanecen en los directorios de campaña. No se copiaron mundos SQLite ni estado personal crudo.
+
+## Resultados acreditados al 27-09 16:45
+
+| Salida | Estado y alcance |
+|---|---|
+| [Auditoría de campañas](balance/auditoria-campanas-codex.json) y [solapes](balance/verificacion-solapes-relanzadas.json) | 51/52 corridas completas; solo HOG-2010 quedó roja. Las 26 relanzadas tienen 1109/1109 días compartidos iguales. |
+| [Regresión C8 día 20](balance/decision-c8-d20-dirents-regresion.json) | VOC 7/12 DETENER, HOG 11/12 CONTINUAR y VOCHOG 7/12 DETENER. Identidad CTRL/CTRL2: 240 días, cero diferencias. |
+| [C8 día 60](balance/decision-c8-d60.json) | Los tres brazos dicen `DATOS_INCOMPLETOS`. Es una salida roja documental: HOG-2010 falló tras el día 24 y VOC/VOCHOG se detuvieron por seguridad en el día 20. No acredita una decisión C8 válida. |
+| [Diagnóstico HOG](balance/hog-stack-diagnostic-20260927.log) | La copia desechable reprodujo 24/24 días canónicos; la pila ubica el fallo en el guardia compuesto de `fill` de `technology-water.ts:79–86`. No identifica el disyunto ni sustituye una réplica válida. |
+| [F2.1](balance/veredicto-f21.json) y [texto](balance/veredicto-f21.md) | Ocho pares completos: PUB2 tiene mayor subida Sen en 4/8 frente al umbral preregistrado de 6/8. Predicción refutada; efecto causal aislado del techo no identificado. |
+| [Economía T5](balance/diagnostico-economia-hacer-final-20260927.json) y [diagnóstico](balance/diagnostico-economia-hacer.md) | 52 corridas únicas completas y verificadas; caída descriptiva de tiempo de hacer y cuatro hipótesis falsables, sin causa establecida. |
+
+La [tabla v4 de 20 controles](balance/calibracion-v4-ctrlv4.json) permanece separada de la [tabla ampliada de 40](balance/calibracion-v4-ctrlv4-40.json). Ambas son descriptivas; Steven conserva la decisión sobre C8 v4. El [informe de cierre](balance/informe-codex-20260926.md) empieza con un resumen de diez líneas y explica límites, fallos y pendientes.
 
 ## Código y procedencia
 
@@ -22,8 +35,8 @@ Este directorio reúne **copias de scripts y resultados agregados** de la tanda 
 | [Verificador T1e](scripts/analysis/verificar-ctrlv4e.py) | Valida cuatro controles nuevos de torre, 6057–6060: SHA y parámetros congelados, días 1–3 y TSV cronológico, 60 días, manifiesto, log e instrumentos. La ejecución actual es parcial; sus testigos no son una segunda fuente independiente. |
 | [Verificador T1f](scripts/analysis/verificar-ctrlv4f.py) | Valida cinco controles nuevos de torre, 6061–6065, con el mismo contrato estructural y de procedencia de T1e; reconoce el testigo adicional de `nice` de 6061 tras ananicy. Los testigos del TSV no son una segunda fuente independiente. |
 | [Resumen de economía de 40 controles](scripts/analysis/resumen-economia-ctrlv4-40.py) | Repite las ventanas T5 en CTRLV4 6001–6040 completos; valida manifiestos, modo, parámetros y días, deja por semilla origen y SHA-256, y calcula medianas y Pearson de cambios pareados. Emite JSON de solo lectura a stdout; los logs y TSV se acreditan con el verificador T1b separado. |
-| [Analizador T5](scripts/analysis/diagnostico-economia-hacer.py) | La versión de entrega exige fecha de corte explícita para el gate completo y registra origen y SHA-256 de `replica.json` por fuente seleccionada. Es procedencia para el análisis; el resultado final de T5 sigue pendiente. |
-| [Analizador F2.1](scripts/analysis/veredicto-f21.py) | Exige fecha de corte explícita y registra SHA-256 de ambos manifiestos `replica.json` en cada pareja PUB2/B. No altera la predicción ni su umbral; el veredicto final sigue pendiente. |
+| [Analizador T5](scripts/analysis/diagnostico-economia-hacer.py) | Exige fecha de corte explícita y registra origen y SHA-256 de `replica.json` por fuente seleccionada. El [resultado final](balance/diagnostico-economia-hacer-final-20260927.json) acredita 52 corridas únicas. |
+| [Analizador F2.1](scripts/analysis/veredicto-f21.py) | Exige fecha de corte explícita y registra SHA-256 de ambos manifiestos `replica.json` en cada pareja PUB2/B. El [veredicto final](balance/veredicto-f21.json) conserva la predicción y su umbral preregistrado. |
 | [Preparador de entrada C8](scripts/analysis/prepare-c8-decision-input.py) | Construye directorios reales y verifica huellas e inodes para el evaluador congelado. Por defecto exige HOG/CTRL2 completos; una opción explícita admite únicamente HOG-2010 con días 1–24 y fallo repetido acreditado, como entrada roja documental. Su evaluación de día 60 no constituye un veredicto C8 válido. |
 | [Scripts de análisis](scripts/analysis/) | Copias de los analizadores y verificadores de esta entrega. Cada copia debe cotejarse byte a byte con `scripts/analysis/` del commit de entrega. Los SHA congelados anteriores identifican el **código de las réplicas**, no el commit de estos analizadores. |
 
@@ -49,7 +62,9 @@ Las copias de scripts se conservan byte a byte respecto de sus originales en la 
 
 Los snapshots se leyeron de SQLite temporales del **laboratorio** en modo de solo lectura. Sus digest permiten identificar los cuerpos observados, pero los JSON agregados no contienen teselas completas ni permiten reconstruir el mundo. El diagnóstico de economía basado en series diarias y estas sondas es descriptivo: no prueba una causa única de la caída de `gather`, `build`, `craft` y `hunt`, ni completa por sí solo el balance de costes, reparación y utilidad exigido por [GOAL.md](../../GOAL.md).
 
-## Estado y cierre pendiente
+## Cronología anterior al cierre
+
+Los párrafos siguientes preservan cortes operativos anteriores al resultado acreditado arriba. Sus pendientes y procesos activos se refieren únicamente a la hora que indica cada párrafo.
 
 **Estado operativo al corte 27-09 11:31 (America/Bogota):** la instrucción sustitutiva de Steven canceló la reposición de 22/19 trabajos y prohibió lanzar más controles extra T1c/T1d/T1e/T1f o posteriores; los dos gestores terminaron por STOP a las 11:11. A las 11:17 se habían detenido por SIGTERM **24 controles** aún bajo día 45 (7 en torre y 17 en portátil), con salidas, logs y temporales preservados sin borrar resultados. Quedaron **15 controles de torre ya en día ≥45** para terminar; en el portátil permanecieron únicamente **CTRL2-2010 y PUB2-101** como prioridades T2/T3. El diagnóstico de pila HOG-2010 se lanzó a las 11:29 en un worktree desechable separado: no es fuente para C8 y aún no tenía resultado a las 11:31. Siguen pendientes `decision-c8-d60`, `veredicto-f21` y el cierre final de T5 y del informe.
 
@@ -71,4 +86,4 @@ El segundo brazo CTRLV4, **T1b**, predeclaró las semillas 6021–6040 y se ejec
 
 **Cierre T1b, 27-09 09:15:** terminó CTRLV4-6027 y el verificador acreditó **20/20** controles nuevos, **1200/1200** informes y **6/6** solapes históricos, con errores `[]`. La tabla de 40 se produjo por separado. Una auditoría independiente recontó sus nueve lecturas, intervalos y cotas y comprobó que las veinte filas originales coinciden con la tabla de 20. Las medias y pendientes B/C fueron contrastadas desde los informes diarios; los valores p Hamed–Rao/AR(1) no se recalcularon por otro método.
 
-Faltan la auditoría final de CTRL2 y PUB2, F2.1 con ocho semillas completas y el recálculo de economía con 52 corridas **únicas** verificadas. La elección de fuente para cada semilla debe quedar explícita; no se sumarán las copias como nuevas semillas. Los futuros JSON, tablas e informe final deberán indicar su fecha de corte, entradas, cantidad de réplicas válidas, SHA-256 de procedencia y límites de interpretación. Su mera presencia en `balance/` no cambia este estado: el informe final deberá declarar explícitamente los gates y los bloqueos que persistan.
+Al corte histórico de las 09:15 faltaban la auditoría final de CTRL2 y PUB2, F2.1 de ocho semillas y el recálculo de economía de 52 corridas únicas. Esos resultados se acreditaron en la tabla inicial de este índice; HOG-2010 continúa como bloqueo rojo de C8.

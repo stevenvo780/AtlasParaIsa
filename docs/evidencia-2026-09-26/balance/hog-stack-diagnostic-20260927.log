@@ -1,0 +1,15 @@
+Error: Invalid contained water state or receipt.
+    at fail (/datos/workspaces/personal/AtlasParaIsa-anexo/worktrees/hog-stack-diagnostic/src/world/technology-water.ts:20:32)
+    at assertWaterExecution (/datos/workspaces/personal/AtlasParaIsa-anexo/worktrees/hog-stack-diagnostic/src/world/technology-water.ts:86:142)
+    at assertTechnology (/datos/workspaces/personal/AtlasParaIsa-anexo/worktrees/hog-stack-diagnostic/src/world/technology.ts:744:5)
+    at <anonymous> (/datos/workspaces/personal/AtlasParaIsa-anexo/worktrees/hog-stack-diagnostic/src/server/store.ts:431:7)
+    at Store.withTechnologyReads (/datos/workspaces/personal/AtlasParaIsa-anexo/worktrees/hog-stack-diagnostic/src/server/store.ts:409:7)
+    at Store.prepareTechnology (/datos/workspaces/personal/AtlasParaIsa-anexo/worktrees/hog-stack-diagnostic/src/server/store.ts:423:10)
+    at Store.save (/datos/workspaces/personal/AtlasParaIsa-anexo/worktrees/hog-stack-diagnostic/src/server/store.ts:1197:10)
+    at main (/datos/workspaces/personal/AtlasParaIsa-anexo/worktrees/hog-stack-diagnostic/scripts/lab/replica.ts:268:63)
+    at <anonymous> (/datos/workspaces/personal/AtlasParaIsa-anexo/worktrees/hog-stack-diagnostic/scripts/lab/replica.ts:337:1)
+    at ModuleJob.run (node:internal/modules/esm/module_job:343:25)
+    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:681:26)
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:117:5)
+(node:3748714) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)

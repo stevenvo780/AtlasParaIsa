@@ -6,11 +6,13 @@ alguno de los ocho PUB2 completos. No interpola diversidad nula ni extinción.
 """
 
 import argparse
+from datetime import datetime
 import hashlib
 import itertools
 import json
 import math
 from pathlib import Path
+import re
 import statistics
 import subprocess
 import sys
@@ -63,7 +65,8 @@ def read_arm(root, prefix, seed, techo):
     if missing or not meta_path.is_file():
         return None, {'ruta': str(folder), 'faltanDias': missing,
                       'faltaReplica': not meta_path.is_file()}
-    meta = read_json(meta_path)
+    meta_bytes = meta_path.read_bytes()
+    meta = json.loads(meta_bytes.decode('utf-8'))
     if not isinstance(meta, dict):
         raise ValueError(f'{meta_path}: no es objeto')
     if meta.get('seed') != seed or meta.get('dias') != LAST_DAY:
@@ -110,7 +113,8 @@ def read_arm(root, prefix, seed, techo):
                 if type(value) is not int or value < 0:
                     raise ValueError(f'{path}: {field} ausente o inválido')
         days[day] = body
-    return {'ruta': str(folder), 'replica': meta, 'dias': days}, None
+    return {'ruta': str(folder), 'replica': meta, 'dias': days,
+            'sha256ReplicaJson': hashlib.sha256(meta_bytes).hexdigest()}, None
 
 
 def sen_increase(arm):
@@ -256,6 +260,7 @@ def evaluate(pub_root, torre_root, b_root, hedge_root=None, use_hedge=False):
             'semilla': seed,
             'pub2': {'ruta': pub['ruta'], 'host': pub_host, 'fuente': pub_source,
                      'sha': pub['replica']['sha'],
+                     'sha256ReplicaJson': pub['sha256ReplicaJson'],
                      'digestCodigo': pub['replica']['digest'],
                      'sha256Parametros': params_sha256(pub['replica']['params']),
                      'subidaSen': pub_sen, 'poblacionDia60': pub['dias'][60]['poblacion'],
@@ -264,6 +269,7 @@ def evaluate(pub_root, torre_root, b_root, hedge_root=None, use_hedge=False):
                      'reproduccionActivaFraccionObservada': None,
                      'reproduccionActivaFraccionDeducida': 1},
             'b': {'ruta': b['ruta'], 'sha': b['replica']['sha'],
+                  'sha256ReplicaJson': b['sha256ReplicaJson'],
                   'digestCodigo': b['replica']['digest'],
                   'sha256Parametros': params_sha256(b['replica']['params']),
                   'subidaSen': b_sen, 'poblacionDia60': b['dias'][60]['poblacion'],
@@ -346,6 +352,7 @@ def verify_selected_provenance(pub_root, torre_root, hedge_root, use_hedge):
 
 def markdown(result):
     rows = ['# Veredicto F2.1 — día 60', '',
+            f'Fecha de corte: {result["fechaCorte"]}.', '',
             'Fuente: bitácora del laboratorio, 23-09 17:40; PUB2 sin techo frente a l60v3/B con techo 100.',
             f'Predicción direccional preregistrada: **{result["prediccionDireccional"]["estado"]}**. PUB2 mayor en {result["semillasMayor"]}/8; '
             f'{result["semillasIndeterminadas"]} semilla(s) indeterminada(s).', '',
@@ -362,6 +369,10 @@ def markdown(result):
                     f'{fmt(b["subidaSen"]["subidaSen"])} | {fmt(pair["diferenciaSubida"])} | '
                     f'{pair["sinTechoMayor"]} | {fmt(b["reproduccionActivaFraccionGlobal"])} | '
                     f'{fmt(b["reproduccionActivaFraccionDia60"])} |')
+    rows += ['', 'Procedencia de los pares (SHA-256 de los bytes de `replica.json`):', '']
+    for pair in result['pares']:
+        rows.append(f'- Semilla {pair["semilla"]}: PUB2 `{pair["pub2"]["sha256ReplicaJson"]}`; '
+                    f'B `{pair["b"]["sha256ReplicaJson"]}`.')
     rows += ['', 'La subida es la mediana de todas las pendientes entre pares de días 5..60, multiplicada por 55; '
              'empates de la serie a tolerancia 1e-9 siguen el evaluador congelado. '
              'La comparación es estricta (>); no se redondea para decidir.',
@@ -392,9 +403,21 @@ def main():
     parser.add_argument('--hedge-root', type=Path, default=DEFAULT_BASE / 'hedge-torre-20260926')
     parser.add_argument('--b-root', type=Path, default=DEFAULT_BASE / 'l60v3')
     parser.add_argument('--salida', type=Path, default=DEFAULT_BALANCE)
+    parser.add_argument('--fecha-corte', required=True,
+                        help='Fecha y hora ISO 8601 con desplazamiento UTC numérico (AAAA-MM-DDTHH:MM:SS±HH:MM)')
     args = parser.parse_args()
+    if not re.fullmatch(r'[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[+-][0-9]{2}:[0-9]{2}',
+                        args.fecha_corte):
+        parser.error('--fecha-corte exige ISO 8601 con desplazamiento UTC numérico (AAAA-MM-DDTHH:MM:SS±HH:MM)')
+    try:
+        fecha_corte = datetime.fromisoformat(args.fecha_corte)
+    except ValueError:
+        parser.error('--fecha-corte no es una fecha y hora válida')
+    if fecha_corte.utcoffset() is None:
+        parser.error('--fecha-corte exige un desplazamiento UTC numérico')
     result = evaluate(args.pub2_root, args.pub2_torre_root, args.b_root,
                       args.hedge_root, args.usar_hedge_torre)
+    result['fechaCorte'] = args.fecha_corte
     if result['estado'] == 'pendiente':
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 2

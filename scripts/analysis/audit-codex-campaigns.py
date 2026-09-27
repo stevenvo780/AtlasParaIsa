@@ -9,6 +9,7 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+import re
 import sys
 
 
@@ -46,8 +47,9 @@ GROUPS = (
     ('HOG', BASE / 'c8panel', range(2001, 2013), SHA_C8, {2010}, 'tower'),
     ('CTRL2', BASE / 'c8panel/portatil', range(2001, 2013), SHA_C8,
      {2002, 2004, 2006, 2007, 2008, 2009, 2010, 2011, 2012}, 'laptop'),
-    ('PUB2', BASE / 'f21b-portatil', (5, 29, 101, 202, 404, 505, 606, 707), SHA_C8,
-     {5, 29, 101, 202, 404, 606, 707}, 'laptop'),
+    ('PUB2', BASE / 'f21b-portatil', (5, 29, 101, 202, 404, 505), SHA_C8,
+     {5, 29, 101, 202, 404}, 'laptop'),
+    ('PUB2', BASE / 'f21b-torre', (606, 707), SHA_C8, {606, 707}, 'pub2_tower'),
 )
 
 
@@ -62,50 +64,144 @@ def params_sha256(params):
     return hashlib.sha256(packed).hexdigest()
 
 
-def overlap_evidence():
+def overlap_evidence(usar_hedge_torre=False):
     # Importación read-only sin generar __pycache__ en el worktree compartido.
     path = Path(__file__).with_name('verificar-solapes-relanzadas.py')
     namespace = {'__name__': 'verificar_solapes', '__file__': str(path)}
     exec(compile(path.read_bytes(), str(path), 'exec'), namespace)
-    return namespace['verify'](BASE)
+    return namespace['verify'](BASE, usar_hedge_torre)
+
+
+def provenance_functions():
+    # El mismo gate read-only que consumen F2.1/T5 y el preflight C8.
+    path = Path(__file__).with_name('hedge_provenance.py')
+    namespace = {'__name__': 'hedge_provenance', '__file__': str(path)}
+    exec(compile(path.read_bytes(), str(path), 'exec'), namespace)
+    return namespace
+
+
+def safe_progress(path):
+    try:
+        states, finished, interrupted = progress(path)
+        return states, finished, interrupted, None
+    except ValueError as exc:
+        return {}, False, False, str(exc)
 
 
 def progress(path):
     states = {}
     if not path.is_file():
-        return states, False
+        return states, False, False
     finished = False
     stopped = False
+    started = False
     for line in path.read_text().splitlines()[1:]:
         parts = line.split('\t')
         if len(parts) != 4:
             raise ValueError(f'Fila mal formada en {path}: {line}')
         _, name, state, info = parts
         if name == 'GESTOR':
+            if state == 'INICIO':
+                started = True
             if state == 'DETENER':
                 stopped = True
             if state == 'FIN' and info == 'réplicas terminadas':
                 finished = True
             continue
-        row = states.setdefault(name, {'identidad': set(), 'estados': [], 'fallos': []})
+        row = states.setdefault(name, {'identidad': set(), 'identidadHashes': {}, 'estados': [], 'fallos': []})
         row['estados'].append(state)
+        if state == 'LANZADA':
+            row.setdefault('lanzamientos', []).append(info)
         if state == 'FALLO':
             row['fallos'].append(info)
         if state == 'IDENTIDAD':
-            row['identidad'].add(int(info.split()[0].split('=')[1]))
-    return states, finished and not stopped
+            match = re.search(r'(?:día|dia)=(\d+)\s+sha256(?:canon)?=([0-9a-f]{64})', info)
+            if not match:
+                raise ValueError(f'IDENTIDAD mal formada en {path}: {name} {info}')
+            day = int(match.group(1))
+            if day in row['identidadHashes']:
+                raise ValueError(f'IDENTIDAD duplicada en {path}: {name} día {day}')
+            row['identidad'].add(day)
+            row['identidadHashes'][day] = match.group(2)
+    laptop_names = {f'CTRL2-{seed}' for seed in (2002, 2004, 2006, 2007, 2008, 2009, 2010, 2011, 2012)}
+    laptop_names |= {f'PUB2-{seed}' for seed in (5, 29, 101, 202, 404)}
+    interrupted = (path.name == 'codex-laptop-20260926.tsv' and started and not finished and not stopped
+                   and set(states) == laptop_names
+                   and all(set(row['estados']) == {'LANZADA', 'IDENTIDAD'}
+                           and row['estados'].count('LANZADA') == 1
+                           and row['estados'].count('IDENTIDAD') == 3
+                           and row['identidad'] == {1, 2, 3} and not row['fallos']
+                           for row in states.values()))
+    return states, finished and not stopped, interrupted
 
 
-def audit():
-    p_tower, tower_finished = progress(BASE / 'codex-tower-20260926.tsv')
-    p_laptop, laptop_finished = progress(BALANCE / 'codex-laptop-20260926.tsv')
-    overlaps = overlap_evidence()
+def audit(usar_hedge_torre=False):
+    p_tower, tower_finished, _, tower_log_error = safe_progress(BASE / 'codex-tower-20260926.tsv')
+    p_laptop, laptop_finished, laptop_interrupted, laptop_log_error = safe_progress(BALANCE / 'codex-laptop-20260926.tsv')
+    p_pub2_tower, _, _, pub2_log_error = safe_progress(BASE / 'f21b-torre/codex-pub2-torre-20260926.tsv')
+    p_hedge, _, _, hedge_log_error = (safe_progress(BASE / 'hedge-torre-20260926/codex-hedge-torre-20260926.tsv')
+                                   if usar_hedge_torre else ({}, False, False, None))
+    hedge_names = {f'CTRL2-{seed}' for seed in (2002, 2004, 2006, 2007, 2008, 2009, 2010, 2011, 2012)}
+    hedge_names |= {f'PUB2-{seed}' for seed in (5, 29, 101, 202, 404)}
+    overlaps = overlap_evidence(usar_hedge_torre)
     overlap_by_name = {row['replica']: row for row in overlaps['replicas']}
+    groups = GROUPS
+    # PUB2-505 ya era completa en el portátil; solo cinco PUB2 y nueve CTRL2 se sustituyen.
+    if usar_hedge_torre:
+        groups = tuple((arm, BASE / 'hedge-torre-20260926', tuple(sorted(reruns)), sha, reruns, 'hedge')
+                       if arm == 'CTRL2' else
+                       (arm, BASE / 'hedge-torre-20260926', (5, 29, 101, 202, 404), sha,
+                        {5, 29, 101, 202, 404}, 'hedge') if arm == 'PUB2' and host == 'laptop' else
+                       (arm, root, seeds, sha, reruns, host)
+                       for arm, root, seeds, sha, reruns, host in GROUPS)
+        groups += (('CTRL2', BASE / 'c8panel/portatil', (2001, 2003, 2005), SHA_C8, set(), 'laptop'),)
+        groups += (('PUB2', BASE / 'f21b-portatil', (505,), SHA_C8, set(), 'laptop'),)
     out = {'tipo': 'auditoria_campanas_codex_20260926',
-           'gestores': {'torreFin': tower_finished, 'portatilFin': laptop_finished},
+           'fuente14Relanzadas': 'hedge-torre-20260926' if usar_hedge_torre else 'portatil',
+           'gestores': {'torreFin': tower_finished, 'portatilFin': laptop_finished,
+                       'portatilInterrumpidoCon14Lanzadas': laptop_interrupted,
+                       'pub2TorreProcedencia': bool(p_pub2_tower),
+                       'hedgeTorreProcedencia': False},
            'solapes': {'estado': overlaps['estado'], **overlaps['resumen']},
-           'grupos': {}, 'faltantes': [], 'fallos': []}
-    for arm, root, seeds, sha, reruns, host in GROUPS:
+           'procedencia': {}, 'grupos': {}, 'faltantes': [], 'fallos': []}
+    for label, error in (('torre', tower_log_error), ('portatil', laptop_log_error),
+                         ('pub2Torre', pub2_log_error), ('hedgeTorre', hedge_log_error)):
+        if error:
+            out['fallos'].append({'replica': f'TSV-{label}', 'detalleProcedencia': error})
+    provenance = provenance_functions()
+    selected_name = 'hedgeTorre' if usar_hedge_torre else 'portatil14'
+    checks = [
+        ('pub2Torre', BASE / 'f21b-torre/codex-pub2-torre-20260926.tsv',
+         [BASE / 'f21b-torre' / f'PUB2-{seed}' for seed in (606, 707)],
+         lambda: provenance['verify_pub2_tower'](BASE, require_complete=False)),
+        (selected_name,
+         BASE / 'hedge-torre-20260926/codex-hedge-torre-20260926.tsv' if usar_hedge_torre
+         else BALANCE / 'codex-laptop-20260926.tsv',
+         [BASE / 'hedge-torre-20260926' / name for name in hedge_names] if usar_hedge_torre else
+         [BASE / ('c8panel/portatil' if name.startswith('CTRL2-') else 'f21b-portatil') / name
+          for name in hedge_names],
+         (lambda: provenance['verify_hedge'](BASE, require_complete=False)) if usar_hedge_torre
+         else (lambda: provenance['verify_laptop'](BASE, BALANCE, require_complete=False))),
+    ]
+    for label, log, folders, check in checks:
+        if not log.is_file() or not all(folder.is_dir() for folder in folders):
+            out['procedencia'][label] = {'estado': 'pendiente', 'motivo': 'TSV o directorios de réplicas ausentes'}
+            continue
+        try:
+            result = check()
+            out['procedencia'][label] = {'estado': result['estado'],
+                                         'replicas': len(result['replicas']),
+                                         'identidadesTSV': result['identidadesTSV'],
+                                         'solapesComparados': result['solapesComparados']}
+        except (ValueError, OSError) as exc:
+            out['procedencia'][label] = {'estado': 'fallo', 'motivo': str(exc)}
+            out['fallos'].append({'replica': f'PROCEDENCIA-{label}', 'detalleProcedencia': str(exc)})
+    out['gestores']['pub2TorreProcedencia'] = out['procedencia']['pub2Torre']['estado'] == 'completo'
+    out['gestores']['hedgeTorreProcedencia'] = (out['procedencia'].get('hedgeTorre', {}).get('estado') == 'completo')
+    names = [f'{arm}-{seed}' for arm, _, seeds, _, _, _ in groups for seed in seeds]
+    if len(names) != 52 or len(set(names)) != 52:
+        raise ValueError('Contrato de campañas: se requieren 52 réplicas únicas')
+    for arm, root, seeds, sha, reruns, host in groups:
         rows = []
         for seed in seeds:
             name = f'{arm}-{seed}'
@@ -122,6 +218,10 @@ def audit():
                 continue
             if not folder.is_dir():
                 missing.append('directorio de réplica ausente')
+            else:
+                expected_files = {'replica.json'} | {f'dia-{day:03}.json' for day in range(1, 61)}
+                if {path.name for path in folder.iterdir()} != expected_files:
+                    missing.append('inventario de réplica distinto de 60 días + replica.json')
             day_hashes = {}
             meta_path = folder / 'replica.json'
             meta = None
@@ -189,7 +289,8 @@ def audit():
             if len(list(folder.glob('dia-*.json'))) != days_found:
                 missing.append('archivos de día extra o mal nombrados')
             archived = root / 'parciales-20260924' / name
-            p = (p_tower if host == 'tower' else p_laptop).get(name, {})
+            p = {'tower': p_tower, 'laptop': p_laptop, 'pub2_tower': p_pub2_tower,
+                 'hedge': p_hedge}[host].get(name, {})
             terminal = next((state for state in reversed(p.get('estados', []))
                              if state in ('COMPLETA', 'FALLO')), None)
             if seed in reruns:
@@ -200,7 +301,21 @@ def audit():
                     missing.append('solape archivado/relanzado no acreditado')
                 if p.get('identidad') != {1, 2, 3}:
                     missing.append('identidad días 1–3 no acreditada en gestor')
-                if terminal != 'COMPLETA':
+                if host in ('hedge', 'pub2_tower', 'laptop') and overlap and p.get('identidadHashes'):
+                    overlap_hashes = {row['dia']: row['sha256Relanzado'] for row in overlap['solapes'] if row['dia'] in (1, 2, 3)}
+                    if p.get('identidadHashes') != overlap_hashes:
+                        missing.append('huellas IDENTIDAD del TSV torre distintas de JSON relanzados')
+                if host == 'laptop' and (not laptop_interrupted or 'LANZADA' not in p.get('estados', [])):
+                    missing.append('lanzamiento del portátil interrumpido no acreditado')
+                elif host == 'hedge' and (p.get('estados', []).count('LANZADA') != 1
+                                          or not any(f'sha={SHA_C8}' in info and f'salida={folder}' in info
+                                                     and ' nice=19 ' in info and ' TMPDIR=/datos/tmp-atlas-lab ' in info
+                                                     for info in p.get('lanzamientos', []))):
+                    missing.append('lanzamiento hedge de torre no acreditado en bitácora')
+                elif host == 'pub2_tower' and (p.get('estados', []).count('LANZADA_VERIFICADA') != 1
+                                                or 'MANIFIESTO_VERIFICADO' not in p.get('estados', [])):
+                    missing.append('procedencia/manifiesto PUB2 de torre no acreditado en bitácora')
+                elif host == 'tower' and terminal != 'COMPLETA':
                     missing.append(f'gestor sin COMPLETA final (último terminal: {terminal})')
             if terminal == 'FALLO':
                 failure = {'replica': name, 'detalleGestor': p.get('fallos', [])[-1] if p.get('fallos') else None}
@@ -216,33 +331,39 @@ def audit():
                          'ultimoEstadoGestor': terminal, 'fallosHistoricosGestor': p.get('fallos', []),
                          'hashesDia': day_hashes, 'errores': missing,
                          'estado': 'fallo' if terminal == 'FALLO' else 'completa' if not missing else 'incompleta'})
-        out['grupos'][arm] = {'requeridas': len(tuple(seeds)),
-                              'completas': sum(not row['errores'] for row in rows),
-                              'fallidas': sum(row['estado'] == 'fallo' for row in rows),
-                              'estado': 'fallo' if any(row['estado'] == 'fallo' for row in rows)
-                                        else 'completo' if all(row['estado'] == 'completa' for row in rows)
-                                        else 'incompleta',
-                              'replicas': rows}
+        out['grupos'].setdefault(arm, {'replicas': []})['replicas'].extend(rows)
+    for group in out['grupos'].values():
+        rows = group['replicas']
+        group.update({'requeridas': len(rows), 'completas': sum(not row['errores'] for row in rows),
+                      'fallidas': sum(row['estado'] == 'fallo' for row in rows),
+                      'estado': 'fallo' if any(row['estado'] == 'fallo' for row in rows)
+                                else 'completo' if all(row['estado'] == 'completa' for row in rows)
+                                else 'incompleta'})
     out['estado'] = ('fallo' if out['fallos'] or overlaps['resumen']['diferencias'] else
-                     'completo' if not out['faltantes'] and tower_finished and laptop_finished else 'incompleta')
+                     'completo' if not out['faltantes'] and tower_finished
+                     and out['procedencia']['pub2Torre']['estado'] == 'completo'
+                     and out['procedencia'][selected_name]['estado'] == 'completo'
+                     and sum(group['requeridas'] for group in out['grupos'].values()) == 52 else 'incompleta')
     return out
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--muestra', action='store_true')
+    parser.add_argument('--usar-hedge-torre', action='store_true', help='elige explícitamente 14 copias de torre')
     args = parser.parse_args()
-    result = audit()
+    result = audit(args.usar_hedge_torre)
     if args.muestra:
         print(json.dumps({k: v for k, v in result.items() if k != 'grupos'} |
                          {'grupos': {k: {'requeridas': v['requeridas'], 'completas': v['completas'],
                                          'fallidas': v['fallidas'], 'estado': v['estado']}
                                      for k, v in result['grupos'].items()}}, ensure_ascii=False, indent=2))
         return 0 if result['estado'] == 'completo' else 2
-    target = BALANCE / 'auditoria-campanas-codex.json'
+    target = BALANCE / ('auditoria-campanas-codex-hedge-torre.json' if args.usar_hedge_torre
+                        else 'auditoria-campanas-codex.json')
     target.write_text(json.dumps(result, ensure_ascii=False, indent=2) + '\n')
     print(f'{target}: {result["estado"]}; {len(result["faltantes"])} réplicas con errores; '
-          f'{len(result["fallos"])} fallos de gestor')
+          f'{len(result["fallos"])} fallos de gestor/procedencia')
     return 0 if result['estado'] == 'completo' else 2
 
 

@@ -84,26 +84,36 @@ if not stat.S_ISREG(p.lstat().st_mode):
     raise SystemExit('Bitácora de gestor no regular')
 rows = p.read_text().splitlines()
 expected = {f'CTRL2-{seed}' for seed in (2002, 2004, 2006, 2007, 2008, 2009, 2010, 2011, 2012)}
-expected |= {f'PUB2-{seed}' for seed in (5, 29, 101, 202, 404, 606, 707)}
-if not rows or rows[0] != 'hora\treplica\testado\tinfo' \
-        or rows[-1].split('\t')[1:] != ['GESTOR', 'FIN', 'réplicas terminadas']:
-    raise SystemExit('Falta GESTOR FIN normal como último registro')
-completed = set()
+expected |= {f'PUB2-{seed}' for seed in (5, 29, 101, 202, 404)}
+if not rows or rows[0] != 'hora\treplica\testado\tinfo':
+    raise SystemExit('Cabecera inválida de bitácora')
+launched = set()
+identities = {name: set() for name in expected}
+manager_start = 0
 for row in rows[1:]:
     parts = row.split('\t')
     if len(parts) != 4:
         raise SystemExit('Fila mal formada en bitácora de gestor')
-    _, name, state, _ = parts
-    if state in ('FALLO', 'DETENER', 'NO_LANZADA'):
-        raise SystemExit(f'Gestor registró {state} para {name}')
-    if state == 'COMPLETA':
-        completed.add(name)
-if completed != expected:
-    raise SystemExit(f'COMPLETA no cubre las 16 réplicas: faltan {sorted(expected-completed)}')
-print('GESTOR FIN')
+    _, name, state, info = parts
+    if name == 'GESTOR' and state == 'INICIO' and info == 'perfil=laptop jobs=16 concurrencia=14':
+        manager_start += 1
+    elif name in expected and state == 'LANZADA' and info.startswith('pid=') and ' sha=d2ebf11' in info:
+        if name in launched:
+            raise SystemExit(f'LANZADA duplicada: {name}')
+        launched.add(name)
+    elif name in expected and state == 'IDENTIDAD' and info.startswith('día='):
+        day = int(info.split()[0].split('=')[1])
+        if day not in (1, 2, 3) or day in identities[name] or ' sha256=' not in info:
+            raise SystemExit(f'IDENTIDAD inesperada: {name} {info}')
+        identities[name].add(day)
+    else:
+        raise SystemExit(f'Evento inesperado en bitácora interrumpida: {name} {state}')
+if manager_start != 1 or launched != expected or any(days != {1, 2, 3} for days in identities.values()):
+    raise SystemExit('Bitácora interrumpida no acredita 14 lanzamientos e identidades 1–3')
+print('GESTOR INTERRUMPIDO; 14 hijos lanzados')
 PY
 )
-[[ $progress_ok == 'GESTOR FIN' ]]
+[[ $progress_ok == 'GESTOR INTERRUMPIDO; 14 hijos lanzados' ]]
 
 names=()
 sources=()
@@ -115,7 +125,7 @@ for seed in 2002 2004 2006 2007 2008 2009 2010 2011 2012; do
   destinations+=("$BASE/c8panel/portatil/CTRL2-$seed")
   seeds+=("$seed")
 done
-for seed in 5 29 101 202 404 606 707; do
+for seed in 5 29 101 202 404; do
   names+=("PUB2-$seed")
   sources+=("/home/stev/atlas-lab/f21b/PUB2-$seed")
   destinations+=("$BASE/f21b-portatil/PUB2-$seed")

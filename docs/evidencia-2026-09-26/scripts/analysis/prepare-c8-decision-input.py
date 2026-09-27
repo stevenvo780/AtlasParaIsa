@@ -38,6 +38,9 @@ import sys
 
 SOURCE = Path('/datos/tmp-atlas-lab/datos-lab/c8panel')
 DEST = Path('/datos/tmp-atlas-lab/balance/decision-c8-entrada-20260926')
+HEDGE_DEST = Path('/datos/tmp-atlas-lab/balance/decision-c8-entrada-hedge-torre-20260926')
+USE_HEDGE = False
+HEDGE_SEEDS = {2002, 2004, 2006, 2007, 2008, 2009, 2010, 2011, 2012}
 ARMS = ('CTRL', 'CTRL2', 'HOG', 'VOC', 'VOCHOG')
 SEEDS = range(2001, 2017)
 PANEL = range(2001, 2013)
@@ -45,6 +48,9 @@ DAY_PATTERN = re.compile(r'dia-(\d{3})\.json\Z')
 TICKS_PER_DAY = 2400
 # Contrato de HOG y CTRL2 en audit-codex-campaigns.py (T2).
 SHA_C8 = 'd2ebf11d51c3221477d88c7045faeafa2a229683'
+DIGEST_C8 = '63d4fc53b1a4c92e9c10bebed763958183ac22f246d8af744ba6a6ebfc840f0a'
+PARAMS_SHA = {'HOG': '9a60a0576abbfd10bf9fad79e53c5d98550efc8d18c9cafe7c756b8833265b42',
+              'CTRL2': '3d7a05d5d1d2ee6ee0ee6feaeb18bbc8a2599db1b64c7365a6569bfec7e43b36'}
 LIMITS = {'teselasActivas': 1303552, 'chunks': 5092, 'fauna': 7821312}
 HOG_FAILURE_VERIFIER = Path(__file__).with_name('verificar-hog-2010.py')
 RED_CRITERION = ('Entrada roja: HOG-2010 solo días 001..024, sin replica.json, '
@@ -61,6 +67,17 @@ def hog_failure_evidence():
     result = namespace['verificar']()
     if result.get('veredicto') != 'fallo_repetido_acreditado' or not all(result.get('comprobaciones', {}).values()):
         raise ValueError('HOG-2010: fallo repetido no acreditado por verificar-hog-2010.py')
+    return result
+
+
+def hedge_evidence():
+    """Valida el TSV y cada solape sin importar ni ejecutar un main externo."""
+    path = Path(__file__).with_name('hedge_provenance.py')
+    namespace = {'__name__': 'hedge_provenance', '__file__': str(path)}
+    exec(compile(path.read_bytes(), str(path), 'exec'), namespace)
+    result = namespace['verify_hedge'](SOURCE.parent)
+    if result['estado'] != 'completo' or len(result['replicas']) != 14 or result['identidadesTSV'] != 42:
+        raise ValueError('Hedge de torre aún no acredita 14 manifiestos, 60 días y todos los solapes')
     return result
 
 
@@ -81,7 +98,17 @@ def real_regular_file(path):
 def source_for(arm, seed):
     name = f'{arm}-{seed}'
     alias = SOURCE / name
-    if arm == 'CTRL2':
+    if arm == 'CTRL2' and USE_HEDGE and seed in HEDGE_SEEDS:
+        canonical = SOURCE.parent / 'hedge-torre-20260926' / name
+        if not os.path.lexists(canonical):
+            return None
+        if not stat.S_ISDIR(canonical.lstat().st_mode):
+            raise ValueError(f'{canonical}: CTRL2 hedge debe ser directorio real')
+        source = canonical.resolve(strict=True)
+        if not source.is_relative_to((SOURCE.parent / 'hedge-torre-20260926').resolve(strict=True)):
+            raise ValueError(f'{source}: CTRL2 hedge fuera de su raíz')
+        alias = None
+    elif arm == 'CTRL2':
         canonical = SOURCE / 'portatil' / name
         if not os.path.lexists(canonical):
             if os.path.lexists(alias):
@@ -108,7 +135,7 @@ def source_for(arm, seed):
             raise ValueError(f'{alias}: origen fuera de c8panel: {source}')
     if not source.is_dir():
         raise ValueError(f'{source}: no es directorio')
-    return {'nombre': name, 'alias': str(alias) if os.path.lexists(alias) else None,
+    return {'nombre': name, 'alias': str(alias) if alias is not None and os.path.lexists(alias) else None,
             'origen': source, 'brazo': arm, 'semilla': seed}
 
 
@@ -126,6 +153,8 @@ def inspect_replica(replica, seed, arm, required):
     if required:
         if metadata.get('sha') != SHA_C8:
             raise ValueError(f'{replica}: SHA incorrecto (esperado {SHA_C8})')
+        if metadata.get('digest') != DIGEST_C8:
+            raise ValueError(f'{replica}: digest de código distinto del brazo congelado')
         if metadata.get('gobernador') != 'no-ejecutado; replica de leyes, no del servidor':
             raise ValueError(f'{replica}: gobernador debe ser no-ejecutado')
         if 'techoLab' in metadata or 'techoLabDetalle' in metadata:
@@ -133,6 +162,10 @@ def inspect_replica(replica, seed, arm, required):
         params = metadata.get('params')
         if not isinstance(params, dict):
             raise ValueError(f'{replica}: faltan parámetros')
+        params_hash = hashlib.sha256(json.dumps(params, ensure_ascii=False, sort_keys=True,
+                                                separators=(',', ':')).encode()).hexdigest()
+        if params_hash != PARAMS_SHA[arm]:
+            raise ValueError(f'{replica}: parámetros completos distintos del brazo congelado')
         persistencia = params.get('persistencia')
         limites = params.get('limites')
         social = params.get('social')
@@ -198,6 +231,8 @@ def preflight(permitir_hog_2010_fallo=False):
         raise FileExistsError(f'El destino ya existe; no se modifica: {DEST}')
     if not DEST.parent.is_dir():
         raise FileNotFoundError(f'Falta el directorio balance: {DEST.parent}')
+    if USE_HEDGE:
+        hedge_evidence()
     if permitir_hog_2010_fallo:
         hog = source_for('HOG', 2010)
         if hog is None:
@@ -240,6 +275,7 @@ def build(items, permitir_hog_2010_fallo=False):
     DEST.mkdir(exist_ok=False)
     manifest = {'creadoUTC': datetime.now(timezone.utc).isoformat(),
                 'entrada': str(DEST), 'fuente': str(SOURCE),
+                'fuenteCTRL2Relanzadas': 'hedge-torre-20260926' if USE_HEDGE else 'portatil',
                 'criterioEntrada': RED_CRITERION if permitir_hog_2010_fallo else STRICT_CRITERION,
                 'entradaRoja': permitir_hog_2010_fallo,
                 'hog2010Parcial': {'dias': list(range(1, 25)), 'replicaJson': False,
@@ -282,12 +318,16 @@ def verify():
     """Relee todas las huellas y la identidad inode fuente/destino sin escribir."""
     if not os.path.lexists(DEST) or not stat.S_ISDIR(DEST.lstat().st_mode):
         raise ValueError(f'{DEST}: falta el directorio real de entrada')
+    if USE_HEDGE:
+        hedge_evidence()
     manifest_path = DEST / 'MANIFIESTO.json'
     real_regular_file(manifest_path)
     with manifest_path.open(encoding='utf-8') as stream:
         manifest = json.load(stream)
     if manifest.get('entrada') != str(DEST) or not isinstance(manifest.get('replicas'), list):
         raise ValueError(f'{manifest_path}: formato o ruta de entrada incorrectos')
+    if manifest.get('fuenteCTRL2Relanzadas', 'portatil') != ('hedge-torre-20260926' if USE_HEDGE else 'portatil'):
+        raise ValueError(f'{manifest_path}: fuente CTRL2 no corresponde a la opción explícita')
     red = manifest.get('entradaRoja')
     if not isinstance(red, bool) or manifest.get('criterioEntrada') != (RED_CRITERION if red else STRICT_CRITERION):
         raise ValueError(f'{manifest_path}: criterio de entrada roja/estricta inconsistente')
@@ -366,7 +406,13 @@ def main():
     action.add_argument('--verify', action='store_true', help='revalida manifiesto, SHA-256 e inodes sin escribir')
     parser.add_argument('--permitir-hog-2010-fallo', action='store_true',
                         help='solo preflight/build: admite HOG-2010 rojo acreditado con días 001..024')
+    parser.add_argument('--usar-hedge-torre', action='store_true',
+                        help='elige nueve CTRL2 relanzadas de torre y una entrada C8 separada')
     args = parser.parse_args()
+    global DEST, USE_HEDGE
+    USE_HEDGE = args.usar_hedge_torre
+    if USE_HEDGE:
+        DEST = HEDGE_DEST
     if args.verify and args.permitir_hog_2010_fallo:
         parser.error('--permitir-hog-2010-fallo solo se admite con --preflight o --build')
     if args.verify:

@@ -22,8 +22,12 @@ GROUPS = (
     ("ctrlv4", "CTRLV4", (6004, 6009, 6010, 6011, 6012, 6013, 6015, 6017, 6018)),
     ("c8panel", "HOG", (2010,)),
     ("c8panel/portatil", "CTRL2", (2002, 2004, 2006, 2007, 2008, 2009, 2010, 2011, 2012)),
-    ("f21b-portatil", "PUB2", (5, 29, 101, 202, 404, 606, 707)),
+    ("f21b-portatil", "PUB2", (5, 29, 101, 202, 404)),
+    ("f21b-torre", "PUB2", (606, 707)),
 )
+HEDGE_ROOT = "hedge-torre-20260926"
+HEDGE_NAMES = {f"CTRL2-{seed}" for seed in (2002, 2004, 2006, 2007, 2008, 2009, 2010, 2011, 2012)}
+HEDGE_NAMES |= {f"PUB2-{seed}" for seed in (5, 29, 101, 202, 404)}
 EXPECTED_ARCHIVED_LAST_DAY = {
     "CTRLV4-6004": 52, "CTRLV4-6009": 48, "CTRLV4-6010": 49,
     "CTRLV4-6011": 55, "CTRLV4-6012": 56, "CTRLV4-6013": 46,
@@ -122,13 +126,15 @@ def verify_pair(base: Path, relative: str, name: str) -> dict:
     }
 
 
-def verify(base: Path) -> dict:
-    rows = [verify_pair(base, relative, f"{arm}-{seed}")
+def verify(base: Path, usar_hedge_torre: bool = False) -> dict:
+    rows = [verify_pair(base, HEDGE_ROOT if usar_hedge_torre and f"{arm}-{seed}" in HEDGE_NAMES else relative,
+                        f"{arm}-{seed}")
             for relative, arm, seeds in GROUPS for seed in seeds]
     ok = all(row["solapeAcreditado"] for row in rows)
     return {
         "tipo": "verificacion_solapes_relanzadas_20260924",
         "base": str(base),
+        "fuente14Relanzadas": "hedge-torre-20260926" if usar_hedge_torre else "portatil",
         "normalizacion": "Omitir recursivamente p50Ms, p95Ms, rss y claves terminadas en Ms; JSON sorted compact; SHA256 UTF-8.",
         "alcance": "Acredita solo identidad de JSON diarios archivados frente a relanzadas; no comprueba día 60, manifiesto final ni igualdad del estado interno. HOG-2010 puede tener solape acreditado y seguir fallida.",
         "estado": "solapes_acreditados" if ok else "pendiente_o_diferente",
@@ -144,8 +150,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base", type=Path, default=DEFAULT_BASE)
     parser.add_argument("--muestra", action="store_true", help="resumen sin escribir balance")
+    parser.add_argument("--usar-hedge-torre", action="store_true", help="elige explícitamente las 14 copias de la torre")
     args = parser.parse_args()
-    result = verify(args.base)
+    result = verify(args.base, args.usar_hedge_torre)
     for row in result["replicas"]:
         print(f'{row["replica"]}: archivado={len(row["diasArchivados"])} '
               f'esperado={row["maximoArchivadoEsperado"]} solapes={len(row["solapes"])} '
@@ -158,7 +165,8 @@ def main() -> int:
     if result["estado"] != "solapes_acreditados":
         print("Balance sin escribir: faltan días, hay datos inválidos o existen diferencias.", file=sys.stderr)
         return 2
-    output = args.base.parent / "balance" / "verificacion-solapes-relanzadas.json"
+    output = args.base.parent / "balance" / ("verificacion-solapes-hedge-torre.json" if args.usar_hedge_torre
+                                             else "verificacion-solapes-relanzadas.json")
     encoded = (json.dumps(result, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
     if output.exists():
         if output.read_bytes() != encoded:

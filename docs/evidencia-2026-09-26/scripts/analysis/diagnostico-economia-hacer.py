@@ -5,6 +5,7 @@ Uso: python3 scripts/analysis/diagnostico-economia-hacer.py [--base DIR]
 No abre mundos, no inicia réplicas y no escribe en las carpetas de datos.
 """
 import argparse
+from datetime import datetime
 import glob
 import hashlib
 import json
@@ -103,11 +104,19 @@ def load_run(path):
     if not days:
         return None
     meta_path = os.path.join(path, 'replica.json')
-    meta = json.load(open(meta_path)) if os.path.exists(meta_path) else {}
+    if os.path.exists(meta_path):
+        with open(meta_path, 'rb') as stream:
+            meta_bytes = stream.read()
+        meta = json.loads(meta_bytes)
+        replica_sha256 = hashlib.sha256(meta_bytes).hexdigest()
+    else:
+        meta = {}
+        replica_sha256 = None
     name = os.path.basename(path)
     seed = int(re.search(r'(\d+)$', name).group(1))
     return {'id': name, 'path': path, 'dias': days, 'seed': seed,
-            'sha': meta.get('sha'), 'day_first': min(days), 'day_last': max(days),
+            'sha': meta.get('sha'), 'replica_sha256': replica_sha256,
+            'day_first': min(days), 'day_last': max(days),
             'day_count': len(days), 'complete': all(d in days for d in range(1, 61))}
 
 
@@ -279,9 +288,22 @@ def main():
                         help='Usar parciales-20260924 cuando existan; congela el corte anterior a las relanzadas')
     parser.add_argument('--require-complete', action='store_true',
                         help='Exige inventario, 60 días, ticks y manifiesto congelado en las cuatro campañas')
+    parser.add_argument('--fecha-corte',
+                        help='Fecha y hora ISO 8601 del corte final con desplazamiento UTC numérico no nulo (AAAA-MM-DDTHH:MM:SS±HH:MM)')
     parser.add_argument('--usar-hedge-torre', action='store_true',
                         help='Usar juntas 9 CTRL2 y 5 PUB2 duplicadas en la torre para el corte corriente')
     args = parser.parse_args()
+    if args.require_complete and args.fecha_corte is None:
+        parser.error('--require-complete exige --fecha-corte')
+    if args.fecha_corte is not None:
+        if not re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}', args.fecha_corte):
+            parser.error('--fecha-corte debe incluir un desplazamiento UTC numérico (AAAA-MM-DDTHH:MM:SS±HH:MM)')
+        try:
+            fecha_corte = datetime.fromisoformat(args.fecha_corte)
+        except ValueError:
+            parser.error('--fecha-corte no es una fecha y hora válida')
+        if fecha_corte.utcoffset() is None or fecha_corte.utcoffset().total_seconds() == 0:
+            parser.error('--fecha-corte exige un desplazamiento UTC numérico no nulo')
     if args.require_complete and args.archived_partials:
         parser.error('--require-complete no admite --archived-partials')
     if args.usar_hedge_torre and args.archived_partials:
@@ -294,6 +316,8 @@ def main():
                                    'directorios corrientes, incluidas relanzadas en curso'),
                          'seleccion_hedge_torre': args.usar_hedge_torre,
                          'hacer': 'suma de fracciones persona-tick gather+build+craft+hunt; no es tasa de eventos'}}
+    if args.fecha_corte is not None:
+        output['metodo']['fecha_corte'] = args.fecha_corte
     for campaign, pattern in {**CAMPAIGNS, 'PUB2': None}.items():
         paths = (pub2_paths(args.base, args.archived_partials, args.require_complete,
                             args.usar_hedge_torre)
@@ -348,7 +372,8 @@ def main():
             'fuentes': [{'id': r['id'], 'origen': os.path.relpath(r['path'], args.base),
                          'host': ('torre' if HEDGE_DIR in r['path'] or 'f21b-torre' in r['path'] else 'portatil')
                          if campaign in ('PUB2', 'CTRL2') else None,
-                         'seed': r['seed'], 'sha': r['sha'], 'primer_dia': r['day_first'],
+                         'seed': r['seed'], 'sha': r['sha'],
+                         'replica_sha256': r['replica_sha256'], 'primer_dia': r['day_first'],
                          'ultimo_dia': r['day_last'], 'cantidad_dias': r['day_count'],
                          'completa_1_60': r['complete']} for r in runs],
             'auditoria_campos_estado': {key: sum(key in day for r in runs for day in r['dias'].values())

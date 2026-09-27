@@ -10,6 +10,15 @@
 > sus runbooks y los bancos de un solo uso se retiraron de main y se conservan en el tag
 > `archivo/campanas-20260922`; las evidencias JSON que produjeron siguen en `docs/evidencia-2026-09-22/`.
 
+## 27 de septiembre de 2026 — poda de leyes refutadas, ola 1 (rama `sprint/poda-leyes-20260927`)
+
+Retiradas NAT-L y vocación de linaje (ver «Poda» en [REGLAS](REGLAS.md)). Puertas de la
+ola: digestos del mundo idénticos a `main`/`0a6476e` en 8 semillas × 1200 pasos con
+parámetros por defecto (el hash de params solo cambia por las 4 claves quitadas);
+`npm run typecheck` y `npm test` verdes; `git grep` sin restos fuera de docs/evidencia.
+El código queda en `main`/`0a6476e` y en el commit previo de esta rama. HOG sigue
+pendiente y no se toca.
+
 ## 24 de septiembre de 2026 (noche) — V11 publicado, C8 v3 auditado, NAT-L refutada en el cribado
 
 Resumen y decisión pendiente en [REVISION-2026-09-24](REVISION-2026-09-24.md). Fuentes: bitácora del laboratorio;

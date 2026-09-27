@@ -13,8 +13,6 @@ import type { Person, World } from '../world/index.js';
 import { reproductiveReadiness } from '../world/family.js';
 import { demographicTraits } from '../world/demography.js';
 import { paramsOf } from '../world/params.js';
-import { hacinamientoLocal, intervaloCumplido } from '../world/natalidad.js';
-import { primeroCerca } from '../world/indice-puntos.js';
 import { POPULATION_HARD_LIMIT } from '../shared/life.js';
 
 export const CADA_PASOS = 50;
@@ -37,13 +35,11 @@ export function resumenNatalidad(world: World): Natalidad {
     else if (person.action === 'forage' && person.reason.startsWith(RAZON_PREPARA)) preparando++;
   }
   const ley = paramsOf(world).poblacion;
-  // La ley local sustituye al cupo en `reproduce()`. `maxima` solo viaja si de verdad limita.
+  // `maxima` solo viaja si de verdad limita.
   return { tick: world.tick, fertiles, cortejando, preparando, reuniendose,
     ley: { radioPareja: ley.radioPareja, radioLugar: ley.radioLugar, radioCortejo: ley.cortejo > 0 ? ley.radioCortejo : 0,
       exigeComunidad: ley.exigeComunidad, reserva: RESERVA_PARA_CRIAR,
-      ...(ley.natalidadLocal > 0
-        ? { natalidadLocal: ley.natalidadLocal, radioProvision: ley.radioProvision }
-        : { cupo: ley.nacimientosPorComprobacion, ventana: ley.intervaloComprobacionTicks, continua: ley.comprobacionContinua }),
+      cupo: ley.nacimientosPorComprobacion, ventana: ley.intervaloComprobacionTicks, continua: ley.comprobacionContinua,
       ...(ley.maxima < POPULATION_HARD_LIMIT ? { maxima: ley.maxima } : {}) } };
 }
 
@@ -81,13 +77,6 @@ export function fertilidad(world: World, person: Person): Fertil {
   if (person.inventory < RESERVA_PARA_CRIAR) return { ahora: false, bloqueo: 'reserva', ...base };
   if (paramsOf(world).poblacion.exigeComunidad && !person.communityId) return { ahora: false, bloqueo: 'comunidad', ...base };
   if (!world.reproductionEnabled) return { ahora: false, bloqueo: 'techo', ...base };
-  const pop = paramsOf(world).poblacion;
-  if (pop.natalidadLocal > 0) {
-    const lugar = primeroCerca(world.places, person, pop.radioLugar + 1,
-      p => Math.hypot(person.x - p.x, person.y - p.y) <= pop.radioLugar);
-    if (lugar && !intervaloCumplido(world, person, hacinamientoLocal(world, lugar, pop.radioProvision, pop.natalidadLocal)))
-      return { ahora: false, bloqueo: 'natalidad-local', ...base };
-  }
   return { ahora: true, bloqueo: null, ...base };
 }
 

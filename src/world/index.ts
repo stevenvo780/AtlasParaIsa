@@ -13,7 +13,6 @@ import { materializeAnimals, stepAnimals, harvestAt, type Animal } from './anima
 import { advanceNeeds } from './needs.js';
 import { assimilateFood, exertBody, hydrateBody, restBody } from './body.js';
 import { CRECIMIENTO_COMIDA, HAMBRE_POR_PASO, HAMBRE_POR_UNIDAD, INTERVALO_ECOLOGIA_TICKS, INTERVALO_TIEMPO_TICKS, LUZ_CREPSCULO, PROB_LLUVIA, SED_POR_PASO, SED_POR_UNIDAD } from './ecologia-constantes.js';
-import { hacinamientoLocal, intervaloCumplido, presionLocal, observadorNatalidad } from './natalidad.js';
 import { defaultBlueprint, constructionCost, constructionOpportunity, inventionOpportunity, invent, completeConstruction, stepStructures, repairOpportunity, repair, facilityRestQuality, recordFacilityRest, foodAvailable, takeFood, waterAvailable, takeWater, REST_FATIGUE_RATE, REST_ENERGY_RATE, BROKEN_CONDITION } from './inventions.js';
 import type { AnimalDynamics, BlueprintView, StructureView, InventionDynamics } from '../shared/life.js';
 import { POPULATION_HARD_LIMIT } from '../shared/life.js';
@@ -32,7 +31,6 @@ import { DEFAULT_PARAMS, MAX_FOUNDER_AGE_TICKS, paramsOf, setParams, limitsOf, t
 import { algunoCerca, filtrarCerca, primeroCerca } from './indice-puntos.js';
 import { conRejilla, personaMovida, vecinos } from './rejilla.js';
 export { bindWorldContext, tileAt, normalizeViewport, worldContext } from './spatial.js';
-export { demandaDiaria } from './natalidad.js';
 export type { WorldContext } from './spatial.js';
 
 // V9 accounts for an earlier visible forager when planning finite family reserves.
@@ -74,8 +72,6 @@ export interface Person extends PersonView {
   home?: { x: number; y: number; quality: number; observedAt: number };
   /** Ley candidata `agua.memoria`: último lugar donde bebió agua del entorno. Sólo existe con la ley activa. */
   waterMemory?: { x: number; y: number };
-  /** H-A: vector heredado sólo por descendientes cuando la ley está activa. */
-  vocacion?: Record<string, number>;
   /** Ley candidata `social.memoriaDisputa` (CONFL): fuente donde cedió su última disputa y paso en que la cedió.
    * Sólo existe con la ley activa; se olvida un día después. */
   conflictMemory?: { x: number; y: number; tick: number };
@@ -305,31 +301,6 @@ const RASGO_DEL_OFICIO: Partial<Record<Action, keyof NonNullable<PersonView['tra
   gather: 'industriousness', farm: 'industriousness', build: 'industriousness', repair: 'industriousness', craft: 'industriousness',
   hunt: 'resilience', share: 'care', cooperate: 'sociability',
 };
-/** Oficios heredables del mapa de aptitudes; explorar queda fuera del preregistro H-A. */
-export const OFICIOS_DE_LINAJE = Object.freeze((Object.keys(RASGO_DEL_OFICIO) as Action[])
-  .filter((action): action is Exclude<Action, 'explore'> => action !== 'explore'));
-
-/** Copia uniparental con error local por identidad y proyección acotada a suma cero. */
-export function heredarVocacion(seed: number, id: string, progenitor: Pick<Person, 'vocacion'>,
-  epsilon: number, tope: number): Record<string, number> {
-  const azar = localRandom(seed, `vocacion:${id}`);
-  const bruto = OFICIOS_DE_LINAJE.map(oficio => (progenitor.vocacion?.[oficio] ?? 0) + epsilon * (2 * azar() - 1));
-  const media = bruto.reduce((suma, valor) => suma + valor, 0) / bruto.length;
-  const centrado = bruto.map(valor => valor - media);
-  if (tope === 0) return Object.fromEntries(OFICIOS_DE_LINAJE.map(oficio => [oficio, 0]));
-  // La traslación común preserva el orden de preferencias y permite recortar cada componente.
-  let inferior = Math.min(...centrado) - tope, superior = Math.max(...centrado) + tope;
-  for (let n = 0; n < 80; n++) {
-    const medio = (inferior + superior) / 2;
-    const suma = centrado.reduce((total, valor) => total + Math.max(-tope, Math.min(tope, valor - medio)), 0);
-    if (suma > 0) inferior = medio; else superior = medio;
-  }
-  const proyectado = centrado.map(valor => Math.max(-tope, Math.min(tope, valor - (inferior + superior) / 2)));
-  const residuo = proyectado.reduce((suma, valor) => suma + valor, 0);
-  const corregible = proyectado.findIndex(valor => valor - residuo >= -tope && valor - residuo <= tope);
-  if (corregible >= 0) proyectado[corregible] = proyectado[corregible]! - residuo;
-  return Object.fromEntries(OFICIOS_DE_LINAJE.map((oficio, n) => [oficio, proyectado[n]!]));
-}
 /** Ventaja comparativa de `traits` en `action` (ley DIV): el rasgo del oficio menos la media de los
  * cinco rasgos de la MISMA persona. Suma cero sobre los cinco rasgos: quien es bueno en todo no
  * gana nada por serlo, sólo ordena sus oficios; 0 para lo que no es un oficio. Pura y exportada
@@ -842,11 +813,6 @@ function choose(world: World, person: Person): void {
       candidate.score += aptitud * ventajaComparativa(person.traits, candidate.action);
     }
   }
-  const epsilonVocacion = paramsOf(world).conducta.vocacion;
-  if (epsilonVocacion > 0 && person.role === 'neighbor' && person.vocacion && person.thirst <= 0.5 && person.hunger <= 0.5 && person.fatigue <= 0.5) {
-    for (const candidate of candidates) if (OFICIOS_DE_LINAJE.includes(candidate.action as typeof OFICIOS_DE_LINAJE[number]))
-      candidate.score += person.vocacion[candidate.action] ?? 0;
-  }
   if (person.command && person.hunger < 0.85 && person.thirst < 0.85 && person.fatigue < 0.88 && person.energy > 0.15) {
     const command = person.command;
     const directed: Candidate = { action: command.order === 'move' ? 'explore' : command.order, target: { x: command.x, y: command.y }, score: 5, directed: true, reason: `Tarea solicitada: ${command.order === 'move' ? 'ir al destino' : actionLabel(command.order)}. Conserva sus necesidades corporales.` };
@@ -1328,7 +1294,6 @@ function transferEstate(world: World, person: Person): void {
 const ELECCION_POR_AFINIDAD = true;
 function reproduce(world: World): void {
   const pop = paramsOf(world).poblacion;
-  const ley = pop.natalidadLocal;
   if (!world.reproductionEnabled || world.people.length >= pop.maxima) return;
   // Leyes candidatas del embudo de natalidad (diagnóstico 2026-09-22). `comprobacionContinua`
   // cambia SÓLO el muestreo: en vez de mirar una vez cada `intervaloComprobacionTicks` pasos,
@@ -1338,32 +1303,22 @@ function reproduce(world: World): void {
   // fundadores (`bornAt ≤ −1200`, `genes.edadFundadoresMinDias` ≥ 0,5 días) no caen dentro
   // de ella con el intervalo por defecto.
   if (!pop.comprobacionContinua && world.tick % pop.intervaloComprobacionTicks !== 0) return;
-  const recientes = ley === 0 && pop.comprobacionContinua
+  const recientes = pop.comprobacionContinua
     ? world.people.filter(p => p.role === 'neighbor' && p.bornAt > world.tick - pop.intervaloComprobacionTicks).length : 0;
-  const cupo = ley > 0 ? Infinity : pop.nacimientosPorComprobacion - recientes;
+  const cupo = pop.nacimientosPorComprobacion - recientes;
   if (cupo <= 0) return;
   const used = new Set<string>();
-  // El mínimo genético de recuperación es 0,8 días; este filtro barato no puede excluir a un fértil.
-  const fit = (p: Person): boolean => !used.has(p.id) && (ley === 0 || world.tick - p.lastBirth >= 0.8 * TICKS_PER_DAY)
+  const fit = (p: Person): boolean => !used.has(p.id)
     && fertile(world, p) && (!pop.exigeComunidad || !!p.communityId);
   const match = (a: Person, b: Person): boolean => b !== a && fit(b) && distance(a, b) <= pop.radioPareja && (a.bonds[b.id] ?? 0) >= 0.3 && (b.bonds[a.id] ?? 0) >= 0.3 && !closeKin(a, b);
-  const memo = new Map<string, number>();
-  const xDe = (l: (typeof world.places)[number]): number => {
-    let x = memo.get(l.id);
-    if (x === undefined) { x = hacinamientoLocal(world, l, pop.radioProvision, ley); memo.set(l.id, x); }
-    return x;
-  };
   for (let n = 0; n < cupo && world.people.length < pop.maxima; n++) {
     let pair: { a: Person; b: Person } | undefined, place: (typeof world.places)[number] | undefined;
     for (const a of world.people) {
       if (!fit(a)) continue;
       const here = primeroCerca(world.places, a, pop.radioLugar + 1, p => distance(a, p) <= pop.radioLugar);
       if (!here) continue;
-      const x = ley > 0 ? xDe(here) : 0;
-      if (ley > 0 && !intervaloCumplido(world, a, x)) { observadorNatalidad(world)?.bloqueo(); continue; }
       const b = chooseReproductivePartner(world, a, vecinos(world, a, pop.radioPareja + 1, p => {
         if (!match(a, p)) return false;
-        if (ley > 0 && !intervaloCumplido(world, p, x)) { observadorNatalidad(world)?.bloqueo(); return false; }
         return true;
       }, 'reproduce'), ELECCION_POR_AFINIDAD);
       if (!b) continue;
@@ -1375,12 +1330,6 @@ function reproduce(world: World): void {
     }
     if (!pair || !place) break;
     const { a, b } = pair;
-    const observador = observadorNatalidad(world);
-    if (observador) {
-      // CTRL se sondea sólo tras decidir la pareja. La sonda no participa en el embudo.
-      const presion = presionLocal(world, place, pop.radioProvision, ley > 0 ? ley : 1);
-      observador.nacimiento(ley > 0 ? xDe(place) : presion.x, presion.limitante);
-    }
     const serial=world.birthCounter+1, id=`descendant-${serial}`;
     if(!Number.isSafeInteger(serial)||[...world.people,...world.legacy,...world.retiredLegacy].some(p=>p.id===id)) throw new Error('La identidad de un nacimiento ya existe; no se gastaron reservas.');
     const genome=inheritGenome(world.seed,id,[a,b],DEFAULT_MUTATION_RATE*paramsOf(world).genes.tasaMutacion); world.birthCounter=serial;
@@ -1395,15 +1344,13 @@ function reproduce(world: World): void {
       technology: initialTechnologyKnowledge(), demography: initialDemography(),
     };
     delete child.home;
-    delete child.vocacion;
-    const leyVocacion = paramsOf(world).conducta;
-    if (leyVocacion.vocacion > 0) child.vocacion = heredarVocacion(world.seed, id, a, leyVocacion.vocacion, leyVocacion.vocacionTope);
+    // Lastre de la ley retirada (vocación, ola 1): una cría nunca hereda ese campo.
+    delete (child as unknown as Record<string, unknown>).vocacion;
     // `agua.memoria`: la cría nace junto a sus padres y conserva el aguadero de `a` (copiado arriba con el
     // resto de su estado); es información, no agua: si está seco lo olvidará al verlo, como cualquiera.
     if (a.waterMemory) child.waterMemory = { x: a.waterMemory.x, y: a.waterMemory.y };
     a.inventory -= 0.08; b.inventory -= 0.08; a.energy = clamp(a.energy - 0.08); b.energy = clamp(b.energy - 0.08); a.lastBirth = world.tick; b.lastBirth = world.tick;
     world.people.push(child);
-    if (ley > 0) memo.clear();
     // El evento de fundación de una comunidad comparte el arreglo con `group.members`
     // (society.ts). Con la comprobación periódica un nacimiento cae siempre en el mismo paso
     // que ese evento, así que empujar aquí lo extiende ANTES de que se archive y la crónica
@@ -1734,7 +1681,7 @@ export function assertWorld(value: unknown, expectedVersion = RULES_VERSION, con
     }
     if (!['ready','hungry','thirsty','tired'].includes(p.intentContext)) fail();
     if (!p.traits || !['curiosity','sociability','industriousness','care','resilience'].every(k => typeof p.traits[k as keyof typeof p.traits] === 'number') || !numericMap(p.traits, 0, 1, 5) || !numericMap(p.skills, 0, 1, expectedVersion>=5?18:15) || !numericMap(p.values, -0.3, 0.3, expectedVersion>=5?72:60) || !numericMap(p.activity, 0, 1_000_000, expectedVersion>=5?18:15) || !p.materials || !Number.isFinite(p.materials.wood) || p.materials.wood < 0 || p.materials.wood > 12 || !Number.isFinite(p.materials.stone) || p.materials.stone < 0 || p.materials.stone > 8 || !Array.isArray(p.visited) || p.visited.length > 192 || !p.visited.every(k => typeof k === 'string' && /^-?\d+,-?\d+$/.test(k)) || !Number.isFinite(p.heading) || !Number.isSafeInteger(p.work) || p.work < 0 || p.work > (expectedVersion>=4?600:90) || !Number.isSafeInteger(p.lastOutcome) || p.lastOutcome < 0 || p.lastOutcome > w.tick || !['auto','directed'].includes(p.controlMode)) fail();
-    if (p.vocacion !== undefined && !numericMap(p.vocacion, -paramsOf(w).conducta.vocacionTope, paramsOf(w).conducta.vocacionTope, OFICIOS_DE_LINAJE.length)) fail();
+
     if (p.command !== null && (!p.command || !['move','explore','gather','farm','build','rest','hunt','drink','cooperate',...(expectedVersion>=4?['invent','repair']:[]), ...(expectedVersion>=5?['research','craft','forage']:[])].includes(p.command.order) || !validCoordinate(p.command.x) || !validCoordinate(p.command.y))) fail();
     if ((p.command === null) !== (p.controlMode === 'auto')) fail();
   }

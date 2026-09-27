@@ -42,7 +42,6 @@ export interface WorldParams {
    */
   poblacion: { maxima: number; intervaloComprobacionTicks: number; nacimientosPorComprobacion: number;
     exigeComunidad: boolean; radioPareja: number; radioLugar: number; comprobacionContinua: boolean;
-    natalidadLocal: number; radioProvision: number;
     /** Cortejo (2026-09-22): peso con que una persona fértil busca a otra fértil, no emparentada y con
      * vínculo mutuo ≥ 0,3 que está fuera de `radioPareja` pero dentro de `radioCortejo`. Histórico 0 / 24
      * (apagado); reglas 10 adopta 2 / 128 para mundos nuevos. */
@@ -86,12 +85,7 @@ export interface WorldParams {
     /** Ventaja comparativa heredable (DIV, 2026-09-22), `index.ts` → `choose`: sin urgencias
      * corporales (sed, hambre y cansancio ≤ 0,5), cada OFICIO suma `aptitud · (rasgo del oficio −
      * media de los cinco rasgos de la persona)`. 0 = hoy. */
-    aptitud: number;
-    /** Error de copia de la vocación heredada por oficio (H-A). 0 apaga la ley y no añade
-     * estado ni consume azar. Sólo altera oficios de linaje en contexto listo. */
-    vocacion: number;
-    /** Cota absoluta de cada componente de vocación; inerte con `vocacion=0`. */
-    vocacionTope: number };
+    aptitud: number };
   /** `social.maxComunidades`: tope de FUNDACIÓN de comunidades (`society.ts`), regla de conducta separada
    * de la admisión `limites.comunidades` (revisión de T100, 2026-09-22). */
   social: { maxComunidades: number; disputaNecesidad: number; disputaEscasez: number; disputaRadio: number; disputaDestino: number; disputaEspera: number;
@@ -140,8 +134,7 @@ const RAW_HISTORICAL: WorldParams = {
   // Ruling R17: `maxima` ya no es un tope de diseño (era 40); por defecto no limita y el
   // freno lo ponen el entorno y el gobernador. Sigue siendo parámetro para el laboratorio.
   poblacion: { maxima: 1_000_000, intervaloComprobacionTicks: 120, nacimientosPorComprobacion: 2,
-    exigeComunidad: true, radioPareja: 3, radioLugar: 4, comprobacionContinua: false, cortejo: 0, radioCortejo: 24,
-    natalidadLocal: 0, radioProvision: 16 },
+    exigeComunidad: true, radioPareja: 3, radioLugar: 4, comprobacionContinua: false, cortejo: 0, radioCortejo: 24 },
   recursos: { capacidadBosque: 1, capacidadPastizal: 0.7, capacidadOtros: 0.35, velocidadRegeneracion: 1, decaimientoFertilidad: 0.001, decaimientoComida: 0.0001 },
   persistencia: { cadaTicks: 1, ventanaEventosTicks: 0, paginasSucias: false },
   agua: { cuencas: 0.4, memoria: 1 },
@@ -153,7 +146,7 @@ const RAW_HISTORICAL: WorldParams = {
   // (`index.ts` no descuenta saciedad; `society.ts` usa 0,65 / ×1 / 2 celdas / 0,5 de
   // destino / 180 ticks de espera / sin rareza / 0,35 de confianza / 0,2 de distancia
   // cultural), así que abrirlas no cambia el mundo.
-  conducta: { habituacion: 0, aptitud: 0, vocacion: 0, vocacionTope: 0.9 },
+  conducta: { habituacion: 0, aptitud: 0 },
   social: { maxComunidades: 8, disputaNecesidad: 0.65, disputaEscasez: 1, disputaRadio: 2, disputaDestino: 0.5, disputaEspera: 180,
     ensenanzaRareza: 0, confianzaSalida: 0.35, distanciaAlternativa: 0.2, vinculoConvivencia: 0, radioConvivencia: 0, memoriaDisputa: 0, hogarTrabajo: 0 },
 };
@@ -202,9 +195,13 @@ export const DEFAULT_PARAMS: WorldParams = deepFreeze(RAW_DEFAULTS);
  * `RULES_11_ADOPTED` conservan aquí 0,65/1/2/0. Las demás claves añadidas la
  * noche del 2026-09-22 mantienen su valor histórico:
  * `genes.edadFundadoresMin/MaxDias` 2/2, `poblacion.radioPareja` 3, `poblacion.radioLugar` 4,
- * `agua.memoria` 1, `conducta.aptitud/vocacion` 0, `conducta.vocacionTope` 0,9, `social.*`
+ * `agua.memoria` 1, `conducta.aptitud` 0, `social.*`
  * (disputas 0,65/×1/2/0,5/180, rareza 0, confianza
  * 0,35, distancia 0,2, `maxComunidades` 8, `vinculoConvivencia` 0, `radioConvivencia` 0).
+ * La poda de leyes refutadas (ola 1, 2026-09-27) retiró `poblacion.natalidadLocal`,
+ * `poblacion.radioProvision`, `conducta.vocacion` y `conducta.vocacionTope`: una instantánea
+ * antigua que las nombre se rechaza como parámetro desconocido (`Invalid snapshot parameters`);
+ * los mundos por defecto nunca las escribieron, así que su conducta no cambia.
  *
  * Única excepción deliberada: `gobernador.politica` vale `techo` también aquí. El gobernador no es
  * una ley del mundo (no entra en `stepWorld`: decide por el p95 de reloj del servidor, ruling R17) y
@@ -273,8 +270,6 @@ export const PARAM_RANGES: Record<string, [number, number]> = {
   // así que mover uno mueve también cómo se ordenan las parejas candidatas.
   'poblacion.radioPareja': [1, 32],
   'poblacion.radioLugar': [1, 64],
-  'poblacion.natalidadLocal': [0, 4],
-  'poblacion.radioProvision': [4, 32],
   'poblacion.cortejo': [0, 5],
   'poblacion.radioCortejo': [1, 128],
   'recursos.capacidadBosque': [0, 10],
@@ -303,8 +298,6 @@ export const PARAM_RANGES: Record<string, [number, number]> = {
   // ni de los actos de vínculo). Rasgo menos media de los cinco cae en [−0,8, 0,8], así que con
   // el máximo 2 la ley mueve un oficio a lo sumo ±1,6, la escala de `habituacion`.
   'conducta.aptitud': [0, 2],
-  'conducta.vocacion': [0, 1],
-  'conducta.vocacionTope': [0, 2],
   'social.disputaNecesidad': [0.1, 1],
   'social.disputaEscasez': [0.1, 20],
   'social.disputaRadio': [1, 8],

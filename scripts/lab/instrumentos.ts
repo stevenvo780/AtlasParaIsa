@@ -26,11 +26,9 @@
 import type { Action } from '../../src/shared/types.js';
 import type { DatabaseSync } from 'node:sqlite';
 import type { Capability, TechnologyExecution } from '../../src/shared/technology.js';
-import { OFICIOS_DE_LINAJE, TICKS_PER_DAY, type Person, type World } from '../../src/world/index.js';
+import { TICKS_PER_DAY, type Person, type World } from '../../src/world/index.js';
 import { indiceDiversidad } from '../../src/world/diversidad.js';
-import { reproductiveReadiness } from '../../src/world/family.js';
-import { demandaTotal, hacinamientoLocal, reposicionTerritorioOcupado, setObservadorNatalidad } from '../../src/world/natalidad.js';
-import { paramsOf } from '../../src/world/params.js';
+
 
 /** Las 18 acciones de `Action`, en el orden de `ACTIONS` de src/world/diversidad.ts (no exportado):
  * fija el orden de las claves de las fracciones en el JSON. */
@@ -211,16 +209,11 @@ function fracciones(conteo: ReadonlyMap<string, number>, total: number): Record<
   return salida;
 }
 
-/** Campos nuevos de `dia-NNN.json` (ver README del laboratorio, «Instrumentos de medida»). */
+/** Campos nuevos de `dia-NNN.json` (ver README del laboratorio, «Instrumentos de medida»).
+ * La poda de leyes refutadas (ola 1, 2026-09-27) retiró las claves `natalidadLocal`,
+ * `vocacionVarianza`, `vocacionEntropiaArgmax` y `vocacionCoincidencia`; los JSON antiguos
+ * las conservan y los evaluadores congelados las siguen leyendo de esos ficheros. */
 export interface MetricasInstrumentos {
-  /** NAT-L se emite en CTRL y NAT: percentiles por rango más cercano inferior, con infinitos
-   * ordenados al final y representados como null sólo en el percentil que los selecciona. */
-  natalidadLocal: { nacimientosDia: number; xNacimientos: { p10: number | null; p50: number | null; p90: number | null };
-    xFertiles: { p10: number | null; p50: number | null; p90: number | null };
-    /** Cada rechazo de `a` por intervaloCumplido y cada `b` que pasó match pero falló
-     * intervaloCumplido durante reproduce(); se cuentan de nuevo si se reevalúan. CTRL = 0. */
-    bloqueadasPorLey: number; kOcupado: { agua: number; comida: number }; nSobreKOcupado: number | null;
-    limitante: { agua: number; comida: number } };
   diversidadConductaTiempo: number;
   diversidadConductaTiempoComponentes: { conducta: number; oficios: number };
   /** El mismo índice con los ticks por acción SIN `rest` (conducta activa). */
@@ -239,9 +232,6 @@ export interface MetricasInstrumentos {
   repartoTiempoPorAccion: { personaTicks: number; fracciones: Record<string, number> };
   repartoActividadPorAccion: { incrementos: number; fracciones: Record<string, number> };
   foodShared: number;
-  vocacionVarianza: number | null;
-  vocacionEntropiaArgmax: number | null;
-  vocacionCoincidencia: number | null;
   diversidadConductaVentanaGen1: number | null;
   /** `approach` cuyo motivo empieza con el texto de `settlementOpportunity`. */
   approachHogar: number | null;
@@ -286,22 +276,11 @@ export class InstrumentosConducta {
   /** Raíz estable aun cuando el registro del antepasado salga de `world.legacy`. */
   private readonly raizPorId = new Map<string, string>();
   private contadorAntes = 0;
-  private nacimientosDia = 0;
-  private readonly xNacimientos: number[] = [];
-  private bloqueadasPorLey = 0;
-  private limitante = { agua: 0, comida: 0 };
   /** Coste de los instrumentos en ms de reloj (se informa por consola, nunca en el JSON). */
   costeMs = 0;
   pasos = 0;
 
-  /** Mundo donde se registró el observador de natalidad (su contexto pasa a los clones del paso). */
-  private readonly mundoObservado: World;
-
   constructor(world: World, db?: DatabaseSync) {
-    this.mundoObservado = world;
-    setObservadorNatalidad(world, { nacimiento: (x, limitante) => {
-      this.nacimientosDia++; this.xNacimientos.push(x); this.limitante[limitante]++;
-    }, bloqueo: () => { this.bloqueadasPorLey++; } });
     this.fotografiarActividad(world); this.vivosInicioDia = mortalesVivos(world);
     const identidades = new Map([...world.legacy, ...world.retiredLegacy, ...world.people]
       .filter(person => person.role === 'neighbor').map(person => [person.id, person] as const));
@@ -340,8 +319,8 @@ export class InstrumentosConducta {
     this.contadorAntes = world.eventCounter;
   }
 
-  /** Retira el observador de natalidad del mundo en que se registró (los clones ya tomados lo conservan). */
-  cerrar(): void { setObservadorNatalidad(this.mundoObservado, null); }
+  /** Sin observadores que retirar: los instrumentos solo leen (la poda ola 1 retiró el observador NAT-L). */
+  cerrar(): void { /* sin estado externo */ }
 
   /** Ticks por acción observados de una persona viva (copia; para tests y diagnóstico). */
   ticksDe(id: string): Record<string, number> | undefined {
@@ -413,25 +392,6 @@ export class InstrumentosConducta {
     const ventanaGen1 = gen1.length >= 2
       ? indiceDiversidadDe(world, gen1, person => sinDescanso(this.ticksDiaPorPersona.get(person.id) ?? vacio))
       : null;
-    const conVocacion = world.people.filter(person => person.role === 'neighbor' && person.vocacion !== undefined);
-    const argmax = (person: Person): string => OFICIOS_DE_LINAJE.reduce((mejor, oficio) =>
-      (person.vocacion?.[oficio] ?? 0) > (person.vocacion?.[mejor] ?? 0) ? oficio : mejor, OFICIOS_DE_LINAJE[0]!);
-    let vocacionVarianza: number | null = null;
-    if (conVocacion.length >= 2) vocacionVarianza = OFICIOS_DE_LINAJE.reduce((total, oficio) => {
-      const media = conVocacion.reduce((suma, person) => suma + (person.vocacion?.[oficio] ?? 0), 0) / conVocacion.length;
-      return total + conVocacion.reduce((suma, person) => suma + ((person.vocacion?.[oficio] ?? 0) - media) ** 2, 0) / conVocacion.length;
-    }, 0) / OFICIOS_DE_LINAJE.length;
-    const cuentas = new Map<string, number>();
-    for (const person of conVocacion) cuentas.set(argmax(person), (cuentas.get(argmax(person)) ?? 0) + 1);
-    const vocacionEntropiaArgmax = conVocacion.length ? -[...cuentas.values()].reduce((suma, n) => {
-      const p = n / conVocacion.length; return suma + p * Math.log(p);
-    }, 0) / Math.log(OFICIOS_DE_LINAJE.length) : null;
-    const enVentanaConVocacion = enVentana.filter(person => person.vocacion !== undefined);
-    const vocacionCoincidencia = enVentanaConVocacion.length ? enVentanaConVocacion.filter(person => {
-      const ticks = this.ticksDiaPorPersona.get(person.id) ?? vacio;
-      const dominante = OFICIOS_DE_LINAJE.reduce((mejor, oficio) => (ticks[oficio] ?? 0) > (ticks[mejor] ?? 0) ? oficio : mejor, OFICIOS_DE_LINAJE[0]!);
-      return (ticks[dominante] ?? 0) > 0 && dominante === argmax(person);
-    }).length / enVentanaConVocacion.length : null;
     const adultos = world.people.filter(person => person.role === 'neighbor' && world.tick - person.bornAt >= 5 * TICKS_PER_DAY);
     const mediaAdultos = (material: 'wood' | 'stone'): number | null => adultos.length
       ? adultos.reduce((suma, person) => suma + person.materials[material], 0) / adultos.length : null;
@@ -447,34 +407,6 @@ export class InstrumentosConducta {
     const linajePerfiles = enVentana.map(person => ({ ticks: this.ticksDiaPorPersona.get(person.id) ?? vacio, grupo: this.raizPorId.get(person.id) ?? null }));
     const dia = Math.ceil(world.tick / TICKS_PER_DAY);
     const ticksActivos = this.personaTicksDia - (this.tiempoDia.get('rest') ?? 0);
-    const pop = paramsOf(world).poblacion;
-    const reposicion = reposicionTerritorioOcupado(world, world.people.filter(p => p.role === 'neighbor'), pop.radioProvision);
-    const demanda = demandaTotal(world, world.people);
-    const agua = demanda.agua === 0 ? 0 : reposicion.agua === 0 ? Infinity : demanda.agua / reposicion.agua;
-    const comida = demanda.comida === 0 ? 0 : reposicion.comida === 0 ? Infinity : demanda.comida / reposicion.comida;
-    const percentiles = (values: readonly number[]) => {
-      const xs = [...values].sort((a, b) => a - b);
-      const at = (p: number): number | null => {
-        const x = xs[Math.floor((xs.length - 1) * p)];
-        return x !== undefined && Number.isFinite(x) ? x : null;
-      };
-      return { p10: at(0.1), p50: at(0.5), p90: at(0.9) };
-    };
-    const xPorPosicion = new Map<string, number>();
-    const xFertiles: number[] = [];
-    for (const person of world.people) if (person.role === 'neighbor' && person.inventory >= 0.1 && reproductiveReadiness(world, person)) {
-      const key = `${Math.round(person.x)},${Math.round(person.y)}`;
-      let x = xPorPosicion.get(key);
-      if (x === undefined) { x = hacinamientoLocal(world, { x: Math.round(person.x), y: Math.round(person.y) }, pop.radioProvision, 1); xPorPosicion.set(key, x); }
-      xFertiles.push(x);
-    }
-    const natalidadLocal: MetricasInstrumentos['natalidadLocal'] = {
-      nacimientosDia: this.nacimientosDia, xNacimientos: percentiles(this.xNacimientos), xFertiles: percentiles(xFertiles),
-      bloqueadasPorLey: this.bloqueadasPorLey, kOcupado: reposicion,
-      nSobreKOcupado: Number.isFinite(Math.max(agua, comida)) ? Math.max(agua, comida) : null,
-      limitante: { agua: this.nacimientosDia ? this.limitante.agua / this.nacimientosDia : 0,
-        comida: this.nacimientosDia ? this.limitante.comida / this.nacimientosDia : 0 },
-    };
     const incrementos = new Map<string, number>();
     let totalIncrementos = 0;
     for (const person of world.people) {
@@ -486,7 +418,6 @@ export class InstrumentosConducta {
       }
     }
     const metricas: MetricasInstrumentos = {
-      natalidadLocal,
       diversidadConductaTiempo: tiempo.total,
       diversidadConductaTiempoComponentes: { conducta: tiempo.conducta, oficios: tiempo.oficios },
       diversidadConductaActiva: activa.total,
@@ -498,9 +429,6 @@ export class InstrumentosConducta {
       repartoTiempoPorAccion: { personaTicks: this.personaTicksDia, fracciones: fracciones(this.tiempoDia, this.personaTicksDia) },
       repartoActividadPorAccion: { incrementos: totalIncrementos, fracciones: fracciones(incrementos, totalIncrementos) },
       foodShared: this.comidaCompartida,
-      vocacionVarianza,
-      vocacionEntropiaArgmax,
-      vocacionCoincidencia,
       diversidadConductaVentanaGen1: ventanaGen1?.total ?? null,
       approachHogar: ticksActivos ? this.approachHogarTicks / ticksActivos : null,
       maderaMediaAdultos: mediaAdultos('wood'),
@@ -520,8 +448,6 @@ export class InstrumentosConducta {
     const vivos = new Set(world.people.map(person => person.id));
     for (const id of [...this.ticksPorPersona.keys()]) if (!vivos.has(id)) this.ticksPorPersona.delete(id);
     this.tiempoDia.clear(); this.personaTicksDia = 0; this.approachHogarTicks = 0;
-    this.nacimientosDia = 0; this.xNacimientos.length = 0; this.bloqueadasPorLey = 0;
-    this.limitante = { agua: 0, comida: 0 };
     this.cambiosHogar = { adopta: 0, pierde: 0 };
     this.ticksDiaPorPersona.clear(); this.vivosInicioDia = mortalesVivos(world);
     this.fotografiarActividad(world);

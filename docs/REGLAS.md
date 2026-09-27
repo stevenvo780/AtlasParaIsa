@@ -1,5 +1,18 @@
 # Reglas del prototipo
 
+## Poda de leyes refutadas, ola 1 (2026-09-27, rama `sprint/poda-leyes-20260927`)
+
+Se retiran del código NAT-L (`poblacion.natalidadLocal`, `poblacion.radioProvision`;
+refutada en el cribado: [preregistro](preregistros/2026-09-23-natalidad-local.md),
+[EVIDENCIA](EVIDENCIA.md) del 24-09, [revisión](REVISION-2026-09-24.md)) y la vocación
+de linaje (`conducta.vocacion`, `conducta.vocacionTope`; DETENER por seguridad:
+[EVIDENCIA](EVIDENCIA.md) del 24-09): parámetros, módulo `src/world/natalidad.ts`,
+ramas en `reproduce()`/`choose`, campo `Person.vocacion`, entradas del halo,
+observador e instrumentos de laboratorio y pruebas propias. Con los parámetros por
+defecto la dinámica es bit a bit la misma (puerta de digestos en 8 semillas).
+El código queda en `main`/`0a6476e` y en el commit previo de esta rama. No se tocan
+HOG (`social.hogarTrabajo`, decisión pendiente), `agua.memoria=1` ni las reglas 10/11.
+
 ## Reglas 11 (2026-09-23)
 
 Los mundos **nuevos** añaden al paquete de reglas 10 los cuatro defaults del brazo B de conflicto

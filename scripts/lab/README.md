@@ -536,7 +536,12 @@ tipificados al día 4 y C4 (corte provisional, día 4, ventana 3) pasa de 2/4 a 
 - Con `--gobernador servidor` el tiempo del observador se descuenta del `stepMs` que decide el
   gobernador; ese modo depende del reloj y no es bit a bit reproducible con ni sin instrumentos.
 
-### 3. Natalidad local (`natalidadLocal`) y fauna (`faunaTotal`), campaña NAT-L 2026-09-23
+### 3. Natalidad local (`natalidadLocal`) y fauna (`faunaTotal`), campaña NAT-L 2026-09-23 (RETIRADA en la poda ola 1, 2026-09-27)
+
+> La ley quedó refutada en el cribado y su código e instrumentos se retiraron de `main`
+> (rama `sprint/poda-leyes-20260927`). Lo que sigue documenta los JSON antiguos, que los
+> evaluadores congelados siguen leyendo de esos ficheros; las réplicas nuevas ya no emiten
+> la clave `natalidadLocal`.
 
 Definiciones congeladas por `docs/preregistros/2026-09-23-natalidad-local.md` (Revisión 1); las lee
 `decision-natalidad.mts`. Se escriben en CTRL y en NAT: con `poblacion.natalidadLocal` = 0 los valores

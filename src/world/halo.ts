@@ -54,9 +54,9 @@ export type Fase = 'activacion' | 'gestos' | 'ecologia' | 'fauna' | 'faunaSerial
  * globales—: su alcance se inventaría y la prueba lo fija, pero el halo no lo acota. */
 export const FASES_CON_HALO: readonly Fase[] = ['decision', 'ecologia', 'fauna'];
 
-export type ClaveDeRadio = 'poblacion.radioPareja' | 'poblacion.radioLugar' | 'poblacion.radioCortejo' | 'poblacion.radioProvision' | 'social.disputaRadio';
+export type ClaveDeRadio = 'poblacion.radioPareja' | 'poblacion.radioLugar' | 'poblacion.radioCortejo' | 'social.disputaRadio';
 /** Radio que dicta una ley parametrizada; `activa` es la clave que la apaga cuando vale 0. */
-export interface RadioParametrizado { readonly param: ClaveDeRadio; readonly activa?: 'poblacion.cortejo' | 'poblacion.natalidadLocal' }
+export interface RadioParametrizado { readonly param: ClaveDeRadio; readonly activa?: 'poblacion.cortejo' }
 export type Radio = number | RadioParametrizado;
 
 /** Dónde vive una entrada: fichero de `src/world`, declaración de primer nivel que la contiene y fragmentos
@@ -372,20 +372,6 @@ export const ALCANCES_SERIALES: readonly AlcanceSerial[] = [
   s('reproduccion.pareja', 'reproduccion', 'personas', 'actor', { param: 'poblacion.radioPareja' }, 'index.ts', 'reproduce',
     ["const b = chooseReproductivePartner(world, a, vecinos(world, a, pop.radioPareja + 1, p => {", 'distance(a, b) <= pop.radioPareja'],
     { nota: 'Pareja (≤ radioPareja) y lugar (≤ radioLugar) se miden los dos desde `a`: no se componen.' }),
-  s('reproduccion.provisionTeselas', 'reproduccion', 'teselas', 'reproduccion.lugar', { param: 'poblacion.radioProvision', activa: 'poblacion.natalidadLocal' }, 'natalidad.ts', 'reposicionLocal',
-    ['const t = teselaProvision(world, cx + dx, cy + dy);', 'if (dx * dx + dy * dy > radio * radio) continue;'],
-    { nota: 'Disco alrededor del lugar, a ≤ radioLugar del progenitor. Teselas inactivas: estado de generación, función pura de semilla, cuencas y coordenada; no se lee el archivo de chunks.' }),
-  s('reproduccion.provisionTeselaActiva', 'reproduccion', 'teselas', 'reproduccion.provisionTeselas', 0, 'natalidad.ts', 'teselaProvision',
-    ['const active = tileAt(world, { x, y });'],
-    { nota: 'Si no está activa, la tesela se genera de forma pura por semilla, cuencas y coordenada.' }),
-  s('reproduccion.provisionEstructuras', 'reproduccion', 'estructuras', 'reproduccion.lugar', { param: 'poblacion.radioProvision', activa: 'poblacion.natalidadLocal' }, 'natalidad.ts', 'reposicionLocal',
-    ['filtrarCerca(world.structures, centro, radio + 1, s => (s.x - centro.x) ** 2 + (s.y - centro.y) ** 2 <= radio * radio']),
-  s('reproduccion.provisionTecho', 'reproduccion', 'teselas', 'reproduccion.lugar', { param: 'poblacion.radioProvision', activa: 'poblacion.natalidadLocal' }, 'natalidad.ts', 'reposicionLocal',
-    ["tileAt(world, s)?.terrain === 'shelter'"]),
-  s('reproduccion.provisionPersonas', 'reproduccion', 'personas', 'reproduccion.lugar', { param: 'poblacion.radioProvision', activa: 'poblacion.natalidadLocal' }, 'natalidad.ts', 'presionLocal',
-    ["vecinos(world, centro, radio + 1,", "'natalidadLocal'))"]),
-  s('reproduccion.demandaTesela', 'reproduccion', 'teselas', 'reproduccion.lugar', { param: 'poblacion.radioProvision', activa: 'poblacion.natalidadLocal' }, 'natalidad.ts', 'demandaDiaria',
-    ['tileAt(world, person)!'], { nota: 'La fisiología se evalúa en la tesela de cada consumidor del disco local.' }),
 ];
 
 /** Lecturas que no dependen de dónde está nadie: colecciones acotadas que cada región recibe enteras y
@@ -581,7 +567,6 @@ export const ESCRITURAS: readonly Escritura[] = [
 
 /** Código de `src/world` que no forma parte del paso: validación, proyección a la vista, creación y migración. */
 export const FUERA_DEL_PASO: readonly Declaracion[] = [
-  { fichero: 'natalidad.ts', funcion: 'reposicionTerritorioOcupado', motivo: 'Métrica de laboratorio: se calcula al cierre del día, fuera de stepWorld.' },
   ...['createWorld', 'migrateWorldState', 'upgradeV3', 'upgradeV5'].map(funcion => ({ fichero: 'index.ts', funcion, motivo: 'Creación o migración de un mundo.' })),
   ...['projectWorld', 'personDetail'].map(funcion => ({ fichero: 'index.ts', funcion, motivo: 'Proyección a la vista.' })),
   { fichero: 'index.ts', funcion: 'assertCommon', motivo: 'Validación.' },

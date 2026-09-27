@@ -55,6 +55,18 @@ test('parseParams rechaza clave desconocida', () => {
   assert.throws(() => parseParams({ 'no.existe': '1' }), /desconocid/i);
 });
 
+test('poda ola 1 (2026-09-27): las leyes refutadas ya no se declaran ni se aceptan', () => {
+  for (const clave of ['poblacion.natalidadLocal', 'poblacion.radioProvision', 'conducta.vocacion', 'conducta.vocacionTope']) {
+    assert.throws(() => parseParams(`${clave}=1`), /desconocid/i, clave);
+    assert.ok(!(clave in PARAM_RANGES), clave);
+    assert.ok(!(clave in PARAM_DESCRIPTORS), clave);
+  }
+  const poblacion = DEFAULT_PARAMS.poblacion as unknown as Record<string, unknown>;
+  const conducta = DEFAULT_PARAMS.conducta as unknown as Record<string, unknown>;
+  assert.ok(!('natalidadLocal' in poblacion || 'radioProvision' in poblacion));
+  assert.ok(!('vocacion' in conducta || 'vocacionTope' in conducta));
+});
+
 test('parseParams rechaza valor fuera de rango', () => {
   const [, max] = PARAM_RANGES['cuerpo.senescenciaInicioFraccion']!;
   assert.throws(() => parseParams(`cuerpo.senescenciaInicioFraccion=${max + 1}`), /rango/i);

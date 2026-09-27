@@ -142,7 +142,8 @@ def check_day(day: dict, number: int, seed: int, schema: set[str],
         value = day.get(key)
         if not bounded(value):
             errors.append(f'{name}: {key} inválido')
-    if not bounded(day.get('distanciaAgua'), 0, math.inf):
+    distancia_agua = day.get('distanciaAgua')
+    if not (bounded(distancia_agua, 0, math.inf) or bounded(distancia_agua, -1, -1)):
         errors.append(f'{name}: distanciaAgua inválida')
     for key in ('diversidadConductaVentana', 'diversidadConductaVentanaGen1'):
         value = day.get(key)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Audita estructura y procedencia de CTRLV4e en solo lectura.
+"""Audita estructura y procedencia de CTRLV4f en solo lectura.
 
 Las huellas del TSV son testigos del lanzamiento, no una prueba independiente
 de identidad de los días: este brazo no tiene solapes archivados anteriores.
@@ -24,9 +24,9 @@ assert spec and spec.loader
 b = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(b)
 
-DEFAULT_ROOT = Path('/datos/tmp-atlas-lab/datos-lab/ctrlv4e')
-SEEDS = range(6057, 6061)
-TSV = 'codex-ctrlv4e-20260927.tsv'
+DEFAULT_ROOT = Path('/datos/tmp-atlas-lab/datos-lab/ctrlv4f')
+SEEDS = range(6061, 6066)
+TSV = 'codex-ctrlv4f-20260927.tsv'
 OUTPUT_ROOT = DEFAULT_ROOT
 TMPDIR = Path('/datos/tmp-atlas-lab')
 
@@ -127,10 +127,13 @@ def check_events(root: Path, days: dict[int, dict[int, dict]],
         if cols[2] == 'LANZADA':
             launches.setdefault(seed, []).append(cols[3])
             launch_times.setdefault(seed, when)
+            # La primera réplica registró además la restauración/verificación
+            # de nice 19 tras el ajuste transitorio de ananicy.
+            suffix = r'(?: verificada_tras_ananicy=1)?' if seed == 6061 else ''
             pattern = (rf'pid=([1-9]\d*) pgid=\1 sha={b.SHA} '
                        rf'params={re.escape(b.PARAMS_TEXT)} nice=19 afinidad=6-31 '
                        rf'TMPDIR={re.escape(str(TMPDIR))} '
-                       rf'salida={re.escape(str(OUTPUT_ROOT / f"CTRLV4-{seed}"))}')
+                       rf'salida={re.escape(str(OUTPUT_ROOT / f"CTRLV4-{seed}"))}{suffix}')
             if not re.fullmatch(pattern, cols[3]):
                 errors.append(f'TSV línea {lineno}: lanzamiento incompatible')
             continue

@@ -1,5 +1,5 @@
 /** Calibración descriptiva de C8 en CTRLV4. Solo lee datos; nunca decide una lectura v4.
- * Uso: npx tsx scripts/analysis/calibracion-v4-ctrlv4.mts [--muestra] [--panel 40|48|56|60]
+ * Uso: npx tsx scripts/analysis/calibracion-v4-ctrlv4.mts [--muestra] [--panel 40|48|56|60|65]
  * Sin --muestra exige todos los días 1..60 y escribe JSON y Markdown en balance/.
  */
 import { readFileSync, existsSync, lstatSync, readdirSync, mkdirSync, writeFileSync } from 'node:fs';
@@ -15,16 +15,17 @@ const RAIZ_B = '/datos/tmp-atlas-lab/datos-lab/ctrlv4b';
 const RAIZ_C = '/datos/tmp-atlas-lab/datos-lab/ctrlv4c-portatil';
 const RAIZ_D = '/datos/tmp-atlas-lab/datos-lab/ctrlv4d-portatil';
 const RAIZ_E = '/datos/tmp-atlas-lab/datos-lab/ctrlv4e';
+const RAIZ_F = '/datos/tmp-atlas-lab/datos-lab/ctrlv4f';
 const SALIDA = '/datos/tmp-atlas-lab/balance';
 const SHA_CTRLV4 = '667454d5e0232885d78c37775d6a5619f516872d';
 const TICKS_POR_DIA = 2400;
 const argumentos = process.argv.slice(2);
 const MUESTRA = argumentos.includes('--muestra');
 const PANEL = argumentos.includes('--panel') ? Number(argumentos[argumentos.indexOf('--panel') + 1]) : 20;
-const esperados = PANEL === 40 || PANEL === 48 || PANEL === 56 || PANEL === 60 ? ['--panel', String(PANEL), ...(MUESTRA ? ['--muestra'] : [])] : MUESTRA ? ['--muestra'] : [];
+const esperados = PANEL === 40 || PANEL === 48 || PANEL === 56 || PANEL === 60 || PANEL === 65 ? ['--panel', String(PANEL), ...(MUESTRA ? ['--muestra'] : [])] : MUESTRA ? ['--muestra'] : [];
 if (argumentos.length !== esperados.length || argumentos.filter(x => x === '--panel').length > 1
   || argumentos.filter(x => x === '--muestra').length > 1
-  || argumentos.some(x => !esperados.includes(x)) || ![20, 40, 48, 56, 60].includes(PANEL)) throw new Error('Uso: script [--muestra] [--panel 40|48|56|60]');
+  || argumentos.some(x => !esperados.includes(x)) || ![20, 40, 48, 56, 60, 65].includes(PANEL)) throw new Error('Uso: script [--muestra] [--panel 40|48|56|60|65]');
 type Dia = Record<string, unknown>;
 type Estado = 'cumple' | 'falla' | 'desconocido';
 type Medida = { estado: Estado; base: number; campo: string; puntos: number; media: number | null;
@@ -157,7 +158,8 @@ const incompletas: { semilla: number; diasFaltantes: number[]; problemas: string
 const datos = new Map<number, Map<number, Dia>>();
 if (PANEL >= 48) for (const [etiqueta, raiz, primera, cantidad] of [
   ['T1c', RAIZ_C, 6041, 8], ...(PANEL >= 56 ? [['T1d', RAIZ_D, 6049, 8]] : []),
-  ...(PANEL === 60 ? [['T1e', RAIZ_E, 6057, 4]] : []),
+  ...(PANEL >= 60 ? [['T1e', RAIZ_E, 6057, 4]] : []),
+  ...(PANEL === 65 ? [['T1f', RAIZ_F, 6061, 5]] : []),
 ] as [string, string, number, number][]) {
   if (!existsSync(raiz) || !lstatSync(raiz).isDirectory())
     throw new Error(`Panel ${PANEL} incompleto: falta directorio real ${etiqueta} ${raiz}; no se escriben salidas`);
@@ -170,7 +172,7 @@ if (PANEL >= 48) for (const [etiqueta, raiz, primera, cantidad] of [
 }
 for (let s = 6001; s < 6001 + PANEL; s++) {
   const dias = new Map<number, Dia>(), faltantes: number[] = [], problemas: string[] = [];
-  const raiz = s <= 6020 ? RAIZ : s <= 6040 ? RAIZ_B : s <= 6048 ? RAIZ_C : s <= 6056 ? RAIZ_D : RAIZ_E;
+  const raiz = s <= 6020 ? RAIZ : s <= 6040 ? RAIZ_B : s <= 6048 ? RAIZ_C : s <= 6056 ? RAIZ_D : s <= 6060 ? RAIZ_E : RAIZ_F;
   if (PANEL >= 40) {
     const directorio = join(raiz, `CTRLV4-${s}`);
     if (!existsSync(directorio) || !lstatSync(directorio).isDirectory()) {
@@ -225,16 +227,23 @@ if (oficialD) {
     replicas.filter(x => x.brazo === 'CTRLV4' && x.semilla === s && x.nombre === `CTRLV4-${s}`).length !== 1))
     throw new Error('Membresía CTRLV4 T1d inválida: se exigen exactamente 6049..6056, sin extras ni duplicados');
 }
-const oficialE = PANEL === 60 ? evaluarConjunto(RAIZ_E, { dia: 60, diversidadCampo: 'diversidadConductaVentana' }) : null;
+const oficialE = PANEL >= 60 ? evaluarConjunto(RAIZ_E, { dia: 60, diversidadCampo: 'diversidadConductaVentana' }) : null;
 if (oficialE) {
   const replicas = oficialE.replicas;
   if (replicas.length !== 4 || Array.from({ length: 4 }, (_, i) => 6057 + i).some(s =>
     replicas.filter(x => x.brazo === 'CTRLV4' && x.semilla === s && x.nombre === `CTRLV4-${s}`).length !== 1))
     throw new Error('Membresía CTRLV4 T1e inválida: se exigen exactamente 6057..6060, sin extras ni duplicados');
 }
+const oficialF = PANEL === 65 ? evaluarConjunto(RAIZ_F, { dia: 60, diversidadCampo: 'diversidadConductaVentana' }) : null;
+if (oficialF) {
+  const replicas = oficialF.replicas;
+  if (replicas.length !== 5 || Array.from({ length: 5 }, (_, i) => 6061 + i).some(s =>
+    replicas.filter(x => x.brazo === 'CTRLV4' && x.semilla === s && x.nombre === `CTRLV4-${s}`).length !== 1))
+    throw new Error('Membresía CTRLV4 T1f inválida: se exigen exactamente 6061..6065, sin extras ni duplicados');
+}
 const porSemilla = new Map((oficialB ? [...oficial.replicas.filter(x => x.brazo === 'CTRLV4'),
   ...oficialB.replicas.filter(x => x.brazo === 'CTRLV4'), ...(oficialC?.replicas ?? []),
-  ...(oficialD?.replicas ?? []), ...(oficialE?.replicas ?? [])] : oficial.replicas).map(x => [x.semilla, x]));
+  ...(oficialD?.replicas ?? []), ...(oficialE?.replicas ?? []), ...(oficialF?.replicas ?? [])] : oficial.replicas).map(x => [x.semilla, x]));
 const filas: Record<string, unknown>[] = [];
 for (const [semilla, dias] of datos) {
   if (incompletas.some(x => x.semilla === semilla)) continue;
@@ -277,10 +286,13 @@ if (PANEL === 56 && (filas.length !== 56 || filas.some((f, i) => f.semilla !== 6
   throw new Error('El panel 56 debe contener exactamente las semillas 6001..6056, una vez cada una');
 if (PANEL === 60 && (filas.length !== 60 || filas.some((f, i) => f.semilla !== 6001 + i)))
   throw new Error('El panel 60 debe contener exactamente las semillas 6001..6060, una vez cada una');
+if (PANEL === 65 && (filas.length !== 65 || filas.some((f, i) => f.semilla !== 6001 + i)))
+  throw new Error('El panel 65 debe contener exactamente las semillas 6001..6065, una vez cada una');
 if (PANEL >= 48) for (const [etiqueta, archivo, raiz] of [
   ['T1c', 'verificar-ctrlv4c.py', RAIZ_C],
   ...(PANEL >= 56 ? [['T1d', 'verificar-ctrlv4d.py', RAIZ_D]] : []),
-  ...(PANEL === 60 ? [['T1e', 'verificar-ctrlv4e.py', RAIZ_E]] : []),
+  ...(PANEL >= 60 ? [['T1e', 'verificar-ctrlv4e.py', RAIZ_E]] : []),
+  ...(PANEL === 65 ? [['T1f', 'verificar-ctrlv4f.py', RAIZ_F]] : []),
 ] as [string, string, string][]) {
   const carpetaScripts = fileURLToPath(new URL('.', import.meta.url));
   const verificador = fileURLToPath(new URL(`./${archivo}`, import.meta.url));
@@ -313,7 +325,8 @@ function resumir(subconjunto: Record<string, unknown>[], totalPanel?: number) {
 const resumen = resumir(filas, PANEL), resumenVivos = resumir(filas.filter(x => !x.extinta));
 const resumenAdicionales = PANEL >= 48 ? resumir(filas.filter(x => Number(x.semilla) >= 6041 && Number(x.semilla) <= 6048), 8) : undefined;
 const resumenT1d = PANEL >= 56 ? resumir(filas.filter(x => Number(x.semilla) >= 6049 && Number(x.semilla) <= 6056), 8) : undefined;
-const resumenT1e = PANEL === 60 ? resumir(filas.filter(x => Number(x.semilla) >= 6057), 4) : undefined;
+const resumenT1e = PANEL >= 60 ? resumir(filas.filter(x => Number(x.semilla) >= 6057 && Number(x.semilla) <= 6060), 4) : undefined;
+const resumenT1f = PANEL === 65 ? resumir(filas.filter(x => Number(x.semilla) >= 6061), 5) : undefined;
 const resultado = { tipo: 'calibracion_descriptiva_control', panel: `CTRLV4 6001..${6000 + PANEL}`, corte: 60,
   estado: incompletas.length ? 'muestra_provisional' : 'panel_completo', incompletas,
   metodo: { v3: 'evaluarConjunto congelado, campo ventana', A: 'mismo evaluador, base primer día sin fundadores mortales',
@@ -323,11 +336,12 @@ const resultado = { tipo: 'calibracion_descriptiva_control', panel: `CTRLV4 6001
     faltantes: 'desconocido; aprobado exige serie completa, cobertura >=80% y extremos completos; el panel exige 60 JSON con ticks válidos y manifiesto final de SHA, seed, días y params correctos',
     intervalos: `Wilson bilateral 95% entre clasificados; fracción de completas y fracción del panel de ${PANEL} separadas; esta última cuenta incompletas y desconocidos como 0 o 1` },
   resumen, resumenVivos, ...(resumenAdicionales ? { resumenAdicionales } : {}),
-  ...(resumenT1d ? { resumenT1d } : {}), ...(resumenT1e ? { resumenT1e } : {}), semillas: filas };
+  ...(resumenT1d ? { resumenT1d } : {}), ...(resumenT1e ? { resumenT1e } : {}),
+  ...(resumenT1f ? { resumenT1f } : {}), semillas: filas };
 if (MUESTRA) console.log(JSON.stringify(resultado, null, 2));
 else {
   mkdirSync(SALIDA, { recursive: true });
-  const nombreSalida = PANEL === 60 ? 'calibracion-v4-ctrlv4-60' : PANEL === 56 ? 'calibracion-v4-ctrlv4-56' : PANEL === 48 ? 'calibracion-v4-ctrlv4-48' : PANEL === 40 ? 'calibracion-v4-ctrlv4-40' : 'calibracion-v4-ctrlv4';
+  const nombreSalida = PANEL === 65 ? 'calibracion-v4-ctrlv4-65' : PANEL === 60 ? 'calibracion-v4-ctrlv4-60' : PANEL === 56 ? 'calibracion-v4-ctrlv4-56' : PANEL === 48 ? 'calibracion-v4-ctrlv4-48' : PANEL === 40 ? 'calibracion-v4-ctrlv4-40' : 'calibracion-v4-ctrlv4';
   writeFileSync(resolve(SALIDA, `${nombreSalida}.json`), JSON.stringify(resultado, null, 2) + '\n');
   const lineas = ['# Calibración descriptiva CTRLV4 a 60 días', '',
     `Solo controles, sin elección de lectura ni preregistro. Wilson 95 % se calcula entre resultados conocidos. La fracción identificada del panel usa siempre ${PANEL} semillas: una incompleta o desconocida puede fallar o aprobar.`, '',
@@ -357,6 +371,13 @@ else {
       '| Lectura | Aprueban / 4 | n conocido | Desconocido completo | Wilson 95 % conocidos |', '|---|---:|---:|---:|---:|');
     for (const [k, v] of Object.entries(resumenT1e))
       lineas.push(`| ${k} | ${v.cumple}/4 | ${v.cumple + v.falla} | ${v.desconocido} | ${v.intervaloWilson95Conocidos?.map(n => n.toFixed(3)).join('–') ?? '—'} |`);
+  }
+  if (resumenT1f) {
+    lineas.push('', '## Sensibilidad suplementaria T1f, semillas 6061–6065', '',
+      'Brazo exploratorio adicional: cinco controles completos. Se informa por separado; no selecciona lectura v4 ni constituye preregistro.', '',
+      '| Lectura | Aprueban / 5 | n conocido | Desconocido completo | Wilson 95 % conocidos |', '|---|---:|---:|---:|---:|');
+    for (const [k, v] of Object.entries(resumenT1f))
+      lineas.push(`| ${k} | ${v.cumple}/5 | ${v.cumple + v.falla} | ${v.desconocido} | ${v.intervaloWilson95Conocidos?.map(n => n.toFixed(3)).join('–') ?? '—'} |`);
   }
   lineas.push('', '## Solo controles vivos al día 60', '',
     'Desglose de sensibilidad: las extinciones no prueban especificidad de la lectura entre mundos vivos.', '',

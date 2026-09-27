@@ -98,6 +98,7 @@ def check_events(root: Path, days: dict[int, dict[int, dict]],
     launches: dict[int, list[str]] = {}
     launch_times: dict[int, datetime] = {}
     last_times: dict[int, datetime] = {}
+    last_global_time: datetime | None = None
     witnesses: dict[tuple[int, int], list[str]] = {}
     manifests: dict[int, list[str]] = {}
     for lineno, line in enumerate(lines[1:], 2):
@@ -116,6 +117,9 @@ def check_events(root: Path, days: dict[int, dict[int, dict]],
         except ValueError:
             errors.append(f'TSV línea {lineno}: fecha u offset inválido')
             continue
+        if last_global_time is not None and when < last_global_time:
+            errors.append(f'TSV línea {lineno}: hora retrocede en orden global')
+        last_global_time = when
         previous = last_times.get(seed)
         if previous is not None and when < previous:
             errors.append(f'TSV línea {lineno}: hora retrocede para CTRLV4-{seed}')

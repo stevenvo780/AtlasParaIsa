@@ -8,6 +8,7 @@ de identidad de los días: este brazo no tiene solapes archivados anteriores.
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 import hashlib
 import importlib.util
 import json
@@ -24,9 +25,16 @@ b = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(b)
 
 DEFAULT_ROOT = Path('/datos/tmp-atlas-lab/datos-lab/ctrlv4d-portatil')
+DEFAULT_TOWER_ROOT = Path('/datos/tmp-atlas-lab/datos-lab/ctrlv4d-torre')
+AMENDMENT = datetime.strptime('2026-09-27 06:24:00-0500', '%Y-%m-%d %H:%M:%S%z')
 SEEDS = range(6049, 6057)
-TSV = 'codex-ctrlv4d-20260927.tsv'
-REMOTE_ROOT = Path('/run/media/stev/datos/atlas-lab/ctrlv4d')
+SOURCES = (
+    (range(6049, 6055), 'codex-ctrlv4d-20260927.tsv',
+     Path('/run/media/stev/datos/atlas-lab/ctrlv4d'), '0-19',
+     '/run/media/stev/datos/atlas-lab/tmp'),
+    (range(6055, 6057), 'codex-ctrlv4d-torre-20260927.tsv',
+     DEFAULT_TOWER_ROOT, '6-31', '/datos/tmp-atlas-lab'),
+)
 
 
 def check_new_instruments(day: dict, number: int, seed: int,
@@ -83,10 +91,11 @@ def check_reference(root: Path, errors: list[str]) -> tuple[dict, set[str]]:
     return reference, schema
 
 
-def check_events(root: Path, days: dict[int, dict[int, dict]],
+def check_events(root: Path, seeds: range, tsv: str, output_root: Path,
+                 affinity: str, tmpdir: str, days: dict[int, dict[int, dict]],
                  completed_manifests: dict[int, Path],
-                 errors: list[str]) -> set[int]:
-    path = root / TSV
+                 errors: list[str], pending: list[str]) -> set[int]:
+    path = root / tsv
     if not b.real_file(path):
         errors.append('TSV de eventos ausente o symlink')
         return set()
@@ -96,6 +105,9 @@ def check_events(root: Path, days: dict[int, dict[int, dict]],
     launches: dict[int, list[str]] = {}
     witnesses: dict[tuple[int, int], list[str]] = {}
     manifests: dict[int, list[str]] = {}
+    launch_times: dict[int, datetime] = {}
+    witness_times: dict[int, list[datetime]] = {}
+    previous: datetime | None = None
     for lineno, line in enumerate(lines[1:], 2):
         cols = line.split('\t')
         if (len(cols) != 4 or
@@ -104,15 +116,26 @@ def check_events(root: Path, days: dict[int, dict[int, dict]],
             errors.append(f'TSV línea {lineno}: cuatro columnas/evento inválidos')
             continue
         seed = int(cols[1][7:])
-        if seed not in SEEDS or cols[2] not in {'LANZADA', 'IDENTIDAD', 'MANIFIESTO_VERIFICADO'}:
+        if seed not in seeds or cols[2] not in {'LANZADA', 'IDENTIDAD', 'MANIFIESTO_VERIFICADO'}:
             errors.append(f'TSV línea {lineno}: semilla o estado inesperado')
             continue
+        when = datetime.strptime(cols[0], '%Y-%m-%d %H:%M:%S%z')
+        if previous is not None and when < previous:
+            errors.append(f'TSV línea {lineno}: cronología decreciente')
+        previous = when
+        if cols[2] != 'LANZADA' and (seed not in launch_times or when < launch_times[seed]):
+            errors.append(f'TSV línea {lineno}: evento anterior a LANZADA')
         if cols[2] == 'LANZADA':
+            if when.astimezone(AMENDMENT.tzinfo).date() != AMENDMENT.date():
+                errors.append(f'TSV línea {lineno}: lanzamiento fuera del día predeclarado')
             launches.setdefault(seed, []).append(cols[3])
+            launch_times[seed] = when
+            if seed >= 6055 and when < AMENDMENT:
+                errors.append(f'TSV línea {lineno}: lanzamiento de torre anterior a enmienda 06:24')
             pattern = (rf'pid=([1-9]\d*) pgid=\1 sha={b.SHA} '
-                       rf'params={re.escape(b.PARAMS_TEXT)} nice=19 afinidad=0-19 '
-                       rf'TMPDIR=/run/media/stev/datos/atlas-lab/tmp '
-                       rf'salida={re.escape(str(REMOTE_ROOT / f"CTRLV4-{seed}"))}')
+                       rf'params={re.escape(b.PARAMS_TEXT)} nice=19 afinidad={affinity} '
+                       rf'TMPDIR={re.escape(tmpdir)} '
+                       rf'salida={re.escape(str(output_root / f"CTRLV4-{seed}"))}')
             if not re.fullmatch(pattern, cols[3]):
                 errors.append(f'TSV línea {lineno}: lanzamiento incompatible')
         elif cols[2] == 'IDENTIDAD':
@@ -121,23 +144,27 @@ def check_events(root: Path, days: dict[int, dict[int, dict]],
                 errors.append(f'TSV línea {lineno}: IDENTIDAD malformada')
             else:
                 witnesses.setdefault((seed, int(m[1])), []).append(m[2])
+                witness_times.setdefault(seed, []).append(when)
         else:
             m = re.fullmatch(r'sha256=([a-f0-9]{64})', cols[3])
             if not m:
                 errors.append(f'TSV línea {lineno}: MANIFIESTO_VERIFICADO malformado')
             else:
                 manifests.setdefault(seed, []).append(m[1])
+                if len(witness_times.get(seed, [])) != 3 or when < max(witness_times[seed]):
+                    errors.append(f'TSV línea {lineno}: manifiesto anterior a tres testigos')
     launched = set(launches)
-    for seed in SEEDS:
+    for seed in seeds:
         if len(launches.get(seed, [])) > 1:
             errors.append(f'CTRLV4-{seed}: LANZADA duplicada')
-        if seed not in launched and any(key[0] == seed for key in witnesses):
-            errors.append(f'CTRLV4-{seed}: IDENTIDAD sin LANZADA')
         if seed in launched:
             for number in (1, 2, 3):
                 entry = days.get(seed, {}).get(number)
                 expected = b.fingerprint(entry) if entry is not None else None
-                if witnesses.get((seed, number)) != [expected]:
+                actual = witnesses.get((seed, number), [])
+                if not actual and completed_manifests.get(seed) is None:
+                    pending.append(f'CTRLV4-{seed}: IDENTIDAD día {number} pendiente')
+                elif actual != [expected]:
                     errors.append(f'CTRLV4-{seed}: IDENTIDAD día {number} ausente, duplicada o distinta')
         manifest_path = completed_manifests.get(seed)
         if manifest_path is None:
@@ -150,13 +177,13 @@ def check_events(root: Path, days: dict[int, dict[int, dict]],
     return launched
 
 
-def check_log(path: Path, seed: int, population: object,
+def check_log(path: Path, seed: int, population: object, output_root: Path,
               errors: list[str]) -> None:
     if not b.real_file(path):
         errors.append(f'CTRLV4-{seed}: log canónico ausente o symlink')
         return
     body = path.read_text(encoding='utf-8')
-    output = REMOTE_ROOT / f'CTRLV4-{seed}'
+    output = output_root / f'CTRLV4-{seed}'
     # El lanzador directo no imprime el comando; SHA, params y ruta se fijan en LANZADA.
     ending = (rf'Réplica completa: 60 día\(s\), población final '
               rf'{re.escape(str(population))}\. Salida: {re.escape(str(output))}(?:\n|\Z)')
@@ -164,15 +191,24 @@ def check_log(path: Path, seed: int, population: object,
         errors.append(f'CTRLV4-{seed}: terminación normal única del log ausente')
 
 
-def audit(root: Path) -> dict:
+def audit(root: Path, tower_root: Path) -> dict:
     errors: list[str] = []
-    if not b.real_dir(root):
-        raise ValueError(f'{root}: raíz ausente o symlink')
+    pending: list[str] = []
+    roots = (root, tower_root)
+    for source in roots:
+        if not b.real_dir(source):
+            raise ValueError(f'{source}: raíz ausente o symlink')
     reference, schema = check_reference(root, errors)
+    tower_reference, tower_schema = check_reference(tower_root, errors)
+    if tower_reference != reference or tower_schema != schema:
+        errors.append('referencia de torre distinta de portátil')
     rows: list[dict] = []
     all_days: dict[int, dict[int, dict]] = {}
     completed_manifests: dict[int, Path] = {}
     for seed in SEEDS:
+        source_index = 0 if seed <= 6054 else 1
+        root = roots[source_index]
+        output_root = SOURCES[source_index][2]
         name = f'CTRLV4-{seed}'
         folder = root / name
         if not b.real_dir(folder):
@@ -211,44 +247,47 @@ def audit(root: Path) -> dict:
             errors.append(f'{name}: replica.json ausente o symlink')
         log_path = root / f'{name}.log'
         if final:
-            check_log(log_path, seed, days[60].get('poblacion'), errors)
+            check_log(log_path, seed, days[60].get('poblacion'), output_root, errors)
         elif log_path.is_symlink():
             errors.append(f'{name}: log symlink')
         rows.append({'seed': seed, 'dias': len(days), 'ultimoDia': max(days, default=0),
                      'final': final and b.real_file(manifest_path) and b.real_file(log_path)})
-    allowed = {f'CTRLV4-{seed}' for seed in SEEDS}
-    allowed_logs = {f'{name}.log' for name in allowed}
-    for path in root.iterdir():
-        if re.fullmatch(r'CTRLV4-\d+', path.name) and path.name not in allowed:
-            errors.append(f'fuente canónica extra: {path.name}')
-        if re.fullmatch(r'CTRLV4-\d+\.log', path.name) and path.name not in allowed_logs:
-            errors.append(f'log canónico extra: {path.name}')
-    launched = check_events(root, all_days, completed_manifests, errors)
+    launched: set[int] = set()
+    for source, (seeds, tsv, output_root, affinity, tmpdir) in zip(roots, SOURCES):
+        allowed = {f'CTRLV4-{seed}' for seed in seeds}
+        allowed_entries = {'brazo.txt', tsv} | allowed | {f'{name}.log' for name in allowed}
+        for path in source.iterdir():
+            if path.name not in allowed_entries or path.is_symlink():
+                errors.append(f'entrada ajena, extra o symlink en fuente: {path}')
+        launched.update(check_events(source, seeds, tsv, output_root, affinity, tmpdir,
+                                     all_days, completed_manifests, errors, pending))
     for seed, row in zip(SEEDS, rows):
-        folder = root / f'CTRLV4-{seed}'
+        source = roots[0 if seed <= 6054 else 1]
+        folder = source / f'CTRLV4-{seed}'
         if seed in launched and not b.real_dir(folder):
             errors.append(f'CTRLV4-{seed}: directorio de réplica lanzada ausente')
         if seed not in launched and b.real_dir(folder):
             errors.append(f'CTRLV4-{seed}: directorio sin LANZADA')
-        log = root / f'CTRLV4-{seed}.log'
+        log = source / f'CTRLV4-{seed}.log'
         if seed not in launched and (log.exists() or log.is_symlink()):
             errors.append(f'CTRLV4-{seed}: log sin LANZADA')
-    complete = len(launched) == 8 and all(row['final'] for row in rows) and not errors
+    complete = len(launched) == 8 and all(row['final'] for row in rows) and not errors and not pending
     return {'estado': 'completo' if complete else 'invalido' if errors else 'parcial',
             'alcance': 'estructura_y_procedencia; testigos_TSV_dias_1_a_3; sin_identidad_independiente_de_dias',
             'completo': complete, 'replicas': len(rows), 'lanzadas': len(launched),
             'replicasFinales': sum(row['final'] for row in rows),
             'diasPresentes': sum(row['dias'] for row in rows),
-            'semillas': rows, 'errores': errors}
+            'semillas': rows, 'pendientes': pending, 'errores': errors}
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--require-complete', action='store_true')
     parser.add_argument('--root', type=Path, default=DEFAULT_ROOT)
+    parser.add_argument('--tower-root', type=Path, default=DEFAULT_TOWER_ROOT)
     args = parser.parse_args()
     try:
-        result = audit(args.root)
+        result = audit(args.root, args.tower_root)
     except (ValueError, OSError, UnicodeError, TypeError, KeyError, json.JSONDecodeError) as exc:
         result = {'estado': 'invalido', 'completo': False, 'errores': [str(exc)]}
     print(json.dumps(result, ensure_ascii=False, separators=(',', ':')))

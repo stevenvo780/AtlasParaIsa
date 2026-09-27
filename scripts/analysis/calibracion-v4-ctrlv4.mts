@@ -14,6 +14,7 @@ const RAIZ = '/datos/tmp-atlas-lab/datos-lab/ctrlv4';
 const RAIZ_B = '/datos/tmp-atlas-lab/datos-lab/ctrlv4b';
 const RAIZ_C = '/datos/tmp-atlas-lab/datos-lab/ctrlv4c-portatil';
 const RAIZ_D = '/datos/tmp-atlas-lab/datos-lab/ctrlv4d-portatil';
+const RAIZ_D_TORRE = '/datos/tmp-atlas-lab/datos-lab/ctrlv4d-torre';
 const RAIZ_E = '/datos/tmp-atlas-lab/datos-lab/ctrlv4e';
 const RAIZ_F = '/datos/tmp-atlas-lab/datos-lab/ctrlv4f';
 const SALIDA = '/datos/tmp-atlas-lab/balance';
@@ -157,7 +158,8 @@ function wilson(exitos: number, total: number): [number, number] | null {
 const incompletas: { semilla: number; diasFaltantes: number[]; problemas: string[] }[] = [];
 const datos = new Map<number, Map<number, Dia>>();
 if (PANEL >= 48) for (const [etiqueta, raiz, primera, cantidad] of [
-  ['T1c', RAIZ_C, 6041, 8], ...(PANEL >= 56 ? [['T1d', RAIZ_D, 6049, 8]] : []),
+  ['T1c', RAIZ_C, 6041, 8], ...(PANEL >= 56 ? [
+    ['T1d portátil', RAIZ_D, 6049, 6], ['T1d torre', RAIZ_D_TORRE, 6055, 2]] : []),
   ...(PANEL >= 60 ? [['T1e', RAIZ_E, 6057, 4]] : []),
   ...(PANEL === 65 ? [['T1f', RAIZ_F, 6061, 5]] : []),
 ] as [string, string, number, number][]) {
@@ -172,7 +174,7 @@ if (PANEL >= 48) for (const [etiqueta, raiz, primera, cantidad] of [
 }
 for (let s = 6001; s < 6001 + PANEL; s++) {
   const dias = new Map<number, Dia>(), faltantes: number[] = [], problemas: string[] = [];
-  const raiz = s <= 6020 ? RAIZ : s <= 6040 ? RAIZ_B : s <= 6048 ? RAIZ_C : s <= 6056 ? RAIZ_D : s <= 6060 ? RAIZ_E : RAIZ_F;
+  const raiz = s <= 6020 ? RAIZ : s <= 6040 ? RAIZ_B : s <= 6048 ? RAIZ_C : s <= 6054 ? RAIZ_D : s <= 6056 ? RAIZ_D_TORRE : s <= 6060 ? RAIZ_E : RAIZ_F;
   if (PANEL >= 40) {
     const directorio = join(raiz, `CTRLV4-${s}`);
     if (!existsSync(directorio) || !lstatSync(directorio).isDirectory()) {
@@ -221,11 +223,18 @@ if (oficialC) {
     throw new Error('Membresía CTRLV4 T1c inválida: se exigen exactamente 6041..6048, sin extras ni duplicados');
 }
 const oficialD = PANEL >= 56 ? evaluarConjunto(RAIZ_D, { dia: 60, diversidadCampo: 'diversidadConductaVentana' }) : null;
+const oficialDTorre = PANEL >= 56 ? evaluarConjunto(RAIZ_D_TORRE, { dia: 60, diversidadCampo: 'diversidadConductaVentana' }) : null;
 if (oficialD) {
   const replicas = oficialD.replicas;
-  if (replicas.length !== 8 || Array.from({ length: 8 }, (_, i) => 6049 + i).some(s =>
+  if (replicas.length !== 6 || Array.from({ length: 6 }, (_, i) => 6049 + i).some(s =>
     replicas.filter(x => x.brazo === 'CTRLV4' && x.semilla === s && x.nombre === `CTRLV4-${s}`).length !== 1))
-    throw new Error('Membresía CTRLV4 T1d inválida: se exigen exactamente 6049..6056, sin extras ni duplicados');
+    throw new Error('Membresía CTRLV4 T1d portátil inválida: se exigen exactamente 6049..6054, sin extras ni duplicados');
+}
+if (oficialDTorre) {
+  const replicas = oficialDTorre.replicas;
+  if (replicas.length !== 2 || [6055, 6056].some(s =>
+    replicas.filter(x => x.brazo === 'CTRLV4' && x.semilla === s && x.nombre === `CTRLV4-${s}`).length !== 1))
+    throw new Error('Membresía CTRLV4 T1d torre inválida: se exigen exactamente 6055..6056, sin extras ni duplicados');
 }
 const oficialE = PANEL >= 60 ? evaluarConjunto(RAIZ_E, { dia: 60, diversidadCampo: 'diversidadConductaVentana' }) : null;
 if (oficialE) {
@@ -243,7 +252,7 @@ if (oficialF) {
 }
 const porSemilla = new Map((oficialB ? [...oficial.replicas.filter(x => x.brazo === 'CTRLV4'),
   ...oficialB.replicas.filter(x => x.brazo === 'CTRLV4'), ...(oficialC?.replicas ?? []),
-  ...(oficialD?.replicas ?? []), ...(oficialE?.replicas ?? []), ...(oficialF?.replicas ?? [])] : oficial.replicas).map(x => [x.semilla, x]));
+  ...(oficialD?.replicas ?? []), ...(oficialDTorre?.replicas ?? []), ...(oficialE?.replicas ?? []), ...(oficialF?.replicas ?? [])] : oficial.replicas).map(x => [x.semilla, x]));
 const filas: Record<string, unknown>[] = [];
 for (const [semilla, dias] of datos) {
   if (incompletas.some(x => x.semilla === semilla)) continue;

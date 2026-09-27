@@ -17,6 +17,9 @@ import sys
 
 
 SEEDS = (5, 29, 101, 202, 404, 505, 606, 707)
+PUB2_PORTATIL = (5, 29, 101, 202, 404, 505)
+PUB2_TORRE = (606, 707)
+PUB2_HEDGE = (5, 29, 101, 202, 404)
 FIRST_DAY, LAST_DAY = 5, 60
 TICKS_PER_DAY = 2400
 TIE_TOLERANCE = 1e-9  # criterio-terminado.mts: TOLERANCIA_PLANA para índice en [0, 1]
@@ -202,10 +205,37 @@ def code_differences(pairs):
     return comparisons
 
 
-def evaluate(pub_root, b_root):
+def check_pub2_inventory(pub_root, torre_root, hedge_root=None, use_hedge=False):
+    """El origen de cada semilla está fijado; rechaza duplicados entre hosts."""
+    sources = [('portatil', pub_root, PUB2_PORTATIL), ('torre', torre_root, PUB2_TORRE)]
+    if use_hedge:
+        if hedge_root is None:
+            raise ValueError('falta raíz explícita del hedge PUB2')
+        sources.append(('hedge-torre', hedge_root, PUB2_HEDGE))
+    for host, root, seeds in sources:
+        observed = {path.name for path in root.glob('PUB2-*') if path.is_dir()}
+        allowed = {f'PUB2-{seed}' for seed in seeds}
+        unexpected = observed - allowed
+        if unexpected:
+            raise ValueError(f'PUB2 {host}: directorios fuera del reparto: {sorted(unexpected)}')
+        if any((root / name).is_symlink() for name in observed):
+            raise ValueError(f'PUB2 {host}: directorio de réplica enlazado')
+
+
+def evaluate(pub_root, torre_root, b_root, hedge_root=None, use_hedge=False):
+    check_pub2_inventory(pub_root, torre_root, hedge_root, use_hedge)
     pairs, pending = [], []
     for seed in SEEDS:
-        pub, problem_pub = read_arm(pub_root, 'PUB2', seed, False)
+        if seed in PUB2_TORRE:
+            pub_host, pub_source, source_root = 'torre', 'f21b-torre', torre_root
+        elif use_hedge and seed in PUB2_HEDGE:
+            pub_host, pub_source, source_root = 'torre', 'hedge-torre-20260926', hedge_root
+        else:
+            pub_host, pub_source, source_root = 'portatil', 'f21b-portatil', pub_root
+        pub, problem_pub = read_arm(source_root, 'PUB2', seed, False)
+        if problem_pub:
+            problem_pub['host'] = pub_host
+            problem_pub['fuente'] = pub_source
         b, problem_b = read_arm(b_root, 'B', seed, True)
         if problem_pub or problem_b:
             pending.append({'semilla': seed, 'pub2': problem_pub, 'b': problem_b})
@@ -224,7 +254,8 @@ def evaluate(pub_root, b_root):
         same_sha = pub['replica']['sha'] == b['replica']['sha']
         pairs.append({
             'semilla': seed,
-            'pub2': {'ruta': pub['ruta'], 'sha': pub['replica']['sha'],
+            'pub2': {'ruta': pub['ruta'], 'host': pub_host, 'fuente': pub_source,
+                     'sha': pub['replica']['sha'],
                      'digestCodigo': pub['replica']['digest'],
                      'sha256Parametros': params_sha256(pub['replica']['params']),
                      'subidaSen': pub_sen, 'poblacionDia60': pub['dias'][60]['poblacion'],
@@ -267,6 +298,9 @@ def evaluate(pub_root, b_root):
             'motivo': 'PUB2 y B tienen SHA, digest de código y parámetros distintos; la concordancia inicial de métricas no demuestra equivalencia dinámica',
         },
         'semillasMayor': yes, 'semillasIndeterminadas': unknown, 'semillas': list(SEEDS),
+        'origenPUB2PorFuente': ({'f21b-portatil': [505], 'hedge-torre-20260926': list(PUB2_HEDGE),
+                                'f21b-torre': list(PUB2_TORRE)} if use_hedge else
+                               {'f21b-portatil': list(PUB2_PORTATIL), 'f21b-torre': list(PUB2_TORRE)}),
         'reproduccionActivaFraccionPUB2': {'observada': None, 'deducida': 1,
             'alcance': 'inferencia del modo de ejecución congelado, no medición ni prueba empírica de la conjunción del prerregistro',
             'fundamento': 'replica.ts d2ebf11 inicializa reproductionEnabled=true; PUB2 sin --techo-lab y con gobernador no-ejecutado; no se escribe fraccion diaria'},
@@ -274,6 +308,40 @@ def evaluate(pub_root, b_root):
         'auditoriaCodigo': code_differences(pairs),
         'pares': pairs,
     }
+
+
+def verify_selected_provenance(pub_root, torre_root, hedge_root, use_hedge):
+    """El gate final coteja identidad y solapes del TSV antes de escribir."""
+    from hedge_provenance import verify_hedge, verify_laptop, verify_pub2_tower
+
+    base = torre_root.parent.resolve()
+    if pub_root.resolve() != (base / 'f21b-portatil').resolve() or torre_root.resolve() != (base / 'f21b-torre').resolve():
+        raise ValueError('raíces PUB2 ajenas al mismo árbol de procedencia')
+    if use_hedge and hedge_root.resolve() != (base / 'hedge-torre-20260926').resolve():
+        raise ValueError('raíz hedge ajena al mismo árbol de procedencia')
+    checks = {'pub2Torre': verify_pub2_tower(base, require_complete=True)}
+    if use_hedge:
+        source_name = 'hedgeTorre'
+        checks[source_name] = verify_hedge(base, require_complete=False)
+    else:
+        # El TSV del gestor interrumpido vive en balance, aunque --salida apunte a otro lugar.
+        source_name = 'portatil'
+        checks[source_name] = verify_laptop(base, DEFAULT_BALANCE, require_complete=False)
+    if checks['pub2Torre'].get('estado') != 'completo':
+        raise ValueError('pub2Torre: cotejo de identidad y solapes incompleto')
+    expected = {f'PUB2-{seed}' for seed in PUB2_HEDGE}
+    rows = checks[source_name].get('replicas')
+    if not isinstance(rows, list) or len(rows) != 14:
+        raise ValueError(f'{source_name}: inventario de procedencia distinto de 14')
+    selected = [row for row in rows if isinstance(row, dict) and row.get('replica') in expected]
+    if len(selected) != len(expected) or {row['replica'] for row in selected} != expected:
+        raise ValueError(f'{source_name}: faltan las cinco PUB2 seleccionadas en la procedencia')
+    incomplete = sorted(row['replica'] for row in selected if row.get('estado') != 'completo')
+    if incomplete:
+        raise ValueError(f'{source_name}: PUB2 seleccionadas sin identidad final completa: {incomplete}')
+    checks['seleccionF21'] = {'estado': 'completo', 'fuente': source_name,
+                              'replicas': sorted(expected)}
+    return checks
 
 
 def markdown(result):
@@ -285,12 +353,12 @@ def markdown(result):
             f'{result["prediccionConjunta"]["motivo"]}.', '',
             f'Atribución causal al techo: **{result["atribucionCausalTecho"]["estado"]}**. '
             f'{result["atribucionCausalTecho"]["motivo"]}.', '',
-            '| Semilla | Sen PUB2 | Sen B | Diferencia | Mayor | Repro B global | Repro B día 60 |',
-            '|---:|---:|---:|---:|:---:|---:|---:|']
+            '| Semilla | Fuente PUB2 | Sen PUB2 | Sen B | Diferencia | Mayor | Repro B global | Repro B día 60 |',
+            '|---:|:---|---:|---:|---:|:---:|---:|---:|']
     fmt = lambda value: 'null' if value is None else repr(value)
     for pair in result['pares']:
         pub, b = pair['pub2'], pair['b']
-        rows.append(f'| {pair["semilla"]} | {fmt(pub["subidaSen"]["subidaSen"])} | '
+        rows.append(f'| {pair["semilla"]} | {pub["fuente"]} | {fmt(pub["subidaSen"]["subidaSen"])} | '
                     f'{fmt(b["subidaSen"]["subidaSen"])} | {fmt(pair["diferenciaSubida"])} | '
                     f'{pair["sinTechoMayor"]} | {fmt(b["reproduccionActivaFraccionGlobal"])} | '
                     f'{fmt(b["reproduccionActivaFraccionDia60"])} |')
@@ -315,20 +383,30 @@ def markdown(result):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--pub2-root', type=Path, default=DEFAULT_BASE / 'f21b-portatil')
+    parser.add_argument('--pub2-root', type=Path, default=DEFAULT_BASE / 'f21b-portatil',
+                        help='PUB2 5,29,101,202,404,505 del portátil')
+    parser.add_argument('--pub2-torre-root', type=Path, default=DEFAULT_BASE / 'f21b-torre',
+                        help='PUB2 606,707 de la torre')
+    parser.add_argument('--usar-hedge-torre', action='store_true',
+                        help='Tomar juntas las cinco PUB2 duplicadas de la torre; nunca mezclar por semilla')
+    parser.add_argument('--hedge-root', type=Path, default=DEFAULT_BASE / 'hedge-torre-20260926')
     parser.add_argument('--b-root', type=Path, default=DEFAULT_BASE / 'l60v3')
     parser.add_argument('--salida', type=Path, default=DEFAULT_BALANCE)
     args = parser.parse_args()
-    result = evaluate(args.pub2_root, args.b_root)
+    result = evaluate(args.pub2_root, args.pub2_torre_root, args.b_root,
+                      args.hedge_root, args.usar_hedge_torre)
     if result['estado'] == 'pendiente':
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 2
+    result['verificacionProcedencia'] = verify_selected_provenance(
+        args.pub2_root, args.pub2_torre_root, args.hedge_root, args.usar_hedge_torre)
     args.salida.mkdir(parents=True, exist_ok=True)
-    (args.salida / 'veredicto-f21.json').write_text(json.dumps(result, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
-    (args.salida / 'veredicto-f21.md').write_text(markdown(result), encoding='utf-8')
+    stem = 'veredicto-f21-hedge' if args.usar_hedge_torre else 'veredicto-f21'
+    (args.salida / f'{stem}.json').write_text(json.dumps(result, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+    (args.salida / f'{stem}.md').write_text(markdown(result), encoding='utf-8')
     print(f'F2.1 direccional: {result["prediccionDireccional"]["estado"]}; '
           f'causal: {result["atribucionCausalTecho"]["estado"]}; '
-          f'PUB2 mayor en {result["semillasMayor"]}/8; salidas en {args.salida}')
+          f'PUB2 mayor en {result["semillasMayor"]}/8; salidas en {args.salida / stem}')
     return 0
 
 

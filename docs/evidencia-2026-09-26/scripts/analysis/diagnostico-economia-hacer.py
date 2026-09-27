@@ -10,16 +10,27 @@ import hashlib
 import json
 import math
 import os
+from pathlib import Path
 import re
 import statistics as st
 
 BASE = '/datos/tmp-atlas-lab/datos-lab'
+BALANCE = '/datos/tmp-atlas-lab/balance'
+HEDGE_DIR = 'hedge-torre-20260926'
+CTRL2_HEDGE_SEEDS = (2002, 2004, 2006, 2007, 2008, 2009, 2010, 2011, 2012)
+PUB2_HEDGE_SEEDS = (5, 29, 101, 202, 404)
 CAMPAIGNS = {
     'CTRLV4': 'ctrlv4/CTRLV4-*',
     'CTRL2': 'c8panel/portatil/CTRL2-*',
-    'PUB2': 'f21b-portatil/PUB2-*',
     'l60v3': 'l60v3/B-*',
 }
+PUB2_SOURCES = {
+    'portatil': ('f21b-portatil', (5, 29, 101, 202, 404, 505)),
+    'torre': ('f21b-torre', (606, 707)),
+}
+# PUB2-505 ya estaba completa en el corte del 24-09; las otras siete
+# tienen parcial archivado obligatorio para reconstruir ese corte.
+PUB2_ARCHIVED_SEEDS = (5, 29, 101, 202, 404, 606, 707)
 FINAL_CONTRACTS = {
     'CTRLV4': {'prefix': 'CTRLV4', 'seeds': tuple(range(6001, 6021)),
                'sha': '667454d5e0232885d78c37775d6a5619f516872d',
@@ -62,10 +73,10 @@ def pearson(xs, ys):
 def scalar(day, key):
     if key == 'hacer':
         time = day.get('repartoTiempoPorAccion')
-        return sum(time['fracciones'].get(a, 0) for a in ACTIONS) if time else None
+        return sum(time['fracciones'].get(a, 0) for a in ACTIONS) if time and time.get('personaTicks', 0) > 0 else None
     if key.startswith('accion:'):
         time = day.get('repartoTiempoPorAccion')
-        return time['fracciones'].get(key.split(':', 1)[1], 0) if time else None
+        return time['fracciones'].get(key.split(':', 1)[1], 0) if time and time.get('personaTicks', 0) > 0 else None
     if key.startswith('actividad:'):
         activity = day.get('repartoActividadPorAccion')
         return activity['fracciones'].get(key.split(':', 1)[1], 0) if activity else None
@@ -147,12 +158,90 @@ def require_complete_campaign(campaign, paths):
             if (not isinstance(fracciones, dict) or type(persona_ticks) is not int or persona_ticks < 0
                     or any(type(v) not in (int, float) or not math.isfinite(v) or v < 0 or v > 1
                            for v in fracciones.values())
-                    or any(not isinstance(k, str) for k in fracciones)):
+                    or any(not isinstance(k, str) for k in fracciones)
+                    or (persona_ticks > 0 and (not fracciones or
+                        not math.isclose(sum(fracciones.values()), 1, rel_tol=0, abs_tol=1e-9)))
+                    or (persona_ticks == 0 and bool(fracciones))):
                 raise ValueError(f'{path}: repartoTiempoPorAccion inválido en día {day}')
             if 'diversidadConductaVentana' not in body or (body['diversidadConductaVentana'] is not None
                     and (type(body['diversidadConductaVentana']) not in (int, float)
                          or not math.isfinite(body['diversidadConductaVentana']))):
                 raise ValueError(f'{path}: diversidad de ventana ausente o inválida en día {day}')
+
+
+def pub2_paths(base, archived_partials, require_complete, use_hedge=False):
+    """Reúne PUB2 por host fijo sin permitir dobles de una misma semilla."""
+    if archived_partials and use_hedge:
+        raise ValueError('el corte histórico no admite fuentes hedge vivas')
+    paths = []
+    for host, (directory, seeds) in PUB2_SOURCES.items():
+        root = os.path.join(base, directory)
+        observed = {os.path.basename(path): path for path in glob.glob(os.path.join(root, 'PUB2-*'))
+                    if os.path.isdir(path)}
+        expected = {f'PUB2-{seed}' for seed in seeds}
+        if extra := set(observed) - expected:
+            raise ValueError(f'PUB2 {host}: directorios fuera del reparto: {sorted(extra)}')
+        required_original = {'PUB2-505'} if use_hedge and host == 'portatil' else expected
+        if require_complete and (missing := required_original - set(observed)):
+            raise ValueError(f'PUB2 {host}: faltan corridas: {sorted(missing)}')
+        if archived_partials:
+            archived = {os.path.basename(path): path for path in
+                        glob.glob(os.path.join(root, 'parciales-20260924', 'PUB2-*'))
+                        if os.path.isdir(path)}
+            required_archives = {f'PUB2-{seed}' for seed in seeds if seed in PUB2_ARCHIVED_SEEDS}
+            if missing_archives := required_archives - set(archived):
+                raise ValueError(f'PUB2 {host}: faltan parciales históricos requeridos: {sorted(missing_archives)}')
+            observed.update({name: path for name, path in archived.items() if name in expected})
+            if missing_historical := expected - set(observed):
+                raise ValueError(f'PUB2 {host}: faltan corridas en corte histórico: {sorted(missing_historical)}')
+        if use_hedge and host == 'portatil':
+            hedge_root = os.path.join(base, HEDGE_DIR)
+            hedge = {os.path.basename(path): path for path in
+                     glob.glob(os.path.join(hedge_root, 'PUB2-*')) if os.path.isdir(path)}
+            expected_hedge = {f'PUB2-{seed}' for seed in PUB2_HEDGE_SEEDS}
+            if extra_hedge := set(hedge) - expected_hedge:
+                raise ValueError(f'PUB2 hedge: directorios ajenos: {sorted(extra_hedge)}')
+            if require_complete and (missing_hedge := expected_hedge - set(hedge)):
+                raise ValueError(f'PUB2 hedge: faltan corridas: {sorted(missing_hedge)}')
+            observed.update(hedge)
+        paths.extend(observed.values())
+    return sorted(paths)
+
+
+def ctrl2_hedge_paths(base, require_complete):
+    """Selecciona las nueve copias como bloque y los tres controles originales."""
+    original_root = os.path.join(base, 'c8panel', 'portatil')
+    hedge_root = os.path.join(base, HEDGE_DIR)
+    originals = {os.path.basename(path): path for path in
+                 glob.glob(os.path.join(original_root, 'CTRL2-*')) if os.path.isdir(path)}
+    hedge = {os.path.basename(path): path for path in
+             glob.glob(os.path.join(hedge_root, 'CTRL2-*')) if os.path.isdir(path)}
+    expected_hedge = {f'CTRL2-{seed}' for seed in CTRL2_HEDGE_SEEDS}
+    if extra := set(hedge) - expected_hedge:
+        raise ValueError(f'CTRL2 hedge: directorios ajenos: {sorted(extra)}')
+    if require_complete and (missing := expected_hedge - set(hedge)):
+        raise ValueError(f'CTRL2 hedge: faltan corridas: {sorted(missing)}')
+    selected = {name: path for name, path in originals.items()
+                if name in {'CTRL2-2001', 'CTRL2-2003', 'CTRL2-2005'}}
+    selected.update(hedge)
+    if require_complete and (missing := {f'CTRL2-{seed}' for seed in range(2001, 2013)} - set(selected)):
+        raise ValueError(f'CTRL2 hedge: faltan controles seleccionados: {sorted(missing)}')
+    return sorted(selected.values())
+
+
+def verify_selected_provenance(base, use_hedge):
+    """Exige cotejo completo de identidad y solapes para el balance final."""
+    from hedge_provenance import verify_hedge, verify_laptop, verify_pub2_tower
+
+    checks = {'pub2Torre': verify_pub2_tower(Path(base), require_complete=True)}
+    if use_hedge:
+        checks['hedgeTorre'] = verify_hedge(Path(base), require_complete=True)
+    else:
+        checks['portatil'] = verify_laptop(Path(base), Path(BALANCE), require_complete=True)
+    for name, check in checks.items():
+        if check.get('estado') != 'completo':
+            raise ValueError(f'{name}: cotejo de identidad y solapes incompleto: {check.get("estado")}')
+    return checks
 
 
 def summarise(runs, key):
@@ -190,26 +279,36 @@ def main():
                         help='Usar parciales-20260924 cuando existan; congela el corte anterior a las relanzadas')
     parser.add_argument('--require-complete', action='store_true',
                         help='Exige inventario, 60 días, ticks y manifiesto congelado en las cuatro campañas')
+    parser.add_argument('--usar-hedge-torre', action='store_true',
+                        help='Usar juntas 9 CTRL2 y 5 PUB2 duplicadas en la torre para el corte corriente')
     args = parser.parse_args()
     if args.require_complete and args.archived_partials:
         parser.error('--require-complete no admite --archived-partials')
+    if args.usar_hedge_torre and args.archived_partials:
+        parser.error('--usar-hedge-torre no admite --archived-partials')
     output = {'metodo': {'ventanas_dias': {'temprana': [5, 14], 'media': [26, 35], 'tardia': [51, 60]},
                          'ventanas_cinco_dias_ctrlv4': [[days.start, days.stop - 1] for _, days in WINDOWS_5_DAYS],
                          'agregacion': 'todos los dias de cada ventana presentes y finitos; mediana diaria por replica, despues mediana entre replicas',
                          'corte': ('cuatro campañas completas verificadas a día 60' if args.require_complete else
                                    'parciales archivados del 24-09 tienen prioridad' if args.archived_partials else
                                    'directorios corrientes, incluidas relanzadas en curso'),
+                         'seleccion_hedge_torre': args.usar_hedge_torre,
                          'hacer': 'suma de fracciones persona-tick gather+build+craft+hunt; no es tasa de eventos'}}
-    for campaign, pattern in CAMPAIGNS.items():
-        paths = sorted(path for path in glob.glob(os.path.join(args.base, pattern)) if os.path.isdir(path))
+    for campaign, pattern in {**CAMPAIGNS, 'PUB2': None}.items():
+        paths = (pub2_paths(args.base, args.archived_partials, args.require_complete,
+                            args.usar_hedge_torre)
+                 if campaign == 'PUB2' else
+                 ctrl2_hedge_paths(args.base, args.require_complete)
+                 if campaign == 'CTRL2' and args.usar_hedge_torre else
+                 sorted(path for path in glob.glob(os.path.join(args.base, pattern)) if os.path.isdir(path)))
         if campaign == 'CTRL2':
-            if args.require_complete:
+            if args.require_complete and not args.usar_hedge_torre:
                 expected_all = {f'CTRL2-{seed}' for seed in range(2001, 2017)}
                 observed_all = {os.path.basename(path) for path in paths}
                 if observed_all != expected_all:
                     raise ValueError(f'CTRL2: inventario bruto 2001..2016 distinto; faltan={sorted(expected_all-observed_all)}, extra={sorted(observed_all-expected_all)}')
             paths = [p for p in paths if 2001 <= int(os.path.basename(p).split('-')[-1]) <= 2012]
-        if args.archived_partials:
+        if args.archived_partials and campaign != 'PUB2':
             archived = [path for path in glob.glob(os.path.join(args.base, os.path.dirname(pattern),
                                                                 'parciales-20260924', os.path.basename(pattern)))
                         if os.path.isdir(path)]
@@ -234,8 +333,21 @@ def main():
         late_pairs = [(a['delta_late_mid'], b['delta_late_mid']) for a, b in
                       zip(metrics['hacer']['semillas'], metrics['diversidadConductaVentana']['semillas'])
                       if a['delta_late_mid'] is not None and b['delta_late_mid'] is not None]
+        material_pairs = {}
+        for material in ('maderaMediaAdultos', 'piedraMediaAdultos'):
+            material_pairs[material] = {}
+            for phase in ('delta_mid_early', 'delta_late_mid'):
+                rows = [(a[phase], b[phase]) for a, b in
+                        zip(metrics[material]['semillas'], metrics['diversidadConductaVentana']['semillas'])
+                        if a[phase] is not None and b[phase] is not None]
+                material_pairs[material][phase] = {
+                    'n': len(rows),
+                    'pearson': pearson([p[0] for p in rows], [p[1] for p in rows]),
+                }
         output[campaign] = {
             'fuentes': [{'id': r['id'], 'origen': os.path.relpath(r['path'], args.base),
+                         'host': ('torre' if HEDGE_DIR in r['path'] or 'f21b-torre' in r['path'] else 'portatil')
+                         if campaign in ('PUB2', 'CTRL2') else None,
                          'seed': r['seed'], 'sha': r['sha'], 'primer_dia': r['day_first'],
                          'ultimo_dia': r['day_last'], 'cantidad_dias': r['day_count'],
                          'completa_1_60': r['complete']} for r in runs],
@@ -247,8 +359,12 @@ def main():
         }
         output[campaign]['correlacion_cambios_media_tardia'] = {
             'n': len(late_pairs), 'pearson': pearson([p[0] for p in late_pairs], [p[1] for p in late_pairs])}
+        output[campaign]['correlacion_material_adulto_diversidad'] = material_pairs
         if campaign == 'CTRLV4':
             output[campaign]['ventanas_cinco_dias'] = five_day_panel(runs)
+    if args.require_complete:
+        output['metodo']['verificacion_procedencia'] = verify_selected_provenance(
+            args.base, args.usar_hedge_torre)
     print(json.dumps(output, indent=2, ensure_ascii=False, allow_nan=False))
 
 

@@ -141,7 +141,30 @@ function retainSnapshotLimitMode(record: Record<string, unknown>): void {
  * parámetro imposible. Las claves que el campo NO nombra se completan SIEMPRE con
  * `HISTORICAL_PARAMS` (reglas 10 y 11), sea cual sea la versión de reglas: una
  * instantánea sólo omite una clave si se escribió antes de que existiera.
+ *
+ * Poda ola 1 (2026-09-27): las claves de NAT-L y vocación que una instantánea antigua
+ * nombre con su valor inerte se sueltan al cargar (nunca decidieron nada); con otro
+ * valor esa instantánea usó la ley de verdad y se rechaza (recuperación explícita).
  */
+const CLAVES_PODADAS_INERTES: readonly (readonly [string, string, unknown])[] = [
+  ['poblacion', 'natalidadLocal', 0],
+  ['poblacion', 'radioProvision', 16],
+  ['conducta', 'vocacion', 0],
+  ['conducta', 'vocacionTope', 0.9],
+];
+function sinClavesPodadas(params: Record<string, unknown>): Record<string, unknown> {
+  const clon = structuredClone(params);
+  for (const [seccion, hoja, inerte] of CLAVES_PODADAS_INERTES) {
+    const grupo = clon[seccion];
+    if (grupo !== null && typeof grupo === 'object' && !Array.isArray(grupo)
+      && (grupo as Record<string, unknown>)[hoja] === inerte) {
+      delete (grupo as Record<string, unknown>)[hoja];
+    }
+    const punteada = `${seccion}.${hoja}`;
+    if (clon[punteada] === inerte) delete clon[punteada];
+  }
+  return clon;
+}
 export function readSnapshotParams(value: unknown): WorldParams {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return HISTORICAL_PARAMS;
   const record = value as Record<string, unknown>;
@@ -149,7 +172,7 @@ export function readSnapshotParams(value: unknown): WorldParams {
   if (!('params' in record) && !('paramsEncoding' in record)) return base;
   const { params, paramsEncoding } = record;
   if (paramsEncoding !== PARAMS_ENCODING || !params || typeof params !== 'object' || Array.isArray(params)) throw new SnapshotSemanticError('Invalid snapshot parameter encoding. Explicit recovery required.');
-  try { return parseParams(params as Record<string, string>, base); }
+  try { return parseParams(sinClavesPodadas(params as Record<string, unknown>) as Record<string, string>, base); }
   catch (error) {
     if (!(error instanceof Error) || error.constructor !== Error || 'code' in error) throw error;
     throw new SnapshotSemanticError(`Invalid snapshot parameters: ${error.message} Explicit recovery required.`, { cause: error });

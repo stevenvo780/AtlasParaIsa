@@ -200,8 +200,8 @@ export const DEFAULT_PARAMS: WorldParams = deepFreeze(RAW_DEFAULTS);
  * 0,35, distancia 0,2, `maxComunidades` 8, `vinculoConvivencia` 0, `radioConvivencia` 0).
  * La poda de leyes refutadas (ola 1, 2026-09-27) retiró `poblacion.natalidadLocal`,
  * `poblacion.radioProvision`, `conducta.vocacion` y `conducta.vocacionTope`: una instantánea
- * antigua que las nombre se rechaza como parámetro desconocido (`Invalid snapshot parameters`);
- * los mundos por defecto nunca las escribieron, así que su conducta no cambia.
+ * antigua que las nombre con valores inertes se carga soltándolas (`snapshot.ts`); con otros
+ * valores usó la ley de verdad y se rechaza (`Invalid snapshot parameters`).
  *
  * Única excepción deliberada: `gobernador.politica` vale `techo` también aquí. El gobernador no es
  * una ley del mundo (no entra en `stepWorld`: decide por el p95 de reloj del servidor, ruling R17) y

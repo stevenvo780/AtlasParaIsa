@@ -176,3 +176,23 @@ test('T102: checksum recalculado no legitima flags, arrays o señales corruptos 
     assert.throws(() => store.load(), /Invalid snapshot parameters/, `${section}.${key}`);
   }
 });
+
+test('poda ola 1 (2026-09-27): una instantánea antigua con las claves inertes carga soltándolas; con valores activos se rechaza', t => {
+  const { store, path } = laboratory(t);
+  store.save(createWorld(51926));
+  const saved = JSON.parse(filaInstantanea(store).body);
+  const inerte = structuredClone(saved);
+  inerte.params.poblacion.natalidadLocal = 0; inerte.params.poblacion.radioProvision = 16;
+  inerte.params.conducta.vocacion = 0; inerte.params.conducta.vocacionTope = 0.9;
+  reescribirInstantanea(store, JSON.stringify(inerte));
+  const reopened = new Store(path);
+  try {
+    const params = paramsOf(reopened.load()!.world) as unknown as Record<string, Record<string, unknown>>;
+    assert.ok(!('natalidadLocal' in params.poblacion! || 'radioProvision' in params.poblacion!));
+    assert.ok(!('vocacion' in params.conducta! || 'vocacionTope' in params.conducta!));
+  } finally { reopened.close(); }
+  const activa = structuredClone(saved);
+  activa.params.poblacion.natalidadLocal = 1;
+  reescribirInstantanea(store, JSON.stringify(activa));
+  assert.throws(() => store.load(), /Invalid snapshot parameters/, 'un mundo que usó NAT-L exige recuperación explícita');
+});

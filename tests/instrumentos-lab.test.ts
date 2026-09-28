@@ -263,11 +263,18 @@ test('CLI: réplica corta con y sin instrumentos — digestoCanonico idéntico y
   assert.ok(reparto.personaTicks >= 2400 * 14, 'al menos los 14 fundadores mortales observados cada paso del día (hay nacimientos, pocas muertes)');
   assert.ok(Math.abs(Object.values(reparto.fracciones).reduce((s, x) => s + x, 0) - 1) < 1e-12);
   assert.deepEqual(Object.keys(reparto.fracciones), ACCIONES.filter(accion => accion in reparto.fracciones), 'claves en el orden fijo de ACCIONES');
-  const diagnostico = con.approachDiagnostico as { vecinos: number; personasConHabitoFuerte: number; habitosFuertes: number; reunionesConReservas: number; oportunidadesFamiliares: number; ticksPorMotivo: Record<string, number> };
+  const diagnostico = con.approachDiagnostico as { vecinos: number; personasConHabitoFuerte: number; habitosFuertes: number; reunionesConReservas: number; oportunidadesFamiliares: number;
+    ticksPorMotivo: Record<string, number>; ticksEnDestinoPorMotivo: Record<string, number>; seleccionesPorMotivo: Record<string, number>;
+    muestreo: { muestras: number; personasObservadas: number; vecinosObservados: number; memoriaCandidatos: number; reunionesCandidatos: number } };
   assert.equal(diagnostico.vecinos, (con.vecinosMortales as number));
   assert.ok(diagnostico.personasConHabitoFuerte <= diagnostico.habitosFuertes);
   assert.ok(diagnostico.reunionesConReservas <= diagnostico.oportunidadesFamiliares);
   assert.ok(Object.values(diagnostico.ticksPorMotivo).reduce((sum, n) => sum + n, 0) <= reparto.personaTicks);
+  assert.ok(Object.values(diagnostico.ticksEnDestinoPorMotivo).reduce((sum, n) => sum + n, 0) <= Object.values(diagnostico.ticksPorMotivo).reduce((sum, n) => sum + n, 0));
+  assert.ok(Object.values(diagnostico.seleccionesPorMotivo).reduce((sum, n) => sum + n, 0) <= ((con.ecoHacerDemanda as { elegidos: Record<string, number> }).elegidos.approach ?? 0));
+  assert.equal(diagnostico.muestreo.muestras, 80, 'una muestra cada 30 ticks en un día de 2400');
+  assert.ok(diagnostico.muestreo.memoriaCandidatos <= diagnostico.muestreo.personasObservadas * 3);
+  assert.ok(diagnostico.muestreo.reunionesCandidatos <= diagnostico.muestreo.vecinosObservados);
   const foodShared = (con.cooperacionAcumuladaPorTipo as Json).foodShared as number;
   assert.ok(Number.isInteger(foodShared) && foodShared > 0);
   assert.deepEqual((con.repertorioAbierto as Json | null)?.usos ?? null,

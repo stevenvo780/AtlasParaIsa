@@ -213,6 +213,15 @@ function fracciones(conteo: ReadonlyMap<string, number>, total: number): Record<
   return salida;
 }
 
+function motivoApproach(reason: string): string {
+  return reason.startsWith('Vuelve a un lugar conocido con agua, alimento, techo o cooperación;') ? 'hogar'
+    : reason.startsWith('Tiene reservas y busca ') ? 'reunion'
+    : reason.startsWith('Recuerda el vínculo con ') ? 'cortejo'
+    : reason.startsWith('Le apetece acercarse;') ? 'social'
+    : reason.startsWith('Percibe una invitación') ? 'invitacion'
+    : reason.startsWith('Recuerda el cuidado compartido en ') ? 'memoria' : 'otro';
+}
+
 /** Campos nuevos de `dia-NNN.json` (ver README del laboratorio, «Instrumentos de medida»). */
 export interface MetricasInstrumentos {
   /** NAT-L se emite en CTRL y NAT: percentiles por rango más cercano inferior, con infinitos
@@ -268,7 +277,10 @@ export interface MetricasInstrumentos {
    * El motivo puede ser sustituido por el resultado de una acción: sus ticks son cotas inferiores. */
   approachDiagnostico: { vecinos: number; personasConHabitoFuerte: number; habitosFuertes: number;
     fertiles: number; oportunidadesFamiliares: number; reunionesConReservas: number;
-    ticksPorMotivo: Record<string, number> };
+    ticksPorMotivo: Record<string, number>; ticksEnDestinoPorMotivo: Record<string, number>;
+    seleccionesPorMotivo: Record<string, number>; seleccionesVecinosPorMotivo: Record<string, number>;
+    muestreo: { muestras: number; personasObservadas: number; vecinosObservados: number;
+      memoriaCandidatos: number; memoriaVecinosCandidatos: number; familiasVecinos: number; reunionesCandidatos: number } };
   /** T5/H2: evaluaciones de `constructionOpportunity` del día por motivo de salida; las medias solo
    * promedian evaluaciones donde el dato se calculó (ganancia/materiales son null en salidas tempranas). */
   ecoHacerConstruccion: { evaluaciones: number; admitidas: number;
@@ -319,6 +331,11 @@ export class InstrumentosConducta {
   private readonly ofrecidosDia = new Map<string, number>();
   private readonly elegidosDia = new Map<string, number>();
   private readonly approachMotivoTicksDia = new Map<string, number>();
+  private readonly approachEnDestinoTicksDia = new Map<string, number>();
+  private readonly approachSeleccionesDia = new Map<string, number>();
+  private readonly approachSeleccionesVecinosDia = new Map<string, number>();
+  private muestreoApproachDia = { muestras: 0, personasObservadas: 0, vecinosObservados: 0,
+    memoriaCandidatos: 0, memoriaVecinosCandidatos: 0, familiasVecinos: 0, reunionesCandidatos: 0 };
   private construccionDia = { admitida: 0, cupo: 0, materiales: 0, ganancia: 0, reparacion: 0 };
   private construccionGananciaSuma = 0; private construccionGananciaN = 0;
   private construccionMaderaSuma = 0; private construccionMaderaN = 0;
@@ -416,6 +433,11 @@ export class InstrumentosConducta {
       let dia = this.ticksDiaPorPersona.get(person.id);
       if (!dia) { dia = {}; this.ticksDiaPorPersona.set(person.id, dia); }
       dia[person.action] = (dia[person.action] ?? 0) + 1;
+      const motivo = person.action === 'approach' ? motivoApproach(person.reason) : null;
+      if (motivo && person.decisionAt === world.tick + 30) {
+        this.approachSeleccionesDia.set(motivo, (this.approachSeleccionesDia.get(motivo) ?? 0) + 1);
+        if (person.role === 'neighbor') this.approachSeleccionesVecinosDia.set(motivo, (this.approachSeleccionesVecinosDia.get(motivo) ?? 0) + 1);
+      }
       if (person.role === 'neighbor') {
         if (!this.raizPorId.has(person.id)) {
           const transmisor = person.genome.parents[0];
@@ -431,17 +453,38 @@ export class InstrumentosConducta {
         }
         this.hogarAnterior.set(person.id, hogar);
         this.tiempoDia.set(person.action, (this.tiempoDia.get(person.action) ?? 0) + 1); this.personaTicksDia++;
-        if (person.action === 'approach') {
-          const motivo = person.reason.startsWith('Vuelve a un lugar conocido con agua, alimento, techo o cooperación;') ? 'hogar'
-            : person.reason.startsWith('Tiene reservas y busca ') ? 'reunion'
-            : person.reason.startsWith('Recuerda el vínculo con ') ? 'cortejo'
-            : person.reason.startsWith('Le apetece acercarse;') ? 'social'
-            : person.reason.startsWith('Percibe una invitación') ? 'invitacion'
-            : person.reason.startsWith('Recuerda el cuidado compartido en ') ? 'memoria' : 'otro';
+        if (motivo) {
           this.approachMotivoTicksDia.set(motivo, (this.approachMotivoTicksDia.get(motivo) ?? 0) + 1);
+          if (Math.hypot(person.x - person.target.x, person.y - person.target.y) < 0.5)
+            this.approachEnDestinoTicksDia.set(motivo, (this.approachEnDestinoTicksDia.get(motivo) ?? 0) + 1);
         }
         // El motivo exacto lo emite sólo `settlementOpportunity`, antes de cualquier recuerdo añadido.
         if (person.action === 'approach' && person.reason.startsWith('Vuelve a un lugar conocido con agua, alimento, techo o cooperación;')) this.approachHogarTicks++;
+      }
+    }
+    if (world.tick % 30 === 0) {
+      const m = this.muestreoApproachDia;
+      m.muestras++;
+      const lugares = new Map(world.places.map(place => [place.id, place] as const));
+      for (const person of world.people) {
+        m.personasObservadas++;
+        if (person.role === 'neighbor') m.vecinosObservados++;
+        const distancia = (a: { x: number; y: number }, b: { x: number; y: number }): number => Math.hypot(a.x - b.x, a.y - b.y);
+        if (person.inventory >= 0.025 && person.hunger < 0.5) for (const habit of person.habits) {
+          const place = lugares.get(habit.placeId);
+          if (!place || habit.strength < 0.5 || distancia(person, place) > 7) continue;
+          if (!world.people.some(other => other.id !== person.id && distancia(person, other) <= 7
+            && distancia(other, place) <= 3 && other.hunger > 0.27)) continue;
+          m.memoriaCandidatos++;
+          if (person.role === 'neighbor') m.memoriaVecinosCandidatos++;
+        }
+        if (person.role === 'neighbor') {
+          const family = familyOpportunity(world, person);
+          if (family) {
+            m.familiasVecinos++;
+            if (person.inventory >= family.reserveTarget && family.partner.inventory >= 0.1) m.reunionesCandidatos++;
+          }
+        }
       }
     }
     const vivos = new Set(world.people.filter(person => person.role === 'neighbor').map(person => person.id));
@@ -635,7 +678,11 @@ export class InstrumentosConducta {
         elegidos: Object.fromEntries(this.elegidosDia) },
       approachDiagnostico: { vecinos: vecinos.length, personasConHabitoFuerte, habitosFuertes,
         fertiles, oportunidadesFamiliares, reunionesConReservas,
-        ticksPorMotivo: Object.fromEntries(this.approachMotivoTicksDia) },
+        ticksPorMotivo: Object.fromEntries(this.approachMotivoTicksDia),
+        ticksEnDestinoPorMotivo: Object.fromEntries(this.approachEnDestinoTicksDia),
+        seleccionesPorMotivo: Object.fromEntries(this.approachSeleccionesDia),
+        seleccionesVecinosPorMotivo: Object.fromEntries(this.approachSeleccionesVecinosDia),
+        muestreo: { ...this.muestreoApproachDia } },
       ecoHacerConstruccion: {
         evaluaciones: this.construccionDia.admitida + this.construccionDia.cupo + this.construccionDia.materiales + this.construccionDia.ganancia + this.construccionDia.reparacion,
         admitidas: this.construccionDia.admitida,
@@ -655,7 +702,10 @@ export class InstrumentosConducta {
     for (const id of [...this.ticksPorPersona.keys()]) if (!vivos.has(id)) this.ticksPorPersona.delete(id);
     this.tiempoDia.clear(); this.personaTicksDia = 0; this.approachHogarTicks = 0;
     this.decisionesDia = 0; this.ofrecidosDia.clear(); this.elegidosDia.clear();
-    this.approachMotivoTicksDia.clear();
+    this.approachMotivoTicksDia.clear(); this.approachEnDestinoTicksDia.clear();
+    this.approachSeleccionesDia.clear(); this.approachSeleccionesVecinosDia.clear();
+    this.muestreoApproachDia = { muestras: 0, personasObservadas: 0, vecinosObservados: 0,
+      memoriaCandidatos: 0, memoriaVecinosCandidatos: 0, familiasVecinos: 0, reunionesCandidatos: 0 };
     this.construccionDia = { admitida: 0, cupo: 0, materiales: 0, ganancia: 0, reparacion: 0 };
     this.construccionGananciaSuma = 0; this.construccionGananciaN = 0;
     this.construccionMaderaSuma = 0; this.construccionMaderaN = 0;

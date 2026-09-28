@@ -28,7 +28,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import type { Capability, TechnologyExecution } from '../../src/shared/technology.js';
 import { OFICIOS_DE_LINAJE, TICKS_PER_DAY, tileAt, type Person, type World } from '../../src/world/index.js';
 import { indiceDiversidad } from '../../src/world/diversidad.js';
-import { reproductiveReadiness } from '../../src/world/family.js';
+import { familyOpportunity, reproductiveReadiness } from '../../src/world/family.js';
 import { demandaTotal, hacinamientoLocal, reposicionTerritorioOcupado, setObservadorNatalidad } from '../../src/world/natalidad.js';
 import { paramsOf } from '../../src/world/params.js';
 import { setObservadorEconomiaHacer } from '../../src/world/spatial.js';
@@ -264,6 +264,11 @@ export interface MetricasInstrumentos {
    * gather/build y cada approach con su motivo (`approach:hogar|reunion|cortejo|social|invitacion|memoria`);
    * `elegidos` cuenta la acción elegida en TODAS las decisiones (no solo con oferta). */
   ecoHacerDemanda: { decisiones: number; ofrecidos: Record<string, number>; elegidos: Record<string, number> };
+  /** Sonda APPROACH: estado al cierre y ticks etiquetados por el motivo de la última decisión.
+   * El motivo puede ser sustituido por el resultado de una acción: sus ticks son cotas inferiores. */
+  approachDiagnostico: { vecinos: number; personasConHabitoFuerte: number; habitosFuertes: number;
+    fertiles: number; oportunidadesFamiliares: number; reunionesConReservas: number;
+    ticksPorMotivo: Record<string, number> };
   /** T5/H2: evaluaciones de `constructionOpportunity` del día por motivo de salida; las medias solo
    * promedian evaluaciones donde el dato se calculó (ganancia/materiales son null en salidas tempranas). */
   ecoHacerConstruccion: { evaluaciones: number; admitidas: number;
@@ -313,6 +318,7 @@ export class InstrumentosConducta {
   private decisionesDia = 0;
   private readonly ofrecidosDia = new Map<string, number>();
   private readonly elegidosDia = new Map<string, number>();
+  private readonly approachMotivoTicksDia = new Map<string, number>();
   private construccionDia = { admitida: 0, cupo: 0, materiales: 0, ganancia: 0, reparacion: 0 };
   private construccionGananciaSuma = 0; private construccionGananciaN = 0;
   private construccionMaderaSuma = 0; private construccionMaderaN = 0;
@@ -425,6 +431,15 @@ export class InstrumentosConducta {
         }
         this.hogarAnterior.set(person.id, hogar);
         this.tiempoDia.set(person.action, (this.tiempoDia.get(person.action) ?? 0) + 1); this.personaTicksDia++;
+        if (person.action === 'approach') {
+          const motivo = person.reason.startsWith('Vuelve a un lugar conocido con agua, alimento, techo o cooperación;') ? 'hogar'
+            : person.reason.startsWith('Tiene reservas y busca ') ? 'reunion'
+            : person.reason.startsWith('Recuerda el vínculo con ') ? 'cortejo'
+            : person.reason.startsWith('Le apetece acercarse;') ? 'social'
+            : person.reason.startsWith('Percibe una invitación') ? 'invitacion'
+            : person.reason.startsWith('Recuerda el cuidado compartido en ') ? 'memoria' : 'otro';
+          this.approachMotivoTicksDia.set(motivo, (this.approachMotivoTicksDia.get(motivo) ?? 0) + 1);
+        }
         // El motivo exacto lo emite sólo `settlementOpportunity`, antes de cualquier recuerdo añadido.
         if (person.action === 'approach' && person.reason.startsWith('Vuelve a un lugar conocido con agua, alimento, techo o cooperación;')) this.approachHogarTicks++;
       }
@@ -560,6 +575,22 @@ export class InstrumentosConducta {
     }
     // T5/H4: cupo de nacimientos al cierre.
     const recientesCupo = world.people.filter(person => person.role === 'neighbor' && person.bornAt > world.tick - pop.intervaloComprobacionTicks).length;
+    // Sonda de solo lectura: el stock que habilita las ofertas observadas por ecoHacerDemanda.
+    const vecinos = world.people.filter(person => person.role === 'neighbor');
+    const lugaresVivos = new Set(world.places.map(place => place.id));
+    let personasConHabitoFuerte = 0, habitosFuertes = 0, fertiles = 0;
+    let oportunidadesFamiliares = 0, reunionesConReservas = 0;
+    for (const person of vecinos) {
+      const n = person.habits.filter(habit => habit.strength >= 0.5 && lugaresVivos.has(habit.placeId)).length;
+      habitosFuertes += n;
+      if (n > 0) personasConHabitoFuerte++;
+      if (reproductiveReadiness(world, person)) fertiles++;
+      const family = familyOpportunity(world, person);
+      if (family) {
+        oportunidadesFamiliares++;
+        if (person.inventory >= family.reserveTarget && family.partner.inventory >= 0.1) reunionesConReservas++;
+      }
+    }
     let totalIncrementos = 0;
     for (const person of world.people) {
       if (person.role !== 'neighbor') continue;
@@ -602,6 +633,9 @@ export class InstrumentosConducta {
       },
       ecoHacerDemanda: { decisiones: this.decisionesDia, ofrecidos: Object.fromEntries(this.ofrecidosDia),
         elegidos: Object.fromEntries(this.elegidosDia) },
+      approachDiagnostico: { vecinos: vecinos.length, personasConHabitoFuerte, habitosFuertes,
+        fertiles, oportunidadesFamiliares, reunionesConReservas,
+        ticksPorMotivo: Object.fromEntries(this.approachMotivoTicksDia) },
       ecoHacerConstruccion: {
         evaluaciones: this.construccionDia.admitida + this.construccionDia.cupo + this.construccionDia.materiales + this.construccionDia.ganancia + this.construccionDia.reparacion,
         admitidas: this.construccionDia.admitida,
@@ -621,6 +655,7 @@ export class InstrumentosConducta {
     for (const id of [...this.ticksPorPersona.keys()]) if (!vivos.has(id)) this.ticksPorPersona.delete(id);
     this.tiempoDia.clear(); this.personaTicksDia = 0; this.approachHogarTicks = 0;
     this.decisionesDia = 0; this.ofrecidosDia.clear(); this.elegidosDia.clear();
+    this.approachMotivoTicksDia.clear();
     this.construccionDia = { admitida: 0, cupo: 0, materiales: 0, ganancia: 0, reparacion: 0 };
     this.construccionGananciaSuma = 0; this.construccionGananciaN = 0;
     this.construccionMaderaSuma = 0; this.construccionMaderaN = 0;

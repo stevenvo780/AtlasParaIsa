@@ -34,7 +34,7 @@ const CLAVES_ANTIGUAS = new Set([
   'cooperacionAcumuladaPorTipo', 'otrasCooperacionesAcumuladas', 'conflictosAcumulados', 'faunaTotal',
   'p50Ms', 'p95Ms', 'rss',
 ]);
-const CLAVES_NUEVAS = ['natalidadLocal', 'diversidadConductaTiempo', 'diversidadConductaTiempoComponentes', 'diversidadConductaActiva', 'diversidadConductaActivaComponentes', 'diversidadConductaComponentes', 'diversidadConductaVentana', 'diversidadConductaVentanaComponentes', 'personasVentana', 'repartoTiempoPorAccion', 'repartoActividadPorAccion', 'vocacionVarianza', 'vocacionEntropiaArgmax', 'vocacionCoincidencia', 'diversidadConductaVentanaGen1', 'approachHogar', 'maderaMediaAdultos', 'piedraMediaAdultos', 'muertesMenores8Dias', 'cambiosHogar', 'diversidadPerfilesJS', 'linajesVivos', 'linajesHerfindahl', 'censoComunidades', 'repertorioAbierto', 'diversidadEntreGrupos', 'ecoHacerDemanda', 'ecoHacerConstruccion', 'ecoHacerStock', 'ecoHacerHerramientas', 'ecoHacerCupo'];
+const CLAVES_NUEVAS = ['natalidadLocal', 'diversidadConductaTiempo', 'diversidadConductaTiempoComponentes', 'diversidadConductaActiva', 'diversidadConductaActivaComponentes', 'diversidadConductaComponentes', 'diversidadConductaVentana', 'diversidadConductaVentanaComponentes', 'personasVentana', 'repartoTiempoPorAccion', 'repartoActividadPorAccion', 'vocacionVarianza', 'vocacionEntropiaArgmax', 'vocacionCoincidencia', 'diversidadConductaVentanaGen1', 'approachHogar', 'maderaMediaAdultos', 'piedraMediaAdultos', 'muertesMenores8Dias', 'cambiosHogar', 'diversidadPerfilesJS', 'linajesVivos', 'linajesHerfindahl', 'censoComunidades', 'repertorioAbierto', 'diversidadEntreGrupos', 'ecoHacerDemanda', 'approachDiagnostico', 'ecoHacerConstruccion', 'ecoHacerStock', 'ecoHacerHerramientas', 'ecoHacerCupo'];
 
 type Json = Record<string, unknown>;
 const readJson = (path: string): Json => JSON.parse(readFileSync(path, 'utf8')) as Json;
@@ -263,6 +263,11 @@ test('CLI: réplica corta con y sin instrumentos — digestoCanonico idéntico y
   assert.ok(reparto.personaTicks >= 2400 * 14, 'al menos los 14 fundadores mortales observados cada paso del día (hay nacimientos, pocas muertes)');
   assert.ok(Math.abs(Object.values(reparto.fracciones).reduce((s, x) => s + x, 0) - 1) < 1e-12);
   assert.deepEqual(Object.keys(reparto.fracciones), ACCIONES.filter(accion => accion in reparto.fracciones), 'claves en el orden fijo de ACCIONES');
+  const diagnostico = con.approachDiagnostico as { vecinos: number; personasConHabitoFuerte: number; habitosFuertes: number; reunionesConReservas: number; oportunidadesFamiliares: number; ticksPorMotivo: Record<string, number> };
+  assert.equal(diagnostico.vecinos, (con.vecinosMortales as number));
+  assert.ok(diagnostico.personasConHabitoFuerte <= diagnostico.habitosFuertes);
+  assert.ok(diagnostico.reunionesConReservas <= diagnostico.oportunidadesFamiliares);
+  assert.ok(Object.values(diagnostico.ticksPorMotivo).reduce((sum, n) => sum + n, 0) <= reparto.personaTicks);
   const foodShared = (con.cooperacionAcumuladaPorTipo as Json).foodShared as number;
   assert.ok(Number.isInteger(foodShared) && foodShared > 0);
   assert.deepEqual((con.repertorioAbierto as Json | null)?.usos ?? null,

@@ -173,13 +173,14 @@
   · **Control**: 2 400 pasos, digesto **idéntico** en 3 semillas; `tileAt` y `animals.terrainIndex` desaparecen del perfil (hoy 3,15 % y 2,16 %).
   · **Cierre**: digesto idéntico y las cuatro cifras (perfil de `tileAt`, perfil de `terrainIndex`, O(1) de `activate`, asignaciones por tick).
 
-- [ ] **T114** [P] [codex/gpt-5.6-sol · high] **Port de T013/T035 al SoA y paridad contra el kernel VIVO.**
+- [x] **T114** [P] [codex/gpt-5.6-sol · high] **Port de T013/T035 al SoA y paridad contra el kernel VIVO.**
   Añadir a `stepArrays` (`scripts/compute-ecology-core.mjs:56`) los tres escalares que le faltan: `decaimientoFertilidad` (T013, `ecosystem-kernel.ts:122`) y `seed`/`cuencas` con el gateo `enCuenca` (T035, `ecosystem-kernel.ts:130-138`). **`enCuenca` no son «tres escalares»**: exige reproducir `ruidoCuenca` → `unit` → `hash` con el desbordamiento de 32 bits de `Math.imul`, los `>>> 16/15` lógicos, la división por 2³², `Math.floor` con coordenadas negativas y el polinomio `fade` `t*t*t*(t*(t*6-15)+10)` en el mismo orden (`src/world/agua.ts:18-27,35-53`). Reapuntar `tests/compute-ecology.test.ts` al kernel **vivo**.
   · **Ficheros**: `scripts/compute-ecology-core.mjs`, `scripts/compute-ecology-worker.mjs`, `tests/compute-ecology.test.ts`.
   **El arnés de paridad compara el tick ecológico íntegro** (añadido 2026-09-19, refutación G4): lo que `stepWorld` ejecuta cada 10 ticks es `ecology()` **y luego** `EcosystemKernel.step`, en ese orden. El arnés debe comparar la composición de las dos, no solo el kernel, porque `food` lo escribe la primera y ninguna otra tarea lo cubría. El port de `ecology()` es de T120; aquí entra solo en el **oráculo**.
   · **Tests**: `Object.is` elemento a elemento con **cero** diferencias contra `ecology()` + `EcosystemKernel.step` de HEAD, con `cuencas` ∈ {1, 0,4} y `decaimientoFertilidad` ∈ {0, 0,001}; casos con `x`/`y` negativos y cruzando múltiplos de la escala del ruido.
   · **Control**: con los defaults (`decaimientoFertilidad=0`, `cuencas=1`) el resultado es bit a bit el del port congelado.
   · **Cierre**: cero diferencias en los cuatro cuadrantes de parámetros y el banco de T108 verde.
+  **Verificado 2026-09-27 (Muse, rama `sprint/t114-soa-20260927`):** paridad CPU 17/17 (3 CUDA omitidos sin `COMPUTE_NVRTC`), tastigo G4 del tick íntegro en mundo envejecido + bordes de cuenca, control congelado `50034301…`, banco T108 CPU `differentValues=0` en todos los casos, typecheck verde, suite 1636/1647 (2 rojos ajenos: `resumen-vivo` t14 preexistente en `main`, flake `bake-pixel` 7/7 aislado).
 
 - [ ] **T115** [claude opus · high] **Pool de workers y ecología cableada** (depende de T112 y T114).
   Pool persistente de `worker_threads` sobre `SharedArrayBuffer` (patrón de `CPUWorkers`, `compute-ecology-clients.mjs:17-27`), **colas estáticas por región** ordenadas por `regiónId` — **nada de *work stealing* hasta que el adversarial de T117 esté verde**. `stepEcosystem` reparte `[begin,end)` entre `motor.hilos` workers; el halo no se copia, se lee del buffer del vecino.

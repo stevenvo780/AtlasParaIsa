@@ -8,7 +8,7 @@ import { createWorld, type Person, type World } from '../src/world/index.js';
 import { demographicTraits, initialDemography, updateDemography } from '../src/world/demography.js';
 import { founderGenome, inheritGenome } from '../src/world/genetics.js';
 import { BROKEN_CONDITION } from '../src/world/inventions.js';
-import { advancePopulation, assertLegacyRecord, assertPopulation, MAX_LEGACY_CACHE, pruneBonds, RECENT_LEGACY_COUNT, referencedLegacy, retainLegacy } from '../src/world/lineage.js';
+import { advancePopulation, assertLegacyRecord, assertPopulation, pruneBonds, RECENT_LEGACY_COUNT, referencedLegacy, retainLegacy } from '../src/world/lineage.js';
 import { paramsOf } from '../src/world/params.js';
 
 function emitFor(world: World) {
@@ -149,7 +149,7 @@ test('retention keeps required identities plus exactly 32 recent deaths without 
   world.technology.recipes = Array.from({ length: 256 }, (_, index) => ({ id: `recipe-ref-${index}`, inventorId: `dead-${index + 66}` } as TechnologyRecipe));
   const queue = world.retiredLegacy, serialized = JSON.stringify(queue), required = referencedLegacy(world);
   retainLegacy(world);
-  assert.equal(world.legacy.length, 2 + 64 + 256 + RECENT_LEGACY_COUNT); assert.ok(world.legacy.length <= MAX_LEGACY_CACHE);
+  assert.equal(world.legacy.length, 2 + 64 + 256 + RECENT_LEGACY_COUNT);
   assert.ok([...required].every(id => world.legacy.some(record => record.id === id)));
   assert.ok(records.slice(-RECENT_LEGACY_COUNT).every(record => world.legacy.includes(record)));
   assert.equal(world.retiredLegacy, queue); assert.equal(JSON.stringify(queue), serialized); assertPopulation(world);
@@ -158,12 +158,25 @@ test('retention keeps required identities plus exactly 32 recent deaths without 
   retainLegacy(world); assert.equal(world.legacy.length, RECENT_LEGACY_COUNT); assert.equal(world.retiredLegacy.length, 1000);
 });
 
-test('cache pressure never silently drops a required identity', () => {
-  const { world } = scene(); alignClock(world, 1000);
-  world.legacy = Array.from({ length: MAX_LEGACY_CACHE + 1 }, (_, index) => legacy(index));
-  world.technology.recipes = world.legacy.map(record => ({ inventorId: record.id } as TechnologyRecipe));
-  const previous = world.legacy;
-  assert.throws(() => retainLegacy(world), /no se descartaron ancestros/); assert.equal(world.legacy, previous);
+test('more than 600 dead parents and inventors remain available while only 32 unrequired deaths stay recent', () => {
+  const { world, a } = scene(); alignClock(world, 2000);
+  const records = Array.from({ length: 800 }, (_, index) => legacy(index));
+  world.legacy = [...records]; world.retiredLegacy = [...records];
+  world.demographyDynamics.deaths = world.demographyDynamics.causes.dehydration = records.length;
+  a.genome = { ...a.genome, generation: 1, parents: ['dead-0', 'dead-1'] };
+  world.blueprints = Array.from({ length: 300 }, (_, index) => ({ ...world.blueprints[0]!, id: `blueprint-ref-${index}`, inventorId: `dead-${index + 2}` }));
+  world.technology.recipes = Array.from({ length: 320 }, (_, index) => ({ id: `recipe-ref-${index}`, inventorId: `dead-${index + 302}` } as TechnologyRecipe));
+  const required = referencedLegacy(world), queue = world.retiredLegacy, queueBefore = JSON.stringify(queue);
+  assert.equal(required.size, 622);
+  retainLegacy(world);
+  const kept = new Set(world.legacy.map(record => record.id));
+  const expected = new Set([...required, ...records.slice(-RECENT_LEGACY_COUNT).map(record => record.id)]);
+  assert.deepEqual(kept, expected);
+  assert.equal(world.legacy.length, 622 + RECENT_LEGACY_COUNT);
+  assert.equal([...kept].filter(id => !required.has(id)).length, RECENT_LEGACY_COUNT);
+  assert.equal(world.retiredLegacy, queue); assert.equal(JSON.stringify(queue), queueBefore);
+  assertPopulation(world);
+  const once = [...world.legacy]; retainLegacy(world); assert.deepEqual(world.legacy, once);
 });
 
 test('legacy validation rejects future evidence, genetic inconsistencies, malformed IDs and extra data', () => {

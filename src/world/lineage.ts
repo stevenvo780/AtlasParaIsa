@@ -10,7 +10,6 @@ import { tileAt } from './spatial.js';
 import { BROKEN_CONDITION } from './inventions.js';
 
 export const RECENT_LEGACY_COUNT = 32;
-export const MAX_LEGACY_CACHE = 600;
 const CAUSES: readonly DemographicDeathCause[] = ['starvation', 'dehydration', 'exposure', 'senescence'];
 const TRAIT_KEYS = ['resilience', 'foodDemand', 'waterDemand', 'maturityAge', 'fertilityCooldown', 'senescenceStart', 'maximumAge'] as const;
 /** Rasgos que sólo dependen del genoma: se recalculan aquí aunque no haya mundo a mano. Los dos que
@@ -81,12 +80,11 @@ export function retainLegacy(world: World): void {
   const newest = [...records.values()].sort((a, b) => b.diedAt - a.diedAt || a.id.localeCompare(b.id));
   const recent = new Set(newest.slice(0, RECENT_LEGACY_COUNT).map(record => record.id));
   const retained = newest.filter(record => required.has(record.id) || recent.has(record.id));
-  if (retained.length > MAX_LEGACY_CACHE) throw new Error('Las referencias vivas exceden el límite del caché de identidades; no se descartaron ancestros requeridos.');
   world.legacy = retained;
 }
 
 export function assertPopulation(world: World): void {
-  if (!integer(world.tick) || !Array.isArray(world.people) || !Array.isArray(world.legacy) || !Array.isArray(world.retiredLegacy) || world.legacy.length > MAX_LEGACY_CACHE) fail();
+  if (!integer(world.tick) || !Array.isArray(world.people) || !Array.isArray(world.legacy) || !Array.isArray(world.retiredLegacy)) fail();
   const alive = new Set<string>();
   for (const person of world.people) {
     const state = person.demography;

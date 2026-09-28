@@ -236,3 +236,37 @@ fundación de reglas 11; elevar la admisión no funda grupos nuevos por sí mism
 persistencia y recarga de nueve comunidades con un perfil host. La prueba 2 M bajo
 `MemoryMax=8G`, `MemorySwapMax=0` y dos procesos secuenciales quedó registrada fuera
 del repositorio en `/datos/tmp-atlas-lab/balance/t100-2m-procesos-20260928/`.
+
+## Caché de identidades fallecidas requerido por el mundo (2026-09-28)
+
+`MAX_LEGACY_CACHE = 600` era un tope de software ajeno a la admisión del mundo:
+`retainLegacy` conservaba progenitores de vivos e inventores de planos o recetas,
+pero lanzaba una excepción cuando ese conjunto, junto con los recientes, superaba
+600. Ocho réplicas CUPO6/CUPO20 de alrededor de 500–1100 habitantes encontraron
+ese estado tras olas de muertes. El número fijo impedía avanzar un mundo válido sin
+señalar falta de memoria del anfitrión.
+
+La retención conserva todas las identidades fallecidas que esas referencias vivas
+requieren y, además, las 32 fallecidas más recientes del conjunto. Si alguna de
+esas 32 ya es requerida, se agregan menos de 32 no requeridas. El tope de
+32 se aplica sólo a esta ventana de lectura; ninguna identidad requerida se expulsa
+para cumplirlo. La cola de registros inmutables por archivar y las vidas ya guardadas
+en SQLite permanecen completas. La cantidad residente de identidades requeridas
+sale de las referencias reales, que crecen con el mundo admitido; su coste de RAM
+lo limita en la práctica el hardware y se observa en las medidas del proceso. El
+gobernador regula el crecimiento por latencia, no mide ni garantiza la RAM.
+Esta decisión no añade una clave `limites.*` ni consulta el
+hardware durante la simulación, la carga o la migración: evita alterar los params
+persistidos y sus digestos para reparar una restricción del caché, no una ley de
+admisión. Tampoco cambia natalidad, mortalidad, parentesco ni autoría.
+
+El formato de `LegacyRecord`, las instantáneas y el archivo SQLite no cambian.
+Una instantánea anterior con hasta 600 entradas sigue siendo legible; una nueva
+puede tener más cuando sus referencias lo exigen. Un binario anterior conserva su
+rechazo al superar 600 y, por tanto, no se promete reversión a ese binario para
+esos mundos. La corrección no promete memoria o disco ilimitados: una población y
+un catálogo grandes pueden mantener muchas identidades requeridas y consumir RAM;
+las biografías históricas archivadas siguen consumiendo almacenamiento durable.
+La regresión, la paridad de digestos, la continuación CUPO20, la carga de una copia
+del respaldo público y los gates de tipo y suite se informan en el balance de esta
+corrección cuando sus resultados estén medidos.

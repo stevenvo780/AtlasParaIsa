@@ -78,8 +78,9 @@ export function hostMemory(): HostMemory {
  * de ahí salen regiones ENTERAS (`presupuesto / (BYTES_PER_ACTIVE_TILE · 256 teselas)`) y de ellas,
  * las teselas y la fauna (6 animales por tesela, ley estructural). Nunca por debajo de los
  * defaults deterministas de hoy: una máquina pequeña no puede rechazar un mundo que el
- * binario anterior aceptaba. `comunidades` NO se deriva del hardware: desde T100 ese número
- * es además el tope de fundación de `society.ts`, y la máquina no decide conductas.
+ * binario anterior aceptaba. Las comunidades ADMITIDAS siguen el presupuesto de teselas:
+ * este tope sólo valida el estado. La fundación lee por separado `social.maxComunidades`
+ * (ley de reglas 11), por lo que la máquina nunca decide esa conducta.
  */
 export function hostLimits(memory: HostMemory): WorldLimits {
   const budget = Math.min(Math.min(positive(memory.fisicaBytes), positive(memory.cgroupBytes)) * HOST_RAM_SHARE,
@@ -87,7 +88,7 @@ export function hostLimits(memory: HostMemory): WorldLimits {
   const chunks = Math.max(DEFAULT_PARAMS.limites.chunks,
     Number.isFinite(budget) ? Math.floor(budget / (BYTES_PER_ACTIVE_TILE * TILES_PER_CHUNK)) : 0);
   const teselasActivas = chunks * TILES_PER_CHUNK;
-  return { teselasActivas, chunks, comunidades: DEFAULT_PARAMS.limites.comunidades, fauna: teselasActivas * MAX_ANIMALS_PER_TILE };
+  return { teselasActivas, chunks, comunidades: teselasActivas, fauna: teselasActivas * MAX_ANIMALS_PER_TILE };
 }
 
 /** Precedencia: defaults deterministas → límites resueltos aquí → overrides explícitos del

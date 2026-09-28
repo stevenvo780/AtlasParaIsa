@@ -144,6 +144,7 @@ test('T100: un mundo nuevo del host/laboratorio persiste límites efectivos supe
   const expected = hostLimits(memory);
   assert.ok(expected.teselasActivas > LEGACY_WORLD_LIMITS.teselasActivas);
   assert.ok(expected.chunks > LEGACY_WORLD_LIMITS.chunks);
+  assert.ok(expected.comunidades > LEGACY_WORLD_LIMITS.comunidades);
   assert.ok(expected.fauna > LEGACY_WORLD_LIMITS.fauna);
 
   // La misma entrada hostParams alimenta la creación lazy del servidor y las réplicas del laboratorio.
@@ -151,9 +152,15 @@ test('T100: un mundo nuevo del host/laboratorio persiste límites efectivos supe
   const world = createWorld(42, params);
   assert.equal(mode(paramsOf(world)), 'parametros');
   assert.deepEqual(numeric(limitsOf(world)), expected, 'RAW_HISTORICAL no limita la admisión del mundo nuevo');
+  assert.equal(paramsOf(world).social.maxComunidades, 8, 'la ley de fundación sigue separada de la admisión');
   assert.equal(paramsOf(world).social.disputaNecesidad, DEFAULT_PARAMS.social.disputaNecesidad);
   assert.notEqual(paramsOf(world).social.disputaNecesidad, HISTORICAL_PARAMS.social.disputaNecesidad,
     'RAW_HISTORICAL tampoco aporta las leyes de un mundo nuevo');
+
+  world.communities = Array.from({ length: 9 }, (_, index) => ({ id: `host-${index}`, name: `Grupo ${index}`, x: 17, y: 13,
+    color: '#ffffff', members: [], culture: { sharing: 0, stewardship: 0, openness: 0 }, formedAt: 0, cooperation: 0, disputes: 0 }));
+  world.communityCounter = 9;
+  assertWorld(world);
 
   const lab = laboratory(t, false);
   lab.store.save(world);
@@ -161,6 +168,7 @@ test('T100: un mundo nuevo del host/laboratorio persiste límites efectivos supe
     { version: 2, aplicacion: 'parametros', ...expected });
   const resumed = lab.reopen().load()!.world;
   assert.equal(mode(paramsOf(resumed)), 'parametros');
+  assert.equal(resumed.communities.length, 9, 'un mundo nuevo admite más de ocho comunidades');
   assert.deepEqual(numeric(limitsOf(resumed)), expected, 'el límite del host queda persistido, no se recalcula al cargar');
 });
 

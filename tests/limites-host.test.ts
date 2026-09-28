@@ -20,7 +20,7 @@ const chunksFor = (budget: number): number => Math.floor(budget / (BYTES_PER_ACT
 test('T100/4b: la fórmula sale de la memoria del host y produce regiones enteras', () => {
   const memory: HostMemory = { fisicaBytes: 128 * GiB, heapBytes: 4 * GiB };
   const chunks = chunksFor(Math.min(memory.fisicaBytes * HOST_RAM_SHARE, memory.heapBytes * HEAP_SHARE));
-  assert.deepEqual(hostLimits(memory), { teselasActivas: chunks * 256, chunks, comunidades: 8, fauna: chunks * 256 * 6 });
+  assert.deepEqual(hostLimits(memory), { teselasActivas: chunks * 256, chunks, comunidades: chunks * 256, fauna: chunks * 256 * 6 });
   // Caso SINTÉTICO (128 GiB de RAM con heap de 4 GiB), no «los límites de esta torre»: aquí
   // manda el heap, y el heap depende de `NODE_OPTIONS`. Los números reales del host los mide
   // la prueba de abajo, que no los fija porque cambian con la máquina y con el arranque.
@@ -34,13 +34,21 @@ test('T100/4b: la fórmula sale de la memoria del host y produce regiones entera
   assert.equal(hostLimits(acotada).chunks, chunksFor(8 * GiB * HOST_RAM_SHARE));
 });
 
-test('T100/4b: nunca por debajo de los defaults, ni comunidades derivadas del hardware', () => {
+test('T100/4b: los mínimos históricos no limitan la admisión comunitaria de mundos nuevos', () => {
   for (const memory of [{ fisicaBytes: 64 * 1024 ** 2, heapBytes: 64 * 1024 ** 2 },
     { fisicaBytes: 0, heapBytes: 0 }, { fisicaBytes: Number.NaN, heapBytes: Number.POSITIVE_INFINITY },
-    { fisicaBytes: -1, heapBytes: -1, cgroupBytes: Number.NaN }] as HostMemory[])
-    assert.deepEqual(hostLimits(memory), LEGACY_WORLD_LIMITS, JSON.stringify(memory));
-  for (const memory of [{ fisicaBytes: 8 * GiB, heapBytes: 8 * GiB }, { fisicaBytes: 512 * GiB, heapBytes: 512 * GiB }] as HostMemory[])
-    assert.equal(hostLimits(memory).comunidades, DEFAULT_PARAMS.limites.comunidades);
+    { fisicaBytes: -1, heapBytes: -1, cgroupBytes: Number.NaN }] as HostMemory[]) {
+    const limits = hostLimits(memory);
+    assert.equal(limits.teselasActivas, LEGACY_WORLD_LIMITS.teselasActivas, JSON.stringify(memory));
+    assert.equal(limits.chunks, LEGACY_WORLD_LIMITS.chunks, JSON.stringify(memory));
+    assert.equal(limits.fauna, LEGACY_WORLD_LIMITS.fauna, JSON.stringify(memory));
+    assert.equal(limits.comunidades, limits.teselasActivas, JSON.stringify(memory));
+  }
+  for (const memory of [{ fisicaBytes: 8 * GiB, heapBytes: 8 * GiB }, { fisicaBytes: 512 * GiB, heapBytes: 512 * GiB }] as HostMemory[]) {
+    const limits = hostLimits(memory);
+    assert.equal(limits.comunidades, limits.teselasActivas);
+    assert.ok(limits.comunidades > DEFAULT_PARAMS.social.maxComunidades);
+  }
   assertWorldLimits(hostLimits(hostMemory()));
 });
 
@@ -133,6 +141,7 @@ test('T100/4b: los números del host son los de ESTA máquina y ESTE heap, no un
   const budget = Math.min(Math.min(memory.fisicaBytes, memory.cgroupBytes ?? Infinity) * HOST_RAM_SHARE, memory.heapBytes * HEAP_SHARE);
   assert.equal(limits.chunks, Math.max(DEFAULT_PARAMS.limites.chunks, chunksFor(budget)));
   assert.equal(limits.teselasActivas, limits.chunks * 256);
+  assert.equal(limits.comunidades, limits.teselasActivas);
   assert.equal(limits.fauna, limits.teselasActivas * 6);
   // El techo depende del heap configurado: con `--max-old-space-size` distinto, el MISMO
   // host admite otro mundo. Por eso el contrato registra heap y RAM junto a cada cifra.

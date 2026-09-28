@@ -220,3 +220,19 @@ era falsa), cierre y reapertura del SQLite, digesto completo idéntico y las cif
 `src/world` (regla 2) ni servir de nada sin conectarlo, pero **debía declararse antes, no después**.
 Aviso para el gate (regla 12): **T104 también edita `src/server/app.ts`**, en `stepOnce` y en la ruta
 `SessionRevoked`. Los bloques son disjuntos de los de aquí, pero el merge los verá en el mismo fichero.
+
+## Cierre funcional autorizado, 2026-09-28
+
+Steven, por medio del orquestador, aceptó para T100 la interpretación funcional de los
+guards de admisión. `RAW_HISTORICAL` conserva 65 536 teselas, 256 chunks, 8 comunidades y
+393 216 animales para instantáneas antiguas sin `limitsProfile` y como base determinista
+de `createWorld` directo; no fija los límites de un mundo nuevo creado por servidor o
+laboratorio, pues esas dos rutas usan `hostParams`. En esos mundos, el
+anfitrión deriva teselas, chunks y fauna de su presupuesto de memoria, y deriva la
+admisión de comunidades del mismo presupuesto (`comunidades = teselasActivas`). Esa
+admisión sólo valida estado. `social.maxComunidades=8` conserva por separado la ley de
+fundación de reglas 11; elevar la admisión no funda grupos nuevos por sí mismo.
+`tests/limites-legacy-mode.test.ts` prueba el contraste de los dos modos, incluida la
+persistencia y recarga de nueve comunidades con un perfil host. La prueba 2 M bajo
+`MemoryMax=8G`, `MemorySwapMax=0` y dos procesos secuenciales quedó registrada fuera
+del repositorio en `/datos/tmp-atlas-lab/balance/t100-2m-procesos-20260928/`.

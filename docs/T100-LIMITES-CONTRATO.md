@@ -223,7 +223,7 @@ Aviso para el gate (regla 12): **T104 también edita `src/server/app.ts`**, en `
 
 ## Cierre funcional autorizado, 2026-09-28
 
-Steven, por medio del orquestador, aceptó para T100 la interpretación funcional de los
+El orquestador (Claude, por el encargo de Steven de orquestar el 28-09) aceptó para T100 la interpretación funcional de los
 guards de admisión. `RAW_HISTORICAL` conserva 65 536 teselas, 256 chunks, 8 comunidades y
 393 216 animales para instantáneas antiguas sin `limitsProfile` y como base determinista
 de `createWorld` directo; no fija los límites de un mundo nuevo creado por servidor o

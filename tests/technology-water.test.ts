@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { Store } from '../src/server/store.js';
 import { decodeSnapshot, encodeSnapshot } from '../src/server/snapshot.js';
 import { assertWorld, cloneWorld, createWorld, migrateWorld, RULES_VERSION, stepWorld, type World } from '../src/world/index.js';
+import { digestoCanonico } from '../src/world/digesto.js';
 import { assertTechnology, projectTechnology, researchTechnology, settleTechnologyEstate, technologyWorkCost, transferTechnologyItem, useTool,
   type TechnologyProgram } from '../src/world/technology.js';
 import { assertWaterExecution, carriedTechnologyMass, containedWaterQuanta, drinkContainedWater, fillContainedWater,
@@ -98,6 +99,33 @@ test('paid hollow properties fill from finite local water, retain fractional sou
   assert.equal(world.technology.recipes[0]!.utility, thirst - actor.thirst);
   nextTick(world); assert.equal(drinkContainedWater(world, actor), 0);
   balanced(world); assertWorld(world);
+});
+
+test('a quantized fill from a nearly depleted source closes at zero without a negative receipt', () => {
+  const lab = fixture(), { world, item, tile } = lab;
+  const store = new Store(':memory:');
+  try {
+    store.save(world);
+    // HOG-2010 at tick 59363: multiplying this double by 50_000 rounds up to 160.
+    tile.drinkingWater = 0.0031999999999999997;
+    assert.equal(fill(lab), 160);
+    assert.equal(tile.drinkingWater, 0);
+    const receipt = world.technology.history.at(-1)!;
+    assert.equal(receipt.water?.action, 'fill');
+    assert.deepEqual(receipt.water?.source, { x: tile.x, y: tile.y, opening: 0.0031999999999999997, closing: 0 });
+    assert.equal(item.contents?.water, 160);
+    balanced(world); assertWorld(world);
+    const forged = structuredClone(receipt);
+    forged.water!.source!.closing = -0.001;
+    assert.throws(() => assertWaterExecution(forged), /contained water/, 'the source guard still rejects a material overdraft');
+    store.save(world);
+    const archived = store.technologyArchive.getExecution(receipt.id, world.tick)!;
+    assert.deepEqual(archived.water?.source, receipt.water?.source);
+    const restored = store.load()!.world;
+    assert.equal(digestoCanonico(restored), digestoCanonico(world));
+    assert.deepEqual(restored.technology.history.at(-1)?.water, receipt.water);
+    balanced(restored); assertWorld(restored);
+  } finally { store.close(); }
 });
 
 test('absence of containment, water, local ownership, effort or carrying room cannot create liquid or hydration', () => {

@@ -253,7 +253,9 @@ export function fillContainedWater(host: TechnologyHost, actor: WaterActor, item
   room(host); const opening = containedWaterStock(actor), energy = flow.workSpent * WATER_WORK_ENERGY;
   account(host, { filled: flow.movedQuanta, work: flow.workSpent, energy });
   // Keep the original fractional environmental remainder; quantization only limits extraction.
-  tile.drinkingWater = before - flow.movedQuanta / WATER_QUANTA_PER_UNIT;
+  // Quantized withdrawal can exceed the floating representation of an exact
+  // source multiple by one rounding ulp; a depleted source remains zero.
+  tile.drinkingWater = Math.max(0, before - flow.movedQuanta / WATER_QUANTA_PER_UNIT);
   item.contents = { version: 1, water: flow.destinationWater, leakRemainder: item.contents?.leakRemainder ?? 0, lastTick: host.tick };
   actor.technology.waterActionAt = host.tick;
   exertBody(actor, { energy, fatigue: flow.workSpent * WATER_WORK_FATIGUE });

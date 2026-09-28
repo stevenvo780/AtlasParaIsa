@@ -1061,7 +1061,16 @@ function bodyAndAction(world: World, person: Person): void {
   if (person.action === 'share') share(world, person);
   if (['research','craft'].includes(person.action) && distance(person,person.target)<0.5) {
     const before = person.technology.attempts;
-    const completed = person.action === 'research' ? researchTechnology(world,person,event=>addEvent(world,event)) : craftTechnology(world,person,technologyOpportunity(world,person)?.recipeId,event=>addEvent(world,event));
+    // Vía rápida (sprint perf-paso): continuar un proyecto con los umbrales de `technologyOpportunity`
+    // superados devuelve demostrablemente `project.recipeId`; se evita resolver de nuevo todas las
+    // recetas conocidas sólo para ese dato. En cualquier otro caso se reevalúa como siempre.
+    const project = person.technology.project;
+    const recipeId = person.action === 'craft'
+      ? (project && person.energy >= 0.3 && person.fatigue <= 0.72 && Math.max(person.hunger ?? 0, person.thirst ?? 0) <= 0.78
+        ? project.recipeId ?? undefined
+        : technologyOpportunity(world,person)?.recipeId)
+      : undefined;
+    const completed = person.action === 'research' ? researchTechnology(world,person,event=>addEvent(world,event)) : craftTechnology(world,person,recipeId,event=>addEvent(world,event));
     if (person.technology.attempts > before) {
       outcome(world,person,person.action,completed?0.12:-0.12,completed);
       if (person.command?.order === person.action) { person.command=null; person.controlMode='auto'; }

@@ -188,12 +188,13 @@
   · **Control**: 1 M celdas dentro del motor: **47,30 ms (1 hilo) → ≤ 20 ms (8 workers)**; digesto idéntico en 3 semillas y 5 recuentos de hilos.
   · **Cierre**: la cifra alcanzada, digesto idéntico y `motor.hilos=1` revirtiendo exactamente al camino de hoy.
 
-- [ ] **T116** [P] [grok/grok-4.6 · high] **Máscara de fauna calculada en el coordinador.**
+- [x] **T116** [P] [grok/grok-4.6 · high] **Máscara de fauna calculada en el coordinador.**
   Hoy `stepAnimals` ordena canónicamente toda la fauna y toma la ventana con el módulo de la población **global** (`animals.ts:285-289`). Extraer eso a una función del coordinador que produce `selectedIds` **una sola vez por paso** y repartirlo a las regiones como **máscara de solo lectura**. **PROHIBIDO** el offset por región: cambia qué animales piensan en qué tick. Además dejar escrito en el código que el pase de `move` (`animals.ts:186,191-195`) es una **cadena secuencial** —liberar una celda habilita la entrada de otro— y permanece en la fase serial.
   · **Ficheros**: `src/world/animals.ts` (solo la selección y el gateo), `tests/fauna-mascara.test.ts` (nuevo).
   · **Tests**: la máscara coincide exactamente con la ventana de hoy para 1 000 ticks y 3 poblaciones de fauna; con la máscara repartida entre 1 y 8 particiones, el resultado es idéntico.
   · **Control**: 2 400 pasos, `digestoCanonico` **idéntico** (es reordenar el cálculo, no cambiar la regla).
   · **Cierre**: digesto idéntico y el coste del sort medido (`O(A log A)`, ≤ 1 % del paso a 10⁵ animales).
+  **Verificado 2026-09-27 (Muse, rama `sprint/t116-fauna-20260927`):** `fauna-mascara` 12/12; digesto idéntico (rama = `main`, identidad cubierta por los tests incl. clon); coste orden/paso a 10⁵ reproducido: persistente 0,67 % sin cría / 0,86 % con cría (≤1 % CUMPLE), clon 1,53 % / 1,54 % (NO CUMPLE, coherente con el informe: pendiente heredar el certificado en `cloneWorld`, fuera de T116, para el gate B); typecheck verde; suite 1637/1647 (único rojo: `resumen-vivo` t14, preexistente en `main`).
 
 - [ ] **T117** [claude opus · xhigh] **`tests/determinismo-hardware.test.ts` — la prueba que sostiene la feature.**
   4 semillas (`7, 51926, 104729, 20260919`) × **7 escenas** × backends `{hilos:1|2|4|8|28}`, **`{orden:'adversarial'}`** y (etapa C) `{gpu:[0]}`, `{gpu:[1]}`, `{gpu:[0,1]}`. **El backend adversarial** ejecuta las particiones en **orden inverso**, con un **número de hilos distinto en cada paso** y con **retardos de reloj real** entre ellas: sin él la prueba solo demuestra que 28 hilos coinciden *hoy*. Modo corto (600 pasos) dentro de `npm test`; modo largo (2 400 pasos) tras bandera. **Sin CUDA, los backends de GPU se marcan `skipped` con motivo; nunca `passed`.**

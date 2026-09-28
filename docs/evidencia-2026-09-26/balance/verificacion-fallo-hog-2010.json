@@ -1,0 +1,244 @@
+{
+  "tipo": "verificacion_fallo_hog_2010",
+  "estado": "rojo",
+  "veredicto": "fallo_repetido_acreditado",
+  "fuentes": {
+    "archivado": "/datos/tmp-atlas-lab/datos-lab/c8panel/parciales-20260924/HOG-2010",
+    "nuevo": "/datos/tmp-atlas-lab/datos-lab/c8panel/HOG-2010"
+  },
+  "normalizacion": "Quita recursivamente p50Ms, p95Ms, rss y toda clave terminada en Ms; JSON con claves ordenadas y separadores compactos; SHA-256 de UTF-8.",
+  "inventarios": {
+    "archivado": {
+      "dias": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24
+      ],
+      "nombresMalFormados": [],
+      "dia025Ausente": true,
+      "dia060Ausente": true,
+      "replicaFinalAusente": true
+    },
+    "nuevo": {
+      "dias": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24
+      ],
+      "nombresMalFormados": [],
+      "dia025Ausente": true,
+      "dia060Ausente": true,
+      "replicaFinalAusente": true
+    }
+  },
+  "comprobaciones": {
+    "conjuntosDiasIguales": true,
+    "ambosExactamenteDias001a024": true,
+    "diasCanonicos001a024Iguales": true,
+    "ambosSinDia025Dia060NiReplicaFinal": true,
+    "ambosLogsConMensajeLiteral": true
+  },
+  "huellasDias": [
+    {
+      "dia": 1,
+      "sha256Archivado": "419c5744a8ec49e1d9fd6d7b7046349a89007de344bdea19c32dc821495471c9",
+      "sha256Nuevo": "419c5744a8ec49e1d9fd6d7b7046349a89007de344bdea19c32dc821495471c9",
+      "iguales": true
+    },
+    {
+      "dia": 2,
+      "sha256Archivado": "edd416502dddf5cf79fde984c00a4f46fd19339ba96ad414493ddcfe1a606661",
+      "sha256Nuevo": "edd416502dddf5cf79fde984c00a4f46fd19339ba96ad414493ddcfe1a606661",
+      "iguales": true
+    },
+    {
+      "dia": 3,
+      "sha256Archivado": "b1df6c34990ec42f5442e0b2d0fdb816f8730e710589cc495b74be14971507d2",
+      "sha256Nuevo": "b1df6c34990ec42f5442e0b2d0fdb816f8730e710589cc495b74be14971507d2",
+      "iguales": true
+    },
+    {
+      "dia": 4,
+      "sha256Archivado": "291291ac0ea3a370d4f0bd306319bd78975d118911499e6a81d60d8e64c8b5eb",
+      "sha256Nuevo": "291291ac0ea3a370d4f0bd306319bd78975d118911499e6a81d60d8e64c8b5eb",
+      "iguales": true
+    },
+    {
+      "dia": 5,
+      "sha256Archivado": "e431d16ee497175b4a096dd96d3f7a6b7bac9d6726e345ba9e4eeb31cd86a543",
+      "sha256Nuevo": "e431d16ee497175b4a096dd96d3f7a6b7bac9d6726e345ba9e4eeb31cd86a543",
+      "iguales": true
+    },
+    {
+      "dia": 6,
+      "sha256Archivado": "cfdc0f84dd0edf0601b2b3cb2a9879c02b5da58e05acc42f42b55609430dd7e0",
+      "sha256Nuevo": "cfdc0f84dd0edf0601b2b3cb2a9879c02b5da58e05acc42f42b55609430dd7e0",
+      "iguales": true
+    },
+    {
+      "dia": 7,
+      "sha256Archivado": "e64ec7758b190dbaa7ec29e7312d858441c31e7be802fd8e0ecf8bb3e8de1a4e",
+      "sha256Nuevo": "e64ec7758b190dbaa7ec29e7312d858441c31e7be802fd8e0ecf8bb3e8de1a4e",
+      "iguales": true
+    },
+    {
+      "dia": 8,
+      "sha256Archivado": "2d8a5de809c993df9249455f53524434e9c0c610afa23692ab7748c4f7a63ba2",
+      "sha256Nuevo": "2d8a5de809c993df9249455f53524434e9c0c610afa23692ab7748c4f7a63ba2",
+      "iguales": true
+    },
+    {
+      "dia": 9,
+      "sha256Archivado": "e1ce4d50d6e8a8de5d556d904e773eb3a976a6ef9f5689f048953dd1ba372a53",
+      "sha256Nuevo": "e1ce4d50d6e8a8de5d556d904e773eb3a976a6ef9f5689f048953dd1ba372a53",
+      "iguales": true
+    },
+    {
+      "dia": 10,
+      "sha256Archivado": "62ec9d572de63860ab0bce4f5bdcafbaa38190e1b9a8c39ddec27b6102484d09",
+      "sha256Nuevo": "62ec9d572de63860ab0bce4f5bdcafbaa38190e1b9a8c39ddec27b6102484d09",
+      "iguales": true
+    },
+    {
+      "dia": 11,
+      "sha256Archivado": "c0a741d4406ba31093ab57f458c098661d35f43de52bc4fb16f1d90041854993",
+      "sha256Nuevo": "c0a741d4406ba31093ab57f458c098661d35f43de52bc4fb16f1d90041854993",
+      "iguales": true
+    },
+    {
+      "dia": 12,
+      "sha256Archivado": "6ba0c18ec7b26b401ba4dc339b3ea6eef84ac9d5b242f35269a09db2118e14a2",
+      "sha256Nuevo": "6ba0c18ec7b26b401ba4dc339b3ea6eef84ac9d5b242f35269a09db2118e14a2",
+      "iguales": true
+    },
+    {
+      "dia": 13,
+      "sha256Archivado": "af1e990824d4a5e7bda75460e0a57beebf8c6318334a8af9fcb99b5665636874",
+      "sha256Nuevo": "af1e990824d4a5e7bda75460e0a57beebf8c6318334a8af9fcb99b5665636874",
+      "iguales": true
+    },
+    {
+      "dia": 14,
+      "sha256Archivado": "644f0b5d88c8c36aae2d3ff0e439d85a83dd0a594903afc1d7a0669571da73d8",
+      "sha256Nuevo": "644f0b5d88c8c36aae2d3ff0e439d85a83dd0a594903afc1d7a0669571da73d8",
+      "iguales": true
+    },
+    {
+      "dia": 15,
+      "sha256Archivado": "7fa2f4e7e95b4bf95682aeb052cb2ff12eb470ea7702d2502daec56c7ea1b689",
+      "sha256Nuevo": "7fa2f4e7e95b4bf95682aeb052cb2ff12eb470ea7702d2502daec56c7ea1b689",
+      "iguales": true
+    },
+    {
+      "dia": 16,
+      "sha256Archivado": "ea1ae70bf9a63333da385901f5b4f5eae3d0dc0fefb8d491eb33af700b3deb57",
+      "sha256Nuevo": "ea1ae70bf9a63333da385901f5b4f5eae3d0dc0fefb8d491eb33af700b3deb57",
+      "iguales": true
+    },
+    {
+      "dia": 17,
+      "sha256Archivado": "57225879d1f91836ed74b98cdb8ce333c4bbe35f82a0f415d6f00286bb284515",
+      "sha256Nuevo": "57225879d1f91836ed74b98cdb8ce333c4bbe35f82a0f415d6f00286bb284515",
+      "iguales": true
+    },
+    {
+      "dia": 18,
+      "sha256Archivado": "35492b9844b8e3e3629ac7b0cd2f5301eceffea44858f0fb8ac87b06433342bc",
+      "sha256Nuevo": "35492b9844b8e3e3629ac7b0cd2f5301eceffea44858f0fb8ac87b06433342bc",
+      "iguales": true
+    },
+    {
+      "dia": 19,
+      "sha256Archivado": "8fb4f50f97e2f15f6c0277d652cbb4dc27bcc42fd178f5eb595a448b9cb5da2b",
+      "sha256Nuevo": "8fb4f50f97e2f15f6c0277d652cbb4dc27bcc42fd178f5eb595a448b9cb5da2b",
+      "iguales": true
+    },
+    {
+      "dia": 20,
+      "sha256Archivado": "3e18d3036cc685b18f41d72bc24581f2ade12020589b970f8931ce1acfa9f29e",
+      "sha256Nuevo": "3e18d3036cc685b18f41d72bc24581f2ade12020589b970f8931ce1acfa9f29e",
+      "iguales": true
+    },
+    {
+      "dia": 21,
+      "sha256Archivado": "0f74a7a650b0df8f7c873b80c766d8a1711058ac5b20b4011bc8bd4e66392879",
+      "sha256Nuevo": "0f74a7a650b0df8f7c873b80c766d8a1711058ac5b20b4011bc8bd4e66392879",
+      "iguales": true
+    },
+    {
+      "dia": 22,
+      "sha256Archivado": "0037caf210582c765648bb6db9e6aefeebb580e5166fdd4665cef6579d5c31c8",
+      "sha256Nuevo": "0037caf210582c765648bb6db9e6aefeebb580e5166fdd4665cef6579d5c31c8",
+      "iguales": true
+    },
+    {
+      "dia": 23,
+      "sha256Archivado": "b324e16ec63b70bf4266fcacb49112143602153896c20cd65152b0aa52269eb8",
+      "sha256Nuevo": "b324e16ec63b70bf4266fcacb49112143602153896c20cd65152b0aa52269eb8",
+      "iguales": true
+    },
+    {
+      "dia": 24,
+      "sha256Archivado": "8fb951049a9d3fc938ba90ba234c116d8eec96cb3b55891f334fecfc2a30ac95",
+      "sha256Nuevo": "8fb951049a9d3fc938ba90ba234c116d8eec96cb3b55891f334fecfc2a30ac95",
+      "iguales": true
+    }
+  ],
+  "huellasLogs": {
+    "archivado": {
+      "ruta": "/datos/tmp-atlas-lab/datos-lab/c8panel/parciales-20260924/HOG-2010.log",
+      "sha256": "1158bdfeac8f7b371216ce7454e766735fbce5e0ec01a9a961eeab4ccf87da2a",
+      "bytes": 511,
+      "mensajeLiteralPresente": true
+    },
+    "nuevo": {
+      "ruta": "/datos/tmp-atlas-lab/datos-lab/c8panel/HOG-2010.log",
+      "sha256": "a799324895bac2fa9746e9c0919478c6b994b3cc680507d6efb56029ddb04f72",
+      "bytes": 511,
+      "mensajeLiteralPresente": true
+    }
+  },
+  "advertencia": "El mensaje genérico no identifica el predicado de validación ni el tick exacto del fallo; la coincidencia de métricas diarias no prueba identidad completa del estado interno."
+}

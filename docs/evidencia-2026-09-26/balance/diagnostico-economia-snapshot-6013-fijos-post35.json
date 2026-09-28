@@ -1,0 +1,822 @@
+{
+  "fuente_temporal": "/datos/tmp-atlas-lab/atlas-lab-9IpQ3f/world.sqlite",
+  "modo": "SQLite mode=ro, query_only=ON, BEGIN, SELECT, ROLLBACK",
+  "metodo": {
+    "radios": [
+      7,
+      16
+    ],
+    "centro": "coordenadas guardadas de cada comunidad",
+    "teselas": "snapshot.tiles activo; wood/stone/fauna índices 8/9/18 de tiles-tuple-v1",
+    "funcional": "materialCapacities > 0.07 por capacidad; objetos de vecinos miembros",
+    "superposicion": "radios de comunidades pueden solaparse; no sumar entre ellas"
+  },
+  "lectura_bytes": 53740933,
+  "duracion_segundos": 1.1942018900008406,
+  "snapshots": [
+    {
+      "seed": 6013,
+      "tick": 59400,
+      "dia": 24.75,
+      "poblacion_vecina": 510,
+      "teselas_activas": 13568,
+      "fauna_activa": 3747,
+      "planos": 15,
+      "estructuras": 75,
+      "comunidades": [
+        {
+          "id": "community-1",
+          "miembros_vecinos": 173,
+          "material_personal": {
+            "wood": 106.58136078992739,
+            "stone": 14
+          },
+          "objetos": 1093,
+          "masa_objetos": 707289,
+          "objetos_funcionales": 963,
+          "objetos_por_capacidad": {
+            "cutting": 471,
+            "storage": 622,
+            "insulation": 791,
+            "cultivation": 484,
+            "binding": 689,
+            "abrasion": 728
+          },
+          "radio_7": {
+            "centro": [
+              24,
+              16
+            ],
+            "celdas_esperadas": 149,
+            "celdas_observadas": 82,
+            "madera": 42.715226947329555,
+            "piedra": 21,
+            "fauna": 0,
+            "celdas_madera_cosechable": 4,
+            "celdas_piedra_cosechable": 21,
+            "celdas_fauna": 0
+          },
+          "radio_16": {
+            "centro": [
+              24,
+              16
+            ],
+            "celdas_esperadas": 797,
+            "celdas_observadas": 495,
+            "madera": 274.8463041358249,
+            "piedra": 111,
+            "fauna": 2,
+            "celdas_madera_cosechable": 32,
+            "celdas_piedra_cosechable": 111,
+            "celdas_fauna": 2
+          }
+        },
+        {
+          "id": "community-2",
+          "miembros_vecinos": 232,
+          "material_personal": {
+            "wood": 153.59622735778393,
+            "stone": 35
+          },
+          "objetos": 1732,
+          "masa_objetos": 1134689,
+          "objetos_funcionales": 1485,
+          "objetos_por_capacidad": {
+            "cutting": 713,
+            "storage": 960,
+            "insulation": 1200,
+            "cultivation": 723,
+            "binding": 1066,
+            "abrasion": 1175
+          },
+          "radio_7": {
+            "centro": [
+              18,
+              20
+            ],
+            "celdas_esperadas": 149,
+            "celdas_observadas": 132,
+            "madera": 76.3997022822917,
+            "piedra": 47,
+            "fauna": 0,
+            "celdas_madera_cosechable": 8,
+            "celdas_piedra_cosechable": 47,
+            "celdas_fauna": 0
+          },
+          "radio_16": {
+            "centro": [
+              18,
+              20
+            ],
+            "celdas_esperadas": 797,
+            "celdas_observadas": 543,
+            "madera": 347.19236472020896,
+            "piedra": 165,
+            "fauna": 2,
+            "celdas_madera_cosechable": 36,
+            "celdas_piedra_cosechable": 165,
+            "celdas_fauna": 2
+          }
+        },
+        {
+          "id": "community-3",
+          "miembros_vecinos": 105,
+          "material_personal": {
+            "wood": 24.33331539504713,
+            "stone": 3
+          },
+          "objetos": 551,
+          "masa_objetos": 336972,
+          "objetos_funcionales": 461,
+          "objetos_por_capacidad": {
+            "cutting": 192,
+            "storage": 296,
+            "insulation": 380,
+            "cultivation": 227,
+            "binding": 325,
+            "abrasion": 341
+          },
+          "radio_7": {
+            "centro": [
+              23,
+              44
+            ],
+            "celdas_esperadas": 149,
+            "celdas_observadas": 149,
+            "madera": 306.59812639912826,
+            "piedra": 55,
+            "fauna": 0,
+            "celdas_madera_cosechable": 30,
+            "celdas_piedra_cosechable": 55,
+            "celdas_fauna": 0
+          },
+          "radio_16": {
+            "centro": [
+              23,
+              44
+            ],
+            "celdas_esperadas": 797,
+            "celdas_observadas": 797,
+            "madera": 1488.6840406550075,
+            "piedra": 199,
+            "fauna": 5,
+            "celdas_madera_cosechable": 189,
+            "celdas_piedra_cosechable": 199,
+            "celdas_fauna": 5
+          }
+        }
+      ],
+      "centros_fijos": [
+        {
+          "id": "community-1",
+          "centro_comunidad_actual": [
+            24,
+            16
+          ],
+          "radio_7": {
+            "centro": [
+              24,
+              16
+            ],
+            "celdas_esperadas": 149,
+            "celdas_observadas": 82,
+            "madera": 42.715226947329555,
+            "piedra": 21,
+            "fauna": 0,
+            "celdas_madera_cosechable": 4,
+            "celdas_piedra_cosechable": 21,
+            "celdas_fauna": 0
+          },
+          "radio_16": {
+            "centro": [
+              24,
+              16
+            ],
+            "celdas_esperadas": 797,
+            "celdas_observadas": 495,
+            "madera": 274.8463041358249,
+            "piedra": 111,
+            "fauna": 2,
+            "celdas_madera_cosechable": 32,
+            "celdas_piedra_cosechable": 111,
+            "celdas_fauna": 2
+          }
+        },
+        {
+          "id": "community-2",
+          "centro_comunidad_actual": [
+            18,
+            20
+          ],
+          "radio_7": {
+            "centro": [
+              18,
+              20
+            ],
+            "celdas_esperadas": 149,
+            "celdas_observadas": 132,
+            "madera": 76.3997022822917,
+            "piedra": 47,
+            "fauna": 0,
+            "celdas_madera_cosechable": 8,
+            "celdas_piedra_cosechable": 47,
+            "celdas_fauna": 0
+          },
+          "radio_16": {
+            "centro": [
+              18,
+              20
+            ],
+            "celdas_esperadas": 797,
+            "celdas_observadas": 543,
+            "madera": 347.19236472020896,
+            "piedra": 165,
+            "fauna": 2,
+            "celdas_madera_cosechable": 36,
+            "celdas_piedra_cosechable": 165,
+            "celdas_fauna": 2
+          }
+        },
+        {
+          "id": "community-3",
+          "centro_comunidad_actual": [
+            23,
+            44
+          ],
+          "radio_7": {
+            "centro": [
+              23,
+              44
+            ],
+            "celdas_esperadas": 149,
+            "celdas_observadas": 149,
+            "madera": 306.59812639912826,
+            "piedra": 55,
+            "fauna": 0,
+            "celdas_madera_cosechable": 30,
+            "celdas_piedra_cosechable": 55,
+            "celdas_fauna": 0
+          },
+          "radio_16": {
+            "centro": [
+              23,
+              44
+            ],
+            "celdas_esperadas": 797,
+            "celdas_observadas": 797,
+            "madera": 1488.6840406550075,
+            "piedra": 199,
+            "fauna": 5,
+            "celdas_madera_cosechable": 189,
+            "celdas_piedra_cosechable": 199,
+            "celdas_fauna": 5
+          }
+        }
+      ],
+      "slot": 2,
+      "saved_at_ms": 1790448776412,
+      "sha256": "4eeac34a2802268c01e271ac8f5259b6f49c8c3b068e4ed3636ac8e23860e73e",
+      "bytes": 16348550,
+      "codificacion": "inline",
+      "paginas": 0
+    },
+    {
+      "seed": 6013,
+      "tick": 84000,
+      "dia": 35.0,
+      "poblacion_vecina": 612,
+      "teselas_activas": 15616,
+      "fauna_activa": 4436,
+      "planos": 15,
+      "estructuras": 89,
+      "comunidades": [
+        {
+          "id": "community-1",
+          "miembros_vecinos": 216,
+          "material_personal": {
+            "wood": 238.3098218041948,
+            "stone": 50
+          },
+          "objetos": 1531,
+          "masa_objetos": 935771,
+          "objetos_funcionales": 1356,
+          "objetos_por_capacidad": {
+            "cutting": 649,
+            "storage": 833,
+            "insulation": 1064,
+            "cultivation": 655,
+            "binding": 899,
+            "abrasion": 1014
+          },
+          "radio_7": {
+            "centro": [
+              19,
+              18
+            ],
+            "celdas_esperadas": 149,
+            "celdas_observadas": 149,
+            "madera": 115.50791668586669,
+            "piedra": 42,
+            "fauna": 0,
+            "celdas_madera_cosechable": 11,
+            "celdas_piedra_cosechable": 42,
+            "celdas_fauna": 0
+          },
+          "radio_16": {
+            "centro": [
+              19,
+              18
+            ],
+            "celdas_esperadas": 797,
+            "celdas_observadas": 797,
+            "madera": 719.6024444972454,
+            "piedra": 224,
+            "fauna": 0,
+            "celdas_madera_cosechable": 77,
+            "celdas_piedra_cosechable": 224,
+            "celdas_fauna": 0
+          }
+        },
+        {
+          "id": "community-2",
+          "miembros_vecinos": 271,
+          "material_personal": {
+            "wood": 264.27202203638205,
+            "stone": 78
+          },
+          "objetos": 1886,
+          "masa_objetos": 1205168,
+          "objetos_funcionales": 1680,
+          "objetos_por_capacidad": {
+            "cutting": 799,
+            "storage": 1066,
+            "insulation": 1372,
+            "cultivation": 851,
+            "binding": 1183,
+            "abrasion": 1288
+          },
+          "radio_7": {
+            "centro": [
+              10,
+              18
+            ],
+            "celdas_esperadas": 149,
+            "celdas_observadas": 149,
+            "madera": 127.29573647689269,
+            "piedra": 69,
+            "fauna": 0,
+            "celdas_madera_cosechable": 13,
+            "celdas_piedra_cosechable": 69,
+            "celdas_fauna": 0
+          },
+          "radio_16": {
+            "centro": [
+              10,
+              18
+            ],
+            "celdas_esperadas": 797,
+            "celdas_observadas": 797,
+            "madera": 685.1597216266174,
+            "piedra": 246,
+            "fauna": 1,
+            "celdas_madera_cosechable": 72,
+            "celdas_piedra_cosechable": 246,
+            "celdas_fauna": 1
+          }
+        },
+        {
+          "id": "community-3",
+          "miembros_vecinos": 125,
+          "material_personal": {
+            "wood": 44.16777151945924,
+            "stone": 13
+          },
+          "objetos": 740,
+          "masa_objetos": 435164,
+          "objetos_funcionales": 674,
+          "objetos_por_capacidad": {
+            "cutting": 309,
+            "storage": 454,
+            "insulation": 545,
+            "cultivation": 354,
+            "binding": 487,
+            "abrasion": 524
+          },
+          "radio_7": {
+            "centro": [
+              22,
+              30
+            ],
+            "celdas_esperadas": 149,
+            "celdas_observadas": 149,
+            "madera": 157.28404348492325,
+            "piedra": 27,
+            "fauna": 0,
+            "celdas_madera_cosechable": 16,
+            "celdas_piedra_cosechable": 27,
+            "celdas_fauna": 0
+          },
+          "radio_16": {
+            "centro": [
+              22,
+              30
+            ],
+            "celdas_esperadas": 797,
+            "celdas_observadas": 797,
+            "madera": 726.4785701724982,
+            "piedra": 156,
+            "fauna": 0,
+            "celdas_madera_cosechable": 78,
+            "celdas_piedra_cosechable": 156,
+            "celdas_fauna": 0
+          }
+        }
+      ],
+      "centros_fijos": [
+        {
+          "id": "community-1",
+          "centro_comunidad_actual": [
+            19,
+            18
+          ],
+          "radio_7": {
+            "centro": [
+              24,
+              16
+            ],
+            "celdas_esperadas": 149,
+            "celdas_observadas": 149,
+            "madera": 133.74866257634474,
+            "piedra": 37,
+            "fauna": 0,
+            "celdas_madera_cosechable": 13,
+            "celdas_piedra_cosechable": 37,
+            "celdas_fauna": 0
+          },
+          "radio_16": {
+            "centro": [
+              24,
+              16
+            ],
+            "celdas_esperadas": 797,
+            "celdas_observadas": 797,
+            "madera": 695.4413180697175,
+            "piedra": 176,
+            "fauna": 0,
+            "celdas_madera_cosechable": 76,
+            "celdas_piedra_cosechable": 176,
+            "celdas_fauna": 0
+          }
+        },
+        {
+          "id": "community-2",
+          "centro_comunidad_actual": [
+            10,
+            18
+          ],
+          "radio_7": {
+            "centro": [
+              18,
+              20
+            ],
+            "celdas_esperadas": 149,
+            "celdas_observadas": 149,
+            "madera": 98.82341235536829,
+            "piedra": 50,
+            "fauna": 0,
+            "celdas_madera_cosechable": 11,
+            "celdas_piedra_cosechable": 50,
+            "celdas_fauna": 0
+          },
+          "radio_16": {
+            "centro": [
+              18,
+              20
+            ],
+            "celdas_esperadas": 797,
+            "celdas_observadas": 797,
+            "madera": 750.1373252697211,
+            "piedra": 238,
+            "fauna": 1,
+            "celdas_madera_cosechable": 79,
+            "celdas_piedra_cosechable": 238,
+            "celdas_fauna": 1
+          }
+        },
+        {
+          "id": "community-3",
+          "centro_comunidad_actual": [
+            22,
+            30
+          ],
+          "radio_7": {
+            "centro": [
+              23,
+              44
+            ],
+            "celdas_esperadas": 149,
+            "celdas_observadas": 149,
+            "madera": 279.0657950893021,
+            "piedra": 23,
+            "fauna": 0,
+            "celdas_madera_cosechable": 28,
+            "celdas_piedra_cosechable": 23,
+            "celdas_fauna": 0
+          },
+          "radio_16": {
+            "centro": [
+              23,
+              44
+            ],
+            "celdas_esperadas": 797,
+            "celdas_observadas": 797,
+            "madera": 1144.3606263398808,
+            "piedra": 90,
+            "fauna": 0,
+            "celdas_madera_cosechable": 138,
+            "celdas_piedra_cosechable": 90,
+            "celdas_fauna": 0
+          }
+        }
+      ],
+      "slot": 1,
+      "saved_at_ms": 1790452915538,
+      "sha256": "cdeb131922f4031e5551d4327d7e8ac68c3084e76b9772d2c7963d95327f82a7",
+      "bytes": 18716037,
+      "codificacion": "inline",
+      "paginas": 0
+    },
+    {
+      "seed": 6013,
+      "tick": 84300,
+      "dia": 35.125,
+      "poblacion_vecina": 607,
+      "teselas_activas": 15104,
+      "fauna_activa": 4051,
+      "planos": 15,
+      "estructuras": 89,
+      "comunidades": [
+        {
+          "id": "community-1",
+          "miembros_vecinos": 216,
+          "material_personal": {
+            "wood": 244.71085631703224,
+            "stone": 62
+          },
+          "objetos": 1560,
+          "masa_objetos": 950459,
+          "objetos_funcionales": 1382,
+          "objetos_por_capacidad": {
+            "cutting": 655,
+            "storage": 850,
+            "insulation": 1086,
+            "cultivation": 675,
+            "binding": 921,
+            "abrasion": 1033
+          },
+          "radio_7": {
+            "centro": [
+              19,
+              18
+            ],
+            "celdas_esperadas": 149,
+            "celdas_observadas": 149,
+            "madera": 115.50791668586669,
+            "piedra": 42,
+            "fauna": 0,
+            "celdas_madera_cosechable": 11,
+            "celdas_piedra_cosechable": 42,
+            "celdas_fauna": 0
+          },
+          "radio_16": {
+            "centro": [
+              19,
+              18
+            ],
+            "celdas_esperadas": 797,
+            "celdas_observadas": 797,
+            "madera": 710.3018554528674,
+            "piedra": 216,
+            "fauna": 0,
+            "celdas_madera_cosechable": 75,
+            "celdas_piedra_cosechable": 216,
+            "celdas_fauna": 0
+          }
+        },
+        {
+          "id": "community-2",
+          "miembros_vecinos": 269,
+          "material_personal": {
+            "wood": 261.87391179030453,
+            "stone": 82
+          },
+          "objetos": 1842,
+          "masa_objetos": 1171914,
+          "objetos_funcionales": 1636,
+          "objetos_por_capacidad": {
+            "cutting": 775,
+            "storage": 1029,
+            "insulation": 1328,
+            "cultivation": 819,
+            "binding": 1143,
+            "abrasion": 1252
+          },
+          "radio_7": {
+            "centro": [
+              10,
+              18
+            ],
+            "celdas_esperadas": 149,
+            "celdas_observadas": 149,
+            "madera": 127.29573647689269,
+            "piedra": 69,
+            "fauna": 0,
+            "celdas_madera_cosechable": 13,
+            "celdas_piedra_cosechable": 69,
+            "celdas_fauna": 0
+          },
+          "radio_16": {
+            "centro": [
+              10,
+              18
+            ],
+            "celdas_esperadas": 797,
+            "celdas_observadas": 797,
+            "madera": 681.5068415688293,
+            "piedra": 246,
+            "fauna": 1,
+            "celdas_madera_cosechable": 71,
+            "celdas_piedra_cosechable": 246,
+            "celdas_fauna": 1
+          }
+        },
+        {
+          "id": "community-3",
+          "miembros_vecinos": 122,
+          "material_personal": {
+            "wood": 62.76858051291018,
+            "stone": 13
+          },
+          "objetos": 723,
+          "masa_objetos": 435357,
+          "objetos_funcionales": 661,
+          "objetos_por_capacidad": {
+            "cutting": 310,
+            "storage": 450,
+            "insulation": 532,
+            "cultivation": 350,
+            "binding": 475,
+            "abrasion": 520
+          },
+          "radio_7": {
+            "centro": [
+              22,
+              30
+            ],
+            "celdas_esperadas": 149,
+            "celdas_observadas": 149,
+            "madera": 157.28404348492325,
+            "piedra": 27,
+            "fauna": 0,
+            "celdas_madera_cosechable": 16,
+            "celdas_piedra_cosechable": 27,
+            "celdas_fauna": 0
+          },
+          "radio_16": {
+            "centro": [
+              22,
+              30
+            ],
+            "celdas_esperadas": 797,
+            "celdas_observadas": 797,
+            "madera": 717.1779811281201,
+            "piedra": 148,
+            "fauna": 0,
+            "celdas_madera_cosechable": 76,
+            "celdas_piedra_cosechable": 148,
+            "celdas_fauna": 0
+          }
+        }
+      ],
+      "centros_fijos": [
+        {
+          "id": "community-1",
+          "centro_comunidad_actual": [
+            19,
+            18
+          ],
+          "radio_7": {
+            "centro": [
+              24,
+              16
+            ],
+            "celdas_esperadas": 149,
+            "celdas_observadas": 149,
+            "madera": 131.41070257634473,
+            "piedra": 37,
+            "fauna": 0,
+            "celdas_madera_cosechable": 12,
+            "celdas_piedra_cosechable": 37,
+            "celdas_fauna": 0
+          },
+          "radio_16": {
+            "centro": [
+              24,
+              16
+            ],
+            "celdas_esperadas": 797,
+            "celdas_observadas": 797,
+            "madera": 686.1407290253394,
+            "piedra": 166,
+            "fauna": 0,
+            "celdas_madera_cosechable": 74,
+            "celdas_piedra_cosechable": 166,
+            "celdas_fauna": 0
+          }
+        },
+        {
+          "id": "community-2",
+          "centro_comunidad_actual": [
+            10,
+            18
+          ],
+          "radio_7": {
+            "centro": [
+              18,
+              20
+            ],
+            "celdas_esperadas": 149,
+            "celdas_observadas": 149,
+            "madera": 95.1705322975802,
+            "piedra": 50,
+            "fauna": 0,
+            "celdas_madera_cosechable": 10,
+            "celdas_piedra_cosechable": 50,
+            "celdas_fauna": 0
+          },
+          "radio_16": {
+            "centro": [
+              18,
+              20
+            ],
+            "celdas_esperadas": 797,
+            "celdas_observadas": 797,
+            "madera": 740.8367362253431,
+            "piedra": 230,
+            "fauna": 1,
+            "celdas_madera_cosechable": 77,
+            "celdas_piedra_cosechable": 230,
+            "celdas_fauna": 1
+          }
+        },
+        {
+          "id": "community-3",
+          "centro_comunidad_actual": [
+            22,
+            30
+          ],
+          "radio_7": {
+            "centro": [
+              23,
+              44
+            ],
+            "celdas_esperadas": 149,
+            "celdas_observadas": 149,
+            "madera": 279.0657950893021,
+            "piedra": 23,
+            "fauna": 0,
+            "celdas_madera_cosechable": 28,
+            "celdas_piedra_cosechable": 23,
+            "celdas_fauna": 0
+          },
+          "radio_16": {
+            "centro": [
+              23,
+              44
+            ],
+            "celdas_esperadas": 797,
+            "celdas_observadas": 797,
+            "madera": 1129.239127047864,
+            "piedra": 90,
+            "fauna": 0,
+            "celdas_madera_cosechable": 133,
+            "celdas_piedra_cosechable": 90,
+            "celdas_fauna": 0
+          }
+        }
+      ],
+      "slot": 0,
+      "saved_at_ms": 1790452962652,
+      "sha256": "28e982622ae61a57d482d55e5ae8161e816cbc87dc2af9d0a5e34e4987224943",
+      "bytes": 18676346,
+      "codificacion": "inline",
+      "paginas": 0
+    }
+  ],
+  "referencia_centros_fijos": {
+    "dia": 24.75,
+    "sha256": "4eeac34a2802268c01e271ac8f5259b6f49c8c3b068e4ed3636ac8e23860e73e",
+    "slot": 2,
+    "descripcion": "Sonda de sitio fijo en coordenadas pre25; no es el radio actual de la comunidad"
+  }
+}

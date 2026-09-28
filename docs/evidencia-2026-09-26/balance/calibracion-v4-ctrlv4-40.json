@@ -1,0 +1,4437 @@
+{
+  "tipo": "calibracion_descriptiva_control",
+  "panel": "CTRLV4 6001..6040",
+  "corte": 60,
+  "estado": "panel_completo",
+  "incompletas": [],
+  "metodo": {
+    "v3": "evaluarConjunto congelado, campo ventana",
+    "A": "mismo evaluador, base primer día sin fundadores mortales",
+    "A_prima": "A con solo componente conducta y mismo umbral absoluto 0.02; elimina la entropía agregada de oficios, pero el vector de conducta conserva un one-hot del oficio dominante",
+    "B": "clasesR100, subida Sen >= 5% de media del tramo",
+    "C": "comunidades y linajes separados, Sen >= 0.02",
+    "variantes": "base 5 y base sin fundadores para B/C; ninguna elegida",
+    "faltantes": "desconocido; aprobado exige serie completa, cobertura >=80% y extremos completos; el panel exige 60 JSON con ticks válidos y manifiesto final de SHA, seed, días y params correctos",
+    "intervalos": "Wilson bilateral 95% entre clasificados; fracción de completas y fracción del panel de 40 separadas; esta última cuenta incompletas y desconocidos como 0 o 1"
+  },
+  "resumen": {
+    "v3": {
+      "cumple": 0,
+      "falla": 40,
+      "desconocido": 0,
+      "totalCompletas": 40,
+      "fraccionConocida": 0,
+      "intervaloWilson95Conocidos": [
+        0,
+        0.08762160119728664
+      ],
+      "fraccionCompletasIdentificada": [
+        0,
+        0
+      ],
+      "totalPanel": 40,
+      "incompletas": 0,
+      "desconocidoPanel": 0,
+      "fraccionPanelIdentificada": [
+        0,
+        0
+      ]
+    },
+    "A": {
+      "cumple": 0,
+      "falla": 40,
+      "desconocido": 0,
+      "totalCompletas": 40,
+      "fraccionConocida": 0,
+      "intervaloWilson95Conocidos": [
+        0,
+        0.08762160119728664
+      ],
+      "fraccionCompletasIdentificada": [
+        0,
+        0
+      ],
+      "totalPanel": 40,
+      "incompletas": 0,
+      "desconocidoPanel": 0,
+      "fraccionPanelIdentificada": [
+        0,
+        0
+      ]
+    },
+    "A_prima": {
+      "cumple": 3,
+      "falla": 37,
+      "desconocido": 0,
+      "totalCompletas": 40,
+      "fraccionConocida": 0.075,
+      "intervaloWilson95Conocidos": [
+        0.025836025774588198,
+        0.19864233524310543
+      ],
+      "fraccionCompletasIdentificada": [
+        0.075,
+        0.075
+      ],
+      "totalPanel": 40,
+      "incompletas": 0,
+      "desconocidoPanel": 0,
+      "fraccionPanelIdentificada": [
+        0.075,
+        0.075
+      ]
+    },
+    "B_clasesR100_base5": {
+      "cumple": 17,
+      "falla": 21,
+      "desconocido": 2,
+      "totalCompletas": 40,
+      "fraccionConocida": 0.4473684210526316,
+      "intervaloWilson95Conocidos": [
+        0.3014640099805125,
+        0.6029370287800753
+      ],
+      "fraccionCompletasIdentificada": [
+        0.425,
+        0.475
+      ],
+      "totalPanel": 40,
+      "incompletas": 0,
+      "desconocidoPanel": 2,
+      "fraccionPanelIdentificada": [
+        0.425,
+        0.475
+      ]
+    },
+    "B_clasesR100_sinFundadores": {
+      "cumple": 10,
+      "falla": 29,
+      "desconocido": 1,
+      "totalCompletas": 40,
+      "fraccionConocida": 0.2564102564102564,
+      "intervaloWilson95Conocidos": [
+        0.14568780540992585,
+        0.4108165592168397
+      ],
+      "fraccionCompletasIdentificada": [
+        0.25,
+        0.275
+      ],
+      "totalPanel": 40,
+      "incompletas": 0,
+      "desconocidoPanel": 1,
+      "fraccionPanelIdentificada": [
+        0.25,
+        0.275
+      ]
+    },
+    "C_comunidades_base5": {
+      "cumple": 0,
+      "falla": 40,
+      "desconocido": 0,
+      "totalCompletas": 40,
+      "fraccionConocida": 0,
+      "intervaloWilson95Conocidos": [
+        0,
+        0.08762160119728664
+      ],
+      "fraccionCompletasIdentificada": [
+        0,
+        0
+      ],
+      "totalPanel": 40,
+      "incompletas": 0,
+      "desconocidoPanel": 0,
+      "fraccionPanelIdentificada": [
+        0,
+        0
+      ]
+    },
+    "C_comunidades_sinFundadores": {
+      "cumple": 0,
+      "falla": 40,
+      "desconocido": 0,
+      "totalCompletas": 40,
+      "fraccionConocida": 0,
+      "intervaloWilson95Conocidos": [
+        0,
+        0.08762160119728664
+      ],
+      "fraccionCompletasIdentificada": [
+        0,
+        0
+      ],
+      "totalPanel": 40,
+      "incompletas": 0,
+      "desconocidoPanel": 0,
+      "fraccionPanelIdentificada": [
+        0,
+        0
+      ]
+    },
+    "C_linajes_base5": {
+      "cumple": 0,
+      "falla": 40,
+      "desconocido": 0,
+      "totalCompletas": 40,
+      "fraccionConocida": 0,
+      "intervaloWilson95Conocidos": [
+        0,
+        0.08762160119728664
+      ],
+      "fraccionCompletasIdentificada": [
+        0,
+        0
+      ],
+      "totalPanel": 40,
+      "incompletas": 0,
+      "desconocidoPanel": 0,
+      "fraccionPanelIdentificada": [
+        0,
+        0
+      ]
+    },
+    "C_linajes_sinFundadores": {
+      "cumple": 1,
+      "falla": 39,
+      "desconocido": 0,
+      "totalCompletas": 40,
+      "fraccionConocida": 0.025,
+      "intervaloWilson95Conocidos": [
+        0.0044268315026814095,
+        0.1288136896347409
+      ],
+      "fraccionCompletasIdentificada": [
+        0.025,
+        0.025
+      ],
+      "totalPanel": 40,
+      "incompletas": 0,
+      "desconocidoPanel": 0,
+      "fraccionPanelIdentificada": [
+        0.025,
+        0.025
+      ]
+    }
+  },
+  "resumenVivos": {
+    "v3": {
+      "cumple": 0,
+      "falla": 29,
+      "desconocido": 0,
+      "totalCompletas": 29,
+      "fraccionConocida": 0,
+      "intervaloWilson95Conocidos": [
+        0,
+        0.11696979849974075
+      ],
+      "fraccionCompletasIdentificada": [
+        0,
+        0
+      ]
+    },
+    "A": {
+      "cumple": 0,
+      "falla": 29,
+      "desconocido": 0,
+      "totalCompletas": 29,
+      "fraccionConocida": 0,
+      "intervaloWilson95Conocidos": [
+        0,
+        0.11696979849974075
+      ],
+      "fraccionCompletasIdentificada": [
+        0,
+        0
+      ]
+    },
+    "A_prima": {
+      "cumple": 3,
+      "falla": 26,
+      "desconocido": 0,
+      "totalCompletas": 29,
+      "fraccionConocida": 0.10344827586206896,
+      "intervaloWilson95Conocidos": [
+        0.03581489135067707,
+        0.26385081090773804
+      ],
+      "fraccionCompletasIdentificada": [
+        0.10344827586206896,
+        0.10344827586206896
+      ]
+    },
+    "B_clasesR100_base5": {
+      "cumple": 17,
+      "falla": 10,
+      "desconocido": 2,
+      "totalCompletas": 29,
+      "fraccionConocida": 0.6296296296296297,
+      "intervaloWilson95Conocidos": [
+        0.4422923441210239,
+        0.784674870390344
+      ],
+      "fraccionCompletasIdentificada": [
+        0.5862068965517241,
+        0.6551724137931034
+      ]
+    },
+    "B_clasesR100_sinFundadores": {
+      "cumple": 10,
+      "falla": 18,
+      "desconocido": 1,
+      "totalCompletas": 29,
+      "fraccionConocida": 0.35714285714285715,
+      "intervaloWilson95Conocidos": [
+        0.2070582950773768,
+        0.5416969348557219
+      ],
+      "fraccionCompletasIdentificada": [
+        0.3448275862068966,
+        0.3793103448275862
+      ]
+    },
+    "C_comunidades_base5": {
+      "cumple": 0,
+      "falla": 29,
+      "desconocido": 0,
+      "totalCompletas": 29,
+      "fraccionConocida": 0,
+      "intervaloWilson95Conocidos": [
+        0,
+        0.11696979849974075
+      ],
+      "fraccionCompletasIdentificada": [
+        0,
+        0
+      ]
+    },
+    "C_comunidades_sinFundadores": {
+      "cumple": 0,
+      "falla": 29,
+      "desconocido": 0,
+      "totalCompletas": 29,
+      "fraccionConocida": 0,
+      "intervaloWilson95Conocidos": [
+        0,
+        0.11696979849974075
+      ],
+      "fraccionCompletasIdentificada": [
+        0,
+        0
+      ]
+    },
+    "C_linajes_base5": {
+      "cumple": 0,
+      "falla": 29,
+      "desconocido": 0,
+      "totalCompletas": 29,
+      "fraccionConocida": 0,
+      "intervaloWilson95Conocidos": [
+        0,
+        0.11696979849974075
+      ],
+      "fraccionCompletasIdentificada": [
+        0,
+        0
+      ]
+    },
+    "C_linajes_sinFundadores": {
+      "cumple": 1,
+      "falla": 28,
+      "desconocido": 0,
+      "totalCompletas": 29,
+      "fraccionConocida": 0.034482758620689655,
+      "intervaloWilson95Conocidos": [
+        0.006113214292762653,
+        0.17175521879320288
+      ],
+      "fraccionCompletasIdentificada": [
+        0.034482758620689655,
+        0.034482758620689655
+      ]
+    }
+  },
+  "semillas": [
+    {
+      "semilla": 6001,
+      "extinta": false,
+      "baseSinFundadores": 18,
+      "lecturas": {
+        "v3": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "diversidadConductaVentana",
+          "puntos": 56,
+          "media": null,
+          "p": 0.8863557102027868,
+          "subida": -0.041051105565135845,
+          "umbral": 0.02
+        },
+        "A": {
+          "estado": "falla",
+          "base": 18,
+          "campo": "diversidadConductaVentana",
+          "puntos": 43,
+          "media": null,
+          "p": 0.6430144270334797,
+          "subida": -0.012131921923783151,
+          "umbral": 0.02
+        },
+        "A_prima": {
+          "estado": "falla",
+          "base": 18,
+          "campo": "diversidadConductaVentanaComponentes.conducta",
+          "puntos": 43,
+          "media": null,
+          "p": 0.8643758020221601,
+          "subida": -0.01889016562900744,
+          "umbral": 0.02
+        },
+        "B_clasesR100_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "B_clasesR100",
+          "puntos": 56,
+          "media": 23.792828007691607,
+          "p": 0.7740499823758697,
+          "subida": -1.1070587664790343,
+          "umbral": 1.1896414003845803
+        },
+        "B_clasesR100_sinFundadores": {
+          "estado": "falla",
+          "base": 18,
+          "campo": "B_clasesR100",
+          "puntos": 43,
+          "media": 23.610637671851027,
+          "p": 0.6786140893871808,
+          "subida": -0.6447381154993114,
+          "umbral": 1.1805318835925513
+        },
+        "C_comunidades_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_comunidades",
+          "puntos": 56,
+          "media": 0.010016226630872782,
+          "p": 0.38599652261687745,
+          "subida": 0.0013456449619423422,
+          "umbral": 0.02
+        },
+        "C_comunidades_sinFundadores": {
+          "estado": "falla",
+          "base": 18,
+          "campo": "C_comunidades",
+          "puntos": 43,
+          "media": 0.00919747769354917,
+          "p": 0.5000000150000002,
+          "subida": 0.000021928671939286385,
+          "umbral": 0.02
+        },
+        "C_linajes_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_linajes",
+          "puntos": 56,
+          "media": 0.03223057017191299,
+          "p": 0.9998805310284886,
+          "subida": -0.046790523156936895,
+          "umbral": 0.02
+        },
+        "C_linajes_sinFundadores": {
+          "estado": "falla",
+          "base": 18,
+          "campo": "C_linajes",
+          "puntos": 43,
+          "media": 0.028618681619083323,
+          "p": 0.9999886186909053,
+          "subida": -0.05037248772821665,
+          "umbral": 0.02
+        }
+      }
+    },
+    {
+      "semilla": 6002,
+      "extinta": true,
+      "baseSinFundadores": 18,
+      "lecturas": {
+        "v3": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "diversidadConductaVentana",
+          "puntos": 0,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": 0.02,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "falla"
+        },
+        "A": {
+          "estado": "falla",
+          "base": 18,
+          "campo": "diversidadConductaVentana",
+          "puntos": 6,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": 0.02,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "A_prima": {
+          "estado": "falla",
+          "base": 18,
+          "campo": "diversidadConductaVentanaComponentes.conducta",
+          "puntos": 6,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": 0.02,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "B_clasesR100_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "B_clasesR100",
+          "puntos": 7,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "B_clasesR100_sinFundadores": {
+          "estado": "falla",
+          "base": 18,
+          "campo": "B_clasesR100",
+          "puntos": 0,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "C_comunidades_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_comunidades",
+          "puntos": 6,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "C_comunidades_sinFundadores": {
+          "estado": "falla",
+          "base": 18,
+          "campo": "C_comunidades",
+          "puntos": 0,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "C_linajes_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_linajes",
+          "puntos": 0,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "C_linajes_sinFundadores": {
+          "estado": "falla",
+          "base": 18,
+          "campo": "C_linajes",
+          "puntos": 0,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        }
+      }
+    },
+    {
+      "semilla": 6003,
+      "extinta": false,
+      "baseSinFundadores": 13,
+      "lecturas": {
+        "v3": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "diversidadConductaVentana",
+          "puntos": 56,
+          "media": null,
+          "p": 0.8029680741485135,
+          "subida": -0.014668218115406266,
+          "umbral": 0.02
+        },
+        "A": {
+          "estado": "falla",
+          "base": 13,
+          "campo": "diversidadConductaVentana",
+          "puntos": 48,
+          "media": null,
+          "p": 0.8508069781194536,
+          "subida": -0.019260736535453918,
+          "umbral": 0.02
+        },
+        "A_prima": {
+          "estado": "cumple",
+          "base": 13,
+          "campo": "diversidadConductaVentanaComponentes.conducta",
+          "puntos": 48,
+          "media": null,
+          "p": 0.004604505983375241,
+          "subida": 0.028193571220338158,
+          "umbral": 0.02
+        },
+        "B_clasesR100_base5": {
+          "estado": "desconocido",
+          "base": 5,
+          "campo": "B_clasesR100",
+          "puntos": 55,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Faltan extremos: 5"
+        },
+        "B_clasesR100_sinFundadores": {
+          "estado": "falla",
+          "base": 13,
+          "campo": "B_clasesR100",
+          "puntos": 48,
+          "media": 25.55662175636691,
+          "p": 0.32128002676549505,
+          "subida": 1.1426771510903104,
+          "umbral": 1.2778310878183454
+        },
+        "C_comunidades_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_comunidades",
+          "puntos": 56,
+          "media": 0.009553294953223308,
+          "p": 0.9025001696005204,
+          "subida": -0.010977657973924157,
+          "umbral": 0.02
+        },
+        "C_comunidades_sinFundadores": {
+          "estado": "falla",
+          "base": 13,
+          "campo": "C_comunidades",
+          "puntos": 48,
+          "media": 0.009826398342556312,
+          "p": 0.7506563454272266,
+          "subida": -0.007095032243748042,
+          "umbral": 0.02
+        },
+        "C_linajes_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_linajes",
+          "puntos": 56,
+          "media": 0.04803202942776125,
+          "p": 0.9999999973512497,
+          "subida": -0.08793382390091824,
+          "umbral": 0.02
+        },
+        "C_linajes_sinFundadores": {
+          "estado": "falla",
+          "base": 13,
+          "campo": "C_linajes",
+          "puntos": 48,
+          "media": 0.03845726896467495,
+          "p": 0.99999988562905,
+          "subida": -0.06529954563128781,
+          "umbral": 0.02
+        }
+      }
+    },
+    {
+      "semilla": 6004,
+      "extinta": false,
+      "baseSinFundadores": 17,
+      "lecturas": {
+        "v3": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "diversidadConductaVentana",
+          "puntos": 56,
+          "media": null,
+          "p": 0.9038164476259144,
+          "subida": -0.02969002996250568,
+          "umbral": 0.02
+        },
+        "A": {
+          "estado": "falla",
+          "base": 17,
+          "campo": "diversidadConductaVentana",
+          "puntos": 44,
+          "media": null,
+          "p": 0.4400944302964285,
+          "subida": 0.002385796768207923,
+          "umbral": 0.02
+        },
+        "A_prima": {
+          "estado": "falla",
+          "base": 17,
+          "campo": "diversidadConductaVentanaComponentes.conducta",
+          "puntos": 44,
+          "media": null,
+          "p": 0.000819196540884459,
+          "subida": 0.019945892674606232,
+          "umbral": 0.02
+        },
+        "B_clasesR100_base5": {
+          "estado": "cumple",
+          "base": 5,
+          "campo": "B_clasesR100",
+          "puntos": 56,
+          "media": 26.132362560014336,
+          "p": 0.0038015400473251147,
+          "subida": 1.932239574765568,
+          "umbral": 1.306618128000717
+        },
+        "B_clasesR100_sinFundadores": {
+          "estado": "falla",
+          "base": 17,
+          "campo": "B_clasesR100",
+          "puntos": 44,
+          "media": 26.54245328207244,
+          "p": 0.04987696973138658,
+          "subida": 0.840367461047478,
+          "umbral": 1.327122664103622
+        },
+        "C_comunidades_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_comunidades",
+          "puntos": 56,
+          "media": 0.005259208227695346,
+          "p": 0.7843653844615921,
+          "subida": -0.005191487400513971,
+          "umbral": 0.02
+        },
+        "C_comunidades_sinFundadores": {
+          "estado": "falla",
+          "base": 17,
+          "campo": "C_comunidades",
+          "puntos": 44,
+          "media": 0.0010782738928986795,
+          "p": 0.0389486853175676,
+          "subida": 0.0037261382308749137,
+          "umbral": 0.02
+        },
+        "C_linajes_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_linajes",
+          "puntos": 56,
+          "media": 0.011788475695685943,
+          "p": 0.9968754550902382,
+          "subida": -0.01735413638298406,
+          "umbral": 0.02
+        },
+        "C_linajes_sinFundadores": {
+          "estado": "falla",
+          "base": 17,
+          "campo": "C_linajes",
+          "puntos": 44,
+          "media": 0.006933115924464838,
+          "p": 0.7246168467447669,
+          "subida": -0.0023715129753587466,
+          "umbral": 0.02
+        }
+      }
+    },
+    {
+      "semilla": 6005,
+      "extinta": true,
+      "baseSinFundadores": 13,
+      "lecturas": {
+        "v3": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "diversidadConductaVentana",
+          "puntos": 0,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": 0.02,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "falla"
+        },
+        "A": {
+          "estado": "falla",
+          "base": 13,
+          "campo": "diversidadConductaVentana",
+          "puntos": 18,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": 0.02,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "A_prima": {
+          "estado": "falla",
+          "base": 13,
+          "campo": "diversidadConductaVentanaComponentes.conducta",
+          "puntos": 18,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": 0.02,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "B_clasesR100_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "B_clasesR100",
+          "puntos": 19,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "B_clasesR100_sinFundadores": {
+          "estado": "falla",
+          "base": 13,
+          "campo": "B_clasesR100",
+          "puntos": 11,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "C_comunidades_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_comunidades",
+          "puntos": 23,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "C_comunidades_sinFundadores": {
+          "estado": "falla",
+          "base": 13,
+          "campo": "C_comunidades",
+          "puntos": 15,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "C_linajes_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_linajes",
+          "puntos": 23,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "C_linajes_sinFundadores": {
+          "estado": "falla",
+          "base": 13,
+          "campo": "C_linajes",
+          "puntos": 15,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        }
+      }
+    },
+    {
+      "semilla": 6006,
+      "extinta": false,
+      "baseSinFundadores": 13,
+      "lecturas": {
+        "v3": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "diversidadConductaVentana",
+          "puntos": 56,
+          "media": null,
+          "p": 0.997784790256068,
+          "subida": -0.05065099273496404,
+          "umbral": 0.02
+        },
+        "A": {
+          "estado": "falla",
+          "base": 13,
+          "campo": "diversidadConductaVentana",
+          "puntos": 48,
+          "media": null,
+          "p": 0.9551138217492117,
+          "subida": -0.03140296011435398,
+          "umbral": 0.02
+        },
+        "A_prima": {
+          "estado": "cumple",
+          "base": 13,
+          "campo": "diversidadConductaVentanaComponentes.conducta",
+          "puntos": 48,
+          "media": null,
+          "p": 0.02360717395301947,
+          "subida": 0.03126528490554059,
+          "umbral": 0.02
+        },
+        "B_clasesR100_base5": {
+          "estado": "desconocido",
+          "base": 5,
+          "campo": "B_clasesR100",
+          "puntos": 52,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Faltan extremos: 56,57,58,59"
+        },
+        "B_clasesR100_sinFundadores": {
+          "estado": "desconocido",
+          "base": 13,
+          "campo": "B_clasesR100",
+          "puntos": 44,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Faltan extremos: 56,57,58,59"
+        },
+        "C_comunidades_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_comunidades",
+          "puntos": 56,
+          "media": 0.0022524722634289914,
+          "p": 0.7039753060964782,
+          "subida": -0.004029828582342534,
+          "umbral": 0.02
+        },
+        "C_comunidades_sinFundadores": {
+          "estado": "falla",
+          "base": 13,
+          "campo": "C_comunidades",
+          "puntos": 48,
+          "media": 0.0006643189652780107,
+          "p": 0.593621379220926,
+          "subida": -0.0016030055204739957,
+          "umbral": 0.02
+        },
+        "C_linajes_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_linajes",
+          "puntos": 56,
+          "media": -0.000014998411411751091,
+          "p": 0.28597881457120977,
+          "subida": 0.009100210004422054,
+          "umbral": 0.02
+        },
+        "C_linajes_sinFundadores": {
+          "estado": "falla",
+          "base": 13,
+          "campo": "C_linajes",
+          "puntos": 48,
+          "media": -0.001366538225579709,
+          "p": 0.05540997247443068,
+          "subida": 0.025167961808168805,
+          "umbral": 0.02
+        }
+      }
+    },
+    {
+      "semilla": 6007,
+      "extinta": true,
+      "baseSinFundadores": 13,
+      "lecturas": {
+        "v3": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "diversidadConductaVentana",
+          "puntos": 0,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": 0.02,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "falla"
+        },
+        "A": {
+          "estado": "falla",
+          "base": 13,
+          "campo": "diversidadConductaVentana",
+          "puntos": 13,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": 0.02,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "A_prima": {
+          "estado": "falla",
+          "base": 13,
+          "campo": "diversidadConductaVentanaComponentes.conducta",
+          "puntos": 13,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": 0.02,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "B_clasesR100_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "B_clasesR100",
+          "puntos": 0,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "B_clasesR100_sinFundadores": {
+          "estado": "falla",
+          "base": 13,
+          "campo": "B_clasesR100",
+          "puntos": 0,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "C_comunidades_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_comunidades",
+          "puntos": 3,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "C_comunidades_sinFundadores": {
+          "estado": "falla",
+          "base": 13,
+          "campo": "C_comunidades",
+          "puntos": 0,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "C_linajes_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_linajes",
+          "puntos": 3,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "C_linajes_sinFundadores": {
+          "estado": "falla",
+          "base": 13,
+          "campo": "C_linajes",
+          "puntos": 0,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        }
+      }
+    },
+    {
+      "semilla": 6008,
+      "extinta": true,
+      "baseSinFundadores": 15,
+      "lecturas": {
+        "v3": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "diversidadConductaVentana",
+          "puntos": 0,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": 0.02,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "falla"
+        },
+        "A": {
+          "estado": "falla",
+          "base": 15,
+          "campo": "diversidadConductaVentana",
+          "puntos": 13,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": 0.02,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "A_prima": {
+          "estado": "falla",
+          "base": 15,
+          "campo": "diversidadConductaVentanaComponentes.conducta",
+          "puntos": 13,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": 0.02,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "B_clasesR100_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "B_clasesR100",
+          "puntos": 17,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "B_clasesR100_sinFundadores": {
+          "estado": "falla",
+          "base": 15,
+          "campo": "B_clasesR100",
+          "puntos": 7,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "C_comunidades_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_comunidades",
+          "puntos": 16,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "C_comunidades_sinFundadores": {
+          "estado": "falla",
+          "base": 15,
+          "campo": "C_comunidades",
+          "puntos": 6,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "C_linajes_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_linajes",
+          "puntos": 16,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "C_linajes_sinFundadores": {
+          "estado": "falla",
+          "base": 15,
+          "campo": "C_linajes",
+          "puntos": 6,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        }
+      }
+    },
+    {
+      "semilla": 6009,
+      "extinta": false,
+      "baseSinFundadores": 18,
+      "lecturas": {
+        "v3": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "diversidadConductaVentana",
+          "puntos": 56,
+          "media": null,
+          "p": 0.9999981746235427,
+          "subida": -0.10111730992347408,
+          "umbral": 0.02
+        },
+        "A": {
+          "estado": "falla",
+          "base": 18,
+          "campo": "diversidadConductaVentana",
+          "puntos": 43,
+          "media": null,
+          "p": 0.9999535198047376,
+          "subida": -0.07635020935572395,
+          "umbral": 0.02
+        },
+        "A_prima": {
+          "estado": "falla",
+          "base": 18,
+          "campo": "diversidadConductaVentanaComponentes.conducta",
+          "puntos": 43,
+          "media": null,
+          "p": 0.9998531116442346,
+          "subida": -0.03450252266610321,
+          "umbral": 0.02
+        },
+        "B_clasesR100_base5": {
+          "estado": "cumple",
+          "base": 5,
+          "campo": "B_clasesR100",
+          "puntos": 56,
+          "media": 26.269127908366738,
+          "p": 0.030464564431229663,
+          "subida": 1.5067255346424353,
+          "umbral": 1.313456395418337
+        },
+        "B_clasesR100_sinFundadores": {
+          "estado": "falla",
+          "base": 18,
+          "campo": "B_clasesR100",
+          "puntos": 43,
+          "media": 26.491363374130156,
+          "p": 0.3074421944866739,
+          "subida": 0.5408394722948041,
+          "umbral": 1.3245681687065078
+        },
+        "C_comunidades_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_comunidades",
+          "puntos": 56,
+          "media": 0.00854130677260644,
+          "p": 0.9999984094789242,
+          "subida": -0.02103410745554406,
+          "umbral": 0.02
+        },
+        "C_comunidades_sinFundadores": {
+          "estado": "falla",
+          "base": 18,
+          "campo": "C_comunidades",
+          "puntos": 43,
+          "media": 0.0038701391605364057,
+          "p": 0.996991548275035,
+          "subida": -0.012276670022611492,
+          "umbral": 0.02
+        },
+        "C_linajes_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_linajes",
+          "puntos": 56,
+          "media": 0.02813727420015041,
+          "p": 0.9989021277804692,
+          "subida": -0.06321547651483332,
+          "umbral": 0.02
+        },
+        "C_linajes_sinFundadores": {
+          "estado": "falla",
+          "base": 18,
+          "campo": "C_linajes",
+          "puntos": 43,
+          "media": 0.010221902025100975,
+          "p": 0.9982309916323019,
+          "subida": -0.027908398924862476,
+          "umbral": 0.02
+        }
+      }
+    },
+    {
+      "semilla": 6010,
+      "extinta": false,
+      "baseSinFundadores": 13,
+      "lecturas": {
+        "v3": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "diversidadConductaVentana",
+          "puntos": 56,
+          "media": null,
+          "p": 0.9964972392265452,
+          "subida": -0.05360692120997854,
+          "umbral": 0.02
+        },
+        "A": {
+          "estado": "falla",
+          "base": 13,
+          "campo": "diversidadConductaVentana",
+          "puntos": 48,
+          "media": null,
+          "p": 0.998421128063506,
+          "subida": -0.04522290568373853,
+          "umbral": 0.02
+        },
+        "A_prima": {
+          "estado": "falla",
+          "base": 13,
+          "campo": "diversidadConductaVentanaComponentes.conducta",
+          "puntos": 48,
+          "media": null,
+          "p": 0.9996512803602793,
+          "subida": -0.02384527977526654,
+          "umbral": 0.02
+        },
+        "B_clasesR100_base5": {
+          "estado": "cumple",
+          "base": 5,
+          "campo": "B_clasesR100",
+          "puntos": 56,
+          "media": 25.053970320593685,
+          "p": 0.0002544162581049537,
+          "subida": 6.1398375627636375,
+          "umbral": 1.2526985160296844
+        },
+        "B_clasesR100_sinFundadores": {
+          "estado": "cumple",
+          "base": 13,
+          "campo": "B_clasesR100",
+          "puntos": 48,
+          "media": 25.81055413786896,
+          "p": 0.00023234061479249617,
+          "subida": 3.9913236431137413,
+          "umbral": 1.290527706893448
+        },
+        "C_comunidades_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_comunidades",
+          "puntos": 56,
+          "media": 0.0016011198498534294,
+          "p": 0.0011567281785647785,
+          "subida": 0.011390159859964926,
+          "umbral": 0.02
+        },
+        "C_comunidades_sinFundadores": {
+          "estado": "falla",
+          "base": 13,
+          "campo": "C_comunidades",
+          "puntos": 48,
+          "media": 0.0023926649204671054,
+          "p": 0.012030995299099598,
+          "subida": 0.007998670022262531,
+          "umbral": 0.02
+        },
+        "C_linajes_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_linajes",
+          "puntos": 56,
+          "media": 0.009419565184864058,
+          "p": 0.0997690678251695,
+          "subida": 0.008481766410193168,
+          "umbral": 0.02
+        },
+        "C_linajes_sinFundadores": {
+          "estado": "falla",
+          "base": 13,
+          "campo": "C_linajes",
+          "puntos": 48,
+          "media": 0.007350533836036391,
+          "p": 0.0023301352490987933,
+          "subida": 0.016455499021164305,
+          "umbral": 0.02
+        }
+      }
+    },
+    {
+      "semilla": 6011,
+      "extinta": false,
+      "baseSinFundadores": 15,
+      "lecturas": {
+        "v3": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "diversidadConductaVentana",
+          "puntos": 56,
+          "media": null,
+          "p": 0.998850353304302,
+          "subida": -0.05598886708452036,
+          "umbral": 0.02
+        },
+        "A": {
+          "estado": "falla",
+          "base": 15,
+          "campo": "diversidadConductaVentana",
+          "puntos": 46,
+          "media": null,
+          "p": 0.9988755031413343,
+          "subida": -0.05475032715752369,
+          "umbral": 0.02
+        },
+        "A_prima": {
+          "estado": "falla",
+          "base": 15,
+          "campo": "diversidadConductaVentanaComponentes.conducta",
+          "puntos": 46,
+          "media": null,
+          "p": 0.9155224899671882,
+          "subida": -0.010901171626114814,
+          "umbral": 0.02
+        },
+        "B_clasesR100_base5": {
+          "estado": "cumple",
+          "base": 5,
+          "campo": "B_clasesR100",
+          "puntos": 56,
+          "media": 25.341733534229117,
+          "p": 0.011478632499895962,
+          "subida": 1.8514017265072071,
+          "umbral": 1.267086676711456
+        },
+        "B_clasesR100_sinFundadores": {
+          "estado": "falla",
+          "base": 15,
+          "campo": "B_clasesR100",
+          "puntos": 46,
+          "media": 25.630368271157682,
+          "p": 0.2725936226299948,
+          "subida": 0.569907376895102,
+          "umbral": 1.281518413557884
+        },
+        "C_comunidades_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_comunidades",
+          "puntos": 56,
+          "media": 0.0034948893177246683,
+          "p": 0.9939537784126802,
+          "subida": -0.006030666715934595,
+          "umbral": 0.02
+        },
+        "C_comunidades_sinFundadores": {
+          "estado": "falla",
+          "base": 15,
+          "campo": "C_comunidades",
+          "puntos": 46,
+          "media": 0.000682023227659515,
+          "p": 0.8075868004929447,
+          "subida": -0.0017314481948240699,
+          "umbral": 0.02
+        },
+        "C_linajes_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_linajes",
+          "puntos": 56,
+          "media": 0.01781351362485537,
+          "p": 0.9999940532669691,
+          "subida": -0.02926434003991039,
+          "umbral": 0.02
+        },
+        "C_linajes_sinFundadores": {
+          "estado": "falla",
+          "base": 15,
+          "campo": "C_linajes",
+          "puntos": 46,
+          "media": 0.010993023835712273,
+          "p": 0.9986730497380208,
+          "subida": -0.02074507400882887,
+          "umbral": 0.02
+        }
+      }
+    },
+    {
+      "semilla": 6012,
+      "extinta": false,
+      "baseSinFundadores": 16,
+      "lecturas": {
+        "v3": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "diversidadConductaVentana",
+          "puntos": 56,
+          "media": null,
+          "p": 0.8472535395149187,
+          "subida": -0.02280703752516422,
+          "umbral": 0.02
+        },
+        "A": {
+          "estado": "falla",
+          "base": 16,
+          "campo": "diversidadConductaVentana",
+          "puntos": 45,
+          "media": null,
+          "p": 0.7723617776157197,
+          "subida": -0.01660008448261334,
+          "umbral": 0.02
+        },
+        "A_prima": {
+          "estado": "falla",
+          "base": 16,
+          "campo": "diversidadConductaVentanaComponentes.conducta",
+          "puntos": 45,
+          "media": null,
+          "p": 0.10236058322493717,
+          "subida": 0.021152092852130246,
+          "umbral": 0.02
+        },
+        "B_clasesR100_base5": {
+          "estado": "cumple",
+          "base": 5,
+          "campo": "B_clasesR100",
+          "puntos": 56,
+          "media": 24.691299486829223,
+          "p": 3.944325662616909e-7,
+          "subida": 4.906222539143219,
+          "umbral": 1.2345649743414613
+        },
+        "B_clasesR100_sinFundadores": {
+          "estado": "cumple",
+          "base": 16,
+          "campo": "B_clasesR100",
+          "puntos": 45,
+          "media": 25.32969829506316,
+          "p": 0.00001229057964666379,
+          "subida": 3.5583441016742583,
+          "umbral": 1.266484914753158
+        },
+        "C_comunidades_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_comunidades",
+          "puntos": 56,
+          "media": 0.007006105896763432,
+          "p": 0.998280024587575,
+          "subida": -0.011968546877438173,
+          "umbral": 0.02
+        },
+        "C_comunidades_sinFundadores": {
+          "estado": "falla",
+          "base": 16,
+          "campo": "C_comunidades",
+          "puntos": 45,
+          "media": 0.0016648216263792013,
+          "p": 0.9882199369226243,
+          "subida": -0.004886140671549498,
+          "umbral": 0.02
+        },
+        "C_linajes_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_linajes",
+          "puntos": 56,
+          "media": 0.04755732409458483,
+          "p": 0.9987774845252959,
+          "subida": -0.10040366105771653,
+          "umbral": 0.02
+        },
+        "C_linajes_sinFundadores": {
+          "estado": "falla",
+          "base": 16,
+          "campo": "C_linajes",
+          "puntos": 45,
+          "media": 0.016959455058875205,
+          "p": 0.9999999516788548,
+          "subida": -0.03456089781909743,
+          "umbral": 0.02
+        }
+      }
+    },
+    {
+      "semilla": 6013,
+      "extinta": false,
+      "baseSinFundadores": 17,
+      "lecturas": {
+        "v3": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "diversidadConductaVentana",
+          "puntos": 56,
+          "media": null,
+          "p": 0.9988932126522038,
+          "subida": -0.06320531867976907,
+          "umbral": 0.02
+        },
+        "A": {
+          "estado": "falla",
+          "base": 17,
+          "campo": "diversidadConductaVentana",
+          "puntos": 44,
+          "media": null,
+          "p": 0.9994206819608294,
+          "subida": -0.05002236096342815,
+          "umbral": 0.02
+        },
+        "A_prima": {
+          "estado": "falla",
+          "base": 17,
+          "campo": "diversidadConductaVentanaComponentes.conducta",
+          "puntos": 44,
+          "media": null,
+          "p": 0.9806866306251774,
+          "subida": -0.018695431435385948,
+          "umbral": 0.02
+        },
+        "B_clasesR100_base5": {
+          "estado": "cumple",
+          "base": 5,
+          "campo": "B_clasesR100",
+          "puntos": 56,
+          "media": 23.924569989845594,
+          "p": 0.0011712290151056311,
+          "subida": 2.6121737010483095,
+          "umbral": 1.1962284994922798
+        },
+        "B_clasesR100_sinFundadores": {
+          "estado": "cumple",
+          "base": 17,
+          "campo": "B_clasesR100",
+          "puntos": 44,
+          "media": 24.345377720682574,
+          "p": 0.0030957089786034257,
+          "subida": 1.4944795965679798,
+          "umbral": 1.2172688860341287
+        },
+        "C_comunidades_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_comunidades",
+          "puntos": 56,
+          "media": 0.010307773900525402,
+          "p": 0.9980184647053149,
+          "subida": -0.01992970252043216,
+          "umbral": 0.02
+        },
+        "C_comunidades_sinFundadores": {
+          "estado": "falla",
+          "base": 17,
+          "campo": "C_comunidades",
+          "puntos": 44,
+          "media": 0.005746415163348387,
+          "p": 0.9999996328495424,
+          "subida": -0.011688133341047758,
+          "umbral": 0.02
+        },
+        "C_linajes_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_linajes",
+          "puntos": 56,
+          "media": 0.021176205619559713,
+          "p": 0.9946080024191072,
+          "subida": -0.030488908004793584,
+          "umbral": 0.02
+        },
+        "C_linajes_sinFundadores": {
+          "estado": "falla",
+          "base": 17,
+          "campo": "C_linajes",
+          "puntos": 44,
+          "media": 0.009758381079497105,
+          "p": 0.9985254727029378,
+          "subida": -0.015236026938122229,
+          "umbral": 0.02
+        }
+      }
+    },
+    {
+      "semilla": 6014,
+      "extinta": true,
+      "baseSinFundadores": 13,
+      "lecturas": {
+        "v3": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "diversidadConductaVentana",
+          "puntos": 0,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": 0.02,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "falla"
+        },
+        "A": {
+          "estado": "falla",
+          "base": 13,
+          "campo": "diversidadConductaVentana",
+          "puntos": 6,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": 0.02,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "A_prima": {
+          "estado": "falla",
+          "base": 13,
+          "campo": "diversidadConductaVentanaComponentes.conducta",
+          "puntos": 6,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": 0.02,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "B_clasesR100_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "B_clasesR100",
+          "puntos": 8,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "B_clasesR100_sinFundadores": {
+          "estado": "falla",
+          "base": 13,
+          "campo": "B_clasesR100",
+          "puntos": 0,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "C_comunidades_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_comunidades",
+          "puntos": 11,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "C_comunidades_sinFundadores": {
+          "estado": "falla",
+          "base": 13,
+          "campo": "C_comunidades",
+          "puntos": 3,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "C_linajes_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_linajes",
+          "puntos": 7,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "C_linajes_sinFundadores": {
+          "estado": "falla",
+          "base": 13,
+          "campo": "C_linajes",
+          "puntos": 0,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        }
+      }
+    },
+    {
+      "semilla": 6015,
+      "extinta": false,
+      "baseSinFundadores": 16,
+      "lecturas": {
+        "v3": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "diversidadConductaVentana",
+          "puntos": 56,
+          "media": null,
+          "p": 0.9863352946018096,
+          "subida": -0.03952305889229753,
+          "umbral": 0.02
+        },
+        "A": {
+          "estado": "falla",
+          "base": 16,
+          "campo": "diversidadConductaVentana",
+          "puntos": 45,
+          "media": null,
+          "p": 0.9786673259952026,
+          "subida": -0.03529794293573598,
+          "umbral": 0.02
+        },
+        "A_prima": {
+          "estado": "falla",
+          "base": 16,
+          "campo": "diversidadConductaVentanaComponentes.conducta",
+          "puntos": 45,
+          "media": null,
+          "p": 0.23855962692286212,
+          "subida": 0.004865764501125472,
+          "umbral": 0.02
+        },
+        "B_clasesR100_base5": {
+          "estado": "cumple",
+          "base": 5,
+          "campo": "B_clasesR100",
+          "puntos": 56,
+          "media": 25.495879729327864,
+          "p": 1.8455046845405893e-8,
+          "subida": 3.031472497297312,
+          "umbral": 1.2747939864663933
+        },
+        "B_clasesR100_sinFundadores": {
+          "estado": "cumple",
+          "base": 16,
+          "campo": "B_clasesR100",
+          "puntos": 45,
+          "media": 25.762779989702878,
+          "p": 8.046610378631004e-7,
+          "subida": 2.5547580187480556,
+          "umbral": 1.288138999485144
+        },
+        "C_comunidades_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_comunidades",
+          "puntos": 56,
+          "media": 0.012961480099695185,
+          "p": 0.9995955955005127,
+          "subida": -0.01396096565539962,
+          "umbral": 0.02
+        },
+        "C_comunidades_sinFundadores": {
+          "estado": "falla",
+          "base": 16,
+          "campo": "C_comunidades",
+          "puntos": 45,
+          "media": 0.0027441424465302106,
+          "p": 0.9980982554604483,
+          "subida": -0.005605554892641991,
+          "umbral": 0.02
+        },
+        "C_linajes_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_linajes",
+          "puntos": 56,
+          "media": 0.029599459603878078,
+          "p": 0.9510314675879885,
+          "subida": -0.033676544428469346,
+          "umbral": 0.02
+        },
+        "C_linajes_sinFundadores": {
+          "estado": "falla",
+          "base": 16,
+          "campo": "C_linajes",
+          "puntos": 45,
+          "media": 0.014092503461944177,
+          "p": 0.5152928755375334,
+          "subida": -0.000116253500041963,
+          "umbral": 0.02
+        }
+      }
+    },
+    {
+      "semilla": 6016,
+      "extinta": true,
+      "baseSinFundadores": 13,
+      "lecturas": {
+        "v3": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "diversidadConductaVentana",
+          "puntos": 0,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": 0.02,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "falla"
+        },
+        "A": {
+          "estado": "falla",
+          "base": 13,
+          "campo": "diversidadConductaVentana",
+          "puntos": 10,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": 0.02,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "A_prima": {
+          "estado": "falla",
+          "base": 13,
+          "campo": "diversidadConductaVentanaComponentes.conducta",
+          "puntos": 10,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": 0.02,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "B_clasesR100_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "B_clasesR100",
+          "puntos": 15,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "B_clasesR100_sinFundadores": {
+          "estado": "falla",
+          "base": 13,
+          "campo": "B_clasesR100",
+          "puntos": 7,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "C_comunidades_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_comunidades",
+          "puntos": 10,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "C_comunidades_sinFundadores": {
+          "estado": "falla",
+          "base": 13,
+          "campo": "C_comunidades",
+          "puntos": 2,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "C_linajes_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_linajes",
+          "puntos": 15,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "C_linajes_sinFundadores": {
+          "estado": "falla",
+          "base": 13,
+          "campo": "C_linajes",
+          "puntos": 7,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        }
+      }
+    },
+    {
+      "semilla": 6017,
+      "extinta": false,
+      "baseSinFundadores": 19,
+      "lecturas": {
+        "v3": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "diversidadConductaVentana",
+          "puntos": 56,
+          "media": null,
+          "p": 0.9925251776956222,
+          "subida": -0.05233775540288643,
+          "umbral": 0.02
+        },
+        "A": {
+          "estado": "falla",
+          "base": 19,
+          "campo": "diversidadConductaVentana",
+          "puntos": 42,
+          "media": null,
+          "p": 0.706349852302032,
+          "subida": -0.008402569195334404,
+          "umbral": 0.02
+        },
+        "A_prima": {
+          "estado": "falla",
+          "base": 19,
+          "campo": "diversidadConductaVentanaComponentes.conducta",
+          "puntos": 42,
+          "media": null,
+          "p": 0.5658984774584458,
+          "subida": -0.001899837989803423,
+          "umbral": 0.02
+        },
+        "B_clasesR100_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "B_clasesR100",
+          "puntos": 56,
+          "media": 25.904336348089053,
+          "p": 0.13943887673007055,
+          "subida": 0.7150733079862982,
+          "umbral": 1.2952168174044527
+        },
+        "B_clasesR100_sinFundadores": {
+          "estado": "falla",
+          "base": 19,
+          "campo": "B_clasesR100",
+          "puntos": 42,
+          "media": 26.072888410693892,
+          "p": 0.429426146055861,
+          "subida": 0.12659579544978605,
+          "umbral": 1.3036444205346946
+        },
+        "C_comunidades_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_comunidades",
+          "puntos": 56,
+          "media": 0.0012092980940115838,
+          "p": 0.5620692042970405,
+          "subida": -0.0004445733548988866,
+          "umbral": 0.02
+        },
+        "C_comunidades_sinFundadores": {
+          "estado": "falla",
+          "base": 19,
+          "campo": "C_comunidades",
+          "puntos": 42,
+          "media": 0.0024882768138817313,
+          "p": 0.9999696192797216,
+          "subida": -0.006330010879197621,
+          "umbral": 0.02
+        },
+        "C_linajes_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_linajes",
+          "puntos": 56,
+          "media": 0.006016337587760103,
+          "p": 0.7842914834155644,
+          "subida": -0.003817853913565459,
+          "umbral": 0.02
+        },
+        "C_linajes_sinFundadores": {
+          "estado": "falla",
+          "base": 19,
+          "campo": "C_linajes",
+          "puntos": 42,
+          "media": 0.004835629096688478,
+          "p": 0.923718290035664,
+          "subida": -0.0038535926382949615,
+          "umbral": 0.02
+        }
+      }
+    },
+    {
+      "semilla": 6018,
+      "extinta": false,
+      "baseSinFundadores": 19,
+      "lecturas": {
+        "v3": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "diversidadConductaVentana",
+          "puntos": 56,
+          "media": null,
+          "p": 0.9701734056836913,
+          "subida": -0.07786660371467996,
+          "umbral": 0.02
+        },
+        "A": {
+          "estado": "falla",
+          "base": 19,
+          "campo": "diversidadConductaVentana",
+          "puntos": 42,
+          "media": null,
+          "p": 0.41445682333419814,
+          "subida": 0.00846628927458333,
+          "umbral": 0.02
+        },
+        "A_prima": {
+          "estado": "falla",
+          "base": 19,
+          "campo": "diversidadConductaVentanaComponentes.conducta",
+          "puntos": 42,
+          "media": null,
+          "p": 0.2570948322541379,
+          "subida": 0.007043747823162575,
+          "umbral": 0.02
+        },
+        "B_clasesR100_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "B_clasesR100",
+          "puntos": 56,
+          "media": 24.577878657797136,
+          "p": 0.25224508823524827,
+          "subida": 1.0337884219296343,
+          "umbral": 1.228893932889857
+        },
+        "B_clasesR100_sinFundadores": {
+          "estado": "falla",
+          "base": 19,
+          "campo": "B_clasesR100",
+          "puntos": 42,
+          "media": 25.312713900396187,
+          "p": 0.9746320114934899,
+          "subida": -1.3710059376060524,
+          "umbral": 1.2656356950198093
+        },
+        "C_comunidades_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_comunidades",
+          "puntos": 56,
+          "media": 0.011475637700089412,
+          "p": 0.04916924822831676,
+          "subida": 0.010016705466450174,
+          "umbral": 0.02
+        },
+        "C_comunidades_sinFundadores": {
+          "estado": "falla",
+          "base": 19,
+          "campo": "C_comunidades",
+          "puntos": 42,
+          "media": 0.011456234418450673,
+          "p": 0.008144622868592946,
+          "subida": 0.013319129773614892,
+          "umbral": 0.02
+        },
+        "C_linajes_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_linajes",
+          "puntos": 56,
+          "media": 0.04440035493332841,
+          "p": 0.8988759811704603,
+          "subida": -0.07011160737008704,
+          "umbral": 0.02
+        },
+        "C_linajes_sinFundadores": {
+          "estado": "falla",
+          "base": 19,
+          "campo": "C_linajes",
+          "puntos": 42,
+          "media": 0.025916723737950925,
+          "p": 0.7513345931871911,
+          "subida": -0.009737444146877492,
+          "umbral": 0.02
+        }
+      }
+    },
+    {
+      "semilla": 6019,
+      "extinta": false,
+      "baseSinFundadores": 18,
+      "lecturas": {
+        "v3": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "diversidadConductaVentana",
+          "puntos": 56,
+          "media": null,
+          "p": 0.9855296376742008,
+          "subida": -0.04728398856328841,
+          "umbral": 0.02
+        },
+        "A": {
+          "estado": "falla",
+          "base": 18,
+          "campo": "diversidadConductaVentana",
+          "puntos": 43,
+          "media": null,
+          "p": 0.686637073831853,
+          "subida": -0.011919248368561414,
+          "umbral": 0.02
+        },
+        "A_prima": {
+          "estado": "falla",
+          "base": 18,
+          "campo": "diversidadConductaVentanaComponentes.conducta",
+          "puntos": 43,
+          "media": null,
+          "p": 0.33675150427999295,
+          "subida": 0.006245424652211384,
+          "umbral": 0.02
+        },
+        "B_clasesR100_base5": {
+          "estado": "cumple",
+          "base": 5,
+          "campo": "B_clasesR100",
+          "puntos": 56,
+          "media": 24.96614414891244,
+          "p": 0.030257650087490404,
+          "subida": 1.8716409324455698,
+          "umbral": 1.248307207445622
+        },
+        "B_clasesR100_sinFundadores": {
+          "estado": "falla",
+          "base": 18,
+          "campo": "B_clasesR100",
+          "puntos": 43,
+          "media": 25.562019219115506,
+          "p": 0.14389908548134986,
+          "subida": 0.45480851765045427,
+          "umbral": 1.2781009609557754
+        },
+        "C_comunidades_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_comunidades",
+          "puntos": 56,
+          "media": 0.017192531377513802,
+          "p": 0.9955001112533559,
+          "subida": -0.04524186786183666,
+          "umbral": 0.02
+        },
+        "C_comunidades_sinFundadores": {
+          "estado": "falla",
+          "base": 18,
+          "campo": "C_comunidades",
+          "puntos": 43,
+          "media": 0.00764696220528776,
+          "p": 0.9884297017076034,
+          "subida": -0.022443365707870134,
+          "umbral": 0.02
+        },
+        "C_linajes_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_linajes",
+          "puntos": 56,
+          "media": 0.04695188062115687,
+          "p": 0.994380402671625,
+          "subida": -0.09419618172942279,
+          "umbral": 0.02
+        },
+        "C_linajes_sinFundadores": {
+          "estado": "falla",
+          "base": 18,
+          "campo": "C_linajes",
+          "puntos": 43,
+          "media": 0.026080332365231364,
+          "p": 0.9770355361092344,
+          "subida": -0.025985727859058554,
+          "umbral": 0.02
+        }
+      }
+    },
+    {
+      "semilla": 6020,
+      "extinta": false,
+      "baseSinFundadores": 17,
+      "lecturas": {
+        "v3": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "diversidadConductaVentana",
+          "puntos": 56,
+          "media": null,
+          "p": 0.7306196137198557,
+          "subida": -0.0227869345841955,
+          "umbral": 0.02
+        },
+        "A": {
+          "estado": "falla",
+          "base": 17,
+          "campo": "diversidadConductaVentana",
+          "puntos": 44,
+          "media": null,
+          "p": 0.8281887240486656,
+          "subida": -0.03413779085923527,
+          "umbral": 0.02
+        },
+        "A_prima": {
+          "estado": "falla",
+          "base": 17,
+          "campo": "diversidadConductaVentanaComponentes.conducta",
+          "puntos": 44,
+          "media": null,
+          "p": 0.3965792504834142,
+          "subida": 0.0065450787586591045,
+          "umbral": 0.02
+        },
+        "B_clasesR100_base5": {
+          "estado": "cumple",
+          "base": 5,
+          "campo": "B_clasesR100",
+          "puntos": 56,
+          "media": 22.995454664794835,
+          "p": 0.025829521595115226,
+          "subida": 2.2365876538565432,
+          "umbral": 1.1497727332397418
+        },
+        "B_clasesR100_sinFundadores": {
+          "estado": "cumple",
+          "base": 17,
+          "campo": "B_clasesR100",
+          "puntos": 44,
+          "media": 23.259484787248383,
+          "p": 0.025542483439551233,
+          "subida": 1.9299521057802924,
+          "umbral": 1.1629742393624192
+        },
+        "C_comunidades_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_comunidades",
+          "puntos": 56,
+          "media": 0.010551570972841371,
+          "p": 0.9328813600218713,
+          "subida": -0.007854945838072815,
+          "umbral": 0.02
+        },
+        "C_comunidades_sinFundadores": {
+          "estado": "falla",
+          "base": 17,
+          "campo": "C_comunidades",
+          "puntos": 44,
+          "media": 0.00043154618873864265,
+          "p": 0.28900819194073735,
+          "subida": 0.0007745085361447014,
+          "umbral": 0.02
+        },
+        "C_linajes_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_linajes",
+          "puntos": 56,
+          "media": 0.023329615434198786,
+          "p": 0.8619983844086628,
+          "subida": -0.02081373285122442,
+          "umbral": 0.02
+        },
+        "C_linajes_sinFundadores": {
+          "estado": "falla",
+          "base": 17,
+          "campo": "C_linajes",
+          "puntos": 44,
+          "media": 0.0010198107391693931,
+          "p": 0.44769565253624477,
+          "subida": 0.00029199632014636237,
+          "umbral": 0.02
+        }
+      }
+    },
+    {
+      "semilla": 6021,
+      "extinta": false,
+      "baseSinFundadores": 13,
+      "lecturas": {
+        "v3": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "diversidadConductaVentana",
+          "puntos": 56,
+          "media": null,
+          "p": 0.7163572071825122,
+          "subida": -0.01961999038485065,
+          "umbral": 0.02
+        },
+        "A": {
+          "estado": "falla",
+          "base": 13,
+          "campo": "diversidadConductaVentana",
+          "puntos": 48,
+          "media": null,
+          "p": 0.7570724515992524,
+          "subida": -0.02790913687980662,
+          "umbral": 0.02
+        },
+        "A_prima": {
+          "estado": "cumple",
+          "base": 13,
+          "campo": "diversidadConductaVentanaComponentes.conducta",
+          "puntos": 48,
+          "media": null,
+          "p": 0.017581963965224365,
+          "subida": 0.022582216039011754,
+          "umbral": 0.02
+        },
+        "B_clasesR100_base5": {
+          "estado": "cumple",
+          "base": 5,
+          "campo": "B_clasesR100",
+          "puntos": 56,
+          "media": 24.623352699655474,
+          "p": 0.008743181589970431,
+          "subida": 2.550684985826723,
+          "umbral": 1.2311676349827738
+        },
+        "B_clasesR100_sinFundadores": {
+          "estado": "falla",
+          "base": 13,
+          "campo": "B_clasesR100",
+          "puntos": 48,
+          "media": 24.941924405480204,
+          "p": 0.05921043501076863,
+          "subida": 1.6098844890909545,
+          "umbral": 1.2470962202740103
+        },
+        "C_comunidades_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_comunidades",
+          "puntos": 56,
+          "media": 0.017061227708157396,
+          "p": 0.8582232113315269,
+          "subida": -0.015860789785992823,
+          "umbral": 0.02
+        },
+        "C_comunidades_sinFundadores": {
+          "estado": "falla",
+          "base": 13,
+          "campo": "C_comunidades",
+          "puntos": 48,
+          "media": 0.007846987943383314,
+          "p": 0.7078918509039245,
+          "subida": -0.0033832048241171494,
+          "umbral": 0.02
+        },
+        "C_linajes_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_linajes",
+          "puntos": 56,
+          "media": 0.022406844143283505,
+          "p": 0.9733436684678972,
+          "subida": -0.026486307561433105,
+          "umbral": 0.02
+        },
+        "C_linajes_sinFundadores": {
+          "estado": "falla",
+          "base": 13,
+          "campo": "C_linajes",
+          "puntos": 48,
+          "media": 0.010970111100610816,
+          "p": 0.9435759998660321,
+          "subida": -0.009815211425387797,
+          "umbral": 0.02
+        }
+      }
+    },
+    {
+      "semilla": 6022,
+      "extinta": false,
+      "baseSinFundadores": 16,
+      "lecturas": {
+        "v3": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "diversidadConductaVentana",
+          "puntos": 56,
+          "media": null,
+          "p": 0.994787460349526,
+          "subida": -0.07740725499052495,
+          "umbral": 0.02
+        },
+        "A": {
+          "estado": "falla",
+          "base": 16,
+          "campo": "diversidadConductaVentana",
+          "puntos": 45,
+          "media": null,
+          "p": 0.9592003537768116,
+          "subida": -0.057040468959988766,
+          "umbral": 0.02
+        },
+        "A_prima": {
+          "estado": "falla",
+          "base": 16,
+          "campo": "diversidadConductaVentanaComponentes.conducta",
+          "puntos": 45,
+          "media": null,
+          "p": 0.9745944086682795,
+          "subida": -0.014765659813510999,
+          "umbral": 0.02
+        },
+        "B_clasesR100_base5": {
+          "estado": "cumple",
+          "base": 5,
+          "campo": "B_clasesR100",
+          "puntos": 56,
+          "media": 23.69289996667343,
+          "p": 0.0008952693985309481,
+          "subida": 6.840531751472972,
+          "umbral": 1.1846449983336715
+        },
+        "B_clasesR100_sinFundadores": {
+          "estado": "cumple",
+          "base": 16,
+          "campo": "B_clasesR100",
+          "puntos": 45,
+          "media": 24.756296659617583,
+          "p": 0.0025139897422027063,
+          "subida": 3.0958961651072814,
+          "umbral": 1.2378148329808791
+        },
+        "C_comunidades_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_comunidades",
+          "puntos": 56,
+          "media": 0.014760230335717455,
+          "p": 0.9999534488927098,
+          "subida": -0.02593303618596229,
+          "umbral": 0.02
+        },
+        "C_comunidades_sinFundadores": {
+          "estado": "falla",
+          "base": 16,
+          "campo": "C_comunidades",
+          "puntos": 45,
+          "media": 0.0048788704503180125,
+          "p": 0.9984818701253446,
+          "subida": -0.008630108935758454,
+          "umbral": 0.02
+        },
+        "C_linajes_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_linajes",
+          "puntos": 56,
+          "media": 0.02298007119030116,
+          "p": 0.9998682707033686,
+          "subida": -0.04014780443006574,
+          "umbral": 0.02
+        },
+        "C_linajes_sinFundadores": {
+          "estado": "falla",
+          "base": 16,
+          "campo": "C_linajes",
+          "puntos": 45,
+          "media": 0.011043440510197436,
+          "p": 0.9969671225157071,
+          "subida": -0.015517217812534519,
+          "umbral": 0.02
+        }
+      }
+    },
+    {
+      "semilla": 6023,
+      "extinta": false,
+      "baseSinFundadores": 13,
+      "lecturas": {
+        "v3": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "diversidadConductaVentana",
+          "puntos": 56,
+          "media": null,
+          "p": 0.9230070303597269,
+          "subida": -0.06675360812498041,
+          "umbral": 0.02
+        },
+        "A": {
+          "estado": "falla",
+          "base": 13,
+          "campo": "diversidadConductaVentana",
+          "puntos": 48,
+          "media": null,
+          "p": 0.9110685545433774,
+          "subida": -0.0771549782567679,
+          "umbral": 0.02
+        },
+        "A_prima": {
+          "estado": "falla",
+          "base": 13,
+          "campo": "diversidadConductaVentanaComponentes.conducta",
+          "puntos": 48,
+          "media": null,
+          "p": 0.6486154472676939,
+          "subida": -0.009392283528422363,
+          "umbral": 0.02
+        },
+        "B_clasesR100_base5": {
+          "estado": "cumple",
+          "base": 5,
+          "campo": "B_clasesR100",
+          "puntos": 56,
+          "media": 22.575634209615536,
+          "p": 0.01804078488840864,
+          "subida": 5.890949728855508,
+          "umbral": 1.128781710480777
+        },
+        "B_clasesR100_sinFundadores": {
+          "estado": "cumple",
+          "base": 13,
+          "campo": "B_clasesR100",
+          "puntos": 48,
+          "media": 22.878010015256795,
+          "p": 0.03133420915712125,
+          "subida": 5.78734227727297,
+          "umbral": 1.1439005007628398
+        },
+        "C_comunidades_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_comunidades",
+          "puntos": 56,
+          "media": 0.007500526382371734,
+          "p": 0.9999342244129091,
+          "subida": -0.016694285344850276,
+          "umbral": 0.02
+        },
+        "C_comunidades_sinFundadores": {
+          "estado": "falla",
+          "base": 13,
+          "campo": "C_comunidades",
+          "puntos": 48,
+          "media": 0.0031673869583146597,
+          "p": 0.9893324839677585,
+          "subida": -0.009060775095417615,
+          "umbral": 0.02
+        },
+        "C_linajes_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_linajes",
+          "puntos": 56,
+          "media": 0.018905365606357517,
+          "p": 0.9999910660901553,
+          "subida": -0.03970950195477286,
+          "umbral": 0.02
+        },
+        "C_linajes_sinFundadores": {
+          "estado": "falla",
+          "base": 13,
+          "campo": "C_linajes",
+          "puntos": 48,
+          "media": 0.012520290615421351,
+          "p": 0.9997447863011112,
+          "subida": -0.027122223117084787,
+          "umbral": 0.02
+        }
+      }
+    },
+    {
+      "semilla": 6024,
+      "extinta": false,
+      "baseSinFundadores": 15,
+      "lecturas": {
+        "v3": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "diversidadConductaVentana",
+          "puntos": 56,
+          "media": null,
+          "p": 0.9547052584957412,
+          "subida": -0.031870048023447346,
+          "umbral": 0.02
+        },
+        "A": {
+          "estado": "falla",
+          "base": 15,
+          "campo": "diversidadConductaVentana",
+          "puntos": 46,
+          "media": null,
+          "p": 0.9931483588573402,
+          "subida": -0.04823013303541224,
+          "umbral": 0.02
+        },
+        "A_prima": {
+          "estado": "falla",
+          "base": 15,
+          "campo": "diversidadConductaVentanaComponentes.conducta",
+          "puntos": 46,
+          "media": null,
+          "p": 0.7359948890485688,
+          "subida": -0.007140994204999035,
+          "umbral": 0.02
+        },
+        "B_clasesR100_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "B_clasesR100",
+          "puntos": 56,
+          "media": 20.077820223533234,
+          "p": 0.7536102429984666,
+          "subida": -0.861429868053341,
+          "umbral": 1.0038910111766617
+        },
+        "B_clasesR100_sinFundadores": {
+          "estado": "falla",
+          "base": 15,
+          "campo": "B_clasesR100",
+          "puntos": 46,
+          "media": 20.1774655925288,
+          "p": 0.9189498592936132,
+          "subida": -1.2313031746997976,
+          "umbral": 1.0088732796264401
+        },
+        "C_comunidades_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_comunidades",
+          "puntos": 56,
+          "media": 0.011869525798773997,
+          "p": 0.8479676438606298,
+          "subida": -0.008045762691828353,
+          "umbral": 0.02
+        },
+        "C_comunidades_sinFundadores": {
+          "estado": "falla",
+          "base": 15,
+          "campo": "C_comunidades",
+          "puntos": 46,
+          "media": 0.0032938182663289346,
+          "p": 0.5983393369641801,
+          "subida": -0.0018483043163837103,
+          "umbral": 0.02
+        },
+        "C_linajes_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_linajes",
+          "puntos": 56,
+          "media": 0.016996929090598238,
+          "p": 0.997536525385015,
+          "subida": -0.03611555294959233,
+          "umbral": 0.02
+        },
+        "C_linajes_sinFundadores": {
+          "estado": "falla",
+          "base": 15,
+          "campo": "C_linajes",
+          "puntos": 46,
+          "media": 0.012503791603980827,
+          "p": 0.962877874889141,
+          "subida": -0.022313968171449528,
+          "umbral": 0.02
+        }
+      }
+    },
+    {
+      "semilla": 6025,
+      "extinta": true,
+      "baseSinFundadores": 15,
+      "lecturas": {
+        "v3": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "diversidadConductaVentana",
+          "puntos": 0,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": 0.02,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "falla"
+        },
+        "A": {
+          "estado": "falla",
+          "base": 15,
+          "campo": "diversidadConductaVentana",
+          "puntos": 7,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": 0.02,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "A_prima": {
+          "estado": "falla",
+          "base": 15,
+          "campo": "diversidadConductaVentanaComponentes.conducta",
+          "puntos": 7,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": 0.02,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "B_clasesR100_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "B_clasesR100",
+          "puntos": 10,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "B_clasesR100_sinFundadores": {
+          "estado": "falla",
+          "base": 15,
+          "campo": "B_clasesR100",
+          "puntos": 1,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "C_comunidades_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_comunidades",
+          "puntos": 15,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "C_comunidades_sinFundadores": {
+          "estado": "falla",
+          "base": 15,
+          "campo": "C_comunidades",
+          "puntos": 5,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "C_linajes_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_linajes",
+          "puntos": 15,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "C_linajes_sinFundadores": {
+          "estado": "falla",
+          "base": 15,
+          "campo": "C_linajes",
+          "puntos": 5,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        }
+      }
+    },
+    {
+      "semilla": 6026,
+      "extinta": true,
+      "baseSinFundadores": 12,
+      "lecturas": {
+        "v3": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "diversidadConductaVentana",
+          "puntos": 0,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": 0.02,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "falla"
+        },
+        "A": {
+          "estado": "falla",
+          "base": 12,
+          "campo": "diversidadConductaVentana",
+          "puntos": 0,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": 0.02,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "A_prima": {
+          "estado": "falla",
+          "base": 12,
+          "campo": "diversidadConductaVentanaComponentes.conducta",
+          "puntos": 0,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": 0.02,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "B_clasesR100_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "B_clasesR100",
+          "puntos": 5,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "B_clasesR100_sinFundadores": {
+          "estado": "falla",
+          "base": 12,
+          "campo": "B_clasesR100",
+          "puntos": 0,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "C_comunidades_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_comunidades",
+          "puntos": 6,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "C_comunidades_sinFundadores": {
+          "estado": "falla",
+          "base": 12,
+          "campo": "C_comunidades",
+          "puntos": 0,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "C_linajes_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_linajes",
+          "puntos": 0,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "C_linajes_sinFundadores": {
+          "estado": "falla",
+          "base": 12,
+          "campo": "C_linajes",
+          "puntos": 0,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        }
+      }
+    },
+    {
+      "semilla": 6027,
+      "extinta": false,
+      "baseSinFundadores": 16,
+      "lecturas": {
+        "v3": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "diversidadConductaVentana",
+          "puntos": 56,
+          "media": null,
+          "p": 0.9998269568948625,
+          "subida": -0.07576377364939167,
+          "umbral": 0.02
+        },
+        "A": {
+          "estado": "falla",
+          "base": 16,
+          "campo": "diversidadConductaVentana",
+          "puntos": 45,
+          "media": null,
+          "p": 0.9906625989146317,
+          "subida": -0.04144351495082481,
+          "umbral": 0.02
+        },
+        "A_prima": {
+          "estado": "falla",
+          "base": 16,
+          "campo": "diversidadConductaVentanaComponentes.conducta",
+          "puntos": 45,
+          "media": null,
+          "p": 0.4020011086540858,
+          "subida": 0.0034608503581645745,
+          "umbral": 0.02
+        },
+        "B_clasesR100_base5": {
+          "estado": "cumple",
+          "base": 5,
+          "campo": "B_clasesR100",
+          "puntos": 56,
+          "media": 25.059106316581698,
+          "p": 0.001862518595399483,
+          "subida": 1.8525734614437845,
+          "umbral": 1.252955315829085
+        },
+        "B_clasesR100_sinFundadores": {
+          "estado": "falla",
+          "base": 16,
+          "campo": "B_clasesR100",
+          "puntos": 45,
+          "media": 25.264721074498464,
+          "p": 0.045563401859466314,
+          "subida": 1.1862111963353712,
+          "umbral": 1.2632360537249232
+        },
+        "C_comunidades_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_comunidades",
+          "puntos": 56,
+          "media": 0.008165622100746074,
+          "p": 0.6360140633601088,
+          "subida": -0.0016894811424869043,
+          "umbral": 0.02
+        },
+        "C_comunidades_sinFundadores": {
+          "estado": "falla",
+          "base": 16,
+          "campo": "C_comunidades",
+          "puntos": 45,
+          "media": 0.005006377862384222,
+          "p": 0.14457030853509423,
+          "subida": 0.004587884309600923,
+          "umbral": 0.02
+        },
+        "C_linajes_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_linajes",
+          "puntos": 56,
+          "media": 0.027775421680466806,
+          "p": 0.48087114473597703,
+          "subida": 0.0015754727337929772,
+          "umbral": 0.02
+        },
+        "C_linajes_sinFundadores": {
+          "estado": "cumple",
+          "base": 16,
+          "campo": "C_linajes",
+          "puntos": 45,
+          "media": 0.018776567430866965,
+          "p": 0.008362953717362618,
+          "subida": 0.024954295193198577,
+          "umbral": 0.02
+        }
+      }
+    },
+    {
+      "semilla": 6028,
+      "extinta": false,
+      "baseSinFundadores": 15,
+      "lecturas": {
+        "v3": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "diversidadConductaVentana",
+          "puntos": 56,
+          "media": null,
+          "p": 0.9892938443003314,
+          "subida": -0.06088835949347696,
+          "umbral": 0.02
+        },
+        "A": {
+          "estado": "falla",
+          "base": 15,
+          "campo": "diversidadConductaVentana",
+          "puntos": 46,
+          "media": null,
+          "p": 0.9940184101557655,
+          "subida": -0.054556198934274006,
+          "umbral": 0.02
+        },
+        "A_prima": {
+          "estado": "falla",
+          "base": 15,
+          "campo": "diversidadConductaVentanaComponentes.conducta",
+          "puntos": 46,
+          "media": null,
+          "p": 0.4633234835089988,
+          "subida": 0.002807840746833052,
+          "umbral": 0.02
+        },
+        "B_clasesR100_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "B_clasesR100",
+          "puntos": 56,
+          "media": 24.607936314665732,
+          "p": 0.278804012068477,
+          "subida": 2.2033318212818527,
+          "umbral": 1.2303968157332867
+        },
+        "B_clasesR100_sinFundadores": {
+          "estado": "falla",
+          "base": 15,
+          "campo": "B_clasesR100",
+          "puntos": 46,
+          "media": 25.596828051859625,
+          "p": 0.9070088515924941,
+          "subida": -1.0070153118211855,
+          "umbral": 1.2798414025929814
+        },
+        "C_comunidades_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_comunidades",
+          "puntos": 56,
+          "media": 0.0082607255417021,
+          "p": 0.5869779265371315,
+          "subida": -0.0016311020869550466,
+          "umbral": 0.02
+        },
+        "C_comunidades_sinFundadores": {
+          "estado": "falla",
+          "base": 15,
+          "campo": "C_comunidades",
+          "puntos": 46,
+          "media": 0.009627526241544808,
+          "p": 0.9586556737243243,
+          "subida": -0.011801818039674311,
+          "umbral": 0.02
+        },
+        "C_linajes_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_linajes",
+          "puntos": 56,
+          "media": 0.01938441689470854,
+          "p": 0.8779188687261761,
+          "subida": -0.023476873407667447,
+          "umbral": 0.02
+        },
+        "C_linajes_sinFundadores": {
+          "estado": "falla",
+          "base": 15,
+          "campo": "C_linajes",
+          "puntos": 46,
+          "media": 0.020418800491045254,
+          "p": 0.9656955782511946,
+          "subida": -0.03252766858940536,
+          "umbral": 0.02
+        }
+      }
+    },
+    {
+      "semilla": 6029,
+      "extinta": false,
+      "baseSinFundadores": 19,
+      "lecturas": {
+        "v3": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "diversidadConductaVentana",
+          "puntos": 56,
+          "media": null,
+          "p": 0.9999999292561695,
+          "subida": -0.1221568435806469,
+          "umbral": 0.02
+        },
+        "A": {
+          "estado": "falla",
+          "base": 19,
+          "campo": "diversidadConductaVentana",
+          "puntos": 42,
+          "media": null,
+          "p": 0.9993254922825889,
+          "subida": -0.08262842967420644,
+          "umbral": 0.02
+        },
+        "A_prima": {
+          "estado": "falla",
+          "base": 19,
+          "campo": "diversidadConductaVentanaComponentes.conducta",
+          "puntos": 42,
+          "media": null,
+          "p": 0.9997017507760142,
+          "subida": -0.04789595590527287,
+          "umbral": 0.02
+        },
+        "B_clasesR100_base5": {
+          "estado": "cumple",
+          "base": 5,
+          "campo": "B_clasesR100",
+          "puntos": 56,
+          "media": 25.952915367059035,
+          "p": 0.026013849772726687,
+          "subida": 1.9465286951646672,
+          "umbral": 1.2976457683529519
+        },
+        "B_clasesR100_sinFundadores": {
+          "estado": "falla",
+          "base": 19,
+          "campo": "B_clasesR100",
+          "puntos": 42,
+          "media": 26.301961765028416,
+          "p": 0.2535361085074798,
+          "subida": 0.4952038645386876,
+          "umbral": 1.315098088251421
+        },
+        "C_comunidades_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_comunidades",
+          "puntos": 56,
+          "media": 0.01856940525043097,
+          "p": 0.9988967619994542,
+          "subida": -0.03732870258569029,
+          "umbral": 0.02
+        },
+        "C_comunidades_sinFundadores": {
+          "estado": "falla",
+          "base": 19,
+          "campo": "C_comunidades",
+          "puntos": 42,
+          "media": 0.009835825032827523,
+          "p": 0.9895243340173175,
+          "subida": -0.012791470306810632,
+          "umbral": 0.02
+        },
+        "C_linajes_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_linajes",
+          "puntos": 56,
+          "media": 0.046641645437139424,
+          "p": 0.9177245771674367,
+          "subida": -0.05080417309818632,
+          "umbral": 0.02
+        },
+        "C_linajes_sinFundadores": {
+          "estado": "falla",
+          "base": 19,
+          "campo": "C_linajes",
+          "puntos": 42,
+          "media": 0.03145434258570238,
+          "p": 0.24098429168305502,
+          "subida": 0.014138294467752017,
+          "umbral": 0.02
+        }
+      }
+    },
+    {
+      "semilla": 6030,
+      "extinta": true,
+      "baseSinFundadores": 13,
+      "lecturas": {
+        "v3": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "diversidadConductaVentana",
+          "puntos": 0,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": 0.02,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "falla"
+        },
+        "A": {
+          "estado": "falla",
+          "base": 13,
+          "campo": "diversidadConductaVentana",
+          "puntos": 16,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": 0.02,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "A_prima": {
+          "estado": "falla",
+          "base": 13,
+          "campo": "diversidadConductaVentanaComponentes.conducta",
+          "puntos": 16,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": 0.02,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "B_clasesR100_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "B_clasesR100",
+          "puntos": 13,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "B_clasesR100_sinFundadores": {
+          "estado": "falla",
+          "base": 13,
+          "campo": "B_clasesR100",
+          "puntos": 6,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "C_comunidades_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_comunidades",
+          "puntos": 17,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "C_comunidades_sinFundadores": {
+          "estado": "falla",
+          "base": 13,
+          "campo": "C_comunidades",
+          "puntos": 9,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "C_linajes_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_linajes",
+          "puntos": 16,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "C_linajes_sinFundadores": {
+          "estado": "falla",
+          "base": 13,
+          "campo": "C_linajes",
+          "puntos": 8,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        }
+      }
+    },
+    {
+      "semilla": 6031,
+      "extinta": false,
+      "baseSinFundadores": 15,
+      "lecturas": {
+        "v3": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "diversidadConductaVentana",
+          "puntos": 56,
+          "media": null,
+          "p": 0.7850157247505964,
+          "subida": -0.015012118257798811,
+          "umbral": 0.02
+        },
+        "A": {
+          "estado": "falla",
+          "base": 15,
+          "campo": "diversidadConductaVentana",
+          "puntos": 46,
+          "media": null,
+          "p": 0.7658277297225062,
+          "subida": -0.014407915654604947,
+          "umbral": 0.02
+        },
+        "A_prima": {
+          "estado": "falla",
+          "base": 15,
+          "campo": "diversidadConductaVentanaComponentes.conducta",
+          "puntos": 46,
+          "media": null,
+          "p": 0.2077477031315765,
+          "subida": 0.004629936564379475,
+          "umbral": 0.02
+        },
+        "B_clasesR100_base5": {
+          "estado": "cumple",
+          "base": 5,
+          "campo": "B_clasesR100",
+          "puntos": 56,
+          "media": 25.830953818010123,
+          "p": 0.00010000157524292214,
+          "subida": 5.215215175380603,
+          "umbral": 1.2915476909005061
+        },
+        "B_clasesR100_sinFundadores": {
+          "estado": "cumple",
+          "base": 15,
+          "campo": "B_clasesR100",
+          "puntos": 46,
+          "media": 26.451622323466896,
+          "p": 0.0003523086520549742,
+          "subida": 3.2903852130351043,
+          "umbral": 1.322581116173345
+        },
+        "C_comunidades_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_comunidades",
+          "puntos": 56,
+          "media": 0.0017269509016663875,
+          "p": 0.1274666462528684,
+          "subida": 0.0020783705893014605,
+          "umbral": 0.02
+        },
+        "C_comunidades_sinFundadores": {
+          "estado": "falla",
+          "base": 15,
+          "campo": "C_comunidades",
+          "puntos": 46,
+          "media": 0.000937578771911824,
+          "p": 0.11212891788239203,
+          "subida": 0.0019309559258547126,
+          "umbral": 0.02
+        },
+        "C_linajes_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_linajes",
+          "puntos": 56,
+          "media": 0.010101627034610301,
+          "p": 0.02476546695588423,
+          "subida": 0.015242370931405668,
+          "umbral": 0.02
+        },
+        "C_linajes_sinFundadores": {
+          "estado": "falla",
+          "base": 15,
+          "campo": "C_linajes",
+          "puntos": 46,
+          "media": 0.010338265011554253,
+          "p": 0.05374565825768367,
+          "subida": 0.010859421875003685,
+          "umbral": 0.02
+        }
+      }
+    },
+    {
+      "semilla": 6032,
+      "extinta": false,
+      "baseSinFundadores": 18,
+      "lecturas": {
+        "v3": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "diversidadConductaVentana",
+          "puntos": 56,
+          "media": null,
+          "p": 0.5085342046159105,
+          "subida": -0.001191005258057346,
+          "umbral": 0.02
+        },
+        "A": {
+          "estado": "falla",
+          "base": 18,
+          "campo": "diversidadConductaVentana",
+          "puntos": 43,
+          "media": null,
+          "p": 0.21166007631002193,
+          "subida": 0.016048141254318526,
+          "umbral": 0.02
+        },
+        "A_prima": {
+          "estado": "falla",
+          "base": 18,
+          "campo": "diversidadConductaVentanaComponentes.conducta",
+          "puntos": 43,
+          "media": null,
+          "p": 0.22851960001678714,
+          "subida": 0.007620382316455306,
+          "umbral": 0.02
+        },
+        "B_clasesR100_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "B_clasesR100",
+          "puntos": 56,
+          "media": 26.198268350540733,
+          "p": 0.6370653119426337,
+          "subida": -0.40227868421227214,
+          "umbral": 1.3099134175270368
+        },
+        "B_clasesR100_sinFundadores": {
+          "estado": "falla",
+          "base": 18,
+          "campo": "B_clasesR100",
+          "puntos": 43,
+          "media": 26.380869251253422,
+          "p": 0.945002581599914,
+          "subida": -1.3867831807428197,
+          "umbral": 1.3190434625626712
+        },
+        "C_comunidades_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_comunidades",
+          "puntos": 56,
+          "media": 0.03803306114505628,
+          "p": 0.9794160207132184,
+          "subida": -0.07858621759629986,
+          "umbral": 0.02
+        },
+        "C_comunidades_sinFundadores": {
+          "estado": "falla",
+          "base": 18,
+          "campo": "C_comunidades",
+          "puntos": 43,
+          "media": 0.023585772434371297,
+          "p": 0.9718721381439624,
+          "subida": -0.0639937042527268,
+          "umbral": 0.02
+        },
+        "C_linajes_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_linajes",
+          "puntos": 56,
+          "media": 0.05278760743882031,
+          "p": 0.9826500197695447,
+          "subida": -0.0933164483839166,
+          "umbral": 0.02
+        },
+        "C_linajes_sinFundadores": {
+          "estado": "falla",
+          "base": 18,
+          "campo": "C_linajes",
+          "puntos": 43,
+          "media": 0.03504344887394816,
+          "p": 0.9861635714257361,
+          "subida": -0.0648266677879624,
+          "umbral": 0.02
+        }
+      }
+    },
+    {
+      "semilla": 6033,
+      "extinta": false,
+      "baseSinFundadores": 15,
+      "lecturas": {
+        "v3": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "diversidadConductaVentana",
+          "puntos": 56,
+          "media": null,
+          "p": 0.9835462398934418,
+          "subida": -0.1014060507440605,
+          "umbral": 0.02
+        },
+        "A": {
+          "estado": "falla",
+          "base": 15,
+          "campo": "diversidadConductaVentana",
+          "puntos": 46,
+          "media": null,
+          "p": 0.97070126662664,
+          "subida": -0.10802245234476039,
+          "umbral": 0.02
+        },
+        "A_prima": {
+          "estado": "falla",
+          "base": 15,
+          "campo": "diversidadConductaVentanaComponentes.conducta",
+          "puntos": 46,
+          "media": null,
+          "p": 0.5234793503494355,
+          "subida": -0.0016304013987630817,
+          "umbral": 0.02
+        },
+        "B_clasesR100_base5": {
+          "estado": "cumple",
+          "base": 5,
+          "campo": "B_clasesR100",
+          "puntos": 56,
+          "media": 23.89972519146313,
+          "p": 0.0440355118347511,
+          "subida": 5.654526723502425,
+          "umbral": 1.1949862595731566
+        },
+        "B_clasesR100_sinFundadores": {
+          "estado": "cumple",
+          "base": 15,
+          "campo": "B_clasesR100",
+          "puntos": 46,
+          "media": 23.934325351532934,
+          "p": 0.006978198646704879,
+          "subida": 7.103500928106135,
+          "umbral": 1.1967162675766467
+        },
+        "C_comunidades_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_comunidades",
+          "puntos": 56,
+          "media": 0.007927726460533057,
+          "p": 0.6912195119725582,
+          "subida": -0.0031504665728646873,
+          "umbral": 0.02
+        },
+        "C_comunidades_sinFundadores": {
+          "estado": "falla",
+          "base": 15,
+          "campo": "C_comunidades",
+          "puntos": 46,
+          "media": 0.004766199145935777,
+          "p": 0.26229635132950563,
+          "subida": 0.0019169637659838066,
+          "umbral": 0.02
+        },
+        "C_linajes_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_linajes",
+          "puntos": 56,
+          "media": 0.019117274066564487,
+          "p": 0.7451291372105306,
+          "subida": -0.006867935419639939,
+          "umbral": 0.02
+        },
+        "C_linajes_sinFundadores": {
+          "estado": "falla",
+          "base": 15,
+          "campo": "C_linajes",
+          "puntos": 46,
+          "media": 0.015123821099809835,
+          "p": 0.3705972988081138,
+          "subida": 0.0021078087966395743,
+          "umbral": 0.02
+        }
+      }
+    },
+    {
+      "semilla": 6034,
+      "extinta": false,
+      "baseSinFundadores": 18,
+      "lecturas": {
+        "v3": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "diversidadConductaVentana",
+          "puntos": 56,
+          "media": null,
+          "p": 0.9999999663914503,
+          "subida": -0.10698654970379662,
+          "umbral": 0.02
+        },
+        "A": {
+          "estado": "falla",
+          "base": 18,
+          "campo": "diversidadConductaVentana",
+          "puntos": 43,
+          "media": null,
+          "p": 0.9999641011574459,
+          "subida": -0.08302508466865863,
+          "umbral": 0.02
+        },
+        "A_prima": {
+          "estado": "falla",
+          "base": 18,
+          "campo": "diversidadConductaVentanaComponentes.conducta",
+          "puntos": 43,
+          "media": null,
+          "p": 0.9998532868630381,
+          "subida": -0.05177549917098414,
+          "umbral": 0.02
+        },
+        "B_clasesR100_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "B_clasesR100",
+          "puntos": 56,
+          "media": 25.306656543473984,
+          "p": 0.9823668825621373,
+          "subida": -1.2110730625251998,
+          "umbral": 1.2653328271736992
+        },
+        "B_clasesR100_sinFundadores": {
+          "estado": "falla",
+          "base": 18,
+          "campo": "B_clasesR100",
+          "puntos": 43,
+          "media": 25.26285928286909,
+          "p": 0.9925577282263847,
+          "subida": -1.6598386971814814,
+          "umbral": 1.2631429641434546
+        },
+        "C_comunidades_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_comunidades",
+          "puntos": 56,
+          "media": 0.003548446411796829,
+          "p": 0.9435810016374949,
+          "subida": -0.004183756312044235,
+          "umbral": 0.02
+        },
+        "C_comunidades_sinFundadores": {
+          "estado": "falla",
+          "base": 18,
+          "campo": "C_comunidades",
+          "puntos": 43,
+          "media": 0.003526708349463364,
+          "p": 0.9875801918123687,
+          "subida": -0.004873586654676866,
+          "umbral": 0.02
+        },
+        "C_linajes_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_linajes",
+          "puntos": 56,
+          "media": 0.020122166984426315,
+          "p": 0.8186360920607734,
+          "subida": -0.008996242591953656,
+          "umbral": 0.02
+        },
+        "C_linajes_sinFundadores": {
+          "estado": "falla",
+          "base": 18,
+          "campo": "C_linajes",
+          "puntos": 43,
+          "media": 0.01687451272903408,
+          "p": 0.6781586114940871,
+          "subida": -0.004325398869964,
+          "umbral": 0.02
+        }
+      }
+    },
+    {
+      "semilla": 6035,
+      "extinta": false,
+      "baseSinFundadores": 13,
+      "lecturas": {
+        "v3": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "diversidadConductaVentana",
+          "puntos": 56,
+          "media": null,
+          "p": 0.9992819694052354,
+          "subida": -0.09436926746825516,
+          "umbral": 0.02
+        },
+        "A": {
+          "estado": "falla",
+          "base": 13,
+          "campo": "diversidadConductaVentana",
+          "puntos": 48,
+          "media": null,
+          "p": 0.9968200836762905,
+          "subida": -0.06451977821575133,
+          "umbral": 0.02
+        },
+        "A_prima": {
+          "estado": "falla",
+          "base": 13,
+          "campo": "diversidadConductaVentanaComponentes.conducta",
+          "puntos": 48,
+          "media": null,
+          "p": 0.9810239953718181,
+          "subida": -0.029179262659991802,
+          "umbral": 0.02
+        },
+        "B_clasesR100_base5": {
+          "estado": "cumple",
+          "base": 5,
+          "campo": "B_clasesR100",
+          "puntos": 56,
+          "media": 24.482796716829146,
+          "p": 0.003745892519576196,
+          "subida": 3.081241071077631,
+          "umbral": 1.2241398358414575
+        },
+        "B_clasesR100_sinFundadores": {
+          "estado": "cumple",
+          "base": 13,
+          "campo": "B_clasesR100",
+          "puntos": 48,
+          "media": 24.74158523500842,
+          "p": 0.04393585598430666,
+          "subida": 2.4728318299497585,
+          "umbral": 1.237079261750421
+        },
+        "C_comunidades_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_comunidades",
+          "puntos": 56,
+          "media": 0.01171593741992197,
+          "p": 0.9819844441326847,
+          "subida": -0.014263535411428403,
+          "umbral": 0.02
+        },
+        "C_comunidades_sinFundadores": {
+          "estado": "falla",
+          "base": 13,
+          "campo": "C_comunidades",
+          "puntos": 48,
+          "media": 0.009919623968958317,
+          "p": 0.9313720623816292,
+          "subida": -0.012188839351584272,
+          "umbral": 0.02
+        },
+        "C_linajes_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_linajes",
+          "puntos": 56,
+          "media": 0.03831939674012175,
+          "p": 0.9994414219515604,
+          "subida": -0.08853242689705228,
+          "umbral": 0.02
+        },
+        "C_linajes_sinFundadores": {
+          "estado": "falla",
+          "base": 13,
+          "campo": "C_linajes",
+          "puntos": 48,
+          "media": 0.026750019664265465,
+          "p": 0.9911504473685689,
+          "subida": -0.05418046816091374,
+          "umbral": 0.02
+        }
+      }
+    },
+    {
+      "semilla": 6036,
+      "extinta": false,
+      "baseSinFundadores": 16,
+      "lecturas": {
+        "v3": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "diversidadConductaVentana",
+          "puntos": 56,
+          "media": null,
+          "p": 0.9821026961195807,
+          "subida": -0.04577461500384204,
+          "umbral": 0.02
+        },
+        "A": {
+          "estado": "falla",
+          "base": 16,
+          "campo": "diversidadConductaVentana",
+          "puntos": 45,
+          "media": null,
+          "p": 0.8200289319082774,
+          "subida": -0.016617741785997158,
+          "umbral": 0.02
+        },
+        "A_prima": {
+          "estado": "falla",
+          "base": 16,
+          "campo": "diversidadConductaVentanaComponentes.conducta",
+          "puntos": 45,
+          "media": null,
+          "p": 0.9326488502694698,
+          "subida": -0.010838375821699211,
+          "umbral": 0.02
+        },
+        "B_clasesR100_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "B_clasesR100",
+          "puntos": 56,
+          "media": 25.205997533183456,
+          "p": 0.7297239301766162,
+          "subida": -0.44858321515445776,
+          "umbral": 1.2602998766591729
+        },
+        "B_clasesR100_sinFundadores": {
+          "estado": "falla",
+          "base": 16,
+          "campo": "B_clasesR100",
+          "puntos": 45,
+          "media": 25.179933744391413,
+          "p": 0.6745412524355265,
+          "subida": -0.35218567542792434,
+          "umbral": 1.2589966872195708
+        },
+        "C_comunidades_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_comunidades",
+          "puntos": 56,
+          "media": 0.0027629310001644285,
+          "p": 0.03552780140518588,
+          "subida": 0.004782793738558847,
+          "umbral": 0.02
+        },
+        "C_comunidades_sinFundadores": {
+          "estado": "falla",
+          "base": 16,
+          "campo": "C_comunidades",
+          "puntos": 45,
+          "media": 0.0026277068594342426,
+          "p": 0.13637345167986142,
+          "subida": 0.004644009037669472,
+          "umbral": 0.02
+        },
+        "C_linajes_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_linajes",
+          "puntos": 56,
+          "media": 0.02222414344605052,
+          "p": 0.9947237518262095,
+          "subida": -0.03435129624638317,
+          "umbral": 0.02
+        },
+        "C_linajes_sinFundadores": {
+          "estado": "falla",
+          "base": 16,
+          "campo": "C_linajes",
+          "puntos": 45,
+          "media": 0.015563166707936076,
+          "p": 0.8643589201581956,
+          "subida": -0.009927884648930305,
+          "umbral": 0.02
+        }
+      }
+    },
+    {
+      "semilla": 6037,
+      "extinta": true,
+      "baseSinFundadores": 13,
+      "lecturas": {
+        "v3": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "diversidadConductaVentana",
+          "puntos": 0,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": 0.02,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "falla"
+        },
+        "A": {
+          "estado": "falla",
+          "base": 13,
+          "campo": "diversidadConductaVentana",
+          "puntos": 6,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": 0.02,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "A_prima": {
+          "estado": "falla",
+          "base": 13,
+          "campo": "diversidadConductaVentanaComponentes.conducta",
+          "puntos": 6,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": 0.02,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "B_clasesR100_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "B_clasesR100",
+          "puntos": 7,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "B_clasesR100_sinFundadores": {
+          "estado": "falla",
+          "base": 13,
+          "campo": "B_clasesR100",
+          "puntos": 0,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "C_comunidades_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_comunidades",
+          "puntos": 8,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "C_comunidades_sinFundadores": {
+          "estado": "falla",
+          "base": 13,
+          "campo": "C_comunidades",
+          "puntos": 0,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "C_linajes_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_linajes",
+          "puntos": 8,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "C_linajes_sinFundadores": {
+          "estado": "falla",
+          "base": 13,
+          "campo": "C_linajes",
+          "puntos": 0,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        }
+      }
+    },
+    {
+      "semilla": 6038,
+      "extinta": false,
+      "baseSinFundadores": 19,
+      "lecturas": {
+        "v3": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "diversidadConductaVentana",
+          "puntos": 56,
+          "media": null,
+          "p": 0.9972584433286298,
+          "subida": -0.07442794305766957,
+          "umbral": 0.02
+        },
+        "A": {
+          "estado": "falla",
+          "base": 19,
+          "campo": "diversidadConductaVentana",
+          "puntos": 42,
+          "media": null,
+          "p": 0.9296544953610002,
+          "subida": -0.040752392318624424,
+          "umbral": 0.02
+        },
+        "A_prima": {
+          "estado": "falla",
+          "base": 19,
+          "campo": "diversidadConductaVentanaComponentes.conducta",
+          "puntos": 42,
+          "media": null,
+          "p": 0.5130579673680906,
+          "subida": -0.0011438764640038651,
+          "umbral": 0.02
+        },
+        "B_clasesR100_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "B_clasesR100",
+          "puntos": 56,
+          "media": 25.15205594899584,
+          "p": 0.13729668722515,
+          "subida": 1.8026841542994478,
+          "umbral": 1.257602797449792
+        },
+        "B_clasesR100_sinFundadores": {
+          "estado": "falla",
+          "base": 19,
+          "campo": "B_clasesR100",
+          "puntos": 42,
+          "media": 25.759629793494437,
+          "p": 0.8601538911964224,
+          "subida": -0.8131121982970719,
+          "umbral": 1.287981489674722
+        },
+        "C_comunidades_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_comunidades",
+          "puntos": 56,
+          "media": 0.005489792712766449,
+          "p": 0.478273075825529,
+          "subida": 0.0003227002986785403,
+          "umbral": 0.02
+        },
+        "C_comunidades_sinFundadores": {
+          "estado": "falla",
+          "base": 19,
+          "campo": "C_comunidades",
+          "puntos": 42,
+          "media": 0.004490313560102144,
+          "p": 0.2503301358278431,
+          "subida": 0.0019280254284180767,
+          "umbral": 0.02
+        },
+        "C_linajes_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_linajes",
+          "puntos": 56,
+          "media": 0.024309947674472313,
+          "p": 0.9105919055487128,
+          "subida": -0.021057476481277874,
+          "umbral": 0.02
+        },
+        "C_linajes_sinFundadores": {
+          "estado": "falla",
+          "base": 19,
+          "campo": "C_linajes",
+          "puntos": 42,
+          "media": 0.013333427822571239,
+          "p": 0.10435199276048732,
+          "subida": 0.0063267141036083075,
+          "umbral": 0.02
+        }
+      }
+    },
+    {
+      "semilla": 6039,
+      "extinta": true,
+      "baseSinFundadores": 18,
+      "lecturas": {
+        "v3": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "diversidadConductaVentana",
+          "puntos": 0,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": 0.02,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "falla"
+        },
+        "A": {
+          "estado": "falla",
+          "base": 18,
+          "campo": "diversidadConductaVentana",
+          "puntos": 12,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": 0.02,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "A_prima": {
+          "estado": "falla",
+          "base": 18,
+          "campo": "diversidadConductaVentanaComponentes.conducta",
+          "puntos": 12,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": 0.02,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "B_clasesR100_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "B_clasesR100",
+          "puntos": 21,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "B_clasesR100_sinFundadores": {
+          "estado": "falla",
+          "base": 18,
+          "campo": "B_clasesR100",
+          "puntos": 8,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "C_comunidades_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_comunidades",
+          "puntos": 22,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "C_comunidades_sinFundadores": {
+          "estado": "falla",
+          "base": 18,
+          "campo": "C_comunidades",
+          "puntos": 9,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "C_linajes_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_linajes",
+          "puntos": 22,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        },
+        "C_linajes_sinFundadores": {
+          "estado": "falla",
+          "base": 18,
+          "campo": "C_linajes",
+          "puntos": 9,
+          "media": null,
+          "p": null,
+          "subida": null,
+          "umbral": null,
+          "motivo": "Extinción antes o en el día 60",
+          "estadoSerieSinReglaExtincion": "desconocido"
+        }
+      }
+    },
+    {
+      "semilla": 6040,
+      "extinta": false,
+      "baseSinFundadores": 17,
+      "lecturas": {
+        "v3": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "diversidadConductaVentana",
+          "puntos": 56,
+          "media": null,
+          "p": 0.9972531469576434,
+          "subida": -0.044730149962299126,
+          "umbral": 0.02
+        },
+        "A": {
+          "estado": "falla",
+          "base": 17,
+          "campo": "diversidadConductaVentana",
+          "puntos": 44,
+          "media": null,
+          "p": 0.6664342488495825,
+          "subida": -0.004009859014679034,
+          "umbral": 0.02
+        },
+        "A_prima": {
+          "estado": "falla",
+          "base": 17,
+          "campo": "diversidadConductaVentanaComponentes.conducta",
+          "puntos": 44,
+          "media": null,
+          "p": 0.46804301625891903,
+          "subida": 0.0010441598103732004,
+          "umbral": 0.02
+        },
+        "B_clasesR100_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "B_clasesR100",
+          "puntos": 56,
+          "media": 26.19368684751805,
+          "p": 0.9998402565463197,
+          "subida": -2.4560275473914595,
+          "umbral": 1.3096843423759026
+        },
+        "B_clasesR100_sinFundadores": {
+          "estado": "falla",
+          "base": 17,
+          "campo": "B_clasesR100",
+          "puntos": 44,
+          "media": 25.852666076262754,
+          "p": 0.9913872670772905,
+          "subida": -1.6166595222697768,
+          "umbral": 1.2926333038131377
+        },
+        "C_comunidades_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_comunidades",
+          "puntos": 56,
+          "media": 0.008341926063052034,
+          "p": 0.886804329597462,
+          "subida": -0.006895640872117568,
+          "umbral": 0.02
+        },
+        "C_comunidades_sinFundadores": {
+          "estado": "falla",
+          "base": 17,
+          "campo": "C_comunidades",
+          "puntos": 44,
+          "media": 0.00669021115313807,
+          "p": 0.9463023702973117,
+          "subida": -0.009872387341547138,
+          "umbral": 0.02
+        },
+        "C_linajes_base5": {
+          "estado": "falla",
+          "base": 5,
+          "campo": "C_linajes",
+          "puntos": 56,
+          "media": 0.040261827100834466,
+          "p": 0.9999999898174619,
+          "subida": -0.06608314155926093,
+          "umbral": 0.02
+        },
+        "C_linajes_sinFundadores": {
+          "estado": "falla",
+          "base": 17,
+          "campo": "C_linajes",
+          "puntos": 44,
+          "media": 0.03063076347238669,
+          "p": 0.996705601150781,
+          "subida": -0.03949201221150631,
+          "umbral": 0.02
+        }
+      }
+    }
+  ]
+}

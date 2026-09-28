@@ -1,0 +1,967 @@
+{
+  "metodo": {
+    "fuentes": {
+      "original20": "ctrlv4/CTRLV4-6001..6020",
+      "nuevas20": "ctrlv4b/CTRLV4-6021..6040"
+    },
+    "ventanas_dias": {
+      "temprana": [
+        5,
+        14
+      ],
+      "media": [
+        26,
+        35
+      ],
+      "tardia": [
+        51,
+        60
+      ]
+    },
+    "hacer": "suma de fracciones persona-tick gather+build+craft+hunt cuando personaTicks>0",
+    "semilla": "mediana de los diez días; un null diario excluye toda esa ventana para esa métrica",
+    "grupo": "mediana de las medianas válidas por semilla; n cuenta semillas válidas por métrica y ventana",
+    "correlacion": "Pearson entre cambios pareados de hacer y diversidadConductaVentana por semilla; n cuenta pares completos",
+    "validacion": "manifiestos seed/dias/SHA/digest/params/modo/instrumentos y huella SHA-256 por fila, 60 JSON diarios y tick=día*2400",
+    "limitaciones": "asociación descriptiva; no demuestra causalidad ni tasa de eventos; null no imputados; este script no acredita por sí solo logs, TSV o testigos de procedencia"
+  },
+  "resumenes": {
+    "original20": {
+      "semillas": 20,
+      "ventanas": {
+        "temprana": {
+          "hacer": {
+            "mediana": 0.14618823323101082,
+            "n": 20
+          },
+          "diversidadConductaVentana": {
+            "mediana": 0.40654057029188895,
+            "n": 20
+          }
+        },
+        "media": {
+          "hacer": {
+            "mediana": 0.076386708796465,
+            "n": 14
+          },
+          "diversidadConductaVentana": {
+            "mediana": 0.375203455952732,
+            "n": 14
+          }
+        },
+        "tardia": {
+          "hacer": {
+            "mediana": 0.06582889753557365,
+            "n": 14
+          },
+          "diversidadConductaVentana": {
+            "mediana": 0.36825144436679424,
+            "n": 14
+          }
+        }
+      },
+      "correlacion_cambios": {
+        "temprana_media": {
+          "pearson": 0.336399412626439,
+          "n": 14
+        },
+        "media_tardia": {
+          "pearson": 0.5451488184212515,
+          "n": 14
+        }
+      }
+    },
+    "nuevas20": {
+      "semillas": 20,
+      "ventanas": {
+        "temprana": {
+          "hacer": {
+            "mediana": 0.13445916803353195,
+            "n": 19
+          },
+          "diversidadConductaVentana": {
+            "mediana": 0.41485103378872934,
+            "n": 19
+          }
+        },
+        "media": {
+          "hacer": {
+            "mediana": 0.08742767287139823,
+            "n": 15
+          },
+          "diversidadConductaVentana": {
+            "mediana": 0.3845296159505478,
+            "n": 15
+          }
+        },
+        "tardia": {
+          "hacer": {
+            "mediana": 0.07198860272167609,
+            "n": 15
+          },
+          "diversidadConductaVentana": {
+            "mediana": 0.36837918480941256,
+            "n": 15
+          }
+        }
+      },
+      "correlacion_cambios": {
+        "temprana_media": {
+          "pearson": 0.48986855362639187,
+          "n": 15
+        },
+        "media_tardia": {
+          "pearson": 0.5551896120032438,
+          "n": 15
+        }
+      }
+    },
+    "juntas40": {
+      "semillas": 40,
+      "ventanas": {
+        "temprana": {
+          "hacer": {
+            "mediana": 0.1366224381054464,
+            "n": 39
+          },
+          "diversidadConductaVentana": {
+            "mediana": 0.41203425311820113,
+            "n": 39
+          }
+        },
+        "media": {
+          "hacer": {
+            "mediana": 0.08003182697686992,
+            "n": 29
+          },
+          "diversidadConductaVentana": {
+            "mediana": 0.3795233319289989,
+            "n": 29
+          }
+        },
+        "tardia": {
+          "hacer": {
+            "mediana": 0.07198860272167609,
+            "n": 29
+          },
+          "diversidadConductaVentana": {
+            "mediana": 0.36837918480941256,
+            "n": 29
+          }
+        }
+      },
+      "correlacion_cambios": {
+        "temprana_media": {
+          "pearson": 0.4258047113647751,
+          "n": 29
+        },
+        "media_tardia": {
+          "pearson": 0.4704449790696789,
+          "n": 29
+        }
+      }
+    }
+  },
+  "por_semilla": [
+    {
+      "seed": 6001,
+      "grupo": "original20",
+      "origen": "ctrlv4/CTRLV4-6001",
+      "sha256Manifiesto": "611c5a313431448f57fbed984f2534e0a62327cbed200fac26aaeaab287d5446",
+      "ventanas": {
+        "temprana": {
+          "hacer": 0.16203302264450453,
+          "diversidadConductaVentana": 0.43940009343407715
+        },
+        "media": {
+          "hacer": 0.10235814280529013,
+          "diversidadConductaVentana": 0.3795233319289989
+        },
+        "tardia": {
+          "hacer": 0.10247132489281734,
+          "diversidadConductaVentana": 0.37184402760149765
+        }
+      }
+    },
+    {
+      "seed": 6002,
+      "grupo": "original20",
+      "origen": "ctrlv4/CTRLV4-6002",
+      "sha256Manifiesto": "87593812b8c1b63b09ba73ae8cf1607298236345dcb59d90c58507be21ec64fa",
+      "ventanas": {
+        "temprana": {
+          "hacer": 0.14367446868939082,
+          "diversidadConductaVentana": 0.3901265045560402
+        },
+        "media": {
+          "hacer": null,
+          "diversidadConductaVentana": null
+        },
+        "tardia": {
+          "hacer": null,
+          "diversidadConductaVentana": null
+        }
+      }
+    },
+    {
+      "seed": 6003,
+      "grupo": "original20",
+      "origen": "ctrlv4/CTRLV4-6003",
+      "sha256Manifiesto": "6a45a5ff48ddb6ede18e9f12185913ce0b17096b3018f9d259bc0b7d32bd2fb6",
+      "ventanas": {
+        "temprana": {
+          "hacer": 0.1603045953882292,
+          "diversidadConductaVentana": 0.4036322366036129
+        },
+        "media": {
+          "hacer": 0.09306548086405192,
+          "diversidadConductaVentana": 0.3991992322574863
+        },
+        "tardia": {
+          "hacer": 0.07786830992080546,
+          "diversidadConductaVentana": 0.3928124955901846
+        }
+      }
+    },
+    {
+      "seed": 6004,
+      "grupo": "original20",
+      "origen": "ctrlv4/CTRLV4-6004",
+      "sha256Manifiesto": "5618b929a7d5987e0b96cb72c323d4ec7fb9dead5e48a65c0699c34d663c56bf",
+      "ventanas": {
+        "temprana": {
+          "hacer": 0.12773006346344534,
+          "diversidadConductaVentana": 0.4328529528476385
+        },
+        "media": {
+          "hacer": 0.10279563322444601,
+          "diversidadConductaVentana": 0.38880282072095207
+        },
+        "tardia": {
+          "hacer": 0.0876488903318023,
+          "diversidadConductaVentana": 0.3646588611320909
+        }
+      }
+    },
+    {
+      "seed": 6005,
+      "grupo": "original20",
+      "origen": "ctrlv4/CTRLV4-6005",
+      "sha256Manifiesto": "467823b68ea587b82d0eb779cce9deb8eeb7abcfbfd46caf987d1c511953ce66",
+      "ventanas": {
+        "temprana": {
+          "hacer": 0.17519420207461128,
+          "diversidadConductaVentana": 0.4121202569866868
+        },
+        "media": {
+          "hacer": null,
+          "diversidadConductaVentana": null
+        },
+        "tardia": {
+          "hacer": null,
+          "diversidadConductaVentana": null
+        }
+      }
+    },
+    {
+      "seed": 6006,
+      "grupo": "original20",
+      "origen": "ctrlv4/CTRLV4-6006",
+      "sha256Manifiesto": "9d653449789a0b7853175af977b28f6375b054d811f33caf9a6888b7754fa8b1",
+      "ventanas": {
+        "temprana": {
+          "hacer": 0.12211719057620485,
+          "diversidadConductaVentana": 0.4584255573514276
+        },
+        "media": {
+          "hacer": 0.0749824434703204,
+          "diversidadConductaVentana": 0.42646651516346235
+        },
+        "tardia": {
+          "hacer": 0.01292456877961759,
+          "diversidadConductaVentana": 0.4018143820568384
+        }
+      }
+    },
+    {
+      "seed": 6007,
+      "grupo": "original20",
+      "origen": "ctrlv4/CTRLV4-6007",
+      "sha256Manifiesto": "c4eb3c395e6912888d67f8fbd6e4550ce1af45fdff2c90855e5bf9688aa9dfc5",
+      "ventanas": {
+        "temprana": {
+          "hacer": 0.18199112893824138,
+          "diversidadConductaVentana": 0.2660749084064763
+        },
+        "media": {
+          "hacer": null,
+          "diversidadConductaVentana": null
+        },
+        "tardia": {
+          "hacer": null,
+          "diversidadConductaVentana": null
+        }
+      }
+    },
+    {
+      "seed": 6008,
+      "grupo": "original20",
+      "origen": "ctrlv4/CTRLV4-6008",
+      "sha256Manifiesto": "fa063de10f8b463b001dcc7b3dd3359389617d6b63042321a5e4e05583684426",
+      "ventanas": {
+        "temprana": {
+          "hacer": 0.12195917463707263,
+          "diversidadConductaVentana": 0.35124493646738375
+        },
+        "media": {
+          "hacer": null,
+          "diversidadConductaVentana": null
+        },
+        "tardia": {
+          "hacer": null,
+          "diversidadConductaVentana": null
+        }
+      }
+    },
+    {
+      "seed": 6009,
+      "grupo": "original20",
+      "origen": "ctrlv4/CTRLV4-6009",
+      "sha256Manifiesto": "d791d9299a53f11d824921ec81d5b82adb6cfeed16ab53f3579dc159ad5e9be7",
+      "ventanas": {
+        "temprana": {
+          "hacer": 0.08690768700846017,
+          "diversidadConductaVentana": 0.4094489039801649
+        },
+        "media": {
+          "hacer": 0.03930672538755898,
+          "diversidadConductaVentana": 0.36874975017654765
+        },
+        "tardia": {
+          "hacer": 0.02761681320575393,
+          "diversidadConductaVentana": 0.340402738646969
+        }
+      }
+    },
+    {
+      "seed": 6010,
+      "grupo": "original20",
+      "origen": "ctrlv4/CTRLV4-6010",
+      "sha256Manifiesto": "28d7d68e5a2ad989a4d19f546b263a703d970d4c5058b041bda46ee3e1f3c84b",
+      "ventanas": {
+        "temprana": {
+          "hacer": 0.1085242935978859,
+          "diversidadConductaVentana": 0.3788115862563199
+        },
+        "media": {
+          "hacer": 0.0489454857998228,
+          "diversidadConductaVentana": 0.3489613590267562
+        },
+        "tardia": {
+          "hacer": 0.049078035261642755,
+          "diversidadConductaVentana": 0.34349761511079824
+        }
+      }
+    },
+    {
+      "seed": 6011,
+      "grupo": "original20",
+      "origen": "ctrlv4/CTRLV4-6011",
+      "sha256Manifiesto": "e51c75b98a1beb36f0c2e884029aa28abc078bc3b245146c15ca0ed6e5d0066d",
+      "ventanas": {
+        "temprana": {
+          "hacer": 0.12187875960785635,
+          "diversidadConductaVentana": 0.4107439104609226
+        },
+        "media": {
+          "hacer": 0.08947796675903497,
+          "diversidadConductaVentana": 0.398210662517284
+        },
+        "tardia": {
+          "hacer": 0.05378948515034185,
+          "diversidadConductaVentana": 0.3727487307726081
+        }
+      }
+    },
+    {
+      "seed": 6012,
+      "grupo": "original20",
+      "origen": "ctrlv4/CTRLV4-6012",
+      "sha256Manifiesto": "d3df8f63168fd5587b8e372f5515e26ec5ae34dc041e3f6ea9ae1056f199b4df",
+      "ventanas": {
+        "temprana": {
+          "hacer": 0.06871330945163062,
+          "diversidadConductaVentana": 0.37843971132237153
+        },
+        "media": {
+          "hacer": 0.04401753412605171,
+          "diversidadConductaVentana": 0.36773059547633496
+        },
+        "tardia": {
+          "hacer": 0.02444699058985067,
+          "diversidadConductaVentana": 0.35373504287580837
+        }
+      }
+    },
+    {
+      "seed": 6013,
+      "grupo": "original20",
+      "origen": "ctrlv4/CTRLV4-6013",
+      "sha256Manifiesto": "fef56bf551fc31eee6da1ae7fefc1d67c6ac3c482fd43198bbc0d916fed42adb",
+      "ventanas": {
+        "temprana": {
+          "hacer": 0.09279954895221063,
+          "diversidadConductaVentana": 0.3971501633154867
+        },
+        "media": {
+          "hacer": 0.047098603697734207,
+          "diversidadConductaVentana": 0.3523974849567186
+        },
+        "tardia": {
+          "hacer": 0.03155703182035992,
+          "diversidadConductaVentana": 0.32330491189432137
+        }
+      }
+    },
+    {
+      "seed": 6014,
+      "grupo": "original20",
+      "origen": "ctrlv4/CTRLV4-6014",
+      "sha256Manifiesto": "68fd081f745cf65e0899d6b26a26da1263daca724f179303cb21b037e6b6aa40",
+      "ventanas": {
+        "temprana": {
+          "hacer": 0.20003358831566387,
+          "diversidadConductaVentana": 0.26609088073644094
+        },
+        "media": {
+          "hacer": null,
+          "diversidadConductaVentana": null
+        },
+        "tardia": {
+          "hacer": null,
+          "diversidadConductaVentana": null
+        }
+      }
+    },
+    {
+      "seed": 6015,
+      "grupo": "original20",
+      "origen": "ctrlv4/CTRLV4-6015",
+      "sha256Manifiesto": "3023c9afb8f13ecb0f0c5d68f3f9e7993cf830622403a68ec2b15697059451f7",
+      "ventanas": {
+        "temprana": {
+          "hacer": 0.14870199777263082,
+          "diversidadConductaVentana": 0.4107028440631212
+        },
+        "media": {
+          "hacer": 0.1159471946477241,
+          "diversidadConductaVentana": 0.3651664722203041
+        },
+        "tardia": {
+          "hacer": 0.1070127355418071,
+          "diversidadConductaVentana": 0.35943802038047
+        }
+      }
+    },
+    {
+      "seed": 6016,
+      "grupo": "original20",
+      "origen": "ctrlv4/CTRLV4-6016",
+      "sha256Manifiesto": "bbd82f45e803bd1f3bff5fcd382484c28eef38a183b9ad0d7e7d32009799c1c3",
+      "ventanas": {
+        "temprana": {
+          "hacer": 0.160457073485524,
+          "diversidadConductaVentana": 0.23122675627758565
+        },
+        "media": {
+          "hacer": null,
+          "diversidadConductaVentana": null
+        },
+        "tardia": {
+          "hacer": null,
+          "diversidadConductaVentana": null
+        }
+      }
+    },
+    {
+      "seed": 6017,
+      "grupo": "original20",
+      "origen": "ctrlv4/CTRLV4-6017",
+      "sha256Manifiesto": "40c151f2f0c172ffbf386833a282e9b5d1ec8dbba2c7d109615ba043e9cb0ddd",
+      "ventanas": {
+        "temprana": {
+          "hacer": 0.11045335990115879,
+          "diversidadConductaVentana": 0.44481046854118483
+        },
+        "media": {
+          "hacer": 0.07638596097727234,
+          "diversidadConductaVentana": 0.37024536842039635
+        },
+        "tardia": {
+          "hacer": 0.0811266213033345,
+          "diversidadConductaVentana": 0.3830411155387813
+        }
+      }
+    },
+    {
+      "seed": 6018,
+      "grupo": "original20",
+      "origen": "ctrlv4/CTRLV4-6018",
+      "sha256Manifiesto": "a58a2c74f7c2edc18a5055a71d85b33b1f43fa6ce5eda34b1a74043040a72411",
+      "ventanas": {
+        "temprana": {
+          "hacer": 0.1531295193071362,
+          "diversidadConductaVentana": 0.4744065483262958
+        },
+        "media": {
+          "hacer": 0.07638745661565766,
+          "diversidadConductaVentana": 0.3781303508276699
+        },
+        "tardia": {
+          "hacer": 0.08142283096839649,
+          "diversidadConductaVentana": 0.36212108314362623
+        }
+      }
+    },
+    {
+      "seed": 6019,
+      "grupo": "original20",
+      "origen": "ctrlv4/CTRLV4-6019",
+      "sha256Manifiesto": "d933b7d42c111992acbea04e64c8824bebe6fbb11f687f2b4be15b5e9d628305",
+      "ventanas": {
+        "temprana": {
+          "hacer": 0.17602643696483966,
+          "diversidadConductaVentana": 0.43627498451680014
+        },
+        "media": {
+          "hacer": 0.054525331413989624,
+          "diversidadConductaVentana": 0.37227656107779417
+        },
+        "tardia": {
+          "hacer": 0.049306961109687304,
+          "diversidadConductaVentana": 0.37764166607412847
+        }
+      }
+    },
+    {
+      "seed": 6020,
+      "grupo": "original20",
+      "origen": "ctrlv4/CTRLV4-6020",
+      "sha256Manifiesto": "138d81647f6b0749d49741d19af12688f6d7454cda4fbf495d1435e534ad3e2b",
+      "ventanas": {
+        "temprana": {
+          "hacer": 0.19280986520120108,
+          "diversidadConductaVentana": 0.3765409881237272
+        },
+        "media": {
+          "hacer": 0.14292611241130834,
+          "diversidadConductaVentana": 0.3844623198561491
+        },
+        "tardia": {
+          "hacer": 0.11793880039748811,
+          "diversidadConductaVentana": 0.3736516962125431
+        }
+      }
+    },
+    {
+      "seed": 6021,
+      "grupo": "nuevas20",
+      "origen": "ctrlv4b/CTRLV4-6021",
+      "sha256Manifiesto": "31b10a937f23cddb5af23dcb462164ac9bd49a907d59416115cf9e75a90688c4",
+      "ventanas": {
+        "temprana": {
+          "hacer": 0.13445916803353195,
+          "diversidadConductaVentana": 0.406351512539971
+        },
+        "media": {
+          "hacer": 0.13034732805103408,
+          "diversidadConductaVentana": 0.4273811805559501
+        },
+        "tardia": {
+          "hacer": 0.11304631941530449,
+          "diversidadConductaVentana": 0.40667806009763263
+        }
+      }
+    },
+    {
+      "seed": 6022,
+      "grupo": "nuevas20",
+      "origen": "ctrlv4b/CTRLV4-6022",
+      "sha256Manifiesto": "91087f5391232c78bfced94d5497e2dfb827e2058fcbd9361bbb279b3dfcb1e2",
+      "ventanas": {
+        "temprana": {
+          "hacer": 0.11818787835959593,
+          "diversidadConductaVentana": 0.4382487321645484
+        },
+        "media": {
+          "hacer": 0.07389175298168085,
+          "diversidadConductaVentana": 0.39177404627508866
+        },
+        "tardia": {
+          "hacer": 0.027937150307514834,
+          "diversidadConductaVentana": 0.3842750873461784
+        }
+      }
+    },
+    {
+      "seed": 6023,
+      "grupo": "nuevas20",
+      "origen": "ctrlv4b/CTRLV4-6023",
+      "sha256Manifiesto": "79d4e5521235cf71e7b2ddc188c2d7a5a594cd4c93d9d280dd660512881389b8",
+      "ventanas": {
+        "temprana": {
+          "hacer": 0.11479249022807583,
+          "diversidadConductaVentana": 0.41203425311820113
+        },
+        "media": {
+          "hacer": 0.06852531275648904,
+          "diversidadConductaVentana": 0.4499591845043301
+        },
+        "tardia": {
+          "hacer": 0.04765647401698077,
+          "diversidadConductaVentana": 0.3688559313947898
+        }
+      }
+    },
+    {
+      "seed": 6024,
+      "grupo": "nuevas20",
+      "origen": "ctrlv4b/CTRLV4-6024",
+      "sha256Manifiesto": "c725f3397344d8a2d94d07ae7294a2866a5941abeb7384c0d09f1c70fabbd900",
+      "ventanas": {
+        "temprana": {
+          "hacer": 0.1366224381054464,
+          "diversidadConductaVentana": 0.41485103378872934
+        },
+        "media": {
+          "hacer": 0.10892183849522219,
+          "diversidadConductaVentana": 0.4167244899149606
+        },
+        "tardia": {
+          "hacer": 0.0867819847151178,
+          "diversidadConductaVentana": 0.4002972284370978
+        }
+      }
+    },
+    {
+      "seed": 6025,
+      "grupo": "nuevas20",
+      "origen": "ctrlv4b/CTRLV4-6025",
+      "sha256Manifiesto": "b13344206cf532d7e912c9ed8dfd310876ff652b70471c5f6a5ab07c4351e0b3",
+      "ventanas": {
+        "temprana": {
+          "hacer": 0.16345743439780594,
+          "diversidadConductaVentana": 0.3484460813085834
+        },
+        "media": {
+          "hacer": null,
+          "diversidadConductaVentana": null
+        },
+        "tardia": {
+          "hacer": null,
+          "diversidadConductaVentana": null
+        }
+      }
+    },
+    {
+      "seed": 6026,
+      "grupo": "nuevas20",
+      "origen": "ctrlv4b/CTRLV4-6026",
+      "sha256Manifiesto": "25119267b0469ef9cfb66f14c5a8aeaab758b228d9738a4de746807afe3b3ca9",
+      "ventanas": {
+        "temprana": {
+          "hacer": null,
+          "diversidadConductaVentana": null
+        },
+        "media": {
+          "hacer": null,
+          "diversidadConductaVentana": null
+        },
+        "tardia": {
+          "hacer": null,
+          "diversidadConductaVentana": null
+        }
+      }
+    },
+    {
+      "seed": 6027,
+      "grupo": "nuevas20",
+      "origen": "ctrlv4b/CTRLV4-6027",
+      "sha256Manifiesto": "2789a03b504a58437213aa494a07cbd991d9f64426fa3842c5ba7516f44508bc",
+      "ventanas": {
+        "temprana": {
+          "hacer": 0.13403648364711623,
+          "diversidadConductaVentana": 0.44599317339199795
+        },
+        "media": {
+          "hacer": 0.09223317122308819,
+          "diversidadConductaVentana": 0.3894290723650171
+        },
+        "tardia": {
+          "hacer": 0.07198860272167609,
+          "diversidadConductaVentana": 0.3566673462194496
+        }
+      }
+    },
+    {
+      "seed": 6028,
+      "grupo": "nuevas20",
+      "origen": "ctrlv4b/CTRLV4-6028",
+      "sha256Manifiesto": "039ad60ca37a09c6a37de2f9c3d10bbb2ad6a8543eab812694d3dac445d519f2",
+      "ventanas": {
+        "temprana": {
+          "hacer": 0.14908619867473644,
+          "diversidadConductaVentana": 0.4334325795391877
+        },
+        "media": {
+          "hacer": 0.07746451224424675,
+          "diversidadConductaVentana": 0.3949799994495381
+        },
+        "tardia": {
+          "hacer": 0.0834051998611409,
+          "diversidadConductaVentana": 0.40539272180784575
+        }
+      }
+    },
+    {
+      "seed": 6029,
+      "grupo": "nuevas20",
+      "origen": "ctrlv4b/CTRLV4-6029",
+      "sha256Manifiesto": "89c7c3686ed5676be41e412bd89d56c31b64caafe7f1057de00855c1c79404df",
+      "ventanas": {
+        "temprana": {
+          "hacer": 0.1583800508447355,
+          "diversidadConductaVentana": 0.4221625254197623
+        },
+        "media": {
+          "hacer": 0.10393513192523517,
+          "diversidadConductaVentana": 0.37245973907841184
+        },
+        "tardia": {
+          "hacer": 0.09601536490263521,
+          "diversidadConductaVentana": 0.329776189439893
+        }
+      }
+    },
+    {
+      "seed": 6030,
+      "grupo": "nuevas20",
+      "origen": "ctrlv4b/CTRLV4-6030",
+      "sha256Manifiesto": "85dea34373589937c560e5045643f743112261d562e4355751e639aa27b3e992",
+      "ventanas": {
+        "temprana": {
+          "hacer": 0.17571242848401467,
+          "diversidadConductaVentana": 0.3889099649778502
+        },
+        "media": {
+          "hacer": null,
+          "diversidadConductaVentana": null
+        },
+        "tardia": {
+          "hacer": null,
+          "diversidadConductaVentana": null
+        }
+      }
+    },
+    {
+      "seed": 6031,
+      "grupo": "nuevas20",
+      "origen": "ctrlv4b/CTRLV4-6031",
+      "sha256Manifiesto": "df10971ac945aa3b9589750af7f8c2bf7444d9c797583213c1dc84b283c18bf8",
+      "ventanas": {
+        "temprana": {
+          "hacer": 0.11365709210746255,
+          "diversidadConductaVentana": 0.38061173457305325
+        },
+        "media": {
+          "hacer": 0.08888010383899345,
+          "diversidadConductaVentana": 0.3764161519906023
+        },
+        "tardia": {
+          "hacer": 0.07476578432684197,
+          "diversidadConductaVentana": 0.3600257425484724
+        }
+      }
+    },
+    {
+      "seed": 6032,
+      "grupo": "nuevas20",
+      "origen": "ctrlv4b/CTRLV4-6032",
+      "sha256Manifiesto": "a35741e17ccdb8dee11b0440864f9accdbc4fe96ee8fd5237804658cf890766e",
+      "ventanas": {
+        "temprana": {
+          "hacer": 0.144523200923767,
+          "diversidadConductaVentana": 0.41255242973096573
+        },
+        "media": {
+          "hacer": 0.07644100075762536,
+          "diversidadConductaVentana": 0.36885260350600046
+        },
+        "tardia": {
+          "hacer": 0.08175748630190374,
+          "diversidadConductaVentana": 0.3723734026774157
+        }
+      }
+    },
+    {
+      "seed": 6033,
+      "grupo": "nuevas20",
+      "origen": "ctrlv4b/CTRLV4-6033",
+      "sha256Manifiesto": "126eb8635521d1dccc3b49becadb9d5300e48f29adafc770c027e6ae63880909",
+      "ventanas": {
+        "temprana": {
+          "hacer": 0.1323920779657764,
+          "diversidadConductaVentana": 0.4475911620998196
+        },
+        "media": {
+          "hacer": 0.08742767287139823,
+          "diversidadConductaVentana": 0.45652198559853785
+        },
+        "tardia": {
+          "hacer": 0.04877038617425025,
+          "diversidadConductaVentana": 0.36837918480941256
+        }
+      }
+    },
+    {
+      "seed": 6034,
+      "grupo": "nuevas20",
+      "origen": "ctrlv4b/CTRLV4-6034",
+      "sha256Manifiesto": "ee50c965e831679efc029addc9f30e28855c77ac858cf39f515d70c1c96f4085",
+      "ventanas": {
+        "temprana": {
+          "hacer": 0.12373699187747454,
+          "diversidadConductaVentana": 0.4129889816042819
+        },
+        "media": {
+          "hacer": 0.09068116248676994,
+          "diversidadConductaVentana": 0.3612175025040575
+        },
+        "tardia": {
+          "hacer": 0.06736448776044263,
+          "diversidadConductaVentana": 0.3111738183835495
+        }
+      }
+    },
+    {
+      "seed": 6035,
+      "grupo": "nuevas20",
+      "origen": "ctrlv4b/CTRLV4-6035",
+      "sha256Manifiesto": "831450f0d9bec780fd1ce9db251e6f1fa87c59625b89706c38a434cf9ac94408",
+      "ventanas": {
+        "temprana": {
+          "hacer": 0.1643526151906673,
+          "diversidadConductaVentana": 0.42806773573997203
+        },
+        "media": {
+          "hacer": 0.08829347442704158,
+          "diversidadConductaVentana": 0.35784649413173264
+        },
+        "tardia": {
+          "hacer": 0.06705237285489618,
+          "diversidadConductaVentana": 0.31896672139308846
+        }
+      }
+    },
+    {
+      "seed": 6036,
+      "grupo": "nuevas20",
+      "origen": "ctrlv4b/CTRLV4-6036",
+      "sha256Manifiesto": "66d9bddf3379b704b14ff5c9257d51a11aa0ee5886021317d97bda5dec01d586",
+      "ventanas": {
+        "temprana": {
+          "hacer": 0.111115056209597,
+          "diversidadConductaVentana": 0.4174756320429806
+        },
+        "media": {
+          "hacer": 0.07350726134136903,
+          "diversidadConductaVentana": 0.3822143258914399
+        },
+        "tardia": {
+          "hacer": 0.08522396487100244,
+          "diversidadConductaVentana": 0.38088163858063306
+        }
+      }
+    },
+    {
+      "seed": 6037,
+      "grupo": "nuevas20",
+      "origen": "ctrlv4b/CTRLV4-6037",
+      "sha256Manifiesto": "a6f6212f83e6b7553a6e8690db990c48284c3249bf8c82a3033680e2ec095126",
+      "ventanas": {
+        "temprana": {
+          "hacer": 0.18843339303829013,
+          "diversidadConductaVentana": 0.3666232128915742
+        },
+        "media": {
+          "hacer": null,
+          "diversidadConductaVentana": null
+        },
+        "tardia": {
+          "hacer": null,
+          "diversidadConductaVentana": null
+        }
+      }
+    },
+    {
+      "seed": 6038,
+      "grupo": "nuevas20",
+      "origen": "ctrlv4b/CTRLV4-6038",
+      "sha256Manifiesto": "7fd1c9855b87b5f2034a95b50ad93ce691a0b386594ee71f3d61831ff1eb1453",
+      "ventanas": {
+        "temprana": {
+          "hacer": 0.12721780232924365,
+          "diversidadConductaVentana": 0.4183890861697419
+        },
+        "media": {
+          "hacer": 0.08003182697686992,
+          "diversidadConductaVentana": 0.3845296159505478
+        },
+        "tardia": {
+          "hacer": 0.06935424859737019,
+          "diversidadConductaVentana": 0.3288849968672228
+        }
+      }
+    },
+    {
+      "seed": 6039,
+      "grupo": "nuevas20",
+      "origen": "ctrlv4b/CTRLV4-6039",
+      "sha256Manifiesto": "0721ac312c44a429a4c63575287dfa80047b1d3025abe314a39df050f3d6845c",
+      "ventanas": {
+        "temprana": {
+          "hacer": 0.17922015005275088,
+          "diversidadConductaVentana": 0.4244210187867108
+        },
+        "media": {
+          "hacer": null,
+          "diversidadConductaVentana": null
+        },
+        "tardia": {
+          "hacer": null,
+          "diversidadConductaVentana": null
+        }
+      }
+    },
+    {
+      "seed": 6040,
+      "grupo": "nuevas20",
+      "origen": "ctrlv4b/CTRLV4-6040",
+      "sha256Manifiesto": "f828f8650d4c18d90f106e8104c6af55a2cd710c324b7f44cd2eb4e34adce0d1",
+      "ventanas": {
+        "temprana": {
+          "hacer": 0.08562816955473981,
+          "diversidadConductaVentana": 0.3950678822939362
+        },
+        "media": {
+          "hacer": 0.060806332118126194,
+          "diversidadConductaVentana": 0.3483477962498557
+        },
+        "tardia": {
+          "hacer": 0.07175302917689418,
+          "diversidadConductaVentana": 0.34910214196956635
+        }
+      }
+    }
+  ]
+}

@@ -5,10 +5,11 @@ import os, { tmpdir } from 'node:os';
 import v8 from 'node:v8';
 import { join } from 'node:path';
 import { Store } from '../src/server/store.js';
+import { hostLimits, hostParams } from '../src/server/hardware-limits.js';
 import { stringifyExact } from '../src/shared/exact-json.js';
 import { assertWorld, cloneWorld, createWorld, stepWorld, type World } from '../src/world/index.js';
 import { digestoCanonico } from '../src/world/digesto.js';
-import { LEGACY_WORLD_LIMITS, WORLD_LIMIT_KEYS, limitsOf, paramsOf, parseParams, setParams, type WorldParams } from '../src/world/params.js';
+import { DEFAULT_PARAMS, HISTORICAL_PARAMS, LEGACY_WORLD_LIMITS, WORLD_LIMIT_KEYS, limitsOf, paramsOf, parseParams, setParams, type WorldParams } from '../src/world/params.js';
 import { filaInstantanea, reescribirInstantanea, sha256, todasLasTablas } from './lib/store.js';
 
 type LimitKey = typeof WORLD_LIMIT_KEYS[number];
@@ -137,6 +138,31 @@ for (const paged of [false, true]) {
     assert.equal(digestoCanonico(lab.reopen().load()!.world), committed);
   });
 }
+
+test('T100: un mundo nuevo del host/laboratorio persiste límites efectivos superiores a los históricos', t => {
+  const memory = { fisicaBytes: 128 * 1024 ** 3, heapBytes: 4 * 1024 ** 3 };
+  const expected = hostLimits(memory);
+  assert.ok(expected.teselasActivas > LEGACY_WORLD_LIMITS.teselasActivas);
+  assert.ok(expected.chunks > LEGACY_WORLD_LIMITS.chunks);
+  assert.ok(expected.fauna > LEGACY_WORLD_LIMITS.fauna);
+
+  // La misma entrada hostParams alimenta la creación lazy del servidor y las réplicas del laboratorio.
+  const params = hostParams(DEFAULT_PARAMS, memory);
+  const world = createWorld(42, params);
+  assert.equal(mode(paramsOf(world)), 'parametros');
+  assert.deepEqual(numeric(limitsOf(world)), expected, 'RAW_HISTORICAL no limita la admisión del mundo nuevo');
+  assert.equal(paramsOf(world).social.disputaNecesidad, DEFAULT_PARAMS.social.disputaNecesidad);
+  assert.notEqual(paramsOf(world).social.disputaNecesidad, HISTORICAL_PARAMS.social.disputaNecesidad,
+    'RAW_HISTORICAL tampoco aporta las leyes de un mundo nuevo');
+
+  const lab = laboratory(t, false);
+  lab.store.save(world);
+  assert.deepEqual(storedMetadata(lab.store).limitsProfile,
+    { version: 2, aplicacion: 'parametros', ...expected });
+  const resumed = lab.reopen().load()!.world;
+  assert.equal(mode(paramsOf(resumed)), 'parametros');
+  assert.deepEqual(numeric(limitsOf(resumed)), expected, 'el límite del host queda persistido, no se recalcula al cargar');
+});
 
 test('R3: el modo de aplicación forma parte del digesto aunque los cuatro números y sus efectivos coincidan', () => {
   const current = createWorld(42), historical = cloneWorld(current);

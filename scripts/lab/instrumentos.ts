@@ -25,9 +25,11 @@
  */
 import type { Action } from '../../src/shared/types.js';
 import type { DatabaseSync } from 'node:sqlite';
+import type { LegacyRecord } from '../../src/shared/demography.js';
 import type { Capability, TechnologyExecution } from '../../src/shared/technology.js';
-import { TICKS_PER_DAY, type Person, type World } from '../../src/world/index.js';
+import { TICKS_PER_DAY, tileAt, type Person, type World } from '../../src/world/index.js';
 import { indiceDiversidad } from '../../src/world/diversidad.js';
+import { containedWaterQuanta } from '../../src/world/technology-water.js';
 
 
 /** Las 18 acciones de `Action`, en el orden de `ACTIONS` de src/world/diversidad.ts (no exportado):
@@ -248,6 +250,102 @@ export interface MetricasInstrumentos {
   repertorioAbierto: RepertorioAbierto | null;
   /** Alternativa C; cada canal es null si no hay dos grupos de al menos dos personas. */
   diversidadEntreGrupos: { comunidades: number | null; linajes: number | null };
+  /** Diagnóstico sequía (2026-09-28): ficha por cada muerte por deshidratación del día. */
+  sedMuertes: MuerteSed[];
+  /** Diagnóstico sequía: clima del día + agua agregada y por región 16×16. */
+  sedRegiones: { lluviaTicks: number; aguaTeselas: number; aguaCisternas: number; manantiales: number; regiones: RegionSed[] };
+  /** Diagnóstico sequía: celda "x,y" (redondeada) → personas distintas vistas bebiendo (`drink`) ese día. */
+  sedFuentes: Record<string, number>;
+}
+
+/** 3. Muertes por sed (diagnóstico sequía 2026-09-28). Rastro por persona viva + ficha por
+ * muerte por deshidratación + agua por región y bebedores por fuente. Todo vive en memoria
+ * del laboratorio: `src/` no se toca (el observador pasivo no hizo falta). */
+
+export interface PuntoRastro { t: number; x: number; y: number; accion: Action; sed: number }
+export interface FuenteCercana { dist: number; x: number; y: number; fuente: 'tesela' | 'cisterna' }
+export interface MuerteSed {
+  tick: number; id: string; edadDias: number;
+  x: number; y: number; accion: Action; motivo: string; sed: number;
+  aguaLlevada: number; contenedores: number;
+  memoria: { x: number; y: number } | null; memoriaDist: number | null;
+  memoriaEstado: 'conAgua' | 'seca' | 'fueraDeVista' | null;
+  rastro: PuntoRastro[];
+  cercaActiva: FuenteCercana | null; cercaInactiva: FuenteCercana | null;
+  region: string;
+}
+export interface RegionSed {
+  id: string; tierra: boolean; aguaTeselas: number; fuentes: number; manantiales: number;
+  cisternas: number; aguaCisternas: number; poblacion: number;
+}
+
+/** Mismo umbral de «hay agua» que las decisiones (`index.ts`: `waterAvailable > 0.005`). */
+export const SED_UMBRAL_AGUA = 0.005;
+/** Radio máximo de búsqueda de agua cercana (celdas). */
+export const SED_RADIO_MAX = 128;
+/** Cadencia de instantáneas del rastro + tope (60 × 50 = 3000 ticks ≈ 1,25 días). */
+export const SED_RASTRO_CADA = 50, SED_RASTRO_MAX = 60;
+const claveCeldaSed = (x: number, y: number): string => `${Math.round(x)},${Math.round(y)}`;
+const claveRegionSed = (x: number, y: number): string => `${Math.floor(x / 16)},${Math.floor(y / 16)}`;
+
+export type PuntosAgua = ReadonlyMap<string, { x: number; y: number; fuente: 'tesela' | 'cisterna' }>;
+
+/** Agua disponible más cercana a (x, y) por anillos cuadrados expandidos; null si nada ≤ maxR.
+ * Determinista: los anillos se recorren en orden fijo y solo mejora una distancia estrictamente
+ * menor (la primera encontrada gana los empates). */
+export function aguaCercana(puntos: PuntosAgua, x: number, y: number, maxR = SED_RADIO_MAX): FuenteCercana | null {
+  const x0 = Math.round(x), y0 = Math.round(y);
+  let mejorDist = Infinity;
+  let mejor: FuenteCercana | null = null;
+  const mirar = (cx: number, cy: number): void => {
+    const p = puntos.get(`${cx},${cy}`);
+    if (!p) return;
+    const d = Math.hypot(cx - x0, cy - y0);
+    if (d < mejorDist) { mejorDist = d; mejor = { dist: d, x: p.x, y: p.y, fuente: p.fuente }; }
+  };
+  for (let r = 0; r <= maxR; r++) {
+    // La celda de distancia euclídea mínima del anillo r está a r (ejes): más allá de la
+    // mejor encontrada no puede haber mejora.
+    if (r > mejorDist) break;
+    if (r === 0) { mirar(x0, y0); continue; }
+    for (let dx = -r; dx <= r; dx++) { mirar(x0 + dx, y0 - r); mirar(x0 + dx, y0 + r); }
+    for (let dy = -r + 1; dy <= r - 1; dy++) { mirar(x0 - r, y0 + dy); mirar(x0 + r, y0 + dy); }
+  }
+  return mejor;
+}
+
+export interface UltimoSed {
+  motivo: string; sed: number; llevada: number; contenedores: number;
+  memoria: { x: number; y: number } | null;
+}
+
+/** Ficha de una muerte por deshidratación a partir del rastro acumulado (pura, para tests).
+ * `aguaEn` devuelve el `drinkingWater` de la tesela ACTIVA en (x, y), o null si no está activa.
+ * Falla en voz alta sin rastro: morir de sed exige miles de ticks con sed y hay instantánea
+ * cada 50, así que un rastro vacío es un bug del instrumento, nunca un dato. */
+export function fichaMuerteSed(args: {
+  record: Pick<LegacyRecord, 'id' | 'diedAt' | 'bornAt'>;
+  rastro: readonly PuntoRastro[]; ultimo: UltimoSed;
+  aguaActiva: PuntosAgua; aguaInactiva: PuntosAgua;
+  aguaEn: (x: number, y: number) => number | null;
+}): MuerteSed {
+  const { record, rastro, ultimo, aguaActiva, aguaInactiva, aguaEn } = args;
+  const fin = rastro[rastro.length - 1];
+  if (!fin) throw new Error(`Instrumentos sed: muerte ${record.id} sin rastro previo.`);
+  const memoriaDist = ultimo.memoria === null ? null : Math.hypot(ultimo.memoria.x - fin.x, ultimo.memoria.y - fin.y);
+  const aguaMemoria = ultimo.memoria === null ? null : aguaEn(ultimo.memoria.x, ultimo.memoria.y);
+  return {
+    tick: record.diedAt, id: record.id, edadDias: (record.diedAt - record.bornAt) / TICKS_PER_DAY,
+    x: fin.x, y: fin.y, accion: fin.accion, motivo: ultimo.motivo, sed: ultimo.sed,
+    aguaLlevada: ultimo.llevada, contenedores: ultimo.contenedores,
+    memoria: ultimo.memoria, memoriaDist,
+    memoriaEstado: ultimo.memoria === null ? null : aguaMemoria === null ? 'fueraDeVista'
+      : aguaMemoria > SED_UMBRAL_AGUA ? 'conAgua' : 'seca',
+    rastro: [...rastro],
+    cercaActiva: aguaCercana(aguaActiva, fin.x, fin.y),
+    cercaInactiva: aguaCercana(aguaInactiva, fin.x, fin.y),
+    region: claveRegionSed(fin.x, fin.y),
+  };
 }
 
 function mortalesVivos(world: World): Set<string> {
@@ -276,6 +374,23 @@ export class InstrumentosConducta {
   /** Raíz estable aun cuando el registro del antepasado salga de `world.legacy`. */
   private readonly raizPorId = new Map<string, string>();
   private contadorAntes = 0;
+  /** Diagnóstico sequía: rastro por persona viva (instantánea cada SED_RASTRO_CADA ticks). */
+  private readonly rastroSed = new Map<string, PuntoRastro[]>();
+  /** Diagnóstico sequía: última instantánea no posicional por persona (motivo, sed, agua, memoria). */
+  private readonly ultimoSed = new Map<string, UltimoSed>();
+  private readonly muertesSedConocidas = new Set<string>();
+  private muertesSedDia: MuerteSed[] = [];
+  /** Diagnóstico sequía: celda "x,y" → ids distintos vistos con action 'drink' en el día. */
+  private readonly bebedoresDia = new Map<string, Set<string>>();
+  private lluviaTicksDia = 0;
+  /** Índice de agua por paso con muertes: solo se construye si hay que fichar alguna. */
+  private indiceAguaTick = -1;
+  private readonly aguaActivaPaso = new Map<string, { x: number; y: number; fuente: 'tesela' | 'cisterna' }>();
+  /** Las teselas retiradas son inmutables: el conjunto de agua inactiva se reutiliza mientras
+   * `retiredChunks` sea el mismo arreglo con la misma longitud (solo cambia en sitio). */
+  private retiradasRef: readonly unknown[] | null = null;
+  private retiradasLongitud = -1;
+  private readonly aguaInactivaCache = new Map<string, { x: number; y: number; fuente: 'tesela' | 'cisterna' }>();
   /** Coste de los instrumentos en ms de reloj (se informa por consola, nunca en el JSON). */
   costeMs = 0;
   pasos = 0;
@@ -357,11 +472,36 @@ export class InstrumentosConducta {
         if (person.action === 'approach' && person.reason.startsWith('Vuelve a un lugar conocido con agua, alimento, techo o cooperación;')) this.approachHogarTicks++;
       }
     }
+    if (world.weather === 'rain') this.lluviaTicksDia++;
+    if (world.tick % SED_RASTRO_CADA === 0) {
+      for (const person of world.people) {
+        let rastro = this.rastroSed.get(person.id);
+        if (!rastro) { rastro = []; this.rastroSed.set(person.id, rastro); }
+        rastro.push({ t: world.tick, x: person.x, y: person.y, accion: person.action, sed: person.thirst });
+        if (rastro.length > SED_RASTRO_MAX) rastro.splice(0, rastro.length - SED_RASTRO_MAX);
+        this.ultimoSed.set(person.id, {
+          motivo: person.reason, sed: person.thirst, llevada: containedWaterQuanta(person),
+          contenedores: person.technology.items.filter(item => (item.contents?.water ?? 0) > 0).length,
+          memoria: person.waterMemory === undefined ? null : { x: person.waterMemory.x, y: person.waterMemory.y },
+        });
+      }
+    }
+    for (const person of world.people) {
+      if (person.action !== 'drink') continue;
+      const celda = claveCeldaSed(person.x, person.y);
+      let bebedores = this.bebedoresDia.get(celda);
+      if (!bebedores) { bebedores = new Set(); this.bebedoresDia.set(celda, bebedores); }
+      bebedores.add(person.id);
+    }
     const vivos = new Set(world.people.filter(person => person.role === 'neighbor').map(person => person.id));
     for (const id of this.hogarAnterior.keys()) if (!vivos.has(id)) this.hogarAnterior.delete(id);
     for (const record of world.retiredLegacy) if (!this.muertesConocidas.has(record.id)) {
       this.muertesConocidas.add(record.id);
       if (record.role === 'neighbor' && record.diedAt - record.bornAt < 8 * TICKS_PER_DAY) this.muertesMenores8Dias++;
+      if (record.cause === 'dehydration' && !this.muertesSedConocidas.has(record.id)) {
+        this.muertesSedConocidas.add(record.id);
+        this.muertesSedDia.push(this.ficharMuerteSed(world, record));
+      }
     }
     const nuevos = world.eventCounter - this.contadorAntes;
     if (nuevos > 0) {
@@ -375,6 +515,78 @@ export class InstrumentosConducta {
     }
     this.pasos++;
     this.costeMs += performance.now() - inicio;
+  }
+
+  /** Ficha una muerte por deshidratación con el rastro acumulado (solo lectura del mundo). */
+  private ficharMuerteSed(world: World, record: LegacyRecord): MuerteSed {
+    if (this.indiceAguaTick !== world.tick) {
+      this.indiceAguaTick = world.tick;
+      this.aguaActivaPaso.clear();
+      for (const tile of world.tiles) {
+        if ((tile.drinkingWater ?? 0) > SED_UMBRAL_AGUA) {
+          this.aguaActivaPaso.set(`${tile.x},${tile.y}`, { x: tile.x, y: tile.y, fuente: 'tesela' });
+        }
+      }
+      for (const structure of world.structures) {
+        if (structure.water > 0) {
+          this.aguaActivaPaso.set(claveCeldaSed(structure.x, structure.y),
+            { x: structure.x, y: structure.y, fuente: 'cisterna' });
+        }
+      }
+      if (this.retiradasRef !== world.retiredChunks || this.retiradasLongitud !== world.retiredChunks.length) {
+        this.retiradasRef = world.retiredChunks;
+        this.retiradasLongitud = world.retiredChunks.length;
+        this.aguaInactivaCache.clear();
+        for (const chunk of world.retiredChunks) {
+          for (const tile of chunk.tiles) {
+            if ((tile.drinkingWater ?? 0) > SED_UMBRAL_AGUA) {
+              this.aguaInactivaCache.set(`${tile.x},${tile.y}`, { x: tile.x, y: tile.y, fuente: 'tesela' });
+            }
+          }
+        }
+      }
+    }
+    const rastro = this.rastroSed.get(record.id) ?? [];
+    const ultimo = this.ultimoSed.get(record.id);
+    if (!ultimo) throw new Error(`Instrumentos sed: muerte ${record.id} sin instantánea previa.`);
+    return fichaMuerteSed({
+      record, rastro, ultimo,
+      aguaActiva: this.aguaActivaPaso, aguaInactiva: this.aguaInactivaCache,
+      aguaEn: (x, y) => tileAt(world, { x, y })?.drinkingWater ?? null,
+    });
+  }
+
+  /** Agua por región 16×16 al cierre del día (misma cuadrícula que `regionesSinAgua`). */
+  private sedRegionesDia(world: World): MetricasInstrumentos['sedRegiones'] {
+    const regiones = new Map<string, RegionSed>();
+    const region = (id: string): RegionSed => {
+      let r = regiones.get(id);
+      if (!r) {
+        r = { id, tierra: false, aguaTeselas: 0, fuentes: 0, manantiales: 0, cisternas: 0, aguaCisternas: 0, poblacion: 0 };
+        regiones.set(id, r);
+      }
+      return r;
+    };
+    let aguaTeselas = 0, manantiales = 0;
+    for (const tile of world.tiles) {
+      const r = region(claveRegionSed(tile.x, tile.y));
+      if (tile.terrain !== 'water') r.tierra = true;
+      const agua = tile.drinkingWater ?? 0;
+      if (agua > 0) { r.aguaTeselas += agua; aguaTeselas += agua; r.fuentes++; }
+      if (tile.feature === 'spring') { r.manantiales++; manantiales++; }
+    }
+    let aguaCisternas = 0;
+    for (const structure of world.structures) {
+      if (structure.water > 0) {
+        const r = region(claveRegionSed(structure.x, structure.y));
+        r.cisternas++; r.aguaCisternas += structure.water; aguaCisternas += structure.water;
+      }
+    }
+    for (const person of world.people) region(claveRegionSed(person.x, person.y)).poblacion++;
+    return {
+      lluviaTicks: this.lluviaTicksDia, aguaTeselas, aguaCisternas, manantiales,
+      regiones: [...regiones.values()].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+    };
   }
 
   /** Métricas del día que acaba en `world.tick`; reinicia los acumuladores del día. */
@@ -444,9 +656,16 @@ export class InstrumentosConducta {
         comunidades: diversidadEntreGrupos(comunidadPerfiles, world.seed, dia, 0),
         linajes: diversidadEntreGrupos(linajePerfiles, world.seed, dia, 1),
       },
+      sedMuertes: this.muertesSedDia,
+      sedRegiones: this.sedRegionesDia(world),
+      sedFuentes: Object.fromEntries([...this.bebedoresDia.entries()].map(([celda, ids]) => [celda, ids.size])),
     };
     const vivos = new Set(world.people.map(person => person.id));
     for (const id of [...this.ticksPorPersona.keys()]) if (!vivos.has(id)) this.ticksPorPersona.delete(id);
+    for (const id of [...this.rastroSed.keys()]) if (!vivos.has(id)) { this.rastroSed.delete(id); this.ultimoSed.delete(id); }
+    this.muertesSedDia = [];
+    this.bebedoresDia.clear();
+    this.lluviaTicksDia = 0;
     this.tiempoDia.clear(); this.personaTicksDia = 0; this.approachHogarTicks = 0;
     this.cambiosHogar = { adopta: 0, pierde: 0 };
     this.ticksDiaPorPersona.clear(); this.vivosInicioDia = mortalesVivos(world);

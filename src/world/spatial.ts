@@ -12,10 +12,21 @@ import { lastTileAt, splitTileBlocks, tileIndexAppended } from './tile-index.js'
 
 /** Observador de laboratorio de la natalidad local (NAT-L): solo lee; vive en el contexto, no en el mundo. */
 export interface ObservadorNatalidad { nacimiento(x: number, limitante: 'agua' | 'comida'): void; bloqueo(): void }
+/** Observador de laboratorio de la economía de hacer (T5): solo lee; vive en el contexto, no en el mundo.
+ * `construccion` informa cada evaluación de `constructionOpportunity` con su motivo, la ganancia esperada
+ * (null si se rechazó antes de calcularla) y los materiales locales (null si no se midieron).
+ * `decision` informa, en cada decisión de `choose`, qué se ofreció de {gather, build, approach con motivo}
+ * y qué acción se eligió. Ninguna llamada muta el mundo ni consume azar. */
+export interface ObservadorEconomiaHacer {
+  construccion(motivo: 'admitida' | 'cupo-estructuras' | 'materiales' | 'ganancia' | 'reparacion-mejor', ganancia: number | null, madera: number | null, piedra: number | null): void;
+  decision(ofrecidos: readonly { accion: string; motivo?: string }[], elegida: string): void;
+}
 export interface WorldContext {
   loadChunk?: (key: string, atTick: number) => Chunk | null;
   /** Se copia a cada clon del paso (`cloneWorld`) con el resto del contexto; null lo retira. */
   observadorNatalidad?: ObservadorNatalidad | null;
+  /** Igual que el anterior: se copia a cada clon; null lo retira. */
+  observadorEconomiaHacer?: ObservadorEconomiaHacer | null;
   catalogueReader?: TechnologyCatalogueReader;
   loadLegacy?: (id: string, atTick: number) => LegacyRecord | null;
 }
@@ -27,6 +38,8 @@ export function bindWorldContext(world: World, context: WorldContext): void {
   if (world.technology && bound.catalogueReader) bindTechnologyCatalogue(world.technology, bound.catalogueReader);
 }
 export function worldContext(world: World): WorldContext { return contexts.get(world) ?? {}; }
+export function setObservadorEconomiaHacer(world: World, value: ObservadorEconomiaHacer | null): void { bindWorldContext(world, { observadorEconomiaHacer: value }); }
+export function observadorEconomiaHacer(world: World): ObservadorEconomiaHacer | null { return worldContext(world).observadorEconomiaHacer ?? null; }
 export type ChunkMeta = Omit<Chunk, 'tiles' | 'animals' | 'structures'>;
 export const validCoordinate = (n: unknown): n is number => typeof n === 'number' && Number.isSafeInteger(n) && n >= -MAX_COORDINATE && n < MAX_COORDINATE;
 /** Índice compartido con la fauna (tile-index.ts): misma respuesta que el `Map` de claves

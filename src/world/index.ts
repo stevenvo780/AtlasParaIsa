@@ -1,6 +1,6 @@
 import { recordChronicleEvent, enableChronicleJournal, assertChronicleJournal, type ChronicleJournal } from './chronicle-journal.js';
 import { PROTOCOL_VERSION, type Action, type ChronicleEvent, type Gesture, type GestureResult, type MemoryView, type PersonView, type PersonDetail, type PlaceView, type Tile, type WorldView, type Viewport, type Order, type CommunityView, type WorldSample, type FaseNombre } from '../shared/types.js';
-import { activate, bindWorldContext, maintainRegions, normalizeViewport, projectTerrain, tileAt, validCoordinate, worldContext, type ChunkMeta, type WorldContext } from './spatial.js';
+import { activate, bindWorldContext, maintainRegions, normalizeViewport, observadorEconomiaHacer, projectTerrain, tileAt, validCoordinate, worldContext, type ChunkMeta, type WorldContext } from './spatial.js';
 import { tileLookup } from './tile-index.js';
 import { primero, primeroConFiltroCaro } from './orden.js';
 import { chunkKey, generateChunk, proceduralPlaceName, legacyStructures, type Chunk } from './terrain.js';
@@ -292,7 +292,9 @@ export function ecology(world: World): void {
   }
 }
 
-interface Candidate { action: Action; target: Point; score: number; reason: string; memory?: Memory; directed?: boolean; }
+interface Candidate { action: Action; target: Point; score: number; reason: string; memory?: Memory; directed?: boolean;
+  /** Motivo del `approach` para el observador de laboratorio; la dinámica no lo lee. */
+  motivo?: string; }
 /** Ley DIV (`conducta.aptitud`): qué rasgo heredable hace a alguien apto para
  * cada OFICIO. Sigue las afinidades que la elección ya usaba (explorar e investigar con
  * `curiosity`, recolectar/cultivar con `industriousness`, compartir con `care`); la caza, el
@@ -474,7 +476,7 @@ function choose(world: World, person: Person): void {
   const aptitud = person.thirst <= 0.5 && person.hunger <= 0.5 && person.fatigue <= 0.5 ? paramsOf(world).conducta.aptitud : 0;
   if (aptitud > 0) candidates[0]!.score += aptitud * ventajaComparativa(person.traits, 'explore');
   const home = settlementOpportunity(world,person);
-  if (home) candidates.push({action:'approach',...home});
+  if (home) candidates.push({action:'approach',...home,motivo:'hogar'});
   // Conflicto legible (`social.memoriaDisputa`, CONFL, default 0 = hoy): quien cedió una disputa recuerda un
   // día la fuente; al elegir dónde comer, beber o cazar esa fuente (la celda y las que la disputa llama «el
   // mismo destino») le parece `memoriaDisputa` celdas más lejos. Sólo reordena las fuentes que ya percibe: si
@@ -567,7 +569,7 @@ function choose(world: World, person: Person): void {
   } : undefined;
   if (familyForage) candidates.push(familyForage);
   if (family && person.inventory >= family.reserveTarget && family.partner.inventory >= 0.1) candidates.push({
-    action: 'approach', target: familyPlace ?? family.partner, score: 0.85 + person.traits.care * 0.2,
+    action: 'approach', target: familyPlace ?? family.partner, motivo: 'reunion', score: 0.85 + person.traits.care * 0.2,
     reason: `Tiene reservas y busca ${familyPlace ? `reunirse con ${family.partner.name} en ${familyPlace.name}` : `acercarse a ${family.partner.name}`}; el vínculo y el cuidado corporal permiten intentar una crianza.`,
   });
   // Cortejo (2026-09-22, `poblacion.cortejo`; histórico 0 = apagado, reglas 10 lo adopta con 2 y radio 128
@@ -590,7 +592,7 @@ function choose(world: World, person: Person): void {
         cortejado = other; vinculo = (strength + (other.bonds[person.id] ?? 0)) / 2;
       }
     }
-    if (cortejado) candidates.push({ action: 'approach', target: { x: cortejado.x, y: cortejado.y }, score: leyPoblacion.cortejo * (0.5 + vinculo * 0.5),
+    if (cortejado) candidates.push({ action: 'approach', target: { x: cortejado.x, y: cortejado.y }, motivo: 'cortejo', score: leyPoblacion.cortejo * (0.5 + vinculo * 0.5),
       reason: `Recuerda el vínculo con ${cortejado.name} y lo busca; ambos están en edad de criar y la cercanía hace posible una familia.` });
   }
   const water = primeroConFiltroCaro(reachableTiles, disputada
@@ -705,12 +707,12 @@ function choose(world: World, person: Person): void {
       const space = nearbyTiles.filter(tile => distance(person, tile) <= 4).sort((a, b) => distance(partner, b) - distance(partner, a))[0]!;
       candidates.push({ action: 'retreat', target: space, score: 1.1 + person.socialLoad, reason: 'Después de compartir tiempo, busca espacio para recuperar su ritmo.' });
     } else {
-      candidates.push({ action: 'approach', target: partner, score: person.closeness * (0.65 + person.sociability * 0.45), reason: 'Le apetece acercarse; puede ver al otro en las cercanías.' });
+      candidates.push({ action: 'approach', target: partner, motivo: 'social', score: person.closeness * (0.65 + person.sociability * 0.45), reason: 'Le apetece acercarse; puede ver al otro en las cercanías.' });
       candidates.push({ action: 'accompany', target: partner, score: 0.18 + person.sociability * 0.1 + (partner.action === 'rest' ? 0.1 : 0), reason: 'Elige compartir una pausa con quien está cerca.' });
     }
   }
   for (const invitation of world.invitations) {
-    if (distance(person, invitation) <= RADIUS && person.hunger < 0.65 && person.fatigue < 0.7 && person.socialLoad < 0.7) candidates.push({ action: 'approach', target: invitation, score: 0.67 + person.sociability * 0.15, reason: 'Percibe una invitación y sus necesidades le permiten acercarse.' });
+    if (distance(person, invitation) <= RADIUS && person.hunger < 0.65 && person.fatigue < 0.7 && person.socialLoad < 0.7) candidates.push({ action: 'approach', target: invitation, motivo: 'invitacion', score: 0.67 + person.sociability * 0.15, reason: 'Percibe una invitación y sus necesidades le permiten acercarse.' });
   }
   const place = primeroCerca(world.places, person, 4, p => distance(person, p) <= 3);
   const hungry = nearbyPeople.filter(other => distance(person, other) <= 2 && other.hunger > 0.27).sort((a, b) => b.hunger - a.hunger)[0];
@@ -723,7 +725,7 @@ function choose(world: World, person: Person): void {
   for (const habit of person.habits) {
     const knownPlace = world.places.find(p => p.id === habit.placeId);
     const usefulVisit = knownPlace && person.inventory >= 0.025 && nearbyPeople.some(p => distance(p, knownPlace) <= 3 && p.hunger > 0.27);
-    if (habit.strength >= 0.5 && knownPlace && usefulVisit && distance(person, knownPlace) <= RADIUS && person.hunger < 0.5) candidates.push({ action: 'approach', target: knownPlace, score: 0.43 + habit.strength * 0.3, reason: `Recuerda el cuidado compartido en ${knownPlace.name} y vuelve por decisión propia.` });
+    if (habit.strength >= 0.5 && knownPlace && usefulVisit && distance(person, knownPlace) <= RADIUS && person.hunger < 0.5) candidates.push({ action: 'approach', target: knownPlace, motivo: 'memoria', score: 0.43 + habit.strength * 0.3, reason: `Recuerda el cuidado compartido en ${knownPlace.name} y vuelve por decisión propia.` });
   }
   for (const memory of world.memories) {
     if (person.role === 'neighbor' || !memory.roles.includes(person.role)) continue;
@@ -861,6 +863,15 @@ function choose(world: World, person: Person): void {
   }
   candidates.sort((a, b) => b.score - a.score);
   const selected = candidates[0]!;
+  const observadorEconomia = observadorEconomiaHacer(world);
+  if (observadorEconomia) {
+    const ofrecidos: { accion: string; motivo?: string }[] = [];
+    for (const candidate of candidates) {
+      if (candidate.action === 'gather' || candidate.action === 'build') ofrecidos.push({ accion: candidate.action });
+      else if (candidate.action === 'approach' && candidate.motivo) ofrecidos.push({ accion: 'approach', motivo: candidate.motivo });
+    }
+    observadorEconomia.decision(ofrecidos, selected.action);
+  }
   if (selected.action === 'explore' && !selected.directed && selected !== volverAlAgua) {
     // Urgent thirst reconsiders every tick. Replacing a still viable waypoint
     // each time can reverse the route before either endpoint is ever visited.

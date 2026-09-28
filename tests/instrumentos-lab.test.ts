@@ -34,7 +34,7 @@ const CLAVES_ANTIGUAS = new Set([
   'cooperacionAcumuladaPorTipo', 'otrasCooperacionesAcumuladas', 'conflictosAcumulados', 'faunaTotal',
   'p50Ms', 'p95Ms', 'rss',
 ]);
-const CLAVES_NUEVAS = ['natalidadLocal', 'diversidadConductaTiempo', 'diversidadConductaTiempoComponentes', 'diversidadConductaActiva', 'diversidadConductaActivaComponentes', 'diversidadConductaComponentes', 'diversidadConductaVentana', 'diversidadConductaVentanaComponentes', 'personasVentana', 'repartoTiempoPorAccion', 'repartoActividadPorAccion', 'vocacionVarianza', 'vocacionEntropiaArgmax', 'vocacionCoincidencia', 'diversidadConductaVentanaGen1', 'approachHogar', 'maderaMediaAdultos', 'piedraMediaAdultos', 'muertesMenores8Dias', 'cambiosHogar', 'diversidadPerfilesJS', 'linajesVivos', 'linajesHerfindahl', 'censoComunidades', 'repertorioAbierto', 'diversidadEntreGrupos'];
+const CLAVES_NUEVAS = ['natalidadLocal', 'diversidadConductaTiempo', 'diversidadConductaTiempoComponentes', 'diversidadConductaActiva', 'diversidadConductaActivaComponentes', 'diversidadConductaComponentes', 'diversidadConductaVentana', 'diversidadConductaVentanaComponentes', 'personasVentana', 'repartoTiempoPorAccion', 'repartoActividadPorAccion', 'vocacionVarianza', 'vocacionEntropiaArgmax', 'vocacionCoincidencia', 'diversidadConductaVentanaGen1', 'approachHogar', 'maderaMediaAdultos', 'piedraMediaAdultos', 'muertesMenores8Dias', 'cambiosHogar', 'diversidadPerfilesJS', 'linajesVivos', 'linajesHerfindahl', 'censoComunidades', 'repertorioAbierto', 'diversidadEntreGrupos', 'ecoHacerDemanda', 'ecoHacerConstruccion', 'ecoHacerStock', 'ecoHacerHerramientas', 'ecoHacerCupo'];
 
 type Json = Record<string, unknown>;
 const readJson = (path: string): Json => JSON.parse(readFileSync(path, 'utf8')) as Json;

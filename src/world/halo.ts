@@ -417,7 +417,7 @@ export const LECTURAS_GLOBALES: readonly LecturaGlobal[] = [
   { id: 'planos.catalogo', fase: 'decision', fuente: 'world.blueprints', cota: 'MAX_BLUEPRINTS = 64', fichero: 'inventions.ts', funcion: 'inventionCandidates',
     patrones: ['world.blueprints.map(b => blueprintSignature(b.components))', 'world.blueprints.map(b => genotypeDistance(child.components, b.components))'],
     motivo: 'Novedad de un diseño frente a todos los planos del mundo.' },
-  ...([['constructionOpportunity', 'decision', 'if (world.structures.length >= MAX_STRUCTURES) return;'],
+  ...([['constructionOpportunity', 'decision', 'world.structures.length >= MAX_STRUCTURES'],
     ['completeConstruction', 'accion', 'world.structures.length >= MAX_STRUCTURES']] as const).map(([funcion, fase, patron]) => ({
     id: `estructuras.tope.${funcion}`, fase, fuente: 'world.structures.length', cota: 'MAX_STRUCTURES = 512', fichero: 'inventions.ts', funcion,
     patrones: [patron], motivo: 'Cuántas estructuras activas hay en todo el mundo: un recuento global.' })),

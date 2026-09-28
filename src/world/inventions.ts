@@ -2,7 +2,7 @@ import type { BlueprintView, StructureComponent, StructureView } from '../shared
 import type { ChronicleEvent, Tile } from '../shared/types.js';
 import type { Person, World } from './index.js';
 import { localRandom } from './genetics.js';
-import { tileAt } from './spatial.js';
+import { observadorEconomiaHacer, tileAt } from './spatial.js';
 import { chunkKey } from './terrain.js';
 import { INTERVALO_ECOLOGIA_TICKS, SED_POR_UNIDAD } from './ecologia-constantes.js';
 import { algunoCerca, filtrarCerca } from './indice-puntos.js';
@@ -181,16 +181,18 @@ function usefulRepairs(world: World, person: Person) {
  * and pays the same material/work costs. No distant archive, historical uses or
  * invented number of occupants contributes to this local marginal comparison. */
 export function constructionOpportunity(world: World, person: Person): { score: number; reason: string } | undefined {
-  if (world.structures.length >= MAX_STRUCTURES) return;
+  const observador = observadorEconomiaHacer(world);
+  if (world.structures.length >= MAX_STRUCTURES) { observador?.construccion('cupo-estructuras', null, null, null); return; }
   const blueprint = selectedBlueprint(world, person), cost = blueprintCost(blueprint.components), materials = localMaterials(world, person);
-  if (materials.wood < cost.wood || materials.stone < cost.stone) return;
+  if (materials.wood < cost.wood || materials.stone < cost.stone) { observador?.construccion('materiales', null, materials.wood, materials.stone); return; }
   const context = constructionContext(world, person), before = serviceValue(localServices(world, person), context);
   // Material committed to the building cannot simultaneously fuel its hearth.
   const gain = serviceValue(localServices(world, person, undefined, blueprint.components, Math.max(0, person.materials.wood - cost.wood)), context) - before;
   const expense = normalizedCost(cost), baseExpense = normalizedCost(defaultBlueprint().cost);
-  if (gain < MIN_SERVICE_GAIN * expense / baseExpense) return;
+  if (gain < MIN_SERVICE_GAIN * expense / baseExpense) { observador?.construccion('ganancia', gain, materials.wood, materials.stone); return; }
   const repair = usefulRepairs(world, person).find(option => materials.wood >= option.steps);
-  if (repair && repair.efficiency >= gain / expense) return;
+  if (repair && repair.efficiency >= gain / expense) { observador?.construccion('reparacion-mejor', gain, materials.wood, materials.stone); return; }
+  observador?.construccion('admitida', gain, materials.wood, materials.stone);
   return { score: 0.35 + person.traits.industriousness * 0.2 + Math.min(0.55, gain) - expense * 0.005,
     reason: 'El plano aporta una función adicional frente a las instalaciones que percibe; fabricarlo exige materiales y trabajo.' };
 }

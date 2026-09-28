@@ -604,6 +604,29 @@ registra `p50Ms=113,82`; la proporción aproximada es 0,41 %, por debajo del pre
 La población de la medición se amplió en memoria para fijar exactamente 600 y no representa
 un día de simulación completo; `instrumentos.costeMs` sigue informando el coste real de cada réplica.
 
+### 5. Economía de hacer (T5/H1–H4, campaña 2026-09-27)
+
+Cinco claves por día, todas de solo lectura. `ecoHacerDemanda` = `{decisiones, ofrecidos, elegidos}`:
+por cada decisión de `choose`, qué se ofreció de {gather, build, approach con motivo
+(`approach:hogar|reunion|cortejo|social|invitacion|memoria`)} y qué acción se eligió (todas las
+decisiones). `ecoHacerConstruccion` = `{evaluaciones, admitidas, rechazos:{cupo,materiales,ganancia,
+reparacion}, gananciaMedia, maderaMedia, piedraMedia}`: cada evaluación de `constructionOpportunity`
+con su motivo de salida; las medias solo promedian donde el dato se calculó. `ecoHacerStock` =
+`{radio:7, comunidades:[{id,miembros,miembrosVivos,madera,piedra,cobertura}]}`: stock cosechable en
+disco de radio 7 (149 celdas) alrededor de cada centro; `cobertura` = activas/149.
+`ecoHacerHerramientas` = `{adultos,items,capacidadMedia,desgasteMedio,reposicion,masaReposicion}`:
+capacidad máxima agregada por adulto, desgaste `1−mass/initialMass` por pieza y piezas con `madeAt`
+del día. `ecoHacerCupo` = `{nacimientos,cupo,recientes,fraccion}`: nacimientos del día y ocupación
+de la ventana de comprobación al cierre. Los motivos de approach viajan en un campo `motivo` del
+candidato que la dinámica no lee; `constructionOpportunity` y `choose` informan a un observador
+pasivo del `WorldContext` (`observadorEconomiaHacer`), que `cerrar()` retira.
+
+Medición `nice -n 19` sobre copia del respaldo público (658–660 hab., 300 pasos):
+`costeMs` 166,2 ms / 300 = 0,55 ms por paso frente a p50 48,5 ms sin instrumentos → 1,1 %,
+bajo el presupuesto de 3 %. Las llamadas al observador (contadores por decisión/evaluación) quedan
+fuera de `costeMs`, igual que en el resto de instrumentos; su cota analítica es ~0,02–0,05 ms/paso
+(~0,1 %). Con instrumentos activos el digesto es bit a bit el mismo (puerta 6/6 × 1200 pasos).
+
 ## Diagnóstico de disputas (`diagnostico-disputas.ts`, hipótesis CONFL 2026-09-22)
 
 ```sh

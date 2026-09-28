@@ -26,11 +26,13 @@
 import type { Action } from '../../src/shared/types.js';
 import type { DatabaseSync } from 'node:sqlite';
 import type { Capability, TechnologyExecution } from '../../src/shared/technology.js';
-import { OFICIOS_DE_LINAJE, TICKS_PER_DAY, type Person, type World } from '../../src/world/index.js';
+import { OFICIOS_DE_LINAJE, TICKS_PER_DAY, tileAt, type Person, type World } from '../../src/world/index.js';
 import { indiceDiversidad } from '../../src/world/diversidad.js';
 import { reproductiveReadiness } from '../../src/world/family.js';
 import { demandaTotal, hacinamientoLocal, reposicionTerritorioOcupado, setObservadorNatalidad } from '../../src/world/natalidad.js';
 import { paramsOf } from '../../src/world/params.js';
+import { setObservadorEconomiaHacer } from '../../src/world/spatial.js';
+import { materialCapacities } from '../../src/world/technology.js';
 
 /** Las 18 acciones de `Action`, en el orden de `ACTIONS` de src/world/diversidad.ts (no exportado):
  * fija el orden de las claves de las fracciones en el JSON. */
@@ -258,6 +260,28 @@ export interface MetricasInstrumentos {
   repertorioAbierto: RepertorioAbierto | null;
   /** Alternativa C; cada canal es null si no hay dos grupos de al menos dos personas. */
   diversidadEntreGrupos: { comunidades: number | null; linajes: number | null };
+  /** T5/H1+H2+H4: decisiones de `choose` del día. `ofrecidos` cuenta, por decisión, cada oferta de
+   * gather/build y cada approach con su motivo (`approach:hogar|reunion|cortejo|social|invitacion|memoria`);
+   * `elegidos` cuenta la acción elegida en TODAS las decisiones (no solo con oferta). */
+  ecoHacerDemanda: { decisiones: number; ofrecidos: Record<string, number>; elegidos: Record<string, number> };
+  /** T5/H2: evaluaciones de `constructionOpportunity` del día por motivo de salida; las medias solo
+   * promedian evaluaciones donde el dato se calculó (ganancia/materiales son null en salidas tempranas). */
+  ecoHacerConstruccion: { evaluaciones: number; admitidas: number;
+    rechazos: { cupo: number; materiales: number; ganancia: number; reparacion: number };
+    gananciaMedia: number | null; maderaMedia: number | null; piedraMedia: number | null };
+  /** T5/H1: stock cosechable por comunidad y día en disco de radio 7 alrededor de su centro
+   * (149 celdas, como las sondas espaciales del diagnóstico). `madera`/`piedra` suman `floor()`
+   * en teselas activas no-agua; `cobertura` = activas/149. */
+  ecoHacerStock: { radio: number; comunidades: { id: string; miembros: number; miembrosVivos: number;
+    madera: number; piedra: number; cobertura: number }[] };
+  /** T5/H3: herramientas por adulto y día. `capacidadMedia` = media por adulto de la suma, sobre sus
+   * piezas, de la capacidad máxima (`materialCapacities`); `desgasteMedio` = media por pieza de
+   * `1 - mass/initialMass`; `reposicion` = piezas con `madeAt` dentro del día. */
+  ecoHacerHerramientas: { adultos: number; items: number; capacidadMedia: number | null;
+    desgasteMedio: number | null; reposicion: number; masaReposicion: number };
+  /** T5/H4: cupo de nacimientos al cierre. `recientes` = vecinos nacidos dentro de la ventana de
+   * comprobación; `fraccion` = recientes/cupo (null con cupo 0). */
+  ecoHacerCupo: { nacimientos: number; cupo: number; recientes: number; fraccion: number | null };
 }
 
 function mortalesVivos(world: World): Set<string> {
@@ -286,6 +310,13 @@ export class InstrumentosConducta {
   /** Raíz estable aun cuando el registro del antepasado salga de `world.legacy`. */
   private readonly raizPorId = new Map<string, string>();
   private contadorAntes = 0;
+  private decisionesDia = 0;
+  private readonly ofrecidosDia = new Map<string, number>();
+  private readonly elegidosDia = new Map<string, number>();
+  private construccionDia = { admitida: 0, cupo: 0, materiales: 0, ganancia: 0, reparacion: 0 };
+  private construccionGananciaSuma = 0; private construccionGananciaN = 0;
+  private construccionMaderaSuma = 0; private construccionMaderaN = 0;
+  private construccionPiedraSuma = 0; private construccionPiedraN = 0;
   private nacimientosDia = 0;
   private readonly xNacimientos: number[] = [];
   private bloqueadasPorLey = 0;
@@ -302,6 +333,26 @@ export class InstrumentosConducta {
     setObservadorNatalidad(world, { nacimiento: (x, limitante) => {
       this.nacimientosDia++; this.xNacimientos.push(x); this.limitante[limitante]++;
     }, bloqueo: () => { this.bloqueadasPorLey++; } });
+    setObservadorEconomiaHacer(world, {
+      construccion: (motivo, ganancia, madera, piedra) => {
+        if (motivo === 'admitida') this.construccionDia.admitida++;
+        else if (motivo === 'cupo-estructuras') this.construccionDia.cupo++;
+        else if (motivo === 'materiales') this.construccionDia.materiales++;
+        else if (motivo === 'ganancia') this.construccionDia.ganancia++;
+        else this.construccionDia.reparacion++;
+        if (ganancia !== null) { this.construccionGananciaSuma += ganancia; this.construccionGananciaN++; }
+        if (madera !== null) { this.construccionMaderaSuma += madera; this.construccionMaderaN++; }
+        if (piedra !== null) { this.construccionPiedraSuma += piedra; this.construccionPiedraN++; }
+      },
+      decision: (ofrecidos, elegida) => {
+        this.decisionesDia++;
+        for (const o of ofrecidos) {
+          const clave = o.accion === 'approach' ? `approach:${o.motivo ?? '?'}` : o.accion;
+          this.ofrecidosDia.set(clave, (this.ofrecidosDia.get(clave) ?? 0) + 1);
+        }
+        this.elegidosDia.set(elegida, (this.elegidosDia.get(elegida) ?? 0) + 1);
+      },
+    });
     this.fotografiarActividad(world); this.vivosInicioDia = mortalesVivos(world);
     const identidades = new Map([...world.legacy, ...world.retiredLegacy, ...world.people]
       .filter(person => person.role === 'neighbor').map(person => [person.id, person] as const));
@@ -341,7 +392,7 @@ export class InstrumentosConducta {
   }
 
   /** Retira el observador de natalidad del mundo en que se registró (los clones ya tomados lo conservan). */
-  cerrar(): void { setObservadorNatalidad(this.mundoObservado, null); }
+  cerrar(): void { setObservadorNatalidad(this.mundoObservado, null); setObservadorEconomiaHacer(this.mundoObservado, null); }
 
   /** Ticks por acción observados de una persona viva (copia; para tests y diagnóstico). */
   ticksDe(id: string): Record<string, number> | undefined {
@@ -476,6 +527,39 @@ export class InstrumentosConducta {
         comida: this.nacimientosDia ? this.limitante.comida / this.nacimientosDia : 0 },
     };
     const incrementos = new Map<string, number>();
+    // T5/H1: stock cosechable por comunidad en disco de radio 7 (149 celdas).
+    const RADIO_STOCK = 7;
+    const CELDAS_DISCO_7 = 149;
+    const vivosVecinos = new Set(world.people.filter(person => person.role === 'neighbor').map(person => person.id));
+    const stockComunidades = world.communities.map(comunidad => {
+      let activas = 0, madera = 0, piedra = 0;
+      const cx = Math.round(comunidad.x), cy = Math.round(comunidad.y);
+      for (let dy = -RADIO_STOCK; dy <= RADIO_STOCK; dy++) for (let dx = -RADIO_STOCK; dx <= RADIO_STOCK; dx++) {
+        if (dx * dx + dy * dy > RADIO_STOCK * RADIO_STOCK) continue;
+        const tile = tileAt(world, { x: cx + dx, y: cy + dy });
+        if (!tile) continue;
+        activas++;
+        if (tile.terrain !== 'water') { madera += Math.floor(tile.wood ?? 0); piedra += Math.floor(tile.stone ?? 0); }
+      }
+      return { id: comunidad.id, miembros: comunidad.members.length,
+        miembrosVivos: comunidad.members.filter(id => vivosVecinos.has(id)).length,
+        madera, piedra, cobertura: activas / CELDAS_DISCO_7 };
+    });
+    // T5/H3: herramientas por adulto.
+    let itemsHerramientas = 0, capacidadSuma = 0, desgasteSuma = 0, desgasteN = 0, reposicionPiezas = 0, masaReposicion = 0;
+    for (const person of adultos) {
+      let capPersona = 0;
+      for (const item of person.technology.items) {
+        itemsHerramientas++;
+        const caps = materialCapacities(item);
+        capPersona += Math.max(caps.cutting, caps.storage, caps.insulation, caps.cultivation, caps.binding, caps.abrasion);
+        desgasteSuma += 1 - item.mass / Math.max(1, item.initialMass); desgasteN++;
+        if (item.madeAt >= world.tick - TICKS_PER_DAY) { reposicionPiezas++; masaReposicion += item.mass; }
+      }
+      capacidadSuma += capPersona;
+    }
+    // T5/H4: cupo de nacimientos al cierre.
+    const recientesCupo = world.people.filter(person => person.role === 'neighbor' && person.bornAt > world.tick - pop.intervaloComprobacionTicks).length;
     let totalIncrementos = 0;
     for (const person of world.people) {
       if (person.role !== 'neighbor') continue;
@@ -516,10 +600,31 @@ export class InstrumentosConducta {
         comunidades: diversidadEntreGrupos(comunidadPerfiles, world.seed, dia, 0),
         linajes: diversidadEntreGrupos(linajePerfiles, world.seed, dia, 1),
       },
+      ecoHacerDemanda: { decisiones: this.decisionesDia, ofrecidos: Object.fromEntries(this.ofrecidosDia),
+        elegidos: Object.fromEntries(this.elegidosDia) },
+      ecoHacerConstruccion: {
+        evaluaciones: this.construccionDia.admitida + this.construccionDia.cupo + this.construccionDia.materiales + this.construccionDia.ganancia + this.construccionDia.reparacion,
+        admitidas: this.construccionDia.admitida,
+        rechazos: { cupo: this.construccionDia.cupo, materiales: this.construccionDia.materiales,
+          ganancia: this.construccionDia.ganancia, reparacion: this.construccionDia.reparacion },
+        gananciaMedia: this.construccionGananciaN ? this.construccionGananciaSuma / this.construccionGananciaN : null,
+        maderaMedia: this.construccionMaderaN ? this.construccionMaderaSuma / this.construccionMaderaN : null,
+        piedraMedia: this.construccionPiedraN ? this.construccionPiedraSuma / this.construccionPiedraN : null },
+      ecoHacerStock: { radio: RADIO_STOCK, comunidades: stockComunidades },
+      ecoHacerHerramientas: { adultos: adultos.length, items: itemsHerramientas,
+        capacidadMedia: adultos.length ? capacidadSuma / adultos.length : null,
+        desgasteMedio: desgasteN ? desgasteSuma / desgasteN : null, reposicion: reposicionPiezas, masaReposicion },
+      ecoHacerCupo: { nacimientos: this.nacimientosDia, cupo: pop.nacimientosPorComprobacion, recientes: recientesCupo,
+        fraccion: pop.nacimientosPorComprobacion > 0 ? recientesCupo / pop.nacimientosPorComprobacion : null },
     };
     const vivos = new Set(world.people.map(person => person.id));
     for (const id of [...this.ticksPorPersona.keys()]) if (!vivos.has(id)) this.ticksPorPersona.delete(id);
     this.tiempoDia.clear(); this.personaTicksDia = 0; this.approachHogarTicks = 0;
+    this.decisionesDia = 0; this.ofrecidosDia.clear(); this.elegidosDia.clear();
+    this.construccionDia = { admitida: 0, cupo: 0, materiales: 0, ganancia: 0, reparacion: 0 };
+    this.construccionGananciaSuma = 0; this.construccionGananciaN = 0;
+    this.construccionMaderaSuma = 0; this.construccionMaderaN = 0;
+    this.construccionPiedraSuma = 0; this.construccionPiedraN = 0;
     this.nacimientosDia = 0; this.xNacimientos.length = 0; this.bloqueadasPorLey = 0;
     this.limitante = { agua: 0, comida: 0 };
     this.cambiosHogar = { adopta: 0, pierde: 0 };

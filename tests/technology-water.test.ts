@@ -14,6 +14,7 @@ import { assertWaterExecution, carriedTechnologyMass, containedWaterQuanta, drin
   maintainContainedWater, payContainedWaterCarry, WATER_WORK_ENERGY } from '../src/world/technology-water.js';
 import { containerAffordance, WATER_QUANTA_PER_UNIT } from '../src/world/material-affordances.js';
 import { captureTechnologyCheckpoint } from '../src/world/technology-checkpoint.js';
+import { enableTechnologyJournal, MAX_PENDING_TECHNOLOGY_EXECUTIONS } from '../src/world/technology-journal.js';
 import { filaInstantanea, sha256 } from './lib/store.js';
 import { proyectoInvestigacion } from './lib/escenas.js';
 
@@ -431,4 +432,27 @@ test('a statistics overflow cannot consume water or hydrate the actor without it
   const before = structuredClone(lab.world);
   assert.throws(() => drinkContainedWater(lab.world, lab.actor), /statistics|integer|overflow/);
   assert.deepEqual(lab.world, before);
+});
+
+// Incident 29-09 (COM12C20-8103, day 40, ~4 000 neighbours, persistencia.cadaTicks=300): a full
+// technology journal is host backpressure, not corrupt water. The water actions used to report it
+// as "Invalid contained water state or receipt.", hiding the real cause (the same cap that killed
+// CUPO20-8103 as "Technology journal is full" two days earlier in the same world).
+test('a full technology journal is reported as backpressure by water actions, before any water debit', () => {
+  const lab = fixture();
+  fill(lab, 2);
+  enableTechnologyJournal(lab.world.technology);
+  const journal = lab.world.technology.journal!;
+  journal.pending.length = MAX_PENDING_TECHNOLOGY_EXECUTIONS; // Only the queue length is observed before appending.
+  const full = /^Error: Technology journal is full; commit before advancing the simulation\.$/;
+  const snapshot = () => structuredClone({ ...lab.world, technology: { ...lab.world.technology, journal: undefined } });
+  nextTick(lab.world);
+  const ledger = structuredClone(lab.world.technology.water), source = lab.tile.drinkingWater, water = lab.item.contents!.water;
+  assert.throws(() => fillContainedWater(lab.world, lab.actor, lab.item.id), full);
+  assert.deepEqual(lab.world.technology.water, ledger); assert.equal(lab.tile.drinkingWater, source); assert.equal(lab.item.contents!.water, water);
+  lab.world.tick += 400; // Enough elapsed ticks for an integer leak, which needs a receipt.
+  const before = snapshot();
+  assert.throws(() => maintainContainedWater(lab.world, lab.actor), full);
+  assert.deepEqual(snapshot(), before);
+  assert.equal(journal.pending.length, MAX_PENDING_TECHNOLOGY_EXECUTIONS);
 });

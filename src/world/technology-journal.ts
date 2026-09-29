@@ -60,13 +60,20 @@ export function enableTechnologyJournal(state: TechnologyState): void {
   state.journal = journal;
 }
 
+/** Backpressure check shared by every writer that must fail BEFORE mutating (water actions check it
+ * up front, `journalTechnologyExecution` at append time), so a full journal is always reported as such
+ * and never disguised as a corrupt receipt. */
+export function assertTechnologyJournalRoom(state: TechnologyState): void {
+  if ((state.journal?.pending.length ?? 0) >= MAX_PENDING_TECHNOLOGY_EXECUTIONS) {
+    throw new Error('Technology journal is full; commit before advancing the simulation.');
+  }
+}
+
 /** Called before the recent ring can discard an execution. Its final benefit is filled on the same object. */
 export function journalTechnologyExecution(state: TechnologyState, execution: TechnologyExecution): void {
   if (!state.journal) return;
   const journal = state.journal;
-  if (journal.pending.length >= MAX_PENDING_TECHNOLOGY_EXECUTIONS) {
-    throw new Error('Technology journal is full; commit before advancing the simulation.');
-  }
+  assertTechnologyJournalRoom(state);
   if (serial(execution) !== journal.committedThrough + journal.pending.length + 1) fail();
   journal.pending.push(execution);
 }

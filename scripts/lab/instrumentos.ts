@@ -28,6 +28,10 @@ import type { DatabaseSync } from 'node:sqlite';
 import type { Capability, TechnologyExecution } from '../../src/shared/technology.js';
 import { TICKS_PER_DAY, type Person, type World } from '../../src/world/index.js';
 import { indiceDiversidad } from '../../src/world/diversidad.js';
+import { disponibilidadCorporal } from '../../src/world/family.js';
+import { primeroCerca } from '../../src/world/indice-puntos.js';
+import { paramsOf } from '../../src/world/params.js';
+import { drenarVentanasReproLocal, leerVentanasReproLocal, llenadoLugar } from '../../src/world/repro-local.js';
 
 
 /** Las 18 acciones de `Action`, en el orden de `ACTIONS` de src/world/diversidad.ts (no exportado):
@@ -453,5 +457,94 @@ export class InstrumentosConducta {
     this.fotografiarActividad(world);
     this.costeMs += performance.now() - inicio;
     return metricas;
+  }
+}
+
+/** Cubos del histograma de phi S3: [0,.25) [.25,.5) [.5,.75) [.75,1) [1,1.5) [1.5,2) [2,inf). */
+const CORTES_PHI = [0.25, 0.5, 0.75, 1, 1.5, 2];
+function cuboPhi(phi: number): number {
+  for (let i = 0; i < CORTES_PHI.length; i++) if (phi < CORTES_PHI[i]!) return i;
+  return CORTES_PHI.length;
+}
+export interface FertilesVentana { n: number; nSinLugar: number; nPhiNull: number; mediana: number | null; histPhi: [number, number, number, number, number, number, number]; }
+export interface VentanaReproLocalDia { ventana: number; phiNacimientos: (number | null)[]; fertiles: FertilesVentana; }
+export interface MetricasReproLocal { evalM: { n: number; fracGt15: number; hist: [number, number, number, number, number, number] }; ventanas: VentanaReproLocalDia[]; }
+
+/**
+ * Instrumento D2 (criterios S2/S3 de critica-d2-20260928): solo LEE el mundo y el sidecar del
+ * motor, y acumula en memoria del laboratorio. S2: evaluaciones de m_L por dia (toda llamada
+ * a `multiplicadorLugar`, hit o miss) con histograma; S3: phi al nacer por ventana + foto de
+ * fertiles-no-concebidos al final de cada ventana (puerta corporal SIN freno, con lugar, que
+ * no parieron en ella; phi = el que vio la ley en la ronda, o fresco si el lugar no se
+ * evaluo; nulos C=0 aparte, mediana sobre informativos). Sobrevive a `cloneWorld` (sidecar
+ * heredado + acumuladores propios por id/ventana, nunca por objeto mundo).
+ */
+export class InstrumentoReproLocal {
+  costeMs = 0;
+  pasos = 0;
+  private ultimoTickFoto = 0;
+  private readonly fotos: { ventana: number; fertiles: FertilesVentana }[] = [];
+  /** Llamar tras `stepWorld` (en ambas ramas de replica.ts, como `InstrumentosConducta`). */
+  despuesDelPaso(world: World): void {
+    const inicio = performance.now();
+    this.pasos++;
+    const pop = paramsOf(world).poblacion;
+    if (pop.reproLocal <= 0) { this.costeMs += performance.now() - inicio; return; }
+    const intervalo = pop.intervaloComprobacionTicks;
+    if (world.tick % intervalo !== intervalo - 1) { this.costeMs += performance.now() - inicio; return; }
+    const ventana = Math.floor(world.tick / intervalo);
+    const padres = new Set<string>();
+    for (const persona of world.people) {
+      if (persona.bornAt > this.ultimoTickFoto && persona.bornAt <= world.tick) {
+        for (const id of persona.genome.parents) padres.add(id);
+      }
+    }
+    const porLugar = new Map<string, { place: (typeof world.places)[number]; n: number }>();
+    let nSinLugar = 0;
+    for (const persona of world.people) {
+      if (!disponibilidadCorporal(world, persona) || padres.has(persona.id)) continue;
+      const place = primeroCerca(world.places, persona, pop.radioLugar + 1,
+        q => Math.hypot(persona.x - q.x, persona.y - q.y) <= pop.radioLugar);
+      if (!place) { nSinLugar++; continue; }
+      const grupo = porLugar.get(place.id);
+      if (grupo) grupo.n++;
+      else porLugar.set(place.id, { place, n: 1 });
+    }
+    const ronda = world.reproLocal;
+    const phis: number[] = [];
+    let nPhiNull = 0;
+    for (const { place, n } of porLugar.values()) {
+      let phi: number | null | undefined = (ronda && ronda.ventana === ventana && ronda.intervalo === intervalo)
+        ? ronda.frenos[place.id]?.phi : undefined;
+      if (phi === undefined) phi = llenadoLugar(world, place).phi;
+      if (phi === null) { nPhiNull += n; continue; }
+      for (let i = 0; i < n; i++) phis.push(phi);
+    }
+    phis.sort((a, b) => a - b);
+    const mediana = !phis.length ? null : phis.length % 2 === 1
+      ? phis[(phis.length - 1) / 2]! : (phis[phis.length / 2 - 1]! + phis[phis.length / 2]!) / 2;
+    const histPhi: [number, number, number, number, number, number, number] = [0, 0, 0, 0, 0, 0, 0];
+    for (const phi of phis) histPhi[cuboPhi(phi)]++;
+    this.fotos.push({ ventana, fertiles: { n: phis.length + nPhiNull, nSinLugar, nPhiNull, mediana, histPhi } });
+    this.ultimoTickFoto = world.tick;
+    this.costeMs += performance.now() - inicio;
+  }
+  /** Metricas del dia (ventanas fotografiadas desde la ultima llamada); las drena del sidecar. */
+  metricasDia(world: World): MetricasReproLocal {
+    const inicio = performance.now();
+    const ventanas = this.fotos.map(foto => foto.ventana);
+    const regs = leerVentanasReproLocal(world, ventanas);
+    const hist: [number, number, number, number, number, number] = [0, 0, 0, 0, 0, 0];
+    let n = 0;
+    const ventanasDia = this.fotos.map((foto, i) => {
+      const rec = regs[i]!;
+      n += rec.nEval;
+      for (let k = 0; k < 6; k++) hist[k]! += rec.histM[k]!;
+      return { ventana: foto.ventana, phiNacimientos: [...rec.phiNacimientos], fertiles: foto.fertiles };
+    });
+    drenarVentanasReproLocal(world, ventanas);
+    this.fotos.length = 0;
+    this.costeMs += performance.now() - inicio;
+    return { evalM: { n, fracGt15: n > 0 ? (hist[2]! + hist[3]! + hist[4]! + hist[5]!) / n : 0, hist }, ventanas: ventanasDia };
   }
 }

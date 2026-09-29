@@ -31,6 +31,11 @@ import { tileAt } from './spatial.js';
  *   a mitad de ventana reutilizan los mismos valores; sin estado oculto de modulo). Con la ley
  *   apagada el campo no existe (identidad bit a bit). Si cambian `intervalo`/`phiref` a mitad de
  *   ventana, la ronda se recalcula; otros params a mitad de ventana se ven en la siguiente.
+ * - Instrumento S2/S3 (solo lectura, `InstrumentoReproLocal`): cada llamada a
+ *   `multiplicadorLugar` (hit o miss) cuenta una evaluacion con su m en un sidecar por mundo
+ *   (heredado en `cloneWorld`, auto-podado, jamas en el mundo: no toca digestos); cada
+ *   nacimiento por la via local anota el phi de su lugar. La ronda guarda {m, phi} para que
+ *   la foto de fertiles reuse el phi que vio la ley.
  */
 
 const distance = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(a.x - b.x, a.y - b.y);
@@ -101,13 +106,60 @@ export function multiplicadorLugar(world: World, place: Pick<PlaceView, 'id' | '
     world.reproLocal = ronda;
   }
   const previo = ronda.frenos[place.id];
-  if (previo !== undefined) return previo;
+  if (previo !== undefined) { registrarEvaluacionM(world, ventana, previo.m); return previo.m; }
   const { s, c, adultos, sedientos } = llenadoLugar(world, place);
+  const phi = c > 0 ? s / c : null;
   const sL = adultos > 0 ? sedientos / adultos : 0;
   const base = c > 0 ? Math.min(1 + (phiRef / (s / c)) ** REPRO_LOCAL_EXPONENTE, REPRO_LOCAL_TOPE_M) : 1;
   const m = base * (1 + REPRO_LOCAL_PESO_CORPORAL * sL);
-  ronda.frenos[place.id] = m;
+  ronda.frenos[place.id] = { m, phi };
+  registrarEvaluacionM(world, ventana, m);
   return m;
+}
+
+/** Cubos del histograma S2 de m: [==1, (1,1.5], (1.5,2], (2,4], (4,8], >8]. */
+export const HIST_M_CUBOS = 6;
+export interface VentanaInstrumento { nEval: number; histM: [number, number, number, number, number, number]; phiNacimientos: (number | null)[]; }
+function ventanaVacia(): VentanaInstrumento { return { nEval: 0, histM: [0, 0, 0, 0, 0, 0], phiNacimientos: [] }; }
+/** Sidecar por mundo (jamas en el `World`: no toca digestos ni instantaneas). */
+const registros = new WeakMap<World, Map<number, VentanaInstrumento>>();
+/** Ventanas retenidas sin drenar (replica drena a diario; el servidor auto-poda). */
+const VENTANAS_RETENIDAS = 40;
+function registroDe(world: World, ventana: number): VentanaInstrumento {
+  let porMundo = registros.get(world);
+  if (!porMundo) { porMundo = new Map(); registros.set(world, porMundo); }
+  let rec = porMundo.get(ventana);
+  if (!rec) {
+    rec = ventanaVacia();
+    porMundo.set(ventana, rec);
+    for (const w of [...porMundo.keys()]) if (w < ventana - VENTANAS_RETENIDAS) porMundo.delete(w);
+  }
+  return rec;
+}
+/** S2: una evaluacion de m_L (hit o miss de la ronda). */
+function registrarEvaluacionM(world: World, ventana: number, m: number): void {
+  const rec = registroDe(world, ventana);
+  rec.nEval++;
+  rec.histM[m <= 1 ? 0 : m <= 1.5 ? 1 : m <= 2 ? 2 : m <= 4 ? 3 : m <= 8 ? 4 : 5]++;
+}
+/** S3: phi del lugar en un nacimiento por la via local (null = C_L 0, sin informacion). */
+export function registrarNacimientoReproLocal(world: World, place: Pick<PlaceView, 'x' | 'y'>, ventana: number): void {
+  registroDe(world, ventana).phiNacimientos.push(llenadoLugar(world, place).phi);
+}
+/** `cloneWorld` crea un objeto nuevo cada paso: sin esto el instrumento no sobreviviria al clon. */
+export function heredarRegistroReproLocal(draft: World, source: World): void {
+  const previo = registros.get(source);
+  if (previo) registros.set(draft, previo);
+}
+/** Lee ventanas (las que faltan salen vacias); no drena. */
+export function leerVentanasReproLocal(world: World, ventanas: number[]): VentanaInstrumento[] {
+  const porMundo = registros.get(world);
+  return ventanas.map(w => porMundo?.get(w) ?? ventanaVacia());
+}
+/** Drena ventanas ya informadas. */
+export function drenarVentanasReproLocal(world: World, ventanas: number[]): void {
+  const porMundo = registros.get(world);
+  if (porMundo) for (const w of ventanas) porMundo.delete(w);
 }
 
 /**

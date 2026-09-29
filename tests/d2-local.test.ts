@@ -278,7 +278,7 @@ test('D2 restore a mitad de ventana reutiliza los frenos (campo persistido)', { 
   const place = a.places[0]!;
   multiplicadorLugar(a, place, PHI, VENTANA); // fija places[0] (puede que nadie este cerca)
   assert.equal(a.reproLocal?.ventana, 5);
-  assert.ok((a.reproLocal?.frenos[place.id] ?? 99) < 1.09, 'm~1 inundado');
+  assert.ok((a.reproLocal?.frenos[place.id]?.m ?? 99) < 1.09, 'm~1 inundado');
   for (let n = 601; n <= 659; n++) stepWorld(a);
   const cuerpo = paramsOf(a).cuerpo;
   const cdCorto = (p: Person): boolean => demographicTraits(p.genome, cuerpo).fertilityCooldown <= 2800;

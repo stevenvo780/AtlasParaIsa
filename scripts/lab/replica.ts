@@ -51,7 +51,7 @@ import { parseParams, type WorldParams } from '../../src/world/params.js';
 import { decideReproduction, RollingStepPerformance } from '../../src/server/governor.js';
 import { decidirTechoLab, TECHO_LAB_MINIMO, techoLabCota } from './techo-lab.js';
 import { durableActivityMetrics } from './metrics.js';
-import { InstrumentosConducta } from './instrumentos.js';
+import { InstrumentoReproLocal, InstrumentosConducta } from './instrumentos.js';
 import { digestoCanonico } from '../../src/world/digesto.js';
 import { faunaTotal, registrarFaunaRetirada } from './fauna-total.js';
 
@@ -216,6 +216,8 @@ async function main(): Promise<void> {
     registrarFaunaRetirada(world, censosFauna);
     store.save(world);
     const instrumentos = instrumentosArg === 'si' ? new InstrumentosConducta(world, store.db) : null;
+    // D2 (S2/S3): solo con instrumentos y ley activa; su clave sale solo entonces.
+    const instRepro = instrumentos && params.poblacion.reproLocal > 0 ? new InstrumentoReproLocal() : null;
 
     // Solo con --gobernador servidor: p95 de la ventana de 120 pasos (mismo mecanismo que
     // src/server/app.ts) y acumuladores del DÍA en curso, reiniciados en cada dia-NNN.json.
@@ -247,9 +249,10 @@ async function main(): Promise<void> {
         }
         // Antes del guardado (vacía chronicleJournal.pending) y FUERA de la medida: su coste se
         // descuenta de stepMs para que el gobernador decida sobre el mismo paso que sin instrumentos.
-        const observadoAntes = instrumentos ? instrumentos.costeMs : 0;
+        const observadoAntes = (instrumentos?.costeMs ?? 0) + (instRepro?.costeMs ?? 0);
         instrumentos?.despuesDelPaso(world);
-        const observacionMs = instrumentos ? instrumentos.costeMs - observadoAntes : 0;
+        instRepro?.despuesDelPaso(world);
+        const observacionMs = (instrumentos?.costeMs ?? 0) + (instRepro?.costeMs ?? 0) - observadoAntes;
         let saveMs = 0;
         if (tick % params.persistencia.cadaTicks === 0) {
           const saveStarted = performance.now();
@@ -276,6 +279,7 @@ async function main(): Promise<void> {
         stepWorld(world);
         stepTimes.push(performance.now() - started);
         instrumentos?.despuesDelPaso(world);
+        instRepro?.despuesDelPaso(world);
         if (techoLab !== null) { techoPoblacionMaximaDia = Math.max(techoPoblacionMaximaDia, world.people.length); techoPoblacionMaxima = Math.max(techoPoblacionMaxima, world.people.length); }
         if (tick % params.persistencia.cadaTicks === 0) { registrarFaunaRetirada(world, censosFauna); store.save(world); }
       }
@@ -292,6 +296,7 @@ async function main(): Promise<void> {
           const { foodShared, ...conducta } = instrumentos.metricasDia(world, store.db);
           medidas = { ...metrics, cooperacionAcumuladaPorTipo: { ...metrics.cooperacionAcumuladaPorTipo, foodShared }, ...conducta };
         }
+        if (instRepro) medidas = { ...medidas, reproLocal: instRepro.metricasDia(world) };
         const extra = gobernadorModo === 'servidor' ? metricasGobernador(world, reproduccionActivaTicksDia, ticksDia, p95GobernadorActual, cloneMsDia, saveMsDia)
           : techoLab !== null ? { techoLab, reproduccionActivaFraccion: techoTicksActivosDia / techoTicksDia, poblacionMaximaDia: techoPoblacionMaximaDia } : {};
         techoTicksActivosDia = 0; techoTicksDia = 0; techoPoblacionMaximaDia = 0;
@@ -341,6 +346,10 @@ async function main(): Promise<void> {
     if (instrumentos) {
       const pasoMedio = stepTimes.reduce((suma, ms) => suma + ms, 0) / stepTimes.length;
       console.log(`Instrumentos: ${(instrumentos.costeMs / instrumentos.pasos).toFixed(4)} ms/paso de media (${instrumentos.costeMs.toFixed(0)} ms en ${instrumentos.pasos} pasos, incluidos los cálculos diarios) frente a ${pasoMedio.toFixed(2)} ms/paso de stepWorld (${(100 * instrumentos.costeMs / (pasoMedio * stepTimes.length)).toFixed(2)} %).`);
+    }
+    if (instRepro) {
+      const pasoMedio = stepTimes.reduce((suma, ms) => suma + ms, 0) / stepTimes.length;
+      console.log(`InstrumentoReproLocal: ${(instRepro.costeMs / instRepro.pasos).toFixed(4)} ms/paso de media (${instRepro.costeMs.toFixed(0)} ms en ${instRepro.pasos} pasos, incluidos los cálculos diarios) frente a ${pasoMedio.toFixed(2)} ms/paso de stepWorld (${(100 * instRepro.costeMs / (pasoMedio * stepTimes.length)).toFixed(2)} %).`);
     }
     console.log(`Réplica completa: ${dias} día(s), población final ${resumen.poblacionFinal}. Salida: ${salida}`);
   } finally { store.close(); rmSync(dataDir, { recursive: true, force: true }); }

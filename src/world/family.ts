@@ -46,6 +46,18 @@ export function chooseReproductivePartner(world: Pick<World, 'seed' | 'tick'>, p
   return best;
 }
 
+/** Puerta corporal SIN freno (descanso base + cuerpo): la poblacion en riesgo de S3
+ * (fertiles que no conciben) se define sin el freno para no sesgar por el desenlace.
+ * Duplica las expresiones de `reproductiveReadiness` con la ley apagada; solo la llama el
+ * laboratorio (`InstrumentoReproLocal`), nunca el paso. */
+export function disponibilidadCorporal(world: World, person: Person): boolean {
+  if (person.role !== 'neighbor') return false;
+  const traits = demographicTraits(person.genome, paramsOf(world).cuerpo);
+  if (world.tick - person.lastBirth < traits.fertilityCooldown) return false;
+  return updateDemography({ state: person.demography, traits, hunger: person.hunger, thirst: person.thirst,
+    energy: person.energy, fatigue: person.fatigue }, { exposure: 0, shelter: 0, protected: false }, 0).offspringEligible;
+}
+
 /** The existing physiological/cooldown gate, without its separate portable-food requirement.
  * dt=0 queries the same demographic model without advancing age or recovering the body.
  * REPRO-LOCAL v2: con la ley activa (`poblacion.reproLocal` > 0) el descanso se alarga con

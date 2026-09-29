@@ -22,7 +22,7 @@ import { defaultTechnologyState, initialTechnologyKnowledge, technologyOpportuni
 import { catalogueEnabled, resolveTechnologyRecipe, withArchiveReadBatch } from './technology-catalogue.js';
 import { initialDemography, demographicTraits, updateDemography } from './demography.js';
 import { reproductiveReadiness, familyOpportunity, availableToShare, closeKin, chooseReproductivePartner, pairAffinity, pairTie, earlierForagerExhausts, observedForagersByCell } from './family.js';
-import { TOPE_NACIMIENTOS_VENTANA, inicioRotado } from './repro-local.js';
+import { TOPE_NACIMIENTOS_VENTANA, inicioRotado, heredarRegistroReproLocal, registrarNacimientoReproLocal } from './repro-local.js';
 import { advancePopulation, assertLegacyRecord, assertPopulation } from './lineage.js';
 import { analyzeTechnologyOrganization } from './technology-organization.js';
 import { captureTechnologyCheckpoint, advanceTechnologyCheckpoint } from './technology-checkpoint.js';
@@ -100,7 +100,7 @@ export interface World {
    * 2026-09-29: PERSISTIDO, no cache de modulo — restaurar a mitad de ventana reutiliza los
    * mismos valores y el mundo restaurado no diverge del ininterrumpido). Solo existe con la
    * ley activa; apagada, ausente: identidad bit a bit. Rueda por ventana. */
-  reproLocal?: { ventana: number; intervalo: number; phiRef: number; frenos: Record<string, number> };
+  reproLocal?: { ventana: number; intervalo: number; phiRef: number; frenos: Record<string, { m: number; phi: number | null }> };
   demographyDynamics: { deaths: number; causes: Record<LegacyRecord['cause'], number>; foodLost: number; woodLost: number; stoneLost: number };
 }
 
@@ -1368,6 +1368,7 @@ function reproducirLocal(world: World, pop: WorldParams['poblacion'], cupo: numb
     }, 'reproducirLocal'), ELECCION_POR_AFINIDAD);
     if (!b) continue;
     crearCria(world, a, b, here);
+    registrarNacimientoReproLocal(world, here, Math.floor(world.tick / pop.intervaloComprobacionTicks));
     used.add(a.id); used.add(b.id);
     nacidos++;
   }
@@ -1470,6 +1471,8 @@ export function cloneWorld(world: World, context: WorldContext = worldContext(wo
   // T041: la cadencia de las métricas caras vive en una caché lateral por mundo; el clon
   // de cada paso la hereda para no recalcular la BFS de agua en cada tick.
   heredarEstadisticas(draft, world);
+  // D2 instrumento S2/S3: el sidecar de evaluaciones/nacimientos lo hereda el clon.
+  heredarRegistroReproLocal(draft, world);
   return draft;
 }
 
@@ -1691,7 +1694,7 @@ export function assertWorld(value: unknown, expectedVersion = RULES_VERSION, con
   assertChronicleJournal(w);
   bindWorldContext(w, context ?? worldContext(w));
   const fail = (): never => { throw new Error('Estado procedural inválido.'); };
-  if (w.reproLocal !== undefined && (typeof w.reproLocal !== 'object' || w.reproLocal === null || !Number.isSafeInteger(w.reproLocal.ventana) || w.reproLocal.ventana < 0 || w.reproLocal.ventana > w.tick || !Number.isSafeInteger(w.reproLocal.intervalo) || w.reproLocal.intervalo < 1 || typeof w.reproLocal.phiRef !== 'number' || !(w.reproLocal.phiRef > 0) || w.reproLocal.phiRef > 1 || !w.reproLocal.frenos || typeof w.reproLocal.frenos !== 'object' || Array.isArray(w.reproLocal.frenos) || Object.entries(w.reproLocal.frenos).some(([id, m]) => typeof id !== 'string' || id.length > 100 || typeof m !== 'number' || !Number.isFinite(m) || m < 1 || m > 40))) fail();
+  if (w.reproLocal !== undefined && (typeof w.reproLocal !== 'object' || w.reproLocal === null || !Number.isSafeInteger(w.reproLocal.ventana) || w.reproLocal.ventana < 0 || w.reproLocal.ventana > w.tick || !Number.isSafeInteger(w.reproLocal.intervalo) || w.reproLocal.intervalo < 1 || typeof w.reproLocal.phiRef !== 'number' || !(w.reproLocal.phiRef > 0) || w.reproLocal.phiRef > 1 || !w.reproLocal.frenos || typeof w.reproLocal.frenos !== 'object' || Array.isArray(w.reproLocal.frenos) || Object.entries(w.reproLocal.frenos).some(([id, f]) => typeof id !== 'string' || id.length > 100 || !f || typeof f !== 'object' || typeof f.m !== 'number' || !Number.isFinite(f.m) || f.m < 1 || f.m > 40 || !(f.phi === null || (typeof f.phi === 'number' && Number.isFinite(f.phi) && f.phi >= 0))))) fail();
   // assertCommon has already rejected duplicate live IDs. Resolve live references
   // once rather than scanning the roster for every bond and recipe author.
   const alive = new Map(w.people.map(person => [person.id, person]));

@@ -44,6 +44,10 @@ function digestoSinLaClave(world: World): string {
   delete antes.social.memoriaDisputa;
   assert.equal(antes.social.hogarTrabajo, 0);
   delete antes.social.hogarTrabajo;
+  // COM-D′ (`sprint/com-d-20260928`): `social.disolucion` no existía en f2757fa; con su valor 0 no
+  // actúa, así que también se quita de la forma.
+  assert.equal(antes.social.disolucion, 0);
+  delete antes.social.disolucion;
   // Poda ola 1 (2026-09-27): `conducta.vocacion`/`vocacionTope` y
   // `poblacion.natalidadLocal`/`radioProvision` ya no se declaran; la forma las trae quitadas.
   setParams(world, antes as unknown as WorldParams);

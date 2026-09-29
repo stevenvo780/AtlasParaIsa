@@ -45,7 +45,13 @@ export interface WorldParams {
     /** Cortejo (2026-09-22): peso con que una persona fértil busca a otra fértil, no emparentada y con
      * vínculo mutuo ≥ 0,3 que está fuera de `radioPareja` pero dentro de `radioCortejo`. Histórico 0 / 24
      * (apagado); reglas 10 adopta 2 / 128 para mundos nuevos. */
-    cortejo: number; radioCortejo: number };
+    cortejo: number; radioCortejo: number;
+    /** REPRO-LOCAL v2 (D2', 2026-09-28, ley candidata): freno LOCAL de la natalidad por llenado
+     * de los depositos de agua a la vista (`repro-local.ts`). 0 = apagada (mundo de hoy, con
+     * casamentero global y cupo). > 0 = phiref, el llenado de referencia: cada pareja cria con
+     * su descanso `fertilityCooldown` multiplicado por el freno de su lugar, sin ranking mundial
+     * y con `nacimientosPorComprobacion` reducido a anticorrupcion (techo 10 000/ventana). */
+    reproLocal: number };
   recursos: { capacidadBosque: number; capacidadPastizal: number; capacidadOtros: number; velocidadRegeneracion: number; decaimientoFertilidad: number; decaimientoComida: number };
   persistencia: { cadaTicks: number; ventanaEventosTicks: number; paginasSucias: boolean };
   /** Agua superficial concentrada en cuencas: 1 = generación actual (todas las charcas/manantiales); < 1 conserva solo las de las cuencas más húmedas (T035).
@@ -134,7 +140,7 @@ const RAW_HISTORICAL: WorldParams = {
   // Ruling R17: `maxima` ya no es un tope de diseño (era 40); por defecto no limita y el
   // freno lo ponen el entorno y el gobernador. Sigue siendo parámetro para el laboratorio.
   poblacion: { maxima: 1_000_000, intervaloComprobacionTicks: 120, nacimientosPorComprobacion: 2,
-    exigeComunidad: true, radioPareja: 3, radioLugar: 4, comprobacionContinua: false, cortejo: 0, radioCortejo: 24 },
+    exigeComunidad: true, radioPareja: 3, radioLugar: 4, comprobacionContinua: false, cortejo: 0, radioCortejo: 24, reproLocal: 0 },
   recursos: { capacidadBosque: 1, capacidadPastizal: 0.7, capacidadOtros: 0.35, velocidadRegeneracion: 1, decaimientoFertilidad: 0.001, decaimientoComida: 0.0001 },
   persistencia: { cadaTicks: 1, ventanaEventosTicks: 0, paginasSucias: false },
   agua: { cuencas: 0.4, memoria: 1 },
@@ -272,6 +278,8 @@ export const PARAM_RANGES: Record<string, [number, number]> = {
   'poblacion.radioLugar': [1, 64],
   'poblacion.cortejo': [0, 5],
   'poblacion.radioCortejo': [1, 128],
+  // REPRO-LOCAL v2: 0 apaga la ley; > 0 es phiref (llenado de referencia, fraccion 0..1).
+  'poblacion.reproLocal': [0, 1],
   'recursos.capacidadBosque': [0, 10],
   'recursos.capacidadPastizal': [0, 10],
   'recursos.capacidadOtros': [0, 10],

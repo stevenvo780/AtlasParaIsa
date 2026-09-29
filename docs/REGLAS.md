@@ -13,6 +13,29 @@ defecto la dinámica es bit a bit la misma (puerta de digestos en 8 semillas).
 El código queda en `main`/`0a6476e` y en el commit previo de esta rama. No se tocan
 HOG (`social.hogarTrabajo`, decisión pendiente), `agua.memoria=1` ni las reglas 10/11.
 
+## Ley candidata D2': REPRO-LOCAL v2 (2026-09-28, rama `sprint/d2-local-20260928`, APAGADA por defecto)
+
+Regulacion LOCAL de la natalidad ([diseno](/datos/tmp-atlas-lab/datos-lab/DISENO-D2-REPRO-LOCAL-20260928.md),
+[critica](/datos/tmp-atlas-lab/datos-lab/critica-d2-20260928.md) con veredicto MODIFICAR: se implementa
+su regla corregida). `poblacion.reproLocal` (rango [0,1], default e historico 0 = mundo de hoy): con
+valor > 0 (phiref, llenado de referencia) cada pareja cria con su descanso `fertilityCooldown`
+multiplicado por el freno m_L de su lugar, sin casamentero global (recorrido en orden rotado por
+`localRandom(seed, tick)`, sin ranking mundial) y con el cupo reducido a anticorrupcion (techo
+10 000 por ventana; `vecesTopeAlcanzado` lo deriva el cribado de los `bornAt`, sin campos nuevos).
+m_L = min(1 + (phiref/phi_L)^2, 8) si hay depositos a la vista (C_L > 0), 1 si no (NEUTRAL sin
+informacion); despues m_L *= (1 + 4*s_L), anticipacion corporal (fraccion de adultos del disco
+con sed > 0,45). Disco R = 12 alrededor del lugar; S_L = agua visible (teselas activas +
+cisternas funcionales con agua > 0,1, cada una una vez); C_L = 1 por tesela-deposito recargable
+(MISMO predicado que el motor, `agua.depositoRecargable`, factorizado para ambos; el oceano no
+cuenta porque el kernel fuerza su agua a 0) + capacidad de esas cisternas. El freno vive DENTRO
+de `reproductiveReadiness`, cacheado por lugar y ventana de 120 pasos (cache de modulo por
+semilla|lugar|ventana|intervalo|phiref: clonar y seguir es bit a bit igual), para que la
+conducta (reunion, provision, cortejo) lo vea. Sin campos nuevos en `World`, sin azar nuevo.
+Puertas (rama): identidad 6/6 semillas x 1200 pasos (forma sin la clave = digestos PRE del
+arbol pristino); `tests/d2-local.test.ts` (10); halo inventariado (decision 47 funciones;
+discos con radio fijo activado, 0 apagada); coste banco-700 (pob 658): delta fase reproduccion ON-OFF / paso OFF = 0,45 % y replica 0,42 % (puerta <= 1 % CUMPLIDA; metrica declarada en bitacora antes de medir).
+NO se lanza cribado ni panel en esta rama (los preregistra Claude).
+
 ## Reglas 11 (2026-09-23)
 
 Los mundos **nuevos** añaden al paquete de reglas 10 los cuatro defaults del brazo B de conflicto

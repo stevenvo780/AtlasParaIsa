@@ -22,6 +22,7 @@ import { defaultTechnologyState, initialTechnologyKnowledge, technologyOpportuni
 import { catalogueEnabled, resolveTechnologyRecipe, withArchiveReadBatch } from './technology-catalogue.js';
 import { initialDemography, demographicTraits, updateDemography } from './demography.js';
 import { reproductiveReadiness, familyOpportunity, availableToShare, closeKin, chooseReproductivePartner, pairAffinity, pairTie, earlierForagerExhausts, observedForagersByCell } from './family.js';
+import { TOPE_NACIMIENTOS_VENTANA, inicioRotado } from './repro-local.js';
 import { advancePopulation, assertLegacyRecord, assertPopulation } from './lineage.js';
 import { analyzeTechnologyOrganization } from './technology-organization.js';
 import { captureTechnologyCheckpoint, advanceTechnologyCheckpoint } from './technology-checkpoint.js';
@@ -1292,6 +1293,81 @@ function transferEstate(world: World, person: Person): void {
 /** Resource-dependent, bounded simulated descendants; learned episodes are not copied into genes. */
 // TODO params: activar/desactivar elección por afinidad vs. primer elegible
 const ELECCION_POR_AFINIDAD = true;
+/**
+ * Nacimiento de una pareja ya elegida (extraido de `reproduce` para D2', sin cambiar ni un
+ * bit: lo usan igual el camino con casamentero global y REPRO-LOCAL v2). Gasta las reservas
+ * de los progenitores, registra la cria y devuelve su id.
+ */
+function crearCria(world: World, a: Person, b: Person, place: (typeof world.places)[number]): string {
+  const pop = paramsOf(world).poblacion;
+  const serial=world.birthCounter+1, id=`descendant-${serial}`;
+  if(!Number.isSafeInteger(serial)||[...world.people,...world.legacy,...world.retiredLegacy].some(p=>p.id===id)) throw new Error('La identidad de un nacimiento ya existe; no se gastaron reservas.');
+  const genome=inheritGenome(world.seed,id,[a,b],DEFAULT_MUTATION_RATE*paramsOf(world).genes.tasaMutacion); world.birthCounter=serial;
+  const traits = expressGenome(genome);
+  const child: Person = { ...structuredClone(a), id, name: `${proceduralPlaceName(world.seed, world.birthCounter, genome.generation).split(' ')[0]} ${world.birthCounter}`.slice(0, 70), role: 'neighbor',
+    genome, traits, curiosity: traits.curiosity, sociability: traits.sociability, generosity: traits.care, bornAt: world.tick, lastBirth: world.tick, thirst: 0.15,
+    hunger: 0.2, fatigue: 0.1, energy: 0.65, inventory: 0.1, materials: { wood: 0, stone: 0 }, skills: {}, activity: {}, values: {}, experiences: [], habits: [], visited: [], bonds: {},
+    culture: { sharing: (a.culture.sharing + b.culture.sharing) / 2, stewardship: (a.culture.stewardship + b.culture.stewardship) / 2, openness: (a.culture.openness + b.culture.openness) / 2 },
+    command: null, controlMode: 'auto', target: { x: a.x, y: a.y }, action: 'rest', reason: 'Un nuevo habitante aprende en la comunidad que lo sostiene.', work: 0, decisionAt: world.tick + 30, lastOutcome: world.tick, lastPracticeMemory: world.tick, recentMemory: null,
+    lastSocial: world.tick, lastDispute: world.tick, lastMeeting: world.tick, lastShared: world.tick, socialLoad: 0, closeness: 0.2, need: 'Aprender', heading: world.birthCounter * 2.399963229728653,
+    blueprintId: null, lastInvention: world.tick,
+    technology: initialTechnologyKnowledge(), demography: initialDemography(),
+  };
+  delete child.home;
+  // Lastre de la ley retirada (vocación, ola 1): una cría nunca hereda ese campo.
+  delete (child as unknown as Record<string, unknown>).vocacion;
+  // `agua.memoria`: la cría nace junto a sus padres y conserva el aguadero de `a` (copiado arriba con el
+  // resto de su estado); es información, no agua: si está seco lo olvidará al verlo, como cualquiera.
+  if (a.waterMemory) child.waterMemory = { x: a.waterMemory.x, y: a.waterMemory.y };
+  a.inventory -= 0.08; b.inventory -= 0.08; a.energy = clamp(a.energy - 0.08); b.energy = clamp(b.energy - 0.08); a.lastBirth = world.tick; b.lastBirth = world.tick;
+  world.people.push(child);
+  // El evento de fundación de una comunidad comparte el arreglo con `group.members`
+  // (society.ts). Con la comprobación periódica un nacimiento cae siempre en el mismo paso
+  // que ese evento, así que empujar aquí lo extiende ANTES de que se archive y la crónica
+  // sigue siendo coherente: eso es lo que guardan las instantáneas de hoy y por eso el
+  // camino por defecto no se toca. Con `comprobacionContinua` el nacimiento puede caer
+  // 1..119 pasos DESPUÉS, cuando el evento ya es durable, y empujar lo reescribiría: el
+  // Store lo rechaza («an immutable event cannot be overwritten»). Reemplazar el arreglo
+  // deja el mismo censo sin tocar el pasado. Desde reglas 10 el evento lleva su propia copia
+  // (society.ts) y aquí se reemplaza siempre; los mundos V9 conservan el alias histórico.
+  const group = world.communities.find(c => c.id === a.communityId);
+  if (group) { if (pop.comprobacionContinua || world.version >= 10) group.members = [...group.members, id]; else group.members.push(id); }
+  count(world, 'births');
+  const event = addEvent(world, { kind: 'birth', actors: [a.id, b.id, child.id], x: child.x, y: child.y, source: 'simulation', text: a.communityId === b.communityId ? `${child.name} nació en la comunidad de ${a.name} y ${b.name}.` : `${child.name} nació del vínculo entre ${a.name} y ${b.name}, de comunidades distintas.`, cause: `${a.name} y ${b.name} junto a ${place.name} (${place.x},${place.y}). Dos progenitores simulados con recursos, confianza y lugar compartido; reserva conjunta −0.16, cría recibe 0.10. Recombina siete pares de parámetros; ${genome.mutations} variaciones. Habilidades y recuerdos comienzan vacíos; cultura inicial por crianza, no por ADN.` });
+  remember(child, world, 'La comunidad sostuvo su llegada.', event.id, place.id);
+  return child.id;
+}
+
+/**
+ * REPRO-LOCAL v2: una pasada por `world.people` en orden rotado por `localRandom(seed, tick)`
+ * (no por id); cada `a` apta toma a su mejor pareja local. Sin ranking mundial: el freno es
+ * el de cada lugar (vive en `reproductiveReadiness`, que `fit` ya consulta) y `cupo` solo
+ * acota como anticorrupcion. Orden determinista; `used` impide criar dos veces por paso.
+ */
+function reproducirLocal(world: World, pop: WorldParams['poblacion'], cupo: number): void {
+  const n = world.people.length;
+  const used = new Set<string>();
+  const fit = (p: Person): boolean => !used.has(p.id)
+    && fertile(world, p) && (!pop.exigeComunidad || !!p.communityId);
+  const match = (a: Person, b: Person): boolean => b !== a && fit(b) && distance(a, b) <= pop.radioPareja && (a.bonds[b.id] ?? 0) >= 0.3 && (b.bonds[a.id] ?? 0) >= 0.3 && !closeKin(a, b);
+  let nacidos = 0;
+  const inicio = inicioRotado(n, world.seed, world.tick);
+  for (let i = 0; i < n && nacidos < cupo && world.people.length < pop.maxima; i++) {
+    const a = world.people[(inicio + i) % n]!;
+    if (!fit(a)) continue;
+    const here = primeroCerca(world.places, a, pop.radioLugar + 1, p => distance(a, p) <= pop.radioLugar);
+    if (!here) continue;
+    const b = chooseReproductivePartner(world, a, vecinos(world, a, pop.radioPareja + 1, p => {
+      if (!match(a, p)) return false;
+      return true;
+    }, 'reproducirLocal'), ELECCION_POR_AFINIDAD);
+    if (!b) continue;
+    crearCria(world, a, b, here);
+    used.add(a.id); used.add(b.id);
+    nacidos++;
+  }
+}
+
 function reproduce(world: World): void {
   const pop = paramsOf(world).poblacion;
   if (!world.reproductionEnabled || world.people.length >= pop.maxima) return;
@@ -1305,8 +1381,13 @@ function reproduce(world: World): void {
   if (!pop.comprobacionContinua && world.tick % pop.intervaloComprobacionTicks !== 0) return;
   const recientes = pop.comprobacionContinua
     ? world.people.filter(p => p.role === 'neighbor' && p.bornAt > world.tick - pop.intervaloComprobacionTicks).length : 0;
-  const cupo = pop.nacimientosPorComprobacion - recientes;
+  // REPRO-LOCAL v2 (D2'): con la ley activa no hay casamentero global: cada pareja elegible
+  // cria en su lugar, en orden rotado (sin ranking mundial), y el cupo queda como
+  // anticorrupcion (techo alto por ventana). Apagada, el camino de abajo no se toca.
+  const leyLocal = pop.reproLocal > 0;
+  const cupo = (leyLocal ? TOPE_NACIMIENTOS_VENTANA : pop.nacimientosPorComprobacion) - recientes;
   if (cupo <= 0) return;
+  if (leyLocal) { reproducirLocal(world, pop, cupo); return; }
   const used = new Set<string>();
   const fit = (p: Person): boolean => !used.has(p.id)
     && fertile(world, p) && (!pop.exigeComunidad || !!p.communityId);
@@ -1330,41 +1411,7 @@ function reproduce(world: World): void {
     }
     if (!pair || !place) break;
     const { a, b } = pair;
-    const serial=world.birthCounter+1, id=`descendant-${serial}`;
-    if(!Number.isSafeInteger(serial)||[...world.people,...world.legacy,...world.retiredLegacy].some(p=>p.id===id)) throw new Error('La identidad de un nacimiento ya existe; no se gastaron reservas.');
-    const genome=inheritGenome(world.seed,id,[a,b],DEFAULT_MUTATION_RATE*paramsOf(world).genes.tasaMutacion); world.birthCounter=serial;
-    const traits = expressGenome(genome);
-    const child: Person = { ...structuredClone(a), id, name: `${proceduralPlaceName(world.seed, world.birthCounter, genome.generation).split(' ')[0]} ${world.birthCounter}`.slice(0, 70), role: 'neighbor',
-      genome, traits, curiosity: traits.curiosity, sociability: traits.sociability, generosity: traits.care, bornAt: world.tick, lastBirth: world.tick, thirst: 0.15,
-      hunger: 0.2, fatigue: 0.1, energy: 0.65, inventory: 0.1, materials: { wood: 0, stone: 0 }, skills: {}, activity: {}, values: {}, experiences: [], habits: [], visited: [], bonds: {},
-      culture: { sharing: (a.culture.sharing + b.culture.sharing) / 2, stewardship: (a.culture.stewardship + b.culture.stewardship) / 2, openness: (a.culture.openness + b.culture.openness) / 2 },
-      command: null, controlMode: 'auto', target: { x: a.x, y: a.y }, action: 'rest', reason: 'Un nuevo habitante aprende en la comunidad que lo sostiene.', work: 0, decisionAt: world.tick + 30, lastOutcome: world.tick, lastPracticeMemory: world.tick, recentMemory: null,
-      lastSocial: world.tick, lastDispute: world.tick, lastMeeting: world.tick, lastShared: world.tick, socialLoad: 0, closeness: 0.2, need: 'Aprender', heading: world.birthCounter * 2.399963229728653,
-      blueprintId: null, lastInvention: world.tick,
-      technology: initialTechnologyKnowledge(), demography: initialDemography(),
-    };
-    delete child.home;
-    // Lastre de la ley retirada (vocación, ola 1): una cría nunca hereda ese campo.
-    delete (child as unknown as Record<string, unknown>).vocacion;
-    // `agua.memoria`: la cría nace junto a sus padres y conserva el aguadero de `a` (copiado arriba con el
-    // resto de su estado); es información, no agua: si está seco lo olvidará al verlo, como cualquiera.
-    if (a.waterMemory) child.waterMemory = { x: a.waterMemory.x, y: a.waterMemory.y };
-    a.inventory -= 0.08; b.inventory -= 0.08; a.energy = clamp(a.energy - 0.08); b.energy = clamp(b.energy - 0.08); a.lastBirth = world.tick; b.lastBirth = world.tick;
-    world.people.push(child);
-    // El evento de fundación de una comunidad comparte el arreglo con `group.members`
-    // (society.ts). Con la comprobación periódica un nacimiento cae siempre en el mismo paso
-    // que ese evento, así que empujar aquí lo extiende ANTES de que se archive y la crónica
-    // sigue siendo coherente: eso es lo que guardan las instantáneas de hoy y por eso el
-    // camino por defecto no se toca. Con `comprobacionContinua` el nacimiento puede caer
-    // 1..119 pasos DESPUÉS, cuando el evento ya es durable, y empujar lo reescribiría: el
-    // Store lo rechaza («an immutable event cannot be overwritten»). Reemplazar el arreglo
-    // deja el mismo censo sin tocar el pasado. Desde reglas 10 el evento lleva su propia copia
-    // (society.ts) y aquí se reemplaza siempre; los mundos V9 conservan el alias histórico.
-    const group = world.communities.find(c => c.id === a.communityId);
-    if (group) { if (pop.comprobacionContinua || world.version >= 10) group.members = [...group.members, id]; else group.members.push(id); }
-    count(world, 'births');
-    const event = addEvent(world, { kind: 'birth', actors: [a.id, b.id, child.id], x: child.x, y: child.y, source: 'simulation', text: a.communityId === b.communityId ? `${child.name} nació en la comunidad de ${a.name} y ${b.name}.` : `${child.name} nació del vínculo entre ${a.name} y ${b.name}, de comunidades distintas.`, cause: `${a.name} y ${b.name} junto a ${place.name} (${place.x},${place.y}). Dos progenitores simulados con recursos, confianza y lugar compartido; reserva conjunta −0.16, cría recibe 0.10. Recombina siete pares de parámetros; ${genome.mutations} variaciones. Habilidades y recuerdos comienzan vacíos; cultura inicial por crianza, no por ADN.` });
-    remember(child, world, 'La comunidad sostuvo su llegada.', event.id, place.id);
+    crearCria(world, a, b, place);
     used.add(a.id); used.add(b.id);
   }
 }

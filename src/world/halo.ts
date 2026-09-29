@@ -55,9 +55,13 @@ export type Fase = 'activacion' | 'gestos' | 'ecologia' | 'fauna' | 'faunaSerial
 export const FASES_CON_HALO: readonly Fase[] = ['decision', 'ecologia', 'fauna'];
 
 export type ClaveDeRadio = 'poblacion.radioPareja' | 'poblacion.radioLugar' | 'poblacion.radioCortejo' | 'social.disputaRadio';
+/** Clave que apaga una ley candidata cuando vale 0 (su radio activado vale 0 entonces). */
+export type ClaveActiva = 'poblacion.cortejo' | 'poblacion.reproLocal';
 /** Radio que dicta una ley parametrizada; `activa` es la clave que la apaga cuando vale 0. */
-export interface RadioParametrizado { readonly param: ClaveDeRadio; readonly activa?: 'poblacion.cortejo' }
-export type Radio = number | RadioParametrizado;
+export interface RadioParametrizado { readonly param: ClaveDeRadio; readonly activa?: ClaveActiva }
+/** Radio fijo de una ley candidata: `fijo` encendida, 0 apagada (D2': el disco de radio 12). */
+export interface RadioFijoActivado { readonly fijo: number; readonly activa: ClaveActiva }
+export type Radio = number | RadioParametrizado | RadioFijoActivado;
 
 /** Dónde vive una entrada: fichero de `src/world`, declaración de primer nivel que la contiene y fragmentos
  * literales de su texto. Cada patrón aparece exactamente `veces` veces (1 si no se dice) en esa declaración. */
@@ -171,6 +175,16 @@ export const ALCANCES: readonly Alcance[] = [
     '&& distance(person, other) <= 7 && (person.bonds[other.id] ?? 0) >= 0.3 && (other.bonds[person.id] ?? 0) >= 0.3', '&& !closeKin(person, other) && reproductiveReadiness(world, other)',
     '.sort((a, b) => distance(person, a) - distance(person, b) || a.id.localeCompare(b.id))[0];']),
   a('familia.lugar', 'lugares', 'entrada', 7, 'family.ts', 'familyOpportunity', ['&& algunoCerca(world.places, person, 8, place => distance(person, place) <= 7 && (distance(person, place) <= 4 || distance(other, place) <= 4)))']),
+  // REPRO-LOCAL v2 (D2'): el freno vive en `reproductiveReadiness`, asi que la decision lo
+  // alcanza; las cuatro lecturas solo existen con `poblacion.reproLocal` > 0 (radio 0 apagada).
+  a('reprolocal.lugar', 'lugares', 'entrada', { param: 'poblacion.radioLugar', activa: 'poblacion.reproLocal' }, 'repro-local.ts', 'multiplicadorPersona', ['const place = primeroCerca(world.places, person, radioLugar + 1, p => distance(person, p) <= radioLugar);'],
+    { nota: 'El lugar de la persona (el mismo radioLugar de `reproduce`); sin lugar cerca la ley es neutra.' }),
+  a('reprolocal.teselas', 'teselas', 'reprolocal.lugar', { fijo: 12, activa: 'poblacion.reproLocal' }, 'repro-local.ts', 'llenadoLugar', ['for (let dy = -REPRO_LOCAL_RADIO; dy <= REPRO_LOCAL_RADIO; dy++) {', 'for (let dx = -REPRO_LOCAL_RADIO; dx <= REPRO_LOCAL_RADIO; dx++) {', 'const tile = tileAt(world, { x: place.x + dx, y: place.y + dy });'],
+    { nota: 'Disco de radio 12 alrededor del lugar (vision 7 + radioLugar 4 + 1): encendida, 4 + 12 = 16 desde quien decide.' }),
+  a('reprolocal.cisternas', 'estructuras', 'reprolocal.lugar', { fijo: 12, activa: 'poblacion.reproLocal' }, 'repro-local.ts', 'llenadoLugar', ["const cisternas = filtrarCerca(world.structures, place, REPRO_LOCAL_RADIO + 1, st => distance(place, st) <= REPRO_LOCAL_RADIO && st.condition > BROKEN_CONDITION && tileAt(world, st)?.terrain === 'shelter' && blueprintAffordances(st.components).waterCapacity > 0 && st.water > REPRO_LOCAL_UMBRAL_CISTERNA);", 'for (const st of cisternas) {', 's += st.water;'],
+    { nota: 'Cisternas funcionales del disco, cada una una vez; con agua <= 0,1 no cuentan (critica D2, riesgo 2).' }),
+  a('reprolocal.adultos', 'personas', 'reprolocal.lugar', { fijo: 12, activa: 'poblacion.reproLocal' }, 'repro-local.ts', 'llenadoLugar', ["for (const otro of vecinos(world, place, REPRO_LOCAL_RADIO + 1, p => p.role === 'neighbor' && distance(place, p) <= REPRO_LOCAL_RADIO, 'repro-local')) {", 'if (otro.demography.age < demographicTraits(otro.genome, cuerpo).maturityAge) continue;'],
+    { nota: 'Adultos del disco para la anticipacion corporal s_L (sed > 0,45).' }),
   // G2: `viable` mira alrededor del hogar (a ≤ 7) y de cada lugar a ≤ 6.
   a('asentamiento.hogar', 'punto', 'entrada', 7, 'society.ts', 'settlementOpportunity', ['if (person.home && distance(person,person.home)<=7) {', 'person.home.quality = viable(person.home);']),
   a('asentamiento.lugares', 'lugares', 'entrada', 6, 'society.ts', 'settlementOpportunity', ['const nearby = filtrarCerca(world.places, person, 7, p=>distance(person,p)<=6).map(p=>({place:p,quality:viable(p)}))',
@@ -267,6 +281,13 @@ export const LLAMADAS: readonly Llamada[] = [
   ll('index.ts', 'canRecoverWaterHandling', 'index.ts:localRestQuality', 'entrada', ['quality = localRestQuality(world, person)']),
   ll('index.ts', 'workDuration', 'inventions.ts:constructionCost', 'entrada', ["action === 'build' ? constructionCost(world, person).work"]),
   ll('family.ts', 'availableToShare', 'family.ts:familyOpportunity', 'entrada', ['const family = familyOpportunity(world, person);']),
+  ll('family.ts', 'reproductiveReadiness', 'repro-local.ts:multiplicadorPersona', 'entrada', ['multiplicadorPersona(world, person, poblacion.reproLocal, poblacion.radioLugar, poblacion.intervaloComprobacionTicks)'],
+    'Solo con `poblacion.reproLocal` > 0; apagada, `reproductiveReadiness` no lee el mundo.'),
+  ll('family.ts', 'familyOpportunity', 'family.ts:reproductiveReadiness', 'entrada', ['reproductiveReadiness(world, person)', 'reproductiveReadiness(world, other)']),
+  ll('index.ts', 'choose', 'family.ts:reproductiveReadiness', 'entrada', ['reproductiveReadiness(world, person)', 'reproductiveReadiness(world, other)'],
+    'Sobre si y sobre el cortejado (<= radioCortejo, ya acotado en `decision.cortejo`): el freno lee +-16 a su alrededor con la ley encendida; el centro cuenta la llamada propia.'),
+  ll('repro-local.ts', 'multiplicadorPersona', 'repro-local.ts:multiplicadorLugar', 'reprolocal.lugar', ['multiplicadorLugar(world, place, phiRef, intervalo)']),
+  ll('repro-local.ts', 'multiplicadorLugar', 'repro-local.ts:llenadoLugar', 'entrada', ['llenadoLugar(world, place)'], '`entrada` es el lugar (asi se llama desde `multiplicadorPersona`).'),
   ll('society.ts', 'cooperationOpportunity', 'society.ts:evaluateCooperation', 'entrada', ['evaluateCooperation(world, person)']),
   ll('society.ts', 'evaluateCooperation', 'inventions.ts:constructionCost', 'cooperacion.otro', ['const cost = constructionCost(world,other);']),
   ll('society.ts', 'evaluateCooperation', 'society.ts:practicedRecipeToTeach', 'cooperacion.otro', ['practicedRecipeToTeach(world, person, other, world.learningEnabled ? practiced ??= practicedRecipes(person) : undefined)']),
@@ -372,6 +393,10 @@ export const ALCANCES_SERIALES: readonly AlcanceSerial[] = [
   s('reproduccion.pareja', 'reproduccion', 'personas', 'actor', { param: 'poblacion.radioPareja' }, 'index.ts', 'reproduce',
     ["const b = chooseReproductivePartner(world, a, vecinos(world, a, pop.radioPareja + 1, p => {", 'distance(a, b) <= pop.radioPareja'],
     { nota: 'Pareja (≤ radioPareja) y lugar (≤ radioLugar) se miden los dos desde `a`: no se componen.' }),
+  s('reproducirLocal.lugar', 'reproduccion', 'lugares', 'actor', { param: 'poblacion.radioLugar' }, 'index.ts', 'reproducirLocal', ['const here = primeroCerca(world.places, a, pop.radioLugar + 1, p => distance(a, p) <= pop.radioLugar)']),
+  s('reproducirLocal.pareja', 'reproduccion', 'personas', 'actor', { param: 'poblacion.radioPareja' }, 'index.ts', 'reproducirLocal',
+    ["const b = chooseReproductivePartner(world, a, vecinos(world, a, pop.radioPareja + 1, p => {", 'distance(a, b) <= pop.radioPareja'],
+    { nota: 'Sin ranking mundial: cada `a` apta toma su mejor pareja local en orden rotado.' }),
 ];
 
 /** Lecturas que no dependen de dónde está nadie: colecciones acotadas que cada región recibe enteras y
@@ -467,9 +492,9 @@ export const LECTURAS_POR_IDENTIDAD: readonly LecturaPorIdentidad[] = [
     patrones: ['world.people.find(p => p.id === gesture.agentId)'], motivo: 'Destinatario de una orden.' },
   { id: 'encuentro.SeI', fase: 'encuentros', fuente: 'world.people', fichero: 'index.ts', funcion: 'encounters',
     patrones: ["world.people.find(p => p.role === 'S')", "world.people.find(p => p.role === 'I')"], motivo: 'S e I por rol; el encuentro exige ≤ 1,5 celdas.' },
-  { id: 'nacimiento.identidad', fase: 'reproduccion', fuente: 'world.people + legado', fichero: 'index.ts', funcion: 'reproduce',
+  { id: 'nacimiento.identidad', fase: 'reproduccion', fuente: 'world.people + legado', fichero: 'index.ts', funcion: 'crearCria',
     patrones: ['[...world.people,...world.legacy,...world.retiredLegacy].some(p=>p.id===id)'], motivo: 'Unicidad de la identidad nueva.' },
-  { id: 'nacimiento.comunidad', fase: 'reproduccion', fuente: 'world.communities', fichero: 'index.ts', funcion: 'reproduce',
+  { id: 'nacimiento.comunidad', fase: 'reproduccion', fuente: 'world.communities', fichero: 'index.ts', funcion: 'crearCria',
     patrones: ['world.communities.find(c => c.id === a.communityId)'], motivo: 'Comunidad del progenitor.' },
   { id: 'cooperacion.comunidad', fase: 'accion', fuente: 'world.communities', fichero: 'society.ts', funcion: 'cooperate',
     patrones: ['world.communities.find(c => c.id === person.communityId); if (group) group.cooperation++;'], motivo: 'Contador de la comunidad.' },
@@ -538,6 +563,7 @@ export const RECORRIDOS: readonly Recorrido[] = [
   { id: 'fauna.recuento', fase: 'faunaSerial', fichero: 'animals.ts', funcion: 'syncFauna', patrones: ['const tileIn = tileLookup(tiles);'],
     motivo: 'Escribe `fauna` y `species` en las celdas ocupadas antes o ahora; al final de `stepAnimals` y tras cada caza.' },
   { id: 'reproduccion', fase: 'reproduccion', fichero: 'index.ts', funcion: 'reproduce', patrones: ['for (const a of world.people) {'], motivo: 'Emparejamiento en cadena (`used`).' },
+  { id: 'reproducirLocal', fase: 'reproduccion', fichero: 'index.ts', funcion: 'reproducirLocal', patrones: ['for (let i = 0; i < n && nacidos < cupo && world.people.length < pop.maxima; i++) {', 'const a = world.people[(inicio + i) % n]!;'], motivo: 'Una pasada en orden rotado por localRandom(seed, tick); `used` impide criar dos veces por paso.' },
   { id: 'estructuras', fase: 'estructuras', fichero: 'inventions.ts', funcion: 'stepStructures',
     patrones: ['for (const structure of world.structures) {', 'if (world.tick % 60 === 0 && world.learningEnabled) for (const person of world.people) {'],
     motivo: 'Cada estructura; y cada 60 pasos cada persona revisa su plano (`inventionContext` ≤ 4, `knownBlueprints` ≤ 5).' },
@@ -613,6 +639,7 @@ function leer(params: ParamsDeRadio, clave: string): number {
 export function valorRadio(radio: Radio, params?: ParamsDeRadio): number | undefined {
   if (typeof radio === 'number') return radio;
   if (!params) return undefined;
+  if ('fijo' in radio) return leer(params, radio.activa) > 0 ? radio.fijo : 0;
   return radio.activa && !(leer(params, radio.activa) > 0) ? 0 : leer(params, radio.param);
 }
 

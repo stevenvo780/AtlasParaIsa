@@ -19,7 +19,8 @@ for (const seed of [42, 2001] as const) test(`H-B apagada conserva el mundo de 2
   for (let n = 0; n < 1200; n++) stepWorld(world);
   // La clave nueva sólo se quita de la FORMA hasheada, no del mundo simulado.
   // La poda ola 1 retiró las demás claves posteriores a 2ee2658; solo H-B sigue declarándose.
-  assert.equal(digestoSin(world, ['social.hogarTrabajo']), REFERENCIAS_1200[seed]);
+  // D2' declara `poblacion.reproLocal=0` (apagada): tambien se quita de la forma.
+  assert.equal(digestoSin(world, ['social.hogarTrabajo', 'poblacion.reproLocal']), REFERENCIAS_1200[seed]);
 });
 
 function escenaHogar(r: number, abundanteEnCasa = false): World {

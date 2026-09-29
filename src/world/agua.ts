@@ -54,6 +54,18 @@ export function enCuenca(seed: number, x: number, y: number, cuencas: number): b
   return ruidoCuenca(seed, x, y) < cuencas;
 }
 
+/**
+ * Tesela-deposito recargable (D2', REPRO-LOCAL v2): el MISMO predicado con que el kernel del
+ * ecosistema recarga `drinkingWater` con la lluvia y el goteo del manantial, factorizado para
+ * que el motor y la ley usen uno solo. El oceano no cuenta: el kernel fuerza su `drinkingWater`
+ * a 0 aunque recargue, asi que nunca acumula agua bebible ni aporta capacidad (C_L).
+ */
+export function depositoRecargable(seed: number, x: number, y: number, tile: Pick<Tile, 'terrain' | 'biome' | 'feature'>, cuencas: number): boolean {
+  if (tile.biome === 'ocean') return false;
+  const fuente = tile.feature === 'pool' || tile.feature === 'spring' || tile.biome === 'wetland' || tile.terrain === 'water';
+  return fuente && (tile.terrain === 'water' || enCuenca(seed, x, y, cuencas));
+}
+
 const regionKey = (x: number, y: number, tamRegion: number): string => `${Math.floor(x / tamRegion)},${Math.floor(y / tamRegion)}`;
 
 /**

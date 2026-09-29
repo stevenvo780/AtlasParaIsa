@@ -1,5 +1,5 @@
 import type { Feature, Tile } from '../shared/types.js';
-import { enCuenca } from './agua.js';
+import { depositoRecargable } from './agua.js';
 import { TileStore } from './soa/terreno.js';
 
 const clamp = (n: number): number => Math.max(0, Math.min(1, n));
@@ -145,11 +145,12 @@ export class EcosystemKernel {
       tile.traffic = clamp(traffic - 0.0005);
       tile.cultivation = clamp(cultivation - 0.00002);
       // Rain remains restricted to the same visible reservoirs as the object kernel.
-      const reservoirSource = feature === 'pool' || feature === 'spring' || biome === 'wetland' || terrain === 'water';
       // T035 (hallazgo crítico #1): fuera de cuenca, un manantial/charca/humedal NO recarga con la
       // lluvia (ni con el goteo fijo del manantial) — el mar (`terrain==='water'`) queda exento del
       // ruido, igual que en la generación, y de todos modos su `drinkingWater` se fuerza a 0 abajo.
-      const reservoir = reservoirSource && (terrain === 'water' || enCuenca(seed, tile.x, tile.y, cuencas));
+      // D2': el predicado vive en `agua.depositoRecargable` (el oceano devuelve false alli, con el
+      // mismo 0 de abajo); la ley REPRO-LOCAL usa ese mismo predicado para la capacidad C_L.
+      const reservoir = depositoRecargable(seed, tile.x, tile.y, tile, cuencas);
       tile.drinkingWater = biome === 'ocean' ? 0 : clamp(drinkingWater
         + (reservoir && weather === 'rain' ? 0.008 * (0.4 + fertility * 0.6) : 0)
         + (reservoir && feature === 'spring' ? 0.002 : 0) - (light ? 0.00015 : 0.00003));

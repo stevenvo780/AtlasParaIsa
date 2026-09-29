@@ -2,6 +2,7 @@ import type { Person, World } from './index.js';
 import { demographicTraits, updateDemography } from './demography.js';
 import { localRandom } from './genetics.js';
 import { DEFAULT_PARAMS, paramsOf } from './params.js';
+import { multiplicadorPersona } from './repro-local.js';
 import { algunoCerca } from './indice-puntos.js';
 import { vecinos } from './rejilla.js';
 
@@ -46,11 +47,18 @@ export function chooseReproductivePartner(world: Pick<World, 'seed' | 'tick'>, p
 }
 
 /** The existing physiological/cooldown gate, without its separate portable-food requirement.
- * dt=0 queries the same demographic model without advancing age or recovering the body. */
+ * dt=0 queries the same demographic model without advancing age or recovering the body.
+ * REPRO-LOCAL v2: con la ley activa (`poblacion.reproLocal` > 0) el descanso se alarga con
+ * el freno del lugar de la persona, para que la conducta (reunion, provision, cortejo) lo
+ * vea; apagada, el umbral es exactamente el de siempre. */
 export function reproductiveReadiness(world: World, person: Person): boolean {
   if (person.role !== 'neighbor') return false;
+  const poblacion = paramsOf(world).poblacion;
   const traits = demographicTraits(person.genome, paramsOf(world).cuerpo);
-  if (world.tick - person.lastBirth < traits.fertilityCooldown) return false;
+  const espera = poblacion.reproLocal > 0
+    ? traits.fertilityCooldown * multiplicadorPersona(world, person, poblacion.reproLocal, poblacion.radioLugar, poblacion.intervaloComprobacionTicks)
+    : traits.fertilityCooldown;
+  if (world.tick - person.lastBirth < espera) return false;
   return updateDemography({ state: person.demography, traits, hunger: person.hunger, thirst: person.thirst,
     energy: person.energy, fatigue: person.fatigue }, { exposure: 0, shelter: 0, protected: false }, 0).offspringEligible;
 }

@@ -125,7 +125,10 @@ export const ECOLOGY_KERNEL_SPEC = Object.freeze({
   // no cambian (mismas operaciones, mismo orden; T112 lo prueba en tests/soa-terreno.test.ts), pero el
   // texto normalizado de step() sí, por la rama `store` y `livingNeighborCounts(0.45)`. No se bumpea la
   // versión: no es un cambio de regla, es la forma en que se llega al mismo umbral de vecino vivo.
-  canonicalStepBodyHash: 'ed7eecd166e75effc30300437278b4a0c36839090acb4ec280c4ef5c868cf47d',
+  // Recalculado tras D2' (REPRO-LOCAL v2): el predicado de depósito recargable se factoriza a
+  // `agua.depositoRecargable` para que el motor y la ley usen uno solo; mismos campos (x e y se
+  // siguen leyendo en la llamada), mismos términos, mismo orden. Tampoco se bumpea la versión.
+  canonicalStepBodyHash: 'b97fda1836bfdf24236c007ddafb7e4722414563fe52e10f96c5ded29579e408',
 });
 
 // Conteos/índices que aparecen en el cuerpo de step() y NO son reglas

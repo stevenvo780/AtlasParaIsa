@@ -436,7 +436,7 @@ test('el inventario cubre cada lectura, llamada y barrido de las fases con halo 
 
 test('las funciones que alcanza cada fase con halo son las del fuente', () => {
   const tamanos = Object.fromEntries(FASES_CON_HALO.map(fase => [fase, BASE.cierres.get(fase)!.size]));
-  assert.deepEqual(tamanos, { decision: 43, ecologia: 4, fauna: 2 });
+  assert.deepEqual(tamanos, { decision: 47, ecologia: 4, fauna: 2 }); // D2': +4 (reproductiveReadiness + 3 de repro-local.ts)
   for (const fase of FASES_CON_HALO) assert.deepEqual([...funcionesDeFase(fase)].sort(), [...BASE.cierres.get(fase)!].sort());
   // Lecturas que ninguna tabla cubre si la red estricta no se aplicara (lo que la red de la tarea no veía).
   const decision = BASE.cierres.get('decision')!;
@@ -496,8 +496,8 @@ test('radios de parámetros: el cortejo de reglas 10 exige 128 celdas y el hist�
   const claves: ClaveDeRadio[] = ['poblacion.radioPareja', 'poblacion.radioLugar', 'poblacion.radioCortejo', 'social.disputaRadio'];
   const exceden = claves.filter(clave => {
     const params = parseParams(`${clave}=${PARAM_RANGES[clave]![1]},poblacion.cortejo=1`, HISTORICAL_PARAMS);
-    return ALCANCES_SERIALES.some(e => typeof e.radio !== 'number' && e.radio.param === clave && alcanceSerial(e.id, ALCANCES_SERIALES, params)! > HALO_CELDAS)
-      || ALCANCES.some(e => typeof e.radio !== 'number' && e.radio.param === clave && alcancesDeFase('decision', params).get(e.id)! > HALO_CELDAS);
+    return ALCANCES_SERIALES.some(e => typeof e.radio !== 'number' && 'param' in e.radio && e.radio.param === clave && alcanceSerial(e.id, ALCANCES_SERIALES, params)! > HALO_CELDAS)
+      || ALCANCES.some(e => typeof e.radio !== 'number' && 'param' in e.radio && e.radio.param === clave && alcancesDeFase('decision', params).get(e.id)! > HALO_CELDAS);
   });
   assert.deepEqual(exceden, ['poblacion.radioPareja', 'poblacion.radioLugar', 'poblacion.radioCortejo']);
   assert.deepEqual(excesos(INVENTARIO, HALO_CELDAS, DEFAULT_PARAMS), [{ id: 'decision.cortejo', fase: 'decision', alcance: 128 }]);

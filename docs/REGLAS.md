@@ -28,12 +28,14 @@ con sed > 0,45). Disco R = 12 alrededor del lugar; S_L = agua visible (teselas a
 cisternas funcionales con agua > 0,1, cada una una vez); C_L = 1 por tesela-deposito recargable
 (MISMO predicado que el motor, `agua.depositoRecargable`, factorizado para ambos; el oceano no
 cuenta porque el kernel fuerza su agua a 0) + capacidad de esas cisternas. El freno vive DENTRO
-de `reproductiveReadiness`, cacheado por lugar y ventana de 120 pasos (cache de modulo por
-semilla|lugar|ventana|intervalo|phiref: clonar y seguir es bit a bit igual), para que la
-conducta (reunion, provision, cortejo) lo vea. Sin campos nuevos en `World`, sin azar nuevo.
+de `reproductiveReadiness`, calculado una vez por lugar y ventana de 120 pasos y PERSISTIDO
+en `world.reproLocal` (ronda de correccion 2026-09-29: la cache de modulo fijaba m_L con la
+primera consulta y un restore a mitad de ventana divergia; el campo viaja con clones,
+instantaneas y digestos, y no existe apagada la ley), para que la conducta (reunion,
+provision, cortejo) lo vea. Sin azar nuevo.
 Puertas (rama): identidad 6/6 semillas x 1200 pasos (forma sin la clave = digestos PRE del
 arbol pristino); `tests/d2-local.test.ts` (10); halo inventariado (decision 47 funciones;
-discos con radio fijo activado, 0 apagada); coste banco-700 (pob 658): delta fase reproduccion ON-OFF / paso OFF = 0,45 % y replica 0,42 % (puerta <= 1 % CUMPLIDA; metrica declarada en bitacora antes de medir).
+discos con radio fijo activado, 0 apagada); coste banco-700 (pob 658): delta fase reproduccion ON-OFF / paso OFF = 0,45 % y replica 0,42 %; tras la ronda de correccion (campo persistido): 0,47 % (puerta <= 1 % CUMPLIDA; metrica declarada en bitacora antes de medir).
 NO se lanza cribado ni panel en esta rama (los preregistra Claude).
 
 ## Reglas 11 (2026-09-23)

@@ -615,6 +615,7 @@ export const ESTADO_GLOBAL: Readonly<Record<string, string>> = {
   tick: 'Reloj del paso.', seed: 'Semilla del mundo.', weather: 'Tiempo del paso (lo cambia la ecología, en el coordinador).',
   cooperationEnabled: 'Bandera.', learningEnabled: 'Bandera.', noveltyEnabled: 'Bandera.', reproductionEnabled: 'Bandera.', shelterBenefitEnabled: 'Bandera.',
   technology: 'Catálogo de recetas y archivo tecnológico: global. Lo leen la tecnología y la cooperación; resolver recetas toca el LRU residente (`withRecipeSession`), una escritura global que el halo no resuelve.',
+  reproLocal: 'Frenos REPRO-LOCAL m_L por lugar de la ventana vigente (D2): estado del mundo, persistido e incluido en instantaneas y digestos; no acota region.',
 };
 
 /** Constantes de módulo que acotan distancias: la prueba lee su valor del fuente. */

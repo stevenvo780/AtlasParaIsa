@@ -96,6 +96,11 @@ export interface World {
   animals: Animal[]; animalCounter: number; animalDynamics: AnimalDynamics;
   blueprints: BlueprintView[]; structures: StructureView[]; blueprintCounter: number; structureCounter: number; inventionDynamics: InventionDynamics;
   technology: TechnologyState; legacy: LegacyRecord[]; retiredLegacy: LegacyRecord[];
+  /** REPRO-LOCAL v2 (D2'): frenos m_L por lugar de la ventana vigente (ronda de correccion
+   * 2026-09-29: PERSISTIDO, no cache de modulo — restaurar a mitad de ventana reutiliza los
+   * mismos valores y el mundo restaurado no diverge del ininterrumpido). Solo existe con la
+   * ley activa; apagada, ausente: identidad bit a bit. Rueda por ventana. */
+  reproLocal?: { ventana: number; intervalo: number; phiRef: number; frenos: Record<string, number> };
   demographyDynamics: { deaths: number; causes: Record<LegacyRecord['cause'], number>; foodLost: number; woodLost: number; stoneLost: number };
 }
 
@@ -1686,6 +1691,7 @@ export function assertWorld(value: unknown, expectedVersion = RULES_VERSION, con
   assertChronicleJournal(w);
   bindWorldContext(w, context ?? worldContext(w));
   const fail = (): never => { throw new Error('Estado procedural inválido.'); };
+  if (w.reproLocal !== undefined && (typeof w.reproLocal !== 'object' || w.reproLocal === null || !Number.isSafeInteger(w.reproLocal.ventana) || w.reproLocal.ventana < 0 || w.reproLocal.ventana > w.tick || !Number.isSafeInteger(w.reproLocal.intervalo) || w.reproLocal.intervalo < 1 || typeof w.reproLocal.phiRef !== 'number' || !(w.reproLocal.phiRef > 0) || w.reproLocal.phiRef > 1 || !w.reproLocal.frenos || typeof w.reproLocal.frenos !== 'object' || Array.isArray(w.reproLocal.frenos) || Object.entries(w.reproLocal.frenos).some(([id, m]) => typeof id !== 'string' || id.length > 100 || typeof m !== 'number' || !Number.isFinite(m) || m < 1 || m > 40))) fail();
   // assertCommon has already rejected duplicate live IDs. Resolve live references
   // once rather than scanning the roster for every bond and recipe author.
   const alive = new Map(w.people.map(person => [person.id, person]));

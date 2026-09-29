@@ -7,7 +7,11 @@ import { demographicTraits } from '../src/world/demography.js';
 import { digestoCanonico } from '../src/world/digesto.js';
 import { familyOpportunity, reproductiveReadiness } from '../src/world/family.js';
 import { DEFAULT_PARAMS, HISTORICAL_PARAMS, PARAM_RANGES, parseParams, paramsOf, setParams, type WorldParams } from '../src/world/params.js';
-import { REPRO_LOCAL_RADIO, inicioRotado, llenadoLugar, multiplicadorLugar, vaciarCacheReproLocal } from '../src/world/repro-local.js';
+import { REPRO_LOCAL_RADIO, inicioRotado, llenadoLugar, multiplicadorLugar } from '../src/world/repro-local.js';
+import { Store } from '../src/server/store.js';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { tileAt } from '../src/world/spatial.js';
 
 /**
@@ -19,7 +23,6 @@ import { tileAt } from '../src/world/spatial.js';
 const PHI = 0.5, VENTANA = 120;
 const distancia = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(a.x - b.x, a.y - b.y);
 function mundoLey(seed: number, extra = ''): World {
-  vaciarCacheReproLocal();
   return createWorld(seed, parseParams(`poblacion.reproLocal=${PHI}${extra}`));
 }
 /** Teselas activas del disco de radio 12 del lugar. */
@@ -67,7 +70,7 @@ test('D2 neutra sin informacion: C=0 => m=1, y solo frena el cuerpo', () => {
   const dentro = world.people.filter(p => esAdulto(p) && distancia(place, p) <= REPRO_LOCAL_RADIO);
   assert.ok(dentro.length >= 1, 'hay al menos un adulto en el disco');
   dentro[0]!.thirst = 0.9;
-  vaciarCacheReproLocal();
+  world.tick = VENTANA;
   const lleno = llenadoLugar(world, place);
   assert.equal(lleno.c, 0);
   assert.equal(lleno.sedientos, 1);
@@ -83,9 +86,10 @@ test('D2 freno monotono con el llenado (valores exactos) y tope 8', () => {
   const candidatas = teselasDisco(world, place).slice(0, 5);
   assert.equal(candidatas.length, 5);
   for (const tile of candidatas) { tile.feature = 'pool'; tile.biome = 'grassland'; if (tile.terrain === 'water') tile.terrain = 'soil'; }
+  let ventanaNivel = 0;
   const probar = (nivel: number, sEsperada: number, mEsperado: number): void => {
     for (const tile of candidatas) tile.drinkingWater = nivel;
-    vaciarCacheReproLocal();
+    world.tick = (ventanaNivel++) * VENTANA;
     const llenado = llenadoLugar(world, place);
     assert.equal(llenado.c, 5);
     assert.equal(llenado.s, sEsperada);
@@ -101,7 +105,7 @@ test('D2 freno monotono con el llenado (valores exactos) y tope 8', () => {
   assert.equal(pareja.length, 2);
   for (const person of pareja) { person.x = place.x; person.y = place.y; person.thirst = 0; }
   pareja[0]!.thirst = 0.9;
-  vaciarCacheReproLocal();
+  world.tick = (ventanaNivel++) * VENTANA;
   const combinado = llenadoLugar(world, place);
   assert.deepEqual([combinado.adultos, combinado.sedientos], [2, 1]);
   assert.equal(multiplicadorLugar(world, place, PHI, VENTANA), 3.75);
@@ -110,7 +114,6 @@ test('D2 freno monotono con el llenado (valores exactos) y tope 8', () => {
 test('D2 sin ranking mundial: con la ley activa crian 3 parejas en un paso', { timeout: 300000 }, () => {
   const escena = (ley: boolean): { nacidos: number; movidos: number } => {
     const world = ley ? mundoLey(9202) : createWorld(9202);
-    if (!ley) vaciarCacheReproLocal();
     const place = world.places[0]!;
     for (const tile of world.tiles) tile.drinkingWater = 1; // freno ~1: el ensayo es del casamentero, no del freno
     const cuerpo = paramsOf(world).cuerpo;
@@ -169,7 +172,6 @@ test('D2 el freno vive en la disponibilidad: familyOpportunity lo ve', () => {
     const cd = demographicTraits(a.genome, cuerpo).fertilityCooldown;
     a.lastBirth = world.tick - 2 * cd;
     b.lastBirth = world.tick - 2 * demographicTraits(b.genome, cuerpo).fertilityCooldown;
-    vaciarCacheReproLocal();
     return { persona: a, cd };
   };
   // Seco (m=8): lista por cuerpo pero frenada => sin oportunidad de familia.
@@ -214,8 +216,8 @@ test('D2 depositos: el oceano no es deposito; la cisterna casi vacia no cuenta',
   const baldosa = tileAt(world, place)!;
   baldosa.terrain = 'shelter';
   world.structures.push({ id: 'cist-1', x: place.x, y: place.y, blueprintId: 'b', name: 'cisterna', components: ['frame', 'cistern'], condition: 0.5, water: 0.05, food: 0, uses: 0, builtAt: 0, builderId: null });
-  vaciarCacheReproLocal();
   assert.equal(llenadoLugar(world, place).c, 0);
+  world.tick = VENTANA;
   world.structures[world.structures.length - 1]!.water = 0.5;
   const conAgua = llenadoLugar(world, place);
   assert.equal(conAgua.c, 0.6);
@@ -249,18 +251,80 @@ test('D2 identidad: apagada, 6 semillas x 1200 pasos bit a bit iguales al arbol 
   }
 });
 
+test('D2 sin estado oculto: dos mundos misma semilla/distintos params intercalados no se contaminan', { timeout: 600000 }, () => {
+  // Misma semilla, cuencas 1 vs 0,4: places identicas pero agua distinta (sonda: C=10 vs C=0
+  // en places[0]). Si los frenos vivieran en una cache de modulo por semilla, se mezclarian.
+  const mundo = (cuencas: number): World => createWorld(9201, parseParams(`poblacion.reproLocal=${PHI},agua.cuencas=${cuencas}`));
+  const aInt = mundo(1), bInt = mundo(0.4);
+  for (let n = 1; n <= 300; n++) { stepWorld(aInt); stepWorld(bInt); }
+  const aSolo = mundo(1);
+  for (let n = 1; n <= 300; n++) stepWorld(aSolo);
+  const bSolo = mundo(0.4);
+  for (let n = 1; n <= 300; n++) stepWorld(bSolo);
+  assert.equal(digestoCanonico(aInt), digestoCanonico(aSolo), 'A intercalado = A solo');
+  assert.equal(digestoCanonico(bInt), digestoCanonico(bSolo), 'B intercalado = B solo');
+});
+
+test('D2 restore a mitad de ventana reutiliza los frenos (campo persistido)', { timeout: 600000 }, () => {
+  // Los frenos de la ventana 5 se fijan en tick 600 (inundado, m~1); se drena en 659 y se
+  // guarda en 660. El restaurado debe reutilizarlos, no recalcularlos del estado drenado
+  // (sonda pre-fix con cache de modulo: V1~4,2 vs V2~10,9). Una pareja armada pare en la
+  // ventana con m~1 (con m=8+ esperaria): la igualdad de frenos y de digestos discrimina.
+  const archivo = join(mkdtempSync(join(tmpdir(), 'd2-restore-')), 'mundo.sqlite');
+  const a = createWorld(9201, parseParams(`poblacion.reproLocal=${PHI},agua.cuencas=1`));
+  for (let n = 1; n <= 599; n++) stepWorld(a);
+  for (const tile of a.tiles) tile.drinkingWater = 1;
+  stepWorld(a); // tick 600: abre la ronda 5 en humedo
+  const place = a.places[0]!;
+  multiplicadorLugar(a, place, PHI, VENTANA); // fija places[0] (puede que nadie este cerca)
+  assert.equal(a.reproLocal?.ventana, 5);
+  assert.ok((a.reproLocal?.frenos[place.id] ?? 99) < 1.09, 'm~1 inundado');
+  for (let n = 601; n <= 659; n++) stepWorld(a);
+  const cuerpo = paramsOf(a).cuerpo;
+  const cdCorto = (p: Person): boolean => demographicTraits(p.genome, cuerpo).fertilityCooldown <= 2800;
+  const candidatos = a.people.filter(p => p.role === 'neighbor'
+    && p.demography.age >= demographicTraits(p.genome, cuerpo).maturityAge && cdCorto(p));
+  assert.ok(candidatos.length >= 2, 'adultos con descanso corto');
+  const pa = candidatos[0]!;
+  const pb = candidatos.slice(1).find(q => ![...q.genome.parents, ...pa.genome.parents].some(id => id === pa.id || id === q.id) && q.genome.parents.join() !== pa.genome.parents.join()) ?? candidatos[1]!;
+  for (const persona of [pa, pb]) {
+    persona.x = place.x; persona.y = place.y;
+    persona.target = { x: place.x, y: place.y };
+    persona.action = 'rest'; persona.decisionAt = a.tick + 1000;
+    persona.inventory = 0.14; persona.thirst = 0; persona.hunger = 0.2; persona.energy = 0.8; persona.fatigue = 0.1;
+    persona.lastBirth = -2400;
+  }
+  pa.bonds[pb.id] = 0.5; pb.bonds[pa.id] = 0.5;
+  for (const tile of a.tiles) tile.drinkingWater = 0;
+  for (const st of a.structures) st.water = 0;
+  stepWorld(a); // tick 660
+  const frenosA = { ...a.reproLocal!.frenos };
+  const storeA = new Store(archivo);
+  storeA.save(a);
+  const nacidos660 = a.birthCounter;
+  for (let n = 661; n <= 719; n++) stepWorld(a);
+  assert.ok(a.birthCounter > nacidos660, 'A pare en la ventana 5 (no vacuo)');
+  for (let n = 720; n <= 1860; n++) stepWorld(a);
+  const digestA = digestoCanonico(a);
+  storeA.close();
+  const storeB = new Store(archivo);
+  const b = storeB.load()!.world;
+  assert.equal(b.reproLocal?.ventana, 5);
+  assert.deepEqual(b.reproLocal!.frenos, frenosA);
+  for (let n = 1; n <= 1200; n++) stepWorld(b);
+  storeB.close();
+  assert.equal(digestoCanonico(b), digestA);
+});
+
 test('D2 determinismo con la ley activa: dos carriles y clonar-y-seguir coinciden', { timeout: 600000 }, () => {
   const correr = (seed: number, pasos: number): string => {
     const world = createWorld(seed, parseParams(`poblacion.reproLocal=${PHI}`));
     for (let n = 1; n <= pasos; n++) stepWorld(world);
     return digestoCanonico(world);
   };
-  vaciarCacheReproLocal();
   const a = correr(9201, 600);
-  vaciarCacheReproLocal();
   const b = correr(9201, 600);
   assert.equal(a, b);
-  vaciarCacheReproLocal();
   const mundo = createWorld(9201, parseParams(`poblacion.reproLocal=${PHI}`));
   for (let n = 1; n <= 300; n++) stepWorld(mundo);
   const clon = cloneWorld(mundo);

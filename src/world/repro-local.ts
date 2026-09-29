@@ -26,10 +26,11 @@ import { tileAt } from './spatial.js';
  *   cisterna con <= 0,1 de agua no cuenta ni en S ni en C). Solo teselas activas.
  * - El freno vive DENTRO de `reproductiveReadiness` (family.ts), cacheado por lugar y
  *   ventana, para que la conducta (reunion, provision, cortejo) lo vea.
- * - Sin campos nuevos en `World`, sin azar nuevo (la rotacion deriva de seed+tick) y sin
- *   estados de generacion. La cache es un Map del modulo (clave semilla|lugar|ventana|
- *   intervalo|phiref): un clon a mitad de ventana reutiliza los mismos valores, asi que
- *   clonar y seguir es bit a bit igual que seguir sin clonar.
+ * - Sin azar nuevo (la rotacion deriva de seed+tick) y sin estados de generacion. Los frenos
+ *   de la ventana vigente viven en `world.reproLocal` (PERSISTIDO: clonar, guardar y restaurar
+ *   a mitad de ventana reutilizan los mismos valores; sin estado oculto de modulo). Con la ley
+ *   apagada el campo no existe (identidad bit a bit). Si cambian `intervalo`/`phiref` a mitad de
+ *   ventana, la ronda se recalcula; otros params a mitad de ventana se ven en la siguiente.
  */
 
 const distance = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(a.x - b.x, a.y - b.y);
@@ -86,31 +87,26 @@ export function llenadoLugar(world: World, place: Pick<PlaceView, 'x' | 'y'>): L
   return { s, c, phi: c > 0 ? s / c : null, adultos, sedientos };
 }
 
-/** Cache por (semilla, lugar, ventana, intervalo, phiref); FIFO acotada. */
-const cacheMultiplicador = new Map<string, number>();
-const CACHE_MAX = 4096;
-/** Solo pruebas: vacia la cache entre escenas sinteticas del mismo mundo. */
-export function vaciarCacheReproLocal(): void { cacheMultiplicador.clear(); }
-
-function claveCache(world: World, placeId: string, intervalo: number, phiRef: number): string {
-  return `${world.seed}|${placeId}|${Math.floor(world.tick / intervalo)}|${intervalo}|${phiRef}`;
-}
-
 /**
- * Freno m_L del lugar, calculado una vez por lugar y ventana de `intervalo` pasos.
- * Determinista en (semilla, lugar, ventana, params): la primera evaluacion de la ventana
- * fija el valor y las siguientes lo reutilizan, tambien tras `cloneWorld`.
+ * Freno m_L del lugar, calculado una vez por lugar y ventana de `intervalo` pasos y guardado
+ * en `world.reproLocal` (ronda vigente): la primera evaluacion de la ventana fija el valor y
+ * las siguientes lo reutilizan, tambien tras `cloneWorld` o restaurar una instantanea, porque
+ * viaja con el mundo (instantaneas, clones y digestos lo incluyen).
  */
 export function multiplicadorLugar(world: World, place: Pick<PlaceView, 'id' | 'x' | 'y'>, phiRef: number, intervalo: number): number {
-  const clave = claveCache(world, place.id, intervalo, phiRef);
-  const previo = cacheMultiplicador.get(clave);
+  const ventana = Math.floor(world.tick / intervalo);
+  let ronda = world.reproLocal;
+  if (!ronda || ronda.ventana !== ventana || ronda.intervalo !== intervalo || ronda.phiRef !== phiRef) {
+    ronda = { ventana, intervalo, phiRef, frenos: {} };
+    world.reproLocal = ronda;
+  }
+  const previo = ronda.frenos[place.id];
   if (previo !== undefined) return previo;
   const { s, c, adultos, sedientos } = llenadoLugar(world, place);
   const sL = adultos > 0 ? sedientos / adultos : 0;
   const base = c > 0 ? Math.min(1 + (phiRef / (s / c)) ** REPRO_LOCAL_EXPONENTE, REPRO_LOCAL_TOPE_M) : 1;
   const m = base * (1 + REPRO_LOCAL_PESO_CORPORAL * sL);
-  if (cacheMultiplicador.size >= CACHE_MAX) cacheMultiplicador.delete(cacheMultiplicador.keys().next().value!);
-  cacheMultiplicador.set(clave, m);
+  ronda.frenos[place.id] = m;
   return m;
 }
 

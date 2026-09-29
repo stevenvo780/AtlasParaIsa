@@ -530,8 +530,10 @@ tipificados al día 4 y C4 (corte provisional, día 4, ventana 3) pasa de 2/4 a 
 `reproduccionComprobaciones` guarda una muestra por llamada efectiva a `reproduce()`:
 `tick`, `eligiblePairs` (parejas distintas que podrían nacer desde al menos un iniciador),
 `eligiblePairsBoth` (también tienen lugar accesible desde ambos, filtro simétrico de R),
-`capSlots`, `slotsAvailable` al entrar, `slotsUsed` y `births`. Con comprobación continua
-puede haber 2.400 muestras por día; se cuentan también los ticks con cupo lleno para
+`capSlots`, `slotsUsed` (ocupación previa de la ventana móvil; 0 en comprobación
+periódica), `slotsAvailable` al entrar y `births` de esta comprobación. Con
+comprobación continua puede haber 2.400 muestras por día; se cuentan también
+los ticks con cupo lleno para
 medir la cola. `approachPorMotivo` cuenta ticks y ticks en destino de vecinos por
 hogar, reunión, cortejo, social, invitación, memoria y `desconocido`; su `diferencia`
 frente a todos los ticks `approach` debe ser cero. `salidasReunion` registra al dejar

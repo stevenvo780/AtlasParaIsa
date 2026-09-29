@@ -17,9 +17,13 @@ export interface ReproductionCheckSample {
   eligiblePairs: number;
   /** Subconjunto con lugar accesible desde ambos: el filtro espacial simétrico de R. */
   eligiblePairsBoth: number;
+  /** Cupo máximo de nacimientos por ventana de comprobación. */
   capSlots: number;
+  /** Plazas libres antes de esta comprobación, nunca negativas aunque cambie el cupo. */
   slotsAvailable: number;
+  /** Nacimientos que ya ocupaban la ventana antes de esta comprobación; puede superar capSlots si el cupo bajó. */
   slotsUsed: number;
+  /** Nacimientos producidos en esta comprobación. */
   births: number;
 }
 

@@ -1363,7 +1363,7 @@ function reproduce(world: World): void {
   const cupo = pop.nacimientosPorComprobacion - recientes;
   if (cupo <= 0) {
     observer?.({ tick: world.tick, eligiblePairs: eligiblePairs.any, eligiblePairsBoth: eligiblePairs.both,
-      capSlots: pop.nacimientosPorComprobacion, slotsAvailable: 0, slotsUsed: 0, births: 0 }, measurementMs);
+      capSlots: pop.nacimientosPorComprobacion, slotsAvailable: Math.max(0, cupo), slotsUsed: recientes, births: 0 }, measurementMs);
     return;
   }
   const used = new Set<string>();
@@ -1428,7 +1428,7 @@ function reproduce(world: World): void {
     used.add(a.id); used.add(b.id);
   }
   observer?.({ tick: world.tick, eligiblePairs: eligiblePairs.any, eligiblePairsBoth: eligiblePairs.both,
-    capSlots: pop.nacimientosPorComprobacion, slotsAvailable: cupo, slotsUsed: births, births }, measurementMs);
+    capSlots: pop.nacimientosPorComprobacion, slotsAvailable: Math.max(0, cupo), slotsUsed: recientes, births }, measurementMs);
 }
 
 function fertile(world: World, person: Person): boolean {

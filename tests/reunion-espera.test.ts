@@ -91,8 +91,28 @@ test('R=1 es determinista con el observador externo y reporta parejas y plazas e
   assert.equal(checks[0]!.eligiblePairsBoth, 1);
   assert.equal(checks[0]!.capSlots, 2);
   assert.equal(checks[0]!.slotsAvailable, 2);
-  assert.equal(checks[0]!.slotsUsed, checks[0]!.births);
+  assert.equal(checks[0]!.slotsUsed, 0, 'ningún nacimiento anterior ocupa la ventana');
+  assert.ok(checks[0]!.births <= checks[0]!.slotsAvailable);
   assert.equal(digestoCanonico(world), digestoCanonico(copy), 'medir no modifica el mundo');
   for (let step = 0; step < 120; step++) { stepWorld(world); stepWorld(copy); }
   assert.equal(digestoCanonico(world), digestoCanonico(copy), 'dos réplicas R=1 siguen idénticas');
+});
+
+test('el observador distingue ventana llena de nacimientos nuevos', () => {
+  const world = createWorld(42);
+  world.tick = 6000;
+  const neighbors = world.people.filter(person => person.role === 'neighbor');
+  assert.ok(neighbors.length >= 2);
+  neighbors[0]!.bornAt = world.tick - 1;
+  neighbors[1]!.bornAt = world.tick - 1;
+  const params = paramsOf(world);
+  setParams(world, { ...params, poblacion: { ...params.poblacion,
+    comprobacionContinua: true, nacimientosPorComprobacion: 2 } });
+  const checks: ReproductionCheckSample[] = [];
+  stepWorld(world, [], { observeReproduction: sample => checks.push(sample) });
+  assert.equal(checks.length, 1);
+  assert.equal(checks[0]!.capSlots, 2);
+  assert.equal(checks[0]!.slotsUsed, 2, 'dos nacimientos anteriores ocupan la ventana móvil');
+  assert.equal(checks[0]!.slotsAvailable, 0);
+  assert.equal(checks[0]!.births, 0, 'no hay nacimientos nuevos con el cupo lleno');
 });

@@ -75,7 +75,8 @@ test('approach: cada tick conocido y desconocido concilia con el total; el obser
   vecinos[0]!.target = { x: vecinos[0]!.x, y: vecinos[0]!.y };
   vecinos[1]!.action = 'approach';
   vecinos[1]!.reason = 'Motivo futuro que aún no clasifica el laboratorio.';
-  const muestra = { tick: 1, eligiblePairs: 3, eligiblePairsBoth: 2, capSlots: 2, slotsAvailable: 1, slotsUsed: 1, births: 1 };
+  const muestra = { tick: 1, eligiblePairs: 3, eligiblePairsBoth: 2, capSlots: 2, slotsAvailable: 1,
+    slotsUsed: 1, births: 1 }; // una plaza ocupada antes y otra nacida en esta comprobación
   const costeAntes = instrumentos.costeMs;
   worldContext(world).observeReproduction!(muestra, 7);
   assert.ok(instrumentos.costeMs - costeAntes >= 7, 'el coste interno comunicado por el núcleo se contabiliza');
@@ -258,8 +259,8 @@ test('en proceso: el observador no mueve un bit del mundo, cuenta cada share() y
     assert.equal(muestra.tick, indice + 1);
     assert.ok(muestra.eligiblePairs >= 0);
     assert.ok(muestra.eligiblePairsBoth <= muestra.eligiblePairs);
-    assert.equal(muestra.births, muestra.slotsUsed);
-    assert.ok(muestra.slotsUsed <= muestra.slotsAvailable && muestra.slotsAvailable <= muestra.capSlots);
+    assert.equal(muestra.slotsAvailable, Math.max(0, muestra.capSlots - muestra.slotsUsed));
+    assert.ok(muestra.births <= muestra.slotsAvailable, 'los nacimientos nuevos consumen plazas libres');
   }
   const suma = (f: Record<string, number>) => Object.values(f).reduce((s, x) => s + x, 0);
   assert.ok(Math.abs(suma(dia.repartoTiempoPorAccion.fracciones) - 1) < 1e-12);

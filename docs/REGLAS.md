@@ -14,8 +14,9 @@ nacimientos, el coste reproductivo, `familyForage`, el reparto de alimento ni S/
 Es una **candidata desactivada para cribado**, no una adopción ni una publicación.
 El laboratorio añade un observador fuera del estado del mundo: registra por
 comprobación parejas elegibles desde al menos un miembro y desde ambos, plazas
-disponibles/usadas y nacimientos; cuenta ticks de `approach` por motivo, incluidos
-los desconocidos, y la distancia a la pareja al abandonar una reunión.
+ocupadas en la ventana al entrar, plazas disponibles y nacimientos nuevos;
+cuenta ticks de `approach` por motivo, incluidos los desconocidos, y la distancia
+a la pareja al abandonar una reunión.
 La predicción y los criterios de refutación están en la crítica del 28-09 y en el
 preregistro del cribado mantenido fuera de esta rama por el orquestador. La rama
 no ejecuta ese cribado.

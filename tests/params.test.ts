@@ -1,12 +1,28 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createWorld, cloneWorld, stepWorld } from '../src/world/index.js';
-import { DEFAULT_PARAMS, PARAM_RANGES, PARAM_DESCRIPTORS, parseParams, paramsOf, setParams, type WorldParams } from '../src/world/params.js';
+import { DEFAULT_PARAMS, HISTORICAL_PARAMS, PARAM_RANGES, PARAM_DESCRIPTORS, parseParams, paramsOf, setParams, type WorldParams } from '../src/world/params.js';
 import { digestoCanonico } from '../src/world/digesto.js';
+import { readSnapshotParams } from '../src/server/snapshot.js';
 import { splitParamList } from '../src/shared/param-syntax.js';
 
 test('parseParams(undefined) devuelve DEFAULT_PARAMS por identidad', () => {
   assert.strictEqual(parseParams(undefined), DEFAULT_PARAMS);
+});
+
+test('reunión sin espera es bit 0/1 y una instantánea anterior recibe 0', () => {
+  assert.equal(DEFAULT_PARAMS.poblacion.reunionSinEspera, 0);
+  assert.equal(HISTORICAL_PARAMS.poblacion.reunionSinEspera, 0);
+  assert.deepEqual(PARAM_RANGES['poblacion.reunionSinEspera'], [0, 1]);
+  assert.equal(parseParams('poblacion.reunionSinEspera=1').poblacion.reunionSinEspera, 1);
+  assert.equal(parseParams({ poblacion: { reunionSinEspera: 0 } }).poblacion.reunionSinEspera, 0);
+  for (const value of ['-1', '2', '0.5', 'true', 'NaN']) {
+    assert.throws(() => parseParams(`poblacion.reunionSinEspera=${value}`), Error, value);
+  }
+  const old = structuredClone(HISTORICAL_PARAMS);
+  delete (old.poblacion as Partial<typeof old.poblacion>).reunionSinEspera;
+  assert.equal(readSnapshotParams({ paramsEncoding: 'params-v1', params: old }).poblacion.reunionSinEspera, 0);
+  assert.equal(readSnapshotParams({}).poblacion.reunionSinEspera, 0);
 });
 
 test('DEFAULT_PARAMS está congelado en profundidad', () => {

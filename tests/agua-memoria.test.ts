@@ -42,12 +42,14 @@ function replica(t: { after(callback: () => void): void }, seed: number, pasos: 
  * midieron los hashes, y con su valor 0 no actúa. */
 function digestoSinMemoria(world: World, conMemoria = false): string {
   const vigentes = paramsOf(world);
-  const antes = structuredClone(vigentes) as unknown as { agua: Record<string, unknown>; social: Record<string, unknown> };
+  const antes = structuredClone(vigentes) as unknown as { agua: Record<string, unknown>; social: Record<string, unknown>; poblacion: Record<string, unknown> };
   assert.equal(antes.social.memoriaDisputa, 0);
   assert.equal(antes.social.hogarTrabajo, 0);
   if (!conMemoria) delete antes.agua.memoria;
   delete antes.social.memoriaDisputa;
   delete antes.social.hogarTrabajo;
+  assert.equal(antes.poblacion.reunionSinEspera, 0);
+  delete antes.poblacion.reunionSinEspera;
   // Poda ola 1 (2026-09-27): `conducta.vocacion`/`vocacionTope` y
   // `poblacion.natalidadLocal`/`radioProvision` ya no se declaran; la forma las trae quitadas.
   setParams(world, antes as unknown as WorldParams);

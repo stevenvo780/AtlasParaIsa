@@ -10,10 +10,28 @@ import type { LegacyRecord } from '../shared/demography.js';
 import { bindTechnologyCatalogue, type TechnologyCatalogueReader } from './technology-catalogue.js';
 import { lastTileAt, splitTileBlocks, tileIndexAppended } from './tile-index.js';
 
+/** Medición externa al estado del mundo, emitida una vez por comprobación reproductiva. */
+export interface ReproductionCheckSample {
+  tick: number;
+  /** Parejas que podrían tener descendencia desde al menos uno de sus miembros. */
+  eligiblePairs: number;
+  /** Subconjunto con lugar accesible desde ambos: el filtro espacial simétrico de R. */
+  eligiblePairsBoth: number;
+  capSlots: number;
+  slotsAvailable: number;
+  slotsUsed: number;
+  births: number;
+}
+
 export interface WorldContext {
   loadChunk?: (key: string, atTick: number) => Chunk | null;
   catalogueReader?: TechnologyCatalogueReader;
   loadLegacy?: (id: string, atTick: number) => LegacyRecord | null;
+  /** Reloj del anfitrión: solo mide el coste del observador, nunca decide la física. */
+  observationClock?: () => number;
+  observeReproduction?: (sample: ReproductionCheckSample, measurementMs: number) => void;
+  /** Identidad de la pareja elegida para reunión; el laboratorio puede medir su salida de la cola. */
+  observeReunionSelection?: (world: World, actorId: string, partnerId: string) => void;
 }
 const contexts = new WeakMap<World, WorldContext>();
 /** Host capabilities live outside serialized worlds and never become inhabitants' knowledge. */

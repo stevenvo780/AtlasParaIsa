@@ -84,6 +84,8 @@ function digestoConParamsDeMain(world: World): string {
   delete (comoMain.gobernador as Record<string, unknown>).politica;
   const poblacion = comoMain.poblacion as Record<string, unknown>;
   for (const clave of ['exigeComunidad', 'radioPareja', 'radioLugar', 'comprobacionContinua', 'cortejo', 'radioCortejo']) delete poblacion[clave];
+  assert.equal(poblacion.reunionSinEspera, 0, 'la nueva ley R está apagada antes de normalizar un hash histórico');
+  delete poblacion.reunionSinEspera;
   delete (comoMain.agua as Record<string, unknown>).memoria;
   for (const clave of ['edadFundadoresMinDias', 'edadFundadoresMaxDias']) delete (comoMain.genes as Record<string, unknown>)[clave];
   setParams(world, comoMain as unknown as WorldParams);

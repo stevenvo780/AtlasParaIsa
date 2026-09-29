@@ -436,7 +436,7 @@ test('el inventario cubre cada lectura, llamada y barrido de las fases con halo 
 
 test('las funciones que alcanza cada fase con halo son las del fuente', () => {
   const tamanos = Object.fromEntries(FASES_CON_HALO.map(fase => [fase, BASE.cierres.get(fase)!.size]));
-  assert.deepEqual(tamanos, { decision: 43, ecologia: 4, fauna: 2 });
+  assert.deepEqual(tamanos, { decision: 45, ecologia: 4, fauna: 2 });
   for (const fase of FASES_CON_HALO) assert.deepEqual([...funcionesDeFase(fase)].sort(), [...BASE.cierres.get(fase)!].sort());
   // Lecturas que ninguna tabla cubre si la red estricta no se aplicara (lo que la red de la tarea no veía).
   const decision = BASE.cierres.get('decision')!;
@@ -452,6 +452,8 @@ test('el alcance compuesto de las fases con halo no supera HALO_CELDAS, y el má
   assert.deepEqual(numericos.filter(([, v]) => v === HALO_CELDAS).map(([id]) => id).sort(), ['cooperacion.destinoDelOtro', 'cooperacion.insumos', 'cooperacion.necesidad']);
   assert.deepEqual(['asentamiento.hogar.personas', 'asentamiento.hogar.teselas', 'asentamiento.hogar.estructuras', 'asentamiento.lugares.personas', 'decision.obra', 'estructuras.funcionales', 'obra.materiales']
     .map(id => decision.get(id)), [13, 11, 11, 12, 12, 8.5, 7]);
+  assert.equal(alcancesDeFase('decision', HISTORICAL_PARAMS).get('decision.lugarReproduccion'),
+    7 + HISTORICAL_PARAMS.poblacion.radioLugar, 'la pareja llega desde familyOpportunity y ambos lugares se consultan');
   const porColeccion = (coleccion: Alcance['coleccion']) => Math.max(...numericos.filter(([id]) => ALCANCES.find(e => e.id === id)!.coleccion === coleccion).map(([, v]) => v!));
   assert.deepEqual({ teselas: porColeccion('teselas'), personas: porColeccion('personas'), estructuras: porColeccion('estructuras'), lugares: porColeccion('lugares') },
     { teselas: 14, personas: 13, estructuras: 11, lugares: 12 });

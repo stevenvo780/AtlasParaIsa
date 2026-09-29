@@ -537,10 +537,16 @@ function choose(world: World, person: Person): void {
     reason: `Prepara alimento para una posible crianza con ${family.partner.name}; debe recogerlo del entorno y conservar una reserva.`,
   } : undefined;
   if (familyForage) candidates.push(familyForage);
-  if (family && person.inventory >= family.reserveTarget && family.partner.inventory >= 0.1) candidates.push({
+  let reunionCandidate: Candidate | undefined;
+  if (family && person.inventory >= family.reserveTarget && family.partner.inventory >= 0.1
+    && (paramsOf(world).poblacion.reunionSinEspera === 0 || person.role !== 'neighbor'
+      || !reproductionReadyFromBoth(world, person, family.partner, paramsOf(world).poblacion))) {
+    reunionCandidate = {
     action: 'approach', target: familyPlace ?? family.partner, score: 0.85 + person.traits.care * 0.2,
     reason: `Tiene reservas y busca ${familyPlace ? `reunirse con ${family.partner.name} en ${familyPlace.name}` : `acercarse a ${family.partner.name}`}; el vínculo y el cuidado corporal permiten intentar una crianza.`,
-  });
+    };
+    candidates.push(reunionCandidate);
+  }
   // Cortejo (2026-09-22, `poblacion.cortejo`; histórico 0 = apagado, reglas 10 lo adopta con 2 y radio 128
   // para mundos nuevos). Diagnóstico: en la semilla 7
   // hay adultos fértiles con vínculo mutuo, pero la pareja válida más cercana de toda la corrida está a
@@ -851,6 +857,7 @@ function choose(world: World, person: Person): void {
   person.target = { x: selected.target.x, y: selected.target.y };
   person.reason = selected.memory ? `${selected.reason} Influye «${selected.memory.title}», ${selected.memory.source === 'sample' ? 'material de prueba' : 'recuerdo aprobado'}.` : selected.reason;
   person.decisionAt = world.tick + (selected === restCandidate && recoverWater ? 1 : 30);
+  if (selected === reunionCandidate) worldContext(world).observeReunionSelection?.(world, person.id, family!.partner.id);
   if (selected.memory && person.recentMemory !== selected.memory.text) {
     const event = addEvent(world, { kind: 'memory', actors: [person.id], text: `${person.name} eligió ${actionLabel(selected.action)} al recordar «${selected.memory.title}».`, cause: `Contexto ${selected.memory.context}; recuerdo ${selected.memory.id}; aumenta la preferencia por ${selected.action}.`, x: person.x, y: person.y, source: selected.memory.source });
     remember(person, world, selected.memory.text, event.id, selected.memory.placeId);
@@ -1292,6 +1299,50 @@ function transferEstate(world: World, person: Person): void {
 /** Resource-dependent, bounded simulated descendants; learned episodes are not copied into genes. */
 // TODO params: activar/desactivar elección por afinidad vs. primer elegible
 const ELECCION_POR_AFINIDAD = true;
+type PopulationLaw = WorldParams['poblacion'];
+
+/** El mismo embudo corporal/comunitario y espacial que usa `reproduce` al elegir un nacimiento. */
+function reproductionFit(world: World, person: Person, pop: PopulationLaw, used?: ReadonlySet<string>): boolean {
+  return !used?.has(person.id) && fertile(world, person) && (!pop.exigeComunidad || !!person.communityId);
+}
+
+function reproductionMatch(world: World, a: Person, b: Person, pop: PopulationLaw, used?: ReadonlySet<string>): boolean {
+  return b !== a && reproductionFit(world, b, pop, used) && distance(a, b) <= pop.radioPareja
+    && (a.bonds[b.id] ?? 0) >= 0.3 && (b.bonds[a.id] ?? 0) >= 0.3 && !closeKin(a, b);
+}
+
+function reproductionPlace(world: World, person: Person, pop: PopulationLaw): (typeof world.places)[number] | undefined {
+  return primeroCerca(world.places, person, pop.radioLugar + 1, place => distance(person, place) <= pop.radioLugar);
+}
+
+/** La ley R solo retira la espera si cualquiera de los dos podría iniciar el nacimiento aquí. */
+function reproductionReadyFromBoth(world: World, a: Person, b: Person, pop: PopulationLaw): boolean {
+  return reproductionFit(world, a, pop) && reproductionMatch(world, a, b, pop)
+    && !!reproductionPlace(world, a, pop) && !!reproductionPlace(world, b, pop);
+}
+
+/** Ambas lecturas de elegibilidad: nacimiento real (algún iniciador) y guarda R (ambos). Solo con observador. */
+function countEligibleReproductionPairs(world: World, pop: PopulationLaw): { any: number; both: number } {
+  const pairs = new Set<string>();
+  const both = new Set<string>();
+  const placeById = new Map<string, boolean>();
+  const nearPlace = (person: Person): boolean => {
+    let near = placeById.get(person.id);
+    if (near === undefined) { near = !!reproductionPlace(world, person, pop); placeById.set(person.id, near); }
+    return near;
+  };
+  for (const a of world.people) {
+    if (!reproductionFit(world, a, pop) || !nearPlace(a)) continue;
+    for (const b of vecinos(world, a, pop.radioPareja + 1, candidate => reproductionMatch(world, a, candidate, pop), 'reproduce')) {
+      const first = a.id < b.id ? a.id : b.id, second = a.id < b.id ? b.id : a.id;
+      const key = `${first}\u0000${second}`;
+      pairs.add(key);
+      if (nearPlace(b)) both.add(key);
+    }
+  }
+  return { any: pairs.size, both: both.size };
+}
+
 function reproduce(world: World): void {
   const pop = paramsOf(world).poblacion;
   if (!world.reproductionEnabled || world.people.length >= pop.maxima) return;
@@ -1303,19 +1354,27 @@ function reproduce(world: World): void {
   // fundadores (`bornAt ≤ −1200`, `genes.edadFundadoresMinDias` ≥ 0,5 días) no caen dentro
   // de ella con el intervalo por defecto.
   if (!pop.comprobacionContinua && world.tick % pop.intervaloComprobacionTicks !== 0) return;
+  const context = worldContext(world), observer = context.observeReproduction;
+  const observationStart = observer ? context.observationClock?.() : undefined;
+  const eligiblePairs = observer ? countEligibleReproductionPairs(world, pop) : { any: 0, both: 0 };
+  const measurementMs = observationStart === undefined ? 0 : context.observationClock!() - observationStart;
   const recientes = pop.comprobacionContinua
     ? world.people.filter(p => p.role === 'neighbor' && p.bornAt > world.tick - pop.intervaloComprobacionTicks).length : 0;
   const cupo = pop.nacimientosPorComprobacion - recientes;
-  if (cupo <= 0) return;
+  if (cupo <= 0) {
+    observer?.({ tick: world.tick, eligiblePairs: eligiblePairs.any, eligiblePairsBoth: eligiblePairs.both,
+      capSlots: pop.nacimientosPorComprobacion, slotsAvailable: 0, slotsUsed: 0, births: 0 }, measurementMs);
+    return;
+  }
   const used = new Set<string>();
-  const fit = (p: Person): boolean => !used.has(p.id)
-    && fertile(world, p) && (!pop.exigeComunidad || !!p.communityId);
-  const match = (a: Person, b: Person): boolean => b !== a && fit(b) && distance(a, b) <= pop.radioPareja && (a.bonds[b.id] ?? 0) >= 0.3 && (b.bonds[a.id] ?? 0) >= 0.3 && !closeKin(a, b);
+  const fit = (p: Person): boolean => reproductionFit(world, p, pop, used);
+  const match = (a: Person, b: Person): boolean => reproductionMatch(world, a, b, pop, used);
+  let births = 0;
   for (let n = 0; n < cupo && world.people.length < pop.maxima; n++) {
     let pair: { a: Person; b: Person } | undefined, place: (typeof world.places)[number] | undefined;
     for (const a of world.people) {
       if (!fit(a)) continue;
-      const here = primeroCerca(world.places, a, pop.radioLugar + 1, p => distance(a, p) <= pop.radioLugar);
+      const here = reproductionPlace(world, a, pop);
       if (!here) continue;
       const b = chooseReproductivePartner(world, a, vecinos(world, a, pop.radioPareja + 1, p => {
         if (!match(a, p)) return false;
@@ -1363,10 +1422,13 @@ function reproduce(world: World): void {
     const group = world.communities.find(c => c.id === a.communityId);
     if (group) { if (pop.comprobacionContinua || world.version >= 10) group.members = [...group.members, id]; else group.members.push(id); }
     count(world, 'births');
+    births++;
     const event = addEvent(world, { kind: 'birth', actors: [a.id, b.id, child.id], x: child.x, y: child.y, source: 'simulation', text: a.communityId === b.communityId ? `${child.name} nació en la comunidad de ${a.name} y ${b.name}.` : `${child.name} nació del vínculo entre ${a.name} y ${b.name}, de comunidades distintas.`, cause: `${a.name} y ${b.name} junto a ${place.name} (${place.x},${place.y}). Dos progenitores simulados con recursos, confianza y lugar compartido; reserva conjunta −0.16, cría recibe 0.10. Recombina siete pares de parámetros; ${genome.mutations} variaciones. Habilidades y recuerdos comienzan vacíos; cultura inicial por crianza, no por ADN.` });
     remember(child, world, 'La comunidad sostuvo su llegada.', event.id, place.id);
     used.add(a.id); used.add(b.id);
   }
+  observer?.({ tick: world.tick, eligiblePairs: eligiblePairs.any, eligiblePairsBoth: eligiblePairs.both,
+    capSlots: pop.nacimientosPorComprobacion, slotsAvailable: cupo, slotsUsed: births, births }, measurementMs);
 }
 
 function fertile(world: World, person: Person): boolean {

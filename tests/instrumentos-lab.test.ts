@@ -11,7 +11,8 @@ import { digestoCanonico } from '../src/world/digesto.js';
 import { CONDUCTA_DIMENSIONS, indiceDiversidad } from '../src/world/diversidad.js';
 import { worldStatistics } from '../src/world/statistics.js';
 import { parseParams } from '../src/world/params.js';
-import { ACCIONES, censoComunidades, diversidadEntreGrupos, indiceDiversidadConActividad, InstrumentosConducta, repertorioAbierto, repertorioAbiertoDurable, sinDescanso } from '../scripts/lab/instrumentos.js';
+import { worldContext } from '../src/world/spatial.js';
+import { ACCIONES, censoComunidades, diversidadEntreGrupos, indiceDiversidadConActividad, InstrumentosConducta, motivoApproach, repertorioAbierto, repertorioAbiertoDurable, sinDescanso } from '../scripts/lab/instrumentos.js';
 
 /**
  * Instrumentos de medida del laboratorio (scripts/lab/instrumentos.ts, ronda INSTR 2026-09-22):
@@ -34,7 +35,7 @@ const CLAVES_ANTIGUAS = new Set([
   'cooperacionAcumuladaPorTipo', 'otrasCooperacionesAcumuladas', 'conflictosAcumulados', 'faunaTotal',
   'p50Ms', 'p95Ms', 'rss',
 ]);
-const CLAVES_NUEVAS = ['diversidadConductaTiempo', 'diversidadConductaTiempoComponentes', 'diversidadConductaActiva', 'diversidadConductaActivaComponentes', 'diversidadConductaComponentes', 'diversidadConductaVentana', 'diversidadConductaVentanaComponentes', 'personasVentana', 'repartoTiempoPorAccion', 'repartoActividadPorAccion', 'diversidadConductaVentanaGen1', 'approachHogar', 'maderaMediaAdultos', 'piedraMediaAdultos', 'muertesMenores8Dias', 'cambiosHogar', 'diversidadPerfilesJS', 'linajesVivos', 'linajesHerfindahl', 'censoComunidades', 'repertorioAbierto', 'diversidadEntreGrupos'];
+const CLAVES_NUEVAS = ['diversidadConductaTiempo', 'diversidadConductaTiempoComponentes', 'diversidadConductaActiva', 'diversidadConductaActivaComponentes', 'diversidadConductaComponentes', 'diversidadConductaVentana', 'personasVentana', 'repartoTiempoPorAccion', 'repartoActividadPorAccion', 'diversidadConductaVentanaGen1', 'approachHogar', 'reproduccionComprobaciones', 'approachPorMotivo', 'salidasReunion', 'maderaMediaAdultos', 'piedraMediaAdultos', 'muertesMenores8Dias', 'cambiosHogar', 'diversidadPerfilesJS', 'linajesVivos', 'linajesHerfindahl', 'censoComunidades', 'repertorioAbierto', 'diversidadEntreGrupos', 'diversidadConductaVentanaComponentes'];
 
 type Json = Record<string, unknown>;
 const readJson = (path: string): Json => JSON.parse(readFileSync(path, 'utf8')) as Json;
@@ -62,6 +63,65 @@ test('ACCIONES cubre las 18 acciones del vector de conducta de src/world/diversi
   assert.equal(new Set(ACCIONES).size, 18);
   // CONDUCTA_DIMENSIONS = 2·|ACTIONS| + 5 (tecnología) + 6 (acciones de comida) + 6 (lugares).
   assert.equal(ACCIONES.length * 2 + 5 + 6 + 6, CONDUCTA_DIMENSIONS);
+});
+
+test('approach: cada tick conocido y desconocido concilia con el total; el observador se retira', t => {
+  const { world } = mundo(t, 17, ETAPA1);
+  const instrumentos = new InstrumentosConducta(world);
+  const vecinos = world.people.filter(person => person.role === 'neighbor');
+  assert.ok(vecinos.length >= 2);
+  vecinos[0]!.action = 'approach';
+  vecinos[0]!.reason = 'Tiene reservas y busca reunirse con alguien; permite intentar una crianza.';
+  vecinos[0]!.target = { x: vecinos[0]!.x, y: vecinos[0]!.y };
+  vecinos[1]!.action = 'approach';
+  vecinos[1]!.reason = 'Motivo futuro que aún no clasifica el laboratorio.';
+  const muestra = { tick: 1, eligiblePairs: 3, eligiblePairsBoth: 2, capSlots: 2, slotsAvailable: 1, slotsUsed: 1, births: 1 };
+  const costeAntes = instrumentos.costeMs;
+  worldContext(world).observeReproduction!(muestra, 7);
+  assert.ok(instrumentos.costeMs - costeAntes >= 7, 'el coste interno comunicado por el núcleo se contabiliza');
+  instrumentos.antesDelPaso(world);
+  instrumentos.despuesDelPaso(world);
+  const dia = instrumentos.metricasDia(world);
+  assert.equal(dia.approachPorMotivo.ticks.reunion, 1);
+  assert.equal(dia.approachPorMotivo.enDestino.reunion, 1);
+  assert.equal(dia.approachPorMotivo.ticks.desconocido, 1);
+  assert.equal(dia.approachPorMotivo.totalApproach, dia.approachPorMotivo.sumaMotivos);
+  assert.equal(dia.approachPorMotivo.diferencia, 0);
+  assert.deepEqual(dia.reproduccionComprobaciones, [muestra], 'el reloj no se serializa con la muestra');
+  assert.equal(motivoApproach('Recuerda el cuidado compartido en casa y vuelve'), 'memoria');
+  assert.equal(instrumentos.metricasDia(world).approachPorMotivo.totalApproach, 0, 'la ventana diaria se reinicia');
+  assert.equal(typeof worldContext(world).observeReproduction, 'function');
+  instrumentos.cerrar();
+  assert.equal(worldContext(world).observeReproduction, undefined);
+  assert.equal(worldContext(world).observationClock, undefined);
+  assert.equal(worldContext(world).observeReunionSelection, undefined);
+});
+
+test('reunión: registra distancia al cambiar de pareja y al abandonar la acción', t => {
+  const { world } = mundo(t, 19, ETAPA1);
+  const instrumentos = new InstrumentosConducta(world);
+  const [actor, primera, segunda] = world.people.filter(person => person.role === 'neighbor');
+  assert.ok(actor && primera && segunda);
+  actor.action = 'approach';
+  actor.reason = 'Tiene reservas y busca reunirse con una pareja; el vínculo permite crianza.';
+  const distancia = (p: Person) => Math.hypot(actor.x - p.x, actor.y - p.y);
+  const costeAntes = instrumentos.costeMs;
+  worldContext(world).observeReunionSelection!(world, actor.id, primera.id);
+  worldContext(world).observeReunionSelection!(world, actor.id, segunda.id);
+  assert.ok(instrumentos.costeMs > costeAntes, 'el callback interior se contabiliza');
+  world.tick = 1;
+  instrumentos.antesDelPaso(world);
+  instrumentos.despuesDelPaso(world);
+  actor.action = 'rest';
+  world.tick = 2;
+  instrumentos.antesDelPaso(world);
+  instrumentos.despuesDelPaso(world);
+  assert.deepEqual(instrumentos.metricasDia(world).salidasReunion, [
+    { tick: 0, actorId: actor.id, partnerId: primera.id, distanciaPareja: distancia(primera), causa: 'cambioPareja' },
+    { tick: 2, actorId: actor.id, partnerId: segunda.id, distanciaPareja: distancia(segunda), causa: 'cambioAccion' },
+  ]);
+  assert.deepEqual(instrumentos.metricasDia(world).salidasReunion, [], 'la ventana diaria se reinicia');
+  instrumentos.cerrar();
 });
 
 test('comunidades: censo sintético de vivos, orden descendente y sin comunidad', () => {
@@ -190,6 +250,17 @@ test('en proceso: el observador no mueve un bit del mundo, cuenta cada share() y
   assert.equal(dia.foodShared, porLastShared, 'un acto de compartir = un suceso care = un donante con lastShared = tick');
   // Cada paso cuenta un tick por vecino mortal vivo; las fracciones suman 1.
   assert.equal(dia.repartoTiempoPorAccion.personaTicks, mortalesPorPaso);
+  assert.equal(dia.approachPorMotivo.diferencia, 0);
+  assert.equal(dia.approachPorMotivo.sumaMotivos, Math.round((dia.repartoTiempoPorAccion.fracciones.approach ?? 0) * mortalesPorPaso));
+  assert.equal(dia.reproduccionComprobaciones.length, pasos, 'la comprobación continua emite una muestra por paso');
+  assert.equal(dia.reproduccionComprobaciones.reduce((s, muestra) => s + muestra.births, 0), a.world.totals.births ?? 0);
+  for (const [indice, muestra] of dia.reproduccionComprobaciones.entries()) {
+    assert.equal(muestra.tick, indice + 1);
+    assert.ok(muestra.eligiblePairs >= 0);
+    assert.ok(muestra.eligiblePairsBoth <= muestra.eligiblePairs);
+    assert.equal(muestra.births, muestra.slotsUsed);
+    assert.ok(muestra.slotsUsed <= muestra.slotsAvailable && muestra.slotsAvailable <= muestra.capSlots);
+  }
   const suma = (f: Record<string, number>) => Object.values(f).reduce((s, x) => s + x, 0);
   assert.ok(Math.abs(suma(dia.repartoTiempoPorAccion.fracciones) - 1) < 1e-12);
   assert.ok(Math.abs(suma(dia.repartoActividadPorAccion.fracciones) - 1) < 1e-12);

@@ -28,6 +28,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import type { Capability, TechnologyExecution } from '../../src/shared/technology.js';
 import { TICKS_PER_DAY, type Person, type World } from '../../src/world/index.js';
 import { indiceDiversidad } from '../../src/world/diversidad.js';
+import { bindWorldContext, worldContext, type ReproductionCheckSample } from '../../src/world/spatial.js';
 
 
 /** Las 18 acciones de `Action`, en el orden de `ACTIONS` de src/world/diversidad.ts (no exportado):
@@ -209,6 +210,22 @@ function fracciones(conteo: ReadonlyMap<string, number>, total: number): Record<
   return salida;
 }
 
+export const MOTIVOS_APPROACH = ['hogar', 'reunion', 'cortejo', 'social', 'invitacion', 'memoria', 'desconocido'] as const;
+export type MotivoApproach = typeof MOTIVOS_APPROACH[number];
+/** Clasifica el motivo emitido por la decisión. Todo texto nuevo queda visible en desconocido. */
+export function motivoApproach(reason: string): MotivoApproach {
+  return reason.startsWith('Vuelve a un lugar conocido con agua, alimento, techo o cooperación;') ? 'hogar'
+    : reason.startsWith('Tiene reservas y busca ') ? 'reunion'
+    : reason.startsWith('Recuerda el vínculo con ') ? 'cortejo'
+    : reason.startsWith('Le apetece acercarse;') ? 'social'
+    : reason.startsWith('Percibe una invitación') ? 'invitacion'
+    : reason.startsWith('Recuerda el cuidado compartido en ') ? 'memoria' : 'desconocido';
+}
+
+function cuentasMotivos(): Record<MotivoApproach, number> {
+  return Object.fromEntries(MOTIVOS_APPROACH.map(motivo => [motivo, 0])) as Record<MotivoApproach, number>;
+}
+
 /** Campos nuevos de `dia-NNN.json` (ver README del laboratorio, «Instrumentos de medida»).
  * La poda de leyes refutadas (ola 1, 2026-09-27) retiró las claves `natalidadLocal`,
  * `vocacionVarianza`, `vocacionEntropiaArgmax` y `vocacionCoincidencia`; los JSON antiguos
@@ -235,6 +252,14 @@ export interface MetricasInstrumentos {
   diversidadConductaVentanaGen1: number | null;
   /** `approach` cuyo motivo empieza con el texto de `settlementOpportunity`. */
   approachHogar: number | null;
+  /** Cada llamada real a reproduce(), con el cupo y los nacimientos de esa comprobación. */
+  reproduccionComprobaciones: ReproductionCheckSample[];
+  /** Ticks de vecinos por motivo. La conciliación debe dar cero: evita perder motivos nuevos. */
+  approachPorMotivo: { ticks: Record<MotivoApproach, number>; enDestino: Record<MotivoApproach, number>;
+    totalApproach: number; sumaMotivos: number; diferencia: number };
+  /** Distancia al salir de una reunión seleccionada; null si falta el actor o la pareja. */
+  salidasReunion: { tick: number; actorId: string; partnerId: string; distanciaPareja: number | null;
+    causa: 'cambioPareja' | 'cambioAccion' | 'cambioMotivo' | 'muerteActor' }[];
   maderaMediaAdultos: number | null;
   piedraMediaAdultos: number | null;
   muertesMenores8Dias: number;
@@ -268,6 +293,18 @@ export class InstrumentosConducta {
   private actividadInicioDia = new Map<string, Record<string, number>>();
   private comidaCompartida = 0;
   private approachHogarTicks = 0;
+  private readonly approachTicks = cuentasMotivos();
+  private readonly approachDestinoTicks = cuentasMotivos();
+  private reproduccionComprobaciones: ReproductionCheckSample[] = [];
+  private readonly mundo: World;
+  private readonly observadorAnterior: ((sample: ReproductionCheckSample, measurementMs: number) => void) | undefined;
+  private readonly observadorReproduccion: (sample: ReproductionCheckSample, measurementMs: number) => void;
+  private readonly relojAnterior: (() => number) | undefined;
+  private readonly relojObservacion: () => number;
+  private readonly reunionAnterior: ((world: World, actorId: string, partnerId: string) => void) | undefined;
+  private readonly observadorReunion: (world: World, actorId: string, partnerId: string) => void;
+  private readonly parejaReunion = new Map<string, string>();
+  private salidasReunion: MetricasInstrumentos['salidasReunion'] = [];
   private readonly muertesConocidas = new Set<string>();
   private muertesMenores8Dias = 0;
   /** Solo posiciones, nunca referencias a `home` mutables del mundo. */
@@ -281,6 +318,27 @@ export class InstrumentosConducta {
   pasos = 0;
 
   constructor(world: World, db?: DatabaseSync) {
+    this.mundo = world;
+    this.observadorAnterior = worldContext(world).observeReproduction;
+    this.reunionAnterior = worldContext(world).observeReunionSelection;
+    this.relojAnterior = worldContext(world).observationClock;
+    this.relojObservacion = () => performance.now();
+    this.observadorReproduccion = (sample, measurementMs) => {
+      const inicio = performance.now();
+      this.observadorAnterior?.(sample, measurementMs);
+      this.reproduccionComprobaciones.push({ ...sample });
+      this.costeMs += measurementMs + performance.now() - inicio;
+    };
+    this.observadorReunion = (actual, actorId, partnerId) => {
+      const inicio = performance.now();
+      this.reunionAnterior?.(actual, actorId, partnerId);
+      const anterior = this.parejaReunion.get(actorId);
+      if (anterior && anterior !== partnerId) this.registrarSalida(actual, actorId, anterior, 'cambioPareja');
+      this.parejaReunion.set(actorId, partnerId);
+      this.costeMs += performance.now() - inicio;
+    };
+    bindWorldContext(world, { observeReproduction: this.observadorReproduccion,
+      observeReunionSelection: this.observadorReunion, observationClock: this.relojObservacion });
     this.fotografiarActividad(world); this.vivosInicioDia = mortalesVivos(world);
     const identidades = new Map([...world.legacy, ...world.retiredLegacy, ...world.people]
       .filter(person => person.role === 'neighbor').map(person => [person.id, person] as const));
@@ -315,12 +373,26 @@ export class InstrumentosConducta {
     this.actividadInicioDia = new Map(world.people.filter(p => p.role === 'neighbor').map(p => [p.id, { ...p.activity }]));
   }
 
+  private registrarSalida(world: World, actorId: string, partnerId: string, causa: MetricasInstrumentos['salidasReunion'][number]['causa'],
+    personas = new Map(world.people.map(person => [person.id, person]))): void {
+    const actor = personas.get(actorId), pareja = personas.get(partnerId);
+    this.salidasReunion.push({ tick: world.tick, actorId, partnerId,
+      distanciaPareja: actor && pareja ? Math.hypot(actor.x - pareja.x, actor.y - pareja.y) : null, causa });
+    this.parejaReunion.delete(actorId);
+  }
+
   antesDelPaso(world: World): void {
     this.contadorAntes = world.eventCounter;
   }
 
-  /** Sin observadores que retirar: los instrumentos solo leen (la poda ola 1 retiró el observador NAT-L). */
-  cerrar(): void { /* sin estado externo */ }
+  cerrar(): void {
+    const context = worldContext(this.mundo);
+    bindWorldContext(this.mundo, {
+      ...(context.observeReproduction === this.observadorReproduccion ? { observeReproduction: this.observadorAnterior } : {}),
+      ...(context.observeReunionSelection === this.observadorReunion ? { observeReunionSelection: this.reunionAnterior } : {}),
+      ...(context.observationClock === this.relojObservacion ? { observationClock: this.relojAnterior } : {}),
+    });
+  }
 
   /** Ticks por acción observados de una persona viva (copia; para tests y diagnóstico). */
   ticksDe(id: string): Record<string, number> | undefined {
@@ -331,6 +403,13 @@ export class InstrumentosConducta {
   /** Llamar tras `stepWorld` y ANTES de `store.save` (que vacía `chronicleJournal.pending`). */
   despuesDelPaso(world: World): void {
     const inicio = performance.now();
+    const personas = new Map(world.people.map(person => [person.id, person]));
+    for (const [actorId, partnerId] of this.parejaReunion) {
+      const actor = personas.get(actorId);
+      if (!actor) this.registrarSalida(world, actorId, partnerId, 'muerteActor', personas);
+      else if (actor.action !== 'approach') this.registrarSalida(world, actorId, partnerId, 'cambioAccion', personas);
+      else if (motivoApproach(actor.reason) !== 'reunion') this.registrarSalida(world, actorId, partnerId, 'cambioMotivo', personas);
+    }
     for (const person of world.people) {
       let ticks = this.ticksPorPersona.get(person.id);
       if (!ticks) { ticks = {}; this.ticksPorPersona.set(person.id, ticks); }
@@ -353,6 +432,11 @@ export class InstrumentosConducta {
         }
         this.hogarAnterior.set(person.id, hogar);
         this.tiempoDia.set(person.action, (this.tiempoDia.get(person.action) ?? 0) + 1); this.personaTicksDia++;
+        if (person.action === 'approach') {
+          const motivo = motivoApproach(person.reason);
+          this.approachTicks[motivo]++;
+          if (person.x === person.target.x && person.y === person.target.y) this.approachDestinoTicks[motivo]++;
+        }
         // El motivo exacto lo emite sólo `settlementOpportunity`, antes de cualquier recuerdo añadido.
         if (person.action === 'approach' && person.reason.startsWith('Vuelve a un lugar conocido con agua, alimento, techo o cooperación;')) this.approachHogarTicks++;
       }
@@ -407,6 +491,8 @@ export class InstrumentosConducta {
     const linajePerfiles = enVentana.map(person => ({ ticks: this.ticksDiaPorPersona.get(person.id) ?? vacio, grupo: this.raizPorId.get(person.id) ?? null }));
     const dia = Math.ceil(world.tick / TICKS_PER_DAY);
     const ticksActivos = this.personaTicksDia - (this.tiempoDia.get('rest') ?? 0);
+    const sumaMotivos = MOTIVOS_APPROACH.reduce((suma, motivo) => suma + this.approachTicks[motivo], 0);
+    const totalApproach = this.tiempoDia.get('approach') ?? 0;
     const incrementos = new Map<string, number>();
     let totalIncrementos = 0;
     for (const person of world.people) {
@@ -431,6 +517,10 @@ export class InstrumentosConducta {
       foodShared: this.comidaCompartida,
       diversidadConductaVentanaGen1: ventanaGen1?.total ?? null,
       approachHogar: ticksActivos ? this.approachHogarTicks / ticksActivos : null,
+      reproduccionComprobaciones: this.reproduccionComprobaciones,
+      approachPorMotivo: { ticks: { ...this.approachTicks }, enDestino: { ...this.approachDestinoTicks },
+        totalApproach, sumaMotivos, diferencia: totalApproach - sumaMotivos },
+      salidasReunion: this.salidasReunion,
       maderaMediaAdultos: mediaAdultos('wood'),
       piedraMediaAdultos: mediaAdultos('stone'),
       muertesMenores8Dias: this.muertesMenores8Dias,
@@ -448,6 +538,9 @@ export class InstrumentosConducta {
     const vivos = new Set(world.people.map(person => person.id));
     for (const id of [...this.ticksPorPersona.keys()]) if (!vivos.has(id)) this.ticksPorPersona.delete(id);
     this.tiempoDia.clear(); this.personaTicksDia = 0; this.approachHogarTicks = 0;
+    for (const motivo of MOTIVOS_APPROACH) { this.approachTicks[motivo] = 0; this.approachDestinoTicks[motivo] = 0; }
+    this.reproduccionComprobaciones = [];
+    this.salidasReunion = [];
     this.cambiosHogar = { adopta: 0, pierde: 0 };
     this.ticksDiaPorPersona.clear(); this.vivosInicioDia = mortalesVivos(world);
     this.fotografiarActividad(world);

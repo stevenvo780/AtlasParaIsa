@@ -1,5 +1,25 @@
 # Reglas del prototipo
 
+## Candidata R: reunión sin espera (28 de septiembre de 2026)
+
+`poblacion.reunionSinEspera` admite 0 o 1. Su valor por defecto e histórico es **0**:
+las reglas 11 publicadas conservan la oferta de reunión actual. Con 1, un vecino no
+recibe la oferta `approach:reunion` si él y su pareja ya son fértiles, mantienen
+vínculo mutuo ≥ 0,3, no son parientes cercanos, están a ≤ `radioPareja` y cada uno
+tiene un lugar a ≤ `radioLugar`; se respeta `exigeComunidad` si está activo. Son
+los mismos predicados de `reproduce`, compartidos por el selector y el nacimiento.
+Si aún falta distancia o lugar, la oferta sigue. La ley no modifica el cupo de
+nacimientos, el coste reproductivo, `familyForage`, el reparto de alimento ni S/I.
+
+Es una **candidata desactivada para cribado**, no una adopción ni una publicación.
+El laboratorio añade un observador fuera del estado del mundo: registra por
+comprobación parejas elegibles desde al menos un miembro y desde ambos, plazas
+disponibles/usadas y nacimientos; cuenta ticks de `approach` por motivo, incluidos
+los desconocidos, y la distancia a la pareja al abandonar una reunión.
+La predicción y los criterios de refutación están en la crítica del 28-09 y en el
+preregistro del cribado mantenido fuera de esta rama por el orquestador. La rama
+no ejecuta ese cribado.
+
 ## Poda de leyes refutadas, ola 1 (2026-09-27, rama `sprint/poda-leyes-20260927`)
 
 Se retiran del código NAT-L (`poblacion.natalidadLocal`, `poblacion.radioProvision`;

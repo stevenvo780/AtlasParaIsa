@@ -1,5 +1,20 @@
 # Evidencia vigente
 
+## 28 de septiembre de 2026 — candidata R, reunión sin espera
+
+La rama `sprint/reunion-espera-20260928` añade `poblacion.reunionSinEspera=1`
+como brazo opcional; el default y el valor histórico son 0. La ley se limita a
+suprimir la oferta de reunión a vecinos que ya cumplen el predicado reproductivo
+desde ambos miembros. El observador registra las comprobaciones reales de
+`reproduce()` desde uno y ambos miembros, ticks de `approach` por motivo y distancia
+a la pareja al abandonar esa acción. Las pruebas de alcance y la puerta
+de identidad se documentan en el informe local
+`/datos/tmp-atlas-lab/balance/informe-codex-5-20260928.md` y en la bitácora del
+laboratorio. **No hay resultado experimental de R en esta rama**: el cribado
+pareado requiere el preregistro y la ejecución del orquestador. La crítica
+`/datos/tmp-atlas-lab/datos-lab/critica-approach-20260928.md` define predicciones
+y refutaciones; este registro no declara eficacia, adopción ni publicación.
+
 > Los enlaces a `../artifacts/…` de este registro apuntan a un directorio local que git ignora: no
 > están versionados y no existen en otros clones. Los que existían el 2026-09-22 se copiaron, con su
 > `MANIFEST.sha256`, a `/datos/workspaces/personal/AtlasParaIsa-archivo/evidencia-local-20260922`

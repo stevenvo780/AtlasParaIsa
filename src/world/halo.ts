@@ -162,6 +162,10 @@ export const ALCANCES: readonly Alcance[] = [
     { nota: 'El agua recordada sólo se consulta si está a ≤ `RADIUS`; más lejos sólo se compara su distancia.' }),
   a('decision.cortejo', 'personas', 'entrada', { param: 'poblacion.radioCortejo', activa: 'poblacion.cortejo' }, 'index.ts', 'choose', ['away > leyPoblacion.radioCortejo'],
     { nota: 'Reglas 10: 128 celdas. La lectura por id de cada vínculo no tiene cota (ver `vinculos.cortejo`); el radio acota a quién se decide buscar.' }),
+  a('decision.lugarReproduccion', 'lugares', 'entrada', { param: 'poblacion.radioLugar' }, 'index.ts', 'reproductionPlace',
+    ['function reproductionPlace(world: World, person: Person, pop: PopulationLaw): (typeof world.places)[number] | undefined {',
+      'return primeroCerca(world.places, person, pop.radioLugar + 1, place => distance(person, place) <= pop.radioLugar);'],
+    { nota: 'La comprobación de reunión consulta el lugar de ambos; `reproductionReadyFromBoth` recibe la pareja a ≤ 7 de `choose`, por lo que el peor alcance es 7 + radioLugar.' }),
   a('decision.techo', 'estructuras', 'entrada', 0, 'index.ts', 'bodilyShelter',
     ["tileAt(world, point)?.terrain === 'shelter' ? Math.max(0, ...filtrarCerca(world.structures, point, 0,", "s => s.x === point.x && s.y === point.y && s.condition > BROKEN_CONDITION && s.components.includes('roof'))"]),
   a('decision.comidaInmediata', 'teselas', 'entrada', 0, 'index.ts', 'immediateMeal', ['Math.min(tileAt(world, person)?.food ?? 0, 0.0035)']),
@@ -247,6 +251,11 @@ export const LLAMADAS: readonly Llamada[] = [
   ll('index.ts', 'choose', 'index.ts:immediateMeal', 'decision.teselas', ['meal = immediateMeal(world, person)', 'immediateMeal(world, { ...person, ...candidate.target })'],
     'Sobre sí y sobre destinos de comida con ruta percibida (≤ 7).'),
   ll('index.ts', 'choose', 'family.ts:familyOpportunity', 'entrada', ['const family = familyOpportunity(world, person);']),
+  ll('index.ts', 'choose', 'index.ts:reproductionReadyFromBoth', 'entrada',
+    ['!reproductionReadyFromBoth(world, person, family.partner, paramsOf(world).poblacion)']),
+  ll('index.ts', 'reproductionReadyFromBoth', 'index.ts:reproductionPlace', 'familia.pareja',
+    ['reproductionPlace(world, a, pop)', 'reproductionPlace(world, b, pop)'],
+    'Se consulta a ambos miembros. El primero está en el actor; el segundo, a ≤ 7 por `familyOpportunity`. Se usa el peor centro.'),
   ll('index.ts', 'choose', 'index.ts:workDuration', 'decision.personas', ["workDuration(world, person, 'forage')", "duration: other => workDuration(world, other, 'forage')"]),
   ll('index.ts', 'choose', 'inventions.ts:waterAvailable', 'decision.teselas', ['t => waterAvailable(world,t) > 0.005', 'const localWater = waterAvailable(world, person) > 0;',
     'waterAvailable(world, recuerdo)', 'if (waterAvailable(world, person) > 0 && damage > 0)'], 'Sobre sí, teselas percibidas y el agua recordada a ≤ `RADIUS`.'),
@@ -368,10 +377,15 @@ export const ALCANCES_SERIALES: readonly AlcanceSerial[] = [
     "const nearby = vecinos(world, person, 7, p => trustedNeighbor(person, p), 'updateCommunities:cohabitation');"],
     { nota: '`trustedNeighbor`: ≤ 6 celdas. Dos llamadas con la misma etiqueta: la fisión (sobre `members`, filtrado aparte) y la revisión de todo el mundo.' }),
   s('convivencia.fision', 'comunidades', 'lugares', 'actor', 7, 'society.ts', 'reviseByCohabitation', ['algunoCerca(world.places, person, 8, place => distance(person, place) <= 7)']),
-  s('reproduccion.lugar', 'reproduccion', 'lugares', 'actor', { param: 'poblacion.radioLugar' }, 'index.ts', 'reproduce', ['primeroCerca(world.places, a, pop.radioLugar + 1, p => distance(a, p) <= pop.radioLugar)']),
+  s('reproduccion.lugar', 'reproduccion', 'lugares', 'actor', { param: 'poblacion.radioLugar' }, 'index.ts', 'reproductionPlace',
+    ['return primeroCerca(world.places, person, pop.radioLugar + 1, place => distance(person, place) <= pop.radioLugar);'],
+    { nota: '`reproduce` y el observador llaman a este mismo predicado; desde cada actor la lectura es ≤ radioLugar.' }),
   s('reproduccion.pareja', 'reproduccion', 'personas', 'actor', { param: 'poblacion.radioPareja' }, 'index.ts', 'reproduce',
-    ["const b = chooseReproductivePartner(world, a, vecinos(world, a, pop.radioPareja + 1, p => {", 'distance(a, b) <= pop.radioPareja'],
+    ["const b = chooseReproductivePartner(world, a, vecinos(world, a, pop.radioPareja + 1, p => {", "}, 'reproduce'), ELECCION_POR_AFINIDAD);"],
     { nota: 'Pareja (≤ radioPareja) y lugar (≤ radioLugar) se miden los dos desde `a`: no se componen.' }),
+  s('reproduccion.parejaObservada', 'reproduccion', 'personas', 'actor', { param: 'poblacion.radioPareja' }, 'index.ts', 'countEligibleReproductionPairs',
+    ["for (const b of vecinos(world, a, pop.radioPareja + 1, candidate => reproductionMatch(world, a, candidate, pop), 'reproduce')) {"],
+    { nota: 'Sólo con observador: cuenta parejas candidatas dentro del mismo radio de reproducción.' }),
 ];
 
 /** Lecturas que no dependen de dónde está nadie: colecciones acotadas que cada región recibe enteras y
@@ -440,6 +454,8 @@ export const LECTURAS_GLOBALES: readonly LecturaGlobal[] = [
   { id: 'nacimientosRecientes', fase: 'reproduccion', fuente: 'world.people', cota: 'O(P)', fichero: 'index.ts', funcion: 'reproduce',
     patrones: ["world.people.filter(p => p.role === 'neighbor' && p.bornAt > world.tick - pop.intervaloComprobacionTicks).length"],
     motivo: 'Cupo de nacimientos de la ventana (`poblacion.comprobacionContinua`).' },
+  { id: 'parejasObservadas', fase: 'reproduccion', fuente: 'world.people', cota: 'O(P)', fichero: 'index.ts', funcion: 'countEligibleReproductionPairs',
+    patrones: ['for (const a of world.people) {'], motivo: 'Sólo con observador: recorre cada posible iniciador para contar parejas elegibles.' },
   { id: 'muestreo', fase: 'muestreo', fuente: 'world.people', cota: 'O(P)', fichero: 'statistics.ts', funcion: 'sample',
     patrones: ['const n = Math.max(1, world.people.length)', 'world.people.reduce((sum, p) => sum + p[key], 0) / n'], motivo: 'Medias de la población cada 60 pasos: suma FP64 en orden de `world.people`, fase serial (regla 13).' },
   { id: 'capacidadFauna', fase: 'faunaSerial', fuente: 'world.tiles', cota: 'O(teselas activas)', fichero: 'animals.ts', funcion: 'reproduce',
@@ -602,6 +618,7 @@ export const UMBRALES_QUE_NO_SON_LECTURAS: readonly { fichero: string; funcion: 
   { fichero: 'index.ts', funcion: 'choose', umbral: 'away', motivo: 'Compara las distancias a dos personas vinculadas ya leídas (`away < distance(person, cortejado)`) para elegir la más cercana.' },
   { fichero: 'family.ts', funcion: 'earlierForagerExhausts', umbral: 'physical.radius', motivo: 'Recorre personas ya percibidas (`choose` le pasa las de ≤ `RADIUS`) y `radius: RADIUS`: no lee el mundo.' },
   { fichero: 'index.ts', funcion: 'choose', umbral: 'disputaDestino', motivo: 'Conflicto legible (`social.memoriaDisputa`): compara una celda que ya percibe (`reachableTiles`) con la fuente disputada que recuerda (`person.conflictMemory`); dos puntos ya leídos, no lee nada en el mundo.' },
+  { fichero: 'index.ts', funcion: 'reproductionMatch', umbral: 'pop.radioPareja', motivo: 'Filtra dos personas ya seleccionadas por `vecinos` (fase serial) o por `familyOpportunity` (decisión, ≤ 7); no inicia otra lectura del mundo.' },
 ];
 
 type ParamsDeRadio = Pick<WorldParams, 'poblacion' | 'social'>;

@@ -24,7 +24,7 @@ npx tsx scripts/lab/replica.ts --seed 51926 --dias 10 --params "cuerpo.riesgoSen
   más abajo. `no` es EXACTAMENTE el comportamiento de siempre (salida bit a bit idéntica); pasar
   explícitamente `no` es equivalente a omitir la bandera.
 - `--instrumentos si|no` (opcional, por defecto `si`): instrumentos de medida de solo lectura
-  (conducta por tiempo y comida compartida), ver «Instrumentos de medida» más abajo. `no` da
+  (conducta por tiempo, comida compartida y diagnóstico de reunión), ver «Instrumentos de medida» más abajo. `no` da
   exactamente los `dia-NNN.json` de antes (mismas claves, mismos valores).
 - `--techo-lab N` (opcional, solo dígitos, ≥ 16): techo **determinista** de laboratorio, ver «Techo de
   laboratorio» más abajo. Sin la bandera no cambia nada (ni el mundo ni las claves de salida). La
@@ -481,7 +481,8 @@ vez por tramo sobre el MISMO mundo sube el índice (día 6: semilla 2024 0,099 �
 
 Tras **cada** paso (`K = 1`), antes del guardado, se anota la acción (`person.action`) de cada persona
 viva y se acumulan ticks por acción desde que el laboratorio la ve (tick 0 o su nacimiento). Coste
-medido: 0,014-0,022 ms por paso (0,18-0,23 % de `stepWorld`), así que no hace falta muestrear. Campos
+medido en la ronda original: 0,014-0,022 ms por paso (0,18-0,23 % de `stepWorld`), antes de añadir el
+conteo reproductivo por comprobación de la candidata R. Campos
 nuevos por día:
 
 - `diversidadConductaTiempo`: **el mismo** `indiceDiversidad` (misma fórmula, mismos grupos del vector:
@@ -524,6 +525,22 @@ la cooperación tipificada se leía casi solo como enseñanza (79-100 % de los a
 en las semillas de abajo; «97 %» en r2); con él, compartir comida es el 43-66 % de los actos
 tipificados al día 4 y C4 (corte provisional, día 4, ventana 3) pasa de 2/4 a 4/4 semillas.
 
+### 3. Reunión y cupo de reproducción (candidata R, 2026-09-28)
+
+`reproduccionComprobaciones` guarda una muestra por llamada efectiva a `reproduce()`:
+`tick`, `eligiblePairs` (parejas distintas que podrían nacer desde al menos un iniciador),
+`eligiblePairsBoth` (también tienen lugar accesible desde ambos, filtro simétrico de R),
+`capSlots`, `slotsAvailable` al entrar, `slotsUsed` y `births`. Con comprobación continua
+puede haber 2.400 muestras por día; se cuentan también los ticks con cupo lleno para
+medir la cola. `approachPorMotivo` cuenta ticks y ticks en destino de vecinos por
+hogar, reunión, cortejo, social, invitación, memoria y `desconocido`; su `diferencia`
+frente a todos los ticks `approach` debe ser cero. `salidasReunion` registra al dejar
+una reunión seleccionada el tick, actor, pareja, distancia en celdas y causa; la
+distancia es `null` si ya falta alguien. No infiere una pareja a partir de nombres.
+Los observadores viven en `WorldContext`, fuera de instantáneas y digestos. Su coste
+interno se mide con un reloj del anfitrión y se descuenta del p95 que usa
+`--gobernador servidor`; los tiempos de pared siguen sin ser deterministas.
+
 ### Garantía: cambia la MEDIDA, no el mundo
 
 - `tests/instrumentos-lab.test.ts`: en proceso, dos mundos en paralelo (con y sin observador) dan el
@@ -536,7 +553,7 @@ tipificados al día 4 y C4 (corte provisional, día 4, ventana 3) pasa de 2/4 a 
 - Con `--gobernador servidor` el tiempo del observador se descuenta del `stepMs` que decide el
   gobernador; ese modo depende del reloj y no es bit a bit reproducible con ni sin instrumentos.
 
-### 3. Natalidad local (`natalidadLocal`) y fauna (`faunaTotal`), campaña NAT-L 2026-09-23 (RETIRADA en la poda ola 1, 2026-09-27)
+### 4. Natalidad local (`natalidadLocal`) y fauna (`faunaTotal`), campaña NAT-L 2026-09-23 (RETIRADA en la poda ola 1, 2026-09-27)
 
 > La ley quedó refutada en el cribado y su código e instrumentos se retiraron de `main`
 > (rama `sprint/poda-leyes-20260927`). Lo que sigue documenta los JSON antiguos, que los
@@ -572,7 +589,7 @@ se usa ese estado inicial y no su historia; sus cisternas no cuentan.
 - Garantía: el observador vive fuera del mundo (no se serializa); `tests/natalidad-integracion.test.ts`
   comprueba el mismo digesto con y sin él, con α = 0 y α = 1.
 
-### 4. Panel C8 de 60 días: comunidades, repertorio y conducta entre grupos
+### 5. Panel C8 de 60 días: comunidades, repertorio y conducta entre grupos
 
 Estos campos se escriben al cierre en cada `dia-NNN.json` con los instrumentos activos. `censoComunidades`
 es `{n, tamanos, sinComunidad}`: número de comunidades registradas al cierre, tamaños de sus

@@ -234,6 +234,8 @@ async function main(): Promise<void> {
         // Imita src/server/app.ts:stepOnce — clon+paso, guardado por cadencia DENTRO de la
         // medición, y el gobernador decidiendo sobre el paso ya medido (governReproduction).
         instrumentos?.antesDelPaso(world);
+        // Incluye la sonda de reproducción que se ejecuta DENTRO de stepWorld.
+        const observadoAntes = instrumentos?.costeMs ?? 0;
         const stepStarted = performance.now();
         let cloneMs = 0;
         if (params.motor.clonPorPaso) {
@@ -245,9 +247,8 @@ async function main(): Promise<void> {
         } else {
           stepWorld(world);
         }
-        // Antes del guardado (vacía chronicleJournal.pending) y FUERA de la medida: su coste se
-        // descuenta de stepMs para que el gobernador decida sobre el mismo paso que sin instrumentos.
-        const observadoAntes = instrumentos ? instrumentos.costeMs : 0;
+        // Antes del guardado (vacía chronicleJournal.pending): resta tanto la observación
+        // interna de reproducción como la lectura posterior del paso para el gobernador.
         instrumentos?.despuesDelPaso(world);
         const observacionMs = instrumentos ? instrumentos.costeMs - observadoAntes : 0;
         let saveMs = 0;

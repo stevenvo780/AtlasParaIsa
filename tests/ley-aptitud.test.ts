@@ -37,7 +37,7 @@ function replica(t: { after(callback: () => void): void }, pasos: number, params
  * estado físico sea idéntico, así que el control la quita antes de hashear. */
 function digestoSinAptitud(world: World): string {
   const vigentes = paramsOf(world);
-  const comoPadre = structuredClone(vigentes) as unknown as { conducta: Record<string, unknown>; social: Record<string, unknown> };
+  const comoPadre = structuredClone(vigentes) as unknown as { conducta: Record<string, unknown>; social: Record<string, unknown>; poblacion: Record<string, unknown> };
   delete comoPadre.conducta.aptitud;
   // Fusión CONFL (`sprint/noche-lab60c-20260922`): `social.memoriaDisputa` no existía en f2757fa, donde se
   // midieron los hashes; con su valor 0 no actúa, así que también se quita de la forma.
@@ -45,6 +45,8 @@ function digestoSinAptitud(world: World): string {
   delete comoPadre.social.memoriaDisputa;
   assert.equal(comoPadre.social.hogarTrabajo, 0);
   delete comoPadre.social.hogarTrabajo;
+  assert.equal(comoPadre.poblacion.reunionSinEspera, 0);
+  delete comoPadre.poblacion.reunionSinEspera;
   // Poda ola 1 (2026-09-27): `conducta.vocacion`/`vocacionTope` y
   // `poblacion.natalidadLocal`/`radioProvision` ya no se declaran; la forma las trae quitadas.
   setParams(world, comoPadre as unknown as WorldParams);

@@ -1,0 +1,39 @@
+{
+ "capturedAt": "2026-09-29T02:05:00+00:00",
+ "status": "published",
+ "kind": "new world (V12): code ced1fec + ley COM activada por parámetro",
+ "reason": "Steven, 28-09 20:5x: «despliega un nuevo mundo con lo más recientemente logrado»",
+ "codeRevision": "ced1fec",
+ "whatChanged": {
+  "code": "main 48b26d5→ced1fec sobre 5a36ce6: poda ola 1 (NAT-L y vocación retiradas; digestos idénticos), T114/T116 verificadas, T100 (admisión de comunidades por presupuesto de memoria), arreglo HOG-2010 (fill de agua ≥ 0), arreglo del tope fijo MAX_LEGACY_CACHE=600 (tumbaba mundos grandes), evidencia y scripts de la tanda Codex. Sin cambio de dinámica con parámetros por defecto.",
+  "activatedLaw": "social.radioConvivencia=12 (COM: la pertenencia sigue a la convivencia; fisión por distancia y paso a la mayoría de confianza), vía CARTA_PARAMS; persistida en el mundo nuevo",
+  "evidenceForLaw": "cribado preregistrado datos-lab/cupo-cribado (Adenda 1), semillas 8101–8106 × 60 días: P4 comunidades vivas SOSTENIDA 5/6 (comunidades ≥ 3 miembros 2–3 → 5–8), P5 natalidad SOSTENIDA 6/6 (0,97–1,17× control), evaluador congelado C1–C7 6/6 igual que el control; diversidadEntreGrupos(comunidades) tardía 0,000–0,008 → 0,039–0,084. C8 (v3 y lecturas v4 A′/C) 0/6 en ambos brazos.",
+  "knownLimits": "tope de fundación social.maxComunidades=8 activo (las 6 semillas acaban en 8 comunidades); restos de 2–9 miembros por falta de disolución local (COM-D′ en diseño); la diversidad entre grupos es máxima pronto y decae, no crece; el cupo global de 40 nacimientos/día sigue siendo el regulador de población (D2 pendiente)."
+ },
+ "operation": {
+  "deployCheck": "scripts/deploy-check.sh ced1fec verde (build + smoke), informe AtlasParaIsa-anexo/publicaciones/deploy-check/ced1fec",
+  "backupBeforeStop": "AtlasParaIsa-anexo/publicaciones/v11-respaldos/world-20260928-2056.sqlite.gz (gzip íntegro, sha256 a187ba308efc05f5…)",
+  "v11Stopped": "atlas-publico.service parado 20:59:09 -05; puerto 3000 libre; base V11 sin WAL; V11 conservado en AtlasParaIsa-anexo/mundos/v11-20260924 (día ~815, 642 vecinos, 3 comunidades del día 1)",
+  "towerCode": "worktree detached AtlasParaIsa-anexo/worktrees/publico-v12 en ced1fec, node_modules copiado de publico-v11, npm run build",
+  "newWorld": "AtlasParaIsa-anexo/mundos/v12-20260928 creado vacío, access.scrypt copiado (misma contraseña; solo el hash, cmp idéntico)",
+  "units": "scripts/systemd/torre/{publico.sh, atlas-publico.service, atlas-respaldo-publico.service} actualizados y copiados a ~/.config/systemd/user; respaldo horario → AtlasParaIsa-anexo/publicaciones/v12-respaldos",
+  "start": "20:59:18 -05 (caída ≈ 9 s)"
+ },
+ "liveChecks": {
+  "domainHealth": "ok",
+  "unauthenticatedWorldStatus": 401,
+  "servedAssetEqualsCompiled": "assets/index-BO2_Sfq3.js sha256 8bb95a9e3514827e… igual en el dominio y en dist/client",
+  "world": {
+   "instanceId": "3b0a6a0f-ec88-4949-8364-17ac6ec4edab",
+   "seed": 51926,
+   "rulesVersion": 11,
+   "persistedParams": {
+    "social.radioConvivencia": 12,
+    "gobernador.presupuestoMs": 5000,
+    "social.maxComunidades": 8,
+    "poblacion.nacimientosPorComprobacion": 2
+   },
+   "firstBackup": "v12-respaldos/world-20260928-2100.sqlite.gz"
+  }
+ }
+}

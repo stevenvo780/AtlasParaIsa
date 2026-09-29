@@ -2,8 +2,18 @@ import type { ChronicleEvent } from '../shared/types.js';
 import { MAX_COORDINATE } from './terrain.js';
 import { POPULATION_HARD_LIMIT } from '../shared/life.js';
 
-/** Backpressure on uncommitted observations, never a silent history truncation. */
-export const MAX_PENDING_CHRONICLE_EVENTS = 32_768;
+/**
+ * Backpressure on uncommitted observations, never a silent history truncation.
+ *
+ * Raised 2026-09-29 (sprint/journal-caps-20260929), same incident and reasoning as
+ * `MAX_PENDING_TECHNOLOGY_EXECUTIONS` in `technology-journal.ts` (read that comment first): a
+ * fixed 32 768 is the same class of arbitrary ceiling that killed a replica's technology journal.
+ * `chronicleJournalNearCapacity` below is the actual fix — the host commits early — this constant
+ * is only the last-resort backstop. Tied to `POPULATION_HARD_LIMIT` like `MAX_CHRONICLE_ACTORS`
+ * just below, at half its value to keep this journal's old 2:1 ratio against the technology one.
+ */
+export const MAX_PENDING_CHRONICLE_EVENTS = POPULATION_HARD_LIMIT / 2;
+export const CHRONICLE_JOURNAL_COMMIT_THRESHOLD = Math.floor(MAX_PENDING_CHRONICLE_EVENTS * 0.75);
 export const EMPTY_CHRONICLE_DIGEST = '0'.repeat(64);
 export interface ChronicleJournal {
   version: 1;
@@ -81,6 +91,18 @@ export function enableChronicleJournal(world: ChronicleHost): void {
   }
   assertChronicleJournal(world);
 }
+
+export function chronicleJournalPendingCount(world: ChronicleHost): number {
+  return world.chronicleJournal?.pending.length ?? 0;
+}
+
+/** True once the pending queue is close enough to `MAX_PENDING_CHRONICLE_EVENTS` that the host
+ * advancing the simulation should commit NOW instead of waiting for its usual cadence
+ * (`persistencia.cadaTicks`). Mirrors `technologyJournalNearCapacity` in `technology-journal.ts`. */
+export function chronicleJournalNearCapacity(world: ChronicleHost): boolean {
+  return chronicleJournalPendingCount(world) >= CHRONICLE_JOURNAL_COMMIT_THRESHOLD;
+}
+
 /** Same event and field order as the original emitter; admission precedes every mutation. */
 export function recordChronicleEvent(world: ChronicleHost, input: Omit<ChronicleEvent,'id'|'tick'>): ChronicleEvent {
   if (world.chronicleJournal === undefined) enableChronicleJournal(world);

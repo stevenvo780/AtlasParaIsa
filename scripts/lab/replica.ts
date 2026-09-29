@@ -43,6 +43,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../../src/server/store.js';
 import { hostParams } from '../../src/server/hardware-limits.js';
+import { technologyJournalNearCapacity } from '../../src/world/technology-journal.js';
+import { chronicleJournalNearCapacity } from '../../src/world/chronicle-journal.js';
 import { assertWorld, cloneWorld, createWorld, projectWorld, stepWorld, TICKS_PER_DAY, type World } from '../../src/world/index.js';
 import { catalogueEnabled, technologyCatalogueTotals } from '../../src/world/technology-catalogue.js';
 import { worldStatistics } from '../../src/world/statistics.js';
@@ -251,7 +253,11 @@ async function main(): Promise<void> {
         instrumentos?.despuesDelPaso(world);
         const observacionMs = instrumentos ? instrumentos.costeMs - observadoAntes : 0;
         let saveMs = 0;
-        if (tick % params.persistencia.cadaTicks === 0) {
+        // sprint/journal-caps-20260929: además de la cadencia, guarda YA si el diario de
+        // tecnología o de crónica se acerca a su tope de pendientes (ver hardware-limits.ts:
+        // población grande puede acumular más recibos por tick de los que caben en `cadaTicks`).
+        if (tick % params.persistencia.cadaTicks === 0
+          || technologyJournalNearCapacity(world.technology) || chronicleJournalNearCapacity(world)) {
           const saveStarted = performance.now();
           registrarFaunaRetirada(world, censosFauna);
           store.save(world);
@@ -277,7 +283,11 @@ async function main(): Promise<void> {
         stepTimes.push(performance.now() - started);
         instrumentos?.despuesDelPaso(world);
         if (techoLab !== null) { techoPoblacionMaximaDia = Math.max(techoPoblacionMaximaDia, world.people.length); techoPoblacionMaxima = Math.max(techoPoblacionMaxima, world.people.length); }
-        if (tick % params.persistencia.cadaTicks === 0) { registrarFaunaRetirada(world, censosFauna); store.save(world); }
+        // sprint/journal-caps-20260929: mismo commit anticipado que en el modo "servidor" arriba.
+        if (tick % params.persistencia.cadaTicks === 0
+          || technologyJournalNearCapacity(world.technology) || chronicleJournalNearCapacity(world)) {
+          registrarFaunaRetirada(world, censosFauna); store.save(world);
+        }
       }
       if (tick % TICKS_PER_DAY === 0) {
         if (tick % params.persistencia.cadaTicks !== 0) { registrarFaunaRetirada(world, censosFauna); store.save(world); }

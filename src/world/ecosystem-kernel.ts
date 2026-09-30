@@ -12,7 +12,21 @@ const NO_NEIGHBORS: Int32Array = new Int32Array(0), NO_LIFE: Float64Array = new 
 
 /** Opciones de la ecología: T013 (`decaimientoFertilidad`) + T035 (`seed`/`cuencas`) + T112 (`soaTerreno`,
  * la topología sobre el SoA de terreno; `motor.soaTerreno`, default `false` = la caché de hoy). */
-export interface EcosystemOptions { decaimientoFertilidad?: number; seed?: number; cuencas?: number; soaTerreno?: boolean; hilos?: number }
+export interface EcosystemBarrierEvent {
+  tick: number; phase: 'ecologia' | 'kernel'; regionSide: 256 | 512;
+  orden: 'natural' | 'inverso' | 'adversarial'; workers: number;
+  dirtyPages: readonly { pageX: number; pageY: number }[] | undefined;
+  diagnostics: StaticWorkerDiagnostics | null;
+  topologyCertificate: { tiles: Tile[]; revision: object } | undefined;
+}
+export interface EcologyExecution {
+  regionSide?: 256 | 512;
+  onBarrier?: (event: EcosystemBarrierEvent) => void;
+}
+export interface EcosystemOptions extends EcologyExecution {
+  decaimientoFertilidad?: number; seed?: number; cuencas?: number; soaTerreno?: boolean; hilos?: number;
+  orden?: 'natural' | 'inverso' | 'adversarial';
+}
 export interface EcosystemKernelOptions { createPool?: (workers: number) => StaticWorkerPool }
 
 /**
@@ -115,19 +129,22 @@ export class EcosystemKernel {
     if (!Number.isSafeInteger(workers) || workers < 1) throw new RangeError('hilos debe ser un entero positivo.');
     if (workers > 1) {
       const store = this.soa ??= new TileStore();
-      const terrain = store.prepareParallel(tiles);
+      const terrain = store.prepareParallel(tiles, options?.regionSide);
       let pool = this.pools.get(workers);
       if (!pool) { pool = this.createPool(workers); this.pools.set(workers, pool); }
       this.lastPool = pool; this.topologies.length = 0;
       store.beginParallel();
       try {
-        pool.run({ regions: terrain.regions, buffers: terrain.buffers, params: {
+        pool.run({ regions: terrain.regions, buffers: terrain.buffers, orden: options?.orden, params: {
           tick, weather, light: phase === 'day' ? 1 : phase === 'night' ? 0 : 0.4,
           decaimientoFertilidad: options?.decaimientoFertilidad ?? 0,
           seed: options?.seed ?? 0, cuencas: options?.cuencas ?? 1, version: terrain.version,
         } });
         store.commitParallel();
       } catch (error) { store.abortParallel(); throw error; }
+      options?.onBarrier?.({ tick, phase: 'kernel', regionSide: options.regionSide ?? 256,
+        orden: options.orden ?? 'natural', workers, dirtyPages: store.dirtyPageCoordinates(),
+        diagnostics: pool.diagnostics(), topologyCertificate: store.parallelTopologyCertificate(tiles) });
       return;
     }
     this.soa?.releaseParallelObjects();
@@ -205,6 +222,9 @@ export class EcosystemKernel {
         }
       }
     }
+    options?.onBarrier?.({ tick, phase: 'kernel', regionSide: options.regionSide ?? 256,
+      orden: options.orden ?? 'natural', workers: 1, dirtyPages: undefined,
+      diagnostics: null, topologyCertificate: undefined });
   }
 
   /** Carga la topología en el SoA (sella presencia, copia `life`); `null` si alguna coordenada no cabe en su

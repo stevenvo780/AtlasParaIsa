@@ -101,6 +101,8 @@ export class TileStore {
   private residentCells = new Int32Array(new SharedArrayBuffer(0));
   private residentRegions: StaticRegion[] = [];
   private residentBusy = false;
+  private residentRegionSide: 256 | 512 = 256;
+  private residentRevision: object = {};
   private residentPending: ResidentBinding[] = [];
   private residentAbsent: { key: ResidentKey; binding: ResidentBinding }[] = [];
   private readonly residentWoodHoles = new Map<number, ResidentBinding[]>();
@@ -239,7 +241,8 @@ export class TileStore {
 
   /** T115: los objetos conservan identidad y claves, pero sus campos residentes tienen una sola
    * autoridad sobre SAB. El worker escribe exclusivamente el fondo; no publica valores a los Tile. */
-  prepareParallel(tiles: Tile[]): SharedTerrain {
+  prepareParallel(tiles: Tile[], regionSide: 256 | 512 = 256): SharedTerrain {
+    if (regionSide !== 256 && regionSide !== 512) throw new RangeError('Geometría de región debe ser 256 o 512.');
     if (this.residentBusy) throw new Error(TWO_WRITERS);
     let same = tiles === this.residentTiles && tiles.length === this.residentBindings.length;
     // La API también admite reemplazar una tesela o sus coordenadas sin reemplazar el array.
@@ -276,11 +279,22 @@ export class TileStore {
         return binding;
       });
       this.refreshResident();
+      this.residentRevision = {};
+      this.residentWoodAdded = new Uint8Array(new SharedArrayBuffer(this.arena.capacity));
+    }
+    if (!same || regionSide !== this.residentRegionSide) {
+      this.residentRegionSide = regionSide;
+      const grouped = new Map<string, { x: number; y: number; slots: number[] }>();
+      for (const region of this.regions.ordered()) for (const slot of region.slots) if (slot >= 0) {
+        const x = Math.floor(this.pageX[slot]! * 16 / regionSide), y = Math.floor(this.pageY[slot]! * 16 / regionSide);
+        const key = `${x},${y}`, group = grouped.get(key) ?? { x, y, slots: [] };
+        group.slots.push(slot); grouped.set(key, group);
+      }
       const ordered: number[] = []; this.residentRegions = [];
       const stamps = this.presence.stamps, version = this.version;
-      for (const region of this.regions.ordered()) {
+      for (const region of [...grouped.values()].sort((a, b) => a.y - b.y || a.x - b.x)) {
         const begin = ordered.length;
-        for (const slot of region.slots) if (slot >= 0) {
+        for (const slot of region.slots.sort((a, b) => this.pageY[a]! - this.pageY[b]! || this.pageX[a]! - this.pageX[b]!)) {
           for (let offset = 0; offset < PAGE_CELLS; offset++) {
             const cell = slot * PAGE_CELLS + offset;
             if (stamps[cell] === version) ordered.push(cell);
@@ -289,7 +303,6 @@ export class TileStore {
         this.residentRegions.push({ id: this.residentRegions.length, begin, end: ordered.length });
       }
       this.residentCells = new Int32Array(new SharedArrayBuffer(ordered.length * 4)); this.residentCells.set(ordered);
-      this.residentWoodAdded = new Uint8Array(new SharedArrayBuffer(this.arena.capacity));
     }
     // Dar de alta una clave opcional entre despachos crea una propiedad ordinaria; incorporarla
     // antes de leer SAB, sin pisarla al desligar. Sólo se consultan las claves aún ausentes.
@@ -311,6 +324,13 @@ export class TileStore {
       buffers[`${key}Back`] = pair[this.parity ^ 1]!.buffer as SharedArrayBuffer;
     }
     return { regions: this.residentRegions, buffers, version: this.version };
+  }
+
+  parallelTopologyCertificate(tiles: Tile[]): { tiles: Tile[]; revision: object } | undefined {
+    return this.residentTiles === tiles ? { tiles, revision: this.residentRevision } : undefined;
+  }
+  dirtyPageCoordinates(): { pageX: number; pageY: number }[] {
+    return this.dirtyPages().map(slot => ({ pageX: this.pageX[slot]!, pageY: this.pageY[slot]! }));
   }
 
   beginParallel(): void {

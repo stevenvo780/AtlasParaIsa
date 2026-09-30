@@ -5,7 +5,7 @@ import {
   BARRIER_HEADER, WORKER_CELL, WORKER_STATUS, ERROR_CHARACTERS, createBarrier,
   workerCell, waitForBarrier, readWorkerError, readSupervisorError, type SharedBarrier,
 } from './barrera.js';
-import { partitionRegions, type StaticRegion } from './particion.js';
+import { partitionRegions, type StaticRegion, type StaticRegionOrder } from './particion.js';
 
 export interface StaticWorkerPoolOptions {
   workers: number;
@@ -17,9 +17,12 @@ export interface StaticWorkerJob<Params = unknown> {
   regions: readonly StaticRegion[];
   buffers: Record<string, SharedArrayBuffer>;
   params: Params;
+  orden?: StaticRegionOrder;
+  /** Espera física entre regiones en adversarial; por defecto 1 ms. */
+  retardoMs?: number;
 }
 
-/** Firma del export configurado; se ejecuta una vez por cola y por despacho. */
+/** Natural: una llamada por cola. Inverso/adversarial: una llamada por región de la cola. */
 export interface StaticWorkerHandlerJob<Params = unknown> extends StaticWorkerJob<Params> {
   workerIndex: number;
 }
@@ -32,6 +35,20 @@ export interface StaticWorkerDiagnostics {
   completedJobs: number[];
   supervisorThreadId: number;
   sourceLoader: boolean;
+  /** IDs de llamadas por región observadas en el último despacho; natural no las instrumenta. */
+  regionOrder: (number | string)[][];
+  /** Duración monotónica acumulada de esperas reales del último despacho, por trabajador. */
+  adversarialDelaysMs: number[];
+  /** Número de Atomics.wait realmente ejecutados entre regiones del último despacho. */
+  adversarialDelayCounts: number[];
+}
+
+interface DispatchObservation {
+  queues: StaticRegion[][];
+  offsets: number[];
+  counts: Int32Array<SharedArrayBuffer>;
+  order: Int32Array<SharedArrayBuffer>;
+  delays: Float64Array<SharedArrayBuffer>;
 }
 
 // Bootstrap autocontenido: también funciona desde dist/server sin copiar un .mjs auxiliar.
@@ -91,6 +108,9 @@ control = new Int32Array(workerData.control);
 errors = new Uint16Array(workerData.errors);
 if (workerData.role === 'compute') {
   const index = workerData.workerIndex;
+  // Este SAB privado no se comparte con el mundo ni puede recibir notificaciones de otro hilo.
+  const delayClock = new Int32Array(new SharedArrayBuffer(4));
+  const { performance } = require('node:perf_hooks');
   let handler, busy = false;
   (async () => {
     // Sólo los imports desde el árbol TS necesitan el loader de desarrollo.
@@ -111,7 +131,25 @@ if (workerData.role === 'compute') {
       let outcome = S.done;
       try {
         // No se copian los buffers: los halos y la salida pertenecen a los mismos SAB.
-        await handler({ regions: job.regions, buffers: job.buffers, params: job.params, workerIndex: index });
+        if (job.orden === 'natural') {
+          await handler({ regions: job.regions, buffers: job.buffers, params: job.params, workerIndex: index });
+        } else {
+          const counts = new Int32Array(job.observation.counts);
+          const order = new Int32Array(job.observation.order);
+          const delays = new Float64Array(job.observation.delays);
+          for (let ordinal = 0; ordinal < job.regions.length; ordinal++) {
+            if (ordinal > 0 && job.orden === 'adversarial') {
+              const start = performance.now();
+              Atomics.wait(delayClock, 0, 0, job.retardoMs);
+              delays[index] += performance.now() - start;
+              Atomics.add(counts, workerData.workers + index, 1);
+            }
+            // Sólo se publica una observación al invocar realmente ese rango del handler.
+            Atomics.store(order, job.observation.offset + ordinal, ordinal);
+            Atomics.add(counts, index, 1);
+            await handler({ regions: [job.regions[ordinal]], buffers: job.buffers, params: job.params, workerIndex: index });
+          }
+        }
       } catch (error) {
         writeError(index, error);
         outcome = S.jobError;
@@ -156,6 +194,8 @@ if (workerData.role === 'compute') {
         for (let index = 0; index < children.length; index++) {
           children[index].postMessage({
             epoch: message.epoch, regions: message.queues[index], buffers: message.buffers, params: message.params,
+            orden: message.orden, retardoMs: message.retardoMs,
+            observation: message.observation && { ...message.observation, offset: message.observation.offsets[index] },
           });
         }
       } catch (error) { fail(error); }
@@ -183,6 +223,7 @@ export class StaticWorkerPool {
   #running = false;
   #supervisorFailure: Error | null = null;
   #supervisorExited = false;
+  #observation: DispatchObservation | null = null;
 
   constructor(options: StaticWorkerPoolOptions) {
     if (!Number.isSafeInteger(options.workers) || options.workers < 1) throw new RangeError('workers debe ser un entero positivo.');
@@ -244,9 +285,25 @@ export class StaticWorkerPool {
     if (this.#closed) throw new Error('StaticWorkerPool cerrado.');
     if (this.#running) throw new Error('StaticWorkerPool no admite despachos superpuestos.');
     this.#throwIfFatal();
-    const queues = partitionRegions(job.regions, this.#workers);
+    const orden = job.orden ?? 'natural';
+    const queues = partitionRegions(job.regions, this.#workers, orden);
+    const retardoMs = job.retardoMs ?? 1;
+    if (!Number.isFinite(retardoMs) || retardoMs < 0) {
+      throw new RangeError('retardoMs debe ser finito y no negativo.');
+    }
     for (const [name, buffer] of Object.entries(job.buffers)) {
       if (!(buffer instanceof SharedArrayBuffer)) throw new TypeError(`El buffer ${name} requiere SharedArrayBuffer.`);
+    }
+    let observation: DispatchObservation | null = null;
+    if (orden !== 'natural') {
+      let offset = 0;
+      const offsets = queues.map(queue => { const start = offset; offset += queue.length; return start; });
+      observation = {
+        queues, offsets,
+        counts: new Int32Array(new SharedArrayBuffer(this.#workers * 2 * 4)),
+        order: new Int32Array(new SharedArrayBuffer(job.regions.length * 4)),
+        delays: new Float64Array(new SharedArrayBuffer(this.#workers * 8)),
+      };
     }
     this.#running = true;
     const control = this.#barrier.control;
@@ -258,7 +315,13 @@ export class StaticWorkerPool {
     }
     try {
       try {
-        this.#supervisor.postMessage({ type: 'run', epoch, queues, buffers: job.buffers, params: job.params });
+        this.#supervisor.postMessage({
+          type: 'run', epoch, queues, buffers: job.buffers, params: job.params, orden, retardoMs,
+          observation: observation && {
+            offsets: observation.offsets, counts: observation.counts.buffer,
+            order: observation.order.buffer, delays: observation.delays.buffer,
+          },
+        });
       } catch (error) {
         // structured-clone rechaza el mensaje entero antes de despacharlo: ningún hijo recibió trabajo.
         for (let index = 0; index < this.#workers; index++) {
@@ -266,6 +329,7 @@ export class StaticWorkerPool {
         }
         throw error;
       }
+      this.#observation = observation;
       this.#dispatches++;
       waitForBarrier(control, () => {
         if (Atomics.load(control, BARRIER_HEADER.fatal)) return this.#fatalAndQuiesced();
@@ -295,6 +359,18 @@ export class StaticWorkerPool {
       completedJobs: Array.from({ length: this.#workers }, (_, index) => Atomics.load(this.#barrier.control, workerCell(index, WORKER_CELL.completed))),
       supervisorThreadId: Atomics.load(this.#barrier.control, BARRIER_HEADER.supervisorThreadId),
       sourceLoader: this.#sourceLoader,
+      regionOrder: Array.from({ length: this.#workers }, (_, index) => {
+        const observation = this.#observation;
+        if (!observation) return [];
+        const count = Atomics.load(observation.counts, index);
+        return Array.from({ length: count }, (_, ordinal) => {
+          const regionIndex = Atomics.load(observation.order, observation.offsets[index]! + ordinal);
+          return observation.queues[index]![regionIndex]!.id;
+        });
+      }),
+      adversarialDelaysMs: Array.from({ length: this.#workers }, (_, index) => this.#observation?.delays[index] ?? 0),
+      adversarialDelayCounts: Array.from({ length: this.#workers }, (_, index) => this.#observation
+        ? Atomics.load(this.#observation.counts, this.#workers + index) : 0),
     };
   }
 

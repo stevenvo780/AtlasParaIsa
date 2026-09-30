@@ -1,6 +1,7 @@
 import { recordChronicleEvent, enableChronicleJournal, assertChronicleJournal, type ChronicleJournal } from './chronicle-journal.js';
 import { PROTOCOL_VERSION, type Action, type ChronicleEvent, type Gesture, type GestureResult, type MemoryView, type PersonView, type PersonDetail, type PlaceView, type Tile, type WorldView, type Viewport, type Order, type CommunityView, type WorldSample, type FaseNombre } from '../shared/types.js';
-import { activate, bindWorldContext, maintainRegions, normalizeViewport, projectTerrain, tileAt, validCoordinate, worldContext, type ChunkMeta, type WorldContext } from './spatial.js';
+import { activate, bindWorldContext, maintainRegions, normalizeViewport, projectTerrain, tileAt, validCoordinate, worldContext, type ChunkMeta, type WorldContext as SpatialWorldContext } from './spatial.js';
+import type { EcologyExecution } from './ecosystem-kernel.js';
 import { tileLookup } from './tile-index.js';
 import { primero, primeroConFiltroCaro } from './orden.js';
 import { chunkKey, generateChunk, proceduralPlaceName, legacyStructures, type Chunk } from './terrain.js';
@@ -31,7 +32,8 @@ import { DEFAULT_PARAMS, MAX_FOUNDER_AGE_TICKS, paramsOf, setParams, limitsOf, t
 import { algunoCerca, filtrarCerca, primeroCerca } from './indice-puntos.js';
 import { conRejilla, personaMovida, vecinos } from './rejilla.js';
 export { bindWorldContext, tileAt, normalizeViewport, worldContext } from './spatial.js';
-export type { WorldContext } from './spatial.js';
+/** Observación/partición del anfitrión: no se serializa ni forma parte de las leyes del mundo. */
+export type WorldContext = SpatialWorldContext & { ecologyExecution?: EcologyExecution };
 
 // V9 accounts for an earlier visible forager when planning finite family reserves.
 // Physical work, consumption and reproduction gates retain their existing laws.
@@ -1243,10 +1245,15 @@ function advanceTick(world: World, inputs: Gesture[], context: WorldContext, med
   world.invitations = world.invitations.filter(invitation => invitation.until > world.tick);
   world.reminders = world.reminders.filter(reminder => reminder.until > world.tick);
   medirFase(medicion, 'ecologia', () => ecology(world));
+  if (world.tick % INTERVALO_ECOLOGIA_TICKS === 0) context.ecologyExecution?.onBarrier?.({
+    tick: world.tick, phase: 'ecologia', regionSide: context.ecologyExecution.regionSide ?? 256,
+    orden: paramsOf(world).motor.orden, workers: 1, dirtyPages: undefined, diagnostics: null, topologyCertificate: undefined,
+  });
   // T013 (decaimiento de fertilidad) + T035 (gateo de cuenca duradero: la lluvia no rellena
   // una tesela fuera de cuenca) viajan juntos en las mismas opciones de ecología.
   medirFase(medicion, 'kernel', () => stepEcosystem(world.tiles, world.tick, world.weather, phaseAt(world.tick), false,
-    { decaimientoFertilidad: paramsOf(world).recursos.decaimientoFertilidad, seed: world.seed, cuencas: paramsOf(world).agua.cuencas, soaTerreno: paramsOf(world).motor.soaTerreno, hilos: paramsOf(world).motor.hilos }));
+    { decaimientoFertilidad: paramsOf(world).recursos.decaimientoFertilidad, seed: world.seed, cuencas: paramsOf(world).agua.cuencas, soaTerreno: paramsOf(world).motor.soaTerreno, hilos: paramsOf(world).motor.hilos,
+      orden: paramsOf(world).motor.orden, ...context.ecologyExecution }));
   medirFase(medicion, 'fauna', () => { stepAnimals(world,event=>addEvent(world,event)); stepStructures(world,event=>addEvent(world,event)); });
   medirFase(medicion, 'personas', () => {
     for (const person of world.people) bodyAndAction(world, person);

@@ -9,8 +9,11 @@ import { projectAnimal } from './animals.js';
 import type { LegacyRecord } from '../shared/demography.js';
 import { bindTechnologyCatalogue, type TechnologyCatalogueReader } from './technology-catalogue.js';
 import { lastTileAt, splitTileBlocks, tileIndexAppended } from './tile-index.js';
+import type { ResidentTopologyOwner } from './soa/topologia.js';
 
 export interface WorldContext {
+  /** Propiedad privada del host, creada antes de exponer teselas; nunca se serializa. */
+  tileOwnership?: ResidentTopologyOwner;
   loadChunk?: (key: string, atTick: number) => Chunk | null;
   catalogueReader?: TechnologyCatalogueReader;
   loadLegacy?: (id: string, atTick: number) => LegacyRecord | null;
@@ -129,12 +132,18 @@ function activateChunk(world: World, key: string, x: number, y: number, context:
   // Both pending snapshots and host readers may share immutable archived objects.
   // Clone only the chunk being reactivated, before exposing animals/places/structures to laws.
   const archived = pending >= 0 ? takePending(world.retiredChunks, pending) : context.loadChunk?.(key, world.tick);
-  const chunk = archived ? structuredClone(archived) : generateChunk(world.seed, cx, cy, cuencas);
+  // Los Tile observados son proxies. El archivo se materializa antes de cruzar structuredClone.
+  const archivePlain = archived && context.tileOwnership
+    ? { ...archived, tiles: archived.tiles.map(tile => ({ ...tile })) } : archived;
+  const chunk = archivePlain ? structuredClone(archivePlain) : generateChunk(world.seed, cx, cy, cuencas);
   const { tiles, animals, structures, ...meta } = chunk;
   world.chunks[key] = meta;
   const state = regions.get(world.chunks);
   if (state) { state.order.set(key, state.next++); state.added.push(key); }
-  const initialized=tiles.map(tile => initializeEcosystem(world.seed, tile, cuencas));
+  const initialized=tiles.map(tile => {
+    const initialized = initializeEcosystem(world.seed, tile, cuencas);
+    return context.tileOwnership?.tile(initialized) ?? initialized;
+  });
   const from = world.tiles.length;
   world.tiles.push(...initialized);
   tileIndexAppended(world.tiles, from);
@@ -188,14 +197,14 @@ export function maintainRegions(world: World, context: WorldContext = worldConte
   }
   if (retired.size) {
     const byBlock = splitTileBlocks(world.tiles, first => detached.get(chunkKey(first.x, first.y))?.tiles);
-    if (byBlock) world.tiles = byBlock;
+    if (byBlock) world.tiles = context.tileOwnership?.tiles(byBlock) ?? byBlock;
     else {
       const active: Tile[] = [];
       for (const tile of world.tiles) {
         const chunk = detached.get(chunkKey(tile.x, tile.y));
         if (chunk) chunk.tiles.push(tile); else active.push(tile);
       }
-      world.tiles = active;
+      world.tiles = context.tileOwnership?.tiles(active) ?? active;
     }
     for (const place of world.places) detached.get(chunkKey(place.x, place.y))?.places.push(place);
     world.animals = world.animals.filter(animal => {

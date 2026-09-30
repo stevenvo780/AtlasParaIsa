@@ -5,25 +5,43 @@ estas cifras. Se actualiza en cada publicación, junto con su contrato
 `docs/evidencia-AAAA-MM-DD/publication*.json`; si este fichero y el contrato discrepan, manda
 el contrato.
 
-## Vigente (mundo V12 desde el 28 de septiembre de 2026, 20:59 -05, en la TORRE)
+## Vigente (mundo V13 desde el 30 de septiembre de 2026, 07:26 -05, en la TORRE)
+
+| Qué | Valor |
+|---|---|
+| URL | <https://atlas.humanizar.tech> |
+| Código compilado y servido | `c7b3bb3` desde el 30-09 07:26 -05 ([contrato](evidencia-2026-09-30/publication-v13.json)): merge en `main` de `sprint/v13-20260930` = `main` `005b877` + `sprint/fixes-escala-20260929` `191c47c` (topes de pendientes de los diarios de tecnología y crónica y del catálogo, derivados de `POPULATION_HARD_LIMIT`, con guardado anticipado al 75 %; mensaje de diario lleno separado del de agua) + `sprint/com-d-20260928` `18062f5` (ley COM-D′: `social.disolucion`) |
+| Ley activada | **COM + COM-D′**: `social.radioConvivencia=12`, `social.disolucion=1`, `social.maxComunidades=64` (la pertenencia a una comunidad sigue a la convivencia y la confianza, con fisión por distancia y disolución local corregida), activadas por `CARTA_PARAMS` y persistidas. Panel preregistrado COM-D′: Q1 comunidades con ≥ 3 mortales días 41–60 6/6 (5,0–8,0 → 28,6–54,8), Q4 natalidad 6/6 (0,996–1,082×), Q5 sin absorción 6/6 (mayor comunidad 7–12 %), Q2/Q3 no refutadas, C1–C7 6/6 en ambos brazos; réplica de 10 semillas coherente (contrato) |
+| `main` | ver `git log`; lo servido es `c7b3bb3` |
+| Reglas | `RULES_VERSION` 11 (+ COM y COM-D′ por parámetro) |
+| Protocolo / SQLite | `PROTOCOL_VERSION` 10 / `user_version` 5 |
+| Máquina | Torre: `atlas-publico.service` en 100.64.0.1:3000, código en `AtlasParaIsa-anexo/worktrees/publico-v13` (proceso «carta-isa», drop-in CPUWeight/IOWeight 10000). No arrancar servicios del portátil ni `atlas-servidor`/`atlas-respaldo` de la torre |
+| Mundo | V13, semilla 51926, identidad `9872e47a-e3c9-4012-9fa8-ab2ac1d9af7a`, creado vacío el 30-09 07:26 -05 en `AtlasParaIsa-anexo/mundos/v13-20260930` (credencial `access.scrypt` copiada de V12: misma contraseña, solo el hash) |
+| Parámetros persistidos | `gobernador.presupuestoMs=5000`, `social.radioConvivencia=12`, `social.disolucion=1`, `social.maxComunidades=64` (`CARTA_PARAMS`; `limites.comunidades` lo deriva el anfitrión), gobernador `techo`, límites de admisión del anfitrión y el paquete de reglas 11 |
+| Respaldos | `AtlasParaIsa-anexo/publicaciones/v13-respaldos` (timer horario `atlas-respaldo-publico.timer`) |
+| Contrato | [publication-v13.json](evidencia-2026-09-30/publication-v13.json) |
+
+Lo que esta publicación **no** acredita: el criterio de 60 días de [GOAL.md](../GOAL.md) **no se cumple**; C8 v3 sigue fallando en ambos brazos del panel COM-D′ (diversidad entre comunidades 4–15× en nivel, sin tendencia) y su lectura no está decidida (no alcanzable por un mundo sano estacionario, `docs/REVISION-2026-09-24.md`). Salvedad declarada por el panel: el tope de fundación `social.maxComunidades=64` está activo en 4/6 semillas, así que parte de la estabilidad del número de comunidades es el tope, no solo la ley. La población la sigue regulando el cupo global de 40 nacimientos/día (D2 pendiente).
+
+## Anteriores, conservados
+
+- V12 (código `ced1fec`, reglas 11 + COM), servido del 28-09 20:59 al 30-09 07:26 -05; mundo detenido e intacto en `AtlasParaIsa-anexo/mundos/v12-20260928` (worktree `publico-v12`); último respaldo `v12-respaldos/world-20260930-0725.sqlite.gz` (gzip íntegro). **No arrancarlo.** Detalle de su publicación:
 
 | Qué | Valor |
 |---|---|
 | URL | <https://atlas.humanizar.tech> |
 | Código compilado y servido | `ced1fec` desde el 28-09 20:59 -05 ([contrato](evidencia-2026-09-28/publication-v12.json)): reglas 11 + poda de leyes refutadas (NAT-L, vocación), T100, arreglo de HOG-2010 y del tope fijo de identidades (`MAX_LEGACY_CACHE`); sin cambio de dinámica con parámetros por defecto |
 | Ley activada | **COM**: `social.radioConvivencia=12` (la pertenencia a una comunidad sigue a la convivencia y la confianza, con fisión por distancia), activada por `CARTA_PARAMS` y persistida. Cribado preregistrado de 6 semillas × 60 días: comunidades vivas 5/6, natalidad 6/6 sin daño, C1–C7 6/6 (contrato) |
-| `main` | ver `git log`; lo servido es `ced1fec` |
+| `main` | ver `git log`; lo servido fue `ced1fec` |
 | Reglas | `RULES_VERSION` 11 (+ COM por parámetro) |
 | Protocolo / SQLite | `PROTOCOL_VERSION` 10 / `user_version` 5 |
-| Máquina | Torre: `atlas-publico.service` en 100.64.0.1:3000, código en `AtlasParaIsa-anexo/worktrees/publico-v12` (proceso «carta-isa», drop-in CPUWeight/IOWeight 10000). No arrancar servicios del portátil ni `atlas-servidor`/`atlas-respaldo` de la torre |
+| Máquina | Torre: `atlas-publico.service` en 100.64.0.1:3000, código en `AtlasParaIsa-anexo/worktrees/publico-v12` (proceso «carta-isa», drop-in CPUWeight/IOWeight 10000) |
 | Mundo | V12, semilla 51926, identidad `3b0a6a0f-ec88-4949-8364-17ac6ec4edab`, creado vacío el 28-09 20:59 -05 en `AtlasParaIsa-anexo/mundos/v12-20260928` (credencial `access.scrypt` copiada de V11: misma contraseña, solo el hash) |
 | Parámetros persistidos | `gobernador.presupuestoMs=5000`, `social.radioConvivencia=12` (`CARTA_PARAMS`), gobernador `techo`, límites de admisión del anfitrión y el paquete de reglas 11 |
 | Respaldos | `AtlasParaIsa-anexo/publicaciones/v12-respaldos` (timer horario `atlas-respaldo-publico.timer`) |
 | Contrato | [publication-v12.json](evidencia-2026-09-28/publication-v12.json) |
 
-Lo que esta publicación **no** acredita: el criterio de 60 días de [GOAL.md](../GOAL.md) **no se cumple**; C8 falla (con COM la diversidad entre comunidades sube de nivel pero no crece) y su lectura v4 la decide Steven. Límites conocidos de COM: el tope de fundación de 8 comunidades está activo y quedan restos pequeños (la disolución local COM-D′ está en diseño). La población la sigue regulando el cupo global de 40 nacimientos/día (D2 pendiente).
-
-## Anteriores, conservados
+Lo que esta publicación **no** acreditó: el criterio de 60 días de [GOAL.md](../GOAL.md) **no se cumple**; C8 falla (con COM la diversidad entre comunidades sube de nivel pero no crece) y su lectura v4 la decide Steven. Límites conocidos de COM: el tope de fundación de 8 comunidades estaba activo y quedaban restos pequeños (la disolución local COM-D′ estaba en diseño; ya integrada en V13). La población la sigue regulando el cupo global de 40 nacimientos/día (D2 pendiente).
 
 - V11 (código `5a36ce6`, reglas 11), servido del 24-09 02:35 al 28-09 20:59 -05; mundo detenido e intacto en `AtlasParaIsa-anexo/mundos/v11-20260924` (día ~815, 642 vecinos, 3 comunidades del día 1); último respaldo `v11-respaldos/world-20260928-2056.sqlite.gz`. **No arrancarlo.** Detalle de su publicación:
 

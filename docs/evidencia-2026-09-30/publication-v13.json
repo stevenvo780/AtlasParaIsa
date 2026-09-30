@@ -1,0 +1,47 @@
+{
+ "capturedAt": "2026-09-30T12:35:00+00:00",
+ "status": "published",
+ "kind": "new world (V13): code c7b3bb3 + ley COM-D′ activada por parámetro (social.disolucion=1) + social.maxComunidades=64 + arreglos de escala de diarios y catálogo",
+ "reason": "Panel preregistrado COM-D′ (datos-lab/com-d-panel/VEREDICTO.md) decide: COM-D′ PASA (candidata a V13); el orquestador integra sprint/v13-20260930 (merge de sprint/com-d-20260928 + sprint/fixes-escala-20260929 sobre main 005b877) y publica el mundo nuevo en la torre",
+ "codeRevision": "c7b3bb3",
+ "whatChanged": {
+  "code": "main 005b877→c7b3bb3: merge de sprint/v13-20260930, que junta sprint/com-d-20260928 (18062f5: ley COM-D′, `social.disolucion`) y sprint/fixes-escala-20260929 (191c47c: topes de pendientes de los diarios de tecnología y crónica y del catálogo, derivados de POPULATION_HARD_LIMIT, con guardado anticipado al 75%; mensaje de diario lleno separado del de agua)",
+  "activatedLaw": "social.radioConvivencia=12 (COM, ya activa en V12) + social.disolucion=1 (COM-D′: disolución local corregida de comunidades) + social.maxComunidades=64 (tope de fundación, subido de 8 a 64), vía CARTA_PARAMS; persistidos en el mundo nuevo. `limites.comunidades` lo deriva el anfitrión a partir de estos parámetros",
+  "evidenceForLaw": "Panel preregistrado COM-D′ (datos-lab/com-d-panel/VEREDICTO.md; primario semillas 9501–9506, torre, código 18062f5, 60 días, sin extinciones): Q1 comunidades con ≥ 3 mortales días 41–60 SOSTENIDA 6/6 (control 5,0–8,0 → tratamiento 28,6–54,8); Q4 natalidad SOSTENIDA 6/6 (0,996–1,082× control); Q5 sin absorción SOSTENIDA 6/6 (mayor comunidad 7–12% de los vecinos); Q2 (sin fragmentación) y Q3 (sin restos ≤ 1 mortal) NO REFUTADAS; seguridad (criterio-terminado.mts congelado, día 60) C1–C7 6/6 en ambos brazos (control y disolución). Réplica con 10 semillas (adenda 1) coherente con el primario (Q1 10/10, Q4 8/10, Q5 10/10). DECISIÓN del panel: COM-D′ PASA (candidata a V13)",
+  "knownLimits": "Salvedades declaradas por el propio panel (no estaban en el prerregistro): (1) el tope de fundación social.maxComunidades=64 llega a activarse en 4/6 semillas (N máximo de comunidades en días 41–60), así que parte de la estabilidad del número de comunidades es el tope, no solo la ley; (2) C8 v3 sigue fallando en ambos brazos: la diversidad entre comunidades (diversidadEntreGrupos.comunidades) es 4–15× la del control en nivel el día 60, pero C8 v3 mide TENDENCIA de diversidadConductaVentana, que baja en ambos brazos (sin tendencia creciente); su lectura la decide Steven (ver docs/REVISION-2026-09-24.md: no alcanzable por un mundo sano estacionario). El cupo global de 40 nacimientos/día (`poblacion.nacimientosPorComprobacion`) sigue siendo el regulador de población (D2 pendiente)"
+ },
+ "operation": {
+  "deployCheck": "bash scripts/deploy-check.sh c7b3bb3 → salida 0 (verde). Nota: no se localizó un directorio de informe archivado para c7b3bb3 en AtlasParaIsa-anexo/publicaciones/deploy-check/ (solo existe el de ced1fec, de la publicación anterior)",
+  "backupBeforeStop": "AtlasParaIsa-anexo/publicaciones/v12-respaldos/world-20260930-0725.sqlite.gz (gzip -t: OK; sha256 no registrado en esta captura)",
+  "v12Stopped": "atlas-publico.service parado 2026-09-30 07:26:47 -05; V12 conservado intacto en AtlasParaIsa-anexo/mundos/v12-20260928 (worktree publico-v12). No arrancarlo",
+  "towerCode": "worktree detached AtlasParaIsa-anexo/worktrees/publico-v13 en c7b3bb3, con su propio node_modules (copiado de publico-v12), npm run build ejecutado allí",
+  "newWorld": "AtlasParaIsa-anexo/mundos/v13-20260930 creado vacío, access.scrypt copiado de V12 (misma contraseña, solo el hash)",
+  "units": "scripts/systemd/torre/{publico.sh, atlas-publico.service, atlas-respaldo-publico.service} repuntados a V13 (ConditionPathExists → v13-20260930/access.scrypt; respaldo → v13-respaldos y publico-v13/scripts/respaldo.sh); copiados a ~/.config/systemd/user y daemon-reload. Cambios sin commit en el árbol de trabajo (ver git status)",
+  "start": "parada 2026-09-30 07:26:47 -05; arranque 07:26:50 -05 (≈ 3 s de caída)"
+ },
+ "verification": {
+  "testSuite": "suite completa del worktree v13: 1629 pruebas, 1620 pass, 0 fail, 9 omitidas",
+  "typecheck": "verde (worktree v13)"
+ },
+ "liveChecks": {
+  "domainHealth": "ok",
+  "unauthenticatedWorldStatus": 401,
+  "servedAssetEqualsCompiled": "assets/index-BO2_Sfq3.js servido en el dominio = compilado en el worktree v13 (mismo hash que V12: c7b3bb3 no cambia el cliente)",
+  "world": {
+   "instanceId": "9872e47a-e3c9-4012-9fa8-ab2ac1d9af7a",
+   "seed": 51926,
+   "rulesVersion": 11,
+   "persistedParams": {
+    "social.radioConvivencia": 12,
+    "social.disolucion": 1,
+    "social.maxComunidades": 64,
+    "gobernador.presupuestoMs": 5000
+   },
+   "firstBackup": null
+  }
+ },
+ "notes": [
+  "firstBackup queda null: no se verificó en esta captura el nombre del primer respaldo horario de v13-respaldos.",
+  "capturedAt es una estimación a partir de la hora de arranque (07:26:50 -05) más el margen habitual de verificación en vivo; no hay una marca de tiempo exacta de cierre del informe."
+ ]
+}

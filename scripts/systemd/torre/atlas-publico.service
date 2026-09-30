@@ -1,6 +1,6 @@
 [Unit]
 Description=Una Carta Para Isa — servidor público (atlas.humanizar.tech) en la torre
-ConditionPathExists=/datos/workspaces/personal/AtlasParaIsa-anexo/mundos/v12-20260928/access.scrypt
+ConditionPathExists=/datos/workspaces/personal/AtlasParaIsa-anexo/mundos/v13-20260930/access.scrypt
 After=network-online.target tailscaled.service
 Wants=network-online.target
 [Service]

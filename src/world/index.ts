@@ -2,6 +2,7 @@ import { recordChronicleEvent, enableChronicleJournal, assertChronicleJournal, t
 import { PROTOCOL_VERSION, type Action, type ChronicleEvent, type Gesture, type GestureResult, type MemoryView, type PersonView, type PersonDetail, type PlaceView, type Tile, type WorldView, type Viewport, type Order, type CommunityView, type WorldSample, type FaseNombre } from '../shared/types.js';
 import { activate, bindWorldContext, maintainRegions, normalizeViewport, projectTerrain, tileAt, validCoordinate, worldContext, type ChunkMeta, type WorldContext } from './spatial.js';
 import { tileLookup } from './tile-index.js';
+import { ResidentTopologyOwner } from './soa/topologia.js';
 import { primero, primeroConFiltroCaro } from './orden.js';
 import { chunkKey, generateChunk, proceduralPlaceName, legacyStructures, type Chunk } from './terrain.js';
 import { assertGenome, DEFAULT_MUTATION_RATE, expressGenome, founderGenome, inheritGenome, localRandom, type Genome } from './genetics.js';
@@ -176,6 +177,11 @@ export function createWorld(seed = 20260905, params?: WorldParams): World {
   // momento. Fijarlo al final (como antes) dejaba la región de partida siempre con el default
   // global sin importar el `params` recibido aquí.
   setParams(world, params ?? DEFAULT_PARAMS);
+  if (paramsOf(world).motor.hilos > 1) {
+    const tileOwnership = new ResidentTopologyOwner();
+    world.tiles = tileOwnership.tiles([]);
+    bindWorldContext(world, { tileOwnership });
+  }
   for (let cy = 0; cy < 2; cy++) for (let cx = 0; cx < 3; cx++) activate(world, cx * 16, cy * 16);
   for (const place of world.places.slice(0, 3)) {
     const tile = tileAt(world, place)!; tile.terrain = 'shelter';
@@ -1409,11 +1415,15 @@ export function cloneWorld(world: World, context: WorldContext = worldContext(wo
   // Same state and same sharing as structuredClone: the non-tile state of the aged 51926
   // laboratory fixture copies in 2.23 ms instead of 8.11 ms (T103).
   const draft: World = cloneState({ ...world, tiles: [], retiredChunks: [] }, new Map());
-  draft.tiles = world.tiles.map(tile => ({ ...tile }));
+  const tileOwnership = paramsOf(world).motor.hilos > 1 || worldContext(world).tileOwnership
+    ? new ResidentTopologyOwner() : undefined;
+  draft.tiles = tileOwnership
+    ? tileOwnership.tiles(world.tiles.map(tile => tileOwnership.tile(tile)))
+    : world.tiles.map(tile => ({ ...tile }));
   // Dormant chunks are immutable until activate() takes a private deep copy.
   // A new queue is still required: retiring/reactivating must not edit the confirmed queue.
   draft.retiredChunks = [...world.retiredChunks];
-  bindWorldContext(draft, { ...worldContext(world), ...(context && typeof context === 'object' ? context : {}) });
+  bindWorldContext(draft, { ...worldContext(world), ...(context && typeof context === 'object' ? context : {}), tileOwnership });
   setParams(draft, paramsOf(world));
   // T041: la cadencia de las métricas caras vive en una caché lateral por mundo; el clon
   // de cada paso la hereda para no recalcular la BFS de agua en cada tick.
@@ -1498,7 +1508,10 @@ export function puntoDeRestauracion(world: World): PuntoDeRestauracion {
     campos[key] = value === null || typeof value !== 'object' ? value : copiaProfunda(value, copias);
   }
   const tiles = world.tiles;
-  world.tiles = tiles.map(tile => ({ ...tile }));
+  const tileOwnership = worldContext(world).tileOwnership;
+  world.tiles = tileOwnership
+    ? tileOwnership.tiles(tiles.map(tile => tileOwnership.tile(tile)))
+    : tiles.map(tile => ({ ...tile }));
   const retiredChunks = [...world.retiredChunks];
   let usado = false;
   return {

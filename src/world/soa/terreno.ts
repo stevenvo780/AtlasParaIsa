@@ -3,6 +3,8 @@ import { PageArena } from './arena.js';
 import { Presence } from './presencia.js';
 import { PAGE_CELLS, RegionTable, admissibleCoordinate } from './region.js';
 import type { StaticRegion } from '../paralelo/particion.js';
+import { maintainResidentTile, observeResidentArray, observeResidentTile, residentTopologyToken,
+  sameResidentTopology, type ResidentTopologyToken } from './topologia.js';
 
 /**
  * `TileStore` (T112): el terreno en estructura de arrays, detrás de `motor.soaTerreno`. Un buffer por
@@ -54,7 +56,7 @@ const NO_AUTHORITY = 'SoA de terreno: escritura sin autoridad; la página perten
 
 const RESIDENT_NUMBERS = ['moisture', 'vegetation', 'wood', 'growth', 'fertility', 'cultivation', 'traffic', 'drinkingWater'] as const;
 type ResidentKey = typeof RESIDENT_NUMBERS[number] | 'terrain' | 'biome' | 'feature' | 'life';
-interface ResidentBinding { store: TileStore; tile: Tile; cell: number; x: number; y: number; }
+interface ResidentBinding { store: TileStore; tile: Tile; cell: number; x: number; y: number; mask: number; }
 const bindings = new WeakMap<Tile, ResidentBinding>();
 const residentKeys: readonly ResidentKey[] = [...RESIDENT_NUMBERS, 'terrain', 'biome', 'feature', 'life'];
 const enumValues: Partial<Record<ResidentKey, readonly string[]>> = { terrain: TERRAINS, biome: BIOMES, feature: FEATURES };
@@ -101,10 +103,15 @@ export class TileStore {
   private residentCells = new Int32Array(new SharedArrayBuffer(0));
   private residentRegions: StaticRegion[] = [];
   private residentBusy = false;
+  private residentTopology: ResidentTopologyToken | undefined;
+  private readonly residentModified = new Set<ResidentBinding>();
+  private readonly topologyCosts = { fastHits: 0, genericCheckedTiles: 0, rebuilds: 0, changedBindings: 0 };
   private residentPending: ResidentBinding[] = [];
   private residentAbsent: { key: ResidentKey; binding: ResidentBinding }[] = [];
   private readonly residentWoodHoles = new Map<number, ResidentBinding[]>();
   private residentWoodAdded = new Uint8Array(new SharedArrayBuffer(0));
+  /** [protocolo=1, contador, ...slots]. Sólo se consume tras la barrera; workers viejos dejan 0. */
+  private residentWoodAddedQueue = new Int32Array(new SharedArrayBuffer(8));
   /** Versión `Uint32` del conjunto de PÁGINAS: sólo cambia cuando entra o sale un chunk. Es lo que valida
    * la vecindad de páginas; la de celdas es `presence.version`. */
   pageSetVersion = 0;
@@ -122,8 +129,10 @@ export class TileStore {
 
   /** Bytes reservados de verdad: arena (con holgura de crecimiento), tablas de región y scratch. */
   get bytes(): number { return this.arena.bytes + this.regions.bytes + this.cellsOf.byteLength + this.counts.byteLength
-    + this.residentCells.byteLength + this.residentWoodAdded.byteLength; }
+    + this.residentCells.byteLength + this.residentWoodAdded.byteLength + this.residentWoodAddedQueue.byteLength; }
   get bytesPerTile(): number { return this.loaded ? this.bytes / this.loaded : 0; }
+  /** Sólo diagnóstico del trabajo real del coordinador: el rebuild sigue siendo O(T). */
+  get parallelTopologyDiagnostics(): Readonly<typeof this.topologyCosts> { return { ...this.topologyCosts }; }
 
   /**
    * Topología del kernel: sella la presencia y copia `life ?? 0` al frente. `false` (sin haber marcado
@@ -241,13 +250,25 @@ export class TileStore {
    * autoridad sobre SAB. El worker escribe exclusivamente el fondo; no publica valores a los Tile. */
   prepareParallel(tiles: Tile[]): SharedTerrain {
     if (this.residentBusy) throw new Error(TWO_WRITERS);
+    const token = residentTopologyToken(tiles);
     let same = tiles === this.residentTiles && tiles.length === this.residentBindings.length;
-    // La API también admite reemplazar una tesela o sus coordenadas sin reemplazar el array.
-    if (same) for (let i = 0; i < tiles.length; i++) {
-      const binding = this.residentBindings[i]!;
-      if (tiles[i] !== binding.tile || !Object.is(tiles[i]!.x, binding.x) || !Object.is(tiles[i]!.y, binding.y)) { same = false; break; }
+    if (same && sameResidentTopology(token, this.residentTopology)) this.topologyCosts.fastHits++;
+    else if (same && token && this.residentTopology) same = false; // cambio observado: cargar la foto nueva
+    // Sin certificado emitido por interceptores, referencias, coordenadas y reflexión se comprueban.
+    else if (same) for (let i = 0; i < tiles.length; i++) {
+      this.topologyCosts.genericCheckedTiles++;
+      const binding = this.residentBindings[i]!, tile = tiles[i]!;
+      if (tile !== binding.tile || !Object.is(tile.x, binding.x) || !Object.is(tile.y, binding.y)) { same = false; break; }
+      for (let k = 0; k < residentKeys.length; k++) {
+        const key = residentKeys[k]!, descriptor = Object.getOwnPropertyDescriptor(tile, key);
+        const own = (binding.mask & (1 << k)) !== 0;
+        if (own ? descriptor?.get !== residentAccessors[key].get || descriptor?.set !== residentAccessors[key].set
+          : descriptor !== undefined) { same = false; break; }
+      }
+      if (!same) break;
     }
     if (!same) {
+      this.topologyCosts.rebuilds++;
       this.detachResident();
       for (const tile of tiles) {
         const prior = bindings.get(tile);
@@ -263,10 +284,12 @@ export class TileStore {
         // reutilizar páginas: una tesela dormida nunca debe leer la ranura de otra región.
         const prior = bindings.get(tile);
         if (prior) prior.store.detachBinding(prior);
-        const binding: ResidentBinding = { store: this, tile, cell: this.cellsOf[i]!, x: tile.x, y: tile.y };
+        const binding: ResidentBinding = { store: this, tile, cell: this.cellsOf[i]!, x: tile.x, y: tile.y, mask: 0 };
         for (const key of residentKeys) this.writeResidentValue(key, binding.cell, tile[key as keyof Tile]);
         bindings.set(tile, binding);
-        for (const key of residentKeys) if (Object.hasOwn(tile, key)) Object.defineProperty(tile, key, residentAccessors[key]);
+        for (const key of residentKeys) if (Object.hasOwn(tile, key)) this.attachResidentAccessor(binding, key);
+        observeResidentTile(tile, { before: () => { if (this.residentBusy) throw new Error(TWO_WRITERS); },
+          after: key => { if (residentKeys.includes(key as ResidentKey)) this.residentModified.add(binding); } });
         for (const key of ['wood', 'feature'] as const) if (!Object.hasOwn(tile, key)) this.residentAbsent.push({ key, binding });
         if (['life', 'fertility', 'growth', 'traffic', 'cultivation', 'drinkingWater'].some(key => !Object.hasOwn(tile, key))) this.residentPending.push(binding);
         if (!Object.hasOwn(tile, 'wood')) {
@@ -290,20 +313,33 @@ export class TileStore {
       }
       this.residentCells = new Int32Array(new SharedArrayBuffer(ordered.length * 4)); this.residentCells.set(ordered);
       this.residentWoodAdded = new Uint8Array(new SharedArrayBuffer(this.arena.capacity));
+      this.residentWoodAddedQueue = new Int32Array(new SharedArrayBuffer((this.arena.capacity + 2) * 4));
+      observeResidentArray(tiles, () => { if (this.residentBusy) throw new Error(TWO_WRITERS); });
     }
+    // Los Tile nacidos bajo owner notifican altas, deletes y defineProperty: O(cambios), no O(T).
+    for (const binding of this.residentModified) {
+      if (bindings.get(binding.tile) !== binding) continue;
+      this.topologyCosts.changedBindings++;
+      this.refreshModifiedBinding(binding);
+    }
+    this.residentModified.clear();
     // Dar de alta una clave opcional entre despachos crea una propiedad ordinaria; incorporarla
     // antes de leer SAB, sin pisarla al desligar. Sólo se consultan las claves aún ausentes.
-    this.residentAbsent = this.residentAbsent.filter(({ key, binding }) => {
+    if (!token) this.residentAbsent = this.residentAbsent.filter(({ key, binding }) => {
       if (!Object.hasOwn(binding.tile, key)) return true;
       this.writeResidentValue(key, binding.cell, binding.tile[key as keyof Tile]);
-      Object.defineProperty(binding.tile, key, residentAccessors[key]); return false;
+      this.attachResidentAccessor(binding, key); return false;
     });
+    this.residentTopology = residentTopologyToken(tiles);
+    // Scratch de este despacho. El protocolo sólo se anuncia desde workers que escriben la cola.
+    this.residentWoodAddedQueue[0] = 0; this.residentWoodAddedQueue[1] = 0;
     this.refreshResident();
     const buffers: Record<string, SharedArrayBuffer> = {
       cells: this.residentCells.buffer as SharedArrayBuffer, stamps: this.presence.stamps.buffer as SharedArrayBuffer,
       around: this.around.buffer as SharedArrayBuffer, pageX: this.pageX.buffer as SharedArrayBuffer,
       pageY: this.pageY.buffer as SharedArrayBuffer, dirty: this.dirty.buffer as SharedArrayBuffer,
       woodAdded: this.residentWoodAdded.buffer as SharedArrayBuffer,
+      woodAddedQueue: this.residentWoodAddedQueue.buffer as SharedArrayBuffer,
     };
     for (const key of residentKeys) {
       const pair = this.residentPairs.get(key)!;
@@ -317,7 +353,11 @@ export class TileStore {
     if (this.residentBusy || this.taken) throw new Error(TWO_WRITERS);
     this.residentBusy = true;
   }
-  abortParallel(): void { this.residentBusy = false; }
+  abortParallel(): void {
+    // Camino excepcional: ninguna alta del fondo fallido puede impedir encolar la del reintento.
+    this.residentWoodAdded.fill(0); this.residentWoodAddedQueue[0] = 0; this.residentWoodAddedQueue[1] = 0;
+    this.residentBusy = false;
+  }
   /** Cambiar al camino serial devuelve los campos a objetos antes de reutilizar la arena. */
   releaseParallelObjects(): void {
     if (this.residentBusy) throw new Error(TWO_WRITERS);
@@ -325,17 +365,34 @@ export class TileStore {
   }
   commitParallel(): void {
     if (!this.residentBusy) throw new Error(NO_AUTHORITY);
+    const queue = this.residentWoodAddedQueue, protocol = queue[0]!;
+    if (protocol !== 0 && protocol !== 1) throw new Error('SoA de terreno: protocolo de altas de wood desconocido.');
+    let addedPages: number[] | null = null;
+    if (protocol === 1) {
+      const count = queue[1]!;
+      if (count < 0 || count > queue.length - 2) throw new Error('SoA de terreno: contador de altas de wood fuera de rango.');
+      addedPages = []; const seen = new Set<number>();
+      for (let i = 0; i < count; i++) {
+        const page = queue[i + 2]!;
+        if (page < 0 || page >= this.residentWoodAdded.length || !this.inUse[page]
+          || !this.presence.pagePresent(page) || !this.residentWoodAdded[page] || seen.has(page))
+          throw new Error('SoA de terreno: cola de altas de wood inválida.');
+        seen.add(page); addedPages.push(page);
+      }
+    }
     this.parity ^= 1; this.residentBusy = false;
     // Ausentes al cargar: mismo orden de asignación que el kernel de objetos, sólo tras éxito.
     for (const binding of this.residentPending) for (const key of ['life', 'fertility', 'growth', 'traffic', 'cultivation', 'drinkingWater'] as const) {
-      if (!Object.hasOwn(binding.tile, key)) Object.defineProperty(binding.tile, key, residentAccessors[key]);
+      if (!Object.hasOwn(binding.tile, key)) this.attachResidentAccessor(binding, key);
     }
     this.residentPending = [];
-    for (const [page, holes] of this.residentWoodHoles) {
+    // Protocolo real: O(páginas con altas). Compatibilidad explícita: workers viejos O(páginas).
+    for (const page of addedPages ?? this.residentWoodHoles.keys()) {
       if (!this.residentWoodAdded[page]) continue;
+      const holes = this.residentWoodHoles.get(page) ?? [];
       const remaining: ResidentBinding[] = [];
       for (const binding of holes) {
-        if (this.residentRead('wood', binding.cell) !== undefined) Object.defineProperty(binding.tile, 'wood', residentAccessors.wood);
+        if (this.residentRead('wood', binding.cell) !== undefined) this.attachResidentAccessor(binding, 'wood');
         else remaining.push(binding);
       }
       if (remaining.length) this.residentWoodHoles.set(page, remaining); else this.residentWoodHoles.delete(page);
@@ -378,20 +435,42 @@ export class TileStore {
     this.refresh(); this.residentPairs.set('life', [this.lives[0], this.lives[1]!]);
     this.residentGeneration = this.arena.generation;
   }
+  private attachResidentAccessor(binding: ResidentBinding, key: ResidentKey): void {
+    maintainResidentTile(binding.tile, () => Object.defineProperty(binding.tile, key, residentAccessors[key]));
+    binding.mask |= 1 << residentKeys.indexOf(key);
+  }
+  private refreshModifiedBinding(binding: ResidentBinding): void {
+    // Validar TODOS los campos alterados antes de escribir ninguno: un NaN no se convierte en ausencia.
+    const changes: { key: ResidentKey; value: unknown; own: boolean; index: number }[] = [];
+    for (let k = 0; k < residentKeys.length; k++) {
+      const key = residentKeys[k]!, descriptor = Object.getOwnPropertyDescriptor(binding.tile, key);
+      if (descriptor?.get === residentAccessors[key].get && descriptor?.set === residentAccessors[key].set) continue;
+      const own = descriptor !== undefined, value = own ? binding.tile[key as keyof Tile] : undefined;
+      this.encodeResident(key, value); changes.push({ key, value, own, index: k });
+    }
+    for (const { key, value, own, index } of changes) {
+      this.writeResidentValue(key, binding.cell, value);
+      if (own) this.attachResidentAccessor(binding, key); else binding.mask &= ~(1 << index);
+    }
+    if (['life', 'fertility', 'growth', 'traffic', 'cultivation', 'drinkingWater'].some(key => !Object.hasOwn(binding.tile, key)))
+      this.residentPending.push(binding);
+  }
   private detachBinding(binding: ResidentBinding): void {
     if (bindings.get(binding.tile) !== binding) return;
     if (this.residentBusy) throw new Error(TWO_WRITERS);
     for (const key of residentKeys) if (Object.getOwnPropertyDescriptor(binding.tile, key)?.get === residentAccessors[key].get) {
       const value = this.residentRead(key, binding.cell);
-      Object.defineProperty(binding.tile, key, { value, writable: true, configurable: true, enumerable: true });
+      maintainResidentTile(binding.tile, () => Object.defineProperty(binding.tile, key, { value, writable: true, configurable: true, enumerable: true }));
     }
+    observeResidentTile(binding.tile, undefined);
     bindings.delete(binding.tile);
     // Cambiar la autoridad desde otra arena obliga a refrescar antes de volver a usar ésta.
-    this.residentTiles = null;
+    if (this.residentTiles) observeResidentArray(this.residentTiles, undefined);
+    this.residentTiles = null; this.residentTopology = undefined;
   }
   private detachResident(): void {
     for (const binding of this.residentBindings) this.detachBinding(binding);
-    this.residentBindings = []; this.residentTiles = null;
+    this.residentBindings = []; this.residentTiles = null; this.residentModified.clear(); this.residentTopology = undefined;
   }
 
   /**

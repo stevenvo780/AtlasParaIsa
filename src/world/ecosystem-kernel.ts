@@ -240,6 +240,8 @@ export function runParallelEcosystem({ regions, buffers, params }: StaticWorkerH
   const drinkingFront = new Float64Array(buffers.drinkingWater!), drinkingBack = new Float64Array(buffers.drinkingWaterBack!);
   const woodFront = new Float64Array(buffers.wood!), woodBack = new Float64Array(buffers.woodBack!);
   const dirty = new Uint8Array(buffers.dirty!), woodAdded = new Uint8Array(buffers.woodAdded!);
+  const woodAddedQueue = buffers.woodAddedQueue ? new Int32Array(buffers.woodAddedQueue) : undefined;
+  if (woodAddedQueue) Atomics.store(woodAddedQueue, 0, 1);
   for (const region of regions) for (let i = region.begin; i < region.end; i++) {
     const cell = cells[i]!, slot = cell >>> 8, lx = cell & 15, ly = (cell >> 4) & 15;
     const vegetation = vegetationFront[cell]!, moisture = moistureFront[cell]!;
@@ -285,7 +287,11 @@ export function runParallelEcosystem({ regions, buffers, params }: StaticWorkerH
       if (regrowth > 0) {
         woodBack[cell] = wood + regrowth;
         growthBack[cell] = clamp(growthBack[cell]! - regrowth * 0.05);
-        if (Number.isNaN(woodFront[cell]!)) woodAdded[slot] = 1;
+        if (Number.isNaN(woodFront[cell]!) && woodAdded[slot] === 0) {
+          woodAdded[slot] = 1;
+          // Cada página pertenece a una sola región/worker. La barrera publica la cola entera.
+          if (woodAddedQueue) woodAddedQueue[2 + Atomics.add(woodAddedQueue, 1, 1)] = slot;
+        }
         if (localFeature === 10 && woodBack[cell]! >= 1) featureBack[cell] = localBiome === 4 ? 2 : 1;
       }
     }

@@ -63,9 +63,12 @@ export function captureReference(seed: number, scene: HardwareSceneName, steps: 
   for (let step = 1; step <= steps; step++) {
     stepWorld(world, [], context); fixture.afterStep(step);
     // World.step's ordered body/totals transitions also matter on the nine non-ecology ticks.
-    // [] requests only globals on a stable certified topology; uncertified fallbacks remain counted.
-    const digest = hasher.update(world, []);
+    // Body/fauna/plant actions write Tile between ecology barriers. Until every writer is
+    // tracked, a globals-only [] refresh would silently retain stale page hashes for nine ticks.
+    // This conservative full refresh is O(T); it does not satisfy the incremental/time gate.
+    const digest = hasher.update(world, undefined);
     trace.topologyScannedTiles += digest.topologyScannedTiles;
+    trace.fullRefreshes++;
     trace.barriers.push(snapshotBarrier({ tick: world.tick, phase: 'fin-paso' }, digest));
     if (isMilestone(step, steps)) trace.milestones.set(step, { digest: finalCanonicalDigest(world), world: normalizedCopy(world) });
   }
@@ -104,7 +107,12 @@ export interface CandidateEvidence {
   topologyScannedTiles: number;
   fullRefreshes: number;
 }
-export function compareCandidate(trace: ReferenceTrace, regionSide: 256 | 512, backend: CpuBackend): CandidateEvidence {
+export interface CandidateFaultInjection {
+  /** Private negative tests only: inject after real actions and before the exact step-end check. */
+  afterStep?: (world: World, step: number) => void;
+}
+export function compareCandidate(trace: ReferenceTrace, regionSide: 256 | 512, backend: CpuBackend,
+  fault?: CandidateFaultInjection): CandidateEvidence {
   const started = performance.now(), fixture = buildHardwareScene(trace.seed, trace.scene), world = fixture.world;
   const evidence: CandidateEvidence = { elapsedMs: 0, actualKernelDispatches: 0, workerCounts: [],
     delayCount: 0, multiRegionQueues: 0, topologyScannedTiles: 0, fullRefreshes: 0 };
@@ -158,7 +166,9 @@ export function compareCandidate(trace: ReferenceTrace, regionSide: 256 | 512, b
     if (backend === 'adversarial' && previousWorkers !== undefined) assert.notEqual(workers, previousWorkers);
     previousWorkers = workers;
     stepWorld(world, [], context); fixture.afterStep(step);
-    compare({ tick: world.tick, phase: 'fin-paso' }, []);
+    fault?.afterStep?.(world, step);
+    // A complete Tile dirty tracker is not yet available: refresh every page honestly.
+    compare({ tick: world.tick, phase: 'fin-paso' }, undefined);
     if (isMilestone(step, trace.steps)) {
       const expected = trace.milestones.get(step)!;
       if (finalCanonicalDigest(world) !== expected.digest) throwDifference(locateDifference(expected.world, world,

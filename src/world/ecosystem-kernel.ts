@@ -1,6 +1,9 @@
 import type { Feature, Tile } from '../shared/types.js';
 import { enCuenca } from './agua.js';
 import { TileStore } from './soa/terreno.js';
+import { StaticWorkerPool, type StaticWorkerDiagnostics, type StaticWorkerHandlerJob } from './paralelo/piscina.js';
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 const clamp = (n: number): number => Math.max(0, Math.min(1, n));
 const TREE_FEATURES = new Set<Feature>(['tree', 'pine', 'palm', 'cactus', 'reeds', 'stump']);
@@ -9,7 +12,8 @@ const NO_NEIGHBORS: Int32Array = new Int32Array(0), NO_LIFE: Float64Array = new 
 
 /** Opciones de la ecología: T013 (`decaimientoFertilidad`) + T035 (`seed`/`cuencas`) + T112 (`soaTerreno`,
  * la topología sobre el SoA de terreno; `motor.soaTerreno`, default `false` = la caché de hoy). */
-export interface EcosystemOptions { decaimientoFertilidad?: number; seed?: number; cuencas?: number; soaTerreno?: boolean }
+export interface EcosystemOptions { decaimientoFertilidad?: number; seed?: number; cuencas?: number; soaTerreno?: boolean; hilos?: number }
+export interface EcosystemKernelOptions { createPool?: (workers: number) => StaticWorkerPool }
 
 /**
  * Índice ordenado de vecinos + la ÚNICA instantánea que la regla necesita.
@@ -77,6 +81,21 @@ export function buildTopology(tiles: readonly Tile[]): Topology {
 export class EcosystemKernel {
   private readonly topologies: Topology[] = [];
   private soa: TileStore | null = null;
+  private readonly pools = new Map<number, StaticWorkerPool>();
+  private lastPool: StaticWorkerPool | null = null;
+  private readonly createPool: (workers: number) => StaticWorkerPool;
+
+  constructor(options?: EcosystemKernelOptions) {
+    this.createPool = options?.createPool ?? (workers => {
+      const js = new URL('./ecosystem-kernel.js', import.meta.url);
+      return new StaticWorkerPool({ workers, moduleURL: existsSync(fileURLToPath(js)) ? js : new URL('./ecosystem-kernel.ts', import.meta.url), exportName: 'runParallelEcosystem' });
+    });
+  }
+  get parallelDiagnostics(): StaticWorkerDiagnostics | null { return this.lastPool?.diagnostics() ?? null; }
+  async closeParallelPool(): Promise<void> {
+    await Promise.all([...this.pools.values()].map(pool => pool.close()));
+    this.pools.clear(); this.lastPool = null;
+  }
 
   get cachedTopologyCount(): number { return this.topologies.length; }
   /** T112: el `TileStore` de la topología SoA, si alguna pasada lo usó (para medir sus bytes). */
@@ -92,6 +111,26 @@ export class EcosystemKernel {
    */
   step(tiles: Tile[], tick: number, weather: 'clear' | 'rain', phase: string, options?: EcosystemOptions): void {
     if (tick % 10 !== 0) return;
+    const workers = options?.hilos ?? 1;
+    if (!Number.isSafeInteger(workers) || workers < 1) throw new RangeError('hilos debe ser un entero positivo.');
+    if (workers > 1) {
+      const store = this.soa ??= new TileStore();
+      const terrain = store.prepareParallel(tiles);
+      let pool = this.pools.get(workers);
+      if (!pool) { pool = this.createPool(workers); this.pools.set(workers, pool); }
+      this.lastPool = pool; this.topologies.length = 0;
+      store.beginParallel();
+      try {
+        pool.run({ regions: terrain.regions, buffers: terrain.buffers, params: {
+          tick, weather, light: phase === 'day' ? 1 : phase === 'night' ? 0 : 0.4,
+          decaimientoFertilidad: options?.decaimientoFertilidad ?? 0,
+          seed: options?.seed ?? 0, cuencas: options?.cuencas ?? 1, version: terrain.version,
+        } });
+        store.commitParallel();
+      } catch (error) { store.abortParallel(); throw error; }
+      return;
+    }
+    this.soa?.releaseParallelObjects();
     const decaimientoFertilidad = options?.decaimientoFertilidad ?? 0;
     const seed = options?.seed ?? 0, cuencas = options?.cuencas ?? 1;
     // T112: con `soaTerreno` la foto de `life` y la presencia van al SoA y los vecinos salen por aritmética;
@@ -175,5 +214,81 @@ export class EcosystemKernel {
     if (!store.loadLife(tiles)) return null;
     this.topologies.length = 0;
     return store;
+  }
+}
+
+interface ParallelEcosystemParams {
+  tick: number; weather: 'clear' | 'rain'; light: number; decaimientoFertilidad: number;
+  seed: number; cuencas: number; version: number;
+}
+
+/** Cuerpo FP64 del kernel vivo, con el mismo orden de operaciones y sin reducciones entre celdas.
+ * Los vecinos siempre se leen del frente compartido, incluso al cruzar la región de la cola. */
+export function runParallelEcosystem({ regions, buffers, params }: StaticWorkerHandlerJob<ParallelEcosystemParams>): void {
+  const { tick, weather, light, decaimientoFertilidad, seed, cuencas, version } = params;
+  const cells = new Int32Array(buffers.cells!), stamps = new Uint32Array(buffers.stamps!);
+  const around = new Int32Array(buffers.around!), pageX = new Int32Array(buffers.pageX!), pageY = new Int32Array(buffers.pageY!);
+  const lifeFront = new Float64Array(buffers.life!), lifeBack = new Float64Array(buffers.lifeBack!);
+  const terrain = new Uint8Array(buffers.terrain!), biome = new Uint8Array(buffers.biome!), feature = new Uint8Array(buffers.feature!);
+  const terrainBack = new Uint8Array(buffers.terrainBack!), biomeBack = new Uint8Array(buffers.biomeBack!), featureBack = new Uint8Array(buffers.featureBack!);
+  const moistureFront = new Float64Array(buffers.moisture!), moistureBack = new Float64Array(buffers.moistureBack!);
+  const vegetationFront = new Float64Array(buffers.vegetation!), vegetationBack = new Float64Array(buffers.vegetationBack!);
+  const fertilityFront = new Float64Array(buffers.fertility!), fertilityBack = new Float64Array(buffers.fertilityBack!);
+  const growthFront = new Float64Array(buffers.growth!), growthBack = new Float64Array(buffers.growthBack!);
+  const trafficFront = new Float64Array(buffers.traffic!), trafficBack = new Float64Array(buffers.trafficBack!);
+  const cultivationFront = new Float64Array(buffers.cultivation!), cultivationBack = new Float64Array(buffers.cultivationBack!);
+  const drinkingFront = new Float64Array(buffers.drinkingWater!), drinkingBack = new Float64Array(buffers.drinkingWaterBack!);
+  const woodFront = new Float64Array(buffers.wood!), woodBack = new Float64Array(buffers.woodBack!);
+  const dirty = new Uint8Array(buffers.dirty!), woodAdded = new Uint8Array(buffers.woodAdded!);
+  for (const region of regions) for (let i = region.begin; i < region.end; i++) {
+    const cell = cells[i]!, slot = cell >>> 8, lx = cell & 15, ly = (cell >> 4) & 15;
+    const vegetation = vegetationFront[cell]!, moisture = moistureFront[cell]!;
+    const growth = Number.isNaN(growthFront[cell]!) ? vegetation : growthFront[cell]!;
+    const fertility = Number.isNaN(fertilityFront[cell]!) ? 0 : fertilityFront[cell]!;
+    const traffic = Number.isNaN(trafficFront[cell]!) ? 0 : trafficFront[cell]!;
+    const cultivation = Number.isNaN(cultivationFront[cell]!) ? 0 : cultivationFront[cell]!;
+    const drinkingWater = Number.isNaN(drinkingFront[cell]!) ? 0 : drinkingFront[cell]!;
+    const life = Number.isNaN(lifeFront[cell]!) ? 0 : lifeFront[cell]!;
+    const localTerrain = terrain[cell]!, localBiome = biome[cell]!, localFeature = feature[cell]!;
+    let livingNeighbors = 0;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      if (dx === 0 && dy === 0) continue;
+      const nx = lx + dx, ny = ly + dy;
+      const target = around[slot * 9 + (ny < 0 ? 0 : ny > 15 ? 6 : 3) + (nx < 0 ? 0 : nx > 15 ? 2 : 1)]!;
+      if (target < 0) continue;
+      const neighbor = (target << 8) | ((ny & 15) << 4) | (nx & 15);
+      if (stamps[neighbor] === version && lifeFront[neighbor]! >= 0.45) livingNeighbors++;
+    }
+    const fertilePattern = livingNeighbors === 3 || (life >= 0.45 && livingNeighbors === 2);
+    const cellularEnergy = light * moisture * (0.6 + fertility * 0.4);
+    lifeBack[cell] = clamp(life + ((fertilePattern ? 1 : 0) - life) * 0.2 * cellularEnergy
+      - (moisture < 0.15 ? 0.015 : 0) - traffic * 0.004);
+    fertilityBack[cell] = clamp(fertility + life * 0.0012 - traffic * 0.0007 - cultivation * 0.0002 - decaimientoFertilidad * fertility);
+    const produced = light * moisture * fertility * (0.25 + life * 0.75)
+      * (1 - growth) * (1 - traffic * 0.9) * 0.005;
+    growthBack[cell] = clamp(growth + produced - 0.0002 - traffic * 0.002 - (moisture < 0.15 ? 0.001 : 0));
+    vegetationBack[cell] = localTerrain !== 1 ? clamp(vegetation + produced * 0.25 - traffic * 0.001) : vegetation;
+    trafficBack[cell] = clamp(traffic - 0.0005); cultivationBack[cell] = clamp(cultivation - 0.00002);
+    const reservoirSource = localFeature === 12 || localFeature === 11 || localBiome === 5 || localTerrain === 1;
+    const reservoir = reservoirSource && (localTerrain === 1 || enCuenca(seed, pageX[slot]! * 16 + lx, pageY[slot]! * 16 + ly, cuencas));
+    drinkingBack[cell] = localBiome === 6 ? 0 : clamp(drinkingWater
+      + (reservoir && weather === 'rain' ? 0.008 * (0.4 + fertility * 0.6) : 0)
+      + (reservoir && localFeature === 11 ? 0.002 : 0) - (light ? 0.00015 : 0.00003));
+    moistureBack[cell] = localTerrain === 1 ? clamp(moisture + (localBiome === 6 ? 0.003 : 0) + (weather === 'rain' ? 0.008 : 0)) : moisture;
+    woodBack[cell] = woodFront[cell]!; featureBack[cell] = localFeature;
+    terrainBack[cell] = localTerrain; biomeBack[cell] = localBiome;
+    if (tick % 100 === 0 && ((localFeature >= 1 && localFeature <= 5) || localFeature === 10) && growth > 0.65
+      && fertility > 0.4 && moisture > 0.35 && traffic < 0.35 && light > 0) {
+      const capacity = localFeature === 5 || localFeature === 4 ? 2 : localFeature === 3 ? 6 : 12;
+      const wood = Number.isNaN(woodFront[cell]!) ? 0 : woodFront[cell]!;
+      const regrowth = Math.min(capacity - wood, 0.025 * light * moisture * fertility);
+      if (regrowth > 0) {
+        woodBack[cell] = wood + regrowth;
+        growthBack[cell] = clamp(growthBack[cell]! - regrowth * 0.05);
+        if (Number.isNaN(woodFront[cell]!)) woodAdded[slot] = 1;
+        if (localFeature === 10 && woodBack[cell]! >= 1) featureBack[cell] = localBiome === 4 ? 2 : 1;
+      }
+    }
+    dirty[slot] = 1;
   }
 }

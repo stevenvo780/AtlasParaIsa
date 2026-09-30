@@ -1246,7 +1246,7 @@ function advanceTick(world: World, inputs: Gesture[], context: WorldContext, med
   // T013 (decaimiento de fertilidad) + T035 (gateo de cuenca duradero: la lluvia no rellena
   // una tesela fuera de cuenca) viajan juntos en las mismas opciones de ecología.
   medirFase(medicion, 'kernel', () => stepEcosystem(world.tiles, world.tick, world.weather, phaseAt(world.tick), false,
-    { decaimientoFertilidad: paramsOf(world).recursos.decaimientoFertilidad, seed: world.seed, cuencas: paramsOf(world).agua.cuencas, soaTerreno: paramsOf(world).motor.soaTerreno }));
+    { decaimientoFertilidad: paramsOf(world).recursos.decaimientoFertilidad, seed: world.seed, cuencas: paramsOf(world).agua.cuencas, soaTerreno: paramsOf(world).motor.soaTerreno, hilos: paramsOf(world).motor.hilos }));
   medirFase(medicion, 'fauna', () => { stepAnimals(world,event=>addEvent(world,event)); stepStructures(world,event=>addEvent(world,event)); });
   medirFase(medicion, 'personas', () => {
     for (const person of world.people) bodyAndAction(world, person);

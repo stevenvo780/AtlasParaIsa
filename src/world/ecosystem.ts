@@ -91,6 +91,9 @@ function state(tile: Tile): CellState {
 }
 
 const ecosystemKernel = new EcosystemKernel();
+/** Liberación explícita para bancos/procesos de laboratorio; el motor mantiene los pools entre ticks. */
+export const closeEcosystemWorkers = (): Promise<void> => ecosystemKernel.closeParallelPool();
+export const ecosystemWorkerDiagnostics = () => ecosystemKernel.parallelDiagnostics;
 
 /**
  * Soft neighbor rule inspired by cellular automata, not an implementation of Conway or Lenia.

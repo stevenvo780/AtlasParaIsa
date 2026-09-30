@@ -357,6 +357,9 @@ function trustedMajority(nearby: readonly Person[]): { id: string; count: number
   for (const [id, n] of counts) if (!best || n > best.count || (n === best.count && id < best.id)) best = { id, count: n };
   return best;
 }
+/** COM-D′ (crítica de COM-D, 2026-09-28), R0: sólo quien puede morir sostiene una comunidad. S e I
+ * nunca cuentan para fundar, fisionar ni disolver; siguen la regla de mayoría como cualquiera. */
+const isMortalMember = (p: Person): boolean => p.role === 'neighbor';
 
 /** Personas por `communityId` en orden de slot, en una pasada: sustituye un `world.people.filter(p =>
  * p.communityId === id)` por grupo (O(P·G)). Una lista sigue valiendo mientras nadie ENTRE en su grupo:
@@ -381,8 +384,12 @@ function porComunidad(people: readonly Person[]): Map<string | null, Person[]> {
  * 2. Mayoría: quien tiene al menos dos vecinos de confianza de otra comunidad, y más que de la suya,
  *    pasa a esa comunidad (se revisa en orden de `world.people`, así que un par aislado no se intercambia).
  * Nada se crea ni se paga: sólo cambia a qué grupo cuenta cada uno. Cada cambio deja un evento con causa.
+ *
+ * COM-D′ (crítica de COM-D, 2026-09-28), sólo con `social.disolucion=1` (`disolver`): R0 hace que el
+ * umbral de fisión cuente MORTALES, no a todos (R1: el grupo nuevo y el de origen retienen cada uno
+ * ≥ 3); y tras la mayoría, una pasada de disolución (R2–R4) retira las comunidades con ≤ 1 mortal.
  */
-function reviseByCohabitation(world: World, emit: Emit, radius: number, iniciales: Map<string | null, Person[]>): void {
+function reviseByCohabitation(world: World, emit: Emit, radius: number, iniciales: Map<string | null, Person[]>, disolver: boolean): void {
   const cap = paramsOf(world).social.maxComunidades;
   for (const group of [...world.communities]) {
     // Hasta aquí sólo hubo salidas (a null) y fisiones de grupos anteriores (hacia ids nuevos, que esta
@@ -395,8 +402,15 @@ function reviseByCohabitation(world: World, emit: Emit, radius: number, iniciale
       const away = distance(person, center);
       if (away <= radius) continue;
       const core = vecinos(world, person, 7, p => memberSet.has(p) && trustedNeighbor(person, p), 'updateCommunities:cohabitation');
-      if (core.length < 2 || core.length + 1 >= members.length || !algunoCerca(world.places, person, 8, place => distance(person, place) <= 7)) continue;
-      const founders = [person, ...core], id = `community-${++world.communityCounter}`;
+      const founders = [person, ...core];
+      if (disolver) {
+        // R1: arreglo en origen. El grupo nuevo y el de origen retienen cada uno ≥ 3 MORTALES
+        // (antes bastaba con que el origen conservara a alguien, cualquiera; eso fabricaba restos).
+        const mortalFounders = founders.filter(isMortalMember).length;
+        const originMortalsAfter = members.filter(isMortalMember).length - mortalFounders;
+        if (mortalFounders < 3 || originMortalsAfter < 3 || !algunoCerca(world.places, person, 8, place => distance(person, place) <= 7)) continue;
+      } else if (core.length < 2 || core.length + 1 >= members.length || !algunoCerca(world.places, person, 8, place => distance(person, place) <= 7)) continue;
+      const id = `community-${++world.communityCounter}`;
       const random = localRandom(world.seed, id), name = `Círculo de ${COMMUNITY_SYLLABLES[Math.floor(random() * COMMUNITY_SYLLABLES.length)]}`;
       const ids = founders.map(p => p.id);
       world.communities.push({ id, name, x: person.x, y: person.y, members: ids, color: COMMUNITY_COLORS[world.communityCounter % 4]!, culture: { ...person.culture }, formedAt: world.tick, cooperation: 0, disputes: 0 });
@@ -417,6 +431,42 @@ function reviseByCohabitation(world: World, emit: Emit, radius: number, iniciale
     person.communityId = to.id;
     emit({ kind: 'community', actors: [person.id], x: person.x, y: person.y, source: 'simulation', text: `${person.name} dejó ${from?.name ?? 'su comunidad'} y se unió a ${to.name}.`, cause: `${best.count} de sus vecinos de confianza son de ${to.name} y ${own} de la suya; la pertenencia sigue a la convivencia y la confianza.` });
   }
+  if (disolver) disolverPorEscasezDeMortales(world, emit);
+}
+
+/**
+ * COM-D′ (crítica de COM-D, 2026-09-28), R2–R4: una comunidad con ≤ 1 mortal se disuelve (R2,
+ * histéresis sin estado: fundar exige 3, disolver 1, y con 2 no pasa nada — evita el bucle
+ * fundar↔disolver↔refundar de la crítica). Sus miembros —mortales, S e I por igual (R0: siguen la
+ * regla de mayoría como cualquiera)— se unen a la mayoría de sus vecinos de confianza ENTRE LAS
+ * COMUNIDADES QUE NO SE DISUELVEN esta misma revisión (R3), o quedan sin comunidad; no pueden
+ * refundar en esta revisión porque fundar exige 3 mortales libres (R0) y una comunidad disuelta
+ * aporta como mucho uno. Una comunidad nacida en esta revisión no se disuelve (R4: `formedAt ===
+ * world.tick`), así que fisión y disolución nunca chocan en el mismo paso. `updateCommunities` se
+ * encarga de vaciar `group.members` (al reagrupar) y de quitar la comunidad de `world.communities`
+ * (al filtrar por miembros al final): aquí sólo se mueve a quién pertenece cada persona.
+ */
+function disolverPorEscasezDeMortales(world: World, emit: Emit): void {
+  const porGrupo = porComunidad(world.people);
+  const disueltas = new Set<string>();
+  for (const group of world.communities) {
+    if (group.formedAt === world.tick) continue;
+    if ((porGrupo.get(group.id) ?? []).filter(isMortalMember).length <= 1) disueltas.add(group.id);
+  }
+  if (!disueltas.size) return;
+  for (const group of world.communities) {
+    if (!disueltas.has(group.id)) continue;
+    const members = porGrupo.get(group.id) ?? [], mortales = members.filter(isMortalMember).length;
+    for (const person of members) {
+      const nearby = vecinos(world, person, 7, p => trustedNeighbor(person, p), 'updateCommunities:disolucion');
+      const best = trustedMajority(nearby.filter(p => p.communityId !== null && !disueltas.has(p.communityId)));
+      const to = best ? world.communities.find(c => c.id === best.id) : undefined;
+      person.communityId = to ? to.id : null;
+      emit({ kind: 'community', actors: [person.id], x: person.x, y: person.y, source: 'simulation',
+        text: to ? `${person.name} dejó ${group.name}, disuelta, y se unió a ${to.name}.` : `${person.name} quedó sin comunidad al disolverse ${group.name}.`,
+        cause: `${group.name} se disolvió con ${mortales} mortal(es) de convivencia; la pertenencia exige convivencia sostenida, no una etiqueta que sobrevive sola.` });
+    }
+  }
 }
 
 /** Local trust and cultural similarity form groups; group identity alone never causes a dispute. */
@@ -428,7 +478,10 @@ export function updateCommunities(world: World, emit: Emit): void {
   // cooperación suma +0,12 de confianza, así que la media satura y la salida queda
   // cerrada; y las alternativas vienen de grupos que divergen, así que exigirles menos
   // de 0,2 de distancia cultural las descarta siempre. Los defaults son esos dos números.
-  const { confianzaSalida, distanciaAlternativa, radioConvivencia } = paramsOf(world).social;
+  const { confianzaSalida, distanciaAlternativa, radioConvivencia, disolucion } = paramsOf(world).social;
+  // COM-D′ (crítica de COM-D, 2026-09-28): sólo actúa con las dos leyes activas a la vez (R0 en
+  // adelante); con `disolucion=0` (default) todo camino de abajo toma la rama de siempre.
+  const comD = radioConvivencia > 0 && disolucion === 1;
   const iniciales = porComunidad(world.people);
   for (const person of world.people) {
     const group = world.communities.find(c => c.id === person.communityId);
@@ -441,7 +494,7 @@ export function updateCommunities(world: World, emit: Emit): void {
     person.communityId = null;
     emit({ kind: 'community', actors: [person.id], x: person.x, y: person.y, source: 'simulation', text: `${person.name} dejó ${group.name} y buscó otra comunidad cercana.`, cause: 'Prácticas distintas, confianza interna baja y al menos dos contactos cercanos compatibles; la pertenencia es revisable.' });
   }
-  if (radioConvivencia > 0) reviseByCohabitation(world, emit, radioConvivencia, iniciales);
+  if (radioConvivencia > 0) reviseByCohabitation(world, emit, radioConvivencia, iniciales, disolucion === 1);
   // La mayoría de la convivencia AÑADE miembros a grupos existentes: se reagrupa, una pasada.
   const actuales = porComunidad(world.people);
   for (const group of world.communities) {
@@ -462,7 +515,9 @@ export function updateCommunities(world: World, emit: Emit): void {
     const free = nearby.filter(p => !p.communityId);
     // Tope de FUNDACIÓN = `social.maxComunidades` (regla de conducta; default 8 = la de siempre).
     // La admisión `limites.comunidades` es otra cosa: lanza al validar, nunca decide aquí.
-    if (free.length < 2 || world.communities.length >= paramsOf(world).social.maxComunidades || !algunoCerca(world.places, person, 8, place => distance(person, place) <= 7)) continue;
+    // COM-D′ (R0): fundar exige ≥ 3 MORTALES (S e I pueden sumarse, pero no cuentan para el umbral).
+    if (comD ? [person, ...free].filter(isMortalMember).length < 3 : free.length < 2) continue;
+    if (world.communities.length >= paramsOf(world).social.maxComunidades || !algunoCerca(world.places, person, 8, place => distance(person, place) <= 7)) continue;
     const members = [person, ...free], id = `community-${++world.communityCounter}`;
     const random = localRandom(world.seed, id), name = `Círculo de ${COMMUNITY_SYLLABLES[Math.floor(random() * COMMUNITY_SYLLABLES.length)]}`;
     const group: CommunityView = { id, name, x: person.x, y: person.y, members: members.map(p => p.id), color: COMMUNITY_COLORS[world.communityCounter % 4]!, culture: { ...person.culture }, formedAt: world.tick, cooperation: 0, disputes: 0 };

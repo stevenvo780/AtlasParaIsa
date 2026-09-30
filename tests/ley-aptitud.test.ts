@@ -45,6 +45,10 @@ function digestoSinAptitud(world: World): string {
   delete comoPadre.social.memoriaDisputa;
   assert.equal(comoPadre.social.hogarTrabajo, 0);
   delete comoPadre.social.hogarTrabajo;
+  // COM-D′ (`sprint/com-d-20260928`): `social.disolucion` no existía en f666226; con su valor 0 no
+  // actúa, así que también se quita de la forma.
+  assert.equal(comoPadre.social.disolucion, 0);
+  delete comoPadre.social.disolucion;
   // Poda ola 1 (2026-09-27): `conducta.vocacion`/`vocacionTope` y
   // `poblacion.natalidadLocal`/`radioProvision` ya no se declaran; la forma las trae quitadas.
   setParams(world, comoPadre as unknown as WorldParams);

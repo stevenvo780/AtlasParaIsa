@@ -93,6 +93,31 @@ for (const regionSide of [256, 512] as const) test(`T117 negativo totals: real t
     && /tick=1 fase=fin-paso pagina=global campo=totals.foodHarvested indice=global/.test(error.message));
 });
 
+test('T117 negativo fin-paso: food/stone/fauna mutations outside ecology fail on the same tick', () => {
+  const reference = captureReference(7, 'cosecha-dos-regiones', 10);
+  assert.equal(reference.startTick, 0);
+  const firstBoundary = reference.barriers[0]!;
+  assert.equal(firstBoundary.tick, 1); assert.equal(firstBoundary.phase, 'fin-paso');
+  // The reference itself must include the real first-tick harvest. This independently
+  // checks that its step-end path did not retain the pre-action page hashes with [].
+  const actualFirstStep = buildHardwareScene(7, 'cosecha-dos-regiones');
+  stepWorld(actualFirstStep.world); actualFirstStep.afterStep(1); actualFirstStep.assertWitness();
+  const fresh = new IncrementalRegionHasher(256, { normalizeExecution: true }).update(actualFirstStep.world);
+  assert.equal(firstHashDisagreement(firstBoundary, fresh), null);
+  for (const field of ['food', 'stone', 'fauna'] as const) {
+    let injected = false;
+    assert.throws(() => compareCandidate(reference, 256, 1, { afterStep(world, step) {
+      if (step !== 1) return;
+      assert.equal(world.tick, 1); assert.notEqual(world.tick % 10, 0);
+      const tile = world.tiles.find(t => t.x === 9 && t.y === 9)!;
+      assert.ok(tile); tile[field] = (tile[field] ?? 0) + (field === 'fauna' ? 1 : 0.03125);
+      injected = true;
+    } }), error => error instanceof assert.AssertionError
+      && error.message.includes(`tick=1 fase=fin-paso pagina=0,0 campo=${field} indice=`));
+    assert.ok(injected, `${field} must be mutated after the real first step, before any ecology dispatch.`);
+  }
+});
+
 for (const seed of HARDWARE_SEEDS) for (const scene of HARDWARE_SCENES) {
   test(`T117 matrix seed=${seed} scene=${scene} steps=${STEPS}`, async t => {
     const started = performance.now(), reference = captureReference(seed, scene, STEPS);

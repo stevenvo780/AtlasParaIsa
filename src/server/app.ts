@@ -9,6 +9,9 @@ import { WebSocketServer, WebSocket, type RawData } from 'ws';
 import { createWorld, stepWorld, projectWorld, normalizeViewport, cloneWorld, puntoDeRestauracion, fraccionSerial, type PuntoDeRestauracion, type World, type FaseMedicion } from '../world/index.js';
 import { paramsOf, type WorldParams } from '../world/params.js';
 import { technologyRecipeDetail } from '../world/technology.js';
+import { technologyCatalogueNearCapacity } from '../world/technology-catalogue.js';
+import { technologyJournalNearCapacity } from '../world/technology-journal.js';
+import { chronicleJournalNearCapacity } from '../world/chronicle-journal.js';
 import type { ClientMessage, Gesture, GestureResult, ServerMessage, Viewport, WorldView, RuntimeStats, FaseNombre } from '../shared/types.js';
 import { Store, fingerprint, GestureConflict, SessionRevoked } from './store.js';
 import { cookie, hashToken, makeToken, passwordVerifier, sessionHash } from './auth.js';
@@ -534,7 +537,14 @@ export function createApp(options: AppOptions) {
       // C3/C12: persistir es una transacción por cadencia, no por tick. Un gesto
       // confirmado nunca espera: obliga a guardar en su propio paso. Lo que se
       // arriesga entre guardados son los pasos de la cadencia, jamás un gesto.
-      if (valid.length > 0 || draft.tick % paramsOf(draft).persistencia.cadaTicks === 0) {
+      // sprint/journal-caps-20260929: una tercera razón para guardar YA, sin esperar la cadencia
+      // ni un gesto — los diarios o el catálogo se acercan a su tope de pendientes. Con
+      // población grande, esperar `cadaTicks` pasos puede acumular más recibos de los que caben
+      // entre guardados (ver `technologyJournalNearCapacity`/`chronicleJournalNearCapacity`); esto
+      // es lo que de verdad evita morir, no solo el tope más alto de esos módulos.
+      if (valid.length > 0 || draft.tick % paramsOf(draft).persistencia.cadaTicks === 0
+        || technologyJournalNearCapacity(draft.technology) || chronicleJournalNearCapacity(draft)
+        || technologyCatalogueNearCapacity(draft.technology)) {
         const saveStarted = monotonicNow();
         store.save(draft, valid.map((item, i) => ({ gesture: item.gesture, result: results[i] })), valid.map(item => item.hash));
         runtime.saveMs = monotonicNow() - saveStarted;

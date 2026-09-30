@@ -4,8 +4,10 @@ import { spawnSync } from 'node:child_process';
 import { assertTechnologyCatalogueState, bindTechnologyCatalogue, catalogueEnabled, enableTechnologyCatalogue,
   findTechnologyRecipe, hasTechnologyFunction, markTechnologyCatalogueCommitted, registerTechnologyRecipe,
   resolveTechnologyRecipe, TECHNOLOGY_FUNCTION_WORDS, technologyCatalogueStateForCommit,
-  technologyCatalogueTotals, technologyFunctionCode, technologyFunctionCount, technologyMemoryCapacity,
+  technologyCatalogueNearCapacity, technologyCatalogueTotals, technologyFunctionCode, technologyFunctionCount, technologyMemoryCapacity,
+  MAX_PENDING_TECHNOLOGY_RECIPES, TECHNOLOGY_CATALOGUE_COMMIT_THRESHOLD,
   updateTechnologyRecipeStats, type TechnologyCatalogueReader } from '../src/world/technology-catalogue.js';
+import { POPULATION_HARD_LIMIT } from '../src/shared/life.js';
 import { defaultTechnologyState, initialTechnologyKnowledge, researchTechnology,
   type TechnologyActor, type TechnologyHost, type TechnologyProgram } from '../src/world/technology.js';
 import { PROGRAMA_FILO, proyectoInvestigacion } from './lib/escenas.js';
@@ -56,6 +58,30 @@ function archivedFixture() {
   const newDefinition = { ...definitions[3]!, manufactured: 0, uses: 0, utility: 0 };
   return { host, archive, reader, reads, newDefinition };
 }
+
+test('catalogue backlog admits definitions and statistics past the old fixed cap, then asks its host to commit', () => {
+  const oldCap = 65_536;
+  assert.equal(MAX_PENDING_TECHNOLOGY_RECIPES, POPULATION_HARD_LIMIT);
+  assert.ok(MAX_PENDING_TECHNOLOGY_RECIPES > oldCap);
+  const absent = defaultTechnologyState();
+  assert.equal(technologyCatalogueNearCapacity(absent), false);
+  const boundary = { catalogue: { pending: { length: TECHNOLOGY_CATALOGUE_COMMIT_THRESHOLD - 1 } } } as unknown as typeof absent;
+  assert.equal(technologyCatalogueNearCapacity(boundary), false);
+  boundary.catalogue!.pending.length++;
+  assert.equal(technologyCatalogueNearCapacity(boundary), true);
+
+  // Isolate both admission guards with a synthetic backlog. The distinct-record Store round trip
+  // at this actual boundary is scripts/lab/reproduce-catalogue-caps.mts; this fixture is not it.
+  const forDefinition = archivedFixture();
+  forDefinition.host.technology.catalogue!.pending = Array(oldCap).fill(forDefinition.archive.get('recipe-1')!);
+  assert.doesNotThrow(() => registerTechnologyRecipe(forDefinition.host, forDefinition.newDefinition));
+  assert.equal(forDefinition.host.technology.catalogue!.pending.length, oldCap + 1);
+
+  const forStats = archivedFixture();
+  forStats.host.technology.catalogue!.pending = Array(oldCap).fill(forStats.archive.get('recipe-2')!);
+  assert.doesNotThrow(() => updateTechnologyRecipeStats(forStats.host, 'recipe-1', { uses: 1 }));
+  assert.equal(forStats.host.technology.catalogue!.pending.length, oldCap + 1);
+});
 
 test('new paid definitions outlive cache eviction and their pending statistics resolve ahead of an unchanged archive', () => {
   const { host, archive, newDefinition } = archivedFixture(), state = host.technology;

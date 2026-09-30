@@ -1,4 +1,5 @@
 import type { Capability, TechnologyCatalogueTotals, TechnologyRecipe, TechnologyState } from '../shared/technology.js';
+import { POPULATION_HARD_LIMIT } from '../shared/life.js';
 
 export interface TechnologyCatalogueReader {
   resolve(id: string, atTick: number): TechnologyRecipe | null;
@@ -14,7 +15,11 @@ export interface TechnologyCatalogueReader {
   readonly readBatch?: <T>(atTick: number, read: () => T) => T;
 }
 export interface TechnologyCatalogueHost { technology: TechnologyState; tick: number; }
-export const MAX_PENDING_TECHNOLOGY_RECIPES = 65_536;
+/** Backstop for distinct uncommitted definitions/statistics. The host commits early below this
+ * bound; unlike the former fixed 65 536, the admission ceiling follows the world's structural
+ * population bound, like the technology and chronicle journals. */
+export const MAX_PENDING_TECHNOLOGY_RECIPES = POPULATION_HARD_LIMIT;
+export const TECHNOLOGY_CATALOGUE_COMMIT_THRESHOLD = Math.floor(MAX_PENDING_TECHNOLOGY_RECIPES * 0.75);
 export const TECHNOLOGY_FUNCTION_WORDS = 1458; // ceil(6 ** 6 / 32)
 const capabilities: readonly Capability[] = ['cutting', 'storage', 'insulation', 'cultivation', 'binding', 'abrasion'];
 const readers = new WeakMap<TechnologyState, TechnologyCatalogueReader>();
@@ -33,6 +38,13 @@ export function bindTechnologyCatalogue(state: TechnologyState, reader: Technolo
   readers.set(state, reader);
 }
 export function catalogueEnabled(state: TechnologyState): boolean { return state.catalogue !== undefined; }
+export function technologyCataloguePendingCount(state: TechnologyState): number {
+  return state.catalogue?.pending.length ?? 0;
+}
+/** A host with an attached Store must commit before the pending recipe queue reaches its backstop. */
+export function technologyCatalogueNearCapacity(state: TechnologyState): boolean {
+  return technologyCataloguePendingCount(state) >= TECHNOLOGY_CATALOGUE_COMMIT_THRESHOLD;
+}
 export function technologyFunctionCode(values: Record<Capability, number>): number {
   let result = 0, factor = 1;
   for (const capability of capabilities) {

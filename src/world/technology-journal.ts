@@ -1,7 +1,29 @@
 import type { TechnologyExecution, TechnologyState } from '../shared/technology.js';
+import { POPULATION_HARD_LIMIT } from '../shared/life.js';
 
-/** Explicit backpressure for a host that keeps stepping without committing its journal. */
-export const MAX_PENDING_TECHNOLOGY_EXECUTIONS = 65_536;
+/**
+ * Explicit backpressure for a host that keeps stepping without committing its journal.
+ *
+ * Raised 2026-09-29 (sprint/journal-caps-20260929): a fixed 65 536 killed a real replica with
+ * 3 775 neighbors and `persistencia.cadaTicks=300` mid-run (`Technology journal is full; commit
+ * before advancing the simulation.`, see the incident bitácora). Population is bounded only by
+ * hardware (FR-013/R17), never by a fixed count in the engine, so 65 536 was an arbitrary ceiling
+ * unrelated to any host's real memory. The actual fix is `technologyJournalNearCapacity` below:
+ * the host that advances the simulation (`scripts/lab/replica.ts`, `src/server/app.ts`) now
+ * commits EARLY, well before this number, every tick — this constant only remains as the
+ * last-resort anticorruption backstop for a tick a host somehow failed to react to in time.
+ * Sized like `MAX_CHRONICLE_ACTORS` in `chronicle-journal.ts` (same file's own precedent for this
+ * exact shape of bound): tied to `POPULATION_HARD_LIMIT`, the same derived ceiling `assertWorld`
+ * already uses, instead of inventing a second arbitrary number. Measured against the incident
+ * (≈218 executions/tick at 3 775 neighbors, ≈0.058/persona/tick): at `POPULATION_HARD_LIMIT`
+ * (1e6 personas) that rate scales to ≈58 000 executions in a single tick, so this cap still leaves
+ * headroom for several such ticks in a row before the backstop could ever be reached.
+ */
+export const MAX_PENDING_TECHNOLOGY_EXECUTIONS = POPULATION_HARD_LIMIT;
+
+/** Trigger point for the host's early commit: 75% full, leaving a quarter of the cap as
+ * headroom for whatever accumulates between this check and the commit it triggers landing. */
+export const TECHNOLOGY_JOURNAL_COMMIT_THRESHOLD = Math.floor(MAX_PENDING_TECHNOLOGY_EXECUTIONS * 0.75);
 
 const integer = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 function serial(execution: TechnologyExecution): number {
@@ -60,15 +82,34 @@ export function enableTechnologyJournal(state: TechnologyState): void {
   state.journal = journal;
 }
 
+/** Backpressure check shared by every writer that must fail BEFORE mutating (water actions check it
+ * up front, `journalTechnologyExecution` at append time), so a full journal is always reported as such
+ * and never disguised as a corrupt receipt. */
+export function assertTechnologyJournalRoom(state: TechnologyState): void {
+  if ((state.journal?.pending.length ?? 0) >= MAX_PENDING_TECHNOLOGY_EXECUTIONS) {
+    throw new Error('Technology journal is full; commit before advancing the simulation.');
+  }
+}
+
 /** Called before the recent ring can discard an execution. Its final benefit is filled on the same object. */
 export function journalTechnologyExecution(state: TechnologyState, execution: TechnologyExecution): void {
   if (!state.journal) return;
   const journal = state.journal;
-  if (journal.pending.length >= MAX_PENDING_TECHNOLOGY_EXECUTIONS) {
-    throw new Error('Technology journal is full; commit before advancing the simulation.');
-  }
+  assertTechnologyJournalRoom(state);
   if (serial(execution) !== journal.committedThrough + journal.pending.length + 1) fail();
   journal.pending.push(execution);
+}
+
+export function technologyJournalPendingCount(state: TechnologyState): number {
+  return state.journal?.pending.length ?? 0;
+}
+
+/** True once the pending queue is close enough to `MAX_PENDING_TECHNOLOGY_EXECUTIONS` that the
+ * host advancing the simulation should commit NOW instead of waiting for its usual cadence
+ * (`persistencia.cadaTicks`). This is the actual fix for the incident documented above: it makes
+ * the accumulation between commits bounded by a tick, not by the cadence a world's params pick. */
+export function technologyJournalNearCapacity(state: TechnologyState): boolean {
+  return technologyJournalPendingCount(state) >= TECHNOLOGY_JOURNAL_COMMIT_THRESHOLD;
 }
 
 /** Prepare the snapshot that will be valid only if the host commits every pending receipt atomically. */

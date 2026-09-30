@@ -4,7 +4,7 @@ import type { BodyState } from './body.js';
 import { exertBody, hydrateBody } from './body.js';
 import { SED_POR_UNIDAD } from './ecologia-constantes.js';
 import { appendTechnologyExecution, technologyStock } from './technology-execution.js';
-import { MAX_PENDING_TECHNOLOGY_EXECUTIONS } from './technology-journal.js';
+import { assertTechnologyJournalRoom } from './technology-journal.js';
 import { touchKnownRecipe } from './technology-memory.js';
 import { updateTechnologyRecipeStats } from './technology-catalogue.js';
 import { firstTileAt } from './tile-index.js';
@@ -176,9 +176,12 @@ export function assertWaterLedger(ledger: WaterLedger, current: number): void {
     || !Number.isFinite(ledger.energy) || ledger.energy < 0 || ledger.energy > Number.MAX_SAFE_INTEGER
     || ledger.filled !== safe(current + ledger.consumed + ledger.environmentalLoss)) fail();
 }
+/** Preconditions of appending one water receipt, checked before any mutation. A full journal is host
+ * backpressure (commit and retry), not a water invariant: it keeps the journal's own error so the host
+ * can tell it apart from corruption (incident COM12C20-8103, 29-09). */
 function room(host: TechnologyHost): void {
-  if (!integer(host.tick) || host.technology.executionCounter >= Number.MAX_SAFE_INTEGER
-    || (host.technology.journal?.pending.length ?? 0) >= MAX_PENDING_TECHNOLOGY_EXECUTIONS) fail();
+  if (!integer(host.tick) || host.technology.executionCounter >= Number.MAX_SAFE_INTEGER) fail();
+  assertTechnologyJournalRoom(host.technology);
 }
 function nextAccount(host: TechnologyHost, delta: Partial<Pick<WaterLedger, 'filled' | 'consumed' | 'environmentalLoss' | 'work' | 'energy'>>): WaterLedger {
   const ledger = host.technology.water ?? emptyWaterLedger(), next = { ...ledger };

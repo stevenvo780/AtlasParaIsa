@@ -9,7 +9,8 @@ import { Session } from 'node:inspector';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
 import { Store } from '../../src/server/store.js';
-import { assertWorld, fraccionSerial, projectWorld, stepWorld, TICKS_PER_DAY, type FaseMedicion } from '../../src/world/index.js';
+import { assertWorld, cloneWorld, fraccionSerial, projectWorld, stepWorld, TICKS_PER_DAY, type FaseMedicion } from '../../src/world/index.js';
+import { closeEcosystemWorkers, ecosystemWorkerDiagnostics } from '../../src/world/ecosystem.js';
 import { digestoCanonico } from '../../src/world/digesto.js';
 import { paramsOf, parseParams, setParams } from '../../src/world/params.js';
 import { technologyJournalNearCapacity } from '../../src/world/technology-journal.js';
@@ -82,10 +83,15 @@ async function main() {
   try {
     const loadAt = stamp(), loaded = store.load();
     if (!loaded) throw new Error('Escena vacía');
-    const loadCost = difference(loadAt), world = loaded.world, referenceParams = paramsOf(world);
+    const loadCost = difference(loadAt), referenceParams = paramsOf(loaded.world);
+    let world = loaded.world;
     const initialDigest = digestoCanonico(world), initial = { tick: world.tick, population: world.people.length,
       tiles: world.tiles.length, animals: world.animals.length, recipes: world.technology.recipes.length };
     setParams(world, parseParams(`motor.hilos=${threads}`, referenceParams));
+    // Adopción privada antes de exponer al banco: mismo mundo y lectores, Tile nuevos observados.
+    const adoptionAt = stamp();
+    if (threads > 1) world = cloneWorld(world);
+    const adoptionCost = difference(adoptionAt);
     const census = new Map<string, number>(), instrumentsAt = stamp(), instruments = new InstrumentosConducta(world, store.db);
     const instrumentsSetup = difference(instrumentsAt);
     const samples: { tick: number; population: number; tiles: number; step: ReturnType<typeof difference>;
@@ -143,17 +149,22 @@ async function main() {
     const totalWall = samples.reduce((s, x) => s + x.step.wallMs, 0), totalCpu = samples.reduce((s, x) => s + x.step.cpuMs, 0);
     const saves = samples.filter(s => s.save !== null);
     const sumPhaseWall = Object.values(phaseWall).reduce((a, b) => a + b, 0), sumPhaseCpu = Object.values(phaseCpu).reduce((a, b) => a + b, 0);
+    const completedSourceDigest = sourceHash();
+    if (completedSourceDigest !== sourceDigest) throw new Error('Fuentes cambiadas durante el banco: no mezclar cifras de snapshots distintos.');
     const result = { startedAt, finishedAt: new Date().toISOString(), code, sourceDigest, pid: process.pid, db: realpathSync(db), working,
       seed: world.seed, initial, final: { tick: world.tick, population: world.people.length, tiles: world.tiles.length }, steps,
-      referenceParams, measuredParams, initialDigest, finalDigest,
+      referenceParams, measuredParams, initialDigest, finalDigest, completedSourceDigest, stableExecutedSources: true,
+      cpuProfileScope: 'main V8 isolate; phase CPU uses aggregate process CPU including worker threads',
       digestNormalization: 'Only motor.hilos restored to referenceParams for final digest; all laws preserved',
-      copyCost, loadCost, stepWall: distribution(samples.map(s => s.step.wallMs)), stepCpu: distribution(samples.map(s => s.step.cpuMs)),
+      copyCost, loadCost, adoptionCost, stepWall: distribution(samples.map(s => s.step.wallMs)), stepCpu: distribution(samples.map(s => s.step.cpuMs)),
       phases: Object.fromEntries(Object.keys(phaseWall).map(k => [k, { wallMsPerStep: phaseWall[k]! / steps, cpuMsPerStep: phaseCpu[k]! / steps,
         wallFraction: phaseWall[k]! / totalWall, cpuFraction: phaseCpu[k]! / totalCpu }])),
       unclassified: { wallMsPerStep: (totalWall - sumPhaseWall) / steps, cpuMsPerStep: (totalCpu - sumPhaseCpu) / steps },
       serialByDesign: fraccionSerial({ ...phaseWall, save: saves.reduce((s, x) => s + x.save!.wallMs, 0) }),
-      execution: { configuredThreads: threads, baselineSynchronousMotor: true, physicalSerialFraction: 1,
-        note: 'Baseline bb48326 never dispatches motor.hilos; redesign evidence required after implementation' },
+      execution: { configuredThreads: threads, baselineSynchronousMotor: threads === 1,
+        physicalSerialFraction: threads === 1 ? 1 : null, diagnostics: threads > 1 ? ecosystemWorkerDiagnostics() : null,
+        parallelPhases: threads > 1 ? ['ecologia', 'kernel'] : [],
+        note: 'Physical worker dispatches recorded. Aggregate process CPU does not measure physical serial fraction; null means unmeasured. Private one-time observed ownership adoption is published separately.' },
       saves: { count: saves.length, wall: distribution(saves.map(s => s.save!.wallMs)), cpu: distribution(saves.map(s => s.save!.cpuMs)),
         wallMsPerStep: saves.reduce((s, x) => s + x.save!.wallMs, 0) / steps, cpuMsPerStep: saves.reduce((s, x) => s + x.save!.cpuMs, 0) / steps },
       instrumentsSetup, observationWallMsPerStep: samples.reduce((s, x) => s + x.observation.wallMs, 0) / steps,
@@ -163,6 +174,6 @@ async function main() {
       maxPending, affinity: readFileSync('/proc/self/status', 'utf8').match(/^Cpus_allowed_list:.*$/m)?.[0] };
     writeFileSync(output, JSON.stringify(result, null, 2) + '\n');
     console.log(JSON.stringify({ event: 'complete', output, finalDigest }));
-  } finally { profiler.disconnect(); store.close(); }
+  } finally { profiler.disconnect(); store.close(); await closeEcosystemWorkers(); }
 }
 main().catch(e => { console.error(e); process.exitCode = 1; });

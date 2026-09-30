@@ -9,7 +9,7 @@ import { chunkKey, generateChunk, proceduralPlaceName, legacyStructures, type Ch
 import { assertGenome, DEFAULT_MUTATION_RATE, expressGenome, founderGenome, inheritGenome, localRandom, type Genome } from './genetics.js';
 import { bond, convivir, cooperate, cooperationOpportunity, initialCulture, resourceDispute, updateCommunities, settlementOpportunity, type Culture } from './society.js';
 import { count, emptyTotals, heredarEstadisticas, recordSample, worldStatistics } from './statistics.js';
-import { initializeEcosystem, stepEcosystem, harvestMaterial, cultivateTile, trampleTile, FOOD_PER_ANIMAL } from './ecosystem.js';
+import { initializeEcosystem, stepEcosystem, stepLocalEcology, harvestMaterial, cultivateTile, trampleTile, FOOD_PER_ANIMAL } from './ecosystem.js';
 import { assertEcosystemTile, assertLifeState, assertDormantTerrain } from './validation.js';
 import { materializeAnimals, stepAnimals, harvestAt, type Animal } from './animals.js';
 import { advanceNeeds } from './needs.js';
@@ -263,7 +263,7 @@ function seededTraits(seed: number, index: number): Person['traits'] {
 }
 
 /** Exportada para que la evidencia de T013 aplique la ley real a un mapa amplio sin pagar el coste del paso completo. */
-export function ecology(world: World): void {
+export function ecology(world: World, execution?: EcologyExecution): void {
   if (world.tick % INTERVALO_TIEMPO_TICKS === 0) {
     const previous = world.weather;
     world.weather = random(world) < PROB_LLUVIA ? 'rain' : 'clear';
@@ -275,6 +275,12 @@ export function ecology(world: World): void {
   }
   if (world.tick % INTERVALO_ECOLOGIA_TICKS !== 0) return;
   const phase = phaseAt(world.tick);
+  if (paramsOf(world).motor.hilos > 1) {
+    stepLocalEcology(world.tiles, world.tick, world.weather, phase, paramsOf(world).recursos,
+      { hilos: paramsOf(world).motor.hilos, orden: paramsOf(world).motor.orden,
+        ...(execution ?? (worldContext(world) as WorldContext).ecologyExecution) });
+    return;
+  }
   const light = phase === 'day' ? 1 : phase === 'night' ? 0 : LUZ_CREPSCULO;
   const { capacidadBosque, capacidadPastizal, capacidadOtros, velocidadRegeneracion, decaimientoComida } = paramsOf(world).recursos;
   // Índice fijado antes del recorrido (sprint noche-perf 2026-09-22): este bucle sólo cambia campos de
@@ -1237,21 +1243,22 @@ export function fraccionSerial(fases: Partial<Record<FaseNombre, number>>): numb
 }
 export function stepWorld(world: World, inputs: Gesture[] = [], context: WorldContext = worldContext(world), medicion?: FaseMedicion): GestureResult[] {
   bindWorldContext(world, context);
+  const boundContext = worldContext(world) as WorldContext;
   if (world.technology.checkpoint === undefined) world.technology.checkpoint = captureTechnologyCheckpoint(world.technology, world.people, world.tick, 'migration');
   world.tick++;
   // Sprint noche-perf2 2026-09-22: el paso sólo LEE el archivo de recetas (nunca escribe en él: eso es
   // del guardado, fuera del paso), así que sus lecturas a fecha de este tick van como un lote del
   // anfitrión, con un solo sello de la memoria de lecturas del Store en vez de uno por lectura (~900 por
   // paso con ~230 habitantes). El mundo resultante es el mismo; ver `readBatch` en store.ts.
-  return withArchiveReadBatch(world, () => conRejilla(world, () => advanceTick(world, inputs, context, medicion)));
+  return withArchiveReadBatch(world, () => conRejilla(world, () => advanceTick(world, inputs, boundContext, medicion)));
 }
 function advanceTick(world: World, inputs: Gesture[], context: WorldContext, medicion: FaseMedicion | undefined): GestureResult[] {
   medirFase(medicion, 'maintainRegions', () => maintainRegions(world, context));
   const results = inputs.map((gesture, order) => applyGesture(world, gesture, order));
   world.invitations = world.invitations.filter(invitation => invitation.until > world.tick);
   world.reminders = world.reminders.filter(reminder => reminder.until > world.tick);
-  medirFase(medicion, 'ecologia', () => ecology(world));
-  if (world.tick % INTERVALO_ECOLOGIA_TICKS === 0) context.ecologyExecution?.onBarrier?.({
+  medirFase(medicion, 'ecologia', () => ecology(world, context.ecologyExecution));
+  if (world.tick % INTERVALO_ECOLOGIA_TICKS === 0 && paramsOf(world).motor.hilos === 1) context.ecologyExecution?.onBarrier?.({
     tick: world.tick, phase: 'ecologia', regionSide: context.ecologyExecution.regionSide ?? 256,
     orden: paramsOf(world).motor.orden, workers: 1, dirtyPages: undefined, diagnostics: null, topologyCertificate: undefined,
   });

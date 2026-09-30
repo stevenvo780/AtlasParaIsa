@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import type { Tile } from '../../src/shared/types.js';
 import { assertWorld, createWorld, type Person, type World } from '../../src/world/index.js';
 import { demographicTraits, initialDemography } from '../../src/world/demography.js';
-import { activate, tileAt } from '../../src/world/spatial.js';
+import { activate, bindWorldContext, tileAt } from '../../src/world/spatial.js';
+import { ResidentTopologyOwner } from '../../src/world/soa/topologia.js';
 import { settlementOpportunity } from '../../src/world/society.js';
 import { chunkKey } from '../../src/world/terrain.js';
 
@@ -32,7 +33,12 @@ function initialScene(seed: number, positions: readonly { x: number; y: number }
   const world = createWorld(seed);
   world.tick = tick;
   world.people = world.people.slice(0, positions.length);
-  world.tiles = []; world.chunks = {}; world.retiredChunks = [];
+  // Both serial and parallel fixtures are owned from construction. No exposed Tile identity
+  // is replaced by a Proxy later; activate() creates owned Tiles before returning them.
+  const tileOwnership = new ResidentTopologyOwner();
+  world.tiles = tileOwnership.tiles([]);
+  bindWorldContext(world, { tileOwnership });
+  world.chunks = {}; world.retiredChunks = [];
   world.animals = []; world.structures = [];
   for (let i = 0; i < positions.length; i++) {
     const position = positions[i]!;

@@ -26,6 +26,13 @@ const indexOf = (key: PropertyKey): number | null => {
   const index = Number(key);
   return Number.isInteger(index) && index >= 0 && index < 0xffffffff && String(index) === key ? index : null;
 };
+const sameDescriptor = (a: PropertyDescriptor | undefined, b: PropertyDescriptor | undefined): boolean => {
+  if (a === undefined || b === undefined) return a === b;
+  if (a.configurable !== b.configurable || a.enumerable !== b.enumerable) return false;
+  if ('value' in a || 'value' in b) return 'value' in a && 'value' in b
+    && Object.is(a.value, b.value) && a.writable === b.writable;
+  return a.get === b.get && a.set === b.set;
+};
 
 /**
  * Constructor del anfitrión. Crea objetos NUEVOS antes de exponerlos: no cambia silenciosamente la
@@ -45,9 +52,14 @@ const indexOf = (key: PropertyKey): number | null => {
 export class ResidentTopologyOwner {
   private coordinates: object = {};
   private opaqueTiles = 0;
+  /** Proxies con escrituras lógicas desde el último drenaje; Set conserva identidad, orden y O(tocados). */
+  private readonly changedTiles = new Set<Tile>();
 
   tile(source: Tile): Tile {
     const target = { ...source }, state: ObservedTile = { owner: this, maintenance: 0, opaque: new Set() };
+    const owner = this;
+    // Los traps no pueden ejecutarse durante `new Proxy`; después siempre registran la identidad pública.
+    let tile!: Tile;
     const changed = (key: PropertyKey, reflection = false): void => {
       if (state.maintenance) return;
       if (key === 'x' || key === 'y') this.coordinates = {};
@@ -58,37 +70,61 @@ export class ResidentTopologyOwner {
         const isOpaque = state.opaque.size > 0;
         if (isOpaque !== wasOpaque) this.opaqueTiles += isOpaque ? 1 : -1;
       }
+      owner.changedTiles.add(tile);
       state.observer?.after(key);
     };
     const before = (): void => { if (!state.maintenance) state.observer?.before(); };
-    const owner = this;
-    const tile = new Proxy(target, {
+    tile = new Proxy(target, {
       set(object, key, value, receiver) {
+        const previous = Reflect.getOwnPropertyDescriptor(object, key);
         before();
         // Los accessors SoA necesitan el Proxy como this (es la identidad pública del Tile).
         const accepted = Reflect.set(object, key, value, receiver);
-        if (accepted) changed(key);
+        const current = Reflect.getOwnPropertyDescriptor(object, key);
+        // Un accessor puede escribir su valor fuera del descriptor (los residentes lo hacen en SAB).
+        // Si ambos descriptores faltan, un setter heredado puede haber hecho lo mismo.
+        const externalSetter = accepted && (previous !== undefined && 'set' in previous && previous.set !== undefined
+          || previous === undefined && current === undefined);
+        if (accepted && (!sameDescriptor(previous, current) || externalSetter)) changed(key);
         return accepted;
       },
       defineProperty(object, key, descriptor) {
+        const previous = Reflect.getOwnPropertyDescriptor(object, key);
         before(); const accepted = Reflect.defineProperty(object, key, descriptor);
-        if (accepted) changed(key, true);
+        const current = Reflect.getOwnPropertyDescriptor(object, key);
+        if (accepted && !sameDescriptor(previous, current)) changed(key, true);
         return accepted;
       },
       deleteProperty(object, key) {
+        const previous = Reflect.getOwnPropertyDescriptor(object, key);
         before(); const accepted = Reflect.deleteProperty(object, key);
-        if (accepted) changed(key, true);
+        if (accepted && previous !== undefined && Reflect.getOwnPropertyDescriptor(object, key) === undefined) changed(key, true);
         return accepted;
       },
       setPrototypeOf(object, prototype) {
+        const previous = Reflect.getPrototypeOf(object);
         before(); const accepted = Reflect.setPrototypeOf(object, prototype);
-        if (accepted) { owner.invalidate(); state.observer?.after('x'); }
+        if (accepted && previous !== Reflect.getPrototypeOf(object)) {
+          owner.invalidate(); owner.changedTiles.add(tile); state.observer?.after('x');
+        }
         return accepted;
       },
-      preventExtensions(object) { before(); return Reflect.preventExtensions(object); },
+      preventExtensions(object) {
+        const previous = Reflect.isExtensible(object);
+        before(); const accepted = Reflect.preventExtensions(object);
+        if (accepted && previous && !Reflect.isExtensible(object)) owner.changedTiles.add(tile);
+        return accepted;
+      },
     });
     observedTiles.set(tile, state);
     return tile;
+  }
+
+  /** Cambios lógicos deduplicados desde la consulta anterior. No recorre el mundo. */
+  drainChangedTiles(): Tile[] {
+    const changed = [...this.changedTiles];
+    this.changedTiles.clear();
+    return changed;
   }
 
   tiles(source: readonly Tile[]): Tile[] {
@@ -161,6 +197,10 @@ export class ResidentTopologyOwner {
 export function residentTopologyToken(tiles: Tile[]): ResidentTopologyToken | undefined {
   const state = observedArrays.get(tiles);
   return state?.owner.token(state);
+}
+/** Asociación emitida por registry; el contexto del mundo puede preceder a un reemplazo del array. */
+export function residentTopologyOwner(tiles: Tile[]): ResidentTopologyOwner | undefined {
+  return observedArrays.get(tiles)?.owner;
 }
 export const sameResidentTopology = (a: ResidentTopologyToken | undefined, b: ResidentTopologyToken | undefined): boolean =>
   a !== undefined && b !== undefined && a.array === b.array && a.coordinates === b.coordinates;

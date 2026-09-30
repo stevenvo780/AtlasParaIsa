@@ -2,6 +2,7 @@ import type { Feature, Tile, Species } from '../shared/types.js';
 import { EcosystemKernel, type EcosystemOptions } from './ecosystem-kernel.js';
 import { initialWood } from './forest.js';
 import { ruidoCuenca } from './agua.js';
+import type { WorldParams } from './params.js';
 const clamp = (n: number, maximum = 1): number => Math.max(0, Math.min(maximum, n));
 const key = (x: number, y: number): string => `${x},${y}`;
 const TREE_FEATURES = new Set<Feature>(['tree', 'pine', 'palm', 'cactus', 'reeds', 'stump']);
@@ -106,6 +107,12 @@ export function stepEcosystem(tiles: Tile[], tick: number, weather: 'clear' | 'r
   if (tick % 10 !== 0) return;
   ecosystemKernel.step(tiles, tick, weather, phase, options);
   if (updateFauna && tick % 50 === 0) stepFauna(tiles, tick);
+}
+
+/** T120: misma autoridad y pool que stepEcosystem; el clima se decide antes en index.ts. */
+export function stepLocalEcology(tiles: Tile[], tick: number, weather: 'clear' | 'rain', phase: string,
+  recursos: WorldParams['recursos'], options: EcosystemOptions): void {
+  ecosystemKernel.stepEcology(tiles, tick, weather, phase, recursos, options);
 }
 
 function animalWater(cell: CellState, species: Species): number {

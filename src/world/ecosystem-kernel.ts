@@ -4,6 +4,8 @@ import { TileStore } from './soa/terreno.js';
 import { StaticWorkerPool, type StaticWorkerDiagnostics, type StaticWorkerHandlerJob } from './paralelo/piscina.js';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { runParallelEcology, type ParallelEcologyParams } from './ecology-kernel.js';
+import type { WorldParams } from './params.js';
 
 const clamp = (n: number): number => Math.max(0, Math.min(1, n));
 const TREE_FEATURES = new Set<Feature>(['tree', 'pine', 'palm', 'cactus', 'reeds', 'stump']);
@@ -114,6 +116,28 @@ export class EcosystemKernel {
   get cachedTopologyCount(): number { return this.topologies.length; }
   /** T112: el `TileStore` de la topología SoA, si alguna pasada lo usó (para medir sus bytes). */
   get soaStore(): TileStore | null { return this.soa; }
+
+  /** Primera pasada, sobre el MISMO pool residente, completada antes del kernel de vida. */
+  stepEcology(tiles: Tile[], tick: number, weather: 'clear' | 'rain', phase: string,
+    recursos: WorldParams['recursos'], options: EcosystemOptions): void {
+    if (tick % 10 !== 0) return;
+    const workers = options.hilos ?? 1;
+    if (!Number.isSafeInteger(workers) || workers <= 1) throw new RangeError('El despacho paralelo de ecology requiere hilos > 1.');
+    const store = this.soa ??= new TileStore(), terrain = store.prepareParallel(tiles, options.regionSide);
+    let pool = this.pools.get(workers);
+    if (!pool) { pool = this.createPool(workers); this.pools.set(workers, pool); }
+    this.lastPool = pool; this.topologies.length = 0;
+    store.beginParallel();
+    try {
+      const params: ParallelEcologyParams = { phase: 'ecologia', weather,
+        light: phase === 'day' ? 1 : phase === 'night' ? 0 : 0.4, recursos, version: terrain.version };
+      pool.run({ regions: terrain.regions, buffers: terrain.buffers, orden: options.orden, params });
+      store.commitParallel('ecologia');
+    } catch (error) { store.abortParallel(); throw error; }
+    options.onBarrier?.({ tick, phase: 'ecologia', regionSide: options.regionSide ?? 256,
+      orden: options.orden ?? 'natural', workers, dirtyPages: store.dirtyPageCoordinates(),
+      diagnostics: pool.diagnostics(), topologyCertificate: store.parallelTopologyCertificate(tiles) });
+  }
 
   /**
    * `seed`/`cuencas` (T035 ronda de arreglo, hallazgo crítico #1): con el default `cuencas=1` el
@@ -244,7 +268,11 @@ interface ParallelEcosystemParams {
 
 /** Cuerpo FP64 del kernel vivo, con el mismo orden de operaciones y sin reducciones entre celdas.
  * Los vecinos siempre se leen del frente compartido, incluso al cruzar la región de la cola. */
-export function runParallelEcosystem({ regions, buffers, params }: StaticWorkerHandlerJob<ParallelEcosystemParams>): void {
+export function runParallelEcosystem(job: StaticWorkerHandlerJob<ParallelEcosystemParams | ParallelEcologyParams>): void {
+  if ('phase' in job.params && job.params.phase === 'ecologia') {
+    runParallelEcology(job as StaticWorkerHandlerJob<ParallelEcologyParams>); return;
+  }
+  const { regions, buffers, params } = job as StaticWorkerHandlerJob<ParallelEcosystemParams>;
   const { tick, weather, light, decaimientoFertilidad, seed, cuencas, version } = params;
   const cells = new Int32Array(buffers.cells!), stamps = new Uint32Array(buffers.stamps!);
   const around = new Int32Array(buffers.around!), pageX = new Int32Array(buffers.pageX!), pageY = new Int32Array(buffers.pageY!);
@@ -259,6 +287,8 @@ export function runParallelEcosystem({ regions, buffers, params }: StaticWorkerH
   const cultivationFront = new Float64Array(buffers.cultivation!), cultivationBack = new Float64Array(buffers.cultivationBack!);
   const drinkingFront = new Float64Array(buffers.drinkingWater!), drinkingBack = new Float64Array(buffers.drinkingWaterBack!);
   const woodFront = new Float64Array(buffers.wood!), woodBack = new Float64Array(buffers.woodBack!);
+  const foodFront = buffers.food ? new Float64Array(buffers.food) : undefined;
+  const foodBack = buffers.foodBack ? new Float64Array(buffers.foodBack) : undefined;
   const dirty = new Uint8Array(buffers.dirty!), woodAdded = new Uint8Array(buffers.woodAdded!);
   const woodAddedQueue = buffers.woodAddedQueue ? new Int32Array(buffers.woodAddedQueue) : undefined;
   if (woodAddedQueue) Atomics.store(woodAddedQueue, 0, 1);
@@ -299,6 +329,7 @@ export function runParallelEcosystem({ regions, buffers, params }: StaticWorkerH
     moistureBack[cell] = localTerrain === 1 ? clamp(moisture + (localBiome === 6 ? 0.003 : 0) + (weather === 'rain' ? 0.008 : 0)) : moisture;
     woodBack[cell] = woodFront[cell]!; featureBack[cell] = localFeature;
     terrainBack[cell] = localTerrain; biomeBack[cell] = localBiome;
+    if (foodFront && foodBack) foodBack[cell] = foodFront[cell]!;
     if (tick % 100 === 0 && ((localFeature >= 1 && localFeature <= 5) || localFeature === 10) && growth > 0.65
       && fertility > 0.4 && moisture > 0.35 && traffic < 0.35 && light > 0) {
       const capacity = localFeature === 5 || localFeature === 4 ? 2 : localFeature === 3 ? 6 : 12;

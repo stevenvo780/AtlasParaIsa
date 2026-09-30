@@ -5,11 +5,14 @@ import { IncrementalRegionHasher } from '../src/world/digesto.js';
 import { closeEcosystemWorkers } from '../src/world/ecosystem.js';
 import { stepWorld } from '../src/world/index.js';
 import { paramsOf, setParams } from '../src/world/params.js';
+import { residentTopologyOwner, residentTopologyToken } from '../src/world/soa/topologia.js';
+import { chunkKey } from '../src/world/terrain.js';
 import { HARDWARE_SCENES, HARDWARE_SEEDS, buildHardwareScene, regionGroupedHarvestTotal,
   sequentialHarvestTotal } from './hardware/escenas.js';
-import { firstHashDisagreement, locateDifference, normalizedCopy,
+import { firstHashDisagreement, locateDifference, normalizedCopy, plainWorldCopy,
   snapshotBarrier, throwDifference } from './hardware/contrato.js';
 import { CPU_BACKENDS, adversarialWorkerCount, captureReference, compareCandidate } from './hardware/matriz.js';
+import { HardwareTileChanges } from './hardware/cambios.js';
 
 // The default npm test includes the complete literal 600-step CPU matrix. Opt-in replaces
 // its duration with 2400 steps; it never relabels a shorter trajectory as the long gate.
@@ -42,7 +45,7 @@ test('T117 normalization preserves every law and every execution option outside 
   const copy = normalizedCopy(world), expected = structuredClone(params);
   Object.assign(expected.motor, { hilos: 1, orden: 'natural', gpu: [], soaTerreno: false });
   assert.deepEqual(paramsOf(copy), expected);
-  assert.deepEqual(copy, structuredClone(world));
+  assert.deepEqual(copy, plainWorldCopy(world));
   assert.deepEqual(paramsOf(copy).recursos, params.recursos);
   assert.deepEqual(paramsOf(copy).poblacion, params.poblacion);
 });
@@ -118,22 +121,105 @@ test('T117 negativo fin-paso: food/stone/fauna mutations outside ecology fail on
   }
 });
 
+test('T120 tracker: owned set/delete/define touches one page and stable captures scan no topology', () => {
+  const world = buildHardwareScene(7, 'compacta').world, tracker = new HardwareTileChanges(world);
+  const initial = tracker.capture(), certificate = tracker.topologyCertificate;
+  assert.ok(certificate); assert.ok(initial.fullRefresh);
+  assert.equal(initial.digest.topologyScannedTiles, world.tiles.length);
+  const tile = world.tiles.find(t => t.x === 9 && t.y === 9)!;
+  tile.food += 0.03125; tile.stone = 0.25; tile.fauna = 1; tile.species = 'hare';
+  delete tile.variety;
+  Object.defineProperty(tile, 'cultivation', { value: -0, writable: true, configurable: true, enumerable: true });
+  Object.defineProperty(tile, 'traffic', { value: undefined, writable: true, configurable: true, enumerable: true });
+  const capture = tracker.capture();
+  assert.equal(capture.fullRefresh, false); assert.equal(capture.changedTiles, 1);
+  assert.equal(capture.digest.updatedPages, 1); assert.equal(capture.digest.topologyScannedTiles, 0);
+  assert.strictEqual(tracker.topologyCertificate, certificate, 'Value/key writes keep the real topology token stable.');
+  const fresh = new IncrementalRegionHasher(256, { normalizeExecution: true }).update(world);
+  assert.deepEqual(capture.digest.pageHashes, fresh.pageHashes); assert.equal(capture.digest.globalHash, fresh.globalHash);
+  const stable = tracker.capture();
+  assert.deepEqual(stable.dirtyPages, []); assert.equal(stable.digest.updatedPages, 0);
+  assert.equal(stable.digest.topologyScannedTiles, 0); assert.equal(stable.fullRefresh, false);
+});
+
+test('T120 tracker: array replacement/reorder/coordinates renew certificates before hashing', () => {
+  const world = buildHardwareScene(7, 'compacta').world, owner = residentTopologyOwner(world.tiles)!;
+  const tracker = new HardwareTileChanges(world); tracker.capture();
+  let certificate = tracker.topologyCertificate;
+  const tile = world.tiles[0]!;
+  world.tiles = owner.tiles([...world.tiles]);
+  let capture = tracker.capture();
+  assert.ok(capture.digest.rebuiltTopology); assert.notStrictEqual(tracker.topologyCertificate, certificate);
+  assert.strictEqual(tracker.topologyCertificate!.tiles, world.tiles); assert.strictEqual(world.tiles[0], tile);
+  certificate = tracker.topologyCertificate;
+  world.tiles.reverse(); capture = tracker.capture();
+  assert.ok(capture.digest.rebuiltTopology); assert.notStrictEqual(tracker.topologyCertificate, certificate);
+  certificate = tracker.topologyCertificate;
+  const first = world.tiles[0]!, second = world.tiles[1]!, x = first.x;
+  first.x = second.x; second.x = x;
+  capture = tracker.capture();
+  assert.ok(capture.digest.rebuiltTopology); assert.notStrictEqual(tracker.topologyCertificate, certificate);
+  const fresh = new IncrementalRegionHasher(256, { normalizeExecution: true }).update(world);
+  assert.deepEqual(capture.digest.pageHashes, fresh.pageHashes);
+  assert.equal(tracker.capture().digest.topologyScannedTiles, 0);
+});
+
+test('T120 tracker: raw/getter revocation refreshes unobservable writes safely', () => {
+  for (const mode of ['raw', 'getter'] as const) {
+    const world = buildHardwareScene(7, 'compacta').world, tracker = new HardwareTileChanges(world);
+    tracker.capture(); let food = world.tiles[0]!.food;
+    if (mode === 'raw') world.tiles[0] = { ...world.tiles[0]! };
+    else Object.defineProperty(world.tiles[0]!, 'food', { get: () => food, configurable: true, enumerable: true });
+    assert.equal(residentTopologyToken(world.tiles), undefined);
+    const capture = tracker.capture(); assert.ok(capture.fullRefresh);
+    assert.equal(tracker.topologyCertificate, undefined);
+    const previous = new Map(capture.digest.pageHashes);
+    if (mode === 'raw') world.tiles[0]!.food += 0.03125; else food += 0.03125;
+    const next = tracker.capture();
+    assert.ok(next.fullRefresh); assert.ok(next.digest.topologyScannedTiles >= world.tiles.length);
+    assert.notDeepEqual(next.digest.pageHashes, previous, 'A raw write/getter closure cannot hide behind an old certificate.');
+  }
+});
+
+test('T120 canonical copy materializes active/dormant Proxies preserving keys, undefined and -0', () => {
+  const world = buildHardwareScene(7, 'compacta').world, owner = residentTopologyOwner(world.tiles)!;
+  const meta = Object.values(world.chunks)[0]!, cx = meta.cx + 256, cy = meta.cy + 256;
+  const tiles = world.tiles.filter(tile => chunkKey(tile.x, tile.y) === meta.key)
+    .map(tile => owner.tile({ ...tile, x: tile.x + 4096, y: tile.y + 4096 }));
+  world.retiredChunks.push({ ...meta, key: `${cx},${cy}`, cx, cy, tiles, places: [], animals: [], structures: [], lifeVersion: 4, lastTick: world.tick });
+  const active = world.tiles[0]!, dormant = tiles[0]!;
+  for (const tile of [active, dormant]) { tile.wood = -0; tile.species = undefined; }
+  const copy = normalizedCopy(world);
+  for (const [before, after] of [[active, copy.tiles[0]!], [dormant, copy.retiredChunks[0]!.tiles[0]!]]) {
+    assert.deepEqual(Object.keys(after!), Object.keys(before!));
+    assert.ok(Object.hasOwn(after!, 'species')); assert.equal(after!.species, undefined);
+    assert.ok(Object.is(after!.wood, -0)); assert.notStrictEqual(before, after);
+  }
+  assert.doesNotThrow(() => structuredClone(copy));
+});
+
 for (const seed of HARDWARE_SEEDS) for (const scene of HARDWARE_SCENES) {
   test(`T117 matrix seed=${seed} scene=${scene} steps=${STEPS}`, async t => {
     const started = performance.now(), reference = captureReference(seed, scene, STEPS);
-    let actualDispatches = 0, actualDelays = 0, topologyScannedTiles = reference.topologyScannedTiles;
+    let actualDispatches = 0, actualEcologyDispatches = 0, actualDelays = 0, topologyScannedTiles = reference.topologyScannedTiles;
     let fullRefreshes = reference.fullRefreshes;
+    let globalCaptures = reference.globalCaptures, logicalTileChanges = reference.logicalTileChanges,
+      updatedPages = reference.updatedPages;
     for (const regionSide of [256, 512] as const) for (const backend of CPU_BACKENDS) {
       await t.test(`CPU=${backend} geometry=${regionSide}`, () => {
         const evidence = compareCandidate(reference, regionSide, backend);
         actualDispatches += evidence.actualKernelDispatches; actualDelays += evidence.delayCount;
+        actualEcologyDispatches += evidence.actualEcologyDispatches;
         topologyScannedTiles += evidence.topologyScannedTiles; fullRefreshes += evidence.fullRefreshes;
+        globalCaptures += evidence.globalCaptures; logicalTileChanges += evidence.logicalTileChanges;
+        updatedPages += evidence.updatedPages;
       });
     }
     // Diagnostic measurements are evidence, never substituted for the global <=180s gate.
     t.diagnostic(`steps=${STEPS}; elapsedMs=${(performance.now() - started).toFixed(3)};`
-      + ` physicalKernelDispatches=${actualDispatches}; realDelayCount=${actualDelays};`
-      + ` topologyScannedTiles=${topologyScannedTiles}; fullRefreshes=${fullRefreshes}`);
+      + ` physicalEcologyDispatches=${actualEcologyDispatches}; physicalKernelDispatches=${actualDispatches}; realDelayCount=${actualDelays};`
+      + ` topologyScannedTiles=${topologyScannedTiles}; fullRefreshes=${fullRefreshes};`
+      + ` logicalTileChanges=${logicalTileChanges}; updatedPages=${updatedPages}; globalCaptures=${globalCaptures}`);
   });
   for (const regionSide of [256, 512]) for (const gpu of [[0], [1], [0, 1]]) test(`T117 CUDA seed=${seed} scene=${scene} geometry=${regionSide} gpu=[${gpu.join(',')}]`,
     { skip: 'Etapa C pending: no CUDA ecology backend implemented or certified; this is SKIP, never CPU/GPU PASS.' }, () => {});

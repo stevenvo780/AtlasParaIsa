@@ -26,8 +26,15 @@ export interface BarrierSnapshot {
 
 /** Only the four admitted execution selectors differ. Do not normalize laws, limits,
  * population, chronology, ordering of simulation arrays, or other motor options. */
+export function plainWorldCopy(world: World): World {
+  // Active and pending dormant Tiles may be Proxies. Spread materializes their exact
+  // enumerable keys/undefined/-0 values before structuredClone; JSON would lose them.
+  return structuredClone({ ...world, tiles: world.tiles.map(tile => ({ ...tile })),
+    retiredChunks: world.retiredChunks.map(chunk => ({ ...chunk,
+      tiles: chunk.tiles.map(tile => ({ ...tile })) })) });
+}
 export function normalizedCopy(world: World): World {
-  const copy = structuredClone(world);
+  const copy = plainWorldCopy(world);
   const params = structuredClone(paramsOf(world));
   Object.assign(params.motor, { hilos: 1, orden: 'natural', gpu: [], soaTerreno: false });
   setParams(copy, params);
@@ -79,10 +86,10 @@ export function throwDifference(difference: LocatedDifference): never {
 }
 
 export function assertPhysicalDispatch(event: HardwareBarrier, workers: number): { delays: number; multiRegionQueues: number } {
-  assert.equal(event.phase, 'kernel');
+  assert.ok(event.phase === 'ecologia' || event.phase === 'kernel');
   assert.equal(event.workers, workers);
   const diagnostic = event.diagnostics;
-  assert.ok(diagnostic, 'Parallel kernel barriers require physical worker diagnostics.');
+  assert.ok(diagnostic, 'Both parallel ecology barriers require physical worker diagnostics.');
   assert.equal(diagnostic.workers, workers);
   assert.equal(diagnostic.threadIds.length, workers);
   assert.equal(new Set(diagnostic.threadIds).size, workers);

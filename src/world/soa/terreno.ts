@@ -54,7 +54,7 @@ const DUPLICATE = 'El ecosistema requiere coordenadas únicas.';
 const TWO_WRITERS = 'SoA de terreno: la página tiene escrituras sin volcar; objeto y SoA no pueden ser escribibles a la vez.';
 const NO_AUTHORITY = 'SoA de terreno: escritura sin autoridad; la página pertenece a los objetos.';
 
-const RESIDENT_NUMBERS = ['moisture', 'vegetation', 'wood', 'growth', 'fertility', 'cultivation', 'traffic', 'drinkingWater'] as const;
+const RESIDENT_NUMBERS = ['moisture', 'vegetation', 'food', 'wood', 'growth', 'fertility', 'cultivation', 'traffic', 'drinkingWater'] as const;
 type ResidentKey = typeof RESIDENT_NUMBERS[number] | 'terrain' | 'biome' | 'feature' | 'life';
 interface ResidentBinding { store: TileStore; tile: Tile; cell: number; x: number; y: number; mask: number; }
 const bindings = new WeakMap<Tile, ResidentBinding>();
@@ -384,7 +384,7 @@ export class TileStore {
     if (this.residentBusy) throw new Error(TWO_WRITERS);
     this.detachResident();
   }
-  commitParallel(): void {
+  commitParallel(phase: 'kernel' | 'ecologia' = 'kernel'): void {
     if (!this.residentBusy) throw new Error(NO_AUTHORITY);
     const queue = this.residentWoodAddedQueue, protocol = queue[0]!;
     if (protocol !== 0 && protocol !== 1) throw new Error('SoA de terreno: protocolo de altas de wood desconocido.');
@@ -403,10 +403,12 @@ export class TileStore {
     }
     this.parity ^= 1; this.residentBusy = false;
     // Ausentes al cargar: mismo orden de asignación que el kernel de objetos, sólo tras éxito.
-    for (const binding of this.residentPending) for (const key of ['life', 'fertility', 'growth', 'traffic', 'cultivation', 'drinkingWater'] as const) {
-      if (!Object.hasOwn(binding.tile, key)) this.attachResidentAccessor(binding, key);
+    if (phase === 'kernel') {
+      for (const binding of this.residentPending) for (const key of ['life', 'fertility', 'growth', 'traffic', 'cultivation', 'drinkingWater'] as const) {
+        if (!Object.hasOwn(binding.tile, key)) this.attachResidentAccessor(binding, key);
+      }
+      this.residentPending = [];
     }
-    this.residentPending = [];
     // Protocolo real: O(páginas con altas). Compatibilidad explícita: workers viejos O(páginas).
     for (const page of addedPages ?? this.residentWoodHoles.keys()) {
       if (!this.residentWoodAdded[page]) continue;

@@ -10,6 +10,77 @@
 > sus runbooks y los bancos de un solo uso se retiraron de main y se conservan en el tag
 > `archivo/campanas-20260922`; las evidencias JSON que produjeron siguen en `docs/evidencia-2026-09-22/`.
 
+## 1 de octubre de 2026 — candidata 2′, validación técnica sin cribado
+
+Rama `sprint/ley-2prima-20261001`, base `bb483260b2489fe62b113d620e5f56e5f3676dbc`.
+Contrato y propuesta de congelación del P90 en [LEY-2PRIMA](LEY-2PRIMA-2026-10-01.md).
+Los resultados de esta sección pertenecen a la candidata; el estado publicado sigue en
+[ESTADO](ESTADO.md). El perfil activo de las pruebas es **sintético: ocho unos**; no
+representa un P90 empírico ni autoriza conclusiones sobre C8.
+
+Los 49 tests focales pasan dentro de la suite completa: retorno físico realmente obtenido y trabajo pagado en los
+ocho oficios, tasa individual, umbral de tres intentos, ausencia de herencia, empates y
+multiplicidad, escalas inmutables y rechazo de instantáneas activas corruptas. También
+comprueban que la ley apagada no lee aprendizaje ni perfil.
+
+La continuidad activa se verificó con semilla 19017, 320 pasos y restauración en el
+paso 160, tanto con instantánea inline como con páginas. El actor realiza intentos
+reales de recolección: al checkpoint tiene ocho resultados positivos y 16 ticks del
+intento en curso; al final, 16 resultados positivos y ningún tick pendiente. Su q es
+exactamente `1/18`, y cada paso de los gemelos, con y sin restauración, conserva el
+digesto completo. Digesto final compartido:
+`9850d670b847ed391eb36a096809bfe9697234bcf72ef786eaa6ed41bc00e334`.
+
+Typecheck y build pasan en el worktree propio. La suite final completa registra
+1.678 tests: **1.669 aprobados, cero fallos y nueve omisiones existentes**, en 382,42 s.
+Las omisiones son cuatro pruebas optativas de escala (`CARTA_TEST_ESCALA`), tres de
+CUDA (`COMPUTE_NVRTC` ausente) y dos que requieren una instantánea no disponible.
+La primera suite se abortó por prioridad 16 de un descendiente de `npx`; el adaptador
+local pasó seis comprobaciones de argumentos, entorno, E/S, errores, señales y
+prioridad 19. La segunda encontró dos fallos en la compatibilidad con parámetros
+históricos sin grupo `conducta`; se corrigieron con una regresión nueva, conservando
+los tests antiguos y sus digestos esperados. Los tres intentos permanecen registrados.
+
+El selftest final de coste pasa 98 pasos de fixture: 24 resultados pagados con q
+calculado independientemente, dos cambios gather→farm y decisiones no productivas
+idénticas en las 32 comparaciones OFF/ON de ready y urgencias. Conserva el fallo de
+cobertura anterior y sus entradas. Ninguna medición de coste se usa para escoger o
+ajustar las escenas.
+
+El único benchmark completa los 32 bloques prefijados y cuatro de warmup: 8.192
+pasos medidos y 1.024 de calentamiento. **Coste NO CONCLUYENTE; puerta ≤1 % NO
+CUMPLIDA por falta de acreditación**, sin demostrar un exceso. CPU: ratio 0,99525,
+IC95 % [0,91217; 1,08881]. Pared: ratio 0,99896, IC95 % [0,95569; 1,04656]. Ambos
+intervalos cruzan 1,01. No se excluyen bloques ni se repite por ruido. Mide el paso
+completo con entradas sintéticas independientes; la preparación, los clones y la
+serialización se reportan fuera del intervalo, y no incluye SQLite ni trayectorias
+divergentes. `COSTE-FINAL.json` local tiene SHA256
+`90325a8d50e0d786a9b7483f65ce7636e134d8b491eb26c35fb5bc81cb4ac0f3`.
+
+La identidad **pasa** para las seis semillas nuevas 19011–19016, cada una con
+defaults y con `social.radioConvivencia=12`, `social.disolucion=1` y
+`social.maxComunidades=64`, durante 1.200 pasos. En cada caso se comparan tres
+brazos: base main, candidata por defecto y candidata con cero explícito. Son 36
+mundos, 43.200 pasos, 43.236 digestos completos y 28.824 comparaciones, incluidos
+los estados iniciales. Las tres particiones y el reductor tienen recibos válidos,
+cero incidencias observadas y fuentes idénticas antes/después. Resultado reducido
+local `identity-shards-final.result.json`, SHA256
+`37265dc73954a1c164292f9a27d7fee6a15c96db86288846222af23a5c8efda4`.
+El intento serial anterior llegó al timeout de 1.200 s y se conserva íntegro como
+incompleto: no se reutiliza ningún prefijo suyo. El reparto completo posterior se
+congeló antes de ejecutarse y pasó cuatro casos positivos y 35 negativos puramente
+sintéticos, sin mundos ni pasos del motor.
+
+Recibos, hashes de fuentes y alcance de cada puerta en
+[ley-2prima-gates.json](evidencia-2026-10-01/ley-2prima-gates.json). Las guardas
+muestrean procesos e hilos cada 0,5 s; una deriva enteramente entre muestras podría
+escapar. La suite usó la ventana nocturna autorizada, y las simulaciones CPU6–31;
+todos los hilos observados durante el trabajo tuvieron prioridad absoluta 19.
+
+Evidencia cruda local, no versionada: `/datos/tmp-atlas-lab/balance/codex10/`.
+Las réplicas de las pruebas usan directorios temporales propios; no se ejecuta panel,
+cribado ni calibración, ni se altera el mundo público o el trabajo de P0.
+
 ## 27 de septiembre de 2026 — poda de leyes refutadas, ola 1 (rama `sprint/poda-leyes-20260927`)
 
 Retiradas NAT-L y vocación de linaje (ver «Poda» en [REGLAS](REGLAS.md)). Puertas de la

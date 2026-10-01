@@ -85,7 +85,13 @@ export interface WorldParams {
     /** Ventaja comparativa heredable (DIV, 2026-09-22), `index.ts` → `choose`: sin urgencias
      * corporales (sed, hambre y cansancio ≤ 0,5), cada OFICIO suma `aptitud · (rasgo del oficio −
      * media de los cinco rasgos de la persona)`. 0 = hoy. */
-    aptitud: number };
+    aptitud: number;
+    /** Ley 2′: ausencia = 0. El cero explícito se omite de la forma canónica para
+     * conservar los parámetros y el digesto del baseline, sin excluir leyes del hash. */
+    utilidadLocal?: 0 | 1;
+    /** Escalas congeladas; sólo con utilidadLocal=1. Ocho valores finitos > 0, en orden:
+     * gather, forage, hunt, farm, build, repair, research, craft. Sin perfil por defecto. */
+    utilidadLocalGhat?: readonly number[] };
   /** `social.maxComunidades`: tope de FUNDACIÓN de comunidades (`society.ts`), regla de conducta separada
    * de la admisión `limites.comunidades` (revisión de T100, 2026-09-22). */
   social: { maxComunidades: number; disputaNecesidad: number; disputaEscasez: number; disputaRadio: number; disputaDestino: number; disputaEspera: number;
@@ -315,6 +321,7 @@ export const PARAM_RANGES: Record<string, [number, number]> = {
   // ni de los actos de vínculo). Rasgo menos media de los cinco cae en [−0,8, 0,8], así que con
   // el máximo 2 la ley mueve un oficio a lo sumo ±1,6, la escala de `habituacion`.
   'conducta.aptitud': [0, 2],
+  'conducta.utilidadLocal': [0, 1],
   'social.disputaNecesidad': [0.1, 1],
   'social.disputaEscasez': [0.1, 20],
   'social.disputaRadio': [1, 8],
@@ -349,7 +356,8 @@ type ParamValue = number | boolean | string | (number | boolean | string)[];
 /** PARAM_RANGES conserva sus tuplas numéricas; cada hoja declara además su tipo. */
 export const PARAM_DESCRIPTORS: Readonly<Record<string, ParamDescriptor>> = deepFreeze({
   ...Object.fromEntries(Object.entries(PARAM_RANGES).map(([key, range]) => [key,
-    { kind: 'number', range, integer: key === 'motor.hilos' || key === 'social.disputaEspera' || key === 'social.maxComunidades' || key === 'social.disolucion' || key.startsWith('limites.') }])),
+    { kind: 'number', range, integer: key === 'motor.hilos' || key === 'social.disputaEspera' || key === 'social.maxComunidades' || key === 'social.disolucion' || key === 'conducta.utilidadLocal' || key.startsWith('limites.') }])),
+  'conducta.utilidadLocalGhat': { kind: 'array', element: { kind: 'number', range: [0, Number.MAX_VALUE] }, minLength: 8, unique: false },
   'poblacion.exigeComunidad': { kind: 'boolean' },
   'poblacion.comprobacionContinua': { kind: 'boolean' },
   'motor.clonPorPaso': { kind: 'boolean' },
@@ -493,6 +501,33 @@ function setPath(target: Record<string, unknown>, dottedKey: string, value: Para
   node[parts[parts.length - 1]!] = value;
 }
 
+/** One parameter boundary for parser, direct binding and snapshot restoration.
+ * Off/default keeps the historical enumerable shape. Active scales are immutable;
+ * a direct caller cannot change the law through a retained mutable vector. */
+function canonicalLocalUtilityParams(params: WorldParams, copyMutableActive = true): WorldParams {
+  const conduct = params.conducta;
+  // Legacy digest callers bind pre-conducta parameter shapes verbatim.
+  if (conduct === undefined) return params;
+  const flag = conduct.utilidadLocal;
+  if (flag !== undefined && flag !== 0 && flag !== 1) throw new Error('conducta.utilidadLocal debe ser 0 o 1.');
+  if (flag !== 1) {
+    if (conduct.utilidadLocalGhat !== undefined) throw new Error('conducta.utilidadLocalGhat sólo se permite con utilidadLocal=1.');
+    if (!Object.hasOwn(conduct, 'utilidadLocal') && !Object.hasOwn(conduct, 'utilidadLocalGhat')) return params;
+    const canonical = structuredClone(params);
+    delete canonical.conducta.utilidadLocal; delete canonical.conducta.utilidadLocalGhat;
+    return deepFreeze(canonical);
+  }
+  const profile = conduct.utilidadLocalGhat;
+  if (!Array.isArray(profile) || profile.length !== 8) throw new Error('conducta.utilidadLocal=1 requiere utilidadLocalGhat con exactamente 8 valores.');
+  for (let i = 0; i < 8; i++) {
+    if (!Object.hasOwn(profile, i) || typeof profile[i] !== 'number' || !Number.isFinite(profile[i]) || profile[i] <= 0)
+      throw new Error('conducta.utilidadLocalGhat requiere 8 números finitos estrictamente positivos.');
+  }
+  if (copyMutableActive && (!Object.isFrozen(params) || !Object.isFrozen(conduct) || !Object.isFrozen(profile)))
+    return deepFreeze(structuredClone(params));
+  return params;
+}
+
 /**
  * Acepta `undefined` (→ `base`, por identidad), una cadena "a.b=1,c.d=2" o
  * JSON (anidado o plano), o un diccionario con valores tipados o de texto. Devuelve
@@ -508,7 +543,7 @@ function setPath(target: Record<string, unknown>, dottedKey: string, value: Para
  * midiendo contra `PARAM_RANGES`, y la base llegó por este mismo camino.
  */
 export function parseParams(input?: Record<string, unknown> | string, base: WorldParams = DEFAULT_PARAMS): WorldParams {
-  if (input === undefined) return base;
+  if (input === undefined) return canonicalLocalUtilityParams(base);
   const raw = typeof input === 'string' ? parseParamString(input) : input;
   const overrides: Record<string, unknown> = Object.create(null);
   flatten(raw, '', overrides);
@@ -516,7 +551,7 @@ export function parseParams(input?: Record<string, unknown> | string, base: Worl
   for (const [key, rawValue] of Object.entries(overrides)) {
     setPath(draft, key, paramValue(key, rawValue, PARAM_DESCRIPTORS[key]!));
   }
-  const params = draft as unknown as WorldParams;
+  const params = canonicalLocalUtilityParams(draft as unknown as WorldParams, false);
   // Cruce de claves: el rango por clave no puede verlo, y el tick es demasiado tarde.
   assertLongevityLaw(params.cuerpo);
   assertFounderAges(params.genes);
@@ -534,7 +569,8 @@ export function paramsOf(world: object): WorldParams {
  * `main.ts`, que aplica CARTA_PARAMS sobre un mundo ya creado: por eso la ley se valida también
  * aquí y no sólo en `parseParams`. */
 export function setParams(world: object, params: WorldParams): void {
-  assertLongevityLaw(params.cuerpo);
-  assertWorldLimits(params.limites, true);
-  worldParams.set(world, params);
+  const canonical = canonicalLocalUtilityParams(params);
+  assertLongevityLaw(canonical.cuerpo);
+  assertWorldLimits(canonical.limites, true);
+  worldParams.set(world, canonical);
 }

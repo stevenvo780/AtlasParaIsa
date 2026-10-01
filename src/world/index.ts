@@ -19,6 +19,7 @@ import { POPULATION_HARD_LIMIT } from '../shared/life.js';
 import type { TechnologyKnowledge, TechnologyState } from '../shared/technology.js';
 import type { DemographicState, LegacyRecord } from '../shared/demography.js';
 import { defaultTechnologyState, initialTechnologyKnowledge, technologyOpportunity, researchTechnology, craftTechnology, projectTechnology, assertTechnology, useTool, recordTechnologyBenefit, settleTechnologyEstate, cancelTechnologyProject, maintainTechnologyMemory } from './technology.js';
+import { registrarRetornoProductivo, permutarOficiosProductivos, aprendizajeUtilidadLocalValido, type AprendizajeUtilidadLocal } from './utilidad-local.js';
 import { catalogueEnabled, resolveTechnologyRecipe, withArchiveReadBatch } from './technology-catalogue.js';
 import { initialDemography, demographicTraits, updateDemography } from './demography.js';
 import { reproductiveReadiness, familyOpportunity, availableToShare, closeKin, chooseReproductivePartner, pairAffinity, pairTie, earlierForagerExhausts, observedForagersByCell } from './family.js';
@@ -76,6 +77,8 @@ export interface Person extends PersonView {
    * Sólo existe con la ley activa; se olvida un día después. */
   conflictMemory?: { x: number; y: number; tick: number };
   technology: TechnologyKnowledge; demography: DemographicState;
+  /** Own completed paid attempts only; absent with the candidate law disabled. */
+  utilidadLocal?: AprendizajeUtilidadLocal;
 }
 export interface Memory extends MemoryView {
   context: 'partner-tired' | 'shelter-tired' | 'food-hungry' | 'rain-shelter' | 'irrelevant';
@@ -826,6 +829,8 @@ function choose(world: World, person: Person): void {
     candidates.push(directed);
   }
   candidates.sort((a, b) => b.score - a.score);
+  if (paramsOf(world).conducta.utilidadLocal === 1) permutarOficiosProductivos(candidates, person, paramsOf(world).conducta,
+    person.thirst <= 0.5 && person.hunger <= 0.5 && person.fatigue <= 0.5);
   const selected = candidates[0]!;
   if (selected.action === 'explore' && !selected.directed && selected !== volverAlAgua) {
     // Urgent thirst reconsiders every tick. Replacing a still viable waypoint
@@ -1061,9 +1066,14 @@ function bodyAndAction(world: World, person: Person): void {
   if (person.action === 'share') share(world, person);
   if (['research','craft'].includes(person.action) && distance(person,person.target)<0.5) {
     const before = person.technology.attempts;
+    const conducta = paramsOf(world).conducta, utilidadActiva = conducta.utilidadLocal === 1;
+    const trabajoPrevio = utilidadActiva ? person.technology.project?.progress ?? 0 : 0;
+    const trabajoGlobalPrevio = utilidadActiva ? world.technology.ledger.work : 0;
     const completed = person.action === 'research' ? researchTechnology(world,person,event=>addEvent(world,event)) : craftTechnology(world,person,technologyOpportunity(world,person)?.recipeId,event=>addEvent(world,event));
     if (person.technology.attempts > before) {
       outcome(world,person,person.action,completed?0.12:-0.12,completed);
+      if (utilidadActiva) registrarRetornoProductivo(person, person.action, completed ? 1 : 0,
+        trabajoPrevio + (world.technology.ledger.work - trabajoGlobalPrevio), conducta);
       if (person.command?.order === person.action) { person.command=null; person.controlMode='auto'; }
       person.decisionAt=world.tick+1;
     }
@@ -1091,6 +1101,8 @@ function performWork(world: World, person: Person, tile: Tile): void {
   person.work++;
   const duration = workDuration(world, person);
   if (person.work < duration) return;
+  const trabajoPagado = person.work;
+  let producido = 0;
   let success = false;
   if (person.action === 'gather') {
     const preferred = person.materials.wood < 6 ? 'wood' : 'stone';
@@ -1101,6 +1113,7 @@ function performWork(world: World, person: Person, tile: Tile): void {
       const receipt=capacity>1&&(tile[material]??0)>1 ? useTool(world,person,material==='wood'?'cutting':'abrasion') : undefined;
       const amount = harvestMaterial(tile, material, Math.min(capacity,1+(receipt?.power??0)));
       person.materials[material] += amount; count(world, material === 'wood' ? 'woodGathered' : 'stoneGathered', amount);
+      producido = amount;
       recordTechnologyBenefit(world,person,receipt,amount-baseline); success = amount > 0; break;
     }
   } else if (person.action === 'forage') {
@@ -1108,11 +1121,13 @@ function performWork(world: World, person: Person, tile: Tile): void {
     tile.food = clamp(tile.food - harvested);
     tile.vegetation = clamp(tile.vegetation - harvested * 0.1);
     person.inventory += harvested;
+    producido = harvested;
     count(world, 'foodHarvested', harvested);
     success = harvested > 0;
   } else if (person.action === 'farm' && person.materials.wood >= 1 && tile.terrain !== 'shelter' && tile.moisture > 0.2 && tile.vegetation < 0.9) {
     if (cultivateTile(tile)) {
       person.materials.wood--; count(world, 'cultivations'); success = true;
+      producido = 1;
       if ((tile.cultivation??0)<1) {
         const receipt=useTool(world,person,'cultivation'), before=tile.cultivation??0;
         tile.cultivation=clamp(before+(receipt?.power??0)*0.15);
@@ -1121,17 +1136,21 @@ function performWork(world: World, person: Person, tile: Tile): void {
     }
   } else if (person.action === 'hunt' && (tile.fauna ?? 0) >= 1) {
     const food = harvestAt(world,tile,person.id,event=>addEvent(world,event)); const stored = Math.min(0.25 - person.inventory, food * 0.5);
+    producido = food;
     person.inventory += stored; assimilateFood(person, food - stored, { hungerPerUnit: HAMBRE_POR_UNIDAD, energyPerUnit: 0 }); if(food>0) count(world, 'hunts'); count(world, 'foodHarvested', food); success = food > 0;
   } else if (person.action === 'build') {
     success=!!completeConstruction(world,person,tile,event=>addEvent(world,event));
+    producido = Number(success);
   } else if(person.action==='invent') {
     success=invent(world,person,event=>addEvent(world,event));
   } else if(person.action==='repair') {
     const structure=primeroCerca(world.structures, tile, 1, s=>s.x===tile.x&&s.y===tile.y);
-    if(structure) success=repair(world,person,structure,event=>addEvent(world,event));
+    if(structure) { const condition = structure.condition; success=repair(world,person,structure,event=>addEvent(world,event)); producido = structure.condition - condition; }
   }
   person.work = 0;
   outcome(world, person, person.action, success ? person.action === 'build' ? 0.3 : 0.14 : -0.2, success);
+  if (paramsOf(world).conducta.utilidadLocal === 1 && person.action !== 'invent')
+    registrarRetornoProductivo(person, person.action, producido, trabajoPagado, paramsOf(world).conducta);
   if (!success) person.reason = 'La tarea no produjo un resultado: faltan recursos o condiciones. Esa experiencia reduce su preferencia.';
   if (person.command && ['build', 'farm', 'invent', 'repair', 'forage'].includes(person.command.order)) { person.command = null; person.controlMode = 'auto'; }
   person.decisionAt = world.tick + 1;
@@ -1344,6 +1363,7 @@ function reproduce(world: World): void {
       technology: initialTechnologyKnowledge(), demography: initialDemography(),
     };
     delete child.home;
+    delete child.utilidadLocal;
     // Lastre de la ley retirada (vocación, ola 1): una cría nunca hereda ese campo.
     delete (child as unknown as Record<string, unknown>).vocacion;
     // `agua.memoria`: la cría nace junto a sus padres y conserva el aguadero de `a` (copiado arriba con el
@@ -1680,6 +1700,7 @@ export function assertWorld(value: unknown, expectedVersion = RULES_VERSION, con
       if (typeof p.thirst !== 'number' || !Number.isFinite(p.thirst) || p.thirst < 0 || p.thirst > 1 || !Number.isSafeInteger(p.bornAt) || p.bornAt < -MAX_FOUNDER_AGE_TICKS || p.bornAt > w.tick || !Number.isSafeInteger(p.lastBirth) || p.lastBirth < -2400 || p.lastBirth > w.tick || !Number.isSafeInteger(p.lastSocial) || p.lastSocial < -30 || p.lastSocial > w.tick || !Number.isSafeInteger(p.lastDispute) || p.lastDispute < -180 || p.lastDispute > w.tick || !Number.isSafeInteger(p.lastPracticeMemory) || p.lastPracticeMemory < 0 || p.lastPracticeMemory > w.tick || !numericMap(p.culture, 0, 1, 3) || !['sharing','stewardship','openness'].every(key => typeof p.culture[key as keyof Culture] === 'number') || !numericMap(p.bonds, 0, 1, populationCap) || Object.keys(p.bonds).some(id => !alive.has(id)) || !(p.communityId === null || typeof p.communityId === 'string' && w.communities?.some(c => c.id === p.communityId))) fail();
     }
     if (!['ready','hungry','thirsty','tired'].includes(p.intentContext)) fail();
+    if (paramsOf(w).conducta?.utilidadLocal === 1 && !aprendizajeUtilidadLocalValido(p.utilidadLocal)) fail();
     if (!p.traits || !['curiosity','sociability','industriousness','care','resilience'].every(k => typeof p.traits[k as keyof typeof p.traits] === 'number') || !numericMap(p.traits, 0, 1, 5) || !numericMap(p.skills, 0, 1, expectedVersion>=5?18:15) || !numericMap(p.values, -0.3, 0.3, expectedVersion>=5?72:60) || !numericMap(p.activity, 0, 1_000_000, expectedVersion>=5?18:15) || !p.materials || !Number.isFinite(p.materials.wood) || p.materials.wood < 0 || p.materials.wood > 12 || !Number.isFinite(p.materials.stone) || p.materials.stone < 0 || p.materials.stone > 8 || !Array.isArray(p.visited) || p.visited.length > 192 || !p.visited.every(k => typeof k === 'string' && /^-?\d+,-?\d+$/.test(k)) || !Number.isFinite(p.heading) || !Number.isSafeInteger(p.work) || p.work < 0 || p.work > (expectedVersion>=4?600:90) || !Number.isSafeInteger(p.lastOutcome) || p.lastOutcome < 0 || p.lastOutcome > w.tick || !['auto','directed'].includes(p.controlMode)) fail();
 
     if (p.command !== null && (!p.command || !['move','explore','gather','farm','build','rest','hunt','drink','cooperate',...(expectedVersion>=4?['invent','repair']:[]), ...(expectedVersion>=5?['research','craft','forage']:[])].includes(p.command.order) || !validCoordinate(p.command.x) || !validCoordinate(p.command.y))) fail();

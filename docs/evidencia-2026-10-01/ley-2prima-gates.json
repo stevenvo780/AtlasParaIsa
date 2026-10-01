@@ -1,0 +1,430 @@
+{
+  "scope": "Candidate technical validation only; no biological screening, calibration, public deployment or C8 acceptance",
+  "createdAt": "2026-10-01T11:58:06.646Z",
+  "branch": "sprint/ley-2prima-20261001",
+  "baselineCommit": "bb483260b2489fe62b113d620e5f56e5f3676dbc",
+  "effectiveDefault": 0,
+  "syntheticGhatForEveryWorldStep": [
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1
+  ],
+  "empiricalGhat": {
+    "status": "NOT RUN",
+    "proposalFrozenBeforeRuns": "CONTRATO-PREVIO.md"
+  },
+  "identity": {
+    "status": "PASS",
+    "cases": [
+      {
+        "profile": "defaults",
+        "seed": 19011,
+        "steps": 1200,
+        "initialDigest": "22e2214b0faf8cd815219c66c7f2bbfb62485be3bbbef726358981d77fe6b2d2",
+        "finalDigest": "4bbf585dd5c030bce9fdc14bda7bdc547c20ad968b4cab2088319c9f7e5b814f"
+      },
+      {
+        "profile": "defaults",
+        "seed": 19012,
+        "steps": 1200,
+        "initialDigest": "1ad5fcb8db932238045447e7a76005c3c9aa149f75f2835ef178e73ef2021aad",
+        "finalDigest": "d2a95f94d9f227776f2826d6c2575f76c1020c7f81d7f11affd855a72afc337a"
+      },
+      {
+        "profile": "defaults",
+        "seed": 19013,
+        "steps": 1200,
+        "initialDigest": "cbd041f3f441000fc7c58d12c099a67c6466a1d165ea29f4fc13454ddc35b242",
+        "finalDigest": "2cac1b348f9d27b990cd1413fc6dda6a3a540a88de627eae143a83e7a1391527"
+      },
+      {
+        "profile": "defaults",
+        "seed": 19014,
+        "steps": 1200,
+        "initialDigest": "8756086b58f42219b68bdb119d170c1d612b2d75182339196f5f702892c342c7",
+        "finalDigest": "385a8a1389cfdf508d4246ba87310593826a46c4554d7c3beb85fe7c4630cadd"
+      },
+      {
+        "profile": "defaults",
+        "seed": 19015,
+        "steps": 1200,
+        "initialDigest": "b235c599c4403cee9ebe6a3dc6699b88dbc905058540a1021bda538c520bef49",
+        "finalDigest": "84a2863383b2061924b05c1fc49582b1eefa9c4d30661a50f6529d0330ccc955"
+      },
+      {
+        "profile": "defaults",
+        "seed": 19016,
+        "steps": 1200,
+        "initialDigest": "969c6a5f5af0b3041c97c4cfe4a3feea946cd20cc4fe5fd897637355c8c63b1a",
+        "finalDigest": "74d11662c978b20a2cc0c98df0af9dcb0b9eacd8d75714f91b09e7de7a34c5bb"
+      },
+      {
+        "profile": "social-v13",
+        "seed": 19011,
+        "steps": 1200,
+        "initialDigest": "fff8403ef7443a9985c23e8007d18d28fe98e14b9eb1969ae18aafb088c1bd15",
+        "finalDigest": "d1b1f08fa605738b6a004f18736cd7632338733b1f59c004643e2d9e567cec6b"
+      },
+      {
+        "profile": "social-v13",
+        "seed": 19012,
+        "steps": 1200,
+        "initialDigest": "b2718eb1b02ee2768e92b3455be6c337fb3399806c2cb72a1c208f173b426857",
+        "finalDigest": "9782f3e3be8d75f6b0f6ca6476fe9324fa2a3ebc02066fc97f416dff92917620"
+      },
+      {
+        "profile": "social-v13",
+        "seed": 19013,
+        "steps": 1200,
+        "initialDigest": "54772eec3a693e99fe6d47d0d8ca9c8888504eb20a577b212b00a5017f2468a7",
+        "finalDigest": "9dbeb3586309838a0beeb391e203651d1918eb312d513746f49a37890fa57c06"
+      },
+      {
+        "profile": "social-v13",
+        "seed": 19014,
+        "steps": 1200,
+        "initialDigest": "06ddeb2a35ea74c118553f223a746594918498b6f089ae7e49510a3cef19bba2",
+        "finalDigest": "25584770e721513f1299f1af3bac1fc5db54fdbead137eb899119c03f2d59a42"
+      },
+      {
+        "profile": "social-v13",
+        "seed": 19015,
+        "steps": 1200,
+        "initialDigest": "340f24dfbccbaf55fcb065bf1f8aef5dd3d52a69a525c75356c164b9841ca679",
+        "finalDigest": "5495dd1d4a1d63a8cb0a41cc0c7b2b3fc00db42559e5d734d787b30b78f301e0"
+      },
+      {
+        "profile": "social-v13",
+        "seed": 19016,
+        "steps": 1200,
+        "initialDigest": "7e75366bc67bcd23fc45b5026dd3a5c0f494ca2cb6e81f9e41ee2dbd66fc4973",
+        "finalDigest": "37ecd191faba0fcaff1f8ef0aeed8d17ff2ea725d1dd195d1752fcc0c5b0e53c"
+      }
+    ],
+    "realSteps": 43200,
+    "digests": 43236,
+    "comparisons": 28824,
+    "protocol": {
+      "version": "ley-2prima-identity-1",
+      "seeds": [
+        19011,
+        19012,
+        19013,
+        19014,
+        19015,
+        19016
+      ],
+      "steps": 1200,
+      "profiles": [
+        {
+          "name": "defaults",
+          "overrides": {}
+        },
+        {
+          "name": "social-v13",
+          "overrides": {
+            "social.radioConvivencia": 12,
+            "social.disolucion": 1,
+            "social.maxComunidades": 64
+          }
+        }
+      ],
+      "arms": [
+        "baseline-main",
+        "candidate-absent",
+        "candidate-explicit-zero"
+      ],
+      "compare": "unchanged digestoCanonico at initial state and every single step; no field excluded",
+      "optionalExactV13": "not requested by this instrument; the two mandatory profiles are always run"
+    },
+    "receipts": [
+      {
+        "file": "identity-shard-a-final.json",
+        "elapsedSeconds": 2273.961325938,
+        "resourceSamples": 4538,
+        "examinedThreads": 63516,
+        "observedResourceIssues": 0
+      },
+      {
+        "file": "identity-shard-b-final.json",
+        "elapsedSeconds": 2357.358898341,
+        "resourceSamples": 4704,
+        "examinedThreads": 65842,
+        "observedResourceIssues": 0
+      },
+      {
+        "file": "identity-shard-c-final.json",
+        "elapsedSeconds": 2149.53072581,
+        "resourceSamples": 4289,
+        "examinedThreads": 60032,
+        "observedResourceIssues": 0
+      }
+    ],
+    "reduction": {
+      "file": "identity-reduce-final.json",
+      "elapsedSeconds": 0.969252698,
+      "resourceSamples": 3,
+      "examinedThreads": 28,
+      "observedResourceIssues": 0
+    },
+    "serialAttempt": "INCOMPLETE: timeout1200, not accepted"
+  },
+  "neutrality": {
+    "status": "PASS",
+    "selftestFixtureSteps": 98,
+    "comparedReadyUrgencyScenes": 32,
+    "independentlyCheckedPaidReturns": 24,
+    "changedReadyProfessions": 2,
+    "nonproductiveActionTargetReasonIdentical": true,
+    "productiveScoreMultisetPreserved": true,
+    "focalTestsInFinalSuite": 49
+  },
+  "activeContinuity": {
+    "status": "PASS",
+    "seed": 19017,
+    "steps": 320,
+    "checkpoint": 160,
+    "formats": [
+      "inline",
+      "pages"
+    ],
+    "ownPaidPositiveAttempts": {
+      "checkpoint": 8,
+      "final": 16
+    },
+    "paidWorkInProgress": {
+      "checkpoint": 16,
+      "final": 0
+    },
+    "gatherQ": 0.05555555555555555,
+    "finalDigest": "9850d670b847ed391eb36a096809bfe9697234bcf72ef786eaa6ed41bc00e334"
+  },
+  "qa": {
+    "suite": {
+      "tests": 1678,
+      "pass": 1669,
+      "fail": 0,
+      "skipped": 9,
+      "skippedLimits": [
+        "4 optional host scale tests",
+        "3 CUDA tests without COMPUTE_NVRTC",
+        "2 missing snapshot tests"
+      ],
+      "file": "suite-v3-night.json",
+      "elapsedSeconds": 382.421164636,
+      "resourceSamples": 765,
+      "examinedThreads": 107845,
+      "observedResourceIssues": 0
+    },
+    "typecheck": {
+      "file": "typecheck-v3.json",
+      "elapsedSeconds": 0.7942061650000003,
+      "resourceSamples": 3,
+      "examinedThreads": 62,
+      "observedResourceIssues": 0
+    },
+    "build": {
+      "file": "build-final.json",
+      "elapsedSeconds": 1.0843744039999998,
+      "resourceSamples": 4,
+      "examinedThreads": 146,
+      "observedResourceIssues": 0
+    },
+    "paramsRegression": {
+      "tests": 26,
+      "pass": 26,
+      "file": "params-regression-v2.json",
+      "elapsedSeconds": 3.454745698,
+      "resourceSamples": 8,
+      "examinedThreads": 164,
+      "observedResourceIssues": 0
+    }
+  },
+  "cost": {
+    "status": "NO CONCLUYENTE",
+    "gateAtMostOnePercent": "NOT ACCREDITED due to uncertainty; no proven excess",
+    "cpu": {
+      "ratio": 0.9952467948374256,
+      "lower": 0.912165190861776,
+      "upper": 1.0888069948957575
+    },
+    "wall": {
+      "ratio": 0.9989553231955057,
+      "lower": 0.9556949592277436,
+      "upper": 1.0465573382546973
+    },
+    "blocks": 32,
+    "warmupBlocks": 4,
+    "measuredSteps": 8192,
+    "warmupSteps": 1024,
+    "manifestSha": "9f1fcf88bd7e6347d9dea429c98d3b3323570f361074caa3047407ed5f08cc94",
+    "receipt": {
+      "file": "cost-full-final.json",
+      "elapsedSeconds": 794.337568307,
+      "resourceSamples": 1590,
+      "examinedThreads": 22246,
+      "observedResourceIssues": 0
+    },
+    "independentRecalculation": "PASS",
+    "rerun": false,
+    "limits": "Synthetic independent full-step inputs, not divergent population trajectories; no SQLite timing, calibration or biological conclusion"
+  },
+  "resourceLimits": {
+    "simulations": "CPU6-31, absolute nice19, TMPDIR laboratory",
+    "fullSuite": "CPU0-31 only inside00-07 Bogota, absolute nice19",
+    "observationLimit": "Tree/thread sampling every0.5s; drift entirely between samples may escape detection"
+  },
+  "preservedFailedAttempts": [
+    "suite-v1-night: npx child nice16; aborted",
+    "suite-v2-night:2 historical parameter failures; corrected without changing old tests",
+    "cost constructor age/fauna/program failures before timings",
+    "cost-selftest-v1: no ready profession change; premeasurement fixture coverage corrected",
+    "identity-full-final: timeout1200, no accepted final trace"
+  ],
+  "sourceSha256": {
+    "src/world/index.ts": "a3c42127589cdf3f157d9aec994f6e16b8d36bc4c1db3eb53aa62171da064ac9",
+    "src/world/params.ts": "0f62f935cbdecce0842f5bc97f995b19d92f02bad8806dc58b416e72fc7893dc",
+    "src/world/utilidad-local.ts": "e602221be4a868e527bd32c03d3b367b24c010b62c329bacfbb24eb97ef47319",
+    "tests/utilidad-local.test.ts": "dbc9c3edef399f817002b46c063825da25893f07619844dd9ac60623cc297fe4",
+    "tests/utilidad-local-params-snapshot.test.ts": "63bffd1da890178871e92d6604338f3c3abafa6e74e06fd0df4f4b91ba2a8d0e",
+    "tests/utilidad-local-continuidad.test.ts": "6d7ceb1e54459a5e0a463032eb98e8a23bb6df1e3381d1d99561b3424c0abb42",
+    "scripts/lab/ley-2prima-identity.mts": "0cb35f2e72f8b62d4250dab4622fa21fbc13faaeab5d0ed3f26016564270ca13",
+    "scripts/lab/ley-2prima-cost.mts": "6cc0bc3a134083fb57b7abc4759fbfdf9c8fde2e5cb6711e3972a89a95ae3deb"
+  },
+  "localEvidenceDirectory": "/datos/tmp-atlas-lab/balance/codex10",
+  "artifacts": [
+    {
+      "file": "CONTRATO-PREVIO.md",
+      "sha256": "76a58199576faa17ff830be81075ef540d0d1790f542995eb56903ca5660b242"
+    },
+    {
+      "file": "ESCENAS-COSTE-PREVIO.md",
+      "sha256": "c9a3104de0b5670688aeb6b84e57d25ceb1ed1df4b191653b247992592fec8a0"
+    },
+    {
+      "file": "CONTINUIDAD-PREVIO.md",
+      "sha256": "46dbcff0b7ec36456f2af8ccee98bacc07df74759d70e24497bdab6800a10543"
+    },
+    {
+      "file": "ESCALAS-UNITARIAS-PREVIO.md",
+      "sha256": "046d62d4813b6039394ead96fa4d7cb2ad4ad40dbe3fce1ce40d735e5dbde382"
+    },
+    {
+      "file": "BASELINE.json",
+      "sha256": "c89d36246989d5e9d85535e4588275e97b48354ed4975f78eb2a73311c3f948c"
+    },
+    {
+      "file": "main-source.tar",
+      "sha256": "2f9b1641db786ee4dedf70220a4ba926ea61a2a7d5c5f397a7482dd31e468098"
+    },
+    {
+      "file": "ESCENAS-FROZEN-FINAL.json",
+      "sha256": "06deb4db1ec1535e0b4a54e00a00d2b3813e62e173fe1d8646dc8688647d55ce"
+    },
+    {
+      "file": "cost-selftest-worker-final.result.json",
+      "sha256": "0a5fa2354725e042cf040018caa6dc23a5ddaf63bb7f7dbc9304e13d2d2d24c1"
+    },
+    {
+      "file": "statistics-selftest-worker-final.result.json",
+      "sha256": "02a3732fb60bbd8a53a9b150862bd087307a9353750f43110631d4b628552342"
+    },
+    {
+      "file": "COSTE-FINAL.json",
+      "sha256": "90325a8d50e0d786a9b7483f65ce7636e134d8b491eb26c35fb5bc81cb4ac0f3"
+    },
+    {
+      "file": "cost-full-final.json",
+      "sha256": "e0e03de23a9fc5df70f59526eba15020360e1e8dc369ed483d350ea66dabb6a7"
+    },
+    {
+      "file": "codex10-revision-cost-result.json",
+      "sha256": "a2c5bb4df9a3d50a3aca41810bedd0a8bad74a213861db53eb8a91cacaf651b2"
+    },
+    {
+      "file": "suite-v3-night.json",
+      "sha256": "28b00aa804721267fc563a76e2c612e60b2f995ad5e65f6c91f206fcbca5477e"
+    },
+    {
+      "file": "suite-v3-night.log",
+      "sha256": "362dfa623b0885d2d68ae350482acde35a93823d6ded1c433c90c578b666ecfa"
+    },
+    {
+      "file": "typecheck-v3.json",
+      "sha256": "c600ffaa7a5bb5c0710dc88888f7d64b91fe5132ccd4f107d0b599614e15e8f7"
+    },
+    {
+      "file": "build-final.json",
+      "sha256": "0d6fe2795157352442ba8cf62831480a3a4b9a2accd6541dd344ed5304821971"
+    },
+    {
+      "file": "params-regression-v2.json",
+      "sha256": "fdd3d8d1fd94a9b30f06999816e725d35d701d6485f7f42cf77dc27ff5807266"
+    },
+    {
+      "file": "qa-npx-smoke-v2.json",
+      "sha256": "90b77b53b665cf2d12bd59ba3b158a03f4a31fff713e3d778310c58dc2bb00cb"
+    },
+    {
+      "file": "qa-npx-smoke-v2-details.json",
+      "sha256": "e3f8d4f47683ac0d8907c4724cdaae891f8bc862a02398aca6ce7119128c3a2e"
+    },
+    {
+      "file": "IDENTITY-SHARDS-PLAN-v1.md",
+      "sha256": "d8eb3fd7aaa98a3bc42624715158cfe53c8e34c1cc520d26c7239f97c00af2e8"
+    },
+    {
+      "file": "IDENTITY-SHARDS-FROZEN-v1.json",
+      "sha256": "2200b4db225b5d2b3f0b08a3392a9f15a34e4cef3d2c43a1c927ebb4b4a63b11"
+    },
+    {
+      "file": "identity-sharded-driver-v1.mts",
+      "sha256": "3194b0713374843e9ce8183f204a441b8b6b8f06ace1ee7eba40ae34b8a55c87"
+    },
+    {
+      "file": "identity-sharded-reducer-v1.mts",
+      "sha256": "a9ab0627678fbb97226634dae39a9b043ceb6f194d2225ba522f472c7d71ca25"
+    },
+    {
+      "file": "IDENTITY-SHARDS-READY-RECEIPT-v1.json",
+      "sha256": "0858d0caf4cac627578f876560756e0ae5c9c805563e2d037b8789944eec26b6"
+    },
+    {
+      "file": "identity-shards-final.result.json",
+      "sha256": "37265dc73954a1c164292f9a27d7fee6a15c96db86288846222af23a5c8efda4"
+    },
+    {
+      "file": "identity-reduce-final.json",
+      "sha256": "1cf100b5f6a64740aee10857726c0a0bdd368e978d6a70cbc84ef01663fc1c77"
+    },
+    {
+      "file": "identity-shard-A-final.result.json",
+      "sha256": "b7ad741810762fa6d2d1e0bea798a7839648b29d3667228589c273693b433fc5"
+    },
+    {
+      "file": "identity-shard-a-final.json",
+      "sha256": "993bef7571e483ae9b1c8a5e9c3557f3c9f604e7958e9641cb6bf056eab62f45"
+    },
+    {
+      "file": "identity-shard-B-final.result.json",
+      "sha256": "0f8e0024a61109a44d0ce2aaea94ced2877d83e905c015c6d158f34daabc3d7b"
+    },
+    {
+      "file": "identity-shard-b-final.json",
+      "sha256": "203f77c970eb3b2b7ec28e617bcc6a44cfceba166eb127a394026d9fca4c3d72"
+    },
+    {
+      "file": "identity-shard-C-final.result.json",
+      "sha256": "2900ff8aa40a54c054e3f0e8a02eeb0d4e62c09b2ad89e2bb90ab2b2831a3594"
+    },
+    {
+      "file": "identity-shard-c-final.json",
+      "sha256": "ef2b819a2654f150477fa8274b4546cf7999a0bd51dc7c0072dc020d93abf969"
+    }
+  ]
+}

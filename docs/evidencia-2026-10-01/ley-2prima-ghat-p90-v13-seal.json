@@ -1,0 +1,7 @@
+{
+  "schema": "c8-ghat-seal-v1",
+  "synthetic": false,
+  "sealedAt": "2026-10-01T21:42:20.725144Z",
+  "ghatPath": "/datos/tmp-atlas-lab/datos-lab/c8-p0c/GHAT-P90-CONTROL-V13.json",
+  "ghatSha256": "699378b31067f5b25be8ee7bda9b801573e2b3dadf9f6f0723384c9c79903ba8"
+}

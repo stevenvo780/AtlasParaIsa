@@ -1,0 +1,101 @@
+{
+  "cuerpo": {
+    "longevidadBaseDias": 11,
+    "longevidadPorResiliencia": 4,
+    "longevidadPorActividad": 1,
+    "senescenciaInicioFraccion": 0.75,
+    "riesgoSenescenciaDiario": 0.04,
+    "riesgoSenescenciaPendiente": 10,
+    "cuidadoReduceRiesgo": 0.6
+  },
+  "genes": {
+    "varianzaFundadores": 0.15,
+    "tasaMutacion": 1,
+    "edadFundadoresMinDias": 2,
+    "edadFundadoresMaxDias": 2
+  },
+  "poblacion": {
+    "maxima": 1000000,
+    "intervaloComprobacionTicks": 120,
+    "nacimientosPorComprobacion": 2,
+    "exigeComunidad": false,
+    "radioPareja": 3,
+    "radioLugar": 4,
+    "comprobacionContinua": true,
+    "cortejo": 2,
+    "radioCortejo": 128
+  },
+  "recursos": {
+    "capacidadBosque": 1,
+    "capacidadPastizal": 0.7,
+    "capacidadOtros": 0.35,
+    "velocidadRegeneracion": 1,
+    "decaimientoFertilidad": 0.001,
+    "decaimientoComida": 0.0001
+  },
+  "persistencia": {
+    "cadaTicks": 300,
+    "ventanaEventosTicks": 0,
+    "paginasSucias": false
+  },
+  "agua": {
+    "cuencas": 0.4,
+    "memoria": 1
+  },
+  "gobernador": {
+    "presupuestoMs": 50,
+    "senales": [
+      "p95"
+    ],
+    "politica": "techo"
+  },
+  "motor": {
+    "clonPorPaso": true,
+    "hilos": 1,
+    "soaTerreno": false,
+    "particionarPersonas": false,
+    "gpu": [],
+    "orden": "natural"
+  },
+  "red": {
+    "deltas": false
+  },
+  "limites": {
+    "teselasActivas": 1303552,
+    "chunks": 5092,
+    "comunidades": 64,
+    "fauna": 7821312,
+    "aplicacion": "parametros"
+  },
+  "conducta": {
+    "habituacion": 0.35,
+    "aptitud": 0,
+    "utilidadLocal": 1,
+    "utilidadLocalGhat": [
+      0.09715088593189963,
+      0.003333333333333333,
+      0.0026666666666666666,
+      0.022222222222222223,
+      0.006666666666666667,
+      0.01239777777777836,
+      0.041666666666666664,
+      0.038461538461538464
+    ]
+  },
+  "social": {
+    "maxComunidades": 64,
+    "disputaNecesidad": 0.45,
+    "disputaEscasez": 3,
+    "disputaRadio": 3,
+    "disputaDestino": 0.5,
+    "disputaEspera": 180,
+    "ensenanzaRareza": 0,
+    "confianzaSalida": 0.35,
+    "distanciaAlternativa": 0.2,
+    "vinculoConvivencia": 0,
+    "radioConvivencia": 12,
+    "memoriaDisputa": 8,
+    "hogarTrabajo": 0,
+    "disolucion": 1
+  }
+}

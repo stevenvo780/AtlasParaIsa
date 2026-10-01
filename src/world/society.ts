@@ -10,6 +10,7 @@ import type { Capability, MaterialBatch, TechnologyProgram, TechnologyRecipe } f
 import { resolveTechnologyRecipe, withRecipeSession } from './technology-catalogue.js';
 import { algunoCerca, filtrarCerca } from './indice-puntos.js';
 import { primerVecino, vecinos } from './rejilla.js';
+import { createProgramRequirementsCache, localProgramAvailability, prospectiveProgramsByProduct, type ProgramRequirementsOf } from './programa-requisitos.js';
 
 type Emit = (event: Omit<ChronicleEvent, 'id' | 'tick'>) => ChronicleEvent;
 export type Culture = NonNullable<PersonView['culture']>;
@@ -93,7 +94,7 @@ function practicedSkillToTeach(world: World, teacher: Person, learner: Person): 
 
 /** This is a local prospect, not a withdrawal: supplies still require collection
  * or exchange and fabrication still pays the physical execution's full costs. */
-function localRecipeInputs(world: World, teacher: Person, learner: Person): (program: TechnologyProgram, prospectiveProductId?: string) => boolean {
+function localRecipeInputs(world: World, teacher: Person, learner: Person, requirementsOf?: ProgramRequirementsOf): (program: TechnologyProgram, prospectiveProductId?: string) => boolean {
   const raw = { wood: (learner.materials.wood + teacher.materials.wood) * MASS_UNIT,
     stone: (learner.materials.stone + teacher.materials.stone) * MASS_UNIT, water: 0 };
   for (let dy = -7; dy <= 7; dy++) for (let dx = -7; dx <= 7; dx++) {
@@ -109,34 +110,24 @@ function localRecipeInputs(world: World, teacher: Person, learner: Person): (pro
     if (mass === undefined) { mass = items.filter(item => item.recipeId === id).reduce((total, item) => total + item.mass, 0); massByRecipe.set(id, mass); }
     return mass;
   };
-  return (program, prospectiveProductId) => {
-    const required = { wood: 0, stone: 0, water: 0 }, residue = { wood: 0, stone: 0, water: 0 }, products = new Map<string, number>();
-    for (const input of program.inputs) {
-      if (input.source === 'product') products.set(input.recipeId!, (products.get(input.recipeId!) ?? 0) + input.mass);
-      else (input.source === 'raw' ? required : residue)[input.material!] += input.mass;
-    }
-    const fuel = program.steps.reduce((n, step) => n + (step.op === 'heat' ? step.intensity * 50 : 0), 0);
-    required.wood += Math.max(0, fuel - Math.max(0, learner.technology.residue.wood - residue.wood));
-    return (['wood', 'stone', 'water'] as const).every(material => required[material] <= raw[material] && residue[material] <= learner.technology.residue[material]) &&
-      [...products].every(([id, needed]) => id === prospectiveProductId || productMass(id) >= needed) &&
-      program.steps.every(step => !step.requiredCatalyst || powers[step.requiredCatalyst] >= 0.1);
-  };
+  return localProgramAvailability(raw, learner.technology.residue, powers, productMass, requirementsOf);
 }
 /** Recetas que el maestro ha practicado con éxito, en el orden de sus instrucciones. No depende del
  * aprendiz: `cooperationOpportunity` la calcula una vez por decisión (nada cambia mientras evalúa). */
 function practicedRecipes(teacher: Person): string[] {
   return teacher.technology.knownRecipes.filter(id => !((teacher.technology.competence[id]?.successes ?? 0) <= 0));
 }
-function practicedRecipeToTeach(world: World, teacher: Person, learner: Person, practiced?: readonly string[]): string | undefined {
+function practicedRecipeToTeach(world: World, teacher: Person, learner: Person, practiced?: readonly string[], requirementsOf?: ProgramRequirementsOf): string | undefined {
   if (!world.learningEnabled) return;
   // Mismas recetas resueltas en el mismo orden que `knownRecipes.flatMap(…)` con los dos filtros puros.
   const candidates: TechnologyRecipe[] = [];
+  const learnerKnown = new Set(learner.technology.knownRecipes);
   for (const id of practiced ?? practicedRecipes(teacher)) {
-    if (learner.technology.knownRecipes.includes(id)) continue;
+    if (learnerKnown.has(id)) continue;
     const recipe = resolveTechnologyRecipe(world, id); if (recipe) candidates.push(recipe);
   }
   if (!candidates.length) return;
-  const inputsAvailable = localRecipeInputs(world, teacher, learner);
+  const inputsAvailable = localRecipeInputs(world, teacher, learner, requirementsOf);
   const remembered = learner.technology.knownRecipes.flatMap(id => { const recipe = resolveTechnologyRecipe(world, id); return recipe ? [recipe] : []; });
   const known = remembered.filter(recipe => inputsAvailable(recipe.program));
   // Possessing a tool does not teach its replacement. Compare reproducible
@@ -152,10 +143,10 @@ function practicedRecipeToTeach(world: World, teacher: Person, learner: Person, 
   // program), with the other substrates still required locally; the world catalogue
   // supplies no new desires and no product is credited until fabrication pays for it.
   const prospectivePrograms = [...remembered.map(recipe => recipe.program), ...requestedPrograms(world, learner)];
+  const programsByProduct = prospectiveProgramsByProduct(prospectivePrograms);
   const viable = candidates.filter(recipe => inputsAvailable(recipe.program)).map(recipe => ({ recipe,
     gain: Math.max(...CAPABILITIES.map(capability => recipe.capacities[capability] - powers[capability]))
-      + (prospectivePrograms.some(program => program.inputs.some(input => input.source === 'product' && input.recipeId === recipe.id)
-        && inputsAvailable(program, recipe.id)) ? 1 : 0),
+      + (programsByProduct.get(recipe.id)?.some(program => inputsAvailable(program, recipe.id)) ? 1 : 0),
   })).filter(candidate => candidate.gain > 0.12);
   // Ley candidata `social.ensenanzaRareza`: ordenar sólo por `gain` reenseña siempre la
   // misma receta y la transmisión se apaga cuando todos la saben. La rareza medida —la
@@ -277,6 +268,10 @@ function evaluateCooperation(world: World, person: Person): Opportunity | undefi
   const opportunities: Opportunity[] = [];
   let practiced: string[] | undefined;
   if (world.tick - person.lastSocial < 30) return;
+  // Sólo el programa es compartido entre aprendices; cada uno calcula sus propias
+  // existencias. El mapa nace al primer uso y muere al terminar esta decisión.
+  let programRequirements: ProgramRequirementsOf | undefined;
+  const requirementsOf: ProgramRequirementsOf = program => (programRequirements ??= createProgramRequirementsCache())(program);
   for (const other of vecinos(world, person, 8, other => !(other === person || distance(person, other) > 7), 'cooperationOpportunity')) {
     const same = person.communityId && person.communityId === other.communityId;
     const trust = person.bonds[other.id] ?? 0.2;
@@ -285,7 +280,7 @@ function evaluateCooperation(world: World, person: Person): Opportunity | undefi
     const cost = constructionCost(world,other);
     const processNeed = processMaterialNeed(world, other);
     const supplyMaterial = (['wood', 'stone'] as const).find(m => processNeed[m] > 0 && person.materials[m] >= 1 && other.materials[m] <= (m === 'wood' ? 11 : 7));
-    const recipeId = practicedRecipeToTeach(world, person, other, world.learningEnabled ? practiced ??= practicedRecipes(person) : undefined), exchange = productExchange(world, person, other);
+    const recipeId = practicedRecipeToTeach(world, person, other, world.learningEnabled ? practiced ??= practicedRecipes(person) : undefined, requirementsOf), exchange = productExchange(world, person, other);
     if (exchange) opportunities.push({ person: other, kind: 'tools', exchange, score: score + 0.24 });
     if (supplyMaterial) opportunities.push({ person: other, kind: 'supply', supplyMaterial, score: score + 0.22 });
     if (recipeId) opportunities.push({ person: other, kind: 'teach', recipeId, score: score + 0.06 });

@@ -7,6 +7,7 @@ import { MAX_COORDINATE } from './terrain.js';
 import { LEGACY_WORLD_LIMITS, limitsOf } from './params.js';
 import { tileLookup } from './tile-index.js';
 import { primero, primerosDos } from './orden.js';
+import { faunaEn, retirarFauna } from './indice-fauna.js';
 
 export const MAX_ACTIVE_ANIMALS = 8192;
 export const MAX_ANIMALS_PER_TILE = 6;
@@ -524,10 +525,10 @@ export function stepAnimals(world: AnimalWorld, emit?: AnimalEmitter, mascara?: 
 
 /** A human hunt removes exactly one living identity on the requested cell, at most once. */
 export function harvestAt(world: AnimalWorld, point: Point, hunterId: string, emit?: AnimalEmitter): number {
-  const victim = world.animals.filter(a => a.x === point.x && a.y === point.y && a.health > 0).sort(canonical)[0];
+  const victim = faunaEn(world, point).sort(canonical)[0];
   if (!victim || !world.tiles.some(t => t.x === point.x && t.y === point.y)) return 0;
   death(world, victim, 'caza humana', emit, hunterId); world.animalDynamics.humanHunts++;
-  world.animals = world.animals.filter(a => a.id !== victim.id); syncFauna(world.tiles, world.animals);
+  retirarFauna(world, victim.id); syncFauna(world.tiles, world.animals);
   return FOOD_PER_ANIMAL[victim.species];
 }
 

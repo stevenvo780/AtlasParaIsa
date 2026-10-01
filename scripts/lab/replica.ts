@@ -52,6 +52,7 @@ import { indiceDiversidad } from '../../src/world/diversidad.js';
 import { parseParams, type WorldParams } from '../../src/world/params.js';
 import { decideReproduction, RollingStepPerformance } from '../../src/server/governor.js';
 import { decidirTechoLab, TECHO_LAB_MINIMO, techoLabCota } from './techo-lab.js';
+import { aplicarPlacebo, PLACEBO_TICK, type PatadaPlacebo } from './placebo.js';
 import { durableActivityMetrics } from './metrics.js';
 import { InstrumentosConducta } from './instrumentos.js';
 import { InstrumentoCribadoDesgaste } from './instrumento-desg-d.js';
@@ -202,6 +203,11 @@ async function main(): Promise<void> {
   // Por defecto activos; `--instrumentos no` da EXACTAMENTE los dia-NNN.json de antes (mismas claves).
   const instrumentosArg = arg('--instrumentos') ?? 'si';
   if (instrumentosArg !== 'si' && instrumentosArg !== 'no') throw new Error('Uso: --instrumentos si|no (por defecto "si").');
+  // Brazo PLACEBO (METODO-SEGURIDAD-CAOS §2): patada ε de 1 ulp en el tick PLACEBO_TICK.
+  // Por defecto 'no': el bucle y la salida son EXACTAMENTE los de antes (puerta G0).
+  const placeboArg = arg('--placebo') ?? 'no';
+  if (placeboArg !== 'si' && placeboArg !== 'no') throw new Error('Uso: --placebo si|no (por defecto "no").');
+  const placebo = placeboArg === 'si';
   const params: WorldParams = parseParams(arg('--params'), hostParams());
   mkdirSync(salida, { recursive: true });
 
@@ -233,9 +239,11 @@ async function main(): Promise<void> {
     // máxima tras un paso, para comprobar la cota (`techoLabCota`) a resolución de paso.
     let techoTicksActivosDia = 0, techoTicksDia = 0, techoTicksActivos = 0, techoPoblacionMaximaDia = 0, techoPoblacionMaxima = world.people.length;
 
+    let patada: PatadaPlacebo | null = null;
     const totalTicks = dias * TICKS_PER_DAY, stepTimes: number[] = [];
     let maxRss = process.memoryUsage().rss, ultimoDia: ReturnType<typeof dailyMetrics> | null = null;
     for (let tick = 1; tick <= totalTicks; tick++) {
+      if (placebo && tick === PLACEBO_TICK) patada = aplicarPlacebo(world, seed, tick);
       if (gobernadorModo === 'servidor') {
         // Imita src/server/app.ts:stepOnce — clon+paso, guardado por cadencia DENTRO de la
         // medición, y el gobernador decidiendo sobre el paso ya medido (governReproduction).
@@ -322,6 +330,7 @@ async function main(): Promise<void> {
     registrarFaunaRetirada(world, censosFauna);
     store.save(world);
     if (!ultimoDia) throw new Error('No se completó ningún día; --dias debe producir al menos un dia-NNN.json.');
+    if (placebo && !patada) throw new Error(`--placebo si exige al menos ${PLACEBO_TICK} ticks (--dias insuficiente).`);
 
     const { p50, p95 } = distribution(stepTimes);
     const resumen = {
@@ -350,6 +359,7 @@ async function main(): Promise<void> {
         },
       } : {}),
       instrumentos: instrumentos ? 'si; solo lectura: conducta por tiempo, comida compartida y panel C8 (instrumentos.ts) + observador material A con proyección DESG-D y censo diario (instrumento-desg-d.ts)' : 'no',
+      ...(placebo && patada ? { placebo: { t0: PLACEBO_TICK, ...patada } } : {}),
       seed, params, sha: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
       digest: worldSourceDigest(),
       // Huella del ESTADO final (digestoCanonico de src/world/digesto.ts): con y sin instrumentos

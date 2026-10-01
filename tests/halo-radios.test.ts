@@ -436,11 +436,12 @@ test('el inventario cubre cada lectura, llamada y barrido de las fases con halo 
 
 test('las funciones que alcanza cada fase con halo son las del fuente', () => {
   const tamanos = Object.fromEntries(FASES_CON_HALO.map(fase => [fase, BASE.cierres.get(fase)!.size]));
-  assert.deepEqual(tamanos, { decision: 43, ecologia: 4, fauna: 2 });
+  assert.deepEqual(tamanos, { decision: 45, ecologia: 4, fauna: 2 });
   for (const fase of FASES_CON_HALO) assert.deepEqual([...funcionesDeFase(fase)].sort(), [...BASE.cierres.get(fase)!].sort());
   // Lecturas que ninguna tabla cubre si la red estricta no se aplicara (lo que la red de la tarea no veía).
   const decision = BASE.cierres.get('decision')!;
-  for (const k of ['society.ts:itemNeed', 'society.ts:settlementOpportunity', 'inventions.ts:inventionCandidates', 'inventions.ts:functionalNear']) assert.ok(decision.has(k), k);
+  for (const k of ['society.ts:itemNeed', 'society.ts:settlementOpportunity', 'inventions.ts:inventionCandidates', 'inventions.ts:functionalNear',
+    'indice-fauna.ts:faunaEn', 'indice-fauna.ts:construir']) assert.ok(decision.has(k), k);
 });
 
 test('el alcance compuesto de las fases con halo no supera HALO_CELDAS, y el máximo es exactamente el halo', () => {
@@ -516,6 +517,37 @@ const detecta = (textos: Record<string, string>, esperado: RegExp, t: Tablas = T
   const { problemas } = verificar(textos, t);
   assert.ok(problemas.some(p => esperado.test(p)), `no detectado (${esperado}):\n${problemas.join('\n') || '(sin problemas)'}`);
 };
+
+test('los lectores del índice de fauna quedan dentro de la red estricta, con consulta local y construcción global separadas', () => {
+  const lectura = ALCANCES.find(e => e.id === 'faunaIndice.celda')!;
+  assert.equal(lectura.radio, 0); assert.equal(lectura.centro, 'entrada');
+  const llamada = LLAMADAS.find(l => l.fichero === 'index.ts' && l.funcion === 'choose' && l.llama === 'indice-fauna.ts:faunaEn')!;
+  assert.equal(llamada.centro, 'decision.teselas');
+  assert.equal(alcancesDeFase('decision').get('faunaIndice.celda'), 7);
+  assert.ok(COLECCIONES_POR_NOMBRE.some(c => c.fichero === 'indice-fauna.ts' && c.funcion === 'construir' && c.nombres.includes('animales')));
+  assert.ok(LECTURAS_GLOBALES.some(g => g.id === 'faunaIndice.construccion' && g.funcion === 'construir'));
+  for (const f of ['faunaEn', 'construir', 'retirarFauna']) {
+    assert.ok(!PRIMITIVAS.some(p => p.fichero === 'indice-fauna.ts' && p.funcion === f));
+    assert.ok(!FUERA_DEL_PASO.some(p => p.fichero === 'indice-fauna.ts' && p.funcion === f));
+  }
+  // Ampliar el predicado local o cambiar sus argumentos rompe la lectura o llamada fijada.
+  detecta(mutar([['indice-fauna.ts', 'animal.x === punto.x && animal.y === punto.y && animal.health > 0',
+    'Math.abs(animal.x - punto.x) <= 40 && animal.y === punto.y && animal.health > 0']]), /indice-fauna\.ts \(faunaEn\) el patrón aparece 0 veces/);
+  detecta(mutar([['index.ts', 'faunaEn(world, tile)', 'faunaEn(world, { x: tile.x + 20, y: tile.y })']]), /index\.ts:\d+ \(choose\) llamada a indice-fauna\.ts:faunaEn sin inventariar/);
+  // La validación de fuente y las lecturas nuevas, también dentro del constructor global, se cubren.
+  detecta(mutar([['indice-fauna.ts', 'indice.longitud !== world.animals.length', 'indice.longitud < world.animals.length']]),
+    /indice-fauna\.ts \(faunaEn\) el patrón aparece 0 veces/);
+  detecta(mutar([['indice-fauna.ts', '  const ambito = ambitos.get(world);',
+    '  const ambito = ambitos.get(world);\n  const lejanos = world.animals.filter(a => Math.abs(a.x - punto.x) <= 40);']]),
+    /indice-fauna\.ts:\d+ \(faunaEn\) coleccion animals sin inventariar/);
+  detecta(mutar([['indice-fauna.ts', '  for (const animal of animales) {',
+    '  const extras = animales.filter(a => a.health > 0);\n  for (const animal of animales) {']]),
+    /indice-fauna\.ts:\d+ \(construir\) nombre animales sin inventariar/);
+  // La retirada global por ID se fija por separado; no debe convertirse en filtro de salud.
+  detecta(mutar([['indice-fauna.ts', 'world.animals = anteriores.filter(animal => animal.id !== id);',
+    'world.animals = anteriores.filter(animal => animal.id !== id && animal.health > 0);']]),
+    /indice-fauna\.ts \(retirarFauna\) el patrón aparece 0 veces/);
+});
 
 test('la prueba muerde: las siete mutaciones de la verificación, una composición 7 + 8 en el código y otras formas de leer más lejos fallan', () => {
   const eleccion = "  const partner = nearbyPeople.find(other => person.role !== 'neighbor' && other.role !== 'neighbor');";

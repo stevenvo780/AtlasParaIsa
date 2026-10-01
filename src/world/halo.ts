@@ -119,6 +119,7 @@ export const COLECCIONES_POR_NOMBRE: readonly { fichero: string; funcion: string
   { fichero: 'ecosystem-kernel.ts', funcion: 'EcosystemKernel', nombres: ['tiles', 'lifeBefore'] },
   { fichero: 'ecosystem-kernel.ts', funcion: 'buildTopology', nombres: ['tiles'] },
   { fichero: 'ecosystem-kernel.ts', funcion: 'sameCoordinates', nombres: ['tiles'] },
+  { fichero: 'indice-fauna.ts', funcion: 'construir', nombres: ['animales'] },
 ];
 
 /** Primitivas de consulta. No se recorren: cada llamada a una de ellas es una lectura que el inventario fija
@@ -151,7 +152,11 @@ export const ALCANCES: readonly Alcance[] = [
   a('decision.personas', 'personas', 'entrada', 7, 'index.ts', 'choose', ["const nearbyPeople = vecinos(world, person, RADIUS + 1, other => other.id !== person.id && distance(person, other) <= RADIUS, 'choose');"]),
   a('decision.lugarFamilia', 'lugares', 'entrada', 7, 'index.ts', 'choose', ['filtrarCerca(world.places, person, RADIUS + 1, place => distance(person,place)<=RADIUS && distance(family.partner,place)<=RADIUS)',
     '.sort((a,b) => (distance(person,a)+distance(family.partner,a))-(distance(person,b)+distance(family.partner,b)) || a.id.localeCompare(b.id))[0]']),
-  a('decision.caza', 'animales', 'decision.teselas', 0, 'index.ts', 'choose', ['const victim = world.animals.filter(a => a.x === tile.x && a.y === tile.y && a.health > 0)', '.sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0)[0];']),
+  a('decision.caza', 'animales', 'decision.teselas', 0, 'index.ts', 'choose', ['const victim = faunaEn(world, tile)', '.sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0)[0];']),
+  a('faunaIndice.celda', 'animales', 'entrada', 0, 'indice-fauna.ts', 'faunaEn',
+    ['const cumple = (animal: Animal): boolean => animal.x === punto.x && animal.y === punto.y && animal.health > 0;',
+      'if (!ambito) return world.animals.filter(cumple);', 'return indice.celdas.get(punto.x)?.get(punto.y)?.filter(cumple) ?? [];'],
+    { nota: 'Filtro literal o celda indexada: mismos objetos, salud y orden. La llamada de choose centra esta lectura en decision.teselas (≤ 7); construir y validar la fuente son lecturas globales distintas.' }),
   a('decision.obra', 'lugares', 'decision.teselas', 5, 'index.ts', 'choose', ['!algunoCerca(world.places, t, 6, p => distance(p, t) < 5)'],
     { nota: 'Antes de PERF2 recorría todo `world.places`; hoy usa el índice por casillas, pero la regla sigue siendo «ningún lugar a < 5 de una tesela a ≤ 7»: 12.' }),
   a('decision.lugarCompartir', 'lugares', 'entrada', 3, 'index.ts', 'choose', ['const place = primeroCerca(world.places, person, 4, p => distance(person, p) <= 3);']),
@@ -239,6 +244,8 @@ export const ALCANCES: readonly Alcance[] = [
 
 /** Llamadas entre funciones que leen el mundo, dentro de las fases con halo. */
 export const LLAMADAS: readonly Llamada[] = [
+  ll('index.ts', 'choose', 'indice-fauna.ts:faunaEn', 'decision.teselas', ['faunaEn(world, tile)'], 'Animal en una tesela percibida: radio 0 desde la tesela, sin ampliar la percepción.'),
+  ll('indice-fauna.ts', 'faunaEn', 'indice-fauna.ts:construir', 'entrada', ['construir(world.animals)'], 'Barrido global declarado aparte: construcción lazy del índice efímero en la cadena serial del coordinador.'),
   ll('index.ts', 'choose', 'society.ts:settlementOpportunity', 'entrada', ['const home = settlementOpportunity(world,person);']),
   ll('index.ts', 'choose', 'inventions.ts:foodAvailable', 'entrada', ['foodAvailable(world,person)>0']),
   ll('index.ts', 'choose', 'index.ts:bodilyShelter', 'decision.teselas', ['const protection = bodilyShelter(world, person)',
@@ -337,7 +344,8 @@ export const ALCANCES_SERIALES: readonly AlcanceSerial[] = [
   s('accion.beber', 'accion', 'teselas', 'actor', 0, 'inventions.ts', 'takeWater', ['const tile = tileAt(world, person); if (!tile) return 0;']),
   s('accion.disputaFuente', 'accion', 'teselas', 'actor', 4096, 'society.ts', 'resourceDispute', ['const source = tileAt(world, person.target);'], { nota: 'Destino propio; ver `accion.destino`.' }),
   s('accion.disputa', 'accion', 'personas', 'actor', { param: 'social.disputaRadio' }, 'society.ts', 'resourceDispute', ["const other = primerVecino(world, person, disputaRadio + 1, p => p !== person && !!p.communityId && p.action === person.action && distance(person, p) <= disputaRadio && distance(person.target, p.target) < disputaDestino"]),
-  s('accion.cazar', 'accion', 'animales', 'actor', 0, 'animals.ts', 'harvestAt', ['world.animals.filter(a => a.x === point.x && a.y === point.y && a.health > 0)', '!world.tiles.some(t => t.x === point.x && t.y === point.y)']),
+  s('accion.cazar', 'accion', 'animales', 'actor', 0, 'animals.ts', 'harvestAt', ['faunaEn(world, point).sort(canonical)[0]', '!world.tiles.some(t => t.x === point.x && t.y === point.y)'],
+    { nota: 'El helper conserva el predicado de radio 0 (faunaIndice.celda); harvestAt mantiene su sort canónico y su comprobación de tesela.' }),
   ...(['fillContainedWater', 'beginWaterPreparation'] as const).map(funcion =>
     s(`accion.${funcion}`, 'accion', 'teselas', 'actor', 0, 'technology-water.ts', funcion, ['firstTileAt(host.tiles, actor.x, actor.y)'])),
   s('accion.entregaObjeto', 'accion', 'personas', 'actor', 2, 'technology.ts', 'transferTechnologyItem', ['distance(from, to) > 2']),
@@ -381,6 +389,12 @@ export const ALCANCES_SERIALES: readonly AlcanceSerial[] = [
 /** Lecturas que no dependen de dónde está nadie: colecciones acotadas que cada región recibe enteras y
  * de solo lectura, y agregados o selecciones que el coordinador calcula una vez. */
 export const LECTURAS_GLOBALES: readonly LecturaGlobal[] = [
+  { id: 'faunaIndice.fuente', fase: 'decision', fuente: 'world.animals (referencia y longitud)', cota: 'Una referencia y un recuento', fichero: 'indice-fauna.ts', funcion: 'faunaEn',
+    patrones: ['if (!indice || indice.animales !== world.animals || indice.longitud !== world.animals.length) {'],
+    motivo: 'Validez del índice de la fase personas: cualquier cambio ajeno de referencia o longitud exige reconstruir; no consulta animales remotos para elegir una presa.' },
+  { id: 'faunaIndice.construccion', fase: 'decision', fuente: 'animales = world.animals', cota: 'Fauna activa admitida por limitsOf(world).fauna', fichero: 'indice-fauna.ts', funcion: 'construir',
+    patrones: ['for (const animal of animales) {', 'if (Number.isNaN(animal.x) || Number.isNaN(animal.y)) continue;', 'return { animales, longitud: animales.length, celdas, porId };'],
+    motivo: 'Barrido GLOBAL de la fauna que construye celdas e IDs en el orden original, lazy una vez en la fase personas del coordinador y ocasionalmente tras invalidación. Hoy la fase es serial; antes de repartir choose, el coordinador debe construir y replicar este índice de solo lectura. Su construcción no tiene radio 0 ni queda acotada por el halo.' },
   { id: 'lugares.porId', fase: 'decision', fuente: 'world.places', cota: 2048, fichero: 'index.ts', funcion: 'choose',
     patrones: ['world.places.find(p => p.id === habit.placeId)', 'world.places.find(p => p.id === memory.placeId)'],
     motivo: 'Lugares de hábitos y recuerdos por id, dondequiera que estén. `world.places` (≤ 2 048, `assertCommon`) se replica íntegro: ninguna lectura de lugares necesita el halo.' },
@@ -462,6 +476,11 @@ export const LECTURAS_GLOBALES: readonly LecturaGlobal[] = [
 /** Lecturas por id, rol o pertenencia: no tienen cota espacial. Con personas repartidas por región
  * exigen una tabla de personas replicada de solo lectura (o quedarse en la fase serial). */
 export const LECTURAS_POR_IDENTIDAD: readonly LecturaPorIdentidad[] = [
+  { id: 'faunaIndice.retirada', fase: 'accion', fuente: 'world.animals', fichero: 'indice-fauna.ts', funcion: 'retirarFauna',
+    patrones: ['const anteriores = world.animals, ambito = ambitos.get(world), indice = ambito?.indice;', 'world.animals = anteriores.filter(animal => animal.id !== id);',
+      'if (indice.animales !== anteriores || indice.longitud !== anteriores.length) {', 'for (const celda of indice.porId.get(id) ?? []) {',
+      'for (const animal of celda) if (animal.id !== id) celda[salida++] = animal;', 'indice.animales = world.animals; indice.longitud = world.animals.length;'],
+    motivo: 'Retirada global por ID en la acción serial: conserva el filter original sobre TODOS sus duplicados. Actualiza sólo sus celdas indexadas si la fuente sigue vigente; una fuente cambiada se reconstruye después. No altera el orden de supervivientes.' },
   { id: 'vinculos.cortejo', fase: 'decision', fuente: 'world.people', fichero: 'index.ts', funcion: 'choose',
     patrones: ['for (const [id, strength] of Object.entries(person.bonds))', 'const other = personById(world, id);'],
     motivo: 'Con `poblacion.cortejo` > 0 (reglas 10) lee rol, vínculos y padres de cada persona vinculada, a cualquier distancia, antes de filtrar por `radioCortejo`.' },
@@ -540,7 +559,7 @@ export const RECORRIDOS: readonly Recorrido[] = [
     motivo: 'Orden canónico al acabar el paso (tras la reproducción), con `ordenCanonico` en vez de `sort`.' },
   { id: 'fauna.compactacion', fase: 'faunaSerial', fichero: 'animals.ts', funcion: 'stepAnimals', veces: 2,
     patrones: ['world.animals = world.animals.filter(a => a.health > 0);'], motivo: 'Compactación tras la fisiología y tras la depredación.' },
-  { id: 'fauna.caza', fase: 'accion', fichero: 'animals.ts', funcion: 'harvestAt', patrones: ['world.animals = world.animals.filter(a => a.id !== victim.id);', 'syncFauna(world.tiles, world.animals)'],
+  { id: 'fauna.caza', fase: 'accion', fichero: 'animals.ts', funcion: 'harvestAt', patrones: ['retirarFauna(world, victim.id);', 'syncFauna(world.tiles, world.animals)'],
     motivo: 'Tras cada caza humana, `syncFauna` vuelve a contar la fauna por celda en el mundo activo.' },
   { id: 'fauna.recuento', fase: 'faunaSerial', fichero: 'animals.ts', funcion: 'syncFauna', patrones: ['const tileIn = tileLookup(tiles);'],
     motivo: 'Escribe `fauna` y `species` en las celdas ocupadas antes o ahora; al final de `stepAnimals` y tras cada caza.' },

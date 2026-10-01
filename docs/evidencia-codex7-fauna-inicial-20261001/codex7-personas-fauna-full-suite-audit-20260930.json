@@ -1,0 +1,1015 @@
+{
+  "status": "PASS",
+  "auditedAt": "2026-10-01T00:38:11.681Z",
+  "label": "fauna",
+  "summary": {
+    "tests": 1648,
+    "suites": 0,
+    "pass": 1639,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 9,
+    "todo": 0,
+    "duration_ms": 345249.80332
+  },
+  "expectedFiles": 164,
+  "log": "/datos/tmp-atlas-lab/balance/codex7-personas-fauna-full1-20260930.log",
+  "logSha256": "eda8ec88e8c9016fe8f0415e8b1d3446a18bd93877876140e76bf3c7d877ea01",
+  "resources": [
+    {
+      "file": "codex7-resources-personas-fauna-full1-3390044.json",
+      "pid": 3390044,
+      "sha256": "53866de5888b7b83b9ab832246d5075629f29270b559b8534f3696e43ae2c867",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3390073.json",
+      "pid": 3390073,
+      "sha256": "fcad9f6bed90667a5369981a1e9cda13fa1d4404e9e8fbecfe3dd35ceb3093e4",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3390074.json",
+      "pid": 3390074,
+      "sha256": "b1c561f9863fac979a7ac0c2b2c7903e29c96bf015dd5684725b00e10a14e4dc",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3390075.json",
+      "pid": 3390075,
+      "sha256": "d9c3cb239fc0810e888bb58b702f8b900f6846a3056d42bd462d7e9d814f039c",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3390077.json",
+      "pid": 3390077,
+      "sha256": "3d1efafbccce3bf470482d75122d80a25774ce07566e1bc07b9100f528933167",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3390087.json",
+      "pid": 3390087,
+      "sha256": "bf145637c04197a95fd5b099cb9356be65da3b345797fa07ea98f728ee4b7efb",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3390088.json",
+      "pid": 3390088,
+      "sha256": "ef20de2f633c7ff80557ef8cf9d7939d0a0ada23605da3ff6c6d6316dbecef5a",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3390094.json",
+      "pid": 3390094,
+      "sha256": "ccebf9b9f92af5c52e1f871122c632ee97bc66ebc2cf1539084b5094036cf6f5",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3390095.json",
+      "pid": 3390095,
+      "sha256": "bf5307f6ed9ace376c20ae37f5b7ae1e494d3e27c55cdb363d0be47051060e62",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3390116.json",
+      "pid": 3390116,
+      "sha256": "473dc18a751b5da8ec3cc680afa5c74898ae3b3f3bf94c31bf9d2a3891667fcb",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3390117.json",
+      "pid": 3390117,
+      "sha256": "81658cd3c0e58d6e4edfd3757b0fd2043beb39810f280b0613b400c77ba0c10b",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3390125.json",
+      "pid": 3390125,
+      "sha256": "53dd510a8cf9adca1bb60b779acd8d34ee8c6cbd2fe8bf12f996ea9343a6a705",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3390126.json",
+      "pid": 3390126,
+      "sha256": "cabc170f09a1da1e18f0cbcb6e7c542fa36dc5351fd1169c8baec3dab48bea03",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3390155.json",
+      "pid": 3390155,
+      "sha256": "fb6fc4cd499231709d3397922a798f026a1a527f64964119244d874f671fb63a",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3390158.json",
+      "pid": 3390158,
+      "sha256": "80c5fe49948ba28845086f194b8b416cf4cf0f7ca853bd5ce335401e28b34dfd",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3390159.json",
+      "pid": 3390159,
+      "sha256": "5ffbf36756ac517ed1689eaf04247c92cb402d5e0f6e356303fa29fa3dd2fe9a",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3390161.json",
+      "pid": 3390161,
+      "sha256": "26937be1a436870e8b880d0745e4c234c9afe61076e750011a6fba745f83c063",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3390171.json",
+      "pid": 3390171,
+      "sha256": "f454822d666ba45a87cd51e90f22876526b8192cd5ba63f521b6809a0a57b1b8",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3390178.json",
+      "pid": 3390178,
+      "sha256": "824a819600c35f631d2f45b3b13b47f7d3b7842ff07eba767bc5221732a9e0ea",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3390183.json",
+      "pid": 3390183,
+      "sha256": "7cb811a1f92b206cf31c733b0a0ae911e9d7a22978ed3df0a23baa0de92b392b",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3390189.json",
+      "pid": 3390189,
+      "sha256": "45ba42540fbe497a1a704b00039ca7f2e0d8e905429c8475deffbf88f96ed421",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3390196.json",
+      "pid": 3390196,
+      "sha256": "579955ee5aa18052ed7c75205fa04fdebfca779fbb4369fd7c9c8408276329c0",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3390198.json",
+      "pid": 3390198,
+      "sha256": "7569311803b989a4bb0918867f1087541ad69b5165a2b497b11fc817a99ec272",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3390207.json",
+      "pid": 3390207,
+      "sha256": "b9ef72e56c9ca7fcfade3055740bb4ad413b1630953239368c30f42fe76e9aed",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3390213.json",
+      "pid": 3390213,
+      "sha256": "1357d479204188d14648299b7f453cd182e9df1a546fe31c02be5109a91d8696",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3390231.json",
+      "pid": 3390231,
+      "sha256": "cd1e7193b795a7ed6a052980b3c9335f202f6ce37c792a18158bf167c80d6d92",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3390618.json",
+      "pid": 3390618,
+      "sha256": "9fdf1843259177ac5db6100609234b721b8edbb6de5674660967d838e2f5b840",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3390678.json",
+      "pid": 3390678,
+      "sha256": "429599257b60009fdbdfeb857ec63effc4810d541e0ba4eb48931ba9a3158c85",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3390700.json",
+      "pid": 3390700,
+      "sha256": "0a04598d5364686676d3a37c623e1cd18d39cc0da7df1cbf95090fa8737af8c1",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3390828.json",
+      "pid": 3390828,
+      "sha256": "791b47c4b9f8b719f99ad16fbc64667a73035dd7363600ca44c125b6ec9d2aeb",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3390829.json",
+      "pid": 3390829,
+      "sha256": "6b769d8364685e764251c246a995b4fdc836a1a0839323a3b88c5aea5f20f3ed",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3390848.json",
+      "pid": 3390848,
+      "sha256": "91bfadf90b8ad3fef9fa986aca0b374296a277ce89bf0973ed376e16c753c4f0",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3390940.json",
+      "pid": 3390940,
+      "sha256": "65fb25d33596ed32e0bab85832eb28f2a0c0bb1cf35c691afd364669113e5e7b",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3390955.json",
+      "pid": 3390955,
+      "sha256": "4871bb4741d7435bd29d152488b8ba62d6724f7e4c5618741465731c7fcd28fe",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3391138.json",
+      "pid": 3391138,
+      "sha256": "924ca0038c6c2758e52cf1df96721bfea9eca1ae99ddc5060f48457f03a93789",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3391156.json",
+      "pid": 3391156,
+      "sha256": "b18a5dd42dbbdc0b2c084a60d4b15d97555964f657909335a60874bad2fea49e",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3391178.json",
+      "pid": 3391178,
+      "sha256": "f50bbff634715ffd0142a7b3d36370359270a0d69d7bd47093394f46d0bade55",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3391312.json",
+      "pid": 3391312,
+      "sha256": "f4c87159f4e859347a1bbffdbbc7d6d3774edbba2945ebe27899038666a92c2e",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3391336.json",
+      "pid": 3391336,
+      "sha256": "978f5bcbbeef45fb8125ad19e252bd5624d0aea472e9938630395f62ead99dc2",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3391373.json",
+      "pid": 3391373,
+      "sha256": "faa48da9c3808e4e0f9ef74d1b596caa2d301fe5b36234e31fb449dede945784",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3391436.json",
+      "pid": 3391436,
+      "sha256": "a8fa347a087fd459529eb722cd7de727cb2321f33022c465e7bb50a71955a129",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3391607.json",
+      "pid": 3391607,
+      "sha256": "763a502fe9ce068b5fdc1fbaa12badf0c8bc11d4508f2af0ac036f6493768c7d",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3391674.json",
+      "pid": 3391674,
+      "sha256": "149c94e72b721d50e5e8d34625c4e099d6aced932dda1554d894c74dd82d07a7",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3391754.json",
+      "pid": 3391754,
+      "sha256": "93cd068e28ba740c5f5232f4e2ded06c761e58379bb1046b9329e6e49138b245",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3391843.json",
+      "pid": 3391843,
+      "sha256": "f4aafa3765214b3f265002690287fd8dd38c238a9d2f7c303ea0250027ff3fb4",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3391867.json",
+      "pid": 3391867,
+      "sha256": "704dc636cd91609248b6a51d90b903f064f2d42bf12d894740636fd9fa6cd8f9",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3391900.json",
+      "pid": 3391900,
+      "sha256": "802bec7420e598b51e9dcd2247e0a0142bf07256686cc08d4e7dd73415ea0051",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3392002.json",
+      "pid": 3392002,
+      "sha256": "89fcc0587ad5aaa419d29422c4b3ddd8a2b8b8a9b80dae336aeda3d07151742e",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3392077.json",
+      "pid": 3392077,
+      "sha256": "f0bcc94807fae7d0f64a9099224b8058fecd541b5b660fe9031bc80848d4c9fb",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3392209.json",
+      "pid": 3392209,
+      "sha256": "b9093192ba28c9a9f1d97629eec7a2abbaf293a375410c15bad3bbc2192ca797",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3392222.json",
+      "pid": 3392222,
+      "sha256": "5c568b20703a1d24866e2e3a7c0e2e9a8729cf7c4c0b1f1722f1db22ef8bd1a6",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3392355.json",
+      "pid": 3392355,
+      "sha256": "4d2406209d1d030bfd5f16898e59617b6ba349c131f91f5c0b698ef30f8a43b3",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3392448.json",
+      "pid": 3392448,
+      "sha256": "7593be9a2584c0cfa275e16d7138f5beb5701babc7d0188e3c98542510994b10",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3392457.json",
+      "pid": 3392457,
+      "sha256": "8deb017c56f78fac6a71a31c6bd9d9d886dfc461f108d4906e13f333603f9720",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3392458.json",
+      "pid": 3392458,
+      "sha256": "d3cd46535aef5385b7efe5ca5c19398d1d99e5193a8af8f8f3d8432fcb12214f",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3392553.json",
+      "pid": 3392553,
+      "sha256": "de3f2c1f26f11dcfd746142fa8ab1f90919cd31b01655af1764f3bda2652d2c3",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3392569.json",
+      "pid": 3392569,
+      "sha256": "e1722eb9a0eda1e4a55e7c7610ffac1aecec6bc130158239a2394f668ac2200a",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3392581.json",
+      "pid": 3392581,
+      "sha256": "1d7d75b8d417bca10d934593efc89aae2412cccef1a96580a2cbd5b021fada91",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3392590.json",
+      "pid": 3392590,
+      "sha256": "59487e4d55ac7800f74b9f4d3bec76fa4a97bb5e42e3e0807d1058fcaa07766d",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3392604.json",
+      "pid": 3392604,
+      "sha256": "035b7a4d5a391d6eeb3c56ece86397ae4d637cd8f313c46d5416d06d0ff16ee0",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3392703.json",
+      "pid": 3392703,
+      "sha256": "d821c97a8165cdb4de316977296cf72ef785fce04c2d75a4eddfb70c257542eb",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3392734.json",
+      "pid": 3392734,
+      "sha256": "8bca7b2e7ae553becd3e9ca4db140ca40cd5e03b3af6613e2600d0089c05403c",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3392747.json",
+      "pid": 3392747,
+      "sha256": "711bcf9dd571ae2a2fd234b973536ed69f59c26f40fadc88d10f248916f7a670",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3392860.json",
+      "pid": 3392860,
+      "sha256": "3bf5d0d25bd301fbe9d0f04999da58fa1015c879253527a95b35d52c03884e62",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3393045.json",
+      "pid": 3393045,
+      "sha256": "ea20966952f12f4a30a11f55245e3916e60cb2cdeb00f2876c0d2109de058de3",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3393195.json",
+      "pid": 3393195,
+      "sha256": "cb601534a44853b8056480a63f508c8d92a297c24594c3b40a4d0017ee138aff",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3393367.json",
+      "pid": 3393367,
+      "sha256": "4779eb482a44d71e026bdb4952a1b07258498388342db12c476381bac3d0c3a9",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3393438.json",
+      "pid": 3393438,
+      "sha256": "c0b1bf1f1a5e18c123f5bb9a8db3d2432206822c1abaf94a7242c1c8cb7c09b6",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3393566.json",
+      "pid": 3393566,
+      "sha256": "5ce0814cffe5b0978d0ae15c267f17efaa1095440b2ca39982a7f7f91f312ddc",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3394026.json",
+      "pid": 3394026,
+      "sha256": "22af9afe948524863f8505b5fa08cf608a6687740231e3869c039b290b1492ad",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3394273.json",
+      "pid": 3394273,
+      "sha256": "f785d420a7aab530bae4b0ecb006e323d28e1d6e8494dbc94d0f681c3b04ff6c",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3394279.json",
+      "pid": 3394279,
+      "sha256": "c6c9f9f08c9e66d9ef1e3fa43ba5c924cf17170127623c8e4938194956732676",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3394630.json",
+      "pid": 3394630,
+      "sha256": "3045f570f4cc09c7591ce3ecdf8a68821d9f045806031dcf0b6360eafbde31dd",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3394665.json",
+      "pid": 3394665,
+      "sha256": "6d9bbe3f657578ed82bb75b38471952fe40115f84b0eb7e85c45c2b0ffacb1a0",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3394819.json",
+      "pid": 3394819,
+      "sha256": "aff7b8595866fb265d56f46750cb0877091c37a6e1b4b5f71ee50b52ece792cf",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3394832.json",
+      "pid": 3394832,
+      "sha256": "529207e63c7d12a4572effa9e55e78820889d04c113220362dbf157af5f61cb4",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3394833.json",
+      "pid": 3394833,
+      "sha256": "10e2419b958d050fa10d7c8669bccd93477cb8b0243e225bbdfd91fb46645382",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3395002.json",
+      "pid": 3395002,
+      "sha256": "71b3bb5e4e7a498c182fd8cdd5396ba19499dcbb9c4b3b4f6ddd1939f2cc472e",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3395252.json",
+      "pid": 3395252,
+      "sha256": "4d1bd7ba02f2734ff3acc39f96c9b79cf7f7e6e1ac927f1eaf177d7847a8df4b",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3395291.json",
+      "pid": 3395291,
+      "sha256": "a1ece091d111ac1641d218518a546e184adf9cc91e21ee67b881acff8bb8c962",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3395420.json",
+      "pid": 3395420,
+      "sha256": "eec38aff4b527efcbc40bf44a3287ac09523d29e5b93d6d1954dac2b686fe371",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3395427.json",
+      "pid": 3395427,
+      "sha256": "b1d47ba1722fde9b3a84a0d93b930f50f42aa33d82d44e190983d4d9054d7edc",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3395482.json",
+      "pid": 3395482,
+      "sha256": "ea796d01e1221270667d4d895f6e2f72d5e0082e18e6fd66acacb2b1e4801090",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3395631.json",
+      "pid": 3395631,
+      "sha256": "3a0800eafa73fd3b5793e57f02887564792b93a79601f3e1147fb58b0e6a4988",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3395660.json",
+      "pid": 3395660,
+      "sha256": "928b8be9b57d4988f7213c8e7f144c566d765574bf53c8a7b7e23ce5e8f11dcb",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3395712.json",
+      "pid": 3395712,
+      "sha256": "d45469412c76c9654c1f48358aa9f8b3559f18acec2586030aeafa564988929b",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3395734.json",
+      "pid": 3395734,
+      "sha256": "70625179745bddf4927fbb976d8a9cecb6ca51668fdd4576c8590fb44ffcd94e",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3395775.json",
+      "pid": 3395775,
+      "sha256": "d19dfdd141483f6b77aaf4023df45808d3654407fccd836c4d5a0f6a0a454ece",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3395839.json",
+      "pid": 3395839,
+      "sha256": "72c879833eed323447e3a80600c87ae29dea9bb562c23bcbbc25b43d7e05f150",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3395866.json",
+      "pid": 3395866,
+      "sha256": "3f6477b78972b36493e951414c5ddb9b415a083488164c48b39b24e4d206b966",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3395968.json",
+      "pid": 3395968,
+      "sha256": "8eaf179bcccdd5f87ded5473fd14935f9160472cf899f71acee2456b94ec4723",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3395974.json",
+      "pid": 3395974,
+      "sha256": "1ccee8618bae69ed2013cb41c6e72b018963375acd23f984a8550ed5076a6d4b",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3395982.json",
+      "pid": 3395982,
+      "sha256": "3344d90f8c77a6598515bd5a930926377559452f9c4275997c68aa70cab90936",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3396272.json",
+      "pid": 3396272,
+      "sha256": "d25f517efeda563068ffc861c7ecd12b869154832030709da276bab427825828",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3396356.json",
+      "pid": 3396356,
+      "sha256": "b9189e41b151ada3c810a823d75ff2ce063ece5294b5a96cf4eb0fa5edb5a3ec",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3396375.json",
+      "pid": 3396375,
+      "sha256": "60ef119ac48bd00e8cc6edfb89102899617a75883252578da63d96df414519bf",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3396793.json",
+      "pid": 3396793,
+      "sha256": "131086a29680ac5299643caa0ce443a2da784476f25e3516c3331bd13e8bc9c9",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3396794.json",
+      "pid": 3396794,
+      "sha256": "b35dbf1b0b12767ed17dad31588da713324b656aee9e2eb46b64f84582d46576",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3397020.json",
+      "pid": 3397020,
+      "sha256": "d603d0e0074d32a590c384fa82499c4670ce668f3cd361ccd4f5e3d43d2cf34d",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3397326.json",
+      "pid": 3397326,
+      "sha256": "20fe67c2233fc5ac72c49bcef3bf3aedc3af62f7b8cb537d6636299111ac2b90",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3397458.json",
+      "pid": 3397458,
+      "sha256": "eb2afbb4e2031fc2cbb5ff5bd179cb6cd349ab573fafb6c4ec1f5b9e14e07508",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3397863.json",
+      "pid": 3397863,
+      "sha256": "eb007c41458e739070ffb65c9910f255b8471d0d82b105f7ba11e55d3029ed04",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3398153.json",
+      "pid": 3398153,
+      "sha256": "b945fdec3b2ada45ccb706bdf69184ef84f1bfdf6d39316092942a49b26f87ef",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3398782.json",
+      "pid": 3398782,
+      "sha256": "0ee09734b6cdbbc819a292d97160afc0fc9521a0684f3a36096ad4d17467d5ca",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3398994.json",
+      "pid": 3398994,
+      "sha256": "6cb307d5521c7df8b62317b36ebddd1af142bd31c0962933288265a35168617b",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3399081.json",
+      "pid": 3399081,
+      "sha256": "668049cc356d5f09c0385b7bbbd1b09aa8fdcb781814f10b869e3240be496189",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3399286.json",
+      "pid": 3399286,
+      "sha256": "856002996249fda48015f8041546879872784a89e568faba2ff6b4b92937b5e0",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3399339.json",
+      "pid": 3399339,
+      "sha256": "e22a27f2ad5cf53e8e183d27ec054ca92c2eb07de3772f617ca871596ef01600",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3399961.json",
+      "pid": 3399961,
+      "sha256": "f6f28d8c6b43b0bdcde9a98c998717c4928081f415878a66e5572fab89428b49",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3400226.json",
+      "pid": 3400226,
+      "sha256": "aefd09a46d6eb5e626d39d45a448df1c6d40d1da960279f6502d9ced88b6eaa0",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3400635.json",
+      "pid": 3400635,
+      "sha256": "e7abaac31cae15ce7aa0965c0dc13737e5ae339b0236828b951e72bf6aa14d28",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3401260.json",
+      "pid": 3401260,
+      "sha256": "347710f3b0f269fb18837a4042b1cb559a28e6e7322ad4c9494b54e010846a30",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3401271.json",
+      "pid": 3401271,
+      "sha256": "d7eae8451a4e862519159a90a739193a4d1fc870cd8f8c2553131a898935b12e",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3401396.json",
+      "pid": 3401396,
+      "sha256": "5ff45fcbfb7073496745dd9e28903fdd3670a6f0148920f1faecaa053b5fd5db",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3401679.json",
+      "pid": 3401679,
+      "sha256": "6e44a83f0d4c5238e7e375b65e5f939073625844915b2d151c79d5d53bc8266b",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3401939.json",
+      "pid": 3401939,
+      "sha256": "ca253dae0d312b5a5ddf57a2fc15c6c2214038a13262d04c0f9546cc198d614b",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3401962.json",
+      "pid": 3401962,
+      "sha256": "fb60a261025d0fc39e6f70d051f433ddcfef0190a94b7bd0f05c89d37dedc0b3",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3402095.json",
+      "pid": 3402095,
+      "sha256": "b47dfc157efa21e8b592864b3fd06a8891c129caf8135568b3caf1ea99e75b6a",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3402164.json",
+      "pid": 3402164,
+      "sha256": "55441faf6458604789a19d0ce8f1fb10240f73b35a24d846db47e03f7624d646",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3402222.json",
+      "pid": 3402222,
+      "sha256": "b9b84136df74c7681668aa1df5120652a319dfd06f4fa3243e750a85b36f2953",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3402375.json",
+      "pid": 3402375,
+      "sha256": "c6aaf559e48c7a51220b2713e6a20961507f09049d213fa9b541cea27dcfbf67",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3402395.json",
+      "pid": 3402395,
+      "sha256": "02438e7bf91031e7b35eb51e3dcb390a5f0e2efa9e77260d21873f4c81b3b979",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3402416.json",
+      "pid": 3402416,
+      "sha256": "d6a217ef1fca021746f9e2d02d48a33d8a4315d87908941a39af07bc16b7cac9",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3402446.json",
+      "pid": 3402446,
+      "sha256": "89f62dc650dc6e411ad6018051c942a81cdcb4fa27078993f26fac2d70f84049",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3402572.json",
+      "pid": 3402572,
+      "sha256": "cbf6b4d3567ecec362acddbbaeb1b0aabc6d680aab009ff217dd0b05a300719e",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3402589.json",
+      "pid": 3402589,
+      "sha256": "f8154850d90db31fa6cd3caff9b1c3f0421e31cd295b9b766e612f9a5e12474b",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3402671.json",
+      "pid": 3402671,
+      "sha256": "78bb94de2101ce0d83e60d143b285bb32efb37bfab485f8145d348f7acfc7bae",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3402731.json",
+      "pid": 3402731,
+      "sha256": "fbfa12ce9617c33ede55e287f2c9804cbdaaacd01a28ed7a1e1932bd72a32e27",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3402758.json",
+      "pid": 3402758,
+      "sha256": "7425d917fbec99352c9bf082075c58b1f1ed1444c7dce7f4718d33277a561b7b",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3402844.json",
+      "pid": 3402844,
+      "sha256": "5a26644a3fea870c721d9abb97c25e109a3dedc96f8826ee225e2ab2b48102ad",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3402953.json",
+      "pid": 3402953,
+      "sha256": "74ac7b6cd586f60c89669714771b00043fd3d5266f03793b691f6d2988ef0d0f",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3403116.json",
+      "pid": 3403116,
+      "sha256": "a223417d6f60b372a447fa3c0dd370a51929aaae2d0c645fc09698a2ae9c8177",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3403579.json",
+      "pid": 3403579,
+      "sha256": "92fdc1ec0e93d54956a8d5a265496c038f3bcaa265c97799e7ea3e7be8a1bd54",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3403580.json",
+      "pid": 3403580,
+      "sha256": "eb7427abf767acd9f1dab18c633b83acd06bffd9365844a9f4b77be2f7c923bc",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3404062.json",
+      "pid": 3404062,
+      "sha256": "f0c8b46b44612128a5a94c494231a753510c1d08cd1a58e4c3a89f3db587d6ad",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3404236.json",
+      "pid": 3404236,
+      "sha256": "164e68168f62383402f3e7a99665da0f6d641fcd33942e0cd70cd57a536d978e",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3404462.json",
+      "pid": 3404462,
+      "sha256": "5ab6436cd9de453def3ed6afa152fc8d975dca0c37e787c1123d01b3b3ee06ac",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3404623.json",
+      "pid": 3404623,
+      "sha256": "21c3bfd516ada0ebc3c37c2b1467dfa4bcf375ecfeaef9f101908bced9740ed2",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3404673.json",
+      "pid": 3404673,
+      "sha256": "c5a9173138074380e57ec6eb7013eb27aa313877ccdaa47210bf1e76df4aa849",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3404769.json",
+      "pid": 3404769,
+      "sha256": "2182df7f7585610ce8581624cb1ac9e7ec381fe17c3b6d95f36bb0f37e84df40",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3404781.json",
+      "pid": 3404781,
+      "sha256": "9d5aa703bebc4e1f06fbcc52eee4a3ff05a71bc62c695a4507e540b499eac96f",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3404968.json",
+      "pid": 3404968,
+      "sha256": "8801c9be284c1daa9a394ffedf08430827764bedd6a059d6b54cd79c8ea12257",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3404994.json",
+      "pid": 3404994,
+      "sha256": "2700c3b5f117fe561bff2088279ce2dc72fa020418028f0d9fb899d66cc7efcc",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3405039.json",
+      "pid": 3405039,
+      "sha256": "04be8512c6372476edc60cec51e58bf22453d331554a70399c5287210454e3cc",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3405087.json",
+      "pid": 3405087,
+      "sha256": "7322e3704c5c70a25fc43eafc620435f0c70f6eec5c505715ed4df84dd41bac5",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3405094.json",
+      "pid": 3405094,
+      "sha256": "1fd29aa9b17f6a72fad2a5c58af0d752572b8fc6a48f5ff783f93b7f05519a27",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3405226.json",
+      "pid": 3405226,
+      "sha256": "525af8e98ff2715545ebed6a51942c06210cba22ec3fd194e0f4f5cc857beaee",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3405234.json",
+      "pid": 3405234,
+      "sha256": "96d279f52ff4bedcd9ccdd475ebcfaee69cfa137a5128263fe9175fa2b6ab08a",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3405276.json",
+      "pid": 3405276,
+      "sha256": "17ab87468e229e893ae38571c10ad042b767f60f0b5a25383a83b0f0b0e9b9c9",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3405349.json",
+      "pid": 3405349,
+      "sha256": "9f9a6487c6e181323a304dab0e3a2d68426cfb254d78a31783d35f5589bdaa34",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3405393.json",
+      "pid": 3405393,
+      "sha256": "6d58bf232f5722e43e648cc8dd5c8d155b5877a907082271549226670af1fabc",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3405584.json",
+      "pid": 3405584,
+      "sha256": "f170aae1658537fd8fc77ba47305e56ff301a71648cce09738a5e8616e4edb88",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3405634.json",
+      "pid": 3405634,
+      "sha256": "aad9ae69f1f04a35ef50e181fe5bc8f46c372ae19a935c3761636e3808041a12",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3405740.json",
+      "pid": 3405740,
+      "sha256": "fc9bfbcf20633e7c351db124410050c91fec141b8595cbe3d29f6d30cbc16b87",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3405767.json",
+      "pid": 3405767,
+      "sha256": "eeb39ad324518c8deec2334057d5ad00c54b5b3f37493603e4301058a3de9c28",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3405879.json",
+      "pid": 3405879,
+      "sha256": "83a89582e63def06f8bf78b5d36e09cdc76d914faa41d778cfb1a1abf90856a0",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3405886.json",
+      "pid": 3405886,
+      "sha256": "32733f46e6ea1169a924fe4fbbbb7caf2baee6e8c8cf7320a2193fa220bcb0cf",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3405923.json",
+      "pid": 3405923,
+      "sha256": "94ac43953184e264108a1eaddb55d1e0f049f5819d797bc4388a5d48a601270f",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3405939.json",
+      "pid": 3405939,
+      "sha256": "61d68ca0653bb90533090c7074cf8dabbf3b15b4139b0de5073a9d4f32d069db",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3406157.json",
+      "pid": 3406157,
+      "sha256": "91e0f74118ea0e3012bc64b097648867714e63eb3faace3ec50bad580145c9e4",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3406230.json",
+      "pid": 3406230,
+      "sha256": "58b6b08887ec02792ba670b35552c5848eb928094519cbd1f98b2928c4ce944e",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3406254.json",
+      "pid": 3406254,
+      "sha256": "c913e3ed30cadcaba3e0375fef0005055eae641f1a458378afa8f6e9c8a2485f",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3406307.json",
+      "pid": 3406307,
+      "sha256": "0090d9388cde52378ad51b4a6266e2d891a88956c9968596b9cbabd82577331d",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3406334.json",
+      "pid": 3406334,
+      "sha256": "4d6572744324350d5866ccd86180b53e4a89b0c377ca9bfc751298383743111e",
+      "snapshots": 2
+    },
+    {
+      "file": "codex7-resources-personas-fauna-full1-3406411.json",
+      "pid": 3406411,
+      "sha256": "beb82be7756f07331266963f2cdd4fa2fbbb3b2977204285a72b998efac51f70",
+      "snapshots": 2
+    }
+  ],
+  "manifest": "/datos/tmp-atlas-lab/balance/codex7-personas-fauna-build-manifest-20260930.json",
+  "manifestSha256": "eb40d463078b083b95422c3fb7c327559f80983a910debd8234e721a0e8731ad",
+  "sourceStableSinceCompilation": true,
+  "launcher": "Programmatic node:test process isolation; concurrency=availableParallelism()-1; per-file timeout600s; outer timeout1200s; tsx loader; same test files as npm test",
+  "limits": "Resource guards sample startup and beforeExit, not continuous scheduling traces; nine skips inherited, no skipped test counted as passed"
+}

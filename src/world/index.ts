@@ -10,6 +10,7 @@ import { count, emptyTotals, heredarEstadisticas, recordSample, worldStatistics 
 import { initializeEcosystem, stepEcosystem, harvestMaterial, cultivateTile, trampleTile, FOOD_PER_ANIMAL } from './ecosystem.js';
 import { assertEcosystemTile, assertLifeState, assertDormantTerrain } from './validation.js';
 import { materializeAnimals, stepAnimals, harvestAt, type Animal } from './animals.js';
+import { conIndiceFauna, faunaEn } from './indice-fauna.js';
 import { advanceNeeds } from './needs.js';
 import { assimilateFood, exertBody, hydrateBody, restBody } from './body.js';
 import { CRECIMIENTO_COMIDA, HAMBRE_POR_PASO, HAMBRE_POR_UNIDAD, INTERVALO_ECOLOGIA_TICKS, INTERVALO_TIEMPO_TICKS, LUZ_CREPSCULO, PROB_LLUVIA, SED_POR_PASO, SED_POR_UNIDAD } from './ecologia-constantes.js';
@@ -619,7 +620,7 @@ function choose(world: World, person: Person): void {
     for (const tile of reachableTiles.filter(t => (t.fauna ?? 0) >= 1).sort(disputada
       ? (a, b) => (distance(person, a) + recelo(a)) - (distance(person, b) + recelo(b))
       : (a, b) => distance(person, a) - distance(person, b))) {
-      const victim = world.animals.filter(a => a.x === tile.x && a.y === tile.y && a.health > 0)
+      const victim = faunaEn(world, tile)
         .sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0)[0];
       const work = Math.max(0, Math.ceil(45 * (1 - (person.skills.hunt ?? 0) * .25))
         - (person.action === 'hunt' && distance(person.target, tile) === 0 ? person.work : 0));
@@ -1248,7 +1249,7 @@ function advanceTick(world: World, inputs: Gesture[], context: WorldContext, med
   medirFase(medicion, 'kernel', () => stepEcosystem(world.tiles, world.tick, world.weather, phaseAt(world.tick), false,
     { decaimientoFertilidad: paramsOf(world).recursos.decaimientoFertilidad, seed: world.seed, cuencas: paramsOf(world).agua.cuencas, soaTerreno: paramsOf(world).motor.soaTerreno }));
   medirFase(medicion, 'fauna', () => { stepAnimals(world,event=>addEvent(world,event)); stepStructures(world,event=>addEvent(world,event)); });
-  medirFase(medicion, 'personas', () => {
+  medirFase(medicion, 'personas', () => conIndiceFauna(world, () => {
     for (const person of world.people) bodyAndAction(world, person);
     for (const person of world.people) {
       const chunk = world.chunks[chunkKey(person.x, person.y)]!;
@@ -1258,7 +1259,7 @@ function advanceTick(world: World, inputs: Gesture[], context: WorldContext, med
         remember(person, world, 'Un nuevo territorio amplió los caminos posibles.', event.id);
       }
     }
-  });
+  }));
   medirFase(medicion, 'encuentros', () => { encounters(world); convivir(world); });
   medirFase(medicion, 'demografia', () => advancePopulation(world,{emit:event=>addEvent(world,event.kind==='death'?deathContext(world,event):event),beforeDeath:transferEstate}));
   medirFase(medicion, 'comunidades', () => updateCommunities(world, event => addEvent(world, event)));

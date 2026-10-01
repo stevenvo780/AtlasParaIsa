@@ -1,0 +1,146 @@
+{
+  "startedAt": "2026-10-01T00:21:45.644Z",
+  "finishedAt": "2026-10-01T01:19:23.998Z",
+  "label": "fauna",
+  "status": "PASS",
+  "results": [
+    {
+      "scale": 700,
+      "label": "fauna",
+      "steps": 600,
+      "parity": true,
+      "perStepTickPopulationTilesParity": true,
+      "sourceStable": true,
+      "resourcePass": true,
+      "initialDigest": "0ab84359ea940a7fec51e647d43977f28505a01fcabd347d618519adffcf22d1",
+      "finalDigest": "61de1b5bf5d17ee3699c5fc9fc5a6879e9dbfd0a00039378a68a99792dc055c7",
+      "profile": "/datos/tmp-atlas-lab/balance/perfil-personas-n700-fauna-20260930.json",
+      "profileSha256": "27397c5744c6a9f7870ad20a2c18235344e0288495d236c84d3e50bff68ca646",
+      "baselineWall": {
+        "n": 600,
+        "mean": 145.3305673883338,
+        "p50": 112.1539669999911,
+        "p95": 333.7574420000019,
+        "max": 662.0433279999997
+      },
+      "actualWall": {
+        "n": 600,
+        "mean": 187.5870355533334,
+        "p50": 148.0356310000061,
+        "p95": 400.5360240000009,
+        "max": 680.0159600000043
+      },
+      "baselineCpu": {
+        "n": 600,
+        "mean": 174.30878166666668,
+        "p50": 133.15299999999115,
+        "p95": 405.377999999997,
+        "max": 738.8440000000046
+      },
+      "actualCpu": {
+        "n": 600,
+        "mean": 225.19736833333405,
+        "p50": 170.93299999999,
+        "p95": 498.99199999999837,
+        "max": 944.4369999999981
+      },
+      "wallSpeedup": 0.7747367346557084,
+      "cpuSpeedup": 0.7740267257859657,
+      "baselinePersonasMs": 91.69441539499984,
+      "actualPersonasMs": 118.3058787416668,
+      "note": "Same scenes/window/parameters/600steps; historical baseline has different measurement time/load. No claim of isolated causal wall speedup."
+    },
+    {
+      "scale": 2000,
+      "label": "fauna",
+      "steps": 600,
+      "parity": true,
+      "perStepTickPopulationTilesParity": true,
+      "sourceStable": true,
+      "resourcePass": true,
+      "initialDigest": "efaddb3e233fa4f203758027f84d8618fb2c41a5f54a860b7b50333210a6a4e7",
+      "finalDigest": "36e2798a567916c588ec00cec0c9c052e17c69a0617b5b69f1373fb067a720aa",
+      "profile": "/datos/tmp-atlas-lab/balance/perfil-personas-n2000-fauna-20260930.json",
+      "profileSha256": "606d08be94a008ba27cca90720ec12e2adb3e41e31f5a4171f580b22e6a32fcd",
+      "baselineWall": {
+        "n": 600,
+        "mean": 454.56144456333374,
+        "p50": 398.9218249999976,
+        "p95": 920.0928520000016,
+        "max": 1506.9912929999991
+      },
+      "actualWall": {
+        "n": 600,
+        "mean": 640.9095555899999,
+        "p50": 511.0293470000033,
+        "p95": 1433.1678879999963,
+        "max": 3795.402700000006
+      },
+      "baselineCpu": {
+        "n": 600,
+        "mean": 517.6555049999992,
+        "p50": 443.7629999999772,
+        "p95": 1047.984999999986,
+        "max": 1943.2699999999895
+      },
+      "actualCpu": {
+        "n": 600,
+        "mean": 674.4572550000006,
+        "p50": 551.5889999999781,
+        "p95": 1495.0739999999641,
+        "max": 2654.368000000002
+      },
+      "wallSpeedup": 0.7092442928938385,
+      "cpuSpeedup": 0.7675141770103706,
+      "baselinePersonasMs": 324.7700193333326,
+      "actualPersonasMs": 456.51032709499964,
+      "note": "Same scenes/window/parameters/600steps; historical baseline has different measurement time/load. No claim of isolated causal wall speedup."
+    },
+    {
+      "scale": 4500,
+      "label": "fauna",
+      "steps": 600,
+      "parity": true,
+      "perStepTickPopulationTilesParity": true,
+      "sourceStable": true,
+      "resourcePass": true,
+      "initialDigest": "b37724bbbebeb5e183a9aef8cb3f6a127dadd9e00edfe25b596c11a7867216b7",
+      "finalDigest": "21ee7727e22243be9ba7ae2daa9328afe59a9a00afd71a64ffd7927e1adcf6ec",
+      "profile": "/datos/tmp-atlas-lab/balance/perfil-personas-n4500-fauna-20260930.json",
+      "profileSha256": "cb82fb901e40b2fb941b81e750c6737ab2f6bc15643d7fa713d69a939957e6ac",
+      "baselineWall": {
+        "n": 600,
+        "mean": 2435.863375490003,
+        "p50": 2185.208130999934,
+        "p95": 3952.686805000063,
+        "max": 20961.581897000317
+      },
+      "actualWall": {
+        "n": 600,
+        "mean": 1998.8185437133368,
+        "p50": 1897.8254050000105,
+        "p95": 2955.1438470000867,
+        "max": 7610.638207999989
+      },
+      "baselineCpu": {
+        "n": 600,
+        "mean": 2496.8883283333307,
+        "p50": 2317.9150000000373,
+        "p95": 4100.163000000175,
+        "max": 7658.064999999944
+      },
+      "actualCpu": {
+        "n": 600,
+        "mean": 2152.753293333333,
+        "p50": 2015.6779999998398,
+        "p95": 3269.4259999999776,
+        "max": 7811.637999999803
+      },
+      "wallSpeedup": 1.2186515795299453,
+      "cpuSpeedup": 1.1598580924557023,
+      "baselinePersonasMs": 1908.8709868699984,
+      "actualPersonasMs": 1534.5847514683285,
+      "note": "Same scenes/window/parameters/600steps; historical baseline has different measurement time/load. No claim of isolated causal wall speedup."
+    }
+  ]
+}

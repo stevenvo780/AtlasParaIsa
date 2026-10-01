@@ -1,0 +1,262 @@
+{
+  "recordedAt": "2026-10-01T08:08:21.563Z",
+  "baselineCommit": "bb483260b2489fe62b113d620e5f56e5f3676dbc",
+  "branch": "sprint/ciclo-material-20261001",
+  "gateA": "NO CUMPLIDA",
+  "fullSuite": "PASS",
+  "typecheck": "PASS",
+  "designB": "UNIMPLEMENTED",
+  "files": [
+    {
+      "path": "balance/ciclo-material-20261001/CODEX9-PROTOCOLO-EVENTOS-v2.json",
+      "sha256": "ab82d6f7926d0af87cc49a9212c186c48584de58da3f2cc2dbb994c040e638bb",
+      "bytes": 8784
+    },
+    {
+      "path": "balance/ciclo-material-20261001/CODEX9-PROTOCOLO-EVENTOS-v3.json",
+      "sha256": "20a1328c73ae202d951804a6fd5b1b5af5b4883beaff65b076fe0527e9aaf7fa",
+      "bytes": 8883
+    },
+    {
+      "path": "balance/ciclo-material-20261001/CODEX9-PROTOCOLO-INSTRUMENTO.json",
+      "sha256": "9795333d632e9a2b04b547ddc6df504cf91c1df9c519a5a85e78b8b6eb923762",
+      "bytes": 6684
+    },
+    {
+      "path": "balance/ciclo-material-20261001/DISENO-CICLO-MATERIAL-20261001.md",
+      "sha256": "edf3ef8711a73e2339a2999ad6d82af89dfee0d188a8bb7ef601f2b7007af08b",
+      "bytes": 28766
+    },
+    {
+      "path": "balance/ciclo-material-20261001/ENTREGA.md",
+      "sha256": "cfa316860837b48b18a57d04cad67141f7392d1f78ed7547050367c889525ad1",
+      "bytes": 8201
+    },
+    {
+      "path": "balance/ciclo-material-20261001/QA-FINAL.json",
+      "sha256": "d9113e68212d1848e993e7a30ec18255f8fc80ccae82a484f4e3fab8f5add8b5",
+      "bytes": 2329
+    },
+    {
+      "path": "balance/ciclo-material-20261001/REPRODUCIR.md",
+      "sha256": "a0b1dc4dd99d3ee4cfc3756d6a55f1f5a1cab6c976e4ddc234b8ebf5188e28bb",
+      "bytes": 10972
+    },
+    {
+      "path": "balance/ciclo-material-20261001/SOURCE-MANIFEST.json",
+      "sha256": "5e52bf32fdd6e3917e4bfdf89dd83415dce07d3483eec5dfc83ca63a2f5bdab7",
+      "bytes": 9411
+    },
+    {
+      "path": "balance/ciclo-material-20261001/codex9-final-recalc-v1.json",
+      "sha256": "a2493bbb1049440a1fa5af76d789d9aa811ff96ec6099f1e75c263ca4a6ba8e1",
+      "bytes": 1790
+    },
+    {
+      "path": "balance/ciclo-material-20261001/codex9-verificacion-gate-final.json",
+      "sha256": "ebcf54dd5e662a8da081368f93108b368b8a1a8e2ab99ed7acf148ab50e4fd99",
+      "bytes": 3192
+    },
+    {
+      "path": "balance/ciclo-material-20261001/codex9-verificacion-qa-final.json",
+      "sha256": "09739a528b8b908dac7364ed1827bd0951fd80a5342b4c5827e1ebd838b9b6f4",
+      "bytes": 4194
+    },
+    {
+      "path": "balance/ciclo-material-20261001/codex9-verificador-gate-final.mjs",
+      "sha256": "54a8080879f36cd997cb47c96b6ac40c032c130a543dc01ceaa82e7afb3dfd84",
+      "bytes": 20673
+    },
+    {
+      "path": "balance/ciclo-material-20261001/codex9-verificador-qa-final.mjs",
+      "sha256": "140a793dd005d9489390b3bfd40b9ca9abd5b01df411d59f953a596c35760995",
+      "bytes": 8033
+    },
+    {
+      "path": "balance/ciclo-material-20261001/final-evidence-v1.json",
+      "sha256": "a376415db7b163b23d12099a7a13c5bcbe85115e43291c4b9dfc938dc7fd28d9",
+      "bytes": 1769
+    },
+    {
+      "path": "balance/ciclo-material-20261001/finalize-evidence.mjs",
+      "sha256": "be22fd010fa5f22a4f91bf94ac4ce81d10b0be8801abb8e050f5fc9c50a6f346",
+      "bytes": 4513
+    },
+    {
+      "path": "balance/ciclo-material-20261001/gate-v3-real.json",
+      "sha256": "bcacff32b46a610ef2b708c86ae331ce57769d4d90b87fd052b0629b74bc99fa",
+      "bytes": 1967
+    },
+    {
+      "path": "balance/ciclo-material-20261001/gate-v3-result.json",
+      "sha256": "53da8e9ebc137414002fcb3ef7ae1278f4ea9b6a49d2f253c7d0faa6f51bd317",
+      "bytes": 4278889
+    },
+    {
+      "path": "balance/ciclo-material-20261001/launcher-init-codex9.README.md",
+      "sha256": "fd7142b80a48f3ec120a269b2faf474eaca9cc83c5933266461c91feff8a6b59",
+      "bytes": 2997
+    },
+    {
+      "path": "balance/ciclo-material-20261001/launcher-init-codex9.c",
+      "sha256": "20af791430dd97065233716fc22da1181fe7f4e8dba15ddf79c89fd62d18ef16",
+      "bytes": 2334
+    },
+    {
+      "path": "balance/ciclo-material-20261001/launcher-init-codex9.exec.c",
+      "sha256": "bfc5c23ed9b598844ee8d29a56ff580cabe37971a63dd8a59a103162f7360f42",
+      "bytes": 4034
+    },
+    {
+      "path": "balance/ciclo-material-20261001/launcher-init-codex9.hashes.json",
+      "sha256": "57e390a43e61fb3644f363fa911af5fbeb01c6a28028926a83b141cb1a782f27",
+      "bytes": 903
+    },
+    {
+      "path": "balance/ciclo-material-20261001/qa-path-README.md",
+      "sha256": "f11f2a304d3dbd6b88787b152acbdc48b472c73ef257cdbc439f4d8284afe4eb",
+      "bytes": 3345
+    },
+    {
+      "path": "balance/ciclo-material-20261001/qa-path-bin-v1/bash",
+      "sha256": "cd243140869e306ba33b0cfb2ed80abe5ca2fd2166610bce9ffe94fb57290739",
+      "bytes": 136
+    },
+    {
+      "path": "balance/ciclo-material-20261001/qa-path-bin-v1/node",
+      "sha256": "1b6f871cac8d52af13088789b2387be85d29873a6184ebad0560425d89b33369",
+      "bytes": 122
+    },
+    {
+      "path": "balance/ciclo-material-20261001/qa-path-deploy-check-v1.json",
+      "sha256": "f2a35865c7a4dc0667b86c30e909a6dc11e450c603b97b9f0204c76fb58cbd10",
+      "bytes": 2335
+    },
+    {
+      "path": "balance/ciclo-material-20261001/qa-path-hashes-v1.json",
+      "sha256": "bb0f860eac8b71561dd99d65776fe186c13e0b0d3ca2b062d048a424baee34e7",
+      "bytes": 957
+    },
+    {
+      "path": "balance/ciclo-material-20261001/qa-path-leaf-v1.mjs",
+      "sha256": "17394e50f8808ae59668b810076709a70baf16d18f9e68d6a390f08ea00b8c3a",
+      "bytes": 1533
+    },
+    {
+      "path": "balance/ciclo-material-20261001/qa-path-smoke-v1-cases.json",
+      "sha256": "1e99369008d855f49d6708183a5d7eccc60d8a94188b6e72b102d5cd0c1e925c",
+      "bytes": 248
+    },
+    {
+      "path": "balance/ciclo-material-20261001/qa-path-smoke-v1.json",
+      "sha256": "ad46f3713b7d45351b73469d295ea88540baaa1dc0802ff74a50eb0e2199dd74",
+      "bytes": 1786
+    },
+    {
+      "path": "balance/ciclo-material-20261001/qa-path-smoke-v1.mjs",
+      "sha256": "768235635be23243aeef7de9910f8b637129ddff946ba27689b121849f1e85ee",
+      "bytes": 2210
+    },
+    {
+      "path": "balance/ciclo-material-20261001/revision-instrumento.json",
+      "sha256": "bb98fe8092499a0d7507b783996fcdb44d5da3b61c930dd3ad5f797184fe6d23",
+      "bytes": 26292
+    },
+    {
+      "path": "balance/ciclo-material-20261001/revision-instrumento.md",
+      "sha256": "d02d1e606d1b382aa73bd2dbaf21004b3069a551539d0b5131940a7d4649af5a",
+      "bytes": 20148
+    },
+    {
+      "path": "balance/ciclo-material-20261001/run_guarded.mjs",
+      "sha256": "26ea519ae9e94566da078928004551ffb36bf8d62c906e32c43dfe2295aeb60f",
+      "bytes": 5252
+    },
+    {
+      "path": "balance/ciclo-material-20261001/run_qa_night_guarded.mjs",
+      "sha256": "285a9f7c103765edc85edb2b49ddcedfa78d67fd85dcb81d4771091e86e8f458",
+      "bytes": 6295
+    },
+    {
+      "path": "balance/ciclo-material-20261001/runner-selftest-v4.json",
+      "sha256": "8fa7d2e70b85e45576d68ab946a8ab222f29d34f683e15bded219013be673fc7",
+      "bytes": 1877
+    },
+    {
+      "path": "balance/ciclo-material-20261001/suite-v1.json",
+      "sha256": "491f04abfcdb266b5aebea17bd99cb82d9987c0824cb65e1fbc28b136700faf6",
+      "bytes": 6663
+    },
+    {
+      "path": "balance/ciclo-material-20261001/suite-v2.json",
+      "sha256": "14c66a226f4ab77176b392abdd9984a5ba55385cf861e2fba2819d0322842282",
+      "bytes": 9086
+    },
+    {
+      "path": "balance/ciclo-material-20261001/suite-v3.json",
+      "sha256": "f3a53f002814607189d705600aedbb23ba4232da6dbb269b6c31a6d82617c50f",
+      "bytes": 4867
+    },
+    {
+      "path": "balance/ciclo-material-20261001/suite-v4-night.json",
+      "sha256": "8cff114457269d0ed5b0542b1554cb0a1cc9e1c292823658a0683b6350856d01",
+      "bytes": 8840
+    },
+    {
+      "path": "balance/ciclo-material-20261001/typecheck-final.json",
+      "sha256": "11f586112a7c562b8e96f8b5b8c7d956320f653e76c69d6bdc4e51c7c27768ba",
+      "bytes": 1750
+    },
+    {
+      "path": "balance/ciclo-material-20261001/typecheck-npm-final.json",
+      "sha256": "34ae3420e2e0f98d08c5e974f2fc57dd9ad5f266db5db5af88c0974bc1a7621e",
+      "bytes": 1958
+    },
+    {
+      "path": "balance/ciclo-material-20261001/verificador-codex9-b.mjs",
+      "sha256": "611d6f3e1ea85b6fab65bd3bd80897408e5c9da86264345f68f43a975c082117",
+      "bytes": 7147
+    },
+    {
+      "path": "docs/CICLO-MATERIAL-INSTRUMENTO.md",
+      "sha256": "5d905a96d2364f0f544e585ff633d5930c7f24da2a80777851dd1c636e606957",
+      "bytes": 4571
+    },
+    {
+      "path": "scripts/lab/validar-ciclo-material.ts",
+      "sha256": "4d8b6dfdf3ca640af7c9f922f7458243d9470a6030d1ddaf925789464625e78d",
+      "bytes": 37943
+    },
+    {
+      "path": "src/world/halo.ts",
+      "sha256": "9001fcc2242b0441ff6279984ddc7153211d537824e0c7fc9251824d954ef32f",
+      "bytes": 85738
+    },
+    {
+      "path": "src/world/index.ts",
+      "sha256": "eaf71196be1661f9b7c78069de419a3c8533e3cdc4b20bdb2fd5e72ba77e3ec6",
+      "bytes": 154892
+    },
+    {
+      "path": "src/world/inventions.ts",
+      "sha256": "2d90f7d315be95529e31cd4bda26487e2dc5f2c8c10b97632d453b06fd083b7d",
+      "bytes": 37744
+    },
+    {
+      "path": "src/world/material-observer.ts",
+      "sha256": "c9826a8ca838b8a2297d97a4f162653250ca3e8a4933fa9c512a266a4830c793",
+      "bytes": 19295
+    },
+    {
+      "path": "src/world/spatial.ts",
+      "sha256": "1e3c060c65094d593e389ede548353ad1ba15b953aaed357d77ce82a842f178f",
+      "bytes": 14828
+    },
+    {
+      "path": "tests/material-observer.test.ts",
+      "sha256": "7c4473d8aa4749f277b9093fe947776c96a0714572f8ba770fca754797be6dce",
+      "bytes": 20007
+    }
+  ],
+  "excludedSelf": "ENTREGA-MANIFEST.json is excluded from its own hash list; commit identity is in the external ENTREGA-LOCAL.json receipt"
+}

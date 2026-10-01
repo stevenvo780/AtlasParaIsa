@@ -1,0 +1,12 @@
+{
+  "algorithm": "sha256",
+  "files": {
+    "/datos/tmp-atlas-lab/balance/codex9/qa-path-bin-v1/node": "1b6f871cac8d52af13088789b2387be85d29873a6184ebad0560425d89b33369",
+    "/datos/tmp-atlas-lab/balance/codex9/qa-path-bin-v1/bash": "cd243140869e306ba33b0cfb2ed80abe5ca2fd2166610bce9ffe94fb57290739",
+    "/datos/tmp-atlas-lab/balance/codex9/qa-path-leaf-v1.mjs": "17394e50f8808ae59668b810076709a70baf16d18f9e68d6a390f08ea00b8c3a",
+    "/datos/tmp-atlas-lab/balance/codex9/qa-path-smoke-v1.mjs": "768235635be23243aeef7de9910f8b637129ddff946ba27689b121849f1e85ee",
+    "/datos/tmp-atlas-lab/balance/codex9/launcher-init-codex9.bash": "07a2331ac400749cc7740fac9999e36cf104c743b612c307ef155fc5dca7fe2e",
+    "/datos/tmp-atlas-lab/codex9-runtime/codex9-node": "b5ab857ab537295e6ca3a922d8ebd6db8b066b640c59d926bbde73a4380de1f2",
+    "/datos/tmp-atlas-lab/balance/codex9/run_guarded.mjs": "26ea519ae9e94566da078928004551ffb36bf8d62c906e32c43dfe2295aeb60f"
+  }
+}

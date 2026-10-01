@@ -1,0 +1,96 @@
+{
+  "reviewedUTC": "2026-10-01T08:05:48.701Z",
+  "verdict": "PASS_QA_LOG_REVIEW",
+  "scope": "read-only QA records and wrapper; no repeated tests/simulation",
+  "nightPolicy": "Inherited Objective8:00:00<=America/Bogota time<07:00, every observed thread NI19 and nonempty CPU subset0..31. Separate QA launcher only; frozen benchmark6..31 unchanged.",
+  "nightPolicyCodeReferences": "run_qa_night_guarded.mjs:29–43,66–76,82–104",
+  "launcherSHA256": "285a9f7c103765edc85edb2b49ddcedfa78d67fd85dcb81d4771091e86e8f458",
+  "suite": {
+    "tests": 1645,
+    "suites": 0,
+    "pass": 1636,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 9,
+    "todo": 0,
+    "duration_ms": 369724.378847,
+    "wrapperElapsedSeconds": 370.21695493100003,
+    "samples": 741,
+    "threadChecks": 116894,
+    "issues": 0,
+    "valid": true,
+    "logSHA256": "60701187c21ef5c1c6bd1f0d2f4db66b37e036700d4e9933ce1930613c36fc8d",
+    "wrapperSHA256": "8cff114457269d0ed5b0542b1554cb0a1cc9e1c292823658a0683b6350856d01",
+    "skips": [
+      {
+        "number": 56,
+        "description": "assertWorld validates 2000 people with 64 bonds each in under 1s (was O(P^2 * B)) # SKIP medida de tiempo del host: exige CARTA_TEST_ESCALA=1"
+      },
+      {
+        "number": 57,
+        "description": "assertWorld cost grows linearly (not quadratically) with population at a fixed bond count # SKIP medida de tiempo del host: exige CARTA_TEST_ESCALA=1"
+      },
+      {
+        "number": 196,
+        "description": "CUDA 0 agrees with live-state CPU reference over 12 updates # SKIP COMPUTE_NVRTC absent: no GPU parity was checked"
+      },
+      {
+        "number": 197,
+        "description": "CUDA 1 agrees with live-state CPU reference over 12 updates # SKIP COMPUTE_NVRTC absent: no GPU parity was checked"
+      },
+      {
+        "number": 198,
+        "description": "CUDA 0,1 agrees with live-state CPU reference over 12 updates # SKIP COMPUTE_NVRTC absent: no GPU parity was checked"
+      },
+      {
+        "number": 619,
+        "description": "T100: 2 097 152 teselas y 8192 chunks conservan el digesto confirmado al reabrir SQLite # SKIP prueba lenta: exige CARTA_TEST_ESCALA=1"
+      },
+      {
+        "number": 818,
+        "description": "la suma de las 11 fases de stepWorld no difiere de simulationMs en más de un 5 % (acumulado en 400 pasos, para amortiguar el ruido del reloj real) # SKIP medida de tiempo del host: exige CARTA_TEST_ESCALA=1"
+      },
+      {
+        "number": 912,
+        "description": "población alta (230 habitantes, semilla 3 día 12,25): digestoCanonico idéntico a la base tras 600 pasos # SKIP falta la instantánea /datos/tmp-atlas-lab/perfil/psinagua3-d12.sqlite"
+      },
+      {
+        "number": 938,
+        "description": "(11) mundo de ~230 habitantes con archivo de recetas: deshacer a mitad de paso y seguir como su gemelo # SKIP falta la instantánea /datos/tmp-atlas-lab/perfil/psinagua3-d12.sqlite"
+      }
+    ]
+  },
+  "typecheck": {
+    "code": 0,
+    "valid": true,
+    "elapsedSeconds": 1.1155525990000001,
+    "samples": 4,
+    "threadChecks": 176,
+    "issues": 0,
+    "logSHA256": "952d0130b7edf4ed056e0ba0cd962126c2acad44de8ab0c4f30ed3babd21bfe2",
+    "wrapperSHA256": "34ae3420e2e0f98d08c5e974f2fc57dd9ad5f266db5db5af88c0974bc1a7621e"
+  },
+  "sourceChecks": 135,
+  "documentaryDelivery": "COMPLETE_WITH_A_GATE_NO_CUMPLIDA",
+  "gateA": "NO CUMPLIDA",
+  "lawB": "PASS_REQUIREMENTS_ONLY; no implementation, biological acceptance or formal future-law critique",
+  "limits": [
+    "0.5s observed-process sampling can miss wholly intermediate processes/drift; clock guard checks initial/samples/final but per-sample clocks not retained",
+    "9 skips remain explicit omissions:4opt-in scale/time,3CUDA without NVRTC,2missing historicalsnapshot",
+    "Old aborted/failed QA remains preserved; this actual successful run does not relabel it",
+    "QA passing does not override scientific<=1% gate failure"
+  ],
+  "resources": {
+    "initial": {
+      "nice": 19,
+      "cpus": "6-31",
+      "TMPDIR": "/datos/tmp-atlas-lab"
+    },
+    "final": {
+      "nice": 19,
+      "cpus": "6-31",
+      "TMPDIR": "/datos/tmp-atlas-lab"
+    },
+    "valid": true
+  }
+}

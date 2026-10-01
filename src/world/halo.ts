@@ -574,13 +574,15 @@ export const ESCRITURAS: readonly Escritura[] = [
     patrones: ['world.places.push(place); world.chunks[chunkKey(tile.x, tile.y)]?.places.push(place);'], motivo: 'La obra terminada funda un lugar en su tesela y en su chunk.' },
 ];
 
-/** Código de `src/world` que no forma parte del paso: validación, proyección a la vista, creación y migración. */
+/** Código de `src/world` que no forma parte del paso: validación, proyección a la vista, creación,
+ * migración e instrumentación de lectura del anfitrión antes o después de confirmar el paso. */
 export const FUERA_DEL_PASO: readonly Declaracion[] = [
   ...['createWorld', 'migrateWorldState', 'upgradeV3', 'upgradeV5'].map(funcion => ({ fichero: 'index.ts', funcion, motivo: 'Creación o migración de un mundo.' })),
   ...['projectWorld', 'personDetail'].map(funcion => ({ fichero: 'index.ts', funcion, motivo: 'Proyección a la vista.' })),
   { fichero: 'index.ts', funcion: 'assertCommon', motivo: 'Validación.' },
   { fichero: 'index.ts', funcion: 'upgradeV4', motivo: 'Migración de un mundo.' },
   ...['cloneWorld', 'puntoDeRestauracion'].map(funcion => ({ fichero: 'index.ts', funcion, motivo: 'Copia o restauración del mundo entero por el servidor: no es una ley.' })),
+  { fichero: 'material-observer.ts', funcion: 'createMaterialObserver', motivo: 'Instrumento externo del anfitrión: sus closures ingest leen estructuras residentes y pendientes al adjuntar un mundo, antes de simularlo o tras una carga; la confirmación y exportación ocurren fuera del paso. No decide acciones ni escribe el mundo. Los hooks del paso no se excluyen.' },
   { fichero: 'technology.ts', funcion: 'projectTechnology', motivo: 'Proyección a la vista: sólo la llama `projectWorld`.' },
   { fichero: 'spatial.ts', funcion: 'projectTerrain', motivo: 'Proyección a la vista (cámara).' },
   { fichero: 'statistics.ts', funcion: 'computeWorldStatistics', motivo: 'Proyección: sólo la llama `worldStatistics`, desde `projectWorld`.' },

@@ -1,0 +1,90 @@
+{
+  "label": "gate-v3-real",
+  "command": [
+    "/datos/tmp-atlas-lab/codex9-runtime/codex9-node",
+    "--import",
+    "tsx",
+    "scripts/lab/validar-ciclo-material.ts",
+    "--run",
+    "--authorized",
+    "--protocol",
+    "/datos/tmp-atlas-lab/datos-lab/CODEX9-PROTOCOLO-EVENTOS-v3.json",
+    "--out",
+    "/datos/tmp-atlas-lab/balance/codex9/gate-v3-result.json"
+  ],
+  "code": 1,
+  "signal": null,
+  "elapsedSeconds": 3757.963578108,
+  "startup": {
+    "settleMilliseconds": 2000,
+    "priorityOnEntry": 15,
+    "priorityBeforeEstablishment": -4,
+    "establishmentBeforeChild": true
+  },
+  "launchEnvironment": {
+    "TMPDIR": "/datos/tmp-atlas-lab",
+    "ldPreloadPresent": false,
+    "launcherInitEnabled": false
+  },
+  "resourceSamples": 7516,
+  "examinedThreads": 105210,
+  "observedPids": [
+    1703898,
+    1704078
+  ],
+  "resourceIssues": [],
+  "ownFinal": [
+    {
+      "pid": 1703898,
+      "tid": 1703898,
+      "comm": "codex9wrap",
+      "nice": 19,
+      "cpus": "6-31"
+    },
+    {
+      "pid": 1703898,
+      "tid": 1703909,
+      "comm": "DelayedTaskSche",
+      "nice": 19,
+      "cpus": "6-31"
+    },
+    {
+      "pid": 1703898,
+      "tid": 1703910,
+      "comm": "codex9-node",
+      "nice": 19,
+      "cpus": "6-31"
+    },
+    {
+      "pid": 1703898,
+      "tid": 1703911,
+      "comm": "codex9-node",
+      "nice": 19,
+      "cpus": "6-31"
+    },
+    {
+      "pid": 1703898,
+      "tid": 1703912,
+      "comm": "codex9-node",
+      "nice": 19,
+      "cpus": "6-31"
+    },
+    {
+      "pid": 1703898,
+      "tid": 1703913,
+      "comm": "codex9-node",
+      "nice": 19,
+      "cpus": "6-31"
+    },
+    {
+      "pid": 1703898,
+      "tid": 1703914,
+      "comm": "codex9-node",
+      "nice": 19,
+      "cpus": "6-31"
+    }
+  ],
+  "valid": false,
+  "samplingLimit": "0.5-second observed process-tree sampling; a process or drift wholly between samples may escape detection",
+  "log": "/datos/tmp-atlas-lab/balance/codex9/gate-v3-real.log"
+}

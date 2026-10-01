@@ -1,0 +1,83 @@
+{
+  "label": "typecheck-final",
+  "command": [
+    "/datos/tmp-atlas-lab/codex9-runtime/codex9-node",
+    "node_modules/typescript/lib/tsc.js",
+    "--noEmit"
+  ],
+  "code": 0,
+  "signal": null,
+  "elapsedSeconds": 0.623986979,
+  "startup": {
+    "settleMilliseconds": 2000,
+    "priorityOnEntry": 15,
+    "priorityBeforeEstablishment": -4,
+    "establishmentBeforeChild": true
+  },
+  "launchEnvironment": {
+    "TMPDIR": "/datos/tmp-atlas-lab",
+    "ldPreloadPresent": false,
+    "launcherInitEnabled": false
+  },
+  "resourceSamples": 3,
+  "examinedThreads": 75,
+  "observedPids": [
+    1696772,
+    1697050
+  ],
+  "resourceIssues": [],
+  "ownFinal": [
+    {
+      "pid": 1696772,
+      "tid": 1696772,
+      "comm": "codex9wrap",
+      "nice": 19,
+      "cpus": "6-31"
+    },
+    {
+      "pid": 1696772,
+      "tid": 1696810,
+      "comm": "DelayedTaskSche",
+      "nice": 19,
+      "cpus": "6-31"
+    },
+    {
+      "pid": 1696772,
+      "tid": 1696811,
+      "comm": "codex9-node",
+      "nice": 19,
+      "cpus": "6-31"
+    },
+    {
+      "pid": 1696772,
+      "tid": 1696812,
+      "comm": "codex9-node",
+      "nice": 19,
+      "cpus": "6-31"
+    },
+    {
+      "pid": 1696772,
+      "tid": 1696813,
+      "comm": "codex9-node",
+      "nice": 19,
+      "cpus": "6-31"
+    },
+    {
+      "pid": 1696772,
+      "tid": 1696814,
+      "comm": "codex9-node",
+      "nice": 19,
+      "cpus": "6-31"
+    },
+    {
+      "pid": 1696772,
+      "tid": 1696817,
+      "comm": "codex9-node",
+      "nice": 19,
+      "cpus": "6-31"
+    }
+  ],
+  "valid": true,
+  "samplingLimit": "0.5-second observed process-tree sampling; a process or drift wholly between samples may escape detection",
+  "log": "/datos/tmp-atlas-lab/balance/codex9/typecheck-final.log"
+}

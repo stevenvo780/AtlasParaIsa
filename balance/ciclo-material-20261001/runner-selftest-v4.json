@@ -1,0 +1,87 @@
+{
+  "label": "runner-selftest-v4",
+  "command": [
+    "/datos/tmp-atlas-lab/codex9-runtime/codex9-node",
+    "--import",
+    "tsx",
+    "scripts/lab/validar-ciclo-material.ts",
+    "--selftest",
+    "--protocol",
+    "/datos/tmp-atlas-lab/datos-lab/CODEX9-PROTOCOLO-EVENTOS-v3.json"
+  ],
+  "code": 0,
+  "signal": null,
+  "elapsedSeconds": 2.212367104,
+  "startup": {
+    "settleMilliseconds": 2000,
+    "priorityOnEntry": 15,
+    "priorityBeforeEstablishment": -4,
+    "establishmentBeforeChild": true
+  },
+  "launchEnvironment": {
+    "TMPDIR": "/datos/tmp-atlas-lab",
+    "ldPreloadPresent": false,
+    "launcherInitEnabled": false
+  },
+  "resourceSamples": 6,
+  "examinedThreads": 90,
+  "observedPids": [
+    1677574,
+    1677831
+  ],
+  "resourceIssues": [],
+  "ownFinal": [
+    {
+      "pid": 1677574,
+      "tid": 1677574,
+      "comm": "codex9wrap",
+      "nice": 19,
+      "cpus": "6-31"
+    },
+    {
+      "pid": 1677574,
+      "tid": 1677588,
+      "comm": "DelayedTaskSche",
+      "nice": 19,
+      "cpus": "6-31"
+    },
+    {
+      "pid": 1677574,
+      "tid": 1677589,
+      "comm": "codex9-node",
+      "nice": 19,
+      "cpus": "6-31"
+    },
+    {
+      "pid": 1677574,
+      "tid": 1677590,
+      "comm": "codex9-node",
+      "nice": 19,
+      "cpus": "6-31"
+    },
+    {
+      "pid": 1677574,
+      "tid": 1677591,
+      "comm": "codex9-node",
+      "nice": 19,
+      "cpus": "6-31"
+    },
+    {
+      "pid": 1677574,
+      "tid": 1677592,
+      "comm": "codex9-node",
+      "nice": 19,
+      "cpus": "6-31"
+    },
+    {
+      "pid": 1677574,
+      "tid": 1677593,
+      "comm": "codex9-node",
+      "nice": 19,
+      "cpus": "6-31"
+    }
+  ],
+  "valid": true,
+  "samplingLimit": "0.5-second observed process-tree sampling; a process or drift wholly between samples may escape detection",
+  "log": "/datos/tmp-atlas-lab/balance/codex9/runner-selftest-v4.log"
+}

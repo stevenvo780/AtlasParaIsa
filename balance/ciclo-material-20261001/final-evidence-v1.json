@@ -1,0 +1,82 @@
+{
+  "label": "final-evidence-v1",
+  "command": [
+    "/datos/tmp-atlas-lab/codex9-runtime/codex9-node",
+    "/datos/tmp-atlas-lab/balance/codex9/finalize-evidence.mjs"
+  ],
+  "code": 0,
+  "signal": null,
+  "elapsedSeconds": 0.09978545099999997,
+  "startup": {
+    "settleMilliseconds": 2000,
+    "priorityOnEntry": -4,
+    "priorityBeforeEstablishment": -4,
+    "establishmentBeforeChild": true
+  },
+  "launchEnvironment": {
+    "TMPDIR": "/datos/tmp-atlas-lab",
+    "ldPreloadPresent": false,
+    "launcherInitEnabled": false
+  },
+  "resourceSamples": 2,
+  "examinedThreads": 14,
+  "observedPids": [
+    2182813,
+    2183155
+  ],
+  "resourceIssues": [],
+  "ownFinal": [
+    {
+      "pid": 2182813,
+      "tid": 2182813,
+      "comm": "codex9wrap",
+      "nice": 19,
+      "cpus": "6-31"
+    },
+    {
+      "pid": 2182813,
+      "tid": 2182827,
+      "comm": "DelayedTaskSche",
+      "nice": 19,
+      "cpus": "6-31"
+    },
+    {
+      "pid": 2182813,
+      "tid": 2182828,
+      "comm": "codex9-node",
+      "nice": 19,
+      "cpus": "6-31"
+    },
+    {
+      "pid": 2182813,
+      "tid": 2182829,
+      "comm": "codex9-node",
+      "nice": 19,
+      "cpus": "6-31"
+    },
+    {
+      "pid": 2182813,
+      "tid": 2182830,
+      "comm": "codex9-node",
+      "nice": 19,
+      "cpus": "6-31"
+    },
+    {
+      "pid": 2182813,
+      "tid": 2182831,
+      "comm": "codex9-node",
+      "nice": 19,
+      "cpus": "6-31"
+    },
+    {
+      "pid": 2182813,
+      "tid": 2182832,
+      "comm": "codex9-node",
+      "nice": 19,
+      "cpus": "6-31"
+    }
+  ],
+  "valid": true,
+  "samplingLimit": "0.5-second observed process-tree sampling; a process or drift wholly between samples may escape detection",
+  "log": "/datos/tmp-atlas-lab/balance/codex9/final-evidence-v1.log"
+}

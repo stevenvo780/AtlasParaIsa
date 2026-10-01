@@ -1,0 +1,87 @@
+{
+  "label": "typecheck-npm-final",
+  "command": [
+    "/datos/tmp-atlas-lab/codex9-runtime/codex9-node",
+    "/usr/lib/node_modules/npm/bin/npm-cli.js",
+    "run",
+    "typecheck"
+  ],
+  "code": 0,
+  "signal": null,
+  "elapsedSeconds": 1.1155525990000001,
+  "qaOnly": true,
+  "authorizedPolicy": "Objective8: CPU0–31 only00:00≤Bogota time<07:00; every observed thread nice19, nonempty CPU subset0–31; no repair",
+  "startup": {
+    "settleMilliseconds": 2000,
+    "priorityOnEntry": -4,
+    "priorityBeforeEstablishment": -4,
+    "establishmentBeforeChild": true
+  },
+  "launchEnvironment": {
+    "TMPDIR": "/datos/tmp-atlas-lab",
+    "ldPreloadPresent": false,
+    "launcherInitEnabled": false
+  },
+  "resourceSamples": 4,
+  "examinedThreads": 176,
+  "observedPids": [
+    2152492,
+    2152771,
+    2152788
+  ],
+  "resourceIssues": [],
+  "ownFinal": [
+    {
+      "pid": 2152492,
+      "tid": 2152492,
+      "comm": "codex9qa",
+      "nice": 19,
+      "cpus": "0-31"
+    },
+    {
+      "pid": 2152492,
+      "tid": 2152503,
+      "comm": "DelayedTaskSche",
+      "nice": 19,
+      "cpus": "0-31"
+    },
+    {
+      "pid": 2152492,
+      "tid": 2152504,
+      "comm": "codex9-node",
+      "nice": 19,
+      "cpus": "0-31"
+    },
+    {
+      "pid": 2152492,
+      "tid": 2152505,
+      "comm": "codex9-node",
+      "nice": 19,
+      "cpus": "0-31"
+    },
+    {
+      "pid": 2152492,
+      "tid": 2152506,
+      "comm": "codex9-node",
+      "nice": 19,
+      "cpus": "0-31"
+    },
+    {
+      "pid": 2152492,
+      "tid": 2152507,
+      "comm": "codex9-node",
+      "nice": 19,
+      "cpus": "0-31"
+    },
+    {
+      "pid": 2152492,
+      "tid": 2152508,
+      "comm": "codex9-node",
+      "nice": 19,
+      "cpus": "0-31"
+    }
+  ],
+  "valid": true,
+  "samplingLimit": "0.5-second observed process-tree sampling; a process or drift wholly between samples may escape detection",
+  "log": "/datos/tmp-atlas-lab/balance/codex9/typecheck-npm-final.log"
+}

@@ -9,6 +9,7 @@ import { projectAnimal } from './animals.js';
 import type { LegacyRecord } from '../shared/demography.js';
 import { bindTechnologyCatalogue, type TechnologyCatalogueReader } from './technology-catalogue.js';
 import { lastTileAt, splitTileBlocks, tileIndexAppended } from './tile-index.js';
+import { observeMaterialRegion } from './material-observer.js';
 
 export interface WorldContext {
   loadChunk?: (key: string, atTick: number) => Chunk | null;
@@ -139,7 +140,9 @@ function activateChunk(world: World, key: string, x: number, y: number, context:
   world.tiles.push(...initialized);
   tileIndexAppended(world.tiles, from);
   world.animals.push(...(animals ?? materializeAnimals(world.seed, initialized, world.tick)));
-  world.structures.push(...(structures ?? legacyStructures(tiles, world.tick)));
+  const materializedStructures = structures ?? legacyStructures(tiles, world.tick);
+  world.structures.push(...materializedStructures);
+  for (const structure of materializedStructures) observeMaterialRegion(world, structure, 'activated');
   for (const place of meta.places) if (!world.places.some(p => p.id === place.id)) world.places.push(place);
 }
 /** Only agent neighborhoods advance ecology. Camera queries never call this function. */
@@ -205,7 +208,7 @@ export function maintainRegions(world: World, context: WorldContext = worldConte
     });
     world.structures = world.structures.filter(structure => {
       const chunk = detached.get(chunkKey(structure.x, structure.y));
-      if (chunk) chunk.structures!.push(structure);
+      if (chunk) { chunk.structures!.push(structure); observeMaterialRegion(world, structure, 'retired'); }
       return !chunk;
     });
     // The three memory anchors remain available as provenance even when dormant.

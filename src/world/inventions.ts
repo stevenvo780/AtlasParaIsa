@@ -8,6 +8,7 @@ import { INTERVALO_ECOLOGIA_TICKS, SED_POR_UNIDAD } from './ecologia-constantes.
 import { algunoCerca, filtrarCerca } from './indice-puntos.js';
 import { esMiembro, techoDelArchivo } from './indices.js';
 import { vecinos } from './rejilla.js';
+import { observeMaterialBuilt, observeMaterialCondition, observeMaterialStock, observeMaterialUse } from './material-observer.js';
 
 type Emit = (event: Omit<ChronicleEvent, 'id' | 'tick'>) => ChronicleEvent;
 type Point = { x: number; y: number };
@@ -352,6 +353,7 @@ export function completeConstruction(world: World, person: Person, tile: Tile, e
   const structure: StructureView = { id: identity.id, x: tile.x, y: tile.y, blueprintId: blueprint.id, name: blueprint.name,
     components: [...blueprint.components], condition: 1, water: 0, food: 0, uses: 0, builtAt: world.tick, builderId: person.id };
   world.structures.push(structure); tile.terrain = 'shelter'; world.settlementCount++;
+  observeMaterialBuilt(world, structure, cost);
   const place = { id: `settlement-${tile.x}-${tile.y}`, name: blueprint.name, x: tile.x, y: tile.y,
     description: `Construido por ${person.name}; componentes ${blueprint.components.join(', ')}.`, gatherings: 0 };
   world.places.push(place); world.chunks[chunkKey(tile.x, tile.y)]?.places.push(place);
@@ -362,11 +364,12 @@ export function completeConstruction(world: World, person: Person, tile: Tile, e
   return structure;
 }
 
-function observeUse(world: World, structure: StructureView, benefit: number): void {
+function observeUse(world: World, structure: StructureView, benefit: number, person: Person, kind: 'food' | 'water' | 'rest', amount = 0): void {
   if (benefit <= 0) return;
   structure.uses++;
   const blueprint = world.blueprints.find(b => b.id === structure.blueprintId);
   if (blueprint) { blueprint.uses++; blueprint.usefulness = clamp(blueprint.usefulness + (clamp(benefit) - blueprint.usefulness) * 0.04); }
+  observeMaterialUse(world, structure, person, kind, amount, benefit);
 }
 // Sprint noche-perf 2026-09-22: se descarta primero lo que está a más de `radius + 1` en algún eje (entonces
 // `Math.hypot` supera `radius` sin duda de redondeo) y el filtro completo, puro, decide igual que antes sobre
@@ -384,7 +387,8 @@ export function takeFood(world: World, person: Point, requested: number): number
     if (!blueprintAffordances(structure.components).foodCapacity) continue;
     const amount = Math.min(structure.food, requested - taken);
     structure.food -= amount; taken += amount; world.inventionDynamics.foodTaken += amount;
-    if (esMiembro(world.people, member, world.tick) && member.action === 'eat' && member.hunger > 0) observeUse(world, structure, amount * 10);
+    if (esMiembro(world.people, member, world.tick) && member.action === 'eat' && member.hunger > 0) observeUse(world, structure, amount * 10, member, 'food', amount);
+    else if (amount > 0) observeMaterialStock(world, structure);
     if (taken >= requested) break;
   }
   return taken;
@@ -409,7 +413,7 @@ export function takeWater(world: World, person: Person, requested: number): numb
     if (blueprintAffordances(structure.components).waterCapacity <= 0) continue;
     const amount = Math.min(structure.water, needed - taken);
     structure.water -= amount; taken += amount;
-    observeUse(world, structure, amount * 15);
+    observeUse(world, structure, amount * 15, person, 'water', amount);
     if (taken >= needed) break;
   }
   return taken;
@@ -446,7 +450,7 @@ export function recordFacilityRest(world: World, person: Person, before?: Pick<P
   if (quality <= outdoor || benefit <= 1e-12) return;
   const fuel = hearthFuel(world, person, structure), unheated = Math.max(outdoor, blueprintAffordances(structure.components).restQuality * structure.condition);
   if (fuel > 0 && person.materials.wood >= fuel && extra(unheated) > 1e-12) person.materials.wood -= fuel;
-  observeUse(world, structure, benefit / (REST_FATIGUE_RATE + REST_ENERGY_RATE));
+  observeUse(world, structure, benefit / (REST_FATIGUE_RATE + REST_ENERGY_RATE), person, 'rest');
 }
 
 export function repairOpportunity(world: World, person: Person): StructureView | undefined {
@@ -456,7 +460,9 @@ export function repairOpportunity(world: World, person: Person): StructureView |
 }
 export function repair(world: World, person: Person, structure: StructureView, emit: Emit): boolean {
   if (!world.structures.includes(structure) || structure.condition >= REPAIR_CONDITION_LIMIT || distance(person, structure) > 1.5 || person.materials.wood < 1 || person.work < REPAIR_WORK) return false;
+  const before = structure.condition;
   person.materials.wood--; person.work -= REPAIR_WORK; structure.condition = clamp(structure.condition + 0.4); world.inventionDynamics.repairs++;
+  observeMaterialCondition(world, structure, 'repair', before, 1, REPAIR_WORK);
   emit({ kind: 'invention', actors: [person.id], x: structure.x, y: structure.y, source: 'simulation', text: `${person.name} reparó ${structure.name.toLocaleLowerCase('es')}.`,
     cause: `Mantenimiento real: −1 madera y ${REPAIR_WORK} trabajo; condición +0,4 hasta un máximo de 1.` });
   return true;
@@ -468,8 +474,9 @@ export function stepStructures(world: World, _emit: Emit): void {
   for (const structure of world.structures) {
     const tile = tileAt(world, structure); if (!tile || tile.terrain !== 'shelter') continue;
     const a = blueprintAffordances(structure.components);
+    const before = structure.condition;
     structure.condition = clamp(structure.condition - (world.weather === 'rain' ? 0.00028 : 0.00018) / a.durability);
-    if (structure.condition <= BROKEN_CONDITION) continue;
+    if (structure.condition <= BROKEN_CONDITION) { observeMaterialCondition(world, structure, 'wear', before); continue; }
     if (world.weather === 'rain' && a.waterCapacity > 0) {
       const collected = Math.min(a.waterCapacity - structure.water, a.catchment * structure.condition);
       structure.water += Math.max(0, collected); world.inventionDynamics.waterCollected += Math.max(0, collected);
@@ -489,6 +496,7 @@ export function stepStructures(world: World, _emit: Emit): void {
       const deposited = Math.max(0, Math.min(person.inventory - 0.12, a.foodCapacity - structure.food, 0.012));
       person.inventory -= deposited; structure.food += deposited; world.inventionDynamics.foodStored += deposited;
     }
+    observeMaterialCondition(world, structure, 'wear', before);
   }
   if (world.tick % 60 === 0 && world.learningEnabled) for (const person of world.people) {
     const context = inventionContext(world, person), current = selectedBlueprint(world, person);

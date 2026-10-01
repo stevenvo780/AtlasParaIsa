@@ -1,0 +1,163 @@
+{
+  "schema": "codex9-material-observer-events-gate-v3",
+  "frozenAt": "2026-10-01T01:21:59-05:00",
+  "beforeRealData": true,
+  "baselineCommit": "bb483260b2489fe62b113d620e5f56e5f3676dbc",
+  "baseline": "clean git archive of baselineCommit; no observer",
+  "candidate": "sprint/ciclo-material-20261001; event capture sidecar/hooks outside serialized World, no new law",
+  "sourceFreeze": "baseline SOURCE-MANIFEST.json67TS SHA256 verified; only src/world/index.ts,src/world/inventions.ts,src/world/spatial.ts and new src/world/material-observer.ts and static src/world/halo.ts inventory may differ; all other world/shared/server TS byte-identical to baseline. Record baseline,candidate,observer,runner,protocol SHA256 at start/end; any drift fails.",
+  "seeds": [
+    17001,
+    17002,
+    17003,
+    17004,
+    17005,
+    17006
+  ],
+  "families": [
+    "fresh",
+    "material-stressed"
+  ],
+  "params": "social.radioConvivencia=12,social.disolucion=1,social.maxComunidades=64",
+  "steps": 1200,
+  "blockSteps": 50,
+  "checkpoints": [
+    0,
+    300,
+    600,
+    900,
+    1200
+  ],
+  "rounds": 2,
+  "orders": [
+    [
+      "A1",
+      "B1",
+      "B2",
+      "A2"
+    ],
+    [
+      "B1",
+      "A1",
+      "A2",
+      "B2"
+    ]
+  ],
+  "orderMeaning": "ABBA then BAAB in every 50-step block; each arm is a fresh independent world and temporary Store; A1/A2 baseline, B1/B2 candidate+observer. Seed order rotates by round; no best-seed/round selection.",
+  "warmup": {
+    "seed": 16999,
+    "family": "material-stressed",
+    "stepsPerArm": 300,
+    "arms": [
+      "A1",
+      "B1"
+    ],
+    "excludedFromCost": true,
+    "stillRecordFailures": true
+  },
+  "measuredWorlds": 96,
+  "measuredSteps": 115200,
+  "warmupSteps": 600,
+  "store": "new Store in TMPDIR; save before tick1 to bind catalogue/context; identical persistence cadence from paramsOf in both arms; poststep ingest BEFORE store.save; observer ingest tick0 before initial save so pending dormant fixtures are visible; harness supplies Date.now=1000000000000+world.tick only during each synchronous Store.save to equalize host saved_at timestamps; restore Date.now immediately, no world/digest exclusions",
+  "observerSeam": {
+    "factory": "createMaterialObserver",
+    "module": "src/world/material-observer.ts",
+    "methods": [
+      "ingest(world): void",
+      "exportRows(): {version:1,coverage,structures:rows[],daily:rows[]}",
+      "discard(world):void"
+    ],
+    "semantics": "ingest initial before Store.save attaches external WeakMap capture; poststep before save confirms captured events. Export non-destructive. No RNG/World mutation. Adapt only interface, not frozen analysis."
+  },
+  "identity": "unmodified digestoCanonico from each tree at 0/300/600/900/1200 and final; includes world+effective params with no exclusions, no version normalization; all four arms and all repeated rounds must agree; also hash all saved SQLite tables in stable logical order, including archive, at every checkpoint and final",
+  "costWindow": "factory+initial ingest+file open and initial export measured and charged to each B total; blocks include stepWorld+event hooks, ingest, persistence, checkpoint exportRows+per-row JSON.stringify+64KiB-buffer file writes; final flush+close charged. No fsync/durable-IO claim: OS buffered writes. Digest computation, fixture creation, imports/assertions and audit-report generation outside timed blocks and reported separately; never use them as dilution denominators.",
+  "serialization": {
+    "bufferBytes": 65536,
+    "exportsAt": [
+      0,
+      300,
+      600,
+      900,
+      1200
+    ],
+    "sink": "exclusive newly created observer.jsonl file in each owned temporary directory; NDJSON metadata/coverage+structure+daily records; writeSync buffered chunks flushed each checkpoint, streaming SHA256, bytes/records, final close all timed. Final export object retained in report before temp cleanup. No fsync: buffered OS I/O only. No world/carta/network/public writes."
+  },
+  "measurements": [
+    "CPU user+system via process.cpuUsage",
+    "monotonic wall via performance.now",
+    "raw per-arm per-block CPU/wall",
+    "total ms/step, p50 and p95 per block",
+    "paired B/A ratios",
+    "A2/A1 noise diagnostics",
+    "observer init/ingest/export+serialization cost",
+    "initial/final resource guards and each checkpoint",
+    "buffered observer file open/write/flush/close CPU+wall",
+    "complete final observer export per B arm retained",
+    "audit report JSON/file/stdout timings separately reported, no attribution to simulation step"
+  ],
+  "estimator": "for each family and metric, log((B1+B2)/(A1+A2)) per seed-round including observer init/exports; average over all 6 seeds and both rounds, exponentiate minus1",
+  "bootstrap": {
+    "replicates": 10000,
+    "rngSeed": 912037,
+    "hierarchy": "resample 6 seeds with replacement, then 2 rounds with replacement within each sampled seed; whole ABBA/BAAB quartet retained; never treat blocks as independent seeds",
+    "confidence": 0.95,
+    "percentiles": [
+      0.025,
+      0.975
+    ],
+    "fixedBeforeData": true
+  },
+  "gate": {
+    "maxOverhead": 0.01,
+    "required": "all identity/source/resource/fixture coverage checks PASS AND upper95CI(CPU overhead)<=0.01 AND upper95CI(wall overhead)<=0.01 in EACH family",
+    "failure": "NO CUMPLIDA; distinguish observed >1% from uncertainty overlapping 1%; noisy wall cannot be silently waived",
+    "noAdaptiveSampling": true,
+    "noExclusions": true,
+    "noBestSelection": true
+  },
+  "fixture": {
+    "fresh": "unmodified createWorld(seed, V13params), synthetic defaults only",
+    "material-stressed": "same fresh world plus blueprint-1 frame+roof+cistern+granary, eight resident structures and eight dormant structures in remote Chunk100,100; conditions cycle1,0.5,0.10001,0.05; food0.35/water0.3; builtAt0; ids1..16; first mortal neighbor thirst0.5/actiondrink/decisionAt1000 beside healthy cistern with ambient water0; all changes deterministic synthetic setup, same in A and B; S/I and memories untouched",
+    "requiredPerStressedSeedRoundArm": [
+      "8 synthetic resident and8 synthetic dormant structures at initialization",
+      "uses increases at least once",
+      "at least1 initial healthy structure transitions to condition<=0.1",
+      "active exposure>=1 structure-tick and dormant exposure>=1 structure-tick",
+      "B exports positive record/byte counts, brokenCrossings>=1, wearEvaluations>=1, activeExposureTicks>=1 and daily uses>=1"
+    ],
+    "coverageFailure": "NO CUMPLIDA; never replace a seed after looking at events; fixture setup assertions run before long gate"
+  },
+  "resources": {
+    "TMPDIR": "/datos/tmp-atlas-lab",
+    "nice": 19,
+    "cpus": "6-31",
+    "runtimeBasename": "codex9-node",
+    "processTitle": "codex9gate",
+    "guard": "assert initial/end and each checkpoint; resource drift fails gate; no automatic priority repair that erases drift",
+    "execution": "single process, synchronous blocks, no competing gate workers"
+  },
+  "executionBarrier": "parent authorizes real gate after protocol/runner review and observer integration; before barrier only syntax and runner selftest/fixture initialization, no real stepWorld trajectories",
+  "outputs": "parent-selected new laboratory output JSON, raw rows retained; source/protocol hashes, every seed/round/arm/block/checkpoint, gates and limitations; write once with exclusive creation",
+  "limitations": [
+    "1200steps=0.5simulated days; no 20day/60day biological conclusion",
+    "12 deterministic synthetic fixtures, not copies of live/public worlds",
+    "two rounds with six seed clusters can leave1% unresolved",
+    "same-process GC/interference may affect neighboring arms; balanced order/A-A diagnostic and confidence interval do not prove absence of all systematic bias",
+    "canonical world digest excludes persisted archives by design; logical SQLite table digest separately covers durable state",
+    "test/typecheck/full suite remain parent gates, never inferred from identity/cost result",
+    "activeExposureTicks is elapsed residency duration, not count of observer frames; dormant initial identities become archived after save and are tracked externally"
+  ],
+  "supersedes": {
+    "path": "/datos/tmp-atlas-lab/datos-lab/CODEX9-PROTOCOLO-EVENTOS-v2.json",
+    "sha256": "ab82d6f7926d0af87cc49a9212c186c48584de58da3f2cc2dbb994c040e638bb",
+    "noRealDataBeforeSupersession": true,
+    "reason": "Only extend source allowlist with src/world/halo.ts: T111 static outside-step inventory must register createMaterialObserver; inventory not imported by simulation runtime. v1/v2 preserved. All seeds/fixtures/statistics/thresholds unchanged."
+  },
+  "sourceAllowlist": [
+    "src/world/index.ts",
+    "src/world/inventions.ts",
+    "src/world/spatial.ts",
+    "src/world/material-observer.ts",
+    "src/world/halo.ts"
+  ]
+}

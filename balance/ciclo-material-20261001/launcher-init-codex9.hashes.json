@@ -1,0 +1,11 @@
+{
+  "createdAt": "2026-10-01T06:37:03.610Z",
+  "files": {
+    "/datos/tmp-atlas-lab/balance/codex9/launcher-init-codex9.c": "20af791430dd97065233716fc22da1181fe7f4e8dba15ddf79c89fd62d18ef16",
+    "/datos/tmp-atlas-lab/balance/codex9/launcher-init-codex9.exec.c": "bfc5c23ed9b598844ee8d29a56ff580cabe37971a63dd8a59a103162f7360f42",
+    "/datos/tmp-atlas-lab/balance/codex9/launcher-init-codex9.exec-argv0.so": "7ade2096852b55065c1b2d8e9f3684e28e89b526b3a3dbde04b6bd2b36924948",
+    "/datos/tmp-atlas-lab/balance/codex9/launcher-init-codex9.bash": "07a2331ac400749cc7740fac9999e36cf104c743b612c307ef155fc5dca7fe2e",
+    "/datos/tmp-atlas-lab/balance/codex9/launcher-init-codex9.smoke.mjs": "7c54820dc7b7f14aa2615f349426c15eaaf669b7dbbf22f9b99a9b4ee95cf69b",
+    "/datos/tmp-atlas-lab/balance/codex9/launcher-init-codex9.README.md": "fd7142b80a48f3ec120a269b2faf474eaca9cc83c5933266461c91feff8a6b59"
+  }
+}

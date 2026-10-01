@@ -1,0 +1,102 @@
+{
+  "reviewedUTC": "2026-10-01T07:50:14.739Z",
+  "verification": "PASS_RECALCULATION",
+  "gateA": "NO CUMPLIDA",
+  "reason": "scientific cost threshold not met; no resource drift, timeout, signal or runtime failure",
+  "inputs": {
+    "resultSHA256": "53da8e9ebc137414002fcb3ef7ae1278f4ea9b6a49d2f253c7d0faa6f51bd317",
+    "wrapperSHA256": "bcacff32b46a610ef2b708c86ae331ce57769d4d90b87fd052b0629b74bc99fa",
+    "logSHA256": "81fa26c4859524919642304c2435a06f7f2013f37c3251e2b92f373defe57819",
+    "protocolSHA256": "20a1328c73ae202d951804a6fd5b1b5af5b4883beaff65b076fe0527e9aaf7fa",
+    "runnerSHA256": "4d8b6dfdf3ca640af7c9f922f7458243d9470a6030d1ddaf925789464625e78d"
+  },
+  "counts": {
+    "numericChecks": 10811,
+    "structuralChecks": 18765,
+    "sourceChecks": 135,
+    "measuredWorlds": 96,
+    "measuredSteps": 115200,
+    "warmupWorlds": 2,
+    "warmupSteps": 600,
+    "quartets": 24,
+    "measuredBlocks": 2304,
+    "warmupBlocks": 12,
+    "checkpointRecords": 484,
+    "identityComparisons": 422,
+    "observerArms": 49,
+    "stressedArms": 50,
+    "structureRows": 559,
+    "dailyRows": 559,
+    "observerNDJSONRecords": 5630,
+    "observerNDJSONBytes": 4505134,
+    "internalGuards": 681,
+    "wrapperSamples": 7516,
+    "wrapperThreadChecks": 105210,
+    "wrapperIssues": 0
+  },
+  "cost": {
+    "fresh": {
+      "cpuMs": {
+        "estimate": 0.010485738350988998,
+        "ci95": [
+          -0.0019508887458672597,
+          0.02436459873645902
+        ],
+        "pass": false,
+        "reason": "observed overhead>1%"
+      },
+      "wallMs": {
+        "estimate": -0.0056357323438847445,
+        "ci95": [
+          -0.04989920594868762,
+          0.04819634770794898
+        ],
+        "pass": false,
+        "reason": "1% unresolved by confidence interval"
+      }
+    },
+    "material-stressed": {
+      "cpuMs": {
+        "estimate": -0.006789306009749601,
+        "ci95": [
+          -0.02068122874332694,
+          0.007562237407618904
+        ],
+        "pass": true,
+        "reason": "upper95CI<=1%"
+      },
+      "wallMs": {
+        "estimate": 0.01681770210764254,
+        "ci95": [
+          -0.03285848775004702,
+          0.07770795772921435
+        ],
+        "pass": false,
+        "reason": "observed overhead>1%"
+      }
+    }
+  },
+  "limits": [
+    "No new stepWorld calls or trajectories; analysis only",
+    "Observer file bytes/stream SHA are recorded raw values; temporary files were removed, so original NDJSON bytes/hash cannot be re-read; record counts independently reconstructed",
+    "Resource sampler every0.5s can miss wholly intermediate processes/drift",
+    "Elapsed residency is separate from wear frames; dormant archives are not contemporaneous global inventories",
+    "6seed clusters/2rounds; buffered writes, no fsync; half-day simulations; no biological or future-law acceptance",
+    "Final suite QA is parent-owned and still pending"
+  ],
+  "resources": {
+    "initial": {
+      "pid": 2103313,
+      "nice": 19,
+      "cpus": "6-31",
+      "TMPDIR": "/datos/tmp-atlas-lab"
+    },
+    "final": {
+      "pid": 2103313,
+      "nice": 19,
+      "cpus": "6-31",
+      "TMPDIR": "/datos/tmp-atlas-lab"
+    },
+    "valid": true
+  }
+}

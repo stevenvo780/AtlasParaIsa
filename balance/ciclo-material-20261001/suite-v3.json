@@ -1,0 +1,275 @@
+{
+  "label": "suite-v3",
+  "command": [
+    "/datos/tmp-atlas-lab/codex9-runtime/codex9-node",
+    "/usr/lib/node_modules/npm/bin/npm-cli.js",
+    "test"
+  ],
+  "code": 1,
+  "signal": null,
+  "elapsedSeconds": 4.584495441,
+  "startup": {
+    "settleMilliseconds": 2000,
+    "priorityOnEntry": -4,
+    "priorityBeforeEstablishment": -4,
+    "establishmentBeforeChild": true
+  },
+  "launchEnvironment": {
+    "TMPDIR": "/datos/tmp-atlas-lab",
+    "ldPreloadPresent": false,
+    "launcherInitEnabled": false
+  },
+  "resourceSamples": 11,
+  "examinedThreads": 2340,
+  "observedPids": [
+    2097859,
+    2098124,
+    2098135,
+    2098154,
+    2098163,
+    2098164,
+    2098165,
+    2098166,
+    2098167,
+    2098178,
+    2098187,
+    2098194,
+    2098208,
+    2098214,
+    2098220,
+    2098221,
+    2098232,
+    2098256,
+    2098260,
+    2098261,
+    2098264,
+    2098265,
+    2098276,
+    2098293,
+    2098403,
+    2098302,
+    2098306,
+    2098311,
+    2098318,
+    2098362,
+    2098375,
+    2098382,
+    2098468,
+    2098426,
+    2098436,
+    2098475,
+    2098489,
+    2098539,
+    2098509,
+    2098517,
+    2098580,
+    2098594,
+    2098574,
+    2098581,
+    2098602,
+    2098674,
+    2098712,
+    2098797,
+    2098798,
+    2098757,
+    2098800,
+    2098758,
+    2098846,
+    2098962,
+    2098887,
+    2098945,
+    2098946,
+    2098835,
+    2098883,
+    2098947,
+    2099039,
+    2099040,
+    2098974,
+    2098982,
+    2099038
+  ],
+  "resourceIssues": [
+    {
+      "sample": 10,
+      "pid": 2098846,
+      "tid": 2099063,
+      "comm": "Thread<00>",
+      "nice": 19,
+      "cpus": "0-25"
+    },
+    {
+      "sample": 10,
+      "pid": 2098846,
+      "tid": 2099064,
+      "comm": "Thread<01>",
+      "nice": 19,
+      "cpus": "0-25"
+    },
+    {
+      "sample": 10,
+      "pid": 2098846,
+      "tid": 2099065,
+      "comm": "Thread<02>",
+      "nice": 19,
+      "cpus": "0-25"
+    },
+    {
+      "sample": 10,
+      "pid": 2098846,
+      "tid": 2099066,
+      "comm": "Thread<03>",
+      "nice": 19,
+      "cpus": "0-25"
+    },
+    {
+      "sample": 10,
+      "pid": 2098846,
+      "tid": 2099067,
+      "comm": "Thread<04>",
+      "nice": 19,
+      "cpus": "0-25"
+    },
+    {
+      "sample": 10,
+      "pid": 2098846,
+      "tid": 2099068,
+      "comm": "Thread<05>",
+      "nice": 19,
+      "cpus": "0-25"
+    },
+    {
+      "sample": 10,
+      "pid": 2098846,
+      "tid": 2099069,
+      "comm": "Thread<06>",
+      "nice": 19,
+      "cpus": "0-25"
+    },
+    {
+      "sample": 10,
+      "pid": 2098846,
+      "tid": 2099070,
+      "comm": "Thread<07>",
+      "nice": 19,
+      "cpus": "0-25"
+    },
+    {
+      "sample": 10,
+      "pid": 2098846,
+      "tid": 2099071,
+      "comm": "Thread<08>",
+      "nice": 19,
+      "cpus": "0-25"
+    },
+    {
+      "sample": 10,
+      "pid": 2098846,
+      "tid": 2099072,
+      "comm": "Thread<09>",
+      "nice": 19,
+      "cpus": "0-25"
+    },
+    {
+      "sample": 10,
+      "pid": 2098846,
+      "tid": 2099073,
+      "comm": "Thread<10>",
+      "nice": 19,
+      "cpus": "0-25"
+    },
+    {
+      "sample": 10,
+      "pid": 2098846,
+      "tid": 2099074,
+      "comm": "Thread<11>",
+      "nice": 19,
+      "cpus": "0-25"
+    },
+    {
+      "sample": 10,
+      "pid": 2098846,
+      "tid": 2099075,
+      "comm": "Thread<12>",
+      "nice": 19,
+      "cpus": "0-25"
+    },
+    {
+      "sample": 10,
+      "pid": 2098846,
+      "tid": 2099076,
+      "comm": "Thread<13>",
+      "nice": 19,
+      "cpus": "0-25"
+    },
+    {
+      "sample": 10,
+      "pid": 2098846,
+      "tid": 2099077,
+      "comm": "Thread<14>",
+      "nice": 19,
+      "cpus": "0-25"
+    },
+    {
+      "sample": 10,
+      "pid": 2098846,
+      "tid": 2099078,
+      "comm": "Thread<15>",
+      "nice": 19,
+      "cpus": "0-25"
+    }
+  ],
+  "ownFinal": [
+    {
+      "pid": 2097859,
+      "tid": 2097859,
+      "comm": "codex9wrap",
+      "nice": 19,
+      "cpus": "6-31"
+    },
+    {
+      "pid": 2097859,
+      "tid": 2097884,
+      "comm": "DelayedTaskSche",
+      "nice": 19,
+      "cpus": "6-31"
+    },
+    {
+      "pid": 2097859,
+      "tid": 2097885,
+      "comm": "codex9-node",
+      "nice": 19,
+      "cpus": "6-31"
+    },
+    {
+      "pid": 2097859,
+      "tid": 2097886,
+      "comm": "codex9-node",
+      "nice": 19,
+      "cpus": "6-31"
+    },
+    {
+      "pid": 2097859,
+      "tid": 2097887,
+      "comm": "codex9-node",
+      "nice": 19,
+      "cpus": "6-31"
+    },
+    {
+      "pid": 2097859,
+      "tid": 2097888,
+      "comm": "codex9-node",
+      "nice": 19,
+      "cpus": "6-31"
+    },
+    {
+      "pid": 2097859,
+      "tid": 2097889,
+      "comm": "codex9-node",
+      "nice": 19,
+      "cpus": "6-31"
+    }
+  ],
+  "valid": false,
+  "samplingLimit": "0.5-second observed process-tree sampling; a process or drift wholly between samples may escape detection",
+  "log": "/datos/tmp-atlas-lab/balance/codex9/suite-v3.log"
+}

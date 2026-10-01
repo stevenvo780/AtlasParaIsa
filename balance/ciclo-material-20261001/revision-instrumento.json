@@ -1,0 +1,788 @@
+{
+  "phase": "FINAL_DOCUMENTARY_DELIVERY_REVIEW_COMPLETE",
+  "reviewedUTC": "2026-10-01T06:17:18.638Z",
+  "referenceBase": "bb483260b2489fe62b113d620e5f56e5f3676dbc",
+  "sourceSHA256": {
+    "src/world/material-observer.ts": "c9826a8ca838b8a2297d97a4f162653250ca3e8a4933fa9c512a266a4830c793",
+    "src/world/index.ts": "eaf71196be1661f9b7c78069de419a3c8533e3cdc4b20bdb2fd5e72ba77e3ec6",
+    "src/world/inventions.ts": "2d90f7d315be95529e31cd4bda26487e2dc5f2c8c10b97632d453b06fd083b7d",
+    "src/world/spatial.ts": "1e3c060c65094d593e389ede548353ad1ba15b953aaed357d77ce82a842f178f",
+    "tests/material-observer.test.ts": "7c4473d8aa4749f277b9093fe947776c96a0714572f8ba770fca754797be6dce",
+    "src/world/halo.ts": "9001fcc2242b0441ff6279984ddc7153211d537824e0c7fc9251824d954ef32f",
+    "docs/CICLO-MATERIAL-INSTRUMENTO.md": "d8ddeac31cc43db01b402241b5a42734f0784b384cf029c1aef987fcb3595cc3"
+  },
+  "findings": [],
+  "confirmedBlockingBugs": 0,
+  "codeReview": "PASS_PROVISIONAL",
+  "gateA": "NO CUMPLIDA",
+  "gateReason": "Scientific cost criterion not met; identity/coverage/resources/QA/typecheck all PASS. No implemented future material law or biological acceptance.",
+  "focusedTestLog": {
+    "tests": 16,
+    "pass": 16,
+    "fail": 0,
+    "skipped": 0,
+    "durationMs": 1551.300447,
+    "sha256": "65e5b2b8b4e21be797813bb905e00128f651f8c9985a2db28cd0e7c829a40ecf",
+    "executedByReviewer": false
+  },
+  "resources": {
+    "initial": {
+      "nice": 19,
+      "cpus": [
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31
+      ],
+      "TMPDIR": "/datos/tmp-atlas-lab"
+    },
+    "final": {
+      "nice": 19,
+      "cpus": [
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31
+      ],
+      "TMPDIR": "/datos/tmp-atlas-lab"
+    },
+    "valid": true
+  },
+  "benchReview": "PASS_INDEPENDENT_RECALCULATION_OF_NO_CUMPLIDA_RESULT",
+  "lawBReview": {
+    "verdict": "PASS_REQUIREMENTS_ONLY",
+    "reviewedUTC": "2026-10-01T06:30:42.328Z",
+    "path": "/datos/tmp-atlas-lab/datos-lab/DISENO-CICLO-MATERIAL-20261001.md",
+    "sha256": "edf3ef8711a73e2339a2999ad6d82af89dfee0d188a8bb7ef601f2b7007af08b",
+    "bytes": 28766,
+    "scope": "requirements completeness and factual/numeric references only; not formal future-law critique/acceptance",
+    "requirements": {
+      "dormantPureDeterministicCatchup": "20–44",
+      "explicitRuinLocalPaidRecovery": "46–60",
+      "environmentalBrokenDepositLoss": "62–86",
+      "localityNoNewCaps": "88–90",
+      "lawZeroAllParamsBitIdentity": "92–94",
+      "proposed20DayNewSeedPanelV13Control": "96–118",
+      "fertilityCostDormantDeterminismRisks": "120–133"
+    },
+    "proposalsNotImplementation": true,
+    "noExperimentClaimed": true,
+    "noSeedVirginityClaimed": true,
+    "numericComparisons": 25,
+    "numericDifferences": 0,
+    "checks": [
+      [
+        "dryRate",
+        0.00018,
+        0.00018
+      ],
+      [
+        "rainRate",
+        0.00028,
+        0.00028
+      ],
+      [
+        "durability1.5Dry",
+        0.00012,
+        0.00012,
+        1e-19
+      ],
+      [
+        "durability1.5Rain",
+        0.00018666666666666666,
+        0.00018666666666666666,
+        1e-19
+      ],
+      [
+        "reviews20days",
+        4800,
+        4800
+      ],
+      [
+        "mixedLoss",
+        3312000000,
+        3312000000
+      ],
+      [
+        "mixedCondition",
+        0,
+        0
+      ],
+      [
+        "dry20Condition",
+        0.136,
+        0.136
+      ],
+      [
+        "rainCrossReview",
+        3215,
+        3215
+      ],
+      [
+        "rainCrossDay",
+        13.395833333333334,
+        13.395833,
+        5e-7
+      ],
+      [
+        "dryCrossReview",
+        5000,
+        5000
+      ],
+      [
+        "dryCrossDay",
+        20.833333333333332,
+        20.833333,
+        5e-7
+      ],
+      [
+        "foodDryDays",
+        4,
+        4
+      ],
+      [
+        "waterDryDays",
+        10,
+        10
+      ],
+      [
+        "waterDay4",
+        0.6,
+        0.6
+      ],
+      [
+        "waterDay5",
+        0.5,
+        0.5
+      ],
+      [
+        "foodRainDays",
+        2.571428571428571,
+        2.571,
+        0.0005
+      ],
+      [
+        "waterRainDays",
+        6.428571428571429,
+        6.429,
+        0.0005
+      ],
+      [
+        "dismantlingWork",
+        23,
+        23
+      ],
+      [
+        "woodConsumable",
+        100,
+        100
+      ],
+      [
+        "woodBalance",
+        6100,
+        6100
+      ],
+      [
+        "stoneBalance",
+        3000,
+        3000
+      ],
+      [
+        "woodNet",
+        2900,
+        2900
+      ],
+      [
+        "replicaSteps",
+        48000,
+        48000
+      ],
+      [
+        "panelSteps",
+        768000,
+        768000
+      ]
+    ],
+    "observationFiguresMatchObjective8Report": true,
+    "factualCorrections": []
+  },
+  "reportSHA256": "d02d1e606d1b382aa73bd2dbaf21004b3069a551539d0b5131940a7d4649af5a",
+  "writes": "only own review md/json; no code changes, simulation, suite, service, worldlive or agents",
+  "haloReview": {
+    "verdict": "PASS_STATIC",
+    "sourceSHA256": "9001fcc2242b0441ff6279984ddc7153211d537824e0c7fc9251824d954ef32f",
+    "testSourceSHA256": "a15150221e7ce5ddf5c4ffb8066b561894125ecb57ee7380374250d4306809cd",
+    "logSHA256": "88c13cfac952d9e1375ddece338dc83945e2b3ff6e8113c4378352be160d4431",
+    "tests": 8,
+    "pass": 8,
+    "fail": 0,
+    "executedByReviewer": false,
+    "scope": "factory closure createMaterialObserver only; engine hooks not excluded; static scanner and diff inspected",
+    "citation": "src/world/halo.ts:585; tests/halo-radios.test.ts:339"
+  },
+  "suiteEvidence": "Parent reports v1 1635 PASS / 1 fail / 9 skipped; no final suite accepted until corrective checks and final logs",
+  "preDataReviewerResources": {
+    "initial": {
+      "pid": 1554411,
+      "nice": 19,
+      "affinity": "6-31",
+      "TMPDIR": "/datos/tmp-atlas-lab"
+    },
+    "final": {
+      "pid": 1554411,
+      "nice": 19,
+      "affinity": "6-31",
+      "TMPDIR": "/datos/tmp-atlas-lab"
+    },
+    "valid": true
+  },
+  "protocolPreReview": {
+    "reviewedUTC": "2026-10-01T06:25:06.516Z",
+    "protocolSHA256": "20a1328c73ae202d951804a6fd5b1b5af5b4883beaff65b076fe0527e9aaf7fa",
+    "preservedV2SHA256": "ab82d6f7926d0af87cc49a9212c186c48584de58da3f2cc2dbb994c040e638bb",
+    "preservedV1SHA256": "9795333d632e9a2b04b547ddc6df504cf91c1df9c519a5a85e78b8b6eb923762",
+    "v2v3ChangedKeys": [
+      "schema",
+      "frozenAt",
+      "sourceFreeze",
+      "supersedes",
+      "sourceAllowlist"
+    ],
+    "statisticsAndFixturesUnchanged": true,
+    "manifestFilesVerified": 67,
+    "baselineArchiveSHA256": "37785411452a3bd8b6d4ea4127527160921c052b2c81ac3b9f047688373571c1",
+    "baselineManifestSHA256": "5e52bf32fdd6e3917e4bfdf89dd83415dce07d3483eec5dfc83ca63a2f5bdab7",
+    "baselineGitCommitProvenance": {
+      "verdict": "PASS",
+      "commit": "bb483260b2489fe62b113d620e5f56e5f3676dbc",
+      "pathspec": [
+        "src/world",
+        "src/shared",
+        "src/server",
+        "package.json",
+        "tsconfig.json"
+      ],
+      "regeneratedArchiveSHA256": "37785411452a3bd8b6d4ea4127527160921c052b2c81ac3b9f047688373571c1",
+      "existingArchiveSHA256": "37785411452a3bd8b6d4ea4127527160921c052b2c81ac3b9f047688373571c1",
+      "byteIdentical": true,
+      "command": "git archive bb483260b2489fe62b113d620e5f56e5f3676dbc src/world src/shared src/server package.json tsconfig.json",
+      "failedReaderAttempt": {
+        "error": "spawnSync git EPIPE",
+        "status": 0,
+        "stdoutCommit": "bb483260b2489fe62b113d620e5f56e5f3676dbc",
+        "reason": "full stdin written after header-only reader exited; no simulation, no real data, no artifact written by failed attempt"
+      }
+    },
+    "runnerSHA256": "0671f1b0f7a7ac058711b47016f1792df1967da07b06238b4f65564b0d59ef16",
+    "runnerLines": 200,
+    "runnerStatus": "PARTIAL; reviewed imports/guard/protocol/sourceMap/fixture/deterministicSave/logicalDatabaseDigest/BufferedObserverFile only; loop/CI/selftest not ready",
+    "verdict": "NO_FULL_ACCEPTANCE_PARTIAL_RUNNER"
+  },
+  "preProtocolReviewerResources": {
+    "initial": {
+      "nice": 19,
+      "affinity": "6-31",
+      "TMPDIR": "/datos/tmp-atlas-lab"
+    },
+    "final": {
+      "nice": 19,
+      "affinity": "6-31",
+      "TMPDIR": "/datos/tmp-atlas-lab"
+    },
+    "valid": true
+  },
+  "preBReviewerResources": {
+    "initial": {
+      "pid": 1642942,
+      "nice": 19,
+      "affinity": "6-31",
+      "TMPDIR": "/datos/tmp-atlas-lab"
+    },
+    "final": {
+      "pid": 1642942,
+      "nice": 19,
+      "affinity": "6-31",
+      "TMPDIR": "/datos/tmp-atlas-lab"
+    },
+    "valid": true
+  },
+  "runnerPreBarrierReview": {
+    "reviewedUTC": "2026-10-01T06:35:26.651Z",
+    "lines": 517,
+    "status": "STATIC_REVIEW_FAVORABLE_PENDING_COVERAGE_REFINEMENT_AND_VALID_SELFTEST",
+    "statistics": "seed/round hierarchical bootstrap; 6 clusters, 2 rounds, log ratio Bsum/Asum; 10000 resamples; two-sided95% upper bound≤1% CPU and wall independently each family",
+    "identity": "all four arms at checkpoints and repeated rounds; full canonical world+params and complete logical SQLite table rows",
+    "cost": "observer initial attach/export/file open and buffered serialization charged; step/ingest/save/checkpoint exports in block; file close/discard charged; warmup/shared setup/digests/report excluded",
+    "coveragePending": "explicit initial8resident+8dormant topology and active/dormant duration evidence per A/B stressed arm requested by parent; current gate relies on dormant ID count",
+    "resourcesPending": "reported direct selftest failed finalnice−4; replacement guarded selftest actual log pending; never turn failed run into PASS",
+    "selftestCode": "known0.5%PASS/2%FAIL/wideCI/missing seed; lifecycle fake step/ingest/save clock restore;12fixture pairs initialization only,0real stepWorld calls; actual result not inferred from source",
+    "confirmedStatisticalBugs": 0,
+    "barrier": "NOT_RELEASED",
+    "sourceSHAObservedNotFullyReviewed": "4d8b6dfdf3ca640af7c9f922f7458243d9470a6030d1ddaf925789464625e78d",
+    "fullyReviewedSHA256": null,
+    "writerDrift": "Source grew from468lines read to517lines during recording; current delta MUST be re-reviewed after writer readiness. No approval attaches to observed SHA."
+  },
+  "launcherStaticReview": {
+    "sha256": "26ea519ae9e94566da078928004551ffb36bf8d62c906e32c43dfe2295aeb60f",
+    "lines": 84,
+    "status": "PASS_STATIC_AND_GUARDED_SELFTEST",
+    "establishment": "nice19 once for all wrapper threads after2s no-child settling, then assertions/abort only",
+    "measurement": "reads /proc stat nice and status affinity for observed process tree threads every0.5s; limits disclosed",
+    "remainingEvidence": "valid smoke/selftest plus exact hash and absence of LD_PRELOAD in real execution environment",
+    "environmentMetadata": "new line79 records booleans only for LD_PRELOAD and launcher init; reviewed, no functional measurement change"
+  },
+  "fullRunnerReviewerResources": {
+    "initial": {
+      "nice": 19,
+      "affinity": "6-31",
+      "TMPDIR": "/datos/tmp-atlas-lab"
+    },
+    "final": {
+      "nice": 19,
+      "affinity": "6-31",
+      "TMPDIR": "/datos/tmp-atlas-lab"
+    },
+    "valid": true
+  },
+  "runnerFinalStaticReview": {
+    "reviewedUTC": "2026-10-01T06:38:35.348Z",
+    "fullyReviewedSHA256": "4d8b6dfdf3ca640af7c9f922f7458243d9470a6030d1ddaf925789464625e78d",
+    "lines": 517,
+    "stableInitialFinalSHA": true,
+    "verdict": "PASS_STATIC_AND_GUARDED_SYNTHETIC",
+    "confirmedBlockingBugs": 0,
+    "coverage": "initial A/B8active+8dormant; tick0/1/final topology; independent [0,1) active/dormant lower bounds; B16IDs,firstObserved0,no gaps,active duration within horizon, complement dormant duration≥independent bound",
+    "coverageLimitation": "only archived chunk100,100 queried at final; retired1–8 in another archive chunk yield unknown and conservative FAIL; no falsePASS",
+    "citations": {
+      "residency": "204–218",
+      "initialTopology": "230–247",
+      "independentDuration": "262–268",
+      "coverageGate": "290–321",
+      "statistics": "380–421",
+      "selftest": "423–464",
+      "finalGate": "495–513"
+    },
+    "guardedSelftest": {
+      "wrapperPath": "/datos/tmp-atlas-lab/balance/codex9/runner-selftest-v4.json",
+      "wrapperSHA256": "8fa7d2e70b85e45576d68ab946a8ab222f29d34f683e15bded219013be673fc7",
+      "logPath": "/datos/tmp-atlas-lab/balance/codex9/runner-selftest-v4.log",
+      "logSHA256": "aeae7b3cdcef8ac07ed785fe026dc464de1a46818e2b4fd653a63d8c2220e0c5",
+      "status": "PASS",
+      "checks": [
+        "affinity parser rejects malformed/range reversal",
+        "p50/p95 linear interpolation",
+        "paired bootstrap known0.5%PASS/2%FAIL/missing seed rejected",
+        "near-zero estimate with wideCI does not pass",
+        "ABBA/BAAB includes every arm",
+        "synthetic runner lifecycle step/ingest/save and host clock restored",
+        "12 fixture pairs valid/equal; initial ingest sees dormant; attach/export preserve canonical world"
+      ],
+      "fixturePairs": 12,
+      "realStepWorldCalls": 0,
+      "elapsedSeconds": 2.212367104,
+      "resourceSamples": 6,
+      "examinedThreads": 90,
+      "resourceIssues": 0,
+      "launchEnvironment": {
+        "TMPDIR": "/datos/tmp-atlas-lab",
+        "ldPreloadPresent": false,
+        "launcherInitEnabled": false
+      },
+      "sourceHashesVerified": 135,
+      "initialGuard": {
+        "stage": "initial",
+        "nice": 19,
+        "cpus": [
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31
+        ],
+        "runtime": "/datos/tmp-atlas-lab/codex9-runtime/codex9-node",
+        "title": "codex9gate",
+        "TMPDIR": "/datos/tmp-atlas-lab",
+        "sampledAt": "2026-10-01T06:37:00.031Z"
+      },
+      "finalGuard": {
+        "stage": "final-selftest",
+        "nice": 19,
+        "cpus": [
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31
+        ],
+        "runtime": "/datos/tmp-atlas-lab/codex9-runtime/codex9-node",
+        "title": "codex9gate",
+        "TMPDIR": "/datos/tmp-atlas-lab",
+        "sampledAt": "2026-10-01T06:37:02.055Z"
+      },
+      "executedByReviewer": false
+    }
+  },
+  "launcherSmoke": {
+    "path": "/datos/tmp-atlas-lab/balance/codex9/wrapper-settle-smoke-v1.json",
+    "sha256": "2a87320cf61eda744be18a6cd94f1db8fdacb7af70cd06bfabf215dc3d237f7e",
+    "valid": true,
+    "elapsedSeconds": 6.038538106,
+    "resourceSamples": 14,
+    "examinedThreads": 182,
+    "issues": 0,
+    "startup": {
+      "settleMilliseconds": 2000,
+      "priorityOnEntry": 15,
+      "priorityBeforeEstablishment": -4,
+      "establishmentBeforeChild": true
+    },
+    "limits": "0.5-second observed process-tree sampling; a process or drift wholly between samples may escape detection"
+  },
+  "preRealBarrier": "PASS",
+  "finalStaticReviewerResources": {
+    "initial": {
+      "nice": 19,
+      "affinity": "6-31",
+      "TMPDIR": "/datos/tmp-atlas-lab"
+    },
+    "final": {
+      "nice": 19,
+      "affinity": "6-31",
+      "TMPDIR": "/datos/tmp-atlas-lab"
+    },
+    "valid": true
+  },
+  "barrierApprovedUTC": "2026-10-01T06:40:13.868Z",
+  "barrierReviewerResources": {
+    "initial": {
+      "pid": 1696749,
+      "nice": 19,
+      "affinity": "6-31",
+      "TMPDIR": "/datos/tmp-atlas-lab"
+    },
+    "final": {
+      "pid": 1696749,
+      "nice": 19,
+      "affinity": "6-31",
+      "TMPDIR": "/datos/tmp-atlas-lab"
+    },
+    "valid": true
+  },
+  "realGateIndependentReview": {
+    "reviewedUTC": "2026-10-01T07:50:14.739Z",
+    "verification": "PASS_RECALCULATION",
+    "gateA": "NO CUMPLIDA",
+    "reason": "scientific cost threshold not met; no resource drift, timeout, signal or runtime failure",
+    "inputs": {
+      "resultSHA256": "53da8e9ebc137414002fcb3ef7ae1278f4ea9b6a49d2f253c7d0faa6f51bd317",
+      "wrapperSHA256": "bcacff32b46a610ef2b708c86ae331ce57769d4d90b87fd052b0629b74bc99fa",
+      "logSHA256": "81fa26c4859524919642304c2435a06f7f2013f37c3251e2b92f373defe57819",
+      "protocolSHA256": "20a1328c73ae202d951804a6fd5b1b5af5b4883beaff65b076fe0527e9aaf7fa",
+      "runnerSHA256": "4d8b6dfdf3ca640af7c9f922f7458243d9470a6030d1ddaf925789464625e78d"
+    },
+    "counts": {
+      "numericChecks": 10811,
+      "structuralChecks": 18765,
+      "sourceChecks": 135,
+      "measuredWorlds": 96,
+      "measuredSteps": 115200,
+      "warmupWorlds": 2,
+      "warmupSteps": 600,
+      "quartets": 24,
+      "measuredBlocks": 2304,
+      "warmupBlocks": 12,
+      "checkpointRecords": 484,
+      "identityComparisons": 422,
+      "observerArms": 49,
+      "stressedArms": 50,
+      "structureRows": 559,
+      "dailyRows": 559,
+      "observerNDJSONRecords": 5630,
+      "observerNDJSONBytes": 4505134,
+      "internalGuards": 681,
+      "wrapperSamples": 7516,
+      "wrapperThreadChecks": 105210,
+      "wrapperIssues": 0
+    },
+    "cost": {
+      "fresh": {
+        "cpuMs": {
+          "estimate": 0.010485738350988998,
+          "ci95": [
+            -0.0019508887458672597,
+            0.02436459873645902
+          ],
+          "pass": false,
+          "reason": "observed overhead>1%"
+        },
+        "wallMs": {
+          "estimate": -0.0056357323438847445,
+          "ci95": [
+            -0.04989920594868762,
+            0.04819634770794898
+          ],
+          "pass": false,
+          "reason": "1% unresolved by confidence interval"
+        }
+      },
+      "material-stressed": {
+        "cpuMs": {
+          "estimate": -0.006789306009749601,
+          "ci95": [
+            -0.02068122874332694,
+            0.007562237407618904
+          ],
+          "pass": true,
+          "reason": "upper95CI<=1%"
+        },
+        "wallMs": {
+          "estimate": 0.01681770210764254,
+          "ci95": [
+            -0.03285848775004702,
+            0.07770795772921435
+          ],
+          "pass": false,
+          "reason": "observed overhead>1%"
+        }
+      }
+    },
+    "limits": [
+      "No new stepWorld calls or trajectories; analysis only",
+      "Observer file bytes/stream SHA are recorded raw values; temporary files were removed, so original NDJSON bytes/hash cannot be re-read; record counts independently reconstructed",
+      "Resource sampler every0.5s can miss wholly intermediate processes/drift",
+      "Elapsed residency is separate from wear frames; dormant archives are not contemporaneous global inventories",
+      "6seed clusters/2rounds; buffered writes, no fsync; half-day simulations; no biological or future-law acceptance",
+      "Final suite QA is parent-owned and still pending"
+    ],
+    "resources": {
+      "initial": {
+        "pid": 2103313,
+        "nice": 19,
+        "cpus": "6-31",
+        "TMPDIR": "/datos/tmp-atlas-lab"
+      },
+      "final": {
+        "pid": 2103313,
+        "nice": 19,
+        "cpus": "6-31",
+        "TMPDIR": "/datos/tmp-atlas-lab"
+      },
+      "valid": true
+    },
+    "evidencePath": "/datos/tmp-atlas-lab/balance/codex9/codex9-verificacion-gate-final.json",
+    "evidenceSHA256": "ebcf54dd5e662a8da081368f93108b368b8a1a8e2ab99ed7acf148ab50e4fd99",
+    "verifierSourceSHA256": "54a8080879f36cd997cb47c96b6ac40c032c130a543dc01ceaa82e7afb3dfd84",
+    "numericTolerance": "1e-12 * max(1,abs(actual),abs(expected)); gate comparisons themselves use exact upperCI<=0.01",
+    "analyticWrapper": {
+      "path": "/datos/tmp-atlas-lab/balance/codex9/codex9-final-recalc-v1.json",
+      "sha256": "a2493bbb1049440a1fa5af76d789d9aa811ff96ec6099f1e75c263ca4a6ba8e1",
+      "valid": true,
+      "code": 0,
+      "elapsedSeconds": 0.3384232310000002,
+      "resourceSamples": 2,
+      "examinedThreads": 14,
+      "issues": 0,
+      "LD_PRELOAD": false
+    }
+  },
+  "acceptanceFindings": [
+    {
+      "severity": "BLOCKING_ACCEPTANCE",
+      "fact": "Cost<=1% is not established in each family and metric",
+      "evidencePath": "/datos/tmp-atlas-lab/balance/codex9/codex9-verificacion-gate-final.json",
+      "failed": [
+        "fresh CPU",
+        "fresh wall",
+        "material-stressed wall"
+      ],
+      "reproduction": "codex9-verificador-gate-final.mjs: paired seed-round totals + independent10000 hierarchical bootstrap",
+      "correction": "Retain NO CUMPLIDA and fixed panel; no exclusion or expanded sample. Any future optimization/experiment requires its own explicit scope and pre-data protocol.",
+      "interpretation": "Point estimates above1% are not conclusive proof of overhead>1%, because CIs cross the threshold; upper95CI criterion nonetheless fails."
+    }
+  ],
+  "finalQAReview": {
+    "reviewedUTC": "2026-10-01T08:05:48.701Z",
+    "verdict": "PASS_QA_LOG_REVIEW",
+    "scope": "read-only QA records and wrapper; no repeated tests/simulation",
+    "nightPolicy": "Inherited Objective8:00:00<=America/Bogota time<07:00, every observed thread NI19 and nonempty CPU subset0..31. Separate QA launcher only; frozen benchmark6..31 unchanged.",
+    "nightPolicyCodeReferences": "run_qa_night_guarded.mjs:29–43,66–76,82–104",
+    "launcherSHA256": "285a9f7c103765edc85edb2b49ddcedfa78d67fd85dcb81d4771091e86e8f458",
+    "suite": {
+      "tests": 1645,
+      "suites": 0,
+      "pass": 1636,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 9,
+      "todo": 0,
+      "duration_ms": 369724.378847,
+      "wrapperElapsedSeconds": 370.21695493100003,
+      "samples": 741,
+      "threadChecks": 116894,
+      "issues": 0,
+      "valid": true,
+      "logSHA256": "60701187c21ef5c1c6bd1f0d2f4db66b37e036700d4e9933ce1930613c36fc8d",
+      "wrapperSHA256": "8cff114457269d0ed5b0542b1554cb0a1cc9e1c292823658a0683b6350856d01",
+      "skips": [
+        {
+          "number": 56,
+          "description": "assertWorld validates 2000 people with 64 bonds each in under 1s (was O(P^2 * B)) # SKIP medida de tiempo del host: exige CARTA_TEST_ESCALA=1"
+        },
+        {
+          "number": 57,
+          "description": "assertWorld cost grows linearly (not quadratically) with population at a fixed bond count # SKIP medida de tiempo del host: exige CARTA_TEST_ESCALA=1"
+        },
+        {
+          "number": 196,
+          "description": "CUDA 0 agrees with live-state CPU reference over 12 updates # SKIP COMPUTE_NVRTC absent: no GPU parity was checked"
+        },
+        {
+          "number": 197,
+          "description": "CUDA 1 agrees with live-state CPU reference over 12 updates # SKIP COMPUTE_NVRTC absent: no GPU parity was checked"
+        },
+        {
+          "number": 198,
+          "description": "CUDA 0,1 agrees with live-state CPU reference over 12 updates # SKIP COMPUTE_NVRTC absent: no GPU parity was checked"
+        },
+        {
+          "number": 619,
+          "description": "T100: 2 097 152 teselas y 8192 chunks conservan el digesto confirmado al reabrir SQLite # SKIP prueba lenta: exige CARTA_TEST_ESCALA=1"
+        },
+        {
+          "number": 818,
+          "description": "la suma de las 11 fases de stepWorld no difiere de simulationMs en más de un 5 % (acumulado en 400 pasos, para amortiguar el ruido del reloj real) # SKIP medida de tiempo del host: exige CARTA_TEST_ESCALA=1"
+        },
+        {
+          "number": 912,
+          "description": "población alta (230 habitantes, semilla 3 día 12,25): digestoCanonico idéntico a la base tras 600 pasos # SKIP falta la instantánea /datos/tmp-atlas-lab/perfil/psinagua3-d12.sqlite"
+        },
+        {
+          "number": 938,
+          "description": "(11) mundo de ~230 habitantes con archivo de recetas: deshacer a mitad de paso y seguir como su gemelo # SKIP falta la instantánea /datos/tmp-atlas-lab/perfil/psinagua3-d12.sqlite"
+        }
+      ]
+    },
+    "typecheck": {
+      "code": 0,
+      "valid": true,
+      "elapsedSeconds": 1.1155525990000001,
+      "samples": 4,
+      "threadChecks": 176,
+      "issues": 0,
+      "logSHA256": "952d0130b7edf4ed056e0ba0cd962126c2acad44de8ab0c4f30ed3babd21bfe2",
+      "wrapperSHA256": "34ae3420e2e0f98d08c5e974f2fc57dd9ad5f266db5db5af88c0974bc1a7621e"
+    },
+    "sourceChecks": 135,
+    "documentaryDelivery": "COMPLETE_WITH_A_GATE_NO_CUMPLIDA",
+    "gateA": "NO CUMPLIDA",
+    "lawB": "PASS_REQUIREMENTS_ONLY; no implementation, biological acceptance or formal future-law critique",
+    "limits": [
+      "0.5s observed-process sampling can miss wholly intermediate processes/drift; clock guard checks initial/samples/final but per-sample clocks not retained",
+      "9 skips remain explicit omissions:4opt-in scale/time,3CUDA without NVRTC,2missing historicalsnapshot",
+      "Old aborted/failed QA remains preserved; this actual successful run does not relabel it",
+      "QA passing does not override scientific<=1% gate failure"
+    ],
+    "resources": {
+      "initial": {
+        "nice": 19,
+        "cpus": "6-31",
+        "TMPDIR": "/datos/tmp-atlas-lab"
+      },
+      "final": {
+        "nice": 19,
+        "cpus": "6-31",
+        "TMPDIR": "/datos/tmp-atlas-lab"
+      },
+      "valid": true
+    },
+    "evidencePath": "/datos/tmp-atlas-lab/balance/codex9/codex9-verificacion-qa-final.json",
+    "evidenceSHA256": "09739a528b8b908dac7364ed1827bd0951fd80a5342b4c5827e1ebd838b9b6f4"
+  },
+  "documentaryDelivery": "COMPLETE_WITH_A_GATE_NO_CUMPLIDA"
+}

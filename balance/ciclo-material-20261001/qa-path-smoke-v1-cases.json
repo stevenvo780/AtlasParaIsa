@@ -1,0 +1,17 @@
+{
+  "results": [
+    {
+      "case": "normal-path",
+      "pid": 2084645,
+      "code": 0,
+      "signal": null
+    },
+    {
+      "case": "env-i-nested-tmp",
+      "pid": 2084646,
+      "code": 0,
+      "signal": null
+    }
+  ],
+  "valid": true
+}

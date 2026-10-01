@@ -1,0 +1,126 @@
+{
+  "label": "qa-path-deploy-check-v1",
+  "command": [
+    "/datos/tmp-atlas-lab/codex9-runtime/codex9-node",
+    "--import",
+    "tsx",
+    "--test",
+    "--test-timeout=600000",
+    "tests/deploy-check.test.ts"
+  ],
+  "code": 0,
+  "signal": null,
+  "elapsedSeconds": 13.359187917,
+  "startup": {
+    "settleMilliseconds": 2000,
+    "priorityOnEntry": -4,
+    "priorityBeforeEstablishment": -4,
+    "establishmentBeforeChild": true
+  },
+  "launchEnvironment": {
+    "TMPDIR": "/datos/tmp-atlas-lab",
+    "ldPreloadPresent": false,
+    "launcherInitEnabled": false
+  },
+  "resourceSamples": 28,
+  "examinedThreads": 847,
+  "observedPids": [
+    2089642,
+    2089825,
+    2089835,
+    2089904,
+    2089940,
+    2089941,
+    2090124,
+    2090161,
+    2090162,
+    2090265,
+    2090303,
+    2090304,
+    2090322,
+    2090413,
+    2090482,
+    2090518,
+    2090624,
+    2090659,
+    2090695,
+    2090696,
+    2090707,
+    2090868,
+    2090944,
+    2090985,
+    2091021,
+    2091022,
+    2091040,
+    2091047,
+    2091302,
+    2091319,
+    2091378,
+    2091427,
+    2091459,
+    2091485,
+    2091551,
+    2091598,
+    2091618,
+    2091710,
+    2091790,
+    2091803,
+    2091854,
+    2091880
+  ],
+  "resourceIssues": [],
+  "ownFinal": [
+    {
+      "pid": 2089642,
+      "tid": 2089642,
+      "comm": "codex9wrap",
+      "nice": 19,
+      "cpus": "6-31"
+    },
+    {
+      "pid": 2089642,
+      "tid": 2089665,
+      "comm": "DelayedTaskSche",
+      "nice": 19,
+      "cpus": "6-31"
+    },
+    {
+      "pid": 2089642,
+      "tid": 2089666,
+      "comm": "codex9-node",
+      "nice": 19,
+      "cpus": "6-31"
+    },
+    {
+      "pid": 2089642,
+      "tid": 2089667,
+      "comm": "codex9-node",
+      "nice": 19,
+      "cpus": "6-31"
+    },
+    {
+      "pid": 2089642,
+      "tid": 2089668,
+      "comm": "codex9-node",
+      "nice": 19,
+      "cpus": "6-31"
+    },
+    {
+      "pid": 2089642,
+      "tid": 2089669,
+      "comm": "codex9-node",
+      "nice": 19,
+      "cpus": "6-31"
+    },
+    {
+      "pid": 2089642,
+      "tid": 2089670,
+      "comm": "codex9-node",
+      "nice": 19,
+      "cpus": "6-31"
+    }
+  ],
+  "valid": true,
+  "samplingLimit": "0.5-second observed process-tree sampling; a process or drift wholly between samples may escape detection",
+  "log": "/datos/tmp-atlas-lab/balance/codex9/qa-path-deploy-check-v1.log"
+}

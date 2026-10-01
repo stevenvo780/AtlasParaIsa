@@ -1,0 +1,2 @@
+#!/datos/tmp-atlas-lab/balance/codex9/launcher-init-codex9.bash
+exec /datos/tmp-atlas-lab/codex9-runtime/codex9-node "$@"

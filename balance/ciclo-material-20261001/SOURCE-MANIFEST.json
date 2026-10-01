@@ -1,0 +1,274 @@
+{
+  "baseCommit": "bb483260b2489fe62b113d620e5f56e5f3676dbc",
+  "archiveSHA256": "37785411452a3bd8b6d4ea4127527160921c052b2c81ac3b9f047688373571c1",
+  "files": [
+    {
+      "path": "src/server/app.ts",
+      "sha256": "c1a82b9befcb7a9498c02114344d0bc9c12a823f60ce49846083200fec71553b"
+    },
+    {
+      "path": "src/server/auth.ts",
+      "sha256": "e8dc1eabf65ac7a5065d0582671be22813005f83c0cce00886a67c9d952c11d2"
+    },
+    {
+      "path": "src/server/deployment-params.ts",
+      "sha256": "eaccd4d961d037e593dc30ef6bfbbb26f0a6c02360d3dfe6b8ad4a43f8568bb5"
+    },
+    {
+      "path": "src/server/governor.ts",
+      "sha256": "3b55ea8718f0ca15b30af8ab9cfea8672d53a70be783b1714453ac2e1e17e8b4"
+    },
+    {
+      "path": "src/server/hardware-limits.ts",
+      "sha256": "06719a7f055ac5b9a4f19124a347cbffcc7639e2e78e96973d634cb7dd615d01"
+    },
+    {
+      "path": "src/server/lock.ts",
+      "sha256": "6818293ed97e2dc2862e7a06e42f8aa8c017a5f27e6656f338331f83a555f536"
+    },
+    {
+      "path": "src/server/main.ts",
+      "sha256": "cdadd658f88ed07fcaaa3e3347e8593b5ef76cd94a77e9da86f9df7c23d815ee"
+    },
+    {
+      "path": "src/server/persona-extra.ts",
+      "sha256": "1501c86c7498d37b7c4229f9a277a926a4f32c21c5d33c727763cef9b22f8cf3"
+    },
+    {
+      "path": "src/server/regiones-vivas.ts",
+      "sha256": "8616ee76cc8ba7ce289d1b995f4920c052b871e33aaae5fd5da4c1668ea28c0d"
+    },
+    {
+      "path": "src/server/resumen-vivo.ts",
+      "sha256": "3570743e7baf09431c9423b57e4fa48f0ceee0f3aa9ed65ae90b42e6b899f6b5"
+    },
+    {
+      "path": "src/server/snapshot-parts.ts",
+      "sha256": "ec7cd0a53a7415f8c50244f289a84f8ac01fc5b10b86fb0e0cccb69705a7b1d9"
+    },
+    {
+      "path": "src/server/snapshot.ts",
+      "sha256": "b60464f7871c6dcd5366584333a9fd7b523dd479aef7644be0751841b6a7a1c1"
+    },
+    {
+      "path": "src/server/store.ts",
+      "sha256": "a12ab269949b69e81277c61699188b1c09a199351e55e3a3352ef74fc25d4992"
+    },
+    {
+      "path": "src/server/technology-archive.ts",
+      "sha256": "58f13c845853bb999b57135985c137490e5593f65b78cfcd464273f74fae5a00"
+    },
+    {
+      "path": "src/server/world-instance.ts",
+      "sha256": "0bb10082d68e29d900bad745f2e06ed284e79603ca49ab3c93792e27ed603969"
+    },
+    {
+      "path": "src/shared/demography.ts",
+      "sha256": "a9e6d6f273957529e942d5358988171a7ab25327ced8d039706f7dfa5fb9fa6f"
+    },
+    {
+      "path": "src/shared/exact-json.ts",
+      "sha256": "23fe2b1b8f9510f1e2474dc815ef2192fba9e78276690a7f9e5da1ba59a15194"
+    },
+    {
+      "path": "src/shared/life.ts",
+      "sha256": "7c2ee3924ddbae01f55c22ff52ac2bd208e8877284c1ee48782f33239f1070bf"
+    },
+    {
+      "path": "src/shared/organization.ts",
+      "sha256": "30d8869086faf0754002e240b3bef1fcec9600d51ab3b40c6bce7ef977f4a2bd"
+    },
+    {
+      "path": "src/shared/param-syntax.ts",
+      "sha256": "c3c04b84c0f011357785ad8b8162e7a4f6d55865326c92b478504f8f90e19dd7"
+    },
+    {
+      "path": "src/shared/technology-archive.ts",
+      "sha256": "4d9ad0b9f1be01e95fbfb5365b6a1391b3321f39c5bcfce0806d5cb2d0079354"
+    },
+    {
+      "path": "src/shared/technology.ts",
+      "sha256": "2c82e88f4ce4fd4b1660cbc83b898066c726df4c7bd80118b151127c7304239d"
+    },
+    {
+      "path": "src/shared/types.ts",
+      "sha256": "947875af624993ae45adb0915b2ed61b30040ba6791dcecb2dfbbc0f151fb6ec"
+    },
+    {
+      "path": "src/shared/world-instance.ts",
+      "sha256": "09967c006226f2fca8fd04af2ca3c310db67278e95d0cfaccbd193d241605349"
+    },
+    {
+      "path": "src/world/agua.ts",
+      "sha256": "1eba9a19e62c4c1524005cd3ee189eeb5944635d6e012e1d6cae1836ebfaa09e"
+    },
+    {
+      "path": "src/world/animals.ts",
+      "sha256": "01c0671c69c48b7542d707811b0f05ac33d31120d78fce0de595164044e7d91e"
+    },
+    {
+      "path": "src/world/body.ts",
+      "sha256": "00a4509b84fdc68bc4adfcf2bb657e7876acf342f1157c20fc8c08db1c70b3d5"
+    },
+    {
+      "path": "src/world/chronicle-journal.ts",
+      "sha256": "89d2cc7de0c57a5fdbf85f4f1652790eb597ea35a7e9daa7c92de7d91876b74f"
+    },
+    {
+      "path": "src/world/demography.ts",
+      "sha256": "a247f23d133f6dbe0438d1e538810673f62783e2a5c4108b9f764885a1b87862"
+    },
+    {
+      "path": "src/world/digesto.ts",
+      "sha256": "a94e90d74b3942d6ced54256a0bab7f4283d50e3e42492bff9351e5bf6082d74"
+    },
+    {
+      "path": "src/world/diversidad.ts",
+      "sha256": "57b104be0efbd12d188dc352123c2982e83a15d27fa5d9bfcbf965f9cc33e6d3"
+    },
+    {
+      "path": "src/world/ecologia-constantes.ts",
+      "sha256": "0e9ee9722a4f5352b400418524c68d986186c3fac3661c89ce945f7e2dc42488"
+    },
+    {
+      "path": "src/world/ecosystem-kernel.ts",
+      "sha256": "0133978a8aa0f7b58c28d8904835b7adc8b54c3f720534e85fcbee8a330acb96"
+    },
+    {
+      "path": "src/world/ecosystem.ts",
+      "sha256": "02a77d2ace4dd6bdf92c8e16366292fca41354329a7ce6464693f822c62eca26"
+    },
+    {
+      "path": "src/world/family.ts",
+      "sha256": "2fbe6d849541f2d0c3fe1ca804776b4c9fff281f56bcb9cce4b4310a8de184d4"
+    },
+    {
+      "path": "src/world/forest.ts",
+      "sha256": "a6c1141791d955fdf4c71afd51c5ed0435ea4eb463035c76a24c49601f006e26"
+    },
+    {
+      "path": "src/world/genetics.ts",
+      "sha256": "6303faa03b11d4f5d659055947955aa16ff82f75a0e8cff143d6ad336da7e12e"
+    },
+    {
+      "path": "src/world/halo.ts",
+      "sha256": "82e372409b8875386e0da6318eaae74376cf014ed4e36a8f106b225a79e02c73"
+    },
+    {
+      "path": "src/world/index.ts",
+      "sha256": "1696a308a2ccc4c9891eedaf56dfd37fa59a0386a8f77e1b338f8f0e5b158228"
+    },
+    {
+      "path": "src/world/indice-puntos.ts",
+      "sha256": "ebf8dd2a874cb5b7a93842375926f00405f11865434b707b5c61a288c33e7eeb"
+    },
+    {
+      "path": "src/world/indices.ts",
+      "sha256": "2b6a09d066c0f7e597f43db32fd67a3ec3d7787633f5d87844c83ef2bbaf3429"
+    },
+    {
+      "path": "src/world/inventions.ts",
+      "sha256": "3f31c1d927205be16ce9b32d5ca88ee1e052cd62ba65fee6148093d40fd1a135"
+    },
+    {
+      "path": "src/world/lineage.ts",
+      "sha256": "95e31a111c3ccbdc8a63d2ac03ba67e4b084ea0c9688ff07ef49ab01fbfc26e3"
+    },
+    {
+      "path": "src/world/material-affordances.ts",
+      "sha256": "f5b40217c802e96548e5228bedf44be64087aae06340c86007bfc4623bc4cd25"
+    },
+    {
+      "path": "src/world/needs.ts",
+      "sha256": "40990c1ad6e824e247f70e217dad1bda0d986ab3d80d0d4c1c8561844061c292"
+    },
+    {
+      "path": "src/world/orden.ts",
+      "sha256": "ee83209e64d0f5bd851a2dfe150e810957fc89121a28bbfa5ff8621291b2bd2c"
+    },
+    {
+      "path": "src/world/organization.ts",
+      "sha256": "e6e3597bf46474fcfec908f01eb562089f37000b14ebea14b40e4eb91901b7b8"
+    },
+    {
+      "path": "src/world/params.ts",
+      "sha256": "daed80699dd70ccf354cd987e28ef793052020430e028c2c89097e5df905b7ea"
+    },
+    {
+      "path": "src/world/rejilla.ts",
+      "sha256": "27e96ef5f57657c48ca4dc73c3673df75499bac36bb810a575e29f86c522d8c8"
+    },
+    {
+      "path": "src/world/soa/arena.ts",
+      "sha256": "3d06d136d28f10c2b3a0dd46d6dde0b46c17627712c921fce468be243ff4a929"
+    },
+    {
+      "path": "src/world/soa/presencia.ts",
+      "sha256": "58fa5ea67ed6779276e92a99ea5e799df4bab0ff04f98cbaf345d390d17e6e5e"
+    },
+    {
+      "path": "src/world/soa/region.ts",
+      "sha256": "1ee95cb5e850a4c7a26911c7a176e7c5fdb978cc57554e225eab470df66fde65"
+    },
+    {
+      "path": "src/world/soa/terreno.ts",
+      "sha256": "03471fcac952116268e10d3e4a1a80d9161826ed1e1dc6d202649aecb56422f7"
+    },
+    {
+      "path": "src/world/society.ts",
+      "sha256": "95ee18c72414bac95c47a89d18f2f367e646363044dd74b13427cb9c2b4051dc"
+    },
+    {
+      "path": "src/world/spatial.ts",
+      "sha256": "2e13050bcb0ea7483173c9e8ff9b9fcfc33a6689198674dcc03e95d0d51bc534"
+    },
+    {
+      "path": "src/world/statistics.ts",
+      "sha256": "3ee127c2ef4a135eacde1c363935c82147543a055af968bea918ce896d6e9316"
+    },
+    {
+      "path": "src/world/technology-catalogue.ts",
+      "sha256": "f958d719c647564ecef9c113ab96771f2c2c2f788da9a1712036c7bb3bc7c612"
+    },
+    {
+      "path": "src/world/technology-checkpoint.ts",
+      "sha256": "8f8ab24d7d041c9631f767c530ef1b9f901e8b047243426decd514c69c9e1d49"
+    },
+    {
+      "path": "src/world/technology-execution.ts",
+      "sha256": "5d1423ee670dd034c5f50d3bd7b612e39eab40ba7181725aec42ab945c6e41a4"
+    },
+    {
+      "path": "src/world/technology-journal.ts",
+      "sha256": "00c46b83ae601488520e4781033d6f5506a1ee795beb322e1f86d8de12d43137"
+    },
+    {
+      "path": "src/world/technology-memory.ts",
+      "sha256": "624c63b7aa7eb56c1bc260ed5423259f6a70a7a89d59de367cc63fea66841667"
+    },
+    {
+      "path": "src/world/technology-organization.ts",
+      "sha256": "3840fa5602012386dc705e9fc7f46f0c18e3983a731481b05e1ca0bb8fa12dde"
+    },
+    {
+      "path": "src/world/technology-water.ts",
+      "sha256": "5b1e2b9c966fe446dc76d2410b77c7ca29452b2b9aafa690cedde9d559125aff"
+    },
+    {
+      "path": "src/world/technology.ts",
+      "sha256": "41b73921285f62c34e7b7da7f552383a4941661bc03f0c6f10a3e9ce5aa53e43"
+    },
+    {
+      "path": "src/world/terrain.ts",
+      "sha256": "538280dba7df8ee07b6b8ada9d2e8ddd007b82bc8d1bae3196927709d3f14c97"
+    },
+    {
+      "path": "src/world/tile-index.ts",
+      "sha256": "c2d3b75ff316b15c3f4c33da4dd29ed70f81873c933c2aa4b782b245b4bd073a"
+    },
+    {
+      "path": "src/world/validation.ts",
+      "sha256": "d0acb7f6e7b89c8f19f6eb649c290d05cc65dcce147e53b3717f60a1e0649d9b"
+    }
+  ]
+}

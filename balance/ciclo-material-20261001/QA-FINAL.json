@@ -1,0 +1,55 @@
+{
+  "verifiedAt": "2026-10-01T08:02:38.900Z",
+  "branch": "sprint/ciclo-material-20261001",
+  "baselineCommit": "bb483260b2489fe62b113d620e5f56e5f3676dbc",
+  "acceptance": {
+    "identity": "PASS",
+    "coverage": "PASS",
+    "cost": "NO CUMPLIDA",
+    "tests": "PASS",
+    "typecheck": "PASS",
+    "fullSuite": "PASS",
+    "gateA": "NO CUMPLIDA",
+    "designB": "DELIVERED_UNIMPLEMENTED"
+  },
+  "measuredWorlds": 96,
+  "measuredSteps": 115200,
+  "warmupSteps": 600,
+  "suite": {
+    "tests": 1645,
+    "suites": 0,
+    "pass": 1636,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 9,
+    "todo": 0,
+    "duration_ms": 369724.378847
+  },
+  "suiteGuard": {
+    "label": "suite-v4-night",
+    "elapsedSeconds": 370.21695493100003,
+    "resourceSamples": 741,
+    "examinedThreads": 116894,
+    "resourceIssues": 0,
+    "authorizedPolicy": "Objective8: CPU0–31 only00:00≤Bogota time<07:00; every observed thread nice19, nonempty CPU subset0–31; no repair"
+  },
+  "typecheckGuard": {
+    "label": "typecheck-npm-final",
+    "elapsedSeconds": 1.1155525990000001,
+    "resourceSamples": 4,
+    "resourceIssues": 0
+  },
+  "hashes": {
+    "gate-v3-result.json": "53da8e9ebc137414002fcb3ef7ae1278f4ea9b6a49d2f253c7d0faa6f51bd317",
+    "gate-v3-real.json": "bcacff32b46a610ef2b708c86ae331ce57769d4d90b87fd052b0629b74bc99fa",
+    "suite-v4-night.json": "8cff114457269d0ed5b0542b1554cb0a1cc9e1c292823658a0683b6350856d01",
+    "suite-v4-night.log": "60701187c21ef5c1c6bd1f0d2f4db66b37e036700d4e9933ce1930613c36fc8d",
+    "typecheck-npm-final.json": "34ae3420e2e0f98d08c5e974f2fc57dd9ad5f266db5db5af88c0974bc1a7621e",
+    "typecheck-npm-final.log": "952d0130b7edf4ed056e0ba0cd962126c2acad44de8ab0c4f30ed3babd21bfe2",
+    "codex9-verificacion-gate-final.json": "ebcf54dd5e662a8da081368f93108b368b8a1a8e2ab99ed7acf148ab50e4fd99",
+    "run_guarded.mjs": "26ea519ae9e94566da078928004551ffb36bf8d62c906e32c43dfe2295aeb60f",
+    "run_qa_night_guarded.mjs": "285a9f7c103765edc85edb2b49ddcedfa78d67fd85dcb81d4771091e86e8f458"
+  },
+  "resourceLimits": "0.5s observed thread sampling; no continuous proof. QA allowed0–31 only00–07 Bogota; benchmark frozen6–31. No runtime repair.",
+  "nextStep": "candidate retained only on local branch; no integration/publication; future law requires formal adversarial critique before implementation"
+}

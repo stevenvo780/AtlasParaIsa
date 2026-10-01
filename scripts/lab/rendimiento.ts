@@ -59,6 +59,9 @@ export function digestoSin(world: World, sin: readonly string[], versionReferenc
     const [seccion, hoja] = clave.split('.') as [string, string];
     if (!forma[seccion] || !Object.hasOwn(forma[seccion]!, hoja)) throw new Error(`sin: la clave ${clave} no existe en este árbol`);
     delete forma[seccion]![hoja];
+    // Una sección vaciada tampoco existía antes de su primera clave: se quita entera para
+    // reproducir la forma previa (DESG-D declara la sección `material` completa).
+    if (Object.keys(forma[seccion]!).length === 0) delete forma[seccion];
   }
   const version = world.version;
   if (sin.length > 0) setParams(world, forma as unknown as WorldParams);

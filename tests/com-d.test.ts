@@ -63,9 +63,14 @@ const con = (w: World, clave: string) => setParams(w, parseParams(clave));
  */
 function digestoSinDisolucion(world: World): string {
   const vigentes = paramsOf(world);
-  const antes = structuredClone(vigentes) as unknown as { social: Record<string, unknown> };
+  const antes = structuredClone(vigentes) as unknown as { social: Record<string, unknown>; material?: Record<string, unknown> };
   assert.equal(antes.social.disolucion, 0);
   delete antes.social.disolucion;
+  // DESG-D (`sprint/desg-d-20261001`): la sección `material` no existía en la base de referencia;
+  // con su valor 0 no actúa (identidad demostrada en `tests/desg-d.test.ts`), así que se quita entera.
+  assert.deepEqual(antes.material, { desgasteDormido: 0 });
+  delete antes.material;
+
   setParams(world, antes as unknown as WorldParams);
   try { return digestoCanonico(world); } finally { setParams(world, vigentes); }
 }

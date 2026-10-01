@@ -50,7 +50,7 @@ function replica(t: { after(callback: () => void): void }, pasos: number, params
  * el estado físico sea idéntico (T102). Quitarla reproduce el digesto de antes byte a byte. */
 function digestoSinLaClave(world: World): string {
   const vigentes = paramsOf(world);
-  const antes = structuredClone(vigentes) as unknown as { social: Record<string, unknown> };
+  const antes = structuredClone(vigentes) as unknown as { social: Record<string, unknown>; material?: Record<string, unknown> };
   delete antes.social.radioConvivencia;
   // Fusión CONFL (`sprint/noche-lab60c-20260922`): `social.memoriaDisputa` no existía en f2757fa, donde se
   // midieron los hashes; con su valor 0 no actúa, así que también se quita de la forma.
@@ -62,6 +62,11 @@ function digestoSinLaClave(world: World): string {
   // actúa (identidad demostrada en `tests/com-d.test.ts`), así que también se quita de la forma.
   assert.equal(antes.social.disolucion, 0);
   delete antes.social.disolucion;
+  // DESG-D (`sprint/desg-d-20261001`): la sección `material` no existía en la base de referencia;
+  // con su valor 0 no actúa (identidad demostrada en `tests/desg-d.test.ts`), así que se quita entera.
+  assert.deepEqual(antes.material, { desgasteDormido: 0 });
+  delete antes.material;
+
   // Poda ola 1 (2026-09-27): `conducta.vocacion`/`vocacionTope` y
   // `poblacion.natalidadLocal`/`radioProvision` ya no se declaran; la forma las trae quitadas.
   setParams(world, antes as unknown as WorldParams);

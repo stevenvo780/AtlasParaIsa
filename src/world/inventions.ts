@@ -1,4 +1,5 @@
-import type { BlueprintView, StructureComponent, StructureView } from '../shared/life.js';
+import { DESGASTE_Q, type BlueprintView, type StructureComponent, type StructureView } from '../shared/life.js';
+import { desgasteActivo, desgasteQ, durabilidadObra, ponerAlDiaDesgaste } from './desgaste.js';
 import type { ChronicleEvent, Tile } from '../shared/types.js';
 import type { Person, World } from './index.js';
 import { localRandom } from './genetics.js';
@@ -52,7 +53,7 @@ export function blueprintAffordances(components: readonly StructureComponent[]) 
   return { waterCapacity: n.cistern * 0.6, foodCapacity: n.granary * 0.7,
     catchment: n.cistern ? n.roof * 0.012 : 0, irrigation: n.garden * 0.008,
     restQuality: clamp(0.82 + (n.roof - 1) * 0.09 + (n.frame - 1) * 0.03),
-    hearths: n.hearth, durability: 1 + (n.frame - 1) * 0.5 };
+    hearths: n.hearth, durability: durabilidadObra(components) };
 }
 
 function blueprintName(components: readonly StructureComponent[]): string {
@@ -351,6 +352,7 @@ export function completeConstruction(world: World, person: Person, tile: Tile, e
   person.materials.wood -= cost.wood; person.materials.stone -= cost.stone; person.work -= cost.work; world.structureCounter = identity.counter;
   const structure: StructureView = { id: identity.id, x: tile.x, y: tile.y, blueprintId: blueprint.id, name: blueprint.name,
     components: [...blueprint.components], condition: 1, water: 0, food: 0, uses: 0, builtAt: world.tick, builderId: person.id };
+  if (desgasteActivo(world)) structure.anclaDesgaste = { q0: DESGASTE_Q, n0: world.revisionesObra ?? 0, r0: world.revisionesLluvia ?? 0 };
   world.structures.push(structure); tile.terrain = 'shelter'; world.settlementCount++;
   const place = { id: `settlement-${tile.x}-${tile.y}`, name: blueprint.name, x: tile.x, y: tile.y,
     description: `Construido por ${person.name}; componentes ${blueprint.components.join(', ')}.`, gatherings: 0 };
@@ -456,7 +458,17 @@ export function repairOpportunity(world: World, person: Person): StructureView |
 }
 export function repair(world: World, person: Person, structure: StructureView, emit: Emit): boolean {
   if (!world.structures.includes(structure) || structure.condition >= REPAIR_CONDITION_LIMIT || distance(person, structure) > 1.5 || person.materials.wood < 1 || person.work < REPAIR_WORK) return false;
-  person.materials.wood--; person.work -= REPAIR_WORK; structure.condition = clamp(structure.condition + 0.4); world.inventionDynamics.repairs++;
+  person.materials.wood--; person.work -= REPAIR_WORK;
+  if (desgasteActivo(world)) {
+    // DESG-D: asienta q en el tick y renueva el ancla {q0,N,R}; 1,2e9 = 0,4·Q exacto.
+    const N = world.revisionesObra ?? 0, R = world.revisionesLluvia ?? 0;
+    const ancla = structure.anclaDesgaste;
+    const q = ancla ? desgasteQ(ancla.q0, ancla.n0, ancla.r0, N, R, blueprintAffordances(structure.components).durability) : Math.round(structure.condition * DESGASTE_Q);
+    const asentada = Math.min(DESGASTE_Q, q + 1_200_000_000);
+    structure.anclaDesgaste = { q0: asentada, n0: N, r0: R };
+    structure.condition = asentada / DESGASTE_Q;
+  } else structure.condition = clamp(structure.condition + 0.4);
+  world.inventionDynamics.repairs++;
   emit({ kind: 'invention', actors: [person.id], x: structure.x, y: structure.y, source: 'simulation', text: `${person.name} reparó ${structure.name.toLocaleLowerCase('es')}.`,
     cause: `Mantenimiento real: −1 madera y ${REPAIR_WORK} trabajo; condición +0,4 hasta un máximo de 1.` });
   return true;
@@ -465,10 +477,21 @@ export function repair(world: World, person: Person, structure: StructureView, e
 /** Bounded active structures only. Inflow, transfers and irrigation all have explicit debits. */
 export function stepStructures(world: World, _emit: Emit): void {
   if (world.tick % INTERVALO_ECOLOGIA_TICKS !== 0) return;
+  // DESG-D: punto ÚNICO de incremento de N/R (crítica a.2): tras fijar el tiempo de este
+  // tick (`ecology` ya corrió), haya o no obras activas. La retirada/reactivación en un
+  // tick múltiplo de 10 ve los prefijos de las revisiones ya ejecutadas: sin doble cuenta.
+  const desgaste = desgasteActivo(world);
+  if (desgaste) {
+    world.revisionesObra = (world.revisionesObra ?? 0) + 1;
+    if (world.weather === 'rain') world.revisionesLluvia = (world.revisionesLluvia ?? 0) + 1;
+  }
   for (const structure of world.structures) {
+    // Con ley=1 la condición deriva del ancla (aritmética entera exacta, NO incremental en
+    // float como la histórica: declarado en la crítica, los brazos divergen de todos modos).
+    if (desgaste) ponerAlDiaDesgaste(world.revisionesObra ?? 0, world.revisionesLluvia ?? 0, structure);
     const tile = tileAt(world, structure); if (!tile || tile.terrain !== 'shelter') continue;
     const a = blueprintAffordances(structure.components);
-    structure.condition = clamp(structure.condition - (world.weather === 'rain' ? 0.00028 : 0.00018) / a.durability);
+    if (!desgaste) structure.condition = clamp(structure.condition - (world.weather === 'rain' ? 0.00028 : 0.00018) / a.durability);
     if (structure.condition <= BROKEN_CONDITION) continue;
     if (world.weather === 'rain' && a.waterCapacity > 0) {
       const collected = Math.min(a.waterCapacity - structure.water, a.catchment * structure.condition);

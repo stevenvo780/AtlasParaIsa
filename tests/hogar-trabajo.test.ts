@@ -20,7 +20,7 @@ for (const seed of [42, 2001] as const) test(`H-B apagada conserva el mundo de 2
   // La clave nueva sólo se quita de la FORMA hasheada, no del mundo simulado.
   // La poda ola 1 retiró las demás claves posteriores a 2ee2658; H-B y COM-D′ (`social.disolucion`,
   // `sprint/com-d-20260928`) siguen declarándose, ambas en 0 (no actúan).
-  assert.equal(digestoSin(world, ['social.hogarTrabajo', 'social.disolucion']), REFERENCIAS_1200[seed]);
+  assert.equal(digestoSin(world, ['social.hogarTrabajo', 'social.disolucion', 'material.desgasteDormido']), REFERENCIAS_1200[seed]);
 });
 
 function escenaHogar(r: number, abundanteEnCasa = false): World {

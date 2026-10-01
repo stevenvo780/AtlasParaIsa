@@ -126,6 +126,11 @@ export interface WorldParams {
      *   la revisión en que nace (`formedAt === tick`).
      */
     disolucion: number };
+  /** DESG-D (crítica del ciclo material, 2026-10-01): desgaste dormido por exposición.
+   * 0 (default e histórico) = hoy, bit a bit: sin contadores ni anclas. Con 1, cada obra
+   * lleva su ancla {q0,n0,r0} y su condición deriva de los prefijos N/R del mundo. */
+  material: {
+    desgasteDormido: number };
 }
 
 function deepFreeze<T>(value: T): T {
@@ -165,6 +170,7 @@ const RAW_HISTORICAL: WorldParams = {
   conducta: { habituacion: 0, aptitud: 0 },
   social: { maxComunidades: 8, disputaNecesidad: 0.65, disputaEscasez: 1, disputaRadio: 2, disputaDestino: 0.5, disputaEspera: 180,
     ensenanzaRareza: 0, confianzaSalida: 0.35, distanciaAlternativa: 0.2, vinculoConvivencia: 0, radioConvivencia: 0, memoriaDisputa: 0, hogarTrabajo: 0, disolucion: 0 },
+  material: { desgasteDormido: 0 },
 };
 
 /**
@@ -214,7 +220,7 @@ export const DEFAULT_PARAMS: WorldParams = deepFreeze(RAW_DEFAULTS);
  * `agua.memoria` 1, `conducta.aptitud` 0, `social.*`
  * (disputas 0,65/×1/2/0,5/180, rareza 0, confianza
  * 0,35, distancia 0,2, `maxComunidades` 8, `vinculoConvivencia` 0, `radioConvivencia` 0, `hogarTrabajo` 0,
- * `disolucion` 0 (COM-D′, 2026-09-28)).
+ * `disolucion` 0 (COM-D′, 2026-09-28)) y `material.desgasteDormido` 0 (DESG-D, 2026-10-01).
  * La poda de leyes refutadas (ola 1, 2026-09-27) retiró `poblacion.natalidadLocal`,
  * `poblacion.radioProvision`, `conducta.vocacion` y `conducta.vocacionTope`: una instantánea
  * antigua que las nombre con valores inertes se carga soltándolas (`snapshot.ts`); con otros
@@ -339,6 +345,9 @@ export const PARAM_RANGES: Record<string, [number, number]> = {
   // COM-D′: 0 (default) = hoy; 1 activa R0–R4 (sólo con `radioConvivencia > 0`). Entero: es un
   // interruptor, no una magnitud continua.
   'social.disolucion': [0, 1],
+  // DESG-D: 0 (default) = hoy; 1 activa el desgaste por exposición con anclas. Entero: es un
+  // interruptor, no una magnitud continua.
+  'material.desgasteDormido': [0, 1],
 };
 
 type ScalarDescriptor = { kind: 'number'; range: readonly [number, number]; integer?: boolean }
@@ -349,7 +358,7 @@ type ParamValue = number | boolean | string | (number | boolean | string)[];
 /** PARAM_RANGES conserva sus tuplas numéricas; cada hoja declara además su tipo. */
 export const PARAM_DESCRIPTORS: Readonly<Record<string, ParamDescriptor>> = deepFreeze({
   ...Object.fromEntries(Object.entries(PARAM_RANGES).map(([key, range]) => [key,
-    { kind: 'number', range, integer: key === 'motor.hilos' || key === 'social.disputaEspera' || key === 'social.maxComunidades' || key === 'social.disolucion' || key.startsWith('limites.') }])),
+    { kind: 'number', range, integer: key === 'motor.hilos' || key === 'social.disputaEspera' || key === 'social.maxComunidades' || key === 'social.disolucion' || key === 'material.desgasteDormido' || key.startsWith('limites.') }])),
   'poblacion.exigeComunidad': { kind: 'boolean' },
   'poblacion.comprobacionContinua': { kind: 'boolean' },
   'motor.clonPorPaso': { kind: 'boolean' },

@@ -3,6 +3,7 @@ import { CHUNK_SIZE, MAX_COORDINATE, chunkCoords, chunkKey, generateChunk, gener
 import type { World } from './index.js';
 import { initializeEcosystem } from './ecosystem.js';
 import { paramsOf } from './params.js';
+import { condicionProyectada, desgasteActivo, ponerAlDiaDesgaste } from './desgaste.js';
 import { materializeAnimals } from './animals.js';
 import type { AnimalView, StructureView } from '../shared/life.js';
 import { projectAnimal } from './animals.js';
@@ -130,6 +131,10 @@ function activateChunk(world: World, key: string, x: number, y: number, context:
   // Clone only the chunk being reactivated, before exposing animals/places/structures to laws.
   const archived = pending >= 0 ? takePending(world.retiredChunks, pending) : context.loadChunk?.(key, world.tick);
   const chunk = archived ? structuredClone(archived) : generateChunk(world.seed, cx, cy, cuencas);
+  // DESG-D (crítica a.3): puesta al día sobre la COPIA clonada, nunca sobre el objeto
+  // archivado compartido. Proyecta con los prefijos vigentes (revisiones ya ejecutadas;
+  // la de este tick, si la hay, la aplica después el bucle normal desde la misma ancla).
+  if (archived && desgasteActivo(world)) for (const structure of chunk.structures ?? []) ponerAlDiaDesgaste(world.revisionesObra ?? 0, world.revisionesLluvia ?? 0, structure);
   const { tiles, animals, structures, ...meta } = chunk;
   world.chunks[key] = meta;
   const state = regions.get(world.chunks);
@@ -139,7 +144,7 @@ function activateChunk(world: World, key: string, x: number, y: number, context:
   world.tiles.push(...initialized);
   tileIndexAppended(world.tiles, from);
   world.animals.push(...(animals ?? materializeAnimals(world.seed, initialized, world.tick)));
-  world.structures.push(...(structures ?? legacyStructures(tiles, world.tick)));
+  world.structures.push(...(structures ?? legacyStructures(tiles, world.tick, desgasteActivo(world) ? { n0: world.revisionesObra ?? 0, r0: world.revisionesLluvia ?? 0 } : undefined)));
   for (const place of meta.places) if (!world.places.some(p => p.id === place.id)) world.places.push(place);
 }
 /** Only agent neighborhoods advance ecology. Camera queries never call this function. */
@@ -239,8 +244,11 @@ export function projectTerrain(world: World, viewport?: Viewport, context: World
     tiles.push(initializeEcosystem(world.seed, chunk.tiles[index] ?? generateTile(world.seed, x, y, cuencas), cuencas));
   }
   const visible = (p: {x: number; y: number}) => p.x >= v.x && p.y >= v.y && p.x < v.x + v.width && p.y < v.y + v.height;
+  // DESG-D (crítica a.4): las cámaras muestran la proyección pura f(ancla,N) sin escribirla.
+  const desgaste = desgasteActivo(world);
+  const condicionVista = (s: StructureView): number => desgaste ? (condicionProyectada(s.components, s.anclaDesgaste, world.revisionesObra ?? 0, world.revisionesLluvia ?? 0) ?? s.condition) : s.condition;
   return { viewport: v, tiles, places: [...places.values()].filter(visible).map(p => ({ ...p })),
     animals: [...world.animals, ...[...archive.values()].flatMap(c => c.animals ?? [])].filter(visible).map(a => projectAnimal(a, world.tick)),
-    structures: [...world.structures, ...[...archive.values()].flatMap(c => c.structures ?? legacyStructures(c.tiles, c.lastTick))].filter(visible).map(s => ({id:s.id,x:s.x,y:s.y,blueprintId:s.blueprintId,name:s.name,components:[...s.components],condition:s.condition,water:s.water,food:s.food,uses:s.uses,builtAt:s.builtAt,builderId:s.builderId})),
+    structures: [...world.structures, ...[...archive.values()].flatMap(c => c.structures ?? legacyStructures(c.tiles, c.lastTick))].filter(visible).map(s => ({id:s.id,x:s.x,y:s.y,blueprintId:s.blueprintId,name:s.name,components:[...s.components],condition:condicionVista(s),water:s.water,food:s.food,uses:s.uses,builtAt:s.builtAt,builderId:s.builderId})),
   };
 }

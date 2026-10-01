@@ -4,7 +4,9 @@ import type { Chunk } from './terrain.js';
 import { assertAnimals } from './animals.js';
 import type { BlueprintView, StructureView } from '../shared/life.js';
 import { validBlueprint, blueprintCost, blueprintAffordances, blueprintSignature } from './inventions.js';
-import { LEGACY_WORLD_LIMITS, limitsOf } from './params.js';
+import { LEGACY_WORLD_LIMITS, limitsOf, paramsOf } from './params.js';
+import { desgasteQ } from './desgaste.js';
+import { DESGASTE_Q } from '../shared/life.js';
 export function assertEcosystemTile(tile: Tile, required = true): void {
   const fail = (): never => { throw new Error('Elemento del ecosistema inválido.'); };
   if ((required || tile.feature !== undefined) && !['tree','pine','palm','cactus','reeds','berries','flowers','rock','clay','stump','spring','pool','none'].includes(String(tile.feature))) fail();
@@ -41,6 +43,35 @@ export function assertStructures(value: unknown,tick: number,tiles: Tile[],maxTi
     if(!positions.has(position)||positions.get(position)!.terrain!=='shelter'||occupied.has(position))fail();
     ids.add(s.id);occupied.add(position);
   }
+}
+/** DESG-D: N/R y anclas. Con ley=0 prohíbe los tres (fuente única); con ley=1 exige
+ * prefijos sanos, anclas anteriores al horizonte (un ancla posterior a un respaldo
+ * anterior es corrupción, nunca recorte silencioso) y caché fresca en residentes. */
+export function assertDesgasteDormido(world: World): void {
+  const ley = paramsOf(world).material?.desgasteDormido ?? 0;
+  if (ley !== 0 && ley !== 1) fail();
+  const archivadas = world.retiredChunks.flatMap(chunk => chunk.structures ?? []);
+  if (ley === 0) {
+    if (Object.hasOwn(world, 'revisionesObra') || Object.hasOwn(world, 'revisionesLluvia')) fail();
+    for (const s of [...world.structures, ...archivadas]) if (Object.hasOwn(s, 'anclaDesgaste')) fail();
+    return;
+  }
+  const N = world.revisionesObra, R = world.revisionesLluvia;
+  if (!integer(N) || !integer(R) || (R as number) > (N as number)) fail();
+  const revisa = (s: StructureView, fresca: boolean): void => {
+    const a = (s as { anclaDesgaste?: unknown }).anclaDesgaste;
+    if (!object(a) || Object.keys(a).length !== 3) fail();
+    const { q0, n0, r0 } = a as Record<string, unknown>;
+    if (!integer(q0, DESGASTE_Q) || !integer(n0) || !integer(r0) || (r0 as number) > (n0 as number)
+      || (n0 as number) > (N as number) || (r0 as number) > (R as number)
+      || ((R as number) - (r0 as number)) > ((N as number) - (n0 as number))) fail();
+    if (fresca) {
+      const q = desgasteQ(q0 as number, n0 as number, r0 as number, N as number, R as number, blueprintAffordances(s.components).durability);
+      if (s.condition !== q / DESGASTE_Q) fail();
+    }
+  };
+  for (const s of world.structures) revisa(s, true);
+  for (const s of archivadas) revisa(s, false);
 }
 export function assertChunkLife(chunk: Chunk,tick: number): void {
   if(chunk.lifeVersion!==undefined&&chunk.lifeVersion!==4)fail();

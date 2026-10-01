@@ -42,7 +42,7 @@ function replica(t: { after(callback: () => void): void }, seed: number, pasos: 
  * midieron los hashes, y con su valor 0 no actúa. */
 function digestoSinMemoria(world: World, conMemoria = false): string {
   const vigentes = paramsOf(world);
-  const antes = structuredClone(vigentes) as unknown as { agua: Record<string, unknown>; social: Record<string, unknown> };
+  const antes = structuredClone(vigentes) as unknown as { agua: Record<string, unknown>; social: Record<string, unknown>; material?: Record<string, unknown> };
   assert.equal(antes.social.memoriaDisputa, 0);
   assert.equal(antes.social.hogarTrabajo, 0);
   // COM-D′ (`sprint/com-d-20260928`): `social.disolucion` no existía en f2757fa; con su valor 0 no
@@ -52,6 +52,11 @@ function digestoSinMemoria(world: World, conMemoria = false): string {
   delete antes.social.memoriaDisputa;
   delete antes.social.hogarTrabajo;
   delete antes.social.disolucion;
+  // DESG-D (`sprint/desg-d-20261001`): la sección `material` no existía en la base de referencia;
+  // con su valor 0 no actúa (identidad demostrada en `tests/desg-d.test.ts`), así que se quita entera.
+  assert.deepEqual(antes.material, { desgasteDormido: 0 });
+  delete antes.material;
+
   // Poda ola 1 (2026-09-27): `conducta.vocacion`/`vocacionTope` y
   // `poblacion.natalidadLocal`/`radioProvision` ya no se declaran; la forma las trae quitadas.
   setParams(world, antes as unknown as WorldParams);

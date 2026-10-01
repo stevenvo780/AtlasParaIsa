@@ -8,11 +8,12 @@ import { assertGenome, DEFAULT_MUTATION_RATE, expressGenome, founderGenome, inhe
 import { bond, convivir, cooperate, cooperationOpportunity, initialCulture, resourceDispute, updateCommunities, settlementOpportunity, type Culture } from './society.js';
 import { count, emptyTotals, heredarEstadisticas, recordSample, worldStatistics } from './statistics.js';
 import { initializeEcosystem, stepEcosystem, harvestMaterial, cultivateTile, trampleTile, FOOD_PER_ANIMAL } from './ecosystem.js';
-import { assertEcosystemTile, assertLifeState, assertDormantTerrain } from './validation.js';
+import { assertEcosystemTile, assertLifeState, assertDormantTerrain, assertDesgasteDormido } from './validation.js';
 import { materializeAnimals, stepAnimals, harvestAt, type Animal } from './animals.js';
 import { advanceNeeds } from './needs.js';
 import { assimilateFood, exertBody, hydrateBody, restBody } from './body.js';
 import { CRECIMIENTO_COMIDA, HAMBRE_POR_PASO, HAMBRE_POR_UNIDAD, INTERVALO_ECOLOGIA_TICKS, INTERVALO_TIEMPO_TICKS, LUZ_CREPSCULO, PROB_LLUVIA, SED_POR_PASO, SED_POR_UNIDAD } from './ecologia-constantes.js';
+import { desgasteActivo } from './desgaste.js';
 import { defaultBlueprint, constructionCost, constructionOpportunity, inventionOpportunity, invent, completeConstruction, stepStructures, repairOpportunity, repair, facilityRestQuality, recordFacilityRest, foodAvailable, takeFood, waterAvailable, takeWater, REST_FATIGUE_RATE, REST_ENERGY_RATE, BROKEN_CONDITION } from './inventions.js';
 import type { AnimalDynamics, BlueprintView, StructureView, InventionDynamics } from '../shared/life.js';
 import { POPULATION_HARD_LIMIT } from '../shared/life.js';
@@ -96,6 +97,8 @@ export interface World {
   blueprints: BlueprintView[]; structures: StructureView[]; blueprintCounter: number; structureCounter: number; inventionDynamics: InventionDynamics;
   technology: TechnologyState; legacy: LegacyRecord[]; retiredLegacy: LegacyRecord[];
   demographyDynamics: { deaths: number; causes: Record<LegacyRecord['cause'], number>; foodLost: number; woodLost: number; stoneLost: number };
+  /** DESG-D: revisiones de obra (N) y revisiones lluviosas (R) ejecutadas. Solo existen con ley=1. */
+  revisionesObra?: number; revisionesLluvia?: number;
 }
 
 function random(world: Pick<World, 'rng'>): number {
@@ -176,6 +179,8 @@ export function createWorld(seed = 20260905, params?: WorldParams): World {
   // momento. Fijarlo al final (como antes) dejaba la región de partida siempre con el default
   // global sin importar el `params` recibido aquí.
   setParams(world, params ?? DEFAULT_PARAMS);
+  // DESG-D: con ley=1 los prefijos nacen en 0 antes de materializar nada; con 0 no se crean.
+  if (desgasteActivo(world)) { world.revisionesObra = 0; world.revisionesLluvia = 0; }
   for (let cy = 0; cy < 2; cy++) for (let cx = 0; cx < 3; cx++) activate(world, cx * 16, cy * 16);
   for (const place of world.places.slice(0, 3)) {
     const tile = tileAt(world, place)!; tile.terrain = 'shelter';
@@ -218,7 +223,7 @@ export function createWorld(seed = 20260905, params?: WorldParams): World {
     }
   }
   world.technology.checkpoint = captureTechnologyCheckpoint(world.technology, world.people, world.tick, 'initial');
-  world.structures.push(...legacyStructures(world.tiles, world.tick));
+  world.structures.push(...legacyStructures(world.tiles, world.tick, desgasteActivo(world) ? { n0: world.revisionesObra ?? 0, r0: world.revisionesLluvia ?? 0 } : undefined));
   addEvent(world, { kind: 'memory', actors: [], source: 'sample', text: 'Este mundo comienza con S, I y una vecindad ficticia. Los cinco recuerdos son ejemplos, pendientes de la historia de Steven e Isa.', cause: 'Contenido sintético identificado; no se importaron conversaciones ni biografía.' });
   return world;
 }
@@ -1695,7 +1700,7 @@ export function assertWorld(value: unknown, expectedVersion = RULES_VERSION, con
     }
     for (const sample of w.history) if (!numericMap(sample, 0, 1e12, 10) || !['tick','population','energy','hunger','fatigue','thirst','discoveries','settlements','cooperation','births'].every(key => typeof sample[key as keyof WorldSample] === 'number') || !Number.isSafeInteger(sample.tick) || sample.tick > w.tick || !Number.isInteger(sample.population) || sample.population < (expectedVersion>=5?2:16) || sample.population > populationCap || [sample.energy,sample.hunger,sample.fatigue,sample.thirst].some(n => n > 1)) fail();
   }
-  if(expectedVersion>=4) assertLifeState(w);
+  if(expectedVersion>=4) { assertLifeState(w); assertDesgasteDormido(w); }
   if(expectedVersion>=5) {
     if (expectedVersion === 5 && (Object.hasOwn(w.technology, 'water')
       || w.people.some(p => Object.hasOwn(p.technology, 'waterActionAt') || Object.hasOwn(p.technology, 'waterCarryAt') || Object.hasOwn(p.technology, 'waterPreparation') || p.technology.items.some(item => Object.hasOwn(item, 'contents')))

@@ -13,9 +13,13 @@ export interface BlueprintView {
   inventorId: string | null; tick: number; uses: number; usefulness: number;
   cost: { wood: number; stone: number; work: number };
 }
+export const DESGASTE_Q = 3_000_000_000;
+/** DESG-D (2026-10-01): ancla de desgaste material. Solo existe con `material.desgasteDormido=1`. */
+export interface AnclaDesgaste { q0: number; n0: number; r0: number }
 export interface StructureView {
   id: string; x: number; y: number; blueprintId: string; name: string; components: StructureComponent[];
   condition: number; water: number; food: number; uses: number; builtAt: number; builderId: string | null;
+  anclaDesgaste?: AnclaDesgaste;
 }
 export interface InventionDynamics { attempts: number; accepted: number; repairs: number; waterCollected: number; foodStored: number; foodTaken: number; }
 

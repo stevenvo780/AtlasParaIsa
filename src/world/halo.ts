@@ -586,6 +586,7 @@ export const FUERA_DEL_PASO: readonly Declaracion[] = [
   { fichero: 'statistics.ts', funcion: 'computeWorldStatistics', motivo: 'Proyección: sólo la llama `worldStatistics`, desde `projectWorld`.' },
   { fichero: 'lineage.ts', funcion: 'assertPopulation', motivo: 'Validación.' },
   { fichero: 'validation.ts', funcion: 'assertLifeState', motivo: 'Validación.' },
+  { fichero: 'validation.ts', funcion: 'assertDesgasteDormido', motivo: 'Validación.' },
   { fichero: 'technology.ts', funcion: 'assertTechnology', motivo: 'Validación.' },
   { fichero: 'technology-water.ts', funcion: 'assertTechnologyWater', motivo: 'Validación.' },
   { fichero: 'technology.ts', funcion: 'isHostMember', motivo: 'Segunda declaración del mismo nombre (ver PRIMITIVAS): sin lectura propia del mundo (parámetro genérico `people`, no `world.people`).' },

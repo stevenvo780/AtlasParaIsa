@@ -1,0 +1,54 @@
+{
+  "onlyCRLFtoLF": true,
+  "numericRowsUnchanged": true,
+  "files": [
+    {
+      "path": "/datos/tmp-atlas-lab/balance/codex8-datos-final/v12-estructuras-0.167-118.042.csv",
+      "rows": 0,
+      "beforeSha": "b07665d138dbf93f742cf57a9d21cdceff8113310e10e81271fd0d1f0d9ac652",
+      "afterSha": "984a644ec3b56d32b0404777e1eb73390c4b0742a6a0e183f07861056b6746de"
+    },
+    {
+      "path": "/datos/tmp-atlas-lab/balance/codex8-datos-final/v12-estructuras-118.042-227.250.csv",
+      "rows": 869,
+      "beforeSha": "a3d1d90912c35f4652b339869e40232d320e6265278d8ec2518710b83eddf3ea",
+      "afterSha": "28322fc472c705fc25b49b7b764488cfcf780f172921ed52f4a50ea6e01ca0d4"
+    },
+    {
+      "path": "/datos/tmp-atlas-lab/balance/codex8-datos-final/v13-estructuras-68.042-126.750.csv",
+      "rows": 648,
+      "beforeSha": "bcadaed80068b236e86212222f4b94ee1c60e730a352ba3c97db7acc8e54d6ab",
+      "afterSha": "b3413c8c50bf706ad294111a835bd07d5c36c302f09794f6ae6a5aef1e144a5d"
+    },
+    {
+      "path": "/datos/tmp-atlas-lab/balance/codex8-datos-final/v13-estructuras-8.083-68.042.csv",
+      "rows": 73,
+      "beforeSha": "b4b05c6faf4d39552e1e2495dcd5faadd40a918f24d6c5f8b818cd7f444c874f",
+      "afterSha": "cb0c30f645a7f5274ae4ff1fb0a7914a9b9abecafc6f2d55659acc056b1398cd"
+    },
+    {
+      "path": "/datos/workspaces/personal/AtlasParaIsa-anexo/worktrees/auditoria-realismo/balance/codex8-datos-final/v12-estructuras-0.167-118.042.csv",
+      "rows": 0,
+      "beforeSha": "b07665d138dbf93f742cf57a9d21cdceff8113310e10e81271fd0d1f0d9ac652",
+      "afterSha": "984a644ec3b56d32b0404777e1eb73390c4b0742a6a0e183f07861056b6746de"
+    },
+    {
+      "path": "/datos/workspaces/personal/AtlasParaIsa-anexo/worktrees/auditoria-realismo/balance/codex8-datos-final/v12-estructuras-118.042-227.250.csv",
+      "rows": 869,
+      "beforeSha": "a3d1d90912c35f4652b339869e40232d320e6265278d8ec2518710b83eddf3ea",
+      "afterSha": "28322fc472c705fc25b49b7b764488cfcf780f172921ed52f4a50ea6e01ca0d4"
+    },
+    {
+      "path": "/datos/workspaces/personal/AtlasParaIsa-anexo/worktrees/auditoria-realismo/balance/codex8-datos-final/v13-estructuras-68.042-126.750.csv",
+      "rows": 648,
+      "beforeSha": "bcadaed80068b236e86212222f4b94ee1c60e730a352ba3c97db7acc8e54d6ab",
+      "afterSha": "b3413c8c50bf706ad294111a835bd07d5c36c302f09794f6ae6a5aef1e144a5d"
+    },
+    {
+      "path": "/datos/workspaces/personal/AtlasParaIsa-anexo/worktrees/auditoria-realismo/balance/codex8-datos-final/v13-estructuras-8.083-68.042.csv",
+      "rows": 73,
+      "beforeSha": "b4b05c6faf4d39552e1e2495dcd5faadd40a918f24d6c5f8b818cd7f444c874f",
+      "afterSha": "cb0c30f645a7f5274ae4ff1fb0a7914a9b9abecafc6f2d55659acc056b1398cd"
+    }
+  ]
+}

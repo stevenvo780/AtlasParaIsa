@@ -1,0 +1,439 @@
+{
+  "cut": "2026-09-30T22:51:08.662694-05:00",
+  "instrumentSha256": "cd3d9fe6b36e6b69bc6e327577867939355d564618033e2c3aa9ae7f9a8cdfa0",
+  "synthetic": [
+    {
+      "case": "active overrides stale archived body",
+      "independent": "PASS",
+      "audited": "PASS"
+    },
+    {
+      "case": "latest per key at or before horizon",
+      "independent": "PASS",
+      "audited": "PASS"
+    },
+    {
+      "case": "legacy excluded from constructed counter",
+      "independent": "PASS",
+      "audited": "PASS"
+    },
+    {
+      "case": "resident duplicate rejected",
+      "independent": "PASS",
+      "audited": "PASS"
+    },
+    {
+      "case": "archived structure duplicate rejected",
+      "independent": "PASS",
+      "audited": "PASS"
+    },
+    {
+      "case": "resident place duplicate rejected",
+      "independent": "PASS",
+      "audited": "PASS"
+    },
+    {
+      "case": "duplicate inside archived places rejected",
+      "independent": "PASS",
+      "audited": "GAP"
+    },
+    {
+      "case": "one dormant resident anchor may overlay archive",
+      "independent": "PASS",
+      "audited": "PASS"
+    },
+    {
+      "case": "negative coordinate uses floor division",
+      "independent": "PASS",
+      "audited": "PASS"
+    },
+    {
+      "case": "constructed serial completeness",
+      "independent": "PASS",
+      "audited": "PASS"
+    },
+    {
+      "case": "bad archive digest rejected",
+      "independent": "PASS",
+      "audited": "PASS"
+    },
+    {
+      "case": "recipe definitions and statistics bounded by horizon",
+      "independent": "PASS"
+    },
+    {
+      "case": "missing cumulative recipe stats rejected",
+      "independent": "PASS"
+    },
+    {
+      "case": "delta four over two days is interval average, not daily history",
+      "independent": "PASS"
+    },
+    {
+      "case": "equal endpoints permit unobserved consume-and-refill",
+      "independent": "PASS"
+    },
+    {
+      "case": "S and I protected, neighbor mortal",
+      "independent": "PASS"
+    },
+    {
+      "case": "duplicate JSON key rejected",
+      "independent": "PASS"
+    },
+    {
+      "case": "live path refused before opening",
+      "independent": "PASS"
+    }
+  ],
+  "real": {
+    "status": "PASS",
+    "snapshots": [
+      {
+        "version": "v13",
+        "backup": "v13-world-20260930-0800.sqlite",
+        "tick": 19400,
+        "constructed": 73,
+        "places": 114,
+        "recipesChecked": false
+      },
+      {
+        "version": "v13",
+        "backup": "v13-world-20260930-1500.sqlite",
+        "tick": 163300,
+        "constructed": 648,
+        "places": 792,
+        "recipesChecked": false
+      },
+      {
+        "version": "v13",
+        "backup": "v13-world-20260930-2200.sqlite",
+        "tick": 304200,
+        "constructed": 855,
+        "places": 1059,
+        "recipesChecked": true
+      },
+      {
+        "version": "v12",
+        "backup": "v12-world-20260928-2100.sqlite",
+        "tick": 400,
+        "constructed": 0,
+        "places": 4,
+        "recipesChecked": false
+      },
+      {
+        "version": "v12",
+        "backup": "v12-world-20260929-1500.sqlite",
+        "tick": 283300,
+        "constructed": 869,
+        "places": 1040,
+        "recipesChecked": false
+      },
+      {
+        "version": "v12",
+        "backup": "v12-world-20260930-0725.sqlite",
+        "tick": 545400,
+        "constructed": 1015,
+        "places": 1361,
+        "recipesChecked": true
+      }
+    ],
+    "detailRecipesSnapshots": 2,
+    "intervals": 4,
+    "scalarComparisons": 133166,
+    "mismatches": [],
+    "copyHashes": [
+      {
+        "backup": "v13-world-20260930-0800.sqlite",
+        "sqliteShaBefore": "5ccf14a6e5c963abee04daaa90181d5d718f11c2732c8314ede7b84f131ca868",
+        "sqliteShaAfter": "5ccf14a6e5c963abee04daaa90181d5d718f11c2732c8314ede7b84f131ca868",
+        "gzipSha": "7d38795a3a6caefe1d5bcef89b4639ccdd773c7eff080657375fb3f64f89b214",
+        "gzipMatchesManifest": true,
+        "decompressedMatchesSqlite": true
+      },
+      {
+        "backup": "v13-world-20260930-1500.sqlite",
+        "sqliteShaBefore": "8df7cd969cccc89b09d57eb73e8b5026c72b3c8a7deb2c609fd3cdadb996a097",
+        "sqliteShaAfter": "8df7cd969cccc89b09d57eb73e8b5026c72b3c8a7deb2c609fd3cdadb996a097",
+        "gzipSha": "41e8eff6524250defd998789677fd3a556889acff8aa9624e3bac8f0f9cae043",
+        "gzipMatchesManifest": true,
+        "decompressedMatchesSqlite": true
+      },
+      {
+        "backup": "v13-world-20260930-2200.sqlite",
+        "sqliteShaBefore": "0e24afe1d9d7e4b53be89ec57ebf09eec55e3f94109ace39781c21cdc8354c74",
+        "sqliteShaAfter": "0e24afe1d9d7e4b53be89ec57ebf09eec55e3f94109ace39781c21cdc8354c74",
+        "gzipSha": "775e4377769ebe04f2d0d3262d73eba930f37306f8192783babadbe12ceba2a4",
+        "gzipMatchesManifest": true,
+        "decompressedMatchesSqlite": true
+      },
+      {
+        "backup": "v12-world-20260928-2100.sqlite",
+        "sqliteShaBefore": "6722ef9377cd69885402ee7d145116b079014e39baf4be4cf8b8f8f06358599c",
+        "sqliteShaAfter": "6722ef9377cd69885402ee7d145116b079014e39baf4be4cf8b8f8f06358599c",
+        "gzipSha": "94a786529174b54c0514e90e12bf1d053bc804b6703b3bc0d1fbe3ec76077aaf",
+        "gzipMatchesManifest": true,
+        "decompressedMatchesSqlite": true
+      },
+      {
+        "backup": "v12-world-20260929-1500.sqlite",
+        "sqliteShaBefore": "5874f6492f9a1a677394fb040ae507303d171e127e515f29e1cbc90e548882f8",
+        "sqliteShaAfter": "5874f6492f9a1a677394fb040ae507303d171e127e515f29e1cbc90e548882f8",
+        "gzipSha": "cc3eb20d11ce0158915bbba25a991a8aa516f6c73e51a59b6071e6e0e11b628f",
+        "gzipMatchesManifest": true,
+        "decompressedMatchesSqlite": true
+      },
+      {
+        "backup": "v12-world-20260930-0725.sqlite",
+        "sqliteShaBefore": "d67606b19ca5d6144df91d856b44a58c15afbb4d3150a82ef2c8306298b1496c",
+        "sqliteShaAfter": "d67606b19ca5d6144df91d856b44a58c15afbb4d3150a82ef2c8306298b1496c",
+        "gzipSha": "44cd8ba6726ad8b8b30a0be8922c6f2a2b653ea2156f0db74a2313aa0f445fb1",
+        "gzipMatchesManifest": true,
+        "decompressedMatchesSqlite": true
+      }
+    ],
+    "resultsSha256": "92f3d965a2e430f9b60715ae1eaa6ed384e134ef8d631e0831222e6412a02dac",
+    "manifestSha256": "7f6eed3827232eeda0712d192269c6830f371b4e36db8fcfce2d6c2113fa0893"
+  },
+  "resources": {
+    "initial": {
+      "nice": 19,
+      "affinity": [
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31
+      ]
+    },
+    "final": {
+      "nice": 19,
+      "affinity": [
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31
+      ]
+    }
+  },
+  "instrumentStableDuringReview": false,
+  "limits": [
+    "Copies only; no source gzip or live world opened.",
+    "Integer quantities exact; floating comparisons rel=1e-10 abs=1e-7; independent math.fsum.",
+    "Active/archive observations have different clocks; sums are mixed-time states.",
+    "Three snapshots per version cannot reconstruct daily use or assert never consumed.",
+    "Real verifier rechecks summaries and row identities, not complete Store/law validation or replay.",
+    "Receipt count and used-as-input fields are restricted to retained history."
+  ],
+  "finalInstrumentReview": {
+    "instrumentSha256": "c83a2c34d8562a3e747de37ba041fee12fa3c06ab5e7ca4838d8ffa715ceeb2e",
+    "sourceStable": true,
+    "synthetic": [
+      {
+        "case": "active overrides stale archived body",
+        "independent": "PASS",
+        "audited": "PASS"
+      },
+      {
+        "case": "latest per key at or before horizon",
+        "independent": "PASS",
+        "audited": "PASS"
+      },
+      {
+        "case": "legacy excluded from constructed counter",
+        "independent": "PASS",
+        "audited": "PASS"
+      },
+      {
+        "case": "resident duplicate rejected",
+        "independent": "PASS",
+        "audited": "PASS"
+      },
+      {
+        "case": "archived structure duplicate rejected",
+        "independent": "PASS",
+        "audited": "PASS"
+      },
+      {
+        "case": "resident place duplicate rejected",
+        "independent": "PASS",
+        "audited": "PASS"
+      },
+      {
+        "case": "duplicate inside archived places rejected",
+        "independent": "PASS",
+        "audited": "PASS"
+      },
+      {
+        "case": "one dormant resident anchor may overlay archive",
+        "independent": "PASS",
+        "audited": "PASS"
+      },
+      {
+        "case": "negative coordinate uses floor division",
+        "independent": "PASS",
+        "audited": "PASS"
+      },
+      {
+        "case": "constructed serial completeness",
+        "independent": "PASS",
+        "audited": "PASS"
+      },
+      {
+        "case": "bad archive digest rejected",
+        "independent": "PASS",
+        "audited": "PASS"
+      },
+      {
+        "case": "recipe definitions and statistics bounded by horizon",
+        "independent": "PASS"
+      },
+      {
+        "case": "missing cumulative recipe stats rejected",
+        "independent": "PASS"
+      },
+      {
+        "case": "delta four over two days is interval average, not daily history",
+        "independent": "PASS"
+      },
+      {
+        "case": "equal endpoints permit unobserved consume-and-refill",
+        "independent": "PASS"
+      },
+      {
+        "case": "S and I protected, neighbor mortal",
+        "independent": "PASS"
+      },
+      {
+        "case": "duplicate JSON key rejected",
+        "independent": "PASS"
+      },
+      {
+        "case": "live path refused before opening",
+        "independent": "PASS"
+      },
+      {
+        "case": "integer comparison remains exact at large magnitude",
+        "independent": "PASS"
+      }
+    ],
+    "resources": {
+      "initial": {
+        "nice": 19,
+        "affinity": [
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31
+        ]
+      },
+      "final": {
+        "nice": 19,
+        "affinity": [
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31
+        ]
+      }
+    },
+    "auditedGaps": []
+  },
+  "repeatRun": {
+    "scalarComparisonsIntegerExact": true,
+    "syntheticPassed": 19,
+    "sixBackupsNumericMismatches": 0,
+    "resourceStatus": "FAIL_DRIFT",
+    "exitCode": 1,
+    "reportOverwritten": false,
+    "evidence": "Second full run independently compared all six copied snapshots without numeric differences, then raised ValueError: verifier resource drift before writing; no initial/final PASS claimed for this run."
+  },
+  "interpretation": "Numeric agreement verified on the first successful run with valid resources; its source changed during review only by adding archived-place duplicate guard. Corrected final instrument independently passes 19 synthetic cases with valid resources. Second numeric rerun agrees but its resource guard failed; preserve that failure."
+}

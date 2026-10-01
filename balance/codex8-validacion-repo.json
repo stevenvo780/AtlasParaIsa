@@ -1,0 +1,16 @@
+[
+  {
+    "label": "typecheck",
+    "exit": 0,
+    "elapsedSeconds": 2.001340866088867,
+    "resourceSamples": 1,
+    "resourceIssues": []
+  },
+  {
+    "label": "test",
+    "exit": 0,
+    "elapsedSeconds": 434.2810254096985,
+    "resourceSamples": 1297,
+    "resourceIssues": []
+  }
+]

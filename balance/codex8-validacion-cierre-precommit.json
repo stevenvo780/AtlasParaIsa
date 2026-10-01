@@ -1,0 +1,42 @@
+{
+  "reviewedReportSHA256": "dde249901c7502b7baff2de14c98f0eb71ef4e2066f3d1eb3ec6a0a2344688bb",
+  "finalReportSHA256": "49b69ef4700de7906da978950761213086c7e74ab8175a907e1232c6f37ff88e",
+  "postReviewChanges": [
+    "Estado line",
+    "independent validation paragraph"
+  ],
+  "unchangedNumericContent": true,
+  "reviewedStateLine": "**Estado:** informe integrado para revisión final. Fecha real de composición: 2026-09-30T23:14:51.463051-05:00.",
+  "finalStateLine": "**Estado:** FINAL — auditoría del objetivo 8 completada; [revisión independiente PASS](codex8-revision-final.md), sin hallazgos bloqueantes. Fecha real de composición: 2026-09-30T23:29:16.543470-05:00.",
+  "summaryLines": 15,
+  "reviewVerdict": "PASS_OBJETIVO_8_AUDITORIA",
+  "nice": 19,
+  "cpus": [
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23,
+    24,
+    25,
+    26,
+    27,
+    28,
+    29,
+    30,
+    31
+  ]
+}

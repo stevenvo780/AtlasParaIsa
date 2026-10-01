@@ -1,0 +1,853 @@
+{
+  "generatedUTC": "2026-10-01T04:17:29.217697+00:00",
+  "reportSHA256": "dde249901c7502b7baff2de14c98f0eb71ef4e2066f3d1eb3ec6a0a2344688bb",
+  "inputSHA256": {
+    "codex8-datos-final/publicos.json": "92f3d965a2e430f9b60715ae1eaa6ed384e134ef8d631e0831222e6412a02dac",
+    "codex8-laboratorio-cifras.json": "c37dd1f725b0a32075c5cebd8e60f7531c5e4400256826afe1699f04a9be29c0",
+    "codex8-c8-cifras.json": "1a89253bdea3d37092eef64fe91f0d9c8e7ce0e769b0bce4c022343c54cc201e"
+  },
+  "resources": {
+    "initial": {
+      "nice": 19,
+      "cpus": [
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31
+      ],
+      "scheduler": 0,
+      "TMPDIR": "/datos/tmp-atlas-lab"
+    },
+    "final": {
+      "nice": 19,
+      "cpus": [
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31
+      ],
+      "scheduler": 0,
+      "TMPDIR": "/datos/tmp-atlas-lab"
+    },
+    "valid": true
+  },
+  "comparisonCounts": {
+    "A_structure_rows": 90,
+    "report_table_rows": 49,
+    "raw_A": 38492,
+    "A_intervals": 7970,
+    "raw_L": 41276,
+    "L_counts": 86,
+    "L_stats": 11382,
+    "L_group": 224,
+    "C_windows": 1807,
+    "C_MK": 200,
+    "C_MK_F": 160,
+    "C_groups": 250,
+    "C_pairs": 18,
+    "C_culture": 90,
+    "manifest": 3,
+    "manifest:declared_sources": 3,
+    "requirements": 3
+  },
+  "totalComparisons": 105429,
+  "mismatches": [],
+  "tableRowsChecked": [
+    "|v13 / 8.083|73|32 / 41|0|0 / 0|2.710 / 7.402|0.943|",
+    "|v13 / 68.042|648|486 / 162|4|28 / 20|35.554 / 67.360|0.872|",
+    "|v13 / 126.750|855|461 / 394|3|66 / 52|86.061 / 126.069|0.824|",
+    "|v13|structure-550|73.930|0.995240|52.917|archivada|",
+    "|v13|structure-656|58.071|0.716400|126.417|archivada|",
+    "|v13|structure-96|116.839|0.685500|120.208|archivada|",
+    "|v13|89.133 / 197.307|62.238 / 168.915|13.067 / 29.430|3614 / 2111250|1535|20|",
+    "|v13|38.011|614.117 / 167|2419004 / 676891 / 1040850|123.364|",
+    "|v13|348801|237929 (68.21 %)|258684|196539|421614 / 1030552|326 / 4834|",
+    "|v13|374064 / 4979474|116.750–126.750|8547|25573|16844|9979|",
+    "|v13|693 / 855|663 / 163|1059 / 447|",
+    "|v12 / 0.167|0|0 / 0|0|0 / 0|NA / NA|NA|",
+    "|v12 / 118.042|869|467 / 402|2|75 / 58|75.563 / 117.360|0.848|",
+    "|v12 / 227.250|1015|575 / 440|2|101 / 93|178.897 / 226.569|0.818|",
+    "|v12|structure-657|158.587|0.977980|69.042|archivada|",
+    "|v12|structure-934|84.114|0.903947|163.000|archivada|",
+    "|v12|152.620 / 224.243|70.084 / 157.121|22.124 / 44.590|3161 / 2012907|1321|49|",
+    "|v12|41.452|1418.534 / 687.856|1640782 / 1288105 / 586409|175.234|",
+    "|v12|459520|310262 (67.52 %)|340389|285235|564258 / 1370913|397 / 5407|",
+    "|v12|457179 / 8120246|217.250–227.250|5807|16968|11082|6827|",
+    "|v12|826 / 1015|627 / 196|1361 / 595|",
+    "|v13 / 8.083–68.042|73|3|48 / 24 / 1|0|",
+    "|v13 / 68.042–126.750|648|88|356 / 246 / 46|40|",
+    "|v12 / 0.167–118.042|0|0|0 / 0 / 0|0|",
+    "|v12 / 118.042–227.250|869|129|473 / 321 / 75|53|",
+    "| CDC | 6/0 | 60–60 | 120 644.2 | 108.93→1 173.25 | 286.22→3 111.85 | 3.74→1.72 | 2.56→0.93 |",
+    "| CDD | 6/0 | 60–60 | 127 804.8 | 110.78→1 213.32 | 285.87→3 380.67 | 3.54→1.69 | 2.61→0.88 |",
+    "| CUPO2 | 6/0 | 60–60 | 96 182.0 | 123.43→771.18 | 331.95→1 989.17 | 3.75→0.83 | 2.59→0.45 |",
+    "| CUPO6 | 6/0 | 60–60 | 200 227.8 | 130.28→2 148.73 | 353.25→5 927.93 | 3.87→0.91 | 2.67→0.45 |",
+    "| CUPO20 | 2/4 | 47–60 | 260 793.5 | 130.28→4 488.37 | 353.25→13 016.48 | 3.87→1.38 | 2.67→0.71 |",
+    "| COM12 | 6/0 | 60–60 | 107 515.2 | 128.37→879.58 | 331.45→2 224.83 | 3.54→0.93 | 2.17→0.48 |",
+    "| COM12C20 | 3/3 | 38–60 | 240 133.7 | 129.50→4 293.50 | 343.45→11 725.60 | 3.71→1.49 | 2.42→0.85 |",
+    "|9501|−0,05116|0,998802|−0,06522|0,996780|0,03706|0,18527|5,00|",
+    "|9502|−0,04535|0,869735|−0,05049|0,952165|0,04525|0,14372|3,18|",
+    "|9503|−0,01800|0,740102|−0,07095|0,997792|0,03841|0,22563|5,87|",
+    "|9504|−0,10617|0,999519|−0,07772|0,999707|0,02937|0,20095|6,84|",
+    "|9505|−0,18486|0,99999985|−0,07698|0,988312|0,04203|0,26230|6,24|",
+    "|9506|−0,08560|0,999936|−0,08092|0,998975|0,00908|0,13870|15,27|",
+    "|C8 compuesto|0,402904|0,344131|0,409631|0,354143|",
+    "|Componente distancia de conducta|0,387418|0,384133|0,396427|0,392344|",
+    "|Componente entropía de oficio|0,418390|0,304130|0,422835|0,315941|",
+    "|F entre comunidades|0,138626|0,034573|0,188292|0,178914|",
+    "|Tiempo activo en `approach`|25,65 %|44,28 %|24,98 %|43,12 %|",
+    "|V13 / 8,0833|75|11|0,86266±0,06528|0,52604±0,02657|0,44119±0,02634|0,028445|",
+    "|V13 / 68,0417|698|44|1±0|0,57390±0,01882|0,44364±0,00473|0,007505|",
+    "|V13 / 126,7500|676|44|1±0|0,59251±0,02918|0,44575±0,00356|0,010356|",
+    "|V12 / 0,1667|17|3|0,53838±0,17092|0,51427±0,18635|0,44801±0,17190|0,120201|",
+    "|V12 / 118,0417|637|7|1±0|0,60832±0,01901|0,43503±0,00460|0,009172|",
+    "|V12 / 227,2500|680|6|1±0|0,67298±0,03705|0,43412±0,00284|0,015644|",
+    "|v13|v13-world-20260930-0800.sqlite|8.083|77|7d38795a3a6caefe1d5bcef89b4639ccdd773c7eff080657375fb3f64f89b214|",
+    "|v13|v13-world-20260930-1500.sqlite|68.042|700|41e8eff6524250defd998789677fd3a556889acff8aa9624e3bac8f0f9cae043|",
+    "|v13|v13-world-20260930-2200.sqlite|126.750|678|775e4377769ebe04f2d0d3262d73eba930f37306f8192783babadbe12ceba2a4|",
+    "|v12|v12-world-20260928-2100.sqlite|0.167|19|94a786529174b54c0514e90e12bf1d053bc804b6703b3bc0d1fbe3ec76077aaf|",
+    "|v12|v12-world-20260929-1500.sqlite|118.042|639|cc3eb20d11ce0158915bbba25a991a8aa516f6c73e51a59b6071e6e0e11b628f|",
+    "|v12|v12-world-20260930-0725.sqlite|227.250|682|44cd8ba6726ad8b8b30a0be8922c6f2a2b653ea2156f0db74a2313aa0f445fb1|",
+    "|v13|structure-113|58.708|0.991180|0|True|",
+    "|v12|structure-421|109.208|0.912620|0|True|"
+  ],
+  "limitations": [
+    "A recipes/receipts: table arithmetic from JSON plus 30 raw rows each in latest two DBs; full extraction independently verified previously in codex8-revision-instrumento.json",
+    "No simulation or counterfactual causal attribution; proposals not calibrated"
+  ],
+  "numericStatus": "PASS",
+  "supplementalVerification": {
+    "resources": {
+      "initial": {
+        "nice": 19,
+        "cpus": [
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31
+        ],
+        "TMPDIR": "/datos/tmp-atlas-lab"
+      },
+      "final": {
+        "nice": 19,
+        "cpus": [
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31
+        ],
+        "TMPDIR": "/datos/tmp-atlas-lab"
+      },
+      "valid": true
+    },
+    "comparisons": 3318,
+    "mismatches": [],
+    "Q1Q5Independent": [
+      {
+        "seed": 9501,
+        "g3c": 6.8,
+        "g3d": 28.6,
+        "Q1": true,
+        "frag": false,
+        "fracR": 0.04,
+        "Q3ref": false,
+        "ratioB": 0.9990480723465016,
+        "Q4": true,
+        "Q4ref": false,
+        "M": 0.11817967891330958,
+        "Q5": true
+      },
+      {
+        "seed": 9502,
+        "g3c": 6.75,
+        "g3d": 51,
+        "Q1": true,
+        "frag": false,
+        "fracR": 0.02,
+        "Q3ref": false,
+        "ratioB": 0.9957916885849553,
+        "Q4": true,
+        "Q4ref": false,
+        "M": 0.06667421507488458,
+        "Q5": true
+      },
+      {
+        "seed": 9503,
+        "g3c": 7.95,
+        "g3d": 51.45,
+        "Q1": true,
+        "frag": false,
+        "fracR": 0.06,
+        "Q3ref": false,
+        "ratioB": 1.0099950024987505,
+        "Q4": true,
+        "Q4ref": false,
+        "M": 0.07555259024248404,
+        "Q5": true
+      },
+      {
+        "seed": 9504,
+        "g3c": 4.95,
+        "g3d": 44.9,
+        "Q1": true,
+        "frag": false,
+        "fracR": 0.02,
+        "Q3ref": false,
+        "ratioB": 1.0816708229426435,
+        "Q4": true,
+        "Q4ref": false,
+        "M": 0.10147824159679456,
+        "Q5": true
+      },
+      {
+        "seed": 9505,
+        "g3c": 6.45,
+        "g3d": 34.85,
+        "Q1": true,
+        "frag": true,
+        "fracR": 0.1,
+        "Q3ref": false,
+        "ratioB": 1.0258933195235629,
+        "Q4": true,
+        "Q4ref": false,
+        "M": 0.10670922251746999,
+        "Q5": true
+      },
+      {
+        "seed": 9506,
+        "g3c": 7,
+        "g3d": 54.8,
+        "Q1": true,
+        "frag": false,
+        "fracR": 0,
+        "Q3ref": false,
+        "ratioB": 1.0816789563244469,
+        "Q4": true,
+        "Q4ref": false,
+        "M": 0.06683457666149928,
+        "Q5": true
+      },
+      {
+        "seed": 9507,
+        "g3c": 5.8,
+        "g3d": 53.15,
+        "Q1": true,
+        "frag": false,
+        "fracR": 0.02,
+        "Q3ref": false,
+        "ratioB": 0.9434914228052472,
+        "Q4": true,
+        "Q4ref": false,
+        "M": 0.07528689000714175,
+        "Q5": true
+      },
+      {
+        "seed": 9508,
+        "g3c": 6.5,
+        "g3d": 51.9,
+        "Q1": true,
+        "frag": true,
+        "fracR": 0,
+        "Q3ref": false,
+        "ratioB": 0.834427057041898,
+        "Q4": false,
+        "Q4ref": false,
+        "M": 0.0781200296497326,
+        "Q5": true
+      },
+      {
+        "seed": 9509,
+        "g3c": 6.55,
+        "g3d": 31.75,
+        "Q1": true,
+        "frag": true,
+        "fracR": 0.02,
+        "Q3ref": false,
+        "ratioB": 0.732152739346984,
+        "Q4": false,
+        "Q4ref": true,
+        "M": 0.14880972402327125,
+        "Q5": true
+      },
+      {
+        "seed": 9510,
+        "g3c": 5.8,
+        "g3d": 47.8,
+        "Q1": true,
+        "frag": false,
+        "fracR": 0,
+        "Q3ref": false,
+        "ratioB": 1.0494393476044852,
+        "Q4": true,
+        "Q4ref": false,
+        "M": 0.06892631503962755,
+        "Q5": true
+      }
+    ],
+    "Q2Independent": [
+      {
+        "seed": 9501,
+        "S": 11,
+        "p": 0.8584007529637274,
+        "Sen": 0.0
+      },
+      {
+        "seed": 9502,
+        "S": 73,
+        "p": 0.1989481007752457,
+        "Sen": 0.0
+      },
+      {
+        "seed": 9503,
+        "S": 74,
+        "p": 0.19278130099319915,
+        "Sen": 0.1111111111111111
+      },
+      {
+        "seed": 9504,
+        "S": 9,
+        "p": 0.8865048064138312,
+        "Sen": 0.0
+      },
+      {
+        "seed": 9505,
+        "S": 154,
+        "p": 0.006339626338933993,
+        "Sen": 0.2857142857142857
+      },
+      {
+        "seed": 9506,
+        "S": -11,
+        "p": 0.8584007529637274,
+        "Sen": 0.0
+      },
+      {
+        "seed": 9507,
+        "S": 101,
+        "p": 0.07440691359805188,
+        "Sen": 0.0
+      },
+      {
+        "seed": 9508,
+        "S": 240,
+        "p": 2.007936797917801e-05,
+        "Sen": 0.3
+      },
+      {
+        "seed": 9509,
+        "S": 259,
+        "p": 4.164762371683453e-06,
+        "Sen": 0.7777777777777778
+      },
+      {
+        "seed": 9510,
+        "S": -3,
+        "p": 0.9715358738879935,
+        "Sen": 0.0
+      }
+    ],
+    "primaryC1C7Independent": {
+      "CDC-9501": {
+        "C1": true,
+        "C2": true,
+        "C3": true,
+        "C4": true,
+        "C5": true,
+        "C6": true,
+        "C7": true
+      },
+      "CDD-9501": {
+        "C1": true,
+        "C2": true,
+        "C3": true,
+        "C4": true,
+        "C5": true,
+        "C6": true,
+        "C7": true
+      },
+      "CDC-9502": {
+        "C1": true,
+        "C2": true,
+        "C3": true,
+        "C4": true,
+        "C5": true,
+        "C6": true,
+        "C7": true
+      },
+      "CDD-9502": {
+        "C1": true,
+        "C2": true,
+        "C3": true,
+        "C4": true,
+        "C5": true,
+        "C6": true,
+        "C7": true
+      },
+      "CDC-9503": {
+        "C1": true,
+        "C2": true,
+        "C3": true,
+        "C4": true,
+        "C5": true,
+        "C6": true,
+        "C7": true
+      },
+      "CDD-9503": {
+        "C1": true,
+        "C2": true,
+        "C3": true,
+        "C4": true,
+        "C5": true,
+        "C6": true,
+        "C7": true
+      },
+      "CDC-9504": {
+        "C1": true,
+        "C2": true,
+        "C3": true,
+        "C4": true,
+        "C5": true,
+        "C6": true,
+        "C7": true
+      },
+      "CDD-9504": {
+        "C1": true,
+        "C2": true,
+        "C3": true,
+        "C4": true,
+        "C5": true,
+        "C6": true,
+        "C7": true
+      },
+      "CDC-9505": {
+        "C1": true,
+        "C2": true,
+        "C3": true,
+        "C4": true,
+        "C5": true,
+        "C6": true,
+        "C7": true
+      },
+      "CDD-9505": {
+        "C1": true,
+        "C2": true,
+        "C3": true,
+        "C4": true,
+        "C5": true,
+        "C6": true,
+        "C7": true
+      },
+      "CDC-9506": {
+        "C1": true,
+        "C2": true,
+        "C3": true,
+        "C4": true,
+        "C5": true,
+        "C6": true,
+        "C7": true
+      },
+      "CDD-9506": {
+        "C1": true,
+        "C2": true,
+        "C3": true,
+        "C4": true,
+        "C5": true,
+        "C6": true,
+        "C7": true
+      }
+    },
+    "instrumentSourceTransition": {
+      "currentSHA256": "053f514faf4d9fae894d935aece5f202a7efcf2bf56502ce0f95bac2ca774e6c",
+      "reviewedSyntheticSHA256": "c83a2c34d8562a3e747de37ba041fee12fa3c06ab5e7ca4838d8ffa715ceeb2e",
+      "reconstructedPreWrapperSHA256": "8723e9a467727871917e9b1f8e0b223f860b0af23d124b2d30aeb8eabbc75051",
+      "exactRecoveredMatch": false,
+      "changeScope": "Historical byte diff not established; current source directly tested in currentInstrumentSyntheticReview, no reliance on inferred source equivalence."
+    },
+    "canonicalResourceArtifactSHA256": "18c6e724e5f279e04b1df80ed187c67d28547a22a3825cd8b4dad05f0bf29277",
+    "failedResourceArtifactSHA256": "0b5b7ad70f00e011c7b905f2f9cc7a5e38e8dfb2529785b3d3fd35efd23913ec",
+    "generatedUTC": "2026-10-01T04:20:30.138655+00:00"
+  },
+  "currentInstrumentSyntheticReview": {
+    "generatedUTC": "2026-10-01T04:23:12.344181+00:00",
+    "instrumentSha256": "0c37bbb58b5c4cd51f90004aed6fdeca595906e909db8802f0eef3bdc244e40f",
+    "sourceStable": true,
+    "synthetic": [
+      {
+        "case": "active overrides stale archived body",
+        "independent": "PASS",
+        "audited": "PASS"
+      },
+      {
+        "case": "latest per key at or before horizon",
+        "independent": "PASS",
+        "audited": "PASS"
+      },
+      {
+        "case": "legacy excluded from constructed counter",
+        "independent": "PASS",
+        "audited": "PASS"
+      },
+      {
+        "case": "resident duplicate rejected",
+        "independent": "PASS",
+        "audited": "PASS"
+      },
+      {
+        "case": "archived structure duplicate rejected",
+        "independent": "PASS",
+        "audited": "PASS"
+      },
+      {
+        "case": "resident place duplicate rejected",
+        "independent": "PASS",
+        "audited": "PASS"
+      },
+      {
+        "case": "duplicate inside archived places rejected",
+        "independent": "PASS",
+        "audited": "PASS"
+      },
+      {
+        "case": "one dormant resident anchor may overlay archive",
+        "independent": "PASS",
+        "audited": "PASS"
+      },
+      {
+        "case": "negative coordinate uses floor division",
+        "independent": "PASS",
+        "audited": "PASS"
+      },
+      {
+        "case": "constructed serial completeness",
+        "independent": "PASS",
+        "audited": "PASS"
+      },
+      {
+        "case": "bad archive digest rejected",
+        "independent": "PASS",
+        "audited": "PASS"
+      },
+      {
+        "case": "recipe definitions and statistics bounded by horizon",
+        "independent": "PASS"
+      },
+      {
+        "case": "missing cumulative recipe stats rejected",
+        "independent": "PASS"
+      },
+      {
+        "case": "delta four over two days is interval average, not daily history",
+        "independent": "PASS"
+      },
+      {
+        "case": "equal endpoints permit unobserved consume-and-refill",
+        "independent": "PASS"
+      },
+      {
+        "case": "S and I protected, neighbor mortal",
+        "independent": "PASS"
+      },
+      {
+        "case": "duplicate JSON key rejected",
+        "independent": "PASS"
+      },
+      {
+        "case": "live path refused before opening",
+        "independent": "PASS"
+      },
+      {
+        "case": "integer comparison remains exact at large magnitude",
+        "independent": "PASS"
+      }
+    ],
+    "PASS": 19,
+    "auditedGaps": 0,
+    "resources": {
+      "initial": {
+        "nice": 19,
+        "cpus": [
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31
+        ],
+        "TMPDIR": "/datos/tmp-atlas-lab"
+      },
+      "final": {
+        "nice": 19,
+        "cpus": [
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31
+        ],
+        "TMPDIR": "/datos/tmp-atlas-lab"
+      },
+      "valid": true
+    },
+    "additionalReportTableRows": [
+      "|v13|v13-world-20260930-0800.sqlite|8.083|77|7d38795a3a6caefe1d5bcef89b4639ccdd773c7eff080657375fb3f64f89b214|",
+      "|v13|v13-world-20260930-1500.sqlite|68.042|700|41e8eff6524250defd998789677fd3a556889acff8aa9624e3bac8f0f9cae043|",
+      "|v13|v13-world-20260930-2200.sqlite|126.750|678|775e4377769ebe04f2d0d3262d73eba930f37306f8192783babadbe12ceba2a4|",
+      "|v12|v12-world-20260928-2100.sqlite|0.167|19|94a786529174b54c0514e90e12bf1d053bc804b6703b3bc0d1fbe3ec76077aaf|",
+      "|v12|v12-world-20260929-1500.sqlite|118.042|639|cc3eb20d11ce0158915bbba25a991a8aa516f6c73e51a59b6071e6e0e11b628f|",
+      "|v12|v12-world-20260930-0725.sqlite|227.250|682|44cd8ba6726ad8b8b30a0be8922c6f2a2b653ea2156f0db74a2313aa0f445fb1|",
+      "|v13|structure-113|58.708|0.991180|0|True|",
+      "|v12|structure-421|109.208|0.912620|0|True|"
+    ],
+    "tableMismatches": [],
+    "syntaxChecks": [
+      {
+        "path": "/datos/workspaces/personal/AtlasParaIsa-anexo/worktrees/auditoria-realismo/scripts/lab/auditar-realismo.py",
+        "sha256": "0c37bbb58b5c4cd51f90004aed6fdeca595906e909db8802f0eef3bdc244e40f",
+        "syntax": "PASS"
+      },
+      {
+        "path": "/datos/tmp-atlas-lab/balance/codex8-laboratorio-recalcular.py",
+        "sha256": "71b74b44ab16e6cd1b6be4de5a6f4f61aeb56e66ff06c7e1782f08e7344871db",
+        "syntax": "PASS"
+      },
+      {
+        "path": "/datos/tmp-atlas-lab/balance/codex8-verificar-publicos.py",
+        "sha256": "6b22b6904447ccd92dfe892ba2768a223648ed5d3482298279feb2171594ad1b",
+        "syntax": "PASS"
+      }
+    ],
+    "method": "Import verifier self_tests() only with bytecode disabled; no main, --real, simulation or subprocess; fixtures in SQLite memory."
+  },
+  "csvIndependentVerification": {
+    "rows": 1590,
+    "cells": 22260,
+    "mismatches": [],
+    "resources": {
+      "initial": {
+        "nice": 19,
+        "cpus": [
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31
+        ]
+      },
+      "final": {
+        "nice": 19,
+        "cpus": [
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31
+        ]
+      },
+      "valid": true
+    },
+    "method": "csv.DictReader all four external CSV versus corresponding rows in accepted publicos.json"
+  },
+  "verdict": "PASS_OBJETIVO_8_AUDITORIA",
+  "findings": [],
+  "blockingFindings": 0,
+  "fullGoalAccepted": false,
+  "c8GrowthAccepted": false,
+  "totalCsvCellComparisons": 22260,
+  "requirements": {
+    "A": "PASS with explicit unobservable daily use and never-consumption limits",
+    "B": "PASS 8 executable criteria and 16 proposed instruments, inherited and candidate thresholds separated",
+    "C": "PASS 20 series, 3 local candidate laws and CULT-VAR critique; C8 unchanged",
+    "summaryLines": 15,
+    "prioritizedDefects": 8,
+    "proposedLaws": 3
+  },
+  "reviewScope": {
+    "objectivePath": "/datos/tmp-atlas-lab/datos-lab/codex-goal-8.md",
+    "objectiveSha256": "bf47e9294fb6c88adaeef15e11e28afdac54911388158057015e4afdc535f041",
+    "codeReference": "bb483260b2489fe62b113d620e5f56e5f3676dbc",
+    "mutations": "only own review md/json and codex8-final-verificar scripts; no product/rules/service/publication mutations",
+    "comparisonCoverage": "57 exact numeric table rows; 6 raw copied SQLite snapshots, 2428 raw diaries, 20 C8 series; independent Q1Q5 and C1C7 calculations; 1590 parsed CSV rows",
+    "historicalEvidence": "B historical examples checked in current docs source lines, not rerun",
+    "excluded": "no simulation, whole-world replay, live path, services, credentials, personal letter, main changes or mass gates"
+  },
+  "reviewCompletedUTC": "2026-10-01T04:25:18.478086+00:00",
+  "finalReportTransition": {
+    "reviewedSHA256": "dde249901c7502b7baff2de14c98f0eb71ef4e2066f3d1eb3ec6a0a2344688bb",
+    "finalSHA256": "49b69ef4700de7906da978950761213086c7e74ab8175a907e1232c6f37ff88e",
+    "reconstructedReviewedSHA256": "dde249901c7502b7baff2de14c98f0eb71ef4e2066f3d1eb3ec6a0a2344688bb",
+    "onlyStateLineAndIndependentValidationParagraphChanged": true,
+    "remainingReportByteExact": true
+  },
+  "reviewMarkdownSHA256": "31290bdecf806e948110ce154d8428409964e4c3ba8d3df1994c68759f8fe737"
+}

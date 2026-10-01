@@ -9,7 +9,9 @@
  * Reactivación: retirar + reanclar N/R a +D días y cronometrar maintainRegions de
  * vuelta (200 iteraciones por D; la puesta al día es aritmética fija ⇒ O(1)).
  *
- * Uso: tsx bench-desg-d.mts [--json out] [--mini]
+ * Uso: tsx bench-desg-d.mts [--json out] [--mini] [--lotes N] [--pasos K]
+ * (lotes finos —p.ej. 30×20— cancelan mejor el ruido de carga correlacionado por
+ * lote; el protocolo tabla es 6×100 y sigue siendo el default).
  */
 import { writeFileSync } from 'node:fs';
 import { cloneWorld, createWorld, stepWorld, type World } from '../../src/world/index.js';
@@ -36,11 +38,11 @@ function escenaBase(): World {
   return w;
 }
 
-function bancoPasos(mini: boolean): { tiemposC: number[]; tiemposT: number[] } {
+function bancoPasos(mini: boolean, lotesArg: number, pasosArg: number): { tiemposC: number[]; tiemposT: number[] } {
   const base = escenaBase();
   const leyC = parseParams(PARAMS_C, DEFAULT_PARAMS), leyT = parseParams(PARAMS_T, DEFAULT_PARAMS);
   const tiemposC: number[] = [], tiemposT: number[] = [];
-  const lotes = mini ? 2 : LOTES, pasos = mini ? 10 : PASOS_LOTE;
+  const lotes = mini ? 2 : lotesArg, pasos = mini ? 10 : pasosArg;
   for (let lote = 0; lote < lotes; lote++) {
     const orden = lote % 2 === 0 ? [false, true] : [true, false]; // alternado anti-deriva
     for (const trat of orden) {
@@ -87,7 +89,13 @@ function bancoReactivacion(mini: boolean): Record<number, number> {
 function main(): void {
   const argv = process.argv.slice(2);
   const mini = argv.includes('--mini');
-  const { tiemposC, tiemposT } = bancoPasos(mini);
+  const flag = (n: string, dflt: number): number => {
+    const i = argv.indexOf(n);
+    return i >= 0 && argv[i + 1] ? Number(argv[i + 1]) : dflt;
+  };
+  const lotes = flag('--lotes', LOTES), pasos = flag('--pasos', PASOS_LOTE);
+  if (!mini && lotes < 5) throw new Error('la tabla exige ≥5 lotes');
+  const { tiemposC, tiemposT } = bancoPasos(mini, lotes, pasos);
   const medC = mediana(tiemposC), medT = mediana(tiemposT);
   const p95C = p95(tiemposC), p95T = p95(tiemposT);
   const rMed = medT / medC, rP95 = p95T / p95C;
@@ -95,7 +103,7 @@ function main(): void {
   const vals = Object.values(react);
   const cociente = Math.max(...vals) / Math.min(...vals);
   const k1 = !mini && rMed <= 1.05 && rP95 <= 1.10 && p95T < 50 && cociente < 2 ? 'SOSTENIDA' : mini ? 'MINI' : 'REFUTADA';
-  const informe = { pasos: { nC: tiemposC.length, nT: tiemposT.length, medC, medT, p95C, p95T, rMed, rP95 },
+  const informe = { protocolo: mini ? 'mini' : `${lotes}x${pasos}`, pasos: { nC: tiemposC.length, nT: tiemposT.length, medC, medT, p95C, p95T, rMed, rP95 },
     reactivacionMs: react, cocienteReact: cociente, k1 };
   console.log(`pasos: med C=${medC.toFixed(3)}ms T=${medT.toFixed(3)}ms (×${rMed.toFixed(3)} ≤1,05); p95 C=${p95C.toFixed(3)} T=${p95T.toFixed(3)} (×${rP95.toFixed(3)} ≤1,10; T<50ms)`);
   console.log(`reactivación 1/10/100/1000d ms: ${[1, 10, 100, 1000].map(d => react[d]!.toFixed(3)).join('/')} (cociente ${cociente.toFixed(2)} <2)`);

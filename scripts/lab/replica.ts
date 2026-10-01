@@ -54,6 +54,7 @@ import { decideReproduction, RollingStepPerformance } from '../../src/server/gov
 import { decidirTechoLab, TECHO_LAB_MINIMO, techoLabCota } from './techo-lab.js';
 import { durableActivityMetrics } from './metrics.js';
 import { InstrumentosConducta } from './instrumentos.js';
+import { InstrumentoCribadoDesgaste } from './instrumento-desg-d.js';
 import { digestoCanonico } from '../../src/world/digesto.js';
 import { faunaTotal, registrarFaunaRetirada } from './fauna-total.js';
 
@@ -218,6 +219,9 @@ async function main(): Promise<void> {
     registrarFaunaRetirada(world, censosFauna);
     store.save(world);
     const instrumentos = instrumentosArg === 'si' ? new InstrumentosConducta(world, store.db) : null;
+    // Cribado DESG-D: observador material A + censo diario con proyección (solo con instrumentos).
+    const desgD = instrumentos ? new InstrumentoCribadoDesgaste() : null;
+    desgD?.alEmpezar(world);
 
     // Solo con --gobernador servidor: p95 de la ventana de 120 pasos (mismo mecanismo que
     // src/server/app.ts) y acumuladores del DÍA en curso, reiniciados en cada dia-NNN.json.
@@ -251,6 +255,7 @@ async function main(): Promise<void> {
         // descuenta de stepMs para que el gobernador decida sobre el mismo paso que sin instrumentos.
         const observadoAntes = instrumentos ? instrumentos.costeMs : 0;
         instrumentos?.despuesDelPaso(world);
+        desgD?.trasPaso(world);
         const observacionMs = instrumentos ? instrumentos.costeMs - observadoAntes : 0;
         let saveMs = 0;
         // sprint/journal-caps-20260929: además de la cadencia, guarda YA si el diario de
@@ -283,6 +288,7 @@ async function main(): Promise<void> {
         stepWorld(world);
         stepTimes.push(performance.now() - started);
         instrumentos?.despuesDelPaso(world);
+        desgD?.trasPaso(world);
         if (techoLab !== null) { techoPoblacionMaximaDia = Math.max(techoPoblacionMaximaDia, world.people.length); techoPoblacionMaxima = Math.max(techoPoblacionMaxima, world.people.length); }
         // sprint/journal-caps-20260929: mismo commit anticipado que en el modo "servidor" arriba.
         if (tick % params.persistencia.cadaTicks === 0
@@ -304,10 +310,11 @@ async function main(): Promise<void> {
           const { foodShared, ...conducta } = instrumentos.metricasDia(world, store.db);
           medidas = { ...metrics, cooperacionAcumuladaPorTipo: { ...metrics.cooperacionAcumuladaPorTipo, foodShared }, ...conducta };
         }
+        const desg = desgD ? { desgD: desgD.metricasDia(world, store) } : {};
         const extra = gobernadorModo === 'servidor' ? metricasGobernador(world, reproduccionActivaTicksDia, ticksDia, p95GobernadorActual, cloneMsDia, saveMsDia)
           : techoLab !== null ? { techoLab, reproduccionActivaFraccion: techoTicksActivosDia / techoTicksDia, poblacionMaximaDia: techoPoblacionMaximaDia } : {};
         techoTicksActivosDia = 0; techoTicksDia = 0; techoPoblacionMaximaDia = 0;
-        const body = { tick, ...medidas, ...extra, p50Ms: Math.round(p50 * 100) / 100, p95Ms: Math.round(p95 * 100) / 100, rss };
+        const body = { tick, ...medidas, ...extra, ...desg, p50Ms: Math.round(p50 * 100) / 100, p95Ms: Math.round(p95 * 100) / 100, rss };
         writeFileSync(join(salida, `dia-${String(dia).padStart(3, '0')}.json`), JSON.stringify(body, null, 2) + '\n');
         if (gobernadorModo === 'servidor') { reproduccionActivaTicksDia = 0; ticksDia = 0; cloneMsDia.length = 0; saveMsDia.length = 0; }
       }
@@ -342,7 +349,7 @@ async function main(): Promise<void> {
           poblacionContada: 'world.people.length (todas las personas vivas, S e I incluidas), como governReproduction en src/server/app.ts',
         },
       } : {}),
-      instrumentos: instrumentos ? 'si; solo lectura (scripts/lab/instrumentos.ts): conducta por tiempo, comida compartida y panel C8' : 'no',
+      instrumentos: instrumentos ? 'si; solo lectura: conducta por tiempo, comida compartida y panel C8 (instrumentos.ts) + observador material A con proyección DESG-D y censo diario (instrumento-desg-d.ts)' : 'no',
       seed, params, sha: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
       digest: worldSourceDigest(),
       // Huella del ESTADO final (digestoCanonico de src/world/digesto.ts): con y sin instrumentos
@@ -350,6 +357,7 @@ async function main(): Promise<void> {
       digestoMundoFinal: digestoCanonico(world), dias, resumen,
     };
     writeFileSync(join(salida, 'replica.json'), JSON.stringify(replica, null, 2) + '\n');
+    if (desgD) writeFileSync(join(salida, 'material.json'), JSON.stringify(desgD.exportFinal(), null, 2) + '\n');
     if (instrumentos) {
       const pasoMedio = stepTimes.reduce((suma, ms) => suma + ms, 0) / stepTimes.length;
       console.log(`Instrumentos: ${(instrumentos.costeMs / instrumentos.pasos).toFixed(4)} ms/paso de media (${instrumentos.costeMs.toFixed(0)} ms en ${instrumentos.pasos} pasos, incluidos los cálculos diarios) frente a ${pasoMedio.toFixed(2)} ms/paso de stepWorld (${(100 * instrumentos.costeMs / (pasoMedio * stepTimes.length)).toFixed(2)} %).`);

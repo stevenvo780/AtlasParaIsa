@@ -1,6 +1,7 @@
 import { recordChronicleEvent, enableChronicleJournal, assertChronicleJournal, type ChronicleJournal } from './chronicle-journal.js';
 import { PROTOCOL_VERSION, type Action, type ChronicleEvent, type Gesture, type GestureResult, type MemoryView, type PersonView, type PersonDetail, type PlaceView, type Tile, type WorldView, type Viewport, type Order, type CommunityView, type WorldSample, type FaseNombre } from '../shared/types.js';
 import { activate, bindWorldContext, maintainRegions, normalizeViewport, projectTerrain, tileAt, validCoordinate, worldContext, type ChunkMeta, type WorldContext } from './spatial.js';
+import { checkpointMaterialObserver, inheritMaterialObserver } from './material-observer.js';
 import { tileLookup } from './tile-index.js';
 import { primero, primeroConFiltroCaro } from './orden.js';
 import { chunkKey, generateChunk, proceduralPlaceName, legacyStructures, type Chunk } from './terrain.js';
@@ -1419,6 +1420,7 @@ export function cloneWorld(world: World, context: WorldContext = worldContext(wo
   // A new queue is still required: retiring/reactivating must not edit the confirmed queue.
   draft.retiredChunks = [...world.retiredChunks];
   bindWorldContext(draft, { ...worldContext(world), ...(context && typeof context === 'object' ? context : {}) });
+  inheritMaterialObserver(world, draft);
   setParams(draft, paramsOf(world));
   // T041: la cadencia de las métricas caras vive en una caché lateral por mundo; el clon
   // de cada paso la hereda para no recalcular la BFS de agua en cada tick.
@@ -1495,6 +1497,7 @@ export interface PuntoDeRestauracion {
  * queda con las confirmadas. El punto no lee el reloj ni el hardware: su contenido depende solo
  * del mundo recibido. */
 export function puntoDeRestauracion(world: World): PuntoDeRestauracion {
+  const restoreMaterialObservation = checkpointMaterialObserver(world);
   // Un solo mapa para todos los campos: la identidad compartida cruza de un campo a otro.
   const campos: Record<string, unknown> = {}, copias = new Map<object, unknown>();
   for (const key in world) {
@@ -1510,6 +1513,7 @@ export function puntoDeRestauracion(world: World): PuntoDeRestauracion {
     restaurar() {
       if (usado) throw new Error('El punto de restauración ya se consumió.');
       usado = true;
+      restoreMaterialObservation?.();
       const objetivo = world as unknown as Record<string, unknown>;
       // Un paso a medias pudo añadir campos que antes no existían: deshacer es también quitarlos.
       for (const key of Object.keys(objetivo)) if (key !== 'tiles' && key !== 'retiredChunks' && !(key in campos)) delete objetivo[key];

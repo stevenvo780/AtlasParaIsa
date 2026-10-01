@@ -10,6 +10,13 @@ import type { Capability, MaterialBatch, TechnologyProgram, TechnologyRecipe } f
 import { resolveTechnologyRecipe, withRecipeSession } from './technology-catalogue.js';
 import { algunoCerca, filtrarCerca } from './indice-puntos.js';
 import { primerVecino, vecinos } from './rejilla.js';
+import { recipePowerPruningRejection, recipeSequenceLength, cooperationPruningActive, cooperationPruningDiagnostics } from './cooperation-pruning.js';
+import { pureAvailableRecipePowers } from './cooperation-known-powers.js';
+
+interface LocalInputs {
+  available: (program: TechnologyProgram, prospectiveProductId?: string) => boolean;
+  facts: { items: MaterialBatch[]; raw: { wood: number; stone: number; water: number }; powers: Record<Capability, number>; massByRecipe: Map<string | null, number> } | undefined;
+}
 
 type Emit = (event: Omit<ChronicleEvent, 'id' | 'tick'>) => ChronicleEvent;
 export type Culture = NonNullable<PersonView['culture']>;
@@ -93,7 +100,7 @@ function practicedSkillToTeach(world: World, teacher: Person, learner: Person): 
 
 /** This is a local prospect, not a withdrawal: supplies still require collection
  * or exchange and fabrication still pays the physical execution's full costs. */
-function localRecipeInputs(world: World, teacher: Person, learner: Person): (program: TechnologyProgram, prospectiveProductId?: string) => boolean {
+function localRecipeInputs(world: World, teacher: Person, learner: Person): LocalInputs {
   const raw = { wood: (learner.materials.wood + teacher.materials.wood) * MASS_UNIT,
     stone: (learner.materials.stone + teacher.materials.stone) * MASS_UNIT, water: 0 };
   for (let dy = -7; dy <= 7; dy++) for (let dx = -7; dx <= 7; dx++) {
@@ -109,7 +116,7 @@ function localRecipeInputs(world: World, teacher: Person, learner: Person): (pro
     if (mass === undefined) { mass = items.filter(item => item.recipeId === id).reduce((total, item) => total + item.mass, 0); massByRecipe.set(id, mass); }
     return mass;
   };
-  return (program, prospectiveProductId) => {
+  const available: LocalInputs['available'] = (program, prospectiveProductId) => {
     const required = { wood: 0, stone: 0, water: 0 }, residue = { wood: 0, stone: 0, water: 0 }, products = new Map<string, number>();
     for (const input of program.inputs) {
       if (input.source === 'product') products.set(input.recipeId!, (products.get(input.recipeId!) ?? 0) + input.mass);
@@ -121,6 +128,7 @@ function localRecipeInputs(world: World, teacher: Person, learner: Person): (pro
       [...products].every(([id, needed]) => id === prospectiveProductId || productMass(id) >= needed) &&
       program.steps.every(step => !step.requiredCatalyst || powers[step.requiredCatalyst] >= 0.1);
   };
+  return { available, facts: cooperationPruningActive(world) ? { items, raw, powers, massByRecipe } : undefined };
 }
 /** Recetas que el maestro ha practicado con éxito, en el orden de sus instrucciones. No depende del
  * aprendiz: `cooperationOpportunity` la calcula una vez por decisión (nada cambia mientras evalúa). */
@@ -136,17 +144,41 @@ function practicedRecipeToTeach(world: World, teacher: Person, learner: Person, 
     const recipe = resolveTechnologyRecipe(world, id); if (recipe) candidates.push(recipe);
   }
   if (!candidates.length) return;
-  const inputsAvailable = localRecipeInputs(world, teacher, learner);
+  const { available: inputsAvailable, facts } = localRecipeInputs(world, teacher, learner);
   const remembered = learner.technology.knownRecipes.flatMap(id => { const recipe = resolveTechnologyRecipe(world, id); return recipe ? [recipe] : []; });
-  const known = remembered.filter(recipe => inputsAvailable(recipe.program));
+  const rejection = facts === undefined ? undefined : recipePowerPruningRejection(remembered, candidates, learner, facts.items, facts.raw, facts.powers, facts.massByRecipe, CAPABILITIES);
+  const canPrune = facts !== undefined && rejection === undefined;
+  const diagnostics = facts === undefined ? undefined : cooperationPruningDiagnostics(world);
+  if (diagnostics) {
+    diagnostics.pairs++; diagnostics.known += recipeSequenceLength(remembered);
+    if (canPrune) { diagnostics.admittedPairs++; diagnostics.admittedKnown += remembered.length; }
+    else if (rejection) diagnostics.rejections[rejection] = (diagnostics.rejections[rejection] ?? 0) + 1;
+  }
+  const known = canPrune ? undefined : remembered.filter(diagnostics ? recipe => {
+    const available = inputsAvailable(recipe.program); diagnostics.checked++;
+    if (!available) diagnostics.unavailable++;
+    return available;
+  } : recipe => inputsAvailable(recipe.program));
   // Possessing a tool does not teach its replacement. Compare reproducible
   // instructions, not the world catalogue or the teacher's lifetime popularity.
   // `Math.max(0, ...valores)` plegado de izquierda a derecha: el mismo resultado (NaN y ±0 incluidos) sin copias.
-  const powers = Object.fromEntries(CAPABILITIES.map(capability => {
+  const checkedBefore = diagnostics?.checked ?? 0, inputsBefore = diagnostics?.inputsChecked ?? 0, stepsBefore = diagnostics?.stepsChecked ?? 0;
+  const powers = canPrune ? pureAvailableRecipePowers(remembered, diagnostics ? program => {
+    diagnostics.checked++; diagnostics.admittedChecked++; diagnostics.inputsChecked += program.inputs.length; diagnostics.stepsChecked += program.steps.length;
+    const available = inputsAvailable(program); if (!available) diagnostics.unavailable++;
+    return available;
+  } : inputsAvailable) : Object.fromEntries(CAPABILITIES.map(capability => {
     let power = 0;
-    for (const recipe of known) power = Math.max(power, recipe.capacities[capability]);
+    for (const recipe of known!) power = Math.max(power, recipe.capacities[capability]);
     return [capability, power];
   })) as Record<Capability, number>;
+  if (diagnostics && canPrune) {
+    diagnostics.pruned += remembered.length - (diagnostics.checked - checkedBefore);
+    let inputs = 0, steps = 0;
+    for (const recipe of remembered) { inputs += recipe.program.inputs.length; steps += recipe.program.steps.length; }
+    diagnostics.inputsPruned += inputs - (diagnostics.inputsChecked - inputsBefore);
+    diagnostics.stepsPruned += steps - (diagnostics.stepsChecked - stepsBefore);
+  }
   // An intermediate can unblock instructions already remembered before a craft
   // action is possible. Assess only those instructions (or the learner's own active
   // program), with the other substrates still required locally; the world catalogue

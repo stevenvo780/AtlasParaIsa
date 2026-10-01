@@ -6,6 +6,7 @@ import { primero, primeroConFiltroCaro } from './orden.js';
 import { chunkKey, generateChunk, proceduralPlaceName, legacyStructures, type Chunk } from './terrain.js';
 import { assertGenome, DEFAULT_MUTATION_RATE, expressGenome, founderGenome, inheritGenome, localRandom, type Genome } from './genetics.js';
 import { bond, convivir, cooperate, cooperationOpportunity, initialCulture, resourceDispute, updateCommunities, settlementOpportunity, type Culture } from './society.js';
+import { withCooperationPruning } from './cooperation-pruning.js';
 import { count, emptyTotals, heredarEstadisticas, recordSample, worldStatistics } from './statistics.js';
 import { initializeEcosystem, stepEcosystem, harvestMaterial, cultivateTile, trampleTile, FOOD_PER_ANIMAL } from './ecosystem.js';
 import { assertEcosystemTile, assertLifeState, assertDormantTerrain } from './validation.js';
@@ -1248,7 +1249,7 @@ function advanceTick(world: World, inputs: Gesture[], context: WorldContext, med
   medirFase(medicion, 'kernel', () => stepEcosystem(world.tiles, world.tick, world.weather, phaseAt(world.tick), false,
     { decaimientoFertilidad: paramsOf(world).recursos.decaimientoFertilidad, seed: world.seed, cuencas: paramsOf(world).agua.cuencas, soaTerreno: paramsOf(world).motor.soaTerreno }));
   medirFase(medicion, 'fauna', () => { stepAnimals(world,event=>addEvent(world,event)); stepStructures(world,event=>addEvent(world,event)); });
-  medirFase(medicion, 'personas', () => {
+  medirFase(medicion, 'personas', () => withCooperationPruning(world, () => {
     for (const person of world.people) bodyAndAction(world, person);
     for (const person of world.people) {
       const chunk = world.chunks[chunkKey(person.x, person.y)]!;
@@ -1258,7 +1259,7 @@ function advanceTick(world: World, inputs: Gesture[], context: WorldContext, med
         remember(person, world, 'Un nuevo territorio amplió los caminos posibles.', event.id);
       }
     }
-  });
+  }));
   medirFase(medicion, 'encuentros', () => { encounters(world); convivir(world); });
   medirFase(medicion, 'demografia', () => advancePopulation(world,{emit:event=>addEvent(world,event.kind==='death'?deathContext(world,event):event),beforeDeath:transferEstate}));
   medirFase(medicion, 'comunidades', () => updateCommunities(world, event => addEvent(world, event)));

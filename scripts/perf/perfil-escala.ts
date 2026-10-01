@@ -40,6 +40,20 @@ function sourceHash() {
     h.update(f).update('\0').update(readFileSync(f));
   return h.digest('hex');
 }
+/** Audit outside measured phases; never repairs priority or changes the world. */
+function resources(label: string) {
+  const threads = readdirSync('/proc/self/task').flatMap(tid => {
+    try {
+      const root = `/proc/self/task/${tid}`, stat = readFileSync(root + '/stat', 'utf8');
+      const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+      const cpus = /Cpus_allowed_list:\s*(\S+)/.exec(readFileSync(root + '/status', 'utf8'))?.[1];
+      return [{ tid: Number(tid), nice: Number(fields[16]), policy: Number(fields[38]), cpus }];
+    } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []; throw error; }
+  });
+  const passed = threads.length > 0 && threads.every(t => t.nice === 19 && t.cpus === '6-31');
+  if (!passed) throw new Error('Resource constraint failed: ' + JSON.stringify({ label, threads }));
+  return { label, at: new Date().toISOString(), passed, threads };
+}
 /** Same dailyMetrics calculation as replica.ts; measured apart, without interpreting criteria. */
 function dailyMetrics(world: Parameters<typeof stepWorld>[0], store: Store, census: ReadonlyMap<string, number>) {
   const stats = worldStatistics(world), loose = stats as unknown as Record<string, unknown>;
@@ -71,6 +85,7 @@ async function main() {
   if (process.env.TMPDIR !== '/datos/tmp-atlas-lab') throw new Error('TMPDIR=/datos/tmp-atlas-lab obligatorio');
   const startedAt = new Date().toISOString(), code = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
   const sourceDigest = sourceHash(), working = mkdtempSync(join(tmpdir(), 'codex7-perfil-'));
+  const resourceSnapshots = [resources('start')];
   mkdirSync(resolve(output, '..'), { recursive: true });
   console.log(JSON.stringify({ event: 'copy', startedAt, pid: process.pid, db, working }));
   const copyAt = stamp();
@@ -122,6 +137,7 @@ async function main() {
       samples.push({ tick: world.tick, population: world.people.length, tiles: world.tiles.length, step, phases,
         observation: { wallMs: observationBefore.wallMs + observationAfter.wallMs, cpuMs: observationBefore.cpuMs + observationAfter.cpuMs }, save, saveReasons: reasons });
       if ((n + 1) % 100 === 0 || n + 1 === steps) {
+        resourceSnapshots.push(resources('step-' + (n + 1)));
         appendFileSync(output + '.pasos.jsonl', samples.slice(Math.floor(n / 100) * 100).map(s => JSON.stringify(s)).join('\n') + '\n');
         console.log(JSON.stringify({ event: 'steps', completed: n + 1, tick: world.tick, population: world.people.length, at: new Date().toISOString() }));
       }
@@ -142,8 +158,11 @@ async function main() {
     const finalDigest = digestoCanonico(world); setParams(world, measuredParams);
     const totalWall = samples.reduce((s, x) => s + x.step.wallMs, 0), totalCpu = samples.reduce((s, x) => s + x.step.cpuMs, 0);
     const saves = samples.filter(s => s.save !== null);
+    const completedSourceDigest = sourceHash(), sourceStable = sourceDigest === completedSourceDigest;
+    resourceSnapshots.push(resources('complete'));
+    if (!sourceStable) throw new Error('Source changed during profile: ' + sourceDigest + ' -> ' + completedSourceDigest);
     const sumPhaseWall = Object.values(phaseWall).reduce((a, b) => a + b, 0), sumPhaseCpu = Object.values(phaseCpu).reduce((a, b) => a + b, 0);
-    const result = { startedAt, finishedAt: new Date().toISOString(), code, sourceDigest, pid: process.pid, db: realpathSync(db), working,
+    const result = { startedAt, finishedAt: new Date().toISOString(), code, sourceDigest, completedSourceDigest, sourceStable, resourceSnapshots, pid: process.pid, db: realpathSync(db), working,
       seed: world.seed, initial, final: { tick: world.tick, population: world.people.length, tiles: world.tiles.length }, steps,
       referenceParams, measuredParams, initialDigest, finalDigest,
       digestNormalization: 'Only motor.hilos restored to referenceParams for final digest; all laws preserved',

@@ -7,12 +7,18 @@ export interface TechnologyCatalogueReader {
   /** `true` sólo si `resolve` devuelve SIEMPRE un objeto nuevo, plano y sin partes compartidas con
    * nada que el anfitrión conserve (el Store: cada lectura es una copia). Entonces la resolución no
    * necesita su propio `structuredClone` defensivo (sprint noche-perf 2026-09-22). Sin la marca, se
-   * clona como siempre. */
+   * clona como siempre. La vista exclusiva de `withReadOnlyCopies` también está separada del archivo,
+   * pero puede repetir la misma copia mientras su callback sólo la lee. */
   readonly freshCopies?: boolean;
   /** Opcional (sprint noche-perf2 2026-09-22): ejecuta `read` —un paso del mundo, que SÓLO lee
    * definiciones archivadas y nunca escribe en el archivo— como un lote a fecha de `atTick`: el anfitrión
    * puede validar su memoria de lecturas una vez para todo el lote. Sin el método, cada lectura se valida sola. */
   readonly readBatch?: <T>(atTick: number, read: () => T) => T;
+  /** Vista temporal para una decisión que sólo lee recetas. Sus copias están separadas
+   * del archivo, pero pueden repetirse dentro del callback; al salir, la vista vuelve
+   * a las lecturas generales. No extender este alcance a acciones que mutan recetas. */
+  readonly withReadOnlyCopies?: <T>(this: TechnologyCatalogueReader, atTick: number,
+    read: (view: TechnologyCatalogueReader) => T) => T;
 }
 export interface TechnologyCatalogueHost { technology: TechnologyState; tick: number; }
 /** Backstop for distinct uncommitted definitions/statistics. The host commits early below this
@@ -218,6 +224,18 @@ export function withRecipeSession<T>(host: TechnologyCatalogueHost, evaluate: ()
     try { return evaluate(); } finally { if (sessions.get(state) === session) endRecipeSession(state); }
   };
   return inSession();
+}
+/** Exclusivo de cooperación: mismos llamados al resolutor y misma sesión LRU;
+ * sólo el lector de archivo puede compartir copias durante esta decisión pura. */
+export function withReadOnlyRecipeSession<T>(host: TechnologyCatalogueHost, evaluate: () => T): T {
+  const state = host.technology, reader = readers.get(state);
+  if (!reader?.withReadOnlyCopies) return withRecipeSession(host, evaluate);
+  return reader.withReadOnlyCopies(host.tick, view => {
+    if (view === reader || !view || typeof view.resolve !== 'function' ||
+      typeof view.findBySignature !== 'function' || view.freshCopies !== true) return withRecipeSession(host, evaluate);
+    readers.set(state, view);
+    try { return withRecipeSession(host, evaluate); } finally { readers.set(state, reader); }
+  });
 }
 /** Ejecuta `read` como un lote de lecturas del anfitrión a fecha de `host.tick` (sprint noche-perf2):
  * `stepWorld` lo usa para todo el paso, que sólo LEE el archivo. Sin anfitrión con lotes, llama y ya. */

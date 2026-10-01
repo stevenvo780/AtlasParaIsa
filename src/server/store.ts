@@ -216,18 +216,30 @@ function validateStoreOptions(options: StoreOptions): void {
 export class Store {
   readonly db: DatabaseSync;
   readonly technologyArchive: TechnologyArchive;
-  readonly catalogueReader: TechnologyCatalogueReader = {
-    // `readTechnologyRecipe` devuelve siempre un objeto recién construido (lectura decodificada o copia
-    // de una memoria que nunca se entrega): la resolución del mundo no necesita clonarlo otra vez.
-    freshCopies: true,
-    resolve: (id, atTick) => this.readTechnologyRecipe(id, atTick),
-    readBatch: (atTick, read) => this.readBatch(atTick, read),
-    findBySignature: (signature, atTick) => {
+  readonly catalogueReader: TechnologyCatalogueReader = (() => {
+    const store = this;
+    const resolve = (id: string, atTick: number) => this.readTechnologyRecipe(id, atTick);
+    const readBatch = <T>(atTick: number, read: () => T) => this.readBatch(atTick, read);
+    const findBySignature = (signature: string, atTick: number) => {
       if (this.schemaVersion < 4) return null;
       const definition = this.technologyArchive.findDefinitionBySignature(signature, atTick);
       return definition ? this.readTechnologyRecipe(definition.id, atTick) : null;
-    },
-  };
+    };
+    const reader: TechnologyCatalogueReader = {
+      // `readTechnologyRecipe` devuelve siempre un objeto recién construido (lectura decodificada o copia
+      // de una memoria que nunca se entrega): la resolución del mundo no necesita clonarlo otra vez.
+      freshCopies: true,
+      resolve, readBatch, findBySignature,
+      withReadOnlyCopies(atTick, read) {
+        // Un decorador puede añadir efectos a resolve/find/readBatch. Sólo el lector
+        // original intacto ofrece la vista; un wrapper conserva todos sus llamados.
+        if (this !== reader || this.resolve !== resolve || this.findBySignature !== findBySignature ||
+          this.readBatch !== readBatch || this.freshCopies !== true) return read(this);
+        return store.withReadOnlyCopies(atTick, read);
+      },
+    };
+    return reader;
+  })();
   lastSnapshotBytes = 0;
   /** Guardados confirmados y último paso en que se intentó podar: gobiernan la
    * profundidad del tercer respaldo y el coste amortizado de la poda. */
@@ -334,7 +346,7 @@ export class Store {
       loadLegacy: (id, atTick) => this.loadLegacy(id, atTick),
       ...(this.schemaVersion >= 4 ? { catalogueReader: this.catalogueReader } : {}) };
   }
-  private readTechnologyRecipe(id: string, atTick: number): TechnologyRecipe | null {
+  private readTechnologyRecipe(id: string, atTick: number, copies?: Map<TechnologyRecipe, TechnologyRecipe>): TechnologyRecipe | null {
     if (this.schemaVersion < 4) return null;
     const reads = typeof atTick === 'number' && typeof id === 'string' ? this.technologyReads : null, key = `${atTick}:${id}`;
     if (reads?.recipes.has(key)) return copyArchivedRecipe(reads.recipes.get(key)!);
@@ -343,7 +355,14 @@ export class Store {
     if (memo && remembered) {
       // Válida si la lectura recordada y ésta miran ambas desde la fila más reciente o después.
       memo.horizon ??= this.technologyArchive.latestTick();
-      if (remembered.atTick >= memo.horizon && atTick >= memo.horizon) return remembered.value && copyArchivedRecipe(remembered.value);
+      if (remembered.atTick >= memo.horizon && atTick >= memo.horizon) {
+        if (!remembered.value) return null;
+        const previous = copies?.get(remembered.value);
+        if (previous) return previous;
+        const value = copyArchivedRecipe(remembered.value);
+        copies?.set(remembered.value, value);
+        return value;
+      }
     }
     const definition = this.technologyArchive.getDefinition(id, atTick);
     if (!definition) { memo?.recipes.set(id, { atTick, value: null }); return null; }
@@ -355,8 +374,30 @@ export class Store {
       if (reads.recipes.size >= reads.limit) reads.recipes.delete(reads.recipes.keys().next().value!);
       reads.recipes.set(key, copyArchivedRecipe(value));
     }
-    memo?.recipes.set(id, { atTick, value: copyArchivedRecipe(value) });
+    if (memo) {
+      const raw = copyArchivedRecipe(value);
+      memo.recipes.set(id, { atTick, value: raw });
+      copies?.set(raw, value);
+    }
     return value;
+  }
+  /** Cada vista tiene su propia memoria de copias, nunca cambia el lector público
+   * ni un flag del Store. El lote habitual del paso sigue validando su mismo sello. */
+  private withReadOnlyCopies<T>(atTick: number, read: (view: TechnologyCatalogueReader) => T): T {
+    if (this.schemaVersion < 4 || this.technologyReads !== null || this.db.isTransaction ||
+      typeof atTick !== 'number' || !Number.isSafeInteger(atTick) || atTick < 0) return read(this.catalogueReader);
+    const reader = this.catalogueReader, resolve = reader.resolve;
+    let copies: Map<TechnologyRecipe, TechnologyRecipe> | undefined;
+    let active = true;
+    const view: TechnologyCatalogueReader = {
+      get freshCopies() { return reader.freshCopies; },
+      resolve: (id, tick) => active && tick === atTick && this.technologyReads === null && !this.db.isTransaction &&
+        reader.resolve === resolve && reader.freshCopies === true
+        ? this.readTechnologyRecipe(id, tick, copies ??= new Map()) : reader.resolve(id, tick),
+      findBySignature: (signature, tick) => reader.findBySignature(signature, tick),
+      readBatch: (tick, callback) => reader.readBatch ? reader.readBatch(tick, callback) : callback(),
+    };
+    try { return read(view); } finally { active = false; copies?.clear(); }
   }
   /** Memoria de recetas archivadas durante la simulación (sprint noche-perf 2026-09-22). La ventana
    * residente del mundo (`budgets.maxRecipes` = 256) es menor que las recetas que recuerdan los vivos

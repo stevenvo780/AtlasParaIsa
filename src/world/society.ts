@@ -15,6 +15,12 @@ type Emit = (event: Omit<ChronicleEvent, 'id' | 'tick'>) => ChronicleEvent;
 export type Culture = NonNullable<PersonView['culture']>;
 const clamp = (n: number) => Math.max(0, Math.min(1, n));
 const distance = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(a.x - b.x, a.y - b.y);
+// Loaded in the controlled stock realm before World callbacks. Later decorators
+// still run eagerly; only this empty built-in constructor can be deferred.
+const NativeProductsMap = Map;
+const NativeProductsProxy = Proxy;
+const NativeProductsGetPrototypeOf = Object.getPrototypeOf;
+const NativeProductsTypeErrorPrototype = TypeError.prototype;
 export function initialCulture(seed: number, id: string): Culture {
   const random = localRandom(seed, `culture:${id}`);
   return { sharing: 0.15 + random() * 0.7, stewardship: 0.15 + random() * 0.7, openness: 0.15 + random() * 0.7 };
@@ -110,15 +116,39 @@ function localRecipeInputs(world: World, teacher: Person, learner: Person): (pro
     return mass;
   };
   return (program, prospectiveProductId) => {
-    const required = { wood: 0, stone: 0, water: 0 }, residue = { wood: 0, stone: 0, water: 0 }, products = new Map<string, number>();
+    const required = { wood: 0, stone: 0, water: 0 }, residue = { wood: 0, stone: 0, water: 0 };
+    const ProductsMap = Map;
+    let products: Map<string, number> | undefined;
+    if (ProductsMap !== NativeProductsMap) {
+      try { products = new ProductsMap<string, number>(); }
+      catch (error) {
+        let constructible = typeof ProductsMap === 'function';
+        if (constructible) {
+          try {
+            const probe = new NativeProductsProxy(ProductsMap, { construct() { return {}; } });
+            try { new probe(); }
+            catch (probeError) {
+              if (probeError !== null && typeof probeError === 'object' &&
+                NativeProductsGetPrototypeOf(probeError) === NativeProductsTypeErrorPrototype) constructible = false;
+            }
+          } catch { /* An unknown failure of the probe preserves the original error. */ }
+        }
+        // A non-constructor cannot have run user code; keep its native error object.
+        if (!constructible) (error as Error).message = 'Map is not a constructor';
+        throw error;
+      }
+    }
     for (const input of program.inputs) {
-      if (input.source === 'product') products.set(input.recipeId!, (products.get(input.recipeId!) ?? 0) + input.mass);
+      if (input.source === 'product') {
+        products ??= new ProductsMap<string, number>();
+        products.set(input.recipeId!, (products.get(input.recipeId!) ?? 0) + input.mass);
+      }
       else (input.source === 'raw' ? required : residue)[input.material!] += input.mass;
     }
     const fuel = program.steps.reduce((n, step) => n + (step.op === 'heat' ? step.intensity * 50 : 0), 0);
     required.wood += Math.max(0, fuel - Math.max(0, learner.technology.residue.wood - residue.wood));
     return (['wood', 'stone', 'water'] as const).every(material => required[material] <= raw[material] && residue[material] <= learner.technology.residue[material]) &&
-      [...products].every(([id, needed]) => id === prospectiveProductId || productMass(id) >= needed) &&
+      [...(products ??= new ProductsMap<string, number>())].every(([id, needed]) => id === prospectiveProductId || productMass(id) >= needed) &&
       program.steps.every(step => !step.requiredCatalyst || powers[step.requiredCatalyst] >= 0.1);
   };
 }

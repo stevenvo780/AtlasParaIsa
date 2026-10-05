@@ -4,6 +4,7 @@ import { localRandom } from './genetics.js';
 import { assertTechnologyCheckpoint } from './technology-checkpoint.js';
 import { assertTechnologyJournal } from './technology-journal.js';
 import { appendTechnologyExecution as appendExecution, technologyStock } from './technology-execution.js';
+import { emitObserved } from './observation.js';
 import { assertTechnologyWater, assertWaterExecution, containedWaterStock, freeWaterCarryQuanta, settleContainedWaterCapacity, waterEnvelope } from './technology-water.js';
 export { technologyStock } from './technology-execution.js';
 import { assertTechnologyCatalogueState, catalogueEnabled, findTechnologyRecipe, hasTechnologyFunction, registerTechnologyRecipe, resolveTechnologyRecipe, technologyCatalogueTotals, technologyMemoryCapacity, updateTechnologyRecipeStats } from './technology-catalogue.js';
@@ -280,10 +281,14 @@ export function useTool(host: TechnologyHost, actor: TechnologyActor, capability
   if (best.item.recipeId) { updateTechnologyRecipeStats(host, best.item.recipeId, { uses: 1 }); touchKnownRecipe(actor.technology, best.item.recipeId); }
   const water = waterEnvelope(actor, waterOpening, 'spill', waterLost ? { lost: waterLost } : {});
   const event = appendExecution(host, { kind: 'use', actorId: actor.id, recipeId: best.item.recipeId, programSignature: '', inputs: [{ resourceId: itemResource(best.item), mass: wear }], outputs: compositionResources(debris, 'residue'), residueMass: wear, energy: 0, work: 0, success: true, parentRecipeIds: [], catalysts: [], benefit: 0, ...(water ? { water } : {}), balance: { opening, closing: technologyStock(actor), externalInputs: [], externalLoss: [] } });
+  emitObserved(host, 'technology.tool-wear', () => ({ kind: 'technology-tool-wear', executionId: event.id,
+    actorId: actor.id, itemId: best.item.id, recipeId: best.item.recipeId, capability,
+    massBefore: best.item.mass + wear, massAfter: best.item.mass, residue: debris, wear }));
   maintainTechnologyMemory(host, actor);
   return { executionId: event.id, itemId: best.item.id, recipeId: best.item.recipeId, capability, power, wear };
 }
-export function recordTechnologyBenefit(host: TechnologyHost, actor: TechnologyActor, receipt: ToolReceipt | undefined, actualBenefit: number): void {
+export function recordTechnologyBenefit(host: TechnologyHost, actor: TechnologyActor, receipt: ToolReceipt | undefined, actualBenefit: number,
+  benefitContext: 'applied-world' | 'process-property' = 'applied-world'): void {
   if (!receipt || !Number.isFinite(actualBenefit) || actualBenefit <= 0) return;
   const state = host.technology;
   if (state.journal && Number(receipt.executionId.slice(8)) <= state.journal.committedThrough) {
@@ -292,6 +297,9 @@ export function recordTechnologyBenefit(host: TechnologyHost, actor: TechnologyA
   const execution = (state.journal?.pending ?? state.history).find(e => e.id === receipt.executionId && e.kind === 'use' && e.actorId === actor.id && e.recipeId === receipt.recipeId);
   if (!execution || execution.benefit > 0) return;
   execution.benefit = actualBenefit;
+  emitObserved(host, 'technology.benefit-applied', () => ({ kind: 'technology-benefit-update',
+    executionId: execution.id, actorId: actor.id, itemId: receipt.itemId, recipeId: receipt.recipeId,
+    capability: receipt.capability, actualBenefit, benefitContext }));
   if (receipt.recipeId) updateTechnologyRecipeStats(host, receipt.recipeId, { utility: actualBenefit });
   if (receipt.recipeId) { const practice = actor.technology.competence[receipt.recipeId] ??= { attempts: 0, successes: 0, work: 0, benefit: 0 }; practice.benefit += actualBenefit; }
   maintainTechnologyMemory(host, actor);
@@ -495,7 +503,7 @@ function finishProject(host: TechnologyHost, actor: TechnologyActor, project: Te
     if (receipt) {
       const control = applyPhysicalOperation({ ...step, requiredCatalyst: undefined }, controlInputs, 0);
       const delta = control.product ? Math.max(0, result.product.properties.cohesion - control.product.properties.cohesion) + Math.max(0, result.product.properties.edge - control.product.properties.edge) + Math.max(0, result.product.properties.toughness - control.product.properties.toughness) + Math.max(0, control.product.properties.temperature - result.product.properties.temperature) + Math.max(0, control.product.properties.porosity - result.product.properties.porosity) + Math.max(0, result.product.mass - control.product.mass) / MASS_UNIT : 0;
-      recordTechnologyBenefit(host, actor, receipt, delta);
+      recordTechnologyBenefit(host, actor, receipt, delta, 'process-property');
     }
   }
   add(knowledge.residue, residue);
@@ -529,10 +537,14 @@ function finishProject(host: TechnologyHost, actor: TechnologyActor, project: Te
   outputs.push(...compositionResources(residue, 'residue'), ...compositionResources(plan.fuel, 'spent'));
   const lost = (state.water?.environmentalLoss ?? 0) - lossBefore;
   const water = waterEnvelope(actor, waterOpening, 'spill', lost ? { lost } : {});
-  appendExecution(host, { kind: project.kind, actorId: actor.id, recipeId: recipe?.id ?? null, programSignature: signature,
+  const finishedReceipt = appendExecution(host, { kind: project.kind, actorId: actor.id, recipeId: recipe?.id ?? null, programSignature: signature,
     inputs: [...project.program.inputs.map(i => ({ resourceId: i.source === 'product' ? `recipe:${i.recipeId}` : `${i.source}:${i.material}`, mass: i.mass })), ...plan.fuelInputs], outputs,
     residueMass: mass(residue), energy: project.energyPaid, work: project.progress, success, parentRecipeIds: project.parents,
     catalysts, benefit: 0, ...(water ? { water } : {}), nestedExecutionIds: Array.from({ length: state.executionCounter - transactionStart }, (_, n) => `process-${transactionStart + n + 1}`), balance: { opening, closing: technologyStock(actor), externalInputs: compositionResources(plan.imported, 'raw'), externalLoss: compositionResources(plan.fuel, 'spent') } });
+  if (success && output && recipe) emitObserved(host, 'technology.product-manufactured', () => ({ kind: 'technology-product-manufactured',
+    executionId: finishedReceipt.id, itemId: output.id, actorId: actor.id, recipeId: recipe.id,
+    programSignature: signature, generation: output.generation, parentItemIds: output.parentItems,
+    initialMass: output.initialMass, mass: output.mass, capacities: materialCapacities(output) }));
   knowledge.project = null; maintainTechnologyMemory(host, actor);
   return success;
 }
@@ -557,6 +569,10 @@ function advanceProject(host: TechnologyHost, actor: TechnologyActor, kind: Tech
   const energy = 0.00045 * (1 - (actor.skills.technology ?? 0) * 0.2 - Math.min(1, (practice?.successes ?? 0) / 10) * 0.1);
   actor.energy = clamp(actor.energy - energy); actor.fatigue = clamp(actor.fatigue + 0.00032);
   project.progress++; project.energyPaid += energy; host.technology.ledger.work++; host.technology.ledger.energy += energy;
+  emitObserved(host, 'technology.project-paid-step', () => ({ kind: 'technology-project-paid-step',
+    actorId: actor.id, projectKind: project.kind, recipeId: project.recipeId,
+    startedAt: project.startedAt, progress: project.progress, workDebit: 1, energyDebit: energy,
+    fatigueAfter: actor.fatigue, energyAfter: actor.energy }));
   return project.progress >= project.requiredWork ? finishProject(host, actor, project, emit) : false;
 }
 export function researchTechnology(host: TechnologyHost, actor: TechnologyActor, emit?: Emit): boolean { return advanceProject(host, actor, 'research', undefined, emit); }
@@ -588,6 +604,8 @@ export function shareTechnology(host: TechnologyHost, teacher: TechnologyActor, 
   teacher.energy = clamp(teacher.energy - 0.003); teacher.fatigue = clamp(teacher.fatigue + 0.002);
   host.technology.ledger.energy += 0.003; host.technology.ledger.work += 1; host.technology.ledger.shared++;
   maintainTechnologyMemory(host, teacher); maintainTechnologyMemory(host, learner);
+  emitObserved(host, 'technology.teach', () => ({ family: 'knowledge', actorIds: [teacher.id, learner.id],
+    payload: { actorId: learner.id, techniqueId: recipe.id, transition: 'teach', teacherId: teacher.id } }));
   (emit ?? host.emit)?.({ kind: 'learning', actors: [teacher.id, learner.id], x: teacher.x, y: teacher.y, source: 'simulation', text: `${teacher.name ?? teacher.id} mostró a ${learner.name ?? learner.id} las operaciones de ${recipe.name}.`, cause: 'Transmisión cercana de una receta realmente conocida; enseñar cuesta energía y no entrega productos ni materias primas.' });
   return true;
 }
@@ -606,6 +624,9 @@ export function transferTechnologyItem(host: TechnologyHost, from: TechnologyAct
   const out = waterEnvelope(from, senderWater, 'transfer', sentWater ? { sent: sentWater } : {}), into = waterEnvelope(to, receiverWater, 'transfer', sentWater ? { received: sentWater } : {});
   appendExecution(host, { ...common, actorId: from.id, counterpartyId: to.id, inputs: resources, outputs: [], ...(out ? { water: out } : {}), balance: { opening: senderOpening, closing: technologyStock(from), externalInputs: [], externalLoss: resources } });
   appendExecution(host, { ...common, actorId: to.id, counterpartyId: from.id, inputs: [], outputs: resources, ...(into ? { water: into } : {}), balance: { opening: receiverOpening, closing: technologyStock(to), externalInputs: resources, externalLoss: [] } });
+  emitObserved(host, 'technology.transfer', () => ({ kind: 'technology-transfer', transferId,
+    fromActorId: from.id, toActorId: to.id, itemId: item.id, mass: item.mass,
+    waterQuanta: sentWater, receiptEnds: [`process-${host.technology.executionCounter - 1}`, `process-${host.technology.executionCounter}`] }));
   maintainTechnologyMemory(host, from); maintainTechnologyMemory(host, to);
   return true;
 }

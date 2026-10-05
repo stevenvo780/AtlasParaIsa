@@ -1,3 +1,4 @@
+import { notifyC10PostCommit } from './c10-store-commit-observer.js';
 import { DatabaseSync } from 'node:sqlite';
 import { createHash } from 'node:crypto';
 import { mkdirSync, existsSync } from 'node:fs';
@@ -1292,6 +1293,8 @@ export class Store {
       if (chronicleTriggers) this.snapshotParts.verifyRetained();
       else if (prepared.inline === undefined) this.snapshotParts.verify(body);
       this.db.exec('COMMIT');
+      // Passive COW observer: successful SQLite return, not a durability receipt.
+      notifyC10PostCommit(this, world, bodyDigest);
       this.saves++;
       // Confirmado: el slot 0 es ahora este cuerpo, escrito y verificado por esta misma
       // conexión, así que la rotación de respaldos se reanuda en el guardado siguiente.

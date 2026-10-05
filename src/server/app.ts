@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { createHash } from 'node:crypto';
 import { readFileSync, statSync } from 'node:fs';
 import { resolve, extname, sep } from 'node:path';
 import { isIP, type Socket } from 'node:net';
@@ -6,7 +7,7 @@ import type { Duplex } from 'node:stream';
 import { gzip } from 'node:zlib';
 import { promisify } from 'node:util';
 import { WebSocketServer, WebSocket, type RawData } from 'ws';
-import { createWorld, stepWorld, projectWorld, normalizeViewport, cloneWorld, puntoDeRestauracion, fraccionSerial, type PuntoDeRestauracion, type World, type FaseMedicion } from '../world/index.js';
+import { createWorld, stepWorld, observeWorldOpening, projectWorld, normalizeViewport, cloneWorld, puntoDeRestauracion, fraccionSerial, type PuntoDeRestauracion, type World, type FaseMedicion } from '../world/index.js';
 import { paramsOf, type WorldParams } from '../world/params.js';
 import { technologyRecipeDetail } from '../world/technology.js';
 import { technologyCatalogueNearCapacity } from '../world/technology-catalogue.js';
@@ -16,10 +17,11 @@ import type { ClientMessage, Gesture, GestureResult, ServerMessage, Viewport, Wo
 import { Store, fingerprint, GestureConflict, SessionRevoked } from './store.js';
 import { cookie, hashToken, makeToken, passwordVerifier, sessionHash } from './auth.js';
 import { ensureWorldInstance, readWorldInstance } from './world-instance.js';
-import { Gobernador } from './governor.js';
+import { Gobernador, copyTechnicalParityData, technicalParityOwnData } from './governor.js';
 import { enriquecerPersona } from './persona-extra.js';
 import { CADA_PASOS, resumenVivo } from './resumen-vivo.js';
 import { clavesVivasEn } from './regiones-vivas.js';
+import { beginObservationAttempt, bindObservation, bindObservationAttempt, emitObserved, endObservationAttempt, markObservationAttempt, observationAttempt, unbindObservation, type ObservationSession } from '../world/observation.js';
 export { decideReproduction, decidirConTecho } from './governor.js';
 
 class HttpError extends Error { constructor(readonly status: number, message: string) { super(message); } }
@@ -34,6 +36,10 @@ export interface AppOptions {
   params?: WorldParams | (() => WorldParams);
   /** Instance-local monotonic clock; tests can measure work without patching global timers. */
   monotonicNow?: () => number;
+  /** Technical replay only: consumes exactly one declared decision-clock entry per site. */
+  decisionClock?: (siteId: string, attemptId: string | null, tick: number, domain: 'app-monotonic' | 'scheduler' | 'projection', readReal: () => number) => number;
+  /** Private observer; never stored in World, snapshots or auth. */
+  observationSession?: ObservationSession;
   /** T136: permite alternar la compresión del `WebSocketServer` sin editar este fichero
    * entre corridas del banco (`scripts/benchmark-ws-deflate.ts`). `true` comprime todo
    * mensaje a todo cliente (lo que midió T136), `false` no negocia compresión. Sin valor
@@ -233,6 +239,15 @@ export function createApp(options: AppOptions) {
     world.events = world.events.slice(-120);
   }
   store.save(world);
+  if (options.observationSession) {
+    bindObservation(world, options.observationSession);
+    beginObservationAttempt(world, world.tick); observeWorldOpening(world);
+    markObservationAttempt(world, 'adopted'); // C10: no durable receipt for opening emitted after save.
+    endObservationAttempt(world);
+  }
+  let decisionWorld = world;
+  const decisionNow = (siteId: string, domain: 'app-monotonic' | 'scheduler' | 'projection' = 'app-monotonic') =>
+    options.decisionClock ? options.decisionClock(siteId, observationAttempt(decisionWorld), decisionWorld.tick, domain, monotonicNow) : monotonicNow();
   const instanceId = existingInstanceId ?? ensureWorldInstance(store.db);
   let stopped = false;
   let failed = false;
@@ -303,8 +318,8 @@ export function createApp(options: AppOptions) {
     stats.activo = draft.reproductionEnabled;
   }
   const proyectar = (viewport?: Viewport) => {
-    const start = monotonicNow(), projected = projectWorld(world, viewport, context);
-    runtime.projectionMs = monotonicNow() - start;
+    const start = decisionNow('projection-start', 'projection'), projected = projectWorld(world, viewport, context);
+    runtime.projectionMs = decisionNow('projection-end', 'projection') - start;
     return { ...projected, instanceId, regionesVivas: clavesVivasEn(world, { x: projected.originX ?? 0, y: projected.originY ?? 0, width: projected.width, height: projected.height }), performance: { ...runtime }, ...(failed ? { paused: true, pauseReason: 'No se pudo guardar. El mundo está en pausa para proteger lo ya vivido.' } : {}) };
   };
   const view = (viewport?: Viewport): WorldView => {
@@ -489,7 +504,10 @@ export function createApp(options: AppOptions) {
   }
   function avanzar() {
     if (failed || stopped) return;
-    const stepStarted = monotonicNow();
+    const initialTick = world.tick;
+    decisionWorld = world;
+    if (options.observationSession) beginObservationAttempt(world, world.tick + 1);
+    const stepStarted = decisionNow('step-start');
     runtime.cloneMs = 0; runtime.simulationMs = 0; runtime.saveMs = 0;
     // Ritmo real en reloj de pared sobre los últimos 120 pasos: lo que de verdad
     // avanza el mundo, no el intervalo pedido. Sin pasos previos no se afirma nada.
@@ -503,13 +521,20 @@ export function createApp(options: AppOptions) {
     // PERF3: el paso corre sobre el mundo vigente sin nada con que deshacerlo. Mientras siga en
     // `true`, un fallo deja `world` a medio paso (ver el `catch`).
     let sinReserva = false;
+    let observationDraft: World | null = null;
+    let observationAdopted = false;
+    // Host reconciliation is needed even with the observer OFF: Store.save may throw
+    // after its internal COMMIT, before this function adopts the saved draft.
+    let saveEntered = false;
+    let saveCompleted = false;
+    let saveAttemptTick: number | null = null;
     try {
       for (const [socket, client] of clients) if (!store.sessionValid(client.hash)) socket.close(4001, 'La sesión terminó.');
       for (const item of batch) {
         if (store.sessionValid(item.hash)) valid.push(item);
         else { item.reject(new HttpError(401, 'La sesión terminó antes de aplicar el gesto.')); pending.delete(item.gesture.id); }
       }
-      const cloneStarted = monotonicNow();
+      const cloneStarted = decisionNow('clone-start');
       // T104/PERF3. La reserva solo sirve para deshacer el paso y seguir: el único fallo del que el
       // servidor se recupera es `SessionRevoked`, y solo puede darse en un paso con gestos (`save`
       // recibe sus sesiones). Cualquier otro fallo pausa el mundo para siempre (`failed`).
@@ -523,8 +548,11 @@ export function createApp(options: AppOptions) {
       if (!clonar) punto = puntoDeRestauracion(world);
       else sinReserva = valid.length === 0;
       const draft = clonar && !sinReserva ? cloneWorld(world, context) : world;
-      runtime.cloneMs = monotonicNow() - cloneStarted;
-      const simulationStarted = monotonicNow();
+      observationDraft = draft;
+      if (options.observationSession && draft !== world) bindObservationAttempt(world, draft);
+      decisionWorld = draft;
+      runtime.cloneMs = decisionNow('clone-end') - cloneStarted;
+      const simulationStarted = decisionNow('simulation-start');
       // T107: `medicion.fases` empieza vacío en cada paso (nunca se arrastra el del anterior).
       // Reloj propio, **no** `monotonicNow`: perfilar por fase es observabilidad de hardware
       // real, nunca la variable de la que dependen las cuentas exactas de paso/gobernador con
@@ -532,7 +560,7 @@ export function createApp(options: AppOptions) {
       // haría que instrumentar sumara ticks fantasma a `simulationMs`/`stepMs`.
       const medicion: FaseMedicion = { clock: () => performance.now(), fases: {} };
       const results = stepWorld(draft, valid.map(item => item.gesture), context, medicion);
-      runtime.simulationMs = monotonicNow() - simulationStarted;
+      runtime.simulationMs = decisionNow('simulation-end') - simulationStarted;
       if (results.length !== valid.length) throw new Error('Gesture result count mismatch');
       // C3/C12: persistir es una transacción por cadencia, no por tick. Un gesto
       // confirmado nunca espera: obliga a guardar en su propio paso. Lo que se
@@ -545,21 +573,27 @@ export function createApp(options: AppOptions) {
       if (valid.length > 0 || draft.tick % paramsOf(draft).persistencia.cadaTicks === 0
         || technologyJournalNearCapacity(draft.technology) || chronicleJournalNearCapacity(draft)
         || technologyCatalogueNearCapacity(draft.technology)) {
-        const saveStarted = monotonicNow();
+        const saveStarted = decisionNow('save-start');
+        saveEntered = true; saveAttemptTick = draft.tick;
         store.save(draft, valid.map((item, i) => ({ gesture: item.gesture, result: results[i] })), valid.map(item => item.hash));
-        runtime.saveMs = monotonicNow() - saveStarted;
+        saveCompleted = true;
+        // C10: save completion does not certify SQLite power-loss durability.
+        runtime.saveMs = decisionNow('save-end') - saveStarted;
       }
-      world = draft;
+      world = draft; decisionWorld = world; observationAdopted = true;
+      if (options.observationSession) markObservationAttempt(world, 'adopted');
       // Desde aquí el paso es el mundo vigente (y, si tocaba guardar, ya es durable): un fallo en lo
       // que queda (gobernador, métricas, difusión) pausa el mundo pero no puede deshacerlo, igual que
       // con el clon, donde `world` ya es el borrador. Sin esto la memoria volvería a un tick que el
       // disco ya dejó atrás y los gestos resueltos en este paso quedarían fuera del mundo en memoria.
       // Tampoco lo deja a medio paso: sin reserva, lo que falle desde aquí pausa sobre un paso entero.
       punto = null; sinReserva = false;
-      runtime.stepMs = monotonicNow() - stepStarted;
+      runtime.stepMs = decisionNow('step-end') - stepStarted;
       runtime.p95StepMs = gobernador.registrar(runtime.stepMs);
       // El gobernador decide sobre el mundo ya vigente: la próxima `reproduce()` lo lee.
       governReproduction(world);
+      emitObserved(world, 'app.governor', () => ({ kind: 'governor-decision', tick: world.tick, enabled: world.reproductionEnabled,
+        manual: runtime.gobernador?.manual ?? null, p95InputMs: runtime.p95StepMs, ceiling: runtime.gobernador?.techo ?? null }));
       if (world.tick % CADA_PASOS === 0 || !runtime.natalidad) Object.assign(runtime, resumenVivo(world));
       runtime.activeTiles = world.tiles.length; runtime.processRssMiB = process.memoryUsage.rss() / 1048576; runtime.snapshotBytes = store.lastSnapshotBytes;
       for (let i=0; i<valid.length; i++) { pending.delete(valid[i].gesture.id); valid[i].resolve(results[i]); }
@@ -578,13 +612,44 @@ export function createApp(options: AppOptions) {
       runtime.fases = fases;
       runtime.fraccionSerial = fraccionSerial(fases);
     } catch (error) {
-      // T104: deshacer va PRIMERO, y vale para las dos salidas. Sin clon, llegar aquí con punto
-      // significa que el mundo vigente está a medio paso; un mundo que no se pudo deshacer ya no
-      // puede seguir avanzando aunque el error fuera recuperable.
-      // Sin reserva no hay nada que restaurar: el mundo se queda a medio paso.
+      // Resolve the durable boundary BEFORE restoring an in-place draft. A save can
+      // throw after COMMIT; restoring then would leave app.world behind slot 0.
+      let commitConfirmed = saveCompleted;
+      let commitUncertain = false;
+      if (saveEntered && !saveCompleted) {
+        if (store.db.isTransaction) commitUncertain = true;
+        else try {
+          const row = store.db.prepare('SELECT body,digest FROM snapshots WHERE slot=0').get() as { body: string; digest: string } | undefined;
+          if (!row || createHash('sha256').update(row.body).digest('hex') !== row.digest) commitUncertain = true;
+          else {
+            const storedTick = store.db.prepare("SELECT COALESCE(json_extract(body,'$.tick'),json_extract(body,'$.world.tick')) AS tick FROM snapshots WHERE slot=0").get() as { tick: unknown } | undefined;
+            if (storedTick?.tick === saveAttemptTick) commitConfirmed = true;
+            else if (storedTick?.tick !== initialTick) commitUncertain = true;
+          }
+        } catch { commitUncertain = true; }
+      }
+      // Restore only a demonstrably uncommitted attempt. On uncertainty the world
+      // pauses without presenting a possibly stale resident state as durable.
       let restaurado = !sinReserva;
-      if (punto) { try { punto.restaurar(); } catch { restaurado = false; } }
-      if (restaurado && error instanceof SessionRevoked) {
+      if (!commitConfirmed && !commitUncertain && punto) { try { punto.restaurar(); } catch { restaurado = false; } }
+      let coherentResident = restaurado && !commitUncertain;
+      if (commitConfirmed && !observationAdopted) {
+        // A verified committed snapshot is the authority for this exceptional
+        // path; Store.save may still have had host-side work after its COMMIT.
+        try {
+          const committed = store.load();
+          if (!committed || committed.slot !== 0 || committed.world.tick !== saveAttemptTick) coherentResident = false;
+          else { world = committed.world; decisionWorld = world; coherentResident = true; }
+        } catch { coherentResident = false; }
+      }
+      if (options.observationSession) {
+        // C10: recovery confirmation is not an independently captured durable receipt.
+        if (observationAdopted) markObservationAttempt(world, 'partial');
+        else if (commitConfirmed || commitUncertain) markObservationAttempt(observationDraft ?? world, 'partial');
+        else if (observationDraft && observationDraft !== world) markObservationAttempt(observationDraft, 'discarded');
+        else markObservationAttempt(world, restaurado ? 'restored' : 'partial');
+      }
+      if (!commitConfirmed && !commitUncertain && restaurado && error instanceof SessionRevoked) {
         // La sesión se revocó entre aceptar el gesto y confirmarlo: el mundo no avanza con un
         // gesto aplicado y no guardado, así que este paso queda deshecho y se reintenta el siguiente.
         for (const item of pending.values()) if (!store.sessionValid(item.hash)) {
@@ -596,8 +661,17 @@ export function createApp(options: AppOptions) {
       // Un mundo a medio paso (sin reserva, o con un punto que no se pudo restaurar) no es un estado
       // del mundo: desde aquí nada lo proyecta ni lo consulta (`view`, `persona`, `recipe`). Guardar ya
       // no puede: `avanzar` no pasa de `failed` y el cierre no guarda.
-      aMedioPaso = !restaurado;
-      for (const item of pending.values()) item.reject(new HttpError(503, 'No se pudo guardar; el gesto no fue confirmado.'));
+      aMedioPaso = !coherentResident;
+      for (const item of pending.values()) {
+        if (commitConfirmed) {
+          if (coherentResident) try {
+            const durableResult = store.result(item.gesture);
+            if (durableResult) { item.resolve(durableResult); continue; }
+          } catch { /* The result cannot be certified; keep the response uncertain. */ }
+          item.reject(new HttpError(503, 'El paso se guardó, pero no se pudo verificar la respuesta del gesto.'));
+        } else item.reject(new HttpError(503, commitUncertain
+          ? 'No se pudo verificar si el gesto quedó guardado.' : 'No se pudo guardar; el gesto no fue confirmado.'));
+      }
       pending.clear();
       // Do not log snapshots, inputs, or personal content on failure.
       for (const socket of clients.keys()) {
@@ -606,6 +680,9 @@ export function createApp(options: AppOptions) {
         // Terminal: no habrá más difusiones, así que no espera al acuse del `state` en vuelo.
         if (previous) sendState(socket, { ...previous, paused: true, pauseReason: 'El mundo está en pausa: no se pudo confirmar el siguiente paso. Se muestra el último estado recibido.' }, true);
       }
+    } finally {
+      if (options.observationSession) { endObservationAttempt(world);
+        if (observationDraft && observationDraft !== world) endObservationAttempt(observationDraft); }
     }
   }
   const server = createServer(async (req, res) => {
@@ -752,7 +829,7 @@ export function createApp(options: AppOptions) {
   // el retraso con una ráfaga de pasos: el mundo no salta hacia atrás ni adelante.
   const tickMs = options.tickMs ?? 100;
   let timer: ReturnType<typeof setTimeout> | undefined;
-  let next = monotonicNow() + tickMs;
+  let next = decisionNow('scheduler-initial', 'scheduler') + tickMs;
   /** Tras un paso que se pasó del intervalo: hasta cuándo puede esperar el siguiente a que acabe la E/S. */
   let cederHasta: number | null = null;
   /** Citas cedidas desde ese paso: con clientes WS, nunca menos de `VUELTAS_CON_CLIENTES_WS`. */
@@ -761,7 +838,7 @@ export function createApp(options: AppOptions) {
   function tic() {
     if (stopped) return;
     // Ceder a la E/S en curso: se vuelve a mirar cada milisegundo; entretanto el bucle atiende el poll.
-    if (cederHasta !== null && monotonicNow() < cederHasta
+    if (cederHasta !== null && decisionNow('scheduler-yield-check', 'scheduler') < cederHasta
       && (cedidas < (clients.size > 0 ? VUELTAS_CON_CLIENTES_WS : 0) || ioEnCurso())) { cedidas++; citar(1); return; }
     cederHasta = null; cedidas = 0;
     next += tickMs;
@@ -776,11 +853,11 @@ export function createApp(options: AppOptions) {
     // del cliente (verificación PERF3, 2026-09-23). Lo que llega por WS se infla sin dejarse ver: con clientes
     // WS se ceden además `VUELTAS_CON_CLIENTES_WS` citas. Nunca una ráfaga: un paso por callback, y el retraso
     // acumulado no se recupera: a tiempo, la cita compensa la deriva.
-    const now = monotonicNow();
+    const now = decisionNow('scheduler-now', 'scheduler');
     if (next < now) { next = now; cederHasta = now + tickMs; }
-    if (!stopped) citar(Math.max(0, next - monotonicNow()));
+    if (!stopped) citar(Math.max(0, next - decisionNow('scheduler-delay', 'scheduler')));
   }
-  if (!options.manual) citar(Math.max(0, next - monotonicNow()));
+  if (!options.manual) citar(Math.max(0, next - decisionNow('scheduler-delay', 'scheduler')));
   const heartbeat = setInterval(() => {
     for (const [socket, client] of clients) {
       if (!client.alive || !store.sessionValid(client.hash)) { socket.terminate(); continue; }
@@ -805,6 +882,36 @@ export function createApp(options: AppOptions) {
      * paso sin reserva que falló es el mundo a medio paso (PERF3): muerto, nadie lo proyecta ni lo guarda, y
      * lo que se le haga ya no llega a ninguna parte; las pruebas lo leen justo para comprobarlo. */
     server, stepOnce, get world() { return world; }, get failed() { return failed; },
+    /** Private lab cut; copied on demand outside step-start/step-end. */
+    technicalParityCommonState() {
+      const pendingRows = [...pending].map(([key, item]) => {
+        const gesture = technicalParityOwnData(item, 'gesture');
+        const keys = Reflect.ownKeys(item);
+        if (keys.length !== 5 || ['gesture', 'hash', 'resolve', 'reject', 'promise'].some(name => !keys.includes(name)))
+          throw new Error('APP-STATE-INCOMPLETE');
+        const hash = technicalParityOwnData(item, 'hash');
+        const promise = technicalParityOwnData(item, 'promise');
+        const resolve = technicalParityOwnData(item, 'resolve');
+        const reject = technicalParityOwnData(item, 'reject');
+        if (typeof key !== 'string' || typeof hash !== 'string' || !(promise instanceof Promise) ||
+            typeof resolve !== 'function' || typeof reject !== 'function') throw new Error('APP-STATE-INCOMPLETE');
+        return { key, gesture: copyTechnicalParityData(gesture), hash,
+          hasPromise: true, hasResolve: true, hasReject: true };
+      });
+      const runtimeGovernor = technicalParityOwnData(runtime, 'gobernador');
+      if (runtimeGovernor === null || runtimeGovernor === undefined) throw new Error('APP-STATE-INCOMPLETE');
+      const governorParams = technicalParityOwnData(paramsOf(world), 'gobernador');
+      const lastViewTick = ultimaVista === null ? null : technicalParityOwnData(ultimaVista, 'tick');
+      const worldTick = technicalParityOwnData(world, 'tick');
+      if (typeof worldTick !== 'number' || !Number.isSafeInteger(worldTick) ||
+          (lastViewTick !== null && (typeof lastViewTick !== 'number' || !Number.isSafeInteger(lastViewTick))))
+        throw new Error('APP-STATE-INCOMPLETE');
+      return { pending: pendingRows, beats: copyTechnicalParityData(beats), governor: gobernador.technicalParityState(),
+        runtimeGovernor: copyTechnicalParityData(runtimeGovernor), effectiveGovernorParams: copyTechnicalParityData(governorParams),
+        worldTick, failed, stopped, aMedioPaso, enPaso, intentoReserva, lastViewTick };
+    },
+    /** B/C-only observation identity; A† has no corresponding field or method. */
+    technicalParityG2State() { return { decisionWorldAlignment: decisionWorld === world }; },
     /** Gestos aceptados que esperan su paso (bancos y pruebas: saber que un gesto ya está en el lote
      * del paso siguiente sin adivinarlo por tiempo). */
     get gestosPendientes() { return pending.size; },

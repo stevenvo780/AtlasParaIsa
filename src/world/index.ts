@@ -22,6 +22,7 @@ import { defaultTechnologyState, initialTechnologyKnowledge, technologyOpportuni
 import { catalogueEnabled, resolveTechnologyRecipe, withArchiveReadBatch } from './technology-catalogue.js';
 import { initialDemography, demographicTraits, updateDemography } from './demography.js';
 import { reproductiveReadiness, familyOpportunity, availableToShare, closeKin, chooseReproductivePartner, pairAffinity, pairTie, earlierForagerExhausts, observedForagersByCell } from './family.js';
+import { beginObservationAttempt, bindObservationAttempt, endObservationAttempt, markObservationAttempt, bindObservationSource, emitObserved, enterObservationPhase, observationAttempt, observationSession, unbindObservation, unbindObservationSource } from './observation.js';
 import { advancePopulation, assertLegacyRecord, assertPopulation } from './lineage.js';
 import { analyzeTechnologyOrganization } from './technology-organization.js';
 import { captureTechnologyCheckpoint, advanceTechnologyCheckpoint } from './technology-checkpoint.js';
@@ -278,6 +279,7 @@ export function ecology(world: World): void {
     if (tile.terrain === 'water') continue;
     // Neighbor water is an explicit, local moisture source (same four cells, same short-circuit order).
     const nearWater = waterAt(tile.x - 1, tile.y) || waterAt(tile.x + 1, tile.y) || waterAt(tile.x, tile.y - 1) || waterAt(tile.x, tile.y + 1);
+    const moistureBefore = tile.moisture, vegetationBefore = tile.vegetation, foodBefore = tile.food;
     tile.moisture = clamp(tile.moisture + (world.weather === 'rain' ? 0.012 : 0) + (nearWater ? 0.008 : 0) - 0.0015 - light * 0.001);
     const K = tile.biome === 'forest' ? capacidadBosque : tile.biome === 'grassland' ? capacidadPastizal : capacidadOtros;
     const headroom = K > 0 ? 1 - tile.vegetation / K : 0;
@@ -285,6 +287,10 @@ export function ecology(world: World): void {
     tile.vegetation = clamp(tile.vegetation + growth - (tile.moisture < 0.15 ? 0.0015 : 0.0001));
     const foodHeadroom = K > 0 ? 1 - tile.food / K : 0;
     tile.food = clamp(tile.food + velocidadRegeneracion * light * tile.moisture * tile.vegetation * CRECIMIENTO_COMIDA * foodHeadroom - decaimientoComida);
+    emitObserved(world, 'index.ecology.tile', () => ({ kind: 'ecology-prekernel-tile', x: tile.x, y: tile.y,
+      biome: tile.biome, weather: world.weather, light, nearWater, capacity: K, vegetationGrowth: growth,
+      before: { moisture: moistureBefore, vegetation: vegetationBefore, food: foodBefore },
+      after: { moisture: tile.moisture, vegetation: tile.vegetation, food: tile.food } }));
   }
 }
 
@@ -931,6 +937,10 @@ function move(world: World, person: Person): void {
   while (previous.get(key(best)) !== start) best = previous.get(key(best))!;
   if (!payContainedWaterCarry(world, person)) { person.reason = 'La carga de agua requiere más esfuerzo del que puede hacer ahora.'; return; }
   person.x = best.x; person.y = best.y;
+  emitObserved(world, 'index.move', () => ({ family: 'migration', actorIds: [person.id],
+    protectedOriginIds: person.role === 'S' || person.role === 'I' ? [person.id] : [],
+    payload: { actorId: person.id, originSourceId: `${start.x},${start.y}`,
+      visitRefs: [`${best.x},${best.y}`], destinationStartTick: world.tick } }));
   personaMovida(world, person);
   trampleTile(tileAt(world, person)!);
   exertBody(person, { energy: 0.0008, fatigue: 0.0007 * (1.2 - person.traits.resilience * 0.4) });
@@ -1024,19 +1034,28 @@ function bodyAndAction(world: World, person: Person): void {
     const saved = Math.min(harvest * 0.25, 0.25 - person.inventory);
     person.inventory += saved;
     let consumed = harvest - saved;
-    if(consumed<0.001 && person.hunger>0.2) consumed += takeFood(world,person,0.002);
+    let fromStructure = 0;
+    if(consumed<0.001 && person.hunger>0.2) { fromStructure = takeFood(world,person,0.002); consumed += fromStructure; }
     if (consumed < 0.001 && person.inventory > 0 && person.hunger > 0.2) {
       const carried = Math.min(person.inventory, 0.002);
       person.inventory -= carried; consumed += carried;
     }
+    const hungerBefore = person.hunger;
     assimilateFood(person, consumed, { hungerPerUnit: HAMBRE_POR_UNIDAD, energyPerUnit: 1.2 });
+    if (fromStructure > 0) emitObserved(world, 'index.food-applied', () => ({ kind: 'food-applied', actorId: person.id,
+      consumptionId: `eat:${world.tick}:${person.id}`, fromStructure, totalConsumed: consumed,
+      hungerBefore, hungerAfter: person.hunger }));
     if (consumed > 0 && world.tick - person.lastOutcome >= 30) outcome(world, person, 'eat', consumed * 30);
     if (person.hunger < 0.12) person.decisionAt = world.tick + 1;
   }
   if (person.action === 'drink' && distance(person, person.target) < 0.5) {
     const needed = Math.min(0.006, person.thirst / SED_POR_UNIDAD);
     const ambient = takeWater(world, person, needed);
+    const thirstBefore = person.thirst;
     hydrateBody(person, ambient);
+    if (ambient > 0) emitObserved(world, 'index.water-applied', () => ({ kind: 'water-applied', actorId: person.id,
+      consumptionId: `drink:${world.tick}:${person.id}`, ambientAndCistern: ambient,
+      thirstBefore, thirstAfter: person.thirst }));
     if (ambient > 0 && paramsOf(world).agua.memoria < 1) person.waterMemory = { x: person.x, y: person.y };
     const remaining = Math.max(0, Math.floor((needed - ambient) * WATER_QUANTA_PER_UNIT));
     const contained = remaining > 0 ? drinkContainedWater(world, person, remaining) / WATER_QUANTA_PER_UNIT : 0;
@@ -1227,27 +1246,98 @@ export function fraccionSerial(fases: Partial<Record<FaseNombre, number>>): numb
   for (const [nombre, ms] of Object.entries(fases) as [FaseNombre, number][]) { total += ms; if (FASES_SERIALES.has(nombre)) serie += ms; }
   return total > 0 ? serie / total : 0;
 }
+/** Host-only read of the durable opening cut. The observer bus is a WeakMap, never world state. */
+export function observeWorldOpening(world: World): void {
+  if (!observationSession(world)) return;
+  enterObservationPhase(world, 'opening');
+  emitObserved(world, 'c10.opening-cut', () => ({ kind: 'c10-opening-cut',
+    structures: world.structures.map(structure => ({ structureId: structure.id,
+      regionId: chunkKey(structure.x, structure.y),
+      terrainEligible: world.tiles.some(tile => tile.x === structure.x && tile.y === structure.y && tile.terrain === 'shelter'),
+    })) }));
+  for (const person of world.people) emitObserved(world, 'index.opening.person', () => ({ family: 'person',
+    actorIds: [person.id], protectedOriginIds: person.role === 'S' || person.role === 'I' ? [person.id] : [],
+    payload: { actorId: person.id, role: person.role === 'neighbor' ? 'mortal' : person.role,
+      birthTick: person.bornAt, founder: person.genome.generation === 0,
+      species: 'human', parentIds: person.genome.parents ?? [], positionRef: `tile:${person.x},${person.y}`,
+      ageOrigin: person.bornAt < 0 ? 'initial-model-age' : 'observed-birth',
+      ageAtOpeningTicks: world.tick - person.bornAt } }));
+  for (const animal of world.animals) emitObserved(world, 'index.opening.animal', () => ({ family: 'person',
+    actorIds: [animal.id], payload: { actorId: animal.id, role: 'fauna', birthTick: animal.bornAt,
+      species: animal.species, parentIds: animal.parents, founder: animal.generation === 0,
+      positionRef: `tile:${animal.x},${animal.y}`,
+      ageOrigin: animal.bornAt < 0 ? 'initial-model-age' : 'observed-birth',
+      ageAtOpeningTicks: world.tick - animal.bornAt } }));
+  for (const tile of world.tiles) emitObserved(world, 'index.opening.tile', () => ({ kind: 'opening-tile-stock',
+    x: tile.x, y: tile.y, regionId: chunkKey(tile.x, tile.y), food: tile.food,
+    growth: tile.growth ?? null, vegetation: tile.vegetation, wood: tile.wood ?? 0,
+    stone: tile.stone ?? 0, drinkingWater: tile.drinkingWater ?? 0,
+    moisture: tile.moisture, fertility: tile.fertility ?? 0, fauna: tile.fauna ?? 0 }));
+  for (const structure of world.structures) {
+    emitObserved(world, 'index.opening.structure', () => ({ family: 'structure',
+      actorIds: structure.builderId ? [structure.builderId] : [], payload: { structureId: structure.id, creationTick: structure.builtAt,
+        blueprintId: structure.blueprintId, condition: structure.condition } }));
+    emitObserved(world, 'index.opening.structure-exposure', () => ({ family: 'exposure',
+      actorIds: structure.builderId ? [structure.builderId] : [],
+      payload: { subjectId: structure.id, regionId: chunkKey(structure.x, structure.y), startTick: world.tick, mode: 'active' } }));
+  }
+  for (const chunk of world.retiredChunks) emitObserved(world, 'index.opening.retired', () => ({ kind: 'opening-retired-region',
+    regionId: chunk.key, localTick: chunk.lastTick, tileCount: chunk.tiles.length,
+    animalIds: (chunk.animals ?? []).map(animal => animal.id),
+    structureIds: (chunk.structures ?? []).map(structure => structure.id) }));
+}
 export function stepWorld(world: World, inputs: Gesture[] = [], context: WorldContext = worldContext(world), medicion?: FaseMedicion): GestureResult[] {
   bindWorldContext(world, context);
   if (world.technology.checkpoint === undefined) world.technology.checkpoint = captureTechnologyCheckpoint(world.technology, world.people, world.tick, 'migration');
+  const autoObservationAttempt = !!observationSession(world) && !observationAttempt(world);
+  if (autoObservationAttempt) beginObservationAttempt(world, world.tick + 1);
   world.tick++;
+  emitObserved(world, 'index.step-inputs', () => ({ family: 'boundary', payload: { boundaryId: `world:${world.seed}:${world.tick}`, includesProtected: true, scope: 'partial' } }));
   // Sprint noche-perf2 2026-09-22: el paso sólo LEE el archivo de recetas (nunca escribe en él: eso es
   // del guardado, fuera del paso), así que sus lecturas a fecha de este tick van como un lote del
   // anfitrión, con un solo sello de la memoria de lecturas del Store en vez de uno por lectura (~900 por
   // paso con ~230 habitantes). El mundo resultante es el mismo; ver `readBatch` en store.ts.
-  return withArchiveReadBatch(world, () => conRejilla(world, () => advanceTick(world, inputs, context, medicion)));
+  let observedStepComplete = false;
+  try {
+    const result = withArchiveReadBatch(world, () => conRejilla(world, () => advanceTick(world, inputs, context, medicion)));
+    observedStepComplete = true; return result;
+  } finally { if (observationSession(world)) {
+    for (const tile of world.tiles) unbindObservationSource(tile);
+    for (const person of world.people) unbindObservationSource(person.technology);
+    // C10 v2: adopted is tentative; only the host's independently captured
+    // durable COMMIT ledger can authorize physical ingestion. No durable mark here.
+    if (autoObservationAttempt) { markObservationAttempt(world, observedStepComplete ? 'adopted' : 'partial'); endObservationAttempt(world); }
+  } }
 }
 function advanceTick(world: World, inputs: Gesture[], context: WorldContext, medicion: FaseMedicion | undefined): GestureResult[] {
+  enterObservationPhase(world, 'maintainRegions');
   medirFase(medicion, 'maintainRegions', () => maintainRegions(world, context));
+  if (observationSession(world)) {
+    for (const tile of world.tiles) bindObservationSource(tile, world);
+    for (const person of world.people) bindObservationSource(person.technology, world, person.id);
+  }
+  enterObservationPhase(world, 'inputs');
   const results = inputs.map((gesture, order) => applyGesture(world, gesture, order));
+  for (let order = 0; order < inputs.length; order++) emitObserved(world, 'index.gesture-result', () => ({
+    kind: 'gesture-result', gestureId: inputs[order]!.id, gestureKind: inputs[order]!.kind,
+    x: inputs[order]!.x, y: inputs[order]!.y, agentId: inputs[order]!.agentId ?? null,
+    command: inputs[order]!.order ?? null, memoryRefPresent: !!inputs[order]!.memoryId,
+    accepted: results[order]!.accepted, order }));
   world.invitations = world.invitations.filter(invitation => invitation.until > world.tick);
   world.reminders = world.reminders.filter(reminder => reminder.until > world.tick);
+  enterObservationPhase(world, 'ecologia');
   medirFase(medicion, 'ecologia', () => ecology(world));
   // T013 (decaimiento de fertilidad) + T035 (gateo de cuenca duradero: la lluvia no rellena
   // una tesela fuera de cuenca) viajan juntos en las mismas opciones de ecología.
-  medirFase(medicion, 'kernel', () => stepEcosystem(world.tiles, world.tick, world.weather, phaseAt(world.tick), false,
-    { decaimientoFertilidad: paramsOf(world).recursos.decaimientoFertilidad, seed: world.seed, cuencas: paramsOf(world).agua.cuencas, soaTerreno: paramsOf(world).motor.soaTerreno }));
+  enterObservationPhase(world, 'kernel');
+  if (observationSession(world)) bindObservationAttempt(world, world.tiles);
+  try {
+    medirFase(medicion, 'kernel', () => stepEcosystem(world.tiles, world.tick, world.weather, phaseAt(world.tick), false,
+      { decaimientoFertilidad: paramsOf(world).recursos.decaimientoFertilidad, seed: world.seed, cuencas: paramsOf(world).agua.cuencas, soaTerreno: paramsOf(world).motor.soaTerreno }));
+  } finally { if (observationSession(world)) unbindObservation(world.tiles); }
+  enterObservationPhase(world, 'fauna');
   medirFase(medicion, 'fauna', () => { stepAnimals(world,event=>addEvent(world,event)); stepStructures(world,event=>addEvent(world,event)); });
+  enterObservationPhase(world, 'personas');
   medirFase(medicion, 'personas', () => {
     for (const person of world.people) bodyAndAction(world, person);
     for (const person of world.people) {
@@ -1259,15 +1349,26 @@ function advanceTick(world: World, inputs: Gesture[], context: WorldContext, med
       }
     }
   });
+  enterObservationPhase(world, 'encuentros');
   medirFase(medicion, 'encuentros', () => { encounters(world); convivir(world); });
+  enterObservationPhase(world, 'demografia');
   medirFase(medicion, 'demografia', () => advancePopulation(world,{emit:event=>addEvent(world,event.kind==='death'?deathContext(world,event):event),beforeDeath:transferEstate}));
+  enterObservationPhase(world, 'comunidades');
   medirFase(medicion, 'comunidades', () => updateCommunities(world, event => addEvent(world, event)));
+  enterObservationPhase(world, 'reproduccion');
   medirFase(medicion, 'reproduccion', () => reproduce(world));
+  enterObservationPhase(world, 'checkpoint');
   medirFase(medicion, 'checkpoint', () => {
     if (catalogueEnabled(world.technology)) for (const person of world.people) maintainTechnologyMemory(world, person);
     advanceTechnologyCheckpoint(world.technology, world.people, world.tick);
   });
+  enterObservationPhase(world, 'muestreo');
   medirFase(medicion, 'muestreo', () => recordSample(world));
+  emitObserved(world, 'c10.closing-cut', () => ({ kind: 'c10-closing-cut',
+    structures: world.structures.map(structure => ({ structureId: structure.id,
+      regionId: chunkKey(structure.x, structure.y),
+      terrainEligible: world.tiles.some(tile => tile.x === structure.x && tile.y === structure.y && tile.terrain === 'shelter'),
+    })) }));
   return results;
 }
 
@@ -1294,7 +1395,10 @@ function transferEstate(world: World, person: Person): void {
 const ELECCION_POR_AFINIDAD = true;
 function reproduce(world: World): void {
   const pop = paramsOf(world).poblacion;
-  if (!world.reproductionEnabled || world.people.length >= pop.maxima) return;
+  if (!world.reproductionEnabled || world.people.length >= pop.maxima) {
+    emitObserved(world, 'index.reproduce.global-stop', () => ({ kind: 'reproduction-period', gate: !world.reproductionEnabled ? 'enabled-false' : 'population-maxima', tick: world.tick }));
+    return;
+  }
   // Leyes candidatas del embudo de natalidad (diagnóstico 2026-09-22). `comprobacionContinua`
   // cambia SÓLO el muestreo: en vez de mirar una vez cada `intervaloComprobacionTicks` pasos,
   // mira cada paso, pero el cupo se cuenta sobre la misma ventana móvil, así que el calendario
@@ -1302,25 +1406,40 @@ function reproduce(world: World): void {
   // nuevos en `World`: la ventana se reconstruye de los `bornAt` que ya existen, y los
   // fundadores (`bornAt ≤ −1200`, `genes.edadFundadoresMinDias` ≥ 0,5 días) no caen dentro
   // de ella con el intervalo por defecto.
-  if (!pop.comprobacionContinua && world.tick % pop.intervaloComprobacionTicks !== 0) return;
+  if (!pop.comprobacionContinua && world.tick % pop.intervaloComprobacionTicks !== 0) {
+    emitObserved(world, 'index.reproduce.cadence-stop', () => ({ kind: 'reproduction-period', gate: 'cadence', tick: world.tick }));
+    return;
+  }
   const recientes = pop.comprobacionContinua
     ? world.people.filter(p => p.role === 'neighbor' && p.bornAt > world.tick - pop.intervaloComprobacionTicks).length : 0;
   const cupo = pop.nacimientosPorComprobacion - recientes;
-  if (cupo <= 0) return;
+  if (cupo <= 0) {
+    emitObserved(world, 'index.reproduce.quota-stop', () => ({ kind: 'reproduction-period', gate: 'global-quota', tick: world.tick }));
+    return;
+  }
   const used = new Set<string>();
-  const fit = (p: Person): boolean => !used.has(p.id)
-    && fertile(world, p) && (!pop.exigeComunidad || !!p.communityId);
-  const match = (a: Person, b: Person): boolean => b !== a && fit(b) && distance(a, b) <= pop.radioPareja && (a.bonds[b.id] ?? 0) >= 0.3 && (b.bonds[a.id] ?? 0) >= 0.3 && !closeKin(a, b);
+  const fit = (p: Person): boolean => {
+    const passed = !used.has(p.id) && fertile(world, p) && (!pop.exigeComunidad || !!p.communityId);
+    emitObserved(world, 'index.reproduce.fit', () => ({ kind: 'reproduction-gate', gate: 'fit', actorIds: [p.id], passed }));
+    return passed;
+  };
+  const match = (a: Person, b: Person): boolean => {
+    const passed = b !== a && fit(b) && distance(a, b) <= pop.radioPareja && (a.bonds[b.id] ?? 0) >= 0.3 && (b.bonds[a.id] ?? 0) >= 0.3 && !closeKin(a, b);
+    emitObserved(world, 'index.reproduce.match', () => ({ kind: 'reproduction-gate', gate: 'match', actorIds: [a.id, b.id], passed }));
+    return passed;
+  };
   for (let n = 0; n < cupo && world.people.length < pop.maxima; n++) {
     let pair: { a: Person; b: Person } | undefined, place: (typeof world.places)[number] | undefined;
     for (const a of world.people) {
       if (!fit(a)) continue;
       const here = primeroCerca(world.places, a, pop.radioLugar + 1, p => distance(a, p) <= pop.radioLugar);
+      emitObserved(world, 'index.reproduce.place', () => ({ kind: 'reproduction-gate', gate: 'place', actorIds: [a.id], passed: !!here, placeId: here?.id ?? null }));
       if (!here) continue;
       const b = chooseReproductivePartner(world, a, vecinos(world, a, pop.radioPareja + 1, p => {
         if (!match(a, p)) return false;
         return true;
       }, 'reproduce'), ELECCION_POR_AFINIDAD);
+      emitObserved(world, 'index.reproduce.partner', () => ({ kind: 'reproduction-gate', gate: 'partner', actorIds: [a.id, ...(b ? [b.id] : [])], passed: !!b }));
       if (!b) continue;
       if (!ELECCION_POR_AFINIDAD) { pair = { a, b }; place = here; break; }
       const afinidad = pairAffinity(a, b, pop.radioPareja), mejor = pair ? pairAffinity(pair.a, pair.b, pop.radioPareja) : -Infinity;
@@ -1328,6 +1447,7 @@ function reproduce(world: World): void {
         pair = { a, b }; place = here;
       }
     }
+    emitObserved(world, 'index.reproduce.pair', () => ({ kind: 'reproduction-gate', gate: 'pair', actorIds: pair ? [pair.a.id, pair.b.id] : [], passed: !!pair && !!place }));
     if (!pair || !place) break;
     const { a, b } = pair;
     const serial=world.birthCounter+1, id=`descendant-${serial}`;
@@ -1351,6 +1471,11 @@ function reproduce(world: World): void {
     if (a.waterMemory) child.waterMemory = { x: a.waterMemory.x, y: a.waterMemory.y };
     a.inventory -= 0.08; b.inventory -= 0.08; a.energy = clamp(a.energy - 0.08); b.energy = clamp(b.energy - 0.08); a.lastBirth = world.tick; b.lastBirth = world.tick;
     world.people.push(child);
+    emitObserved(world, 'index.reproduce.accepted', () => ({ kind: 'reproduction-accepted',
+      childId: child.id, actorIds: [a.id, b.id], tick: world.tick }));
+    emitObserved(world, 'index.birth', () => ({ family: 'person', actorIds: [a.id, b.id, child.id],
+      payload: { actorId: child.id, role: 'mortal', birthTick: world.tick, founder: false,
+        parentIds: [a.id, b.id], ageOrigin: 'observed-birth' } }));
     // El evento de fundación de una comunidad comparte el arreglo con `group.members`
     // (society.ts). Con la comprobación periódica un nacimiento cae siempre en el mismo paso
     // que ese evento, así que empujar aquí lo extiende ANTES de que se archive y la crónica

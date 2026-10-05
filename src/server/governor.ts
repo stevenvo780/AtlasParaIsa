@@ -1,3 +1,54 @@
+import { types as utilTypes } from 'node:util';
+
+/** Private parity probe. Copy data descriptors only; never run application getters. */
+export function technicalParityOwnData(value: object, key: string): unknown {
+  if (utilTypes.isProxy(value)) throw new Error('APP-STATE-INCOMPLETE');
+  const descriptor = Object.getOwnPropertyDescriptor(value, key);
+  if (!descriptor || !Object.hasOwn(descriptor, 'value')) throw new Error('APP-STATE-INCOMPLETE');
+  return descriptor.value;
+}
+export function copyTechnicalParityData(value: unknown): unknown {
+  const seen = new WeakMap<object, unknown>();
+  const copy = (item: unknown): unknown => {
+    if (item === null || typeof item === 'string' || typeof item === 'boolean' || item === undefined) return item;
+    if (typeof item === 'number' && Number.isFinite(item)) return item;
+    if (typeof item !== 'object' || utilTypes.isProxy(item)) throw new Error('APP-STATE-INCOMPLETE');
+    const prior = seen.get(item);
+    if (prior !== undefined) return prior;
+    const prototype = Object.getPrototypeOf(item);
+    if (Array.isArray(item)) {
+      if (prototype !== Array.prototype) throw new Error('APP-STATE-INCOMPLETE');
+      const length = technicalParityOwnData(item, 'length');
+      if (typeof length !== 'number' || !Number.isSafeInteger(length) || length < 0)
+        throw new Error('APP-STATE-INCOMPLETE');
+      const result: unknown[] = new Array(length);
+      seen.set(item, result);
+      for (const key of Reflect.ownKeys(item)) {
+        if (key === 'length') continue;
+        if (typeof key !== 'string' || !/^(0|[1-9][0-9]*)$/.test(key) || Number(key) >= result.length)
+          throw new Error('APP-STATE-INCOMPLETE');
+        const descriptor = Object.getOwnPropertyDescriptor(item, key);
+        if (!descriptor || !Object.hasOwn(descriptor, 'value')) throw new Error('APP-STATE-INCOMPLETE');
+        Object.defineProperty(result, key, { ...descriptor, value: copy(descriptor.value) });
+      }
+      const lengthDescriptor = Object.getOwnPropertyDescriptor(item, 'length');
+      if (!lengthDescriptor || !Object.hasOwn(lengthDescriptor, 'value')) throw new Error('APP-STATE-INCOMPLETE');
+      Object.defineProperty(result, 'length', lengthDescriptor);
+      return result;
+    }
+    if (prototype !== Object.prototype && prototype !== null) throw new Error('APP-STATE-INCOMPLETE');
+    const result: Record<string, unknown> = prototype === null ? Object.create(null) as Record<string, unknown> : {};
+    seen.set(item, result);
+    for (const key of Reflect.ownKeys(item)) {
+      if (typeof key !== 'string') throw new Error('APP-STATE-INCOMPLETE');
+      const descriptor = Object.getOwnPropertyDescriptor(item, key);
+      if (!descriptor || !Object.hasOwn(descriptor, 'value')) throw new Error('APP-STATE-INCOMPLETE');
+      Object.defineProperty(result, key, { ...descriptor, value: copy(descriptor.value) });
+    }
+    return result;
+  };
+  return copy(value);
+}
 /** Recent completed steps, including persistence. This is not a lifetime percentile. */
 export const GOVERNOR_WINDOW_STEPS = 120;
 
@@ -6,6 +57,14 @@ export class RollingStepPerformance {
   private readonly measurements: number[] = [];
 
   get count(): number { return this.measurements.length; }
+
+  /** Private read at a parity cut, never on the record/decision path. */
+  technicalParityMeasurements(): number[] {
+    const copy = copyTechnicalParityData(this.measurements);
+    if (!Array.isArray(copy) || !copy.every((value): value is number => typeof value === 'number' && Number.isFinite(value)))
+      throw new Error('GOVERNOR-STATE-INCOMPLETE');
+    return copy;
+  }
 
   record(stepMs: number): number {
     this.measurements.push(stepMs);
@@ -71,6 +130,16 @@ export class Gobernador {
   private enRojo = false;
 
   registrar(stepMs: number): number { this.p95StepMs = this.medidas.record(stepMs); return this.p95StepMs; }
+
+  /** Full private state at a parity cut; no mirror or new per-step state. */
+  technicalParityState() {
+    const measurements = this.medidas.technicalParityMeasurements();
+    const count = this.medidas.count;
+    if (count !== measurements.length || count > GOVERNOR_WINDOW_STEPS) throw new Error('GOVERNOR-STATE-INCOMPLETE');
+    return { measurements, count, p95StepMs: this.p95StepMs,
+      estado: copyTechnicalParityData(this.estado), techoObservado: copyTechnicalParityData(this.techoObservado),
+      enRojo: this.enRojo };
+  }
 
   /**
    * Decide `reproductionEnabled` para el paso siguiente. `actual` es el valor vigente del mundo.

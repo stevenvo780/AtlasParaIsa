@@ -7,6 +7,7 @@ import { MAX_COORDINATE } from './terrain.js';
 import { LEGACY_WORLD_LIMITS, limitsOf } from './params.js';
 import { tileLookup } from './tile-index.js';
 import { primero, primerosDos } from './orden.js';
+import { emitObserved } from './observation.js';
 
 export const MAX_ACTIVE_ANIMALS = 8192;
 export const MAX_ANIMALS_PER_TILE = 6;
@@ -240,6 +241,8 @@ function move(animal: Animal, world: AnimalWorld, state: LocalState): void {
 }
 function death(world: AnimalWorld, animal: Animal, cause: string, emit?: AnimalEmitter, hunter?: string): void {
   animal.health = 0; world.animalDynamics.deaths++;
+  emitObserved(world, 'animals.death', () => ({ kind: 'animal-death', animalId: animal.id, species: animal.species,
+    birthTick: animal.bornAt, deathTick: world.tick, causeCode: cause, hunterId: hunter ?? null, x: animal.x, y: animal.y }));
   emit?.({ kind: 'animal', actors: hunter ? [hunter, animal.id] : [animal.id], x: animal.x, y: animal.y,
     text: `${animal.species} ${animal.id} muere por ${cause}.`, cause, source: 'simulation' });
 }
@@ -265,6 +268,8 @@ function feed(animal: Animal, tile: Tile, world: AnimalWorld): void {
     tile.vegetation = clamp(tile.vegetation - consumed * 0.5);
     assimilateFood(animal, consumed, { hungerPerUnit: 4, assimilation: 1 - animal.genes.carnivory, energyPerUnit: 0.8 });
     world.animalDynamics.plantConsumed += consumed;
+    emitObserved(world, 'animals.graze', () => ({ kind: 'animal-feeding', animalId: animal.id,
+      sourceId: `${tile.x},${tile.y}`, consumed, hungerAfter: animal.hunger, growthAfter: tile.growth }));
     // Plant water is finite and belongs to this patch, never to an invisible drinking reservoir.
     if (animal.species !== 'fish') {
       const moisture = Math.min(tile.moisture, consumed * 3);
@@ -275,6 +280,9 @@ function feed(animal: Animal, tile: Tile, world: AnimalWorld): void {
   } else if (animal.action === 'drink') {
     const water = takeWater(animal, tile, Math.min(0.0016, animal.thirst / 3));
     hydrateBody(animal, water); world.animalDynamics.waterConsumed += water;
+    emitObserved(world, 'animals.drink', () => ({ kind: 'animal-hydration', animalId: animal.id,
+      sourceId: `${tile.x},${tile.y}`, consumed: water, thirstAfter: animal.thirst,
+      waterAfter: animal.species === 'fish' ? tile.moisture : tile.drinkingWater ?? 0 }));
     if (animal.thirst < 0.15 || water <= 0) animal.lastDecision = world.tick - 12;
   } else if (animal.action === 'rest') {
     restBody(animal, { fatigue: 0.002, energy: 0.0015 });
@@ -332,6 +340,9 @@ function reproduce(world: AnimalWorld, state: LocalState, active: Animal[], emit
       generation: Math.max(a.generation, b.generation) + 1, parents, age: 0, bornAt: world.tick, lastBirth: world.tick, lastBirthAge: 0,
       lastDecision: world.tick, lastMove: world.tick, target: { x: a.x, y: a.y }, memory: [], work: 0, preyId: null };
     world.animals.push(child); state.counts.set(cell(a), (state.counts.get(cell(a)) ?? 0) + 1); world.animalDynamics.births++;
+    emitObserved(world, 'animals.birth', () => ({ family: 'person', actorIds: [id, ...parents],
+      payload: { actorId: id, role: 'fauna', birthTick: world.tick, species: a.species,
+        parentIds: parents, founder: false, ageOrigin: 'observed-birth' } }));
     emit?.({ kind: 'animal', actors: [...parents, id], x: a.x, y: a.y, text: `Nace ${a.species} de generación ${child.generation}.`, cause: 'reproducción con costes corporales, alimento y agua', source: 'simulation' });
   }
 }

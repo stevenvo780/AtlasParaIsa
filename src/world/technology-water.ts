@@ -8,6 +8,7 @@ import { assertTechnologyJournalRoom } from './technology-journal.js';
 import { touchKnownRecipe } from './technology-memory.js';
 import { updateTechnologyRecipeStats } from './technology-catalogue.js';
 import { firstTileAt } from './tile-index.js';
+import { emitObserved } from './observation.js';
 import { assertWaterContents, capacityOverflowReturns, containerAffordance, DEFAULT_WATER_POLICY, flowQuantized,
   leakIntegerRemainder, WATER_QUANTA_PER_UNIT } from './material-affordances.js';
 
@@ -229,7 +230,11 @@ export function maintainContainedWater(host: TechnologyHost, actor: TechnologyAc
   }
   if (lost) { room(host); account(host, { environmentalLoss: lost }); }
   for (const change of changes) change.item.contents = change.contents;
-  if (lost) record(host, actor, waterEnvelope(actor, opening, 'leak', { lost })!);
+  if (lost) {
+    record(host, actor, waterEnvelope(actor, opening, 'leak', { lost })!);
+    emitObserved(host, 'technology-water.leak', () => ({ kind: 'contained-water-leak', actorId: actor.id,
+      lostQuanta: lost, opening, closing: containedWaterStock(actor) }));
+  }
 }
 /** Bodily and per-tick handling prerequisites shared by real actions and read-only forecasts.
  * Ownership, contents and source debits remain the action's responsibility. */
@@ -264,6 +269,9 @@ export function fillContainedWater(host: TechnologyHost, actor: WaterActor, item
   exertBody(actor, { energy, fatigue: flow.workSpent * WATER_WORK_FATIGUE });
   record(host, actor, waterEnvelope(actor, opening, 'fill', { filled: flow.movedQuanta,
     source: { x: tile.x, y: tile.y, opening: before, closing: tile.drinkingWater } })!, flow.workSpent, energy, 0, item.recipeId);
+  emitObserved(host, 'technology-water.fill', () => ({ kind: 'contained-water-fill', actorId: actor.id,
+    itemId, filledQuanta: flow.movedQuanta, sourceId: `${tile.x},${tile.y}`, sourceWaterAfter: tile.drinkingWater,
+    opening, closing: containedWaterStock(actor) }));
   return flow.movedQuanta;
 }
 /** Hydration follows the debit, and only actual thirst relief is credited to the artifact. */
@@ -295,6 +303,9 @@ export function drinkContainedWater(host: TechnologyHost, actor: WaterActor, req
   actor.technology.waterActionAt = host.tick;
   actor.energy = body.energy; actor.fatigue = body.fatigue; actor.thirst = body.thirst;
   record(host, actor, waterEnvelope(actor, opening, 'drink', { consumed: flow.movedQuanta })!, flow.workSpent, energy, benefit, item.recipeId);
+  emitObserved(host, 'technology-water.drink', () => ({ kind: 'contained-water-drink', actorId: actor.id,
+    itemId: item.id, consumedQuanta: flow.movedQuanta, actualThirstRelief: benefit,
+    opening, closing: containedWaterStock(actor) }));
   return flow.movedQuanta;
 }
 /** One actual movement can pay this payload cost; an exhausted carrier cannot move it for free. */

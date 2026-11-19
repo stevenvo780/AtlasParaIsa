@@ -126,6 +126,27 @@ export interface WorldParams {
      *   la revisión en que nace (`formedAt === tick`).
      */
     disolucion: number };
+  /**
+   * Leyes locales de estabilidad tecnológica (Fase B, `docs/PLAN-ESTABILIDAD-2026-11-18.md`,
+   * `docs/preregistros/2026-11-18-estabilidad-tecnologia.md`). Constitución II: nacen en sus valores
+   * históricos tanto en `HISTORICAL_PARAMS` como en `DEFAULT_PARAMS` hasta evaluar el panel de 8×60 días.
+   * · `dosisCuanto`: cuantización entera de dosis propuestas de `residue` y `product` en `localInputs`
+   *   (0 = sin cuantizar, histórico; candidato 250).
+   * · `mejoraLocal`: puerta local de novedad o mejora/dominancia Pareto por trabajo en `finishProject`;
+   *   conserva intacto el redescubrimiento pagado de firmas existentes (0 = registra todo, histórico;
+   *   candidato 0,05).
+   * · `enfriamiento`: ticks mínimos entre intentos autónomos en `technologyOpportunity` (45 = histórico;
+   *   candidato 300). Con `mejoraLocal > 0 || enfriamiento > 45` no salta `craft` por `attempts % 3 !== 0`
+   *   y atenúa `research` con inventario lleno de herramientas útiles.
+   * · `evitarNoOp`: evita emitir pasos localmente no-op obvios en `proposeTechnologyProgram` (`false` =
+   *   histórico; candidato `true`).
+   */
+  tecnologia: {
+    dosisCuanto: number;
+    mejoraLocal: number;
+    enfriamiento: number;
+    evitarNoOp: boolean;
+  };
 }
 
 function deepFreeze<T>(value: T): T {
@@ -165,6 +186,7 @@ const RAW_HISTORICAL: WorldParams = {
   conducta: { habituacion: 0, aptitud: 0 },
   social: { maxComunidades: 8, disputaNecesidad: 0.65, disputaEscasez: 1, disputaRadio: 2, disputaDestino: 0.5, disputaEspera: 180,
     ensenanzaRareza: 0, confianzaSalida: 0.35, distanciaAlternativa: 0.2, vinculoConvivencia: 0, radioConvivencia: 0, memoriaDisputa: 0, hogarTrabajo: 0, disolucion: 0 },
+  tecnologia: { dosisCuanto: 0, mejoraLocal: 0, enfriamiento: 45, evitarNoOp: false },
 };
 
 /**
@@ -339,6 +361,11 @@ export const PARAM_RANGES: Record<string, [number, number]> = {
   // COM-D′: 0 (default) = hoy; 1 activa R0–R4 (sólo con `radioConvivencia > 0`). Entero: es un
   // interruptor, no una magnitud continua.
   'social.disolucion': [0, 1],
+  // Fase B — estabilidad tecnológica (`docs/preregistros/2026-11-18-estabilidad-tecnologia.md`):
+  // nacen con sus valores históricos (0, 0, 45, false) en HISTORICAL_PARAMS y DEFAULT_PARAMS.
+  'tecnologia.dosisCuanto': [0, 1000],
+  'tecnologia.mejoraLocal': [0, 1],
+  'tecnologia.enfriamiento': [1, 2400],
 };
 
 type ScalarDescriptor = { kind: 'number'; range: readonly [number, number]; integer?: boolean }
@@ -349,7 +376,7 @@ type ParamValue = number | boolean | string | (number | boolean | string)[];
 /** PARAM_RANGES conserva sus tuplas numéricas; cada hoja declara además su tipo. */
 export const PARAM_DESCRIPTORS: Readonly<Record<string, ParamDescriptor>> = deepFreeze({
   ...Object.fromEntries(Object.entries(PARAM_RANGES).map(([key, range]) => [key,
-    { kind: 'number', range, integer: key === 'motor.hilos' || key === 'social.disputaEspera' || key === 'social.maxComunidades' || key === 'social.disolucion' || key.startsWith('limites.') }])),
+    { kind: 'number', range, integer: key === 'motor.hilos' || key === 'social.disputaEspera' || key === 'social.maxComunidades' || key === 'social.disolucion' || key === 'tecnologia.dosisCuanto' || key === 'tecnologia.enfriamiento' || key.startsWith('limites.') }])),
   'poblacion.exigeComunidad': { kind: 'boolean' },
   'poblacion.comprobacionContinua': { kind: 'boolean' },
   'motor.clonPorPaso': { kind: 'boolean' },
@@ -362,6 +389,7 @@ export const PARAM_DESCRIPTORS: Readonly<Record<string, ParamDescriptor>> = deep
   'red.deltas': { kind: 'boolean' },
   'gobernador.senales': { kind: 'array', element: { kind: 'enum', values: ['p95'] }, minLength: 1, unique: true },
   'gobernador.politica': { kind: 'enum', values: ['apagar', 'techo'] },
+  'tecnologia.evitarNoOp': { kind: 'boolean' },
 });
 const PARAM_KEYS = Object.keys(PARAM_DESCRIPTORS);
 
@@ -528,6 +556,11 @@ const worldParams = new WeakMap<object, WorldParams>();
 /** Params efectivos de un mundo, o `DEFAULT_PARAMS` (misma identidad) si nunca se fijaron. */
 export function paramsOf(world: object): WorldParams {
   return worldParams.get(world) ?? DEFAULT_PARAMS;
+}
+
+/** Params fijados explícitamente en `world` (`setParams`), o `undefined` si no está en el WeakMap. */
+export function boundParamsOf(world: object): WorldParams | undefined {
+  return worldParams.get(world);
 }
 
 /** Fija los params de un mundo (o clon). Lo llaman `createWorld`/`cloneWorld` en `index.ts` y

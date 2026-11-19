@@ -10,6 +10,7 @@ import { assertTechnologyCatalogueState, catalogueEnabled, findTechnologyRecipe,
 import { pruneTechnologyCompetence, rememberRecipe, technologyProjectPins, touchKnownRecipe } from './technology-memory.js';
 import { containerAffordance } from './material-affordances.js';
 import { firstTileAt } from './tile-index.js';
+import { boundParamsOf, HISTORICAL_PARAMS, type WorldParams } from './params.js';
 export type * from '../shared/technology.js';
 
 export interface TechnologyActor {
@@ -40,6 +41,11 @@ function add(a: Composition, b: Composition): void { for (const m of MATERIALS) 
 function subtract(a: Composition, b: Composition): void { for (const m of MATERIALS) a[m] -= b[m]; }
 const sum = (cs: Composition[]): Composition => { const c = empty(); for (const x of cs) add(c, x); return c; };
 const distance = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(a.x - b.x, a.y - b.y);
+/** Lee `tecnologia.*` del WeakMap si `host` es un `World` (o un host con `setParams`);
+ * los `TechnologyHost` sintéticos sin registro usan siempre los valores históricos. */
+function techParams(host: TechnologyHost): WorldParams['tecnologia'] {
+  return boundParamsOf(host)?.tecnologia ?? HISTORICAL_PARAMS.tecnologia;
+}
 /** `host.people.includes(x)` on the decision path (T141 inventory: `technology.ts:584,605`): a cache
  * keyed by the array itself, invalidated by length, like `tile-index.ts` and `rejilla.ts`. Exact
  * because `host.people` (`world.people`) only ever gets reassigned to a new array (a death, `filter`
@@ -304,11 +310,37 @@ function randomInstruction(random: () => number): OperationInstruction {
   if (op === 'combine' && random() < 0.5) instruction.catalyst = 'binding';
   return instruction;
 }
+function isObviousNoOp(step: OperationInstruction, priorSteps: readonly OperationInstruction[], inputs: readonly MaterialRequirement[]): boolean {
+  if (step.op === 'cool' && !priorSteps.some(prior => prior.op === 'heat')) return true;
+  if (step.op === 'separate' && inputs.length === 1 && inputs[0]!.source === 'raw' && !priorSteps.some(prior => prior.op === 'combine')) return true;
+  const previous = priorSteps[priorSteps.length - 1];
+  if (previous && previous.op === step.op && previous.shape === step.shape && previous.material === step.material) return true;
+  return false;
+}
+function nextInstruction(random: () => number, evitarNoOp: boolean, priorSteps: readonly OperationInstruction[], inputs: readonly MaterialRequirement[]): OperationInstruction {
+  let instruction = randomInstruction(random);
+  if (!evitarNoOp) return instruction;
+  for (let retry = 0; retry < 4 && isObviousNoOp(instruction, priorSteps, inputs); retry++) instruction = randomInstruction(random);
+  return instruction;
+}
 function localInputs(host: TechnologyHost, actor: TechnologyActor): MaterialRequirement[] {
-  const result: MaterialRequirement[] = [];
+  const result: MaterialRequirement[] = [], { dosisCuanto } = techParams(host);
   for (const material of ['wood', 'stone'] as const) if (actor.materials[material] >= 1) result.push({ source: 'raw', material, mass: MASS_UNIT });
-  for (const material of MATERIALS) if (actor.technology.residue[material] >= 150) result.push({ source: 'residue', material, mass: Math.min(1000, actor.technology.residue[material]) });
-  for (const item of actor.technology.items) if (item.recipeId && item.mass >= 200 && actor.technology.knownRecipes.includes(item.recipeId)) result.push({ source: 'product', recipeId: item.recipeId, mass: Math.min(item.mass, 1000) });
+  const minResidue = dosisCuanto > 0 ? Math.max(150, dosisCuanto) : 150;
+  for (const material of MATERIALS) {
+    const available = actor.technology.residue[material];
+    if (available >= minResidue) {
+      const dose = dosisCuanto > 0 ? Math.min(1000, Math.floor(available / dosisCuanto) * dosisCuanto) : Math.min(1000, available);
+      result.push({ source: 'residue', material, mass: dose });
+    }
+  }
+  const minProduct = dosisCuanto > 0 ? Math.max(200, dosisCuanto) : 200;
+  for (const item of actor.technology.items) {
+    if (item.recipeId && item.mass >= minProduct && actor.technology.knownRecipes.includes(item.recipeId)) {
+      const dose = dosisCuanto > 0 ? Math.min(1000, Math.floor(item.mass / dosisCuanto) * dosisCuanto) : Math.min(item.mass, 1000);
+      result.push({ source: 'product', recipeId: item.recipeId, mass: dose });
+    }
+  }
   const tile = (host.tiles ? firstTileAt(host.tiles, Math.round(actor.x), Math.round(actor.y)) : undefined);
   if ((tile?.drinkingWater ?? 0) >= 0.01) result.push({ source: 'raw', material: 'water', mass: 500 });
   return result;
@@ -317,6 +349,7 @@ function localInputs(host: TechnologyHost, actor: TechnologyActor): MaterialRequ
 export function proposeTechnologyProgram(host: TechnologyHost, actor: TechnologyActor): { program: TechnologyProgram; parents: string[] } | undefined {
   const state = host.technology, random = localRandom(host.seed, `process:${actor.id}:${actor.technology.attempts}`), available = localInputs(host, actor);
   if (!available.length || !inventionRoom(state)) return;
+  const { evitarNoOp } = techParams(host);
   const known = knownTechnologyRecipes(host, actor).filter(r => r.generation < generationLimit(state));
   const pick = <T>(xs: T[]): T => xs[Math.floor(random() * xs.length)]!;
   let program: TechnologyProgram, parents: string[] = [];
@@ -328,8 +361,11 @@ export function proposeTechnologyProgram(host: TechnologyHost, actor: Technology
       program.steps = [...program.steps.slice(0, split), ...structuredClone(other.program.steps.slice(Math.floor(random() * other.program.steps.length)))].slice(0, state.budgets.maxSteps);
     }
     const mutation = Math.floor(random() * 4);
-    if (mutation === 0 && program.steps.length < state.budgets.maxSteps) program.steps.push(randomInstruction(random));
-    else if (mutation === 1) program.steps[Math.floor(random() * program.steps.length)] = randomInstruction(random);
+    if (mutation === 0 && program.steps.length < state.budgets.maxSteps) program.steps.push(nextInstruction(random, evitarNoOp, program.steps, program.inputs));
+    else if (mutation === 1) {
+      const index = Math.floor(random() * program.steps.length);
+      program.steps[index] = nextInstruction(random, evitarNoOp, program.steps.slice(0, index), program.inputs);
+    }
     else if (mutation === 2) program.steps[Math.floor(random() * program.steps.length)]!.intensity = 1 + Math.floor(random() * 4);
     else program.inputs = [structuredClone(pick(available))];
     // An existing product can replace a raw substrate; the input's physical properties survive.
@@ -337,7 +373,9 @@ export function proposeTechnologyProgram(host: TechnologyHost, actor: Technology
     if (products.length && random() < 0.55) program.inputs[0] = structuredClone(pick(products));
     if (!planWithdrawal(host, actor, program)) program.inputs = [structuredClone(pick(available))];
   } else {
-    program = { inputs: [structuredClone(pick(available))], steps: Array.from({ length: 1 + Math.floor(random() * 3) }, () => randomInstruction(random)) };
+    const firstInput = structuredClone(pick(available)), count = 1 + Math.floor(random() * 3), steps: OperationInstruction[] = [];
+    for (let i = 0; i < count; i++) steps.push(nextInstruction(random, evitarNoOp, steps, [firstInput]));
+    program = { inputs: [firstInput], steps };
   }
   if (available.length > 1 && program.inputs.length < state.budgets.maxInputs && random() < 0.25) {
     program.inputs.push(structuredClone(pick(available))); program.steps.unshift({ op: 'combine', intensity: 1 + Math.floor(random() * 4), catalyst: 'binding' });
@@ -441,11 +479,15 @@ export function technologyOpportunity(host: TechnologyHost, actor: TechnologyAct
   // space speculative research and unrelated replacement crafts.
   const dependency = dependencyCraft(host, actor, known, powers);
   if (dependency) return { kind: 'craft', recipeId: dependency.id, score: 0.58, reason: 'Reproduce un paso conocido de una cadena material que mejora un uso disponible aquí; cada paso exige sus propios insumos y trabajo.' };
-  if (host.tick - actor.technology.lastAttempt < 45) return;
+  const tech = techParams(host);
+  if (host.tick - actor.technology.lastAttempt < tech.enfriamiento) return;
+  const stabilized = tech.mejoraLocal > 0 || tech.enfriamiento > 45;
   const craft = known.filter(r => planWithdrawal(host, actor, r.program) && CAPABILITIES.some(c => r.capacities[c] > Math.max(0.12, powers[c] * 1.35))).sort((a, b) => (actor.technology.competence[b.id]?.benefit ?? 0) - (actor.technology.competence[a.id]?.benefit ?? 0) || (actor.technology.competence[b.id]?.successes ?? 0) - (actor.technology.competence[a.id]?.successes ?? 0) || a.id.localeCompare(b.id))[0];
-  if (craft && actor.technology.items.length < host.technology.budgets.maxItems && actor.technology.attempts % 3 !== 0) return { kind: 'craft', recipeId: craft.id, score: 0.58, reason: 'Puede reproducir una técnica aprendida para recuperar una capacidad material.' };
+  if (craft && actor.technology.items.length < host.technology.budgets.maxItems && (stabilized || actor.technology.attempts % 3 !== 0)) return { kind: 'craft', recipeId: craft.id, score: 0.58, reason: 'Puede reproducir una técnica aprendida para recuperar una capacidad material.' };
   if (host.noveltyEnabled === false || !inventionRoom(host.technology) || !localInputs(host, actor).length) return;
-  return { kind: 'research', score: 0.35 + (actor.curiosity ?? 0.5) * 0.3 + (actor.skills.technology ?? 0) * 0.08, reason: 'Prueba una variación o composición de procesos conocidos con materiales presentes; el intento cuesta trabajo y recursos.' };
+  let score = 0.35 + (actor.curiosity ?? 0.5) * 0.3 + (actor.skills.technology ?? 0) * 0.08;
+  if (stabilized && actor.technology.items.length >= host.technology.budgets.maxItems && Math.max(...Object.values(powers)) >= 0.4) score *= 0.35;
+  return { kind: 'research', score, reason: 'Prueba una variación o composición de procesos conocidos con materiales presentes; el intento cuesta trabajo y recursos.' };
 }
 function recycleToFit(host: TechnologyHost, actor: TechnologyActor): void {
   while (actor.technology.items.length >= host.technology.budgets.maxItems) {
@@ -504,10 +546,28 @@ function finishProject(host: TechnologyHost, actor: TechnologyActor, project: Te
   if (success && output) {
     if (!recipe && inventionRoom(state)) {
       const capacities = materialCapacities(output), newFunction = !hasTechnologyFunction(host, capacities);
-      recipe = { id: `recipe-${state.recipeCounter + 1}`, name: `${project.program.steps.map(s => s.op).join('·').slice(0, 70)} ${state.recipeCounter + 1}`,
-        program: structuredClone(project.program), signature, parents: [...project.parents], generation: nextGeneration, inventorId: actor.id, tick: host.tick, x: actor.x, y: actor.y,
-        novelty: newFunction ? 'both' : 'program', capacities, uses: 0, utility: 0, manufactured: 0 };
-      registerTechnologyRecipe(host, recipe); emitDiscovery(host, actor, recipe, emit);
+      const { mejoraLocal } = techParams(host);
+      let accepted = true;
+      if (mejoraLocal > 0) {
+        const maxCap = Math.max(...CAPABILITIES.map(c => capacities[c]));
+        if (parentRecipes.length === 0) {
+          accepted = newFunction || maxCap >= 0.12;
+        } else {
+          const parentBest = Object.fromEntries(CAPABILITIES.map(c => [c, Math.max(...parentRecipes.map(p => p!.capacities[c]))])) as Record<Capability, number>;
+          const minParentWork = Math.min(...parentRecipes.map(p => technologyWorkCost(p!.program)));
+          const improves = CAPABILITIES.some(c => capacities[c] >= Math.max(0.12, parentBest[c] * (1 + mejoraLocal)));
+          const paretoWork = maxCap >= 0.12
+            && CAPABILITIES.every(c => capacities[c] >= parentBest[c] - 1e-9)
+            && technologyWorkCost(project.program) < minParentWork;
+          accepted = newFunction || improves || paretoWork;
+        }
+      }
+      if (accepted) {
+        recipe = { id: `recipe-${state.recipeCounter + 1}`, name: `${project.program.steps.map(s => s.op).join('·').slice(0, 70)} ${state.recipeCounter + 1}`,
+          program: structuredClone(project.program), signature, parents: [...project.parents], generation: nextGeneration, inventorId: actor.id, tick: host.tick, x: actor.x, y: actor.y,
+          novelty: newFunction ? 'both' : 'program', capacities, uses: 0, utility: 0, manufactured: 0 };
+        registerTechnologyRecipe(host, recipe); emitDiscovery(host, actor, recipe, emit);
+      }
     }
     if (recipe) {
       recycleToFit(host, actor);

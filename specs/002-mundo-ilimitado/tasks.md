@@ -183,7 +183,7 @@
   · **Cierre**: cero diferencias en los cuatro cuadrantes de parámetros y el banco de T108 verde.
   **Verificado 2026-09-27 (Muse, rama `sprint/t114-soa-20260927`):** paridad CPU 17/17 (3 CUDA omitidos sin `COMPUTE_NVRTC`), testigo G4 del tick íntegro en mundo envejecido + bordes de cuenca, control congelado `50034301…`, banco T108 CPU `differentValues=0` en todos los casos, typecheck verde, suite 1636/1647 (2 rojos ajenos: `resumen-vivo` t14 preexistente en `main`, flake `bake-pixel` 7/7 aislado).
 
-- [ ] **T115** [claude opus · high] **Pool de workers y ecología cableada** (depende de T112 y T114).
+- [x] **T115** [claude opus · high] **Pool de workers y ecología cableada** (depende de T112 y T114). **Integrada (`2156f03` / `4f2ab59`, 2026-11-19).**
   Pool persistente de `worker_threads` sobre `SharedArrayBuffer` (patrón de `CPUWorkers`, `compute-ecology-clients.mjs:17-27`), **colas estáticas por región** ordenadas por `regiónId` — **nada de *work stealing* hasta que el adversarial de T117 esté verde**. `stepEcosystem` reparte `[begin,end)` entre `motor.hilos` workers; el halo no se copia, se lee del buffer del vecino.
   · **Ficheros**: `src/world/paralelo/{piscina,particion,barrera}.ts` (nuevos), `src/world/ecosystem.ts`, `src/world/ecosystem-kernel.ts` (extraer el cuerpo a función sobre arrays), `tests/paralelo-ecologia.test.ts` (nuevo).
   · **Tests**: 1, 2, 4, 8 y 28 hilos dan bytes idénticos; una región vacía no rompe la barrera; un worker que lanza aborta el paso antes del swap.
@@ -198,7 +198,7 @@
   · **Cierre**: digesto idéntico y el coste del sort medido (`O(A log A)`, ≤ 1 % del paso a 10⁵ animales).
   **Verificado 2026-09-27 (Muse, rama `sprint/t116-fauna-20260927`):** `fauna-mascara` 12/12; digesto idéntico (rama = `main`, identidad cubierta por los tests incl. clon); coste orden/paso a 10⁵ reproducido: persistente 0,67 % sin cría / 0,86 % con cría (≤1 % CUMPLE), clon 1,53 % / 1,54 % (NO CUMPLE, coherente con el informe: pendiente heredar el certificado en `cloneWorld`, fuera de T116, para el gate B); typecheck verde; suite 1637/1647 (único rojo: `resumen-vivo` t14, preexistente en `main`).
 
-- [ ] **T117** [claude opus · xhigh] **`tests/determinismo-hardware.test.ts` — la prueba que sostiene la feature.**
+- [x] **T117** [claude opus · xhigh] **`tests/determinismo-hardware.test.ts` — la prueba que sostiene la feature.** **Integrada (`62247db` / `4f2ab59`, 2026-11-19).**
   4 semillas (`7, 51926, 104729, 20260919`) × **7 escenas** × backends `{hilos:1|2|4|8|28}`, **`{orden:'adversarial'}`** y (etapa C) `{gpu:[0]}`, `{gpu:[1]}`, `{gpu:[0,1]}`. **El backend adversarial** ejecuta las particiones en **orden inverso**, con un **número de hilos distinto en cada paso** y con **retardos de reloj real** entre ellas: sin él la prueba solo demuestra que 28 hilos coinciden *hoy*. Modo corto (600 pasos) dentro de `npm test`; modo largo (2 400 pasos) tras bandera. **Sin CUDA, los backends de GPU se marcan `skipped` con motivo; nunca `passed`.**
   **Las siete escenas** (las dos últimas añadidas 2026-09-19): compacta · habitantes sobre frontera de región · dos actores compitiendo por la misma tesela · nacimiento y muerte simultáneos · regiones dispersas · **alcance compuesto** (persona en la frontera, `home` a 6-7 celdas **en la región vecina**, y la persona o el recurso que decide el resultado 4-6 celdas más allá: es la escena que refuta un halo corto, y con `HALO_CELDAS=8` habría fallado — refutación G2) · **cosecha simultánea en dos regiones** cuyo **único** síntoma posible es `world.totals` (refutación R3: la suma FP64 no es asociativa y T101 mete `totals` en el digesto). Las dos geometrías de partición (256×256 y 512×512) entran en la matriz, porque US2-4 lo exige y porque es lo que delata un acumulador agrupado por región.
   **La comparación por barrera es por región, no del mundo completo** (corrección 2026-09-19, refutación R9, verificada): la comparación se hace **tras cada barrera** con un **hash incremental por región** actualizado con la máscara sucia, en O(regiones tocadas); el `digestoCanonico` completo se reserva para el final del paso y para los hitos (1 200 y 2 400). Cuenta que lo obliga: 4 semillas × 7 escenas × 6 backends de CPU = 168 corridas × 600 pasos ≥ 403 000 barreras, y el único recorrido completo del mundo medido hoy es `cloneWorld` a **p50 10,25 ms sin ordenar nada** ⇒ más de una hora; incluso con un digesto irreal de 1 ms se pasa del techo de 3 min de SC-010. Cuando una barrera discrepe, **entonces** se llama a `diferenciaCanonica` (T101) sobre las regiones que difieren, que es quien informa **tick, fase, página, campo e índice**.
@@ -207,14 +207,14 @@
   · **Control**: referencia = 1 hilo, `motor.orden='natural'`, geometría 256×256.
   · **Cierre**: todos los backends de CPU verdes en las 4 semillas y las 7 escenas, modo corto ≤ 3 min **medidos y escritos en evidencia** (no estimados), y los dos tests negativos demostrando que la prueba muerde.
 
-- [ ] **T118** [P] [claude sonnet · high] **Laboratorio consciente del hardware.**
+- [x] **T118** [P] [claude sonnet · high] **Laboratorio consciente del hardware.** **Integrada (`ca06182`, 2026-11-19, 52/52 tests verdes).**
   `scripts/lab/replica.ts` y `barrido.ts` aceptan `--hilos`, `--gpu`, `--orden`; `replica.json` registra `fases`, `fraccionSerial`, `teselasActivas`, `teselasPorHabitante`; `resumen.ts` añade la **curva p95(teselas)** y la comparación de digestos entre backends (misma semilla + distinto backend con digesto distinto ⇒ 🔴).
   · **Ficheros**: `scripts/lab/{replica,barrido,resumen}.ts`, `scripts/lab/README.md`, `tests/lab-hardware.test.ts` (nuevo).
   · **Tests**: un barrido de 2 réplicas × 2 backends detecta una rotura de determinismo sintética.
   · **Control**: `--hilos 1` reproduce exactamente las cifras de mundo del laboratorio de hoy.
   · **Cierre**: el barrido produce la curva y el semáforo de determinismo.
 
-- [ ] **T120** [codex/gpt-5.6-sol · high] **El segundo barrido de teselas: `ecology()` al camino paralelo** (depende de T112, T113 y T115). *(Tarea nueva de la revisión de refutaciones; numerada después de T119 por no renumerar el gate, pero **se mergea antes que T119**.)*
+- [x] **T120** [codex/gpt-5.6-sol · high] **El segundo barrido de teselas: `ecology()` al camino paralelo** (depende de T112, T113 y T115). **Integrada (`147d834` / `4f2ab59`, 2026-11-19).** *(Tarea nueva de la revisión de refutaciones; numerada después de T119 por no renumerar el gate, pero **se mergea antes que T119**.)*
   `stepWorld` corre **dos** pasadas ecológicas cada 10 ticks, no una: `ecology(world)` (`index.ts:900`) y `stepEcosystem(...)` (`index.ts:903`). `ecology()` (`index.ts:215-242`) es una función **distinta** del kernel: recorre `for (const tile of world.tiles)`, hace **cuatro `tileAt()`** por tesela para la humedad de vecindad y escribe `moisture`, `vegetation` y **`food`** — el campo que comen las personas, que el kernel SoA/CUDA **no** escribe. Ninguna tarea la nombraba: T112/T114/T115/T121/T122 hablan todas de `EcosystemKernel`/`stepEcosystem`. A 18,4 M teselas son **73,6 M búsquedas en `Map` de cadena por tick ecológico en el hilo principal**, y el 0,54 % del perfil de `research.md` §1.2 mide solo `EcosystemKernel.step + buildTopology`: el coste de `ecology()` a escala **no está medido ni presupuestado** (refutaciones R4/G4, verificadas).
   **Qué se mueve y qué no**:
   · **Se mueve** el bucle por tesela (`index.ts:225-241`). Es un autómata local: lee `tile` completo y de los cuatro vecinos **solo `terrain`**, que es estático ⇒ no hay dependencia entre celdas y encaja en el SoA de T112 y en el pool de T115.
@@ -231,14 +231,14 @@
 
 ## Etapa C — GPU residente para el ecosistema
 
-- [ ] **T121** [P] [codex/gpt-5.6-sol · xhigh] **`enCuenca` y los tres escalares en CUDA, con paridad fp64 exacta.**
+- [x] **T121** [P] [codex/gpt-5.6-sol · xhigh] **`enCuenca` y los tres escalares en CUDA, con paridad fp64 exacta.** **Integrada (`c08a7b2`, 2026-11-19, 0 diferencias en GPU 0 RTX 5070 Ti y GPU 1 RTX 2060).**
   Portar a `scripts/compute-ecology.cu` lo que T114 portó al SoA de JS: `decaimientoFertilidad`, `seed`, `cuencas` y `enCuenca` completo, **más el bucle por tesela de `ecology()` que T120 llevó al camino paralelo** (mismo orden: pasada de `ecology` completa, luego la del kernel; dos despachos, no un kernel fusionado — es quien escribe `food`, refutación G4). El desbordamiento de 32 bits de `Math.imul` se reproduce con `int32_t`/`uint32_t` explícitos; los `>>>` son desplazamientos **lógicos**; la división por 2³² es exacta; `Math.floor` con negativos **no** es truncamiento; el polinomio `fade` va en el mismo orden y **sin contracción FMA**. La paridad de este kernel es estructural (no hay `exp`/`log`/`pow` donde libdevice y V8 pudieran diferir): si diverge, es un error de port, no de la GPU.
   · **Ficheros**: `scripts/compute-ecology.cu`, `scripts/compute-ecology-gpu.py` (paso de los escalares), `tests/compute-ecology.test.ts` (variantes GPU).
   · **Tests**: `Object.is` con cero diferencias contra el kernel vivo en los cuatro cuadrantes de parámetros, con coordenadas negativas y en los bordes de la escala del ruido.
   · **Control**: `--fmad=false` verificado en la línea de compilación; quitarlo debe hacer fallar el test (prueba de que el flag importa).
   · **Cierre**: cero diferencias en GPU0 y GPU1 por separado.
 
-- [ ] **T122** [claude opus · high] **Puente GPU persistente con buffers residentes.**
+- [x] **T122** [claude opus · high] **Puente GPU persistente con buffers residentes.** **Integrada (`30eae6e` / `e7e49b1` / `36ce0e4`, 2026-11-19; opción (b) medida a 18,43 M en 11,99 ms ≤ 20 ms y 32,00 M en 19,60 ms ≤ 25 ms con paridad `Object.is` = 0 diferencias, ver `informes/T122-T125-report.md`).**
   Un subproceso persistente por GPU, NVRTC compilado **una vez** al arranque, los 9 campos de ecología residentes en VRAM entre pasos. Hoy el puente manda 120 MB por paso y gasta ~196 ms de IPC sobre 0,40 ms de kernel. Selector: workers por debajo de 1,25 M celdas, GPU por encima, con el punto de cruce **medido** y comparado contra el estimado.
   **Dos presupuestos de transporte, medidos por separado** (corrección 2026-09-19, refutaciones R5/G3, verificadas — el «≤ 1 MB por paso» solo contaba la subida y erraba por ≈118×):
   · **CPU → GPU (confirmación)**: `(índice, valor)` de las teselas que la fase de confirmación tocó. Disperso. **≤ 1 MB por paso**, que es el número que ya estaba.
@@ -249,21 +249,21 @@
   · **Control (experimento)**: tick ecológico **íntegro** (`ecology()` + kernel) a 1 M, 4 M, 18,4 M y 32 M celdas, GPU vs 8 workers vs 1 hilo, misma escena, con las dos direcciones de transporte medidas.
   · **Cierre**: **18,4 M ≤ 20 ms**, **32 M ≤ 25 ms**, subida **≤ 1 MB/paso**, bajada **medida con su objetivo declarado**, y el punto de cruce real escrito en evidencia.
 
-- [ ] **T123** [P] [claude sonnet · high] **Autoprueba de paridad al arranque, con autodesactivación.**
+- [x] **T123** [P] [claude sonnet · high] **Autoprueba de paridad al arranque, con autodesactivación.** **Integrada (`c08a7b2` / `9258572`, 2026-11-19, `verificationMs` ≈ 7–18 ms ≤ 200 ms en GPU 0 y GPU 1).**
   Al arrancar, 4 096 celdas sintéticas × 100 invocaciones, `Object.is` contra el kernel de CPU (es lo que ya hace `compare()`, `compute-ecology-core.mjs:89`). **Un solo bit distinto desactiva esa GPU para la sesión**, queda registrado con dispositivo, driver y primer índice divergente, y el mundo sigue en CPU. Es lo que hace honesta la frase «el hardware solo cambia la velocidad» frente a una actualización de driver.
   · **Ficheros**: `src/world/gpu/autoprueba.ts` (nuevo), `src/server/main.ts` (invocación), `tests/gpu-autoprueba.test.ts` (nuevo).
   · **Tests**: con una divergencia **sintética** inyectada de un bit, la GPU queda desactivada, el log lo dice y el mundo avanza con el digesto correcto; sin CUDA la autoprueba no falla, informa `no disponible`.
   · **Control**: la autoprueba tarda ≤ 200 ms al arranque.
   · **Cierre**: los dos tests verdes y la desactivación visible en `performance`.
 
-- [ ] **T124** [P] [minimax/MiniMax-M3] **Reparto por throughput medido, no 50/50 y no persistido.**
+- [x] **T124** [P] [minimax/MiniMax-M3] **Reparto por throughput medido, no 50/50 y no persistido.** **Integrada (`c08a7b2`, 2026-11-19, 79:21 / 50:50 / 100:0 bit a bit idénticos).**
   Repartir las regiones entre GPU por throughput medido (≈**78,6 % / 21,4 %**, de 2,5 M/ms y 0,680 M/ms), redondeado a páginas completas, asignado por orden Morton. **El reparto NO se persiste con el mundo**: es configuración de ejecución. El kernel no tiene reducción entre celdas (`compute-ecology-core.mjs:56-65`), así que cualquier frontera da el mismo bit.
   · **Ficheros**: `src/world/gpu/reparto.ts` (nuevo), `tests/gpu-reparto.test.ts` (nuevo).
   · **Tests**: tres repartos distintos (79:21, 50:50, 100:0) dan bytes idénticos; el reparto no aparece en el snapshot.
   · **Control**: «ambas GPU» supera a la 5070 Ti sola a 18,4 M celdas (hoy no lo hace con 50/50).
   · **Cierre**: bytes idénticos en los tres repartos y la mejora medida.
 
-- [ ] **T125** [claude opus · high] **Backends de GPU en la prueba de determinismo.**
+- [x] **T125** [claude opus · high] **Backends de GPU en la prueba de determinismo.** **Integrada (`30eae6e` / `36ce0e4`, 2026-11-19).**
   Activar `{gpu:[0]}`, `{gpu:[1]}`, `{gpu:[0,1]}` en `tests/determinismo-hardware.test.ts`, con `skip` explícito y motivo cuando falta `COMPUTE_NVRTC`. Cerrar los 9 backends.
   · **Ficheros**: `tests/determinismo-hardware.test.ts`.
   · **Tests**: los propios.
@@ -292,7 +292,7 @@
   · **Control**: recuperar un mundo guardado y comparar `digestoCanonico` con el original.
   · **Cierre**: crecimiento **≤ 20 MB/día simulado**, p95 de `saveMs` **≤ 20 ms** a 2 000 habitantes, `previous()` exacto.
 
-- [ ] **T133** [minimax/MiniMax-M3] **Terreno dormido con la tupla compacta** (**depende de T132**, ya no es `[P]`).
+- [x] **T133** [minimax/MiniMax-M3] **Terreno dormido con la tupla compacta** (**depende de T132**, ya no es `[P]`). **Integrada (`4406f6c`, 2026-11-19, −62,1 % bytes en `chunks`, lector dual y `digestoCanonico` idéntico).**
   *(Corrección 2026-09-19, refutación G5: el bloque de archivo de chunks vive **dentro** del `save()` que T132 reescribe — `store.ts:704-714`, `if (retired.length) { const archive = this.db.prepare('INSERT OR REPLACE INTO chunks VALUES (?,?,?,?)'); … }`, en el mismo `try`. Dos worktrees `[P]` desde el mismo commit base no ven el parche del otro y el merge del gate puede quedar limpio pero descartar en silencio uno de los dos cambios.)*
   Hoy los chunks archivados se escriben con `JSON.stringify(chunk)` (`store.ts:711`) mientras la instantánea viva ya usa `ENCODING='tiles-tuple-v1'` (`snapshot.ts:6-25`): 106,1 KB de media por chunk, el 36,7 % del fichero de 243 MB. Reusar la tupla, con lector de **ambos** formatos durante una versión.
   · **Ficheros**: `src/server/store.ts` (escritura y lectura de `chunks`), `src/server/snapshot.ts`, `tests/store-chunks-tupla.test.ts` (nuevo).
@@ -367,7 +367,7 @@
   · **Control (experimento)**: 2 400 pasos, `digestoCanonico` **idéntico** en 3 semillas — es reordenar una búsqueda, **no** cambiar la regla.
   · **Cierre**: digesto idéntico, los ocho sitios migrados, y el ajuste de `p95(P)` a P ∈ {50, 200, 800, 2 000} **lineal con R² > 0,95**.
 
-- [ ] **T140** [gemini/pro · high] **Índices no-persona: `nextIdentity`, estructuras por celda, `localInputs`, capacidad de fauna** (depende de T141; usa su rejilla para `family.ts`).
+- [x] **T140** [gemini/pro · high] **Índices no-persona: `nextIdentity`, estructuras por celda, `localInputs`, capacidad de fauna** (depende de T141; usa su rejilla para `family.ts`). **Fusionada en `main` (`9b7d14d` / `b5def74`, ola 2 del bloque E.0).**
   *(Tarea nueva de la revisión de refutaciones — R2 y R11. Lleva el número 140 pero **depende de T141 y se mergea después de ella**, porque `family.ts` usa su rejilla.)* Barridos que quedaban en el camino de decisión y que no son consultas de personas:
   · **O(territorio explorado)** — `inventions.ts:82` y `:333`: `nextIdentity(...)` construye el conjunto global de ids con `world.retiredChunks.flatMap(chunk => (chunk.structures ?? []).map(s => s.id))` en **cada invención y cada construcción**, es decir recorre el archivo dormido entero. Pasa a índice incremental de ids (`src/world/indices.ts`), que además es lo que necesita el prefix-sum de `blueprintCounter`/`structureCounter` de T146.
   · **O(teselas activas)** — `technology.ts:284` (y su gemelo `:207`): `host.tiles?.find(t => t.x === Math.round(actor.x) && t.y === Math.round(actor.y))` dentro de `localInputs`, en cada intento de investigación. Debe usar `tileAt` (T113), que ya es O(1).
@@ -438,7 +438,7 @@
   · **Control**: 2 400 pasos con y sin el SoA de persona: digesto **idéntico**.
   · **Cierre**: digesto idéntico, test de empate verde y **≤ 4 KiB/habitante** medidos.
 
-- [ ] **T148** [P] [claude sonnet · high] **Modo depuración: los buffers del mundo son de solo lectura en la fase B.**
+- [x] **T148** [P] [claude sonnet · high] **Modo depuración: los buffers del mundo son de solo lectura en la fase B.** **Integrada (`99cb734`, 2026-11-19).**
   Con `motor.depuracion=true`, los buffers del mundo se marcan de solo lectura durante la fase de decisión y **cualquier escritura lanza nombrando el slot culpable**. Es la única mitigación concreta contra la escritura fugada, que rompe el determinismo de forma intermitente y difícil de ver.
   · **Ficheros**: `src/world/paralelo/guardia.ts` (nuevo), `src/world/params.ts` (clave `motor.depuracion`), `tests/guardia-fase-b.test.ts` (nuevo).
   · **Tests**: una escritura sintética en fase B lanza con el slot; con `depuracion=false` el coste es cero.
@@ -482,7 +482,7 @@
 
 ## Etapa F — El gobernador hace crecer el mundo activo
 
-- [ ] **T161** [P] [claude sonnet · high] **Señales del gobernador.**
+- [x] **T161** [P] [claude sonnet · high] **Señales del gobernador.** **Integrada (`d7ba0b5`, 2026-11-19).**
   p50/p95/p99 del paso y **por fase**, **máximo por ventana**, `tickHz`, p95 ecológico (CPU y GPU), RSS, VRAM libre por dispositivo, cola de red (`max(bufferedAmount)`, `state` descartados, resyncs), `saveMs` y cola durable, regiones activas, teselas activas y **teselas activas por habitante**, población, nacimientos y muertes.
   **El máximo por ventana es obligatorio** (añadido 2026-09-19, refutación R8): el p95 sobre 120 muestras (`app.ts:224-226`) es **ciego a los picos de cadencia larga**. `updateCommunities` corre cada 120 ticks (`society.ts:199`), `worldStatistics` cada 200 y el guardado cada 20: un pico de un segundo cada 120 pasos es el **0,83 %** de la ventana —por debajo del percentil 95— así que el mundo se congelaría ~1 s cada 12 s con el panel en verde. Eso choca con US5 y con el principio VI. La señal debe publicar también **qué fase** produjo el máximo.
   · **Ficheros**: `src/server/app.ts`, `src/world/statistics.ts`, `src/shared/types.ts`, `tests/gobernador-senales.test.ts` (nuevo).
@@ -497,21 +497,21 @@
   · **Control**: `gobernador.senales=['p95']` reproduce el gobernador de hoy exactamente.
   · **Cierre**: tests verdes y control idéntico.
 
-- [ ] **T163** [P] [codex/gpt-5.6-sol · high] **Desalojo de páginas frías y caché LRU de terreno dormido.**
+- [x] **T163** [P] [codex/gpt-5.6-sol · high] **Desalojo de páginas frías y caché LRU de terreno dormido.** **Integrada (`cf5582e`, 2026-11-19).**
   «Reducir área» = retirar páginas **sin habitantes ni halos obligatorios**, ordenadas por `(distancia mínima, lastTick, regiónId)`, respaldadas por la tabla `chunks` que el `Store` ya tiene y por `context.loadChunk` que ya existe (`spatial.ts:13`). **Nunca** impedir el movimiento ni borrar mundo: si una persona cruza una frontera, se activa la página obligatoria y se retira otra fría. **PROHIBIDO** la palanca «reducir `maintainRegions` de ±8 a ±8 solo alrededor de personas»: es un **no-op**, `spatial.ts:57-63` ya hace exactamente eso.
   · **Ficheros**: `src/world/spatial.ts` (retiro y reanimación), `src/world/lru.ts` (nuevo), `src/server/store.ts` (paginación de `chunks`), `tests/desalojo.test.ts` (nuevo).
   · **Tests**: una persona que camina 1 000 celdas nunca ve una página obligatoria ausente; el conjunto activo se mantiene bajo el techo sin que el mundo pierda información (recargar da el mismo digesto).
   · **Control**: 30 días con y sin desalojo: mismo digesto del día 5, distinta memoria.
   · **Cierre**: memoria acotada y digesto intacto.
 
-- [ ] **T164** [P] [minimax/MiniMax-M3] **Techo observado.**
+- [x] **T164** [P] [minimax/MiniMax-M3] **Techo observado.** **Integrada (`d7ba0b5`, 2026-11-19).**
   `performance.gobernador.techoObservado = {p95, poblacion, teselasActivas, teselasPorHabitante, senal, tick}` del último frenazo, más el motivo legible («frenado por p95 = 52 ms con 3 180 habitantes y 4,2 M teselas activas»).
   · **Ficheros**: `src/server/app.ts`, `src/shared/types.ts`, `tests/techo-observado.test.ts` (nuevo).
   · **Tests**: tras un frenazo sintético, el campo se puebla y no se borra al volver a verde.
   · **Control**: no cambia el digesto (es publicación).
   · **Cierre**: el campo viaja en el `state`.
 
-- [ ] **T165** [P] [claude sonnet · medium] **Panel del techo en el cliente.**
+- [x] **T165** [P] [claude sonnet · medium] **Panel del techo en el cliente.** **Integrada (`416d3f8`, 2026-11-19).**
   Mostrar estado del gobernador, señal disparadora, techo observado y teselas por habitante, en escritorio y en modo observador. Sin adornos: causas, como pide el principio VI.
   · **Ficheros**: `src/client/{game,world-shell}.ts`, `tests/panel-gobernador.test.ts` (nuevo).
   · **Tests**: el panel muestra lo que el `state` trae; con el gobernador en manual lo dice.

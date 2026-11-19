@@ -104,8 +104,10 @@ export const ECOLOGY_KERNEL_SPEC = Object.freeze({
     oceanMoisture: 0.003,
     rainMoistureRecharge: 0.008,
 
-    // Luz: day=1, night=0, dawn=0.4
+    // Luz: day=1, night=0, dawn=0.4 (camino serial, pool CPU T115 y puente GPU T122)
     dawnLight: 0.4,
+    dawnLightParallel: 0.4,
+    dawnLightGpu: 0.4,
 
     // Regrowth de madera (tick % 100)
     woodGrowthThreshold: 0.65,
@@ -125,12 +127,12 @@ export const ECOLOGY_KERNEL_SPEC = Object.freeze({
   // no cambian (mismas operaciones, mismo orden; T112 lo prueba en tests/soa-terreno.test.ts), pero el
   // texto normalizado de step() sí, por la rama `store` y `livingNeighborCounts(0.45)`. No se bumpea la
   // versión: no es un cambio de regla, es la forma en que se llega al mismo umbral de vecino vivo.
-  canonicalStepBodyHash: 'ed7eecd166e75effc30300437278b4a0c36839090acb4ec280c4ef5c868cf47d',
+  canonicalStepBodyHash: '1856093e0ac4951054edeb9532f5913c7bd0317cb76fd3d79f5c630ac26bb147',
 });
 
 // Conteos/índices que aparecen en el cuerpo de step() y NO son reglas
 // versionadas. Mantener este set sincronizado con el kernel.
-const STRUCTURAL_NUMERIC_LITERALS = new Set([0, 1, 3, 8, 10, 100]);
+const STRUCTURAL_NUMERIC_LITERALS = new Set([0, 1, 3, 8, 10, 100, 256]);
 
 function extractStepBody(source) {
   const stepStart = source.indexOf('step(tiles: Tile[]');

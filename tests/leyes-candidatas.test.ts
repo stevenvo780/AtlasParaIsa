@@ -78,7 +78,7 @@ function digestoConParamsDeMain(world: World): string {
   const comoMain = structuredClone(HISTORICAL_PARAMS) as unknown as Record<string, unknown>;
   // `social` entero no existe en `main`: con él se van también las claves que las hipótesis de la noche
   // añadieron al grupo (vinculoConvivencia, radioConvivencia y memoriaDisputa, CONFL); con su default no actúan.
-  delete comoMain.conducta; delete comoMain.social;
+  delete comoMain.conducta; delete comoMain.social; delete comoMain.tecnologia;
   // Claves nuevas de la integración de la noche (gobernador techo, cortejo, maxComunidades):
   // tampoco existen en `main`, y con su default tampoco actúan.
   delete (comoMain.gobernador as Record<string, unknown>).politica;

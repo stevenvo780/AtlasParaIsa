@@ -1,0 +1,15 @@
+[
+  {"name":"transient_flip_daily_reconverge","tick":4807,"variant":"transient","expect":"FIRST_FLIP","dailyDigests":["same","same"],"finalSame":true},
+  {"name":"float_only_no_flip","tick":4807,"variant":"float","expect":"NO_FLIP"},
+  {"name":"unilateral_choose_physical_commit_change","tick":4807,"variant":"unilateral","expect":"FIRST_FLIP"},
+  {"name":"gate_change_same_action","tick":4807,"variant":"gate","expect":"NO_FLIP"},
+  {"name":"broken_seq","tick":4807,"variant":"seq","expect":"UNKNOWN"},
+  {"name":"broken_history","tick":4807,"variant":"history","expect":"UNKNOWN"},
+  {"name":"target_diff_same_action","tick":4807,"variant":"target","expect":"FIRST_FLIP"},
+  {"name":"actor_dies_no_opportunity","tick":4808,"variant":"death","expect":"UNKNOWN"},
+  {"name":"lower_window_inclusive","tick":4807,"variant":"boundary","expect":"FIRST_FLIP"},
+  {"name":"malformed_dto","tick":4807,"variant":"malformed","expect":"UNKNOWN"},
+  {"name":"source_mismatch","tick":4807,"variant":"source","expect":"UNKNOWN"},
+  {"name":"missing_commit","tick":4807,"variant":"missing","expect":"UNKNOWN"},
+  {"name":"empty_stream","tick":4807,"variant":"empty","expect":"UNKNOWN"}
+]

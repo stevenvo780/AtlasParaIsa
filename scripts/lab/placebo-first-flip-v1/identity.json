@@ -1,0 +1,22 @@
+{
+  "schema": "placebo-first-flip-source-identity/v1",
+  "originalHEAD": "6516c62e06fe2b22493e029022fab7f32388b674",
+  "originalIndexSHA": "6172a5f7ccbc1e1eafe621430cbf1bc1f06b15d8a763325595e868c774d7ea83",
+  "sourceSHA": "98e6e8fce70d3ca4ee7f04b9ba2118cd0cb429f11b5b81d15be9c4dd337c3dbf",
+  "sourceSHASemantics": "SHA256 bytes of instrumented src/world/index.ts; not original git HEAD",
+  "worldSourceHash": "022e84eb01b7fa2a10fbb0c8d2b92a657f2deb3d544ef9b6ad77221342d1bdd6",
+  "originalWorldSourceHash": "ab5a7878a25e1ff11b77974a124ef1273cc0319ed50713833e3bf5bb0e96cc4b",
+  "harnessHash": "ef6ff450ba1858575e540f42ab3a36b674ee28a53e54eae55d0da1fdcac2d8b3",
+  "harnessFiles": [
+    "scripts/lab/placebo-first-flip-v1/fixtures/manual.ts",
+    "scripts/lab/placebo-first-flip-v1/fixtures/scenarios.json",
+    "scripts/lab/placebo-first-flip-v1/observer.ts",
+    "scripts/lab/placebo-first-flip-v1/reader.py",
+    "scripts/lab/placebo-first-flip-v1/runner.ts",
+    "scripts/lab/placebo-first-flip-v1/verify_source.py",
+    "tests/placebo-first-flip-v1.test.ts"
+  ],
+  "paramsHash": "0d9b700dc4ac3479b7439d001e168cbe2d866af59df3101c20c3ef0b865a3478",
+  "instrumentedCommitSHA": "UNCOMMITTED_AUTHORING_ONLY",
+  "newEpoch": true
+}

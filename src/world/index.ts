@@ -423,7 +423,50 @@ function personById(world: World, id: string): Person | undefined {
   return index.byId.get(id);
 }
 
+// BEGIN PLACEBO-FIRST-FLIP-V1 passive instrumentation (isolated checkout only).
+export interface DecisionProjectionV1 {
+  readonly action: Action; readonly target: Readonly<Point>; readonly decisionAt: number;
+  readonly thirstBits: string;
+}
+export type DecisionObservationV1 =
+  | Readonly<{ kind: 'begin'; tick: number; expected: number }>
+  | Readonly<{ kind: 'end'; tick: number; visited: number }>
+  | Readonly<{ kind: 'gate'; tick: number; id: string; ordinal: number; eligible: boolean;
+      path: 'gate' | 'preparation'; pre: DecisionProjectionV1; post: DecisionProjectionV1 }>
+  | Readonly<{ kind: 'commit'; tick: number; id: string; ordinal: number;
+      pre: DecisionProjectionV1; post: DecisionProjectionV1; selectedAction: Action;
+      selectedTarget: Readonly<Point>; selectedScoreBits: string; candidateCount: number; reasonHash: 'UNKNOWN' }>;
+interface DecisionSessionV1 {
+  callback: (dto: DecisionObservationV1) => void; visited: number; fault: boolean;
+}
+const decisionSessionsV1 = new WeakMap<World, DecisionSessionV1>();
+/** External opt-in; never serialized, never inherited implicitly by clones. Callback faults
+ * invalidate observation but cannot interrupt or change the physical step. */
+export function attachDecisionObserverV1(world: World, callback: (dto: DecisionObservationV1) => void): { detach(): void; faulted(): boolean } {
+  if (decisionSessionsV1.has(world)) throw new Error('Decision observer already attached');
+  const session: DecisionSessionV1 = { callback, visited: 0, fault: false };
+  decisionSessionsV1.set(world, session);
+  return { detach: () => { decisionSessionsV1.delete(world); }, faulted: () => session.fault };
+}
+export function decisionBitsV1(value: number): string {
+  const view = new DataView(new ArrayBuffer(8));
+  view.setFloat64(0, value, false);
+  return view.getBigUint64(0, false).toString(16).padStart(16, '0');
+}
+function decisionProjectionV1(person: Person): DecisionProjectionV1 {
+  return Object.freeze({ action: person.action, target: Object.freeze({ x: person.target.x, y: person.target.y }),
+    decisionAt: person.decisionAt, thirstBits: decisionBitsV1(person.thirst) });
+}
+function deliverDecisionV1(session: DecisionSessionV1, dto: DecisionObservationV1): void {
+  try { session.callback(Object.freeze(dto)); } catch { session.fault = true; }
+}
+// END PLACEBO-FIRST-FLIP-V1 passive instrumentation.
+
 function choose(world: World, person: Person): void {
+  // BEGIN PLACEBO-FIRST-FLIP-V1
+  const decisionSession = decisionSessionsV1.get(world);
+  const decisionPre = decisionSession ? decisionProjectionV1(person) : undefined;
+  // END PLACEBO-FIRST-FLIP-V1
   const nearbyTiles: Tile[] = [];
   for (let dy = -RADIUS; dy <= RADIUS; dy++) for (let dx = -RADIUS; dx <= RADIUS; dx++) {
     if (dx * dx + dy * dy > RADIUS * RADIUS) continue;
@@ -857,6 +900,14 @@ function choose(world: World, person: Person): void {
   person.target = { x: selected.target.x, y: selected.target.y };
   person.reason = selected.memory ? `${selected.reason} Influye «${selected.memory.title}», ${selected.memory.source === 'sample' ? 'material de prueba' : 'recuerdo aprobado'}.` : selected.reason;
   person.decisionAt = world.tick + (selected === restCandidate && recoverWater ? 1 : 30);
+  // BEGIN PLACEBO-FIRST-FLIP-V1: actual commit; locals copied, never passed out.
+  if (decisionSession && decisionPre) deliverDecisionV1(decisionSession, {
+    kind: 'commit', tick: world.tick, id: person.id, ordinal: decisionSession.visited,
+    pre: decisionPre, post: decisionProjectionV1(person), selectedAction: selected.action,
+    selectedTarget: Object.freeze({ x: selected.target.x, y: selected.target.y }),
+    selectedScoreBits: decisionBitsV1(selected.score), candidateCount: candidates.length, reasonHash: 'UNKNOWN',
+  });
+  // END PLACEBO-FIRST-FLIP-V1
   if (selected.memory && person.recentMemory !== selected.memory.text) {
     const event = addEvent(world, { kind: 'memory', actors: [person.id], text: `${person.name} eligió ${actionLabel(selected.action)} al recordar «${selected.memory.title}».`, cause: `Contexto ${selected.memory.context}; recuerdo ${selected.memory.id}; aumenta la preferencia por ${selected.action}.`, x: person.x, y: person.y, source: selected.memory.source });
     remember(person, world, selected.memory.text, event.id, selected.memory.placeId);
@@ -993,6 +1044,10 @@ function share(world: World, donor: Person): void {
 }
 
 function bodyAndAction(world: World, person: Person): void {
+  // BEGIN PLACEBO-FIRST-FLIP-V1: witness each actual for-of iteration.
+  const gateSession = decisionSessionsV1.get(world);
+  if (gateSession) gateSession.visited++;
+  // END PLACEBO-FIRST-FLIP-V1
   maintainContainedWater(world, person);
   const tile = tileAt(world, person)!;
   const physiology = demographicTraits(person.genome, paramsOf(world).cuerpo);
@@ -1007,6 +1062,13 @@ function bodyAndAction(world: World, person: Person): void {
       if (preparation.moved > 0) {
         person.reason = preparation.complete ? 'Preparó una reserva finita de agua; vuelve a elegir su camino.' : 'Llena un objeto que retiene agua para preparar una reserva de viaje; cada carga cuesta esfuerzo.';
         person.need = 'Preparar agua para el camino';
+        // BEGIN PLACEBO-FIRST-FLIP-V1
+        if (gateSession) {
+          const projection = decisionProjectionV1(person);
+          deliverDecisionV1(gateSession, { kind: 'gate', tick: world.tick, id: person.id,
+            ordinal: gateSession.visited, eligible: false, path: 'preparation', pre: projection, post: projection });
+        }
+        // END PLACEBO-FIRST-FLIP-V1
         return; // This tick's handling effort cannot also be spent drinking or working.
       }
     }
@@ -1017,7 +1079,21 @@ function bodyAndAction(world: World, person: Person): void {
   const blockedCarriedWater = person.action === 'drink' && distance(person, person.target) < 0.5
     && containedWaterQuanta(person) > 0 && !canHandleContainedWater(person, world.tick) && waterAvailable(world, person) <= 0;
   const agreedWait = person.action === 'retreat' && person.lastDispute >= 0 && world.tick < person.decisionAt && world.tick - person.lastDispute < 30;
-  if (!agreedWait && (world.tick >= person.decisionAt || emptyFood || emptyHarvest || emptyWater || blockedCarriedWater || (person.hunger > 0.9 && !['eat','hunt'].includes(person.action)) || (person.thirst > 0.9 && person.action !== 'drink'))) choose(world, person);
+  // BEGIN PLACEBO-FIRST-FLIP-V1
+  const gatePre = gateSession ? decisionProjectionV1(person) : undefined;
+  let gateChose = false;
+  // END PLACEBO-FIRST-FLIP-V1
+  if (!agreedWait && (world.tick >= person.decisionAt || emptyFood || emptyHarvest || emptyWater || blockedCarriedWater || (person.hunger > 0.9 && !['eat','hunt'].includes(person.action)) || (person.thirst > 0.9 && person.action !== 'drink'))) {
+    // BEGIN PLACEBO-FIRST-FLIP-V1
+    gateChose = true;
+    // END PLACEBO-FIRST-FLIP-V1
+    choose(world, person);
+  }
+  // BEGIN PLACEBO-FIRST-FLIP-V1
+  if (gateSession && gatePre) deliverDecisionV1(gateSession, { kind: 'gate', tick: world.tick,
+    id: person.id, ordinal: gateSession.visited, eligible: gateChose, path: 'gate',
+    pre: gatePre, post: decisionProjectionV1(person) });
+  // END PLACEBO-FIRST-FLIP-V1
   if (['eat','drink','hunt'].includes(person.action)) resourceDispute(world, person, event => addEvent(world, event));
   if (world.tick % 6 === 0 && !(person.action === 'accompany' && distance(person, person.target) <= 1.5)) move(world, person);
   const current = tileAt(world, person)!;
@@ -1255,7 +1331,16 @@ function advanceTick(world: World, inputs: Gesture[], context: WorldContext, med
     { decaimientoFertilidad: paramsOf(world).recursos.decaimientoFertilidad, seed: world.seed, cuencas: paramsOf(world).agua.cuencas, soaTerreno: paramsOf(world).motor.soaTerreno }));
   medirFase(medicion, 'fauna', () => { stepAnimals(world,event=>addEvent(world,event)); stepStructures(world,event=>addEvent(world,event)); });
   medirFase(medicion, 'personas', () => {
+    // BEGIN PLACEBO-FIRST-FLIP-V1
+    const iterationSession = decisionSessionsV1.get(world);
+    if (iterationSession) { iterationSession.visited = 0; deliverDecisionV1(iterationSession,
+      { kind: 'begin', tick: world.tick, expected: world.people.length }); }
+    // END PLACEBO-FIRST-FLIP-V1
     for (const person of world.people) bodyAndAction(world, person);
+    // BEGIN PLACEBO-FIRST-FLIP-V1
+    if (iterationSession) deliverDecisionV1(iterationSession,
+      { kind: 'end', tick: world.tick, visited: iterationSession.visited });
+    // END PLACEBO-FIRST-FLIP-V1
     for (const person of world.people) {
       const chunk = world.chunks[chunkKey(person.x, person.y)]!;
       if (!chunk.discovered) {

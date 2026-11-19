@@ -42,16 +42,20 @@ function replica(t: { after(callback: () => void): void }, seed: number, pasos: 
  * midieron los hashes, y con su valor 0 no actúa. */
 function digestoSinMemoria(world: World, conMemoria = false): string {
   const vigentes = paramsOf(world);
-  const antes = structuredClone(vigentes) as unknown as { agua: Record<string, unknown>; social: Record<string, unknown> };
+  const antes = structuredClone(vigentes) as unknown as { agua: Record<string, unknown>; social: Record<string, unknown>; tecnologia?: Record<string, unknown> };
   assert.equal(antes.social.memoriaDisputa, 0);
   assert.equal(antes.social.hogarTrabajo, 0);
   // COM-D′ (`sprint/com-d-20260928`): `social.disolucion` no existía en f2757fa; con su valor 0 no
   // actúa (identidad demostrada en `tests/com-d.test.ts`), así que también se quita de la forma.
   assert.equal(antes.social.disolucion, 0);
+  // Fase B (`sprint/estabilidad-fase-b-20261118`): `tecnologia.*` no existía en f2757fa; con sus
+  // valores históricos no actúa, así que también se quita de la forma.
+  assert.deepEqual(antes.tecnologia, HISTORICAL_PARAMS.tecnologia);
   if (!conMemoria) delete antes.agua.memoria;
   delete antes.social.memoriaDisputa;
   delete antes.social.hogarTrabajo;
   delete antes.social.disolucion;
+  delete antes.tecnologia;
   // Poda ola 1 (2026-09-27): `conducta.vocacion`/`vocacionTope` y
   // `poblacion.natalidadLocal`/`radioProvision` ya no se declaran; la forma las trae quitadas.
   setParams(world, antes as unknown as WorldParams);

@@ -56,6 +56,11 @@ function paso(world: World, store: Store, medicion?: FaseMedicion): void {
 export function digestoSin(world: World, sin: readonly string[], versionReferencia?: number): string {
   const vigentes = paramsOf(world), forma = structuredClone(vigentes) as unknown as Record<string, Record<string, unknown>>;
   for (const clave of sin) {
+    if (!clave.includes('.')) {
+      if (!Object.hasOwn(forma, clave)) throw new Error(`sin: la sección ${clave} no existe en este árbol`);
+      delete forma[clave];
+      continue;
+    }
     const [seccion, hoja] = clave.split('.') as [string, string];
     if (!forma[seccion] || !Object.hasOwn(forma[seccion]!, hoja)) throw new Error(`sin: la clave ${clave} no existe en este árbol`);
     delete forma[seccion]![hoja];

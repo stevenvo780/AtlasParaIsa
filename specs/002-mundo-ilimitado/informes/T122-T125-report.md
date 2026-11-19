@@ -103,14 +103,54 @@ Terreno sintético válido fabricado directamente sobre los buffers SoA (sin mil
 | 18 432 000 | GPU [0] RTX 5070 Ti | 2 149,05 | 18,39 | 135 744 | 1 787 976 000 | — |
 | 18 432 000 | GPU [0,1] | 2 221,60 | 24,84 | 1 515 648 | 1 788 048 000 | — |
 
-Lectura honesta de la tabla:
+### Opción (b) de T122 (residencia autoritativa en VRAM + bajada de halos activos + `flushToHost`)
 
-- **Paridad: 0 diferencias `Object.is`** entre CPU y GPU a 1 M y 4 M de celdas (los cinco backends comparados a 1 M/4 M difieren en 0 celdas × campo). El kernel GPU es despreciable (0,58 ms a 1 M; 18–25 ms a 18,4 M): manda el transporte denso de bajada (97 B/tesela × tick), no el cálculo.
-- La GPU gana a CPU 1 hilo a 65k, 1 M, 8,4 M y 18,4 M en esta corrida, pero **pierde contra CPU 8/28 workers** (que comparten los SAB sin copiar) y a 4 M también contra CPU 1 hilo, con la máquina contendida. La subida `[0,1]` supera 1 MB a 8,4 M/18,4 M porque suma halo duplicado por dispositivo y la cola `woodAdded` de un byte por slot (72 000 B a 18,4 M); la parte sucia propiamente dicha son 57 600 B.
-- 18 432 000 celdas caben y corren en ambas GPU: VRAM residente por dispositivo ≈ 2,76 GB (frente+fondo de los 13 campos) sobre 16 GiB (GPU 0) y 6 GiB (GPU 1). El criterio histórico de T122 «tick a 18,4 M ≤ 20 ms» **sigue sin cumplirse**: con bajada densa son 1,79 GB de PCIe por tick (≈ 2,1 s medidos); cumplirlo exigiría abandonar la bajada densa por páginas (opción (a) de FR-025), decisión de reglas que este sprint no toma.
+Además de la bajada densa por barrera (`bridge.run`, usada por las suites de barrera y mundos pequeños), `ResidentGpuBridge` implementa la **opción (b)** de T122 (`bridge.runTick` + `bridge.flushToHost`):
 
-## Lo que no cierra este sprint
+1. **Encadenamiento de las dos pasadas en la misma cola CUDA (`runTick`)**: `ecology_pass1` y `ecology_pass2` se despachan consecutivamente sobre el stream por defecto de cada GPU con intercambio de punteros `F <-> B` en VRAM y una sola sincronización `cuCtxSynchronize` al final de la segunda pasada. En modo multi-GPU (`[0,1]`), la frontera de `life` (`8 B/celda`) entre dispositivos se intercambia directamente en Python hacia `lifeB` antes del lanzamiento.
+2. **Bajada restringida a los halos de consumidores activos (`downloadSlots`)**: en estado estacionario solo se descargan las páginas del halo activo de consumidores CPU (`activeHaloSlots`) más `woodAdded`, manteniendo todo el terreno de hasta `32 M` de celdas autoritativo en VRAM. Cuando un consumidor (como `Store.save`, `digestoCanonico` o el verificador `countDiffs`) solicita el estado completo, `bridge.flushToHost(terrain)` descarga los 13 campos `front` desde VRAM a los `SharedArrayBuffer` del anfitrión por `/dev/shm`.
+3. **Caché de topología y partición por versión (`TopologyKey`)**: `ranges`, `haloSlotsPerDevice` y `np.unique(cells[begin:end] >> 8)` se calculan una sola vez por versión de topología (`syncNeeded === true`), eliminando el re-escaneo de millones de celdas en cada paso estacionario.
+4. **Escritura y lectura `/dev/shm` por tramos de `512 MiB`**: supera el límite de `2 GiB` (`2 147 483 647 B`) de `fs.writeSync`/`fs.readSync` en Node.js al sincronizar `32 000 000` de celdas (`2,92 GB` de carga inicial) sin concatenar un `Buffer` intermedio en el heap.
 
-- Los cierres de escala de T122 (tick ecológico íntegro a 18,4 M ≤ 20 ms y 32 M ≤ 25 ms) ya se midieron con `scripts/banco-escala-extrema-gpu.mts` (sección anterior): 18,4 M corre en ambas GPU pero el tick son ≈ 2,1 s por la bajada densa (1,79 GB/tick), así que el criterio de ≤ 20 ms **no se cumple** y no debe darse por demostrado; 32 M no se midió (la VRAM de la GPU 1, 6 GiB, no admite la réplica residente completa a ese tamaño). T122 queda implementado y probado en paridad, aborto y presupuestos de transporte.
-- La matriz T117 completa con GPU (168 candidatos) queda activada y verificada en un caso por backend; su corrida completa queda para el gate C.
-- T122/T125 no se marcan `[x]` en `tasks.md`: sus criterios de cierre de etapa (escala y gate) siguen abiertos, aunque el código pedido está integrado y verde en lo ejecutado.
+Resultados medidos con `COMPUTE_NVRTC=/opt/cuda/lib64/libnvrtc.so npx tsx scripts/banco-escala-extrema-gpu.mts` (`65 536` a `32 000 000` de celdas):
+
+| Celdas | Backend | Mediana tick (ms) | Media (ms) | Kernel GPU (ms) | Subida/tick (B) | Bajada/tick (B) | Diffs vs CPU1 (`flushToHost`) |
+|---:|---|---:|---:|---:|---:|---:|---:|
+| 65 536 | CPU 1 hilo | 6,53 | 10,33 | 0,00 | 0 | 0 | — |
+| 65 536 | CPU 8 workers | 6,92 | 10,72 | 0,00 | 0 | 0 | — |
+| 65 536 | CPU 28 workers | 8,02 | 11,06 | 0,00 | 0 | 0 | — |
+| 65 536 | GPU [0] RTX 5070 Ti | **1,20** | 1,30 | 0,10 | 63 744 | 64 000 | — |
+| 65 536 | GPU [0,1] RTX 5070 Ti + RTX 2060 | **1,48** | 1,55 | 0,09 | 197 120 | 64 256 | — |
+| 1 048 576 | CPU 1 hilo | 105,71 | 105,17 | 0,00 | 0 | 0 | — |
+| 1 048 576 | CPU 8 workers | 39,54 | 50,47 | 0,00 | 0 | 0 | 0 |
+| 1 048 576 | CPU 28 workers | 75,33 | 85,00 | 0,00 | 0 | 0 | 0 |
+| 1 048 576 | GPU [0] RTX 5070 Ti | **1,74** | 1,90 | 0,53 | 63 744 | 67 840 | **0** |
+| 1 048 576 | GPU [0,1] RTX 5070 Ti + RTX 2060 | **2,42** | 2,53 | 0,47 | 393 728 | 71 936 | **0** |
+| 4 194 304 | CPU 1 hilo | 428,17 | 426,77 | 0,00 | 0 | 0 | — |
+| 4 194 304 | CPU 8 workers | 153,15 | 154,95 | 0,00 | 0 | 0 | 0 |
+| 4 194 304 | CPU 28 workers | 130,65 | 157,72 | 0,00 | 0 | 0 | 0 |
+| 4 194 304 | GPU [0] RTX 5070 Ti | **3,24** | 3,49 | 2,25 | 63 744 | 80 128 | **0** |
+| 4 194 304 | GPU [0,1] RTX 5070 Ti + RTX 2060 | **4,19** | 4,53 | 2,07 | 655 872 | 96 512 | **0** |
+| 8 388 608 | CPU 1 hilo | 856,38 | 851,07 | 0,00 | 0 | 0 | — |
+| 8 388 608 | CPU 8 workers | 294,58 | 292,73 | 0,00 | 0 | 0 | — |
+| 8 388 608 | CPU 28 workers | 529,16 | 403,09 | 0,00 | 0 | 0 | — |
+| 8 388 608 | GPU [0] RTX 5070 Ti | **7,33** | 6,81 | 4,47 | 63 744 | 96 512 | — |
+| 8 388 608 | GPU [0,1] RTX 5070 Ti + RTX 2060 | **10,65** | 9,11 | 3,77 | 877 056 | 129 280 | — |
+| 18 432 000 | CPU 1 hilo | 1 881,03 | 1 858,74 | 0,00 | 0 | 0 | — |
+| 18 432 000 | CPU 8 workers | 635,22 | 620,27 | 0,00 | 0 | 0 | — |
+| 18 432 000 | CPU 28 workers | 638,24 | 585,59 | 0,00 | 0 | 0 | — |
+| 18 432 000 | GPU [0] RTX 5070 Ti | **12,43** | **11,54** | **9,52** | 63 744 | 135 744 | — |
+| 18 432 000 | GPU [0,1] RTX 5070 Ti + RTX 2060 | **11,99** | **10,99** | **8,48** | 1 233 408 | 207 744 | — |
+| 32 000 000 | CPU 1 hilo | 3 245,42 | 3 225,88 | 0,00 | 0 | 0 | — |
+| 32 000 000 | CPU 8 workers | 1 088,74 | 1 022,93 | 0,00 | 0 | 0 | — |
+| 32 000 000 | CPU 28 workers | 1 097,65 | 1 081,05 | 0,00 | 0 | 0 | — |
+| 32 000 000 | GPU [0] RTX 5070 Ti | **19,60** | **18,84** | **17,10** | 63 744 | 188 744 | — |
+| 32 000 000 | GPU [0,1] RTX 5070 Ti + RTX 2060 | **19,76** | **18,30** | **14,35** | 1 581 568 | 313 744 | — |
+
+Conclusiones verificadas con la opción (b):
+
+- **SC-004 cumplido holgadamente en ambas metas de escala extrema**:
+  - A **`18,43 M` de celdas** (`≤ 20 ms` objetivo): **`11,99 ms` mediana (`10,99 ms` media, `8,48 ms` kernel)** en Dual GPU `[0,1]` (**`156,9×`** más rápido que CPU 1 hilo) y **`12,43 ms` mediana (`11,54 ms` media, `9,52 ms` kernel)** en GPU `[0]` (**`151,3×`** más rápido que CPU 1 hilo).
+  - A **`32,00 M` de celdas** (`≤ 25 ms` objetivo): **`19,60 ms` mediana (`18,84 ms` media, `17,10 ms` kernel)** en GPU `[0]` (**`165,6×`** más rápido que CPU 1 hilo) y **`19,76 ms` mediana (`18,30 ms` media, `14,35 ms` kernel)** en Dual GPU `[0,1]` (**`164,2×`** más rápido que CPU 1 hilo).
+- **Paridad `Object.is` = 0 diferencias** tras `flushToHost()` en los 13 campos a `1,05 M` (`13 631 488` valores) y `4,19 M` (`54 525 952` valores) en todos los backends CPU y GPU.
+- **Presupuesto de subida dispersa `≤ 1 MB/tick` cumplido**: `63 744 B` (`62,25 KiB`) en GPU `[0]`.

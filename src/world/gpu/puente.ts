@@ -33,6 +33,7 @@ const FIELD_BY_NAME = Object.fromEntries(FIELDS.map(f => [f.name, f]));
 const DOWNLOAD_FIELDS = {
   1: ['moisture', 'vegetation', 'food'],
   2: FIELDS.map(f => f.name).filter(n => n !== 'food' && n !== 'terrain' && n !== 'biome'),
+  '2_halo': FIELDS.map(f => f.name).filter(n => n !== 'terrain' && n !== 'biome'),
 };
 function runsOf(sorted) {
   const runs = [];
@@ -44,15 +45,29 @@ function runsOf(sorted) {
   return runs;
 }
 let child = null, reader = null, readyPromise = null, dead = null;
-let shmFd = null, shmReadBuf = null, shmPath = null;
-function shmWrite(payload) {
-  let off = 0;
-  while (off < payload.length) { off += fs.writeSync(shmFd, payload, off, payload.length - off, off); }
+let shmFd = null, shmReadBuf = null, shmPath = null, cachedBuffers = null;
+const MAX_IO_CHUNK = 1 << 29; // 512 MiB (< 2 GiB limit of Node fs.writeSync/readSync)
+function shmWriteParts(parts) {
+  let pos = 0;
+  for (const part of parts) {
+    let off = 0;
+    while (off < part.byteLength) {
+      const chunk = Math.min(MAX_IO_CHUNK, part.byteLength - off);
+      off += fs.writeSync(shmFd, part, off, chunk, pos);
+      pos = pos + chunk;
+    }
+  }
+  return pos;
 }
 function shmReadRange(offset, n) {
   if (!shmReadBuf || shmReadBuf.length < n) shmReadBuf = Buffer.allocUnsafe(n);
   let off = 0;
-  while (off < n) { const r = fs.readSync(shmFd, shmReadBuf, off, n - off, offset + off); if (r <= 0) throw new Error('GPU shm: lectura corta'); off += r; }
+  while (off < n) {
+    const chunk = Math.min(MAX_IO_CHUNK, n - off);
+    const r = fs.readSync(shmFd, shmReadBuf, off, chunk, offset + off);
+    if (r <= 0) throw new Error('GPU shm: lectura corta');
+    off += r;
+  }
   return shmReadBuf.subarray(0, n);
 }
 class Reader {
@@ -85,12 +100,25 @@ function start(){
 }
 async function send(header, body){
   if(dead) throw dead;
-  if(!child || !child.stdin || child.stdin.destroyed || !child.stdin.writable) throw dead||new Error('GPU resident subprocess stdin is closed');
-  const payload = body||Buffer.alloc(0);
-  const useShm = shmFd !== null && payload.length > 0;
-  if(useShm) shmWrite(payload);
-  const raw=Buffer.from(JSON.stringify(useShm ? {...header, bytes: 0, shmBytes: payload.length} : {...header, bytes: payload.length, shmBytes: 0})); const prefix=Buffer.alloc(4); prefix.writeUInt32LE(raw.length);
-  child.stdin.write(prefix); child.stdin.write(raw); if(payload.length && !useShm) child.stdin.write(payload);
+  if(!child || !child.stdin || !child.stdin.writable || child.stdin.destroyed) throw dead||new Error('GPU resident subprocess stdin is closed');
+  const parts = Array.isArray(body) ? body : (body && body.byteLength ? [body] : []);
+  const totalBytes = parts.reduce((s, p) => s + p.byteLength, 0);
+  const useShm = shmFd !== null && totalBytes > 0;
+  if(useShm) {
+    let pos = 0;
+    for (const part of parts) {
+      let off = 0;
+      while (off < part.byteLength) {
+        const chunk = Math.min(MAX_IO_CHUNK, part.byteLength - off);
+        const w = fs.writeSync(shmFd, part, off, chunk, pos + off);
+        off += w;
+      }
+      pos += part.byteLength;
+    }
+  }
+  const raw=Buffer.from(JSON.stringify(useShm ? {...header, bytes: 0, shmBytes: totalBytes} : {...header, bytes: totalBytes, shmBytes: 0})); const prefix=Buffer.alloc(4); prefix.writeUInt32LE(raw.length);
+  child.stdin.write(prefix); child.stdin.write(raw);
+  if(totalBytes && !useShm) { for (const part of parts) child.stdin.write(part); }
   return reader.frame();
 }
 function view(buffers, name, bytes){
@@ -101,7 +129,8 @@ function bytesOf(buffers,name){ const buf=buffers[name]; return new Uint8Array(b
 async function handle(job){
   await readyPromise;
   if(dead) throw dead;
-  const buffers=job.buffers;
+  if(job.buffers) cachedBuffers = job.buffers;
+  const buffers = cachedBuffers;
   let uploaded=0, downloaded=0;
   const capacity=job.capacityCells, slots=job.slots, total=job.totalCells;
   if(job.syncNeeded){
@@ -109,12 +138,74 @@ async function handle(job){
     const push=(u8)=>parts.push(Buffer.from(u8.buffer, u8.byteOffset, u8.byteLength));
     push(new Uint8Array(buffers.cells)); push(new Uint8Array(buffers.stamps)); push(new Uint8Array(buffers.around)); push(new Uint8Array(buffers.pageX)); push(new Uint8Array(buffers.pageY));
     for(const f of FIELDS) push(bytesOf(buffers,f.name));
-    const body=Buffer.concat(parts);
-    const reply=await send({kind:'sync', capacityCells:capacity, slots, totalCells:total}, body);
+    const reply=await send({kind:'sync', capacityCells:capacity, slots, totalCells:total}, parts);
     if(!reply.header.ok) throw new Error('GPU sync failed');
     uploaded += reply.header.uploadedBytes||0; stats[2]=uploaded;
   }
   const syncUploaded = uploaded;
+  if(job.kind==='tick'){
+    const perPage = FIELDS.reduce((s,f)=>s+256*f.bytes,0);
+    const body = Buffer.alloc(job.dirtySlots.length * perPage);
+    let off = 0;
+    const dirtyRuns = runsOf(job.dirtySlots);
+    for(const f of FIELDS){
+      const src = bytesOf(buffers, f.name);
+      for(const [startSlot, count] of dirtyRuns){
+        const start = startSlot * 256 * f.bytes; const len = count * 256 * f.bytes;
+        body.set(src.subarray(start, start + len), off); off += len;
+      }
+    }
+    const reply = await send({
+      kind: 'tick', dirtySlots: job.dirtySlots, ranges: job.ranges,
+      haloSlotsPerDevice: job.haloSlotsPerDevice || [], downloadSlots: job.downloadSlots || [],
+      pass1Params: job.pass1Params, pass2Params: job.pass2Params,
+    }, body);
+    if(!reply.header.ok) throw new Error('GPU tick failed');
+    uploaded += reply.header.uploadedBytes || 0; downloaded += reply.header.downloadedBytes || 0;
+    let boff = 0;
+    const perDevice = reply.header.downloadSlotsPerDevice || [];
+    const touched = new Set();
+    for(let di = 0; di < perDevice.length; di++){
+      const deviceSlots = perDevice[di];
+      if(!deviceSlots || !deviceSlots.length) continue;
+      for(const slot of deviceSlots) touched.add(slot);
+      const deviceRuns = runsOf(deviceSlots);
+      for(const f of FIELDS){
+        const dst = bytesOf(buffers, f.name);
+        for(const [startSlot, count] of deviceRuns){
+          const start = startSlot * 256 * f.bytes; const len = count * 256 * f.bytes;
+          const chunk = reply.shmBytes ? shmReadRange(boff, len) : reply.body.subarray(boff, boff + len);
+          dst.set(chunk, start); boff += len;
+        }
+      }
+    }
+    const woodAdded = new Uint8Array(buffers.woodAdded); const queue = new Int32Array(buffers.woodAddedQueue); const dirty = new Uint8Array(buffers.dirty);
+    const added = (reply.header.woodAddedSlots || []).slice().sort((a,b)=>a-b);
+    for(const s of added) woodAdded[s] = 1;
+    Atomics.store(queue, 0, 1); Atomics.store(queue, 1, added.length); added.forEach((s,i)=>Atomics.store(queue, 2+i, s));
+    for(const s of touched) dirty[s] = 1;
+    stats[0] = uploaded; stats[1] = downloaded; stats[2] = syncUploaded;
+    const devs = reply.header.devices || []; stats[3] = devs.reduce((s,d)=>Math.max(s, d.kernelMs || 0), 0);
+    return {touched: [...touched].sort((a,b)=>a-b)};
+  }
+  if(job.kind==='flush'){
+    const reply=await send({kind:'flush', ranges:job.ranges}, null);
+    if(!reply.header.ok) throw new Error('GPU flush failed');
+    let boff=0;
+    const perDevice = reply.header.downloadSlotsPerDevice||[];
+    for(let di=0; di<perDevice.length; di++){
+      const deviceRuns = runsOf(perDevice[di]);
+      for(const f of FIELDS){
+        const dst=bytesOf(buffers,f.name);
+        for(const [startSlot,count] of deviceRuns){
+          const start=startSlot*256*f.bytes; const len=count*256*f.bytes;
+          const chunk = reply.shmBytes ? shmReadRange(boff, len) : reply.body.subarray(boff,boff+len);
+          dst.set(chunk,start); boff+=len;
+        }
+      }
+    }
+    return {touched:[]};
+  }
   // step body: dirty chunks
   const perPage = FIELDS.reduce((s,f)=>s+256*f.bytes,0);
   const haloField = job.pass===1 ? 'terrain' : 'life';
@@ -127,18 +218,21 @@ async function handle(job){
   for(const f of FIELDS){ const src=bytesOf(buffers,f.name); for(const [startSlot,count] of dirtyRuns){ const start=startSlot*256*f.bytes; const len=count*256*f.bytes; body.set(src.subarray(start,start+len),off); off+=len; } }
   if(job.pass===2){ body.set(bytesOf(buffers,'woodAdded').subarray(0,slots),off); off+=slots; }
   for(const lst of (job.haloSlotsPerDevice||[])){ for(const slot of lst){ const src=bytesOf(buffers,haloField); const start=slot*256*haloSpec.bytes; body.set(src.subarray(start,start+256*haloSpec.bytes),off); off+=256*haloSpec.bytes; } }
-  const reply=await send({kind:'step', pass:job.pass, dirtySlots:job.dirtySlots, ranges:job.ranges, haloSlotsPerDevice:job.haloSlotsPerDevice||[], haloField, params:job.params}, body);
+  const reply=await send({kind:'step', pass:job.pass, dirtySlots:job.dirtySlots, ranges:job.ranges, haloSlotsPerDevice:job.haloSlotsPerDevice||[], haloField, downloadSlots:job.downloadSlots, params:job.params}, body);
   if(!reply.header.ok) throw new Error('GPU step failed');
   uploaded += reply.header.uploadedBytes||0; downloaded += reply.header.downloadedBytes||0;
   // Bajada selectiva coalescida: solo los campos de la pasada, por campo y por tramo.
   // Los campos no descargados se copian front->back en RAM local para los tramos tocados.
   let boff=0;
   const perDevice = reply.header.downloadSlotsPerDevice||[];
-  const dlNames = DOWNLOAD_FIELDS[job.pass] || FIELDS.map(f=>f.name);
+  const dlKey = (job.downloadSlots !== undefined && job.downloadSlots !== null && job.pass === 2) ? '2_halo' : job.pass;
+  const dlNames = DOWNLOAD_FIELDS[dlKey] || FIELDS.map(f=>f.name);
   const dlSet = new Set(dlNames);
   const touched=new Set();
   for(let di=0; di<perDevice.length; di++){
-    const deviceSlots = perDevice[di]; for(const slot of deviceSlots) touched.add(slot);
+    const deviceSlots = perDevice[di];
+    if(!deviceSlots || !deviceSlots.length) continue;
+    for(const slot of deviceSlots) touched.add(slot);
     const deviceRuns = runsOf(deviceSlots);
     for(const name of dlNames){ const f=FIELD_BY_NAME[name]; const dst=bytesOf(buffers,name+'Back'); for(const [startSlot,count] of deviceRuns){ const start=startSlot*256*f.bytes; const len=count*256*f.bytes; const chunk = reply.shmBytes ? shmReadRange(boff, len) : reply.body.subarray(boff,boff+len); dst.set(chunk,start); boff+=len; } }
     for(const f of FIELDS){ if(dlSet.has(f.name)) continue; const src=bytesOf(buffers,f.name); const dst=bytesOf(buffers,f.name+'Back'); for(const [startSlot,count] of deviceRuns){ const start=startSlot*256*f.bytes; const len=count*256*f.bytes; dst.set(src.subarray(start,start+len),start); } }
@@ -149,7 +243,7 @@ async function handle(job){
   else { Atomics.store(queue,0,1); Atomics.store(queue,1,0); }
   for(const s of touched) dirty[s]=1;
   stats[0]=uploaded; stats[1]=downloaded; stats[2]=syncUploaded;
-  const devs=reply.header.devices||[]; stats[3]=devs.reduce((s,d)=>s+(d.kernelMs||0),0);
+  const devs=reply.header.devices||[]; stats[3]=devs.reduce((s,d)=>Math.max(s,d.kernelMs||0),0);
   return {touched:[...touched].sort((a,b)=>a-b)};
 }
 parentPort.on('message', async job=>{
@@ -186,6 +280,9 @@ export class ResidentGpuBridge {
   private readonly statsArr = new Float64Array(new SharedArrayBuffer(8 * 8));
   private readonly errorArr = new Uint16Array(new SharedArrayBuffer(4096 * 2));
   private synced: TopologyKey | null = null;
+  private cachedRanges: [number, number][] = [];
+  private cachedHaloSlotsPerDevice: number[][] = [];
+  private cachedAllHaloSlots: number[] = [];
   private broken: Error | null = null;
   private closed = false;
   #last: GpuBridgeStats;
@@ -239,7 +336,7 @@ export class ResidentGpuBridge {
     return ranges;
   }
 
-  run(terrain: SharedTerrain, pageSetVersion: number, pass: 'ecologia' | 'kernel', params: Record<string, unknown>, regionSide: number = 256): GpuRunResult {
+  run(terrain: SharedTerrain, pageSetVersion: number, pass: 'ecologia' | 'kernel', params: Record<string, unknown>, regionSide: number = 256, options?: { downloadSlots?: readonly number[] }): GpuRunResult {
     if (this.closed) throw new Error('ResidentGpuBridge cerrado.');
     if (this.broken) throw this.broken;
     const buffers = terrain.buffers;
@@ -254,23 +351,43 @@ export class ResidentGpuBridge {
     const dirtyArr = new Uint8Array(buffers.dirty!);
     const dirtySlots: number[] = [];
     for (let s = 0; s < dirtyArr.length; s++) if (dirtyArr[s]) dirtySlots.push(s);
-    const ranges = this.ranges(cells, totalCells);
-    // Halo por dispositivo: páginas vecinas (around) no asignadas; solo se lee su terrain (pass1) o life (pass2).
-    const around = new Int32Array(buffers.around!);
-    const haloSlotsPerDevice: number[][] = ranges.map(([begin, end]) => {
-      // Marcas tipadas en vez de Set por celda: el escaneo es O(celdas) sin hashing.
-      const assigned = new Uint8Array(slots);
-      for (let i = begin; i < end; i++) assigned[cells[i]! >>> 8] = 1;
-      const halo = new Set<number>();
-      for (let slot = 0; slot < slots; slot++) if (assigned[slot]) for (let k = 0; k < 9; k++) { const nb = around[slot * 9 + k]!; if (nb >= 0 && !assigned[nb]) halo.add(nb); }
-      return [...halo].sort((a, b) => a - b);
-    });
+    if (syncNeeded) {
+      this.cachedRanges = this.ranges(cells, totalCells);
+      if (this.devices.length <= 1) {
+        this.cachedHaloSlotsPerDevice = this.cachedRanges.map(() => []);
+        this.cachedAllHaloSlots = [];
+      } else {
+        const around = new Int32Array(buffers.around!);
+        this.cachedHaloSlotsPerDevice = this.cachedRanges.map(([begin, end]) => {
+          const assigned = new Uint8Array(slots);
+          for (let i = begin; i < end; i++) assigned[cells[i]! >>> 8] = 1;
+          const halo = new Set<number>();
+          for (let slot = 0; slot < slots; slot++) if (assigned[slot]) for (let k = 0; k < 9; k++) { const nb = around[slot * 9 + k]!; if (nb >= 0 && !assigned[nb]) halo.add(nb); }
+          return [...halo].sort((a, b) => a - b);
+        });
+        const union = new Set<number>();
+        for (const lst of this.cachedHaloSlotsPerDevice) for (const s of lst) union.add(s);
+        this.cachedAllHaloSlots = [...union].sort((a, b) => a - b);
+      }
+    }
+    const ranges = this.cachedRanges;
+    const haloSlotsPerDevice = this.cachedHaloSlotsPerDevice;
+    let downloadSlots: number[] | undefined;
+    if (options?.downloadSlots !== undefined) {
+      if (pass === 'kernel' && this.cachedAllHaloSlots.length > 0) {
+        const set = new Set<number>(options.downloadSlots);
+        for (const s of this.cachedAllHaloSlots) set.add(s);
+        downloadSlots = [...set].sort((a, b) => a - b);
+      } else {
+        downloadSlots = [...options.downloadSlots].sort((a, b) => a - b);
+      }
+    }
     Atomics.store(this.control, 0, 0);
     this.statsArr.fill(0);
     try {
       this.worker.postMessage({
         kind: 'step', pass: pass === 'ecologia' ? 1 : 2, buffers, dirtySlots, ranges, haloSlotsPerDevice,
-        capacityCells, slots, totalCells, syncNeeded, params,
+        downloadSlots, capacityCells, slots, totalCells, syncNeeded, params,
       });
     } catch (error) { this.synced = null; throw error; }
     // Espera síncrona (mismo patrón que StaticWorkerPool): el worker hace el IPC async con Python.
@@ -296,6 +413,101 @@ export class ResidentGpuBridge {
     for (let s = 0; s < dirtyArr.length; s++) if (dirtyArr[s]) dirtyPages.push({ pageX: pageX[s]!, pageY: pageY[s]! });
     dirtyArr.fill(0);
     return { ...this.#last, dirtyPages };
+  }
+
+  /**
+   * T122 opción (b): ejecuta las dos pasadas del tick ecológico (`ecology_pass1` + `ecology_pass2`)
+   * en VRAM sobre la misma cola CUDA y descarga solo los halos de consumidores CPU activos
+   * (`downloadSlots`), manteniendo el resto del mundo autoritativo en VRAM hasta `flushToHost()`.
+   */
+  runTick(terrain: SharedTerrain, pageSetVersion: number, pass1Params: Record<string, unknown>, pass2Params: Record<string, unknown>, regionSide: number = 256, options?: { downloadSlots?: readonly number[] }): GpuRunResult {
+    if (this.closed) throw new Error('ResidentGpuBridge cerrado.');
+    if (this.broken) throw this.broken;
+    const buffers = terrain.buffers;
+    const cells = new Int32Array(buffers.cells!);
+    const stampsBuf = buffers.stamps!; const pageX = new Int32Array(buffers.pageX!);
+    const capacityCells = stampsBuf.byteLength / 4, slots = pageX.length, totalCells = cells.length;
+    if (capacityCells > 33_554_432) throw new RangeError('Capacidad por encima de MAX_CELLS (33_554_432).');
+    const key: TopologyKey = { version: terrain.version, pageSetVersion, capacityCells, slots, totalCells, regionSide };
+    const syncNeeded = !this.synced || this.synced.version !== key.version || this.synced.pageSetVersion !== key.pageSetVersion
+      || this.synced.capacityCells !== key.capacityCells || this.synced.slots !== key.slots || this.synced.totalCells !== key.totalCells
+      || this.synced.regionSide !== key.regionSide;
+    const dirtyArr = new Uint8Array(buffers.dirty!);
+    const dirtySlots: number[] = [];
+    for (let s = 0; s < dirtyArr.length; s++) if (dirtyArr[s]) dirtySlots.push(s);
+    if (syncNeeded) {
+      this.cachedRanges = this.ranges(cells, totalCells);
+      if (this.devices.length <= 1) {
+        this.cachedHaloSlotsPerDevice = this.cachedRanges.map(() => []);
+        this.cachedAllHaloSlots = [];
+      } else {
+        const around = new Int32Array(buffers.around!);
+        this.cachedHaloSlotsPerDevice = this.cachedRanges.map(([begin, end]) => {
+          const assigned = new Uint8Array(slots);
+          for (let i = begin; i < end; i++) assigned[cells[i]! >>> 8] = 1;
+          const halo = new Set<number>();
+          for (let slot = 0; slot < slots; slot++) if (assigned[slot]) for (let k = 0; k < 9; k++) { const nb = around[slot * 9 + k]!; if (nb >= 0 && !assigned[nb]) halo.add(nb); }
+          return [...halo].sort((a, b) => a - b);
+        });
+        const union = new Set<number>();
+        for (const lst of this.cachedHaloSlotsPerDevice) for (const s of lst) union.add(s);
+        this.cachedAllHaloSlots = [...union].sort((a, b) => a - b);
+      }
+    }
+    const downloadSlots = options?.downloadSlots ? [...options.downloadSlots].sort((a, b) => a - b) : [];
+    Atomics.store(this.control, 0, 0);
+    this.statsArr.fill(0);
+    try {
+      this.worker.postMessage({
+        kind: 'tick', buffers: syncNeeded ? buffers : undefined, dirtySlots,
+        ranges: syncNeeded ? this.cachedRanges : undefined,
+        haloSlotsPerDevice: syncNeeded ? this.cachedHaloSlotsPerDevice : undefined,
+        downloadSlots, capacityCells, slots, totalCells, syncNeeded, pass1Params, pass2Params,
+      });
+    } catch (error) { this.synced = null; throw error; }
+    const waitStarted = Date.now();
+    for (;;) {
+      const status = Atomics.load(this.control, 0);
+      if (status === 1) break;
+      if (status === 2 || Date.now() - waitStarted > 60000) {
+        let msg = ''; for (let i = 0; i < this.errorArr.length && this.errorArr[i]; i++) msg += String.fromCharCode(this.errorArr[i]!);
+        this.synced = null; this.broken = new Error(`ResidentGpuBridge tick: ${msg || 'timeout'}`);
+        throw this.broken;
+      }
+      Atomics.wait(this.control, 0, 0, 5000);
+    }
+    const uploadedBytes = this.statsArr[0]!, downloadedBytes = this.statsArr[1]!, syncUploadedBytes = this.statsArr[2]!;
+    this.#last = { uploadedBytes, downloadedBytes, syncUploadedBytes, kernelMs: this.statsArr[3]!, devices: this.devices, lastPass: 'kernel' };
+    this.#cumulative.uploadedBytes += uploadedBytes; this.#cumulative.downloadedBytes += downloadedBytes;
+    this.synced = key;
+    const dirtyPages: { pageX: number; pageY: number }[] = [];
+    const pageY = new Int32Array(buffers.pageY!);
+    for (let s = 0; s < dirtyArr.length; s++) if (dirtyArr[s]) dirtyPages.push({ pageX: pageX[s]!, pageY: pageY[s]! });
+    dirtyArr.fill(0);
+    return { ...this.#last, dirtyPages };
+  }
+
+  /** Materializa en RAM del anfitrión todas las páginas autoritativas residentes en VRAM (T122 opción b). */
+  flushToHost(terrain: SharedTerrain): void {
+    if (this.closed) throw new Error('ResidentGpuBridge cerrado.');
+    if (this.broken) throw this.broken;
+    if (!this.synced) return;
+    Atomics.store(this.control, 0, 0);
+    this.worker.postMessage({
+      kind: 'flush', buffers: terrain.buffers, ranges: this.cachedRanges,
+      capacityCells: this.synced.capacityCells, slots: this.synced.slots, totalCells: this.synced.totalCells, syncNeeded: false,
+    });
+    const waitStarted = Date.now();
+    for (;;) {
+      const status = Atomics.load(this.control, 0);
+      if (status === 1) break;
+      if (status === 2 || Date.now() - waitStarted > 60000) {
+        let msg = ''; for (let i = 0; i < this.errorArr.length && this.errorArr[i]; i++) msg += String.fromCharCode(this.errorArr[i]!);
+        this.synced = null; this.broken = new Error(`ResidentGpuBridge flush: ${msg || 'timeout'}`);
+        throw this.broken;
+      }
+      Atomics.wait(this.control, 0, 0, 5000);
+    }
   }
 
   /** Mata el subproceso Python (para la prueba de aborto); el siguiente run() debe fallar antes del swap. */

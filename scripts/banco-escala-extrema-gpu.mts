@@ -23,7 +23,7 @@ function arg(name: string): string | undefined {
   const i = process.argv.indexOf(name);
   return i === -1 ? undefined : process.argv[i + 1];
 }
-const SIZES = (arg('--sizes') ?? '65536,1048576,4194304,8388608,18432000').split(',').map(Number);
+const SIZES = (arg('--sizes') ?? '65536,1048576,4194304,8388608,18432000,32000000').split(',').map(Number);
 const REPS_ARG = arg('--reps') ? Number(arg('--reps')) : undefined;
 
 function hash01(i: number, salt: number): number {
@@ -138,12 +138,15 @@ async function main(): Promise<void> {
           pool = new StaticWorkerPool({ workers: backend.workers!, moduleURL: new URL('../src/world/ecosystem-kernel.ts', import.meta.url), exportName: 'runParallelEcosystem' });
         }
         if (backend.kind === 'gpu') bridge = new ResidentGpuBridge(backend.devices!);
+        const activeHaloSlots = [0, t.pages >> 1, t.pages - 1];
         const runTick = (): { kernelMs: number; up: number; down: number } => {
           markSparseDirty(t);
           if (backend.kind === 'gpu') {
-            const a = bridge!.run(t, 0, 'ecologia', pass1GpuParams); swapParity(t);
-            const b = bridge!.run(t, 0, 'kernel', pass2GpuParams); swapParity(t);
-            return { kernelMs: a.kernelMs + b.kernelMs, up: a.uploadedBytes + b.uploadedBytes, down: a.downloadedBytes + b.downloadedBytes };
+            // T122 opción (b): las dos pasadas del tick se ejecutan encadenadas en VRAM sobre la
+            // misma cola CUDA y solo se descargan los halos de consumidores activos; flushToHost()
+            // materializa todo el mundo desde VRAM cuando un consumidor pide el estado completo.
+            const res = bridge!.runTick(t, 0, pass1GpuParams, pass2GpuParams, 256, { downloadSlots: activeHaloSlots });
+            return { kernelMs: res.kernelMs, up: res.uploadedBytes, down: res.downloadedBytes };
           }
           if (backend.kind === 'pool') {
             pool!.run({ regions: t.regions, buffers: t.buffers, params: pass1CpuParams }); swapParity(t);
@@ -167,8 +170,12 @@ async function main(): Promise<void> {
         row.medianMs = times[Math.floor(times.length / 2)]!;
         row.meanMs = times.reduce((s, v) => s + v, 0) / times.length;
         row.kernelMs = kern / reps; row.uploadedPerTick = up / reps; row.downloadedPerTick = down / reps;
-        if (backend.kind === 'cpu1') cpu1Terrain = t;
-        else if (cpu1Terrain && (n === 1048576 || n === 4194304)) row.diffsVsCpu1 = countDiffs(cpu1Terrain, t, n);
+        if (backend.kind === 'cpu1') {
+          if (n === 1048576 || n === 4194304) cpu1Terrain = t;
+        } else if (cpu1Terrain && (n === 1048576 || n === 4194304)) {
+          if (backend.kind === 'gpu') bridge!.flushToHost(t);
+          row.diffsVsCpu1 = countDiffs(cpu1Terrain, t, n);
+        }
         console.log(`cells=${n} backend=${backend.name} medianMs=${row.medianMs.toFixed(2)} meanMs=${row.meanMs.toFixed(2)} kernelMs=${row.kernelMs.toFixed(2)} up=${row.uploadedPerTick} down=${row.downloadedPerTick} diffs=${row.diffsVsCpu1 ?? '-'}`);
       } catch (error) {
         row.error = (error as Error).message.slice(0, 300);

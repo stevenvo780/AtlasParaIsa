@@ -13,7 +13,8 @@ MAX_CELLS = 33_554_432
 FIELDS = [('moisture',8),('vegetation',8),('food',8),('wood',8),('growth',8),('fertility',8),('cultivation',8),('traffic',8),('drinkingWater',8),('terrain',1),('biome',1),('feature',1),('life',8)]
 # Descarga selectiva por pasada (solo lo que el kernel modifica; el resto lo copia el worker JS front->back en RAM).
 DOWNLOAD_FIELDS = {1: [('moisture',8),('vegetation',8),('food',8)],
-                   2: [(f,e) for f,e in FIELDS if f not in ('food','terrain','biome')]}
+                   2: [(f,e) for f,e in FIELDS if f not in ('food','terrain','biome')],
+                   '2_halo': [(f,e) for f,e in FIELDS if f not in ('terrain','biome')]}
 
 def runs_of(slots_sorted):
     """Agrupa una lista ordenada de slots en tramos contiguos [(start_slot, count_slots), ...]."""
@@ -110,17 +111,28 @@ class Device:
         self.k1=p(); checked(self.function(C.byref(self.k1),self.module,b'ecology_pass1'))
         self.k2=p(); checked(self.function(C.byref(self.k2),self.module,b'ecology_pass2'))
         self.kcopy=p(); checked(self.function(C.byref(self.kcopy),self.module,b'copy_front_to_back'))
-        self.index=index; self.ptrs={}; self.capacity=0; self.slots=0; self.total=0; self.cells=None
+        self.index=index; self.ptrs={}; self.capacity=0; self.slots=0; self.total=0; self.cells=None; self._range_cache={}
     def _alloc(self, name, nbytes):
         ptr=C.c_uint64(); checked(self.alloc(C.byref(ptr), max(1,int(nbytes)))); self.ptrs[name]=ptr
     def _up(self, ptr, host_addr, nbytes, offset=0):
         if nbytes: checked(self.upload_fn(C.c_uint64(ptr.value+offset), C.c_void_p(host_addr), int(nbytes)))
     def _down(self, host_addr, ptr, nbytes, offset=0):
         if nbytes: checked(self.download_fn(C.c_void_p(host_addr), C.c_uint64(ptr.value+offset), int(nbytes)))
+    def range_slots(self, begin, end):
+        key = (int(begin), int(end))
+        cached = self._range_cache.get(key)
+        if cached is None:
+            if end > begin:
+                slots_sorted = np.unique(self.cells[begin:end] >> 8).tolist()
+            else:
+                slots_sorted = []
+            cached = (slots_sorted, runs_of(slots_sorted), set(slots_sorted))
+            self._range_cache[key] = cached
+        return cached
     def sync(self, arrays, capacity, slots, total):
         checked(self.current(self.context)); started=clock()
         for ptr in self.ptrs.values(): checked(self.free(ptr))
-        self.ptrs={}; self.capacity=capacity; self.slots=slots; self.total=total; self.cells=arrays['cells']
+        self.ptrs={}; self.capacity=capacity; self.slots=slots; self.total=total; self.cells=arrays['cells']; self._range_cache={}
         # topology
         self._alloc('cells', total*4); self._alloc('stamps', capacity*4); self._alloc('around', slots*9*4)
         self._alloc('pageX', slots*4); self._alloc('pageY', slots*4); self._alloc('woodAdded', slots)
@@ -130,6 +142,9 @@ class Device:
         for fname,esz in FIELDS:
             self._alloc(fname+'F', capacity*esz); self._alloc(fname+'B', capacity*esz)
             a=arrays[fname]; self._up(self.ptrs[fname+'F'], a.ctypes.data, a.nbytes); uploaded+=a.nbytes
+            if fname=='terrain': self._up(self.ptrs[fname+'B'], a.ctypes.data, a.nbytes)
+        z_wood = np.zeros(slots, dtype=np.uint8)
+        self._up(self.ptrs['woodAdded'], z_wood.ctypes.data, z_wood.nbytes)
         resident = sum(int(v.value and capacity) for v in []) # placeholder no-op
         resident_bytes = capacity*sum(e for _,e in FIELDS)*2 + total*4 + capacity*4 + slots*9*4 + slots*9
         return {'index':self.index,'uploadedBytes':uploaded,'syncMs':(clock()-started)*1000,'residentBytes':resident_bytes}
@@ -170,13 +185,17 @@ class Device:
         checked(self.launch(kern,grid,1,1,256,1,1,0,None,args,None)); checked(self.sync_fn()); kernel_ms=(clock()-ks)*1000
         dl_started=clock()
         # Bajada selectiva y coalescida: solo los campos que la pasada modifica (3 en pass1, 10 en
-        # pass2), una llamada DMA por campo y por tramo contiguo de páginas.
-        if count:
-            # unique ordenado en C (sin materializar millones de enteros Python por pasada).
-            slots_sorted=np.unique(self.cells[begin:end]>>8).tolist()
-        else: slots_sorted=[]
-        dl_fields = DOWNLOAD_FIELDS[req['pass']]
-        dl_runs = runs_of(slots_sorted)
+        # pass2, o 11 en pass2 con halo activo), una llamada DMA por campo y por tramo contiguo.
+        all_slots, all_runs, all_set = self.range_slots(begin, end)
+        req_dl_slots = req.get('downloadSlots')
+        if req_dl_slots is not None:
+            slots_sorted = sorted(int(s) for s in req_dl_slots if int(s) in all_set)
+            dl_runs = runs_of(slots_sorted)
+            dl_fields = DOWNLOAD_FIELDS['2_halo' if req['pass']==2 else 1]
+        else:
+            slots_sorted = all_slots
+            dl_runs = all_runs
+            dl_fields = DOWNLOAD_FIELDS[req['pass']]
         total_dl=sum(256*esz for _,esz in dl_fields)*len(slots_sorted)
         if staging_out is not None and staging_out.nbytes == total_dl:
             staging = staging_out
@@ -202,6 +221,100 @@ class Device:
                 with open(timing_path,'a') as fh: fh.write(json.dumps({'pass':req['pass'],'device':self.index,'stepMs':result['stepMs'],'kernelMs':kernel_ms,'downloadMs':(clock()-dl_started)*1000,'preKernelMs':(ks-started)*1000,'bytes':downloaded})+'\n')
             except Exception: pass
         return result
+    def upload_dirty(self, body_addr, dirty_runs, also_back=False):
+        checked(self.current(self.context))
+        offset = 0; uploaded = 0
+        for fname, esz in FIELDS:
+            for start_slot, count in dirty_runs:
+                nbytes = count * 256 * esz
+                self._up(self.ptrs[fname + 'F'], body_addr + offset, nbytes, start_slot * 256 * esz)
+                if also_back and fname in ('terrain', 'life'):
+                    self._up(self.ptrs[fname + 'B'], body_addr + offset, nbytes, start_slot * 256 * esz)
+                offset += nbytes; uploaded += nbytes
+        return uploaded
+    def download_field_runs(self, fname, esz, buf_suffix, runs):
+        checked(self.current(self.context))
+        total = sum(c * 256 * esz for _, c in runs)
+        out = np.empty(total, dtype=np.uint8)
+        off = 0
+        for start_slot, count in runs:
+            nbytes = count * 256 * esz
+            self._down(out.ctypes.data + off, self.ptrs[fname + buf_suffix], nbytes, start_slot * 256 * esz)
+            off += nbytes
+        return out
+    def upload_field_runs(self, fname, esz, buf_suffix, runs, arr):
+        checked(self.current(self.context))
+        off = 0
+        for start_slot, count in runs:
+            nbytes = count * 256 * esz
+            self._up(self.ptrs[fname + buf_suffix], arr.ctypes.data + off, nbytes, start_slot * 256 * esz)
+            off += nbytes
+        return off
+    def tick_kernels(self, range_pair, p1, p2, req_dl_slots, uploaded_pre=0, staging_out=None):
+        checked(self.current(self.context)); started = clock()
+        begin, end = range_pair
+        count = max(0, end - begin); grid = (count + 255) // 256
+        topo = [self.ptrs['cells'], self.ptrs['stamps'], self.ptrs['around']]
+        if p2['tick'] % 100 == 0:
+            z_wood = np.zeros(self.slots, dtype=np.uint8)
+            self._up(self.ptrs['woodAdded'], z_wood.ctypes.data, z_wood.nbytes)
+        front1 = [self.ptrs[f + 'F'] for f, _ in FIELDS]; back1 = [self.ptrs[f + 'B'] for f, _ in FIELDS]
+        vals1 = topo + front1 + back1 + [
+            C.c_int(begin), C.c_int(end), C.c_uint(p1['version']), C.c_int(p1['rain']), C.c_double(p1['light']),
+            C.c_double(p1['capacidadBosque']), C.c_double(p1['capacidadPastizal']), C.c_double(p1['capacidadOtros']),
+            C.c_double(p1['velocidadRegeneracion']), C.c_double(p1['decaimientoComida']),
+        ]
+        args1 = (C.c_void_p * len(vals1))(*(C.cast(C.byref(v), C.c_void_p) for v in vals1))
+        for fname, _ in FIELDS:
+            self.ptrs[fname + 'F'], self.ptrs[fname + 'B'] = self.ptrs[fname + 'B'], self.ptrs[fname + 'F']
+        front2 = [self.ptrs[f + 'F'] for f, _ in FIELDS]; back2 = [self.ptrs[f + 'B'] for f, _ in FIELDS]
+        vals2 = topo + [self.ptrs['pageX'], self.ptrs['pageY'], self.ptrs['woodAdded']] + front2 + back2 + [
+            C.c_int(begin), C.c_int(end), C.c_int(p2['tick']), C.c_uint(p2['version']), C.c_int(p2['rain']),
+            C.c_double(p2['light']), C.c_double(p2['decaimientoFertilidad']), C.c_uint(p2['seed']), C.c_double(p2['cuencas']),
+        ]
+        args2 = (C.c_void_p * len(vals2))(*(C.cast(C.byref(v), C.c_void_p) for v in vals2))
+        ks = clock()
+        checked(self.launch(self.k1, grid, 1, 1, 256, 1, 1, 0, None, args1, None))
+        checked(self.launch(self.k2, grid, 1, 1, 256, 1, 1, 0, None, args2, None))
+        checked(self.sync_fn())
+        kernel_ms = (clock() - ks) * 1000
+        for fname, _ in FIELDS:
+            self.ptrs[fname + 'F'], self.ptrs[fname + 'B'] = self.ptrs[fname + 'B'], self.ptrs[fname + 'F']
+        _, _, all_set = self.range_slots(begin, end)
+        slots_sorted = sorted(int(s) for s in req_dl_slots if int(s) in all_set)
+        dl_runs = runs_of(slots_sorted)
+        total_dl = sum(256 * esz for _, esz in FIELDS) * len(slots_sorted)
+        staging = staging_out if (staging_out is not None and staging_out.nbytes == total_dl) else np.empty(total_dl, dtype=np.uint8)
+        downloaded = 0; off = 0
+        for fname, esz in FIELDS:
+            for start_slot, run_count in dl_runs:
+                nbytes = run_count * 256 * esz
+                self._down(staging.ctypes.data + off, self.ptrs[fname + 'F'], nbytes, start_slot * 256 * esz)
+                off += nbytes; downloaded += nbytes
+        wood_slots = []
+        if p2['tick'] % 100 == 0:
+            wa = np.empty(self.slots, dtype=np.uint8)
+            self._down(wa.ctypes.data, self.ptrs['woodAdded'], wa.nbytes)
+            downloaded += wa.nbytes
+            wood_slots = [int(s) for s in np.nonzero(wa)[0].tolist()]
+        return {
+            'index': self.index, 'begin': begin, 'end': end, 'uploadedBytes': uploaded_pre,
+            'downloadedBytes': downloaded, 'kernelMs': kernel_ms, 'stepMs': (clock() - started) * 1000,
+            'downloadSlots': slots_sorted, 'woodAddedSlots': wood_slots, 'staging': staging,
+        }
+    def flush(self, range_pair, staging_out=None):
+        checked(self.current(self.context))
+        begin, end = range_pair
+        slots_sorted, dl_runs, _ = self.range_slots(begin, end)
+        total_dl = sum(256*esz for _,esz in FIELDS) * len(slots_sorted)
+        staging = staging_out if (staging_out is not None and staging_out.nbytes == total_dl) else np.empty(total_dl, dtype=np.uint8)
+        off = 0
+        for fname, esz in FIELDS:
+            for start_slot, run_count in dl_runs:
+                nbytes = run_count * 256 * esz
+                self._down(staging.ctypes.data + off, self.ptrs[fname + 'F'], nbytes, start_slot * 256 * esz)
+                off += nbytes
+        return {'index': self.index, 'downloadSlots': slots_sorted, 'downloadedBytes': off, 'staging': staging}
     def close(self):
         try:
             checked(self.current(self.context))
@@ -252,6 +365,9 @@ def main():
     try:
         for idx in indices: devices.append(Device(idx,a.nvrtc,source))
         emit({'ready':True,'devices':[{'index':d.index,'architecture':d.arch,'contextMs':d.context_ms,'compileMs':d.compile_ms} for d in devices],'precision':'Float64','fmad':False,'kernels':['ecology_pass1','ecology_pass2'],'maxCells':MAX_CELLS,'shmPath':(SHM.path if SHM else None),'shmCapacity':(SHM.capacity if SHM else 0)})
+        cached_ranges = None
+        cached_halo_per = None
+        cached_halo_plan = None
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(devices)) as ex:
             while True:
                 ln=struct.unpack('<I',read_exact(4))[0]
@@ -289,14 +405,18 @@ def main():
                         for lst in halo_per: halo_offsets.append(hoff); hoff+=len(lst)*256*esz
                     # DMA directa al mmap /dev/shm: cada dispositivo descarga en su tramo del
                     # buffer compartido y la respuesta no vuelve a copiarse staging->shm.
-                    dl_fields_main = DOWNLOAD_FIELDS[req['pass']]
+                    req_dl_slots = req.get('downloadSlots')
+                    dl_fields_main = DOWNLOAD_FIELDS[('2_halo' if req['pass']==2 else 1) if req_dl_slots is not None else req['pass']]
                     per_device_bytes = []
                     staging_slices = None
                     if SHM is not None and devices[0].cells is not None:
-                        cells_all = devices[0].cells
                         sizes = []
-                        for (b,e) in ranges:
-                            nslots = int(np.unique(cells_all[b:e]>>8).size) if e > b else 0
+                        for di, (b,e) in enumerate(ranges):
+                            all_slots, _, all_set = devices[di].range_slots(b, e)
+                            if req_dl_slots is not None:
+                                nslots = sum(1 for s in req_dl_slots if int(s) in all_set)
+                            else:
+                                nslots = len(all_slots)
                             sizes.append(nslots * sum(256*esz for _,esz in dl_fields_main))
                         total_dl_all = sum(sizes)
                         if total_dl_all:
@@ -319,6 +439,96 @@ def main():
                         emit_shm(reply_header, sum(per_device_bytes))
                     else:
                         out=parts[0]['staging'] if len(parts)==1 else (np.concatenate([p['staging'] for p in parts]) if any(p['staging'].size for p in parts) else np.empty(0,dtype=np.uint8))
+                        emit(reply_header, out)
+                elif req['kind']=='tick':
+                    dirty = req.get('dirtySlots', [])
+                    if req.get('ranges') is not None:
+                        cached_ranges = req['ranges']
+                        cached_halo_per = req.get('haloSlotsPerDevice', [])
+                        cached_halo_plan = None
+                    ranges = cached_ranges
+                    halo_per = cached_halo_per or []
+                    req_dl_slots = req.get('downloadSlots', [])
+                    p1 = req['pass1Params']; p2 = req['pass2Params']
+                    dirty_runs = runs_of(sorted(int(s) for s in dirty))
+                    uploaded_per_dev = [0] * len(devices)
+                    if dirty_runs:
+                        body_np = np.frombuffer(body, dtype=np.uint8)
+                        body_addr = body_np.ctypes.data
+                        for di, d in enumerate(devices):
+                            uploaded_per_dev[di] += d.upload_dirty(body_addr, dirty_runs, also_back=(len(devices) > 1))
+                    if len(devices) > 1:
+                        if cached_halo_plan is None:
+                            cached_halo_plan = []
+                            for di, dst_d in enumerate(devices):
+                                if di >= len(halo_per) or not halo_per[di]: continue
+                                for src_di, src_d in enumerate(devices):
+                                    if src_di == di: continue
+                                    _, _, src_set = src_d.range_slots(*ranges[src_di])
+                                    h_slots = sorted(int(s) for s in halo_per[di] if int(s) in src_set)
+                                    if h_slots:
+                                        cached_halo_plan.append((di, dst_d, src_d, runs_of(h_slots)))
+                        for di, dst_d, src_d, h_runs in cached_halo_plan:
+                            h_buf = src_d.download_field_runs('life', 8, 'F', h_runs)
+                            uploaded_per_dev[di] += dst_d.upload_field_runs('life', 8, 'B', h_runs, h_buf)
+                    per_device_bytes = []
+                    staging_slices = None
+                    if SHM is not None and devices[0].cells is not None:
+                        sizes = []
+                        for di, (b, e) in enumerate(ranges):
+                            _, _, all_set = devices[di].range_slots(b, e)
+                            nslots = sum(1 for s in req_dl_slots if int(s) in all_set)
+                            sizes.append(nslots * sum(256 * esz for _, esz in FIELDS))
+                        total_dl_all = sum(sizes)
+                        if total_dl_all:
+                            SHM.ensure(total_dl_all)
+                            base = np.frombuffer(SHM.mm, dtype=np.uint8, count=total_dl_all)
+                            staging_slices = []; soff = 0
+                            for sz in sizes: staging_slices.append(base[soff:soff + sz]); soff += sz
+                            per_device_bytes = sizes
+                    futs = [
+                        ex.submit(
+                            d.tick_kernels, tuple(ranges[di]), p1, p2, req_dl_slots,
+                            uploaded_per_dev[di], staging_slices[di] if staging_slices is not None else None,
+                        )
+                        for di, d in enumerate(devices)
+                    ]
+                    parts = [f.result() for f in futs]
+                    wood_slots = sorted(set(s for p in parts for s in p['woodAddedSlots']))
+                    reply_header = {
+                        'ok': True, 'uploadedBytes': sum(p['uploadedBytes'] for p in parts),
+                        'downloadedBytes': sum(p['downloadedBytes'] for p in parts),
+                        'woodAddedSlots': wood_slots, 'downloadSlotsPerDevice': [p['downloadSlots'] for p in parts],
+                        'devices': [{k: v for k, v in p.items() if k != 'staging'} for p in parts],
+                    }
+                    if staging_slices is not None:
+                        emit_shm(reply_header, sum(per_device_bytes))
+                    else:
+                        out = parts[0]['staging'] if len(parts) == 1 else (np.concatenate([p['staging'] for p in parts]) if any(p['staging'].size for p in parts) else np.empty(0, dtype=np.uint8))
+                        emit(reply_header, out)
+                elif req['kind']=='flush':
+                    ranges=req['ranges']
+                    per_device_bytes = []
+                    staging_slices = None
+                    if SHM is not None and devices[0].cells is not None:
+                        sizes = []
+                        for di, (b,e) in enumerate(ranges):
+                            all_slots, _, _ = devices[di].range_slots(b, e)
+                            sizes.append(len(all_slots) * sum(256*esz for _,esz in FIELDS))
+                        total_dl_all = sum(sizes)
+                        if total_dl_all:
+                            SHM.ensure(total_dl_all)
+                            base = np.frombuffer(SHM.mm, dtype=np.uint8, count=total_dl_all)
+                            staging_slices = []; soff = 0
+                            for sz in sizes: staging_slices.append(base[soff:soff+sz]); soff += sz
+                            per_device_bytes = sizes
+                    futs=[ex.submit(d.flush, tuple(ranges[di]), staging_slices[di] if staging_slices is not None else None) for di, d in enumerate(devices)]
+                    parts=[f.result() for f in futs]
+                    reply_header={'ok':True,'downloadedBytes':sum(p['downloadedBytes'] for p in parts),'downloadSlotsPerDevice':[p['downloadSlots'] for p in parts]}
+                    if staging_slices is not None:
+                        emit_shm(reply_header, sum(per_device_bytes))
+                    else:
+                        out=parts[0]['staging'] if len(parts)==1 else np.concatenate([p['staging'] for p in parts])
                         emit(reply_header, out)
                 else: raise ValueError('Unknown operation')
     finally:

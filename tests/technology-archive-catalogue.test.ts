@@ -256,7 +256,17 @@ test('host rollback invalidation discards uncommitted statistics and COMMIT with
   assert.deepEqual(archive.summarizeDefinitions(5), original);
   db.exec('BEGIN'); archive.beginHostTransaction(); archive.putStats('recipe-4', 5, { uses: 6, manufactured: 6, utility: 6 }); db.exec('COMMIT');
   const queries = countQueries(db); queries.reset();
-  assert.equal(archive.summarizeDefinitions(5).uses, original.uses + 2); assert.ok(queries.count > 25, 'a raw commit cannot implicitly acknowledge a proof');
+  const scanned = archive as unknown as { scanDefinitions(...a: unknown[]): unknown };
+  const originalScan = scanned.scanDefinitions;
+  let rescans = 0;
+  scanned.scanDefinitions = function (...a: unknown[]) { rescans++; return originalScan.apply(this, a); };
+  try {
+    assert.equal(archive.summarizeDefinitions(5).uses, original.uses + 2);
+  } finally { scanned.scanDefinitions = originalScan; }
+  assert.equal(rescans, 1, 'a raw commit cannot implicitly acknowledge a proof');
+  // A2 eliminó las consultas O(N) por padre y por estadística, dejando la revalidación completa
+  // en 21 sentencias (frente a 8 con caché caliente, < 15 arriba).
+  assert.ok(queries.count >= 20, `expected full revalidation after raw commit, got ${queries.count} statements`);
 });
 
 for (const scope of ['main', 'temp'] as const) test(`${scope} triggers prevent non-technology host SQL from hiding archive changes`, t => {

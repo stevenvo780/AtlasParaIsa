@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { generateNaturalScenes, parseGenerationArgs, readLabParams, type GenerationReport } from '../scripts/perf/generar-escenas.js';
+import { generateNaturalScenes, labRoot, parseGenerationArgs, readLabParams, type GenerationReport } from '../scripts/perf/generar-escenas.js';
 import { Store } from '../src/server/store.js';
 import { chronicleJournalNearCapacity } from '../src/world/chronicle-journal.js';
 import { digestoCanonico } from '../src/world/digesto.js';
@@ -17,7 +17,9 @@ const params = parseParams('poblacion.nacimientosPorComprobacion=20,agua.cuencas
 const hash = (bytes: Buffer | string): string => createHash('sha256').update(bytes).digest('hex');
 
 function fixture(t: { after: (callback: () => unknown) => void }) {
-  const directory = mkdtempSync('/datos/tmp-atlas-lab/atlas-test-escenas-');
+  const root = labRoot();
+  mkdirSync(root, { recursive: true, mode: 0o700 });
+  const directory = mkdtempSync(join(root, 'atlas-test-escenas-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const path = join(directory, 'params.sqlite'), store = new Store(path);
   store.save(createWorld(8101, params)); store.close();

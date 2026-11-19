@@ -2,6 +2,7 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -14,7 +15,11 @@ import type { WorldParams } from '../../src/world/params.js';
 import { technologyCatalogueNearCapacity } from '../../src/world/technology-catalogue.js';
 import { technologyJournalNearCapacity } from '../../src/world/technology-journal.js';
 
-const LAB_ROOT = '/datos/tmp-atlas-lab';
+const DEFAULT_LAB_ROOT = '/datos/tmp-atlas-lab';
+/** Raíz privada del laboratorio: respeta `ATLAS_LAB_ROOT`, conserva `/datos/tmp-atlas-lab` si existe y usa `tmpdir()` si no. */
+export function labRoot(): string {
+  return process.env.ATLAS_LAB_ROOT || (existsSync(DEFAULT_LAB_ROOT) ? DEFAULT_LAB_ROOT : join(tmpdir(), 'atlas-lab'));
+}
 const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const sha256 = (value: string | Buffer): string => createHash('sha256').update(value).digest('hex');
 
@@ -39,7 +44,9 @@ export interface GenerationReport {
 }
 
 function withinLab(path: string, existing: boolean): string {
-  const candidate = resolve(path), root = realpathSync(LAB_ROOT);
+  const configured = labRoot();
+  if (!existsSync(configured)) mkdirSync(configured, { recursive: true, mode: 0o700 });
+  const candidate = resolve(path), root = realpathSync(configured);
   let ancestor = candidate;
   if (!existing) while (!existsSync(ancestor) && dirname(ancestor) !== ancestor) ancestor = dirname(ancestor);
   const actual = existing ? realpathSync(candidate) : resolve(realpathSync(ancestor), relative(ancestor, candidate));
@@ -155,12 +162,13 @@ export function generateNaturalScenes(options: GenerationOptions, log: (message:
   const paramsSource = readLabParams(checked.paramsDb);
   if (paramsSource.seed !== checked.seed) throw new Error(`La semilla pedida (${checked.seed}) no coincide con la fuente (${paramsSource.seed}).`);
   const output = withinLab(checked.output, false);
-  if (output === realpathSync(LAB_ROOT) || output === dirname(paramsSource.path)) throw new Error('La salida debe ser un directorio propio, separado de la fuente.');
+  const resolvedRoot = realpathSync(labRoot());
+  if (output === resolvedRoot || output === dirname(paramsSource.path)) throw new Error('La salida debe ser un directorio propio, separado de la fuente.');
   for (const name of ['ejecucion.json', 'manifiesto.json', ...checked.thresholds.flatMap(n => [`n${n}.sqlite`, `n${n}.json`])])
     if (existsSync(join(output, name))) throw new Error(`La salida ya existe; no se sobrescribe: ${join(output, name)}`);
   mkdirSync(output, { recursive: true, mode: 0o700 });
   withinLab(output, true);
-  const workingDirectory = mkdtempSync(join(realpathSync(LAB_ROOT), 'atlas-perfil-escenas-'));
+  const workingDirectory = mkdtempSync(join(resolvedRoot, 'atlas-perfil-escenas-'));
   const workingDb = join(workingDirectory, 'world.sqlite'), source = sourceHashes(), startedAt = new Date().toISOString();
   const params = paramsSource.params, scenes: NaturalScene[] = [];
   writeFileSync(join(output, 'ejecucion.json'), JSON.stringify({ ...checked, output, params, paramsSource, source, workingDb, startedAt }, null, 2) + '\n', { flag: 'wx', mode: 0o600 });

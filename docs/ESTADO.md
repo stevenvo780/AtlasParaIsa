@@ -1,29 +1,31 @@
 # Estado publicado
 
-Única fuente de «qué está publicado». README, PLAN y CLAUDE.md enlazan aquí en vez de copiar
+Única fuente de «qué está publicado». README, PLAN y CLAUDE.md/AGENTS.md enlazan aquí en vez de copiar
 estas cifras. Se actualiza en cada publicación, junto con su contrato
 `docs/evidencia-AAAA-MM-DD/publication*.json`; si este fichero y el contrato discrepan, manda
 el contrato.
 
-## Vigente (mundo V13 desde el 30 de septiembre de 2026, 07:26 -05, en la TORRE)
+## Vigente (mundo V14 desde el 19 de noviembre de 2026, 00:42 -05, en la TORRE)
 
 | Qué | Valor |
 |---|---|
 | URL | <https://atlas.humanizar.tech> |
-| Código compilado y servido | `c7b3bb3` desde el 30-09 07:26 -05 ([contrato](evidencia-2026-09-30/publication-v13.json)): merge en `main` de `sprint/v13-20260930` = `main` `005b877` + `sprint/fixes-escala-20260929` `191c47c` (topes de pendientes de los diarios de tecnología y crónica y del catálogo, derivados de `POPULATION_HARD_LIMIT`, con guardado anticipado al 75 %; mensaje de diario lleno separado del de agua) + `sprint/com-d-20260928` `18062f5` (ley COM-D′: `social.disolucion`) |
-| Ley activada | **COM + COM-D′**: `social.radioConvivencia=12`, `social.disolucion=1`, `social.maxComunidades=64` (la pertenencia a una comunidad sigue a la convivencia y la confianza, con fisión por distancia y disolución local corregida), activadas por `CARTA_PARAMS` y persistidas. Panel preregistrado COM-D′: Q1 comunidades con ≥ 3 mortales días 41–60 6/6 (5,0–8,0 → 28,6–54,8), Q4 natalidad 6/6 (0,996–1,082×), Q5 sin absorción 6/6 (mayor comunidad 7–12 %), Q2/Q3 no refutadas, C1–C7 6/6 en ambos brazos; réplica de 10 semillas coherente (contrato) |
-| `main` | ver `git log`; lo servido es `c7b3bb3` |
+| Código compilado y servido | `aebce69` desde el 19-11 00:42 -05 ([contrato](evidencia-2026-11-19/publication-v14.json)): Fase A de estabilidad de persistencia, arranque en frío y respaldo en caliente ([PLAN-ESTABILIDAD-2026-11-18](PLAN-ESTABILIDAD-2026-11-18.md), `sprint/estabilidad-fase-a-20261118`) + unificación documental y herramientas Grupo A (`bd2d30d`) sobre `c7b3bb3` |
+| Ley activada | **COM + COM-D′**: `social.radioConvivencia=12`, `social.disolucion=1`, `social.maxComunidades=64` (sin cambio de leyes físicas respecto a V13; cero cambios en `src/world/`), activadas por `CARTA_PARAMS` y persistidas |
+| `main` | ver `git log`; lo servido es `aebce69` |
 | Reglas | `RULES_VERSION` 11 (+ COM y COM-D′ por parámetro) |
-| Protocolo / SQLite | `PROTOCOL_VERSION` 10 / `user_version` 5 |
-| Máquina | Torre: `atlas-publico.service` en 100.64.0.1:3000, código en `AtlasParaIsa-anexo/worktrees/publico-v13` (proceso «carta-isa», drop-in CPUWeight/IOWeight 10000). No arrancar servicios del portátil ni `atlas-servidor`/`atlas-respaldo` de la torre |
-| Mundo | V13, semilla 51926, identidad `9872e47a-e3c9-4012-9fa8-ab2ac1d9af7a`, creado vacío el 30-09 07:26 -05 en `AtlasParaIsa-anexo/mundos/v13-20260930` (credencial `access.scrypt` copiada de V12: misma contraseña, solo el hash) |
+| Protocolo / SQLite | `PROTOCOL_VERSION` 10 / `user_version` 5 (`PRAGMA auto_vacuum=INCREMENTAL` en bases nuevas, índice expresivo `technology_definitions_order`, índice `technology_stats_tick` y `deep-checkpoint-saves-v1`) |
+| Máquina | Torre: `atlas-publico.service` en 100.64.0.1:3000, código en `AtlasParaIsa-anexo/worktrees/publico-v14` (proceso «carta-isa», drop-in CPUWeight/IOWeight 10000). No arrancar servicios del portátil ni `atlas-servidor`/`atlas-respaldo` de la torre |
+| Mundo | V14, semilla 51926, identidad `36a23d11-02af-49be-a867-960d2341c458`, creado vacío el 19-11 00:42 -05 en NVMe `/datos/workspaces/personal/AtlasParaIsa-anexo/mundos/v14-20261119` (credencial `access.scrypt` copiada de V13: misma contraseña, solo el hash) |
 | Parámetros persistidos | `gobernador.presupuestoMs=5000`, `social.radioConvivencia=12`, `social.disolucion=1`, `social.maxComunidades=64` (`CARTA_PARAMS`; `limites.comunidades` lo deriva el anfitrión), gobernador `techo`, límites de admisión del anfitrión y el paquete de reglas 11 |
-| Respaldos | `AtlasParaIsa-anexo/publicaciones/v13-respaldos` (timer horario `atlas-respaldo-publico.timer`) |
-| Contrato | [publication-v13.json](evidencia-2026-09-30/publication-v13.json) |
+| Respaldos | HDD `/mnt/Data2/respaldos-atlas-v14` (timer horario `atlas-respaldo-publico.timer`, `RETENCION=24`, `RESPALDO_METODO=backup` con instantánea WAL en caliente, `MemoryHigh=3G`, `IOSchedulingClass=idle`, `Nice=15`; primer respaldo `world-20261119-0042.sqlite.gz` verificado en 1 s) |
+| Contrato | [publication-v14.json](evidencia-2026-11-19/publication-v14.json) |
 
-Lo que esta publicación **no** acredita: el criterio de 60 días de [GOAL.md](../GOAL.md) **no se cumple**; C8 v3 sigue fallando en ambos brazos del panel COM-D′ (diversidad entre comunidades 4–15× en nivel, sin tendencia) y su lectura no está decidida (no alcanzable por un mundo sano estacionario, `docs/REVISION-2026-09-24.md`). Salvedad declarada por el panel: el tope de fundación `social.maxComunidades=64` está activo en 4/6 semillas, así que parte de la estabilidad del número de comunidades es el tope, no solo la ley. La población la sigue regulando el cupo global de 40 nacimientos/día (D2 pendiente).
+Lo que esta publicación acredita y lo que sigue en curso: Fase A resuelve el desborde de `technology_stats`, el `TEMP B-TREE` de ~15 GiB en `summarizeDefinitions()`, la pérdida de rotación del `slot 2` tras reinicios y los bloqueos/picos de 44,5 GiB de RAM de `VACUUM INTO` en los respaldos horarios. En paralelo corre el panel preregistrado de **Fase B** ([2026-11-18-estabilidad-tecnologia](preregistros/2026-11-18-estabilidad-tecnologia.md), 8 semillas × 60 días) para evaluar las leyes locales B1–B4 de invención antes de promoverlas a `RULES_VERSION` 12.
 
 ## Anteriores, conservados
+
+- V13 (código `c7b3bb3`, reglas 11 + COM + COM-D′), servido del 30-09 07:26 al 17-11 13:13 -05 (alcanzó el día 9 252,79, tick 22 206 700, 641 vivos, 369 708 nacimientos, 0 caídas; 24,43 GiB SQLite); mundo detenido e intacto en `AtlasParaIsa-anexo/mundos/v13-20260930` (worktree `publico-v13`); último respaldo `/mnt/Juegos/respaldos-atlas-v13/world-20261118-2000.sqlite.gz` (5,12 GiB, `gzip -t` OK; 5 copias duplicadas deduplicadas). **No arrancarlo.** Contrato: [publication-v13.json](evidencia-2026-09-30/publication-v13.json).
 
 - V12 (código `ced1fec`, reglas 11 + COM), servido del 28-09 20:59 al 30-09 07:26 -05; mundo detenido e intacto en `AtlasParaIsa-anexo/mundos/v12-20260928` (worktree `publico-v12`); último respaldo `v12-respaldos/world-20260930-0725.sqlite.gz` (gzip íntegro). **No arrancarlo.** Detalle de su publicación:
 
@@ -49,7 +51,7 @@ Lo que esta publicación **no** acreditó: el criterio de 60 días de [GOAL.md](
 |---|---|
 | URL | <https://atlas.humanizar.tech> |
 | Código compilado y servido | `5a36ce6` desde el 24-09 02:35 -05 (en el portátil hasta las 08:34, en la torre desde las 08:35: [contrato de la publicación](evidencia-2026-09-24/publication-v11.json), [contrato de la mudanza](evidencia-2026-09-24/publication-v11-torre.json)): reglas 11 (conflicto legible) y el arte del suelo por campo (bordes orgánicos de biomas, desgaste y orillas; agua sin cuadros). Contiene también, **a 0**, las leyes candidatas de C8 (`conducta.vocacion`, `social.hogarTrabajo`) y de natalidad local (`poblacion.natalidadLocal`): el mundo por defecto es bit a bit el de reglas 11 |
-| `main` | ver `git log`; lo servido es `5a36ce6`, no necesariamente el HEAD de `main` |
+| `main` | ver `git log`; lo servido fue `5a36ce6`, no necesariamente el HEAD de `main` |
 | Reglas | `RULES_VERSION` 11: reglas 10 + `social` { disputaNecesidad 0,45, disputaEscasez 3, disputaRadio 3, memoriaDisputa 8 } y gobernador `techo` |
 | Protocolo | `PROTOCOL_VERSION` 10 |
 | SQLite | `user_version` 5 (instantáneas paginadas) |
@@ -72,22 +74,24 @@ Lo que esta publicación **no** acredita: el criterio de 60 días de [GOAL.md](.
 
 ## Trabajo en curso
 
-- Revisiones vigentes: [REVISION-2026-09-22](REVISION-2026-09-22.md) y
+- Revisiones vigentes: [REVISION-2026-09-24](REVISION-2026-09-24.md),
+  [REVISION-2026-09-22](REVISION-2026-09-22.md) y
   [REVISION-NOCHE-2026-09-22](REVISION-NOCHE-2026-09-22.md).
 - `specs/002-mundo-ilimitado/`: etapas B–F descongeladas el 2026-09-23 (decisión de Steven: la escala en paralelo a
-  la biología). Ya integrados y servidos: PERF3 (sin copia del mundo en los pasos sin gestos) y el bloque E.0 ola 1
-  (T141–T143). La ola 1 de la etapa B (T111–T113: halo, terreno SoA, teselas y activación O(1)) ya está fusionada en
-  `main` (`ff52c30`) pero **aún no desplegada al público** (el commit servido, `b5def74`, es anterior a ese merge).
-  La ola 2 de B (T115/T117/T120) queda en espera: el perfil a 700 habitantes (bitácora 23-09 17:50) señala la
-  enseñanza/recetas (20 %), la fauna (13 %) y la ecología (7 %) como el coste, no el halo/terreno (decisión D4 del
-  plan maestro). La etapa A está integrada en `main`; T103 y T104 quedan superadas por ARCH/PERF3 y ese perfil
-  (pendiente reescribirlas); siguen abiertas T100 y el Gate A (T110), según
+  la biología). Ya integrados en `main` y desplegados en V13 (`c7b3bb3`): PERF3 (sin copia del mundo en pasos sin
+  gestos), bloque E.0 olas 1–2 (T141–T143 y `b5def74`), Etapa B tareas T111–T114 y T116 (halo, terreno SoA,
+  activación O(1), port SoA de ecología y máscara de fauna), Etapa D tareas T134 y T136 (viewport/censo y compresión
+  WS), y T100 (cerrada funcionalmente el 2026-09-28, [T100-LIMITES-CONTRATO](T100-LIMITES-CONTRATO.md)).
+  La ola 2 de B (T115/T117/T120, en ramas `sprint/t115..t120-20260930`) sigue pendiente de integración y Gate B
+  (T118/T119) porque el perfil a 700 habitantes (bitácora 23-09 17:50) señala enseñanza/recetas (20 %), fauna (13 %)
+  y ecología (7 %) como coste dominante (decisión D4). De la etapa A siguen abiertas T103 y T104 (superadas por
+  ARCH/PERF3 y ese perfil, pendientes de reescritura) y el Gate A (T110), según
   [tasks.md](../specs/002-mundo-ilimitado/tasks.md).
 - `specs/001-mundo-solido-masivo/`: cerrada el 2026-09-19.
 
 ## Cómo se actualiza
 
-Al publicar, con el procedimiento de CLAUDE.md: nuevo `publication-*.json` con el commit, el gate y las
+Al publicar, con el procedimiento de CLAUDE.md/AGENTS.md: nuevo `publication-*.json` con el commit, el gate y las
 comprobaciones en vivo; después, esta tabla y la sección de anteriores, y `npx tsx scripts/check-links.ts`
 para no dejar enlaces rotos. Ningún otro documento repite
-el commit vigente; CLAUDE.md nombra además el directorio del mundo para que ningún agente lo toque.
+el commit vigente; CLAUDE.md/AGENTS.md nombran además el directorio del mundo para que ningún agente lo toque.

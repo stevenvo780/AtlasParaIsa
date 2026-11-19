@@ -1,4 +1,4 @@
-import { DatabaseSync } from 'node:sqlite';
+import { DatabaseSync, type StatementSync } from 'node:sqlite';
 import { createHash } from 'node:crypto';
 import { mkdirSync, existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -67,6 +67,8 @@ export const TECHNOLOGY_RETENTION_MIN_TICKS = TICKS_PER_DAY;
  * pública: ver docs/REGLAS.md, «Retención del archivo de recibos».
  */
 export const TECHNOLOGY_PRUNE_ROWS_PER_SAVE = 4096;
+/** Tope de filas históricas de `technology_stats` compactadas por guardado (A1). */
+export const TECHNOLOGY_STATS_COMPACT_ROWS_PER_SAVE = 2048;
 /** Tope de recetas en la memoria de lecturas archivadas (`archivedRecipeMemo`); al llenarse se vacía. */
 const ARCHIVED_RECIPE_MEMO_LIMIT = 65_536;
 interface ArchivedRecipeMemo {
@@ -102,10 +104,11 @@ type TechnologyChainRecord = TechnologyChain & ({ version: 1 } | { version: 2; p
 /** Frontera V2: `digest` pliega todo el prefijo desde el origen; `seal` autentica los campos acumulados y la
  * cabeza durable lo repite, de modo que no pueda cambiar sin romper la prueba del archivo. */
 type TechnologyPrune = TechnologyChain & { tick: number; count: number; byKind: TechnologyExecutionCounts; seal: string };
-/** Lo que una instantánea exige del archivo para volver a cargarse o recuperarse: sus recibos confirmados y
- * los de su anillo residente (`ringTick`, tick del primero; `null` si está vacío). */
-type SlotBounds = { committed: number; ringTick: number | null };
+/** Lo que una instantánea exige del archivo para volver a cargarse o recuperarse: su tick,
+ * sus recibos confirmados y los de su anillo residente (`ringTick`, tick del primero; `null` si está vacío). */
+type SlotBounds = { tick: number; committed: number; ringTick: number | null };
 const TECHNOLOGY_PRUNED_KEY = 'technology-pruned-v1', TECHNOLOGY_CHAIN_KEY = 'technology-chain-v1';
+const DEEP_CHECKPOINT_SAVES_KEY = 'deep-checkpoint-saves-v1';
 const hexDigest = (value: unknown): value is string => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value);
 const safeCount = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 const technologyCounts = (value: unknown): TechnologyExecutionCounts | null => {
@@ -246,6 +249,9 @@ export class Store {
   private verifiedTechnology: { startsAfter: number; through: number; catalogueThrough: number; dataVersion: number; totalChanges: number;
     schemaCookie: number; chain: TechnologyChain } | null = null;
   private readonly technologyPruneRowsPerSave: number;
+  private readonly explicitPruneCap: boolean;
+  private readonly readOnly: boolean;
+  private readonly autoVacuumIncremental: boolean;
   /** Límites de retención de cada instantánea por el digesto de su fila (`SlotBounds`): la del slot 0 se
    * anota al cargarla o escribirla, y la rotación copia cuerpos idénticos a los slots 1 y 2, así que casi
    * nunca hace falta decodificar un respaldo para saber cuánto archivo necesita. Acotada a 8 entradas. */
@@ -255,11 +261,13 @@ export class Store {
   private technologyReads: { limit: number; recipes: Map<string, TechnologyRecipe> } | null = null;
   constructor(readonly path: string, options: StoreOptions = {}) {
     validateStoreOptions(options);
+    this.readOnly = options.readOnly ?? false;
     this.snapshotInlineTileLimit = options.snapshotInlineTileLimit ?? SNAPSHOT_INLINE_TILE_LIMIT;
+    this.explicitPruneCap = options.technologyPruneRowsPerSave !== undefined;
     this.technologyPruneRowsPerSave = options.technologyPruneRowsPerSave ?? TECHNOLOGY_PRUNE_ROWS_PER_SAVE;
     const existed = path !== ':memory:' && existsSync(path);
-    if (path !== ':memory:' && !options.readOnly) mkdirSync(dirname(resolve(path)), { recursive: true, mode: 0o700 });
-    this.db = new DatabaseSync(path, { readOnly: options.readOnly ?? false });
+    if (path !== ':memory:' && !this.readOnly) mkdirSync(dirname(resolve(path)), { recursive: true, mode: 0o700 });
+    this.db = new DatabaseSync(path, { readOnly: this.readOnly });
     // El archivo consulta la frontera de poda en cada verificación: nunca la recuerda (ver TechnologyArchiveHost).
     this.technologyArchive = new TechnologyArchive(this.db, { prunedThrough: () => this.prunedTechnology()?.through ?? null });
     let schemaVersion = existed ? 0 : 5;
@@ -285,7 +293,7 @@ export class Store {
         if (schemaVersion >= 4) assertTechnologySchema(this.db);
         if (schemaVersion >= 5) assertSnapshotPartsSchema(this.db);
       }
-      if (!options.readOnly) {
+      if (!this.readOnly) {
         // WAL + synchronous=NORMAL: un corte de luz puede costar el último commit
         // (≤ `persistencia.cadaTicks` pasos), nunca una base corrupta ni un estado
         // a medias. El fsync por tick era el 48 % del paso del servidor (C3).
@@ -298,7 +306,9 @@ export class Store {
         // 2,1 KB y en una hoja de 4 KiB cabe uno solo, así que el 36 % del archivo público eran huecos
         // (952,6 → 697 MiB con 8 KiB, mismos bytes de contenido). Sólo se puede fijar antes de crear la
         // primera tabla y de pasar a WAL; una base existente conserva su tamaño de página.
-        if (!existed) this.db.exec('PRAGMA page_size=8192');
+        // `auto_vacuum=INCREMENTAL` (A3): en bases nuevas permite devolver al disco las páginas liberadas
+        // por poda/compactación en pasos cortos (`PRAGMA incremental_vacuum(256)`) sin pausar el bucle.
+        if (!existed) this.db.exec('PRAGMA page_size=8192; PRAGMA auto_vacuum=INCREMENTAL;');
         // El umbral del volcado del WAL se fija en bytes (≈16 MiB, el medido), no en páginas.
         const pageBytes = Number((this.db.prepare('PRAGMA page_size').get() as { page_size: number }).page_size);
         const walPages = Math.max(1000, Math.round(16_384_000 / (Number.isSafeInteger(pageBytes) && pageBytes > 0 ? pageBytes : 4096)));
@@ -324,7 +334,19 @@ export class Store {
             throw error;
           }
         }
+        if (schemaVersion >= 4 && !this.technologyArchive.hasPerformanceIndexes()) {
+          this.db.exec('BEGIN IMMEDIATE');
+          try {
+            this.technologyArchive.ensurePerformanceIndexes();
+            this.db.exec('COMMIT');
+          } catch (error) {
+            if (this.db.isTransaction) this.db.exec('ROLLBACK');
+            throw error;
+          }
+        }
       }
+      this.autoVacuumIncremental = !this.readOnly
+        && Number((this.db.prepare('PRAGMA auto_vacuum').get() as { auto_vacuum: number }).auto_vacuum) === 2;
       this.schemaVersion = schemaVersion;
       this.snapshotParts = new SnapshotParts(this.db, schemaVersion);
     } catch (error) { this.db.close(); throw error; }
@@ -514,8 +536,8 @@ export class Store {
     let chain: TechnologyChain | null = null;
     if (declaredJournal) {
       if (world.technology.journal!.pending.length || world.technology.journal!.committedThrough !== world.technology.executionCounter) technologyFailure('snapshot contains uncommitted executions');
-      chain = this.assertTechnologyCoverage(world);
       if (this.schemaVersion >= 4) this.assertTechnologyCache(world);
+      chain = this.assertTechnologyCoverage(world);
     } else if (this.schemaVersion >= 4 && (this.technologyArchive.getHistoryOrigin()
       || ['technology_definitions', 'technology_stats', 'technology_executions'].some(table => this.db.prepare(`SELECT 1 FROM ${table} LIMIT 1`).get()))) {
       technologyFailure('an unjournaled snapshot cannot describe an initialized archive');
@@ -577,15 +599,18 @@ export class Store {
       || later('SELECT 1 FROM technology_stats WHERE tick>? LIMIT 1', world.tick)
       || later("SELECT 1 FROM technology_definitions WHERE id GLOB 'recipe-[0-9]*' AND CAST(substr(id,8) AS INTEGER)>? LIMIT 1", world.technology.recipeCounter))) behind();
   }
-  loadLegacy(id: string, atTick=Number.MAX_SAFE_INTEGER): LegacyRecord | null {
+  private readLegacyRecord(id: string, atTick: number, statement?: StatementSync): LegacyRecord | null {
     if (typeof id!=='string'||!id.length||id.length>50||!Number.isSafeInteger(atTick)||atTick<0) throw new RangeError('Invalid identity archive lookup.');
     if (this.schemaVersion<3) return null;
-    const row=this.db.prepare('SELECT body,digest,tick FROM legacy WHERE id=? AND tick<=?').get(id,atTick) as {body:string;digest:string;tick:number}|undefined;
+    const row=(statement ?? this.db.prepare('SELECT body,digest,tick FROM legacy WHERE id=? AND tick<=?')).get(id,atTick) as {body:string;digest:string;tick:number}|undefined;
     if (!row) return null;
     if (checksum(row.body)!==row.digest) throw new Error('Archived identity checksum mismatch. Explicit recovery required.');
     const record:unknown=JSON.parse(row.body); assertLegacyRecord(record,atTick);
     if(record.id!==id||record.diedAt!==row.tick) throw new Error('Archived identity key or date mismatch. Explicit recovery required.');
     return record;
+  }
+  loadLegacy(id: string, atTick=Number.MAX_SAFE_INTEGER): LegacyRecord | null {
+    return this.readLegacyRecord(id, atTick);
   }
   private assertLegacyParents(record: LegacyRecord, world: World): void {
     const parents=record.parents.map(id=>world.people.find(p=>p.id===id)??world.retiredLegacy.find(p=>p.id===id)??this.loadLegacy(id,world.tick));
@@ -894,18 +919,30 @@ export class Store {
     }
   }
 
-  /** Lo que una instantánea exige del archivo de recibos (ver `SlotBounds`). */
-  private boundsOf(world: Pick<World, 'technology'>): SlotBounds {
+  /** Lo que una instantánea exige del archivo de recibos y estadísticas (ver `SlotBounds`). */
+  private boundsOf(world: Pick<World, 'tick' | 'technology'>): SlotBounds {
     const technology = world.technology as Partial<World['technology']> | undefined;
     const committed = technology?.executionCounter, first = Array.isArray(technology?.history) ? technology.history[0]?.tick : undefined;
+    const atTick = typeof world.tick === 'number' && Number.isSafeInteger(world.tick) && world.tick >= 0 ? world.tick : 0;
     // Sin contador legible (instantánea anterior a la tecnología) se supone que necesita todo: 0 frena la poda.
-    return { committed: typeof committed === 'number' && Number.isSafeInteger(committed) && committed >= 0 ? committed : 0,
+    return { tick: atTick,
+      committed: typeof committed === 'number' && Number.isSafeInteger(committed) && committed >= 0 ? committed : 0,
       ringTick: typeof first === 'number' && Number.isSafeInteger(first) ? first : null };
   }
-  private rememberSlotBounds(digest: string, world: Pick<World, 'technology'>): void {
+  private rememberSlotBounds(digest: string, world: Pick<World, 'tick' | 'technology'>): void {
     if (!digest) return;
     this.slotBounds.delete(digest); this.slotBounds.set(digest, this.boundsOf(world));
     while (this.slotBounds.size > 8) this.slotBounds.delete(this.slotBounds.keys().next().value!);
+  }
+  /** Contador durable de guardados (A3): desacopla la rotación del respaldo profundo (slot 2) de los reinicios
+   * del proceso, de modo que reiniciar antes de los 100 guardados nunca congele el slot 2 ni la poda. */
+  private readDurableSaves(): number {
+    const row = this.db.prepare('SELECT value FROM main.metadata WHERE key=?').get(DEEP_CHECKPOINT_SAVES_KEY) as { value: string } | undefined;
+    if (!row) return this.saves;
+    const value = Number(row.value);
+    if (!/^(0|[1-9]\d*)$/.test(row.value) || !Number.isSafeInteger(value))
+      throw new Error('Invalid durable save counter metadata. Explicit recovery required.');
+    return value;
   }
   /** Límites del respaldo que hoy ocupa `slot` con ese digesto; `'unusable'` si su cuerpo está dañado (ni la
    * carga ni `previous()` lo adoptarían) y `null` si no se pudo decidir: entonces no se poda en este guardado.
@@ -958,7 +995,7 @@ export class Store {
    * El mundo no lee estos recibos (sólo definiciones y estadísticas, `catalogueReader`), así que nada de esto
    * cambia la simulación ni `digestoCanonico`.
    */
-  private pruneTechnology(world: World, window: number, rotatesBackups: boolean): TechnologyPrune | null {
+  private pruneTechnology(world: World, window: number, rotatesBackups: boolean, deep: boolean): TechnologyPrune | null {
     if (this.schemaVersion < 4 || window <= 0) return null;
     let limitTick = world.tick - Math.max(window, TECHNOLOGY_RETENTION_MIN_TICKS);
     if (limitTick <= 0) return null;
@@ -970,7 +1007,6 @@ export class Store {
     if (own.ringTick !== null) limitTick = Math.min(limitTick, own.ringTick);
     const digests = new Map((this.db.prepare('SELECT slot,digest FROM snapshots').all() as { slot: number; digest: string }[])
       .map(row => [row.slot, row.digest]));
-    const deep = rotatesBackups && (this.saves + 1) % DEEP_CHECKPOINT_EVERY_SAVES === 0;
     for (const source of [rotatesBackups ? 0 : 1, deep ? 0 : 2] as SnapshotSlot[]) {
       const digest = digests.get(source);
       if (digest === undefined) continue;
@@ -986,11 +1022,15 @@ export class Store {
       through = next === null ? null : this.lastExecutionBefore(next);
     }
     if (through === null || through <= from) return null;
-    if (through - from > this.technologyPruneRowsPerSave) {
-      const capTick = this.executionTick(from + this.technologyPruneRowsPerSave);
+    // A3: en producción/lab (sin tope explícito en StoreOptions) escalar la poda por encima del ritmo de generación.
+    const cap = this.explicitPruneCap
+      ? this.technologyPruneRowsPerSave
+      : Math.max(this.technologyPruneRowsPerSave, journal.pending.length * 2);
+    if (through - from > cap) {
+      const capTick = this.executionTick(from + cap);
       if (capTick === null) return null;
       const capTickEnd = this.lastExecutionAt(capTick);
-      const cut = capTickEnd !== null && capTickEnd <= from + this.technologyPruneRowsPerSave
+      const cut = capTickEnd !== null && capTickEnd <= from + cap
         ? capTickEnd : this.lastExecutionBefore(capTick);
       // Si ni el primer tick completo cabe, se poda ese tick entero y solo: nunca se parte un padre de sus
       // anidadas y, si no se podara, la poda quedaría atascada para siempre en él. Su coste está acotado por
@@ -1006,18 +1046,60 @@ export class Store {
     return { ...boundary, seal: technologyPruneSeal(boundary) };
   }
 
-  private assertTechnologyAuthor(world: World, definition: Pick<TechnologyDefinition, 'inventorId' | 'tick'>): void {
-    const author = world.people.find(person => person.id === definition.inventorId)
-      ?? world.legacy.find(person => person.id === definition.inventorId)
-      ?? world.retiredLegacy.find(person => person.id === definition.inventorId)
-      ?? this.loadLegacy(definition.inventorId, world.tick);
-    if (!author || author.bornAt > definition.tick || 'diedAt' in author && author.diedAt < definition.tick)
+  /**
+   * Compactación incremental de `technology_stats` (A1, plan de estabilidad): bajo `ventanaEventosTicks > 0`,
+   * borra filas estrictamente superadas por otra fila de la misma receta `<= cutoffTick`, donde `cutoffTick`
+   * queda acotado tanto por la ventana como por el tick más viejo de las instantáneas que sobrevivirán al
+   * guardado (`[0, 1, 2]`). Con `window === 0` no compacta nada.
+   */
+  private compactTechnologyStats(world: World, window: number, rotatesBackups: boolean, deep: boolean): number {
+    if (this.schemaVersion < 4 || window <= 0) return 0;
+    let cutoffTick = Math.min(world.tick - Math.max(window, TECHNOLOGY_RETENTION_MIN_TICKS), world.tick);
+    if (cutoffTick <= 0) return 0;
+    const digests = new Map((this.db.prepare('SELECT slot,digest FROM snapshots').all() as { slot: number; digest: string }[])
+      .map(row => [row.slot, row.digest]));
+    for (const source of [rotatesBackups ? 0 : 1, deep ? 0 : 2] as SnapshotSlot[]) {
+      const digest = digests.get(source);
+      if (digest === undefined) continue;
+      const bounds = this.slotBoundsOf(source, digest);
+      if (bounds === null) return 0;
+      if (bounds === 'unusable') continue;
+      cutoffTick = Math.min(cutoffTick, bounds.tick);
+    }
+    if (cutoffTick <= 0) return 0;
+    return this.technologyArchive.compactStats(cutoffTick, TECHNOLOGY_STATS_COMPACT_ROWS_PER_SAVE, TECHNOLOGY_STATS_COMPACT_ROWS_PER_SAVE * 16);
+  }
+
+  private assertTechnologyAuthor(world: World, definition: Pick<TechnologyDefinition, 'inventorId' | 'tick'>,
+    authorLookup?: (id: string) => { bornAt: number; diedAt?: number } | null): void {
+    const author = authorLookup ? authorLookup(definition.inventorId)
+      : world.people.find(person => person.id === definition.inventorId)
+        ?? world.legacy.find(person => person.id === definition.inventorId)
+        ?? world.retiredLegacy.find(person => person.id === definition.inventorId)
+        ?? this.loadLegacy(definition.inventorId, world.tick);
+    if (!author || author.bornAt > definition.tick || 'diedAt' in author && author.diedAt !== undefined && author.diedAt < definition.tick)
       technologyFailure('definition author disagrees with world history');
   }
   private assertTechnologyCache(world: World): void {
     const state = world.technology;
+    // A2: indexar autores residentes y memoizar `loadLegacy()` con sentencia preparada durante este barrido.
+    const residentAuthors = new Map<string, { bornAt: number; diedAt?: number }>();
+    for (const record of world.retiredLegacy) residentAuthors.set(record.id, { bornAt: record.bornAt, diedAt: record.diedAt });
+    for (const record of world.legacy) residentAuthors.set(record.id, { bornAt: record.bornAt, diedAt: record.diedAt });
+    for (const person of world.people) residentAuthors.set(person.id, { bornAt: person.bornAt });
+    const legacyStatement = this.schemaVersion >= 3 ? this.db.prepare('SELECT body,digest,tick FROM legacy WHERE id=? AND tick<=?') : undefined;
+    const legacyAuthors = new Map<string, { bornAt: number; diedAt: number } | null>();
+    const authorLookup = (id: string): { bornAt: number; diedAt?: number } | null => {
+      const resident = residentAuthors.get(id);
+      if (resident) return resident;
+      if (legacyAuthors.has(id)) return legacyAuthors.get(id)!;
+      const archived = this.readLegacyRecord(id, world.tick, legacyStatement);
+      const entry = archived ? { bornAt: archived.bornAt, diedAt: archived.diedAt } : null;
+      legacyAuthors.set(id, entry);
+      return entry;
+    };
     // The resident list is a cache, never evidence of lifetime archive coverage.
-    const summary = this.technologyArchive.summarizeDefinitions(world.tick, definition => this.assertTechnologyAuthor(world, definition));
+    const summary = this.technologyArchive.summarizeDefinitions(world.tick, definition => this.assertTechnologyAuthor(world, definition, authorLookup));
     if (summary.recipes !== state.recipeCounter) technologyFailure('definition cache disagrees with archive');
     if (state.catalogue) {
       const totals = state.catalogue.totals;
@@ -1119,7 +1201,7 @@ export class Store {
             const committed = baseline.technology.journal;
             assertTechnologyJournal(baseline.technology, baseline.tick);
             if (committed.pending.length || committed.committedThrough !== baseline.technology.executionCounter) technologyFailure('baseline snapshot contains uncommitted executions');
-            chain = this.assertTechnologyCoverage(baseline); this.assertTechnologyCache(baseline);
+            this.assertTechnologyCache(baseline); chain = this.assertTechnologyCoverage(baseline);
             if (journal.startsAfter !== committed.startsAfter || journal.committedThrough !== committed.committedThrough) technologyFailure('candidate changed the committed coverage boundary');
             if (baseline.technology.catalogue && state.catalogue?.committedThrough !== baseline.technology.catalogue.committedThrough)
               technologyFailure('candidate changed the committed definition boundary');
@@ -1216,10 +1298,18 @@ export class Store {
     else bindWorldContext(world, this.context);
     const window = paramsOf(world).persistencia.ventanaEventosTicks;
     const prunes = window > 0 && world.tick - this.lastPruneTick >= window;
+    const changedRecipeIds = new Set((world.technology.catalogue?.pending ?? world.technology.recipes).map(recipe => recipe.id));
+    const memoBefore = this.archivedRecipes;
+    const beforeMemoEpoch = memoBefore ? this.technologyArchive.readEpoch() : null;
+    if (memoBefore && beforeMemoEpoch && memoBefore.epoch === beforeMemoEpoch && memoBefore.recipes.size > 0 && this.schemaVersion >= 4) {
+      memoBefore.horizon ??= this.technologyArchive.latestTick();
+    }
     // Los params vigentes viajan con el mundo: `load()` no puede medirlo con otros (R8).
     const prepared = this.snapshotParts.prepare({ ...world, chronicleJournal: committedChronicle, technology: technologyCatalogueStateForCommit(technologyStateForCommit(world.technology)) }, paramsOf(world), this.snapshotInlineTileLimit);
     let body = '', bodyDigest = '';
     let committedChain: TechnologyChain | null = null;
+    let technologyPruned: TechnologyPrune | null = null;
+    let statsCompacted = 0;
     this.db.exec('BEGIN IMMEDIATE');
     // Authorization and commit share a transaction with respect to external revocation.
     // Revocada antes de escribir nada: se deshace una transacción sin cambios, que no mueve ningún sello,
@@ -1228,17 +1318,20 @@ export class Store {
     let revoked = false;
     try { revoked = requiredSessions.some(hash => !this.sessionValid(hash)); }
     catch (error) {
-      this.db.exec('ROLLBACK'); this.technologyArchive.invalidateVerification(); this.verifiedChronicle = null; throw error;
+      this.db.exec('ROLLBACK'); this.technologyArchive.invalidateVerification(); this.verifiedChronicle = null; this.archivedRecipes = null; throw error;
     }
     if (revoked) { this.db.exec('ROLLBACK'); throw new SessionRevoked('Session revoked before commit.'); }
     let chronicleTriggers = false;
     try {
       const rotatesBackups = this.slot0Readable ?? this.readSlot0();
+      const nextDurableSaves = this.readDurableSaves() + 1;
+      const deep = rotatesBackups && nextDurableSaves % DEEP_CHECKPOINT_EVERY_SAVES === 0;
       chronicleTriggers = this.chronicleHasTriggers();
       this.technologyArchive.beginHostTransaction();
       this.assertChronicleChanges(world, chronicleStamp, !chronicleTriggers);
       const technologyChain = this.flushTechnology(world);
-      const technologyPruned = this.pruneTechnology(world, window, rotatesBackups);
+      technologyPruned = this.pruneTechnology(world, window, rotatesBackups, deep);
+      statsCompacted = this.compactTechnologyStats(world, window, rotatesBackups, deep);
       this.technologyArchive.observeHostWrites(() => {
       if (this.schemaVersion >= 4) this.writeTechnologyMetadata(technologyChain, technologyPruned);
       this.flushChronicle(world);
@@ -1271,7 +1364,7 @@ export class Store {
       // salvar el arranque. Un cuerpo no verificado nunca entra en un respaldo.
       if (rotatesBackups) {
         this.db.exec('INSERT OR REPLACE INTO snapshots SELECT 1,body,digest,saved_at FROM snapshots WHERE slot=0');
-        if ((this.saves + 1) % DEEP_CHECKPOINT_EVERY_SAVES === 0) this.db.exec('INSERT OR REPLACE INTO snapshots SELECT 2,body,digest,saved_at FROM snapshots WHERE slot=0');
+        if (deep) this.db.exec('INSERT OR REPLACE INTO snapshots SELECT 2,body,digest,saved_at FROM snapshots WHERE slot=0');
       }
       const written = this.snapshotParts.write(prepared);
       body = written.body;
@@ -1279,6 +1372,7 @@ export class Store {
       bodyDigest = checksum(body);
       this.db.prepare('INSERT OR REPLACE INTO snapshots VALUES (0,?,?,?)').run(body, bodyDigest, Date.now());
       this.db.prepare("INSERT OR REPLACE INTO metadata VALUES ('initialized','1')").run();
+      this.db.prepare('INSERT OR REPLACE INTO metadata VALUES (?,?)').run(DEEP_CHECKPOINT_SAVES_KEY, String(nextDurableSaves));
       const insertInput = this.db.prepare('INSERT INTO inputs VALUES (?,?,?,?,?,?)');
       for (const { gesture, result } of inputs) insertInput.run(gesture.id, fingerprint(gesture), result.tick, result.order, JSON.stringify(gesture), JSON.stringify(result));
       this.snapshotParts.collect();
@@ -1303,6 +1397,7 @@ export class Store {
       if (this.db.isTransaction) this.db.exec('ROLLBACK');
       this.technologyArchive.invalidateVerification();
       this.verifiedChronicle = null;
+      this.archivedRecipes = null;
       throw error;
     }
     // A discarded transaction must leave the caller's pending archive queue intact for a retry.
@@ -1310,16 +1405,35 @@ export class Store {
     this.verifiedChronicle = null;
     try {
       const current = this.chronicleStamp();
-      if (!chronicleTriggers && current.dataVersion === chronicleStamp.dataVersion && current.schemaCookie === chronicleStamp.schemaCookie
-        && current.tempSchemaCookie === chronicleStamp.tempSchemaCookie) this.rememberChronicle(world, current);
-    } catch { /* Durable commit succeeded; losing a cache is not a failed transaction. */ }
+      const unchangedEnv = !chronicleTriggers && current.dataVersion === chronicleStamp.dataVersion && current.schemaCookie === chronicleStamp.schemaCookie
+        && current.tempSchemaCookie === chronicleStamp.tempSchemaCookie;
+      if (unchangedEnv) this.rememberChronicle(world, current);
+      if (unchangedEnv && this.archivedRecipes === memoBefore && memoBefore && beforeMemoEpoch && memoBefore.epoch === beforeMemoEpoch
+        && memoBefore.horizon !== undefined && Number.isSafeInteger(memoBefore.horizon) && world.tick >= memoBefore.horizon) {
+        const afterEpoch = this.technologyArchive.readEpoch();
+        if (afterEpoch !== null) {
+          for (const [id, entry] of memoBefore.recipes) {
+            if (changedRecipeIds.has(id) || entry.value === null || entry.atTick < memoBefore.horizon) memoBefore.recipes.delete(id);
+            else entry.atTick = world.tick;
+          }
+          memoBefore.epoch = afterEpoch;
+          memoBefore.horizon = world.tick;
+        } else this.archivedRecipes = null;
+      } else this.archivedRecipes = null;
+    } catch { this.archivedRecipes = null; /* Durable commit succeeded; losing a cache is not a failed transaction. */ }
     world.retiredChunks = [];
     world.retiredLegacy = [];
     markTechnologyJournalCommitted(world.technology);
     markTechnologyCatalogueCommitted(world.technology);
     // The transaction is already durable. Failure to refresh an optimization
     // cannot turn a successful save into a reported failure or a discarded tick.
-    try { this.rememberTechnology(world, committedChain!); this.rememberSlotBounds(bodyDigest, world); }
+    try {
+      this.rememberTechnology(world, committedChain!);
+      this.rememberSlotBounds(bodyDigest, world);
+      if (!this.readOnly && this.autoVacuumIncremental && (technologyPruned !== null || statsCompacted > 0 || prunes)) {
+        this.db.exec('PRAGMA incremental_vacuum(256)');
+      }
+    }
     catch {
       this.verifiedTechnology = null; this.verifiedCatalogue = null; this.verifiedRecipes.clear();
       this.technologyArchive.invalidateVerification();
@@ -1348,6 +1462,7 @@ export class Store {
   private sessionWrite(write: () => number): void {
     if (this.db.isTransaction) { write(); return; }
     const before = this.chronicleStamp();
+    const beforeMemoEpoch = this.archivedRecipes ? this.technologyArchive.readEpoch() : null;
     this.db.exec('BEGIN IMMEDIATE');
     let changes = 0, triggers = true;
     try {
@@ -1359,6 +1474,7 @@ export class Store {
     } catch (error) {
       if (this.db.isTransaction) this.db.exec('ROLLBACK');
       this.technologyArchive.invalidateVerification();
+      this.archivedRecipes = null;
       throw error;
     }
     const after = this.chronicleStamp();
@@ -1369,6 +1485,11 @@ export class Store {
       && technology.schemaCookie === before.schemaCookie) technology.totalChanges = after.totalChanges;
     const chronicle = this.verifiedChronicle;
     if (own && chronicle && sameChronicleStamp(chronicle.stamp, before)) chronicle.stamp = after;
+    if (own && this.archivedRecipes && beforeMemoEpoch && this.archivedRecipes.epoch === beforeMemoEpoch) {
+      const afterEpoch = this.technologyArchive.readEpoch();
+      if (afterEpoch !== null) this.archivedRecipes.epoch = afterEpoch;
+      else this.archivedRecipes = null;
+    }
   }
   sessionValid(hash: string): boolean {
     const row = this.db.prepare('SELECT expires FROM sessions WHERE hash=?').get(hash) as { expires: number } | undefined;
@@ -1557,8 +1678,8 @@ export class Store {
       let chain: TechnologyChain | null = null;
       if (declaredJournal) {
         if (chainAtCheckpoint) recovered.writeTechnologyMetadata(chainAtCheckpoint, null);
-        chain = recovered.assertTechnologyCoverage(world);
         recovered.assertTechnologyCache(world);
+        chain = recovered.assertTechnologyCoverage(world);
       } else recovered.rebuildPreviousTechnology(world);
       recovered.prepareTechnology(world, declaredJournal ? world.technology.recipeCounter : 0);
       // A pre-journal checkpoint has surviving receipts in memory, not a backed watermark.
@@ -1569,6 +1690,7 @@ export class Store {
       // La copia empieza su propia cadena: heredar los respaldos del original dejaría
       // ahí puntos POSTERIORES al que se acaba de restaurar (o los que fallaron).
       recovered.db.prepare('DELETE FROM snapshots WHERE slot<>0').run();
+      recovered.db.prepare('DELETE FROM main.metadata WHERE key=?').run(DEEP_CHECKPOINT_SAVES_KEY);
       recovered.db.prepare('DELETE FROM inputs WHERE tick>?').run(world.tick);
       recovered.db.prepare('DELETE FROM events WHERE tick>?').run(world.tick);
       recovered.db.prepare('DELETE FROM chunks WHERE tick>?').run(world.tick);

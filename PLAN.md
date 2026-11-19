@@ -2,6 +2,320 @@
 
 ## Estado actual
 
+- **Estado publicado vigente**: consultar únicamente [docs/ESTADO.md](docs/ESTADO.md) (mundo V13 en la torre, `RULES_VERSION` 11 + COM + COM-D′, `PROTOCOL_VERSION` 10, SQLite `user_version` 5).
+- **Meta y revisiones vigentes**: [GOAL.md](GOAL.md), [revisión del 24 de septiembre](docs/REVISION-2026-09-24.md), [revisión del 22 de septiembre](docs/REVISION-2026-09-22.md) y [revisión de la noche del 22](docs/REVISION-NOCHE-2026-09-22.md).
+- **Corte operativo archivado (2026-10-03 → 2026-10-06 14:49 UTC)**: marcador histórico **7/24** (`C1–C7`); ninguna aceptación científica nueva (`C8–C24` abiertos). En el worktree `AtlasParaIsa-anexo/worktrees/criterios-realismo-20261003` cerró el gate técnico **G1** (`ROOT-G1-GO v9c`, T004–T006, 1733/0/9) y siguen abiertos **G2** (replay completo de App y 6 semillas técnicas × 1200, `B9 NO_GO`), **G3** (48 casos + 8 controles RAW), **G4** y `T019` (6 semillas nuevas × 60d). El registro completo de los 24 cortes del 2026-10-06 y las notas del 03–04 oct quedó archivado sin pérdida en `AtlasParaIsa-anexo/archivo/PLAN-cortes-20261003-20261006.md` (y el respaldo previo en `AtlasParaIsa-anexo/archivo/PLAN.md.pre-g1-g2-0cc2ce345d91.bak`); la matriz fila por fila está en `AtlasParaIsa-anexo/worktrees/criterios-realismo-20261003/specs/003-criterios-realismo/acceptance-status.md`.
+
+Lo publicado se consulta exclusivamente en [ESTADO](docs/ESTADO.md). El plan de cierre
+vigente es el siguiente; los balances fechados posteriores de este documento son históricos.
+
+## Plan de cierre C1–C24 — recuperación del 3 de octubre de 2026
+
+**Objetivo:** completar la meta de [GOAL](GOAL.md) mediante evidencia conjunta de C1–C24,
+con pruebas de servidor y experiencia separadas de las réplicas biológicas.
+**Arquitectura:** conservar el motor autoritativo y determinista; medir primero las brechas,
+contrastar una ley local por experimento y aceptar únicamente mejoras materiales verificadas.
+**Tecnología:** TypeScript, Node, SQLite, Vite y los instrumentos existentes del laboratorio.
+**Base del plan:** GOAL, la constitución y la decisión recuperada de Steven de adoptar B01–B16
+como C9–C24; el encargo pendiente está en `datos-lab/codex-goal-12.md` del laboratorio.
+
+Este plan organiza trabajo futuro. No acredita criterios nuevos, aprueba candidatas ni cambia
+reglas, evaluadores congelados, umbrales o publicaciones. La ejecución SDD seguirá
+`/speckit-implement` con tareas y ownership explícitos antes de cada implementación.
+
+### Qué se recuperó y qué quedó detenido
+
+- Sesión principal de Claude: `71b6da8a-24fe-445a-abe9-a2469c7538ac`, en
+  `/home/stev/.claude/projects/-datos-workspaces-personal-AtlasParaIsa/`.
+  Última petición humana: pausar el monitor por falta de tokens, **01-10 18:48:47 -05**.
+  Claude confirmó la pausa a las 18:49:30. La memoria resume la hora como ~18:25;
+  para la petición exacta manda el registro de la sesión. No se ha reactivado el monitor.
+- La decisión del **30-09** mantiene **C8 por tendencia creciente**, y la del **01-10**
+  amplía «terminado» a **C1–C24**. La frase de ESTADO sobre una lectura de C8 pendiente
+  está superada por esa decisión, aunque todavía no se ha corregido allí.
+- La auditoría de realismo está terminada y revisada. C9–C24 se adoptaron como frentes;
+  sus umbrales candidatos requieren la especificación y calibración prevista en el objetivo 12.
+  No se encontraron `docs/CRITERIOS-REALISMO.md`, `scripts/lab/criterio-realismo.mts`,
+  su línea base final ni la rama/worktree previstos para ese objetivo.
+- **P0.c / objetivo 11:** los cuatro JSONL de 9501–9504 conservan 31/37/32/41 de 60 días.
+  Las cuatro ejecuciones acabaron con `SIGTERM`/`missingInnerReceipt`; el cierre coincide
+  temporalmente con el cierre de sesión/user-manager del 02-10 a las 05:54 UTC, pero se
+  desconoce quién emitió la señal. El reboot posterior invalida la época y no explica por sí
+  solo la primera interrupción. El estado es **interrumpido**, no un veredicto científico.
+  Repetir los cuatro desde tick 0 en una época nueva; no usar el runner hardcoded sin adaptación
+  operacional aprobada. La calibración previa de cuatro semillas y su perfil P90 sí tienen cierre.
+- **DESG-D60:** de 36 trayectorias, 9 están completas sin validar, 14 interrumpidas y 13 no
+  iniciadas; ninguna es completa válida. Tener 60 registros no acredita fuentes, recibos,
+  continuidad ni seguridad.
+- **Muse4 sequía:** de seis secuencias, tres están completas sin validar y tres interrumpidas;
+  ninguna es completa válida. No se encontró cierre/evaluación final; no se leyeron outcomes.
+- La reconciliación de archivos de staging halló tres targets `underlay` de 0 B que son stubs
+  `ro-bind`, no corrupción de fuente. AMD (111067 B), clock (332 B) y recipe (196363 B)
+  canónicos coinciden por SHA con fuentes v7. R0 sigue abierto: esos estados no son aceptación.
+- No hay réplicas nuevas científicas en marcha. La revisión Sol autoriza preparar nueva operación
+  P0.c con ciencia sin cambios, pero da NO-GO a ejecutar los comandos antiguos sin adaptación.
+- **Objetivo 7 / escala:** la asignación diferida de productos quedó archivada en
+  `530c846`: paridad observada, rendimiento sin mejora conjunta y suite completa fallida.
+  El siguiente ensayo de pertenencia quedó preparando/corrigiendo el lanzador; no tiene
+  aceptación de rendimiento. No se encontraron `codex7-FIN`, `codex11-FIN` ni `codex12-FIN`.
+- Las sesiones tmux antiguas en los sockets `codex` y `muse` no están disponibles.
+  El reinicio que interrumpió P0.c está confirmado; otras causas no se atribuyen sin evidencia.
+  No se han relanzado procesos.
+  La consulta del 03-10 confirmó health público correcto y servicio/timer activos;
+  disponibilidad operativa no equivale a cumplimiento biológico.
+
+Fuentes locales de recuperación, sin copiar conversaciones ni bases al repositorio:
+`/datos/tmp-atlas-lab/datos-lab/bitacora.md`,
+`/datos/tmp-atlas-lab/balance/auditoria-realismo-20260930.md`,
+`/datos/tmp-atlas-lab/balance/codex11/P0C-PORTABLE-HANDOFF-20261001.md`,
+`/datos/tmp-atlas-lab/datos-lab/desg-d60/PRERREGISTRO.md` y las memorias
+`c8-decision-crecer.md`, `criterios-realismo-c9-c24.md`, `estado-20261001-pausa.md`
+de la sesión de Claude. El corte actualizado está en
+`/datos/tmp-atlas-lab/orquestacion-20261003/recuperacion/RECUPERACION.md` e
+`INVENTARIO.json`; las puertas operativas están en
+`/datos/tmp-atlas-lab/orquestacion-20261003/recursos/RESULTADO-RECURSOS.md` y
+`recursos/fedora/FEDORA-RECURSOS.md`. Estas rutas son locales, no artefactos disponibles en otro clon.
+
+### Matriz de cobertura para el cierre
+
+«Pendiente» significa que no hay aceptación integral del criterio nuevo; no afirma que falte
+toda implementación. C1–C7 están acreditados en el panel publicado, no en todas las campañas.
+El diagnóstico observable de la auditoría y sus ablaciones todavía deben convertirse en
+evaluaciones ejecutables; un histórico de otra versión no aprueba la versión candidata.
+
+| Criterio | Frente y estado recuperado | Evidencia que falta para cerrar |
+|---|---|---|
+| C1–C7 | Supervivencia, recambio, generaciones, cooperación, conflictos, muertes y tecnología: panel publicado favorable | Revalidar sobre el código integrado final; conservar el alcance y las limitaciones del evaluador congelado |
+| C8 | Diversidad de conducta creciente: falla en los paneles publicados | Tendencia que cumpla el evaluador vigente; un nivel mayor entre comunidades no sustituye la tendencia |
+| C9 | Uso de obras y construcción marginal: pendiente | Uso por ID y usuario, servicio material y control de utilidad de construir |
+| C10 | Desgaste, mantenimiento y ruinas: pendiente; DESG-D60 incompleto | Condición, exposición, pérdida de función y reparación con costes; definir la política de ruinas sin inventarla |
+| C11 | Continuidad material y reposición: pendiente | Varios recambios e insumos repuestos por la red; retirada y restauración física de un proveedor |
+| C12 | Conservación y alivio corporal: pendiente | Balance de materia, agua, trabajo y pérdidas; alivio sólo tras consumo real |
+| C13 | Muerte temprana y causalidad individual: pendiente | Edad, lugar, historia causal y frecuencia temprana, además de las cuatro etiquetas de C6 |
+| C14 | Transmisión y redescubrimiento: pendiente | Enseñanza local, pérdida del último conocedor y redescubrimiento pagado; usar no concede instrucciones |
+| C15 | Novedad funcional y catálogo ampliable: pendiente | Nueva función ejecutada con beneficio y costes, genealogía resoluble y archivo más allá de la caché |
+| C16 | Migración por escasez y abandono: pendiente | Trayecto, cambio duradero de hogar, consumo en destino y contraste causal de escasez |
+| C17 | Roles, dependencias e instituciones adaptables: pendiente | Especialización útil, receptores, sustitución de proveedores y consecuencias de reglas sociales locales |
+| C18 | Conflictos y acuerdos con consecuencia: pendiente | Desencadenante material y cambio posterior de acceso, consumo, recurrencia o confianza |
+| C19 | Ecología y territorio fuera de cámara: pendiente; congelación lejana conocida | Política multiescala, conservación al activar/retirar y trayectorias independientes de las cámaras |
+| C20 | Demografía frente a topes de software: pendiente; cupo global activo | Atribución de cada freno; retirar el regulador global con una ley local validada y conservar determinismo |
+| C21 | Mundo durable y compartido: evidencia técnica parcial | Estado e historia coherentes ante interrupciones, rollback y reconexión; cámaras con el mismo reloj |
+| C22 | Rendimiento y hardware equivalentes: aceptación integral pendiente | Coste completo de paso, guardado, proyección, RAM, disco y red; mejora medida sin cambiar el mundo |
+| C23 | Carta, agencia, accesibilidad y legibilidad: pendiente | Recorrido en teléfono real y teclado, consecuencias legibles y revisión personal de Steven |
+| C24 | Calidad del experimento y neuroevolución: método parcial, entrenamiento sin comenzar | Procedencia/control/semillas reservadas; entrenamiento posterior a afinar el mundo, con contraste neutral y selector actual |
+
+### Restricciones y controles transversales
+
+- C1–C8 y su evaluador congelado no se cambian. Su umbral de agregación actual admite
+  exactamente la mitad; no llamarlo mayoría estricta ni imponer otro umbral sin preregistro.
+- Separar criterio aprobado, fallado, desconocido, no observado e infraestructura interrumpida.
+  Una trayectoria parcial o ausencia de eventos sin observabilidad no se convierte en éxito.
+- Excluir S e I del éxito autónomo en los nuevos instrumentos; documentar las inclusiones
+  heredadas del evaluador antiguo sin modificarlo para mejorar sus resultados.
+- Todo instrumento observador conserva digestos con/sin medición; hardware y cámaras
+  no cambian leyes ni resultados de pasos equivalentes. Ningún rescate o suministro oculto.
+- Preservar campañas interrumpidas, fuentes, parámetros y recibos. No juntar prefijos de épocas
+  diferentes. El handoff de P0.c exige repetir sus cuatro controles desde tick cero si la época
+  se interrumpió mecánicamente; no existe permiso técnico para continuarla como si nada.
+- Nuevos experimentos usan el método de placebo adoptado el 01-10. Los veredictos antiguos
+  permanecen cerrados; el panel DESG-D60 tiene su propio contrato de aceptación.
+- Mantener un escritor por área; worktrees en `AtlasParaIsa-anexo/worktrees/`, laboratorio
+  temporal y público intacto. La autorización de recursos del 03-10 reemplaza la afinidad
+  histórica 12–31 y el límite de madrugada; verificar el estado de cada límite antes de usarlo.
+  La portátil comparte la cuota Codex principal.
+- Consultar cuotas y rutas actuales antes del reparto. El 03-10 se consultaron ambas:
+  Gemini Pro revisó cobertura en lectura (job `180371008af94b4196850c742e74d34c`);
+  Codex realizó recuperación y síntesis. La cuota Claude fue desconocida. Reconsultar al ejecutar.
+
+### Recursos y reparto de agentes — 3 de octubre de 2026
+
+El árbol principal conserva sólo la orquestación. El primer grupo tiene cuatro agentes
+subordinados (dos Luna y dos Sol high) más el coordinador, dentro de cinco slots nativos;
+no se abren seis agentes ni se asignan cuatro jobs cloud por agente. El pool MCP admite
+hasta cuatro jobs agregados. Cada artefacto tiene un escritor y una revisión independiente;
+al acabar una entrega, el revisor puede rotar a otro carril.
+
+| Espacio | Ownership / salida | Gate y dependencia | Asignación inicial |
+|---|---|---|---|
+| R0 recuperación | Luna: inventario documental, recibos y estados; entrega de recuperación | P0.c: cuatro ejecuciones interrumpidas, prefijos 31/37/32/41 de 60 días; reboot posterior invalida la época, no explica por sí solo la interrupción inicial. Requiere nueva época y cuatro controles desde tick 0; inventario total sigue abierto | Luna; `/datos/tmp-atlas-lab/orquestacion-20261003/recuperacion` |
+| R1 criterios | Sol 6.1 high: `docs/CRITERIOS-REALISMO.md` y spec/tareas C9–C24 | Fórmula, ventana, denominador, umbral y desconocido; separado de C8 y no dependiente de P0.c | Despachado en worktree `/datos/workspaces/personal/AtlasParaIsa-anexo/worktrees/criterios-realismo-20261003`, rama `codex/criterios-realismo-20261003`, HEAD `bb483260b2489fe62b113d620e5f56e5f3676dbc`; Sol 6.1 high, cuenta secundaria `561…`, job `8de35915a3eb42259fb6fdbb79434ebd`, timeout 1800 s. El job `8de35915a3eb42259fb6fdbb79434ebd` terminó succeeded (2026-10-04 01:37:43 UTC): entregó `docs/CRITERIOS-REALISMO.md`, `specs/003-criterios-realismo/ENTREGA.md`, spec/plan/tasks, schemas v1 y 26 tareas. R1 sigue sin aprobar: la revisión v2 (job MCP `47510e03921d4091a2fac76ead47299f`) emitió NO-GO-R2 por dos bloqueos; G1 semántica sigue pendiente. La corrección secundaria job MCP `96bd6836a13d47daa0286bcd75d86f05` falló por timeout 900 s a las 02:52:42 UTC, sin señal de auth/cuota. Luna conservó diagnóstico y snapshot privado de 88 archivos en `/datos/tmp-atlas-lab/orquestacion-20261003/criterios-autor/DIAGNOSTICO-TIMEOUT-R1-v3.md` y `snapshots/timeout-r1-v3-20261004T0254Z`; manifiesto 7/54 hashes coinciden, 47/54 están obsoletos, 64/64 rutas de índice existen. Nuevo job MCP `2b601dd3bf462f9d321b3541853be6` continúa con la misma cuenta secundaria Sol 6.1 high, timeout 1500 s, limitado a finalizar los dos fixes e integridad. Los IDs `d1ab5…`, `96bd…` y `2b601…` son jobs MCP, no commits. R1v3 requiere formalización independiente; R2 sigue NO-GO, sin cambios de motor/ciencia. Copia fiel del handoff: `/datos/tmp-atlas-lab/orquestacion-20261003/criterios-autor/ENTREGA.md` (SHA-256 de la fuente `5ddf7ef2e7c09b73f11c2d51de9e1087fa864fa698ab15d23f9f58e980b20bb4`). El intento anterior `5f9fbf0fb73944bc87ce91caa5c6c204` se canceló por el orquestador tras 20 min sin artefacto/worktree, no por auth/cuota. |
+| Revisión R1 | Sol 6.1 high, principal: revisión independiente, sin editar contrato | R1-v2 NO-GO-R2; R1-v3 formal y peer pendientes; G1 semántica pendiente | Informe v2 `/datos/tmp-atlas-lab/orquestacion-20261003/revision-criterios/REVISION-R1-v2.md`. La corrección v3 de autor job MCP `96bd6836a13d47daa0286bcd75d86f05` falló timeout 900 s (no auth/cuota); Luna preservó diagnóstico/snapshot 88 archivos. Nuevo job MCP `2b601dd3bf462f9d321b3541853be6`, misma cuenta secundaria/Sol high, timeout 1500 s, solo completar ambos fixes e integridad. Jobs MCP, no commits. |
+| Observador de viabilidad | Sol 6.1 high, principal: informe independiente, sin editar autoría ni ejecutar motor/ciencia | Informe de viabilidad separado; no desbloquea R1 por sí solo | Job `77fb33129aed47d992d200dfbfc7b2b8` completado. Informe durable: `/datos/tmp-atlas-lab/orquestacion-20261003/revision-criterios/VIABILIDAD-OBSERVADOR.md` (SHA-256 `f925390b238bdc34a23e426dfb6ebd016c3aa1ad4bf94a6d6e25be8edc5491be`). |
+| R2 observadores | Ownership separado de `replica.ts`/`instrumentos.ts` | Gate 6×1200 con digestos iguales y coste medido | Bloqueado por NO-GO-R2/G0 abierto; no iniciado |
+| R2 evaluador | Sol high, escritor distinto: `scripts/lab/criterio-realismo.mts` y pruebas propias | Solo lectura; fixtures sintéticos pass/fail/unknown; requiere contrato R1 sellado | Casos de revisión disponibles; no son fixtures ejecutados ni evidencia empírica |
+| R3 línea base | Luna: runner/informe y recibos en espacio nuevo de evidencia | Depende de R1/R2, semillas nuevas verificadas y preregistro; seis semillas × 60 días, desconocidos explícitos | Luna ejecuta checks; réplicas son procesos compute, no agentes |
+| R4 campañas pendientes | Ownership separado por manifiestos/salidas P0.c y DESG-D60 | Preservar parciales; P0.c interrumpido: nueva época y cuatro controles desde tick 0; runner original requiere adaptación operacional aprobada | Sol high adversarial sobre procedencia; Luna coteja cobertura |
+| R6 escala / R7 técnico y UI | Worktrees y artefactos separados para territorio/natalidad, Store/servidor y experiencia | No usar el worktree sucio de pertenencia como espacio limpio; C21/C23 puertas distintas de biología | Asignación posterior; el trabajo de carta queda con Steven |
+
+**Capacidad observada, 03-10 ~19:00 Bogotá.** Es una muestra puntual, no una promesa de
+throughput ni una garantía de capacidad física sostenida.
+
+| Equipo | Estado observado | Uso sugerido sujeto a gates |
+|---|---|---|
+| Torre Kratos | Ryzen 9 9950X3D, 32 hilos, 125 GiB; 81 GiB disponibles, swap 159 GiB con 5,2 GiB usados; load 6,6, CPU 84,8% idle en lectura puntual; `/datos` 276 GiB libres (77% usado). RTX 5070 Ti 16 GiB (~3 usados), RTX 2060 6 GiB (~0,1 usado), driver 615.71.09 | Réplicas CPU y suites medidas; GPU solo render/benchmark. Público V13 activo (RSS ~1,5 GiB; cgroup ~5,3 GB) y Vitest activo: no tocar procesos ajenos. No se detectaron réplicas Atlas activas. |
+| Fedora portátil | SSH `fedora` funciona; i7-12700H, 20 hilos, 38 GiB RAM; 28 GiB disponibles, swap 8 GiB sin uso, load 0,43. Datos ext4 641 GiB, 440 usados/169 libres (73%); `/home` 206 GiB libres. Intel Iris Xe; no se ve NVIDIA | Puede alojar réplica(s) CPU tras medir. Sin tmux histórico ni réplicas detectadas; conservar checkouts sucios. |
+
+**Autorización de recursos del 03-10:** la portátil puede usar hasta el 100% de la CPU
+permitida por el host durante todo horario; la torre puede usar hasta el 80% de la CPU
+total durante todo horario (25,6 CPU equivalentes de 32). Son techos autorizados, no
+objetivos de saturación ni garantía de disponibilidad sostenida. La admisión debe contar
+CPU de tareas autorizadas junto con Vitest, público y todas las cargas ajenas para mantener
+el total bajo 80%. Ya no aplica una partición fija de CPU ni una
+ventana exclusiva de madrugada.
+
+| Host | Límite propuesto / autorización | Estado |
+|---|---|---|
+| Torre | CPUQuota 2400% (24 CPU) en slice propia; cpuset 0–31; MemoryMax inicial 32 GiB; preflight `MemAvailable` ≥40 GiB además del pedido. Supervisor para solo sus lotes si CPU global >80% durante tres muestras, si `MemAvailable` cae a 44 GiB o si `/datos` llega al suelo de 220 GiB libres. | Slice/guardrails base verificados. Pruebas mecánicas rechazaron `--cpu 25` antes de iniciar y confirmaron stop de lote propio (`exit 143`, cgroup vacío). Cap de output corregido; gate mecánico torre PASS. Primer intento P0.c run `p0c-recovery-20261003-v1` admitió supervisor 02:52:57.834, pero el hijo salió 1 antes del primer `Popen`: materializador `ROOT-GO` emitió `amdSha256` en vez de `amendmentSha256`. No se crearon procesos científicos, World, boots, ACK ni START files; 83 pins revisados sin alteración. Unidad muerta/cgroup vacío; reserva terminal persiste hasta reconciliación CLI. START2 validado el 2026-10-04 03:01:09.870 UTC: recibos de cuatro boots/ACK y STARTFILES con SHA pasan; modelos 9501–9504 vivos en Fedora bajo FULL 20 CPU/24 GiB/output 40 GiB. ROOT-GO SHA `b18105d3773c36a6c7ac34b21e2cfbbfb8888b6495dca18040c87e18a31fb863`. Esto valida el inicio de época, no resultados ni aceptación científica; C+B, 4×60 y 240×14 siguen pendientes. |
+| Fedora | 20 CPU, 24 GiB RAM y output 40 GiB bajo perfil FULL aplicado; admitir solo si `MemAvailable` ≥ solicitud+4 GiB y disco libre ≥140 GiB. Backup privado de configuración propia. | Luna live confirmó PASS mecánico del supervisor SHA `f8e62e…e6907` y reporter `b610…e330`. Root aprobó el segundo inicio operacional condicionado; START2 sí tiene inicio operativo validado (2026-10-04 03:01:09.870 UTC): cuatro boots/ACK y hashes STARTFILES PASS, modelos 9501–9504 vivos. No implica PASS científico; los cierres C+B, 4×60 y 240×14 siguen pendientes. El primer intento murió antes de `Popen`; no aceptación biológica. |
+
+La torre tiene slice agregada y freno de CPU global que solo detiene sus trabajos; la revisión
+independiente confirma el rechazo por exceso de CPU y el stop propio con `exit 143` y cgroup vacío.
+El cap de salida de torre está corregido y su gate mecánico pasó. Fedora FULL también pasó revisión mecánica live; estos PASS de recursos no sustituyen autorización científica. Aumentar
+réplicas de 1→2→4 en torre y 1→2 en Fedora solo tras corregir gates y revisar muestras de exit,
+RSS, p95/coste, swap nuevo, PSI, disco y carga ajena.
+Ejecutar una suite por equipo a la vez; esperar cierres limpios antes de cambiar concurrencia.
+
+Presupuesto de almacenamiento propuesto: ≤60 GiB nuevo en `/datos`, manteniendo uso
+≤85%; en Fedora ≤20 GiB por campaña y ≥100 GiB libres. `/tmp` de torre es tmpfs que
+comparte RAM: no alojar allí bases grandes. Vigilar también `/mnt/Data2` (611 GiB libres).
+No borrar almacenes o procesos ajenos para recuperar capacidad.
+
+**Cuotas y rutas, consulta del 03-10.** La cuenta Codex principal `b5f…` marca 58%
+disponible en ventana semanal en la app; la sesión Codex de Fedora usa el mismo ID, así
+que no es cuota independiente. Los perfiles `secundaria` y `jhon-existente` comparten
+la cuenta `561…`, distinta de principal/flota/Fedora; smoke de Luna
+(`codex/gpt-6-luna`, texto, low) completó en 4,9 s,
+job `761d08498cd34e4cab17010721375bf3`. Su cuota sigue desconocida: el sondeo ai-usage
+está desactivado y no hay lecturas recientes. No copiar credenciales ni cambiar perfiles.
+Sol high está disponible en Codex 6.1; para R1 se propone perfil secundario y para R2
+principal, con cuenta/proveedor/job/cwd anotados en cada recibo. Gemini indica 76% en
+ventana de 5 h y 82% semanal; MiniMax 67% en 5 h y 22% semanal: reservarlos para trabajo
+que lo requiera, sin usarlos en este inventario. El catálogo anuncia `claude/opus`, pero no
+confirma que sea la versión exacta Opus 5.5. Mantener Sol high como revisor difícil hasta
+verificar esa versión; no sustituir proveedor o modelo silenciosamente.
+
+El MCP `fedora-offload` está configurado en `/home/stev/.codex/config.toml` para SSH
+`fedora` y `/home/stev/.local/bin/cloud-mcp-fedora`, pero hoy sus tools no están expuestos;
+el alias `fedora-local` también apunta a remoto. Para usar ese puente se requiere recarga
+segura de herramientas/sesión y verificación de catálogo antes de crear jobs. SSH directo
+no equivale a MCP expuesto. El ejecutable existe y respondió a `initialize` y `tools/list`
+por stdio (7 herramientas): transporte probado, exposición en la app pendiente. El wrapper
+usa CODEX_HOME principal `b5f…`; el catálogo confirma las rutas `codex/gpt-6-luna`,
+`codex/gpt-6.1-sol` y `claude/opus` (versión 5.5 sin confirmar). El alias `portatil` apunta
+a `/home/stev/.codex` y al mismo account_id `b5f…` de principal. No se lanzaron modelos
+remotos. No instalar ni cambiar configuración.
+
+**Estado al 04-10:** R0 recuperó la matriz de campañas, aún sin aceptación. R1 se reintentó en
+worktree preparado, rama `codex/criterios-realismo-20261003` (HEAD `bb483260b2489fe62b113d620e5f56e5f3676dbc`): job `8de35915a3eb42259fb6fdbb79434ebd`, Sol 6.1 high, cuenta secundaria, terminó succeeded a las 01:37:43 UTC. Contrato, spec, plan, schemas v1 y 26 tareas fueron entregados, pendientes de revisión y sin aprobación. El handoff documental se copió fielmente a `/datos/tmp-atlas-lab/orquestacion-20261003/criterios-autor/ENTREGA.md` (SHA-256 fuente `5ddf7ef2e7c09b73f11c2d51de9e1087fa864fa698ab15d23f9f58e980b20bb4`). Revisión Sol principal R1-v2 job MCP `47510e03921d4091a2fac76ead47299f` terminó NO-GO-R2 por dos bloqueos; G1 semántica sigue pendiente. Luna validó tres schemas, 27 estructuras, cuatro parsers y 194 punteros, pero cuatro casos semánticos requieren engine. Corrección secundaria job MCP `96bd6836a13d47daa0286bcd75d86f05` terminó FAILED por timeout 900 s (02:52:42 UTC), sin auth/cuota. `DIAGNOSTICO-TIMEOUT-R1-v3.md` y snapshot privado de 88 archivos quedan preservados; 64 rutas de índice existen, con 7/54 hashes de manifest coincidentes y 47 stale. Nuevo job MCP `2b601dd3bf462f9d321b3541853be6`, misma cuenta secundaria/Sol high, timeout 1500 s, limitado a terminar dos fixes y recalcular integridad. IDs `d1ab5…`/`96bd…`/`2b601…` son jobs MCP, no commits. R1 formal v3 + peer independientes pendientes; R2 NO-GO. No se corrieron suites, builds ni commits. El job anterior `5f9fbf0fb73944bc87ce91caa5c6c204` fue cancelado por el orquestador tras 20 min sin artefacto/worktree, no por auth/cuota. El observador Sol 6.1 high principal terminó el job `77fb33129aed47d992d200dfbfc7b2b8` sin motor ni ciencia; por filesystem de solo lectura no pudo escribir en su cwd. Recuperé fielmente su texto y metadata en `/datos/tmp-atlas-lab/orquestacion-20261003/revision-criterios/VIABILIDAD-OBSERVADOR.md` (SHA-256 `f925390b238bdc34a23e426dfb6ebd016c3aa1ad4bf94a6d6e25be8edc5491be`). Es viabilidad parcial, no aprobación R1. R1 usa `specs/003-criterios-realismo/`; su archivo de criterios sigue siendo borrador no leído/evaluado. Sol preparó para P0.c una nueva época con 504 inputs de SHA exactos y salida vacía; no se lanzó ciencia. El peer P0.c-v2 encontró incoherencia entre START pin AMD v1 y launcher AMD v2 con check post-spawn, además de receta v2 montando v1 visible. Sol completó P0.c op-v3 sin ejecutar ciencia: peer revalidó 83/83 manifest v3, 33/33 históricos, 37 checks read-only y preservación de 504 records; 27 checks de transporte se respaldan por evidencia registrada, no reejecución; dos pruebas con procesos hijos no fueron repetidas por el peer. Job MCP `af6489381f8248e6867b826a893e9f6b` terminó con GO técnico condicionado. La cápsula aislada restauró el OpenSSL 3.5.8 firmado. Fedora perfil FULL pasó gate mecánico live; el panel 4×60 no está lanzado. Torre pasó gate mecánico; cap de salida corregido. La identidad R0 dio PASS fresco: comparador original 1926, cross-digest 1284, inner 6, legacy rows 69 y eventos exactos 19017/19018 × 320 × 3; probe técnico 180 s con pico 302.5 MB, no estimación de 60 días. El primer ROOT-GO falló por campo mal nombrado antes del primer Popen; el segundo intento fue aprobado a partir del ejemplo sellado y cinco aserciones AST PASS. START2 fue validado a las 2026-10-04 03:01:09.870 UTC; sus recibos ROOT-LAUNCH y LIVE-STARTUP-AUDIT confirman cuatro boots/ACK y hashes STARTFILES correctos, con modelos 9501–9504 vivos. Es inicio de época, no evidencia de resultados ni aceptación: faltan los cierres C+B, 4×60 y 240×14. En el intento1 la reserva terminal sigue en ledger hasta la reconciliación CLI. Receta AMD2/probe de identidad precede el panel de cuatro; perfil FULL Fedora 24 GiB y output 40 GiB aplicado; antes de cada start exige admisión fresca ≥28 GiB disponibles y ≥140 GiB libres en disco. Fedora perfil FULL aplicado: 20 CPU, 24 GiB y output 40 GiB, admisión RAM del host ≥pedido+4 GiB, disco libre ≥140 GiB (100 reserva +40 solicitud) y backup privado de configuración propia; Luna confirmó PASS mecánico live del supervisor (SHA `f8e62e…e6907`) y reporter (`b610…e330`). Torre PASS mecánico. El panel científico 4×60 sigue sin lanzar. Cuota reportada 02:36 UTC: principal 55% semanal disponible; secundaria desconocida. Versión exacta de Opus 5.5 pendiente, no sustituir Sol sin verificar ruta.
+Antes de cada trabajo se consultan rutas/cuotas de las cuentas elegidas y se revisan
+leases/capacidad; si se usa MCP Fedora, comprobar exposición en la app. R1 y R2 pueden
+avanzar sin esperar C8: el evaluador C1–C8 permanece congelado y el cierre C8 por tendencia sigue su
+propia evidencia. Réplicas son procesos de cómputo, no agentes API/cloud; su fan-out exige
+mediciones propias. Preservar `publico-v13`, la carta y todos los checkouts ajenos. El estado
+por job, cuenta, máquina, ownership y gate se mantiene en
+`/datos/tmp-atlas-lab/orquestacion-20261003/ESTADO-ORQUESTACION.md`.
+
+### Secuencia de trabajo y entregables comprobables
+
+1. **R0 — Cerrar el inventario de recuperación.** Ownership: operación/evidencia, sin tocar leyes.
+   Leer manifiestos y recibos completos en ambas máquinas, registrar SHA, cobertura, época,
+   cierre real y motivo de interrupción cuando pueda probarse. Marcar cada brazo como completo
+   válido, interrumpido o no iniciado. Verificar la campaña de sequía y sus cierres en
+   `auditoria-muse/`; la ausencia de FIN no basta para declarar fracaso biológico.
+   **Puerta:** inventario de las 36 trayectorias DESG, los cuatro controles P0.c y los ensayos
+   de escala, sin estados `running` atribuidos a procesos ausentes. Registrar en EVIDENCIA
+   sólo hechos verificables y conservar originales. Después corregir las notas atrasadas de
+   ESTADO/AGENTS sobre la decisión C8 y T100, sin duplicar el contrato publicado.
+
+2. **R1 — Especificar C9–C24 y el método de aceptación.** Ownership:
+   `docs/CRITERIOS-REALISMO.md`, `docs/REGLAS.md` sólo para referencias de fórmulas;
+   tareas propias de una nueva especificación SDD. Convertir el objetivo 12 en definiciones
+   de campo/fórmula/ventana/denominador y resultados desconocidos. Identificar los umbrales
+   heredados y los provisionales a calibrar con controles, nunca con candidatas.
+   **Puerta:** cada frente de GOAL tiene criterio, prueba y responsable; C21–C23 son puertas
+   separadas de biología y C24 conserva método y etapa posterior de entrenamiento.
+   Esto puede avanzar en paralelo a R0 y no depende del resultado de P0.c.
+
+3. **R2 — Instrumentos y evaluador sin alterar el mundo.** Ownership de observadores:
+   `scripts/lab/replica.ts`, `scripts/lab/instrumentos.ts` y el observador material recuperado
+   de `sprint/ciclo-material-20261001`, tras revisar su puerta de coste todavía incumplida.
+   Ownership separado del evaluador: `scripts/lab/criterio-realismo.mts` y sus pruebas.
+   Reutilizar registros útiles de obras, balances, mortalidad, enseñanza y trayectos; no integrar
+   todo el código de una rama porque contenga un instrumento útil.
+   **Puerta:** seis semillas × 1200 pasos con digestos idénticos con/sin instrumento, cobertura
+   de casos sintéticos aprobados/fallados/desconocidos, typecheck y suite completos, y coste
+   integral observado. Un wrapper o fixture defectuoso se corrige conservando el fallo original.
+
+4. **R3 — Línea base C1–C24.** Ownership: laboratorio y evidencia. Tras sellar R1/R2,
+   usar seis semillas nuevas verificadas sin uso, 60 días completos cada una, como pide
+   el objetivo 12. Conservar tablas por semilla y agregación explícita; las puertas técnicas
+   y personales tienen ensayos propios, no columnas biológicas rellenadas por intuición.
+   **Puerta:** línea base reproducible con SHA/parámetros/recibos y causas de fallo o
+   desconocimiento. Identifica qué cambios son necesarios; no presupone 16 leyes nuevas.
+
+5. **R4 — Resolver las campañas pendientes bajo sus contratos.** Puede solaparse con R1/R2
+   si hay recursos y ownership distintos. Para P0.c, el reinicio ya está confirmado: usar
+   una nueva época aislada y repetir exactamente los cuatro controles desde tick 0; conservar calibración,
+   método, ventanas y cotejo de campos. Cerrar diagnóstico de viajes familia/hogar.
+   No relanzar el runner original hardcoded sin adaptación operacional aprobada. **Puerta P0.c:**
+   sólo el resultado preregistrado habilita el cribado de ley 2′; no lanzarlo
+   por la calibración positiva. Para DESG-D60, revisar primero recibos y fuentes de las
+   trayectorias de 60 días, conservar las parciales y completar/repetir únicamente lo que
+   autorice el contrato operacional. **Puerta DESG:** P1–P3, K1 y seguridad SEGURO;
+   9 directorios completos no sustituyen 12 ternas ni la validación del placebo.
+
+6. **R5 — Cierre material y biológico, una hipótesis a la vez.** Prioridad C9–C14:
+   uso y utilidad de obras, desgaste/reparación, reposición, balances, mortalidad y transmisión.
+   Después C8/C15–C18: diferenciación útil, invención, migración, roles y conflictos.
+   Ownership por función/módulo y tareas SDD disjuntas, manteniendo serial cualquier edición
+   compartida de `src/world/index.ts`, `society.ts` o `inventions.ts`.
+   **Puerta de cada ley:** predicción y refutación selladas antes de datos, controles/ablaciones,
+   coste físico explícito, ausencia de daño según método vigente y revisión independiente.
+   No declarar resuelto C8 por separación entre comunidades o por cambio del índice.
+
+7. **R6 — Territorio, natalidad y escala.** C19/C20 requieren continuidad fuera de cámara
+   y una alternativa local al cupo global; C22 requiere coste completo medido. Reabrir tareas
+   002 según el perfil actual, con T100 funcionalmente cerrada y T103/T104 reescritas;
+   conservar T110 abierto hasta satisfacer su gate. Ensayar pertenencia sólo tras reparar y
+   validar el lanzador, sin reutilizar como éxito los experimentos rechazados.
+   **Puerta:** frenos atribuibles, paridad bit a bit, conservación territorial y mediciones
+   equivalentes de CPU/GPU/multinúcleo. Adoptar aceleración únicamente si mejora el coste
+   completo; kernel rápido por sí solo no acredita utilidad. No prometer una fecha ni escala
+   ilimitada sin medir tiempos/disco y el cuello de botella real.
+
+8. **R7 — Durabilidad y experiencia.** Carril técnico C21: pruebas de fallos en copias
+   aisladas sobre Store/servidor/red y clientes con cámaras independientes; cotejar también
+   historia, identidades, parentesco, autoría y recibos. Carril C23: tareas concretas de
+   explorar, seguir, dirigir, devolver autonomía e inspeccionar causas con teclado y teléfono
+   físico. La carta y recuerdos reales se revisan con Steven, sin edición por otros agentes.
+   **Puerta:** recuperación exacta del último commit durable, sin divergencias silenciosas,
+   causas legibles, sin bloqueos críticos y revisión personal realizada. Puede prepararse
+   en paralelo a R5/R6; su aceptación final usa el mismo candidato integrado.
+
+9. **R8 — Entrenamiento posterior y aceptación conjunta.** Aplicar el método C24 desde R1.
+   Cuando supervivencia, utilidad y legibilidad estén afinadas, contrastar selector actual,
+   neutral y aprendido con semillas reservadas, aprendizaje on/off y presupuesto comparable;
+   no premiar construcción vacía ni usar LLM por tick. Definir ese experimento antes de
+   entrenar. Finalmente revalidar C1–C24 sobre una versión integrada con fuentes congeladas,
+   typecheck, suite, build en worktree y pruebas técnicas/personales de la misma versión.
+   **Puerta final:** matriz de aceptación completa, ningún desconocido contado como aprobado,
+   evidencia de costes, utilidad, recambios, continuidad, transmisión, escala y carta revisada.
+   La publicación es una acción posterior con respaldo y contrato; este plan no la ejecuta.
+
+El calendario se estimará después de R0–R3: hoy no hay medición integral que permita estimar
+el tiempo de cierre. El primer hito concreto es **recuperación válida + criterios ejecutables +
+línea base**, con R1/R2 desbloqueados de la investigación de C8.
+
+### Registro G0 y preparación G1 — 4 de octubre de 2026
+
+PLAN fue recuperado por reproducción documental determinista; informe `/datos/tmp-atlas-lab/orquestacion-20261003/recuperacion-plan/REPARACION.md`. El registro actual de R1 es **GO-G0-R2 — CONTRATO**: ambos bloqueos v2 resueltos, peer independiente `fc33b542bee1494abe4d7f089f5c66e1` y formal Luna v3 sobre los mismos pins. Dictamen `/datos/tmp-atlas-lab/orquestacion-20261003/revision-criterios/REVISION-R1-v3.md` SHA `d085aa80eb01573b4a2f913403f7b9191627433d99e70e5d5397b773a50815d2`; decisión root `ROOT-G0-DECISION-v3.md` SHA `658605e0d5f52d626def8169cf0e39f3d6477dbbbcb7c0573e7f85a0137b410c`.
+
+R1-FROZEN-v3 preserva los 87 archivos revisados más fingerprint fuera del worktree; manifest de archivo SHA `faaac25fb0ace210103eb5a19f12b4be8a0fac009b4635a6bb9a9a880714ef54`. Los cambios vivos de tasks/checklist/ownership conservan ese vínculo y no reescriben el manifiesto original. T001–T003 cerradas documentalmente; G1 T004→T005→T006 autorizado al integrador principal Sol 6.1 high. Observador principal y evaluador secundaria (cuota desconocida) quedan reservados **hasta PASS G1**, sin arranque ni fallback. Runtime privado disponible; root autorizó Ajv2020/jsonc-parser sólo como devDependencies exactas del worktree para parser/schema estándar. T004–T006 aún pendientes de implementación/pruebas y suite capped torre 16CPU/16GiB/output8GiB/log128MiB con TMPDIR propio.
+
+G0 no acepta C9–C24 ni biología, no ejecuta 48+8 diseños, no concede consentimiento personal ni training. P0.c START2 sigue su época sellada e independiente; la recuperación de PLAN y G1 no alteran sus pins, recursos ni resultados.
+
+## Balance histórico del 23 de septiembre de 2026
+
 Lo publicado (commit, reglas, protocolo, SQLite y mundo) está en [docs/ESTADO.md](docs/ESTADO.md),
 la única fuente de ese estado; este plan no lo repite. Resumen del 23 de septiembre de 2026 (~17:30):
 

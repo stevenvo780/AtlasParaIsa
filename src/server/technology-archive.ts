@@ -166,6 +166,37 @@ const sameDatabase = (a: ArchiveStamp, b: ArchiveStamp) => a.dataVersion === b.d
 const sameStamp = (a: ArchiveStamp, b: ArchiveStamp) => sameDatabase(a, b) && a.totalChanges === b.totalChanges && a.transaction === b.transaction;
 const copySummary = (value: TechnologyDefinitionSummary): TechnologyDefinitionSummary => ({ ...value, functions: [...value.functions] });
 
+/** Índice compacto en memoria de definiciones ya verificadas durante un barrido completo desde el origen
+ * (A2, plan de estabilidad): evita re-leer y re-decodificar (SHA-256 + JSON.parse) cada padre en
+ * `definitionParents` y cada definición al recorrer `technology_stats`. Usa arreglos tipados indexados por
+ * serie 1..N (16 B/receta, sin presión GC, enteros seguros exactos hasta MAX_SAFE_INTEGER) y se libera al
+ * terminar el barrido. */
+class VerifiedDefinitionIndex {
+  count = 0;
+  private ticks = new Float64Array(256);
+  private generations = new Float64Array(256);
+  push(serial: number, atTick: number, generation: number): void {
+    if (serial !== this.count + 1) fail('definition sequence');
+    if (serial >= this.ticks.length) {
+      const size = this.ticks.length * 2;
+      const nextTicks = new Float64Array(size); nextTicks.set(this.ticks); this.ticks = nextTicks;
+      const nextGenerations = new Float64Array(size); nextGenerations.set(this.generations); this.generations = nextGenerations;
+    }
+    this.ticks[serial] = atTick;
+    this.generations[serial] = generation;
+    this.count = serial;
+  }
+  get(id: string): { tick: number; generation: number } | null {
+    const serial = serialOf(id, 'recipe');
+    if (serial === null || serial < 1 || serial > this.count) return null;
+    return { tick: this.ticks[serial]!, generation: this.generations[serial]! };
+  }
+  tickOf(id: string): number {
+    const serial = serialOf(id, 'recipe');
+    return serial !== null && serial >= 1 && serial <= this.count ? this.ticks[serial]! : -1;
+  }
+}
+
 /** Persistence primitives only. The host owns transactions, pending queues, checkpoints,
  * cache eviction and causal analysis. Definition IDs form a contiguous allocation prefix.
  * Execution serials may have historical gaps; their completeness must be checked against
@@ -175,6 +206,7 @@ export class TechnologyArchive {
   private verifiedStamp: ArchiveStamp | null = null;
   private definitionProof: DefinitionProof | null = null;
   private summaryProof: SummaryProof | null = null;
+  private compactedStatsThrough: number | null = null;
   private hostTransaction = false;
   private readDepth = 0;
   /** A fixed set of SQL programs, never cached rows or validation results. Each get
@@ -198,7 +230,10 @@ export class TechnologyArchive {
       tempSchemaCookie: (this.readStatement('PRAGMA temp.schema_version').get() as { schema_version: number }).schema_version,
       transaction: this.db.isTransaction };
   }
-  private clearProofs(): void { this.verifiedStamp = null; this.definitionProof = null; this.summaryProof = null; this.referenceMemo = null; }
+  private clearProofs(): void {
+    this.verifiedStamp = null; this.definitionProof = null; this.summaryProof = null;
+    this.referenceMemo = null; this.compactedStatsThrough = null;
+  }
   invalidateVerification(): void { this.clearProofs(); this.hostTransaction = false; this.epochMemo = null; }
   /** Sello de la base para la memoria de lecturas del anfitrión (Store, sprint noche-perf 2026-09-22):
    * el mismo `stamp()` que invalida las pruebas de este archivo, serializado; `null` dentro de una
@@ -306,7 +341,28 @@ export class TechnologyArchive {
       CREATE TABLE IF NOT EXISTS technology_origin (
       id INTEGER PRIMARY KEY NOT NULL CHECK(id=1), body TEXT NOT NULL, digest TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS technology_definitions_tick ON technology_definitions(tick);
+      CREATE INDEX IF NOT EXISTS technology_definitions_order ON technology_definitions(length(id), id);
+      CREATE INDEX IF NOT EXISTS technology_stats_tick ON technology_stats(tick);
       CREATE INDEX IF NOT EXISTS technology_executions_tick ON technology_executions(tick);`);
+    this.assertSchema();
+  }
+
+  hasPerformanceIndexes(): boolean {
+    const row = this.db.prepare(
+      "SELECT COUNT(*) AS n FROM main.sqlite_schema WHERE type='index' AND name IN ('technology_definitions_order','technology_stats_tick')"
+    ).get() as { n: number };
+    return row.n === 2;
+  }
+
+  /** Crea los índices no únicos de rendimiento (A1/A2) en bases existentes schemaVersion >= 4 abiertas en modo
+   * escritura. Requiere transacción anfitriona; nunca se invoca en conexiones readOnly. */
+  ensurePerformanceIndexes(): void {
+    this.transaction();
+    if (this.hasPerformanceIndexes()) return;
+    this.epochMemo = null;
+    this.clearProofs();
+    this.db.exec(`CREATE INDEX IF NOT EXISTS technology_definitions_order ON technology_definitions(length(id), id);
+      CREATE INDEX IF NOT EXISTS technology_stats_tick ON technology_stats(tick);`);
     this.assertSchema();
   }
 
@@ -365,13 +421,21 @@ export class TechnologyArchive {
     if (value.id !== row.id || value.tick !== row.tick || value.signature !== row.signature) fail('definition key or tick');
     return value;
   }
-  private definitionParents(value: TechnologyDefinition): void {
+  private definitionParents(value: TechnologyDefinition, verified?: VerifiedDefinitionIndex): void {
     let generation = 0;
+    const valueSerial = serialOf(value.id, 'recipe')!;
     for (const id of value.parents) {
-      const row = this.definitionRow(id); if (!row) fail('missing definition parent');
-      const parent = this.definition(row);
-      if (parent.tick > value.tick || parent.generation >= value.generation || serialOf(parent.id, 'recipe')! >= serialOf(value.id, 'recipe')!) fail('definition parent chronology');
-      generation = Math.max(generation, parent.generation);
+      const known = verified?.get(id);
+      if (known) {
+        if (known.tick > value.tick || known.generation >= value.generation || serialOf(id, 'recipe')! >= valueSerial) fail('definition parent chronology');
+        generation = Math.max(generation, known.generation);
+      } else {
+        const row = this.definitionRow(id); if (!row) fail('missing definition parent');
+        const parent = this.definition(row);
+        if (parent.tick > value.tick || parent.generation >= value.generation || serialOf(parent.id, 'recipe')! >= valueSerial) fail('definition parent chronology');
+        if (verified) fail('definition parent chronology');
+        generation = Math.max(generation, parent.generation);
+      }
     }
     if (value.generation !== generation + 1) fail('definition generation');
   }
@@ -383,7 +447,8 @@ export class TechnologyArchive {
     if (reportsFunctionNovelty !== !seen) fail('definition novelty');
     return code;
   }
-  private scanDefinitions(asOfTick: number, inspect?: (definition: TechnologyDefinition) => void, opening?: DefinitionProof): DefinitionProof {
+  private scanDefinitions(asOfTick: number, inspect?: (definition: TechnologyDefinition) => void, opening?: DefinitionProof,
+    verifiedDefs?: VerifiedDefinitionIndex): DefinitionProof {
     if (!opening) {
       this.assertSchema();
       // SQLite INTEGER affinity is not a STRICT-table guarantee. An undatable row cannot
@@ -396,15 +461,20 @@ export class TechnologyArchive {
     const proof: DefinitionProof = opening ? { ...opening, throughTick: asOfTick, functions: [...opening.functions] }
       : { throughTick: asOfTick, recipes: 0, maxGeneration: 0, lastTick: -1,
         functionalDiversity: 0, functions: Array<number>(TECHNOLOGY_FUNCTION_WORDS).fill(0) };
-    // Canonical IDs sort numerically without retaining any identity set or ancestor stack.
-    // Each parent precedes its child, so checking every local edge proves the entire prefix DAG.
+    const verified = opening ? undefined : (verifiedDefs ?? new VerifiedDefinitionIndex());
+    // Canonical IDs sort numerically without retaining any ancestor stack.
+    // `+tick<=?` prevents SQLite from choosing `technology_definitions_tick` + `TEMP B-TREE`
+    // when `technology_definitions_order` is present, while still falling back safely on old
+    // read-only databases without that index.
     const rows = opening
       ? this.db.prepare('SELECT id,tick,signature,body,digest FROM technology_definitions WHERE tick>? AND tick<=? ORDER BY length(id),id').iterate(opening.throughTick, asOfTick)
-      : this.db.prepare('SELECT id,tick,signature,body,digest FROM technology_definitions WHERE tick<=? ORDER BY length(id),id').iterate(asOfTick);
+      : this.db.prepare('SELECT id,tick,signature,body,digest FROM technology_definitions WHERE +tick<=? ORDER BY length(id),id').iterate(asOfTick);
     for (const row of rows as Iterable<DefinitionRow>) {
-      const value = this.definition(row); this.definitionParents(value);
-      if (serialOf(value.id, 'recipe') !== proof.recipes + 1) fail('definition sequence');
+      const value = this.definition(row); this.definitionParents(value, verified);
+      const serial = serialOf(value.id, 'recipe');
+      if (serial !== proof.recipes + 1) fail('definition sequence');
       if (value.tick < proof.lastTick) fail('definition chronology');
+      verified?.push(serial, value.tick, value.generation);
       proof.recipes++; proof.lastTick = value.tick; proof.maxGeneration = Math.max(proof.maxGeneration, value.generation);
       const code = this.definitionFunction(value, proof.functions), word = code >>> 5;
       proof.functions[word] = (proof.functions[word]! | (1 << (code & 31))) >>> 0;
@@ -460,12 +530,15 @@ export class TechnologyArchive {
     });
   }
 
-  private stats(row: StatsRow, verifiedPrefix = false): TechnologyStatsRecord {
+  private stats(row: StatsRow, verifiedPrefix: boolean | VerifiedDefinitionIndex = false): TechnologyStatsRecord {
     const value = decode(row);
     if (!keys(value, ['recipeId', 'tick', 'uses', 'utility', 'manufactured']) || value.recipeId !== row.recipeId || value.tick !== row.tick) fail('statistics key or tick');
     const stats = { uses: value.uses, utility: value.utility, manufactured: value.manufactured }; assertStats(stats); tick(row.tick);
     if (!recipeId(row.recipeId)) fail('statistics definition reference');
-    if (verifiedPrefix) {
+    if (verifiedPrefix instanceof VerifiedDefinitionIndex) {
+      const defTick = verifiedPrefix.tickOf(row.recipeId);
+      if (defTick < 0 || defTick > row.tick) fail('statistics definition reference');
+    } else if (verifiedPrefix) {
       const definition = this.definitionRow(row.recipeId);
       if (!definition || this.definition(definition).tick > row.tick) fail('statistics definition reference');
     } else if (!this.getDefinition(row.recipeId, row.tick)) fail('statistics definition reference');
@@ -495,27 +568,34 @@ export class TechnologyArchive {
     return this.read(() => {
       const cached = this.summaryProof;
       if (!inspect && cached && asOfTick >= cached.fromTick && asOfTick <= cached.throughTick) return copySummary(cached.value);
-      const proof = this.scanDefinitions(asOfTick, inspect);
+      const verified = new VerifiedDefinitionIndex();
+      const proof = this.scanDefinitions(asOfTick, inspect, undefined, verified);
       const result: TechnologyDefinitionSummary = { recipes: proof.recipes, maxGeneration: proof.maxGeneration,
         manufactured: 0, uses: 0, utility: 0, functionalDiversity: proof.functionalDiversity, functions: [...proof.functions] };
       if (this.db.prepare("SELECT 1 FROM technology_stats WHERE typeof(tick)<>'integer' OR tick<0 OR tick>? LIMIT 1").get(MAX_TICK)) fail('statistics tick');
-      let previous: TechnologyStatsRecord | undefined, covered = 0;
+      let previous: TechnologyStatsRecord | undefined, covered = 0, earliestSupersededTick = Number.POSITIVE_INFINITY;
       const latest = (): void => {
         if (!previous) return;
         covered++; result.manufactured += previous.manufactured; result.uses += previous.uses; result.utility += previous.utility;
         if (!integer(result.manufactured) || !integer(result.uses) || !finite(result.utility)) fail('summary overflow');
       };
       for (const row of this.db.prepare('SELECT recipeId,tick,body,digest FROM technology_stats WHERE tick<=? ORDER BY recipeId,tick').iterate(asOfTick) as Iterable<StatsRow>) {
-        const value = this.stats(row, true);
-        if (previous?.recipeId === value.recipeId) { if (!monotone(previous, value)) fail('statistics regression'); }
-        else latest();
+        const value = this.stats(row, verified);
+        if (previous?.recipeId === value.recipeId) {
+          if (!monotone(previous, value)) fail('statistics regression');
+          if (value.tick < earliestSupersededTick) earliestSupersededTick = value.tick;
+        } else latest();
         previous = value;
       }
       latest();
       if (covered !== proof.recipes) fail('summary statistics coverage');
       const future = this.db.prepare('SELECT MIN(tick) AS tick FROM (SELECT MIN(tick) AS tick FROM technology_definitions WHERE tick>? UNION ALL SELECT MIN(tick) AS tick FROM technology_stats WHERE tick>?)').get(asOfTick, asOfTick) as { tick: number | null };
       const throughTick = future.tick === null ? MAX_TICK : future.tick - 1;
-      if (this.retainProofs()) this.summaryProof = { fromTick: asOfTick, throughTick, value: result };
+      if (this.retainProofs()) {
+        this.summaryProof = { fromTick: asOfTick, throughTick, value: result };
+        const compacted = earliestSupersededTick === Number.POSITIVE_INFINITY ? asOfTick : earliestSupersededTick - 1;
+        if (this.compactedStatsThrough === null || compacted > this.compactedStatsThrough) this.compactedStatsThrough = compacted;
+      }
       return copySummary(result);
     });
   }
@@ -531,6 +611,9 @@ export class TechnologyArchive {
     if (before && !monotone(before, value) || after && !monotone(value, this.stats(after))) fail('statistics regression');
     const result = this.db.prepare('INSERT INTO technology_stats VALUES (?,?,?,?)').run(recipe, atTick, body, checksum(body));
     this.ownMutation(token, Number(result.changes), () => {
+      if (this.compactedStatsThrough !== null && atTick <= this.compactedStatsThrough) {
+        this.compactedStatsThrough = atTick > 0 ? atTick - 1 : -1;
+      }
       const cached = this.summaryProof;
       if (!cached || cached.throughTick !== MAX_TICK || atTick < cached.fromTick || after) { this.summaryProof = null; return; }
       const next = { ...cached.value, uses: cached.value.uses + (value.uses - (before?.uses ?? 0)),
@@ -539,6 +622,99 @@ export class TechnologyArchive {
       if (!integer(next.uses) || !integer(next.manufactured) || !finite(next.utility)) { this.summaryProof = null; return; }
       this.summaryProof = { fromTick: atTick, throughTick: MAX_TICK, value: next };
     });
+  }
+
+  /**
+   * Compactación incremental de `technology_stats` (A1, plan de estabilidad): dentro de una transacción
+   * anfitriona borra como mucho `maxRows` filas estrictamente superadas cuya receta ya tiene otra fila más
+   * reciente `<= beforeTick`. Conserva SIEMPRE la última fila `<= beforeTick` de cada receta y todas las
+   * filas con `tick > beforeTick`, y valida checksum, forma, referencia a definición y monotonicidad antes
+   * de borrar cualquier fila (fail-closed: nunca silencia corrupción).
+   */
+  compactStats(beforeTick: number, maxRows: number, maxScan = Number.POSITIVE_INFINITY): number {
+    this.transaction();
+    tick(beforeTick);
+    if (!integer(maxRows) || maxRows < 1 || maxRows > 1_000_000) fail('compact limit');
+    if (maxScan !== Number.POSITIVE_INFINITY && (!integer(maxScan) || maxScan < 1)) fail('compact scan limit');
+    const before = this.synchronize();
+    if (beforeTick <= 0) return 0;
+    if (this.compactedStatsThrough !== null && beforeTick <= this.compactedStatsThrough) return 0;
+    if (this.compactedStatsThrough === null) {
+      this.assertSchema();
+      if (this.db.prepare("SELECT 1 FROM technology_stats WHERE typeof(tick)<>'integer' OR tick<0 OR tick>? LIMIT 1").get(MAX_TICK))
+        fail('statistics tick');
+    }
+    const startAfter = this.compactedStatsThrough ?? -1;
+    const hasOlder = this.readStatement('SELECT 1 FROM technology_stats WHERE recipeId=? AND tick<? LIMIT 1');
+    const historyForRecipe = this.readStatement('SELECT recipeId,tick,body,digest FROM technology_stats WHERE recipeId=? AND tick<=? ORDER BY tick ASC');
+    const queued = new Set<string>();
+    const toDelete: { recipeId: string; tick: number }[] = [];
+    const defTicks = new Map<string, number>();
+    let definitionsVerified = false;
+    const verifyRow = (row: StatsRow): TechnologyStatsRecord => {
+      if (!definitionsVerified) { this.verifyDefinitionsThrough(beforeTick); definitionsVerified = true; }
+      const value = decode(row);
+      if (!keys(value, ['recipeId', 'tick', 'uses', 'utility', 'manufactured']) || value.recipeId !== row.recipeId || value.tick !== row.tick)
+        fail('statistics key or tick');
+      const current = { uses: value.uses, utility: value.utility, manufactured: value.manufactured };
+      assertStats(current); tick(row.tick);
+      if (!recipeId(row.recipeId)) fail('statistics definition reference');
+      let defTick = defTicks.get(row.recipeId);
+      if (defTick === undefined) {
+        const defRow = this.definitionRow(row.recipeId);
+        if (!defRow) fail('statistics definition reference');
+        defTick = this.definition(defRow).tick;
+        defTicks.set(row.recipeId, defTick);
+      }
+      if (defTick > row.tick) fail('statistics definition reference');
+      return { recipeId: row.recipeId, tick: row.tick, ...current };
+    };
+
+    let scanned = 0, lastCompletedTick = startAfter, currentTick = startAfter, stoppedEarly = false;
+    const cursor = this.db.prepare('SELECT recipeId,tick FROM technology_stats WHERE tick>? AND tick<=? ORDER BY tick');
+    for (const entry of cursor.iterate(startAfter, beforeTick) as Iterable<{ recipeId: string; tick: number }>) {
+      if (entry.tick > currentTick) {
+        if (currentTick > lastCompletedTick) lastCompletedTick = currentTick;
+        if (scanned >= maxScan) { stoppedEarly = true; break; }
+        currentTick = entry.tick;
+      }
+      scanned++;
+      if (!hasOlder.get(entry.recipeId, entry.tick)) continue;
+      const chain = historyForRecipe.all(entry.recipeId, entry.tick) as StatsRow[];
+      const remaining: StatsRow[] = [];
+      for (const row of chain) {
+        if (!queued.has(`${row.recipeId}\0${row.tick}`)) remaining.push(row);
+      }
+      if (remaining.length < 2) continue;
+      const decoded = remaining.map(verifyRow);
+      for (let i = 1; i < decoded.length; i++) {
+        if (!monotone(decoded[i - 1]!, decoded[i]!)) fail('statistics regression');
+      }
+      const limit = Math.min(remaining.length - 1, maxRows - toDelete.length);
+      for (let i = 0; i < limit; i++) {
+        const victim = remaining[i]!;
+        queued.add(`${victim.recipeId}\0${victim.tick}`);
+        toDelete.push({ recipeId: victim.recipeId, tick: victim.tick });
+      }
+      if (toDelete.length >= maxRows) { stoppedEarly = true; break; }
+    }
+
+    let deleted = 0;
+    if (toDelete.length > 0) {
+      const remove = this.db.prepare('DELETE FROM technology_stats WHERE recipeId=? AND tick=?');
+      for (const victim of toDelete) deleted += Number(remove.run(victim.recipeId, victim.tick).changes);
+      if (deleted !== toDelete.length) fail('compact statistics mismatch');
+    }
+    const nextCursor = stoppedEarly ? lastCompletedTick : beforeTick;
+    this.ownMutation(before, deleted, () => {
+      if (this.compactedStatsThrough === null || nextCursor > this.compactedStatsThrough) {
+        this.compactedStatsThrough = nextCursor;
+      }
+      if (deleted > 0 && this.summaryProof && beforeTick > this.summaryProof.fromTick) {
+        this.summaryProof = null;
+      }
+    });
+    return deleted;
   }
 
   private executionRow(id: string): ExecutionRow | undefined {
@@ -693,10 +869,11 @@ export class TechnologyArchive {
     this.transaction(); tick(atTick);
     this.synchronize();
     const origin = this.getHistoryOrigin(), unverifiable = this.unverifiableThrough(origin);
-    this.scanDefinitions(atTick);
+    const verified = new VerifiedDefinitionIndex();
+    this.scanDefinitions(atTick, undefined, undefined, verified);
     let previousStats: TechnologyStatsRecord | undefined, previousExecutionTick = -1;
     for (const row of this.db.prepare('SELECT recipeId,tick,body,digest FROM technology_stats WHERE tick<=? ORDER BY recipeId,tick').iterate(atTick) as Iterable<StatsRow>) {
-      const value = this.stats(row);
+      const value = this.stats(row, verified);
       if (previousStats?.recipeId === value.recipeId && !monotone(previousStats, value)) fail('retained statistics regression');
       previousStats = value;
     }

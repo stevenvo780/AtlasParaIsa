@@ -91,6 +91,18 @@ function practicedSkillToTeach(world: World, teacher: Person, learner: Person): 
   return useful ? skill : undefined;
 }
 
+/** Desempate puro de habilidades por valor: gana la de mayor valor y, en empate, la primera en
+ * el orden de inserción dado (sin él, el de `Object.keys`). Es el desempate que el SoA de
+ * personas (T147) conserva con su columna de orden explícita; no lee ni escribe el mundo. */
+export function topSkillByInsertionOrder(skills: Record<string, number>, insertionOrder?: readonly string[]): string | undefined {
+  const ordered: string[] = [];
+  if (insertionOrder) for (const key of insertionOrder) if (key in skills && !ordered.includes(key)) ordered.push(key);
+  for (const key of Object.keys(skills)) if (!ordered.includes(key)) ordered.push(key);
+  let best: string | undefined;
+  for (const key of ordered) if (best === undefined || skills[key]! > skills[best]!) best = key;
+  return best;
+}
+
 /** This is a local prospect, not a withdrawal: supplies still require collection
  * or exchange and fabrication still pays the physical execution's full costs. */
 function localRecipeInputs(world: World, teacher: Person, learner: Person): (program: TechnologyProgram, prospectiveProductId?: string) => boolean {

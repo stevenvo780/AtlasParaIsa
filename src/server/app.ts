@@ -16,7 +16,7 @@ import type { ClientMessage, Gesture, GestureResult, ServerMessage, Viewport, Wo
 import { Store, fingerprint, GestureConflict, SessionRevoked } from './store.js';
 import { cookie, hashToken, makeToken, passwordVerifier, sessionHash } from './auth.js';
 import { ensureWorldInstance, readWorldInstance } from './world-instance.js';
-import { Gobernador } from './governor.js';
+import { Gobernador, teselasPorHabitante } from './governor.js';
 import { enriquecerPersona } from './persona-extra.js';
 import { CADA_PASOS, resumenVivo } from './resumen-vivo.js';
 import { clavesVivasEn } from './regiones-vivas.js';
@@ -282,7 +282,14 @@ export function createApp(options: AppOptions) {
   const runtime: RuntimeStats = { stepMs: 0, p95StepMs: 0, cloneMs: 0, simulationMs: 0, saveMs: 0, projectionMs: 0, snapshotBytes: 0, activeTiles: world.tiles.length, processRssMiB: process.memoryUsage.rss() / 1048576, tickHz: 0, tickHzObjetivo: 1000 / (options.tickMs ?? 100),
     fases: fasesEnCero(), fraccionSerial: 0,
     gobernador: { activo: world.reproductionEnabled, presupuestoMs: paramsOf(world).gobernador.presupuestoMs, p95StepMs: 0, manual: null,
-      politica: paramsOf(world).gobernador.politica, techo: null, techoObservado: null } };
+      politica: paramsOf(world).gobernador.politica, techo: null, techoObservado: null,
+      p50Ms: 0, p95Ms: 0, p99Ms: 0, maxMs: 0, faseMax: null, fasesP95: fasesEnCero(),
+      tickHz: 0, rssBytes: process.memoryUsage.rss(), saveMs: 0,
+      regionesActivas: Object.keys(world.chunks).length, teselasActivas: world.tiles.length,
+      teselasPorHabitante: teselasPorHabitante(world.tiles.length, world.people.length),
+      poblacion: world.people.length, nacimientos: world.totals.births ?? 0,
+      muertes: Object.values(world.demographyDynamics.causes).reduce((a, b) => a + b, 0),
+      colaRed: 0, maxBufferedAmount: 0, reproductionEnabled: world.reproductionEnabled, techoPoblacion: null } };
   /**
    * Ruling R17: la población la limita el HARDWARE, no un tope fijo. Tras medir el paso,
    * el gobernador compara el p95 (ventana de 120 pasos) con `gobernador.presupuestoMs`.
@@ -297,10 +304,33 @@ export function createApp(options: AppOptions) {
     const stats = runtime.gobernador!, params = paramsOf(draft).gobernador;
     stats.presupuestoMs = params.presupuestoMs; stats.politica = params.politica;
     stats.p95StepMs = runtime.p95StepMs;
-    if (stats.manual !== null) { draft.reproductionEnabled = stats.manual; stats.activo = stats.manual; return; }
+    if (stats.manual !== null) { draft.reproductionEnabled = stats.manual; stats.activo = stats.manual; publicarSenalesGobernador(draft); return; }
     draft.reproductionEnabled = gobernador.decidir(params, draft.reproductionEnabled, draft.people.length, draft.tiles.length, draft.tick);
     stats.techo = gobernador.estado.techo; stats.techoObservado = gobernador.techoObservado;
     stats.activo = draft.reproductionEnabled;
+    publicarSenalesGobernador(draft);
+  }
+  /** T161: publica las señales de la ventana y del mundo servido. Solo lee; nunca toca el mundo. */
+  function publicarSenalesGobernador(mundo: World): void {
+    const stats = runtime.gobernador!; if (!stats) return;
+    const senales = gobernador.senales();
+    const poblacion = mundo.people.length, teselasActivas = mundo.tiles.length;
+    let colaRed = 0;
+    for (const socket of clients.keys()) colaRed = Math.max(colaRed, socket.bufferedAmount);
+    stats.p50Ms = senales.p50Ms; stats.p95Ms = senales.p95Ms; stats.p99Ms = senales.p99Ms; stats.p95StepMs = senales.p95Ms;
+    stats.maxMs = senales.maxMs; stats.faseMax = senales.faseMax;
+    stats.fasesP95 = Object.assign(fasesEnCero(), senales.fasesP95);
+    stats.tickHz = runtime.tickHz; stats.rssBytes = process.memoryUsage().rss; stats.saveMs = runtime.saveMs;
+    stats.regionesActivas = Object.keys(mundo.chunks).length; stats.teselasActivas = teselasActivas;
+    stats.teselasPorHabitante = teselasPorHabitante(teselasActivas, poblacion);
+    stats.poblacion = poblacion; stats.nacimientos = mundo.totals.births ?? 0;
+    stats.muertes = Object.values(mundo.demographyDynamics.causes).reduce((a, b) => a + b, 0);
+    stats.colaRed = colaRed; stats.maxBufferedAmount = colaRed;
+    const params = paramsOf(mundo).gobernador;
+    stats.presupuestoMs = params.presupuestoMs; stats.politica = params.politica;
+    stats.reproductionEnabled = mundo.reproductionEnabled; stats.activo = mundo.reproductionEnabled;
+    stats.techo = gobernador.estado.techo; stats.techoPoblacion = gobernador.estado.techo;
+    stats.techoObservado = gobernador.techoObservado;
   }
   const proyectar = (viewport?: Viewport) => {
     const start = monotonicNow(), projected = projectWorld(world, viewport, context);
@@ -557,7 +587,7 @@ export function createApp(options: AppOptions) {
       // Tampoco lo deja a medio paso: sin reserva, lo que falle desde aquí pausa sobre un paso entero.
       punto = null; sinReserva = false;
       runtime.stepMs = monotonicNow() - stepStarted;
-      runtime.p95StepMs = gobernador.registrar(runtime.stepMs);
+      runtime.p95StepMs = gobernador.registrar(runtime.stepMs, { ...medicion.fases, save: runtime.saveMs });
       // El gobernador decide sobre el mundo ya vigente: la próxima `reproduce()` lo lee.
       governReproduction(world);
       if (world.tick % CADA_PASOS === 0 || !runtime.natalidad) Object.assign(runtime, resumenVivo(world));
@@ -572,11 +602,13 @@ export function createApp(options: AppOptions) {
         const broadcastStarted = performance.now();
         broadcast();
         fases.broadcast = performance.now() - broadcastStarted;
+        gobernador.medidas.anotarUltimaFase('broadcast', fases.broadcast);
       }
       // Con visores, `broadcast` ya la renovó; sin ellos, una proyección cada `VISTA_RESERVA_PASOS` pasos.
       if (reservaVieja()) renovarReserva();
       runtime.fases = fases;
       runtime.fraccionSerial = fraccionSerial(fases);
+      publicarSenalesGobernador(world);
     } catch (error) {
       // T104: deshacer va PRIMERO, y vale para las dos salidas. Sin clon, llegar aquí con punto
       // significa que el mundo vigente está a medio paso; un mundo que no se pudo deshacer ya no
@@ -818,7 +850,7 @@ export function createApp(options: AppOptions) {
     /** Copia de las métricas vivas (incluido el gobernador de ruling R17); solo lectura. */
     get runtime(): RuntimeStats { return { ...runtime, ...(runtime.gobernador ? { gobernador: { ...runtime.gobernador } } : {}) }; },
     /** Orden humana sobre la reproducción: manda sobre el gobernador. `null` la devuelve al hardware. */
-    setReproduccionManual(value: boolean | null) { runtime.gobernador!.manual = value; if (value !== null) { world.reproductionEnabled = value; runtime.gobernador!.activo = value; } },
+    setReproduccionManual(value: boolean | null) { runtime.gobernador!.manual = value; if (value !== null) { world.reproductionEnabled = value; runtime.gobernador!.activo = value; runtime.gobernador!.reproductionEnabled = value; } },
     async close() {
       stopped = true; if (timer) clearTimeout(timer); clearInterval(heartbeat); clearInterval(latido);
       for (const item of pending.values()) item.reject(new HttpError(503, 'El servicio se está cerrando.'));

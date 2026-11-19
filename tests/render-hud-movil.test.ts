@@ -13,7 +13,7 @@ function enTecho(): WorldView {
   const performance: RuntimeStats = { stepMs: 52, p95StepMs: 53.6, saveMs: 1, projectionMs: 2, snapshotBytes: 4096, activeTiles: 1200, processRssMiB: 300, tickHz: 6.1, tickHzObjetivo: 10,
     fases: { maintainRegions: 0, ecologia: 0, kernel: 0, fauna: 0, personas: 0, encuentros: 0, demografia: 0, comunidades: 0, reproduccion: 0, checkpoint: 0, muestreo: 0, save: 0, broadcast: 0 }, fraccionSerial: 0,
     gobernador: { activo: false, presupuestoMs: 50, p95StepMs: 53.6, manual: null, politica: 'techo', techo: population,
-      techoObservado: { p95: 53.6, poblacion: population, teselasActivas: 1200, teselasPorHabitante: 1200 / population, senal: 'p95', tick: 0, motivo: 'frenado por p95 = 53.6 ms > 50 ms' } } };
+      techoObservado: { p95: 53.6, maxMs: 53.6, poblacion: population, teselasActivas: 1200, teselasPorHabitante: 1200 / population, senal: 'p95', tick: 0, motivo: 'frenado por p95 = 53.6 ms > 50 ms' } } };
   return { ...view, performance };
 }
 

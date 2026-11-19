@@ -131,3 +131,51 @@ test('indiceDiversidad: semilla 4821 tras 600 pasos es estable y está en [0,1]'
   assert.ok(Number.isFinite(first.conducta) && first.conducta >= 0 && first.conducta <= 1);
   assert.ok(Number.isFinite(first.oficios) && first.oficios >= 0 && first.oficios <= 1);
 });
+
+test('indiceDiversidad O(P): coincide con la referencia cuadrática (incluidos vectores en blanco) y escala linealmente a P=2000', () => {
+  const world = createWorld(51926);
+  for (let t = 0; t < 400; t++) stepWorld(world);
+  // Añade dos personas en blanco (norma 0) para cubrir pares cero–cero y cero–no-cero.
+  const blank1: Person = structuredClone(world.people[0]!);
+  blank1.id = 'blank-1'; blank1.activity = {}; blank1.skills = {}; blank1.experiences = [];
+  blank1.technology = { ...blank1.technology, knownRecipes: [], competence: {}, items: [] };
+  const blank2: Person = structuredClone(blank1); blank2.id = 'blank-2';
+  world.people.push(blank1, blank2);
+  // Referencia O(P²) explícita
+  const vectors = world.people.map(p => vectorConducta(p, world));
+  let refSum = 0, pairs = 0;
+  for (let i = 0; i < vectors.length; i++) {
+    const a = vectors[i]!;
+    const nA = Math.sqrt(a.reduce((s, x) => s + x * x, 0));
+    for (let j = i + 1; j < vectors.length; j++) {
+      const b = vectors[j]!;
+      const nB = Math.sqrt(b.reduce((s, x) => s + x * x, 0));
+      let d: number;
+      if (nA === 0 && nB === 0) d = 0;
+      else if (nA === 0 || nB === 0) d = 1;
+      else {
+        let dot = 0;
+        for (let k = 0; k < a.length; k++) dot += a[k]! * b[k]!;
+        d = Math.max(0, Math.min(1, 1 - dot / (nA * nB)));
+      }
+      refSum += d; pairs++;
+    }
+  }
+  const refConducta = refSum / pairs;
+  const got = indiceDiversidad(world);
+  assert.ok(Math.abs(got.conducta - refConducta) < 1e-12, `desviación ${Math.abs(got.conducta - refConducta)} >= 1e-12`);
+  // Escala O(P): 2 000 habitantes debe correr en unos pocos ms (antes ~712 ms)
+  const basePeople = world.people.slice();
+  const large: Person[] = [];
+  for (let i = 0; i < 2000; i++) {
+    const p = structuredClone(basePeople[i % basePeople.length]!);
+    p.id = `p-${i}`;
+    large.push(p);
+  }
+  world.people = large;
+  const t0 = performance.now();
+  const r2000 = indiceDiversidad(world);
+  const ms = performance.now() - t0;
+  assert.ok(Number.isFinite(r2000.conducta) && r2000.conducta >= 0 && r2000.conducta <= 1);
+  assert.ok(ms < 100, `P=2000 debe bajar muy por debajo de 100 ms (antes ~712 ms); medido ${ms.toFixed(2)} ms`);
+});

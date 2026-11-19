@@ -103,20 +103,39 @@ export function vectorConducta(person: Person, _world: World): number[] {
   return norm > 0 ? vector.map(x => x / norm) : vector;
 }
 
-/** Distancia coseno en [0,1]: `vectorConducta` solo produce componentes no negativas,
- * así que la similitud coseno ya cae en [0,1] (Cauchy-Schwarz) sin necesitar recorte
- * salvo por el redondeo de punto flotante. Dos vectores en blanco (nadie ha actuado
- * ni tiene memorias ni tecnología todavía) se tratan como clones (0), no como
- * indefinidos; un vector en blanco frente a uno con contenido se trata como máxima
- * distancia (1), no como 0/0. */
-function cosineDistance(a: readonly number[], b: readonly number[]): number {
-  const normA = Math.sqrt(a.reduce((sum, x) => sum + x * x, 0));
-  const normB = Math.sqrt(b.reduce((sum, x) => sum + x * x, 0));
-  if (normA === 0 && normB === 0) return 0;
-  if (normA === 0 || normB === 0) return 1;
-  let dot = 0;
-  for (let i = 0; i < a.length; i++) dot += a[i]! * (b[i] ?? 0);
-  return Math.max(0, Math.min(1, 1 - dot / (normA * normB)));
+/**
+ * Media de la distancia coseno entre todos los pares de vectores no negativos en O(P · d):
+ * para vectores unitarios u_i (‖u_i‖ = 1), ‖u_i − u_j‖² = 2·(1 − u_i·u_j), de modo que
+ * ∑_{i<j} (1 − u_i·u_j) = ½·(M·∑‖u_i‖² − ‖∑ u_i‖²). Los pares cero–cero aportan 0 y los
+ * pares cero–no-cero aportan 1 (Z·M). Elimina el pico cuadrático O(P²) de `worldStatistics`
+ * detectado en T144 (712 ms → < 3 ms en P = 2 000) conservando la definición exacta.
+ */
+function meanCosineDistance(vectors: readonly (readonly number[])[]): number {
+  const n = vectors.length;
+  if (n < 2) return 0;
+  const dim = vectors[0]!.length;
+  const sumVec = new Float64Array(dim);
+  let nonZero = 0, zero = 0, sumNormSq = 0;
+  for (let i = 0; i < n; i++) {
+    const v = vectors[i]!;
+    let normSq = 0;
+    for (let k = 0; k < dim; k++) { const x = v[k]!; normSq += x * x; }
+    if (normSq === 0) { zero++; continue; }
+    nonZero++;
+    const invNorm = 1 / Math.sqrt(normSq);
+    let unitNormSq = 0;
+    for (let k = 0; k < dim; k++) {
+      const u = v[k]! * invNorm;
+      sumVec[k]! += u;
+      unitNormSq += u * u;
+    }
+    sumNormSq += unitNormSq;
+  }
+  let sumSq = 0;
+  for (let k = 0; k < dim; k++) { const s = sumVec[k]!; sumSq += s * s; }
+  const pairs = (n * (n - 1)) / 2;
+  const nonZeroDist = nonZero >= 2 ? Math.max(0, (nonZero * sumNormSq - sumSq) / 2) : 0;
+  return Math.max(0, Math.min(1, (zero * nonZero + nonZeroDist) / pairs));
 }
 
 /**
@@ -129,18 +148,14 @@ function cosineDistance(a: readonly number[], b: readonly number[]): number {
  * máxima, incapaz de detectar el colapso de riqueza de oficios que SC-003 debe
  * poder refutar); recortada a 1 por si el rótulo "sin oficio aún" (`dominantAction`
  * `null`) añadiera una categoría más de las 18 contempladas. `total` = media de
- * ambas. O(n²) con n acotado por `poblacion.maxima` (≤ 8.128 pares con 128
- * habitantes: barato). 0 ó 1 habitante → {0,0,0}, sin excepción.
+ * ambas. Calculada en O(P · d) mediante identidad exacta de norma L2 (ver
+ * `meanCosineDistance`). 0 ó 1 habitante → {0,0,0}, sin excepción.
  */
 export function indiceDiversidad(world: World): { conducta: number; oficios: number; total: number } {
   const people = world.people;
   if (people.length < 2) return { conducta: 0, oficios: 0, total: 0 };
   const vectors = people.map(person => vectorConducta(person, world));
-  let sum = 0, pairs = 0;
-  for (let i = 0; i < vectors.length; i++) {
-    for (let j = i + 1; j < vectors.length; j++) { sum += cosineDistance(vectors[i]!, vectors[j]!); pairs++; }
-  }
-  const conducta = pairs > 0 ? sum / pairs : 0;
+  const conducta = meanCosineDistance(vectors);
   const counts = new Map<string, number>();
   for (const person of people) {
     const label = dominantAction(person) ?? '';

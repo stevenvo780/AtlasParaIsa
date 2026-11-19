@@ -9,7 +9,7 @@ MAX_CELLS is the antic-corruption bound from the task.
 import argparse, concurrent.futures, ctypes as C, json, mmap, os, pathlib, struct, sys, tempfile, time
 import numpy as np
 clock = time.perf_counter
-MAX_CELLS = 33_554_432
+MAX_CELLS = 134_217_728
 FIELDS = [('moisture',8),('vegetation',8),('food',8),('wood',8),('growth',8),('fertility',8),('cultivation',8),('traffic',8),('drinkingWater',8),('terrain',1),('biome',1),('feature',1),('life',8)]
 # Descarga selectiva por pasada (solo lo que el kernel modifica; el resto lo copia el worker JS front->back en RAM).
 DOWNLOAD_FIELDS = {1: [('moisture',8),('vegetation',8),('food',8)],
@@ -373,7 +373,7 @@ def main():
                 ln=struct.unpack('<I',read_exact(4))[0]
                 if ln>1_000_000: raise ValueError('Oversized header')
                 req=json.loads(read_exact(ln)); amount=req.get('bytes',0); shm_amount=req.get('shmBytes',0) or 0
-                if amount<0 or amount>4_000_000_000 or shm_amount<0 or shm_amount>4_000_000_000: raise ValueError('Oversized body')
+                if amount<0 or amount>16_000_000_000 or shm_amount<0 or shm_amount>16_000_000_000: raise ValueError('Oversized body')
                 if shm_amount:
                     if SHM is None: raise ValueError('shmBytes sin canal /dev/shm')
                     body=SHM.view(int(shm_amount))

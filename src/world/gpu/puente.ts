@@ -343,7 +343,7 @@ export class ResidentGpuBridge {
     const cells = new Int32Array(buffers.cells!);
     const stampsBuf = buffers.stamps!; const pageX = new Int32Array(buffers.pageX!);
     const capacityCells = stampsBuf.byteLength / 4, slots = pageX.length, totalCells = cells.length;
-    if (capacityCells > 33_554_432) throw new RangeError('Capacidad por encima de MAX_CELLS (33_554_432).');
+    if (capacityCells > 134_217_728) throw new RangeError('Capacidad por encima de MAX_CELLS (134_217_728).');
     const key: TopologyKey = { version: terrain.version, pageSetVersion, capacityCells, slots, totalCells, regionSide };
     const syncNeeded = !this.synced || this.synced.version !== key.version || this.synced.pageSetVersion !== key.pageSetVersion
       || this.synced.capacityCells !== key.capacityCells || this.synced.slots !== key.slots || this.synced.totalCells !== key.totalCells
@@ -427,7 +427,7 @@ export class ResidentGpuBridge {
     const cells = new Int32Array(buffers.cells!);
     const stampsBuf = buffers.stamps!; const pageX = new Int32Array(buffers.pageX!);
     const capacityCells = stampsBuf.byteLength / 4, slots = pageX.length, totalCells = cells.length;
-    if (capacityCells > 33_554_432) throw new RangeError('Capacidad por encima de MAX_CELLS (33_554_432).');
+    if (capacityCells > 134_217_728) throw new RangeError('Capacidad por encima de MAX_CELLS (134_217_728).');
     const key: TopologyKey = { version: terrain.version, pageSetVersion, capacityCells, slots, totalCells, regionSide };
     const syncNeeded = !this.synced || this.synced.version !== key.version || this.synced.pageSetVersion !== key.pageSetVersion
       || this.synced.capacityCells !== key.capacityCells || this.synced.slots !== key.slots || this.synced.totalCells !== key.totalCells

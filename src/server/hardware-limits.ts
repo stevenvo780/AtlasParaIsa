@@ -1,8 +1,10 @@
+import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { totalmem } from 'node:os';
+import { availableParallelism, totalmem } from 'node:os';
 import { join } from 'node:path';
 import { getHeapStatistics } from 'node:v8';
 import { MAX_ANIMALS_PER_TILE } from '../world/animals.js';
+import { gpuNvrtcAvailable } from '../world/gpu/puente.js';
 import { CHUNK_SIZE } from '../world/terrain.js';
 import { DEFAULT_PARAMS, parseParams, type WorldLimits, type WorldParams } from '../world/params.js';
 
@@ -95,4 +97,119 @@ export function hostLimits(memory: HostMemory): WorldLimits {
  * operador (que se aplican DESPUÉS, en `deploymentParams`, aunque repitan el default). */
 export function hostParams(base: WorldParams = DEFAULT_PARAMS, memory: HostMemory = hostMemory()): WorldParams {
   return parseParams({ limites: hostLimits(memory) }, base);
+}
+
+/** Timeout corto para consultar los índices CUDA con `nvidia-smi` sin bloquear el arranque. */
+export const NVIDIA_SMI_TIMEOUT_MS = 2000;
+const MAX_MOTOR_HILOS = 512;
+
+export interface HostHardware {
+  cpuThreads: number;
+  totalRamBytes: number;
+  cudaDevices: number[];
+}
+
+export interface HostHardwareProbe {
+  cpuThreads?: () => number;
+  totalRamBytes?: () => number;
+  nvrtcAvailable?: () => boolean;
+  /** Consulta de índices CUDA (por defecto `nvidia-smi --query-gpu=index --format=csv,noheader`). */
+  nvidiaSmi?: () => string | null | undefined;
+  /** Permite fijar la memoria completa del anfitrión en pruebas deterministas de `hostFullHardwareParams`. */
+  memory?: () => HostMemory;
+}
+
+export type RecommendedHostMotor = Pick<
+  WorldParams['motor'],
+  'hilos' | 'gpu' | 'soaTerreno' | 'particionarPersonas' | 'clonPorPaso'
+>;
+
+function defaultNvidiaSmi(): string {
+  return execFileSync('nvidia-smi', ['--query-gpu=index', '--format=csv,noheader'], {
+    encoding: 'utf8',
+    timeout: NVIDIA_SMI_TIMEOUT_MS,
+    stdio: ['ignore', 'pipe', 'ignore'],
+  });
+}
+
+/** Parsea índices CUDA no negativos devueltos por `nvidia-smi`, deduplicados y ordenados. */
+export function parseNvidiaSmiIndices(output: string | null | undefined): number[] {
+  if (typeof output !== 'string' || output.trim() === '') return [];
+  const seen = new Set<number>();
+  for (const token of output.split(/[\r\n,]+/)) {
+    const trimmed = token.trim();
+    if (!/^\d+$/.test(trimmed)) continue;
+    const index = Number(trimmed);
+    if (Number.isSafeInteger(index) && index >= 0) seen.add(index);
+  }
+  return [...seen].sort((a, b) => a - b);
+}
+
+/**
+ * Detecta los recursos físicos de cómputo del anfitrión (hilos de CPU, RAM total y GPUs CUDA
+ * utilizables con NVRTC). Admite `probe` inyectable para pruebas deterministas sin tocar GPU real.
+ * Vive únicamente en `src/server/`: el motor (`src/world`) jamás inspecciona el hardware (T171).
+ */
+export function detectHostHardware(probe?: HostHardwareProbe): HostHardware {
+  const rawThreads = probe?.cpuThreads ? probe.cpuThreads() : availableParallelism();
+  const cpuThreads = Number.isFinite(rawThreads) && rawThreads >= 1 ? Math.floor(rawThreads) : 1;
+  const rawRam = probe?.totalRamBytes ? probe.totalRamBytes() : totalmem();
+  const totalRamBytes = Number.isFinite(rawRam) && rawRam > 0 ? Math.floor(rawRam) : 0;
+
+  let cudaDevices: number[] = [];
+  const hasNvrtc = probe?.nvrtcAvailable ? probe.nvrtcAvailable() : gpuNvrtcAvailable();
+  if (hasNvrtc) {
+    try {
+      const rawOutput = probe?.nvidiaSmi ? probe.nvidiaSmi() : defaultNvidiaSmi();
+      cudaDevices = parseNvidiaSmiIndices(rawOutput);
+    } catch {
+      cudaDevices = [];
+    }
+  }
+  return { cpuThreads, totalRamBytes, cudaDevices };
+}
+
+/**
+ * Función pura que deriva el despacho recomendado del motor a partir del hardware detectado.
+ * En torres grandes (`cpuThreads >= 8`) reserva 4 hilos para SO, WebSockets y SQLite
+ * (p. ej. 32 hilos → 28 hilos + todas las GPUs CUDA disponibles).
+ */
+export function recommendedMotorForHost(hw: HostHardware): RecommendedHostMotor {
+  const cpuThreads = Number.isFinite(hw.cpuThreads) && hw.cpuThreads >= 1 ? Math.floor(hw.cpuThreads) : 1;
+  const seenGpu = new Set<number>();
+  const gpu: number[] = [];
+  for (const device of hw.cudaDevices) {
+    if (Number.isSafeInteger(device) && device >= 0 && !seenGpu.has(device)) {
+      seenGpu.add(device);
+      gpu.push(device);
+    }
+  }
+  const hilos = Math.min(MAX_MOTOR_HILOS, Math.max(1, cpuThreads >= 8 ? cpuThreads - 4 : cpuThreads));
+  return {
+    hilos,
+    gpu,
+    soaTerreno: cpuThreads > 1 || gpu.length > 0,
+    particionarPersonas: cpuThreads >= 4,
+    clonPorPaso: false,
+  };
+}
+
+/**
+ * Combina los límites de admisión del anfitrión (`hostParams`) con el despacho real para todos los
+ * chips detectados, gobernador por hardware (`techo` a 100 ms) y cadencia de persistencia de producción.
+ */
+export function hostFullHardwareParams(base: WorldParams = DEFAULT_PARAMS, probe?: HostHardwareProbe): WorldParams {
+  const hw = detectHostHardware(probe);
+  const memory: HostMemory = probe?.memory
+    ? probe.memory()
+    : probe?.totalRamBytes
+      ? { ...hostMemory(), fisicaBytes: hw.totalRamBytes }
+      : hostMemory();
+  const withLimits = hostParams(base, memory);
+  const motor = recommendedMotorForHost(hw);
+  return parseParams({
+    motor,
+    gobernador: { ...base.gobernador, politica: 'techo', presupuestoMs: 100 },
+    persistencia: { ...base.persistencia, cadaTicks: 100, ventanaEventosTicks: 24000 },
+  }, withLimits);
 }

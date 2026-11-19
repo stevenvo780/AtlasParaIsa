@@ -31,6 +31,13 @@ npx tsx scripts/lab/replica.ts --seed 51926 --dias 10 --params "cuerpo.riesgoSen
   bandera sin valor (p. ej. al final de la línea) o con un valor que no sea solo dígitos (` 18`, `1e2`,
   `0x14`, `+18`, `18.0`) es un error, no «sin techo». Incompatible con `--gobernador servidor` (error
   explícito).
+- `--hilos N` (opcional, entero en `[1, 512]`): aplica `params.motor.hilos = N` validado por `parseParams`
+  (T118). `barrido.ts` también lo acepta y lo reenvía a cada réplica (además de permitir barridos con
+  `--param motor.hilos=1,2`).
+- `--gpu <lista>` (opcional, p. ej. `[]`, `[0]`, `[0,1]`): aplica `params.motor.gpu` validado por
+  `parseParams` (array de enteros ≥ 0 sin duplicados). Aceptado tanto en `replica.ts` como en `barrido.ts`.
+- `--orden natural|inverso|adversarial` (opcional): aplica `params.motor.orden` validado por `parseParams`.
+  Aceptado tanto en `replica.ts` como en `barrido.ts`.
 
 ## Por qué SIEMPRE hay un `Store` (hallazgo P3)
 
@@ -134,8 +141,23 @@ corre en `atlas.humanizar.tech`. Por eso `replica.ts`:
 - `sha`: `git rev-parse HEAD` en el momento de correr.
 - `digest`: sha256 de los ficheros `.ts` de `src/world` (nombre + contenido, ordenados por nombre) —
   cambia si el código de simulación cambió, aunque el `sha` de git no se haya movido (árbol sucio).
+- `teselasActivas`: número de teselas activas (`world.tiles.length`) al final de la réplica (T118).
+- `teselasPorHabitante`: `teselasActivas / Math.max(1, world.people.length)` al final de la réplica (T118).
+- `fases`: milisegundos medios por paso en cada una de las 13 fases (`FaseNombre`, T107/T118).
+- `fraccionSerial`: `fraccionSerial(fases)` ∈ `[0, 1]` (T107/T118).
+- `digestoMundoFinal`: `digestoCanonico(world)` con las opciones de backend de hardware
+  (`motor.hilos`, `motor.gpu`, `motor.orden`) normalizadas a sus defaults, de modo que dos backends
+  que produzcan el mismo estado del mundo y las mismas leyes materiales tengan exactamente el mismo
+  `digestoMundoFinal`.
 - `resumen`: cifras finales (población inicial/final, totales acumulados, `gini`/`fraccionComida`/
   `distanciaAgua` finales) más `p50Ms`/`p95Ms` sobre **toda** la corrida y `rssMaximo`.
+
+En `scripts/lab/resumen.ts` (T118), las réplicas de un barrido que comparten `seed`, `digest` y
+parámetros de mundo salvo `motor.{hilos,gpu,orden}` se comparan por métricas diarias y por
+`digestoMundoFinal`: si todas coinciden, `determinismo.estado` es `🟢 DETERMINISTA` (`semaforo: "🟢"`);
+si alguna diverge, es `🔴 ROTO` (`semaforo: "🔴"`) nombrando los backends y réplicas divergentes.
+Además `resumen.json` y `resumen.md` incluyen la tabla/curva `p95(teselasActivas)` y
+`teselasPorHabitante` por grupo y backend.
 
 **Salida determinista salvo tiempos**: con la misma semilla, params y código, dos réplicas dan
 exactamente los mismos valores en todas las claves salvo `p50Ms`, `p95Ms`, `rss` y `rssMaximo`

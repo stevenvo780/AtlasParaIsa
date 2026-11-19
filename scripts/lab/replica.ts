@@ -45,11 +45,12 @@ import { Store } from '../../src/server/store.js';
 import { hostParams } from '../../src/server/hardware-limits.js';
 import { technologyJournalNearCapacity } from '../../src/world/technology-journal.js';
 import { chronicleJournalNearCapacity } from '../../src/world/chronicle-journal.js';
-import { assertWorld, cloneWorld, createWorld, projectWorld, stepWorld, TICKS_PER_DAY, type World } from '../../src/world/index.js';
+import { assertWorld, cloneWorld, createWorld, fraccionSerial, projectWorld, stepWorld, TICKS_PER_DAY, type FaseMedicion, type World } from '../../src/world/index.js';
 import { catalogueEnabled, technologyCatalogueNearCapacity, technologyCatalogueTotals } from '../../src/world/technology-catalogue.js';
 import { worldStatistics } from '../../src/world/statistics.js';
 import { indiceDiversidad } from '../../src/world/diversidad.js';
-import { parseParams, type WorldParams } from '../../src/world/params.js';
+import { DEFAULT_PARAMS, paramsOf, parseParams, setParams, type WorldParams } from '../../src/world/params.js';
+import type { FaseNombre } from '../../src/shared/types.js';
 import { decideReproduction, RollingStepPerformance } from '../../src/server/governor.js';
 import { decidirTechoLab, TECHO_LAB_MINIMO, techoLabCota } from './techo-lab.js';
 import { durableActivityMetrics } from './metrics.js';
@@ -61,10 +62,59 @@ type ModoGobernador = 'no' | 'servidor';
 
 const CAUSES = ['starvation', 'dehydration', 'exposure', 'senescence'] as const;
 type Cause = typeof CAUSES[number];
+const FASE_NOMBRES: readonly FaseNombre[] = [
+  'maintainRegions', 'ecologia', 'kernel', 'fauna', 'personas', 'encuentros',
+  'demografia', 'comunidades', 'reproduccion', 'checkpoint', 'muestreo', 'save', 'broadcast',
+];
+
+function flagPresente(flag: string): boolean {
+  return process.argv.some(a => a === flag || a.startsWith(`${flag}=`));
+}
 
 function arg(flag: string): string | undefined {
-  const index = process.argv.indexOf(flag);
-  return index === -1 ? undefined : process.argv[index + 1];
+  for (let i = 2; i < process.argv.length; i++) {
+    const a = process.argv[i]!;
+    if (a === flag) return process.argv[i + 1];
+    if (a.startsWith(`${flag}=`)) return a.slice(flag.length + 1);
+  }
+  return undefined;
+}
+
+function normalizarGpuArg(raw: string): string {
+  const trimmed = raw.trim();
+  return /^\d+(,\s*\d+)*$/.test(trimmed) ? `[${trimmed}]` : raw;
+}
+
+/**
+ * `digestoCanonico` hashea `{world, params}`. Para que dos backends de hardware
+ * (`motor.hilos`, `motor.gpu`, `motor.orden`) produzcan el mismo `digestoMundoFinal`
+ * cuando el estado del mundo y las leyes materiales coinciden bit a bit, normalizamos
+ * únicamente esas tres claves de ejecución a sus defaults durante el cálculo del hash.
+ */
+function digestoMundoSinHardware(world: World): string {
+  const vigentes = paramsOf(world);
+  if (
+    vigentes.motor.hilos === DEFAULT_PARAMS.motor.hilos &&
+    vigentes.motor.gpu.length === DEFAULT_PARAMS.motor.gpu.length &&
+    vigentes.motor.orden === DEFAULT_PARAMS.motor.orden
+  ) {
+    return digestoCanonico(world);
+  }
+  const sinHardware: WorldParams = {
+    ...vigentes,
+    motor: {
+      ...vigentes.motor,
+      hilos: DEFAULT_PARAMS.motor.hilos,
+      gpu: DEFAULT_PARAMS.motor.gpu,
+      orden: DEFAULT_PARAMS.motor.orden,
+    },
+  };
+  setParams(world, sinHardware);
+  try {
+    return digestoCanonico(world);
+  } finally {
+    setParams(world, vigentes);
+  }
 }
 
 function distribution(samples: readonly number[]): { p50: number; p95: number } {
@@ -201,7 +251,24 @@ async function main(): Promise<void> {
   // Por defecto activos; `--instrumentos no` da EXACTAMENTE los dia-NNN.json de antes (mismas claves).
   const instrumentosArg = arg('--instrumentos') ?? 'si';
   if (instrumentosArg !== 'si' && instrumentosArg !== 'no') throw new Error('Uso: --instrumentos si|no (por defecto "si").');
-  const params: WorldParams = parseParams(arg('--params'), hostParams());
+  const motorOverrides: Record<string, unknown> = {};
+  if (flagPresente('--hilos')) {
+    const hilosArg = arg('--hilos');
+    if (hilosArg === undefined || hilosArg === '' || hilosArg.startsWith('--')) throw new Error('Uso: --hilos N (entero en [1, 512]).');
+    motorOverrides['motor.hilos'] = hilosArg;
+  }
+  if (flagPresente('--gpu')) {
+    const gpuArg = arg('--gpu');
+    if (gpuArg === undefined || gpuArg === '' || gpuArg.startsWith('--')) throw new Error('Uso: --gpu <lista> (p. ej. [], [0], [0,1]).');
+    motorOverrides['motor.gpu'] = normalizarGpuArg(gpuArg);
+  }
+  if (flagPresente('--orden')) {
+    const ordenArg = arg('--orden');
+    if (ordenArg === undefined || ordenArg === '' || ordenArg.startsWith('--')) throw new Error('Uso: --orden natural|inverso|adversarial.');
+    motorOverrides['motor.orden'] = ordenArg;
+  }
+  let params: WorldParams = parseParams(arg('--params'), hostParams());
+  if (Object.keys(motorOverrides).length > 0) params = parseParams(motorOverrides, params);
   mkdirSync(salida, { recursive: true });
 
   const dataDir = mkdtempSync(join(tmpdir(), 'atlas-lab-'));
@@ -230,6 +297,8 @@ async function main(): Promise<void> {
     let techoTicksActivosDia = 0, techoTicksDia = 0, techoTicksActivos = 0, techoPoblacionMaximaDia = 0, techoPoblacionMaxima = world.people.length;
 
     const totalTicks = dias * TICKS_PER_DAY, stepTimes: number[] = [];
+    const fasesAcumuladas: Record<FaseNombre, number> = Object.fromEntries(FASE_NOMBRES.map(nombre => [nombre, 0])) as Record<FaseNombre, number>;
+    const medicion: FaseMedicion = { clock: () => performance.now(), fases: fasesAcumuladas };
     let maxRss = process.memoryUsage().rss, ultimoDia: ReturnType<typeof dailyMetrics> | null = null;
     for (let tick = 1; tick <= totalTicks; tick++) {
       if (gobernadorModo === 'servidor') {
@@ -242,10 +311,10 @@ async function main(): Promise<void> {
           const cloneStarted = performance.now();
           const draft = cloneWorld(world, store.context);
           cloneMs = performance.now() - cloneStarted;
-          stepWorld(draft);
+          stepWorld(draft, [], undefined, medicion);
           world = draft;
         } else {
-          stepWorld(world);
+          stepWorld(world, [], undefined, medicion);
         }
         // Antes del guardado (vacía chronicleJournal.pending) y FUERA de la medida: su coste se
         // descuenta de stepMs para que el gobernador decida sobre el mismo paso que sin instrumentos.
@@ -263,6 +332,7 @@ async function main(): Promise<void> {
           registrarFaunaRetirada(world, censosFauna);
           store.save(world);
           saveMs = performance.now() - saveStarted;
+          fasesAcumuladas.save += saveMs;
         }
         const stepMs = performance.now() - stepStarted - observacionMs;
         stepTimes.push(stepMs);
@@ -280,7 +350,7 @@ async function main(): Promise<void> {
         }
         instrumentos?.antesDelPaso(world);
         const started = performance.now();
-        stepWorld(world);
+        stepWorld(world, [], undefined, medicion);
         stepTimes.push(performance.now() - started);
         instrumentos?.despuesDelPaso(world);
         if (techoLab !== null) { techoPoblacionMaximaDia = Math.max(techoPoblacionMaximaDia, world.people.length); techoPoblacionMaxima = Math.max(techoPoblacionMaxima, world.people.length); }
@@ -288,11 +358,17 @@ async function main(): Promise<void> {
         if (tick % params.persistencia.cadaTicks === 0
           || technologyJournalNearCapacity(world.technology) || chronicleJournalNearCapacity(world)
           || technologyCatalogueNearCapacity(world.technology)) {
+          const saveStarted = performance.now();
           registrarFaunaRetirada(world, censosFauna); store.save(world);
+          fasesAcumuladas.save += performance.now() - saveStarted;
         }
       }
       if (tick % TICKS_PER_DAY === 0) {
-        if (tick % params.persistencia.cadaTicks !== 0) { registrarFaunaRetirada(world, censosFauna); store.save(world); }
+        if (tick % params.persistencia.cadaTicks !== 0) {
+          const saveStarted = performance.now();
+          registrarFaunaRetirada(world, censosFauna); store.save(world);
+          fasesAcumuladas.save += performance.now() - saveStarted;
+        }
         assertWorld(world);
         const dia = tick / TICKS_PER_DAY, rss = process.memoryUsage().rss, { p50, p95 } = distribution(stepTimes.slice(-TICKS_PER_DAY));
         maxRss = Math.max(maxRss, rss);
@@ -317,6 +393,11 @@ async function main(): Promise<void> {
     if (!ultimoDia) throw new Error('No se completó ningún día; --dias debe producir al menos un dia-NNN.json.');
 
     const { p50, p95 } = distribution(stepTimes);
+    const fases = Object.fromEntries(
+      FASE_NOMBRES.map(nombre => [nombre, fasesAcumuladas[nombre] / totalTicks]),
+    ) as Record<FaseNombre, number>;
+    const teselasActivas = world.tiles.length;
+    const teselasPorHabitante = teselasActivas / Math.max(1, world.people.length);
     const resumen = {
       vecinosMortalesIniciales, fundadoresMortalesIniciales,
       poblacionInicial, poblacionFinal: ultimoDia.poblacion, nacimientosTotal: ultimoDia.nacimientos,
@@ -345,9 +426,13 @@ async function main(): Promise<void> {
       instrumentos: instrumentos ? 'si; solo lectura (scripts/lab/instrumentos.ts): conducta por tiempo, comida compartida y panel C8' : 'no',
       seed, params, sha: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
       digest: worldSourceDigest(),
+      teselasActivas,
+      teselasPorHabitante,
+      fases,
+      fraccionSerial: fraccionSerial(fases),
       // Huella del ESTADO final (digestoCanonico de src/world/digesto.ts): con y sin instrumentos
-      // debe ser idéntica (tests/instrumentos-lab.test.ts). `digest` es la del CÓDIGO.
-      digestoMundoFinal: digestoCanonico(world), dias, resumen,
+      // (y entre distintos backends de hardware) debe ser idéntica. `digest` es la del CÓDIGO.
+      digestoMundoFinal: digestoMundoSinHardware(world), dias, resumen,
     };
     writeFileSync(join(salida, 'replica.json'), JSON.stringify(replica, null, 2) + '\n');
     if (instrumentos) {

@@ -161,3 +161,20 @@ test('--gobernador acepta solo "servidor"|"no"', (t) => {
   const result = spawnSync(process.execPath, ['--import', 'tsx', 'scripts/lab/replica.ts', '--seed', '1', '--dias', '1', '--params', FAST_PARAMS, '--gobernador', 'invalido', '--salida', dir], { encoding: 'utf8' });
   assert.notEqual(result.status, 0);
 });
+
+test('--gobernador servidor respeta gobernador.politica=techo y documenta la política en replica.json', (t) => {
+  // Verifica que `--gobernador servidor` usa `Gobernador` (como `src/server/app.ts`) en vez
+  // de hardcodear `decideReproduction` (`apagar`), y documenta la política efectiva.
+  const dirTecho = runReplica(t, ['--seed', '51926', '--dias', '1', '--params', `${FAST_PARAMS},gobernador.presupuestoMs=5,gobernador.politica=techo`, '--gobernador', 'servidor']);
+  const dirApagar = runReplica(t, ['--seed', '51926', '--dias', '1', '--params', `${FAST_PARAMS},gobernador.presupuestoMs=5,gobernador.politica=apagar`, '--gobernador', 'servidor']);
+  const repTecho = readJson(join(dirTecho, 'replica.json'));
+  const repApagar = readJson(join(dirApagar, 'replica.json'));
+  assert.match(repTecho.gobernador as string, /politica=techo/);
+  assert.match(repApagar.gobernador as string, /politica=apagar/);
+  const diaTecho = readJson(join(dirTecho, 'dia-001.json'));
+  const diaApagar = readJson(join(dirApagar, 'dia-001.json'));
+  for (const d of [diaTecho, diaApagar]) {
+    const f = d.reproduccionActivaFraccion as number;
+    assert.ok(f >= 0 && f <= 1, `reproduccionActivaFraccion fuera de [0,1]: ${f}`);
+  }
+});

@@ -51,7 +51,7 @@ import { worldStatistics } from '../../src/world/statistics.js';
 import { indiceDiversidad } from '../../src/world/diversidad.js';
 import { DEFAULT_PARAMS, paramsOf, parseParams, setParams, type WorldParams } from '../../src/world/params.js';
 import type { FaseNombre } from '../../src/shared/types.js';
-import { decideReproduction, RollingStepPerformance } from '../../src/server/governor.js';
+import { Gobernador } from '../../src/server/governor.js';
 import { decidirTechoLab, TECHO_LAB_MINIMO, techoLabCota } from './techo-lab.js';
 import { durableActivityMetrics } from './metrics.js';
 import { InstrumentosConducta } from './instrumentos.js';
@@ -286,9 +286,10 @@ async function main(): Promise<void> {
     store.save(world);
     const instrumentos = instrumentosArg === 'si' ? new InstrumentosConducta(world, store.db) : null;
 
-    // Solo con --gobernador servidor: p95 de la ventana de 120 pasos (mismo mecanismo que
-    // src/server/app.ts) y acumuladores del DÍA en curso, reiniciados en cada dia-NNN.json.
-    const gobernadorPerf = new RollingStepPerformance();
+    // Solo con --gobernador servidor: mismo `Gobernador` que `src/server/app.ts` (respetando
+    // `params.gobernador.politica`, p. ej. `techo` por defecto) y acumuladores del DÍA en curso,
+    // reiniciados en cada dia-NNN.json.
+    const gobernador = new Gobernador();
     let reproduccionActivaTicksDia = 0, ticksDia = 0, p95GobernadorActual = 0;
     const cloneMsDia: number[] = [], saveMsDia: number[] = [];
 
@@ -336,8 +337,8 @@ async function main(): Promise<void> {
         }
         const stepMs = performance.now() - stepStarted - observacionMs;
         stepTimes.push(stepMs);
-        p95GobernadorActual = gobernadorPerf.record(stepMs);
-        world.reproductionEnabled = decideReproduction(p95GobernadorActual, params.gobernador.presupuestoMs, world.reproductionEnabled);
+        p95GobernadorActual = gobernador.registrar(stepMs);
+        world.reproductionEnabled = gobernador.decidir(params.gobernador, world.reproductionEnabled, world.people.length, world.tiles.length, world.tick);
         ticksDia++; if (world.reproductionEnabled) reproduccionActivaTicksDia++;
         cloneMsDia.push(cloneMs); saveMsDia.push(saveMs);
       } else {
@@ -411,7 +412,7 @@ async function main(): Promise<void> {
     const replica = {
       metricasVersion: 2,
       gobernador: gobernadorModo === 'servidor'
-        ? 'servidor; imita stepOnce (clon+paso, guardado por cadencia, decideReproduction sobre p95) cada tick'
+        ? `servidor; imita stepOnce (clon+paso, guardado por cadencia, Gobernador politica=${params.gobernador.politica} sobre p95) cada tick`
         : techoLab !== null ? `techo de laboratorio fijo en ${techoLab}; política techo del servidor sin reloj (reproductionEnabled = población < ${techoLab} antes de cada paso)`
           : 'no-ejecutado; replica de leyes, no del servidor',
       ...(techoLab !== null ? {

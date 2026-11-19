@@ -125,7 +125,7 @@ test('parseParams sobre una base aplica los overrides encima de ella, no encima 
 
 test('T102: parámetros tipados sobreviven a guardado, reinicio, clon y overrides del despliegue', t => {
   const { store, path } = laboratory(t);
-  const params = parseParams('agua.cuencas=0.8,motor.hilos=8,motor.gpu=[1,0],motor.clonPorPaso=false,motor.orden=inverso,persistencia.paginasSucias=true,red.deltas=true');
+  const params = parseParams('agua.cuencas=0.8,motor.hilos=8,motor.gpu=[1,0],motor.clonPorPaso=false,motor.orden=inverso,red.deltas=true');
   store.save(createWorld(51926, params));
   const saved = filaInstantanea(store), reopened = new Store(path);
   try {
@@ -140,6 +140,23 @@ test('T102: parámetros tipados sobreviven a guardado, reinicio, clon y override
     assert.deepEqual(effective.motor.gpu, [1, 0]); assert.equal(overridden.agua.cuencas, 0.8);
     assert.equal(overridden.motor.clonPorPaso, false); assert.equal(overridden.persistencia.cadaTicks, 100);
   } finally { reopened.close(); }
+
+  // Con T132 activo (`persistencia.paginasSucias=true`), el segundo guardado escribe un delta
+  // replayable (`depth=1`) en vez de repetir el checkpoint completo, conservando los mismos params.
+  const replayLab = laboratory(t);
+  const replayParams = parseParams('persistencia.paginasSucias=true', params);
+  replayLab.store.save(createWorld(51926, replayParams));
+  const reopenedReplay = new Store(replayLab.path);
+  try {
+    const loaded = reopenedReplay.load()!.world;
+    assert.deepEqual(paramsOf(loaded), replayParams);
+    reopenedReplay.save(loaded);
+    const second = JSON.parse(filaInstantanea(reopenedReplay).body);
+    assert.equal(second.snapshotReplay, 1);
+    assert.equal(second.kind, 'delta');
+    assert.equal(second.depth, 1);
+    assert.deepEqual(paramsOf(reopenedReplay.load()!.world), replayParams);
+  } finally { reopenedReplay.close(); }
 });
 
 test('T102: snapshot params-v1 anterior completa sólo los campos nuevos con defaults', t => {

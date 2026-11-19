@@ -39,6 +39,9 @@ interface Job {
   readonly paramsArg: string;
   readonly dir: string;
   readonly gobernador: string | undefined;
+  readonly hilos: string | undefined;
+  readonly gpu: string | undefined;
+  readonly orden: string | undefined;
 }
 
 interface JobResult {
@@ -58,13 +61,22 @@ interface Options {
   readonly salida: string;
   readonly control: string | undefined;
   readonly gobernador: string | undefined;
+  readonly hilos: string | undefined;
+  readonly gpu: string | undefined;
+  readonly orden: string | undefined;
   readonly paramValues: ReadonlyMap<string, readonly string[]>;
+}
+
+function normalizarGpuArg(raw: string): string {
+  const trimmed = raw.trim();
+  return /^\d+(,\s*\d+)*$/.test(trimmed) ? `[${trimmed}]` : raw;
 }
 
 function printHelp(): void {
   console.log(
     'Uso: npm run lab -- --replicas N --dias D [--param clave=v1,v2 ...] [--seed-base S] ' +
-    '[--concurrencia C] [--timeout SEGUNDOS] [--salida DIR] [--control DIR] [--gobernador no|servidor]\n' +
+    '[--concurrencia C] [--timeout SEGUNDOS] [--salida DIR] [--control DIR] [--gobernador no|servidor] ' +
+    '[--hilos N] [--gpu LISTA] [--orden natural|inverso|adversarial]\n' +
     'Corre el producto cartesiano de --param (repetible, o varios "clave=v1,v2" sueltos tras un ' +
     'solo --param, como en T031) × --replicas réplicas con scripts/lab/replica.ts, en cola con ' +
     '--concurrencia procesos a la vez (por defecto availableParallelism()-2); mata el GRUPO de ' +
@@ -91,6 +103,7 @@ function parseArgs(argv: readonly string[]): Options | null {
   const paramValues = new Map<string, string[]>();
   let replicas: number | undefined, dias: number | undefined, seedBase: number | undefined;
   let concurrencia: number | undefined, timeoutSeconds: number | undefined, salida: string | undefined, control: string | undefined, gobernador: string | undefined;
+  let hilos: string | undefined, gpu: string | undefined, orden: string | undefined;
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
     if (arg === '--help' || arg === '-h') { printHelp(); return null; }
@@ -114,6 +127,24 @@ function parseArgs(argv: readonly string[]): Options | null {
         const value = takeValue();
         if (value !== 'no' && value !== 'servidor') throw new Error(`--gobernador requiere "no" o "servidor" (recibido "${value}")`);
         gobernador = value;
+        break;
+      }
+      case '--hilos': {
+        const value = takeValue();
+        parseParams({ 'motor.hilos': value });
+        hilos = value;
+        break;
+      }
+      case '--gpu': {
+        const value = takeValue();
+        parseParams({ 'motor.gpu': normalizarGpuArg(value) });
+        gpu = value;
+        break;
+      }
+      case '--orden': {
+        const value = takeValue();
+        parseParams({ 'motor.orden': value });
+        orden = value;
         break;
       }
       case '--param': {
@@ -143,7 +174,7 @@ function parseArgs(argv: readonly string[]): Options | null {
     replicas, dias, paramValues,
     salida: resolve(ROOT, salida ?? join('artifacts', 'lab', sello())),
     control: control ? resolve(ROOT, control) : undefined,
-    gobernador,
+    gobernador, hilos, gpu, orden,
     seedBase: seedBase ?? 1,
     concurrencia: concurrencia ?? Math.max(1, availableParallelism() - 2),
     timeoutMs: (timeoutSeconds ?? DEFAULT_TIMEOUT_SECONDS) * 1000,
@@ -173,7 +204,11 @@ function buildJobs(options: Options): Job[] {
     const paramsArg = Object.entries(combo).map(([key, value]) => `${key}=${value}`).join(',');
     for (let replica = 0; replica < options.replicas; replica++) {
       const seed = options.seedBase + replica;
-      jobs.push({ id: `${slug}/seed-${seed}`, seed, dias: options.dias, paramsArg, dir: join(options.salida, slug, `seed-${seed}`), gobernador: options.gobernador });
+      jobs.push({
+        id: `${slug}/seed-${seed}`, seed, dias: options.dias, paramsArg,
+        dir: join(options.salida, slug, `seed-${seed}`), gobernador: options.gobernador,
+        hilos: options.hilos, gpu: options.gpu, orden: options.orden,
+      });
     }
   }
   return jobs;
@@ -237,7 +272,15 @@ function writeAbortedMarker(job: Job, result: JobResult): void {
   const path = join(job.dir, 'replica.json');
   if (existsSync(path)) return; // replica.ts alcanzó a escribir el suyo antes de morir: no se pisa.
   let params: unknown;
-  try { params = parseParams(job.paramsArg || undefined); }
+  try {
+    let parsed = parseParams(job.paramsArg || undefined);
+    const motorOverrides: Record<string, unknown> = {};
+    if (job.hilos !== undefined) motorOverrides['motor.hilos'] = job.hilos;
+    if (job.gpu !== undefined) motorOverrides['motor.gpu'] = normalizarGpuArg(job.gpu);
+    if (job.orden !== undefined) motorOverrides['motor.orden'] = job.orden;
+    if (Object.keys(motorOverrides).length > 0) parsed = parseParams(motorOverrides, parsed);
+    params = parsed;
+  }
   catch (error) { params = { _paramsCrudos: job.paramsArg, _errorParseParams: (error as Error).message }; }
   const marker = {
     seed: job.seed, params, sha: repoSha(), digest: worldSourceDigest(), dias: job.dias, abortada: true,
@@ -253,6 +296,9 @@ async function runJob(job: Job, timeoutMs: number): Promise<JobResult> {
   const args = ['tsx', replicaScript, '--seed', String(job.seed), '--dias', String(job.dias), '--salida', job.dir];
   if (job.paramsArg) args.push('--params', job.paramsArg);
   if (job.gobernador) args.push('--gobernador', job.gobernador);
+  if (job.hilos !== undefined) args.push('--hilos', job.hilos);
+  if (job.gpu !== undefined) args.push('--gpu', job.gpu);
+  if (job.orden !== undefined) args.push('--orden', job.orden);
   const logFd = openSync(join(job.dir, 'proceso.log'), 'a');
   const { child, done } = spawnAwait('npx', args, ROOT, ['ignore', logFd, logFd], true);
   let timedOut = false;

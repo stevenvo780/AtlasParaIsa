@@ -47,6 +47,9 @@ interface DiaMetrica {
 
 interface ReplicaLeida {
   directorio: string; seed: number; params: Params; sha: string; digest: string;
+  digestoMundoFinal: string | null;
+  teselasActivas: number | null; teselasPorHabitante: number | null;
+  fraccionSerial: number | null; fases: Record<string, number> | null;
   diasDeclarados: number; abortada: boolean; dias: DiaMetrica[];
   poblacionInicial: number | null; vecinosMortalesIniciales: number | null; fundadoresMortalesIniciales: number | null;
   metricasVersion: number;
@@ -67,6 +70,7 @@ interface MetricasReplica {
   recetasDistintasEnUsoFinal: number | null; recetasCreadasAcumuladasFinal: number | null;
   giniFinal: number | null; fraccionComidaFinal: number | null;
   distanciaAguaFinal: number | null; regionesSinAguaFinal: number | null; p95Ms: number | null;
+  teselasActivas: number | null; teselasPorHabitante: number | null; fraccionSerial: number | null;
   muertesPorCausa: Record<string, number>; muertesDesconocidas: number;
   colapsoTemprano: boolean;
 }
@@ -74,7 +78,35 @@ interface MetricasReplica {
 // El día se deriva del reloj simulado, no del índice ni del nombre del archivo.
 const TICKS_POR_DIA = 2400, TICK_DIVERSIDAD_SC003 = 5 * TICKS_POR_DIA;
 
-interface ConflictoDeterminismo { firma: string; seed: number; digest: string; replicas: string[]; primeraDiferencia: string }
+interface ConflictoDeterminismo {
+  firma: string;
+  firmasGrupo: string[];
+  seed: number;
+  digest: string;
+  replicas: string[];
+  backends: string[];
+  digestoMundoFinal: [string | null, string | null];
+  primeraDiferencia: string;
+}
+
+interface ComparacionBackend {
+  seed: number;
+  backends: string[];
+  replicas: string[];
+  digestoMundoFinal: (string | null)[];
+  ok: boolean;
+  semaforo: '🟢' | '🔴';
+  estado: '🟢 DETERMINISTA' | '🔴 ROTO';
+}
+
+interface PuntoCurvaTeselas {
+  grupo: string;
+  backend: string;
+  teselasActivas: Agregado | null;
+  teselasPorHabitante: Agregado | null;
+  p95Ms: Agregado | null;
+  fraccionSerial: Agregado | null;
+}
 
 /** Lee y valida un JSON; error legible con la ruta si falta o está mal formado. */
 function leerJson<T>(ruta: string): T {
@@ -135,7 +167,9 @@ function leerDia(ruta: string, anteriores: Record<string, number>, metricasVersi
 }
 
 function leerReplica(directorio: string): ReplicaLeida {
-  const meta = leerJson<{ seed?: number; params?: Params; sha?: string; digest?: string; dias?: number; abortada?: boolean; metricasVersion?: number;
+  const meta = leerJson<{ seed?: number; params?: Params; sha?: string; digest?: string; digestoMundoFinal?: string;
+    teselasActivas?: number; teselasPorHabitante?: number; fraccionSerial?: number; fases?: Record<string, number>;
+    dias?: number; abortada?: boolean; metricasVersion?: number;
     resumen?: { poblacionInicial?: number; vecinosMortalesIniciales?: number; fundadoresMortalesIniciales?: number } | null }>(
     join(directorio, 'replica.json'));
   if (typeof meta.seed !== 'number' || typeof meta.digest !== 'string' || typeof meta.sha !== 'string') {
@@ -151,6 +185,11 @@ function leerReplica(directorio: string): ReplicaLeida {
   });
   if (dias.some((dia, index) => index > 0 && dia.tick <= dias[index - 1]!.tick)) throw new Error(`${directorio}: días fuera de orden o repetidos.`);
   return { directorio, seed: meta.seed, params: meta.params ?? {}, sha: meta.sha, digest: meta.digest,
+    digestoMundoFinal: typeof meta.digestoMundoFinal === 'string' ? meta.digestoMundoFinal : null,
+    teselasActivas: typeof meta.teselasActivas === 'number' && Number.isFinite(meta.teselasActivas) ? meta.teselasActivas : null,
+    teselasPorHabitante: typeof meta.teselasPorHabitante === 'number' && Number.isFinite(meta.teselasPorHabitante) ? meta.teselasPorHabitante : null,
+    fraccionSerial: typeof meta.fraccionSerial === 'number' && Number.isFinite(meta.fraccionSerial) ? meta.fraccionSerial : null,
+    fases: meta.fases && typeof meta.fases === 'object' && !Array.isArray(meta.fases) ? meta.fases : null,
     diasDeclarados: meta.dias ?? dias.length, abortada: meta.abortada === true, dias, metricasVersion,
     poblacionInicial: meta.resumen?.poblacionInicial ?? (dias[0]?.tick === 0 ? dias[0].poblacion : null),
     vecinosMortalesIniciales: meta.resumen?.vecinosMortalesIniciales ?? null,
@@ -175,6 +214,7 @@ function metricasReplica(replica: ReplicaLeida): MetricasReplica {
       recetasDistintasEnUsoFinal: null, recetasCreadasAcumuladasFinal: null,
       diaDiversidadUsado: null, giniFinal: null, fraccionComidaFinal: null, distanciaAguaFinal: null,
       regionesSinAguaFinal: null, p95Ms: null,
+      teselasActivas: replica.teselasActivas, teselasPorHabitante: replica.teselasPorHabitante, fraccionSerial: replica.fraccionSerial,
       muertesPorCausa: {}, muertesDesconocidas: 0, colapsoTemprano: false };
   }
   const primero = dias[0]!, ultimo = dias.at(-1)!;
@@ -206,6 +246,7 @@ function metricasReplica(replica: ReplicaLeida): MetricasReplica {
     giniFinal: ultimo.gini, fraccionComidaFinal: ultimo.fraccionComida,
     distanciaAguaFinal: ultimo.distanciaAgua, regionesSinAguaFinal: ultimo.regionesSinAgua,
     p95Ms: p95Serie?.mediana ?? null,
+    teselasActivas: replica.teselasActivas, teselasPorHabitante: replica.teselasPorHabitante, fraccionSerial: replica.fraccionSerial,
     muertesPorCausa, muertesDesconocidas, colapsoTemprano,
   };
 }
@@ -214,6 +255,36 @@ function metricasReplica(replica: ReplicaLeida): MetricasReplica {
 // pared (tiempos de paso y memoria), no del estado del mundo. Todo lo demás se compara: misma
 // semilla + mismo digest de `src/world` debe dar EXACTAMENTE la misma serie de estado del mundo.
 const CAMPOS_NO_DETERMINISTAS = new Set<keyof DiaMetrica>(['p50Ms', 'p95Ms', 'rss']);
+
+/** Quita las opciones de backend de hardware (`motor.hilos`, `motor.gpu`, `motor.orden`) para
+ * agrupar réplicas que solo difieren en su configuración de ejecución. */
+function paramsSinHardware(params: Params): Params {
+  const copia: Params = { ...params };
+  delete copia['motor.hilos'];
+  delete copia['motor.gpu'];
+  delete copia['motor.orden'];
+  if (copia.motor !== null && typeof copia.motor === 'object' && !Array.isArray(copia.motor)) {
+    const motor = { ...(copia.motor as Record<string, unknown>) };
+    delete motor.hilos;
+    delete motor.gpu;
+    delete motor.orden;
+    if (Object.keys(motor).length === 0) delete copia.motor;
+    else copia.motor = motor;
+  }
+  return copia;
+}
+
+/** Etiqueta legible del backend de ejecución de una réplica (`hilos=N,gpu=[...],orden=...`). */
+function etiquetaBackend(params: Params): string {
+  const motor = (params.motor !== null && typeof params.motor === 'object' && !Array.isArray(params.motor))
+    ? (params.motor as Record<string, unknown>)
+    : undefined;
+  const hilos = motor?.hilos ?? params['motor.hilos'] ?? 1;
+  const gpuRaw = motor?.gpu ?? params['motor.gpu'] ?? [];
+  const orden = motor?.orden ?? params['motor.orden'] ?? 'natural';
+  const gpu = typeof gpuRaw === 'string' ? gpuRaw : JSON.stringify(gpuRaw);
+  return `hilos=${String(hilos)},gpu=${gpu},orden=${String(orden)}`;
+}
 
 /** Compara dos series de días recorriendo TODAS las claves de `DiaMetrica` (salvo las de reloj de
  * pared) en vez de una lista literal, para no volver a omitir un campo al ampliar el contrato.
@@ -232,29 +303,59 @@ function primeraDiferenciaDias(a: DiaMetrica[], b: DiaMetrica[]): string | null 
   return null;
 }
 
-/** Misma firma de parámetros + misma semilla + mismo digest de `src/world` debería dar la MISMA
- * serie de métricas de mundo (determinismo, principio I). Si no, rotura → 🔴. */
-function detectarRoturaDeterminismo(replicas: ReplicaLeida[]): ConflictoDeterminismo[] {
+/** Misma firma de parámetros (excluido el backend de hardware `motor.{hilos,gpu,orden}`) + misma
+ * semilla + mismo digest de `src/world` debería dar la MISMA serie de métricas de mundo y el
+ * MISMO `digestoMundoFinal` (determinismo, principio I y T118). Si no, rotura → 🔴 ROTO. */
+function detectarRoturaDeterminismo(replicas: ReplicaLeida[]): {
+  conflictos: ConflictoDeterminismo[];
+  comparacionesBackend: ComparacionBackend[];
+} {
   const grupos = new Map<string, ReplicaLeida[]>();
   for (const replica of replicas) {
     if (replica.abortada || replica.dias.length === 0) continue;
     // A change of measurement schema is not a change of the simulated laws.
-    const clave = `${firmaEstable(replica.params)}::${replica.seed}::${replica.digest}::v${replica.metricasVersion}`;
+    const clave = `${firmaEstable(paramsSinHardware(replica.params))}::${replica.seed}::${replica.digest}::v${replica.metricasVersion}`;
     grupos.set(clave, [...(grupos.get(clave) ?? []), replica]);
   }
   const conflictos: ConflictoDeterminismo[] = [];
+  const comparacionesBackend: ComparacionBackend[] = [];
   for (const [clave, grupo] of grupos) {
     if (grupo.length < 2) continue;
     const base = grupo[0]!;
+    const backendBase = etiquetaBackend(base.params);
+    let grupoOk = true;
     for (const otra of grupo.slice(1)) {
-      const diferencia = primeraDiferenciaDias(base.dias, otra.dias);
+      const backendOtra = etiquetaBackend(otra.params);
+      const difDias = primeraDiferenciaDias(base.dias, otra.dias);
+      const difDigesto = (base.digestoMundoFinal !== null && otra.digestoMundoFinal !== null && base.digestoMundoFinal !== otra.digestoMundoFinal)
+        ? `digestoMundoFinal distinto (${backendBase}=${base.digestoMundoFinal} vs ${backendOtra}=${otra.digestoMundoFinal})`
+        : null;
+      const diferencia = difDias && difDigesto ? `${difDias}; ${difDigesto}` : (difDias ?? difDigesto);
       if (diferencia) {
-        conflictos.push({ firma: clave, seed: base.seed, digest: base.digest,
-          replicas: [base.directorio, otra.directorio], primeraDiferencia: diferencia });
+        grupoOk = false;
+        conflictos.push({
+          firma: clave,
+          firmasGrupo: [...new Set([firmaEstable(base.params), firmaEstable(otra.params)])],
+          seed: base.seed,
+          digest: base.digest,
+          replicas: [base.directorio, otra.directorio],
+          backends: [backendBase, backendOtra],
+          digestoMundoFinal: [base.digestoMundoFinal, otra.digestoMundoFinal],
+          primeraDiferencia: diferencia,
+        });
       }
     }
+    comparacionesBackend.push({
+      seed: base.seed,
+      backends: grupo.map(r => etiquetaBackend(r.params)),
+      replicas: grupo.map(r => r.directorio),
+      digestoMundoFinal: grupo.map(r => r.digestoMundoFinal),
+      ok: grupoOk,
+      semaforo: grupoOk ? '🟢' : '🔴',
+      estado: grupoOk ? '🟢 DETERMINISTA' : '🔴 ROTO',
+    });
   }
-  return conflictos;
+  return { conflictos, comparacionesBackend };
 }
 
 // Umbrales SC-002..005 de spec.md. Solo el valor "verde" es una cifra oficial del spec; el
@@ -272,7 +373,7 @@ const peor = (...s: (Semaforo | null)[]): Semaforo => {
 };
 
 interface GrupoResumen {
-  params: Params; firma: string; esControl: boolean; replicas: number; abortadas: number;
+  params: Params; firma: string; backend: string; esControl: boolean; replicas: number; abortadas: number;
   // Índice del día realmente usado para `diversidadFinal` (SC-003 pide el día 5; con réplicas más
   // cortas se cae al último día disponible). `null` si el grupo no tiene ninguna réplica válida.
   diaDiversidadUsado: number | null;
@@ -282,6 +383,7 @@ interface GrupoResumen {
     recetasDistintasEnUsoFinal: Agregado | null; recetasCreadasAcumuladasFinal: Agregado | null;
     diversidadFinal: Agregado | null; diversidadDia5: Agregado | null; giniFinal: Agregado | null; fraccionComidaFinal: Agregado | null;
     distanciaAguaFinal: Agregado | null; regionesSinAguaFinal: Agregado | null; p95Ms: Agregado | null;
+    teselasActivas: Agregado | null; teselasPorHabitante: Agregado | null; fraccionSerial: Agregado | null;
     muertesPorCausa: Record<string, Agregado | null> };
   colapsoTemprano: { detectado: boolean; replicas: string[] };
   muertesDesconocidas: number;
@@ -304,6 +406,9 @@ function agregarGrupo(replicas: ReplicaLeida[], causas: string[]): GrupoResumen[
     distanciaAguaFinal: agregar(metricas.map(m => m.distanciaAguaFinal)),
     regionesSinAguaFinal: agregar(metricas.map(m => m.regionesSinAguaFinal)),
     p95Ms: agregar(metricas.map(m => m.p95Ms)),
+    teselasActivas: agregar(metricas.map(m => m.teselasActivas)),
+    teselasPorHabitante: agregar(metricas.map(m => m.teselasPorHabitante)),
+    fraccionSerial: agregar(metricas.map(m => m.fraccionSerial)),
     muertesPorCausa: Object.fromEntries(causas.map(causa => [causa, agregar(metricas.map(m => m.muertesPorCausa[causa] ?? 0))])),
   };
 }
@@ -321,7 +426,7 @@ function construirGrupos(replicas: ReplicaConOrigen[], huboControlExplicito: boo
   const porGrupo = new Map<string, ReplicaConOrigen[]>();
   for (const replica of replicas) porGrupo.set(claveGrupo(replica), [...(porGrupo.get(claveGrupo(replica)) ?? []), replica]);
   const causas = [...new Set(replicas.flatMap(r => r.dias.flatMap(d => Object.keys(d.muertes))))].sort();
-  const firmasConConflicto = new Set(conflictos.map(c => c.firma.split('::')[0]));
+  const firmasConConflicto = new Set(conflictos.flatMap(c => c.firmasGrupo));
 
   // El grupo de control es: (a) con `--control` explícito, el (único) grupo cuyas réplicas vienen
   // de esa fuente; (b) sin `--control`, el grupo de `--entrada` cuyos `params` son `{}`, si existe.
@@ -335,6 +440,7 @@ function construirGrupos(replicas: ReplicaConOrigen[], huboControlExplicito: boo
   const grupos: GrupoResumen[] = [];
   for (const [clave, replicasGrupo] of porGrupo) {
     const firma = firmaEstable(replicasGrupo[0]!.params);
+    const backend = etiquetaBackend(replicasGrupo[0]!.params);
     const vivas = replicasGrupo.filter(r => !r.abortada && r.dias.length > 0);
     const metricasVivas = vivas.map(metricasReplica);
     const metricas = agregarGrupo(vivas, causas);
@@ -381,7 +487,7 @@ function construirGrupos(replicas: ReplicaConOrigen[], huboControlExplicito: boo
     if (semRegionesSecas === '🔴' || semRegionesSecas === '🟡') motivos.push(`regiones sin agua ${((metricas.regionesSinAguaFinal?.mediana ?? 0) * 100).toFixed(1)} % (SC-004 ≥ 30 %)`);
     if (semDesconocidas) motivos.push(`${muertesDesconocidas} muerte(s) con causa desconocida (SC-005 = 0)`);
     if (semColapso) motivos.push(`colapso > 50 % en los 2 primeros días en ${colapsoReplicas.length} réplica(s)`);
-    if (semDeterminismo) motivos.push('rotura de determinismo: misma semilla + mismo digest con métricas distintas');
+    if (semDeterminismo) motivos.push('rotura de determinismo: misma semilla + mismo digest con métricas o digestoMundoFinal distintos');
 
     let comparacionControl: GrupoResumen['comparacionControl'] = null;
     if (metricasControl && !esControl) {
@@ -402,7 +508,7 @@ function construirGrupos(replicas: ReplicaConOrigen[], huboControlExplicito: boo
       }
     }
 
-    grupos.push({ params: replicasGrupo[0]!.params, firma, esControl, replicas: vivas.length, abortadas: replicasGrupo.filter(replica => replica.abortada).length,
+    grupos.push({ params: replicasGrupo[0]!.params, firma, backend, esControl, replicas: vivas.length, abortadas: replicasGrupo.filter(replica => replica.abortada).length,
       diaDiversidadUsado, alcancesSupervivencia,
       metricas, colapsoTemprano: { detectado: colapsoReplicas.length > 0, replicas: colapsoReplicas }, muertesDesconocidas,
       comparacionControl, semaforo, motivos });
@@ -412,7 +518,15 @@ function construirGrupos(replicas: ReplicaConOrigen[], huboControlExplicito: boo
 
 interface ResultadoResumen {
   generadoEn: string; entrada: string; control: string | null; totalReplicas: number; replicasAbortadas: number;
-  causasConocidas: readonly string[]; grupos: GrupoResumen[]; determinismo: { ok: boolean; conflictos: ConflictoDeterminismo[] };
+  causasConocidas: readonly string[]; grupos: GrupoResumen[];
+  curvaTeselas: PuntoCurvaTeselas[];
+  determinismo: {
+    ok: boolean;
+    semaforo: '🟢' | '🔴';
+    estado: '🟢 DETERMINISTA' | '🔴 ROTO';
+    conflictos: ConflictoDeterminismo[];
+    comparacionesBackend: ComparacionBackend[];
+  };
 }
 
 function formatoAgregado(a: Agregado | null, decimales = 2): string {
@@ -434,9 +548,18 @@ function generarMarkdown(resultado: ResultadoResumen): string {
         `| ${causa} | ${resultado.grupos.map(g => formatoAgregado(g.metricas.muertesPorCausa[causa] ?? null, 1)).join(' | ')} |`).join('\n')
     : '(sin muertes registradas)';
 
+  const curvaFilas = resultado.curvaTeselas.map(p =>
+    `| ${p.grupo} | \`${p.backend}\` | ${formatoAgregado(p.teselasActivas, 0)} | ${formatoAgregado(p.teselasPorHabitante, 2)} | ${formatoAgregado(p.p95Ms, 1)} | ${formatoAgregado(p.fraccionSerial, 3)} |`).join('\n');
+
   const conflictos = resultado.determinismo.conflictos.length
-    ? resultado.determinismo.conflictos.map(c => `- semilla ${c.seed}, digest \`${c.digest.slice(0, 12)}…\`: ${c.replicas.join(' vs ')} — ${c.primeraDiferencia}`).join('\n')
+    ? resultado.determinismo.conflictos.map(c =>
+        `- semilla ${c.seed}, digest \`${c.digest.slice(0, 12)}…\` (${c.backends.join(' vs ')}): ${c.replicas.join(' vs ')} — ${c.primeraDiferencia}`).join('\n')
     : '(ninguna)';
+
+  const comparacionesMd = resultado.determinismo.comparacionesBackend.length
+    ? `\n\n| Semilla | Backends | Estado |\n|---|---|---|\n` +
+      resultado.determinismo.comparacionesBackend.map(cb => `| ${cb.seed} | \`${cb.backends.join('` vs `')}\` | ${cb.estado} |`).join('\n')
+    : '';
 
   const motivos = resultado.grupos.filter(g => g.motivos.length).map(g =>
     `- ${g.esControl ? 'control' : JSON.stringify(g.params)} ${g.semaforo}: ${g.motivos.join('; ')}`).join('\n') || '(ninguno)';
@@ -447,11 +570,14 @@ function generarMarkdown(resultado: ResultadoResumen): string {
     `## Por grupo de parámetros\n\n` +
     `| Grupo | Réplicas | Superv. fundadores | Δ vs control | Población final/inicial | Diversidad normalizada observada | Gini | % celdas comida | Dist. agua | Regiones sin agua | p95 ms | Muertes desconocidas | Semáforo |\n` +
     `|---|---|---|---|---|---|---|---|---|---|---|---|---|\n${filas}\n\n` +
+    `## Curva p95(teselasActivas) y hardware\n\n` +
+    `| Grupo | Backend | teselasActivas | teselasPorHabitante | p95 ms | fraccionSerial |\n` +
+    `|---|---|---|---|---|---|\n${curvaFilas}\n\n` +
     `## Muertes por causa (mediana por réplica del grupo)\n\n` +
     `| Causa | ${resultado.grupos.map(g => g.esControl ? 'control' : JSON.stringify(g.params)).join(' | ')} |\n` +
     `|---|${resultado.grupos.map(() => '---').join('|')}|\n${causasFilas}\n\n` +
     `## Determinismo (misma semilla + mismo digest de \`src/world\`)\n\n` +
-    `${resultado.determinismo.ok ? '🟢 sin conflictos.' : `🔴 rotura de determinismo:\n\n${conflictos}`}\n\n` +
+    `${resultado.determinismo.ok ? '🟢 DETERMINISTA — sin conflictos.' : `🔴 ROTO — rotura de determinismo:\n\n${conflictos}`}${comparacionesMd}\n\n` +
     `## Motivos de semáforo no verde\n\n${motivos}\n\n` +
     `_Semáforo: verde cumple el umbral SC-002/003/004 de \`spec.md\`; rojo, por debajo de la mitad del umbral (o incumplimiento` +
     ` duro SC-005 / colapso temprano / rotura de determinismo / grupo sin réplicas válidas o sin datos para una métrica con` +
@@ -473,12 +599,28 @@ function resumirBarrido(entrada: string, opciones: { control?: string | null; sa
     ...replicasControlCrudas.map(r => ({ ...r, esDelControl: true as const })),
   ];
   const huboControlExplicito = opciones.control != null;
-  const conflictos = detectarRoturaDeterminismo(todas);
+  const { conflictos, comparacionesBackend } = detectarRoturaDeterminismo(todas);
   const grupos = construirGrupos(todas, huboControlExplicito, conflictos);
+  const curvaTeselas: PuntoCurvaTeselas[] = grupos.map(g => ({
+    grupo: g.esControl ? 'control' : JSON.stringify(g.params),
+    backend: g.backend,
+    teselasActivas: g.metricas.teselasActivas,
+    teselasPorHabitante: g.metricas.teselasPorHabitante,
+    p95Ms: g.metricas.p95Ms,
+    fraccionSerial: g.metricas.fraccionSerial,
+  }));
+  const determinismoOk = conflictos.length === 0;
   const resultado: ResultadoResumen = {
     generadoEn: new Date().toISOString(), entrada: resolve(entrada), control: opciones.control ? resolve(opciones.control) : null,
     totalReplicas: todas.length, replicasAbortadas: todas.filter(r => r.abortada).length,
-    causasConocidas: CAUSAS_CONOCIDAS, grupos, determinismo: { ok: conflictos.length === 0, conflictos },
+    causasConocidas: CAUSAS_CONOCIDAS, grupos, curvaTeselas,
+    determinismo: {
+      ok: determinismoOk,
+      semaforo: determinismoOk ? '🟢' : '🔴',
+      estado: determinismoOk ? '🟢 DETERMINISTA' : '🔴 ROTO',
+      conflictos,
+      comparacionesBackend,
+    },
   };
   const salida = opciones.salida ? resolve(opciones.salida) : resolve(entrada);
   mkdirSync(salida, { recursive: true });
@@ -516,6 +658,7 @@ function main() {
   const salida = config.salida ? resolve(config.salida) : resolve(config.entrada);
   console.log(JSON.stringify({ salida: relative(process.cwd(), salida) || '.', grupos: resultado.grupos.length,
     replicas: resultado.totalReplicas, abortadas: resultado.replicasAbortadas, determinismoOk: resultado.determinismo.ok,
+    determinismoSemaforo: resultado.determinismo.semaforo, determinismoEstado: resultado.determinismo.estado,
     semaforos: Object.fromEntries(resultado.grupos.map(g => [g.esControl ? 'control' : g.firma, g.semaforo])) }));
   if (!resultado.determinismo.ok || resultado.grupos.some(g => g.semaforo === '🔴')) process.exitCode = 1;
 }

@@ -34,7 +34,9 @@
  * (generación 0, sin padres) del propio `createWorld` — la «misma vía que usa createWorld»
  * que puede reutilizarse desde fuera de `src/world` sin exportar una fábrica nueva de
  * personas: se reutiliza un `Person` que YA construyó `createWorld` con sus leyes reales
- * (genoma, cultura, tecnología, demografía) y solo se le cambian identidad y posición.
+ * (genoma, cultura, demografía). Se cambian identidad y posición, se limpian vínculos y
+ * recuerdos y se restablece únicamente su tecnología al estado inicial: la plantilla
+ * vigente puede portar productos, residuos, proyectos y práctica de ventanas anteriores.
  * Colocados exactamente sobre las posiciones de los 14 fundadores «neighbor» (walkable por
  * construcción, ya las validó `createWorld`; nada exige exclusividad de tesela entre
  * personas), nunca en coordenadas propias: una posición inventada podría caer en agua
@@ -67,6 +69,7 @@ import { GOVERNOR_WINDOW_STEPS, RollingStepPerformance } from '../src/server/gov
 import { cloneWorld, createWorld, stepWorld, tileAt, type Person, type World } from '../src/world/index.js';
 import { paramsOf, DEFAULT_PARAMS, type WorldParams } from '../src/world/params.js';
 import { maintainRegions, type WorldContext } from '../src/world/spatial.js';
+import { clonarPlantillaSintetica } from './lib/curva-techo-fixture.js';
 
 /** Hoy no hay ninguna fase paralelizable implementada (T102 es config reservada): el paso
  * entero corre en un solo hilo. Ver la nota de cabecera sobre T107. */
@@ -122,7 +125,7 @@ function agregarHabitantesSinteticos(world: World, objetivo: number, contador: {
   const posiciones = world.people.filter(p => p.genome.generation === 0).map(p => ({ x: p.x, y: p.y }));
   while (world.people.length < objetivo) {
     const n = contador.n++;
-    const persona = structuredClone(plantilla);
+    const persona = clonarPlantillaSintetica(plantilla);
     persona.id = `synthetic-${n}`;
     const destino = posiciones[n % posiciones.length]!;
     desvincular(persona, destino.x, destino.y);
@@ -166,7 +169,7 @@ function agregarAnclasSinteticas(world: World, objetivo: number, contador: { n: 
     const plantilla = founderTemplate(world);
     const n = contador.n++;
     const { x, y } = coordenadaAncla(n);
-    const ancla = structuredClone(plantilla);
+    const ancla = clonarPlantillaSintetica(plantilla);
     ancla.id = `ancla-${n}`;
     desvincular(ancla, x, y);
     world.people.push(ancla);

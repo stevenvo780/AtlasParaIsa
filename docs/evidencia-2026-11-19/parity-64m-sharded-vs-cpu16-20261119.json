@@ -1,0 +1,12 @@
+{
+  "cells": 64000000,
+  "valuesCompared": 832000000,
+  "ticks": 10,
+  "crossSeamDirtyMutationAtTick": 150,
+  "cpu16WorkersTotalMs": 11929.2,
+  "cpu16WorkersAvgMsPerTick": 1192.92,
+  "shardedDualGpuTotalMs": 3260.9,
+  "shardedDualGpuAvgMsPerTick": 326.09,
+  "objectIsDiffs": 0,
+  "elapsedTotalSec": 24.8
+}

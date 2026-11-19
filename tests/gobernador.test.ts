@@ -421,3 +421,27 @@ test('T162: la clase Gobernador publica estado, palanca y señal, y aplica la hi
   f.app.setReproduccionManual(false); f.app.stepOnce();
   assert.equal(f.app.runtime.gobernador!.estado, 'manual'); assert.equal(f.app.runtime.gobernador!.palancaActiva, null);
 });
+
+test('T171 F-1: Gobernador.gobernar() conserva actual=false con ventana vacía y honra manualOverride', () => {
+  const g = new Gobernador();
+  const base = { presupuestoMs: 50, politica: 'techo' as const, senales: ['p95'], subscribeMs: 100, cadaTicks: 2 };
+  // Ventana vacía: no debe recomputar con p95=0 e invertir actual=false a true.
+  const vacia = g.gobernar(base, false, 20, 500, 1);
+  assert.equal(vacia.reproductionEnabled, false);
+  assert.equal(vacia.estado, 'verde');
+  assert.equal(vacia.palancaActiva, null);
+  assert.equal(g.ultimaDecision, null);
+  // Con mediciones en rojo, manualOverride=false/true debe reflejarse en gobernar() sin devolver ultimaDecision obsoleta.
+  for (let n = 0; n < 8; n++) g.registrar(80);
+  const rojo = g.gobernar(base, true, 20, 500, 8);
+  assert.equal(rojo.estado, 'rojo');
+  assert.equal(rojo.reproductionEnabled, false);
+  const manualOn = g.gobernar({ ...base, manualOverride: true }, false, 20, 500, 9);
+  assert.equal(manualOn.estado, 'manual');
+  assert.equal(manualOn.reproductionEnabled, true);
+  assert.equal(manualOn.palancaActiva, null);
+  const manualOff = g.gobernar({ ...base, manualOverride: false }, true, 20, 500, 10);
+  assert.equal(manualOff.estado, 'manual');
+  assert.equal(manualOff.reproductionEnabled, false);
+  assert.equal(manualOff.palancaActiva, null);
+});

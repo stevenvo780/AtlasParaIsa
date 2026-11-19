@@ -354,7 +354,15 @@ export class Gobernador {
 
   /** Atajo T162: decide y devuelve la decisión entera (estado, palanca y efectos), no solo el booleano. */
   gobernar(params: ParamsDecisionGobernador, actual: boolean, poblacion: number, teselasActivas: number, tick: number): DecisionGobernar {
-    this.decidir(params, actual, poblacion, teselasActivas, tick);
-    return this.ultimaDecision ?? gobernar({ ...params, p95StepMs: this.p95StepMs, actual, poblacion }, this.gobernacion);
+    const reproduccion = this.decidir(params, actual, poblacion, teselasActivas, tick);
+    if (this.ultimaDecision && (params.manualOverride === null || params.manualOverride === undefined)) return this.ultimaDecision;
+    // T171 F-1: ventana vacía o mandato manual — `decidir` ya resolvió `reproduccion`;
+    // no recomputar con p95=0, que invertiría `actual=false` en «verde».
+    return {
+      estado: this.estadoGobernador, palancaActiva: this.palancaActiva, senalDisparadora: this.senalDisparadora,
+      senalesDisparadas: [], reproductionEnabled: reproduccion, techo: this.estado.techo, estadoTecho: this.estado,
+      ventanasVerdesConsecutivas: this.ventanasVerdesConsecutivas, solicitarRetiroPaginasFrias: this.solicitarRetiroPaginasFrias,
+      subscribeMsEfectivo: this.subscribeMsEfectivo, cadaTicksEfectivo: this.cadaTicksEfectivo, siguiente: this.gobernacion,
+    };
   }
 }

@@ -4,6 +4,7 @@ import { localRandom } from './genetics.js';
 import { DEFAULT_PARAMS, paramsOf } from './params.js';
 import { algunoCerca } from './indice-puntos.js';
 import { vecinos } from './rejilla.js';
+import { emitObserved } from './observation.js';
 
 export const FAMILY_RESERVE_TARGET = 0.12;
 const SHARE_AMOUNT = 0.025;
@@ -25,7 +26,9 @@ export function pairAffinity(a: Person, b: Person, radioPareja: number = DEFAULT
 
 export function pairTie(world: Pick<World, 'seed' | 'tick'>, a: Person, b: Person): number {
   const lo = a.id < b.id ? a.id : b.id, hi = a.id < b.id ? b.id : a.id;
-  return localRandom(world.seed, `reproduce:${world.tick}:${lo}:${hi}`)();
+  const tie = localRandom(world.seed, `reproduce:${world.tick}:${lo}:${hi}`)();
+  emitObserved(world, 'family.pair-tie', () => ({ kind: 'reproduction-gate', gate: 'pair-tie', actorIds: [lo, hi], value: tie }));
+  return tie;
 }
 
 /** `byAffinity=false` keeps insertion order (first of `candidates`). Ties break with `localRandom`. */
@@ -104,6 +107,7 @@ export function familyOpportunity(world: World, person: Person): FamilyOpportuni
     && !closeKin(person, other) && reproductiveReadiness(world, other)
     && algunoCerca(world.places, person, 8, place => distance(person, place) <= 7 && (distance(person, place) <= 4 || distance(other, place) <= 4)))
     .sort((a, b) => distance(person, a) - distance(person, b) || a.id.localeCompare(b.id))[0];
+  emitObserved(world, 'family.opportunity-forecast', () => ({ kind: 'family-forecast', actorIds: [person.id, ...(partner ? [partner.id] : [])], viable: !!partner }));
   return partner ? { partner, reserveTarget: FAMILY_RESERVE_TARGET } : null;
 }
 

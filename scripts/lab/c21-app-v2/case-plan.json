@@ -1,0 +1,2100 @@
+{
+  "schema": "c21-app-case-plan/v1",
+  "scientificAcceptance": false,
+  "c21": "UNKNOWN",
+  "protocolPath": "/datos/workspaces/personal/AtlasParaIsa-anexo/worktrees/c21-durabilidad-20261004/specs/003-criterios-realismo/durability-protocol.md",
+  "protocolSha256": "c20b96b95209aaea70559f9cfb84932c376136a84f7f12eaaef1577e7a50fa8a",
+  "plannedPrimaryCases": 61,
+  "plannedBeforeCases": 20,
+  "plannedAfterCases": 24,
+  "plannedAdditionalCases": 54,
+  "cases": [
+    {
+      "caseId": "B01-G",
+      "fixture": "F21-B/C",
+      "boundary": "Después de preparar snapshot, antes de `BEGIN IMMEDIATE`",
+      "expectedManual": "No publicar borrador no confirmado",
+      "binding": {
+        "source": "src/server/store.ts",
+        "signal": "SIGTERM",
+        "observable": "NO_APP_BARRIER",
+        "implementableMechanism": false
+      },
+      "classification": "UNKNOWN",
+      "reason": "No phase barrier; Store harness wrapper is outside App scope",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "B01-F",
+      "fixture": "F21-B/C",
+      "boundary": "Después de preparar snapshot, antes de `BEGIN IMMEDIATE`",
+      "expectedManual": "No publicar borrador no confirmado",
+      "binding": {
+        "source": "src/server/store.ts",
+        "signal": "SIGKILL",
+        "observable": "NO_APP_BARRIER",
+        "implementableMechanism": false
+      },
+      "classification": "UNKNOWN",
+      "reason": "No phase barrier; Store harness wrapper is outside App scope",
+      "v2Binding": {
+        "mechanismImplemented": true,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": "WRITE_BEFORE_BEGIN",
+        "reason": "Native mechanism needs observed receipt plus independent manual ledger and v3 bundle"
+      }
+    },
+    {
+      "caseId": "B02-G",
+      "fixture": "F21-B/C",
+      "boundary": "Después de BEGIN/comprobación de sesiones sintéticas, antes de flush",
+      "expectedManual": "Nada parcial durable ni ACK positivo",
+      "binding": {
+        "source": "src/server/store.ts",
+        "signal": "SIGTERM",
+        "observable": "NO_APP_BARRIER",
+        "implementableMechanism": false
+      },
+      "classification": "UNKNOWN",
+      "reason": "No phase barrier; Store harness wrapper is outside App scope",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "B02-F",
+      "fixture": "F21-B/C",
+      "boundary": "Después de BEGIN/comprobación de sesiones sintéticas, antes de flush",
+      "expectedManual": "Nada parcial durable ni ACK positivo",
+      "binding": {
+        "source": "src/server/store.ts",
+        "signal": "SIGKILL",
+        "observable": "NO_APP_BARRIER",
+        "implementableMechanism": false
+      },
+      "classification": "UNKNOWN",
+      "reason": "No phase barrier; Store harness wrapper is outside App scope",
+      "v2Binding": {
+        "mechanismImplemented": true,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": "WRITE_BEFORE_FLUSH",
+        "reason": "Native mechanism needs observed receipt plus independent manual ledger and v3 bundle"
+      }
+    },
+    {
+      "caseId": "B03-G",
+      "fixture": "F21-B/C",
+      "boundary": "Tras `flushTechnology`",
+      "expectedManual": "Recibos/definiciones no sobreviven sin snapshot coherente",
+      "binding": {
+        "source": "src/server/store.ts",
+        "signal": "SIGTERM",
+        "observable": "NO_APP_BARRIER",
+        "implementableMechanism": false
+      },
+      "classification": "UNKNOWN",
+      "reason": "No phase barrier; Store harness wrapper is outside App scope",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "B03-F",
+      "fixture": "F21-B/C",
+      "boundary": "Tras `flushTechnology`",
+      "expectedManual": "Recibos/definiciones no sobreviven sin snapshot coherente",
+      "binding": {
+        "source": "src/server/store.ts",
+        "signal": "SIGKILL",
+        "observable": "NO_APP_BARRIER",
+        "implementableMechanism": false
+      },
+      "classification": "UNKNOWN",
+      "reason": "No phase barrier; Store harness wrapper is outside App scope",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "B04-G",
+      "fixture": "F21-B/C",
+      "boundary": "Tras `pruneTechnology` y metadata de cadena",
+      "expectedManual": "No perder prefijo retenido ni modificar frontera en rollback",
+      "binding": {
+        "source": "src/server/store.ts",
+        "signal": "SIGTERM",
+        "observable": "NO_APP_BARRIER",
+        "implementableMechanism": false
+      },
+      "classification": "UNKNOWN",
+      "reason": "No phase barrier; Store harness wrapper is outside App scope",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "B04-F",
+      "fixture": "F21-B/C",
+      "boundary": "Tras `pruneTechnology` y metadata de cadena",
+      "expectedManual": "No perder prefijo retenido ni modificar frontera en rollback",
+      "binding": {
+        "source": "src/server/store.ts",
+        "signal": "SIGKILL",
+        "observable": "NO_APP_BARRIER",
+        "implementableMechanism": false
+      },
+      "classification": "UNKNOWN",
+      "reason": "No phase barrier; Store harness wrapper is outside App scope",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "B05-G",
+      "fixture": "F21-B/C",
+      "boundary": "Tras `flushChronicle`",
+      "expectedManual": "Crónica y snapshot vuelven juntos a K0",
+      "binding": {
+        "source": "src/server/store.ts",
+        "signal": "SIGTERM",
+        "observable": "NO_APP_BARRIER",
+        "implementableMechanism": false
+      },
+      "classification": "UNKNOWN",
+      "reason": "No phase barrier; Store harness wrapper is outside App scope",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "B05-F",
+      "fixture": "F21-B/C",
+      "boundary": "Tras `flushChronicle`",
+      "expectedManual": "Crónica y snapshot vuelven juntos a K0",
+      "binding": {
+        "source": "src/server/store.ts",
+        "signal": "SIGKILL",
+        "observable": "NO_APP_BARRIER",
+        "implementableMechanism": false
+      },
+      "classification": "UNKNOWN",
+      "reason": "No phase barrier; Store harness wrapper is outside App scope",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "B06-G",
+      "fixture": "F21-B/C",
+      "boundary": "Tras archivado de identidades `retiredLegacy`",
+      "expectedManual": "Identidades/parentesco no mezclan K0 y K1",
+      "binding": {
+        "source": "src/server/store.ts",
+        "signal": "SIGTERM",
+        "observable": "NO_APP_BARRIER",
+        "implementableMechanism": false
+      },
+      "classification": "UNKNOWN",
+      "reason": "No phase barrier; Store harness wrapper is outside App scope",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "B06-F",
+      "fixture": "F21-B/C",
+      "boundary": "Tras archivado de identidades `retiredLegacy`",
+      "expectedManual": "Identidades/parentesco no mezclan K0 y K1",
+      "binding": {
+        "source": "src/server/store.ts",
+        "signal": "SIGKILL",
+        "observable": "NO_APP_BARRIER",
+        "implementableMechanism": false
+      },
+      "classification": "UNKNOWN",
+      "reason": "No phase barrier; Store harness wrapper is outside App scope",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "B07-G",
+      "fixture": "F21-B/C",
+      "boundary": "Tras archivado de chunks y poda de crónica",
+      "expectedManual": "Terreno/material/historia vuelven juntos",
+      "binding": {
+        "source": "src/server/store.ts",
+        "signal": "SIGTERM",
+        "observable": "NO_APP_BARRIER",
+        "implementableMechanism": false
+      },
+      "classification": "UNKNOWN",
+      "reason": "No phase barrier; Store harness wrapper is outside App scope",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "B07-F",
+      "fixture": "F21-B/C",
+      "boundary": "Tras archivado de chunks y poda de crónica",
+      "expectedManual": "Terreno/material/historia vuelven juntos",
+      "binding": {
+        "source": "src/server/store.ts",
+        "signal": "SIGKILL",
+        "observable": "NO_APP_BARRIER",
+        "implementableMechanism": false
+      },
+      "classification": "UNKNOWN",
+      "reason": "No phase barrier; Store harness wrapper is outside App scope",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "B08-G",
+      "fixture": "F21-B/C",
+      "boundary": "Tras rotación 0→1/2",
+      "expectedManual": "Rollback conserva red de respaldos original",
+      "binding": {
+        "source": "src/server/store.ts",
+        "signal": "SIGTERM",
+        "observable": "NO_APP_BARRIER",
+        "implementableMechanism": false
+      },
+      "classification": "UNKNOWN",
+      "reason": "No phase barrier; Store harness wrapper is outside App scope",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "B08-F",
+      "fixture": "F21-B/C",
+      "boundary": "Tras rotación 0→1/2",
+      "expectedManual": "Rollback conserva red de respaldos original",
+      "binding": {
+        "source": "src/server/store.ts",
+        "signal": "SIGKILL",
+        "observable": "NO_APP_BARRIER",
+        "implementableMechanism": false
+      },
+      "classification": "UNKNOWN",
+      "reason": "No phase barrier; Store harness wrapper is outside App scope",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "B09-G",
+      "fixture": "F21-B/C",
+      "boundary": "Tras escritura de partes y slot0",
+      "expectedManual": "Partes referidas/GC no dejan snapshot a medias",
+      "binding": {
+        "source": "src/server/store.ts",
+        "signal": "SIGTERM",
+        "observable": "NO_APP_BARRIER",
+        "implementableMechanism": false
+      },
+      "classification": "UNKNOWN",
+      "reason": "No phase barrier; Store harness wrapper is outside App scope",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "B09-F",
+      "fixture": "F21-B/C",
+      "boundary": "Tras escritura de partes y slot0",
+      "expectedManual": "Partes referidas/GC no dejan snapshot a medias",
+      "binding": {
+        "source": "src/server/store.ts",
+        "signal": "SIGKILL",
+        "observable": "NO_APP_BARRIER",
+        "implementableMechanism": false
+      },
+      "classification": "UNKNOWN",
+      "reason": "No phase barrier; Store harness wrapper is outside App scope",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "B10-G",
+      "fixture": "F21-B/C",
+      "boundary": "Tras inputs/collect y validación final, inmediatamente antes de COMMIT",
+      "expectedManual": "Ni resultado ni ACK sin el resto del commit",
+      "binding": {
+        "source": "src/server/store.ts",
+        "signal": "SIGTERM",
+        "observable": "NO_APP_BARRIER",
+        "implementableMechanism": false
+      },
+      "classification": "UNKNOWN",
+      "reason": "No phase barrier; Store harness wrapper is outside App scope",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "B10-F",
+      "fixture": "F21-B/C",
+      "boundary": "Tras inputs/collect y validación final, inmediatamente antes de COMMIT",
+      "expectedManual": "Ni resultado ni ACK sin el resto del commit",
+      "binding": {
+        "source": "src/server/store.ts",
+        "signal": "SIGKILL",
+        "observable": "NO_APP_BARRIER",
+        "implementableMechanism": false
+      },
+      "classification": "UNKNOWN",
+      "reason": "No phase barrier; Store harness wrapper is outside App scope",
+      "v2Binding": {
+        "mechanismImplemented": true,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": "WRITE_BEFORE_COMMIT",
+        "reason": "Native mechanism needs observed receipt plus independent manual ledger and v3 bundle"
+      }
+    },
+    {
+      "caseId": "A01-G",
+      "fixture": "F21-B/C",
+      "boundary": "COMMIT retornado, antes de `saves++`",
+      "expectedManual": "Contadores en memoria no condicionan recuperación de K1",
+      "binding": {
+        "source": "src/server/store.ts",
+        "signal": "SIGTERM",
+        "observable": "NO_APP_BARRIER",
+        "implementableMechanism": false
+      },
+      "classification": "UNKNOWN",
+      "reason": "No phase barrier; Store harness wrapper is outside App scope",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "A01-F",
+      "fixture": "F21-B/C",
+      "boundary": "COMMIT retornado, antes de `saves++`",
+      "expectedManual": "Contadores en memoria no condicionan recuperación de K1",
+      "binding": {
+        "source": "src/server/store.ts",
+        "signal": "SIGKILL",
+        "observable": "NO_APP_BARRIER",
+        "implementableMechanism": false
+      },
+      "classification": "UNKNOWN",
+      "reason": "No phase barrier; Store harness wrapper is outside App scope",
+      "v2Binding": {
+        "mechanismImplemented": true,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": "WRITE_AFTER_COMMIT",
+        "reason": "Native mechanism needs observed receipt plus independent manual ledger and v3 bundle"
+      }
+    },
+    {
+      "caseId": "A02-G",
+      "fixture": "F21-B/C",
+      "boundary": "Antes de `acknowledgeHostCommit`",
+      "expectedManual": "Archivo confirmado no se trata como cola descartada",
+      "binding": {
+        "source": "src/server/store.ts",
+        "signal": "SIGTERM",
+        "observable": "NO_APP_BARRIER",
+        "implementableMechanism": false
+      },
+      "classification": "UNKNOWN",
+      "reason": "No phase barrier; Store harness wrapper is outside App scope",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "A02-F",
+      "fixture": "F21-B/C",
+      "boundary": "Antes de `acknowledgeHostCommit`",
+      "expectedManual": "Archivo confirmado no se trata como cola descartada",
+      "binding": {
+        "source": "src/server/store.ts",
+        "signal": "SIGKILL",
+        "observable": "NO_APP_BARRIER",
+        "implementableMechanism": false
+      },
+      "classification": "UNKNOWN",
+      "reason": "No phase barrier; Store harness wrapper is outside App scope",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "A03-G",
+      "fixture": "F21-B/C",
+      "boundary": "Tras acknowledge, antes de actualizar crónica residente",
+      "expectedManual": "Snapshot y archivo K1 íntegros",
+      "binding": {
+        "source": "src/server/store.ts",
+        "signal": "SIGTERM",
+        "observable": "NO_APP_BARRIER",
+        "implementableMechanism": false
+      },
+      "classification": "UNKNOWN",
+      "reason": "No phase barrier; Store harness wrapper is outside App scope",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "A03-F",
+      "fixture": "F21-B/C",
+      "boundary": "Tras acknowledge, antes de actualizar crónica residente",
+      "expectedManual": "Snapshot y archivo K1 íntegros",
+      "binding": {
+        "source": "src/server/store.ts",
+        "signal": "SIGKILL",
+        "observable": "NO_APP_BARRIER",
+        "implementableMechanism": false
+      },
+      "classification": "UNKNOWN",
+      "reason": "No phase barrier; Store harness wrapper is outside App scope",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "A04-G",
+      "fixture": "F21-B/C",
+      "boundary": "Antes de limpiar `retiredChunks`",
+      "expectedManual": "No doble archivado/material al reintentar",
+      "binding": {
+        "source": "src/server/store.ts",
+        "signal": "SIGTERM",
+        "observable": "NO_APP_BARRIER",
+        "implementableMechanism": false
+      },
+      "classification": "UNKNOWN",
+      "reason": "No phase barrier; Store harness wrapper is outside App scope",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "A04-F",
+      "fixture": "F21-B/C",
+      "boundary": "Antes de limpiar `retiredChunks`",
+      "expectedManual": "No doble archivado/material al reintentar",
+      "binding": {
+        "source": "src/server/store.ts",
+        "signal": "SIGKILL",
+        "observable": "NO_APP_BARRIER",
+        "implementableMechanism": false
+      },
+      "classification": "UNKNOWN",
+      "reason": "No phase barrier; Store harness wrapper is outside App scope",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "A05-G",
+      "fixture": "F21-B/C",
+      "boundary": "Antes de limpiar `retiredLegacy`",
+      "expectedManual": "No segunda muerte/identidad duplicada",
+      "binding": {
+        "source": "src/server/store.ts",
+        "signal": "SIGTERM",
+        "observable": "NO_APP_BARRIER",
+        "implementableMechanism": false
+      },
+      "classification": "UNKNOWN",
+      "reason": "No phase barrier; Store harness wrapper is outside App scope",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "A05-F",
+      "fixture": "F21-B/C",
+      "boundary": "Antes de limpiar `retiredLegacy`",
+      "expectedManual": "No segunda muerte/identidad duplicada",
+      "binding": {
+        "source": "src/server/store.ts",
+        "signal": "SIGKILL",
+        "observable": "NO_APP_BARRIER",
+        "implementableMechanism": false
+      },
+      "classification": "UNKNOWN",
+      "reason": "No phase barrier; Store harness wrapper is outside App scope",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "A06-G",
+      "fixture": "F21-B/C",
+      "boundary": "Antes de `markTechnologyJournalCommitted`",
+      "expectedManual": "No duplicar recibos ya escritos",
+      "binding": {
+        "source": "src/server/store.ts",
+        "signal": "SIGTERM",
+        "observable": "NO_APP_BARRIER",
+        "implementableMechanism": false
+      },
+      "classification": "UNKNOWN",
+      "reason": "No phase barrier; Store harness wrapper is outside App scope",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "A06-F",
+      "fixture": "F21-B/C",
+      "boundary": "Antes de `markTechnologyJournalCommitted`",
+      "expectedManual": "No duplicar recibos ya escritos",
+      "binding": {
+        "source": "src/server/store.ts",
+        "signal": "SIGKILL",
+        "observable": "NO_APP_BARRIER",
+        "implementableMechanism": false
+      },
+      "classification": "UNKNOWN",
+      "reason": "No phase barrier; Store harness wrapper is outside App scope",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "A07-G",
+      "fixture": "F21-B/C",
+      "boundary": "Antes de `markTechnologyCatalogueCommitted`",
+      "expectedManual": "Catálogo/autoría no se duplican ni pierden",
+      "binding": {
+        "source": "src/server/store.ts",
+        "signal": "SIGTERM",
+        "observable": "NO_APP_BARRIER",
+        "implementableMechanism": false
+      },
+      "classification": "UNKNOWN",
+      "reason": "No phase barrier; Store harness wrapper is outside App scope",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "A07-F",
+      "fixture": "F21-B/C",
+      "boundary": "Antes de `markTechnologyCatalogueCommitted`",
+      "expectedManual": "Catálogo/autoría no se duplican ni pierden",
+      "binding": {
+        "source": "src/server/store.ts",
+        "signal": "SIGKILL",
+        "observable": "NO_APP_BARRIER",
+        "implementableMechanism": false
+      },
+      "classification": "UNKNOWN",
+      "reason": "No phase barrier; Store harness wrapper is outside App scope",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "A08-G",
+      "fixture": "F21-B/C",
+      "boundary": "Antes de caches `rememberTechnology/rememberSlotBounds` y retorno",
+      "expectedManual": "Fallo de caché no revierte commit durable",
+      "binding": {
+        "source": "src/server/store.ts",
+        "signal": "SIGTERM",
+        "observable": "NO_APP_BARRIER",
+        "implementableMechanism": false
+      },
+      "classification": "UNKNOWN",
+      "reason": "No phase barrier; Store harness wrapper is outside App scope",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "A08-F",
+      "fixture": "F21-B/C",
+      "boundary": "Antes de caches `rememberTechnology/rememberSlotBounds` y retorno",
+      "expectedManual": "Fallo de caché no revierte commit durable",
+      "binding": {
+        "source": "src/server/store.ts",
+        "signal": "SIGKILL",
+        "observable": "NO_APP_BARRIER",
+        "implementableMechanism": false
+      },
+      "classification": "UNKNOWN",
+      "reason": "No phase barrier; Store harness wrapper is outside App scope",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "A09-G",
+      "fixture": "F21-B/C",
+      "boundary": "App tras save, antes de `world=draft`/gobernador",
+      "expectedManual": "Recuperación conserva K1 aunque memoria no se haya actualizado",
+      "binding": {
+        "source": "src/server/app.ts",
+        "signal": "SIGTERM",
+        "observable": "NO_APP_BARRIER",
+        "implementableMechanism": false
+      },
+      "classification": "UNKNOWN",
+      "reason": "No phase barrier; Store harness wrapper is outside App scope",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "A09-F",
+      "fixture": "F21-B/C",
+      "boundary": "App tras save, antes de `world=draft`/gobernador",
+      "expectedManual": "Recuperación conserva K1 aunque memoria no se haya actualizado",
+      "binding": {
+        "source": "src/server/app.ts",
+        "signal": "SIGKILL",
+        "observable": "NO_APP_BARRIER",
+        "implementableMechanism": false
+      },
+      "classification": "UNKNOWN",
+      "reason": "No phase barrier; Store harness wrapper is outside App scope",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "A10-G",
+      "fixture": "F21-B/C",
+      "boundary": "App tras gobernador, antes de resolver órdenes pendientes",
+      "expectedManual": "K1 sin ACK recibido; misma orden devuelve resultado guardado",
+      "binding": {
+        "source": "src/server/app.ts",
+        "signal": "SIGTERM",
+        "observable": "NO_APP_BARRIER",
+        "implementableMechanism": false
+      },
+      "classification": "UNKNOWN",
+      "reason": "No phase barrier; Store harness wrapper is outside App scope",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "A10-F",
+      "fixture": "F21-B/C",
+      "boundary": "App tras gobernador, antes de resolver órdenes pendientes",
+      "expectedManual": "K1 sin ACK recibido; misma orden devuelve resultado guardado",
+      "binding": {
+        "source": "src/server/app.ts",
+        "signal": "SIGKILL",
+        "observable": "NO_APP_BARRIER",
+        "implementableMechanism": false
+      },
+      "classification": "UNKNOWN",
+      "reason": "No phase barrier; Store harness wrapper is outside App scope",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "A11-G",
+      "fixture": "F21-B/C",
+      "boundary": "Tras resolver/enviar resultado, antes de recepción cliente",
+      "expectedManual": "Registrar incertidumbre de entrega sin borrar efecto",
+      "binding": {
+        "source": "src/server/app.ts",
+        "signal": "SIGTERM",
+        "observable": "NO_APP_BARRIER",
+        "implementableMechanism": false
+      },
+      "classification": "UNKNOWN",
+      "reason": "No phase barrier; Store harness wrapper is outside App scope",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "A11-F",
+      "fixture": "F21-B/C",
+      "boundary": "Tras resolver/enviar resultado, antes de recepción cliente",
+      "expectedManual": "Registrar incertidumbre de entrega sin borrar efecto",
+      "binding": {
+        "source": "src/server/app.ts",
+        "signal": "SIGKILL",
+        "observable": "NO_APP_BARRIER",
+        "implementableMechanism": false
+      },
+      "classification": "UNKNOWN",
+      "reason": "No phase barrier; Store harness wrapper is outside App scope",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "A12-G",
+      "fixture": "F21-B/C",
+      "boundary": "Tras recepción de respuesta aceptada y verificación durable",
+      "expectedManual": "Ninguna orden confirmada perdida al reiniciar",
+      "binding": {
+        "source": "src/server/app.ts",
+        "signal": "SIGTERM",
+        "observable": "HTTP_RESULT_RECEIVED_PLUS_READONLY_CUT",
+        "implementableMechanism": true
+      },
+      "classification": "UNKNOWN",
+      "reason": "Mechanism available; F21-B/C material ledger/components not independently prepared",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "A12-F",
+      "fixture": "F21-B/C",
+      "boundary": "Tras recepción de respuesta aceptada y verificación durable",
+      "expectedManual": "Ninguna orden confirmada perdida al reiniciar",
+      "binding": {
+        "source": "src/server/app.ts",
+        "signal": "SIGKILL",
+        "observable": "HTTP_RESULT_RECEIVED_PLUS_READONLY_CUT",
+        "implementableMechanism": true
+      },
+      "classification": "UNKNOWN",
+      "reason": "Mechanism available; F21-B/C material ledger/components not independently prepared",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "D01",
+      "fixture": "F21-A",
+      "trigger": "K0/K1, cierre graceful estable y reapertura misma versión",
+      "expectedManual": "K1 sin reset a tick0; O+C, vínculos/órdenes exactos; origen intacto. Pérdida→FAIL, frontera desconocida→UNKNOWN",
+      "classification": "UNKNOWN",
+      "binding": {
+        "implementableMechanism": true,
+        "source": "src/server/app.ts + src/server/store.ts",
+        "implementedScope": "HTTP observation/restart only"
+      },
+      "reason": "WS/material ledger/common-complete-cuts absent",
+      "v2Binding": {
+        "mechanismImplemented": true,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "Client/recovery partial mechanism"
+      }
+    },
+    {
+      "caseId": "D02",
+      "fixture": "F21-B",
+      "trigger": "Bxx/Axx, fallo de escritura parcial/ENOSPC/EIO/timeout de bloqueo en almacenamiento desechable",
+      "expectedManual": "Rollback K0 o K1 probado; error visible y pausa sin ACK falso; O+logs. No retirar disco del host; sin inyección reproducible→UNKNOWN",
+      "classification": "UNKNOWN",
+      "binding": {
+        "implementableMechanism": false,
+        "source": "src/server/app.ts + src/server/store.ts",
+        "implementedScope": null
+      },
+      "reason": "Fixture or reproducible owned fault injector absent; not substituted with SIGKILL",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "D03",
+      "fixture": "F21-C",
+      "trigger": "Slot0 físico roto, slot1 válido y archivo no posterior",
+      "expectedManual": "Load adopta slot1 con retroceso declarado; primer save no pisa respaldo salvador, segundo rota sano; O+health/pausa. Pérdida adicional→FAIL",
+      "classification": "UNKNOWN",
+      "binding": {
+        "implementableMechanism": false,
+        "source": "src/server/app.ts + src/server/store.ts",
+        "implementedScope": null
+      },
+      "reason": "Fixture or reproducible owned fault injector absent; not substituted with SIGKILL",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "D04",
+      "fixture": "F21-C",
+      "trigger": "Slots0/1 físicos rotos, slot2 válido",
+      "expectedManual": "Misma prueba para slot2; no asumir que aparece tras reinicios frecuentes; O+causa. Slot ausente→UNKNOWN de profundidad",
+      "classification": "UNKNOWN",
+      "binding": {
+        "implementableMechanism": false,
+        "source": "src/server/app.ts + src/server/store.ts",
+        "implementedScope": null
+      },
+      "reason": "Fixture or reproducible owned fault injector absent; not substituted with SIGKILL",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "D05",
+      "fixture": "F21-B/C",
+      "trigger": "Snapshot legible inválido, o respaldo atrasado frente al archivo durable",
+      "expectedManual": "Rechazo cerrado, sin borrar ni crear mundo nuevo; O antes/después y error. Arranque con sustitución silenciosa→FAIL",
+      "classification": "UNKNOWN",
+      "binding": {
+        "implementableMechanism": false,
+        "source": "src/server/app.ts + src/server/store.ts",
+        "implementedScope": null
+      },
+      "reason": "Fixture or reproducible owned fault injector absent; not substituted with SIGKILL",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "D06",
+      "fixture": "F21-B",
+      "trigger": "Alterar en copia checksum/parte, padre, autor, recibo, crónica o región archivada; control ledger",
+      "expectedManual": "Detectar cada clase independientemente; `quick_check` verde no la absuelve; O+diff manual. Dato sin cobertura→UNKNOWN",
+      "classification": "UNKNOWN",
+      "binding": {
+        "implementableMechanism": false,
+        "source": "src/server/app.ts + src/server/store.ts",
+        "implementedScope": null
+      },
+      "reason": "Fixture or reproducible owned fault injector absent; not substituted with SIGKILL",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "D07",
+      "fixture": "F21-C",
+      "trigger": "Backup coherente propio mientras escritor sintético avanza y con WAL pendiente",
+      "expectedManual": "Copia refleja un único K demostrado, todos los componentes; original lógico preservado, versiones/bytes archivados; O+intervalo backup. No copiar sólo `.sqlite` abierto",
+      "classification": "UNKNOWN",
+      "binding": {
+        "implementableMechanism": false,
+        "source": "src/server/app.ts + src/server/store.ts",
+        "implementedScope": null
+      },
+      "reason": "Fixture or reproducible owned fault injector absent; not substituted with SIGKILL",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "D08",
+      "fixture": "F21-C",
+      "trigger": "Backup truncado/compresión fallida/destino ocupado/retención inválida",
+      "expectedManual": "Error sin éxito nominal, sin sustituir copia buena; artefactos retenidos o limpieza documentada propia; O+stderr. Restauración no validada→UNKNOWN",
+      "classification": "UNKNOWN",
+      "binding": {
+        "implementableMechanism": false,
+        "source": "src/server/app.ts + src/server/store.ts",
+        "implementedScope": null
+      },
+      "reason": "Fixture or reproducible owned fault injector absent; not substituted with SIGKILL",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "D09",
+      "fixture": "F21-B/C",
+      "trigger": "Restore de backup a directorio vacío; intento a destino ocupado",
+      "expectedManual": "Destino nuevo exacto, origen intacto, sólo sesiones sintéticas revocadas; ocupado rechazado; O+C. Borrar destino para ocultar rechazo→FAIL",
+      "classification": "UNKNOWN",
+      "binding": {
+        "implementableMechanism": false,
+        "source": "src/server/app.ts + src/server/store.ts",
+        "implementedScope": null
+      },
+      "reason": "Fixture or reproducible owned fault injector absent; not substituted with SIGKILL",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "D10",
+      "fixture": "F21-C",
+      "trigger": "`previous` desde slot1/2, incluidos dos checkpoints del mismo tick",
+      "expectedManual": "Copia nueva igual al checkpoint por serial/IDs, poda explícita de futuros y sesiones sintéticas revocadas; origen completo conservado; O+recibo de pérdidas. No es cero pérdida del linaje original",
+      "classification": "UNKNOWN",
+      "binding": {
+        "implementableMechanism": false,
+        "source": "src/server/app.ts + src/server/store.ts",
+        "implementedScope": null
+      },
+      "reason": "Fixture or reproducible owned fault injector absent; not substituted with SIGKILL",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "D11",
+      "fixture": "F21-C",
+      "trigger": "Checkpoint cambia entre selección y backup, trigger altera copia, fallo durante recuperación",
+      "expectedManual": "Rechazo sin «recuperado» nominal; copia fallida conservada separada, origen intacto; O+logs. No escoger otro checkpoint sin declararlo",
+      "classification": "UNKNOWN",
+      "binding": {
+        "implementableMechanism": false,
+        "source": "src/server/app.ts + src/server/store.ts",
+        "implementedScope": null
+      },
+      "reason": "Fixture or reproducible owned fault injector absent; not substituted with SIGKILL",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "D12",
+      "fixture": "F21-D",
+      "trigger": "Migración sintética soportada a lector actual, interrupción en cada fase",
+      "expectedManual": "Archivo de origen con hash/version, destino verificable y mapa de transformaciones declaradas; O+ledger. No tocar `stateVersion`/holes; incompatible rechazado, faltante→UNKNOWN",
+      "classification": "UNKNOWN",
+      "binding": {
+        "implementableMechanism": false,
+        "source": "src/server/app.ts + src/server/store.ts",
+        "implementedScope": null
+      },
+      "reason": "Fixture or reproducible owned fault injector absent; not substituted with SIGKILL",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "D13",
+      "fixture": "F21-D",
+      "trigger": "Política de nueva versión publicada sólo en manifiestos sintéticos",
+      "expectedManual": "Mundo de versión nueva inicia tick0 sin historia heredada; viejo queda archivado aparte. Restart/commit/reconnect misma versión no resetean; O. No ejecutar publicación ni copiar credenciales",
+      "classification": "UNKNOWN",
+      "binding": {
+        "implementableMechanism": false,
+        "source": "src/server/app.ts + src/server/store.ts",
+        "implementedScope": null
+      },
+      "reason": "Fixture or reproducible owned fault injector absent; not substituted with SIGKILL",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "S01",
+      "fixture": "F21-A/B",
+      "trigger": "Cámara1/cámara2 en regiones distintas, mismo servidor, corte a tick T",
+      "expectedManual": "Misma instancia/mundo/clockTick T, stocks/IDs en solapamiento iguales; C+O. Diferente viewport no es otro mundo; falta corte común→UNKNOWN",
+      "classification": "UNKNOWN",
+      "binding": {
+        "implementableMechanism": true,
+        "source": "src/server/app.ts + src/server/store.ts",
+        "implementedScope": "HTTP observation/restart only"
+      },
+      "reason": "WS/material ledger/common-complete-cuts absent",
+      "v2Binding": {
+        "mechanismImplemented": true,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "Client/recovery partial mechanism"
+      }
+    },
+    {
+      "caseId": "S02",
+      "fixture": "F21-B",
+      "trigger": "Desconectar/reconectar un cliente, cambios de cámara y suscripción lenta",
+      "expectedManual": "Historia/último ACK y orden recuperables; sin reejecución ni ticks por cámara; C+O. No exigir que paquetes asíncronos lleguen a la vez",
+      "classification": "UNKNOWN",
+      "binding": {
+        "implementableMechanism": true,
+        "source": "src/server/app.ts + src/server/store.ts",
+        "implementedScope": "HTTP observation/restart only"
+      },
+      "reason": "WS/material ledger/common-complete-cuts absent",
+      "v2Binding": {
+        "mechanismImplemented": true,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "Client/recovery partial mechanism"
+      }
+    },
+    {
+      "caseId": "S03",
+      "fixture": "F21-B/C",
+      "trigger": "Interrumpir servidor antes/después de ACK con clientes suscritos",
+      "expectedManual": "Reconectar al mismo mundo/version, caída visible, órdenes mismas IDs idempotentes; reloj no retrocede salvo recuperación explícita declarada; C+O",
+      "classification": "UNKNOWN",
+      "binding": {
+        "implementableMechanism": true,
+        "source": "src/server/app.ts + src/server/store.ts",
+        "implementedScope": "HTTP observation/restart only"
+      },
+      "reason": "WS/material ledger/common-complete-cuts absent",
+      "v2Binding": {
+        "mechanismImplemented": true,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "Client/recovery partial mechanism"
+      }
+    },
+    {
+      "caseId": "S04",
+      "fixture": "F21-A/B",
+      "trigger": "Campaña preregistrada 12 clientes/1h, 1 y 2 cámaras explícitas, rápidos/lentos/no lectores",
+      "expectedManual": "Cero bifurcaciones en cortes comunes; subscriber cambia transporte, no física; C+O+colas/coste. Tamaño/duración B13 PROVISIONALES; cobertura incompleta→UNKNOWN",
+      "classification": "UNKNOWN",
+      "binding": {
+        "implementableMechanism": true,
+        "source": "src/server/app.ts + src/server/store.ts",
+        "implementedScope": "HTTP observation/restart only"
+      },
+      "reason": "WS/material ledger/common-complete-cuts absent",
+      "v2Binding": {
+        "mechanismImplemented": true,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "Client/recovery partial mechanism"
+      }
+    },
+    {
+      "caseId": "EXTRA-initialization-migration-before-BEGIN-G",
+      "source": "src/server/store.ts constructor",
+      "transaction": "initialization/migration",
+      "phase": "before-BEGIN",
+      "classification": "UNKNOWN",
+      "reason": "No barrier/frozen synthetic fixture; not executed",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "EXTRA-initialization-migration-before-BEGIN-F",
+      "source": "src/server/store.ts constructor",
+      "transaction": "initialization/migration",
+      "phase": "before-BEGIN",
+      "classification": "UNKNOWN",
+      "reason": "No barrier/frozen synthetic fixture; not executed",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "EXTRA-initialization-migration-between-writes-G",
+      "source": "src/server/store.ts constructor",
+      "transaction": "initialization/migration",
+      "phase": "between-writes",
+      "classification": "UNKNOWN",
+      "reason": "No barrier/frozen synthetic fixture; not executed",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "EXTRA-initialization-migration-between-writes-F",
+      "source": "src/server/store.ts constructor",
+      "transaction": "initialization/migration",
+      "phase": "between-writes",
+      "classification": "UNKNOWN",
+      "reason": "No barrier/frozen synthetic fixture; not executed",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "EXTRA-initialization-migration-before-COMMIT-G",
+      "source": "src/server/store.ts constructor",
+      "transaction": "initialization/migration",
+      "phase": "before-COMMIT",
+      "classification": "UNKNOWN",
+      "reason": "No barrier/frozen synthetic fixture; not executed",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "EXTRA-initialization-migration-before-COMMIT-F",
+      "source": "src/server/store.ts constructor",
+      "transaction": "initialization/migration",
+      "phase": "before-COMMIT",
+      "classification": "UNKNOWN",
+      "reason": "No barrier/frozen synthetic fixture; not executed",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "EXTRA-initialization-migration-after-COMMIT-G",
+      "source": "src/server/store.ts constructor",
+      "transaction": "initialization/migration",
+      "phase": "after-COMMIT",
+      "classification": "UNKNOWN",
+      "reason": "No barrier/frozen synthetic fixture; not executed",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "EXTRA-initialization-migration-after-COMMIT-F",
+      "source": "src/server/store.ts constructor",
+      "transaction": "initialization/migration",
+      "phase": "after-COMMIT",
+      "classification": "UNKNOWN",
+      "reason": "No barrier/frozen synthetic fixture; not executed",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "EXTRA-initialization-migration-before-success-G",
+      "source": "src/server/store.ts constructor",
+      "transaction": "initialization/migration",
+      "phase": "before-success",
+      "classification": "UNKNOWN",
+      "reason": "No barrier/frozen synthetic fixture; not executed",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "EXTRA-initialization-migration-before-success-F",
+      "source": "src/server/store.ts constructor",
+      "transaction": "initialization/migration",
+      "phase": "before-success",
+      "classification": "UNKNOWN",
+      "reason": "No barrier/frozen synthetic fixture; not executed",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "EXTRA-world-instance-before-BEGIN-G",
+      "source": "src/server/world-instance.ts ensureWorldInstance",
+      "transaction": "world-instance",
+      "phase": "before-BEGIN",
+      "classification": "UNKNOWN",
+      "reason": "No barrier/frozen synthetic fixture; not executed",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "EXTRA-world-instance-before-BEGIN-F",
+      "source": "src/server/world-instance.ts ensureWorldInstance",
+      "transaction": "world-instance",
+      "phase": "before-BEGIN",
+      "classification": "UNKNOWN",
+      "reason": "No barrier/frozen synthetic fixture; not executed",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "EXTRA-world-instance-between-writes-G",
+      "source": "src/server/world-instance.ts ensureWorldInstance",
+      "transaction": "world-instance",
+      "phase": "between-writes",
+      "classification": "UNKNOWN",
+      "reason": "No barrier/frozen synthetic fixture; not executed",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "EXTRA-world-instance-between-writes-F",
+      "source": "src/server/world-instance.ts ensureWorldInstance",
+      "transaction": "world-instance",
+      "phase": "between-writes",
+      "classification": "UNKNOWN",
+      "reason": "No barrier/frozen synthetic fixture; not executed",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "EXTRA-world-instance-before-COMMIT-G",
+      "source": "src/server/world-instance.ts ensureWorldInstance",
+      "transaction": "world-instance",
+      "phase": "before-COMMIT",
+      "classification": "UNKNOWN",
+      "reason": "No barrier/frozen synthetic fixture; not executed",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "EXTRA-world-instance-before-COMMIT-F",
+      "source": "src/server/world-instance.ts ensureWorldInstance",
+      "transaction": "world-instance",
+      "phase": "before-COMMIT",
+      "classification": "UNKNOWN",
+      "reason": "No barrier/frozen synthetic fixture; not executed",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "EXTRA-world-instance-after-COMMIT-G",
+      "source": "src/server/world-instance.ts ensureWorldInstance",
+      "transaction": "world-instance",
+      "phase": "after-COMMIT",
+      "classification": "UNKNOWN",
+      "reason": "No barrier/frozen synthetic fixture; not executed",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "EXTRA-world-instance-after-COMMIT-F",
+      "source": "src/server/world-instance.ts ensureWorldInstance",
+      "transaction": "world-instance",
+      "phase": "after-COMMIT",
+      "classification": "UNKNOWN",
+      "reason": "No barrier/frozen synthetic fixture; not executed",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "EXTRA-world-instance-before-success-G",
+      "source": "src/server/world-instance.ts ensureWorldInstance",
+      "transaction": "world-instance",
+      "phase": "before-success",
+      "classification": "UNKNOWN",
+      "reason": "No barrier/frozen synthetic fixture; not executed",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "EXTRA-world-instance-before-success-F",
+      "source": "src/server/world-instance.ts ensureWorldInstance",
+      "transaction": "world-instance",
+      "phase": "before-success",
+      "classification": "UNKNOWN",
+      "reason": "No barrier/frozen synthetic fixture; not executed",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "EXTRA-synthetic-session-add-before-BEGIN-G",
+      "source": "src/server/store.ts addSession/sessionWrite",
+      "transaction": "synthetic-session-add",
+      "phase": "before-BEGIN",
+      "classification": "UNKNOWN",
+      "reason": "No barrier/frozen synthetic fixture; not executed",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "EXTRA-synthetic-session-add-before-BEGIN-F",
+      "source": "src/server/store.ts addSession/sessionWrite",
+      "transaction": "synthetic-session-add",
+      "phase": "before-BEGIN",
+      "classification": "UNKNOWN",
+      "reason": "No barrier/frozen synthetic fixture; not executed",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "EXTRA-synthetic-session-add-between-writes-G",
+      "source": "src/server/store.ts addSession/sessionWrite",
+      "transaction": "synthetic-session-add",
+      "phase": "between-writes",
+      "classification": "UNKNOWN",
+      "reason": "No barrier/frozen synthetic fixture; not executed",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "EXTRA-synthetic-session-add-between-writes-F",
+      "source": "src/server/store.ts addSession/sessionWrite",
+      "transaction": "synthetic-session-add",
+      "phase": "between-writes",
+      "classification": "UNKNOWN",
+      "reason": "No barrier/frozen synthetic fixture; not executed",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "EXTRA-synthetic-session-add-before-COMMIT-G",
+      "source": "src/server/store.ts addSession/sessionWrite",
+      "transaction": "synthetic-session-add",
+      "phase": "before-COMMIT",
+      "classification": "UNKNOWN",
+      "reason": "No barrier/frozen synthetic fixture; not executed",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "EXTRA-synthetic-session-add-before-COMMIT-F",
+      "source": "src/server/store.ts addSession/sessionWrite",
+      "transaction": "synthetic-session-add",
+      "phase": "before-COMMIT",
+      "classification": "UNKNOWN",
+      "reason": "No barrier/frozen synthetic fixture; not executed",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "EXTRA-synthetic-session-add-after-COMMIT-G",
+      "source": "src/server/store.ts addSession/sessionWrite",
+      "transaction": "synthetic-session-add",
+      "phase": "after-COMMIT",
+      "classification": "UNKNOWN",
+      "reason": "No barrier/frozen synthetic fixture; not executed",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "EXTRA-synthetic-session-add-after-COMMIT-F",
+      "source": "src/server/store.ts addSession/sessionWrite",
+      "transaction": "synthetic-session-add",
+      "phase": "after-COMMIT",
+      "classification": "UNKNOWN",
+      "reason": "No barrier/frozen synthetic fixture; not executed",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "EXTRA-synthetic-session-add-before-success-G",
+      "source": "src/server/store.ts addSession/sessionWrite",
+      "transaction": "synthetic-session-add",
+      "phase": "before-success",
+      "classification": "UNKNOWN",
+      "reason": "No barrier/frozen synthetic fixture; not executed",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "EXTRA-synthetic-session-add-before-success-F",
+      "source": "src/server/store.ts addSession/sessionWrite",
+      "transaction": "synthetic-session-add",
+      "phase": "before-success",
+      "classification": "UNKNOWN",
+      "reason": "No barrier/frozen synthetic fixture; not executed",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "EXTRA-restore-revocation-before-BEGIN-G",
+      "source": "src/server/store.ts restore/sessionWrite",
+      "transaction": "restore/revocation",
+      "phase": "before-BEGIN",
+      "classification": "UNKNOWN",
+      "reason": "No barrier/frozen synthetic fixture; not executed",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "EXTRA-restore-revocation-before-BEGIN-F",
+      "source": "src/server/store.ts restore/sessionWrite",
+      "transaction": "restore/revocation",
+      "phase": "before-BEGIN",
+      "classification": "UNKNOWN",
+      "reason": "No barrier/frozen synthetic fixture; not executed",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "EXTRA-restore-revocation-between-writes-G",
+      "source": "src/server/store.ts restore/sessionWrite",
+      "transaction": "restore/revocation",
+      "phase": "between-writes",
+      "classification": "UNKNOWN",
+      "reason": "No barrier/frozen synthetic fixture; not executed",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "EXTRA-restore-revocation-between-writes-F",
+      "source": "src/server/store.ts restore/sessionWrite",
+      "transaction": "restore/revocation",
+      "phase": "between-writes",
+      "classification": "UNKNOWN",
+      "reason": "No barrier/frozen synthetic fixture; not executed",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "EXTRA-restore-revocation-before-COMMIT-G",
+      "source": "src/server/store.ts restore/sessionWrite",
+      "transaction": "restore/revocation",
+      "phase": "before-COMMIT",
+      "classification": "UNKNOWN",
+      "reason": "No barrier/frozen synthetic fixture; not executed",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "EXTRA-restore-revocation-before-COMMIT-F",
+      "source": "src/server/store.ts restore/sessionWrite",
+      "transaction": "restore/revocation",
+      "phase": "before-COMMIT",
+      "classification": "UNKNOWN",
+      "reason": "No barrier/frozen synthetic fixture; not executed",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "EXTRA-restore-revocation-after-COMMIT-G",
+      "source": "src/server/store.ts restore/sessionWrite",
+      "transaction": "restore/revocation",
+      "phase": "after-COMMIT",
+      "classification": "UNKNOWN",
+      "reason": "No barrier/frozen synthetic fixture; not executed",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "EXTRA-restore-revocation-after-COMMIT-F",
+      "source": "src/server/store.ts restore/sessionWrite",
+      "transaction": "restore/revocation",
+      "phase": "after-COMMIT",
+      "classification": "UNKNOWN",
+      "reason": "No barrier/frozen synthetic fixture; not executed",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "EXTRA-restore-revocation-before-success-G",
+      "source": "src/server/store.ts restore/sessionWrite",
+      "transaction": "restore/revocation",
+      "phase": "before-success",
+      "classification": "UNKNOWN",
+      "reason": "No barrier/frozen synthetic fixture; not executed",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "EXTRA-restore-revocation-before-success-F",
+      "source": "src/server/store.ts restore/sessionWrite",
+      "transaction": "restore/revocation",
+      "phase": "before-success",
+      "classification": "UNKNOWN",
+      "reason": "No barrier/frozen synthetic fixture; not executed",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "EXTRA-previous-copy-before-BEGIN-G",
+      "source": "src/server/store.ts previous",
+      "transaction": "previous/copy",
+      "phase": "before-BEGIN",
+      "classification": "UNKNOWN",
+      "reason": "No barrier/frozen synthetic fixture; not executed",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "EXTRA-previous-copy-before-BEGIN-F",
+      "source": "src/server/store.ts previous",
+      "transaction": "previous/copy",
+      "phase": "before-BEGIN",
+      "classification": "UNKNOWN",
+      "reason": "No barrier/frozen synthetic fixture; not executed",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "EXTRA-previous-copy-between-writes-G",
+      "source": "src/server/store.ts previous",
+      "transaction": "previous/copy",
+      "phase": "between-writes",
+      "classification": "UNKNOWN",
+      "reason": "No barrier/frozen synthetic fixture; not executed",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "EXTRA-previous-copy-between-writes-F",
+      "source": "src/server/store.ts previous",
+      "transaction": "previous/copy",
+      "phase": "between-writes",
+      "classification": "UNKNOWN",
+      "reason": "No barrier/frozen synthetic fixture; not executed",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "EXTRA-previous-copy-before-COMMIT-G",
+      "source": "src/server/store.ts previous",
+      "transaction": "previous/copy",
+      "phase": "before-COMMIT",
+      "classification": "UNKNOWN",
+      "reason": "No barrier/frozen synthetic fixture; not executed",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "EXTRA-previous-copy-before-COMMIT-F",
+      "source": "src/server/store.ts previous",
+      "transaction": "previous/copy",
+      "phase": "before-COMMIT",
+      "classification": "UNKNOWN",
+      "reason": "No barrier/frozen synthetic fixture; not executed",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "EXTRA-previous-copy-after-COMMIT-G",
+      "source": "src/server/store.ts previous",
+      "transaction": "previous/copy",
+      "phase": "after-COMMIT",
+      "classification": "UNKNOWN",
+      "reason": "No barrier/frozen synthetic fixture; not executed",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "EXTRA-previous-copy-after-COMMIT-F",
+      "source": "src/server/store.ts previous",
+      "transaction": "previous/copy",
+      "phase": "after-COMMIT",
+      "classification": "UNKNOWN",
+      "reason": "No barrier/frozen synthetic fixture; not executed",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "EXTRA-previous-copy-before-success-G",
+      "source": "src/server/store.ts previous",
+      "transaction": "previous/copy",
+      "phase": "before-success",
+      "classification": "UNKNOWN",
+      "reason": "No barrier/frozen synthetic fixture; not executed",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "EXTRA-previous-copy-before-success-F",
+      "source": "src/server/store.ts previous",
+      "transaction": "previous/copy",
+      "phase": "before-success",
+      "classification": "UNKNOWN",
+      "reason": "No barrier/frozen synthetic fixture; not executed",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "EXTRA-load-validation-G",
+      "classification": "UNKNOWN",
+      "reason": "Interruption observable not bound; original preservation required",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "EXTRA-load-validation-F",
+      "classification": "UNKNOWN",
+      "reason": "Interruption observable not bound; original preservation required",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "EXTRA-previous-read-origin-G",
+      "classification": "UNKNOWN",
+      "reason": "Interruption observable not bound; original preservation required",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    },
+    {
+      "caseId": "EXTRA-previous-read-origin-F",
+      "classification": "UNKNOWN",
+      "reason": "Interruption observable not bound; original preservation required",
+      "v2Binding": {
+        "mechanismImplemented": false,
+        "exactCaseConformanceImplemented": false,
+        "status": "UNKNOWN",
+        "hook": null,
+        "reason": "No exact private injector or independent fixture for this original case; not substituted"
+      }
+    }
+  ],
+  "auxiliaryMechanisms": [
+    {
+      "id": "OBS-HTTP-POSTACK-F",
+      "signals": [
+        "SIGSTOP",
+        "SIGKILL"
+      ],
+      "phase": "AFTER_HTTP_RESULT_AND_READONLY_CUT",
+      "notEquivalentTo": [
+        "B01-B10",
+        "A01-A11"
+      ],
+      "oracle": "all SQLite tables/columns exact equality stopped versus closed + all result retries"
+    },
+    {
+      "id": "OBS-GRACEFUL-RESTART",
+      "signal": "SIGTERM",
+      "phase": "stable closed cut then real Store.load/App restart",
+      "oracle": "loaded slot0/tick/instance + all result retries"
+    }
+  ],
+  "schemaV2Support": "c21-app-case-bindings/v2",
+  "originalPlanSha256": "81de0faffd16071e5caea0fea6d3dbfc2c990a39954a0fc1ca3fd44a3d5a8849",
+  "allOriginalValuesPreserved": true,
+  "b02BeforeCommitAliasRejected": true
+}

@@ -6,6 +6,7 @@ import { count } from './statistics.js';
 import { tileAt } from './spatial.js';
 import { constructionCost, waterAvailable } from './inventions.js';
 import { CAPABILITIES, itemCapacities, MASS_UNIT, materialCapacities, shareTechnology, transferTechnologyItem } from './technology.js';
+import { emitObserved, observationSession } from './observation.js';
 import type { Capability, MaterialBatch, TechnologyProgram, TechnologyRecipe } from '../shared/technology.js';
 import { resolveTechnologyRecipe, withRecipeSession } from './technology-catalogue.js';
 import { algunoCerca, filtrarCerca } from './indice-puntos.js';
@@ -294,12 +295,20 @@ function evaluateCooperation(world: World, person: Person): Opportunity | undefi
     else if (person.materials.wood >= 2 && person.materials.stone < 2 && other.materials.stone >= 2 && other.materials.wood < 6) opportunities.push({ person: other, kind: 'trade', score: score + 0.08 });
     else if (practicedSkillToTeach(world, person, other)) opportunities.push({ person: other, kind: 'teach', score });
   }
-  return opportunities.sort((a, b) => b.score - a.score || distance(person, a.person) - distance(person, b.person) || a.person.id.localeCompare(b.person.id))[0];
+  const selected = opportunities.sort((a, b) => b.score - a.score || distance(person, a.person) - distance(person, b.person) || a.person.id.localeCompare(b.person.id))[0];
+  emitObserved(world, 'society.cooperation-forecast', () => ({ kind: 'cooperation-forecast', actorId: person.id,
+    opportunityCount: opportunities.length, kinds: opportunities.map(candidate => candidate.kind),
+    selectedActorId: selected?.person.id ?? null, selectedKind: selected?.kind ?? null }));
+  return selected;
 }
 export function cooperate(world: World, person: Person, emit: Emit): boolean {
   const opportunity = cooperationOpportunity(world, person);
   if (!opportunity || distance(person, opportunity.person) > 1.5) return false;
   const other = opportunity.person; let detail = '', helperPaid = false;
+  const observedBefore = observationSession(world) ? { helperWood: person.materials.wood, helperStone: person.materials.stone,
+    helperEnergy: person.energy, helperFatigue: person.fatigue, helperItems: person.technology.items.map(item => item.id),
+    recipientWood: other.materials.wood, recipientStone: other.materials.stone, recipientWork: other.work,
+    recipientItems: other.technology.items.map(item => item.id) } : null;
   if (opportunity.kind === 'supply') {
     const material = opportunity.supplyMaterial ?? (other.materials.wood < constructionCost(world,other).wood && person.materials.wood > 0 ? 'wood' : 'stone');
     if (person.materials[material] < 1 || other.materials[material] > (material === 'wood' ? 11 : 7) || (opportunity.supplyMaterial && processMaterialNeed(world, other)[material] <= 0)) return false;
@@ -338,6 +347,13 @@ export function cooperate(world: World, person: Person, emit: Emit): boolean {
   if (!helperPaid) { person.energy = clamp(person.energy - 0.005); person.fatigue = clamp(person.fatigue + 0.004); }
   bond(world, person, other, 0.12); count(world, 'cooperation');
   const group = world.communities.find(c => c.id === person.communityId); if (group) group.cooperation++;
+  emitObserved(world, 'society.cooperation', () => ({ kind: 'cooperation', actorIds: [person.id, other.id],
+    opportunityKind: opportunity.kind, communityIds: [person.communityId, other.communityId],
+    helperPaid, energyAfter: person.energy, fatigueAfter: person.fatigue,
+    ...(observedBefore ? { before: observedBefore, after: { helperWood: person.materials.wood, helperStone: person.materials.stone,
+      helperEnergy: person.energy, helperFatigue: person.fatigue, helperItems: person.technology.items.map(item => item.id),
+      recipientWood: other.materials.wood, recipientStone: other.materials.stone, recipientWork: other.work,
+      recipientItems: other.technology.items.map(item => item.id) } } : {}) }));
   const event = emit({ kind: 'cooperation', actors: [person.id, other.id], x: person.x, y: person.y, source: 'simulation', text: `${person.name} cooperó con ${other.name}. ${detail}`, cause: `Estrategia ${opportunity.kind}; recursos o trabajo transferidos realmente; confianza reforzada y prácticas locales aproximadas.` });
   for (const p of [person, other]) { p.experiences.push({ tick: world.tick, text: detail, causeId: event.id, placeId: '' }); p.experiences = p.experiences.slice(-8); p.recentMemory = detail; }
   return true;
@@ -566,6 +582,10 @@ export function resourceDispute(world: World, person: Person, emit: Emit): boole
     cede.action = 'retreat'; cede.target = { x: cede.x, y: cede.y }; cede.decisionAt = world.tick + 12;
     cede.reason = legible ? 'Acordó un turno ante la escasez: su vecino lo necesita más y accede primero.' : 'Acordó un turno ante la escasez: deja acceder primero a su vecino.';
     count(world, 'cooperation');
+    emitObserved(world, 'society.dispute-agreement', () => ({ family: 'conflict', actorIds: [cede.id, sigue.id],
+      payload: { episodeId: `dispute:${world.tick}:${cede.id}:${sigue.id}`, actorIds: [cede.id, sigue.id],
+        sourceId: `${fuente.x},${fuente.y}`, groupRelation: person.communityId === other.communityId ? 'endo' : 'exo',
+        agreement: true, memoryEnabled: legible, accessWinnerId: sigue.id } }));
     emit({ kind: 'cooperation', actors: [cede.id, sigue.id], x: cede.x, y: cede.y, source: 'simulation', text: `${cede.name} y ${sigue.name} acordaron turnarse ante una fuente escasa.`, cause: legible
       ? 'Confianza o apertura aprendida permiten coordinar el acceso; espera doce pasos quien menos lo necesita y el recurso no aumenta.'
       : 'Confianza o apertura aprendida permiten coordinar el acceso; el primero espera doce pasos y el recurso no aumenta.' });
@@ -576,6 +596,10 @@ export function resourceDispute(world: World, person: Person, emit: Emit): boole
   person.socialLoad = clamp(person.socialLoad + 0.12); other.socialLoad = clamp(other.socialLoad + 0.12);
   person.fatigue = clamp(person.fatigue + 0.015); other.fatigue = clamp(other.fatigue + 0.015);
   bond(world, person, other, -0.08); count(world, 'conflicts');
+  emitObserved(world, 'society.dispute-conflict', () => ({ family: 'conflict', actorIds: [person.id, other.id],
+    payload: { episodeId: `dispute:${world.tick}:${person.id}:${other.id}`, actorIds: [person.id, other.id],
+      sourceId: `${fuente.x},${fuente.y}`, groupRelation: person.communityId === other.communityId ? 'endo' : 'exo',
+      agreement: false, memoryEnabled: legible, accessWinnerId: sigue.id } }));
   for (const p of [person, other]) { const group = world.communities.find(c => c.id === p.communityId); if (group) group.disputes++; }
   // Yield one contested attempt, producing an observable cost without forced violence or theft.
   cede.action = 'retreat'; cede.target = { x: cede.x, y: cede.y }; cede.decisionAt = world.tick + (legible ? 1 : 30);

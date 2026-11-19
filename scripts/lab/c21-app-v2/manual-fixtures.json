@@ -1,0 +1,32 @@
+{
+  "schema": "c21-manual-review-fixtures/v2",
+  "scope": "OFFLINE_INPUTS_ONLY_NOT_NATIVE_EVIDENCE_OR_UNIT_TEST_RESULTS",
+  "method": "Copy one input to a new owned JSON file, assess with pinned Python review.py, and compare the literal expected assessment. Independently inspect the referenced source and retained rows. Never treat these synthetic observations as a runtime receipt.",
+  "positiveNecessaryRecord": {
+    "barrier": {"operationBinding": "STORE_SAVE_ARGUMENTS_REAL_GESTURE_ID", "writeBeginSeen": true, "commitReturned": true, "changesDelta": 8, "inTransaction": false},
+    "clientHeaderBytes": 0, "clientEofObserved": true, "afterCommitBeforeAck": true,
+    "retainedRowsReadBack": true, "completeProjectionSameCut": true, "recoveryStarted": true,
+    "actualMonotonicSeconds": 3600, "requiredMonotonicSeconds": 3600
+  },
+  "fixtures": [
+    {"id": "missing-barrier", "input": {}, "expected": "UNKNOWN_MISSING_BARRIER", "manual": "Timeout, sleep or socket cancellation contains no SQL phase witness."},
+    {"id": "read-commit-noop", "input": {"barrier": {"operationBinding": "STORE_SAVE_ARGUMENTS_REAL_GESTURE_ID", "writeBeginSeen": false, "commitReturned": true, "changesDelta": 0, "inTransaction": false}}, "expected": "FAIL_NOOP_OR_READ_COMMIT", "manual": "COMMIT from withTechnologyReads must not reach the write barrier. Require BEGIN IMMEDIATE and changes with actual inputs row."},
+    {"id": "unilateral-http-ack", "input": {"acceptedHttp200": true, "durableResultPresent": false}, "expected": "FAIL_UNILATERAL_MUTATION_ACK", "manual": "Query inputs for that exact ID/body/fingerprint; health, WS projection ACK and IPC READY are insufficient."},
+    {"id": "no-client-headers-unobserved", "input": {"afterCommitBeforeAck": true, "barrier": {"operationBinding": "STORE_SAVE_ARGUMENTS_REAL_GESTURE_ID", "commitReturned": true, "writeBeginSeen": true, "changesDelta": 8, "inTransaction": false}}, "expected": "UNKNOWN_CLIENT_DELIVERY_WITNESS", "manual": "A negative delivery claim requires a real client byte counter and EOF after exact worker kill. Missing counter is not zero."},
+    {"id": "same-id-different-body", "input": {"sameIdDifferentBodyStatus": 200}, "expected": "FAIL_IDEMPOTENCY_CONFLICT", "manual": "Expected 409; preserve original inputs row and result, then re-read unchanged body/fingerprint."},
+    {"id": "recovery-failed-startup", "input": {"recoveryStarted": false, "barrier": {"operationBinding": "STORE_SAVE_ARGUMENTS_REAL_GESTURE_ID"}}, "expected": "UNKNOWN_RECOVERY_NOT_VERIFIED", "manual": "Retain failed copy; do not repair/reset/fallback to another checkpoint to hide failure."},
+    {"id": "recovery-lost-known-commit", "input": {"knownCommittedResultLost": true}, "expected": "FAIL_RECOVERY_LOST_COMMITTED_RESULT", "manual": "A previously witnessed committed result absent after recovery is FAIL, even if snapshot tick matches."},
+    {"id": "seqgap", "input": {"projectionSequenceGap": true, "barrier": {"operationBinding": "STORE_SAVE_ARGUMENTS_REAL_GESTURE_ID"}}, "expected": "UNKNOWN_UNOBSERVED_HISTORY_PROJECTION_TRANSPORT_MAY_COALESCE", "manual": "Sequence 100 to 120 is permitted for a coalescing feed; it supplies no history for the missing states. Never fabricate or claim continuous historical coverage."},
+    {"id": "sequence-regression", "input": {"sequenceRegressed": true}, "expected": "FAIL_SEQUENCE_REGRESSION", "manual": "Within one uninterrupted epoch 120 to 119 violates the clock. An explicit rollback requires a separate declared epoch."},
+    {"id": "ws-backpressure", "input": {"statesOutstanding": 2}, "expected": "FAIL_WS_BACKPRESSURE", "manual": "Map local TCP source port to app.flujo.remotePort; require enviados-acuses<=1 and exact sequence on each ACK."},
+    {"id": "36s-is-not-3600s", "input": {"actualMonotonicSeconds": 36, "requiredMonotonicSeconds": 3600}, "expected": "UNKNOWN_SHORT_REAL_EXPOSURE", "manual": "Subtract actual monotonic timestamps for the 12-peer intersection; reject fake clock, multiplier, estimated/extrapolated hours."},
+    {"id": "phase-correct-operation-unbound", "input": {"barrier": {"writeBeginSeen": true, "commitReturned": true, "changesDelta": 8, "inTransaction": false}}, "expected": "UNKNOWN_OPERATION_BINDING", "manual": "Cookie/PID/SQL phase correctness alone does not prove that the HTTP gesture is in this write transaction."}
+  ],
+  "nativeManualProcedures": {
+    "before": "At B01-F/B02-F/B10-F, independent readonly inputs lookup must find no candidate ID; retain all tables/columns/typed rows as K0. Hold the actual barrier for at least the registered 10 observation seconds, receive zero client bytes, kill exact PID/start/pgrp/session/cgroup, compare closed K0, and compare recovered pre-App cut to K0. Only then release startup and retry same ID. This does not cover every Bxx phase.",
+    "after": "At A01-F, require COMMIT actually returned after BEGIN IMMEDIATE, transaction ended, total_changes delta positive, real inputs body/result/fingerprint and snapshot digest. Independent readonly result must exist while no header bytes reached the probe. Kill exact owned worker, preserve full K1, compare pre-App recovery cut, retry same ID and exact original result, then reject same ID with another body as 409.",
+    "lossless": "Read every retained gzip segment, verify compressed file SHA, each payload SHA, contiguous counters, aggregate raw SHA and all retained row counts. Cross-reference SQLite cut-start/table/row/cut-complete with complete client raw projection, actual same tick/digest and independent RO projection connection. No hash-only evidence substitutes for retained raw rows.",
+    "lifetime": "First confirm all 12 upgrades and received states plus app.flujo by TCP source port. Open the monotonic exposure after confirmation. End only after >=3600 actual seconds and all 12 peers still connected and server-confirmed. Disconnection aborts this exposure; matrix reconnect occurs afterward and is reported separately.",
+    "independentManualLedger": "Root must supply and obtain independent reviewer signature for F21-B/C component-manifest/manual expected stocks, identities, parentage, catalogue, authorship, receipts, chronicle, region archive and historyUnknownPrefixRef. Projection replay uses production reader under test and cannot serve as this independent semantic ledger. Until supplied, all case classifications remain UNKNOWN."
+  }
+}

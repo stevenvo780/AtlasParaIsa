@@ -26,7 +26,9 @@ for (const seed of [1, 51926, 0xffffffff]) test(`streamed digest preserves prior
   Object.assign(world, { digestProbe: { '10': 1, '2': 2, '0': 3, '01': 4, '-0': 5,
     '4294967294': 6, '4294967295': 7, missing: undefined, null: null,
     unicode: 'á🙂\ud800\n"', array: [null, false, -0, 1e-30, 'ñ🌱', { nested: true }] } });
-  const bytes = previousJson(previousCanonical({ world, params: paramsOf(world) }));
+  // Los bytes previos a T148 no tenían `motor.depuracion` (diagnóstico, fuera del digesto): se omite aquí.
+  const { depuracion: _depuracion, ...motor } = paramsOf(world).motor;
+  const bytes = previousJson(previousCanonical({ world, params: { ...paramsOf(world), motor } }));
   assert.ok(bytes.length > 64 * 1024, 'control crosses buffered emission boundaries');
   const before = structuredClone(world);
   assert.equal(digestoCanonico(world), sha256(bytes));

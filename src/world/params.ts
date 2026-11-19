@@ -68,8 +68,10 @@ export interface WorldParams {
    * Default 50 ms = constitución V.
    */
   gobernador: { presupuestoMs: number; senales: string[]; politica: 'apagar' | 'techo' };
-  /** T102: configuración reservada; todavía no selecciona otro backend. */
-  motor: { clonPorPaso: boolean; hilos: number; soaTerreno: boolean; particionarPersonas: boolean; gpu: number[]; orden: 'natural' | 'inverso' | 'adversarial' };
+  /** T102: configuración reservada; todavía no selecciona otro backend. T148: `depuracion` activa la guardia
+   * de solo lectura de la fase de decisión (`src/world/paralelo/guardia.ts`). Es diagnóstico: no cambia la
+   * dinámica y no entra en el digesto canónico. */
+  motor: { clonPorPaso: boolean; hilos: number; soaTerreno: boolean; particionarPersonas: boolean; gpu: number[]; orden: 'natural' | 'inverso' | 'adversarial'; depuracion: boolean };
   red: { deltas: boolean };
   /** T100: admisión de colecciones; no son una política silenciosa de natalidad. */
   limites: { teselasActivas: number; chunks: number; comunidades: number; fauna: number; aplicacion: 'historicos' | 'parametros' };
@@ -155,7 +157,7 @@ const RAW_HISTORICAL: WorldParams = {
   persistencia: { cadaTicks: 1, ventanaEventosTicks: 0, paginasSucias: false },
   agua: { cuencas: 0.4, memoria: 1 },
   gobernador: { presupuestoMs: 50, senales: ['p95'], politica: 'techo' },
-  motor: { clonPorPaso: true, hilos: 1, soaTerreno: false, particionarPersonas: false, gpu: [], orden: 'natural' },
+  motor: { clonPorPaso: true, hilos: 1, soaTerreno: false, particionarPersonas: false, gpu: [], orden: 'natural', depuracion: false },
   red: { deltas: false },
   limites: { teselasActivas: 65536, chunks: 256, comunidades: 8, fauna: 393216, aplicacion: 'parametros' },
   // Leyes candidatas: cada default es la constante que hoy está escrita en el código
@@ -355,6 +357,7 @@ export const PARAM_DESCRIPTORS: Readonly<Record<string, ParamDescriptor>> = deep
   'motor.clonPorPaso': { kind: 'boolean' },
   'motor.soaTerreno': { kind: 'boolean' },
   'motor.particionarPersonas': { kind: 'boolean' },
+  'motor.depuracion': { kind: 'boolean' },
   'motor.gpu': { kind: 'array', element: { kind: 'number', range: [0, Number.MAX_SAFE_INTEGER], integer: true }, minLength: 0, unique: true },
   'motor.orden': { kind: 'enum', values: ['natural', 'inverso', 'adversarial'] },
   'limites.aplicacion': { kind: 'enum', values: ['historicos', 'parametros'] },

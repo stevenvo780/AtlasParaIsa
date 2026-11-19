@@ -9,16 +9,23 @@ import { projectAnimal } from './animals.js';
 import type { LegacyRecord } from '../shared/demography.js';
 import { bindTechnologyCatalogue, type TechnologyCatalogueReader } from './technology-catalogue.js';
 import { lastTileAt, splitTileBlocks, tileIndexAppended } from './tile-index.js';
+import { cooperationMembershipForContext, mergeCooperationMembershipContext, type CooperationMembershipBoundary } from './cooperation-membership.js';
 
 export interface WorldContext {
   loadChunk?: (key: string, atTick: number) => Chunk | null;
   catalogueReader?: TechnologyCatalogueReader;
   loadLegacy?: (id: string, atTick: number) => LegacyRecord | null;
+  cooperationMembership?: CooperationMembershipBoundary;
 }
 const contexts = new WeakMap<World, WorldContext>();
+const nativeContextGet = Function.prototype.call.bind(WeakMap.prototype.get) as (map: WeakMap<World, WorldContext>, world: World) => WorldContext | undefined;
+/** Unknown contexts, accessors and tokens grant no new reads or callbacks. */
+export function cooperationMembershipBoundary(world: World): CooperationMembershipBoundary | undefined {
+  return cooperationMembershipForContext(nativeContextGet(contexts, world));
+}
 /** Host capabilities live outside serialized worlds and never become inhabitants' knowledge. */
 export function bindWorldContext(world: World, context: WorldContext): void {
-  const bound = { ...contexts.get(world), ...context };
+  const bound = mergeCooperationMembershipContext(contexts.get(world), context);
   contexts.set(world, bound);
   if (world.technology && bound.catalogueReader) bindTechnologyCatalogue(world.technology, bound.catalogueReader);
 }

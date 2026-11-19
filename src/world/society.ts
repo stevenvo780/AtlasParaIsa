@@ -3,7 +3,8 @@ import type { Person, World } from './index.js';
 import { localRandom } from './genetics.js';
 import { paramsOf } from './params.js';
 import { count } from './statistics.js';
-import { tileAt } from './spatial.js';
+import { tileAt, cooperationMembershipBoundary } from './spatial.js';
+import { createRecipeMembership } from './cooperation-membership.js';
 import { constructionCost, waterAvailable } from './inventions.js';
 import { CAPABILITIES, itemCapacities, MASS_UNIT, materialCapacities, shareTechnology, transferTechnologyItem } from './technology.js';
 import type { Capability, MaterialBatch, TechnologyProgram, TechnologyRecipe } from '../shared/technology.js';
@@ -131,8 +132,11 @@ function practicedRecipeToTeach(world: World, teacher: Person, learner: Person, 
   if (!world.learningEnabled) return;
   // Mismas recetas resueltas en el mismo orden que `knownRecipes.flatMap(…)` con los dos filtros puros.
   const candidates: TechnologyRecipe[] = [];
-  for (const id of practiced ?? practicedRecipes(teacher)) {
-    if (learner.technology.knownRecipes.includes(id)) continue;
+  const practicedIds = practiced ?? practicedRecipes(teacher);
+  const membership = createRecipeMembership(cooperationMembershipBoundary(world), learner, practicedIds);
+  for (const id of practicedIds) {
+    if (membership.includes(id)) continue;
+    membership.discard();
     const recipe = resolveTechnologyRecipe(world, id); if (recipe) candidates.push(recipe);
   }
   if (!candidates.length) return;

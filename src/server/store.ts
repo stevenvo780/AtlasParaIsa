@@ -1,4 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
+import { nodeCooperationMembershipContext } from './cooperation-membership.js';
 import { createHash } from 'node:crypto';
 import { mkdirSync, existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -330,9 +331,9 @@ export class Store {
     } catch (error) { this.db.close(); throw error; }
   }
   get context(): WorldContext {
-    return { loadChunk: (key, atTick) => this.loadChunk(key, atTick),
+    return nodeCooperationMembershipContext<WorldContext>({ loadChunk: (key, atTick) => this.loadChunk(key, atTick),
       loadLegacy: (id, atTick) => this.loadLegacy(id, atTick),
-      ...(this.schemaVersion >= 4 ? { catalogueReader: this.catalogueReader } : {}) };
+      ...(this.schemaVersion >= 4 ? { catalogueReader: this.catalogueReader } : {}) });
   }
   private readTechnologyRecipe(id: string, atTick: number): TechnologyRecipe | null {
     if (this.schemaVersion < 4) return null;

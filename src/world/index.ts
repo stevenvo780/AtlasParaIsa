@@ -2,6 +2,7 @@ import { recordChronicleEvent, enableChronicleJournal, assertChronicleJournal, t
 import { PROTOCOL_VERSION, type Action, type ChronicleEvent, type Gesture, type GestureResult, type MemoryView, type PersonView, type PersonDetail, type PlaceView, type Tile, type WorldView, type Viewport, type Order, type CommunityView, type WorldSample, type FaseNombre } from '../shared/types.js';
 import { activate, bindWorldContext, maintainRegions, normalizeViewport, projectTerrain, tileAt, validCoordinate, worldContext, type ChunkMeta, type WorldContext } from './spatial.js';
 import { tileLookup } from './tile-index.js';
+import { mergeCooperationMembershipContext } from './cooperation-membership.js';
 import { primero, primeroConFiltroCaro } from './orden.js';
 import { chunkKey, generateChunk, proceduralPlaceName, legacyStructures, type Chunk } from './terrain.js';
 import { assertGenome, DEFAULT_MUTATION_RATE, expressGenome, founderGenome, inheritGenome, localRandom, type Genome } from './genetics.js';
@@ -1413,7 +1414,7 @@ export function cloneWorld(world: World, context: WorldContext = worldContext(wo
   // Dormant chunks are immutable until activate() takes a private deep copy.
   // A new queue is still required: retiring/reactivating must not edit the confirmed queue.
   draft.retiredChunks = [...world.retiredChunks];
-  bindWorldContext(draft, { ...worldContext(world), ...(context && typeof context === 'object' ? context : {}) });
+  bindWorldContext(draft, mergeCooperationMembershipContext(worldContext(world), context && typeof context === 'object' ? context : {}));
   setParams(draft, paramsOf(world));
   // T041: la cadencia de las métricas caras vive en una caché lateral por mundo; el clon
   // de cada paso la hereda para no recalcular la BFS de agua en cada tick.

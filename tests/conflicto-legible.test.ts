@@ -40,7 +40,7 @@ function replica(t: { after(callback: () => void): void }, seed: number, pasos: 
  * hashea `{world, params}`, así que declarar la clave mueve el hash aunque el estado no se mueva (T102). */
 function digestoSinLaClave(world: World): string {
   const vigentes = paramsOf(world);
-  const antes = structuredClone(vigentes) as unknown as { social: Record<string, unknown> };
+  const antes = structuredClone(vigentes) as unknown as { social: Record<string, unknown>; tecnologia?: Record<string, unknown> };
   delete antes.social.memoriaDisputa;
   assert.equal(antes.social.hogarTrabajo, 0);
   delete antes.social.hogarTrabajo;
@@ -48,6 +48,10 @@ function digestoSinLaClave(world: World): string {
   // actúa, así que también se quita de la forma.
   assert.equal(antes.social.disolucion, 0);
   delete antes.social.disolucion;
+  // Fase B (`sprint/estabilidad-fase-b-20261118`): `tecnologia.*` no existía en f2757fa; con sus
+  // valores históricos no actúa, así que también se quita de la forma.
+  assert.deepEqual(antes.tecnologia, HISTORICAL_PARAMS.tecnologia);
+  delete antes.tecnologia;
   // Poda ola 1 (2026-09-27): `conducta.vocacion`/`vocacionTope` y
   // `poblacion.natalidadLocal`/`radioProvision` ya no se declaran; la forma las trae quitadas.
   setParams(world, antes as unknown as WorldParams);

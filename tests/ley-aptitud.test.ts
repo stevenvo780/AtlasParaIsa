@@ -37,7 +37,7 @@ function replica(t: { after(callback: () => void): void }, pasos: number, params
  * estado físico sea idéntico, así que el control la quita antes de hashear. */
 function digestoSinAptitud(world: World): string {
   const vigentes = paramsOf(world);
-  const comoPadre = structuredClone(vigentes) as unknown as { conducta: Record<string, unknown>; social: Record<string, unknown> };
+  const comoPadre = structuredClone(vigentes) as unknown as { conducta: Record<string, unknown>; social: Record<string, unknown>; tecnologia?: Record<string, unknown> };
   delete comoPadre.conducta.aptitud;
   // Fusión CONFL (`sprint/noche-lab60c-20260922`): `social.memoriaDisputa` no existía en f2757fa, donde se
   // midieron los hashes; con su valor 0 no actúa, así que también se quita de la forma.
@@ -49,6 +49,10 @@ function digestoSinAptitud(world: World): string {
   // actúa, así que también se quita de la forma.
   assert.equal(comoPadre.social.disolucion, 0);
   delete comoPadre.social.disolucion;
+  // Fase B (`sprint/estabilidad-fase-b-20261118`): `tecnologia.*` no existía en f666226; con sus
+  // valores históricos no actúa, así que también se quita de la forma.
+  assert.deepEqual(comoPadre.tecnologia, HISTORICAL_PARAMS.tecnologia);
+  delete comoPadre.tecnologia;
   // Poda ola 1 (2026-09-27): `conducta.vocacion`/`vocacionTope` y
   // `poblacion.natalidadLocal`/`radioProvision` ya no se declaran; la forma las trae quitadas.
   setParams(world, comoPadre as unknown as WorldParams);

@@ -10,6 +10,69 @@
 > sus runbooks y los bancos de un solo uso se retiraron de main y se conservan en el tag
 > `archivo/campanas-20260922`; las evidencias JSON que produjeron siguen en `docs/evidencia-2026-09-22/`.
 
+## 19 de noviembre de 2026 — estabilización V14 (Fase A), evaluación preregistrada Fase B (8 semillas × 60 días), GPU 32 M celdas (T122) y escala de red 10k (T138)
+
+Fuentes archivadas en [`docs/evidencia-2026-11-19/`](evidencia-2026-11-19/publication-v14.json):
+- Contrato de publicación V14: [`publication-v14.json`](evidencia-2026-11-19/publication-v14.json)
+- Panel preregistrado Fase B (8 semillas × 60 días, 16 réplicas): [`panel-fase-b-20261119.json`](evidencia-2026-11-19/panel-fase-b-20261119.json) y [`criterio-terminado-fase-b-20261119.json`](evidencia-2026-11-19/criterio-terminado-fase-b-20261119.json)
+- Banco de red a 40 / 1 000 / 10 000 habitantes (`scripts/banco-red.mts`): [`banco-red-20261119.json`](evidencia-2026-11-19/banco-red-20261119.json)
+- Informe GPU residente T122/T125 (opción b, hasta 32 M celdas): [`T122-T125-report.md`](../specs/002-mundo-ilimitado/informes/T122-T125-report.md)
+- Diagnóstico y plan de estabilidad: [`PLAN-ESTABILIDAD-2026-11-18.md`](PLAN-ESTABILIDAD-2026-11-18.md)
+
+### 1. Estabilidad en producción (Fase A, mundo público V14)
+
+- **V14** arrancó el 2026-11-19 00:42 -05 en la torre (`atlas-publico.service` → `https://atlas.humanizar.tech`) con Fase A (compactación incremental de `technology_stats`, índice `technology_definitions_order`, `Store.load()` sin `TEMP B-TREE` ni re-decodificaciones $O(N)$, poda escalada de ejecuciones, `auto_vacuum=INCREMENTAL`, y respaldo en caliente `.backup` con `MemoryHigh=3G` hacia `/mnt/Data2/respaldos-atlas-v14`).
+- Tras 8+ horas continuas de operación en vivo: `/health` estable (`{"status":"ok"}`), 0 timeouts de respaldo y tamaño del respaldo comprimido **estabilizado en meseta** (`00:42` 52 KiB → `04:00` 159 MiB → `06:00` 222 MiB → `07:00` 241 MiB → `08:00` **240 MiB**).
+- Adicionalmente, T133 (`chunks` en formato de tuplas v2) comprime el terreno dormido en SQLite en **−62,1 %** con lectura retrocompatible de v1 y paridad exacta de `loadChunk`.
+
+### 2. Panel preregistrado Fase B (`tecnologia.*`, 8 semillas `9601..9608` × 60 días, 16 réplicas)
+
+Preregistro: [`2026-11-18-estabilidad-tecnologia.md`](preregistros/2026-11-18-estabilidad-tecnologia.md). Comparación entre `control` (`HISTORICAL_PARAMS` + `social.radioConvivencia=12,social.disolucion=1,social.maxComunidades=64`, `RULES_VERSION=11`) y `tratamiento` (mismo base + leyes locales `tecnologia.cuantizarMasas=250,tecnologia.enfriamiento=240,tecnologia.puertaNovedad=1,tecnologia.evitarNoOp=1,tecnologia.topeEspeculacion=1`).
+
+| Semilla | Pob 60 (ctrl / trt) | Recetas 60 (ctrl / trt) | Δ Recetas | Filas cat. (def+stats) | DB 60d (ctrl / trt) | Div. func. (ctrl / trt) | Gen. máx. (ctrl / trt) | C1–C7 (ctrl / trt) |
+|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| 9601 | 660 / 651 | 81 327 / 6 161 | −92,4 % | −83,7 % | 1,27 / 1,56 GiB | 3 532 / 1 369 | 139 / 24 | ✓✓✓✓✓✓✓ / ✓✓✓✓✓✓✓ |
+| 9602 | 533 / 555 | 43 305 / 8 527 | −80,3 % | −56,9 % | 0,80 / 1,77 GiB | 2 671 / 1 689 | 148 / 16 | ✓✓✓✓✓✓✓ / ✓✓✓✓✓✓✓ |
+| 9603 | 2 (ext.) / 596 | 11 097 / 12 217 | +10,1 %* | +137,4 %* | 0,18 / 2,07 GiB | 1 110 / 2 139 | 203 / 19 | ✗✗✗✗✗✗✗ / ✓✓✓✓✓✓✓ |
+| 9604 | 669 / 638 | 166 032 / 13 074 | −92,1 % | −85,6 % | 1,77 / 2,26 GiB | 4 199 / 2 008 | 166 / 21 | ✓✓✓✓✓✓✓ / ✓✓✓✓✓✓✓ |
+| 9605 | 643 / 632 | 86 591 / 9 865 | −88,6 % | −76,2 % | 1,46 / 2,36 GiB | 3 622 / 1 626 | 124 / 20 | ✓✓✓✓✓✓✓ / ✓✓✓✓✓✓✓ |
+| 9606 | 2 (ext.) / 490 | 6 069 / 9 257 | +52,5 %* | +190,2 %* | 0,18 / 1,76 GiB | 666 / 1 705 | 169 / 35 | ✗✗✗✗✗✗✗ / ✓✓✓✓✓✓✓ |
+| 9607 | 2 (ext.) / 2 (ext.) | 3 541 / 358 | −89,9 % | −83,9 % | 0,14 / 0,12 GiB | 457 / 124 | 185 / 17 | ✗✗✗✗✗✗✗ / ✗✗✗✗✗✗✗ |
+| 9608 | 646 / 604 | 116 185 / 7 394 | −93,6 % | −85,8 % | 1,48 / 2,26 GiB | 3 725 / 1 420 | 160 / 17 | ✓✓✓✓✓✓✓ / ✓✓✓✓✓✓✓ |
+| **Mediana** | **643 / 632** (sup.) | **62 316 / 8 892** | **−85,7 %** (−89,2 % par.) | **−79,9 %** | **×1,57** | **ratio med. 0,46** | **163 / 19,5** | **5/8 → 7/8** |
+
+*\*En 9603 y 9606 el brazo de control se extinguió antes del día 60 mientras tratamiento sobrevivió con 596 y 490 habitantes.*
+
+Evaluación estricta de puertas preregistradas Q1–Q5:
+- **Q4 (seguridad biológica)**: **CUMPLE** — `C1–C7` sube de **5/8** en control a **7/8** en tratamiento (0 extinciones extra; salvó `9603` y `9606` de la extinción), población mediana en semillas supervivientes `0,983×`, nacimientos `1,001×`. `C8` sigue `0/8` en ambos brazos (auditado como no alcanzable en mundos estacionarios en [REVISION-2026-09-24](REVISION-2026-09-24.md)).
+- **Q5 (paridad histórica)**: **CUMPLE** — con parámetros por defecto, digestos bit a bit idénticos a `main` en `tests/tecnologia-estabilidad.test.ts` (semillas 7, 42, 51926 × 1 200 pasos).
+- **Q1 (freno al spam)**: **NO CUMPLE** en la regla literal — aunque la mediana global cae **−85,7 %** (`0,143 ≤ 0,15`) y el ratio pareado mediano es `0,108` (−89,2 %), solo `5/8` semillas individuales bajan `< 0,15` (el umbral era `≥ 7/8`) porque `9603` y `9606` se extinguieron pronto en control; además la tasa agregada `rate41_60 > rate1_20` crece con el tamaño de la población (de 16 a ~600 personas), aunque la tasa *per cápita* baja.
+- **Q2 (bytes totales de `world.sqlite` a 60 días)**: **NO CUMPLE** — las filas append-only de `technology_definitions + technology_stats` caen **−79,9 %** de mediana (hasta −85,8 % en `9608`), pero el tamaño total de `world.sqlite` a 60 días es `1,57×` mayor en tratamiento porque >90 % del archivo a ese horizonte corresponde a la ventana acotada de 10 días de recibos de transporte de agua (`technology_executions`), que aumenta al sobrevivir más personas y usar más vasijas (624k–961k filas frente a 275k–477k en control). A escalas de miles de días (como V13) la ventaja de −80 % en definiciones sí dominaría, pero a 60 días Q2 no pasa.
+- **Q3 (diversidad funcional)**: **NO CUMPLE** — `generacionMaxima ≥ 3` pasa `8/8` y `C7` sube de `5/8` a `7/8`, pero `diversidadFuncional ≥ 50 %` del control pasa en `3/8` (las microvariantes redundantes del control inflan el conteo bruto de firmas distintas).
+- **Veredicto (Constitución, Principio II)**: **NO ADOPTADA en `DEFAULT_PARAMS`**. `RULES_VERSION` permanece en **11** y los valores por defecto históricos no cambian. Las claves `tecnologia.*` permanecen disponibles como leyes locales opcionales bajo configuración explícita para futuras rondas de refinamiento.
+
+### 3. Escala extrema en GPU (T122 opción b — `65 k` a `32 M` de celdas)
+
+Medido en la torre (RTX 5070 Ti + RTX 2060, `COMPUTE_NVRTC=/opt/cuda/lib64/libnvrtc.so npx tsx scripts/banco-escala-extrema-gpu.mts`):
+
+| Celdas | CPU 1 hilo (med.) | CPU 8 workers (med.) | GPU `[0]` RTX 5070 Ti (med. / kernel) | Dual GPU `[0,1]` (med. / kernel) | Aceleración vs CPU1 | Diffs `Object.is` (`flushToHost`) |
+|---:|---:|---:|---:|---:|---:|---:|
+| 65 536 | 6,53 ms | 6,92 ms | **1,20 ms** (0,10 ms) | **1,48 ms** (0,09 ms) | 5,4× | — |
+| 1 048 576 | 105,71 ms | 39,54 ms | **1,74 ms** (0,53 ms) | **2,42 ms** (0,47 ms) | **60,8×** | **0** / 13,6 M |
+| 4 194 304 | 428,17 ms | 153,15 ms | **3,24 ms** (2,25 ms) | **4,19 ms** (2,07 ms) | **132,2×** | **0** / 54,5 M |
+| 8 388 608 | 856,38 ms | 294,58 ms | **7,33 ms** (4,47 ms) | **10,65 ms** (3,77 ms) | **116,8×** | — |
+| **18 432 000** (SC-004 ≤ 20 ms) | 1 881,03 ms | 635,22 ms | **12,43 ms** (9,52 ms) | **11,99 ms** (8,48 ms) | **156,9×** | — |
+| **32 000 000** (SC-004 ≤ 25 ms) | 3 245,42 ms | 1 088,74 ms | **19,60 ms** (17,10 ms) | **19,76 ms** (14,35 ms) | **165,6×** | — |
+
+Subida dispersa por tick en GPU `[0]`: `63 744 B` (`≤ 1 MB`, cumple FR-025). Paridad FP64 bit a bit (`Object.is` = 0 diferencias en los 13 campos) frente a CPU 1 hilo.
+
+### 4. Escala de red WebSocket (`scripts/banco-red.mts`, T138)
+
+Medido con 12 clientes simultáneos × 5 pasos (`--escalas 40,1000,10000`):
+- `40` hab.: `state = 49 873 B` (`48,7 KiB`), `0` descartados, `0` sockets terminados.
+- `1 000` hab.: `state = 66 785 B` (`65,2 KiB`), `0` descartados, `0` sockets terminados.
+- `10 000` hab.: `state = 66 790 B` (`65,2 KiB < 120 KiB`, +5 bytes respecto a 1 000 hab.), `0` descartados, `0` sockets terminados, `contieneIdsLejanos = false`, ningún campo acotado crece linealmente.
+
 ## 27 de septiembre de 2026 — poda de leyes refutadas, ola 1 (rama `sprint/poda-leyes-20260927`)
 
 Retiradas NAT-L y vocación de linaje (ver «Poda» en [REGLAS](REGLAS.md)). Puertas de la

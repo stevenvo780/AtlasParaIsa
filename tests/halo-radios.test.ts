@@ -436,7 +436,7 @@ test('el inventario cubre cada lectura, llamada y barrido de las fases con halo 
 
 test('las funciones que alcanza cada fase con halo son las del fuente', () => {
   const tamanos = Object.fromEntries(FASES_CON_HALO.map(fase => [fase, BASE.cierres.get(fase)!.size]));
-  assert.deepEqual(tamanos, { decision: 43, ecologia: 4, fauna: 2 });
+  assert.deepEqual(tamanos, { decision: 43, ecologia: 6, fauna: 2 });
   for (const fase of FASES_CON_HALO) assert.deepEqual([...funcionesDeFase(fase)].sort(), [...BASE.cierres.get(fase)!].sort());
   // Lecturas que ninguna tabla cubre si la red estricta no se aplicara (lo que la red de la tarea no veía).
   const decision = BASE.cierres.get('decision')!;

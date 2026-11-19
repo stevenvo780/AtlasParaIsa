@@ -107,7 +107,7 @@ export const RAICES: readonly Raiz[] = [
     seleccion: ['fauna.ventana', 'fauna.turno'],
     nota: 'Quién decide sale de dos selecciones sobre TODA la fauna activa (`LECTURAS_GLOBALES`): la ventana rotatoria de `MAX_ACTIVE_ANIMALS` y los `MAX_ANIMAL_DECISIONS_PER_TICK` más atrasados. Las calcula el coordinador; sólo la decisión de cada animal elegido se reparte.' },
   { fase: 'ecologia', fichero: 'index.ts', funcion: 'ecology',
-    llamador: { fichero: 'index.ts', funcion: 'advanceTick', patrones: ["medirFase(medicion, 'ecologia', () => ecology(world));"] }, seleccion: [],
+    llamador: { fichero: 'index.ts', funcion: 'advanceTick', patrones: ["medirFase(medicion, 'ecologia', () => ecology(world, context.ecologyExecution));"] }, seleccion: [],
     nota: 'Cada tesela activa. El cambio de tiempo (cada 600 pasos) consume `world.rng` y se queda en el coordinador.' },
   { fase: 'ecologia', fichero: 'ecosystem-kernel.ts', funcion: 'EcosystemKernel',
     llamador: { fichero: 'ecosystem.ts', funcion: 'ecosystemKernel', patrones: ['const ecosystemKernel = new EcosystemKernel();'] }, seleccion: [],
@@ -232,6 +232,15 @@ export const ALCANCES: readonly Alcance[] = [
     'for (let i = 0; i < length; i++) lifeBefore[i] = tiles[i].life ?? 0;', 'const tile = tiles[i];', 'life = lifeBefore[i];',
     'if (!store.loadLife(tiles)) return null;'],
     { nota: 'T112: con `motor.soaTerreno` la foto de `life` y la presencia van al `TileStore` (`soaTopology`, misma clase) y los vecinos vivos salen por aritmética (`kernel.vivos`); sin él sigue la caché de topologías de objetos.' }),
+  a('kernel.paralelo.ecologia', 'teselas', 'entrada', 0, 'ecosystem-kernel.ts', 'EcosystemKernel', [
+    'store.prepareParallel(tiles, options.regionSide)'],
+    { veces: 2, nota: 'T120/T122: prepara el SoA residente en paralelo (hilos CPU o GPU) para la primera pasada de ecología.' }),
+  a('kernel.paralelo.paso', 'teselas', 'entrada', 0, 'ecosystem-kernel.ts', 'EcosystemKernel', [
+    'store.prepareParallel(tiles, options?.regionSide)'],
+    { veces: 2, nota: 'T115/T122: prepara el SoA residente en paralelo (hilos CPU o GPU) para el kernel de ecosistema.' }),
+  a('kernel.paralelo.certificado', 'teselas', 'entrada', 0, 'ecosystem-kernel.ts', 'EcosystemKernel', [
+    'store.parallelTopologyCertificate(tiles)'],
+    { veces: 4, nota: 'T115/T120/T122: certificado de topología residente emitido en la barrera paralela/GPU.' }),
   a('kernel.vecinos', 'teselas', 'entrada', 1, 'ecosystem-kernel.ts', 'buildTopology', ['for (let dy = -1; dy <= 1; dy++) {', 'const row = rows.get(tile.y + dy);',
     'for (let dx = -1; dx <= 1; dx++) {', 'neighbors[offset++] = row === undefined ? -1 : row.get(tile.x + dx) ?? -1;']),
   a('kernel.vivos', 'teselas', 'kernel.vecinos', 0, 'ecosystem-kernel.ts', 'EcosystemKernel', ['for (let offset = 0; offset < 8; offset++) {', 'if (neighbor >= 0 && lifeBefore[neighbor] >= 0.45) livingNeighbors++;']),
@@ -307,6 +316,11 @@ export const LLAMADAS: readonly Llamada[] = [
   ll('technology.ts', 'dependencyCraft', 'technology.ts:forecastCraft', 'entrada', ['const output = forecastCraft(privateHost, privateActor, recipe);']),
   ll('technology.ts', 'forecastCraft', 'technology.ts:planWithdrawal', 'entrada', ['const plan = planWithdrawal(host, actor, recipe.program);']),
   ll('animals.ts', 'choose', 'animals.ts:localTiles', 'entrada', ['const visible = localTiles(animal, state)']),
+  ll('index.ts', 'ecology', 'ecosystem.ts:stepLocalEcology', 'entrada', [
+    'stepLocalEcology(world.tiles, world.tick, world.weather, phase, paramsOf(world).recursos,\n      { hilos: paramsOf(world).motor.hilos, orden: paramsOf(world).motor.orden, gpu: paramsOf(world).motor.gpu,\n        ...(execution ?? (worldContext(world) as WorldContext).ecologyExecution) })'],
+    'T120/T122: despacho paralelo/GPU de la ecología local sobre el mismo pool residente.'),
+  ll('ecosystem.ts', 'stepLocalEcology', 'ecosystem.ts:ecosystemKernel', 'entrada', ['ecosystemKernel.stepEcology(tiles, tick, weather, phase, recursos, options)']),
+  ll('ecosystem.ts', 'ecosystemKernel', 'ecosystem-kernel.ts:EcosystemKernel', 'entrada', ['new EcosystemKernel()']),
   ll('ecosystem-kernel.ts', 'EcosystemKernel', 'ecosystem-kernel.ts:buildTopology', 'entrada', ['buildTopology(tiles)']),
   ll('ecosystem-kernel.ts', 'EcosystemKernel', 'ecosystem-kernel.ts:sameCoordinates', 'entrada', ['sameCoordinates(topology, tiles)']),
 ];
@@ -530,7 +544,7 @@ export const RECORRIDOS: readonly Recorrido[] = [
   { id: 'paso.caducidad', fase: 'gestos', fichero: 'index.ts', funcion: 'advanceTick',
     patrones: ['world.invitations = world.invitations.filter(', 'world.reminders = world.reminders.filter('], motivo: 'Listas globales acotadas a 8.' },
   { id: 'paso.checkpoint', fase: 'checkpoint', fichero: 'index.ts', funcion: 'advanceTick', patrones: ['for (const person of world.people) maintainTechnologyMemory(world, person);'], motivo: 'Memoria tecnológica.' },
-  { id: 'ecologia', fase: 'ecologia', fichero: 'index.ts', funcion: 'ecology', patrones: ['for (const tile of world.tiles) {', "if (tile.terrain === 'water') continue;", 'const tileIn = tileLookup(world.tiles);'], motivo: 'Autómata por tesela (T120).' },
+  { id: 'ecologia', fase: 'ecologia', fichero: 'index.ts', funcion: 'ecology', patrones: ['for (const tile of world.tiles) {', "if (tile.terrain === 'water') continue;", 'const tileIn = tileLookup(world.tiles);', 'stepLocalEcology(world.tiles, world.tick, world.weather, phase, paramsOf(world).recursos,'], motivo: 'Autómata por tesela (T120).' },
   { id: 'kernel', fase: 'ecologia', fichero: 'ecosystem-kernel.ts', funcion: 'EcosystemKernel', patrones: ['for (let i = 0; i < length; i++) {'], motivo: 'Una vuelta por tesela activa.' },
   { id: 'fauna', fase: 'faunaSerial', fichero: 'animals.ts', funcion: 'stepAnimals',
     patrones: ['for (const animal of world.animals) {', 'tileLookup(world.tiles)', 'syncFauna(world.tiles, world.animals);'], motivo: 'Ocupación de la fauna y recuento por celda al final.' },
@@ -595,6 +609,7 @@ export const FUERA_DEL_PASO: readonly Declaracion[] = [
   { fichero: 'technology.ts', funcion: 'assertTechnology', motivo: 'Validación.' },
   { fichero: 'technology-water.ts', funcion: 'assertTechnologyWater', motivo: 'Validación.' },
   { fichero: 'technology.ts', funcion: 'isHostMember', motivo: 'Segunda declaración del mismo nombre (ver PRIMITIVAS): sin lectura propia del mundo (parámetro genérico `people`, no `world.people`).' },
+  { fichero: 'digesto.ts', funcion: 'IncrementalRegionHasher', motivo: 'Hash incremental por región para la prueba de determinismo entre barreras (T117); no forma parte del paso.' },
 ];
 
 /** Campos de `world`/`host` que no son colecciones y que leen las funciones de las fases con halo: iguales para

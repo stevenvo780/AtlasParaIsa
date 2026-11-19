@@ -44,3 +44,11 @@ Sin imponer ningún techo fijo de recetas ni generaciones (respetando [GOAL.md](
 2. **B2 · Puerta local de novedad o mejora en `finishProject()` + refuerzo honesto**: mantener intacto el redescubrimiento pagado de firmas existentes; registrar una definición nueva solo si descubre una clase funcional nueva o mejora/domina en Pareto localmente a sus padres, y aplicar refuerzo negativo a ensayos estériles.
 3. **B3 · Enfriamiento y oportunidad realistas en `technologyOpportunity()`**: parametrizar el enfriamiento (histórico `45` en `HISTORICAL_PARAMS`; candidato V12 mayor), quitar el salto forzado `attempts % 3 !== 0` frente a `craft` necesario y bajar la especulación cuando el inventario ya está lleno de herramientas útiles.
 4. **B4 · Evitar mutaciones no-op obvias en `proposeTechnologyProgram()`**: no proponer pasos sin efecto físico local (p. ej. `cool` sin `heat`, `separate` sobre un solo material).
+
+## 3. Resultado verificado (2026-11-19)
+
+- **Fase A — IMPLEMENTADA Y DESPLEGADA EN PRODUCCIÓN (V14)**: `A1–A4` integrados en `main` y corriendo en `https://atlas.humanizar.tech` desde 2026-11-19 00:42 -05. Tras 8+ horas continuas, los respaldos horarios comprimidos en `/mnt/Data2/respaldos-atlas-v14` se estabilizaron en meseta (`~240 MiB`, 0 timeouts).
+- **Fase B — IMPLEMENTADA COMO LEYES OPCIONALES, NO ADOPTADA EN `DEFAULT_PARAMS`**: evaluada en panel preregistrado de 8 semillas × 60 días (`9601..9608`, 16 réplicas; detalle completo en [EVIDENCIA.md](EVIDENCIA.md) y [`panel-fase-b-20261119.json`](evidencia-2026-11-19/panel-fase-b-20261119.json)).
+  - **Q4 (seguridad)** y **Q5 (paridad histórica)** cumplieron holgadamente (`C1–C7` subió de `5/8` en control a `7/8` en tratamiento; 0 extinciones extra y 2 extinciones evitadas; paridad bit a bit con defaults históricos).
+  - **Q1**, **Q2** y **Q3** no cumplieron los umbrales literales del preregistro a 60 días (aunque las recetas acumuladas cayeron −85,7 % de mediana y las filas de catálogo −79,9 %, el tamaño total de SQLite a 60 días estuvo dominado >90 % por la ventana acotada de recibos de agua en `technology_executions`, mayor en tratamiento por la mayor supervivencia).
+  - Por el Principio II de la Constitución, `RULES_VERSION` se mantiene en **11** y `DEFAULT_PARAMS` no adopta Fase B; las claves `tecnologia.*` quedan disponibles en configuración opt-in.

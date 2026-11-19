@@ -308,7 +308,7 @@ export function createApp(options: AppOptions) {
   /** T162: efectos vigentes de las palancas de red y guardado para los pasos siguientes.
    * Sin palanca activa valen 0 (sin suelo) y la cadencia declarada en `persistencia.cadaTicks`. */
   let suscripcionGobernadorMs = 0;
-  let cadaTicksGobernador = paramsOf(world).persistencia.cadaTicks;
+  let cadaTicksGobernador: number | null = null;
   function gobernar(draft: World): void {
     const stats = runtime.gobernador!, params = paramsOf(draft).gobernador;
     stats.presupuestoMs = params.presupuestoMs; stats.politica = params.politica;
@@ -316,7 +316,7 @@ export function createApp(options: AppOptions) {
     if (stats.manual !== null) {
       draft.reproductionEnabled = stats.manual; stats.activo = stats.manual;
       gobernador.estadoGobernador = 'manual'; gobernador.palancaActiva = null; gobernador.senalDisparadora = null;
-      suscripcionGobernadorMs = 0; cadaTicksGobernador = paramsOf(draft).persistencia.cadaTicks;
+      suscripcionGobernadorMs = 0; cadaTicksGobernador = null;
       publicarSenalesGobernador(draft); return;
     }
     let colaRed = 0;
@@ -329,7 +329,7 @@ export function createApp(options: AppOptions) {
     draft.reproductionEnabled, draft.people.length, draft.tiles.length, draft.tick);
     draft.reproductionEnabled = decision.reproductionEnabled;
     suscripcionGobernadorMs = decision.palancaActiva === 'red' ? decision.subscribeMsEfectivo : 0;
-    cadaTicksGobernador = decision.palancaActiva === 'guardado' ? decision.cadaTicksEfectivo : paramsOf(draft).persistencia.cadaTicks;
+    cadaTicksGobernador = decision.palancaActiva === 'guardado' ? decision.cadaTicksEfectivo : null;
     stats.techo = gobernador.estado.techo; stats.techoObservado = gobernador.techoObservado;
     stats.activo = draft.reproductionEnabled;
     publicarSenalesGobernador(draft);
@@ -360,7 +360,7 @@ export function createApp(options: AppOptions) {
     stats.senalDisparadora = stats.manual !== null ? null : gobernador.senalDisparadora;
     stats.ventanasVerdesConsecutivas = gobernador.ventanasVerdesConsecutivas;
     stats.solicitarRetiroPaginasFrias = stats.manual !== null ? false : gobernador.solicitarRetiroPaginasFrias;
-    stats.subscribeMsEfectivo = suscripcionGobernadorMs; stats.cadaTicksEfectivo = cadaTicksGobernador;
+    stats.subscribeMsEfectivo = suscripcionGobernadorMs; stats.cadaTicksEfectivo = cadaTicksGobernador ?? paramsOf(mundo).persistencia.cadaTicks;
   }
   const proyectar = (viewport?: Viewport) => {
     const start = monotonicNow(), projected = projectWorld(world, viewport, context);
@@ -632,7 +632,8 @@ export function createApp(options: AppOptions) {
       // es lo que de verdad evita morir, no solo el tope más alto de esos módulos.
       // T162: la cadencia vigente puede venir espaciada por la palanca de guardado; el gesto
       // (`valid.length > 0`) sigue forzando el guardado en su propio paso, sin tocar esa invariante.
-      if (valid.length > 0 || draft.tick % cadaTicksGobernador === 0
+      const cadaTicksEfectivo = cadaTicksGobernador ?? paramsOf(draft).persistencia.cadaTicks;
+      if (valid.length > 0 || draft.tick % cadaTicksEfectivo === 0
         || technologyJournalNearCapacity(draft.technology) || chronicleJournalNearCapacity(draft)
         || technologyCatalogueNearCapacity(draft.technology)) {
         const saveStarted = monotonicNow();

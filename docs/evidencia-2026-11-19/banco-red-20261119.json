@@ -1,0 +1,163 @@
+{
+  "escalas": [
+    {
+      "habitantes": 40,
+      "habitantesInyectados": 24,
+      "habitantesEnVistaMedia": 24,
+      "clientes": 12,
+      "pasos": 5,
+      "mensajesEsperados": 60,
+      "mensajesRecibidos": 60,
+      "mensajesDescartados": 0,
+      "socketsTerminados": 0,
+      "bytesPorPasoPorCliente": {
+        "media": 98677.81666666667,
+        "p95": 274230
+      },
+      "egressTotalBytes": 5920669,
+      "totalStateBytes": 49873,
+      "cumpleTecho120KiB": true,
+      "desglose": {
+        "campos": {
+          "tiles": 18653,
+          "people": 25065,
+          "communities": 500,
+          "blueprints": 2,
+          "technology": 464,
+          "events": 300,
+          "animals": 2,
+          "structures": 2,
+          "stats": 1281,
+          "demography": 94,
+          "organization": 892,
+          "memories": 972,
+          "places": 2
+        },
+        "sobrecosteBytes": 1644,
+        "sumaCamposBytes": 49873,
+        "totalStateBytes": 49873,
+        "diferenciaPct": 0,
+        "dentroDel2Pct": true
+      },
+      "miembrosComunidadEnVista": 24,
+      "miembrosComunidadTotal": 24,
+      "contieneIdsLejanos": false
+    },
+    {
+      "habitantes": 1000,
+      "habitantesInyectados": 984,
+      "habitantesEnVistaMedia": 40,
+      "clientes": 12,
+      "pasos": 5,
+      "mensajesEsperados": 60,
+      "mensajesRecibidos": 60,
+      "mensajesDescartados": 0,
+      "socketsTerminados": 0,
+      "bytesPorPasoPorCliente": {
+        "media": 113740.65,
+        "p95": 291143
+      },
+      "egressTotalBytes": 6824439,
+      "totalStateBytes": 66785,
+      "cumpleTecho120KiB": true,
+      "desglose": {
+        "campos": {
+          "tiles": 18653,
+          "people": 41789,
+          "communities": 693,
+          "blueprints": 2,
+          "technology": 464,
+          "events": 300,
+          "animals": 2,
+          "structures": 2,
+          "stats": 1281,
+          "demography": 94,
+          "organization": 892,
+          "memories": 972,
+          "places": 2
+        },
+        "sobrecosteBytes": 1639,
+        "sumaCamposBytes": 66785,
+        "totalStateBytes": 66785,
+        "diferenciaPct": 0,
+        "dentroDel2Pct": true
+      },
+      "miembrosComunidadEnVista": 40,
+      "miembrosComunidadTotal": 984,
+      "contieneIdsLejanos": false
+    },
+    {
+      "habitantes": 10000,
+      "habitantesInyectados": 9984,
+      "habitantesEnVistaMedia": 40,
+      "clientes": 12,
+      "pasos": 5,
+      "mensajesEsperados": 60,
+      "mensajesRecibidos": 60,
+      "mensajesDescartados": 0,
+      "socketsTerminados": 0,
+      "bytesPorPasoPorCliente": {
+        "media": 113745.15,
+        "p95": 291148
+      },
+      "egressTotalBytes": 6824709,
+      "totalStateBytes": 66790,
+      "cumpleTecho120KiB": true,
+      "desglose": {
+        "campos": {
+          "tiles": 18653,
+          "people": 41789,
+          "communities": 694,
+          "blueprints": 2,
+          "technology": 464,
+          "events": 300,
+          "animals": 2,
+          "structures": 2,
+          "stats": 1281,
+          "demography": 94,
+          "organization": 892,
+          "memories": 972,
+          "places": 2
+        },
+        "sobrecosteBytes": 1643,
+        "sumaCamposBytes": 66790,
+        "totalStateBytes": 66790,
+        "diferenciaPct": 0,
+        "dentroDel2Pct": true
+      },
+      "miembrosComunidadEnVista": 40,
+      "miembrosComunidadTotal": 9984,
+      "contieneIdsLejanos": false
+    }
+  ],
+  "comparacion1000a10000": {
+    "camposAcotados": {
+      "people": {
+        "bytes1000": 41789,
+        "bytes10000": 41789,
+        "ratio": 1,
+        "acotado": true
+      },
+      "communities": {
+        "bytes1000": 693,
+        "bytes10000": 694,
+        "ratio": 1.0014430014430014,
+        "acotado": true
+      },
+      "blueprints": {
+        "bytes1000": 2,
+        "bytes10000": 2,
+        "ratio": 1,
+        "acotado": true
+      },
+      "tiles": {
+        "bytes1000": 18653,
+        "bytes10000": 18653,
+        "ratio": 1,
+        "acotado": true
+      }
+    },
+    "ningunCampoAcotadoCreceLineal": true,
+    "stateMedioBajoTechoEnAmbas": true
+  }
+}

@@ -1,0 +1,629 @@
+{
+  "evaluatedAt": "2026-11-19T13:42:14.796Z",
+  "panelDir": "/tmp/panel-fase-b-20261118",
+  "seeds": [
+    9601,
+    9602,
+    9603,
+    9604,
+    9605,
+    9606,
+    9607,
+    9608
+  ],
+  "gates": {
+    "Q1": {
+      "pass": false,
+      "part1Pass": false,
+      "part2Pass": false,
+      "medianRecetasCtrl": 62316,
+      "medianRecetasTrt": 8892,
+      "medianRecetasRatioOfMedians": 0.14269208549971116,
+      "medianRecetasPairedRatio": 0.10751388668424175,
+      "seedsRecetasReduced85": 5,
+      "medianRate1_20": 1338.5,
+      "medianRate41_60": 3289.5,
+      "seedsDecelerated": 1
+    },
+    "Q2": {
+      "pass": false,
+      "medianDbBytesRatio": 1.5687735167743773,
+      "seedsDbBytesReduced50": 0,
+      "medianCatalogueRowsRatio": 0.20078352235231173,
+      "seedsCatalogueRowsReduced50": 6,
+      "note": "En réplicas de 60 días con ventanaEventosTicks=24000, >90% de world.sqlite son recibos de agua en technology_executions (que crecen con la población viva y el uso de vasijas), mientras technology_definitions + technology_stats se reducen ~80-90%."
+    },
+    "Q3": {
+      "pass": false,
+      "seedsDivFunc50": 3,
+      "seedsGenMax3": 8,
+      "ctrlC7PassCount": 5,
+      "trtC7PassCount": 7,
+      "c7Maintained": true
+    },
+    "Q4": {
+      "pass": true,
+      "cNoRegression": true,
+      "cPassCounts": {
+        "C1": {
+          "control": 5,
+          "tratamiento": 7
+        },
+        "C2": {
+          "control": 5,
+          "tratamiento": 7
+        },
+        "C3": {
+          "control": 5,
+          "tratamiento": 7
+        },
+        "C4": {
+          "control": 5,
+          "tratamiento": 7
+        },
+        "C5": {
+          "control": 5,
+          "tratamiento": 7
+        },
+        "C6": {
+          "control": 5,
+          "tratamiento": 7
+        },
+        "C7": {
+          "control": 5,
+          "tratamiento": 7
+        }
+      },
+      "ctrlExtinctions": 3,
+      "trtExtinctions": 1,
+      "extraExtinctionsInTrt": 0,
+      "medianPobRatioSurviving": 0.9828926905132193,
+      "medianPobRatioAll": 0.9931818181818182,
+      "seedsPob80": 5,
+      "survivingCtrlCount": 5,
+      "medianNacimientosRatio": 1.0012162023726512
+    },
+    "Q5": {
+      "pass": true,
+      "verifiedBy": "tests/tecnologia-estabilidad.test.ts (semillas 7, 42, 51926 x 1200 ticks idénticas bit a bit a main) + tests/leyes-candidatas.test.ts"
+    }
+  },
+  "pairs": [
+    {
+      "seed": 9601,
+      "control": {
+        "pob60": 660,
+        "vecinosMortales60": 658,
+        "nacimientos60": 1839,
+        "recetas20": 8531,
+        "recetas40": 44856,
+        "recetas60": 81327,
+        "rate1_20": 8531,
+        "rate41_60": 36471,
+        "diversidadFuncional60": 3532,
+        "generacionMaxima60": 139,
+        "totalBytes": 1366753280,
+        "defRows": 81327,
+        "statRows": 223225,
+        "execRows": 370549,
+        "criterios": {
+          "C1": "cumple",
+          "C2": "cumple",
+          "C3": "cumple",
+          "C4": "cumple",
+          "C5": "cumple",
+          "C6": "cumple",
+          "C7": "cumple",
+          "C8": "falla"
+        }
+      },
+      "tratamiento": {
+        "pob60": 651,
+        "vecinosMortales60": 649,
+        "nacimientos60": 1829,
+        "recetas20": 1174,
+        "recetas40": 3486,
+        "recetas60": 6161,
+        "rate1_20": 1174,
+        "rate41_60": 2675,
+        "diversidadFuncional60": 1369,
+        "generacionMaxima60": 24,
+        "totalBytes": 1673756672,
+        "defRows": 6161,
+        "statRows": 43552,
+        "execRows": 624330,
+        "criterios": {
+          "C1": "cumple",
+          "C2": "cumple",
+          "C3": "cumple",
+          "C4": "cumple",
+          "C5": "cumple",
+          "C6": "cumple",
+          "C7": "cumple",
+          "C8": "falla"
+        }
+      },
+      "ratios": {
+        "recetasRatio": 0.07575589902492408,
+        "recetasReductionPct": 92.42441009750759,
+        "deceleratedInTratamiento": false,
+        "dbBytesRatio": 1.22462239271158,
+        "dbBytesReductionPct": -22.462239271158,
+        "catalogueRowsRatio": 0.1632332081220941,
+        "catalogueRowsReductionPct": 83.6766791877906,
+        "divFuncRatio": 0.387599093997735,
+        "pobRatio": 0.9863636363636363,
+        "nacimientosRatio": 0.9945622620989668
+      }
+    },
+    {
+      "seed": 9602,
+      "control": {
+        "pob60": 533,
+        "vecinosMortales60": 531,
+        "nacimientos60": 695,
+        "recetas20": 6368,
+        "recetas40": 12072,
+        "recetas60": 43305,
+        "rate1_20": 6368,
+        "rate41_60": 31233,
+        "diversidadFuncional60": 2671,
+        "generacionMaxima60": 148,
+        "totalBytes": 856383488,
+        "defRows": 43305,
+        "statRows": 107795,
+        "execRows": 275726,
+        "criterios": {
+          "C1": "cumple",
+          "C2": "cumple",
+          "C3": "cumple",
+          "C4": "cumple",
+          "C5": "cumple",
+          "C6": "cumple",
+          "C7": "cumple",
+          "C8": "falla"
+        }
+      },
+      "tratamiento": {
+        "pob60": 555,
+        "vecinosMortales60": 553,
+        "nacimientos60": 1769,
+        "recetas20": 993,
+        "recetas40": 5136,
+        "recetas60": 8527,
+        "rate1_20": 993,
+        "rate41_60": 3391,
+        "diversidadFuncional60": 1689,
+        "generacionMaxima60": 16,
+        "totalBytes": 1902813184,
+        "defRows": 8527,
+        "statRows": 56549,
+        "execRows": 630622,
+        "criterios": {
+          "C1": "cumple",
+          "C2": "cumple",
+          "C3": "cumple",
+          "C4": "cumple",
+          "C5": "cumple",
+          "C6": "cumple",
+          "C7": "cumple",
+          "C8": "falla"
+        }
+      },
+      "ratios": {
+        "recetasRatio": 0.19690566909132895,
+        "recetasReductionPct": 80.30943309086712,
+        "deceleratedInTratamiento": false,
+        "dbBytesRatio": 2.221917179234544,
+        "dbBytesReductionPct": -122.1917179234544,
+        "catalogueRowsRatio": 0.43068166776968897,
+        "catalogueRowsReductionPct": 56.931833223031106,
+        "divFuncRatio": 0.6323474354174466,
+        "pobRatio": 1.0412757973733584,
+        "nacimientosRatio": 2.545323741007194
+      }
+    },
+    {
+      "seed": 9603,
+      "control": {
+        "pob60": 2,
+        "vecinosMortales60": 0,
+        "nacimientos60": 58,
+        "recetas20": 4959,
+        "recetas40": 10444,
+        "recetas60": 11097,
+        "rate1_20": 4959,
+        "rate41_60": 653,
+        "diversidadFuncional60": 1110,
+        "generacionMaxima60": 203,
+        "totalBytes": 195026944,
+        "defRows": 11097,
+        "statRows": 26839,
+        "execRows": 8186,
+        "criterios": {
+          "C1": "falla",
+          "C2": "falla",
+          "C3": "falla",
+          "C4": "falla",
+          "C5": "falla",
+          "C6": "falla",
+          "C7": "falla",
+          "C8": "falla"
+        }
+      },
+      "tratamiento": {
+        "pob60": 596,
+        "vecinosMortales60": 594,
+        "nacimientos60": 1830,
+        "recetas20": 1503,
+        "recetas40": 6579,
+        "recetas60": 12217,
+        "rate1_20": 1503,
+        "rate41_60": 5638,
+        "diversidadFuncional60": 2139,
+        "generacionMaxima60": 19,
+        "totalBytes": 2219352064,
+        "defRows": 12217,
+        "statRows": 77846,
+        "execRows": 674250,
+        "criterios": {
+          "C1": "cumple",
+          "C2": "cumple",
+          "C3": "cumple",
+          "C4": "cumple",
+          "C5": "cumple",
+          "C6": "cumple",
+          "C7": "cumple",
+          "C8": "falla"
+        }
+      },
+      "ratios": {
+        "recetasRatio": 1.1009281787870595,
+        "recetasReductionPct": -10.09281787870595,
+        "deceleratedInTratamiento": false,
+        "dbBytesRatio": 11.379720250346537,
+        "dbBytesReductionPct": -1037.9720250346536,
+        "catalogueRowsRatio": 2.3740773935048503,
+        "catalogueRowsReductionPct": -137.40773935048503,
+        "divFuncRatio": 1.927027027027027,
+        "pobRatio": null,
+        "nacimientosRatio": 31.551724137931036
+      }
+    },
+    {
+      "seed": 9604,
+      "control": {
+        "pob60": 669,
+        "vecinosMortales60": 667,
+        "nacimientos60": 2033,
+        "recetas20": 24800,
+        "recetas40": 95698,
+        "recetas60": 166032,
+        "rate1_20": 24800,
+        "rate41_60": 70334,
+        "diversidadFuncional60": 4199,
+        "generacionMaxima60": 166,
+        "totalBytes": 1901797376,
+        "defRows": 166032,
+        "statRows": 433021,
+        "execRows": 477694,
+        "criterios": {
+          "C1": "cumple",
+          "C2": "cumple",
+          "C3": "cumple",
+          "C4": "cumple",
+          "C5": "cumple",
+          "C6": "cumple",
+          "C7": "cumple",
+          "C8": "falla"
+        }
+      },
+      "tratamiento": {
+        "pob60": 638,
+        "vecinosMortales60": 636,
+        "nacimientos60": 2049,
+        "recetas20": 2341,
+        "recetas40": 8145,
+        "recetas60": 13074,
+        "rate1_20": 2341,
+        "rate41_60": 4929,
+        "diversidadFuncional60": 2008,
+        "generacionMaxima60": 21,
+        "totalBytes": 2422751232,
+        "defRows": 13074,
+        "statRows": 72980,
+        "execRows": 685666,
+        "criterios": {
+          "C1": "cumple",
+          "C2": "cumple",
+          "C3": "cumple",
+          "C4": "cumple",
+          "C5": "cumple",
+          "C6": "cumple",
+          "C7": "cumple",
+          "C8": "falla"
+        }
+      },
+      "ratios": {
+        "recetasRatio": 0.07874385660595548,
+        "recetasReductionPct": 92.12561433940445,
+        "deceleratedInTratamiento": false,
+        "dbBytesRatio": 1.2739271084155708,
+        "dbBytesReductionPct": -27.392710841557076,
+        "catalogueRowsRatio": 0.14365006101296546,
+        "catalogueRowsReductionPct": 85.63499389870346,
+        "divFuncRatio": 0.47820909740414386,
+        "pobRatio": 0.953662182361734,
+        "nacimientosRatio": 1.0078701426463355
+      }
+    },
+    {
+      "seed": 9605,
+      "control": {
+        "pob60": 643,
+        "vecinosMortales60": 641,
+        "nacimientos60": 2166,
+        "recetas20": 24215,
+        "recetas40": 66452,
+        "recetas60": 86591,
+        "rate1_20": 24215,
+        "rate41_60": 20139,
+        "diversidadFuncional60": 3622,
+        "generacionMaxima60": 124,
+        "totalBytes": 1568415744,
+        "defRows": 86591,
+        "statRows": 247902,
+        "execRows": 395201,
+        "criterios": {
+          "C1": "cumple",
+          "C2": "cumple",
+          "C3": "cumple",
+          "C4": "cumple",
+          "C5": "cumple",
+          "C6": "cumple",
+          "C7": "cumple",
+          "C8": "falla"
+        }
+      },
+      "tratamiento": {
+        "pob60": 632,
+        "vecinosMortales60": 630,
+        "nacimientos60": 2119,
+        "recetas20": 2387,
+        "recetas40": 6677,
+        "recetas60": 9865,
+        "rate1_20": 2387,
+        "rate41_60": 3188,
+        "diversidadFuncional60": 1626,
+        "generacionMaxima60": 20,
+        "totalBytes": 2529017856,
+        "defRows": 9865,
+        "statRows": 69856,
+        "execRows": 961030,
+        "criterios": {
+          "C1": "cumple",
+          "C2": "cumple",
+          "C3": "cumple",
+          "C4": "cumple",
+          "C5": "cumple",
+          "C6": "cumple",
+          "C7": "cumple",
+          "C8": "falla"
+        }
+      },
+      "ratios": {
+        "recetasRatio": 0.11392638957859362,
+        "recetasReductionPct": 88.60736104214064,
+        "deceleratedInTratamiento": false,
+        "dbBytesRatio": 1.612466506839656,
+        "dbBytesReductionPct": -61.2466506839656,
+        "catalogueRowsRatio": 0.23833383658252938,
+        "catalogueRowsReductionPct": 76.16661634174706,
+        "divFuncRatio": 0.4489232468249586,
+        "pobRatio": 0.9828926905132193,
+        "nacimientosRatio": 0.9783010156971376
+      }
+    },
+    {
+      "seed": 9606,
+      "control": {
+        "pob60": 2,
+        "vecinosMortales60": 0,
+        "nacimientos60": 27,
+        "recetas20": 4469,
+        "recetas40": 5718,
+        "recetas60": 6069,
+        "rate1_20": 4469,
+        "rate41_60": 351,
+        "diversidadFuncional60": 666,
+        "generacionMaxima60": 169,
+        "totalBytes": 198565888,
+        "defRows": 6069,
+        "statRows": 15078,
+        "execRows": 14061,
+        "criterios": {
+          "C1": "falla",
+          "C2": "falla",
+          "C3": "falla",
+          "C4": "falla",
+          "C5": "falla",
+          "C6": "falla",
+          "C7": "falla",
+          "C8": "falla"
+        }
+      },
+      "tratamiento": {
+        "pob60": 490,
+        "vecinosMortales60": 488,
+        "nacimientos60": 1281,
+        "recetas20": 697,
+        "recetas40": 2891,
+        "recetas60": 9257,
+        "rate1_20": 697,
+        "rate41_60": 6366,
+        "diversidadFuncional60": 1705,
+        "generacionMaxima60": 35,
+        "totalBytes": 1889280000,
+        "defRows": 9257,
+        "statRows": 52110,
+        "execRows": 749649,
+        "criterios": {
+          "C1": "cumple",
+          "C2": "cumple",
+          "C3": "cumple",
+          "C4": "cumple",
+          "C5": "cumple",
+          "C6": "cumple",
+          "C7": "cumple",
+          "C8": "falla"
+        }
+      },
+      "ratios": {
+        "recetasRatio": 1.5252924699291481,
+        "recetasReductionPct": -52.529246992914814,
+        "deceleratedInTratamiento": false,
+        "dbBytesRatio": 9.514625190808202,
+        "dbBytesReductionPct": -851.4625190808201,
+        "catalogueRowsRatio": 2.9019246228779494,
+        "catalogueRowsReductionPct": -190.19246228779494,
+        "divFuncRatio": 2.56006006006006,
+        "pobRatio": null,
+        "nacimientosRatio": 47.44444444444444
+      }
+    },
+    {
+      "seed": 9607,
+      "control": {
+        "pob60": 2,
+        "vecinosMortales60": 0,
+        "nacimientos60": 9,
+        "recetas20": 2840,
+        "recetas40": 3269,
+        "recetas60": 3541,
+        "rate1_20": 2840,
+        "rate41_60": 272,
+        "diversidadFuncional60": 457,
+        "generacionMaxima60": 185,
+        "totalBytes": 146300928,
+        "defRows": 3541,
+        "statRows": 8224,
+        "execRows": 8888,
+        "criterios": {
+          "C1": "falla",
+          "C2": "falla",
+          "C3": "falla",
+          "C4": "falla",
+          "C5": "falla",
+          "C6": "falla",
+          "C7": "falla",
+          "C8": "falla"
+        }
+      },
+      "tratamiento": {
+        "pob60": 2,
+        "vecinosMortales60": 0,
+        "nacimientos60": 6,
+        "recetas20": 268,
+        "recetas40": 320,
+        "recetas60": 358,
+        "rate1_20": 268,
+        "rate41_60": 38,
+        "diversidadFuncional60": 124,
+        "generacionMaxima60": 17,
+        "totalBytes": 125575168,
+        "defRows": 358,
+        "statRows": 1537,
+        "execRows": 5362,
+        "criterios": {
+          "C1": "falla",
+          "C2": "falla",
+          "C3": "falla",
+          "C4": "falla",
+          "C5": "falla",
+          "C6": "falla",
+          "C7": "falla",
+          "C8": "falla"
+        }
+      },
+      "ratios": {
+        "recetasRatio": 0.10110138378988986,
+        "recetasReductionPct": 89.88986162101101,
+        "deceleratedInTratamiento": true,
+        "dbBytesRatio": 0.8583347331877484,
+        "dbBytesReductionPct": 14.166526681225156,
+        "catalogueRowsRatio": 0.16107097322566935,
+        "catalogueRowsReductionPct": 83.89290267743307,
+        "divFuncRatio": 0.2713347921225383,
+        "pobRatio": null,
+        "nacimientosRatio": 0.6666666666666666
+      }
+    },
+    {
+      "seed": 9608,
+      "control": {
+        "pob60": 646,
+        "vecinosMortales60": 644,
+        "nacimientos60": 2107,
+        "recetas20": 22342,
+        "recetas40": 72633,
+        "recetas60": 116185,
+        "rate1_20": 22342,
+        "rate41_60": 43552,
+        "diversidadFuncional60": 3725,
+        "generacionMaxima60": 160,
+        "totalBytes": 1589534720,
+        "defRows": 116185,
+        "statRows": 312846,
+        "execRows": 372013,
+        "criterios": {
+          "C1": "cumple",
+          "C2": "cumple",
+          "C3": "cumple",
+          "C4": "cumple",
+          "C5": "cumple",
+          "C6": "cumple",
+          "C7": "cumple",
+          "C8": "falla"
+        }
+      },
+      "tratamiento": {
+        "pob60": 604,
+        "vecinosMortales60": 602,
+        "nacimientos60": 2095,
+        "recetas20": 1979,
+        "recetas40": 5216,
+        "recetas60": 7394,
+        "rate1_20": 1979,
+        "rate41_60": 2178,
+        "diversidadFuncional60": 1420,
+        "generacionMaxima60": 17,
+        "totalBytes": 2424168448,
+        "defRows": 7394,
+        "statRows": 53739,
+        "execRows": 645310,
+        "criterios": {
+          "C1": "cumple",
+          "C2": "cumple",
+          "C3": "cumple",
+          "C4": "cumple",
+          "C5": "cumple",
+          "C6": "cumple",
+          "C7": "cumple",
+          "C8": "falla"
+        }
+      },
+      "ratios": {
+        "recetasRatio": 0.06363988466669536,
+        "recetasReductionPct": 93.63601153333046,
+        "deceleratedInTratamiento": false,
+        "dbBytesRatio": 1.5250805267090988,
+        "dbBytesReductionPct": -52.508052670909876,
+        "catalogueRowsRatio": 0.14249086895818716,
+        "catalogueRowsReductionPct": 85.75091310418128,
+        "divFuncRatio": 0.3812080536912752,
+        "pobRatio": 0.934984520123839,
+        "nacimientosRatio": 0.9943046986236355
+      }
+    }
+  ]
+}

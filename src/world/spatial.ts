@@ -132,10 +132,12 @@ function activateChunk(world: World, key: string, x: number, y: number, context:
   const cuencas = paramsOf(world).agua.cuencas;
   // Both pending snapshots and host readers may share immutable archived objects.
   // Clone only the chunk being reactivated, before exposing animals/places/structures to laws.
-  let archived = pending >= 0 ? takePending(world.retiredChunks, pending) : chunkLruFor(world).get(key);
+  // Una vez reanimado el chunk vuelve a mutar en vivo: su copia dormida en la LRU deja de ser válida.
+  const lru = chunkLruFor(world);
+  let archived = pending >= 0 ? takePending(world.retiredChunks, pending) : lru.get(key);
+  lru.delete(key);
   if (!archived && context.loadChunk) {
     archived = context.loadChunk(key, world.tick) ?? undefined;
-    if (archived) chunkLruFor(world).set(archived);
   }
   // Los Tile observados son proxies. El archivo se materializa antes de cruzar structuredClone.
   const archivePlain = archived && context.tileOwnership
@@ -158,7 +160,7 @@ function activateChunk(world: World, key: string, x: number, y: number, context:
 }
 /** Mueve chunks activos (en el orden dado) a `retiredChunks` con sus teselas, lugares,
  * animales y estructuras, y los recuerda en la LRU del mundo. No borra información. */
-function retireActiveChunks(world: World, keys: readonly string[], context: WorldContext = worldContext(world)): string[] {
+function retireActiveChunks(world: World, keys: readonly string[], context: WorldContext = worldContext(world), cacheInLru = false): string[] {
   const state = regions.get(world.chunks);
   const retired = new Set<string>();
   const detached = new Map<string, Chunk>();
@@ -194,8 +196,13 @@ function retireActiveChunks(world: World, keys: readonly string[], context: Worl
     });
     // The three memory anchors remain available as provenance even when dormant.
     world.places = world.places.filter(p => ['claro', 'refugio', 'huerta'].includes(p.id) || !retired.has(chunkKey(p.x, p.y)));
-    for (const chunk of detached.values()) {
-      chunkLruFor(world).set(context.tileOwnership ? { ...chunk, tiles: chunk.tiles.map(tile => ({ ...tile })) } : chunk);
+    const lru = chunkLruFor(world);
+    if (cacheInLru) {
+      for (const chunk of detached.values()) {
+        lru.set(context.tileOwnership ? { ...chunk, tiles: chunk.tiles.map(tile => ({ ...tile })) } : chunk);
+      }
+    } else {
+      for (const key of detached.keys()) lru.delete(key);
     }
   }
   return done;
@@ -247,7 +254,7 @@ function evictCold(world: World, options: EvictColdChunksOptions): string[] {
   const evicted: string[] = [];
   for (const candidate of candidates) {
     if (!overBudget()) break;
-    evicted.push(...retireActiveChunks(world, [candidate.key]));
+    evicted.push(...retireActiveChunks(world, [candidate.key], worldContext(world), true));
   }
   return evicted;
 }

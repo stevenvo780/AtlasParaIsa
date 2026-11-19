@@ -6,7 +6,7 @@ import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { runParallelEcology, type ParallelEcologyParams } from './ecology-kernel.js';
 import type { WorldParams } from './params.js';
-import { ResidentGpuBridge, type GpuBridgeStats } from './gpu/puente.js';
+import { ResidentGpuBridge, gpuNvrtcAvailable, type GpuBridgeStats } from './gpu/puente.js';
 
 const clamp = (n: number): number => Math.max(0, Math.min(1, n));
 const TREE_FEATURES = new Set<Feature>(['tree', 'pine', 'palm', 'cactus', 'reeds', 'stump']);
@@ -148,7 +148,7 @@ export class EcosystemKernel {
     recursos: WorldParams['recursos'], options: EcosystemOptions): void {
     if (tick % 10 !== 0) return;
     const gpu = options.gpu;
-    if (gpu && gpu.length > 0) {
+    if (gpu && gpu.length > 0 && gpuNvrtcAvailable()) {
       const store = this.soa ??= new TileStore(), terrain = store.prepareParallel(tiles, options.regionSide);
       this.topologies.length = 0;
       const bridge = this.gpuBridge(gpu);
@@ -200,7 +200,7 @@ export class EcosystemKernel {
     const workers = options?.hilos ?? 1;
     if (!Number.isSafeInteger(workers) || workers < 1) throw new RangeError('hilos debe ser un entero positivo.');
     const gpu = options?.gpu;
-    if (gpu && gpu.length > 0) {
+    if (gpu && gpu.length > 0 && gpuNvrtcAvailable()) {
       const store = this.soa ??= new TileStore();
       const terrain = store.prepareParallel(tiles, options?.regionSide);
       this.topologies.length = 0;

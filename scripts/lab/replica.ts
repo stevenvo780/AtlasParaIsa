@@ -45,7 +45,7 @@ import { Store } from '../../src/server/store.js';
 import { hostParams } from '../../src/server/hardware-limits.js';
 import { technologyJournalNearCapacity } from '../../src/world/technology-journal.js';
 import { chronicleJournalNearCapacity } from '../../src/world/chronicle-journal.js';
-import { assertWorld, cloneWorld, createWorld, projectWorld, stepWorld, TICKS_PER_DAY, type World } from '../../src/world/index.js';
+import { assertWorld, cloneWorld, createWorld, observeWorldOpening, projectWorld, stepWorld, TICKS_PER_DAY, type World } from '../../src/world/index.js';
 import { catalogueEnabled, technologyCatalogueNearCapacity, technologyCatalogueTotals } from '../../src/world/technology-catalogue.js';
 import { worldStatistics } from '../../src/world/statistics.js';
 import { indiceDiversidad } from '../../src/world/diversidad.js';
@@ -53,7 +53,7 @@ import { parseParams, type WorldParams } from '../../src/world/params.js';
 import { decideReproduction, RollingStepPerformance } from '../../src/server/governor.js';
 import { decidirTechoLab, TECHO_LAB_MINIMO, techoLabCota } from './techo-lab.js';
 import { durableActivityMetrics } from './metrics.js';
-import { InstrumentosConducta } from './instrumentos.js';
+import { InstrumentosConducta, InstrumentosRealismo, makeRealismoSourceManifest, type RealismoSourceManifest } from './instrumentos.js';
 import { digestoCanonico } from '../../src/world/digesto.js';
 import { faunaTotal, registrarFaunaRetirada } from './fauna-total.js';
 
@@ -89,6 +89,26 @@ function worldSourceDigest(): string {
   const dir = 'src/world', hash = createHash('sha256');
   for (const name of readdirSync(dir).filter(f => f.endsWith('.ts')).sort()) hash.update(name).update('\0').update(readFileSync(join(dir, name)));
   return hash.digest('hex');
+}
+
+/** Contract sourceSHA is 40 hex, but a dirty worktree must not masquerade as HEAD. */
+function realismoSourceManifest(): RealismoSourceManifest {
+  const files: { path: string; sha256: string }[] = [];
+  const scan = (dir: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) scan(path);
+      else if (entry.isFile() && /\.(?:ts|mts|json)$/.test(entry.name))
+        files.push({ path, sha256: createHash('sha256').update(readFileSync(path)).digest('hex') });
+    }
+  };
+  for (const dir of ['src', 'scripts/lab', 'scripts/lib']) scan(dir);
+  for (const path of ['package.json', 'package-lock.json', 'tsconfig.json'])
+    files.push({ path, sha256: createHash('sha256').update(readFileSync(path)).digest('hex') });
+  const baseCommit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  const runtime = { node: process.version, v8: process.versions.v8, modules: process.versions.modules,
+    platform: process.platform, arch: process.arch };
+  return makeRealismoSourceManifest({ baseCommit, runtime, files });
 }
 
 /** Métricas leídas del mundo vivo para el archivo `dia-NNN.json`; sin campos de tiempo real. */
@@ -201,12 +221,17 @@ async function main(): Promise<void> {
   // Por defecto activos; `--instrumentos no` da EXACTAMENTE los dia-NNN.json de antes (mismas claves).
   const instrumentosArg = arg('--instrumentos') ?? 'si';
   if (instrumentosArg !== 'si' && instrumentosArg !== 'no') throw new Error('Uso: --instrumentos si|no (por defecto "si").');
+  const observerRunId = arg('--realismo-observer');
+  if (process.argv.includes('--realismo-observer') && (!observerRunId || observerRunId.startsWith('--')))
+    throw new Error('Uso: --realismo-observer RUN_ID (identificador técnico no vacío).');
   const params: WorldParams = parseParams(arg('--params'), hostParams());
   mkdirSync(salida, { recursive: true });
 
   const dataDir = mkdtempSync(join(tmpdir(), 'atlas-lab-'));
   process.env.CARTA_DATA_DIR = dataDir;
   const store = new Store(join(dataDir, 'world.sqlite'));
+  let observer: InstrumentosRealismo | null = null;
+  let completed = false;
   try {
     let world = createWorld(seed, params);
     const censosFauna = new Map<string, number>();
@@ -218,6 +243,10 @@ async function main(): Promise<void> {
     registrarFaunaRetirada(world, censosFauna);
     store.save(world);
     const instrumentos = instrumentosArg === 'si' ? new InstrumentosConducta(world, store.db) : null;
+    observer = observerRunId ? new InstrumentosRealismo(world, observerRunId, `seed-${seed}`,
+      realismoSourceManifest(), salida) : null;
+    if (observer) { observer.beginOpening(world); observeWorldOpening(world);
+      observer.state(world, 'adopted'); observer.state(world, 'durable'); await observer.drain(); observer.end(world); }
 
     // Solo con --gobernador servidor: p95 de la ventana de 120 pasos (mismo mecanismo que
     // src/server/app.ts) y acumuladores del DÍA en curso, reiniciados en cada dia-NNN.json.
@@ -236,16 +265,20 @@ async function main(): Promise<void> {
         // Imita src/server/app.ts:stepOnce — clon+paso, guardado por cadencia DENTRO de la
         // medición, y el gobernador decidiendo sobre el paso ya medido (governReproduction).
         instrumentos?.antesDelPaso(world);
+        observer?.begin(world);
         const stepStarted = performance.now();
         let cloneMs = 0;
         if (params.motor.clonPorPaso) {
           const cloneStarted = performance.now();
           const draft = cloneWorld(world, store.context);
+          observer?.clone(world, draft);
           cloneMs = performance.now() - cloneStarted;
           stepWorld(draft);
           world = draft;
+          observer?.state(world, 'adopted');
         } else {
           stepWorld(world);
+          observer?.state(world, 'adopted');
         }
         // Antes del guardado (vacía chronicleJournal.pending) y FUERA de la medida: su coste se
         // descuenta de stepMs para que el gobernador decida sobre el mismo paso que sin instrumentos.
@@ -262,6 +295,7 @@ async function main(): Promise<void> {
           const saveStarted = performance.now();
           registrarFaunaRetirada(world, censosFauna);
           store.save(world);
+          observer?.state(world, 'durable');
           saveMs = performance.now() - saveStarted;
         }
         const stepMs = performance.now() - stepStarted - observacionMs;
@@ -270,6 +304,7 @@ async function main(): Promise<void> {
         world.reproductionEnabled = decideReproduction(p95GobernadorActual, params.gobernador.presupuestoMs, world.reproductionEnabled);
         ticksDia++; if (world.reproductionEnabled) reproduccionActivaTicksDia++;
         cloneMsDia.push(cloneMs); saveMsDia.push(saveMs);
+        await observer?.drain();
       } else {
         if (techoLab !== null) {
           // El servidor decide tras cada paso sobre el mundo vigente, para el paso siguiente; aquí se
@@ -279,8 +314,10 @@ async function main(): Promise<void> {
           if (world.reproductionEnabled) { techoTicksActivosDia++; techoTicksActivos++; }
         }
         instrumentos?.antesDelPaso(world);
+        observer?.begin(world);
         const started = performance.now();
         stepWorld(world);
+        observer?.state(world, 'adopted');
         stepTimes.push(performance.now() - started);
         instrumentos?.despuesDelPaso(world);
         if (techoLab !== null) { techoPoblacionMaximaDia = Math.max(techoPoblacionMaximaDia, world.people.length); techoPoblacionMaxima = Math.max(techoPoblacionMaxima, world.people.length); }
@@ -289,10 +326,12 @@ async function main(): Promise<void> {
           || technologyJournalNearCapacity(world.technology) || chronicleJournalNearCapacity(world)
           || technologyCatalogueNearCapacity(world.technology)) {
           registrarFaunaRetirada(world, censosFauna); store.save(world);
+          observer?.state(world, 'durable');
         }
+        await observer?.drain();
       }
       if (tick % TICKS_PER_DAY === 0) {
-        if (tick % params.persistencia.cadaTicks !== 0) { registrarFaunaRetirada(world, censosFauna); store.save(world); }
+        if (tick % params.persistencia.cadaTicks !== 0) { registrarFaunaRetirada(world, censosFauna); store.save(world); observer?.state(world, 'durable'); }
         assertWorld(world);
         const dia = tick / TICKS_PER_DAY, rss = process.memoryUsage().rss, { p50, p95 } = distribution(stepTimes.slice(-TICKS_PER_DAY));
         maxRss = Math.max(maxRss, rss);
@@ -311,9 +350,11 @@ async function main(): Promise<void> {
         writeFileSync(join(salida, `dia-${String(dia).padStart(3, '0')}.json`), JSON.stringify(body, null, 2) + '\n');
         if (gobernadorModo === 'servidor') { reproduccionActivaTicksDia = 0; ticksDia = 0; cloneMsDia.length = 0; saveMsDia.length = 0; }
       }
+      observer?.end(world);
     }
     registrarFaunaRetirada(world, censosFauna);
     store.save(world);
+    await observer?.drain();
     if (!ultimoDia) throw new Error('No se completó ningún día; --dias debe producir al menos un dia-NNN.json.');
 
     const { p50, p95 } = distribution(stepTimes);
@@ -354,8 +395,19 @@ async function main(): Promise<void> {
       const pasoMedio = stepTimes.reduce((suma, ms) => suma + ms, 0) / stepTimes.length;
       console.log(`Instrumentos: ${(instrumentos.costeMs / instrumentos.pasos).toFixed(4)} ms/paso de media (${instrumentos.costeMs.toFixed(0)} ms en ${instrumentos.pasos} pasos, incluidos los cálculos diarios) frente a ${pasoMedio.toFixed(2)} ms/paso de stepWorld (${(100 * instrumentos.costeMs / (pasoMedio * stepTimes.length)).toFixed(2)} %).`);
     }
+    completed = true;
     console.log(`Réplica completa: ${dias} día(s), población final ${resumen.poblacionFinal}. Salida: ${salida}`);
-  } finally { store.close(); rmSync(dataDir, { recursive: true, force: true }); }
+  } finally {
+    try {
+      if (observer) {
+        if (!completed) observer.abort();
+        await observer.drain();
+        let finalSource: RealismoSourceManifest | undefined;
+        try { finalSource = realismoSourceManifest(); } catch { /* Unknown source identity is a coverage gap. */ }
+        observer.finish(finalSource);
+      }
+    } finally { store.close(); rmSync(dataDir, { recursive: true, force: true }); }
+  }
 }
 
 main().catch(error => { console.error((error as Error).message); process.exitCode = 1; });

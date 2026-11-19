@@ -1,0 +1,93 @@
+{
+  "contractVersion": "realismo-v3",
+  "evidenceId": "repro-coverage",
+  "kind": "reproduction-coverage",
+  "synthetic": true,
+  "sourceRefs": [],
+  "payload": {
+    "startTick": 0,
+    "endTick": 1,
+    "opportunityRuleRef": "law",
+    "opportunities": [
+      {
+        "opportunityId": "opp-a",
+        "tick": 1,
+        "actorIds": [
+          "mortal-a"
+        ],
+        "attemptRecordIds": [
+          "attempt-a"
+        ],
+        "disposition": "attempted",
+        "reason": "manual attempt"
+      },
+      {
+        "opportunityId": "opp-r",
+        "tick": 1,
+        "actorIds": [
+          "mortal-b"
+        ],
+        "attemptRecordIds": [
+          "attempt-r"
+        ],
+        "disposition": "attempted",
+        "reason": "manual attempt"
+      }
+    ],
+    "stoppingPeriods": [
+      {
+        "periodId": "brake-1",
+        "startTick": 0,
+        "endTick": 1,
+        "reason": "global-quota",
+        "opportunityIds": [
+          "opp-r"
+        ],
+        "attemptRecordIds": [
+          "attempt-r"
+        ],
+        "decisionRefs": [
+          "gates-rejected"
+        ]
+      }
+    ],
+    "coverageQuality": "PARTIAL",
+    "gaps": [
+      {
+        "startTick": 0,
+        "endTick": 1,
+        "reason": "not a100d source trace; no empirical capacity claim"
+      }
+    ]
+  },
+  "fieldCoverage": {
+    "startTick": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "endTick": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "opportunityRuleRef": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "opportunities": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "stoppingPeriods": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "coverageQuality": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "gaps": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    }
+  }
+}

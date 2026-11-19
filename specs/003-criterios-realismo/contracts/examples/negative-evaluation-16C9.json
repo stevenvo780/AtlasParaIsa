@@ -1,0 +1,632 @@
+{
+  "contractVersion": "realismo-v3",
+  "kind": "evaluation",
+  "evaluatorSHA": "not-implemented",
+  "thresholdProfileHash": "d99e24ee85f379164c1dd0d351a0cdb204d8bf1dda0e446abd70cfe582e4b7cb",
+  "inputHashes": [
+    "1a24b60d186d486dac66e8284fea14f7413548dc21968732672129479c7f8865"
+  ],
+  "requestedStage": "final",
+  "runId": "manual-partial-wire",
+  "results": [
+    {
+      "criterion": "C9",
+      "stage": "replica",
+      "state": "UNKNOWN",
+      "quality": "PARTIAL",
+      "provisionalConformity": true,
+      "personalDecision": "not-applicable",
+      "subgates": [
+        {
+          "subgateId": "C9.service",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        },
+        {
+          "subgateId": "C9.marginal",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        }
+      ],
+      "reasonCodes": [
+        "MISSING_FIELD"
+      ],
+      "evidenceRefs": []
+    },
+    {
+      "criterion": "C9",
+      "stage": "replica",
+      "state": "UNKNOWN",
+      "quality": "PARTIAL",
+      "provisionalConformity": true,
+      "personalDecision": "not-applicable",
+      "subgates": [
+        {
+          "subgateId": "C9.service",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        },
+        {
+          "subgateId": "C9.marginal",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        }
+      ],
+      "reasonCodes": [
+        "MISSING_FIELD"
+      ],
+      "evidenceRefs": []
+    },
+    {
+      "criterion": "C9",
+      "stage": "replica",
+      "state": "UNKNOWN",
+      "quality": "PARTIAL",
+      "provisionalConformity": true,
+      "personalDecision": "not-applicable",
+      "subgates": [
+        {
+          "subgateId": "C9.service",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        },
+        {
+          "subgateId": "C9.marginal",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        }
+      ],
+      "reasonCodes": [
+        "MISSING_FIELD"
+      ],
+      "evidenceRefs": []
+    },
+    {
+      "criterion": "C9",
+      "stage": "replica",
+      "state": "UNKNOWN",
+      "quality": "PARTIAL",
+      "provisionalConformity": true,
+      "personalDecision": "not-applicable",
+      "subgates": [
+        {
+          "subgateId": "C9.service",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        },
+        {
+          "subgateId": "C9.marginal",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        }
+      ],
+      "reasonCodes": [
+        "MISSING_FIELD"
+      ],
+      "evidenceRefs": []
+    },
+    {
+      "criterion": "C9",
+      "stage": "replica",
+      "state": "UNKNOWN",
+      "quality": "PARTIAL",
+      "provisionalConformity": true,
+      "personalDecision": "not-applicable",
+      "subgates": [
+        {
+          "subgateId": "C9.service",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        },
+        {
+          "subgateId": "C9.marginal",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        }
+      ],
+      "reasonCodes": [
+        "MISSING_FIELD"
+      ],
+      "evidenceRefs": []
+    },
+    {
+      "criterion": "C9",
+      "stage": "replica",
+      "state": "UNKNOWN",
+      "quality": "PARTIAL",
+      "provisionalConformity": true,
+      "personalDecision": "not-applicable",
+      "subgates": [
+        {
+          "subgateId": "C9.service",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        },
+        {
+          "subgateId": "C9.marginal",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        }
+      ],
+      "reasonCodes": [
+        "MISSING_FIELD"
+      ],
+      "evidenceRefs": []
+    },
+    {
+      "criterion": "C9",
+      "stage": "replica",
+      "state": "UNKNOWN",
+      "quality": "PARTIAL",
+      "provisionalConformity": true,
+      "personalDecision": "not-applicable",
+      "subgates": [
+        {
+          "subgateId": "C9.service",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        },
+        {
+          "subgateId": "C9.marginal",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        }
+      ],
+      "reasonCodes": [
+        "MISSING_FIELD"
+      ],
+      "evidenceRefs": []
+    },
+    {
+      "criterion": "C9",
+      "stage": "replica",
+      "state": "UNKNOWN",
+      "quality": "PARTIAL",
+      "provisionalConformity": true,
+      "personalDecision": "not-applicable",
+      "subgates": [
+        {
+          "subgateId": "C9.service",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        },
+        {
+          "subgateId": "C9.marginal",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        }
+      ],
+      "reasonCodes": [
+        "MISSING_FIELD"
+      ],
+      "evidenceRefs": []
+    },
+    {
+      "criterion": "C9",
+      "stage": "replica",
+      "state": "UNKNOWN",
+      "quality": "PARTIAL",
+      "provisionalConformity": true,
+      "personalDecision": "not-applicable",
+      "subgates": [
+        {
+          "subgateId": "C9.service",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        },
+        {
+          "subgateId": "C9.marginal",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        }
+      ],
+      "reasonCodes": [
+        "MISSING_FIELD"
+      ],
+      "evidenceRefs": []
+    },
+    {
+      "criterion": "C9",
+      "stage": "replica",
+      "state": "UNKNOWN",
+      "quality": "PARTIAL",
+      "provisionalConformity": true,
+      "personalDecision": "not-applicable",
+      "subgates": [
+        {
+          "subgateId": "C9.service",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        },
+        {
+          "subgateId": "C9.marginal",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        }
+      ],
+      "reasonCodes": [
+        "MISSING_FIELD"
+      ],
+      "evidenceRefs": []
+    },
+    {
+      "criterion": "C9",
+      "stage": "replica",
+      "state": "UNKNOWN",
+      "quality": "PARTIAL",
+      "provisionalConformity": true,
+      "personalDecision": "not-applicable",
+      "subgates": [
+        {
+          "subgateId": "C9.service",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        },
+        {
+          "subgateId": "C9.marginal",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        }
+      ],
+      "reasonCodes": [
+        "MISSING_FIELD"
+      ],
+      "evidenceRefs": []
+    },
+    {
+      "criterion": "C9",
+      "stage": "replica",
+      "state": "UNKNOWN",
+      "quality": "PARTIAL",
+      "provisionalConformity": true,
+      "personalDecision": "not-applicable",
+      "subgates": [
+        {
+          "subgateId": "C9.service",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        },
+        {
+          "subgateId": "C9.marginal",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        }
+      ],
+      "reasonCodes": [
+        "MISSING_FIELD"
+      ],
+      "evidenceRefs": []
+    },
+    {
+      "criterion": "C9",
+      "stage": "replica",
+      "state": "UNKNOWN",
+      "quality": "PARTIAL",
+      "provisionalConformity": true,
+      "personalDecision": "not-applicable",
+      "subgates": [
+        {
+          "subgateId": "C9.service",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        },
+        {
+          "subgateId": "C9.marginal",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        }
+      ],
+      "reasonCodes": [
+        "MISSING_FIELD"
+      ],
+      "evidenceRefs": []
+    },
+    {
+      "criterion": "C9",
+      "stage": "replica",
+      "state": "UNKNOWN",
+      "quality": "PARTIAL",
+      "provisionalConformity": true,
+      "personalDecision": "not-applicable",
+      "subgates": [
+        {
+          "subgateId": "C9.service",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        },
+        {
+          "subgateId": "C9.marginal",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        }
+      ],
+      "reasonCodes": [
+        "MISSING_FIELD"
+      ],
+      "evidenceRefs": []
+    },
+    {
+      "criterion": "C9",
+      "stage": "replica",
+      "state": "UNKNOWN",
+      "quality": "PARTIAL",
+      "provisionalConformity": true,
+      "personalDecision": "not-applicable",
+      "subgates": [
+        {
+          "subgateId": "C9.service",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        },
+        {
+          "subgateId": "C9.marginal",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        }
+      ],
+      "reasonCodes": [
+        "MISSING_FIELD"
+      ],
+      "evidenceRefs": []
+    },
+    {
+      "criterion": "C9",
+      "stage": "replica",
+      "state": "UNKNOWN",
+      "quality": "PARTIAL",
+      "provisionalConformity": true,
+      "personalDecision": "not-applicable",
+      "subgates": [
+        {
+          "subgateId": "C9.service",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        },
+        {
+          "subgateId": "C9.marginal",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        }
+      ],
+      "reasonCodes": [
+        "MISSING_FIELD"
+      ],
+      "evidenceRefs": []
+    }
+  ],
+  "panels": [],
+  "frozenC1C8ArtifactRef": null,
+  "acceptanceStatus": "NOT_GRANTED",
+  "limitations": [
+    "Manual illustrative output; no evaluator executed, no scientific/personal acceptance; synthetic C23 oracle never authenticates Steven."
+  ],
+  "evidenceId": "negative-evaluation-16C9",
+  "synthetic": true,
+  "epochId": "e0",
+  "artifactRole": "synthetic",
+  "inputObservationRef": "manual-partial-observation"
+}

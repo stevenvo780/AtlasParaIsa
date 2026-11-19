@@ -28,6 +28,11 @@ import type { DatabaseSync } from 'node:sqlite';
 import type { Capability, TechnologyExecution } from '../../src/shared/technology.js';
 import { TICKS_PER_DAY, type Person, type World } from '../../src/world/index.js';
 import { indiceDiversidad } from '../../src/world/diversidad.js';
+import { appendFileSync, closeSync, openSync, readSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { join } from 'node:path';
+import { beginObservationAttempt, bindObservation, bindObservationAttempt, coverageStatus, createObservationSession,
+  drainObservation, endObservationAttempt, markObservationAttempt } from '../../src/world/observation.js';
 
 
 /** Las 18 acciones de `Action`, en el orden de `ACTIONS` de src/world/diversidad.ts (no exportado):
@@ -453,5 +458,119 @@ export class InstrumentosConducta {
     this.fotografiarActividad(world);
     this.costeMs += performance.now() - inicio;
     return metricas;
+  }
+}
+
+/** R2 technical observer adapter. It is separate from the C8 instruments and off by default. */
+export type RealismoSourceManifest = Readonly<{
+  identityKind: 'composite-source-runtime-v1'; sourceSHA: string; sourceTreeDigest: string;
+  sourceSHAAlgorithm: 'sha1-of-descriptor-v1'; sourceTreeDigestAlgorithm: 'sha256-of-descriptor-v1';
+  baseCommit: string; runtime: Readonly<{ node: string; v8: string; modules: string; platform: string; arch: string }>;
+  files: readonly Readonly<{ path: string; sha256: string }>[];
+}>;
+export function makeRealismoSourceManifest(input: Pick<RealismoSourceManifest, 'baseCommit' | 'runtime' | 'files'>): RealismoSourceManifest {
+  const files = [...input.files].sort((a, b) => a.path.localeCompare(b.path));
+  const descriptor = JSON.stringify({ identityKind: 'composite-source-runtime-v1', baseCommit: input.baseCommit,
+    runtime: input.runtime, files });
+  return { identityKind: 'composite-source-runtime-v1',
+    sourceSHA: createHash('sha1').update(descriptor).digest('hex'),
+    sourceTreeDigest: createHash('sha256').update(descriptor).digest('hex'),
+    sourceSHAAlgorithm: 'sha1-of-descriptor-v1', sourceTreeDigestAlgorithm: 'sha256-of-descriptor-v1',
+    baseCommit: input.baseCommit, runtime: input.runtime, files };
+}
+export class InstrumentosRealismo {
+  readonly session: import('../../src/world/observation.js').ObservationSession;
+  private readonly sidecar: string;
+  private readonly manifest: string;
+  private readonly sourceManifest: RealismoSourceManifest;
+  private readonly sourceManifestSha256: string;
+  private readonly intendedSidecarHash = createHash('sha256');
+  private intendedSidecarBytes = 0;
+  private writtenEvents = 0;
+  costeMs = 0;
+  constructor(world: World, runId: string, epochId: string, sourceManifest: RealismoSourceManifest, outputDir: string) {
+    this.sourceManifest = sourceManifest;
+    const sourceManifestBody = JSON.stringify(sourceManifest, null, 2) + '\n';
+    this.sourceManifestSha256 = createHash('sha256').update(sourceManifestBody).digest('hex');
+    this.session = createObservationSession({ runId, epochId, sourceSHA: sourceManifest.sourceSHA, capacity: 65536 });
+    bindObservation(world, this.session);
+    this.sidecar = join(outputDir, 'realismo-source-events.ndjson');
+    this.manifest = join(outputDir, 'realismo-observer.json');
+    writeFileSync(join(outputDir, 'realismo-source-manifest.json'), sourceManifestBody, { mode: 0o600 });
+    writeFileSync(this.sidecar, '', { mode: 0o600 });
+  }
+  beginOpening(world: World): string { return beginObservationAttempt(world, world.tick); }
+  begin(world: World): string { return beginObservationAttempt(world, world.tick + 1); }
+  clone(from: World, draft: World): void { bindObservationAttempt(from, draft); }
+  state(world: World, status: 'adopted' | 'discarded' | 'restored' | 'partial' | 'durable'): void { markObservationAttempt(world, status); }
+  end(world: World): void { endObservationAttempt(world); }
+  async drain(): Promise<void> {
+    const start = performance.now();
+    await drainObservation(this.session, event => {
+      const line = Buffer.from(JSON.stringify(event) + '\n', 'utf8');
+      appendFileSync(this.sidecar, line, { mode: 0o600 });
+      this.intendedSidecarHash.update(line);
+      this.intendedSidecarBytes += line.length;
+      this.writtenEvents++;
+    });
+    this.costeMs += performance.now() - start;
+  }
+  private gap(reason: string, siteId = 'sidecar'): void {
+    const lastAttempt = [...this.session.attemptHistory.keys()].at(-1) ?? null;
+    if (this.session.gaps.length < this.session.capacity)
+      this.session.gaps.push(Object.freeze({ attemptId: lastAttempt, tick: null, siteId, reason }));
+    else this.session.lostGaps++;
+  }
+  /** Seal actual on-disk bytes, including any partial write, with bounded memory. */
+  private sealSidecar(): { sha256: string; bytes: number; lines: number; completeLines: boolean } {
+    const fd = openSync(this.sidecar, 'r'), buffer = Buffer.allocUnsafe(64 * 1024);
+    const hash = createHash('sha256');
+    let bytes = 0, lines = 0, lastByte = 10;
+    try {
+      for (;;) {
+        const count = readSync(fd, buffer, 0, buffer.length, null);
+        if (count === 0) break;
+        hash.update(buffer.subarray(0, count)); bytes += count; lastByte = buffer[count - 1]!;
+        for (let i = 0; i < count; i++) if (buffer[i] === 10) lines++;
+      }
+    } finally { closeSync(fd); }
+    return { sha256: hash.digest('hex'), bytes, lines, completeLines: bytes === 0 || lastByte === 10 };
+  }
+  abort(): void {
+    const latest = [...this.session.attemptHistory.entries()].at(-1);
+    if (latest && !latest[1].some(transition => transition.state === 'discarded' || transition.state === 'restored' || transition.state === 'partial')
+      && latest[1].at(-1)?.state !== 'durable') {
+      latest[1].push(Object.freeze({ state: 'partial' as const }));
+      if (this.session.gaps.length < this.session.capacity)
+        this.session.gaps.push(Object.freeze({ attemptId: latest[0], tick: null, siteId: 'attempt', reason: 'run-aborted' }));
+      else this.session.lostGaps++;
+    }
+  }
+  finish(currentSourceManifest?: RealismoSourceManifest): void {
+    if (!currentSourceManifest || currentSourceManifest.sourceTreeDigest !== this.sourceManifest.sourceTreeDigest) {
+      this.gap('source-drift', 'source');
+    }
+    let sidecarSeal: ReturnType<InstrumentosRealismo['sealSidecar']> | null = null;
+    try { sidecarSeal = this.sealSidecar(); }
+    catch { this.gap('sidecar-seal-failed'); }
+    const intendedSha256 = this.intendedSidecarHash.copy().digest('hex');
+    const matchesWriter = sidecarSeal !== null && sidecarSeal.sha256 === intendedSha256
+      && sidecarSeal.bytes === this.intendedSidecarBytes;
+    if (!matchesWriter) this.gap('sidecar-content-mismatch');
+    if (sidecarSeal && (!sidecarSeal.completeLines || sidecarSeal.lines !== this.writtenEvents || this.session.queue.length > 0))
+      this.gap('sidecar-count-or-line-boundary-mismatch');
+    const coverage = coverageStatus(this.session);
+    writeFileSync(this.manifest, JSON.stringify({ runId: this.session.runId, epochId: this.session.epochId,
+      sourceSHA: this.session.sourceSHA, sourceIdentityKind: this.sourceManifest.identityKind,
+      sourceSHAAlgorithm: this.sourceManifest.sourceSHAAlgorithm,
+      baseCommit: this.sourceManifest.baseCommit, sourceTreeDigest: this.sourceManifest.sourceTreeDigest,
+      sourceManifestSha256: this.sourceManifestSha256, finalSourceTreeDigest: currentSourceManifest?.sourceTreeDigest ?? null,
+      sourceEventsSha256: sidecarSeal?.sha256 ?? null, sourceEventsBytes: sidecarSeal?.bytes ?? null,
+      sourceEventsIntendedSha256: intendedSha256, sourceEventsIntendedBytes: this.intendedSidecarBytes,
+      sourceEventsSealMatchesWriter: matchesWriter,
+      sourceEventsLines: sidecarSeal?.lines ?? null, sourceEventsWritten: this.writtenEvents,
+      sourceEventsCompleteLines: sidecarSeal?.completeLines ?? null,
+      quality: coverage.quality, lostEvents: coverage.lostEvents, lostGaps: coverage.lostGaps,
+      gaps: coverage.gaps, attemptHistory: [...this.session.attemptHistory] }, null, 2) + '\n', { mode: 0o600 });
   }
 }

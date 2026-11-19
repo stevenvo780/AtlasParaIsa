@@ -1,0 +1,3295 @@
+{
+  "contractVersion": "realismo-v3",
+  "targetSyntax": "record:<family> / evidence:<kind> / bundle:<kind>; schemaPointer locates declaring property; target type and semantic role both checked by R2",
+  "references": [
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/paramsRef",
+      "field": "paramsRef",
+      "targets": [
+        "evidence:parameter-set"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/inputTraceRef",
+      "field": "inputTraceRef",
+      "targets": [
+        "evidence:physical-inputs"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/governorTraceRef",
+      "field": "governorTraceRef",
+      "targets": [
+        "evidence:governor-trace"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/preregistrationRef",
+      "field": "preregistrationRef",
+      "targets": [
+        "evidence:preregistration"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/hardwareRef",
+      "field": "hardwareRef",
+      "targets": [
+        "evidence:host-scene"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/interventionRefs",
+      "field": "interventionRefs",
+      "targets": [
+        "evidence:intervention"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/0/properties/provenanceRefs",
+      "field": "provenanceRefs",
+      "targets": [
+        "record:boundary",
+        "record:stock",
+        "record:flow",
+        "record:exposure",
+        "record:person",
+        "record:death",
+        "record:structure",
+        "record:repair",
+        "record:service",
+        "record:product",
+        "record:replacement",
+        "record:knowledge",
+        "record:migration",
+        "record:role",
+        "record:conflict",
+        "record:ecology",
+        "record:rejection",
+        "record:digest",
+        "record:cost",
+        "record:fault",
+        "record:review",
+        "record:method",
+        "evidence:governor-trace",
+        "evidence:physical-inputs",
+        "evidence:law",
+        "evidence:law-inputs",
+        "evidence:position-trajectory",
+        "evidence:cohort",
+        "evidence:opportunity",
+        "evidence:applied-effect",
+        "evidence:functional-map",
+        "evidence:role-classification",
+        "evidence:component-manifest",
+        "evidence:host-scene",
+        "evidence:preregistration",
+        "evidence:seed-register",
+        "evidence:budget",
+        "evidence:phase-decision",
+        "evidence:personal-receipt",
+        "evidence:intervention",
+        "evidence:parameter-set",
+        "evidence:conversion-matrix",
+        "evidence:real-memory-inventory",
+        "evidence:memory-authorization",
+        "evidence:synthetic-review-oracle",
+        "evidence:source-metadata",
+        "evidence:source-order",
+        "evidence:reproduction-gates",
+        "evidence:reproduction-coverage",
+        "evidence:causal-pair",
+        "evidence:metric-definitions",
+        "evidence:run-manifest",
+        "bundle:observation",
+        "bundle:evaluation"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/0/properties/payload/properties/conversionMatrixRef",
+      "field": "conversionMatrixRef",
+      "targets": [
+        "evidence:conversion-matrix"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/1/properties/provenanceRefs",
+      "field": "provenanceRefs",
+      "targets": [
+        "record:boundary",
+        "record:stock",
+        "record:flow",
+        "record:exposure",
+        "record:person",
+        "record:death",
+        "record:structure",
+        "record:repair",
+        "record:service",
+        "record:product",
+        "record:replacement",
+        "record:knowledge",
+        "record:migration",
+        "record:role",
+        "record:conflict",
+        "record:ecology",
+        "record:rejection",
+        "record:digest",
+        "record:cost",
+        "record:fault",
+        "record:review",
+        "record:method",
+        "evidence:governor-trace",
+        "evidence:physical-inputs",
+        "evidence:law",
+        "evidence:law-inputs",
+        "evidence:position-trajectory",
+        "evidence:cohort",
+        "evidence:opportunity",
+        "evidence:applied-effect",
+        "evidence:functional-map",
+        "evidence:role-classification",
+        "evidence:component-manifest",
+        "evidence:host-scene",
+        "evidence:preregistration",
+        "evidence:seed-register",
+        "evidence:budget",
+        "evidence:phase-decision",
+        "evidence:personal-receipt",
+        "evidence:intervention",
+        "evidence:parameter-set",
+        "evidence:conversion-matrix",
+        "evidence:real-memory-inventory",
+        "evidence:memory-authorization",
+        "evidence:synthetic-review-oracle",
+        "evidence:source-metadata",
+        "evidence:source-order",
+        "evidence:reproduction-gates",
+        "evidence:reproduction-coverage",
+        "evidence:causal-pair",
+        "evidence:metric-definitions",
+        "evidence:run-manifest",
+        "bundle:observation",
+        "bundle:evaluation"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/2/properties/provenanceRefs",
+      "field": "provenanceRefs",
+      "targets": [
+        "record:boundary",
+        "record:stock",
+        "record:flow",
+        "record:exposure",
+        "record:person",
+        "record:death",
+        "record:structure",
+        "record:repair",
+        "record:service",
+        "record:product",
+        "record:replacement",
+        "record:knowledge",
+        "record:migration",
+        "record:role",
+        "record:conflict",
+        "record:ecology",
+        "record:rejection",
+        "record:digest",
+        "record:cost",
+        "record:fault",
+        "record:review",
+        "record:method",
+        "evidence:governor-trace",
+        "evidence:physical-inputs",
+        "evidence:law",
+        "evidence:law-inputs",
+        "evidence:position-trajectory",
+        "evidence:cohort",
+        "evidence:opportunity",
+        "evidence:applied-effect",
+        "evidence:functional-map",
+        "evidence:role-classification",
+        "evidence:component-manifest",
+        "evidence:host-scene",
+        "evidence:preregistration",
+        "evidence:seed-register",
+        "evidence:budget",
+        "evidence:phase-decision",
+        "evidence:personal-receipt",
+        "evidence:intervention",
+        "evidence:parameter-set",
+        "evidence:conversion-matrix",
+        "evidence:real-memory-inventory",
+        "evidence:memory-authorization",
+        "evidence:synthetic-review-oracle",
+        "evidence:source-metadata",
+        "evidence:source-order",
+        "evidence:reproduction-gates",
+        "evidence:reproduction-coverage",
+        "evidence:causal-pair",
+        "evidence:metric-definitions",
+        "evidence:run-manifest",
+        "bundle:observation",
+        "bundle:evaluation"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/2/properties/payload/properties/conversionRef",
+      "field": "conversionRef",
+      "targets": [
+        "evidence:conversion-matrix"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/2/properties/payload/properties/consumptionRef",
+      "field": "consumptionRef",
+      "targets": [
+        "record:flow"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/3/properties/provenanceRefs",
+      "field": "provenanceRefs",
+      "targets": [
+        "record:boundary",
+        "record:stock",
+        "record:flow",
+        "record:exposure",
+        "record:person",
+        "record:death",
+        "record:structure",
+        "record:repair",
+        "record:service",
+        "record:product",
+        "record:replacement",
+        "record:knowledge",
+        "record:migration",
+        "record:role",
+        "record:conflict",
+        "record:ecology",
+        "record:rejection",
+        "record:digest",
+        "record:cost",
+        "record:fault",
+        "record:review",
+        "record:method",
+        "evidence:governor-trace",
+        "evidence:physical-inputs",
+        "evidence:law",
+        "evidence:law-inputs",
+        "evidence:position-trajectory",
+        "evidence:cohort",
+        "evidence:opportunity",
+        "evidence:applied-effect",
+        "evidence:functional-map",
+        "evidence:role-classification",
+        "evidence:component-manifest",
+        "evidence:host-scene",
+        "evidence:preregistration",
+        "evidence:seed-register",
+        "evidence:budget",
+        "evidence:phase-decision",
+        "evidence:personal-receipt",
+        "evidence:intervention",
+        "evidence:parameter-set",
+        "evidence:conversion-matrix",
+        "evidence:real-memory-inventory",
+        "evidence:memory-authorization",
+        "evidence:synthetic-review-oracle",
+        "evidence:source-metadata",
+        "evidence:source-order",
+        "evidence:reproduction-gates",
+        "evidence:reproduction-coverage",
+        "evidence:causal-pair",
+        "evidence:metric-definitions",
+        "evidence:run-manifest",
+        "bundle:observation",
+        "bundle:evaluation"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/3/properties/payload/properties/lawInputsRef",
+      "field": "lawInputsRef",
+      "targets": [
+        "evidence:law-inputs"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/4/properties/provenanceRefs",
+      "field": "provenanceRefs",
+      "targets": [
+        "record:boundary",
+        "record:stock",
+        "record:flow",
+        "record:exposure",
+        "record:person",
+        "record:death",
+        "record:structure",
+        "record:repair",
+        "record:service",
+        "record:product",
+        "record:replacement",
+        "record:knowledge",
+        "record:migration",
+        "record:role",
+        "record:conflict",
+        "record:ecology",
+        "record:rejection",
+        "record:digest",
+        "record:cost",
+        "record:fault",
+        "record:review",
+        "record:method",
+        "evidence:governor-trace",
+        "evidence:physical-inputs",
+        "evidence:law",
+        "evidence:law-inputs",
+        "evidence:position-trajectory",
+        "evidence:cohort",
+        "evidence:opportunity",
+        "evidence:applied-effect",
+        "evidence:functional-map",
+        "evidence:role-classification",
+        "evidence:component-manifest",
+        "evidence:host-scene",
+        "evidence:preregistration",
+        "evidence:seed-register",
+        "evidence:budget",
+        "evidence:phase-decision",
+        "evidence:personal-receipt",
+        "evidence:intervention",
+        "evidence:parameter-set",
+        "evidence:conversion-matrix",
+        "evidence:real-memory-inventory",
+        "evidence:memory-authorization",
+        "evidence:synthetic-review-oracle",
+        "evidence:source-metadata",
+        "evidence:source-order",
+        "evidence:reproduction-gates",
+        "evidence:reproduction-coverage",
+        "evidence:causal-pair",
+        "evidence:metric-definitions",
+        "evidence:run-manifest",
+        "bundle:observation",
+        "bundle:evaluation"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/4/properties/payload/properties/positionRef",
+      "field": "positionRef",
+      "targets": [
+        "evidence:position-trajectory"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/5/properties/provenanceRefs",
+      "field": "provenanceRefs",
+      "targets": [
+        "record:boundary",
+        "record:stock",
+        "record:flow",
+        "record:exposure",
+        "record:person",
+        "record:death",
+        "record:structure",
+        "record:repair",
+        "record:service",
+        "record:product",
+        "record:replacement",
+        "record:knowledge",
+        "record:migration",
+        "record:role",
+        "record:conflict",
+        "record:ecology",
+        "record:rejection",
+        "record:digest",
+        "record:cost",
+        "record:fault",
+        "record:review",
+        "record:method",
+        "evidence:governor-trace",
+        "evidence:physical-inputs",
+        "evidence:law",
+        "evidence:law-inputs",
+        "evidence:position-trajectory",
+        "evidence:cohort",
+        "evidence:opportunity",
+        "evidence:applied-effect",
+        "evidence:functional-map",
+        "evidence:role-classification",
+        "evidence:component-manifest",
+        "evidence:host-scene",
+        "evidence:preregistration",
+        "evidence:seed-register",
+        "evidence:budget",
+        "evidence:phase-decision",
+        "evidence:personal-receipt",
+        "evidence:intervention",
+        "evidence:parameter-set",
+        "evidence:conversion-matrix",
+        "evidence:real-memory-inventory",
+        "evidence:memory-authorization",
+        "evidence:synthetic-review-oracle",
+        "evidence:source-metadata",
+        "evidence:source-order",
+        "evidence:reproduction-gates",
+        "evidence:reproduction-coverage",
+        "evidence:causal-pair",
+        "evidence:metric-definitions",
+        "evidence:run-manifest",
+        "bundle:observation",
+        "bundle:evaluation"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/5/properties/payload/properties/locationRef",
+      "field": "locationRef",
+      "targets": [
+        "evidence:position-trajectory"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/5/properties/payload/properties/durableReceiptRef",
+      "field": "durableReceiptRef",
+      "targets": [
+        "evidence:component-manifest"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/6/properties/provenanceRefs",
+      "field": "provenanceRefs",
+      "targets": [
+        "record:boundary",
+        "record:stock",
+        "record:flow",
+        "record:exposure",
+        "record:person",
+        "record:death",
+        "record:structure",
+        "record:repair",
+        "record:service",
+        "record:product",
+        "record:replacement",
+        "record:knowledge",
+        "record:migration",
+        "record:role",
+        "record:conflict",
+        "record:ecology",
+        "record:rejection",
+        "record:digest",
+        "record:cost",
+        "record:fault",
+        "record:review",
+        "record:method",
+        "evidence:governor-trace",
+        "evidence:physical-inputs",
+        "evidence:law",
+        "evidence:law-inputs",
+        "evidence:position-trajectory",
+        "evidence:cohort",
+        "evidence:opportunity",
+        "evidence:applied-effect",
+        "evidence:functional-map",
+        "evidence:role-classification",
+        "evidence:component-manifest",
+        "evidence:host-scene",
+        "evidence:preregistration",
+        "evidence:seed-register",
+        "evidence:budget",
+        "evidence:phase-decision",
+        "evidence:personal-receipt",
+        "evidence:intervention",
+        "evidence:parameter-set",
+        "evidence:conversion-matrix",
+        "evidence:real-memory-inventory",
+        "evidence:memory-authorization",
+        "evidence:synthetic-review-oracle",
+        "evidence:source-metadata",
+        "evidence:source-order",
+        "evidence:reproduction-gates",
+        "evidence:reproduction-coverage",
+        "evidence:causal-pair",
+        "evidence:metric-definitions",
+        "evidence:run-manifest",
+        "bundle:observation",
+        "bundle:evaluation"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/6/properties/payload/properties/positionRef",
+      "field": "positionRef",
+      "targets": [
+        "evidence:position-trajectory"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/6/properties/payload/properties/rainInputRef",
+      "field": "rainInputRef",
+      "targets": [
+        "evidence:law-inputs"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/7/properties/provenanceRefs",
+      "field": "provenanceRefs",
+      "targets": [
+        "record:boundary",
+        "record:stock",
+        "record:flow",
+        "record:exposure",
+        "record:person",
+        "record:death",
+        "record:structure",
+        "record:repair",
+        "record:service",
+        "record:product",
+        "record:replacement",
+        "record:knowledge",
+        "record:migration",
+        "record:role",
+        "record:conflict",
+        "record:ecology",
+        "record:rejection",
+        "record:digest",
+        "record:cost",
+        "record:fault",
+        "record:review",
+        "record:method",
+        "evidence:governor-trace",
+        "evidence:physical-inputs",
+        "evidence:law",
+        "evidence:law-inputs",
+        "evidence:position-trajectory",
+        "evidence:cohort",
+        "evidence:opportunity",
+        "evidence:applied-effect",
+        "evidence:functional-map",
+        "evidence:role-classification",
+        "evidence:component-manifest",
+        "evidence:host-scene",
+        "evidence:preregistration",
+        "evidence:seed-register",
+        "evidence:budget",
+        "evidence:phase-decision",
+        "evidence:personal-receipt",
+        "evidence:intervention",
+        "evidence:parameter-set",
+        "evidence:conversion-matrix",
+        "evidence:real-memory-inventory",
+        "evidence:memory-authorization",
+        "evidence:synthetic-review-oracle",
+        "evidence:source-metadata",
+        "evidence:source-order",
+        "evidence:reproduction-gates",
+        "evidence:reproduction-coverage",
+        "evidence:causal-pair",
+        "evidence:metric-definitions",
+        "evidence:run-manifest",
+        "bundle:observation",
+        "bundle:evaluation"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/7/properties/payload/properties/serviceBeforeRefs",
+      "field": "serviceBeforeRefs",
+      "targets": [
+        "record:service"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/7/properties/payload/properties/serviceAfterRefs",
+      "field": "serviceAfterRefs",
+      "targets": [
+        "record:service"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/8/properties/provenanceRefs",
+      "field": "provenanceRefs",
+      "targets": [
+        "record:boundary",
+        "record:stock",
+        "record:flow",
+        "record:exposure",
+        "record:person",
+        "record:death",
+        "record:structure",
+        "record:repair",
+        "record:service",
+        "record:product",
+        "record:replacement",
+        "record:knowledge",
+        "record:migration",
+        "record:role",
+        "record:conflict",
+        "record:ecology",
+        "record:rejection",
+        "record:digest",
+        "record:cost",
+        "record:fault",
+        "record:review",
+        "record:method",
+        "evidence:governor-trace",
+        "evidence:physical-inputs",
+        "evidence:law",
+        "evidence:law-inputs",
+        "evidence:position-trajectory",
+        "evidence:cohort",
+        "evidence:opportunity",
+        "evidence:applied-effect",
+        "evidence:functional-map",
+        "evidence:role-classification",
+        "evidence:component-manifest",
+        "evidence:host-scene",
+        "evidence:preregistration",
+        "evidence:seed-register",
+        "evidence:budget",
+        "evidence:phase-decision",
+        "evidence:personal-receipt",
+        "evidence:intervention",
+        "evidence:parameter-set",
+        "evidence:conversion-matrix",
+        "evidence:real-memory-inventory",
+        "evidence:memory-authorization",
+        "evidence:synthetic-review-oracle",
+        "evidence:source-metadata",
+        "evidence:source-order",
+        "evidence:reproduction-gates",
+        "evidence:reproduction-coverage",
+        "evidence:causal-pair",
+        "evidence:metric-definitions",
+        "evidence:run-manifest",
+        "bundle:observation",
+        "bundle:evaluation"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/8/properties/payload/properties/consumptionRefs",
+      "field": "consumptionRefs",
+      "targets": [
+        "record:flow"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/8/properties/payload/properties/inputRefs",
+      "field": "inputRefs",
+      "targets": [
+        "record:boundary",
+        "record:stock",
+        "record:flow",
+        "record:exposure",
+        "record:person",
+        "record:death",
+        "record:structure",
+        "record:repair",
+        "record:service",
+        "record:product",
+        "record:replacement",
+        "record:knowledge",
+        "record:migration",
+        "record:role",
+        "record:conflict",
+        "record:ecology",
+        "record:rejection",
+        "record:digest",
+        "record:cost",
+        "record:fault",
+        "record:review",
+        "record:method",
+        "evidence:governor-trace",
+        "evidence:physical-inputs",
+        "evidence:law",
+        "evidence:law-inputs",
+        "evidence:position-trajectory",
+        "evidence:cohort",
+        "evidence:opportunity",
+        "evidence:applied-effect",
+        "evidence:functional-map",
+        "evidence:role-classification",
+        "evidence:component-manifest",
+        "evidence:host-scene",
+        "evidence:preregistration",
+        "evidence:seed-register",
+        "evidence:budget",
+        "evidence:phase-decision",
+        "evidence:personal-receipt",
+        "evidence:intervention",
+        "evidence:parameter-set",
+        "evidence:conversion-matrix",
+        "evidence:real-memory-inventory",
+        "evidence:memory-authorization",
+        "evidence:synthetic-review-oracle",
+        "evidence:source-metadata",
+        "evidence:source-order",
+        "evidence:reproduction-gates",
+        "evidence:reproduction-coverage",
+        "evidence:causal-pair",
+        "evidence:metric-definitions",
+        "evidence:run-manifest",
+        "bundle:observation",
+        "bundle:evaluation"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/8/properties/payload/properties/causeRef",
+      "field": "causeRef",
+      "targets": [
+        "evidence:applied-effect"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/8/properties/payload/properties/conditionSourceRef",
+      "field": "conditionSourceRef",
+      "targets": [
+        "record:structure",
+        "evidence:law-inputs"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/9/properties/provenanceRefs",
+      "field": "provenanceRefs",
+      "targets": [
+        "record:boundary",
+        "record:stock",
+        "record:flow",
+        "record:exposure",
+        "record:person",
+        "record:death",
+        "record:structure",
+        "record:repair",
+        "record:service",
+        "record:product",
+        "record:replacement",
+        "record:knowledge",
+        "record:migration",
+        "record:role",
+        "record:conflict",
+        "record:ecology",
+        "record:rejection",
+        "record:digest",
+        "record:cost",
+        "record:fault",
+        "record:review",
+        "record:method",
+        "evidence:governor-trace",
+        "evidence:physical-inputs",
+        "evidence:law",
+        "evidence:law-inputs",
+        "evidence:position-trajectory",
+        "evidence:cohort",
+        "evidence:opportunity",
+        "evidence:applied-effect",
+        "evidence:functional-map",
+        "evidence:role-classification",
+        "evidence:component-manifest",
+        "evidence:host-scene",
+        "evidence:preregistration",
+        "evidence:seed-register",
+        "evidence:budget",
+        "evidence:phase-decision",
+        "evidence:personal-receipt",
+        "evidence:intervention",
+        "evidence:parameter-set",
+        "evidence:conversion-matrix",
+        "evidence:real-memory-inventory",
+        "evidence:memory-authorization",
+        "evidence:synthetic-review-oracle",
+        "evidence:source-metadata",
+        "evidence:source-order",
+        "evidence:reproduction-gates",
+        "evidence:reproduction-coverage",
+        "evidence:causal-pair",
+        "evidence:metric-definitions",
+        "evidence:run-manifest",
+        "bundle:observation",
+        "bundle:evaluation"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/9/properties/payload/properties/manufactureRefs",
+      "field": "manufactureRefs",
+      "targets": [
+        "record:flow",
+        "record:service"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/10/properties/provenanceRefs",
+      "field": "provenanceRefs",
+      "targets": [
+        "record:boundary",
+        "record:stock",
+        "record:flow",
+        "record:exposure",
+        "record:person",
+        "record:death",
+        "record:structure",
+        "record:repair",
+        "record:service",
+        "record:product",
+        "record:replacement",
+        "record:knowledge",
+        "record:migration",
+        "record:role",
+        "record:conflict",
+        "record:ecology",
+        "record:rejection",
+        "record:digest",
+        "record:cost",
+        "record:fault",
+        "record:review",
+        "record:method",
+        "evidence:governor-trace",
+        "evidence:physical-inputs",
+        "evidence:law",
+        "evidence:law-inputs",
+        "evidence:position-trajectory",
+        "evidence:cohort",
+        "evidence:opportunity",
+        "evidence:applied-effect",
+        "evidence:functional-map",
+        "evidence:role-classification",
+        "evidence:component-manifest",
+        "evidence:host-scene",
+        "evidence:preregistration",
+        "evidence:seed-register",
+        "evidence:budget",
+        "evidence:phase-decision",
+        "evidence:personal-receipt",
+        "evidence:intervention",
+        "evidence:parameter-set",
+        "evidence:conversion-matrix",
+        "evidence:real-memory-inventory",
+        "evidence:memory-authorization",
+        "evidence:synthetic-review-oracle",
+        "evidence:source-metadata",
+        "evidence:source-order",
+        "evidence:reproduction-gates",
+        "evidence:reproduction-coverage",
+        "evidence:causal-pair",
+        "evidence:metric-definitions",
+        "evidence:run-manifest",
+        "bundle:observation",
+        "bundle:evaluation"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/10/properties/payload/properties/wearRefs",
+      "field": "wearRefs",
+      "targets": [
+        "record:exposure",
+        "record:structure"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/10/properties/payload/properties/wasteFlowRefs",
+      "field": "wasteFlowRefs",
+      "targets": [
+        "record:flow"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/10/properties/payload/properties/oldServiceRefs",
+      "field": "oldServiceRefs",
+      "targets": [
+        "record:service"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/10/properties/payload/properties/newServiceRefs",
+      "field": "newServiceRefs",
+      "targets": [
+        "record:service"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/10/properties/payload/properties/manufactureRefs",
+      "field": "manufactureRefs",
+      "targets": [
+        "record:flow",
+        "record:service"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/10/properties/payload/properties/initialStockRefs",
+      "field": "initialStockRefs",
+      "targets": [
+        "record:stock"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/11/properties/provenanceRefs",
+      "field": "provenanceRefs",
+      "targets": [
+        "record:boundary",
+        "record:stock",
+        "record:flow",
+        "record:exposure",
+        "record:person",
+        "record:death",
+        "record:structure",
+        "record:repair",
+        "record:service",
+        "record:product",
+        "record:replacement",
+        "record:knowledge",
+        "record:migration",
+        "record:role",
+        "record:conflict",
+        "record:ecology",
+        "record:rejection",
+        "record:digest",
+        "record:cost",
+        "record:fault",
+        "record:review",
+        "record:method",
+        "evidence:governor-trace",
+        "evidence:physical-inputs",
+        "evidence:law",
+        "evidence:law-inputs",
+        "evidence:position-trajectory",
+        "evidence:cohort",
+        "evidence:opportunity",
+        "evidence:applied-effect",
+        "evidence:functional-map",
+        "evidence:role-classification",
+        "evidence:component-manifest",
+        "evidence:host-scene",
+        "evidence:preregistration",
+        "evidence:seed-register",
+        "evidence:budget",
+        "evidence:phase-decision",
+        "evidence:personal-receipt",
+        "evidence:intervention",
+        "evidence:parameter-set",
+        "evidence:conversion-matrix",
+        "evidence:real-memory-inventory",
+        "evidence:memory-authorization",
+        "evidence:synthetic-review-oracle",
+        "evidence:source-metadata",
+        "evidence:source-order",
+        "evidence:reproduction-gates",
+        "evidence:reproduction-coverage",
+        "evidence:causal-pair",
+        "evidence:metric-definitions",
+        "evidence:run-manifest",
+        "bundle:observation",
+        "bundle:evaluation"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/11/properties/payload/properties/localityRef",
+      "field": "localityRef",
+      "targets": [
+        "evidence:position-trajectory"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/11/properties/payload/properties/paymentRefs",
+      "field": "paymentRefs",
+      "targets": [
+        "record:flow",
+        "record:service"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/12/properties/provenanceRefs",
+      "field": "provenanceRefs",
+      "targets": [
+        "record:boundary",
+        "record:stock",
+        "record:flow",
+        "record:exposure",
+        "record:person",
+        "record:death",
+        "record:structure",
+        "record:repair",
+        "record:service",
+        "record:product",
+        "record:replacement",
+        "record:knowledge",
+        "record:migration",
+        "record:role",
+        "record:conflict",
+        "record:ecology",
+        "record:rejection",
+        "record:digest",
+        "record:cost",
+        "record:fault",
+        "record:review",
+        "record:method",
+        "evidence:governor-trace",
+        "evidence:physical-inputs",
+        "evidence:law",
+        "evidence:law-inputs",
+        "evidence:position-trajectory",
+        "evidence:cohort",
+        "evidence:opportunity",
+        "evidence:applied-effect",
+        "evidence:functional-map",
+        "evidence:role-classification",
+        "evidence:component-manifest",
+        "evidence:host-scene",
+        "evidence:preregistration",
+        "evidence:seed-register",
+        "evidence:budget",
+        "evidence:phase-decision",
+        "evidence:personal-receipt",
+        "evidence:intervention",
+        "evidence:parameter-set",
+        "evidence:conversion-matrix",
+        "evidence:real-memory-inventory",
+        "evidence:memory-authorization",
+        "evidence:synthetic-review-oracle",
+        "evidence:source-metadata",
+        "evidence:source-order",
+        "evidence:reproduction-gates",
+        "evidence:reproduction-coverage",
+        "evidence:causal-pair",
+        "evidence:metric-definitions",
+        "evidence:run-manifest",
+        "bundle:observation",
+        "bundle:evaluation"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/12/properties/payload/properties/destinationViabilityRef",
+      "field": "destinationViabilityRef",
+      "targets": [
+        "evidence:opportunity"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/12/properties/payload/properties/trajectoryRefs",
+      "field": "trajectoryRefs",
+      "targets": [
+        "evidence:position-trajectory"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/12/properties/payload/properties/destinationConsumptionRefs",
+      "field": "destinationConsumptionRefs",
+      "targets": [
+        "record:flow"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/12/properties/payload/properties/visitRefs",
+      "field": "visitRefs",
+      "targets": [
+        "evidence:position-trajectory"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/13/properties/provenanceRefs",
+      "field": "provenanceRefs",
+      "targets": [
+        "record:boundary",
+        "record:stock",
+        "record:flow",
+        "record:exposure",
+        "record:person",
+        "record:death",
+        "record:structure",
+        "record:repair",
+        "record:service",
+        "record:product",
+        "record:replacement",
+        "record:knowledge",
+        "record:migration",
+        "record:role",
+        "record:conflict",
+        "record:ecology",
+        "record:rejection",
+        "record:digest",
+        "record:cost",
+        "record:fault",
+        "record:review",
+        "record:method",
+        "evidence:governor-trace",
+        "evidence:physical-inputs",
+        "evidence:law",
+        "evidence:law-inputs",
+        "evidence:position-trajectory",
+        "evidence:cohort",
+        "evidence:opportunity",
+        "evidence:applied-effect",
+        "evidence:functional-map",
+        "evidence:role-classification",
+        "evidence:component-manifest",
+        "evidence:host-scene",
+        "evidence:preregistration",
+        "evidence:seed-register",
+        "evidence:budget",
+        "evidence:phase-decision",
+        "evidence:personal-receipt",
+        "evidence:intervention",
+        "evidence:parameter-set",
+        "evidence:conversion-matrix",
+        "evidence:real-memory-inventory",
+        "evidence:memory-authorization",
+        "evidence:synthetic-review-oracle",
+        "evidence:source-metadata",
+        "evidence:source-order",
+        "evidence:reproduction-gates",
+        "evidence:reproduction-coverage",
+        "evidence:causal-pair",
+        "evidence:metric-definitions",
+        "evidence:run-manifest",
+        "bundle:observation",
+        "bundle:evaluation"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/13/properties/payload/properties/serviceRefs",
+      "field": "serviceRefs",
+      "targets": [
+        "record:service"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/13/properties/payload/properties/localRuleRef",
+      "field": "localRuleRef",
+      "targets": [
+        "evidence:law"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/14/properties/provenanceRefs",
+      "field": "provenanceRefs",
+      "targets": [
+        "record:boundary",
+        "record:stock",
+        "record:flow",
+        "record:exposure",
+        "record:person",
+        "record:death",
+        "record:structure",
+        "record:repair",
+        "record:service",
+        "record:product",
+        "record:replacement",
+        "record:knowledge",
+        "record:migration",
+        "record:role",
+        "record:conflict",
+        "record:ecology",
+        "record:rejection",
+        "record:digest",
+        "record:cost",
+        "record:fault",
+        "record:review",
+        "record:method",
+        "evidence:governor-trace",
+        "evidence:physical-inputs",
+        "evidence:law",
+        "evidence:law-inputs",
+        "evidence:position-trajectory",
+        "evidence:cohort",
+        "evidence:opportunity",
+        "evidence:applied-effect",
+        "evidence:functional-map",
+        "evidence:role-classification",
+        "evidence:component-manifest",
+        "evidence:host-scene",
+        "evidence:preregistration",
+        "evidence:seed-register",
+        "evidence:budget",
+        "evidence:phase-decision",
+        "evidence:personal-receipt",
+        "evidence:intervention",
+        "evidence:parameter-set",
+        "evidence:conversion-matrix",
+        "evidence:real-memory-inventory",
+        "evidence:memory-authorization",
+        "evidence:synthetic-review-oracle",
+        "evidence:source-metadata",
+        "evidence:source-order",
+        "evidence:reproduction-gates",
+        "evidence:reproduction-coverage",
+        "evidence:causal-pair",
+        "evidence:metric-definitions",
+        "evidence:run-manifest",
+        "bundle:observation",
+        "bundle:evaluation"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/14/properties/payload/properties/needInputsRef",
+      "field": "needInputsRef",
+      "targets": [
+        "evidence:law-inputs"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/14/properties/payload/properties/triggerLawRef",
+      "field": "triggerLawRef",
+      "targets": [
+        "evidence:law"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/14/properties/payload/properties/trajectoryRefs",
+      "field": "trajectoryRefs",
+      "targets": [
+        "evidence:position-trajectory"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/14/properties/payload/properties/costRefs",
+      "field": "costRefs",
+      "targets": [
+        "record:cost",
+        "record:flow",
+        "record:service"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/14/properties/payload/properties/consumptionRefs",
+      "field": "consumptionRefs",
+      "targets": [
+        "record:flow"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/14/properties/payload/properties/recurrenceRefs",
+      "field": "recurrenceRefs",
+      "targets": [
+        "record:conflict"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/14/properties/payload/properties/eligibleOpportunityRefs",
+      "field": "eligibleOpportunityRefs",
+      "targets": [
+        "evidence:opportunity"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/15/properties/provenanceRefs",
+      "field": "provenanceRefs",
+      "targets": [
+        "record:boundary",
+        "record:stock",
+        "record:flow",
+        "record:exposure",
+        "record:person",
+        "record:death",
+        "record:structure",
+        "record:repair",
+        "record:service",
+        "record:product",
+        "record:replacement",
+        "record:knowledge",
+        "record:migration",
+        "record:role",
+        "record:conflict",
+        "record:ecology",
+        "record:rejection",
+        "record:digest",
+        "record:cost",
+        "record:fault",
+        "record:review",
+        "record:method",
+        "evidence:governor-trace",
+        "evidence:physical-inputs",
+        "evidence:law",
+        "evidence:law-inputs",
+        "evidence:position-trajectory",
+        "evidence:cohort",
+        "evidence:opportunity",
+        "evidence:applied-effect",
+        "evidence:functional-map",
+        "evidence:role-classification",
+        "evidence:component-manifest",
+        "evidence:host-scene",
+        "evidence:preregistration",
+        "evidence:seed-register",
+        "evidence:budget",
+        "evidence:phase-decision",
+        "evidence:personal-receipt",
+        "evidence:intervention",
+        "evidence:parameter-set",
+        "evidence:conversion-matrix",
+        "evidence:real-memory-inventory",
+        "evidence:memory-authorization",
+        "evidence:synthetic-review-oracle",
+        "evidence:source-metadata",
+        "evidence:source-order",
+        "evidence:reproduction-gates",
+        "evidence:reproduction-coverage",
+        "evidence:causal-pair",
+        "evidence:metric-definitions",
+        "evidence:run-manifest",
+        "bundle:observation",
+        "bundle:evaluation"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/15/properties/payload/properties/predationRefs",
+      "field": "predationRefs",
+      "targets": [
+        "record:flow"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/15/properties/payload/properties/huntRefs",
+      "field": "huntRefs",
+      "targets": [
+        "record:flow"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/15/properties/payload/properties/flowRefs",
+      "field": "flowRefs",
+      "targets": [
+        "record:flow"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/15/properties/payload/properties/conditionInputsRef",
+      "field": "conditionInputsRef",
+      "targets": [
+        "evidence:law-inputs"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/16/properties/provenanceRefs",
+      "field": "provenanceRefs",
+      "targets": [
+        "record:boundary",
+        "record:stock",
+        "record:flow",
+        "record:exposure",
+        "record:person",
+        "record:death",
+        "record:structure",
+        "record:repair",
+        "record:service",
+        "record:product",
+        "record:replacement",
+        "record:knowledge",
+        "record:migration",
+        "record:role",
+        "record:conflict",
+        "record:ecology",
+        "record:rejection",
+        "record:digest",
+        "record:cost",
+        "record:fault",
+        "record:review",
+        "record:method",
+        "evidence:governor-trace",
+        "evidence:physical-inputs",
+        "evidence:law",
+        "evidence:law-inputs",
+        "evidence:position-trajectory",
+        "evidence:cohort",
+        "evidence:opportunity",
+        "evidence:applied-effect",
+        "evidence:functional-map",
+        "evidence:role-classification",
+        "evidence:component-manifest",
+        "evidence:host-scene",
+        "evidence:preregistration",
+        "evidence:seed-register",
+        "evidence:budget",
+        "evidence:phase-decision",
+        "evidence:personal-receipt",
+        "evidence:intervention",
+        "evidence:parameter-set",
+        "evidence:conversion-matrix",
+        "evidence:real-memory-inventory",
+        "evidence:memory-authorization",
+        "evidence:synthetic-review-oracle",
+        "evidence:source-metadata",
+        "evidence:source-order",
+        "evidence:reproduction-gates",
+        "evidence:reproduction-coverage",
+        "evidence:causal-pair",
+        "evidence:metric-definitions",
+        "evidence:run-manifest",
+        "bundle:observation",
+        "bundle:evaluation"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/16/properties/payload/properties/allGateResultsRef",
+      "field": "allGateResultsRef",
+      "targets": [
+        "evidence:reproduction-gates"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/16/properties/payload/properties/fertilityInputsRef",
+      "field": "fertilityInputsRef",
+      "targets": [
+        "evidence:law-inputs"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/16/properties/payload/properties/accessibleResourcesRef",
+      "field": "accessibleResourcesRef",
+      "targets": [
+        "evidence:opportunity"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/16/properties/payload/properties/governorInputRef",
+      "field": "governorInputRef",
+      "targets": [
+        "evidence:governor-trace"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/16/properties/payload/properties/governorDecisionRef",
+      "field": "governorDecisionRef",
+      "targets": [
+        "evidence:governor-trace"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/16/properties/payload/properties/coverageRef",
+      "field": "coverageRef",
+      "targets": [
+        "evidence:reproduction-coverage"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/17/properties/provenanceRefs",
+      "field": "provenanceRefs",
+      "targets": [
+        "record:boundary",
+        "record:stock",
+        "record:flow",
+        "record:exposure",
+        "record:person",
+        "record:death",
+        "record:structure",
+        "record:repair",
+        "record:service",
+        "record:product",
+        "record:replacement",
+        "record:knowledge",
+        "record:migration",
+        "record:role",
+        "record:conflict",
+        "record:ecology",
+        "record:rejection",
+        "record:digest",
+        "record:cost",
+        "record:fault",
+        "record:review",
+        "record:method",
+        "evidence:governor-trace",
+        "evidence:physical-inputs",
+        "evidence:law",
+        "evidence:law-inputs",
+        "evidence:position-trajectory",
+        "evidence:cohort",
+        "evidence:opportunity",
+        "evidence:applied-effect",
+        "evidence:functional-map",
+        "evidence:role-classification",
+        "evidence:component-manifest",
+        "evidence:host-scene",
+        "evidence:preregistration",
+        "evidence:seed-register",
+        "evidence:budget",
+        "evidence:phase-decision",
+        "evidence:personal-receipt",
+        "evidence:intervention",
+        "evidence:parameter-set",
+        "evidence:conversion-matrix",
+        "evidence:real-memory-inventory",
+        "evidence:memory-authorization",
+        "evidence:synthetic-review-oracle",
+        "evidence:source-metadata",
+        "evidence:source-order",
+        "evidence:reproduction-gates",
+        "evidence:reproduction-coverage",
+        "evidence:causal-pair",
+        "evidence:metric-definitions",
+        "evidence:run-manifest",
+        "bundle:observation",
+        "bundle:evaluation"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/17/properties/payload/properties/componentHashesRef",
+      "field": "componentHashesRef",
+      "targets": [
+        "evidence:component-manifest"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/18/properties/provenanceRefs",
+      "field": "provenanceRefs",
+      "targets": [
+        "record:boundary",
+        "record:stock",
+        "record:flow",
+        "record:exposure",
+        "record:person",
+        "record:death",
+        "record:structure",
+        "record:repair",
+        "record:service",
+        "record:product",
+        "record:replacement",
+        "record:knowledge",
+        "record:migration",
+        "record:role",
+        "record:conflict",
+        "record:ecology",
+        "record:rejection",
+        "record:digest",
+        "record:cost",
+        "record:fault",
+        "record:review",
+        "record:method",
+        "evidence:governor-trace",
+        "evidence:physical-inputs",
+        "evidence:law",
+        "evidence:law-inputs",
+        "evidence:position-trajectory",
+        "evidence:cohort",
+        "evidence:opportunity",
+        "evidence:applied-effect",
+        "evidence:functional-map",
+        "evidence:role-classification",
+        "evidence:component-manifest",
+        "evidence:host-scene",
+        "evidence:preregistration",
+        "evidence:seed-register",
+        "evidence:budget",
+        "evidence:phase-decision",
+        "evidence:personal-receipt",
+        "evidence:intervention",
+        "evidence:parameter-set",
+        "evidence:conversion-matrix",
+        "evidence:real-memory-inventory",
+        "evidence:memory-authorization",
+        "evidence:synthetic-review-oracle",
+        "evidence:source-metadata",
+        "evidence:source-order",
+        "evidence:reproduction-gates",
+        "evidence:reproduction-coverage",
+        "evidence:causal-pair",
+        "evidence:metric-definitions",
+        "evidence:run-manifest",
+        "bundle:observation",
+        "bundle:evaluation"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/18/properties/payload/properties/hostLoadRef",
+      "field": "hostLoadRef",
+      "targets": [
+        "evidence:host-scene"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/19/properties/provenanceRefs",
+      "field": "provenanceRefs",
+      "targets": [
+        "record:boundary",
+        "record:stock",
+        "record:flow",
+        "record:exposure",
+        "record:person",
+        "record:death",
+        "record:structure",
+        "record:repair",
+        "record:service",
+        "record:product",
+        "record:replacement",
+        "record:knowledge",
+        "record:migration",
+        "record:role",
+        "record:conflict",
+        "record:ecology",
+        "record:rejection",
+        "record:digest",
+        "record:cost",
+        "record:fault",
+        "record:review",
+        "record:method",
+        "evidence:governor-trace",
+        "evidence:physical-inputs",
+        "evidence:law",
+        "evidence:law-inputs",
+        "evidence:position-trajectory",
+        "evidence:cohort",
+        "evidence:opportunity",
+        "evidence:applied-effect",
+        "evidence:functional-map",
+        "evidence:role-classification",
+        "evidence:component-manifest",
+        "evidence:host-scene",
+        "evidence:preregistration",
+        "evidence:seed-register",
+        "evidence:budget",
+        "evidence:phase-decision",
+        "evidence:personal-receipt",
+        "evidence:intervention",
+        "evidence:parameter-set",
+        "evidence:conversion-matrix",
+        "evidence:real-memory-inventory",
+        "evidence:memory-authorization",
+        "evidence:synthetic-review-oracle",
+        "evidence:source-metadata",
+        "evidence:source-order",
+        "evidence:reproduction-gates",
+        "evidence:reproduction-coverage",
+        "evidence:causal-pair",
+        "evidence:metric-definitions",
+        "evidence:run-manifest",
+        "bundle:observation",
+        "bundle:evaluation"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/19/properties/payload/properties/expectedComponentManifestRef",
+      "field": "expectedComponentManifestRef",
+      "targets": [
+        "evidence:component-manifest"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/19/properties/payload/properties/actualComponentManifestRef",
+      "field": "actualComponentManifestRef",
+      "targets": [
+        "evidence:component-manifest"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/19/properties/payload/properties/clientTickRefs",
+      "field": "clientTickRefs",
+      "targets": [
+        "record:digest"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/19/properties/payload/properties/archiveVersionManifestRef",
+      "field": "archiveVersionManifestRef",
+      "targets": [
+        "evidence:component-manifest"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/20/properties/provenanceRefs",
+      "field": "provenanceRefs",
+      "targets": [
+        "record:boundary",
+        "record:stock",
+        "record:flow",
+        "record:exposure",
+        "record:person",
+        "record:death",
+        "record:structure",
+        "record:repair",
+        "record:service",
+        "record:product",
+        "record:replacement",
+        "record:knowledge",
+        "record:migration",
+        "record:role",
+        "record:conflict",
+        "record:ecology",
+        "record:rejection",
+        "record:digest",
+        "record:cost",
+        "record:fault",
+        "record:review",
+        "record:method",
+        "evidence:governor-trace",
+        "evidence:physical-inputs",
+        "evidence:law",
+        "evidence:law-inputs",
+        "evidence:position-trajectory",
+        "evidence:cohort",
+        "evidence:opportunity",
+        "evidence:applied-effect",
+        "evidence:functional-map",
+        "evidence:role-classification",
+        "evidence:component-manifest",
+        "evidence:host-scene",
+        "evidence:preregistration",
+        "evidence:seed-register",
+        "evidence:budget",
+        "evidence:phase-decision",
+        "evidence:personal-receipt",
+        "evidence:intervention",
+        "evidence:parameter-set",
+        "evidence:conversion-matrix",
+        "evidence:real-memory-inventory",
+        "evidence:memory-authorization",
+        "evidence:synthetic-review-oracle",
+        "evidence:source-metadata",
+        "evidence:source-order",
+        "evidence:reproduction-gates",
+        "evidence:reproduction-coverage",
+        "evidence:causal-pair",
+        "evidence:metric-definitions",
+        "evidence:run-manifest",
+        "bundle:observation",
+        "bundle:evaluation"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/20/properties/payload/properties/receiptRef",
+      "field": "receiptRef",
+      "targets": [
+        "evidence:personal-receipt",
+        "evidence:synthetic-review-oracle",
+        "evidence:phase-decision",
+        "evidence:component-manifest",
+        "evidence:source-metadata"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/20/properties/payload/properties/evidenceRefs",
+      "field": "evidenceRefs",
+      "targets": [
+        "record:boundary",
+        "record:stock",
+        "record:flow",
+        "record:exposure",
+        "record:person",
+        "record:death",
+        "record:structure",
+        "record:repair",
+        "record:service",
+        "record:product",
+        "record:replacement",
+        "record:knowledge",
+        "record:migration",
+        "record:role",
+        "record:conflict",
+        "record:ecology",
+        "record:rejection",
+        "record:digest",
+        "record:cost",
+        "record:fault",
+        "record:review",
+        "record:method",
+        "evidence:governor-trace",
+        "evidence:physical-inputs",
+        "evidence:law",
+        "evidence:law-inputs",
+        "evidence:position-trajectory",
+        "evidence:cohort",
+        "evidence:opportunity",
+        "evidence:applied-effect",
+        "evidence:functional-map",
+        "evidence:role-classification",
+        "evidence:component-manifest",
+        "evidence:host-scene",
+        "evidence:preregistration",
+        "evidence:seed-register",
+        "evidence:budget",
+        "evidence:phase-decision",
+        "evidence:personal-receipt",
+        "evidence:intervention",
+        "evidence:parameter-set",
+        "evidence:conversion-matrix",
+        "evidence:real-memory-inventory",
+        "evidence:memory-authorization",
+        "evidence:synthetic-review-oracle",
+        "evidence:source-metadata",
+        "evidence:source-order",
+        "evidence:reproduction-gates",
+        "evidence:reproduction-coverage",
+        "evidence:causal-pair",
+        "evidence:metric-definitions",
+        "evidence:run-manifest",
+        "bundle:observation",
+        "bundle:evaluation"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/21/properties/provenanceRefs",
+      "field": "provenanceRefs",
+      "targets": [
+        "record:boundary",
+        "record:stock",
+        "record:flow",
+        "record:exposure",
+        "record:person",
+        "record:death",
+        "record:structure",
+        "record:repair",
+        "record:service",
+        "record:product",
+        "record:replacement",
+        "record:knowledge",
+        "record:migration",
+        "record:role",
+        "record:conflict",
+        "record:ecology",
+        "record:rejection",
+        "record:digest",
+        "record:cost",
+        "record:fault",
+        "record:review",
+        "record:method",
+        "evidence:governor-trace",
+        "evidence:physical-inputs",
+        "evidence:law",
+        "evidence:law-inputs",
+        "evidence:position-trajectory",
+        "evidence:cohort",
+        "evidence:opportunity",
+        "evidence:applied-effect",
+        "evidence:functional-map",
+        "evidence:role-classification",
+        "evidence:component-manifest",
+        "evidence:host-scene",
+        "evidence:preregistration",
+        "evidence:seed-register",
+        "evidence:budget",
+        "evidence:phase-decision",
+        "evidence:personal-receipt",
+        "evidence:intervention",
+        "evidence:parameter-set",
+        "evidence:conversion-matrix",
+        "evidence:real-memory-inventory",
+        "evidence:memory-authorization",
+        "evidence:synthetic-review-oracle",
+        "evidence:source-metadata",
+        "evidence:source-order",
+        "evidence:reproduction-gates",
+        "evidence:reproduction-coverage",
+        "evidence:causal-pair",
+        "evidence:metric-definitions",
+        "evidence:run-manifest",
+        "bundle:observation",
+        "bundle:evaluation"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/21/properties/payload/properties/preregistrationRef",
+      "field": "preregistrationRef",
+      "targets": [
+        "evidence:preregistration"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/21/properties/payload/properties/seedRegistryRef",
+      "field": "seedRegistryRef",
+      "targets": [
+        "evidence:seed-register"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/21/properties/payload/properties/runManifestRefs",
+      "field": "runManifestRefs",
+      "targets": [
+        "evidence:run-manifest"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/21/properties/payload/properties/budgetRef",
+      "field": "budgetRef",
+      "targets": [
+        "evidence:budget"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/21/properties/payload/properties/interventionRefs",
+      "field": "interventionRefs",
+      "targets": [
+        "evidence:intervention"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/21/properties/payload/properties/independentReviewRef",
+      "field": "independentReviewRef",
+      "targets": [
+        "evidence:phase-decision"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/21/properties/payload/properties/priorPhaseDecisionRef",
+      "field": "priorPhaseDecisionRef",
+      "targets": [
+        "evidence:phase-decision"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/21/properties/payload/properties/rewardDefinitionRef",
+      "field": "rewardDefinitionRef",
+      "targets": [
+        "evidence:metric-definitions"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/properties/records/items/oneOf/21/properties/payload/properties/reservedSeedAuditRef",
+      "field": "reservedSeedAuditRef",
+      "targets": [
+        "evidence:seed-register"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/$defs/capability/properties/sourceRefs",
+      "field": "sourceRefs",
+      "targets": [
+        "evidence:source-metadata"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/$defs/stream/properties/evidenceRefs",
+      "field": "evidenceRefs",
+      "targets": [
+        "record:boundary",
+        "record:stock",
+        "record:flow",
+        "record:exposure",
+        "record:person",
+        "record:death",
+        "record:structure",
+        "record:repair",
+        "record:service",
+        "record:product",
+        "record:replacement",
+        "record:knowledge",
+        "record:migration",
+        "record:role",
+        "record:conflict",
+        "record:ecology",
+        "record:rejection",
+        "record:digest",
+        "record:cost",
+        "record:fault",
+        "record:review",
+        "record:method",
+        "evidence:governor-trace",
+        "evidence:physical-inputs",
+        "evidence:law",
+        "evidence:law-inputs",
+        "evidence:position-trajectory",
+        "evidence:cohort",
+        "evidence:opportunity",
+        "evidence:applied-effect",
+        "evidence:functional-map",
+        "evidence:role-classification",
+        "evidence:component-manifest",
+        "evidence:host-scene",
+        "evidence:preregistration",
+        "evidence:seed-register",
+        "evidence:budget",
+        "evidence:phase-decision",
+        "evidence:personal-receipt",
+        "evidence:intervention",
+        "evidence:parameter-set",
+        "evidence:conversion-matrix",
+        "evidence:real-memory-inventory",
+        "evidence:memory-authorization",
+        "evidence:synthetic-review-oracle",
+        "evidence:source-metadata",
+        "evidence:source-order",
+        "evidence:reproduction-gates",
+        "evidence:reproduction-coverage",
+        "evidence:causal-pair",
+        "evidence:metric-definitions",
+        "evidence:run-manifest",
+        "bundle:observation",
+        "bundle:evaluation"
+      ]
+    },
+    {
+      "schema": "observation.schema.json",
+      "schemaPointer": "/$defs/causalContext/properties/sourceOrderRef",
+      "field": "sourceOrderRef",
+      "targets": [
+        "evidence:source-order"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/0/properties/sourceRefs",
+      "field": "sourceRefs",
+      "targets": [
+        "evidence:source-metadata"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/1/properties/sourceRefs",
+      "field": "sourceRefs",
+      "targets": [
+        "evidence:source-metadata"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/1/properties/payload/properties/entries/items/properties/targetRef",
+      "field": "targetRef",
+      "targets": [
+        "record:boundary",
+        "record:stock",
+        "record:flow",
+        "record:exposure",
+        "record:person",
+        "record:death",
+        "record:structure",
+        "record:repair",
+        "record:service",
+        "record:product",
+        "record:replacement",
+        "record:knowledge",
+        "record:migration",
+        "record:role",
+        "record:conflict",
+        "record:ecology",
+        "record:rejection",
+        "record:digest",
+        "record:cost",
+        "record:fault",
+        "record:review",
+        "record:method",
+        "evidence:governor-trace",
+        "evidence:physical-inputs",
+        "evidence:law",
+        "evidence:law-inputs",
+        "evidence:position-trajectory",
+        "evidence:cohort",
+        "evidence:opportunity",
+        "evidence:applied-effect",
+        "evidence:functional-map",
+        "evidence:role-classification",
+        "evidence:component-manifest",
+        "evidence:host-scene",
+        "evidence:preregistration",
+        "evidence:seed-register",
+        "evidence:budget",
+        "evidence:phase-decision",
+        "evidence:personal-receipt",
+        "evidence:intervention",
+        "evidence:parameter-set",
+        "evidence:conversion-matrix",
+        "evidence:real-memory-inventory",
+        "evidence:memory-authorization",
+        "evidence:synthetic-review-oracle",
+        "evidence:source-metadata",
+        "evidence:source-order",
+        "evidence:reproduction-gates",
+        "evidence:reproduction-coverage",
+        "evidence:causal-pair",
+        "evidence:metric-definitions",
+        "evidence:run-manifest",
+        "bundle:observation",
+        "bundle:evaluation"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/2/properties/sourceRefs",
+      "field": "sourceRefs",
+      "targets": [
+        "evidence:source-metadata"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/2/properties/payload/properties/sourceRefs",
+      "field": "sourceRefs",
+      "targets": [
+        "evidence:source-metadata"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/3/properties/sourceRefs",
+      "field": "sourceRefs",
+      "targets": [
+        "evidence:source-metadata"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/3/properties/payload/properties/lawRef",
+      "field": "lawRef",
+      "targets": [
+        "evidence:law"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/4/properties/sourceRefs",
+      "field": "sourceRefs",
+      "targets": [
+        "evidence:source-metadata"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/4/properties/payload/properties/positions/items/properties/localPerceptionRef",
+      "field": "localPerceptionRef",
+      "targets": [
+        "evidence:opportunity"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/4/properties/payload/properties/positions/items/properties/workDebitRef",
+      "field": "workDebitRef",
+      "targets": [
+        "record:service",
+        "record:flow"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/5/properties/sourceRefs",
+      "field": "sourceRefs",
+      "targets": [
+        "evidence:source-metadata"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/5/properties/payload/properties/selectionRegisteredRef",
+      "field": "selectionRegisteredRef",
+      "targets": [
+        "evidence:preregistration"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/5/properties/payload/properties/sourceRefs",
+      "field": "sourceRefs",
+      "targets": [
+        "evidence:source-metadata"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/6/properties/sourceRefs",
+      "field": "sourceRefs",
+      "targets": [
+        "evidence:source-metadata"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/6/properties/payload/properties/cohortRef",
+      "field": "cohortRef",
+      "targets": [
+        "evidence:cohort"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/6/properties/payload/properties/accessibleRouteRefs",
+      "field": "accessibleRouteRefs",
+      "targets": [
+        "evidence:position-trajectory"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/6/properties/payload/properties/conditionRefs",
+      "field": "conditionRefs",
+      "targets": [
+        "evidence:law-inputs",
+        "record:stock"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/7/properties/sourceRefs",
+      "field": "sourceRefs",
+      "targets": [
+        "evidence:source-metadata"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/7/properties/payload/properties/consumptionRefs",
+      "field": "consumptionRefs",
+      "targets": [
+        "record:flow"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/7/properties/payload/properties/workRefs",
+      "field": "workRefs",
+      "targets": [
+        "record:service",
+        "record:flow"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/7/properties/payload/properties/lawRef",
+      "field": "lawRef",
+      "targets": [
+        "evidence:law"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/7/properties/payload/properties/sourceOrderRef",
+      "field": "sourceOrderRef",
+      "targets": [
+        "evidence:source-order"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/8/properties/sourceRefs",
+      "field": "sourceRefs",
+      "targets": [
+        "evidence:source-metadata"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/8/properties/payload/properties/historyOpeningRefs",
+      "field": "historyOpeningRefs",
+      "targets": [
+        "evidence:component-manifest"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/8/properties/payload/properties/registeredRef",
+      "field": "registeredRef",
+      "targets": [
+        "evidence:preregistration"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/9/properties/sourceRefs",
+      "field": "sourceRefs",
+      "targets": [
+        "evidence:source-metadata"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/9/properties/payload/properties/registeredRef",
+      "field": "registeredRef",
+      "targets": [
+        "evidence:preregistration"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/9/properties/payload/properties/referenceCohortRef",
+      "field": "referenceCohortRef",
+      "targets": [
+        "evidence:cohort"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/9/properties/payload/properties/timeExposureRefs",
+      "field": "timeExposureRefs",
+      "targets": [
+        "record:exposure"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/9/properties/payload/properties/institutionRuleRefs",
+      "field": "institutionRuleRefs",
+      "targets": [
+        "evidence:law"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/10/properties/sourceRefs",
+      "field": "sourceRefs",
+      "targets": [
+        "evidence:source-metadata"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/10/properties/payload/properties/historyUnknownPrefixRef",
+      "field": "historyUnknownPrefixRef",
+      "targets": [
+        "evidence:source-metadata"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/11/properties/sourceRefs",
+      "field": "sourceRefs",
+      "targets": [
+        "evidence:source-metadata"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/11/properties/payload/properties/hostLoadSamples/items/properties/externalLoadRef",
+      "field": "externalLoadRef",
+      "targets": [
+        "evidence:host-scene"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/11/properties/payload/properties/initialStateRef",
+      "field": "initialStateRef",
+      "targets": [
+        "evidence:component-manifest"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/12/properties/sourceRefs",
+      "field": "sourceRefs",
+      "targets": [
+        "evidence:source-metadata"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/12/properties/payload/properties/metricDefinitionsRef",
+      "field": "metricDefinitionsRef",
+      "targets": [
+        "evidence:metric-definitions"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/12/properties/payload/properties/budgetRef",
+      "field": "budgetRef",
+      "targets": [
+        "evidence:budget"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/12/properties/payload/properties/controlPairRefs",
+      "field": "controlPairRefs",
+      "targets": [
+        "evidence:causal-pair"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/12/properties/payload/properties/independentReceiptRef",
+      "field": "independentReceiptRef",
+      "targets": [
+        "evidence:phase-decision"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/13/properties/sourceRefs",
+      "field": "sourceRefs",
+      "targets": [
+        "evidence:source-metadata"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/13/properties/payload/properties/entries/items/properties/registryEvidenceRef",
+      "field": "registryEvidenceRef",
+      "targets": [
+        "evidence:source-metadata"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/14/properties/sourceRefs",
+      "field": "sourceRefs",
+      "targets": [
+        "evidence:source-metadata"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/14/properties/payload/properties/rewardFunctionRef",
+      "field": "rewardFunctionRef",
+      "targets": [
+        "evidence:metric-definitions"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/14/properties/payload/properties/interventionRefs",
+      "field": "interventionRefs",
+      "targets": [
+        "evidence:intervention"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/15/properties/sourceRefs",
+      "field": "sourceRefs",
+      "targets": [
+        "evidence:source-metadata"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/15/properties/payload/properties/evidenceRefs",
+      "field": "evidenceRefs",
+      "targets": [
+        "record:boundary",
+        "record:stock",
+        "record:flow",
+        "record:exposure",
+        "record:person",
+        "record:death",
+        "record:structure",
+        "record:repair",
+        "record:service",
+        "record:product",
+        "record:replacement",
+        "record:knowledge",
+        "record:migration",
+        "record:role",
+        "record:conflict",
+        "record:ecology",
+        "record:rejection",
+        "record:digest",
+        "record:cost",
+        "record:fault",
+        "record:review",
+        "record:method",
+        "evidence:governor-trace",
+        "evidence:physical-inputs",
+        "evidence:law",
+        "evidence:law-inputs",
+        "evidence:position-trajectory",
+        "evidence:cohort",
+        "evidence:opportunity",
+        "evidence:applied-effect",
+        "evidence:functional-map",
+        "evidence:role-classification",
+        "evidence:component-manifest",
+        "evidence:host-scene",
+        "evidence:preregistration",
+        "evidence:seed-register",
+        "evidence:budget",
+        "evidence:phase-decision",
+        "evidence:personal-receipt",
+        "evidence:intervention",
+        "evidence:parameter-set",
+        "evidence:conversion-matrix",
+        "evidence:real-memory-inventory",
+        "evidence:memory-authorization",
+        "evidence:synthetic-review-oracle",
+        "evidence:source-metadata",
+        "evidence:source-order",
+        "evidence:reproduction-gates",
+        "evidence:reproduction-coverage",
+        "evidence:causal-pair",
+        "evidence:metric-definitions",
+        "evidence:run-manifest",
+        "bundle:observation",
+        "bundle:evaluation"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/15/properties/payload/properties/receiptRef",
+      "field": "receiptRef",
+      "targets": [
+        "evidence:personal-receipt",
+        "evidence:synthetic-review-oracle",
+        "evidence:phase-decision",
+        "evidence:component-manifest",
+        "evidence:source-metadata"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/16/properties/sourceRefs",
+      "field": "sourceRefs",
+      "targets": [
+        "evidence:source-metadata"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/16/properties/payload/properties/realMemoryInventoryRef",
+      "field": "realMemoryInventoryRef",
+      "targets": [
+        "evidence:real-memory-inventory"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/16/properties/payload/properties/provenanceRef",
+      "field": "provenanceRef",
+      "targets": [
+        "evidence:source-metadata"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/17/properties/sourceRefs",
+      "field": "sourceRefs",
+      "targets": [
+        "evidence:source-metadata"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/17/properties/payload/properties/inputRefs",
+      "field": "inputRefs",
+      "targets": [
+        "record:boundary",
+        "record:stock",
+        "record:flow",
+        "record:exposure",
+        "record:person",
+        "record:death",
+        "record:structure",
+        "record:repair",
+        "record:service",
+        "record:product",
+        "record:replacement",
+        "record:knowledge",
+        "record:migration",
+        "record:role",
+        "record:conflict",
+        "record:ecology",
+        "record:rejection",
+        "record:digest",
+        "record:cost",
+        "record:fault",
+        "record:review",
+        "record:method",
+        "evidence:governor-trace",
+        "evidence:physical-inputs",
+        "evidence:law",
+        "evidence:law-inputs",
+        "evidence:position-trajectory",
+        "evidence:cohort",
+        "evidence:opportunity",
+        "evidence:applied-effect",
+        "evidence:functional-map",
+        "evidence:role-classification",
+        "evidence:component-manifest",
+        "evidence:host-scene",
+        "evidence:preregistration",
+        "evidence:seed-register",
+        "evidence:budget",
+        "evidence:phase-decision",
+        "evidence:personal-receipt",
+        "evidence:intervention",
+        "evidence:parameter-set",
+        "evidence:conversion-matrix",
+        "evidence:real-memory-inventory",
+        "evidence:memory-authorization",
+        "evidence:synthetic-review-oracle",
+        "evidence:source-metadata",
+        "evidence:source-order",
+        "evidence:reproduction-gates",
+        "evidence:reproduction-coverage",
+        "evidence:causal-pair",
+        "evidence:metric-definitions",
+        "evidence:run-manifest",
+        "bundle:observation",
+        "bundle:evaluation"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/17/properties/payload/properties/receiptRef",
+      "field": "receiptRef",
+      "targets": [
+        "evidence:personal-receipt",
+        "evidence:synthetic-review-oracle",
+        "evidence:phase-decision",
+        "evidence:component-manifest",
+        "evidence:source-metadata"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/18/properties/sourceRefs",
+      "field": "sourceRefs",
+      "targets": [
+        "evidence:source-metadata"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/19/properties/sourceRefs",
+      "field": "sourceRefs",
+      "targets": [
+        "evidence:source-metadata"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/20/properties/sourceRefs",
+      "field": "sourceRefs",
+      "targets": [
+        "evidence:source-metadata"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/20/properties/payload/properties/entries/items/properties/incorporationRef",
+      "field": "incorporationRef",
+      "targets": [
+        "evidence:component-manifest"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/20/properties/payload/properties/entries/items/properties/authorizationReceiptRef",
+      "field": "authorizationReceiptRef",
+      "targets": [
+        "evidence:memory-authorization"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/21/properties/sourceRefs",
+      "field": "sourceRefs",
+      "targets": [
+        "evidence:source-metadata"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/21/properties/payload/properties/provenanceRef",
+      "field": "provenanceRef",
+      "targets": [
+        "evidence:source-metadata"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/22/properties/sourceRefs",
+      "field": "sourceRefs",
+      "targets": [
+        "evidence:source-metadata"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/22/properties/payload/properties/inventoryRef",
+      "field": "inventoryRef",
+      "targets": [
+        "evidence:real-memory-inventory"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/23/properties/sourceRefs",
+      "field": "sourceRefs",
+      "targets": [
+        "evidence:source-metadata"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/24/properties/sourceRefs",
+      "field": "sourceRefs",
+      "targets": [
+        "evidence:source-metadata"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/25/properties/sourceRefs",
+      "field": "sourceRefs",
+      "targets": [
+        "evidence:source-metadata"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/25/properties/payload/properties/sourceOrderRef",
+      "field": "sourceOrderRef",
+      "targets": [
+        "evidence:source-order"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/25/properties/payload/properties/gates/items/properties/inputRefs",
+      "field": "inputRefs",
+      "targets": [
+        "record:boundary",
+        "record:stock",
+        "record:flow",
+        "record:exposure",
+        "record:person",
+        "record:death",
+        "record:structure",
+        "record:repair",
+        "record:service",
+        "record:product",
+        "record:replacement",
+        "record:knowledge",
+        "record:migration",
+        "record:role",
+        "record:conflict",
+        "record:ecology",
+        "record:rejection",
+        "record:digest",
+        "record:cost",
+        "record:fault",
+        "record:review",
+        "record:method",
+        "evidence:governor-trace",
+        "evidence:physical-inputs",
+        "evidence:law",
+        "evidence:law-inputs",
+        "evidence:position-trajectory",
+        "evidence:cohort",
+        "evidence:opportunity",
+        "evidence:applied-effect",
+        "evidence:functional-map",
+        "evidence:role-classification",
+        "evidence:component-manifest",
+        "evidence:host-scene",
+        "evidence:preregistration",
+        "evidence:seed-register",
+        "evidence:budget",
+        "evidence:phase-decision",
+        "evidence:personal-receipt",
+        "evidence:intervention",
+        "evidence:parameter-set",
+        "evidence:conversion-matrix",
+        "evidence:real-memory-inventory",
+        "evidence:memory-authorization",
+        "evidence:synthetic-review-oracle",
+        "evidence:source-metadata",
+        "evidence:source-order",
+        "evidence:reproduction-gates",
+        "evidence:reproduction-coverage",
+        "evidence:causal-pair",
+        "evidence:metric-definitions",
+        "evidence:run-manifest",
+        "bundle:observation",
+        "bundle:evaluation"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/26/properties/sourceRefs",
+      "field": "sourceRefs",
+      "targets": [
+        "evidence:source-metadata"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/26/properties/payload/properties/opportunityRuleRef",
+      "field": "opportunityRuleRef",
+      "targets": [
+        "evidence:law"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/26/properties/payload/properties/stoppingPeriods/items/properties/decisionRefs",
+      "field": "decisionRefs",
+      "targets": [
+        "evidence:governor-trace",
+        "evidence:reproduction-gates"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/27/properties/sourceRefs",
+      "field": "sourceRefs",
+      "targets": [
+        "evidence:source-metadata"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/27/properties/payload/properties/registeredRef",
+      "field": "registeredRef",
+      "targets": [
+        "evidence:preregistration"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/27/properties/payload/properties/interventionRefs",
+      "field": "interventionRefs",
+      "targets": [
+        "evidence:intervention"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/27/properties/payload/properties/windows/items/properties/treatmentServiceRefs",
+      "field": "treatmentServiceRefs",
+      "targets": [
+        "record:service"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/27/properties/payload/properties/windows/items/properties/controlServiceRefs",
+      "field": "controlServiceRefs",
+      "targets": [
+        "record:service"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/27/properties/payload/properties/windows/items/properties/treatmentOpportunityRefs",
+      "field": "treatmentOpportunityRefs",
+      "targets": [
+        "evidence:opportunity"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/27/properties/payload/properties/windows/items/properties/controlOpportunityRefs",
+      "field": "controlOpportunityRefs",
+      "targets": [
+        "evidence:opportunity"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/27/properties/payload/properties/windows/items/properties/openingStockRefs",
+      "field": "openingStockRefs",
+      "targets": [
+        "record:stock"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/27/properties/payload/properties/windows/items/properties/closingStockRefs",
+      "field": "closingStockRefs",
+      "targets": [
+        "record:stock"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/27/properties/payload/properties/windows/items/properties/flowRefs",
+      "field": "flowRefs",
+      "targets": [
+        "record:flow"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/27/properties/payload/properties/windows/items/properties/exposureRefs",
+      "field": "exposureRefs",
+      "targets": [
+        "record:exposure"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/27/properties/payload/properties/treatmentManifestRef",
+      "field": "treatmentManifestRef",
+      "targets": [
+        "evidence:run-manifest"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/27/properties/payload/properties/controlManifestRef",
+      "field": "controlManifestRef",
+      "targets": [
+        "evidence:run-manifest"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/28/properties/sourceRefs",
+      "field": "sourceRefs",
+      "targets": [
+        "evidence:source-metadata"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/29/properties/sourceRefs",
+      "field": "sourceRefs",
+      "targets": [
+        "evidence:source-metadata"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/29/properties/payload/properties/paramsRef",
+      "field": "paramsRef",
+      "targets": [
+        "evidence:parameter-set"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/29/properties/payload/properties/initialStateRef",
+      "field": "initialStateRef",
+      "targets": [
+        "evidence:component-manifest"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/29/properties/payload/properties/inputTraceRef",
+      "field": "inputTraceRef",
+      "targets": [
+        "evidence:physical-inputs"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/29/properties/payload/properties/governorTraceRef",
+      "field": "governorTraceRef",
+      "targets": [
+        "evidence:governor-trace"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/29/properties/payload/properties/hardwareRef",
+      "field": "hardwareRef",
+      "targets": [
+        "evidence:host-scene"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/29/properties/payload/properties/observationRef",
+      "field": "observationRef",
+      "targets": [
+        "bundle:observation"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/29/properties/payload/properties/costRefs",
+      "field": "costRefs",
+      "targets": [
+        "record:cost",
+        "record:flow",
+        "record:service"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/29/properties/payload/properties/interventionRefs",
+      "field": "interventionRefs",
+      "targets": [
+        "evidence:intervention"
+      ]
+    },
+    {
+      "schema": "evaluation.schema.json",
+      "schemaPointer": "/properties/frozenC1C8ArtifactRef",
+      "field": "frozenC1C8ArtifactRef",
+      "targets": [
+        "bundle:evaluation"
+      ]
+    },
+    {
+      "schema": "evaluation.schema.json",
+      "schemaPointer": "/$defs/metric/properties/evidenceRefs",
+      "field": "evidenceRefs",
+      "targets": [
+        "record:boundary",
+        "record:stock",
+        "record:flow",
+        "record:exposure",
+        "record:person",
+        "record:death",
+        "record:structure",
+        "record:repair",
+        "record:service",
+        "record:product",
+        "record:replacement",
+        "record:knowledge",
+        "record:migration",
+        "record:role",
+        "record:conflict",
+        "record:ecology",
+        "record:rejection",
+        "record:digest",
+        "record:cost",
+        "record:fault",
+        "record:review",
+        "record:method",
+        "evidence:governor-trace",
+        "evidence:physical-inputs",
+        "evidence:law",
+        "evidence:law-inputs",
+        "evidence:position-trajectory",
+        "evidence:cohort",
+        "evidence:opportunity",
+        "evidence:applied-effect",
+        "evidence:functional-map",
+        "evidence:role-classification",
+        "evidence:component-manifest",
+        "evidence:host-scene",
+        "evidence:preregistration",
+        "evidence:seed-register",
+        "evidence:budget",
+        "evidence:phase-decision",
+        "evidence:personal-receipt",
+        "evidence:intervention",
+        "evidence:parameter-set",
+        "evidence:conversion-matrix",
+        "evidence:real-memory-inventory",
+        "evidence:memory-authorization",
+        "evidence:synthetic-review-oracle",
+        "evidence:source-metadata",
+        "evidence:source-order",
+        "evidence:reproduction-gates",
+        "evidence:reproduction-coverage",
+        "evidence:causal-pair",
+        "evidence:metric-definitions",
+        "evidence:run-manifest",
+        "bundle:observation",
+        "bundle:evaluation"
+      ]
+    },
+    {
+      "schema": "evaluation.schema.json",
+      "schemaPointer": "/$defs/subgate/properties/evidenceRefs",
+      "field": "evidenceRefs",
+      "targets": [
+        "record:boundary",
+        "record:stock",
+        "record:flow",
+        "record:exposure",
+        "record:person",
+        "record:death",
+        "record:structure",
+        "record:repair",
+        "record:service",
+        "record:product",
+        "record:replacement",
+        "record:knowledge",
+        "record:migration",
+        "record:role",
+        "record:conflict",
+        "record:ecology",
+        "record:rejection",
+        "record:digest",
+        "record:cost",
+        "record:fault",
+        "record:review",
+        "record:method",
+        "evidence:governor-trace",
+        "evidence:physical-inputs",
+        "evidence:law",
+        "evidence:law-inputs",
+        "evidence:position-trajectory",
+        "evidence:cohort",
+        "evidence:opportunity",
+        "evidence:applied-effect",
+        "evidence:functional-map",
+        "evidence:role-classification",
+        "evidence:component-manifest",
+        "evidence:host-scene",
+        "evidence:preregistration",
+        "evidence:seed-register",
+        "evidence:budget",
+        "evidence:phase-decision",
+        "evidence:personal-receipt",
+        "evidence:intervention",
+        "evidence:parameter-set",
+        "evidence:conversion-matrix",
+        "evidence:real-memory-inventory",
+        "evidence:memory-authorization",
+        "evidence:synthetic-review-oracle",
+        "evidence:source-metadata",
+        "evidence:source-order",
+        "evidence:reproduction-gates",
+        "evidence:reproduction-coverage",
+        "evidence:causal-pair",
+        "evidence:metric-definitions",
+        "evidence:run-manifest",
+        "bundle:observation",
+        "bundle:evaluation"
+      ]
+    },
+    {
+      "schema": "evaluation.schema.json",
+      "schemaPointer": "/$defs/result/properties/evidenceRefs",
+      "field": "evidenceRefs",
+      "targets": [
+        "record:boundary",
+        "record:stock",
+        "record:flow",
+        "record:exposure",
+        "record:person",
+        "record:death",
+        "record:structure",
+        "record:repair",
+        "record:service",
+        "record:product",
+        "record:replacement",
+        "record:knowledge",
+        "record:migration",
+        "record:role",
+        "record:conflict",
+        "record:ecology",
+        "record:rejection",
+        "record:digest",
+        "record:cost",
+        "record:fault",
+        "record:review",
+        "record:method",
+        "evidence:governor-trace",
+        "evidence:physical-inputs",
+        "evidence:law",
+        "evidence:law-inputs",
+        "evidence:position-trajectory",
+        "evidence:cohort",
+        "evidence:opportunity",
+        "evidence:applied-effect",
+        "evidence:functional-map",
+        "evidence:role-classification",
+        "evidence:component-manifest",
+        "evidence:host-scene",
+        "evidence:preregistration",
+        "evidence:seed-register",
+        "evidence:budget",
+        "evidence:phase-decision",
+        "evidence:personal-receipt",
+        "evidence:intervention",
+        "evidence:parameter-set",
+        "evidence:conversion-matrix",
+        "evidence:real-memory-inventory",
+        "evidence:memory-authorization",
+        "evidence:synthetic-review-oracle",
+        "evidence:source-metadata",
+        "evidence:source-order",
+        "evidence:reproduction-gates",
+        "evidence:reproduction-coverage",
+        "evidence:causal-pair",
+        "evidence:metric-definitions",
+        "evidence:run-manifest",
+        "bundle:observation",
+        "bundle:evaluation"
+      ]
+    },
+    {
+      "schema": "evaluation.schema.json",
+      "schemaPointer": "/$defs/panel/properties/replicaResultRefs",
+      "field": "replicaResultRefs",
+      "targets": [
+        "bundle:evaluation"
+      ]
+    },
+    {
+      "schema": "evaluation.schema.json",
+      "schemaPointer": "/properties/inputObservationRef",
+      "field": "inputObservationRef",
+      "targets": [
+        "bundle:observation"
+      ]
+    },
+    {
+      "schema": "evidence.schema.json",
+      "schemaPointer": "/oneOf/3/properties/payload/properties/entries/items/properties/sourceOrderRef",
+      "field": "sourceOrderRef",
+      "targets": [
+        "evidence:source-order"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,812 @@
+{
+  "contractVersion": "realismo-v3",
+  "kind": "evaluation",
+  "evaluatorSHA": "not-implemented",
+  "thresholdProfileHash": "d99e24ee85f379164c1dd0d351a0cdb204d8bf1dda0e446abd70cfe582e4b7cb",
+  "inputHashes": [
+    "1a24b60d186d486dac66e8284fea14f7413548dc21968732672129479c7f8865"
+  ],
+  "requestedStage": "final",
+  "runId": "manual-partial-wire",
+  "results": [
+    {
+      "criterion": "C9",
+      "stage": "replica",
+      "state": "UNKNOWN",
+      "quality": "PARTIAL",
+      "provisionalConformity": true,
+      "personalDecision": "not-applicable",
+      "subgates": [
+        {
+          "subgateId": "C9.service",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        },
+        {
+          "subgateId": "C9.marginal",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        }
+      ],
+      "reasonCodes": [
+        "MISSING_FIELD"
+      ],
+      "evidenceRefs": []
+    },
+    {
+      "criterion": "C10",
+      "stage": "replica",
+      "state": "FAIL",
+      "quality": "PARTIAL",
+      "provisionalConformity": true,
+      "personalDecision": "not-applicable",
+      "subgates": [
+        {
+          "subgateId": "C10.wear",
+          "state": "FAIL",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "OBSERVED_VIOLATION"
+          ],
+          "thresholdIds": [
+            "C10.functionalCutoff"
+          ],
+          "metrics": [
+            {
+              "name": "conditionAtService",
+              "value": 0.1,
+              "unit": "condition",
+              "numerator": 1,
+              "denominator": 1,
+              "exposureTicks": null,
+              "censoredCount": 0,
+              "formulaId": "synthetic.functional-service",
+              "evidenceRefs": [
+                "service-1",
+                "condition-at-service-1",
+                "law",
+                "order"
+              ]
+            }
+          ],
+          "evidenceRefs": [
+            "service-1",
+            "condition-at-service-1",
+            "effect",
+            "order"
+          ],
+          "scope": "manual synthetic illustrative subgate"
+        },
+        {
+          "subgateId": "C10.repair",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        }
+      ],
+      "reasonCodes": [
+        "OBSERVED_VIOLATION"
+      ],
+      "evidenceRefs": []
+    },
+    {
+      "criterion": "C11",
+      "stage": "replica",
+      "state": "UNKNOWN",
+      "quality": "PARTIAL",
+      "provisionalConformity": true,
+      "personalDecision": "not-applicable",
+      "subgates": [
+        {
+          "subgateId": "C11.replacement",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        },
+        {
+          "subgateId": "C11.autonomy",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        },
+        {
+          "subgateId": "C11.supplier",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        }
+      ],
+      "reasonCodes": [
+        "MISSING_FIELD"
+      ],
+      "evidenceRefs": []
+    },
+    {
+      "criterion": "C12",
+      "stage": "replica",
+      "state": "UNKNOWN",
+      "quality": "PARTIAL",
+      "provisionalConformity": true,
+      "personalDecision": "not-applicable",
+      "subgates": [
+        {
+          "subgateId": "C12.balance",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        },
+        {
+          "subgateId": "C12.relief",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        }
+      ],
+      "reasonCodes": [
+        "MISSING_FIELD"
+      ],
+      "evidenceRefs": []
+    },
+    {
+      "criterion": "C13",
+      "stage": "replica",
+      "state": "UNKNOWN",
+      "quality": "PARTIAL",
+      "provisionalConformity": true,
+      "personalDecision": "not-applicable",
+      "subgates": [
+        {
+          "subgateId": "C13.founders",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        },
+        {
+          "subgateId": "C13.history",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        },
+        {
+          "subgateId": "C13.early-mortality",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        }
+      ],
+      "reasonCodes": [
+        "MISSING_FIELD"
+      ],
+      "evidenceRefs": []
+    },
+    {
+      "criterion": "C14",
+      "stage": "replica",
+      "state": "UNKNOWN",
+      "quality": "PARTIAL",
+      "provisionalConformity": true,
+      "personalDecision": "not-applicable",
+      "subgates": [
+        {
+          "subgateId": "C14.transmission",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        },
+        {
+          "subgateId": "C14.loss",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        },
+        {
+          "subgateId": "C14.rediscovery",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        }
+      ],
+      "reasonCodes": [
+        "MISSING_FIELD"
+      ],
+      "evidenceRefs": []
+    },
+    {
+      "criterion": "C15",
+      "stage": "replica",
+      "state": "UNKNOWN",
+      "quality": "PARTIAL",
+      "provisionalConformity": true,
+      "personalDecision": "not-applicable",
+      "subgates": [
+        {
+          "subgateId": "C15.functional-novelty",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        },
+        {
+          "subgateId": "C15.property",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        },
+        {
+          "subgateId": "C15.archive",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        }
+      ],
+      "reasonCodes": [
+        "MISSING_FIELD"
+      ],
+      "evidenceRefs": []
+    },
+    {
+      "criterion": "C16",
+      "stage": "replica",
+      "state": "UNKNOWN",
+      "quality": "PARTIAL",
+      "provisionalConformity": true,
+      "personalDecision": "not-applicable",
+      "subgates": [
+        {
+          "subgateId": "C16.migration",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        },
+        {
+          "subgateId": "C16.locality",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        },
+        {
+          "subgateId": "C16.abandonment",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        }
+      ],
+      "reasonCodes": [
+        "MISSING_FIELD"
+      ],
+      "evidenceRefs": []
+    },
+    {
+      "criterion": "C17",
+      "stage": "replica",
+      "state": "UNKNOWN",
+      "quality": "PARTIAL",
+      "provisionalConformity": true,
+      "personalDecision": "not-applicable",
+      "subgates": [
+        {
+          "subgateId": "C17.roles",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        },
+        {
+          "subgateId": "C17.supplier",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        },
+        {
+          "subgateId": "C17.institution",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        }
+      ],
+      "reasonCodes": [
+        "MISSING_FIELD"
+      ],
+      "evidenceRefs": []
+    },
+    {
+      "criterion": "C18",
+      "stage": "replica",
+      "state": "UNKNOWN",
+      "quality": "PARTIAL",
+      "provisionalConformity": true,
+      "personalDecision": "not-applicable",
+      "subgates": [
+        {
+          "subgateId": "C18.integrity",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        },
+        {
+          "subgateId": "C18.agreement-effect",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        }
+      ],
+      "reasonCodes": [
+        "MISSING_FIELD"
+      ],
+      "evidenceRefs": []
+    },
+    {
+      "criterion": "C19",
+      "stage": "replica",
+      "state": "UNKNOWN",
+      "quality": "PARTIAL",
+      "provisionalConformity": true,
+      "personalDecision": "not-applicable",
+      "subgates": [
+        {
+          "subgateId": "C19.ecology-balance",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        },
+        {
+          "subgateId": "C19.camera-parity",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        },
+        {
+          "subgateId": "C19.remote-advance",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        }
+      ],
+      "reasonCodes": [
+        "MISSING_FIELD"
+      ],
+      "evidenceRefs": []
+    },
+    {
+      "criterion": "C20",
+      "stage": "replica",
+      "state": "UNKNOWN",
+      "quality": "PARTIAL",
+      "provisionalConformity": true,
+      "personalDecision": "not-applicable",
+      "subgates": [
+        {
+          "subgateId": "C20.rejection-attribution",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        },
+        {
+          "subgateId": "C20.no-software-limit",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        },
+        {
+          "subgateId": "C20.capacity",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        }
+      ],
+      "reasonCodes": [
+        "MISSING_FIELD"
+      ],
+      "evidenceRefs": []
+    },
+    {
+      "criterion": "C21",
+      "stage": "server",
+      "state": "UNKNOWN",
+      "quality": "PARTIAL",
+      "provisionalConformity": true,
+      "personalDecision": "not-applicable",
+      "subgates": [
+        {
+          "subgateId": "C21.shared-world",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        },
+        {
+          "subgateId": "C21.durable-recovery",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        },
+        {
+          "subgateId": "C21.version-archive",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        }
+      ],
+      "reasonCodes": [
+        "MISSING_FIELD"
+      ],
+      "evidenceRefs": []
+    },
+    {
+      "criterion": "C22",
+      "stage": "performance",
+      "state": "UNKNOWN",
+      "quality": "PARTIAL",
+      "provisionalConformity": true,
+      "personalDecision": "not-applicable",
+      "subgates": [
+        {
+          "subgateId": "C22.tick-parity",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        },
+        {
+          "subgateId": "C22.host-capacity",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        },
+        {
+          "subgateId": "C22.complete-cost",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        },
+        {
+          "subgateId": "C22.backend-selection",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        }
+      ],
+      "reasonCodes": [
+        "MISSING_FIELD"
+      ],
+      "evidenceRefs": []
+    },
+    {
+      "criterion": "C23",
+      "stage": "experience",
+      "state": "UNKNOWN",
+      "quality": "PARTIAL",
+      "provisionalConformity": true,
+      "personalDecision": "pending",
+      "subgates": [
+        {
+          "subgateId": "C23.synthetic-agency",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        },
+        {
+          "subgateId": "C23.device-tasks",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        },
+        {
+          "subgateId": "C23.personal-review",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        }
+      ],
+      "reasonCodes": [
+        "MISSING_FIELD"
+      ],
+      "evidenceRefs": []
+    },
+    {
+      "criterion": "C24",
+      "stage": "final",
+      "state": "UNKNOWN",
+      "quality": "PARTIAL",
+      "provisionalConformity": true,
+      "personalDecision": "not-applicable",
+      "subgates": [
+        {
+          "subgateId": "C24.method",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        },
+        {
+          "subgateId": "C24.training",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        },
+        {
+          "subgateId": "C24.final",
+          "state": "UNKNOWN",
+          "quality": "PARTIAL",
+          "reasonCodes": [
+            "MISSING_FIELD"
+          ],
+          "thresholdIds": [],
+          "metrics": [],
+          "evidenceRefs": [],
+          "scope": "manual synthetic illustrative subgate"
+        }
+      ],
+      "reasonCodes": [
+        "MISSING_FIELD"
+      ],
+      "evidenceRefs": []
+    }
+  ],
+  "panels": [],
+  "frozenC1C8ArtifactRef": null,
+  "acceptanceStatus": "NOT_GRANTED",
+  "limitations": [
+    "Manual illustrative output; no evaluator executed, no scientific/personal acceptance; synthetic C23 oracle never authenticates Steven."
+  ],
+  "evidenceId": "evaluation-partial",
+  "synthetic": true,
+  "epochId": "e-conflict",
+  "artifactRole": "synthetic",
+  "inputObservationRef": "manual-partial-observation"
+}

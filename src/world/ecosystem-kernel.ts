@@ -1,6 +1,7 @@
 import type { Feature, Tile } from '../shared/types.js';
 import { enCuenca } from './agua.js';
 import { TileStore } from './soa/terreno.js';
+import { emitObserved } from './observation.js';
 
 const clamp = (n: number): number => Math.max(0, Math.min(1, n));
 const TREE_FEATURES = new Set<Feature>(['tree', 'pine', 'palm', 'cactus', 'reeds', 'stump']);
@@ -122,6 +123,7 @@ export class EcosystemKernel {
       const terrain = tile.terrain, biome = tile.biome, feature = tile.feature;
       const growth = tile.growth ?? vegetation, fertility = tile.fertility ?? 0;
       const drinkingWater = tile.drinkingWater ?? 0, cultivation = tile.cultivation ?? 0, traffic = tile.traffic ?? 0;
+      const woodBefore = tile.wood ?? 0;
       let livingNeighbors = 0, life: number;
       if (store !== null) {
         life = front![cells![i]]; livingNeighbors = living![i];
@@ -165,6 +167,13 @@ export class EcosystemKernel {
           if (feature === 'stump' && tile.wood >= 1) tile.feature = biome === 'mountain' ? 'pine' : 'tree';
         }
       }
+      emitObserved(tiles, 'ecosystem-kernel.tile', () => ({ kind: 'ecology-kernel-tile', tick,
+        x: tile.x, y: tile.y, biome, weather, phase, livingNeighbors, fertilePattern,
+        cellularEnergy, produced, before: { life, fertility, growth, vegetation, moisture,
+          drinkingWater, cultivation, traffic, wood: woodBefore },
+        after: { life: tile.life, fertility: tile.fertility, growth: tile.growth,
+          vegetation: tile.vegetation, moisture: tile.moisture, drinkingWater: tile.drinkingWater,
+          cultivation: tile.cultivation, traffic: tile.traffic, wood: tile.wood ?? 0 } }));
     }
   }
 

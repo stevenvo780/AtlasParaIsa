@@ -8,6 +8,10 @@ import { GOVERNOR_WINDOW_STEPS } from '../src/server/governor.js';
 // `.mjs` (no `.mts`): tsx resuelve el especificador ESM `.mjs` contra el fuente `.mts`, igual que
 // ya hace `tests/survival-audit.test.ts` con `scripts/survival-audit.mts`.
 import { cerrarEscena, crearEscenaBase, medirVentana } from '../scripts/curva-techo.mjs';
+import { clonarPlantillaSintetica } from '../scripts/lib/curva-techo-fixture.js';
+import type { Person } from '../src/world/index.js';
+import type { MaterialBatch, TechnologyKnowledge, TechnologyProgram } from '../src/shared/technology.js';
+import { assertTechnology, defaultTechnologyState, materialCapacities, programSignature, technologyStock, toolCapacities, type TechnologyActor, type TechnologyHost } from '../src/world/technology.js';
 
 type Json = Record<string, unknown>;
 const readJson = (path: string): Json => JSON.parse(readFileSync(path, 'utf8')) as Json;
@@ -203,4 +207,129 @@ test('--hilos y --gpu se aceptan y se registran aunque hoy no exista backend par
   assert.equal(punto.hilosSolicitados, 4);
   assert.deepEqual(punto.gpuSolicitada, [0, 1]);
   assert.equal(punto.fraccionSerial, 1, 'con --hilos > 1 el paso sigue siendo 100% serial: no hay backend que lo paralelice todavía');
+});
+
+/** Plantilla manual envejecida: un producto de 890 cuantos, 110 de residuo, un recibo
+ * de investigación y un proyecto de fabricación en curso. No ejecuta World ni depende
+ * de que el p95 permita alcanzar un escalón concreto. `sex` comprueba también que el
+ * helper conserva campos corporales adicionales a los de Person en esta base. */
+function plantillaConTecnologia(sex: 'female' | 'male') {
+  const program: TechnologyProgram = {
+    inputs: [{ source: 'raw', material: 'stone', mass: 1000 }],
+    steps: [{ op: 'form', intensity: 4, shape: 'edge' }],
+  };
+  const item: MaterialBatch = {
+    id: 'product-1', recipeId: 'recipe-1', composition: { wood: 0, stone: 890, water: 0 }, mass: 890,
+    properties: { hardness: 0.84, toughness: 0.3, porosity: 0.2, flexibility: 0, edge: 0.86,
+      containment: 0, insulation: 0.08, leverage: 0.05, cohesion: 0.62, temperature: 0, alignment: 0, firing: 0 },
+    generation: 1, madeAt: 12, parentItems: ['raw:stone'], initialMass: 890,
+  };
+  const technology: TechnologyKnowledge = {
+    knownRecipes: ['recipe-1'], items: [item], residue: { wood: 0, stone: 110, water: 0 },
+    attempts: 1, lastAttempt: 239,
+    project: { kind: 'craft', recipeId: 'recipe-1', program: structuredClone(program), parents: [],
+      progress: 2, requiredWork: 20, energyPaid: 0.0009, startedAt: 239 },
+    learnedFrom: [{ recipeId: 'recipe-1', teacherId: 'teacher', tick: 120 }],
+    competence: { 'recipe-1': { attempts: 1, successes: 1, work: 20, benefit: 0 } },
+    waterActionAt: 239, waterCarryAt: 239,
+  };
+  const plantilla = {
+    id: 'founder', x: 2, y: 3, energy: 0.7, fatigue: 0.2, hunger: 0.1, thirst: 0.3,
+    materials: { wood: 2, stone: 1 }, skills: { technology: 0.25 }, sex,
+    genome: { alleles: [0.2, 0.2, 0.4, 0.4, 0.6, 0.6, 0.8, 0.8, 0.3, 0.3, 0.5, 0.5, 0.7, 0.7],
+      generation: 0, parents: [], learningRate: 0.12, cooperation: 0.7, mutations: 0 },
+    traits: { curiosity: 0.2, sociability: 0.4, industriousness: 0.6, care: 0.8, resilience: 0.3 },
+    technology,
+  } satisfies TechnologyActor & Pick<Person, 'genome' | 'traits'> & { sex: 'female' | 'male' };
+  const state = defaultTechnologyState();
+  state.recipes.push({ id: 'recipe-1', name: 'Filo', program, signature: programSignature(program),
+    parents: [], generation: 1, inventorId: 'founder', tick: 12, x: 2, y: 3, novelty: 'both',
+    capacities: materialCapacities(item), uses: 0, utility: 0, manufactured: 1 });
+  state.recipeCounter = 1; state.itemCounter = 1; state.executionCounter = 1;
+  state.ledger.imported.stone = 1000;
+  state.ledger.attempts = 1; state.ledger.crafted = 1; state.ledger.work = 20; state.ledger.energy = 0.009;
+  state.water = { version: 1, policyVersion: 1, filled: 0, consumed: 0, environmentalLoss: 0, work: 0, energy: 0 };
+  const inputs = [{ resourceId: 'raw:stone', mass: 1000 }];
+  const outputs = [{ resourceId: 'recipe:recipe-1', mass: 890 }];
+  state.history.push({ id: 'process-1', kind: 'research', tick: 12, actorId: 'founder', recipeId: 'recipe-1',
+    programSignature: programSignature(program), inputs, outputs, residueMass: 110, energy: 0.009,
+    work: 20, success: true, parentRecipeIds: [], catalysts: [], benefit: 0,
+    balance: { opening: [], closing: [...outputs, { resourceId: 'residue:stone', mass: 110 }], externalInputs: inputs, externalLoss: [] } });
+  const host: TechnologyHost = { seed: 51926, tick: 240, people: [plantilla], technology: state };
+  return { plantilla, host };
+}
+
+test('regresión de sintéticos: añadir clones no duplica productos, materia ni trabajo tecnológico', () => {
+  for (const sex of ['female', 'male'] as const) {
+    const { plantilla, host } = plantillaConTecnologia(sex);
+    const before = structuredClone(host);
+    assert.doesNotThrow(() => assertTechnology(host), 'la plantilla manual debe ser válida antes de añadir sintéticos');
+
+    // Control anterior: copiar una plantilla con stock físico debe seguir siendo rechazado.
+    const copiaCompleta = structuredClone(plantilla);
+    copiaCompleta.id = 'synthetic-control';
+    assert.throws(() => assertTechnology({ ...host, people: [plantilla, copiaCompleta] }), /Estado de tecnología física inválido/);
+
+    const clones = ['synthetic-0', 'ancla-1'].map(id => {
+      const persona = clonarPlantillaSintetica(plantilla);
+      persona.id = id;
+      return persona;
+    });
+    for (const persona of clones) {
+      const { technology: _technology, ...cuerpo } = persona;
+      const { technology: _originalTechnology, ...original } = plantilla;
+      assert.deepEqual(cuerpo, { ...original, id: persona.id }, 'sexo, genoma, fenotipo y resto de la plantilla se conservan');
+      assert.deepEqual(technologyStock(persona), [], 'el sintético no aporta stock tecnológico');
+      assert.ok(Object.values(toolCapacities(persona)).every(value => value === 0), 'no hereda capacidades de herramientas');
+      assert.deepEqual(persona.technology, {
+        knownRecipes: [], items: [], residue: { wood: 0, stone: 0, water: 0 }, attempts: 0, lastAttempt: -120,
+        project: null, learnedFrom: [], competence: {},
+      }, 'no hereda proyecto pagado, recetas, práctica, enseñanza ni marcas de trabajo');
+    }
+
+    // Control de conservación aislado: sin producto duplicado, copiar sólo residuo también falla.
+    const residuoCopiado = clonarPlantillaSintetica(plantilla);
+    residuoCopiado.id = 'synthetic-residue-control';
+    residuoCopiado.technology.residue = structuredClone(plantilla.technology.residue);
+    assert.throws(() => assertTechnology({ ...host, people: [plantilla, residuoCopiado] }), /Estado de tecnología física inválido/);
+
+    host.people.push(...clones);
+    assert.doesNotThrow(() => assertTechnology(host), 'el validador real admite sintéticos sin duplicar materia ni IDs');
+    const ids = host.people.flatMap(persona => persona.technology.items.map(item => item.id));
+    assert.deepEqual(ids, ['product-1'], 'sólo el dueño original conserva la identidad física');
+    for (const material of ['wood', 'stone', 'water'] as const) {
+      const stock = host.people.reduce((total, persona) => total + persona.technology.residue[material]
+        + persona.technology.items.reduce((sum, item) => sum + item.composition[material], 0), 0);
+      assert.equal(stock, before.technology.ledger.imported[material], `se conserva ${material} sin inventar importaciones`);
+    }
+    assert.deepEqual(host.technology, before.technology, 'catálogo, contadores, ledger y recibos no se reescriben');
+    assert.deepEqual(plantilla, before.people[0], 'el fundador conserva sus pertenencias y trabajo');
+  }
+});
+
+test('regresión de sintéticos: cada clon tiene tecnología inicial independiente', () => {
+  const { plantilla } = plantillaConTecnologia('female');
+  const before = structuredClone(plantilla);
+  const a = clonarPlantillaSintetica(plantilla), b = clonarPlantillaSintetica(plantilla);
+  const fresh = structuredClone(b.technology);
+  assert.notStrictEqual(a, plantilla);
+  assert.notStrictEqual(a.genome, plantilla.genome);
+  assert.notStrictEqual(a.traits, plantilla.traits);
+  assert.notStrictEqual(a.technology, b.technology);
+  assert.notStrictEqual(a.technology, plantilla.technology);
+  for (const key of ['items', 'residue', 'knownRecipes', 'learnedFrom', 'competence'] as const) {
+    assert.notStrictEqual(a.technology[key], b.technology[key], `${key} pertenece a cada sintético`);
+    assert.notStrictEqual(a.technology[key], plantilla.technology[key], `${key} no aliasa a la plantilla`);
+  }
+
+  // Nueva actividad local de un clon no debe contaminar al siguiente ni al fundador.
+  a.technology.items.push(structuredClone(plantilla.technology.items[0]!));
+  a.technology.residue.stone = 5;
+  a.technology.knownRecipes.push('recipe-1');
+  a.technology.learnedFrom.push({ recipeId: 'recipe-1', teacherId: 'teacher', tick: 240 });
+  a.technology.competence['recipe-1'] = { attempts: 1, successes: 0, work: 1, benefit: 0 };
+  a.technology.project = structuredClone(plantilla.technology.project);
+  a.technology.attempts = 1; a.technology.lastAttempt = 240;
+  assert.deepEqual(b.technology, fresh);
+  assert.deepEqual(plantilla, before);
 });

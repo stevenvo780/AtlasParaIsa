@@ -1,0 +1,64 @@
+{
+  "contractVersion": "realismo-v3",
+  "evidenceId": "registration",
+  "kind": "preregistration",
+  "synthetic": true,
+  "sourceRefs": [],
+  "payload": {
+    "registrationId": "manual-wire-design"
+  },
+  "fieldCoverage": {
+    "registrationId": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "contentHash": {
+      "status": "missing",
+      "reason": "not supplied; UNKNOWN for dependent subgate"
+    },
+    "registeredAt": {
+      "status": "missing",
+      "reason": "not supplied; UNKNOWN for dependent subgate"
+    },
+    "firstDataAt": {
+      "status": "missing",
+      "reason": "not supplied; UNKNOWN for dependent subgate"
+    },
+    "plannedRunIds": {
+      "status": "missing",
+      "reason": "not supplied; UNKNOWN for dependent subgate"
+    },
+    "plannedSeeds": {
+      "status": "missing",
+      "reason": "not supplied; UNKNOWN for dependent subgate"
+    },
+    "arms": {
+      "status": "missing",
+      "reason": "not supplied; UNKNOWN for dependent subgate"
+    },
+    "interventions": {
+      "status": "missing",
+      "reason": "not supplied; UNKNOWN for dependent subgate"
+    },
+    "profileHash": {
+      "status": "missing",
+      "reason": "not supplied; UNKNOWN for dependent subgate"
+    },
+    "metricDefinitionsRef": {
+      "status": "missing",
+      "reason": "not supplied; UNKNOWN for dependent subgate"
+    },
+    "budgetRef": {
+      "status": "missing",
+      "reason": "not supplied; UNKNOWN for dependent subgate"
+    },
+    "controlPairRefs": {
+      "status": "missing",
+      "reason": "not supplied; UNKNOWN for dependent subgate"
+    },
+    "independentReceiptRef": {
+      "status": "missing",
+      "reason": "not supplied; UNKNOWN for dependent subgate"
+    }
+  }
+}

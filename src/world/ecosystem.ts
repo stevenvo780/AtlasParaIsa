@@ -2,6 +2,7 @@ import type { Feature, Tile, Species } from '../shared/types.js';
 import { EcosystemKernel, type EcosystemOptions } from './ecosystem-kernel.js';
 import { initialWood } from './forest.js';
 import { ruidoCuenca } from './agua.js';
+import { emitObserved } from './observation.js';
 const clamp = (n: number, maximum = 1): number => Math.max(0, Math.min(maximum, n));
 const key = (x: number, y: number): string => `${x},${y}`;
 const TREE_FEATURES = new Set<Feature>(['tree', 'pine', 'palm', 'cactus', 'reeds', 'stump']);
@@ -177,23 +178,33 @@ export function harvestMaterial(tile: Tile, material: 'wood' | 'stone', amount: 
     tile.vegetation = clamp(tile.vegetation - harvested * 0.025);
     if (tile.wood === 0 && TREE_FEATURES.has(tile.feature ?? 'none')) tile.feature = tile.feature === 'reeds' || tile.feature === 'cactus' ? 'none' : 'stump';
   } else if (tile.stone === 0 && (tile.feature === 'rock' || tile.feature === 'clay')) tile.feature = 'none';
+  emitObserved(tile, 'ecosystem.harvest-material', () => ({ kind: 'material-extraction', x: tile.x, y: tile.y,
+    material, requested: amount, harvested, remaining: tile[material] ?? 0,
+    growthAfter: tile.growth ?? null, vegetationAfter: tile.vegetation }));
   return harvested;
 }
 
 export function cultivateTile(tile: Tile): boolean {
   if (tile.terrain === 'water' || tile.terrain === 'shelter' || tile.moisture <= 0.25 || (tile.cultivation ?? 0) >= 0.95) return false;
+  const before = { cultivation: tile.cultivation ?? 0, fertility: tile.fertility ?? 0,
+    growth: tile.growth ?? tile.vegetation, vegetation: tile.vegetation };
   tile.cultivation = clamp((tile.cultivation ?? 0) + 0.18);
   tile.fertility = clamp((tile.fertility ?? 0) + 0.06);
   tile.growth = clamp((tile.growth ?? tile.vegetation) + 0.03);
   tile.vegetation = clamp(tile.vegetation + 0.04);
   if (tile.feature === 'none' || tile.feature === 'stump') tile.feature = 'flowers';
+  emitObserved(tile, 'ecosystem.cultivate', () => ({ kind: 'cultivation', x: tile.x, y: tile.y, before,
+    after: { cultivation: tile.cultivation, fertility: tile.fertility, growth: tile.growth, vegetation: tile.vegetation } }));
   return true;
 }
 
 export function trampleTile(tile: Tile): void {
   if (tile.terrain === 'water') return;
+  const before = { traffic: tile.traffic ?? 0, growth: tile.growth ?? tile.vegetation, vegetation: tile.vegetation, life: tile.life ?? 0 };
   tile.traffic = clamp((tile.traffic ?? 0) + 0.025);
   tile.growth = clamp((tile.growth ?? tile.vegetation) - 0.006);
   tile.vegetation = clamp(tile.vegetation - 0.003);
   tile.life = clamp((tile.life ?? 0) - 0.01);
+  emitObserved(tile, 'ecosystem.trample', () => ({ kind: 'trampling', x: tile.x, y: tile.y, before,
+    after: { traffic: tile.traffic, growth: tile.growth, vegetation: tile.vegetation, life: tile.life } }));
 }

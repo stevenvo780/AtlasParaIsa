@@ -1,0 +1,1462 @@
+{
+  "contractVersion": "realismo-v3",
+  "profileId": "r1-20261003-correction3-provisional",
+  "status": "DRAFT_FOR_INDEPENDENT_REVIEW",
+  "scientificAcceptance": "NOT_GRANTED",
+  "criteria": [
+    {
+      "criterion": "C9",
+      "sourceFront": "B01",
+      "requiredSubgates": [
+        "C9.service",
+        "C9.marginal"
+      ],
+      "requiredFamilies": [
+        "structure",
+        "exposure",
+        "service",
+        "flow"
+      ],
+      "window": "60d; cohorte10d activos; contraste10d",
+      "formulaSummary": "unused/cohort; (work_base-work_abl)/work_base; (service_base-service_abl)/service_base",
+      "normativeDetails": "docs/CRITERIOS-REALISMO.md",
+      "thresholds": [
+        {
+          "thresholdId": "C9.eligibleActiveDays",
+          "measure": "eligibleActiveDays",
+          "operator": ">=",
+          "value": 10,
+          "unit": "active-days",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B01; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        },
+        {
+          "thresholdId": "C9.usefulMortalServices",
+          "measure": "usefulMortalServices",
+          "operator": ">=",
+          "value": 1,
+          "unit": "events",
+          "status": "PROVISIONAL",
+          "origin": "R1 2026-10-03, elección operacional sin base empírica; sección C9 / B01",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        },
+        {
+          "thresholdId": "C9.unusedAlarm",
+          "measure": "unusedAlarm",
+          "operator": ">",
+          "value": 0.3,
+          "unit": "ratio-diagnostic",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B01; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        },
+        {
+          "thresholdId": "C9.workSaving",
+          "measure": "workSaving",
+          "operator": ">=",
+          "value": 0.1,
+          "unit": "relative-ratio",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B01; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        },
+        {
+          "thresholdId": "C9.serviceDrop",
+          "measure": "serviceDrop",
+          "operator": "<=",
+          "value": 0.05,
+          "unit": "relative-ratio",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B01; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        }
+      ],
+      "calibration": "Controles y casos límite del apartado correspondiente del canon, antes de datos candidatos; sin evidencia ejecutada en R1",
+      "acceptance": "NOT_GRANTED",
+      "normativeSection": "C9 / B01",
+      "operationalChoicesStatus": "PROVISIONAL_R1 — fórmulas/firmas/cohortes según canon, revisión/calibración pendiente",
+      "ruleResolution": "Cada requiredSubgate se evalúa con su apartado normativo; reglas de panel y fase nunca se aplican como si fueran una réplica.",
+      "normativeLayers": {
+        "inheritedObligation": "Canon autoridad y obligaciones; no se calibran autorizaciones ni procedencia",
+        "authorizedProtocol": "objetivo12 sólo6×60d descriptivas y6×1200 técnico",
+        "provisionalThreshold": "Cifras B/R1 no heredadas requieren revisión y calibración antes de candidatas"
+      }
+    },
+    {
+      "criterion": "C10",
+      "sourceFront": "B02",
+      "requiredSubgates": [
+        "C10.wear",
+        "C10.repair"
+      ],
+      "requiredFamilies": [
+        "structure",
+        "exposure",
+        "repair",
+        "flow",
+        "service"
+      ],
+      "window": "20d activos por ID; reparación aparte",
+      "formulaSummary": "max(abs(condition-observer_replay)); condition_after-min(1,condition_before+0.4)",
+      "normativeDetails": "docs/CRITERIOS-REALISMO.md",
+      "thresholds": [
+        {
+          "thresholdId": "C10.activeDays",
+          "measure": "activeDays",
+          "operator": ">=",
+          "value": 20,
+          "unit": "active-days",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B02; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        },
+        {
+          "thresholdId": "C10.conditionError",
+          "measure": "conditionError",
+          "operator": "<=",
+          "value": 1e-09,
+          "unit": "absolute-normalized",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B02; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        },
+        {
+          "thresholdId": "C10.functionalCutoff",
+          "measure": "functionalCutoff",
+          "operator": "<=",
+          "value": 0.1,
+          "unit": "condition",
+          "status": "LAW_REFERENCE",
+          "origin": "REGLAS:306–308; verificar ley al sourceSHA",
+          "normativeClass": "REFERENCIA_LEY_SHA"
+        },
+        {
+          "thresholdId": "C10.repairWork",
+          "measure": "repairWork",
+          "operator": "==",
+          "value": 30,
+          "unit": "work",
+          "status": "LAW_REFERENCE",
+          "origin": "REGLAS:306–308; verificar ley al sourceSHA",
+          "normativeClass": "REFERENCIA_LEY_SHA"
+        },
+        {
+          "thresholdId": "C10.repairWood",
+          "measure": "repairWood",
+          "operator": "==",
+          "value": 1,
+          "unit": "wood-unit",
+          "status": "LAW_REFERENCE",
+          "origin": "REGLAS:306–308; verificar ley al sourceSHA",
+          "normativeClass": "REFERENCIA_LEY_SHA"
+        },
+        {
+          "thresholdId": "C10.repairIncrease",
+          "measure": "repairIncrease",
+          "operator": "<=",
+          "value": 0.4,
+          "unit": "condition",
+          "status": "LAW_REFERENCE",
+          "origin": "REGLAS:306–308; verificar ley al sourceSHA",
+          "normativeClass": "REFERENCIA_LEY_SHA"
+        },
+        {
+          "thresholdId": "C10.paidUsefulRepairs",
+          "measure": "paidUsefulRepairs",
+          "operator": ">=",
+          "value": 1,
+          "unit": "events",
+          "status": "PROVISIONAL",
+          "origin": "R1 2026-10-03, elección operacional sin base empírica; sección C10 / B02",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        }
+      ],
+      "calibration": "Controles y casos límite del apartado correspondiente del canon, antes de datos candidatos; sin evidencia ejecutada en R1",
+      "acceptance": "NOT_GRANTED",
+      "normativeSection": "C10 / B02",
+      "operationalChoicesStatus": "PROVISIONAL_R1 — fórmulas/firmas/cohortes según canon, revisión/calibración pendiente",
+      "ruleResolution": "Cada requiredSubgate se evalúa con su apartado normativo; reglas de panel y fase nunca se aplican como si fueran una réplica.",
+      "normativeLayers": {
+        "inheritedObligation": "Canon autoridad y obligaciones; no se calibran autorizaciones ni procedencia",
+        "authorizedProtocol": "objetivo12 sólo6×60d descriptivas y6×1200 técnico",
+        "provisionalThreshold": "Cifras B/R1 no heredadas requieren revisión y calibración antes de candidatas"
+      }
+    },
+    {
+      "criterion": "C11",
+      "sourceFront": "B03",
+      "requiredSubgates": [
+        "C11.replacement",
+        "C11.autonomy",
+        "C11.supplier"
+      ],
+      "requiredFamilies": [
+        "replacement",
+        "product",
+        "flow",
+        "service",
+        "knowledge"
+      ],
+      "window": "41–60 replacements/roles; separate causal pairs: reference/removal/restoration10d each, simultaneous equivalent windows both arms",
+      "formulaSummary": "unique old→new replacements; R=1-treatmentRemoval/controlRemoval; Q=treatmentRestoration/controlRestoration, contemporary unperturbed pair by function",
+      "normativeDetails": "docs/CRITERIOS-REALISMO.md",
+      "thresholds": [
+        {
+          "thresholdId": "C11.completeReplacements",
+          "measure": "completeReplacements",
+          "operator": ">=",
+          "value": 3,
+          "unit": "events",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B03; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        },
+        {
+          "thresholdId": "C11.indispensableFunctions",
+          "measure": "indispensableFunctions",
+          "operator": ">=",
+          "value": 2,
+          "unit": "functions",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B03; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        },
+        {
+          "thresholdId": "C11.removalDrop",
+          "measure": "removalDrop",
+          "operator": ">=",
+          "value": 0.2,
+          "unit": "relative-ratio",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B03; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        },
+        {
+          "thresholdId": "C11.restoration",
+          "measure": "restoration",
+          "operator": ">=",
+          "value": 0.8,
+          "unit": "relative-ratio",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B03; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        }
+      ],
+      "calibration": "Controles y casos límite del apartado correspondiente del canon, antes de datos candidatos; sin evidencia ejecutada en R1",
+      "acceptance": "NOT_GRANTED",
+      "normativeSection": "C11 / B03",
+      "operationalChoicesStatus": "PROVISIONAL_R1 — fórmulas/firmas/cohortes según canon, revisión/calibración pendiente",
+      "ruleResolution": "Cada requiredSubgate se evalúa con su apartado normativo; reglas de panel y fase nunca se aplican como si fueran una réplica.",
+      "normativeLayers": {
+        "inheritedObligation": "Canon autoridad y obligaciones; no se calibran autorizaciones ni procedencia",
+        "authorizedProtocol": "objetivo12 sólo6×60d descriptivas y6×1200 técnico",
+        "provisionalThreshold": "Cifras B/R1 no heredadas requieren revisión y calibración antes de candidatas"
+      }
+    },
+    {
+      "criterion": "C12",
+      "sourceFront": "B04",
+      "requiredSubgates": [
+        "C12.balance",
+        "C12.relief"
+      ],
+      "requiredFamilies": [
+        "boundary",
+        "stock",
+        "flow",
+        "service"
+      ],
+      "window": "1–60 cada tick y bloques10d",
+      "formulaSummary": "opening+external_in+regeneration+conversion_net-closing-external_out-consumption-loss",
+      "normativeDetails": "docs/CRITERIOS-REALISMO.md",
+      "thresholds": [
+        {
+          "thresholdId": "C12.integerResidual",
+          "measure": "integerResidual",
+          "operator": "==",
+          "value": 0,
+          "unit": "quanta",
+          "status": "HEREDADO",
+          "origin": "GOAL:35–36; REGLAS balance material",
+          "normativeClass": "OBLIGACION_HEREDADA"
+        },
+        {
+          "thresholdId": "C12.normalizedResidualAbs",
+          "measure": "normalizedResidualAbs",
+          "operator": "<=",
+          "value": 1e-09,
+          "unit": "absolute-normalized",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B04; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        },
+        {
+          "thresholdId": "C12.freeRelief",
+          "measure": "freeRelief",
+          "operator": "==",
+          "value": 0,
+          "unit": "events",
+          "status": "HEREDADO",
+          "origin": "GOAL:35–36; REGLAS balance material",
+          "normativeClass": "OBLIGACION_HEREDADA"
+        },
+        {
+          "thresholdId": "C12.fillTransportUtility",
+          "measure": "fillTransportUtility",
+          "operator": "==",
+          "value": 0,
+          "unit": "events",
+          "status": "HEREDADO",
+          "origin": "GOAL:35–36; REGLAS balance material",
+          "normativeClass": "OBLIGACION_HEREDADA"
+        }
+      ],
+      "calibration": "Controles y casos límite del apartado correspondiente del canon, antes de datos candidatos; sin evidencia ejecutada en R1",
+      "acceptance": "NOT_GRANTED",
+      "normativeSection": "C12 / B04",
+      "operationalChoicesStatus": "PROVISIONAL_R1 — fórmulas/firmas/cohortes según canon, revisión/calibración pendiente",
+      "ruleResolution": "Cada requiredSubgate se evalúa con su apartado normativo; reglas de panel y fase nunca se aplican como si fueran una réplica.",
+      "normativeLayers": {
+        "inheritedObligation": "Canon autoridad y obligaciones; no se calibran autorizaciones ni procedencia",
+        "authorizedProtocol": "objetivo12 sólo6×60d descriptivas y6×1200 técnico",
+        "provisionalThreshold": "Cifras B/R1 no heredadas requieren revisión y calibración antes de candidatas"
+      }
+    },
+    {
+      "criterion": "C13",
+      "sourceFront": "B05",
+      "requiredSubgates": [
+        "C13.founders",
+        "C13.history",
+        "C13.early-mortality"
+      ],
+      "requiredFamilies": [
+        "person",
+        "death"
+      ],
+      "window": "1–60; nacidos<=D52 con seguimiento8d; panel8 separado",
+      "formulaSummary": "(N0-founderAlive2)/N0; founderAlive10/N0; deathsAge<8/eligibleBirths; p8_treat<=1.1*p8_control",
+      "normativeDetails": "docs/CRITERIOS-REALISMO.md",
+      "thresholds": [
+        {
+          "thresholdId": "C13.founderLoss2d",
+          "measure": "founderLoss2d",
+          "operator": "<=",
+          "value": 0.5,
+          "unit": "ratio",
+          "status": "HEREDADO",
+          "origin": "spec001:43–45,112,134–144; tamaño panel8 PROVISIONAL B05",
+          "normativeClass": "OBLIGACION_HEREDADA"
+        },
+        {
+          "thresholdId": "C13.founderMedian10d",
+          "measure": "founderMedian10d",
+          "operator": ">=",
+          "value": 0.7,
+          "unit": "panel-ratio",
+          "status": "HEREDADO",
+          "origin": "spec001:43–45,112,134–144; tamaño panel8 PROVISIONAL B05",
+          "normativeClass": "OBLIGACION_HEREDADA"
+        },
+        {
+          "thresholdId": "C13.panelCollapses",
+          "measure": "panelCollapses",
+          "operator": "==",
+          "value": 0,
+          "unit": "events-over8",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B05; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        },
+        {
+          "thresholdId": "C13.historyCoverage",
+          "measure": "historyCoverage",
+          "operator": "==",
+          "value": 1,
+          "unit": "ratio",
+          "status": "HEREDADO",
+          "origin": "spec001:43–45,112,134–144; tamaño panel8 PROVISIONAL B05",
+          "normativeClass": "OBLIGACION_HEREDADA"
+        },
+        {
+          "thresholdId": "C13.earlyDeathMultiplier",
+          "measure": "earlyDeathMultiplier",
+          "operator": "<=",
+          "value": 1.1,
+          "unit": "relative-ratio",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B05; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        }
+      ],
+      "calibration": "Controles y casos límite del apartado correspondiente del canon, antes de datos candidatos; sin evidencia ejecutada en R1",
+      "acceptance": "NOT_GRANTED",
+      "normativeSection": "C13 / B05",
+      "operationalChoicesStatus": "PROVISIONAL_R1 — fórmulas/firmas/cohortes según canon, revisión/calibración pendiente",
+      "ruleResolution": "Cada requiredSubgate se evalúa con su apartado normativo; reglas de panel y fase nunca se aplican como si fueran una réplica.",
+      "normativeLayers": {
+        "inheritedObligation": "Canon autoridad y obligaciones; no se calibran autorizaciones ni procedencia",
+        "authorizedProtocol": "objetivo12 sólo6×60d descriptivas y6×1200 técnico",
+        "provisionalThreshold": "Cifras B/R1 no heredadas requieren revisión y calibración antes de candidatas"
+      }
+    },
+    {
+      "criterion": "C14",
+      "sourceFront": "B06",
+      "requiredSubgates": [
+        "C14.transmission",
+        "C14.loss",
+        "C14.rediscovery"
+      ],
+      "requiredFamilies": [
+        "knowledge",
+        "person",
+        "product",
+        "service",
+        "flow"
+      ],
+      "window": "60d; pérdida total+20d",
+      "formulaSummary": "retained_techniques/preselected; count paid rediscoveries with original identity",
+      "normativeDetails": "docs/CRITERIOS-REALISMO.md",
+      "thresholds": [
+        {
+          "thresholdId": "C14.preselectedTechniques",
+          "measure": "preselectedTechniques",
+          "operator": ">=",
+          "value": 3,
+          "unit": "techniques",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B06; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        },
+        {
+          "thresholdId": "C14.humanTurnovers",
+          "measure": "humanTurnovers",
+          "operator": ">=",
+          "value": 2,
+          "unit": "turnovers",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B06; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        },
+        {
+          "thresholdId": "C14.retainedFraction",
+          "measure": "retainedFraction",
+          "operator": ">=",
+          "value": 0.6666666666666666,
+          "unit": "ratio",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B06; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        },
+        {
+          "thresholdId": "C14.paidRediscoveries",
+          "measure": "paidRediscoveries",
+          "operator": ">=",
+          "value": 1,
+          "unit": "events",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B06; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        },
+        {
+          "thresholdId": "C14.manufactureWithoutLearning",
+          "measure": "manufactureWithoutLearning",
+          "operator": "==",
+          "value": 0,
+          "unit": "events",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B06; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        }
+      ],
+      "calibration": "Controles y casos límite del apartado correspondiente del canon, antes de datos candidatos; sin evidencia ejecutada en R1",
+      "acceptance": "NOT_GRANTED",
+      "normativeSection": "C14 / B06",
+      "operationalChoicesStatus": "PROVISIONAL_R1 — fórmulas/firmas/cohortes según canon, revisión/calibración pendiente",
+      "ruleResolution": "Cada requiredSubgate se evalúa con su apartado normativo; reglas de panel y fase nunca se aplican como si fueran una réplica.",
+      "normativeLayers": {
+        "inheritedObligation": "Canon autoridad y obligaciones; no se calibran autorizaciones ni procedencia",
+        "authorizedProtocol": "objetivo12 sólo6×60d descriptivas y6×1200 técnico",
+        "provisionalThreshold": "Cifras B/R1 no heredadas requieren revisión y calibración antes de candidatas"
+      }
+    },
+    {
+      "criterion": "C15",
+      "sourceFront": "B07",
+      "requiredSubgates": [
+        "C15.functional-novelty",
+        "C15.property",
+        "C15.archive"
+      ],
+      "requiredFamilies": [
+        "product",
+        "service",
+        "flow",
+        "knowledge"
+      ],
+      "window": "60d; prueba archivo separada",
+      "formulaSummary": "distinct applied functions absent in opening history; (base-ablated)/base; count resolvable programs/generations",
+      "normativeDetails": "docs/CRITERIOS-REALISMO.md",
+      "thresholds": [
+        {
+          "thresholdId": "C15.newUsefulFunctions",
+          "measure": "newUsefulFunctions",
+          "operator": ">=",
+          "value": 3,
+          "unit": "functions",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B07; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        },
+        {
+          "thresholdId": "C15.usesEach",
+          "measure": "usesEach",
+          "operator": ">=",
+          "value": 5,
+          "unit": "events",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B07; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        },
+        {
+          "thresholdId": "C15.mortalsEach",
+          "measure": "mortalsEach",
+          "operator": ">=",
+          "value": 2,
+          "unit": "actors",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B07; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        },
+        {
+          "thresholdId": "C15.propertyDrop",
+          "measure": "propertyDrop",
+          "operator": ">=",
+          "value": 0.1,
+          "unit": "relative-ratio",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B07; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        },
+        {
+          "thresholdId": "C15.programs",
+          "measure": "programs",
+          "operator": ">=",
+          "value": 257,
+          "unit": "programs",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B07; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        },
+        {
+          "thresholdId": "C15.techGenerations",
+          "measure": "techGenerations",
+          "operator": ">=",
+          "value": 33,
+          "unit": "generations",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B07; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        },
+        {
+          "thresholdId": "C15.brokenReferences",
+          "measure": "brokenReferences",
+          "operator": "==",
+          "value": 0,
+          "unit": "events",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B07; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        }
+      ],
+      "calibration": "Controles y casos límite del apartado correspondiente del canon, antes de datos candidatos; sin evidencia ejecutada en R1",
+      "acceptance": "NOT_GRANTED",
+      "normativeSection": "C15 / B07",
+      "operationalChoicesStatus": "PROVISIONAL_R1 — fórmulas/firmas/cohortes según canon, revisión/calibración pendiente",
+      "ruleResolution": "Cada requiredSubgate se evalúa con su apartado normativo; reglas de panel y fase nunca se aplican como si fueran una réplica.",
+      "normativeLayers": {
+        "inheritedObligation": "Canon autoridad y obligaciones; no se calibran autorizaciones ni procedencia",
+        "authorizedProtocol": "objetivo12 sólo6×60d descriptivas y6×1200 técnico",
+        "provisionalThreshold": "Cifras B/R1 no heredadas requieren revisión y calibración antes de candidatas"
+      }
+    },
+    {
+      "criterion": "C16",
+      "sourceFront": "B08",
+      "requiredSubgates": [
+        "C16.migration",
+        "C16.locality",
+        "C16.abandonment"
+      ],
+      "requiredFamilies": [
+        "migration",
+        "exposure",
+        "person",
+        "service",
+        "stock"
+      ],
+      "window": "10d; llegada<=D7; abandono10d completos",
+      "formulaSummary": "100*(migrant_treat/exposed_treat-migrant_control/exposed_control); count places without mortal return/service10d",
+      "normativeDetails": "docs/CRITERIOS-REALISMO.md",
+      "thresholds": [
+        {
+          "thresholdId": "C16.depletion",
+          "measure": "depletion",
+          "operator": ">=",
+          "value": 0.8,
+          "unit": "relative-ratio",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B08; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        },
+        {
+          "thresholdId": "C16.migrantDifference",
+          "measure": "migrantDifference",
+          "operator": ">=",
+          "value": 20,
+          "unit": "percentage-points",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B08; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        },
+        {
+          "thresholdId": "C16.destinationDays",
+          "measure": "destinationDays",
+          "operator": ">=",
+          "value": 3,
+          "unit": "days",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B08; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        },
+        {
+          "thresholdId": "C16.contrastDays",
+          "measure": "contrastDays",
+          "operator": "==",
+          "value": 10,
+          "unit": "days",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B08; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        },
+        {
+          "thresholdId": "C16.abandonmentDays",
+          "measure": "abandonmentDays",
+          "operator": ">=",
+          "value": 10,
+          "unit": "days",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B08; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        },
+        {
+          "thresholdId": "C16.abandonedPlaces",
+          "measure": "abandonedPlaces",
+          "operator": ">=",
+          "value": 1,
+          "unit": "places",
+          "status": "PROVISIONAL",
+          "origin": "R1 2026-10-03, elección operacional sin base empírica; sección C16 / B08",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        },
+        {
+          "thresholdId": "C16.teleports",
+          "measure": "teleports",
+          "operator": "==",
+          "value": 0,
+          "unit": "events",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B08; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        }
+      ],
+      "calibration": "Controles y casos límite del apartado correspondiente del canon, antes de datos candidatos; sin evidencia ejecutada en R1",
+      "acceptance": "NOT_GRANTED",
+      "normativeSection": "C16 / B08",
+      "operationalChoicesStatus": "PROVISIONAL_R1 — fórmulas/firmas/cohortes según canon, revisión/calibración pendiente",
+      "ruleResolution": "Cada requiredSubgate se evalúa con su apartado normativo; reglas de panel y fase nunca se aplican como si fueran una réplica.",
+      "normativeLayers": {
+        "inheritedObligation": "Canon autoridad y obligaciones; no se calibran autorizaciones ni procedencia",
+        "authorizedProtocol": "objetivo12 sólo6×60d descriptivas y6×1200 técnico",
+        "provisionalThreshold": "Cifras B/R1 no heredadas requieren revisión y calibración antes de candidatas"
+      }
+    },
+    {
+      "criterion": "C17",
+      "sourceFront": "B09",
+      "requiredSubgates": [
+        "C17.roles",
+        "C17.supplier",
+        "C17.institution"
+      ],
+      "requiredFamilies": [
+        "role",
+        "service",
+        "knowledge",
+        "flow"
+      ],
+      "window": "41–60 replacements/roles; separate causal pairs: reference/removal/restoration10d each, simultaneous equivalent windows both arms",
+      "formulaSummary": "role rate vs preselected peers; supplier/institution R=1-treatmentRemoval/controlRemoval and Q=treatmentRestoration/controlRestoration, contemporary unperturbed pair",
+      "normativeDetails": "docs/CRITERIOS-REALISMO.md",
+      "thresholds": [
+        {
+          "thresholdId": "C17.roles",
+          "measure": "roles",
+          "operator": ">=",
+          "value": 2,
+          "unit": "roles",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B09; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        },
+        {
+          "thresholdId": "C17.deliveriesEach",
+          "measure": "deliveriesEach",
+          "operator": ">=",
+          "value": 10,
+          "unit": "events",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B09; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        },
+        {
+          "thresholdId": "C17.specialization",
+          "measure": "specialization",
+          "operator": ">=",
+          "value": 0.2,
+          "unit": "relative-ratio",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B09; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        },
+        {
+          "thresholdId": "C17.removalDrop",
+          "measure": "removalDrop",
+          "operator": ">=",
+          "value": 0.2,
+          "unit": "relative-ratio",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B09; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        },
+        {
+          "thresholdId": "C17.restoration",
+          "measure": "restoration",
+          "operator": ">=",
+          "value": 0.8,
+          "unit": "relative-ratio",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B09; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        },
+        {
+          "thresholdId": "C17.revisedInstitutions",
+          "measure": "revisedInstitutions",
+          "operator": ">=",
+          "value": 1,
+          "unit": "institutions",
+          "status": "PROVISIONAL",
+          "origin": "R1 2026-10-03, elección operacional sin base empírica; sección C17 / B09",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        }
+      ],
+      "calibration": "Controles y casos límite del apartado correspondiente del canon, antes de datos candidatos; sin evidencia ejecutada en R1",
+      "acceptance": "NOT_GRANTED",
+      "normativeSection": "C17 / B09",
+      "operationalChoicesStatus": "PROVISIONAL_R1 — fórmulas/firmas/cohortes según canon, revisión/calibración pendiente",
+      "ruleResolution": "Cada requiredSubgate se evalúa con su apartado normativo; reglas de panel y fase nunca se aplican como si fueran una réplica.",
+      "normativeLayers": {
+        "inheritedObligation": "Canon autoridad y obligaciones; no se calibran autorizaciones ni procedencia",
+        "authorizedProtocol": "objetivo12 sólo6×60d descriptivas y6×1200 técnico",
+        "provisionalThreshold": "Cifras B/R1 no heredadas requieren revisión y calibración antes de candidatas"
+      }
+    },
+    {
+      "criterion": "C18",
+      "sourceFront": "B10",
+      "requiredSubgates": [
+        "C18.integrity",
+        "C18.agreement-effect"
+      ],
+      "requiredFamilies": [
+        "conflict",
+        "service",
+        "flow",
+        "exposure"
+      ],
+      "window": "60d; episodios no solapados seguimiento1d",
+      "formulaSummary": "recurrence/eligible_complete_episodes; (rate_control-rate_treat)/rate_control",
+      "normativeDetails": "docs/CRITERIOS-REALISMO.md",
+      "thresholds": [
+        {
+          "thresholdId": "C18.triggerCoverage",
+          "measure": "triggerCoverage",
+          "operator": "==",
+          "value": 1,
+          "unit": "ratio",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B10; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        },
+        {
+          "thresholdId": "C18.episodesEachArm",
+          "measure": "episodesEachArm",
+          "operator": ">=",
+          "value": 20,
+          "unit": "episodes",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B10; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        },
+        {
+          "thresholdId": "C18.recurrenceDrop",
+          "measure": "recurrenceDrop",
+          "operator": ">=",
+          "value": 0.2,
+          "unit": "relative-ratio",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B10; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        },
+        {
+          "thresholdId": "C18.followupDays",
+          "measure": "followupDays",
+          "operator": "==",
+          "value": 1,
+          "unit": "days",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B10; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        },
+        {
+          "thresholdId": "C18.freeResources",
+          "measure": "freeResources",
+          "operator": "==",
+          "value": 0,
+          "unit": "events",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B10; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        }
+      ],
+      "calibration": "Controles y casos límite del apartado correspondiente del canon, antes de datos candidatos; sin evidencia ejecutada en R1",
+      "acceptance": "NOT_GRANTED",
+      "normativeSection": "C18 / B10",
+      "operationalChoicesStatus": "PROVISIONAL_R1 — fórmulas/firmas/cohortes según canon, revisión/calibración pendiente",
+      "ruleResolution": "Cada requiredSubgate se evalúa con su apartado normativo; reglas de panel y fase nunca se aplican como si fueran una réplica.",
+      "normativeLayers": {
+        "inheritedObligation": "Canon autoridad y obligaciones; no se calibran autorizaciones ni procedencia",
+        "authorizedProtocol": "objetivo12 sólo6×60d descriptivas y6×1200 técnico",
+        "provisionalThreshold": "Cifras B/R1 no heredadas requieren revisión y calibración antes de candidatas"
+      }
+    },
+    {
+      "criterion": "C19",
+      "sourceFront": "B11",
+      "requiredSubgates": [
+        "C19.ecology-balance",
+        "C19.camera-parity",
+        "C19.remote-advance"
+      ],
+      "requiredFamilies": [
+        "ecology",
+        "exposure",
+        "person",
+        "stock",
+        "flow",
+        "digest"
+      ],
+      "window": "60d0/1/12 cámaras; lejanas10d",
+      "formulaSummary": "opening+birth+immigration-death-emigration-closing; exact physical digest same tick & inputs",
+      "normativeDetails": "docs/CRITERIOS-REALISMO.md",
+      "thresholds": [
+        {
+          "thresholdId": "C19.remoteRegions",
+          "measure": "remoteRegions",
+          "operator": ">=",
+          "value": 4,
+          "unit": "regions",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B11; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        },
+        {
+          "thresholdId": "C19.remoteDays",
+          "measure": "remoteDays",
+          "operator": ">=",
+          "value": 10,
+          "unit": "days",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B11; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        },
+        {
+          "thresholdId": "C19.cameraDigestDifferences",
+          "measure": "cameraDigestDifferences",
+          "operator": "==",
+          "value": 0,
+          "unit": "events",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B11; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        },
+        {
+          "thresholdId": "C19.unbalancedTransfers",
+          "measure": "unbalancedTransfers",
+          "operator": "==",
+          "value": 0,
+          "unit": "events",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B11; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        },
+        {
+          "thresholdId": "C19.doubleDeaths",
+          "measure": "doubleDeaths",
+          "operator": "==",
+          "value": 0,
+          "unit": "events",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B11; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        },
+        {
+          "thresholdId": "C19.transitionsEachRegion",
+          "measure": "transitionsEachRegion",
+          "operator": ">=",
+          "value": 1,
+          "unit": "events",
+          "status": "PROVISIONAL",
+          "origin": "R1 2026-10-03, elección operacional sin base empírica; sección C19 / B11",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        }
+      ],
+      "calibration": "Controles y casos límite del apartado correspondiente del canon, antes de datos candidatos; sin evidencia ejecutada en R1",
+      "acceptance": "NOT_GRANTED",
+      "normativeSection": "C19 / B11",
+      "operationalChoicesStatus": "PROVISIONAL_R1 — fórmulas/firmas/cohortes según canon, revisión/calibración pendiente",
+      "ruleResolution": "Cada requiredSubgate se evalúa con su apartado normativo; reglas de panel y fase nunca se aplican como si fueran una réplica.",
+      "normativeLayers": {
+        "inheritedObligation": "Canon autoridad y obligaciones; no se calibran autorizaciones ni procedencia",
+        "authorizedProtocol": "objetivo12 sólo6×60d descriptivas y6×1200 técnico",
+        "provisionalThreshold": "Cifras B/R1 no heredadas requieren revisión y calibración antes de candidatas"
+      }
+    },
+    {
+      "criterion": "C20",
+      "sourceFront": "B12",
+      "requiredSubgates": [
+        "C20.rejection-attribution",
+        "C20.no-software-limit",
+        "C20.capacity"
+      ],
+      "requiredFamilies": [
+        "rejection",
+        "digest",
+        "cost"
+      ],
+      "window": "100d1/28hilos;60d sólo descriptivo",
+      "formulaSummary": "software rejections; measured reasons/all stopping periods; capacity with explicit governor trace",
+      "normativeDetails": "docs/CRITERIOS-REALISMO.md",
+      "thresholds": [
+        {
+          "thresholdId": "C20.globalSoftwareRejections",
+          "measure": "globalSoftwareRejections",
+          "operator": "==",
+          "value": 0,
+          "unit": "events",
+          "status": "HEREDADO",
+          "origin": "GOAL FR-013 / ruling R17; B12 adopts absence of fixed software limits",
+          "normativeClass": "OBLIGACION_HEREDADA"
+        },
+        {
+          "thresholdId": "C20.measuredStoppingReasons",
+          "measure": "measuredStoppingReasons",
+          "operator": "==",
+          "value": 1,
+          "unit": "ratio",
+          "status": "HEREDADO",
+          "origin": "GOAL determinismo/verificabilidad; B12 atribución de todos los frenos",
+          "normativeClass": "OBLIGACION_HEREDADA"
+        },
+        {
+          "thresholdId": "C20.longWindowDays",
+          "measure": "longWindowDays",
+          "operator": ">=",
+          "value": 100,
+          "unit": "days",
+          "status": "HEREDADO",
+          "origin": "spec002 diseño comparativo100d heredado / B12; objetivo12 línea base60d no lo reemplaza",
+          "normativeClass": "OBLIGACION_HEREDADA"
+        }
+      ],
+      "calibration": "Controles y casos límite del apartado correspondiente del canon, antes de datos candidatos; sin evidencia ejecutada en R1",
+      "acceptance": "NOT_GRANTED",
+      "normativeSection": "C20 / B12",
+      "operationalChoicesStatus": "PROVISIONAL_R1 — fórmulas/firmas/cohortes según canon, revisión/calibración pendiente",
+      "ruleResolution": "Cada requiredSubgate se evalúa con su apartado normativo; reglas de panel y fase nunca se aplican como si fueran una réplica.",
+      "normativeLayers": {
+        "inheritedObligation": "Canon autoridad y obligaciones; no se calibran autorizaciones ni procedencia",
+        "authorizedProtocol": "objetivo12 sólo6×60d descriptivas y6×1200 técnico",
+        "provisionalThreshold": "Cifras B/R1 no heredadas requieren revisión y calibración antes de candidatas"
+      }
+    },
+    {
+      "criterion": "C21",
+      "sourceFront": "B13",
+      "requiredSubgates": [
+        "C21.shared-world",
+        "C21.durable-recovery",
+        "C21.version-archive"
+      ],
+      "requiredFamilies": [
+        "fault",
+        "digest"
+      ],
+      "window": "1h real;>=10 antes y>=10 despuésCOMMIT",
+      "formulaSummary": "exact component equality with last durable commit and common tick; confirmed loss count",
+      "normativeDetails": "docs/CRITERIOS-REALISMO.md",
+      "thresholds": [
+        {
+          "thresholdId": "C21.clients",
+          "measure": "clients",
+          "operator": ">=",
+          "value": 12,
+          "unit": "clients",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B13; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        },
+        {
+          "thresholdId": "C21.realSeconds",
+          "measure": "realSeconds",
+          "operator": ">=",
+          "value": 3600,
+          "unit": "seconds",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B13; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        },
+        {
+          "thresholdId": "C21.faultsEachCommitPhase",
+          "measure": "faultsEachCommitPhase",
+          "operator": ">=",
+          "value": 10,
+          "unit": "cases",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B13; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        },
+        {
+          "thresholdId": "C21.durableLosses",
+          "measure": "durableLosses",
+          "operator": "==",
+          "value": 0,
+          "unit": "events",
+          "status": "HEREDADO",
+          "origin": "GOAL mundo único durable/historia e identidades; constitución I; B13",
+          "normativeClass": "OBLIGACION_HEREDADA"
+        },
+        {
+          "thresholdId": "C21.worldClockDifferences",
+          "measure": "worldClockDifferences",
+          "operator": "==",
+          "value": 0,
+          "unit": "events",
+          "status": "HEREDADO",
+          "origin": "GOAL mundo/reloj único; constitución I; B13",
+          "normativeClass": "OBLIGACION_HEREDADA"
+        }
+      ],
+      "calibration": "Controles y casos límite del apartado correspondiente del canon, antes de datos candidatos; sin evidencia ejecutada en R1",
+      "acceptance": "NOT_GRANTED",
+      "normativeSection": "C21 / B13",
+      "operationalChoicesStatus": "PROVISIONAL_R1 — fórmulas/firmas/cohortes según canon, revisión/calibración pendiente",
+      "ruleResolution": "Cada requiredSubgate se evalúa con su apartado normativo; reglas de panel y fase nunca se aplican como si fueran una réplica.",
+      "normativeLayers": {
+        "inheritedObligation": "Canon autoridad y obligaciones; no se calibran autorizaciones ni procedencia",
+        "authorizedProtocol": "objetivo12 sólo6×60d descriptivas y6×1200 técnico",
+        "provisionalThreshold": "Cifras B/R1 no heredadas requieren revisión y calibración antes de candidatas"
+      }
+    },
+    {
+      "criterion": "C22",
+      "sourceFront": "B14",
+      "requiredSubgates": [
+        "C22.tick-parity",
+        "C22.host-capacity",
+        "C22.complete-cost",
+        "C22.backend-selection"
+      ],
+      "requiredFamilies": [
+        "digest",
+        "cost"
+      ],
+      "window": "30min tras60s warmup; paridad6×1200 separada",
+      "formulaSummary": "nearest-rank quantile; completeSaving=(CPU-backend)/CPU; tickHz=completed/(lastEnd-firstStart)",
+      "normativeDetails": "docs/CRITERIOS-REALISMO.md",
+      "thresholds": [
+        {
+          "thresholdId": "C22.realSeconds",
+          "measure": "realSeconds",
+          "operator": ">=",
+          "value": 1800,
+          "unit": "seconds",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B14; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        },
+        {
+          "thresholdId": "C22.warmupSeconds",
+          "measure": "warmupSeconds",
+          "operator": ">=",
+          "value": 60,
+          "unit": "seconds",
+          "status": "PROVISIONAL",
+          "origin": "R1 2026-10-03, elección operacional sin base empírica; sección C22 / B14",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        },
+        {
+          "thresholdId": "C22.paritySeeds",
+          "measure": "paritySeeds",
+          "operator": ">=",
+          "value": 6,
+          "unit": "seeds",
+          "status": "PROTOCOLO_AUTORIZADO",
+          "origin": "objetivo12: paridad instrumental6 semillas×1200 pasos",
+          "normativeClass": "PROTOCOLO_AUTORIZADO"
+        },
+        {
+          "thresholdId": "C22.parityStepsEach",
+          "measure": "parityStepsEach",
+          "operator": ">=",
+          "value": 1200,
+          "unit": "steps",
+          "status": "PROTOCOLO_AUTORIZADO",
+          "origin": "objetivo12: paridad instrumental6 semillas×1200 pasos",
+          "normativeClass": "PROTOCOLO_AUTORIZADO"
+        },
+        {
+          "thresholdId": "C22.p95At32",
+          "measure": "p95At32",
+          "operator": "<",
+          "value": 50,
+          "unit": "ms",
+          "status": "HEREDADO",
+          "origin": "constitución V; spec001 SC006/SC009",
+          "normativeClass": "OBLIGACION_HEREDADA"
+        },
+        {
+          "thresholdId": "C22.stateAt32",
+          "measure": "stateAt32",
+          "operator": "<",
+          "value": 122880,
+          "unit": "bytes",
+          "status": "HEREDADO",
+          "origin": "constitución V; spec001 SC006/SC009",
+          "normativeClass": "OBLIGACION_HEREDADA"
+        },
+        {
+          "thresholdId": "C22.desktopFPS32",
+          "measure": "desktopFPS32",
+          "operator": ">=",
+          "value": 55,
+          "unit": "fps",
+          "status": "HEREDADO",
+          "origin": "constitución V; spec001 SC006/SC009",
+          "normativeClass": "OBLIGACION_HEREDADA"
+        },
+        {
+          "thresholdId": "C22.completeSaving",
+          "measure": "completeSaving",
+          "operator": ">=",
+          "value": 0.1,
+          "unit": "relative-ratio",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B14; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        },
+        {
+          "thresholdId": "C22.physicalDifferences",
+          "measure": "physicalDifferences",
+          "operator": "==",
+          "value": 0,
+          "unit": "events",
+          "status": "HEREDADO",
+          "origin": "constitución I: determinismo con entradas iguales; B14",
+          "normativeClass": "OBLIGACION_HEREDADA"
+        }
+      ],
+      "calibration": "Controles y casos límite del apartado correspondiente del canon, antes de datos candidatos; sin evidencia ejecutada en R1",
+      "acceptance": "NOT_GRANTED",
+      "normativeSection": "C22 / B14",
+      "operationalChoicesStatus": "PROVISIONAL_R1 — fórmulas/firmas/cohortes según canon, revisión/calibración pendiente",
+      "ruleResolution": "Cada requiredSubgate se evalúa con su apartado normativo; reglas de panel y fase nunca se aplican como si fueran una réplica.",
+      "normativeLayers": {
+        "inheritedObligation": "Canon autoridad y obligaciones; no se calibran autorizaciones ni procedencia",
+        "authorizedProtocol": "objetivo12 sólo6×60d descriptivas y6×1200 técnico",
+        "provisionalThreshold": "Cifras B/R1 no heredadas requieren revisión y calibración antes de candidatas"
+      }
+    },
+    {
+      "criterion": "C23",
+      "sourceFront": "B15",
+      "requiredSubgates": [
+        "C23.synthetic-agency",
+        "C23.device-tasks",
+        "C23.personal-review"
+      ],
+      "requiredFamilies": [
+        "review",
+        "service"
+      ],
+      "window": "30min teclado y teléfono físico; revisión a hash vigente",
+      "formulaSummary": "planned device tasks; individually authorized incorporated IDs/all real incorporated IDs from complete current-content inventory; real Steven receipt only",
+      "normativeDetails": "docs/CRITERIOS-REALISMO.md",
+      "thresholds": [
+        {
+          "thresholdId": "C23.memoryPairs",
+          "measure": "memoryPairs",
+          "operator": ">=",
+          "value": 3,
+          "unit": "pairs",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B15; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        },
+        {
+          "thresholdId": "C23.encounterPairs",
+          "measure": "encounterPairs",
+          "operator": ">=",
+          "value": 1,
+          "unit": "pairs",
+          "status": "PROVISIONAL",
+          "origin": "R1 2026-10-03, elección operacional sin base empírica; sección C23 / B15",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        },
+        {
+          "thresholdId": "C23.tasksEachDevice",
+          "measure": "tasksEachDevice",
+          "operator": ">=",
+          "value": 10,
+          "unit": "tasks",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B15; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        },
+        {
+          "thresholdId": "C23.realSecondsEachDevice",
+          "measure": "realSecondsEachDevice",
+          "operator": ">=",
+          "value": 1800,
+          "unit": "seconds",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B15; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        },
+        {
+          "thresholdId": "C23.criticalBlockers",
+          "measure": "criticalBlockers",
+          "operator": "==",
+          "value": 0,
+          "unit": "events",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B15; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        },
+        {
+          "thresholdId": "C23.reviewedRealMemories",
+          "measure": "reviewedRealMemories",
+          "operator": "==",
+          "value": 1,
+          "unit": "ratio",
+          "status": "HEREDADO",
+          "origin": "constitución VI y gobernanza: Steven autoriza individualmente toda memoria real incorporada; GOAL carta; B15",
+          "normativeClass": "OBLIGACION_HEREDADA"
+        },
+        {
+          "thresholdId": "C23.inspectorsConform",
+          "measure": "inspectorsConform",
+          "operator": "==",
+          "value": 1,
+          "unit": "ratio",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B15; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        }
+      ],
+      "calibration": "Controles y casos límite del apartado correspondiente del canon, antes de datos candidatos; sin evidencia ejecutada en R1",
+      "acceptance": "NOT_GRANTED",
+      "normativeSection": "C23 / B15",
+      "operationalChoicesStatus": "PROVISIONAL_R1 — fórmulas/firmas/cohortes según canon, revisión/calibración pendiente",
+      "ruleResolution": "Cada requiredSubgate se evalúa con su apartado normativo; reglas de panel y fase nunca se aplican como si fueran una réplica.",
+      "normativeLayers": {
+        "inheritedObligation": "Canon autoridad y obligaciones; no se calibran autorizaciones ni procedencia",
+        "authorizedProtocol": "objetivo12 sólo6×60d descriptivas y6×1200 técnico",
+        "provisionalThreshold": "Cifras B/R1 no heredadas requieren revisión y calibración antes de candidatas"
+      }
+    },
+    {
+      "criterion": "C24",
+      "sourceFront": "B16",
+      "requiredSubgates": [
+        "C24.method",
+        "C24.training",
+        "C24.final"
+      ],
+      "requiredFamilies": [
+        "method",
+        "service",
+        "cost"
+      ],
+      "window": "method antesdatos; training8×6brazos×60d",
+      "formulaSummary": "documented planned runs/all planned runs; (learned useful service-control)/control; no frozen C1–C8 deterioration",
+      "normativeDetails": "docs/CRITERIOS-REALISMO.md",
+      "thresholds": [
+        {
+          "thresholdId": "C24.runMetadataCoverage",
+          "measure": "runMetadataCoverage",
+          "operator": "==",
+          "value": 1,
+          "unit": "ratio",
+          "status": "HEREDADO",
+          "origin": "constitución II: preregistro/procedencia/evidencia reproducible; GOAL método; B16",
+          "normativeClass": "OBLIGACION_HEREDADA"
+        },
+        {
+          "thresholdId": "C24.hiddenInterventions",
+          "measure": "hiddenInterventions",
+          "operator": "==",
+          "value": 0,
+          "unit": "events",
+          "status": "HEREDADO",
+          "origin": "constitución I/II: ningún rescate oculto; B16",
+          "normativeClass": "OBLIGACION_HEREDADA"
+        },
+        {
+          "thresholdId": "C24.reservedTrainingSeeds",
+          "measure": "reservedTrainingSeeds",
+          "operator": "==",
+          "value": 8,
+          "unit": "seeds",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B16; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        },
+        {
+          "thresholdId": "C24.selectors",
+          "measure": "selectors",
+          "operator": "==",
+          "value": 3,
+          "unit": "selectors",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B16; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        },
+        {
+          "thresholdId": "C24.learningArms",
+          "measure": "learningArms",
+          "operator": "==",
+          "value": 2,
+          "unit": "arms",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B16; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        },
+        {
+          "thresholdId": "C24.trainingDays",
+          "measure": "trainingDays",
+          "operator": ">=",
+          "value": 60,
+          "unit": "days",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B16; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        },
+        {
+          "thresholdId": "C24.usefulImprovement",
+          "measure": "usefulImprovement",
+          "operator": ">=",
+          "value": 0.1,
+          "unit": "relative-ratio",
+          "status": "PROVISIONAL",
+          "origin": "auditoria-realismo-20260930.md:B16; R1 operacionalización",
+          "normativeClass": "UMBRAL_PROVISIONAL"
+        },
+        {
+          "thresholdId": "C24.emptyConstructionReward",
+          "measure": "emptyConstructionReward",
+          "operator": "==",
+          "value": 0,
+          "unit": "events",
+          "status": "HEREDADO",
+          "origin": "GOAL servicio material real / B16; ningún mérito por obra vacía",
+          "normativeClass": "OBLIGACION_HEREDADA"
+        }
+      ],
+      "calibration": "Controles y casos límite del apartado correspondiente del canon, antes de datos candidatos; sin evidencia ejecutada en R1",
+      "acceptance": "NOT_GRANTED",
+      "normativeSection": "C24 / B16",
+      "operationalChoicesStatus": "PROVISIONAL_R1 — fórmulas/firmas/cohortes según canon, revisión/calibración pendiente",
+      "ruleResolution": "Cada requiredSubgate se evalúa con su apartado normativo; reglas de panel y fase nunca se aplican como si fueran una réplica.",
+      "normativeLayers": {
+        "inheritedObligation": "Canon autoridad y obligaciones; no se calibran autorizaciones ni procedencia",
+        "authorizedProtocol": "objetivo12 sólo6×60d descriptivas y6×1200 técnico",
+        "provisionalThreshold": "Cifras B/R1 no heredadas requieren revisión y calibración antes de candidatas"
+      }
+    }
+  ],
+  "panelRules": {
+    "baseline": {
+      "seeds": 6,
+      "days": 60,
+      "gate": "DESCRIPTIVE_ONLY",
+      "status": "PROTOCOLO_AUTORIZADO",
+      "origin": "objetivo12:6 controles nuevos×60d descriptivos"
+    },
+    "candidate8": {
+      "seeds": 8,
+      "minimumPass": 5,
+      "status": "PROVISIONAL",
+      "safetyViolationsAllowed": 0,
+      "sixSeedsState": "UNKNOWN/INSUFFICIENT_PANEL"
+    },
+    "C13": {
+      "seeds": 8,
+      "collapsesAllowed": 0,
+      "founderMedianMin": 0.7,
+      "status": "PROVISIONAL_PANEL_SIZE"
+    },
+    "instrumentParity": {
+      "seeds": 6,
+      "stepsEach": 1200,
+      "digestDifferencesAllowed": 0,
+      "origin": "objetivo12",
+      "scope": "TECHNICAL_ONLY",
+      "status": "PROTOCOLO_AUTORIZADO"
+    }
+  },
+  "commonRules": {
+    "zeroDenominator": "UNKNOWN",
+    "zeroReference": "UNKNOWN except C13 p8 guard with both rates zero",
+    "missingData": "UNKNOWN",
+    "internalTransferNet": 0,
+    "protectedSuccess": "EXCLUDE_DIRECT_AND_TRANSITIVE",
+    "protectedBalance": "INCLUDE",
+    "finalAcceptance": "NEVER_AUTOMATIC",
+    "c24Stages": [
+      "method",
+      "training",
+      "final"
+    ],
+    "lawReferenceMismatch": "UNKNOWN/LAW_UNRESOLVED"
+  },
+  "normativeStatusVocabulary": [
+    "HEREDADO",
+    "PROTOCOLO_AUTORIZADO",
+    "PROVISIONAL",
+    "LAW_REFERENCE"
+  ]
+}

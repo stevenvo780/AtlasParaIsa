@@ -1,0 +1,714 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "contractVersion": {
+      "const": "realismo-v3"
+    },
+    "kind": {
+      "const": "evaluation"
+    },
+    "evaluatorSHA": {
+      "type": "string",
+      "minLength": 1
+    },
+    "thresholdProfileHash": {
+      "type": "string",
+      "minLength": 1
+    },
+    "inputHashes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-f0-9]{64}$"
+      },
+      "uniqueItems": true,
+      "minItems": 1
+    },
+    "requestedStage": {
+      "type": "string",
+      "enum": [
+        "method",
+        "training",
+        "final"
+      ]
+    },
+    "runId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "results": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/result"
+      },
+      "minItems": 16,
+      "maxItems": 16,
+      "allOf": [
+        {
+          "contains": {
+            "properties": {
+              "criterion": {
+                "const": "C9"
+              }
+            },
+            "required": [
+              "criterion"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "criterion": {
+                "const": "C10"
+              }
+            },
+            "required": [
+              "criterion"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "criterion": {
+                "const": "C11"
+              }
+            },
+            "required": [
+              "criterion"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "criterion": {
+                "const": "C12"
+              }
+            },
+            "required": [
+              "criterion"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "criterion": {
+                "const": "C13"
+              }
+            },
+            "required": [
+              "criterion"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "criterion": {
+                "const": "C14"
+              }
+            },
+            "required": [
+              "criterion"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "criterion": {
+                "const": "C15"
+              }
+            },
+            "required": [
+              "criterion"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "criterion": {
+                "const": "C16"
+              }
+            },
+            "required": [
+              "criterion"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "criterion": {
+                "const": "C17"
+              }
+            },
+            "required": [
+              "criterion"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "criterion": {
+                "const": "C18"
+              }
+            },
+            "required": [
+              "criterion"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "criterion": {
+                "const": "C19"
+              }
+            },
+            "required": [
+              "criterion"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "criterion": {
+                "const": "C20"
+              }
+            },
+            "required": [
+              "criterion"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "criterion": {
+                "const": "C21"
+              }
+            },
+            "required": [
+              "criterion"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "criterion": {
+                "const": "C22"
+              }
+            },
+            "required": [
+              "criterion"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "criterion": {
+                "const": "C23"
+              }
+            },
+            "required": [
+              "criterion"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "criterion": {
+                "const": "C24"
+              }
+            },
+            "required": [
+              "criterion"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        }
+      ]
+    },
+    "panels": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/panel"
+      }
+    },
+    "frozenC1C8ArtifactRef": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "acceptanceStatus": {
+      "const": "NOT_GRANTED"
+    },
+    "limitations": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "evidenceId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "synthetic": {
+      "type": "boolean"
+    },
+    "epochId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "artifactRole": {
+      "type": "string",
+      "enum": [
+        "baseline",
+        "paired-control",
+        "paired-treatment",
+        "technical",
+        "experience",
+        "training",
+        "synthetic",
+        "legacy"
+      ]
+    },
+    "inputObservationRef": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "required": [
+    "contractVersion",
+    "kind",
+    "evaluatorSHA",
+    "thresholdProfileHash",
+    "inputHashes",
+    "requestedStage",
+    "runId",
+    "results",
+    "panels",
+    "frozenC1C8ArtifactRef",
+    "acceptanceStatus",
+    "limitations",
+    "evidenceId",
+    "synthetic",
+    "epochId",
+    "artifactRole",
+    "inputObservationRef"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:una-carta-para-isa:realismo-v3:evaluation",
+  "$defs": {
+    "metric": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unit": {
+          "type": "string",
+          "minLength": 1
+        },
+        "numerator": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "denominator": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "exposureTicks": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "censoredCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "formulaId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "evidenceRefs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "name",
+        "value",
+        "unit",
+        "numerator",
+        "denominator",
+        "exposureTicks",
+        "censoredCount",
+        "formulaId",
+        "evidenceRefs"
+      ]
+    },
+    "subgate": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subgateId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "PASS",
+            "FAIL",
+            "UNKNOWN"
+          ]
+        },
+        "quality": {
+          "type": "string",
+          "enum": [
+            "COMPLETE",
+            "PARTIAL",
+            "INVALID",
+            "UNAVAILABLE"
+          ]
+        },
+        "reasonCodes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1
+        },
+        "thresholdIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "metrics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/metric"
+          }
+        },
+        "evidenceRefs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "scope": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "subgateId",
+        "state",
+        "quality",
+        "reasonCodes",
+        "thresholdIds",
+        "metrics",
+        "evidenceRefs",
+        "scope"
+      ]
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "criterion": {
+          "type": "string",
+          "enum": [
+            "C9",
+            "C10",
+            "C11",
+            "C12",
+            "C13",
+            "C14",
+            "C15",
+            "C16",
+            "C17",
+            "C18",
+            "C19",
+            "C20",
+            "C21",
+            "C22",
+            "C23",
+            "C24"
+          ]
+        },
+        "stage": {
+          "type": "string",
+          "enum": [
+            "replica",
+            "server",
+            "performance",
+            "experience",
+            "method",
+            "training",
+            "final"
+          ]
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "PASS",
+            "FAIL",
+            "UNKNOWN"
+          ]
+        },
+        "quality": {
+          "type": "string",
+          "enum": [
+            "COMPLETE",
+            "PARTIAL",
+            "INVALID",
+            "UNAVAILABLE"
+          ]
+        },
+        "provisionalConformity": {
+          "const": true
+        },
+        "personalDecision": {
+          "type": "string",
+          "enum": [
+            "accepted",
+            "rejected",
+            "pending",
+            "not-applicable"
+          ]
+        },
+        "subgates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/subgate"
+          },
+          "minItems": 1
+        },
+        "reasonCodes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1
+        },
+        "evidenceRefs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "criterion",
+        "stage",
+        "state",
+        "quality",
+        "provisionalConformity",
+        "personalDecision",
+        "subgates",
+        "reasonCodes",
+        "evidenceRefs"
+      ]
+    },
+    "panel": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "panelId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "criterion": {
+          "type": "string",
+          "minLength": 1
+        },
+        "profileRuleId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "plannedSeeds": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "uniqueItems": true
+        },
+        "pass": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "fail": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "unknown": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "PASS",
+            "FAIL",
+            "UNKNOWN"
+          ]
+        },
+        "quality": {
+          "type": "string",
+          "enum": [
+            "COMPLETE",
+            "PARTIAL",
+            "INVALID",
+            "UNAVAILABLE"
+          ]
+        },
+        "safetyState": {
+          "type": "string",
+          "enum": [
+            "PASS",
+            "FAIL",
+            "UNKNOWN"
+          ]
+        },
+        "reasonCodes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1
+        },
+        "replicaResultRefs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "panelId",
+        "criterion",
+        "profileRuleId",
+        "plannedSeeds",
+        "pass",
+        "fail",
+        "unknown",
+        "total",
+        "state",
+        "quality",
+        "safetyState",
+        "reasonCodes",
+        "replicaResultRefs"
+      ]
+    }
+  },
+  "title": "Realismo v3 evaluation — two scoped R1 corrections, not sealed"
+}

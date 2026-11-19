@@ -1,0 +1,992 @@
+{
+  "schemaVersion": "review-fixture-spec-v1",
+  "purpose": "Documentary design supplement of original48+8, not executable fixtures or empirical evidence",
+  "author": "Independent Sol high reviewer, Codex principal",
+  "generatedDate": "2026-10-03",
+  "contractVersion": "realismo-v3",
+  "cases": [
+    {
+      "criterion": "C9",
+      "caseId": "C9-pass-01",
+      "expected": "PASS",
+      "thresholdOrigin": "Candidate fixture configuration only; replace/confirm against sealed R1 contract",
+      "coverageDefault": "complete for described subgate",
+      "otherRequiredSubgates": "Satisfied with complete evidence unless the facts specify otherwise; final-stage gates remain separate",
+      "facts": {
+        "cohortActiveDays": 10,
+        "usefulMortalService": true,
+        "marginalAblationMeetsRegisteredThreshold": true,
+        "unusedFractionDiagnosticOnly": 0.31
+      },
+      "note": "Una alarma de obras no usadas no basta para fallar; actividad sin servicio no basta para aprobar."
+    },
+    {
+      "criterion": "C9",
+      "caseId": "C9-fail-01",
+      "expected": "FAIL",
+      "thresholdOrigin": "Candidate fixture configuration only; replace/confirm against sealed R1 contract",
+      "coverageDefault": "complete for described subgate",
+      "otherRequiredSubgates": "Satisfied with complete evidence unless the facts specify otherwise; final-stage gates remain separate",
+      "facts": {
+        "completeCohort": true,
+        "usefulMortalService": false,
+        "allActivity": "fill-and-transport-only"
+      },
+      "note": "Una alarma de obras no usadas no basta para fallar; actividad sin servicio no basta para aprobar."
+    },
+    {
+      "criterion": "C9",
+      "caseId": "C9-unknown-01",
+      "expected": "UNKNOWN",
+      "thresholdOrigin": "Candidate fixture configuration only; replace/confirm against sealed R1 contract",
+      "coverageDefault": "incomplete-or-not-evaluable",
+      "otherRequiredSubgates": "Satisfied with complete evidence unless the facts specify otherwise; final-stage gates remain separate",
+      "facts": {
+        "structureLedger": "missing",
+        "aggregateConstructionCounter": 100
+      },
+      "note": "Una alarma de obras no usadas no basta para fallar; actividad sin servicio no basta para aprobar."
+    },
+    {
+      "criterion": "C10",
+      "caseId": "C10-pass-01",
+      "expected": "PASS",
+      "thresholdOrigin": "Candidate fixture configuration only; replace/confirm against sealed R1 contract",
+      "coverageDefault": "complete for described subgate",
+      "otherRequiredSubgates": "Satisfied with complete evidence unless the facts specify otherwise; final-stage gates remain separate",
+      "facts": {
+        "lawParametersFromSHA": true,
+        "conditionMatchesLaw": true,
+        "repairInputsDebited": true,
+        "benefitAfterRepair": true
+      },
+      "note": "Conformidad por tiempo activo; no extrapolar reloj global a archivo congelado."
+    },
+    {
+      "criterion": "C10",
+      "caseId": "C10-fail-01",
+      "expected": "FAIL",
+      "thresholdOrigin": "Candidate fixture configuration only; replace/confirm against sealed R1 contract",
+      "coverageDefault": "complete for described subgate",
+      "otherRequiredSubgates": "Satisfied with complete evidence unless the facts specify otherwise; final-stage gates remain separate",
+      "facts": {
+        "condition": 0.1,
+        "functionalServiceRecorded": true
+      },
+      "note": "Conformidad por tiempo activo; no extrapolar reloj global a archivo congelado."
+    },
+    {
+      "criterion": "C10",
+      "caseId": "C10-unknown-01",
+      "expected": "UNKNOWN",
+      "thresholdOrigin": "Candidate fixture configuration only; replace/confirm against sealed R1 contract",
+      "coverageDefault": "incomplete-or-not-evaluable",
+      "otherRequiredSubgates": "Satisfied with complete evidence unless the facts specify otherwise; final-stage gates remain separate",
+      "facts": {
+        "activeExposureTicks": "missing",
+        "globalClockDays": 20
+      },
+      "note": "Conformidad por tiempo activo; no extrapolar reloj global a archivo congelado."
+    },
+    {
+      "criterion": "C11",
+      "caseId": "C11-pass-01",
+      "expected": "PASS",
+      "thresholdOrigin": "Candidate fixture configuration only; replace/confirm against sealed R1 contract",
+      "coverageDefault": "complete for described subgate",
+      "otherRequiredSubgates": "Satisfied with complete evidence unless the facts specify otherwise; final-stage gates remain separate",
+      "facts": {
+        "completeReplacements": 3,
+        "indispensableFunctions": 2,
+        "mortalOnlySupplyChain": true,
+        "supplierRemovalAndRestorationMeetsRegisteredThreshold": true
+      },
+      "note": "Reposición material trazada; el número sin origen de insumos no acredita autonomía.",
+      "correctionFacts": {
+        "causalControl": "non-intervened paired copy, seed/SHA/initial state/params/inputs equal except registered supplier/institution intervention",
+        "normalization": "service/day by same function, ten-day simultaneous windows",
+        "reference": {
+          "control": 100,
+          "treatment": 100
+        },
+        "removal": {
+          "control": 100,
+          "treatment": 60
+        },
+        "restoration": {
+          "control": 100,
+          "treatment": 90
+        },
+        "expectedReduction": 0.4,
+        "expectedRecovery": 0.9,
+        "requiredLedgers": [
+          "service actor/function/recipient IDs",
+          "paid consumption/transfer/repair/wear/regen by event source order",
+          "opening/closing stocks and exposure/age each arm/window",
+          "opportunity counts fixed by preregistration",
+          "mortal-only transitive provenance",
+          "separate supplier/institution pairs for C17"
+        ],
+        "beforeAfterAlone": "UNKNOWN; matched control cannot be replaced by earlier reference",
+        "windows": [
+          {
+            "phase": "reference",
+            "startTick": 0,
+            "endTick": 24000,
+            "controlServiceUnits": 100,
+            "treatmentServiceUnits": 100,
+            "controlEligibleOpportunities": 100,
+            "treatmentEligibleOpportunities": 100,
+            "controlObservedActiveTicks": 24000,
+            "treatmentObservedActiveTicks": 24000
+          },
+          {
+            "phase": "removal",
+            "startTick": 24000,
+            "endTick": 48000,
+            "controlServiceUnits": 100,
+            "treatmentServiceUnits": 60,
+            "controlEligibleOpportunities": 100,
+            "treatmentEligibleOpportunities": 100,
+            "controlObservedActiveTicks": 24000,
+            "treatmentObservedActiveTicks": 24000
+          },
+          {
+            "phase": "restoration",
+            "startTick": 48000,
+            "endTick": 72000,
+            "controlServiceUnits": 100,
+            "treatmentServiceUnits": 90,
+            "controlEligibleOpportunities": 100,
+            "treatmentEligibleOpportunities": 100,
+            "controlObservedActiveTicks": 24000,
+            "treatmentObservedActiveTicks": 24000
+          }
+        ],
+        "confounderControl": {
+          "ageExposure": "same initial ages, same24000 active ticks per matched window; event-phase wear tracked",
+          "regeneration": "zero in both arms, or equal explicit flow paired by source tick",
+          "initialStock": "opening100 quanta per matched stock; each closing reconciles paid use and explicit transfers, no added intervention stock",
+          "paidConsumption": "10 quanta per matched window/arm, not inferred from net",
+          "intervention": "remove/restore supplier or institution availability only; no replenishment, actor replacement or time jump",
+          "equivalenceTolerance": 0,
+          "equivalenceToleranceOrigin": "exact synthetic design only, not a scientific tolerance adopted for experiments"
+        },
+        "positiveOtherSubgates": "Original design assumption remains: C11 three completed replacements across two preregistered indispensable functions; C17 two roles with ten paid useful deliveries each and20% advantage vs preselected peers, institution/supplier each own matched pair. R2 must instantiate their individual receipts and IDs."
+      }
+    },
+    {
+      "criterion": "C11",
+      "caseId": "C11-fail-01",
+      "expected": "FAIL",
+      "thresholdOrigin": "Candidate fixture configuration only; replace/confirm against sealed R1 contract",
+      "coverageDefault": "complete for described subgate",
+      "otherRequiredSubgates": "Satisfied with complete evidence unless the facts specify otherwise; final-stage gates remain separate",
+      "facts": {
+        "completeReplacements": 3,
+        "protectedSupplier": "S",
+        "mortalSupplyChain": false
+      },
+      "note": "Reposición material trazada; el número sin origen de insumos no acredita autonomía."
+    },
+    {
+      "criterion": "C11",
+      "caseId": "C11-unknown-01",
+      "expected": "UNKNOWN",
+      "thresholdOrigin": "Candidate fixture configuration only; replace/confirm against sealed R1 contract",
+      "coverageDefault": "incomplete-or-not-evaluable",
+      "otherRequiredSubgates": "Satisfied with complete evidence unless the facts specify otherwise; final-stage gates remain separate",
+      "facts": {
+        "openingStock": "missing",
+        "replacementCount": 3
+      },
+      "note": "Reposición material trazada; el número sin origen de insumos no acredita autonomía."
+    },
+    {
+      "criterion": "C12",
+      "caseId": "C12-pass-01",
+      "expected": "PASS",
+      "thresholdOrigin": "Candidate fixture configuration only; replace/confirm against sealed R1 contract",
+      "coverageDefault": "complete for described subgate",
+      "otherRequiredSubgates": "Satisfied with complete evidence unless the facts specify otherwise; final-stage gates remain separate",
+      "facts": {
+        "opening": 10,
+        "externalInput": 2,
+        "closing": 5,
+        "consumed": 4,
+        "wasteOut": 1,
+        "lossOut": 2,
+        "internalTransfer": 3,
+        "reliefWithRealConsumption": true
+      },
+      "note": "Balance PASS: 10+2=5+4+1+2; transferencia interna 3 excluida de entradas/salidas."
+    },
+    {
+      "criterion": "C12",
+      "caseId": "C12-fail-01",
+      "expected": "FAIL",
+      "thresholdOrigin": "Candidate fixture configuration only; replace/confirm against sealed R1 contract",
+      "coverageDefault": "complete for described subgate",
+      "otherRequiredSubgates": "Satisfied with complete evidence unless the facts specify otherwise; final-stage gates remain separate",
+      "facts": {
+        "opening": 10,
+        "externalInput": 0,
+        "closing": 10,
+        "consumed": 1,
+        "wasteOut": 0,
+        "lossOut": 0,
+        "reliefWithRealConsumption": false
+      },
+      "note": "Balance PASS: 10+2=5+4+1+2; transferencia interna 3 excluida de entradas/salidas."
+    },
+    {
+      "criterion": "C12",
+      "caseId": "C12-unknown-01",
+      "expected": "UNKNOWN",
+      "thresholdOrigin": "Candidate fixture configuration only; replace/confirm against sealed R1 contract",
+      "coverageDefault": "incomplete-or-not-evaluable",
+      "otherRequiredSubgates": "Satisfied with complete evidence unless the facts specify otherwise; final-stage gates remain separate",
+      "facts": {
+        "opening": "missing",
+        "closing": 5,
+        "consumed": 4
+      },
+      "note": "Balance PASS: 10+2=5+4+1+2; transferencia interna 3 excluida de entradas/salidas."
+    },
+    {
+      "criterion": "C13",
+      "caseId": "C13-pass-01",
+      "expected": "PASS",
+      "thresholdOrigin": "Candidate fixture configuration only; replace/confirm against sealed R1 contract",
+      "coverageDefault": "complete for described subgate",
+      "otherRequiredSubgates": "Satisfied with complete evidence unless the facts specify otherwise; final-stage gates remain separate",
+      "facts": {
+        "everyMortalDeathHasLifetimeHistory": true,
+        "founderSurvivalMeetsInheritedGate": true,
+        "earlyDeathComparisonMeetsRegisteredThreshold": true,
+        "censoredBirthsReported": true
+      },
+      "note": "Causalidad individual y mortalidad con población en riesgo; totales sin edad no permiten comparación."
+    },
+    {
+      "criterion": "C13",
+      "caseId": "C13-fail-01",
+      "expected": "FAIL",
+      "thresholdOrigin": "Candidate fixture configuration only; replace/confirm against sealed R1 contract",
+      "coverageDefault": "complete for described subgate",
+      "otherRequiredSubgates": "Satisfied with complete evidence unless the facts specify otherwise; final-stage gates remain separate",
+      "facts": {
+        "deathCount": 4,
+        "deathsWithIDAndAge": 3,
+        "missingDeathHasConfirmedReceipt": true,
+        "earlyMortalityExceedsRegisteredThreshold": true
+      },
+      "note": "Causalidad individual y mortalidad con población en riesgo; totales sin edad no permiten comparación."
+    },
+    {
+      "criterion": "C13",
+      "caseId": "C13-unknown-01",
+      "expected": "UNKNOWN",
+      "thresholdOrigin": "Candidate fixture configuration only; replace/confirm against sealed R1 contract",
+      "coverageDefault": "incomplete-or-not-evaluable",
+      "otherRequiredSubgates": "Satisfied with complete evidence unless the facts specify otherwise; final-stage gates remain separate",
+      "facts": {
+        "birthTimes": "missing",
+        "deathTotalsOnly": 4
+      },
+      "note": "Causalidad individual y mortalidad con población en riesgo; totales sin edad no permiten comparación."
+    },
+    {
+      "criterion": "C14",
+      "caseId": "C14-pass-01",
+      "expected": "PASS",
+      "thresholdOrigin": "Candidate fixture configuration only; replace/confirm against sealed R1 contract",
+      "coverageDefault": "complete for described subgate",
+      "otherRequiredSubgates": "Satisfied with complete evidence unless the facts specify otherwise; final-stage gates remain separate",
+      "facts": {
+        "usefulTechniquesPreselected": 3,
+        "retainedAfterTwoHumanTurnovers": 2,
+        "knowledgeLossVerified": true,
+        "paidRediscoverySameIdentityAndAuthor": true
+      },
+      "note": "Perder inventor no equivale a perder último conocedor; uso no concede instrucciones."
+    },
+    {
+      "criterion": "C14",
+      "caseId": "C14-fail-01",
+      "expected": "FAIL",
+      "thresholdOrigin": "Candidate fixture configuration only; replace/confirm against sealed R1 contract",
+      "coverageDefault": "complete for described subgate",
+      "otherRequiredSubgates": "Satisfied with complete evidence unless the facts specify otherwise; final-stage gates remain separate",
+      "facts": {
+        "allKnowersGone": true,
+        "manufactureBeforePaidLearning": true
+      },
+      "note": "Perder inventor no equivale a perder último conocedor; uso no concede instrucciones."
+    },
+    {
+      "criterion": "C14",
+      "caseId": "C14-unknown-01",
+      "expected": "UNKNOWN",
+      "thresholdOrigin": "Candidate fixture configuration only; replace/confirm against sealed R1 contract",
+      "coverageDefault": "incomplete-or-not-evaluable",
+      "otherRequiredSubgates": "Satisfied with complete evidence unless the facts specify otherwise; final-stage gates remain separate",
+      "facts": {
+        "knownActors": "missing",
+        "founderInventorDead": true,
+        "inheritedObjectUsed": true
+      },
+      "note": "Perder inventor no equivale a perder último conocedor; uso no concede instrucciones."
+    },
+    {
+      "criterion": "C15",
+      "caseId": "C15-pass-01",
+      "expected": "PASS",
+      "thresholdOrigin": "Candidate fixture configuration only; replace/confirm against sealed R1 contract",
+      "coverageDefault": "complete for described subgate",
+      "otherRequiredSubgates": "Satisfied with complete evidence unless the facts specify otherwise; final-stage gates remain separate",
+      "facts": {
+        "newUsefulFunctions": 3,
+        "usesPerFunction": [
+          5,
+          5,
+          5
+        ],
+        "distinctMortalsPerFunction": [
+          2,
+          2,
+          2
+        ],
+        "propertyAblationMeetsThreshold": true,
+        "archiveIntegrity": true
+      },
+      "note": "Firma funcional distinta y útil; fixture del archivo no prueba novedad autónoma."
+    },
+    {
+      "criterion": "C15",
+      "caseId": "C15-fail-01",
+      "expected": "FAIL",
+      "thresholdOrigin": "Candidate fixture configuration only; replace/confirm against sealed R1 contract",
+      "coverageDefault": "complete for described subgate",
+      "otherRequiredSubgates": "Satisfied with complete evidence unless the facts specify otherwise; final-stage gates remain separate",
+      "facts": {
+        "newRecipeNames": 3,
+        "newUsefulFunctions": 0,
+        "fullWindowObserved": true
+      },
+      "note": "Firma funcional distinta y útil; fixture del archivo no prueba novedad autónoma."
+    },
+    {
+      "criterion": "C15",
+      "caseId": "C15-unknown-01",
+      "expected": "UNKNOWN",
+      "thresholdOrigin": "Candidate fixture configuration only; replace/confirm against sealed R1 contract",
+      "coverageDefault": "incomplete-or-not-evaluable",
+      "otherRequiredSubgates": "Satisfied with complete evidence unless the facts specify otherwise; final-stage gates remain separate",
+      "facts": {
+        "functionalSignatureVersion": "missing",
+        "recipeCount": 257
+      },
+      "note": "Firma funcional distinta y útil; fixture del archivo no prueba novedad autónoma."
+    },
+    {
+      "criterion": "C16",
+      "caseId": "C16-pass-01",
+      "expected": "PASS",
+      "thresholdOrigin": "Candidate fixture configuration only; replace/confirm against sealed R1 contract",
+      "coverageDefault": "complete for described subgate",
+      "otherRequiredSubgates": "Satisfied with complete evidence unless the facts specify otherwise; final-stage gates remain separate",
+      "facts": {
+        "viableDestination": true,
+        "localPaidTrajectory": true,
+        "consumedAtDestination": true,
+        "exposureDenominatorFixed": true,
+        "migrantDifferencePP": 20,
+        "destinationMaintainedDays": 3
+      },
+      "note": "Conservar expuestos y muertes en el denominador; sin destino viable no exigir éxito."
+    },
+    {
+      "criterion": "C16",
+      "caseId": "C16-fail-01",
+      "expected": "FAIL",
+      "thresholdOrigin": "Candidate fixture configuration only; replace/confirm against sealed R1 contract",
+      "coverageDefault": "complete for described subgate",
+      "otherRequiredSubgates": "Satisfied with complete evidence unless the facts specify otherwise; final-stage gates remain separate",
+      "facts": {
+        "newHomeRecorded": true,
+        "localTrajectory": false,
+        "destination": "teleported"
+      },
+      "note": "Conservar expuestos y muertes en el denominador; sin destino viable no exigir éxito."
+    },
+    {
+      "criterion": "C16",
+      "caseId": "C16-unknown-01",
+      "expected": "UNKNOWN",
+      "thresholdOrigin": "Candidate fixture configuration only; replace/confirm against sealed R1 contract",
+      "coverageDefault": "incomplete-or-not-evaluable",
+      "otherRequiredSubgates": "Satisfied with complete evidence unless the facts specify otherwise; final-stage gates remain separate",
+      "facts": {
+        "viableDestination": "unmeasured",
+        "homeChanges": 5
+      },
+      "note": "Conservar expuestos y muertes en el denominador; sin destino viable no exigir éxito."
+    },
+    {
+      "criterion": "C17",
+      "caseId": "C17-pass-01",
+      "expected": "PASS",
+      "thresholdOrigin": "Candidate fixture configuration only; replace/confirm against sealed R1 contract",
+      "coverageDefault": "complete for described subgate",
+      "otherRequiredSubgates": "Satisfied with complete evidence unless the facts specify otherwise; final-stage gates remain separate",
+      "facts": {
+        "functionalRoles": 2,
+        "usefulDeliveriesPerRole": [
+          10,
+          10
+        ],
+        "comparativeSpecializationMeetsThreshold": true,
+        "supplierPerturbationMeetsThreshold": true,
+        "localInstitutionEffectObserved": true
+      },
+      "note": "Oficio e institución requieren consecuencias; ningún indicador secundario sustituye C8.",
+      "correctionFacts": {
+        "causalControl": "non-intervened paired copy, seed/SHA/initial state/params/inputs equal except registered supplier/institution intervention",
+        "normalization": "service/day by same function, ten-day simultaneous windows",
+        "reference": {
+          "control": 100,
+          "treatment": 100
+        },
+        "removal": {
+          "control": 100,
+          "treatment": 60
+        },
+        "restoration": {
+          "control": 100,
+          "treatment": 90
+        },
+        "expectedReduction": 0.4,
+        "expectedRecovery": 0.9,
+        "requiredLedgers": [
+          "service actor/function/recipient IDs",
+          "paid consumption/transfer/repair/wear/regen by event source order",
+          "opening/closing stocks and exposure/age each arm/window",
+          "opportunity counts fixed by preregistration",
+          "mortal-only transitive provenance",
+          "separate supplier/institution pairs for C17"
+        ],
+        "beforeAfterAlone": "UNKNOWN; matched control cannot be replaced by earlier reference",
+        "windows": [
+          {
+            "phase": "reference",
+            "startTick": 0,
+            "endTick": 24000,
+            "controlServiceUnits": 100,
+            "treatmentServiceUnits": 100,
+            "controlEligibleOpportunities": 100,
+            "treatmentEligibleOpportunities": 100,
+            "controlObservedActiveTicks": 24000,
+            "treatmentObservedActiveTicks": 24000
+          },
+          {
+            "phase": "removal",
+            "startTick": 24000,
+            "endTick": 48000,
+            "controlServiceUnits": 100,
+            "treatmentServiceUnits": 60,
+            "controlEligibleOpportunities": 100,
+            "treatmentEligibleOpportunities": 100,
+            "controlObservedActiveTicks": 24000,
+            "treatmentObservedActiveTicks": 24000
+          },
+          {
+            "phase": "restoration",
+            "startTick": 48000,
+            "endTick": 72000,
+            "controlServiceUnits": 100,
+            "treatmentServiceUnits": 90,
+            "controlEligibleOpportunities": 100,
+            "treatmentEligibleOpportunities": 100,
+            "controlObservedActiveTicks": 24000,
+            "treatmentObservedActiveTicks": 24000
+          }
+        ],
+        "confounderControl": {
+          "ageExposure": "same initial ages, same24000 active ticks per matched window; event-phase wear tracked",
+          "regeneration": "zero in both arms, or equal explicit flow paired by source tick",
+          "initialStock": "opening100 quanta per matched stock; each closing reconciles paid use and explicit transfers, no added intervention stock",
+          "paidConsumption": "10 quanta per matched window/arm, not inferred from net",
+          "intervention": "remove/restore supplier or institution availability only; no replenishment, actor replacement or time jump",
+          "equivalenceTolerance": 0,
+          "equivalenceToleranceOrigin": "exact synthetic design only, not a scientific tolerance adopted for experiments"
+        },
+        "positiveOtherSubgates": "Original design assumption remains: C11 three completed replacements across two preregistered indispensable functions; C17 two roles with ten paid useful deliveries each and20% advantage vs preselected peers, institution/supplier each own matched pair. R2 must instantiate their individual receipts and IDs."
+      }
+    },
+    {
+      "criterion": "C17",
+      "caseId": "C17-fail-01",
+      "expected": "FAIL",
+      "thresholdOrigin": "Candidate fixture configuration only; replace/confirm against sealed R1 contract",
+      "coverageDefault": "complete for described subgate",
+      "otherRequiredSubgates": "Satisfied with complete evidence unless the facts specify otherwise; final-stage gates remain separate",
+      "facts": {
+        "roleLabels": 2,
+        "usefulDeliveriesPerRole": [
+          0,
+          0
+        ],
+        "fullWindowObserved": true
+      },
+      "note": "Oficio e institución requieren consecuencias; ningún indicador secundario sustituye C8."
+    },
+    {
+      "criterion": "C17",
+      "caseId": "C17-unknown-01",
+      "expected": "UNKNOWN",
+      "thresholdOrigin": "Candidate fixture configuration only; replace/confirm against sealed R1 contract",
+      "coverageDefault": "incomplete-or-not-evaluable",
+      "otherRequiredSubgates": "Satisfied with complete evidence unless the facts specify otherwise; final-stage gates remain separate",
+      "facts": {
+        "receptorLedger": "missing",
+        "roleLabels": 2
+      },
+      "note": "Oficio e institución requieren consecuencias; ningún indicador secundario sustituye C8."
+    },
+    {
+      "criterion": "C18",
+      "caseId": "C18-pass-01",
+      "expected": "PASS",
+      "thresholdOrigin": "Candidate fixture configuration only; replace/confirm against sealed R1 contract",
+      "coverageDefault": "complete for described subgate",
+      "otherRequiredSubgates": "Satisfied with complete evidence unless the facts specify otherwise; final-stage gates remain separate",
+      "facts": {
+        "episodesPerArm": [
+          20,
+          20
+        ],
+        "localMaterialTriggerForEveryEpisode": true,
+        "recurrenceReductionMeetsThreshold": true,
+        "winningAccessConsumed": true
+      },
+      "note": "N insuficiente es UNKNOWN; la recurrencia usa fuente/oportunidad y ventana comparable."
+    },
+    {
+      "criterion": "C18",
+      "caseId": "C18-fail-01",
+      "expected": "FAIL",
+      "thresholdOrigin": "Candidate fixture configuration only; replace/confirm against sealed R1 contract",
+      "coverageDefault": "complete for described subgate",
+      "otherRequiredSubgates": "Satisfied with complete evidence unless the facts specify otherwise; final-stage gates remain separate",
+      "facts": {
+        "episodesPerArm": [
+          20,
+          20
+        ],
+        "resourceCreatedByAgreement": true
+      },
+      "note": "N insuficiente es UNKNOWN; la recurrencia usa fuente/oportunidad y ventana comparable."
+    },
+    {
+      "criterion": "C18",
+      "caseId": "C18-unknown-01",
+      "expected": "UNKNOWN",
+      "thresholdOrigin": "Candidate fixture configuration only; replace/confirm against sealed R1 contract",
+      "coverageDefault": "incomplete-or-not-evaluable",
+      "otherRequiredSubgates": "Satisfied with complete evidence unless the facts specify otherwise; final-stage gates remain separate",
+      "facts": {
+        "episodesPerArm": [
+          19,
+          19
+        ],
+        "localMaterialTriggerForEveryEpisode": true
+      },
+      "note": "N insuficiente es UNKNOWN; la recurrencia usa fuente/oportunidad y ventana comparable."
+    },
+    {
+      "criterion": "C19",
+      "caseId": "C19-pass-01",
+      "expected": "PASS",
+      "thresholdOrigin": "Candidate fixture configuration only; replace/confirm against sealed R1 contract",
+      "coverageDefault": "complete for described subgate",
+      "otherRequiredSubgates": "Satisfied with complete evidence unless the facts specify otherwise; final-stage gates remain separate",
+      "facts": {
+        "remoteRegions": 4,
+        "observedDays": 10,
+        "physicalDigestEqualForCameras": [
+          0,
+          1,
+          12
+        ],
+        "policyAdvancesRemoteState": true,
+        "allScaleTransfersBalanced": true
+      },
+      "note": "No sumar stocks asincrónicos; paridad de cámaras y avance material son subgates distintas."
+    },
+    {
+      "criterion": "C19",
+      "caseId": "C19-fail-01",
+      "expected": "FAIL",
+      "thresholdOrigin": "Candidate fixture configuration only; replace/confirm against sealed R1 contract",
+      "coverageDefault": "complete for described subgate",
+      "otherRequiredSubgates": "Satisfied with complete evidence unless the facts specify otherwise; final-stage gates remain separate",
+      "facts": {
+        "remoteRegions": 4,
+        "fullWindowObserved": true,
+        "remoteStateFrozenDespiteRequiredAdvance": true
+      },
+      "note": "No sumar stocks asincrónicos; paridad de cámaras y avance material son subgates distintas."
+    },
+    {
+      "criterion": "C19",
+      "caseId": "C19-unknown-01",
+      "expected": "UNKNOWN",
+      "thresholdOrigin": "Candidate fixture configuration only; replace/confirm against sealed R1 contract",
+      "coverageDefault": "incomplete-or-not-evaluable",
+      "otherRequiredSubgates": "Satisfied with complete evidence unless the facts specify otherwise; final-stage gates remain separate",
+      "facts": {
+        "remoteRegionClocks": "missing",
+        "archivedStockTotalsOnly": true
+      },
+      "note": "No sumar stocks asincrónicos; paridad de cámaras y avance material son subgates distintas."
+    },
+    {
+      "criterion": "C20",
+      "caseId": "C20-pass-01",
+      "expected": "PASS",
+      "thresholdOrigin": "Candidate fixture configuration only; replace/confirm against sealed R1 contract",
+      "coverageDefault": "complete for described subgate",
+      "otherRequiredSubgates": "Satisfied with complete evidence unless the facts specify otherwise; final-stage gates remain separate",
+      "facts": {
+        "globalCapRejections": 0,
+        "stoppingCauseMeasured": true,
+        "deterministicParityWithEqualGovernorInputs": true,
+        "requiredLongWindowComplete": true
+      },
+      "note": "Meseta por cupo es limitada por software; capacidad y digesto se comparan con equivalencia explícita.",
+      "correctionRequirements": [
+        "all accepted/rejected attempts",
+        "source gate priority and pass/block/not-reached",
+        "coverage of opportunities and every stopping period incl no-attempt periods",
+        "100d inherited,60d incomplete",
+        "no birth-derived attempts or rerun selection"
+      ]
+    },
+    {
+      "criterion": "C20",
+      "caseId": "C20-fail-01",
+      "expected": "FAIL",
+      "thresholdOrigin": "Candidate fixture configuration only; replace/confirm against sealed R1 contract",
+      "coverageDefault": "complete for described subgate",
+      "otherRequiredSubgates": "Satisfied with complete evidence unless the facts specify otherwise; final-stage gates remain separate",
+      "facts": {
+        "globalCapRejections": 40,
+        "claimedLimit": "ecological-or-hardware"
+      },
+      "note": "Meseta por cupo es limitada por software; capacidad y digesto se comparan con equivalencia explícita.",
+      "correctionRequirements": [
+        "all accepted/rejected attempts",
+        "source gate priority and pass/block/not-reached",
+        "coverage of opportunities and every stopping period incl no-attempt periods",
+        "100d inherited,60d incomplete",
+        "no birth-derived attempts or rerun selection"
+      ]
+    },
+    {
+      "criterion": "C20",
+      "caseId": "C20-unknown-01",
+      "expected": "UNKNOWN",
+      "thresholdOrigin": "Candidate fixture configuration only; replace/confirm against sealed R1 contract",
+      "coverageDefault": "incomplete-or-not-evaluable",
+      "otherRequiredSubgates": "Satisfied with complete evidence unless the facts specify otherwise; final-stage gates remain separate",
+      "facts": {
+        "rejectionReasons": "missing",
+        "populationPlateau": true
+      },
+      "note": "Meseta por cupo es limitada por software; capacidad y digesto se comparan con equivalencia explícita.",
+      "correctionRequirements": [
+        "all accepted/rejected attempts",
+        "source gate priority and pass/block/not-reached",
+        "coverage of opportunities and every stopping period incl no-attempt periods",
+        "100d inherited,60d incomplete",
+        "no birth-derived attempts or rerun selection"
+      ]
+    },
+    {
+      "criterion": "C21",
+      "caseId": "C21-pass-01",
+      "expected": "PASS",
+      "thresholdOrigin": "Candidate fixture configuration only; replace/confirm against sealed R1 contract",
+      "coverageDefault": "complete for described subgate",
+      "otherRequiredSubgates": "Satisfied with complete evidence unless the facts specify otherwise; final-stage gates remain separate",
+      "facts": {
+        "recoverLastDurableCommitExactly": true,
+        "stateHistoryIdentitiesReceiptsConsistent": true,
+        "commonTickClientsEqual": true,
+        "requiredFaultPhasesCovered": true
+      },
+      "note": "Estado final igual no compensa historia durable perdida."
+    },
+    {
+      "criterion": "C21",
+      "caseId": "C21-fail-01",
+      "expected": "FAIL",
+      "thresholdOrigin": "Candidate fixture configuration only; replace/confirm against sealed R1 contract",
+      "coverageDefault": "complete for described subgate",
+      "otherRequiredSubgates": "Satisfied with complete evidence unless the facts specify otherwise; final-stage gates remain separate",
+      "facts": {
+        "snapshotEqual": true,
+        "confirmedChronicleEntriesLost": 1
+      },
+      "note": "Estado final igual no compensa historia durable perdida."
+    },
+    {
+      "criterion": "C21",
+      "caseId": "C21-unknown-01",
+      "expected": "UNKNOWN",
+      "thresholdOrigin": "Candidate fixture configuration only; replace/confirm against sealed R1 contract",
+      "coverageDefault": "incomplete-or-not-evaluable",
+      "otherRequiredSubgates": "Satisfied with complete evidence unless the facts specify otherwise; final-stage gates remain separate",
+      "facts": {
+        "faultInjectionEvidence": "missing",
+        "labBiologyJSONComplete": true
+      },
+      "note": "Estado final igual no compensa historia durable perdida."
+    },
+    {
+      "criterion": "C22",
+      "caseId": "C22-pass-01",
+      "expected": "PASS",
+      "thresholdOrigin": "Candidate fixture configuration only; replace/confirm against sealed R1 contract",
+      "coverageDefault": "complete for described subgate",
+      "otherRequiredSubgates": "Satisfied with complete evidence unless the facts specify otherwise; final-stage gates remain separate",
+      "facts": {
+        "equivalentSceneInputs": true,
+        "completeCostMeasured": true,
+        "inheritedBudgetSatisfied": true,
+        "cameraHardwareComparisonsReported": true,
+        "slowerAcceleratorRejected": true
+      },
+      "note": "Rechazar aceleración peor es válido; no atribuir kernel al coste integral.",
+      "correctionRequirements": [
+        "retain kernel/server/client partial samples; per-subgate fields",
+        "fps not applicable server; warmup missing kernel UNKNOWN integral",
+        "6×1200 authorized objetivo12; not B14 provisional sample size"
+      ]
+    },
+    {
+      "criterion": "C22",
+      "caseId": "C22-fail-01",
+      "expected": "FAIL",
+      "thresholdOrigin": "Candidate fixture configuration only; replace/confirm against sealed R1 contract",
+      "coverageDefault": "complete for described subgate",
+      "otherRequiredSubgates": "Satisfied with complete evidence unless the facts specify otherwise; final-stage gates remain separate",
+      "facts": {
+        "reportedImprovement": "kernel-only",
+        "measuredEndToEndRegression": true,
+        "regressionBackendAdopted": true
+      },
+      "note": "Rechazar aceleración peor es válido; no atribuir kernel al coste integral.",
+      "correctionRequirements": [
+        "retain kernel/server/client partial samples; per-subgate fields",
+        "fps not applicable server; warmup missing kernel UNKNOWN integral",
+        "6×1200 authorized objetivo12; not B14 provisional sample size"
+      ]
+    },
+    {
+      "criterion": "C22",
+      "caseId": "C22-unknown-01",
+      "expected": "UNKNOWN",
+      "thresholdOrigin": "Candidate fixture configuration only; replace/confirm against sealed R1 contract",
+      "coverageDefault": "incomplete-or-not-evaluable",
+      "otherRequiredSubgates": "Satisfied with complete evidence unless the facts specify otherwise; final-stage gates remain separate",
+      "facts": {
+        "warmupAndHostLoad": "missing",
+        "kernelTimeOnly": 0.466
+      },
+      "note": "Rechazar aceleración peor es válido; no atribuir kernel al coste integral.",
+      "correctionRequirements": [
+        "retain kernel/server/client partial samples; per-subgate fields",
+        "fps not applicable server; warmup missing kernel UNKNOWN integral",
+        "6×1200 authorized objetivo12; not B14 provisional sample size"
+      ]
+    },
+    {
+      "criterion": "C23",
+      "caseId": "C23-pass-01",
+      "expected": "PASS",
+      "thresholdOrigin": "Candidate fixture configuration only; replace/confirm against sealed R1 contract",
+      "coverageDefault": "complete for described subgate",
+      "otherRequiredSubgates": "Satisfied with complete evidence unless the facts specify otherwise; final-stage gates remain separate",
+      "facts": {
+        "stevenReviewReceipt": true,
+        "allRealMemoriesReviewed": true,
+        "physicalPhoneTasksComplete": true,
+        "keyboardTasksComplete": true,
+        "criticalBlockers": 0
+      },
+      "note": "El evaluador sólo comprueba recibo/estado; no inventa ni realiza revisión íntima.",
+      "correctionFacts": {
+        "artifactRole": "synthetic",
+        "authority": "synthetic-oracle",
+        "receiptKind": "synthetic-review-oracle",
+        "personalReceipt": "none; synthetic design does not represent a real Steven receipt",
+        "expected": "PASS only in technical oracle emulating contract conjunction, real personal-review UNKNOWN",
+        "inventoryDenominator": "all incorporated IDs/hashes incl unauthorized, reconcile inventory+manifest+individual authorization in oracle only"
+      }
+    },
+    {
+      "criterion": "C23",
+      "caseId": "C23-fail-01",
+      "expected": "FAIL",
+      "thresholdOrigin": "Candidate fixture configuration only; replace/confirm against sealed R1 contract",
+      "coverageDefault": "complete for described subgate",
+      "otherRequiredSubgates": "Satisfied with complete evidence unless the facts specify otherwise; final-stage gates remain separate",
+      "facts": {
+        "realBiographyUnreviewedPublished": true,
+        "criticalBlockers": 1
+      },
+      "note": "El evaluador sólo comprueba recibo/estado; no inventa ni realiza revisión íntima."
+    },
+    {
+      "criterion": "C23",
+      "caseId": "C23-unknown-01",
+      "expected": "UNKNOWN",
+      "thresholdOrigin": "Candidate fixture configuration only; replace/confirm against sealed R1 contract",
+      "coverageDefault": "incomplete-or-not-evaluable",
+      "otherRequiredSubgates": "Satisfied with complete evidence unless the facts specify otherwise; final-stage gates remain separate",
+      "facts": {
+        "stevenReviewReceipt": "missing",
+        "emulatedE2EPass": true,
+        "physicalPhoneEvidence": "missing"
+      },
+      "note": "El evaluador sólo comprueba recibo/estado; no inventa ni realiza revisión íntima."
+    },
+    {
+      "criterion": "C24",
+      "caseId": "C24-pass-01",
+      "expected": "PASS",
+      "thresholdOrigin": "Candidate fixture configuration only; replace/confirm against sealed R1 contract",
+      "coverageDefault": "complete for described subgate",
+      "otherRequiredSubgates": "Satisfied with complete evidence unless the facts specify otherwise; final-stage gates remain separate",
+      "facts": {
+        "targetStage": "final",
+        "methodGatePassed": true,
+        "priorSurvivalUtilityLegibilityGate": true,
+        "preregistrationBeforeData": true,
+        "reservedSeedsUnused": true,
+        "comparableSelectorAndLearningArms": true,
+        "declaredBudgetEqual": true,
+        "learnedBenefitMeetsThreshold": true
+      },
+      "note": "Método PASS no es entrenamiento PASS; ausencia de fase posterior deja cierre UNKNOWN."
+    },
+    {
+      "criterion": "C24",
+      "caseId": "C24-fail-01",
+      "expected": "FAIL",
+      "thresholdOrigin": "Candidate fixture configuration only; replace/confirm against sealed R1 contract",
+      "coverageDefault": "complete for described subgate",
+      "otherRequiredSubgates": "Satisfied with complete evidence unless the facts specify otherwise; final-stage gates remain separate",
+      "facts": {
+        "targetStage": "method",
+        "hiddenResupplyInterventions": 1,
+        "reportedInterventions": 0
+      },
+      "note": "Método PASS no es entrenamiento PASS; ausencia de fase posterior deja cierre UNKNOWN."
+    },
+    {
+      "criterion": "C24",
+      "caseId": "C24-unknown-01",
+      "expected": "UNKNOWN",
+      "thresholdOrigin": "Candidate fixture configuration only; replace/confirm against sealed R1 contract",
+      "coverageDefault": "incomplete-or-not-evaluable",
+      "otherRequiredSubgates": "Satisfied with complete evidence unless the facts specify otherwise; final-stage gates remain separate",
+      "facts": {
+        "targetStage": "final",
+        "methodGatePassed": true,
+        "trainingStage": "not-started"
+      },
+      "note": "Método PASS no es entrenamiento PASS; ausencia de fase posterior deja cierre UNKNOWN."
+    }
+  ],
+  "transverseCases": [
+    {
+      "caseId": "T-protected-stock-conservation",
+      "expected": "PASS-balance/FAIL-autonomy",
+      "facts": {
+        "protectedOpeningStockIncluded": true,
+        "protectedTransferToMortals": 5,
+        "transferLedgerBalanced": true,
+        "autonomousSupplyClaim": true
+      }
+    },
+    {
+      "caseId": "T-missing-event-vs-zero",
+      "expected": "UNKNOWN",
+      "facts": {
+        "events": [],
+        "eventStreamCoverage": "missing"
+      }
+    },
+    {
+      "caseId": "T-zero-events-complete-existential",
+      "expected": "FAIL",
+      "facts": {
+        "events": [],
+        "eventStreamCoverage": "complete",
+        "eligibleOpportunitiesPresent": true,
+        "requiredPositiveEvent": true
+      }
+    },
+    {
+      "caseId": "T-zero-opportunities-universal",
+      "expected": "UNKNOWN-frontier",
+      "facts": {
+        "events": [],
+        "eventStreamCoverage": "complete",
+        "eligibleOpportunitiesPresent": false,
+        "universalConformity": true,
+        "existentialSubgateRequired": true
+      }
+    },
+    {
+      "caseId": "T-six-not-eight-seeds",
+      "expected": "DO-NOT-REUSE-eight-seed-panel-threshold",
+      "facts": {
+        "baselineSeeds": 6,
+        "candidatePanelSeeds": 8,
+        "candidatePanelRequiredPass": 5
+      }
+    },
+    {
+      "caseId": "T-governor-parity",
+      "expected": "DO-NOT-CLAIM-exact-parity-and-different-population-same-tick",
+      "facts": {
+        "sameTick": true,
+        "physicalDigestClaimEqual": true,
+        "populationDifferent": true
+      }
+    },
+    {
+      "caseId": "T-c8-frozen-channel",
+      "expected": "FAIL-c8-unchanged",
+      "facts": {
+        "frozenC8Trend": "FAIL",
+        "communitySeparation": "improved",
+        "alternateChannel": "PASS"
+      }
+    },
+    {
+      "caseId": "T-no-evidence-upgrade",
+      "expected": "UNKNOWN-never-PASS",
+      "facts": {
+        "originalState": "UNKNOWN",
+        "necessaryFieldRemoved": true
+      }
+    }
+  ],
+  "correctionOwner": "Solalto secondary R1",
+  "originalDesignRef": "/datos/tmp-atlas-lab/orquestacion-20261003/revision-criterios/CASOS-SINTETICOS.json"
+}

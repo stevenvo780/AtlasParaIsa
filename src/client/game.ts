@@ -80,7 +80,7 @@ function saveVisit(): void {
 }
 function readVisit(current: WorldView): number | null { try { return readWorldVisit(localStorage, current); } catch { return null; } }
 function stopSound(): void { clearTimeout(soundTimer); if (soundContext) void soundContext.close(); soundContext = null; document.getElementById('sound-toggle')?.setAttribute('aria-pressed', 'false'); }
-function clean(): void { capaMapa = 'none'; capaCalor = null; saveVisit(); connection?.stop(); landscape?.destroy(); stopSound(); connection = null; landscape = null; world = null; pending = false; following = false; control = 'inspect'; populationSignature = ''; inspectorSignature = ''; memorySignature = ''; statsTab = 'life'; populationKind = 'people'; }
+function clean(): void { capaMapa = 'none'; capaCalor = null; saveVisit(); if (document.fullscreenElement === root) void document.exitFullscreen().catch(() => {}); connection?.stop(); landscape?.destroy(); stopSound(); connection = null; landscape = null; world = null; pending = false; following = false; control = 'inspect'; populationSignature = ''; inspectorSignature = ''; memorySignature = ''; statsTab = 'life'; populationKind = 'people'; }
 
 function loginScreen(message = ''): void {
   clean(); root.innerHTML = `<main class="entry-page"><div class="entry-monogram">${icon.leaf}<span>UN MUNDO PRIVADO POR DESCUBRIR</span></div><section class="entry-card" aria-labelledby="entry-title"><div class="letter-stamp" aria-hidden="true">I<span>PARA TI</span></div><p class="eyebrow">UN LUGAR PARA ENCONTRARNOS</p><h1 id="entry-title">Una carta<br>para <em>Isa.</em></h1><p class="entry-intro">Un mundo que crece.<br>Muchas vidas. Tu forma de recorrerlo.</p><form id="login-form"><label for="password">Contraseña privada</label><input id="password" name="password" type="password" autocomplete="current-password" required placeholder="La llave de este lugar"><button class="button primary entry-submit" type="submit">Entrar a la carta ${icon.arrow}</button><p id="login-error" class="form-message" role="status">${esc(message)}</p></form><div class="entry-footnote">${icon.leaf}<span>Lo pequeño también puede contener un mundo.</span></div></section><p class="entry-footer">UNA CARTA PARA ISA · ACCESO PRIVADO</p></main>`;
@@ -109,6 +109,7 @@ function syncModo(): Modo {
 function enterWorld(): void {
   clean(); lastVisit = null; status = 'connecting'; cronica.clear(); hitosGuardados = []; journalFilter = 'todo';
   root.innerHTML = worldShell();
+  syncFullscreenControl();
   notebook = new Notebook(el('game')); inspectorTab = 'now';
   focusedRecipe = null; recipeDetails.clear(); personaDetails.clear(); personaVivo.clear(); olvidarVistos(); buscando = null;
   const modo = syncModo(); modoActual = modo;
@@ -171,6 +172,32 @@ function pick(selection: Selection): void {
 function person(): PersonView | undefined { return world?.people.find(p => p.id === activePersonId); }
 function target(): { x: number; y: number } | null { if (!world) return null; const selection = selected; if (selection.kind === 'tile') return selection; const p = selection.kind === 'animal' ? world.animals?.find(a => a.id === selection.id) : person(); return p ? { x: p.x, y: p.y } : null; }
 function message(text: string, accepted?: boolean): void { const output = document.getElementById('gesture-result'); if (output) { output.textContent = text; output.hidden = !text; output.dataset.accepted = accepted === undefined ? 'pending' : String(accepted); } }
+function fullscreenNotice(text: string): void { const output = document.getElementById('fullscreen-notice'); if (output) { output.textContent = text; output.hidden = !text; } }
+function syncFullscreenControl(): void {
+  const button = document.getElementById('fullscreen-toggle');
+  if (!button) return;
+  const active = document.fullscreenElement === root;
+  button.setAttribute('aria-pressed', String(active));
+  button.setAttribute('aria-label', active ? 'Salir de pantalla completa' : 'Activar pantalla completa');
+  button.title = active ? 'Salir de pantalla completa' : 'Activar pantalla completa';
+  fullscreenNotice('');
+}
+async function toggleFullscreen(): Promise<void> {
+  const button = el<HTMLButtonElement>('fullscreen-toggle');
+  if (typeof root.requestFullscreen !== 'function' || typeof document.exitFullscreen !== 'function') {
+    fullscreenNotice('Este navegador no ofrece pantalla completa aquí. Puedes seguir recorriendo el mundo en la vista actual.');
+    return;
+  }
+  button.disabled = true;
+  try {
+    if (document.fullscreenElement === root) await document.exitFullscreen();
+    else await root.requestFullscreen();
+  } catch {
+    fullscreenNotice('El navegador no permitió cambiar a pantalla completa. Puedes seguir recorriendo el mundo en la vista actual.');
+  } finally {
+    button.disabled = false;
+  }
+}
 function send(input: Omit<Gesture, 'id'>): void { if (!world || world.paused || status !== 'live' || pending) return; if (connection?.send({ ...input, id: crypto.randomUUID() })) { landscape?.setPendingTarget(input); message('Esperando la confirmación del mundo…'); } }
 function sendCommand(order: Order, position?: { x: number; y: number }): void { const p = person(); if (!p || selected.kind === 'animal') return; send({ kind: 'command', agentId: p.id, order, x: position?.x ?? p.x, y: position?.y ?? p.y }); if (order === 'auto') { control = 'inspect'; renderControls(); } }
 
@@ -211,6 +238,7 @@ function wire(): void {
     location.reload();
   });
   el('logout-button').addEventListener('click', async () => { try { const response = await fetch('/api/logout', { method: 'POST', credentials: 'same-origin', signal: AbortSignal.timeout(10_000) }); if (!response.ok) throw new Error(); loginScreen(); } catch { loginScreen('Ocultamos la carta, pero no pudimos revocar la sesión. Vuelve a conectar para cerrar la sesión.'); } });
+  el('fullscreen-toggle').addEventListener('click', () => { void toggleFullscreen(); });
   el('zoom-in').addEventListener('click', () => landscape?.zoom(1)); el('zoom-out').addEventListener('click', () => landscape?.zoom(-1)); el('map-reset').addEventListener('click', () => { following = false; landscape?.follow(null); const s = world?.people.find(p => p.role === 'S'); if (s) { landscape?.fit(); renderControls(); return; } irAPersona(idDeRol('S', world)); });
   // M3: S e I se encuentran aunque estén fuera de la cámara (la ficha a demanda trae su posición).
   for (const role of ['S', 'I'] as const) el(`focus-${role.toLowerCase()}`).addEventListener('click', () => choosePerson(idDeRol(role, world)));
@@ -227,7 +255,7 @@ function wire(): void {
   el<HTMLSelectElement>('place-select').addEventListener('change', event => { const place = world?.places.find(p => p.id === (event.target as HTMLSelectElement).value); if (place) { selected = { kind: 'tile', x: place.x, y: place.y }; landscape?.focus(place.x, place.y); landscape?.select(selected); inspectorSignature = ''; renderInspector(); drawer('layer', false); drawer('inspector', true); } });
   el<HTMLFormElement>('tile-form').addEventListener('submit', event => { event.preventDefault(); const x = Number(el<HTMLInputElement>('tile-x').value), y = Number(el<HTMLInputElement>('tile-y').value); if (!Number.isInteger(x) || !Number.isInteger(y)) return; selected = { kind: 'tile', x, y }; following = false; landscape?.follow(null); landscape?.focus(x, y); landscape?.select(selected); inspectorSignature = ''; renderInspector(); renderTool(); drawer('inspector', true); });
   el('landscape').addEventListener('keydown', event => { const keyboard = event as KeyboardEvent; if (control !== 'direct' || keyboard.ctrlKey || keyboard.metaKey || keyboard.altKey || keyboard.repeat) return; const key = keyboard.key.toLowerCase(); const offsets: Record<string, [number, number]> = { w: [0, -1], a: [-1, 0], s: [0, 1], d: [1, 0] }; const offset = offsets[key], p = person(); if (!offset || !p) return; event.preventDefault(); sendCommand('move', { x: p.x + offset[0], y: p.y + offset[1] }); });
-  el('game').addEventListener('keydown', event => { if ((event as KeyboardEvent).key === 'Escape') { if (!el('inspector-drawer').hidden && !el('task-palette').hidden) { toggleTasks(false); el('task-toggle').focus(); return; } if (control === 'direct') { control = 'inspect'; renderControls(); if (!el('inspector-drawer').hidden) el('direct-toggle').focus(); else el('landscape').focus(); return; } notebook?.close(); } });
+  el('game').addEventListener('keydown', async event => { if ((event as KeyboardEvent).key === 'Escape') { if (document.fullscreenElement === root) { try { await document.exitFullscreen(); return; } catch { fullscreenNotice('El navegador no permitió salir de pantalla completa. Puedes seguir recorriendo el mundo en la vista actual.'); } } if (!el('inspector-drawer').hidden && !el('task-palette').hidden) { toggleTasks(false); el('task-toggle').focus(); return; } if (control === 'direct') { control = 'inspect'; renderControls(); if (!el('inspector-drawer').hidden) el('direct-toggle').focus(); else el('landscape').focus(); return; } notebook?.close(); } });
   el('heat-button').addEventListener('click', () => cicloCalor());
   el('growth-chip').addEventListener('click', () => { selectStatsTab('life'); drawer('stats', true); });
   document.addEventListener('keydown', event => {
@@ -628,4 +656,6 @@ function renderStatsContent(): void {
 }
 window.addEventListener('pagehide', saveVisit); document.addEventListener('visibilitychange', () => { if (document.hidden) saveVisit(); });
 async function boot(): Promise<void> { root.innerHTML = '<main class="boot-screen"><span>✧</span><p>Abriendo la carta…</p></main>'; try { const response = await fetch('/api/session', { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(10_000) }); const session = await response.json() as { authenticated: boolean }; if (response.ok && session.authenticated) enterWorld(); else loginScreen(); } catch { loginScreen('No hay conexión con el servidor. Puedes volver a intentar.'); } }
+document.addEventListener('fullscreenchange', syncFullscreenControl);
+document.addEventListener('fullscreenerror', () => fullscreenNotice('El navegador no permitió abrir pantalla completa. Puedes seguir recorriendo el mundo en la vista actual.'));
 void boot();

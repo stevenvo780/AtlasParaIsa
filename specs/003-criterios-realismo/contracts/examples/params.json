@@ -1,0 +1,26 @@
+{
+  "contractVersion": "realismo-v3",
+  "evidenceId": "params",
+  "kind": "parameter-set",
+  "synthetic": true,
+  "sourceRefs": [],
+  "payload": {
+    "sourceSHA": "bb483260b2489fe62b113d620e5f56e5f3676dbc",
+    "paramsHash": "d956a755ba428301d4b7a1b0e35b0b428d16c836fa3d37032f6c22f702fbc81c",
+    "entries": []
+  },
+  "fieldCoverage": {
+    "sourceSHA": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "paramsHash": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "entries": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    }
+  }
+}

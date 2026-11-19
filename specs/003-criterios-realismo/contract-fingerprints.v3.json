@@ -1,0 +1,370 @@
+{
+  "contractVersion": "realismo-v3",
+  "profileId": "r1-20261003-correction3-provisional",
+  "status": "DRAFT_NOT_SEALED_ROOT_REVIEW_PENDING",
+  "interfaceStatus": "FROZEN_FOR_PEER_FORMAL",
+  "gate": "NO-GO-R2_UNTIL_PEER_AND_FORMAL_V3",
+  "pathBase": "repository-root",
+  "sourceSHA": "bb483260b2489fe62b113d620e5f56e5f3676dbc",
+  "coverage": "All regular files in specs/003-criterios-realismo/ plus docs/CRITERIOS-REALISMO.md, excluding this manifest itself",
+  "excludedSelf": "specs/003-criterios-realismo/contract-fingerprints.v3.json",
+  "coverageChange": {
+    "priorPathCount": 54,
+    "addedFixtureAndOraclePaths": 30,
+    "addedDeliveryAndVerificationPaths": 3,
+    "reason": "Pin every persisted v3 artifact and final delivery; prior 54 paths omitted new v3 fixtures and verification files"
+  },
+  "fileCount": 87,
+  "aggregateFormat": "UTF-8: path + TAB + sha256 + LF, sorted by path; SHA-256",
+  "aggregateSHA256": "3989c066ea4c850cb8e4222a58a709fe0bbb7eaf2a5da8eb070aebb3f3a98467",
+  "files": [
+    {
+      "path": "docs/CRITERIOS-REALISMO.md",
+      "sha256": "9f863c563b67d488af38a5653d7c381b33f02a3c4b8148722ec82981f79624ca"
+    },
+    {
+      "path": "specs/003-criterios-realismo/ENTREGA.md",
+      "sha256": "6ab15c7613a4402f0fbefc562d1b4af3aea84a5463f609b292bc5aff34cf0f88"
+    },
+    {
+      "path": "specs/003-criterios-realismo/checklists/requirements.md",
+      "sha256": "3eb49a87b8810fe96b22e3f8fe6fb0f5da2067d15d8823dd888df61261d0b637"
+    },
+    {
+      "path": "specs/003-criterios-realismo/checklists/revision-independiente.md",
+      "sha256": "4ca051b69dcfe12d14a832c93b3aa6d2064c349cde3cd6135f857aa0bf629202"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/README.md",
+      "sha256": "1975f0ce79d7651eb359affb8a67c89a059f9acf7a5d6479c389a82a2e2bcce5"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/evaluation.schema.json",
+      "sha256": "f2d4f85be8541b4ff546fc4a037d0c0536c776e34168db5fe914f10eabe59a54"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/evidence.schema.json",
+      "sha256": "0752c2f94b90030e1bff534b037f4f2b0de1abd5b0c6966e769638ed13d21983"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/example-unavailable.v3.json",
+      "sha256": "b23ff3d94efbfd1a04a2c66c093d63b502bb5ab6e958722f7c18f8c993b92998"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/bundle-control.v3.json",
+      "sha256": "34c25f783af0818092b29a52693d7d7cb5a54a3bad6bb66dce2bac12a5917f98"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/bundle-treatment.v3.json",
+      "sha256": "dd02c0206f261199d6a48291968cfb02d5e038bbd2bbd5fb05e234d543ba9b3b"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/causal-pair-c11.json",
+      "sha256": "3f91d833adcb273710b7502d49898b08908908fd9537abe54bbca059a77ec1d5"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/causal-pair-c17.json",
+      "sha256": "75b3532d9ccd823bd666e46bff2db7f012139ad2c6dd4d4a217bbf2f81284c27"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/condition-inputs-service.v3.json",
+      "sha256": "6747a7f0e0aac0525f71c6bacad8c39564acb4b32317b2d4d236f1cb05da4a6a"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/condition-inputs-wrong-event.v3.json",
+      "sha256": "2bc56aa42bee3cb9e6158cd6625666c6491b7f0937a2909b32202108a7bcdeba"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/condition-inputs.v3.json",
+      "sha256": "0d1ed7d8da9e573bf291fd9dc3719c2f315d21139d7f8e10de66aa506a5ded94"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/conservation-service.v3.json",
+      "sha256": "37bf88a30ae3d41d8e25573e59cb23ee914391f8c7b49f8de2cdd7ebcd3e188b"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/conversion-matrix.v3.json",
+      "sha256": "e281b939b88c47aa93b408763de9329628fdd03e40ea90fb3ca8746c93cae6d3"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/crossrun-input.v3.json",
+      "sha256": "ef40d7c9c4f108bfc4ea859c4859700b8af78ec5c066b82c3e6a434a01a2fee1"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/effect.json",
+      "sha256": "ea037bdb4a2e69e9023d218f7b5987dbc64251e6bca6d78986999dd7961ebbbc"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/evaluation-partial.json",
+      "sha256": "ef6f8e3f33a990e96a5eee18e83212590938c284e0d79f1302ded5e5b2def564"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/evaluation-wrong-input.v3.json",
+      "sha256": "a5fe5ff93405a5cd819c758669aa035ec295092c80db027545ef01c005458349"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/g1-cases.v3.json",
+      "sha256": "abfdc403c29983d4cc681b514f4a8d8cd599d76f0e08581bde3d28723038be2c"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/gates-accepted.json",
+      "sha256": "3514f9881f51f8682bbaaf6bf3cecb7d67eff43db6c3c741ca459a9ec022061d"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/gates-rejected.json",
+      "sha256": "34fbf90cfddf4bac816aef2b8bb588e0336c50754ba7eee0c31192c7116b783d"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/governor.json",
+      "sha256": "95941afe7acab29ba468ecda6d9f2d3b937081fcfae31450b755df39fddb0251"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/host.json",
+      "sha256": "450d832226ca44c04d6d06ee398633f27f9c176f1b2a50525c3cd8e52a498344"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/index.v3.json",
+      "sha256": "62181f84f55c51267703ba0180436f964fa9ff55b4619979fe99efae61e9b029"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/initial-state.v3.json",
+      "sha256": "2c18d4e74f2261f6d274234db5d27208dcbbdd65f9e786ec01129552e5caec93"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/inputs.json",
+      "sha256": "98943ee085665843aca76b38140527ad3d0f9c241a873eb978453338ed1b1974"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/law-wrong-sha.v3.json",
+      "sha256": "cae403205076d6dc81d2b6d0f7a942f1158a93f7e215ada1ab15f687039fd3e7"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/law.json",
+      "sha256": "cc8078678aea133cf1508e1935fd93e7a2e5fa5be4eb07edad653dfcab1ed0c5"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/memory-authorization.json",
+      "sha256": "b9b434bd4c58f6089dfea7a0f542ef65d38cbfd251da25fd78a61d03c7c78d96"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/memory-inventory.json",
+      "sha256": "ea36cc0072ec01bafdd6d3ee2b52de433ca361050947fb70b70d6fbe292ebdcc"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/memory-manifest.json",
+      "sha256": "44f0833137406de1d4b9f27244c88d885f56b5bd073001ca547a599c34eed1c4"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/memory-provenance.json",
+      "sha256": "4257bae2cf83174613951bb9ad007806a40da62ff1d7be2175b80f16bbf4c278"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/negative-accepted-decisive.json",
+      "sha256": "97a90e9f6f7f1f2db1491ba8e38b71cf133e8aed7de0448bfcf06e9886e83808"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/negative-bundle-epoch.v3.json",
+      "sha256": "1b4cf1e2c15f888f029042d20180abdbb882ca1d33cee4bec4f55a11085cd936"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/negative-bundle-kind.v3.json",
+      "sha256": "118ab5e84a63579f4c826f942d748b6bf2ec791fab0edb177a0f26b821af5e57"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/negative-bundle-ref-absent.v3.json",
+      "sha256": "f782f37ca12f3f56e62e9e1ff9e94c3e3ab419d6769c8d38b8a0c54276fe7007"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/negative-bundle-role.v3.json",
+      "sha256": "74fdee5e3b85b8276949b9ab36c2ad9def8a192afbc87333f4f6ae8e40b0db0e"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/negative-bundle-run.v3.json",
+      "sha256": "6022c6297e5ef15981498d25a3084334163da8375504572d7ec3e8c133cef8df"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/negative-bundle-schema.v3.json",
+      "sha256": "ef719f965ff97ec712d8380a7cf9b28b4ca402e824f0b3a162fb376b62248bc8"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/negative-capabilities-duplicate.json",
+      "sha256": "07c10346b4d699fcb5f6b51a8e649bbde9866237e7be5ee3b99579693f2a99f8"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/negative-complete-inconsistent.json",
+      "sha256": "991292f6d450aa2efbde605be8140396de25bc2ab8df8dbaca2b459c09369555"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/negative-condition-input-event.v3.json",
+      "sha256": "030bcd96f6b300688568f3b484346315bce1ea8ef9d97a6699d474e5c69beb18"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/negative-duplicate-keys.json.txt",
+      "sha256": "b9ff2dc22c33a908c289dfc24e2e27298162df0887d51cd8b5929f23dfc53d7a"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/negative-evaluation-16C9.json",
+      "sha256": "ef6514e4d294afcd6950c2534620a87cb14c93cf64c585ce8c68092ed54088aa"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/negative-evaluation-input.v3.json",
+      "sha256": "c8f7d5112f84f883f2fe3e68ddc5b1bc0efb20f7da35528ab901924b39f41820"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/negative-field-coverage.json",
+      "sha256": "fe58efc99cdb75991214954f4241663030a8e28cd24c4a2502ea9c54cf705fc2"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/negative-infinity.json.txt",
+      "sha256": "d360272c1a4f888e95495a8b74826c541a37a5f3251c13107b26d5800032c733"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/negative-nan.json.txt",
+      "sha256": "c99765960ef2411a38ac2f6468d98be75c4ae741b407bebbdcff55509443d3e0"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/negative-overflow.json.txt",
+      "sha256": "958e25f168a6e6772ea26c9ec84bea1cabc6ecc6c7bb1ff570092301d4f149ee"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/negative-quantum-fraction.json",
+      "sha256": "2fb04fdbbc6bddbdaaae93a42180ef8101892452809f2a52eae0b74484cb3564"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/negative-quantum-unsafe.json",
+      "sha256": "eef927352fe4c21a6eb4fe39d348c41a169925c2619b631e9352779f1b1807b9"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/negative-record-duplicate.json",
+      "sha256": "8b9b29b7a494c7695ff52fbd65677081b7bc5718786f392f2c1662c716b878dd"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/negative-rejected-null.json",
+      "sha256": "211bf9a2091d0d266afb728b58ae3190d8ac91ec8a5145b1968f01468e75168a"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/order-unavailable.json",
+      "sha256": "19bec2603d29ddfc3e12c553fcd75396dc3d676abbe2508339c34a2c61b31494"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/order-wrong-sha.v3.json",
+      "sha256": "2be10f198a2dc47fd77b2192f1e488208a07bbe27476be33dfcb6a391ef71667"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/order.json",
+      "sha256": "390909e5fd23826cb268712e37c8212faca0ff2bfc4b7fdfff9871b2b7c62019"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/params.json",
+      "sha256": "c038ce62922dfcc1b602d25b00e929a6e0e9f01c14510feffbfa806dacd2a1f2"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/partial-observation.json",
+      "sha256": "1a24b60d186d486dac66e8284fea14f7413548dc21968732672129479c7f8865"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/registration.json",
+      "sha256": "ceb0b8761891793e05694877d78b874eb8cc7266ed53ba2f93f3cb4fe463fe91"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/reproduction-coverage.json",
+      "sha256": "a4285ae92cd335aae4dd2809e58239f4d6e1f211b0c2c858222cce07586862b2"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/review-cases-supplement.v3.json",
+      "sha256": "1be74eb67cf2501072426ea9d5a0c19b259ebadbc4c949516258709dbfb8ac9c"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/run-manifest-control.v3.json",
+      "sha256": "c073ac49f88ce4c9b5baeb5695ab5ed58af75b51605e2b063f697880ef633d49"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/run-manifest-treatment.v3.json",
+      "sha256": "ee3ac192fad2d5db117aaa22c71af2656f4b95abad5e6c31881bcf804c8cc7fa"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/run-manifest-wrong-epoch.v3.json",
+      "sha256": "f1ad1c0a29163e30091f8ea33ae8ca17a62510bf8c07b7dec84445d3c50babdf"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/run-manifest-wrong-role.v3.json",
+      "sha256": "fc807ee79c35b815f1b0ba57e61c7d19939d2816c0d264f055826d830af9cd57"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/run-manifest-wrong-run.v3.json",
+      "sha256": "a65c56c8843ca5170daad110900979d04c009ed0a70716c2bfc66557922cb74b"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/synthetic-review.json",
+      "sha256": "c8c0fe3e57315e32121852c5429da8fa94c164a67b6dd11023f8bb485dc99315"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/unknown-law-sha.v3.json",
+      "sha256": "95578641120fe25d1c6cdd95b6076485821fed6ed09a3aa63090a1b2e902b7d4"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/unknown-order-sha.v3.json",
+      "sha256": "9a8ac563f424d81d17cfd024266ba254ead281b82bf378ef99f70bf7f5307667"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/unknown-service-condition-event.v3.json",
+      "sha256": "2799bdedef087b5ec7815e8d2f7db5b4d2bc87419c3ee5dba829e7f30d3a6861"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/unknown-service-order.v3.json",
+      "sha256": "8f8c8b79aa099b596ee4cac828aaa45eb1a2933cb6056349f1e5b723955a84f5"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/examples/unknown-source-order.json",
+      "sha256": "1f7e51075586a1c76858d6e0c372de5f323472ec603563a415313f6ba404a942"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/observation.schema.json",
+      "sha256": "de07d954cbb8d084bd0337723a947cc7c29ed9f385571dae42b3a060b74b1628"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/reference-types.v3.json",
+      "sha256": "a6d128667f84e95253901d20e86dffb85f93a62ca4d67bdb9ce1ea6eb2697d69"
+    },
+    {
+      "path": "specs/003-criterios-realismo/contracts/thresholds.v3.json",
+      "sha256": "d99e24ee85f379164c1dd0d351a0cdb204d8bf1dda0e446abd70cfe582e4b7cb"
+    },
+    {
+      "path": "specs/003-criterios-realismo/data-model.md",
+      "sha256": "4497cf091e4cdbfb1661589be70bd0ab093ed73a1612c88e1944e8ba4ea272b4"
+    },
+    {
+      "path": "specs/003-criterios-realismo/documentary-probes.v3.json",
+      "sha256": "4258365a2c244c3ae19dee4cf32a71e9e26ea4e35853bfcd672e2a0af91e6d21"
+    },
+    {
+      "path": "specs/003-criterios-realismo/documentary-verification.md",
+      "sha256": "36b797be84aca4861cf28ea9f3ed9a7dd8b56d7834a0af933758e7882127b76f"
+    },
+    {
+      "path": "specs/003-criterios-realismo/plan.md",
+      "sha256": "0c0a5bc283005b0fa6d1ef024aae4527d686867e37dcfbfe570c056d2a10d7ed"
+    },
+    {
+      "path": "specs/003-criterios-realismo/quickstart.md",
+      "sha256": "68d6feadd51af09dc7f54baf744bdb3f35d1adb55e3cd09b28ec7505613f2b17"
+    },
+    {
+      "path": "specs/003-criterios-realismo/research.md",
+      "sha256": "4ba2fe6cd0692e5718e4bdaa89d93e2decfe2d126ba95c48362346dde8449e69"
+    },
+    {
+      "path": "specs/003-criterios-realismo/source-fingerprints.json",
+      "sha256": "375a112ca6a76f5585cc29c7ed92b93c7e067b4661171cf7a30b3dd368840198"
+    },
+    {
+      "path": "specs/003-criterios-realismo/spec.md",
+      "sha256": "43639d8b7da4af3cbe850d91cd7a3d62323c54656287290dbbf427048e78c8d8"
+    },
+    {
+      "path": "specs/003-criterios-realismo/tasks.md",
+      "sha256": "64bb439e48909d35e190f6d58ecff4e8e3fecef4b6035528e747b699d1d39563"
+    }
+  ]
+}

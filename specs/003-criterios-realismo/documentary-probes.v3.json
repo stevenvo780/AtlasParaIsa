@@ -1,0 +1,127 @@
+{
+  "contractVersion": "realismo-v3",
+  "status": "BOUNDED_DOCUMENTARY_PROBES_ONLY_NOT_REALENGINE_NOT_FORMAL_SCHEMA_NOT_G1_PASS",
+  "probeSourceSHA256": "e7795d0076ee34975e16fb1a19bc89a2c15d9684f81ade7df7f9f204edae39a8",
+  "command": "python3 /tmp/realismo_v3_probe.py",
+  "counts": {
+    "strictJSON": 72,
+    "localSchemaRefs": 503,
+    "referencePointers": 196,
+    "parserRejections": 4
+  },
+  "manualOracleMatches": 15,
+  "cases": [
+    {
+      "input": "conservation-service.v3.json",
+      "inputSHA256": "37bf88a30ae3d41d8e25573e59cb23ee914391f8c7b49f8de2cdd7ebcd3e188b",
+      "expected": "BALANCE_CLOSED_C10_FAIL_BASELINE_UNKNOWN",
+      "actual": "BALANCE_CLOSED_C10_FAIL_BASELINE_UNKNOWN",
+      "matchesManualOracle": true
+    },
+    {
+      "input": "condition-inputs-service.v3.json",
+      "inputSHA256": "6747a7f0e0aac0525f71c6bacad8c39564acb4b32317b2d4d236f1cb05da4a6a",
+      "expected": "BALANCE_CLOSED_C10_FAIL_BASELINE_UNKNOWN",
+      "actual": "BALANCE_CLOSED_C10_FAIL_BASELINE_UNKNOWN",
+      "matchesManualOracle": true
+    },
+    {
+      "input": "negative-condition-input-event.v3.json",
+      "inputSHA256": "030bcd96f6b300688568f3b484346315bce1ea8ef9d97a6699d474e5c69beb18",
+      "expected": "UNKNOWN_CAUSAL_SUBGATES",
+      "actual": "UNKNOWN_CAUSAL_SUBGATES",
+      "matchesManualOracle": true
+    },
+    {
+      "input": "unknown-law-sha.v3.json",
+      "inputSHA256": "95578641120fe25d1c6cdd95b6076485821fed6ed09a3aa63090a1b2e902b7d4",
+      "expected": "UNKNOWN_CAUSAL_SUBGATES",
+      "actual": "UNKNOWN_CAUSAL_SUBGATES",
+      "matchesManualOracle": true
+    },
+    {
+      "input": "unknown-order-sha.v3.json",
+      "inputSHA256": "9a8ac563f424d81d17cfd024266ba254ead281b82bf378ef99f70bf7f5307667",
+      "expected": "UNKNOWN_CAUSAL_SUBGATES",
+      "actual": "UNKNOWN_CAUSAL_SUBGATES",
+      "matchesManualOracle": true
+    },
+    {
+      "input": "unknown-service-order.v3.json",
+      "inputSHA256": "8f8c8b79aa099b596ee4cac828aaa45eb1a2933cb6056349f1e5b723955a84f5",
+      "expected": "UNKNOWN_CAUSAL_SUBGATES",
+      "actual": "UNKNOWN_CAUSAL_SUBGATES",
+      "matchesManualOracle": true
+    },
+    {
+      "input": "unknown-service-condition-event.v3.json",
+      "inputSHA256": "2799bdedef087b5ec7815e8d2f7db5b4d2bc87419c3ee5dba829e7f30d3a6861",
+      "expected": "UNKNOWN_CAUSAL_SUBGATES",
+      "actual": "UNKNOWN_CAUSAL_SUBGATES",
+      "matchesManualOracle": true
+    },
+    {
+      "input": "crossrun-input.v3.json",
+      "inputSHA256": "ef40d7c9c4f108bfc4ea859c4859700b8af78ec5c066b82c3e6a434a01a2fee1",
+      "expected": "VALID_BINDINGS_CAUSAL_UNKNOWN",
+      "actual": "VALID_BINDINGS_CAUSAL_UNKNOWN",
+      "matchesManualOracle": true
+    },
+    {
+      "input": "negative-bundle-ref-absent.v3.json",
+      "inputSHA256": "f782f37ca12f3f56e62e9e1ff9e94c3e3ab419d6769c8d38b8a0c54276fe7007",
+      "expected": "REJECT_BINDING",
+      "actual": "REJECT_BINDING",
+      "matchesManualOracle": true
+    },
+    {
+      "input": "negative-bundle-run.v3.json",
+      "inputSHA256": "6022c6297e5ef15981498d25a3084334163da8375504572d7ec3e8c133cef8df",
+      "expected": "REJECT_BINDING",
+      "actual": "REJECT_BINDING",
+      "matchesManualOracle": true
+    },
+    {
+      "input": "negative-bundle-epoch.v3.json",
+      "inputSHA256": "1b4cf1e2c15f888f029042d20180abdbb882ca1d33cee4bec4f55a11085cd936",
+      "expected": "REJECT_BINDING",
+      "actual": "REJECT_BINDING",
+      "matchesManualOracle": true
+    },
+    {
+      "input": "negative-bundle-role.v3.json",
+      "inputSHA256": "74fdee5e3b85b8276949b9ab36c2ad9def8a192afbc87333f4f6ae8e40b0db0e",
+      "expected": "REJECT_BINDING",
+      "actual": "REJECT_BINDING",
+      "matchesManualOracle": true
+    },
+    {
+      "input": "negative-evaluation-input.v3.json",
+      "inputSHA256": "c8f7d5112f84f883f2fe3e68ddc5b1bc0efb20f7da35528ab901924b39f41820",
+      "expected": "REJECT_BINDING",
+      "actual": "REJECT_BINDING",
+      "matchesManualOracle": true
+    },
+    {
+      "input": "negative-bundle-kind.v3.json",
+      "inputSHA256": "118ab5e84a63579f4c826f942d748b6bf2ec791fab0edb177a0f26b821af5e57",
+      "expected": "REJECT_BINDING",
+      "actual": "REJECT_BINDING",
+      "matchesManualOracle": true
+    },
+    {
+      "input": "negative-bundle-schema.v3.json",
+      "inputSHA256": "ef719f965ff97ec712d8380a7cf9b28b4ca402e824f0b3a162fb376b62248bc8",
+      "expected": "REJECT_BINDING",
+      "actual": "REJECT_BINDING",
+      "matchesManualOracle": true
+    }
+  ],
+  "pending": [
+    "formal-v3 nativehelper/Luna",
+    "independent-Sol review",
+    "G1 semantic evaluator fixtures",
+    "48+8 scientific designs"
+  ],
+  "noGo": "NO-GO-R2 until independent reviews"
+}

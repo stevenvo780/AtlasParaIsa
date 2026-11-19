@@ -9,6 +9,7 @@ import { projectAnimal } from './animals.js';
 import type { LegacyRecord } from '../shared/demography.js';
 import { bindTechnologyCatalogue, type TechnologyCatalogueReader } from './technology-catalogue.js';
 import { lastTileAt, splitTileBlocks, tileIndexAppended } from './tile-index.js';
+import { emitObserved, observationSession, unbindObservationSource } from './observation.js';
 
 export interface WorldContext {
   loadChunk?: (key: string, atTick: number) => Chunk | null;
@@ -138,9 +139,21 @@ function activateChunk(world: World, key: string, x: number, y: number, context:
   const from = world.tiles.length;
   world.tiles.push(...initialized);
   tileIndexAppended(world.tiles, from);
-  world.animals.push(...(animals ?? materializeAnimals(world.seed, initialized, world.tick)));
+  const activeAnimals = animals ?? materializeAnimals(world.seed, initialized, world.tick);
+  world.animals.push(...activeAnimals);
+  const structureStart = world.structures.length;
   world.structures.push(...(structures ?? legacyStructures(tiles, world.tick)));
   for (const place of meta.places) if (!world.places.some(p => p.id === place.id)) world.places.push(place);
+  emitObserved(world, 'spatial.activate', () => ({ kind: 'region-boundary', operation: archived ? 'reactivate' : 'materialize',
+    regionId: key, previousLocalTick: archived?.lastTick ?? null, globalTick: world.tick,
+    tileStocks: initialized.map(tile => ({ x: tile.x, y: tile.y, food: tile.food, wood: tile.wood ?? 0,
+      stone: tile.stone ?? 0, drinkingWater: tile.drinkingWater ?? 0, vegetation: tile.vegetation,
+      moisture: tile.moisture, fertility: tile.fertility ?? 0, fauna: tile.fauna ?? 0 })),
+    animalIds: activeAnimals.map(animal => animal.id),
+    structureIds: world.structures.slice(structureStart).map(structure => structure.id) }));
+  if (observationSession(world)) for (const structure of world.structures.slice(structureStart))
+    emitObserved(world, 'spatial.structure-active', () => ({ family: 'exposure', actorIds: structure.builderId ? [structure.builderId] : [],
+      payload: { subjectId: structure.id, regionId: key, startTick: world.tick, mode: 'active' } }));
 }
 /** Only agent neighborhoods advance ecology. Camera queries never call this function. */
 export function maintainRegions(world: World, context: WorldContext = worldContext(world)): void {
@@ -210,6 +223,18 @@ export function maintainRegions(world: World, context: WorldContext = worldConte
     });
     // The three memory anchors remain available as provenance even when dormant.
     world.places = world.places.filter(p => ['claro', 'refugio', 'huerta'].includes(p.id) || !retired.has(chunkKey(p.x, p.y)));
+    for (const [key, chunk] of detached) {
+      emitObserved(world, 'spatial.retire', () => ({ kind: 'region-boundary',
+        operation: 'archive', regionId: key, globalTick: world.tick, localTick: chunk.lastTick,
+        tileStocks: chunk.tiles.map(tile => ({ x: tile.x, y: tile.y, food: tile.food, wood: tile.wood ?? 0,
+          stone: tile.stone ?? 0, drinkingWater: tile.drinkingWater ?? 0, vegetation: tile.vegetation,
+          moisture: tile.moisture, fertility: tile.fertility ?? 0, fauna: tile.fauna ?? 0 })),
+        animalIds: (chunk.animals ?? []).map(animal => animal.id), structureIds: (chunk.structures ?? []).map(structure => structure.id) }));
+      if (observationSession(world)) for (const structure of chunk.structures ?? [])
+        emitObserved(world, 'spatial.structure-archived', () => ({ family: 'exposure', actorIds: structure.builderId ? [structure.builderId] : [],
+          payload: { subjectId: structure.id, regionId: key, endTick: world.tick, localEndTick: chunk.lastTick, mode: 'archived' } }));
+      for (const tile of chunk.tiles) unbindObservationSource(tile);
+    }
   }
 }
 export function normalizeViewport(value?: Viewport): Viewport {

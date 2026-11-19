@@ -1,0 +1,61 @@
+{
+  "contractVersion": "realismo-v3",
+  "evidenceId": "law",
+  "kind": "law",
+  "synthetic": true,
+  "sourceRefs": [],
+  "payload": {
+    "sourceSHA": "0000000000000000000000000000000000000000",
+    "lawVersion": "manual-synthetic-law",
+    "phaseOrder": [
+      "wear",
+      "service"
+    ],
+    "formulaDefinitions": [
+      {
+        "formulaId": "synthetic.functional-service",
+        "expression": "serviceEnabled iff condition > functionalCutoff",
+        "inputFields": [
+          "condition",
+          "functionalCutoff"
+        ],
+        "outputField": "serviceEnabled",
+        "unit": "boolean"
+      }
+    ],
+    "parameters": [
+      {
+        "name": "functionalCutoff",
+        "value": 0.1,
+        "unit": "condition"
+      }
+    ],
+    "sourceRefs": []
+  },
+  "fieldCoverage": {
+    "sourceSHA": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "lawVersion": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "phaseOrder": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "formulaDefinitions": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "parameters": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "sourceRefs": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    }
+  }
+}

@@ -1,0 +1,102 @@
+{
+  "contractVersion": "realismo-v3",
+  "status": "MANUAL_ORACLE_NOT_ENGINE_NOT_G1_ACCEPTANCE",
+  "fixes": 2,
+  "cases": [
+    {
+      "input": "conservation-service.v3.json",
+      "expected": "BALANCE_CLOSED_C10_FAIL_BASELINE_UNKNOWN",
+      "purpose": "Good partial conservation with an independently backed invalid service at cutoff; no marginal baseline",
+      "inputSHA256": "37bf88a30ae3d41d8e25573e59cb23ee914391f8c7b49f8de2cdd7ebcd3e188b"
+    },
+    {
+      "input": "condition-inputs-service.v3.json",
+      "expected": "BALANCE_CLOSED_C10_FAIL_BASELINE_UNKNOWN",
+      "purpose": "Exact event-bound law-inputs condition alternative",
+      "inputSHA256": "6747a7f0e0aac0525f71c6bacad8c39564acb4b32317b2d4d236f1cb05da4a6a"
+    },
+    {
+      "input": "negative-condition-input-event.v3.json",
+      "expected": "UNKNOWN_CAUSAL_SUBGATES",
+      "purpose": "law-inputs has right tick but wrong event",
+      "inputSHA256": "030bcd96f6b300688568f3b484346315bce1ea8ef9d97a6699d474e5c69beb18"
+    },
+    {
+      "input": "unknown-law-sha.v3.json",
+      "expected": "UNKNOWN_CAUSAL_SUBGATES",
+      "purpose": "Law SHA differs; indexed bytes themselves are intact",
+      "inputSHA256": "95578641120fe25d1c6cdd95b6076485821fed6ed09a3aa63090a1b2e902b7d4"
+    },
+    {
+      "input": "unknown-order-sha.v3.json",
+      "expected": "UNKNOWN_CAUSAL_SUBGATES",
+      "purpose": "Source-order SHA differs; indexed bytes themselves are intact",
+      "inputSHA256": "9a8ac563f424d81d17cfd024266ba254ead281b82bf378ef99f70bf7f5307667"
+    },
+    {
+      "input": "unknown-service-order.v3.json",
+      "expected": "UNKNOWN_CAUSAL_SUBGATES",
+      "purpose": "Order reference intentionally absent",
+      "inputSHA256": "8f8c8b79aa099b596ee4cac828aaa45eb1a2933cb6056349f1e5b723955a84f5"
+    },
+    {
+      "input": "unknown-service-condition-event.v3.json",
+      "expected": "UNKNOWN_CAUSAL_SUBGATES",
+      "purpose": "Earlier wear event cannot substitute service condition",
+      "inputSHA256": "2799bdedef087b5ec7815e8d2f7db5b4d2bc87419c3ee5dba829e7f30d3a6861"
+    },
+    {
+      "input": "crossrun-input.v3.json",
+      "expected": "VALID_BINDINGS_CAUSAL_UNKNOWN",
+      "purpose": "Indexed leaves/manifests/evaluation resolve; no causal ledgers executed",
+      "inputSHA256": "ef40d7c9c4f108bfc4ea859c4859700b8af78ec5c066b82c3e6a434a01a2fee1"
+    },
+    {
+      "input": "negative-bundle-ref-absent.v3.json",
+      "expected": "REJECT_BINDING",
+      "purpose": "Manifest observationRef has no indexed leaf",
+      "inputSHA256": "f782f37ca12f3f56e62e9e1ff9e94c3e3ab419d6769c8d38b8a0c54276fe7007"
+    },
+    {
+      "input": "negative-bundle-run.v3.json",
+      "expected": "REJECT_BINDING",
+      "purpose": "Manifest and leaf runId contradict",
+      "inputSHA256": "6022c6297e5ef15981498d25a3084334163da8375504572d7ec3e8c133cef8df"
+    },
+    {
+      "input": "negative-bundle-epoch.v3.json",
+      "expected": "REJECT_BINDING",
+      "purpose": "Manifest and leaf epochId contradict",
+      "inputSHA256": "1b4cf1e2c15f888f029042d20180abdbb882ca1d33cee4bec4f55a11085cd936"
+    },
+    {
+      "input": "negative-bundle-role.v3.json",
+      "expected": "REJECT_BINDING",
+      "purpose": "Manifest and leaf artifactRole contradict",
+      "inputSHA256": "74fdee5e3b85b8276949b9ab36c2ad9def8a192afbc87333f4f6ae8e40b0db0e"
+    },
+    {
+      "input": "negative-evaluation-input.v3.json",
+      "expected": "REJECT_BINDING",
+      "purpose": "Evaluation epoch contradicts indexed input",
+      "inputSHA256": "c8f7d5112f84f883f2fe3e68ddc5b1bc0efb20f7da35528ab901924b39f41820"
+    },
+    {
+      "input": "negative-bundle-kind.v3.json",
+      "expected": "REJECT_BINDING",
+      "purpose": "Wrong index kind/schema, no alias fallback",
+      "inputSHA256": "118ab5e84a63579f4c826f942d748b6bf2ec791fab0edb177a0f26b821af5e57"
+    },
+    {
+      "input": "negative-bundle-schema.v3.json",
+      "expected": "REJECT_BINDING",
+      "purpose": "Wrong index kind/schema, no alias fallback",
+      "inputSHA256": "ef719f965ff97ec712d8380a7cf9b28b4ca402e824f0b3a162fb376b62248bc8"
+    }
+  ],
+  "unchangedScientificDesignCounts": {
+    "cases": 48,
+    "transverse": 8
+  },
+  "sourceReviewJob": "job47510e03921d4091a2fac76ead47299f"
+}

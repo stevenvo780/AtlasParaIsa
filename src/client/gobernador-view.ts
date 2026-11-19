@@ -8,8 +8,8 @@
  * · apagar: por encima del presupuesto no nace nadie; bajo el 70 % vuelve a permitirse.
  * · manual: una orden humana manda sobre el gobernador.
  */
-import type { RuntimeStats } from '../shared/types.js';
-import { number } from './ui-catalog.js';
+import type { RuntimeStats, WorldView } from '../shared/types.js';
+import { esc, number } from './ui-catalog.js';
 
 export type Gobernador = NonNullable<RuntimeStats['gobernador']>;
 export type EstadoCrecimiento = 'libre' | 'reponiendo' | 'en-techo' | 'apagado' | 'manual';
@@ -82,6 +82,114 @@ export function ultimoFrenazo(g: Gobernador | undefined, ticksPorDia = 2400): { 
   const habitantes = `${number(f.poblacion)} ${f.poblacion === 1 ? 'habitante' : 'habitantes'}`;
   const medida = `paso p95 ${ms(f.p95)} > ${ms(g.presupuestoMs)} con ${habitantes} y ${number(f.teselasActivas)} casillas activas`;
   return { vigente, titular, texto: `Día ${number(dia)} (paso ${number(f.tick)}): ${medida}.` };
+}
+
+export type EstadoGobernador = 'verde' | 'amarillo' | 'rojo' | 'manual';
+
+/** Entrada laxa del panel: acepta los campos nuevos (T165) y los de siempre, todos opcionales. */
+export interface GobernadorPanelInput {
+  estado?: EstadoGobernador; politica?: string; presupuestoMs?: number;
+  p95Ms?: number; p95StepMs?: number; maxMs?: number; faseMax?: string; senal?: string;
+  teselasActivas?: number; teselasPorHabitante?: number;
+  techoPoblacion?: number | null; techo?: number | null;
+  reproductionEnabled?: boolean; activo?: boolean; manual?: boolean | null;
+  techoObservado?: { p95: number; maxMs?: number; poblacion: number; teselasActivas: number; teselasPorHabitante: number; senal: string; tick: number; motivo?: string } | null;
+}
+
+export interface PanelGobernador {
+  estado: EstadoGobernador;
+  titulo: string;
+  lineas: string[];
+  texto: string;
+  html: string;
+  manual: boolean;
+  senal: string | null;
+  teselasPorHabitante: number | null;
+  techoPoblacion: number | null;
+  techoObservado: GobernadorPanelInput['techoObservado'];
+  p95Ms: number | null;
+  presupuestoMs: number | null;
+  maxMs: number | null;
+  faseMax: string | null;
+}
+
+const finito = (v: number | undefined | null): v is number => v !== undefined && v !== null && Number.isFinite(v);
+
+/**
+ * T165: panel del gobernador, puro y sin DOM. Acepta el gobernador suelto, el `RuntimeStats`
+ * (`performance`) o el `WorldView` (`state`) entero. Muestra causas: estado, señal y margen,
+ * pico de ventana, teselas por habitante y el techo observado, que se conserva aunque el
+ * estado actual vuelva a verde. Si hay orden manual, lo dice explícitamente.
+ */
+export function formatearPanelGobernador(
+  entrada: GobernadorPanelInput | RuntimeStats | Pick<WorldView, 'performance' | 'stats'> | null | undefined,
+  poblacion?: number,
+  teselasActivasRespaldo?: number,
+): PanelGobernador | null {
+  if (!entrada) return null;
+  let g: GobernadorPanelInput | undefined;
+  let runtime: RuntimeStats | undefined;
+  let poblacionVista = poblacion;
+  if ('performance' in entrada) {
+    runtime = entrada.performance;
+    g = runtime?.gobernador as GobernadorPanelInput | undefined;
+    poblacionVista ??= entrada.stats?.population;
+  } else if ('gobernador' in entrada) {
+    runtime = entrada as RuntimeStats;
+    g = runtime.gobernador as GobernadorPanelInput | undefined;
+  } else g = entrada as GobernadorPanelInput;
+  if (!g) return null;
+  const presupuestoMs = finito(g.presupuestoMs) ? g.presupuestoMs : null;
+  const p95Ms = finito(g.p95Ms) ? g.p95Ms : finito(g.p95StepMs) ? g.p95StepMs : finito(runtime?.p95StepMs) ? runtime!.p95StepMs : null;
+  const maxMs = finito(g.maxMs) ? g.maxMs : null;
+  const faseMax = g.faseMax ?? null;
+  const techoObservado = g.techoObservado ?? null;
+  const techoPoblacion = g.techoPoblacion !== undefined ? g.techoPoblacion : g.techo !== undefined ? g.techo : null;
+  const teselasActivas = finito(g.teselasActivas) ? g.teselasActivas : finito(runtime?.activeTiles) ? runtime!.activeTiles : finito(teselasActivasRespaldo) ? teselasActivasRespaldo : null;
+  const teselasPorHabitante = finito(g.teselasPorHabitante) ? g.teselasPorHabitante
+    : teselasActivas !== null && poblacionVista !== undefined && poblacionVista > 0 ? teselasActivas / poblacionVista : null;
+  const manual = g.estado === 'manual' || (g.manual !== null && g.manual !== undefined);
+  const reproduccion = g.reproductionEnabled ?? g.activo;
+  let estadoPanel: EstadoGobernador;
+  if (manual) estadoPanel = 'manual';
+  else if (g.estado) estadoPanel = g.estado;
+  else if (p95Ms !== null && presupuestoMs !== null && presupuestoMs > 0) estadoPanel = p95Ms > presupuestoMs ? 'rojo' : p95Ms >= presupuestoMs * 0.7 ? 'amarillo' : 'verde';
+  else if (techoPoblacion !== null) estadoPanel = 'amarillo';
+  else estadoPanel = 'verde';
+  const senal = g.senal ?? techoObservado?.senal ?? (p95Ms !== null && presupuestoMs !== null && p95Ms > presupuestoMs ? 'p95' : null);
+  const lineas: string[] = [`Estado del gobernador: ${estadoPanel}`];
+  if (manual) lineas.push(`Gobernador en modo manual: los nacimientos ${reproduccion === false ? 'están detenidos' : reproduccion === true ? 'están permitidos' : 'quedan fijados'} por orden manual${g.reproductionEnabled !== undefined ? ' (reproductionEnabled fijado manualmente)' : ''}; el gobernador mide el paso pero no decide.`);
+  if (g.politica) lineas.push(`Política del gobernador: ${g.politica}.`);
+  if (p95Ms !== null && presupuestoMs !== null) {
+    const margen = presupuestoMs - p95Ms;
+    lineas.push(`Señal disparadora: ${senal ?? 'p95'}; paso p95 ${ms(p95Ms)} frente a ${ms(presupuestoMs)} de presupuesto (margen ${ms(margen)}).`);
+  } else if (senal) lineas.push(`Señal disparadora: ${senal}.`);
+  if (maxMs !== null) lineas.push(`Pico máximo de la ventana: ${ms(maxMs)}${faseMax ? ` en la fase ${faseMax}` : ''}.`);
+  else if (faseMax) lineas.push(`Fase del pico máximo: ${faseMax}.`);
+  if (teselasPorHabitante !== null) lineas.push(`Teselas activas por habitante: ${number(teselasPorHabitante, 2)}${teselasActivas !== null && poblacionVista !== undefined && poblacionVista > 0 ? ` (${number(teselasActivas)} teselas activas / ${number(poblacionVista)} habitantes)` : ''}.`);
+  else if (poblacionVista === 0) lineas.push('Teselas activas por habitante: sin habitantes.');
+  if (techoPoblacion !== null && techoPoblacion !== undefined) lineas.push(`Techo de población: ${number(techoPoblacion)} habitantes.`);
+  if (techoObservado) {
+    const obs = techoObservado.motivo
+      ? `Techo observado: ${techoObservado.motivo}`
+      : `Techo observado: frenado por ${techoObservado.senal} = ${ms(techoObservado.p95)} con ${number(techoObservado.poblacion)} habitantes y ${number(techoObservado.teselasActivas)} teselas activas (paso ${number(techoObservado.tick)}).`;
+    lineas.push(obs.endsWith('.') ? obs : `${obs}.`);
+    if (finito(techoObservado.teselasPorHabitante)) lineas.push(`En el último frenazo: ${number(techoObservado.teselasPorHabitante, 2)} teselas activas por habitante.`);
+    if (finito(techoObservado.maxMs)) lineas.push(`Pico del último frenazo: ${ms(techoObservado.maxMs!)}.`);
+  }
+  const titulo = `Gobernador: ${estadoPanel}`;
+  const items = lineas.map(linea => `<li>${esc(linea)}</li>`).join('');
+  const html = `<section class="stats-section" data-panel-gobernador data-estado="${esc(estadoPanel)}"${manual ? ' data-manual="true"' : ''}><div class="stats-section-heading"><h3>Panel del gobernador</h3><span>${esc(titulo)}</span></div><ul class="governor-panel">${items}</ul></section>`;
+  return { estado: estadoPanel, titulo, lineas, texto: lineas.join(' '), html, manual, senal, teselasPorHabitante, techoPoblacion, techoObservado, p95Ms, presupuestoMs, maxMs, faseMax };
+}
+
+/** HTML del panel del gobernador; cadena vacía si el servidor no informó el gobernador. */
+export function renderPanelGobernador(
+  entrada: Parameters<typeof formatearPanelGobernador>[0],
+  poblacion?: number,
+  teselasActivasRespaldo?: number,
+): string {
+  return formatearPanelGobernador(entrada, poblacion, teselasActivasRespaldo)?.html ?? '';
 }
 
 /** Ritmo real del mundo frente al pedido. `objetivo` ausente: no se afirma que vaya lento. */

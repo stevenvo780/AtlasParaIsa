@@ -182,8 +182,13 @@ export interface RuntimeStats { stepMs: number; p95StepMs: number; saveMs: numbe
   gobernador?: { activo: boolean; presupuestoMs: number; p95StepMs: number; manual: boolean | null;
     /** Política vigente (`gobernador.politica`), techo de población vigente con la política `techo`
      * (null = sin freno) y el último frenazo registrado (T164; no se borra al volver a verde). */
-    politica?: 'apagar' | 'techo'; techo?: number | null;
-    techoObservado?: { p95: number; poblacion: number; teselasActivas: number; teselasPorHabitante: number; senal: 'p95'; tick: number; motivo: string } | null }; }
+    politica?: string; techo?: number | null;
+    /** T165: campos opcionales del panel (compatibles hacia atrás; un servidor anterior los omite). */
+    estado?: 'verde' | 'amarillo' | 'rojo' | 'manual';
+    p95Ms?: number; maxMs?: number; faseMax?: string; senal?: string;
+    teselasActivas?: number; teselasPorHabitante?: number;
+    techoPoblacion?: number | null; reproductionEnabled?: boolean;
+    techoObservado?: { p95: number; maxMs?: number; poblacion: number; teselasActivas: number; teselasPorHabitante: number; senal: string; tick: number; motivo: string } | null }; }
 export type GestureKind = 'plant' | 'invite' | 'remember' | 'command';
 export interface Gesture { id: string; kind: GestureKind; x: number; y: number; memoryId?: string; agentId?: string; order?: Order; }
 export interface GestureResult {

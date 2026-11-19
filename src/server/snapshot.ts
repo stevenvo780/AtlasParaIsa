@@ -1,4 +1,5 @@
 import type { Tile } from '../shared/types.js';
+import type { Chunk } from '../world/terrain.js';
 import { RULES_VERSION, type World } from '../world/index.js';
 import { DEFAULT_PARAMS, HISTORICAL_PARAMS, LEGACY_WORLD_LIMITS, PARAMETER_LIMITS_RULES_VERSION, WORLD_LIMIT_KEYS,
   assertWorldLimits, effectiveLimits, parseParams, type WorldLimits, type WorldParams } from '../world/params.js';
@@ -7,6 +8,10 @@ import { exactJsonNumber, stringifyExact } from '../shared/exact-json.js';
 // Lossless JSON tuples avoid repeating twenty property names for every active tile
 // on every durable step. Old object snapshots remain readable. No float quantization.
 export const SNAPSHOT_TILE_ENCODING = 'tiles-tuple-v1';
+/** T133: archived (retired) chunks reuse the tile tuple for `tiles` only; every
+ * other chunk field (animals, structures, places, …) keeps its plain JSON shape,
+ * so SQLite queries over `$.animals`/`$.structures` keep working unchanged. */
+export const ARCHIVED_CHUNK_TILE_ENCODING = 'chunk-tiles-tuple-v1';
 /** R8: los `WorldParams` viven en un `WeakMap` por instancia (params.ts, ruling R3), así
  * que `load()` reconstruía el mundo desde JSON SIN ellos y volvía silenciosamente a
  * `DEFAULT_PARAMS`. Viajan en la instantánea como campo versionado y aparte del `World`:
@@ -223,3 +228,49 @@ export function finishDecodedRecord(record: Record<string, unknown>): void {
   delete record.limitsProfile;
 }
 export function decodeSnapshot(body: string): unknown { return decodeSnapshotValue(parseSnapshotJSON(body)); }
+/** T133: encode a retired chunk with its tiles as tuples (same lossless rows as
+ * `tiles-tuple-v1`); all other fields travel exactly as `stringifyExact(chunk)` wrote them. */
+export function encodeArchivedChunk(chunk: Chunk): string {
+  if (!chunk || typeof chunk !== 'object' || !Array.isArray(chunk.tiles))
+    throw new Error('Invalid archived chunk tiles. Snapshot was not written.');
+  let rows = encodeSnapshotTileRows(chunk.tiles);
+  // Coordinates are implicit in a chunk: tile i sits at (cx*16 + i%16, cy*16 + i/16),
+  // exactly as `assertChunk` requires (same rationale as the SoA terrain of T112).
+  // When every tile matches that derivation, drop the two leading slots; the decoder
+  // rebuilds them from the grid. Any other chunk keeps the full 20-field tuple.
+  if (Number.isSafeInteger(chunk.cx) && Number.isSafeInteger(chunk.cy)) {
+    const x0 = chunk.cx * 16, y0 = chunk.cy * 16;
+    if (rows.every((row, i) => row[0] === x0 + i % 16 && row[1] === y0 + Math.floor(i / 16)))
+      rows = rows.map(row => row.slice(2));
+  }
+  const encoded: Record<string, unknown> = { ...(chunk as unknown as Record<string, unknown>),
+    tiles: rows, tileEncoding: ARCHIVED_CHUNK_TILE_ENCODING };
+  // Same fast path as `encodeSnapshot`: tiles already validated, keep their native
+  // serializer so `-0` rawJSON rows survive; the rest uses the exact writer.
+  const fields: string[] = [];
+  for (const [key, value] of Object.entries(encoded)) {
+    const fragment = key === 'tiles' ? JSON.stringify(value) : stringifyExact(value);
+    if (fragment !== undefined) fields.push(`${JSON.stringify(key)}:${fragment}`);
+  }
+  return `{${fields.join(',')}}`;
+}
+/** Accepts both the historical plain-JSON chunk body and `chunk-tiles-tuple-v1`,
+ * returning exactly the same `Chunk` (same keys and values) in either case. */
+export function decodeArchivedChunk(body: string): Chunk {
+  const value: unknown = JSON.parse(body);
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value as Chunk;
+  const record = value as Record<string, unknown>;
+  if (!('tileEncoding' in record)) return value as Chunk;
+  if (record.tileEncoding !== ARCHIVED_CHUNK_TILE_ENCODING || !Array.isArray(record.tiles))
+    throw new SnapshotSemanticError('Invalid archived chunk tile encoding. Explicit recovery required.');
+  // Restore dropped coordinates from the chunk grid before expanding the tuples:
+  // an 18-field row is a 20-field tuple whose x,y are the grid position of its index.
+  if (Number.isSafeInteger(record.cx) && Number.isSafeInteger(record.cy)) {
+    const x0 = (record.cx as number) * 16, y0 = (record.cy as number) * 16;
+    record.tiles = (record.tiles as unknown[]).map((row, i) => Array.isArray(row) && row.length === SNAPSHOT_TILE_FIELDS.length - 2
+      ? [x0 + i % 16, y0 + Math.floor(i / 16), ...row] : row);
+  }
+  record.tiles = decodeSnapshotTileRows(record.tiles as unknown[]);
+  delete record.tileEncoding;
+  return value as Chunk;
+}

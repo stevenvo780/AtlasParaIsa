@@ -51,7 +51,9 @@ Store.prototype.backup = function(destination) {
       const tick = mode === 'old-chunk-checksum' || table === 'legacy' ? 0 : 1;
       const row = writer.prepare('SELECT rowid,body FROM ' + table + ' WHERE tick=?').get(tick);
       const value = JSON.parse(row.body);
-      if (table === 'chunks') value.tiles[0].food = mode.endsWith('semantic') ? -1 : 0.987654321;
+      if (table === 'chunks') { const tile = value.tiles[0]; const food = mode.endsWith('semantic') ? -1 : 0.987654321;
+        // T133: tiles travel as tuples (food is slot 5, or 3 when x,y are grid-implicit); old bodies keep object tiles.
+        if (Array.isArray(tile)) tile[tile.length === 18 ? 3 : 5] = food; else tile.food = food; }
       else value.cause = mode.endsWith('semantic') ? 'invalid' : 'dehydration';
       const body = JSON.stringify(value);
       if (mode.endsWith('semantic')) writer.prepare('UPDATE ' + table + ' SET body=?,digest=? WHERE rowid=?')

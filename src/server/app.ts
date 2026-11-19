@@ -13,6 +13,7 @@ import { technologyCatalogueNearCapacity } from '../world/technology-catalogue.j
 import { technologyJournalNearCapacity } from '../world/technology-journal.js';
 import { chronicleJournalNearCapacity } from '../world/chronicle-journal.js';
 import type { ClientMessage, Gesture, GestureResult, ServerMessage, Viewport, WorldView, RuntimeStats, FaseNombre } from '../shared/types.js';
+import { computeStateDelta } from '../shared/deltas.js';
 import { Store, fingerprint, GestureConflict, SessionRevoked } from './store.js';
 import { cookie, hashToken, makeToken, passwordVerifier, sessionHash } from './auth.js';
 import { ensureWorldInstance, readWorldInstance } from './world-instance.js';
@@ -72,6 +73,8 @@ type ClienteWs = {
   lastSentAt: number;
   /** `null` = cliente sin acuse (pestaña con el cliente anterior): conserva el camino de siempre. */
   flujo: Flujo | null;
+  /** T135: estado de deltas por socket; `null` hasta que `red.deltas` lo activa para este socket. */
+  delta: { prev: WorldView | null; buffer: WorldView[]; ackedSequence: number; needFull: boolean; viewportKey: string } | null;
 };
 /** Estadística de un socket vivo, para bancos y pruebas; no expone sesión ni contenido. */
 export interface FlujoCliente { remotePort: number | null; acuse: boolean; subscribeMs: number; enVuelo: boolean; enviados: number; aplazados: number; acuses: number; ultimoAcuseMs: number | null; ultimoEnlaceMs: number | null; comprime: boolean; bufferedAmount: number }
@@ -454,7 +457,33 @@ export function createApp(options: AppOptions) {
       const projected = view(client.viewport);
       client.lastView = projected;
       client.lastBroadcastAt = Date.now();
-      send(socket, { type: 'state', world: projected });
+      // T135: con `red.deltas=false` (default) el camino es exactamente el de siempre.
+      if (!paramsOf(world).red.deltas) { send(socket, { type: 'state', world: projected }); return; }
+      if (!client.delta) client.delta = { prev: null, buffer: [], ackedSequence: -1, needFull: true, viewportKey: '' };
+      const deltaState = client.delta;
+      const viewportKey = client.viewport ? `${client.viewport.x},${client.viewport.y},${client.viewport.width},${client.viewport.height}` : '';
+      if (viewportKey !== deltaState.viewportKey) { deltaState.viewportKey = viewportKey; deltaState.needFull = true; deltaState.prev = null; }
+      if (deltaState.needFull || !deltaState.prev) {
+        // `state` completo acotado al viewport: solo con el socket drenado o dentro del límite seguro.
+        if (socket.bufferedAmount > 256 * 1024) { if (client.flujo) client.flujo.pendiente = true; return; }
+        send(socket, { type: 'state', world: projected });
+        if (socket.readyState === WebSocket.OPEN) {
+          deltaState.prev = projected; deltaState.buffer = [projected]; deltaState.needFull = false;
+        }
+        return;
+      }
+      const delta = computeStateDelta(deltaState.prev, projected);
+      const text = JSON.stringify(delta);
+      if (client.flujo) {
+        emitir(socket, text, false);
+        client.flujo.enVuelo = { sequence: delta.sequence, sentAt: relojReal(), bytes: Buffer.byteLength(text) };
+        client.flujo.pendiente = false; client.flujo.enviados++;
+      } else {
+        if (socket.bufferedAmount > 256 * 1024) return;
+        emitir(socket, text, false);
+      }
+      deltaState.prev = projected;
+      deltaState.buffer.push(projected); if (deltaState.buffer.length > 8) deltaState.buffer.shift();
     } catch (error) {
       // A camera read is not a simulation transaction. Never retry the failing archive in a fallback.
       // `HttpError`: un mundo a medio paso sin vista anterior (ver `view`), no una región ilegible.
@@ -695,7 +724,7 @@ export function createApp(options: AppOptions) {
       ws.handleUpgrade(req, socket, head, client => {
         clients.set(client, { hash, alive: true, messages: 0, window: Date.now(), subscribeMs: 0, lastBroadcastAt: 0, lastSentAt: Date.now(),
           ...(solicitud.viewport ? { viewport: solicitud.viewport } : {}),
-          flujo: solicitud.acuse ? { enVuelo: null, pendiente: false, enviados: 0, aplazados: 0, acuses: 0, ultimoAcuseMs: null, ultimoEnlaceMs: null, comprimir: compresion !== 'nunca', rapidos: 0, lentos: 0 } : null });
+          flujo: solicitud.acuse ? { enVuelo: null, pendiente: false, enviados: 0, aplazados: 0, acuses: 0, ultimoAcuseMs: null, ultimoEnlaceMs: null, comprimir: compresion !== 'nunca', rapidos: 0, lentos: 0 } : null, delta: null });
         client.on('error', () => client.terminate());
         client.on('pong', () => { const info = clients.get(client); if (info) info.alive = true; });
         client.on('close', () => clients.delete(client));
@@ -708,13 +737,32 @@ export function createApp(options: AppOptions) {
             if (Date.now() - info.window >= 10_000) { info.window = Date.now(); info.messages = 0; }
             // El acuse que libera el `state` en vuelo no gasta cupo: cada uno responde a un `state`
             // que el servidor eligió mandar. Un acuse suelto o repetido sí cuenta (y no libera nada).
-            if (!binary && info.flujo?.enVuelo && esAcuse(data, info.flujo.enVuelo.sequence)) { liberar(client, info.flujo); return; }
+            if (!binary && info.flujo?.enVuelo && esAcuse(data, info.flujo.enVuelo.sequence)) {
+              if (info.delta) { info.delta.ackedSequence = info.flujo.enVuelo.sequence; if (info.delta.buffer.length && info.delta.ackedSequence < info.delta.buffer[0]!.sequence) info.delta.needFull = true; }
+              liberar(client, info.flujo); return;
+            }
             if (++info.messages > 120) { client.close(4008, 'Demasiados mensajes.'); return; }
             if (binary) throw new HttpError(400, 'Se requiere JSON.');
             const parsed = JSON.parse(data.toString()) as Partial<ClientMessage> & { gesture?: unknown; viewport?: Viewport; id?: unknown; intervaloMs?: unknown };
-            if (parsed?.type === 'ack') return;
+            if (parsed?.type === 'ack') {
+              // T135: un `ack` demasiado viejo (fuera del buffer corto) fuerza un `state` completo.
+              if (info.delta && typeof (parsed as { sequence?: unknown }).sequence === 'number') {
+                const seq = (parsed as { sequence: number }).sequence;
+                info.delta.ackedSequence = seq;
+                if (info.delta.buffer.length && seq < info.delta.buffer[0]!.sequence) info.delta.needFull = true;
+              }
+              return;
+            }
+            if (parsed?.type === 'resync') {
+              const req = parsed as { viewport?: Viewport };
+              if (req.viewport) { try { info.viewport = normalizeViewport(req.viewport); } catch { throw new HttpError(400, 'Ventana de cámara no válida.'); } }
+              if (info.delta) { info.delta.prev = null; info.delta.buffer = []; info.delta.needFull = true; }
+              if (info.flujo) info.flujo.enVuelo = null;
+              sendView(client); return;
+            }
             if (parsed?.type === 'viewport') {
               try { info.viewport = normalizeViewport(parsed.viewport); } catch { throw new HttpError(400, 'Ventana de cámara no válida.'); }
+              if (info.delta) { info.delta.prev = null; info.delta.needFull = true; }
               // Con acuse, si hay un `state` en vuelo esto solo lo apunta: al llegar el acuse sale uno
               // con la cámara más reciente, por muchas que hayan llegado entretanto.
               sendView(client); return;

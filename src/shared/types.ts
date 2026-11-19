@@ -184,6 +184,15 @@ export interface RuntimeStats { stepMs: number; p95StepMs: number; saveMs: numbe
      * (null = sin freno) y el último frenazo registrado (T164; no se borra al volver a verde). */
     politica?: 'apagar' | 'techo'; techo?: number | null;
     techoObservado?: { p95: number; poblacion: number; teselasActivas: number; teselasPorHabitante: number; senal: 'p95'; tick: number; motivo: string } | null }; }
+/** T135/T137: delta tras la cuantización `r3` de `projectWorld`. Solo viajan los campos
+ * cambiados de cada tesela (con `x,y`); un campo que desaparece viaja como `null` y el cliente
+ * lo borra. `tileUpserts` también se acepta como `Record<"x,y", Partial<Tile>>`. */
+export interface StateDelta {
+  type: 'state-delta'; baseSequence: number; sequence: number;
+  tileUpserts: Array<Partial<Tile> & { x: number; y: number }> | Record<string, Partial<Tile>>;
+  tileRemovals: string[]; peopleUpserts: PersonView[]; peopleRemovals: string[];
+  worldPatch: Partial<WorldView>;
+}
 export type GestureKind = 'plant' | 'invite' | 'remember' | 'command';
 export interface Gesture { id: string; kind: GestureKind; x: number; y: number; memoryId?: string; agentId?: string; order?: Order; }
 export interface GestureResult {
@@ -201,9 +210,13 @@ export type ClientMessage =
   /** Contrapresión (2026-09-22): acuse de un `state` ya recibido entero. Solo lo manda el cliente
    * que abrió `/ws?ack=1`; con él el servidor nunca tiene más de un `state` en vuelo hacia ese
    * cliente y, al llegar el acuse, le manda el más reciente. */
-  | { type: 'ack'; sequence: number };
+  | { type: 'ack'; sequence: number }
+  /** T135/T137: el cliente perdió la base del delta (o pide la primera vista); el servidor
+   * responde con un `state` completo acotado al viewport. */
+  | { type: 'resync'; viewport?: Viewport };
 export type ServerMessage =
   | { type: 'state'; world: WorldView }
+  | StateDelta
   /** Solo hacia `/ws?ack=1`: el siguiente `state` llega partido en `partes` marcos de texto
    * consecutivos que, concatenados, son su JSON. Así cada trozo que llega demuestra que la
    * conexión vive aunque el `state` entero tarde más que el silencio tolerado. */

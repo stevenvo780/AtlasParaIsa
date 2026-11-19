@@ -1,4 +1,5 @@
-import { PROTOCOL_VERSION, type ClientMessage, type Gesture, type GestureResult, type PersonDetail, type ServerMessage, type TechnologyRecipe, type Viewport, type WorldView } from '../shared/types.js';
+import { PROTOCOL_VERSION, type ClientMessage, type Gesture, type GestureResult, type PersonDetail, type ServerMessage, type StateDelta, type TechnologyRecipe, type Viewport, type WorldView } from '../shared/types.js';
+import { applyStateDelta } from '../shared/deltas.js';
 
 export type ConnectionStatus = 'connecting' | 'live' | 'offline';
 interface Callbacks {
@@ -32,6 +33,9 @@ export class Connection {
   private readonly askedRecipes = new Set<string>();
   private readonly askedPeople = new Set<string>();
   private subscribeMs = 0;
+  /** T137: última vista completa aplicada (base de los deltas) y resync ya pedido por secuencia. */
+  private lastWorld: WorldView | null = null;
+  private resyncForSequence = -1;
   /** M2: tamaño (en caracteres UTF-16 ≈ bytes del JSON) y hora de llegada de los últimos estados recibidos.
    * Solo se mide; no cambia el protocolo ni lo que se pide al servidor. */
   private readonly received: { size: number; at: number }[] = [];
@@ -171,9 +175,27 @@ export class Connection {
     }
     if (!reconnectSnapshot && (world.sequence < this.sequence || (world.sequence === this.sequence && operationalState === this.operationalState && viewportSignature === this.viewportSignature))) return;
     this.sequence = world.sequence;
+    this.lastWorld = world;
+    this.resyncForSequence = -1;
     this.operationalState = operationalState;
     this.viewportSignature = viewportSignature;
     this.callbacks.world(world);
+  }
+
+  /** T137: aplica un delta sobre la base aplicada; sin base coincidente pide un solo `resync`. */
+  private acceptDelta(delta: StateDelta, size: number): void {
+    if (this.stopped) return;
+    if (!this.lastWorld || delta.baseSequence !== this.sequence) {
+      if (this.resyncForSequence !== delta.sequence) {
+        this.resyncForSequence = delta.sequence;
+        this.transmit(this.viewport ? { type: 'resync', viewport: this.viewport } : { type: 'resync' });
+      }
+      return;
+    }
+    const world = applyStateDelta(this.lastWorld, delta);
+    this.transmit({ type: 'ack', sequence: delta.sequence });
+    this.measure(size);
+    this.accept(world);
   }
 
   private result(result: GestureResult): void {
@@ -247,6 +269,7 @@ export class Connection {
             // Se mide el `state` entero ya reensamblado, no el último trozo que lo completó.
             this.measure(data.length); this.accept(message.world);
           }
+          else if (message.type === 'state-delta') this.acceptDelta(message, data.length);
           else if (message.type === 'result') this.result(message.result);
           else if (message.type === 'recipe') { this.askedRecipes.delete(message.id); this.callbacks.recipe?.(message.id, message.recipe); }
           else if (message.type === 'persona') { this.askedPeople.delete(message.id); this.callbacks.persona?.(message.id, message.persona); }

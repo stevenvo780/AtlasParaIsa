@@ -31,11 +31,11 @@ exactos para que el coordinador los aplique en la rama principal.
 
 **Nota de nomenclatura (desviación respecto al texto de la tarea)**: la tarea nombra los
 interruptores de la Fase B como `cuantizarMasas`/`puertaNovedad`/`topeEspeculacion`. Esas claves
-**no existen** en el código. Las claves reales en [src/world/params.ts:147](../../../src/world/params.ts:147)
+**no existen** en el código. Las claves reales en [src/world/params.ts:147](../../../src/world/params.ts#L147)
 son `tecnologia.dosisCuanto` (cuantización), `tecnologia.mejoraLocal` (puerta de novedad),
 `tecnologia.enfriamiento` y `tecnologia.evitarNoOp`; no hay un parámetro separado de especulación
 (la especulación se atenúa vía `mejoraLocal > 0 || enfriamiento > 45` en
-[src/world/technology.ts:484](../../../src/world/technology.ts:484)). Las guardas codifican las claves reales.
+[src/world/technology.ts:484](../../../src/world/technology.ts#L484)). Las guardas codifican las claves reales.
 
 ---
 
@@ -60,7 +60,7 @@ vive en despacho, observabilidad o laboratorio, con dos fronteras que hay que co
   bucle serie histórico. La disponibilidad de NVRTC decide **qué backend corre**, nunca qué sale:
   sin NVRTC el mismo paso cae a CPU (verificado por la matriz de paridad existente).
 - La única división por `workers` del árbol está en
-  [src/world/paralelo/particion.ts:49](../../../src/world/paralelo/particion.ts:49)
+  [src/world/paralelo/particion.ts:49](../../../src/world/paralelo/particion.ts#L49)
   (`Math.floor(ordered.length * workerIndex / workers)`): reparte la cola estática de regiones,
   no una magnitud del mundo. No existe ninguna fórmula de ley con `hilos`, `workers` o el conteo
   de dispositivos como operando.
@@ -72,10 +72,10 @@ vive en despacho, observabilidad o laboratorio, con dos fronteras que hay que co
   como manda la regla 3.
 - `Date.now`/`performance.now` no aparecen en las leyes (`src/world/*.ts` + `src/world/soa/`).
   Los tres únicos relojes del despacho quedan en lista blanca en la guarda nueva, con su uso:
-  - [src/world/paralelo/piscina.ts:142](../../../src/world/paralelo/piscina.ts:142): `performance.now`
+  - [src/world/paralelo/piscina.ts:142](../../../src/world/paralelo/piscina.ts#L142): `performance.now`
     mide la espera física del modo `adversarial` y alimenta `adversarialDelaysMs` del diagnóstico.
     La espera se hace con `Atomics.wait` sobre un reloj privado; no escribe valores del mundo.
-  - [src/world/gpu/puente.ts:394](../../../src/world/gpu/puente.ts:394), `:468`, `:500`:
+  - [src/world/gpu/puente.ts:394](../../../src/world/gpu/puente.ts#L394), `:468`, `:500`:
     `Date.now` acota a 60 s la espera síncrona al subproceso GPU (y a 2 s el hook de aborto).
     Si vence, `run`/`runTick`/`flushToHost` lanzan, `EcosystemKernel` hace `abortParallel()` y
     descarta el puente: el paso **no se confirma a medias**. Un hardware lento puede hacer
@@ -89,9 +89,9 @@ vive en despacho, observabilidad o laboratorio, con dos fronteras que hay que co
 
 ### 1.3 Tamaños de partición (256/512) — geometría de despacho, no ley
 
-- `regionSide: 256 | 512` ([src/world/ecosystem-kernel.ts:19](../../../src/world/ecosystem-kernel.ts:19))
+- `regionSide: 256 | 512` ([src/world/ecosystem-kernel.ts:19](../../../src/world/ecosystem-kernel.ts#L19))
   solo agrupa páginas en regiones de trabajo. `TileStore.prepareParallel`
-  ([src/world/soa/terreno.ts:253](../../../src/world/soa/terreno.ts:253)) ordena las celdas por
+  ([src/world/soa/terreno.ts:253](../../../src/world/soa/terreno.ts#L253)) ordena las celdas por
   `(región, página, offset)`; cada celda se calcula exactamente una vez, lee a sus vecinas del
   frente compartido y escribe solo su ranura del fondo. Cambiar la geometría cambia el orden
   físico de escritura sobre ranuras disjuntas, no ningún operando. La suite existente
@@ -105,15 +105,15 @@ vive en despacho, observabilidad o laboratorio, con dos fronteras que hay que co
 
 Hay tres sitios con la capacidad medida de la torre, todos de despacho:
 
-- [src/world/gpu/puente.ts:316](../../../src/world/gpu/puente.ts:316): pesos `0.79 / 0.21`
+- [src/world/gpu/puente.ts:316](../../../src/world/gpu/puente.ts#L316): pesos `0.79 / 0.21`
   (RTX 5070 Ti / RTX 2060) para cortar los rangos de celdas por dispositivo, con redondeo a
   páginas completas para no partir ninguna página. Con cualquier otro par de dispositivos, a
   partes iguales.
-- [src/world/gpu/reparto.ts:7](../../../src/world/gpu/reparto.ts:7): `DEFAULT_GPU_THROUGHPUT`
+- [src/world/gpu/reparto.ts:7](../../../src/world/gpu/reparto.ts#L7): `DEFAULT_GPU_THROUGHPUT`
   (2 500 000 / 680 000 celdas·ms⁻¹, el mismo ≈79/21) para `repartirPaginas` (orden Morton +
   cuotas por restos mayores, desempate por orden de dispositivo). Hoy solo lo ejercitan
   `tests/gpu-reparto.test.ts`; ningún camino de producción lo consume.
-- [scripts/compute-ecology-gpu.py:182](../../scripts/compute-ecology-gpu.py:182): tasas
+- [scripts/compute-ecology-gpu.py:182](../../../scripts/compute-ecology-gpu.py#L182): tasas
   `2_500_000 / 680_000` como partición por defecto del backend no residente cuando el cliente
   no pasa `ranges`. El cliente de autoprueba trabaja con un solo dispositivo, donde la tasa
   es irrelevante (todo el rango es suyo).
@@ -146,7 +146,7 @@ lector futuro podría tomarlos por ley. Propuesta P-3 (documentación, no códig
   llamando a `stepWorld` directamente.
 
 En el servidor, además, la palanca de área está deliberadamente inhabilitada
-([src/server/app.ts:327](../../../src/server/app.ts:327): `areaHabilitada: false`), así que el
+([src/server/app.ts:327](../../../src/server/app.ts#L327): `areaHabilitada: false`), así que el
 gobernador nunca solicita retirar páginas en producción: T163 no se activa solo.
 
 ### 1.6 `hardware-limits.ts`: el host resuelve límites una vez y los persiste
@@ -178,14 +178,14 @@ se suma y en qué orden» (siempre serie y por contenido). El detalle, mecanismo
   confirmación: un `jobError` en cualquier worker aborta el paso entero.
 - Los `Atomics` de la barrera y la piscina son exclusivamente enteros de control (época,
   estados, conteos de trabajos, longitudes de error). El propio
-  [src/world/paralelo/barrera.ts:1](../../../src/world/paralelo/barrera.ts:1) lo declara: «Los
+  [src/world/paralelo/barrera.ts:1](../../../src/world/paralelo/barrera.ts#L1) lo declara: «Los
   valores del mundo nunca se reducen mediante Atomics». No hay ni un `Atomics.add` sobre
   `Float64Array` en todo el árbol.
 
 ### 2.2 Los kernels escriben por celda; no hay reducciones entre celdas
 
 - `runParallelEcology` ([src/world/ecology-kernel.ts](../../../src/world/ecology-kernel.ts)) y
-  `runParallelEcosystem` ([src/world/ecosystem-kernel.ts:340](../../../src/world/ecosystem-kernel.ts:340))
+  `runParallelEcosystem` ([src/world/ecosystem-kernel.ts:340](../../../src/world/ecosystem-kernel.ts#L340))
   copian frente→fondo y aplican la misma aritmética FP64 por celda que el camino serie, en el
   mismo orden de operaciones, leyendo vecinas solo del frente. La suma de «vecinas vivas» es un
   conteo entero (0–8), asociativo y exacto. Ningún worker suma magnitudes de otra celda.
@@ -205,7 +205,7 @@ El único punto donde el orden de llegada existe físicamente:
 
 - En CPU, `runParallelEcosystem` reserva posiciones con
   `woodAddedQueue[2 + Atomics.add(woodAddedQueue, 1, 1)] = slot`
-  ([src/world/ecosystem-kernel.ts:414](../../../src/world/ecosystem-kernel.ts:414)). Dos workers
+  ([src/world/ecosystem-kernel.ts:414](../../../src/world/ecosystem-kernel.ts#L414)). Dos workers
   pueden encolar sus páginas en cualquier orden relativo. Cada página pertenece a una sola
   región/worker (rangos disjuntos) y el flag `woodAdded[slot]` evita duplicados dentro de la
   página, así que el **conjunto** encolado es determinista aunque la secuencia no lo sea.
@@ -216,7 +216,7 @@ El único punto donde el orden de llegada existe físicamente:
   antes que la B no cambia el estado final: ni valores FP64, ni orden de `world.tiles`, ni
   el digesto dependen de ello.
 - En GPU no hay ni esa ventana: el worker JS ordena los slots ascendentes antes de escribir
-  la cola ([src/world/gpu/puente.ts:242](../../../src/world/gpu/puente.ts:242), «CPU-side
+  la cola ([src/world/gpu/puente.ts:242](../../../src/world/gpu/puente.ts#L242), «CPU-side
   deterministic queue, slots ascending»), y el residente Python devuelve
   `wood_slots = sorted(set(...))` por unión de dispositivos.
 - El protocolo vale 1 solo si algún worker lo anuncia; `prepareParallel` reinicia
@@ -248,15 +248,15 @@ El único punto donde el orden de llegada existe físicamente:
 ### 2.5 CUDA: FP64 con `--fmad=false`, sin fast-math, sin reducciones
 
 - Residente: opciones NVRTC únicas y literales
-  ([scripts/compute-ecology-gpu-resident.py:103](../../scripts/compute-ecology-gpu-resident.py:103):
+  ([scripts/compute-ecology-gpu-resident.py:103](../../../scripts/compute-ecology-gpu-resident.py#L103):
   `--gpu-architecture=…`, `--fmad=false`, `--std=c++11`). Los kernels
   (`scripts/compute-ecology-resident.cu`) son por celda, sin `atomicAdd`, sin reducciones en
   árbol y sin `__syncthreads` con acumulación: cada hilo escribe solo `cell = cells[i]`.
-- No residente: [scripts/compute-ecology-gpu.py:41](../../scripts/compute-ecology-gpu.py:41)
+- No residente: [scripts/compute-ecology-gpu.py:41](../../../scripts/compute-ecology-gpu.py#L41)
   compila con `--fmad=false` por defecto. Existe una rama `--test-fmad=true`
   (`GPUWorker.create(..., { testFmad })`) como **control negativo deliberado**: la autoprueba
   la rechaza («Opciones NVRTC incompatibles con paridad FP64») en
-  [src/world/gpu/autoprueba.ts:107](../../../src/world/gpu/autoprueba.ts:107). No es un camino de
+  [src/world/gpu/autoprueba.ts:107](../../../src/world/gpu/autoprueba.ts#L107). No es un camino de
   producción; la guarda nueva prohíbe que esa rama aparezca en el residente y que exista
   `fast_math` en ambos backends.
 - La autoprueba compara el backend GPU contra el oráculo CPU con `Object.is` por celda
@@ -264,7 +264,7 @@ El único punto donde el orden de llegada existe físicamente:
   primera divergencia: un kernel que no reproduzca FP64 bit a bit no llega a un mundo.
 - Único `sort` sensible en leyes tocado por el desalojo T163: los candidatos a retirar se
   ordenan por `(distancia Chebyshev DESC, lastTick ASC, chunkKey ASC)` en
-  [src/world/spatial.ts:251](../../../src/world/spatial.ts:251): orden total por contenido,
+  [src/world/spatial.ts:251](../../../src/world/spatial.ts#L251): orden total por contenido,
   independiente de la llegada y del número de personas iteradas para la distancia
   (mínimo entero, asociativo).
 
@@ -286,7 +286,7 @@ la caché LRU de T163, el gobernador T162 o el formato de tuplas T133? No. Vecto
 
 ### 3.1 Defaults y versión de reglas
 
-- `RULES_VERSION` sigue siendo 11 ([src/world/index.ts:43](../../../src/world/index.ts:43)), igual
+- `RULES_VERSION` sigue siendo 11 ([src/world/index.ts:43](../../../src/world/index.ts#L43)), igual
   que en `main`: correcto, porque con los defaults ninguna ley cambia de conducta y no hay
   migración que versionar.
 - El diff de `params.ts` contra `main` añade exactamente dos cosas: el bloque `tecnologia.*`
@@ -294,15 +294,15 @@ la caché LRU de T163, el gobernador T162 o el formato de tuplas T133? No. Vecto
   previos; `RAW_DEFAULTS` sigue derivándose con `RULES_10_ADOPTED` + `RULES_11_ADOPTED`, sin
   tocar ninguna de sus claves.
 - Fase B en histórico: `tecnologia: { dosisCuanto: 0, mejoraLocal: 0, enfriamiento: 45, evitarNoOp: false }`
-  ([src/world/params.ts:191](../../../src/world/params.ts:191)), idéntico en `DEFAULT_PARAMS` y en
+  ([src/world/params.ts:191](../../../src/world/params.ts#L191)), idéntico en `DEFAULT_PARAMS` y en
   `HISTORICAL_PARAMS`. Revisadas las cuatro ramas en `technology.ts`: con 0 la cuantización es
   identidad (`Math.min(1000, available)` como antes), con 0 la puerta acepta todo, con 45 el
   enfriamiento es el literal histórico y con `false` `nextInstruction` devuelve la primera
   instrucción sin consumir azar extra (el orden de consumo de `localRandom` es el mismo que el
   código de `main`, incluida la rama de mutación). Los hosts sintéticos sin params caen a
-  `HISTORICAL_PARAMS.tecnologia` ([src/world/technology.ts:46](../../../src/world/technology.ts:46)).
+  `HISTORICAL_PARAMS.tecnologia` ([src/world/technology.ts:46](../../../src/world/technology.ts#L46)).
 - `motor.depuracion` queda fuera del digesto a propósito
-  ([src/world/digesto.ts:36](../../../src/world/digesto.ts:36) `paramsParaDigesto`): es un
+  ([src/world/digesto.ts:36](../../../src/world/digesto.ts#L36) `paramsParaDigesto`): es un
   diagnóstico (la guardia lanza si la fase de decisión escribe), con default `false` devuelve
   el mundo sin proxies y a coste cero ([src/world/paralelo/guardia.ts](../../../src/world/paralelo/guardia.ts)).
 
@@ -316,7 +316,7 @@ serie de `index.ts` y el kernel de objetos/SoA-opcional de siempre; ni `StaticWo
 ### 3.3 Caché LRU de T163 (`src/world/lru.ts`, `spatial.ts`)
 
 - La LRU (capacidad 32 por mundo) **nunca es la única copia** de un chunk. `activateChunk`
-  ([src/world/spatial.ts:136](../../../src/world/spatial.ts:136)) busca primero en
+  ([src/world/spatial.ts:136](../../../src/world/spatial.ts#L136)) busca primero en
   `world.retiredChunks` (pendiente en memoria), después en la LRU y por último en
   `context.loadChunk` (SQLite). Todo lo que entra en la LRU entró también en `retiredChunks`
   al retirarse, y al guardar, `Store.save` archiva esos chunks en la tabla `chunks` antes de
@@ -327,7 +327,7 @@ serie de `index.ts` y el kernel de objetos/SoA-opcional de siempre; ni `StaticWo
 - El orden de recencia de la LRU depende del historial de accesos, pero solo decide **qué
   copia en memoria se conserva**, nunca qué datos se reaniman: por eso un desalojo distinto
   en otra máquina no puede cambiar el mundo.
-- El desalojo de páginas frías (`evictColdChunks`, [src/world/spatial.ts:271](../../../src/world/spatial.ts:271))
+- El desalojo de páginas frías (`evictColdChunks`, [src/world/spatial.ts:271](../../../src/world/spatial.ts#L271))
   es un no-op sin presupuesto explícito, y ningún llamador de producción lo fija (solo las
   pruebas). `maintainRegions` solo lo invoca si un presupuesto quedó registrado antes.
   La restauración (`puntoDeRestauracion`) limpia la LRU para no reanimar copias anteriores
@@ -344,7 +344,7 @@ El defecto F-1 vive en el envoltorio de clase, no en esta vía por defecto; ver 
 
 ### 3.5 Formato de tuplas T133 (`chunk-tiles-tuple-v1`)
 
-- `encodeArchivedChunk` ([src/server/snapshot.ts:233](../../../src/server/snapshot.ts:233))
+- `encodeArchivedChunk` ([src/server/snapshot.ts:233](../../../src/server/snapshot.ts#L233))
   escribe las teselas del chunk retirado con las mismas filas de 20 campos de
   `tiles-tuple-v1` (sin cuantizar FP64, con `-0` preservado vía `exactJsonNumber`) y el resto
   de campos con `stringifyExact`, como el cuerpo histórico. Cuando cada tesela está en su
@@ -400,7 +400,7 @@ versiones debe excluir el bloque declarado, no concluir que el mundo cambió.
 **Qué**: `Gobernador.gobernar()` contradice a `Gobernador.decidir()` cuando aún no hay
 mediciones. `decidir` documenta y cumple «Sin mediciones todavía (primer paso) no se afirma
 nada sobre el hardware y se devuelve `actual`»
-([src/server/governor.ts:331](../../../src/server/governor.ts:331)), pero `gobernar` hace:
+([src/server/governor.ts:331](../../../src/server/governor.ts#L331)), pero `gobernar` hace:
 
 ```ts
 gobernar(params, actual, poblacion, teselasActivas, tick): DecisionGobernar {
@@ -409,7 +409,7 @@ gobernar(params, actual, poblacion, teselasActivas, tick): DecisionGobernar {
 }
 ```
 
-([src/server/governor.ts:356](../../../src/server/governor.ts:356)). En el retorno temprano de
+([src/server/governor.ts:356](../../../src/server/governor.ts#L356)). En el retorno temprano de
 `decidir` (ventana vacía), `ultimaDecision` queda `null` y el envoltorio recomputa la función
 pura con `p95StepMs = 0`: ventana «verde», y con política `techo` eso significa
 `reproductionEnabled = true`, **aunque el mundo trajera la reproducción deshabilitada**.
@@ -432,7 +432,7 @@ puede esperar a que alguien lo pise: la clase exporta ambos métodos como equiva
 **Parche exacto propuesto** (para el coordinador, en la rama principal; esta tarea no toca
 `src/`). Hacer que `decidir` siempre deje una decisión coherente, o que `gobernar` sintetice
 la decisión del retorno temprano en vez de recomputar con p95 = 0. Forma mínima, en
-`Gobernador.gobernar` ([src/server/governor.ts:356](../../../src/server/governor.ts:356)):
+`Gobernador.gobernar` ([src/server/governor.ts:356](../../../src/server/governor.ts#L356)):
 
 ```ts
 gobernar(params: ParamsDecisionGobernador, actual: boolean, poblacion: number, teselasActivas: number, tick: number): DecisionGobernar {
@@ -463,8 +463,8 @@ para `Atomics`), para que la lista blanca viva también junto al despacho y no s
 
 ### P-3 — Propuesta de documentación · severidad baja · constantes 79/21
 
-Anotar en [src/world/gpu/puente.ts:315](../../../src/world/gpu/puente.ts:315) y en
-[src/world/gpu/reparto.ts:7](../../../src/world/gpu/reparto.ts:7) que los pesos son equilibrio de
+Anotar en [src/world/gpu/puente.ts:315](../../../src/world/gpu/puente.ts#L315) y en
+[src/world/gpu/reparto.ts:7](../../../src/world/gpu/reparto.ts#L7) que los pesos son equilibrio de
 carga medido en la torre y que cambiarlos no puede cambiar el mundo (la prueba multi-GPU con
 repartos 79:21, 50:50 y 100:0 byte a byte idénticos es la evidencia). Sin cambio de código.
 

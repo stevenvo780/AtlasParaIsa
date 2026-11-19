@@ -28,7 +28,7 @@ Fuentes archivadas en [`docs/evidencia-2026-11-19/`](evidencia-2026-11-19/public
 
 ### 2. Panel preregistrado Fase B (`tecnologia.*`, 8 semillas `9601..9608` × 60 días, 16 réplicas)
 
-Preregistro: [`2026-11-18-estabilidad-tecnologia.md`](preregistros/2026-11-18-estabilidad-tecnologia.md). Comparación entre `control` (`HISTORICAL_PARAMS` + `social.radioConvivencia=12,social.disolucion=1,social.maxComunidades=64`, `RULES_VERSION=11`) y `tratamiento` (mismo base + leyes locales `tecnologia.cuantizarMasas=250,tecnologia.enfriamiento=240,tecnologia.puertaNovedad=1,tecnologia.evitarNoOp=1,tecnologia.topeEspeculacion=1`).
+Preregistro: [`2026-11-18-estabilidad-tecnologia.md`](preregistros/2026-11-18-estabilidad-tecnologia.md). Comparación entre `control` (`HISTORICAL_PARAMS` + `social.radioConvivencia=12,social.disolucion=1,social.maxComunidades=64`, `RULES_VERSION=11`) y `tratamiento` (mismo base + leyes locales `tecnologia.dosisCuanto=0.05,tecnologia.mejoraLocal=1,tecnologia.enfriamiento=240,tecnologia.evitarNoOp=1`).
 
 | Semilla | Pob 60 (ctrl / trt) | Recetas 60 (ctrl / trt) | Δ Recetas | Filas cat. (def+stats) | DB 60d (ctrl / trt) | Div. func. (ctrl / trt) | Gen. máx. (ctrl / trt) | C1–C7 (ctrl / trt) |
 |---:|---:|---:|---:|---:|---:|---:|---:|---|
@@ -71,6 +71,7 @@ Subida dispersa por tick en GPU `[0]`: `63 744 B` (`≤ 1 MB`, cumple FR-025). P
 - **`18 432 000` celdas (`239 616 000` valores)**: GPU `[0]` `p50 = 11,53 ms`, `p95 = 13,43 ms` (`kernel = 10,22 ms`) · Dual GPU `[0,1]` **`p50 = 10,28 ms`**, **`p95 = 14,55 ms`** (`kernel = 7,99 ms`) · **`0` diferencias `Object.is`** (GPU `[0]` vs Dual `[0,1]` tras 301 ticks y CPU 8w vs Dual `[0,1]`).
 - **`32 000 000` celdas (`416 000 000` valores)**: GPU `[0]` `p50 = 19,36 ms`, `p95 = 21,04 ms` (`kernel = 17,64 ms`) · Dual GPU `[0,1]` **`p50 = 16,59 ms`**, **`p95 = 20,60 ms`** (`kernel = 14,19 ms`, **`195,6×`** vs CPU 1 hilo) · **`0` diferencias `Object.is`** sobre los **416 000 000 de valores** (GPU `[0]` vs Dual `[0,1]` tras 301 ticks y CPU 8w vs Dual `[0,1]`).
 - **Determinismo CPU completo (`tests/determinismo-hardware.test.ts`)**: **375/375 pruebas verdes (0 fallos)** en las 28 escenas (`4 semillas × 7 escenas × 12 backends CPU × 600 pasos`, incluidas las dos geometrías `256`/`512` y el modo `adversarial`).
+- **Determinismo CUDA Gate C (`seed=51926`, `COMPUTE_NVRTC=/opt/cuda/lib64/libnvrtc.so`)**: **42/42 pruebas verdes (0 fallos)** cubriendo las 7 escenas × 3 backends GPU (`gpu=[0]` RTX 5070 Ti, `gpu=[1]` RTX 2060 y `gpu=[0,1]` dual) × 2 geometrías (`256` y `512`).
 
 ### 4. Escala de red WebSocket (`scripts/banco-red.mts`, T138)
 
@@ -78,6 +79,15 @@ Medido con 12 clientes simultáneos × 5 pasos (`--escalas 40,1000,10000`):
 - `40` hab.: `state = 49 873 B` (`48,7 KiB`), `0` descartados, `0` sockets terminados.
 - `1 000` hab.: `state = 66 785 B` (`65,2 KiB`), `0` descartados, `0` sockets terminados.
 - `10 000` hab.: `state = 66 790 B` (`65,2 KiB < 120 KiB`, +5 bytes respecto a 1 000 hab.), `0` descartados, `0` sockets terminados, `contieneIdsLejanos = false`, ningún campo acotado crece linealmente.
+
+### 5. Auditoría adversarial (T171), linealidad E.0 (T144) y bloques de escala integrados
+
+Informes completos en `specs/002-mundo-ilimitado/informes/`:
+- **Auditoría adversarial 3 lentes ([`T171-report.md`](../specs/002-mundo-ilimitado/informes/T171-report.md))**: guardas permanentes en `tests/auditoria-reglas-motor.test.ts` (7/7 verdes). Lente 1 (sin hardware/relojes/azar en leyes), Lente 2 (sin reducciones dependientes de llegada; `--fmad=false` en CUDA), Lente 3 (mundo por defecto bit a bit idéntico a `main` en semillas `7, 42, 51926`). Hallazgo medio F-1 (`Gobernador.gobernar()` con ventana vacía o `manualOverride`) corregido con prueba de regresión en `tests/gobernador.test.ts` (27/27 verdes).
+- **Linealidad E.0 ([`T144-report.md`](../specs/002-mundo-ilimitado/informes/T144-report.md))**: a densidad constante (~1 hab / 6 teselas, `cadaTicks=100`, 1 hilo, semilla `51926`), `stepWorld` escala linealmente (`stepP50 R²_lin = 0,99926`, `stepP95 R²_lin = 0,99778`) y sostiene **1 000 habitantes bajo 50 ms** (`stepP95 = 46,37 ms`, `totalP95 = 47,19 ms`). Hallazgo abierto para el máximo por ventana: `indiceDiversidad` (`src/world/diversidad.ts:140-142`, llamado cada 200 ticks al proyectar para clientes) sigue siendo $O(P^2)$ (`712,28 ms` en `P = 2 000`, `R²_cuad = 0,99996`).
+- **Núcleos de Etapa D/E/F integrados sin alterar `DEFAULT_PARAMS` ni `RULES_VERSION=11`**:
+  - [`T132-report.md`](../specs/002-mundo-ilimitado/informes/T132-report.md): guardado incremental opt-in por replay determinista (`persistencia.paginasSucias=true`, 82/82 verdes; payload `5,13 MB → 5,9 KiB` = **867× menor**, WAL `10,7 MB → 788 KiB` = **13,6× menor**, `saveMsMedian = 31,44 ms` tras acelerar `digesto.ts` 2,64×).
+  - [`T145-report.md`](../specs/002-mundo-ilimitado/informes/T145-report.md), [`T146-report.md`](../specs/002-mundo-ilimitado/informes/T146-report.md), [`T147-report.md`](../specs/002-mundo-ilimitado/informes/T147-report.md), [`T151-report.md`](../specs/002-mundo-ilimitado/informes/T151-report.md), [`T153-report.md`](../specs/002-mundo-ilimitado/informes/T153-report.md), [`T166-report.md`](../specs/002-mundo-ilimitado/informes/T166-report.md), [`T172-report.md`](../specs/002-mundo-ilimitado/informes/T172-report.md): núcleo determinista fase B/C (27/27), prefix-sum de 9 contadores + renumeración atómica de transacciones (43/43), `PersonStore` SoA caliente a `782 B` / `2 581 B/hab ≤ 4 KiB` (13/13), ocupación de workers `0,994` y Amdahl `3,989×` vs `3,962×` (7/7), reducción canónica de acumuladores con saturación `1e12` (17/17), y prueba literal SC-013 de techo por hardware (27/27).
 
 ## 27 de septiembre de 2026 — poda de leyes refutadas, ola 1 (rama `sprint/poda-leyes-20260927`)
 

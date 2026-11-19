@@ -95,8 +95,19 @@ export function distanciaMediaAgua(tiles: readonly Tile[]): number {
 }
 
 export const TOTAL_KEYS = ['foodHarvested','woodGathered','stoneGathered','hunts','waterConsumed','cooperation','teaching','trade','conflicts','births','cultivations','constructionHelp'] as const;
+/** Tope de cada suma de `count`. Lo comparte la reducción de T153 para que las dos vías no puedan divergir. */
+export const TOTALS_CAP = 1e12;
+/**
+ * Saturación de un acumulador: `Math.min(1e12, (current ?? 0) + amount)` en cada suma.
+ * Con el acumulado por debajo del tope, `Math.min` devuelve la suma ya hecha, bit a bit.
+ */
+export function saturateTotal(current: number | undefined, amount: number): number {
+  return Math.min(TOTALS_CAP, (current ?? 0) + amount);
+}
 export function emptyTotals(): Record<string, number> { return Object.fromEntries(TOTAL_KEYS.map(key => [key, 0])); }
-export function count(world: World, key: typeof TOTAL_KEYS[number], amount = 1): void { world.totals[key] = Math.min(1e12, (world.totals[key] ?? 0) + amount); }
+export function count(world: World, key: typeof TOTAL_KEYS[number], amount = 1): void {
+  world.totals[key] = saturateTotal(world.totals[key], amount);
+}
 function sample(world: World): WorldSample {
   const n = Math.max(1, world.people.length), mean = (key: 'hunger' | 'energy' | 'fatigue' | 'thirst') => world.people.reduce((sum, p) => sum + p[key], 0) / n;
   return { tick: world.tick, population: world.people.length, hunger: mean('hunger'), energy: mean('energy'), fatigue: mean('fatigue'), thirst: mean('thirst'), discoveries: world.discoveredChunks, settlements: world.settlementCount, cooperation: world.totals.cooperation ?? 0, births: world.totals.births ?? 0 };

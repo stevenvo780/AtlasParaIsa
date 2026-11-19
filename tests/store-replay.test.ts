@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { statSync } from 'node:fs';
 import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
-import { Store, DEEP_CHECKPOINT_EVERY_SAVES } from '../src/server/store.js';
+import { Store, DEEP_CHECKPOINT_EVERY_SAVES, DEEP_VALIDATION_EVERY_SAVES } from '../src/server/store.js';
 import { captureReplayChange, decodeSnapshot, encodeSnapshot, readSnapshotReplay, takeSnapshotParams } from '../src/server/snapshot.js';
 import { cloneWorld, createWorld, migrateWorld, stepWorld, type World } from '../src/world/index.js';
 import { digestoCanonico } from '../src/world/digesto.js';
@@ -249,6 +249,16 @@ test('replay: una raíz recalculada incorrecta o profundidad >99 no autoriza ret
   }
 });
 
+test('replay: deltas de fase 1 con raíz canónica siguen siendo legibles', t => {
+  const { store } = laboratorio(t, 'atlas-replay-phase1-root-');
+  const world = createWorld(7, replayParams); store.save(world);
+  stepWorld(world, [], store.context); store.save(world);
+  const legacy = { ...JSON.parse(filaInstantanea(store).body), root: digestoCanonico(world) };
+  const body = JSON.stringify(legacy);
+  store.db.prepare('UPDATE snapshots SET body=?,digest=? WHERE slot=0').run(body, sha256(body));
+  assert.equal(digestoCanonico(store.load()!.world), digestoCanonico(world));
+});
+
 test('replay: control de bytes escritos y saveMs con la misma escena y cadencia', t => {
   const directory = directorioTemporal(t, 'atlas-replay-benchmark-');
   const rows = [];
@@ -259,16 +269,22 @@ test('replay: control de bytes escritos y saveMs con la misma escena y cadencia'
       const world = createWorld(51926, parseParams(`persistencia.paginasSucias=${enabled}`));
       store.save(world);
       const startBytes = statSync(path + '-wal').size;
-      let bytes = 0; const times: number[] = [];
+      let bytes = 0; const samples: { save: number; ms: number; deepAudit: boolean }[] = [];
       for (let save = 1; save <= 12; save++) {
         for (let tick = 0; tick < 2; tick++) stepWorld(world, [], store.context);
-        const start = performance.now(); store.save(world); times.push(performance.now() - start);
+        const start = performance.now(); store.save(world);
+        // Hay un guardado inicial antes de la muestra. La marca coincide con
+        // `deepValidationDue(this.saves)` y con la revisión retenida alineada.
+        samples.push({ save, ms: performance.now() - start, deepAudit: save % DEEP_VALIDATION_EVERY_SAVES === 0 });
         bytes += store.lastSnapshotBytes;
       }
-      times.sort((a, b) => a - b);
+      const times = samples.filter(sample => !sample.deepAudit).map(sample => sample.ms).sort((a, b) => a - b);
+      const deepAudits = samples.filter(sample => sample.deepAudit).map(sample => sample.ms);
       rows.push({ paginasSucias: enabled, seed: world.seed, people: world.people.length, tiles: world.tiles.length,
-        saves: times.length, ticks: world.tick, payloadBytes: bytes, walBytes: statSync(path + '-wal').size - startBytes,
+        saves: samples.length, ordinarySaves: times.length, deepAudits: deepAudits.length, ticks: world.tick,
+        payloadBytes: bytes, walBytes: statSync(path + '-wal').size - startBytes,
         saveMsMedian: times[Math.floor(times.length / 2)], saveMsP95: times[Math.ceil(times.length * .95) - 1],
+        deepAuditMsMax: Math.max(...deepAudits),
         digest: digestoCanonico(comparable(world)) });
       assert.equal(digestoCanonico(store.load()!.world), digestoCanonico(world));
     } finally { store.close(); }

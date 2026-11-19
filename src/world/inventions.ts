@@ -90,6 +90,26 @@ function nextIdentity(counter: number, prefix: 'blueprint' | 'structure', ids: r
   return { id: `${prefix}-${largest + 1}`, counter: largest + 1 };
 }
 
+/**
+ * T146: base confirmada efectiva para el prefix-sum de `blueprint`/`structure`:
+ * el mayor serial ya reservado entre el contador del mundo, los ids activos y
+ * el techo del archivo dormido (`techoDelArchivo`, T140). Es exactamente la
+ * reserva que `nextIdentity` hace hoy antes de asignar `largest + 1`, pero sin
+ * asignar: el coordinador suma su prefix-sum sobre esta base. `undefined` si
+ * algún sufijo es corrupto o desborda, como en `nextIdentity`. Sin cambios en
+ * el camino por defecto, que sigue llamando a `nextIdentity`.
+ */
+export function identityBaseFromArchive(world: World, prefix: 'blueprint' | 'structure'): number | undefined {
+  const planos = world.blueprints, obras = world.structures, ids: string[] = [];
+  if (prefix === 'blueprint') {
+    for (const plano of planos) ids.push(plano.id, ...plano.parents);
+    for (const obra of obras) ids.push(obra.blueprintId);
+  } else for (const obra of obras) ids.push(obra.id);
+  const counter = prefix === 'blueprint' ? world.blueprintCounter : world.structureCounter;
+  const siguiente = nextIdentity(counter, prefix, ids, world);
+  return siguiente ? siguiente.counter - 1 : undefined;
+}
+
 function blueprintIdentity(world: World) {
   return nextIdentity(world.blueprintCounter, 'blueprint', [...world.blueprints.map(b => b.id), ...world.blueprints.flatMap(b => b.parents),
     ...world.structures.map(s => s.blueprintId)], world);

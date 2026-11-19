@@ -3,7 +3,7 @@ import type { Capability, Composition, Material, MaterialBatch, MaterialProperti
 import { localRandom } from './genetics.js';
 import { assertTechnologyCheckpoint } from './technology-checkpoint.js';
 import { assertTechnologyJournal } from './technology-journal.js';
-import { appendTechnologyExecution as appendExecution, technologyStock } from './technology-execution.js';
+import { appendTechnologyExecution as appendExecution, renumberTechnologyExecutionBlock, technologyExecutionSerial, technologyStock } from './technology-execution.js';
 import { assertTechnologyWater, assertWaterExecution, containedWaterStock, freeWaterCarryQuanta, settleContainedWaterCapacity, waterEnvelope } from './technology-water.js';
 export { technologyStock } from './technology-execution.js';
 import { assertTechnologyCatalogueState, catalogueEnabled, findTechnologyRecipe, hasTechnologyFunction, registerTechnologyRecipe, resolveTechnologyRecipe, technologyCatalogueTotals, technologyMemoryCapacity, updateTechnologyRecipeStats } from './technology-catalogue.js';
@@ -747,6 +747,43 @@ export function projectTechnology(host: TechnologyHost): TechnologyView {
 export function technologyRecipeDetail(host: TechnologyHost, id: string): TechnologyRecipe | undefined {
   if (typeof id !== 'string' || !/^recipe-[1-9]\d{0,9}$/.test(id)) return undefined;
   try { return resolveTechnologyRecipe(host, id, { cache: false }); } catch { return undefined; }
+}
+
+export interface TechnologyTransactionRenumbering { executions: readonly TechnologyExecution[]; firstSerial: number; }
+
+/**
+ * T146: renumera transacciones completas en bloque —`id`, `nestedExecutionIds` y
+ * `catalysts[].executionId`— y reordena `history`/`journal.pending` por el serial
+ * nuevo, preservando `serial === previousSerial + 1`. Una referencia anidada o de
+ * catalizador fuera de su propio bloque lanza: pertenece a otra transacción.
+ * Las ejecuciones de un bloque que aún no estén en `history` se incorporan (y a
+ * `journal.pending` si hay diario) antes de ordenar; `executionCounter` pasa a
+ * ser `historyDropped + history.length`. No se llama en el camino por defecto.
+ */
+export function renumberTechnologyTransactionBlocks(state: TechnologyState, blocks: readonly TechnologyTransactionRenumbering[]): void {
+  for (const block of blocks) {
+    if (!block || !Array.isArray(block.executions)) throw new TypeError('Renumeración de tecnología: bloque sin ejecuciones.');
+    const map = renumberTechnologyExecutionBlock(block.executions, block.firstSerial);
+    const remap = (id: string): string => {
+      const serial = technologyExecutionSerial(id), next = serial === null ? undefined : map.get(serial);
+      if (next === undefined) throw new Error('Renumeración de tecnología: referencia a una ejecución fuera de su transacción.');
+      return `process-${next}`;
+    };
+    for (const execution of block.executions) {
+      if (execution.nestedExecutionIds !== undefined) execution.nestedExecutionIds = execution.nestedExecutionIds.map(remap);
+      for (const catalyst of execution.catalysts) catalyst.executionId = remap(catalyst.executionId);
+    }
+    for (const execution of block.executions) {
+      if (!state.history.includes(execution)) state.history.push(execution);
+      if (state.journal && (technologyExecutionSerial(execution.id) ?? 0) > state.journal.committedThrough
+        && !state.journal.pending.includes(execution)) state.journal.pending.push(execution);
+    }
+  }
+  const bySerial = (a: TechnologyExecution, b: TechnologyExecution) => (technologyExecutionSerial(a.id) ?? 0) - (technologyExecutionSerial(b.id) ?? 0);
+  state.history.sort(bySerial);
+  if (state.journal) state.journal.pending.sort(bySerial);
+  state.executionCounter = state.historyDropped + state.history.length;
+  if (state.journal) assertTechnologyJournal(state, Number.MAX_SAFE_INTEGER);
 }
 
 export function assertTechnology(host: TechnologyHost): void {

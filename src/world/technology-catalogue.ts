@@ -267,6 +267,35 @@ export function hasTechnologyFunction(host: TechnologyCatalogueHost, capacities:
   return catalogueEnabled(state) ? containsFunction(state.catalogue!.functions, code)
     : state.recipes.some(recipe => technologyFunctionCode(recipe.capacities) === code);
 }
+/**
+ * T146: renumeración determinista de un bloque de recetas aún no registradas.
+ * Devuelve copias (el original no se toca, así el camino por defecto no cambia)
+ * con ids `recipe-N` contiguos desde `firstSerial`, los `parents` que apuntan
+ * dentro del bloque remapeados y el sufijo numérico del nombre —que hoy se
+ * construye como `… ${recipeCounter + 1}`— actualizado si coincidía con el
+ * serial viejo. El orden del bloque lo fija el llamador con la clave total.
+ */
+export function renumberTechnologyRecipes(recipes: readonly TechnologyRecipe[], firstSerial: number):
+{ recipes: TechnologyRecipe[]; map: Map<string, string> } {
+  if (!Number.isSafeInteger(firstSerial) || firstSerial < 1) throw new RangeError('Renumeración de recetas: firstSerial debe ser un entero seguro ≥ 1.');
+  const map = new Map<string, string>();
+  recipes.forEach((recipe, index) => {
+    const old = recipe ? serial(recipe.id) : -1;
+    if (old < 1 || map.has(recipe.id)) fail('recipe renumbering requires distinct recipe-N ids');
+    if (index > 0 && old !== serial(recipes[index - 1]!.id) + 1) fail('recipe renumbering requires a contiguous block');
+    const next = firstSerial + index;
+    if (!Number.isSafeInteger(next)) fail('recipe renumbering overflow');
+    map.set(recipe.id, `recipe-${next}`);
+  });
+  const renumbered = recipes.map((recipe, index) => {
+    const next = firstSerial + index, suffix = ` ${serial(recipe.id)}`;
+    return { ...structuredClone(recipe), id: `recipe-${next}`,
+      name: recipe.name.endsWith(suffix) ? `${recipe.name.slice(0, -suffix.length)} ${next}` : recipe.name,
+      parents: recipe.parents.map(parent => map.get(parent) ?? parent) };
+  });
+  return { recipes: renumbered, map };
+}
+
 export function registerTechnologyRecipe(host: TechnologyCatalogueHost, recipe: TechnologyRecipe): void {
   const state = host.technology, catalogue = state.catalogue;
   endRecipeSession(state);

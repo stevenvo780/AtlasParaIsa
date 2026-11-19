@@ -108,22 +108,27 @@ export class GPUParitySession {
         || info.compileOptions.some(option => option === '--fmad=true' || option.includes('fast_math')))
         return disable('Opciones NVRTC incompatibles con paridad FP64 (--fmad=false requerido).');
       const helpers = await computeModule<ComputeHelpers>('compute-ecology-core');
-      const tiles = parityFixture();
+      const tiles = parityFixture(), packedInput = helpers.pack(tiles);
       await backend.setup(tiles.length, helpers.topology(tiles));
-      // Context creation, NVRTC and topology setup are initialization costs, recorded separately.
+      const kernel = new EcosystemKernel();
+      const quadrants: { tick: number; rain: boolean; light: number; args: ParityOptions; expected: Float64Array }[] = [];
+      let qIndex = 0;
+      for (const cuencas of [1, 0.4]) for (const decaimientoFertilidad of [0, 0.001]) {
+        const tick = [100, 310, 1600, 1900][qIndex]!, phase = phaseAt(tick), rain = qIndex % 2 === 0;
+        const light = phase === 'day' ? 1 : phase === 'night' ? 0 : 0.4;
+        const params = { ...HISTORICAL_PARAMS, recursos: { ...HISTORICAL_PARAMS.recursos, decaimientoFertilidad }, agua: { ...HISTORICAL_PARAMS.agua, cuencas } };
+        const reference = { tiles: tiles.map(tile => ({ ...tile })), tick, seed: 51926, weather: rain ? 'rain' : 'clear' } as World;
+        setParams(reference, params);
+        const args: ParityOptions = { seed: 51926, cuencas, decaimientoFertilidad, localEcology: true, recursos: params.recursos };
+        ecology(reference); kernel.step(reference.tiles, tick, reference.weather, phase, args);
+        quadrants.push({ tick, rain, light, args, expected: helpers.pack(reference.tiles) });
+        qIndex++;
+      }
+      // Context creation, NVRTC, topology setup and CPU oracle preparation are initialization costs, recorded separately.
       verificationStart = process.hrtime.bigint();
       const check = async (): Promise<ParityResult> => {
-        const kernel = new EcosystemKernel();
-        for (const cuencas of [1, 0.4]) for (const decaimientoFertilidad of [0, 0.001]) {
-          const tick = [100, 310, 1600, 1900][comparisons], phase = phaseAt(tick), rain = comparisons % 2 === 0;
-          const light = phase === 'day' ? 1 : phase === 'night' ? 0 : 0.4;
-          const params = { ...HISTORICAL_PARAMS, recursos: { ...HISTORICAL_PARAMS.recursos, decaimientoFertilidad }, agua: { ...HISTORICAL_PARAMS.agua, cuencas } };
-          const reference = { tiles: tiles.map(tile => ({ ...tile })), tick, seed: 51926, weather: rain ? 'rain' : 'clear' } as World;
-          setParams(reference, params);
-          const args: ParityOptions = { seed: 51926, cuencas, decaimientoFertilidad, localEcology: true, recursos: params.recursos };
-          ecology(reference); kernel.step(reference.tiles, tick, reference.weather, phase, args);
-          const expected = helpers.pack(reference.tiles);
-          const actual = (await backend!.step(helpers.pack(tiles), tick, rain, light, args)).data;
+        for (const { tick, rain, light, args, expected } of quadrants) {
+          const actual = (await backend!.step(packedInput, tick, rain, light, args)).data;
           if (expired) return failure!;
           comparisons++;
           if (actual.length !== expected.length) return disable('Tamaño de salida distinto.', Math.min(actual.length, expected.length));

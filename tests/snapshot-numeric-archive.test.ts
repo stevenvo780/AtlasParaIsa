@@ -12,6 +12,7 @@ import { assertLegacyRecord } from '../src/world/lineage.js';
 import { paramsOf } from '../src/world/params.js';
 import { activate } from '../src/world/spatial.js';
 import { generateChunk } from '../src/world/terrain.js';
+import { decodeArchivedChunk, encodeArchivedChunk } from '../src/server/snapshot.js';
 import { sha256 } from './lib/store.js';
 
 interface ArchiveRow { body: string; digest: string; tick: number; }
@@ -63,7 +64,7 @@ for (const zero of [0, -0]) {
     assert.equal(saved.tick, world.tick);
     assert.equal(saved.digest, sha256(saved.body), 'el checksum acredita los bytes efectivamente escritos');
     assert.equal(lab.store.db.prepare('SELECT COUNT(*) AS n FROM chunks').get()!.n, 1);
-    if (!Object.is(zero, -0)) assert.equal(saved.body, JSON.stringify(expectedChunk), 'el caso ordinario conserva los bytes históricos');
+    if (!Object.is(zero, -0)) assert.equal(saved.body, encodeArchivedChunk(expectedChunk), 'el caso ordinario usa la tupla compacta de T133');
 
     const expected = cloneWorld(world);
     activate(expected, 0, 160, { loadChunk: key => key === chunk.key ? expectedChunk : null });
@@ -83,7 +84,7 @@ for (const zero of [0, -0]) {
       digest: digestoCanonico(resumed),
     };
     t.diagnostic(JSON.stringify({ kind: 'chunk', input: label, checksumValid: saved.digest === sha256(saved.body),
-      rowPreservesNegativeZero: Object.is((JSON.parse(saved.body) as typeof chunk).tiles[0]!.x, -0), ...observed, expectedDigest }));
+      rowPreservesNegativeZero: Object.is(decodeArchivedChunk(saved.body).tiles[0]!.x, -0), ...observed, expectedDigest }));
     assert.deepEqual(observed, {
       archivedNegativeZero: Object.is(zero, -0), activatedNegativeZero: Object.is(zero, -0), digest: expectedDigest,
     }, 'el archivo y la reactivación deben conservar el bit y el digesto completo');

@@ -6,7 +6,7 @@ import type { Gesture, GestureResult } from '../shared/types.js';
 import { assertWorld, bindWorldContext, migrateWorld, TICKS_PER_DAY, type World, type WorldContext } from '../world/index.js';
 import { CHUNK_SIZE, MAX_COORDINATE, type Chunk } from '../world/terrain.js';
 import { assertEcosystemTile, assertChunkLife } from '../world/validation.js';
-import { takeSnapshotParams, SnapshotPhysicalError, SnapshotSemanticError } from './snapshot.js';
+import { takeSnapshotParams, SnapshotPhysicalError, SnapshotSemanticError, encodeArchivedChunk, decodeArchivedChunk } from './snapshot.js';
 import { SnapshotParts, assertSnapshotPartsSchema, SNAPSHOT_INLINE_TILE_LIMIT } from './snapshot-parts.js';
 import type { LegacyRecord } from '../shared/demography.js';
 import { assertLegacyRecord } from '../world/lineage.js';
@@ -624,7 +624,8 @@ export class Store {
     const row = this.db.prepare('SELECT body,digest,tick FROM chunks WHERE key=? AND tick<=? ORDER BY tick DESC LIMIT 1').get(key, atTick) as { body: string; digest: string; tick: number } | undefined;
     if (!row) return null;
     if (!Number.isSafeInteger(row.tick) || row.tick < 0 || checksum(row.body) !== row.digest) throw new Error('Archived chunk checksum or version mismatch. Explicit recovery required.');
-    const chunk: unknown = JSON.parse(row.body);
+    // T133: accepts both the historical plain-JSON body and `chunk-tiles-tuple-v1`.
+    const chunk: unknown = decodeArchivedChunk(row.body);
     assertChunk(chunk, key, row.tick);
     return chunk;
   }
@@ -1350,7 +1351,8 @@ export class Store {
         const supersede = window > 0 ? this.db.prepare('DELETE FROM chunks WHERE key=? AND tick<?') : null;
         for (const chunk of retired) {
           assertChunk(chunk, chunk.key, world.tick);
-          const archivedBody = stringifyExact(chunk);
+          // T133: compact tuple body; digest is sha256 of the stored bytes, as before.
+          const archivedBody = encodeArchivedChunk(chunk);
           archive.run(chunk.key, world.tick, archivedBody, checksum(archivedBody));
           supersede?.run(chunk.key, world.tick);
         }

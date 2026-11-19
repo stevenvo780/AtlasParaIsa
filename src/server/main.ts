@@ -5,6 +5,7 @@ import { acquireLock } from './lock.js';
 import { paramsOf, setParams } from '../world/params.js';
 import { deploymentParams } from './deployment-params.js';
 import { hostParams } from './hardware-limits.js';
+import { gpuParitySession } from '../world/gpu/autoprueba.js';
 
 process.umask(0o077);
 const port = Number(process.env.PORT ?? 3000);
@@ -25,6 +26,10 @@ try {
   // ENCIMA la configuración explícita del despliegue, solo en las claves que nombra.
   // Los límites del host NO vuelven a resolverse aquí: los del mundo cargado son los suyos.
   setParams(app.world, deploymentParams(paramsOf(app.world)));
+  for (const device of paramsOf(app.world).motor.gpu) {
+    const parity = await gpuParitySession.initialize(device, { log: diagnostic => console.warn(JSON.stringify(diagnostic)) });
+    console.info(JSON.stringify({ gpuAutoprueba: parity }));
+  }
   let closing = false;
   const shutdown = async () => {
     if (closing) return; closing = true;

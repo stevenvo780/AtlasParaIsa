@@ -2,8 +2,8 @@
 import { isDeepStrictEqual } from 'node:util';
 import { createHash } from 'node:crypto';
 export const ECOLOGY_CONTRACT = Object.freeze({
-  version: 3,
-  fields: ['growth', 'fertility', 'life', 'moisture', 'drinkingWater', 'cultivation', 'traffic', 'vegetation', 'wood', 'feature', 'aquatic', 'ocean', 'mountain', 'wetland', 'woodPresent', 'x', 'y'],
+  version: 4,
+  fields: ['growth', 'fertility', 'life', 'moisture', 'drinkingWater', 'cultivation', 'traffic', 'vegetation', 'wood', 'feature', 'aquatic', 'ocean', 'mountain', 'wetland', 'woodPresent', 'x', 'y', 'food', 'forest', 'grassland', 'growthPresent'],
   options: { decaimientoFertilidad: 0, seed: 0, cuencas: 1 },
   terms: {
     life: 'old 8-neighbor life >= 0.45; fertile at 3 neighbors or alive with 2; light/moisture/fertility growth minus drought and traffic',
@@ -16,7 +16,7 @@ export const ECOLOGY_CONTRACT = Object.freeze({
     basin: '32-bit imul hash; salt1400; scale24; floor negative coordinates; quintic fade and bilinear lerp in original order',
     wood: '100-tick regrowth debits updated growth; uses old fertility/moisture/growth; stump transitions preserved',
     cadence: 'no updates except tick%10==0; read old neighbor life; Float64 with FMA disabled',
-    tick: 'stepWorld runs ecology() first (moisture, vegetation, food; not ported here, T120) and then this kernel; tests/compute-ecology.test.ts compares that whole composition',
+    tick: 'localEcology=true runs local_ecology (moisture, vegetation, food, cardinal water) then ecology, with a complete intermediate state and no fused dispatch',
   },
 });
 export const FIELDS = ECOLOGY_CONTRACT.fields.length;
@@ -320,6 +320,8 @@ export function pack(tiles, into = new Float64Array(tiles.length * FIELDS)) {
     into[12*n+i] = +(t.biome === 'mountain'); into[13*n+i] = +(t.biome === 'wetland');
     into[14*n+i] = +(t.wood !== undefined);
     into[15*n+i] = t.x; into[16*n+i] = t.y;
+    into[17*n+i] = t.food; into[18*n+i] = +(t.biome === 'forest');
+    into[19*n+i] = +(t.biome === 'grassland'); into[20*n+i] = +(t.growth !== undefined);
   }
   return into;
 }
@@ -331,12 +333,43 @@ export function unpack(data, tiles, tick) {
     const t = tiles[i];
     t.growth=data[i]; t.fertility=data[n+i]; t.life=data[2*n+i]; t.moisture=data[3*n+i];
     t.drinkingWater=data[4*n+i]; t.cultivation=data[5*n+i]; t.traffic=data[6*n+i];
-    t.vegetation=data[7*n+i];
+    t.vegetation=data[7*n+i]; t.food=data[17*n+i];
     if (data[14*n+i]) t.wood=data[8*n+i];
     const feature=FEATURES[data[9*n+i]];
     if (feature !== undefined) t.feature=feature;
   }
   return tiles;
+}
+
+export const LOCAL_DEFAULTS = Object.freeze({ capacidadBosque: 1, capacidadPastizal: 0.7,
+  capacidadOtros: 0.35, velocidadRegeneracion: 1, decaimientoComida: 0.0001 });
+
+/** First dispatch: only old cardinal terrain is remote; arithmetic follows ecology(world). */
+export function localEcologyArrays(input, output, neighbors, n, tick, rain, light, options = {}) {
+  output.set(input);
+  if (tick % 10) return;
+  const { capacidadBosque, capacidadPastizal, capacidadOtros, velocidadRegeneracion, decaimientoComida } = { ...LOCAL_DEFAULTS, ...options.recursos };
+  for (let i = 0; i < n; i++) {
+    if (input[10*n+i]) continue;
+    const waterAt = k => { const q = neighbors[i*8+k]; return q >= 0 && input[10*n+q] === 1; };
+    const nearWater = waterAt(3) || waterAt(4) || waterAt(1) || waterAt(6);
+    const moisture = clamp(input[3*n+i] + (rain ? 0.012 : 0) + (nearWater ? 0.008 : 0) - 0.0015 - light * 0.001);
+    const K = input[18*n+i] ? capacidadBosque : input[19*n+i] ? capacidadPastizal : capacidadOtros;
+    const headroom = K > 0 ? 1 - input[7*n+i] / K : 0;
+    const growth = velocidadRegeneracion * light * moisture * 0.007 * headroom;
+    const vegetation = clamp(input[7*n+i] + growth - (moisture < 0.15 ? 0.0015 : 0.0001));
+    const food = input[17*n+i], foodHeadroom = K > 0 ? 1 - food / K : 0;
+    output[3*n+i] = moisture; output[7*n+i] = vegetation;
+    output[17*n+i] = clamp(food + velocidadRegeneracion * light * moisture * vegetation * 0.006 * foodHeadroom - decaimientoComida);
+    // The second dispatch resolves `growth ?? vegetation` AFTER this first pass.
+    if (!input[20*n+i]) output[i] = vegetation;
+  }
+}
+
+export function stepEcologyArrays(input, output, neighbors, n, tick, rain, light, options = {}) {
+  const middle = new Float64Array(input.length);
+  localEcologyArrays(input, middle, neighbors, n, tick, rain, light, options);
+  stepArrays(middle, output, neighbors, n, tick, rain, light, 0, n, options);
 }
 
 function basinUnit(seed, x, y) {
@@ -370,6 +403,7 @@ export function stepArrays(input, output, neighbors, n, tick, rain, light, begin
     output[n+i]=clamp(fertility+life*0.0012-traffic*0.0007-cultivation*0.0002-decaimientoFertilidad*fertility);
     const produced=light*moisture*fertility*(0.25+life*0.75)*(1-growth)*(1-traffic*0.9)*0.005;
     output[i]=clamp(growth+produced-0.0002-traffic*0.002-(moisture<0.15?0.001:0));
+    output[20*n+i]=1;
     if(!aquatic) output[7*n+i]=clamp(vegetation+produced*0.25-traffic*0.001);
     output[6*n+i]=clamp(traffic-0.0005); output[5*n+i]=clamp(cultivation-0.00002);
     const reservoir=(feature===9 || feature===8 || wetland || aquatic) && (aquatic || basinNoise(seed,input[15*n+i],input[16*n+i])<cuencas);

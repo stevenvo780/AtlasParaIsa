@@ -27,7 +27,16 @@ function canonical(value: unknown): Canonical {
  * Persisted archive contents must be checked separately; a digest cannot read a host's disk.
  */
 function canonicalWorld(world: World): Canonical {
-  return canonical({ world, params: paramsOf(world) });
+  return canonical({ world, params: paramsParaDigesto(world) });
+}
+
+/** T148: `motor.depuracion` es un interruptor de diagnóstico (guardia de la fase B), no una ley: no cambia
+ * ninguna dinámica, así que queda fuera del digesto. Así activar la guardia no mueve el digesto y los
+ * digestos de mundos anteriores a la clave siguen iguales byte a byte. */
+function paramsParaDigesto(world: World): object {
+  const params = paramsOf(world);
+  const { depuracion: _depuracion, ...motor } = params.motor;
+  return { ...params, motor };
 }
 
 // Object.fromEntries (the original canonicalizer) enumerates array-index keys
@@ -68,7 +77,7 @@ export function digestoCanonico(world: World): string {
   const hash = createHash('sha256');
   let pieces: string[] = [], length = 0;
   const flush = () => { if (pieces.length) hash.update(pieces.join('')); pieces = []; length = 0; };
-  emitCanonical({ world, params: paramsOf(world) }, text => {
+  emitCanonical({ world, params: paramsParaDigesto(world) }, text => {
     pieces.push(text); length += text.length;
     // No full-world copy or string: a large valid world can exceed V8's string limit.
     // Flush only between complete JSON tokens so UTF-16 pairs are never split.

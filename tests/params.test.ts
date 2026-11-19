@@ -132,7 +132,7 @@ test('control: 200 stepWorld con y sin params explícitos (una copia de DEFAULT_
 });
 
 test('T102: defaults deterministas y opciones reservadas sin activar nuevas etapas', () => {
-  assert.deepEqual(DEFAULT_PARAMS.motor, { clonPorPaso: true, hilos: 1, soaTerreno: false, particionarPersonas: false, gpu: [], orden: 'natural' });
+  assert.deepEqual(DEFAULT_PARAMS.motor, { clonPorPaso: true, hilos: 1, soaTerreno: false, particionarPersonas: false, gpu: [], orden: 'natural', depuracion: false });
   assert.deepEqual(DEFAULT_PARAMS.limites, { teselasActivas: 65536, chunks: 256, comunidades: 8, fauna: 393216, aplicacion: 'parametros' });
   assert.equal(DEFAULT_PARAMS.persistencia.paginasSucias, false);
   assert.equal(DEFAULT_PARAMS.red.deltas, false);
@@ -145,6 +145,15 @@ test('T102: defaults deterministas y opciones reservadas sin activar nuevas etap
   for (let tick = 0; tick < 200; tick++) { stepWorld(normal); stepWorld(reserved); }
   assert.deepEqual(reserved, normal, 'T102 sólo declara opciones; no cambia la física ni levanta topes');
   assert.notEqual(digestoCanonico(reserved), digestoCanonico(normal), 'el digesto completo sigue incluyendo la configuración');
+});
+
+test('T148: motor.depuracion es booleano, default false y no cambia el digesto', () => {
+  assert.equal(PARAM_DESCRIPTORS['motor.depuracion']!.kind, 'boolean');
+  assert.equal(parseParams('motor.depuracion=true').motor.depuracion, true);
+  assert.equal(parseParams({ motor: { depuracion: false } }).motor.depuracion, false);
+  assert.throws(() => parseParams('motor.depuracion=1'), /motor\.depuracion/);
+  const off = createWorld(4821), on = createWorld(4821, parseParams('motor.depuracion=true'));
+  assert.equal(digestoCanonico(on), digestoCanonico(off), 'la clave de diagnóstico queda fuera del digesto');
 });
 
 test('T102: cadena, JSON plano/anidado y diccionario dan parámetros tipados equivalentes', () => {

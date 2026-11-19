@@ -17,14 +17,16 @@ export function externalRecorder(directory: string, retainInitial: (ref: string)
     const path = `${artifacts.length}.json`; write(path, raw);
     artifacts.push({ kind, path, ref });
     if (kind === 'source-tap') {
-      const tap = row as unknown as { operation: string; queue: unknown[] };
+      // v7 rows carry only source ops since the previous checkpoint; events are rebuilt by the independent reader from (path, seq).
+      const tap = row as unknown as { protocol: string; operation: string; seq: number };
+      if (tap.protocol !== 'c10-source-observer/v7') throw new Error('source-tap protocol');
       if (tap.operation === 'initial') { initialRef = ref; retainInitial(ref); } // BEFORE first begin
-      if (tap.operation === 'emit') events.push(tap.queue[tap.queue.length - 1]);
+      if (tap.operation === 'emit') events.push({ path, seq: tap.seq, ref });
     }
     return ref;
   } };
   return { capture, artifacts, finish(dependencyManifest: string, dependencySHA256: string, sourceProof: string) {
-    const raw = stable({ schema: 'c10-process-capture/v3', initialRef, artifacts, events,
+    const raw = stable({ schema: 'c10-process-capture/v5', tapProtocol: 'c10-source-observer/v7', initialRef, artifacts, events,
       dependencyManifest, dependencySHA256, sourceProof }); write('index.json', raw);
     return { initialRef, indexSHA256: createHash('sha256').update(raw).digest('hex') };
   } };

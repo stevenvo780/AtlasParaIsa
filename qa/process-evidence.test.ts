@@ -61,7 +61,7 @@ test('full bus includes not projected sites; early drain and discarded lineage c
   await drainObservation(f.session,()=>{});f.store.save(f.world);
   assert.equal(f.caller.reconcile().every(r=>!r.ownershipReconciled),true);
   const taps=f.recorder.artifacts.filter(e=>e.kind==='source-tap').map(e=>JSON.parse(readFileSync(join(f.directory,'capture',e.path),'utf8')));
-  assert.ok(taps.some(r=>r.operation==='emit'&&r.queue[0].siteId==='unsupported-source-site'));
+  assert.ok(taps.some(r=>r.operation==='emit'&&r.protocol==='c10-source-observer/v7'&&JSON.stringify(r.ops).includes('"unsupported-source-site"')));
  }finally{f.close();}
 });
 test('history-only SQL mutation changes full manifest while slot0 digest unchanged',()=>{

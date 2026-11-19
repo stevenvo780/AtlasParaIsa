@@ -99,7 +99,7 @@ test('(c) parseParams de un objeto sin las claves nuevas sobre la base históric
     'sin campo ni perfil: históricos con admisión histórica');
 });
 
-test('(a) una instantánea V9 de antes de reglas 10 recarga, migra a V11 y sigue exactamente la trayectoria de las reglas anteriores', { timeout: 1_800_000 }, t => {
+test('(a) una instantánea V9 de antes de reglas 10 recarga, migra a V12 y sigue exactamente la trayectoria de las reglas anteriores', { timeout: 1_800_000 }, t => {
   const legado = laboratorio(t), control = laboratorio(t), otro = laboratorio(t);
   const world = createWorld(51926, HISTORICAL_PARAMS);
   for (let n = 0; n < 240; n++) stepWorld(world);
@@ -118,8 +118,8 @@ test('(a) una instantánea V9 de antes de reglas 10 recarga, migra a V11 y sigue
   const reabierto = new Store(legado.path), referencia = new Store(control.path), contraste = new Store(otro.path);
   t.after(() => { reabierto.close(); referencia.close(); contraste.close(); });
   const cargado = reabierto.load()!.world, esperado = referencia.load()!.world, nuevo = contraste.load()!.world;
-  assert.equal(cargado.version, 11, 'la migración V9→V11 sólo cambia la etiqueta');
-  assert.equal(esperado.version, 11);
+  assert.equal(cargado.version, 12, 'la migración V9→V12 sólo cambia la etiqueta');
+  assert.equal(esperado.version, 12);
   assert.deepEqual(paramsOf(cargado), HISTORICAL_PARAMS, 'las claves ausentes se completan con los históricos, no con los defaults nuevos');
   assert.deepEqual(paramsOf(esperado), HISTORICAL_PARAMS, 'la migración conserva tal cual los params persistidos');
   assert.equal(digestoCanonico(cargado), digestoCanonico(esperado));
@@ -133,7 +133,7 @@ test('(a) una instantánea V9 de antes de reglas 10 recarga, migra a V11 y sigue
   assert.notEqual(JSON.stringify(nuevo), JSON.stringify(cargado), 'con los defaults nuevos el mismo mundo toma otra trayectoria: el control tiene dientes');
 });
 
-test('la migración V9→V11 conserva los params persistidos tal cual, también si ya eran los nuevos', t => {
+test('la migración V9→V12 conserva los params persistidos tal cual, también si ya eran los nuevos', t => {
   const { path, store } = laboratorio(t);
   const world = createWorld(51926, parseParams('agua.cuencas=0.8'));
   world.version = 9;
@@ -141,7 +141,7 @@ test('la migración V9→V11 conserva los params persistidos tal cual, también 
   const reabierto = new Store(path);
   t.after(() => reabierto.close());
   const cargado = reabierto.load()!.world;
-  assert.equal(cargado.version, 11);
+  assert.equal(cargado.version, 12);
   assert.deepEqual(paramsOf(cargado), parseParams('agua.cuencas=0.8'), 'nada se inyecta ni se revierte al migrar');
   assert.deepEqual(adoptadas(paramsOf(cargado)), NUEVAS);
 });

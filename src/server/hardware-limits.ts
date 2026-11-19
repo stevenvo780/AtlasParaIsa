@@ -190,7 +190,9 @@ export function recommendedMotorForHost(hw: HostHardware): RecommendedHostMotor 
     gpu,
     soaTerreno: cpuThreads > 1 || gpu.length > 0,
     particionarPersonas: cpuThreads >= 4,
-    clonPorPaso: false,
+    // PERF3 (`app.ts`): `clonPorPaso: true` corre en el sitio con 0 ms de clon en pasos sin gestos
+    // y conserva la residencia de `TileStore` + VRAM entre pasos (`false` invocaría `puntoDeRestauracion`).
+    clonPorPaso: true,
   };
 }
 

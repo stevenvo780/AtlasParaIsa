@@ -78,42 +78,42 @@ test('detectHostHardware: usa probe determinista sin tocar GPU real', () => {
 
 test('recommendedMotorForHost: mapeo puro por tamaño de máquina y GPUs', () => {
   assert.deepEqual(recommendedMotorForHost({ cpuThreads: 1, totalRamBytes: 2 * GiB, cudaDevices: [] }), {
-    hilos: 1, gpu: [], soaTerreno: false, particionarPersonas: false, clonPorPaso: false,
+    hilos: 1, gpu: [], soaTerreno: false, particionarPersonas: false, clonPorPaso: true,
   });
 
   assert.deepEqual(recommendedMotorForHost({ cpuThreads: 1, totalRamBytes: 4 * GiB, cudaDevices: [0] }), {
-    hilos: 1, gpu: [0], soaTerreno: true, particionarPersonas: false, clonPorPaso: false,
+    hilos: 1, gpu: [0], soaTerreno: true, particionarPersonas: false, clonPorPaso: true,
   });
 
   assert.deepEqual(recommendedMotorForHost({ cpuThreads: 2, totalRamBytes: 8 * GiB, cudaDevices: [] }), {
-    hilos: 2, gpu: [], soaTerreno: true, particionarPersonas: false, clonPorPaso: false,
+    hilos: 2, gpu: [], soaTerreno: true, particionarPersonas: false, clonPorPaso: true,
   });
 
   assert.deepEqual(recommendedMotorForHost({ cpuThreads: 4, totalRamBytes: 16 * GiB, cudaDevices: [] }), {
-    hilos: 4, gpu: [], soaTerreno: true, particionarPersonas: true, clonPorPaso: false,
+    hilos: 4, gpu: [], soaTerreno: true, particionarPersonas: true, clonPorPaso: true,
   });
 
   assert.deepEqual(recommendedMotorForHost({ cpuThreads: 7, totalRamBytes: 16 * GiB, cudaDevices: [] }), {
-    hilos: 7, gpu: [], soaTerreno: true, particionarPersonas: true, clonPorPaso: false,
+    hilos: 7, gpu: [], soaTerreno: true, particionarPersonas: true, clonPorPaso: true,
   });
 
   // A partir de 8 hilos reserva 4 para SO/WebSockets/SQLite.
   assert.deepEqual(recommendedMotorForHost({ cpuThreads: 8, totalRamBytes: 32 * GiB, cudaDevices: [] }), {
-    hilos: 4, gpu: [], soaTerreno: true, particionarPersonas: true, clonPorPaso: false,
+    hilos: 4, gpu: [], soaTerreno: true, particionarPersonas: true, clonPorPaso: true,
   });
 
   // Torre de 32 hilos y 2 GPUs CUDA → 28 hilos + gpu [0, 1].
   const hw32: HostHardware = { cpuThreads: 32, totalRamBytes: 125 * GiB, cudaDevices: [0, 1] };
   const motor32 = recommendedMotorForHost(hw32);
   assert.deepEqual(motor32, {
-    hilos: 28, gpu: [0, 1], soaTerreno: true, particionarPersonas: true, clonPorPaso: false,
+    hilos: 28, gpu: [0, 1], soaTerreno: true, particionarPersonas: true, clonPorPaso: true,
   });
 
   // Copia defensiva y deduplicación de cudaDevices.
   hw32.cudaDevices.push(9);
   assert.deepEqual(motor32.gpu, [0, 1]);
   assert.deepEqual(recommendedMotorForHost({ cpuThreads: 1024, totalRamBytes: 512 * GiB, cudaDevices: [0, 0, -1, 1] }), {
-    hilos: 512, gpu: [0, 1], soaTerreno: true, particionarPersonas: true, clonPorPaso: false,
+    hilos: 512, gpu: [0, 1], soaTerreno: true, particionarPersonas: true, clonPorPaso: true,
   });
 });
 
@@ -132,7 +132,7 @@ test('hostFullHardwareParams: integra límites, motor, gobernador techo=100ms y 
   assert.equal(Object.isFrozen(resolved), true);
   assert.deepEqual({ ...resolved.limites }, { ...hostLimits(memory), aplicacion: DEFAULT_PARAMS.limites.aplicacion });
   assert.deepEqual(resolved.motor, {
-    clonPorPaso: false,
+    clonPorPaso: true,
     hilos: 28,
     soaTerreno: true,
     particionarPersonas: true,
@@ -159,7 +159,7 @@ test('hostFullHardwareParams: integra límites, motor, gobernador techo=100ms y 
   assert.deepEqual(deployed.motor.gpu, []);
   assert.equal(deployed.motor.soaTerreno, true);
   assert.equal(deployed.motor.particionarPersonas, true);
-  assert.equal(deployed.motor.clonPorPaso, false);
+  assert.equal(deployed.motor.clonPorPaso, true);
 
   // Compatibilidad intacta de hostParams(): no toca motor, gobernador ni persistencia.
   const legacyHost = hostParams(DEFAULT_PARAMS, memory);
@@ -196,7 +196,7 @@ test('anfitrión real: detectHostHardware y hostFullHardwareParams son coherente
   assert.deepEqual(params.motor.gpu, hw.cudaDevices);
   assert.equal(params.motor.soaTerreno, hw.cpuThreads > 1 || hw.cudaDevices.length > 0);
   assert.equal(params.motor.particionarPersonas, hw.cpuThreads >= 4);
-  assert.equal(params.motor.clonPorPaso, false);
+  assert.equal(params.motor.clonPorPaso, true);
   assert.equal(params.gobernador.politica, 'techo');
   assert.equal(params.gobernador.presupuestoMs, 100);
   assert.equal(params.persistencia.cadaTicks, 100);

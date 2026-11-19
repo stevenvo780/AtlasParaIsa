@@ -226,7 +226,7 @@ test('la tierra agotada frena solo a esa aldea y el agua en cero no singulariza'
 test('la selección es determinista y maxComunidades 0 solo conserva la admisión', () => {
   assert.equal(effectiveCommunityCap(0, 1_000_000), 1_000_000);
   assert.equal(effectiveCommunityCap(64, 1_000_000), 64);
-  assert.equal(effectiveCommunityCap(100, 40), 40);
+  assert.equal(effectiveCommunityCap(100, 40), 100);
 
   const { world, plantilla } = mundo();
   for (let i = 0; i < 10; i++) aldeaCompacta(world, plantilla, `det-${i}`, 16 + i * 80, 48, 12, 0.5, 0);

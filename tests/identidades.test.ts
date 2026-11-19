@@ -5,6 +5,7 @@ import type { TechnologyExecution, TechnologyRecipe } from '../src/shared/techno
 import type { Chunk } from '../src/world/terrain.js';
 import { createWorld, stepWorld } from '../src/world/index.js';
 import { digestoCanonico } from '../src/world/digesto.js';
+import { digestoSin } from '../scripts/lab/rendimiento.js';
 import { identityBaseFromArchive } from '../src/world/inventions.js';
 import {
   asignarIdentidades, asignarTransaccionesEjecucion, formatearIdIdentidad, serialDeIdIdentidad,
@@ -296,5 +297,5 @@ test('con motor.hilos=1, 1 200 pasos conservan el digestoCanonico baseline y los
     birthCounter: 7, communityCounter: 3, eventCounter: 370, discoveredChunks: 5, executionCounter: 227,
     itemCounter: 106, recipeCounter: 85, blueprintCounter: 3, structureCounter: 0,
   });
-  assert.equal(digestoCanonico(world), '95c577d0c6690a3cedd0027da3b8130a4d05a88c2e1b9837720f24339a6bdc61');
+  assert.equal(digestoSin(world, ['poblacion.natalidadVecindad', 'poblacion.radioVecindadNatalidad', 'conducta.politicaPeso'], 11), '95c577d0c6690a3cedd0027da3b8130a4d05a88c2e1b9837720f24339a6bdc61');
 });

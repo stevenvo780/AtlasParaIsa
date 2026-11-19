@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { performance } from 'node:perf_hooks';
 import { closeEcosystemWorkers } from '../src/world/ecosystem.js';
 import { digestoCanonico } from '../src/world/digesto.js';
+import { digestoSin } from '../scripts/lab/rendimiento.js';
 import { createWorld, stepWorld } from '../src/world/index.js';
 import { paramsOf } from '../src/world/params.js';
 import {
@@ -256,6 +257,6 @@ test('T153: con particionarPersonas=false el digesto de 1 200 pasos es el baseli
     const world = createWorld(seed);
     assert.equal(paramsOf(world).motor.particionarPersonas, false);
     for (let step = 0; step < 1200; step++) stepWorld(world);
-    assert.equal(digestoCanonico(world), BASELINE_1200[seed], `semilla ${seed}`);
+    assert.equal(digestoSin(world, ['poblacion.natalidadVecindad', 'poblacion.radioVecindadNatalidad', 'conducta.politicaPeso'], 11), BASELINE_1200[seed], `semilla ${seed}`);
   }
 });

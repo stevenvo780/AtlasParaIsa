@@ -93,7 +93,7 @@ test('Q5: paridad bit a bit de digestoCanonico en 3 semillas (7, 42, 51926) × 1
       store.save(world);
       for (let tick = 1; tick <= 1200; tick++) stepWorld(world);
       assert.equal(
-        digestoSin(world, ['tecnologia']),
+        digestoSin(world, ['tecnologia', 'poblacion.natalidadVecindad', 'poblacion.radioVecindadNatalidad', 'conducta.politicaPeso'], 11),
         REFERENCIAS_MAIN_1200[seed][modo],
         `semilla ${seed} (${modo}): digesto físico idéntico bit a bit a main @bd2d30d`,
       );

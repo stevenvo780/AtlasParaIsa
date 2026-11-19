@@ -106,10 +106,11 @@ function confianzaMutua(a: Person, b: Person): boolean {
   return (a.bonds[b.id] ?? 0) >= CONFIANZA_MUTUA_MINIMA && (b.bonds[a.id] ?? 0) >= CONFIANZA_MUTUA_MINIMA;
 }
 
-/** `maxComunidades = 0` significa «sin tope de conducta»: solo corta la admisión del anfitrión. */
+/** `maxComunidades = 0` significa «sin tope de conducta»: solo corta la admisión del anfitrión.
+ * Con `maxComunidades > 0` manda la ley de fundación (T100: la admisión nunca decide la conducta). */
 export function effectiveCommunityCap(maxComunidades: number, admissionLimit: number): number {
   if (maxComunidades === 0) return admissionLimit;
-  return Math.min(maxComunidades, admissionLimit);
+  return maxComunidades;
 }
 
 /**

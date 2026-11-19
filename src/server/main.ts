@@ -7,7 +7,8 @@ import { deploymentParams } from './deployment-params.js';
 import { hostFullHardwareParams, hostOpenWorldParams, hostParams } from './hardware-limits.js';
 import { gpuParitySession } from '../world/gpu/autoprueba.js';
 import { closeEcosystemWorkers } from '../world/ecosystem.js';
-import { closePersonasParallelPools, closePolicyGpuBatchers } from '../world/index.js';
+import { bindWorldContext, closePersonasParallelPools, closePolicyGpuBatchers, worldContext } from '../world/index.js';
+import { ResidentTopologyOwner } from '../world/soa/topologia.js';
 
 process.umask(0o077);
 const port = Number(process.env.PORT ?? 3000);
@@ -35,7 +36,13 @@ try {
   // ENCIMA la configuración explícita del despliegue, solo en las claves que nombra.
   // Los límites del host NO vuelven a resolverse aquí: los del mundo cargado son los suyos.
   setParams(app.world, deploymentParams(paramsOf(app.world)));
-  for (const device of paramsOf(app.world).motor.gpu) {
+  const motor = paramsOf(app.world).motor;
+  if ((motor.hilos > 1 || motor.gpu.length > 0) && !worldContext(app.world).tileOwnership) {
+    const tileOwnership = new ResidentTopologyOwner();
+    app.world.tiles = tileOwnership.tiles(app.world.tiles.map(t => tileOwnership.tile(t)));
+    bindWorldContext(app.world, { ...worldContext(app.world), tileOwnership });
+  }
+  for (const device of motor.gpu) {
     const parity = await gpuParitySession.initialize(device, { log: diagnostic => console.warn(JSON.stringify(diagnostic)) });
     console.info(JSON.stringify({ gpuAutoprueba: parity }));
   }

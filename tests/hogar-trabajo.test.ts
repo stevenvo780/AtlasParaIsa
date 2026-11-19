@@ -22,7 +22,7 @@ for (const seed of [42, 2001] as const) test(`H-B apagada conserva el mundo de 2
   // `sprint/com-d-20260928`) y Fase B (`tecnologia.*`, `sprint/estabilidad-fase-b-20261118`) siguen
   // declarándose en sus valores históricos (no actúan).
   assert.deepEqual(DEFAULT_PARAMS.tecnologia, HISTORICAL_PARAMS.tecnologia);
-  assert.equal(digestoSin(world, ['social.hogarTrabajo', 'social.disolucion', 'tecnologia']), REFERENCIAS_1200[seed]);
+  assert.equal(digestoSin(world, ['social.hogarTrabajo', 'social.disolucion', 'tecnologia', 'poblacion.natalidadVecindad', 'poblacion.radioVecindadNatalidad', 'conducta.politicaPeso'], 11), REFERENCIAS_1200[seed]);
 });
 
 function escenaHogar(r: number, abundanteEnCasa = false): World {

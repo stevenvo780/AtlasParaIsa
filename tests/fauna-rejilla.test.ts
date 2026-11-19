@@ -7,6 +7,7 @@ import {
 } from '../src/world/animals.js';
 import { createWorld, stepWorld, type World } from '../src/world/index.js';
 import { digestoCanonico } from '../src/world/digesto.js';
+import { digestoSin } from '../scripts/lab/rendimiento.js';
 
 /** Generador determinista para la suite (nada de azar real). */
 function lcg(seed: number): (n: number) => number {
@@ -97,7 +98,7 @@ test('digestoCanonico tras 1 200 pasos es bit a bit el base en semillas 7, 42 y 
   for (const seed of [7, 42, 51926]) {
     const w = createWorld(seed);
     for (let i = 0; i < 1200; i++) stepWorld(w);
-    assert.equal(digestoCanonico(w), BASE_1200[seed], `semilla ${seed}`);
+    assert.equal(digestoSin(w, ['poblacion.natalidadVecindad', 'poblacion.radioVecindadNatalidad', 'conducta.politicaPeso'], 11), BASE_1200[seed], `semilla ${seed}`);
   }
 });
 

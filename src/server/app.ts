@@ -6,7 +6,7 @@ import type { Duplex } from 'node:stream';
 import { gzip } from 'node:zlib';
 import { promisify } from 'node:util';
 import { WebSocketServer, WebSocket, type RawData } from 'ws';
-import { createWorld, stepWorld, projectWorld, normalizeViewport, cloneWorld, puntoDeRestauracion, fraccionSerial, type PuntoDeRestauracion, type World, type FaseMedicion } from '../world/index.js';
+import { createWorld, stepWorld, projectWorld, normalizeViewport, cloneWorld, puntoDeRestauracion, fraccionSerial, worldContext, type PuntoDeRestauracion, type World, type FaseMedicion } from '../world/index.js';
 import { calcularFraccionSerialReal } from '../world/paralelo/piscina.js';
 export { aceleracionAmdahlTeorica } from '../world/paralelo/piscina.js';
 import { paramsOf, type WorldParams } from '../world/params.js';
@@ -625,8 +625,15 @@ export function createApp(options: AppOptions) {
       // se encadena cualquier `onBarrier` previo del contexto y solo se acumulan ms.
       let paraleloCapturadoMs = 0, barreraCapturadaMs = 0, ocupacionPonderada = 0;
       const ejecucionPrevia = context.ecologyExecution;
-      const contextoPaso: typeof context = { ...context, ecologyExecution: { ...ejecucionPrevia,
-        onBarrier: evento => { ejecucionPrevia?.onBarrier?.(evento); const d = evento.diagnostics; if (d && d.tiempoParaleloMs > 0) { paraleloCapturadoMs += d.tiempoParaleloMs; barreraCapturadaMs += d.tiempoBarreraMs; ocupacionPonderada += d.ocupacionWorkers * d.tiempoParaleloMs; } } } };
+      const personasPrevia = context.personasExecution;
+      const contextoPaso: typeof context = {
+        ...context,
+        tileOwnership: worldContext(draft).tileOwnership ?? context.tileOwnership,
+        ecologyExecution: { ...ejecucionPrevia,
+          onBarrier: evento => { ejecucionPrevia?.onBarrier?.(evento); const d = evento.diagnostics; if (d && d.tiempoParaleloMs > 0) { paraleloCapturadoMs += d.tiempoParaleloMs; barreraCapturadaMs += d.tiempoBarreraMs; ocupacionPonderada += d.ocupacionWorkers * d.tiempoParaleloMs; } } },
+        personasExecution: { ...personasPrevia,
+          onStep: d => { personasPrevia?.onStep?.(d); if (d.tiempoParaleloMs > 0) { paraleloCapturadoMs += d.tiempoParaleloMs; barreraCapturadaMs += d.tiempoBarreraMs; ocupacionPonderada += d.ocupacionWorkers * d.tiempoParaleloMs; } } },
+      };
       const results = stepWorld(draft, valid.map(item => item.gesture), contextoPaso, medicion);
       runtime.simulationMs = monotonicNow() - simulationStarted;
       if (results.length !== valid.length) throw new Error('Gesture result count mismatch');

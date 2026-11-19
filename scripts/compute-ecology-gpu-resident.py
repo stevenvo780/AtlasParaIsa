@@ -6,11 +6,70 @@ sync or only dirty pages, launches ecology_pass1/ecology_pass2, and downloads
 back pages for the ranges each device computed. No 1M-cell / 120MB caps:
 MAX_CELLS is the antic-corruption bound from the task.
 """
-import argparse, concurrent.futures, ctypes as C, json, pathlib, struct, sys, time
+import argparse, concurrent.futures, ctypes as C, json, mmap, os, pathlib, struct, sys, tempfile, time
 import numpy as np
 clock = time.perf_counter
 MAX_CELLS = 33_554_432
 FIELDS = [('moisture',8),('vegetation',8),('food',8),('wood',8),('growth',8),('fertility',8),('cultivation',8),('traffic',8),('drinkingWater',8),('terrain',1),('biome',1),('feature',1),('life',8)]
+# Descarga selectiva por pasada (solo lo que el kernel modifica; el resto lo copia el worker JS front->back en RAM).
+DOWNLOAD_FIELDS = {1: [('moisture',8),('vegetation',8),('food',8)],
+                   2: [(f,e) for f,e in FIELDS if f not in ('food','terrain','biome')]}
+
+def runs_of(slots_sorted):
+    """Agrupa una lista ordenada de slots en tramos contiguos [(start_slot, count_slots), ...]."""
+    runs = []
+    for s in slots_sorted:
+        if runs and s == runs[-1][0] + runs[-1][1]:
+            runs[-1] = (runs[-1][0], runs[-1][1] + 1)
+        else:
+            runs.append((int(s), 1))
+    return runs
+
+class ShmChannel:
+    """Payload grande por /dev/shm (mmap); stdin/stdout solo llevan encabezados JSON < 4 KB."""
+    def __init__(self):
+        base = '/dev/shm' if os.path.isdir('/dev/shm') else tempfile.gettempdir()
+        self.path = os.path.join(base, f'atlas-gpu-resident-{os.getpid()}.shm')
+        self._fd = os.open(self.path, os.O_CREAT | os.O_RDWR, 0o600)
+        self.capacity = 0
+        self.mm = None
+        self.ensure(1 << 20)
+    def ensure(self, nbytes):
+        if nbytes <= self.capacity:
+            return
+        cap = max(nbytes, self.capacity * 2, 1 << 20)
+        if self.mm is not None:
+            self.mm.close()
+        os.ftruncate(self._fd, cap)
+        self.mm = mmap.mmap(self._fd, cap)
+        self.capacity = cap
+    def write(self, data):
+        n = data.nbytes if isinstance(data, np.ndarray) else len(data)
+        self.ensure(n)
+        if isinstance(data, np.ndarray) and data.dtype == np.uint8:
+            np.frombuffer(self.mm, dtype=np.uint8, count=n)[:] = data.ravel()
+        elif isinstance(data, np.ndarray):
+            self.mm[:n] = data.tobytes()
+        else:
+            self.mm[:n] = data
+        return n
+    def view(self, nbytes):
+        self.ensure(nbytes)
+        return memoryview(self.mm)[:nbytes]
+    def close(self):
+        try:
+            if self.mm is not None:
+                self.mm.close()
+        except Exception:
+            pass
+        try:
+            os.close(self._fd)
+        except Exception:
+            pass
+        try:
+            os.unlink(self.path)
+        except Exception:
+            pass
 
 def bind(lib, name, args):
     fn = getattr(lib, name); fn.argtypes = args; fn.restype = C.c_int; return fn
@@ -74,21 +133,25 @@ class Device:
         resident = sum(int(v.value and capacity) for v in []) # placeholder no-op
         resident_bytes = capacity*sum(e for _,e in FIELDS)*2 + total*4 + capacity*4 + slots*9*4 + slots*9
         return {'index':self.index,'uploadedBytes':uploaded,'syncMs':(clock()-started)*1000,'residentBytes':resident_bytes}
-    def step(self, req, body_addr, dirty, ranges_by_device, halo=None):
+    def step(self, req, body_addr, dirty, ranges_by_device, halo=None, staging_out=None):
         checked(self.current(self.context)); started=clock(); uploaded=0
-        # dirty upload: body layout slot-major, field-minor chunks of 256 cells
+        # Subida sucia coalescida: el body viene por campo y por tramo contiguo (ver puente.ts);
+        # una sola llamada DMA por campo y tramo copia count*256*esz bytes seguidos.
         offset=0
-        for slot in dirty:
-            for fname,esz in FIELDS:
-                nbytes=256*esz; self._up(self.ptrs[fname+'F'], body_addr+offset, nbytes, slot*256*esz); offset+=nbytes; uploaded+=nbytes
+        dirty_sorted = sorted(int(s) for s in dirty)
+        dirty_runs = runs_of(dirty_sorted)
+        for fname,esz in FIELDS:
+            for start_slot,count in dirty_runs:
+                nbytes=count*256*esz; self._up(self.ptrs[fname+'F'], body_addr+offset, nbytes, start_slot*256*esz); offset+=nbytes; uploaded+=nbytes
         if req['pass']==2:
             wood_arr = req.pop('_wood_arr')
             self._up(self.ptrs['woodAdded'], wood_arr.ctypes.data, wood_arr.nbytes); uploaded+=wood_arr.nbytes; offset+=wood_arr.nbytes
         if halo:
             halo_slots, halo_field, halo_offset = halo
             esz = dict(FIELDS)[halo_field]
-            for j,slot in enumerate(halo_slots):
-                nbytes=256*esz; self._up(self.ptrs[halo_field+'F'], body_addr+halo_offset+j*nbytes, nbytes, slot*256*esz); uploaded+=nbytes
+            rel=0
+            for start_slot,count in runs_of(sorted(int(s) for s in halo_slots)):
+                nbytes=count*256*esz; self._up(self.ptrs[halo_field+'F'], body_addr+halo_offset+rel, nbytes, start_slot*256*esz); uploaded+=nbytes; rel+=nbytes
         begin,end = ranges_by_device
         p = req['params']
         # Build kernel args
@@ -105,15 +168,26 @@ class Device:
         count=max(0,end-begin); grid=(count+255)//256
         ks=clock()
         checked(self.launch(kern,grid,1,1,256,1,1,0,None,args,None)); checked(self.sync_fn()); kernel_ms=(clock()-ks)*1000
-        # download slots for this range
+        dl_started=clock()
+        # Bajada selectiva y coalescida: solo los campos que la pasada modifica (3 en pass1, 10 en
+        # pass2), una llamada DMA por campo y por tramo contiguo de páginas.
         if count:
-            cells_slice=self.cells[begin:end]; slots_sorted=sorted(set((cells_slice>>8).tolist()))
+            # unique ordenado en C (sin materializar millones de enteros Python por pasada).
+            slots_sorted=np.unique(self.cells[begin:end]>>8).tolist()
         else: slots_sorted=[]
-        total_dl=sum(256*esz for _,esz in FIELDS)*len(slots_sorted)
-        staging=np.empty(total_dl,dtype=np.uint8); downloaded=0; off=0
-        for slot in slots_sorted:
-            for fname,esz in FIELDS:
-                nbytes=256*esz; self._down(staging.ctypes.data+off, self.ptrs[fname+'B'], nbytes, slot*256*esz); off+=nbytes; downloaded+=nbytes
+        dl_fields = DOWNLOAD_FIELDS[req['pass']]
+        dl_runs = runs_of(slots_sorted)
+        total_dl=sum(256*esz for _,esz in dl_fields)*len(slots_sorted)
+        if staging_out is not None and staging_out.nbytes == total_dl:
+            staging = staging_out
+        elif staging_out is not None:
+            raise ValueError('staging shm de tamaño inesperado')
+        else:
+            staging=np.empty(total_dl,dtype=np.uint8)
+        downloaded=0; off=0
+        for fname,esz in dl_fields:
+            for start_slot,run_count in dl_runs:
+                nbytes=run_count*256*esz; self._down(staging.ctypes.data+off, self.ptrs[fname+'B'], nbytes, start_slot*256*esz); off+=nbytes; downloaded+=nbytes
         # Logical front becomes the back just computed, matching TileStore.commitParallel parity swap.
         for fname,_ in FIELDS:
             self.ptrs[fname+'F'],self.ptrs[fname+'B'] = self.ptrs[fname+'B'],self.ptrs[fname+'F']
@@ -121,7 +195,13 @@ class Device:
         if req['pass']==2:
             wa=np.empty(self.slots,dtype=np.uint8); self._down(wa.ctypes.data, self.ptrs['woodAdded'], wa.nbytes); downloaded+=wa.nbytes
             wood_slots=[int(s) for s in np.nonzero(wa)[0].tolist()]
-        return {'index':self.index,'begin':begin,'end':end,'uploadedBytes':uploaded,'downloadedBytes':downloaded,'kernelMs':kernel_ms,'stepMs':(clock()-started)*1000,'downloadSlots':slots_sorted,'woodAddedSlots':wood_slots,'staging':staging}
+        result={'index':self.index,'begin':begin,'end':end,'uploadedBytes':uploaded,'downloadedBytes':downloaded,'kernelMs':kernel_ms,'stepMs':(clock()-started)*1000,'downloadSlots':slots_sorted,'woodAddedSlots':wood_slots,'staging':staging}
+        timing_path=os.environ.get('ATLAS_GPU_TIMING')
+        if timing_path:
+            try:
+                with open(timing_path,'a') as fh: fh.write(json.dumps({'pass':req['pass'],'device':self.index,'stepMs':result['stepMs'],'kernelMs':kernel_ms,'downloadMs':(clock()-dl_started)*1000,'preKernelMs':(ks-started)*1000,'bytes':downloaded})+'\n')
+            except Exception: pass
+        return result
     def close(self):
         try:
             checked(self.current(self.context))
@@ -136,12 +216,26 @@ def read_exact(n):
         if not c: raise EOFError()
         o+=c
     return bytes(b)
+SHM = None
 def emit(header, body=None):
+    # El payload viaja por /dev/shm; por stdout solo va el encabezado JSON (con shmBytes).
     if body is not None and not isinstance(body,(bytes,bytearray,np.ndarray)): body=bytes(body)
     n = 0 if body is None else (body.nbytes if isinstance(body,np.ndarray) else len(body))
-    header={**header,'bytes':n}; raw=json.dumps(header,separators=(',',':')).encode()
+    shm_bytes = 0
+    if body is not None and n and SHM is not None:
+        shm_bytes = SHM.write(body)
+        header={**header,'bytes':0,'shmBytes':shm_bytes}
+    else:
+        header={**header,'bytes':n,'shmBytes':0}
+    raw=json.dumps(header,separators=(',',':')).encode()
     sys.stdout.buffer.write(struct.pack('<I',len(raw))); sys.stdout.buffer.write(raw)
-    if body is not None: sys.stdout.buffer.write(body if isinstance(body,(bytes,bytearray)) else body.tobytes())
+    if body is not None and not shm_bytes and n:
+        sys.stdout.buffer.write(body if isinstance(body,(bytes,bytearray)) else body.tobytes())
+    sys.stdout.buffer.flush()
+def emit_shm(header, nbytes):
+    """Respuesta cuyo payload ya está en /dev/shm (DMA directa al mmap): solo va el encabezado."""
+    header={**header,'bytes':0,'shmBytes':int(nbytes)}; raw=json.dumps(header,separators=(',',':')).encode()
+    sys.stdout.buffer.write(struct.pack('<I',len(raw))); sys.stdout.buffer.write(raw)
     sys.stdout.buffer.flush()
 
 def main():
@@ -150,16 +244,25 @@ def main():
     if not indices or any(x<0 for x in indices) or len(set(indices))!=len(indices): raise ValueError('Invalid devices')
     source=pathlib.Path(__file__).with_name('compute-ecology-resident.cu').read_text()
     devices=[]
+    global SHM
+    try:
+        SHM = ShmChannel()
+    except Exception:
+        SHM = None
     try:
         for idx in indices: devices.append(Device(idx,a.nvrtc,source))
-        emit({'ready':True,'devices':[{'index':d.index,'architecture':d.arch,'contextMs':d.context_ms,'compileMs':d.compile_ms} for d in devices],'precision':'Float64','fmad':False,'kernels':['ecology_pass1','ecology_pass2'],'maxCells':MAX_CELLS})
+        emit({'ready':True,'devices':[{'index':d.index,'architecture':d.arch,'contextMs':d.context_ms,'compileMs':d.compile_ms} for d in devices],'precision':'Float64','fmad':False,'kernels':['ecology_pass1','ecology_pass2'],'maxCells':MAX_CELLS,'shmPath':(SHM.path if SHM else None),'shmCapacity':(SHM.capacity if SHM else 0)})
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(devices)) as ex:
             while True:
                 ln=struct.unpack('<I',read_exact(4))[0]
                 if ln>1_000_000: raise ValueError('Oversized header')
-                req=json.loads(read_exact(ln)); amount=req.get('bytes',0)
-                if amount<0 or amount>4_000_000_000: raise ValueError('Oversized body')
-                body=read_exact(amount) if amount else b''
+                req=json.loads(read_exact(ln)); amount=req.get('bytes',0); shm_amount=req.get('shmBytes',0) or 0
+                if amount<0 or amount>4_000_000_000 or shm_amount<0 or shm_amount>4_000_000_000: raise ValueError('Oversized body')
+                if shm_amount:
+                    if SHM is None: raise ValueError('shmBytes sin canal /dev/shm')
+                    body=SHM.view(int(shm_amount))
+                else:
+                    body=read_exact(amount) if amount else b''
                 if req['kind']=='close': break
                 if req['kind']=='sync':
                     cap=req['capacityCells']; slots=req['slots']; total=req['totalCells']
@@ -184,17 +287,43 @@ def main():
                     if halo_field:
                         esz=dict(FIELDS)[halo_field]
                         for lst in halo_per: halo_offsets.append(hoff); hoff+=len(lst)*256*esz
-                    parts=[]
-                    for di,d in enumerate(devices):
+                    # DMA directa al mmap /dev/shm: cada dispositivo descarga en su tramo del
+                    # buffer compartido y la respuesta no vuelve a copiarse staging->shm.
+                    dl_fields_main = DOWNLOAD_FIELDS[req['pass']]
+                    per_device_bytes = []
+                    staging_slices = None
+                    if SHM is not None and devices[0].cells is not None:
+                        cells_all = devices[0].cells
+                        sizes = []
+                        for (b,e) in ranges:
+                            nslots = int(np.unique(cells_all[b:e]>>8).size) if e > b else 0
+                            sizes.append(nslots * sum(256*esz for _,esz in dl_fields_main))
+                        total_dl_all = sum(sizes)
+                        if total_dl_all:
+                            SHM.ensure(total_dl_all)
+                            base = np.frombuffer(SHM.mm, dtype=np.uint8, count=total_dl_all)
+                            staging_slices = []; soff = 0
+                            for sz in sizes: staging_slices.append(base[soff:soff+sz]); soff += sz
+                            per_device_bytes = sizes
+                    # Multi-GPU: cada dispositivo en su hilo (contexto propio); nunca secuencial.
+                    def run_one(di_d):
+                        di,d = di_d
                         r=dict(req); r['_wood_arr']=wood_arr
                         halo=(halo_per[di], halo_field, halo_offsets[di]) if halo_field and di < len(halo_per) else None
-                        parts.append(d.step(r,body_addr,dirty,tuple(ranges[di]),halo))
-                    out=np.concatenate([p['staging'] for p in parts]) if any(p['staging'].size for p in parts) else np.empty(0,dtype=np.uint8)
+                        return d.step(r,body_addr,dirty,tuple(ranges[di]),halo, staging_slices[di] if staging_slices is not None else None)
+                    futs=[ex.submit(run_one,(di,d)) for di,d in enumerate(devices)]
+                    parts=[f.result() for f in futs]
                     wood_slots=sorted(set(s for p in parts for s in p['woodAddedSlots']))
-                    emit({'ok':True,'uploadedBytes':sum(p['uploadedBytes'] for p in parts),'downloadedBytes':sum(p['downloadedBytes'] for p in parts),'woodAddedSlots':wood_slots,'downloadSlotsPerDevice':[p['downloadSlots'] for p in parts],'devices':[{k:v for k,v in p.items() if k!='staging'} for p in parts]}, out)
+                    reply_header={'ok':True,'uploadedBytes':sum(p['uploadedBytes'] for p in parts),'downloadedBytes':sum(p['downloadedBytes'] for p in parts),'woodAddedSlots':wood_slots,'downloadSlotsPerDevice':[p['downloadSlots'] for p in parts],'devices':[{k:v for k,v in p.items() if k!='staging'} for p in parts]}
+                    if staging_slices is not None:
+                        emit_shm(reply_header, sum(per_device_bytes))
+                    else:
+                        out=parts[0]['staging'] if len(parts)==1 else (np.concatenate([p['staging'] for p in parts]) if any(p['staging'].size for p in parts) else np.empty(0,dtype=np.uint8))
+                        emit(reply_header, out)
                 else: raise ValueError('Unknown operation')
     finally:
         for d in devices: d.close()
+        if SHM is not None: SHM.close()
 if __name__=='__main__':
     try: main()
     except EOFError: pass

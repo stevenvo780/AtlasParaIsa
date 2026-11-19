@@ -171,7 +171,7 @@ test('el software ya no pone tope: `poblacion.maxima` por defecto no limita y el
 // el hardware limita el crecimiento, no el reemplazo.
 // ---------------------------------------------------------------------------------------------
 
-import { decidirConTecho, ESTADO_TECHO_INICIAL, Gobernador } from '../src/server/governor.js';
+import { decidirConTecho, ESTADO_TECHO_INICIAL, Gobernador, gobernar, ESTADO_GOBERNACION_INICIAL, VENTANAS_VERDES_PARA_SALIR, type EntradaGobernar, type EstadoGobernacion } from '../src/server/governor.js';
 import type { Person } from '../src/world/index.js';
 
 /** Igual que `fatalThirst` en tests/muerte.test.ts: sed total y salud mínima ⇒ muerte real por deshidratación en el paso auténtico. */
@@ -271,4 +271,153 @@ test('servidor con `gobernador.politica=apagar`: bajo carga sostenida apaga la r
   for (let n = 0; n < 40 && !muerto; n++) { app.stepOnce(); muerto = app.world.people.length < poblacion; }
   assert.ok(muerto);
   assert.equal(app.world.reproductionEnabled, false, 'apagar no repone: la extinción observada en el mundo público');
+});
+
+// ---------------------------------------------------------------------------------------------
+// T162: estados verde/amarillo/rojo/manual, histéresis de tres ventanas verdes y palancas con
+// prioridad estricta (área → nacimientos → red → guardado), una sola activa a la vez.
+// La vía multiseñal es nueva; con `gobernador.senales=['p95']` manda el control de siempre.
+// ---------------------------------------------------------------------------------------------
+
+const ENTRADA_T162: EntradaGobernar = { presupuestoMs: 50, politica: 'techo', senales: ['p95', 'max', 'rss', 'colaRed', 'saveMs'],
+  valores: { p95: 80, max: 80, rss: 80, colaRed: 80, saveMs: 80 }, actual: true, poblacion: 22,
+  areaHabilitada: true, paginasFriasExceso: 3, subscribeMs: 100, cadaTicks: 2 };
+const previoRojo = (entrada: EntradaGobernar): EstadoGobernacion => gobernar(entrada, ESTADO_GOBERNACION_INICIAL).siguiente;
+
+test('T162: los umbrales son relativos al presupuesto (35/50 ms con 50 ms): verde < 70 %, amarillo en la banda, rojo por encima', () => {
+  const estado = (p95: number) => gobernar({ presupuestoMs: 50, politica: 'techo', senales: ['p95'], valores: { p95 }, actual: true, poblacion: 10 }).estado;
+  assert.equal(estado(34.9), 'verde');
+  assert.equal(estado(35), 'amarillo', 'el 70 % exacto ya es banda muerta, no verde');
+  assert.equal(estado(50), 'amarillo', 'el presupuesto exacto todavía no es rojo');
+  assert.equal(estado(50.001), 'rojo');
+  assert.equal(gobernar({ presupuestoMs: 50, politica: 'techo', senales: ['p95'], valores: { p95: 40 }, actual: false, poblacion: 10 }).palancaActiva, null, 'en amarillo no se toca ninguna palanca');
+});
+
+test('T162: cuatro señales disparando a la vez activan una sola palanca, la de mayor prioridad (área), y las demás quedan intactas', () => {
+  const d = gobernar(ENTRADA_T162, ESTADO_GOBERNACION_INICIAL);
+  assert.equal(d.estado, 'rojo');
+  assert.deepEqual(d.senalesDisparadas, ['p95', 'max', 'rss', 'colaRed', 'saveMs']);
+  assert.equal(d.palancaActiva, 'area');
+  assert.equal(d.solicitarRetiroPaginasFrias, true, 'el área solo lo solicita: retirar páginas frías es T163');
+  assert.equal(d.reproductionEnabled, true, 'nacimientos no se tocó: con la población en el techo habría sido false');
+  assert.equal(d.subscribeMsEfectivo, 100, 'red no se tocó');
+  assert.equal(d.cadaTicksEfectivo, 2, 'guardado no se tocó');
+  // Sin área aplicable gana nacimientos; sin nacimientos gana red; sin red gana guardado.
+  const sinArea = gobernar({ ...ENTRADA_T162, paginasFriasExceso: 0 }, ESTADO_GOBERNACION_INICIAL);
+  assert.equal(sinArea.palancaActiva, 'nacimientos'); assert.equal(sinArea.reproductionEnabled, false);
+  assert.equal(sinArea.subscribeMsEfectivo, 100); assert.equal(sinArea.cadaTicksEfectivo, 2);
+  const sinNacimientos = gobernar({ ...ENTRADA_T162, paginasFriasExceso: 0, valores: { colaRed: 80, saveMs: 80 } }, ESTADO_GOBERNACION_INICIAL);
+  assert.equal(sinNacimientos.palancaActiva, 'red'); assert.equal(sinNacimientos.subscribeMsEfectivo, 200, 'red sube subscribeMs antes que descartar');
+  assert.equal(sinNacimientos.cadaTicksEfectivo, 2); assert.equal(sinNacimientos.reproductionEnabled, true);
+  const soloGuardado = gobernar({ ...ENTRADA_T162, paginasFriasExceso: 0, valores: { saveMs: 80 } }, ESTADO_GOBERNACION_INICIAL);
+  assert.equal(soloGuardado.palancaActiva, 'guardado'); assert.equal(soloGuardado.cadaTicksEfectivo, 4);
+  assert.equal(soloGuardado.subscribeMsEfectivo, 100); assert.equal(soloGuardado.reproductionEnabled, true);
+  // `rss` sin área habilitada y sin exceso no levanta ninguna palanca, aunque el estado sea rojo.
+  const rssSolo = gobernar({ ...ENTRADA_T162, areaHabilitada: false, paginasFriasExceso: 0, valores: { rss: 80 } }, ESTADO_GOBERNACION_INICIAL);
+  assert.equal(rssSolo.estado, 'rojo'); assert.equal(rssSolo.palancaActiva, null); assert.equal(rssSolo.solicitarRetiroPaginasFrias, false);
+});
+
+test('T162: la palanca de guardado espacia dentro de un máximo y jamás toca el paso de un gesto; la de red tampoco supera su máximo', () => {
+  const guardado = (extra: Partial<EntradaGobernar>) => gobernar({ presupuestoMs: 50, politica: 'techo', senales: ['saveMs'], valores: { saveMs: 80 }, actual: true, poblacion: 10, cadaTicks: 15, ...extra });
+  assert.equal(guardado({}).cadaTicksEfectivo, 20, '15 × 2 se capa en el máximo, no crece sin tope');
+  assert.equal(guardado({ gestoEnEstePaso: true }).cadaTicksEfectivo, 15, 'un gesto fuerza guardado en su propio paso: la cadencia no se espacia');
+  const red = gobernar({ presupuestoMs: 50, politica: 'techo', senales: ['colaRed'], valores: { colaRed: 80 }, actual: true, poblacion: 10, subscribeMs: 4000 });
+  assert.equal(red.subscribeMsEfectivo, 5000, 'la suscripción efectiva se capa en su máximo');
+});
+
+test('T162: salir de rojo exige tres ventanas verdes consecutivas; una amarilla reinicia la cuenta (oscilación acotada)', () => {
+  const multi: EntradaGobernar = { presupuestoMs: 50, politica: 'techo', senales: ['p95', 'max'], valores: { p95: 80, max: 80 }, actual: true, poblacion: 22 };
+  const verde: EntradaGobernar = { ...multi, valores: { p95: 10, max: 10 } };
+  let previo = previoRojo(multi);
+  let d = gobernar({ ...verde, actual: false }, previo);
+  assert.equal(d.estado, 'rojo'); assert.equal(d.ventanasVerdesConsecutivas, 1); assert.equal(d.reproductionEnabled, false, 'aún no se sale');
+  assert.equal(d.techo, 22, 'el techo se conserva mientras dura la histéresis');
+  previo = d.siguiente;
+  d = gobernar({ ...verde, valores: { p95: 40, max: 40 }, actual: false }, previo);
+  assert.equal(d.estado, 'rojo'); assert.equal(d.ventanasVerdesConsecutivas, 0, 'una ventana amarilla reinicia la cuenta');
+  previo = d.siguiente;
+  for (let n = 1; n < VENTANAS_VERDES_PARA_SALIR; n++) {
+    d = gobernar({ ...verde, actual: false }, previo);
+    assert.equal(d.estado, 'rojo', `la ventana verde ${n} aún no basta`); assert.equal(d.ventanasVerdesConsecutivas, n);
+    previo = d.siguiente;
+  }
+  d = gobernar({ ...verde, actual: false }, previo);
+  assert.equal(d.estado, 'verde'); assert.equal(d.ventanasVerdesConsecutivas, VENTANAS_VERDES_PARA_SALIR);
+  assert.equal(d.reproductionEnabled, true); assert.equal(d.techo, null, 'al salir, el techo se retira');
+  // Oscilación: rojo/verde alternos nunca acumulan las tres ventanas, así que nunca salen de rojo.
+  let oscilante = previoRojo(multi);
+  for (let n = 0; n < 12; n++) {
+    const paso = gobernar(n % 2 ? multi : { ...verde, actual: false }, oscilante);
+    assert.equal(paso.estado, 'rojo'); oscilante = paso.siguiente;
+  }
+});
+
+test('T162: `manual` gana a todas las señales automáticas, active o detenga', () => {
+  for (const orden of [true, false]) {
+    const d = gobernar({ ...ENTRADA_T162, manualOverride: orden, actual: !orden }, ESTADO_GOBERNACION_INICIAL);
+    assert.equal(d.estado, 'manual'); assert.equal(d.reproductionEnabled, orden);
+    assert.equal(d.palancaActiva, null); assert.equal(d.solicitarRetiroPaginasFrias, false);
+    assert.equal(d.subscribeMsEfectivo, 100); assert.equal(d.cadaTicksEfectivo, 2);
+  }
+  const g = new Gobernador();
+  g.registrar(80);
+  assert.equal(g.decidir({ presupuestoMs: 50, politica: 'techo', senales: ['p95', 'colaRed'], valores: { colaRed: 999 }, manualOverride: true }, false, 10, 100, 1), true);
+  assert.equal(g.estadoGobernador, 'manual'); assert.equal(g.palancaActiva, null);
+});
+
+test('T162: `gobernar` es pura como `decideReproduction`: no muta entrada ni estado previo y repite el resultado', () => {
+  const entrada = Object.freeze({ ...ENTRADA_T162, valores: Object.freeze({ ...ENTRADA_T162.valores }) });
+  const previo = Object.freeze({ techo: Object.freeze({ techo: 22 }), frenado: true, ventanasVerdesConsecutivas: 1 });
+  const uno = gobernar(entrada, previo), dos = gobernar(entrada, previo);
+  assert.deepEqual(uno, dos);
+  assert.deepEqual(previo, { techo: { techo: 22 }, frenado: true, ventanasVerdesConsecutivas: 1 });
+  assert.notEqual(uno.siguiente, previo); assert.notEqual(uno.estadoTecho, previo.techo);
+});
+
+test("T162 control: con `gobernador.senales=['p95']` la reproducción y el techo reproducen exactamente el gobernador de hoy, sin esperar tres ventanas", () => {
+  for (const politica of ['techo', 'apagar'] as const) {
+    let estadoTecho: EstadoGobernacion['techo'] = { ...ESTADO_TECHO_INICIAL };
+    let previo: EstadoGobernacion = { techo: estadoTecho, frenado: false, ventanasVerdesConsecutivas: 0 };
+    let actual = true;
+    for (const p95 of [20, 40, 60, 50, 35, 80, 10, 40, 90, 20]) {
+      const d = gobernar({ presupuestoMs: 50, politica, senales: ['p95'], valores: { p95 }, actual, poblacion: 22 }, previo);
+      const esperado: { reproduccion: boolean; techo: number | null } = politica === 'apagar'
+        ? { reproduccion: decideReproduction(p95, 50, actual), techo: null }
+        : (() => { const c = decidirConTecho(p95, 50, 22, estadoTecho); return { reproduccion: c.reproduccion, techo: c.estado.techo }; })();
+      assert.equal(d.reproductionEnabled, esperado.reproduccion, `${politica} a ${p95} ms`);
+      assert.equal(d.techo, esperado.techo, `${politica} a ${p95} ms`);
+      actual = d.reproductionEnabled; previo = d.siguiente; estadoTecho = d.estadoTecho;
+    }
+  }
+  // La salida de rojo es la de hoy: basta una ventana por debajo del 70 %, sin contar tres.
+  const clase = new Gobernador();
+  for (let n = 0; n < 8; n++) clase.registrar(80);
+  assert.equal(clase.decidir({ presupuestoMs: 50, politica: 'techo', senales: ['p95'] }, true, 22, 1120, 8), false);
+  for (let n = 0; n < GOVERNOR_WINDOW_STEPS; n++) clase.registrar(10);
+  assert.equal(clase.decidir({ presupuestoMs: 50, politica: 'techo', senales: ['p95'] }, false, 22, 1120, 130), true);
+  assert.equal(clase.estado.techo, null); assert.equal(clase.estadoGobernador, 'verde');
+  assert.deepEqual(parseParams('gobernador.senales=["p95","max","rss","colaRed","saveMs"]').gobernador.senales, ['p95', 'max', 'rss', 'colaRed', 'saveMs']);
+  assert.throws(() => parseParams('gobernador.senales=["inventada"]'), /valores permitidos/);
+});
+
+test('T162: la clase Gobernador publica estado, palanca y señal, y aplica la histéresis multiseñal ventana a ventana', (t) => {
+  const g = new Gobernador();
+  g.registrar(10);
+  const params = { presupuestoMs: 50, politica: 'techo' as const, senales: ['colaRed'], subscribeMs: 0, cadaTicks: 1 };
+  assert.equal(g.decidir({ ...params, valores: { colaRed: 80 } }, true, 10, 100, 1), true, 'la palanca de red no toca los nacimientos');
+  assert.equal(g.estadoGobernador, 'rojo'); assert.equal(g.palancaActiva, 'red'); assert.equal(g.senalDisparadora, 'colaRed');
+  assert.equal(g.subscribeMsEfectivo, 1000); assert.equal(g.techoObservado!.senal, 'colaRed');
+  for (let n = 1; n < VENTANAS_VERDES_PARA_SALIR; n++) {
+    g.decidir({ ...params, valores: { colaRed: 10 } }, true, 10, 100, 1 + n);
+    assert.equal(g.estadoGobernador, 'rojo', `la ventana verde ${n} aún no basta`); assert.equal(g.ventanasVerdesConsecutivas, n);
+  }
+  g.decidir({ ...params, valores: { colaRed: 10 } }, true, 10, 100, 4);
+  assert.equal(g.estadoGobernador, 'verde'); assert.equal(g.palancaActiva, null);
+  // Y en el servidor real: bajo carga el estado publicado es rojo/nacimientos; con orden humana, manual.
+  const f = fixture(t, 50, { slowMs: 80, deterministic: true });
+  f.app.stepOnce();
+  assert.equal(f.app.runtime.gobernador!.estado, 'rojo'); assert.equal(f.app.runtime.gobernador!.palancaActiva, 'nacimientos');
+  assert.equal(f.app.runtime.gobernador!.senalDisparadora, 'p95');
+  f.app.setReproduccionManual(false); f.app.stepOnce();
+  assert.equal(f.app.runtime.gobernador!.estado, 'manual'); assert.equal(f.app.runtime.gobernador!.palancaActiva, null);
 });

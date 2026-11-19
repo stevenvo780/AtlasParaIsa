@@ -490,7 +490,7 @@
   · **Control**: el coste de medir ≤ 2 % del paso.
   · **Cierre**: todas las señales en `performance.gobernador`.
 
-- [ ] **T162** [claude opus · high] **Estados, umbrales y palancas con prioridad estricta.**
+- [x] **T162** [claude opus · high] **Estados, umbrales y palancas con prioridad estricta.**
   Verde / amarillo / rojo / manual, con la histéresis que ya existe (35/50 ms) y **tres ventanas verdes (36 s)** para salir de rojo. Palancas en orden, **una sola activa a la vez**: (1) área — retirar páginas frías; (2) nacimientos — lo de hoy; (3) cadencia de red — subir `subscribeMs` antes que descartar; (4) cadencia de guardado — dentro de un máximo, **sin tocar** la invariante «un gesto fuerza guardado en su propio paso» (C3/C12, `app.ts:216-221`). La orden humana (`manual`) manda siempre. `decideReproduction` sigue siendo una **función pura** (lo exige `tests/gobernador.test.ts`).
   · **Ficheros**: `src/server/app.ts` (`governReproduction` → `gobernar`), `src/world/params.ts`, `tests/gobernador.test.ts` (ampliado).
   · **Tests**: cuatro señales disparando a la vez ⇒ una sola palanca; oscilación acotada; `manual` gana a todo; la función pura sigue siéndolo.

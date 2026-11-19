@@ -192,7 +192,13 @@ export interface RuntimeStats { stepMs: number; p95StepMs: number; saveMs: numbe
     regionesActivas?: number; teselasActivas?: number; teselasPorHabitante?: number;
     poblacion?: number; nacimientos?: number; muertes?: number;
     colaRed?: number; maxBufferedAmount?: number;
-    reproductionEnabled?: boolean; techoPoblacion?: number | null }; }
+    reproductionEnabled?: boolean; techoPoblacion?: number | null;
+    /** T162: estado del gobernador, única palanca activa, señal que disparó y cuenta de
+     * ventanas verdes hacia la salida de rojo. `manual` manda sobre toda señal automática. */
+    estado?: 'verde' | 'amarillo' | 'rojo' | 'manual';
+    palancaActiva?: 'area' | 'nacimientos' | 'red' | 'guardado' | null;
+    senalDisparadora?: string | null; ventanasVerdesConsecutivas?: number;
+    solicitarRetiroPaginasFrias?: boolean; subscribeMsEfectivo?: number; cadaTicksEfectivo?: number }; }
 export type GestureKind = 'plant' | 'invite' | 'remember' | 'command';
 export interface Gesture { id: string; kind: GestureKind; x: number; y: number; memoryId?: string; agentId?: string; order?: Order; }
 export interface GestureResult {

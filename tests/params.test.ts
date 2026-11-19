@@ -190,7 +190,8 @@ test('T102: rechaza tipos, rangos, arrays, señales y claves inválidos sin coer
     { 'poblacion.maxima': [32] }, { 'motor.hilos': true }, { 'motor.gpu': [NaN] },
     { 'motor.gpu': [Infinity] }, { 'motor.gpu': Array(1) }, { 'motor.gpu': null },
   ]) assert.throws(() => parseParams(input), Error, JSON.stringify(input));
-  assert.throws(() => parseParams('gobernador.senales=["rss"]'), /T161/);
+  assert.deepEqual(parseParams('gobernador.senales=["rss"]').gobernador.senales, ['rss'], 'T162: las señales multiseñal ya son configurables');
+  assert.throws(() => parseParams('gobernador.senales=["inventada"]'), /valores permitidos/);
   assert.equal(Object.hasOwn(Object.prototype, 'motor'), false);
   assert.equal(parseParams('poblacion.maxima=3.2e1,persistencia.cadaTicks=20').poblacion.maxima, 32);
 });

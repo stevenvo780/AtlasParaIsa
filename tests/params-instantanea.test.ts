@@ -169,7 +169,7 @@ test('T102: checksum recalculado no legitima flags, arrays o señales corruptos 
   for (const [section, key, value] of [
     ['motor', 'hilos', 1.5], ['motor', 'clonPorPaso', 1], ['motor', 'gpu', [0, 0]],
     ['motor', 'gpu', ['0']], ['motor', 'gpu', [null]], ['motor', 'orden', 'azar'],
-    ['gobernador', 'senales', []], ['gobernador', 'senales', ['rss']], ['limites', 'fauna', -1],
+    ['gobernador', 'senales', []], ['gobernador', 'senales', ['inventada']], ['limites', 'fauna', -1],
   ] as const) {
     const corrupted = structuredClone(saved); corrupted.params[section][key] = value;
     reescribirInstantanea(store, JSON.stringify(corrupted));

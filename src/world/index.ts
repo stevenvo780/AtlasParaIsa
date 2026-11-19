@@ -179,7 +179,7 @@ export function createWorld(seed = 20260905, params?: WorldParams): World {
   // momento. Fijarlo al final (como antes) dejaba la región de partida siempre con el default
   // global sin importar el `params` recibido aquí.
   setParams(world, params ?? DEFAULT_PARAMS);
-  if (paramsOf(world).motor.hilos > 1) {
+  if (paramsOf(world).motor.hilos > 1 || paramsOf(world).motor.gpu.length > 0) {
     const tileOwnership = new ResidentTopologyOwner();
     world.tiles = tileOwnership.tiles([]);
     bindWorldContext(world, { tileOwnership });
@@ -275,9 +275,9 @@ export function ecology(world: World, execution?: EcologyExecution): void {
   }
   if (world.tick % INTERVALO_ECOLOGIA_TICKS !== 0) return;
   const phase = phaseAt(world.tick);
-  if (paramsOf(world).motor.hilos > 1) {
+  if (paramsOf(world).motor.hilos > 1 || paramsOf(world).motor.gpu.length > 0) {
     stepLocalEcology(world.tiles, world.tick, world.weather, phase, paramsOf(world).recursos,
-      { hilos: paramsOf(world).motor.hilos, orden: paramsOf(world).motor.orden,
+      { hilos: paramsOf(world).motor.hilos, orden: paramsOf(world).motor.orden, gpu: paramsOf(world).motor.gpu,
         ...(execution ?? (worldContext(world) as WorldContext).ecologyExecution) });
     return;
   }
@@ -1258,7 +1258,7 @@ function advanceTick(world: World, inputs: Gesture[], context: WorldContext, med
   world.invitations = world.invitations.filter(invitation => invitation.until > world.tick);
   world.reminders = world.reminders.filter(reminder => reminder.until > world.tick);
   medirFase(medicion, 'ecologia', () => ecology(world, context.ecologyExecution));
-  if (world.tick % INTERVALO_ECOLOGIA_TICKS === 0 && paramsOf(world).motor.hilos === 1) context.ecologyExecution?.onBarrier?.({
+  if (world.tick % INTERVALO_ECOLOGIA_TICKS === 0 && paramsOf(world).motor.hilos === 1 && paramsOf(world).motor.gpu.length === 0) context.ecologyExecution?.onBarrier?.({
     tick: world.tick, phase: 'ecologia', regionSide: context.ecologyExecution.regionSide ?? 256,
     orden: paramsOf(world).motor.orden, workers: 1, dirtyPages: undefined, diagnostics: null, topologyCertificate: undefined,
   });
@@ -1266,7 +1266,7 @@ function advanceTick(world: World, inputs: Gesture[], context: WorldContext, med
   // una tesela fuera de cuenca) viajan juntos en las mismas opciones de ecología.
   medirFase(medicion, 'kernel', () => stepEcosystem(world.tiles, world.tick, world.weather, phaseAt(world.tick), false,
     { decaimientoFertilidad: paramsOf(world).recursos.decaimientoFertilidad, seed: world.seed, cuencas: paramsOf(world).agua.cuencas, soaTerreno: paramsOf(world).motor.soaTerreno, hilos: paramsOf(world).motor.hilos,
-      orden: paramsOf(world).motor.orden, ...context.ecologyExecution }));
+      gpu: paramsOf(world).motor.gpu, orden: paramsOf(world).motor.orden, ...context.ecologyExecution }));
   medirFase(medicion, 'fauna', () => { stepAnimals(world,event=>addEvent(world,event)); stepStructures(world,event=>addEvent(world,event)); });
   medirFase(medicion, 'personas', () => {
     for (const person of world.people) bodyAndAction(world, person);
@@ -1429,7 +1429,7 @@ export function cloneWorld(world: World, context: WorldContext = worldContext(wo
   // Same state and same sharing as structuredClone: the non-tile state of the aged 51926
   // laboratory fixture copies in 2.23 ms instead of 8.11 ms (T103).
   const draft: World = cloneState({ ...world, tiles: [], retiredChunks: [] }, new Map());
-  const tileOwnership = paramsOf(world).motor.hilos > 1 || worldContext(world).tileOwnership
+  const tileOwnership = paramsOf(world).motor.hilos > 1 || paramsOf(world).motor.gpu.length > 0 || worldContext(world).tileOwnership
     ? new ResidentTopologyOwner() : undefined;
   draft.tiles = tileOwnership
     ? tileOwnership.tiles(world.tiles.map(tile => tileOwnership.tile(tile)))

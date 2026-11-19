@@ -14,6 +14,8 @@ export interface HardwareBarrier {
   topologyCertificate?: RegionHashTopologyCertificate;
   regionSide: 256 | 512;
   orden: 'natural' | 'inverso' | 'adversarial';
+  gpu?: readonly number[];
+  gpuStats?: { uploadedBytes: number; downloadedBytes: number } | unknown;
 }
 export type RegionDigest = ReturnType<IncrementalRegionHasher['update']>;
 export interface BarrierSnapshot {

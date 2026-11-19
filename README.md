@@ -203,6 +203,10 @@ En `bf6431b`, 256 recetas y generación tecnológica 32 detenían la búsqueda. 
 | `npm run test:e2e` | Ejecuta las pruebas de navegador disponibles con Playwright. Requiere sus navegadores instalados. |
 | `npm run test:smoke` | Comprueba el servidor compilado, contraseña, reinicio tras `SIGKILL` y revocación en un mundo temporal. Requiere `npm run build`. |
 | `npm run test:soak` | Simula cinco días del modelo con guardado SQLite por paso, reinicio y copia; escribe `artifacts/soak.json`. |
+| `npm run techo -- --seed 51926 --escala habitantes --hilos 1 --hasta 2000 --salida <dir>` | Mide la curva de techo (`p50`, `p95`, `tickHz`, RSS) en escala de `habitantes` o `teselas` sobre un `Store` SQLite temporal (`scripts/curva-techo.mts`). |
+| `npm run banco:red -- --clientes 12 --escalas 40,1000,10000 --pasos 5` | Mide el tamaño por campo del `state` WebSocket, egress total, descartes y sockets con hasta 12 clientes simultáneos (`scripts/banco-red.mts`). |
+| `COMPUTE_NVRTC=/opt/cuda/lib64/libnvrtc.so npx tsx scripts/banco-escala-extrema-gpu.mts` | Banco del tick ecológico íntegro en SoA hasta 32 M celdas: CPU (1/8/28 hilos) frente a GPU `[0]` y `[0,1]` con residencia VRAM y control `Object.is`. |
+| `npx tsx scripts/check-links.ts` | Comprueba que todos los enlaces relativos en los `.md` versionados apunten a rutas versionadas existentes. |
 | `npx tsx scripts/evolution.ts --days 15 --seeds 51926,20260905 --output artifacts/evolution-nueva.json` | Observa dos réplicas autónomas, con SQLite cada 120 pasos, reinicio intermedio y copia final. No mide commit por paso. |
 
 `SOAK_DAYS` permite entre 3 y 60 días del modelo. Un día equivale a 2400 pasos: **cuatro minutos simulados**. La ejecución acelerada mide el motor y el guardado; no acredita varios días de operación real ni sustituye la prueba en un móvil físico.

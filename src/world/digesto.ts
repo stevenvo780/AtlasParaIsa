@@ -41,12 +41,17 @@ function paramsParaDigesto(world: World): object {
 
 // Object.fromEntries (the original canonicalizer) enumerates array-index keys
 // numerically before other sorted keys. Preserve those exact historical bytes.
+function isArrayIndexKey(key: string): boolean {
+  const c0 = key.charCodeAt(0);
+  if (c0 < 48 || c0 > 57) return false;
+  const n = Number(key);
+  return Number.isInteger(n) && n >= 0 && n < 0xffffffff && String(n) === key;
+}
 function compareKeys(a: string, b: string): number {
-  const index = (key: string): boolean => {
-    const n = Number(key); return Number.isInteger(n) && n >= 0 && n < 0xffffffff && String(n) === key;
-  };
-  const ai = index(a), bi = index(b);
-  return ai && bi ? Number(a) - Number(b) : ai ? -1 : bi ? 1 : compareText(a, b);
+  const ca = a.charCodeAt(0), cb = b.charCodeAt(0);
+  if ((ca < 48 || ca > 57) && (cb < 48 || cb > 57)) return a < b ? -1 : a > b ? 1 : 0;
+  const ai = isArrayIndexKey(a), bi = isArrayIndexKey(b);
+  return ai && bi ? Number(a) - Number(b) : ai ? -1 : bi ? 1 : a < b ? -1 : a > b ? 1 : 0;
 }
 
 function emitCanonical(value: unknown, emit: (text: string) => void): void {
@@ -140,41 +145,64 @@ const hashPageKey = (x: number, y: number): string => `${x},${y}`;
 /** Separate encoding for incremental captures: explicit undefined and array holes preserve own
  * key/presence state as well as -0. Record key insertion order is still immaterial. The historical
  * canonical digest/difference above deliberately retain their existing contracts and bytes. */
-function emitRegionValue(value: unknown, emit: (text: string) => void): void {
-  if (value === undefined) { emit('undefined'); return; }
-  if (typeof value === 'number') {
-    if (!Number.isFinite(value)) throw new TypeError('Non-finite canonical world value.');
-    emit(Object.is(value, -0) ? '-0' : JSON.stringify(value)); return;
-  }
-  if (value === null || typeof value === 'string' || typeof value === 'boolean') { emit(JSON.stringify(value)); return; }
-  if (Array.isArray(value)) {
-    emit('[');
-    for (let i = 0; i < value.length; i++) {
-      if (i) emit(',');
-      if (Object.hasOwn(value, i)) emitRegionValue(value[i], emit); else emit('hole');
-    }
-    emit(']'); return;
-  }
-  if (typeof value !== 'object') throw new TypeError('Unsupported canonical world value.');
-  emit('{');
-  const keys = Object.keys(value).sort(compareKeys);
-  for (let i = 0; i < keys.length; i++) {
-    if (i) emit(',');
-    const key = keys[i]!; emit(JSON.stringify(key)); emit(':');
-    emitRegionValue((value as Record<string, unknown>)[key], emit);
-  }
-  emit('}');
+const SIMPLE_REGION_STRING = /^[\x20\x21\x23-\x5b\x5d-\x7e]*$/;
+const quotedRegionKeyCache = new Map<string, string>();
+function quotedRegionKey(key: string): string {
+  let cached = quotedRegionKeyCache.get(key);
+  if (cached !== undefined) return cached;
+  cached = SIMPLE_REGION_STRING.test(key) ? `"${key}":` : `${JSON.stringify(key)}:`;
+  if (quotedRegionKeyCache.size < 4096) quotedRegionKeyCache.set(key, cached);
+  return cached;
 }
 
 function regionValueHash(value: unknown): string {
   const hash = createHash('sha256');
-  let pieces: string[] = [], length = 0;
-  const flush = (): void => { if (pieces.length) hash.update(pieces.join('')); pieces = []; length = 0; };
-  emitRegionValue(value, text => {
-    pieces.push(text); length += text.length;
-    if (length >= 64 * 1024) flush();
-  });
-  flush(); return hash.digest('hex');
+  let buf = '';
+  const flush = (): void => { if (buf.length) { hash.update(buf); buf = ''; } };
+  const emit = (v: unknown): void => {
+    if (v === undefined) { buf += 'undefined'; return; }
+    const type = typeof v;
+    if (type === 'number') {
+      if (!Number.isFinite(v as number)) throw new TypeError('Non-finite canonical world value.');
+      buf += Object.is(v, -0) ? '-0' : `${v as number}`; return;
+    }
+    if (v === null) { buf += 'null'; return; }
+    if (type === 'boolean') { buf += v ? 'true' : 'false'; return; }
+    if (type === 'string') {
+      buf += SIMPLE_REGION_STRING.test(v as string) ? `"${v as string}"` : JSON.stringify(v); return;
+    }
+    if (Array.isArray(v)) {
+      buf += '[';
+      for (let i = 0; i < v.length; i++) {
+        if (i) buf += ',';
+        if (Object.hasOwn(v, i)) emit(v[i]); else buf += 'hole';
+      }
+      buf += ']';
+      if (buf.length >= 64 * 1024) flush();
+      return;
+    }
+    if (type !== 'object') throw new TypeError('Unsupported canonical world value.');
+    buf += '{';
+    const keys = Object.keys(v as object);
+    let sorted = keys.length <= 1 || keys[0]!.charCodeAt(0) > 57;
+    if (sorted) {
+      for (let i = 1; i < keys.length; i++) {
+        if (keys[i]!.charCodeAt(0) <= 57 || keys[i - 1]! > keys[i]!) { sorted = false; break; }
+      }
+    }
+    if (!sorted) keys.sort(compareKeys);
+    for (let i = 0; i < keys.length; i++) {
+      if (i) buf += ',';
+      const key = keys[i]!;
+      buf += quotedRegionKey(key);
+      emit((v as Record<string, unknown>)[key]);
+    }
+    buf += '}';
+    if (buf.length >= 64 * 1024) flush();
+  };
+  emit(value);
+  flush();
+  return hash.digest('hex');
 }
 
 /** T117: page masks rehash only touched pages, then only their changed regions. Original Tile

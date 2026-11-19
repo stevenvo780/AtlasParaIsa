@@ -16,6 +16,7 @@ Fuentes archivadas en [`docs/evidencia-2026-11-19/`](evidencia-2026-11-19/public
 - Contrato de publicación V14: [`publication-v14.json`](evidencia-2026-11-19/publication-v14.json)
 - Panel preregistrado Fase B (8 semillas × 60 días, 16 réplicas): [`panel-fase-b-20261119.json`](evidencia-2026-11-19/panel-fase-b-20261119.json) y [`criterio-terminado-fase-b-20261119.json`](evidencia-2026-11-19/criterio-terminado-fase-b-20261119.json)
 - Banco de red a 40 / 1 000 / 10 000 habitantes (`scripts/banco-red.mts`): [`banco-red-20261119.json`](evidencia-2026-11-19/banco-red-20261119.json)
+- Soak sostenido Dual-GPU 300 ticks × 18,43 M / 32,00 M celdas con paridad `Object.is`: [`gpu-soak-32m-20261119.json`](evidencia-2026-11-19/gpu-soak-32m-20261119.json)
 - Informe GPU residente T122/T125 (opción b, hasta 32 M celdas): [`T122-T125-report.md`](../specs/002-mundo-ilimitado/informes/T122-T125-report.md)
 - Diagnóstico y plan de estabilidad: [`PLAN-ESTABILIDAD-2026-11-18.md`](PLAN-ESTABILIDAD-2026-11-18.md)
 
@@ -65,6 +66,11 @@ Medido en la torre (RTX 5070 Ti + RTX 2060, `COMPUTE_NVRTC=/opt/cuda/lib64/libnv
 | **32 000 000** (SC-004 ≤ 25 ms) | 3 245,42 ms | 1 088,74 ms | **19,60 ms** (17,10 ms) | **19,76 ms** (14,35 ms) | **165,6×** | — |
 
 Subida dispersa por tick en GPU `[0]`: `63 744 B` (`≤ 1 MB`, cumple FR-025). Paridad FP64 bit a bit (`Object.is` = 0 diferencias en los 13 campos) frente a CPU 1 hilo.
+
+**Soak sostenido de 300 ticks consecutivos + paridad `Object.is` completa a escala extrema** ([`gpu-soak-32m-20261119.json`](evidencia-2026-11-19/gpu-soak-32m-20261119.json)):
+- **`18 432 000` celdas (`239 616 000` valores)**: GPU `[0]` `p50 = 11,53 ms`, `p95 = 13,43 ms` (`kernel = 10,22 ms`) · Dual GPU `[0,1]` **`p50 = 10,28 ms`**, **`p95 = 14,55 ms`** (`kernel = 7,99 ms`) · **`0` diferencias `Object.is`** (GPU `[0]` vs Dual `[0,1]` tras 301 ticks y CPU 8w vs Dual `[0,1]`).
+- **`32 000 000` celdas (`416 000 000` valores)**: GPU `[0]` `p50 = 19,36 ms`, `p95 = 21,04 ms` (`kernel = 17,64 ms`) · Dual GPU `[0,1]` **`p50 = 16,59 ms`**, **`p95 = 20,60 ms`** (`kernel = 14,19 ms`, **`195,6×`** vs CPU 1 hilo) · **`0` diferencias `Object.is`** sobre los **416 000 000 de valores** (GPU `[0]` vs Dual `[0,1]` tras 301 ticks y CPU 8w vs Dual `[0,1]`).
+- **Determinismo CPU completo (`tests/determinismo-hardware.test.ts`)**: **375/375 pruebas verdes (0 fallos)** en las 28 escenas (`4 semillas × 7 escenas × 12 backends CPU × 600 pasos`, incluidas las dos geometrías `256`/`512` y el modo `adversarial`).
 
 ### 4. Escala de red WebSocket (`scripts/banco-red.mts`, T138)
 

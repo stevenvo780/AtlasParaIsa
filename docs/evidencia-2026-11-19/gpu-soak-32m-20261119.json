@@ -1,0 +1,55 @@
+{
+  "generatedAt": "2026-11-19T15:05:18.681Z",
+  "results": [
+    {
+      "cells": 18432000,
+      "valuesVerified": 239616000,
+      "ticks": 300,
+      "gpu0": {
+        "p50Ms": 11.53,
+        "p95Ms": 13.43,
+        "p99Ms": 16.13,
+        "meanMs": 11.76,
+        "meanKernelMs": 10.22,
+        "uploadedBytesPerTick": 63744,
+        "downloadedBytesPerTick": 70944
+      },
+      "dualGpu01": {
+        "p50Ms": 10.28,
+        "p95Ms": 14.55,
+        "p99Ms": 15.3,
+        "meanMs": 10.76,
+        "meanKernelMs": 7.99,
+        "uploadedBytesPerTick": 1233408,
+        "downloadedBytesPerTick": 78144
+      },
+      "diffsGpu0VsDualAfterSoak": 0,
+      "diffsCpu8wVsDual2Ticks": 0
+    },
+    {
+      "cells": 32000000,
+      "valuesVerified": 416000000,
+      "ticks": 300,
+      "gpu0": {
+        "p50Ms": 19.36,
+        "p95Ms": 21.04,
+        "p99Ms": 23.16,
+        "meanMs": 19.35,
+        "meanKernelMs": 17.64,
+        "uploadedBytesPerTick": 63744,
+        "downloadedBytesPerTick": 76244
+      },
+      "dualGpu01": {
+        "p50Ms": 16.59,
+        "p95Ms": 20.6,
+        "p99Ms": 22.96,
+        "meanMs": 17.16,
+        "meanKernelMs": 14.19,
+        "uploadedBytesPerTick": 1581568,
+        "downloadedBytesPerTick": 88744
+      },
+      "diffsGpu0VsDualAfterSoak": 0,
+      "diffsCpu8wVsDual2Ticks": 0
+    }
+  ]
+}

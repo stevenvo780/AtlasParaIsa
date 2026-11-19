@@ -127,7 +127,7 @@ export const ECOLOGY_KERNEL_SPEC = Object.freeze({
   // no cambian (mismas operaciones, mismo orden; T112 lo prueba en tests/soa-terreno.test.ts), pero el
   // texto normalizado de step() sí, por la rama `store` y `livingNeighborCounts(0.45)`. No se bumpea la
   // versión: no es un cambio de regla, es la forma en que se llega al mismo umbral de vecino vivo.
-  canonicalStepBodyHash: '1856093e0ac4951054edeb9532f5913c7bd0317cb76fd3d79f5c630ac26bb147',
+  canonicalStepBodyHash: '441d8a77707728c712ab3660954565a5b08bdd0d994ae615430742cfcbac2957',
 });
 
 // Conteos/índices que aparecen en el cuerpo de step() y NO son reglas

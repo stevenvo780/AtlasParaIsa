@@ -1,6 +1,7 @@
-import test, { after } from 'node:test';
+import test, { after, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { performance } from 'node:perf_hooks';
+import { availableParallelism } from 'node:os';
+import { Worker } from 'node:worker_threads';
 import { IncrementalRegionHasher } from '../src/world/digesto.js';
 import { closeEcosystemWorkers } from '../src/world/ecosystem.js';
 import { stepWorld } from '../src/world/index.js';
@@ -8,16 +9,81 @@ import { paramsOf, setParams } from '../src/world/params.js';
 import { residentTopologyOwner, residentTopologyToken } from '../src/world/soa/topologia.js';
 import { chunkKey } from '../src/world/terrain.js';
 import { HARDWARE_SCENES, HARDWARE_SEEDS, buildHardwareScene, regionGroupedHarvestTotal,
-  sequentialHarvestTotal } from './hardware/escenas.js';
+  sequentialHarvestTotal, type HardwareSceneName } from './hardware/escenas.js';
 import { firstHashDisagreement, locateDifference, normalizedCopy, plainWorldCopy,
   snapshotBarrier, throwDifference } from './hardware/contrato.js';
-import { CPU_BACKENDS, adversarialWorkerCount, captureReference, compareCandidate, compareGpuCandidate, type ReferenceTrace } from './hardware/matriz.js';
+import { adversarialWorkerCount, captureReference, compareCandidate, compareGpuCandidate, type ReferenceTrace } from './hardware/matriz.js';
 import { HardwareTileChanges } from './hardware/cambios.js';
+import type { MatrixSceneRequest, MatrixSceneResponse } from './hardware/worker-matriz.js';
 
 // The default npm test includes the complete literal 600-step CPU matrix. Opt-in replaces
 // its duration with 2400 steps; it never relabels a shorter trajectory as the long gate.
 const STEPS = process.env.ATLAS_T117_LONG === '1' ? 2400 : 600;
-after(async () => { await closeEcosystemWorkers(); });
+const MATRIX_CONCURRENCY = Math.max(1, Math.min(28, Number(process.env.ATLAS_T117_JOBS) || Math.floor(availableParallelism() / 2)));
+
+interface PooledSceneWorker {
+  worker: Worker;
+  busy: boolean;
+}
+const scenePool: PooledSceneWorker[] = [];
+const sceneWaiters: ((entry: PooledSceneWorker) => void)[] = [];
+let nextRequestId = 1;
+
+function acquireSceneWorker(): Promise<PooledSceneWorker> {
+  const idle = scenePool.find(entry => !entry.busy);
+  if (idle) { idle.busy = true; return Promise.resolve(idle); }
+  if (scenePool.length < MATRIX_CONCURRENCY) {
+    const worker = new Worker(new URL('./hardware/worker-matriz.ts', import.meta.url));
+    const entry: PooledSceneWorker = { worker, busy: true };
+    scenePool.push(entry);
+    return Promise.resolve(entry);
+  }
+  return new Promise(resolve => sceneWaiters.push(resolve));
+}
+
+function releaseSceneWorker(entry: PooledSceneWorker): void {
+  const next = sceneWaiters.shift();
+  if (next) next(entry);
+  else entry.busy = false;
+}
+
+async function runSceneInWorker(seed: number, scene: HardwareSceneName, steps: number): Promise<MatrixSceneResponse> {
+  const entry = await acquireSceneWorker();
+  const id = nextRequestId++;
+  return new Promise<MatrixSceneResponse>((resolve, reject) => {
+    const cleanup = () => {
+      entry.worker.off('message', onMessage);
+      entry.worker.off('error', onError);
+      entry.worker.off('exit', onExit);
+      releaseSceneWorker(entry);
+    };
+    const onMessage = (msg: MatrixSceneResponse) => {
+      if (msg.id !== id) return;
+      cleanup(); resolve(msg);
+    };
+    const onError = (err: Error) => { cleanup(); reject(err); };
+    const onExit = (code: number) => { cleanup(); reject(new Error(`Matrix worker exited with code ${code}`)); };
+    entry.worker.on('message', onMessage);
+    entry.worker.on('error', onError);
+    entry.worker.on('exit', onExit);
+    const req: MatrixSceneRequest = { id, seed, scene, steps };
+    entry.worker.postMessage(req);
+  });
+}
+
+after(async () => {
+  await Promise.all(scenePool.map(async ({ worker }) => {
+    try {
+      worker.postMessage({ close: true });
+      await new Promise<void>(resolve => {
+        const timer = setTimeout(() => { void worker.terminate().then(() => resolve()); }, 5000);
+        worker.once('exit', () => { clearTimeout(timer); resolve(); });
+      });
+    } catch { await worker.terminate().catch(() => {}); }
+  }));
+  scenePool.length = 0;
+  await closeEcosystemWorkers();
+});
 const referenceCache = new Map<string, ReferenceTrace>();
 function cachedReference(seed: number, scene: (typeof HARDWARE_SCENES)[number]): ReferenceTrace {
   const key = `${seed}|${scene}|${STEPS}`;
@@ -205,29 +271,23 @@ test('T120 canonical copy materializes active/dormant Proxies preserving keys, u
   assert.doesNotThrow(() => structuredClone(copy));
 });
 
+describe('T117 CPU matrix', { concurrency: MATRIX_CONCURRENCY }, () => {
+  for (const seed of HARDWARE_SEEDS) for (const scene of HARDWARE_SCENES) {
+    test(`T117 matrix seed=${seed} scene=${scene} steps=${STEPS}`, async t => {
+      const result = await runSceneInWorker(seed, scene, STEPS);
+      if (!result.ok) {
+        assert.fail(`[${result.failedSubtest ?? 'matrix'}] ${result.errorMessage ?? 'worker failure'}`);
+      }
+      for (const sub of result.subtests ?? []) {
+        await t.test(sub.name, () => {});
+      }
+      // Diagnostic measurements are evidence, never substituted for the global <=180s gate.
+      if (result.diagnostic) t.diagnostic(result.diagnostic);
+    });
+  }
+});
+
 for (const seed of HARDWARE_SEEDS) for (const scene of HARDWARE_SCENES) {
-  test(`T117 matrix seed=${seed} scene=${scene} steps=${STEPS}`, async t => {
-    const started = performance.now(), reference = cachedReference(seed, scene);
-    let actualDispatches = 0, actualEcologyDispatches = 0, actualDelays = 0, topologyScannedTiles = reference.topologyScannedTiles;
-    let fullRefreshes = reference.fullRefreshes;
-    let globalCaptures = reference.globalCaptures, logicalTileChanges = reference.logicalTileChanges,
-      updatedPages = reference.updatedPages;
-    for (const regionSide of [256, 512] as const) for (const backend of CPU_BACKENDS) {
-      await t.test(`CPU=${backend} geometry=${regionSide}`, () => {
-        const evidence = compareCandidate(reference, regionSide, backend);
-        actualDispatches += evidence.actualKernelDispatches; actualDelays += evidence.delayCount;
-        actualEcologyDispatches += evidence.actualEcologyDispatches;
-        topologyScannedTiles += evidence.topologyScannedTiles; fullRefreshes += evidence.fullRefreshes;
-        globalCaptures += evidence.globalCaptures; logicalTileChanges += evidence.logicalTileChanges;
-        updatedPages += evidence.updatedPages;
-      });
-    }
-    // Diagnostic measurements are evidence, never substituted for the global <=180s gate.
-    t.diagnostic(`steps=${STEPS}; elapsedMs=${(performance.now() - started).toFixed(3)};`
-      + ` physicalEcologyDispatches=${actualEcologyDispatches}; physicalKernelDispatches=${actualDispatches}; realDelayCount=${actualDelays};`
-      + ` topologyScannedTiles=${topologyScannedTiles}; fullRefreshes=${fullRefreshes};`
-      + ` logicalTileChanges=${logicalTileChanges}; updatedPages=${updatedPages}; globalCaptures=${globalCaptures}`);
-  });
   for (const regionSide of [256, 512] as const) for (const gpu of [[0], [1], [0, 1]] as const) test(`T117 CUDA seed=${seed} scene=${scene} geometry=${regionSide} gpu=[${gpu.join(',')}]`,
     { skip: process.env.COMPUTE_NVRTC ? false : 'COMPUTE_NVRTC no está definido: backend GPU omitido (skip explícito, nunca pass).' }, t => {
       const reference = cachedReference(seed, scene);

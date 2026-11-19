@@ -1,16 +1,14 @@
 #!/usr/bin/env bash
-# T022 — Respaldo horario del mundo de Isa (hueco del crítico: 6,1 GiB/día, sin respaldo).
+# T022 / Fase A4 — Respaldo horario del mundo de Isa.
 #
-# Copia consistente mediante VACUUM INTO: conserva una instantánea mientras el servidor
-# escribe en WAL, sin reiniciar la copia ante cada escritura como puede hacer `.backup`.
-# Abre "$DB" con
-# `sqlite3 -readonly`: solo LEE, nunca escribe ni borra el mundo. Sin -readonly, cuando
-# este proceso es la ÚNICA conexión (servidor parado, WAL pendiente sin checkpointear),
-# SQLite haría un checkpoint automático al cerrar la conexión de respaldo y modificaría
-# el fichero original — -readonly evita esa escritura incluso en ese caso. La copia se
-# verifica con PRAGMA quick_check antes de comprimirla; si falla, se descarta y el
-# script termina en error (sin rescates ocultos: una copia dudosa nunca cuenta como
-# éxito).
+# Copia consistente en modo `backup` (por defecto: `BEGIN; SELECT 1 ...` + `.backup`, que
+# fija una única instantánea WAL de lectura y copia páginas secuencialmente sin reconstruir
+# índices B-tree ni reiniciarse ante escritores WAL concurrentes) o `vacuum` (`VACUUM INTO`).
+# Abre "$DB" con `sqlite3 -readonly`: solo LEE, nunca escribe ni borra el mundo ni hace
+# checkpoint de un `-wal` pendiente si el servidor cayó. Exporta `SQLITE_TMPDIR` fuera de
+# `/tmp` para evitar desbordamientos en tmpfs. La copia se verifica con `PRAGMA quick_check`
+# antes de comprimirla; si falla, se descarta y el script termina en error (sin rescates
+# ocultos: una copia dudosa nunca cuenta como éxito).
 #
 # Variables de entorno:
 #   DB          ruta del mundo a copiar (por defecto "${CARTA_DATA_DIR:-data}/world.sqlite",
@@ -21,6 +19,9 @@
 #               son 2 días de historial; rango 1..1000000).
 #   RESPALDO_TIMEOUT_SEGUNDOS  límite por operación SQLite (por defecto 900;
 #               rango 1..86400).
+#   RESPALDO_METODO  método de copia: `backup` (por defecto) o `vacuum`.
+#   SQLITE_TMPDIR    directorio temporal para SQLite (por defecto dentro del temporal de la
+#                    ejecución en `$DEST`, nunca `/tmp`).
 #
 # Uso manual:  npm run respaldo
 # Uso automático: scripts/systemd/atlas-respaldo.{service,timer} (T022; T043 lo activa).
@@ -30,6 +31,7 @@ DB="${DB:-${CARTA_DATA_DIR:-data}/world.sqlite}"
 DEST="${DEST:-$HOME/.local/state/atlas-para-isa/backups}"
 RETENCION="${RETENCION:-48}"
 RESPALDO_TIMEOUT_SEGUNDOS="${RESPALDO_TIMEOUT_SEGUNDOS:-900}"
+RESPALDO_METODO="${RESPALDO_METODO:-backup}"
 
 # Limitar primero los dígitos: una comparación aritmética del valor sin acotar
 # también podría desbordarse antes de llegar a RETENCION + 1.
@@ -39,6 +41,10 @@ if [[ ! "$RETENCION" =~ ^[1-9][0-9]{0,6}$ ]] || [ "$RETENCION" -gt 1000000 ]; th
 fi
 if [[ ! "$RESPALDO_TIMEOUT_SEGUNDOS" =~ ^[1-9][0-9]{0,4}$ ]] || [ "$RESPALDO_TIMEOUT_SEGUNDOS" -gt 86400 ]; then
   echo "respaldo.sh: RESPALDO_TIMEOUT_SEGUNDOS debe ser un entero entre 1 y 86400" >&2
+  exit 1
+fi
+if [ "$RESPALDO_METODO" != "backup" ] && [ "$RESPALDO_METODO" != "vacuum" ]; then
+  echo "respaldo.sh: RESPALDO_METODO debe ser 'backup' o 'vacuum'" >&2
   exit 1
 fi
 
@@ -60,10 +66,19 @@ fi
 
 temporal="$(mktemp -d "$DEST/.respaldo-$marca.XXXXXX")"
 limpiar_temporal() {
+  rm -rf -- "$temporal/sqlite-tmp"
   rm -f -- "$temporal/world.sqlite" "$temporal/world.sqlite.gz" "$temporal/world.sqlite-journal" "$temporal/world.sqlite-wal" "$temporal/world.sqlite-shm"
   rmdir -- "$temporal"
 }
 trap limpiar_temporal EXIT
+
+if [ -z "${SQLITE_TMPDIR:-}" ]; then
+  mkdir -m 700 "$temporal/sqlite-tmp"
+  export SQLITE_TMPDIR="$temporal/sqlite-tmp"
+else
+  mkdir -p -m 700 "$SQLITE_TMPDIR"
+  export SQLITE_TMPDIR
+fi
 
 sqlite_acotado() {
   local codigo
@@ -80,10 +95,24 @@ sqlite_acotado() {
   fi
 }
 
-# Una comilla en una ruta es parte del nombre: duplicarla dentro del literal SQL.
 # El directorio temporal es exclusivo de esta ejecución; un fallo no retira copias previas.
-destino_sql="${temporal//\'/\'\'}/world.sqlite"
-sqlite_acotado -readonly -cmd '.timeout 5000' "$DB" "VACUUM INTO '$destino_sql';"
+if [ "$RESPALDO_METODO" = "backup" ]; then
+  if [[ "$temporal" == *$'\n'* ]]; then
+    echo "respaldo.sh: la ruta de destino no puede contener saltos de línea en modo backup" >&2
+    exit 1
+  fi
+  destino_backup="${temporal//\\/\\\\}"
+  destino_backup="${destino_backup//\"/\\\"}/world.sqlite"
+  # Abrir transacción de lectura antes de `.backup` fija una única foto WAL y evita
+  # reinicios/livelock frente a escritores concurrentes sin reconstruir los índices B-tree.
+  sqlite_acotado -readonly -cmd '.timeout 5000' -cmd 'BEGIN;' -cmd 'SELECT 1 FROM sqlite_master LIMIT 1;' "$DB" ".backup \"$destino_backup\"" >/dev/null
+  # Normalizar la copia temporal a modo DELETE para entregar un único fichero autocontenido.
+  sqlite_acotado "$temporal/world.sqlite" 'PRAGMA journal_mode=DELETE;' >/dev/null
+else
+  # Una comilla en una ruta es parte del nombre: duplicarla dentro del literal SQL.
+  destino_sql="${temporal//\'/\'\'}/world.sqlite"
+  sqlite_acotado -readonly -cmd '.timeout 5000' "$DB" "VACUUM INTO '$destino_sql';"
+fi
 
 verificacion="$(sqlite_acotado -readonly "$temporal/world.sqlite" 'PRAGMA quick_check;')"
 if [ "$verificacion" != "ok" ]; then

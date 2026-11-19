@@ -1,0 +1,43 @@
+{
+  "contractVersion": "realismo-v3",
+  "evidenceId": "memory-manifest",
+  "kind": "component-manifest",
+  "synthetic": true,
+  "sourceRefs": [],
+  "payload": {
+    "commitId": "synthetic-incorporation",
+    "tick": 0,
+    "components": [
+      {
+        "component": "snapshot",
+        "itemId": "synthetic-memory-1",
+        "sha256": "ed88416b7d069d4e1eb64eb0cf870ed6c04bfc64c57cca0b29d3b17939b7e769",
+        "count": 1
+      }
+    ],
+    "confirmedOrderIds": [],
+    "historyUnknownPrefixRef": null
+  },
+  "fieldCoverage": {
+    "commitId": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "tick": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "components": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "confirmedOrderIds": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "historyUnknownPrefixRef": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    }
+  }
+}

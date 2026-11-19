@@ -1,0 +1,41 @@
+{
+  "contractVersion": "realismo-v3",
+  "evidenceId": "synthetic-review",
+  "kind": "synthetic-review-oracle",
+  "synthetic": true,
+  "sourceRefs": [],
+  "payload": {
+    "authority": "synthetic-oracle",
+    "caseId": "C23-pass-01",
+    "contentHash": "b6abdcdf03444d6a35fc2c5c6634532baecd5e4cf077b1bedfe02a2545f27916",
+    "inventoryRef": "memory-inventory",
+    "expectedDecision": "accepted",
+    "purpose": "technical-fixture-only"
+  },
+  "fieldCoverage": {
+    "authority": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "caseId": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "contentHash": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "inventoryRef": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "expectedDecision": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "purpose": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    }
+  }
+}

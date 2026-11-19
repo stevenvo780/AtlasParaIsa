@@ -1,0 +1,5901 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "contractVersion": {
+      "const": "realismo-v3"
+    },
+    "kind": {
+      "const": "observation"
+    },
+    "runId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "sourceSHA": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{40}$"
+    },
+    "seed": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "epochId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "artifactRole": {
+      "type": "string",
+      "enum": [
+        "baseline",
+        "paired-control",
+        "paired-treatment",
+        "technical",
+        "experience",
+        "training",
+        "synthetic",
+        "legacy"
+      ]
+    },
+    "paramsHash": {
+      "type": "string",
+      "minLength": 1
+    },
+    "paramsRef": {
+      "type": "string",
+      "minLength": 1
+    },
+    "initialStateHash": {
+      "type": "string",
+      "minLength": 1
+    },
+    "inputTraceRef": {
+      "type": "string",
+      "minLength": 1
+    },
+    "governorTraceRef": {
+      "type": "string",
+      "minLength": 1
+    },
+    "observerSHA": {
+      "type": "string",
+      "minLength": 1
+    },
+    "canonicalDigestVersion": {
+      "type": "string",
+      "minLength": 1
+    },
+    "thresholdProfileHash": {
+      "type": "string",
+      "minLength": 1
+    },
+    "preregistrationRef": {
+      "type": "string",
+      "minLength": 1
+    },
+    "hardwareRef": {
+      "type": "string",
+      "minLength": 1
+    },
+    "backend": {
+      "type": "string",
+      "minLength": 1
+    },
+    "plannedWindow": {
+      "$ref": "#/$defs/window"
+    },
+    "actualWindow": {
+      "$ref": "#/$defs/window"
+    },
+    "runStatus": {
+      "type": "string",
+      "enum": [
+        "complete",
+        "aborted",
+        "partial",
+        "not-started"
+      ]
+    },
+    "pairedRunId": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "interventionRefs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/capability"
+      },
+      "minItems": 22,
+      "maxItems": 22,
+      "allOf": [
+        {
+          "contains": {
+            "properties": {
+              "family": {
+                "const": "boundary"
+              }
+            },
+            "required": [
+              "family"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "family": {
+                "const": "stock"
+              }
+            },
+            "required": [
+              "family"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "family": {
+                "const": "flow"
+              }
+            },
+            "required": [
+              "family"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "family": {
+                "const": "exposure"
+              }
+            },
+            "required": [
+              "family"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "family": {
+                "const": "person"
+              }
+            },
+            "required": [
+              "family"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "family": {
+                "const": "death"
+              }
+            },
+            "required": [
+              "family"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "family": {
+                "const": "structure"
+              }
+            },
+            "required": [
+              "family"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "family": {
+                "const": "repair"
+              }
+            },
+            "required": [
+              "family"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "family": {
+                "const": "service"
+              }
+            },
+            "required": [
+              "family"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "family": {
+                "const": "product"
+              }
+            },
+            "required": [
+              "family"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "family": {
+                "const": "replacement"
+              }
+            },
+            "required": [
+              "family"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "family": {
+                "const": "knowledge"
+              }
+            },
+            "required": [
+              "family"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "family": {
+                "const": "migration"
+              }
+            },
+            "required": [
+              "family"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "family": {
+                "const": "role"
+              }
+            },
+            "required": [
+              "family"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "family": {
+                "const": "conflict"
+              }
+            },
+            "required": [
+              "family"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "family": {
+                "const": "ecology"
+              }
+            },
+            "required": [
+              "family"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "family": {
+                "const": "rejection"
+              }
+            },
+            "required": [
+              "family"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "family": {
+                "const": "digest"
+              }
+            },
+            "required": [
+              "family"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "family": {
+                "const": "cost"
+              }
+            },
+            "required": [
+              "family"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "family": {
+                "const": "fault"
+              }
+            },
+            "required": [
+              "family"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "family": {
+                "const": "review"
+              }
+            },
+            "required": [
+              "family"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {
+              "family": {
+                "const": "method"
+              }
+            },
+            "required": [
+              "family"
+            ]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        }
+      ]
+    },
+    "streams": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/stream"
+      }
+    },
+    "evidenceIndex": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "evidenceId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "relativePath": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "governor-trace",
+              "physical-inputs",
+              "law",
+              "law-inputs",
+              "position-trajectory",
+              "cohort",
+              "opportunity",
+              "applied-effect",
+              "functional-map",
+              "role-classification",
+              "component-manifest",
+              "host-scene",
+              "preregistration",
+              "seed-register",
+              "budget",
+              "phase-decision",
+              "personal-receipt",
+              "intervention",
+              "parameter-set",
+              "conversion-matrix",
+              "real-memory-inventory",
+              "memory-authorization",
+              "synthetic-review-oracle",
+              "source-metadata",
+              "source-order",
+              "reproduction-gates",
+              "reproduction-coverage",
+              "causal-pair",
+              "metric-definitions",
+              "run-manifest",
+              "observation",
+              "evaluation"
+            ]
+          },
+          "synthetic": {
+            "type": "boolean"
+          },
+          "schema": {
+            "type": "string",
+            "enum": [
+              "evidence.schema.json",
+              "observation.schema.json",
+              "evaluation.schema.json"
+            ]
+          }
+        },
+        "required": [
+          "evidenceId",
+          "relativePath",
+          "sha256",
+          "kind",
+          "synthetic",
+          "schema"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "schema": {
+                  "const": "observation.schema.json"
+                }
+              },
+              "required": [
+                "schema"
+              ]
+            },
+            "then": {
+              "properties": {
+                "kind": {
+                  "const": "observation"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "schema": {
+                  "const": "evaluation.schema.json"
+                }
+              },
+              "required": [
+                "schema"
+              ]
+            },
+            "then": {
+              "properties": {
+                "kind": {
+                  "const": "evaluation"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "schema": {
+                  "const": "evidence.schema.json"
+                }
+              },
+              "required": [
+                "schema"
+              ]
+            },
+            "then": {
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "governor-trace",
+                    "physical-inputs",
+                    "law",
+                    "law-inputs",
+                    "position-trajectory",
+                    "cohort",
+                    "opportunity",
+                    "applied-effect",
+                    "functional-map",
+                    "role-classification",
+                    "component-manifest",
+                    "host-scene",
+                    "preregistration",
+                    "seed-register",
+                    "budget",
+                    "phase-decision",
+                    "personal-receipt",
+                    "intervention",
+                    "parameter-set",
+                    "conversion-matrix",
+                    "real-memory-inventory",
+                    "memory-authorization",
+                    "synthetic-review-oracle",
+                    "source-metadata",
+                    "source-order",
+                    "reproduction-gates",
+                    "reproduction-coverage",
+                    "causal-pair",
+                    "metric-definitions",
+                    "run-manifest"
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    "records": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "recordId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "streamId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "epochId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "seq": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "tick": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "family": {
+                "const": "boundary"
+              },
+              "actorIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "protectedOriginIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "protectionStatus": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "protected",
+                  "mixed",
+                  "unknown"
+                ]
+              },
+              "provenanceRefs": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "boundaryId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "stockIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "uniqueItems": true
+                  },
+                  "materials": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "uniqueItems": true
+                  },
+                  "unitMapVersion": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "conversionMatrixRef": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "includesProtected": {
+                    "const": true
+                  },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "global",
+                      "partial"
+                    ]
+                  },
+                  "excludedCompartments": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "uniqueItems": true
+                  }
+                },
+                "minProperties": 1
+              },
+              "fieldCoverage": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "boundaryId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "stockIds": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "materials": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "unitMapVersion": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "conversionMatrixRef": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "includesProtected": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "scope": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "excludedCompartments": {
+                    "$ref": "#/$defs/fieldStatus"
+                  }
+                },
+                "required": [
+                  "boundaryId",
+                  "stockIds",
+                  "materials",
+                  "unitMapVersion",
+                  "conversionMatrixRef",
+                  "includesProtected",
+                  "scope",
+                  "excludedCompartments"
+                ]
+              },
+              "causalContext": {
+                "$ref": "#/$defs/causalContext"
+              }
+            },
+            "required": [
+              "recordId",
+              "streamId",
+              "epochId",
+              "seq",
+              "tick",
+              "family",
+              "actorIds",
+              "protectedOriginIds",
+              "protectionStatus",
+              "provenanceRefs",
+              "payload",
+              "fieldCoverage",
+              "causalContext"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "recordId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "streamId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "epochId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "seq": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "tick": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "family": {
+                "const": "stock"
+              },
+              "actorIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "protectedOriginIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "protectionStatus": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "protected",
+                  "mixed",
+                  "unknown"
+                ]
+              },
+              "provenanceRefs": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "boundaryId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "stockId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "ownerId": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "regionId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "clockTick": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "scale": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "material": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "quantity": {
+                    "$ref": "#/$defs/quantity"
+                  },
+                  "phase": {
+                    "type": "string",
+                    "enum": [
+                      "opening",
+                      "closing",
+                      "sample"
+                    ]
+                  }
+                },
+                "minProperties": 1
+              },
+              "fieldCoverage": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "boundaryId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "stockId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "ownerId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "regionId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "clockTick": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "scale": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "material": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "quantity": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "phase": {
+                    "$ref": "#/$defs/fieldStatus"
+                  }
+                },
+                "required": [
+                  "boundaryId",
+                  "stockId",
+                  "ownerId",
+                  "regionId",
+                  "clockTick",
+                  "scale",
+                  "material",
+                  "quantity",
+                  "phase"
+                ]
+              },
+              "causalContext": {
+                "$ref": "#/$defs/causalContext"
+              }
+            },
+            "required": [
+              "recordId",
+              "streamId",
+              "epochId",
+              "seq",
+              "tick",
+              "family",
+              "actorIds",
+              "protectedOriginIds",
+              "protectionStatus",
+              "provenanceRefs",
+              "payload",
+              "fieldCoverage",
+              "causalContext"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "recordId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "streamId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "epochId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "seq": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "tick": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "family": {
+                "const": "flow"
+              },
+              "actorIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "protectedOriginIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "protectionStatus": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "protected",
+                  "mixed",
+                  "unknown"
+                ]
+              },
+              "provenanceRefs": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "boundaryId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "transferId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "fromStockId": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "toStockId": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "flowType": {
+                    "type": "string",
+                    "enum": [
+                      "internal",
+                      "external-in",
+                      "external-out",
+                      "regeneration",
+                      "conversion",
+                      "consumption",
+                      "loss"
+                    ]
+                  },
+                  "quantity": {
+                    "$ref": "#/$defs/quantity"
+                  },
+                  "counterpartRecordId": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "conversionRef": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "consumptionRef": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "minProperties": 1
+              },
+              "fieldCoverage": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "boundaryId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "transferId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "fromStockId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "toStockId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "flowType": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "quantity": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "counterpartRecordId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "conversionRef": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "consumptionRef": {
+                    "$ref": "#/$defs/fieldStatus"
+                  }
+                },
+                "required": [
+                  "boundaryId",
+                  "transferId",
+                  "fromStockId",
+                  "toStockId",
+                  "flowType",
+                  "quantity",
+                  "counterpartRecordId",
+                  "conversionRef",
+                  "consumptionRef"
+                ]
+              },
+              "causalContext": {
+                "$ref": "#/$defs/causalContext"
+              }
+            },
+            "required": [
+              "recordId",
+              "streamId",
+              "epochId",
+              "seq",
+              "tick",
+              "family",
+              "actorIds",
+              "protectedOriginIds",
+              "protectionStatus",
+              "provenanceRefs",
+              "payload",
+              "fieldCoverage",
+              "causalContext"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "recordId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "streamId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "epochId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "seq": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "tick": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "family": {
+                "const": "exposure"
+              },
+              "actorIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "protectedOriginIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "protectionStatus": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "protected",
+                  "mixed",
+                  "unknown"
+                ]
+              },
+              "provenanceRefs": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "subjectId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "regionId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "startTick": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "endTick": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "activeTicks": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "localStartTick": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "localEndTick": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "active",
+                      "archived",
+                      "multiscale"
+                    ]
+                  },
+                  "lawInputsRef": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "minProperties": 1
+              },
+              "fieldCoverage": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "subjectId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "regionId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "startTick": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "endTick": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "activeTicks": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "localStartTick": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "localEndTick": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "mode": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "lawInputsRef": {
+                    "$ref": "#/$defs/fieldStatus"
+                  }
+                },
+                "required": [
+                  "subjectId",
+                  "regionId",
+                  "startTick",
+                  "endTick",
+                  "activeTicks",
+                  "localStartTick",
+                  "localEndTick",
+                  "mode",
+                  "lawInputsRef"
+                ]
+              },
+              "causalContext": {
+                "$ref": "#/$defs/causalContext"
+              }
+            },
+            "required": [
+              "recordId",
+              "streamId",
+              "epochId",
+              "seq",
+              "tick",
+              "family",
+              "actorIds",
+              "protectedOriginIds",
+              "protectionStatus",
+              "provenanceRefs",
+              "payload",
+              "fieldCoverage",
+              "causalContext"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "recordId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "streamId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "epochId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "seq": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "tick": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "family": {
+                "const": "person"
+              },
+              "actorIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "protectedOriginIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "protectionStatus": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "protected",
+                  "mixed",
+                  "unknown"
+                ]
+              },
+              "provenanceRefs": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "actorId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "role": {
+                    "type": "string",
+                    "enum": [
+                      "mortal",
+                      "S",
+                      "I",
+                      "fauna"
+                    ]
+                  },
+                  "birthTick": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "deathTick": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "founder": {
+                    "type": "boolean"
+                  },
+                  "species": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "parentIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "uniqueItems": true
+                  },
+                  "knownTechniqueIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "uniqueItems": true
+                  },
+                  "positionRef": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "ageOrigin": {
+                    "type": "string",
+                    "enum": [
+                      "observed-birth",
+                      "initial-model-age"
+                    ]
+                  },
+                  "ageAtOpeningTicks": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "minProperties": 1
+              },
+              "fieldCoverage": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "actorId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "role": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "birthTick": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "deathTick": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "founder": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "species": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "parentIds": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "knownTechniqueIds": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "positionRef": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "ageOrigin": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "ageAtOpeningTicks": {
+                    "$ref": "#/$defs/fieldStatus"
+                  }
+                },
+                "required": [
+                  "actorId",
+                  "role",
+                  "birthTick",
+                  "deathTick",
+                  "founder",
+                  "species",
+                  "parentIds",
+                  "knownTechniqueIds",
+                  "positionRef",
+                  "ageOrigin",
+                  "ageAtOpeningTicks"
+                ]
+              },
+              "causalContext": {
+                "$ref": "#/$defs/causalContext"
+              }
+            },
+            "required": [
+              "recordId",
+              "streamId",
+              "epochId",
+              "seq",
+              "tick",
+              "family",
+              "actorIds",
+              "protectedOriginIds",
+              "protectionStatus",
+              "provenanceRefs",
+              "payload",
+              "fieldCoverage",
+              "causalContext"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "recordId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "streamId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "epochId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "seq": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "tick": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "family": {
+                "const": "death"
+              },
+              "actorIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "protectedOriginIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "protectionStatus": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "protected",
+                  "mixed",
+                  "unknown"
+                ]
+              },
+              "provenanceRefs": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "actorId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "birthTick": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "deathTick": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "ageTicks": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "locationRef": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "cause": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "previousEventIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "uniqueItems": true,
+                    "maxItems": 3
+                  },
+                  "historyStartTick": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "lifetimeEventCount": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "historyComplete": {
+                    "type": "boolean"
+                  },
+                  "durableReceiptRef": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "ageOrigin": {
+                    "type": "string",
+                    "enum": [
+                      "observed-birth",
+                      "initial-model-age"
+                    ]
+                  },
+                  "ageAtOpeningTicks": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "minProperties": 1
+              },
+              "fieldCoverage": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "actorId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "birthTick": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "deathTick": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "ageTicks": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "locationRef": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "cause": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "previousEventIds": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "historyStartTick": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "lifetimeEventCount": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "historyComplete": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "durableReceiptRef": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "ageOrigin": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "ageAtOpeningTicks": {
+                    "$ref": "#/$defs/fieldStatus"
+                  }
+                },
+                "required": [
+                  "actorId",
+                  "birthTick",
+                  "deathTick",
+                  "ageTicks",
+                  "locationRef",
+                  "cause",
+                  "previousEventIds",
+                  "historyStartTick",
+                  "lifetimeEventCount",
+                  "historyComplete",
+                  "durableReceiptRef",
+                  "ageOrigin",
+                  "ageAtOpeningTicks"
+                ]
+              },
+              "causalContext": {
+                "$ref": "#/$defs/causalContext"
+              }
+            },
+            "required": [
+              "recordId",
+              "streamId",
+              "epochId",
+              "seq",
+              "tick",
+              "family",
+              "actorIds",
+              "protectedOriginIds",
+              "protectionStatus",
+              "provenanceRefs",
+              "payload",
+              "fieldCoverage",
+              "causalContext"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "recordId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "streamId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "epochId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "seq": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "tick": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "family": {
+                "const": "structure"
+              },
+              "actorIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "protectedOriginIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "protectionStatus": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "protected",
+                  "mixed",
+                  "unknown"
+                ]
+              },
+              "provenanceRefs": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "structureId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "creationTick": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "blueprintId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "positionRef": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "condition": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "durability": {
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  },
+                  "constructionFlows": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "uniqueItems": true
+                  },
+                  "constructionWork": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "lawVersion": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "rainInputRef": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "minProperties": 1
+              },
+              "fieldCoverage": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "structureId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "creationTick": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "blueprintId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "positionRef": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "condition": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "durability": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "constructionFlows": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "constructionWork": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "lawVersion": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "rainInputRef": {
+                    "$ref": "#/$defs/fieldStatus"
+                  }
+                },
+                "required": [
+                  "structureId",
+                  "creationTick",
+                  "blueprintId",
+                  "positionRef",
+                  "condition",
+                  "durability",
+                  "constructionFlows",
+                  "constructionWork",
+                  "lawVersion",
+                  "rainInputRef"
+                ]
+              },
+              "causalContext": {
+                "$ref": "#/$defs/causalContext"
+              }
+            },
+            "required": [
+              "recordId",
+              "streamId",
+              "epochId",
+              "seq",
+              "tick",
+              "family",
+              "actorIds",
+              "protectedOriginIds",
+              "protectionStatus",
+              "provenanceRefs",
+              "payload",
+              "fieldCoverage",
+              "causalContext"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "recordId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "streamId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "epochId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "seq": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "tick": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "family": {
+                "const": "repair"
+              },
+              "actorIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "protectedOriginIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "protectionStatus": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "protected",
+                  "mixed",
+                  "unknown"
+                ]
+              },
+              "provenanceRefs": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "structureId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "actorId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "conditionBefore": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "conditionAfter": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "paidWork": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "inputFlows": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "uniqueItems": true
+                  },
+                  "serviceBeforeRefs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "uniqueItems": true
+                  },
+                  "serviceAfterRefs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "uniqueItems": true
+                  },
+                  "lawVersion": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "minProperties": 1
+              },
+              "fieldCoverage": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "structureId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "actorId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "conditionBefore": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "conditionAfter": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "paidWork": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "inputFlows": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "serviceBeforeRefs": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "serviceAfterRefs": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "lawVersion": {
+                    "$ref": "#/$defs/fieldStatus"
+                  }
+                },
+                "required": [
+                  "structureId",
+                  "actorId",
+                  "conditionBefore",
+                  "conditionAfter",
+                  "paidWork",
+                  "inputFlows",
+                  "serviceBeforeRefs",
+                  "serviceAfterRefs",
+                  "lawVersion"
+                ]
+              },
+              "causalContext": {
+                "$ref": "#/$defs/causalContext"
+              }
+            },
+            "required": [
+              "recordId",
+              "streamId",
+              "epochId",
+              "seq",
+              "tick",
+              "family",
+              "actorIds",
+              "protectedOriginIds",
+              "protectionStatus",
+              "provenanceRefs",
+              "payload",
+              "fieldCoverage",
+              "causalContext"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "recordId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "streamId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "epochId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "seq": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "tick": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "family": {
+                "const": "service"
+              },
+              "actorIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "protectedOriginIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "protectionStatus": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "protected",
+                  "mixed",
+                  "unknown"
+                ]
+              },
+              "provenanceRefs": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "subjectId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "actorId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "recipientId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "functionId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "domain": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "appliedBenefit": {
+                    "$ref": "#/$defs/quantity"
+                  },
+                  "baselineBenefit": {
+                    "$ref": "#/$defs/quantity"
+                  },
+                  "consumptionRefs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "uniqueItems": true
+                  },
+                  "inputRefs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "uniqueItems": true
+                  },
+                  "work": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "eventType": {
+                    "type": "string",
+                    "enum": [
+                      "consume",
+                      "shelter-recovery",
+                      "soil-preparation",
+                      "extraction-increment",
+                      "work-saving",
+                      "other-applied"
+                    ]
+                  },
+                  "causeRef": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "conditionAtService": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "conditionSourceRef": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "minProperties": 1
+              },
+              "fieldCoverage": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "subjectId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "actorId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "recipientId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "functionId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "domain": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "appliedBenefit": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "baselineBenefit": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "consumptionRefs": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "inputRefs": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "work": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "eventType": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "causeRef": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "conditionAtService": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "conditionSourceRef": {
+                    "$ref": "#/$defs/fieldStatus"
+                  }
+                },
+                "required": [
+                  "subjectId",
+                  "actorId",
+                  "recipientId",
+                  "functionId",
+                  "domain",
+                  "appliedBenefit",
+                  "baselineBenefit",
+                  "consumptionRefs",
+                  "inputRefs",
+                  "work",
+                  "eventType",
+                  "causeRef",
+                  "conditionAtService",
+                  "conditionSourceRef"
+                ]
+              },
+              "causalContext": {
+                "$ref": "#/$defs/causalContext"
+              }
+            },
+            "required": [
+              "recordId",
+              "streamId",
+              "epochId",
+              "seq",
+              "tick",
+              "family",
+              "actorIds",
+              "protectedOriginIds",
+              "protectionStatus",
+              "provenanceRefs",
+              "payload",
+              "fieldCoverage",
+              "causalContext"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "recordId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "streamId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "epochId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "seq": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "tick": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "family": {
+                "const": "product"
+              },
+              "actorIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "protectedOriginIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "protectionStatus": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "protected",
+                  "mixed",
+                  "unknown"
+                ]
+              },
+              "provenanceRefs": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "productId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "techniqueId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "programSignature": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "signatureVersion": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "capabilities": {
+                    "type": "array",
+                    "items": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "minItems": 6,
+                    "maxItems": 6
+                  },
+                  "functionIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "uniqueItems": true
+                  },
+                  "authorId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "ancestorIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "uniqueItems": true
+                  },
+                  "techGeneration": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "manufactureRefs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "uniqueItems": true
+                  },
+                  "resident": {
+                    "type": "boolean"
+                  },
+                  "residentBudget": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "minProperties": 1
+              },
+              "fieldCoverage": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "productId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "techniqueId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "programSignature": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "signatureVersion": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "capabilities": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "functionIds": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "authorId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "ancestorIds": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "techGeneration": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "manufactureRefs": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "resident": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "residentBudget": {
+                    "$ref": "#/$defs/fieldStatus"
+                  }
+                },
+                "required": [
+                  "productId",
+                  "techniqueId",
+                  "programSignature",
+                  "signatureVersion",
+                  "capabilities",
+                  "functionIds",
+                  "authorId",
+                  "ancestorIds",
+                  "techGeneration",
+                  "manufactureRefs",
+                  "resident",
+                  "residentBudget"
+                ]
+              },
+              "causalContext": {
+                "$ref": "#/$defs/causalContext"
+              }
+            },
+            "required": [
+              "recordId",
+              "streamId",
+              "epochId",
+              "seq",
+              "tick",
+              "family",
+              "actorIds",
+              "protectedOriginIds",
+              "protectionStatus",
+              "provenanceRefs",
+              "payload",
+              "fieldCoverage",
+              "causalContext"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "recordId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "streamId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "epochId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "seq": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "tick": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "family": {
+                "const": "replacement"
+              },
+              "actorIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "protectedOriginIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "protectionStatus": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "protected",
+                  "mixed",
+                  "unknown"
+                ]
+              },
+              "provenanceRefs": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "oldProductId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "newProductId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "functionId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "wearRefs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "uniqueItems": true
+                  },
+                  "wasteFlowRefs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "uniqueItems": true
+                  },
+                  "oldServiceRefs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "uniqueItems": true
+                  },
+                  "newServiceRefs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "uniqueItems": true
+                  },
+                  "manufactureRefs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "uniqueItems": true
+                  },
+                  "supplierId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "initialStockRefs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "uniqueItems": true
+                  }
+                },
+                "minProperties": 1
+              },
+              "fieldCoverage": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "oldProductId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "newProductId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "functionId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "wearRefs": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "wasteFlowRefs": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "oldServiceRefs": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "newServiceRefs": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "manufactureRefs": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "supplierId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "initialStockRefs": {
+                    "$ref": "#/$defs/fieldStatus"
+                  }
+                },
+                "required": [
+                  "oldProductId",
+                  "newProductId",
+                  "functionId",
+                  "wearRefs",
+                  "wasteFlowRefs",
+                  "oldServiceRefs",
+                  "newServiceRefs",
+                  "manufactureRefs",
+                  "supplierId",
+                  "initialStockRefs"
+                ]
+              },
+              "causalContext": {
+                "$ref": "#/$defs/causalContext"
+              }
+            },
+            "required": [
+              "recordId",
+              "streamId",
+              "epochId",
+              "seq",
+              "tick",
+              "family",
+              "actorIds",
+              "protectedOriginIds",
+              "protectionStatus",
+              "provenanceRefs",
+              "payload",
+              "fieldCoverage",
+              "causalContext"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "recordId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "streamId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "epochId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "seq": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "tick": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "family": {
+                "const": "knowledge"
+              },
+              "actorIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "protectedOriginIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "protectionStatus": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "protected",
+                  "mixed",
+                  "unknown"
+                ]
+              },
+              "provenanceRefs": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "actorId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "techniqueId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "transition": {
+                    "type": "string",
+                    "enum": [
+                      "acquire",
+                      "lose",
+                      "teach",
+                      "paid-rediscovery"
+                    ]
+                  },
+                  "teacherId": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "localityRef": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "paymentRefs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "uniqueItems": true
+                  },
+                  "previousTechniqueId": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "originalAuthorId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "humanCohortId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "minProperties": 1
+              },
+              "fieldCoverage": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "actorId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "techniqueId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "transition": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "teacherId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "localityRef": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "paymentRefs": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "previousTechniqueId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "originalAuthorId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "humanCohortId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  }
+                },
+                "required": [
+                  "actorId",
+                  "techniqueId",
+                  "transition",
+                  "teacherId",
+                  "localityRef",
+                  "paymentRefs",
+                  "previousTechniqueId",
+                  "originalAuthorId",
+                  "humanCohortId"
+                ]
+              },
+              "causalContext": {
+                "$ref": "#/$defs/causalContext"
+              }
+            },
+            "required": [
+              "recordId",
+              "streamId",
+              "epochId",
+              "seq",
+              "tick",
+              "family",
+              "actorIds",
+              "protectedOriginIds",
+              "protectionStatus",
+              "provenanceRefs",
+              "payload",
+              "fieldCoverage",
+              "causalContext"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "recordId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "streamId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "epochId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "seq": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "tick": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "family": {
+                "const": "migration"
+              },
+              "actorIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "protectedOriginIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "protectionStatus": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "protected",
+                  "mixed",
+                  "unknown"
+                ]
+              },
+              "provenanceRefs": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "actorId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "exposureCohortId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "originHomeId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "destinationHomeId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "originSourceId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "destinationViabilityRef": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "trajectoryRefs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "uniqueItems": true
+                  },
+                  "paidWork": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "destinationStartTick": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "destinationEndTick": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "destinationConsumptionRefs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "uniqueItems": true
+                  },
+                  "visitRefs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "uniqueItems": true
+                  }
+                },
+                "minProperties": 1
+              },
+              "fieldCoverage": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "actorId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "exposureCohortId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "originHomeId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "destinationHomeId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "originSourceId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "destinationViabilityRef": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "trajectoryRefs": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "paidWork": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "destinationStartTick": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "destinationEndTick": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "destinationConsumptionRefs": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "visitRefs": {
+                    "$ref": "#/$defs/fieldStatus"
+                  }
+                },
+                "required": [
+                  "actorId",
+                  "exposureCohortId",
+                  "originHomeId",
+                  "destinationHomeId",
+                  "originSourceId",
+                  "destinationViabilityRef",
+                  "trajectoryRefs",
+                  "paidWork",
+                  "destinationStartTick",
+                  "destinationEndTick",
+                  "destinationConsumptionRefs",
+                  "visitRefs"
+                ]
+              },
+              "causalContext": {
+                "$ref": "#/$defs/causalContext"
+              }
+            },
+            "required": [
+              "recordId",
+              "streamId",
+              "epochId",
+              "seq",
+              "tick",
+              "family",
+              "actorIds",
+              "protectedOriginIds",
+              "protectionStatus",
+              "provenanceRefs",
+              "payload",
+              "fieldCoverage",
+              "causalContext"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "recordId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "streamId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "epochId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "seq": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "tick": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "family": {
+                "const": "role"
+              },
+              "actorIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "protectedOriginIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "protectionStatus": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "protected",
+                  "mixed",
+                  "unknown"
+                ]
+              },
+              "provenanceRefs": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "actorId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "roleClassificationId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "functionId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "recipientIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "uniqueItems": true
+                  },
+                  "serviceRefs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "uniqueItems": true
+                  },
+                  "workTicks": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "opportunities": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "institutionId": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "institutionTransition": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "adopt",
+                          "revise",
+                          "remove",
+                          "restore"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "localRuleRef": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "minProperties": 1
+              },
+              "fieldCoverage": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "actorId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "roleClassificationId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "functionId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "recipientIds": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "serviceRefs": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "workTicks": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "opportunities": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "institutionId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "institutionTransition": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "localRuleRef": {
+                    "$ref": "#/$defs/fieldStatus"
+                  }
+                },
+                "required": [
+                  "actorId",
+                  "roleClassificationId",
+                  "functionId",
+                  "recipientIds",
+                  "serviceRefs",
+                  "workTicks",
+                  "opportunities",
+                  "institutionId",
+                  "institutionTransition",
+                  "localRuleRef"
+                ]
+              },
+              "causalContext": {
+                "$ref": "#/$defs/causalContext"
+              }
+            },
+            "required": [
+              "recordId",
+              "streamId",
+              "epochId",
+              "seq",
+              "tick",
+              "family",
+              "actorIds",
+              "protectedOriginIds",
+              "protectionStatus",
+              "provenanceRefs",
+              "payload",
+              "fieldCoverage",
+              "causalContext"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "recordId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "streamId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "epochId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "seq": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "tick": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "family": {
+                "const": "conflict"
+              },
+              "actorIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "protectedOriginIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "protectionStatus": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "protected",
+                  "mixed",
+                  "unknown"
+                ]
+              },
+              "provenanceRefs": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "episodeId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "actorIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "minItems": 2,
+                    "maxItems": 2,
+                    "uniqueItems": true
+                  },
+                  "sourceId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "groupRelation": {
+                    "type": "string",
+                    "enum": [
+                      "endo",
+                      "exo"
+                    ]
+                  },
+                  "needInputsRef": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "triggerLawRef": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "trajectoryRefs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "uniqueItems": true
+                  },
+                  "costRefs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "uniqueItems": true
+                  },
+                  "agreement": {
+                    "type": "boolean"
+                  },
+                  "memoryEnabled": {
+                    "type": "boolean"
+                  },
+                  "accessWinnerId": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "consumptionRefs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "uniqueItems": true
+                  },
+                  "recurrenceRefs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "uniqueItems": true
+                  },
+                  "followupStartTick": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "followupEndTick": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "eligibleOpportunityRefs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "uniqueItems": true
+                  }
+                },
+                "minProperties": 1
+              },
+              "fieldCoverage": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "episodeId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "actorIds": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "sourceId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "groupRelation": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "needInputsRef": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "triggerLawRef": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "trajectoryRefs": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "costRefs": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "agreement": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "memoryEnabled": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "accessWinnerId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "consumptionRefs": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "recurrenceRefs": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "followupStartTick": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "followupEndTick": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "eligibleOpportunityRefs": {
+                    "$ref": "#/$defs/fieldStatus"
+                  }
+                },
+                "required": [
+                  "episodeId",
+                  "actorIds",
+                  "sourceId",
+                  "groupRelation",
+                  "needInputsRef",
+                  "triggerLawRef",
+                  "trajectoryRefs",
+                  "costRefs",
+                  "agreement",
+                  "memoryEnabled",
+                  "accessWinnerId",
+                  "consumptionRefs",
+                  "recurrenceRefs",
+                  "followupStartTick",
+                  "followupEndTick",
+                  "eligibleOpportunityRefs"
+                ]
+              },
+              "causalContext": {
+                "$ref": "#/$defs/causalContext"
+              }
+            },
+            "required": [
+              "recordId",
+              "streamId",
+              "epochId",
+              "seq",
+              "tick",
+              "family",
+              "actorIds",
+              "protectedOriginIds",
+              "protectionStatus",
+              "provenanceRefs",
+              "payload",
+              "fieldCoverage",
+              "causalContext"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "recordId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "streamId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "epochId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "seq": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "tick": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "family": {
+                "const": "ecology"
+              },
+              "actorIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "protectedOriginIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "protectionStatus": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "protected",
+                  "mixed",
+                  "unknown"
+                ]
+              },
+              "provenanceRefs": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "regionId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "species": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "biome": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "globalTick": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "localTick": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "scale": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "policyVersion": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "population": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "birthIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "uniqueItems": true
+                  },
+                  "deathIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "uniqueItems": true
+                  },
+                  "immigrantIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "uniqueItems": true
+                  },
+                  "emigrantIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "uniqueItems": true
+                  },
+                  "predationRefs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "uniqueItems": true
+                  },
+                  "huntRefs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "uniqueItems": true
+                  },
+                  "flowRefs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "uniqueItems": true
+                  },
+                  "conditionInputsRef": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "humanIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "uniqueItems": true
+                  }
+                },
+                "minProperties": 1
+              },
+              "fieldCoverage": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "regionId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "species": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "biome": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "globalTick": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "localTick": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "scale": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "policyVersion": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "population": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "birthIds": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "deathIds": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "immigrantIds": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "emigrantIds": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "predationRefs": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "huntRefs": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "flowRefs": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "conditionInputsRef": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "humanIds": {
+                    "$ref": "#/$defs/fieldStatus"
+                  }
+                },
+                "required": [
+                  "regionId",
+                  "species",
+                  "biome",
+                  "globalTick",
+                  "localTick",
+                  "scale",
+                  "policyVersion",
+                  "population",
+                  "birthIds",
+                  "deathIds",
+                  "immigrantIds",
+                  "emigrantIds",
+                  "predationRefs",
+                  "huntRefs",
+                  "flowRefs",
+                  "conditionInputsRef",
+                  "humanIds"
+                ]
+              },
+              "causalContext": {
+                "$ref": "#/$defs/causalContext"
+              }
+            },
+            "required": [
+              "recordId",
+              "streamId",
+              "epochId",
+              "seq",
+              "tick",
+              "family",
+              "actorIds",
+              "protectedOriginIds",
+              "protectionStatus",
+              "provenanceRefs",
+              "payload",
+              "fieldCoverage",
+              "causalContext"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "recordId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "streamId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "epochId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "seq": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "tick": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "family": {
+                "const": "rejection"
+              },
+              "actorIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "protectedOriginIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "protectionStatus": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "protected",
+                  "mixed",
+                  "unknown"
+                ]
+              },
+              "provenanceRefs": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "attemptId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "actorIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "uniqueItems": true
+                  },
+                  "allGateResultsRef": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "decisiveGate": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "local",
+                          "global-quota",
+                          "governor",
+                          "anticorruption",
+                          "other-software"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "fertilityInputsRef": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "accessibleResourcesRef": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "governorInputRef": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "governorDecisionRef": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "outcome": {
+                    "type": "string",
+                    "enum": [
+                      "accepted",
+                      "rejected"
+                    ]
+                  },
+                  "opportunityId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "coverageRef": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "allOf": [
+                  {
+                    "if": {
+                      "properties": {
+                        "outcome": {
+                          "const": "accepted"
+                        }
+                      },
+                      "required": [
+                        "outcome"
+                      ]
+                    },
+                    "then": {
+                      "properties": {
+                        "decisiveGate": {
+                          "type": "null"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "if": {
+                      "properties": {
+                        "outcome": {
+                          "const": "rejected"
+                        }
+                      },
+                      "required": [
+                        "outcome"
+                      ]
+                    },
+                    "then": {
+                      "properties": {
+                        "decisiveGate": {
+                          "type": "string",
+                          "enum": [
+                            "local",
+                            "global-quota",
+                            "governor",
+                            "anticorruption",
+                            "other-software"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                ],
+                "minProperties": 1
+              },
+              "fieldCoverage": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "attemptId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "actorIds": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "allGateResultsRef": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "decisiveGate": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "fertilityInputsRef": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "accessibleResourcesRef": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "governorInputRef": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "governorDecisionRef": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "outcome": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "opportunityId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "coverageRef": {
+                    "$ref": "#/$defs/fieldStatus"
+                  }
+                },
+                "required": [
+                  "attemptId",
+                  "actorIds",
+                  "allGateResultsRef",
+                  "decisiveGate",
+                  "fertilityInputsRef",
+                  "accessibleResourcesRef",
+                  "governorInputRef",
+                  "governorDecisionRef",
+                  "outcome",
+                  "opportunityId",
+                  "coverageRef"
+                ]
+              },
+              "causalContext": {
+                "$ref": "#/$defs/causalContext"
+              }
+            },
+            "required": [
+              "recordId",
+              "streamId",
+              "epochId",
+              "seq",
+              "tick",
+              "family",
+              "actorIds",
+              "protectedOriginIds",
+              "protectionStatus",
+              "provenanceRefs",
+              "payload",
+              "fieldCoverage",
+              "causalContext"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "recordId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "streamId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "epochId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "seq": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "tick": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "family": {
+                "const": "digest"
+              },
+              "actorIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "protectedOriginIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "protectionStatus": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "protected",
+                  "mixed",
+                  "unknown"
+                ]
+              },
+              "provenanceRefs": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "physicalTick": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "algorithm": {
+                    "const": "sha256"
+                  },
+                  "canonicalVersion": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "physical",
+                      "state-history",
+                      "projection"
+                    ]
+                  },
+                  "digest": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "inputTraceHash": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "governorTraceHash": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "population": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "backend": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "cameraCount": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "excludedFields": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "uniqueItems": true
+                  },
+                  "componentHashesRef": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "minProperties": 1
+              },
+              "fieldCoverage": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "physicalTick": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "algorithm": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "canonicalVersion": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "scope": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "digest": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "inputTraceHash": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "governorTraceHash": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "population": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "backend": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "cameraCount": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "excludedFields": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "componentHashesRef": {
+                    "$ref": "#/$defs/fieldStatus"
+                  }
+                },
+                "required": [
+                  "physicalTick",
+                  "algorithm",
+                  "canonicalVersion",
+                  "scope",
+                  "digest",
+                  "inputTraceHash",
+                  "governorTraceHash",
+                  "population",
+                  "backend",
+                  "cameraCount",
+                  "excludedFields",
+                  "componentHashesRef"
+                ]
+              },
+              "causalContext": {
+                "$ref": "#/$defs/causalContext"
+              }
+            },
+            "required": [
+              "recordId",
+              "streamId",
+              "epochId",
+              "seq",
+              "tick",
+              "family",
+              "actorIds",
+              "protectedOriginIds",
+              "protectionStatus",
+              "provenanceRefs",
+              "payload",
+              "fieldCoverage",
+              "causalContext"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "recordId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "streamId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "epochId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "seq": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "tick": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "family": {
+                "const": "cost"
+              },
+              "actorIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "protectedOriginIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "protectionStatus": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "protected",
+                  "mixed",
+                  "unknown"
+                ]
+              },
+              "provenanceRefs": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "sampleId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "sceneId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "completedSteps": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "startSeconds": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "endSeconds": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "warmupSeconds": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "hostLoadRef": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "physicalInputsHash": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "governorInputsHash": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "backend": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "threads": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "cameraCount": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "population": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "stepMs": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "saveMs": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "projectionMs": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "transferToMs": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "transferFromMs": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "completeMs": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "queueMs": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "cpuSeconds": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "rssBytes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "diskBytes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "egressBytes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "stateBytes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "fps": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "measurementScope": {
+                    "type": "string",
+                    "enum": [
+                      "server",
+                      "kernel",
+                      "client",
+                      "end-to-end"
+                    ]
+                  }
+                },
+                "minProperties": 1
+              },
+              "fieldCoverage": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "sampleId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "sceneId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "completedSteps": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "startSeconds": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "endSeconds": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "warmupSeconds": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "hostLoadRef": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "physicalInputsHash": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "governorInputsHash": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "backend": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "threads": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "cameraCount": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "population": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "stepMs": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "saveMs": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "projectionMs": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "transferToMs": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "transferFromMs": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "completeMs": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "queueMs": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "cpuSeconds": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "rssBytes": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "diskBytes": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "egressBytes": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "stateBytes": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "fps": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "measurementScope": {
+                    "$ref": "#/$defs/fieldStatus"
+                  }
+                },
+                "required": [
+                  "sampleId",
+                  "sceneId",
+                  "completedSteps",
+                  "startSeconds",
+                  "endSeconds",
+                  "warmupSeconds",
+                  "hostLoadRef",
+                  "physicalInputsHash",
+                  "governorInputsHash",
+                  "backend",
+                  "threads",
+                  "cameraCount",
+                  "population",
+                  "stepMs",
+                  "saveMs",
+                  "projectionMs",
+                  "transferToMs",
+                  "transferFromMs",
+                  "completeMs",
+                  "queueMs",
+                  "cpuSeconds",
+                  "rssBytes",
+                  "diskBytes",
+                  "egressBytes",
+                  "stateBytes",
+                  "fps",
+                  "measurementScope"
+                ]
+              },
+              "causalContext": {
+                "$ref": "#/$defs/causalContext"
+              }
+            },
+            "required": [
+              "recordId",
+              "streamId",
+              "epochId",
+              "seq",
+              "tick",
+              "family",
+              "actorIds",
+              "protectedOriginIds",
+              "protectionStatus",
+              "provenanceRefs",
+              "payload",
+              "fieldCoverage",
+              "causalContext"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "recordId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "streamId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "epochId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "seq": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "tick": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "family": {
+                "const": "fault"
+              },
+              "actorIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "protectedOriginIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "protectionStatus": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "protected",
+                  "mixed",
+                  "unknown"
+                ]
+              },
+              "provenanceRefs": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "caseId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "phase": {
+                    "type": "string",
+                    "enum": [
+                      "before-commit",
+                      "after-commit"
+                    ]
+                  },
+                  "faultPoint": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "lastDurableCommitId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "acknowledgedOrderIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "uniqueItems": true
+                  },
+                  "recoveredCommitId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "expectedComponentManifestRef": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "actualComponentManifestRef": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "clientTickRefs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "uniqueItems": true
+                  },
+                  "archiveVersionManifestRef": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "realDurationSeconds": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "clientCount": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "minProperties": 1
+              },
+              "fieldCoverage": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "caseId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "phase": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "faultPoint": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "lastDurableCommitId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "acknowledgedOrderIds": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "recoveredCommitId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "expectedComponentManifestRef": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "actualComponentManifestRef": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "clientTickRefs": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "archiveVersionManifestRef": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "realDurationSeconds": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "clientCount": {
+                    "$ref": "#/$defs/fieldStatus"
+                  }
+                },
+                "required": [
+                  "caseId",
+                  "phase",
+                  "faultPoint",
+                  "lastDurableCommitId",
+                  "acknowledgedOrderIds",
+                  "recoveredCommitId",
+                  "expectedComponentManifestRef",
+                  "actualComponentManifestRef",
+                  "clientTickRefs",
+                  "archiveVersionManifestRef",
+                  "realDurationSeconds",
+                  "clientCount"
+                ]
+              },
+              "causalContext": {
+                "$ref": "#/$defs/causalContext"
+              }
+            },
+            "required": [
+              "recordId",
+              "streamId",
+              "epochId",
+              "seq",
+              "tick",
+              "family",
+              "actorIds",
+              "protectedOriginIds",
+              "protectionStatus",
+              "provenanceRefs",
+              "payload",
+              "fieldCoverage",
+              "causalContext"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "recordId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "streamId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "epochId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "seq": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "tick": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "family": {
+                "const": "review"
+              },
+              "actorIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "protectedOriginIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "protectionStatus": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "protected",
+                  "mixed",
+                  "unknown"
+                ]
+              },
+              "provenanceRefs": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "reviewId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "personal",
+                      "task",
+                      "inspector",
+                      "memory-pair",
+                      "encounter-pair",
+                      "authorization"
+                    ]
+                  },
+                  "authority": {
+                    "type": "string",
+                    "enum": [
+                      "Steven",
+                      "technical-reviewer",
+                      "synthetic-oracle"
+                    ]
+                  },
+                  "contentHash": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "decision": {
+                    "type": "string",
+                    "enum": [
+                      "accepted",
+                      "rejected",
+                      "pending"
+                    ]
+                  },
+                  "receiptRef": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "deviceId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "physicalDevice": {
+                    "type": "boolean"
+                  },
+                  "taskId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "criticalBlockers": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "durationSeconds": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "evidenceRefs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "uniqueItems": true
+                  }
+                },
+                "minProperties": 1
+              },
+              "fieldCoverage": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "reviewId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "kind": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "authority": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "contentHash": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "decision": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "receiptRef": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "deviceId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "physicalDevice": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "taskId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "criticalBlockers": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "durationSeconds": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "evidenceRefs": {
+                    "$ref": "#/$defs/fieldStatus"
+                  }
+                },
+                "required": [
+                  "reviewId",
+                  "kind",
+                  "authority",
+                  "contentHash",
+                  "decision",
+                  "receiptRef",
+                  "deviceId",
+                  "physicalDevice",
+                  "taskId",
+                  "criticalBlockers",
+                  "durationSeconds",
+                  "evidenceRefs"
+                ]
+              },
+              "causalContext": {
+                "$ref": "#/$defs/causalContext"
+              }
+            },
+            "required": [
+              "recordId",
+              "streamId",
+              "epochId",
+              "seq",
+              "tick",
+              "family",
+              "actorIds",
+              "protectedOriginIds",
+              "protectionStatus",
+              "provenanceRefs",
+              "payload",
+              "fieldCoverage",
+              "causalContext"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "recordId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "streamId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "epochId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "seq": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "tick": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "family": {
+                "const": "method"
+              },
+              "actorIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "protectedOriginIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "protectionStatus": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "protected",
+                  "mixed",
+                  "unknown"
+                ]
+              },
+              "provenanceRefs": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "payload": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "trialId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "preregistrationRef": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "preregistrationHash": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "registeredBeforeData": {
+                    "type": "boolean"
+                  },
+                  "seedRegistryRef": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "runManifestRefs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "uniqueItems": true
+                  },
+                  "selector": {
+                    "type": "string",
+                    "enum": [
+                      "current",
+                      "neutral",
+                      "learned",
+                      "not-applicable"
+                    ]
+                  },
+                  "learningEnabled": {
+                    "type": "boolean"
+                  },
+                  "budgetRef": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "interventionRefs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "uniqueItems": true
+                  },
+                  "independentReviewRef": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "priorPhaseDecisionRef": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "rewardDefinitionRef": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "reservedSeedAuditRef": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "minProperties": 1
+              },
+              "fieldCoverage": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "trialId": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "preregistrationRef": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "preregistrationHash": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "registeredBeforeData": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "seedRegistryRef": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "runManifestRefs": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "selector": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "learningEnabled": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "budgetRef": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "interventionRefs": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "independentReviewRef": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "priorPhaseDecisionRef": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "rewardDefinitionRef": {
+                    "$ref": "#/$defs/fieldStatus"
+                  },
+                  "reservedSeedAuditRef": {
+                    "$ref": "#/$defs/fieldStatus"
+                  }
+                },
+                "required": [
+                  "trialId",
+                  "preregistrationRef",
+                  "preregistrationHash",
+                  "registeredBeforeData",
+                  "seedRegistryRef",
+                  "runManifestRefs",
+                  "selector",
+                  "learningEnabled",
+                  "budgetRef",
+                  "interventionRefs",
+                  "independentReviewRef",
+                  "priorPhaseDecisionRef",
+                  "rewardDefinitionRef",
+                  "reservedSeedAuditRef"
+                ]
+              },
+              "causalContext": {
+                "$ref": "#/$defs/causalContext"
+              }
+            },
+            "required": [
+              "recordId",
+              "streamId",
+              "epochId",
+              "seq",
+              "tick",
+              "family",
+              "actorIds",
+              "protectedOriginIds",
+              "protectionStatus",
+              "provenanceRefs",
+              "payload",
+              "fieldCoverage",
+              "causalContext"
+            ]
+          }
+        ]
+      }
+    },
+    "evidenceId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "synthetic": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "contractVersion",
+    "kind",
+    "runId",
+    "sourceSHA",
+    "seed",
+    "epochId",
+    "artifactRole",
+    "paramsHash",
+    "paramsRef",
+    "initialStateHash",
+    "inputTraceRef",
+    "governorTraceRef",
+    "observerSHA",
+    "canonicalDigestVersion",
+    "thresholdProfileHash",
+    "preregistrationRef",
+    "hardwareRef",
+    "backend",
+    "plannedWindow",
+    "actualWindow",
+    "runStatus",
+    "pairedRunId",
+    "interventionRefs",
+    "capabilities",
+    "streams",
+    "evidenceIndex",
+    "records",
+    "evidenceId",
+    "synthetic"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:una-carta-para-isa:realismo-v3:observation",
+  "title": "Realismo v3 observation — two scoped R1 corrections, not sealed",
+  "$defs": {
+    "window": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "startTick": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "endTick": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "ticksPerDay": {
+          "const": 2400
+        },
+        "closure": {
+          "const": "(start,end]"
+        },
+        "clock": {
+          "type": "string",
+          "enum": [
+            "global",
+            "active",
+            "real"
+          ]
+        },
+        "epochId": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "startTick",
+        "endTick",
+        "ticksPerDay",
+        "closure",
+        "clock",
+        "epochId"
+      ]
+    },
+    "quantity": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "value": {
+          "type": "number",
+          "minimum": 0
+        },
+        "unit": {
+          "type": "string",
+          "enum": [
+            "quanta",
+            "normalized",
+            "work",
+            "energy-model",
+            "ticks",
+            "ms",
+            "bytes",
+            "seconds",
+            "count",
+            "fps",
+            "ratio",
+            "percentage-points"
+          ]
+        },
+        "material": {
+          "type": "string",
+          "minLength": 1
+        },
+        "conversionVersion": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "value",
+        "unit",
+        "material",
+        "conversionVersion"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "unit": {
+                "enum": [
+                  "quanta",
+                  "ticks",
+                  "bytes",
+                  "count"
+                ]
+              }
+            },
+            "required": [
+              "unit"
+            ]
+          },
+          "then": {
+            "properties": {
+              "value": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            }
+          }
+        }
+      ]
+    },
+    "capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "family": {
+          "type": "string",
+          "enum": [
+            "boundary",
+            "stock",
+            "flow",
+            "exposure",
+            "person",
+            "death",
+            "structure",
+            "repair",
+            "service",
+            "product",
+            "replacement",
+            "knowledge",
+            "migration",
+            "role",
+            "conflict",
+            "ecology",
+            "rejection",
+            "digest",
+            "cost",
+            "fault",
+            "review",
+            "method"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "available",
+            "partial",
+            "unavailable"
+          ]
+        },
+        "availableFields": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "missingFields": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "sourceRefs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "family",
+        "status",
+        "availableFields",
+        "missingFields",
+        "sourceRefs",
+        "reason"
+      ]
+    },
+    "stream": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "streamId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "family": {
+          "type": "string",
+          "enum": [
+            "boundary",
+            "stock",
+            "flow",
+            "exposure",
+            "person",
+            "death",
+            "structure",
+            "repair",
+            "service",
+            "product",
+            "replacement",
+            "knowledge",
+            "migration",
+            "role",
+            "conflict",
+            "ecology",
+            "rejection",
+            "digest",
+            "cost",
+            "fault",
+            "review",
+            "method"
+          ]
+        },
+        "epochId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "window": {
+          "$ref": "#/$defs/window"
+        },
+        "quality": {
+          "type": "string",
+          "enum": [
+            "COMPLETE",
+            "PARTIAL",
+            "INVALID",
+            "UNAVAILABLE"
+          ]
+        },
+        "requiredFields": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "coveredFields": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "firstSeq": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lastSeq": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "expectedRecords": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "observedRecords": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "eligibleOpportunities": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "censoredSubjects": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "gaps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "startTick": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "endTick": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "startTick",
+              "endTick",
+              "reason"
+            ]
+          }
+        },
+        "evidenceRefs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "streamId",
+        "family",
+        "epochId",
+        "window",
+        "quality",
+        "requiredFields",
+        "coveredFields",
+        "firstSeq",
+        "lastSeq",
+        "expectedRecords",
+        "observedRecords",
+        "eligibleOpportunities",
+        "censoredSubjects",
+        "gaps",
+        "evidenceRefs"
+      ]
+    },
+    "fieldStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "observed",
+            "missing",
+            "not-applicable"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "status",
+        "reason"
+      ]
+    },
+    "causalContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "ordered",
+            "snapshot",
+            "unknown"
+          ]
+        },
+        "sourceEventId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "phaseId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "phaseOrdinal": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "eventOrdinal": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sourceOrderRef": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "predecessorRecordIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "status",
+        "sourceEventId",
+        "phaseId",
+        "phaseOrdinal",
+        "eventOrdinal",
+        "sourceOrderRef",
+        "predecessorRecordIds",
+        "reason"
+      ]
+    }
+  }
+}

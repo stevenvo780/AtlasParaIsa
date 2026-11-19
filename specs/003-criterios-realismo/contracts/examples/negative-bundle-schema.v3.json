@@ -1,0 +1,617 @@
+{
+  "contractVersion": "realismo-v3",
+  "kind": "observation",
+  "runId": "crossrun-input",
+  "sourceSHA": "bb483260b2489fe62b113d620e5f56e5f3676dbc",
+  "seed": 0,
+  "epochId": "e0",
+  "artifactRole": "synthetic",
+  "paramsHash": "d956a755ba428301d4b7a1b0e35b0b428d16c836fa3d37032f6c22f702fbc81c",
+  "paramsRef": "params",
+  "initialStateHash": "43c1f13fbb0fa05b23c6ebd108cc3bc36e566ca532eb0d6c5768d817a529ba23",
+  "inputTraceRef": "inputs",
+  "governorTraceRef": "governor",
+  "observerSHA": "not-implemented",
+  "canonicalDigestVersion": "unavailable",
+  "thresholdProfileHash": "d99e24ee85f379164c1dd0d351a0cdb204d8bf1dda0e446abd70cfe582e4b7cb",
+  "preregistrationRef": "registration",
+  "hardwareRef": "host",
+  "backend": "synthetic",
+  "plannedWindow": {
+    "startTick": 0,
+    "endTick": 72000,
+    "ticksPerDay": 2400,
+    "closure": "(start,end]",
+    "clock": "global",
+    "epochId": "e0"
+  },
+  "actualWindow": {
+    "startTick": 0,
+    "endTick": 0,
+    "ticksPerDay": 2400,
+    "closure": "(start,end]",
+    "clock": "global",
+    "epochId": "e0"
+  },
+  "runStatus": "not-started",
+  "pairedRunId": null,
+  "interventionRefs": [],
+  "capabilities": [
+    {
+      "family": "boundary",
+      "status": "unavailable",
+      "availableFields": [],
+      "missingFields": [
+        "boundaryId",
+        "stockIds",
+        "materials",
+        "unitMapVersion",
+        "conversionMatrixRef",
+        "includesProtected",
+        "scope",
+        "excludedCompartments"
+      ],
+      "sourceRefs": [],
+      "reason": "Ejemplo estructural: evidencia no recogida"
+    },
+    {
+      "family": "stock",
+      "status": "unavailable",
+      "availableFields": [],
+      "missingFields": [
+        "boundaryId",
+        "stockId",
+        "ownerId",
+        "regionId",
+        "clockTick",
+        "scale",
+        "material",
+        "quantity",
+        "phase"
+      ],
+      "sourceRefs": [],
+      "reason": "Ejemplo estructural: evidencia no recogida"
+    },
+    {
+      "family": "flow",
+      "status": "unavailable",
+      "availableFields": [],
+      "missingFields": [
+        "boundaryId",
+        "transferId",
+        "fromStockId",
+        "toStockId",
+        "flowType",
+        "quantity",
+        "counterpartRecordId",
+        "conversionRef",
+        "consumptionRef"
+      ],
+      "sourceRefs": [],
+      "reason": "Ejemplo estructural: evidencia no recogida"
+    },
+    {
+      "family": "exposure",
+      "status": "unavailable",
+      "availableFields": [],
+      "missingFields": [
+        "subjectId",
+        "regionId",
+        "startTick",
+        "endTick",
+        "activeTicks",
+        "localStartTick",
+        "localEndTick",
+        "mode",
+        "lawInputsRef"
+      ],
+      "sourceRefs": [],
+      "reason": "Ejemplo estructural: evidencia no recogida"
+    },
+    {
+      "family": "person",
+      "status": "unavailable",
+      "availableFields": [],
+      "missingFields": [
+        "actorId",
+        "role",
+        "birthTick",
+        "deathTick",
+        "founder",
+        "species",
+        "parentIds",
+        "knownTechniqueIds",
+        "positionRef",
+        "ageOrigin",
+        "ageAtOpeningTicks"
+      ],
+      "sourceRefs": [],
+      "reason": "Ejemplo estructural: evidencia no recogida"
+    },
+    {
+      "family": "death",
+      "status": "unavailable",
+      "availableFields": [],
+      "missingFields": [
+        "actorId",
+        "birthTick",
+        "deathTick",
+        "ageTicks",
+        "locationRef",
+        "cause",
+        "previousEventIds",
+        "historyStartTick",
+        "lifetimeEventCount",
+        "historyComplete",
+        "durableReceiptRef",
+        "ageOrigin",
+        "ageAtOpeningTicks"
+      ],
+      "sourceRefs": [],
+      "reason": "Ejemplo estructural: evidencia no recogida"
+    },
+    {
+      "family": "structure",
+      "status": "unavailable",
+      "availableFields": [],
+      "missingFields": [
+        "structureId",
+        "creationTick",
+        "blueprintId",
+        "positionRef",
+        "condition",
+        "durability",
+        "constructionFlows",
+        "constructionWork",
+        "lawVersion",
+        "rainInputRef"
+      ],
+      "sourceRefs": [],
+      "reason": "Ejemplo estructural: evidencia no recogida"
+    },
+    {
+      "family": "repair",
+      "status": "unavailable",
+      "availableFields": [],
+      "missingFields": [
+        "structureId",
+        "actorId",
+        "conditionBefore",
+        "conditionAfter",
+        "paidWork",
+        "inputFlows",
+        "serviceBeforeRefs",
+        "serviceAfterRefs",
+        "lawVersion"
+      ],
+      "sourceRefs": [],
+      "reason": "Ejemplo estructural: evidencia no recogida"
+    },
+    {
+      "family": "service",
+      "status": "unavailable",
+      "availableFields": [],
+      "missingFields": [
+        "subjectId",
+        "actorId",
+        "recipientId",
+        "functionId",
+        "domain",
+        "appliedBenefit",
+        "baselineBenefit",
+        "consumptionRefs",
+        "inputRefs",
+        "work",
+        "eventType",
+        "causeRef"
+      ],
+      "sourceRefs": [],
+      "reason": "Ejemplo estructural: evidencia no recogida"
+    },
+    {
+      "family": "product",
+      "status": "unavailable",
+      "availableFields": [],
+      "missingFields": [
+        "productId",
+        "techniqueId",
+        "programSignature",
+        "signatureVersion",
+        "capabilities",
+        "functionIds",
+        "authorId",
+        "ancestorIds",
+        "techGeneration",
+        "manufactureRefs",
+        "resident",
+        "residentBudget"
+      ],
+      "sourceRefs": [],
+      "reason": "Ejemplo estructural: evidencia no recogida"
+    },
+    {
+      "family": "replacement",
+      "status": "unavailable",
+      "availableFields": [],
+      "missingFields": [
+        "oldProductId",
+        "newProductId",
+        "functionId",
+        "wearRefs",
+        "wasteFlowRefs",
+        "oldServiceRefs",
+        "newServiceRefs",
+        "manufactureRefs",
+        "supplierId",
+        "initialStockRefs"
+      ],
+      "sourceRefs": [],
+      "reason": "Ejemplo estructural: evidencia no recogida"
+    },
+    {
+      "family": "knowledge",
+      "status": "unavailable",
+      "availableFields": [],
+      "missingFields": [
+        "actorId",
+        "techniqueId",
+        "transition",
+        "teacherId",
+        "localityRef",
+        "paymentRefs",
+        "previousTechniqueId",
+        "originalAuthorId",
+        "humanCohortId"
+      ],
+      "sourceRefs": [],
+      "reason": "Ejemplo estructural: evidencia no recogida"
+    },
+    {
+      "family": "migration",
+      "status": "unavailable",
+      "availableFields": [],
+      "missingFields": [
+        "actorId",
+        "exposureCohortId",
+        "originHomeId",
+        "destinationHomeId",
+        "originSourceId",
+        "destinationViabilityRef",
+        "trajectoryRefs",
+        "paidWork",
+        "destinationStartTick",
+        "destinationEndTick",
+        "destinationConsumptionRefs",
+        "visitRefs"
+      ],
+      "sourceRefs": [],
+      "reason": "Ejemplo estructural: evidencia no recogida"
+    },
+    {
+      "family": "role",
+      "status": "unavailable",
+      "availableFields": [],
+      "missingFields": [
+        "actorId",
+        "roleClassificationId",
+        "functionId",
+        "recipientIds",
+        "serviceRefs",
+        "workTicks",
+        "opportunities",
+        "institutionId",
+        "institutionTransition",
+        "localRuleRef"
+      ],
+      "sourceRefs": [],
+      "reason": "Ejemplo estructural: evidencia no recogida"
+    },
+    {
+      "family": "conflict",
+      "status": "unavailable",
+      "availableFields": [],
+      "missingFields": [
+        "episodeId",
+        "actorIds",
+        "sourceId",
+        "groupRelation",
+        "needInputsRef",
+        "triggerLawRef",
+        "trajectoryRefs",
+        "costRefs",
+        "agreement",
+        "memoryEnabled",
+        "accessWinnerId",
+        "consumptionRefs",
+        "recurrenceRefs",
+        "followupStartTick",
+        "followupEndTick",
+        "eligibleOpportunityRefs"
+      ],
+      "sourceRefs": [],
+      "reason": "Ejemplo estructural: evidencia no recogida"
+    },
+    {
+      "family": "ecology",
+      "status": "unavailable",
+      "availableFields": [],
+      "missingFields": [
+        "regionId",
+        "species",
+        "biome",
+        "globalTick",
+        "localTick",
+        "scale",
+        "policyVersion",
+        "population",
+        "birthIds",
+        "deathIds",
+        "immigrantIds",
+        "emigrantIds",
+        "predationRefs",
+        "huntRefs",
+        "flowRefs",
+        "conditionInputsRef",
+        "humanIds"
+      ],
+      "sourceRefs": [],
+      "reason": "Ejemplo estructural: evidencia no recogida"
+    },
+    {
+      "family": "rejection",
+      "status": "unavailable",
+      "availableFields": [],
+      "missingFields": [
+        "attemptId",
+        "actorIds",
+        "allGateResultsRef",
+        "decisiveGate",
+        "fertilityInputsRef",
+        "accessibleResourcesRef",
+        "governorInputRef",
+        "governorDecisionRef"
+      ],
+      "sourceRefs": [],
+      "reason": "Ejemplo estructural: evidencia no recogida"
+    },
+    {
+      "family": "digest",
+      "status": "unavailable",
+      "availableFields": [],
+      "missingFields": [
+        "physicalTick",
+        "algorithm",
+        "canonicalVersion",
+        "scope",
+        "digest",
+        "inputTraceHash",
+        "governorTraceHash",
+        "population",
+        "backend",
+        "cameraCount",
+        "excludedFields",
+        "componentHashesRef"
+      ],
+      "sourceRefs": [],
+      "reason": "Ejemplo estructural: evidencia no recogida"
+    },
+    {
+      "family": "cost",
+      "status": "unavailable",
+      "availableFields": [],
+      "missingFields": [
+        "sampleId",
+        "sceneId",
+        "completedSteps",
+        "startSeconds",
+        "endSeconds",
+        "warmupSeconds",
+        "hostLoadRef",
+        "physicalInputsHash",
+        "governorInputsHash",
+        "backend",
+        "threads",
+        "cameraCount",
+        "population",
+        "stepMs",
+        "saveMs",
+        "projectionMs",
+        "transferToMs",
+        "transferFromMs",
+        "completeMs",
+        "queueMs",
+        "cpuSeconds",
+        "rssBytes",
+        "diskBytes",
+        "egressBytes",
+        "stateBytes",
+        "fps"
+      ],
+      "sourceRefs": [],
+      "reason": "Ejemplo estructural: evidencia no recogida"
+    },
+    {
+      "family": "fault",
+      "status": "unavailable",
+      "availableFields": [],
+      "missingFields": [
+        "caseId",
+        "phase",
+        "faultPoint",
+        "lastDurableCommitId",
+        "acknowledgedOrderIds",
+        "recoveredCommitId",
+        "expectedComponentManifestRef",
+        "actualComponentManifestRef",
+        "clientTickRefs",
+        "archiveVersionManifestRef",
+        "realDurationSeconds",
+        "clientCount"
+      ],
+      "sourceRefs": [],
+      "reason": "Ejemplo estructural: evidencia no recogida"
+    },
+    {
+      "family": "review",
+      "status": "unavailable",
+      "availableFields": [],
+      "missingFields": [
+        "reviewId",
+        "kind",
+        "authority",
+        "contentHash",
+        "decision",
+        "receiptRef",
+        "deviceId",
+        "physicalDevice",
+        "taskId",
+        "criticalBlockers",
+        "durationSeconds",
+        "evidenceRefs"
+      ],
+      "sourceRefs": [],
+      "reason": "Ejemplo estructural: evidencia no recogida"
+    },
+    {
+      "family": "method",
+      "status": "unavailable",
+      "availableFields": [],
+      "missingFields": [
+        "trialId",
+        "preregistrationRef",
+        "preregistrationHash",
+        "registeredBeforeData",
+        "seedRegistryRef",
+        "runManifestRefs",
+        "selector",
+        "learningEnabled",
+        "budgetRef",
+        "interventionRefs",
+        "independentReviewRef",
+        "priorPhaseDecisionRef",
+        "rewardDefinitionRef",
+        "reservedSeedAuditRef"
+      ],
+      "sourceRefs": [],
+      "reason": "Ejemplo estructural: evidencia no recogida"
+    }
+  ],
+  "streams": [],
+  "evidenceIndex": [
+    {
+      "evidenceId": "params",
+      "relativePath": "params.json",
+      "sha256": "c038ce62922dfcc1b602d25b00e929a6e0e9f01c14510feffbfa806dacd2a1f2",
+      "kind": "parameter-set",
+      "synthetic": true,
+      "schema": "evidence.schema.json"
+    },
+    {
+      "evidenceId": "inputs",
+      "relativePath": "inputs.json",
+      "sha256": "98943ee085665843aca76b38140527ad3d0f9c241a873eb978453338ed1b1974",
+      "kind": "physical-inputs",
+      "synthetic": true,
+      "schema": "evidence.schema.json"
+    },
+    {
+      "evidenceId": "governor",
+      "relativePath": "governor.json",
+      "sha256": "95941afe7acab29ba468ecda6d9f2d3b937081fcfae31450b755df39fddb0251",
+      "kind": "governor-trace",
+      "synthetic": true,
+      "schema": "evidence.schema.json"
+    },
+    {
+      "evidenceId": "host",
+      "relativePath": "host.json",
+      "sha256": "450d832226ca44c04d6d06ee398633f27f9c176f1b2a50525c3cd8e52a498344",
+      "kind": "host-scene",
+      "synthetic": true,
+      "schema": "evidence.schema.json"
+    },
+    {
+      "evidenceId": "registration",
+      "relativePath": "registration.json",
+      "sha256": "ceb0b8761891793e05694877d78b874eb8cc7266ed53ba2f93f3cb4fe463fe91",
+      "kind": "preregistration",
+      "synthetic": true,
+      "schema": "evidence.schema.json"
+    },
+    {
+      "evidenceId": "bundle-treatment",
+      "relativePath": "bundle-treatment.v3.json",
+      "sha256": "dd02c0206f261199d6a48291968cfb02d5e038bbd2bbd5fb05e234d543ba9b3b",
+      "kind": "observation",
+      "synthetic": true,
+      "schema": "evidence.schema.json"
+    },
+    {
+      "evidenceId": "bundle-control",
+      "relativePath": "bundle-control.v3.json",
+      "sha256": "34c25f783af0818092b29a52693d7d7cb5a54a3bad6bb66dce2bac12a5917f98",
+      "kind": "observation",
+      "synthetic": true,
+      "schema": "observation.schema.json"
+    },
+    {
+      "evidenceId": "manifest-treatment",
+      "relativePath": "run-manifest-treatment.v3.json",
+      "sha256": "ee3ac192fad2d5db117aaa22c71af2656f4b95abad5e6c31881bcf804c8cc7fa",
+      "kind": "run-manifest",
+      "synthetic": true,
+      "schema": "evidence.schema.json"
+    },
+    {
+      "evidenceId": "manifest-control",
+      "relativePath": "run-manifest-control.v3.json",
+      "sha256": "c073ac49f88ce4c9b5baeb5695ab5ed58af75b51605e2b063f697880ef633d49",
+      "kind": "run-manifest",
+      "synthetic": true,
+      "schema": "evidence.schema.json"
+    },
+    {
+      "evidenceId": "initial-state",
+      "relativePath": "initial-state.v3.json",
+      "sha256": "2c18d4e74f2261f6d274234db5d27208dcbbdd65f9e786ec01129552e5caec93",
+      "kind": "component-manifest",
+      "synthetic": true,
+      "schema": "evidence.schema.json"
+    },
+    {
+      "evidenceId": "C11-pair",
+      "relativePath": "causal-pair-c11.json",
+      "sha256": "3f91d833adcb273710b7502d49898b08908908fd9537abe54bbca059a77ec1d5",
+      "kind": "causal-pair",
+      "synthetic": true,
+      "schema": "evidence.schema.json"
+    },
+    {
+      "evidenceId": "C17-pair",
+      "relativePath": "causal-pair-c17.json",
+      "sha256": "75b3532d9ccd823bd666e46bff2db7f012139ad2c6dd4d4a217bbf2f81284c27",
+      "kind": "causal-pair",
+      "synthetic": true,
+      "schema": "evidence.schema.json"
+    },
+    {
+      "evidenceId": "manual-partial-observation",
+      "relativePath": "partial-observation.json",
+      "sha256": "1a24b60d186d486dac66e8284fea14f7413548dc21968732672129479c7f8865",
+      "kind": "observation",
+      "synthetic": true,
+      "schema": "observation.schema.json"
+    },
+    {
+      "evidenceId": "evaluation-partial",
+      "relativePath": "evaluation-partial.json",
+      "sha256": "ef6f8e3f33a990e96a5eee18e83212590938c284e0d79f1302ded5e5b2def564",
+      "kind": "evaluation",
+      "synthetic": true,
+      "schema": "evaluation.schema.json"
+    }
+  ],
+  "records": [],
+  "evidenceId": "negative-bundle-schema.v3",
+  "synthetic": true
+}

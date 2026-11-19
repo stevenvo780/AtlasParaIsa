@@ -1,0 +1,41 @@
+{
+  "contractVersion": "realismo-v3",
+  "evidenceId": "memory-inventory",
+  "kind": "real-memory-inventory",
+  "synthetic": true,
+  "sourceRefs": [],
+  "payload": {
+    "contentHash": "b6abdcdf03444d6a35fc2c5c6634532baecd5e4cf077b1bedfe02a2545f27916",
+    "inventoryScope": "all-real-memories-incorporated",
+    "complete": true,
+    "entries": [
+      {
+        "memoryId": "synthetic-memory-1",
+        "memoryHash": "ed88416b7d069d4e1eb64eb0cf870ed6c04bfc64c57cca0b29d3b17939b7e769",
+        "incorporatedContentHash": "b6abdcdf03444d6a35fc2c5c6634532baecd5e4cf077b1bedfe02a2545f27916",
+        "incorporated": true,
+        "incorporationRef": "memory-manifest",
+        "authorization": "accepted",
+        "authorizationReceiptRef": "memory-authorization"
+      }
+    ]
+  },
+  "fieldCoverage": {
+    "contentHash": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "inventoryScope": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "complete": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "entries": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    }
+  }
+}

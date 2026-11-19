@@ -1,0 +1,78 @@
+{
+  "contractVersion": "realismo-v3",
+  "evidenceId": "gates-accepted",
+  "kind": "reproduction-gates",
+  "synthetic": true,
+  "sourceRefs": [],
+  "payload": {
+    "attemptId": "attempt-accepted",
+    "opportunityId": "opp-a",
+    "sourceOrderRef": "order",
+    "priority": [
+      "local",
+      "global-quota",
+      "governor",
+      "anticorruption",
+      "other-software"
+    ],
+    "gates": [
+      {
+        "gateId": "local",
+        "ordinal": 0,
+        "result": "pass",
+        "inputRefs": [],
+        "reason": "manual source fixture, evaluated pass"
+      },
+      {
+        "gateId": "global-quota",
+        "ordinal": 1,
+        "result": "pass",
+        "inputRefs": [],
+        "reason": "manual source fixture, evaluated pass"
+      },
+      {
+        "gateId": "governor",
+        "ordinal": 2,
+        "result": "pass",
+        "inputRefs": [],
+        "reason": "manual source fixture, evaluated pass"
+      },
+      {
+        "gateId": "anticorruption",
+        "ordinal": 3,
+        "result": "pass",
+        "inputRefs": [],
+        "reason": "manual source fixture, evaluated pass"
+      },
+      {
+        "gateId": "other-software",
+        "ordinal": 4,
+        "result": "pass",
+        "inputRefs": [],
+        "reason": "manual source fixture, evaluated pass"
+      }
+    ]
+  },
+  "fieldCoverage": {
+    "attemptId": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "opportunityId": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "sourceOrderRef": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "priority": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "gates": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    }
+  }
+}

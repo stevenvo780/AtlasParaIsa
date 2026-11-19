@@ -1,0 +1,1710 @@
+{
+  "contractVersion": "realismo-v3",
+  "kind": "observation",
+  "runId": "manual-partial-wire",
+  "sourceSHA": "bb483260b2489fe62b113d620e5f56e5f3676dbc",
+  "seed": 0,
+  "epochId": "e0",
+  "artifactRole": "synthetic",
+  "paramsHash": "d956a755ba428301d4b7a1b0e35b0b428d16c836fa3d37032f6c22f702fbc81c",
+  "paramsRef": "params",
+  "initialStateHash": "43c1f13fbb0fa05b23c6ebd108cc3bc36e566ca532eb0d6c5768d817a529ba23",
+  "inputTraceRef": "inputs",
+  "governorTraceRef": "governor",
+  "observerSHA": "not-implemented",
+  "canonicalDigestVersion": "unavailable",
+  "thresholdProfileHash": "d99e24ee85f379164c1dd0d351a0cdb204d8bf1dda0e446abd70cfe582e4b7cb",
+  "preregistrationRef": "registration",
+  "hardwareRef": "host",
+  "backend": "synthetic",
+  "plannedWindow": {
+    "startTick": 0,
+    "endTick": 1,
+    "ticksPerDay": 2400,
+    "closure": "(start,end]",
+    "clock": "global",
+    "epochId": "e0"
+  },
+  "actualWindow": {
+    "startTick": 0,
+    "endTick": 1,
+    "ticksPerDay": 2400,
+    "closure": "(start,end]",
+    "clock": "global",
+    "epochId": "e0"
+  },
+  "runStatus": "partial",
+  "pairedRunId": null,
+  "interventionRefs": [],
+  "capabilities": [
+    {
+      "family": "boundary",
+      "status": "unavailable",
+      "availableFields": [],
+      "missingFields": [
+        "boundaryId",
+        "stockIds",
+        "materials",
+        "unitMapVersion",
+        "conversionMatrixRef",
+        "includesProtected",
+        "scope",
+        "excludedCompartments"
+      ],
+      "sourceRefs": [],
+      "reason": "Ejemplo estructural: evidencia no recogida"
+    },
+    {
+      "family": "stock",
+      "status": "unavailable",
+      "availableFields": [],
+      "missingFields": [
+        "boundaryId",
+        "stockId",
+        "ownerId",
+        "regionId",
+        "clockTick",
+        "scale",
+        "material",
+        "quantity",
+        "phase"
+      ],
+      "sourceRefs": [],
+      "reason": "Ejemplo estructural: evidencia no recogida"
+    },
+    {
+      "family": "flow",
+      "status": "partial",
+      "availableFields": [
+        "boundaryId",
+        "consumptionRef",
+        "conversionRef",
+        "counterpartRecordId",
+        "flowType",
+        "fromStockId",
+        "quantity",
+        "toStockId",
+        "transferId"
+      ],
+      "missingFields": [],
+      "sourceRefs": [],
+      "reason": "manual partial data retained by field; no complete coverage claim"
+    },
+    {
+      "family": "exposure",
+      "status": "unavailable",
+      "availableFields": [],
+      "missingFields": [
+        "subjectId",
+        "regionId",
+        "startTick",
+        "endTick",
+        "activeTicks",
+        "localStartTick",
+        "localEndTick",
+        "mode",
+        "lawInputsRef"
+      ],
+      "sourceRefs": [],
+      "reason": "Ejemplo estructural: evidencia no recogida"
+    },
+    {
+      "family": "person",
+      "status": "unavailable",
+      "availableFields": [],
+      "missingFields": [
+        "actorId",
+        "role",
+        "birthTick",
+        "deathTick",
+        "founder",
+        "species",
+        "parentIds",
+        "knownTechniqueIds",
+        "positionRef",
+        "ageOrigin",
+        "ageAtOpeningTicks"
+      ],
+      "sourceRefs": [],
+      "reason": "Ejemplo estructural: evidencia no recogida"
+    },
+    {
+      "family": "death",
+      "status": "unavailable",
+      "availableFields": [],
+      "missingFields": [
+        "actorId",
+        "birthTick",
+        "deathTick",
+        "ageTicks",
+        "locationRef",
+        "cause",
+        "previousEventIds",
+        "historyStartTick",
+        "lifetimeEventCount",
+        "historyComplete",
+        "durableReceiptRef",
+        "ageOrigin",
+        "ageAtOpeningTicks"
+      ],
+      "sourceRefs": [],
+      "reason": "Ejemplo estructural: evidencia no recogida"
+    },
+    {
+      "family": "structure",
+      "status": "partial",
+      "availableFields": [
+        "condition",
+        "structureId"
+      ],
+      "missingFields": [
+        "creationTick",
+        "blueprintId",
+        "positionRef",
+        "durability",
+        "constructionFlows",
+        "constructionWork",
+        "lawVersion",
+        "rainInputRef"
+      ],
+      "sourceRefs": [],
+      "reason": "manual partial data retained by field; no complete coverage claim"
+    },
+    {
+      "family": "repair",
+      "status": "unavailable",
+      "availableFields": [],
+      "missingFields": [
+        "structureId",
+        "actorId",
+        "conditionBefore",
+        "conditionAfter",
+        "paidWork",
+        "inputFlows",
+        "serviceBeforeRefs",
+        "serviceAfterRefs",
+        "lawVersion"
+      ],
+      "sourceRefs": [],
+      "reason": "Ejemplo estructural: evidencia no recogida"
+    },
+    {
+      "family": "service",
+      "status": "partial",
+      "availableFields": [
+        "actorId",
+        "appliedBenefit",
+        "causeRef",
+        "conditionAtService",
+        "conditionSourceRef",
+        "consumptionRefs",
+        "domain",
+        "eventType",
+        "functionId",
+        "inputRefs",
+        "recipientId",
+        "subjectId",
+        "work"
+      ],
+      "missingFields": [
+        "baselineBenefit"
+      ],
+      "sourceRefs": [],
+      "reason": "manual partial data retained by field; no complete coverage claim"
+    },
+    {
+      "family": "product",
+      "status": "unavailable",
+      "availableFields": [],
+      "missingFields": [
+        "productId",
+        "techniqueId",
+        "programSignature",
+        "signatureVersion",
+        "capabilities",
+        "functionIds",
+        "authorId",
+        "ancestorIds",
+        "techGeneration",
+        "manufactureRefs",
+        "resident",
+        "residentBudget"
+      ],
+      "sourceRefs": [],
+      "reason": "Ejemplo estructural: evidencia no recogida"
+    },
+    {
+      "family": "replacement",
+      "status": "unavailable",
+      "availableFields": [],
+      "missingFields": [
+        "oldProductId",
+        "newProductId",
+        "functionId",
+        "wearRefs",
+        "wasteFlowRefs",
+        "oldServiceRefs",
+        "newServiceRefs",
+        "manufactureRefs",
+        "supplierId",
+        "initialStockRefs"
+      ],
+      "sourceRefs": [],
+      "reason": "Ejemplo estructural: evidencia no recogida"
+    },
+    {
+      "family": "knowledge",
+      "status": "unavailable",
+      "availableFields": [],
+      "missingFields": [
+        "actorId",
+        "techniqueId",
+        "transition",
+        "teacherId",
+        "localityRef",
+        "paymentRefs",
+        "previousTechniqueId",
+        "originalAuthorId",
+        "humanCohortId"
+      ],
+      "sourceRefs": [],
+      "reason": "Ejemplo estructural: evidencia no recogida"
+    },
+    {
+      "family": "migration",
+      "status": "unavailable",
+      "availableFields": [],
+      "missingFields": [
+        "actorId",
+        "exposureCohortId",
+        "originHomeId",
+        "destinationHomeId",
+        "originSourceId",
+        "destinationViabilityRef",
+        "trajectoryRefs",
+        "paidWork",
+        "destinationStartTick",
+        "destinationEndTick",
+        "destinationConsumptionRefs",
+        "visitRefs"
+      ],
+      "sourceRefs": [],
+      "reason": "Ejemplo estructural: evidencia no recogida"
+    },
+    {
+      "family": "role",
+      "status": "unavailable",
+      "availableFields": [],
+      "missingFields": [
+        "actorId",
+        "roleClassificationId",
+        "functionId",
+        "recipientIds",
+        "serviceRefs",
+        "workTicks",
+        "opportunities",
+        "institutionId",
+        "institutionTransition",
+        "localRuleRef"
+      ],
+      "sourceRefs": [],
+      "reason": "Ejemplo estructural: evidencia no recogida"
+    },
+    {
+      "family": "conflict",
+      "status": "unavailable",
+      "availableFields": [],
+      "missingFields": [
+        "episodeId",
+        "actorIds",
+        "sourceId",
+        "groupRelation",
+        "needInputsRef",
+        "triggerLawRef",
+        "trajectoryRefs",
+        "costRefs",
+        "agreement",
+        "memoryEnabled",
+        "accessWinnerId",
+        "consumptionRefs",
+        "recurrenceRefs",
+        "followupStartTick",
+        "followupEndTick",
+        "eligibleOpportunityRefs"
+      ],
+      "sourceRefs": [],
+      "reason": "Ejemplo estructural: evidencia no recogida"
+    },
+    {
+      "family": "ecology",
+      "status": "unavailable",
+      "availableFields": [],
+      "missingFields": [
+        "regionId",
+        "species",
+        "biome",
+        "globalTick",
+        "localTick",
+        "scale",
+        "policyVersion",
+        "population",
+        "birthIds",
+        "deathIds",
+        "immigrantIds",
+        "emigrantIds",
+        "predationRefs",
+        "huntRefs",
+        "flowRefs",
+        "conditionInputsRef",
+        "humanIds"
+      ],
+      "sourceRefs": [],
+      "reason": "Ejemplo estructural: evidencia no recogida"
+    },
+    {
+      "family": "rejection",
+      "status": "partial",
+      "availableFields": [
+        "actorIds",
+        "allGateResultsRef",
+        "attemptId",
+        "coverageRef",
+        "decisiveGate",
+        "opportunityId",
+        "outcome"
+      ],
+      "missingFields": [
+        "fertilityInputsRef",
+        "accessibleResourcesRef",
+        "governorInputRef",
+        "governorDecisionRef"
+      ],
+      "sourceRefs": [],
+      "reason": "manual partial data retained by field; no complete coverage claim"
+    },
+    {
+      "family": "digest",
+      "status": "unavailable",
+      "availableFields": [],
+      "missingFields": [
+        "physicalTick",
+        "algorithm",
+        "canonicalVersion",
+        "scope",
+        "digest",
+        "inputTraceHash",
+        "governorTraceHash",
+        "population",
+        "backend",
+        "cameraCount",
+        "excludedFields",
+        "componentHashesRef"
+      ],
+      "sourceRefs": [],
+      "reason": "Ejemplo estructural: evidencia no recogida"
+    },
+    {
+      "family": "cost",
+      "status": "partial",
+      "availableFields": [
+        "completeMs",
+        "measurementScope",
+        "sampleId",
+        "saveMs",
+        "sceneId",
+        "stepMs"
+      ],
+      "missingFields": [
+        "completedSteps",
+        "startSeconds",
+        "endSeconds",
+        "warmupSeconds",
+        "hostLoadRef",
+        "physicalInputsHash",
+        "governorInputsHash",
+        "backend",
+        "threads",
+        "cameraCount",
+        "population",
+        "projectionMs",
+        "transferToMs",
+        "transferFromMs",
+        "queueMs",
+        "cpuSeconds",
+        "rssBytes",
+        "diskBytes",
+        "egressBytes",
+        "stateBytes",
+        "fps"
+      ],
+      "sourceRefs": [],
+      "reason": "manual partial data retained by field; no complete coverage claim"
+    },
+    {
+      "family": "fault",
+      "status": "unavailable",
+      "availableFields": [],
+      "missingFields": [
+        "caseId",
+        "phase",
+        "faultPoint",
+        "lastDurableCommitId",
+        "acknowledgedOrderIds",
+        "recoveredCommitId",
+        "expectedComponentManifestRef",
+        "actualComponentManifestRef",
+        "clientTickRefs",
+        "archiveVersionManifestRef",
+        "realDurationSeconds",
+        "clientCount"
+      ],
+      "sourceRefs": [],
+      "reason": "Ejemplo estructural: evidencia no recogida"
+    },
+    {
+      "family": "review",
+      "status": "partial",
+      "availableFields": [
+        "authority",
+        "contentHash",
+        "decision",
+        "kind",
+        "receiptRef",
+        "reviewId"
+      ],
+      "missingFields": [
+        "deviceId",
+        "physicalDevice",
+        "taskId",
+        "criticalBlockers",
+        "durationSeconds",
+        "evidenceRefs"
+      ],
+      "sourceRefs": [],
+      "reason": "manual partial data retained by field; no complete coverage claim"
+    },
+    {
+      "family": "method",
+      "status": "unavailable",
+      "availableFields": [],
+      "missingFields": [
+        "trialId",
+        "preregistrationRef",
+        "preregistrationHash",
+        "registeredBeforeData",
+        "seedRegistryRef",
+        "runManifestRefs",
+        "selector",
+        "learningEnabled",
+        "budgetRef",
+        "interventionRefs",
+        "independentReviewRef",
+        "priorPhaseDecisionRef",
+        "rewardDefinitionRef",
+        "reservedSeedAuditRef"
+      ],
+      "sourceRefs": [],
+      "reason": "Ejemplo estructural: evidencia no recogida"
+    }
+  ],
+  "streams": [
+    {
+      "streamId": "structure-stream",
+      "family": "structure",
+      "epochId": "e0",
+      "window": {
+        "startTick": 0,
+        "endTick": 1,
+        "ticksPerDay": 2400,
+        "closure": "(start,end]",
+        "clock": "global",
+        "epochId": "e0"
+      },
+      "quality": "PARTIAL",
+      "requiredFields": [
+        "structureId",
+        "creationTick",
+        "blueprintId",
+        "positionRef",
+        "condition",
+        "durability",
+        "constructionFlows",
+        "constructionWork",
+        "lawVersion",
+        "rainInputRef"
+      ],
+      "coveredFields": [
+        "condition",
+        "structureId"
+      ],
+      "firstSeq": 0,
+      "lastSeq": 0,
+      "expectedRecords": null,
+      "observedRecords": 1,
+      "eligibleOpportunities": null,
+      "censoredSubjects": [],
+      "gaps": [],
+      "evidenceRefs": []
+    },
+    {
+      "streamId": "flow-stream",
+      "family": "flow",
+      "epochId": "e0",
+      "window": {
+        "startTick": 0,
+        "endTick": 1,
+        "ticksPerDay": 2400,
+        "closure": "(start,end]",
+        "clock": "global",
+        "epochId": "e0"
+      },
+      "quality": "PARTIAL",
+      "requiredFields": [
+        "boundaryId",
+        "transferId",
+        "fromStockId",
+        "toStockId",
+        "flowType",
+        "quantity",
+        "counterpartRecordId",
+        "conversionRef",
+        "consumptionRef"
+      ],
+      "coveredFields": [
+        "boundaryId",
+        "consumptionRef",
+        "conversionRef",
+        "counterpartRecordId",
+        "flowType",
+        "fromStockId",
+        "quantity",
+        "toStockId",
+        "transferId"
+      ],
+      "firstSeq": 0,
+      "lastSeq": 0,
+      "expectedRecords": null,
+      "observedRecords": 1,
+      "eligibleOpportunities": null,
+      "censoredSubjects": [],
+      "gaps": [],
+      "evidenceRefs": []
+    },
+    {
+      "streamId": "service-stream",
+      "family": "service",
+      "epochId": "e0",
+      "window": {
+        "startTick": 0,
+        "endTick": 1,
+        "ticksPerDay": 2400,
+        "closure": "(start,end]",
+        "clock": "global",
+        "epochId": "e0"
+      },
+      "quality": "PARTIAL",
+      "requiredFields": [
+        "subjectId",
+        "actorId",
+        "recipientId",
+        "functionId",
+        "domain",
+        "appliedBenefit",
+        "baselineBenefit",
+        "consumptionRefs",
+        "inputRefs",
+        "work",
+        "eventType",
+        "causeRef",
+        "conditionAtService",
+        "conditionSourceRef"
+      ],
+      "coveredFields": [
+        "actorId",
+        "appliedBenefit",
+        "causeRef",
+        "conditionAtService",
+        "conditionSourceRef",
+        "consumptionRefs",
+        "domain",
+        "eventType",
+        "functionId",
+        "inputRefs",
+        "recipientId",
+        "subjectId",
+        "work"
+      ],
+      "firstSeq": 0,
+      "lastSeq": 0,
+      "expectedRecords": null,
+      "observedRecords": 1,
+      "eligibleOpportunities": null,
+      "censoredSubjects": [],
+      "gaps": [],
+      "evidenceRefs": []
+    },
+    {
+      "streamId": "cost-stream",
+      "family": "cost",
+      "epochId": "e0",
+      "window": {
+        "startTick": 0,
+        "endTick": 1,
+        "ticksPerDay": 2400,
+        "closure": "(start,end]",
+        "clock": "global",
+        "epochId": "e0"
+      },
+      "quality": "PARTIAL",
+      "requiredFields": [
+        "sampleId",
+        "sceneId",
+        "completedSteps",
+        "startSeconds",
+        "endSeconds",
+        "warmupSeconds",
+        "hostLoadRef",
+        "physicalInputsHash",
+        "governorInputsHash",
+        "backend",
+        "threads",
+        "cameraCount",
+        "population",
+        "stepMs",
+        "saveMs",
+        "projectionMs",
+        "transferToMs",
+        "transferFromMs",
+        "completeMs",
+        "queueMs",
+        "cpuSeconds",
+        "rssBytes",
+        "diskBytes",
+        "egressBytes",
+        "stateBytes",
+        "fps",
+        "measurementScope"
+      ],
+      "coveredFields": [
+        "completeMs",
+        "measurementScope",
+        "sampleId",
+        "saveMs",
+        "sceneId",
+        "stepMs"
+      ],
+      "firstSeq": 0,
+      "lastSeq": 1,
+      "expectedRecords": null,
+      "observedRecords": 2,
+      "eligibleOpportunities": null,
+      "censoredSubjects": [],
+      "gaps": [],
+      "evidenceRefs": []
+    },
+    {
+      "streamId": "rejection-stream",
+      "family": "rejection",
+      "epochId": "e0",
+      "window": {
+        "startTick": 0,
+        "endTick": 1,
+        "ticksPerDay": 2400,
+        "closure": "(start,end]",
+        "clock": "global",
+        "epochId": "e0"
+      },
+      "quality": "PARTIAL",
+      "requiredFields": [
+        "attemptId",
+        "actorIds",
+        "allGateResultsRef",
+        "decisiveGate",
+        "fertilityInputsRef",
+        "accessibleResourcesRef",
+        "governorInputRef",
+        "governorDecisionRef",
+        "outcome",
+        "opportunityId",
+        "coverageRef"
+      ],
+      "coveredFields": [
+        "actorIds",
+        "allGateResultsRef",
+        "attemptId",
+        "coverageRef",
+        "decisiveGate",
+        "opportunityId",
+        "outcome"
+      ],
+      "firstSeq": 0,
+      "lastSeq": 1,
+      "expectedRecords": null,
+      "observedRecords": 2,
+      "eligibleOpportunities": null,
+      "censoredSubjects": [],
+      "gaps": [],
+      "evidenceRefs": []
+    },
+    {
+      "streamId": "review-stream",
+      "family": "review",
+      "epochId": "e0",
+      "window": {
+        "startTick": 0,
+        "endTick": 1,
+        "ticksPerDay": 2400,
+        "closure": "(start,end]",
+        "clock": "global",
+        "epochId": "e0"
+      },
+      "quality": "PARTIAL",
+      "requiredFields": [
+        "reviewId",
+        "kind",
+        "authority",
+        "contentHash",
+        "decision",
+        "receiptRef",
+        "deviceId",
+        "physicalDevice",
+        "taskId",
+        "criticalBlockers",
+        "durationSeconds",
+        "evidenceRefs"
+      ],
+      "coveredFields": [
+        "authority",
+        "contentHash",
+        "decision",
+        "kind",
+        "receiptRef",
+        "reviewId"
+      ],
+      "firstSeq": 0,
+      "lastSeq": 0,
+      "expectedRecords": null,
+      "observedRecords": 1,
+      "eligibleOpportunities": null,
+      "censoredSubjects": [],
+      "gaps": [],
+      "evidenceRefs": []
+    }
+  ],
+  "evidenceIndex": [
+    {
+      "evidenceId": "params",
+      "relativePath": "params.json",
+      "sha256": "c038ce62922dfcc1b602d25b00e929a6e0e9f01c14510feffbfa806dacd2a1f2",
+      "kind": "parameter-set",
+      "synthetic": true,
+      "schema": "evidence.schema.json"
+    },
+    {
+      "evidenceId": "inputs",
+      "relativePath": "inputs.json",
+      "sha256": "98943ee085665843aca76b38140527ad3d0f9c241a873eb978453338ed1b1974",
+      "kind": "physical-inputs",
+      "synthetic": true,
+      "schema": "evidence.schema.json"
+    },
+    {
+      "evidenceId": "governor",
+      "relativePath": "governor.json",
+      "sha256": "95941afe7acab29ba468ecda6d9f2d3b937081fcfae31450b755df39fddb0251",
+      "kind": "governor-trace",
+      "synthetic": true,
+      "schema": "evidence.schema.json"
+    },
+    {
+      "evidenceId": "registration",
+      "relativePath": "registration.json",
+      "sha256": "ceb0b8761891793e05694877d78b874eb8cc7266ed53ba2f93f3cb4fe463fe91",
+      "kind": "preregistration",
+      "synthetic": true,
+      "schema": "evidence.schema.json"
+    },
+    {
+      "evidenceId": "host",
+      "relativePath": "host.json",
+      "sha256": "450d832226ca44c04d6d06ee398633f27f9c176f1b2a50525c3cd8e52a498344",
+      "kind": "host-scene",
+      "synthetic": true,
+      "schema": "evidence.schema.json"
+    },
+    {
+      "evidenceId": "effect",
+      "relativePath": "effect.json",
+      "sha256": "ea037bdb4a2e69e9023d218f7b5987dbc64251e6bca6d78986999dd7961ebbbc",
+      "kind": "applied-effect",
+      "synthetic": true,
+      "schema": "evidence.schema.json"
+    },
+    {
+      "evidenceId": "law",
+      "relativePath": "law.json",
+      "sha256": "cc8078678aea133cf1508e1935fd93e7a2e5fa5be4eb07edad653dfcab1ed0c5",
+      "kind": "law",
+      "synthetic": true,
+      "schema": "evidence.schema.json"
+    },
+    {
+      "evidenceId": "order",
+      "relativePath": "order.json",
+      "sha256": "390909e5fd23826cb268712e37c8212faca0ff2bfc4b7fdfff9871b2b7c62019",
+      "kind": "source-order",
+      "synthetic": true,
+      "schema": "evidence.schema.json"
+    },
+    {
+      "evidenceId": "gates-accepted",
+      "relativePath": "gates-accepted.json",
+      "sha256": "3514f9881f51f8682bbaaf6bf3cecb7d67eff43db6c3c741ca459a9ec022061d",
+      "kind": "reproduction-gates",
+      "synthetic": true,
+      "schema": "evidence.schema.json"
+    },
+    {
+      "evidenceId": "gates-rejected",
+      "relativePath": "gates-rejected.json",
+      "sha256": "34fbf90cfddf4bac816aef2b8bb588e0336c50754ba7eee0c31192c7116b783d",
+      "kind": "reproduction-gates",
+      "synthetic": true,
+      "schema": "evidence.schema.json"
+    },
+    {
+      "evidenceId": "repro-coverage",
+      "relativePath": "reproduction-coverage.json",
+      "sha256": "a4285ae92cd335aae4dd2809e58239f4d6e1f211b0c2c858222cce07586862b2",
+      "kind": "reproduction-coverage",
+      "synthetic": true,
+      "schema": "evidence.schema.json"
+    },
+    {
+      "evidenceId": "memory-inventory",
+      "relativePath": "memory-inventory.json",
+      "sha256": "ea36cc0072ec01bafdd6d3ee2b52de433ca361050947fb70b70d6fbe292ebdcc",
+      "kind": "real-memory-inventory",
+      "synthetic": true,
+      "schema": "evidence.schema.json"
+    },
+    {
+      "evidenceId": "memory-authorization",
+      "relativePath": "memory-authorization.json",
+      "sha256": "b9b434bd4c58f6089dfea7a0f542ef65d38cbfd251da25fd78a61d03c7c78d96",
+      "kind": "memory-authorization",
+      "synthetic": true,
+      "schema": "evidence.schema.json"
+    },
+    {
+      "evidenceId": "memory-manifest",
+      "relativePath": "memory-manifest.json",
+      "sha256": "44f0833137406de1d4b9f27244c88d885f56b5bd073001ca547a599c34eed1c4",
+      "kind": "component-manifest",
+      "synthetic": true,
+      "schema": "evidence.schema.json"
+    },
+    {
+      "evidenceId": "memory-provenance",
+      "relativePath": "memory-provenance.json",
+      "sha256": "4257bae2cf83174613951bb9ad007806a40da62ff1d7be2175b80f16bbf4c278",
+      "kind": "source-metadata",
+      "synthetic": true,
+      "schema": "evidence.schema.json"
+    },
+    {
+      "evidenceId": "synthetic-review",
+      "relativePath": "synthetic-review.json",
+      "sha256": "c8c0fe3e57315e32121852c5429da8fa94c164a67b6dd11023f8bb485dc99315",
+      "kind": "synthetic-review-oracle",
+      "synthetic": true,
+      "schema": "evidence.schema.json"
+    }
+  ],
+  "records": [
+    {
+      "recordId": "condition-1",
+      "streamId": "structure-stream",
+      "epochId": "e0",
+      "seq": 0,
+      "tick": 1,
+      "family": "structure",
+      "actorIds": [
+        "mortal-a"
+      ],
+      "protectedOriginIds": [],
+      "protectionStatus": "unknown",
+      "provenanceRefs": [],
+      "payload": {
+        "structureId": "structure-1",
+        "condition": 0.1
+      },
+      "fieldCoverage": {
+        "structureId": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "creationTick": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "blueprintId": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "positionRef": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "condition": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "durability": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "constructionFlows": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "constructionWork": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "lawVersion": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "rainInputRef": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        }
+      },
+      "causalContext": {
+        "status": "ordered",
+        "sourceEventId": "event-condition",
+        "phaseId": "wear",
+        "phaseOrdinal": 0,
+        "eventOrdinal": 0,
+        "sourceOrderRef": "order",
+        "predecessorRecordIds": [],
+        "reason": "manual shared source event order"
+      }
+    },
+    {
+      "recordId": "flow-1",
+      "streamId": "flow-stream",
+      "epochId": "e0",
+      "seq": 0,
+      "tick": 1,
+      "family": "flow",
+      "actorIds": [
+        "mortal-a"
+      ],
+      "protectedOriginIds": [],
+      "protectionStatus": "unknown",
+      "provenanceRefs": [],
+      "payload": {
+        "boundaryId": "manual-boundary",
+        "transferId": "transfer-1",
+        "fromStockId": "wood-source",
+        "toStockId": null,
+        "flowType": "consumption",
+        "quantity": {
+          "value": 1.5,
+          "unit": "quanta",
+          "material": "wood",
+          "conversionVersion": "manual-quanta"
+        },
+        "counterpartRecordId": null,
+        "conversionRef": null,
+        "consumptionRef": null
+      },
+      "fieldCoverage": {
+        "boundaryId": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "transferId": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "fromStockId": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "toStockId": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "flowType": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "quantity": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "counterpartRecordId": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "conversionRef": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "consumptionRef": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        }
+      },
+      "causalContext": {
+        "status": "ordered",
+        "sourceEventId": "event-1",
+        "phaseId": "service",
+        "phaseOrdinal": 1,
+        "eventOrdinal": 0,
+        "sourceOrderRef": "order",
+        "predecessorRecordIds": [
+          "condition-1"
+        ],
+        "reason": "manual shared source event order"
+      }
+    },
+    {
+      "recordId": "service-1",
+      "streamId": "service-stream",
+      "epochId": "e0",
+      "seq": 0,
+      "tick": 1,
+      "family": "service",
+      "actorIds": [
+        "mortal-a"
+      ],
+      "protectedOriginIds": [],
+      "protectionStatus": "unknown",
+      "provenanceRefs": [],
+      "payload": {
+        "subjectId": "structure-1",
+        "actorId": "mortal-a",
+        "recipientId": "mortal-b",
+        "functionId": "shelter",
+        "domain": "shelter",
+        "appliedBenefit": {
+          "value": 0.1,
+          "unit": "normalized",
+          "material": "recovery",
+          "conversionVersion": "manual-model"
+        },
+        "consumptionRefs": [
+          "flow-1"
+        ],
+        "inputRefs": [],
+        "work": 1,
+        "eventType": "shelter-recovery",
+        "causeRef": "effect",
+        "conditionAtService": 0.1,
+        "conditionSourceRef": "condition-1"
+      },
+      "fieldCoverage": {
+        "subjectId": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "actorId": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "recipientId": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "functionId": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "domain": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "appliedBenefit": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "baselineBenefit": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "consumptionRefs": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "inputRefs": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "work": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "eventType": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "causeRef": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "conditionAtService": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "conditionSourceRef": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        }
+      },
+      "causalContext": {
+        "status": "ordered",
+        "sourceEventId": "event-1",
+        "phaseId": "service",
+        "phaseOrdinal": 1,
+        "eventOrdinal": 0,
+        "sourceOrderRef": "order",
+        "predecessorRecordIds": [
+          "condition-1"
+        ],
+        "reason": "manual shared source event order"
+      }
+    },
+    {
+      "recordId": "server-cost",
+      "streamId": "cost-stream",
+      "epochId": "e0",
+      "seq": 0,
+      "tick": 1,
+      "family": "cost",
+      "actorIds": [
+        "mortal-a"
+      ],
+      "protectedOriginIds": [],
+      "protectionStatus": "unknown",
+      "provenanceRefs": [],
+      "payload": {
+        "sampleId": "server-cost",
+        "sceneId": "manual-scene",
+        "measurementScope": "server",
+        "stepMs": 3,
+        "saveMs": 1,
+        "completeMs": 4
+      },
+      "fieldCoverage": {
+        "sampleId": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "sceneId": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "completedSteps": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "startSeconds": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "endSeconds": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "warmupSeconds": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "hostLoadRef": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "physicalInputsHash": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "governorInputsHash": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "backend": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "threads": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "cameraCount": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "population": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "stepMs": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "saveMs": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "projectionMs": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "transferToMs": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "transferFromMs": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "completeMs": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "queueMs": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "cpuSeconds": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "rssBytes": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "diskBytes": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "egressBytes": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "stateBytes": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "fps": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "measurementScope": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        }
+      },
+      "causalContext": {
+        "status": "unknown",
+        "sourceEventId": null,
+        "phaseId": null,
+        "phaseOrdinal": null,
+        "eventOrdinal": null,
+        "sourceOrderRef": null,
+        "predecessorRecordIds": [],
+        "reason": "source phase ordering unavailable; causal subgate UNKNOWN"
+      }
+    },
+    {
+      "recordId": "kernel-cost",
+      "streamId": "cost-stream",
+      "epochId": "e0",
+      "seq": 1,
+      "tick": 1,
+      "family": "cost",
+      "actorIds": [
+        "mortal-a"
+      ],
+      "protectedOriginIds": [],
+      "protectionStatus": "unknown",
+      "provenanceRefs": [],
+      "payload": {
+        "sampleId": "kernel-cost",
+        "sceneId": "manual-scene",
+        "measurementScope": "kernel",
+        "stepMs": 1
+      },
+      "fieldCoverage": {
+        "sampleId": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "sceneId": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "completedSteps": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "startSeconds": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "endSeconds": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "warmupSeconds": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "hostLoadRef": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "physicalInputsHash": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "governorInputsHash": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "backend": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "threads": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "cameraCount": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "population": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "stepMs": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "saveMs": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "projectionMs": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "transferToMs": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "transferFromMs": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "completeMs": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "queueMs": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "cpuSeconds": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "rssBytes": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "diskBytes": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "egressBytes": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "stateBytes": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "fps": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "measurementScope": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        }
+      },
+      "causalContext": {
+        "status": "unknown",
+        "sourceEventId": null,
+        "phaseId": null,
+        "phaseOrdinal": null,
+        "eventOrdinal": null,
+        "sourceOrderRef": null,
+        "predecessorRecordIds": [],
+        "reason": "source phase ordering unavailable; causal subgate UNKNOWN"
+      }
+    },
+    {
+      "recordId": "attempt-a",
+      "streamId": "rejection-stream",
+      "epochId": "e0",
+      "seq": 0,
+      "tick": 1,
+      "family": "rejection",
+      "actorIds": [
+        "mortal-a"
+      ],
+      "protectedOriginIds": [],
+      "protectionStatus": "unknown",
+      "provenanceRefs": [],
+      "payload": {
+        "attemptId": "attempt-accepted",
+        "actorIds": [
+          "mortal-a"
+        ],
+        "opportunityId": "opp-a",
+        "allGateResultsRef": "gates-accepted",
+        "outcome": "accepted",
+        "decisiveGate": null,
+        "coverageRef": "repro-coverage"
+      },
+      "fieldCoverage": {
+        "attemptId": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "actorIds": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "allGateResultsRef": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "decisiveGate": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "fertilityInputsRef": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "accessibleResourcesRef": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "governorInputRef": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "governorDecisionRef": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "outcome": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "opportunityId": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "coverageRef": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        }
+      },
+      "causalContext": {
+        "status": "unknown",
+        "sourceEventId": null,
+        "phaseId": null,
+        "phaseOrdinal": null,
+        "eventOrdinal": null,
+        "sourceOrderRef": null,
+        "predecessorRecordIds": [],
+        "reason": "source phase ordering unavailable; causal subgate UNKNOWN"
+      }
+    },
+    {
+      "recordId": "attempt-r",
+      "streamId": "rejection-stream",
+      "epochId": "e0",
+      "seq": 1,
+      "tick": 1,
+      "family": "rejection",
+      "actorIds": [
+        "mortal-a"
+      ],
+      "protectedOriginIds": [],
+      "protectionStatus": "unknown",
+      "provenanceRefs": [],
+      "payload": {
+        "attemptId": "attempt-rejected",
+        "actorIds": [
+          "mortal-b"
+        ],
+        "opportunityId": "opp-r",
+        "allGateResultsRef": "gates-rejected",
+        "outcome": "rejected",
+        "decisiveGate": "global-quota",
+        "coverageRef": "repro-coverage"
+      },
+      "fieldCoverage": {
+        "attemptId": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "actorIds": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "allGateResultsRef": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "decisiveGate": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "fertilityInputsRef": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "accessibleResourcesRef": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "governorInputRef": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "governorDecisionRef": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "outcome": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "opportunityId": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "coverageRef": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        }
+      },
+      "causalContext": {
+        "status": "unknown",
+        "sourceEventId": null,
+        "phaseId": null,
+        "phaseOrdinal": null,
+        "eventOrdinal": null,
+        "sourceOrderRef": null,
+        "predecessorRecordIds": [],
+        "reason": "source phase ordering unavailable; causal subgate UNKNOWN"
+      }
+    },
+    {
+      "recordId": "review-synthetic",
+      "streamId": "review-stream",
+      "epochId": "e0",
+      "seq": 0,
+      "tick": 1,
+      "family": "review",
+      "actorIds": [
+        "mortal-a"
+      ],
+      "protectedOriginIds": [],
+      "protectionStatus": "unknown",
+      "provenanceRefs": [],
+      "payload": {
+        "reviewId": "C23-pass-01",
+        "kind": "personal",
+        "authority": "synthetic-oracle",
+        "contentHash": "b6abdcdf03444d6a35fc2c5c6634532baecd5e4cf077b1bedfe02a2545f27916",
+        "decision": "accepted",
+        "receiptRef": "synthetic-review"
+      },
+      "fieldCoverage": {
+        "reviewId": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "kind": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "authority": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "contentHash": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "decision": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "receiptRef": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "deviceId": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "physicalDevice": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "taskId": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "criticalBlockers": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "durationSeconds": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "evidenceRefs": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        }
+      },
+      "causalContext": {
+        "status": "unknown",
+        "sourceEventId": null,
+        "phaseId": null,
+        "phaseOrdinal": null,
+        "eventOrdinal": null,
+        "sourceOrderRef": null,
+        "predecessorRecordIds": [],
+        "reason": "source phase ordering unavailable; causal subgate UNKNOWN"
+      }
+    }
+  ],
+  "evidenceId": "negative-quantum-fraction",
+  "synthetic": true
+}

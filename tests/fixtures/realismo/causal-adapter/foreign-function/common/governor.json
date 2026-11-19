@@ -1,0 +1,1 @@
+{"contractVersion":"realismo-v3","evidenceId":"governor","fieldCoverage":{"budgetMs":{"reason":"TEST_FIXTURE outside scope","status":"missing"},"entries":{"reason":"TEST_FIXTURE authored fact","status":"observed"},"policyVersion":{"reason":"TEST_FIXTURE outside scope","status":"missing"}},"kind":"governor-trace","payload":{"entries":[]},"sourceRefs":[],"synthetic":true}

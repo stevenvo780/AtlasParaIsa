@@ -1,0 +1,65 @@
+{
+  "contractVersion": "realismo-v3",
+  "evidenceId": "host",
+  "kind": "host-scene",
+  "synthetic": true,
+  "sourceRefs": [],
+  "payload": {
+    "hardwareId": "synthetic-host",
+    "sceneId": "manual-scene"
+  },
+  "fieldCoverage": {
+    "hardwareId": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "sceneId": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "cpu": {
+      "status": "missing",
+      "reason": "not supplied; UNKNOWN for dependent subgate"
+    },
+    "ramBytes": {
+      "status": "missing",
+      "reason": "not supplied; UNKNOWN for dependent subgate"
+    },
+    "gpus": {
+      "status": "missing",
+      "reason": "not supplied; UNKNOWN for dependent subgate"
+    },
+    "drivers": {
+      "status": "missing",
+      "reason": "not supplied; UNKNOWN for dependent subgate"
+    },
+    "threads": {
+      "status": "missing",
+      "reason": "not supplied; UNKNOWN for dependent subgate"
+    },
+    "viewport": {
+      "status": "missing",
+      "reason": "not supplied; UNKNOWN for dependent subgate"
+    },
+    "population": {
+      "status": "missing",
+      "reason": "not supplied; UNKNOWN for dependent subgate"
+    },
+    "activeTiles": {
+      "status": "missing",
+      "reason": "not supplied; UNKNOWN for dependent subgate"
+    },
+    "warmupSeconds": {
+      "status": "missing",
+      "reason": "not supplied; UNKNOWN for dependent subgate"
+    },
+    "hostLoadSamples": {
+      "status": "missing",
+      "reason": "not supplied; UNKNOWN for dependent subgate"
+    },
+    "initialStateRef": {
+      "status": "missing",
+      "reason": "not supplied; UNKNOWN for dependent subgate"
+    }
+  }
+}

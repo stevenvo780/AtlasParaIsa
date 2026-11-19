@@ -1,0 +1,184 @@
+{
+  "contractVersion": "realismo-v3",
+  "evidenceId": "C11-pair",
+  "kind": "causal-pair",
+  "synthetic": true,
+  "sourceRefs": [],
+  "payload": {
+    "criterion": "C11",
+    "registeredRef": "registration",
+    "treatmentRunId": "synthetic-treatment",
+    "controlRunId": "synthetic-control",
+    "initialStateHash": "43c1f13fbb0fa05b23c6ebd108cc3bc36e566ca532eb0d6c5768d817a529ba23",
+    "paramsHash": "d956a755ba428301d4b7a1b0e35b0b428d16c836fa3d37032f6c22f702fbc81c",
+    "inputTraceHash": "98943ee085665843aca76b38140527ad3d0f9c241a873eb978453338ed1b1974",
+    "governorTraceHash": "95941afe7acab29ba468ecda6d9f2d3b937081fcfae31450b755df39fddb0251",
+    "interventionRefs": [
+      "registered-removal",
+      "registered-restoration"
+    ],
+    "functionIds": [
+      "indispensable-function"
+    ],
+    "normalization": "per-day",
+    "equivalenceTolerance": 0,
+    "equivalenceUnit": "absolute-service-per-day",
+    "windows": [
+      {
+        "phase": "reference",
+        "startTick": 0,
+        "endTick": 24000,
+        "treatmentServiceRefs": [
+          "C11-treatment-reference"
+        ],
+        "controlServiceRefs": [
+          "C11-control-reference"
+        ],
+        "treatmentOpportunityRefs": [
+          "C11-treatment-opportunities-reference"
+        ],
+        "controlOpportunityRefs": [
+          "C11-control-opportunities-reference"
+        ],
+        "openingStockRefs": [
+          "C11-opening-reference"
+        ],
+        "closingStockRefs": [
+          "C11-closing-reference"
+        ],
+        "flowRefs": [
+          "C11-flows-reference"
+        ],
+        "exposureRefs": [
+          "C11-exposure-reference"
+        ]
+      },
+      {
+        "phase": "removal",
+        "startTick": 24000,
+        "endTick": 48000,
+        "treatmentServiceRefs": [
+          "C11-treatment-removal"
+        ],
+        "controlServiceRefs": [
+          "C11-control-removal"
+        ],
+        "treatmentOpportunityRefs": [
+          "C11-treatment-opportunities-removal"
+        ],
+        "controlOpportunityRefs": [
+          "C11-control-opportunities-removal"
+        ],
+        "openingStockRefs": [
+          "C11-opening-removal"
+        ],
+        "closingStockRefs": [
+          "C11-closing-removal"
+        ],
+        "flowRefs": [
+          "C11-flows-removal"
+        ],
+        "exposureRefs": [
+          "C11-exposure-removal"
+        ]
+      },
+      {
+        "phase": "restoration",
+        "startTick": 48000,
+        "endTick": 72000,
+        "treatmentServiceRefs": [
+          "C11-treatment-restoration"
+        ],
+        "controlServiceRefs": [
+          "C11-control-restoration"
+        ],
+        "treatmentOpportunityRefs": [
+          "C11-treatment-opportunities-restoration"
+        ],
+        "controlOpportunityRefs": [
+          "C11-control-opportunities-restoration"
+        ],
+        "openingStockRefs": [
+          "C11-opening-restoration"
+        ],
+        "closingStockRefs": [
+          "C11-closing-restoration"
+        ],
+        "flowRefs": [
+          "C11-flows-restoration"
+        ],
+        "exposureRefs": [
+          "C11-exposure-restoration"
+        ]
+      }
+    ],
+    "treatmentManifestRef": "manifest-treatment",
+    "controlManifestRef": "manifest-control"
+  },
+  "fieldCoverage": {
+    "criterion": {
+      "status": "observed",
+      "reason": "manual fixture design"
+    },
+    "registeredRef": {
+      "status": "observed",
+      "reason": "manual fixture design"
+    },
+    "treatmentRunId": {
+      "status": "observed",
+      "reason": "manual fixture design"
+    },
+    "controlRunId": {
+      "status": "observed",
+      "reason": "manual fixture design"
+    },
+    "initialStateHash": {
+      "status": "observed",
+      "reason": "manual fixture design"
+    },
+    "paramsHash": {
+      "status": "observed",
+      "reason": "manual fixture design"
+    },
+    "inputTraceHash": {
+      "status": "observed",
+      "reason": "manual fixture design"
+    },
+    "governorTraceHash": {
+      "status": "observed",
+      "reason": "manual fixture design"
+    },
+    "interventionRefs": {
+      "status": "observed",
+      "reason": "manual fixture design"
+    },
+    "functionIds": {
+      "status": "observed",
+      "reason": "manual fixture design"
+    },
+    "normalization": {
+      "status": "observed",
+      "reason": "manual fixture design"
+    },
+    "windows": {
+      "status": "observed",
+      "reason": "manual fixture design"
+    },
+    "treatmentManifestRef": {
+      "status": "observed",
+      "reason": "indexed synthetic run-manifest; service/stock/exposure ledgers remain unmaterialized, causal UNKNOWN"
+    },
+    "controlManifestRef": {
+      "status": "observed",
+      "reason": "indexed synthetic run-manifest; service/stock/exposure ledgers remain unmaterialized, causal UNKNOWN"
+    },
+    "equivalenceTolerance": {
+      "status": "observed",
+      "reason": "manual fixture design"
+    },
+    "equivalenceUnit": {
+      "status": "observed",
+      "reason": "manual fixture design"
+    }
+  }
+}

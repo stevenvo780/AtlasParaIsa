@@ -1,0 +1,26 @@
+{
+  "contractVersion": "realismo-v3",
+  "evidenceId": "inputs",
+  "kind": "physical-inputs",
+  "synthetic": true,
+  "sourceRefs": [],
+  "payload": {
+    "initialStateHash": "43c1f13fbb0fa05b23c6ebd108cc3bc36e566ca532eb0d6c5768d817a529ba23",
+    "paramsHash": "d956a755ba428301d4b7a1b0e35b0b428d16c836fa3d37032f6c22f702fbc81c",
+    "entries": []
+  },
+  "fieldCoverage": {
+    "initialStateHash": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "paramsHash": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "entries": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    }
+  }
+}

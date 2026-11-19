@@ -1,0 +1,92 @@
+{
+  "contractVersion": "realismo-v3",
+  "evidenceId": "effect",
+  "kind": "applied-effect",
+  "synthetic": true,
+  "sourceRefs": [],
+  "payload": {
+    "actorId": "mortal-a",
+    "recipientId": "mortal-b",
+    "tick": 1,
+    "functionId": "shelter",
+    "unit": "normalized",
+    "bodyBefore": 0.2,
+    "bodyAfter": 0.3,
+    "appliedDelta": 0.1,
+    "consumedAmount": 1,
+    "consumptionRefs": [
+      "flow-1"
+    ],
+    "workRefs": [],
+    "lawRef": "law",
+    "saturationLimit": 1,
+    "sourceEventId": "event-1",
+    "sourceOrderRef": "order"
+  },
+  "fieldCoverage": {
+    "actorId": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "recipientId": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "tick": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "functionId": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "unit": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "bodyBefore": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "bodyAfter": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "baselineDelta": {
+      "status": "missing",
+      "reason": "not supplied; UNKNOWN for dependent subgate"
+    },
+    "appliedDelta": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "consumedAmount": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "consumptionRefs": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "workRefs": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "lawRef": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "saturationLimit": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "sourceEventId": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "sourceOrderRef": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    }
+  }
+}

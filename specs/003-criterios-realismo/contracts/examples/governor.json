@@ -1,0 +1,26 @@
+{
+  "contractVersion": "realismo-v3",
+  "evidenceId": "governor",
+  "kind": "governor-trace",
+  "synthetic": true,
+  "sourceRefs": [],
+  "payload": {
+    "policyVersion": "synthetic-no-governor",
+    "budgetMs": 50,
+    "entries": []
+  },
+  "fieldCoverage": {
+    "policyVersion": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "budgetMs": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "entries": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    }
+  }
+}

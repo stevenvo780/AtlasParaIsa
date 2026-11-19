@@ -1,0 +1,51 @@
+{
+  "contractVersion": "realismo-v3",
+  "evidenceId": "memory-authorization",
+  "kind": "memory-authorization",
+  "synthetic": true,
+  "sourceRefs": [],
+  "payload": {
+    "authority": "Steven",
+    "memoryId": "synthetic-memory-1",
+    "memoryHash": "ed88416b7d069d4e1eb64eb0cf870ed6c04bfc64c57cca0b29d3b17939b7e769",
+    "contentHash": "b6abdcdf03444d6a35fc2c5c6634532baecd5e4cf077b1bedfe02a2545f27916",
+    "decision": "accepted",
+    "at": "2026-10-03T00:00:00-05:00",
+    "localReceiptId": "synthetic-only-not-Steven-receipt",
+    "provenanceRef": "memory-provenance"
+  },
+  "fieldCoverage": {
+    "authority": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "memoryId": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "memoryHash": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "contentHash": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "decision": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "at": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "localReceiptId": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "provenanceRef": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    }
+  }
+}

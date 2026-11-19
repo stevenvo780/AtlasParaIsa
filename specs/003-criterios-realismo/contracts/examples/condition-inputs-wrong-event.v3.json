@@ -1,0 +1,31 @@
+{
+  "contractVersion": "realismo-v3",
+  "evidenceId": "condition-inputs",
+  "kind": "law-inputs",
+  "synthetic": true,
+  "sourceRefs": [],
+  "payload": {
+    "lawRef": "law",
+    "entries": [
+      {
+        "tick": 1,
+        "subjectId": "structure-1",
+        "field": "condition",
+        "value": 0.1,
+        "unit": "condition",
+        "sourceEventId": "event-condition",
+        "sourceOrderRef": "order"
+      }
+    ]
+  },
+  "fieldCoverage": {
+    "lawRef": {
+      "status": "observed",
+      "reason": "manual synthetic fact"
+    },
+    "entries": {
+      "status": "observed",
+      "reason": "manual synthetic fact"
+    }
+  }
+}

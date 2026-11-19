@@ -1,0 +1,1401 @@
+{
+  "contractVersion": "realismo-v3",
+  "kind": "observation",
+  "runId": "manual-conservation-service",
+  "sourceSHA": "bb483260b2489fe62b113d620e5f56e5f3676dbc",
+  "seed": 0,
+  "epochId": "e0",
+  "artifactRole": "synthetic",
+  "paramsHash": "d956a755ba428301d4b7a1b0e35b0b428d16c836fa3d37032f6c22f702fbc81c",
+  "paramsRef": "params",
+  "initialStateHash": "43c1f13fbb0fa05b23c6ebd108cc3bc36e566ca532eb0d6c5768d817a529ba23",
+  "inputTraceRef": "inputs",
+  "governorTraceRef": "governor",
+  "observerSHA": "not-implemented",
+  "canonicalDigestVersion": "unavailable",
+  "thresholdProfileHash": "d99e24ee85f379164c1dd0d351a0cdb204d8bf1dda0e446abd70cfe582e4b7cb",
+  "preregistrationRef": "registration",
+  "hardwareRef": "host",
+  "backend": "synthetic",
+  "plannedWindow": {
+    "startTick": 0,
+    "endTick": 1,
+    "ticksPerDay": 2400,
+    "closure": "(start,end]",
+    "clock": "global",
+    "epochId": "e0"
+  },
+  "actualWindow": {
+    "startTick": 0,
+    "endTick": 1,
+    "ticksPerDay": 2400,
+    "closure": "(start,end]",
+    "clock": "global",
+    "epochId": "e0"
+  },
+  "runStatus": "partial",
+  "pairedRunId": null,
+  "interventionRefs": [],
+  "capabilities": [
+    {
+      "family": "boundary",
+      "status": "available",
+      "availableFields": [
+        "boundaryId",
+        "stockIds",
+        "materials",
+        "unitMapVersion",
+        "conversionMatrixRef",
+        "includesProtected",
+        "scope",
+        "excludedCompartments"
+      ],
+      "missingFields": [],
+      "sourceRefs": [],
+      "reason": "manual synthetic boundary/service fixture, not a run"
+    },
+    {
+      "family": "stock",
+      "status": "available",
+      "availableFields": [
+        "boundaryId",
+        "stockId",
+        "ownerId",
+        "regionId",
+        "clockTick",
+        "scale",
+        "material",
+        "quantity",
+        "phase"
+      ],
+      "missingFields": [],
+      "sourceRefs": [],
+      "reason": "manual synthetic boundary/service fixture, not a run"
+    },
+    {
+      "family": "flow",
+      "status": "available",
+      "availableFields": [
+        "boundaryId",
+        "transferId",
+        "fromStockId",
+        "toStockId",
+        "flowType",
+        "quantity",
+        "counterpartRecordId",
+        "conversionRef",
+        "consumptionRef"
+      ],
+      "missingFields": [],
+      "sourceRefs": [],
+      "reason": "manual synthetic boundary/service fixture, not a run"
+    },
+    {
+      "family": "exposure",
+      "status": "unavailable",
+      "availableFields": [],
+      "missingFields": [
+        "subjectId",
+        "regionId",
+        "startTick",
+        "endTick",
+        "activeTicks",
+        "localStartTick",
+        "localEndTick",
+        "mode",
+        "lawInputsRef"
+      ],
+      "sourceRefs": [],
+      "reason": "not present in this minimal fixture"
+    },
+    {
+      "family": "person",
+      "status": "unavailable",
+      "availableFields": [],
+      "missingFields": [
+        "actorId",
+        "role",
+        "birthTick",
+        "deathTick",
+        "founder",
+        "species",
+        "parentIds",
+        "knownTechniqueIds",
+        "positionRef",
+        "ageOrigin",
+        "ageAtOpeningTicks"
+      ],
+      "sourceRefs": [],
+      "reason": "not present in this minimal fixture"
+    },
+    {
+      "family": "death",
+      "status": "unavailable",
+      "availableFields": [],
+      "missingFields": [
+        "actorId",
+        "birthTick",
+        "deathTick",
+        "ageTicks",
+        "locationRef",
+        "cause",
+        "previousEventIds",
+        "historyStartTick",
+        "lifetimeEventCount",
+        "historyComplete",
+        "durableReceiptRef",
+        "ageOrigin",
+        "ageAtOpeningTicks"
+      ],
+      "sourceRefs": [],
+      "reason": "not present in this minimal fixture"
+    },
+    {
+      "family": "structure",
+      "status": "partial",
+      "availableFields": [
+        "structureId",
+        "condition"
+      ],
+      "missingFields": [
+        "creationTick",
+        "blueprintId",
+        "positionRef",
+        "durability",
+        "constructionFlows",
+        "constructionWork",
+        "lawVersion",
+        "rainInputRef"
+      ],
+      "sourceRefs": [],
+      "reason": "manual synthetic boundary/service fixture, not a run"
+    },
+    {
+      "family": "repair",
+      "status": "unavailable",
+      "availableFields": [],
+      "missingFields": [
+        "structureId",
+        "actorId",
+        "conditionBefore",
+        "conditionAfter",
+        "paidWork",
+        "inputFlows",
+        "serviceBeforeRefs",
+        "serviceAfterRefs",
+        "lawVersion"
+      ],
+      "sourceRefs": [],
+      "reason": "not present in this minimal fixture"
+    },
+    {
+      "family": "service",
+      "status": "partial",
+      "availableFields": [
+        "subjectId",
+        "actorId",
+        "recipientId",
+        "functionId",
+        "domain",
+        "appliedBenefit",
+        "consumptionRefs",
+        "inputRefs",
+        "work",
+        "eventType",
+        "causeRef",
+        "conditionAtService",
+        "conditionSourceRef"
+      ],
+      "missingFields": [
+        "baselineBenefit"
+      ],
+      "sourceRefs": [],
+      "reason": "manual synthetic boundary/service fixture, not a run"
+    },
+    {
+      "family": "product",
+      "status": "unavailable",
+      "availableFields": [],
+      "missingFields": [
+        "productId",
+        "techniqueId",
+        "programSignature",
+        "signatureVersion",
+        "capabilities",
+        "functionIds",
+        "authorId",
+        "ancestorIds",
+        "techGeneration",
+        "manufactureRefs",
+        "resident",
+        "residentBudget"
+      ],
+      "sourceRefs": [],
+      "reason": "not present in this minimal fixture"
+    },
+    {
+      "family": "replacement",
+      "status": "unavailable",
+      "availableFields": [],
+      "missingFields": [
+        "oldProductId",
+        "newProductId",
+        "functionId",
+        "wearRefs",
+        "wasteFlowRefs",
+        "oldServiceRefs",
+        "newServiceRefs",
+        "manufactureRefs",
+        "supplierId",
+        "initialStockRefs"
+      ],
+      "sourceRefs": [],
+      "reason": "not present in this minimal fixture"
+    },
+    {
+      "family": "knowledge",
+      "status": "unavailable",
+      "availableFields": [],
+      "missingFields": [
+        "actorId",
+        "techniqueId",
+        "transition",
+        "teacherId",
+        "localityRef",
+        "paymentRefs",
+        "previousTechniqueId",
+        "originalAuthorId",
+        "humanCohortId"
+      ],
+      "sourceRefs": [],
+      "reason": "not present in this minimal fixture"
+    },
+    {
+      "family": "migration",
+      "status": "unavailable",
+      "availableFields": [],
+      "missingFields": [
+        "actorId",
+        "exposureCohortId",
+        "originHomeId",
+        "destinationHomeId",
+        "originSourceId",
+        "destinationViabilityRef",
+        "trajectoryRefs",
+        "paidWork",
+        "destinationStartTick",
+        "destinationEndTick",
+        "destinationConsumptionRefs",
+        "visitRefs"
+      ],
+      "sourceRefs": [],
+      "reason": "not present in this minimal fixture"
+    },
+    {
+      "family": "role",
+      "status": "unavailable",
+      "availableFields": [],
+      "missingFields": [
+        "actorId",
+        "roleClassificationId",
+        "functionId",
+        "recipientIds",
+        "serviceRefs",
+        "workTicks",
+        "opportunities",
+        "institutionId",
+        "institutionTransition",
+        "localRuleRef"
+      ],
+      "sourceRefs": [],
+      "reason": "not present in this minimal fixture"
+    },
+    {
+      "family": "conflict",
+      "status": "unavailable",
+      "availableFields": [],
+      "missingFields": [
+        "episodeId",
+        "actorIds",
+        "sourceId",
+        "groupRelation",
+        "needInputsRef",
+        "triggerLawRef",
+        "trajectoryRefs",
+        "costRefs",
+        "agreement",
+        "memoryEnabled",
+        "accessWinnerId",
+        "consumptionRefs",
+        "recurrenceRefs",
+        "followupStartTick",
+        "followupEndTick",
+        "eligibleOpportunityRefs"
+      ],
+      "sourceRefs": [],
+      "reason": "not present in this minimal fixture"
+    },
+    {
+      "family": "ecology",
+      "status": "unavailable",
+      "availableFields": [],
+      "missingFields": [
+        "regionId",
+        "species",
+        "biome",
+        "globalTick",
+        "localTick",
+        "scale",
+        "policyVersion",
+        "population",
+        "birthIds",
+        "deathIds",
+        "immigrantIds",
+        "emigrantIds",
+        "predationRefs",
+        "huntRefs",
+        "flowRefs",
+        "conditionInputsRef",
+        "humanIds"
+      ],
+      "sourceRefs": [],
+      "reason": "not present in this minimal fixture"
+    },
+    {
+      "family": "rejection",
+      "status": "unavailable",
+      "availableFields": [],
+      "missingFields": [
+        "fertilityInputsRef",
+        "accessibleResourcesRef",
+        "governorInputRef",
+        "governorDecisionRef"
+      ],
+      "sourceRefs": [],
+      "reason": "not present in this minimal fixture"
+    },
+    {
+      "family": "digest",
+      "status": "unavailable",
+      "availableFields": [],
+      "missingFields": [
+        "physicalTick",
+        "algorithm",
+        "canonicalVersion",
+        "scope",
+        "digest",
+        "inputTraceHash",
+        "governorTraceHash",
+        "population",
+        "backend",
+        "cameraCount",
+        "excludedFields",
+        "componentHashesRef"
+      ],
+      "sourceRefs": [],
+      "reason": "not present in this minimal fixture"
+    },
+    {
+      "family": "cost",
+      "status": "unavailable",
+      "availableFields": [],
+      "missingFields": [
+        "completedSteps",
+        "startSeconds",
+        "endSeconds",
+        "warmupSeconds",
+        "hostLoadRef",
+        "physicalInputsHash",
+        "governorInputsHash",
+        "backend",
+        "threads",
+        "cameraCount",
+        "population",
+        "projectionMs",
+        "transferToMs",
+        "transferFromMs",
+        "queueMs",
+        "cpuSeconds",
+        "rssBytes",
+        "diskBytes",
+        "egressBytes",
+        "stateBytes",
+        "fps"
+      ],
+      "sourceRefs": [],
+      "reason": "not present in this minimal fixture"
+    },
+    {
+      "family": "fault",
+      "status": "unavailable",
+      "availableFields": [],
+      "missingFields": [
+        "caseId",
+        "phase",
+        "faultPoint",
+        "lastDurableCommitId",
+        "acknowledgedOrderIds",
+        "recoveredCommitId",
+        "expectedComponentManifestRef",
+        "actualComponentManifestRef",
+        "clientTickRefs",
+        "archiveVersionManifestRef",
+        "realDurationSeconds",
+        "clientCount"
+      ],
+      "sourceRefs": [],
+      "reason": "not present in this minimal fixture"
+    },
+    {
+      "family": "review",
+      "status": "unavailable",
+      "availableFields": [],
+      "missingFields": [
+        "deviceId",
+        "physicalDevice",
+        "taskId",
+        "criticalBlockers",
+        "durationSeconds",
+        "evidenceRefs"
+      ],
+      "sourceRefs": [],
+      "reason": "not present in this minimal fixture"
+    },
+    {
+      "family": "method",
+      "status": "unavailable",
+      "availableFields": [],
+      "missingFields": [
+        "trialId",
+        "preregistrationRef",
+        "preregistrationHash",
+        "registeredBeforeData",
+        "seedRegistryRef",
+        "runManifestRefs",
+        "selector",
+        "learningEnabled",
+        "budgetRef",
+        "interventionRefs",
+        "independentReviewRef",
+        "priorPhaseDecisionRef",
+        "rewardDefinitionRef",
+        "reservedSeedAuditRef"
+      ],
+      "sourceRefs": [],
+      "reason": "not present in this minimal fixture"
+    }
+  ],
+  "streams": [
+    {
+      "streamId": "structure-stream",
+      "family": "structure",
+      "epochId": "e0",
+      "window": {
+        "startTick": 0,
+        "endTick": 1,
+        "ticksPerDay": 2400,
+        "closure": "(start,end]",
+        "clock": "global",
+        "epochId": "e0"
+      },
+      "quality": "PARTIAL",
+      "requiredFields": [
+        "structureId",
+        "creationTick",
+        "blueprintId",
+        "positionRef",
+        "condition",
+        "durability",
+        "constructionFlows",
+        "constructionWork",
+        "lawVersion",
+        "rainInputRef"
+      ],
+      "coveredFields": [
+        "condition",
+        "structureId"
+      ],
+      "firstSeq": 0,
+      "lastSeq": 1,
+      "expectedRecords": null,
+      "observedRecords": 2,
+      "eligibleOpportunities": null,
+      "censoredSubjects": [],
+      "gaps": [],
+      "evidenceRefs": []
+    },
+    {
+      "streamId": "flow-stream",
+      "family": "flow",
+      "epochId": "e0",
+      "window": {
+        "startTick": 0,
+        "endTick": 1,
+        "ticksPerDay": 2400,
+        "closure": "(start,end]",
+        "clock": "global",
+        "epochId": "e0"
+      },
+      "quality": "PARTIAL",
+      "requiredFields": [
+        "boundaryId",
+        "transferId",
+        "fromStockId",
+        "toStockId",
+        "flowType",
+        "quantity",
+        "counterpartRecordId",
+        "conversionRef",
+        "consumptionRef"
+      ],
+      "coveredFields": [
+        "boundaryId",
+        "consumptionRef",
+        "conversionRef",
+        "counterpartRecordId",
+        "flowType",
+        "fromStockId",
+        "quantity",
+        "toStockId",
+        "transferId"
+      ],
+      "firstSeq": 0,
+      "lastSeq": 0,
+      "expectedRecords": null,
+      "observedRecords": 1,
+      "eligibleOpportunities": null,
+      "censoredSubjects": [],
+      "gaps": [],
+      "evidenceRefs": []
+    },
+    {
+      "streamId": "service-stream",
+      "family": "service",
+      "epochId": "e0",
+      "window": {
+        "startTick": 0,
+        "endTick": 1,
+        "ticksPerDay": 2400,
+        "closure": "(start,end]",
+        "clock": "global",
+        "epochId": "e0"
+      },
+      "quality": "PARTIAL",
+      "requiredFields": [
+        "subjectId",
+        "actorId",
+        "recipientId",
+        "functionId",
+        "domain",
+        "appliedBenefit",
+        "baselineBenefit",
+        "consumptionRefs",
+        "inputRefs",
+        "work",
+        "eventType",
+        "causeRef",
+        "conditionAtService",
+        "conditionSourceRef"
+      ],
+      "coveredFields": [
+        "actorId",
+        "appliedBenefit",
+        "causeRef",
+        "conditionAtService",
+        "conditionSourceRef",
+        "consumptionRefs",
+        "domain",
+        "eventType",
+        "functionId",
+        "inputRefs",
+        "recipientId",
+        "subjectId",
+        "work"
+      ],
+      "firstSeq": 0,
+      "lastSeq": 0,
+      "expectedRecords": null,
+      "observedRecords": 1,
+      "eligibleOpportunities": null,
+      "censoredSubjects": [],
+      "gaps": [],
+      "evidenceRefs": []
+    },
+    {
+      "streamId": "stock-stream",
+      "family": "stock",
+      "epochId": "e0",
+      "window": {
+        "startTick": 0,
+        "endTick": 1,
+        "ticksPerDay": 2400,
+        "closure": "(start,end]",
+        "clock": "global",
+        "epochId": "e0"
+      },
+      "quality": "COMPLETE",
+      "requiredFields": [
+        "boundaryId",
+        "stockId",
+        "ownerId",
+        "regionId",
+        "clockTick",
+        "scale",
+        "material",
+        "quantity",
+        "phase"
+      ],
+      "coveredFields": [
+        "boundaryId",
+        "stockId",
+        "ownerId",
+        "regionId",
+        "clockTick",
+        "scale",
+        "material",
+        "quantity",
+        "phase"
+      ],
+      "firstSeq": 0,
+      "lastSeq": 1,
+      "expectedRecords": 2,
+      "observedRecords": 2,
+      "eligibleOpportunities": 2,
+      "censoredSubjects": [],
+      "gaps": [],
+      "evidenceRefs": []
+    },
+    {
+      "streamId": "boundary-stream",
+      "family": "boundary",
+      "epochId": "e0",
+      "window": {
+        "startTick": 0,
+        "endTick": 1,
+        "ticksPerDay": 2400,
+        "closure": "(start,end]",
+        "clock": "global",
+        "epochId": "e0"
+      },
+      "quality": "COMPLETE",
+      "requiredFields": [
+        "boundaryId",
+        "stockIds",
+        "materials",
+        "unitMapVersion",
+        "conversionMatrixRef",
+        "includesProtected",
+        "scope",
+        "excludedCompartments"
+      ],
+      "coveredFields": [
+        "boundaryId",
+        "stockIds",
+        "materials",
+        "unitMapVersion",
+        "conversionMatrixRef",
+        "includesProtected",
+        "scope",
+        "excludedCompartments"
+      ],
+      "firstSeq": 0,
+      "lastSeq": 0,
+      "expectedRecords": 1,
+      "observedRecords": 1,
+      "eligibleOpportunities": 1,
+      "censoredSubjects": [],
+      "gaps": [],
+      "evidenceRefs": []
+    }
+  ],
+  "evidenceIndex": [
+    {
+      "evidenceId": "params",
+      "relativePath": "params.json",
+      "sha256": "c038ce62922dfcc1b602d25b00e929a6e0e9f01c14510feffbfa806dacd2a1f2",
+      "kind": "parameter-set",
+      "synthetic": true,
+      "schema": "evidence.schema.json"
+    },
+    {
+      "evidenceId": "inputs",
+      "relativePath": "inputs.json",
+      "sha256": "98943ee085665843aca76b38140527ad3d0f9c241a873eb978453338ed1b1974",
+      "kind": "physical-inputs",
+      "synthetic": true,
+      "schema": "evidence.schema.json"
+    },
+    {
+      "evidenceId": "governor",
+      "relativePath": "governor.json",
+      "sha256": "95941afe7acab29ba468ecda6d9f2d3b937081fcfae31450b755df39fddb0251",
+      "kind": "governor-trace",
+      "synthetic": true,
+      "schema": "evidence.schema.json"
+    },
+    {
+      "evidenceId": "registration",
+      "relativePath": "registration.json",
+      "sha256": "ceb0b8761891793e05694877d78b874eb8cc7266ed53ba2f93f3cb4fe463fe91",
+      "kind": "preregistration",
+      "synthetic": true,
+      "schema": "evidence.schema.json"
+    },
+    {
+      "evidenceId": "host",
+      "relativePath": "host.json",
+      "sha256": "450d832226ca44c04d6d06ee398633f27f9c176f1b2a50525c3cd8e52a498344",
+      "kind": "host-scene",
+      "synthetic": true,
+      "schema": "evidence.schema.json"
+    },
+    {
+      "evidenceId": "effect",
+      "relativePath": "effect.json",
+      "sha256": "ea037bdb4a2e69e9023d218f7b5987dbc64251e6bca6d78986999dd7961ebbbc",
+      "kind": "applied-effect",
+      "synthetic": true,
+      "schema": "evidence.schema.json"
+    },
+    {
+      "evidenceId": "law",
+      "relativePath": "law.json",
+      "sha256": "cc8078678aea133cf1508e1935fd93e7a2e5fa5be4eb07edad653dfcab1ed0c5",
+      "kind": "law",
+      "synthetic": true,
+      "schema": "evidence.schema.json"
+    },
+    {
+      "evidenceId": "gates-accepted",
+      "relativePath": "gates-accepted.json",
+      "sha256": "3514f9881f51f8682bbaaf6bf3cecb7d67eff43db6c3c741ca459a9ec022061d",
+      "kind": "reproduction-gates",
+      "synthetic": true,
+      "schema": "evidence.schema.json"
+    },
+    {
+      "evidenceId": "gates-rejected",
+      "relativePath": "gates-rejected.json",
+      "sha256": "34fbf90cfddf4bac816aef2b8bb588e0336c50754ba7eee0c31192c7116b783d",
+      "kind": "reproduction-gates",
+      "synthetic": true,
+      "schema": "evidence.schema.json"
+    },
+    {
+      "evidenceId": "repro-coverage",
+      "relativePath": "reproduction-coverage.json",
+      "sha256": "a4285ae92cd335aae4dd2809e58239f4d6e1f211b0c2c858222cce07586862b2",
+      "kind": "reproduction-coverage",
+      "synthetic": true,
+      "schema": "evidence.schema.json"
+    },
+    {
+      "evidenceId": "memory-inventory",
+      "relativePath": "memory-inventory.json",
+      "sha256": "ea36cc0072ec01bafdd6d3ee2b52de433ca361050947fb70b70d6fbe292ebdcc",
+      "kind": "real-memory-inventory",
+      "synthetic": true,
+      "schema": "evidence.schema.json"
+    },
+    {
+      "evidenceId": "memory-authorization",
+      "relativePath": "memory-authorization.json",
+      "sha256": "b9b434bd4c58f6089dfea7a0f542ef65d38cbfd251da25fd78a61d03c7c78d96",
+      "kind": "memory-authorization",
+      "synthetic": true,
+      "schema": "evidence.schema.json"
+    },
+    {
+      "evidenceId": "memory-manifest",
+      "relativePath": "memory-manifest.json",
+      "sha256": "44f0833137406de1d4b9f27244c88d885f56b5bd073001ca547a599c34eed1c4",
+      "kind": "component-manifest",
+      "synthetic": true,
+      "schema": "evidence.schema.json"
+    },
+    {
+      "evidenceId": "memory-provenance",
+      "relativePath": "memory-provenance.json",
+      "sha256": "4257bae2cf83174613951bb9ad007806a40da62ff1d7be2175b80f16bbf4c278",
+      "kind": "source-metadata",
+      "synthetic": true,
+      "schema": "evidence.schema.json"
+    },
+    {
+      "evidenceId": "synthetic-review",
+      "relativePath": "synthetic-review.json",
+      "sha256": "c8c0fe3e57315e32121852c5429da8fa94c164a67b6dd11023f8bb485dc99315",
+      "kind": "synthetic-review-oracle",
+      "synthetic": true,
+      "schema": "evidence.schema.json"
+    },
+    {
+      "evidenceId": "wood-units",
+      "relativePath": "conversion-matrix.v3.json",
+      "sha256": "e281b939b88c47aa93b408763de9329628fdd03e40ea90fb3ca8746c93cae6d3",
+      "kind": "conversion-matrix",
+      "synthetic": true,
+      "schema": "evidence.schema.json"
+    }
+  ],
+  "records": [
+    {
+      "recordId": "condition-1",
+      "streamId": "structure-stream",
+      "epochId": "e0",
+      "seq": 0,
+      "tick": 1,
+      "family": "structure",
+      "actorIds": [
+        "mortal-a"
+      ],
+      "protectedOriginIds": [],
+      "protectionStatus": "unknown",
+      "provenanceRefs": [],
+      "payload": {
+        "structureId": "structure-1",
+        "condition": 0.1
+      },
+      "fieldCoverage": {
+        "structureId": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "creationTick": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "blueprintId": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "positionRef": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "condition": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "durability": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "constructionFlows": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "constructionWork": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "lawVersion": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "rainInputRef": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        }
+      },
+      "causalContext": {
+        "status": "ordered",
+        "sourceEventId": "event-condition",
+        "phaseId": "wear",
+        "phaseOrdinal": 0,
+        "eventOrdinal": 0,
+        "sourceOrderRef": "order",
+        "predecessorRecordIds": [],
+        "reason": "manual shared source event order"
+      }
+    },
+    {
+      "recordId": "condition-at-service-1",
+      "streamId": "structure-stream",
+      "epochId": "e0",
+      "seq": 1,
+      "tick": 1,
+      "family": "structure",
+      "actorIds": [
+        "mortal-a"
+      ],
+      "protectedOriginIds": [],
+      "protectionStatus": "unknown",
+      "provenanceRefs": [],
+      "payload": {
+        "structureId": "structure-1",
+        "condition": 0.1
+      },
+      "fieldCoverage": {
+        "structureId": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "creationTick": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "blueprintId": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "positionRef": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "condition": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "durability": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "constructionFlows": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "constructionWork": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "lawVersion": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "rainInputRef": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        }
+      },
+      "causalContext": {
+        "status": "ordered",
+        "sourceEventId": "event-1",
+        "phaseId": "service",
+        "phaseOrdinal": 1,
+        "eventOrdinal": 0,
+        "sourceOrderRef": "order",
+        "predecessorRecordIds": [
+          "condition-1"
+        ],
+        "reason": "manual shared source event order"
+      }
+    },
+    {
+      "recordId": "flow-1",
+      "streamId": "flow-stream",
+      "epochId": "e0",
+      "seq": 0,
+      "tick": 1,
+      "family": "flow",
+      "actorIds": [
+        "mortal-a"
+      ],
+      "protectedOriginIds": [],
+      "protectionStatus": "unknown",
+      "provenanceRefs": [],
+      "payload": {
+        "boundaryId": "manual-boundary",
+        "transferId": "transfer-1",
+        "fromStockId": "wood-source",
+        "toStockId": null,
+        "flowType": "consumption",
+        "quantity": {
+          "value": 1,
+          "unit": "quanta",
+          "material": "wood",
+          "conversionVersion": "manual-quanta"
+        },
+        "counterpartRecordId": null,
+        "conversionRef": null,
+        "consumptionRef": null
+      },
+      "fieldCoverage": {
+        "boundaryId": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "transferId": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "fromStockId": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "toStockId": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "flowType": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "quantity": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "counterpartRecordId": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "conversionRef": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "consumptionRef": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        }
+      },
+      "causalContext": {
+        "status": "ordered",
+        "sourceEventId": "event-1",
+        "phaseId": "service",
+        "phaseOrdinal": 1,
+        "eventOrdinal": 0,
+        "sourceOrderRef": "order",
+        "predecessorRecordIds": [
+          "condition-1"
+        ],
+        "reason": "manual shared source event order"
+      }
+    },
+    {
+      "recordId": "service-1",
+      "streamId": "service-stream",
+      "epochId": "e0",
+      "seq": 0,
+      "tick": 1,
+      "family": "service",
+      "actorIds": [
+        "mortal-a"
+      ],
+      "protectedOriginIds": [],
+      "protectionStatus": "unknown",
+      "provenanceRefs": [],
+      "payload": {
+        "subjectId": "structure-1",
+        "actorId": "mortal-a",
+        "recipientId": "mortal-b",
+        "functionId": "shelter",
+        "domain": "shelter",
+        "appliedBenefit": {
+          "value": 0.1,
+          "unit": "normalized",
+          "material": "recovery",
+          "conversionVersion": "manual-model"
+        },
+        "consumptionRefs": [
+          "flow-1"
+        ],
+        "inputRefs": [],
+        "work": 1,
+        "eventType": "shelter-recovery",
+        "causeRef": "effect",
+        "conditionAtService": 0.1,
+        "conditionSourceRef": "condition-at-service-1"
+      },
+      "fieldCoverage": {
+        "subjectId": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "actorId": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "recipientId": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "functionId": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "domain": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "appliedBenefit": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "baselineBenefit": {
+          "status": "missing",
+          "reason": "not supplied; UNKNOWN for dependent subgate"
+        },
+        "consumptionRefs": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "inputRefs": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "work": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "eventType": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "causeRef": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "conditionAtService": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        },
+        "conditionSourceRef": {
+          "status": "observed",
+          "reason": "synthetic manual fact"
+        }
+      },
+      "causalContext": {
+        "status": "ordered",
+        "sourceEventId": "event-1",
+        "phaseId": "service",
+        "phaseOrdinal": 1,
+        "eventOrdinal": 0,
+        "sourceOrderRef": "order",
+        "predecessorRecordIds": [
+          "condition-1"
+        ],
+        "reason": "manual shared source event order"
+      }
+    },
+    {
+      "recordId": "wood-opening",
+      "streamId": "stock-stream",
+      "epochId": "e0",
+      "seq": 0,
+      "tick": 0,
+      "family": "stock",
+      "actorIds": [],
+      "protectedOriginIds": [
+        "S"
+      ],
+      "protectionStatus": "protected",
+      "provenanceRefs": [],
+      "payload": {
+        "boundaryId": "manual-boundary",
+        "stockId": "wood-source",
+        "ownerId": "S",
+        "regionId": "manual-region",
+        "clockTick": 0,
+        "scale": "active",
+        "material": "wood",
+        "quantity": {
+          "value": 1,
+          "unit": "quanta",
+          "material": "wood",
+          "conversionVersion": "manual-quanta"
+        },
+        "phase": "opening"
+      },
+      "fieldCoverage": {
+        "boundaryId": {
+          "status": "observed",
+          "reason": "manual synthetic fact"
+        },
+        "stockId": {
+          "status": "observed",
+          "reason": "manual synthetic fact"
+        },
+        "ownerId": {
+          "status": "observed",
+          "reason": "manual synthetic fact"
+        },
+        "regionId": {
+          "status": "observed",
+          "reason": "manual synthetic fact"
+        },
+        "clockTick": {
+          "status": "observed",
+          "reason": "manual synthetic fact"
+        },
+        "scale": {
+          "status": "observed",
+          "reason": "manual synthetic fact"
+        },
+        "material": {
+          "status": "observed",
+          "reason": "manual synthetic fact"
+        },
+        "quantity": {
+          "status": "observed",
+          "reason": "manual synthetic fact"
+        },
+        "phase": {
+          "status": "observed",
+          "reason": "manual synthetic fact"
+        }
+      },
+      "causalContext": {
+        "status": "snapshot",
+        "sourceEventId": null,
+        "phaseId": null,
+        "phaseOrdinal": null,
+        "eventOrdinal": null,
+        "sourceOrderRef": null,
+        "predecessorRecordIds": [],
+        "reason": "confirmed boundary cut; no source event attribution"
+      }
+    },
+    {
+      "recordId": "wood-closing",
+      "streamId": "stock-stream",
+      "epochId": "e0",
+      "seq": 1,
+      "tick": 1,
+      "family": "stock",
+      "actorIds": [],
+      "protectedOriginIds": [
+        "S"
+      ],
+      "protectionStatus": "protected",
+      "provenanceRefs": [],
+      "payload": {
+        "boundaryId": "manual-boundary",
+        "stockId": "wood-source",
+        "ownerId": "S",
+        "regionId": "manual-region",
+        "clockTick": 1,
+        "scale": "active",
+        "material": "wood",
+        "quantity": {
+          "value": 0,
+          "unit": "quanta",
+          "material": "wood",
+          "conversionVersion": "manual-quanta"
+        },
+        "phase": "closing"
+      },
+      "fieldCoverage": {
+        "boundaryId": {
+          "status": "observed",
+          "reason": "manual synthetic fact"
+        },
+        "stockId": {
+          "status": "observed",
+          "reason": "manual synthetic fact"
+        },
+        "ownerId": {
+          "status": "observed",
+          "reason": "manual synthetic fact"
+        },
+        "regionId": {
+          "status": "observed",
+          "reason": "manual synthetic fact"
+        },
+        "clockTick": {
+          "status": "observed",
+          "reason": "manual synthetic fact"
+        },
+        "scale": {
+          "status": "observed",
+          "reason": "manual synthetic fact"
+        },
+        "material": {
+          "status": "observed",
+          "reason": "manual synthetic fact"
+        },
+        "quantity": {
+          "status": "observed",
+          "reason": "manual synthetic fact"
+        },
+        "phase": {
+          "status": "observed",
+          "reason": "manual synthetic fact"
+        }
+      },
+      "causalContext": {
+        "status": "snapshot",
+        "sourceEventId": null,
+        "phaseId": null,
+        "phaseOrdinal": null,
+        "eventOrdinal": null,
+        "sourceOrderRef": null,
+        "predecessorRecordIds": [],
+        "reason": "confirmed boundary cut; no source event attribution"
+      }
+    },
+    {
+      "recordId": "wood-boundary",
+      "streamId": "boundary-stream",
+      "epochId": "e0",
+      "seq": 0,
+      "tick": 0,
+      "family": "boundary",
+      "actorIds": [],
+      "protectedOriginIds": [],
+      "protectionStatus": "unknown",
+      "provenanceRefs": [],
+      "payload": {
+        "boundaryId": "manual-boundary",
+        "stockIds": [
+          "wood-source"
+        ],
+        "materials": [
+          "wood"
+        ],
+        "unitMapVersion": "manual-quanta",
+        "conversionMatrixRef": "wood-units",
+        "includesProtected": true,
+        "scope": "partial",
+        "excludedCompartments": [
+          "all compartments outside wood-source"
+        ]
+      },
+      "fieldCoverage": {
+        "boundaryId": {
+          "status": "observed",
+          "reason": "manual synthetic fact"
+        },
+        "stockIds": {
+          "status": "observed",
+          "reason": "manual synthetic fact"
+        },
+        "materials": {
+          "status": "observed",
+          "reason": "manual synthetic fact"
+        },
+        "unitMapVersion": {
+          "status": "observed",
+          "reason": "manual synthetic fact"
+        },
+        "conversionMatrixRef": {
+          "status": "observed",
+          "reason": "manual synthetic fact"
+        },
+        "includesProtected": {
+          "status": "observed",
+          "reason": "manual synthetic fact"
+        },
+        "scope": {
+          "status": "observed",
+          "reason": "manual synthetic fact"
+        },
+        "excludedCompartments": {
+          "status": "observed",
+          "reason": "manual synthetic fact"
+        }
+      },
+      "causalContext": {
+        "status": "snapshot",
+        "sourceEventId": null,
+        "phaseId": null,
+        "phaseOrdinal": null,
+        "eventOrdinal": null,
+        "sourceOrderRef": null,
+        "predecessorRecordIds": [],
+        "reason": "confirmed boundary cut; no source event attribution"
+      }
+    }
+  ],
+  "evidenceId": "unknown-service-order",
+  "synthetic": true
+}

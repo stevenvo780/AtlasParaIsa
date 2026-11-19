@@ -5,23 +5,23 @@ estas cifras. Se actualiza en cada publicación, junto con su contrato
 `docs/evidencia-AAAA-MM-DD/publication*.json`; si este fichero y el contrato discrepan, manda
 el contrato.
 
-## Vigente (mundo V14 desde el 19 de noviembre de 2026, 00:42 -05, en la TORRE)
+## Vigente (mundo V14 desde el 19 de noviembre de 2026, 00:42 -05; código actualizado a `f550c04` a las 10:45 -05, en la TORRE)
 
 | Qué | Valor |
 |---|---|
 | URL | <https://atlas.humanizar.tech> |
-| Código compilado y servido | `aebce69` desde el 19-11 00:42 -05 ([contrato](evidencia-2026-11-19/publication-v14.json)): Fase A de estabilidad de persistencia, arranque en frío y respaldo en caliente ([PLAN-ESTABILIDAD-2026-11-18](PLAN-ESTABILIDAD-2026-11-18.md), `sprint/estabilidad-fase-a-20261118`) + unificación documental y herramientas Grupo A (`bd2d30d`) sobre `c7b3bb3` |
-| Ley activada | **COM + COM-D′**: `social.radioConvivencia=12`, `social.disolucion=1`, `social.maxComunidades=64` (sin cambio de leyes físicas respecto a V13; cero cambios en `src/world/`), activadas por `CARTA_PARAMS` y persistidas |
-| `main` | ver `git log`; lo servido es `aebce69` |
+| Código compilado y servido | `f550c04` desde el 19-11 10:45 -05 ([contrato actualización](evidencia-2026-11-19/publication-v14-r2.json), [contrato inicial V14](evidencia-2026-11-19/publication-v14.json)): Fase A de estabilidad + integración `specs/002-mundo-ilimitado` etapas B–F (GPU residente T121–T125, red delta T135/T137/T138, gobernador multiseñal T161–T165, desalojo LRU T163, replay opt-in T132, núcleos E.1 T145–T148/T151/T153, auditoría adversarial T171 + fix F-1); sin cambio de `DEFAULT_PARAMS` ni `RULES_VERSION` |
+| Ley activada | **COM + COM-D′**: `social.radioConvivencia=12`, `social.disolucion=1`, `social.maxComunidades=64` (sin cambio de leyes físicas respecto a V13/V14 inicial), activadas por `CARTA_PARAMS` y persistidas |
+| `main` | ver `git log`; lo servido es `f550c04` |
 | Reglas | `RULES_VERSION` 11 (+ COM y COM-D′ por parámetro) |
 | Protocolo / SQLite | `PROTOCOL_VERSION` 10 / `user_version` 5 (`PRAGMA auto_vacuum=INCREMENTAL` en bases nuevas, índice expresivo `technology_definitions_order`, índice `technology_stats_tick` y `deep-checkpoint-saves-v1`) |
-| Máquina | Torre: `atlas-publico.service` en 100.64.0.1:3000, código en `AtlasParaIsa-anexo/worktrees/publico-v14` (proceso «carta-isa», drop-in CPUWeight/IOWeight 10000). No arrancar servicios del portátil ni `atlas-servidor`/`atlas-respaldo` de la torre |
-| Mundo | V14, semilla 51926, identidad `36a23d11-02af-49be-a867-960d2341c458`, creado vacío el 19-11 00:42 -05 en NVMe `/datos/workspaces/personal/AtlasParaIsa-anexo/mundos/v14-20261119` (credencial `access.scrypt` copiada de V13: misma contraseña, solo el hash) |
+| Máquina | Torre: `atlas-publico.service` en 100.64.0.1:3000, código en `AtlasParaIsa-anexo/worktrees/publico-v14-r2` (`publico-v14` conservado para rollback; proceso «carta-isa», drop-in CPUWeight/IOWeight 10000). No arrancar servicios del portátil ni `atlas-servidor`/`atlas-respaldo` de la torre |
+| Mundo | V14, semilla 51926, identidad `36a23d11-02af-49be-a867-960d2341c458`, creado vacío el 19-11 00:42 -05 en NVMe `/datos/workspaces/personal/AtlasParaIsa-anexo/mundos/v14-20261119` y preservado intacto en la actualización de código de las 10:45 (credencial `access.scrypt` copiada de V13: misma contraseña, solo el hash) |
 | Parámetros persistidos | `gobernador.presupuestoMs=5000`, `social.radioConvivencia=12`, `social.disolucion=1`, `social.maxComunidades=64` (`CARTA_PARAMS`; `limites.comunidades` lo deriva el anfitrión), gobernador `techo`, límites de admisión del anfitrión y el paquete de reglas 11 |
-| Respaldos | HDD `/mnt/Data2/respaldos-atlas-v14` (timer horario `atlas-respaldo-publico.timer`, `RETENCION=24`, `RESPALDO_METODO=backup` con instantánea WAL en caliente, `MemoryHigh=3G`, `IOSchedulingClass=idle`, `Nice=15`; primer respaldo `world-20261119-0042.sqlite.gz` verificado en 1 s) |
-| Contrato | [publication-v14.json](evidencia-2026-11-19/publication-v14.json) |
+| Respaldos | HDD `/mnt/Data2/respaldos-atlas-v14` (timer horario `atlas-respaldo-publico.timer`, `RETENCION=24`, `RESPALDO_METODO=backup` con instantánea WAL en caliente, `MemoryHigh=3G`, `IOSchedulingClass=idle`, `Nice=15`; respaldo previo a `f550c04`: `world-20261119-1033.sqlite.gz`, 251 MiB, `gzip -t` OK; tamaño en meseta ~240–256 MiB) |
+| Contrato | [publication-v14-r2.json](evidencia-2026-11-19/publication-v14-r2.json) y [publication-v14.json](evidencia-2026-11-19/publication-v14.json) |
 
-Lo que esta publicación acredita y lo que sigue en curso: Fase A resuelve el desborde de `technology_stats`, el `TEMP B-TREE` de ~15 GiB en `summarizeDefinitions()`, la pérdida de rotación del `slot 2` tras reinicios y los bloqueos/picos de 44,5 GiB de RAM de `VACUUM INTO` en los respaldos horarios. En paralelo corre el panel preregistrado de **Fase B** ([2026-11-18-estabilidad-tecnologia](preregistros/2026-11-18-estabilidad-tecnologia.md), 8 semillas × 60 días) para evaluar las leyes locales B1–B4 de invención antes de promoverlas a `RULES_VERSION` 12.
+Lo que esta publicación acredita y lo que sigue en curso: Fase A estabilizó `technology_stats`, `Store.load()` y respaldos horarios (~240–256 MiB en meseta tras 10 h continuas). El panel preregistrado de **Fase B** ([2026-11-18-estabilidad-tecnologia](preregistros/2026-11-18-estabilidad-tecnologia.md), 8 semillas × 60 días) quedó cerrado y evaluado: cumple Q4/Q5 (C1–C7 sube de 5/8 a 7/8) pero no cumple Q1–Q3 literales, por lo que **no se adopta en `DEFAULT_PARAMS`** (`RULES_VERSION` sigue en 11; disponible como opt-in). Las etapas B–F de `002-mundo-ilimitado` están integradas y verificadas (`375/375` CPU, `42/42` CUDA `seed=51926`, soak 32 M / 5 000 ticks Dual-GPU 28 M con `0` diffs `Object.is`, red 10k `< 66 KiB` y auditoría T171).
 
 ## Anteriores, conservados
 

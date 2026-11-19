@@ -1,0 +1,26 @@
+[
+  {
+    "cells": 48000000,
+    "valuesPerTick": 624000000,
+    "ticks": 1000,
+    "totalFieldUpdates": 624000000000,
+    "totalMs": 30437.2,
+    "billionFieldUpdatesPerSec": 20.5,
+    "p50Ms": 29.56,
+    "p95Ms": 32.46,
+    "kernelP50Ms": 26.68,
+    "gpu0Telemetry": "45 %, 38 %, 13453 MiB, 16303 MiB, 48, 187.29 W"
+  },
+  {
+    "cells": 56000000,
+    "valuesPerTick": 728000000,
+    "ticks": 1000,
+    "totalFieldUpdates": 728000000000,
+    "totalMs": 35541.7,
+    "billionFieldUpdatesPerSec": 20.48,
+    "p50Ms": 34.05,
+    "p95Ms": 37.19,
+    "kernelP50Ms": 31.12,
+    "gpu0Telemetry": "7 %, 2 %, 14784 MiB, 16303 MiB, 45, 163.02 W"
+  }
+]

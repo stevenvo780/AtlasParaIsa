@@ -1,0 +1,44 @@
+{
+  "capturedAt": "2026-11-19T10:45:31-05:00",
+  "status": "published",
+  "kind": "code upgrade on live world V14 (aebce69 → f550c04): integración completa de 002 (etapas B–F, GPU residente T121–T125, red delta T135/T137/T138, gobernador multiseñal T161–T165, desalojo LRU T163, replay opt-in T132, núcleos E.1 T145–T148/T151/T153, auditoría adversarial T171 + fix F-1) preservando intacto el mundo V14",
+  "reason": "Llevar a producción el conjunto estabilizado y auditado de `specs/002-mundo-ilimitado` tras verificar paridad exacta campo a campo (`diferenciaCanonica = null`) cargando, avanzando 10 pasos, guardando y recargando la copia real de V14 (`world-20261119-1000.sqlite.gz`, tick 188 010, 669 habitantes, 54 528 teselas) entre `aebce69` y `f550c04`.",
+  "codeRevision": "f550c04",
+  "previousCodeRevision": "aebce69",
+  "whatChanged": {
+    "code": "main aebce69→f550c04: integración de Etapa B (T115/T117/T118/T120), Etapa C GPU residente FP64 con --fmad=false (T121–T125), Etapa D (T132 opt-in, T133 tuplas −62,1 %, T135/T137/T138 red delta < 66 KiB a 10 000 hab.), Etapa E (T144 reporte, núcleos T145/T146/T147/T148/T151/T153), Etapa F (T161–T166 gobernador multiseñal, desalojo LRU y panel), auditoría adversarial 3 lentes T171 + corrección F-1 en `src/server/governor.ts:356`, aceleración 2,64× de `digesto.ts` y consolidación documental T172. Sin cambio en `DEFAULT_PARAMS` ni `RULES_VERSION` (permanece en 11).",
+    "activatedLaw": "Sin cambio respecto a V14 inicial: COM (`social.radioConvivencia=12`) + COM-D′ (`social.disolucion=1`) + `social.maxComunidades=64` + `gobernador.presupuestoMs=5000` vía `CARTA_PARAMS` (`RULES_VERSION=11`). Fase B (`tecnologia.*`) permanece opt-in no adoptada en defaults tras no superar Q1–Q3 en el panel preregistrado de 8 semillas × 60 días.",
+    "evidence": {
+      "liveWorldBackupParity": "world-20261119-1000.sqlite.gz (tick 188 010, 669 hab., 54 528 teselas): 0 diferencias de campo entre aebce69 y f550c04 al cargar, tras 10 pasos y tras save→reload (`diferenciaCanonica = null`).",
+      "cpuDeterminismMatrix": "375/375 pruebas verdes (0 fallos) en tests/determinismo-hardware.test.ts (4 semillas × 7 escenas × 12 backends CPU × 600 pasos, geometrías 256 y 512 + adversarial).",
+      "cudaDeterminism": "42/42 pruebas CUDA verdes (seed=51926 × 7 escenas × geometrías 256/512 × gpu=[0],[1],[0,1]); + 56/56 pruebas gpu-puente/autoprueba/reparto/compute-ecology.",
+      "gpuSoak32M": "docs/evidencia-2026-11-19/gpu-soak-32m-20261119.json: Dual GPU [0,1] 32 M celdas p50=16,59 ms, p95=20,60 ms (195,6× vs CPU 1h), 0/416 000 000 diffs Object.is.",
+      "gpuBurn28M5000Ticks": "docs/evidencia-2026-11-19/gpu-burn-28m-5000ticks-20261119.json: Dual GPU [0,1] 28 M celdas × 5 000 ticks (1,82 billones de actualizaciones) p50=15,93 ms, 20,95 B actualizaciones/s, 0/364 000 000 diffs Object.is.",
+      "networkScale10k": "docs/evidencia-2026-11-19/banco-red-20261119.json: 10 000 habitantes en 65,2 KiB (< 120 KiB), 0 descartados, 0 sockets terminados.",
+      "adversarialAudit": "specs/002-mundo-ilimitado/informes/T171-report.md + tests/auditoria-reglas-motor.test.ts (7/7 verdes) + fix F-1 (27/27 tests/gobernador.test.ts)."
+    }
+  },
+  "operation": {
+    "deployCheck": "bash scripts/deploy-check.sh f550c04 /datos/workspaces/personal/AtlasParaIsa-anexo/publicaciones/deploy-check/v14-r2-20261119 → salida 0 (build + test:smoke verdes)",
+    "backupBeforeStop": {
+      "path": "/mnt/Data2/respaldos-atlas-v14/world-20261119-1033.sqlite.gz",
+      "size": "251 MiB",
+      "sha256": "a3721c3019bbe583e08130271fc69449d0dbb4b2f2205f4ba19b6ce6907d5f43",
+      "gzipTest": "OK"
+    },
+    "towerCode": "worktree detached AtlasParaIsa-anexo/worktrees/publico-v14-r2 en f550c04, con node_modules propio y npm run build ejecutado allí (publico-v14 conservado para rollback inmediato)",
+    "worldPreserved": "AtlasParaIsa-anexo/mundos/v14-20261119 (misma identidad 36a23d11-02af-49be-a867-960d2341c458, semilla 51926, sin pérdida de ticks)",
+    "units": "scripts/systemd/torre/publico.sh repuntado a publico-v14-r2 + systemctl --user daemon-reload",
+    "start": "arranque 2026-11-19 10:45:04 -05 (PID 3321596, listo en 19 s, Memory ~1,0 GiB)"
+  },
+  "verification": {
+    "typecheck": "verde (0 errores)",
+    "checkLinks": "122 documentos, 721 enlaces relativos, 0 rotos",
+    "combinedSuites": "178/178 pasadas (0 fallos) en suite combinada de 17 ficheros + 79/79 en fraccion-serial/perfil-fases/auditoria/server/gobernador"
+  },
+  "liveChecks": {
+    "domainHealth": "ok",
+    "unauthenticatedWorldStatus": 401,
+    "servedAssetEqualsCompiled": "assets/index-Dnpsuc3u.js servido en https://atlas.humanizar.tech = compilado en worktree publico-v14-r2 (cmp -s: OK)"
+  }
+}

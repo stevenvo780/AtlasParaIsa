@@ -13,7 +13,7 @@ import { bond, convivir, cooperate, cooperationOpportunity, initialCulture, reso
 import { count, emptyTotals, heredarEstadisticas, recordSample, worldStatistics } from './statistics.js';
 import { initializeEcosystem, stepEcosystem, stepLocalEcology, harvestMaterial, cultivateTile, trampleTile, FOOD_PER_ANIMAL } from './ecosystem.js';
 import { assertEcosystemTile, assertLifeState, assertDormantTerrain } from './validation.js';
-import { materializeAnimals, stepAnimals, harvestAt, type Animal } from './animals.js';
+import { animalesVivosEnCelda, conRejillaFauna, materializeAnimals, stepAnimals, harvestAt, type Animal } from './animals.js';
 import { advanceNeeds } from './needs.js';
 import { assimilateFood, exertBody, hydrateBody, restBody } from './body.js';
 import { CRECIMIENTO_COMIDA, HAMBRE_POR_PASO, HAMBRE_POR_UNIDAD, INTERVALO_ECOLOGIA_TICKS, INTERVALO_TIEMPO_TICKS, LUZ_CREPSCULO, PROB_LLUVIA, SED_POR_PASO, SED_POR_UNIDAD } from './ecologia-constantes.js';
@@ -630,8 +630,19 @@ function choose(world: World, person: Person): void {
     for (const tile of reachableTiles.filter(t => (t.fauna ?? 0) >= 1).sort(disputada
       ? (a, b) => (distance(person, a) + recelo(a)) - (distance(person, b) + recelo(b))
       : (a, b) => distance(person, a) - distance(person, b))) {
-      const victim = world.animals.filter(a => a.x === tile.x && a.y === tile.y && a.health > 0)
-        .sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0)[0];
+      const victim = (() => {
+        const enCelda = animalesVivosEnCelda(world, tile.x, tile.y);
+        if (enCelda) {
+          // La rejilla devuelve el orden de slot; el menor id con desempate por slot es la
+          // víctima del `filter(...).sort(...)` de siempre, sin ordenar la celda entera.
+          let mejor: Animal | undefined;
+          for (const animal of enCelda) if (!mejor || animal.id < mejor.id) mejor = animal;
+          return mejor;
+        }
+        const victim = world.animals.filter(a => a.x === tile.x && a.y === tile.y && a.health > 0)
+          .sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0)[0];
+        return victim;
+      })();
       const work = Math.max(0, Math.ceil(45 * (1 - (person.skills.hunt ?? 0) * .25))
         - (person.action === 'hunt' && distance(person.target, tile) === 0 ? person.work : 0));
       if (victim && planAffordable(stepsTo(tile)!, work)) return { tile, victim, work };
@@ -1247,7 +1258,7 @@ export function stepWorld(world: World, inputs: Gesture[] = [], context: WorldCo
   // del guardado, fuera del paso), así que sus lecturas a fecha de este tick van como un lote del
   // anfitrión, con un solo sello de la memoria de lecturas del Store en vez de uno por lectura (~900 por
   // paso con ~230 habitantes). El mundo resultante es el mismo; ver `readBatch` en store.ts.
-  return withArchiveReadBatch(world, () => conRejilla(world, () => advanceTick(world, inputs, boundContext, medicion)));
+  return withArchiveReadBatch(world, () => conRejilla(world, () => conRejillaFauna(world, () => advanceTick(world, inputs, boundContext, medicion))));
 }
 function advanceTick(world: World, inputs: Gesture[], context: WorldContext, medicion: FaseMedicion | undefined): GestureResult[] {
   medirFase(medicion, 'maintainRegions', () => maintainRegions(world, context));

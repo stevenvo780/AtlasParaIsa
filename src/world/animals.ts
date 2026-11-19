@@ -128,6 +128,145 @@ export function syncFauna(tiles: Tile[], animals: Animal[]): void {
   cache.occupied = counts;
 }
 
+/**
+ * Rejilla espacial efímera de fauna (misma filosofía que `rejilla.ts` de personas): sólo existe
+ * dentro de `conRejillaFauna` (lo abre `stepWorld`); fuera de ese ámbito las consultas son el
+ * recorrido lineal de siempre, así que una mutación manual nunca deja un índice obsoleto.
+ *   animalesVivosEnCelda(w, x, y) ≡ w.animals.filter(a => a.x === x && a.y === y && a.health > 0)
+ * con los mismos objetos y en el mismo orden de slot: cada celda exacta guarda sus slots en orden
+ * creciente y el predicado (coordenadas y salud) se evalúa en vivo sobre el animal actual. Se
+ * construye en O(A) en la primera consulta del paso y sigue exacta porque, dentro del paso, el
+ * único escritor de `x`/`y` es `move`, que avisa con `animalMovido`; un nacimiento sólo alarga el
+ * arreglo (se anexan los slots nuevos en `sincronizarRejillaFauna`) y los escritores que lo
+ * reemplazan entero (`stepAnimals`, `harvestAt`) refrescan el ámbito, así que la siguiente
+ * consulta lo reconstruye. Un animal repetido en el arreglo o una coordenada no finita en la
+ * consulta devuelven `undefined` y el llamador cae al recorrido lineal, idéntico por definición.
+ * Nada de esto entra en el mundo ni en su digesto.
+ */
+interface IndiceFauna {
+  arreglo: Animal[];
+  length: number;
+  valido: boolean;
+  celdas: Map<Cell, number[]>;
+  celdaPorSlot: Map<number, Cell>;
+  slotPorAnimal: Map<Animal, number>;
+}
+/** Ámbito del paso: guarda el arreglo de fauna vigente, que los escritores de este módulo
+ * (`stepAnimals`, `harvestAt`) refrescan con `refrescarAmbitoFauna` cada vez que lo reemplazan. */
+interface AmbitoFauna { profundidad: number; arreglo: Animal[]; indice?: IndiceFauna }
+const ambitosFauna = new WeakMap<AnimalWorld, AmbitoFauna>();
+const rejillaFaunaDesactivada = new WeakMap<AnimalWorld, number>();
+
+function insertarEnCelda(indice: IndiceFauna, slot: number, animal: Animal): boolean {
+  if (indice.slotPorAnimal.has(animal)) return false;
+  const claveCelda = cell(animal);
+  let lista = indice.celdas.get(claveCelda);
+  if (!lista) { lista = []; indice.celdas.set(claveCelda, lista); }
+  let lo = 0, hi = lista.length;
+  while (lo < hi) { const mid = (lo + hi) >>> 1; if (lista[mid]! < slot) lo = mid + 1; else hi = mid; }
+  lista.splice(lo, 0, slot);
+  indice.celdaPorSlot.set(slot, claveCelda);
+  indice.slotPorAnimal.set(animal, slot);
+  return true;
+}
+function construirRejillaFauna(animales: Animal[]): IndiceFauna {
+  const indice: IndiceFauna = { arreglo: animales, length: 0, valido: true, celdas: new Map(), celdaPorSlot: new Map(), slotPorAnimal: new Map() };
+  for (let slot = 0; slot < animales.length; slot++) {
+    const animal = animales[slot];
+    if (!(slot in animales) || !animal || typeof animal !== 'object' || !insertarEnCelda(indice, slot, animal)) { indice.valido = false; break; }
+  }
+  indice.length = animales.length;
+  return indice;
+}
+function sincronizarRejillaFauna(ambito: AmbitoFauna): IndiceFauna {
+  const animales = ambito.arreglo;
+  let indice = ambito.indice;
+  if (!indice || indice.arreglo !== animales || animales.length < indice.length) {
+    indice = construirRejillaFauna(animales);
+    ambito.indice = indice;
+    return indice;
+  }
+  if (animales.length > indice.length) {
+    if (indice.valido) for (let slot = indice.length; slot < animales.length; slot++) {
+      const animal = animales[slot];
+      if (!(slot in animales) || !animal || typeof animal !== 'object' || !insertarEnCelda(indice, slot, animal)) { indice.valido = false; break; }
+    }
+    indice.length = animales.length;
+  }
+  return indice;
+}
+/** Apunta el ámbito al arreglo de fauna actual y descarta el índice si el arreglo cambió. */
+function refrescarAmbitoFauna(world: AnimalWorld): void {
+  const ambito = ambitosFauna.get(world);
+  if (ambito && ambito.arreglo !== world.animals) { ambito.arreglo = world.animals; ambito.indice = undefined; }
+}
+/** Descarta el índice al cerrar la fauna del paso: `ordenCanonico` puede haber reordenado el
+ * mismo arreglo en el sitio, y eso no lo delata ningún cambio de identidad ni de longitud. */
+function invalidarRejillaFauna(world: AnimalWorld): void {
+  const ambito = ambitosFauna.get(world);
+  if (ambito) { ambito.arreglo = world.animals; ambito.indice = undefined; }
+}
+export function conRejillaFauna<R>(world: AnimalWorld, fn: () => R): R {
+  let ambito = ambitosFauna.get(world);
+  if (!ambito) { ambito = { profundidad: 0, arreglo: world.animals }; ambitosFauna.set(world, ambito); }
+  ambito.profundidad++;
+  try { return fn(); }
+  finally {
+    ambito.profundidad--;
+    if (ambito.profundidad === 0) ambitosFauna.delete(world);
+  }
+}
+/** Animales vivos en la celda exacta `(x, y)`, en orden de slot: dentro del ámbito, los mismos
+ * objetos y el mismo orden que `filter(a => a.x === x && a.y === y && a.health > 0)` sobre el
+ * arreglo vigente; `undefined` fuera del ámbito o con la rejilla inválida, para que el llamador
+ * use ese recorrido lineal, idéntico por definición. */
+export function animalesVivosEnCelda(world: AnimalWorld, x: number, y: number): Animal[] | undefined {
+  const ambito = ambitosFauna.get(world);
+  if (!ambito || (rejillaFaunaDesactivada.get(world) ?? 0) > 0 || !Number.isFinite(x) || !Number.isFinite(y)) return undefined;
+  const indice = sincronizarRejillaFauna(ambito);
+  if (!indice.valido) return undefined;
+  const lista = indice.celdas.get(cellXY(x, y));
+  if (!lista) return [];
+  const resultado: Animal[] = [];
+  for (const slot of lista) {
+    const animal = ambito.arreglo[slot]!;
+    if (animal && animal.x === x && animal.y === y && animal.health > 0) resultado.push(animal);
+  }
+  return resultado;
+}
+/** Notifica el único cambio de posición de la fauna (`move`), después de escribir `x`/`y`. */
+export function animalMovido(world: AnimalWorld, animal: Animal): void {
+  const ambito = ambitosFauna.get(world);
+  if (!ambito?.indice || (rejillaFaunaDesactivada.get(world) ?? 0) > 0) return;
+  const indice = sincronizarRejillaFauna(ambito);
+  if (!indice.valido) return;
+  const slot = indice.slotPorAnimal.get(animal);
+  if (slot === undefined || indice.arreglo[slot] !== animal) { indice.valido = false; return; }
+  const destino = cell(animal), origen = indice.celdaPorSlot.get(slot);
+  if (origen === destino) return;
+  const listaOrigen = indice.celdas.get(origen!);
+  if (listaOrigen) {
+    const i = listaOrigen.indexOf(slot);
+    if (i >= 0) listaOrigen.splice(i, 1);
+    if (!listaOrigen.length) indice.celdas.delete(origen!);
+  }
+  let listaDestino = indice.celdas.get(destino);
+  if (!listaDestino) { listaDestino = []; indice.celdas.set(destino, listaDestino); }
+  let lo = 0, hi = listaDestino.length;
+  while (lo < hi) { const mid = (lo + hi) >>> 1; if (listaDestino[mid]! < slot) lo = mid + 1; else hi = mid; }
+  listaDestino.splice(lo, 0, slot);
+  indice.celdaPorSlot.set(slot, destino);
+}
+/** Gancho de prueba: fuerza el recorrido lineal dentro del ámbito, como `sinRejillaParaPruebas`. */
+export function sinRejillaFaunaParaPruebas<R>(world: AnimalWorld, fn: () => R): R {
+  rejillaFaunaDesactivada.set(world, (rejillaFaunaDesactivada.get(world) ?? 0) + 1);
+  try { return fn(); }
+  finally {
+    const depth = (rejillaFaunaDesactivada.get(world) ?? 1) - 1;
+    if (depth === 0) rejillaFaunaDesactivada.delete(world); else rejillaFaunaDesactivada.set(world, depth);
+  }
+}
+
 function habitat(animal: Animal, tile: Tile): boolean {
   return animal.species === 'fish' ? tile.terrain === 'water' : tile.terrain !== 'water' && tile.terrain !== 'shelter';
 }
@@ -228,7 +367,7 @@ function move(animal: Animal, world: AnimalWorld, state: LocalState): void {
   const from = cell(animal);
   state.counts.set(from, state.counts.get(from)! - 1);
   state.occupants.set(from, (state.occupants.get(from) ?? []).filter(a => a.id !== animal.id));
-  animal.x = next.x; animal.y = next.y; animal.lastMove = world.tick;
+  animal.x = next.x; animal.y = next.y; animal.lastMove = world.tick; animalMovido(world, animal);
   const to = cell(animal);
   state.counts.set(to, (state.counts.get(to) ?? 0) + 1);
   // Nadie conserva los arreglos de ocupantes (quien los lee copia sus elementos): añadir en el sitio da
@@ -519,15 +658,18 @@ export function stepAnimals(world: AnimalWorld, emit?: AnimalEmitter, mascara?: 
   // Filtrar conserva el orden de la máscara: sólo las crías, al final, pueden estar fuera de sitio.
   world.animals = world.animals.filter(a => a.health > 0);
   const previos = world.animals.length;
-  reproduce(world, state, active, emit); ordenCanonico(world.animals, previos); syncFauna(world.tiles, world.animals);
+  reproduce(world, state, active, emit); ordenCanonico(world.animals, previos); invalidarRejillaFauna(world); syncFauna(world.tiles, world.animals);
 }
 
 /** A human hunt removes exactly one living identity on the requested cell, at most once. */
 export function harvestAt(world: AnimalWorld, point: Point, hunterId: string, emit?: AnimalEmitter): number {
-  const victim = world.animals.filter(a => a.x === point.x && a.y === point.y && a.health > 0).sort(canonical)[0];
+  refrescarAmbitoFauna(world);
+  const enCelda = animalesVivosEnCelda(world, point.x, point.y);
+  const victim = enCelda ? enCelda.sort(canonical)[0]
+    : world.animals.filter(a => a.x === point.x && a.y === point.y && a.health > 0).sort(canonical)[0];
   if (!victim || !world.tiles.some(t => t.x === point.x && t.y === point.y)) return 0;
   death(world, victim, 'caza humana', emit, hunterId); world.animalDynamics.humanHunts++;
-  world.animals = world.animals.filter(a => a.id !== victim.id); syncFauna(world.tiles, world.animals);
+  world.animals = world.animals.filter(a => a.id !== victim.id); refrescarAmbitoFauna(world); syncFauna(world.tiles, world.animals);
   return FOOD_PER_ANIMAL[victim.species];
 }
 

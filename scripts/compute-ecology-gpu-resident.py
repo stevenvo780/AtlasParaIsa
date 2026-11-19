@@ -477,7 +477,7 @@ def main():
                 # Liberar cualquier vista/memoryview sobre SHM.mm ANTES de redimensionar (evita BufferError al crecer el mundo vivo).
                 release_body(body); body = None
                 ln=struct.unpack('<I',read_exact(4))[0]
-                if ln>1_000_000: raise ValueError('Oversized header')
+                if ln>16_777_216: raise ValueError('Oversized header')
                 req=json.loads(read_exact(ln)); amount=req.get('bytes',0); shm_amount=req.get('shmBytes',0) or 0
                 if amount<0 or amount>16_000_000_000 or shm_amount<0 or shm_amount>16_000_000_000: raise ValueError('Oversized body')
                 if shm_amount:
@@ -656,7 +656,7 @@ def main():
                     futs=[ex.submit(d.flush, tuple(ranges[di]), staging_slices[di] if staging_slices is not None else None) for di, d in enumerate(devices)]
                     parts=[f.result() for f in futs]
                     futs = None
-                    reply_header={'ok':True,'downloadedBytes':sum(p['downloadedBytes'] for p in parts),'downloadSlotsPerDevice':[p['downloadSlots'] for p in parts]}
+                    reply_header={'ok':True,'downloadedBytes':sum(p['downloadedBytes'] for p in parts),'downloadRunsPerDevice':[runs_of(p['downloadSlots']) for p in parts]}
                     if staging_slices is not None:
                         parts = None; staging_slices = None; base = None
                         emit_shm(reply_header, sum(per_device_bytes))

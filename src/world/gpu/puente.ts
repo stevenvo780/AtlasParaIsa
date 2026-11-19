@@ -80,7 +80,7 @@ class Reader {
     const out=Buffer.allocUnsafe(n); let copied=0;
     while(copied<n){ const head=this.chunks[0]; const amt=Math.min(n-copied, head.length-this.offset); head.copy(out,copied,this.offset,this.offset+amt); copied+=amt; this.offset+=amt; if(this.offset===head.length){this.chunks.shift(); this.offset=0;} }
     this.available-=n; return out; }
-  async frame(){ const size=(await this.read(4)).readUInt32LE(); if(size>1048576) throw new Error('Oversized GPU reply header');
+  async frame(){ const size=(await this.read(4)).readUInt32LE(); if(size>16777216) throw new Error('Oversized GPU reply header');
     const header=JSON.parse((await this.read(size)).toString()); if(header.error) throw new Error(header.error);
     if(header.shmBytes) { if(shmFd===null) throw new Error('GPU shm: respuesta shmBytes sin canal abierto'); return {header, body: null, shmBytes: header.shmBytes}; }
     const body=await this.read(header.bytes||0); return {header, body}; }
@@ -192,9 +192,9 @@ async function handle(job){
     const reply=await send({kind:'flush', ranges:job.ranges}, null);
     if(!reply.header.ok) throw new Error('GPU flush failed');
     let boff=0;
-    const perDevice = reply.header.downloadSlotsPerDevice||[];
-    for(let di=0; di<perDevice.length; di++){
-      const deviceRuns = runsOf(perDevice[di]);
+    const perDeviceRuns = reply.header.downloadRunsPerDevice || (reply.header.downloadSlotsPerDevice||[]).map(slots=>runsOf(slots));
+    for(let di=0; di<perDeviceRuns.length; di++){
+      const deviceRuns = perDeviceRuns[di];
       for(const f of FIELDS){
         const dst=bytesOf(buffers,f.name);
         for(const [startSlot,count] of deviceRuns){

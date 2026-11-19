@@ -560,9 +560,15 @@ export const RECORRIDOS: readonly Recorrido[] = [
       'const alive = new Set(world.people.map(person => person.id));', 'for (const community of world.communities)', 'const communities = new Set(world.communities.map(community => community.id));',
       'world.communities = world.communities.filter(', 'for (const person of world.people) if (person.communityId !== null'],
     motivo: 'Bajas y limpieza de vínculos (T142: `pruneBonds` sustituye el doble bucle sobre `departed`, mismo resultado) y comunidades.' },
-  { id: 'activacion.retiro', fase: 'activacion', fichero: 'spatial.ts', funcion: 'maintainRegions',
+  { id: 'activacion.retiro', fase: 'activacion', fichero: 'spatial.ts', funcion: 'retireActiveChunks',
     patrones: ['const meta = world.chunks[key]!;', 'for (const tile of world.tiles) {', 'for (const place of world.places) detached', 'delete world.chunks[key];', 'world.animals = world.animals.filter(', 'world.structures = world.structures.filter(', 'world.places = world.places.filter('],
-    motivo: 'Retira los chunks que nadie necesita.' },
+    motivo: 'Retira los chunks que nadie necesita: lo llaman `maintainRegions` (sin referencias) y el desalojo T163 (fuera del halo).' },
+  { id: 'activacion.haloObligatorio', fase: 'activacion', fichero: 'spatial.ts', funcion: 'mandatoryChunkKeys',
+    patrones: ['for (const person of world.people) for (const dx of REACH) for (const dy of REACH) {'],
+    motivo: 'T163: halo obligatorio (±8 celdas, ±1 chunk) de cada persona viva; esos chunks nunca se desalojan.' },
+  { id: 'activacion.distanciaFria', fase: 'activacion', fichero: 'spatial.ts', funcion: 'minChunkDistance',
+    patrones: ['for (const person of world.people) {'],
+    motivo: 'T163: distancia Chebyshev en chunks a la persona viva más cercana, para ordenar el desalojo.' },
 ];
 
 /** El área que el paso ESCRIBE alrededor de cada persona: materializa teselas, fauna, estructuras y lugares. */

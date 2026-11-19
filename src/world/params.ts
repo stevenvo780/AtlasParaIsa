@@ -363,7 +363,7 @@ export const PARAM_DESCRIPTORS: Readonly<Record<string, ParamDescriptor>> = deep
   'limites.aplicacion': { kind: 'enum', values: ['historicos', 'parametros'] },
   'persistencia.paginasSucias': { kind: 'boolean' },
   'red.deltas': { kind: 'boolean' },
-  'gobernador.senales': { kind: 'array', element: { kind: 'enum', values: ['p95'] }, minLength: 1, unique: true },
+  'gobernador.senales': { kind: 'array', element: { kind: 'enum', values: ['p95', 'max', 'rss', 'colaRed', 'saveMs'] }, minLength: 1, unique: true },
   'gobernador.politica': { kind: 'enum', values: ['apagar', 'techo'] },
 });
 const PARAM_KEYS = Object.keys(PARAM_DESCRIPTORS);
@@ -391,8 +391,7 @@ function paramValue(key: string, raw: unknown, descriptor: ParamDescriptor, text
   }
   if (descriptor.kind === 'enum') {
     if (typeof raw === 'string' && descriptor.values.includes(raw)) return raw;
-    throw new Error(`Valor inválido para "${key}": valores permitidos ${descriptor.values.join(', ')}.`
-      + (key.startsWith('gobernador.senales') ? ' Las demás señales requieren T161.' : ''));
+    throw new Error(`Valor inválido para "${key}": valores permitidos ${descriptor.values.join(', ')}.`);
   }
   const value = typeof raw === 'number' ? raw : text && typeof raw === 'string' && raw.trim() !== '' ? Number(raw.trim()) : NaN;
   if (!Number.isFinite(value)) throw new Error(`Valor no numérico para "${key}": "${typeof raw === 'string' || typeof raw === 'number' ? String(raw) : typeof raw}".`);

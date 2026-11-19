@@ -16,11 +16,11 @@ import type { ClientMessage, Gesture, GestureResult, ServerMessage, Viewport, Wo
 import { Store, fingerprint, GestureConflict, SessionRevoked } from './store.js';
 import { cookie, hashToken, makeToken, passwordVerifier, sessionHash } from './auth.js';
 import { ensureWorldInstance, readWorldInstance } from './world-instance.js';
-import { Gobernador } from './governor.js';
+import { Gobernador, teselasPorHabitante } from './governor.js';
 import { enriquecerPersona } from './persona-extra.js';
 import { CADA_PASOS, resumenVivo } from './resumen-vivo.js';
 import { clavesVivasEn } from './regiones-vivas.js';
-export { decideReproduction, decidirConTecho } from './governor.js';
+export { decideReproduction, decidirConTecho, gobernar } from './governor.js';
 
 class HttpError extends Error { constructor(readonly status: number, message: string) { super(message); } }
 export interface AppOptions {
@@ -282,7 +282,16 @@ export function createApp(options: AppOptions) {
   const runtime: RuntimeStats = { stepMs: 0, p95StepMs: 0, cloneMs: 0, simulationMs: 0, saveMs: 0, projectionMs: 0, snapshotBytes: 0, activeTiles: world.tiles.length, processRssMiB: process.memoryUsage.rss() / 1048576, tickHz: 0, tickHzObjetivo: 1000 / (options.tickMs ?? 100),
     fases: fasesEnCero(), fraccionSerial: 0,
     gobernador: { activo: world.reproductionEnabled, presupuestoMs: paramsOf(world).gobernador.presupuestoMs, p95StepMs: 0, manual: null,
-      politica: paramsOf(world).gobernador.politica, techo: null, techoObservado: null } };
+      politica: paramsOf(world).gobernador.politica, techo: null, techoObservado: null,
+      p50Ms: 0, p95Ms: 0, p99Ms: 0, maxMs: 0, faseMax: null, fasesP95: fasesEnCero(),
+      tickHz: 0, rssBytes: process.memoryUsage.rss(), saveMs: 0,
+      regionesActivas: Object.keys(world.chunks).length, teselasActivas: world.tiles.length,
+      teselasPorHabitante: teselasPorHabitante(world.tiles.length, world.people.length),
+      poblacion: world.people.length, nacimientos: world.totals.births ?? 0,
+      muertes: Object.values(world.demographyDynamics.causes).reduce((a, b) => a + b, 0),
+      colaRed: 0, maxBufferedAmount: 0, reproductionEnabled: world.reproductionEnabled, techoPoblacion: null,
+      estado: 'verde', palancaActiva: null, senalDisparadora: null, ventanasVerdesConsecutivas: 0,
+      solicitarRetiroPaginasFrias: false, subscribeMsEfectivo: 0, cadaTicksEfectivo: paramsOf(world).persistencia.cadaTicks } };
   /**
    * Ruling R17: la población la limita el HARDWARE, no un tope fijo. Tras medir el paso,
    * el gobernador compara el p95 (ventana de 120 pasos) con `gobernador.presupuestoMs`.
@@ -293,14 +302,62 @@ export function createApp(options: AppOptions) {
    * Una orden humana manda siempre: mientras `runtime.gobernador.manual` no sea `null`,
    * el gobernador observa y publica el p95 pero no toca `reproductionEnabled`.
    */
-  function governReproduction(draft: World): void {
+  /** T162: efectos vigentes de las palancas de red y guardado para los pasos siguientes.
+   * Sin palanca activa valen 0 (sin suelo) y la cadencia declarada en `persistencia.cadaTicks`. */
+  let suscripcionGobernadorMs = 0;
+  let cadaTicksGobernador = paramsOf(world).persistencia.cadaTicks;
+  function gobernar(draft: World): void {
     const stats = runtime.gobernador!, params = paramsOf(draft).gobernador;
     stats.presupuestoMs = params.presupuestoMs; stats.politica = params.politica;
     stats.p95StepMs = runtime.p95StepMs;
-    if (stats.manual !== null) { draft.reproductionEnabled = stats.manual; stats.activo = stats.manual; return; }
-    draft.reproductionEnabled = gobernador.decidir(params, draft.reproductionEnabled, draft.people.length, draft.tiles.length, draft.tick);
+    if (stats.manual !== null) {
+      draft.reproductionEnabled = stats.manual; stats.activo = stats.manual;
+      gobernador.estadoGobernador = 'manual'; gobernador.palancaActiva = null; gobernador.senalDisparadora = null;
+      suscripcionGobernadorMs = 0; cadaTicksGobernador = paramsOf(draft).persistencia.cadaTicks;
+      publicarSenalesGobernador(draft); return;
+    }
+    let colaRed = 0;
+    for (const socket of clients.keys()) colaRed = Math.max(colaRed, socket.bufferedAmount);
+    const decision = gobernador.gobernar({ presupuestoMs: params.presupuestoMs, politica: params.politica, senales: params.senales,
+      valores: { saveMs: runtime.saveMs, colaRed, rss: process.memoryUsage().rss / 1048576 },
+      // El retiro de páginas frías es T163: aún no está habilitado, así que la palanca de área no gana ni solicita.
+      areaHabilitada: false, paginasFriasExceso: 0,
+      subscribeMs: 0, cadaTicks: paramsOf(draft).persistencia.cadaTicks, gestoEnEstePaso: false },
+    draft.reproductionEnabled, draft.people.length, draft.tiles.length, draft.tick);
+    draft.reproductionEnabled = decision.reproductionEnabled;
+    suscripcionGobernadorMs = decision.palancaActiva === 'red' ? decision.subscribeMsEfectivo : 0;
+    cadaTicksGobernador = decision.palancaActiva === 'guardado' ? decision.cadaTicksEfectivo : paramsOf(draft).persistencia.cadaTicks;
     stats.techo = gobernador.estado.techo; stats.techoObservado = gobernador.techoObservado;
     stats.activo = draft.reproductionEnabled;
+    publicarSenalesGobernador(draft);
+  }
+  /** T161: publica las señales de la ventana y del mundo servido. Solo lee; nunca toca el mundo. */
+  function publicarSenalesGobernador(mundo: World): void {
+    const stats = runtime.gobernador!; if (!stats) return;
+    const senales = gobernador.senales();
+    const poblacion = mundo.people.length, teselasActivas = mundo.tiles.length;
+    let colaRed = 0;
+    for (const socket of clients.keys()) colaRed = Math.max(colaRed, socket.bufferedAmount);
+    stats.p50Ms = senales.p50Ms; stats.p95Ms = senales.p95Ms; stats.p99Ms = senales.p99Ms; stats.p95StepMs = senales.p95Ms;
+    stats.maxMs = senales.maxMs; stats.faseMax = senales.faseMax;
+    stats.fasesP95 = Object.assign(fasesEnCero(), senales.fasesP95);
+    stats.tickHz = runtime.tickHz; stats.rssBytes = process.memoryUsage().rss; stats.saveMs = runtime.saveMs;
+    stats.regionesActivas = Object.keys(mundo.chunks).length; stats.teselasActivas = teselasActivas;
+    stats.teselasPorHabitante = teselasPorHabitante(teselasActivas, poblacion);
+    stats.poblacion = poblacion; stats.nacimientos = mundo.totals.births ?? 0;
+    stats.muertes = Object.values(mundo.demographyDynamics.causes).reduce((a, b) => a + b, 0);
+    stats.colaRed = colaRed; stats.maxBufferedAmount = colaRed;
+    const params = paramsOf(mundo).gobernador;
+    stats.presupuestoMs = params.presupuestoMs; stats.politica = params.politica;
+    stats.reproductionEnabled = mundo.reproductionEnabled; stats.activo = mundo.reproductionEnabled;
+    stats.techo = gobernador.estado.techo; stats.techoPoblacion = gobernador.estado.techo;
+    stats.techoObservado = gobernador.techoObservado;
+    stats.estado = stats.manual !== null ? 'manual' : gobernador.estadoGobernador;
+    stats.palancaActiva = stats.manual !== null ? null : gobernador.palancaActiva;
+    stats.senalDisparadora = stats.manual !== null ? null : gobernador.senalDisparadora;
+    stats.ventanasVerdesConsecutivas = gobernador.ventanasVerdesConsecutivas;
+    stats.solicitarRetiroPaginasFrias = stats.manual !== null ? false : gobernador.solicitarRetiroPaginasFrias;
+    stats.subscribeMsEfectivo = suscripcionGobernadorMs; stats.cadaTicksEfectivo = cadaTicksGobernador;
   }
   const proyectar = (viewport?: Viewport) => {
     const start = monotonicNow(), projected = projectWorld(world, viewport, context);
@@ -441,7 +498,9 @@ export function createApp(options: AppOptions) {
     for (const [socket, client] of clients) {
       if (!store.sessionValid(client.hash)) { socket.close(4001, 'La sesión terminó.'); continue; }
       // T024 (P1): un cliente suscrito con `intervaloMs` no recibe empujes más seguido que eso.
-      if (client.subscribeMs && now - client.lastBroadcastAt < client.subscribeMs) continue;
+      // T162: la palanca de red sube ese suelo efectivo antes que descartar mensajes.
+      const subscribeEfectivo = Math.max(client.subscribeMs, suscripcionGobernadorMs);
+      if (subscribeEfectivo && now - client.lastBroadcastAt < subscribeEfectivo) continue;
       sendView(socket);
     }
   }
@@ -542,7 +601,9 @@ export function createApp(options: AppOptions) {
       // población grande, esperar `cadaTicks` pasos puede acumular más recibos de los que caben
       // entre guardados (ver `technologyJournalNearCapacity`/`chronicleJournalNearCapacity`); esto
       // es lo que de verdad evita morir, no solo el tope más alto de esos módulos.
-      if (valid.length > 0 || draft.tick % paramsOf(draft).persistencia.cadaTicks === 0
+      // T162: la cadencia vigente puede venir espaciada por la palanca de guardado; el gesto
+      // (`valid.length > 0`) sigue forzando el guardado en su propio paso, sin tocar esa invariante.
+      if (valid.length > 0 || draft.tick % cadaTicksGobernador === 0
         || technologyJournalNearCapacity(draft.technology) || chronicleJournalNearCapacity(draft)
         || technologyCatalogueNearCapacity(draft.technology)) {
         const saveStarted = monotonicNow();
@@ -557,9 +618,9 @@ export function createApp(options: AppOptions) {
       // Tampoco lo deja a medio paso: sin reserva, lo que falle desde aquí pausa sobre un paso entero.
       punto = null; sinReserva = false;
       runtime.stepMs = monotonicNow() - stepStarted;
-      runtime.p95StepMs = gobernador.registrar(runtime.stepMs);
+      runtime.p95StepMs = gobernador.registrar(runtime.stepMs, { ...medicion.fases, save: runtime.saveMs });
       // El gobernador decide sobre el mundo ya vigente: la próxima `reproduce()` lo lee.
-      governReproduction(world);
+      gobernar(world);
       if (world.tick % CADA_PASOS === 0 || !runtime.natalidad) Object.assign(runtime, resumenVivo(world));
       runtime.activeTiles = world.tiles.length; runtime.processRssMiB = process.memoryUsage.rss() / 1048576; runtime.snapshotBytes = store.lastSnapshotBytes;
       for (let i=0; i<valid.length; i++) { pending.delete(valid[i].gesture.id); valid[i].resolve(results[i]); }
@@ -572,11 +633,13 @@ export function createApp(options: AppOptions) {
         const broadcastStarted = performance.now();
         broadcast();
         fases.broadcast = performance.now() - broadcastStarted;
+        gobernador.medidas.anotarUltimaFase('broadcast', fases.broadcast);
       }
       // Con visores, `broadcast` ya la renovó; sin ellos, una proyección cada `VISTA_RESERVA_PASOS` pasos.
       if (reservaVieja()) renovarReserva();
       runtime.fases = fases;
       runtime.fraccionSerial = fraccionSerial(fases);
+      publicarSenalesGobernador(world);
     } catch (error) {
       // T104: deshacer va PRIMERO, y vale para las dos salidas. Sin clon, llegar aquí con punto
       // significa que el mundo vigente está a medio paso; un mundo que no se pudo deshacer ya no
@@ -818,7 +881,7 @@ export function createApp(options: AppOptions) {
     /** Copia de las métricas vivas (incluido el gobernador de ruling R17); solo lectura. */
     get runtime(): RuntimeStats { return { ...runtime, ...(runtime.gobernador ? { gobernador: { ...runtime.gobernador } } : {}) }; },
     /** Orden humana sobre la reproducción: manda sobre el gobernador. `null` la devuelve al hardware. */
-    setReproduccionManual(value: boolean | null) { runtime.gobernador!.manual = value; if (value !== null) { world.reproductionEnabled = value; runtime.gobernador!.activo = value; } },
+    setReproduccionManual(value: boolean | null) { runtime.gobernador!.manual = value; if (value !== null) { world.reproductionEnabled = value; runtime.gobernador!.activo = value; runtime.gobernador!.reproductionEnabled = value; runtime.gobernador!.estado = 'manual'; runtime.gobernador!.palancaActiva = null; gobernador.estadoGobernador = 'manual'; gobernador.palancaActiva = null; } },
     async close() {
       stopped = true; if (timer) clearTimeout(timer); clearInterval(heartbeat); clearInterval(latido);
       for (const item of pending.values()) item.reject(new HttpError(503, 'El servicio se está cerrando.'));

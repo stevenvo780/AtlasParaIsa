@@ -15,7 +15,7 @@ import { CronicaBuffer, clasificar, contadoresDe, esHito, filtrar, momento, quie
 import { decidirModo, setModo, type Modo } from './modo.js';
 import { capasDeCalor, leyendaEnRango, rangoRecibido, type Capa } from './calor.js';
 import { ausenteEstado, demographicSummary, rotuloRecuento } from './censo-view.js';
-import { estadoCrecimiento, ritmo, ultimoFrenazo } from './gobernador-view.js';
+import { estadoCrecimiento, renderPanelGobernador, ritmo, ultimoFrenazo } from './gobernador-view.js';
 import { distribution, sparkline, statCard } from './charts.js';
 import { notaAcercamientos, seccionNacimientos } from './natalidad-view.js';
 import { seccionDesacuerdos, seccionJuntos } from './cooperacion-view.js';
@@ -571,8 +571,15 @@ function serverPerformance(runtime: WorldView['performance']): string {
   const receivedCard = received ? statCard('Recibido por este navegador', `≈ ${number(received.meanBytes / 1024, 0)} KiB`, `Por actualización (media de las últimas)${received.perSecond ? ` · ${number(received.perSecond, 1)} actualizaciones/s` : ''}. Tamaño del JSON recibido, sin cabeceras.`) : statCard('Recibido por este navegador', '—', 'Aún no llegó ninguna actualización por la conexión en vivo.');
   return `<section class="stats-section"><div class="stats-section-heading"><h3>Servidor · CPU y persistencia</h3><span>Mediciones reales</span></div><p class="stats-note">Duración del trabajo y memoria del proceso. No representan el porcentaje de uso total de la CPU.</p><div class="stats-grid">${p95Card}${paceCard}${growthCard}${brakeCard}${statCard('Paso de simulación', `${number(runtime.stepMs, 2)} ms`, 'Último paso')}${statCard('Guardado', `${number(runtime.saveMs, 2)} ms`, 'Persistencia')}${statCard('Proyección', `${number(runtime.projectionMs, 2)} ms`, 'Preparación de una vista')}${statCard('Memoria del proceso', `${number(runtime.processRssMiB, 1)} MiB`, 'RSS del servidor')}${statCard('Instantánea guardada en disco', `${number(runtime.snapshotBytes / 1024, 1)} KiB`, 'Tamaño del último guardado del mundo')}${receivedCard}</div></section>`;
 }
+/** T165: panel del gobernador en el cajón Mundo, visible en escritorio y en modo observador. */
+function renderPanelGobernadorEnDom(): void {
+  const contenedor = document.getElementById('panel-gobernador'); if (!contenedor) return;
+  const html = world ? renderPanelGobernador(world.performance, world.stats?.population) : '';
+  contenedor.innerHTML = html; contenedor.hidden = !html;
+}
 function renderStats(): void {
   const panel = document.getElementById('stats-content'); if (!panel) return;
+  renderPanelGobernadorEnDom();
   const restore = retainViewState(panel);
   renderStatsContent();
   restore();

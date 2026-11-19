@@ -182,20 +182,21 @@ export interface RuntimeStats { stepMs: number; p95StepMs: number; saveMs: numbe
   gobernador?: { activo: boolean; presupuestoMs: number; p95StepMs: number; manual: boolean | null;
     /** Política vigente (`gobernador.politica`), techo de población vigente con la política `techo`
      * (null = sin freno) y el último frenazo registrado (T164; no se borra al volver a verde). */
-    politica?: 'apagar' | 'techo'; techo?: number | null;
-    techoObservado?: { p95: number; maxMs: number; poblacion: number; teselasActivas: number; teselasPorHabitante: number; senal: string; tick: number; motivo: string } | null;
+    politica?: string; techo?: number | null;
+    techoObservado?: { p95: number; maxMs?: number; poblacion: number; teselasActivas: number; teselasPorHabitante: number; senal: string; tick: number; motivo: string } | null;
     /** T161: señales de la ventana móvil de 120 pasos y del mundo servido. El máximo por
      * ventana (`maxMs` + `faseMax`) delata los picos de cadencia larga que el p95 no ve. */
-    p50Ms?: number; p95Ms?: number; p99Ms?: number; maxMs?: number; faseMax?: FaseNombre | null;
+    p50Ms?: number; p95Ms?: number; p99Ms?: number; maxMs?: number; faseMax?: FaseNombre | string | null;
     fasesP95?: Partial<Record<FaseNombre, number>>;
     tickHz?: number; rssBytes?: number; saveMs?: number;
     regionesActivas?: number; teselasActivas?: number; teselasPorHabitante?: number;
     poblacion?: number; nacimientos?: number; muertes?: number;
     colaRed?: number; maxBufferedAmount?: number;
     reproductionEnabled?: boolean; techoPoblacion?: number | null;
-    /** T162: estado del gobernador, única palanca activa, señal que disparó y cuenta de
+    /** T162/T165: estado del gobernador, única palanca activa, señal que disparó y cuenta de
      * ventanas verdes hacia la salida de rojo. `manual` manda sobre toda señal automática. */
     estado?: 'verde' | 'amarillo' | 'rojo' | 'manual';
+    senal?: string;
     palancaActiva?: 'area' | 'nacimientos' | 'red' | 'guardado' | null;
     senalDisparadora?: string | null; ventanasVerdesConsecutivas?: number;
     solicitarRetiroPaginasFrias?: boolean; subscribeMsEfectivo?: number; cadaTicksEfectivo?: number }; }

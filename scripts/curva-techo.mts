@@ -78,10 +78,16 @@ const FRACCION_SERIAL_HOY = 1;
  * los bloques 3×3 que cada una mantiene viva se solapen. */
 const SEPARACION_ANCLAS_CHUNKS = 3;
 const COLUMNAS_ANCLAS = 64; // ancho de la cuadrícula de anclas; solo importa que quepa en MAX_COORDINATE
+/** Habitantes por bloque de ancla en `--densidad-constante` (~2304 teselas / 24 ≈ 96 teselas/hab). */
+const HABITANTES_POR_BLOQUE = 24;
 
 function arg(flag: string): string | undefined {
   const index = process.argv.indexOf(flag);
   return index === -1 ? undefined : process.argv[index + 1];
+}
+
+function hasFlag(flag: string): boolean {
+  return process.argv.includes(flag);
 }
 
 /** Igual fórmula que `scripts/lab/replica.ts`: p50/p95 de una ventana de muestras reales. */
@@ -148,6 +154,63 @@ function buscarTeselaCaminable(world: World, cx: number, cy: number): { x: numbe
     if (tile && tile.terrain !== 'water') return { x, y };
   }
   throw new Error(`No se encontró tesela transitable cerca de (${cx},${cy}) tras activar su chunk.`);
+}
+
+/** Recoge hasta `limite` teselas caminables espaciadas en el entorno de `(cx,cy)` dentro de un
+ * bloque ya activado por `maintainRegions`, evitando apilar toda la población sobre una casilla. */
+function plazasCaminablesEnBloque(world: World, cx: number, cy: number, limite: number): { x: number; y: number }[] {
+  const plazas: { x: number; y: number }[] = [];
+  for (let paso = 2; paso >= 1 && plazas.length < limite; paso--) {
+    for (let dy = -6; dy <= 6 && plazas.length < limite; dy += paso) {
+      for (let dx = -6; dx <= 6 && plazas.length < limite; dx += paso) {
+        if (paso === 1 && dx % 2 === 0 && dy % 2 === 0) continue;
+        const x = cx + dx, y = cy + dy, tile = tileAt(world, { x, y });
+        if (tile && tile.terrain !== 'water') plazas.push({ x, y });
+      }
+    }
+  }
+  if (!plazas.length) plazas.push(buscarTeselaCaminable(world, cx, cy));
+  return plazas;
+}
+
+interface EstadoDensidad { anclaIdx: number; plazas: { x: number; y: number }[]; indicePlaza: number; }
+
+/** Añade clones distribuidos en bloques espaciados de `HABITANTES_POR_BLOQUE` personas para
+ * mantener `teselasPorHabitante` aproximadamente constante (sin apilar cientos de habitantes
+ * sobre las 14 teselas fundadoras). */
+function agregarHabitantesDensidadConstante(
+  world: World, objetivo: number, contador: { n: number }, estado: EstadoDensidad, context: WorldContext,
+): void {
+  if (world.people.length >= objetivo) return;
+  const plantilla = founderTemplate(world);
+  if (!estado.plazas.length) {
+    estado.plazas = world.people.filter(p => p.genome.generation === 0).map(p => ({ x: p.x, y: p.y }));
+    estado.indicePlaza = world.people.length;
+  }
+  while (world.people.length < objetivo) {
+    if (estado.indicePlaza >= estado.plazas.length) {
+      const idx = ++estado.anclaIdx; // empieza en 1 para no solaparse con el bloque inicial (0,0)
+      const { x, y } = coordenadaAncla(idx);
+      const n = contador.n++;
+      const ancla = clonarPlantillaSintetica(plantilla);
+      ancla.id = `synthetic-${n}`;
+      desvincular(ancla, x, y);
+      world.people.push(ancla);
+      maintainRegions(world, context);
+      const destino = buscarTeselaCaminable(world, x, y);
+      if (destino.x !== ancla.x || destino.y !== ancla.y) desvincular(ancla, destino.x, destino.y);
+      const nuevas = plazasCaminablesEnBloque(world, destino.x, destino.y, HABITANTES_POR_BLOQUE);
+      estado.plazas.push(...nuevas.slice(1));
+      estado.indicePlaza = estado.plazas.length - Math.max(0, nuevas.length - 1);
+      continue;
+    }
+    const n = contador.n++;
+    const persona = clonarPlantillaSintetica(plantilla);
+    persona.id = `synthetic-${n}`;
+    const destino = estado.plazas[estado.indicePlaza++]!;
+    desvincular(persona, destino.x, destino.y);
+    world.people.push(persona);
+  }
 }
 
 /** Añade anclas hasta que `world.tiles.length` (teselasActivas) llegue a `objetivo`; cada
@@ -259,8 +322,10 @@ async function main(): Promise<void> {
   const gpuArg = arg('--gpu');
   const escala = arg('--escala');
   const hastaArg = arg('--hasta');
+  const cadaTicksArg = arg('--cada-ticks');
+  const densidadConstante = hasFlag('--densidad-constante');
   const salida = arg('--salida');
-  const uso = 'Uso: --seed N --hilos N --gpu "0,1" --escala habitantes|teselas --hasta N --salida <dir>.';
+  const uso = 'Uso: --seed N --hilos N --gpu "0,1" --escala habitantes|teselas --hasta N [--cada-ticks N] [--densidad-constante] --salida <dir>.';
   if (!Number.isInteger(seed) || seed < 0) throw new Error(`${uso} (seed entero ≥ 0).`);
   if (!Number.isInteger(hilos) || hilos < 1 || hilos > 512) throw new Error(`${uso} (hilos entero en [1,512]; motor.hilos, T102, no tiene backend todavía).`);
   const gpu = gpuArg ? gpuArg.split(',').map(s => {
@@ -271,6 +336,9 @@ async function main(): Promise<void> {
   if (escala !== 'habitantes' && escala !== 'teselas') throw new Error(`${uso} (--escala es "habitantes" o "teselas").`);
   const hasta = hastaArg === undefined ? undefined : Number(hastaArg);
   if (hasta !== undefined && (!Number.isInteger(hasta) || hasta < 1)) throw new Error(`${uso} (--hasta es un entero ≥ 1).`);
+  const cadaTicks = cadaTicksArg === undefined ? undefined : Number(cadaTicksArg);
+  if (cadaTicks !== undefined && (!Number.isInteger(cadaTicks) || cadaTicks < 1)) throw new Error(`${uso} (--cada-ticks es un entero ≥ 1).`);
+  if (densidadConstante && escala !== 'habitantes') throw new Error(`${uso} (--densidad-constante solo aplica a --escala habitantes).`);
   if (!salida) throw new Error(`${uso} (falta --salida).`);
   if (hilos > 1 || gpu.length > 0) console.warn(`AVISO: --hilos ${hilos} / --gpu [${gpu.join(',')}] se registran en motor.hilos/motor.gpu (T102) pero HOY no existe ningún backend paralelo ni de GPU: el paso corre 100 % serial en 1 hilo.`);
   mkdirSync(salida, { recursive: true });
@@ -279,7 +347,19 @@ async function main(): Promise<void> {
   process.env.CARTA_DATA_DIR = dataDir;
   const store = new Store(join(dataDir, 'world.sqlite'));
   try {
-    const params: WorldParams = { ...DEFAULT_PARAMS, motor: { ...DEFAULT_PARAMS.motor, hilos, gpu } };
+    const bloquesEstimados = densidadConstante ? Math.max(16, Math.ceil((hasta ?? 8192) / HABITANTES_POR_BLOQUE) + 4) : 0;
+    const params: WorldParams = {
+      ...DEFAULT_PARAMS,
+      motor: { ...DEFAULT_PARAMS.motor, hilos, gpu },
+      ...(cadaTicks !== undefined ? { persistencia: { ...DEFAULT_PARAMS.persistencia, cadaTicks } } : {}),
+      ...(densidadConstante ? {
+        limites: {
+          ...DEFAULT_PARAMS.limites,
+          chunks: Math.max(DEFAULT_PARAMS.limites.chunks, bloquesEstimados * 10),
+          teselasActivas: Math.max(DEFAULT_PARAMS.limites.teselasActivas, bloquesEstimados * 10 * 256),
+        },
+      } : {}),
+    };
     let world = createWorld(seed, params);
     world.reproductionEnabled = false; // la escala la decide el instrumento, no el emparejamiento orgánico (ver cabecera)
     // P3 (igual que replica.ts): guardar ANTES de simular fija la catalogación de producción y
@@ -288,6 +368,7 @@ async function main(): Promise<void> {
     const context = store.context;
 
     const contador = { n: 0 };
+    const estadoDensidad: EstadoDensidad = { anclaIdx: 0, plazas: [], indicePlaza: 0 };
     const rolling = new RollingStepPerformance();
     const puntos: Punto[] = [];
     let objetivo = escala === 'habitantes' ? world.people.length : world.tiles.length;
@@ -295,8 +376,10 @@ async function main(): Promise<void> {
     let motivoParada = '';
 
     for (;;) {
-      if (escala === 'habitantes') agregarHabitantesSinteticos(world, objetivo, contador);
-      else world = agregarAnclasSinteticas(world, objetivo, contador, context);
+      if (escala === 'habitantes') {
+        if (densidadConstante) agregarHabitantesDensidadConstante(world, objetivo, contador, estadoDensidad, context);
+        else agregarHabitantesSinteticos(world, objetivo, contador);
+      } else world = agregarAnclasSinteticas(world, objetivo, contador, context);
 
       const tiempos: number[] = [], beats: number[] = [];
       let p95 = 0;
@@ -344,6 +427,8 @@ async function main(): Promise<void> {
 
     const curva = {
       seed, escala, hilosSolicitados: hilos, gpuSolicitada: gpu,
+      ...(cadaTicks !== undefined ? { cadaTicks } : {}),
+      ...(densidadConstante ? { densidadConstante: true } : {}),
       presupuestoMs: paramsOf(world).gobernador.presupuestoMs, motivoParada,
       sha: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
       digest: worldSourceDigest(), puntos,

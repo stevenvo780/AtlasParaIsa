@@ -385,6 +385,46 @@ function porComunidad(people: readonly Person[]): Map<string | null, Person[]> {
   return grupos;
 }
 
+/** Holgura bajo la cual la media aproximada se rehace con el pliegue de siempre.
+ * El error medido de la aproximación frente a ese pliegue queda por debajo de 1e-11
+ * incluso con un millón de pares; 1e-9 no cambia ninguna comparación lejana y obliga
+ * al pliegue exacto en el filo de `confianzaSalida`. */
+const MARGEN_MEDIA_CONFIANZA = 1e-9;
+interface GrupoSalida { id: string; miembros: readonly Person[]; ids: ReadonlySet<string>; salidos: Set<string>; }
+function grupoSalidaDe(id: string, iniciales: Map<string | null, Person[]>, cache: Map<string, GrupoSalida>): GrupoSalida {
+  const previo = cache.get(id);
+  if (previo) return previo;
+  const miembros = iniciales.get(id) ?? [];
+  const ids = new Set<string>();
+  for (const p of miembros) ids.add(p.id);
+  const grupo: GrupoSalida = { id, miembros, ids, salidos: new Set() };
+  cache.set(id, grupo);
+  return grupo;
+}
+/** Misma media que `peers.reduce((sum, p) => sum + (bonds[p.id] ?? 0,2), 0) / peers.length`
+ * (o 0,2 si no queda nadie), sin reescanear el grupo por persona. Un lazo ausente vale 0,2:
+ * la media es `0,2 + exceso / n`, y el exceso sólo recorre lazos guardados hacia quien sigue
+ * dentro. En este bucle sólo se sale, así que `salidos` son las bajas ya decididas, en orden
+ * de `world.people`. El resultado sólo se compara con el umbral. */
+function mediaConfianza(person: Person, grupo: GrupoSalida, umbral: number): number {
+  const n = grupo.miembros.length - 1 - grupo.salidos.size;
+  if (n <= 0) return 0.2;
+  let extra = 0;
+  for (const id in person.bonds) {
+    if (!Object.hasOwn(person.bonds, id) || id === person.id || !grupo.ids.has(id) || grupo.salidos.has(id)) continue;
+    extra += (person.bonds[id] ?? 0.2) - 0.2;
+  }
+  const aprox = (0.2 * n + extra) / n;
+  if (Math.abs(aprox - umbral) > MARGEN_MEDIA_CONFIANZA) return aprox;
+  let sum = 0, count = 0;
+  for (const peer of grupo.miembros) {
+    if (peer === person || peer.communityId !== grupo.id) continue;
+    sum += person.bonds[peer.id] ?? 0.2;
+    count++;
+  }
+  return count ? sum / count : 0.2;
+}
+
 /**
  * Ley candidata `social.radioConvivencia` (hipótesis COM, 2026-09-22): la pertenencia es con quién
  * convivo y en quién confío, no una etiqueta de nacimiento. Dos reglas locales, sin umbrales nuevos
@@ -408,8 +448,14 @@ function reviseByCohabitation(world: World, emit: Emit, radius: number, iniciale
     // copia de `world.communities` no recorre): nadie entró en `group` desde que se hizo `iniciales`.
     const members = (iniciales.get(group.id) ?? []).filter(p => p.communityId === group.id);
     if (members.length < 4 || world.communities.length >= cap) continue;
-    const center = { x: members.reduce((sum, p) => sum + p.x, 0) / members.length, y: members.reduce((sum, p) => sum + p.y, 0) / members.length };
+    // Un solo pliegue por coordenada, el mismo orden que los dos `reduce`: el centroide no se mueve.
+    let sumX = 0, sumY = 0;
+    for (const p of members) { sumX += p.x; sumY += p.y; }
+    const center = { x: sumX / members.length, y: sumY / members.length };
     const memberSet = new Set(members);
+    // R1 cuenta mortales del origen. No cambia mientras se busca al primer núcleo: `isMortalMember`
+    // lee el rol, y la fisión (una por grupo) reasigna `communityId` sólo después de esta cuenta.
+    const mortalesDeOrigen = disolver ? members.filter(isMortalMember).length : 0;
     for (const person of members) {
       const away = distance(person, center);
       if (away <= radius) continue;
@@ -419,7 +465,7 @@ function reviseByCohabitation(world: World, emit: Emit, radius: number, iniciale
         // R1: arreglo en origen. El grupo nuevo y el de origen retienen cada uno ≥ 3 MORTALES
         // (antes bastaba con que el origen conservara a alguien, cualquiera; eso fabricaba restos).
         const mortalFounders = founders.filter(isMortalMember).length;
-        const originMortalsAfter = members.filter(isMortalMember).length - mortalFounders;
+        const originMortalsAfter = mortalesDeOrigen - mortalFounders;
         if (mortalFounders < 3 || originMortalsAfter < 3 || !algunoCerca(world.places, person, 8, place => distance(person, place) <= 7)) continue;
       } else if (core.length < 2 || core.length + 1 >= members.length || !algunoCerca(world.places, person, 8, place => distance(person, place) <= 7)) continue;
       const id = `community-${++world.communityCounter}`;
@@ -495,15 +541,21 @@ export function updateCommunities(world: World, emit: Emit): void {
   // adelante); con `disolucion=0` (default) todo camino de abajo toma la rama de siempre.
   const comD = radioConvivencia > 0 && disolucion === 1;
   const iniciales = porComunidad(world.people);
+  // Una foto por grupo que de verdad revisa a alguien. Quien no llega a distancia cultural 0,3
+  // no la construye: en el paso típico este bucle sale en O(P).
+  const salida = new Map<string, GrupoSalida>();
+  const comunidadesPorId = new Map(world.communities.map(c => [c.id, c]));
   for (const person of world.people) {
-    const group = world.communities.find(c => c.id === person.communityId);
+    const group = person.communityId ? comunidadesPorId.get(person.communityId) : undefined;
     if (!group || culturalDistance(person.culture, group.culture) < 0.3) continue;
-    // En este bucle sólo se sale (a null): la lista inicial filtrada por la pertenencia actual es el `filter` de siempre.
-    const peers = (iniciales.get(group.id) ?? []).filter(p => p !== person && p.communityId === group.id);
-    const trust = peers.length ? peers.reduce((sum, p) => sum + (person.bonds[p.id] ?? 0.2), 0) / peers.length : 0.2;
+    // En este bucle sólo se sale (a null). La media usa la foto inicial y las bajas ya hechas,
+    // que es el filtro `p !== person && p.communityId === group.id` de antes, en orden de slot.
+    const grupo = grupoSalidaDe(group.id, iniciales, salida);
+    const trust = mediaConfianza(person, grupo, confianzaSalida);
     const alternatives = vecinos(world, person, 7, p => p !== person && p.communityId !== group.id && distance(person, p) <= 6 && (person.bonds[p.id] ?? 0) >= 0.3 && culturalDistance(person.culture, p.culture) < distanciaAlternativa, 'updateCommunities:alternatives');
     if (trust >= confianzaSalida || alternatives.length < 2) continue;
     person.communityId = null;
+    grupo.salidos.add(person.id);
     emit({ kind: 'community', actors: [person.id], x: person.x, y: person.y, source: 'simulation', text: `${person.name} dejó ${group.name} y buscó otra comunidad cercana.`, cause: 'Prácticas distintas, confianza interna baja y al menos dos contactos cercanos compatibles; la pertenencia es revisable.' });
   }
   if (radioConvivencia > 0) reviseByCohabitation(world, emit, radioConvivencia, iniciales, disolucion === 1);
@@ -513,17 +565,25 @@ export function updateCommunities(world: World, emit: Emit): void {
     const members = actuales.get(group.id) ?? [];
     group.members = members.map(p => p.id);
     if (members.length) {
-      for (const key of ['sharing','stewardship','openness'] as const) group.culture[key] = members.reduce((sum, p) => sum + p.culture[key], 0) / members.length;
-      group.x = Math.round(members.reduce((sum, p) => sum + p.x, 0) / members.length); group.y = Math.round(members.reduce((sum, p) => sum + p.y, 0) / members.length);
+      // Un pliegue por campo, en orden de slot: los mismos bits que cinco `reduce` seguidos.
+      let sharing = 0, stewardship = 0, openness = 0, sx = 0, sy = 0;
+      for (const p of members) {
+        sharing += p.culture.sharing; stewardship += p.culture.stewardship; openness += p.culture.openness;
+        sx += p.x; sy += p.y;
+      }
+      const n = members.length;
+      group.culture.sharing = sharing / n; group.culture.stewardship = stewardship / n; group.culture.openness = openness / n;
+      group.x = Math.round(sx / n); group.y = Math.round(sy / n);
     }
   }
+  const gruposActuales = new Map(world.communities.map(c => [c.id, c]));
   for (const person of world.people) {
     if (person.communityId) continue;
     const nearby = vecinos(world, person, 7, p => p !== person && distance(person, p) <= 6 && (person.bonds[p.id] ?? 0) >= 0.25 && culturalDistance(person.culture, p.culture) < 0.3, 'updateCommunities:foundation');
     // Con `social.radioConvivencia` > 0 quien no tiene comunidad (una cría, un recién llegado) se une a la
     // de la mayoría de sus vecinos de confianza; con 0, a la del primero que encuentra, como siempre.
     const joined = radioConvivencia > 0 ? trustedMajority(nearby)?.id : nearby.find(p => p.communityId)?.communityId;
-    if (joined) { person.communityId = joined; world.communities.find(c => c.id === joined)?.members.push(person.id); continue; }
+    if (joined) { person.communityId = joined; gruposActuales.get(joined)?.members.push(person.id); continue; }
     const free = nearby.filter(p => !p.communityId);
     // Tope de FUNDACIÓN = `social.maxComunidades` (regla de conducta; default 8 = la de siempre).
     // La admisión `limites.comunidades` es otra cosa: lanza al validar, nunca decide aquí.
@@ -535,6 +595,7 @@ export function updateCommunities(world: World, emit: Emit): void {
     const group: CommunityView = { id, name, x: person.x, y: person.y, members: members.map(p => p.id), color: COMMUNITY_COLORS[world.communityCounter % 4]!, culture: { ...person.culture }, formedAt: world.tick, cooperation: 0, disputes: 0 };
     for (const p of members) p.communityId = id;
     world.communities.push(group);
+    gruposActuales.set(id, group);
     // NOTA (2026-09-22): este evento COMPARTE el arreglo con `group.members`. Un nacimiento
     // del MISMO paso lo extiende retroactivamente, y esa lista extendida es la que hoy
     // guardan las instantáneas de producción. Copiarlo aquí cambiaría historias ya escritas

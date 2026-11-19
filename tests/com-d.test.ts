@@ -63,15 +63,29 @@ const con = (w: World, clave: string) => setParams(w, parseParams(clave));
  */
 function digestoSinDisolucion(world: World): string {
   const vigentes = paramsOf(world);
-  const antes = structuredClone(vigentes) as unknown as { social: Record<string, unknown>; tecnologia?: Record<string, unknown> };
+  const antes = structuredClone(vigentes) as unknown as {
+    social: Record<string, unknown>;
+    tecnologia?: Record<string, unknown>;
+    poblacion: Record<string, unknown>;
+    conducta: Record<string, unknown>;
+  };
   assert.equal(antes.social.disolucion, 0);
   delete antes.social.disolucion;
   // Fase B (`sprint/estabilidad-fase-b-20261118`): `tecnologia.*` no existía en 005b877; con sus
   // valores históricos no actúa, así que también se quita de la forma.
   assert.deepEqual(antes.tecnologia, HISTORICAL_PARAMS.tecnologia);
   delete antes.tecnologia;
+  // V12 (`sprint/v15-rules12-20261119`): claves opt-in en valor inactivo (default) no actúan.
+  assert.equal(antes.poblacion.natalidadVecindad, false);
+  delete antes.poblacion.natalidadVecindad;
+  assert.equal(antes.poblacion.radioVecindadNatalidad, 16);
+  delete antes.poblacion.radioVecindadNatalidad;
+  assert.equal(antes.conducta.politicaPeso, 0);
+  delete antes.conducta.politicaPeso;
   setParams(world, antes as unknown as WorldParams);
-  try { return digestoCanonico(world); } finally { setParams(world, vigentes); }
+  const version = world.version;
+  world.version = 11;
+  try { return digestoCanonico(world); } finally { world.version = version; setParams(world, vigentes); }
 }
 
 /** Réplica mínima de laboratorio (Store temporal guardado ANTES del primer paso, como

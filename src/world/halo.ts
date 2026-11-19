@@ -54,9 +54,9 @@ export type Fase = 'activacion' | 'gestos' | 'ecologia' | 'fauna' | 'faunaSerial
  * globales—: su alcance se inventaría y la prueba lo fija, pero el halo no lo acota. */
 export const FASES_CON_HALO: readonly Fase[] = ['decision', 'ecologia', 'fauna'];
 
-export type ClaveDeRadio = 'poblacion.radioPareja' | 'poblacion.radioLugar' | 'poblacion.radioCortejo' | 'social.disputaRadio';
+export type ClaveDeRadio = 'poblacion.radioPareja' | 'poblacion.radioLugar' | 'poblacion.radioCortejo' | 'poblacion.radioVecindadNatalidad' | 'social.disputaRadio';
 /** Radio que dicta una ley parametrizada; `activa` es la clave que la apaga cuando vale 0. */
-export interface RadioParametrizado { readonly param: ClaveDeRadio; readonly activa?: 'poblacion.cortejo' }
+export interface RadioParametrizado { readonly param: ClaveDeRadio; readonly activa?: 'poblacion.cortejo' | 'poblacion.natalidadVecindad' }
 export type Radio = number | RadioParametrizado;
 
 /** Dónde vive una entrada: fichero de `src/world`, declaración de primer nivel que la contiene y fragmentos
@@ -99,7 +99,7 @@ const ll = (fichero: string, funcion: string, llama: string, centro: string, pat
 
 export const RAICES: readonly Raiz[] = [
   { fase: 'decision', fichero: 'index.ts', funcion: 'choose',
-    llamador: { fichero: 'index.ts', funcion: 'bodyAndAction', patrones: ["(person.thirst > 0.9 && person.action !== 'drink'))) choose(world, person);"] },
+    llamador: { fichero: 'index.ts', funcion: 'bodyAndAction', patrones: ["(person.thirst > 0.9 && person.action !== 'drink'))) choose(world, person, policyScores);"] },
     seleccion: ['accion.destino', 'accion.aqui'],
     nota: 'Quién decide lo resuelve `bodyAndAction` en la cadena serial: su turno (`decisionAt`) y el disparador de destino agotado, que lee la tesela y el agua de su destino propio (`accion.destino`: hasta 4 096 celdas con una orden). Al repartir `choose`, ese disparador se evalúa antes y fuera del halo. `choose` tampoco es de solo lectura hoy: al decidir por un recuerdo de S e I escribe un evento de crónica (id global, `addEvent`), y resolver recetas toca el LRU del catálogo (`ESTADO_GLOBAL.technology`). El halo acota lo que se lee; esas escrituras las ordena la confirmación (E.1), y este inventario no las recorre.' },
   { fase: 'fauna', fichero: 'animals.ts', funcion: 'choose',
@@ -166,6 +166,9 @@ export const ALCANCES: readonly Alcance[] = [
     ["tileAt(world, point)?.terrain === 'shelter' ? Math.max(0, ...filtrarCerca(world.structures, point, 0,", "s => s.x === point.x && s.y === point.y && s.condition > BROKEN_CONDITION && s.components.includes('roof'))"]),
   a('decision.comidaInmediata', 'teselas', 'entrada', 0, 'index.ts', 'immediateMeal', ['Math.min(tileAt(world, person)?.food ?? 0, 0.0035)']),
   a('decision.recuperarAgua', 'teselas', 'entrada', 0, 'index.ts', 'canRecoverWaterHandling', ['bodilyNeedRates(world, tileAt(world, person)!']),
+  a('decision.politicaTeselas', 'teselas', 'entrada', 4, 'index.ts', 'localPolicyObservation', ['for (let dy = -4; dy <= 4; dy++) for (let dx = -4; dx <= 4; dx++) {',
+    'if (dx * dx + dy * dy > 16) continue;', 'const tile = tileAt(world, { x: person.x + dx, y: person.y + dy });']),
+  a('decision.politicaPersonas', 'personas', 'entrada', 7, 'index.ts', 'localPolicyObservation', ["const nearby = vecinos(world, person, RADIUS + 1, other => other.id !== person.id && distance(person, other) <= RADIUS, 'policy');"]),
   a('decision.companeros', 'personas', 'entrada', 7, 'index.ts', 'explorationTarget', ["const companions = world.cooperationEnabled ? vecinos(world, person, 8, p => p.id !== person.id && distance(person, p) <= 7 && (person.bonds[p.id] ?? 0) > 0.3, 'explorationTarget') : [];"]),
   a('familia.pareja', 'personas', 'entrada', 7, 'family.ts', 'familyOpportunity', ['const partner = vecinos(world, person, 8, other => other !== person && other.id !== person.id && !!other.communityId',
     '&& distance(person, other) <= 7 && (person.bonds[other.id] ?? 0) >= 0.3 && (other.bonds[person.id] ?? 0) >= 0.3', '&& !closeKin(person, other) && reproductiveReadiness(world, other)',
@@ -270,6 +273,7 @@ export const LLAMADAS: readonly Llamada[] = [
   ll('index.ts', 'choose', 'index.ts:drinkingBody', 'decision.teselas', ['drinkingBody(world, person, candidate.target)'], 'Destinos con ruta percibida (≤ 7).'),
   ll('index.ts', 'choose', 'index.ts:explorationTarget', 'entrada', ["if (command.order === 'explore') directed.target = explorationTarget(world, person, reachableTiles);",
     'selected.target = continuingSearch ? person.target : explorationTarget(world, person, reachableTiles);']),
+  ll('index.ts', 'choose', 'index.ts:localPolicyObservation', 'entrada', ['scores = evaluatePolicySingle(localPolicyObservation(world, person), genome.weights, plasticity.bias);']),
   ll('index.ts', 'immediateMeal', 'inventions.ts:foodAvailable', 'entrada', ['Math.min(foodAvailable(world, person), 0.002)']),
   ll('index.ts', 'drinkingBody', 'inventions.ts:waterAvailable', 'entrada', ['Math.min(waterAvailable(world, point), needed)']),
   ll('index.ts', 'localRestQuality', 'inventions.ts:facilityRestQuality', 'entrada', ['facilityRestQuality(world, person)']),
@@ -390,6 +394,16 @@ export const ALCANCES_SERIALES: readonly AlcanceSerial[] = [
   s('reproduccion.pareja', 'reproduccion', 'personas', 'actor', { param: 'poblacion.radioPareja' }, 'index.ts', 'reproduce',
     ["const b = chooseReproductivePartner(world, a, vecinos(world, a, pop.radioPareja + 1, p => {", 'distance(a, b) <= pop.radioPareja'],
     { nota: 'Pareja (≤ radioPareja) y lugar (≤ radioLugar) se miden los dos desde `a`: no se componen.' }),
+  s('reproduccion.natalidadLocalRecientes', 'reproduccion', 'personas', 'actor', { param: 'poblacion.radioVecindadNatalidad', activa: 'poblacion.natalidadVecindad' }, 'natalidad-local.ts', 'localRecentBirths',
+    ['return conRejilla(world, () => vecinos(world, center, alcance, (person) => {'],
+    { nota: 'V12 (D2): nacimientos recientes en la vecindad local de radio `radioVecindadNatalidad`.' }),
+  s('reproduccion.natalidadLocalForraje', 'reproduccion', 'teselas', 'actor', 4, 'natalidad-local.ts', 'localForageSupport',
+    ['const tile = tileAt(world, { x: origenX + dx, y: origenY + dy });'],
+    { nota: 'V12 (D2): alimento medio de tierra en la ventana Chebyshev ≤ 4 alrededor del progenitor.' }),
+  s('reproduccion.natalidadLocalLugar', 'reproduccion', 'lugares', 'actor', { param: 'poblacion.radioLugar' }, 'natalidad-local.ts', 'selectLocalBirthPairs',
+    ['const lugar = primeroCerca(world.places, a, config.radioLugar + 1, (place) => distancia(a, place) <= config.radioLugar);']),
+  s('reproduccion.natalidadLocalPareja', 'reproduccion', 'personas', 'actor', { param: 'poblacion.radioPareja' }, 'natalidad-local.ts', 'mejorSocio',
+    ['const candidatos = vecinos(world, a, config.radioPareja + 1, (p) => {']),
 ];
 
 /** Lecturas que no dependen de dónde está nadie: colecciones acotadas que cada región recibe enteras y
@@ -425,8 +439,8 @@ export const LECTURAS_GLOBALES: readonly LecturaGlobal[] = [
     ['completeConstruction', 'accion', 'world.structures.length >= MAX_STRUCTURES']] as const).map(([funcion, fase, patron]) => ({
     id: `estructuras.tope.${funcion}`, fase, fuente: 'world.structures.length', cota: 'MAX_STRUCTURES = 512', fichero: 'inventions.ts', funcion,
     patrones: [patron], motivo: 'Cuántas estructuras activas hay en todo el mundo: un recuento global.' })),
-  { id: 'comunidades.tope', fase: 'comunidades', fuente: 'world.communities.length', cota: '`social.maxComunidades` (8)', fichero: 'society.ts', funcion: 'updateCommunities',
-    patrones: ['world.communities.length >= paramsOf(world).social.maxComunidades'], motivo: 'Cuántas comunidades hay en todo el mundo: tope de fundación.' },
+  { id: 'comunidades.tope', fase: 'comunidades', fuente: 'world.communities.length', cota: '`social.maxComunidades` (8; 0 = admisión)', fichero: 'society.ts', funcion: 'updateCommunities',
+    patrones: ['world.communities.length >= communityCap'], motivo: 'Cuántas comunidades hay en todo el mundo: tope de fundación efectivo.' },
   { id: 'planos.uso', fase: 'accion', fuente: 'world.blueprints', cota: 'MAX_BLUEPRINTS = 64', fichero: 'inventions.ts', funcion: 'observeUse',
     patrones: ['world.blueprints.find(b => b.id === structure.blueprintId)'], motivo: 'Plano de la estructura usada, por id.' },
   { id: 'planos.padres', fase: 'accion', fuente: 'world.blueprints', cota: 'MAX_BLUEPRINTS = 64', fichero: 'inventions.ts', funcion: 'invent',
@@ -538,8 +552,12 @@ export const LECTURAS_POR_IDENTIDAD: readonly LecturaPorIdentidad[] = [
 /** Recorridos de fase y compactaciones: el bucle que decide QUIÉN actúa, no una lectura alrededor de
  * nadie. Su orden es parte de la regla (orden de `world.people`, orden canónico de la fauna). */
 export const RECORRIDOS: readonly Recorrido[] = [
-  { id: 'paso.acciones', fase: 'accion', fichero: 'index.ts', funcion: 'advanceTick', patrones: ['for (const person of world.people) bodyAndAction(world, person);'],
-    motivo: 'Cadena secuencial: cada persona decide y actúa viendo lo que las anteriores ya hicieron en este paso.' },
+  { id: 'paso.acciones', fase: 'accion', fichero: 'index.ts', funcion: 'advanceTick', patrones: ['for (let slot = 0; slot < world.people.length; slot++) bodyAndAction(world, world.people[slot]!, precomputedMoves, slot, policyScores);'],
+    motivo: 'Cadena secuencial: cada persona decide y actúa viendo lo que las anteriores ya hicieron en este paso (los movimientos y políticas se precomputan antes en paralelo/GPU).' },
+  { id: 'paso.politicaLote', fase: 'accion', fichero: 'index.ts', funcion: 'precomputePolicyScores', patrones: ['for (const person of world.people) {'],
+    motivo: 'V12: selección en orden canónico de actores con decisión prevista para el lote FP64 CPU/GPU de política.' },
+  { id: 'reproduccion.natalidadLocal', fase: 'reproduccion', fichero: 'natalidad-local.ts', funcion: 'selectLocalBirthPairs', patrones: ['for (const a of world.people) {'],
+    motivo: 'V12 (D2): emparejamiento en cadena con cupo local por vecindad.' },
   { id: 'paso.descubrimiento', fase: 'accion', fichero: 'index.ts', funcion: 'advanceTick', patrones: ['for (const person of world.people) {', 'const chunk = world.chunks[chunkKey(person.x, person.y)]!;'], motivo: 'Chunk bajo cada persona.' },
   { id: 'paso.caducidad', fase: 'gestos', fichero: 'index.ts', funcion: 'advanceTick',
     patrones: ['world.invitations = world.invitations.filter(', 'world.reminders = world.reminders.filter('], motivo: 'Listas globales acotadas a 8.' },

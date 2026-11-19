@@ -117,7 +117,7 @@ test('T171 lente 1: en el despacho solo hay relojes de espera/diagnóstico, jam�
 });
 
 test('T171 lente 1/2: los kernels GPU compilan FP64 con --fmad=false y sin fast-math', () => {
-  for (const nombre of ['compute-ecology-gpu-resident.py', 'compute-ecology-gpu.py']) {
+  for (const nombre of ['compute-ecology-gpu-resident.py', 'compute-ecology-gpu.py', 'compute-policy-gpu.py']) {
     const fuente = readFileSync(join(SCRIPTS_DIR, nombre), 'utf8');
     assert.ok(fuente.includes('--fmad=false'), `${nombre}: debe compilar con --fmad=false`);
     assert.ok(!fuente.includes('use_fast_math') && !fuente.includes('fast_math'), `${nombre}: fast-math prohibido`);
@@ -150,8 +150,10 @@ test('T171 lente 2: la partición por regiones es estática, completa y sin robo
     'invertir solo recorre la misma cola al revés: no mueve regiones entre workers');
 });
 
-test('T171 lente 3: los defaults son reglas 11 con la Fase B en su valor histórico', () => {
-  assert.equal(RULES_VERSION, 11);
+test('T171 lente 3: los defaults son reglas 12 con la Fase B y las leyes V12 opt-in en su valor histórico', () => {
+  assert.equal(RULES_VERSION, 12);
+  assert.equal(DEFAULT_PARAMS.poblacion.natalidadVecindad, false);
+  assert.equal(DEFAULT_PARAMS.conducta.politicaPeso, 0);
   // Claves reales de la Fase B en `params.ts` (la tarea las nombra como
   // cuantización/puerta/especulación; en el código son estas cuatro):
   // dosisCuanto=0 (sin cuantizar), mejoraLocal=0 (sin puerta), enfriamiento=45

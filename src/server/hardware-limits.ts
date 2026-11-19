@@ -213,3 +213,20 @@ export function hostFullHardwareParams(base: WorldParams = DEFAULT_PARAMS, probe
     persistencia: { ...base.persistencia, cadaTicks: 100, ventanaEventosTicks: 24000 },
   }, withLimits);
 }
+
+/**
+ * V15 (`RULES_VERSION 12`): modo de evolución abierta limitada únicamente por el hardware físico.
+ * Activa todos los chips detectados (`hostFullHardwareParams`) junto con natalidad estrictamente local
+ * (sin cupo global de 40 nacimientos/día), comunidades vivas sin tope ficticio (`maxComunidades=0`),
+ * política evolutiva local + plasticidad Baldwin (`politicaPeso=0.35`, `aptitud=0.35`) y señal limpia
+ * de innovación tecnológica sin spam de microvariantes (`evitarNoOp=true`, `dosisCuanto=50`).
+ */
+export function hostOpenWorldParams(base: WorldParams = DEFAULT_PARAMS, probe?: HostHardwareProbe): WorldParams {
+  const full = hostFullHardwareParams(base, probe);
+  return parseParams({
+    poblacion: { ...full.poblacion, natalidadVecindad: true, radioVecindadNatalidad: 16 },
+    social: { ...full.social, radioConvivencia: 12, disolucion: 1, maxComunidades: 0 },
+    conducta: { ...full.conducta, aptitud: 0.35, politicaPeso: 0.35 },
+    tecnologia: { ...full.tecnologia, evitarNoOp: true, dosisCuanto: 50, enfriamiento: 240 },
+  }, full);
+}

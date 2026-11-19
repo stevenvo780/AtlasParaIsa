@@ -148,7 +148,10 @@ test('con el recelo de CONFL (`social.memoriaDisputa`), primero y primeroConFilt
 /** Claves declaradas después de e1adaaf que, con su valor por defecto, no actúan (ver cabecera).
  * La poda ola 1 (2026-09-27) retiró `conducta.vocacion`/`vocacionTope` y
  * `poblacion.natalidadLocal`/`radioProvision`: ya no se declaran y la forma las trae quitadas. */
-const CLAVES_POSTERIORES = ['social.memoriaDisputa', 'social.hogarTrabajo', 'social.disolucion', 'tecnologia'] as const;
+const CLAVES_POSTERIORES = [
+  'social.memoriaDisputa', 'social.hogarTrabajo', 'social.disolucion', 'tecnologia',
+  'poblacion.natalidadVecindad', 'poblacion.radioVecindadNatalidad', 'conducta.politicaPeso',
+] as const;
 /** Quitar una clave del hash sólo es legítimo si con el valor que tiene no actúa (histórico). */
 function clavesPosterioresApagadas(params: WorldParams): void {
   for (const clave of CLAVES_POSTERIORES) {
@@ -158,7 +161,8 @@ function clavesPosterioresApagadas(params: WorldParams): void {
       continue;
     }
     const [seccion, hoja] = clave.split('.') as [string, string];
-    assert.equal((params as unknown as Record<string, Record<string, unknown>>)[seccion]![hoja], 0, `${clave}: no actúa`);
+    assert.deepEqual((params as unknown as Record<string, Record<string, unknown>>)[seccion]![hoja],
+      (HISTORICAL_PARAMS as unknown as Record<string, Record<string, unknown>>)[seccion]![hoja], `${clave}: no actúa`);
   }
 }
 

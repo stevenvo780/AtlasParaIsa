@@ -194,3 +194,39 @@ export class PolicyGpuBatcher {
     }
   }
 }
+
+const cachedPolicyBatchers = new Map<string, PolicyGpuBatcher>();
+
+/**
+ * Evalúa un lote de políticas 12→8→12 usando un `PolicyGpuBatcher` persistente por tupla de
+ * dispositivos CUDA (sin recrear procesos ni recompilar NVRTC por paso). Si `devices` está vacío
+ * o NVRTC no está disponible, corre `evaluatePoliciesCpu` con paridad FP64 exacta (`Object.is`).
+ */
+export function evaluatePoliciesBatch(
+  observations: Float64Array,
+  weights: Float64Array,
+  plasticityBiases: Float64Array | null,
+  count: number,
+  devices: readonly number[],
+): Float64Array {
+  if (count === 0 || devices.length === 0) return evaluatePoliciesCpu(observations, weights, plasticityBiases, count);
+  const key = devices.join(',');
+  let batcher = cachedPolicyBatchers.get(key);
+  if (!batcher) {
+    batcher = new PolicyGpuBatcher(devices);
+    cachedPolicyBatchers.set(key, batcher);
+  }
+  return batcher.evaluate(observations, weights, plasticityBiases, count);
+}
+
+/** Diagnóstico de los batchers GPU de políticas actualmente abiertos (solo lectura). */
+export function policyGpuBatcherStatus(devices: readonly number[]): { backend: 'cpu' | 'gpu'; fallbackReason: string | null } | null {
+  const batcher = cachedPolicyBatchers.get(devices.join(','));
+  return batcher ? { backend: batcher.backend, fallbackReason: batcher.fallbackReason } : null;
+}
+
+/** Cierra todos los batchers GPU persistentes de políticas (tests y cierre ordenado del servidor). */
+export function closePolicyGpuBatchers(): void {
+  for (const batcher of cachedPolicyBatchers.values()) batcher.close();
+  cachedPolicyBatchers.clear();
+}

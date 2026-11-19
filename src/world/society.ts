@@ -1,7 +1,8 @@
 import type { ChronicleEvent, CommunityView, PersonView } from '../shared/types.js';
 import type { Person, World } from './index.js';
 import { localRandom } from './genetics.js';
-import { paramsOf } from './params.js';
+import { effectiveLimits, paramsOf } from './params.js';
+import { effectiveCommunityCap } from './natalidad-local.js';
 import { count } from './statistics.js';
 import { tileAt } from './spatial.js';
 import { constructionCost, waterAvailable } from './inventions.js';
@@ -442,7 +443,8 @@ function mediaConfianza(person: Person, grupo: GrupoSalida, umbral: number): num
  * ≥ 3); y tras la mayoría, una pasada de disolución (R2–R4) retira las comunidades con ≤ 1 mortal.
  */
 function reviseByCohabitation(world: World, emit: Emit, radius: number, iniciales: Map<string | null, Person[]>, disolver: boolean): void {
-  const cap = paramsOf(world).social.maxComunidades;
+  const params = paramsOf(world);
+  const cap = effectiveCommunityCap(params.social.maxComunidades, effectiveLimits(params).comunidades);
   for (const group of [...world.communities]) {
     // Hasta aquí sólo hubo salidas (a null) y fisiones de grupos anteriores (hacia ids nuevos, que esta
     // copia de `world.communities` no recorre): nadie entró en `group` desde que se hizo `iniciales`.
@@ -589,7 +591,8 @@ export function updateCommunities(world: World, emit: Emit): void {
     // La admisión `limites.comunidades` es otra cosa: lanza al validar, nunca decide aquí.
     // COM-D′ (R0): fundar exige ≥ 3 MORTALES (S e I pueden sumarse, pero no cuentan para el umbral).
     if (comD ? [person, ...free].filter(isMortalMember).length < 3 : free.length < 2) continue;
-    if (world.communities.length >= paramsOf(world).social.maxComunidades || !algunoCerca(world.places, person, 8, place => distance(person, place) <= 7)) continue;
+    const communityCap = effectiveCommunityCap(paramsOf(world).social.maxComunidades, effectiveLimits(paramsOf(world)).comunidades);
+    if (world.communities.length >= communityCap || !algunoCerca(world.places, person, 8, place => distance(person, place) <= 7)) continue;
     const members = [person, ...free], id = `community-${++world.communityCounter}`;
     const random = localRandom(world.seed, id), name = `Círculo de ${COMMUNITY_SYLLABLES[Math.floor(random() * COMMUNITY_SYLLABLES.length)]}`;
     const group: CommunityView = { id, name, x: person.x, y: person.y, members: members.map(p => p.id), color: COMMUNITY_COLORS[world.communityCounter % 4]!, culture: { ...person.culture }, formedAt: world.tick, cooperation: 0, disputes: 0 };

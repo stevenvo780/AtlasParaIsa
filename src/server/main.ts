@@ -4,8 +4,10 @@ import { Store } from './store.js';
 import { acquireLock } from './lock.js';
 import { paramsOf, setParams } from '../world/params.js';
 import { deploymentParams } from './deployment-params.js';
-import { hostParams } from './hardware-limits.js';
+import { hostFullHardwareParams, hostOpenWorldParams, hostParams } from './hardware-limits.js';
 import { gpuParitySession } from '../world/gpu/autoprueba.js';
+import { closeEcosystemWorkers } from '../world/ecosystem.js';
+import { closePersonasParallelPools, closePolicyGpuBatchers } from '../world/index.js';
 
 process.umask(0o077);
 const port = Number(process.env.PORT ?? 3000);
@@ -21,7 +23,14 @@ try {
   store = new Store(resolve(dataPath, 'world.sqlite'));
   // Los params llegan ANTES de que `createApp` genere un mundo nuevo (R6: `agua.cuencas`
   // decide el terreno en la generación, así que fijarlos después no servía de nada).
-  const app = createApp({ store, password: process.env.CARTA_PASSWORD, credentialPath: resolve(dataPath, 'access.scrypt'), origin, secure, params: () => deploymentParams(hostParams()) });
+  // `CARTA_OPEN_WORLD=1` activa evolución abierta V12 + todos los chips (CPU+GPU);
+  // `CARTA_FULL_HARDWARE=1` activa solo el despacho multi-chip sobre las leyes base.
+  const baseHostParams = () => process.env.CARTA_OPEN_WORLD === '1'
+    ? hostOpenWorldParams()
+    : process.env.CARTA_FULL_HARDWARE === '1'
+      ? hostFullHardwareParams()
+      : hostParams();
+  const app = createApp({ store, password: process.env.CARTA_PASSWORD, credentialPath: resolve(dataPath, 'access.scrypt'), origin, secure, params: () => deploymentParams(baseHostParams()) });
   // Precedencia: un mundo cargado trae los params de su instantánea y esta línea aplica
   // ENCIMA la configuración explícita del despliegue, solo en las claves que nombra.
   // Los límites del host NO vuelven a resolverse aquí: los del mundo cargado son los suyos.
@@ -33,7 +42,11 @@ try {
   let closing = false;
   const shutdown = async () => {
     if (closing) return; closing = true;
-    await app.close(); store!.close(); unlock();
+    await app.close();
+    closePolicyGpuBatchers();
+    await closePersonasParallelPools();
+    await closeEcosystemWorkers();
+    store!.close(); unlock();
   };
   process.once('SIGINT', () => void shutdown()); process.once('SIGTERM', () => void shutdown());
   app.server.on('error', async () => { console.error('No se pudo abrir el servicio. Revisa dirección y puerto.'); await shutdown(); process.exitCode = 1; });

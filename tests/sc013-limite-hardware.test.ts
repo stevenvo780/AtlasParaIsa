@@ -65,7 +65,7 @@ function simularTechoPuro(presupuestoMs: number, factorVelocidad: number): numbe
 test('SC-013: sin topes fijos — doblar el presupuesto o partir el coste por la mitad duplica el techo observado y no extingue', () => {
   // Las leyes son idénticas en las tres máquinas: solo cambia el hardware (presupuesto/velocidad).
   const leyes = (presupuestoMs: number) => parseParams(`gobernador.presupuestoMs=${presupuestoMs},gobernador.politica=techo`);
-  assert.equal(RULES_VERSION, 11, 'la prueba corre sobre las leyes vigentes');
+  assert.equal(RULES_VERSION, 12, 'la prueba corre sobre las leyes vigentes');
   assert.deepEqual(leyes(100).poblacion, leyes(50).poblacion, 'ningún tope poblacional cambia al doblar el presupuesto');
   assert.deepEqual(leyes(100).social, leyes(50).social);
   assert.equal(DEFAULT_PARAMS.poblacion.maxima, POPULATION_HARD_LIMIT, 'el único tope que queda es el anticorrupción');

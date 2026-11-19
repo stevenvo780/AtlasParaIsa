@@ -45,7 +45,10 @@ export interface WorldParams {
     /** Cortejo (2026-09-22): peso con que una persona fértil busca a otra fértil, no emparentada y con
      * vínculo mutuo ≥ 0,3 que está fuera de `radioPareja` pero dentro de `radioCortejo`. Histórico 0 / 24
      * (apagado); reglas 10 adopta 2 / 128 para mundos nuevos. */
-    cortejo: number; radioCortejo: number };
+    cortejo: number; radioCortejo: number;
+    /** V12/D2: natalidad estrictamente local por vecindad (`radioVecindadNatalidad`), sin cupo global
+     * planetario de 40 nacimientos/día; con `false` (histórico/V11) conserva el cupo global anterior. */
+    natalidadVecindad: boolean; radioVecindadNatalidad: number };
   recursos: { capacidadBosque: number; capacidadPastizal: number; capacidadOtros: number; velocidadRegeneracion: number; decaimientoFertilidad: number; decaimientoComida: number };
   persistencia: { cadaTicks: number; ventanaEventosTicks: number; paginasSucias: boolean };
   /** Agua superficial concentrada en cuencas: 1 = generación actual (todas las charcas/manantiales); < 1 conserva solo las de las cuencas más húmedas (T035).
@@ -87,7 +90,10 @@ export interface WorldParams {
     /** Ventaja comparativa heredable (DIV, 2026-09-22), `index.ts` → `choose`: sin urgencias
      * corporales (sed, hambre y cansancio ≤ 0,5), cada OFICIO suma `aptitud · (rasgo del oficio −
      * media de los cinco rasgos de la persona)`. 0 = hoy. */
-    aptitud: number };
+    aptitud: number;
+    /** V12: peso de la política neuronal local evolutiva + plasticidad vitalicia (`src/world/politica.ts`).
+     * 0 = apagada (conducta V11 exacta); > 0 suma `politicaPeso · softSign(z + bias)` fuera de emergencias. */
+    politicaPeso: number };
   /** `social.maxComunidades`: tope de FUNDACIÓN de comunidades (`society.ts`), regla de conducta separada
    * de la admisión `limites.comunidades` (revisión de T100, 2026-09-22). */
   social: { maxComunidades: number; disputaNecesidad: number; disputaEscasez: number; disputaRadio: number; disputaDestino: number; disputaEspera: number;
@@ -173,7 +179,8 @@ const RAW_HISTORICAL: WorldParams = {
   // Ruling R17: `maxima` ya no es un tope de diseño (era 40); por defecto no limita y el
   // freno lo ponen el entorno y el gobernador. Sigue siendo parámetro para el laboratorio.
   poblacion: { maxima: 1_000_000, intervaloComprobacionTicks: 120, nacimientosPorComprobacion: 2,
-    exigeComunidad: true, radioPareja: 3, radioLugar: 4, comprobacionContinua: false, cortejo: 0, radioCortejo: 24 },
+    exigeComunidad: true, radioPareja: 3, radioLugar: 4, comprobacionContinua: false, cortejo: 0, radioCortejo: 24,
+    natalidadVecindad: false, radioVecindadNatalidad: 16 },
   recursos: { capacidadBosque: 1, capacidadPastizal: 0.7, capacidadOtros: 0.35, velocidadRegeneracion: 1, decaimientoFertilidad: 0.001, decaimientoComida: 0.0001 },
   persistencia: { cadaTicks: 1, ventanaEventosTicks: 0, paginasSucias: false },
   agua: { cuencas: 0.4, memoria: 1 },
@@ -185,7 +192,7 @@ const RAW_HISTORICAL: WorldParams = {
   // (`index.ts` no descuenta saciedad; `society.ts` usa 0,65 / ×1 / 2 celdas / 0,5 de
   // destino / 180 ticks de espera / sin rareza / 0,35 de confianza / 0,2 de distancia
   // cultural), así que abrirlas no cambia el mundo.
-  conducta: { habituacion: 0, aptitud: 0 },
+  conducta: { habituacion: 0, aptitud: 0, politicaPeso: 0 },
   social: { maxComunidades: 8, disputaNecesidad: 0.65, disputaEscasez: 1, disputaRadio: 2, disputaDestino: 0.5, disputaEspera: 180,
     ensenanzaRareza: 0, confianzaSalida: 0.35, distanciaAlternativa: 0.2, vinculoConvivencia: 0, radioConvivencia: 0, memoriaDisputa: 0, hogarTrabajo: 0, disolucion: 0 },
   tecnologia: { dosisCuanto: 0, mejoraLocal: 0, enfriamiento: 45, evitarNoOp: false },
@@ -313,6 +320,7 @@ export const PARAM_RANGES: Record<string, [number, number]> = {
   'poblacion.radioLugar': [1, 64],
   'poblacion.cortejo': [0, 5],
   'poblacion.radioCortejo': [1, 128],
+  'poblacion.radioVecindadNatalidad': [4, 64],
   'recursos.capacidadBosque': [0, 10],
   'recursos.capacidadPastizal': [0, 10],
   'recursos.capacidadOtros': [0, 10],
@@ -330,7 +338,7 @@ export const PARAM_RANGES: Record<string, [number, number]> = {
   'limites.chunks': [1, Number.MAX_SAFE_INTEGER],
   'limites.comunidades': [1, Number.MAX_SAFE_INTEGER],
   'limites.fauna': [1, Number.MAX_SAFE_INTEGER],
-  'social.maxComunidades': [1, Number.MAX_SAFE_INTEGER],
+  'social.maxComunidades': [0, Number.MAX_SAFE_INTEGER],
   // Leyes candidatas. El mínimo de `disputaNecesidad` y `disputaEscasez` no es 0 a
   // propósito: con 0 la disputa dejaría de exigir necesidad o escasez y sería un
   // conflicto decretado, no medido. `disputaRadio` parte de 1 celda (contacto real).
@@ -339,6 +347,7 @@ export const PARAM_RANGES: Record<string, [number, number]> = {
   // ni de los actos de vínculo). Rasgo menos media de los cinco cae en [−0,8, 0,8], así que con
   // el máximo 2 la ley mueve un oficio a lo sumo ±1,6, la escala de `habituacion`.
   'conducta.aptitud': [0, 2],
+  'conducta.politicaPeso': [0, 2],
   'social.disputaNecesidad': [0.1, 1],
   'social.disputaEscasez': [0.1, 20],
   'social.disputaRadio': [1, 8],
@@ -378,9 +387,10 @@ type ParamValue = number | boolean | string | (number | boolean | string)[];
 /** PARAM_RANGES conserva sus tuplas numéricas; cada hoja declara además su tipo. */
 export const PARAM_DESCRIPTORS: Readonly<Record<string, ParamDescriptor>> = deepFreeze({
   ...Object.fromEntries(Object.entries(PARAM_RANGES).map(([key, range]) => [key,
-    { kind: 'number', range, integer: key === 'motor.hilos' || key === 'social.disputaEspera' || key === 'social.maxComunidades' || key === 'social.disolucion' || key === 'tecnologia.dosisCuanto' || key === 'tecnologia.enfriamiento' || key.startsWith('limites.') }])),
+    { kind: 'number', range, integer: key === 'motor.hilos' || key === 'poblacion.radioVecindadNatalidad' || key === 'social.disputaEspera' || key === 'social.maxComunidades' || key === 'social.disolucion' || key === 'tecnologia.dosisCuanto' || key === 'tecnologia.enfriamiento' || key.startsWith('limites.') }])),
   'poblacion.exigeComunidad': { kind: 'boolean' },
   'poblacion.comprobacionContinua': { kind: 'boolean' },
+  'poblacion.natalidadVecindad': { kind: 'boolean' },
   'motor.clonPorPaso': { kind: 'boolean' },
   'motor.soaTerreno': { kind: 'boolean' },
   'motor.particionarPersonas': { kind: 'boolean' },

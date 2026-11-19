@@ -1,0 +1,775 @@
+{
+  "seed": 51926,
+  "days": 30,
+  "ticks": 72000,
+  "params": "social.radioConvivencia=12,social.disolucion=1,social.maxComunidades=64,limites.comunidades=64,limites.teselasActivas=262144,limites.chunks=1024,persistencia.cadaTicks=100,motor.gpu=[0,1]",
+  "totalSec": 13099.3,
+  "finalPeople": 588,
+  "finalTiles": 49408,
+  "finalChunks": 193,
+  "totalEvictedChunks": 10,
+  "fullReloadChecks": 3,
+  "allDaysCanonicalParityExact": true,
+  "finalDigest": "54a4bf3322cf939fb85f28bcd0e464e609ebd7f20a5100474b91b2b072018593",
+  "finalGpuDiagnostics": {
+    "uploadedBytes": 47568,
+    "downloadedBytes": 3607248,
+    "syncUploadedBytes": 0,
+    "kernelMs": 0.09938201401382685,
+    "devices": [
+      0,
+      1
+    ],
+    "lastPass": "kernel"
+  },
+  "daysLog": [
+    {
+      "day": 1,
+      "tick": 2400,
+      "people": 23,
+      "tiles": 3328,
+      "chunks": 13,
+      "evictedToday": 0,
+      "totalEvicted": 0,
+      "dbMiB": 8.56,
+      "daySec": 16.92,
+      "digestMatch": true,
+      "reloadedMatch": null,
+      "gpuDiag": {
+        "uploadedBytes": 16414,
+        "downloadedBytes": 242974,
+        "syncUploadedBytes": 0,
+        "kernelMs": 0.033741001971066,
+        "devices": [
+          0,
+          1
+        ],
+        "lastPass": "kernel"
+      },
+      "gpus": [
+        "0, 6 %, 4930 MiB, 38, 65.07 W",
+        "1, 9 %, 201 MiB, 57, 29.36 W"
+      ]
+    },
+    {
+      "day": 2,
+      "tick": 4800,
+      "people": 30,
+      "tiles": 3328,
+      "chunks": 13,
+      "evictedToday": 0,
+      "totalEvicted": 0,
+      "dbMiB": 17.97,
+      "daySec": 18.56,
+      "digestMatch": true,
+      "reloadedMatch": null,
+      "gpuDiag": {
+        "uploadedBytes": 18470,
+        "downloadedBytes": 242982,
+        "syncUploadedBytes": 0,
+        "kernelMs": 0.056500983191654086,
+        "devices": [
+          0,
+          1
+        ],
+        "lastPass": "kernel"
+      }
+    },
+    {
+      "day": 3,
+      "tick": 7200,
+      "people": 37,
+      "tiles": 3840,
+      "chunks": 15,
+      "evictedToday": 0,
+      "totalEvicted": 0,
+      "dbMiB": 34.37,
+      "daySec": 27.13,
+      "digestMatch": true,
+      "reloadedMatch": null,
+      "gpuDiag": {
+        "uploadedBytes": 16432,
+        "downloadedBytes": 280368,
+        "syncUploadedBytes": 0,
+        "kernelMs": 0.035859993658959866,
+        "devices": [
+          0,
+          1
+        ],
+        "lastPass": "kernel"
+      }
+    },
+    {
+      "day": 4,
+      "tick": 9600,
+      "people": 45,
+      "tiles": 12800,
+      "chunks": 50,
+      "evictedToday": 0,
+      "totalEvicted": 0,
+      "dbMiB": 65.83,
+      "daySec": 49.64,
+      "digestMatch": true,
+      "reloadedMatch": null,
+      "gpuDiag": {
+        "uploadedBytes": 30840,
+        "downloadedBytes": 934520,
+        "syncUploadedBytes": 0,
+        "kernelMs": 0.031311006750911474,
+        "devices": [
+          0,
+          1
+        ],
+        "lastPass": "kernel"
+      }
+    },
+    {
+      "day": 5,
+      "tick": 12000,
+      "people": 52,
+      "tiles": 21248,
+      "chunks": 83,
+      "evictedToday": 0,
+      "totalEvicted": 0,
+      "dbMiB": 91.13,
+      "daySec": 89.91,
+      "digestMatch": true,
+      "reloadedMatch": null,
+      "gpuDiag": {
+        "uploadedBytes": 35004,
+        "downloadedBytes": 1551292,
+        "syncUploadedBytes": 0,
+        "kernelMs": 0.05217001307755709,
+        "devices": [
+          0,
+          1
+        ],
+        "lastPass": "kernel"
+      },
+      "gpus": [
+        "0, 6 %, 4950 MiB, 38, 64.05 W",
+        "1, 6 %, 205 MiB, 55, 29.23 W"
+      ]
+    },
+    {
+      "day": 6,
+      "tick": 14400,
+      "people": 55,
+      "tiles": 23296,
+      "chunks": 91,
+      "evictedToday": 0,
+      "totalEvicted": 0,
+      "dbMiB": 136.97,
+      "daySec": 129.67,
+      "digestMatch": true,
+      "reloadedMatch": null,
+      "gpuDiag": {
+        "uploadedBytes": 26860,
+        "downloadedBytes": 1700844,
+        "syncUploadedBytes": 0,
+        "kernelMs": 0.04501000512391329,
+        "devices": [
+          0,
+          1
+        ],
+        "lastPass": "kernel"
+      }
+    },
+    {
+      "day": 7,
+      "tick": 16800,
+      "people": 66,
+      "tiles": 20224,
+      "chunks": 79,
+      "evictedToday": 0,
+      "totalEvicted": 0,
+      "dbMiB": 183.66,
+      "daySec": 272.8,
+      "digestMatch": true,
+      "reloadedMatch": null,
+      "gpuDiag": {
+        "uploadedBytes": 22764,
+        "downloadedBytes": 1476588,
+        "syncUploadedBytes": 0,
+        "kernelMs": 0.4461750213522464,
+        "devices": [
+          0,
+          1
+        ],
+        "lastPass": "kernel"
+      }
+    },
+    {
+      "day": 8,
+      "tick": 19200,
+      "people": 77,
+      "tiles": 20992,
+      "chunks": 82,
+      "evictedToday": 0,
+      "totalEvicted": 0,
+      "dbMiB": 237.94,
+      "daySec": 378.89,
+      "digestMatch": true,
+      "reloadedMatch": null,
+      "gpuDiag": {
+        "uploadedBytes": 39148,
+        "downloadedBytes": 1532652,
+        "syncUploadedBytes": 0,
+        "kernelMs": 1.0746509942691773,
+        "devices": [
+          0,
+          1
+        ],
+        "lastPass": "kernel"
+      }
+    },
+    {
+      "day": 9,
+      "tick": 21600,
+      "people": 92,
+      "tiles": 21248,
+      "chunks": 83,
+      "evictedToday": 0,
+      "totalEvicted": 0,
+      "dbMiB": 291.55,
+      "daySec": 348.78,
+      "digestMatch": true,
+      "reloadedMatch": null,
+      "gpuDiag": {
+        "uploadedBytes": 28908,
+        "downloadedBytes": 1551340,
+        "syncUploadedBytes": 0,
+        "kernelMs": 0.11556100798770785,
+        "devices": [
+          0,
+          1
+        ],
+        "lastPass": "kernel"
+      }
+    },
+    {
+      "day": 10,
+      "tick": 24000,
+      "people": 103,
+      "tiles": 23808,
+      "chunks": 93,
+      "evictedToday": 0,
+      "totalEvicted": 0,
+      "dbMiB": 341.65,
+      "daySec": 372.4,
+      "digestMatch": true,
+      "reloadedMatch": true,
+      "gpuDiag": {
+        "uploadedBytes": 12524,
+        "downloadedBytes": 1738220,
+        "syncUploadedBytes": 0,
+        "kernelMs": 0.19021198386326432,
+        "devices": [
+          0,
+          1
+        ],
+        "lastPass": "kernel"
+      },
+      "gpus": [
+        "0, 4 %, 4800 MiB, 38, 61.52 W",
+        "1, 21 %, 205 MiB, 65, 62.53 W"
+      ]
+    },
+    {
+      "day": 11,
+      "tick": 26400,
+      "people": 120,
+      "tiles": 23808,
+      "chunks": 93,
+      "evictedToday": 1,
+      "totalEvicted": 1,
+      "dbMiB": 383.2,
+      "daySec": 388.02,
+      "digestMatch": true,
+      "reloadedMatch": null,
+      "gpuDiag": {
+        "uploadedBytes": 18668,
+        "downloadedBytes": 1756908,
+        "syncUploadedBytes": 0,
+        "kernelMs": 0.08481100667268038,
+        "devices": [
+          0,
+          1
+        ],
+        "lastPass": "kernel"
+      }
+    },
+    {
+      "day": 12,
+      "tick": 28800,
+      "people": 135,
+      "tiles": 23040,
+      "chunks": 90,
+      "evictedToday": 0,
+      "totalEvicted": 1,
+      "dbMiB": 444.34,
+      "daySec": 418.23,
+      "digestMatch": true,
+      "reloadedMatch": null,
+      "gpuDiag": {
+        "uploadedBytes": 16620,
+        "downloadedBytes": 1682156,
+        "syncUploadedBytes": 0,
+        "kernelMs": 0.08179098949767649,
+        "devices": [
+          0,
+          1
+        ],
+        "lastPass": "kernel"
+      }
+    },
+    {
+      "day": 13,
+      "tick": 31200,
+      "people": 161,
+      "tiles": 22528,
+      "chunks": 88,
+      "evictedToday": 0,
+      "totalEvicted": 1,
+      "dbMiB": 502.47,
+      "daySec": 308.69,
+      "digestMatch": true,
+      "reloadedMatch": null,
+      "gpuDiag": {
+        "uploadedBytes": 12524,
+        "downloadedBytes": 1644780,
+        "syncUploadedBytes": 0,
+        "kernelMs": 0.049610011046752334,
+        "devices": [
+          0,
+          1
+        ],
+        "lastPass": "kernel"
+      }
+    },
+    {
+      "day": 14,
+      "tick": 33600,
+      "people": 187,
+      "tiles": 21760,
+      "chunks": 85,
+      "evictedToday": 1,
+      "totalEvicted": 2,
+      "dbMiB": 564.15,
+      "daySec": 207.57,
+      "digestMatch": true,
+      "reloadedMatch": null,
+      "gpuDiag": {
+        "uploadedBytes": 41196,
+        "downloadedBytes": 1607404,
+        "syncUploadedBytes": 0,
+        "kernelMs": 0.037640013033524156,
+        "devices": [
+          0,
+          1
+        ],
+        "lastPass": "kernel"
+      }
+    },
+    {
+      "day": 15,
+      "tick": 36000,
+      "people": 209,
+      "tiles": 18944,
+      "chunks": 74,
+      "evictedToday": 0,
+      "totalEvicted": 2,
+      "dbMiB": 622.16,
+      "daySec": 408.22,
+      "digestMatch": true,
+      "reloadedMatch": null,
+      "gpuDiag": {
+        "uploadedBytes": 28908,
+        "downloadedBytes": 1383148,
+        "syncUploadedBytes": 0,
+        "kernelMs": 0.11133099906146526,
+        "devices": [
+          0,
+          1
+        ],
+        "lastPass": "kernel"
+      },
+      "gpus": [
+        "0, 1 %, 4815 MiB, 39, 62.04 W",
+        "1, 7 %, 205 MiB, 55, 29.25 W"
+      ]
+    },
+    {
+      "day": 16,
+      "tick": 38400,
+      "people": 230,
+      "tiles": 17920,
+      "chunks": 70,
+      "evictedToday": 0,
+      "totalEvicted": 2,
+      "dbMiB": 677.3,
+      "daySec": 605.5,
+      "digestMatch": true,
+      "reloadedMatch": null,
+      "gpuDiag": {
+        "uploadedBytes": 33004,
+        "downloadedBytes": 1308396,
+        "syncUploadedBytes": 0,
+        "kernelMs": 0.08287100354209542,
+        "devices": [
+          0,
+          1
+        ],
+        "lastPass": "kernel"
+      }
+    },
+    {
+      "day": 17,
+      "tick": 40800,
+      "people": 263,
+      "tiles": 18432,
+      "chunks": 72,
+      "evictedToday": 0,
+      "totalEvicted": 2,
+      "dbMiB": 725.58,
+      "daySec": 605.56,
+      "digestMatch": true,
+      "reloadedMatch": null,
+      "gpuDiag": {
+        "uploadedBytes": 35052,
+        "downloadedBytes": 1345772,
+        "syncUploadedBytes": 0,
+        "kernelMs": 0.09923099423758686,
+        "devices": [
+          0,
+          1
+        ],
+        "lastPass": "kernel"
+      }
+    },
+    {
+      "day": 18,
+      "tick": 43200,
+      "people": 298,
+      "tiles": 20992,
+      "chunks": 82,
+      "evictedToday": 2,
+      "totalEvicted": 4,
+      "dbMiB": 802.15,
+      "daySec": 632.59,
+      "digestMatch": true,
+      "reloadedMatch": null,
+      "gpuDiag": {
+        "uploadedBytes": 45292,
+        "downloadedBytes": 1570028,
+        "syncUploadedBytes": 0,
+        "kernelMs": 0.09294101619161665,
+        "devices": [
+          0,
+          1
+        ],
+        "lastPass": "kernel"
+      }
+    },
+    {
+      "day": 19,
+      "tick": 45600,
+      "people": 333,
+      "tiles": 18944,
+      "chunks": 74,
+      "evictedToday": 0,
+      "totalEvicted": 4,
+      "dbMiB": 873.51,
+      "daySec": 649.51,
+      "digestMatch": true,
+      "reloadedMatch": null,
+      "gpuDiag": {
+        "uploadedBytes": 43244,
+        "downloadedBytes": 1383148,
+        "syncUploadedBytes": 0,
+        "kernelMs": 0.06336098886094987,
+        "devices": [
+          0,
+          1
+        ],
+        "lastPass": "kernel"
+      }
+    },
+    {
+      "day": 20,
+      "tick": 48000,
+      "people": 364,
+      "tiles": 20480,
+      "chunks": 80,
+      "evictedToday": 0,
+      "totalEvicted": 4,
+      "dbMiB": 954.38,
+      "daySec": 546.97,
+      "digestMatch": true,
+      "reloadedMatch": true,
+      "gpuDiag": {
+        "uploadedBytes": 33004,
+        "downloadedBytes": 1495276,
+        "syncUploadedBytes": 0,
+        "kernelMs": 0.06355097866617143,
+        "devices": [
+          0,
+          1
+        ],
+        "lastPass": "kernel"
+      },
+      "gpus": [
+        "0, 0 %, 4879 MiB, 39, 60.23 W",
+        "1, 0 %, 205 MiB, 54, 27.78 W"
+      ]
+    },
+    {
+      "day": 21,
+      "tick": 50400,
+      "people": 400,
+      "tiles": 23808,
+      "chunks": 93,
+      "evictedToday": 0,
+      "totalEvicted": 4,
+      "dbMiB": 1035.88,
+      "daySec": 531.83,
+      "digestMatch": true,
+      "reloadedMatch": null,
+      "gpuDiag": {
+        "uploadedBytes": 26860,
+        "downloadedBytes": 1738220,
+        "syncUploadedBytes": 0,
+        "kernelMs": 0.054410978918895125,
+        "devices": [
+          0,
+          1
+        ],
+        "lastPass": "kernel"
+      }
+    },
+    {
+      "day": 22,
+      "tick": 52800,
+      "people": 438,
+      "tiles": 27136,
+      "chunks": 106,
+      "evictedToday": 2,
+      "totalEvicted": 6,
+      "dbMiB": 1124.27,
+      "daySec": 591.87,
+      "digestMatch": true,
+      "reloadedMatch": null,
+      "gpuDiag": {
+        "uploadedBytes": 30956,
+        "downloadedBytes": 2018540,
+        "syncUploadedBytes": 0,
+        "kernelMs": 0.07183002890087664,
+        "devices": [
+          0,
+          1
+        ],
+        "lastPass": "kernel"
+      }
+    },
+    {
+      "day": 23,
+      "tick": 55200,
+      "people": 460,
+      "tiles": 23552,
+      "chunks": 92,
+      "evictedToday": 0,
+      "totalEvicted": 6,
+      "dbMiB": 1178.15,
+      "daySec": 686.92,
+      "digestMatch": true,
+      "reloadedMatch": null,
+      "gpuDiag": {
+        "uploadedBytes": 18668,
+        "downloadedBytes": 1719532,
+        "syncUploadedBytes": 0,
+        "kernelMs": 0.05381001392379403,
+        "devices": [
+          0,
+          1
+        ],
+        "lastPass": "kernel"
+      }
+    },
+    {
+      "day": 24,
+      "tick": 57600,
+      "people": 487,
+      "tiles": 29952,
+      "chunks": 117,
+      "evictedToday": 1,
+      "totalEvicted": 7,
+      "dbMiB": 1292.04,
+      "daySec": 625.93,
+      "digestMatch": true,
+      "reloadedMatch": null,
+      "gpuDiag": {
+        "uploadedBytes": 37100,
+        "downloadedBytes": 2205420,
+        "syncUploadedBytes": 0,
+        "kernelMs": 0.04938000347465277,
+        "devices": [
+          0,
+          1
+        ],
+        "lastPass": "kernel"
+      }
+    },
+    {
+      "day": 25,
+      "tick": 60000,
+      "people": 514,
+      "tiles": 51712,
+      "chunks": 202,
+      "evictedToday": 2,
+      "totalEvicted": 9,
+      "dbMiB": 1431.52,
+      "daySec": 705.3,
+      "digestMatch": true,
+      "reloadedMatch": null,
+      "gpuDiag": {
+        "uploadedBytes": 49616,
+        "downloadedBytes": 3812816,
+        "syncUploadedBytes": 0,
+        "kernelMs": 0.0738500093575567,
+        "devices": [
+          0,
+          1
+        ],
+        "lastPass": "kernel"
+      },
+      "gpus": [
+        "0, 0 %, 4848 MiB, 39, 60.37 W",
+        "1, 0 %, 211 MiB, 54, 27.75 W"
+      ]
+    },
+    {
+      "day": 26,
+      "tick": 62400,
+      "people": 527,
+      "tiles": 44800,
+      "chunks": 175,
+      "evictedToday": 0,
+      "totalEvicted": 9,
+      "dbMiB": 1510.93,
+      "daySec": 851.36,
+      "digestMatch": true,
+      "reloadedMatch": null,
+      "gpuDiag": {
+        "uploadedBytes": 59856,
+        "downloadedBytes": 3270864,
+        "syncUploadedBytes": 0,
+        "kernelMs": 0.06359000690281391,
+        "devices": [
+          0,
+          1
+        ],
+        "lastPass": "kernel"
+      }
+    },
+    {
+      "day": 27,
+      "tick": 64800,
+      "people": 539,
+      "tiles": 46592,
+      "chunks": 182,
+      "evictedToday": 0,
+      "totalEvicted": 9,
+      "dbMiB": 1635.18,
+      "daySec": 635.56,
+      "digestMatch": true,
+      "reloadedMatch": null,
+      "gpuDiag": {
+        "uploadedBytes": 45520,
+        "downloadedBytes": 3401680,
+        "syncUploadedBytes": 0,
+        "kernelMs": 0.05778099875897169,
+        "devices": [
+          0,
+          1
+        ],
+        "lastPass": "kernel"
+      }
+    },
+    {
+      "day": 28,
+      "tick": 67200,
+      "people": 555,
+      "tiles": 47872,
+      "chunks": 187,
+      "evictedToday": 0,
+      "totalEvicted": 9,
+      "dbMiB": 1765.98,
+      "daySec": 651.88,
+      "digestMatch": true,
+      "reloadedMatch": null,
+      "gpuDiag": {
+        "uploadedBytes": 45520,
+        "downloadedBytes": 3495120,
+        "syncUploadedBytes": 0,
+        "kernelMs": 0.05758000770583749,
+        "devices": [
+          0,
+          1
+        ],
+        "lastPass": "kernel"
+      }
+    },
+    {
+      "day": 29,
+      "tick": 69600,
+      "people": 564,
+      "tiles": 49408,
+      "chunks": 193,
+      "evictedToday": 1,
+      "totalEvicted": 10,
+      "dbMiB": 1906.95,
+      "daySec": 641.1,
+      "digestMatch": true,
+      "reloadedMatch": null,
+      "gpuDiag": {
+        "uploadedBytes": 47568,
+        "downloadedBytes": 3625936,
+        "syncUploadedBytes": 0,
+        "kernelMs": 0.055970012908801436,
+        "devices": [
+          0,
+          1
+        ],
+        "lastPass": "kernel"
+      }
+    },
+    {
+      "day": 30,
+      "tick": 72000,
+      "people": 588,
+      "tiles": 49408,
+      "chunks": 193,
+      "evictedToday": 0,
+      "totalEvicted": 10,
+      "dbMiB": 2053.45,
+      "daySec": 631.35,
+      "digestMatch": true,
+      "reloadedMatch": true,
+      "gpuDiag": {
+        "uploadedBytes": 47568,
+        "downloadedBytes": 3607248,
+        "syncUploadedBytes": 0,
+        "kernelMs": 0.09938201401382685,
+        "devices": [
+          0,
+          1
+        ],
+        "lastPass": "kernel"
+      },
+      "gpus": [
+        "0, 12 %, 4696 MiB, 37, 62.23 W",
+        "1, 7 %, 211 MiB, 53, 29.25 W"
+      ]
+    }
+  ]
+}

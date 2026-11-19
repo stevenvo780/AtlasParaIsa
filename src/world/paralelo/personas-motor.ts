@@ -237,6 +237,88 @@ export class EstadoPersonasCompartido {
     this.#regionesMorton = regionMorton + 1; this.#regionSide = regionSide;
     this.#params = vista.params;
   }
+
+  /**
+   * Empaquetado ligero dedicado a la precomputación paralela de movimiento (`move` BFS 2048 nodos):
+   * solo copia la caminabilidad de las teselas y las coordenadas/destinos de las personas, evitando
+   * el trabajo de percepción/ecología en pasos de movimiento (`tick % 6 === 0`). La caminabilidad
+   * (`terrain !== 'water'`) es invariante durante toda la fase `personas`, por lo que el primer paso
+   * calculado en workers es bit a bit idéntico al BFS en serie para todo actor cuyo destino no cambie.
+   */
+  empaquetarSoloMovimiento(world: World, opciones: { regionSide?: RegionSidePersonas; bloque?: number } = {}): void {
+    const regionSide = opciones.regionSide ?? 256, bloque = opciones.bloque ?? BLOQUE_ACTORES;
+    if (regionSide !== 256 && regionSide !== 512) throw new RangeError('regionSide debe ser 256 o 512.');
+    if (!Number.isSafeInteger(bloque) || bloque < 1) throw new RangeError('bloque debe ser un entero positivo.');
+    const tiles = world.tiles, personas = world.people;
+    const paginaDe = new Map<number, number>();
+    const pagX: number[] = [], pagY: number[] = [];
+    for (let i = 0; i < tiles.length; i++) {
+      const tile = tiles[i]!;
+      const px = tile.x >> 4, py = tile.y >> 4, clave = clavePagina(px, py);
+      if (!paginaDe.has(clave)) { paginaDe.set(clave, pagX.length); pagX.push(px); pagY.push(py); }
+    }
+    const paginas = pagX.length, capHash = siguientePotencia(Math.max(2, paginas * 2));
+    if (paginas > this.#capPaginas || capHash > this.#capHash || personas.length > this.#capPersonas) {
+      const crecer = (actual: number, necesario: number): number => necesario > actual ? Math.max(necesario, actual * 2) : actual;
+      this.#asignar(crecer(this.#capPaginas, paginas), Math.max(capHash, this.#capHash), crecer(this.#capPersonas, personas.length));
+    }
+    const vista = crearVista(this.#buffers, {
+      capPersonas: this.#capPersonas, personas: personas.length, hashMask: capHash - 1,
+      lluvia: false, memoriaDisputa: 0, disputaDestino: 0,
+    });
+    vista.paginasSlot.fill(-1, 0, capHash);
+    for (let slot = 0; slot < paginas; slot++) {
+      let h = hashPagina(pagX[slot]!, pagY[slot]!, capHash - 1);
+      while (vista.paginasSlot[h]! >= 0) h = (h + 1) & (capHash - 1);
+      vista.paginasX[h] = pagX[slot]!; vista.paginasY[h] = pagY[slot]!; vista.paginasSlot[h] = slot;
+    }
+    const celdas = paginas * CELDAS_POR_PAGINA;
+    vista.flags.fill(0, 0, celdas);
+    for (let i = 0; i < tiles.length; i++) {
+      const tile = tiles[i]!;
+      const slot = paginaDe.get(clavePagina(tile.x >> 4, tile.y >> 4))!;
+      const celda = slot * CELDAS_POR_PAGINA + ((tile.y & 15) << 4) + (tile.x & 15);
+      vista.flags[celda] = CELDA_PRESENTE | (tile.terrain !== 'water' ? CELDA_CAMINABLE : 0);
+    }
+    const cap = this.#capPersonas;
+    const mortonDe = new Map<number, bigint>();
+    const claves: { morton: bigint; slot: number }[] = new Array(personas.length);
+    for (let slot = 0; slot < personas.length; slot++) {
+      const p = personas[slot]!;
+      vista.pf[PF.x * cap + slot] = p.x;
+      vista.pf[PF.y * cap + slot] = p.y;
+      vista.pf[PF.targetX * cap + slot] = p.target.x;
+      vista.pf[PF.targetY * cap + slot] = p.target.y;
+      vista.pf[PF.hunger * cap + slot] = p.hunger;
+      vista.pf[PF.thirst * cap + slot] = p.thirst;
+      vista.pf[PF.fatigue * cap + slot] = p.fatigue;
+      vista.pf[PF.energy * cap + slot] = p.energy;
+      vista.pf[PF.foodDemand * cap + slot] = 1;
+      vista.pf[PF.waterDemand * cap + slot] = 1;
+      vista.pi[PI.actionCode * cap + slot] = 0;
+      vista.pi[PI.needsDecision * cap + slot] = 0;
+      vista.pi[PI.shouldMove * cap + slot] = !(p.action === 'accompany' && Math.hypot(p.x - p.target.x, p.y - p.target.y) <= 1.5) ? 1 : 0;
+      vista.pi[PI.disputaActiva * cap + slot] = 0;
+      const rx = Math.floor(p.x / regionSide), ry = Math.floor(p.y / regionSide), clave = clavePagina(rx, ry);
+      let morton = mortonDe.get(clave);
+      if (morton === undefined) { morton = mortonCode(rx, ry); mortonDe.set(clave, morton); }
+      claves[slot] = { morton, slot };
+    }
+    claves.sort((a, b) => a.morton < b.morton ? -1 : a.morton > b.morton ? 1 : a.slot - b.slot);
+    const regiones: StaticRegion[] = [];
+    let regionMorton = -1, inicio = 0;
+    for (let i = 0; i <= claves.length; i++) {
+      const nueva = i === claves.length || i === 0 || claves[i]!.morton !== claves[i - 1]!.morton;
+      if (i > 0 && (nueva || i - inicio === bloque)) { regiones.push({ id: regiones.length, begin: inicio, end: i }); inicio = i; }
+      if (i === claves.length) break;
+      if (nueva) regionMorton++;
+      vista.orden[i] = claves[i]!.slot;
+      vista.pi[PI.regionId * cap + claves[i]!.slot] = regionMorton;
+    }
+    this.#paginas = paginas; this.#personas = personas.length; this.#regiones = regiones;
+    this.#regionesMorton = regionMorton + 1; this.#regionSide = regionSide;
+    this.#params = vista.params;
+  }
 }
 
 /** Escena de la fase `personas` a partir de un mundo real (solo lectura). */
@@ -451,5 +533,72 @@ export function copiarSalidas(estado: EstadoPersonasCompartido): Record<string, 
   for (const [nombre, columna] of Object.entries(SI)) salida[nombre] = Array.from(vista.si.subarray(columna * cap, columna * cap + n));
   for (const [nombre, columna] of Object.entries(SF)) salida[nombre] = Array.from(vista.sf.subarray(columna * cap, columna * cap + n));
   return salida;
+}
+
+// ── Despacho residente para el bucle real de `stepWorld` ──────────────────────────────
+
+export { MOVE_AVANZA, MOVE_BLOQUEADO, MOVE_EN_DESTINO, MOVE_SIN_EVALUAR, SI } from './personas-worker.js';
+
+export interface PrecomputedMoves {
+  si: Int32Array;
+  cap: number;
+  targetX: Int32Array;
+  targetY: Int32Array;
+  count: number;
+  diagnostico: DiagnosticoPersonas;
+}
+
+export interface PersonasExecution {
+  regionSide?: RegionSidePersonas;
+  onStep?: (diagnostico: DiagnosticoPersonas) => void;
+}
+
+const poolsPersonas = new Map<string, PersonasParallelPool>();
+let estadoMovimientoCompartido: EstadoPersonasCompartido | null = null;
+let snapTargetX = new Int32Array(0);
+let snapTargetY = new Int32Array(0);
+
+/**
+ * Precomputa en paralelo (sobre `PersonasParallelPool` persistente y SAB reutilizables) el primer
+ * paso BFS de `move()` para toda la población del paso actual. Solo empaqueta caminabilidad y
+ * posiciones/destinos; el resultado para cualquier actor cuyo destino no cambie es bit a bit
+ * idéntico al BFS en serie de `move()`.
+ */
+export function precomputeMovesParallel(
+  world: World,
+  motor: { hilos: number; orden: StaticRegionOrder },
+  execution?: PersonasExecution,
+): PrecomputedMoves {
+  const n = world.people.length;
+  const key = `${motor.hilos}:${motor.orden}`;
+  let pool = poolsPersonas.get(key);
+  if (!pool) {
+    pool = new PersonasParallelPool({ hilos: motor.hilos, orden: motor.orden });
+    poolsPersonas.set(key, pool);
+  }
+  const estado = estadoMovimientoCompartido ??= new EstadoPersonasCompartido();
+  if (snapTargetX.length < n) {
+    const cap = siguientePotencia(Math.max(32, n));
+    snapTargetX = new Int32Array(cap);
+    snapTargetY = new Int32Array(cap);
+  }
+  for (let i = 0; i < n; i++) {
+    const p = world.people[i]!;
+    snapTargetX[i] = p.target.x;
+    snapTargetY[i] = p.target.y;
+  }
+  estado.empaquetarSoloMovimiento(world, { regionSide: execution?.regionSide ?? 256 });
+  pool.stepPhaseB(estado);
+  const diagnostico = pool.diagnostics();
+  execution?.onStep?.(diagnostico);
+  const vista = estado.vista();
+  return { si: vista.si, cap: vista.params.capPersonas, targetX: snapTargetX, targetY: snapTargetY, count: n, diagnostico };
+}
+
+/** Cierra todas las piscinas persistentes de la fase `personas` (tests y apagado del servidor). */
+export async function closePersonasParallelPools(): Promise<void> {
+  const pools = [...poolsPersonas.values()];
+  poolsPersonas.clear();
+  await Promise.all(pools.map(pool => pool.close()));
 }
 

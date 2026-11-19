@@ -34,13 +34,26 @@ import { flowQuantized, WATER_QUANTA_PER_UNIT } from './material-affordances.js'
 import { DEFAULT_PARAMS, MAX_FOUNDER_AGE_TICKS, paramsOf, setParams, limitsOf, type WorldParams } from './params.js';
 import { algunoCerca, filtrarCerca, primeroCerca } from './indice-puntos.js';
 import { conRejilla, personaMovida, vecinos } from './rejilla.js';
+import {
+  assertPolicyGenome, assertPolicyPlasticity, evaluatePolicySingle, extractLocalObservation,
+  founderPolicy, inheritPolicy, initialPolicyPlasticity, POLICY_ACTIONS, POLICY_INPUTS, POLICY_WEIGHTS,
+  policyActionBias, updatePolicyPlasticity, type PolicyGenome, type PolicyPlasticity,
+} from './politica.js';
+import { closePolicyGpuBatchers, evaluatePoliciesBatch } from './gpu/politica-gpu.js';
+import {
+  closePersonasParallelPools, MOVE_AVANZA, MOVE_BLOQUEADO, MOVE_EN_DESTINO, MOVE_SIN_EVALUAR,
+  precomputeMovesParallel, SI, type PersonasExecution, type PrecomputedMoves,
+} from './paralelo/personas-motor.js';
+import { ALIMENTO_MEDIO_MINIMO_NATALIDAD, selectLocalBirthPairs } from './natalidad-local.js';
 export { bindWorldContext, tileAt, normalizeViewport, worldContext } from './spatial.js';
+export { closePersonasParallelPools } from './paralelo/personas-motor.js';
+export { closePolicyGpuBatchers } from './gpu/politica-gpu.js';
 /** Observación/partición del anfitrión: no se serializa ni forma parte de las leyes del mundo. */
-export type WorldContext = SpatialWorldContext & { ecologyExecution?: EcologyExecution };
+export type WorldContext = SpatialWorldContext & { ecologyExecution?: EcologyExecution; personasExecution?: PersonasExecution };
 
-// V9 accounts for an earlier visible forager when planning finite family reserves.
-// Physical work, consumption and reproduction gates retain their existing laws.
-export const RULES_VERSION = 11;
+// V12 adds opt-in local neighborhood natality (D2), uncapped organic communities (`maxComunidades=0`),
+// evolvable 12→8→12 local neural policy + lifetime Baldwin plasticity, and multi-chip CPU+Dual-GPU dispatch.
+export const RULES_VERSION = 12;
 /**
  * Ruling R17: ya no hay tope de población en el software. `POPULATION_HARD_LIMIT`
  * (1.000.000) solo protege `assertWorld` de un snapshot corrupto; el freno real es el
@@ -80,6 +93,10 @@ export interface Person extends PersonView {
   /** Ley candidata `social.memoriaDisputa` (CONFL): fuente donde cedió su última disputa y paso en que la cedió.
    * Sólo existe con la ley activa; se olvida un día después. */
   conflictMemory?: { x: number; y: number; tick: number };
+  /** Ley evolutiva V12 (`conducta.politicaPeso > 0`): red de política local 12→8→12 heredable. */
+  policy?: PolicyGenome;
+  /** Plasticidad adquirida en vida (efecto Baldwin, nunca heredable): sesgo y traza por familia de acción. */
+  policyPlasticity?: PolicyPlasticity;
   technology: TechnologyKnowledge; demography: DemographicState;
 }
 export interface Memory extends MemoryView {
@@ -189,6 +206,7 @@ export function createWorld(seed = 20260905, params?: WorldParams): World {
   const names = ['S', 'I', 'Luma', 'Nilo', 'Duna', 'Bruma', 'Olmo', 'Vera', 'Tilo', 'Cora', 'Lino', 'Nara', 'Río', 'Alba', 'Mora', 'Sol'];
   const colors = ['#f4ce7a', '#e7a8b9', '#9dc8ae', '#9ebacc', '#d8ba91', '#b8a6cc'];
   const varianzaFundadores = (params ?? DEFAULT_PARAMS).genes.varianzaFundadores;
+  const politicaActiva = (params ?? DEFAULT_PARAMS).conducta.politicaPeso > 0;
   for (let n = 0; n < names.length; n++) {
     const place = world.places[Math.floor(n / 6) % world.places.length]!;
     const x = place.x + n % 3 - 1;
@@ -207,6 +225,7 @@ export function createWorld(seed = 20260905, params?: WorldParams): World {
       traits, skills: {}, materials: { wood: 0, stone: 0 }, activity: {}, values: {}, visited: [],
       heading: n * 2.399963229728653, command: null, work: 0, lastOutcome: 0, intentContext: 'ready', controlMode: 'auto',
       thirst: 0.15, genome: founderGenome(world.seed, id, traits, varianzaFundadores), bornAt: -4800, lastBirth: -2400, lastSocial: -30, lastDispute: -180, lastPracticeMemory: 0, culture: initialCulture(world.seed, id), communityId: null, bonds: {},
+      ...(politicaActiva ? { policy: founderPolicy(world.seed, id), policyPlasticity: initialPolicyPlasticity() } : {}),
       technology: initialTechnologyKnowledge(), demography: initialDemography(4800),
     });
   }
@@ -428,7 +447,78 @@ function personById(world: World, id: string): Person | undefined {
   return index.byId.get(id);
 }
 
-function choose(world: World, person: Person): void {
+function ensurePersonPolicy(world: World, person: Person): { genome: PolicyGenome; plasticity: PolicyPlasticity } {
+  if (!person.policy) person.policy = founderPolicy(world.seed, person.id);
+  if (!person.policyPlasticity) person.policyPlasticity = initialPolicyPlasticity();
+  return { genome: person.policy, plasticity: person.policyPlasticity };
+}
+
+/** Observación estrictamente local (radio ≤ 4 en teselas, ≤ 7 en vecinos) para la red de política V12. */
+function localPolicyObservation(world: World, person: Person): Float64Array {
+  let land = 0, foodSum = 0, waterTiles = 0, shelterTiles = 0, materialSum = 0, unvisited = 0;
+  const visitedSet = person.visited.length > 0 ? new Set(person.visited) : null;
+  for (let dy = -4; dy <= 4; dy++) for (let dx = -4; dx <= 4; dx++) {
+    if (dx * dx + dy * dy > 16) continue;
+    const tile = tileAt(world, { x: person.x + dx, y: person.y + dy });
+    if (!tile || tile.terrain === 'water') continue;
+    land++;
+    foodSum += tile.food;
+    if ((tile.drinkingWater ?? 0) > 0.005) waterTiles++;
+    if (tile.terrain === 'shelter') shelterTiles++;
+    materialSum += (tile.wood ?? 0) + (tile.stone ?? 0);
+    if (!visitedSet || !visitedSet.has(`${tile.x},${tile.y}`)) unvisited++;
+  }
+  const nearby = vecinos(world, person, RADIUS + 1, other => other.id !== person.id && distance(person, other) <= RADIUS, 'policy');
+  let trustSum = 0;
+  for (const other of nearby) trustSum += person.bonds[other.id] ?? 0;
+  const denom = Math.max(1, land);
+  return extractLocalObservation({
+    hunger: clamp(person.hunger),
+    thirst: clamp(person.thirst),
+    fatigue: clamp(person.fatigue),
+    energy: clamp(person.energy),
+    inventoryFrac: clamp(person.inventory / 0.25),
+    localFood: clamp(foodSum / denom),
+    localWater: clamp((waterTiles / denom) * 3),
+    localCrowd: clamp(nearby.length / 16),
+    localShelter: clamp(shelterTiles / 4),
+    localResources: clamp(materialSum / 24),
+    communityTrust: nearby.length > 0 ? clamp(trustSum / nearby.length) : 0,
+    biomeNovelty: clamp(unvisited / denom),
+  });
+}
+
+/** Evalúa por lote (CPU o Dual-GPU FP64 exacta) las políticas de los actores con decisión prevista en este paso. */
+function precomputePolicyScores(world: World): Map<string, Float64Array> | undefined {
+  const params = paramsOf(world);
+  if (params.conducta.politicaPeso <= 0) return undefined;
+  const deciding: Person[] = [];
+  for (const person of world.people) {
+    if (world.tick >= person.decisionAt || person.hunger > 0.85 || person.thirst > 0.85) deciding.push(person);
+  }
+  const count = deciding.length;
+  if (count === 0) return undefined;
+  const obs = new Float64Array(count * POLICY_INPUTS);
+  const weights = new Float64Array(count * POLICY_WEIGHTS);
+  const biases = new Float64Array(count * POLICY_ACTIONS.length);
+  for (let i = 0; i < count; i++) {
+    const person = deciding[i]!;
+    const { genome, plasticity } = ensurePersonPolicy(world, person);
+    obs.set(localPolicyObservation(world, person), i * POLICY_INPUTS);
+    weights.set(genome.weights, i * POLICY_WEIGHTS);
+    biases.set(plasticity.bias, i * POLICY_ACTIONS.length);
+  }
+  const devices = params.motor.gpu.length > 0 && gpuNvrtcAvailable() ? params.motor.gpu : [];
+  const raw = evaluatePoliciesBatch(obs, weights, biases, count, devices);
+  const byId = new Map<string, Float64Array>();
+  for (let i = 0; i < count; i++) {
+    const start = i * POLICY_ACTIONS.length;
+    byId.set(deciding[i]!.id, raw.subarray(start, start + POLICY_ACTIONS.length));
+  }
+  return byId;
+}
+
+function choose(world: World, person: Person, policyScores?: Map<string, Float64Array>): void {
   const nearbyTiles: Tile[] = [];
   for (let dy = -RADIUS; dy <= RADIUS; dy++) for (let dx = -RADIUS; dx <= RADIUS; dx++) {
     if (dx * dx + dy * dy > RADIUS * RADIUS) continue;
@@ -835,6 +925,22 @@ function choose(world: World, person: Person): void {
       candidate.score += aptitud * ventajaComparativa(person.traits, candidate.action);
     }
   }
+  // Ley evolutiva V12 (`conducta.politicaPeso`): red local 12→8→12 heredable + plasticidad Baldwin
+  // adquirida en vida (nunca heredada). Nunca sobrepone urgencias corporales severas (> 0,75) ni
+  // búsquedas de emergencia por sed o lluvia. Con default 0 no ejecuta nada (V11 bit a bit).
+  const politicaPeso = person.thirst <= 0.75 && person.hunger <= 0.75 ? paramsOf(world).conducta.politicaPeso : 0;
+  if (politicaPeso > 0) {
+    let scores = policyScores?.get(person.id);
+    if (!scores) {
+      const { genome, plasticity } = ensurePersonPolicy(world, person);
+      scores = evaluatePolicySingle(localPolicyObservation(world, person), genome.weights, plasticity.bias);
+    }
+    const emergencyExplore = seekingWater || (exposed && !protectionPlan && protection === 0);
+    for (const candidate of candidates) {
+      if (candidate === candidates[0] && emergencyExplore) continue;
+      candidate.score += policyActionBias(scores, candidate.action, politicaPeso);
+    }
+  }
   if (person.command && person.hunger < 0.85 && person.thirst < 0.85 && person.fatigue < 0.88 && person.energy > 0.15) {
     const command = person.command;
     const directed: Candidate = { action: command.order === 'move' ? 'explore' : command.order, target: { x: command.x, y: command.y }, score: 5, directed: true, reason: `Tarea solicitada: ${command.order === 'move' ? 'ir al destino' : actionLabel(command.order)}. Conserva sus necesidades corporales.` };
@@ -900,6 +1006,10 @@ function valueKey(person: Person, action: Action): string { return `${person.thi
 function outcome(world: World, person: Person, action: Action, benefit: number, useful = true): void {
   const key = `${person.intentContext}:${action}`;
   if (world.adaptationEnabled) person.values[key] = Math.max(-0.3, Math.min(0.3, (person.values[key] ?? 0) + person.genome.learningRate * (benefit - (person.values[key] ?? 0))));
+  if (world.adaptationEnabled && paramsOf(world).conducta.politicaPeso > 0) {
+    const { plasticity } = ensurePersonPolicy(world, person);
+    updatePolicyPlasticity(plasticity, action, benefit, person.genome.learningRate * 0.25);
+  }
   if (world.adaptationEnabled && world.cooperationEnabled) {
     // Acquired norms react to consequences, independently from inherited alleles.
     const rate = person.genome.learningRate * 0.04;
@@ -923,23 +1033,41 @@ function specialty(person: Person): string {
 }
 
 /** Breadth-first movement takes one adjacent land cell. It never crosses water or teleports. */
-function move(world: World, person: Person): void {
+function move(world: World, person: Person, precomputed?: PrecomputedMoves, slot?: number): void {
   if (distance(person, person.target) < 0.5) return;
   const key = (p: Point) => `${p.x},${p.y}`;
   const start = { x: person.x, y: person.y };
-  const queue: Point[] = [start], previous = new Map<string, Point | null>([[key(start), null]]);
-  let best = start, head = 0;
-  // Bounded local BFS takes one physical step toward even a distant order.
-  while (head < queue.length && head < 2048) {
-    const current = queue[head++]!;
-    if (distance(current, person.target) < distance(best, person.target)) best = current;
-    if (distance(current, person.target) < 0.5) { best = current; break; }
-    for (const next of [{ x: current.x + 1, y: current.y }, { x: current.x, y: current.y + 1 }, { x: current.x - 1, y: current.y }, { x: current.x, y: current.y - 1 }]) {
-      if (Math.max(Math.abs(next.x - start.x), Math.abs(next.y - start.y)) > 24 || !walkable(world, next) || previous.has(key(next))) continue;
-      previous.set(key(next), current); queue.push(next);
+  let nextStep: Point | null = null;
+  let blocked = false;
+  if (precomputed !== undefined && slot !== undefined && slot < precomputed.count
+    && precomputed.targetX[slot] === person.target.x && precomputed.targetY[slot] === person.target.y) {
+    const status = precomputed.si[SI.moveStatus * precomputed.cap + slot]!;
+    if (status === MOVE_EN_DESTINO) return;
+    if (status === MOVE_BLOQUEADO) blocked = true;
+    else if (status === MOVE_AVANZA) {
+      nextStep = { x: precomputed.si[SI.nextX * precomputed.cap + slot]!, y: precomputed.si[SI.nextY * precomputed.cap + slot]! };
     }
   }
-  if (best === start) {
+  if (!blocked && nextStep === null) {
+    const queue: Point[] = [start], previous = new Map<string, Point | null>([[key(start), null]]);
+    let best = start, head = 0;
+    // Bounded local BFS takes one physical step toward even a distant order.
+    while (head < queue.length && head < 2048) {
+      const current = queue[head++]!;
+      if (distance(current, person.target) < distance(best, person.target)) best = current;
+      if (distance(current, person.target) < 0.5) { best = current; break; }
+      for (const next of [{ x: current.x + 1, y: current.y }, { x: current.x, y: current.y + 1 }, { x: current.x - 1, y: current.y }, { x: current.x, y: current.y - 1 }]) {
+        if (Math.max(Math.abs(next.x - start.x), Math.abs(next.y - start.y)) > 24 || !walkable(world, next) || previous.has(key(next))) continue;
+        previous.set(key(next), current); queue.push(next);
+      }
+    }
+    if (best === start) blocked = true;
+    else {
+      while (previous.get(key(best)) !== start) best = previous.get(key(best))!;
+      nextStep = best;
+    }
+  }
+  if (blocked || !nextStep) {
     person.heading += 1.3; person.decisionAt = world.tick + 1;
     if (world.tick - person.lastOutcome >= 30) outcome(world, person, person.action, -0.15, false);
     person.reason = 'El terreno bloquea el paso; busca una ruta local posible.';
@@ -950,9 +1078,8 @@ function move(world: World, person: Person): void {
     }
     return;
   }
-  while (previous.get(key(best)) !== start) best = previous.get(key(best))!;
   if (!payContainedWaterCarry(world, person)) { person.reason = 'La carga de agua requiere más esfuerzo del que puede hacer ahora.'; return; }
-  person.x = best.x; person.y = best.y;
+  person.x = nextStep.x; person.y = nextStep.y;
   personaMovida(world, person);
   trampleTile(tileAt(world, person)!);
   exertBody(person, { energy: 0.0008, fatigue: 0.0007 * (1.2 - person.traits.resilience * 0.4) });
@@ -1008,7 +1135,7 @@ function share(world: World, donor: Person): void {
   }
 }
 
-function bodyAndAction(world: World, person: Person): void {
+function bodyAndAction(world: World, person: Person, precomputedMoves?: PrecomputedMoves, slot?: number, policyScores?: Map<string, Float64Array>): void {
   maintainContainedWater(world, person);
   const tile = tileAt(world, person)!;
   const physiology = demographicTraits(person.genome, paramsOf(world).cuerpo);
@@ -1033,9 +1160,9 @@ function bodyAndAction(world: World, person: Person): void {
   const blockedCarriedWater = person.action === 'drink' && distance(person, person.target) < 0.5
     && containedWaterQuanta(person) > 0 && !canHandleContainedWater(person, world.tick) && waterAvailable(world, person) <= 0;
   const agreedWait = person.action === 'retreat' && person.lastDispute >= 0 && world.tick < person.decisionAt && world.tick - person.lastDispute < 30;
-  if (!agreedWait && (world.tick >= person.decisionAt || emptyFood || emptyHarvest || emptyWater || blockedCarriedWater || (person.hunger > 0.9 && !['eat','hunt'].includes(person.action)) || (person.thirst > 0.9 && person.action !== 'drink'))) choose(world, person);
+  if (!agreedWait && (world.tick >= person.decisionAt || emptyFood || emptyHarvest || emptyWater || blockedCarriedWater || (person.hunger > 0.9 && !['eat','hunt'].includes(person.action)) || (person.thirst > 0.9 && person.action !== 'drink'))) choose(world, person, policyScores);
   if (['eat','drink','hunt'].includes(person.action)) resourceDispute(world, person, event => addEvent(world, event));
-  if (world.tick % 6 === 0 && !(person.action === 'accompany' && distance(person, person.target) <= 1.5)) move(world, person);
+  if (world.tick % 6 === 0 && !(person.action === 'accompany' && distance(person, person.target) <= 1.5)) move(world, person, precomputedMoves, slot);
   const current = tileAt(world, person)!;
   if (person.action === 'eat') {
     const harvest = Math.min(current.food, 0.0035);
@@ -1277,7 +1404,12 @@ function advanceTick(world: World, inputs: Gesture[], context: WorldContext, med
       gpu: paramsOf(world).motor.gpu, orden: paramsOf(world).motor.orden, ...context.ecologyExecution }));
   medirFase(medicion, 'fauna', () => { stepAnimals(world,event=>addEvent(world,event)); stepStructures(world,event=>addEvent(world,event)); });
   medirFase(medicion, 'personas', () => {
-    for (const person of world.people) bodyAndAction(world, person);
+    const motor = paramsOf(world).motor;
+    const precomputedMoves = motor.particionarPersonas && world.tick % 6 === 0 && world.people.length >= 16
+      ? precomputeMovesParallel(world, motor, context.personasExecution)
+      : undefined;
+    const policyScores = precomputePolicyScores(world);
+    for (let slot = 0; slot < world.people.length; slot++) bodyAndAction(world, world.people[slot]!, precomputedMoves, slot, policyScores);
     for (const person of world.people) {
       const chunk = world.chunks[chunkKey(person.x, person.y)]!;
       if (!chunk.discovered) {
@@ -1331,6 +1463,73 @@ function reproduce(world: World): void {
   // fundadores (`bornAt ≤ −1200`, `genes.edadFundadoresMinDias` ≥ 0,5 días) no caen dentro
   // de ella con el intervalo por defecto.
   if (!pop.comprobacionContinua && world.tick % pop.intervaloComprobacionTicks !== 0) return;
+  const materializeBirth = (a: Person, b: Person, place: (typeof world.places)[number]): void => {
+    const serial=world.birthCounter+1, id=`descendant-${serial}`;
+    if(!Number.isSafeInteger(serial)||[...world.people,...world.legacy,...world.retiredLegacy].some(p=>p.id===id)) throw new Error('La identidad de un nacimiento ya existe; no se gastaron reservas.');
+    const genome=inheritGenome(world.seed,id,[a,b],DEFAULT_MUTATION_RATE*paramsOf(world).genes.tasaMutacion); world.birthCounter=serial;
+    const traits = expressGenome(genome);
+    const child: Person = { ...structuredClone(a), id, name: `${proceduralPlaceName(world.seed, world.birthCounter, genome.generation).split(' ')[0]} ${world.birthCounter}`.slice(0, 70), role: 'neighbor',
+      genome, traits, curiosity: traits.curiosity, sociability: traits.sociability, generosity: traits.care, bornAt: world.tick, lastBirth: world.tick, thirst: 0.15,
+      hunger: 0.2, fatigue: 0.1, energy: 0.65, inventory: 0.1, materials: { wood: 0, stone: 0 }, skills: {}, activity: {}, values: {}, experiences: [], habits: [], visited: [], bonds: {},
+      culture: { sharing: (a.culture.sharing + b.culture.sharing) / 2, stewardship: (a.culture.stewardship + b.culture.stewardship) / 2, openness: (a.culture.openness + b.culture.openness) / 2 },
+      command: null, controlMode: 'auto', target: { x: a.x, y: a.y }, action: 'rest', reason: 'Un nuevo habitante aprende en la comunidad que lo sostiene.', work: 0, decisionAt: world.tick + 30, lastOutcome: world.tick, lastPracticeMemory: world.tick, recentMemory: null,
+      lastSocial: world.tick, lastDispute: world.tick, lastMeeting: world.tick, lastShared: world.tick, socialLoad: 0, closeness: 0.2, need: 'Aprender', heading: world.birthCounter * 2.399963229728653,
+      blueprintId: null, lastInvention: world.tick,
+      technology: initialTechnologyKnowledge(), demography: initialDemography(),
+    };
+    delete child.home;
+    // Lastre de la ley retirada (vocación, ola 1): una cría nunca hereda ese campo.
+    delete (child as unknown as Record<string, unknown>).vocacion;
+    // Política evolutiva V12: la plasticidad adquirida en vida (efecto Baldwin) jamás se hereda.
+    delete child.policy;
+    delete child.policyPlasticity;
+    if (paramsOf(world).conducta.politicaPeso > 0) {
+      const parentPolicyA = a.policy ?? founderPolicy(world.seed, a.id);
+      const parentPolicyB = b.policy ?? founderPolicy(world.seed, b.id);
+      child.policy = inheritPolicy(world.seed, id, parentPolicyA, parentPolicyB, DEFAULT_MUTATION_RATE * paramsOf(world).genes.tasaMutacion);
+      child.policyPlasticity = initialPolicyPlasticity();
+    }
+    // `agua.memoria`: la cría nace junto a sus padres y conserva el aguadero de `a` (copiado arriba con el
+    // resto de su estado); es información, no agua: si está seco lo olvidará al verlo, como cualquiera.
+    if (a.waterMemory) child.waterMemory = { x: a.waterMemory.x, y: a.waterMemory.y };
+    a.inventory -= 0.08; b.inventory -= 0.08; a.energy = clamp(a.energy - 0.08); b.energy = clamp(b.energy - 0.08); a.lastBirth = world.tick; b.lastBirth = world.tick;
+    world.people.push(child);
+    // El evento de fundación de una comunidad comparte el arreglo con `group.members`
+    // (society.ts). Con la comprobación periódica un nacimiento cae siempre en el mismo paso
+    // que ese evento, así que empujar aquí lo extiende ANTES de que se archive y la crónica
+    // sigue siendo coherente: eso es lo que guardan las instantáneas de hoy y por eso el
+    // camino por defecto no se toca. Con `comprobacionContinua` el nacimiento puede caer
+    // 1..119 pasos DESPUÉS, cuando el evento ya es durable, y empujar lo reescribiría: el
+    // Store lo rechaza («an immutable event cannot be overwritten»). Reemplazar el arreglo
+    // deja el mismo censo sin tocar el pasado. Desde reglas 10 el evento lleva su propia copia
+    // (society.ts) y aquí se reemplaza siempre; los mundos V9 conservan el alias histórico.
+    const group = world.communities.find(c => c.id === a.communityId);
+    if (group) { if (pop.comprobacionContinua || world.version >= 10) group.members = [...group.members, id]; else group.members.push(id); }
+    count(world, 'births');
+    const event = addEvent(world, { kind: 'birth', actors: [a.id, b.id, child.id], x: child.x, y: child.y, source: 'simulation', text: a.communityId === b.communityId ? `${child.name} nació en la comunidad de ${a.name} y ${b.name}.` : `${child.name} nació del vínculo entre ${a.name} y ${b.name}, de comunidades distintas.`, cause: `${a.name} y ${b.name} junto a ${place.name} (${place.x},${place.y}). Dos progenitores simulados con recursos, confianza y lugar compartido; reserva conjunta −0.16, cría recibe 0.10. Recombina siete pares de parámetros; ${genome.mutations} variaciones. Habilidades y recuerdos comienzan vacíos; cultura inicial por crianza, no por ADN.` });
+    remember(child, world, 'La comunidad sostuvo su llegada.', event.id, place.id);
+  };
+  if (pop.natalidadVecindad) {
+    const pairs = selectLocalBirthPairs(
+      world,
+      {
+        radioVecindad: pop.radioVecindadNatalidad,
+        cupoLocalPorVentana: pop.nacimientosPorComprobacion,
+        ventanaTicks: pop.intervaloComprobacionTicks,
+        alimentoMedioMinimo: ALIMENTO_MEDIO_MINIMO_NATALIDAD,
+        radioPareja: pop.radioPareja,
+        radioLugar: pop.radioLugar,
+        exigeComunidad: pop.exigeComunidad,
+        maximaPoblacion: pop.maxima,
+      },
+      person => fertile(world, person),
+      closeKin,
+      pairAffinity,
+      pairTie,
+    );
+    for (const { a, b, place } of pairs) materializeBirth(a, b, place);
+    return;
+  }
   const recientes = pop.comprobacionContinua
     ? world.people.filter(p => p.role === 'neighbor' && p.bornAt > world.tick - pop.intervaloComprobacionTicks).length : 0;
   const cupo = pop.nacimientosPorComprobacion - recientes;
@@ -1357,43 +1556,8 @@ function reproduce(world: World): void {
       }
     }
     if (!pair || !place) break;
-    const { a, b } = pair;
-    const serial=world.birthCounter+1, id=`descendant-${serial}`;
-    if(!Number.isSafeInteger(serial)||[...world.people,...world.legacy,...world.retiredLegacy].some(p=>p.id===id)) throw new Error('La identidad de un nacimiento ya existe; no se gastaron reservas.');
-    const genome=inheritGenome(world.seed,id,[a,b],DEFAULT_MUTATION_RATE*paramsOf(world).genes.tasaMutacion); world.birthCounter=serial;
-    const traits = expressGenome(genome);
-    const child: Person = { ...structuredClone(a), id, name: `${proceduralPlaceName(world.seed, world.birthCounter, genome.generation).split(' ')[0]} ${world.birthCounter}`.slice(0, 70), role: 'neighbor',
-      genome, traits, curiosity: traits.curiosity, sociability: traits.sociability, generosity: traits.care, bornAt: world.tick, lastBirth: world.tick, thirst: 0.15,
-      hunger: 0.2, fatigue: 0.1, energy: 0.65, inventory: 0.1, materials: { wood: 0, stone: 0 }, skills: {}, activity: {}, values: {}, experiences: [], habits: [], visited: [], bonds: {},
-      culture: { sharing: (a.culture.sharing + b.culture.sharing) / 2, stewardship: (a.culture.stewardship + b.culture.stewardship) / 2, openness: (a.culture.openness + b.culture.openness) / 2 },
-      command: null, controlMode: 'auto', target: { x: a.x, y: a.y }, action: 'rest', reason: 'Un nuevo habitante aprende en la comunidad que lo sostiene.', work: 0, decisionAt: world.tick + 30, lastOutcome: world.tick, lastPracticeMemory: world.tick, recentMemory: null,
-      lastSocial: world.tick, lastDispute: world.tick, lastMeeting: world.tick, lastShared: world.tick, socialLoad: 0, closeness: 0.2, need: 'Aprender', heading: world.birthCounter * 2.399963229728653,
-      blueprintId: null, lastInvention: world.tick,
-      technology: initialTechnologyKnowledge(), demography: initialDemography(),
-    };
-    delete child.home;
-    // Lastre de la ley retirada (vocación, ola 1): una cría nunca hereda ese campo.
-    delete (child as unknown as Record<string, unknown>).vocacion;
-    // `agua.memoria`: la cría nace junto a sus padres y conserva el aguadero de `a` (copiado arriba con el
-    // resto de su estado); es información, no agua: si está seco lo olvidará al verlo, como cualquiera.
-    if (a.waterMemory) child.waterMemory = { x: a.waterMemory.x, y: a.waterMemory.y };
-    a.inventory -= 0.08; b.inventory -= 0.08; a.energy = clamp(a.energy - 0.08); b.energy = clamp(b.energy - 0.08); a.lastBirth = world.tick; b.lastBirth = world.tick;
-    world.people.push(child);
-    // El evento de fundación de una comunidad comparte el arreglo con `group.members`
-    // (society.ts). Con la comprobación periódica un nacimiento cae siempre en el mismo paso
-    // que ese evento, así que empujar aquí lo extiende ANTES de que se archive y la crónica
-    // sigue siendo coherente: eso es lo que guardan las instantáneas de hoy y por eso el
-    // camino por defecto no se toca. Con `comprobacionContinua` el nacimiento puede caer
-    // 1..119 pasos DESPUÉS, cuando el evento ya es durable, y empujar lo reescribiría: el
-    // Store lo rechaza («an immutable event cannot be overwritten»). Reemplazar el arreglo
-    // deja el mismo censo sin tocar el pasado. Desde reglas 10 el evento lleva su propia copia
-    // (society.ts) y aquí se reemplaza siempre; los mundos V9 conservan el alias histórico.
-    const group = world.communities.find(c => c.id === a.communityId);
-    if (group) { if (pop.comprobacionContinua || world.version >= 10) group.members = [...group.members, id]; else group.members.push(id); }
-    count(world, 'births');
-    const event = addEvent(world, { kind: 'birth', actors: [a.id, b.id, child.id], x: child.x, y: child.y, source: 'simulation', text: a.communityId === b.communityId ? `${child.name} nació en la comunidad de ${a.name} y ${b.name}.` : `${child.name} nació del vínculo entre ${a.name} y ${b.name}, de comunidades distintas.`, cause: `${a.name} y ${b.name} junto a ${place.name} (${place.x},${place.y}). Dos progenitores simulados con recursos, confianza y lugar compartido; reserva conjunta −0.16, cría recibe 0.10. Recombina siete pares de parámetros; ${genome.mutations} variaciones. Habilidades y recuerdos comienzan vacíos; cultura inicial por crianza, no por ADN.` });
-    remember(child, world, 'La comunidad sostuvo su llegada.', event.id, place.id);
-    used.add(a.id); used.add(b.id);
+    materializeBirth(pair.a, pair.b, place);
+    used.add(pair.a.id); used.add(pair.b.id);
   }
 }
 
@@ -1720,6 +1884,14 @@ export function assertWorld(value: unknown, expectedVersion = RULES_VERSION, con
 
     if (p.command !== null && (!p.command || !['move','explore','gather','farm','build','rest','hunt','drink','cooperate',...(expectedVersion>=4?['invent','repair']:[]), ...(expectedVersion>=5?['research','craft','forage']:[])].includes(p.command.order) || !validCoordinate(p.command.x) || !validCoordinate(p.command.y))) fail();
     if ((p.command === null) !== (p.controlMode === 'auto')) fail();
+    if (p.policy !== undefined) {
+      if (expectedVersion < 12) fail();
+      assertPolicyGenome(p.policy);
+    }
+    if (p.policyPlasticity !== undefined) {
+      if (expectedVersion < 12) fail();
+      assertPolicyPlasticity(p.policyPlasticity);
+    }
   }
   if (expectedVersion >= 3) {
     if (typeof w.cooperationEnabled !== 'boolean' || typeof w.reproductionEnabled !== 'boolean' || !Array.isArray(w.communities) || w.communities.length > limits.comunidades || !Number.isSafeInteger(w.communityCounter) || w.communityCounter < 0 || !Number.isSafeInteger(w.birthCounter) || w.birthCounter < 0 || !Array.isArray(w.history) || w.history.length > 96 || !numericMap(w.totals, 0, 1e12, 12)) fail();
@@ -1792,6 +1964,11 @@ function migrateWorldState(value: unknown, context: WorldContext = {}): World {
     if (catalogueEnabled(world.technology)) for (const person of world.people) maintainTechnologyMemory(world, person);
     assertWorld(world); return world;
   }
+  if (version === 11) {
+    assertWorld(value, 11, context);
+    const world = cloneWorld(value, context); upgradeV12(world);
+    return migrateWorldState(world, context);
+  }
   if (version === 10) {
     // V10 → V11 sólo cambia la etiqueta; la rama de la versión vigente aplica después la misma
     // normalización de carga que recibía un mundo V10 con el código de reglas 10.
@@ -1823,20 +2000,20 @@ function migrateWorldState(value: unknown, context: WorldContext = {}): World {
   }
   if (version === 5) {
     assertWorld(value, 5, context);
-    const world = cloneWorld(value, context); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); upgradeV10(world); upgradeV11(world);
+    const world = cloneWorld(value, context); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); upgradeV10(world); upgradeV11(world); upgradeV12(world);
     if (world.technology.checkpoint === undefined) world.technology.checkpoint = captureTechnologyCheckpoint(world.technology, world.people, world.tick, 'migration');
     if (catalogueEnabled(world.technology)) for (const person of world.people) maintainTechnologyMemory(world, person);
     assertWorld(world); return world;
   }
-  if (version===4) { assertWorld(value,4,context); const world=cloneWorld(value,context); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); upgradeV10(world); upgradeV11(world); assertWorld(world); return world; }
+  if (version===4) { assertWorld(value,4,context); const world=cloneWorld(value,context); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); upgradeV10(world); upgradeV11(world); upgradeV12(world); assertWorld(world); return world; }
   if(version===3) {
     assertWorld(value,3,context);
-    const world=cloneWorld(value,context); upgradeV4(world); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); upgradeV10(world); upgradeV11(world); assertWorld(world); return world;
+    const world=cloneWorld(value,context); upgradeV4(world); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); upgradeV10(world); upgradeV11(world); upgradeV12(world); assertWorld(world); return world;
   }
   if (version === 2) {
     assertWorld(value, 2, context);
     const world = cloneWorld(value, context);
-    upgradeV3(world); upgradeV4(world); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); upgradeV10(world); upgradeV11(world); assertWorld(world); return world;
+    upgradeV3(world); upgradeV4(world); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); upgradeV10(world); upgradeV11(world); upgradeV12(world); assertWorld(world); return world;
   }
   assertCommon(value, true);
   const world = structuredClone(value);
@@ -1864,7 +2041,7 @@ function migrateWorldState(value: unknown, context: WorldContext = {}): World {
     p.skills = {}; p.values = {}; p.activity = {}; p.materials = { wood: 0, stone: 0 }; p.visited = [];
     p.heading = index * 2.399963229728653; p.command = null; p.work = 0; p.lastOutcome = world.tick; p.intentContext = p.hunger > 0.5 ? 'hungry' : p.fatigue > 0.5 ? 'tired' : 'ready'; p.controlMode = 'auto';
   });
-  upgradeV3(world); upgradeV4(world); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); upgradeV10(world); upgradeV11(world); assertWorld(world); return world;
+  upgradeV3(world); upgradeV4(world); upgradeV5(world); upgradeV6(world); upgradeV7(world); upgradeV8(world); upgradeV9(world); upgradeV10(world); upgradeV11(world); upgradeV12(world); assertWorld(world); return world;
 }
 function upgradeV3(world: World): void {
   world.version = 3; world.cooperationEnabled = true; world.reproductionEnabled = true;
@@ -1900,3 +2077,5 @@ function upgradeV9(world: World): void { world.version = 9; }
 function upgradeV10(world: World): void { world.version = 10; }
 /** V11 adopta nuevos defaults sólo al crear mundos; al migrar no altera estado ni params. */
 function upgradeV11(world: World): void { world.version = 11; }
+/** V12 habilita leyes evolutivas y natalidad local opt-in; al migrar no altera estado ni params. */
+function upgradeV12(world: World): void { world.version = 12; }

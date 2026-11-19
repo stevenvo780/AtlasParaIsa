@@ -37,7 +37,12 @@ function replica(t: { after(callback: () => void): void }, pasos: number, params
  * estado físico sea idéntico, así que el control la quita antes de hashear. */
 function digestoSinAptitud(world: World): string {
   const vigentes = paramsOf(world);
-  const comoPadre = structuredClone(vigentes) as unknown as { conducta: Record<string, unknown>; social: Record<string, unknown>; tecnologia?: Record<string, unknown> };
+  const comoPadre = structuredClone(vigentes) as unknown as {
+    conducta: Record<string, unknown>;
+    social: Record<string, unknown>;
+    tecnologia?: Record<string, unknown>;
+    poblacion: Record<string, unknown>;
+  };
   delete comoPadre.conducta.aptitud;
   // Fusión CONFL (`sprint/noche-lab60c-20260922`): `social.memoriaDisputa` no existía en f2757fa, donde se
   // midieron los hashes; con su valor 0 no actúa, así que también se quita de la forma.
@@ -53,6 +58,13 @@ function digestoSinAptitud(world: World): string {
   // valores históricos no actúa, así que también se quita de la forma.
   assert.deepEqual(comoPadre.tecnologia, HISTORICAL_PARAMS.tecnologia);
   delete comoPadre.tecnologia;
+  // V12 (`sprint/v15-rules12-20261119`): claves opt-in en valor inactivo (default) no actúan.
+  assert.equal(comoPadre.poblacion.natalidadVecindad, false);
+  delete comoPadre.poblacion.natalidadVecindad;
+  assert.equal(comoPadre.poblacion.radioVecindadNatalidad, 16);
+  delete comoPadre.poblacion.radioVecindadNatalidad;
+  assert.equal(comoPadre.conducta.politicaPeso, 0);
+  delete comoPadre.conducta.politicaPeso;
   // Poda ola 1 (2026-09-27): `conducta.vocacion`/`vocacionTope` y
   // `poblacion.natalidadLocal`/`radioProvision` ya no se declaran; la forma las trae quitadas.
   setParams(world, comoPadre as unknown as WorldParams);

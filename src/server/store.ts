@@ -1553,6 +1553,10 @@ export class Store {
     if (revoked) { this.db.exec('ROLLBACK'); throw new SessionRevoked('Session revoked before commit.'); }
     let chronicleTriggers = false;
     try {
+      // Abrir la transacción anfitriona ANTES de `prepareReplay`: el replay ejecuta `stepWorld`
+      // con lecturas de `catalogueReader`; sin ella cada consulta descartaba pruebas y reescaneaba
+      // toda `technology_definitions` (12+ min y >120 GB leídos en un mundo V14 real de 705 hab.).
+      this.technologyArchive.beginHostTransaction();
       const rotatesBackups = this.slot0Readable ?? this.readSlot0();
       const nextDurableSaves = this.readDurableSaves() + 1;
       const deep = rotatesBackups && nextDurableSaves % DEEP_CHECKPOINT_EVERY_SAVES === 0;
@@ -1566,7 +1570,6 @@ export class Store {
         if (replay.node.kind === 'checkpoint') prepared = this.snapshotParts.prepare(this.committedReplayWorld(world), paramsOf(world), this.snapshotInlineTileLimit);
       }
       chronicleTriggers = this.chronicleHasTriggers();
-      this.technologyArchive.beginHostTransaction();
       this.assertChronicleChanges(world, chronicleStamp, !chronicleTriggers);
       const technologyChain = this.flushTechnology(world);
       technologyPruned = this.pruneTechnology(world, window, rotatesBackups, deep);
@@ -1894,6 +1897,8 @@ export class Store {
     let chosen: { slot: SnapshotSlot; row: Row } | undefined;
     this.db.exec('BEGIN');
     try {
+      this.db.prepare('SELECT 1 FROM main.sqlite_schema LIMIT 1').get();
+      this.technologyArchive.beginHostTransaction();
     for (const slot of SNAPSHOT_SLOTS) {
       if (slot < fromSlot) continue;
       const candidate = this.db.prepare('SELECT body,digest,saved_at FROM snapshots WHERE slot=?').get(slot) as Row | undefined;
@@ -1919,12 +1924,14 @@ export class Store {
       }
     }
     this.db.exec('COMMIT');
-    } catch (error) { if (this.db.isTransaction) this.db.exec('ROLLBACK'); throw error; }
+    this.technologyArchive.acknowledgeHostCommit();
+    } catch (error) { if (this.db.isTransaction) this.db.exec('ROLLBACK'); this.technologyArchive.invalidateVerification(); throw error; }
     if (!chosen) throw new Error(`No valid previous checkpoint (${refusals.join('; ')}).`);
     this.backup(destination);
     const recovered = new Store(destination, { snapshotInlineTileLimit: this.snapshotInlineTileLimit });
     try {
       recovered.db.exec('BEGIN IMMEDIATE');
+      recovered.technologyArchive.beginHostTransaction();
       // VACUUM cannot run inside the source read transaction. Another writer may
       // rotate a checkpoint or remove its pages in that interval. Never silently
       // substitute its new slot occupant or reuse the previously decoded world.
@@ -1932,7 +1939,6 @@ export class Store {
       if (!copied || copied.body !== chosen.row.body || copied.digest !== chosen.row.digest || copied.saved_at !== chosen.row.saved_at)
         throw new Error('Selected previous checkpoint changed before backup. Explicit recovery required.');
       const { world, declaredJournal } = recovered.verifyPrevious(recovered.readSnapshot(copied.body) as World);
-      recovered.technologyArchive.beginHostTransaction();
       bindWorldContext(world, recovered.context);
       // Antes de borrar nada: la cadena del original tiene que cerrar sobre lo retenido, y su pliegue en este
       // punto es la cabeza de la copia (las filas posteriores se van a borrar).

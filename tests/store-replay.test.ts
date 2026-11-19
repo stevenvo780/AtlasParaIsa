@@ -259,6 +259,31 @@ test('replay: deltas de fase 1 con raíz canónica siguen siendo legibles', t =>
   assert.equal(digestoCanonico(store.load()!.world), digestoCanonico(world));
 });
 
+test('replay: save() y previous() mantienen beginHostTransaction activo durante prepareReplay/readSnapshot', t => {
+  const { store, directory } = laboratorio(t, 'atlas-replay-host-tx-');
+  const world = createWorld(51926, replayParams);
+  store.save(world);
+  for (let i = 0; i < 6; i++) stepWorld(world, [], store.context);
+  const archive = (store as unknown as { technologyArchive: { hostTransaction: boolean; clearProofs: () => void } }).technologyArchive;
+  const prepareReplay = (store as unknown as { prepareReplay: (...args: unknown[]) => unknown }).prepareReplay.bind(store);
+  let txActiveInPrepare = false;
+  (store as unknown as { prepareReplay: (...args: unknown[]) => unknown }).prepareReplay = (...args: unknown[]) => {
+    txActiveInPrepare = archive.hostTransaction;
+    return prepareReplay(...args);
+  };
+  store.save(world);
+  assert.equal(txActiveInPrepare, true, 'beginHostTransaction debe estar activo antes de prepareReplay para no reescanear technology_definitions');
+
+  const readSnapshot = (store as unknown as { readSnapshot: (body: string) => unknown }).readSnapshot.bind(store);
+  let txActiveInPreviousRead = false;
+  (store as unknown as { readSnapshot: (body: string) => unknown }).readSnapshot = (body: string) => {
+    txActiveInPreviousRead = archive.hostTransaction;
+    return readSnapshot(body);
+  };
+  store.previous(join(directory, 'prev.sqlite'));
+  assert.equal(txActiveInPreviousRead, true, 'beginHostTransaction debe estar activo antes de readSnapshot en previous()');
+});
+
 test('replay: control de bytes escritos y saveMs con la misma escena y cadencia', t => {
   const directory = directorioTemporal(t, 'atlas-replay-benchmark-');
   const rows = [];

@@ -1,6 +1,6 @@
 # Estado publicado
 
-Única fuente de «qué está publicado». README, PLAN y CLAUDE.md enlazan aquí en vez de copiar
+Única fuente de «qué está publicado». README, PLAN y CLAUDE.md/AGENTS.md enlazan aquí en vez de copiar
 estas cifras. Se actualiza en cada publicación, junto con su contrato
 `docs/evidencia-AAAA-MM-DD/publication*.json`; si este fichero y el contrato discrepan, manda
 el contrato.
@@ -49,7 +49,7 @@ Lo que esta publicación **no** acreditó: el criterio de 60 días de [GOAL.md](
 |---|---|
 | URL | <https://atlas.humanizar.tech> |
 | Código compilado y servido | `5a36ce6` desde el 24-09 02:35 -05 (en el portátil hasta las 08:34, en la torre desde las 08:35: [contrato de la publicación](evidencia-2026-09-24/publication-v11.json), [contrato de la mudanza](evidencia-2026-09-24/publication-v11-torre.json)): reglas 11 (conflicto legible) y el arte del suelo por campo (bordes orgánicos de biomas, desgaste y orillas; agua sin cuadros). Contiene también, **a 0**, las leyes candidatas de C8 (`conducta.vocacion`, `social.hogarTrabajo`) y de natalidad local (`poblacion.natalidadLocal`): el mundo por defecto es bit a bit el de reglas 11 |
-| `main` | ver `git log`; lo servido es `5a36ce6`, no necesariamente el HEAD de `main` |
+| `main` | ver `git log`; lo servido fue `5a36ce6`, no necesariamente el HEAD de `main` |
 | Reglas | `RULES_VERSION` 11: reglas 10 + `social` { disputaNecesidad 0,45, disputaEscasez 3, disputaRadio 3, memoriaDisputa 8 } y gobernador `techo` |
 | Protocolo | `PROTOCOL_VERSION` 10 |
 | SQLite | `user_version` 5 (instantáneas paginadas) |
@@ -72,22 +72,24 @@ Lo que esta publicación **no** acredita: el criterio de 60 días de [GOAL.md](.
 
 ## Trabajo en curso
 
-- Revisiones vigentes: [REVISION-2026-09-22](REVISION-2026-09-22.md) y
+- Revisiones vigentes: [REVISION-2026-09-24](REVISION-2026-09-24.md),
+  [REVISION-2026-09-22](REVISION-2026-09-22.md) y
   [REVISION-NOCHE-2026-09-22](REVISION-NOCHE-2026-09-22.md).
 - `specs/002-mundo-ilimitado/`: etapas B–F descongeladas el 2026-09-23 (decisión de Steven: la escala en paralelo a
-  la biología). Ya integrados y servidos: PERF3 (sin copia del mundo en los pasos sin gestos) y el bloque E.0 ola 1
-  (T141–T143). La ola 1 de la etapa B (T111–T113: halo, terreno SoA, teselas y activación O(1)) ya está fusionada en
-  `main` (`ff52c30`) pero **aún no desplegada al público** (el commit servido, `b5def74`, es anterior a ese merge).
-  La ola 2 de B (T115/T117/T120) queda en espera: el perfil a 700 habitantes (bitácora 23-09 17:50) señala la
-  enseñanza/recetas (20 %), la fauna (13 %) y la ecología (7 %) como el coste, no el halo/terreno (decisión D4 del
-  plan maestro). La etapa A está integrada en `main`; T103 y T104 quedan superadas por ARCH/PERF3 y ese perfil
-  (pendiente reescribirlas); siguen abiertas T100 y el Gate A (T110), según
+  la biología). Ya integrados en `main` y desplegados en V13 (`c7b3bb3`): PERF3 (sin copia del mundo en pasos sin
+  gestos), bloque E.0 olas 1–2 (T141–T143 y `b5def74`), Etapa B tareas T111–T114 y T116 (halo, terreno SoA,
+  activación O(1), port SoA de ecología y máscara de fauna), Etapa D tareas T134 y T136 (viewport/censo y compresión
+  WS), y T100 (cerrada funcionalmente el 2026-09-28, [T100-LIMITES-CONTRATO](T100-LIMITES-CONTRATO.md)).
+  La ola 2 de B (T115/T117/T120, en ramas `sprint/t115..t120-20260930`) sigue pendiente de integración y Gate B
+  (T118/T119) porque el perfil a 700 habitantes (bitácora 23-09 17:50) señala enseñanza/recetas (20 %), fauna (13 %)
+  y ecología (7 %) como coste dominante (decisión D4). De la etapa A siguen abiertas T103 y T104 (superadas por
+  ARCH/PERF3 y ese perfil, pendientes de reescritura) y el Gate A (T110), según
   [tasks.md](../specs/002-mundo-ilimitado/tasks.md).
 - `specs/001-mundo-solido-masivo/`: cerrada el 2026-09-19.
 
 ## Cómo se actualiza
 
-Al publicar, con el procedimiento de CLAUDE.md: nuevo `publication-*.json` con el commit, el gate y las
+Al publicar, con el procedimiento de CLAUDE.md/AGENTS.md: nuevo `publication-*.json` con el commit, el gate y las
 comprobaciones en vivo; después, esta tabla y la sección de anteriores, y `npx tsx scripts/check-links.ts`
 para no dejar enlaces rotos. Ningún otro documento repite
-el commit vigente; CLAUDE.md nombra además el directorio del mundo para que ningún agente lo toque.
+el commit vigente; CLAUDE.md/AGENTS.md nombran además el directorio del mundo para que ningún agente lo toque.

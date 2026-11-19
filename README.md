@@ -6,20 +6,23 @@ criterios de aceptación están en [GOAL.md](GOAL.md).
 
 **Estado:** lo publicado (commit, reglas, protocolo, SQLite y directorio del mundo) está en
 [docs/ESTADO.md](docs/ESTADO.md), la única fuente de ese estado. [PLAN](PLAN.md#estado-actual)
-identifica lo pendiente, y las revisiones vigentes, la [del 22 de septiembre](docs/REVISION-2026-09-22.md)
-y la [de la noche del 22](docs/REVISION-NOCHE-2026-09-22.md), separan controles causales, resultados
-demográficos y rendimiento. No se declara autonomía sostenida ni cierre del proyecto. Histórico
-(hasta 2026-09-23): el servicio de usuario `atlas-servidor.service` y su respaldo horario corrían
-en la torre; hoy están **deshabilitados** ahí y el servicio activo es `atlas-publico.service` en el
-portátil de Steven (detalle en `docs/ESTADO.md`). Cada versión publicada usa un directorio de mundo
-nuevo y los anteriores siguen separados.
+identifica lo pendiente, y las revisiones vigentes —[del 24 de septiembre](docs/REVISION-2026-09-24.md),
+[del 22 de septiembre](docs/REVISION-2026-09-22.md) y
+[de la noche del 22](docs/REVISION-NOCHE-2026-09-22.md)— separan controles causales, resultados
+demográficos y rendimiento. No se declara autonomía sostenida ni cierre del proyecto. El servicio
+activo es `atlas-publico.service` en **la torre** (detalle en [docs/ESTADO.md](docs/ESTADO.md));
+los servicios anteriores (`atlas-servidor.service` en la torre hasta el 23-09, y `atlas-puente.service`
+junto al servicio del portátil del 23-09 al 24-09 08:35) están **deshabilitados**. Cada versión
+publicada usa un directorio de mundo nuevo y los anteriores se mantienen separados.
 
-El servidor de `atlas.humanizar.tech` corre en el portátil de Steven desde 2026-09-23 11:17; la
-torre solo reenvía el tráfico (`atlas-puente.service`). Histórico: hasta esa fecha servía
-`dist/client` desde el árbol principal de la torre. Las compilaciones de prueba se hacen en
-worktrees aislados. Para publicar hay que validar el commit, verificar un respaldo, detener el
-servicio y sólo entonces compilar ese árbol. Cada versión de pruebas publicada usa un directorio de
-mundo nuevo; reiniciar la misma versión recupera su estado confirmado. La contraseña se conserva.
+El servidor de `atlas.humanizar.tech` corre en la torre desde un worktree aislado bajo
+`AtlasParaIsa-anexo/worktrees/`. Histórico: hasta el 2026-09-23 11:17 servía `dist/client` desde
+el árbol principal de la torre, y del 23-09 al 24-09 08:35 corrió en el portátil de Steven detrás
+de `atlas-puente.service`. Todas las compilaciones (pruebas y publicaciones) se hacen en worktrees
+aislados, nunca en el árbol principal. Para publicar hay que validar el commit, verificar un
+respaldo, detener el servicio y levantar el worktree detached nuevo. Cada versión de pruebas
+publicada usa un directorio de mundo nuevo; reiniciar la misma versión recupera su estado
+confirmado. La contraseña se conserva.
 
 ## Antecedentes de septiembre de 2026
 
@@ -84,7 +87,7 @@ npm start
 
 Abre **http://127.0.0.1:3000** e ingresa con esa contraseña. Usa exactamente ese origen: el servidor comprueba `Host` y el origen de las solicitudes. Arrastra para explorar, usa la rueda para acercarte y selecciona un habitante en el mapa o el censo. «Autónomo» devuelve sus decisiones. [EXPERIENCIA.md](docs/EXPERIENCIA.md#participación-de-isa) explica órdenes, fichas, fauna, procedimientos y gestos; los recursos del panel corresponden a regiones activas, no a todo el territorio.
 
-**Todos los clientes conectados al mismo servicio comparten un único mundo persistente.** El backend mantiene un estado y un reloj de simulación a diez pasos por segundo, guarda cada paso y envía normalmente dos vistas por segundo a cada cliente. Cada navegador conserva su cámara y dibuja la región solicitada; abrir otra pestaña no crea habitantes ni otra simulación. Las órdenes aceptadas de todos los clientes actúan sobre ese mundo común.
+**Todos los clientes conectados al mismo servicio comparten un único mundo persistente.** El backend mantiene un estado y un reloj de simulación a diez pasos por segundo, persiste por cadencia (en el servidor por defecto cada 100 pasos, además de guardar de inmediato cada gesto confirmado o al acercarse a la capacidad de los diarios) y envía normalmente dos vistas por segundo a cada cliente. Cada navegador conserva su cámara y dibuja la región solicitada; abrir otra pestaña no crea habitantes ni otra simulación. Las órdenes aceptadas de todos los clientes actúan sobre ese mundo común.
 
 La CPU del servidor ejecuta la simulación y el guardado; cada navegador dibuja con sus recursos gráficos. El límite actual es **12 conexiones WebSocket simultáneas**, incluidas varias pestañas de una persona. La distribución del trabajo y los límites gráficos están en [CONSTRUCCION.md](docs/CONSTRUCCION.md#arquitectura-implementada).
 
@@ -113,6 +116,7 @@ Este acceso por IP de la red bridge está pensado para la propia torre Linux. No
 | `PORT` | `3000` | Puerto TCP, entre 1 y 65535. |
 | `CARTA_ORIGIN` | `http://127.0.0.1:<PORT>` | Origen exacto visible en el navegador. Un origen HTTPS activa cookies `Secure` y HSTS. |
 | `CARTA_PASSWORD` | Sin valor | Alternativa operativa a `access.scrypt`, suministrada fuera del repositorio. No hace falta para el arranque interactivo anterior. |
+| `CARTA_PARAMS` | Vacío (sobre `PRODUCTION_PARAMS`) | Ajustes de parámetros clave a clave (`a.b=v,...`) aplicados sobre los defaults de producción del servidor (`persistencia.cadaTicks=100,persistencia.ventanaEventosTicks=24000`). |
 
 Para alojamiento hacen falta **una sola instancia**, un proceso persistente, disco persistente para SQLite y terminación HTTPS con soporte WebSocket. `CARTA_ORIGIN` declara el origen autorizado; no instala certificados ni convierte por sí solo el servidor HTTP en HTTPS. El proveedor y la publicación requieren la decisión del dueño.
 
@@ -183,7 +187,7 @@ Se comprueba el backend en loopback antes de exponerlo por TLS. Si ya se intent�
 
 El mundo se genera por regiones de 16 × 16 celdas con coordenadas positivas y negativas; no conserva el borde de 40 × 28. El límite técnico es ±10 millones de celdas, con extremo superior excluido. La cámara recibe ventanas de hasta 96 × 64. Solo los alrededores de los habitantes avanzan: las regiones archivadas conservan sus cambios y congelan su ecología. El archivo en disco puede crecer con la exploración.
 
-La fuente para grabación usaba reglas/protocolo **6** y SQLite **4** (histórico, `03470e3`); lo vigente es reglas/protocolo **10** y SQLite **5** con instantáneas paginadas (`docs/ESTADO.md`). El lector valida el origen antes de migrar; V5→V6 añade cuentas líquidas vacías y nunca llena recipientes. La actualización anterior a `bf6431b` conservó el mundo y sus sesiones al pasar de SQLite 3 a 4; `7d8777c` comenzó otro mundo según la política vigente. El archivo V4 anterior conserva su defecto de madera fuera de cota: el inicio V5 fue un mundo nuevo autorizado, no una migración exitosa de ese V4. El contrato de archivo y recuperación está en [CONSTRUCCION.md](docs/CONSTRUCCION.md#territorio-procedural-y-archivo); [EVIDENCIA.md](docs/EVIDENCIA.md#actualización-sin-reiniciar-el-mundo) registra aquel cambio de esquema.
+La fuente para grabación usaba reglas/protocolo **6** y SQLite **4** (histórico, `03470e3`); lo vigente es reglas **11**, protocolo **10** y SQLite **5** con instantáneas paginadas ([docs/ESTADO.md](docs/ESTADO.md)). El lector valida el origen antes de migrar; V5→V6 añade cuentas líquidas vacías y nunca llena recipientes. La actualización anterior a `bf6431b` conservó el mundo y sus sesiones al pasar de SQLite 3 a 4; `7d8777c` comenzó otro mundo según la política vigente. El archivo V4 anterior conserva su defecto de madera fuera de cota: el inicio V5 fue un mundo nuevo autorizado, no una migración exitosa de ese V4. El contrato de archivo y recuperación está en [CONSTRUCCION.md](docs/CONSTRUCCION.md#territorio-procedural-y-archivo); [EVIDENCIA.md](docs/EVIDENCIA.md#actualización-sin-reiniciar-el-mundo) registra aquel cambio de esquema.
 
 En `bf6431b`, 256 recetas y generación tecnológica 32 detenían la búsqueda. El catálogo publicado desde `7d8777c` separa esos límites de la historia durable y mantiene acotados caché, memoria, proyectos y colas pendientes. Snapshot, definiciones, estadísticas y recibos se confirman juntos; un fallo conserva las colas y no confirma órdenes. El disco puede crecer y no hay almacenamiento ilimitado ni reconstrucción de episodios perdidos. La construcción conserva su gramática de seis componentes. [REGLAS](docs/REGLAS.md#catálogo-resoluble-y-memoria-técnica) y [CONSTRUCCION](docs/CONSTRUCCION.md#archivo-tecnológico) detallan el contrato.
 
@@ -248,7 +252,7 @@ npm run lab:resumen -- --entrada artifacts/lab/mi-corrida --control artifacts/la
 
 **Aviso operativo: pinnear un worktree para líneas base.** El laboratorio importa el código de simulación por ruta absoluta al árbol de trabajo compartido, sin aislar una copia. Si el árbol principal sigue recibiendo commits en vivo (p. ej. otro workflow de desarrollo en paralelo), una réplica larga puede arrancar con una versión del código y terminar corriendo sobre otra sin que se note (ver el aviso de integridad en `docs/evidencia-2026-09-19/linea-base-reglas-viejas-16x25.md`). Para una línea base o comparación que deba ser estable, fija un worktree de git en el commit exacto que se quiere medir (`git worktree add`) y apunta la réplica a ese worktree en vez de al árbol principal mientras haya desarrollo activo.
 
-Con `persistencia.cadaTicks=1` (el default de `params.ts`), guardar cada tick cuesta caro (~32 ms/tick, un día completo ≈78 s); para barridos grandes conviene pasar `--params "persistencia.cadaTicks=200"` (o el valor que calibre T031) para acelerar sin dejar de ejercitar el guardado periódico con `Store`. Detalle completo en `scripts/lab/README.md`.
+Con `persistencia.cadaTicks=1` (el default de `params.ts`), guardar cada tick cuesta caro (~32 ms/tick, un día completo ≈78 s); para barridos grandes conviene pasar `--params "persistencia.cadaTicks=200"` (en producción el servidor usa `100`) para acelerar sin dejar de ejercitar el guardado periódico con `Store`. Detalle completo en `scripts/lab/README.md`.
 
 ## Mapa del proyecto
 

@@ -1,5 +1,5 @@
 [Unit]
-Description=Respaldo horario del mundo público (torre, V11)
+Description=Respaldo horario del mundo público (torre, V13)
 [Timer]
 OnCalendar=hourly
 Persistent=true

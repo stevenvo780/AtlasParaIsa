@@ -81,7 +81,7 @@ Subida dispersa por tick en GPU `[0]`: `63 744 B` (`≤ 1 MB`, cumple FR-025). P
   - **`72 000 000` celdas (`936 M` valores/tick, 77/23 × 1 000 ticks)**: **`p50 = 32,73 ms`**, **`p95 = 36,70 ms`**, **`27,12 mil millones` act./s** (`14,5 GiB` + `3,16 GiB` VRAM).
   - **`80 000 000` celdas (`1 040 000 000` = > 1 000 millones de valores/tick, 70/30 × 2 000 ticks = `2,08 billones` de actualizaciones)**: **`p50 = 46,79 ms`** (`< 50 ms`), `p95 = 52,95 ms`, **`21,34 mil millones` act./s** (`14,85 GiB` + `4,43 GiB` = **`19,28 GiB` de VRAM combinada activa**; 0 fugas tras `3,85 billones` de actualizaciones acumuladas).
 - **Determinismo CPU completo (`tests/determinismo-hardware.test.ts`)**: **375/375 pruebas verdes (0 fallos)** en modo corto (600 pasos, 4 semillas × 7 escenas × 12 backends CPU) y **52/52 verdes (0 fallos)** en la compuerta larga `ATLAS_T117_LONG=1` de **2 400 pasos** sobre `seed=51926` (`compacta`, `frontera`, `alcance-compuesto`, `cosecha-dos-regiones` × 12 backends CPU en portátil Fedora).
-- **Determinismo CUDA Gate C (`seed=51926`, `COMPUTE_NVRTC=/opt/cuda/lib64/libnvrtc.so`)**: **42/42 pruebas verdes (0 fallos)** cubriendo las 7 escenas × 3 backends GPU (`gpu=[0]` RTX 5070 Ti, `gpu=[1]` RTX 2060 y `gpu=[0,1]` dual) × 2 geometrías (`256` y `512`).
+- **Determinismo CUDA Gate C completo (`COMPUTE_NVRTC=/opt/cuda/lib64/libnvrtc.so`)**: **168/168 pruebas verdes (0 fallos, 0 omitidas)** cubriendo el 100 % de la matriz: las **4 semillas (`7`, `51926`, `104729`, `20260919`) × 7 escenas × 2 geometrías (`256`, `512`) × 3 backends GPU (`gpu=[0]` RTX 5070 Ti, `gpu=[1]` RTX 2060 y `gpu=[0,1]` dual)**.
 
 ### 4. Escala de red WebSocket (`scripts/banco-red.mts`, T138)
 

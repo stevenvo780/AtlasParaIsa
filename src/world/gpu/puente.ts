@@ -138,7 +138,7 @@ async function handle(job){
     const push=(u8)=>parts.push(Buffer.from(u8.buffer, u8.byteOffset, u8.byteLength));
     push(new Uint8Array(buffers.cells)); push(new Uint8Array(buffers.stamps)); push(new Uint8Array(buffers.around)); push(new Uint8Array(buffers.pageX)); push(new Uint8Array(buffers.pageY));
     for(const f of FIELDS) push(bytesOf(buffers,f.name));
-    const reply=await send({kind:'sync', capacityCells:capacity, slots, totalCells:total}, parts);
+    const reply=await send({kind:'sync', capacityCells:capacity, slots, totalCells:total, shardRanges: job.sharded ? job.ranges : null}, parts);
     if(!reply.header.ok) throw new Error('GPU sync failed');
     uploaded += reply.header.uploadedBytes||0; stats[2]=uploaded;
   }
@@ -285,15 +285,19 @@ export class ResidentGpuBridge {
   private cachedAllHaloSlots: number[] = [];
   private broken: Error | null = null;
   private closed = false;
+  private readonly customWeights?: readonly number[];
+  private readonly shardedOption?: boolean;
   #last: GpuBridgeStats;
   #cumulative = { uploadedBytes: 0, downloadedBytes: 0 };
   /** Test hook: last python ready header (devices/arch/compile). */
   readyInfo: unknown = null;
 
-  constructor(devices: readonly number[]) {
+  constructor(devices: readonly number[], options?: { weights?: readonly number[]; sharded?: boolean }) {
     if (!devices.length || devices.some(d => !Number.isSafeInteger(d) || d < 0) || new Set(devices).size !== devices.length)
       throw new RangeError('gpu debe ser una lista no vacía de dispositivos enteros sin duplicados.');
     this.devices = [...devices];
+    this.customWeights = options?.weights;
+    this.shardedOption = options?.sharded;
     this.#last = { uploadedBytes: 0, downloadedBytes: 0, syncUploadedBytes: 0, kernelMs: 0, devices: this.devices, lastPass: null };
     this.worker = new Worker(WORKER_CODE, {
       eval: true, execArgv: [], name: 'atlas-gpu-resident',
@@ -313,7 +317,9 @@ export class ResidentGpuBridge {
   private ranges(cells: Int32Array, total: number): [number, number][] {
     if (this.devices.length === 1 || total === 0) return [[0, total]];
     // Peso medido en la torre: 5070 Ti ≈79%, 2060 ≈21% (T122/T124). Con otros pares, a partes iguales.
-    const weights = this.devices.map(d => this.devices.includes(0) && this.devices.includes(1) ? (d === 0 ? 0.79 : d === 1 ? 0.21 : 1 / this.devices.length) : 1 / this.devices.length);
+    const weights = (this.customWeights && this.customWeights.length === this.devices.length)
+      ? [...this.customWeights]
+      : this.devices.map(d => this.devices.includes(0) && this.devices.includes(1) ? (d === 0 ? 0.79 : d === 1 ? 0.21 : 1 / this.devices.length) : 1 / this.devices.length);
     const sum = weights.reduce((a, b) => a + b, 0);
     const ranges: [number, number][] = []; let begin = 0; let acc = 0;
     for (let i = 0; i < this.devices.length; i++) {
@@ -382,12 +388,13 @@ export class ResidentGpuBridge {
         downloadSlots = [...options.downloadSlots].sort((a, b) => a - b);
       }
     }
+    const sharded = this.devices.length > 1 && (this.shardedOption ?? (capacityCells > 16_000_000));
     Atomics.store(this.control, 0, 0);
     this.statsArr.fill(0);
     try {
       this.worker.postMessage({
         kind: 'step', pass: pass === 'ecologia' ? 1 : 2, buffers, dirtySlots, ranges, haloSlotsPerDevice,
-        downloadSlots, capacityCells, slots, totalCells, syncNeeded, params,
+        downloadSlots, capacityCells, slots, totalCells, syncNeeded, sharded, params,
       });
     } catch (error) { this.synced = null; throw error; }
     // Espera síncrona (mismo patrón que StaticWorkerPool): el worker hace el IPC async con Python.
@@ -395,7 +402,7 @@ export class ResidentGpuBridge {
     for (;;) {
       const status = Atomics.load(this.control, 0);
       if (status === 1) break;
-      if (status === 2 || Date.now() - waitStarted > 60000) {
+      if (status === 2 || Date.now() - waitStarted > 120000) {
         let msg = ''; for (let i = 0; i < this.errorArr.length && this.errorArr[i]; i++) msg += String.fromCharCode(this.errorArr[i]!);
         this.synced = null; this.broken = new Error(`ResidentGpuBridge: ${msg || 'timeout esperando al subproceso GPU'}`);
         throw this.broken;
@@ -455,6 +462,7 @@ export class ResidentGpuBridge {
       }
     }
     const downloadSlots = options?.downloadSlots ? [...options.downloadSlots].sort((a, b) => a - b) : [];
+    const sharded = this.devices.length > 1 && (this.shardedOption ?? (capacityCells > 16_000_000));
     Atomics.store(this.control, 0, 0);
     this.statsArr.fill(0);
     try {
@@ -462,14 +470,14 @@ export class ResidentGpuBridge {
         kind: 'tick', buffers: syncNeeded ? buffers : undefined, dirtySlots,
         ranges: syncNeeded ? this.cachedRanges : undefined,
         haloSlotsPerDevice: syncNeeded ? this.cachedHaloSlotsPerDevice : undefined,
-        downloadSlots, capacityCells, slots, totalCells, syncNeeded, pass1Params, pass2Params,
+        downloadSlots, capacityCells, slots, totalCells, syncNeeded, sharded, pass1Params, pass2Params,
       });
     } catch (error) { this.synced = null; throw error; }
     const waitStarted = Date.now();
     for (;;) {
       const status = Atomics.load(this.control, 0);
       if (status === 1) break;
-      if (status === 2 || Date.now() - waitStarted > 60000) {
+      if (status === 2 || Date.now() - waitStarted > 120000) {
         let msg = ''; for (let i = 0; i < this.errorArr.length && this.errorArr[i]; i++) msg += String.fromCharCode(this.errorArr[i]!);
         this.synced = null; this.broken = new Error(`ResidentGpuBridge tick: ${msg || 'timeout'}`);
         throw this.broken;

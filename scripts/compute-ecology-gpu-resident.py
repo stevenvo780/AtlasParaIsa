@@ -112,13 +112,42 @@ class Device:
         self.k2=p(); checked(self.function(C.byref(self.k2),self.module,b'ecology_pass2'))
         self.kcopy=p(); checked(self.function(C.byref(self.kcopy),self.module,b'copy_front_to_back'))
         self.index=index; self.ptrs={}; self.capacity=0; self.slots=0; self.total=0; self.cells=None; self._range_cache={}
+        self.sharded=False; self.g2l=None; self.l2g=None; self.local_slots=0; self.local_total=0
+        self.owned_global_sorted=[]; self.owned_global_runs=[]; self.owned_global_set=set()
     def _alloc(self, name, nbytes):
         ptr=C.c_uint64(); checked(self.alloc(C.byref(ptr), max(1,int(nbytes)))); self.ptrs[name]=ptr
     def _up(self, ptr, host_addr, nbytes, offset=0):
         if nbytes: checked(self.upload_fn(C.c_uint64(ptr.value+offset), C.c_void_p(host_addr), int(nbytes)))
     def _down(self, host_addr, ptr, nbytes, offset=0):
         if nbytes: checked(self.download_fn(C.c_void_p(host_addr), C.c_uint64(ptr.value+offset), int(nbytes)))
+    def map_slots_to_local_runs(self, global_slots_sorted):
+        if not self.sharded:
+            return runs_of(global_slots_sorted)
+        g2l = self.g2l
+        return runs_of([int(g2l[s]) for s in global_slots_sorted])
+    def map_indexed_dirty_runs(self, global_slots_sorted):
+        """Devuelve [(src_idx, dst_local_slot, count), ...] coalescidos en origen y destino."""
+        runs = []
+        if not self.sharded:
+            for idx, gs in enumerate(global_slots_sorted):
+                gs = int(gs)
+                if runs and idx == runs[-1][0] + runs[-1][2] and gs == runs[-1][1] + runs[-1][2]:
+                    runs[-1] = (runs[-1][0], runs[-1][1], runs[-1][2] + 1)
+                else:
+                    runs.append((idx, gs, 1))
+            return runs
+        g2l = self.g2l
+        for idx, gs in enumerate(global_slots_sorted):
+            ls = int(g2l[int(gs)])
+            if ls < 0: continue
+            if runs and idx == runs[-1][0] + runs[-1][2] and ls == runs[-1][1] + runs[-1][2]:
+                runs[-1] = (runs[-1][0], runs[-1][1], runs[-1][2] + 1)
+            else:
+                runs.append((idx, ls, 1))
+        return runs
     def range_slots(self, begin, end):
+        if self.sharded:
+            return (self.owned_global_sorted, self.owned_global_runs, self.owned_global_set)
         key = (int(begin), int(end))
         cached = self._range_cache.get(key)
         if cached is None:
@@ -129,73 +158,136 @@ class Device:
             cached = (slots_sorted, runs_of(slots_sorted), set(slots_sorted))
             self._range_cache[key] = cached
         return cached
-    def sync(self, arrays, capacity, slots, total):
+    def sync(self, arrays, capacity, slots, total, shard_range=None):
         checked(self.current(self.context)); started=clock()
         for ptr in self.ptrs.values(): checked(self.free(ptr))
         self.ptrs={}; self.capacity=capacity; self.slots=slots; self.total=total; self.cells=arrays['cells']; self._range_cache={}
-        # topology
-        self._alloc('cells', total*4); self._alloc('stamps', capacity*4); self._alloc('around', slots*9*4)
-        self._alloc('pageX', slots*4); self._alloc('pageY', slots*4); self._alloc('woodAdded', slots)
         uploaded=0
-        for name,key,dt in [('cells','cells',np.int32),('stamps','stamps',np.uint32),('around','around',np.int32),('pageX','pageX',np.int32),('pageY','pageY',np.int32)]:
-            a=arrays[key]; self._up(self.ptrs[name], a.ctypes.data, a.nbytes); uploaded+=a.nbytes
-        for fname,esz in FIELDS:
-            self._alloc(fname+'F', capacity*esz); self._alloc(fname+'B', capacity*esz)
-            a=arrays[fname]; self._up(self.ptrs[fname+'F'], a.ctypes.data, a.nbytes); uploaded+=a.nbytes
-            if fname=='terrain': self._up(self.ptrs[fname+'B'], a.ctypes.data, a.nbytes)
-        z_wood = np.zeros(slots, dtype=np.uint8)
-        self._up(self.ptrs['woodAdded'], z_wood.ctypes.data, z_wood.nbytes)
-        resident = sum(int(v.value and capacity) for v in []) # placeholder no-op
-        resident_bytes = capacity*sum(e for _,e in FIELDS)*2 + total*4 + capacity*4 + slots*9*4 + slots*9
-        return {'index':self.index,'uploadedBytes':uploaded,'syncMs':(clock()-started)*1000,'residentBytes':resident_bytes}
+        if shard_range is None:
+            self.sharded=False; self.g2l=None; self.l2g=None; self.local_slots=slots; self.local_total=total
+            self.owned_global_sorted=[]; self.owned_global_set=set()
+            self._alloc('cells', total*4); self._alloc('stamps', capacity*4); self._alloc('around', slots*9*4)
+            self._alloc('pageX', slots*4); self._alloc('pageY', slots*4); self._alloc('woodAdded', slots)
+            for name,key in [('cells','cells'),('stamps','stamps'),('around','around'),('pageX','pageX'),('pageY','pageY')]:
+                a=arrays[key]; self._up(self.ptrs[name], a.ctypes.data, a.nbytes); uploaded+=a.nbytes
+            for fname,esz in FIELDS:
+                self._alloc(fname+'F', capacity*esz); self._alloc(fname+'B', capacity*esz)
+                a=arrays[fname]; self._up(self.ptrs[fname+'F'], a.ctypes.data, a.nbytes); uploaded+=a.nbytes
+                if fname in ('terrain', 'life'): self._up(self.ptrs[fname+'B'], a.ctypes.data, a.nbytes)
+            z_wood = np.zeros(slots, dtype=np.uint8)
+            self._up(self.ptrs['woodAdded'], z_wood.ctypes.data, z_wood.nbytes)
+            resident_bytes = capacity*sum(e for _,e in FIELDS)*2 + total*4 + capacity*4 + slots*9*4 + slots*9
+            return {'index':self.index,'uploadedBytes':uploaded,'syncMs':(clock()-started)*1000,'residentBytes':resident_bytes,'sharded':False}
+        # Sharded Multi-GPU VRAM: cada GPU aloja SOLO sus páginas asignadas + su halo de 1 página.
+        begin, end = int(shard_range[0]), int(shard_range[1])
+        self.sharded = True
+        owned_cells = arrays['cells'][begin:end]
+        local_total = int(owned_cells.size)
+        owned_slots = np.unique(owned_cells >> 8).astype(np.int32) if local_total > 0 else np.empty(0, dtype=np.int32)
+        around_global = arrays['around'].reshape(slots, 9)
+        if owned_slots.size > 0:
+            nbrs = around_global[owned_slots].ravel()
+            valid_nbrs = nbrs[nbrs >= 0]
+            local_globals = np.unique(np.concatenate([owned_slots, valid_nbrs])).astype(np.int32)
+        else:
+            local_globals = np.empty(0, dtype=np.int32)
+        local_slots = int(local_globals.size)
+        local_cap = local_slots * 256
+        g2l = np.full(slots, -1, dtype=np.int32)
+        if local_slots > 0:
+            g2l[local_globals] = np.arange(local_slots, dtype=np.int32)
+        self.g2l = g2l; self.l2g = local_globals; self.local_slots = local_slots; self.local_total = local_total
+        self.owned_global_sorted = owned_slots.tolist(); self.owned_global_runs = runs_of(self.owned_global_sorted); self.owned_global_set = set(self.owned_global_sorted)
+        local_cells = ((g2l[owned_cells >> 8] << 8) | (owned_cells & 255)).astype(np.int32) if local_total > 0 else np.empty(0, dtype=np.int32)
+        if local_slots > 0:
+            raw_ar = around_global[local_globals]
+            local_around = np.where(raw_ar >= 0, g2l[np.maximum(raw_ar, 0)], -1).astype(np.int32).ravel()
+            local_pageX = arrays['pageX'][local_globals].astype(np.int32)
+            local_pageY = arrays['pageY'][local_globals].astype(np.int32)
+        else:
+            local_around = np.empty(0, dtype=np.int32); local_pageX = np.empty(0, dtype=np.int32); local_pageY = np.empty(0, dtype=np.int32)
+        self._alloc('cells', local_total*4); self._alloc('stamps', local_cap*4); self._alloc('around', local_slots*9*4)
+        self._alloc('pageX', local_slots*4); self._alloc('pageY', local_slots*4); self._alloc('woodAdded', local_slots)
+        for name, a in [('cells', local_cells), ('around', local_around), ('pageX', local_pageX), ('pageY', local_pageY)]:
+            self._up(self.ptrs[name], a.ctypes.data, a.nbytes); uploaded += a.nbytes
+        slot_runs = runs_of(local_globals.tolist())
+        stamps_addr = arrays['stamps'].ctypes.data
+        l_off = 0
+        for g_start, r_cnt in slot_runs:
+            nbytes = r_cnt * 256 * 4
+            self._up(self.ptrs['stamps'], stamps_addr + g_start * 256 * 4, nbytes, l_off * 256 * 4)
+            l_off += r_cnt; uploaded += nbytes
+        for fname, esz in FIELDS:
+            self._alloc(fname+'F', local_cap*esz); self._alloc(fname+'B', local_cap*esz)
+            f_addr = arrays[fname].ctypes.data
+            l_off = 0
+            for g_start, r_cnt in slot_runs:
+                nbytes = r_cnt * 256 * esz
+                self._up(self.ptrs[fname+'F'], f_addr + g_start * 256 * esz, nbytes, l_off * 256 * esz)
+                if fname in ('terrain', 'life'):
+                    self._up(self.ptrs[fname+'B'], f_addr + g_start * 256 * esz, nbytes, l_off * 256 * esz)
+                l_off += r_cnt; uploaded += nbytes
+        z_wood = np.zeros(max(1, local_slots), dtype=np.uint8)
+        if local_slots > 0:
+            self._up(self.ptrs['woodAdded'], z_wood.ctypes.data, local_slots)
+        resident_bytes = local_cap*sum(e for _,e in FIELDS)*2 + local_total*4 + local_cap*4 + local_slots*9*4 + local_slots*9
+        return {'index':self.index,'uploadedBytes':uploaded,'syncMs':(clock()-started)*1000,'residentBytes':resident_bytes,'sharded':True,'localSlots':local_slots,'ownedSlots':len(self.owned_global_sorted)}
     def step(self, req, body_addr, dirty, ranges_by_device, halo=None, staging_out=None):
         checked(self.current(self.context)); started=clock(); uploaded=0
         # Subida sucia coalescida: el body viene por campo y por tramo contiguo (ver puente.ts);
         # una sola llamada DMA por campo y tramo copia count*256*esz bytes seguidos.
-        offset=0
         dirty_sorted = sorted(int(s) for s in dirty)
-        dirty_runs = runs_of(dirty_sorted)
+        dirty_idx_runs = self.map_indexed_dirty_runs(dirty_sorted)
+        field_off = 0
         for fname,esz in FIELDS:
-            for start_slot,count in dirty_runs:
-                nbytes=count*256*esz; self._up(self.ptrs[fname+'F'], body_addr+offset, nbytes, start_slot*256*esz); offset+=nbytes; uploaded+=nbytes
+            for src_idx, dst_slot, count in dirty_idx_runs:
+                nbytes=count*256*esz
+                self._up(self.ptrs[fname+'F'], body_addr+field_off+src_idx*256*esz, nbytes, dst_slot*256*esz)
+                uploaded+=nbytes
+            field_off += len(dirty_sorted)*256*esz
         if req['pass']==2:
             wood_arr = req.pop('_wood_arr')
-            self._up(self.ptrs['woodAdded'], wood_arr.ctypes.data, wood_arr.nbytes); uploaded+=wood_arr.nbytes; offset+=wood_arr.nbytes
+            w_local = wood_arr[self.l2g] if self.sharded else wood_arr
+            if w_local.nbytes:
+                self._up(self.ptrs['woodAdded'], w_local.ctypes.data, w_local.nbytes); uploaded+=w_local.nbytes
         if halo:
             halo_slots, halo_field, halo_offset = halo
             esz = dict(FIELDS)[halo_field]
-            rel=0
-            for start_slot,count in runs_of(sorted(int(s) for s in halo_slots)):
-                nbytes=count*256*esz; self._up(self.ptrs[halo_field+'F'], body_addr+halo_offset+rel, nbytes, start_slot*256*esz); uploaded+=nbytes; rel+=nbytes
+            for src_idx, dst_slot, count in self.map_indexed_dirty_runs(sorted(int(s) for s in halo_slots)):
+                nbytes=count*256*esz
+                self._up(self.ptrs[halo_field+'F'], body_addr+halo_offset+src_idx*256*esz, nbytes, dst_slot*256*esz)
+                uploaded+=nbytes
         begin,end = ranges_by_device
+        k_begin, k_end = (0, self.local_total) if self.sharded else (begin, end)
         p = req['params']
         # Build kernel args
         front=[self.ptrs[f+'F'] for f,_ in FIELDS]; back=[self.ptrs[f+'B'] for f,_ in FIELDS]
         topo=[self.ptrs['cells'],self.ptrs['stamps'],self.ptrs['around']]
         vals=[]
         if req['pass']==1:
-            vals = topo + front + back + [C.c_int(begin),C.c_int(end),C.c_uint(p['version']),C.c_int(p['rain']),C.c_double(p['light']),C.c_double(p['capacidadBosque']),C.c_double(p['capacidadPastizal']),C.c_double(p['capacidadOtros']),C.c_double(p['velocidadRegeneracion']),C.c_double(p['decaimientoComida'])]
+            vals = topo + front + back + [C.c_int(k_begin),C.c_int(k_end),C.c_uint(p['version']),C.c_int(p['rain']),C.c_double(p['light']),C.c_double(p['capacidadBosque']),C.c_double(p['capacidadPastizal']),C.c_double(p['capacidadOtros']),C.c_double(p['velocidadRegeneracion']),C.c_double(p['decaimientoComida'])]
             kern=self.k1
         else:
-            vals = topo + [self.ptrs['pageX'],self.ptrs['pageY'],self.ptrs['woodAdded']] + front + back + [C.c_int(begin),C.c_int(end),C.c_int(p['tick']),C.c_uint(p['version']),C.c_int(p['rain']),C.c_double(p['light']),C.c_double(p['decaimientoFertilidad']),C.c_uint(p['seed']),C.c_double(p['cuencas'])]
+            vals = topo + [self.ptrs['pageX'],self.ptrs['pageY'],self.ptrs['woodAdded']] + front + back + [C.c_int(k_begin),C.c_int(k_end),C.c_int(p['tick']),C.c_uint(p['version']),C.c_int(p['rain']),C.c_double(p['light']),C.c_double(p['decaimientoFertilidad']),C.c_uint(p['seed']),C.c_double(p['cuencas'])]
             kern=self.k2
         args=(C.c_void_p*len(vals))(*(C.cast(C.byref(v),C.c_void_p) for v in vals))
-        count=max(0,end-begin); grid=(count+255)//256
+        count=max(0,k_end-k_begin); grid=(count+255)//256
         ks=clock()
-        checked(self.launch(kern,grid,1,1,256,1,1,0,None,args,None)); checked(self.sync_fn()); kernel_ms=(clock()-ks)*1000
+        if grid > 0:
+            checked(self.launch(kern,grid,1,1,256,1,1,0,None,args,None)); checked(self.sync_fn())
+        kernel_ms=(clock()-ks)*1000
         dl_started=clock()
         # Bajada selectiva y coalescida: solo los campos que la pasada modifica (3 en pass1, 10 en
         # pass2, o 11 en pass2 con halo activo), una llamada DMA por campo y por tramo contiguo.
-        all_slots, all_runs, all_set = self.range_slots(begin, end)
+        all_slots, _, all_set = self.range_slots(begin, end)
         req_dl_slots = req.get('downloadSlots')
         if req_dl_slots is not None:
             slots_sorted = sorted(int(s) for s in req_dl_slots if int(s) in all_set)
-            dl_runs = runs_of(slots_sorted)
             dl_fields = DOWNLOAD_FIELDS['2_halo' if req['pass']==2 else 1]
         else:
             slots_sorted = all_slots
-            dl_runs = all_runs
             dl_fields = DOWNLOAD_FIELDS[req['pass']]
+        dl_runs = self.map_slots_to_local_runs(slots_sorted)
         total_dl=sum(256*esz for _,esz in dl_fields)*len(slots_sorted)
         if staging_out is not None and staging_out.nbytes == total_dl:
             staging = staging_out
@@ -211,9 +303,10 @@ class Device:
         for fname,_ in FIELDS:
             self.ptrs[fname+'F'],self.ptrs[fname+'B'] = self.ptrs[fname+'B'],self.ptrs[fname+'F']
         wood_slots=[]
-        if req['pass']==2:
-            wa=np.empty(self.slots,dtype=np.uint8); self._down(wa.ctypes.data, self.ptrs['woodAdded'], wa.nbytes); downloaded+=wa.nbytes
-            wood_slots=[int(s) for s in np.nonzero(wa)[0].tolist()]
+        if req['pass']==2 and self.local_slots > 0:
+            wa=np.empty(self.local_slots,dtype=np.uint8); self._down(wa.ctypes.data, self.ptrs['woodAdded'], wa.nbytes); downloaded+=wa.nbytes
+            nz = np.nonzero(wa)[0]
+            wood_slots=[int(self.l2g[s]) for s in nz.tolist()] if self.sharded else [int(s) for s in nz.tolist()]
         result={'index':self.index,'begin':begin,'end':end,'uploadedBytes':uploaded,'downloadedBytes':downloaded,'kernelMs':kernel_ms,'stepMs':(clock()-started)*1000,'downloadSlots':slots_sorted,'woodAddedSlots':wood_slots,'staging':staging}
         timing_path=os.environ.get('ATLAS_GPU_TIMING')
         if timing_path:
@@ -221,31 +314,32 @@ class Device:
                 with open(timing_path,'a') as fh: fh.write(json.dumps({'pass':req['pass'],'device':self.index,'stepMs':result['stepMs'],'kernelMs':kernel_ms,'downloadMs':(clock()-dl_started)*1000,'preKernelMs':(ks-started)*1000,'bytes':downloaded})+'\n')
             except Exception: pass
         return result
-    def upload_dirty(self, body_addr, dirty_runs, also_back=False):
+    def upload_dirty(self, body_addr, dirty_sorted, also_back=False):
         checked(self.current(self.context))
-        offset = 0; uploaded = 0
+        idx_runs = self.map_indexed_dirty_runs(dirty_sorted)
+        field_off = 0; uploaded = 0
         for fname, esz in FIELDS:
-            for start_slot, count in dirty_runs:
+            for src_idx, dst_slot, count in idx_runs:
                 nbytes = count * 256 * esz
-                self._up(self.ptrs[fname + 'F'], body_addr + offset, nbytes, start_slot * 256 * esz)
+                self._up(self.ptrs[fname + 'F'], body_addr + field_off + src_idx * 256 * esz, nbytes, dst_slot * 256 * esz)
                 if also_back and fname in ('terrain', 'life'):
-                    self._up(self.ptrs[fname + 'B'], body_addr + offset, nbytes, start_slot * 256 * esz)
-                offset += nbytes; uploaded += nbytes
+                    self._up(self.ptrs[fname + 'B'], body_addr + field_off + src_idx * 256 * esz, nbytes, dst_slot * 256 * esz)
+                uploaded += nbytes
+            field_off += len(dirty_sorted) * 256 * esz
         return uploaded
-    def download_field_runs(self, fname, esz, buf_suffix, runs):
+    def download_field_local_runs(self, fname, esz, buf_suffix, local_runs, total_bytes):
         checked(self.current(self.context))
-        total = sum(c * 256 * esz for _, c in runs)
-        out = np.empty(total, dtype=np.uint8)
+        out = np.empty(total_bytes, dtype=np.uint8)
         off = 0
-        for start_slot, count in runs:
+        for start_slot, count in local_runs:
             nbytes = count * 256 * esz
             self._down(out.ctypes.data + off, self.ptrs[fname + buf_suffix], nbytes, start_slot * 256 * esz)
             off += nbytes
         return out
-    def upload_field_runs(self, fname, esz, buf_suffix, runs, arr):
+    def upload_field_local_runs(self, fname, esz, buf_suffix, local_runs, arr):
         checked(self.current(self.context))
         off = 0
-        for start_slot, count in runs:
+        for start_slot, count in local_runs:
             nbytes = count * 256 * esz
             self._up(self.ptrs[fname + buf_suffix], arr.ctypes.data + off, nbytes, start_slot * 256 * esz)
             off += nbytes
@@ -253,14 +347,15 @@ class Device:
     def tick_kernels(self, range_pair, p1, p2, req_dl_slots, uploaded_pre=0, staging_out=None):
         checked(self.current(self.context)); started = clock()
         begin, end = range_pair
-        count = max(0, end - begin); grid = (count + 255) // 256
+        k_begin, k_end = (0, self.local_total) if self.sharded else (begin, end)
+        count = max(0, k_end - k_begin); grid = (count + 255) // 256
         topo = [self.ptrs['cells'], self.ptrs['stamps'], self.ptrs['around']]
-        if p2['tick'] % 100 == 0:
-            z_wood = np.zeros(self.slots, dtype=np.uint8)
+        if p2['tick'] % 100 == 0 and self.local_slots > 0:
+            z_wood = np.zeros(self.local_slots, dtype=np.uint8)
             self._up(self.ptrs['woodAdded'], z_wood.ctypes.data, z_wood.nbytes)
         front1 = [self.ptrs[f + 'F'] for f, _ in FIELDS]; back1 = [self.ptrs[f + 'B'] for f, _ in FIELDS]
         vals1 = topo + front1 + back1 + [
-            C.c_int(begin), C.c_int(end), C.c_uint(p1['version']), C.c_int(p1['rain']), C.c_double(p1['light']),
+            C.c_int(k_begin), C.c_int(k_end), C.c_uint(p1['version']), C.c_int(p1['rain']), C.c_double(p1['light']),
             C.c_double(p1['capacidadBosque']), C.c_double(p1['capacidadPastizal']), C.c_double(p1['capacidadOtros']),
             C.c_double(p1['velocidadRegeneracion']), C.c_double(p1['decaimientoComida']),
         ]
@@ -269,20 +364,21 @@ class Device:
             self.ptrs[fname + 'F'], self.ptrs[fname + 'B'] = self.ptrs[fname + 'B'], self.ptrs[fname + 'F']
         front2 = [self.ptrs[f + 'F'] for f, _ in FIELDS]; back2 = [self.ptrs[f + 'B'] for f, _ in FIELDS]
         vals2 = topo + [self.ptrs['pageX'], self.ptrs['pageY'], self.ptrs['woodAdded']] + front2 + back2 + [
-            C.c_int(begin), C.c_int(end), C.c_int(p2['tick']), C.c_uint(p2['version']), C.c_int(p2['rain']),
+            C.c_int(k_begin), C.c_int(k_end), C.c_int(p2['tick']), C.c_uint(p2['version']), C.c_int(p2['rain']),
             C.c_double(p2['light']), C.c_double(p2['decaimientoFertilidad']), C.c_uint(p2['seed']), C.c_double(p2['cuencas']),
         ]
         args2 = (C.c_void_p * len(vals2))(*(C.cast(C.byref(v), C.c_void_p) for v in vals2))
         ks = clock()
-        checked(self.launch(self.k1, grid, 1, 1, 256, 1, 1, 0, None, args1, None))
-        checked(self.launch(self.k2, grid, 1, 1, 256, 1, 1, 0, None, args2, None))
-        checked(self.sync_fn())
+        if grid > 0:
+            checked(self.launch(self.k1, grid, 1, 1, 256, 1, 1, 0, None, args1, None))
+            checked(self.launch(self.k2, grid, 1, 1, 256, 1, 1, 0, None, args2, None))
+            checked(self.sync_fn())
         kernel_ms = (clock() - ks) * 1000
         for fname, _ in FIELDS:
             self.ptrs[fname + 'F'], self.ptrs[fname + 'B'] = self.ptrs[fname + 'B'], self.ptrs[fname + 'F']
         _, _, all_set = self.range_slots(begin, end)
         slots_sorted = sorted(int(s) for s in req_dl_slots if int(s) in all_set)
-        dl_runs = runs_of(slots_sorted)
+        dl_runs = self.map_slots_to_local_runs(slots_sorted)
         total_dl = sum(256 * esz for _, esz in FIELDS) * len(slots_sorted)
         staging = staging_out if (staging_out is not None and staging_out.nbytes == total_dl) else np.empty(total_dl, dtype=np.uint8)
         downloaded = 0; off = 0
@@ -292,11 +388,12 @@ class Device:
                 self._down(staging.ctypes.data + off, self.ptrs[fname + 'F'], nbytes, start_slot * 256 * esz)
                 off += nbytes; downloaded += nbytes
         wood_slots = []
-        if p2['tick'] % 100 == 0:
-            wa = np.empty(self.slots, dtype=np.uint8)
+        if p2['tick'] % 100 == 0 and self.local_slots > 0:
+            wa = np.empty(self.local_slots, dtype=np.uint8)
             self._down(wa.ctypes.data, self.ptrs['woodAdded'], wa.nbytes)
             downloaded += wa.nbytes
-            wood_slots = [int(s) for s in np.nonzero(wa)[0].tolist()]
+            nz = np.nonzero(wa)[0]
+            wood_slots = [int(self.l2g[s]) for s in nz.tolist()] if self.sharded else [int(s) for s in nz.tolist()]
         return {
             'index': self.index, 'begin': begin, 'end': end, 'uploadedBytes': uploaded_pre,
             'downloadedBytes': downloaded, 'kernelMs': kernel_ms, 'stepMs': (clock() - started) * 1000,
@@ -305,7 +402,8 @@ class Device:
     def flush(self, range_pair, staging_out=None):
         checked(self.current(self.context))
         begin, end = range_pair
-        slots_sorted, dl_runs, _ = self.range_slots(begin, end)
+        slots_sorted, _, _ = self.range_slots(begin, end)
+        dl_runs = self.map_slots_to_local_runs(slots_sorted)
         total_dl = sum(256*esz for _,esz in FIELDS) * len(slots_sorted)
         staging = staging_out if (staging_out is not None and staging_out.nbytes == total_dl) else np.empty(total_dl, dtype=np.uint8)
         off = 0
@@ -382,13 +480,17 @@ def main():
                 if req['kind']=='close': break
                 if req['kind']=='sync':
                     cap=req['capacityCells']; slots=req['slots']; total=req['totalCells']
+                    shard_ranges=req.get('shardRanges')
                     if cap<1 or cap>MAX_CELLS or total<0 or total>cap: raise ValueError('Invalid capacity')
                     off=0; arrays={}
-                    def take(dt,count):
-                        nonlocal off; nbytes=int(np.dtype(dt).itemsize*count); arr=np.frombuffer(body,dtype=dt,count=count,offset=off).copy(); off+=nbytes; return arr
-                    arrays['cells']=take(np.int32,total); arrays['stamps']=take(np.uint32,cap); arrays['around']=take(np.int32,slots*9); arrays['pageX']=take(np.int32,slots); arrays['pageY']=take(np.int32,slots)
+                    def take(dt,count,copy=False):
+                        nonlocal off; nbytes=int(np.dtype(dt).itemsize*count); arr=np.frombuffer(body,dtype=dt,count=count,offset=off); off+=nbytes; return arr.copy() if copy else arr
+                    arrays['cells']=take(np.int32,total,copy=True); arrays['stamps']=take(np.uint32,cap); arrays['around']=take(np.int32,slots*9); arrays['pageX']=take(np.int32,slots); arrays['pageY']=take(np.int32,slots)
                     for fname,esz in FIELDS: arrays[fname]=take(np.float64 if esz==8 else np.uint8,cap)
-                    futs=[ex.submit(d.sync,arrays,cap,slots,total) for d in devices]; parts=[f.result() for f in futs]
+                    use_sharded = bool(shard_ranges and len(devices) > 1 and len(shard_ranges) == len(devices))
+                    futs=[ex.submit(d.sync,arrays,cap,slots,total,tuple(shard_ranges[di]) if use_sharded else None) for di,d in enumerate(devices)]
+                    parts=[f.result() for f in futs]
+                    cached_halo_plan = None
                     emit({'ok':True,'uploadedBytes':sum(p['uploadedBytes'] for p in parts),'devices':parts})
                 elif req['kind']=='step':
                     dirty=req.get('dirtySlots',[]); ranges=req['ranges']
@@ -450,13 +552,13 @@ def main():
                     halo_per = cached_halo_per or []
                     req_dl_slots = req.get('downloadSlots', [])
                     p1 = req['pass1Params']; p2 = req['pass2Params']
-                    dirty_runs = runs_of(sorted(int(s) for s in dirty))
+                    dirty_sorted = sorted(int(s) for s in dirty)
                     uploaded_per_dev = [0] * len(devices)
-                    if dirty_runs:
+                    if dirty_sorted:
                         body_np = np.frombuffer(body, dtype=np.uint8)
                         body_addr = body_np.ctypes.data
                         for di, d in enumerate(devices):
-                            uploaded_per_dev[di] += d.upload_dirty(body_addr, dirty_runs, also_back=(len(devices) > 1))
+                            uploaded_per_dev[di] += d.upload_dirty(body_addr, dirty_sorted, also_back=(len(devices) > 1))
                     if len(devices) > 1:
                         if cached_halo_plan is None:
                             cached_halo_plan = []
@@ -467,10 +569,15 @@ def main():
                                     _, _, src_set = src_d.range_slots(*ranges[src_di])
                                     h_slots = sorted(int(s) for s in halo_per[di] if int(s) in src_set)
                                     if h_slots:
-                                        cached_halo_plan.append((di, dst_d, src_d, runs_of(h_slots)))
-                        for di, dst_d, src_d, h_runs in cached_halo_plan:
-                            h_buf = src_d.download_field_runs('life', 8, 'F', h_runs)
-                            uploaded_per_dev[di] += dst_d.upload_field_runs('life', 8, 'B', h_runs, h_buf)
+                                        cached_halo_plan.append((
+                                            di, dst_d, src_d,
+                                            src_d.map_slots_to_local_runs(h_slots),
+                                            dst_d.map_slots_to_local_runs(h_slots),
+                                            len(h_slots) * 256 * 8,
+                                        ))
+                        for di, dst_d, src_d, src_runs, dst_runs, total_b in cached_halo_plan:
+                            h_buf = src_d.download_field_local_runs('life', 8, 'F', src_runs, total_b)
+                            uploaded_per_dev[di] += dst_d.upload_field_local_runs('life', 8, 'B', dst_runs, h_buf)
                     per_device_bytes = []
                     staging_slices = None
                     if SHM is not None and devices[0].cells is not None:

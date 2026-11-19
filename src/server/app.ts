@@ -7,6 +7,8 @@ import { gzip } from 'node:zlib';
 import { promisify } from 'node:util';
 import { WebSocketServer, WebSocket, type RawData } from 'ws';
 import { createWorld, stepWorld, projectWorld, normalizeViewport, cloneWorld, puntoDeRestauracion, fraccionSerial, type PuntoDeRestauracion, type World, type FaseMedicion } from '../world/index.js';
+import { calcularFraccionSerialReal } from '../world/paralelo/piscina.js';
+export { aceleracionAmdahlTeorica } from '../world/paralelo/piscina.js';
 import { paramsOf, type WorldParams } from '../world/params.js';
 import { technologyRecipeDetail } from '../world/technology.js';
 import { technologyCatalogueNearCapacity } from '../world/technology-catalogue.js';
@@ -283,7 +285,7 @@ export function createApp(options: AppOptions) {
   const FASE_NOMBRES: readonly FaseNombre[] = ['maintainRegions', 'ecologia', 'kernel', 'fauna', 'personas', 'encuentros', 'demografia', 'comunidades', 'reproduccion', 'checkpoint', 'muestreo', 'save', 'broadcast'];
   const fasesEnCero = (): Record<FaseNombre, number> => Object.fromEntries(FASE_NOMBRES.map(nombre => [nombre, 0])) as Record<FaseNombre, number>;
   const runtime: RuntimeStats = { stepMs: 0, p95StepMs: 0, cloneMs: 0, simulationMs: 0, saveMs: 0, projectionMs: 0, snapshotBytes: 0, activeTiles: world.tiles.length, processRssMiB: process.memoryUsage.rss() / 1048576, tickHz: 0, tickHzObjetivo: 1000 / (options.tickMs ?? 100),
-    fases: fasesEnCero(), fraccionSerial: 0,
+    fases: fasesEnCero(), fraccionSerial: 0, fraccionSerialReal: 1, ocupacionWorkers: 0, tiempoBarreraMs: 0, tiempoParaleloMs: 0,
     gobernador: { activo: world.reproductionEnabled, presupuestoMs: paramsOf(world).gobernador.presupuestoMs, p95StepMs: 0, manual: null,
       politica: paramsOf(world).gobernador.politica, techo: null, techoObservado: null,
       p50Ms: 0, p95Ms: 0, p99Ms: 0, maxMs: 0, faseMax: null, fasesP95: fasesEnCero(),
@@ -619,7 +621,13 @@ export function createApp(options: AppOptions) {
       // reloj inyectado en pruebas (`tests/gobernador.test.ts`); compartir el contador falso
       // haría que instrumentar sumara ticks fantasma a `simulationMs`/`stepMs`.
       const medicion: FaseMedicion = { clock: () => performance.now(), fases: {} };
-      const results = stepWorld(draft, valid.map(item => item.gesture), context, medicion);
+      // T151: capturar la ocupación del pool en las barreras ecológicas sin tocar el mundo;
+      // se encadena cualquier `onBarrier` previo del contexto y solo se acumulan ms.
+      let paraleloCapturadoMs = 0, barreraCapturadaMs = 0, ocupacionPonderada = 0;
+      const ejecucionPrevia = context.ecologyExecution;
+      const contextoPaso: typeof context = { ...context, ecologyExecution: { ...ejecucionPrevia,
+        onBarrier: evento => { ejecucionPrevia?.onBarrier?.(evento); const d = evento.diagnostics; if (d && d.tiempoParaleloMs > 0) { paraleloCapturadoMs += d.tiempoParaleloMs; barreraCapturadaMs += d.tiempoBarreraMs; ocupacionPonderada += d.ocupacionWorkers * d.tiempoParaleloMs; } } } };
+      const results = stepWorld(draft, valid.map(item => item.gesture), contextoPaso, medicion);
       runtime.simulationMs = monotonicNow() - simulationStarted;
       if (results.length !== valid.length) throw new Error('Gesture result count mismatch');
       // C3/C12: persistir es una transacción por cadencia, no por tick. Un gesto
@@ -669,6 +677,20 @@ export function createApp(options: AppOptions) {
       if (reservaVieja()) renovarReserva();
       runtime.fases = fases;
       runtime.fraccionSerial = fraccionSerial(fases);
+      // T151: fracción real y ocupación. `fraccionSerial` conserva la lectura por diseño de
+      // T107 (compatibilidad con perfil-fases/lab); la real vale 1 sin workers ni GPU y, con
+      // tramo paralelo, es el tiempo fuera de ese tramo sobre el total de fases del paso.
+      const motor = paramsOf(world).motor, hayGpu = motor.gpu.length > 0, hayParalelo = motor.hilos > 1 || hayGpu;
+      const totalFases = FASE_NOMBRES.reduce((suma, nombre) => suma + fases[nombre], 0);
+      // Solo un despacho real (o la pared GPU, sin diagnósticos de pool) actualiza el trío
+      // paralelo/barrera/ocupación; entre ticks ecológicos se conserva el último despacho.
+      const paraleloPasoMs = paraleloCapturadoMs > 0 ? paraleloCapturadoMs : hayGpu ? fases.ecologia + fases.kernel : 0;
+      if (!hayParalelo) { runtime.fraccionSerialReal = 1; runtime.ocupacionWorkers = 0; runtime.tiempoParaleloMs = 0; runtime.tiempoBarreraMs = 0; }
+      else {
+        runtime.fraccionSerialReal = calcularFraccionSerialReal(Math.max(0, totalFases - paraleloPasoMs), paraleloPasoMs, motor.hilos, motor.gpu.length);
+        if (paraleloCapturadoMs > 0) { runtime.ocupacionWorkers = Math.max(0, Math.min(1, ocupacionPonderada / paraleloCapturadoMs)); runtime.tiempoParaleloMs = paraleloCapturadoMs; runtime.tiempoBarreraMs = barreraCapturadaMs; }
+        else if (hayGpu && paraleloPasoMs > 0) { runtime.tiempoParaleloMs = paraleloPasoMs; runtime.tiempoBarreraMs = 0; }
+      }
       publicarSenalesGobernador(world);
     } catch (error) {
       // T104: deshacer va PRIMERO, y vale para las dos salidas. Sin clon, llegar aquí con punto

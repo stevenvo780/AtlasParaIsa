@@ -153,6 +153,17 @@ export interface RuntimeStats { stepMs: number; p95StepMs: number; saveMs: numbe
    * 5 % de fracción serial topa la aceleración en 20×, un 10 % en 10×.
    */
   fases: Record<FaseNombre, number>; fraccionSerial: number;
+  /** T151: fracción serial real medida: 1 con `motor.hilos === 1` y sin GPU; con workers/GPU,
+   * tiempo fuera del tramo paralelo efectivo sobre el total de fases. Opcional para que un
+   * servidor anterior pueda omitirla sin romper el cliente. */
+  fraccionSerialReal?: number;
+  /** T151: ocupación media real de los workers del último despacho del pool, en [0,1].
+   * 0 con `motor.hilos === 1` (sin pool) y antes del primer despacho paralelo. */
+  ocupacionWorkers?: number;
+  /** T151: espera de barrera + despacho del último tramo paralelo (ms). */
+  tiempoBarreraMs?: number;
+  /** T151: duración de pared del último tramo paralelo (ms). */
+  tiempoParaleloMs?: number;
   /**
    * Ruling R17: el hardware, no un tope fijo, limita la población. `activo` es el valor
    * vigente de `world.reproductionEnabled`. Con la política `techo` (la de hoy) el gobernador no

@@ -1,0 +1,42 @@
+{
+  "capturedAt": "2026-11-19T12:30:46-05:00",
+  "status": "published",
+  "kind": "code upgrade on live world V14 (f550c04 → c1fe393): optimizaciones exactas de rendimiento (indiceDiversidad O(P), rejilla espacial de fauna, society.ts O(|G|) + índices O(1)), T132 fase 2 + fix beginHostTransaction en save/previous, GPU sharded VRAM + fixes SHM/RLE, y fix Gobernador techo en replica.ts",
+  "reason": "Desplegar en producción las optimizaciones verificadas bit a bit sobre `main` (`1,20×` más rápido por paso sobre la copia viva de las 12:00 con 665 hab. y 50 176 teselas, `0` diferencias en `digestoCanonico` al cargar, tras 20 pasos y tras save→reload), preservando intacto el mundo V14.",
+  "codeRevision": "c1fe393",
+  "previousCodeRevision": "f550c04",
+  "whatChanged": {
+    "code": "main f550c04→c1fe393: reforma O(P·d) de `indiceDiversidad` (`220131f`, 37,8× a 2k / ~209× a 10k, cierra T144), rejilla espacial de fauna en `animals.ts` (`bdcf75a`, 18,6× a 2k / 77× a 8k), salida O(|G|) exacta + índices O(1) en `society.ts` + `--densidad-constante`/`--cada-ticks` en `curva-techo.mts` (`7694cf2`), T132 fase 2 sin `cloneWorld` ni doble digesto (`18c0e16`, `7,83 ms` med / `19,47 ms` p95 en escena de control) + fix crítico `beginHostTransaction()` antes de `prepareReplay`/`readSnapshot` (`c1fe393`, elimina reescaneo >12 min en mundos V14 de 1,6 GiB dejando deltas de `507 B`), VRAM sharded Dual-GPU hasta 80 M celdas (`70657f3`, 1,04 B valores/tick en `46,79 ms` p50) + fixes de redimensionado `/dev/shm` (`0c455e6`) y RLE en `flush` (`ea1933a`), y migración de `scripts/lab/replica.ts` a `new Gobernador()` (`9f69aaf`). Sin cambio en `DEFAULT_PARAMS` ni `RULES_VERSION` (permanece en 11).",
+    "activatedLaw": "Sin cambio respecto a V14 inicial y V14-r2: COM (`social.radioConvivencia=12`) + COM-D′ (`social.disolucion=1`) + `social.maxComunidades=64` + `gobernador.presupuestoMs=5000` vía `CARTA_PARAMS` (`RULES_VERSION=11`).",
+    "evidence": {
+      "liveWorldBackupParity": "world-20261119-1200.sqlite.gz (tick 226 800, 665 hab., 50 176 teselas): `digestoCanonico` bit a bit idéntico entre `f550c04` y `c1fe393` al cargar (`e26b8e1e…`), tras 20 pasos (`7bd3cee9…`, `step20Ms` baja `5 265,8 → 4 388,1 ms` = 1,20×) y tras save→reload (`4ecb4cbb…`, `saveMs` baja `5 608,4 → 4 865,5 ms`).",
+      "cudaDeterminism100Percent": "168/168 pruebas CUDA Gate C verdes (0 fallos, 0 omitidas): 4 semillas × 7 escenas × 2 geometrías × 3 backends GPU (`[0]`, `[1]`, `[0,1]`).",
+      "gpuShardedParity64M": "docs/evidencia-2026-11-19/parity-64m-sharded-vs-cpu16-20261119.json: 0 / 832 000 000 diferencias `Object.is` (Sharded Dual-GPU 79/21 vs 16 workers CPU); techo 80 M celdas (1,04 B valores/tick) en `gpu-sharded-1billion-20261119.json`.",
+      "longGate2400Steps": "130/130 verdes en torre (`seed=7` 7/7 escenas + `seed=51926` 3 escenas restantes × 12 backends CPU × 2 400 pasos) + 52/52 previos en Fedora (`seed=51926` 4 escenas) = 168/168 cerrados en semillas 7 y 51926; semillas 104729 y 20260919 en curso en paralelo (torre + Fedora).",
+      "storeReplayV14": "119/119 pruebas `store-*`/`snapshot-parts`/`server` + 14/14 `store-replay` con regresión `beginHostTransaction`; copia real 1,6 GiB V14 (`705` habs, `59 648` teselas): deltas de `507 B` (52 900× menos que el checkpoint de 26,85 MiB)."
+    }
+  },
+  "operation": {
+    "deployCheck": "bash scripts/deploy-check.sh c1fe393 /datos/workspaces/personal/AtlasParaIsa-anexo/publicaciones/deploy-check/v14-r3-20261119 → salida 0 (build + test:smoke verdes en 3,8 s)",
+    "backupBeforeStop": {
+      "path": "/mnt/Data2/respaldos-atlas-v14/world-20261119-1228.sqlite.gz",
+      "size": "263 MiB",
+      "sha256": "b3e38db9d3085dff564dbac4f88b3743abbd2c5e627ebaf1f5a4371c22c8738d",
+      "gzipTest": "OK"
+    },
+    "towerCode": "worktree detached AtlasParaIsa-anexo/worktrees/publico-v14-r3 en c1fe393, con node_modules propio y npm run build ejecutado allí (`publico-v14` y `publico-v14-r2` conservados para rollback inmediato)",
+    "worldPreserved": "AtlasParaIsa-anexo/mundos/v14-20261119 (misma identidad 36a23d11-02af-49be-a867-960d2341c458, semilla 51926, sin pérdida de ticks)",
+    "units": "scripts/systemd/torre/publico.sh repuntado a publico-v14-r3",
+    "start": "arranque 2026-11-19 12:30:05 -05 (PID 220577, `carta-isa` NI -4 TS, listo en 41 s bajo carga de pruebas, MemoryCurrent 658 MiB, CPUWeight/IOWeight 10000)"
+  },
+  "verification": {
+    "typecheck": "verde (0 errores)",
+    "checkLinks": "123 documentos, 732 enlaces relativos, 0 rotos",
+    "targetedSuites": "119/119 store/snapshot/server + 46/46 society/curva-techo/halo/T171/comunidades/leyes + 32/32 fauna-rejilla + 33/33 lab/gobernador + 20/20 gpu-puente"
+  },
+  "liveChecks": {
+    "domainHealth": "ok",
+    "unauthenticatedWorldStatus": 401,
+    "servedAssetEqualsCompiled": "assets/index-Dnpsuc3u.js servido en https://atlas.humanizar.tech = compilado en worktree publico-v14-r3 (cmp -s: OK)"
+  }
+}

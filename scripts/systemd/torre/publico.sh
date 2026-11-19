@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Servidor PÚBLICO de Una Carta Para Isa (atlas.humanizar.tech) en la TORRE desde el 2026-09-24 (Steven: portátil
-# liberado; una sola instancia en la torre con todos sus recursos). Mundo V14 desde el 2026-11-19 (código f550c04 sobre
-# la misma base V14: Fase A + integración 002 etapas B–F, GPU residente, red delta, gobernador multiseñal y fix T171 F-1 +
-# ley COM-D′). V13 se conserva en mundos/v13-20260930, V12 en mundos/v12-20260928 y V11 en mundos/v11-20260924.
+# liberado; una sola instancia en la torre con todos sus recursos). Mundo V14 desde el 2026-11-19 (código c1fe393 sobre
+# la misma base V14: Fase A + integración 002 etapas B–F, GPU sharded, indiceDiversidad O(P), rejilla fauna, society O(|G|),
+# T132 fase 2 + beginHostTransaction y ley COM-D′). V13 se conserva en mundos/v13-20260930, V12 en mundos/v12-20260928 y V11 en mundos/v11-20260924.
 # Escucha en la IP de tailnet de la torre 100.64.0.1:3000 (la que usa el dominio). Acceso con la credencial con hash
 # del directorio del mundo (access.scrypt); nunca la contraseña en claro. El binario se enlaza como «carta-isa» para que
 # la regla de ananicy para «node» (SCHED_IDLE) no le quite prioridad.
 set -euo pipefail
-cd /datos/workspaces/personal/AtlasParaIsa-anexo/worktrees/publico-v14-r2
+cd /datos/workspaces/personal/AtlasParaIsa-anexo/worktrees/publico-v14-r3
 export CARTA_DATA_DIR=/datos/workspaces/personal/AtlasParaIsa-anexo/mundos/v14-20261119 HOST=100.64.0.1 PORT=3000 CARTA_ORIGIN=https://atlas.humanizar.tech
 export CARTA_PARAMS=gobernador.presupuestoMs=5000,social.radioConvivencia=12,social.disolucion=1,social.maxComunidades=64 NODE_ENV=production TMPDIR=/datos/workspaces/personal/AtlasParaIsa-anexo/publicaciones/tmp
 ln -sf "$(command -v node)" dist/carta-isa

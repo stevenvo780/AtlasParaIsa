@@ -27,6 +27,16 @@ iguales. Toda clave ausente de una instantánea sigue completándose con `HISTOR
 los mundos existentes conservan su conducta. Los demás defaults de reglas 10 no cambian;
 `agua.memoria` sigue en 1, como en B. `PARAMETER_LIMITS_RULES_VERSION` sigue en 9.
 
+**Estado vigente de versión (2026-11-19).** **`RULES_VERSION` sigue en `11`** (`src/world/index.ts:43`,
+protocolo `10`, SQLite `5`; estado publicado en [ESTADO.md](ESTADO.md)). Ni la infraestructura de
+cómputo paralelo/GPU de ecología ni la evaluación preregistrada de **Fase B** (`tecnologia.*`,
+[preregistro](preregistros/2026-11-18-estabilidad-tecnologia.md)) suben la versión de reglas: los
+parámetros `tecnologia.*` son **opt-in** y **no han sido adoptados** en `DEFAULT_PARAMS` ni en
+`HISTORICAL_PARAMS` (pasaron Q4 y Q5, pero no Q1/Q2/Q3 en el panel de 8 semillas × 60 días; ver
+[EVIDENCIA.md](EVIDENCIA.md#2-panel-preregistrado-fase-b-tecnologia-8-semillas-96019608--60-días-16-réplicas)).
+Tampoco está adoptado todavía el particionado simultáneo de personas (`motor.particionarPersonas = false`,
+Bloque E.1 pendiente).
+
 ## Reglas 10 (2026-09-22)
 
 **Reglas 10** (protocolo 9, SQLite 4) llega en dos pasos. El primero ya estaba en la rama de la noche:
@@ -451,19 +461,26 @@ Las comas dentro de JSON pertenecen al valor: en el laboratorio
 Los arrays conservan su orden, se copian y se congelan; tipos incorrectos, valores no finitos,
 claves desconocidas y elementos duplicados en las listas se rechazan.
 
-| Opción reservada | Default | Valores aceptados |
+| Opción (`motor.*`, red, gobernador, límites, tecnología opt-in) | Default | Valores aceptados y estado actual (2026-11-19) |
 |---|---|---|
-| `motor.clonPorPaso` | `true` | booleano |
-| `motor.hilos` | `1` | entero de 1 a 512 |
-| `motor.soaTerreno`, `motor.particionarPersonas` | `false` | booleano |
-| `motor.gpu` | `[]` | índices enteros seguros no negativos, únicos, sin consultar el hardware |
-| `motor.orden` | `natural` | `natural`, `inverso`, `adversarial` |
-| `persistencia.paginasSucias`, `red.deltas` | `false` | booleano |
-| `gobernador.senales` | `["p95"]` | lista no vacía, sin duplicados; sólo `p95` hasta T161 |
+| `motor.clonPorPaso` | `true` | booleano; `true` reserva por clon en pasos con gestos (PERF3), `false` usa `puntoDeRestauracion` |
+| `motor.hilos` | `1` | entero de 1 a 512; con `> 1` activa `StaticWorkerPool` determinista para las dos pasadas de ecología (T115/T120) |
+| `motor.soaTerreno` | `false` | booleano; activa `TileStore` SoA con máscara de presencia para el kernel (T112) |
+| `motor.particionarPersonas` | `false` | booleano; reservado para Bloque E.1 (intención/confirmación simultánea, aún no adoptado; `RULES_VERSION` sigue en `11`) |
+| `motor.gpu` | `[]` | índices enteros seguros no negativos, únicos, sin consultar el hardware; con `COMPUTE_NVRTC` activa `ResidentGpuBridge` FP64 `--fmad=false` (T121–T125) |
+| `motor.orden` | `natural` | `natural`, `inverso`, `adversarial`; sólo altera el orden físico del despacho de regiones para pruebas de determinismo (T117), jamás las leyes |
+| `motor.depuracion` | `false` | booleano (T148); activa la guardia de solo lectura `withReadOnlyDecisionGuard` (`src/world/paralelo/guardia.ts`); diagnóstico puro, excluido de `digestoCanonico` |
+| `persistencia.paginasSucias`, `red.deltas` | `false` | booleanos; `red.deltas` activa `state-delta`/`ack`/`resync` (T135/T137, opt-in) |
+| `gobernador.senales` | `["p95"]` | lista no vacía, sin duplicados, sobre `p95`, `max`, `rss`, `colaRed`, `saveMs` (T161/T162) |
 | `gobernador.politica` | `techo` | `apagar` (gobernador de 2026-09-19) o `techo` (2026-09-22: el hardware limita el crecimiento, no el reemplazo) |
-| `limites.teselasActivas`, `limites.chunks` | `65536`, `256` | enteros de 1 a `Number.MAX_SAFE_INTEGER` |
-| `limites.comunidades`, `limites.fauna` | `8`, `393216` | enteros de 1 a `Number.MAX_SAFE_INTEGER` |
+| `limites.teselasActivas`, `limites.chunks` | `65536`, `256` | enteros de 1 a `Number.MAX_SAFE_INTEGER` (T100: el anfitrión deriva su perfil en servidor/lab; `RAW_HISTORICAL` cubre instantáneas sin perfil) |
+| `limites.comunidades`, `limites.fauna` | `8`, `393216` | enteros de 1 a `Number.MAX_SAFE_INTEGER` (T100) |
+| `limites.aplicacion` | `parametros` | `historicos` (admisión legacy para instantáneas sin perfil de límites) o `parametros` (T100) |
 | `social.maxComunidades` | `8` | entero de 1 a `Number.MAX_SAFE_INTEGER`; tope de FUNDACIÓN de comunidades (conducta), separado de la admisión `limites.comunidades` (2026-09-22) |
+| `tecnologia.dosisCuanto` | `0` | entero `[0, 1000]`; **opt-in Fase B (no adoptado en defaults)** — cuantización entera de dosis propuestas de `residue`/`product` en `localInputs` (`0` = histórico; candidato probado `250`) |
+| `tecnologia.mejoraLocal` | `0` | real `[0, 1]`; **opt-in Fase B (no adoptado en defaults)** — puerta local de novedad o mejora/dominancia Pareto por trabajo en `finishProject`, conservando redescubrimiento pagado (`0` = histórico; candidato probado `0,05`) |
+| `tecnologia.enfriamiento` | `45` | entero `[1, 2400]`; **opt-in Fase B (no adoptado en defaults)** — ticks mínimos entre intentos autónomos en `technologyOpportunity` (`45` = histórico; candidato probado `300`) |
+| `tecnologia.evitarNoOp` | `false` | booleano; **opt-in Fase B (no adoptado en defaults)** — evita mutaciones no-op obvias en `proposeTechnologyProgram` (`false` = histórico; candidato probado `true`) |
 
 ### Gobernador: política `techo` (2026-09-22)
 
@@ -720,25 +737,76 @@ ninguna de 642 decisiones de la fauna con H ≥ 5; con reglas 10 cambian algunas
   42 y 51926, 16–33 habitantes, 10 000–18 000 teselas activas) cada región lee de sus vecinas el 26–50 % de las
   teselas activas con halo 14 (15–27 % con halo 8), y con regiones de 512 igual o más, porque el mundo nace
   en el origen, que es esquina de cuatro regiones de cualquier tamaño. Pasar a 512 cambia la geometría de las
-  regiones, no las reglas. Hay que decidirlo con la métrica de T115.
+  regiones, no las reglas (`tests/determinismo-hardware.test.ts` verifica ambas geometrías 256 y 512 bit a bit).
+- **Cobertura viva (2026-11-19).** El inventario de `src/world/halo.ts` incorpora las primitivas de
+  E.0 (`vecinos`/`primerVecino` de `rejilla.ts`, `techoDelArchivo`/`esMiembro` de `indices.ts`),
+  el despacho paralelo/GPU del `TileStore` (T112/T115/T120/T122), la máscara global de fauna (T116)
+  y el halo obligatorio `±8` del desalojo de páginas frías (T163), todos verificados por `tests/halo-radios.test.ts`.
 
-Estas opciones se validan y persisten, pero **T102 no activa backends, deltas ni nuevas señales,
-ni cambia los topes de validación o fundación de comunidades**. La ejecución sigue usando el
-motor V7 y el gobernador p95 existentes. Los límites son declaraciones pendientes de T100;
-no se calculan con memoria o CPU del host. El rango de un índice GPU no acredita que exista
-ese dispositivo. Las etapas posteriores deben validar su capacidad real al conectarlas.
+### Motor: orden determinista de reducciones y barreras (2026-11-19)
+
+El principio rector de ejecución (Constitución I) exige que el reparto entre hilos, geometrías de
+partición o dispositivos GPU decida **quién** calcula, jamás **qué** resultado se produce: con
+distinto hardware el `digestoCanonico` normalizado (sin selectores de motor) debe ser bit a bit
+idéntico al de CPU en 1 hilo. Ninguna fórmula del mundo puede leer `availableParallelism()`, `os.cpus()`,
+el número de hilos, el tamaño de partición ni el throughput medido de una GPU.
+
+1. **Colas estáticas ordenadas por `regionId` (`src/world/paralelo/particion.ts`).** Las regiones
+   disjuntas se ordenan por `compareRegionIds` (orden total determinista) y se reparten en bloques
+   contiguos entre los `motor.hilos` trabajadores, sin *work stealing*. `motor.orden` (`natural`,
+   `inverso`, `adversarial`) sólo cambia el orden físico de ejecución e introduce retardos reales en
+   el backend adversarial (`tests/determinismo-hardware.test.ts`), nunca la pertenencia ni la reducción.
+2. **Doble buffer, máscara de presencia y barrera única (`src/world/soa/terreno.ts`, `src/world/ecosystem-kernel.ts`).**
+   Cada 10 ticks el ecosistema corre dos pasadas separadas —primero `ecology` local y, tras barrera,
+   `EcosystemKernel.step`—, nunca fusionadas. Cada celda lee del buffer *front* (con máscara de
+   presencia por sello `Uint32` que conserva `-1` en vecinos ausentes de bordes activos) y escribe
+   exclusivamente en su ranura del buffer *back*. Al cerrar la barrera, `commitParallel()` intercambia
+   la paridad una sola vez; cualquier error o caída de worker/subproceso GPU dispara `abortParallel()`
+   antes del swap y deja intacto el frente confirmado. En GPU (`scripts/compute-ecology-resident.cu`,
+   `src/world/gpu/puente.ts`), el cómputo es estrictamente FP64 sin contracción FMA (`--fmad=false`),
+   el reparto multi-GPU por orden Morton (`src/world/gpu/reparto.ts`) nunca entra en el snapshot, y la
+   autoprueba al arranque (`src/world/gpu/autoprueba.ts`) desactiva irreversiblemente en la sesión
+   cualquier dispositivo que diverja un solo bit.
+3. **Uso estricto de `Atomics` (`src/world/paralelo/barrera.ts`, `src/world/soa/terreno.ts`).**
+   `Atomics` se limita a señales de control entero (barreras, estado de worker y reserva de entradas
+   en la cola de páginas `woodAddedQueue` del protocolo 1, donde el orden de llegada no altera el
+   resultado porque `commitParallel` adjunta los accesores pendientes de cada página en el orden fijo
+   de los *bindings*). Está **prohibido** usar `Atomics` para acumular valores FP64, resolver desempates
+   o asignar identidades, así como realizar sumas en árbol.
+4. **Fases seriales y contrato futuro de personas (Bloque E.1).** Clima (`world.rng`), máscara global
+   de fauna (`ordenCanonico` + ventana rotatoria en coordinador, T116; el pase `move` de fauna es una
+   cadena secuencial y permanece serial), demografía, comunidades, reproducción, crónica, todos los
+   acumuladores FP64 (`world.totals`, `demographyDynamics`, `inventionDynamics`, `animalDynamics`,
+   `technology.ledger`) y los nueve contadores de identidad permanecen en el hilo principal en orden
+   canónico de slot / `id.localeCompare`. Mientras `motor.particionarPersonas` siga en `false` (reglas
+   11 vigentes), las acciones de personas corren secuencialmente en orden de `world.people`; cuando se
+   adopte el Bloque E.1 (subiendo `RULES_VERSION` con evidencia propia), la confirmación aplicará
+   intentos en orden total por contenido `(celda, slot)`, la migración en `(regiónDestino, slot)`, y
+   las identidades por *stable sort* + *prefix-sum* sobre `(tick, fase, regionMorton, actorSlot, secuenciaLocal)`
+   con la transacción tecnológica como unidad contigua.
+
+**Activación gradual y compatibilidad de `params-v1`.** En su introducción inicial (T102, 2026-09-22),
+las claves `motor.*`, `limites.*`, `red.*` y `gobernador.senales` eran opciones reservadas sin
+consumidores. Desde entonces se han conectado por etapas detrás de sus defaults conservadores: T100
+(límites de admisión derivados del anfitrión en servidor/lab, con `RAW_HISTORICAL` para instantáneas
+antiguas sin perfil), T112/T115/T120/T122 (SoA, workers y puente GPU residente para las dos pasadas
+de ecología), T135/T137 (`red.deltas` opt-in), T148 (`motor.depuracion`, fuera del digesto) y
+T161/T162 (`gobernador.senales`). El rango de un índice GPU en `motor.gpu` no acredita presencia física
+del dispositivo: la autoprueba verifica capacidad y paridad real al arrancar y cae a CPU sin `COMPUTE_NVRTC`.
+`motor.particionarPersonas` y `tecnologia.*` (Fase B) permanecen desactivados en los defaults (`RULES_VERSION = 11`).
 
 El formato `params-v1` sigue siendo legible: un snapshot anterior completa las claves nuevas
-con sus valores históricos (`HISTORICAL_PARAMS` desde reglas 10, etapa 1; antes, estos defaults, que
-coincidían con ellos) y conserva sus overrides históricos. Los defaults siguen sin ocupar un
-campo en el snapshot; los overrides antiguos incorporan las nuevas claves al próximo guardado.
-`digestoCanonico` conserva todos los parámetros: añadir configuración cambia su hash aunque
-el estado físico sea igual. El control separado `scripts/verify-params-baseline.ts` compara
-estado completo, orden, aliases, `undefined` y bits numéricos frente a V7, sin debilitar ese digesto.
+con sus valores históricos (`HISTORICAL_PARAMS` desde reglas 10/11) y conserva sus overrides históricos.
+Los defaults siguen sin ocupar un campo en el snapshot; los overrides antiguos incorporan las nuevas
+claves al próximo guardado. `digestoCanonico` conserva los parámetros efectivos salvo la bandera de
+diagnóstico `motor.depuracion` (T148): añadir configuración física cambia su hash aunque el estado
+físico sea igual. El control separado `scripts/verify-params-baseline.ts` compara estado completo,
+orden, aliases, `undefined` y bits numéricos frente a V7, sin debilitar ese digesto.
 
-Los defaults de esta tabla son los de un mundo NUEVO. Desde reglas 10, etapa 1 (2026-09-22), cinco de
-ellos (marcados «reglas 10») difieren del valor histórico con que se completa una instantánea que no nombra
-la clave (`HISTORICAL_PARAMS`); en todas las demás filas default e histórico coinciden.
+Los defaults de esta tabla son los de un mundo NUEVO (`RULES_VERSION = 11`). Cinco claves (marcadas
+«reglas 10») y cuatro claves de conflicto legible (marcadas «reglas 11») difieren del valor histórico
+con que se completa una instantánea que no nombra la clave (`HISTORICAL_PARAMS`); en todas las demás
+filas —incluidas las cuatro claves opt-in `tecnologia.*` de Fase B— default e histórico coinciden.
 
 | Parámetro | Default de un mundo nuevo | Rango | Ley que controla | Tarea |
 | :--- | :--- | :--- | :--- | :--- |
@@ -767,23 +835,29 @@ la clave (`HISTORICAL_PARAMS`); en todas las demás filas default e histórico c
 | `agua.memoria` | 1 (apagada) | [0, 1] | Sed prevista al llegar al último lugar con agua que vio (sed actual − agua que lleva + sed del camino a 6 pasos por celda) por encima de la cual, sin agua a la vista, emprende la vuelta; el recuerdo se renueva al ver o beber agua y se olvida al verlo seco | Noche 2026-09-22 (SED) |
 | `conducta.habituacion` | **0,35** (reglas 10; histórico 0) | [0, 2] | Descuento por saciedad en la elección de acción: resta `habituacion · (0,5 + curiosity) · share`, con `share` = fracción vitalicia de esa acción en `activity` | Noche de ciencia 2026-09-22 · reglas 10 |
 | `conducta.aptitud` | 0 | [0, 2] | Ventaja comparativa heredable: sin urgencias corporales (sed, hambre y cansancio ≤ 0,5), cada oficio suma `aptitud · (rasgo del oficio − media de los cinco rasgos de la persona)`; comer, beber, descansar, vínculos y provisión para crianza no son oficios | Ley DIV, noche 2026-09-22 |
-| `social.disputaNecesidad` | 0.65 | [0.1, 1] | Necesidad (máximo de hambre y sed) que exige `resourceDispute` a los dos implicados | Noche de ciencia 2026-09-22 |
-| `social.disputaEscasez` | 1 | [0.1, 20] | Multiplicador de los tres umbrales de stock de la disputa (0,06 comida · 0,12 agua · 1 fauna) | Noche de ciencia 2026-09-22 |
-| `social.disputaRadio` | 2 | [1, 8] | Distancia máxima, en celdas, entre dos personas que compiten por el mismo destino | Noche de ciencia 2026-09-22 |
+| `social.disputaNecesidad` | **0,45** (reglas 11; histórico 0,65) | [0.1, 1] | Necesidad (máximo de hambre y sed) que exige `resourceDispute` a los dos implicados | Noche de ciencia 2026-09-22 · reglas 11 |
+| `social.disputaEscasez` | **3** (reglas 11; histórico 1) | [0.1, 20] | Multiplicador de los tres umbrales de stock de la disputa (0,06 comida · 0,12 agua · 1 fauna) | Noche de ciencia 2026-09-22 · reglas 11 |
+| `social.disputaRadio` | **3** (reglas 11; histórico 2) | [1, 8] | Distancia máxima, en celdas, entre dos personas que compiten por el mismo destino | Noche de ciencia 2026-09-22 · reglas 11 |
 | `social.disputaDestino` | 0.5 | [0.1, 8] | Cuánto tienen que coincidir los dos destinos para que haya disputa (0,5 = la misma celda) | Noche de ciencia 2026-09-22 |
 | `social.disputaEspera` | 180 | [1, 10000] (entero) | Ticks de calma que guarda cada lado tras una disputa, antes de poder volver a disputar | Noche de ciencia 2026-09-22 |
 | `social.ensenanzaRareza` | 0 | [0, 5] | Peso de la rareza al elegir qué receta enseñar: clave `gain + ensenanzaRareza · (1 − conocedores/vivos)` | Noche de ciencia 2026-09-22 |
 | `social.confianzaSalida` | 0.35 | [0, 1] | Confianza media con los pares por debajo de la cual se puede dejar una comunidad | Noche de ciencia 2026-09-22 |
 | `social.distanciaAlternativa` | 0.2 | [0, 1] | Distancia cultural máxima que puede tener una alternativa para contar como refugio al salir | Noche de ciencia 2026-09-22 |
 | `social.vinculoConvivencia` | 0 | [0, 0.01] | Vínculo mutuo que ganan por paso dos personas a ≤ 2 celdas, `vinculoConvivencia · sociabilidad media`, con techo (medido neutro, no adoptado) | Hipótesis cohorte, noche 2026-09-22 |
-| `social.radioConvivencia` | 0 | [0, 64] | Comunidades vivas: con > 0 la pertenencia sigue a la convivencia. Quien vive a más de este radio (celdas) del centro de su comunidad y tiene ≥ 2 vecinos de confianza de ella funda con ellos una nueva (fisión, con los requisitos de una fundación); quien tiene ≥ 2 vecinos de confianza de otra comunidad, y más que de la suya, pasa a ella; quien no tiene comunidad se une a la de la mayoría de sus vecinos de confianza. 0 = hoy: la pertenencia sólo cambia por `confianzaSalida` | Hipótesis COM, noche 2026-09-22 |
-| `social.memoriaDisputa` | 0 | [0, 32] | Conflicto legible: con > 0, en una disputa o un turno cede quien menos lo necesita (máximo de hambre y sed; empate, el de id mayor) y vuelve a elegir al paso siguiente en vez de quedar treinta pasos inmóvil; quien cede una disputa recuerda un día la fuente (la celda y las que la disputa llama «el mismo destino»), que al elegir dónde comer, beber o cazar le parece este número de celdas más lejos. Sólo reordena fuentes percibidas: si no hay otra, vuelve. 0 = hoy | Hipótesis CONFL, noche 2026-09-22 |
+| `social.radioConvivencia` | 0 (en V14 vía `CARTA_PARAMS`: 12) | [0, 64] | Comunidades vivas: con > 0 la pertenencia sigue a la convivencia. Quien vive a más de este radio (celdas) del centro de su comunidad y tiene ≥ 2 vecinos de confianza de ella funda con ellos una nueva (fisión, con los requisitos de una fundación); quien tiene ≥ 2 vecinos de confianza de otra comunidad, y más que de la suya, pasa a ella; quien no tiene comunidad se une a la de la mayoría de sus vecinos de confianza. 0 = hoy: la pertenencia sólo cambia por `confianzaSalida` | Hipótesis COM, noche 2026-09-22 |
+| `social.memoriaDisputa` | **8** (reglas 11; histórico 0) | [0, 32] | Conflicto legible: con > 0, en una disputa o un turno cede quien menos lo necesita (máximo de hambre y sed; empate, el de id mayor) y vuelve a elegir al paso siguiente en vez de quedar treinta pasos inmóvil; quien cede una disputa recuerda un día la fuente (la celda y las que la disputa llama «el mismo destino»), que al elegir dónde comer, beber o cazar le parece este número de celdas más lejos. Sólo reordena fuentes percibidas: si no hay otra, vuelve. 0 = histórico | Hipótesis CONFL, noche 2026-09-22 · reglas 11 |
+| `social.hogarTrabajo` | 0 | [0, 1] | Hogar por rendimiento marginal (H-B): reduce la provisión percibida de cada lugar según madera, piedra y fauna a ≤ 4 celdas (0 = histórico) | 2026-09-23 |
+| `social.disolucion` | 0 (en V14 vía `CARTA_PARAMS`: 1) | [0, 1] (entero) | COM-D′ (sólo actúa con `radioConvivencia > 0`): 1 exige ≥ 3 mortales en fisión/fundación, disuelve con ≤ 1 mortal (histéresis) y reagrupa miembros en orden fisión → mayoría → disolución → reagrupar → fundación; 0 = histórico | COM-D′, 2026-09-28 |
 | `poblacion.exigeComunidad` | **`false`** (reglas 10; histórico `true`) | booleano | Si reproducirse exige pertenecer a una comunidad; con `false` la cría hereda la del progenitor `a`, o ninguna | Noche de ciencia 2026-09-22 · reglas 10 |
 | `poblacion.radioPareja` | 3 | [1, 32] | Distancia máxima entre progenitores en `reproduce()`; es también la escala espacial de `pairAffinity` | Noche de ciencia 2026-09-22 |
 | `poblacion.radioLugar` | 4 | [1, 64] | Distancia máxima a un lugar compartido para que un nacimiento tenga sitio | Noche de ciencia 2026-09-22 |
 | `poblacion.comprobacionContinua` | **`true`** (reglas 10; histórico `false`) | booleano | Muestrea `reproduce()` cada paso en vez de cada `intervaloComprobacionTicks`; el techo por ventana no cambia | Noche de ciencia 2026-09-22 · reglas 10 |
 | `poblacion.cortejo` | **2** (reglas 10; histórico 0) | [0, 5] | Peso con que una persona fértil busca a otra fértil, no emparentada y con vínculo mutuo ≥ 0,3 que está fuera de `radioPareja` pero dentro de `radioCortejo` (acción `approach`, puntuación `cortejo · (0,5 + vínculo/2)`); 0 = apagado | Noche 2026-09-22 · reglas 10 |
 | `poblacion.radioCortejo` | **128** (reglas 10; histórico 24) | [1, 128] | Alcance del cortejo, en celdas | Noche 2026-09-22 · reglas 10 |
+| `tecnologia.dosisCuanto` | 0 (opt-in Fase B, no adoptado) | [0, 1000] (entero) | Cuantización entera de dosis propuestas de `residue`/`product` en `localInputs` (0 = sin cuantizar, histórico; candidato probado 250) | Fase B, 2026-11-18 |
+| `tecnologia.mejoraLocal` | 0 (opt-in Fase B, no adoptado) | [0, 1] | Puerta local de novedad o mejora/dominancia Pareto por trabajo en `finishProject`, conservando redescubrimiento pagado (0 = registra todo, histórico; candidato probado 0,05) | Fase B, 2026-11-18 |
+| `tecnologia.enfriamiento` | 45 (opt-in Fase B, no adoptado) | [1, 2400] (entero) | Ticks mínimos entre intentos autónomos en `technologyOpportunity`; con `mejoraLocal > 0` o `enfriamiento > 45` deja de saltar `craft` por `attempts % 3 !== 0` y atenúa `research` con inventario lleno (45 = histórico; candidato probado 300) | Fase B, 2026-11-18 |
+| `tecnologia.evitarNoOp` | `false` (opt-in Fase B, no adoptado) | booleano | Evita mutaciones localmente no-op obvias (`cool` sin `heat`, `separate` sobre un único `raw` sin `combine`, paso repetido) en `proposeTechnologyProgram` (`false` = histórico; candidato probado `true`) | Fase B, 2026-11-18 |
 
 #### Leyes candidatas (noche de ciencia, 2026-09-22)
 

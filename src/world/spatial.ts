@@ -10,6 +10,7 @@ import type { LegacyRecord } from '../shared/demography.js';
 import { bindTechnologyCatalogue, type TechnologyCatalogueReader } from './technology-catalogue.js';
 import { lastTileAt, splitTileBlocks, tileIndexAppended } from './tile-index.js';
 import type { ResidentTopologyOwner } from './soa/topologia.js';
+import { chunkLruFor } from './lru.js';
 
 export interface WorldContext {
   /** Propiedad privada del host, creada antes de exponer teselas; nunca se serializa. */
@@ -131,7 +132,11 @@ function activateChunk(world: World, key: string, x: number, y: number, context:
   const cuencas = paramsOf(world).agua.cuencas;
   // Both pending snapshots and host readers may share immutable archived objects.
   // Clone only the chunk being reactivated, before exposing animals/places/structures to laws.
-  const archived = pending >= 0 ? takePending(world.retiredChunks, pending) : context.loadChunk?.(key, world.tick);
+  let archived = pending >= 0 ? takePending(world.retiredChunks, pending) : chunkLruFor(world).get(key);
+  if (!archived && context.loadChunk) {
+    archived = context.loadChunk(key, world.tick) ?? undefined;
+    if (archived) chunkLruFor(world).set(archived);
+  }
   // Los Tile observados son proxies. El archivo se materializa antes de cruzar structuredClone.
   const archivePlain = archived && context.tileOwnership
     ? { ...archived, tiles: archived.tiles.map(tile => ({ ...tile })) } : archived;
@@ -151,6 +156,118 @@ function activateChunk(world: World, key: string, x: number, y: number, context:
   world.structures.push(...(structures ?? legacyStructures(tiles, world.tick)));
   for (const place of meta.places) if (!world.places.some(p => p.id === place.id)) world.places.push(place);
 }
+/** Mueve chunks activos (en el orden dado) a `retiredChunks` con sus teselas, lugares,
+ * animales y estructuras, y los recuerda en la LRU del mundo. No borra información. */
+function retireActiveChunks(world: World, keys: readonly string[], context: WorldContext = worldContext(world)): string[] {
+  const state = regions.get(world.chunks);
+  const retired = new Set<string>();
+  const detached = new Map<string, Chunk>();
+  const done: string[] = [];
+  for (const key of keys) {
+    const meta = world.chunks[key]!;
+    if (!meta) continue;
+    const chunk: Chunk = { ...meta, lifeVersion: 4, lastTick: world.tick, tiles: [], places: [], animals: [], structures: [] };
+    retire(world.retiredChunks, chunk); detached.set(key, chunk);
+    delete world.chunks[key]; retired.add(key); state?.order.delete(key); done.push(key);
+  }
+  if (retired.size) {
+    const byBlock = splitTileBlocks(world.tiles, first => detached.get(chunkKey(first.x, first.y))?.tiles);
+    if (byBlock) world.tiles = context.tileOwnership?.tiles(byBlock) ?? byBlock;
+    else {
+      const active: Tile[] = [];
+      for (const tile of world.tiles) {
+        const chunk = detached.get(chunkKey(tile.x, tile.y));
+        if (chunk) chunk.tiles.push(tile); else active.push(tile);
+      }
+      world.tiles = context.tileOwnership?.tiles(active) ?? active;
+    }
+    for (const place of world.places) detached.get(chunkKey(place.x, place.y))?.places.push(place);
+    world.animals = world.animals.filter(animal => {
+      const chunk = detached.get(chunkKey(animal.x, animal.y));
+      if (chunk) chunk.animals!.push(animal);
+      return !chunk;
+    });
+    world.structures = world.structures.filter(structure => {
+      const chunk = detached.get(chunkKey(structure.x, structure.y));
+      if (chunk) chunk.structures!.push(structure);
+      return !chunk;
+    });
+    // The three memory anchors remain available as provenance even when dormant.
+    world.places = world.places.filter(p => ['claro', 'refugio', 'huerta'].includes(p.id) || !retired.has(chunkKey(p.x, p.y)));
+    for (const chunk of detached.values()) {
+      chunkLruFor(world).set(context.tileOwnership ? { ...chunk, tiles: chunk.tiles.map(tile => ({ ...tile })) } : chunk);
+    }
+  }
+  return done;
+}
+
+export interface EvictColdChunksOptions { maxActiveChunks?: number; maxActiveTiles?: number; }
+const areaBudgets = new WeakMap<World, EvictColdChunksOptions>();
+/** Presupuesto de área activo para este mundo (el último dado a `evictColdChunks`), o `undefined`. */
+export function activeAreaBudget(world: World): EvictColdChunksOptions | undefined {
+  const budget = areaBudgets.get(world);
+  return budget ? { ...budget } : undefined;
+}
+function validateEvictOptions(options: EvictColdChunksOptions): void {
+  if (!options || typeof options !== 'object' || Array.isArray(options)
+    || Object.keys(options).some(key => key !== 'maxActiveChunks' && key !== 'maxActiveTiles')
+    || (options.maxActiveChunks !== undefined && (!Number.isSafeInteger(options.maxActiveChunks) || options.maxActiveChunks < 0))
+    || (options.maxActiveTiles !== undefined && (!Number.isSafeInteger(options.maxActiveTiles) || options.maxActiveTiles < 0)))
+    throw new RangeError('Presupuesto de desalojo inválido: maxActiveChunks/maxActiveTiles deben ser enteros ≥ 0.');
+}
+/** Halo obligatorio: el chunk de cada persona viva y el anillo ±1 chunk (`REACH` de `maintainRegions`). */
+function mandatoryChunkKeys(world: World): Set<string> {
+  const mandatory = new Set<string>();
+  for (const person of world.people) for (const dx of REACH) for (const dy of REACH) {
+    const x = person.x + dx, y = person.y + dy;
+    if (validCoordinate(x) && validCoordinate(y)) mandatory.add(chunkKey(x, y));
+  }
+  return mandatory;
+}
+/** Distancia Chebyshev, en chunks, del chunk a la persona viva más cercana (`Infinity` sin personas). */
+function minChunkDistance(world: World, cx: number, cy: number): number {
+  let best = Infinity;
+  for (const person of world.people) {
+    const pcx = Math.floor(person.x / CHUNK_SIZE), pcy = Math.floor(person.y / CHUNK_SIZE);
+    best = Math.min(best, Math.max(Math.abs(cx - pcx), Math.abs(cy - pcy)));
+  }
+  return best;
+}
+function evictCold(world: World, options: EvictColdChunksOptions): string[] {
+  const overBudget = (): boolean => (options.maxActiveChunks !== undefined && Object.keys(world.chunks).length > options.maxActiveChunks)
+    || (options.maxActiveTiles !== undefined && world.tiles.length > options.maxActiveTiles);
+  if (!overBudget()) return [];
+  const mandatory = mandatoryChunkKeys(world);
+  const candidates = Object.entries(world.chunks)
+    .filter(([key]) => !mandatory.has(key))
+    .map(([key, meta]) => ({ key, lastTick: meta.lastTick, distance: minChunkDistance(world, meta.cx, meta.cy) }))
+    .sort((a, b) => (a.distance !== b.distance ? (a.distance > b.distance ? -1 : 1)
+      : a.lastTick !== b.lastTick ? a.lastTick - b.lastTick
+      : a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+  const evicted: string[] = [];
+  for (const candidate of candidates) {
+    if (!overBudget()) break;
+    evicted.push(...retireActiveChunks(world, [candidate.key]));
+  }
+  return evicted;
+}
+/**
+ * T163 «Reducir área»: retira los chunks activos más fríos que no contienen habitantes ni
+ * caen en el halo obligatorio de ninguna persona viva, en orden `(distancia mínima Chebyshev
+ * en chunks DESC, lastTick ASC, chunkKey ASC)`, hasta cumplir el presupuesto dado. Los
+ * retirados quedan en `world.retiredChunks` (el `Store` los respalda en la tabla `chunks`
+ * al guardar y `activate` los reanima desde ahí, desde la LRU o desde `context.loadChunk`).
+ * Nunca retira un chunk obligatorio: sin candidatos el conjunto activo puede quedar por
+ * encima del presupuesto, pero el movimiento nunca se impide. Sin presupuesto (o ya bajo
+ * él) es un no-op. El presupuesto queda activo para los siguientes `maintainRegions`.
+ */
+export function evictColdChunks(world: World, options: EvictColdChunksOptions = {}): string[] {
+  validateEvictOptions(options);
+  if (options.maxActiveChunks === undefined && options.maxActiveTiles === undefined) return [];
+  areaBudgets.set(world, { ...options });
+  return evictCold(world, options);
+}
+
 /** Only agent neighborhoods advance ecology. Camera queries never call this function. */
 export function maintainRegions(world: World, context: WorldContext = worldContext(world)): void {
   const state = regionsOf(world.chunks), stamp = ++state.stamp, zeroed: string[] = [];
@@ -179,7 +296,6 @@ export function maintainRegions(world: World, context: WorldContext = worldConte
   }
   for (const key of state.added) zeroed.push(key);
   state.added.length = 0;
-  if (!zeroed.length) return;
   const stale: string[] = [];
   for (const key of new Set(zeroed)) {
     if (state.refs.has(key)) continue;
@@ -187,39 +303,11 @@ export function maintainRegions(world: World, context: WorldContext = worldConte
   }
   // Mismo orden que `Object.entries(world.chunks)`: el de inserción.
   stale.sort((a, b) => state.order.get(a)! - state.order.get(b)!);
-  const retired = new Set<string>();
-  const detached = new Map<string, Chunk>();
-  for (const key of stale) {
-    const meta = world.chunks[key]!;
-    const chunk: Chunk = { ...meta, lifeVersion: 4, lastTick: world.tick, tiles: [], places: [], animals: [], structures: [] };
-    retire(world.retiredChunks, chunk); detached.set(key, chunk);
-    delete world.chunks[key]; retired.add(key); state.order.delete(key);
-  }
-  if (retired.size) {
-    const byBlock = splitTileBlocks(world.tiles, first => detached.get(chunkKey(first.x, first.y))?.tiles);
-    if (byBlock) world.tiles = context.tileOwnership?.tiles(byBlock) ?? byBlock;
-    else {
-      const active: Tile[] = [];
-      for (const tile of world.tiles) {
-        const chunk = detached.get(chunkKey(tile.x, tile.y));
-        if (chunk) chunk.tiles.push(tile); else active.push(tile);
-      }
-      world.tiles = context.tileOwnership?.tiles(active) ?? active;
-    }
-    for (const place of world.places) detached.get(chunkKey(place.x, place.y))?.places.push(place);
-    world.animals = world.animals.filter(animal => {
-      const chunk = detached.get(chunkKey(animal.x, animal.y));
-      if (chunk) chunk.animals!.push(animal);
-      return !chunk;
-    });
-    world.structures = world.structures.filter(structure => {
-      const chunk = detached.get(chunkKey(structure.x, structure.y));
-      if (chunk) chunk.structures!.push(structure);
-      return !chunk;
-    });
-    // The three memory anchors remain available as provenance even when dormant.
-    world.places = world.places.filter(p => ['claro', 'refugio', 'huerta'].includes(p.id) || !retired.has(chunkKey(p.x, p.y)));
-  }
+  retireActiveChunks(world, stale, context);
+  // T163: con presupuesto de área activo se retira además la página fría que sobra;
+  // sin presupuesto este camino no existe y el comportamiento es exactamente el de siempre.
+  const budget = areaBudgets.get(world);
+  if (budget) evictCold(world, budget);
 }
 export function normalizeViewport(value?: Viewport): Viewport {
   const v = value ?? { x: 0, y: 0, width: 40, height: 28 };

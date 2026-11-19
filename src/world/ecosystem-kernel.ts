@@ -6,6 +6,7 @@ import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { runParallelEcology, type ParallelEcologyParams } from './ecology-kernel.js';
 import type { WorldParams } from './params.js';
+import { ResidentGpuBridge, type GpuBridgeStats } from './gpu/puente.js';
 
 const clamp = (n: number): number => Math.max(0, Math.min(1, n));
 const TREE_FEATURES = new Set<Feature>(['tree', 'pine', 'palm', 'cactus', 'reeds', 'stump']);
@@ -20,6 +21,8 @@ export interface EcosystemBarrierEvent {
   dirtyPages: readonly { pageX: number; pageY: number }[] | undefined;
   diagnostics: StaticWorkerDiagnostics | null;
   topologyCertificate: { tiles: Tile[]; revision: object } | undefined;
+  gpu?: readonly number[];
+  gpuStats?: GpuBridgeStats;
 }
 export interface EcologyExecution {
   regionSide?: 256 | 512;
@@ -28,6 +31,7 @@ export interface EcologyExecution {
 export interface EcosystemOptions extends EcologyExecution {
   decaimientoFertilidad?: number; seed?: number; cuencas?: number; soaTerreno?: boolean; hilos?: number;
   orden?: 'natural' | 'inverso' | 'adversarial';
+  gpu?: readonly number[];
 }
 export interface EcosystemKernelOptions { createPool?: (workers: number) => StaticWorkerPool }
 
@@ -98,6 +102,8 @@ export class EcosystemKernel {
   private readonly topologies: Topology[] = [];
   private soa: TileStore | null = null;
   private readonly pools = new Map<number, StaticWorkerPool>();
+  private readonly gpuBridges = new Map<string, ResidentGpuBridge>();
+  private lastGpuBridge: ResidentGpuBridge | null = null;
   private lastPool: StaticWorkerPool | null = null;
   private readonly createPool: (workers: number) => StaticWorkerPool;
 
@@ -108,9 +114,29 @@ export class EcosystemKernel {
     });
   }
   get parallelDiagnostics(): StaticWorkerDiagnostics | null { return this.lastPool?.diagnostics() ?? null; }
+  get gpuDiagnostics(): GpuBridgeStats | null { return this.lastGpuBridge?.lastStats ?? null; }
+  /** Solo para la prueba de aborto: mata el subproceso del puente activo sin tocar el mundo. */
+  killGpuSubprocessForTest(): void { this.lastGpuBridge?.killSubprocessForTest(); }
+  private gpuBridge(devices: readonly number[]): ResidentGpuBridge {
+    const key = devices.join(',');
+    let bridge = this.gpuBridges.get(key);
+    if (!bridge) { bridge = new ResidentGpuBridge(devices); this.gpuBridges.set(key, bridge); }
+    this.lastGpuBridge = bridge; return bridge;
+  }
+  private dropGpuBridge(bridge: ResidentGpuBridge): void {
+    for (const [key, value] of this.gpuBridges) if (value === bridge) this.gpuBridges.delete(key);
+    if (this.lastGpuBridge === bridge) this.lastGpuBridge = null;
+    void bridge.close().catch(() => undefined);
+  }
   async closeParallelPool(): Promise<void> {
     await Promise.all([...this.pools.values()].map(pool => pool.close()));
     this.pools.clear(); this.lastPool = null;
+    await Promise.all([...this.gpuBridges.values()].map(bridge => bridge.close()));
+    this.gpuBridges.clear(); this.lastGpuBridge = null;
+  }
+  async closeGpuBridges(): Promise<void> {
+    await Promise.all([...this.gpuBridges.values()].map(bridge => bridge.close()));
+    this.gpuBridges.clear(); this.lastGpuBridge = null;
   }
 
   get cachedTopologyCount(): number { return this.topologies.length; }
@@ -121,6 +147,28 @@ export class EcosystemKernel {
   stepEcology(tiles: Tile[], tick: number, weather: 'clear' | 'rain', phase: string,
     recursos: WorldParams['recursos'], options: EcosystemOptions): void {
     if (tick % 10 !== 0) return;
+    const gpu = options.gpu;
+    if (gpu && gpu.length > 0) {
+      const store = this.soa ??= new TileStore(), terrain = store.prepareParallel(tiles, options.regionSide);
+      this.topologies.length = 0;
+      const bridge = this.gpuBridge(gpu);
+      store.beginParallel();
+      let result;
+      try {
+        result = bridge.run(terrain, store.pageSetVersion, 'ecologia', {
+          version: terrain.version, rain: weather === 'rain' ? 1 : 0,
+          light: phase === 'day' ? 1 : phase === 'night' ? 0 : 0.4,
+          capacidadBosque: recursos.capacidadBosque, capacidadPastizal: recursos.capacidadPastizal,
+          capacidadOtros: recursos.capacidadOtros, velocidadRegeneracion: recursos.velocidadRegeneracion,
+          decaimientoComida: recursos.decaimientoComida,
+        }, options.regionSide ?? 256);
+        store.commitParallel('ecologia');
+      } catch (error) { store.abortParallel(); this.dropGpuBridge(bridge); throw error; }
+      options.onBarrier?.({ tick, phase: 'ecologia', regionSide: options.regionSide ?? 256,
+        orden: options.orden ?? 'natural', workers: gpu.length, dirtyPages: result.dirtyPages,
+        diagnostics: null, topologyCertificate: store.parallelTopologyCertificate(tiles), gpu, gpuStats: result });
+      return;
+    }
     const workers = options.hilos ?? 1;
     if (!Number.isSafeInteger(workers) || workers <= 1) throw new RangeError('El despacho paralelo de ecology requiere hilos > 1.');
     const store = this.soa ??= new TileStore(), terrain = store.prepareParallel(tiles, options.regionSide);
@@ -151,6 +199,28 @@ export class EcosystemKernel {
     if (tick % 10 !== 0) return;
     const workers = options?.hilos ?? 1;
     if (!Number.isSafeInteger(workers) || workers < 1) throw new RangeError('hilos debe ser un entero positivo.');
+    const gpu = options?.gpu;
+    if (gpu && gpu.length > 0) {
+      const store = this.soa ??= new TileStore();
+      const terrain = store.prepareParallel(tiles, options?.regionSide);
+      this.topologies.length = 0;
+      const bridge = this.gpuBridge(gpu);
+      store.beginParallel();
+      let result;
+      try {
+        result = bridge.run(terrain, store.pageSetVersion, 'kernel', {
+          tick, version: terrain.version, rain: weather === 'rain' ? 1 : 0,
+          light: phase === 'day' ? 1 : phase === 'night' ? 0 : 0.4,
+          decaimientoFertilidad: options?.decaimientoFertilidad ?? 0,
+          seed: (options?.seed ?? 0) >>> 0, cuencas: options?.cuencas ?? 1,
+        }, options.regionSide ?? 256);
+        store.commitParallel();
+      } catch (error) { store.abortParallel(); this.dropGpuBridge(bridge); throw error; }
+      options?.onBarrier?.({ tick, phase: 'kernel', regionSide: options.regionSide ?? 256,
+        orden: options.orden ?? 'natural', workers: gpu.length, dirtyPages: result.dirtyPages,
+        diagnostics: null, topologyCertificate: store.parallelTopologyCertificate(tiles), gpu, gpuStats: result });
+      return;
+    }
     if (workers > 1) {
       const store = this.soa ??= new TileStore();
       const terrain = store.prepareParallel(tiles, options?.regionSide);

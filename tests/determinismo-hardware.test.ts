@@ -11,13 +11,20 @@ import { HARDWARE_SCENES, HARDWARE_SEEDS, buildHardwareScene, regionGroupedHarve
   sequentialHarvestTotal } from './hardware/escenas.js';
 import { firstHashDisagreement, locateDifference, normalizedCopy, plainWorldCopy,
   snapshotBarrier, throwDifference } from './hardware/contrato.js';
-import { CPU_BACKENDS, adversarialWorkerCount, captureReference, compareCandidate } from './hardware/matriz.js';
+import { CPU_BACKENDS, adversarialWorkerCount, captureReference, compareCandidate, compareGpuCandidate, type ReferenceTrace } from './hardware/matriz.js';
 import { HardwareTileChanges } from './hardware/cambios.js';
 
 // The default npm test includes the complete literal 600-step CPU matrix. Opt-in replaces
 // its duration with 2400 steps; it never relabels a shorter trajectory as the long gate.
 const STEPS = process.env.ATLAS_T117_LONG === '1' ? 2400 : 600;
 after(async () => { await closeEcosystemWorkers(); });
+const referenceCache = new Map<string, ReferenceTrace>();
+function cachedReference(seed: number, scene: (typeof HARDWARE_SCENES)[number]): ReferenceTrace {
+  const key = `${seed}|${scene}|${STEPS}`;
+  let trace = referenceCache.get(key);
+  if (!trace) { trace = captureReference(seed, scene, STEPS); referenceCache.set(key, trace); }
+  return trace;
+}
 
 test('T117 fixtures: the 28 private scenes establish actual biological and geometric witnesses', () => {
   for (const seed of HARDWARE_SEEDS) for (const scene of HARDWARE_SCENES) {
@@ -200,7 +207,7 @@ test('T120 canonical copy materializes active/dormant Proxies preserving keys, u
 
 for (const seed of HARDWARE_SEEDS) for (const scene of HARDWARE_SCENES) {
   test(`T117 matrix seed=${seed} scene=${scene} steps=${STEPS}`, async t => {
-    const started = performance.now(), reference = captureReference(seed, scene, STEPS);
+    const started = performance.now(), reference = cachedReference(seed, scene);
     let actualDispatches = 0, actualEcologyDispatches = 0, actualDelays = 0, topologyScannedTiles = reference.topologyScannedTiles;
     let fullRefreshes = reference.fullRefreshes;
     let globalCaptures = reference.globalCaptures, logicalTileChanges = reference.logicalTileChanges,
@@ -221,6 +228,12 @@ for (const seed of HARDWARE_SEEDS) for (const scene of HARDWARE_SCENES) {
       + ` topologyScannedTiles=${topologyScannedTiles}; fullRefreshes=${fullRefreshes};`
       + ` logicalTileChanges=${logicalTileChanges}; updatedPages=${updatedPages}; globalCaptures=${globalCaptures}`);
   });
-  for (const regionSide of [256, 512]) for (const gpu of [[0], [1], [0, 1]]) test(`T117 CUDA seed=${seed} scene=${scene} geometry=${regionSide} gpu=[${gpu.join(',')}]`,
-    { skip: 'Etapa C pending: no CUDA ecology backend implemented or certified; this is SKIP, never CPU/GPU PASS.' }, () => {});
+  for (const regionSide of [256, 512] as const) for (const gpu of [[0], [1], [0, 1]] as const) test(`T117 CUDA seed=${seed} scene=${scene} geometry=${regionSide} gpu=[${gpu.join(',')}]`,
+    { skip: process.env.COMPUTE_NVRTC ? false : 'COMPUTE_NVRTC no está definido: backend GPU omitido (skip explícito, nunca pass).' }, t => {
+      const reference = cachedReference(seed, scene);
+      const evidence = compareGpuCandidate(reference, regionSide, gpu);
+      t.diagnostic(`gpu=[${gpu.join(',')}]; elapsedMs=${evidence.elapsedMs.toFixed(3)};`
+        + ` uploadedBytes=${evidence.uploadedBytes}; downloadedBytes=${evidence.downloadedBytes};`
+        + ` ecologyDispatches=${evidence.actualEcologyDispatches}; kernelDispatches=${evidence.actualKernelDispatches}`);
+    });
 }

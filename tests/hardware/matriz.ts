@@ -47,6 +47,14 @@ function selectors(world: World, backend: CpuBackend, tick: number): void {
   params.motor.gpu = []; params.motor.soaTerreno = false;
   setParams(world, params);
 }
+function selectorsGpu(world: World, gpu: readonly number[]): void {
+  const params = structuredClone(paramsOf(world));
+  params.motor.hilos = 1;
+  params.motor.orden = 'natural';
+  params.motor.gpu = [...gpu]; params.motor.soaTerreno = false;
+  setParams(world, params);
+}
+export type GpuBackend = readonly number[];
 const isMilestone = (step: number, steps: number) => step === steps || step === 1200 || step === 2400;
 
 /** One serial trajectory per seed/scene, reused by all twelve CPU/geometry candidates.
@@ -221,6 +229,65 @@ export function compareCandidate(trace: ReferenceTrace, regionSide: 256 | 512, b
       'Sparse scenes must actually reverse a multi-region queue and wait on a real clock.');
   } else if (backend > 1) assert.deepEqual([...actualCounts], [backend]);
   evidence.workerCounts = [...actualCounts].sort((a, b) => a - b);
+  evidence.elapsedMs = performance.now() - started;
+  return evidence;
+}
+
+export interface GpuCandidateEvidence {
+  elapsedMs: number; actualKernelDispatches: number; actualEcologyDispatches: number;
+  topologyScannedTiles: number; fullRefreshes: number; globalCaptures: number;
+  logicalTileChanges: number; updatedPages: number; uploadedBytes: number; downloadedBytes: number;
+}
+/** T125: candidato GPU residente; la referencia es la misma trayectoria CPU 1 hilo de captureReference. */
+export function compareGpuCandidate(trace: ReferenceTrace, regionSide: 256 | 512, gpu: GpuBackend): GpuCandidateEvidence {
+  const started = performance.now(), fixture = buildHardwareScene(trace.seed, trace.scene), world = fixture.world;
+  const evidence: GpuCandidateEvidence = { elapsedMs: 0, actualKernelDispatches: 0, actualEcologyDispatches: 0,
+    topologyScannedTiles: 0, fullRefreshes: 0, globalCaptures: 0, logicalTileChanges: 0, updatedPages: 0,
+    uploadedBytes: 0, downloadedBytes: 0 };
+  let cursor = 0, actualEcologyTicks = 0;
+  let nextPhase: HardwareBarrier['phase'] = 'ecologia';
+  const tracker = new HardwareTileChanges(world);
+  selectorsGpu(world, gpu); countCapture(evidence, tracker.capture());
+  const compare = (boundary: Pick<BarrierSnapshot, 'tick' | 'phase'>, dirtyPages: HardwareBarrier['dirtyPages']) => {
+    const expected = trace.barriers[cursor++];
+    assert.ok(expected, 'No extra or fabricated GPU barriers are accepted.');
+    assert.equal(boundary.tick, expected.tick); assert.equal(boundary.phase, expected.phase);
+    const capture = tracker.capture(dirtyPages);
+    countCapture(evidence, capture);
+    const page = firstHashDisagreement(expected, capture.digest);
+    if (page !== null) throwDifference(locateDifference(referenceAt(trace, boundary), world, boundary, page));
+  };
+  const context: WorldContext = { ecologyExecution: { regionSide, onBarrier(event: HardwareBarrier) {
+    assert.equal(event.phase, nextPhase);
+    nextPhase = event.phase === 'ecologia' ? 'kernel' : 'ecologia';
+    assert.equal(event.regionSide, regionSide);
+    assert.equal(event.orden, 'natural');
+    assert.equal(event.tick % 10, 0);
+    assert.deepEqual(event.gpu, [...gpu], 'La barrera debe declarar el backend GPU que la calculó.');
+    assert.equal(event.diagnostics, null, 'GPU no usa diagnósticos de workers CPU.');
+    assert.equal(event.workers, gpu.length);
+    const stats = event.gpuStats as { uploadedBytes: number; downloadedBytes: number } | undefined;
+    assert.ok(stats && Number.isFinite(stats.uploadedBytes) && Number.isFinite(stats.downloadedBytes), 'GPU debe medir subida y bajada por separado.');
+    evidence.uploadedBytes += stats.uploadedBytes; evidence.downloadedBytes += stats.downloadedBytes;
+    if (event.phase === 'ecologia') { actualEcologyTicks++; evidence.actualEcologyDispatches++; } else evidence.actualKernelDispatches++;
+    compare(event, event.dirtyPages);
+  } } };
+  for (let step = 1; step <= trace.steps; step++) {
+    stepWorld(world, [], context); fixture.afterStep(step);
+    assert.equal(nextPhase, 'ecologia');
+    compare({ tick: world.tick, phase: 'fin-paso' }, undefined);
+    if (isMilestone(step, trace.steps)) {
+      const expected = trace.milestones.get(step)!;
+      if (finalCanonicalDigest(world) !== expected.digest) throwDifference(locateDifference(expected.world, world,
+        { tick: world.tick, phase: 'fin-paso' }));
+    }
+  }
+  fixture.assertWitness(); assertWorld(world);
+  assert.equal(cursor, trace.barriers.length);
+  const expectedEcologyTicks = Math.floor((trace.startTick + trace.steps) / 10) - Math.floor(trace.startTick / 10);
+  assert.equal(actualEcologyTicks, expectedEcologyTicks);
+  assert.equal(evidence.actualKernelDispatches, expectedEcologyTicks);
+  assert.equal(evidence.actualEcologyDispatches, expectedEcologyTicks);
   evidence.elapsedMs = performance.now() - started;
   return evidence;
 }

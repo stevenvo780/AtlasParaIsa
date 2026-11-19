@@ -194,6 +194,31 @@ test('valida los argumentos: --escala inválida, --hilos fuera de rango y falta 
   const sinSalida = base(['--seed', '1', '--escala', 'habitantes']);
   assert.notEqual(sinSalida.status, 0);
   assert.match(sinSalida.stderr, /--salida/);
+
+  const cadaTicksInvalido = base(['--seed', '1', '--escala', 'habitantes', '--cada-ticks', '0', '--salida', dir]);
+  assert.notEqual(cadaTicksInvalido.status, 0);
+  assert.match(cadaTicksInvalido.stderr, /--cada-ticks/);
+
+  const densidadConTeselas = base(['--seed', '1', '--escala', 'teselas', '--densidad-constante', '--salida', dir]);
+  assert.notEqual(densidadConTeselas.status, 0);
+  assert.match(densidadConTeselas.stderr, /--densidad-constante/);
+});
+
+test('--densidad-constante y --cada-ticks distribuyen sintéticos sin apilarlos y respetan la cadencia', (t) => {
+  const { dir, result } = runCurva(t, [
+    '--seed', '51926', '--escala', 'habitantes', '--hasta', '64',
+    '--densidad-constante', '--cada-ticks', '100',
+  ]);
+  assert.equal(result.status, 0, result.stderr);
+  const curva = readJson(join(dir, 'curva.json'));
+  assert.equal(curva.densidadConstante, true);
+  assert.equal(curva.cadaTicks, 100);
+  const puntos = curva.puntos as Json[];
+  assert.ok(puntos.length >= 2, 'debe avanzar al menos hasta el escalón de 32/64 habitantes');
+  const ultimo = puntos[puntos.length - 1]!;
+  assert.ok((ultimo.habitantes as number) >= 32);
+  assert.ok((ultimo.teselasActivas as number) > 1536, 'en densidad constante deben activarse bloques adicionales al crecer la población');
+  assert.ok((ultimo.teselasPorHabitante as number) >= 40, `teselasPorHabitante=${ultimo.teselasPorHabitante} debe mantenerse en rango orgánico y no colapsar por apilamiento`);
 });
 
 test('--hilos y --gpu se aceptan y se registran aunque hoy no exista backend paralelo ni GPU', (t) => {

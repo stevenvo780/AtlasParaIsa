@@ -1059,6 +1059,9 @@ export class Landscape {
   private interpolatePeople(now: number): RenderPerson[] {
     const world = this.curr;
     if (!world) return [];
+    // T137: `prevPeople` solo conserva ids del frame actual; sin esto acumula huérfanos.
+    const currentIds = new Set(world.people.map(p => p.id));
+    for (const id of this.prevPeople.keys()) if (!currentIds.has(id)) this.prevPeople.delete(id);
     const alpha = this.prev && !this.reduceMotion ? clamp01((now - this.currAt) / this.interval) : 1;
     const out: RenderPerson[] = [];
     for (const p of world.people) {

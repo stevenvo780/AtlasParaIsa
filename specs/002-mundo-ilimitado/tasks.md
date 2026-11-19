@@ -308,7 +308,7 @@
   · **Control**: con 16 habitantes, el `state` no crece y el panel es idéntico.
   · **Cierre**: `state` **< 120 KiB** con 10 000 habitantes en viewport medio, **verificado campo a campo** con el banco de T138 (no solo el total).
 
-- [ ] **T135** [grok/grok-4.6 · high] **Delta de teselas por campo, `ack` y `resync`** (**depende de T134**, ya no es `[P]`).
+- [x] **T135** [grok/grok-4.6 · high] **Delta de teselas por campo, `ack` y `resync`** (**depende de T134**, ya no es `[P]`).
   *(Corrección 2026-09-19, refutación G5: T134 y T135 declaraban **la misma función**, `projectWorld`. Dos worktrees `[P]` desde el mismo commit base no ven el parche del otro; el delta se construye sobre el `projectWorld` ya filtrado, no en paralelo con él.)*
   Protocolo `state-full` / `state-delta {baseSequence, sequence, tileUpserts(por campo), tileRemovals, peopleUpserts, peopleRemovals, statsDelta}` / `ack {sequence}` / `resync {viewport}`. Las teselas se comparan **después** de la cuantización `r3` (`index.ts:1014`) y se manda **el campo que cambió, no el objeto**: `tile.fertility` deriva `life * 0.0012` por invocación ecológica (`ecosystem-kernel.ts:122`), **más de una milésima**, así que tras un tick ecológico casi toda tesela viva del viewport ha cambiado. Buffer corto de deltas por socket; un `ack` demasiado viejo ⇒ **un** `state-full` acotado al viewport. `state-full` solo con `bufferedAmount = 0`.
   · **Ficheros**: `src/server/app.ts` (`broadcast`, buffer por socket), `src/world/index.ts` (`projectWorld` en modo delta), `src/shared/types.ts`, `tests/red-deltas.test.ts` (nuevo).
@@ -323,7 +323,7 @@
   · **Control**: mismo mundo, mismo viewport, mismos 1 000 pasos.
   · **Cierre**: decisión tomada **con la cifra escrita** en evidencia, sea cual sea.
 
-- [ ] **T137** [P] [claude sonnet · medium] **Cliente: `ack`, deltas y censo desde `stats`.**
+- [x] **T137** [P] [claude sonnet · medium] **Cliente: `ack`, deltas y censo desde `stats`.**
   El cliente confirma con `ack`, aplica `state-delta` sobre su copia, pide `resync` cuando pierde la base, lee el censo de `stats` en vez de recorrer `received.people` (`game.ts:419-437`), y `interpolatePeople` (`landscape.ts:1075-1099`) deja de recorrer toda la población recibida por frame (cae solo al filtrar en el servidor, pero el `Map` `prevPeople` debe acotarse igual).
   · **Ficheros**: `src/client/{connection,game,landscape}.ts`, `tests/connection.test.ts` (ampliado), `tests/modo.test.ts` (si aplica).
   · **Tests**: reconexión tras corte largo; delta aplicado sobre base correcta e incorrecta; el panel de censo muestra lo mismo que antes.

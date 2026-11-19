@@ -1,0 +1,29 @@
+{
+  "date": "2026-10-03",
+  "sources": [
+    {
+      "path": "/datos/tmp-atlas-lab/datos-lab/codex-goal-12.md",
+      "sha256": "fa2096949d529456d6f418ac87f9e84076b74d1d43ba0bfab98391342b9ed5b0"
+    },
+    {
+      "path": "/datos/tmp-atlas-lab/balance/auditoria-realismo-20260930.md",
+      "sha256": "49b69ef4700de7906da978950761213086c7e74ab8175a907e1232c6f37ff88e"
+    },
+    {
+      "path": "/datos/tmp-atlas-lab/orquestacion-20261003/revision-criterios/REVISION-PREVIA.md",
+      "sha256": "1593c4fff0f9fda7c7c1a2215400c8c770e34b0acbf93c89ddeeeb74a4344e43"
+    },
+    {
+      "path": "/datos/tmp-atlas-lab/orquestacion-20261003/revision-criterios/CASOS-SINTETICOS.json",
+      "sha256": "5dc4dbffe12cb36addf305dd4b3c4e8288374b2a5c33b6d387cdc2ddc128a80a"
+    },
+    {
+      "path": "/datos/tmp-atlas-lab/orquestacion-20261003/revision-criterios/VIABILIDAD-OBSERVADOR.md",
+      "sha256": "f925390b238bdc34a23e426dfb6ebd016c3aa1ad4bf94a6d6e25be8edc5491be"
+    },
+    {
+      "path": "/datos/tmp-atlas-lab/orquestacion-20261003/criterios-autor/VALIDACION-SCHEMAS.md",
+      "sha256": "3d212da3f5c0074fdc58c29e5c6dbfeed9a5f9b8d2f08b2eddfe64b52b62f1be"
+    }
+  ]
+}

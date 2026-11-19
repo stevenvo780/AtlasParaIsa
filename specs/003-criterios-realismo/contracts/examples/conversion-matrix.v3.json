@@ -1,0 +1,29 @@
+{
+  "contractVersion": "realismo-v3",
+  "evidenceId": "wood-units",
+  "kind": "conversion-matrix",
+  "synthetic": true,
+  "sourceRefs": [],
+  "payload": {
+    "version": "manual-quanta",
+    "entries": [
+      {
+        "inputMaterial": "wood",
+        "inputUnit": "quanta",
+        "outputMaterial": "wood",
+        "outputUnit": "quanta",
+        "coefficient": 1
+      }
+    ]
+  },
+  "fieldCoverage": {
+    "version": {
+      "status": "observed",
+      "reason": "manual synthetic fact"
+    },
+    "entries": {
+      "status": "observed",
+      "reason": "manual synthetic fact"
+    }
+  }
+}

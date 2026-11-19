@@ -1,0 +1,24 @@
+{
+  "contractVersion": "realismo-v3",
+  "evidenceId": "order",
+  "kind": "source-order",
+  "synthetic": true,
+  "sourceRefs": [],
+  "payload": {
+    "sourceSHA": "0000000000000000000000000000000000000000"
+  },
+  "fieldCoverage": {
+    "sourceSHA": {
+      "status": "observed",
+      "reason": "manual source SHA"
+    },
+    "phaseOrder": {
+      "status": "missing",
+      "reason": "source does not expose phase/event ordering; causalUNKNOWN"
+    },
+    "entries": {
+      "status": "missing",
+      "reason": "source does not expose phase/event ordering; causalUNKNOWN"
+    }
+  }
+}

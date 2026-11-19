@@ -1,0 +1,91 @@
+{
+  "contractVersion": "realismo-v3",
+  "evidenceId": "manifest-treatment",
+  "kind": "run-manifest",
+  "synthetic": true,
+  "sourceRefs": [],
+  "payload": {
+    "runId": "synthetic-treatment",
+    "epochId": "e0",
+    "artifactRole": "paired-treatment",
+    "sourceSHA": "bb483260b2489fe62b113d620e5f56e5f3676dbc",
+    "seed": 0,
+    "paramsRef": "params",
+    "initialStateRef": "initial-state",
+    "inputTraceRef": "inputs",
+    "governorTraceRef": "governor",
+    "hardwareRef": "host",
+    "observationRef": "bundle-treatment",
+    "plannedStartTick": 0,
+    "plannedEndTick": 72000,
+    "runStatus": "not-started",
+    "costRefs": [],
+    "interventionRefs": []
+  },
+  "fieldCoverage": {
+    "runId": {
+      "status": "observed",
+      "reason": "manual synthetic fact"
+    },
+    "sourceSHA": {
+      "status": "observed",
+      "reason": "manual synthetic fact"
+    },
+    "seed": {
+      "status": "observed",
+      "reason": "manual synthetic fact"
+    },
+    "paramsRef": {
+      "status": "observed",
+      "reason": "manual synthetic fact"
+    },
+    "initialStateRef": {
+      "status": "observed",
+      "reason": "manual synthetic fact"
+    },
+    "inputTraceRef": {
+      "status": "observed",
+      "reason": "manual synthetic fact"
+    },
+    "governorTraceRef": {
+      "status": "observed",
+      "reason": "manual synthetic fact"
+    },
+    "hardwareRef": {
+      "status": "observed",
+      "reason": "manual synthetic fact"
+    },
+    "observationRef": {
+      "status": "observed",
+      "reason": "manual synthetic fact"
+    },
+    "plannedStartTick": {
+      "status": "observed",
+      "reason": "manual synthetic fact"
+    },
+    "plannedEndTick": {
+      "status": "observed",
+      "reason": "manual synthetic fact"
+    },
+    "runStatus": {
+      "status": "observed",
+      "reason": "manual synthetic fact"
+    },
+    "costRefs": {
+      "status": "observed",
+      "reason": "manual synthetic fact"
+    },
+    "interventionRefs": {
+      "status": "observed",
+      "reason": "manual synthetic fact"
+    },
+    "epochId": {
+      "status": "observed",
+      "reason": "manual synthetic fact"
+    },
+    "artifactRole": {
+      "status": "observed",
+      "reason": "manual synthetic fact"
+    }
+  }
+}

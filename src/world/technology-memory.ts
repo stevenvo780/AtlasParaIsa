@@ -1,3 +1,4 @@
+import { emitObserved, observationSourceActor } from './observation.js';
 import type { TechnologyKnowledge } from '../shared/technology.js';
 
 export interface RecipeMemoryOptions {
@@ -116,5 +117,13 @@ export function rememberRecipe(knowledge: TechnologyKnowledge, id: string, optio
     knowledge.competence = competence;
   }
   knowledge.knownRecipes = knownRecipes;
+  emitObserved(knowledge, 'technology-memory.remember', () => ({ family: 'knowledge',
+    actorIds: observationSourceActor(knowledge) ? [observationSourceActor(knowledge)!] : [],
+    payload: { ...(observationSourceActor(knowledge) ? { actorId: observationSourceActor(knowledge)! } : {}),
+      techniqueId: id, transition: 'acquire' } }));
+  for (const forgottenId of forgotten) emitObserved(knowledge, 'technology-memory.forget', () => ({ family: 'knowledge',
+    actorIds: observationSourceActor(knowledge) ? [observationSourceActor(knowledge)!] : [],
+    payload: { ...(observationSourceActor(knowledge) ? { actorId: observationSourceActor(knowledge)! } : {}),
+      techniqueId: forgottenId, transition: 'lose' } }));
   return { remembered: true, forgotten };
 }

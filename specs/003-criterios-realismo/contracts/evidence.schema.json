@@ -1,0 +1,4318 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:una-carta-para-isa:realismo-v3:evidence",
+  "title": "Realismo v3 evidence — two scoped R1 corrections, not sealed",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "contractVersion": {
+          "const": "realismo-v3"
+        },
+        "evidenceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "const": "governor-trace"
+        },
+        "synthetic": {
+          "type": "boolean"
+        },
+        "sourceRefs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "policyVersion": {
+              "type": "string",
+              "minLength": 1
+            },
+            "budgetMs": {
+              "type": "number",
+              "minimum": 0
+            },
+            "entries": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "tick": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "p95InputMs": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "populationInput": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "activeTilesInput": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "manualInput": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "previousCeiling": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "nextCeiling": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "decision": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "tick",
+                  "p95InputMs",
+                  "populationInput",
+                  "activeTilesInput",
+                  "manualInput",
+                  "previousCeiling",
+                  "nextCeiling",
+                  "decision",
+                  "reason"
+                ]
+              }
+            }
+          },
+          "minProperties": 1
+        },
+        "fieldCoverage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "policyVersion": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "budgetMs": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "entries": {
+              "$ref": "#/$defs/fieldStatus"
+            }
+          },
+          "required": [
+            "policyVersion",
+            "budgetMs",
+            "entries"
+          ]
+        }
+      },
+      "required": [
+        "contractVersion",
+        "evidenceId",
+        "kind",
+        "synthetic",
+        "sourceRefs",
+        "payload",
+        "fieldCoverage"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "contractVersion": {
+          "const": "realismo-v3"
+        },
+        "evidenceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "const": "physical-inputs"
+        },
+        "synthetic": {
+          "type": "boolean"
+        },
+        "sourceRefs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "initialStateHash": {
+              "type": "string",
+              "minLength": 1
+            },
+            "paramsHash": {
+              "type": "string",
+              "minLength": 1
+            },
+            "entries": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "tick": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "inputId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "inputKind": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "actorId": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "targetRef": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "quantity": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "confirmed": {
+                    "type": "boolean"
+                  },
+                  "inputHash": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "tick",
+                  "inputId",
+                  "inputKind",
+                  "actorId",
+                  "targetRef",
+                  "quantity",
+                  "confirmed",
+                  "inputHash"
+                ]
+              }
+            }
+          },
+          "minProperties": 1
+        },
+        "fieldCoverage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "initialStateHash": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "paramsHash": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "entries": {
+              "$ref": "#/$defs/fieldStatus"
+            }
+          },
+          "required": [
+            "initialStateHash",
+            "paramsHash",
+            "entries"
+          ]
+        }
+      },
+      "required": [
+        "contractVersion",
+        "evidenceId",
+        "kind",
+        "synthetic",
+        "sourceRefs",
+        "payload",
+        "fieldCoverage"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "contractVersion": {
+          "const": "realismo-v3"
+        },
+        "evidenceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "const": "law"
+        },
+        "synthetic": {
+          "type": "boolean"
+        },
+        "sourceRefs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "sourceSHA": {
+              "type": "string",
+              "minLength": 1
+            },
+            "lawVersion": {
+              "type": "string",
+              "minLength": 1
+            },
+            "phaseOrder": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "formulaDefinitions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "formulaId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "expression": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "inputFields": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "outputField": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "unit": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "formulaId",
+                  "expression",
+                  "inputFields",
+                  "outputField",
+                  "unit"
+                ]
+              }
+            },
+            "parameters": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "value": {
+                    "type": "number"
+                  },
+                  "unit": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "name",
+                  "value",
+                  "unit"
+                ]
+              }
+            },
+            "sourceRefs": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "minProperties": 1
+        },
+        "fieldCoverage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "sourceSHA": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "lawVersion": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "phaseOrder": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "formulaDefinitions": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "parameters": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "sourceRefs": {
+              "$ref": "#/$defs/fieldStatus"
+            }
+          },
+          "required": [
+            "sourceSHA",
+            "lawVersion",
+            "phaseOrder",
+            "formulaDefinitions",
+            "parameters",
+            "sourceRefs"
+          ]
+        }
+      },
+      "required": [
+        "contractVersion",
+        "evidenceId",
+        "kind",
+        "synthetic",
+        "sourceRefs",
+        "payload",
+        "fieldCoverage"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "contractVersion": {
+          "const": "realismo-v3"
+        },
+        "evidenceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "const": "law-inputs"
+        },
+        "synthetic": {
+          "type": "boolean"
+        },
+        "sourceRefs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "lawRef": {
+              "type": "string",
+              "minLength": 1
+            },
+            "entries": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "tick": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "subjectId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "field": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "value": {
+                    "type": "number"
+                  },
+                  "unit": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "sourceEventId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "sourceOrderRef": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "tick",
+                  "subjectId",
+                  "field",
+                  "value",
+                  "unit",
+                  "sourceEventId",
+                  "sourceOrderRef"
+                ]
+              }
+            }
+          },
+          "minProperties": 1
+        },
+        "fieldCoverage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "lawRef": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "entries": {
+              "$ref": "#/$defs/fieldStatus"
+            }
+          },
+          "required": [
+            "lawRef",
+            "entries"
+          ]
+        }
+      },
+      "required": [
+        "contractVersion",
+        "evidenceId",
+        "kind",
+        "synthetic",
+        "sourceRefs",
+        "payload",
+        "fieldCoverage"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "contractVersion": {
+          "const": "realismo-v3"
+        },
+        "evidenceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "const": "position-trajectory"
+        },
+        "synthetic": {
+          "type": "boolean"
+        },
+        "sourceRefs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "actorId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "positions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "tick": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "x": {
+                    "type": "number"
+                  },
+                  "y": {
+                    "type": "number"
+                  },
+                  "regionId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "localPerceptionRef": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "workDebitRef": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "tick",
+                  "x",
+                  "y",
+                  "regionId",
+                  "localPerceptionRef",
+                  "workDebitRef"
+                ]
+              }
+            }
+          },
+          "minProperties": 1
+        },
+        "fieldCoverage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "actorId": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "positions": {
+              "$ref": "#/$defs/fieldStatus"
+            }
+          },
+          "required": [
+            "actorId",
+            "positions"
+          ]
+        }
+      },
+      "required": [
+        "contractVersion",
+        "evidenceId",
+        "kind",
+        "synthetic",
+        "sourceRefs",
+        "payload",
+        "fieldCoverage"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "contractVersion": {
+          "const": "realismo-v3"
+        },
+        "evidenceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "const": "cohort"
+        },
+        "synthetic": {
+          "type": "boolean"
+        },
+        "sourceRefs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "cohortId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "selectionRegisteredRef": {
+              "type": "string",
+              "minLength": 1
+            },
+            "atTick": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "eligibilityRule": {
+              "type": "string",
+              "minLength": 1
+            },
+            "actorIds": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "excluded": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "actorId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "actorId",
+                  "reason"
+                ]
+              }
+            },
+            "censored": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "actorId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "lastObservedTick": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "actorId",
+                  "lastObservedTick",
+                  "reason"
+                ]
+              }
+            },
+            "sourceRefs": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "minProperties": 1
+        },
+        "fieldCoverage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "cohortId": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "selectionRegisteredRef": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "atTick": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "eligibilityRule": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "actorIds": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "excluded": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "censored": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "sourceRefs": {
+              "$ref": "#/$defs/fieldStatus"
+            }
+          },
+          "required": [
+            "cohortId",
+            "selectionRegisteredRef",
+            "atTick",
+            "eligibilityRule",
+            "actorIds",
+            "excluded",
+            "censored",
+            "sourceRefs"
+          ]
+        }
+      },
+      "required": [
+        "contractVersion",
+        "evidenceId",
+        "kind",
+        "synthetic",
+        "sourceRefs",
+        "payload",
+        "fieldCoverage"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "contractVersion": {
+          "const": "realismo-v3"
+        },
+        "evidenceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "const": "opportunity"
+        },
+        "synthetic": {
+          "type": "boolean"
+        },
+        "sourceRefs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "cohortRef": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sourceId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "destinationId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "startTick": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "endTick": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "eligibleActorIds": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "viabilityStocks": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "accessibleRouteRefs": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "conditionRefs": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "expectedFollowupTicks": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "minProperties": 1
+        },
+        "fieldCoverage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "cohortRef": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "sourceId": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "destinationId": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "startTick": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "endTick": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "eligibleActorIds": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "viabilityStocks": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "accessibleRouteRefs": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "conditionRefs": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "expectedFollowupTicks": {
+              "$ref": "#/$defs/fieldStatus"
+            }
+          },
+          "required": [
+            "cohortRef",
+            "sourceId",
+            "destinationId",
+            "startTick",
+            "endTick",
+            "eligibleActorIds",
+            "viabilityStocks",
+            "accessibleRouteRefs",
+            "conditionRefs",
+            "expectedFollowupTicks"
+          ]
+        }
+      },
+      "required": [
+        "contractVersion",
+        "evidenceId",
+        "kind",
+        "synthetic",
+        "sourceRefs",
+        "payload",
+        "fieldCoverage"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "contractVersion": {
+          "const": "realismo-v3"
+        },
+        "evidenceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "const": "applied-effect"
+        },
+        "synthetic": {
+          "type": "boolean"
+        },
+        "sourceRefs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "actorId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "recipientId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "tick": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "functionId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "unit": {
+              "type": "string",
+              "minLength": 1
+            },
+            "bodyBefore": {
+              "type": "number"
+            },
+            "bodyAfter": {
+              "type": "number"
+            },
+            "baselineDelta": {
+              "type": "number"
+            },
+            "appliedDelta": {
+              "type": "number"
+            },
+            "consumedAmount": {
+              "type": "number",
+              "minimum": 0
+            },
+            "consumptionRefs": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "workRefs": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "lawRef": {
+              "type": "string",
+              "minLength": 1
+            },
+            "saturationLimit": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "sourceEventId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sourceOrderRef": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "minProperties": 1
+        },
+        "fieldCoverage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "actorId": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "recipientId": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "tick": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "functionId": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "unit": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "bodyBefore": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "bodyAfter": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "baselineDelta": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "appliedDelta": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "consumedAmount": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "consumptionRefs": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "workRefs": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "lawRef": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "saturationLimit": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "sourceEventId": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "sourceOrderRef": {
+              "$ref": "#/$defs/fieldStatus"
+            }
+          },
+          "required": [
+            "actorId",
+            "recipientId",
+            "tick",
+            "functionId",
+            "unit",
+            "bodyBefore",
+            "bodyAfter",
+            "baselineDelta",
+            "appliedDelta",
+            "consumedAmount",
+            "consumptionRefs",
+            "workRefs",
+            "lawRef",
+            "saturationLimit",
+            "sourceEventId",
+            "sourceOrderRef"
+          ]
+        }
+      },
+      "required": [
+        "contractVersion",
+        "evidenceId",
+        "kind",
+        "synthetic",
+        "sourceRefs",
+        "payload",
+        "fieldCoverage"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "contractVersion": {
+          "const": "realismo-v3"
+        },
+        "evidenceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "const": "functional-map"
+        },
+        "synthetic": {
+          "type": "boolean"
+        },
+        "sourceRefs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "signatureVersion": {
+              "type": "string",
+              "minLength": 1
+            },
+            "capabilityOrder": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "binEdges": {
+              "type": "array",
+              "items": {
+                "type": "number"
+              }
+            },
+            "programCanonicalization": {
+              "type": "string",
+              "minLength": 1
+            },
+            "functionDefinitions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "functionId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "domain": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "appliedEffectField": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "unit": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "noveltyRule": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "functionId",
+                  "domain",
+                  "appliedEffectField",
+                  "unit",
+                  "noveltyRule"
+                ]
+              }
+            },
+            "historyOpeningRefs": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "registeredRef": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "minProperties": 1
+        },
+        "fieldCoverage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "signatureVersion": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "capabilityOrder": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "binEdges": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "programCanonicalization": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "functionDefinitions": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "historyOpeningRefs": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "registeredRef": {
+              "$ref": "#/$defs/fieldStatus"
+            }
+          },
+          "required": [
+            "signatureVersion",
+            "capabilityOrder",
+            "binEdges",
+            "programCanonicalization",
+            "functionDefinitions",
+            "historyOpeningRefs",
+            "registeredRef"
+          ]
+        }
+      },
+      "required": [
+        "contractVersion",
+        "evidenceId",
+        "kind",
+        "synthetic",
+        "sourceRefs",
+        "payload",
+        "fieldCoverage"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "contractVersion": {
+          "const": "realismo-v3"
+        },
+        "evidenceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "const": "role-classification"
+        },
+        "synthetic": {
+          "type": "boolean"
+        },
+        "sourceRefs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "classificationVersion": {
+              "type": "string",
+              "minLength": 1
+            },
+            "registeredRef": {
+              "type": "string",
+              "minLength": 1
+            },
+            "functionIds": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "assignmentRule": {
+              "type": "string",
+              "minLength": 1
+            },
+            "referenceCohortRef": {
+              "type": "string",
+              "minLength": 1
+            },
+            "timeExposureRefs": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "institutionRuleRefs": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "minProperties": 1
+        },
+        "fieldCoverage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "classificationVersion": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "registeredRef": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "functionIds": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "assignmentRule": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "referenceCohortRef": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "timeExposureRefs": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "institutionRuleRefs": {
+              "$ref": "#/$defs/fieldStatus"
+            }
+          },
+          "required": [
+            "classificationVersion",
+            "registeredRef",
+            "functionIds",
+            "assignmentRule",
+            "referenceCohortRef",
+            "timeExposureRefs",
+            "institutionRuleRefs"
+          ]
+        }
+      },
+      "required": [
+        "contractVersion",
+        "evidenceId",
+        "kind",
+        "synthetic",
+        "sourceRefs",
+        "payload",
+        "fieldCoverage"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "contractVersion": {
+          "const": "realismo-v3"
+        },
+        "evidenceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "const": "component-manifest"
+        },
+        "synthetic": {
+          "type": "boolean"
+        },
+        "sourceRefs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "commitId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "tick": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "components": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "component": {
+                    "type": "string",
+                    "enum": [
+                      "snapshot",
+                      "inventories",
+                      "identities",
+                      "parentage",
+                      "catalogue",
+                      "authorship",
+                      "receipts",
+                      "chronicle",
+                      "region-archive"
+                    ]
+                  },
+                  "itemId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "sha256": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "count": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "component",
+                  "itemId",
+                  "sha256",
+                  "count"
+                ]
+              }
+            },
+            "confirmedOrderIds": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "historyUnknownPrefixRef": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "minProperties": 1
+        },
+        "fieldCoverage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "commitId": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "tick": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "components": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "confirmedOrderIds": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "historyUnknownPrefixRef": {
+              "$ref": "#/$defs/fieldStatus"
+            }
+          },
+          "required": [
+            "commitId",
+            "tick",
+            "components",
+            "confirmedOrderIds",
+            "historyUnknownPrefixRef"
+          ]
+        }
+      },
+      "required": [
+        "contractVersion",
+        "evidenceId",
+        "kind",
+        "synthetic",
+        "sourceRefs",
+        "payload",
+        "fieldCoverage"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "contractVersion": {
+          "const": "realismo-v3"
+        },
+        "evidenceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "const": "host-scene"
+        },
+        "synthetic": {
+          "type": "boolean"
+        },
+        "sourceRefs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "hardwareId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sceneId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "cpu": {
+              "type": "string",
+              "minLength": 1
+            },
+            "ramBytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "gpus": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "drivers": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "threads": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "viewport": {
+              "type": "string",
+              "minLength": 1
+            },
+            "population": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "activeTiles": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "warmupSeconds": {
+              "type": "number",
+              "minimum": 0
+            },
+            "hostLoadSamples": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "seconds": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "cpuLoad": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "rssBytes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "externalLoadRef": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "seconds",
+                  "cpuLoad",
+                  "rssBytes",
+                  "externalLoadRef"
+                ]
+              }
+            },
+            "initialStateRef": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "minProperties": 1
+        },
+        "fieldCoverage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "hardwareId": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "sceneId": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "cpu": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "ramBytes": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "gpus": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "drivers": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "threads": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "viewport": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "population": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "activeTiles": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "warmupSeconds": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "hostLoadSamples": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "initialStateRef": {
+              "$ref": "#/$defs/fieldStatus"
+            }
+          },
+          "required": [
+            "hardwareId",
+            "sceneId",
+            "cpu",
+            "ramBytes",
+            "gpus",
+            "drivers",
+            "threads",
+            "viewport",
+            "population",
+            "activeTiles",
+            "warmupSeconds",
+            "hostLoadSamples",
+            "initialStateRef"
+          ]
+        }
+      },
+      "required": [
+        "contractVersion",
+        "evidenceId",
+        "kind",
+        "synthetic",
+        "sourceRefs",
+        "payload",
+        "fieldCoverage"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "contractVersion": {
+          "const": "realismo-v3"
+        },
+        "evidenceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "const": "preregistration"
+        },
+        "synthetic": {
+          "type": "boolean"
+        },
+        "sourceRefs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "registrationId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "contentHash": {
+              "type": "string",
+              "minLength": 1
+            },
+            "registeredAt": {
+              "type": "string",
+              "minLength": 1
+            },
+            "firstDataAt": {
+              "type": "string",
+              "minLength": 1
+            },
+            "plannedRunIds": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "plannedSeeds": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "arms": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "interventions": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "profileHash": {
+              "type": "string",
+              "minLength": 1
+            },
+            "metricDefinitionsRef": {
+              "type": "string",
+              "minLength": 1
+            },
+            "budgetRef": {
+              "type": "string",
+              "minLength": 1
+            },
+            "controlPairRefs": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "independentReceiptRef": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "minProperties": 1
+        },
+        "fieldCoverage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "registrationId": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "contentHash": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "registeredAt": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "firstDataAt": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "plannedRunIds": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "plannedSeeds": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "arms": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "interventions": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "profileHash": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "metricDefinitionsRef": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "budgetRef": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "controlPairRefs": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "independentReceiptRef": {
+              "$ref": "#/$defs/fieldStatus"
+            }
+          },
+          "required": [
+            "registrationId",
+            "contentHash",
+            "registeredAt",
+            "firstDataAt",
+            "plannedRunIds",
+            "plannedSeeds",
+            "arms",
+            "interventions",
+            "profileHash",
+            "metricDefinitionsRef",
+            "budgetRef",
+            "controlPairRefs",
+            "independentReceiptRef"
+          ]
+        }
+      },
+      "required": [
+        "contractVersion",
+        "evidenceId",
+        "kind",
+        "synthetic",
+        "sourceRefs",
+        "payload",
+        "fieldCoverage"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "contractVersion": {
+          "const": "realismo-v3"
+        },
+        "evidenceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "const": "seed-register"
+        },
+        "synthetic": {
+          "type": "boolean"
+        },
+        "sourceRefs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "registeredAt": {
+              "type": "string",
+              "minLength": 1
+            },
+            "entries": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "seed": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "priorUses": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "reservationStage": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "reservedBeforeDataAt": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "registryEvidenceRef": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "seed",
+                  "priorUses",
+                  "reservationStage",
+                  "reservedBeforeDataAt",
+                  "registryEvidenceRef"
+                ]
+              }
+            }
+          },
+          "minProperties": 1
+        },
+        "fieldCoverage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "registeredAt": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "entries": {
+              "$ref": "#/$defs/fieldStatus"
+            }
+          },
+          "required": [
+            "registeredAt",
+            "entries"
+          ]
+        }
+      },
+      "required": [
+        "contractVersion",
+        "evidenceId",
+        "kind",
+        "synthetic",
+        "sourceRefs",
+        "payload",
+        "fieldCoverage"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "contractVersion": {
+          "const": "realismo-v3"
+        },
+        "evidenceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "const": "budget"
+        },
+        "synthetic": {
+          "type": "boolean"
+        },
+        "sourceRefs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "budgetId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "stage": {
+              "type": "string",
+              "minLength": 1
+            },
+            "dimensions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "dimension": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "unit": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "plannedValue": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "actualValue": {
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "dimension",
+                  "unit",
+                  "plannedValue",
+                  "actualValue"
+                ]
+              }
+            },
+            "rewardFunctionRef": {
+              "type": "string",
+              "minLength": 1
+            },
+            "interventionRefs": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "minProperties": 1
+        },
+        "fieldCoverage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "budgetId": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "stage": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "dimensions": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "rewardFunctionRef": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "interventionRefs": {
+              "$ref": "#/$defs/fieldStatus"
+            }
+          },
+          "required": [
+            "budgetId",
+            "stage",
+            "dimensions",
+            "rewardFunctionRef",
+            "interventionRefs"
+          ]
+        }
+      },
+      "required": [
+        "contractVersion",
+        "evidenceId",
+        "kind",
+        "synthetic",
+        "sourceRefs",
+        "payload",
+        "fieldCoverage"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "contractVersion": {
+          "const": "realismo-v3"
+        },
+        "evidenceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "const": "phase-decision"
+        },
+        "synthetic": {
+          "type": "boolean"
+        },
+        "sourceRefs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "phase": {
+              "type": "string",
+              "minLength": 1
+            },
+            "authority": {
+              "type": "string",
+              "minLength": 1
+            },
+            "decision": {
+              "type": "string",
+              "enum": [
+                "accepted",
+                "rejected",
+                "pending"
+              ]
+            },
+            "at": {
+              "type": "string",
+              "minLength": 1
+            },
+            "evidenceRefs": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "receiptRef": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "minProperties": 1
+        },
+        "fieldCoverage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "phase": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "authority": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "decision": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "at": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "evidenceRefs": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "receiptRef": {
+              "$ref": "#/$defs/fieldStatus"
+            }
+          },
+          "required": [
+            "phase",
+            "authority",
+            "decision",
+            "at",
+            "evidenceRefs",
+            "receiptRef"
+          ]
+        }
+      },
+      "required": [
+        "contractVersion",
+        "evidenceId",
+        "kind",
+        "synthetic",
+        "sourceRefs",
+        "payload",
+        "fieldCoverage"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "contractVersion": {
+          "const": "realismo-v3"
+        },
+        "evidenceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "const": "personal-receipt"
+        },
+        "synthetic": {
+          "type": "boolean"
+        },
+        "sourceRefs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "authority": {
+              "const": "Steven"
+            },
+            "decision": {
+              "type": "string",
+              "enum": [
+                "accepted",
+                "rejected",
+                "pending"
+              ]
+            },
+            "contentHash": {
+              "type": "string",
+              "minLength": 1
+            },
+            "at": {
+              "type": "string",
+              "minLength": 1
+            },
+            "authorizedMemoryIds": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "realMemoryInventoryRef": {
+              "type": "string",
+              "minLength": 1
+            },
+            "localReceiptId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "provenanceRef": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "minProperties": 1
+        },
+        "fieldCoverage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "authority": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "decision": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "contentHash": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "at": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "authorizedMemoryIds": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "realMemoryInventoryRef": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "localReceiptId": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "provenanceRef": {
+              "$ref": "#/$defs/fieldStatus"
+            }
+          },
+          "required": [
+            "authority",
+            "decision",
+            "contentHash",
+            "at",
+            "authorizedMemoryIds",
+            "realMemoryInventoryRef",
+            "localReceiptId",
+            "provenanceRef"
+          ]
+        }
+      },
+      "required": [
+        "contractVersion",
+        "evidenceId",
+        "kind",
+        "synthetic",
+        "sourceRefs",
+        "payload",
+        "fieldCoverage"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "contractVersion": {
+          "const": "realismo-v3"
+        },
+        "evidenceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "const": "intervention"
+        },
+        "synthetic": {
+          "type": "boolean"
+        },
+        "sourceRefs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "runId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "tick": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "actorId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "kind": {
+              "type": "string",
+              "minLength": 1
+            },
+            "declaredBeforeData": {
+              "type": "boolean"
+            },
+            "changes": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "field": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "before": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "after": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "unit": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "field",
+                  "before",
+                  "after",
+                  "unit"
+                ]
+              }
+            },
+            "inputRefs": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "protectedOriginIds": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "receiptRef": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "minProperties": 1
+        },
+        "fieldCoverage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "runId": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "tick": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "actorId": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "kind": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "declaredBeforeData": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "changes": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "inputRefs": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "protectedOriginIds": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "receiptRef": {
+              "$ref": "#/$defs/fieldStatus"
+            }
+          },
+          "required": [
+            "runId",
+            "tick",
+            "actorId",
+            "kind",
+            "declaredBeforeData",
+            "changes",
+            "inputRefs",
+            "protectedOriginIds",
+            "receiptRef"
+          ]
+        }
+      },
+      "required": [
+        "contractVersion",
+        "evidenceId",
+        "kind",
+        "synthetic",
+        "sourceRefs",
+        "payload",
+        "fieldCoverage"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "contractVersion": {
+          "const": "realismo-v3"
+        },
+        "evidenceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "const": "parameter-set"
+        },
+        "synthetic": {
+          "type": "boolean"
+        },
+        "sourceRefs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "sourceSHA": {
+              "type": "string",
+              "minLength": 1
+            },
+            "paramsHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "entries": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "value": {
+                    "type": [
+                      "number",
+                      "string",
+                      "boolean"
+                    ]
+                  },
+                  "unit": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "name",
+                  "value",
+                  "unit"
+                ]
+              }
+            }
+          },
+          "minProperties": 1
+        },
+        "fieldCoverage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "sourceSHA": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "paramsHash": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "entries": {
+              "$ref": "#/$defs/fieldStatus"
+            }
+          },
+          "required": [
+            "sourceSHA",
+            "paramsHash",
+            "entries"
+          ]
+        }
+      },
+      "required": [
+        "contractVersion",
+        "evidenceId",
+        "kind",
+        "synthetic",
+        "sourceRefs",
+        "payload",
+        "fieldCoverage"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "contractVersion": {
+          "const": "realismo-v3"
+        },
+        "evidenceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "const": "conversion-matrix"
+        },
+        "synthetic": {
+          "type": "boolean"
+        },
+        "sourceRefs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "version": {
+              "type": "string",
+              "minLength": 1
+            },
+            "entries": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "inputMaterial": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "inputUnit": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "outputMaterial": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "outputUnit": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "coefficient": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "inputMaterial",
+                  "inputUnit",
+                  "outputMaterial",
+                  "outputUnit",
+                  "coefficient"
+                ]
+              }
+            }
+          },
+          "minProperties": 1
+        },
+        "fieldCoverage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "version": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "entries": {
+              "$ref": "#/$defs/fieldStatus"
+            }
+          },
+          "required": [
+            "version",
+            "entries"
+          ]
+        }
+      },
+      "required": [
+        "contractVersion",
+        "evidenceId",
+        "kind",
+        "synthetic",
+        "sourceRefs",
+        "payload",
+        "fieldCoverage"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "contractVersion": {
+          "const": "realismo-v3"
+        },
+        "evidenceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "const": "real-memory-inventory"
+        },
+        "synthetic": {
+          "type": "boolean"
+        },
+        "sourceRefs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "contentHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "inventoryScope": {
+              "const": "all-real-memories-incorporated"
+            },
+            "complete": {
+              "type": "boolean"
+            },
+            "entries": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "memoryId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "memoryHash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "incorporatedContentHash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "incorporated": {
+                    "type": "boolean"
+                  },
+                  "incorporationRef": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "authorization": {
+                    "type": "string",
+                    "enum": [
+                      "accepted",
+                      "rejected",
+                      "pending",
+                      "unknown"
+                    ]
+                  },
+                  "authorizationReceiptRef": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "memoryId",
+                  "memoryHash",
+                  "incorporatedContentHash",
+                  "incorporated",
+                  "incorporationRef",
+                  "authorization",
+                  "authorizationReceiptRef"
+                ]
+              }
+            }
+          },
+          "minProperties": 1
+        },
+        "fieldCoverage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "contentHash": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "inventoryScope": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "complete": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "entries": {
+              "$ref": "#/$defs/fieldStatus"
+            }
+          },
+          "required": [
+            "contentHash",
+            "inventoryScope",
+            "complete",
+            "entries"
+          ]
+        }
+      },
+      "required": [
+        "contractVersion",
+        "evidenceId",
+        "kind",
+        "synthetic",
+        "sourceRefs",
+        "payload",
+        "fieldCoverage"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "contractVersion": {
+          "const": "realismo-v3"
+        },
+        "evidenceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "const": "memory-authorization"
+        },
+        "synthetic": {
+          "type": "boolean"
+        },
+        "sourceRefs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "authority": {
+              "const": "Steven"
+            },
+            "memoryId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "memoryHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "contentHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "decision": {
+              "type": "string",
+              "enum": [
+                "accepted",
+                "rejected",
+                "pending"
+              ]
+            },
+            "at": {
+              "type": "string",
+              "minLength": 1
+            },
+            "localReceiptId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "provenanceRef": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "minProperties": 1
+        },
+        "fieldCoverage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "authority": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "memoryId": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "memoryHash": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "contentHash": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "decision": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "at": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "localReceiptId": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "provenanceRef": {
+              "$ref": "#/$defs/fieldStatus"
+            }
+          },
+          "required": [
+            "authority",
+            "memoryId",
+            "memoryHash",
+            "contentHash",
+            "decision",
+            "at",
+            "localReceiptId",
+            "provenanceRef"
+          ]
+        }
+      },
+      "required": [
+        "contractVersion",
+        "evidenceId",
+        "kind",
+        "synthetic",
+        "sourceRefs",
+        "payload",
+        "fieldCoverage"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "contractVersion": {
+          "const": "realismo-v3"
+        },
+        "evidenceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "const": "synthetic-review-oracle"
+        },
+        "synthetic": {
+          "type": "boolean"
+        },
+        "sourceRefs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "authority": {
+              "const": "synthetic-oracle"
+            },
+            "caseId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "contentHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "inventoryRef": {
+              "type": "string",
+              "minLength": 1
+            },
+            "expectedDecision": {
+              "type": "string",
+              "enum": [
+                "accepted",
+                "rejected",
+                "pending"
+              ]
+            },
+            "purpose": {
+              "const": "technical-fixture-only"
+            }
+          },
+          "minProperties": 1
+        },
+        "fieldCoverage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "authority": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "caseId": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "contentHash": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "inventoryRef": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "expectedDecision": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "purpose": {
+              "$ref": "#/$defs/fieldStatus"
+            }
+          },
+          "required": [
+            "authority",
+            "caseId",
+            "contentHash",
+            "inventoryRef",
+            "expectedDecision",
+            "purpose"
+          ]
+        }
+      },
+      "required": [
+        "contractVersion",
+        "evidenceId",
+        "kind",
+        "synthetic",
+        "sourceRefs",
+        "payload",
+        "fieldCoverage"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "contractVersion": {
+          "const": "realismo-v3"
+        },
+        "evidenceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "const": "source-metadata"
+        },
+        "synthetic": {
+          "type": "boolean"
+        },
+        "sourceRefs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "sourceSHA": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sourcePath": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sourceLocation": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "role": {
+              "type": "string",
+              "enum": [
+                "code",
+                "document",
+                "receipt-provenance",
+                "history-gap",
+                "seed-registry"
+              ]
+            }
+          },
+          "minProperties": 1
+        },
+        "fieldCoverage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "sourceSHA": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "sourcePath": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "sourceLocation": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "sha256": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "role": {
+              "$ref": "#/$defs/fieldStatus"
+            }
+          },
+          "required": [
+            "sourceSHA",
+            "sourcePath",
+            "sourceLocation",
+            "sha256",
+            "role"
+          ]
+        }
+      },
+      "required": [
+        "contractVersion",
+        "evidenceId",
+        "kind",
+        "synthetic",
+        "sourceRefs",
+        "payload",
+        "fieldCoverage"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "contractVersion": {
+          "const": "realismo-v3"
+        },
+        "evidenceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "const": "source-order"
+        },
+        "synthetic": {
+          "type": "boolean"
+        },
+        "sourceRefs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "sourceSHA": {
+              "type": "string",
+              "minLength": 1
+            },
+            "phaseOrder": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "entries": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "sourceEventId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "tick": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "phaseId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "phaseOrdinal": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "eventOrdinal": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "recordIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                },
+                "required": [
+                  "sourceEventId",
+                  "tick",
+                  "phaseId",
+                  "phaseOrdinal",
+                  "eventOrdinal",
+                  "recordIds"
+                ]
+              }
+            }
+          },
+          "minProperties": 1
+        },
+        "fieldCoverage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "sourceSHA": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "phaseOrder": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "entries": {
+              "$ref": "#/$defs/fieldStatus"
+            }
+          },
+          "required": [
+            "sourceSHA",
+            "phaseOrder",
+            "entries"
+          ]
+        }
+      },
+      "required": [
+        "contractVersion",
+        "evidenceId",
+        "kind",
+        "synthetic",
+        "sourceRefs",
+        "payload",
+        "fieldCoverage"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "contractVersion": {
+          "const": "realismo-v3"
+        },
+        "evidenceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "const": "reproduction-gates"
+        },
+        "synthetic": {
+          "type": "boolean"
+        },
+        "sourceRefs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "attemptId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "opportunityId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sourceOrderRef": {
+              "type": "string",
+              "minLength": 1
+            },
+            "priority": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "local",
+                  "global-quota",
+                  "governor",
+                  "anticorruption",
+                  "other-software"
+                ]
+              }
+            },
+            "gates": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "gateId": {
+                    "type": "string",
+                    "enum": [
+                      "local",
+                      "global-quota",
+                      "governor",
+                      "anticorruption",
+                      "other-software"
+                    ]
+                  },
+                  "ordinal": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "result": {
+                    "type": "string",
+                    "enum": [
+                      "pass",
+                      "block",
+                      "not-reached",
+                      "not-applicable",
+                      "unknown"
+                    ]
+                  },
+                  "inputRefs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "gateId",
+                  "ordinal",
+                  "result",
+                  "inputRefs",
+                  "reason"
+                ]
+              }
+            }
+          },
+          "minProperties": 1
+        },
+        "fieldCoverage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "attemptId": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "opportunityId": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "sourceOrderRef": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "priority": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "gates": {
+              "$ref": "#/$defs/fieldStatus"
+            }
+          },
+          "required": [
+            "attemptId",
+            "opportunityId",
+            "sourceOrderRef",
+            "priority",
+            "gates"
+          ]
+        }
+      },
+      "required": [
+        "contractVersion",
+        "evidenceId",
+        "kind",
+        "synthetic",
+        "sourceRefs",
+        "payload",
+        "fieldCoverage"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "contractVersion": {
+          "const": "realismo-v3"
+        },
+        "evidenceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "const": "reproduction-coverage"
+        },
+        "synthetic": {
+          "type": "boolean"
+        },
+        "sourceRefs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "startTick": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "endTick": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "opportunityRuleRef": {
+              "type": "string",
+              "minLength": 1
+            },
+            "opportunities": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "opportunityId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "tick": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "actorIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "attemptRecordIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "disposition": {
+                    "type": "string",
+                    "enum": [
+                      "attempted",
+                      "not-attempted",
+                      "unknown"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "opportunityId",
+                  "tick",
+                  "actorIds",
+                  "attemptRecordIds",
+                  "disposition",
+                  "reason"
+                ]
+              }
+            },
+            "stoppingPeriods": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "periodId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "startTick": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "endTick": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "reason": {
+                    "type": "string",
+                    "enum": [
+                      "local",
+                      "global-quota",
+                      "governor",
+                      "anticorruption",
+                      "other-software",
+                      "unknown"
+                    ]
+                  },
+                  "opportunityIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "attemptRecordIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "decisionRefs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                },
+                "required": [
+                  "periodId",
+                  "startTick",
+                  "endTick",
+                  "reason",
+                  "opportunityIds",
+                  "attemptRecordIds",
+                  "decisionRefs"
+                ]
+              }
+            },
+            "coverageQuality": {
+              "type": "string",
+              "enum": [
+                "COMPLETE",
+                "PARTIAL",
+                "UNAVAILABLE"
+              ]
+            },
+            "gaps": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "startTick": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "endTick": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "startTick",
+                  "endTick",
+                  "reason"
+                ]
+              }
+            }
+          },
+          "minProperties": 1
+        },
+        "fieldCoverage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "startTick": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "endTick": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "opportunityRuleRef": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "opportunities": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "stoppingPeriods": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "coverageQuality": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "gaps": {
+              "$ref": "#/$defs/fieldStatus"
+            }
+          },
+          "required": [
+            "startTick",
+            "endTick",
+            "opportunityRuleRef",
+            "opportunities",
+            "stoppingPeriods",
+            "coverageQuality",
+            "gaps"
+          ]
+        }
+      },
+      "required": [
+        "contractVersion",
+        "evidenceId",
+        "kind",
+        "synthetic",
+        "sourceRefs",
+        "payload",
+        "fieldCoverage"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "contractVersion": {
+          "const": "realismo-v3"
+        },
+        "evidenceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "const": "causal-pair"
+        },
+        "synthetic": {
+          "type": "boolean"
+        },
+        "sourceRefs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "criterion": {
+              "type": "string",
+              "enum": [
+                "C11",
+                "C17"
+              ]
+            },
+            "registeredRef": {
+              "type": "string",
+              "minLength": 1
+            },
+            "treatmentRunId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "controlRunId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "initialStateHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "paramsHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "inputTraceHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "governorTraceHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "interventionRefs": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "functionIds": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "normalization": {
+              "type": "string",
+              "enum": [
+                "per-day",
+                "per-opportunity"
+              ]
+            },
+            "windows": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "phase": {
+                    "type": "string",
+                    "enum": [
+                      "reference",
+                      "removal",
+                      "restoration"
+                    ]
+                  },
+                  "startTick": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "endTick": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "treatmentServiceRefs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "controlServiceRefs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "treatmentOpportunityRefs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "controlOpportunityRefs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "openingStockRefs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "closingStockRefs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "flowRefs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "exposureRefs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                },
+                "required": [
+                  "phase",
+                  "startTick",
+                  "endTick",
+                  "treatmentServiceRefs",
+                  "controlServiceRefs",
+                  "treatmentOpportunityRefs",
+                  "controlOpportunityRefs",
+                  "openingStockRefs",
+                  "closingStockRefs",
+                  "flowRefs",
+                  "exposureRefs"
+                ]
+              }
+            },
+            "treatmentManifestRef": {
+              "type": "string",
+              "minLength": 1
+            },
+            "controlManifestRef": {
+              "type": "string",
+              "minLength": 1
+            },
+            "equivalenceTolerance": {
+              "type": "number",
+              "minimum": 0
+            },
+            "equivalenceUnit": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "minProperties": 1
+        },
+        "fieldCoverage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "criterion": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "registeredRef": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "treatmentRunId": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "controlRunId": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "initialStateHash": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "paramsHash": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "inputTraceHash": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "governorTraceHash": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "interventionRefs": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "functionIds": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "normalization": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "windows": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "treatmentManifestRef": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "controlManifestRef": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "equivalenceTolerance": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "equivalenceUnit": {
+              "$ref": "#/$defs/fieldStatus"
+            }
+          },
+          "required": [
+            "criterion",
+            "registeredRef",
+            "treatmentRunId",
+            "controlRunId",
+            "initialStateHash",
+            "paramsHash",
+            "inputTraceHash",
+            "governorTraceHash",
+            "interventionRefs",
+            "functionIds",
+            "normalization",
+            "windows",
+            "treatmentManifestRef",
+            "controlManifestRef",
+            "equivalenceTolerance",
+            "equivalenceUnit"
+          ]
+        }
+      },
+      "required": [
+        "contractVersion",
+        "evidenceId",
+        "kind",
+        "synthetic",
+        "sourceRefs",
+        "payload",
+        "fieldCoverage"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "contractVersion": {
+          "const": "realismo-v3"
+        },
+        "evidenceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "const": "metric-definitions"
+        },
+        "synthetic": {
+          "type": "boolean"
+        },
+        "sourceRefs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "definitionVersion": {
+              "type": "string",
+              "minLength": 1
+            },
+            "definitions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "formulaId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "criterion": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "expression": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "unit": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "requiredFields": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "rewardEligible": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "formulaId",
+                  "criterion",
+                  "expression",
+                  "unit",
+                  "requiredFields",
+                  "rewardEligible"
+                ]
+              }
+            }
+          },
+          "minProperties": 1
+        },
+        "fieldCoverage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "definitionVersion": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "definitions": {
+              "$ref": "#/$defs/fieldStatus"
+            }
+          },
+          "required": [
+            "definitionVersion",
+            "definitions"
+          ]
+        }
+      },
+      "required": [
+        "contractVersion",
+        "evidenceId",
+        "kind",
+        "synthetic",
+        "sourceRefs",
+        "payload",
+        "fieldCoverage"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "contractVersion": {
+          "const": "realismo-v3"
+        },
+        "evidenceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "const": "run-manifest"
+        },
+        "synthetic": {
+          "type": "boolean"
+        },
+        "sourceRefs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "runId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sourceSHA": {
+              "type": "string",
+              "minLength": 1
+            },
+            "seed": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "paramsRef": {
+              "type": "string",
+              "minLength": 1
+            },
+            "initialStateRef": {
+              "type": "string",
+              "minLength": 1
+            },
+            "inputTraceRef": {
+              "type": "string",
+              "minLength": 1
+            },
+            "governorTraceRef": {
+              "type": "string",
+              "minLength": 1
+            },
+            "hardwareRef": {
+              "type": "string",
+              "minLength": 1
+            },
+            "observationRef": {
+              "type": "string",
+              "minLength": 1
+            },
+            "plannedStartTick": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "plannedEndTick": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "runStatus": {
+              "type": "string",
+              "enum": [
+                "complete",
+                "aborted",
+                "partial",
+                "not-started"
+              ]
+            },
+            "costRefs": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "interventionRefs": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "epochId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "artifactRole": {
+              "type": "string",
+              "enum": [
+                "baseline",
+                "paired-control",
+                "paired-treatment",
+                "technical",
+                "experience",
+                "training",
+                "synthetic",
+                "legacy"
+              ]
+            }
+          },
+          "minProperties": 1
+        },
+        "fieldCoverage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "runId": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "sourceSHA": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "seed": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "paramsRef": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "initialStateRef": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "inputTraceRef": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "governorTraceRef": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "hardwareRef": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "observationRef": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "plannedStartTick": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "plannedEndTick": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "runStatus": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "costRefs": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "interventionRefs": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "epochId": {
+              "$ref": "#/$defs/fieldStatus"
+            },
+            "artifactRole": {
+              "$ref": "#/$defs/fieldStatus"
+            }
+          },
+          "required": [
+            "runId",
+            "sourceSHA",
+            "seed",
+            "paramsRef",
+            "initialStateRef",
+            "inputTraceRef",
+            "governorTraceRef",
+            "hardwareRef",
+            "observationRef",
+            "plannedStartTick",
+            "plannedEndTick",
+            "runStatus",
+            "costRefs",
+            "interventionRefs",
+            "epochId",
+            "artifactRole"
+          ]
+        }
+      },
+      "required": [
+        "contractVersion",
+        "evidenceId",
+        "kind",
+        "synthetic",
+        "sourceRefs",
+        "payload",
+        "fieldCoverage"
+      ]
+    }
+  ],
+  "$defs": {
+    "fieldStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "observed",
+            "missing",
+            "not-applicable"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "status",
+        "reason"
+      ]
+    }
+  }
+}

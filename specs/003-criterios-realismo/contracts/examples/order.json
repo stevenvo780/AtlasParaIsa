@@ -1,0 +1,52 @@
+{
+  "contractVersion": "realismo-v3",
+  "evidenceId": "order",
+  "kind": "source-order",
+  "synthetic": true,
+  "sourceRefs": [],
+  "payload": {
+    "sourceSHA": "bb483260b2489fe62b113d620e5f56e5f3676dbc",
+    "phaseOrder": [
+      "wear",
+      "service"
+    ],
+    "entries": [
+      {
+        "sourceEventId": "event-condition",
+        "tick": 1,
+        "phaseId": "wear",
+        "phaseOrdinal": 0,
+        "eventOrdinal": 0,
+        "recordIds": [
+          "condition-1"
+        ]
+      },
+      {
+        "sourceEventId": "event-1",
+        "tick": 1,
+        "phaseId": "service",
+        "phaseOrdinal": 1,
+        "eventOrdinal": 0,
+        "recordIds": [
+          "condition-at-service-1",
+          "service-1",
+          "flow-1"
+        ]
+      }
+    ]
+  },
+  "fieldCoverage": {
+    "sourceSHA": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "phaseOrder": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "entries": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    }
+  }
+}

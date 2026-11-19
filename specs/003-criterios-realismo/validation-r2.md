@@ -1,0 +1,222 @@
+# Validación R2 — gate G1 en curso
+
+Integrador único: GPT-6.1 Sol high, Codex principal, torre. Cuenta compartida con Fedora; root leyó 53% semanal disponible a 03:24/03:41 UTC; secundaria desconocida, sin fallback. G0 contractual recibido; T001–T003 cerradas por peer/decisión/documentación, no por aceptación científica.
+
+## Fuente congelada y metadata posterior
+
+Peer `/datos/tmp-atlas-lab/orquestacion-20261003/revision-criterios/REVISION-R1-v3.md` SHA `d085aa80eb01573b4a2f913403f7b9191627433d99e70e5d5397b773a50815d2`; ROOT-G0-DECISION-v3 SHA `658605e0d5f52d626def8169cf0e39f3d6477dbbbcb7c0573e7f85a0137b410c`. Archivo R1-FROZEN-v3-MANIFEST SHA `faaac25fb0ace210103eb5a19f12b4be8a0fac009b4635a6bb9a9a880714ef54`; fingerprint original SHA `8cf50919f02508a4f8d834a153c3d125d319e9f61f98726d0683be6dda0431f0`. Antes de editar tasks/checklist se cotejaron los 87 pins vivos y archivados sin discrepancia; estos archivos mutables posteriores ya no se atribuyen a esos bytes originales. El manifiesto original no se recalcula ni sobrescribe.
+
+Feature resuelta mediante scripts oficiales con SPECIFY_FEATURE=003-criterios-realismo y SPECIFY_FEATURE_DIRECTORY=specs/003-criterios-realismo, feature.json propio. Checklists 16/16 calidad y 7/7 revisión independiente recibida. Hooks .specify/extensions.yml ausentes. Ignore existente cubre node_modules/dist/build/log/env; ninguna modificación necesaria. Ownership OBS principal y EVAL secundaria reservado después de G1.
+
+## Dependencias aprobadas por root
+
+Ajv 8.20.0 y jsonc-parser 3.3.1 como devDependencies exactas solamente del worktree. Instalar `npm install --ignore-scripts --save-dev --save-exact --no-audit --no-fund ajv@8.20.0 jsonc-parser@3.3.1`. Respaldo privado package/lock previo. Lock añadió dos directas y cuatro transitivas, cero eliminaciones y cero cambios de versiones existentes. npm reconcilió la copia privada node_modules (35 añadidos/29 retirados); tsx4.23.13 y TypeScript7.0.2 quedaron verificados. Ambos integrity sha512 concilian contra registry oficial. Ningún schema declara format: ajv-formats no necesario; no se desactiva validación de formatos.
+
+Fuentes oficiales: [Ajv draft2020-12](https://ajv.js.org/json-schema.html#draft-2020-12), [Ajv registry exacto](https://registry.npmjs.org/ajv/8.20.0), [jsonc-parser registry exacto](https://registry.npmjs.org/jsonc-parser/3.3.1), [parser Microsoft](https://github.com/microsoft/node-jsonc-parser). Metadata completa y diff en `/datos/tmp-atlas-lab/orquestacion-20261003/revision-criterios/r2-g1/DEPENDENCIES-REGISTRY.json` y DEPENDENCY-DIFF.json.
+
+Parser: JSON.parse exige gramática JSON sin comentarios/trailing commas; AST jsonc-parser conserva claves decodificadas y lexemas antes de descarte/redondeo. Enteros/quanta verifican representabilidad exacta y rango seguro; floats finitos como condición0.1 se conservan. Ajv2020 valida schemas pinneados sin coerción/default/eliminación. strictTypes/strictRequired se desactivan sólo como lint de schemas canónicos que omiten anotaciones redundantes en applicators; validación de instancias/keywords/formatos sigue activa.
+
+## Implementación y oráculo
+
+G1 foundation: scripts/lab/realismo-contract.ts, tests/realismo-contract.test.ts. Forma estricta, cobertura/identidad/secuencias/cortes; archivos locales indexados con hash/identidad/binding y confinamiento de rutas. Causalidad separa BOUND/UNKNOWN de integridad INVALID y conserva datos parciales independientes. Types de payload se transcribieron mecánicamente desde schemas; runtime Ajv es autoridad.
+
+Los 64 wire cases usan el índice congelado como oráculo manual, con su capa parser/structural/semantic; no expected derivado de código, motor o evaluador. El balance protegido parcial y ley explícita en condición0.1 se cotejan con aritmética/oráculo manual; G1 no implementa un evaluador C10 ni C9–C24. Baseline ausente mantiene desconocido marginal; sin SHA/orden/evento común el enlace causal queda UNKNOWN. Los 48+8 diseños científicos siguen sin materializar/ejecutar.
+
+## Estado de ejecución
+
+Typecheck y tests focales PASS; suite completa pendiente. No hay PASS G1 todavía. Se solicitarán jobs detached propios con TMPDIR=CARTA_DATA_DIR, timeout1200, recibos y logs; suite completa candidata16CPU/16GiB/output8GiB/log128MiB, slice propia agregada24CPU/32GiB y guard global80% sólo detiene propios. T004/T005 implementadas y verificadas focalmente; T006 abierto hasta evidencia completa. No observer/evaluator, build, campaña, cambio de ciencia, publicación, commit ni push.
+
+### Focales ejecutados
+
+| Job | Resultado | Alcance |
+|---|---|---|
+| r2-g1-focused-20261004-v1 | FAIL exit1 | Dos overloads assert.throws detectados por tsc; tests no ejecutados; corregidos y recibos preservados |
+| r2-g1-focused-20261004-v2 | PASS exit0 | typecheck +75/75 tests; código previo a hardening adicional |
+| r2-g1-focused-20261004-v3 | PASS exit0 | typecheck +80/80 tests, skip0/todo0/cancel0; versión anterior con namespaces propios, hashes de hojas, perfil/registry pinneados, predecesor posterior/ciclo y COMPLETE por campo |
+
+Cada focal 4CPU/4GiB/output1GiB/log32MiB, detached, TMPDIR propio. Logs/receipts `/datos/tmp-atlas-lab/orquestacion-20261003/recursos/runs/<job>/`. El último terminó 03:59:33 UTC, stop_reason=null; CPU global pico muestreado15%, output final401.338 bytes. Duración de los80 tests1.195s, no incluye admisión/typecheck. Los64 del wire oracle mantienen sus capas y expectativas;16 regresiones manuales adicionales. T004/T005 cerradas sobre estas pruebas, T006/G1 aún pendiente de suite completa. Los80 PASS son del instrumento de contrato, no C9–C24 ni biología.
+
+### Primera suite completa: interrumpida por recursos, sin resultado de suite
+
+Job `r2-g1-suite-20261004-v1`, principal/Sol6.1 high/kratos, start `2026-10-04T04:00:46+00:00`, end `2026-10-04T04:00:50+00:00`, unidad `atlas-isa-goal-r2-g1-suite-20261004-v1.service`, PID 1101187 / startticks 4685553. CPU16/16GiB/output8GiB/log128MiB; kernel cpu.max `1600000 100000`, memory.max `17179869184`. Typecheck terminó antes de npm test; el log sólo contiene el inicio TAP. El supervisor finalizó exit1 con stop_reason `CPU total torre sobre 80% durante tres muestras`, pico global muestreado99%. No es PASS de suite ni fallo funcional comprobado: pruebas completas no terminaron. No se bajó el guard ni se detuvo carga ajena. Root y LunaTower avisados; ajuste de fanout/admisión pendiente de diagnóstico.
+
+Receipt SHA `6a810ca6be37c8f3093ccdbb7d01c09f202d981d3cc664535455d3e051fd6261`, log SHA `8bffe19b3f02593ea61f2cb458d4000c800a697c6a77878792a5f9fa5268d1b9`. G1/T006 continúa abierto. Fuente/test/deps de este intento sellados en G1-SUITE-INPUT-PINS.json externo; evidencia histórica de la versión v3, anterior al correctivo $defs.
+
+### Correctivo de referencias reutilizadas y snapshot v4
+
+Se identificaron siete reglas del registro canónico bajo $defs omitidas por el recorrido previo. Ahora se resuelven sus usos reales mediante $ref, con discriminadores de rama y sin tratar definiciones como propiedades de datos. Cuatro grupos manuales ejercitan las siete reglas: capability/sourceOrder con target incorrecto; stream ausente mantiene UNKNOWN y stock; result/subgate/metric detectan cada referencia ausente; panel rechaza observación donde requiere evaluación. No se alteró el registro ni los schemas.
+
+Focal `r2-g1-focused-20261004-v4` terminó 04:12:40 UTC: typecheck +84/84 PASS, exit0, stop_reason=null, pico global15%, output410.542 bytes, 1.384s de tests. Son64 wire casos congelados +20 regresiones manuales. Copia privada estable en `/datos/tmp-atlas-lab/orquestacion-20261003/revision-criterios/r2-g1/G1-SNAPSHOT-v4/`; pins separados G1-SUITE-INPUT-PINS-v4.json. Fuente SHA `535c33c658e2f172ead57a98476e7fdef2296822c76083f613a6c6303e0fcc39`; tests SHA `7808d0adc7db3938a4c6f8d2250681a61cfe4dfb7d585c7ec4960cf4eed1ddb1`. Package SHA `c74cdc036558ce16c7901123674d6a693289879b805d811c269a564296cce262`; lock SHA `e52f2fa733df60bfa638972907d306b1e536ae247e8dcdf9d2748152c9d14e47`.
+
+### Segunda suite completa en curso: fanout explícito
+
+Diagnóstico independiente Luna `/datos/tmp-atlas-lab/orquestacion-20261003/recursos/DIAGNOSTICO-CPU-SUITE-G1.md` SHA `c845665c0a243b7efdf0cb52e9961702c96b274e2d4436cf0ccbc6d68d058d4b`:163 archivos, concurrency implícita31; primera muestra99% pudo ser subsegundo, pero dos posteriores excedieron80% con separación aproximada1s. No se atribuye esa carga a un actor sin evidencia. Root autoriza siguiente intento con todos los archivos, fanout4,8CPU16GiB/output8GiB/log128MiB y mismo guard80%.
+
+Job `r2-g1-suite-20261004-v2`; comando exacto `npm run typecheck && node_modules/.bin/tsx --test --test-concurrency=4 --test-timeout=600000 tests/*.test.ts`, env TMPDIR=CARTA_DATA_DIR propio, timeout1200. Es la expansión del script npm test original con el único añadido de concurrencia explícita antes del glob de los163 archivos. Node22 declara --test-concurrency en CLI, pero no lo admite mediante NODE_OPTIONS; focal v4 verificó esta CLI. Package script permanece intacto. G1-SUITE-COMMAND-v2.json registra atribución y equivalencia. Pendiente resultado completo y revisión independiente; no G1 GO.
+
+Resultado provisional durante v2: TAP registra un fallo en `tests/curva-techo.test.ts:120`, «el instrumento encuentra el techo (p95 ≥ presupuestoMs) antes de un hasta generoso». El subproceso `node --import tsx scripts/curva-techo.mts --seed 51926 --escala habitantes --hasta 4096 --salida <TMPDIR-propio>` devolvió1 con «Estado de tecnología física inválido»; assert esperaba0. El mensaje se emite en technology.ts:693. No se atribuye causa/regresión sin diagnóstico; G1 no importa motor. Root avisado; no se edita ese código/test ajeno, ni se omite el archivo. Suite completa sigue hasta cierre; no full PASS ni T006 cerrado.
+
+### Cierre completo v2 — FAIL de integración, G1 abierto
+
+Terminó04:18:42 UTC, exit1, stop_reason=null; guard recursos no intervino.163 archivos seleccionados por el glob completo, TAP1713:1703PASS,1FAIL,9SKIP nativos, cancel0/todo0; duración303.322s. Pico global muestreado68%, salida7.048.423 bytes/8GiB. Unidad propia inactive al cierre; ningún retry automático.
+
+ÚnicoFAIL `curva-techo.test.ts:120`, error físico descrito arriba.9SKIP explícitos: cuatro ensayos requieren CARTA_TEST_ESCALA=1; tres comparaciones CUDA requieren COMPUTE_NVRTC; dos necesitan snapshot `/datos/tmp-atlas-lab/perfil/psinagua3-d12.sqlite` ausente. No se habilitaron estos opt-ins ni se fabricó snapshot ni se presentan comoPASS. Es el comportamiento original de npm test; cero filtros añadidos.
+
+Recibo SHA `df7fdd41a15321dc082366f7873505aecd5467fa91e33571c59d9d822ac8b7a9`; log SHA `311f6a471337672eea48ea44a42a9be5652e5c858894af908156855b82abef0d`. JSON comando SHA `55f2fd46f8b65c2d154a846d8c0cb9f146e045a0dfa986d860860da2dec8abe4`; pins v4 SHA `61db2c47634d1079111f8166dd2241eabbb5d97fef3bfc33c26663dfedae8e3d`. Peer G1 read-only secundaria job377893322f734c238ad5c54c49eae768 pendiente; código/test/deps permanecen congelados. T006 continúa abierto, sin autorización de observer/evaluator. T004/T005 acreditan sólo implementación y focal84PASS; ningún criterio C9–C24 acepta por esta ejecución.
+
+### Peer v4 NO-GO y corrección v5 focal — G1 sigue abierto
+
+Dictamen independiente secundaria job377893322f734c238ad5c54c49eae768 (476,7s, lectura, ejemplos estáticos no ejecutados), serializado REVISION-G1-v4.md SHA `9b74ad9035a320c578f8815a5e829839fa6a6dbfa7545857f9b3b997735bcfd9`. Los64 hashes wire y75 pins canon/contratos quedaron intactos. Copia fresca de los4 archivos v4 antes del write en r2-g1/pre-corrective-v5; resultado completo con metadata en PEER-G1-v4.json.
+
+| Hallazgo | Correctivo y regresión manual v5 |
+|---|---|
+| F1 lexical integer | Cuatro unidades integer quanta/ticks/bytes/count y arrays con items integer del schema verifican lexemas originales; rechazan fracción redondeada/underflow, conservan normalized0.1 |
+| F2 ventana propia | Cada record concilia tick con su stream, excepción snapshot de apertura en la frontera propia; no obliga a cubrir toda ventana global |
+| F3 identidad física | Parámetros e inputs concilian paramsHash/initialStateHash con cada Observation en namespace propio aun sin manifest; initialStateRef exige componente snapshot; hashes declarados por causal-pair concilian contra ambos brazos y bytes indexados; datos ausentes→UNKNOWN, contradicciones→INVALID |
+| F4 orden transitivo | Cada predecesor ordered requiere mapping de fuente resuelto; null/unresolved propaga UNKNOWN a condición/flow/service, stocks independientes conservados |
+| F5 débito aplicado | Referencias consumo servicio/efecto iguales; flow acredita consumo irreversible desde stock, no transferencia interna; cantidad concilia sólo con matriz versionada explícita y dimensión común; sin conversión/monto/causa acreditada→UNKNOWN; no umbral científico nuevo |
+| F6 output/perfil | Perfil SHA verificado; subgates únicas y exactas requeridas por criterio, thresholdIds pertenecen al criterio y total=plannedSeeds.length además de suma pass/fail/unknown |
+
+Focal `r2-g1-focused-20261004-v5`:04:37:46–04:37:49 UTC, typecheck+91/91PASS,64 wire+27regresiones (7 grupos añadidos para6hallazgos), skip/cancel/todo0; exit0/stop_reason=null;4CPU/4GiB/output1GiB/log32MiB, CPU global pico18%, salida433.622B. Recibo SHA `9f3fd78a49cd4c1f080342698e0e20ffad7d244c8474714b10fbb690308eaa15`; log SHA `4089ed1bea4d641407b703e800a16b9a8b3c8d9f61fc7bcd8a4345e2ac2a9f7c`. G1-SNAPSHOT-v5 y G1-SUITE-INPUT-PINS-v5.json congelados; fuente498c298f6dfbf040750437f90d4888a23ab057929bd1e85101cc75ea49a057dd, tests7e32625dc406625d000fbf8b6b0e8a8b155c530d64f1c85b386ff70abbbd5c4a; package/lock originales v4 sin cambio.
+
+Identidad Node leída DENTRO de la unidad v5 antes de tests: /usr/bin/node v22.23.3, SHA `3cd75b97fdd54b6fc89f240d72a769575b47e5992c28f80f1fadd0be0c4866d6`. Las lecturas22 anteriores fueron CLI/preparación; recibos antiguos no fijaron Node de systemd. Este dato verifica v5, no certifica retrospectivamente runtime de suitev2. Runtime bundled24.19 es ruta distinta; no se hizo install/cambio global ni se alteró físico. Fullsuite no se reintenta hasta focalcorrectivos+curva narrowfix validado/integrado y decisión root. Pendiente peer v5; T006 abierto, no observer/evaluator.
+
+### T022–T025 cierre documental autorizado, sin ejecución
+
+Root GO-DOC después peer principal job28dd85d0d95e459b8ef060c064e9d246 (288,6s, lectura) cerró H1 paridad C22 bit a bit, H2 límites agregados propios y admisión fresca, H3 cuatroP0.c y unidadesGiB. Hashes inicial=final cotejados: durability `c20b96b95209aaea70559f9cfb84932c376136a84f7f12eaaef1577e7a50fa8a`; performance `ba1a1cccb06614b3528a653871d44dc7e5d2218166352412d549ed5a372c6694`; experience `85b40d945a6d1d909ef6a94027e6e1da851cc91b9b3e3c97f33b3eec236ed922`; method `36c4c86233f8b05ffd44ca0402c77b11d2824e918b020f5568b33d4065f4b433`. Integrador recibe cierre exclusivamente documental de4tareas. Harnesses/ciencia/recibo personal/reservas completas siguenUNKNOWN; no training autorizado ni C21–C24PASS. Se conserva fuente congelada R1 y no se recalcula su manifest por estas ediciones posteriores.
+
+### Peer v5 NO-GO residual y v6 focal94PASS
+
+Peer secundaria job9ed1d183b9c24678ba9383261897bdb1 (351,9s, sólo lectura) cerró F1/F2/F4/F6 y las6reproducciones originales. Quedaron F3 ausencia deparamsHash en ruta residualmanifest y F5 suma deproyecciones delmismotransferId. Resultado completo conmetadata en PEER-G1-v5.json; copia fresca4/4v5 anteseditar en pre-corrective-v6. Canon/64wire/75pins congelados se preservan.
+
+v6canonicaliza débitos físicos portransferId antes deconvertir/sumar. Colapsa sóloproyecciones con campos físicos iguales ycounterpart/provenance recíprocos acreditados; identidad/equivalencia faltantes→UNKNOWN. Dosregresionesmanuales: copiasflow1/flow2 delmismo débito1 con effectconsumedAmount2→UNKNOWN, con1→BOUND cuando fuente/refs/ley/matriz restantes concilian. ManifestparamsHash sinvalor observado producePHYSICAL_BINDING_UNAVAILABLE; valorpresentedistinto conservaPARAMETER_HASH inválido. Tercerregresión concatena ambasvariantes conmanifests y actualización explícita detodosloshashes dehojas/ancestros/evaluationinputs en copias temporales; no cambiafixturepermanente.
+
+Focal `r2-g1-focused-20261004-v6` preservado93PASS/1FAIL: lacopia de prueba omitió actualizar evaluation.inputHashes despuésde modificar unaleaf; elpuente rechazó correctamente EVALUATION_IDENTITY/EVALUATION_INPUT_HASH. Se corrigió exclusivamente elfixture temporal deestaprueba. Focal posterior `r2-g1-focused-20261004-v6b` typecheck+94/94PASS,64wire+30regresiones,skip/cancel/todo0, fin04:52:26UTC;exit0/stop_reason=null,picoglobal14%,salida441.605B,4CPU4GiB/output1/log32. ReciboSHA `0dbaacdcc5ef3c59d8a6cfc816633c7d81a3623bdccbfedd5e1ac9fc5aa2ff25`;logSHA `6f86a41b06b4051ceffdbb577bf57f86683b51f22e6f5a484be74be0d77af75f`. Runtime Node22.23.3 ySHA in-unit registradosotra vez. No suitecompleta nueva.
+
+G1-SNAPSHOT-v6 y G1-SUITE-INPUT-PINS-v6.json congelados;fuente `7d6f672997d7b2c4fc94a628b8987c18e071089ae76b70eca6a52c80ef37e98b`;tests `f16e388323baa57ea9d5c0899d9e1ffffe3ab470dc212c22664d0eb2a92fddac`;package/lock sin cambio. T006/G1 sigueabierto porpeer yfullsuitependientes. Root mantiene reparación/revisióncurva-techo enownershipajeno; no se toca física niinstrumento desdeG1. T022–25DOCremaincerradas; ningúnC9–C24PASS niobserver/evaluator/experimentoadmitido.
+
+### Peer v6 residual F5 y snapshot v7
+
+Peer secundaria job `1bae9e0eae1641afad950839685b2d37` (269,8s, lectura) cerró F3 y el doble conteo original, pero encontró que sólo se validaba conversión del representante. Referencia explícita ausente en la proyección descartada podía mantener BOUND y cambiar al invertir las refs. Resultado completo preservado en PEER-G1-v6.json; copia fresca4/4 v6 en pre-corrective-v7 antes de escribir.
+
+v7 resuelve conversión de cada miembro acreditado antes de colapsar, exige dimensión común y monto convertido iguales para proyecciones de un mismo transferId y suma ese débito físico una sola vez. Referencia explícita sin resolver, monto o dimensión contradictorios producen UNKNOWN independiente del orden. Ocho regresiones manuales cubren conversiones ausentes, compatibles, monto distinto y dimensión distinta en ambas permutaciones. Se conservan los positivos débito1/efecto1 BOUND y débito1/efecto2 UNKNOWN. Ningún schema, perfil, fixture congelado, dependencia o ley cambió.
+
+Focal `r2-g1-focused-20261004-v7` terminó05:11:59 UTC: typecheck+102/102 PASS (64 wire+38 regresiones), skip/cancel/todo0; exit0/stop_reason=null,4CPU/4GiB/output1/log32, pico global26%, salida447.539B. Recibo SHA `957d786d62d6fa4e0007e21cd1d1bb53bb536b6829a6b940df1e4d1838aec658`; log SHA `6de4ce6ddc8953f6e1b31f4c4f003171de635f6cc3c8d4234368e3050c58598b`. Identidad Node se registra dentro de la unidad antes de tests, sin extrapolar a fullsuite antigua.
+
+G1-SNAPSHOT-v7 / G1-SUITE-INPUT-PINS-v7.json congelados. Fuente SHA `93dd9940071c766f190faaba45bde48861f3639ee9133bbe29196c1d68944bfe`; tests `777c2c2ea464d5d8ac09672591a235aabe633a9e7a7c6600b99c2b90a13b4d57`; package/lock sin cambio. Pendiente peer v7 y evidencia dinámica/integración de curva-techo antes de nueva fullsuite. T006/G1 sigue abierto, sin observer/evaluator ni aceptación científica. Las órdenes de G2/G3 son preparación externa condicionada y no ejecución.
+
+### Integración autorizada del instrumento curva-techo, G1 todavía abierto
+
+Root autorizó copiar exclusivamente tres archivos desde `/datos/workspaces/personal/AtlasParaIsa-anexo/worktrees/techo-diagnostico-20261003` tras peer principal `b83426514a1b47a6bf02931a726b898c` GO-TECHO-CODE y validación dinámica Luna. Base de ambos checkouts `bb483260b2489fe62b113d620e5f56e5f3676dbc`; script/test existentes coincidían byte a byte con esa base antes de copiar; helper ausente. Respaldos privados previos y proveniencia en r2-g1/pre-techo-integration-v1. Copia con precondición de hash y publicación por ruta autorizada.
+
+| Archivo integrado | SHA-256 |
+|---|---|
+| scripts/curva-techo.mts | 78d2d6e632a999b933dff49ea16c132e58c4fa21966a054c23a6ad7dca01986d |
+| scripts/lib/curva-techo-fixture.ts | d40c1f92d62f6c7a4e25579e9e15b1bf21de0b5432e73a5c8483b1ac2d130642 |
+| tests/curva-techo.test.ts | 4988dcbbf4e636f5c8494a2bfd883fedf533691df7f2cbf77b0e0cd5d1d973fa |
+
+El helper inicializa tecnología propia de cada sintético y evita copiar stock/productos/residuos/proyectos/práctica de la plantilla envejecida. Conserva cuerpo, genoma y demás campos; las leyes del motor no se editaron. Los dos nuevos tests manuales comprueban conservación con controles negativos de duplicación y ausencia de alias entre clones.
+
+Evidencia dinámica pertenece al checkout diagnóstico, anterior a esta copia: `/datos/tmp-atlas-lab/orquestacion-20261003/recursos/VALIDACION-TECHO-FIX-v1.md` SHA `3514926dfc55765acfc898de2c0f3855922e68c4c501f28ec25610eec20de316`. Typecheck PASS, 10/10 tests PASS y caso exacto seed51926/escala habitantes/hasta4096 exit0; alcanzó256 antes de detenerse por p95=75,03ms sobre presupuesto50ms. El fixture cambió: esos puntos no acreditan paridad C22 ni aceptación biológica. No se ejecutó test adicional durante la integración.
+
+Bridge/test G1 v7 y package/lock conservaron sus cuatro hashes. Snapshot privado acoplado G1-SNAPSHOT-v7-con-techo-v1; pins de siete archivos `G1-SUITE-INPUT-PINS-v7-con-techo-v1.json` SHA `7287d5cf3074be8fb68d9f44e00e519a1ac99bf17aae7f2cd23778db4c1c841a`. Diff check PASS. Peer G1 v7 cuenta secundaria job `25c36b6b3d2849e4b80b4575c3ce9fe6` pendiente al integrar. No fullsuite nueva ni cierre T006/G1; observer/evaluator siguen sin escritura hasta GO explícito root.
+
+### G1 v8b: marcador unavailable indexado, focal108PASS
+
+
+
+Autor GPT-6.1 Sol high, Codex principal, kratos. Worktree criterios-realismo-20261003. Único escritor bridge/test; ninguna modificación src, canon,64wire,75pins, package/lock ni tres archivos curva. Root autorizó correctivo F5 y focal; NO fullsuite/G2/G3.
+
+Peer real v7 secundaria job ea98102da75f444b9ba0730b49759fc8 duró303,9s: NO-GO por marcador unavailable indexado acreditando conversión. Resultado íntegro+metadata preservado PEER-G1-v7.json. El anterior job25c36 sin lectura es inconcluso y no prueba defecto/cuota/authfailure.
+
+Correctivo usa disponibilidad común para lookups referenciales de binding. Seis regresiones manuales nuevas: marcador de matriz indexado con hash correcto explícito/fallback y ambas permutaciones, UNKNOWN/DEBIT_AMOUNT_UNBOUND; marcador indexado en ley y source-order impide BOUND. Conserva positivos efecto1 BOUND, efecto2 UNKNOWN y conversiones compatibles/contradictorias/permutaciones de v7. Expected no se deriva del evaluador y no cambia fixture permanente.
+
+Intento v8 preservado G1-SNAPSHOT-v8, FOCAL-v8-command.json y recibos originales: typecheck PASS,107PASS/1FAIL,exit1,stop_reason=null. El oracle64 `negative-bundle-ref-absent.v3.json -> REJECT_BINDING` detectó que el primer ajuste trataba referencia obligatoria ordinaria ausente como UNKNOWN. Se corrigió sólo distinción de integridad: ordinary mandatory invalid mantiene REJECT, explicit unavailable permaneceUNKNOWN. No reescribir v8 como éxito.
+
+Focal v8b: r2-g1-focused-20261004-v8b, unidad atlas-isa-goal-r2-g1-focused-20261004-v8b.service,05:56:57–05:57:00UTC. Typecheck+108/108PASS (64wire+44regresiones), fail/skip/cancel/todo0;exit0/stop_reason=null. Presupuesto4CPU4GiB/output1GiB/log32MiB,CPU global pico muestreado28%,salida456107B. Node verificado dentro unidad v22.23.3 SHA3cd75b97fdd54b6fc89f240d72a769575b47e5992c28f80f1fadd0be0c4866d6,dev/inode37:80638716,namespace mnt:[4026531832]. Wrapper exige identidad antes de npmtypecheck/test; TMPDIR=CARTA_DATA_DIR propio. Comando/inputs guardados en FOCAL-v8b-command.json; no variables sensibles.
+
+#### Barrido acotado de lookups de binding
+
+`availableReference` excluye marcador explícito y referencias no string; `referencedItem` es la única entrada común para referencias declaradas al catálogo. targetOf lo aplica también antes de buscar records locales o fragmentos scoped. ConversionRef y fallback conversionMatrixRef usan el mismo guard. order/ley/efecto/params/inputs/manifests/pares/trazas lo consumen; predecessor y consumo de records también respetan disponibilidad. Ausencia de soporte causal produce UNKNOWN sin borrar stocks independientes. Un input obligatorio ordinario contradictorio que no resuelve sigue REJECT_BINDING según oracle congelado; marcador explícitamente unavailable queda UNKNOWN. Hash de parámetros ausente y contradicción presente conservan sus comportamientos aprobados.
+
+Quedaron sólo búsquedas crudas por IDENTIDAD, no referencia de soporte: (1) implementación del helper tras guard; (2) input.evidenceId para seleccionar su namespace ya cargado; (3) índice de IDs/duplicados y alias root para detectar shadow/hash. Estas búsquedas no acreditan una referencia unavailable; no se retiran documentos marcados del índice, para conservar observación parcial y detectar integridad. No relajación de types/refs/hash/paths ni edición del registry196/schema/profile.
+
+#### Siete pins exactos v8b
+
+| Archivo | SHA-256 |
+|---|---|
+| scripts/lab/realismo-contract.ts | c761af9531e78abab9a6275b19f3ef21d7b7f7cf41473c6b392ee7ce00f6595a |
+| tests/realismo-contract.test.ts | 16b61be2dabb15091d69c01a6f6ba923601b85e6b1a26dc268e78f76a6c07136 |
+| package.json | c74cdc036558ce16c7901123674d6a693289879b805d811c269a564296cce262 |
+| package-lock.json | e52f2fa733df60bfa638972907d306b1e536ae247e8dcdf9d2748152c9d14e47 |
+| scripts/curva-techo.mts | 78d2d6e632a999b933dff49ea16c132e58c4fa21966a054c23a6ad7dca01986d |
+| scripts/lib/curva-techo-fixture.ts | d40c1f92d62f6c7a4e25579e9e15b1bf21de0b5432e73a5c8483b1ac2d130642 |
+| tests/curva-techo.test.ts | 4988dcbbf4e636f5c8494a2bfd883fedf533691df7f2cbf77b0e0cd5d1d973fa |
+
+Snapshot privado G1-SNAPSHOT-v8b: archivos0400; pins G1-SUITE-INPUT-PINS-v8b.json SHA `0326524f8ff39404461af3ba09ec1e957261fe15968899fa1a0cebbe61ff8ae3`. Recibo SHA `60c49c808a0f8fe4655f454acc0a64388d8f9e1508931a8ed4c957d823779ca4`;log SHA `72ac35bf94cdc03763ad12157b780b3c4cd90fd3b4485d6ad5b7515a6be2a42f`. Fuente/test/package/lock/curva congelados después del focal. G1/T006 abiertos hasta peer real y suite completa integrada bajo orden root. Scope completo sigue propuesta externa en revisión, ningún hook implementado.
+
+### G1 v9c: focal111PASS y control RED anterior
+
+Autor único GPT-6.1 Sol high, Codex principal, máquina kratos. Worktree `/datos/workspaces/personal/AtlasParaIsa-anexo/worktrees/criterios-realismo-20261003`. Focal v9c técnica PASS; G1/T006 sigue ABIERTO hasta peer independiente y orden root sobre suite completa. No aceptación C9–C24, cambios de leyes, hooks, World, C1–C8, main/public ni escritura íntima S/I.
+
+## Problema y solución
+
+Peer G1 v8b `fb75a5f0dfdd407087b02103d6865d25` encontró que `String(p.conditionSourceRef)` fabricaba la identidad literal `"undefined"` al omitir el campo. El resultado íntegro está preservado en PEER-G1-v8b.json. La fuente v9c admite raw `unknown` en targetOf, aplica el guard de disponibilidad antes de buscar y retira esa coerción del caller. Conserva IDs explícitos legítimos, la distinción UNKNOWN por soporte ausente frente REJECT por contradicción obligatoria, y los balances parciales independientes.
+
+Barrido acotado: targetOf y referencedItem centralizan el guard raw antes de búsquedas de soporte; ley/orden/efecto/params/inputs/manifests/pares/trazas/predecessors/consumption/conversiones ya lo utilizan. Los String restantes identifican datos tipados o describen errores; no fabrican referencias faltantes. En flow, conversionRef ausente o null selecciona legítimamente boundary.conversionMatrixRef según schema; los demás tipos raw no pueden hacerlo. No se impone una política genérica de null que contradiga la semántica del campo.
+
+v9 tenía un fallo de autor: bloqueaba el selector nullable de conversión y produjo 8FAIL. v9b restauró ese fallback, pero su positivo nuevo renombraba la primera structure (`condition-1`) en vez de la señal causal realmente referenciada (`condition-at-service-1`), y produjo 1FAIL. Ambos intentos conservan snapshot7/recibo/log exactos, no se reescriben como éxitos. v9c cambia SOLO test respecto de v9b: elige por conditionSourceRef real y reconcilia todos los predecessorRecordIds, el source-order y su SHA. El negativo exige sólo CONDITION_EVENT_UNBOUND, evitando un oracle vacuo por otro vínculo roto.
+
+## Verificación focal y reproducción RED
+
+Comando exacto de lanzamiento/7inputs/wrapper en FOCAL-v9c-command.json. Lanzador propio `launch-lab-batch.sh --id r2-g1-focused-20261004-v9c --cpu 4 --memory-gib 4 --output-gib 1 --log-mib 32 --cwd /datos/workspaces/personal/AtlasParaIsa-anexo/worktrees/criterios-realismo-20261003 -- /usr/bin/bash /datos/tmp-atlas-lab/orquestacion-20261003/revision-criterios/r2-g1/FOCAL-v9c.sh`.
+
+Dentro de la unidad: TMPDIR=CARTA_DATA_DIR propio; Node `/usr/bin/node` v22.23.3, SHA `3cd75b97fdd54b6fc89f240d72a769575b47e5992c28f80f1fadd0be0c4866d6`, dev/inode37:80638716, mnt:[4026531832]; wrapper exige versión y SHA antes de `npm run typecheck` y focal. Typecheck PASS;111/111PASS,0FAIL/skip/cancel/todo (64wire congelados+47 tests manuales). Se mantienen los64 expected, schemas/profile/registry y75inputs canónicos; no escritura en ellos. Los hash assertions de64wire y pins canónicos cargados pasan; no se afirma una nueva auditoría integral de toda la ciencia.
+
+Reproducción privada sin sobrescribir proyecto: RED-v9c-stage contiene copia0400 del bridge v8b SHA `c761af9531e78abab9a6275b19f3ef21d7b7f7cf41473c6b392ee7ce00f6595a`, symlinks readonly de lectura hacia contracts/node_modules del worktree, harness manual separado. No instala, ejecuta World ni modifica canon. Los dos fixtures se generan bajo CARTA_DATA_DIR propio y se mantienen en snapshot con pins. Los expected son manuales previos a la ejecución, conforme contrato/review:
+
+| Entrada manual | Bridge v8b | Bridge v9c |
+|---|---|---|
+| Referencia omitida; record causal con ID literal `"undefined"` | BOUND (defecto RED reproducido) | UNKNOWN, único CONDITION_EVENT_UNBOUND |
+| Referencia explícita `"undefined"` al mismo record | BOUND | BOUND |
+
+Misma order SHA `4b20b4856198f315fb3488a0d9344c7c652a4794836d58e4092ea41addc81fcc`; fixture omitido SHA `9a1344b0911bb74908799e0f39f801b8ef80ecf0c0f5c45c472d8f4c0825d458`; explícito SHA `58de3aee0508ea0638c71cbb47d720030a02e5632e088c3d227bc9c4b9a3488a`. Ningún expected se deriva del evaluador; no hay evaluador implementado.
+
+## Intentos preservados
+
+| Intento | UTC | Exit | Pico CPU global muestreado | SHA recibo |
+|---|---|---|---|---|
+| v9 | 2026-10-04T06:18:44+00:00 → 2026-10-04T06:18:47+00:00 | 1 | 33% | `2e0ddfa4a9bbbac18f0ae25a2bd0e70242ff93e46991936344d7d100a876487e` |
+| v9b | 2026-10-04T06:20:33+00:00 → 2026-10-04T06:20:36+00:00 | 1 | 14% | `c708e0b57b4b81437f547f69f8560cf4047ae0e829632e4f4ecda0b6de1c0818` |
+| v9c | 2026-10-04T06:29:17+00:00 → 2026-10-04T06:29:21+00:00 | 0 | 13% | `4fc86151bdd389e8b2e8f1947e048d32f132201e75a15d9f14d296271ea0af49` |
+
+v9:103/111PASS; v9b:110/111PASS; v9c:111/111PASS+RED2oracles. Stop_reason=null en los tres. v9c salida2.710.858B de1GiB, CPU max400000/100000, memory_max4294967296B, parent slice propio. Unidad `atlas-isa-goal-r2-g1-focused-20261004-v9c.service` acabó inactive/dead/MainPID0. Recibo histórico child PID3217411/start_ticks5576705. El pico13% es muestreado, no garantiza el máximo entre muestras. No fullsuite nueva.
+
+## Snapshot congelado para peer
+
+G1-SNAPSHOT-v9c contiene7inputs0400, recibo/log y trazas CPU, resultados RED, fixtures/order pins y copia del harness. Fuente igual a v9b, test v9c; package/lock y tres archivos curva invariantes.
+
+| Archivo | SHA-256 |
+|---|---|
+| scripts/lab/realismo-contract.ts | `c6a15dc37e16cb8b16819f80e10d209799396f5051c6c35cb2846f8df69dbf0a` |
+| tests/realismo-contract.test.ts | `feb5d457b0e7bdd630130c8649b3dbb896f20f4660a115f29826212e74118e14` |
+| package.json | `c74cdc036558ce16c7901123674d6a693289879b805d811c269a564296cce262` |
+| package-lock.json | `e52f2fa733df60bfa638972907d306b1e536ae247e8dcdf9d2748152c9d14e47` |
+| scripts/curva-techo.mts | `78d2d6e632a999b933dff49ea16c132e58c4fa21966a054c23a6ad7dca01986d` |
+| scripts/lib/curva-techo-fixture.ts | `d40c1f92d62f6c7a4e25579e9e15b1bf21de0b5432e73a5c8483b1ac2d130642` |
+| tests/curva-techo.test.ts | `4988dcbbf4e636f5c8494a2bfd883fedf533691df7f2cbf77b0e0cd5d1d973fa` |
+
+Pins SHA `a57b2e4aef1ca1267ab3841c4714b406f371356381bee606a128e1fa15f208cc`; recibo SHA `4fc86151bdd389e8b2e8f1947e048d32f132201e75a15d9f14d296271ea0af49`; log SHA `e461eab60384d43d1b8764b8c54b232fa9d27a3e5bc06a47696c0fba7a97fd01`; RED resultados SHA `226414601c933da56074da764ce9fe5865500333f81652a5273c2aaf3525a364`; RED fixturepins SHA `972f410232bb2554d9dcad864e5b7a223fb5f6d40d452e2d1463d68df7bd31da`.
+
+La fullsuite anterior v8b (FULLSUITE-G1-v8b.md SHA2b19a99d64551a613742959a67524ed2509e1577a5864934a5a4c617262567c3) es histórica:1730PASS/9SKIP, pero peerNOGO requirió este correctivo. No se transfiere ese PASS como prueba dinámica de sourcev9c. Scopev2 y conservación base→off→on siguen autorizados sólo para fase futura, sin hooks hoy.
+
+
+## Cierre técnico ROOT-G1-GO v9c — 2026-10-04
+
+Root comunicó GO final técnico para G1/T006 sobre HEAD `bb483260b2489fe62b113d620e5f56e5f3676dbc`, fuente bridge SHA `c6a15dc37e16cb8b16819f80e10d209799396f5051c6c35cb2846f8df69dbf0a`. Peer independiente secundaria job `fe02f0cd157d4a32a18f87fd289c82be` emitió GO-G1-CODE-v9c (`REVISION-G1-v9c.md`, SHA `b651a1bb7e16fddf9f5f4027241be911ed1a9ee4df8b933637d656c86cdd9842`). Focal v9c: typecheck y111/111 PASS (64 wire+47 manuales), RED de referencia ausente contra ID literal `undefined`; pruebas fallidas v9/v9b permanecen históricas.
+
+Suite final `r2-g1-suite-20261004-v9c-a2`: `npm run typecheck` y `node_modules/.bin/tsx --test --test-concurrency=4 --test-timeout=600000 tests/*.test.ts`, Node `/usr/bin/node`22.23.3 verificado dentro de unidad, exit0/stop_reason null. TAP1742 total,1733PASS,0FAIL,9SKIP,0cancel/todo; cuatro skips escala opt-in, tres CUDA sin COMPUTE_NVRTC, dos snapshot ausente. Auditoría CPU300/300 runtime y3/3 preflight completa, pico global muestreado70%, cap8CPU/16GiB y output7.537.891B; unidad terminal, cgroup propio ausente. El primer intento v9c falló en preflight antes de typecheck/test y no se cuenta como suite. Informe íntegro `FULLSUITE-G1-v9c.md` SHA `7c02a7c7cc4dbe88af22f3081ed72384e730b0682f35b99916e8725121daaef3`; recibo final SHA `9e8fb410bc7c7623df79593ba956c6b997779fa75a0498e301be2d828129bb30`, log SHA `06a14bfc819221556f9afc6c40da2e42f6ca019c879e30761501dec94942e501`.
+
+Los siete inputs fuente/config coinciden con pins v9c; inventario de497 entradas pre/mid/post idéntico SHA `3b855eefc18117168137d14b221a32a840707b6bf20799c71ef0b2a6363a4a09`. Snapshot de aceptación privado `G1-ACCEPTED-v9c/manifest.json` SHA `9a08425f97dfd7f91b053e929e157fd04c22290fccf7107fc1bbfa9f4d1d8be1` conserva copias0400 de siete inputs, tres inventarios, recibo/log/muestras; directorio700. R1-FROZEN-v3 permanece inmutable SHA `faaac25fb0ace210103eb5a19f12b4be8a0fac009b4635a6bb9a9a880714ef54`. Decisión recibida en `ROOT-G1-DECISION-v9c-final.md` externo.
+
+G1 acredita contrato técnico y libera trabajo G2/G3 según root; no certifica C9–C24, GPU, las9 pruebas omitidas, baseline, publicación ni aceptación personal. T022–T025 sólo DOC. G2 observador y G3 evaluador siguen pendientes de implementación/revisión/ensayo.

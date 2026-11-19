@@ -8,6 +8,7 @@ import { demographicTraits, updateDemography } from './demography.js';
 import { paramsOf } from './params.js';
 import { tileAt } from './spatial.js';
 import { BROKEN_CONDITION } from './inventions.js';
+import { emitObserved, unbindObservationSource } from './observation.js';
 
 export const RECENT_LEGACY_COUNT = 32;
 const CAUSES: readonly DemographicDeathCause[] = ['starvation', 'dehydration', 'exposure', 'senescence'];
@@ -189,7 +190,13 @@ export function advancePopulation(world: World, callbacks: PopulationCallbacks):
     for (const record of records) {
       world.legacy.push(record); world.retiredLegacy.push(record);
       world.demographyDynamics.deaths++; world.demographyDynamics.causes[record.cause]++;
+      emitObserved(world, 'lineage.death', () => ({ family: 'death', actorIds: [record.id],
+        protectedOriginIds: record.role === 'S' || record.role === 'I' ? [record.id] : [],
+        payload: { actorId: record.id, birthTick: record.bornAt, deathTick: record.diedAt,
+          ageTicks: record.diedAt - record.bornAt, cause: record.cause,
+          ageOrigin: record.bornAt < 0 ? 'initial-model-age' : 'observed-birth' } }));
       const person = dyingById.get(record.id)!;
+      unbindObservationSource(person.technology);
       callbacks.emit({ kind: 'death', actors: [record.id], x: person.x, y: person.y, source: 'simulation',
         text: `Terminó la vida simulada de ${record.name}.`,
         cause: `Causa del modelo: ${record.cause}; evaluación posterior a las acciones. Su identidad y parentesco se conservan; no aparece un sustituto ni recursos nuevos.` });

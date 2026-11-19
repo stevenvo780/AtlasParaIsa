@@ -1,0 +1,43 @@
+{
+  "contractVersion": "realismo-v3",
+  "evidenceId": "initial-state",
+  "kind": "component-manifest",
+  "synthetic": true,
+  "sourceRefs": [],
+  "payload": {
+    "commitId": "manual-initial-cut",
+    "tick": 0,
+    "components": [
+      {
+        "component": "snapshot",
+        "itemId": "manual-initial-state",
+        "sha256": "43c1f13fbb0fa05b23c6ebd108cc3bc36e566ca532eb0d6c5768d817a529ba23",
+        "count": 1
+      }
+    ],
+    "confirmedOrderIds": [],
+    "historyUnknownPrefixRef": null
+  },
+  "fieldCoverage": {
+    "commitId": {
+      "status": "observed",
+      "reason": "manual synthetic fact"
+    },
+    "tick": {
+      "status": "observed",
+      "reason": "manual synthetic fact"
+    },
+    "components": {
+      "status": "observed",
+      "reason": "manual synthetic fact"
+    },
+    "confirmedOrderIds": {
+      "status": "observed",
+      "reason": "manual synthetic fact"
+    },
+    "historyUnknownPrefixRef": {
+      "status": "observed",
+      "reason": "manual synthetic fact"
+    }
+  }
+}

@@ -1,0 +1,41 @@
+# Ownership R2 después de G0
+
+Asignación root 2026-10-04, tras peer y formal v3. Un escritor por archivo; ningún autor modifica documentos congelados ni el manifiesto original. Fuente `/datos/tmp-atlas-lab/orquestacion-20261003/criterios-autor/R1-FROZEN-v3-MANIFEST.json` SHA `faaac25fb0ace210103eb5a19f12b4be8a0fac009b4635a6bb9a9a880714ef54` (87 pins + fingerprint conservados fuera del worktree). Cuenta principal compartida torre/Fedora: root reportó 53% semanal restante a 03:24 UTC; secundaria funcional, cuota DESCONOCIDA. No son licencias por máquina.
+
+| Autor | Cuenta/modelo | Archivos / momento |
+|---|---|---|
+| Integrador actual | Codex principal; GPT-6.1 Sol high | main PLAN.md; feature.json; tasks/checklist G0; este ownership; scripts/lab/realismo-contract.ts; tests/realismo-contract.test.ts; validation-r2.md; package.json/package-lock/node_modules privados únicamente del worktree, Ajv/jsonc autorizados root |
+| Observador futuro | Codex principal; Sol high, asignación separada posterior | tests/realismo-observer.test.ts, scripts/lab/realismo-observer.ts, scripts/lab/instrumentos.ts, scripts/lab/replica.ts, tests/realismo-paridad.test.ts; **bloqueado por G1** |
+| Evaluador futuro | Codex secundaria explícita; Sol high, cuota desconocida | tests/fixtures/realismo/v3, tests/realismo-evaluator.test.ts, scripts/lab/realismo-evaluator.ts, scripts/lab/realismo-panel.ts, scripts/lab/criterio-realismo.mts; **bloqueado por G1** |
+| Root/revisor | Principal Sol high | Coordinación, revisión independiente, autorización de gates; recibos ajenos aportados por artefactos separados, validation-r2 sólo integrador |
+
+Worktree: `/datos/workspaces/personal/AtlasParaIsa-anexo/worktrees/criterios-realismo-20261003`, rama codex/criterios-realismo-20261003, HEAD bb483260b2489fe62b113d620e5f56e5f3676dbc. Metadata oficial SPECIFY_FEATURE=003-criterios-realismo y SPECIFY_FEATURE_DIRECTORY=specs/003-criterios-realismo persistida por check-prerequisites. Canon, perfil, schemas e índice R1 permanecen intactos. Esta reserva no inicia los autores futuros ni cambia su cuenta automáticamente.
+
+G1 torre: slice agregada propia 24 CPU/32 GiB, guard global 80% CPU; job candidato 16 CPU/16 GiB, output 8 GiB/log 128 MiB, TMPDIR=CARTA_DATA_DIR, timeout 1200 para typecheck y suite. Admisión fresca y recibos antes de declararlo ejecutado. No builds ni campañas por G1.
+
+
+## Ownership activo tras ROOT-G1-GO v9c
+
+Root recibió GO-G1 técnico final; T006 cerrado por `validation-r2.md`. Lectura fresca 2026-10-04 15:36 UTC: cuenta principal37% semanal disponible, secundaria DESCONOCIDA. El observer es Sol high principal; evaluator Sol high secundaria explícita conserva cinco áreas disjuntas. Las cuotas no se infieren de la máquina. Los escritores no revierten cambios ajenos. Este delta sustituye las reservas “bloqueado por G1” anteriores sin reescribir su historia.
+
+Observer único, T007–T010: `tests/realismo-observer.test.ts`, `scripts/lab/realismo-observer.ts`, `scripts/lab/instrumentos.ts`, `scripts/lab/replica.ts`, `scripts/lab/realismo-replay.ts` nuevo, `tests/realismo-paridad.test.ts` y sólo estos quince `src`:
+
+- `src/world/observation.ts` (nuevo)
+- `src/world/index.ts`
+- `src/world/spatial.ts`
+- `src/world/inventions.ts`
+- `src/world/technology-memory.ts`
+- `src/world/society.ts`
+- `src/world/ecosystem.ts`
+- `src/world/ecosystem-kernel.ts`
+- `src/world/animals.ts`
+- `src/world/lineage.ts`
+- `src/world/family.ts`
+- `src/world/technology-execution.ts`
+- `src/world/technology-water.ts`
+- `src/world/technology.ts`
+- `src/server/app.ts`
+
+Evaluator secundario conserva exclusivamente `tests/fixtures/realismo/v3/`, `tests/realismo-evaluator.test.ts`, `scripts/lab/realismo-evaluator.ts`, `scripts/lab/realismo-panel.ts`, `scripts/lab/criterio-realismo.mts`. Integrador conserva metadata compartida (`PLAN.md` principal, `specs/003/{plan,ownership-r2,tasks,validation-r2}.md`, `.specify/feature.json`) y bridge/test G1 congelados; no concurrent writer en esas rutas. Root coordina launcher, revisión y gates.
+
+Excluidos: `src/world/halo.ts`, `tests/halo-radios.test.ts`, body/demography/terrain/forest/agua/governor/Store/auth/shared schemas, package/lock y servicio público. Ningún hook altera ley, C1–C8, parámetros, radios, orden o RHS. Cambio de alcance requiere ruta/callsite y decisión root antes de editar. Oráculos manuales antes de hooks; ejecución World/tests/typecheck/build sólo por launcher.

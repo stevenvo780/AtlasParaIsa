@@ -1,0 +1,36 @@
+{
+  "contractVersion": "realismo-v3",
+  "evidenceId": "memory-provenance",
+  "kind": "source-metadata",
+  "synthetic": true,
+  "sourceRefs": [],
+  "payload": {
+    "sourceSHA": "0000000000000000000000000000000000000000",
+    "sourcePath": "manual-synthetic-design",
+    "sourceLocation": "C23-pass-01",
+    "sha256": "a37f5288c7d77d29be866602928218dd5ad7bc3d86c9bd42f433281912b6bf27",
+    "role": "receipt-provenance"
+  },
+  "fieldCoverage": {
+    "sourceSHA": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "sourcePath": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "sourceLocation": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "sha256": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    },
+    "role": {
+      "status": "observed",
+      "reason": "synthetic manual fact"
+    }
+  }
+}

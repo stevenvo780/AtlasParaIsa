@@ -1,0 +1,531 @@
+{
+  "contractVersion": "realismo-v3",
+  "status": "DOCUMENTARY_NOT_EXECUTED",
+  "files": [
+    {
+      "file": "params.json",
+      "schema": "evidence.schema.json",
+      "validationLayer": "structural",
+      "expected": "VALID",
+      "purpose": "Typed synthetic wire; no personal receipt or empirical result",
+      "sha256": "c038ce62922dfcc1b602d25b00e929a6e0e9f01c14510feffbfa806dacd2a1f2"
+    },
+    {
+      "file": "inputs.json",
+      "schema": "evidence.schema.json",
+      "validationLayer": "structural",
+      "expected": "VALID",
+      "purpose": "Typed synthetic wire; no personal receipt or empirical result",
+      "sha256": "98943ee085665843aca76b38140527ad3d0f9c241a873eb978453338ed1b1974"
+    },
+    {
+      "file": "governor.json",
+      "schema": "evidence.schema.json",
+      "validationLayer": "structural",
+      "expected": "VALID",
+      "purpose": "Typed synthetic wire; no personal receipt or empirical result",
+      "sha256": "95941afe7acab29ba468ecda6d9f2d3b937081fcfae31450b755df39fddb0251"
+    },
+    {
+      "file": "registration.json",
+      "schema": "evidence.schema.json",
+      "validationLayer": "structural",
+      "expected": "VALID_PARTIAL",
+      "purpose": "Typed synthetic wire; no personal receipt or empirical result",
+      "sha256": "ceb0b8761891793e05694877d78b874eb8cc7266ed53ba2f93f3cb4fe463fe91"
+    },
+    {
+      "file": "host.json",
+      "schema": "evidence.schema.json",
+      "validationLayer": "structural",
+      "expected": "VALID_PARTIAL",
+      "purpose": "Typed synthetic wire; no personal receipt or empirical result",
+      "sha256": "450d832226ca44c04d6d06ee398633f27f9c176f1b2a50525c3cd8e52a498344"
+    },
+    {
+      "file": "effect.json",
+      "schema": "evidence.schema.json",
+      "validationLayer": "structural",
+      "expected": "VALID_PARTIAL",
+      "purpose": "Typed synthetic wire; no personal receipt or empirical result",
+      "sha256": "ea037bdb4a2e69e9023d218f7b5987dbc64251e6bca6d78986999dd7961ebbbc"
+    },
+    {
+      "file": "law.json",
+      "schema": "evidence.schema.json",
+      "validationLayer": "structural",
+      "expected": "VALID",
+      "purpose": "Typed synthetic wire; no personal receipt or empirical result",
+      "sha256": "cc8078678aea133cf1508e1935fd93e7a2e5fa5be4eb07edad653dfcab1ed0c5"
+    },
+    {
+      "file": "order.json",
+      "schema": "evidence.schema.json",
+      "validationLayer": "structural",
+      "expected": "VALID",
+      "purpose": "Typed synthetic wire; no personal receipt or empirical result",
+      "sha256": "390909e5fd23826cb268712e37c8212faca0ff2bfc4b7fdfff9871b2b7c62019"
+    },
+    {
+      "file": "gates-accepted.json",
+      "schema": "evidence.schema.json",
+      "validationLayer": "structural",
+      "expected": "VALID",
+      "purpose": "Typed synthetic wire; no personal receipt or empirical result",
+      "sha256": "3514f9881f51f8682bbaaf6bf3cecb7d67eff43db6c3c741ca459a9ec022061d"
+    },
+    {
+      "file": "gates-rejected.json",
+      "schema": "evidence.schema.json",
+      "validationLayer": "structural",
+      "expected": "VALID",
+      "purpose": "Typed synthetic wire; no personal receipt or empirical result",
+      "sha256": "34fbf90cfddf4bac816aef2b8bb588e0336c50754ba7eee0c31192c7116b783d"
+    },
+    {
+      "file": "reproduction-coverage.json",
+      "schema": "evidence.schema.json",
+      "validationLayer": "structural",
+      "expected": "VALID",
+      "purpose": "Typed synthetic wire; no personal receipt or empirical result",
+      "sha256": "a4285ae92cd335aae4dd2809e58239f4d6e1f211b0c2c858222cce07586862b2"
+    },
+    {
+      "file": "memory-inventory.json",
+      "schema": "evidence.schema.json",
+      "validationLayer": "structural",
+      "expected": "VALID",
+      "purpose": "Typed synthetic wire; no personal receipt or empirical result",
+      "sha256": "ea36cc0072ec01bafdd6d3ee2b52de433ca361050947fb70b70d6fbe292ebdcc"
+    },
+    {
+      "file": "memory-authorization.json",
+      "schema": "evidence.schema.json",
+      "validationLayer": "structural",
+      "expected": "VALID",
+      "purpose": "Typed synthetic wire; no personal receipt or empirical result",
+      "sha256": "b9b434bd4c58f6089dfea7a0f542ef65d38cbfd251da25fd78a61d03c7c78d96"
+    },
+    {
+      "file": "memory-manifest.json",
+      "schema": "evidence.schema.json",
+      "validationLayer": "structural",
+      "expected": "VALID",
+      "purpose": "Typed synthetic wire; no personal receipt or empirical result",
+      "sha256": "44f0833137406de1d4b9f27244c88d885f56b5bd073001ca547a599c34eed1c4"
+    },
+    {
+      "file": "memory-provenance.json",
+      "schema": "evidence.schema.json",
+      "validationLayer": "structural",
+      "expected": "VALID",
+      "purpose": "Typed synthetic wire; no personal receipt or empirical result",
+      "sha256": "4257bae2cf83174613951bb9ad007806a40da62ff1d7be2175b80f16bbf4c278"
+    },
+    {
+      "file": "synthetic-review.json",
+      "schema": "evidence.schema.json",
+      "validationLayer": "structural",
+      "expected": "VALID",
+      "purpose": "Typed synthetic wire; no personal receipt or empirical result",
+      "sha256": "c8c0fe3e57315e32121852c5429da8fa94c164a67b6dd11023f8bb485dc99315"
+    },
+    {
+      "file": "partial-observation.json",
+      "schema": "observation.schema.json",
+      "validationLayer": "structural",
+      "expected": "VALID_PARTIAL",
+      "purpose": "Missing baseline preserves C10 service violation probe; server nofps and kernel no warmup retained. Protection/capacity/coverage UNKNOWN; no evaluated PASS.",
+      "sha256": "1a24b60d186d486dac66e8284fea14f7413548dc21968732672129479c7f8865"
+    },
+    {
+      "file": "evaluation-partial.json",
+      "schema": "evaluation.schema.json",
+      "validationLayer": "structural",
+      "expected": "VALID",
+      "purpose": "Manual output illustrates retained FAIL with UNKNOWN,16 distinct criteria",
+      "sha256": "ef6f8e3f33a990e96a5eee18e83212590938c284e0d79f1302ded5e5b2def564"
+    },
+    {
+      "file": "negative-capabilities-duplicate.json",
+      "schema": "observation.schema.json",
+      "validationLayer": "structural",
+      "expected": "REJECT",
+      "purpose": "22 same-family capabilities",
+      "sha256": "07c10346b4d699fcb5f6b51a8e649bbde9866237e7be5ee3b99579693f2a99f8"
+    },
+    {
+      "file": "negative-record-duplicate.json",
+      "schema": "observation.schema.json",
+      "validationLayer": "semantic",
+      "expected": "REJECT",
+      "purpose": "Duplicate recordId and (epochId,streamId,seq)",
+      "sha256": "8b9b29b7a494c7695ff52fbd65677081b7bc5718786f392f2c1662c716b878dd"
+    },
+    {
+      "file": "negative-complete-inconsistent.json",
+      "schema": "observation.schema.json",
+      "validationLayer": "semantic",
+      "expected": "REJECT",
+      "purpose": "COMPLETE impossible range/count/fields",
+      "sha256": "991292f6d450aa2efbde605be8140396de25bc2ab8df8dbaca2b459c09369555"
+    },
+    {
+      "file": "negative-field-coverage.json",
+      "schema": "observation.schema.json",
+      "validationLayer": "semantic",
+      "expected": "REJECT",
+      "purpose": "Observed baseline missing property",
+      "sha256": "fe58efc99cdb75991214954f4241663030a8e28cd24c4a2502ea9c54cf705fc2"
+    },
+    {
+      "file": "negative-quantum-fraction.json",
+      "schema": "observation.schema.json",
+      "validationLayer": "structural",
+      "expected": "REJECT",
+      "purpose": "Fractional quanta",
+      "sha256": "2fb04fdbbc6bddbdaaae93a42180ef8101892452809f2a52eae0b74484cb3564"
+    },
+    {
+      "file": "negative-quantum-unsafe.json",
+      "schema": "observation.schema.json",
+      "validationLayer": "structural",
+      "expected": "REJECT",
+      "purpose": "Unsafe integer quanta",
+      "sha256": "eef927352fe4c21a6eb4fe39d348c41a169925c2619b631e9352779f1b1807b9"
+    },
+    {
+      "file": "negative-accepted-decisive.json",
+      "schema": "observation.schema.json",
+      "validationLayer": "structural",
+      "expected": "REJECT",
+      "purpose": "accepted with nonnull decisiveGate",
+      "sha256": "97a90e9f6f7f1f2db1491ba8e38b71cf133e8aed7de0448bfcf06e9886e83808"
+    },
+    {
+      "file": "negative-rejected-null.json",
+      "schema": "observation.schema.json",
+      "validationLayer": "structural",
+      "expected": "REJECT",
+      "purpose": "rejected decisiveGate cannot be observed null",
+      "sha256": "211bf9a2091d0d266afb728b58ae3190d8ac91ec8a5145b1968f01468e75168a"
+    },
+    {
+      "file": "negative-evaluation-16C9.json",
+      "schema": "evaluation.schema.json",
+      "validationLayer": "structural",
+      "expected": "REJECT",
+      "purpose": "16 C9 results instead of C9–C24",
+      "sha256": "ef6514e4d294afcd6950c2534620a87cb14c93cf64c585ce8c68092ed54088aa"
+    },
+    {
+      "file": "negative-nan.json.txt",
+      "schema": null,
+      "validationLayer": "parser-runtime",
+      "expected": "REJECT",
+      "purpose": "Strict JSON parser/finite runtime; not a JSON-schema-only claim",
+      "sha256": "c99765960ef2411a38ac2f6468d98be75c4ae741b407bebbdcff55509443d3e0"
+    },
+    {
+      "file": "negative-infinity.json.txt",
+      "schema": null,
+      "validationLayer": "parser-runtime",
+      "expected": "REJECT",
+      "purpose": "Strict JSON parser/finite runtime; not a JSON-schema-only claim",
+      "sha256": "d360272c1a4f888e95495a8b74826c541a37a5f3251c13107b26d5800032c733"
+    },
+    {
+      "file": "negative-duplicate-keys.json.txt",
+      "schema": null,
+      "validationLayer": "parser-runtime",
+      "expected": "REJECT",
+      "purpose": "Strict JSON parser/finite runtime; not a JSON-schema-only claim",
+      "sha256": "b9ff2dc22c33a908c289dfc24e2e27298162df0887d51cd8b5929f23dfc53d7a"
+    },
+    {
+      "file": "negative-overflow.json.txt",
+      "schema": null,
+      "validationLayer": "parser-runtime",
+      "expected": "REJECT",
+      "purpose": "Strict JSON parser/finite runtime; not a JSON-schema-only claim",
+      "sha256": "958e25f168a6e6772ea26c9ec84bea1cabc6ecc6c7bb1ff570092301d4f149ee"
+    },
+    {
+      "file": "unknown-source-order.json",
+      "schema": "observation.schema.json",
+      "validationLayer": "semantic",
+      "expected": "UNKNOWN_CAUSAL_SUBGATES",
+      "purpose": "No observed phase order; end stock/net cannot substitute event order",
+      "sha256": "1f7e51075586a1c76858d6e0c372de5f323472ec603563a415313f6ba404a942"
+    },
+    {
+      "file": "causal-pair-c11.json",
+      "schema": "evidence.schema.json",
+      "validationLayer": "structural",
+      "expected": "VALID_PARTIAL",
+      "purpose": "Wire pair with explicit reference/removal/restoration windows; manifests/bundles materialized in crossrun-input.v3.json, service/stock/exposure ledgers still designed, current causal gate UNKNOWN. Synthetic positive expected needs their complete materialization.",
+      "sha256": "3f91d833adcb273710b7502d49898b08908908fd9537abe54bbca059a77ec1d5"
+    },
+    {
+      "file": "causal-pair-c17.json",
+      "schema": "evidence.schema.json",
+      "validationLayer": "structural",
+      "expected": "VALID_PARTIAL",
+      "purpose": "Wire pair with explicit reference/removal/restoration windows; manifests/bundles materialized in crossrun-input.v3.json, service/stock/exposure ledgers still designed, current causal gate UNKNOWN. Synthetic positive expected needs their complete materialization.",
+      "sha256": "75b3532d9ccd823bd666e46bff2db7f012139ad2c6dd4d4a217bbf2f81284c27"
+    },
+    {
+      "file": "order-unavailable.json",
+      "schema": "evidence.schema.json",
+      "validationLayer": "structural",
+      "expected": "VALID_PARTIAL",
+      "purpose": "Typed source with no phase/event trace, causal subgate UNKNOWN; no invented seq as order",
+      "sha256": "19bec2603d29ddfc3e12c553fcd75396dc3d676abbe2508339c34a2c61b31494"
+    },
+    {
+      "file": "bundle-control.v3.json",
+      "schema": "observation.schema.json",
+      "validationLayer": "structural",
+      "expected": "VALID_PARTIAL",
+      "purpose": "Manual support/structural fixture for one of the two scoped v3 fixes",
+      "sha256": "34c25f783af0818092b29a52693d7d7cb5a54a3bad6bb66dce2bac12a5917f98"
+    },
+    {
+      "file": "bundle-treatment.v3.json",
+      "schema": "observation.schema.json",
+      "validationLayer": "structural",
+      "expected": "VALID_PARTIAL",
+      "purpose": "Manual support/structural fixture for one of the two scoped v3 fixes",
+      "sha256": "dd02c0206f261199d6a48291968cfb02d5e038bbd2bbd5fb05e234d543ba9b3b"
+    },
+    {
+      "file": "condition-inputs-service.v3.json",
+      "schema": "observation.schema.json",
+      "validationLayer": "semantic",
+      "expected": "BALANCE_CLOSED_C10_FAIL_BASELINE_UNKNOWN",
+      "purpose": "Exact event-bound law-inputs condition alternative",
+      "sha256": "6747a7f0e0aac0525f71c6bacad8c39564acb4b32317b2d4d236f1cb05da4a6a"
+    },
+    {
+      "file": "condition-inputs-wrong-event.v3.json",
+      "schema": "evidence.schema.json",
+      "validationLayer": "structural",
+      "expected": "VALID_PARTIAL",
+      "purpose": "Manual support/structural fixture for one of the two scoped v3 fixes",
+      "sha256": "2bc56aa42bee3cb9e6158cd6625666c6491b7f0937a2909b32202108a7bcdeba"
+    },
+    {
+      "file": "condition-inputs.v3.json",
+      "schema": "evidence.schema.json",
+      "validationLayer": "structural",
+      "expected": "VALID_PARTIAL",
+      "purpose": "Manual support/structural fixture for one of the two scoped v3 fixes",
+      "sha256": "0d1ed7d8da9e573bf291fd9dc3719c2f315d21139d7f8e10de66aa506a5ded94"
+    },
+    {
+      "file": "conservation-service.v3.json",
+      "schema": "observation.schema.json",
+      "validationLayer": "semantic",
+      "expected": "BALANCE_CLOSED_C10_FAIL_BASELINE_UNKNOWN",
+      "purpose": "Good partial conservation with an independently backed invalid service at cutoff; no marginal baseline",
+      "sha256": "37bf88a30ae3d41d8e25573e59cb23ee914391f8c7b49f8de2cdd7ebcd3e188b"
+    },
+    {
+      "file": "conversion-matrix.v3.json",
+      "schema": "evidence.schema.json",
+      "validationLayer": "structural",
+      "expected": "VALID_PARTIAL",
+      "purpose": "Manual support/structural fixture for one of the two scoped v3 fixes",
+      "sha256": "e281b939b88c47aa93b408763de9329628fdd03e40ea90fb3ca8746c93cae6d3"
+    },
+    {
+      "file": "crossrun-input.v3.json",
+      "schema": "observation.schema.json",
+      "validationLayer": "semantic",
+      "expected": "VALID_BINDINGS_CAUSAL_UNKNOWN",
+      "purpose": "Indexed leaves/manifests/evaluation resolve; no causal ledgers executed",
+      "sha256": "ef40d7c9c4f108bfc4ea859c4859700b8af78ec5c066b82c3e6a434a01a2fee1"
+    },
+    {
+      "file": "evaluation-wrong-input.v3.json",
+      "schema": "evaluation.schema.json",
+      "validationLayer": "structural",
+      "expected": "VALID_PARTIAL",
+      "purpose": "Manual support/structural fixture for one of the two scoped v3 fixes",
+      "sha256": "a5fe5ff93405a5cd819c758669aa035ec295092c80db027545ef01c005458349"
+    },
+    {
+      "file": "initial-state.v3.json",
+      "schema": "evidence.schema.json",
+      "validationLayer": "structural",
+      "expected": "VALID_PARTIAL",
+      "purpose": "Manual support/structural fixture for one of the two scoped v3 fixes",
+      "sha256": "2c18d4e74f2261f6d274234db5d27208dcbbdd65f9e786ec01129552e5caec93"
+    },
+    {
+      "file": "law-wrong-sha.v3.json",
+      "schema": "evidence.schema.json",
+      "validationLayer": "structural",
+      "expected": "VALID_PARTIAL",
+      "purpose": "Manual support/structural fixture for one of the two scoped v3 fixes",
+      "sha256": "cae403205076d6dc81d2b6d0f7a942f1158a93f7e215ada1ab15f687039fd3e7"
+    },
+    {
+      "file": "negative-bundle-epoch.v3.json",
+      "schema": "observation.schema.json",
+      "validationLayer": "semantic",
+      "expected": "REJECT_BINDING",
+      "purpose": "Manifest and leaf epochId contradict",
+      "sha256": "1b4cf1e2c15f888f029042d20180abdbb882ca1d33cee4bec4f55a11085cd936"
+    },
+    {
+      "file": "negative-bundle-kind.v3.json",
+      "schema": "observation.schema.json",
+      "validationLayer": "structural",
+      "expected": "REJECT",
+      "purpose": "Manual support/structural fixture for one of the two scoped v3 fixes",
+      "sha256": "118ab5e84a63579f4c826f942d748b6bf2ec791fab0edb177a0f26b821af5e57"
+    },
+    {
+      "file": "negative-bundle-ref-absent.v3.json",
+      "schema": "observation.schema.json",
+      "validationLayer": "semantic",
+      "expected": "REJECT_BINDING",
+      "purpose": "Manifest observationRef has no indexed leaf",
+      "sha256": "f782f37ca12f3f56e62e9e1ff9e94c3e3ab419d6769c8d38b8a0c54276fe7007"
+    },
+    {
+      "file": "negative-bundle-role.v3.json",
+      "schema": "observation.schema.json",
+      "validationLayer": "semantic",
+      "expected": "REJECT_BINDING",
+      "purpose": "Manifest and leaf artifactRole contradict",
+      "sha256": "74fdee5e3b85b8276949b9ab36c2ad9def8a192afbc87333f4f6ae8e40b0db0e"
+    },
+    {
+      "file": "negative-bundle-run.v3.json",
+      "schema": "observation.schema.json",
+      "validationLayer": "semantic",
+      "expected": "REJECT_BINDING",
+      "purpose": "Manifest and leaf runId contradict",
+      "sha256": "6022c6297e5ef15981498d25a3084334163da8375504572d7ec3e8c133cef8df"
+    },
+    {
+      "file": "negative-bundle-schema.v3.json",
+      "schema": "observation.schema.json",
+      "validationLayer": "structural",
+      "expected": "REJECT",
+      "purpose": "Manual support/structural fixture for one of the two scoped v3 fixes",
+      "sha256": "ef719f965ff97ec712d8380a7cf9b28b4ca402e824f0b3a162fb376b62248bc8"
+    },
+    {
+      "file": "negative-condition-input-event.v3.json",
+      "schema": "observation.schema.json",
+      "validationLayer": "semantic",
+      "expected": "UNKNOWN_CAUSAL_SUBGATES",
+      "purpose": "law-inputs has right tick but wrong event",
+      "sha256": "030bcd96f6b300688568f3b484346315bce1ea8ef9d97a6699d474e5c69beb18"
+    },
+    {
+      "file": "negative-evaluation-input.v3.json",
+      "schema": "observation.schema.json",
+      "validationLayer": "semantic",
+      "expected": "REJECT_BINDING",
+      "purpose": "Evaluation epoch contradicts indexed input",
+      "sha256": "c8f7d5112f84f883f2fe3e68ddc5b1bc0efb20f7da35528ab901924b39f41820"
+    },
+    {
+      "file": "order-wrong-sha.v3.json",
+      "schema": "evidence.schema.json",
+      "validationLayer": "structural",
+      "expected": "VALID_PARTIAL",
+      "purpose": "Manual support/structural fixture for one of the two scoped v3 fixes",
+      "sha256": "2be10f198a2dc47fd77b2192f1e488208a07bbe27476be33dfcb6a391ef71667"
+    },
+    {
+      "file": "run-manifest-control.v3.json",
+      "schema": "evidence.schema.json",
+      "validationLayer": "structural",
+      "expected": "VALID_PARTIAL",
+      "purpose": "Manual support/structural fixture for one of the two scoped v3 fixes",
+      "sha256": "c073ac49f88ce4c9b5baeb5695ab5ed58af75b51605e2b063f697880ef633d49"
+    },
+    {
+      "file": "run-manifest-treatment.v3.json",
+      "schema": "evidence.schema.json",
+      "validationLayer": "structural",
+      "expected": "VALID_PARTIAL",
+      "purpose": "Manual support/structural fixture for one of the two scoped v3 fixes",
+      "sha256": "ee3ac192fad2d5db117aaa22c71af2656f4b95abad5e6c31881bcf804c8cc7fa"
+    },
+    {
+      "file": "run-manifest-wrong-epoch.v3.json",
+      "schema": "evidence.schema.json",
+      "validationLayer": "structural",
+      "expected": "VALID_PARTIAL",
+      "purpose": "Manual support/structural fixture for one of the two scoped v3 fixes",
+      "sha256": "f1ad1c0a29163e30091f8ea33ae8ca17a62510bf8c07b7dec84445d3c50babdf"
+    },
+    {
+      "file": "run-manifest-wrong-role.v3.json",
+      "schema": "evidence.schema.json",
+      "validationLayer": "structural",
+      "expected": "VALID_PARTIAL",
+      "purpose": "Manual support/structural fixture for one of the two scoped v3 fixes",
+      "sha256": "fc807ee79c35b815f1b0ba57e61c7d19939d2816c0d264f055826d830af9cd57"
+    },
+    {
+      "file": "run-manifest-wrong-run.v3.json",
+      "schema": "evidence.schema.json",
+      "validationLayer": "structural",
+      "expected": "VALID_PARTIAL",
+      "purpose": "Manual support/structural fixture for one of the two scoped v3 fixes",
+      "sha256": "a65c56c8843ca5170daad110900979d04c009ed0a70716c2bfc66557922cb74b"
+    },
+    {
+      "file": "unknown-law-sha.v3.json",
+      "schema": "observation.schema.json",
+      "validationLayer": "semantic",
+      "expected": "UNKNOWN_CAUSAL_SUBGATES",
+      "purpose": "Law SHA differs; indexed bytes themselves are intact",
+      "sha256": "95578641120fe25d1c6cdd95b6076485821fed6ed09a3aa63090a1b2e902b7d4"
+    },
+    {
+      "file": "unknown-order-sha.v3.json",
+      "schema": "observation.schema.json",
+      "validationLayer": "semantic",
+      "expected": "UNKNOWN_CAUSAL_SUBGATES",
+      "purpose": "Source-order SHA differs; indexed bytes themselves are intact",
+      "sha256": "9a8ac563f424d81d17cfd024266ba254ead281b82bf378ef99f70bf7f5307667"
+    },
+    {
+      "file": "unknown-service-condition-event.v3.json",
+      "schema": "observation.schema.json",
+      "validationLayer": "semantic",
+      "expected": "UNKNOWN_CAUSAL_SUBGATES",
+      "purpose": "Earlier wear event cannot substitute service condition",
+      "sha256": "2799bdedef087b5ec7815e8d2f7db5b4d2bc87419c3ee5dba829e7f30d3a6861"
+    },
+    {
+      "file": "unknown-service-order.v3.json",
+      "schema": "observation.schema.json",
+      "validationLayer": "semantic",
+      "expected": "UNKNOWN_CAUSAL_SUBGATES",
+      "purpose": "Order reference intentionally absent",
+      "sha256": "8f8c8b79aa099b596ee4cac828aaa45eb1a2933cb6056349f1e5b723955a84f5"
+    }
+  ],
+  "reviewDesigns": "review-cases-supplement.v3.json",
+  "scientificDesignCounts": {
+    "criteria": 16,
+    "cases": 48,
+    "transverse": 8
+  },
+  "mandatoryR2": "Run structural validator and independent semantic/parser fixtures plus expand48+8 with all remaining required subgates; no schema alone gate",
+  "interfaceStatus": "FROZEN_FOR_PEER_FORMAL_NOT_SEALED",
+  "reviewDesignsSHA256": "1be74eb67cf2501072426ea9d5a0c19b259ebadbc4c949516258709dbfb8ac9c",
+  "manualOracle": "g1-cases.v3.json",
+  "manualOracleSHA256": "abfdc403c29983d4cc681b514f4a8d8cd599d76f0e08581bde3d28723038be2c",
+  "filesAggregateFormat": "UTF-8: file + TAB + sha256 + LF, sorted by file; SHA-256",
+  "filesAggregateSHA256": "a5374e7b5d01250b32cc40539c70f2a7d1ac8842bfeeed59bb87e1af0e3dc8b3"
+}

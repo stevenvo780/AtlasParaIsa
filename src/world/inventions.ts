@@ -8,6 +8,7 @@ import { INTERVALO_ECOLOGIA_TICKS, SED_POR_UNIDAD } from './ecologia-constantes.
 import { algunoCerca, filtrarCerca } from './indice-puntos.js';
 import { esMiembro, techoDelArchivo } from './indices.js';
 import { vecinos } from './rejilla.js';
+import { emitObserved } from './observation.js';
 
 type Emit = (event: Omit<ChronicleEvent, 'id' | 'tick'>) => ChronicleEvent;
 type Point = { x: number; y: number };
@@ -324,6 +325,8 @@ export function invent(world: World, person: Person, emit: Emit): boolean {
   world.inventionDynamics.attempts++;
   const candidate = world.blueprints.length < MAX_BLUEPRINTS ? chooseInvention(world, person) : undefined;
   if (!candidate) {
+    emitObserved(world, 'inventions.paid-trial', () => ({ kind: 'invention-paid-trial', actorId: person.id,
+      woodDebit: 1, workDebit: RESEARCH_WORK, success: false, blueprintId: null }));
     person.reason = 'El ensayo consumió una madera y sesenta unidades de trabajo; no produjo una receta novedosa y útil.';
     return false;
   }
@@ -332,6 +335,9 @@ export function invent(world: World, person: Person, emit: Emit): boolean {
     generation: Math.max(0, ...parents.map(b => b.generation)) + 1, parents: parents.map(b => b.id), inventorId: person.id, tick: world.tick,
     uses: 0, usefulness: 0, cost: blueprintCost(candidate.components) };
   world.blueprintCounter = identity.counter; world.blueprints.push(blueprint); person.blueprintId = blueprint.id; world.inventionDynamics.accepted++;
+  emitObserved(world, 'inventions.paid-trial', () => ({ kind: 'invention-paid-trial', actorId: person.id,
+    woodDebit: 1, workDebit: RESEARCH_WORK, success: true, blueprintId: blueprint.id,
+    parentIds: blueprint.parents }));
   const event = emit({ kind: 'invention', actors: [person.id], x: person.x, y: person.y, source: 'simulation',
     text: `${person.name} ideó ${blueprint.name.toLocaleLowerCase('es')}, generación ${blueprint.generation}.`,
     cause: `Ensayo real: −1 madera y ${RESEARCH_WORK} trabajo; selección Pareto entre combinaciones válidas; receta cultural derivada de ${blueprint.parents.join(', ')}. La utilidad deberá comprobarse al usarla.` });
@@ -352,6 +358,10 @@ export function completeConstruction(world: World, person: Person, tile: Tile, e
   const structure: StructureView = { id: identity.id, x: tile.x, y: tile.y, blueprintId: blueprint.id, name: blueprint.name,
     components: [...blueprint.components], condition: 1, water: 0, food: 0, uses: 0, builtAt: world.tick, builderId: person.id };
   world.structures.push(structure); tile.terrain = 'shelter'; world.settlementCount++;
+  emitObserved(world, 'inventions.construction', () => ({ family: 'structure', actorIds: [person.id],
+    x: tile.x, y: tile.y, woodDebit: cost.wood, stoneDebit: cost.stone,
+    payload: { structureId: structure.id, creationTick: world.tick, blueprintId: blueprint.id,
+      condition: structure.condition, constructionWork: cost.work } }));
   const place = { id: `settlement-${tile.x}-${tile.y}`, name: blueprint.name, x: tile.x, y: tile.y,
     description: `Construido por ${person.name}; componentes ${blueprint.components.join(', ')}.`, gatherings: 0 };
   world.places.push(place); world.chunks[chunkKey(tile.x, tile.y)]?.places.push(place);
@@ -384,6 +394,10 @@ export function takeFood(world: World, person: Point, requested: number): number
     if (!blueprintAffordances(structure.components).foodCapacity) continue;
     const amount = Math.min(structure.food, requested - taken);
     structure.food -= amount; taken += amount; world.inventionDynamics.foodTaken += amount;
+    if (amount > 0) emitObserved(world, 'inventions.take-food', () => ({ kind: 'structure-food-debit',
+      structureId: structure.id, actorId: 'id' in person ? (person as Person).id : null, amount,
+      consumptionId: 'id' in person ? `eat:${world.tick}:${(person as Person).id}` : null,
+      condition: structure.condition }));
     if (esMiembro(world.people, member, world.tick) && member.action === 'eat' && member.hunger > 0) observeUse(world, structure, amount * 10);
     if (taken >= requested) break;
   }
@@ -404,11 +418,17 @@ export function takeWater(world: World, person: Person, requested: number): numb
   const tile = tileAt(world, person); if (!tile) return 0;
   const needed = Math.min(requested, person.thirst / SED_POR_UNIDAD), ambient = Math.min(tile.drinkingWater ?? 0, needed);
   tile.drinkingWater = (tile.drinkingWater ?? 0) - ambient;
+  if (ambient > 0) emitObserved(world, 'inventions.take-water-ambient', () => ({ kind: 'ambient-water-debit',
+    actorId: person.id, x: tile.x, y: tile.y, amount: ambient,
+    consumptionId: `drink:${world.tick}:${person.id}` }));
   let taken = ambient;
   for (const structure of functionalNear(world, person, 0.5)) {
     if (blueprintAffordances(structure.components).waterCapacity <= 0) continue;
     const amount = Math.min(structure.water, needed - taken);
     structure.water -= amount; taken += amount;
+    if (amount > 0) emitObserved(world, 'inventions.take-water-cistern', () => ({ kind: 'cistern-water-debit',
+      actorId: person.id, structureId: structure.id, amount, condition: structure.condition,
+      consumptionId: `drink:${world.tick}:${person.id}` }));
     observeUse(world, structure, amount * 15);
     if (taken >= needed) break;
   }
@@ -445,8 +465,13 @@ export function recordFacilityRest(world: World, person: Person, before?: Pick<P
   // Rounding at saturation must not fabricate an incremental benefit.
   if (quality <= outdoor || benefit <= 1e-12) return;
   const fuel = hearthFuel(world, person, structure), unheated = Math.max(outdoor, blueprintAffordances(structure.components).restQuality * structure.condition);
-  if (fuel > 0 && person.materials.wood >= fuel && extra(unheated) > 1e-12) person.materials.wood -= fuel;
+  const paidFuel = fuel > 0 && person.materials.wood >= fuel && extra(unheated) > 1e-12;
+  if (paidFuel) person.materials.wood -= fuel;
   observeUse(world, structure, benefit / (REST_FATIGUE_RATE + REST_ENERGY_RATE));
+  emitObserved(world, 'inventions.rest-benefit', () => ({ kind: 'shelter-recovery-applied',
+    structureId: structure.id, actorId: person.id, conditionAtService: structure.condition,
+    measuredExtra: benefit, outdoorBaselineQuality: outdoor, serviceQuality: quality,
+    fuelDebit: paidFuel ? fuel : 0 }));
 }
 
 export function repairOpportunity(world: World, person: Person): StructureView | undefined {
@@ -456,7 +481,12 @@ export function repairOpportunity(world: World, person: Person): StructureView |
 }
 export function repair(world: World, person: Person, structure: StructureView, emit: Emit): boolean {
   if (!world.structures.includes(structure) || structure.condition >= REPAIR_CONDITION_LIMIT || distance(person, structure) > 1.5 || person.materials.wood < 1 || person.work < REPAIR_WORK) return false;
+  const conditionBefore = structure.condition;
   person.materials.wood--; person.work -= REPAIR_WORK; structure.condition = clamp(structure.condition + 0.4); world.inventionDynamics.repairs++;
+  emitObserved(world, 'inventions.repair', () => ({ family: 'repair', actorIds: [person.id],
+    woodDebit: 1,
+    payload: { structureId: structure.id, actorId: person.id, conditionBefore,
+      conditionAfter: structure.condition, paidWork: REPAIR_WORK } }));
   emit({ kind: 'invention', actors: [person.id], x: structure.x, y: structure.y, source: 'simulation', text: `${person.name} reparó ${structure.name.toLocaleLowerCase('es')}.`,
     cause: `Mantenimiento real: −1 madera y ${REPAIR_WORK} trabajo; condición +0,4 hasta un máximo de 1.` });
   return true;
@@ -468,11 +498,17 @@ export function stepStructures(world: World, _emit: Emit): void {
   for (const structure of world.structures) {
     const tile = tileAt(world, structure); if (!tile || tile.terrain !== 'shelter') continue;
     const a = blueprintAffordances(structure.components);
+    const conditionBefore = structure.condition;
     structure.condition = clamp(structure.condition - (world.weather === 'rain' ? 0.00028 : 0.00018) / a.durability);
+    emitObserved(world, 'inventions.condition', () => ({ kind: 'structure-condition', structureId: structure.id,
+      conditionBefore, conditionAfter: structure.condition, weather: world.weather,
+      durability: a.durability, broken: structure.condition <= BROKEN_CONDITION }));
     if (structure.condition <= BROKEN_CONDITION) continue;
     if (world.weather === 'rain' && a.waterCapacity > 0) {
       const collected = Math.min(a.waterCapacity - structure.water, a.catchment * structure.condition);
       structure.water += Math.max(0, collected); world.inventionDynamics.waterCollected += Math.max(0, collected);
+      if (collected > 0) emitObserved(world, 'inventions.rain-catchment', () => ({ kind: 'structure-water-inflow',
+        structureId: structure.id, amount: collected, waterAfter: structure.water, weather: world.weather }));
     }
     // Production remains stock. Only an actual consumer may turn supply into observed utility.
     if (a.irrigation > 0 && structure.water > 0) {
@@ -482,18 +518,29 @@ export function stepStructures(world: World, _emit: Emit): void {
       for (const [index, garden] of gardens.entries()) {
         const amount = Math.min(budget / (gardens.length - index), 0.75 - garden.moisture);
         garden.moisture += amount; structure.water -= amount; budget -= amount;
+        if (amount > 0) emitObserved(world, 'inventions.irrigation', () => ({ kind: 'structure-irrigation',
+          transferId: `irrigation:${world.tick}:${structure.id}:${index}`, structureId: structure.id,
+          gardenId: `${garden.x},${garden.y}`, amount, waterAfter: structure.water,
+          gardenMoistureAfter: garden.moisture }));
       }
     }
     if (a.foodCapacity > 0) for (const person of vecinos(world, structure, 2.5,
       person => !(distance(person, structure) > 1.5 || person.hunger >= 0.5 || person.inventory <= 0.12))) {
       const deposited = Math.max(0, Math.min(person.inventory - 0.12, a.foodCapacity - structure.food, 0.012));
       person.inventory -= deposited; structure.food += deposited; world.inventionDynamics.foodStored += deposited;
+      if (deposited > 0) emitObserved(world, 'inventions.food-deposit', () => ({ kind: 'structure-food-deposit',
+        structureId: structure.id, actorId: person.id, amount: deposited,
+        actorFoodAfter: person.inventory, structureFoodAfter: structure.food }));
     }
   }
   if (world.tick % 60 === 0 && world.learningEnabled) for (const person of world.people) {
     const context = inventionContext(world, person), current = selectedBlueprint(world, person);
     const value = (b: BlueprintView) => expectedValue(b.components, context) + b.usefulness * 0.12;
     const observed = knownBlueprints(world, person).sort((a, b) => value(b) - value(a) || a.id.localeCompare(b.id))[0];
-    if (observed && observed.id !== current.id && value(observed) > value(current) + 0.025 && person.action !== 'build') person.blueprintId = observed.id;
+    if (observed && observed.id !== current.id && value(observed) > value(current) + 0.025 && person.action !== 'build') {
+      person.blueprintId = observed.id;
+      emitObserved(world, 'inventions.blueprint-selection', () => ({ kind: 'blueprint-selection',
+        actorId: person.id, previousBlueprintId: current.id, selectedBlueprintId: observed.id }));
+    }
   }
 }

@@ -3,10 +3,12 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import type { Gesture, GestureResult } from '../shared/types.js';
-import { assertWorld, bindWorldContext, migrateWorld, TICKS_PER_DAY, type World, type WorldContext } from '../world/index.js';
+import { assertWorld, bindWorldContext, cloneWorld, migrateWorld, stepWorld, TICKS_PER_DAY, type World, type WorldContext } from '../world/index.js';
 import { CHUNK_SIZE, MAX_COORDINATE, type Chunk } from '../world/terrain.js';
 import { assertEcosystemTile, assertChunkLife } from '../world/validation.js';
-import { takeSnapshotParams, SnapshotPhysicalError, SnapshotSemanticError, encodeArchivedChunk, decodeArchivedChunk } from './snapshot.js';
+import { takeSnapshotParams, SnapshotPhysicalError, SnapshotSemanticError, encodeArchivedChunk, decodeArchivedChunk,
+  parseSnapshotJSON, readSnapshotReplay, assertReplayPath, type SnapshotReplay, type SnapshotReplayChange } from './snapshot.js';
+import { digestoCanonico } from '../world/digesto.js';
 import { SnapshotParts, assertSnapshotPartsSchema, SNAPSHOT_INLINE_TILE_LIMIT } from './snapshot-parts.js';
 import type { LegacyRecord } from '../shared/demography.js';
 import { assertLegacyRecord } from '../world/lineage.js';
@@ -21,7 +23,7 @@ import { assertTechnologyCatalogueState, enableTechnologyCatalogue, markTechnolo
   TECHNOLOGY_FUNCTION_WORDS, type TechnologyCatalogueReader } from '../world/technology-catalogue.js';
 import { assertChronicleEvent, assertChronicleJournal, enableChronicleJournal, chronicleSerial, chronicleFailure, chronicleForCommit, EMPTY_CHRONICLE_DIGEST, type ChronicleJournal } from '../world/chronicle-journal.js';
 import { assertTechnology, maintainTechnologyMemory } from '../world/technology.js';
-import { paramsOf, setParams } from '../world/params.js';
+import { paramsOf, parseParams, setParams } from '../world/params.js';
 import { stringifyExact } from '../shared/exact-json.js';
 
 /** Profundidad de recuperación: cada cien guardados el slot 2 hereda la instantánea
@@ -109,6 +111,7 @@ type TechnologyPrune = TechnologyChain & { tick: number; count: number; byKind: 
 type SlotBounds = { tick: number; committed: number; ringTick: number | null };
 const TECHNOLOGY_PRUNED_KEY = 'technology-pruned-v1', TECHNOLOGY_CHAIN_KEY = 'technology-chain-v1';
 const DEEP_CHECKPOINT_SAVES_KEY = 'deep-checkpoint-saves-v1';
+const REPLAY_KEY = 'snapshot-replay-v1:';
 const hexDigest = (value: unknown): value is string => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value);
 const safeCount = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 const technologyCounts = (value: unknown): TechnologyExecutionCounts | null => {
@@ -259,6 +262,8 @@ export class Store {
   private verifiedRecipes = new Map<string, { body: string; uses: number; utility: number; manufactured: number }>();
   private verifiedCatalogue: { totals: TechnologyCatalogueTotals; functions: number[] } | null = null;
   private technologyReads: { limit: number; recipes: Map<string, TechnologyRecipe> } | null = null;
+  private replayCache: { digest: string; world: World; stamp: ChronicleStamp } | null = null;
+  private readonly replayFloors = new Map<string, number>();
   constructor(readonly path: string, options: StoreOptions = {}) {
     validateStoreOptions(options);
     this.readOnly = options.readOnly ?? false;
@@ -453,6 +458,186 @@ export class Store {
       assertTechnology(world);
     });
   }
+  private replayParent(digest: string): string {
+    const row = this.db.prepare('SELECT value FROM main.metadata WHERE key=?').get(REPLAY_KEY + digest) as { value: string } | undefined;
+    if (!row || checksum(row.value) !== digest) throw new SnapshotPhysicalError('Replay parent missing or checksum mismatch.');
+    return row.value;
+  }
+  private committedReplayWorld(world: World): World {
+    const committed = { ...world, retiredChunks: [], retiredLegacy: [],
+      chronicleJournal: chronicleForCommit(world, this.chronicleDigest(world)),
+      technology: technologyCatalogueStateForCommit(technologyStateForCommit(world.technology)) };
+    setParams(committed, paramsOf(world));
+    return committed;
+  }
+  private replayDelta(world: World, node: Extract<SnapshotReplay, { kind: 'delta' }>): World {
+    if (node.tick < world.tick) throw new SnapshotSemanticError('Replay tick regressed. Explicit recovery required.');
+    let input = 0, change = 0;
+    for (const entry of node.inputs) if (entry.result.tick <= world.tick || entry.result.tick > node.tick)
+      throw new SnapshotSemanticError('Replay gesture outside commit. Explicit recovery required.');
+    let lastTick = world.tick;
+    for (const entry of node.changes) {
+      if (entry.tick < lastTick || entry.tick > node.tick) throw new SnapshotSemanticError('Replay dirty timeline is invalid. Explicit recovery required.');
+      lastTick = entry.tick;
+    }
+    for (;;) {
+      while (change < node.changes.length && node.changes[change]!.tick === world.tick) {
+        const entry = node.changes[change++]!;
+        assertReplayPath(entry.path);
+        if (entry.path[0] === '$params') {
+          if (entry.path.length !== 1 || !entry.present || !entry.value || typeof entry.value !== 'object')
+            throw new SnapshotSemanticError('Invalid replay parameter change. Explicit recovery required.');
+          setParams(world, parseParams(entry.value as Record<string, string>, paramsOf(world)));
+          continue;
+        }
+        let parent = world as unknown as Record<string, unknown>;
+        for (const key of entry.path.slice(0, -1)) {
+          if (!Object.hasOwn(parent, key) || !parent[key] || typeof parent[key] !== 'object')
+            throw new SnapshotSemanticError('Replay dirty parent is missing. Explicit recovery required.');
+          parent = parent[key] as Record<string, unknown>;
+        }
+        const key = entry.path.at(-1)!;
+        if (entry.present) parent[key] = JSON.parse(stringifyExact(entry.value));
+        else delete parent[key];
+      }
+      if (world.tick === node.tick) break;
+      const batch: typeof node.inputs = [];
+      while (input < node.inputs.length && node.inputs[input]!.result.tick === world.tick + 1) batch.push(node.inputs[input++]!);
+      if (batch.some((entry, order) => entry.result.order !== order))
+        throw new SnapshotSemanticError('Replay gesture order is invalid. Explicit recovery required.');
+      const results = stepWorld(world, batch.map(entry => entry.gesture), this.context);
+      if (stringifyExact(results) !== stringifyExact(batch.map(entry => entry.result)))
+        throw new SnapshotSemanticError('Replay gesture result mismatch. Explicit recovery required.');
+    }
+    if (input !== node.inputs.length || change !== node.changes.length)
+      throw new SnapshotSemanticError('Replay input timeline is invalid. Explicit recovery required.');
+    const committed = this.committedReplayWorld(world);
+    if (stringifyExact(node.journals) !== stringifyExact({ chronicle: committed.chronicleJournal, technology: committed.technology.journal }))
+      throw new SnapshotSemanticError('Replay journal mismatch. Explicit recovery required.');
+    return committed;
+  }
+  /** Iterative and bounded before any simulation. No partially replayed world is
+   * published, cached or written if a parent, root or execution fails. */
+  private replayWorld(body: string): World {
+    const chain: SnapshotReplay[] = [];
+    let node = readSnapshotReplay(parseSnapshotJSON(body));
+    if (!node) throw new SnapshotSemanticError('Missing replay encoding. Explicit recovery required.');
+    for (;;) {
+      chain.push(node);
+      if (node.kind === 'checkpoint') break;
+      if (chain.length >= DEEP_CHECKPOINT_EVERY_SAVES) throw new SnapshotSemanticError('Replay exceeds 99 commits. Explicit recovery required.');
+      const parent = readSnapshotReplay(parseSnapshotJSON(this.replayParent(node.parent)));
+      if (!parent || parent.depth + 1 !== node.depth || parent.tick > node.tick)
+        throw new SnapshotSemanticError('Replay parent depth or tick mismatch. Explicit recovery required.');
+      node = parent;
+    }
+    if (node.kind !== 'checkpoint') throw new SnapshotSemanticError('Missing replay checkpoint.');
+    let world = this.migrateSnapshot(this.snapshotParts.read(node.body) as World);
+    let root = digestoCanonico(world);
+    for (const entry of chain.reverse()) {
+      if (entry.kind === 'delta') {
+        const changed = entry.tick !== world.tick || entry.changes.length !== 0 || entry.inputs.length !== 0;
+        world = this.replayDelta(world, entry);
+        if (changed) root = digestoCanonico(world);
+      }
+      if (world.version !== entry.rules || world.tick !== entry.tick || root !== entry.root)
+        throw new SnapshotSemanticError('Replay canonical hash mismatch (unmarked page or state). Explicit recovery required.');
+    }
+    return world;
+  }
+  private readSnapshot(body: string): unknown {
+    if (!body.startsWith('{"snapshotReplay":')) return this.snapshotParts.read(body);
+    const world = this.replayWorld(body);
+    // Keep the same decoded transport contract as SnapshotParts: the next
+    // migrateSnapshot owns taking the effective parameters off the record.
+    return { ...world, paramsEncoding: 'params-v1', params: paramsOf(world) };
+  }
+  private prepareReplay(world: World, inputs: { gesture: Gesture; result: GestureResult }[], changes: readonly SnapshotReplayChange[],
+    durableSaves: number): { node: SnapshotReplay; world: World } {
+    const current = this.db.prepare('SELECT body,digest FROM snapshots WHERE slot=0').get() as Row | undefined;
+    const parent = current && checksum(current.body) === current.digest ? readSnapshotReplay(parseSnapshotJSON(current.body)) : null;
+    const committed = this.committedReplayWorld(world), root = digestoCanonico(committed);
+    let candidate: World;
+    if (parent && current && this.slot0Readable !== false) {
+      const node: Extract<SnapshotReplay, { kind: 'delta' }> = { snapshotReplay: 1, rules: world.version, kind: 'delta', tick: world.tick,
+        depth: parent.depth + 1, parent: current.digest, root, inputs: JSON.parse(stringifyExact(inputs)),
+        changes: JSON.parse(stringifyExact(changes)), journals: { chronicle: committed.chronicleJournal, technology: committed.technology.journal } };
+      const cached = this.replayCache;
+      const unchanged = parent.tick === world.tick && !inputs.length && !changes.length;
+      const prior = durableSaves % DEEP_VALIDATION_EVERY_SAVES !== 0 && cached?.digest === current.digest
+        && sameChronicleStamp(cached.stamp, this.chronicleStamp()) ? unchanged ? cached.world : cloneWorld(cached.world, this.context) : this.replayWorld(current.body);
+      candidate = this.replayDelta(prior, node);
+      if ((unchanged ? parent.root : digestoCanonico(candidate)) !== root)
+        throw new SnapshotSemanticError('Replay canonical hash mismatch (unmarked page or state). Snapshot was not written.');
+      if (parent.depth < DEEP_CHECKPOINT_EVERY_SAVES - 1 && durableSaves % DEEP_CHECKPOINT_EVERY_SAVES !== 0) return { node, world: candidate };
+    } else candidate = cloneWorld(committed, this.context);
+    return { node: { snapshotReplay: 1, rules: world.version, kind: 'checkpoint', tick: world.tick, depth: 0, root, body: '' }, world: candidate };
+  }
+  /** Objects and paged checkpoints belong to the three retained heads, including
+   * the old checkpoint needed by previous() at a checkpoint rollover. */
+  private collectSnapshots(): void {
+    const objects = this.db.prepare('SELECT key,value FROM main.metadata WHERE key GLOB ?').all(REPLAY_KEY + '*') as { key: string; value: string }[];
+    if (!objects.length) { this.snapshotParts.collect(); return; }
+    const retained = new Set<string>(), pages = new Set<string>();
+    const visit = (body: string, remaining: number): void => {
+      const node = readSnapshotReplay(parseSnapshotJSON(body));
+      if (node) {
+        if (remaining === 0) throw new SnapshotSemanticError('Replay collection exceeds depth.');
+        const digest = checksum(body);
+        if (retained.has(REPLAY_KEY + digest)) return;
+        retained.add(REPLAY_KEY + digest);
+        if (node.kind === 'delta') visit(this.replayParent(node.parent), remaining - 1);
+        else visit(node.body, remaining - 1);
+      } else {
+        const value = parseSnapshotJSON(body) as { snapshotEncoding?: unknown; tiles?: { pages?: { digest: string }[] } };
+        this.snapshotParts.verify(body);
+        if (value?.snapshotEncoding === 'snapshot-parts-v1') for (const page of value.tiles!.pages!) pages.add(page.digest);
+      }
+    };
+    try {
+      for (const row of this.db.prepare('SELECT body,digest FROM snapshots').all() as Row[]) {
+        if (checksum(row.body) !== row.digest) return;
+        visit(row.body, DEEP_CHECKPOINT_EVERY_SAVES + 1);
+      }
+    } catch (error) {
+      // An unreadable backup is not evidence that it has no references.
+      if (error instanceof SnapshotPhysicalError || error instanceof SnapshotSemanticError) return;
+      throw error;
+    }
+    for (const row of objects) if (!retained.has(row.key)) this.db.prepare('DELETE FROM main.metadata WHERE key=?').run(row.key);
+    this.db.prepare('DELETE FROM main.snapshot_parts WHERE digest NOT IN (SELECT value FROM json_each(?))').run(JSON.stringify([...pages]));
+  }
+  private replayFloor(atTick: number): number | null {
+    let floor = atTick;
+    try {
+      for (const row of this.db.prepare('SELECT body,digest FROM snapshots').all() as Row[]) {
+        if (checksum(row.body) !== row.digest) return null;
+        let node = readSnapshotReplay(parseSnapshotJSON(row.body));
+        if (!node) continue;
+        for (let remaining = DEEP_CHECKPOINT_EVERY_SAVES; node.kind === 'delta'; remaining--) {
+          if (remaining <= 0) return null;
+          const parent = readSnapshotReplay(parseSnapshotJSON(this.replayParent(node.parent)));
+          if (!parent || parent.depth + 1 !== node.depth) return null;
+          node = parent;
+        }
+        const digest = checksum(node.body);
+        let checkpointFloor = this.replayFloors.get(digest);
+        if (checkpointFloor === undefined) {
+          const world = this.snapshotParts.read(node.body) as World;
+          checkpointFloor = world.tick;
+          for (const event of world.events) checkpointFloor = Math.min(checkpointFloor, event.tick);
+          for (const receipt of world.technology.history) checkpointFloor = Math.min(checkpointFloor, receipt.tick);
+          this.replayFloors.set(digest, checkpointFloor);
+          while (this.replayFloors.size > 8) this.replayFloors.delete(this.replayFloors.keys().next().value!);
+        }
+        floor = Math.min(floor, checkpointFloor);
+      }
+    } catch (error) {
+      if (error instanceof SnapshotPhysicalError || error instanceof SnapshotSemanticError) return null;
+      throw error;
+    }
+    return floor;
+  }
   /** C10: leer es una transacción. Una copia en caliente o un guardado de otra
    * conexión ya no puede convertir una lectura correcta en «corrupción»: la
    * instantánea queda congelada durante toda la verificación. */
@@ -507,7 +692,7 @@ export class Store {
       const refuse = (reason: string) => { refusals.push(`slot ${slot}: ${reason}`); supersededAt ??= row.saved_at; };
       if (checksum(row.body) !== row.digest) { refuse('snapshot checksum mismatch'); continue; }
       let decoded: World;
-      try { decoded = this.snapshotParts.read(row.body) as World; }
+      try { decoded = this.readSnapshot(row.body) as World; }
       catch (error) {
         if (!(error instanceof SnapshotPhysicalError)) throw error;
         refuse(error.message); continue;
@@ -577,7 +762,7 @@ export class Store {
     const row = this.db.prepare('SELECT body,digest FROM snapshots WHERE slot=0').get() as Row | undefined;
     if (!row) return this.slot0Readable = true;
     if (checksum(row.body) !== row.digest) return this.slot0Readable = false;
-    try { this.snapshotParts.read(row.body); }
+    try { this.readSnapshot(row.body); }
     catch (error) {
       if (!(error instanceof SnapshotPhysicalError)) throw error;
       return this.slot0Readable = false;
@@ -732,7 +917,7 @@ export class Store {
         if (journal.committedThrough !== journal.startsAfter || journal.committedDigest !== EMPTY_CHRONICLE_DIGEST) chronicleFailure('committed history has no baseline');
       } else {
         if (checksum(row.body) !== row.digest) chronicleFailure('baseline snapshot checksum mismatch');
-        const baseline = this.snapshotParts.read(row.body) as World, declared = baseline.chronicleJournal !== undefined;
+        const baseline = this.readSnapshot(row.body) as World, declared = baseline.chronicleJournal !== undefined;
         enableChronicleJournal(baseline); this.assertChronicleOrigin(baseline, declared); this.assertChronicleArchive(baseline);
         this.rememberChronicle(baseline, this.chronicleStamp());
       }
@@ -957,7 +1142,7 @@ export class Store {
     let bounds: SlotBounds | 'unusable';
     if (checksum(row.body) !== row.digest) bounds = 'unusable';
     else {
-      try { bounds = this.boundsOf(this.snapshotParts.read(row.body) as World); }
+      try { bounds = this.boundsOf(this.readSnapshot(row.body) as World); }
       catch (error) {
         if (!(error instanceof SnapshotPhysicalError) && !(error instanceof SnapshotSemanticError)) return null;
         bounds = 'unusable';
@@ -1197,7 +1382,7 @@ export class Store {
         let baselineProved = false;
         if (row) {
           if (checksum(row.body) !== row.digest) technologyFailure('baseline snapshot checksum mismatch');
-          const baseline = this.migrateSnapshot(this.snapshotParts.read(row.body) as World);
+          const baseline = this.migrateSnapshot(this.readSnapshot(row.body) as World);
           if (baseline.technology.journal !== undefined) {
             const committed = baseline.technology.journal;
             assertTechnologyJournal(baseline.technology, baseline.tick);
@@ -1271,7 +1456,8 @@ export class Store {
     return { startsAfter: journal.startsAfter, through: journal.committedThrough + journal.pending.length, digest };
   }
 
-  save(world: World, inputs: { gesture: Gesture; result: GestureResult }[] = [], requiredSessions: string[] = []): void {
+  save(world: World, inputs: { gesture: Gesture; result: GestureResult }[] = [], requiredSessions: string[] = [],
+    changes: readonly SnapshotReplayChange[] = []): void {
     const retired = world.retiredChunks;
     if (this.db.isTransaction) { this.verifiedChronicle = null; throw new Error("Store.save requires its own transaction."); }
     const chronicleStamp = this.chronicleStamp();
@@ -1297,8 +1483,13 @@ export class Store {
     const deepValidation = deepValidationDue(this.saves, this.verifiedByLoad);
     if (deepValidation) assertWorld(world, world.version, this.context);
     else bindWorldContext(world, this.context);
-    const window = paramsOf(world).persistencia.ventanaEventosTicks;
-    const prunes = window > 0 && world.tick - this.lastPruneTick >= window;
+    const replayEnabled = paramsOf(world).persistencia.paginasSucias;
+    // A replay reads archives at the checkpoint's horizon, not merely at its
+    // head. Bound pruning by every retained anchor, even after flag rollback.
+    const replayRetained = replayEnabled || !!this.db.prepare('SELECT 1 FROM main.metadata WHERE key GLOB ? LIMIT 1').get(REPLAY_KEY + '*');
+    const configuredWindow = paramsOf(world).persistencia.ventanaEventosTicks;
+    let window = configuredWindow;
+    let prunes = window > 0 && world.tick - this.lastPruneTick >= window;
     const changedRecipeIds = new Set((world.technology.catalogue?.pending ?? world.technology.recipes).map(recipe => recipe.id));
     const memoBefore = this.archivedRecipes;
     const beforeMemoEpoch = memoBefore ? this.technologyArchive.readEpoch() : null;
@@ -1306,7 +1497,8 @@ export class Store {
       memoBefore.horizon ??= this.technologyArchive.latestTick();
     }
     // Los params vigentes viajan con el mundo: `load()` no puede medirlo con otros (R8).
-    const prepared = this.snapshotParts.prepare({ ...world, chronicleJournal: committedChronicle, technology: technologyCatalogueStateForCommit(technologyStateForCommit(world.technology)) }, paramsOf(world), this.snapshotInlineTileLimit);
+    let prepared = replayEnabled ? undefined : this.snapshotParts.prepare({ ...world, chronicleJournal: committedChronicle, technology: technologyCatalogueStateForCommit(technologyStateForCommit(world.technology)) }, paramsOf(world), this.snapshotInlineTileLimit);
+    let replay: { node: SnapshotReplay; world: World } | undefined;
     let body = '', bodyDigest = '';
     let committedChain: TechnologyChain | null = null;
     let technologyPruned: TechnologyPrune | null = null;
@@ -1327,6 +1519,15 @@ export class Store {
       const rotatesBackups = this.slot0Readable ?? this.readSlot0();
       const nextDurableSaves = this.readDurableSaves() + 1;
       const deep = rotatesBackups && nextDurableSaves % DEEP_CHECKPOINT_EVERY_SAVES === 0;
+      const replayFloor = replayRetained ? this.replayFloor(world.tick) : null;
+      if (replayRetained && configuredWindow > 0) {
+        window = replayFloor === null ? 0 : Math.max(configuredWindow, world.tick - replayFloor + 1);
+        prunes = window > 0 && world.tick - this.lastPruneTick >= configuredWindow;
+      }
+      if (replayEnabled) {
+        replay = this.prepareReplay(world, inputs, changes, nextDurableSaves);
+        if (replay.node.kind === 'checkpoint') prepared = this.snapshotParts.prepare(this.committedReplayWorld(world), paramsOf(world), this.snapshotInlineTileLimit);
+      }
       chronicleTriggers = this.chronicleHasTriggers();
       this.technologyArchive.beginHostTransaction();
       this.assertChronicleChanges(world, chronicleStamp, !chronicleTriggers);
@@ -1348,13 +1549,16 @@ export class Store {
         const archive = this.db.prepare('INSERT OR REPLACE INTO chunks VALUES (?,?,?,?)');
         // Con ventana de poda el terreno dormido guarda una sola versión por clave:
         // la vigente. Sin ventana (0) se conserva el historial completo de siempre.
-        const supersede = window > 0 ? this.db.prepare('DELETE FROM chunks WHERE key=? AND tick<?') : null;
+        const supersede = window > 0 ? this.db.prepare(replayRetained
+          ? 'DELETE FROM chunks WHERE key=? AND tick<(SELECT MAX(tick) FROM chunks WHERE key=? AND tick<=?)'
+          : 'DELETE FROM chunks WHERE key=? AND tick<?') : null;
         for (const chunk of retired) {
           assertChunk(chunk, chunk.key, world.tick);
           // T133: compact tuple body; digest is sha256 of the stored bytes, as before.
           const archivedBody = encodeArchivedChunk(chunk);
           archive.run(chunk.key, world.tick, archivedBody, checksum(archivedBody));
-          supersede?.run(chunk.key, world.tick);
+          if (replayRetained) supersede?.run(chunk.key, chunk.key, replayFloor!);
+          else supersede?.run(chunk.key, world.tick);
         }
       }
       if (prunes) this.pruneChronicle(world, committedChronicle, window);
@@ -1368,25 +1572,41 @@ export class Store {
         this.db.exec('INSERT OR REPLACE INTO snapshots SELECT 1,body,digest,saved_at FROM snapshots WHERE slot=0');
         if (deep) this.db.exec('INSERT OR REPLACE INTO snapshots SELECT 2,body,digest,saved_at FROM snapshots WHERE slot=0');
       }
-      const written = this.snapshotParts.write(prepared);
-      body = written.body;
-      this.lastSnapshotBytes = written.bytes;
+      const written = prepared ? this.snapshotParts.write(prepared) : undefined;
+      if (replay) {
+        if (replay.node.kind === 'checkpoint') replay.node.body = written!.body;
+        body = stringifyExact(replay.node);
+        const digest = checksum(body), existing = this.db.prepare('SELECT value FROM main.metadata WHERE key=?').get(REPLAY_KEY + digest) as { value: string } | undefined;
+        if (existing && existing.value !== body) throw new SnapshotPhysicalError('Replay object disagrees with its digest.');
+        if (!existing) this.db.prepare('INSERT INTO main.metadata VALUES (?,?)').run(REPLAY_KEY + digest, body);
+        this.lastSnapshotBytes = Buffer.byteLength(body) + (written ? written.bytes - Buffer.byteLength(written.body) : 0);
+      } else {
+        body = written!.body;
+        this.lastSnapshotBytes = written!.bytes;
+      }
       bodyDigest = checksum(body);
       this.db.prepare('INSERT OR REPLACE INTO snapshots VALUES (0,?,?,?)').run(body, bodyDigest, Date.now());
       this.db.prepare("INSERT OR REPLACE INTO metadata VALUES ('initialized','1')").run();
       this.db.prepare('INSERT OR REPLACE INTO metadata VALUES (?,?)').run(DEEP_CHECKPOINT_SAVES_KEY, String(nextDurableSaves));
       const insertInput = this.db.prepare('INSERT INTO inputs VALUES (?,?,?,?,?,?)');
       for (const { gesture, result } of inputs) insertInput.run(gesture.id, fingerprint(gesture), result.tick, result.order, JSON.stringify(gesture), JSON.stringify(result));
-      this.snapshotParts.collect();
+      this.collectSnapshots();
       });
+      if (replay && this.replayParent(bodyDigest) !== body) throw new SnapshotPhysicalError('Replay head changed before commit.');
       if (chronicleTriggers) {
         this.assertChronicleOrigin({ ...world, chronicleJournal: committedChronicle }, true);
         this.assertChronicleArchive({ ...world, chronicleJournal: committedChronicle });
         const saved = this.db.prepare('SELECT body,digest FROM snapshots WHERE slot=0').get() as Row | undefined;
         if (!saved || saved.body !== body || saved.digest !== checksum(body)) chronicleFailure('trigger changed committed snapshot');
       }
+      if (replay && (chronicleTriggers || nextDurableSaves % DEEP_VALIDATION_EVERY_SAVES === 0)) {
+        for (const row of this.db.prepare('SELECT body,digest FROM snapshots').all() as Row[]) {
+          if (checksum(row.body) !== row.digest) throw new SnapshotPhysicalError('Retained replay checksum mismatch.');
+          this.readSnapshot(row.body);
+        }
+      }
       if (chronicleTriggers) this.snapshotParts.verifyRetained();
-      else if (prepared.inline === undefined) this.snapshotParts.verify(body);
+      else if (prepared && prepared.inline === undefined) this.snapshotParts.verify(replay?.node.kind === 'checkpoint' ? replay.node.body : body);
       this.db.exec('COMMIT');
       this.saves++;
       // Confirmado: el slot 0 es ahora este cuerpo, escrito y verificado por esta misma
@@ -1427,6 +1647,11 @@ export class Store {
     world.retiredLegacy = [];
     markTechnologyJournalCommitted(world.technology);
     markTechnologyCatalogueCommitted(world.technology);
+    this.replayCache = null;
+    if (replay) {
+      try { this.replayCache = { digest: bodyDigest, world: replay.world, stamp: this.chronicleStamp() }; }
+      catch { /* A lost cache never changes an acknowledged commit. */ }
+    }
     // The transaction is already durable. Failure to refresh an optimization
     // cannot turn a successful save into a reported failure or a discarded tick.
     try {
@@ -1558,7 +1783,7 @@ export class Store {
     // Unverifiable metadata is not permission to reconstruct a damaged retained prefix.
     if (origin) {
       if (!current || checksum(current.body) !== current.digest) technologyFailure('cannot verify recovery history origin');
-      const baseline = this.migrateSnapshot(this.snapshotParts.read(current!.body) as World), journal = baseline.technology.journal;
+      const baseline = this.migrateSnapshot(this.readSnapshot(current!.body) as World), journal = baseline.technology.journal;
       if (!journal || journal.startsAfter !== origin.startsAfter || journal.pending.length
         || journal.committedThrough !== baseline.technology.executionCounter) technologyFailure('recovery history origin disagrees with committed snapshot');
       assertTechnologyJournal(baseline.technology, baseline.tick);
@@ -1579,7 +1804,7 @@ export class Store {
     } else {
       if (['technology_definitions', 'technology_stats', 'technology_executions'].some(table => this.db.prepare(`SELECT 1 FROM ${table} LIMIT 1`).get())) technologyFailure('recovery archive has records but no origin');
       if (current && checksum(current.body) === current.digest) {
-        const baseline = this.migrateSnapshot(this.snapshotParts.read(current.body) as World);
+        const baseline = this.migrateSnapshot(this.readSnapshot(current.body) as World);
         if (baseline.technology.journal !== undefined) technologyFailure('recovery lost its declared history origin');
       }
     }
@@ -1637,7 +1862,7 @@ export class Store {
       // Aquí sí se salta un respaldo que infringe una ley: quien pidió recuperar ya
       // aceptó retroceder, y el destino es una copia nueva que se poda y se valida.
       let decoded: World;
-      try { decoded = this.snapshotParts.read(candidate.body) as World; }
+      try { decoded = this.readSnapshot(candidate.body) as World; }
       catch (error) {
         // The reader may throw ordinary operational errors too. Only declared
         // codec faults justify skipping its bytes; do not classify by message.
@@ -1666,7 +1891,7 @@ export class Store {
       const copied = recovered.db.prepare('SELECT body,digest,saved_at FROM snapshots WHERE slot=?').get(chosen.slot) as Row | undefined;
       if (!copied || copied.body !== chosen.row.body || copied.digest !== chosen.row.digest || copied.saved_at !== chosen.row.saved_at)
         throw new Error('Selected previous checkpoint changed before backup. Explicit recovery required.');
-      const { world, declaredJournal } = recovered.verifyPrevious(recovered.snapshotParts.read(copied.body) as World);
+      const { world, declaredJournal } = recovered.verifyPrevious(recovered.readSnapshot(copied.body) as World);
       recovered.technologyArchive.beginHostTransaction();
       bindWorldContext(world, recovered.context);
       // Antes de borrar nada: la cadena del original tiene que cerrar sobre lo retenido, y su pliegue en este
@@ -1705,7 +1930,7 @@ export class Store {
       recovered.db.prepare("INSERT OR REPLACE INTO metadata VALUES ('chronicle-origin-v1',?)").run(JSON.stringify({ version: 1, startsAfter: world.chronicleJournal!.startsAfter }));
       recovered.assertChronicleOrigin(world, true); recovered.assertChronicleArchive(world);
       recovered.revoke();
-      recovered.snapshotParts.collect();
+      recovered.collectSnapshots();
       if (recovered.chronicleHasTriggers()) recovered.snapshotParts.verifyRetained();
       else if (prepared.inline === undefined) recovered.snapshotParts.verify(body);
       // Self-consistency is insufficient: a trigger could substitute a different

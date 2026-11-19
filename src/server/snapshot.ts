@@ -1,8 +1,8 @@
-import type { Tile } from '../shared/types.js';
+import type { Gesture, GestureResult, Tile } from '../shared/types.js';
 import type { Chunk } from '../world/terrain.js';
 import { RULES_VERSION, type World } from '../world/index.js';
 import { DEFAULT_PARAMS, HISTORICAL_PARAMS, LEGACY_WORLD_LIMITS, PARAMETER_LIMITS_RULES_VERSION, WORLD_LIMIT_KEYS,
-  assertWorldLimits, effectiveLimits, parseParams, type WorldLimits, type WorldParams } from '../world/params.js';
+  assertWorldLimits, effectiveLimits, paramsOf, parseParams, type WorldLimits, type WorldParams } from '../world/params.js';
 import { exactJsonNumber, stringifyExact } from '../shared/exact-json.js';
 
 // Lossless JSON tuples avoid repeating twenty property names for every active tile
@@ -34,6 +34,69 @@ export const SNAPSHOT_TILE_FIELDS = ['x','y','terrain','moisture','vegetation','
 export class SnapshotPhysicalError extends Error {}
 /** Readable bytes with an explicitly recognized codec/parameter violation. */
 export class SnapshotSemanticError extends Error {}
+
+/** Host changes are captured at their actual tick, after the mutation and before
+ * the next step. Numeric simulation output is never a dirty page. */
+export interface SnapshotReplayChange { tick: number; path: string[]; present: boolean; value?: unknown; }
+export interface SnapshotReplayBase { snapshotReplay: 1; rules: number; tick: number; depth: number; root: string; }
+export type SnapshotReplay = SnapshotReplayBase & (
+  { kind: 'checkpoint'; body: string }
+  | { kind: 'delta'; parent: string; inputs: { gesture: Gesture; result: GestureResult }[];
+    changes: SnapshotReplayChange[]; journals: { chronicle: World['chronicleJournal']; technology: World['technology']['journal'] } }
+);
+const replayObject = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
+const replayDigest = (value: unknown) => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value);
+export function assertReplayPath(path: unknown): asserts path is string[] {
+  if (!Array.isArray(path) || !path.length || path.some(key => typeof key !== 'string' || !key.length
+    || ['__proto__', 'prototype', 'constructor'].includes(key))
+    || ['tick', 'version', 'chronicleJournal', 'snapshotReplay', 'snapshotEncoding', 'params', 'paramsEncoding'].includes(path[0]))
+    throw new SnapshotSemanticError('Invalid replay dirty path. Explicit recovery required.');
+}
+export function captureReplayChange(world: World, path: string[]): SnapshotReplayChange {
+  assertReplayPath(path);
+  if (path.length === 1 && path[0] === '$params')
+    return { tick: world.tick, path: [...path], present: true, value: JSON.parse(stringifyExact(paramsOf(world))) };
+  let value: unknown = world;
+  for (const key of path.slice(0, -1)) {
+    if (!replayObject(value) && !Array.isArray(value) || !Object.hasOwn(value as object, key))
+      throw new SnapshotSemanticError('Missing replay dirty parent. Explicit recovery required.');
+    value = (value as Record<string, unknown>)[key];
+  }
+  if (!replayObject(value) && !Array.isArray(value)) throw new SnapshotSemanticError('Invalid replay dirty parent.');
+  const key = path.at(-1)!, present = Object.hasOwn(value, key);
+  return { tick: world.tick, path: [...path], present,
+    ...(present ? { value: JSON.parse(stringifyExact((value as Record<string, unknown>)[key])) } : {}) };
+}
+/** The durable reader supplies parent lookup and simulation; an ordinary JSON
+ * snapshot reader must never accidentally accept this transport as a world. */
+export function readSnapshotReplay(value: unknown): SnapshotReplay | null {
+  if (!replayObject(value) || !Object.hasOwn(value, 'snapshotReplay')) return null;
+  const fail = (): never => { throw new SnapshotSemanticError('Invalid snapshot replay. Explicit recovery required.'); };
+  const fields = value.kind === 'checkpoint' ? ['snapshotReplay','rules','kind','tick','depth','root','body']
+    : ['snapshotReplay','rules','kind','tick','depth','root','parent','inputs','changes','journals'];
+  if (value.snapshotReplay !== 1 || Object.keys(value).length !== fields.length || fields.some(key => !Object.hasOwn(value, key))
+    || !Number.isSafeInteger(value.rules) || (value.rules as number) < 1 || (value.rules as number) > RULES_VERSION
+    || !Number.isSafeInteger(value.tick) || (value.tick as number) < 0 || !replayDigest(value.root)
+    || !Number.isSafeInteger(value.depth) || (value.depth as number) < 0 || (value.depth as number) > 99) fail();
+  if (value.kind === 'checkpoint') {
+    if (value.depth !== 0 || typeof value.body !== 'string') fail();
+  } else {
+    if (value.kind !== 'delta' || value.depth === 0 || !replayDigest(value.parent) || !Array.isArray(value.inputs)
+      || !Array.isArray(value.changes) || !replayObject(value.journals)
+      || Object.keys(value.journals).sort().join(',') !== 'chronicle,technology') fail();
+    for (const input of value.inputs as unknown[]) {
+      if (!replayObject(input) || Object.keys(input).sort().join(',') !== 'gesture,result'
+        || !replayObject(input.gesture) || typeof input.gesture.id !== 'string' || !replayObject(input.result)
+        || !Number.isSafeInteger(input.result.tick) || !Number.isSafeInteger(input.result.order)) fail();
+    }
+    for (const change of value.changes as unknown[]) {
+      if (!replayObject(change) || !Number.isSafeInteger(change.tick) || typeof change.present !== 'boolean'
+        || Object.keys(change).sort().join(',') !== (change.present ? 'path,present,tick,value' : 'path,present,tick')) fail();
+      assertReplayPath((change as Record<string, unknown>).path);
+    }
+  }
+  return value as unknown as SnapshotReplay;
+}
 
 function assertSnapshotRulesVersion(record: Record<string, unknown>): void {
   if (!Number.isSafeInteger(record.version) || (record.version as number) < 1 || (record.version as number) > RULES_VERSION)
@@ -94,6 +157,7 @@ export function encodeSnapshotTileRows(tiles: readonly Tile[]): unknown[][] {
   });
 }
 export function snapshotRecord(world: World, params: WorldParams, tiles: unknown): Record<string, unknown> {
+  if (Object.hasOwn(world, 'snapshotReplay')) throw new Error('Reserved snapshot replay field. Snapshot was not written.');
   if (Object.hasOwn(world, 'snapshotEncoding')) throw new Error('Reserved snapshot encoding field. Snapshot was not written.');
   if (Object.hasOwn(world, 'limitsProfile')) throw new Error('Reserved snapshot limits profile. Snapshot was not written.');
   assertWorldLimits(params.limites, true);
@@ -210,6 +274,7 @@ export function decodeSnapshotTileRows(rows: unknown[]): Tile[] {
 export function decodeSnapshotValue(value: unknown): unknown {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
   const record = value as Record<string, unknown>;
+  if ('snapshotReplay' in record) throw new SnapshotSemanticError('Snapshot replay requires a durable reader. Explicit recovery required.');
   if ('snapshotEncoding' in record) throw new SnapshotSemanticError('Snapshot parts require a durable reader. Explicit recovery required.');
   const limits = readSnapshotLimits(record);
   assertSnapshotCounts(record, limits, Array.isArray(record.tiles) ? record.tiles.length : undefined);

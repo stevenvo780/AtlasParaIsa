@@ -6,7 +6,7 @@ sync or only dirty pages, launches ecology_pass1/ecology_pass2, and downloads
 back pages for the ranges each device computed. No 1M-cell / 120MB caps:
 MAX_CELLS is the antic-corruption bound from the task.
 """
-import argparse, concurrent.futures, ctypes as C, json, mmap, os, pathlib, struct, sys, tempfile, time
+import argparse, concurrent.futures, ctypes as C, gc, json, mmap, os, pathlib, struct, sys, tempfile, time
 import numpy as np
 clock = time.perf_counter
 MAX_CELLS = 134_217_728
@@ -40,6 +40,7 @@ class ShmChannel:
             return
         cap = max(nbytes, self.capacity * 2, 1 << 20)
         if self.mm is not None:
+            gc.collect()
             self.mm.close()
         os.ftruncate(self._fd, cap)
         self.mm = mmap.mmap(self._fd, cap)
@@ -307,7 +308,7 @@ class Device:
             wa=np.empty(self.local_slots,dtype=np.uint8); self._down(wa.ctypes.data, self.ptrs['woodAdded'], wa.nbytes); downloaded+=wa.nbytes
             nz = np.nonzero(wa)[0]
             wood_slots=[int(self.l2g[s]) for s in nz.tolist()] if self.sharded else [int(s) for s in nz.tolist()]
-        result={'index':self.index,'begin':begin,'end':end,'uploadedBytes':uploaded,'downloadedBytes':downloaded,'kernelMs':kernel_ms,'stepMs':(clock()-started)*1000,'downloadSlots':slots_sorted,'woodAddedSlots':wood_slots,'staging':staging}
+        result={'index':self.index,'begin':begin,'end':end,'uploadedBytes':uploaded,'downloadedBytes':downloaded,'kernelMs':kernel_ms,'stepMs':(clock()-started)*1000,'downloadSlots':slots_sorted,'woodAddedSlots':wood_slots,'staging':None if staging_out is not None else staging}
         timing_path=os.environ.get('ATLAS_GPU_TIMING')
         if timing_path:
             try:
@@ -397,7 +398,7 @@ class Device:
         return {
             'index': self.index, 'begin': begin, 'end': end, 'uploadedBytes': uploaded_pre,
             'downloadedBytes': downloaded, 'kernelMs': kernel_ms, 'stepMs': (clock() - started) * 1000,
-            'downloadSlots': slots_sorted, 'woodAddedSlots': wood_slots, 'staging': staging,
+            'downloadSlots': slots_sorted, 'woodAddedSlots': wood_slots, 'staging': None if staging_out is not None else staging,
         }
     def flush(self, range_pair, staging_out=None):
         checked(self.current(self.context))
@@ -412,7 +413,7 @@ class Device:
                 nbytes = run_count * 256 * esz
                 self._down(staging.ctypes.data + off, self.ptrs[fname + 'F'], nbytes, start_slot * 256 * esz)
                 off += nbytes
-        return {'index': self.index, 'downloadSlots': slots_sorted, 'downloadedBytes': off, 'staging': staging}
+        return {'index': self.index, 'downloadSlots': slots_sorted, 'downloadedBytes': off, 'staging': None if staging_out is not None else staging}
     def close(self):
         try:
             checked(self.current(self.context))
@@ -466,8 +467,15 @@ def main():
         cached_ranges = None
         cached_halo_per = None
         cached_halo_plan = None
+        def release_body(b):
+            if isinstance(b, memoryview):
+                try: b.release()
+                except Exception: pass
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(devices)) as ex:
+            body = None
             while True:
+                # Liberar cualquier vista/memoryview sobre SHM.mm ANTES de redimensionar (evita BufferError al crecer el mundo vivo).
+                release_body(body); body = None
                 ln=struct.unpack('<I',read_exact(4))[0]
                 if ln>1_000_000: raise ValueError('Oversized header')
                 req=json.loads(read_exact(ln)); amount=req.get('bytes',0); shm_amount=req.get('shmBytes',0) or 0
@@ -477,7 +485,9 @@ def main():
                     body=SHM.view(int(shm_amount))
                 else:
                     body=read_exact(amount) if amount else b''
-                if req['kind']=='close': break
+                if req['kind']=='close':
+                    release_body(body); body = None
+                    break
                 if req['kind']=='sync':
                     cap=req['capacityCells']; slots=req['slots']; total=req['totalCells']
                     shard_ranges=req.get('shardRanges')
@@ -490,8 +500,10 @@ def main():
                     use_sharded = bool(shard_ranges and len(devices) > 1 and len(shard_ranges) == len(devices))
                     futs=[ex.submit(d.sync,arrays,cap,slots,total,tuple(shard_ranges[di]) if use_sharded else None) for di,d in enumerate(devices)]
                     parts=[f.result() for f in futs]
+                    futs = None; take = None; arrays = None; release_body(body); body = None
                     cached_halo_plan = None
                     emit({'ok':True,'uploadedBytes':sum(p['uploadedBytes'] for p in parts),'devices':parts})
+                    parts = None
                 elif req['kind']=='step':
                     dirty=req.get('dirtySlots',[]); ranges=req['ranges']
                     # split body: dirty chunks then optional woodAdded tail
@@ -500,6 +512,7 @@ def main():
                     if req['pass']==2:
                         wood_arr=np.frombuffer(body,dtype=np.uint8,count=devices[0].slots,offset=dirty_bytes).copy()
                     body_np=np.frombuffer(body,dtype=np.uint8).copy(); body_addr=body_np.ctypes.data
+                    release_body(body); body = None
                     halo_per=req.get('haloSlotsPerDevice',[]); halo_field=req.get('haloField')
                     halo_offsets=[]; hoff=dirty_bytes + (devices[0].slots if req['pass']==2 else 0)
                     if halo_field:
@@ -510,7 +523,7 @@ def main():
                     req_dl_slots = req.get('downloadSlots')
                     dl_fields_main = DOWNLOAD_FIELDS[('2_halo' if req['pass']==2 else 1) if req_dl_slots is not None else req['pass']]
                     per_device_bytes = []
-                    staging_slices = None
+                    staging_slices = None; base = None
                     if SHM is not None and devices[0].cells is not None:
                         sizes = []
                         for di, (b,e) in enumerate(ranges):
@@ -535,13 +548,17 @@ def main():
                         return d.step(r,body_addr,dirty,tuple(ranges[di]),halo, staging_slices[di] if staging_slices is not None else None)
                     futs=[ex.submit(run_one,(di,d)) for di,d in enumerate(devices)]
                     parts=[f.result() for f in futs]
+                    futs = None; run_one = None
                     wood_slots=sorted(set(s for p in parts for s in p['woodAddedSlots']))
                     reply_header={'ok':True,'uploadedBytes':sum(p['uploadedBytes'] for p in parts),'downloadedBytes':sum(p['downloadedBytes'] for p in parts),'woodAddedSlots':wood_slots,'downloadSlotsPerDevice':[p['downloadSlots'] for p in parts],'devices':[{k:v for k,v in p.items() if k!='staging'} for p in parts]}
                     if staging_slices is not None:
+                        parts = None; staging_slices = None; base = None; body_np = None
                         emit_shm(reply_header, sum(per_device_bytes))
                     else:
                         out=parts[0]['staging'] if len(parts)==1 else (np.concatenate([p['staging'] for p in parts]) if any(p['staging'].size for p in parts) else np.empty(0,dtype=np.uint8))
+                        parts = None; base = None; body_np = None
                         emit(reply_header, out)
+                        out = None
                 elif req['kind']=='tick':
                     dirty = req.get('dirtySlots', [])
                     if req.get('ranges') is not None:
@@ -559,6 +576,8 @@ def main():
                         body_addr = body_np.ctypes.data
                         for di, d in enumerate(devices):
                             uploaded_per_dev[di] += d.upload_dirty(body_addr, dirty_sorted, also_back=(len(devices) > 1))
+                        body_np = None
+                    release_body(body); body = None
                     if len(devices) > 1:
                         if cached_halo_plan is None:
                             cached_halo_plan = []
@@ -579,7 +598,7 @@ def main():
                             h_buf = src_d.download_field_local_runs('life', 8, 'F', src_runs, total_b)
                             uploaded_per_dev[di] += dst_d.upload_field_local_runs('life', 8, 'B', dst_runs, h_buf)
                     per_device_bytes = []
-                    staging_slices = None
+                    staging_slices = None; base = None
                     if SHM is not None and devices[0].cells is not None:
                         sizes = []
                         for di, (b, e) in enumerate(ranges):
@@ -601,6 +620,7 @@ def main():
                         for di, d in enumerate(devices)
                     ]
                     parts = [f.result() for f in futs]
+                    futs = None
                     wood_slots = sorted(set(s for p in parts for s in p['woodAddedSlots']))
                     reply_header = {
                         'ok': True, 'uploadedBytes': sum(p['uploadedBytes'] for p in parts),
@@ -609,14 +629,18 @@ def main():
                         'devices': [{k: v for k, v in p.items() if k != 'staging'} for p in parts],
                     }
                     if staging_slices is not None:
+                        parts = None; staging_slices = None; base = None
                         emit_shm(reply_header, sum(per_device_bytes))
                     else:
                         out = parts[0]['staging'] if len(parts) == 1 else (np.concatenate([p['staging'] for p in parts]) if any(p['staging'].size for p in parts) else np.empty(0, dtype=np.uint8))
+                        parts = None; base = None
                         emit(reply_header, out)
+                        out = None
                 elif req['kind']=='flush':
+                    release_body(body); body = None
                     ranges=req['ranges']
                     per_device_bytes = []
-                    staging_slices = None
+                    staging_slices = None; base = None
                     if SHM is not None and devices[0].cells is not None:
                         sizes = []
                         for di, (b,e) in enumerate(ranges):
@@ -631,12 +655,16 @@ def main():
                             per_device_bytes = sizes
                     futs=[ex.submit(d.flush, tuple(ranges[di]), staging_slices[di] if staging_slices is not None else None) for di, d in enumerate(devices)]
                     parts=[f.result() for f in futs]
+                    futs = None
                     reply_header={'ok':True,'downloadedBytes':sum(p['downloadedBytes'] for p in parts),'downloadSlotsPerDevice':[p['downloadSlots'] for p in parts]}
                     if staging_slices is not None:
+                        parts = None; staging_slices = None; base = None
                         emit_shm(reply_header, sum(per_device_bytes))
                     else:
                         out=parts[0]['staging'] if len(parts)==1 else np.concatenate([p['staging'] for p in parts])
+                        parts = None; base = None
                         emit(reply_header, out)
+                        out = None
                 else: raise ValueError('Unknown operation')
     finally:
         for d in devices: d.close()

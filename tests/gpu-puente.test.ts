@@ -143,3 +143,42 @@ test('T122 VRAM sharded Dual-GPU [0,1] (70/30) produce 0 diferencias Object.is f
   }
   assert.equal(diffs, 0);
 });
+
+test('T122 regresión SHM resize: crecer el territorio por encima de 1 MiB -> 4 MiB -> 8 MiB no falla por exported pointers', { skip }, async () => {
+  const R = DEFAULT_PARAMS.recursos;
+  const p1 = { version: 1, rain: 0, light: 1, capacidadBosque: R.capacidadBosque, capacidadPastizal: R.capacidadPastizal, capacidadOtros: R.capacidadOtros, velocidadRegeneracion: R.velocidadRegeneracion, decaimientoComida: R.decaimientoComida };
+  const p2 = { tick: 100, version: 1, rain: 0, light: 1, decaimientoFertilidad: R.decaimientoFertilidad, seed: 7, cuencas: 1 };
+  const mk = (pages: number, version: number): SharedTerrain => {
+    const N = pages * 256, gridW = Math.ceil(Math.sqrt(pages));
+    const sab = (b: number) => new SharedArrayBuffer(b);
+    const cells = new Int32Array(sab(N * 4)); for (let i = 0; i < N; i++) cells[i] = i;
+    const stamps = new Uint32Array(sab(N * 4)); stamps.fill(version);
+    const pageX = new Int32Array(sab(pages * 4)), pageY = new Int32Array(sab(pages * 4));
+    for (let s = 0; s < pages; s++) { pageX[s] = s % gridW; pageY[s] = Math.floor(s / gridW); }
+    const around = new Int32Array(sab(pages * 9 * 4)).fill(-1);
+    const buffers: Record<string, SharedArrayBuffer> = {
+      cells: cells.buffer as SharedArrayBuffer, stamps: stamps.buffer as SharedArrayBuffer,
+      around: around.buffer as SharedArrayBuffer, pageX: pageX.buffer as SharedArrayBuffer,
+      pageY: pageY.buffer as SharedArrayBuffer, dirty: sab(pages), woodAdded: sab(pages), woodAddedQueue: sab((pages + 2) * 4),
+    };
+    for (const f of GPU_FIELDS) {
+      buffers[f.name] = sab(N * f.bytes);
+      buffers[`${f.name}Back`] = sab(N * f.bytes);
+      if (f.name === 'terrain') new Uint8Array(buffers[f.name]!).fill(2);
+    }
+    return { regions: [{ id: 0, begin: 0, end: N }], buffers, version };
+  };
+  const bridge = new ResidentGpuBridge([0, 1]);
+  try {
+    // 16 páginas (< 1 MiB) -> 128 páginas (> 2 MiB) -> 512 páginas (> 11 MiB): fuerza 2 resizes de SHM.mm
+    for (const [idx, pages] of ([16, 128, 512] as const).entries()) {
+      const t = mk(pages, idx + 1);
+      bridge.run(t, idx + 1, 'ecologia', { ...p1, version: idx + 1 });
+      bridge.run(t, idx + 1, 'kernel', { ...p2, version: idx + 1 });
+      bridge.runTick(t, idx + 10, { ...p1, version: idx + 1 }, { ...p2, version: idx + 1 }, 256, { downloadSlots: [0] });
+      bridge.flushToHost(t);
+    }
+  } finally {
+    await bridge.close();
+  }
+});

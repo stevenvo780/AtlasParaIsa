@@ -32,6 +32,9 @@ export interface WorldParams {
    * acotada por debajo del inicio de su propia vejez. Default 2 y 2 = los 4800 ticks de siempre.
    */
   genes: { varianzaFundadores: number; tasaMutacion: number; edadFundadoresMinDias: number; edadFundadoresMaxDias: number };
+  /** Ley candidata CULT-VAR: perturbación de la cultura al nacer y aprendizaje simétrico
+   * por consecuencias. Ambos valores son 0 en mundos nuevos e históricos. */
+  cultura: { variacion: number; adaptacion: number };
   /**
    * `exigeComunidad`, `radioPareja`, `radioLugar` y `comprobacionContinua` son leyes
    * del embudo de natalidad (diagnóstico 2026-09-22, `scripts/lab/diagnostico-natalidad.ts`):
@@ -131,6 +134,7 @@ const RAW_HISTORICAL: WorldParams = {
     riesgoSenescenciaDiario: 0.04, riesgoSenescenciaPendiente: 10, cuidadoReduceRiesgo: 0.6,
   },
   genes: { varianzaFundadores: 0.15, tasaMutacion: 1, edadFundadoresMinDias: 2, edadFundadoresMaxDias: 2 },
+  cultura: { variacion: 0, adaptacion: 0 },
   // Ruling R17: `maxima` ya no es un tope de diseño (era 40); por defecto no limita y el
   // freno lo ponen el entorno y el gobernador. Sigue siendo parámetro para el laboratorio.
   poblacion: { maxima: 1_000_000, intervaloComprobacionTicks: 120, nacimientosPorComprobacion: 2,
@@ -263,6 +267,10 @@ export const PARAM_RANGES: Record<string, [number, number]> = {
   // comprueba `assertFounderAges`, porque un rango por clave no puede verlo.
   'genes.edadFundadoresMinDias': [0.5, 30],
   'genes.edadFundadoresMaxDias': [0.5, 30],
+  // CULT-VAR: amplitud del error de copia cultural y fracción de aprendizaje inverso.
+  // Cero conserva exactamente las operaciones culturales anteriores.
+  'cultura.variacion': [0, 0.2],
+  'cultura.adaptacion': [0, 1],
   'poblacion.maxima': [1, 1_000_000],
   'poblacion.intervaloComprobacionTicks': [1, 10000],
   'poblacion.nacimientosPorComprobacion': [0, 20],

@@ -883,6 +883,11 @@ function outcome(world: World, person: Person, action: Action, benefit: number, 
     const rate = person.genome.learningRate * 0.04;
     if ((!useful && ['gather','hunt','forage'].includes(action)) || (useful && action === 'farm')) person.culture.stewardship = clamp(person.culture.stewardship + rate);
     if (useful && ['cooperate','share'].includes(action)) person.culture.sharing = clamp(person.culture.sharing + rate);
+    const adaptacion = paramsOf(world).cultura.adaptacion;
+    if (adaptacion > 0) {
+      if (useful && ['gather','hunt','forage'].includes(action)) person.culture.stewardship = clamp(person.culture.stewardship - rate * adaptacion);
+      if (!useful && ['cooperate','share'].includes(action)) person.culture.sharing = clamp(person.culture.sharing - rate * adaptacion);
+    }
   }
   person.lastOutcome = world.tick;
   if (world.adaptationEnabled && world.tick - person.lastPracticeMemory >= 300 && ['gather','hunt','farm','build','drink','cooperate','forage'].includes(action)) {
@@ -1343,6 +1348,10 @@ function reproduce(world: World): void {
       blueprintId: null, lastInvention: world.tick,
       technology: initialTechnologyKnowledge(), demography: initialDemography(),
     };
+    const variacion = paramsOf(world).cultura.variacion;
+    if (variacion > 0) for (const key of ['sharing', 'stewardship', 'openness'] as const) {
+      child.culture[key] = clamp(child.culture[key] + variacion * (2 * localRandom(world.seed, `${id}:${key}`)() - 1));
+    }
     delete child.home;
     // Lastre de la ley retirada (vocación, ola 1): una cría nunca hereda ese campo.
     delete (child as unknown as Record<string, unknown>).vocacion;

@@ -41,6 +41,41 @@ export interface StaticWorkerDiagnostics {
   adversarialDelaysMs: number[];
   /** Número de Atomics.wait realmente ejecutados entre regiones del último despacho. */
   adversarialDelayCounts: number[];
+  /** T151: ocupación real del último despacho, en [0,1]: tiempo activo útil sumado de los
+   * workers dividido por `workers * tiempoParaleloMs`. 0 antes del primer despacho. */
+  ocupacionWorkers: number;
+  /** T151: tiempo activo útil por worker en el último despacho (ms, excluye esperas entre regiones). */
+  tiempoActivoWorkersMs: number[];
+  /** T151: duración de pared del último despacho en el coordinador (ms). */
+  tiempoParaleloMs: number;
+  /** T151: parte del último despacho fuera del worker más ocupado (ms): espera de barrera y despacho. */
+  tiempoBarreraMs: number;
+}
+
+/** T151: aceleración teórica de Amdahl para una fracción serial `fraccionSerial` en [0,1] y `hilos` ≥ 1. */
+export function aceleracionAmdahlTeorica(fraccionSerial: number, hilos: number): number {
+  if (!Number.isFinite(fraccionSerial) || fraccionSerial < 0 || fraccionSerial > 1) throw new RangeError('fraccionSerial debe estar en [0,1].');
+  if (!Number.isSafeInteger(hilos) || hilos < 1) throw new RangeError('hilos debe ser un entero positivo.');
+  if (hilos === 1 || fraccionSerial === 1) return 1;
+  if (fraccionSerial === 0) return hilos;
+  return 1 / (fraccionSerial + (1 - fraccionSerial) / hilos);
+}
+
+/** T151: ocupación en [0,1] a partir de tiempos activos por worker y la pared del despacho. */
+export function calcularOcupacionWorkers(tiemposActivosMs: readonly number[], wallMs: number): number {
+  if (!Number.isFinite(wallMs) || wallMs <= 0 || tiemposActivosMs.length === 0) return 0;
+  let suma = 0;
+  for (const ms of tiemposActivosMs) suma += Number.isFinite(ms) && ms > 0 ? ms : 0;
+  return Math.max(0, Math.min(1, suma / (tiemposActivosMs.length * wallMs)));
+}
+
+/** T151: fracción serial real: 1 sin tramo paralelo (1 hilo y sin GPU); si lo hay, tiempo fuera del tramo paralelo sobre el total. */
+export function calcularFraccionSerialReal(tiempoSerialMs: number, tiempoParaleloMs: number, hilos: number, dispositivosGpu = 0): number {
+  if (!Number.isFinite(tiempoSerialMs) || !Number.isFinite(tiempoParaleloMs)) throw new RangeError('Los tiempos de la fracción serial deben ser finitos.');
+  if (hilos <= 1 && dispositivosGpu <= 0) return 1;
+  const serial = Math.max(0, tiempoSerialMs), paralelo = Math.max(0, tiempoParaleloMs), total = serial + paralelo;
+  if (total <= 0 || paralelo <= 0) return 1;
+  return Math.max(0, Math.min(1, serial / total));
 }
 
 interface DispatchObservation {
@@ -110,6 +145,8 @@ if (workerData.role === 'compute') {
   const index = workerData.workerIndex;
   // Este SAB privado no se comparte con el mundo ni puede recibir notificaciones de otro hilo.
   const delayClock = new Int32Array(new SharedArrayBuffer(4));
+  // T151: microsegundos activos por worker (entero vía Atomics; nunca entra en el cálculo del mundo).
+  const tiemposActivos = new Int32Array(workerData.timing);
   const { performance } = require('node:perf_hooks');
   let handler, busy = false;
   (async () => {
@@ -129,10 +166,12 @@ if (workerData.role === 'compute') {
       }
       busy = true;
       let outcome = S.done;
+      let activoUs = 0;
+      const medir = async fn => { const inicio = performance.now(); try { await fn(); } finally { activoUs += (performance.now() - inicio) * 1000; } };
       try {
         // No se copian los buffers: los halos y la salida pertenecen a los mismos SAB.
         if (job.orden === 'natural') {
-          await handler({ regions: job.regions, buffers: job.buffers, params: job.params, workerIndex: index });
+          await medir(() => handler({ regions: job.regions, buffers: job.buffers, params: job.params, workerIndex: index }));
         } else {
           const counts = new Int32Array(job.observation.counts);
           const order = new Int32Array(job.observation.order);
@@ -147,13 +186,14 @@ if (workerData.role === 'compute') {
             // Sólo se publica una observación al invocar realmente ese rango del handler.
             Atomics.store(order, job.observation.offset + ordinal, ordinal);
             Atomics.add(counts, index, 1);
-            await handler({ regions: [job.regions[ordinal]], buffers: job.buffers, params: job.params, workerIndex: index });
+            await medir(() => handler({ regions: [job.regions[ordinal]], buffers: job.buffers, params: job.params, workerIndex: index }));
           }
         }
       } catch (error) {
         writeError(index, error);
         outcome = S.jobError;
       }
+      Atomics.store(tiemposActivos, index, Math.round(activoUs));
       busy = false;
       if (computeFatal) return;
       Atomics.add(control, cell(index, C.completed), 1);
@@ -224,11 +264,18 @@ export class StaticWorkerPool {
   #supervisorFailure: Error | null = null;
   #supervisorExited = false;
   #observation: DispatchObservation | null = null;
+  readonly #tiemposActivos: Int32Array<SharedArrayBuffer>;
+  #ocupacionWorkers = 0;
+  #tiempoParaleloMs = 0;
+  #tiempoBarreraMs = 0;
+  #tiempoActivoWorkersMs: number[] = [];
 
   constructor(options: StaticWorkerPoolOptions) {
     if (!Number.isSafeInteger(options.workers) || options.workers < 1) throw new RangeError('workers debe ser un entero positivo.');
     if (!options.exportName) throw new TypeError('exportName no puede estar vacío.');
     this.#workers = options.workers;
+    this.#tiemposActivos = new Int32Array(new SharedArrayBuffer(options.workers * 4));
+    this.#tiempoActivoWorkersMs = Array.from({ length: options.workers }, () => 0);
     this.#barrier = createBarrier(options.workers);
     this.#sourceLoader = new URL(import.meta.url).pathname.endsWith('.ts');
     let moduleURL = new URL(options.moduleURL).href;
@@ -241,6 +288,7 @@ export class StaticWorkerPool {
       workerData: {
         role: 'supervisor', workers: this.#workers, moduleURL, exportName: options.exportName,
         loaderURL: this.#sourceLoader ? import.meta.resolve('tsx/esm/api') : undefined,
+        timing: this.#tiemposActivos.buffer,
         control: this.#barrier.control.buffer, errors: this.#barrier.errors.buffer,
         layout: { header: BARRIER_HEADER, cells: WORKER_CELL, status: WORKER_STATUS, errorCharacters: ERROR_CHARACTERS },
         bootstrap: WORKER_BOOTSTRAP,
@@ -312,7 +360,9 @@ export class StaticWorkerPool {
     for (let index = 0; index < this.#workers; index++) {
       Atomics.store(control, workerCell(index, WORKER_CELL.errorLength), 0);
       Atomics.store(control, workerCell(index, WORKER_CELL.status), WORKER_STATUS.running);
+      Atomics.store(this.#tiemposActivos, index, 0);
     }
+    const paredInicio = performance.now();
     try {
       try {
         this.#supervisor.postMessage({
@@ -339,6 +389,11 @@ export class StaticWorkerPool {
         }
         return true;
       });
+      // T151: la pared y los tiempos activos solo se leen; nunca alimentan el cálculo.
+      this.#tiempoParaleloMs = Math.max(0, performance.now() - paredInicio);
+      this.#tiempoActivoWorkersMs = Array.from({ length: this.#workers }, (_, index) => Atomics.load(this.#tiemposActivos, index) / 1000);
+      this.#ocupacionWorkers = calcularOcupacionWorkers(this.#tiempoActivoWorkersMs, this.#tiempoParaleloMs);
+      this.#tiempoBarreraMs = Math.max(0, this.#tiempoParaleloMs - Math.max(0, ...this.#tiempoActivoWorkersMs));
       this.#throwIfFatal();
       // Todos terminaron antes de comunicar un throw recuperable: no quedan escrituras tardías.
       for (let index = 0; index < this.#workers; index++) {
@@ -371,6 +426,10 @@ export class StaticWorkerPool {
       adversarialDelaysMs: Array.from({ length: this.#workers }, (_, index) => this.#observation?.delays[index] ?? 0),
       adversarialDelayCounts: Array.from({ length: this.#workers }, (_, index) => this.#observation
         ? Atomics.load(this.#observation.counts, this.#workers + index) : 0),
+      ocupacionWorkers: this.#ocupacionWorkers,
+      tiempoActivoWorkersMs: [...this.#tiempoActivoWorkersMs],
+      tiempoParaleloMs: this.#tiempoParaleloMs,
+      tiempoBarreraMs: this.#tiempoBarreraMs,
     };
   }
 

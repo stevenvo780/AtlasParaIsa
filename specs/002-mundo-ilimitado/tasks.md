@@ -330,7 +330,7 @@
   · **Control**: con `red.deltas=false` el cliente funciona exactamente como hoy.
   · **Cierre**: e2e del observador verde y sin errores de consola.
 
-- [ ] **T138** [P] [claude sonnet · high] **Banco de red a escala.**
+- [x] **T138** [P] [claude sonnet · high] **Banco de red a escala.**
   `scripts/banco-red.mts`: levanta un servidor con `CARTA_DATA_DIR` temporal y un mundo con N habitantes **inyectados** (fuera de `stepWorld`, solo para medir tamaño), conecta hasta 12 clientes con viewports distintos y mide bytes/paso por cliente, egress total, mensajes descartados y sockets terminados.
   · **Ficheros**: `scripts/banco-red.mts` (nuevo), `package.json`, `tests/banco-red.test.ts` (nuevo).
   **Desglose por campo obligatorio** (añadido 2026-09-19, refutación R10): el banco mide bytes **por campo** del `state` (`tiles`, `people`, `communities`, `blueprints`, `technology`, `events`, `animals`, `structures`, `stats`, `demography`, `organization`, `memories`, `places`) a 40, 1 000 y 10 000 habitantes, de modo que el campo que rebase el techo quede **nombrado**. Un total bajo el techo con un campo creciendo linealmente con la población no cierra SC-005.

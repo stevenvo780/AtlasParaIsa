@@ -11,10 +11,16 @@ import { generateChunk } from '../src/world/terrain.js';
 import { ruidoCuenca } from '../src/world/agua.js';
 // Isolated .mjs benchmark helpers intentionally have no application wiring.
 // @ts-ignore benchmark-only JavaScript module
-import { topology, pack, unpack, stepArrays, compare, basinNoise, validateLiveKernel } from '../scripts/compute-ecology-core.mjs';
+import { topology, pack, unpack, stepArrays, stepEcologyArrays, compare, basinNoise, validateLiveKernel } from '../scripts/compute-ecology-core.mjs';
 // @ts-ignore benchmark-only JavaScript module
 import { CPUWorkers, GPUWorker } from '../scripts/compute-ecology-clients.mjs';
 import type { Tile } from '../src/shared/types.js';
+
+const nvrtc=process.env.COMPUTE_NVRTC;
+const driverProbe=nvrtc?spawnSync('python3',['-c','import ctypes; print(ctypes.CDLL("libcuda.so.1").cuInit(0))'],{encoding:'utf8',timeout:5000}):undefined;
+const cudaSkip=!nvrtc?'COMPUTE_NVRTC absent':driverProbe?.stdout.trim()==='0'?false:`CUDA no disponible: cuInit=${driverProbe?.stdout.trim()||driverProbe?.stderr.trim()}`;
+const nodeChildProbe=spawnSync(process.execPath,['--eval','process.stdout.write("node-child-ok")'],{encoding:'utf8',timeout:3000});
+const nodeChildSkip=(nodeChildProbe.error as NodeJS.ErrnoException|undefined)?.code==='EPERM'?'Sandbox denies Node child processes (EPERM)':false;
 
 const clone=(tiles:Tile[])=>tiles.map(tile=>({...tile}));
 function fixture():Tile[] {
@@ -24,7 +30,7 @@ function fixture():Tile[] {
   for(const x of [-49,-25,-24,-1,0,23,24,49]) tiles.push({x,y:-300,terrain:'meadow',biome:'grassland',feature:'spring',fertility:0.9,moisture:0.9,vegetation:0.7,food:0.5,drinkingWater:0.2});
   return tiles;
 }
-test('missing Python rejects GPU setup and completes owned cleanup without an exit event',()=>{
+test('missing Python rejects GPU setup and completes owned cleanup without an exit event',{skip:nodeChildSkip},()=>{
   const clientURL = new URL('../scripts/compute-ecology-clients.mjs', import.meta.url).href;
   const probe = spawnSync(process.execPath, ['--input-type=module', '--eval', `
     import assert from 'node:assert/strict';
@@ -36,7 +42,7 @@ test('missing Python rejects GPU setup and completes owned cleanup without an ex
   assert.equal(probe.status, 0);
   assert.equal(probe.stdout, 'rejected-and-closed');
 });
-test('GPU requests cover stdin backpressure and close escalates only their owned unresponsive child',async()=>{
+test('GPU requests cover stdin backpressure and close escalates only their owned unresponsive child',{skip:nodeChildSkip},async()=>{
   // Real pipes and an owned child that acknowledges readiness but never reads input.
   const child=spawn(process.execPath,['--eval',"process.on('SIGTERM',()=>{}); process.stdout.write('ready'); setInterval(()=>{},1000);"],{stdio:['pipe','pipe','pipe']});
   const completed=new Promise(resolve=>child.once('close',(code,signal)=>resolve({code,signal})));
@@ -69,7 +75,7 @@ test('the live contract accepts the engine and rejects a changed physical result
     reference(...args); args[0][0].fertility!+=0.01;
   }),/Live ecology contract.*differs/);
   assert.throws(()=>validateLiveKernel((...args:Parameters<typeof reference>)=>{
-    reference(...args); args[0][0].food+=0.125;
+    reference(...args); args[0][0].stone=0.125;
   }),/Live ecology contract.*tile fields differ/,'una regla nueva sobre un campo no empaquetado también invalida el port');
 });
 
@@ -259,9 +265,7 @@ test('whole ecological tick through CPU workers: the partition decides who compu
   edges.tiles=basinEdgeTiles(51926,0.4);edges.tick=1400;edges.weather='rain';
   for(const workers of [1,3,4])await compareEcologicalTicks(edges,60,`${workers} workers`,workers);
 });
-for(const devices of ['0','1','0,1'])test(`CUDA ${devices} agrees with live-state CPU reference over 12 updates`,async context=>{
-  const nvrtc=process.env.COMPUTE_NVRTC;
-  if(!nvrtc){context.skip('COMPUTE_NVRTC absent: no GPU parity was checked');return;}
+for(const devices of ['0','1','0,1'])test(`CUDA ${devices} agrees with live-state CPU reference over 12 updates`,{skip:cudaSkip},async()=>{
   const gpu=await GPUWorker.create(devices,nvrtc);
   try{
     const actual=fixture(),expected=clone(actual);await gpu.setup(actual.length,topology(actual));
@@ -275,4 +279,58 @@ for(const devices of ['0','1','0,1'])test(`CUDA ${devices} agrees with live-stat
       assert.deepStrictEqual(actual,expected,`GPU ${devices} update ${j}`);
     }
   }finally{await gpu.close();}
+});
+
+for(const cuencas of [1,0.4])for(const decaimientoFertilidad of [0,0.001])
+test(`complete two-pass array port equals live ecology, basins=${cuencas}, decay=${decaimientoFertilidad}`,()=>{
+  const live=createWorld(51926,worldParams(cuencas,decaimientoFertilidad));
+  live.tiles=basinEdgeTiles(51926,cuencas);
+  // Explicitly exercise fallback growth AFTER local ecology, absent biome and zero capacity.
+  for(let i=0;i<live.tiles.length;i+=13)delete live.tiles[i].growth;
+  const actual=clone(live.tiles),neighbors=topology(actual);
+  for(const tick of [1,100,310,1600,1900,2000]) {
+    live.tick=tick;live.weather=tick%100===0?'rain':'clear';
+    const input=pack(actual),output=new Float64Array(input.length);
+    stepEcologyArrays(input,output,neighbors,actual.length,tick,live.weather==='rain',lightOf(phaseAt(tick)),
+      {...kernelOptions(live),recursos:paramsOf(live).recursos});
+    liveTick(live);unpack(output,actual,tick);
+    assert.deepEqual(compare(pack(live.tiles),output),{different:0,maximumAbsoluteError:0});
+    assert.deepStrictEqual(actual,live.tiles);
+  }
+});
+
+for(const devices of ['0','1','0,1'])for(const cuencas of [1,0.4])for(const decaimientoFertilidad of [0,0.001])
+test(`CUDA ${devices} complete ecology() + stepEcosystem(), basins=${cuencas}, decay=${decaimientoFertilidad}`,{skip:cudaSkip},async()=>{
+  const gpu=await GPUWorker.create(devices,nvrtc);
+  try {
+    assert.equal(gpu.initialization.fmad,false);
+    for(const device of gpu.initialization.devices)assert.ok(device.compileOptions.includes('--fmad=false'));
+    const live=createWorld(51926,worldParams(cuencas,decaimientoFertilidad));
+    live.tiles=basinEdgeTiles(51926,cuencas);
+    for(let i=0;i<live.tiles.length;i+=13)delete live.tiles[i].growth;
+    const actual=clone(live.tiles);
+    await gpu.setup(actual.length,topology(actual));
+    for(const tick of [1,100,310,1600,1900,2000]) {
+      live.tick=tick;live.weather=tick%100===0?'rain':'clear';
+      const result=await gpu.step(pack(actual),tick,live.weather==='rain',lightOf(phaseAt(tick)),
+        {...kernelOptions(live),localEcology:true,recursos:paramsOf(live).recursos});
+      liveTick(live);unpack(result.data,actual,tick);
+      assert.deepEqual(compare(pack(live.tiles),result.data),{different:0,maximumAbsoluteError:0});
+      assert.deepStrictEqual(actual,live.tiles);
+    }
+  } finally {await gpu.close();}
+});
+
+for(const architecture of ['compute_75','compute_120'])
+test(`NVRTC ${architecture}: --fmad=false prevents contraction in both ecological dispatches`,{skip:!nvrtc&&'COMPUTE_NVRTC absent'},()=>{
+  function compile(fmad:boolean):{options:string[];fmaInstructions:number;entries:string[]} {
+    const result=spawnSync('python3',[new URL('../scripts/compute-ecology-gpu.py',import.meta.url).pathname,
+      '--nvrtc',nvrtc!,'--compile-only',architecture,'--test-fmad',String(fmad)],{encoding:'utf8',timeout:15000});
+    assert.equal(result.status,0,result.stderr||result.stdout);
+    return JSON.parse(result.stdout);
+  }
+  const exact=compile(false),contracted=compile(true);
+  assert.ok(exact.options.includes('--fmad=false'));assert.equal(exact.fmaInstructions,0);
+  assert.deepEqual(exact.entries,['local_ecology','ecology']);
+  assert.ok(contracted.options.includes('--fmad=true'));assert.ok(contracted.fmaInstructions>0);
 });

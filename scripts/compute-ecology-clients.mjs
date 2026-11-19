@@ -66,9 +66,9 @@ class BinaryReader {
 }
 
 export class GPUWorker {
-  static async create(devices,nvrtc) {
+  static async create(devices,nvrtc,{testFmad=false}={}) {
     const result=new GPUWorker(),started=performance.now();
-    result.process=spawn('python3',[new URL('./compute-ecology-gpu.py',import.meta.url).pathname,'--devices',devices,'--nvrtc',nvrtc],{stdio:['pipe','pipe','pipe']});
+    result.process=spawn('python3',[new URL('./compute-ecology-gpu.py',import.meta.url).pathname,'--devices',devices,'--nvrtc',nvrtc,...(testFmad?['--test-fmad','true']:[])],{stdio:['pipe','pipe','pipe']});
     result.stderr='';result.process.stderr.on('data',chunk=>{result.stderr=(result.stderr+chunk.toString()).slice(-4096);});
     result.reader=new BinaryReader(result.process.stdout);
     // A failed spawn emits error/close without exit (for example absent Python).
@@ -90,9 +90,9 @@ export class GPUWorker {
     this.process.stdin.write(prefix);this.process.stdin.write(raw);
     if(!this.process.stdin.write(payload))await once(this.process.stdin,'drain');
   }
-  async setup(n,neighbors) {
+  async setup(n,neighbors,{ranges}={}) {
     const start=performance.now();
-    const reply=await this.deadline((async()=>{await this.send({kind:'setup',n},neighbors);return this.reader.frame();})());
+    const reply=await this.deadline((async()=>{await this.send({kind:'setup',n,ranges},neighbors);return this.reader.frame();})());
     return {...reply.header,nodeSetupMs:performance.now()-start};
   }
   async step(data,tick,rain,light,options={}) {

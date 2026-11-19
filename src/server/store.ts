@@ -2,6 +2,7 @@ import { DatabaseSync, type StatementSync } from 'node:sqlite';
 import { createHash } from 'node:crypto';
 import { mkdirSync, existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import type { Gesture, GestureResult } from '../shared/types.js';
 import { assertWorld, bindWorldContext, cloneWorld, migrateWorld, stepWorld, TICKS_PER_DAY, type World, type WorldContext } from '../world/index.js';
 import { CHUNK_SIZE, MAX_COORDINATE, type Chunk } from '../world/terrain.js';
@@ -98,6 +99,27 @@ export const fingerprint = (g: Gesture) => checksum(JSON.stringify(g.kind === 'c
 type Row = { body: string; digest: string; saved_at: number };
 type ChronicleStamp = { dataVersion: number; totalChanges: number; schemaCookie: number; tempSchemaCookie: number };
 const sameChronicleStamp = (a: ChronicleStamp, b: ChronicleStamp) => Object.keys(a).every(key => a[key as keyof ChronicleStamp] === b[key as keyof ChronicleStamp]);
+function sameReplayState(left: World, right: World): boolean {
+  // Más estricto que el SHA histórico: huecos, `undefined`, prototipos o formas
+  // distintas también fallan cerrado aunque serializaran igual.
+  if (!isDeepStrictEqual(left, right)) return false;
+  // `motor.depuracion` es observabilidad y está excluido del digesto histórico.
+  const leftParams = paramsOf(left), rightParams = paramsOf(right);
+  const { depuracion: _leftDebug, ...leftMotor } = leftParams.motor;
+  const { depuracion: _rightDebug, ...rightMotor } = rightParams.motor;
+  return isDeepStrictEqual({ ...leftParams, motor: leftMotor }, { ...rightParams, motor: rightMotor });
+}
+/**
+ * Compromiso del delta nuevo. El objeto completo ya queda autenticado además
+ * por su digest en `metadata`; esta raíz enlaza explícitamente padre, timeline,
+ * resultados, cambios y diarios sin volver a recorrer el mundo. El estado se
+ * autoriza antes con `sameReplayState`, y al leer `replayDelta` vuelve a ejecutar
+ * y cotejar resultados/diarios. Los checkpoints conservan el SHA canónico.
+ */
+function replayDeltaRoot(node: Extract<SnapshotReplay, { kind: 'delta' }>): string {
+  const { root: _root, ...commitment } = node;
+  return checksum(stringifyExact(commitment));
+}
 type ChronicleProof = { startsAfter: number; through: number; digest: string; tick: number; stamp: ChronicleStamp };
 type ChroniclePrune = { through: number; digest: string };
 /** Cabeza V2 de la cadena de recibos: pliegue de `(startsAfter, through]` (ver `technologyChainStep`). */
@@ -537,8 +559,14 @@ export class Store {
     for (const entry of chain.reverse()) {
       if (entry.kind === 'delta') {
         const changed = entry.tick !== world.tick || entry.changes.length !== 0 || entry.inputs.length !== 0;
+        const priorRoot = root;
         world = this.replayDelta(world, entry);
-        if (changed) root = digestoCanonico(world);
+        // Fase 2: compromiso del delta. Fallbacks: la fase 1 guardaba el SHA
+        // canónico cuando había cambios y heredaba la raíz si no los había.
+        if (replayDeltaRoot(entry) !== entry.root
+          && (changed ? digestoCanonico(world) !== entry.root : priorRoot !== entry.root))
+          throw new SnapshotSemanticError('Replay canonical hash mismatch (unmarked page or state). Explicit recovery required.');
+        root = entry.root;
       }
       if (world.version !== entry.rules || world.tick !== entry.tick || root !== entry.root)
         throw new SnapshotSemanticError('Replay canonical hash mismatch (unmarked page or state). Explicit recovery required.');
@@ -556,21 +584,30 @@ export class Store {
     durableSaves: number): { node: SnapshotReplay; world: World } {
     const current = this.db.prepare('SELECT body,digest FROM snapshots WHERE slot=0').get() as Row | undefined;
     const parent = current && checksum(current.body) === current.digest ? readSnapshotReplay(parseSnapshotJSON(current.body)) : null;
-    const committed = this.committedReplayWorld(world), root = digestoCanonico(committed);
+    const committed = this.committedReplayWorld(world);
     let candidate: World;
     if (parent && current && this.slot0Readable !== false) {
       const node: Extract<SnapshotReplay, { kind: 'delta' }> = { snapshotReplay: 1, rules: world.version, kind: 'delta', tick: world.tick,
-        depth: parent.depth + 1, parent: current.digest, root, inputs: JSON.parse(stringifyExact(inputs)),
+        depth: parent.depth + 1, parent: current.digest, root: parent.root, inputs: JSON.parse(stringifyExact(inputs)),
         changes: JSON.parse(stringifyExact(changes)), journals: { chronicle: committed.chronicleJournal, technology: committed.technology.journal } };
       const cached = this.replayCache;
-      const unchanged = parent.tick === world.tick && !inputs.length && !changes.length;
-      const prior = durableSaves % DEEP_VALIDATION_EVERY_SAVES !== 0 && cached?.digest === current.digest
-        && sameChronicleStamp(cached.stamp, this.chronicleStamp()) ? unchanged ? cached.world : cloneWorld(cached.world, this.context) : this.replayWorld(current.body);
+      // La auditoría retenida de abajo vuelve a leer la cadena cada diez
+      // guardados. Repetir esa reconstrucción aquí no añade evidencia: la caché
+      // está ligada al digest del padre y a todos los sellos SQLite.
+      const cachedPrior = cached?.digest === current.digest && sameChronicleStamp(cached.stamp, this.chronicleStamp())
+        ? cached.world : null;
+      const prior = cachedPrior ?? this.replayWorld(current.body);
+      // `replayDelta` muta su argumento. Consumir la caché evita clonar el mundo
+      // completo en la ruta normal; retirarla ANTES hace que cualquier excepción o
+      // rollback obligue a reconstruir desde el cuerpo durable en el reintento.
+      if (cachedPrior) this.replayCache = null;
       candidate = this.replayDelta(prior, node);
-      if ((unchanged ? parent.root : digestoCanonico(candidate)) !== root)
+      if (!sameReplayState(candidate, committed))
         throw new SnapshotSemanticError('Replay canonical hash mismatch (unmarked page or state). Snapshot was not written.');
+      node.root = replayDeltaRoot(node);
       if (parent.depth < DEEP_CHECKPOINT_EVERY_SAVES - 1 && durableSaves % DEEP_CHECKPOINT_EVERY_SAVES !== 0) return { node, world: candidate };
     } else candidate = cloneWorld(committed, this.context);
+    const root = digestoCanonico(candidate);
     return { node: { snapshotReplay: 1, rules: world.version, kind: 'checkpoint', tick: world.tick, depth: 0, root, body: '' }, world: candidate };
   }
   /** Objects and paged checkpoints belong to the three retained heads, including
@@ -1599,7 +1636,10 @@ export class Store {
         const saved = this.db.prepare('SELECT body,digest FROM snapshots WHERE slot=0').get() as Row | undefined;
         if (!saved || saved.body !== body || saved.digest !== checksum(body)) chronicleFailure('trigger changed committed snapshot');
       }
-      if (replay && (chronicleTriggers || nextDurableSaves % DEEP_VALIDATION_EVERY_SAVES === 0)) {
+      // La revisión de la cadena retenida comparte guardado con `assertWorld`.
+      // Antes usaba `nextDurableSaves` y caía un guardado antes: dos picos
+      // completos consecutivos cada diez commits sin evidencia adicional.
+      if (replay && (chronicleTriggers || deepValidation)) {
         for (const row of this.db.prepare('SELECT body,digest FROM snapshots').all() as Row[]) {
           if (checksum(row.body) !== row.digest) throw new SnapshotPhysicalError('Retained replay checksum mismatch.');
           this.readSnapshot(row.body);

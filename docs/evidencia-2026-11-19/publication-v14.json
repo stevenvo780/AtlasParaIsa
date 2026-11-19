@@ -1,0 +1,49 @@
+{
+  "capturedAt": "2026-11-19T00:43:05-05:00",
+  "status": "published",
+  "kind": "new world (V14): code aebce69 (Fase A de estabilidad de persistencia, arranque en frío y respaldo en caliente + unificación de herramientas Grupo A) + ley COM-D′ activada por parámetro (social.radioConvivencia=12,social.disolucion=1,social.maxComunidades=64)",
+  "reason": "Estabilización integral de persistencia, arranque en frío y respaldos (Fase A: A1–A4 de docs/PLAN-ESTABILIDAD-2026-11-18.md) tras diagnosticar que en V13 (día 9 252,79; 24,43 GiB) el 91,03 % del SQLite correspondía a technology_definitions (16,17 GiB) y technology_stats (6,07 GiB), el arranque en frío generaba un TEMP B-TREE de ~15 GiB sin índice para ORDER BY length(id), id y los respaldos horarios por VACUUM INTO agotaban 900 s y consumían hasta 44,5 GiB de page cache.",
+  "codeRevision": "aebce69",
+  "whatChanged": {
+    "code": "main c7b3bb3→aebce69: unificación documental y herramientas Grupo A (bd2d30d) + Fase A de estabilidad de persistencia sin cambio de leyes físicas (sprint/estabilidad-fase-a-20261118 → aebce69): A1 compactación segura de technology_stats bajo ventanaEventosTicks > 0 e índice technology_stats_tick; A2 índice expresivo technology_definitions_order ON technology_definitions(length(id), id) (0 TEMP B-TREE en EXPLAIN QUERY PLAN), índice compacto Float64Array en TechnologyArchive, memoización de loadLegacy(); A3 tope escalado en pruneTechnology, rotación de slot 2 persistida en metadata (deep-checkpoint-saves-v1) y PRAGMA auto_vacuum=INCREMENTAL + incremental_vacuum(256); A4 scripts/respaldo.sh con instantánea WAL consistente (BEGIN + .backup por defecto) y SQLITE_TMPDIR explícito, más endurecimiento de atlas-respaldo-publico.service (MemoryHigh=3G, IOSchedulingClass=idle, Nice=15, DEST en HDD /mnt/Data2)",
+    "activatedLaw": "social.radioConvivencia=12 (COM) + social.disolucion=1 (COM-D′) + social.maxComunidades=64 + gobernador.presupuestoMs=5000, vía CARTA_PARAMS; cero cambios en src/world/ respecto a V13 (RULES_VERSION 11 intacto)",
+    "evidenceForLaw": "Sin cambio de leyes físicas respecto a V13 (ver docs/evidencia-2026-09-30/publication-v13.json). Evidencia de Fase A: 569/569 pruebas de persistencia/store/archive/respaldo en verde; compactación de technology_stats -80 % filas respetando el invariante de verifyChain(); 0 TEMP B-TREE en summarizeDefinitions(); -85,7 % decodificaciones JSON y -99,97 % lecturas de legacy en loadSlot(); -28,4 % páginas físicas tras poda e incremental_vacuum; respaldo en caliente con escrituras concurrentes cada 1 ms completado en 107 ms sin bloqueo ni escritura al -wal huérfano (9/9 pruebas en tests/respaldo.test.ts).",
+    "knownLimits": "Fase A estabiliza almacenamiento, memoria de arranque y respaldos sin tocar las leyes de invención local. La Fase B (leyes locales B1–B4 de invención con grano físico, admisión por mejora local, enfriamiento de investigación y poda de pasos sin efecto; docs/preregistros/2026-11-18-estabilidad-tecnologia.md) se evalúa en paralelo en el panel preregistrado de 8 semillas × 60 días antes de promoverse a RULES_VERSION 12."
+  },
+  "operation": {
+    "deployCheck": "bash scripts/deploy-check.sh HEAD /datos/workspaces/personal/AtlasParaIsa-anexo/publicaciones/deploy-check/v14-fase-a-20261119 → salida 0 (build + test:smoke verdes en worktree efímero sobre aebce69)",
+    "backupBeforeStop": "/mnt/Juegos/respaldos-atlas-v13/world-20261118-2000.sqlite.gz (5,12 GiB, gzip -t: OK, CRC32 eb1a359f; 5 copias idénticas deduplicadas liberando 25,6 GiB)",
+    "v13Stopped": "atlas-publico.service parado limpiamente (2026-11-17 13:13:51 -05 en día 9 252,79, tick 22 206 700, 641 vivos); V13 conservado intacto en AtlasParaIsa-anexo/mundos/v13-20260930 (worktree publico-v13). No arrancarlo",
+    "towerCode": "worktree detached AtlasParaIsa-anexo/worktrees/publico-v14 en aebce69, con su propio node_modules y npm run build ejecutado allí",
+    "newWorld": "AtlasParaIsa-anexo/mundos/v14-20261119 creado vacío en NVMe /datos, access.scrypt copiado de V13 (misma contraseña, solo el hash)",
+    "units": "scripts/systemd/torre/{publico.sh, atlas-publico.service, atlas-respaldo-publico.service, atlas-respaldo-publico.timer} repuntados a V14 (ConditionPathExists → v14-20261119/access.scrypt; respaldo → /mnt/Data2/respaldos-atlas-v14 con RETENCION=24, RESPALDO_METODO=backup, MemoryHigh=3G, IOSchedulingClass=idle, Nice=15; drop-in antiguo 50-kant-hdd.conf archivado en AtlasParaIsa-anexo/archivo/rescate-2026-11-18/systemd-dropins/); copiados a ~/.config/systemd/user y daemon-reload",
+    "start": "arranque 2026-11-19 00:42:38 -05 (PID 1204679, 54,7 MiB RAM); timer atlas-respaldo-publico.timer habilitado y activo"
+  },
+  "verification": {
+    "testSuite": "suite completa verificada en worktree aislado: 1640 pruebas (1631 pass, 0 fail, 9 omitidas) + 569/569 pruebas de persistencia/store/archive/respaldo de Fase A",
+    "typecheck": "verde (0 errores)",
+    "checkLinks": "100 documentos, 617 enlaces, 0 rotos"
+  },
+  "liveChecks": {
+    "domainHealth": "ok",
+    "unauthenticatedWorldStatus": 401,
+    "servedAssetEqualsCompiled": "assets/index-BO2_Sfq3.js servido en https://atlas.humanizar.tech = compilado en worktree publico-v14 (cmp -s: OK)",
+    "world": {
+      "instanceId": "36a23d11-02af-49be-a867-960d2341c458",
+      "seed": 51926,
+      "rulesVersion": 11,
+      "persistedParams": {
+        "social.radioConvivencia": 12,
+        "social.disolucion": 1,
+        "social.maxComunidades": 64,
+        "gobernador.presupuestoMs": 5000
+      },
+      "firstBackup": {
+        "path": "/mnt/Data2/respaldos-atlas-v14/world-20261119-0042.sqlite.gz",
+        "sha256": "cbbbe0fc3d65573274177892d927237e2bd56ac906b31fe4409aa44a630db843",
+        "gzipTest": "OK",
+        "durationSeconds": 1
+      }
+    }
+  }
+}

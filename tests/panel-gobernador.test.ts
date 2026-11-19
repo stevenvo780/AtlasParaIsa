@@ -23,7 +23,7 @@ function stateCon(gobernador: NonNullable<RuntimeStats['gobernador']>, populatio
 }
 
 const frenazo = {
-  p95: 52, poblacion: 23, teselasActivas: 1000, teselasPorHabitante: 1000 / 23, senal: 'p95', tick: 2400,
+  p95: 52, maxMs: 120, poblacion: 23, teselasActivas: 1000, teselasPorHabitante: 1000 / 23, senal: 'p95', tick: 2400,
   motivo: 'frenado por p95 = 52 ms > 50 ms con 23 habitantes y 1000 teselas activas',
 };
 

@@ -213,9 +213,10 @@ export function withRecipeSession<T>(host: TechnologyCatalogueHost, evaluate: ()
   if (sessions.has(state) || !catalogueEnabled(state)) return evaluate();
   const inSession = (): T => {
     const max = state.budgets.maxRecipes;
-    if (!windowIndex(state.recipes) || !Number.isSafeInteger(max) || max < 1 || state.recipes.length > max) return evaluate();
-    const lru = new Map<string, TechnologyRecipe>();
-    for (const recipe of state.recipes) lru.set(recipe.id, recipe);
+    const lru = windowIndex(state.recipes);
+    if (!lru || !Number.isSafeInteger(max) || max < 1 || state.recipes.length > max) return evaluate();
+    // The map now belongs to the session; retained arrays must rebuild their own index.
+    windowIndexes.delete(state.recipes);
     const session: RecipeSession = { lru, max, touched: false };
     sessions.set(state, session);
     try { return evaluate(); } finally { if (sessions.get(state) === session) endRecipeSession(state); }

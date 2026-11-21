@@ -2,7 +2,8 @@ import type { PlaceView } from '../shared/types.js';
 import type { Person, World } from './index.js';
 import { primeroCerca } from './indice-puntos.js';
 import { conRejilla, vecinos } from './rejilla.js';
-import { tileAt } from './spatial.js';
+import { tileLookup } from './tile-index.js';
+import { residentTileReader } from './soa/terreno.js';
 
 /**
  * Natalidad por vecindad (decisión D2). El cupo global de 2 nacimientos cada 120 pasos
@@ -86,12 +87,21 @@ export function localForageSupport(world: World, center: Centro, radioMuestreo: 
   if (!(Number.isFinite(center.x) && Number.isFinite(center.y))) return { meanFood: 0, landTiles: 0 };
   const radio = radioMuestreoDe(radioMuestreo);
   const origenX = Math.round(center.x), origenY = Math.round(center.y);
+  const reader = residentTileReader(world.tiles), tileIn = reader ? undefined : tileLookup(world.tiles);
   let suma = 0, landTiles = 0;
   for (let dy = -radio; dy <= radio; dy++) for (let dx = -radio; dx <= radio; dx++) {
-    const tile = tileAt(world, { x: origenX + dx, y: origenY + dy });
-    if (!tile || tile.terrain === 'water') continue;
+    let food: number | undefined;
+    if (reader) {
+      const cell = reader.cellAt(origenX + dx, origenY + dy);
+      if (cell < 0 || reader.terrainCode(cell) === reader.TERRAIN_WATER) continue;
+      food = reader.food(cell);
+    } else {
+      const tile = tileIn!(origenX + dx, origenY + dy);
+      if (!tile || tile.terrain === 'water') continue;
+      food = tile.food;
+    }
     landTiles++;
-    suma += Number.isFinite(tile.food) ? tile.food : 0;
+    suma += Number.isFinite(food) ? food! : 0;
   }
   return { meanFood: landTiles === 0 ? 0 : suma / landTiles, landTiles };
 }

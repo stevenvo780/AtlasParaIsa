@@ -21,7 +21,7 @@ export interface GpuBridgeStats {
 export interface GpuRunResult extends GpuBridgeStats {
   dirtyPages: readonly { pageX: number; pageY: number }[];
 }
-interface TopologyKey { version: number; pageSetVersion: number; capacityCells: number; slots: number; totalCells: number; regionSide: number; }
+interface TopologyKey { version: number; pageSetVersion: number; residentEpoch: number; capacityCells: number; slots: number; totalCells: number; regionSide: number; }
 
 const WORKER_CODE = String.raw`
 const { parentPort, workerData } = require('node:worker_threads');
@@ -569,6 +569,7 @@ export class ResidentGpuBridge {
   private readonly statsArr = new Float64Array(new SharedArrayBuffer(8 * 8));
   private readonly errorArr = new Uint16Array(new SharedArrayBuffer(4096 * 2));
   private synced: TopologyKey | null = null;
+  private syncedDirtyBuffer: SharedArrayBuffer | null = null;
   private topo: ResidentTopology | null = null;
   /** La VRAM va por delante del anfitrión (runTick o bajada parcial): un cambio de topología resincroniza entero. */
   private vramAhead = false;
@@ -599,7 +600,7 @@ export class ResidentGpuBridge {
     this.worker.unref();
     // Un fallo o una salida inesperada del worker no tumba el anfitrión: el siguiente paso falla al
     // instante (`broken`) en vez de agotar la espera de 120 s.
-    const romper = (error: Error): void => { this.broken ??= error; this.synced = null; this.topo = null; };
+    const romper = (error: Error): void => { this.broken ??= error; this.synced = null; this.syncedDirtyBuffer = null; this.topo = null; };
     this.worker.on('error', error => romper(error instanceof Error ? error : new Error(String(error))));
     this.#exited = new Promise(resolve => this.worker.once('exit', code => {
       if (!this.closed) romper(new Error(`El worker GPU residente terminó (code=${code}).`));
@@ -611,7 +612,7 @@ export class ResidentGpuBridge {
   /** Cuántos cambios de topología se resolvieron con sync completo, incremental o sin subir nada. */
   get syncCounts(): Readonly<{ full: number; delta: number; noop: number }> { return this.#syncCounts; }
   /** Fuerza una resincronización completa en el próximo paso (tras un fallo o un cambio externo). */
-  invalidate(): void { this.synced = null; this.topo = null; }
+  invalidate(): void { this.synced = null; this.syncedDirtyBuffer = null; this.topo = null; }
 
   private weights(): number[] {
     // Peso medido en la torre: 5070 Ti ≈79%, 2060 ≈21% (T122/T124). Con otros pares, a partes iguales.
@@ -652,7 +653,9 @@ export class ResidentGpuBridge {
     const pageX = new Int32Array(buffers.pageX!), pageY = new Int32Array(buffers.pageY!);
     const identity = !sharded;
     const topo = this.topo;
-    if (allowIncremental && topo && this.synced && topo.identity === identity && topo.slots === key.slots && topo.capacityCells === key.capacityCells) {
+    if (allowIncremental && topo && this.synced && this.syncedDirtyBuffer === buffers.dirty
+      && this.synced.residentEpoch === key.residentEpoch
+      && topo.identity === identity && topo.slots === key.slots && topo.capacityCells === key.capacityCells) {
       const delta = topo.delta(cells, key.totalCells, around, pageX, pageY);
       if (delta === 'noop') return { kind: 'noop' };
       if (delta) return { delta, kind: 'delta' };
@@ -682,7 +685,7 @@ export class ResidentGpuBridge {
       if (status === 1) return;
       if (status === 2 || Date.now() - waitStarted > limitMs) {
         let msg = ''; for (let i = 0; i < this.errorArr.length && this.errorArr[i]; i++) msg += String.fromCharCode(this.errorArr[i]!);
-        this.synced = null; this.topo = null; this.broken = new Error(`${label}: ${msg || 'timeout esperando al subproceso GPU'}`);
+        this.synced = null; this.syncedDirtyBuffer = null; this.topo = null; this.broken = new Error(`${label}: ${msg || 'timeout esperando al subproceso GPU'}`);
         throw this.broken;
       }
       Atomics.wait(this.control, 0, 0, 5000);
@@ -715,11 +718,12 @@ export class ResidentGpuBridge {
     const cells = new Int32Array(buffers.cells!);
     const capacityCells = buffers.stamps!.byteLength / 4, slots = new Int32Array(buffers.pageX!).length, totalCells = cells.length;
     if (capacityCells > 134_217_728) throw new RangeError('Capacidad por encima de MAX_CELLS (134_217_728).');
-    return { version: terrain.version, pageSetVersion, capacityCells, slots, totalCells, regionSide };
+    return { version: terrain.version, pageSetVersion, residentEpoch: terrain.residentEpoch ?? 0, capacityCells, slots, totalCells, regionSide };
   }
-  private changed(key: TopologyKey): boolean {
+  private changed(key: TopologyKey, buffers: Record<string, SharedArrayBuffer>): boolean {
     const s = this.synced;
-    return !s || s.version !== key.version || s.pageSetVersion !== key.pageSetVersion || s.capacityCells !== key.capacityCells
+    return !s || this.syncedDirtyBuffer !== buffers.dirty || s.residentEpoch !== key.residentEpoch
+      || s.version !== key.version || s.pageSetVersion !== key.pageSetVersion || s.capacityCells !== key.capacityCells
       || s.slots !== key.slots || s.totalCells !== key.totalCells || s.regionSide !== key.regionSide;
   }
 
@@ -731,7 +735,7 @@ export class ResidentGpuBridge {
     const sharded = this.devices.length > 1 && (this.shardedOption ?? (key.capacityCells > 16_000_000));
     let plan: ReturnType<ResidentGpuBridge['planTopology']> | null = null;
     // Incremental solo si el anfitrión es autoritativo (el último paso bajó todas las páginas propias).
-    if (this.changed(key)) plan = this.planTopology(terrain, key, sharded, !this.vramAhead);
+    if (this.changed(key, buffers)) plan = this.planTopology(terrain, key, sharded, !this.vramAhead);
     const topo = this.topo!;
     const dirtyArr = new Uint8Array(buffers.dirty!);
     const dirtySlots = this.dirtySlotsOf(dirtyArr);
@@ -749,9 +753,9 @@ export class ResidentGpuBridge {
         kind: 'step', pass: pass === 'ecologia' ? 1 : 2, buffers, dirtySlots, haloSlotsPerDevice,
         downloadSlots, capacityCells: key.capacityCells, slots: key.slots, full: plan?.full, delta: plan?.delta, params,
       }, this.transferables(plan?.full, plan?.delta));
-    } catch (error) { this.synced = null; this.topo = null; throw error; }
+    } catch (error) { this.synced = null; this.syncedDirtyBuffer = null; this.topo = null; throw error; }
     this.wait('ResidentGpuBridge', 120000);
-    this.synced = key;
+    this.synced = key; this.syncedDirtyBuffer = buffers.dirty!;
     if (plan?.full) this.vramAhead = false;
     if (options?.downloadSlots !== undefined) this.vramAhead = true;
     return this.finish(buffers, dirtyArr, pass, plan?.kind ?? null);
@@ -769,7 +773,7 @@ export class ResidentGpuBridge {
     const buffers = terrain.buffers;
     const key = this.topologyKey(terrain, pageSetVersion, regionSide);
     const sharded = this.devices.length > 1 && (this.shardedOption ?? (key.capacityCells > 16_000_000));
-    const plan = this.changed(key) ? this.planTopology(terrain, key, sharded, false) : null;
+    const plan = this.changed(key, buffers) ? this.planTopology(terrain, key, sharded, false) : null;
     const topo = this.topo!;
     const dirtyArr = new Uint8Array(buffers.dirty!);
     const dirtySlots = this.dirtySlotsOf(dirtyArr);
@@ -782,9 +786,9 @@ export class ResidentGpuBridge {
         haloSlotsPerDevice: topo.haloLists(), downloadSlots, capacityCells: key.capacityCells, slots: key.slots,
         full: plan?.full, pass1Params, pass2Params,
       }, this.transferables(plan?.full));
-    } catch (error) { this.synced = null; this.topo = null; throw error; }
+    } catch (error) { this.synced = null; this.syncedDirtyBuffer = null; this.topo = null; throw error; }
     this.wait('ResidentGpuBridge tick', 120000);
-    this.synced = key; this.vramAhead = true;
+    this.synced = key; this.syncedDirtyBuffer = buffers.dirty!; this.vramAhead = true;
     return this.finish(buffers, dirtyArr, 'kernel', plan?.kind ?? null);
   }
 
@@ -804,7 +808,7 @@ export class ResidentGpuBridge {
     Atomics.store(this.control, 0, 0);
     this.worker.postMessage({ kind: 'kill' });
     // La muerte se observa en el siguiente run(), no en el hook: una espera breve para que SIGKILL llegue.
-    this.synced = null; this.topo = null;
+    this.synced = null; this.syncedDirtyBuffer = null; this.topo = null;
     Atomics.wait(this.control, 0, 0, 50);
     this.broken = null;
   }

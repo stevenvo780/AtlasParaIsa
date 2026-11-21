@@ -125,6 +125,8 @@ export interface SharedTerrain {
   regions: readonly StaticRegion[];
   buffers: Record<string, SharedArrayBuffer>;
   version: number;
+  /** Se incrementa solo en recargas completas no incrementales (`else` de `prepareParallel`): invalida delta-sync en GPU. */
+  residentEpoch?: number;
 }
 
 export class TileStore {
@@ -160,6 +162,7 @@ export class TileStore {
   private residentRegions: StaticRegion[] = [];
   private residentBusy = false;
   private residentRegionSide: 256 | 512 = 256;
+  private residentEpoch = 0;
   private residentRevision: object = {};
   private residentTopology: ResidentTopologyToken | undefined;
   private residentOwner: ResidentTopologyOwner | undefined;
@@ -412,6 +415,7 @@ export class TileStore {
           this.residentWoodAdded.fill(0);
         }
       } else {
+        this.residentEpoch++;
         this.detachResident();
         for (const tile of tiles) {
           const prior = bindings.get(tile);
@@ -431,6 +435,7 @@ export class TileStore {
           if (prior) prior.store.detachBinding(prior);
           const binding: ResidentBinding = { store: this, tile, cell: this.cellsOf[i]!, x: tile.x, y: tile.y, mask: 0 };
           for (const key of residentKeys) this.writeResidentValue(key, binding.cell, tile[key as keyof Tile]);
+          this.dirty[binding.cell >>> 8] = 1;
           bindings.set(tile, binding);
           for (const key of residentKeys) if (Object.hasOwn(tile, key)) this.attachResidentAccessor(binding, key);
           observeResidentTile(tile, { before: () => { if (this.residentBusy) throw new Error(TWO_WRITERS); },
@@ -503,7 +508,7 @@ export class TileStore {
       buffers[key] = pair[this.parity]!.buffer as SharedArrayBuffer;
       buffers[`${key}Back`] = pair[this.parity ^ 1]!.buffer as SharedArrayBuffer;
     }
-    return { regions: this.residentRegions, buffers, version: this.version };
+    return { regions: this.residentRegions, buffers, version: this.version, residentEpoch: this.residentEpoch };
   }
 
   parallelTopologyCertificate(tiles: Tile[]): { tiles: Tile[]; revision: object } | undefined {

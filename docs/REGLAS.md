@@ -13,6 +13,22 @@ defecto la dinámica es bit a bit la misma (puerta de digestos en 8 semillas).
 El código queda en `main`/`0a6476e` y en el commit previo de esta rama. No se tocan
 HOG (`social.hogarTrabajo`, decisión pendiente), `agua.memoria=1` ni las reglas 10/11.
 
+## Reglas 12 (2026-11-19 / 2026-11-21 — evolución abierta limitada por hardware, opt-in)
+
+**`RULES_VERSION = 12`** (`src/world/index.ts`, protocolo `10`, SQLite `5`) incorpora las leyes opt-in de evolución abierta y cómputo multi-chip sin modificar la trayectoria histórica de los defaults de V11 (`DEFAULT_PARAMS` y `HISTORICAL_PARAMS` conservan bit a bit la dinámica V11; la migración V11→V12 solo actualiza `world.version`):
+
+| Clave | Default / Histórico | Modo abierto (`CARTA_OPEN_WORLD=1` / `hostOpenWorldParams`) | Ley |
+| :--- | ---: | ---: | :--- |
+| `poblacion.natalidadVecindad` | `false` | `true` | Decisión D2 (`src/world/natalidad-local.ts`): reemplaza el cupo planetario de `nacimientosPorComprobacion` (2 cada 120 pasos = 40/día) por un cupo estrictamente local por disco de vecindad (`radioVecindadNatalidad`) condicionado al alimento medio caminable local (`meanFood ≥ 0,08`, sin singularidades de agua=0). |
+| `poblacion.radioVecindadNatalidad` | `16` | `16` | Radio en celdas (`[4, 64]`) del disco de natalidad por vecindad. Colonias separadas más allá del radio conciben en paralelo hasta que el suelo local o el gobernador de hardware (`gobernador.politica=techo`) fijen el límite. |
+| `social.maxComunidades` | `8` (hist.) / `64` (V14) | `0` | Rango ampliado a `[0, Number.MAX_SAFE_INTEGER]`. `0` significa «sin tope artificial de conducta»: `effectiveCommunityCap` delega el techo exclusivamente a la admisión física de RAM (`limites.comunidades`), respetando la separación T100 (con `maxComunidades > 0` sigue mandando la ley de fundación). |
+| `conducta.politicaPeso` | `0` | `0,35` | Red de política evolutiva estrictamente local (`12→8→12`, activación racional `x/(1+|x|)`, `src/world/politica.ts`, `Person.policy` y `Person.policyPlasticity`). Observación local (`R ≤ 4` teselas, `R ≤ 7` personas), sesgo acotado fuera de urgencias corporales (`hunger ≤ 0,75 && thirst ≤ 0,75`), plasticidad vitalicia (efecto Baldwin) jamás heredada en `reproduce()`, y evaluación en lote con paridad FP64 `Object.is` exacta entre CPU y Dual-GPU (`--fmad=false`, `src/world/gpu/politica-gpu.ts`). |
+| `conducta.aptitud` | `0` | `0,35` | Ventaja comparativa de oficios (ley DIV, solo cuando `thirst/hunger/fatigue ≤ 0,5`). |
+| `tecnologia.*` | `0 / 45 / false` | `evitarNoOp=true, dosisCuanto=50, enfriamiento=240` | Señal limpia de complejidad tecnológica acumulativa (`src/world/tecnologia-complejidad.ts`) sin microvariantes no-op redundantes. |
+| `motor.*` | `hilos=1, gpu=[], particionarPersonas=false, clonPorPaso=true` | `hostFullHardwareParams()` (`hilos=28, gpu=[0,1], soaTerreno=true, particionarPersonas=true, clonPorPaso=true`) | Detección automática de todos los hilos CPU y GPUs CUDA del anfitrión (`src/server/hardware-limits.ts`), con `ResidentTopologyOwner` vinculado en `src/server/main.ts` y precomputación paralela de movimiento BFS en workers (`empaquetarSoloMovimiento`). |
+
+**Compatibilidad histórica (obligatoria).** Con `DEFAULT_PARAMS` y `HISTORICAL_PARAMS` todas las nuevas claves permanecen inactivas (`natalidadVecindad=false`, `politicaPeso=0`, `maxComunidades=8`), `assertWorld` rechaza `Person.policy`/`policyPlasticity` en mundos `< V12`, y las puertas de digestos históricos V10/V11 coinciden byte a byte tras normalizar las tres claves inactivas.
+
 ## Reglas 11 (2026-09-23)
 
 Los mundos **nuevos** añaden al paquete de reglas 10 los cuatro defaults del brazo B de conflicto
@@ -27,15 +43,7 @@ iguales. Toda clave ausente de una instantánea sigue completándose con `HISTOR
 los mundos existentes conservan su conducta. Los demás defaults de reglas 10 no cambian;
 `agua.memoria` sigue en 1, como en B. `PARAMETER_LIMITS_RULES_VERSION` sigue en 9.
 
-**Estado vigente de versión (2026-11-19).** **`RULES_VERSION` sigue en `11`** (`src/world/index.ts:43`,
-protocolo `10`, SQLite `5`; estado publicado en [ESTADO.md](ESTADO.md)). Ni la infraestructura de
-cómputo paralelo/GPU de ecología ni la evaluación preregistrada de **Fase B** (`tecnologia.*`,
-[preregistro](preregistros/2026-11-18-estabilidad-tecnologia.md)) suben la versión de reglas: los
-parámetros `tecnologia.*` son **opt-in** y **no han sido adoptados** en `DEFAULT_PARAMS` ni en
-`HISTORICAL_PARAMS` (pasaron Q4 y Q5, pero no Q1/Q2/Q3 en el panel de 8 semillas × 60 días; ver
-[EVIDENCIA.md](EVIDENCIA.md#2-panel-preregistrado-fase-b-tecnologia-8-semillas-96019608--60-días-16-réplicas)).
-Tampoco está adoptado todavía el particionado simultáneo de personas (`motor.particionarPersonas = false`,
-Bloque E.1 pendiente).
+*(Nota histórica 2026-11-19: en V11 las claves `tecnologia.*` de Fase B —[preregistro](preregistros/2026-11-18-estabilidad-tecnologia.md)— pasaron Q4 y Q5 pero no Q1/Q2/Q3 en el panel de 8 semillas × 60 días, por lo que siguen siendo opt-in en V12 y no se adoptan en `DEFAULT_PARAMS` ni `HISTORICAL_PARAMS`; ver [EVIDENCIA.md](EVIDENCIA.md#2-panel-preregistrado-fase-b-tecnologia-8-semillas-96019608--60-días-16-réplicas).)*
 
 ## Reglas 10 (2026-09-22)
 

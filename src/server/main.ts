@@ -7,7 +7,7 @@ import { deploymentParams } from './deployment-params.js';
 import { hostFullHardwareParams, hostOpenWorldParams, hostParams } from './hardware-limits.js';
 import { gpuParitySession } from '../world/gpu/autoprueba.js';
 import { closeEcosystemWorkers } from '../world/ecosystem.js';
-import { bindWorldContext, closePersonasParallelPools, closePolicyGpuBatchers, worldContext } from '../world/index.js';
+import { bindWorldContext, closeFaunaParallelPools, closePersonasParallelPools, closePolicyGpuBatchers, worldContext } from '../world/index.js';
 import { ResidentTopologyOwner } from '../world/soa/topologia.js';
 
 process.umask(0o077);
@@ -51,6 +51,7 @@ try {
     if (closing) return; closing = true;
     await app.close();
     closePolicyGpuBatchers();
+    await closeFaunaParallelPools();
     await closePersonasParallelPools();
     await closeEcosystemWorkers();
     store!.close(); unlock();

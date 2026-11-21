@@ -1,0 +1,404 @@
+{
+  "date": "2026-11-21T16:27:39.243Z",
+  "devices": [
+    0,
+    1
+  ],
+  "ticks": 100,
+  "references": [
+    {
+      "cells": 1048576,
+      "cpuMs": 3452.776938
+    },
+    {
+      "cells": 4194304,
+      "cpuMs": 9640.864367999999
+    }
+  ],
+  "rows": [
+    {
+      "cells": 1048576,
+      "actors": 4000,
+      "ticks": 100,
+      "devices": [
+        0,
+        1
+      ],
+      "tickMedianMs": 3.2311110000000554,
+      "tickMeanMs": 3.3716922727273064,
+      "ecologyMedianMs": 2.25431799999933,
+      "policyBeginMedianMs": 0.8788120000008348,
+      "policyWaitMedianMs": 0.06992100000024948,
+      "ecologyAloneMedianMs": 2.138767000000371,
+      "policyAloneMedianMs": 1.2363259999992806,
+      "overlapGainMs": 0.14398199999959616,
+      "policyUploadPerTick": 784000,
+      "weightSyncPerTick": 68000,
+      "weightBytesAvoidedPerTick": 6784000,
+      "ecologyUploadPerTick": 393728,
+      "ecologyDownloadPerTick": 64488.72727272727,
+      "births": 1980,
+      "deaths": 1980,
+      "policyShards": [
+        3204,
+        796
+      ],
+      "policyDeviceMedianMs": [
+        0.21093199029564857,
+        0.2040629624389112
+      ],
+      "policyShardMedian": [
+        3166,
+        834
+      ],
+      "policyWorkerMedianMs": 0.3246939741075039,
+      "ecologyDiffs": 0,
+      "policyDiffs": 0,
+      "policyBackend": "gpu",
+      "appsOnGpu": {
+        "ecology": [
+          0,
+          1
+        ],
+        "policy": [
+          0,
+          1
+        ]
+      },
+      "util": {
+        "0": {
+          "samples": 31,
+          "mean": 5.838709677419355,
+          "max": 19,
+          "busyFraction": 1
+        },
+        "1": {
+          "samples": 31,
+          "mean": 2.6451612903225805,
+          "max": 5,
+          "busyFraction": 1
+        }
+      }
+    },
+    {
+      "cells": 1048576,
+      "actors": 20000,
+      "ticks": 100,
+      "devices": [
+        0,
+        1
+      ],
+      "tickMedianMs": 7.947451000000001,
+      "tickMeanMs": 8.279984000000052,
+      "ecologyMedianMs": 2.3703499999992346,
+      "policyBeginMedianMs": 5.2549569999991945,
+      "policyWaitMedianMs": 0.24947299999985262,
+      "ecologyAloneMedianMs": 2.209708000000319,
+      "policyAloneMedianMs": 5.824153999999908,
+      "overlapGainMs": 0.08641100000022561,
+      "policyUploadPerTick": 3920000,
+      "weightSyncPerTick": 340000,
+      "weightBytesAvoidedPerTick": 33920000,
+      "ecologyUploadPerTick": 393728,
+      "ecologyDownloadPerTick": 64488.72727272727,
+      "births": 9900,
+      "deaths": 9900,
+      "policyShards": [
+        17970,
+        2030
+      ],
+      "policyDeviceMedianMs": [
+        0.3257740172557533,
+        0.32934400951489806
+      ],
+      "policyShardMedian": [
+        17899,
+        2101
+      ],
+      "policyWorkerMedianMs": 0.46735600335523486,
+      "ecologyDiffs": 0,
+      "policyDiffs": 0,
+      "policyBackend": "gpu",
+      "appsOnGpu": {
+        "ecology": [
+          0,
+          1
+        ],
+        "policy": [
+          0,
+          1
+        ]
+      },
+      "util": {
+        "0": {
+          "samples": 47,
+          "mean": 4.74468085106383,
+          "max": 10,
+          "busyFraction": 1
+        },
+        "1": {
+          "samples": 47,
+          "mean": 3.3191489361702127,
+          "max": 18,
+          "busyFraction": 0.574468085106383
+        }
+      }
+    },
+    {
+      "cells": 1048576,
+      "actors": 50000,
+      "ticks": 100,
+      "devices": [
+        0,
+        1
+      ],
+      "tickMedianMs": 18.8351300000013,
+      "tickMeanMs": 18.317947424242355,
+      "ecologyMedianMs": 2.8843569999989995,
+      "policyBeginMedianMs": 15.152573000001212,
+      "policyWaitMedianMs": 0.5763270000024932,
+      "ecologyAloneMedianMs": 5.329757999999856,
+      "policyAloneMedianMs": 16.626861000000645,
+      "overlapGainMs": 3.121488999999201,
+      "policyUploadPerTick": 9800000,
+      "weightSyncPerTick": 850000,
+      "weightBytesAvoidedPerTick": 84800000,
+      "ecologyUploadPerTick": 393728,
+      "ecologyDownloadPerTick": 64488.72727272727,
+      "births": 24750,
+      "deaths": 24750,
+      "policyShards": [
+        47619,
+        2381
+      ],
+      "policyDeviceMedianMs": [
+        0.8268100209534168,
+        0.8032000041566789
+      ],
+      "policyShardMedian": [
+        43592,
+        6408
+      ],
+      "policyWorkerMedianMs": 1.072544022463262,
+      "ecologyDiffs": 0,
+      "policyDiffs": 0,
+      "policyBackend": "gpu",
+      "appsOnGpu": {
+        "ecology": [
+          0,
+          1
+        ],
+        "policy": [
+          0,
+          1
+        ]
+      },
+      "util": {
+        "0": {
+          "samples": 79,
+          "mean": 5.025316455696203,
+          "max": 10,
+          "busyFraction": 1
+        },
+        "1": {
+          "samples": 79,
+          "mean": 6.734177215189874,
+          "max": 14,
+          "busyFraction": 0.7468354430379747
+        }
+      }
+    },
+    {
+      "cells": 4194304,
+      "actors": 4000,
+      "ticks": 100,
+      "devices": [
+        0,
+        1
+      ],
+      "tickMedianMs": 4.711108999999851,
+      "tickMeanMs": 4.861414787878701,
+      "ecologyMedianMs": 3.3198019999981625,
+      "policyBeginMedianMs": 1.306855999999243,
+      "policyWaitMedianMs": 0.07175999999890337,
+      "ecologyAloneMedianMs": 3.4318330000023707,
+      "policyAloneMedianMs": 1.355027000001428,
+      "overlapGainMs": 0.07575100000394741,
+      "policyUploadPerTick": 784000,
+      "weightSyncPerTick": 68000,
+      "weightBytesAvoidedPerTick": 6784000,
+      "ecologyUploadPerTick": 655872,
+      "ecologyDownloadPerTick": 66722.90909090909,
+      "births": 1980,
+      "deaths": 1980,
+      "policyShards": [
+        3312,
+        688
+      ],
+      "policyDeviceMedianMs": [
+        0.13896101154386997,
+        0.15565200010314584
+      ],
+      "policyShardMedian": [
+        3624,
+        376
+      ],
+      "policyWorkerMedianMs": 0.2756629837676883,
+      "ecologyDiffs": 0,
+      "policyDiffs": 0,
+      "policyBackend": "gpu",
+      "appsOnGpu": {
+        "ecology": [
+          0,
+          1
+        ],
+        "policy": [
+          0,
+          1
+        ]
+      },
+      "util": {
+        "0": {
+          "samples": 41,
+          "mean": 8.731707317073171,
+          "max": 40,
+          "busyFraction": 1
+        },
+        "1": {
+          "samples": 41,
+          "mean": 8.75609756097561,
+          "max": 29,
+          "busyFraction": 1
+        }
+      }
+    },
+    {
+      "cells": 4194304,
+      "actors": 20000,
+      "ticks": 100,
+      "devices": [
+        0,
+        1
+      ],
+      "tickMedianMs": 9.19316599999729,
+      "tickMeanMs": 9.400040202020127,
+      "ecologyMedianMs": 3.5144839999993565,
+      "policyBeginMedianMs": 5.313797000002523,
+      "policyWaitMedianMs": 0.26975300000049174,
+      "ecologyAloneMedianMs": 3.5376650000034715,
+      "policyAloneMedianMs": 6.124157999998715,
+      "overlapGainMs": 0.46865700000489596,
+      "policyUploadPerTick": 3920000,
+      "weightSyncPerTick": 340000,
+      "weightBytesAvoidedPerTick": 33920000,
+      "ecologyUploadPerTick": 655872,
+      "ecologyDownloadPerTick": 66722.90909090909,
+      "births": 9900,
+      "deaths": 9900,
+      "policyShards": [
+        17411,
+        2589
+      ],
+      "policyDeviceMedianMs": [
+        0.3722450346685946,
+        0.3658339846879244
+      ],
+      "policyShardMedian": [
+        17441,
+        2559
+      ],
+      "policyWorkerMedianMs": 0.5013970076106489,
+      "ecologyDiffs": 0,
+      "policyDiffs": 0,
+      "policyBackend": "gpu",
+      "appsOnGpu": {
+        "ecology": [
+          0,
+          1
+        ],
+        "policy": [
+          0,
+          1
+        ]
+      },
+      "util": {
+        "0": {
+          "samples": 53,
+          "mean": 8.528301886792454,
+          "max": 21,
+          "busyFraction": 1
+        },
+        "1": {
+          "samples": 53,
+          "mean": 8.20754716981132,
+          "max": 17,
+          "busyFraction": 0.6226415094339622
+        }
+      }
+    },
+    {
+      "cells": 4194304,
+      "actors": 50000,
+      "ticks": 100,
+      "devices": [
+        0,
+        1
+      ],
+      "tickMedianMs": 18.176118999996106,
+      "tickMeanMs": 19.329568202020187,
+      "ecologyMedianMs": 4.0545209999982035,
+      "policyBeginMedianMs": 13.414777999998478,
+      "policyWaitMedianMs": 0.6174380000011297,
+      "ecologyAloneMedianMs": 3.6451860000015586,
+      "policyAloneMedianMs": 15.259922000004735,
+      "overlapGainMs": 0.7289890000101877,
+      "policyUploadPerTick": 9800000,
+      "weightSyncPerTick": 850000,
+      "weightBytesAvoidedPerTick": 84800000,
+      "ecologyUploadPerTick": 655872,
+      "ecologyDownloadPerTick": 66722.90909090909,
+      "births": 24750,
+      "deaths": 24750,
+      "policyShards": [
+        43695,
+        6305
+      ],
+      "policyDeviceMedianMs": [
+        0.7797899888828397,
+        0.7846300140954554
+      ],
+      "policyShardMedian": [
+        43573,
+        6427
+      ],
+      "policyWorkerMedianMs": 1.0118830250576138,
+      "ecologyDiffs": 0,
+      "policyDiffs": 0,
+      "policyBackend": "gpu",
+      "appsOnGpu": {
+        "ecology": [
+          0,
+          1
+        ],
+        "policy": [
+          0,
+          1
+        ]
+      },
+      "util": {
+        "0": {
+          "samples": 86,
+          "mean": 6.767441860465116,
+          "max": 12,
+          "busyFraction": 1
+        },
+        "1": {
+          "samples": 85,
+          "mean": 9.6,
+          "max": 22,
+          "busyFraction": 0.7647058823529411
+        }
+      }
+    }
+  ]
+}

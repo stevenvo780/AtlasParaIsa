@@ -48,6 +48,7 @@ import {
 import { ALIMENTO_MEDIO_MINIMO_NATALIDAD, selectLocalBirthPairs } from './natalidad-local.js';
 export { bindWorldContext, tileAt, normalizeViewport, worldContext } from './spatial.js';
 export { closePersonasParallelPools } from './paralelo/personas-motor.js';
+export { closeFaunaParallelPools } from './paralelo/fauna-motor.js';
 export { closePolicyGpuBatchers } from './gpu/politica-gpu.js';
 /** Observación/partición del anfitrión: no se serializa ni forma parte de las leyes del mundo. */
 export type WorldContext = SpatialWorldContext & { ecologyExecution?: EcologyExecution; personasExecution?: PersonasExecution };

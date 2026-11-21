@@ -4,9 +4,10 @@ import { FOOD_PER_ANIMAL } from './ecosystem.js';
 import { advanceNeeds } from './needs.js';
 import { assimilateFood, exertBody, hydrateBody, restBody } from './body.js';
 import { MAX_COORDINATE } from './terrain.js';
-import { LEGACY_WORLD_LIMITS, limitsOf } from './params.js';
+import { LEGACY_WORLD_LIMITS, limitsOf, paramsOf } from './params.js';
 import { tileLookup } from './tile-index.js';
 import { residentFaunaCapacity, residentTileReader, type ResidentTileReader } from './soa/terreno.js';
+import { applyFaunaChooseOutputs, stepChooseParallel } from './paralelo/fauna-motor.js';
 import { primero, primerosDos } from './orden.js';
 
 export const MAX_ACTIVE_ANIMALS = 8192;
@@ -687,8 +688,13 @@ export function stepAnimals(world: AnimalWorld, emit?: AnimalEmitter, mascara?: 
   const due = active.filter(a => world.tick - a.lastDecision >= 8)
     .sort((a, b) => a.lastDecision - b.lastDecision || canonical(a, b)).slice(0, MAX_ANIMAL_DECISIONS_PER_TICK);
   // Después de la fisiología y sus emisiones: choose no escribe terreno ni llama código externo.
-  state.reader = residentTileReader(world.tiles);
-  for (const animal of due) choose(animal, world, state);
+  const motor = paramsOf(world).motor;
+  if (motor.hilos > 1 && due.length >= 64) {
+    applyFaunaChooseOutputs(due, world, stepChooseParallel(world, due, state, motor.hilos, motor.orden));
+  } else {
+    state.reader = residentTileReader(world.tiles);
+    for (const animal of due) choose(animal, world, state);
+  }
   // Cadena secuencial (ver `move`): permanece en la fase serial del coordinador. `active` ya está
   // en orden canónico (`m.seleccion`), así que dos pasadas (`flee` primero) son idénticas al `sort`.
   for (const animal of active) if (animal.action === 'flee') move(animal, world, state);

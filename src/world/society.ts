@@ -107,32 +107,65 @@ export function topSkillByInsertionOrder(skills: Record<string, number>, inserti
 /** This is a local prospect, not a withdrawal: supplies still require collection
  * or exchange and fabrication still pays the physical execution's full costs. */
 function localRecipeInputs(world: World, teacher: Person, learner: Person): (program: TechnologyProgram, prospectiveProductId?: string) => boolean {
-  const raw = { wood: (learner.materials.wood + teacher.materials.wood) * MASS_UNIT,
-    stone: (learner.materials.stone + teacher.materials.stone) * MASS_UNIT, water: 0 };
-  for (let dy = -7; dy <= 7; dy++) for (let dx = -7; dx <= 7; dx++) {
-    if (dx * dx + dy * dy > 49) continue;
-    const tile = tileAt(world, { x: learner.x + dx, y: learner.y + dy });
-    if (tile && tile.terrain !== 'water') { raw.wood += (tile.wood ?? 0) * MASS_UNIT; raw.stone += (tile.stone ?? 0) * MASS_UNIT; raw.water += (tile.drinkingWater ?? 0) * 50_000; }
-  }
-  const items = [...learner.technology.items, ...teacher.technology.items], powers = itemCapacities(items);
-  // Masa por receta de producto, sumada en el orden de `items` como el `filter` + `reduce` de siempre.
-  const massByRecipe = new Map<string | null, number>();
-  const productMass = (id: string): number => {
+  const carriedWood = (learner.materials.wood + teacher.materials.wood) * MASS_UNIT, carriedStone = (learner.materials.stone + teacher.materials.stone) * MASS_UNIT;
+  // El terreno sólo suma cantidades validadas ≥ 0 a lo que llevan los dos: si lo llevado ya cubre lo
+  // pedido, la comparación con la suma completa da lo mismo y el recorrido no hace falta.
+  let raw: { wood: number; stone: number; water: number } | undefined;
+  const learnerItems = learner.technology.items, teacherItems = teacher.technology.items, stock = learner.technology.residue;
+  let powers: Record<Capability, number> | undefined;
+  // Masa por receta de producto, sumada en el orden aprendiz + maestro como el `filter` + `reduce` de siempre.
+  const massByRecipe = new Map<string | null | undefined, number>();
+  const productMass = (id: string | undefined): number => {
     let mass = massByRecipe.get(id);
-    if (mass === undefined) { mass = items.filter(item => item.recipeId === id).reduce((total, item) => total + item.mass, 0); massByRecipe.set(id, mass); }
+    if (mass === undefined) {
+      mass = 0;
+      for (const item of learnerItems) if (item.recipeId === id) mass += item.mass;
+      for (const item of teacherItems) if (item.recipeId === id) mass += item.mass;
+      massByRecipe.set(id, mass);
+    }
     return mass;
   };
+  // Las tres condiciones son puras: se evalúan en otro orden, con las mismas sumas en el orden de `inputs`.
   return (program, prospectiveProductId) => {
-    const required = { wood: 0, stone: 0, water: 0 }, residue = { wood: 0, stone: 0, water: 0 }, products = new Map<string, number>();
-    for (const input of program.inputs) {
-      if (input.source === 'product') products.set(input.recipeId!, (products.get(input.recipeId!) ?? 0) + input.mass);
-      else (input.source === 'raw' ? required : residue)[input.material!] += input.mass;
+    const { inputs, steps } = program;
+    let needWood = 0, needStone = 0, needWater = 0, usedWood = 0, usedStone = 0, usedWater = 0, fuel = 0;
+    for (const input of inputs) {
+      if (input.source === 'product') continue;
+      if (input.source === 'raw') {
+        if (input.material === 'wood') needWood += input.mass; else if (input.material === 'stone') needStone += input.mass; else if (input.material === 'water') needWater += input.mass;
+      } else if (input.material === 'wood') usedWood += input.mass; else if (input.material === 'stone') usedStone += input.mass; else if (input.material === 'water') usedWater += input.mass;
     }
-    const fuel = program.steps.reduce((n, step) => n + (step.op === 'heat' ? step.intensity * 50 : 0), 0);
-    required.wood += Math.max(0, fuel - Math.max(0, learner.technology.residue.wood - residue.wood));
-    return (['wood', 'stone', 'water'] as const).every(material => required[material] <= raw[material] && residue[material] <= learner.technology.residue[material]) &&
-      [...products].every(([id, needed]) => id === prospectiveProductId || productMass(id) >= needed) &&
-      program.steps.every(step => !step.requiredCatalyst || powers[step.requiredCatalyst] >= 0.1);
+    for (const step of steps) fuel += step.op === 'heat' ? step.intensity * 50 : 0;
+    needWood += Math.max(0, fuel - Math.max(0, stock.wood - usedWood));
+    if (!(usedWood <= stock.wood && usedStone <= stock.stone && usedWater <= stock.water)) return false;
+    if (!(needWood <= carriedWood && needStone <= carriedStone && needWater <= 0)) {
+      if (!raw) {
+        raw = { wood: carriedWood, stone: carriedStone, water: 0 };
+        for (let dy = -7; dy <= 7; dy++) for (let dx = -7; dx <= 7; dx++) {
+          if (dx * dx + dy * dy > 49) continue;
+          const tile = tileAt(world, { x: learner.x + dx, y: learner.y + dy });
+          if (tile && tile.terrain !== 'water') { raw.wood += (tile.wood ?? 0) * MASS_UNIT; raw.stone += (tile.stone ?? 0) * MASS_UNIT; raw.water += (tile.drinkingWater ?? 0) * 50_000; }
+        }
+      }
+      if (!(needWood <= raw.wood && needStone <= raw.stone && needWater <= raw.water)) return false;
+    }
+    for (const step of steps) {
+      if (!step.requiredCatalyst) continue;
+      powers ??= itemCapacities([...learnerItems, ...teacherItems]);
+      if (!(powers[step.requiredCatalyst] >= 0.1)) return false;
+    }
+    // Cada receta de producto una vez (su primera entrada), con su masa total sumada desde 0 en orden.
+    for (let i = 0; i < inputs.length; i++) {
+      const input = inputs[i]!, id = input.recipeId;
+      if (input.source !== 'product' || id === prospectiveProductId) continue;
+      let seen = false;
+      for (let j = 0; j < i && !seen; j++) seen = inputs[j]!.source === 'product' && inputs[j]!.recipeId === id;
+      if (seen) continue;
+      let needed = 0;
+      for (let j = i; j < inputs.length; j++) if (inputs[j]!.source === 'product' && inputs[j]!.recipeId === id) needed += inputs[j]!.mass;
+      if (!(productMass(id) >= needed)) return false;
+    }
+    return true;
   };
 }
 /** Recetas que el maestro ha practicado con éxito, en el orden de sus instrucciones. No depende del
@@ -150,26 +183,39 @@ function practicedRecipeToTeach(world: World, teacher: Person, learner: Person, 
   }
   if (!candidates.length) return;
   const inputsAvailable = localRecipeInputs(world, teacher, learner);
-  const remembered = learner.technology.knownRecipes.flatMap(id => { const recipe = resolveTechnologyRecipe(world, id); return recipe ? [recipe] : []; });
-  const known = remembered.filter(recipe => inputsAvailable(recipe.program));
-  // Possessing a tool does not teach its replacement. Compare reproducible
-  // instructions, not the world catalogue or the teacher's lifetime popularity.
-  // `Math.max(0, ...valores)` plegado de izquierda a derecha: el mismo resultado (NaN y ±0 incluidos) sin copias.
-  const powers = Object.fromEntries(CAPABILITIES.map(capability => {
-    let power = 0;
-    for (const recipe of known) power = Math.max(power, recipe.capacities[capability]);
-    return [capability, power];
-  })) as Record<Capability, number>;
+  // Las resoluciones (que tocan la ventana de recetas) van en el orden de siempre: recordadas y luego
+  // pedidas. Lo demás es puro y se calcula sólo si alguna candidata tiene sus insumos.
+  const remembered: TechnologyRecipe[] = [];
+  for (const id of learner.technology.knownRecipes) { const recipe = resolveTechnologyRecipe(world, id); if (recipe) remembered.push(recipe); }
   // An intermediate can unblock instructions already remembered before a craft
   // action is possible. Assess only those instructions (or the learner's own active
   // program), with the other substrates still required locally; the world catalogue
   // supplies no new desires and no product is credited until fabrication pays for it.
-  const prospectivePrograms = [...remembered.map(recipe => recipe.program), ...requestedPrograms(world, learner)];
-  const viable = candidates.filter(recipe => inputsAvailable(recipe.program)).map(recipe => ({ recipe,
-    gain: Math.max(...CAPABILITIES.map(capability => recipe.capacities[capability] - powers[capability]))
-      + (prospectivePrograms.some(program => program.inputs.some(input => input.source === 'product' && input.recipeId === recipe.id)
-        && inputsAvailable(program, recipe.id)) ? 1 : 0),
-  })).filter(candidate => candidate.gain > 0.12);
+  const requested = requestedPrograms(world, learner);
+  const unblocks = (program: TechnologyProgram, id: string) =>
+    program.inputs.some(input => input.source === 'product' && input.recipeId === id) && inputsAvailable(program, id);
+  let powers: Record<Capability, number> | undefined;
+  const viable: { recipe: TechnologyRecipe; gain: number }[] = [];
+  for (const recipe of candidates) {
+    if (!inputsAvailable(recipe.program)) continue;
+    // Possessing a tool does not teach its replacement. Compare reproducible
+    // instructions, not the world catalogue or the teacher's lifetime popularity.
+    // `Math.max` plegado de izquierda a derecha: el mismo resultado (NaN y ±0 incluidos) sin copias. Una
+    // receta que no supera ningún poder ya reunido no lo cambia, tenga o no sus insumos.
+    if (!powers) {
+      powers = { cutting: 0, storage: 0, insulation: 0, cultivation: 0, binding: 0, abrasion: 0 };
+      for (const known of remembered) {
+        if (CAPABILITIES.every(capability => known.capacities[capability] <= powers![capability]) || !inputsAvailable(known.program)) continue;
+        for (const capability of CAPABILITIES) powers[capability] = Math.max(powers[capability], known.capacities[capability]);
+      }
+    }
+    let best = -Infinity;
+    for (const capability of CAPABILITIES) best = Math.max(best, recipe.capacities[capability] - powers[capability]);
+    const gain = best + (remembered.some(known => unblocks(known.program, recipe.id)) || requested.some(program => unblocks(program, recipe.id)) ? 1 : 0);
+    if (gain > 0.12) viable.push({ recipe, gain });
+  }
+  // Con una sola viable (o ninguna) el orden no decide nada: ni rareza ni desempates.
+  if (viable.length < 2) return viable[0]?.recipe.id;
   // Ley candidata `social.ensenanzaRareza`: ordenar sólo por `gain` reenseña siempre la
   // misma receta y la transmisión se apaga cuando todos la saben. La rareza medida —la
   // fracción de vivos que NO la recuerdan— entra en la clave de orden; con el default 0
@@ -178,9 +224,9 @@ function practicedRecipeToTeach(world: World, teacher: Person, learner: Person, 
   const rareza = paramsOf(world).social.ensenanzaRareza;
   const holders = rareza > 0 ? recipeHolders(world, viable) : undefined;
   const alive = Math.max(1, world.people.length);
-  return viable.map(candidate => ({ ...candidate,
+  return viable.map(candidate => ({ recipe: candidate.recipe,
     key: candidate.gain + (holders ? rareza * (1 - (holders.get(candidate.recipe.id) ?? 0) / alive) : 0) }))
-    .sort((a, b) => b.key - a.key || (teacher.technology.competence[b.recipe.id]?.benefit ?? 0) - (teacher.technology.competence[a.recipe.id]?.benefit ?? 0) || a.recipe.id.localeCompare(b.recipe.id))[0]?.recipe.id;
+    .sort((a, b) => b.key - a.key || (teacher.technology.competence[b.recipe.id]?.benefit ?? 0) - (teacher.technology.competence[a.recipe.id]?.benefit ?? 0) || a.recipe.id.localeCompare(b.recipe.id))[0]!.recipe.id;
 }
 /** Vivos que ya recuerdan cada receta candidata, en UNA pasada por la población: contar
  * por receta recorrería `O(personas × recetas)` una vez por candidata. */

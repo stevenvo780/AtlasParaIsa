@@ -17,6 +17,8 @@ const SENESCENCE_GENE_RELIEF = 0.4;
 const CAUSES: readonly DemographicDeathCause[] = ['starvation', 'dehydration', 'exposure', 'senescence'];
 const clamp = (value: number) => Math.max(0, Math.min(1, value));
 const unit = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1;
+const nonNegative = (value: number) => Number.isFinite(value) && value >= 0;
+const positiveSafe = (value: number) => Number.isSafeInteger(value) && value > 0;
 const emptyDamage = (): DemographicTransition['damage'] => ({ starvation: 0, dehydration: 0, exposure: 0, senescence: 0 });
 
 export function initialDemography(age = 0): DemographicState {
@@ -34,8 +36,8 @@ export function initialDemography(age = 0): DemographicState {
  * sólo del genoma, y por eso `assertLegacyRecord` puede seguir recalculándolos sin mundo. */
 export function demographicTraits(genome: { alleles: readonly number[] }, longevity: Readonly<LongevityLaw> = DEFAULT_PARAMS.cuerpo): DemographicTraits {
   if (!Array.isArray(genome.alleles) || genome.alleles.length !== 14 || !genome.alleles.every(unit)) throw new RangeError('Alelos demográficos inválidos.');
-  if (![longevity.longevidadBaseDias, longevity.longevidadPorResiliencia, longevity.longevidadPorActividad, longevity.senescenciaInicioFraccion]
-    .every(value => Number.isFinite(value) && value >= 0)) throw new RangeError('Ley de longevidad inválida.');
+  if (!(nonNegative(longevity.longevidadBaseDias) && nonNegative(longevity.longevidadPorResiliencia) && nonNegative(longevity.longevidadPorActividad)
+    && nonNegative(longevity.senescenciaInicioFraccion))) throw new RangeError('Ley de longevidad inválida.');
   const resilience = (genome.alleles[8]! + genome.alleles[9]!) / 2;
   const activity = (genome.alleles[4]! + genome.alleles[5]!) / 2;
   const { maturityAge, senescenceStart, maximumAge } = longevityAges(resilience, activity, longevity);
@@ -57,18 +59,19 @@ export function demographicTraits(genome: { alleles: readonly number[] }, longev
 function validate(actor: DemographicActor, environment: DemographicEnvironment, dt: number): void {
   const state = actor.state, traits = actor.traits, law = environment.senescence;
   if (!Number.isFinite(dt) || dt < 0 || dt > MAX_DEMOGRAPHY_DT || !state || !traits
-    || ![actor.hunger, actor.thirst, actor.energy, actor.fatigue, state.health, state.vitality, environment.exposure, environment.shelter, traits.resilience].every(unit)
+    || !(unit(actor.hunger) && unit(actor.thirst) && unit(actor.energy) && unit(actor.fatigue) && unit(state.health) && unit(state.vitality)
+      && unit(environment.exposure) && unit(environment.shelter) && unit(traits.resilience))
     || typeof environment.protected !== 'boolean' || !Number.isFinite(state.age) || state.age < 0 || state.age + dt > Number.MAX_SAFE_INTEGER
     || (actor.id !== undefined && (typeof actor.id !== 'string' || actor.id.length === 0))
     || (environment.seed !== undefined && !Number.isInteger(environment.seed))
     || (environment.tick !== undefined && !Number.isFinite(environment.tick))
     || (law !== undefined && (typeof law !== 'object' || law === null
-      || ![law.riesgoSenescenciaDiario, law.riesgoSenescenciaPendiente].every(value => Number.isFinite(value) && value >= 0)
+      || !(nonNegative(law.riesgoSenescenciaDiario) && nonNegative(law.riesgoSenescenciaPendiente))
       || !unit(law.cuidadoReduceRiesgo)))
     || (state.deathCause !== null && !CAUSES.includes(state.deathCause)) || ((state.health === 0) !== (state.deathCause !== null))
     || !Number.isFinite(traits.foodDemand) || traits.foodDemand <= 0 || traits.foodDemand > 3
     || !Number.isFinite(traits.waterDemand) || traits.waterDemand <= 0 || traits.waterDemand > 3
-    || ![traits.maturityAge, traits.fertilityCooldown, traits.senescenceStart, traits.maximumAge].every(value => Number.isSafeInteger(value) && value > 0)
+    || !(positiveSafe(traits.maturityAge) && positiveSafe(traits.fertilityCooldown) && positiveSafe(traits.senescenceStart) && positiveSafe(traits.maximumAge))
     || traits.maturityAge >= traits.senescenceStart || traits.senescenceStart >= traits.maximumAge) throw new RangeError('Estado, entorno o intervalo demográfico inválido.');
 }
 
@@ -142,7 +145,7 @@ export function updateDemography(actor: DemographicActor, environment: Demograph
   damage.senescence = senescenceDamage(actor.state.age, state.age, traits);
   const aging = clamp((state.age - traits.senescenceStart) / (traits.maximumAge - traits.senescenceStart));
   const healing = nourishment * actor.energy * state.vitality * 0.08 * (1 - aging) * days;
-  state.health = clamp(state.health + healing - CAUSES.reduce((sum, cause) => sum + damage[cause], 0));
+  state.health = clamp(state.health + healing - (0 + damage.starvation + damage.dehydration + damage.exposure + damage.senescence));
   let death: DemographicDeathCause | null = null;
   const senescenceRisk = mortalityRisk(actor.state.age, state.age, traits, care, law);
   if (state.health <= 0) death = [...CAUSES].sort((a, b) => damage[b] - damage[a])[0]!;

@@ -625,10 +625,10 @@ export const ESCRITURAS: readonly Escritura[] = [
 /** Código de `src/world` que no forma parte del paso: validación, proyección a la vista, creación y migración. */
 export const FUERA_DEL_PASO: readonly Declaracion[] = [
   ...['createWorld', 'migrateWorldState', 'upgradeV3', 'upgradeV5'].map(funcion => ({ fichero: 'index.ts', funcion, motivo: 'Creación o migración de un mundo.' })),
-  ...['projectWorld', 'personDetail'].map(funcion => ({ fichero: 'index.ts', funcion, motivo: 'Proyección a la vista.' })),
+  ...['projectWorld', 'personDetail'].map(funcion => ({ fichero: 'proyeccion.ts', funcion, motivo: 'Proyección a la vista.' })),
   { fichero: 'index.ts', funcion: 'assertCommon', motivo: 'Validación.' },
   { fichero: 'index.ts', funcion: 'upgradeV4', motivo: 'Migración de un mundo.' },
-  ...['cloneWorld', 'puntoDeRestauracion'].map(funcion => ({ fichero: 'index.ts', funcion, motivo: 'Copia o restauración del mundo entero por el servidor: no es una ley.' })),
+  ...['cloneWorld', 'puntoDeRestauracion'].map(funcion => ({ fichero: 'clon.ts', funcion, motivo: 'Copia o restauración del mundo entero por el servidor: no es una ley.' })),
   { fichero: 'technology.ts', funcion: 'projectTechnology', motivo: 'Proyección a la vista: sólo la llama `projectWorld`.' },
   { fichero: 'spatial.ts', funcion: 'projectTerrain', motivo: 'Proyección a la vista (cámara).' },
   { fichero: 'statistics.ts', funcion: 'computeWorldStatistics', motivo: 'Proyección: sólo la llama `worldStatistics`, desde `projectWorld`.' },

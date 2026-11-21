@@ -1,16 +1,14 @@
 import { recordChronicleEvent, enableChronicleJournal, assertChronicleJournal, type ChronicleJournal } from './chronicle-journal.js';
-import { PROTOCOL_VERSION, type Action, type ChronicleEvent, type Gesture, type GestureResult, type MemoryView, type PersonView, type PersonDetail, type PlaceView, type Tile, type WorldView, type Viewport, type Order, type CommunityView, type WorldSample, type FaseNombre } from '../shared/types.js';
-import { activate, bindWorldContext, maintainRegions, normalizeViewport, projectTerrain, tileAt, validCoordinate, worldContext, type ChunkMeta, type WorldContext as SpatialWorldContext } from './spatial.js';
+import type { Action, ChronicleEvent, Gesture, GestureResult, MemoryView, PersonView, PlaceView, Tile, WorldView, Order, CommunityView, WorldSample, FaseNombre } from '../shared/types.js';
+import { activate, bindWorldContext, maintainRegions, tileAt, validCoordinate, worldContext, type ChunkMeta, type WorldContext as SpatialWorldContext } from './spatial.js';
 import type { EcologyExecution } from './ecosystem-kernel.js';
 import { tileLookup } from './tile-index.js';
-import { ResidentTopologyOwner } from './soa/topologia.js';
 import { gpuNvrtcAvailable } from './gpu/puente.js';
-import { chunkLruFor } from './lru.js';
 import { primero, primeroConFiltroCaro } from './orden.js';
 import { chunkKey, generateChunk, proceduralPlaceName, legacyStructures, type Chunk } from './terrain.js';
 import { assertGenome, DEFAULT_MUTATION_RATE, expressGenome, founderGenome, inheritGenome, localRandom, type Genome } from './genetics.js';
 import { bond, convivir, cooperate, cooperationOpportunity, initialCulture, resourceDispute, updateCommunities, settlementOpportunity, type Culture } from './society.js';
-import { count, emptyTotals, heredarEstadisticas, recordSample, worldStatistics } from './statistics.js';
+import { count, emptyTotals, recordSample } from './statistics.js';
 import { initializeEcosystem, stepEcosystem, stepLocalEcology, harvestMaterial, cultivateTile, trampleTile, FOOD_PER_ANIMAL } from './ecosystem.js';
 import { assertEcosystemTile, assertLifeState, assertDormantTerrain } from './validation.js';
 import { animalesVivosEnCelda, conRejillaFauna, materializeAnimals, stepAnimals, harvestAt, type Animal } from './animals.js';
@@ -22,12 +20,11 @@ import type { AnimalDynamics, BlueprintView, StructureView, InventionDynamics } 
 import { POPULATION_HARD_LIMIT } from '../shared/life.js';
 import type { TechnologyKnowledge, TechnologyState } from '../shared/technology.js';
 import type { DemographicState, LegacyRecord } from '../shared/demography.js';
-import { defaultTechnologyState, initialTechnologyKnowledge, technologyOpportunity, researchTechnology, craftTechnology, projectTechnology, assertTechnology, useTool, recordTechnologyBenefit, settleTechnologyEstate, cancelTechnologyProject, maintainTechnologyMemory } from './technology.js';
+import { defaultTechnologyState, initialTechnologyKnowledge, technologyOpportunity, researchTechnology, craftTechnology, assertTechnology, useTool, recordTechnologyBenefit, settleTechnologyEstate, cancelTechnologyProject, maintainTechnologyMemory } from './technology.js';
 import { catalogueEnabled, resolveTechnologyRecipe, withArchiveReadBatch } from './technology-catalogue.js';
 import { initialDemography, demographicTraits, updateDemography } from './demography.js';
 import { reproductiveReadiness, familyOpportunity, availableToShare, closeKin, chooseReproductivePartner, pairAffinity, pairTie, earlierForagerExhausts, observedForagersByCell } from './family.js';
 import { advancePopulation, assertLegacyRecord, assertPopulation } from './lineage.js';
-import { analyzeTechnologyOrganization } from './technology-organization.js';
 import { captureTechnologyCheckpoint, advanceTechnologyCheckpoint } from './technology-checkpoint.js';
 import { advanceWaterPreparation, beginWaterPreparation, canHandleContainedWater, containedWaterQuanta, drinkContainedWater, emptyWaterLedger, maintainContainedWater, payContainedWaterCarry, WATER_WORK_ENERGY, WATER_WORK_FATIGUE } from './technology-water.js';
 import { flowQuantized, WATER_QUANTA_PER_UNIT } from './material-affordances.js';
@@ -40,16 +37,19 @@ import {
   policyActionBias, updatePolicyPlasticity, type PolicyGenome, type PolicyPlasticity,
 } from './politica.js';
 import { cellIntKey, cellKeyX, cellKeyY, computeLocalPolicyObservation } from './politica-obs.js';
-import { closePolicyGpuBatchers, evaluatePoliciesBatch, evaluatePoliciesResidentBatch } from './gpu/politica-gpu.js';
+import { evaluatePoliciesBatch, evaluatePoliciesResidentBatch } from './gpu/politica-gpu.js';
 import {
-  closePersonasParallelPools, MOVE_AVANZA, MOVE_BLOQUEADO, MOVE_EN_DESTINO, MOVE_SIN_EVALUAR,
+  MOVE_AVANZA, MOVE_BLOQUEADO, MOVE_EN_DESTINO,
   precomputePersonasParallel, precomputedRouteLookup, SI, type PersonasExecution, type PrecomputedMoves,
 } from './paralelo/personas-motor.js';
 import { ALIMENTO_MEDIO_MINIMO_NATALIDAD, selectLocalBirthPairs } from './natalidad-local.js';
+import { cloneWorld } from './clon.js';
 export { bindWorldContext, tileAt, normalizeViewport, worldContext } from './spatial.js';
 export { closePersonasParallelPools } from './paralelo/personas-motor.js';
 export { closeFaunaParallelPools } from './paralelo/fauna-motor.js';
 export { closePolicyGpuBatchers } from './gpu/politica-gpu.js';
+export { cloneWorld, puntoDeRestauracion, type PuntoDeRestauracion } from './clon.js';
+export { projectWorld, personDetail, VIEW_EVENTS, VIEW_MEMORIES } from './proyeccion.js';
 /** Observación/partición del anfitrión: no se serializa ni forma parte de las leyes del mundo. */
 export type WorldContext = SpatialWorldContext & { ecologyExecution?: EcologyExecution; personasExecution?: PersonasExecution };
 
@@ -1051,11 +1051,6 @@ function outcome(world: World, person: Person, action: Action, benefit: number, 
   person.skills[action] = clamp((person.skills[action] ?? 0) + 0.008);
   person.activity[action] = Math.min(1_000_000, (person.activity[action] ?? 0) + 1);
 }
-function specialty(person: Person): string {
-  const names: Record<string, string> = { explore: 'exploración', eat: 'recolección de alimento', forage: 'cosecha y provisión', drink: 'búsqueda de agua', hunt: 'caza', rest: 'recuperación', share: 'cuidado', gather: 'materiales', farm: 'cultivo', build: 'construcción', cooperate: 'cooperación' };
-  const practiced = Object.entries(person.activity).filter(([, count]) => count >= 3).sort((a, b) => b[1] - a[1]).slice(0, 2);
-  return practiced.length ? practiced.map(([action]) => names[action] ?? action).join(' · ') : 'Descubriendo sus aptitudes';
-}
 
 /** Breadth-first movement takes one adjacent land cell. It never crosses water or teleports. */
 function move(world: World, person: Person, precomputed?: PrecomputedMoves, slot?: number): void {
@@ -1588,233 +1583,6 @@ function reproduce(world: World): void {
 
 function fertile(world: World, person: Person): boolean {
   return person.inventory >= 0.1 && reproductiveReadiness(world, person);
-}
-
-/** `structuredClone` semantics for the plain JSON-shaped world state, without its
- * serialize/deserialize round trip. `shared` keeps the identity the world already has —
- * an event lives at once in `events` and in `chronicleJournal.pending`, a place in
- * `places` and in the meta of its active chunk — so writing through one path is still
- * seen through the other. Anything that is not a plain object or array (a Date, a
- * null-prototype record) falls back to `structuredClone` for that subtree. */
-function cloneState<T>(value: T, shared: Map<object, unknown>): T {
-  if (value === null) return value;
-  const kind = typeof value;
-  // A host capability smuggled into the state still fails loudly, as structuredClone did.
-  if (kind !== 'object') return kind === 'function' ? structuredClone(value) : value;
-  const source = value as unknown as object;
-  const previous = shared.get(source);
-  if (previous !== undefined) return previous as T;
-  if (Array.isArray(source)) {
-    const copy: unknown[] = new Array(source.length);
-    shared.set(source, copy);
-    for (let i = 0; i < source.length; i++) if (i in source) copy[i] = cloneState(source[i], shared);
-    return copy as T;
-  }
-  if (Object.getPrototypeOf(source) !== Object.prototype) {
-    const copy = structuredClone(value); shared.set(source, copy as object); return copy;
-  }
-  const copy: Record<string, unknown> = {};
-  shared.set(source, copy);
-  for (const key in source) copy[key] = cloneState((source as Record<string, unknown>)[key], shared);
-  return copy as T;
-}
-
-/** Flat terrain cells can be copied without the generic structured-clone traversal overhead. */
-export function cloneWorld(world: World, context: WorldContext): World;
-export function cloneWorld(world: World): World;
-export function cloneWorld(world: World, context: WorldContext = worldContext(world)): World {
-  // Same state and same sharing as structuredClone: the non-tile state of the aged 51926
-  // laboratory fixture copies in 2.23 ms instead of 8.11 ms (T103).
-  const draft: World = cloneState({ ...world, tiles: [], retiredChunks: [] }, new Map());
-  const tileOwnership = worldContext(world).tileOwnership || context?.tileOwnership
-    ? new ResidentTopologyOwner() : undefined;
-  draft.tiles = tileOwnership
-    ? tileOwnership.tiles(world.tiles.map(tile => tileOwnership.tile(tile)))
-    : world.tiles.map(tile => ({ ...tile }));
-  // Dormant chunks are immutable until activate() takes a private deep copy.
-  // A new queue is still required: retiring/reactivating must not edit the confirmed queue.
-  draft.retiredChunks = [...world.retiredChunks];
-  bindWorldContext(draft, { ...worldContext(world), ...(context && typeof context === 'object' ? context : {}), tileOwnership });
-  setParams(draft, paramsOf(world));
-  // T041: la cadencia de las métricas caras vive en una caché lateral por mundo; el clon
-  // de cada paso la hereda para no recalcular la BFS de agua en cada tick.
-  heredarEstadisticas(draft, world);
-  return draft;
-}
-
-/** T104. Copia profunda especializada en el estado del mundo: objetos llanos, arrays y
- * primitivas, que es todo lo que un mundo serializable contiene. `structuredClone` resuelve
- * además ciclos, `Map`, `Set`, binarios y transferencias que aquí no existen, y ese recorrido
- * genérico es el que se paga en cada paso. Un prototipo que no sea el de `Object` se rechaza
- * en vez de copiarse mal en silencio.
- *
- * `copias` conserva la identidad compartida, como `cloneState`: entre guardados, un mismo objeto
- * vive en el estado y en la cola que el Store confirmará (`technology.history` y
- * `technology.journal.pending`, `technology.recipes` y `technology.catalogue.pending`, `events` y
- * `chronicleJournal.pending`), y las leyes escriben por un solo camino contando con que el otro lo
- * ve: `recordTechnologyBenefit` pone el beneficio en la ejecución pendiente y
- * `updateTechnologyRecipeStats` las estadísticas en la receta pendiente. Una copia sin identidad
- * dejaba, tras deshacer, dos objetos distintos donde había uno, y el primer beneficio o estadística
- * posterior separaba el estado residente de lo que se archiva. */
-function copiaProfunda(value: object, copias: Map<object, unknown>): unknown {
-  const previa = copias.get(value);
-  if (previa !== undefined) return previa;
-  if (Array.isArray(value)) {
-    const length = value.length, copy: unknown[] = new Array(length);
-    copias.set(value, copy);
-    for (let index = 0; index < length; index++) {
-      const item: unknown = value[index];
-      copy[index] = item === null || typeof item !== 'object' ? item : copiaProfunda(item, copias);
-    }
-    return copy;
-  }
-  const prototype = Object.getPrototypeOf(value);
-  if (prototype !== Object.prototype && prototype !== null) throw new TypeError('Estado del mundo con prototipo no copiable en el punto de restauración.');
-  const source = value as Record<string, unknown>, copy: Record<string, unknown> = {};
-  copias.set(value, copy);
-  for (const key in source) {
-    const item = source[key];
-    copy[key] = item === null || typeof item !== 'object' ? item : copiaProfunda(item, copias);
-  }
-  return copy;
-}
-
-/** T104: lo que hace falta para deshacer un paso que no llegó a confirmarse. */
-export interface PuntoDeRestauracion {
-  /** Deja el mundo exactamente como estaba cuando se tomó el punto. Se usa una sola vez:
-   * al restaurar, el mundo se queda con los objetos del punto y este deja de ser válido. */
-  restaurar(): void;
-}
-
-/** T104 — clon estructural **acotado** a lo que un paso puede tocar, para que `stepOnce` pueda
- * simular sobre el mundo vigente (`motor.clonPorPaso=false`) sin perder la atomicidad del paso.
- *
- * Tres decisiones y su razón en el código:
- * · **teselas**: se copian una a una y **la copia se la queda el mundo**, no el punto. El clon de
- *   hoy hacía dos cosas a la vez y solo una se veía: además de reservar la vuelta atrás, entregaba
- *   al paso teselas recién construidas. `syncFauna` hace `delete tile.species` (`animals.ts`), que
- *   deja el objeto en modo diccionario para siempre; un mundo que avanza en sitio acumula ese daño
- *   y recorrerlo se encarece. Medido a 2 400 pasos con el mismo mundo (digesto idéntico) por los
- *   dos caminos: `tiles.map(t => ({...t}))` cuesta 3,41 ms si el mundo se reconstruyó cada paso y
- *   29,15 ms si avanzó en sitio (8,6×); animales, tecnología y personas no se degradan. Así que el
- *   punto guarda las teselas confirmadas y el paso trabaja sobre las nuevas: mismo recorrido de
- *   antes, misma higiene de formas, y restaurar es devolver el array viejo.
- * · **`retiredChunks`**: array nuevo y chunks **compartidos por referencia**. `activate` clona en
- *   profundidad el chunk que reanima antes de exponer sus animales, estructuras y lugares a las
- *   leyes (T103), y `maintainRegions` solo **añade** chunks nuevos; ningún chunk dormido del punto
- *   se muta durante el paso.
- * · **el resto**: copia profunda especializada; el estado del mundo es serializable por contrato
- *   (lo exige la instantánea durable), de modo que objetos llanos y arrays lo cubren entero. La
- *   copia conserva la identidad compartida entre campos, igual que `cloneWorld` (ver `copiaProfunda`).
- *
- * Tomar el punto deja además el mundo listo para simular: recibe las teselas nuevas y el punto se
- * queda con las confirmadas. El punto no lee el reloj ni el hardware: su contenido depende solo
- * del mundo recibido. */
-export function puntoDeRestauracion(world: World): PuntoDeRestauracion {
-  // Un solo mapa para todos los campos: la identidad compartida cruza de un campo a otro.
-  const campos: Record<string, unknown> = {}, copias = new Map<object, unknown>();
-  for (const key in world) {
-    if (key === 'tiles' || key === 'retiredChunks') continue;
-    const value = (world as unknown as Record<string, unknown>)[key];
-    campos[key] = value === null || typeof value !== 'object' ? value : copiaProfunda(value, copias);
-  }
-  const tiles = world.tiles;
-  const tileOwnership = worldContext(world).tileOwnership;
-  world.tiles = tileOwnership
-    ? tileOwnership.tiles(tiles.map(tile => tileOwnership.tile(tile)))
-    : tiles.map(tile => ({ ...tile }));
-  const retiredChunks = [...world.retiredChunks];
-  let usado = false;
-  return {
-    restaurar() {
-      if (usado) throw new Error('El punto de restauración ya se consumió.');
-      usado = true;
-      const objetivo = world as unknown as Record<string, unknown>;
-      // Un paso a medias pudo añadir campos que antes no existían: deshacer es también quitarlos.
-      for (const key of Object.keys(objetivo)) if (key !== 'tiles' && key !== 'retiredChunks' && !(key in campos)) delete objetivo[key];
-      Object.assign(objetivo, campos);
-      world.tiles = tiles; world.retiredChunks = retiredChunks;
-      chunkLruFor(world).clear();
-      // El lector del catálogo vive en un WeakMap indexado por el `technology` del mundo, y
-      // `technology` acaba de volver a ser otro objeto: sin esto el mundo restaurado perdería
-      // el archivo de recetas del anfitrión.
-      bindWorldContext(world, worldContext(world));
-    },
-  };
-}
-
-/** Explicit allow-list: no PRNG, habit internals, private provenance or session data cross the wire. */
-const organizationViews = new WeakMap<World, { tick: number; executionCounter: number; checkpoint: TechnologyState['checkpoint']; value: NonNullable<WorldView['organization']> }>();
-/** Windows of the projection, not of the world: the chronicle and the letter keep their own bounds. */
-export const VIEW_EVENTS = 40, VIEW_MEMORIES = 100;
-/** A snapshot is read by a screen: thousandths are the resolution it draws and the one the wire pays for.
- * An absent datum stays absent; rounding never invents a zero. */
-const r3 = (n: number): number => Math.round(n * 1000) / 1000;
-const viewNumber = <T extends number | undefined>(value: T): T => (typeof value === 'number' ? r3(value) : value) as T;
-/** T036(h): «no hay nada de esto aquí» no necesita viajar como `0`. Estas magnitudes son cantidades
- * (existencias, huellas, fauna): su ausencia y su cero significan lo mismo para quien dibuja, y el
- * cliente ya las lee con `?? 0`. Las que sí describen el terreno —humedad, alimento, vegetación,
- * altitud, crecimiento, fertilidad— viajan siempre, porque ahí un cero es un dato. */
-const amount = <K extends string>(key: K, value: number | undefined): Partial<Record<K, number>> =>
-  (typeof value !== 'number' || value === 0 ? {} : { [key]: r3(value) } as Record<K, number>);
-export function projectWorld(world: World, viewport?: Viewport, context: WorldContext = worldContext(world)): WorldView {
-  bindWorldContext(world, context);
-  const projected = projectTerrain(world, viewport, context), v = projected.viewport;
-  let organization=organizationViews.get(world);
-  if(!organization||organization.tick!==world.tick||organization.executionCounter!==world.technology.executionCounter||organization.checkpoint!==world.technology.checkpoint) {
-    organization={tick:world.tick,executionCounter:world.technology.executionCounter,checkpoint:world.technology.checkpoint,value:analyzeTechnologyOrganization(world.technology,world.people,world.tick)};
-    organizationViews.set(world,organization);
-  }
-  // La ley de longevidad del mundo, leída una vez por proyección: decide `lifeStage` de cada persona.
-  const cuerpo = paramsOf(world).cuerpo;
-  // T134 (FR-017/FR-026): `people` se recorta con la MISMA prueba de cámara que `projectTerrain`
-  // ya usa para `tiles` (`spatial.ts:121`: `p.x >= v.x && p.y >= v.y && p.x < v.x+v.width && p.y <
-  // v.y+v.height`), con un margen de una celda (quien está a punto de entrar en cuadro no debe
-  // parpadear al aparecer). `spatial.ts` no es fichero de esta tarea; se repite la prueba aquí en
-  // vez de exportarla desde allí. Los agregados de censo (`stats.census`) siguen viendo TODA la
-  // población, calculados en `worldStatistics` sobre `world.people` sin recortar.
-  const visible = (p: { x: number; y: number }, margin: number): boolean =>
-    p.x >= v.x - margin && p.y >= v.y - margin && p.x < v.x + v.width + margin && p.y < v.y + v.height + margin;
-  const peopleInView = world.people.filter(p => visible(p, 1));
-  const visibleIds = new Set(peopleInView.map(p => p.id));
-  // Solo los planos que alguna estructura VISIBLE referencia viajan enteros; el resto se pide a
-  // demanda (mismo patrón que `technologyRecipeDetail`), porque el catálogo entero crece con el
-  // mundo y no con la cámara.
-  const referencedBlueprintIds = new Set(projected.structures.map(s => s.blueprintId).filter((id): id is string => typeof id === 'string'));
-  return {
-    version: PROTOCOL_VERSION, sequence: world.tick, tick: world.tick, day: Math.floor(world.tick / TICKS_PER_DAY) + 1,
-    phase: phaseAt(world.tick), weather: world.weather, width: v.width, height: v.height,
-    originX: v.x, originY: v.y, infinite: true, activeChunks: Object.keys(world.chunks).length, discoveredChunks: world.discoveredChunks, settlementCount: world.settlementCount,
-    tiles: projected.tiles.map(t => ({ x: t.x, y: t.y, terrain: t.terrain, biome: t.biome, elevation: viewNumber(t.elevation), moisture: viewNumber(t.moisture), food: viewNumber(t.food), vegetation: viewNumber(t.vegetation), feature: t.feature, growth: viewNumber(t.growth), fertility: viewNumber(t.fertility), species: t.species, ...amount('wood', t.wood), ...amount('stone', t.stone), ...amount('variety', t.variety), ...amount('cultivation', t.cultivation), ...amount('traffic', t.traffic), ...amount('drinkingWater', t.drinkingWater), ...amount('fauna', t.fauna), ...amount('life', t.life) })),
-    people: peopleInView.map((p): PersonView => {
-      const life = demographicTraits(p.genome, cuerpo);
-      return { id: p.id, name: p.name, role: p.role, x: p.x, y: p.y, color: p.color, action: p.action, reason: p.reason, energy: p.energy, hunger: p.hunger, fatigue: p.fatigue, thirst: p.thirst, need: p.need, recentMemory: p.recentMemory, traits: { ...p.traits }, skills: { ...p.skills }, materials: { ...p.materials }, specialty: specialty(p), controlMode: p.controlMode, blueprintId:p.blueprintId??null,
-      target: { x:p.target.x,y:p.target.y }, foodReserve:p.inventory, foodReserveCapacity:0.25, working: !!p.technology.waterPreparation || ['gather','farm','build','hunt','invent','repair','research','craft','forage'].includes(p.action) && distance(p,p.target)<0.5,
-      workProgress: p.technology.waterPreparation ? clamp(((p.technology.items.find(item => item.id === p.technology.waterPreparation!.itemId)?.contents?.water ?? 0) - p.technology.waterPreparation.initialQuanta) / (p.technology.waterPreparation.targetQuanta - p.technology.waterPreparation.initialQuanta))
-        : ['research','craft'].includes(p.action) ? (p.technology.project ? clamp(p.technology.project.progress/p.technology.project.requiredWork) : 0) : clamp(p.work / (p.action==='build'?constructionCost(world,p).work:p.action==='invent'?60:p.action==='repair'?30:['farm','hunt'].includes(p.action)?Math.ceil(45*(1-(p.skills[p.action]??0)*0.25)):Math.ceil(18*(1-(p.skills[p.action]??0)*0.25)))),
-      health:p.demography.health,vitality:p.demography.vitality,continuityProtected:p.role!=='neighbor',
-      lifeStage: p.demography.age < life.maturityAge ? 'juvenile' : p.demography.age < life.senescenceStart ? 'adult' : 'senescent',
-      genome: { generation: p.genome.generation, parents: [...p.genome.parents], learningRate: p.genome.learningRate, cooperation: p.genome.cooperation, mutations: p.genome.mutations }, age: world.tick - p.bornAt, communityId: p.communityId, culture: { ...p.culture } };
-    }),
-    places: projected.places.map(p => ({ id: p.id, name: p.name, x: p.x, y: p.y, description: p.description, gatherings: p.gatherings })), events: world.events.slice(-VIEW_EVENTS).map(e => ({ id: e.id, tick: e.tick, kind: e.kind, actors: [...e.actors], ...(e.x === undefined ? {} : { x: e.x }), ...(e.y === undefined ? {} : { y: e.y }), text: e.text, cause: e.cause, source: e.source, ...(e.death === undefined ? {} : { death: { ...e.death, previous: [...e.death.previous] } }) })),
-    memories: world.memories.slice(-VIEW_MEMORIES).map(m => ({ id: m.id, title: m.title, text: m.text, source: m.source, placeId: m.placeId })),
-    animals: projected.animals, structures: projected.structures, blueprints: world.blueprints.filter(b=>referencedBlueprintIds.has(b.id)).map(b=>({id:b.id,name:b.name,components:[...b.components],generation:b.generation,parents:[...b.parents],inventorId:b.inventorId,tick:b.tick,uses:b.uses,usefulness:b.usefulness,cost:{wood:b.cost.wood,stone:b.cost.stone,work:b.cost.work}})),
-    stats: worldStatistics(world), communities: world.communities.map(c => ({ id: c.id, name: c.name, x: c.x, y: c.y, color: c.color, members: c.members.filter(id=>visibleIds.has(id)), memberCount: c.members.length, culture: { ...c.culture }, formedAt: c.formedAt, cooperation: c.cooperation, disputes: c.disputes })),
-    technology: projectTechnology(world), organization: (({ resources: _resources, ...summary }) => structuredClone(summary))(organization.value),
-    demography: {deaths:world.demographyDynamics.deaths,causes:{...world.demographyDynamics.causes},recent:world.legacy.slice(0,32).map(p=>({id:p.id,name:p.name,generation:p.generation,parents:[...p.parents],bornAt:p.bornAt,diedAt:p.diedAt,cause:p.cause}))},
-  };
-}
-
-/** T036(h): la biografía de UN habitante, servida a petición y de sólo lectura, como
- * `technologyRecipeDetail`. Una identidad que ya no vive devuelve `undefined`: ausente, no vacía. */
-export function personDetail(world: World, id: string): PersonDetail | undefined {
-  if (typeof id !== 'string' || id.length > 50) return undefined;
-  const person = world.people.find(p => p.id === id);
-  if (!person) return undefined;
-  return { id: person.id,
-    experiences: person.experiences.map(e => ({ tick: e.tick, text: e.text, causeId: e.causeId })),
-    trust: Object.entries(person.bonds).map(([other, value]) => ({ id: other, value: viewNumber(value) })),
-    recipeIds: [...person.technology.knownRecipes] };
 }
 
 /** Reject corruption on load rather than silently replacing a world. */

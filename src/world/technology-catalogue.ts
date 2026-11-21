@@ -96,7 +96,8 @@ export function technologyMemoryCapacity(state: TechnologyState): number {
   return catalogueEnabled(state) ? Math.min(state.budgets.maxRecipes, state.catalogue!.memoryCapacity) : state.budgets.maxRecipes;
 }
 function checkedRecipe(host: TechnologyCatalogueHost, recipe: TechnologyRecipe, expectedId?: string): TechnologyRecipe {
-  if (!recipe || serial(recipe.id) < 1 || serial(recipe.id) > host.technology.recipeCounter ||
+  const number = recipe ? serial(recipe.id) : -1;
+  if (!recipe || number < 1 || number > host.technology.recipeCounter ||
     expectedId !== undefined && recipe.id !== expectedId || !integer(recipe.tick, host.tick) ||
     !integer(recipe.generation) || !recipe.generation || typeof recipe.signature !== 'string' ||
     !integer(recipe.manufactured) || !integer(recipe.uses) || !finite(recipe.utility)) fail('resolved identity, time or statistics');
@@ -213,7 +214,9 @@ export function withRecipeSession<T>(host: TechnologyCatalogueHost, evaluate: ()
   const inSession = (): T => {
     const max = state.budgets.maxRecipes;
     if (!windowIndex(state.recipes) || !Number.isSafeInteger(max) || max < 1 || state.recipes.length > max) return evaluate();
-    const session: RecipeSession = { lru: new Map(state.recipes.map(recipe => [recipe.id, recipe])), max, touched: false };
+    const lru = new Map<string, TechnologyRecipe>();
+    for (const recipe of state.recipes) lru.set(recipe.id, recipe);
+    const session: RecipeSession = { lru, max, touched: false };
     sessions.set(state, session);
     try { return evaluate(); } finally { if (sessions.get(state) === session) endRecipeSession(state); }
   };

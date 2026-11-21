@@ -1,7 +1,5 @@
 import { Worker } from 'node:worker_threads';
 import { closeSync, existsSync, openSync, readSync, unlinkSync, writeSync } from 'node:fs';
-import { randomBytes } from 'node:crypto';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assertPolicyBatch, evaluatePoliciesCpu, POLICY_WEIGHTS } from '../politica.js';
@@ -169,18 +167,22 @@ const align = (n: number, a: number): number => Math.ceil(n / a) * a;
 
 const shmPaths = new Set<string>();
 let shmExitHook = false;
+let shmSeq = 0;
 function createShmFile(): { fd: number; path: string } | null {
-  const dir = existsSync('/dev/shm') ? '/dev/shm' : tmpdir();
-  const path = join(dir, `atlas-policy-${process.pid}-${randomBytes(6).toString('hex')}.shm`);
-  try {
-    const fd = openSync(path, 'wx+', 0o600);
-    shmPaths.add(path);
-    if (!shmExitHook) {
-      shmExitHook = true;
-      process.on('exit', () => { for (const p of shmPaths) { try { unlinkSync(p); } catch {} } });
-    }
-    return { fd, path };
-  } catch { return null; }
+  const dir = existsSync('/dev/shm') ? '/dev/shm' : (process.env.TMPDIR ?? '/tmp');
+  for (let attempt = 0; attempt < 32; attempt++) {
+    const path = join(dir, `atlas-policy-${process.pid}-${++shmSeq}.shm`);
+    try {
+      const fd = openSync(path, 'wx+', 0o600);
+      shmPaths.add(path);
+      if (!shmExitHook) {
+        shmExitHook = true;
+        process.on('exit', () => { for (const p of shmPaths) { try { unlinkSync(p); } catch {} } });
+      }
+      return { fd, path };
+    } catch { /* collide: try next monotonic seq */ }
+  }
+  return null;
 }
 function unlinkShm(path: string | null): void {
   if (path !== null && shmPaths.delete(path)) { try { unlinkSync(path); } catch {} }

@@ -40,7 +40,7 @@ import {
   policyActionBias, updatePolicyPlasticity, type PolicyGenome, type PolicyPlasticity,
 } from './politica.js';
 import { cellIntKey, cellKeyX, cellKeyY, computeLocalPolicyObservation } from './politica-obs.js';
-import { closePolicyGpuBatchers, evaluatePoliciesBatch } from './gpu/politica-gpu.js';
+import { closePolicyGpuBatchers, evaluatePoliciesBatch, evaluatePoliciesResidentBatch } from './gpu/politica-gpu.js';
 import {
   closePersonasParallelPools, MOVE_AVANZA, MOVE_BLOQUEADO, MOVE_EN_DESTINO, MOVE_SIN_EVALUAR,
   precomputeMovesParallel, SI, type PersonasExecution, type PrecomputedMoves,
@@ -506,18 +506,34 @@ function precomputePolicyScores(world: World): Map<string, Float64Array> | undef
   const count = deciding.length;
   if (count === 0) return undefined;
   const tileIn = tileLookup(world.tiles);
-  const obs = new Float64Array(count * POLICY_INPUTS);
-  const weights = new Float64Array(count * POLICY_WEIGHTS);
-  const biases = new Float64Array(count * POLICY_ACTIONS.length);
-  for (let i = 0; i < count; i++) {
-    const person = deciding[i]!;
-    const { genome, plasticity } = ensurePersonPolicy(world, person);
-    obs.set(localPolicyObservation(world, person, tileIn), i * POLICY_INPUTS);
-    weights.set(genome.weights, i * POLICY_WEIGHTS);
-    biases.set(plasticity.bias, i * POLICY_ACTIONS.length);
-  }
   const devices = params.motor.gpu.length > 0 && gpuNvrtcAvailable() ? params.motor.gpu : [];
-  const raw = evaluatePoliciesBatch(obs, weights, biases, count, devices);
+  let raw: Float64Array;
+  if (devices.length > 0) {
+    const actors = new Array<{ id: string; weights: readonly number[]; obs: Float64Array; bias: Float64Array }>(count);
+    for (let i = 0; i < count; i++) {
+      const person = deciding[i]!;
+      const { genome, plasticity } = ensurePersonPolicy(world, person);
+      actors[i] = {
+        id: person.id,
+        weights: genome.weights,
+        obs: localPolicyObservation(world, person, tileIn),
+        bias: Float64Array.from(plasticity.bias),
+      };
+    }
+    raw = evaluatePoliciesResidentBatch(actors, devices);
+  } else {
+    const obs = new Float64Array(count * POLICY_INPUTS);
+    const weights = new Float64Array(count * POLICY_WEIGHTS);
+    const biases = new Float64Array(count * POLICY_ACTIONS.length);
+    for (let i = 0; i < count; i++) {
+      const person = deciding[i]!;
+      const { genome, plasticity } = ensurePersonPolicy(world, person);
+      obs.set(localPolicyObservation(world, person, tileIn), i * POLICY_INPUTS);
+      weights.set(genome.weights, i * POLICY_WEIGHTS);
+      biases.set(plasticity.bias, i * POLICY_ACTIONS.length);
+    }
+    raw = evaluatePoliciesBatch(obs, weights, biases, count, devices);
+  }
   const byId = new Map<string, Float64Array>();
   for (let i = 0; i < count; i++) {
     const start = i * POLICY_ACTIONS.length;

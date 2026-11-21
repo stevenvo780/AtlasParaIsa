@@ -6,7 +6,7 @@ import { assimilateFood, exertBody, hydrateBody, restBody } from './body.js';
 import { MAX_COORDINATE } from './terrain.js';
 import { LEGACY_WORLD_LIMITS, limitsOf } from './params.js';
 import { tileLookup } from './tile-index.js';
-import { residentFaunaCapacity } from './soa/terreno.js';
+import { residentFaunaCapacity, residentTileReader, type ResidentTileReader } from './soa/terreno.js';
 import { primero, primerosDos } from './orden.js';
 
 export const MAX_ACTIVE_ANIMALS = 8192;
@@ -290,68 +290,106 @@ function takeWater(animal: Animal, tile: Tile, requested: number): number {
   else tile.drinkingWater = clamp((tile.drinkingWater ?? 0) - amount);
   return amount;
 }
-function remember(animal: Animal, tile: Tile, tick: number, visited: boolean): void {
-  const existing = animal.memory.find(m => m.x === tile.x && m.y === tile.y);
-  const here = cell(tile);
-  animal.memory = animal.memory.filter(m => cell(m) !== here && tick - m.tick <= MEMORY_TTL);
-  animal.memory.push({ x: tile.x, y: tile.y, tick, food: tile.growth ?? tile.vegetation, water: waterAt(animal, tile), visited: visited || !!existing?.visited });
+function remember(animal: Animal, tile: Point, tick: number, visited: boolean, food: number, water: number): void {
+  const memory = animal.memory, here = cell(tile);
+  // `find` precedía al filtro de caducidad: una visita incluso caducada conserva visited.
+  let existingVisited = false;
+  for (const m of memory) if (m.x === tile.x && m.y === tile.y) { existingVisited = m.visited; break; }
+  let kept = 0;
+  for (const m of memory) if (cell(m) !== here && tick - m.tick <= MEMORY_TTL) memory[kept++] = m;
+  memory.length = kept;
+  memory.push({ x: tile.x, y: tile.y, tick, food, water, visited: visited || existingVisited });
   if (animal.memory.length > MAX_ANIMAL_MEMORY) animal.memory.shift();
 }
 /** `tile(x, y)` es el índice de terreno fijado al empezar el paso (el `Map` de claves `"x,y"` que se
  * construía aquí, ahora compartido con `tileAt` en tile-index.ts): misma tesela para las mismas
  * coordenadas, y como antes no ve teselas añadidas a mitad del paso. */
-interface LocalState { tile: (x: number, y: number) => Tile | undefined; occupants: Map<Cell, Animal[]>; counts: Map<Cell, number>; }
-function localTiles(animal: Animal, state: LocalState): Tile[] {
-  const radius = 2 + Math.floor(animal.genes.perception * 4), result: Tile[] = [];
+interface Resource extends Point { food: number; water: number; }
+interface VisibleTile extends Resource { growth: number | undefined; novelty: number | undefined; cell: Cell; }
+interface LocalState {
+  tile: (x: number, y: number) => Tile | undefined; occupants: Map<Cell, Animal[]>; counts: Map<Cell, number>;
+  reader: ResidentTileReader | undefined;
+  visible: VisibleTile[]; pool: VisibleTile[]; resources: Resource[]; adjacent: VisibleTile[]; neighbors: Tile[];
+}
+function localTiles(animal: Animal, state: LocalState): VisibleTile[] {
+  const radius = 2 + Math.floor(animal.genes.perception * 4), result = state.visible, reader = state.reader;
+  result.length = 0;
   for (let dy = -radius; dy <= radius; dy++) for (let dx = -radius; dx <= radius; dx++) {
     if (Math.abs(dx) + Math.abs(dy) > radius) continue;
-    const tile = state.tile(animal.x + dx, animal.y + dy);
-    if (tile && habitat(animal, tile)) result.push(tile);
+    let x = animal.x + dx, y = animal.y + dy, growth: number | undefined, vegetation: number, water: number;
+    if (reader) {
+      const at = reader.cellAt(x, y);
+      if (at < 0) continue;
+      const terrain = reader.terrainCode(at);
+      if (animal.species === 'fish' ? terrain !== reader.TERRAIN_WATER
+        : terrain === reader.TERRAIN_WATER || terrain === reader.TERRAIN_SHELTER) continue;
+      growth = reader.growth(at); vegetation = reader.vegetation(at)!;
+      water = animal.species === 'fish' ? reader.moisture(at)!
+        : reader.biomeCode(at) === reader.BIOME_OCEAN ? 0 : reader.drinkingWater(at) ?? 0;
+      // Las coordenadas implícitas no distinguen -0 de +0. Sólo en los ejes se leen las
+      // coordenadas originales para conservar también esos bits en target y memory.
+      if (x === 0 || y === 0) { const original = state.tile(x, y)!; x = original.x; y = original.y; }
+    } else {
+      const tile = state.tile(animal.x + dx, animal.y + dy);
+      if (!tile || !habitat(animal, tile)) continue;
+      x = tile.x; y = tile.y; growth = tile.growth; vegetation = tile.vegetation; water = waterAt(animal, tile);
+    }
+    // Scratch exclusivo del paso, reutilizado entre decisiones; ningún objeto escapa:
+    // remember copia sus campos y choose copia el destino antes de la siguiente decisión.
+    const t = state.pool[result.length] ??= { x: 0, y: 0, growth: undefined, food: 0, water: 0, novelty: undefined, cell: 0 };
+    t.x = x; t.y = y; t.growth = growth; t.food = growth ?? vegetation; t.water = water; t.novelty = undefined; t.cell = cellXY(x, y);
+    result.push(t);
   }
   return result;
 }
 function choose(animal: Animal, world: AnimalWorld, state: LocalState): void {
   const visible = localTiles(animal, state), near = visible.flatMap(t => state.occupants.get(cell(t)) ?? []).filter(a => a.id !== animal.id && a.health > 0);
   const threats = near.filter(a => edible(a, animal) && distance(a, animal) <= 1 + Math.floor(animal.genes.perception * 5));
-  const adjacent = visible.filter(t => distance(t, animal) === 1 && (state.counts.get(cell(t)) ?? 0) < MAX_ANIMALS_PER_TILE);
+  const adjacent = state.adjacent;
+  adjacent.length = 0;
+  for (const t of visible) if (distance(t, animal) === 1 && (state.counts.get(t.cell) ?? 0) < MAX_ANIMALS_PER_TILE) adjacent.push(t);
   let action: AnimalAction = 'roam', target: Point = animal, reason = 'Explora celdas cercanas y evita recorridos que recuerda.';
   let preyId: string | null = null;
   // Los dos primeros del mismo orden estable, sin ordenar todo lo visible (orden.ts).
-  for (const tile of primerosDos(visible, (a, b) => (waterAt(animal, b) + (b.growth ?? 0)) - (waterAt(animal, a) + (a.growth ?? 0)) || distance(a, animal) - distance(b, animal) || a.y - b.y || a.x - b.x,
-    t => (t.growth ?? 0) > 0.05 || waterAt(animal, t) > 0.005)) remember(animal, tile, world.tick, distance(tile, animal) === 0);
+  for (const tile of primerosDos(visible, (a, b) => (b.water + (b.growth ?? 0)) - (a.water + (a.growth ?? 0)) || distance(a, animal) - distance(b, animal) || a.y - b.y || a.x - b.x,
+    t => (t.growth ?? 0) > 0.05 || t.water > 0.005)) remember(animal, tile, world.tick, distance(tile, animal) === 0, tile.food, tile.water);
   if (threats.length) {
-    const safety = (p: Point): number => Math.min(...threats.map(t => distance(t, p)));
-    const escape = adjacent.sort((a, b) => safety(b) - safety(a) || a.y - b.y || a.x - b.x)[0];
+    const safety = (p: Point): number => { let min = Infinity; for (const t of threats) min = Math.min(min, distance(t, p)); return min; };
+    const escape = primero(adjacent, (a, b) => safety(b) - safety(a) || a.y - b.y || a.x - b.x);
     action = 'flee'; target = escape && safety(escape) > safety(animal) ? escape : animal;
     reason = 'Percibe un depredador cercano y se aleja físicamente de su alcance.';
   } else {
-    // Sprint noche-perf2: «¿alguna celda visible es la del recuerdo?» con un conjunto de las celdas visibles
-    // (las claves `cell` son números enteros o cadenas: `Set.has` y `===` coinciden) en vez de recorrer
-    // lo visible por cada recuerdo.
-    let visibleCells: Set<Cell> | undefined;
-    const resources = [...visible.map(t => ({ x: t.x, y: t.y, food: t.growth ?? t.vegetation, water: waterAt(animal, t) })),
-      ...animal.memory.filter(m => world.tick - m.tick <= MEMORY_TTL && state.tile(m.x, m.y) !== undefined
-        && !(visibleCells ??= new Set(visible.map(cell))).has(cell(m)))];
+    // Mismo orden: rombo visible, seguido de recuerdos válidos que no están en el rombo.
+    // Los ≤12 recuerdos se cotejan con el scratch, sin construir recursos ni un Set por decisión.
+    const resources = state.resources;
+    resources.length = 0;
+    for (const t of visible) resources.push(t);
+    for (const m of animal.memory) {
+      if (world.tick - m.tick > MEMORY_TTL || !(state.reader ? state.reader.cellAt(m.x, m.y) >= 0 : state.tile(m.x, m.y) !== undefined)) continue;
+      const here = cell(m);
+      let seen = false;
+      for (const t of visible) if (t.cell === here) { seen = true; break; }
+      if (!seen) resources.push(m);
+    }
     const water = primero(resources, (a, b) => distance(a, animal) - distance(b, animal) || b.water - a.water || a.y - b.y || a.x - b.x, t => t.water > 0.001);
     const food = primero(resources, (a, b) => distance(a, animal) - distance(b, animal) || b.food - a.food || a.y - b.y || a.x - b.x, t => t.food > 0.001);
-    const prey = near.filter(a => edible(animal, a)).sort((a, b) => distance(a, animal) - distance(b, animal) || canonical(a, b))[0];
+    const prey = primero(near, (a, b) => distance(a, animal) - distance(b, animal) || canonical(a, b), a => edible(animal, a));
     if (animal.thirst > 0.42 && water) { action = 'drink'; target = water; reason = 'La sed orienta su camino hacia agua percibida o recordada.'; }
     else if (animal.hunger > 0.38 && prey) { action = 'hunt'; target = prey; preyId = prey.id; reason = 'Persigue una presa individual visible; alimentarse exige alcanzarla.'; }
     else if (animal.hunger > 0.38 && animal.genes.carnivory < 0.6 && food) { action = 'graze'; target = food; reason = 'El hambre orienta su camino hacia crecimiento vegetal finito.'; }
     else if (animal.energy < 0.4 || animal.fatigue > 0.55) { action = 'rest'; reason = 'El agotamiento requiere una pausa; descansar no elimina hambre ni sed.'; }
     else {
       // Función pura de la tesela: se calcula una vez por tesela y no en cada comparación del `sort`.
-      const novelties = new Map<Tile, number>();
-      const novelty = (t: Tile): number => {
-        let value = novelties.get(t);
+      const novelty = (t: VisibleTile): number => {
+        let value = t.novelty;
         if (value === undefined) {
-          const visit = animal.memory.find(m => m.visited && cell(m) === cell(t));
+          const visit = animal.memory.find(m => m.visited && cell(m) === t.cell);
           value = (visit ? Math.min(1, (world.tick - visit.tick) / MEMORY_TTL) : 2) + hash(world.seed, `${animal.id}:${key(t)}:${Math.floor(world.tick / 60)}`) / 4294967296 * 0.2;
-          novelties.set(t, value);
+          t.novelty = value;
         }
         return value;
       };
-      target = adjacent.sort((a, b) => novelty(b) - novelty(a) || a.y - b.y || a.x - b.x)[0] ?? animal;
+      target = primero(adjacent, (a, b) => novelty(b) - novelty(a) || a.y - b.y || a.x - b.x) ?? animal;
     }
   }
   if (animal.action !== action || animal.preyId !== preyId) animal.work = 0;
@@ -364,12 +402,17 @@ function choose(animal: Animal, world: AnimalWorld, state: LocalState): void {
 function move(animal: Animal, world: AnimalWorld, state: LocalState): void {
   const interval = Math.ceil(11 - animal.genes.speed * 7 + animal.fatigue * 3);
   if (animal.action === 'rest' || distance(animal, animal.target) === 0 || world.tick - animal.lastMove < interval || animal.energy < 0.06) return;
-  const neighbors = [[0, -1], [-1, 0], [1, 0], [0, 1]].map(([dx, dy]) => state.tile(animal.x + dx!, animal.y + dy!))
-    .filter((t): t is Tile => !!t && habitat(animal, t) && (state.counts.get(cell(t)) ?? 0) < MAX_ANIMALS_PER_TILE);
-  neighbors.sort((a, b) => distance(a, animal.target) - distance(b, animal.target) || a.y - b.y || a.x - b.x);
-  const next = neighbors[0];
+  const neighbors = state.neighbors;
+  neighbors.length = 0;
+  for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+    if (Math.abs(dx) + Math.abs(dy) !== 1) continue;
+    const t = state.tile(animal.x + dx, animal.y + dy);
+    if (t && habitat(animal, t) && (state.counts.get(cell(t)) ?? 0) < MAX_ANIMALS_PER_TILE) neighbors.push(t);
+  }
+  const next = primero(neighbors, (a, b) => distance(a, animal.target) - distance(b, animal.target) || a.y - b.y || a.x - b.x);
   if (!next) return;
-  remember(animal, state.tile(animal.x, animal.y)!, world.tick, true);
+  const current = state.tile(animal.x, animal.y)!;
+  remember(animal, current, world.tick, true, current.growth ?? current.vegetation, waterAt(animal, current));
   const from = cell(animal);
   state.counts.set(from, state.counts.get(from)! - 1);
   state.occupants.set(from, (state.occupants.get(from) ?? []).filter(a => a.id !== animal.id));
@@ -381,7 +424,7 @@ function move(animal: Animal, world: AnimalWorld, state: LocalState): void {
   const arrived = state.occupants.get(to);
   if (arrived) arrived.push(animal); else state.occupants.set(to, [animal]);
   exertBody(animal, { energy: animal.action === 'flee' ? 0.003 : 0.0015, fatigue: animal.action === 'flee' ? 0.004 : 0.002 });
-  remember(animal, next, world.tick, true);
+  remember(animal, next, world.tick, true, next.growth ?? next.vegetation, waterAt(animal, next));
 }
 function death(world: AnimalWorld, animal: Animal, cause: string, emit?: AnimalEmitter, hunter?: string): void {
   animal.health = 0; world.animalDynamics.deaths++;
@@ -624,7 +667,8 @@ export function seleccionDe(mascara: MascaraFauna, animales: readonly Animal[]):
  * `mascara` es la del coordinador para este paso; sin ella se calcula aquí, con el mismo resultado. */
 export function stepAnimals(world: AnimalWorld, emit?: AnimalEmitter, mascara?: MascaraFauna): void {
   if (world.animals.length > limitsOf(world).fauna) throw new Error('Capacidad regional de fauna excedida.');
-  const state: LocalState = { tile: tileLookup(world.tiles), occupants: new Map(), counts: new Map() };
+  const state: LocalState = { tile: tileLookup(world.tiles), occupants: new Map(), counts: new Map(),
+    reader: undefined, visible: [], pool: [], resources: [], adjacent: [], neighbors: [] };
   const m = mascara ?? calcularMascara(world, false);
   if (m.tick !== world.tick || m.animales !== world.animals || m.poblacion !== world.animals.length || mascara && !mismosObjetos(world.animals, m.orden))
     throw new Error('Máscara de fauna de otro paso.');
@@ -642,6 +686,8 @@ export function stepAnimals(world: AnimalWorld, emit?: AnimalEmitter, mascara?: 
   // Oldest decision first avoids starvation while preventing a synchronized migration from bursting every eighth tick.
   const due = active.filter(a => world.tick - a.lastDecision >= 8)
     .sort((a, b) => a.lastDecision - b.lastDecision || canonical(a, b)).slice(0, MAX_ANIMAL_DECISIONS_PER_TICK);
+  // Después de la fisiología y sus emisiones: choose no escribe terreno ni llama código externo.
+  state.reader = residentTileReader(world.tiles);
   for (const animal of due) choose(animal, world, state);
   // Cadena secuencial (ver `move`): permanece en la fase serial del coordinador. `active` ya está
   // en orden canónico (`m.seleccion`), así que dos pasadas (`flee` primero) son idénticas al `sort`.

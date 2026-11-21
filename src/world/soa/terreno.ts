@@ -84,6 +84,43 @@ export function residentFaunaCapacity(tiles: readonly Tile[]): number | undefine
   return store?.faunaCapacityIfResident(tiles);
 }
 
+type ReaderNumbers = { readonly [K in 'growth' | 'vegetation' | 'moisture' | 'drinkingWater' | 'food' | 'wood']: Float64Array };
+/** Vista de solo lectura para una fase síncrona sin cambios de topología ni barreras worker.
+ * No expone buffers escribibles. Los setters residentes siguen escribiendo en estos mismos arrays;
+ * hay que obtener otra vista tras prepare/commit/detach (pueden cambiar páginas, generación o frente).
+ * Los códigos 0 representan un enum ausente; NaN representa un número ausente, igual que los getters
+ * de Tile. No convertir mediante `||`: perdería -0. */
+export class ResidentTileReader {
+  readonly TERRAIN_WATER = TERRAINS.indexOf('water') + 1;
+  readonly TERRAIN_SHELTER = SHELTER_CODE;
+  readonly BIOME_OCEAN = BIOMES.indexOf('ocean') + 1;
+  readonly BIOME_DESERT = BIOMES.indexOf('desert') + 1;
+  constructor(private readonly regions: RegionTable, private readonly stamps: Uint32Array,
+    private readonly version: number, private readonly terrain: Uint8Array, private readonly biome: Uint8Array,
+    private readonly numbers: ReaderNumbers) {}
+
+  cellAt(x: number, y: number): number {
+    if (!admissibleCoordinate(x) || !admissibleCoordinate(y)) return -1;
+    const page = this.regions.slot(x >> 4, y >> 4);
+    if (page < 0) return -1;
+    const cell = (page << 8) | ((y & 15) << 4) | (x & 15);
+    return this.stamps[cell] === this.version ? cell : -1;
+  }
+  terrainCode(cell: number): number { return this.terrain[cell]!; }
+  biomeCode(cell: number): number { return this.biome[cell]!; }
+  growth(cell: number): number | undefined { const v = this.numbers.growth[cell]!; return v === v ? v : undefined; }
+  vegetation(cell: number): number | undefined { const v = this.numbers.vegetation[cell]!; return v === v ? v : undefined; }
+  moisture(cell: number): number | undefined { const v = this.numbers.moisture[cell]!; return v === v ? v : undefined; }
+  drinkingWater(cell: number): number | undefined { const v = this.numbers.drinkingWater[cell]!; return v === v ? v : undefined; }
+  food(cell: number): number | undefined { const v = this.numbers.food[cell]!; return v === v ? v : undefined; }
+  wood(cell: number): number | undefined { const v = this.numbers.wood[cell]!; return v === v ? v : undefined; }
+}
+
+/** Sólo un owner observado puede certificar que los buffers siguen representando estas teselas. */
+export function residentTileReader(tiles: readonly Tile[]): ResidentTileReader | undefined {
+  return residentStoreByTiles.get(tiles as Tile[])?.tileReaderIfResident(tiles);
+}
+
 export interface SharedTerrain {
   regions: readonly StaticRegion[];
   buffers: Record<string, SharedArrayBuffer>;
@@ -573,10 +610,25 @@ export class TileStore {
     (this.residentCur[idx] as Uint8Array)[cell] = encoded;
     this.dirty[cell >>> 8] = 1;
   }
-  faunaCapacityIfResident(tiles: readonly Tile[]): number | undefined {
+  private canReadResident(tiles: readonly Tile[]): boolean {
     if (this.residentTiles !== tiles || this.residentBusy || this.residentModified.size > 0
-      || this.residentBindings.length !== tiles.length || this.loaded !== tiles.length) return undefined;
-    if (!sameResidentTopology(residentTopologyToken(tiles as Tile[]), this.residentTopology)) return undefined;
+      || this.residentBindings.length !== tiles.length || this.loaded !== tiles.length) return false;
+    return sameResidentTopology(residentTopologyToken(tiles as Tile[]), this.residentTopology);
+  }
+  tileReaderIfResident(tiles: readonly Tile[]): ResidentTileReader | undefined {
+    if (!this.canReadResident(tiles)) return undefined;
+    if (this.residentGeneration !== this.arena.generation) this.refreshResident();
+    return new ResidentTileReader(this.regions, this.presence.stamps, this.version,
+      this.residentCur[TERRAIN_IDX] as Uint8Array, this.residentCur[residentKeys.indexOf('biome')] as Uint8Array,
+      { growth: this.residentCur[GROWTH_IDX] as Float64Array,
+        vegetation: this.residentCur[residentKeys.indexOf('vegetation')] as Float64Array,
+        moisture: this.residentCur[residentKeys.indexOf('moisture')] as Float64Array,
+        drinkingWater: this.residentCur[residentKeys.indexOf('drinkingWater')] as Float64Array,
+        food: this.residentCur[residentKeys.indexOf('food')] as Float64Array,
+        wood: this.residentCur[residentKeys.indexOf('wood')] as Float64Array });
+  }
+  faunaCapacityIfResident(tiles: readonly Tile[]): number | undefined {
+    if (!this.canReadResident(tiles)) return undefined;
     if (this.residentGeneration !== this.arena.generation) this.refreshResident();
     const cells = this.cellsOf, n = this.loaded;
     const terrain = this.residentCur[TERRAIN_IDX] as Uint8Array;

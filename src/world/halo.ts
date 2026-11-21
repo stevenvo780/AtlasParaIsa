@@ -217,14 +217,16 @@ export const ALCANCES: readonly Alcance[] = [
   // Decisión de la fauna: `choose` y `localTiles` de animals.ts.
   a('fauna.percepcion', 'teselas', 'entrada', 6, 'animals.ts', 'localTiles', ['const radius = 2 + Math.floor(animal.genes.perception * 4)',
     'for (let dy = -radius; dy <= radius; dy++) for (let dx = -radius; dx <= radius; dx++) {', 'if (Math.abs(dx) + Math.abs(dy) > radius) continue;',
-    'const tile = state.tile(animal.x + dx, animal.y + dy);'], { nota: 'Rombo Manhattan de radio 2 + ⌊p·4⌋ ≤ 6.' }),
+    'let x = animal.x + dx, y = animal.y + dy', 'reader.cellAt(x, y)',
+    'const original = state.tile(x, y)!', 'const tile = state.tile(animal.x + dx, animal.y + dy);'],
+    { nota: 'Rombo Manhattan de radio 2 + ⌊p·4⌋ ≤ 6. El lector residente consulta las mismas celdas; en los ejes conserva el signo original de cero.' }),
   a('fauna.vecinos', 'animales', 'fauna.percepcion', 0, 'animals.ts', 'choose', ['visible.flatMap(t => state.occupants.get(cell(t)) ?? [])'],
 ),
   a('fauna.amenazas', 'animales', 'fauna.percepcion', 0, 'animals.ts', 'choose', ['const threats = near.filter(a => edible(a, animal) && distance(a, animal) <= 1 + Math.floor(animal.genes.perception * 5));'],
     { nota: 'Subconjunto de `fauna.vecinos`: el umbral `1 + ⌊p·5⌋ ≤ 6` filtra lo ya percibido.' }),
-  a('fauna.adyacentes', 'animales', 'fauna.percepcion', 0, 'animals.ts', 'choose', ['const adjacent = visible.filter(t => distance(t, animal) === 1 && (state.counts.get(cell(t)) ?? 0) < MAX_ANIMALS_PER_TILE);'],
+  a('fauna.adyacentes', 'animales', 'fauna.percepcion', 0, 'animals.ts', 'choose', ['for (const t of visible) if (distance(t, animal) === 1 && (state.counts.get(t.cell) ?? 0) < MAX_ANIMALS_PER_TILE) adjacent.push(t);'],
     { nota: 'Ocupación de las celdas visibles a distancia 1.' }),
-  a('fauna.memoria', 'teselas', 'entrada', 126, 'animals.ts', 'choose', ['state.tile(m.x, m.y) !== undefined'],
+  a('fauna.memoria', 'teselas', 'entrada', 126, 'animals.ts', 'choose', ['state.reader ? state.reader.cellAt(m.x, m.y) >= 0 : state.tile(m.x, m.y) !== undefined'],
     { excepcion: 'presencia', nota: 'Sólo pregunta si la celda recordada sigue activa: recuerdos de ≤ 480 pasos (`MEMORY_TTL`), un paso de celda cada ≥ 4 pasos y celdas vistas a ≤ 6: 6 + 480/4.' }),
   // Ecología: vecindad de una celda.
   a('ecologia.vecinos', 'teselas', 'entrada', 1, 'index.ts', 'ecology', ["const waterAt = (x: number, y: number): boolean => tileIn(x, y)?.terrain === 'water';",
@@ -335,7 +337,9 @@ const s = (id: string, fase: Fase, coleccion: Coleccion, centro: string, radio: 
 
 /** Lecturas de las fases seriales, planas: el halo no las acota y la prueba sólo fija su máximo. */
 export const ALCANCES_SERIALES: readonly AlcanceSerial[] = [
-  s('fauna.mover', 'faunaSerial', 'teselas', 'actor', 1, 'animals.ts', 'move', ['.map(([dx, dy]) => state.tile(animal.x + dx!, animal.y + dy!))']),
+  s('fauna.mover', 'faunaSerial', 'teselas', 'actor', 1, 'animals.ts', 'move',
+    ['for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {',
+      'if (Math.abs(dx) + Math.abs(dy) !== 1) continue;', 'const t = state.tile(animal.x + dx, animal.y + dy);']),
   s('fauna.cria', 'faunaSerial', 'animales', 'actor', 1, 'animals.ts', 'reproduce', ['state.occupants.get(cellXY(a.x + dx!, a.y + dy!))']),
   // Acción de cada persona: cadena secuencial en orden de `world.people`.
   s('accion.bfs', 'accion', 'teselas', 'actor', 24, 'index.ts', 'move', ['Math.abs(next.y - start.y)) > 24 || !walkable(world, next)'],
@@ -565,7 +569,7 @@ export const RECORRIDOS: readonly Recorrido[] = [
   { id: 'ecologia', fase: 'ecologia', fichero: 'index.ts', funcion: 'ecology', patrones: ['for (const tile of world.tiles) {', "if (tile.terrain === 'water') continue;", 'const tileIn = tileLookup(world.tiles);', 'stepLocalEcology(world.tiles, world.tick, world.weather, phase, paramsOf(world).recursos,'], motivo: 'Autómata por tesela (T120).' },
   { id: 'kernel', fase: 'ecologia', fichero: 'ecosystem-kernel.ts', funcion: 'EcosystemKernel', patrones: ['for (let i = 0; i < length; i++) {'], motivo: 'Una vuelta por tesela activa.' },
   { id: 'fauna', fase: 'faunaSerial', fichero: 'animals.ts', funcion: 'stepAnimals',
-    patrones: ['for (const animal of world.animals) {', 'tileLookup(world.tiles)', 'syncFauna(world.tiles, world.animals);'], motivo: 'Ocupación de la fauna y recuento por celda al final.' },
+    patrones: ['for (const animal of world.animals) {', 'tileLookup(world.tiles)', 'residentTileReader(world.tiles)', 'syncFauna(world.tiles, world.animals);'], motivo: 'Ocupación de la fauna, vista residente validada para las decisiones y recuento por celda al final.' },
   { id: 'fauna.orden.inicio', fase: 'faunaSerial', fichero: 'animals.ts', funcion: 'calcularMascara', patrones: ['ordenCanonico(world.animals);'],
     motivo: 'T116: el orden canónico al empezar el paso lo deja `ordenCanonico` (certificado + mezcla), el mismo resultado que `world.animals.sort(canonical)`, calculado dentro de `mascaraFauna`/`calcularMascara`, no ya en `stepAnimals`.' },
   { id: 'fauna.orden.cierre', fase: 'faunaSerial', fichero: 'animals.ts', funcion: 'stepAnimals', patrones: ['ordenCanonico(world.animals, previos);'],

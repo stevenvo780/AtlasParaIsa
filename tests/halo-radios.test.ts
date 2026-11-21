@@ -440,7 +440,7 @@ test('las funciones que alcanza cada fase con halo son las del fuente', () => {
   for (const fase of FASES_CON_HALO) assert.deepEqual([...funcionesDeFase(fase)].sort(), [...BASE.cierres.get(fase)!].sort());
   // Lecturas que ninguna tabla cubre si la red estricta no se aplicara (lo que la red de la tarea no veía).
   const decision = BASE.cierres.get('decision')!;
-  for (const k of ['society.ts:itemNeed', 'society.ts:settlementOpportunity', 'inventions.ts:inventionCandidates', 'inventions.ts:functionalNear']) assert.ok(decision.has(k), k);
+  for (const k of ['society.ts:itemNeed', 'society.ts:settlementOpportunity', 'inventions.ts:candidatesFromKnown', 'inventions.ts:functionalNear']) assert.ok(decision.has(k), k);
 });
 
 test('el alcance compuesto de las fases con halo no supera HALO_CELDAS, y el máximo es exactamente el halo', () => {
@@ -480,7 +480,7 @@ test('alcances fijados de las fases seriales, que el halo no acota', () => {
     faunaSerial: 1, accion: 4096, gestos: 7, estructuras: 1.5, encuentros: 3, demografia: 2, comunidades: 7, reproduccion: 4,
   });
   assert.equal(alcanceSerial('accion.caminable'), 24, 'la búsqueda de ruta de `move` lee terreno y presencia a 24 celdas');
-  assert.match(FUENTES['index.ts']!, /Math\.abs\(next\.y - start\.y\)\) > 24 \|\| !walkable/);
+  assert.match(FUENTES['index.ts']!, /Math\.max\(Math\.abs\(x - start\.x\), Math\.abs\(y - start\.y\)\) > 24/);
   const activacion = ESCRITURAS.find(e => e.id === 'activacion')!;
   assert.equal(activacion.radio, 8 + CHUNK_SIZE - 1);
   assert.ok(activacion.radio > HALO_CELDAS, 'el área escrita supera el halo de lectura: la activación queda en el coordinador');
@@ -578,8 +578,8 @@ test('la prueba muerde: las siete mutaciones de la verificación, una composici�
   detecta(mutar([['society.ts', "for (const other of vecinos(world, person, 8, other => !(other === person || distance(person, other) > 7), 'cooperationOpportunity')) {",
     "for (const other of vecinos(world, person, 8, other => !(other === person || distance(person, other) > 7) || Math.abs(other.x - person.x) < 40 && other.hunger > 2, 'cooperationOpportunity')) {"]]),
   /society\.ts:\d+ \(evaluateCooperation\) primitiva vecinos sin inventariar/);
-  detecta(mutar([['index.ts', "    const tile = tileAt(world, { x: person.x + dx, y: person.y + dy }); if (tile && tile.terrain !== 'water') nearbyTiles.push(tile);",
-    "    dx += 20; const tile = tileAt(world, { x: person.x + dx, y: person.y + dy }); if (tile && tile.terrain !== 'water') nearbyTiles.push(tile);"]]), /index\.ts:\d+ \(choose\) barrido dx sin inventariar/);
+  detecta(mutar([['index.ts', "      const tile = tileIn(x, y); if (tile && tile.terrain !== 'water') nearbyTiles.push(tile);",
+    "      dx += 20; const tile = tileIn(x, y); if (tile && tile.terrain !== 'water') nearbyTiles.push(tile);"]]), /index\.ts:\d+ \(choose\) barrido dx sin inventariar/);
   // El mundo por otro camino: un campo global nuevo, el mundo con otro tipo, y una lectura serial repartida en dos líneas.
   detecta(mutar([['index.ts', eleccion, `${eleccion}\n  if (world.events.length > 1e9) return;`]]), /index\.ts:\d+ \(choose\) campo global events fuera de ESTADO_GLOBAL/);
   detecta(mutar([['index.ts', eleccion, `${eleccion}\n  const todos = (world as unknown as Record<string, unknown[]>)['peo' + 'ple'];`]]), /index\.ts:\d+ \(choose\) coleccion reflexion sin inventariar/);

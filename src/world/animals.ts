@@ -424,7 +424,7 @@ function choose(animal: Animal, world: AnimalWorld, state: LocalState): void {
     else if (animal.hunger > 0.38 && animal.genes.carnivory < 0.6 && food) { action = 'graze'; target = food; reason = 'El hambre orienta su camino hacia crecimiento vegetal finito.'; }
     else if (animal.energy < 0.4 || animal.fatigue > 0.55) { action = 'rest'; reason = 'El agotamiento requiere una pausa; descansar no elimina hambre ni sed.'; }
     else {
-      const { seed, tick } = world;
+      const seed = world.seed, tick = world.tick;
       target = primero(adjacent, (a, b) => novelty(animal, seed, tick, b) - novelty(animal, seed, tick, a) || a.y - b.y || a.x - b.x) ?? animal;
     }
   }

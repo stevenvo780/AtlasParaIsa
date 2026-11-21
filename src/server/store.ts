@@ -10,7 +10,7 @@ import { assertEcosystemTile, assertChunkLife } from '../world/validation.js';
 import { takeSnapshotParams, SnapshotPhysicalError, SnapshotSemanticError, encodeArchivedChunk, decodeArchivedChunk,
   parseSnapshotJSON, readSnapshotReplay, assertReplayPath, type SnapshotReplay, type SnapshotReplayChange } from './snapshot.js';
 import { digestoCanonico } from '../world/digesto.js';
-import { SnapshotParts, assertSnapshotPartsSchema, SNAPSHOT_INLINE_TILE_LIMIT } from './snapshot-parts.js';
+import { SnapshotParts, assertSnapshotPartsSchema, SNAPSHOT_INLINE_TILE_LIMIT, type WrittenSnapshot } from './snapshot-parts.js';
 import type { LegacyRecord } from '../shared/demography.js';
 import { assertLegacyRecord } from '../world/lineage.js';
 import { TechnologyArchive, TECHNOLOGY_CHAIN_EMPTY, TECHNOLOGY_EXECUTION_KINDS, emptyTechnologyExecutionCounts,
@@ -1537,6 +1537,7 @@ export class Store {
     let prepared = replayEnabled ? undefined : this.snapshotParts.prepare({ ...world, chronicleJournal: committedChronicle, technology: technologyCatalogueStateForCommit(technologyStateForCommit(world.technology)) }, paramsOf(world), this.snapshotInlineTileLimit);
     let replay: { node: SnapshotReplay; world: World } | undefined;
     let body = '', bodyDigest = '';
+    let written: WrittenSnapshot | undefined;
     let committedChain: TechnologyChain | null = null;
     let technologyPruned: TechnologyPrune | null = null;
     let statsCompacted = 0;
@@ -1612,19 +1613,20 @@ export class Store {
         this.db.exec('INSERT OR REPLACE INTO snapshots SELECT 1,body,digest,saved_at FROM snapshots WHERE slot=0');
         if (deep) this.db.exec('INSERT OR REPLACE INTO snapshots SELECT 2,body,digest,saved_at FROM snapshots WHERE slot=0');
       }
-      const written = prepared ? this.snapshotParts.write(prepared) : undefined;
+      written = prepared ? this.snapshotParts.write(prepared) : undefined;
       if (replay) {
         if (replay.node.kind === 'checkpoint') replay.node.body = written!.body;
         body = stringifyExact(replay.node);
-        const digest = checksum(body), existing = this.db.prepare('SELECT value FROM main.metadata WHERE key=?').get(REPLAY_KEY + digest) as { value: string } | undefined;
+        bodyDigest = checksum(body);
+        const existing = this.db.prepare('SELECT value FROM main.metadata WHERE key=?').get(REPLAY_KEY + bodyDigest) as { value: string } | undefined;
         if (existing && existing.value !== body) throw new SnapshotPhysicalError('Replay object disagrees with its digest.');
-        if (!existing) this.db.prepare('INSERT INTO main.metadata VALUES (?,?)').run(REPLAY_KEY + digest, body);
+        if (!existing) this.db.prepare('INSERT INTO main.metadata VALUES (?,?)').run(REPLAY_KEY + bodyDigest, body);
         this.lastSnapshotBytes = Buffer.byteLength(body) + (written ? written.bytes - Buffer.byteLength(written.body) : 0);
       } else {
         body = written!.body;
+        bodyDigest = written!.digest;
         this.lastSnapshotBytes = written!.bytes;
       }
-      bodyDigest = checksum(body);
       this.db.prepare('INSERT OR REPLACE INTO snapshots VALUES (0,?,?,?)').run(body, bodyDigest, Date.now());
       this.db.prepare("INSERT OR REPLACE INTO metadata VALUES ('initialized','1')").run();
       this.db.prepare('INSERT OR REPLACE INTO metadata VALUES (?,?)').run(DEEP_CHECKPOINT_SAVES_KEY, String(nextDurableSaves));
@@ -1649,7 +1651,7 @@ export class Store {
         }
       }
       if (chronicleTriggers) this.snapshotParts.verifyRetained();
-      else if (prepared && prepared.inline === undefined) this.snapshotParts.verify(replay?.node.kind === 'checkpoint' ? replay.node.body : body);
+      else if (written && written.pages.length) this.snapshotParts.assertWritten(written);
       this.db.exec('COMMIT');
       this.saves++;
       // Confirmado: el slot 0 es ahora este cuerpo, escrito y verificado por esta misma

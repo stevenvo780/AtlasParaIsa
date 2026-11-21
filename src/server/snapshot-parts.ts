@@ -1,3 +1,4 @@
+import { isUtf8 } from 'node:buffer';
 import { createHash } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import type { Tile } from '../shared/types.js';
@@ -18,7 +19,7 @@ export const SNAPSHOT_PAGE_TILES = 4096;
 export const SNAPSHOT_METADATA_BYTES = 256 * 1024 * 1024;
 const PAGE_BYTES = 4 * 1024 * 1024;
 const ENCODING = 'snapshot-parts-v1';
-const checksum = (body: string): string => createHash('sha256').update(body).digest('hex');
+const checksum = (body: string | Uint8Array): string => createHash('sha256').update(body).digest('hex');
 class SnapshotPartsFormatError extends SnapshotSemanticError {}
 function failure(message: string): never { throw new SnapshotPartsFormatError(`Invalid snapshot parts ${message}. Explicit recovery required.`); }
 /** Una regla de los metadatos ya se explica y pide recuperación: su texto va una sola vez, con el error original como `cause`. */
@@ -30,8 +31,10 @@ const keys = (value: Record<string, unknown>, expected: string[]): boolean =>
   Object.keys(value).length === expected.length && expected.every(key => Object.hasOwn(value, key));
 interface Page { index: number; digest: string; count: number; bytes: number; }
 interface Manifest { snapshotEncoding: typeof ENCODING; world: Record<string, unknown>; tiles: { count: number; pages: Page[] }; }
-export interface PreparedSnapshot { inline?: string; metadata?: Record<string, unknown>; tiles: readonly Tile[]; }
-export interface WrittenSnapshot { body: string; bytes: number; }
+/** `metadata` is the exact JSON of the world record without tiles, serialized once. */
+export interface PreparedSnapshot { inline?: string; metadata?: string; tiles: readonly Tile[]; }
+/** `digest` is sha256(body); `pages` are the digests write() proved inside the caller's transaction. */
+export interface WrittenSnapshot { body: string; digest: string; bytes: number; pages: readonly string[]; }
 
 /** JSON.parse accepts duplicate keys. A manifest must not hide an earlier encoding
  * or tile source through last-key-wins semantics, including inside its metadata. */
@@ -92,9 +95,8 @@ export class SnapshotParts {
     if (world.tiles.length <= inlineLimit) return { inline: encodeSnapshot(world, params), tiles: [] };
     // Keep a validated null placeholder: deleting/reinserting tiles changes the
     // world's enumerable property order when a paged checkpoint is reloaded.
-    const metadata = snapshotRecord(world, params, null);
-    const body = stringifyExact(metadata);
-    if (Buffer.byteLength(body) > SNAPSHOT_METADATA_BYTES) failure('metadata exceeds transport size');
+    const metadata = stringifyExact(snapshotRecord(world, params, null));
+    if (Buffer.byteLength(metadata) > SNAPSHOT_METADATA_BYTES) failure('metadata exceeds transport size');
     return { metadata, tiles: world.tiles };
   }
 
@@ -104,29 +106,43 @@ export class SnapshotParts {
     this.requireTransaction();
     assertSnapshotPartsSchema(this.db);
     if (prepared.inline !== undefined) {
-      if (this.db.prepare('SELECT 1 FROM main.snapshot_parts LIMIT 1').get()) this.references.set(checksum(prepared.inline), []);
+      const digest = checksum(prepared.inline);
+      if (this.db.prepare('SELECT 1 FROM main.snapshot_parts LIMIT 1').get()) this.references.set(digest, []);
       else this.references.clear();
-      return { body: prepared.inline, bytes: Buffer.byteLength(prepared.inline) };
+      return { body: prepared.inline, digest, bytes: Buffer.byteLength(prepared.inline), pages: [] };
     }
-    if (!prepared.metadata) failure('metadata missing');
+    if (prepared.metadata === undefined) failure('metadata missing');
     const pages: Page[] = [], insert = this.db.prepare('INSERT INTO main.snapshot_parts(digest,body) VALUES (?,?)');
-    const get = this.db.prepare('SELECT body FROM main.snapshot_parts WHERE digest=?');
+    // SQLite compares the stored bytes itself: an unchanged multi-megabyte page is not copied into JS
+    // just to prove its identity. BINARY ignores any collation a damaged schema could declare.
+    const same = this.db.prepare('SELECT body = ? COLLATE BINARY AS same FROM main.snapshot_parts WHERE digest=?');
     let bytes = 0;
     for (let offset = 0; offset < prepared.tiles.length; offset += SNAPSHOT_PAGE_TILES) {
       const rows = encodeSnapshotTileRows(prepared.tiles.slice(offset, offset + SNAPSHOT_PAGE_TILES));
       const body = JSON.stringify(rows), digest = checksum(body), size = Buffer.byteLength(body);
       if (size > PAGE_BYTES) failure('page exceeds transport size');
-      const existing = get.get(digest) as { body: string } | undefined;
-      if (existing && existing.body !== body) failure('existing page disagrees with its digest');
+      const existing = same.get(body, digest) as { same: number } | undefined;
+      if (existing && existing.same !== 1) failure('existing page disagrees with its digest');
       if (!existing) insert.run(digest, body);
       pages.push({ index: pages.length, digest, count: rows.length, bytes: size });
       bytes += size;
     }
-    const manifest: Manifest = { snapshotEncoding: ENCODING, world: prepared.metadata!, tiles: { count: prepared.tiles.length, pages } };
-    const body = stringifyExact(manifest);
-    if (Buffer.byteLength(body) > SNAPSHOT_METADATA_BYTES) failure('manifest exceeds transport size');
-    this.references.set(checksum(body), pages.map(page => page.digest));
-    return { body, bytes: bytes + Buffer.byteLength(body) };
+    // Byte for byte `stringifyExact(manifest)`: the page descriptors hold only strings and non-negative integers.
+    const tiles: Manifest['tiles'] = { count: prepared.tiles.length, pages };
+    const body = `{"snapshotEncoding":${JSON.stringify(ENCODING)},"world":${prepared.metadata},"tiles":${JSON.stringify(tiles)}}`;
+    const size = Buffer.byteLength(body), digest = checksum(body), digests = pages.map(page => page.digest);
+    if (size > SNAPSHOT_METADATA_BYTES) failure('manifest exceeds transport size');
+    this.references.set(digest, digests);
+    return { body, digest, bytes: bytes + size, pages: digests };
+  }
+
+  /** Without SQL triggers only this transaction writes `snapshot_parts` before COMMIT, and write()
+   * already proved the bytes of every page it references: what remains is that collection kept them. */
+  assertWritten(written: WrittenSnapshot): void {
+    this.requireTransaction();
+    const row = this.db.prepare('SELECT COUNT(*) AS n FROM main.snapshot_parts WHERE digest IN (SELECT value FROM json_each(?))')
+      .get(JSON.stringify(written.pages)) as { n: number };
+    if (row.n !== new Set(written.pages).size) throw new SnapshotPhysicalError('Snapshot page missing or checksum mismatch.');
   }
 
   private manifest(value: Record<string, unknown>, body: string, validateParams = true): Manifest {
@@ -219,16 +235,23 @@ export class SnapshotParts {
     // merely to prove that there are no page rows to delete.
     if (!this.db.prepare('SELECT 1 FROM main.snapshot_parts LIMIT 1').get()) { this.references.clear(); return; }
     const retained = new Set<string>(), bodies = new Set<string>();
-    const snapshots = this.db.prepare('SELECT body,digest FROM main.snapshots').all() as { body: string; digest: string }[];
+    // In a UTF-8 database, valid UTF-8 bytes without NUL (node:sqlite cuts text there) hash exactly like
+    // the text they decode to, without transcoding three multi-megabyte bodies to JS strings and back.
+    // Any other row takes the text path.
+    const snapshots = this.db.prepare("SELECT slot,CAST(body AS BLOB) AS bytes,instr(CAST(body AS BLOB),x'00') AS nul,digest FROM main.snapshots")
+      .all() as { slot: number; bytes: Uint8Array; nul: number; digest: string }[];
+    const text = this.db.prepare('SELECT body FROM main.snapshots WHERE slot=?');
+    const bodyOf = (slot: number) => (text.get(slot) as { body: string }).body;
+    const utf8 = (this.db.prepare('PRAGMA main.encoding').get() as { encoding: string }).encoding === 'UTF-8';
     try {
       for (const row of snapshots) {
-        if (checksum(row.body) !== row.digest) return;
+        if (checksum(utf8 && row.nul === 0 && isUtf8(row.bytes) ? row.bytes : bodyOf(row.slot)) !== row.digest) return;
         bodies.add(row.digest);
         let refs = this.references.get(row.digest);
         if (!refs) {
-          const value = parseSnapshotJSON(row.body);
+          const body = bodyOf(row.slot), value = parseSnapshotJSON(body);
           refs = object(value) && Object.hasOwn(value, 'snapshotEncoding')
-            ? this.manifest(value, row.body, false).tiles.pages.map(page => page.digest) : [];
+            ? this.manifest(value, body, false).tiles.pages.map(page => page.digest) : [];
           this.references.set(row.digest, refs);
         }
         for (const digest of refs) retained.add(digest);

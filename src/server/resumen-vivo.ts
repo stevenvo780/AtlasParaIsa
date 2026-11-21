@@ -89,3 +89,19 @@ export function aQuienBusca(world: World, person: Person): { id: string; name: s
   const longest = Math.max(0, ...candidates.map(c => c.name.length)), best = candidates.filter(c => c.name.length === longest);
   return best.length === 1 ? { id: best[0]!.id, name: best[0]!.name, motivo } : undefined;
 }
+
+/** Despacho y leyes V15 que el proceso está sirviendo. O(1), solo lectura: no entra en `resumenVivo`
+ * (ese objeto viaja en cada `RuntimeStats` y su tamaño está medido). Lo publica el arranque. */
+export interface DespachoVivo {
+  hilos: number; gpu: number[]; soaTerreno: boolean; particionarPersonas: boolean;
+  natalidadVecindad: boolean; radioVecindadNatalidad: number; maxComunidades: number;
+  politica: 'apagar' | 'techo'; presupuestoMs: number;
+}
+export function resumenDespacho(world: World): DespachoVivo {
+  const params = paramsOf(world), motor = params.motor;
+  return {
+    hilos: motor.hilos, gpu: [...motor.gpu], soaTerreno: motor.soaTerreno, particionarPersonas: motor.particionarPersonas,
+    natalidadVecindad: params.poblacion.natalidadVecindad, radioVecindadNatalidad: params.poblacion.radioVecindadNatalidad,
+    maxComunidades: params.social.maxComunidades, politica: params.gobernador.politica, presupuestoMs: params.gobernador.presupuestoMs,
+  };
+}

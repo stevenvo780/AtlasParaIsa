@@ -119,6 +119,9 @@ export const COLECCIONES_POR_NOMBRE: readonly { fichero: string; funcion: string
   { fichero: 'ecosystem-kernel.ts', funcion: 'EcosystemKernel', nombres: ['tiles', 'lifeBefore'] },
   { fichero: 'ecosystem-kernel.ts', funcion: 'buildTopology', nombres: ['tiles'] },
   { fichero: 'ecosystem-kernel.ts', funcion: 'sameCoordinates', nombres: ['tiles'] },
+  // La observación de política recibe el índice de `world.tiles` ya construido (`tileLookup`)
+  // y lo consulta por celda. El nombre es la colección, igual que `tiles` en el kernel.
+  { fichero: 'politica-obs.ts', funcion: 'computeLocalPolicyObservation', nombres: ['tileIn'] },
 ];
 
 /** Primitivas de consulta. No se recorren: cada llamada a una de ellas es una lectura que el inventario fija
@@ -166,9 +169,11 @@ export const ALCANCES: readonly Alcance[] = [
     ["tileAt(world, point)?.terrain === 'shelter' ? Math.max(0, ...filtrarCerca(world.structures, point, 0,", "s => s.x === point.x && s.y === point.y && s.condition > BROKEN_CONDITION && s.components.includes('roof'))"]),
   a('decision.comidaInmediata', 'teselas', 'entrada', 0, 'index.ts', 'immediateMeal', ['Math.min(tileAt(world, person)?.food ?? 0, 0.0035)']),
   a('decision.recuperarAgua', 'teselas', 'entrada', 0, 'index.ts', 'canRecoverWaterHandling', ['bodilyNeedRates(world, tileAt(world, person)!']),
-  a('decision.politicaTeselas', 'teselas', 'entrada', 4, 'index.ts', 'localPolicyObservation', ['for (let dy = -4; dy <= 4; dy++) for (let dx = -4; dx <= 4; dx++) {',
-    'if (dx * dx + dy * dy > 16) continue;', 'const tile = tileAt(world, { x: person.x + dx, y: person.y + dy });']),
+  a('decision.politicaTeselas', 'teselas', 'entrada', 4, 'politica-obs.ts', 'computeLocalPolicyObservation', ['for (let dy = -4; dy <= 4; dy++) for (let dx = -4; dx <= 4; dx++) {',
+    'if (dx * dx + dy * dy > 16) continue;', 'const tile = tileIn(person.x + dx, person.y + dy);']),
   a('decision.politicaPersonas', 'personas', 'entrada', 7, 'index.ts', 'localPolicyObservation', ["const nearby = vecinos(world, person, RADIUS + 1, other => other.id !== person.id && distance(person, other) <= RADIUS, 'policy');"]),
+  a('decision.politicaIndice', 'teselas', 'entrada', 4, 'index.ts', 'localPolicyObservation', ['const lookup = tileIn ?? tileLookup(world.tiles);'],
+    { nota: 'Índice de `world.tiles` compartido por el paso. Las celdas que se leen están a ≤ 4 (`decision.politicaTeselas`).' }),
   a('decision.companeros', 'personas', 'entrada', 7, 'index.ts', 'explorationTarget', ["const companions = world.cooperationEnabled ? vecinos(world, person, 8, p => p.id !== person.id && distance(person, p) <= 7 && (person.bonds[p.id] ?? 0) > 0.3, 'explorationTarget') : [];"]),
   a('familia.pareja', 'personas', 'entrada', 7, 'family.ts', 'familyOpportunity', ['const partner = vecinos(world, person, 8, other => other !== person && other.id !== person.id && !!other.communityId',
     '&& distance(person, other) <= 7 && (person.bonds[other.id] ?? 0) >= 0.3 && (other.bonds[person.id] ?? 0) >= 0.3', '&& !closeKin(person, other) && reproductiveReadiness(world, other)',
@@ -274,6 +279,7 @@ export const LLAMADAS: readonly Llamada[] = [
   ll('index.ts', 'choose', 'index.ts:explorationTarget', 'entrada', ["if (command.order === 'explore') directed.target = explorationTarget(world, person, reachableTiles);",
     'selected.target = continuingSearch ? person.target : explorationTarget(world, person, reachableTiles);']),
   ll('index.ts', 'choose', 'index.ts:localPolicyObservation', 'entrada', ['scores = evaluatePolicySingle(localPolicyObservation(world, person), genome.weights, plasticity.bias);']),
+  ll('index.ts', 'localPolicyObservation', 'politica-obs.ts:computeLocalPolicyObservation', 'entrada', ['return computeLocalPolicyObservation(world, person, lookup, nearby);']),
   ll('index.ts', 'immediateMeal', 'inventions.ts:foodAvailable', 'entrada', ['Math.min(foodAvailable(world, person), 0.002)']),
   ll('index.ts', 'drinkingBody', 'inventions.ts:waterAvailable', 'entrada', ['Math.min(waterAvailable(world, point), needed)']),
   ll('index.ts', 'localRestQuality', 'inventions.ts:facilityRestQuality', 'entrada', ['facilityRestQuality(world, person)']),
@@ -554,8 +560,8 @@ export const LECTURAS_POR_IDENTIDAD: readonly LecturaPorIdentidad[] = [
 export const RECORRIDOS: readonly Recorrido[] = [
   { id: 'paso.acciones', fase: 'accion', fichero: 'index.ts', funcion: 'advanceTick', patrones: ['for (let slot = 0; slot < world.people.length; slot++) bodyAndAction(world, world.people[slot]!, precomputedMoves, slot, policyScores);'],
     motivo: 'Cadena secuencial: cada persona decide y actúa viendo lo que las anteriores ya hicieron en este paso (los movimientos y políticas se precomputan antes en paralelo/GPU).' },
-  { id: 'paso.politicaLote', fase: 'accion', fichero: 'index.ts', funcion: 'precomputePolicyScores', patrones: ['for (const person of world.people) {'],
-    motivo: 'V12: selección en orden canónico de actores con decisión prevista para el lote FP64 CPU/GPU de política.' },
+  { id: 'paso.politicaLote', fase: 'accion', fichero: 'index.ts', funcion: 'precomputePolicyScores', patrones: ['for (const person of world.people) {', 'const tileIn = tileLookup(world.tiles);'],
+    motivo: 'V12: selección en orden canónico de actores con decisión prevista para el lote FP64 CPU/GPU de política. El índice de teselas se construye una vez por paso.' },
   { id: 'reproduccion.natalidadLocal', fase: 'reproduccion', fichero: 'natalidad-local.ts', funcion: 'selectLocalBirthPairs', patrones: ['for (const a of world.people) {'],
     motivo: 'V12 (D2): emparejamiento en cadena con cupo local por vecindad.' },
   { id: 'paso.descubrimiento', fase: 'accion', fichero: 'index.ts', funcion: 'advanceTick', patrones: ['for (const person of world.people) {', 'const chunk = world.chunks[chunkKey(person.x, person.y)]!;'], motivo: 'Chunk bajo cada persona.' },

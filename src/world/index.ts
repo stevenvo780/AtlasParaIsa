@@ -35,10 +35,11 @@ import { DEFAULT_PARAMS, MAX_FOUNDER_AGE_TICKS, paramsOf, setParams, limitsOf, t
 import { algunoCerca, filtrarCerca, primeroCerca } from './indice-puntos.js';
 import { conRejilla, personaMovida, vecinos } from './rejilla.js';
 import {
-  assertPolicyGenome, assertPolicyPlasticity, evaluatePolicySingle, extractLocalObservation,
+  assertPolicyGenome, assertPolicyPlasticity, evaluatePolicySingle,
   founderPolicy, inheritPolicy, initialPolicyPlasticity, POLICY_ACTIONS, POLICY_INPUTS, POLICY_WEIGHTS,
   policyActionBias, updatePolicyPlasticity, type PolicyGenome, type PolicyPlasticity,
 } from './politica.js';
+import { cellIntKey, cellKeyX, cellKeyY, computeLocalPolicyObservation } from './politica-obs.js';
 import { closePolicyGpuBatchers, evaluatePoliciesBatch } from './gpu/politica-gpu.js';
 import {
   closePersonasParallelPools, MOVE_AVANZA, MOVE_BLOQUEADO, MOVE_EN_DESTINO, MOVE_SIN_EVALUAR,
@@ -377,8 +378,12 @@ function immediateMeal(world: World, person: Person): number {
   return consumed;
 }
 
-/** Bounded perceived land routes. Planning cannot borrow a path through unseen cells. */
-function perceivedRoutes(person: Person, tiles: Tile[]): Map<string, number> {
+/** Bounded perceived land routes. Planning cannot borrow a path through unseen cells.
+ * Integer keys keep the same FIFO order (este, norte, oeste, sur) and the same distances.
+ * A coordinate that is not an admissible integer falls back to the original string keys. */
+function perceivedRoutes(person: Person, tiles: Tile[]): (point: Point) => number | undefined {
+  const ints = perceivedRouteInts(person, tiles);
+  if (ints) return ints;
   const land = new Set(tiles.map(t => `${t.x},${t.y}`)), steps = new Map([[`${person.x},${person.y}`, 0]]), queue: Point[] = [person];
   for (let i = 0; i < queue.length; i++) {
     const p = queue[i]!, n = steps.get(`${p.x},${p.y}`)! + 1;
@@ -387,7 +392,36 @@ function perceivedRoutes(person: Person, tiles: Tile[]): Map<string, number> {
       if (land.has(key) && !steps.has(key)) { steps.set(key, n); queue.push(next); }
     }
   }
-  return steps;
+  return point => steps.get(`${point.x},${point.y}`);
+}
+
+function perceivedRouteInts(person: Person, tiles: Tile[]): ((point: Point) => number | undefined) | undefined {
+  const land = new Set<number>();
+  for (let i = 0; i < tiles.length; i++) {
+    const key = cellIntKey(tiles[i]!.x, tiles[i]!.y);
+    if (key === undefined) return undefined;
+    land.add(key);
+  }
+  const origin = cellIntKey(person.x, person.y);
+  if (origin === undefined) return undefined;
+  const steps = new Map<number, number>([[origin, 0]]);
+  const queue = [origin];
+  for (let i = 0; i < queue.length; i++) {
+    const key = queue[i]!;
+    const x = cellKeyX(key), y = cellKeyY(key), n = steps.get(key)! + 1;
+    let next = cellIntKey(x + 1, y);
+    if (next !== undefined && land.has(next) && !steps.has(next)) { steps.set(next, n); queue.push(next); }
+    next = cellIntKey(x, y + 1);
+    if (next !== undefined && land.has(next) && !steps.has(next)) { steps.set(next, n); queue.push(next); }
+    next = cellIntKey(x - 1, y);
+    if (next !== undefined && land.has(next) && !steps.has(next)) { steps.set(next, n); queue.push(next); }
+    next = cellIntKey(x, y - 1);
+    if (next !== undefined && land.has(next) && !steps.has(next)) { steps.set(next, n); queue.push(next); }
+  }
+  return point => {
+    const key = cellIntKey(point.x, point.y);
+    return key === undefined ? undefined : steps.get(key);
+  };
 }
 
 /** Predict the exact finite drinking dose without touching stocks or receipts.
@@ -453,39 +487,12 @@ function ensurePersonPolicy(world: World, person: Person): { genome: PolicyGenom
   return { genome: person.policy, plasticity: person.policyPlasticity };
 }
 
-/** Observación estrictamente local (radio ≤ 4 en teselas, ≤ 7 en vecinos) para la red de política V12. */
-function localPolicyObservation(world: World, person: Person): Float64Array {
-  let land = 0, foodSum = 0, waterTiles = 0, shelterTiles = 0, materialSum = 0, unvisited = 0;
-  const visitedSet = person.visited.length > 0 ? new Set(person.visited) : null;
-  for (let dy = -4; dy <= 4; dy++) for (let dx = -4; dx <= 4; dx++) {
-    if (dx * dx + dy * dy > 16) continue;
-    const tile = tileAt(world, { x: person.x + dx, y: person.y + dy });
-    if (!tile || tile.terrain === 'water') continue;
-    land++;
-    foodSum += tile.food;
-    if ((tile.drinkingWater ?? 0) > 0.005) waterTiles++;
-    if (tile.terrain === 'shelter') shelterTiles++;
-    materialSum += (tile.wood ?? 0) + (tile.stone ?? 0);
-    if (!visitedSet || !visitedSet.has(`${tile.x},${tile.y}`)) unvisited++;
-  }
+/** Observación estrictamente local (radio ≤ 4 en teselas, ≤ 7 en vecinos) para la red de política V12.
+ * El índice de teselas llega ya construido desde `precomputePolicyScores` (una vez por paso). */
+function localPolicyObservation(world: World, person: Person, tileIn?: (x: number, y: number) => Tile | undefined): Float64Array {
+  const lookup = tileIn ?? tileLookup(world.tiles);
   const nearby = vecinos(world, person, RADIUS + 1, other => other.id !== person.id && distance(person, other) <= RADIUS, 'policy');
-  let trustSum = 0;
-  for (const other of nearby) trustSum += person.bonds[other.id] ?? 0;
-  const denom = Math.max(1, land);
-  return extractLocalObservation({
-    hunger: clamp(person.hunger),
-    thirst: clamp(person.thirst),
-    fatigue: clamp(person.fatigue),
-    energy: clamp(person.energy),
-    inventoryFrac: clamp(person.inventory / 0.25),
-    localFood: clamp(foodSum / denom),
-    localWater: clamp((waterTiles / denom) * 3),
-    localCrowd: clamp(nearby.length / 16),
-    localShelter: clamp(shelterTiles / 4),
-    localResources: clamp(materialSum / 24),
-    communityTrust: nearby.length > 0 ? clamp(trustSum / nearby.length) : 0,
-    biomeNovelty: clamp(unvisited / denom),
-  });
+  return computeLocalPolicyObservation(world, person, lookup, nearby);
 }
 
 /** Evalúa por lote (CPU o Dual-GPU FP64 exacta) las políticas de los actores con decisión prevista en este paso. */
@@ -498,13 +505,14 @@ function precomputePolicyScores(world: World): Map<string, Float64Array> | undef
   }
   const count = deciding.length;
   if (count === 0) return undefined;
+  const tileIn = tileLookup(world.tiles);
   const obs = new Float64Array(count * POLICY_INPUTS);
   const weights = new Float64Array(count * POLICY_WEIGHTS);
   const biases = new Float64Array(count * POLICY_ACTIONS.length);
   for (let i = 0; i < count; i++) {
     const person = deciding[i]!;
     const { genome, plasticity } = ensurePersonPolicy(world, person);
-    obs.set(localPolicyObservation(world, person), i * POLICY_INPUTS);
+    obs.set(localPolicyObservation(world, person, tileIn), i * POLICY_INPUTS);
     weights.set(genome.weights, i * POLICY_WEIGHTS);
     biases.set(plasticity.bias, i * POLICY_ACTIONS.length);
   }
@@ -524,7 +532,7 @@ function choose(world: World, person: Person, policyScores?: Map<string, Float64
     if (dx * dx + dy * dy > RADIUS * RADIUS) continue;
     const tile = tileAt(world, { x: person.x + dx, y: person.y + dy }); if (tile && tile.terrain !== 'water') nearbyTiles.push(tile);
   }
-  const routes = perceivedRoutes(person, nearbyTiles), stepsTo = (point: Point) => routes.get(`${point.x},${point.y}`);
+  const stepsTo = perceivedRoutes(person, nearbyTiles);
   const reachableTiles = nearbyTiles.filter(t => stepsTo(t) !== undefined), payload = containedWaterQuanta(person) / 1000;
   // A nominal effort budget for planning; the bodily law itself still saturates
   // readiness at zero. It is not a new physical prohibition or a future guarantee.

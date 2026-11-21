@@ -6,7 +6,8 @@ import type { Duplex } from 'node:stream';
 import { gzip } from 'node:zlib';
 import { promisify } from 'node:util';
 import { WebSocketServer, WebSocket, type RawData } from 'ws';
-import { createWorld, stepWorld, projectWorld, normalizeViewport, cloneWorld, puntoDeRestauracion, fraccionSerial, worldContext, type PuntoDeRestauracion, type World, type FaseMedicion } from '../world/index.js';
+import { createWorld, stepWorld, projectWorld, normalizeViewport, cloneWorld, puntoDeRestauracion, fraccionSerial, worldContext, closeFaunaParallelPools, closePersonasParallelPools, closePolicyGpuBatchers, type PuntoDeRestauracion, type World, type FaseMedicion } from '../world/index.js';
+import { closeEcosystemWorkers } from '../world/ecosystem.js';
 import { calcularFraccionSerialReal } from '../world/paralelo/piscina.js';
 export { aceleracionAmdahlTeorica } from '../world/paralelo/piscina.js';
 import { paramsOf, type WorldParams } from '../world/params.js';
@@ -207,6 +208,23 @@ export function rate(map: Map<string, { count: number; reset: number }>, key: st
   row.count++; map.set(key, row);
   if (row.count > max) throw new HttpError(429, 'Espera un momento antes de intentarlo de nuevo.');
 }
+
+/**
+ * Suelta las cuatro piscinas de proceso (GPU de políticas, fauna, personas, ecología).
+ * Son globales: un `createApp` que avanzó con `motor.hilos > 1` o con GPU las deja vivas
+ * aunque el llamador solo cierre el HTTP. Cada cierre es idempotente. Un rechazo no se traga
+ * en silencio ni impide intentar las demás.
+ */
+export async function cerrarPiscinasDeComputo(): Promise<void> {
+  const errores: unknown[] = [];
+  const paso = async (fn: () => unknown) => { try { await fn(); } catch (error) { errores.push(error); } };
+  await paso(() => closePolicyGpuBatchers());
+  await paso(() => closeFaunaParallelPools());
+  await paso(() => closePersonasParallelPools());
+  await paso(() => closeEcosystemWorkers());
+  if (errores.length === 1) throw errores[0];
+  if (errores.length > 1) throw new AggregateError(errores, 'No se pudieron cerrar todas las piscinas de cómputo.');
+}
 export function createApp(options: AppOptions) {
   const { store } = options;
   const monotonicNow = options.monotonicNow ?? (() => performance.now());
@@ -338,7 +356,7 @@ export function createApp(options: AppOptions) {
   }
   /** T161: publica las señales de la ventana y del mundo servido. Solo lee; nunca toca el mundo. */
   function publicarSenalesGobernador(mundo: World): void {
-    const stats = runtime.gobernador!; if (!stats) return;
+    const stats = runtime.gobernador!;
     const senales = gobernador.senales();
     const poblacion = mundo.people.length, teselasActivas = mundo.tiles.length;
     let colaRed = 0;
@@ -941,6 +959,7 @@ export function createApp(options: AppOptions) {
     }
   }, 1000);
   latido.unref();
+  let cierre: Promise<void> | undefined;
   return {
     /** `world` es el mundo vivo, para `main.ts` al arrancar (antes de ningún paso), bancos y pruebas. Tras un
      * paso sin reserva que falló es el mundo a medio paso (PERF3): muerto, nadie lo proyecta ni lo guarda, y
@@ -960,11 +979,27 @@ export function createApp(options: AppOptions) {
     get runtime(): RuntimeStats { return { ...runtime, ...(runtime.gobernador ? { gobernador: { ...runtime.gobernador } } : {}) }; },
     /** Orden humana sobre la reproducción: manda sobre el gobernador. `null` la devuelve al hardware. */
     setReproduccionManual(value: boolean | null) { runtime.gobernador!.manual = value; if (value !== null) { world.reproductionEnabled = value; runtime.gobernador!.activo = value; runtime.gobernador!.reproductionEnabled = value; runtime.gobernador!.estado = 'manual'; runtime.gobernador!.palancaActiva = null; gobernador.estadoGobernador = 'manual'; gobernador.palancaActiva = null; } },
-    async close() {
+    close() {
+      if (cierre) return cierre;
       stopped = true; if (timer) clearTimeout(timer); clearInterval(heartbeat); clearInterval(latido);
-      for (const item of pending.values()) item.reject(new HttpError(503, 'El servicio se está cerrando.'));
-      pending.clear(); for (const socket of clients.keys()) socket.terminate(); ws.close();
-      if (server.listening) await new Promise<void>((yes, no) => server.close(error => error ? no(error) : yes()));
+      for (const item of pending.values()) { item.promise.catch(() => undefined); item.reject(new HttpError(503, 'El servicio se está cerrando.')); }
+      pending.clear();
+      for (const socket of clients.keys()) socket.terminate();
+      for (const socket of conexionesNuevas) socket.destroy();
+      conexionesNuevas.clear();
+      ws.close();
+      // Un keep-alive ocioso dejaba `server.close()` esperando hasta `headersTimeout` (10 s)
+      // y, con él, las piscinas y el candado del mundo.
+      server.closeIdleConnections();
+      server.closeAllConnections();
+      cierre = (async () => {
+        try {
+          if (server.listening) await new Promise<void>((yes, no) => server.close(error => error ? no(error) : yes()));
+        } finally {
+          await cerrarPiscinasDeComputo();
+        }
+      })();
+      return cierre;
     }
   };
 }

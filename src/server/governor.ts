@@ -248,13 +248,19 @@ export function gobernar(entrada: EntradaGobernar, previo: Readonly<EstadoGobern
     if (palancaActiva === 'area') return cerrar({ ...comun, solicitarRetiroPaginasFrias: true, reproductionEnabled: entrada.actual, estadoTecho: estadoTechoPrevio, siguiente: siguiente(estadoTechoPrevio) });
     if (palancaActiva === 'red') {
       const maximo = entrada.subscribeMsMaximo ?? SUBSCRIBE_MS_MAXIMO;
-      const efectivo = subscribeBase > 0 ? Math.min(maximo, subscribeBase * 2) : Math.min(maximo, 1000);
+      const subido = subscribeBase > 0 ? Math.min(maximo, subscribeBase * 2) : Math.min(maximo, 1000);
+      // El tope limita cuánto se espacia. No acorta un intervalo que ya era más holgado:
+      // eso mandaría más estados justo cuando la red es el cuello.
+      const efectivo = Math.max(subscribeBase, subido);
       return cerrar({ ...comun, subscribeMsEfectivo: efectivo, reproductionEnabled: entrada.actual, estadoTecho: estadoTechoPrevio, siguiente: siguiente(estadoTechoPrevio) });
     }
     if (palancaActiva === 'guardado') {
       const maximo = entrada.cadaTicksMaximo ?? CADA_TICKS_MAXIMO;
       // Un gesto fuerza guardado en su propio paso: en ese paso la cadencia no se espacia jamás.
-      const efectivo = entrada.gestoEnEstePaso ? cadaBase : Math.min(maximo, Math.max(cadaBase + 1, cadaBase * 2));
+      // Producción guarda cada 100 pasos y el tope histórico de la palanca es 20: acortar 100→20
+      // mete el guardado en la ventana del gobernador (el fallo que R19 sacó de la cadencia).
+      const espaciado = Math.min(maximo, Math.max(cadaBase + 1, cadaBase * 2));
+      const efectivo = entrada.gestoEnEstePaso ? cadaBase : Math.max(cadaBase, espaciado);
       return cerrar({ ...comun, cadaTicksEfectivo: efectivo, reproductionEnabled: entrada.actual, estadoTecho: estadoTechoPrevio, siguiente: siguiente(estadoTechoPrevio) });
     }
     return cerrar({ ...comun, reproductionEnabled: entrada.actual, estadoTecho: estadoTechoPrevio, siguiente: siguiente(estadoTechoPrevio) });

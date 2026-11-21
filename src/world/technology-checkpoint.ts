@@ -4,12 +4,64 @@ import { assertContainedWater, assertWaterLedger } from './technology-water.js';
 import { POPULATION_HARD_LIMIT } from '../shared/life.js';
 
 export interface TechnologyStockActor { id: string; technology: Pick<TechnologyKnowledge, 'items' | 'residue'>; }
-const materials = ['wood', 'stone', 'water'] as const;
 const integer = (value: unknown, max = Number.MAX_SAFE_INTEGER): value is number =>
   typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 && value <= max;
 const identifier = (value: unknown): value is string => typeof value === 'string' && value.length > 0 && value.length <= 100;
-const composition = (value: unknown): boolean => !!value && typeof value === 'object' && !Array.isArray(value) &&
-  Object.keys(value).length === materials.length && materials.every(material => integer((value as Record<string, unknown>)[material]));
+/** `Object.keys` cuenta solo claves string propias y enumerables. Un material heredado sigue valiendo. */
+function composition(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  let keys = 0;
+  for (const key in value) if (Object.hasOwn(value, key) && ++keys > 3) return false;
+  if (keys !== 3) return false;
+  const record = value as Record<string, unknown>;
+  return integer(record.wood) && integer(record.stone) && integer(record.water);
+}
+/** Mismo orden que `localeCompare` en el alfabeto de los ids (`a-z`, dígitos, `-`). Fuera de él, la comparación del entorno. */
+function idAlphabet(code: number): boolean {
+  return code === 45 || (code >= 48 && code <= 57) || (code >= 97 && code <= 122);
+}
+function compareId(a: string, b: string): number {
+  const n = a.length < b.length ? a.length : b.length;
+  for (let i = 0; i < n; i++) {
+    const left = a.charCodeAt(i), right = b.charCodeAt(i);
+    if (!idAlphabet(left) || !idAlphabet(right)) return a.localeCompare(b);
+    if (left !== right) return left - right;
+  }
+  const rest = a.length > b.length ? a : b;
+  for (let i = n; i < rest.length; i++) if (!idAlphabet(rest.charCodeAt(i))) return a.localeCompare(b);
+  return a.length - b.length;
+}
+/** `id === \`process-${serial}\`` sin construir la cadena. `process-01` y los espacios no coinciden con `process-1`. */
+function sameProcessSerial(id: string, serial: number): boolean {
+  if (!Number.isSafeInteger(serial) || serial < 0) return id === `process-${serial}`;
+  let digits = 1;
+  if (serial >= 10) { digits = 0; for (let n = serial; n > 0; n = Math.floor(n / 10)) digits++; }
+  if (id.length !== 8 + digits) return false;
+  if (id.charCodeAt(0) !== 112 || id.charCodeAt(1) !== 114 || id.charCodeAt(2) !== 111 || id.charCodeAt(3) !== 99
+    || id.charCodeAt(4) !== 101 || id.charCodeAt(5) !== 115 || id.charCodeAt(6) !== 115 || id.charCodeAt(7) !== 45) return false;
+  let value = 0;
+  for (let i = 8; i < id.length; i++) {
+    const digit = id.charCodeAt(i) - 48;
+    if (digit < 0 || digit > 9) return false;
+    value = value * 10 + digit;
+  }
+  return value === serial;
+}
+/** `/^product-[1-9]\\d*$/` y `integer(Number(id.slice(8)), max)` sin regex ni copia del sufijo. */
+function productSerial(id: string, max: number): boolean {
+  if (id.length < 9) return false;
+  if (id.charCodeAt(0) !== 112 || id.charCodeAt(1) !== 114 || id.charCodeAt(2) !== 111 || id.charCodeAt(3) !== 100
+    || id.charCodeAt(4) !== 117 || id.charCodeAt(5) !== 99 || id.charCodeAt(6) !== 116 || id.charCodeAt(7) !== 45) return false;
+  const first = id.charCodeAt(8);
+  if (first < 49 || first > 57) return false;
+  let value = first - 48;
+  for (let i = 9; i < id.length; i++) {
+    const digit = id.charCodeAt(i) - 48;
+    if (digit < 0 || digit > 9) return false;
+    value = value * 10 + digit;
+  }
+  return integer(value, max);
+}
 
 /** Captures only technology matter, never raw inventories, decisions, or random state. */
 export function captureTechnologyCheckpoint(state: TechnologyState, actors: readonly TechnologyStockActor[], tick: number,
@@ -18,8 +70,8 @@ export function captureTechnologyCheckpoint(state: TechnologyState, actors: read
     ...(state.water ? { water: { ...state.water } } : {}),
     inventories: actors.map(actor => ({ actorId: actor.id, residue: { ...actor.technology.residue },
       items: actor.technology.items.map(item => ({ id: item.id, recipeId: item.recipeId, mass: item.mass, composition: { ...item.composition }, ...(item.contents ? { contents: { ...item.contents } } : {}) }))
-        .sort((a, b) => a.id.localeCompare(b.id)),
-    })).sort((a, b) => a.actorId.localeCompare(b.actorId)) };
+        .sort((a, b) => compareId(a.id, b.id)),
+    })).sort((a, b) => compareId(a.actorId, b.actorId)) };
 }
 
 /** Shape/integrity of a historical opening, not a claim that subsequent flows close. */
@@ -63,9 +115,11 @@ export function assertTechnologyCheckpoint(state: TechnologyState, tick: number)
       !Array.isArray(inventory.items) || inventory.items.length > state.budgets.maxItems) fail();
     actorIds.add(inventory.actorId);
     for (const item of inventory.items) {
-      if (!item || !identifier(item.id) || !/^product-[1-9]\d*$/.test(item.id) || !integer(Number(item.id.slice(8)), state.itemCounter) ||
-        itemIds.has(item.id) || !(item.recipeId === null || recipeExisted(item.recipeId)) || !composition(item.composition) ||
-        !integer(item.mass) || item.mass === 0 || item.mass !== materials.reduce((total, material) => total + item.composition[material], 0)) fail();
+      if (!item) fail();
+      const itemId = item.id;
+      if (!identifier(itemId) || !productSerial(itemId, state.itemCounter) ||
+        itemIds.has(itemId) || !(item.recipeId === null || recipeExisted(item.recipeId)) || !composition(item.composition) ||
+        !integer(item.mass) || item.mass === 0 || item.mass !== item.composition.wood + item.composition.stone + item.composition.water) fail();
       itemIds.add(item.id);
       if (item.contents !== undefined) {
         if (!state.water) fail();
@@ -86,7 +140,7 @@ export function technologyHistoryGap(state: TechnologyState): boolean {
   if (!checkpoint || state.historyDropped > checkpoint.executionCounter || state.historyDropped + state.history.length !== state.executionCounter) return true;
   let previous = state.historyDropped, previousTick = -1;
   for (const event of state.history) {
-    if (event.id !== `process-${previous + 1}` || event.tick < previousTick) return true;
+    if (!sameProcessSerial(event.id, previous + 1) || event.tick < previousTick) return true;
     previous++; previousTick = event.tick;
   }
   return previous !== state.executionCounter;
@@ -114,15 +168,26 @@ export function advanceTechnologyCheckpoint(state: TechnologyState, actors: read
   if (checkpoint === undefined) { state.checkpoint = captureTechnologyCheckpoint(state, actors, tick, 'migration'); return; }
   let rosterChanged = false, unique = false;
   if (!steady || !sameIds(actors, steady.actors, actor => actor.id) || !sameIds(checkpoint.inventories, steady.inventories, inventory => inventory.actorId)) {
-    const current = new Set(actors.map(actor => actor.id));
+    const current = new Set<string>();
+    for (let i = 0; i < actors.length; i++) current.add(actors[i]!.id);
     unique = current.size === actors.length;
-    rosterChanged = current.size !== checkpoint.inventories.length || checkpoint.inventories.some(inventory => !current.has(inventory.actorId));
-    if (!rosterChanged) steady = { actors: actors.map(actor => actor.id), inventories: checkpoint.inventories.map(inventory => inventory.actorId) };
+    const inventories = checkpoint.inventories;
+    rosterChanged = current.size !== inventories.length;
+    if (!rosterChanged) for (let i = 0; i < inventories.length; i++) if (!current.has(inventories[i]!.actorId)) { rosterChanged = true; break; }
+    if (!rosterChanged) steady = snapshotRoster(actors, inventories);
   }
   if (rosterChanged || technologyHistoryGap(state)) {
     assertTechnologyCheckpoint(state, tick); // Never normalize a malformed boundary by rotating it.
     state.checkpoint = captureTechnologyCheckpoint(state, actors, tick, rosterChanged ? 'roster-change' : 'history-gap');
     // Sin ids repetidos, la apertura recién capturada contiene exactamente el padrón: el tick siguiente no rota.
-    if (rosterChanged && unique) steady = { actors: actors.map(actor => actor.id), inventories: state.checkpoint.inventories.map(inventory => inventory.actorId) };
+    if (rosterChanged && unique) steady = snapshotRoster(actors, state.checkpoint.inventories);
   }
+}
+
+function snapshotRoster(actors: readonly TechnologyStockActor[], inventories: readonly { actorId: string }[]): { actors: string[]; inventories: string[] } {
+  const actorIds = new Array<string>(actors.length);
+  for (let i = 0; i < actors.length; i++) actorIds[i] = actors[i]!.id;
+  const inventoryIds = new Array<string>(inventories.length);
+  for (let i = 0; i < inventories.length; i++) inventoryIds[i] = inventories[i]!.actorId;
+  return { actors: actorIds, inventories: inventoryIds };
 }

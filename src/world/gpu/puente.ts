@@ -46,8 +46,8 @@ function runsOf(sorted) {
   }
   return runs;
 }
-let child = null, reader = null, readyPromise = null, dead = null;
-let shmFd = null, shmPath = null, cachedBuffers = null;
+let child = null, reader = null, readyPromise = null, dead = null, childClosed = false;
+let shmFd = null, cachedBuffers = null;
 const MAX_IO_CHUNK = 1 << 29; // 512 MiB (< 2 GiB limit of Node fs.writeSync/readSync)
 class Reader {
   constructor(stream){ this.chunks=[]; this.offset=0; this.available=0; this.done=false; this.waiter=null; this.error=null;
@@ -70,10 +70,12 @@ function start(){
   child.stderr.on('data',c=>{ stderr=(stderr+c.toString()).slice(-4096); });
   reader = new Reader(child.stdout);
   child.on('error', e=>{ dead=e; if(reader){reader.error=e; reader.done=true; reader.wake();} });
-  child.on('close', (code,signal)=>{ if(shmPath){ try{fs.unlinkSync(shmPath);}catch{} } if(!workerData.closing){ dead=new Error('GPU resident subprocess exited code='+code+' signal='+signal+' '+stderr); if(reader){reader.error=dead; reader.done=true; reader.wake();} } });
+  child.on('close', (code,signal)=>{ childClosed=true; if(!workerData.closing){ dead=new Error('GPU resident subprocess exited code='+code+' signal='+signal+' '+stderr); if(reader){reader.error=dead; reader.done=true; reader.wake();} } });
   child.stdin.on('error', e=>{ if(reader){reader.error=e; reader.done=true; reader.wake();} });
-  readyPromise = reader.frame().then(f=>{ if(!f.header.ready) throw new Error('GPU resident worker not ready'); workerData.readyInfo=f.header;
-    if(f.header.shmPath) { shmPath = f.header.shmPath; try { shmFd = fs.openSync(f.header.shmPath, 'r+'); } catch(e) { throw new Error('GPU shm: no se pudo abrir '+f.header.shmPath+': '+e.message); } }
+  readyPromise = reader.frame().then(f=>{ if(!f.header.ready) throw new Error('GPU resident worker not ready');
+    // Abierto por ambos lados, el nombre sobra: se borra ya, así ni un SIGKILL deja el fichero en /dev/shm
+    // (Python solo usa su descriptor: ftruncate y mmap).
+    if(f.header.shmPath) { try { shmFd = fs.openSync(f.header.shmPath, 'r+'); } catch(e) { throw new Error('GPU shm: no se pudo abrir '+f.header.shmPath+': '+e.message); } finally { try{fs.unlinkSync(f.header.shmPath);}catch{} } }
     return f.header; });
   return readyPromise;
 }
@@ -99,10 +101,6 @@ async function send(header, body){
   child.stdin.write(prefix); child.stdin.write(raw);
   if(totalBytes && !useShm) { for (const part of parts) child.stdin.write(part); }
   return reader.frame();
-}
-function view(buffers, name, bytes){
-  const buf=buffers[name]; if(!buf) throw new Error('Missing resident buffer '+name);
-  return bytes===8 ? new Float64Array(buf) : new Uint8Array(buf);
 }
 function bytesOf(buffers,name){ const buf=buffers[name]; return new Uint8Array(buf); }
 // Bajada directa: fs.readSync escribe en la vista del SharedArrayBuffer destino (sin copia intermedia).
@@ -261,13 +259,25 @@ async function handle(job){
   return {touched:[...touched].sort((a,b)=>a-b)};
 }
 parentPort.on('message', async job=>{
-  if(job.kind==='close'){ try{ workerData.closing=true; if(child){ child.stdin.end(); setTimeout(()=>{ try{child.kill('SIGKILL');}catch{} },500); } if(shmFd!==null){ try{fs.closeSync(shmFd);}catch{} shmFd=null; } }catch{} Atomics.store(control,0,1); Atomics.notify(control,0); return; }
+  if(job.kind==='close'){
+    // EOF por stdin: Python libera la VRAM y sale; si no sale en 500 ms, SIGKILL. El worker termina
+    // cuando el subproceso ya no existe.
+    workerData.closing=true;
+    if(shmFd!==null){ try{fs.closeSync(shmFd);}catch{} shmFd=null; }
+    if(!child || childClosed) process.exit(0);
+    const killer=setTimeout(()=>{ try{child.kill('SIGKILL');}catch{} },500);
+    child.once('close',()=>{ clearTimeout(killer); process.exit(0); });
+    try{ child.stdin.end(); }catch{}
+    return;
+  }
   if(job.kind==='kill'){ try{ if(child) child.kill('SIGKILL'); }catch{} Atomics.store(control,0,2); const msg='GPU resident subprocess killed by test'; for(let i=0;i<msg.length;i++) errors[i]=msg.charCodeAt(i); errors[msg.length]=0; Atomics.notify(control,0); return; }
   try{ const result=await handle(job); workerData.lastTouched=result.touched; Atomics.store(control,0,1); }
   catch(e){ const msg=(e&&e.stack||String(e)).slice(0,4000); for(let i=0;i<msg.length;i++) errors[i]=msg.charCodeAt(i); errors[msg.length]=0; Atomics.store(control,0,2); }
   Atomics.notify(control,0);
 });
-start();
+// La causa de un arranque fallido la recibe el primer job (await readyPromise); sin este catch,
+// un fallo antes del primer job sería un rechazo no observado que mataría el worker en silencio.
+start().catch(()=>{});
 `;
 
 function resolveNvrtc(): string {
@@ -569,8 +579,7 @@ export class ResidentGpuBridge {
   #last: GpuBridgeStats;
   #cumulative = { uploadedBytes: 0, downloadedBytes: 0 };
   #syncCounts = { full: 0, delta: 0, noop: 0 };
-  /** Test hook: last python ready header (devices/arch/compile). */
-  readyInfo: unknown = null;
+  readonly #exited: Promise<void>;
 
   constructor(devices: readonly number[], options?: { weights?: readonly number[]; sharded?: boolean }) {
     if (!devices.length || devices.some(d => !Number.isSafeInteger(d) || d < 0) || new Set(devices).size !== devices.length)
@@ -588,6 +597,14 @@ export class ResidentGpuBridge {
       },
     });
     this.worker.unref();
+    // Un fallo o una salida inesperada del worker no tumba el anfitrión: el siguiente paso falla al
+    // instante (`broken`) en vez de agotar la espera de 120 s.
+    const romper = (error: Error): void => { this.broken ??= error; this.synced = null; this.topo = null; };
+    this.worker.on('error', error => romper(error instanceof Error ? error : new Error(String(error))));
+    this.#exited = new Promise(resolve => this.worker.once('exit', code => {
+      if (!this.closed) romper(new Error(`El worker GPU residente terminó (code=${code}).`));
+      resolve();
+    }));
   }
   get lastStats(): GpuBridgeStats { return this.#last; }
   get cumulativeStats(): Readonly<{ uploadedBytes: number; downloadedBytes: number }> { return this.#cumulative; }
@@ -786,22 +803,19 @@ export class ResidentGpuBridge {
   killSubprocessForTest(): void {
     Atomics.store(this.control, 0, 0);
     this.worker.postMessage({ kind: 'kill' });
-    // No esperamos al worker: la muerte se observa en el siguiente run (o en este si el lector ya falló).
+    // La muerte se observa en el siguiente run(), no en el hook: una espera breve para que SIGKILL llegue.
     this.synced = null; this.topo = null;
-    // Dar una oportunidad breve a que SIGKILL surta efecto sin bloquear el test indefinidamente.
-    const deadline = Date.now() + 2000;
-    while (Date.now() < deadline) {
-      if (Atomics.load(this.control, 0) === 2) break;
-      Atomics.wait(this.control, 0, 0, 50);
-      // El worker marca error también cuando el lector de Python detecta el cierre; si no, el próximo run lo hará.
-      break;
-    }
-    this.broken = null; // el fallo debe producirse en run(), no en el hook
+    Atomics.wait(this.control, 0, 0, 50);
+    this.broken = null;
   }
 
+  /** Espera a que el subproceso Python salga (≤ 2 s) antes de terminar el worker que lo posee. */
   async close(): Promise<void> {
     if (this.closed) return; this.closed = true;
     try { this.worker.postMessage({ kind: 'close' }); } catch { /* worker ya muerto */ }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([this.#exited, new Promise<void>(resolve => { timer = setTimeout(resolve, 2000); })]);
+    clearTimeout(timer);
     await this.worker.terminate().catch(() => undefined);
   }
 }

@@ -28,11 +28,9 @@
  * propio animal. `applyFaunaChooseOutputs` (fauna-motor.ts) lee esos objetos reales, así que `target`,
  * los recuerdos (`food`, `water`, `-0` incluidos) y `preyId` son por construcción los de `choose`.
  */
+import { buscarPagina, CELDAS_POR_PAGINA } from './paginas.js';
 import type { StaticRegion } from './particion.js';
 import type { StaticWorkerHandlerJob } from './piscina.js';
-
-export const LADO_PAGINA = 16;
-export const CELDAS_POR_PAGINA = LADO_PAGINA * LADO_PAGINA;
 
 /** Copias literales de `animals.ts` (`MEMORY_TTL` no se exporta; las otras dos se comprueban en la prueba). */
 export const MEMORIA_TTL = 480;
@@ -133,23 +131,6 @@ export function crearVistaFauna(buffers: Readonly<Record<string, SharedArrayBuff
     df: new Float64Array(buffers.dueF64!), di: new Int32Array(buffers.dueI32!), mf: new Float64Array(buffers.memoriaF64!),
     mv: new Uint8Array(buffers.memoriaVisitado!), id: new Uint16Array(buffers.idCaracteres!), so: new Int32Array(buffers.salidaI32!), params,
   };
-}
-
-/** Hash de página determinista: el mismo esquema que `personas-worker.ts`. */
-export function hashPagina(px: number, py: number, mask: number): number {
-  let h = Math.imul(px, 0x9e3779b1) ^ Math.imul(py ^ 0x5bd1e995, 0x85ebca77);
-  h ^= h >>> 15; h = Math.imul(h, 0x2c1b3c6d); h ^= h >>> 12;
-  return h & mask;
-}
-
-/** Ranura de la página `(px, py)` o −1 si no está cargada. */
-export function buscarPagina(vista: VistaFauna, px: number, py: number): number {
-  const mask = vista.params.hashMask;
-  for (let h = hashPagina(px, py, mask); ; h = (h + 1) & mask) {
-    const slot = vista.paginasSlot[h]!;
-    if (slot < 0) return -1;
-    if (vista.paginasX[h] === px && vista.paginasY[h] === py) return slot;
-  }
 }
 
 /** Rango de enteros que admite el hash de páginas (`>> 4` exacto y clave de página < 2^53); cubre de

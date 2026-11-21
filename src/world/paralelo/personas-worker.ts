@@ -22,6 +22,7 @@
  */
 import { advanceBody, type BodyRates, type BodyState } from '../body.js';
 import { HAMBRE_POR_PASO, SED_POR_PASO, SED_POR_UNIDAD } from '../ecologia-constantes.js';
+import { buscarPagina, CELDAS_POR_PAGINA } from './paginas.js';
 import type { StaticRegion } from './particion.js';
 import type { StaticWorkerHandlerJob } from './piscina.js';
 
@@ -30,8 +31,6 @@ export const LADO_PERCEPCION = 2 * RADIO_PERCEPCION + 1;
 export const CELDAS_PERCEPCION = LADO_PERCEPCION * LADO_PERCEPCION;
 export const MOVE_MAX_EXTRACCIONES = 2048;
 export const MOVE_RADIO_CHEBYSHEV = 24;
-export const LADO_PAGINA = 16;
-export const CELDAS_POR_PAGINA = LADO_PAGINA * LADO_PAGINA;
 export const FORAGE_AMOUNT = 0.06;
 export const EAT_AMOUNT = 0.0035;
 
@@ -115,23 +114,6 @@ export function crearVista(buffers: Readonly<Record<string, SharedArrayBuffer>>,
     si: new Int32Array(buffers.salidaI32!), sf: new Float64Array(buffers.salidaF64!),
     rutas: new Int16Array(buffers.salidaRutas!), params,
   };
-}
-
-/** Hash de página determinista (enteros de 32 bits). Lo comparten empaquetador y lector. */
-export function hashPagina(px: number, py: number, mask: number): number {
-  let h = Math.imul(px, 0x9e3779b1) ^ Math.imul(py ^ 0x5bd1e995, 0x85ebca77);
-  h ^= h >>> 15; h = Math.imul(h, 0x2c1b3c6d); h ^= h >>> 12;
-  return h & mask;
-}
-
-/** Ranura de la página `(px, py)` o −1 si no está cargada. */
-export function buscarPagina(vista: VistaPersonas, px: number, py: number): number {
-  const mask = vista.params.hashMask;
-  for (let h = hashPagina(px, py, mask); ; h = (h + 1) & mask) {
-    const slot = vista.paginasSlot[h]!;
-    if (slot < 0) return -1;
-    if (vista.paginasX[h] === px && vista.paginasY[h] === py) return slot;
-  }
 }
 
 /** Índice global de celda o −1 si la tesela no existe. */

@@ -13,21 +13,21 @@ defecto la dinámica es bit a bit la misma (puerta de digestos en 8 semillas).
 El código queda en `main`/`0a6476e` y en el commit previo de esta rama. No se tocan
 HOG (`social.hogarTrabajo`, decisión pendiente), `agua.memoria=1` ni las reglas 10/11.
 
-## Reglas 12 (2026-11-19 / 2026-11-21 — evolución abierta limitada por hardware, opt-in)
+## Reglas 12 (2026-11-19 / 2026-11-21 — evolución abierta opt-in, acotada por el hardware)
 
-**`RULES_VERSION = 12`** (`src/world/index.ts`, protocolo `10`, SQLite `5`) incorpora las leyes opt-in de evolución abierta y cómputo multi-chip sin modificar la trayectoria histórica de los defaults de V11 (`DEFAULT_PARAMS` y `HISTORICAL_PARAMS` conservan bit a bit la dinámica V11; la migración V11→V12 solo actualiza `world.version`):
+**`RULES_VERSION = 12`** (`src/world/index.ts`, protocolo `10`, SQLite `5`). La migración V11→V12 solo cambia `world.version`. Las leyes nuevas siguen apagadas en `DEFAULT_PARAMS` y `HISTORICAL_PARAMS`; `CARTA_OPEN_WORLD=1` las enciende con `hostOpenWorldParams()`:
 
 | Clave | Default / Histórico | Modo abierto (`CARTA_OPEN_WORLD=1` / `hostOpenWorldParams`) | Ley |
 | :--- | ---: | ---: | :--- |
-| `poblacion.natalidadVecindad` | `false` | `true` | Decisión D2 (`src/world/natalidad-local.ts`): reemplaza el cupo planetario de `nacimientosPorComprobacion` (2 cada 120 pasos = 40/día) por un cupo estrictamente local por disco de vecindad (`radioVecindadNatalidad`) condicionado al alimento medio caminable local (`meanFood ≥ 0,08`, sin singularidades de agua=0). |
-| `poblacion.radioVecindadNatalidad` | `16` | `16` | Radio en celdas (`[4, 64]`) del disco de natalidad por vecindad. Colonias separadas más allá del radio conciben en paralelo hasta que el suelo local o el gobernador de hardware (`gobernador.politica=techo`) fijen el límite. |
-| `social.maxComunidades` | `8` (hist.) / `64` (V14) | `0` | Rango ampliado a `[0, Number.MAX_SAFE_INTEGER]`. `0` significa «sin tope artificial de conducta»: `effectiveCommunityCap` delega el techo exclusivamente a la admisión física de RAM (`limites.comunidades`), respetando la separación T100 (con `maxComunidades > 0` sigue mandando la ley de fundación). |
-| `conducta.politicaPeso` | `0` | `0,35` | Red de política evolutiva estrictamente local (`12→8→12`, activación racional `x/(1+|x|)`, `src/world/politica.ts`, `Person.policy` y `Person.policyPlasticity`). Observación local (`R ≤ 4` teselas, `R ≤ 7` personas), sesgo acotado fuera de urgencias corporales (`hunger ≤ 0,75 && thirst ≤ 0,75`), plasticidad vitalicia (efecto Baldwin) jamás heredada en `reproduce()`, y evaluación en lote con paridad FP64 `Object.is` exacta entre CPU y Dual-GPU (`--fmad=false`, `src/world/gpu/politica-gpu.ts`). |
-| `conducta.aptitud` | `0` | `0,35` | Ventaja comparativa de oficios (ley DIV, solo cuando `thirst/hunger/fatigue ≤ 0,5`). |
-| `tecnologia.*` | `0 / 45 / false` | `evitarNoOp=true, dosisCuanto=50, enfriamiento=240` | Señal limpia de complejidad tecnológica acumulativa (`src/world/tecnologia-complejidad.ts`) sin microvariantes no-op redundantes. |
-| `motor.*` | `hilos=1, gpu=[], particionarPersonas=false, clonPorPaso=true` | `hostFullHardwareParams()` (`hilos=28, gpu=[0,1], soaTerreno=true, particionarPersonas=true, clonPorPaso=true`) | Detección automática de todos los hilos CPU y GPUs CUDA del anfitrión (`src/server/hardware-limits.ts`), con `ResidentTopologyOwner` vinculado en `src/server/main.ts` y precomputación paralela de movimiento BFS en workers (`empaquetarSoloMovimiento`). |
+| `poblacion.natalidadVecindad` | `false` | `true` | D2 (`natalidad-local.ts`): el cupo planetario (2 cada 120 pasos = 40/día) pasa a un cupo local por disco de vecindad, si el alimento medio caminable cumple `meanFood ≥ 0,08`. |
+| `poblacion.radioVecindadNatalidad` | `16` | `16` | Radio del disco, en celdas (`[4, 64]`). Colonias más allá de ese radio conciben en paralelo; el tope lo ponen el suelo local o `gobernador.politica=techo`. |
+| `social.maxComunidades` | `8` (hist.) / `64` (V14) | `0` | `[0, Number.MAX_SAFE_INTEGER]`. `0` = sin tope de conducta: `effectiveCommunityCap` usa solo la admisión de RAM (`limites.comunidades`). Con valor `> 0` sigue mandando la ley de fundación (T100). |
+| `conducta.politicaPeso` | `0` | `0,35` | Red local `12→8→12` (`politica.ts`, `Person.policy` / `policyPlasticity`), activación `softSign` (`x/(1+abs(x))`). Observa `R ≤ 4` teselas y `R ≤ 7` personas; el sesgo solo corre si `hunger` y `thirst ≤ 0,75`. Plasticidad Baldwin, no heredada en `reproduce()`. Lote FP64 con `Object.is` exacto entre CPU y Dual-GPU (`--fmad=false`, `politica-gpu.ts`). |
+| `conducta.aptitud` | `0` | `0,35` | Ventaja de oficios (DIV), solo con `thirst`, `hunger` y `fatigue ≤ 0,5`. |
+| `tecnologia.*` | `dosisCuanto=0`, `mejoraLocal=0`, `enfriamiento=45`, `evitarNoOp=false` | `evitarNoOp=true`, `dosisCuanto=50`, `enfriamiento=240` | Complejidad acumulativa (`tecnologia-complejidad.ts`), sin microvariantes no-op. `mejoraLocal` no cambia en el modo abierto. |
+| `motor.*` | `hilos=1`, `gpu=[]`, `particionarPersonas=false`, `clonPorPaso=true` | `hilos=28`, `gpu=[0,1]`, `soaTerreno=true`, `particionarPersonas=true`, `clonPorPaso=true` | `recommendedMotorForHost`: con ≥ 8 hilos de CPU reserva 4 (en la torre, 32 → 28) y toma todas las GPU CUDA. `ResidentTopologyOwner` en `main.ts`. `choose()` de fauna va a workers solo si `hilos > 1` y `due ≥ 384`; `move()` sigue en serie. El BFS de personas va a workers (`empaquetarSoloMovimiento`). |
 
-**Compatibilidad histórica (obligatoria).** Con `DEFAULT_PARAMS` y `HISTORICAL_PARAMS` todas las nuevas claves permanecen inactivas (`natalidadVecindad=false`, `politicaPeso=0`, `maxComunidades=8`), `assertWorld` rechaza `Person.policy`/`policyPlasticity` en mundos `< V12`, y las puertas de digestos históricos V10/V11 coinciden byte a byte tras normalizar las tres claves inactivas.
+**Compatibilidad histórica (obligatoria).** En los defaults esas claves siguen inactivas (`natalidadVecindad=false`, `politicaPeso=0`, `maxComunidades=8`). `assertWorld` rechaza `Person.policy` y `policyPlasticity` si el mundo es `< V12`. Los digestos V10/V11 coinciden byte a byte tras normalizar esas tres claves.
 
 ## Reglas 11 (2026-09-23)
 
@@ -474,7 +474,7 @@ claves desconocidas y elementos duplicados en las listas se rechazan.
 | `motor.clonPorPaso` | `true` | booleano; `true` reserva por clon en pasos con gestos (PERF3), `false` usa `puntoDeRestauracion` |
 | `motor.hilos` | `1` | entero de 1 a 512; con `> 1` activa `StaticWorkerPool` determinista para las dos pasadas de ecología (T115/T120) |
 | `motor.soaTerreno` | `false` | booleano; activa `TileStore` SoA con máscara de presencia para el kernel (T112) |
-| `motor.particionarPersonas` | `false` | booleano; reservado para Bloque E.1 (intención/confirmación simultánea, aún no adoptado; `RULES_VERSION` sigue en `11`) |
+| `motor.particionarPersonas` | `false` | booleano; con `true`, `precomputePersonasParallel` reparte el BFS antes de la confirmación, que sigue en serie. El Bloque E.1 no está adoptado. Default apagado (`RULES_VERSION = 12`) |
 | `motor.gpu` | `[]` | índices enteros seguros no negativos, únicos, sin consultar el hardware; con `COMPUTE_NVRTC` activa `ResidentGpuBridge` FP64 `--fmad=false` (T121–T125) |
 | `motor.orden` | `natural` | `natural`, `inverso`, `adversarial`; sólo altera el orden físico del despacho de regiones para pruebas de determinismo (T117), jamás las leyes |
 | `motor.depuracion` | `false` | booleano (T148); activa la guardia de solo lectura `withReadOnlyDecisionGuard` (`src/world/paralelo/guardia.ts`); diagnóstico puro, excluido de `digestoCanonico` |
@@ -782,12 +782,12 @@ el número de hilos, el tamaño de partición ni el throughput medido de una GPU
    de los *bindings*). Está **prohibido** usar `Atomics` para acumular valores FP64, resolver desempates
    o asignar identidades, así como realizar sumas en árbol.
 4. **Fases seriales y contrato futuro de personas (Bloque E.1).** Clima (`world.rng`), máscara global
-   de fauna (`ordenCanonico` + ventana rotatoria en coordinador, T116; el pase `move` de fauna es una
-   cadena secuencial y permanece serial), demografía, comunidades, reproducción, crónica, todos los
+   de fauna (`ordenCanonico` + ventana rotatoria en coordinador, T116; `choose` se reparte si `hilos > 1`
+   y `due ≥ 384`; `move` sigue en serie), demografía, comunidades, reproducción, crónica, todos los
    acumuladores FP64 (`world.totals`, `demographyDynamics`, `inventionDynamics`, `animalDynamics`,
    `technology.ledger`) y los nueve contadores de identidad permanecen en el hilo principal en orden
-   canónico de slot / `id.localeCompare`. Mientras `motor.particionarPersonas` siga en `false` (reglas
-   11 vigentes), las acciones de personas corren secuencialmente en orden de `world.people`; cuando se
+   canónico de slot / `id.localeCompare`. Mientras `motor.particionarPersonas` siga en `false` (default
+   de reglas 12), las acciones de personas corren secuencialmente en orden de `world.people`; cuando se
    adopte el Bloque E.1 (subiendo `RULES_VERSION` con evidencia propia), la confirmación aplicará
    intentos en orden total por contenido `(celda, slot)`, la migración en `(regiónDestino, slot)`, y
    las identidades por *stable sort* + *prefix-sum* sobre `(tick, fase, regionMorton, actorSlot, secuenciaLocal)`
@@ -801,7 +801,7 @@ antiguas sin perfil), T112/T115/T120/T122 (SoA, workers y puente GPU residente p
 de ecología), T135/T137 (`red.deltas` opt-in), T148 (`motor.depuracion`, fuera del digesto) y
 T161/T162 (`gobernador.senales`). El rango de un índice GPU en `motor.gpu` no acredita presencia física
 del dispositivo: la autoprueba verifica capacidad y paridad real al arrancar y cae a CPU sin `COMPUTE_NVRTC`.
-`motor.particionarPersonas` y `tecnologia.*` (Fase B) permanecen desactivados en los defaults (`RULES_VERSION = 11`).
+`motor.particionarPersonas` y `tecnologia.*` (Fase B) permanecen desactivados en los defaults (`RULES_VERSION = 12`).
 
 El formato `params-v1` sigue siendo legible: un snapshot anterior completa las claves nuevas
 con sus valores históricos (`HISTORICAL_PARAMS` desde reglas 10/11) y conserva sus overrides históricos.
@@ -811,7 +811,7 @@ diagnóstico `motor.depuracion` (T148): añadir configuración física cambia su
 físico sea igual. El control separado `scripts/verify-params-baseline.ts` compara estado completo,
 orden, aliases, `undefined` y bits numéricos frente a V7, sin debilitar ese digesto.
 
-Los defaults de esta tabla son los de un mundo NUEVO (`RULES_VERSION = 11`). Cinco claves (marcadas
+Los defaults de esta tabla son los de un mundo NUEVO (`RULES_VERSION = 12`). Cinco claves (marcadas
 «reglas 10») y cuatro claves de conflicto legible (marcadas «reglas 11») difieren del valor histórico
 con que se completa una instantánea que no nombra la clave (`HISTORICAL_PARAMS`); en todas las demás
 filas —incluidas las cuatro claves opt-in `tecnologia.*` de Fase B— default e histórico coinciden.

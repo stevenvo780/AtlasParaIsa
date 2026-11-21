@@ -10,6 +10,34 @@
 > sus runbooks y los bancos de un solo uso se retiraron de main y se conservan en el tag
 > `archivo/campanas-20260922`; las evidencias JSON que produjeron siguen en `docs/evidencia-2026-09-22/`.
 
+## 21 de noviembre de 2026 — Evolución abierta V15 (`RULES_VERSION = 12`) y sustrato multi-chip completo
+
+### Resistencia 30 días, mundo vivo Dual-GPU `[0,1]`
+
+Fuente: [`live-world-dual-gpu-30d-20261119.json`](evidencia-2026-11-19/live-world-dual-gpu-30d-20261119.json).
+
+- 72 000 ticks, 588 hab. finales, 49 408 teselas, 10 desalojos T163.
+- 3/3 recargas frías SQLite exactas; 30/30 días con paridad canónica exacta frente a CPU en serie (`kernel 0,099 ms`, `syncUploadedBytes: 0`).
+
+### Determinismo multi-chip completo sobre V12
+
+- `543/543` pruebas, `0` fallos: `375/375` CPU en Fedora y `168/168` CUDA `[0]`, `[1]`, `[0,1]` en la torre. Auditoría T171 y `halo-radios` en verde.
+
+### Aceleración multi-chip real
+
+- Política neuronal `12→8→12` residente en VRAM Dual-GPU `[0,1]` (pinned `/dev/shm`, `0` bytes de pesos/tick, `0` diffs `Object.is`): `P=4 000` en `0,67–0,81 ms` (`7,3×–9,0×`); `P=20 000` en `3,76–4,71 ms` (`13,3×`).
+- Banco concurrente ecología + política Dual-GPU `[0,1]` ([`dual-gpu-mundo-vivo-20261121.json`](evidencia-2026-11-19/dual-gpu-mundo-vivo-20261121.json)): `4,19 M` celdas + `50 000` actores en `18,18 ms` mediana (`0` diffs en ambos).
+- Subida incremental de páginas GPU al activar chunks (`puente.ts`): `4,1×` más rápido y `761×` menos bytes en `1 024` páginas (`26,64 → 6,47 ms`, `47,8 MiB → 62,8 KiB`).
+- `fauna` `choose()` con 28 workers: `6,5×` de extremo a extremo, `6 650` decisiones exactas. `ResidentTileReader` SoA: `1,5×–1,9×`. `personas` `perceivedRoutes` 15×15 + `move()` con 28 workers: `5,1×–5,7×`, `864 000` celdas exactas.
+
+### Ablación biológica pura, sin gobernador
+
+25 días × 8 semillas × 4 brazos = 32 réplicas; 8/8 supervivencia en los 4 brazos.
+
+- `V12_NOGOV` superó la meseta de 665 hab.: `1 034` hab. y `36` comunidades en `seed=2002` (`2×` los `512` de V11); `683` hab. en `51926` (frente a `549`); `592` en `2004` (frente a `383`); deshidratación `5×` menor en `2005` (`22` frente a `108`).
+- `NAT_ONLY` llegó a `1 134` hab. y `76` comunidades en `51926`.
+- Campaña larga de 60 días, `gov=off`, en curso en Fedora: `V12` salvó `seed=2003` (V11 se extinguió el día 42; V12 sobrevivió 60 días, 18 generaciones, `bDiv +26 %`); cruzó `1 591` hab. / `118` com. (`51926`, día 30) y `1 640` hab. / `32` com. (`2002`, día 29); colapso ecológico real en `2005` (pico `249` el día 30 → día 54).
+
 ## 19 de noviembre de 2026 — estabilización V14 (Fase A), evaluación preregistrada Fase B (8 semillas × 60 días), GPU 32 M celdas (T122) y escala de red 10k (T138)
 
 Fuentes archivadas en [`docs/evidencia-2026-11-19/`](evidencia-2026-11-19/publication-v14.json):

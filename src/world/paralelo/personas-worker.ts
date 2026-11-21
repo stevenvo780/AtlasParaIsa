@@ -26,6 +26,8 @@ import type { StaticRegion } from './particion.js';
 import type { StaticWorkerHandlerJob } from './piscina.js';
 
 export const RADIO_PERCEPCION = 7;
+export const LADO_PERCEPCION = 2 * RADIO_PERCEPCION + 1;
+export const CELDAS_PERCEPCION = LADO_PERCEPCION * LADO_PERCEPCION;
 export const MOVE_MAX_EXTRACCIONES = 2048;
 export const MOVE_RADIO_CHEBYSHEV = 24;
 export const LADO_PAGINA = 16;
@@ -77,7 +79,7 @@ export const INTENTO_NINGUNO = 0, INTENTO_COMER = 1, INTENTO_COSECHAR = 2, INTEN
 /** Nombres de los SAB del despacho. */
 export const BUFFERS_PERSONAS = [
   'paginasX', 'paginasY', 'paginasSlot', 'celdaFlags', 'celdaComida', 'celdaAgua', 'celdaAguaPotable', 'celdaMadera', 'celdaPiedra',
-  'celdaTerreno', 'celdaBioma', 'personasF64', 'personasI32', 'ordenSlots', 'salidaI32', 'salidaF64',
+  'celdaTerreno', 'celdaBioma', 'personasF64', 'personasI32', 'ordenSlots', 'salidaI32', 'salidaF64', 'salidaRutas',
 ] as const;
 export type BuffersPersonas = Record<typeof BUFFERS_PERSONAS[number], SharedArrayBuffer>;
 
@@ -89,6 +91,8 @@ export interface ParamsFaseBPersonas {
   lluvia: boolean;
   memoriaDisputa: number;
   disputaDestino: number;
+  /** Bucle real: solo BFS invariantes; cuerpo, stocks y selección se confirman en serie. */
+  soloRutasYMovimiento?: boolean;
 }
 
 /** Vistas tipadas sobre los SAB. Se reconstruyen por llamada (coste despreciable). */
@@ -97,6 +101,7 @@ export interface VistaPersonas {
   flags: Uint8Array; comida: Float64Array; agua: Float64Array; aguaPotable: Float64Array; madera: Float64Array; piedra: Float64Array;
   terreno: Uint8Array; bioma: Uint8Array;
   pf: Float64Array; pi: Int32Array; orden: Int32Array; si: Int32Array; sf: Float64Array;
+  rutas: Int16Array;
   params: ParamsFaseBPersonas;
 }
 
@@ -107,7 +112,8 @@ export function crearVista(buffers: Readonly<Record<string, SharedArrayBuffer>>,
     aguaPotable: new Float64Array(buffers.celdaAguaPotable!), madera: new Float64Array(buffers.celdaMadera!), piedra: new Float64Array(buffers.celdaPiedra!),
     terreno: new Uint8Array(buffers.celdaTerreno!), bioma: new Uint8Array(buffers.celdaBioma!),
     pf: new Float64Array(buffers.personasF64!), pi: new Int32Array(buffers.personasI32!), orden: new Int32Array(buffers.ordenSlots!),
-    si: new Int32Array(buffers.salidaI32!), sf: new Float64Array(buffers.salidaF64!), params,
+    si: new Int32Array(buffers.salidaI32!), sf: new Float64Array(buffers.salidaF64!),
+    rutas: new Int16Array(buffers.salidaRutas!), params,
   };
 }
 
@@ -162,8 +168,8 @@ function celdaVentana(vista: VistaPersonas, x: number, y: number): number {
 const DX = [1, 0, -1, 0], DY = [0, 1, 0, -1];
 
 // Rutas percibidas: rejilla local (2R+1)² con pasos (−1 = sin ruta).
-const LADO_R = 2 * RADIO_PERCEPCION + 1;
-const rutaPasos = new Int32Array(LADO_R * LADO_R);
+const LADO_R = LADO_PERCEPCION;
+const rutaPasos = new Int16Array(CELDAS_PERCEPCION);
 const rutaTierra = new Int32Array(LADO_R * LADO_R); // celda global si es tierra percibida, −1 si no
 const rutaCola = new Int32Array(LADO_R * LADO_R);
 /** Teselas cercanas (`nearbyTiles`) en su orden de `choose`: índice local en la rejilla. */
@@ -271,8 +277,28 @@ const cuerpo: BodyState = { hunger: 0, thirst: 0, fatigue: 0, energy: 0 };
 const tasas: BodyRates = { hunger: 0, thirst: 0, energy: 0.00007, stressEnergy: 0.00015, fatigue: 0 };
 const paso: PasoMovimiento = { estado: MOVE_SIN_EVALUAR, x: 0, y: 0 };
 
+/** Cada actor es dueño de sus 225 celdas; no crea Map ni copia stocks mutables. */
+function precomputarRutasYMovimiento(vista: VistaPersonas, slot: number): void {
+  const { pf, pi, si, params } = vista, cap = params.capPersonas;
+  const px = pf[PF.x * cap + slot]!, py = pf[PF.y * cap + slot]!;
+  const inicio = slot * CELDAS_PERCEPCION;
+  let rutas = 0;
+  if (pi[PI.needsDecision * cap + slot]) {
+    rutas = calcularRutas(vista, px, py);
+    vista.rutas.set(rutaPasos, inicio);
+  } else vista.rutas.fill(-1, inicio, inicio + CELDAS_PERCEPCION);
+  si[SI.routeSteps * cap + slot] = rutas;
+  paso.estado = MOVE_SIN_EVALUAR; paso.x = px; paso.y = py;
+  if (pi[PI.shouldMove * cap + slot]) {
+    pasoMovimiento(vista, px, py, pf[PF.targetX * cap + slot]!, pf[PF.targetY * cap + slot]!, paso);
+  }
+  si[SI.moveStatus * cap + slot] = paso.estado;
+  si[SI.nextX * cap + slot] = paso.x; si[SI.nextY * cap + slot] = paso.y;
+}
+
 /** Fase B completa de un actor: escribe solo su fila de salida. */
 export function faseBPersona(vista: VistaPersonas, slot: number): void {
+  if (vista.params.soloRutasYMovimiento) { precomputarRutasYMovimiento(vista, slot); return; }
   const { pf, pi, si, sf, params } = vista, cap = params.capPersonas;
   const col = (c: number): number => c * cap + slot;
   const px = pf[col(PF.x)]!, py = pf[col(PF.y)]!, tx = pf[col(PF.targetX)]!, ty = pf[col(PF.targetY)]!;
@@ -296,6 +322,7 @@ export function faseBPersona(vista: VistaPersonas, slot: number): void {
   let found = 0, foodLocal = -1, waterLocal = -1, resourceLocal = -1, routeSteps = 0;
   if (pi[col(PI.needsDecision)]) {
     routeSteps = calcularRutas(vista, px, py);
+    vista.rutas.set(rutaPasos, slot * CELDAS_PERCEPCION);
     const R = RADIO_PERCEPCION, energy = cuerpo.energy, fatigue = cuerpo.fatigue;
     const payload = pf[col(PF.payload)]!, resilience = pf[col(PF.resilience)]!;
     const planAffordable = (steps: number, work: number): boolean => energy >= steps * (.0008 + payload * .0008) + work * .0003
@@ -337,6 +364,7 @@ export function faseBPersona(vista: VistaPersonas, slot: number): void {
     si[SI.stepsFood * cap + slot] = foodLocal < 0 ? -1 : rutaPasos[foodLocal]!;
     si[SI.stepsWater * cap + slot] = waterLocal < 0 ? -1 : rutaPasos[waterLocal]!;
   } else {
+    vista.rutas.fill(-1, slot * CELDAS_PERCEPCION, (slot + 1) * CELDAS_PERCEPCION);
     si[SI.bestFoodX * cap + slot] = 0; si[SI.bestFoodY * cap + slot] = 0; si[SI.bestWaterX * cap + slot] = 0;
     si[SI.bestWaterY * cap + slot] = 0; si[SI.bestResourceX * cap + slot] = 0; si[SI.bestResourceY * cap + slot] = 0;
     si[SI.stepsFood * cap + slot] = -1; si[SI.stepsWater * cap + slot] = -1;

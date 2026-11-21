@@ -99,7 +99,7 @@ const ll = (fichero: string, funcion: string, llama: string, centro: string, pat
 
 export const RAICES: readonly Raiz[] = [
   { fase: 'decision', fichero: 'index.ts', funcion: 'choose',
-    llamador: { fichero: 'index.ts', funcion: 'bodyAndAction', patrones: ["(person.thirst > 0.9 && person.action !== 'drink'))) choose(world, person, policyScores);"] },
+    llamador: { fichero: 'index.ts', funcion: 'bodyAndAction', patrones: ["(person.thirst > 0.9 && person.action !== 'drink'))) choose(world, person, policyScores, precomputedMoves, slot);"] },
     seleccion: ['accion.destino', 'accion.aqui'],
     nota: 'Quién decide lo resuelve `bodyAndAction` en la cadena serial: su turno (`decisionAt`) y el disparador de destino agotado, que lee la tesela y el agua de su destino propio (`accion.destino`: hasta 4 096 celdas con una orden). Al repartir `choose`, ese disparador se evalúa antes y fuera del halo. `choose` tampoco es de solo lectura hoy: al decidir por un recuerdo de S e I escribe un evento de crónica (id global, `addEvent`), y resolver recetas toca el LRU del catálogo (`ESTADO_GLOBAL.technology`). El halo acota lo que se lee; esas escrituras las ordena la confirmación (E.1), y este inventario no las recorre.' },
   { fase: 'fauna', fichero: 'animals.ts', funcion: 'choose',

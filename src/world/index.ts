@@ -3,6 +3,7 @@ import type { Action, ChronicleEvent, Gesture, GestureResult, MemoryView, Person
 import { activate, bindWorldContext, maintainRegions, tileAt, validCoordinate, worldContext, type ChunkMeta, type WorldContext as SpatialWorldContext } from './spatial.js';
 import type { EcologyExecution } from './ecosystem-kernel.js';
 import { tileLookup } from './tile-index.js';
+import { residentTileReader } from './soa/terreno.js';
 import { gpuNvrtcAvailable } from './gpu/puente.js';
 import { primero, primeroConFiltroCaro } from './orden.js';
 import { chunkKey, generateChunk, proceduralPlaceName, legacyStructures, type Chunk } from './terrain.js';
@@ -21,7 +22,7 @@ import { POPULATION_HARD_LIMIT } from '../shared/life.js';
 import type { TechnologyKnowledge, TechnologyState } from '../shared/technology.js';
 import type { DemographicState, LegacyRecord } from '../shared/demography.js';
 import { defaultTechnologyState, initialTechnologyKnowledge, technologyOpportunity, researchTechnology, craftTechnology, assertTechnology, useTool, recordTechnologyBenefit, settleTechnologyEstate, cancelTechnologyProject, maintainTechnologyMemory } from './technology.js';
-import { catalogueEnabled, resolveTechnologyRecipe, withArchiveReadBatch } from './technology-catalogue.js';
+import { catalogueEnabled, resolveTechnologyRecipe, withArchiveReadBatch, withRecipeSession } from './technology-catalogue.js';
 import { initialDemography, demographicTraits, updateDemography } from './demography.js';
 import { reproductiveReadiness, familyOpportunity, availableToShare, closeKin, chooseReproductivePartner, pairAffinity, pairTie, earlierForagerExhausts, observedForagersByCell } from './family.js';
 import { advancePopulation, assertLegacyRecord, assertPopulation } from './lineage.js';
@@ -36,7 +37,7 @@ import {
   founderPolicy, inheritPolicy, initialPolicyPlasticity, POLICY_ACTIONS, POLICY_INPUTS, POLICY_WEIGHTS,
   policyActionBias, updatePolicyPlasticity, type PolicyGenome, type PolicyPlasticity,
 } from './politica.js';
-import { cellIntKey, cellKeyX, cellKeyY, computeLocalPolicyObservation } from './politica-obs.js';
+import { cellIntKey, computeLocalPolicyObservation } from './politica-obs.js';
 import { evaluatePoliciesBatch, evaluatePoliciesResidentBatch } from './gpu/politica-gpu.js';
 import {
   MOVE_AVANZA, MOVE_BLOQUEADO, MOVE_EN_DESTINO,
@@ -397,31 +398,34 @@ function perceivedRoutes(person: Person, tiles: Tile[]): (point: Point) => numbe
 }
 
 function perceivedRouteInts(person: Person, tiles: Tile[]): ((point: Point) => number | undefined) | undefined {
-  const land = new Set<number>();
-  for (let i = 0; i < tiles.length; i++) {
-    const key = cellIntKey(tiles[i]!.x, tiles[i]!.y);
-    if (key === undefined) return undefined;
-    land.add(key);
+  if (cellIntKey(person.x, person.y) === undefined) return undefined;
+  const side = 2 * RADIUS + 1, originX = person.x - RADIUS, originY = person.y - RADIUS;
+  const steps = new Int16Array(side * side).fill(-2);
+  for (const tile of tiles) {
+    if (cellIntKey(tile.x, tile.y) === undefined) return undefined;
+    const x = tile.x - originX, y = tile.y - originY;
+    if (x < 0 || x >= side || y < 0 || y >= side) return undefined;
+    steps[y * side + x] = -1;
   }
-  const origin = cellIntKey(person.x, person.y);
-  if (origin === undefined) return undefined;
-  const steps = new Map<number, number>([[origin, 0]]);
-  const queue = [origin];
-  for (let i = 0; i < queue.length; i++) {
-    const key = queue[i]!;
-    const x = cellKeyX(key), y = cellKeyY(key), n = steps.get(key)! + 1;
-    let next = cellIntKey(x + 1, y);
-    if (next !== undefined && land.has(next) && !steps.has(next)) { steps.set(next, n); queue.push(next); }
-    next = cellIntKey(x, y + 1);
-    if (next !== undefined && land.has(next) && !steps.has(next)) { steps.set(next, n); queue.push(next); }
-    next = cellIntKey(x - 1, y);
-    if (next !== undefined && land.has(next) && !steps.has(next)) { steps.set(next, n); queue.push(next); }
-    next = cellIntKey(x, y - 1);
-    if (next !== undefined && land.has(next) && !steps.has(next)) { steps.set(next, n); queue.push(next); }
+  const origin = RADIUS * side + RADIUS, queue = new Int16Array(steps.length);
+  steps[origin] = 0; queue[0] = origin;
+  let tail = 1;
+  for (let head = 0; head < tail; head++) {
+    const cell = queue[head]!, x = cell % side, y = Math.floor(cell / side), n = steps[cell]! + 1;
+    let next = cell + 1;
+    if (x + 1 < side && steps[next] === -1) { steps[next] = n; queue[tail++] = next; }
+    next = cell + side;
+    if (y + 1 < side && steps[next] === -1) { steps[next] = n; queue[tail++] = next; }
+    next = cell - 1;
+    if (x > 0 && steps[next] === -1) { steps[next] = n; queue[tail++] = next; }
+    next = cell - side;
+    if (y > 0 && steps[next] === -1) { steps[next] = n; queue[tail++] = next; }
   }
   return point => {
-    const key = cellIntKey(point.x, point.y);
-    return key === undefined ? undefined : steps.get(key);
+    const x = point.x - originX, y = point.y - originY;
+    if (!Number.isSafeInteger(point.x) || !Number.isSafeInteger(point.y) || x < 0 || x >= side || y < 0 || y >= side) return undefined;
+    const n = steps[y * side + x]!;
+    return n < 0 ? undefined : n;
   };
 }
 
@@ -545,17 +549,24 @@ function precomputePolicyScores(world: World): Map<string, Float64Array> | undef
 
 function choose(world: World, person: Person, policyScores?: Map<string, Float64Array>, precomputed?: PrecomputedMoves, slot?: number): void {
   const nearbyTiles: Tile[] = [];
+  const tileIn = tileLookup(world.tiles), reader = residentTileReader(world.tiles);
   for (let dy = -RADIUS; dy <= RADIUS; dy++) for (let dx = -RADIUS; dx <= RADIUS; dx++) {
     if (dx * dx + dy * dy > RADIUS * RADIUS) continue;
-    const tile = tileAt(world, { x: person.x + dx, y: person.y + dy }); if (tile && tile.terrain !== 'water') nearbyTiles.push(tile);
+    const x = person.x + dx, y = person.y + dy;
+    if (reader) {
+      const cell = reader.cellAt(x, y);
+      if (cell >= 0 && reader.terrainCode(cell) !== reader.TERRAIN_WATER) nearbyTiles.push(tileIn(x, y)!);
+    } else {
+      const tile = tileIn(x, y); if (tile && tile.terrain !== 'water') nearbyTiles.push(tile);
+    }
   }
   const stepsTo = precomputedRouteLookup(person, precomputed, slot) ?? perceivedRoutes(person, nearbyTiles);
   const reachableTiles = nearbyTiles.filter(t => stepsTo(t) !== undefined), payload = containedWaterQuanta(person) / 1000;
   // A nominal effort budget for planning; the bodily law itself still saturates
   // readiness at zero. It is not a new physical prohibition or a future guarantee.
   const plannedEffort = (steps: number, work: number) => ({
-    energy: steps * (.0008 + payload * .0008) + workEffort(person, work).energy,
-    fatigue: steps * (.0007 * (1.2 - person.traits.resilience * .4) + payload * .0007) + workEffort(person, work).fatigue,
+    energy: steps * (.0008 + payload * .0008) + work * .0003,
+    fatigue: steps * (.0007 * (1.2 - person.traits.resilience * .4) + payload * .0007) + work * .00025 * (1.2 - person.traits.resilience * .4),
   });
   const planAffordable = (steps: number, work: number) => person.energy >= steps * (.0008 + payload * .0008) + work * .0003
     && person.fatigue + steps * (.0007 * (1.2 - person.traits.resilience * .4) + payload * .0007) + work * .00025 * (1.2 - person.traits.resilience * .4) < 1;
@@ -1069,21 +1080,35 @@ function move(world: World, person: Person, precomputed?: PrecomputedMoves, slot
     }
   }
   if (!blocked && nextStep === null) {
-    const queue: Point[] = [start], previous = new Map<string, Point | null>([[key(start), null]]);
+    const routeKey = (x: number, y: number) => cellIntKey(x, y) ?? `${x},${y}`;
+    const tileIn = tileLookup(world.tiles), reader = residentTileReader(world.tiles);
+    const queue: Point[] = [start], previous = new Map<number | string, Point | null>([[routeKey(start.x, start.y), null]]);
     let best = start, head = 0;
     // Bounded local BFS takes one physical step toward even a distant order.
     while (head < queue.length && head < 2048) {
       const current = queue[head++]!;
       if (distance(current, person.target) < distance(best, person.target)) best = current;
       if (distance(current, person.target) < 0.5) { best = current; break; }
-      for (const next of [{ x: current.x + 1, y: current.y }, { x: current.x, y: current.y + 1 }, { x: current.x - 1, y: current.y }, { x: current.x, y: current.y - 1 }]) {
-        if (Math.max(Math.abs(next.x - start.x), Math.abs(next.y - start.y)) > 24 || !walkable(world, next) || previous.has(key(next))) continue;
-        previous.set(key(next), current); queue.push(next);
+      for (let direction = 0; direction < 4; direction++) {
+        const x = direction === 0 ? current.x + 1 : direction === 2 ? current.x - 1 : current.x;
+        const y = direction === 1 ? current.y + 1 : direction === 3 ? current.y - 1 : current.y;
+        if (Math.max(Math.abs(x - start.x), Math.abs(y - start.y)) > 24) continue;
+        if (reader) {
+          const cell = reader.cellAt(x, y);
+          if (cell < 0 || reader.terrainCode(cell) === reader.TERRAIN_WATER) continue;
+        } else {
+          const tile = tileIn(x, y);
+          if (!tile || tile.terrain === 'water') continue;
+        }
+        const nextKey = routeKey(x, y);
+        if (previous.has(nextKey)) continue;
+        const next = { x, y };
+        previous.set(nextKey, current); queue.push(next);
       }
     }
     if (best === start) blocked = true;
     else {
-      while (previous.get(key(best)) !== start) best = previous.get(key(best))!;
+      while (previous.get(routeKey(best.x, best.y)) !== start) best = previous.get(routeKey(best.x, best.y))!;
       nextStep = best;
     }
   }
@@ -1180,8 +1205,8 @@ function bodyAndAction(world: World, person: Person, precomputedMoves?: Precompu
   const blockedCarriedWater = person.action === 'drink' && distance(person, person.target) < 0.5
     && containedWaterQuanta(person) > 0 && !canHandleContainedWater(person, world.tick) && waterAvailable(world, person) <= 0;
   const agreedWait = person.action === 'retreat' && person.lastDispute >= 0 && world.tick < person.decisionAt && world.tick - person.lastDispute < 30;
-  if (!agreedWait && (world.tick >= person.decisionAt || emptyFood || emptyHarvest || emptyWater || blockedCarriedWater || (person.hunger > 0.9 && !['eat','hunt'].includes(person.action)) || (person.thirst > 0.9 && person.action !== 'drink'))) choose(world, person, policyScores, precomputedMoves, slot);
-  if (['eat','drink','hunt'].includes(person.action)) resourceDispute(world, person, event => addEvent(world, event));
+  if (!agreedWait && (world.tick >= person.decisionAt || emptyFood || emptyHarvest || emptyWater || blockedCarriedWater || (person.hunger > 0.9 && person.action !== 'eat' && person.action !== 'hunt') || (person.thirst > 0.9 && person.action !== 'drink'))) choose(world, person, policyScores, precomputedMoves, slot);
+  if (person.action === 'eat' || person.action === 'drink' || person.action === 'hunt') resourceDispute(world, person, event => addEvent(world, event));
   if (world.tick % 6 === 0 && !(person.action === 'accompany' && distance(person, person.target) <= 1.5)) move(world, person, precomputedMoves, slot);
   const current = tileAt(world, person)!;
   if (person.action === 'eat') {
@@ -1423,7 +1448,7 @@ function advanceTick(world: World, inputs: Gesture[], context: WorldContext, med
     { decaimientoFertilidad: paramsOf(world).recursos.decaimientoFertilidad, seed: world.seed, cuencas: paramsOf(world).agua.cuencas, soaTerreno: paramsOf(world).motor.soaTerreno, hilos: paramsOf(world).motor.hilos,
       gpu: paramsOf(world).motor.gpu, orden: paramsOf(world).motor.orden, ...context.ecologyExecution }));
   medirFase(medicion, 'fauna', () => { stepAnimals(world,event=>addEvent(world,event)); stepStructures(world,event=>addEvent(world,event)); });
-  medirFase(medicion, 'personas', () => {
+  medirFase(medicion, 'personas', () => withRecipeSession(world, () => {
     const motor = paramsOf(world).motor;
     const precomputedMoves = motor.particionarPersonas
       ? precomputePersonasParallel(world, motor, context.personasExecution)
@@ -1438,7 +1463,7 @@ function advanceTick(world: World, inputs: Gesture[], context: WorldContext, med
         remember(person, world, 'Un nuevo territorio amplió los caminos posibles.', event.id);
       }
     }
-  });
+  }));
   medirFase(medicion, 'encuentros', () => { encounters(world); convivir(world); });
   medirFase(medicion, 'demografia', () => advancePopulation(world,{emit:event=>addEvent(world,event.kind==='death'?deathContext(world,event):event),beforeDeath:transferEstate}));
   medirFase(medicion, 'comunidades', () => updateCommunities(world, event => addEvent(world, event)));

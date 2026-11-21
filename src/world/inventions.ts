@@ -28,12 +28,31 @@ const COSTS: Record<StructureComponent, BlueprintView['cost']> = {
 };
 const clamp = (value: number, maximum = 1) => Math.max(0, Math.min(maximum, value));
 const distance = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y);
-const counts = (components: readonly StructureComponent[]) => Object.fromEntries(COMPONENTS.map(component => [component, components.filter(c => c === component).length])) as Record<StructureComponent, number>;
+function counts(components: readonly StructureComponent[]): Record<StructureComponent, number> {
+  const result = { frame: 0, roof: 0, cistern: 0, granary: 0, garden: 0, hearth: 0 };
+  for (const component of components) {
+    switch (component) {
+      case 'frame': result.frame++; break;
+      case 'roof': result.roof++; break;
+      case 'cistern': result.cistern++; break;
+      case 'granary': result.granary++; break;
+      case 'garden': result.garden++; break;
+      case 'hearth': result.hearth++; break;
+    }
+  }
+  return result;
+}
 const canonical = (components: readonly StructureComponent[]) => COMPONENTS.flatMap(component => components.filter(c => c === component));
-export const blueprintSignature = (components: readonly StructureComponent[]): string => COMPONENTS.map(component => components.filter(c => c === component).length).join(':');
+export const blueprintSignature = (components: readonly StructureComponent[]): string => {
+  const n = counts(components);
+  return `${n.frame}:${n.roof}:${n.cistern}:${n.granary}:${n.garden}:${n.hearth}`;
+};
 
 export function blueprintCost(components: readonly StructureComponent[]): BlueprintView['cost'] {
-  return components.reduce((cost, component) => ({ wood: cost.wood + COSTS[component].wood, stone: cost.stone + COSTS[component].stone, work: cost.work + COSTS[component].work }), { wood: 0, stone: 0, work: 0 });
+  return components.reduce((cost, component) => {
+    cost.wood += COSTS[component].wood; cost.stone += COSTS[component].stone; cost.work += COSTS[component].work;
+    return cost;
+  }, { wood: 0, stone: 0, work: 0 });
 }
 
 /** A roof needs a frame; enclosed storage needs a roof; gardens need captured water.
@@ -178,19 +197,21 @@ function localMaterials(world: World, person: Person): Person['materials'] {
   return materials;
 }
 
-function usefulRepairs(world: World, person: Person) {
-  const context = constructionContext(world, person), before = serviceValue(localServices(world, person), context);
+function usefulRepairs(world: World, person: Person, context?: ReturnType<typeof constructionContext>) {
   // Negación literal del `return []` de siempre: una condición/distancia NaN no debe excluir aquí lo
   // que el bucle de abajo (también insensible a NaN por `while (condition < LIMIT)`) habría procesado.
-  return filtrarCerca(world.structures, person, CONSTRUCTION_RADIUS + 1, structure => !(structure.condition >= REPAIR_CONDITION_LIMIT
-    || distance(person, structure) > CONSTRUCTION_RADIUS || tileAt(world, structure)?.terrain !== 'shelter')).flatMap(structure => {
+  const structures = filtrarCerca(world.structures, person, CONSTRUCTION_RADIUS + 1, structure => !(structure.condition >= REPAIR_CONDITION_LIMIT
+    || distance(person, structure) > CONSTRUCTION_RADIUS || tileAt(world, structure)?.terrain !== 'shelter'));
+  if (!structures.length) return [];
+  const perceived = context ?? constructionContext(world, person), before = serviceValue(localServices(world, person), perceived);
+  return structures.flatMap(structure => {
     // Evaluate each physically legal paid prefix. A broken roof can need several
     // steps before it helps; a last top-up with no extra service earns no benefit.
     let condition = structure.condition, steps = 0;
     const options: { structure: StructureView; gain: number; steps: number; efficiency: number }[] = [];
     while (condition < REPAIR_CONDITION_LIMIT) {
       condition = clamp(condition + 0.4); steps++;
-      const gain = serviceValue(localServices(world, person, { structure, condition }, undefined, Math.max(0, person.materials.wood - steps)), context) - before;
+      const gain = serviceValue(localServices(world, person, { structure, condition }, undefined, Math.max(0, person.materials.wood - steps)), perceived) - before;
       if (gain >= MIN_SERVICE_GAIN) options.push({ structure, gain, steps, efficiency: gain / (steps * (1 + REPAIR_WORK / 30)) });
     }
     return options;
@@ -209,7 +230,7 @@ export function constructionOpportunity(world: World, person: Person): { score: 
   const gain = serviceValue(localServices(world, person, undefined, blueprint.components, Math.max(0, person.materials.wood - cost.wood)), context) - before;
   const expense = normalizedCost(cost), baseExpense = normalizedCost(defaultBlueprint().cost);
   if (gain < MIN_SERVICE_GAIN * expense / baseExpense) return;
-  const repair = usefulRepairs(world, person).find(option => materials.wood >= option.steps);
+  const repair = usefulRepairs(world, person, context).find(option => materials.wood >= option.steps);
   if (repair && repair.efficiency >= gain / expense) return;
   return { score: 0.35 + person.traits.industriousness * 0.2 + Math.min(0.55, gain) - expense * 0.005,
     reason: 'El plano aporta una función adicional frente a las instalaciones que percibe; fabricarlo exige materiales y trabajo.' };
@@ -219,16 +240,17 @@ export interface InventionContext { water: number; food: number; rest: number; r
 /** Perceived local deficits, not global resource omniscience or invented weather history.
  * rainPotential is explicitly a soil/biome prior; only actual rain can fill a built cistern. */
 export function inventionContext(world: World, person: Person): InventionContext {
-  const nearby: Tile[] = [];
+  let count = 0, moisture = 0, food = 0, wood = 0, reserve = 0;
   for (let dy = -4; dy <= 4; dy++) for (let dx = -4; dx <= 4; dx++) {
     if (dx * dx + dy * dy > 16) continue;
     const tile = tileAt(world, { x: person.x + dx, y: person.y + dy });
-    if (tile && tile.terrain !== 'water') nearby.push(tile);
+    if (tile && tile.terrain !== 'water') {
+      count++; moisture += tile.moisture; food += tile.food; wood += tile.wood ?? 0;
+      reserve = Math.max(reserve, tile.drinkingWater ?? 0);
+    }
   }
-  const average = (get: (tile: Tile) => number) => nearby.reduce((sum, tile) => sum + get(tile), 0) / Math.max(1, nearby.length);
-  const moisture = average(tile => tile.moisture), food = average(tile => tile.food);
+  moisture /= Math.max(1, count); food /= Math.max(1, count); wood /= Math.max(1, count);
   const portable = vecinos(world, person, 5, p => distance(person, p) <= 4).reduce((sum, p) => sum + Math.max(0, p.inventory - 0.08), 0);
-  const reserve = Math.max(0, ...nearby.map(tile => tile.drinkingWater ?? 0));
   const roofs = filtrarCerca(world.structures, person, 5, s => distance(person, s) <= 4 && s.condition > BROKEN_CONDITION && tileAt(world, s)?.terrain === 'shelter');
   const quality = Math.max(0, ...roofs.map(s => blueprintAffordances(s.components).restQuality * s.condition));
   return { water: clamp(0.65 * (1 - clamp(reserve * 5)) + person.thirst * 0.35),
@@ -237,7 +259,7 @@ export function inventionContext(world: World, person: Person): InventionContext
     rainPotential: world.weather === 'rain' ? 1 : clamp(0.15 + moisture * 0.55),
     foodSurplus: clamp(portable * 2 + food * 2), moisture,
     cold: world.weather === 'rain' || world.tick % 2400 >= 1800 ? 1 : 0.15,
-    fuel: clamp((person.materials.wood + average(tile => tile.wood ?? 0)) / 4) };
+    fuel: clamp((person.materials.wood + wood) / 4) };
 }
 
 /** Cultural parents must be known through ownership, nearby built examples, or trusted contacts. */
@@ -268,9 +290,14 @@ export interface InventionCandidate { components: StructureComponent[]; parents:
 /** Exactly twelve bounded proposals, including meaningful multi-component edits; invalid children
  * are rejected rather than silently repaired into a different claimed genotype. */
 export function inventionCandidates(world: World, person: Person): InventionCandidate[] {
-  const context = inventionContext(world, person), known = knownBlueprints(world, person);
+  return candidatesFromKnown(world, person, inventionContext(world, person), knownBlueprints(world, person));
+}
+
+function candidatesFromKnown(world: World, person: Person, context: InventionContext, known: BlueprintView[]): InventionCandidate[] {
   if (!known.length) known.push(defaultBlueprint());
-  known.sort((a, b) => expectedValue(b.components, context) + b.usefulness * 0.1 - expectedValue(a.components, context) - a.usefulness * 0.1 || a.id.localeCompare(b.id));
+  const values = new Map(known.map(b => [b, expectedValue(b.components, context)]));
+  // Keep the original left-associative subtraction, including its rounding at ties.
+  known.sort((a, b) => values.get(b)! + b.usefulness * 0.1 - values.get(a)! - a.usefulness * 0.1 || a.id.localeCompare(b.id));
   const random = localRandom(world.seed, `research:${person.id}:${world.tick}`), raw: { components: StructureComponent[]; parents: string[] }[] = [];
   const base = known.find(b => b.id === 'blueprint-base') ?? known[0]!;
   const push = (components: StructureComponent[], parents: string[]) => raw.push({ components: canonical(components), parents: [...new Set(parents)] });
@@ -312,9 +339,9 @@ export function paretoCandidates(candidates: readonly InventionCandidate[]): Inv
     && (other.value > candidate.value || other.efficiency > candidate.efficiency || other.novelty > candidate.novelty)));
 }
 
-function chooseInvention(world: World, person: Person): InventionCandidate | undefined {
-  const context = inventionContext(world, person), candidates = paretoCandidates(inventionCandidates(world, person));
-  const bestKnown = Math.max(0, ...knownBlueprints(world, person).map(b => expectedValue(b.components, context)));
+function chooseInvention(world: World, person: Person, context = inventionContext(world, person)): InventionCandidate | undefined {
+  const known = knownBlueprints(world, person), candidates = paretoCandidates(candidatesFromKnown(world, person, context, known));
+  const bestKnown = Math.max(0, ...known.map(b => expectedValue(b.components, context)));
   const useful = candidates.filter(candidate => candidate.value > Math.max(0.035, bestKnown * 1.02));
   const valueScale = Math.max(0.001, ...useful.map(c => c.value)), efficiencyScale = Math.max(0.001, ...useful.map(c => c.efficiency));
   const score = (candidate: InventionCandidate) => candidate.value / valueScale * 0.76 + candidate.efficiency / efficiencyScale * 0.16 + candidate.novelty * 0.08;
@@ -330,7 +357,7 @@ export function inventionOpportunity(world: World, person: Person): { score: num
     || world.tick - (person.lastInvention ?? -RESEARCH_COOLDOWN) < RESEARCH_COOLDOWN
     || person.energy < 0.45 || Math.max(person.hunger, person.thirst, person.fatigue) > 0.72) return;
   const context = inventionContext(world, person), need = Math.max(context.water, context.food, context.rest);
-  if (need < 0.35 || !chooseInvention(world, person)) return;
+  if (need < 0.35 || !chooseInvention(world, person, context)) return;
   return { target: { x: person.x, y: person.y }, score: 0.4 + person.curiosity * 0.25 + expertise(person) * 0.18 + need * 0.22,
     reason: 'Su práctica y una carencia local motivan ensayar otra combinación; el intento cuesta madera y trabajo.' };
 }
@@ -471,8 +498,10 @@ export function recordFacilityRest(world: World, person: Person, before?: Pick<P
 
 export function repairOpportunity(world: World, person: Person): StructureView | undefined {
   if (person.materials.wood < 1) return;
+  const options = usefulRepairs(world, person);
+  if (!options.length) return;
   const materials = localMaterials(world, person);
-  return usefulRepairs(world, person).find(option => materials.wood >= option.steps)?.structure;
+  return options.find(option => materials.wood >= option.steps)?.structure;
 }
 export function repair(world: World, person: Person, structure: StructureView, emit: Emit): boolean {
   if (!world.structures.includes(structure) || structure.condition >= REPAIR_CONDITION_LIMIT || distance(person, structure) > 1.5 || person.materials.wood < 1 || person.work < REPAIR_WORK) return false;
@@ -513,7 +542,8 @@ export function stepStructures(world: World, _emit: Emit): void {
   if (world.tick % 60 === 0 && world.learningEnabled) for (const person of world.people) {
     const context = inventionContext(world, person), current = selectedBlueprint(world, person);
     const value = (b: BlueprintView) => expectedValue(b.components, context) + b.usefulness * 0.12;
-    const observed = knownBlueprints(world, person).sort((a, b) => value(b) - value(a) || a.id.localeCompare(b.id))[0];
-    if (observed && observed.id !== current.id && value(observed) > value(current) + 0.025 && person.action !== 'build') person.blueprintId = observed.id;
+    const observed = knownBlueprints(world, person).map(blueprint => ({ blueprint, value: value(blueprint) }))
+      .sort((a, b) => b.value - a.value || a.blueprint.id.localeCompare(b.blueprint.id))[0];
+    if (observed && observed.blueprint.id !== current.id && observed.value > value(current) + 0.025 && person.action !== 'build') person.blueprintId = observed.blueprint.id;
   }
 }

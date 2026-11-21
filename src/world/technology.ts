@@ -78,10 +78,12 @@ export function maintainTechnologyMemory(host: TechnologyHost, actor: Technology
 }
 function knownTechnologyRecipes(host: TechnologyHost, actor: TechnologyActor, cache = true): TechnologyRecipe[] {
   // The archive resolves only identities already held locally; its cache is not knowledge.
-  return actor.technology.knownRecipes.flatMap(id => {
+  const known: TechnologyRecipe[] = [];
+  actor.technology.knownRecipes.forEach(id => {
     const recipe = resolveTechnologyRecipe(host, id, { cache });
-    return recipe ? [recipe] : [];
+    if (recipe) known.push(recipe);
   });
+  return known;
 }
 function inventionRoom(state: TechnologyState): boolean {
   return state.recipeCounter < Number.MAX_SAFE_INTEGER && (catalogueEnabled(state) || state.recipes.length < state.budgets.maxRecipes);
@@ -258,7 +260,7 @@ export function toolCapacities(actor: TechnologyActor): Record<Capability, numbe
 /** Lo mismo que `toolCapacities` de un actor con esos objetos, sin construir el actor (sprint noche-perf2:
  * los llamadores copiaban la persona entera sólo para cambiarle el inventario). */
 export function itemCapacities(items: readonly MaterialBatch[]): Record<Capability, number> {
-  const result = Object.fromEntries(CAPABILITIES.map(c => [c, 0])) as Record<Capability, number>;
+  const result = { cutting: 0, storage: 0, insulation: 0, cultivation: 0, binding: 0, abrasion: 0 };
   for (const item of items) { const powers = materialCapacities(item); for (const c of CAPABILITIES) result[c] = Math.max(result[c], powers[c]); }
   return result;
 }
@@ -482,7 +484,7 @@ export function technologyOpportunity(host: TechnologyHost, actor: TechnologyAct
   const tech = techParams(host);
   if (host.tick - actor.technology.lastAttempt < tech.enfriamiento) return;
   const stabilized = tech.mejoraLocal > 0 || tech.enfriamiento > 45;
-  const craft = known.filter(r => planWithdrawal(host, actor, r.program) && CAPABILITIES.some(c => r.capacities[c] > Math.max(0.12, powers[c] * 1.35))).sort((a, b) => (actor.technology.competence[b.id]?.benefit ?? 0) - (actor.technology.competence[a.id]?.benefit ?? 0) || (actor.technology.competence[b.id]?.successes ?? 0) - (actor.technology.competence[a.id]?.successes ?? 0) || a.id.localeCompare(b.id))[0];
+  const craft = known.find(r => CAPABILITIES.some(c => r.capacities[c] > Math.max(0.12, powers[c] * 1.35)) && planWithdrawal(host, actor, r.program));
   if (craft && actor.technology.items.length < host.technology.budgets.maxItems && (stabilized || actor.technology.attempts % 3 !== 0)) return { kind: 'craft', recipeId: craft.id, score: 0.58, reason: 'Puede reproducir una técnica aprendida para recuperar una capacidad material.' };
   if (host.noveltyEnabled === false || !inventionRoom(host.technology) || !localInputs(host, actor).length) return;
   let score = 0.35 + (actor.curiosity ?? 0.5) * 0.3 + (actor.skills.technology ?? 0) * 0.08;

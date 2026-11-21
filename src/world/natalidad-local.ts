@@ -35,8 +35,6 @@ const RADIO_MUESTREO_MAXIMO = 4;
 /** La misma confianza mutua que ya exige `reproduce`. No es un umbral ecológico nuevo. */
 const CONFIANZA_MUTUA_MINIMA = 0.3;
 
-export type Place = PlaceView;
-
 export interface LocalBirthConfig {
   radioVecindad: number;
   cupoLocalPorVentana: number;
@@ -51,7 +49,7 @@ export interface LocalBirthConfig {
 export interface LocalBirthPair {
   a: Person;
   b: Person;
-  place: Place;
+  place: PlaceView;
   affinity: number;
 }
 

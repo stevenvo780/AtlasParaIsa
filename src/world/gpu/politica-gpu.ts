@@ -88,9 +88,9 @@ ready.then(()=>signal(),async e=>{await stop(true); signal(e); parentPort.close(
 async function sendViews(header, views) {
   const raw=Buffer.from(JSON.stringify(header)), prefix=Buffer.allocUnsafe(4); prefix.writeUInt32LE(raw.length);
   const parts=[Buffer.concat([prefix, raw]), ...views.filter(v=>v.length>0)];
-  let last;
-  for(const p of parts) last=new Promise((resolve,reject)=>child.stdin.write(p,e=>e?reject(e):resolve()));
-  await last;
+  // Every write is awaited: a broken pipe fails all of them, and an unobserved
+  // rejection would kill this worker before it can signal (host waits timeoutMs).
+  await Promise.all(parts.map(p=>new Promise((resolve,reject)=>child.stdin.write(p,e=>e?reject(e):resolve()))));
 }
 parentPort.on('message',async job=>{
   try {

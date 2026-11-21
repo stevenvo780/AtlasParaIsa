@@ -35,8 +35,7 @@
  * T171: aquí no hay relojes, ni consulta de la máquina, ni azar del proceso. Las medidas de tiempo
  * las toma `piscina.ts`; con `hilos = 1` sólo se mide si quien llama inyecta `reloj`.
  *
- * Este módulo no está cableado en `stepAnimals` (`animals.ts` no se toca en esta tarea): es el motor
- * verificado bit a bit que un cableado posterior podrá usar.
+ * Cableado en `stepAnimals` (`animals.ts`) a partir del umbral de animales debidos de allí.
  */
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -45,12 +44,13 @@ import type { Animal, AnimalMemory } from '../animals.js';
 import { residentTopologyToken, sameResidentTopology, type ResidentTopologyToken } from '../soa/topologia.js';
 import { MAX_COORDINATE } from '../terrain.js';
 import { partitionRegions, type StaticRegion, type StaticRegionOrder } from './particion.js';
+import { buscarPagina, CELDAS_POR_PAGINA, clavePagina, crecerCapacidad, llenarTablaPaginas, siguientePotencia } from './paginas.js';
 import { calcularOcupacionWorkers, StaticWorkerPool, type StaticWorkerDiagnostics } from './piscina.js';
 import {
-  ACCIONES_FAUNA, CELDAS_POR_PAGINA, CELDA_AGUA, CELDA_CRECIMIENTO, CELDA_OCEANO, CELDA_PRESENTE, CELDA_REFUGIO,
+  ACCIONES_FAUNA, CELDA_AGUA, CELDA_CRECIMIENTO, CELDA_OCEANO, CELDA_PRESENTE, CELDA_REFUGIO,
   DESTINO_PRESA, DESTINO_PROPIO, DESTINO_RECUERDO, DESTINO_TESELA, DF, DI,
   MAX_MEMORIA_ANIMAL, MEMORIA_TTL, MF, NDF, NDI, NMF, NSO, NTF, NTI, RAZONES_FAUNA, SO, TF, TI,
-  buscarPagina, celdaDe, codigoEspecie, crearVistaFauna, ejecutarRegionesFauna, hashPagina, paginable,
+  celdaDe, codigoEspecie, crearVistaFauna, ejecutarRegionesFauna, paginable,
   type BuffersFauna, type ParamsFauna, type VistaFauna,
 } from './fauna-worker.js';
 
@@ -80,17 +80,13 @@ export interface SalidasFauna {
   readonly tiles: readonly Tile[];
 }
 
-const siguientePotencia = (n: number): number => { let p = 1; while (p < n) p *= 2; return p; };
-/** Páginas en [-2^21, 2^21) (coordenadas paginables / 16): la clave cabe en 2^44. */
-const clavePagina = (px: number, py: number): number => (px + 0x200000) * 0x400000 + (py + 0x200000);
-const crecerCap = (actual: number, necesario: number): number => necesario > actual ? Math.max(necesario, actual * 2) : actual;
 const sab = (bytes: number): SharedArrayBuffer => new SharedArrayBuffer(Math.max(8, bytes));
 
 /** Clave de celda de `animals.ts` (`cellXY`): entero único dentro del dominio, cadena `"x,y"` fuera. */
 const CELL_SPAN = 2 * MAX_COORDINATE;
 const cellXY = (x: number, y: number): number | string => Number.isInteger(x) && Number.isInteger(y) && x >= -MAX_COORDINATE && x < MAX_COORDINATE
   && y >= -MAX_COORDINATE && y < MAX_COORDINATE ? (x + MAX_COORDINATE) * CELL_SPAN + (y + MAX_COORDINATE) : `${x},${y}`;
-/** Coordenadas de una clave de `state.occupants`/`state.counts` (inversa de `cellXY`), o `null`. */
+/** Coordenadas de una clave de `state.occupants`/`state.counts` (inversa de `cellXY`); `false` si no es una clave válida. */
 function coordenadasDeClave(clave: number | string, salida: { x: number; y: number }): boolean {
   if (typeof clave === 'number') {
     if (!Number.isSafeInteger(clave) || clave < 0) return false;
@@ -208,15 +204,9 @@ export class EstadoFaunaCompartido {
       celdas[i] = slot * CELDAS_POR_PAGINA + ((tile.y & 15) << 4) + (tile.x & 15);
     }
     const paginas = pagX.length, capHash = siguientePotencia(Math.max(2, paginas * 2));
-    if (paginas > this.#capPaginas || capHash > this.#capHash) this.#asignarTerreno(crecerCap(this.#capPaginas, paginas), Math.max(capHash, this.#capHash));
+    if (paginas > this.#capPaginas || capHash > this.#capHash) this.#asignarTerreno(crecerCapacidad(this.#capPaginas, paginas), Math.max(capHash, this.#capHash));
     const b = this.#buffers;
-    const paginasSlot = new Int32Array(b.paginasSlot), paginasX = new Int32Array(b.paginasX), paginasY = new Int32Array(b.paginasY);
-    paginasSlot.fill(-1, 0, capHash);
-    for (let slot = 0; slot < paginas; slot++) {
-      let h = hashPagina(pagX[slot]!, pagY[slot]!, capHash - 1);
-      while (paginasSlot[h]! >= 0) h = (h + 1) & (capHash - 1);
-      paginasX[h] = pagX[slot]!; paginasY[h] = pagY[slot]!; paginasSlot[h] = slot;
-    }
+    llenarTablaPaginas({ paginasSlot: new Int32Array(b.paginasSlot), paginasX: new Int32Array(b.paginasX), paginasY: new Int32Array(b.paginasY) }, pagX, pagY, capHash);
     const flags = new Uint8Array(b.celdaFlags), tesela = new Int32Array(b.celdaTesela);
     flags.fill(0, 0, paginas * CELDAS_POR_PAGINA); tesela.fill(-1, 0, paginas * CELDAS_POR_PAGINA);
     // La última tesela con esas coordenadas gana, como `tileLookup`.
@@ -320,8 +310,8 @@ export class EstadoFaunaCompartido {
     let memoriaMax = MAX_MEMORIA_ANIMAL, caracteres = 0;
     for (const a of due) { if (a.memory.length > memoriaMax) memoriaMax = a.memory.length; caracteres += a.id.length; }
     if (filas > this.#capTabla || due.length > this.#capDue || memoriaMax > this.#capMemoria || caracteres > this.#capId) {
-      this.#asignarAnimales(crecerCap(this.#capTabla, filas), crecerCap(this.#capDue, due.length),
-        crecerCap(this.#capMemoria, memoriaMax), crecerCap(this.#capId, caracteres));
+      this.#asignarAnimales(crecerCapacidad(this.#capTabla, filas), crecerCapacidad(this.#capDue, due.length),
+        crecerCapacidad(this.#capMemoria, memoriaMax), crecerCapacidad(this.#capId, caracteres));
     }
     this.#params = {
       capTabla: this.#capTabla, capDue: this.#capDue, due: due.length, capMemoria: this.#capMemoria,

@@ -29,17 +29,19 @@ import { TICKS_PER_DAY, type Person, type World } from '../index.js';
 import { demographicTraits } from '../demography.js';
 import { waterAvailable } from '../inventions.js';
 import { paramsOf } from '../params.js';
+import { residentTileReader } from '../soa/terreno.js';
 import { residentTerrainRevision, residentTopologyToken, sameResidentTopology, type ResidentTopologyToken } from '../soa/topologia.js';
 import { containedWaterQuanta } from '../technology-water.js';
 import { emptyAggregateBooks, reduceAggregates, type AggregateBooks, type Intent as IntentAgregado, type ReductionCost } from './agregados.js';
 import { partitionRegions, type StaticRegion, type StaticRegionOrder } from './particion.js';
+import { CELDAS_POR_PAGINA, clavePagina, crecerCapacidad, llenarTablaPaginas, siguientePotencia } from './paginas.js';
 import { calcularOcupacionWorkers, StaticWorkerPool, type StaticWorkerDiagnostics } from './piscina.js';
 import { confirmarIntentos, type Intent, type ResultadoConfirmacion } from './reduccion.js';
 import {
   ACCION, BIOMAS, CELDAS_PERCEPCION, LADO_PERCEPCION, RADIO_PERCEPCION,
-  CELDAS_POR_PAGINA, CELDA_CAMINABLE, CELDA_DESIERTO, CELDA_PRESENTE, CELDA_REFUGIO,
+  CELDA_CAMINABLE, CELDA_DESIERTO, CELDA_PRESENTE, CELDA_REFUGIO,
   INTENTO_BEBER, INTENTO_COMER, INTENTO_COSECHAR, INTENTO_MADERA, INTENTO_NINGUNO, INTENTO_PIEDRA,
-  NPF, NPI, NSF, NSI, PF, PI, SF, SI, TERRENOS, celdaDe, crearVista, ejecutarRegionesPersonas, hashPagina,
+  NPF, NPI, NSF, NSI, PF, PI, SF, SI, TERRENOS, celdaDe, crearVista, ejecutarRegionesPersonas,
   type BuffersPersonas, type ParamsFaseBPersonas, type VistaPersonas,
 } from './personas-worker.js';
 
@@ -86,9 +88,6 @@ export interface EscenaPersonas {
   /** Agua percibida (`waterAvailable`); por defecto `drinkingWater ?? 0`. */
   aguaPercibida?: (tile: TeselaEntrada) => number;
 }
-
-const siguientePotencia = (n: number): number => { let p = 1; while (p < n) p *= 2; return p; };
-const clavePagina = (px: number, py: number): number => (px + 0x100000) * 0x200000 + (py + 0x100000);
 
 /**
  * Estado empaquetado reutilizable entre pasos. Los SAB solo se reasignan cuando la escena no cabe
@@ -139,43 +138,70 @@ export class EstadoPersonasCompartido {
     this.#walkCache = null;
   }
 
-  /** Vuelca la escena en los SAB y reparte los actores por regiones Morton. */
-  empaquetar(escena: EscenaPersonas, opciones: { regionSide?: RegionSidePersonas; bloque?: number } = {}): void {
-    this.#walkCache = null;
-    const regionSide = opciones.regionSide ?? 256, bloque = opciones.bloque ?? BLOQUE_ACTORES;
-    if (regionSide !== 256 && regionSide !== 512) throw new RangeError('regionSide debe ser 256 o 512.');
-    if (!Number.isSafeInteger(bloque) || bloque < 1) throw new RangeError('bloque debe ser un entero positivo.');
-    const { tiles, personas } = escena;
+  #crearVista(personas: number, capHash: number, escena?: EscenaPersonas): VistaPersonas {
+    return crearVista(this.#buffers, {
+      capPersonas: this.#capPersonas, personas, hashMask: capHash - 1,
+      lluvia: escena?.lluvia ?? false, memoriaDisputa: escena?.memoriaDisputa ?? 0, disputaDestino: escena?.disputaDestino ?? 0,
+    });
+  }
 
-    // Páginas en orden de primera aparición (determinista).
-    const paginaDe = new Map<number, number>();
-    const pagX: number[] = [], pagY: number[] = [];
-    for (const tile of tiles) {
-      if (!Number.isSafeInteger(tile.x) || !Number.isSafeInteger(tile.y)) throw new TypeError('Tesela con coordenadas no enteras.');
+  /** Páginas de `tiles` en orden de primera aparición (determinista): reserva capacidad, llena la
+   * tabla hash y limpia las banderas de celda. */
+  #paginar(tiles: readonly { x: number; y: number }[], personas: number, validar: boolean, escena?: EscenaPersonas) {
+    const paginaDe = new Map<number, number>(), pagX: number[] = [], pagY: number[] = [];
+    for (let i = 0; i < tiles.length; i++) {
+      const tile = tiles[i]!;
+      if (validar && (!Number.isSafeInteger(tile.x) || !Number.isSafeInteger(tile.y))) throw new TypeError('Tesela con coordenadas no enteras.');
       const px = tile.x >> 4, py = tile.y >> 4, clave = clavePagina(px, py);
       if (!paginaDe.has(clave)) { paginaDe.set(clave, pagX.length); pagX.push(px); pagY.push(py); }
     }
     const paginas = pagX.length, capHash = siguientePotencia(Math.max(2, paginas * 2));
-    if (paginas > this.#capPaginas || capHash > this.#capHash || personas.length > this.#capPersonas) {
-      const crecer = (actual: number, necesario: number): number => necesario > actual ? Math.max(necesario, actual * 2) : actual;
-      this.#asignar(crecer(this.#capPaginas, paginas), Math.max(capHash, this.#capHash), crecer(this.#capPersonas, personas.length));
+    if (paginas > this.#capPaginas || capHash > this.#capHash || personas > this.#capPersonas) {
+      this.#asignar(crecerCapacidad(this.#capPaginas, paginas), Math.max(capHash, this.#capHash), crecerCapacidad(this.#capPersonas, personas));
     }
-    const vista = crearVista(this.#buffers, {
-      capPersonas: this.#capPersonas, personas: personas.length, hashMask: capHash - 1,
-      lluvia: escena.lluvia ?? false, memoriaDisputa: escena.memoriaDisputa ?? 0, disputaDestino: escena.disputaDestino ?? 0,
-    });
+    const vista = this.#crearVista(personas, capHash, escena);
+    llenarTablaPaginas(vista, pagX, pagY, capHash);
+    vista.flags.fill(0, 0, paginas * CELDAS_POR_PAGINA);
+    return { vista, paginaDe, paginas, capHash };
+  }
 
-    // Tabla hash de páginas.
-    vista.paginasSlot.fill(-1, 0, capHash);
-    for (let slot = 0; slot < paginas; slot++) {
-      let h = hashPagina(pagX[slot]!, pagY[slot]!, capHash - 1);
-      while (vista.paginasSlot[h]! >= 0) h = (h + 1) & (capHash - 1);
-      vista.paginasX[h] = pagX[slot]!; vista.paginasY[h] = pagY[slot]!; vista.paginasSlot[h] = slot;
+  /** Partición Morton: actores ordenados por (morton de su región, actorSlot); cada región se trocea en
+   * bloques de `bloque` actores. Los ids de bloque son ordinales: `partitionRegions` reparte colas
+   * contiguas en orden Morton, sin robo de trabajo. Cierra el empaquetado. */
+  #repartir(vista: VistaPersonas, personas: readonly { x: number; y: number }[], regionSide: RegionSidePersonas, bloque: number, paginas: number): void {
+    const cap = this.#capPersonas, mortonDe = new Map<number, bigint>();
+    const claves: { morton: bigint; slot: number }[] = new Array(personas.length);
+    for (let slot = 0; slot < personas.length; slot++) {
+      const p = personas[slot]!;
+      const rx = Math.floor(p.x / regionSide), ry = Math.floor(p.y / regionSide), clave = clavePagina(rx, ry);
+      let morton = mortonDe.get(clave);
+      if (morton === undefined) { morton = mortonCode(rx, ry); mortonDe.set(clave, morton); }
+      claves[slot] = { morton, slot };
     }
+    claves.sort((a, b) => a.morton < b.morton ? -1 : a.morton > b.morton ? 1 : a.slot - b.slot);
+    const regiones: StaticRegion[] = [];
+    let regionMorton = -1, inicio = 0;
+    for (let i = 0; i <= claves.length; i++) {
+      const nueva = i === claves.length || i === 0 || claves[i]!.morton !== claves[i - 1]!.morton;
+      if (i > 0 && (nueva || i - inicio === bloque)) { regiones.push({ id: regiones.length, begin: inicio, end: i }); inicio = i; }
+      if (i === claves.length) break;
+      if (nueva) regionMorton++;
+      vista.orden[i] = claves[i]!.slot;
+      vista.pi[PI.regionId * cap + claves[i]!.slot] = regionMorton;
+    }
+    this.#paginas = paginas; this.#personas = personas.length; this.#regiones = regiones;
+    this.#regionesMorton = regionMorton + 1; this.#regionSide = regionSide;
+    this.#params = vista.params;
+  }
+
+  /** Vuelca la escena en los SAB y reparte los actores por regiones Morton. */
+  empaquetar(escena: EscenaPersonas, opciones: { regionSide?: RegionSidePersonas; bloque?: number } = {}): void {
+    this.#walkCache = null;
+    const { regionSide, bloque } = opcionesReparto(opciones);
+    const { tiles, personas } = escena;
+    const { vista, paginaDe, paginas } = this.#paginar(tiles, personas.length, true, escena);
 
     // Celdas: la última tesela de una coordenada gana, como `tileAt`/`lastTileAt`.
-    const celdas = paginas * CELDAS_POR_PAGINA;
-    vista.flags.fill(0, 0, celdas);
     const percibida = escena.aguaPercibida;
     for (const tile of tiles) {
       const slot = paginaDe.get(clavePagina(tile.x >> 4, tile.y >> 4))!;
@@ -214,34 +240,7 @@ export class EstadoPersonasCompartido {
       vista.pi[PI.shouldMove * cap + slot] = p.shouldMove ? 1 : 0;
       vista.pi[PI.disputaActiva * cap + slot] = p.disputa ? 1 : 0;
     }
-
-    // Partición Morton: actores ordenados por (morton de su región, actorSlot); cada región se
-    // trocea en bloques de `bloque` actores. Los ids de bloque son ordinales: `partitionRegions`
-    // reparte colas contiguas en orden Morton, sin robo de trabajo.
-    const mortonDe = new Map<number, bigint>();
-    const claves: { morton: bigint; slot: number }[] = new Array(personas.length);
-    for (let slot = 0; slot < personas.length; slot++) {
-      const p = personas[slot]!;
-      const rx = Math.floor(p.x / regionSide), ry = Math.floor(p.y / regionSide), clave = clavePagina(rx, ry);
-      let morton = mortonDe.get(clave);
-      if (morton === undefined) { morton = mortonCode(rx, ry); mortonDe.set(clave, morton); }
-      claves[slot] = { morton, slot };
-    }
-    claves.sort((a, b) => a.morton < b.morton ? -1 : a.morton > b.morton ? 1 : a.slot - b.slot);
-    const regiones: StaticRegion[] = [];
-    let regionMorton = -1, inicio = 0;
-    for (let i = 0; i <= claves.length; i++) {
-      const nueva = i === claves.length || i === 0 || claves[i]!.morton !== claves[i - 1]!.morton;
-      if (i > 0 && (nueva || i - inicio === bloque)) { regiones.push({ id: regiones.length, begin: inicio, end: i }); inicio = i; }
-      if (i === claves.length) break;
-      if (nueva) regionMorton++;
-      vista.orden[i] = claves[i]!.slot;
-      vista.pi[PI.regionId * cap + claves[i]!.slot] = regionMorton;
-    }
-
-    this.#paginas = paginas; this.#personas = personas.length; this.#regiones = regiones;
-    this.#regionesMorton = regionMorton + 1; this.#regionSide = regionSide;
-    this.#params = vista.params;
+    this.#repartir(vista, personas, regionSide, bloque, paginas);
   }
 
   /**
@@ -254,61 +253,35 @@ export class EstadoPersonasCompartido {
   empaquetarSoloMovimiento(world: World, opciones: {
     regionSide?: RegionSidePersonas; bloque?: number; movimiento?: boolean; decisiones?: Uint8Array;
   } = {}): void {
-    const regionSide = opciones.regionSide ?? 256, bloque = opciones.bloque ?? BLOQUE_ACTORES;
-    if (regionSide !== 256 && regionSide !== 512) throw new RangeError('regionSide debe ser 256 o 512.');
-    if (!Number.isSafeInteger(bloque) || bloque < 1) throw new RangeError('bloque debe ser un entero positivo.');
+    const { regionSide, bloque } = opcionesReparto(opciones);
     const tiles = world.tiles, personas = world.people;
     const token = residentTopologyToken(tiles);
     const terrainRev = token ? residentTerrainRevision(tiles) : undefined;
     const cache = this.#walkCache;
-    let paginas: number, capHash: number, vista: VistaPersonas;
+    let paginas: number, vista: VistaPersonas;
     if (cache && cache.tiles === tiles && cache.length === tiles.length
       && sameResidentTopology(cache.token, token) && cache.terrainRev === terrainRev
       && personas.length <= this.#capPersonas) {
       paginas = cache.paginas;
-      capHash = cache.capHash;
-      vista = crearVista(this.#buffers, {
-        capPersonas: this.#capPersonas, personas: personas.length, hashMask: capHash - 1,
-        lluvia: false, memoriaDisputa: 0, disputaDestino: 0,
-      });
+      vista = this.#crearVista(personas.length, cache.capHash);
     } else {
-      const paginaDe = new Map<number, number>();
-      const pagX: number[] = [], pagY: number[] = [];
+      const paginado = this.#paginar(tiles, personas.length, false);
+      paginas = paginado.paginas; vista = paginado.vista;
+      // Terreno residente: el código se lee del SoA (sin el getter por tesela); `cellAt` < 0 no ocurre
+      // con el lector válido, pero se conserva el getter como respaldo exacto.
+      const lector = token ? residentTileReader(tiles) : undefined;
       for (let i = 0; i < tiles.length; i++) {
-        const tile = tiles[i]!;
-        const px = tile.x >> 4, py = tile.y >> 4, clave = clavePagina(px, py);
-        if (!paginaDe.has(clave)) { paginaDe.set(clave, pagX.length); pagX.push(px); pagY.push(py); }
+        const tile = tiles[i]!, x = tile.x, y = tile.y;
+        const slot = paginado.paginaDe.get(clavePagina(x >> 4, y >> 4))!;
+        const celda = slot * CELDAS_POR_PAGINA + ((y & 15) << 4) + (x & 15);
+        const residente = lector ? lector.cellAt(x, y) : -1;
+        const caminable = residente >= 0 ? lector!.terrainCode(residente) !== lector!.TERRAIN_WATER : tile.terrain !== 'water';
+        vista.flags[celda] = CELDA_PRESENTE | (caminable ? CELDA_CAMINABLE : 0);
       }
-      paginas = pagX.length;
-      capHash = siguientePotencia(Math.max(2, paginas * 2));
-      if (paginas > this.#capPaginas || capHash > this.#capHash || personas.length > this.#capPersonas) {
-        const crecer = (actual: number, necesario: number): number => necesario > actual ? Math.max(necesario, actual * 2) : actual;
-        this.#asignar(crecer(this.#capPaginas, paginas), Math.max(capHash, this.#capHash), crecer(this.#capPersonas, personas.length));
-      }
-      vista = crearVista(this.#buffers, {
-        capPersonas: this.#capPersonas, personas: personas.length, hashMask: capHash - 1,
-        lluvia: false, memoriaDisputa: 0, disputaDestino: 0,
-      });
-      vista.paginasSlot.fill(-1, 0, capHash);
-      for (let slot = 0; slot < paginas; slot++) {
-        let h = hashPagina(pagX[slot]!, pagY[slot]!, capHash - 1);
-        while (vista.paginasSlot[h]! >= 0) h = (h + 1) & (capHash - 1);
-        vista.paginasX[h] = pagX[slot]!; vista.paginasY[h] = pagY[slot]!; vista.paginasSlot[h] = slot;
-      }
-      const celdas = paginas * CELDAS_POR_PAGINA;
-      vista.flags.fill(0, 0, celdas);
-      for (let i = 0; i < tiles.length; i++) {
-        const tile = tiles[i]!;
-        const slot = paginaDe.get(clavePagina(tile.x >> 4, tile.y >> 4))!;
-        const celda = slot * CELDAS_POR_PAGINA + ((tile.y & 15) << 4) + (tile.x & 15);
-        vista.flags[celda] = CELDA_PRESENTE | (tile.terrain !== 'water' ? CELDA_CAMINABLE : 0);
-      }
-      this.#walkCache = token && terrainRev ? { tiles, length: tiles.length, token, terrainRev, paginas, capHash } : null;
+      this.#walkCache = token && terrainRev ? { tiles, length: tiles.length, token, terrainRev, paginas, capHash: paginado.capHash } : null;
     }
     const cap = this.#capPersonas;
     vista.params.soloRutasYMovimiento = true;
-    const mortonDe = new Map<number, bigint>();
-    const claves: { morton: bigint; slot: number }[] = new Array(personas.length);
     for (let slot = 0; slot < personas.length; slot++) {
       const p = personas[slot]!;
       vista.pf[PF.x * cap + slot] = p.x;
@@ -327,26 +300,16 @@ export class EstadoPersonasCompartido {
       vista.pi[PI.shouldMove * cap + slot] = opciones.movimiento !== false
         && !(p.action === 'accompany' && Math.hypot(p.x - p.target.x, p.y - p.target.y) <= 1.5) ? 1 : 0;
       vista.pi[PI.disputaActiva * cap + slot] = 0;
-      const rx = Math.floor(p.x / regionSide), ry = Math.floor(p.y / regionSide), clave = clavePagina(rx, ry);
-      let morton = mortonDe.get(clave);
-      if (morton === undefined) { morton = mortonCode(rx, ry); mortonDe.set(clave, morton); }
-      claves[slot] = { morton, slot };
     }
-    claves.sort((a, b) => a.morton < b.morton ? -1 : a.morton > b.morton ? 1 : a.slot - b.slot);
-    const regiones: StaticRegion[] = [];
-    let regionMorton = -1, inicio = 0;
-    for (let i = 0; i <= claves.length; i++) {
-      const nueva = i === claves.length || i === 0 || claves[i]!.morton !== claves[i - 1]!.morton;
-      if (i > 0 && (nueva || i - inicio === bloque)) { regiones.push({ id: regiones.length, begin: inicio, end: i }); inicio = i; }
-      if (i === claves.length) break;
-      if (nueva) regionMorton++;
-      vista.orden[i] = claves[i]!.slot;
-      vista.pi[PI.regionId * cap + claves[i]!.slot] = regionMorton;
-    }
-    this.#paginas = paginas; this.#personas = personas.length; this.#regiones = regiones;
-    this.#regionesMorton = regionMorton + 1; this.#regionSide = regionSide;
-    this.#params = vista.params;
+    this.#repartir(vista, personas, regionSide, bloque, paginas);
   }
+}
+
+function opcionesReparto(opciones: { regionSide?: RegionSidePersonas; bloque?: number }): { regionSide: RegionSidePersonas; bloque: number } {
+  const regionSide = opciones.regionSide ?? 256, bloque = opciones.bloque ?? BLOQUE_ACTORES;
+  if (regionSide !== 256 && regionSide !== 512) throw new RangeError('regionSide debe ser 256 o 512.');
+  if (!Number.isSafeInteger(bloque) || bloque < 1) throw new RangeError('bloque debe ser un entero positivo.');
+  return { regionSide, bloque };
 }
 
 /** Escena de la fase `personas` a partir de un mundo real (solo lectura). */
@@ -681,6 +644,8 @@ function despacharRutasYMovimiento(
 export async function closePersonasParallelPools(): Promise<void> {
   const pools = [...poolsPersonas.values()];
   poolsPersonas.clear();
+  // El estado retiene `world.tiles` en su caché de caminabilidad y SAB del tamaño del último mundo.
+  estadoMovimientoCompartido = null;
   await Promise.all(pools.map(pool => pool.close()));
 }
 

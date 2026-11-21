@@ -43,7 +43,7 @@ import { cellIntKey, cellKeyX, cellKeyY, computeLocalPolicyObservation } from '.
 import { closePolicyGpuBatchers, evaluatePoliciesBatch } from './gpu/politica-gpu.js';
 import {
   closePersonasParallelPools, MOVE_AVANZA, MOVE_BLOQUEADO, MOVE_EN_DESTINO, MOVE_SIN_EVALUAR,
-  precomputeMovesParallel, SI, type PersonasExecution, type PrecomputedMoves,
+  precomputePersonasParallel, precomputedRouteLookup, SI, type PersonasExecution, type PrecomputedMoves,
 } from './paralelo/personas-motor.js';
 import { ALIMENTO_MEDIO_MINIMO_NATALIDAD, selectLocalBirthPairs } from './natalidad-local.js';
 export { bindWorldContext, tileAt, normalizeViewport, worldContext } from './spatial.js';
@@ -526,13 +526,13 @@ function precomputePolicyScores(world: World): Map<string, Float64Array> | undef
   return byId;
 }
 
-function choose(world: World, person: Person, policyScores?: Map<string, Float64Array>): void {
+function choose(world: World, person: Person, policyScores?: Map<string, Float64Array>, precomputed?: PrecomputedMoves, slot?: number): void {
   const nearbyTiles: Tile[] = [];
   for (let dy = -RADIUS; dy <= RADIUS; dy++) for (let dx = -RADIUS; dx <= RADIUS; dx++) {
     if (dx * dx + dy * dy > RADIUS * RADIUS) continue;
     const tile = tileAt(world, { x: person.x + dx, y: person.y + dy }); if (tile && tile.terrain !== 'water') nearbyTiles.push(tile);
   }
-  const stepsTo = perceivedRoutes(person, nearbyTiles);
+  const stepsTo = precomputedRouteLookup(person, precomputed, slot) ?? perceivedRoutes(person, nearbyTiles);
   const reachableTiles = nearbyTiles.filter(t => stepsTo(t) !== undefined), payload = containedWaterQuanta(person) / 1000;
   // A nominal effort budget for planning; the bodily law itself still saturates
   // readiness at zero. It is not a new physical prohibition or a future guarantee.
@@ -1168,7 +1168,7 @@ function bodyAndAction(world: World, person: Person, precomputedMoves?: Precompu
   const blockedCarriedWater = person.action === 'drink' && distance(person, person.target) < 0.5
     && containedWaterQuanta(person) > 0 && !canHandleContainedWater(person, world.tick) && waterAvailable(world, person) <= 0;
   const agreedWait = person.action === 'retreat' && person.lastDispute >= 0 && world.tick < person.decisionAt && world.tick - person.lastDispute < 30;
-  if (!agreedWait && (world.tick >= person.decisionAt || emptyFood || emptyHarvest || emptyWater || blockedCarriedWater || (person.hunger > 0.9 && !['eat','hunt'].includes(person.action)) || (person.thirst > 0.9 && person.action !== 'drink'))) choose(world, person, policyScores);
+  if (!agreedWait && (world.tick >= person.decisionAt || emptyFood || emptyHarvest || emptyWater || blockedCarriedWater || (person.hunger > 0.9 && !['eat','hunt'].includes(person.action)) || (person.thirst > 0.9 && person.action !== 'drink'))) choose(world, person, policyScores, precomputedMoves, slot);
   if (['eat','drink','hunt'].includes(person.action)) resourceDispute(world, person, event => addEvent(world, event));
   if (world.tick % 6 === 0 && !(person.action === 'accompany' && distance(person, person.target) <= 1.5)) move(world, person, precomputedMoves, slot);
   const current = tileAt(world, person)!;
@@ -1413,8 +1413,8 @@ function advanceTick(world: World, inputs: Gesture[], context: WorldContext, med
   medirFase(medicion, 'fauna', () => { stepAnimals(world,event=>addEvent(world,event)); stepStructures(world,event=>addEvent(world,event)); });
   medirFase(medicion, 'personas', () => {
     const motor = paramsOf(world).motor;
-    const precomputedMoves = motor.particionarPersonas && world.tick % 6 === 0 && world.people.length >= 16
-      ? precomputeMovesParallel(world, motor, context.personasExecution)
+    const precomputedMoves = motor.particionarPersonas
+      ? precomputePersonasParallel(world, motor, context.personasExecution)
       : undefined;
     const policyScores = precomputePolicyScores(world);
     for (let slot = 0; slot < world.people.length; slot++) bodyAndAction(world, world.people[slot]!, precomputedMoves, slot, policyScores);

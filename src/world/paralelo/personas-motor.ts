@@ -18,8 +18,8 @@
  * T171: aquí no hay relojes, ni consulta de la máquina, ni azar del proceso. Las medidas de tiempo
  * las toma `piscina.ts`; con `hilos = 1` solo se mide si quien llama inyecta `reloj`.
  *
- * Este módulo no está cableado en `stepWorld` (`index.ts` no se toca en esta tarea): es el motor
- * verificado bit a bit que el cableado de Gate E.1 podrá usar.
+ * El bucle real usa el despacho ligero de rutas y movimiento; las decisiones y los débitos de
+ * recursos siguen en la cadena serial de `bodyAndAction`.
  */
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -36,7 +36,8 @@ import { partitionRegions, type StaticRegion, type StaticRegionOrder } from './p
 import { calcularOcupacionWorkers, StaticWorkerPool, type StaticWorkerDiagnostics } from './piscina.js';
 import { confirmarIntentos, type Intent, type ResultadoConfirmacion } from './reduccion.js';
 import {
-  ACCION, BIOMAS, CELDAS_POR_PAGINA, CELDA_CAMINABLE, CELDA_DESIERTO, CELDA_PRESENTE, CELDA_REFUGIO,
+  ACCION, BIOMAS, CELDAS_PERCEPCION, LADO_PERCEPCION, RADIO_PERCEPCION,
+  CELDAS_POR_PAGINA, CELDA_CAMINABLE, CELDA_DESIERTO, CELDA_PRESENTE, CELDA_REFUGIO,
   INTENTO_BEBER, INTENTO_COMER, INTENTO_COSECHAR, INTENTO_MADERA, INTENTO_NINGUNO, INTENTO_PIEDRA,
   NPF, NPI, NSF, NSI, PF, PI, SF, SI, TERRENOS, celdaDe, crearVista, ejecutarRegionesPersonas, hashPagina,
   type BuffersPersonas, type ParamsFaseBPersonas, type VistaPersonas,
@@ -131,6 +132,7 @@ export class EstadoPersonasCompartido {
       celdaMadera: sab(celdas * 8), celdaPiedra: sab(celdas * 8), celdaTerreno: sab(celdas), celdaBioma: sab(celdas),
       personasF64: sab(capPersonas * NPF * 8), personasI32: sab(capPersonas * NPI * 4), ordenSlots: sab(capPersonas * 4),
       salidaI32: sab(capPersonas * NSI * 4), salidaF64: sab(capPersonas * NSF * 8),
+      salidaRutas: sab(capPersonas * CELDAS_PERCEPCION * 2),
     };
     this.#capPaginas = capPaginas; this.#capHash = capHash; this.#capPersonas = capPersonas;
     this.#reasignaciones++;
@@ -243,13 +245,15 @@ export class EstadoPersonasCompartido {
   }
 
   /**
-   * Empaquetado ligero dedicado a la precomputación paralela de movimiento (`move` BFS 2048 nodos):
+   * Empaquetado ligero para movimiento (`move` BFS 2048 nodos) y rutas percibidas de `choose`:
    * solo copia la caminabilidad de las teselas y las coordenadas/destinos de las personas, evitando
-   * el trabajo de percepción/ecología en pasos de movimiento (`tick % 6 === 0`). La caminabilidad
+   * copiar stocks o calcular decisiones durante el despacho. La caminabilidad
    * (`terrain !== 'water'`) es invariante durante toda la fase `personas`, por lo que el primer paso
    * calculado en workers es bit a bit idéntico al BFS en serie para todo actor cuyo destino no cambie.
    */
-  empaquetarSoloMovimiento(world: World, opciones: { regionSide?: RegionSidePersonas; bloque?: number } = {}): void {
+  empaquetarSoloMovimiento(world: World, opciones: {
+    regionSide?: RegionSidePersonas; bloque?: number; movimiento?: boolean; decisiones?: Uint8Array;
+  } = {}): void {
     const regionSide = opciones.regionSide ?? 256, bloque = opciones.bloque ?? BLOQUE_ACTORES;
     if (regionSide !== 256 && regionSide !== 512) throw new RangeError('regionSide debe ser 256 o 512.');
     if (!Number.isSafeInteger(bloque) || bloque < 1) throw new RangeError('bloque debe ser un entero positivo.');
@@ -302,6 +306,7 @@ export class EstadoPersonasCompartido {
       this.#walkCache = token && terrainRev ? { tiles, length: tiles.length, token, terrainRev, paginas, capHash } : null;
     }
     const cap = this.#capPersonas;
+    vista.params.soloRutasYMovimiento = true;
     const mortonDe = new Map<number, bigint>();
     const claves: { morton: bigint; slot: number }[] = new Array(personas.length);
     for (let slot = 0; slot < personas.length; slot++) {
@@ -317,8 +322,10 @@ export class EstadoPersonasCompartido {
       vista.pf[PF.foodDemand * cap + slot] = 1;
       vista.pf[PF.waterDemand * cap + slot] = 1;
       vista.pi[PI.actionCode * cap + slot] = 0;
-      vista.pi[PI.needsDecision * cap + slot] = 0;
-      vista.pi[PI.shouldMove * cap + slot] = !(p.action === 'accompany' && Math.hypot(p.x - p.target.x, p.y - p.target.y) <= 1.5) ? 1 : 0;
+      // Coordenadas no enteras conservan el fallback histórico de perceivedRoutes.
+      vista.pi[PI.needsDecision * cap + slot] = Number.isInteger(p.x) && Number.isInteger(p.y) ? opciones.decisiones?.[slot] ?? 0 : 0;
+      vista.pi[PI.shouldMove * cap + slot] = opciones.movimiento !== false
+        && !(p.action === 'accompany' && Math.hypot(p.x - p.target.x, p.y - p.target.y) <= 1.5) ? 1 : 0;
       vista.pi[PI.disputaActiva * cap + slot] = 0;
       const rx = Math.floor(p.x / regionSide), ry = Math.floor(p.y / regionSide), clave = clavePagina(rx, ry);
       let morton = mortonDe.get(clave);
@@ -567,6 +574,8 @@ export interface PrecomputedMoves {
   targetY: Int32Array;
   count: number;
   diagnostico: DiagnosticoPersonas;
+  /** Válido solo durante esta fase personas, como las salidas de movimiento reutilizables. */
+  rutas?: { pasos: Int16Array; x: Float64Array; y: Float64Array; listas: Int32Array };
 }
 
 export interface PersonasExecution {
@@ -578,6 +587,48 @@ const poolsPersonas = new Map<string, PersonasParallelPool>();
 let estadoMovimientoCompartido: EstadoPersonasCompartido | null = null;
 let snapTargetX = new Int32Array(0);
 let snapTargetY = new Int32Array(0);
+let decisiones = new Uint8Array(0);
+
+/** Lookup sin Map. Una fila ausente o una posición cambiada obliga al BFS serial de choose. */
+export function precomputedRouteLookup(
+  person: { x: number; y: number }, precomputed?: PrecomputedMoves, slot?: number,
+): ((point: { x: number; y: number }) => number | undefined) | undefined {
+  const rutas = precomputed?.rutas;
+  if (!precomputed || !rutas || slot === undefined || slot < 0 || slot >= precomputed.count || !rutas.listas[slot]
+    || person.x !== rutas.x[slot] || person.y !== rutas.y[slot]) return undefined;
+  const x = person.x, y = person.y, inicio = slot * CELDAS_PERCEPCION;
+  return point => {
+    const dx = point.x - x + RADIO_PERCEPCION, dy = point.y - y + RADIO_PERCEPCION;
+    if (!Number.isInteger(dx) || !Number.isInteger(dy) || dx < 0 || dy < 0 || dx >= LADO_PERCEPCION || dy >= LADO_PERCEPCION) return undefined;
+    const pasos = rutas.pasos[inicio + dy * LADO_PERCEPCION + dx]!;
+    return pasos < 0 ? undefined : pasos;
+  };
+}
+
+/**
+ * Selección conservadora sin consultar teselas: eat/forage/drink pueden agotar su destino antes
+ * de su turno; la preparación de agua puede adelantar decisionAt. Los umbrales anticipan las
+ * necesidades basales (como el lote de políticas). Una decisión imprevista conserva el fallback.
+ * El movimiento y la percepción comparten un único despacho/barrera cuando coinciden.
+ */
+export function precomputePersonasParallel(
+  world: World, motor: { hilos: number; orden: StaticRegionOrder }, execution?: PersonasExecution,
+): PrecomputedMoves | undefined {
+  const n = world.people.length;
+  if (n < 16) return undefined;
+  if (decisiones.length < n) decisiones = new Uint8Array(siguientePotencia(n));
+  let decidingCount = 0;
+  for (let slot = 0; slot < n; slot++) {
+    const p = world.people[slot]!;
+    const due = world.tick >= p.decisionAt || p.hunger > 0.85 || p.thirst > 0.85
+      || p.action === 'eat' || p.action === 'forage' || p.action === 'drink' || !!p.technology.waterPreparation;
+    decisiones[slot] = due ? 1 : 0;
+    if (due) decidingCount++;
+  }
+  const movimiento = world.tick % 6 === 0;
+  if (!movimiento && decidingCount < 16) return undefined;
+  return despacharRutasYMovimiento(world, motor, execution, movimiento, decidingCount >= 16 ? decisiones : undefined);
+}
 
 /**
  * Precomputa en paralelo (sobre `PersonasParallelPool` persistente y SAB reutilizables) el primer
@@ -589,6 +640,13 @@ export function precomputeMovesParallel(
   world: World,
   motor: { hilos: number; orden: StaticRegionOrder },
   execution?: PersonasExecution,
+): PrecomputedMoves {
+  return despacharRutasYMovimiento(world, motor, execution, true);
+}
+
+function despacharRutasYMovimiento(
+  world: World, motor: { hilos: number; orden: StaticRegionOrder }, execution: PersonasExecution | undefined,
+  movimiento: boolean, decisiones?: Uint8Array,
 ): PrecomputedMoves {
   const n = world.people.length;
   const key = `${motor.hilos}:${motor.orden}`;
@@ -608,12 +666,15 @@ export function precomputeMovesParallel(
     snapTargetX[i] = p.target.x;
     snapTargetY[i] = p.target.y;
   }
-  estado.empaquetarSoloMovimiento(world, { regionSide: execution?.regionSide ?? 256 });
+  estado.empaquetarSoloMovimiento(world, { regionSide: execution?.regionSide ?? 256, movimiento, decisiones });
   pool.stepPhaseB(estado);
   const diagnostico = pool.diagnostics();
   execution?.onStep?.(diagnostico);
   const vista = estado.vista();
-  return { si: vista.si, cap: vista.params.capPersonas, targetX: snapTargetX, targetY: snapTargetY, count: n, diagnostico };
+  const cap = vista.params.capPersonas;
+  return { si: vista.si, cap, targetX: snapTargetX, targetY: snapTargetY, count: n, diagnostico,
+    rutas: decisiones ? { pasos: vista.rutas, x: vista.pf.subarray(PF.x * cap, PF.x * cap + n),
+      y: vista.pf.subarray(PF.y * cap, PF.y * cap + n), listas: vista.pi.subarray(PI.needsDecision * cap, PI.needsDecision * cap + n) } : undefined };
 }
 
 /** Cierra todas las piscinas persistentes de la fase `personas` (tests y apagado del servidor). */

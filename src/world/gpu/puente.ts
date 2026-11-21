@@ -15,6 +15,8 @@ export const GPU_FIELDS = [
 export interface GpuBridgeStats {
   uploadedBytes: number; downloadedBytes: number; syncUploadedBytes: number;
   kernelMs: number; devices: readonly number[]; lastPass: 'ecologia' | 'kernel' | null;
+  /** Cómo se llevó la VRAM a la topología de este paso: completo, incremental (`delta`), nada que subir (`noop`) o sin cambio (`null`). */
+  syncKind: 'full' | 'delta' | 'noop' | null;
 }
 export interface GpuRunResult extends GpuBridgeStats {
   dirtyPages: readonly { pageX: number; pageY: number }[];
@@ -45,31 +47,8 @@ function runsOf(sorted) {
   return runs;
 }
 let child = null, reader = null, readyPromise = null, dead = null;
-let shmFd = null, shmReadBuf = null, shmPath = null, cachedBuffers = null;
+let shmFd = null, shmPath = null, cachedBuffers = null;
 const MAX_IO_CHUNK = 1 << 29; // 512 MiB (< 2 GiB limit of Node fs.writeSync/readSync)
-function shmWriteParts(parts) {
-  let pos = 0;
-  for (const part of parts) {
-    let off = 0;
-    while (off < part.byteLength) {
-      const chunk = Math.min(MAX_IO_CHUNK, part.byteLength - off);
-      off += fs.writeSync(shmFd, part, off, chunk, pos);
-      pos = pos + chunk;
-    }
-  }
-  return pos;
-}
-function shmReadRange(offset, n) {
-  if (!shmReadBuf || shmReadBuf.length < n) shmReadBuf = Buffer.allocUnsafe(n);
-  let off = 0;
-  while (off < n) {
-    const chunk = Math.min(MAX_IO_CHUNK, n - off);
-    const r = fs.readSync(shmFd, shmReadBuf, off, chunk, offset + off);
-    if (r <= 0) throw new Error('GPU shm: lectura corta');
-    off += r;
-  }
-  return shmReadBuf.subarray(0, n);
-}
 class Reader {
   constructor(stream){ this.chunks=[]; this.offset=0; this.available=0; this.done=false; this.waiter=null; this.error=null;
     stream.on('data',c=>{this.chunks.push(c); this.available+=c.length; this.wake();});
@@ -126,25 +105,63 @@ function view(buffers, name, bytes){
   return bytes===8 ? new Float64Array(buf) : new Uint8Array(buf);
 }
 function bytesOf(buffers,name){ const buf=buffers[name]; return new Uint8Array(buf); }
+// Bajada directa: fs.readSync escribe en la vista del SharedArrayBuffer destino (sin copia intermedia).
+function readInto(dst, start, len, reply, boff){
+  if(!len) return;
+  if(reply.shmBytes){
+    let off=0;
+    while(off<len){ const chunk=Math.min(MAX_IO_CHUNK, len-off); const r=fs.readSync(shmFd, dst, start+off, chunk, boff+off); if(r<=0) throw new Error('GPU shm: lectura corta'); off+=r; }
+  } else dst.set(reply.body.subarray(boff, boff+len), start);
+}
+function expandRuns(runs, touched){ for(const [s0,c] of runs) for(let s=s0;s<s0+c;s++) touched.add(s); }
+async function fullSync(job, buffers){
+  const parts=[];
+  const push=(u8)=>parts.push(Buffer.from(u8.buffer, u8.byteOffset, u8.byteLength));
+  push(new Uint8Array(buffers.stamps)); push(new Uint8Array(buffers.around)); push(new Uint8Array(buffers.pageX)); push(new Uint8Array(buffers.pageY));
+  for(const f of FIELDS) push(bytesOf(buffers,f.name));
+  const specs=[];
+  for(const d of job.full.devices){
+    if(!d.identity) push(new Uint8Array(d.l2g.buffer, d.l2g.byteOffset, d.l2g.byteLength));
+    push(new Uint8Array(d.cells.buffer, d.cells.byteOffset, d.cells.byteLength));
+    specs.push({identity:d.identity, localSlots:d.identity?0:d.l2g.length, localCap:d.localCap, cellsCap:d.cellsCap, nCells:d.cells.length});
+  }
+  const reply=await send({kind:'sync', capacityCells:job.capacityCells, slots:job.slots, version:job.full.version, devices:specs}, parts);
+  if(!reply.header.ok) throw new Error('GPU sync failed');
+  return reply.header.uploadedBytes||0;
+}
+async function deltaSync(job, buffers){
+  const dl=job.delta, pages=dl.pages, P=pages.length;
+  const perPage=FIELDS.reduce((s,f)=>s+256*f.bytes,0);
+  let size=P*perPage + P*256*4 + P*8;
+  const ops=[]; const tails=[];
+  for(const op of dl.devices){
+    const o={...op}; delete o.aroundData; delete o.cellsData;
+    o.aroundOff=size; size+=op.aroundData.byteLength; o.cellsOff=size; size+=op.cellsData.byteLength;
+    ops.push(o); tails.push(op.aroundData, op.cellsData);
+  }
+  const body=Buffer.alloc(size); let off=0;
+  const pageRuns=runsOf(pages);
+  for(const f of FIELDS){ const src=bytesOf(buffers,f.name); for(const [s0,c] of pageRuns){ const a=s0*256*f.bytes, n=c*256*f.bytes; body.set(src.subarray(a,a+n),off); off+=n; } }
+  body.set(new Uint8Array(dl.stamps.buffer, dl.stamps.byteOffset, dl.stamps.byteLength), off); off+=dl.stamps.byteLength;
+  body.set(new Uint8Array(dl.pageX.buffer, dl.pageX.byteOffset, dl.pageX.byteLength), off); off+=dl.pageX.byteLength;
+  body.set(new Uint8Array(dl.pageY.buffer, dl.pageY.byteOffset, dl.pageY.byteLength), off); off+=dl.pageY.byteLength;
+  for(const t of tails){ body.set(new Uint8Array(t.buffer, t.byteOffset, t.byteLength), off); off+=t.byteLength; }
+  const reply=await send({kind:'delta', pages:P, devices:ops}, body);
+  if(!reply.header.ok) throw new Error('GPU delta sync failed');
+  return reply.header.uploadedBytes||0;
+}
 async function handle(job){
   await readyPromise;
   if(dead) throw dead;
   if(job.buffers) cachedBuffers = job.buffers;
   const buffers = cachedBuffers;
   let uploaded=0, downloaded=0;
-  const capacity=job.capacityCells, slots=job.slots, total=job.totalCells;
-  if(job.syncNeeded){
-    const parts=[];
-    const push=(u8)=>parts.push(Buffer.from(u8.buffer, u8.byteOffset, u8.byteLength));
-    push(new Uint8Array(buffers.cells)); push(new Uint8Array(buffers.stamps)); push(new Uint8Array(buffers.around)); push(new Uint8Array(buffers.pageX)); push(new Uint8Array(buffers.pageY));
-    for(const f of FIELDS) push(bytesOf(buffers,f.name));
-    const reply=await send({kind:'sync', capacityCells:capacity, slots, totalCells:total, shardRanges: job.sharded ? job.ranges : null}, parts);
-    if(!reply.header.ok) throw new Error('GPU sync failed');
-    uploaded += reply.header.uploadedBytes||0; stats[2]=uploaded;
-  }
+  if(job.full) uploaded += await fullSync(job, buffers);
+  else if(job.delta) uploaded += await deltaSync(job, buffers);
+  stats[2]=uploaded;
   const syncUploaded = uploaded;
+  const perPage = FIELDS.reduce((s,f)=>s+256*f.bytes,0);
   if(job.kind==='tick'){
-    const perPage = FIELDS.reduce((s,f)=>s+256*f.bytes,0);
     const body = Buffer.alloc(job.dirtySlots.length * perPage);
     let off = 0;
     const dirtyRuns = runsOf(job.dirtySlots);
@@ -156,26 +173,24 @@ async function handle(job){
       }
     }
     const reply = await send({
-      kind: 'tick', dirtySlots: job.dirtySlots, ranges: job.ranges,
+      kind: 'tick', dirtySlots: job.dirtySlots,
       haloSlotsPerDevice: job.haloSlotsPerDevice || [], downloadSlots: job.downloadSlots || [],
       pass1Params: job.pass1Params, pass2Params: job.pass2Params,
     }, body);
     if(!reply.header.ok) throw new Error('GPU tick failed');
     uploaded += reply.header.uploadedBytes || 0; downloaded += reply.header.downloadedBytes || 0;
     let boff = 0;
-    const perDevice = reply.header.downloadSlotsPerDevice || [];
+    const perDevice = reply.header.downloadRunsPerDevice || [];
     const touched = new Set();
     for(let di = 0; di < perDevice.length; di++){
-      const deviceSlots = perDevice[di];
-      if(!deviceSlots || !deviceSlots.length) continue;
-      for(const slot of deviceSlots) touched.add(slot);
-      const deviceRuns = runsOf(deviceSlots);
+      const deviceRuns = perDevice[di];
+      if(!deviceRuns || !deviceRuns.length) continue;
+      expandRuns(deviceRuns, touched);
       for(const f of FIELDS){
         const dst = bytesOf(buffers, f.name);
         for(const [startSlot, count] of deviceRuns){
           const start = startSlot * 256 * f.bytes; const len = count * 256 * f.bytes;
-          const chunk = reply.shmBytes ? shmReadRange(boff, len) : reply.body.subarray(boff, boff + len);
-          dst.set(chunk, start); boff += len;
+          readInto(dst, start, len, reply, boff); boff += len;
         }
       }
     }
@@ -189,27 +204,26 @@ async function handle(job){
     return {touched: [...touched].sort((a,b)=>a-b)};
   }
   if(job.kind==='flush'){
-    const reply=await send({kind:'flush', ranges:job.ranges}, null);
+    const reply=await send({kind:'flush'}, null);
     if(!reply.header.ok) throw new Error('GPU flush failed');
     let boff=0;
-    const perDeviceRuns = reply.header.downloadRunsPerDevice || (reply.header.downloadSlotsPerDevice||[]).map(slots=>runsOf(slots));
+    const perDeviceRuns = reply.header.downloadRunsPerDevice || [];
     for(let di=0; di<perDeviceRuns.length; di++){
       const deviceRuns = perDeviceRuns[di];
       for(const f of FIELDS){
         const dst=bytesOf(buffers,f.name);
         for(const [startSlot,count] of deviceRuns){
           const start=startSlot*256*f.bytes; const len=count*256*f.bytes;
-          const chunk = reply.shmBytes ? shmReadRange(boff, len) : reply.body.subarray(boff,boff+len);
-          dst.set(chunk,start); boff+=len;
+          readInto(dst, start, len, reply, boff); boff+=len;
         }
       }
     }
     return {touched:[]};
   }
   // step body: dirty chunks
-  const perPage = FIELDS.reduce((s,f)=>s+256*f.bytes,0);
+  const slots = job.slots;
   const haloField = job.pass===1 ? 'terrain' : 'life';
-  const haloSpec = FIELDS.find(f=>f.name===haloField);
+  const haloSpec = FIELD_BY_NAME[haloField];
   const haloBytes = (job.haloSlotsPerDevice||[]).reduce((s,l)=>s+l.length*256*haloSpec.bytes,0);
   const body=Buffer.alloc(job.dirtySlots.length*perPage + (job.pass===2 ? slots : 0) + haloBytes);
   let off=0;
@@ -217,24 +231,24 @@ async function handle(job){
   const dirtyRuns = runsOf(job.dirtySlots);
   for(const f of FIELDS){ const src=bytesOf(buffers,f.name); for(const [startSlot,count] of dirtyRuns){ const start=startSlot*256*f.bytes; const len=count*256*f.bytes; body.set(src.subarray(start,start+len),off); off+=len; } }
   if(job.pass===2){ body.set(bytesOf(buffers,'woodAdded').subarray(0,slots),off); off+=slots; }
-  for(const lst of (job.haloSlotsPerDevice||[])){ for(const slot of lst){ const src=bytesOf(buffers,haloField); const start=slot*256*haloSpec.bytes; body.set(src.subarray(start,start+256*haloSpec.bytes),off); off+=256*haloSpec.bytes; } }
-  const reply=await send({kind:'step', pass:job.pass, dirtySlots:job.dirtySlots, ranges:job.ranges, haloSlotsPerDevice:job.haloSlotsPerDevice||[], haloField, downloadSlots:job.downloadSlots, params:job.params}, body);
+  { const src=bytesOf(buffers,haloField); const hb=256*haloSpec.bytes;
+    for(const lst of (job.haloSlotsPerDevice||[])){ for(const [s0,c] of runsOf(lst)){ body.set(src.subarray(s0*hb,(s0+c)*hb),off); off+=c*hb; } } }
+  const reply=await send({kind:'step', pass:job.pass, dirtySlots:job.dirtySlots, haloSlotsPerDevice:job.haloSlotsPerDevice||[], haloField, downloadSlots:job.downloadSlots, params:job.params}, body);
   if(!reply.header.ok) throw new Error('GPU step failed');
   uploaded += reply.header.uploadedBytes||0; downloaded += reply.header.downloadedBytes||0;
   // Bajada selectiva coalescida: solo los campos de la pasada, por campo y por tramo.
   // Los campos no descargados se copian front->back en RAM local para los tramos tocados.
   let boff=0;
-  const perDevice = reply.header.downloadSlotsPerDevice||[];
+  const perDevice = reply.header.downloadRunsPerDevice||[];
   const dlKey = (job.downloadSlots !== undefined && job.downloadSlots !== null && job.pass === 2) ? '2_halo' : job.pass;
   const dlNames = DOWNLOAD_FIELDS[dlKey] || FIELDS.map(f=>f.name);
   const dlSet = new Set(dlNames);
   const touched=new Set();
   for(let di=0; di<perDevice.length; di++){
-    const deviceSlots = perDevice[di];
-    if(!deviceSlots || !deviceSlots.length) continue;
-    for(const slot of deviceSlots) touched.add(slot);
-    const deviceRuns = runsOf(deviceSlots);
-    for(const name of dlNames){ const f=FIELD_BY_NAME[name]; const dst=bytesOf(buffers,name+'Back'); for(const [startSlot,count] of deviceRuns){ const start=startSlot*256*f.bytes; const len=count*256*f.bytes; const chunk = reply.shmBytes ? shmReadRange(boff, len) : reply.body.subarray(boff,boff+len); dst.set(chunk,start); boff+=len; } }
+    const deviceRuns = perDevice[di];
+    if(!deviceRuns || !deviceRuns.length) continue;
+    expandRuns(deviceRuns, touched);
+    for(const name of dlNames){ const f=FIELD_BY_NAME[name]; const dst=bytesOf(buffers,name+'Back'); for(const [startSlot,count] of deviceRuns){ const start=startSlot*256*f.bytes; const len=count*256*f.bytes; readInto(dst, start, len, reply, boff); boff+=len; } }
     for(const f of FIELDS){ if(dlSet.has(f.name)) continue; const src=bytesOf(buffers,f.name); const dst=bytesOf(buffers,f.name+'Back'); for(const [startSlot,count] of deviceRuns){ const start=startSlot*256*f.bytes; const len=count*256*f.bytes; dst.set(src.subarray(start,start+len),start); } }
   }
   // woodAdded + queue + dirty (CPU-side deterministic queue, slots ascending)
@@ -272,6 +286,271 @@ function resolveScript(): string {
   throw new Error(`No se encontró compute-ecology-gpu-resident.py cerca de ${here}`);
 }
 
+/** Una página entra, sale o cambia de presencia: lo que hay que subir a un dispositivo. */
+interface DeviceDeltaOp {
+  unmap: number[]; map: [number, number][]; ownedAdd: number[]; ownedRemove: number[]; nCells: number;
+  pageUploads: [number, number][]; aroundSlots: number[]; cellRuns: [number, number][];
+  aroundData: Int32Array; cellsData: Int32Array;
+}
+interface DeltaPlan { pages: Int32Array; stamps: Uint32Array; pageX: Int32Array; pageY: Int32Array; devices: DeviceDeltaOp[]; }
+interface FullPlan { version: number; devices: { identity: boolean; l2g: Int32Array; cells: Int32Array; localCap: number; cellsCap: number }[]; }
+interface DeviceMirror {
+  /** Ranura global → local (-1: no residente en este dispositivo). Identidad en modo replicado. */
+  g2l: Int32Array; l2g: Int32Array; free: number[]; localCap: number; cellsCap: number;
+  /** Lista de celdas (ids GLOBALES) que calcula este dispositivo; en VRAM viven como ids locales. */
+  cellsGlobal: Int32Array; nCells: number;
+  /** Espejo del `around` LOCAL residente en VRAM (-2: desconocido). */
+  around: Int32Array;
+  halo: Uint8Array;
+}
+
+const popcount32 = (v: number): number => { v -= (v >>> 1) & 0x55555555; v = (v & 0x33333333) + ((v >>> 2) & 0x33333333); return (((v + (v >>> 4)) & 0x0f0f0f0f) * 0x01010101) >>> 24; };
+
+/**
+ * Espejo exacto de la topología residente en VRAM (sync incremental). Cada página presente tiene un
+ * dispositivo propietario estable; cada dispositivo calcula SU lista de celdas (borrado por intercambio
+ * con la última: O(celdas que cambian)). La presencia viaja como máscara de 256 bits por página, de modo
+ * que un cambio de `version` del anfitrión no reescribe sellos en VRAM. El resultado por celda no depende
+ * del dispositivo ni del orden de `cells` (FP64, --fmad=false, sin reducciones entre celdas): mover la
+ * propiedad no cambia ningún bit, solo qué GPU lo calcula.
+ */
+class ResidentTopology {
+  readonly owner: Int8Array; readonly px: Int32Array; readonly py: Int32Array; readonly present: Uint8Array;
+  readonly mask: Uint32Array; readonly around: Int32Array; readonly posOf: Int32Array;
+  readonly devs: DeviceMirror[] = [];
+  private readonly scratchMask: Uint32Array; private readonly scratchFlag: Uint8Array;
+  private haloCache: number[][] | null = null;
+  constructor(readonly identity: boolean, readonly slots: number, readonly capacityCells: number, readonly weights: readonly number[]) {
+    this.owner = new Int8Array(slots).fill(-1); this.px = new Int32Array(slots); this.py = new Int32Array(slots);
+    this.present = new Uint8Array(slots); this.mask = new Uint32Array(slots * 8); this.around = new Int32Array(slots * 9).fill(-1);
+    this.posOf = new Int32Array(capacityCells).fill(-1);
+    this.scratchMask = new Uint32Array(slots * 8); this.scratchFlag = new Uint8Array(slots);
+  }
+
+  /** Sync completo: propiedad inicial por tramos contiguos del orden del anfitrión (como antes). */
+  static full(identity: boolean, weights: readonly number[], ranges: readonly [number, number][], cells: Int32Array, total: number,
+    hostAround: Int32Array, hostPX: Int32Array, hostPY: Int32Array, slots: number, capacityCells: number, version: number): { topo: ResidentTopology; plan: FullPlan } {
+    const topo = new ResidentTopology(identity, slots, capacityCells, weights);
+    const nDev = weights.length;
+    for (let d = 0; d < ranges.length; d++) for (let i = ranges[d]![0]; i < ranges[d]![1]; i++) { const s = cells[i]! >>> 8; if (topo.owner[s]! < 0) topo.owner[s] = d; }
+    for (let i = 0; i < total; i++) { const c = cells[i]!; topo.mask[(c >>> 8) * 8 + ((c >>> 5) & 7)]! |= 1 << (c & 31); }
+    topo.px.set(hostPX.subarray(0, slots)); topo.py.set(hostPY.subarray(0, slots)); topo.around.set(hostAround.subarray(0, slots * 9));
+    const counts = new Array<number>(nDev).fill(0);
+    for (let s = 0; s < slots; s++) if (topo.owner[s]! >= 0) topo.present[s] = 1;
+    for (let i = 0; i < total; i++) counts[topo.owner[cells[i]! >>> 8]!]!++;
+    for (let d = 0; d < nDev; d++) {
+      let g2l: Int32Array, l2g: Int32Array, localCap: number, cellsCap: number; const free: number[] = [];
+      if (identity) {
+        g2l = new Int32Array(slots); for (let s = 0; s < slots; s++) g2l[s] = s; l2g = g2l; localCap = slots; cellsCap = capacityCells;
+      } else {
+        const need = new Uint8Array(slots);
+        for (let s = 0; s < slots; s++) if (topo.owner[s] === d) { need[s] = 1; for (let k = 0; k < 9; k++) { const nb = hostAround[s * 9 + k]!; if (nb >= 0 && topo.present[nb]) need[nb] = 1; } }
+        let n = 0; for (let s = 0; s < slots; s++) if (need[s]) n++;
+        localCap = n + Math.max(16, Math.ceil(n / 4)); cellsCap = localCap * 256;
+        g2l = new Int32Array(slots).fill(-1); l2g = new Int32Array(localCap).fill(-1);
+        let l = 0; for (let s = 0; s < slots; s++) if (need[s]) { g2l[s] = l; l2g[l] = s; l++; }
+        for (let f = localCap - 1; f >= n; f--) free.push(f);
+      }
+      const around = new Int32Array(localCap * 9).fill(-2);
+      const dev: DeviceMirror = { g2l, l2g, free, localCap, cellsCap, cellsGlobal: new Int32Array(Math.max(cellsCap, counts[d]!)), nCells: 0, around, halo: new Uint8Array(slots) };
+      topo.devs.push(dev);
+    }
+    for (let i = 0; i < total; i++) { const c = cells[i]!, dev = topo.devs[topo.owner[c >>> 8]!]!; topo.posOf[c] = dev.nCells; dev.cellsGlobal[dev.nCells++] = c; }
+    for (let s = 0; s < slots; s++) if (topo.present[s]) { topo.refreshHalo(s, hostAround); for (const dev of topo.devs) { const l = dev.g2l[s]!; if (l >= 0) topo.localAround(dev, s, hostAround, dev.around, l * 9); } }
+    const plan: FullPlan = { version, devices: topo.devs.map(dev => ({
+      identity, l2g: identity ? new Int32Array(0) : dev.l2g.slice(0, dev.localCap - dev.free.length),
+      cells: topo.localCells(dev, 0, dev.nCells), localCap: dev.localCap, cellsCap: dev.cellsCap,
+    })) };
+    return { topo, plan };
+  }
+
+  get nDev(): number { return this.devs.length; }
+  private localCells(dev: DeviceMirror, from: number, to: number): Int32Array {
+    const out = new Int32Array(to - from);
+    for (let p = from; p < to; p++) { const c = dev.cellsGlobal[p]!; out[p - from] = this.identity ? c : (dev.g2l[c >>> 8]! << 8) | (c & 255); }
+    return out;
+  }
+  private localAround(dev: DeviceMirror, s: number, hostAround: Int32Array, out: Int32Array, at: number): void {
+    for (let k = 0; k < 9; k++) { const nb = hostAround[s * 9 + k]!; out[at + k] = nb < 0 ? -1 : this.identity ? nb : dev.g2l[nb]!; }
+  }
+  /** ¿Necesita el dispositivo `d` la página `s` (propia o vecina de una propia)? */
+  private needs(d: number, s: number, hostAround: Int32Array): boolean {
+    if (!this.present[s]) return false;
+    if (this.owner[s] === d) return true;
+    for (let k = 0; k < 9; k++) { const nb = hostAround[s * 9 + k]!; if (nb >= 0 && this.present[nb] && this.owner[nb] === d) return true; }
+    return false;
+  }
+  private refreshHalo(s: number, hostAround: Int32Array): boolean {
+    let changed = false;
+    for (let d = 0; d < this.nDev; d++) {
+      const h = this.nDev > 1 && this.owner[s] !== d && this.needs(d, s, hostAround) ? 1 : 0;
+      if (this.devs[d]!.halo[s] !== h) { this.devs[d]!.halo[s] = h; changed = true; }
+    }
+    if (changed) this.haloCache = null;
+    return changed;
+  }
+  haloLists(): number[][] {
+    if (this.haloCache) return this.haloCache;
+    this.haloCache = this.devs.map(dev => { const out: number[] = []; if (this.nDev > 1) for (let s = 0; s < this.slots; s++) if (dev.halo[s]) out.push(s); return out; });
+    return this.haloCache;
+  }
+
+  /**
+   * Sync incremental. `null` ⇒ hace falta un sync completo (sin holgura local o reparto desequilibrado);
+   * en ese caso el llamador descarta este espejo. `'noop'` ⇒ la VRAM ya representa la topología nueva
+   * (p. ej. solo cambió la `version` del anfitrión o el orden de `cells`).
+   */
+  delta(cells: Int32Array, total: number, hostAround: Int32Array, hostPX: Int32Array, hostPY: Int32Array): DeltaPlan | 'noop' | null {
+    const S = this.slots, nDev = this.nDev, newMask = this.scratchMask;
+    newMask.fill(0);
+    for (let i = 0; i < total; i++) { const c = cells[i]!; newMask[(c >>> 8) * 8 + ((c >>> 5) & 7)]! |= 1 << (c & 31); }
+    const retired: number[] = [], added: number[] = [], presChanged: number[] = [], aroundChanged: number[] = [];
+    for (let s = 0; s < S; s++) {
+      const b = s * 8;
+      const isP = (newMask[b]! | newMask[b + 1]! | newMask[b + 2]! | newMask[b + 3]! | newMask[b + 4]! | newMask[b + 5]! | newMask[b + 6]! | newMask[b + 7]!) !== 0;
+      const wasP = this.present[s] === 1;
+      if (!wasP && !isP) continue;
+      if (wasP && isP && this.px[s] === hostPX[s] && this.py[s] === hostPY[s]) {
+        for (let w = 0; w < 8; w++) if (newMask[b + w] !== this.mask[b + w]) { presChanged.push(s); break; }
+        for (let k = 0; k < 9; k++) if (hostAround[s * 9 + k] !== this.around[s * 9 + k]) { aroundChanged.push(s); break; }
+      } else { if (wasP) retired.push(s); if (isP) added.push(s); }
+    }
+    if (!retired.length && !added.length && !presChanged.length && !aroundChanged.length) return 'noop';
+    // Conjunto afectado: páginas cambiadas y sus vecindades vieja (espejo) y nueva (anfitrión).
+    const flag = this.scratchFlag; flag.fill(0);
+    const affected: number[] = [];
+    const touch = (s: number) => { if (s >= 0 && s < S && !flag[s]) { flag[s] = 1; affected.push(s); } };
+    for (const list of [retired, added, presChanged, aroundChanged]) for (const s of list) touch(s);
+    for (const s of retired) for (let k = 0; k < 9; k++) touch(this.around[s * 9 + k]!);
+    for (const s of added) for (let k = 0; k < 9; k++) touch(hostAround[s * 9 + k]!);
+    const mods = this.devs.map(() => new Set<number>());
+    const ops: DeviceDeltaOp[] = this.devs.map(() => ({ unmap: [], map: [], ownedAdd: [], ownedRemove: [], nCells: 0, pageUploads: [], aroundSlots: [], cellRuns: [], aroundData: new Int32Array(0), cellsData: new Int32Array(0) }));
+    const removeCell = (d: number, c: number) => {
+      const dev = this.devs[d]!, p = this.posOf[c]!, last = --dev.nCells;
+      if (p !== last) { const moved = dev.cellsGlobal[last]!; dev.cellsGlobal[p] = moved; this.posOf[moved] = p; mods[d]!.add(p); }
+      this.posOf[c] = -1;
+    };
+    const appendCell = (d: number, c: number): boolean => {
+      const dev = this.devs[d]!;
+      if (dev.nCells >= dev.cellsCap) return false;
+      dev.cellsGlobal[dev.nCells] = c; this.posOf[c] = dev.nCells; mods[d]!.add(dev.nCells); dev.nCells++; return true;
+    };
+    const unmap = (d: number, s: number) => {
+      const dev = this.devs[d]!, l = dev.g2l[s]!;
+      if (this.identity || l < 0) return;
+      dev.g2l[s] = -1; dev.l2g[l] = -1; dev.free.push(l); dev.around.fill(-2, l * 9, l * 9 + 9); ops[d]!.unmap.push(s);
+    };
+    const forEachBit = (s: number, m: Uint32Array, fn: (c: number) => void, other?: Uint32Array, wantSet = true) => {
+      for (let w = 0; w < 8; w++) {
+        let bits = m[s * 8 + w]!; if (other) bits = wantSet ? bits & ~other[s * 8 + w]! : bits;
+        while (bits) { const t = bits & -bits; fn((s << 8) | (w << 5) | (31 - Math.clz32(t))); bits ^= t; }
+      }
+    };
+    // 1) Salidas (también una ranura reutilizada por otro chunk: sale la vieja y entra la nueva).
+    for (const s of retired) {
+      const d = this.owner[s]!;
+      forEachBit(s, this.mask, c => removeCell(d, c));
+      this.owner[s] = -1; this.present[s] = 0; ops[d]!.ownedRemove.push(s);
+      for (let e = 0; e < nDev; e++) unmap(e, s);
+      this.mask.fill(0, s * 8, s * 8 + 8);
+    }
+    // 2) Presencia parcial cambiada dentro de una página que se queda.
+    for (const s of presChanged) {
+      const d = this.owner[s]!;
+      forEachBit(s, this.mask, c => removeCell(d, c), newMask);
+    }
+    for (const s of presChanged) {
+      const d = this.owner[s]!;
+      let ok = true; forEachBit(s, newMask, c => { ok = appendCell(d, c) && ok; }, this.mask);
+      if (!ok) return null;
+      this.mask.set(newMask.subarray(s * 8, s * 8 + 8), s * 8);
+    }
+    // 3) Entradas: propietario estable elegido por vecindad y por el peso de cada GPU.
+    const slackAssign = Math.max(4 * 256, Math.ceil(0.02 * total));
+    for (const s of added) {
+      let k = 0; for (let w = 0; w < 8; w++) k += popcount32(newMask[s * 8 + w]!);
+      const d = this.chooseOwner(s, k, total, hostAround, slackAssign);
+      this.mask.set(newMask.subarray(s * 8, s * 8 + 8), s * 8);
+      this.owner[s] = d; this.present[s] = 1; this.px[s] = hostPX[s]!; this.py[s] = hostPY[s]!;
+      let ok = true; forEachBit(s, newMask, c => { ok = appendCell(d, c) && ok; });
+      if (!ok) return null;
+      ops[d]!.ownedAdd.push(s);
+    }
+    // 4) Residencia local (modo repartido) y halos, solo en el conjunto afectado.
+    affected.sort((a, b) => a - b);
+    const newlyLocal = this.devs.map(() => new Set<number>());
+    for (const s of added) for (let d = 0; d < nDev; d++) if (this.identity) newlyLocal[d]!.add(s);
+    if (!this.identity) {
+      for (const q of affected) for (let d = 0; d < nDev; d++) {
+        const dev = this.devs[d]!, should = this.needs(d, q, hostAround), l = dev.g2l[q]!;
+        if (should && l < 0) {
+          const nl = dev.free.pop(); if (nl === undefined) return null;
+          dev.g2l[q] = nl; dev.l2g[nl] = q; ops[d]!.map.push([q, nl]); newlyLocal[d]!.add(q);
+        } else if (!should && l >= 0) unmap(d, q);
+      }
+    }
+    for (const q of affected) this.refreshHalo(q, hostAround);
+    // 5) Páginas a subir por dispositivo: nuevas, con presencia cambiada o recién residentes.
+    const pageSet = new Set<number>();
+    const perDevPages: number[][] = this.devs.map((dev, d) => {
+      const out = new Set<number>(newlyLocal[d]);
+      for (const s of presChanged) if (dev.g2l[s]! >= 0) out.add(s);
+      for (const s of added) if (dev.g2l[s]! >= 0) out.add(s);
+      const sorted = [...out].sort((a, b) => a - b); for (const s of sorted) pageSet.add(s); return sorted;
+    });
+    const pages = Int32Array.from([...pageSet].sort((a, b) => a - b));
+    const pageIdx = new Map<number, number>(); pages.forEach((s, i) => pageIdx.set(s, i));
+    const stamps = new Uint32Array(pages.length * 256), pageX = new Int32Array(pages.length), pageY = new Int32Array(pages.length);
+    pages.forEach((s, i) => { pageX[i] = hostPX[s]!; pageY[i] = hostPY[s]!; forEachBit(s, this.mask, c => { stamps[i * 256 + (c & 255)] = 1; }); });
+    // 6) Vecindades: afectadas y sus vecinas (cambia `around` o el mapa local de una vecina).
+    const check: number[] = [];
+    flag.fill(0);
+    const touch2 = (s: number) => { if (s >= 0 && s < S && !flag[s] && this.present[s]) { flag[s] = 1; check.push(s); } };
+    for (const q of affected) { touch2(q); if (this.present[q]) for (let k = 0; k < 9; k++) touch2(hostAround[q * 9 + k]!); }
+    check.sort((a, b) => a - b);
+    const vec = new Int32Array(9);
+    for (let d = 0; d < nDev; d++) {
+      const dev = this.devs[d]!, op = ops[d]!;
+      op.pageUploads = perDevPages[d]!.map(s => [dev.g2l[s]!, pageIdx.get(s)!] as [number, number]);
+      const aroundVals: number[] = [];
+      for (const q of check) {
+        const l = dev.g2l[q]!; if (l < 0) continue;
+        this.localAround(dev, q, hostAround, vec, 0);
+        let differs = false; for (let k = 0; k < 9; k++) if (dev.around[l * 9 + k] !== vec[k]) { differs = true; break; }
+        if (!differs) continue;
+        dev.around.set(vec, l * 9); op.aroundSlots.push(l); for (let k = 0; k < 9; k++) aroundVals.push(vec[k]!);
+      }
+      op.aroundData = Int32Array.from(aroundVals);
+      const positions = [...mods[d]!].filter(p => p < dev.nCells).sort((a, b) => a - b);
+      const runs: [number, number][] = [];
+      for (const p of positions) { const last = runs[runs.length - 1]; if (last && p === last[0] + last[1]) last[1]++; else runs.push([p, 1]); }
+      op.cellRuns = runs;
+      const data = new Int32Array(positions.length); let o = 0;
+      for (const [p0, c] of runs) { data.set(this.localCells(dev, p0, p0 + c), o); o += c; }
+      op.cellsData = data; op.nCells = dev.nCells;
+    }
+    for (const s of affected) if (this.present[s]) this.around.set(hostAround.subarray(s * 9, s * 9 + 9), s * 9);
+    // Reparto: si una GPU se aleja demasiado de su peso (muchas salidas), se reparte de nuevo con un sync completo.
+    if (nDev > 1) {
+      const slack = Math.max(32 * 256, Math.ceil(0.08 * total));
+      for (let d = 0; d < nDev; d++) if (Math.abs(this.devs[d]!.nCells - this.weights[d]! * total) > slack) return null;
+    }
+    return { pages, stamps, pageX, pageY, devices: ops };
+  }
+
+  private chooseOwner(s: number, k: number, total: number, hostAround: Int32Array, slack: number): number {
+    const nDev = this.nDev; if (nDev === 1) return 0;
+    const counts = new Array<number>(nDev).fill(0);
+    for (let j = 0; j < 9; j++) { if (j === 4) continue; const nb = hostAround[s * 9 + j]!; if (nb >= 0 && nb !== s && this.present[nb]) { const o = this.owner[nb]!; if (o >= 0) counts[o]!++; } }
+    let best = -1;
+    for (let d = 0; d < nDev; d++) if (counts[d]! > 0 && (best < 0 || counts[d]! > counts[best]!)) best = d;
+    if (best >= 0 && this.devs[best]!.nCells + k <= this.weights[best]! * total + slack) return best;
+    let arg = 0;
+    for (let d = 1; d < nDev; d++) if (this.weights[d]! * total - this.devs[d]!.nCells > this.weights[arg]! * total - this.devs[arg]!.nCells) arg = d;
+    return arg;
+  }
+}
+
 /** Puente GPU persistente (T122): un worker JS que posee un subproceso Python con VRAM residente. */
 export class ResidentGpuBridge {
   readonly devices: readonly number[];
@@ -280,15 +559,16 @@ export class ResidentGpuBridge {
   private readonly statsArr = new Float64Array(new SharedArrayBuffer(8 * 8));
   private readonly errorArr = new Uint16Array(new SharedArrayBuffer(4096 * 2));
   private synced: TopologyKey | null = null;
-  private cachedRanges: [number, number][] = [];
-  private cachedHaloSlotsPerDevice: number[][] = [];
-  private cachedAllHaloSlots: number[] = [];
+  private topo: ResidentTopology | null = null;
+  /** La VRAM va por delante del anfitrión (runTick o bajada parcial): un cambio de topología resincroniza entero. */
+  private vramAhead = false;
   private broken: Error | null = null;
   private closed = false;
   private readonly customWeights?: readonly number[];
   private readonly shardedOption?: boolean;
   #last: GpuBridgeStats;
   #cumulative = { uploadedBytes: 0, downloadedBytes: 0 };
+  #syncCounts = { full: 0, delta: 0, noop: 0 };
   /** Test hook: last python ready header (devices/arch/compile). */
   readyInfo: unknown = null;
 
@@ -298,7 +578,7 @@ export class ResidentGpuBridge {
     this.devices = [...devices];
     this.customWeights = options?.weights;
     this.shardedOption = options?.sharded;
-    this.#last = { uploadedBytes: 0, downloadedBytes: 0, syncUploadedBytes: 0, kernelMs: 0, devices: this.devices, lastPass: null };
+    this.#last = { uploadedBytes: 0, downloadedBytes: 0, syncUploadedBytes: 0, kernelMs: 0, devices: this.devices, lastPass: null, syncKind: null };
     this.worker = new Worker(WORKER_CODE, {
       eval: true, execArgv: [], name: 'atlas-gpu-resident',
       workerData: {
@@ -311,19 +591,25 @@ export class ResidentGpuBridge {
   }
   get lastStats(): GpuBridgeStats { return this.#last; }
   get cumulativeStats(): Readonly<{ uploadedBytes: number; downloadedBytes: number }> { return this.#cumulative; }
+  /** Cuántos cambios de topología se resolvieron con sync completo, incremental o sin subir nada. */
+  get syncCounts(): Readonly<{ full: number; delta: number; noop: number }> { return this.#syncCounts; }
   /** Fuerza una resincronización completa en el próximo paso (tras un fallo o un cambio externo). */
-  invalidate(): void { this.synced = null; }
+  invalidate(): void { this.synced = null; this.topo = null; }
 
-  private ranges(cells: Int32Array, total: number): [number, number][] {
-    if (this.devices.length === 1 || total === 0) return [[0, total]];
+  private weights(): number[] {
     // Peso medido en la torre: 5070 Ti ≈79%, 2060 ≈21% (T122/T124). Con otros pares, a partes iguales.
-    const weights = (this.customWeights && this.customWeights.length === this.devices.length)
+    const raw = (this.customWeights && this.customWeights.length === this.devices.length)
       ? [...this.customWeights]
       : this.devices.map(d => this.devices.includes(0) && this.devices.includes(1) ? (d === 0 ? 0.79 : d === 1 ? 0.21 : 1 / this.devices.length) : 1 / this.devices.length);
-    const sum = weights.reduce((a, b) => a + b, 0);
+    const sum = raw.reduce((a, b) => a + b, 0);
+    return raw.map(w => w / sum);
+  }
+
+  private ranges(cells: Int32Array, total: number, weights: readonly number[]): [number, number][] {
+    if (this.devices.length === 1 || total === 0) return this.devices.map((_, i) => (i === 0 ? [0, total] : [total, total]) as [number, number]);
     const ranges: [number, number][] = []; let begin = 0; let acc = 0;
     for (let i = 0; i < this.devices.length; i++) {
-      acc += weights[i]! / sum;
+      acc += weights[i]!;
       let end = i === this.devices.length - 1 ? total : Math.round(total * acc);
       if (i < this.devices.length - 1 && end > begin && end < total) {
         // Redondeo a páginas completas: ninguna página se parte entre dispositivos.
@@ -342,157 +628,147 @@ export class ResidentGpuBridge {
     return ranges;
   }
 
-  run(terrain: SharedTerrain, pageSetVersion: number, pass: 'ecologia' | 'kernel', params: Record<string, unknown>, regionSide: number = 256, options?: { downloadSlots?: readonly number[] }): GpuRunResult {
-    if (this.closed) throw new Error('ResidentGpuBridge cerrado.');
-    if (this.broken) throw this.broken;
+  /** Decide cómo llevar la VRAM a la topología del anfitrión: completo, incremental o nada. */
+  private planTopology(terrain: SharedTerrain, key: TopologyKey, sharded: boolean, allowIncremental: boolean): { full?: FullPlan; delta?: DeltaPlan; kind: 'full' | 'delta' | 'noop' } {
     const buffers = terrain.buffers;
-    const cells = new Int32Array(buffers.cells!);
-    const stampsBuf = buffers.stamps!; const pageX = new Int32Array(buffers.pageX!);
-    const capacityCells = stampsBuf.byteLength / 4, slots = pageX.length, totalCells = cells.length;
-    if (capacityCells > 134_217_728) throw new RangeError('Capacidad por encima de MAX_CELLS (134_217_728).');
-    const key: TopologyKey = { version: terrain.version, pageSetVersion, capacityCells, slots, totalCells, regionSide };
-    const syncNeeded = !this.synced || this.synced.version !== key.version || this.synced.pageSetVersion !== key.pageSetVersion
-      || this.synced.capacityCells !== key.capacityCells || this.synced.slots !== key.slots || this.synced.totalCells !== key.totalCells
-      || this.synced.regionSide !== key.regionSide;
-    const dirtyArr = new Uint8Array(buffers.dirty!);
-    const dirtySlots: number[] = [];
-    for (let s = 0; s < dirtyArr.length; s++) if (dirtyArr[s]) dirtySlots.push(s);
-    if (syncNeeded) {
-      this.cachedRanges = this.ranges(cells, totalCells);
-      if (this.devices.length <= 1) {
-        this.cachedHaloSlotsPerDevice = this.cachedRanges.map(() => []);
-        this.cachedAllHaloSlots = [];
-      } else {
-        const around = new Int32Array(buffers.around!);
-        this.cachedHaloSlotsPerDevice = this.cachedRanges.map(([begin, end]) => {
-          const assigned = new Uint8Array(slots);
-          for (let i = begin; i < end; i++) assigned[cells[i]! >>> 8] = 1;
-          const halo = new Set<number>();
-          for (let slot = 0; slot < slots; slot++) if (assigned[slot]) for (let k = 0; k < 9; k++) { const nb = around[slot * 9 + k]!; if (nb >= 0 && !assigned[nb]) halo.add(nb); }
-          return [...halo].sort((a, b) => a - b);
-        });
-        const union = new Set<number>();
-        for (const lst of this.cachedHaloSlotsPerDevice) for (const s of lst) union.add(s);
-        this.cachedAllHaloSlots = [...union].sort((a, b) => a - b);
-      }
+    const cells = new Int32Array(buffers.cells!), around = new Int32Array(buffers.around!);
+    const pageX = new Int32Array(buffers.pageX!), pageY = new Int32Array(buffers.pageY!);
+    const identity = !sharded;
+    const topo = this.topo;
+    if (allowIncremental && topo && this.synced && topo.identity === identity && topo.slots === key.slots && topo.capacityCells === key.capacityCells) {
+      const delta = topo.delta(cells, key.totalCells, around, pageX, pageY);
+      if (delta === 'noop') return { kind: 'noop' };
+      if (delta) return { delta, kind: 'delta' };
     }
-    const ranges = this.cachedRanges;
-    const haloSlotsPerDevice = this.cachedHaloSlotsPerDevice;
-    let downloadSlots: number[] | undefined;
-    if (options?.downloadSlots !== undefined) {
-      if (pass === 'kernel' && this.cachedAllHaloSlots.length > 0) {
-        const set = new Set<number>(options.downloadSlots);
-        for (const s of this.cachedAllHaloSlots) set.add(s);
-        downloadSlots = [...set].sort((a, b) => a - b);
-      } else {
-        downloadSlots = [...options.downloadSlots].sort((a, b) => a - b);
-      }
+    const weights = this.weights();
+    const { topo: next, plan } = ResidentTopology.full(identity, weights, this.ranges(cells, key.totalCells, weights), cells, key.totalCells,
+      around, pageX, pageY, key.slots, key.capacityCells, terrain.version);
+    this.topo = next;
+    return { full: plan, kind: 'full' };
+  }
+
+  private transferables(full?: FullPlan, delta?: DeltaPlan): ArrayBuffer[] {
+    const out: ArrayBuffer[] = [];
+    if (full) for (const d of full.devices) { if (d.l2g.byteLength) out.push(d.l2g.buffer as ArrayBuffer); out.push(d.cells.buffer as ArrayBuffer); }
+    if (delta) {
+      out.push(delta.pages.buffer as ArrayBuffer, delta.stamps.buffer as ArrayBuffer, delta.pageX.buffer as ArrayBuffer, delta.pageY.buffer as ArrayBuffer);
+      for (const d of delta.devices) out.push(d.aroundData.buffer as ArrayBuffer, d.cellsData.buffer as ArrayBuffer);
     }
-    const sharded = this.devices.length > 1 && (this.shardedOption ?? (capacityCells > 16_000_000));
-    Atomics.store(this.control, 0, 0);
-    this.statsArr.fill(0);
-    try {
-      this.worker.postMessage({
-        kind: 'step', pass: pass === 'ecologia' ? 1 : 2, buffers, dirtySlots, ranges, haloSlotsPerDevice,
-        downloadSlots, capacityCells, slots, totalCells, syncNeeded, sharded, params,
-      });
-    } catch (error) { this.synced = null; throw error; }
+    return out.filter((b, i, all) => b.byteLength > 0 && all.indexOf(b) === i);
+  }
+
+  private wait(label: string, limitMs: number): void {
     // Espera síncrona (mismo patrón que StaticWorkerPool): el worker hace el IPC async con Python.
     const waitStarted = Date.now();
     for (;;) {
       const status = Atomics.load(this.control, 0);
-      if (status === 1) break;
-      if (status === 2 || Date.now() - waitStarted > 120000) {
+      if (status === 1) return;
+      if (status === 2 || Date.now() - waitStarted > limitMs) {
         let msg = ''; for (let i = 0; i < this.errorArr.length && this.errorArr[i]; i++) msg += String.fromCharCode(this.errorArr[i]!);
-        this.synced = null; this.broken = new Error(`ResidentGpuBridge: ${msg || 'timeout esperando al subproceso GPU'}`);
+        this.synced = null; this.topo = null; this.broken = new Error(`${label}: ${msg || 'timeout esperando al subproceso GPU'}`);
         throw this.broken;
       }
       Atomics.wait(this.control, 0, 0, 5000);
     }
+  }
+
+  private dirtySlotsOf(dirtyArr: Uint8Array): number[] {
+    const dirtySlots: number[] = [];
+    for (let s = 0; s < dirtyArr.length; s++) if (dirtyArr[s]) dirtySlots.push(s);
+    return dirtySlots;
+  }
+
+  private finish(buffers: Record<string, SharedArrayBuffer>, dirtyArr: Uint8Array, pass: 'ecologia' | 'kernel', syncKind: GpuBridgeStats['syncKind']): GpuRunResult {
     const uploadedBytes = this.statsArr[0]!, downloadedBytes = this.statsArr[1]!, syncUploadedBytes = this.statsArr[2]!;
-    this.#last = { uploadedBytes, downloadedBytes, syncUploadedBytes, kernelMs: this.statsArr[3]!, devices: this.devices, lastPass: pass };
+    // `uploadedBytes` ya incluye la subida de sincronización (`syncUploadedBytes`).
+    this.#last = { uploadedBytes, downloadedBytes, syncUploadedBytes, kernelMs: this.statsArr[3]!, devices: this.devices, lastPass: pass, syncKind };
     this.#cumulative.uploadedBytes += uploadedBytes; this.#cumulative.downloadedBytes += downloadedBytes;
-    this.synced = key;
+    if (syncKind) this.#syncCounts[syncKind]++;
     // Páginas tocadas para la barrera, y limpieza: los actores re-marcarán solo lo que toquen.
     const dirtyPages: { pageX: number; pageY: number }[] = [];
-    const pageY = new Int32Array(buffers.pageY!);
+    const pageX = new Int32Array(buffers.pageX!), pageY = new Int32Array(buffers.pageY!);
     // dirty fue marcado por el worker para las páginas descargadas; capturarlo antes de limpiar.
     for (let s = 0; s < dirtyArr.length; s++) if (dirtyArr[s]) dirtyPages.push({ pageX: pageX[s]!, pageY: pageY[s]! });
     dirtyArr.fill(0);
     return { ...this.#last, dirtyPages };
   }
 
+  private topologyKey(terrain: SharedTerrain, pageSetVersion: number, regionSide: number): TopologyKey {
+    const buffers = terrain.buffers;
+    const cells = new Int32Array(buffers.cells!);
+    const capacityCells = buffers.stamps!.byteLength / 4, slots = new Int32Array(buffers.pageX!).length, totalCells = cells.length;
+    if (capacityCells > 134_217_728) throw new RangeError('Capacidad por encima de MAX_CELLS (134_217_728).');
+    return { version: terrain.version, pageSetVersion, capacityCells, slots, totalCells, regionSide };
+  }
+  private changed(key: TopologyKey): boolean {
+    const s = this.synced;
+    return !s || s.version !== key.version || s.pageSetVersion !== key.pageSetVersion || s.capacityCells !== key.capacityCells
+      || s.slots !== key.slots || s.totalCells !== key.totalCells || s.regionSide !== key.regionSide;
+  }
+
+  run(terrain: SharedTerrain, pageSetVersion: number, pass: 'ecologia' | 'kernel', params: Record<string, unknown>, regionSide: number = 256, options?: { downloadSlots?: readonly number[] }): GpuRunResult {
+    if (this.closed) throw new Error('ResidentGpuBridge cerrado.');
+    if (this.broken) throw this.broken;
+    const buffers = terrain.buffers;
+    const key = this.topologyKey(terrain, pageSetVersion, regionSide);
+    const sharded = this.devices.length > 1 && (this.shardedOption ?? (key.capacityCells > 16_000_000));
+    let plan: ReturnType<ResidentGpuBridge['planTopology']> | null = null;
+    // Incremental solo si el anfitrión es autoritativo (el último paso bajó todas las páginas propias).
+    if (this.changed(key)) plan = this.planTopology(terrain, key, sharded, !this.vramAhead);
+    const topo = this.topo!;
+    const dirtyArr = new Uint8Array(buffers.dirty!);
+    const dirtySlots = this.dirtySlotsOf(dirtyArr);
+    const haloSlotsPerDevice = topo.haloLists();
+    let downloadSlots: number[] | undefined;
+    if (options?.downloadSlots !== undefined) {
+      const set = new Set<number>(options.downloadSlots);
+      if (pass === 'kernel') for (const lst of haloSlotsPerDevice) for (const s of lst) set.add(s);
+      downloadSlots = [...set].sort((a, b) => a - b);
+    }
+    Atomics.store(this.control, 0, 0);
+    this.statsArr.fill(0);
+    try {
+      this.worker.postMessage({
+        kind: 'step', pass: pass === 'ecologia' ? 1 : 2, buffers, dirtySlots, haloSlotsPerDevice,
+        downloadSlots, capacityCells: key.capacityCells, slots: key.slots, full: plan?.full, delta: plan?.delta, params,
+      }, this.transferables(plan?.full, plan?.delta));
+    } catch (error) { this.synced = null; this.topo = null; throw error; }
+    this.wait('ResidentGpuBridge', 120000);
+    this.synced = key;
+    if (plan?.full) this.vramAhead = false;
+    if (options?.downloadSlots !== undefined) this.vramAhead = true;
+    return this.finish(buffers, dirtyArr, pass, plan?.kind ?? null);
+  }
+
   /**
    * T122 opción (b): ejecuta las dos pasadas del tick ecológico (`ecology_pass1` + `ecology_pass2`)
    * en VRAM sobre la misma cola CUDA y descarga solo los halos de consumidores CPU activos
    * (`downloadSlots`), manteniendo el resto del mundo autoritativo en VRAM hasta `flushToHost()`.
+   * Con la VRAM autoritativa, un cambio de topología resincroniza entero desde el anfitrión (como antes).
    */
   runTick(terrain: SharedTerrain, pageSetVersion: number, pass1Params: Record<string, unknown>, pass2Params: Record<string, unknown>, regionSide: number = 256, options?: { downloadSlots?: readonly number[] }): GpuRunResult {
     if (this.closed) throw new Error('ResidentGpuBridge cerrado.');
     if (this.broken) throw this.broken;
     const buffers = terrain.buffers;
-    const cells = new Int32Array(buffers.cells!);
-    const stampsBuf = buffers.stamps!; const pageX = new Int32Array(buffers.pageX!);
-    const capacityCells = stampsBuf.byteLength / 4, slots = pageX.length, totalCells = cells.length;
-    if (capacityCells > 134_217_728) throw new RangeError('Capacidad por encima de MAX_CELLS (134_217_728).');
-    const key: TopologyKey = { version: terrain.version, pageSetVersion, capacityCells, slots, totalCells, regionSide };
-    const syncNeeded = !this.synced || this.synced.version !== key.version || this.synced.pageSetVersion !== key.pageSetVersion
-      || this.synced.capacityCells !== key.capacityCells || this.synced.slots !== key.slots || this.synced.totalCells !== key.totalCells
-      || this.synced.regionSide !== key.regionSide;
+    const key = this.topologyKey(terrain, pageSetVersion, regionSide);
+    const sharded = this.devices.length > 1 && (this.shardedOption ?? (key.capacityCells > 16_000_000));
+    const plan = this.changed(key) ? this.planTopology(terrain, key, sharded, false) : null;
+    const topo = this.topo!;
     const dirtyArr = new Uint8Array(buffers.dirty!);
-    const dirtySlots: number[] = [];
-    for (let s = 0; s < dirtyArr.length; s++) if (dirtyArr[s]) dirtySlots.push(s);
-    if (syncNeeded) {
-      this.cachedRanges = this.ranges(cells, totalCells);
-      if (this.devices.length <= 1) {
-        this.cachedHaloSlotsPerDevice = this.cachedRanges.map(() => []);
-        this.cachedAllHaloSlots = [];
-      } else {
-        const around = new Int32Array(buffers.around!);
-        this.cachedHaloSlotsPerDevice = this.cachedRanges.map(([begin, end]) => {
-          const assigned = new Uint8Array(slots);
-          for (let i = begin; i < end; i++) assigned[cells[i]! >>> 8] = 1;
-          const halo = new Set<number>();
-          for (let slot = 0; slot < slots; slot++) if (assigned[slot]) for (let k = 0; k < 9; k++) { const nb = around[slot * 9 + k]!; if (nb >= 0 && !assigned[nb]) halo.add(nb); }
-          return [...halo].sort((a, b) => a - b);
-        });
-        const union = new Set<number>();
-        for (const lst of this.cachedHaloSlotsPerDevice) for (const s of lst) union.add(s);
-        this.cachedAllHaloSlots = [...union].sort((a, b) => a - b);
-      }
-    }
+    const dirtySlots = this.dirtySlotsOf(dirtyArr);
     const downloadSlots = options?.downloadSlots ? [...options.downloadSlots].sort((a, b) => a - b) : [];
-    const sharded = this.devices.length > 1 && (this.shardedOption ?? (capacityCells > 16_000_000));
     Atomics.store(this.control, 0, 0);
     this.statsArr.fill(0);
     try {
       this.worker.postMessage({
-        kind: 'tick', buffers: syncNeeded ? buffers : undefined, dirtySlots,
-        ranges: syncNeeded ? this.cachedRanges : undefined,
-        haloSlotsPerDevice: syncNeeded ? this.cachedHaloSlotsPerDevice : undefined,
-        downloadSlots, capacityCells, slots, totalCells, syncNeeded, sharded, pass1Params, pass2Params,
-      });
-    } catch (error) { this.synced = null; throw error; }
-    const waitStarted = Date.now();
-    for (;;) {
-      const status = Atomics.load(this.control, 0);
-      if (status === 1) break;
-      if (status === 2 || Date.now() - waitStarted > 120000) {
-        let msg = ''; for (let i = 0; i < this.errorArr.length && this.errorArr[i]; i++) msg += String.fromCharCode(this.errorArr[i]!);
-        this.synced = null; this.broken = new Error(`ResidentGpuBridge tick: ${msg || 'timeout'}`);
-        throw this.broken;
-      }
-      Atomics.wait(this.control, 0, 0, 5000);
-    }
-    const uploadedBytes = this.statsArr[0]!, downloadedBytes = this.statsArr[1]!, syncUploadedBytes = this.statsArr[2]!;
-    this.#last = { uploadedBytes, downloadedBytes, syncUploadedBytes, kernelMs: this.statsArr[3]!, devices: this.devices, lastPass: 'kernel' };
-    this.#cumulative.uploadedBytes += uploadedBytes; this.#cumulative.downloadedBytes += downloadedBytes;
-    this.synced = key;
-    const dirtyPages: { pageX: number; pageY: number }[] = [];
-    const pageY = new Int32Array(buffers.pageY!);
-    for (let s = 0; s < dirtyArr.length; s++) if (dirtyArr[s]) dirtyPages.push({ pageX: pageX[s]!, pageY: pageY[s]! });
-    dirtyArr.fill(0);
-    return { ...this.#last, dirtyPages };
+        kind: 'tick', buffers: plan ? buffers : undefined, dirtySlots,
+        haloSlotsPerDevice: topo.haloLists(), downloadSlots, capacityCells: key.capacityCells, slots: key.slots,
+        full: plan?.full, pass1Params, pass2Params,
+      }, this.transferables(plan?.full));
+    } catch (error) { this.synced = null; this.topo = null; throw error; }
+    this.wait('ResidentGpuBridge tick', 120000);
+    this.synced = key; this.vramAhead = true;
+    return this.finish(buffers, dirtyArr, 'kernel', plan?.kind ?? null);
   }
 
   /** Materializa en RAM del anfitrión todas las páginas autoritativas residentes en VRAM (T122 opción b). */
@@ -501,21 +777,9 @@ export class ResidentGpuBridge {
     if (this.broken) throw this.broken;
     if (!this.synced) return;
     Atomics.store(this.control, 0, 0);
-    this.worker.postMessage({
-      kind: 'flush', buffers: terrain.buffers, ranges: this.cachedRanges,
-      capacityCells: this.synced.capacityCells, slots: this.synced.slots, totalCells: this.synced.totalCells, syncNeeded: false,
-    });
-    const waitStarted = Date.now();
-    for (;;) {
-      const status = Atomics.load(this.control, 0);
-      if (status === 1) break;
-      if (status === 2 || Date.now() - waitStarted > 60000) {
-        let msg = ''; for (let i = 0; i < this.errorArr.length && this.errorArr[i]; i++) msg += String.fromCharCode(this.errorArr[i]!);
-        this.synced = null; this.broken = new Error(`ResidentGpuBridge flush: ${msg || 'timeout'}`);
-        throw this.broken;
-      }
-      Atomics.wait(this.control, 0, 0, 5000);
-    }
+    this.worker.postMessage({ kind: 'flush', buffers: terrain.buffers });
+    this.wait('ResidentGpuBridge flush', 60000);
+    this.vramAhead = false;
   }
 
   /** Mata el subproceso Python (para la prueba de aborto); el siguiente run() debe fallar antes del swap. */
@@ -523,7 +787,7 @@ export class ResidentGpuBridge {
     Atomics.store(this.control, 0, 0);
     this.worker.postMessage({ kind: 'kill' });
     // No esperamos al worker: la muerte se observa en el siguiente run (o en este si el lector ya falló).
-    this.synced = null;
+    this.synced = null; this.topo = null;
     // Dar una oportunidad breve a que SIGKILL surta efecto sin bloquear el test indefinidamente.
     const deadline = Date.now() + 2000;
     while (Date.now() < deadline) {

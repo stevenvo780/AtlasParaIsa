@@ -689,7 +689,7 @@ export function stepAnimals(world: AnimalWorld, emit?: AnimalEmitter, mascara?: 
     .sort((a, b) => a.lastDecision - b.lastDecision || canonical(a, b)).slice(0, MAX_ANIMAL_DECISIONS_PER_TICK);
   // Después de la fisiología y sus emisiones: choose no escribe terreno ni llama código externo.
   const motor = paramsOf(world).motor;
-  if (motor.hilos > 1 && due.length >= 64) {
+  if (motor.hilos > 1 && due.length >= 384) {
     applyFaunaChooseOutputs(due, world, stepChooseParallel(world, due, state, motor.hilos, motor.orden));
   } else {
     state.reader = residentTileReader(world.tiles);

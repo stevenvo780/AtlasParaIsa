@@ -29,6 +29,7 @@ import { TICKS_PER_DAY, type Person, type World } from '../index.js';
 import { demographicTraits } from '../demography.js';
 import { waterAvailable } from '../inventions.js';
 import { paramsOf } from '../params.js';
+import { residentTerrainRevision, residentTopologyToken, sameResidentTopology, type ResidentTopologyToken } from '../soa/topologia.js';
 import { containedWaterQuanta } from '../technology-water.js';
 import { emptyAggregateBooks, reduceAggregates, type AggregateBooks, type Intent as IntentAgregado, type ReductionCost } from './agregados.js';
 import { partitionRegions, type StaticRegion, type StaticRegionOrder } from './particion.js';
@@ -104,6 +105,7 @@ export class EstadoPersonasCompartido {
   #regionesMorton = 0;
   #reasignaciones = 0;
   #regionSide: RegionSidePersonas = 256;
+  #walkCache: { tiles: Tile[]; length: number; token: ResidentTopologyToken; terrainRev: object; paginas: number; capHash: number } | null = null;
 
   constructor() { this.#asignar(1, 2, 1); }
 
@@ -132,10 +134,12 @@ export class EstadoPersonasCompartido {
     };
     this.#capPaginas = capPaginas; this.#capHash = capHash; this.#capPersonas = capPersonas;
     this.#reasignaciones++;
+    this.#walkCache = null;
   }
 
   /** Vuelca la escena en los SAB y reparte los actores por regiones Morton. */
   empaquetar(escena: EscenaPersonas, opciones: { regionSide?: RegionSidePersonas; bloque?: number } = {}): void {
+    this.#walkCache = null;
     const regionSide = opciones.regionSide ?? 256, bloque = opciones.bloque ?? BLOQUE_ACTORES;
     if (regionSide !== 256 && regionSide !== 512) throw new RangeError('regionSide debe ser 256 o 512.');
     if (!Number.isSafeInteger(bloque) || bloque < 1) throw new RangeError('bloque debe ser un entero positivo.');
@@ -250,35 +254,52 @@ export class EstadoPersonasCompartido {
     if (regionSide !== 256 && regionSide !== 512) throw new RangeError('regionSide debe ser 256 o 512.');
     if (!Number.isSafeInteger(bloque) || bloque < 1) throw new RangeError('bloque debe ser un entero positivo.');
     const tiles = world.tiles, personas = world.people;
-    const paginaDe = new Map<number, number>();
-    const pagX: number[] = [], pagY: number[] = [];
-    for (let i = 0; i < tiles.length; i++) {
-      const tile = tiles[i]!;
-      const px = tile.x >> 4, py = tile.y >> 4, clave = clavePagina(px, py);
-      if (!paginaDe.has(clave)) { paginaDe.set(clave, pagX.length); pagX.push(px); pagY.push(py); }
-    }
-    const paginas = pagX.length, capHash = siguientePotencia(Math.max(2, paginas * 2));
-    if (paginas > this.#capPaginas || capHash > this.#capHash || personas.length > this.#capPersonas) {
-      const crecer = (actual: number, necesario: number): number => necesario > actual ? Math.max(necesario, actual * 2) : actual;
-      this.#asignar(crecer(this.#capPaginas, paginas), Math.max(capHash, this.#capHash), crecer(this.#capPersonas, personas.length));
-    }
-    const vista = crearVista(this.#buffers, {
-      capPersonas: this.#capPersonas, personas: personas.length, hashMask: capHash - 1,
-      lluvia: false, memoriaDisputa: 0, disputaDestino: 0,
-    });
-    vista.paginasSlot.fill(-1, 0, capHash);
-    for (let slot = 0; slot < paginas; slot++) {
-      let h = hashPagina(pagX[slot]!, pagY[slot]!, capHash - 1);
-      while (vista.paginasSlot[h]! >= 0) h = (h + 1) & (capHash - 1);
-      vista.paginasX[h] = pagX[slot]!; vista.paginasY[h] = pagY[slot]!; vista.paginasSlot[h] = slot;
-    }
-    const celdas = paginas * CELDAS_POR_PAGINA;
-    vista.flags.fill(0, 0, celdas);
-    for (let i = 0; i < tiles.length; i++) {
-      const tile = tiles[i]!;
-      const slot = paginaDe.get(clavePagina(tile.x >> 4, tile.y >> 4))!;
-      const celda = slot * CELDAS_POR_PAGINA + ((tile.y & 15) << 4) + (tile.x & 15);
-      vista.flags[celda] = CELDA_PRESENTE | (tile.terrain !== 'water' ? CELDA_CAMINABLE : 0);
+    const token = residentTopologyToken(tiles);
+    const terrainRev = token ? residentTerrainRevision(tiles) : undefined;
+    const cache = this.#walkCache;
+    let paginas: number, capHash: number, vista: VistaPersonas;
+    if (cache && cache.tiles === tiles && cache.length === tiles.length
+      && sameResidentTopology(cache.token, token) && cache.terrainRev === terrainRev
+      && personas.length <= this.#capPersonas) {
+      paginas = cache.paginas;
+      capHash = cache.capHash;
+      vista = crearVista(this.#buffers, {
+        capPersonas: this.#capPersonas, personas: personas.length, hashMask: capHash - 1,
+        lluvia: false, memoriaDisputa: 0, disputaDestino: 0,
+      });
+    } else {
+      const paginaDe = new Map<number, number>();
+      const pagX: number[] = [], pagY: number[] = [];
+      for (let i = 0; i < tiles.length; i++) {
+        const tile = tiles[i]!;
+        const px = tile.x >> 4, py = tile.y >> 4, clave = clavePagina(px, py);
+        if (!paginaDe.has(clave)) { paginaDe.set(clave, pagX.length); pagX.push(px); pagY.push(py); }
+      }
+      paginas = pagX.length;
+      capHash = siguientePotencia(Math.max(2, paginas * 2));
+      if (paginas > this.#capPaginas || capHash > this.#capHash || personas.length > this.#capPersonas) {
+        const crecer = (actual: number, necesario: number): number => necesario > actual ? Math.max(necesario, actual * 2) : actual;
+        this.#asignar(crecer(this.#capPaginas, paginas), Math.max(capHash, this.#capHash), crecer(this.#capPersonas, personas.length));
+      }
+      vista = crearVista(this.#buffers, {
+        capPersonas: this.#capPersonas, personas: personas.length, hashMask: capHash - 1,
+        lluvia: false, memoriaDisputa: 0, disputaDestino: 0,
+      });
+      vista.paginasSlot.fill(-1, 0, capHash);
+      for (let slot = 0; slot < paginas; slot++) {
+        let h = hashPagina(pagX[slot]!, pagY[slot]!, capHash - 1);
+        while (vista.paginasSlot[h]! >= 0) h = (h + 1) & (capHash - 1);
+        vista.paginasX[h] = pagX[slot]!; vista.paginasY[h] = pagY[slot]!; vista.paginasSlot[h] = slot;
+      }
+      const celdas = paginas * CELDAS_POR_PAGINA;
+      vista.flags.fill(0, 0, celdas);
+      for (let i = 0; i < tiles.length; i++) {
+        const tile = tiles[i]!;
+        const slot = paginaDe.get(clavePagina(tile.x >> 4, tile.y >> 4))!;
+        const celda = slot * CELDAS_POR_PAGINA + ((tile.y & 15) << 4) + (tile.x & 15);
+        vista.flags[celda] = CELDA_PRESENTE | (tile.terrain !== 'water' ? CELDA_CAMINABLE : 0);
+      }
+      this.#walkCache = token && terrainRev ? { tiles, length: tiles.length, token, terrainRev, paginas, capHash } : null;
     }
     const cap = this.#capPersonas;
     const mortonDe = new Map<number, bigint>();

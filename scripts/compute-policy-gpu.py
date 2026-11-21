@@ -118,15 +118,16 @@ class Device:
             return
         checked(self.current(self.context))
         if n > self.capacity:
+            new_cap = max(n, self.capacity * 2, 64)
             for ptr in self.ptrs:
                 checked(self.free(ptr))
             self.ptrs = []
             self.capacity = 0
             for width in (12, 212, 12, 12):
                 ptr = C.c_uint64()
-                checked(self.alloc(C.byref(ptr), n * width * 8))
+                checked(self.alloc(C.byref(ptr), new_cap * width * 8))
                 self.ptrs.append(ptr)
-            self.capacity = n
+            self.capacity = new_cap
         # Data layout is observation rows, weight rows, optional lifetime bias rows.
         base = C.addressof((C.c_ubyte * len(body)).from_buffer(body))
         for slot, offset, width in ((0, begin * 12 * 8, 12),
@@ -168,9 +169,7 @@ def read_exact(n):
 
 def send(header, body=b''):
     raw = json.dumps(header, separators=(',', ':')).encode()
-    sys.stdout.buffer.write(struct.pack('<I', len(raw)))
-    sys.stdout.buffer.write(raw)
-    sys.stdout.buffer.write(body)
+    sys.stdout.buffer.write(struct.pack('<I', len(raw)) + raw + body)
     sys.stdout.buffer.flush()
 
 

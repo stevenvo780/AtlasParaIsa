@@ -6,6 +6,7 @@ import { assimilateFood, exertBody, hydrateBody, restBody } from './body.js';
 import { MAX_COORDINATE } from './terrain.js';
 import { LEGACY_WORLD_LIMITS, limitsOf } from './params.js';
 import { tileLookup } from './tile-index.js';
+import { residentFaunaCapacity } from './soa/terreno.js';
 import { primero, primerosDos } from './orden.js';
 
 export const MAX_ACTIVE_ANIMALS = 8192;
@@ -118,8 +119,13 @@ export function syncFauna(tiles: Tile[], animals: Animal[]): void {
     const tile = tileIn(at.x, at.y);
     if (!tile) return;
     const count = counts.get(p);
-    tile.fauna = count?.count ?? 0;
-    if (count) tile.species = count.species; else delete tile.species;
+    const nextFauna = count?.count ?? 0;
+    if (!Object.is(tile.fauna, nextFauna)) tile.fauna = nextFauna;
+    if (count) {
+      if (tile.species !== count.species) tile.species = count.species;
+    } else if (Object.hasOwn(tile, 'species')) {
+      delete tile.species;
+    }
   };
   // Cada celda una sola vez: primero las ocupadas antes y luego las nuevas, el orden del antiguo
   // `new Set([...occupied, ...counts.keys()])` (cada celda escribe una tesela distinta).
@@ -430,6 +436,8 @@ function feed(animal: Animal, tile: Tile, world: AnimalWorld): void {
  * those sites to report their own deltas — proposed for T140 ("recuento incremental mantenido por el
  * paso ecológico"), not attempted here: a wrong number would change `digestoCanonico`. */
 function faunaCapacity(tiles: readonly Tile[]): number {
+  const fast = residentFaunaCapacity(tiles);
+  if (fast !== undefined) return fast;
   let count = 0;
   for (const t of tiles) if (t.terrain !== 'shelter' && (t.growth ?? 0) > 0.04) count++;
   return count * 3;
@@ -635,14 +643,20 @@ export function stepAnimals(world: AnimalWorld, emit?: AnimalEmitter, mascara?: 
   const due = active.filter(a => world.tick - a.lastDecision >= 8)
     .sort((a, b) => a.lastDecision - b.lastDecision || canonical(a, b)).slice(0, MAX_ANIMAL_DECISIONS_PER_TICK);
   for (const animal of due) choose(animal, world, state);
-  // Cadena secuencial (ver `move`): permanece en la fase serial del coordinador.
-  for (const animal of [...active].sort((a, b) => Number(b.action === 'flee') - Number(a.action === 'flee') || canonical(a, b))) move(animal, world, state);
-  const byId = new Map(world.animals.map(a => [a.id, a]));
+  // Cadena secuencial (ver `move`): permanece en la fase serial del coordinador. `active` ya está
+  // en orden canónico (`m.seleccion`), así que dos pasadas (`flee` primero) son idénticas al `sort`.
+  for (const animal of active) if (animal.action === 'flee') move(animal, world, state);
+  for (const animal of active) if (animal.action !== 'flee') move(animal, world, state);
+  let byId: Map<string, Animal> | undefined;
   for (const animal of active) {
     if (animal.health <= 0) continue;
     const tile = state.tile(animal.x, animal.y)!;
     feed(animal, tile, world);
     if (animal.action !== 'hunt' || !animal.preyId) continue;
+    if (!byId) {
+      byId = new Map();
+      for (const a of world.animals) byId.set(a.id, a);
+    }
     const prey = byId.get(animal.preyId);
     // A resident prey is physically reachable even when its own routine is deferred; archived animals are absent from byId.
     if (!prey || prey.health <= 0 || !edible(animal, prey) || distance(animal, prey) > 0) { animal.work = 0; continue; }

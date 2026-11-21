@@ -58,13 +58,31 @@ const RESIDENT_NUMBERS = ['moisture', 'vegetation', 'food', 'wood', 'growth', 'f
 type ResidentKey = typeof RESIDENT_NUMBERS[number] | 'terrain' | 'biome' | 'feature' | 'life';
 interface ResidentBinding { store: TileStore; tile: Tile; cell: number; x: number; y: number; mask: number; }
 const bindings = new WeakMap<Tile, ResidentBinding>();
+const residentStoreByTiles = new WeakMap<Tile[], TileStore>();
 const residentKeys: readonly ResidentKey[] = [...RESIDENT_NUMBERS, 'terrain', 'biome', 'feature', 'life'];
+const residentKeySet = new Set<PropertyKey>(residentKeys);
 const enumValues: Partial<Record<ResidentKey, readonly string[]>> = { terrain: TERRAINS, biome: BIOMES, feature: FEATURES };
-const residentAccessors = Object.fromEntries(residentKeys.map(key => [key, {
-  configurable: true, enumerable: true,
-  get(this: Tile) { const binding = bindings.get(this)!; return binding.store.residentRead(key, binding.cell); },
-  set(this: Tile, value: unknown) { const binding = bindings.get(this)!; binding.store.residentWrite(key, binding.cell, value); },
-}])) as Record<ResidentKey, PropertyDescriptor>;
+const TERRAIN_IDX = residentKeys.indexOf('terrain');
+const GROWTH_IDX = residentKeys.indexOf('growth');
+const SHELTER_CODE = TERRAINS.indexOf('shelter') + 1;
+const residentAccessors = Object.fromEntries(residentKeys.map((key, idx) => {
+  const values = enumValues[key];
+  return [key, values ? {
+    configurable: true, enumerable: true,
+    get(this: Tile) { const binding = bindings.get(this)!; return binding.store.residentReadEnum(idx, binding.cell, values); },
+    set(this: Tile, value: unknown) { const binding = bindings.get(this)!; binding.store.residentWriteEnum(idx, key, binding.cell, value, values); },
+  } : {
+    configurable: true, enumerable: true,
+    get(this: Tile) { const binding = bindings.get(this)!; return binding.store.residentReadNumber(idx, binding.cell); },
+    set(this: Tile, value: unknown) { const binding = bindings.get(this)!; binding.store.residentWriteNumber(idx, key, binding.cell, value); },
+  }];
+})) as Record<ResidentKey, PropertyDescriptor>;
+
+/** Camino rápido exacto de `faunaCapacity` sobre el SoA residente (0 llamadas a getters/Proxy). */
+export function residentFaunaCapacity(tiles: readonly Tile[]): number | undefined {
+  const store = residentStoreByTiles.get(tiles as Tile[]);
+  return store?.faunaCapacityIfResident(tiles);
+}
 
 export interface SharedTerrain {
   regions: readonly StaticRegion[];
@@ -99,6 +117,7 @@ export class TileStore {
   private residentTiles: Tile[] | null = null;
   private residentBindings: ResidentBinding[] = [];
   private residentPairs = new Map<ResidentKey, [Float64Array | Uint8Array, Float64Array | Uint8Array]>();
+  private residentCur: (Float64Array | Uint8Array)[] = new Array(residentKeys.length);
   private residentGeneration = -1;
   private residentCells = new Int32Array(new SharedArrayBuffer(0));
   private residentRegions: StaticRegion[] = [];
@@ -216,7 +235,7 @@ export class TileStore {
   /** Intercambia frente y fondo: la pasada debe haber escrito el fondo de todas las celdas presentes. */
   swapLife(): void {
     if (this.taken === 0) throw new Error(NO_AUTHORITY);
-    this.back(); this.parity ^= 1;
+    this.back(); this.parity ^= 1; this.syncResidentCur();
   }
 
   /** Vuelca la SoA en las mismas teselas de la última `pack` y devuelve la autoridad a los objetos. */
@@ -321,6 +340,7 @@ export class TileStore {
           if (alive.length) this.residentWoodHoles.set(page, alive);
         }
         this.residentTiles = tiles;
+        residentStoreByTiles.set(tiles, this);
         const nextBindings = new Array<ResidentBinding>(tiles.length);
         for (let i = 0; i < tiles.length; i++) {
           const tile = tiles[i]!, cell = this.cellsOf[i]!;
@@ -336,7 +356,7 @@ export class TileStore {
           bindings.set(tile, binding);
           for (const key of residentKeys) if (Object.hasOwn(tile, key)) this.attachResidentAccessor(binding, key);
           observeResidentTile(tile, { before: () => { if (this.residentBusy) throw new Error(TWO_WRITERS); },
-            after: key => { if (residentKeys.includes(key as ResidentKey)) this.residentModified.add(binding); } });
+            after: (key, descriptorChanged) => { if (descriptorChanged !== false && residentKeySet.has(key)) this.residentModified.add(binding); } });
           for (const key of ['wood', 'feature'] as const) if (!Object.hasOwn(tile, key)) this.residentAbsent.push({ key, binding });
           if (['life', 'fertility', 'growth', 'traffic', 'cultivation', 'drinkingWater'].some(key => !Object.hasOwn(tile, key))) this.residentPending.push(binding);
           if (!Object.hasOwn(tile, 'wood')) {
@@ -365,6 +385,7 @@ export class TileStore {
         this.back(); this.refreshResident();
         this.residentPending = []; this.residentAbsent = []; this.residentWoodHoles.clear();
         this.residentTiles = tiles;
+        residentStoreByTiles.set(tiles, this);
         this.residentOwner = owner;
         this.residentBindings = tiles.map((tile, i) => {
           // Otra arena puede retener el mismo Tile (clon/reintento/restauración). Desligar antes de
@@ -376,7 +397,7 @@ export class TileStore {
           bindings.set(tile, binding);
           for (const key of residentKeys) if (Object.hasOwn(tile, key)) this.attachResidentAccessor(binding, key);
           observeResidentTile(tile, { before: () => { if (this.residentBusy) throw new Error(TWO_WRITERS); },
-            after: key => { if (residentKeys.includes(key as ResidentKey)) this.residentModified.add(binding); } });
+            after: (key, descriptorChanged) => { if (descriptorChanged !== false && residentKeySet.has(key)) this.residentModified.add(binding); } });
           for (const key of ['wood', 'feature'] as const) if (!Object.hasOwn(tile, key)) this.residentAbsent.push({ key, binding });
           if (['life', 'fertility', 'growth', 'traffic', 'cultivation', 'drinkingWater'].some(key => !Object.hasOwn(tile, key))) this.residentPending.push(binding);
           if (!Object.hasOwn(tile, 'wood')) {
@@ -486,7 +507,7 @@ export class TileStore {
         seen.add(page); addedPages.push(page);
       }
     }
-    this.parity ^= 1; this.residentBusy = false;
+    this.parity ^= 1; this.syncResidentCur(); this.residentBusy = false;
     // Ausentes al cargar: mismo orden de asignación que el kernel de objetos, sólo tras éxito.
     if (phase === 'kernel') {
       for (const binding of this.residentPending) for (const key of ['life', 'fertility', 'growth', 'traffic', 'cultivation', 'drinkingWater'] as const) {
@@ -509,14 +530,70 @@ export class TileStore {
   }
 
   residentRead(key: ResidentKey, cell: number): number | string | undefined {
-    this.refreshResident();
+    if (this.residentGeneration !== this.arena.generation) this.refreshResident();
     const value = this.residentPairs.get(key)![this.parity]![cell]!;
     const values = enumValues[key];
     return values ? (value ? values[value - 1] : undefined) : Number.isNaN(value) ? undefined : value;
   }
+  residentReadNumber(idx: number, cell: number): number | undefined {
+    if (this.residentGeneration !== this.arena.generation) this.refreshResident();
+    const value = (this.residentCur[idx] as Float64Array)[cell]!;
+    return value === value ? value : undefined;
+  }
+  residentReadEnum(idx: number, cell: number, values: readonly string[]): string | undefined {
+    if (this.residentGeneration !== this.arena.generation) this.refreshResident();
+    const value = (this.residentCur[idx] as Uint8Array)[cell]!;
+    return value ? values[value - 1] : undefined;
+  }
   residentWrite(key: ResidentKey, cell: number, value: unknown): void {
     if (this.residentBusy) throw new Error(TWO_WRITERS);
-    this.refreshResident(); this.writeResidentValue(key, cell, value); this.dirty[cell >>> 8] = 1;
+    if (this.residentGeneration !== this.arena.generation) this.refreshResident();
+    this.writeResidentValue(key, cell, value); this.dirty[cell >>> 8] = 1;
+  }
+  residentWriteNumber(idx: number, key: ResidentKey, cell: number, value: unknown): void {
+    if (this.residentBusy) throw new Error(TWO_WRITERS);
+    if (this.residentGeneration !== this.arena.generation) this.refreshResident();
+    let encoded: number;
+    if (value === undefined) encoded = Number.NaN;
+    else if (typeof value !== 'number' || Number.isNaN(value)) throw new RangeError(`Tesela no representable en el SoA: ${key}=${String(value)}.`);
+    else encoded = value;
+    (this.residentCur[idx] as Float64Array)[cell] = encoded;
+    this.dirty[cell >>> 8] = 1;
+  }
+  residentWriteEnum(idx: number, key: ResidentKey, cell: number, value: unknown, values: readonly string[]): void {
+    if (this.residentBusy) throw new Error(TWO_WRITERS);
+    if (this.residentGeneration !== this.arena.generation) this.refreshResident();
+    let encoded: number;
+    if (value === undefined) encoded = 0;
+    else {
+      const code = typeof value === 'string' ? values.indexOf(value) + 1 : 0;
+      if (code <= 0) throw new RangeError(`Tesela no representable en el SoA: ${key}=${String(value)}.`);
+      encoded = code;
+    }
+    (this.residentCur[idx] as Uint8Array)[cell] = encoded;
+    this.dirty[cell >>> 8] = 1;
+  }
+  faunaCapacityIfResident(tiles: readonly Tile[]): number | undefined {
+    if (this.residentTiles !== tiles || this.residentBusy || this.residentModified.size > 0
+      || this.residentBindings.length !== tiles.length || this.loaded !== tiles.length) return undefined;
+    if (!sameResidentTopology(residentTopologyToken(tiles as Tile[]), this.residentTopology)) return undefined;
+    if (this.residentGeneration !== this.arena.generation) this.refreshResident();
+    const cells = this.cellsOf, n = this.loaded;
+    const terrain = this.residentCur[TERRAIN_IDX] as Uint8Array;
+    const growth = this.residentCur[GROWTH_IDX] as Float64Array;
+    let count = 0;
+    for (let i = 0; i < n; i++) {
+      const cell = cells[i]!;
+      if (terrain[cell] !== SHELTER_CODE && growth[cell]! > 0.04) count++;
+    }
+    return count * 3;
+  }
+  private syncResidentCur(): void {
+    const p = this.parity;
+    for (let k = 0; k < residentKeys.length; k++) {
+      const pair = this.residentPairs.get(residentKeys[k]!);
+      if (pair) this.residentCur[k] = pair[p]!;
+    }
   }
   private writeResidentValue(key: ResidentKey, cell: number, value: unknown): void {
     this.residentPairs.get(key)![this.parity]![cell] = this.encodeResident(key, value);
@@ -542,6 +619,7 @@ export class TileStore {
     }
     this.refresh(); this.residentPairs.set('life', [this.lives[0], this.lives[1]!]);
     this.residentGeneration = this.arena.generation;
+    this.syncResidentCur();
   }
   private attachResidentAccessor(binding: ResidentBinding, key: ResidentKey): void {
     maintainResidentTile(binding.tile, () => Object.defineProperty(binding.tile, key, residentAccessors[key]));
@@ -573,10 +651,14 @@ export class TileStore {
     observeResidentTile(binding.tile, undefined);
     bindings.delete(binding.tile);
     // Cambiar la autoridad desde otra arena obliga a refrescar antes de volver a usar ésta.
-    if (this.residentTiles) observeResidentArray(this.residentTiles, undefined);
+    if (this.residentTiles) {
+      observeResidentArray(this.residentTiles, undefined);
+      residentStoreByTiles.delete(this.residentTiles);
+    }
     this.residentTiles = null; this.residentTopology = undefined;
   }
   private detachResident(): void {
+    if (this.residentTiles) residentStoreByTiles.delete(this.residentTiles);
     for (const binding of this.residentBindings) this.detachBinding(binding);
     this.residentBindings = []; this.residentTiles = null; this.residentModified.clear(); this.residentTopology = undefined; this.residentOwner = undefined;
   }

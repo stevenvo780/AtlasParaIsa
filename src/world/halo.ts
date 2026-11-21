@@ -530,7 +530,7 @@ export const LECTURAS_POR_IDENTIDAD: readonly LecturaPorIdentidad[] = [
   { id: 'pertenencia.transferTechnologyItem', fase: 'accion', fuente: 'host.people', fichero: 'technology.ts', funcion: 'transferTechnologyItem',
     patrones: ['!isHostMember(host.people, from) || !isHostMember(host.people, to)'], motivo: 'Pertenencia de las dos partes (Set cacheado por longitud del arreglo).' },
   { id: 'fauna.presa', fase: 'faunaSerial', fuente: 'world.animals', fichero: 'animals.ts', funcion: 'stepAnimals',
-    patrones: ['const byId = new Map(world.animals.map(a => [a.id, a]));', 'const prey = byId.get(animal.preyId);'], motivo: 'Presa elegida (a ≤ 6) leída por id dondequiera que esté; sólo se la hiere a distancia 0.' },
+    patrones: ['for (const a of world.animals) byId.set(a.id, a);', 'const prey = byId.get(animal.preyId);'], motivo: 'Presa elegida (a ≤ 6) leída por id dondequiera que esté; sólo se la hiere a distancia 0.' },
   { id: 'muerte.identidad', fase: 'demografia', fuente: 'world.people + legado', fichero: 'lineage.ts', funcion: 'advancePopulation',
     patrones: ['const archived = new Set([...world.legacy, ...world.retiredLegacy].map(record => record.id));', 'world.people.some(person => archived.has(person.id))'], motivo: 'Ninguna identidad archivada reaparece.' },
   { id: 'muerte.legado', fase: 'demografia', fuente: 'world.legacy', fichero: 'index.ts', funcion: 'deathContext',

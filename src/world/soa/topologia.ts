@@ -4,7 +4,7 @@ import type { Tile } from '../../shared/types.js';
 export interface ResidentTopologyToken { readonly array: object; readonly coordinates: object; }
 export interface ResidentMutationObserver {
   before(): void;
-  after(key: PropertyKey): void;
+  after(key: PropertyKey, descriptorChanged?: boolean): void;
 }
 interface ObservedTile {
   owner: ResidentTopologyOwner;
@@ -51,6 +51,7 @@ const sameDescriptor = (a: PropertyDescriptor | undefined, b: PropertyDescriptor
  */
 export class ResidentTopologyOwner {
   private coordinates: object = {};
+  private terrainRevision: object = {};
   private opaqueTiles = 0;
   /** Proxies con escrituras lógicas desde el último drenaje; Set conserva identidad, orden y O(tocados). */
   private readonly changedTiles = new Set<Tile>();
@@ -60,9 +61,10 @@ export class ResidentTopologyOwner {
     const owner = this;
     // Los traps no pueden ejecutarse durante `new Proxy`; después siempre registran la identidad pública.
     let tile!: Tile;
-    const changed = (key: PropertyKey, reflection = false): void => {
+    const changed = (key: PropertyKey, reflection = false, descriptorChanged = reflection): void => {
       if (state.maintenance) return;
       if (key === 'x' || key === 'y') this.coordinates = {};
+      if (key === 'terrain') this.terrainRevision = {};
       if (reflection) {
         const descriptor = Reflect.getOwnPropertyDescriptor(target, key), wasOpaque = state.opaque.size > 0;
         if (descriptor && ('get' in descriptor || 'set' in descriptor)) state.opaque.add(key);
@@ -71,7 +73,7 @@ export class ResidentTopologyOwner {
         if (isOpaque !== wasOpaque) this.opaqueTiles += isOpaque ? 1 : -1;
       }
       owner.changedTiles.add(tile);
-      state.observer?.after(key);
+      state.observer?.after(key, descriptorChanged);
     };
     const before = (): void => { if (!state.maintenance) state.observer?.before(); };
     tile = new Proxy(target, {
@@ -83,29 +85,30 @@ export class ResidentTopologyOwner {
         const current = Reflect.getOwnPropertyDescriptor(object, key);
         // Un accessor puede escribir su valor fuera del descriptor (los residentes lo hacen en SAB).
         // Si ambos descriptores faltan, un setter heredado puede haber hecho lo mismo.
+        const descChanged = !sameDescriptor(previous, current);
         const externalSetter = accepted && (previous !== undefined && 'set' in previous && previous.set !== undefined
           || previous === undefined && current === undefined);
-        if (accepted && (!sameDescriptor(previous, current) || externalSetter)) changed(key);
+        if (accepted && (descChanged || externalSetter)) changed(key, false, descChanged || previous === undefined);
         return accepted;
       },
       defineProperty(object, key, descriptor) {
         const previous = Reflect.getOwnPropertyDescriptor(object, key);
         before(); const accepted = Reflect.defineProperty(object, key, descriptor);
         const current = Reflect.getOwnPropertyDescriptor(object, key);
-        if (accepted && !sameDescriptor(previous, current)) changed(key, true);
+        if (accepted && !sameDescriptor(previous, current)) changed(key, true, true);
         return accepted;
       },
       deleteProperty(object, key) {
         const previous = Reflect.getOwnPropertyDescriptor(object, key);
         before(); const accepted = Reflect.deleteProperty(object, key);
-        if (accepted && previous !== undefined && Reflect.getOwnPropertyDescriptor(object, key) === undefined) changed(key, true);
+        if (accepted && previous !== undefined && Reflect.getOwnPropertyDescriptor(object, key) === undefined) changed(key, true, true);
         return accepted;
       },
       setPrototypeOf(object, prototype) {
         const previous = Reflect.getPrototypeOf(object);
         before(); const accepted = Reflect.setPrototypeOf(object, prototype);
         if (accepted && previous !== Reflect.getPrototypeOf(object)) {
-          owner.invalidate(); owner.changedTiles.add(tile); state.observer?.after('x');
+          owner.invalidate(); owner.changedTiles.add(tile); state.observer?.after('x', true);
         }
         return accepted;
       },
@@ -186,17 +189,23 @@ export class ResidentTopologyOwner {
   }
 
   /** Réflexion/prototipo que no puede justificarse por interceptores: revoca permanentemente. */
-  private invalidate(): void { this.opaqueTiles++; this.coordinates = {}; }
+  private invalidate(): void { this.opaqueTiles++; this.coordinates = {}; this.terrainRevision = {}; }
   /** Sólo la registry puede emitir un token; no acepta un booleano aportado por el consumidor. */
   token(state: ObservedArray): ResidentTopologyToken | undefined {
     return this.opaqueTiles === 0 && state.unsafe.size === 0
       ? { array: state.revision, coordinates: this.coordinates } : undefined;
   }
+  /** Revisión de `terrain` bajo este owner; cambia ante cualquier escritura/reflexión sobre `terrain`. */
+  terrainToken(): object { return this.terrainRevision; }
 }
 
 export function residentTopologyToken(tiles: Tile[]): ResidentTopologyToken | undefined {
   const state = observedArrays.get(tiles);
   return state?.owner.token(state);
+}
+export function residentTerrainRevision(tiles: Tile[]): object | undefined {
+  const state = observedArrays.get(tiles);
+  return state?.owner.token(state) ? state.owner.terrainToken() : undefined;
 }
 /** Asociación emitida por registry; el contexto del mundo puede preceder a un reemplazo del array. */
 export function residentTopologyOwner(tiles: Tile[]): ResidentTopologyOwner | undefined {

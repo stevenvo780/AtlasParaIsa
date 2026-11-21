@@ -46,11 +46,12 @@ class Reader {
   }
 }
 async function send(header, arrays=[]) {
-  const raw=Buffer.from(JSON.stringify(header)), prefix=Buffer.alloc(4); prefix.writeUInt32LE(raw.length);
+  const raw=Buffer.from(JSON.stringify(header)), prefix=Buffer.allocUnsafe(4); prefix.writeUInt32LE(raw.length);
+  const parts=[prefix, raw];
+  for(const a of arrays) parts.push(Buffer.from(a.buffer,a.byteOffset,a.byteLength));
+  const payload=Buffer.concat(parts);
   // Honour pipe backpressure: large batches must not queue unbounded writes.
-  async function write(b) { await new Promise((resolve,reject)=>child.stdin.write(b,e=>e?reject(e):resolve())); }
-  await write(prefix); await write(raw);
-  for(const a of arrays) await write(Buffer.from(a.buffer,a.byteOffset,a.byteLength));
+  await new Promise((resolve,reject)=>child.stdin.write(payload,e=>e?reject(e):resolve()));
 }
 async function stop(force=false) {
   if(!child) return;
@@ -86,7 +87,7 @@ parentPort.on('message',async job=>{
     const h=await reader.frame();
     if(h.bytes!==job.count*12*8) throw new Error('Invalid policy GPU output size');
     const body=await reader.read(h.bytes);
-    new Uint8Array(job.output).set(body);
+    new Uint8Array(job.output, 0, h.bytes).set(body);
     signal();
   } catch(e) { await stop(true); signal(e); parentPort.close(); }
 });
@@ -116,6 +117,7 @@ export class PolicyGpuBatcher {
   private worker: Worker | null = null;
   private readonly control = new Int32Array(new SharedArrayBuffer(12));
   private readonly errors = new Uint16Array(new SharedArrayBuffer(8192));
+  private sharedOutput = new SharedArrayBuffer(64 * 12 * 8);
   private readonly timeoutMs: number;
   private closed = false;
   private reason: string | null = null;
@@ -167,12 +169,15 @@ export class PolicyGpuBatcher {
     if (this.closed) throw new Error('PolicyGpuBatcher closed');
     assertPolicyBatch(observations, weights, plasticityBiases, count);
     if (this.worker === null || count === 0) return evaluatePoliciesCpu(observations, weights, plasticityBiases, count);
-    const output = new SharedArrayBuffer(count * 12 * 8);
+    const neededBytes = count * 12 * 8;
+    if (this.sharedOutput.byteLength < neededBytes) {
+      this.sharedOutput = new SharedArrayBuffer(Math.max(neededBytes, this.sharedOutput.byteLength * 2));
+    }
     try {
       Atomics.store(this.control, 0, 0);
-      this.worker.postMessage({ kind: 'evaluate', observations, weights, biases: plasticityBiases, count, output });
+      this.worker.postMessage({ kind: 'evaluate', observations, weights, biases: plasticityBiases, count, output: this.sharedOutput });
       this.wait();
-      return new Float64Array(output);
+      return new Float64Array(new Float64Array(this.sharedOutput, 0, count * 12));
     } catch (e) {
       this.fallback(e);
       return evaluatePoliciesCpu(observations, weights, plasticityBiases, count);

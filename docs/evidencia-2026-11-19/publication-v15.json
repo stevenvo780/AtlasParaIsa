@@ -1,0 +1,53 @@
+{
+  "capturedAt": "2026-11-21T15:48:14-05:00",
+  "status": "published",
+  "kind": "new open-world V15 (RULES_VERSION = 12, CARTA_OPEN_WORLD=1, full multi-chip Torre: 28 CPU workers + Dual-GPU [0,1] ecology & resident neural policy)",
+  "reason": "Publicar el universo emergente abierto V15 (`RULES_VERSION = 12`) sin topes artificiales de población ni comunidades, acotado solo por cómputo físico real (28 hilos CPU + RTX 5070 Ti + RTX 2060), con todas las optimizaciones bit a bit (`p95` -57,2 % en `d=19`, `Store.save` -47,6 % a 40k teselas), fixes de producción (`/dev/shm` unlink, cierre de piscinas GPU/CPU, cadencia de guardado del gobernador y `residentEpoch` GPU) y auditoría multi-chip `2 576 / 2 576` verde.",
+  "codeRevision": "179b44d",
+  "previousCodeRevision": "c1fe393",
+  "whatChanged": {
+    "code": "main c1fe393→179b44d: `RULES_VERSION = 12` opt-in (`CARTA_OPEN_WORLD=1`, `hostOpenWorldParams()`): natalidad local por vecindad (`natalidad-local.ts`), red de política neuronal `12→8→12` heredable con plasticidad Baldwin (`politica.ts`, `politica-obs.ts`) evaluada en VRAM residente Dual-GPU `[0,1]` (`politica-gpu.ts`, `compute-policy-gpu.py`), complejidad tecnológica procedimental (`tecnologia-complejidad.ts`), sync incremental de páginas GPU (`puente.ts`, `5,8×` / `761×` menos bytes + `residentEpoch` en recargas completas), `choose()`/`move()` paralelos con 28 workers (`personas-motor.ts`, `fauna-motor.ts`, `paginas.ts`), modularización limpia (`clon.ts`, `proyeccion.ts`), optimizaciones serie bit a bit en `animals.ts`, `society.ts`, `demography.ts`, `inventions.ts`, `technology*.ts`, `index.ts`, `Store.save`/`snapshot-parts.ts`, y endurecimiento de servidor (`app.close()` cierra las 4 piscinas, gobernador no acorta `cadaTicks=100` a `20`). `GOAL.md` alineado a la tesis emergentista conservando intactos la carta, S e I y recuerdos autorizados.",
+    "activatedLaw": "`CARTA_OPEN_WORLD=1` (`motor.hilos=28`, `motor.gpu=[0,1]`, `motor.soaTerreno=true`, `motor.particionarPersonas=true`, `poblacion.natalidadVecindad=true`, `poblacion.radioVecindadNatalidad=16`, `social.radioConvivencia=12`, `social.disolucion=1`, `social.maxComunidades=0`, `conducta.politicaPeso=0.35`, `tecnologia.evitarNoOp=true`) + `CARTA_PARAMS=gobernador.presupuestoMs=5000` (`gobernador.politica=techo`).",
+    "evidence": {
+      "fullRepoSuite": "2 033 / 2 033 pruebas del repositorio (215 ficheros) + 375 / 375 T117 CPU + 168 / 168 T117 CUDA (`[0]`, `[1]`, `[0,1]` × 4 semillas × 7 escenas × 2 geometrías) = 2 576 / 2 576 verdes, 0 fallos.",
+      "combinedPerfSeed2002Day19": "45 600 ticks bit a bit idénticos (`pop=398`, `12 288` teselas, `2 386` animales, Dual-GPU `[0,1]`): `p50` `65,0 → 34,7 ms` (`1,87×`), `p95` `152,7 → 65,3 ms` (`2,34×`), `personas` `106,01 → 50,54 s/día` (`-52,3 %`), `fauna` `57,71 → 28,97 s/día` (`-49,8 %`), `checkpoint` `7,84 → 4,25 s`, `demografia` `3,77 → 2,08 s`, `reproduccion` `1,80 → 0,53 s`; `Store.save` paginado a `40 192` teselas `99,9 → 52,3 ms` (`-47,6 %`).",
+      "dualGpuLivingWorld": "docs/evidencia-2026-11-19/dual-gpu-mundo-vivo-20261121.json: 4,19 M celdas + 50 000 actores en `18,18 ms` mediana (`0` diffs `Object.is`); política VRAM `P=20 000` en `3,76–4,73 ms` (`13,3×–15,0×`).",
+      "endurance30dDualGpu": "docs/evidencia-2026-11-19/live-world-dual-gpu-30d-20261119.json: 72 000 ticks, 588 hab., 49 408 teselas, 3/3 recargas frías exactas, 30/30 paridad canónica.",
+      "biologicalCampaign60dNoGov": "docs/evidencia-2026-11-19/campaign-v12-60d-nogov-20261121.json: 5/8 supervivencia (`4` semillas > `1 500` hab., hasta `1 695` hab. y `131` comunidades pico, mediana `pDiv=0,7813`, `bDiv=0,4035`; `s=2003` salvada a 60 días frente a extinción V11 el día 42; `3` extinciones ecológicas genuinas sin rescate)."
+    }
+  },
+  "operation": {
+    "deployCheck": "bash scripts/deploy-check.sh 179b44d0dab66dc41e43a7ceed771835d96be94c → salida 0 (build + test:smoke verdes)",
+    "v14BackupBeforeStop": {
+      "path": "/mnt/Data2/respaldos-atlas-v14/world-20261121-1545.sqlite.gz",
+      "size": "852 MiB",
+      "sha256": "8060ac11d79bbfe988a0356d850f9f5a0a9085e35ead9f076fcb8a2981fcf2e9",
+      "gzipTest": "OK",
+      "v14FinalState": { "tick": 1443100, "day": 601.29, "people": 649, "communities": 64, "births": 23648 }
+    },
+    "towerCode": "worktree detached AtlasParaIsa-anexo/worktrees/publico-v15 en 179b44d, con node_modules propio y npm run build ejecutado allí (`58 ms`); `publico-v14-r3` y `mundos/v14-20261119` intactos para rollback",
+    "worldCreated": {
+      "dir": "/datos/workspaces/personal/AtlasParaIsa-anexo/mundos/v15-20261121",
+      "worldInstanceId": "b92f1888-a923-441a-bf69-45432b845130",
+      "seed": 51926,
+      "rulesVersion": 12,
+      "accessScrypt": "copiado de mundos/v14-20261119/access.scrypt (misma contraseña, solo hash)"
+    },
+    "backups": "HDD /mnt/Data2/respaldos-atlas-v15 (timer horario atlas-respaldo-publico.timer, RETENCION=24, RESPALDO_METODO=backup)",
+    "units": "scripts/systemd/torre/{publico.sh,atlas-publico.service,atlas-respaldo-publico.service} actualizados y copiados a ~/.config/systemd/user/ con daemon-reload",
+    "start": "arranque 2026-11-21 15:48:13 -05 (PID 3614967, carta-isa, CPUWeight/IOWeight 10000, gpuAutoprueba PASS en GPU 0 [9,86 ms] y GPU 1 [5,80 ms]; procesos residentes compute-policy-gpu.py [PID 3615043] y compute-ecology-gpu-resident.py [PID 3615236] activos en VRAM de ambas GPU)"
+  },
+  "verification": {
+    "typecheck": "verde (0 errores)",
+    "build": "verde en worktree publico-v15 (58 ms)",
+    "checkLinks": "123 documentos, 737 enlaces relativos, 0 rotos",
+    "hardwareDeterminism": "543/543 (375 CPU + 168 CUDA)"
+  },
+  "liveChecks": {
+    "domainHealth": "https://atlas.humanizar.tech/health → 200 {\"status\":\"ok\"}",
+    "unauthenticatedWorldStatus": 401,
+    "servedAssetEqualsCompiled": "assets/index-Dnpsuc3u.js servido en https://atlas.humanizar.tech = compilado en publico-v15 (cmp -s: OK)",
+    "durableWorldConfirmed": "mundos/v15-20261121/world.sqlite + WAL activos (tick 500, 18 hab., 1 536 teselas, 6 guardados durables en los primeros 55 s)",
+    "dualGpuVramActive": "RTX 5070 Ti (226 + 224 MiB) y RTX 2060 (88 + 86 MiB) activas para política y ecología residentes"
+  }
+}

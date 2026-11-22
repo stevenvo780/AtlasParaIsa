@@ -1,11 +1,11 @@
 [Unit]
-Description=Una Carta Para Isa — proxy TLS directo para LAN (192.168.78.211:8443) y VPN (100.64.0.1:8443)
+Description=Una Carta Para Isa — proxy TLS directo para LAN (192.168.78.211:3443) y VPN (100.64.0.1:3443)
 After=network-online.target tailscaled.service
 Wants=network-online.target
 [Service]
 Type=simple
 Environment=LAN_TLS_HOSTS=100.64.0.1,192.168.78.211
-Environment=LAN_TLS_PORT=8443
+Environment=LAN_TLS_PORT=3443
 Environment=LAN_TLS_UPSTREAM_HOST=100.64.0.1
 Environment=LAN_TLS_UPSTREAM_PORT=3000
 ExecStart=/usr/bin/node /datos/workspaces/personal/AtlasParaIsa/scripts/systemd/torre/lan-tls.mjs

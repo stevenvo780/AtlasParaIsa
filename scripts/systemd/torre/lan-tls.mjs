@@ -15,7 +15,7 @@ process.umask(0o077);
 
 const LISTEN_HOSTS = (process.env.LAN_TLS_HOSTS ?? '100.64.0.1,192.168.78.211')
   .split(',').map(s => s.trim()).filter(Boolean);
-const LISTEN_PORT = Number(process.env.LAN_TLS_PORT ?? 8443);
+const LISTEN_PORT = Number(process.env.LAN_TLS_PORT ?? 3443);
 const UP_HOST = process.env.LAN_TLS_UPSTREAM_HOST ?? '100.64.0.1';
 const UP_PORT = Number(process.env.LAN_TLS_UPSTREAM_PORT ?? 3000);
 const STATE_DIR = process.env.LAN_TLS_CERT_DIR ?? join(homedir(), '.local', 'state', 'atlas-para-isa', 'lan-tls');
@@ -26,7 +26,7 @@ if (!Number.isInteger(LISTEN_PORT) || LISTEN_PORT < 1 || LISTEN_PORT > 65535) th
 if (!Number.isInteger(UP_PORT) || UP_PORT < 1 || UP_PORT > 65535) throw new Error('LAN_TLS_UPSTREAM_PORT inválido.');
 if (LISTEN_HOSTS.length === 0) throw new Error('Configura al menos una dirección en LAN_TLS_HOSTS.');
 
-function ensureCert(): { key: Buffer; cert: Buffer } {
+function ensureCert() {
   if (!existsSync(CERT_PATH) || !existsSync(KEY_PATH)) {
     mkdirSync(STATE_DIR, { recursive: true, mode: 0o700 });
     const san = [

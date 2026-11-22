@@ -1,0 +1,45 @@
+{
+  "capturedAt": "2026-11-22T13:27:41-05:00",
+  "status": "published",
+  "kind": "new open-world V17 (publico-v17, fresh world mundos/v17-20261122; 3-channel HTTPS public + VPN + LAN; V16 preserved intact in mundos/v16-20261122)",
+  "reason": "Resolver todos los hallazgos de la auditoría del mundo vivo V16 a día 48,5 (3 207 hab.) + eliminar los picos que disparaban «Crecimiento en pausa» + habilitar acceso directo de baja latencia por LAN y VPN junto al dominio público: (1) peregrinaje de largo alcance de S e I con rodeo costero Tangent-Bug (1T==4T bit-idéntico) para que no se bloqueen en lagos/golfos ni deriven 1 139 celdas; (2) fisión por hacinamiento Dunbar, nombres poéticos sin colisiones (1 920 combinaciones) y deriva bidireccional equilibrada de stewardship; (3) mayor peso de oficios y autonomía neuronal (aptitud=0.85, politicaPeso=0.80, politicaAutonomia=0.65) con presión ecológica afinada; (4) optimización caliente 5,2× en pico (prepareParallel incremental por ranuras, #walkCache incremental, buckets Morton sin asignaciones, ResidentFastAccess en choose/politica-obs/fauna-motor, solape Dual-GPU de políticas, sin structuredClone en dependencyCraft) + deltas WS (red.deltas=true); (5) CARTA_EXTRA_ORIGINS opt-in con emparejamiento estricto Host↔Origin HTTPS + proxy TLS de usuario atlas-lan-tls.service en :3443 para VPN (100.64.0.1) y LAN (192.168.78.211).",
+  "codeRevision": "db4998a",
+  "previousCodeRevision": "d091f7a",
+  "whatChanged": {
+    "code": "main db1215f→db4998a: src/world/index.ts (peregrinaje S/I >1.5d + rodeo costero Tangent-Bug bit-exacto, solape Dual-GPU de políticas, lecturas directas ResidentFastAccess + selección sin doble evaluación en choose/explorationTarget), src/world/society.ts (fisión Dunbar, nombres sin colisiones, stewardship bidireccional), src/world/soa/terreno.ts (prepareParallel incremental conservando ranuras + ResidentTileReader cacheado + ResidentFastAccess), src/world/paralelo/personas-motor.ts (#walkCache incremental por bloques + buckets Morton sin asignaciones), src/world/paralelo/fauna-motor.ts (#disponer por bloques + #releerPagina por página), src/world/technology.ts (sin structuredClone en dependencyCraft), src/server/hardware-limits.ts (preset abierto V17), src/server/app.ts + main.ts (CARTA_EXTRA_ORIGINS opt-in con emparejamiento estricto Host↔Origin HTTPS), scripts/systemd/torre/lan-tls.mjs + atlas-lan-tls.service.",
+    "deployment": "Nuevo mundo limpio v17-20261122 (semilla 51926, access.scrypt copiada de V16), CARTA_OPEN_WORLD=1, 28 hilos CPU, Dual-GPU [0,1] (RTX 5070 Ti + RTX 2060), NODE_OPTIONS=--max-old-space-size=65536, CARTA_ORIGIN=https://atlas.humanizar.tech, CARTA_EXTRA_ORIGINS=https://100.64.0.1:3443,https://192.168.78.211:3443, CARTA_PROXY_IP=100.64.0.11,100.64.0.1, CARTA_PARAMS=gobernador.presupuestoMs=5000,persistencia.cadaTicks=200,persistencia.ventanaEventosTicks=2400,red.deltas=true,limites.chunks=65536,limites.teselasActivas=16777216,limites.comunidades=16777216,limites.fauna=100663296, respaldos horarios en /mnt/Data2/respaldos-atlas-v17 y proxy TLS directo atlas-lan-tls.service en 100.64.0.1:3443 y 192.168.78.211:3443.",
+    "evidence": {
+      "audit4Seeds30Days": "4 semillas × 30 días (7, 42, 404, 51926): 0/4 extinciones (pop final 92/85/204/343; seed 404 5→204, 40.8×); S/I siFinalDist mediana 11.7 celdas (6.1–18.4), siMeetings 80–148 (mediana 111), siDaysSinceLastMeeting 0.34–1.31 días, siZombieSamples 0/0/0/0, memoriesUntouched 4/4; comunidades 12–19/semilla, maxCommunityShare mediana 25.5% (seed 51926 21.6%, maxSize 74), uniqueCommunityNameFrac 1.0000 en 4/4 semillas; interCommunityCultureStdev sharing 0.067 / stewardship 0.042 / openness 0.066; craftActivityFrac 29.5% en seed 51926, actionEntropy 0.634, 6 capacidades activas.",
+      "liveScaleBenchmark3207Pop": "Copia exacta del mundo vivo V16 (tick 116 300, 3 207 hab., 278 016 teselas, 1 086 chunks, 28T + Dual-GPU [0,1]): max spike 3 682.9 ms → 708.9 ms (5.2×); p95 >3 000 ms → 708.9 ms (7× bajo presupuestoMs=5000); avg 801.0 → 506.1 ms (1.58×); ecologia pico 3 003.6 → 159.9 ms (18.8×, avg 171.5 → 15.3 ms); personas avg ~550 → 373.8 ms; fauna avg ~95 → 56.5 ms.",
+      "tests": "npm run typecheck verde; check-links 123 docs / 738 enlaces / 0 rotos; suite completa 2 432 + 25 (politica-obs-fast, sc013, gpu-autoprueba, halo-radios) + 543 (determinismo-hardware con CUDA gpu=[0],[1],[0,1] 0 ULP) + v17-perf-hotpath + v17-extra-origins + v17-emergencia-largo-plazo + v17-sociedad-fision = 0 fallos; deploy-check.sh db4998a salida 0."
+    }
+  },
+  "operation": {
+    "deployCheck": "bash scripts/deploy-check.sh db4998ac9c8909935c7518de963c75249e8d1e74 → salida 0",
+    "previousWorldBackup": {
+      "world": "v16-20261122 (detenido en tick 120 100, día 50.04, 3 204 hab., 202 comunidades, 4 703 nacimientos, 2 333 recetas, 259 584 teselas)",
+      "path": "/mnt/Data2/respaldos-atlas-v16/world-20261122-1319.sqlite.gz",
+      "size": "631 MiB",
+      "sha256": "69b654f85a0c1c9d76c20dbf673c5474f10be498fbaa5edb4bfb5fea3950c609",
+      "gzipTest": "OK"
+    },
+    "towerCode": "worktree detached AtlasParaIsa-anexo/worktrees/publico-v17 en db4998a con node_modules propio y build allí (61 ms); publico-v16 y anteriores conservados intactos para rollback",
+    "worldCreated": {
+      "dir": "/datos/workspaces/personal/AtlasParaIsa-anexo/mundos/v17-20261122",
+      "worldInstanceId": "49374bfe-25e1-424b-aec1-a0e3eedd4cd3",
+      "seed": 51926,
+      "reset": true
+    },
+    "start": "arranque 2026-11-22 13:27:13 -05 (PID 2566885, carta-isa, NODE_OPTIONS=--max-old-space-size=65536, gpuAutoprueba PASS en GPU 0 RTX 5070 Ti [9.37 ms] y GPU 1 RTX 2060 [5.86 ms]; 28 hilos CPU + Dual-GPU activos; atlas-lan-tls.service PID 2566793 en 100.64.0.1:3443 y 192.168.78.211:3443)"
+  },
+  "liveChecks": {
+    "publicHealth": "https://atlas.humanizar.tech/health → 200 {\"status\":\"ok\"}",
+    "vpnHealth": "https://100.64.0.1:3443/health → 200 {\"status\":\"ok\"}",
+    "lanHealth": "https://192.168.78.211:3443/health → 200 {\"status\":\"ok\"}",
+    "unauthenticatedWorldStatus": { "public": 401, "vpn": 401, "lan": 401 },
+    "crossOriginSpoofStatus": 403,
+    "servedAssetEqualsCompiled": "assets/index-Dnpsuc3u.js servido por público y LAN = compilado en publico-v17 (cmp -s: OK)",
+    "durableWorldConfirmed": "tick 800, 20 hab., 3 840 teselas, 5 recuerdos intactos; todas las leyes V17 persistidas (cuencas=0.36, capacidadBosque=0.74, aptitud=0.85, politicaPeso=0.80, politicaAutonomia=0.65, derivaCultural=1, vinculoEncuentro=1, efectosHerramientas=true, red.deltas=true, persistencia.cadaTicks=200, hilos=28, gpu=[0,1])",
+    "firstBackupVerified": "/mnt/Data2/respaldos-atlas-v17/world-20261122-1327.sqlite.gz (1.3 MiB, sha256 7f209fd15486d3be9181efe7c5b3ec63d173f37e74b8ae8d3f835a3eb4ef2f97, gzip -t OK)"
+  }
+}

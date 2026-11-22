@@ -499,6 +499,21 @@ function addToolEffectUses(uses: Capability[], tile: { terrain?: string; fauna?:
   if (prey || canBuild) add('cutting');
   if (canBuild) add('abrasion');
 }
+/** Clona los objetos de un actor para pronosticar fabricación sin `structuredClone` ni agua contenida. */
+function cloneItemsForForecast(items: readonly MaterialBatch[]): MaterialBatch[] {
+  const copy = new Array<MaterialBatch>(items.length);
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i]!;
+    copy[i] = {
+      id: item.id, recipeId: item.recipeId,
+      composition: { wood: item.composition.wood, stone: item.composition.stone, water: item.composition.water },
+      mass: item.mass, properties: { ...item.properties },
+      generation: item.generation, madeAt: item.madeAt,
+      parentItems: [...item.parentItems], initialMass: item.initialMass,
+    };
+  }
+  return copy;
+}
 /** Follow only locally remembered product dependencies, with at most one memory's
  * worth of fabrication steps per forecast. No alternative-program search or
  * unbounded quantity expansion; the next decision recomputes from actual stock. */
@@ -506,15 +521,20 @@ function dependencyCraft(host: TechnologyHost, actor: TechnologyActor, known: Te
   if (!known.some(recipe => recipe.program.inputs.some(input => input.source === 'product'))) return;
   const uses = localTechnologyUses(host, actor), byId = new Map(known.map(recipe => [recipe.id, recipe])), effects = techParams(host).efectosHerramientas;
   const improves = (capacities: Record<Capability, number>, capabilities: Capability[]) => capabilities.some(c => capacities[c] > Math.max(0.12, powers[c] * 1.35));
+  const tile = (host.tiles ? firstTileAt(host.tiles, Math.round(actor.x), Math.round(actor.y)) : undefined);
   for (const goal of known) {
     if (!goal.program.inputs.some(input => input.source === 'product') || !improves(goal.capacities, uses)) continue;
+    let reachableGoal = true;
+    for (const input of goal.program.inputs) {
+      if (input.source !== 'product' || byId.has(input.recipeId!)) continue;
+      let held = 0;
+      for (const item of actor.technology.items) if (item.recipeId === input.recipeId) held += item.mass;
+      if (held < input.mass) { reachableGoal = false; break; }
+    }
+    if (!reachableGoal) continue;
     const privateActor: TechnologyActor = { ...actor, materials: { ...actor.materials }, technology: {
-      ...actor.technology, residue: { ...actor.technology.residue }, items: structuredClone(actor.technology.items),
+      ...actor.technology, residue: { ...actor.technology.residue }, items: cloneItemsForForecast(actor.technology.items),
     } };
-    // Contained water is not chemical substrate or a catalyst. Do not speculate on
-    // its transport, leakage or future hydration while forecasting fabrication.
-    for (const item of privateActor.technology.items) delete item.contents;
-    const tile = (host.tiles ? firstTileAt(host.tiles, Math.round(actor.x), Math.round(actor.y)) : undefined);
     const privateHost: TechnologyHost = { seed: host.seed, tick: host.tick, people: [privateActor], tiles: tile ? [{ ...tile }] : [],
       technology: { ...defaultTechnologyState(), budgets: host.technology.budgets, itemCounter: host.technology.itemCounter } };
     const route: TechnologyRecipe[] = [], visiting = new Set<string>();

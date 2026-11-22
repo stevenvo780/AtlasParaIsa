@@ -7,6 +7,7 @@ import { componentNames, componentPurpose } from './life-art.js';
 import { carriedWaterCard, recipeLabel } from './technology-art.js';
 import { esc, svg, icon, number, percentage } from './ui-catalog.js';
 import { nombreConocido } from './vistos.js';
+import { ejeDominante, ejesCultura } from './censo-view.js';
 
 /** FR-006: the legible context (place, tick, up to 3 prior episodes) of a `death` chronicle event,
  * for a «Historia» detail on an identity that no longer appears in `world.people`. The caller
@@ -76,10 +77,114 @@ export function textoDeExperiencia(text: string, cause: ChronicleEvent | undefin
   return cause?.kind === 'memory' && cause.source !== 'simulation' ? text : enClaro(text, { world });
 }
 
+/** V18: la ÚNICA señal de la política neuronal que cruza el cable. `projectWorld` no envía
+ * `policy` ni `policyPlasticity` (pesos y sesgos quedan en el servidor); la ley deja constancia
+ * en `reason` solo cuando ese empuje SUPERÓ a la opción que iba primera por cuerpo y cercanía
+ * (`choose` en world/index.ts: delta > 0,12 y acción distinta de la ganadora heurística). */
+export const MARCA_POLITICA = 'Su política neuronal aprendida inclinó esta estrategia.';
+
+export interface LecturaDecision {
+  inclinadaPorPolitica: boolean;
+  dirigida: boolean;
+  razonBase: string;
+  presionCorporal: { etiqueta: string; valor: number } | null;
+  urgenciaCorporalSevera: boolean;
+  distintivo: 'aprendida' | 'dirigida' | 'sin marca';
+}
+
+type CuerpoDecision = Pick<PersonView, 'reason' | 'controlMode' | 'hunger' | 'thirst' | 'fatigue' | 'energy'>;
+
+const enRango = (value: number | undefined): value is number =>
+  typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1;
+
+/** Descompone la elección recibida en causa corporal y estrategia aprendida, solo con campos que
+ * ya viajan en `PersonView`. Sin la marca no se afirma que la política no exista ni que no empujara
+ * en la misma dirección: solo que no consta que cambiara esta elección. */
+export function lecturaDecision(p: CuerpoDecision): LecturaDecision {
+  const reason = typeof p.reason === 'string' ? p.reason.trim() : '';
+  const inclinadaPorPolitica = reason.endsWith(MARCA_POLITICA);
+  const razonBase = inclinadaPorPolitica ? reason.slice(0, -MARCA_POLITICA.length).trim() : reason;
+  const presiones: { etiqueta: string; valor: number }[] = [];
+  if (enRango(p.hunger)) presiones.push({ etiqueta: 'Hambre', valor: p.hunger });
+  if (enRango(p.thirst)) presiones.push({ etiqueta: 'Sed', valor: p.thirst });
+  if (enRango(p.fatigue)) presiones.push({ etiqueta: 'Cansancio', valor: p.fatigue });
+  if (enRango(p.energy)) presiones.push({ etiqueta: 'Falta de energía', valor: 1 - p.energy });
+  presiones.sort((a, b) => b.valor - a.valor);
+  const dirigida = p.controlMode === 'directed';
+  return {
+    inclinadaPorPolitica,
+    dirigida,
+    razonBase,
+    presionCorporal: presiones[0] ?? null,
+    // La ley apaga el empuje de la política con hambre o sed por encima de 0,75.
+    urgenciaCorporalSevera: (enRango(p.hunger) && p.hunger > 0.75) || (enRango(p.thirst) && p.thirst > 0.75),
+    distintivo: inclinadaPorPolitica ? 'aprendida' : dirigida ? 'dirigida' : 'sin marca',
+  };
+}
+
+/** Ficha › Ahora › «Por qué hace esto»: cuerpo y cercanía frente a estrategia aprendida, en un
+ * `<details>` cerrado (no satura ni carga el modo ligero; el distintivo se lee en el resumen). */
+export function decisionFicha(p: PersonView, world: WorldView): string {
+  const d = lecturaDecision(p);
+  const presion = d.presionCorporal
+    ? `<div class="skill-row"><span>Lo que más aprieta en su cuerpo</span><strong>${esc(d.presionCorporal.etiqueta)} · ${esc(percentage(d.presionCorporal.valor))}</strong></div>`
+    : '<p>Su estado corporal no llegó completo en esta vista.</p>';
+  const base = d.razonBase ? `<p><strong>Cuerpo y cercanía.</strong> ${esc(enClaro(d.razonBase, { world }))}</p>` : '';
+  const estrategia = d.inclinadaPorPolitica
+    ? '<p data-policy="inclinada"><strong>Estrategia aprendida.</strong> Su política aprendida inclinó esta elección por encima de la opción que iba primera por cuerpo y cercanía. Combina su red heredada con el sesgo que fue adquiriendo en esta vida; ese sesgo no pasa a su descendencia. Sus cifras no viajan a este navegador, así que aquí no se inventa cuánto empujó cada acción.</p>'
+    : d.dirigida
+      ? '<p data-policy="dirigida"><strong>Tarea dirigida.</strong> Sigue una orden: mientras su cuerpo lo permite, la tarea va por delante de su estrategia aprendida; el hambre, la sed o el agotamiento extremos pueden interrumpirla.</p>'
+      : '<p data-policy="sin-marca"><strong>Estrategia aprendida.</strong> En esta elección no consta que su política aprendida la inclinara: la razón recibida se sostiene en su cuerpo y en lo que percibe cerca. Que no haya marca no dice que no tenga política, solo que no cambió esta elección.</p>';
+  const urgencia = d.urgenciaCorporalSevera
+    ? '<p>Con hambre o sed por encima del 75 %, esa política ni siquiera participa: manda la urgencia corporal.</p>' : '';
+  const ritmoHeredado = p.genome && enRango(p.genome.learningRate)
+    ? `<div class="skill-row"><span>Ritmo de aprendizaje heredado</span><strong>${esc(number(p.genome.learningRate, 2))}</strong></div><p>Ese ritmo, fijado al nacer, regula cuánto puede ajustar en vida el sesgo de su política.</p>` : '';
+  return `<details class="person-detail" data-detail="decision"><summary>Por qué hace esto <span class="detail-badge">${esc(d.distintivo)}</span></summary>${presion}${base}${estrategia}${urgencia}${ritmoHeredado}</details>`;
+}
+
+export interface VinculoSI {
+  distanciaCasillas: number;
+  /** A 1,5 casillas o menos: el mismo umbral al que la ley deja que compartan una pausa. */
+  juntoAhora: boolean;
+  ultimoEncuentroTick: number | null;
+  pasosDesdeEncuentro: number | null;
+}
+
+/** Distancia actual entre S e I y su último encuentro, solo con el estado recibido: posiciones de
+ * AMBAS en este mismo `people` y episodios `meeting` (actores + paso) que este navegador recibió.
+ * Nunca lee `memories`, `recentMemory` ni el texto de los episodios: ni un dato biográfico. */
+export function vinculoSI(view: Pick<WorldView, 'people' | 'tick'>, eventos: readonly ChronicleEvent[]): VinculoSI | null {
+  const s = view.people.find(p => p.role === 'S'), i = view.people.find(p => p.role === 'I');
+  if (!s || !i || s.id === i.id) return null;
+  if (![s.x, s.y, i.x, i.y].every(Number.isFinite)) return null;
+  const distanciaCasillas = Math.hypot(s.x - i.x, s.y - i.y);
+  let ultimo: number | null = null;
+  for (const event of eventos) {
+    if (event.kind !== 'meeting' || !event.actors.includes(s.id) || !event.actors.includes(i.id)) continue;
+    if (!Number.isFinite(event.tick) || event.tick > view.tick) continue;
+    if (ultimo === null || event.tick > ultimo) ultimo = event.tick;
+  }
+  return { distanciaCasillas, juntoAhora: distanciaCasillas <= 1.5, ultimoEncuentroTick: ultimo,
+    pasosDesdeEncuentro: ultimo === null ? null : view.tick - ultimo };
+}
+
+/** Línea discreta en la ficha de S o de I. Si la otra identidad no está en el estado recibido no
+ * dibuja nada: estar fuera de la cámara no es una distancia, y una posición recordada sería vieja. */
+export function vinculoSIFicha(p: PersonView, world: WorldView, eventos: readonly ChronicleEvent[]): string {
+  if (p.role !== 'S' && p.role !== 'I') return '';
+  const v = vinculoSI(world, eventos);
+  if (!v) return '';
+  const cerca = v.juntoAhora ? ' Están lado a lado.' : '';
+  const encuentro = v.ultimoEncuentroTick === null
+    ? 'Este navegador no recibió ningún encuentro entre ambas entre los episodios guardados de esta visita.'
+    : `Su último encuentro entre los episodios que recibió este navegador fue hace ${number(v.pasosDesdeEncuentro!)} ${v.pasosDesdeEncuentro === 1 ? 'paso' : 'pasos'} (${momento(v.ultimoEncuentroTick)}).`;
+  return `<p class="drawer-note" data-vinculo-si>S e I están ahora a ${esc(number(v.distanciaCasillas, 1))} casillas en esta vista.${esc(cerca)} ${esc(encuentro)}</p>`;
+}
+
 /** T036(h): `p.experiences`, `p.trust` y el repertorio (`recipeIds`) ya no viajan en el `state`:
  * llegan con `{type:'persona'}`. `undefined` significa «todavía no ha llegado» y se dibuja como
  * «cargando…»; una lista vacía sí significa «no hay nada», y se dice con esas palabras. */
-export function inheritedAndLearned(p: PersonView, world: WorldView, recipeIds?: string[], extra?: Pick<PersonDetail, 'fertil' | 'busca' | 'familia' | 'edades' | 'procedimientos' | 'inventadas'> | null, buscarEpisodio: (id: string) => ChronicleEvent | undefined = id => world.events.find(event => event.id === id)): { now: string; kit: string; story: string } {
+export function inheritedAndLearned(p: PersonView, world: WorldView, recipeIds?: string[], extra?: Pick<PersonDetail, 'fertil' | 'busca' | 'familia' | 'edades' | 'procedimientos' | 'inventadas'> | null, buscarEpisodio: (id: string) => ChronicleEvent | undefined = id => world.events.find(event => event.id === id), eventosRecibidos: readonly ChronicleEvent[] = world.events): { now: string; kit: string; story: string } {
   const skillNames: Record<string, string> = { gather: 'Recolección', gathering: 'Recolección', forage: 'Cosecha', farm: 'Cultivo', farming: 'Cultivo', build: 'Construcción', building: 'Construcción', explore: 'Exploración', exploration: 'Exploración', care: 'Cuidado', cooperate: 'Cooperación', hunt: 'Caza', drink: 'Búsqueda de agua',
     // M6: el resto de las prácticas que registra `outcome()` (world/index.ts), en claro.
     research: 'Investigación', share: 'Compartir', craft: 'Fabricación', technology: 'Técnica', invent: 'Invención', repair: 'Reparación', eat: 'Alimentarse', rest: 'Descanso', approach: 'Acercarse a otros', accompany: 'Compañía', retreat: 'Buscar espacio' };
@@ -94,7 +199,9 @@ export function inheritedAndLearned(p: PersonView, world: WorldView, recipeIds?:
   const genetics = genome ? `<details class="person-detail" data-detail="genome"><summary>Herencia y genealogía <span class="detail-badge">G${esc(genome.generation)}</span></summary><p>Parámetros heredados y fijados al nacer. No cambian durante esta vida; no describen una biografía real.</p><div class="gene-chips"><span>Generación <strong>${esc(genome.generation)}</strong></span><span>Mutaciones <strong>${esc(genome.mutations)}</strong></span></div>${familia.progenitores ? `<div class="lineage"><h4>Progenitores</h4>${familia.progenitores}</div><div class="lineage"><h4>Descendencia</h4>${familia.descendencia}</div>` : `<div class="lineage"><h4>Progenitores</h4>${parentMarkup}</div><div class="lineage"><h4>Descendencia en esta vista</h4>${descendants.length ? descendants.map(child=>`<button class="lineage-person" data-parent="${esc(child.id)}">${esc(child.name)} · G${esc(child.genome?.generation ?? 'sin dato')} ${icon.arrow}</button>`).join('') : '<span class="lineage-absent">No hay descendientes en esta vista.</span>'}${extra === null ? '<p class="drawer-note" data-loading="family">Cargando su familia en todo el mundo…</p>' : ''}</div>`}<div class="skill-row"><span>Ritmo de aprendizaje</span><strong>${number(genome.learningRate, 2)}</strong></div>${meter('Cooperación heredada', genome.cooperation)}${edadFicha(p, extra)}<p>El ritmo heredado regula cuánto aprende de sus experiencias; no garantiza una conducta.</p></details>` : '';
   const learned = skills.length || p.traits ? `<details class="person-detail" data-detail="skills"><summary>Habilidades y carácter</summary>${skills.map(([name, value]) => `<div class="skill-row"><span>${esc(skillNames[name] ?? name)}</span><strong>${percentage(value)}</strong></div>`).join('')}${p.traits ? `<div class="trait-list">${Object.entries(p.traits).map(([name, value]) => `<span>${esc(traitNames[name] ?? name)} <strong>${percentage(value)}</strong></span>`).join('')}</div>` : ''}<p>Las habilidades cambian con la práctica y la experiencia. Los rasgos heredados orientan sus preferencias.</p></details>` : '';
   const community = world?.communities?.find(group => group.id === p.communityId);
-  const social = p.culture || p.trust?.length || community ? `<details class="person-detail" data-detail="community"><summary>Cultura y vínculos</summary><div class="person-community"><small>COMUNIDAD ACTUAL</small>${community ? `<button class="entity-link" data-community="${esc(community.id)}">${esc(community.name)} ${icon.arrow}</button>` : '<strong>Sin comunidad</strong> <small>(pertenecer a una es opcional)</small>'}</div>${p.culture ? meter('Compartir', p.culture.sharing)+meter('Cuidar el entorno', p.culture.stewardship)+meter('Apertura', p.culture.openness) : '<p>Cultura sin dato en esta vista.</p>'}<p>Costumbres aprendidas en las interacciones. Pertenecer a otro grupo no implica hostilidad.</p>${p.trust === undefined ? '<p class="drawer-note" data-loading="trust">Cargando sus vínculos…</p>' : p.trust.length ? `<h4 class="detail-subtitle">Confianza registrada</h4><div class="trust-list">${[...p.trust].sort((a, b) => b.value - a.value).slice(0, 6).map(t => `<span><button class="entity-link" data-parent="${esc(t.id)}">${esc(nombreConocido(t.id, world) ?? 'Alguien')}${world!.people.some(other=>other.id===t.id) ? '' : ' · fuera de esta vista'}</button><strong>${number(t.value, 2)}</strong></span>`).join('')}</div><p>Valores del modelo, no una medida de afecto real.</p>` : '<p>Todavía no hay vínculos de confianza registrados.</p>'}</details>` : '';
+  const ejePropio = ejeDominante(p.culture), ejeComunidad = community ? ejeDominante(community.culture) : null;
+  const culturaLineas = `${ejePropio ? `<p data-culture-dominant>Su eje más alto en esta vista: <strong>${esc(ejePropio.etiqueta)} (${esc(percentage(ejePropio.valor!))})</strong>. ${esc(ejePropio.lectura)}</p>` : ''}${ejeComunidad && community ? `<p>El eje más alto de ${esc(community.name)} es ${esc(ejeComunidad.etiqueta.toLocaleLowerCase('es'))} (${esc(percentage(ejeComunidad.valor!))}), como promedio de sus miembros vivos.</p>` : ''}`;
+  const social = p.culture || p.trust?.length || community ? `<details class="person-detail" data-detail="community"><summary>Cultura y vínculos</summary><div class="person-community"><small>COMUNIDAD ACTUAL</small>${community ? `<button class="entity-link" data-community="${esc(community.id)}">${esc(community.name)} ${icon.arrow}</button>` : '<strong>Sin comunidad</strong> <small>(pertenecer a una es opcional)</small>'}</div>${p.culture ? ejesCultura(p.culture).map(eje => eje.valor === null ? '' : meter(eje.etiqueta, eje.valor)).join('') || '<p>Cultura sin dato en esta vista.</p>' : '<p>Cultura sin dato en esta vista.</p>'}${culturaLineas}<p>Costumbres aprendidas en las interacciones. Pertenecer a otro grupo no implica hostilidad.</p>${p.trust === undefined ? '<p class="drawer-note" data-loading="trust">Cargando sus vínculos…</p>' : p.trust.length ? `<h4 class="detail-subtitle">Confianza registrada</h4><div class="trust-list">${[...p.trust].sort((a, b) => b.value - a.value).slice(0, 6).map(t => `<span><button class="entity-link" data-parent="${esc(t.id)}">${esc(nombreConocido(t.id, world) ?? 'Alguien')}${world!.people.some(other=>other.id===t.id) ? '' : ' · fuera de esta vista'}</button><strong>${number(t.value, 2)}</strong></span>`).join('')}</div><p>Valores del modelo, no una medida de afecto real.</p>` : '<p>Todavía no hay vínculos de confianza registrados.</p>'}</details>` : '';
   const experiences = `<details class="person-detail" data-detail="experiences"><summary>Últimas experiencias${p.experiences === undefined ? '' : ` <span class="detail-badge">${Math.min(8, p.experiences.length)}</span>`}</summary><p>Registro reciente de esta vida simulada. Conserva el momento y el episodio que lo originó.</p>${p.experiences === undefined ? '<p class="drawer-note" data-loading="experiences">Cargando sus últimas experiencias…</p>' : p.experiences.length ? `<ol class="experience-list">${p.experiences.slice(-8).reverse().map(experience => { const cause = buscarEpisodio(experience.causeId); return `<li><span class="experience-tick">${esc(momento(experience.tick).toLocaleUpperCase('es'))}</span><p>${esc(textoDeExperiencia(experience.text, cause, world))}</p><small><strong>Qué influyó:</strong> ${esc(cause ? enClaro(cause.cause, { world }) : 'El episodio que lo causó no está entre los que recibió este navegador.')}</small></li>`; }).join('')}</ol>` : '<p>Aún no hay experiencias registradas.</p>'}</details>`;
   const technology = world?.technology;
   const knowledge = recipeIds ?? technology?.knowledge?.find(entry => entry.actorId === p.id)?.recipeIds;
@@ -109,5 +216,5 @@ export function inheritedAndLearned(p: PersonView, world: WorldView, recipeIds?:
   const reserve = p.foodReserve !== undefined ? `<div class="food-reserve"><div><span>${icon.bag} Reserva de alimento</span><strong>${number(p.foodReserve,2)}${p.foodReserveCapacity !== undefined ? ` / ${number(p.foodReserveCapacity,2)}` : ''} u.</strong></div>${p.foodReserveCapacity !== undefined && p.foodReserveCapacity > 0 ? `<meter aria-label="Alimento reservado" min="0" max="${esc(p.foodReserveCapacity)}" value="${esc(p.foodReserve)}"></meter>` : ''}<p>Unidades de alimento del mundo.</p></div>` : '';
   const lifeStage = p.lifeStage === 'juvenile' ? 'En crecimiento' : p.lifeStage === 'adult' ? 'Edad de crianza' : p.lifeStage === 'senescent' ? 'Vejez' : 'Sin dato';
   const body = `<details class="person-detail" data-detail="vitality"><summary>Salud y ciclo de vida</summary><div class="skill-row" data-person-life-stage><span>Etapa del modelo</span><strong>${lifeStage}</strong></div>${fertilidadFicha(extra, world)}${p.health !== undefined?meter('Salud',p.health):''}${p.vitality !== undefined?meter('Vitalidad',p.vitality):''}<p>La etapa describe la edad del modelo; no garantiza una crianza. El alimento, el agua, el descanso y la exposición dejan consecuencias en el cuerpo.</p>${p.continuityProtected?'<p class="drawer-note">La continuidad de esta identidad está protegida por la configuración del mundo.</p>':''}</details>`;
-  return { now: reserve + progress + body, kit: toolkit + remembered + learned, story: genetics + social + experiences };
+  return { now: decisionFicha(p, world) + vinculoSIFicha(p, world, eventosRecibidos) + reserve + progress + body, kit: toolkit + remembered + learned, story: genetics + social + experiences };
 }

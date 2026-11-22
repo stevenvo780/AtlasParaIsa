@@ -33,9 +33,11 @@ export class Connection {
   private readonly askedRecipes = new Set<string>();
   private readonly askedPeople = new Set<string>();
   private subscribeMs = 0;
-  /** T137: última vista completa aplicada (base de los deltas) y resync ya pedido por secuencia. */
+  /** T137: última vista completa aplicada (base de los deltas). V18: a lo sumo UN `resync` en vuelo:
+   * cada delta perdido nuevo pedía otro, y en un enlace lento eso gasta el cupo de mensajes del
+   * servidor antes de que llegue el `state` que ya viene de camino. Lo limpia todo `state` aceptado. */
   private lastWorld: WorldView | null = null;
-  private resyncForSequence = -1;
+  private resyncPendiente = false;
   /** M2: tamaño (en caracteres UTF-16 ≈ bytes del JSON) y hora de llegada de los últimos estados recibidos.
    * Solo se mide; no cambia el protocolo ni lo que se pide al servidor. */
   private readonly received: { size: number; at: number }[] = [];
@@ -173,26 +175,40 @@ export class Connection {
       this.updateStatus('offline');
       return;
     }
+    // Un `state` completo con la secuencia vigente (aunque se descarte por duplicado) ya repone la base.
+    if (world.sequence >= this.sequence) this.resyncPendiente = false;
     if (!reconnectSnapshot && (world.sequence < this.sequence || (world.sequence === this.sequence && operationalState === this.operationalState && viewportSignature === this.viewportSignature))) return;
     this.sequence = world.sequence;
     this.lastWorld = world;
-    this.resyncForSequence = -1;
+    this.resyncPendiente = false;
     this.operationalState = operationalState;
     this.viewportSignature = viewportSignature;
     this.callbacks.world(world);
   }
 
-  /** T137: aplica un delta sobre la base aplicada; sin base coincidente pide un solo `resync`. */
+  /** Pide un `state` completo de recuperación, una sola vez hasta que llegue y se acepte. Si el
+   * envío no salió (socket aún cerrado) no queda marcado: el siguiente delta perdido reintenta y,
+   * en una reconexión, `getWorld` ya trae un estado completo que repone la base. */
+  private pedirResync(): void {
+    if (this.resyncPendiente) return;
+    if (this.transmit(this.viewport ? { type: 'resync', viewport: this.viewport } : { type: 'resync' })) this.resyncPendiente = true;
+  }
+
+  /** T137+V18: aplica un delta sobre la base aplicada, sin fugas ni parpadeos: mientras la base no
+   * coincida no se emite ningún mundo nuevo (la última vista buena se queda), un delta ya aplicado
+   * no se acusa otra vez (un `ack` viejo forzaría un `state` completo en el servidor) y un delta
+   * que no se puede aplicar se trata como base perdida, no como mundo a medias. La cadena manda:
+   * un delta genuino encadena siempre con `baseSequence` igual a la secuencia aplicada —también el
+   * de un mismo paso (pausa al mismo tick), que se aplica y se acusa—, mientras que la repetición
+   * del delta que ya nos trajo hasta aquí llega con la base anterior y se descarta en silencio. */
   private acceptDelta(delta: StateDelta, size: number): void {
     if (this.stopped) return;
-    if (!this.lastWorld || delta.baseSequence !== this.sequence) {
-      if (this.resyncForSequence !== delta.sequence) {
-        this.resyncForSequence = delta.sequence;
-        this.transmit(this.viewport ? { type: 'resync', viewport: this.viewport } : { type: 'resync' });
-      }
-      return;
-    }
-    const world = applyStateDelta(this.lastWorld, delta);
+    if (!Number.isSafeInteger(delta.sequence) || !Number.isSafeInteger(delta.baseSequence)) { this.pedirResync(); return; }
+    if (this.lastWorld && delta.sequence < this.sequence) return;
+    if (this.lastWorld && delta.sequence === this.sequence && delta.baseSequence !== this.sequence) return;
+    if (!this.lastWorld || delta.baseSequence !== this.sequence) { this.pedirResync(); return; }
+    let world: WorldView;
+    try { world = applyStateDelta(this.lastWorld, delta); } catch { this.pedirResync(); return; }
     this.transmit({ type: 'ack', sequence: delta.sequence });
     this.measure(size);
     this.accept(world);

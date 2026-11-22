@@ -8,7 +8,7 @@ import { gpuNvrtcAvailable } from './gpu/puente.js';
 import { primero, primeroConFiltroCaro } from './orden.js';
 import { chunkKey, generateChunk, proceduralPlaceName, legacyStructures, type Chunk } from './terrain.js';
 import { assertGenome, DEFAULT_MUTATION_RATE, expressGenome, founderGenome, inheritGenome, localRandom, type Genome } from './genetics.js';
-import { bond, convivir, cooperate, cooperationOpportunity, initialCulture, resourceDispute, updateCommunities, settlementOpportunity, type Culture } from './society.js';
+import { bond, convivir, cooperate, cooperationOpportunity, inheritCulture, initialCulture, resourceDispute, updateCommunities, updateCulturalNormsOnOutcome, settlementOpportunity, type Culture } from './society.js';
 import { count, emptyTotals, recordSample } from './statistics.js';
 import { initializeEcosystem, stepEcosystem, stepLocalEcology, harvestMaterial, cultivateTile, trampleTile, FOOD_PER_ANIMAL } from './ecosystem.js';
 import { assertEcosystemTile, assertLifeState, assertDormantTerrain } from './validation.js';
@@ -21,7 +21,7 @@ import type { AnimalDynamics, BlueprintView, StructureView, InventionDynamics } 
 import { POPULATION_HARD_LIMIT } from '../shared/life.js';
 import type { TechnologyKnowledge, TechnologyState } from '../shared/technology.js';
 import type { DemographicState, LegacyRecord } from '../shared/demography.js';
-import { defaultTechnologyState, initialTechnologyKnowledge, technologyOpportunity, researchTechnology, craftTechnology, assertTechnology, useTool, recordTechnologyBenefit, settleTechnologyEstate, cancelTechnologyProject, maintainTechnologyMemory } from './technology.js';
+import { defaultTechnologyState, initialTechnologyKnowledge, technologyOpportunity, researchTechnology, craftTechnology, assertTechnology, useTool, recordTechnologyBenefit, settleTechnologyEstate, cancelTechnologyProject, maintainTechnologyMemory, constructionWorkFactor, consumeHuntingTools, huntingWorkFactor } from './technology.js';
 import { catalogueEnabled, resolveTechnologyRecipe, withArchiveReadBatch, withRecipeSession } from './technology-catalogue.js';
 import { initialDemography, demographicTraits, updateDemography } from './demography.js';
 import { reproductiveReadiness, familyOpportunity, availableToShare, closeKin, chooseReproductivePartner, pairAffinity, pairTie, earlierForagerExhausts, observedForagersByCell } from './family.js';
@@ -1096,9 +1096,7 @@ function outcome(world: World, person: Person, action: Action, benefit: number, 
   }
   if (world.adaptationEnabled && world.cooperationEnabled) {
     // Acquired norms react to consequences, independently from inherited alleles.
-    const rate = person.genome.learningRate * 0.04;
-    if ((!useful && ['gather','hunt','forage'].includes(action)) || (useful && action === 'farm')) person.culture.stewardship = clamp(person.culture.stewardship + rate);
-    if (useful && ['cooperate','share'].includes(action)) person.culture.sharing = clamp(person.culture.sharing + rate);
+    updateCulturalNormsOnOutcome(world, person, action, useful);
   }
   person.lastOutcome = world.tick;
   if (world.adaptationEnabled && world.tick - person.lastPracticeMemory >= 300 && ['gather','hunt','farm','build','drink','cooperate','forage'].includes(action)) {
@@ -1330,9 +1328,12 @@ function workEffort(person: Person, work = 1) {
   return { energy: work * 0.0003, fatigue: work * 0.00025 * (1.2 - person.traits.resilience * 0.4) };
 }
 function workDuration(world: World, person: Person, action = person.action): number {
-  return action === 'build' ? constructionCost(world, person).work : action === 'invent' ? 60 : action === 'repair' ? 30
+  const base = action === 'build' ? constructionCost(world, person).work : action === 'invent' ? 60 : action === 'repair' ? 30
     : ['farm', 'hunt'].includes(action) ? Math.ceil(45 * (1 - (person.skills[action] ?? 0) * 0.25))
       : Math.ceil(18 * (1 - (person.skills[action] ?? 0) * 0.25));
+  if (action === 'build') { const f = constructionWorkFactor(world, person); return f < 1 ? Math.ceil(base * f) : base; }
+  if (action === 'hunt') { const f = huntingWorkFactor(world, person); return f < 1 ? Math.ceil(base * f) : base; }
+  return base;
 }
 function performWork(world: World, person: Person, tile: Tile): void {
   exertBody(person, workEffort(person));
@@ -1369,7 +1370,9 @@ function performWork(world: World, person: Person, tile: Tile): void {
     }
   } else if (person.action === 'hunt' && (tile.fauna ?? 0) >= 1) {
     const food = harvestAt(world,tile,person.id,event=>addEvent(world,event)); const stored = Math.min(0.25 - person.inventory, food * 0.5);
-    person.inventory += stored; assimilateFood(person, food - stored, { hungerPerUnit: HAMBRE_POR_UNIDAD, energyPerUnit: 0 }); if(food>0) count(world, 'hunts'); count(world, 'foodHarvested', food); success = food > 0;
+    person.inventory += stored; assimilateFood(person, food - stored, { hungerPerUnit: HAMBRE_POR_UNIDAD, energyPerUnit: 0 });
+    if (food > 0) { count(world, 'hunts'); consumeHuntingTools(world, person, food); }
+    count(world, 'foodHarvested', food); success = food > 0;
   } else if (person.action === 'build') {
     success=!!completeConstruction(world,person,tile,event=>addEvent(world,event));
   } else if(person.action==='invent') {
@@ -1607,7 +1610,7 @@ function reproduce(world: World): void {
     const child: Person = { ...structuredClone(a), id, name: `${proceduralPlaceName(world.seed, world.birthCounter, genome.generation).split(' ')[0]} ${world.birthCounter}`.slice(0, 70), role: 'neighbor',
       genome, traits, curiosity: traits.curiosity, sociability: traits.sociability, generosity: traits.care, bornAt: world.tick, lastBirth: world.tick, thirst: 0.15,
       hunger: 0.2, fatigue: 0.1, energy: 0.65, inventory: 0.1, materials: { wood: 0, stone: 0 }, skills: {}, activity: {}, values: {}, experiences: [], habits: [], visited: [], bonds: {},
-      culture: { sharing: (a.culture.sharing + b.culture.sharing) / 2, stewardship: (a.culture.stewardship + b.culture.stewardship) / 2, openness: (a.culture.openness + b.culture.openness) / 2 },
+      culture: inheritCulture(world.seed, id, a.culture, b.culture, paramsOf(world).social.derivaCultural),
       command: null, controlMode: 'auto', target: { x: a.x, y: a.y }, action: 'rest', reason: 'Un nuevo habitante aprende en la comunidad que lo sostiene.', work: 0, decisionAt: world.tick + 30, lastOutcome: world.tick, lastPracticeMemory: world.tick, recentMemory: null,
       lastSocial: world.tick, lastDispute: world.tick, lastMeeting: world.tick, lastShared: world.tick, socialLoad: 0, closeness: 0.2, need: 'Aprender', heading: world.birthCounter * 2.399963229728653,
       blueprintId: null, lastInvention: world.tick,

@@ -54,7 +54,12 @@ export function enCuenca(seed: number, x: number, y: number, cuencas: number): b
   return ruidoCuenca(seed, x, y) < cuencas;
 }
 
-const regionKey = (x: number, y: number, tamRegion: number): string => `${Math.floor(x / tamRegion)},${Math.floor(y / tamRegion)}`;
+/** Clave de región como cadena: solo para coordenadas que no caben en la clave empaquetada (NaN, ±Infinity, tamaños extremos). */
+const regionKey = (rx: number, ry: number): string => `${rx},${ry}`;
+const REGION_BITS = 2 ** 25, REGION_STRIDE = 2 * REGION_BITS;
+/** Bits de la máscara por región: 1 = hay tierra, 2 = hay agua potable superficial. */
+const TIERRA = 1, AGUA = 2;
+const inRange = (r: number): boolean => r >= -REGION_BITS && r < REGION_BITS && Number.isInteger(r);
 
 /**
  * Fracción [0,1] de regiones CON TIERRA (cuadrículas de `tamRegion`×`tamRegion` sobre las teselas
@@ -65,17 +70,32 @@ const regionKey = (x: number, y: number, tamRegion: number): string => `${Math.f
  * importante: «regionesSinAgua cuenta las regiones 100 % océano como "sin agua"»).
  */
 export function regionesSinAgua(tiles: readonly Tile[], tamRegion = 16): number {
-  const regiones = new Map<string, { tierra: boolean; agua: boolean }>();
+  // Clave numérica empaquetada (|región| < 2^25 → entero seguro) y máscara de bits: sin cadenas ni objetos por tesela.
+  // Las regiones fuera de rango (coordenadas extremas o no finitas) caen en un mapa de cadenas con la clave de siempre.
+  const regiones = new Map<number, number>();
+  let extremas: Map<string, number> | undefined;
+  let claveActual = NaN, mascaraActual = 0;
   for (const tile of tiles) {
-    const clave = regionKey(tile.x, tile.y, tamRegion);
-    const entrada = regiones.get(clave) ?? { tierra: false, agua: false };
-    if (tile.terrain !== 'water') entrada.tierra = true;
-    if ((tile.drinkingWater ?? 0) > 0) entrada.agua = true;
-    regiones.set(clave, entrada);
+    const rx = Math.floor(tile.x / tamRegion), ry = Math.floor(tile.y / tamRegion);
+    const bits = (tile.terrain !== 'water' ? TIERRA : 0) | ((tile.drinkingWater ?? 0) > 0 ? AGUA : 0);
+    if (inRange(rx) && inRange(ry)) {
+      const clave = (rx + REGION_BITS) * REGION_STRIDE + (ry + REGION_BITS);
+      // Las teselas suelen llegar agrupadas por región: se acumula la racha y se vuelca al cambiar de clave.
+      if (clave !== claveActual) {
+        if (mascaraActual !== 0) regiones.set(claveActual, (regiones.get(claveActual) ?? 0) | mascaraActual);
+        claveActual = clave; mascaraActual = 0;
+      }
+      mascaraActual |= bits;
+    } else {
+      extremas ??= new Map();
+      const clave = regionKey(rx, ry);
+      extremas.set(clave, (extremas.get(clave) ?? 0) | bits);
+    }
   }
-  const conTierra = [...regiones.values()].filter(r => r.tierra);
-  if (conTierra.length === 0) return 0;
-  let sinAgua = 0;
-  for (const r of conTierra) if (!r.agua) sinAgua++;
-  return sinAgua / conTierra.length;
+  if (mascaraActual !== 0) regiones.set(claveActual, (regiones.get(claveActual) ?? 0) | mascaraActual);
+  let conTierra = 0, sinAgua = 0;
+  const contar = (mascara: number): void => { if (mascara & TIERRA) { conTierra++; if (!(mascara & AGUA)) sinAgua++; } };
+  for (const mascara of regiones.values()) contar(mascara);
+  if (extremas) for (const mascara of extremas.values()) contar(mascara);
+  return conTierra === 0 ? 0 : sinAgua / conTierra;
 }

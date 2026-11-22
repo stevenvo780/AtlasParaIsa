@@ -46,13 +46,23 @@ function estadisticasCaras(world: World): EstadisticasCaras {
 const POSITION_STRIDE = 2 * MAX_COORDINATE + 1, REGION_LIMIT = Math.ceil(MAX_COORDINATE / CHUNK_SIZE), REGION_STRIDE = 2 * REGION_LIMIT + 1;
 const packPosition = (x: number, y: number): number => (x + MAX_COORDINATE) * POSITION_STRIDE + (y + MAX_COORDINATE);
 const packRegion = (x: number, y: number): number => (Math.floor(x / CHUNK_SIZE) + REGION_LIMIT) * REGION_STRIDE + (Math.floor(y / CHUNK_SIZE) + REGION_LIMIT);
-const NEIGHBORS: readonly (readonly [number, number])[] = [[0, -1], [-1, 0], [1, 0], [0, 1]];
 
 /** Gini de la comida sumada por region (chunk de CHUNK_SIZE). Forma ordenada: O(n log n) en vez del
  * doble bucle O(n^2), identica por definicion y exacta en los ejemplos de prueba. */
 export function giniRecursosPorRegion(tiles: readonly Tile[]): number {
   const totals = new Map<number, number>();
-  for (const tile of tiles) { const region = packRegion(tile.x, tile.y); totals.set(region, (totals.get(region) ?? 0) + tile.food); }
+  // Las teselas llegan agrupadas por región: se acumula la racha en una variable (continuando el total ya guardado,
+  // así la suma de cada región conserva el orden de teselas) y se vuelca solo al cambiar de región.
+  let open = false, current = 0, running = 0;
+  for (const tile of tiles) {
+    const region = packRegion(tile.x, tile.y);
+    if (!open || region !== current) {
+      if (open) totals.set(current, running);
+      open = true; current = region; running = totals.get(region) ?? 0;
+    }
+    running += tile.food;
+  }
+  if (open) totals.set(current, running);
   const values = [...totals.values()].sort((left, right) => left - right), n = values.length;
   if (n === 0) return 0;
   let sum = 0, weighted = 0;
@@ -75,23 +85,59 @@ export function fraccionCeldasConComida(tiles: readonly Tile[], umbral = 0.1): n
  * de SC-004 en mundos costeros (ver `.superpowers/sdd/tasks/t041-residuales.md`, hallazgo R1).
  * BFS por indices enteros sobre arrays tipados: sin objetos ni claves de cadena por celda visitada. */
 export function distanciaMediaAgua(tiles: readonly Tile[]): number {
-  const count = tiles.length, index = new Map<number, number>();
-  for (let i = 0; i < count; i++) { const tile = tiles[i]!; index.set(packPosition(tile.x, tile.y), i); }
+  const count = tiles.length;
   const distances = new Int32Array(count).fill(-1), queue = new Int32Array(count);
+  const lookup = positionLookup(tiles);
   let tail = 0;
   for (let i = 0; i < count; i++) { const tile = tiles[i]!; if ((tile.drinkingWater ?? 0) > 0) { distances[i] = 0; queue[tail++] = i; } }
   if (tail === 0) return -1;
+  // Vecinos en el orden fijo N, O, E, S: el recorrido BFS (y por tanto cada distancia) no cambia.
   for (let head = 0; head < tail; head++) {
-    const tile = tiles[queue[head]!]!, next = distances[queue[head]!]! + 1;
-    for (const [dx, dy] of NEIGHBORS) {
-      const neighbor = index.get(packPosition(tile.x + dx, tile.y + dy));
-      if (neighbor === undefined || distances[neighbor]! >= 0) continue;
-      distances[neighbor] = next; queue[tail++] = neighbor;
-    }
+    const origin = queue[head]!, tile = tiles[origin]!, next = distances[origin]! + 1, x = tile.x, y = tile.y;
+    let neighbor = lookup(x, y - 1);
+    if (neighbor >= 0 && distances[neighbor]! < 0) { distances[neighbor] = next; queue[tail++] = neighbor; }
+    neighbor = lookup(x - 1, y);
+    if (neighbor >= 0 && distances[neighbor]! < 0) { distances[neighbor] = next; queue[tail++] = neighbor; }
+    neighbor = lookup(x + 1, y);
+    if (neighbor >= 0 && distances[neighbor]! < 0) { distances[neighbor] = next; queue[tail++] = neighbor; }
+    neighbor = lookup(x, y + 1);
+    if (neighbor >= 0 && distances[neighbor]! < 0) { distances[neighbor] = next; queue[tail++] = neighbor; }
   }
   let land = 0, total = 0;
   for (let i = 0; i < count; i++) if (tiles[i]!.terrain !== 'water' && distances[i]! >= 0) { land++; total += distances[i]!; }
   return land === 0 ? 0 : total / land;
+}
+
+/** Máximo de celdas de la rejilla densa por tesela: por encima, las teselas están demasiado dispersas y se usa el mapa. */
+const DENSE_GRID_FACTOR = 8;
+/**
+ * Índice de tesela por posición (`-1` si no hay). Con las teselas agrupadas en una caja compacta usa una
+ * rejilla entera densa; si hay coordenadas no enteras, pegadas al borde del mundo (donde `packPosition`
+ * solapa filas) o dispersas, usa el mapa de claves empaquetadas de siempre. En ambos casos, ante una posición
+ * repetida gana la última tesela, como al rellenar el mapa.
+ */
+function positionLookup(tiles: readonly Tile[]): (x: number, y: number) => number {
+  const count = tiles.length;
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, dense = count > 0;
+  for (let i = 0; i < count && dense; i++) {
+    const { x, y } = tiles[i]!;
+    if (!Number.isInteger(x) || !Number.isInteger(y) || x <= -MAX_COORDINATE || x >= MAX_COORDINATE || y <= -MAX_COORDINATE || y >= MAX_COORDINATE) { dense = false; break; }
+    if (x < minX) minX = x; if (x > maxX) maxX = x; if (y < minY) minY = y; if (y > maxY) maxY = y;
+  }
+  if (dense) {
+    const width = maxX - minX + 1, height = maxY - minY + 1;
+    if (width * height <= DENSE_GRID_FACTOR * count + 1024) {
+      const grid = new Int32Array(width * height).fill(-1);
+      for (let i = 0; i < count; i++) { const tile = tiles[i]!; grid[(tile.y - minY) * width + (tile.x - minX)] = i; }
+      return (x, y) => {
+        const dx = x - minX, dy = y - minY;
+        return dx < 0 || dy < 0 || dx >= width || dy >= height ? -1 : grid[dy * width + dx]!;
+      };
+    }
+  }
+  const index = new Map<number, number>();
+  for (let i = 0; i < count; i++) { const tile = tiles[i]!; index.set(packPosition(tile.x, tile.y), i); }
+  return (x, y) => index.get(packPosition(x, y)) ?? -1;
 }
 
 export const TOTAL_KEYS = ['foodHarvested','woodGathered','stoneGathered','hunts','waterConsumed','cooperation','teaching','trade','conflicts','births','cultivations','constructionHelp'] as const;
@@ -109,8 +155,11 @@ export function count(world: World, key: typeof TOTAL_KEYS[number], amount = 1):
   world.totals[key] = saturateTotal(world.totals[key], amount);
 }
 function sample(world: World): WorldSample {
-  const n = Math.max(1, world.people.length), mean = (key: 'hunger' | 'energy' | 'fatigue' | 'thirst') => world.people.reduce((sum, p) => sum + p[key], 0) / n;
-  return { tick: world.tick, population: world.people.length, hunger: mean('hunger'), energy: mean('energy'), fatigue: mean('fatigue'), thirst: mean('thirst'), discoveries: world.discoveredChunks, settlements: world.settlementCount, cooperation: world.totals.cooperation ?? 0, births: world.totals.births ?? 0 };
+  // Una sola pasada: cada suma conserva su orden (habitante a habitante), idéntica a un `reduce` por magnitud.
+  const n = Math.max(1, world.people.length);
+  let hunger = 0, energy = 0, fatigue = 0, thirst = 0;
+  for (const p of world.people) { hunger += p.hunger; energy += p.energy; fatigue += p.fatigue; thirst += p.thirst; }
+  return { tick: world.tick, population: world.people.length, hunger: hunger / n, energy: energy / n, fatigue: fatigue / n, thirst: thirst / n, discoveries: world.discoveredChunks, settlements: world.settlementCount, cooperation: world.totals.cooperation ?? 0, births: world.totals.births ?? 0 };
 }
 export function recordSample(world: World): void {
   if (world.tick % 60 !== 0) return;
@@ -148,11 +197,19 @@ function computeWorldStatistics(world: World): WorldStatsRecursos {
       identities++; protectedCount++;
     }
   }
+  // Biomas y rasgos se cuentan por rachas (las teselas contiguas repiten valor) y se vuelcan al cambiar:
+  // son enteros, así que los totales y el orden de primera aparición de las claves no cambian.
+  let lastBiome: string | undefined, biomeRun = 0, lastFeature: string | undefined, featureRun = 0;
   for (const tile of world.tiles) {
     const biome = tile.biome ?? 'grassland', feature = tile.feature ?? 'none';
-    biomes[biome] = (biomes[biome] ?? 0) + 1; features[feature] = (features[feature] ?? 0) + 1;
+    if (biome !== lastBiome) { if (lastBiome !== undefined) biomes[lastBiome] = (biomes[lastBiome] ?? 0) + biomeRun; lastBiome = biome; biomeRun = 0; }
+    biomeRun++;
+    if (feature !== lastFeature) { if (lastFeature !== undefined) features[lastFeature] = (features[lastFeature] ?? 0) + featureRun; lastFeature = feature; featureRun = 0; }
+    featureRun++;
     freshWater += tile.drinkingWater ?? 0; if ((tile.cultivation ?? 0) > 0.1) cultivatedTiles++; if ((tile.traffic ?? 0) > 0.15) trailTiles++;
   }
+  if (lastBiome !== undefined) biomes[lastBiome] = (biomes[lastBiome] ?? 0) + biomeRun;
+  if (lastFeature !== undefined) features[lastFeature] = (features[lastFeature] ?? 0) + featureRun;
   for(const animal of world.animals) wildlife[animal.species]=(wildlife[animal.species]??0)+1;
   const structures:Record<string,number>={}; for(const structure of world.structures){freshWater+=structure.water;for(const component of structure.components)structures[component]=(structures[component]??0)+1;}
   return { population: current.population, meanEnergy: current.energy, meanHunger: current.hunger, meanFatigue: current.fatigue, meanThirst: current.thirst, materials, actions, biomes, features, totals: { ...world.totals }, generations, history: world.history.map(s => ({ ...s })), scope: 'active-regions', wildlife, freshWater, cultivatedTiles, trailTiles, animalDynamics:{...world.animalDynamics}, structures,blueprints:world.blueprints.length,inventionDynamics:{...world.inventionDynamics}, ...caras, diversidad: { ...caras.diversidad },

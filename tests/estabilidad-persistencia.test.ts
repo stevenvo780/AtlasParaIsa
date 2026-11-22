@@ -424,7 +424,7 @@ test('A2: EXPLAIN QUERY PLAN confirma 0 TEMP B-TREE en technology_definitions y 
   }
 });
 
-test('A3: poda escalada supera 4096 recibos en un guardado cuando pending.length*2 es mayor', t => {
+test('A3: poda escalada supera TECHNOLOGY_PRUNE_ROWS_PER_SAVE en un guardado cuando pending.length*2 es mayor', t => {
   const { store } = laboratorio(t, 'atlas-a3-prune-');
   const world = createWorld(51926);
   setParams(world, parseParams('persistencia.ventanaEventosTicks=2400'));
@@ -432,20 +432,23 @@ test('A3: poda escalada supera 4096 recibos en un guardado cuando pending.length
   inventTool(world, 0);
   store.save(world);
 
-  // Generar 5200 recibos antiguos en varios ticks pequeños (sin superar ventana todavía).
+  // Generar suficientes recibos antiguos (> TECHNOLOGY_PRUNE_ROWS_PER_SAVE + 2000) en varios ticks pequeños.
   const toolIndex = { next: 1 };
-  for (let batch = 0; batch < 26; batch++) {
+  const targetOld = TECHNOLOGY_PRUNE_ROWS_PER_SAVE + 2400;
+  const batches = Math.ceil(targetOld / 1000);
+  for (let batch = 0; batch < batches; batch++) {
     fixtureTick(world, world.tick + 10);
-    useCutting(world, 200, 2, toolIndex);
+    useCutting(world, 1000, 2, toolIndex);
     store.save(world);
   }
   const beforePruneCount = count(store.db, 'SELECT COUNT(*) AS n FROM technology_executions');
-  assert.ok(beforePruneCount > 5200);
+  assert.ok(beforePruneCount > TECHNOLOGY_PRUNE_ROWS_PER_SAVE + 1000);
 
-  // Avanzar más allá de la ventana y acumular >= 2600 recibos pendientes (cap escalado >= 5200 > 4096).
+  // Avanzar más allá de la ventana y acumular pending.length*2 > TECHNOLOGY_PRUNE_ROWS_PER_SAVE.
+  const pendingCount = Math.ceil(TECHNOLOGY_PRUNE_ROWS_PER_SAVE / 2) + 800;
   fixtureTick(world, world.tick + TECHNOLOGY_RETENTION_MIN_TICKS + 1000);
-  useCutting(world, 2600, 2, toolIndex);
-  assert.ok(world.technology.journal!.pending.length >= 2600);
+  useCutting(world, pendingCount, 2, toolIndex);
+  assert.ok(world.technology.journal!.pending.length >= pendingCount);
   store.save(world);
 
   const row = store.db.prepare("SELECT value FROM metadata WHERE key='technology-pruned-v1'").get() as { value: string } | undefined;

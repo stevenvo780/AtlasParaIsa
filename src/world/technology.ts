@@ -11,6 +11,7 @@ import { pruneTechnologyCompetence, rememberRecipe, technologyProjectPins, touch
 import { containerAffordance } from './material-affordances.js';
 import { firstTileAt } from './tile-index.js';
 import { boundParamsOf, HISTORICAL_PARAMS, type WorldParams } from './params.js';
+import { isGenuineFunctionalNovelty } from './tecnologia-complejidad.js';
 export type * from '../shared/technology.js';
 
 export interface TechnologyActor {
@@ -22,8 +23,10 @@ export interface TechnologyActor {
 type Emit = (event: Omit<ChronicleEvent, 'id' | 'tick'>) => unknown;
 export interface TechnologyHost {
   seed: number; tick: number; people: TechnologyActor[]; technology: TechnologyState;
-  tiles?: { x: number; y: number; drinkingWater?: number; wood?: number; stone?: number; terrain?: string; moisture?: number; vegetation?: number; cultivation?: number }[];
+  tiles?: { x: number; y: number; drinkingWater?: number; wood?: number; stone?: number; terrain?: string; moisture?: number; vegetation?: number; cultivation?: number; fauna?: number }[];
   cooperationEnabled?: boolean; learningEnabled?: boolean; noveltyEnabled?: boolean; emit?: Emit;
+  /** Tiempo del paso (`World.weather`); sólo lo leen los usos de `tecnologia.efectosHerramientas`. */
+  weather?: string;
 }
 export const MASS_UNIT = 1000;
 export const CAPABILITIES: readonly Capability[] = ['cutting', 'storage', 'insulation', 'cultivation', 'binding', 'abrasion'];
@@ -304,6 +307,63 @@ export function recordTechnologyBenefit(host: TechnologyHost, actor: TechnologyA
   if (receipt.recipeId) { const practice = actor.technology.competence[receipt.recipeId] ??= { attempts: 0, successes: 0, work: 0, benefit: 0 }; practice.benefit += actualBenefit; }
   maintainTechnologyMemory(host, actor);
 }
+/**
+ * V16 — efectos físicos cualitativos de las seis capacidades (`tecnologia.efectosHerramientas`, por
+ * defecto `false`: nada de esto ocurre y el mundo es el histórico bit a bit). Con la ley, el abrigo
+ * (`insulation`), las ataduras y lazos (`binding`), el corte (`cutting`) y el desbaste (`abrasion`)
+ * cambian la caza, la obra y la intemperie. Cada efecto pasa por `useTool` (desgaste material real,
+ * conservado en el residuo del actor y en el libro) y su beneficio sólo se anota con
+ * `recordTechnologyBenefit` después de medir el cambio que produjo en el mundo. Un anfitrión
+ * sintético sin params nunca activa la ley.
+ */
+export function toolEffectsEnabled(host: TechnologyHost): boolean {
+  return techParams(host).efectosHerramientas === true;
+}
+/** Por debajo de 0,07 un objeto no cuenta como herramienta: la misma cota con la que `bestTool` lo admite. */
+const toolPower = (power: number): number => power > 0.07 ? power : 0;
+/** Abrigo portátil (capa o manta tejida) que lleva el actor: sólo lectura, para prever la protección
+ * a la intemperie (`bodilyShelter`/`choose`). El uso real y su desgaste van por `consumeInsulationTools`. */
+export function portableInsulationPower(actor: TechnologyActor): number {
+  return toolPower(itemCapacities(actor.technology.items).insulation);
+}
+/** Fracción del trabajo de caza que queda con lanza o cuchillo (`cutting`) y lazo o trampa (`binding`):
+ * 1 sin la ley o sin herramientas; como mucho un 32 % menos. Sólo lectura (se paga en `consumeHuntingTools`). */
+export function huntingWorkFactor(host: TechnologyHost, actor: TechnologyActor): number {
+  if (!toolEffectsEnabled(host)) return 1;
+  const powers = itemCapacities(actor.technology.items);
+  return 1 - Math.min(0.32, toolPower(powers.cutting) * 0.2 + toolPower(powers.binding) * 0.16);
+}
+/** Tras una caza que rindió `foodGained` con el trabajo acortado por `huntingWorkFactor`: desgasta la mejor
+ * herramienta de corte y la de atar (demanda 0,8) y anota a cada una su parte del rendimiento. */
+export function consumeHuntingTools(host: TechnologyHost, actor: TechnologyActor, foodGained: number): void {
+  if (!toolEffectsEnabled(host) || !Number.isFinite(foodGained) || foodGained <= 0) return;
+  for (const [capability, share] of [['cutting', 0.2], ['binding', 0.16]] as const) {
+    const receipt = useTool(host, actor, capability, 0.8);
+    if (receipt) recordTechnologyBenefit(host, actor, receipt, foodGained * receipt.power * share);
+  }
+}
+/** Fracción del trabajo de obra que queda con ataduras (`binding`), carpintería (`cutting`) y cantería
+ * (`abrasion`): 1 sin la ley o sin herramientas; como mucho un 35 % menos. Sólo lectura. */
+export function constructionWorkFactor(host: TechnologyHost, actor: TechnologyActor): number {
+  if (!toolEffectsEnabled(host)) return 1;
+  const powers = itemCapacities(actor.technology.items);
+  return 1 - Math.min(0.35, toolPower(powers.binding) * 0.16 + toolPower(powers.cutting) * 0.12 + toolPower(powers.abrasion) * 0.12);
+}
+/** Tras una obra que ahorró `workSaved` unidades de trabajo gracias a `constructionWorkFactor`: desgasta la
+ * mejor herramienta de atar, cortar y desbastar (demanda 0,7). Sin ahorro real no hay uso ni beneficio. */
+export function consumeConstructionTools(host: TechnologyHost, actor: TechnologyActor, workSaved: number): void {
+  if (!toolEffectsEnabled(host) || !Number.isFinite(workSaved) || workSaved <= 0) return;
+  for (const capability of ['binding', 'cutting', 'abrasion'] as const) {
+    const receipt = useTool(host, actor, capability, 0.7);
+    recordTechnologyBenefit(host, actor, receipt, Math.max(0.05, workSaved * 0.01));
+  }
+}
+/** Tras una exposición cuyo daño corporal evitado por el abrigo portátil (`portableInsulationPower`) se
+ * midió contra el mismo cuerpo sin él: desgasta la capa (demanda 0,5) y anota ese daño evitado. */
+export function consumeInsulationTools(host: TechnologyHost, actor: TechnologyActor, avoidedDamage: number): void {
+  if (!toolEffectsEnabled(host) || !Number.isFinite(avoidedDamage) || avoidedDamage <= 0) return;
+  recordTechnologyBenefit(host, actor, useTool(host, actor, 'insulation', 0.5), avoidedDamage);
+}
 function randomInstruction(random: () => number): OperationInstruction {
   const op = PHYSICAL_OPERATIONS[Math.floor(random() * PHYSICAL_OPERATIONS.length)]!, instruction: OperationInstruction = { op, intensity: 1 + Math.floor(random() * 4) };
   if (op === 'form') instruction.shape = SHAPES[Math.floor(random() * SHAPES.length)]!;
@@ -424,14 +484,27 @@ function localTechnologyUses(host: TechnologyHost, actor: TechnologyActor): Capa
   if (actor.materials.wood >= 1 && tile.terrain !== 'shelter' && (tile.moisture ?? 0) > 0.2
     && (tile.vegetation ?? 1) < 0.9 && (tile.cultivation ?? 0) < 0.9) uses.push('cultivation');
   if (host.technology.water && (tile.drinkingWater ?? 0) > 0) uses.push('storage');
+  if (techParams(host).efectosHerramientas) addToolEffectUses(uses, tile, actor, host.weather === 'rain');
   return uses;
+}
+/** V16 (`tecnologia.efectosHerramientas`): usos que aquí tienen las capacidades sin efecto histórico. Puro:
+ * la tesela ya leída, el cuerpo y el tiempo del paso. Abrigo a la intemperie, con lluvia o sin capa propia;
+ * ataduras, lazos y trampas con materia que atar o una presa; corte para cazar o construir; desbaste para
+ * construir (la obra más ligera, un armazón, pide 2 maderas y 1 piedra). */
+function addToolEffectUses(uses: Capability[], tile: { terrain?: string; fauna?: number }, actor: TechnologyActor, rain: boolean): void {
+  const prey = (tile.fauna ?? 0) >= 1, canBuild = actor.materials.wood >= 2 && actor.materials.stone >= 1;
+  const add = (capability: Capability) => { if (!uses.includes(capability)) uses.push(capability); };
+  if (rain || tile.terrain !== 'shelter' || portableInsulationPower(actor) === 0) add('insulation');
+  if (prey || actor.materials.wood >= 1 || actor.materials.stone >= 1) add('binding');
+  if (prey || canBuild) add('cutting');
+  if (canBuild) add('abrasion');
 }
 /** Follow only locally remembered product dependencies, with at most one memory's
  * worth of fabrication steps per forecast. No alternative-program search or
  * unbounded quantity expansion; the next decision recomputes from actual stock. */
 function dependencyCraft(host: TechnologyHost, actor: TechnologyActor, known: TechnologyRecipe[], powers: Record<Capability, number>): TechnologyRecipe | undefined {
   if (!known.some(recipe => recipe.program.inputs.some(input => input.source === 'product'))) return;
-  const uses = localTechnologyUses(host, actor), byId = new Map(known.map(recipe => [recipe.id, recipe]));
+  const uses = localTechnologyUses(host, actor), byId = new Map(known.map(recipe => [recipe.id, recipe])), effects = techParams(host).efectosHerramientas;
   const improves = (capacities: Record<Capability, number>, capabilities: Capability[]) => capabilities.some(c => capacities[c] > Math.max(0.12, powers[c] * 1.35));
   for (const goal of known) {
     if (!goal.program.inputs.some(input => input.source === 'product') || !improves(goal.capacities, uses)) continue;
@@ -469,6 +542,8 @@ function dependencyCraft(host: TechnologyHost, actor: TechnologyActor, known: Te
     // available use after paying the whole chain, including its future farm wood.
     const finalUses = localTechnologyUses({ ...privateHost, technology: host.technology }, privateActor)
       .filter(capability => capability !== 'storage' || containerAffordance(output).capacityQuanta > 0);
+    // The private host carries no laws; the forecast runs under the real host's.
+    if (effects && tile) addToolEffectUses(finalUses, tile, privateActor, host.weather === 'rain');
     if (improves(materialCapacities(output), finalUses)) return route[0];
   }
   return;
@@ -505,6 +580,26 @@ function emitDiscovery(host: TechnologyHost, actor: TechnologyActor, recipe: Tec
   (emit ?? host.emit)?.({ kind: 'invention', actors: [actor.id], x: actor.x, y: actor.y, source: 'simulation',
     text: `${actor.name ?? actor.id} descubrió ${recipe.name}: ${recipe.program.steps.map(s => s.op).join(' → ')}.`,
     cause: `Proceso físico nuevo, generación ${recipe.generation}, ${recipe.program.inputs.length} sustratos y ${recipe.program.steps.length} operaciones; masa y residuos conservados. La utilidad se mide al usar el producto.` });
+}
+/** Puerta local de descubrimiento (`tecnologia.mejoraLocal > 0`). Un ensayo pagado sólo gana instrucciones
+ * si su producto hace algo: nunca un lote inerte (ninguna capacidad ≥ 0,12), y además, o una novedad
+ * funcional genuina (`isGenuineFunctionalNovelty`, tolerancia = `mejoraLocal`) frente a lo que el actor
+ * sabe y a la ventana residente de recetas calientes, o la misma función que sus padres por estrictamente
+ * menos trabajo (Pareto). La rejilla de 6⁶ casillas de `hasTechnologyFunction` ya no basta: aceptaba
+ * microvariantes que sólo cambiaban de casilla y lotes casi inertes (V15: 27 969 recetas, 40 % sin uso). */
+function locallyUsefulDiscovery(host: TechnologyHost, actor: TechnologyActor, project: TechnologyProject, parents: readonly TechnologyRecipe[],
+  capacities: Record<Capability, number>, signature: string, generation: number, tolerance: number): boolean {
+  if (Math.max(...CAPABILITIES.map(c => capacities[c])) < 0.12) return false;
+  if (parents.length && technologyWorkCost(project.program) < Math.min(...parents.map(p => technologyWorkCost(p.program)))
+    && CAPABILITIES.every(c => capacities[c] >= Math.max(...parents.map(p => p.capacities[c])) - 1e-9)) return true;
+  // Known instructions resolve without touching the resident LRU; the window is read as it stands.
+  const compared = new Map<string, TechnologyRecipe>();
+  for (const recipe of knownTechnologyRecipes(host, actor, false)) compared.set(recipe.id, recipe);
+  for (const recipe of host.technology.recipes) if (!compared.has(recipe.id)) compared.set(recipe.id, recipe);
+  const candidate: TechnologyRecipe = { id: `recipe-${host.technology.recipeCounter + 1}`, name: '', program: project.program, signature,
+    parents: [...project.parents], generation, inventorId: actor.id, tick: host.tick, x: actor.x, y: actor.y, novelty: 'program', capacities,
+    uses: 0, utility: 0, manufactured: 0 };
+  return isGenuineFunctionalNovelty(candidate, [...compared.values()], tolerance);
 }
 function finishProject(host: TechnologyHost, actor: TechnologyActor, project: TechnologyProject, emit?: Emit): boolean {
   const state = host.technology, knowledge = actor.technology;
@@ -549,21 +644,9 @@ function finishProject(host: TechnologyHost, actor: TechnologyActor, project: Te
     if (!recipe && inventionRoom(state)) {
       const capacities = materialCapacities(output), newFunction = !hasTechnologyFunction(host, capacities);
       const { mejoraLocal } = techParams(host);
-      let accepted = true;
-      if (mejoraLocal > 0) {
-        const maxCap = Math.max(...CAPABILITIES.map(c => capacities[c]));
-        if (parentRecipes.length === 0) {
-          accepted = newFunction || maxCap >= 0.12;
-        } else {
-          const parentBest = Object.fromEntries(CAPABILITIES.map(c => [c, Math.max(...parentRecipes.map(p => p!.capacities[c]))])) as Record<Capability, number>;
-          const minParentWork = Math.min(...parentRecipes.map(p => technologyWorkCost(p!.program)));
-          const improves = CAPABILITIES.some(c => capacities[c] >= Math.max(0.12, parentBest[c] * (1 + mejoraLocal)));
-          const paretoWork = maxCap >= 0.12
-            && CAPABILITIES.every(c => capacities[c] >= parentBest[c] - 1e-9)
-            && technologyWorkCost(project.program) < minParentWork;
-          accepted = newFunction || improves || paretoWork;
-        }
-      }
+      const accepted = mejoraLocal > 0
+        ? locallyUsefulDiscovery(host, actor, project, parentRecipes as TechnologyRecipe[], capacities, signature, nextGeneration, mejoraLocal)
+        : true;
       if (accepted) {
         recipe = { id: `recipe-${state.recipeCounter + 1}`, name: `${project.program.steps.map(s => s.op).join('·').slice(0, 70)} ${state.recipeCounter + 1}`,
           program: structuredClone(project.program), signature, parents: [...project.parents], generation: nextGeneration, inventorId: actor.id, tick: host.tick, x: actor.x, y: actor.y,

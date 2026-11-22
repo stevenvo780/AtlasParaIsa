@@ -1,5 +1,6 @@
 import type { Capability, TechnologyCatalogueTotals, TechnologyRecipe, TechnologyState } from '../shared/technology.js';
 import { POPULATION_HARD_LIMIT } from '../shared/life.js';
+import { boundParamsOf } from './params.js';
 
 export interface TechnologyCatalogueReader {
   resolve(id: string, atTick: number): TechnologyRecipe | null;
@@ -158,14 +159,38 @@ function residentRecipe(recipes: TechnologyRecipe[], id: string): TechnologyReci
   const byId = windowIndex(recipes);
   return byId ? byId.get(id) : recipes.find(recipe => recipe.id === id);
 }
-function cacheRecipe(state: TechnologyState, recipe: TechnologyRecipe): void {
+/**
+ * V16: ventana residente ponderada por utilidad. Con `tecnologia.mejoraLocal > 0` o
+ * `tecnologia.efectosHerramientas` (leyes ligadas al anfitrión con `setParams`), al desbordar la
+ * ventana se expulsa la receta MÁS ANTIGUA SIN USOS de su mitad más antigua, para que una racha de
+ * variantes recién inventadas y nunca usadas no desaloje lo que sí se usa (en V15, 102 de 256
+ * residentes tenían 0 usos). Sin receta sin usos en esa mitad, la más antigua, como siempre. La
+ * mitad nueva queda fuera: una receta recién llegada tiene su oportunidad de usarse. Sin esas leyes,
+ * y en todo anfitrión sintético sin params, LRU estricto exactamente igual que antes.
+ */
+function utilityAwareWindow(host: TechnologyCatalogueHost): boolean {
+  const tech = boundParamsOf(host)?.tecnologia;
+  return tech !== undefined && (tech.mejoraLocal > 0 || tech.efectosHerramientas === true);
+}
+/** Posición de la receta que sale de una ventana desbordada (`window.length > max`), en su orden de toque. */
+function evictionIndex(window: readonly TechnologyRecipe[], max: number, utilityAware: boolean): number {
+  if (utilityAware) {
+    const half = Math.floor(max / 2);
+    for (let n = 0; n < half && n < window.length - 1; n++) if (window[n]!.uses === 0) return n;
+  }
+  return 0;
+}
+function cacheRecipe(host: TechnologyCatalogueHost, recipe: TechnologyRecipe): void {
   // Replacing the array avoids extending an array currently being validated/iterated.
-  const current = state.recipes, max = state.budgets.maxRecipes, byId = windowIndex(current);
+  const state = host.technology, current = state.recipes, max = state.budgets.maxRecipes, byId = windowIndex(current);
+  const utilityAware = current.length >= max && utilityAwareWindow(host);
   if (!byId) {
     const next: TechnologyRecipe[] = [];
     current.forEach(cached => { if (cached.id !== recipe.id) next.push(cached); });
     next.push(recipe);
-    state.recipes = next.length > max ? next.slice(-max) : next;
+    if (!utilityAware) { state.recipes = next.length > max ? next.slice(-max) : next; return; }
+    while (next.length > max) next.splice(evictionIndex(next, max, true), 1);
+    state.recipes = next;
     return;
   }
   // Ids únicos: el `filter` de siempre quita exactamente al residente con ese id, si lo hay.
@@ -173,10 +198,14 @@ function cacheRecipe(state: TechnologyState, recipe: TechnologyRecipe): void {
   let next = current.slice();
   if (resident !== undefined) next.splice(current.indexOf(resident), 1);
   next.push(recipe);
-  if (next.length > max) {
+  if (next.length > max && !utilityAware) {
     const kept = next.slice(-max);
     for (let n = 0; n < next.length - kept.length; n++) byId.delete(next[n]!.id);
     next = kept;
+  }
+  while (next.length > max) {
+    const n = evictionIndex(next, max, true);
+    byId.delete(next[n]!.id); next.splice(n, 1);
   }
   byId.delete(recipe.id);
   if (next[next.length - 1] === recipe) byId.set(recipe.id, recipe);
@@ -197,7 +226,7 @@ function cacheRecipe(state: TechnologyState, recipe: TechnologyRecipe): void {
  * cierra antes la sesión. Una sesión sólo se abre con el catálogo activo, ids únicos en la ventana,
  * `maxRecipes` entero positivo y la ventana sin exceso; si no, todo sigue el camino de siempre.
  */
-interface RecipeSession { lru: Map<string, TechnologyRecipe>; max: number; touched: boolean; }
+interface RecipeSession { lru: Map<string, TechnologyRecipe>; max: number; touched: boolean; utilityAware: boolean; }
 const sessions = new WeakMap<TechnologyState, RecipeSession>();
 function endRecipeSession(state: TechnologyState): void {
   const session = sessions.get(state);
@@ -217,7 +246,7 @@ export function withRecipeSession<T>(host: TechnologyCatalogueHost, evaluate: ()
     if (!lru || !Number.isSafeInteger(max) || max < 1 || state.recipes.length > max) return evaluate();
     // The map now belongs to the session; retained arrays must rebuild their own index.
     windowIndexes.delete(state.recipes);
-    const session: RecipeSession = { lru, max, touched: false };
+    const session: RecipeSession = { lru, max, touched: false, utilityAware: utilityAwareWindow(host) };
     sessions.set(state, session);
     try { return evaluate(); } finally { if (sessions.get(state) === session) endRecipeSession(state); }
   };
@@ -231,8 +260,17 @@ export function withArchiveReadBatch<T>(host: TechnologyCatalogueHost, read: () 
 }
 function touchInSession(session: RecipeSession, recipe: TechnologyRecipe): void {
   session.lru.delete(recipe.id); session.lru.set(recipe.id, recipe);
-  if (session.lru.size > session.max) session.lru.delete(session.lru.keys().next().value!);
+  if (session.lru.size > session.max) session.lru.delete(sessionEvictionKey(session));
   session.touched = true;
+}
+/** La misma elección que `evictionIndex` sobre la ventana de la sesión (el orden del `Map` es el de la ventana). */
+function sessionEvictionKey(session: RecipeSession): string {
+  if (session.utilityAware) {
+    const half = Math.floor(session.max / 2), last = session.lru.size - 1;
+    let n = 0;
+    for (const [id, cached] of session.lru) { if (n >= half || n >= last) break; if (cached.uses === 0) return id; n++; }
+  }
+  return session.lru.keys().next().value!;
 }
 export function resolveTechnologyRecipe(host: TechnologyCatalogueHost, id: string,
   options: { cache?: boolean } = {}): TechnologyRecipe | undefined {
@@ -250,7 +288,7 @@ export function resolveTechnologyRecipe(host: TechnologyCatalogueHost, id: strin
   } else {
     checkedRecipe(host, recipe, id);
   }
-  if (options.cache !== false) { if (session) touchInSession(session, recipe); else cacheRecipe(state, recipe); }
+  if (options.cache !== false) { if (session) touchInSession(session, recipe); else cacheRecipe(host, recipe); }
   return recipe;
 }
 export function findTechnologyRecipe(host: TechnologyCatalogueHost, signature: string): TechnologyRecipe | undefined {
@@ -265,7 +303,7 @@ export function findTechnologyRecipe(host: TechnologyCatalogueHost, signature: s
   if (archived.signature !== signature) fail('resolved signature');
   const recipe = pendingRecipe(state.catalogue!.pending, archived.id) ?? structuredClone(checkedRecipe(host, archived));
   checkedRecipe(host, recipe);
-  cacheRecipe(state, recipe); return recipe;
+  cacheRecipe(host, recipe); return recipe;
 }
 export function hasTechnologyFunction(host: TechnologyCatalogueHost, capacities: Record<Capability, number>): boolean {
   const code = technologyFunctionCode(capacities), state = host.technology;
@@ -318,7 +356,7 @@ export function registerTechnologyRecipe(host: TechnologyCatalogueHost, recipe: 
   state.recipeCounter++; catalogue.pending.push(recipe);
   catalogue.totals.recipes++; catalogue.totals.maxGeneration = Math.max(catalogue.totals.maxGeneration, recipe.generation);
   if (addFunction(catalogue.functions, code)) catalogue.totals.functionalDiversity++;
-  cacheRecipe(state, recipe);
+  cacheRecipe(host, recipe);
 }
 export function updateTechnologyRecipeStats(host: TechnologyCatalogueHost, id: string,
   delta: { manufactured?: number; uses?: number; utility?: number }): void {
@@ -340,7 +378,7 @@ export function updateTechnologyRecipeStats(host: TechnologyCatalogueHost, id: s
     catalogue.totals = totals;
   }
   Object.assign(recipe, next);
-  if (catalogue) cacheRecipe(state, recipe);
+  if (catalogue) cacheRecipe(host, recipe);
 }
 export function technologyCatalogueTotals(host: TechnologyCatalogueHost): TechnologyCatalogueTotals {
   return catalogueEnabled(host.technology) ? { ...host.technology.catalogue!.totals } : totalsOf(host.technology.recipes);

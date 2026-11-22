@@ -217,13 +217,15 @@ export function hostFullHardwareParams(base: WorldParams = DEFAULT_PARAMS, probe
 }
 
 /**
- * V16 (`RULES_VERSION 12`): modo de evolución abierta limitada únicamente por el hardware físico.
+ * V17 (`RULES_VERSION 12`): modo de evolución abierta limitada únicamente por el hardware físico.
  * Activa todos los chips detectados (`hostFullHardwareParams`) junto con:
  * - presión ecológica realista (`recursos.*`, `agua.cuencas=0.36`, `agua.memoria=1`) para imponer
  *   selección malthusiana real y migración sin colapso;
  * - natalidad local (`natalidadVecindad=true`) y comunidades vivas sin tope ficticio (`maxComunidades=0`)
- *   con deriva cultural bidireccional (`derivaCultural=1`) y ancla narrativa de S e I (`vinculoEncuentro=1`);
- * - política neuronal autónoma + plasticidad Baldwin (`politicaPeso=0.65`, `politicaAutonomia=0.55`);
+ *   con fisión tipo Dunbar, nombres ricos, deriva cultural bidireccional (`derivaCultural=1`) y
+ *   ancla narrativa de largo alcance para S e I (`vinculoEncuentro=1`);
+ * - especialización adaptativa de oficios (`aptitud=0.85`) + política neuronal autónoma y plasticidad
+ *   Baldwin (`politicaPeso=0.80`, `politicaAutonomia=0.65`);
  * - tecnología funcional de alto cociente señal/ruido (`mejoraLocal=0.08`, `dosisCuanto=100`, `efectosHerramientas=true`).
  */
 export function hostOpenWorldParams(base: WorldParams = DEFAULT_PARAMS, probe?: HostHardwareProbe): WorldParams {
@@ -231,16 +233,16 @@ export function hostOpenWorldParams(base: WorldParams = DEFAULT_PARAMS, probe?: 
   return parseParams({
     recursos: {
       ...full.recursos,
-      capacidadBosque: 0.8,
-      capacidadPastizal: 0.58,
-      capacidadOtros: 0.28,
-      velocidadRegeneracion: 0.72,
-      decaimientoFertilidad: 0.0018,
+      capacidadBosque: 0.74,
+      capacidadPastizal: 0.52,
+      capacidadOtros: 0.24,
+      velocidadRegeneracion: 0.66,
+      decaimientoFertilidad: 0.0022,
     },
     agua: { ...full.agua, cuencas: 0.36, memoria: 1 },
     poblacion: { ...full.poblacion, natalidadVecindad: true, radioVecindadNatalidad: 16 },
     social: { ...full.social, radioConvivencia: 12, disolucion: 1, maxComunidades: 0, derivaCultural: 1, vinculoEncuentro: 1 },
-    conducta: { ...full.conducta, aptitud: 0.35, politicaPeso: 0.65, politicaAutonomia: 0.55 },
+    conducta: { ...full.conducta, aptitud: 0.85, politicaPeso: 0.8, politicaAutonomia: 0.65 },
     tecnologia: { ...full.tecnologia, evitarNoOp: true, dosisCuanto: 100, mejoraLocal: 0.08, enfriamiento: 240, efectosHerramientas: true },
   }, full);
 }

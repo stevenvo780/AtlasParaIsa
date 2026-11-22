@@ -38,7 +38,7 @@ import {
   policyActionBias, updatePolicyPlasticity, type PolicyGenome, type PolicyPlasticity,
 } from './politica.js';
 import { cellIntKey, computeLocalPolicyObservation } from './politica-obs.js';
-import { evaluatePoliciesBatch, evaluatePoliciesResidentBatch } from './gpu/politica-gpu.js';
+import { evaluatePoliciesBatch, residentPolicyRegistry } from './gpu/politica-gpu.js';
 import {
   MOVE_AVANZA, MOVE_BLOQUEADO, MOVE_EN_DESTINO,
   precomputePersonasParallel, precomputedRouteLookup, SI, type PersonasExecution, type PrecomputedMoves,
@@ -514,19 +514,27 @@ function localPolicyObservation(world: World, person: Person, tileIn?: (x: numbe
   return computeLocalPolicyObservation(world, person, lookup, nearby);
 }
 
-/** Evalúa por lote (CPU o Dual-GPU FP64 exacta) las políticas de los actores con decisión prevista en este paso. */
-function precomputePolicyScores(world: World): Map<string, Float64Array> | undefined {
+/** Evalúa por lote (CPU o Dual-GPU FP64 exacta) las políticas de los actores con decisión prevista en este paso.
+ * En Dual-GPU lanza el kernel de forma no bloqueante (`begin`) para solaparlo con los workers CPU de `personas`. */
+function precomputePolicyScores(world: World): (() => Map<string, Float64Array>) | undefined {
   const params = paramsOf(world);
   if (params.conducta.politicaPeso <= 0) return undefined;
   const deciding: Person[] = [];
   for (const person of world.people) {
-    if (world.tick >= person.decisionAt || person.hunger > 0.85 || person.thirst > 0.85) deciding.push(person);
+    if (world.tick >= person.decisionAt && person.hunger <= 0.75 && person.thirst <= 0.75) deciding.push(person);
   }
   const count = deciding.length;
   if (count === 0) return undefined;
   const tileIn = tileLookup(world.tiles);
   const devices = params.motor.gpu.length > 0 && gpuNvrtcAvailable() ? params.motor.gpu : [];
-  let raw: Float64Array;
+  const toMap = (raw: Float64Array): Map<string, Float64Array> => {
+    const byId = new Map<string, Float64Array>();
+    for (let i = 0; i < count; i++) {
+      const start = i * POLICY_ACTIONS.length;
+      byId.set(deciding[i]!.id, raw.subarray(start, start + POLICY_ACTIONS.length));
+    }
+    return byId;
+  };
   if (devices.length > 0) {
     const actors = new Array<{ id: string; weights: readonly number[]; obs: Float64Array; bias: Float64Array }>(count);
     for (let i = 0; i < count; i++) {
@@ -539,26 +547,21 @@ function precomputePolicyScores(world: World): Map<string, Float64Array> | undef
         bias: Float64Array.from(plasticity.bias),
       };
     }
-    raw = evaluatePoliciesResidentBatch(actors, devices);
-  } else {
-    const obs = new Float64Array(count * POLICY_INPUTS);
-    const weights = new Float64Array(count * POLICY_WEIGHTS);
-    const biases = new Float64Array(count * POLICY_ACTIONS.length);
-    for (let i = 0; i < count; i++) {
-      const person = deciding[i]!;
-      const { genome, plasticity } = ensurePersonPolicy(world, person);
-      obs.set(localPolicyObservation(world, person, tileIn), i * POLICY_INPUTS);
-      weights.set(genome.weights, i * POLICY_WEIGHTS);
-      biases.set(plasticity.bias, i * POLICY_ACTIONS.length);
-    }
-    raw = evaluatePoliciesBatch(obs, weights, biases, count, devices);
+    const pending = residentPolicyRegistry(devices).begin(actors);
+    return () => toMap(pending.wait());
   }
-  const byId = new Map<string, Float64Array>();
+  const obs = new Float64Array(count * POLICY_INPUTS);
+  const weights = new Float64Array(count * POLICY_WEIGHTS);
+  const biases = new Float64Array(count * POLICY_ACTIONS.length);
   for (let i = 0; i < count; i++) {
-    const start = i * POLICY_ACTIONS.length;
-    byId.set(deciding[i]!.id, raw.subarray(start, start + POLICY_ACTIONS.length));
+    const person = deciding[i]!;
+    const { genome, plasticity } = ensurePersonPolicy(world, person);
+    obs.set(localPolicyObservation(world, person, tileIn), i * POLICY_INPUTS);
+    weights.set(genome.weights, i * POLICY_WEIGHTS);
+    biases.set(plasticity.bias, i * POLICY_ACTIONS.length);
   }
-  return byId;
+  const ready = toMap(evaluatePoliciesBatch(obs, weights, biases, count, devices));
+  return () => ready;
 }
 
 function choose(world: World, person: Person, policyScores?: Map<string, Float64Array>, precomputed?: PrecomputedMoves, slot?: number): void {
@@ -853,16 +856,24 @@ function choose(world: World, person: Person, policyScores?: Map<string, Float64
       candidates.push({ action: 'accompany', target: partner, score: 0.18 + person.sociability * 0.1 + (partner.action === 'rest' ? 0.1 : 0), reason: 'Elige compartir una pausa con quien está cerca.' });
     }
   } else if (vinculoEncuentro > 0 && person.role !== 'neighbor' && person.partnerMemory
-    && distance(person, person.partnerMemory) >= 2 && person.hunger < 0.65 && person.thirst < 0.65
-    && person.fatigue < 0.72 && person.socialLoad < 0.65 && person.closeness > 0.42) {
-    const reunionUrgency = world.tick - person.lastMeeting > TICKS_PER_DAY ? 0.35 : 0;
-    reunionCandidate = {
-      action: 'approach',
-      target: { x: person.partnerMemory.x, y: person.partnerMemory.y },
-      score: vinculoEncuentro * (0.48 + person.closeness * 0.55 + reunionUrgency),
-      reason: 'Recuerda el último lugar compartido y emprende el camino de regreso para reencontrarse; conserva sus necesidades.',
-    };
-    candidates.push(reunionCandidate);
+    && distance(person, person.partnerMemory) >= 2) {
+    const daysApart = Math.max(0, (world.tick - person.lastMeeting) / TICKS_PER_DAY);
+    const longSeparation = daysApart >= 1.5 && distance(person, person.partnerMemory) > 12;
+    const canTravel = longSeparation
+      ? person.hunger < 0.76 && person.thirst < 0.76 && person.fatigue < 0.84 && person.socialLoad < 0.75 && person.closeness > 0.32
+      : person.hunger < 0.65 && person.thirst < 0.65 && person.fatigue < 0.72 && person.socialLoad < 0.65 && person.closeness > 0.42;
+    if (canTravel) {
+      const reunionUrgency = longSeparation
+        ? Math.min(1.15, daysApart * 0.25)
+        : (world.tick - person.lastMeeting > TICKS_PER_DAY ? 0.35 : 0);
+      reunionCandidate = {
+        action: 'approach',
+        target: { x: person.partnerMemory.x, y: person.partnerMemory.y },
+        score: vinculoEncuentro * (0.48 + person.closeness * 0.55 + reunionUrgency),
+        reason: 'Recuerda el último lugar compartido y emprende el camino de regreso para reencontrarse; conserva sus necesidades.',
+      };
+      candidates.push(reunionCandidate);
+    }
   }
   for (const invitation of world.invitations) {
     if (distance(person, invitation) <= RADIUS && person.hunger < 0.65 && person.fatigue < 0.7 && person.socialLoad < 0.7) candidates.push({ action: 'approach', target: invitation, score: 0.67 + person.sociability * 0.15, reason: 'Percibe una invitación y sus necesidades le permiten acercarse.' });
@@ -1056,6 +1067,16 @@ function choose(world: World, person: Person, policyScores?: Map<string, Float64
     const continuingSearch = urgentSearch && person.action === 'explore' && remaining !== undefined
       && remaining > 0 && (desperateSubsistence || planAffordable(remaining, 0));
     if (vinculoEncuentro > 0 && urgentSearch && !continuingSearch) {
+      // Si S o I buscan agua/alimento lejos de su punto compartido (> 48 celdas), orientan el primer intento
+      // hacia su propio recuerdo local antes de rebotar por la costa, evitando derivar cientos de celdas lejos.
+      if (person.role !== 'neighbor' && person.partnerMemory && distance(person, person.partnerMemory) > 48) {
+        const toward = Math.atan2(person.partnerMemory.y - person.y, person.partnerMemory.x - person.x);
+        const hx0 = Math.cos(toward), hy0 = Math.sin(toward);
+        if (reachableTiles.some(t => {
+          const ox = t.x - person.x, oy = t.y - person.y, d2 = ox * ox + oy * oy;
+          return d2 >= 9 && d2 <= 36 && ox * hx0 + oy * hy0 >= 2.5;
+        })) person.heading = toward;
+      }
       for (let tries = 0; tries < 4; tries++) {
         const hx = Math.cos(person.heading), hy = Math.sin(person.heading);
         const canAdvance = reachableTiles.some(t => {
@@ -1150,7 +1171,9 @@ function move(world: World, person: Person, precomputed?: PrecomputedMoves, slot
       nextStep = { x: precomputed.si[SI.nextX * precomputed.cap + slot]!, y: precomputed.si[SI.nextY * precomputed.cap + slot]! };
     }
   }
-  if (!blocked && nextStep === null) {
+  const allowCoastalDetour = paramsOf(world).social.vinculoEncuentro > 0
+    && person.action === 'approach' && !person.command && distance(start, person.target) > 12;
+  if ((!blocked && nextStep === null) || allowCoastalDetour) {
     const routeKey = (x: number, y: number) => cellIntKey(x, y) ?? `${x},${y}`;
     const tileIn = tileLookup(world.tiles), reader = residentTileReader(world.tiles);
     const queue: Point[] = [start], previous = new Map<number | string, Point | null>([[routeKey(start.x, start.y), null]]);
@@ -1177,10 +1200,23 @@ function move(world: World, person: Person, precomputed?: PrecomputedMoves, slot
         previous.set(nextKey, current); queue.push(next);
       }
     }
+    if (allowCoastalDetour && queue.length > 1 && distance(start, person.target) - distance(best, person.target) < 1.5) {
+      const side = Math.floor(world.tick / 360) % 2 === 0 ? Math.PI / 2 : -Math.PI / 2;
+      const angle = Math.atan2(person.target.y - start.y, person.target.x - start.x) + side;
+      const tx = Math.cos(angle), ty = Math.sin(angle);
+      let bestDetour = start, bestDot = -Infinity;
+      for (let idx = 1; idx < queue.length; idx++) {
+        const node = queue[idx]!;
+        const dot = (node.x - start.x) * tx + (node.y - start.y) * ty;
+        if (dot > bestDot) { bestDot = dot; bestDetour = node; }
+      }
+      if (bestDetour !== start) best = bestDetour;
+    }
     if (best === start) blocked = true;
     else {
       while (previous.get(routeKey(best.x, best.y)) !== start) best = previous.get(routeKey(best.x, best.y))!;
       nextStep = best;
+      blocked = false;
     }
   }
   if (blocked || !nextStep) {
@@ -1577,10 +1613,11 @@ function advanceTick(world: World, inputs: Gesture[], context: WorldContext, med
   medirFase(medicion, 'fauna', () => { stepAnimals(world,event=>addEvent(world,event)); stepStructures(world,event=>addEvent(world,event)); });
   medirFase(medicion, 'personas', () => withRecipeSession(world, () => {
     const motor = paramsOf(world).motor;
+    const collectPolicyScores = precomputePolicyScores(world);
     const precomputedMoves = motor.particionarPersonas
       ? precomputePersonasParallel(world, motor, context.personasExecution)
       : undefined;
-    const policyScores = precomputePolicyScores(world);
+    const policyScores = collectPolicyScores?.();
     for (let slot = 0; slot < world.people.length; slot++) bodyAndAction(world, world.people[slot]!, precomputedMoves, slot, policyScores);
     for (const person of world.people) {
       const chunk = world.chunks[chunkKey(person.x, person.y)]!;

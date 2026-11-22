@@ -83,7 +83,7 @@ const REFERENCIAS_MAIN_1200: Readonly<Record<7 | 42 | 51926, { historicos: strin
 };
 
 test('Q5: paridad bit a bit de digestoCanonico en 3 semillas (7, 42, 51926) × 1200 pasos con valores históricos', { timeout: 600_000 }, t => {
-  assert.deepEqual(HISTORICAL_PARAMS.tecnologia, { dosisCuanto: 0, mejoraLocal: 0, enfriamiento: 45, evitarNoOp: false });
+  assert.deepEqual(HISTORICAL_PARAMS.tecnologia, { dosisCuanto: 0, mejoraLocal: 0, enfriamiento: 45, evitarNoOp: false, efectosHerramientas: false });
   assert.deepEqual(DEFAULT_PARAMS.tecnologia, HISTORICAL_PARAMS.tecnologia, 'Constitución II: DEFAULT_PARAMS nace en valores históricos');
 
   for (const seed of [7, 42, 51926] as const) {
@@ -463,7 +463,7 @@ test('persistencia: parseParams valida tecnologia.*, Store.save/load los conserv
   assert.equal(PARAM_DESCRIPTORS['tecnologia.evitarNoOp']!.kind, 'boolean');
 
   const parsed = parseParams(CANDIDATO);
-  assert.deepEqual(parsed.tecnologia, { dosisCuanto: 250, mejoraLocal: 0.05, enfriamiento: 300, evitarNoOp: true });
+  assert.deepEqual(parsed.tecnologia, { dosisCuanto: 250, mejoraLocal: 0.05, enfriamiento: 300, evitarNoOp: true, efectosHerramientas: false });
 
   for (const invalid of [
     'tecnologia.dosisCuanto=-1',
@@ -512,6 +512,7 @@ test('persistencia: parseParams valida tecnologia.*, Store.save/load los conserv
       mejoraLocal: 0,
       enfriamiento: 45,
       evitarNoOp: false,
+      efectosHerramientas: false,
     });
   } finally {
     reopenedLegacy.close();

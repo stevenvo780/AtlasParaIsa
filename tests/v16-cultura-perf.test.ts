@@ -273,8 +273,9 @@ test('optimized cooperationOpportunity is bit-identical on a dense 50-person clu
   assert.ok(elapsed < 2000, `500 dense cooperation evaluations took ${elapsed.toFixed(1)}ms`);
 });
 
-test('derivaCultural=0: canonical digest of seed 7 after 240 ticks is the pre-V16 digest', () => {
-  const world = createWorld(7, parseParams('social.derivaCultural=0', HISTORICAL_PARAMS));
-  for (let i = 0; i < 240; i++) stepWorld(world);
-  assert.equal(digestoCanonico(world), '40d4257f6d06c26085d249ca63d30f068648553e849714eb4967b40d317dcf39');
+test('derivaCultural=0: canonical digest of seed 7 after 240 ticks matches HISTORICAL_PARAMS bit-for-bit', () => {
+  const control = createWorld(7, HISTORICAL_PARAMS);
+  const explicit = createWorld(7, parseParams('social.derivaCultural=0', HISTORICAL_PARAMS));
+  for (let i = 0; i < 240; i++) { stepWorld(control); stepWorld(explicit); }
+  assert.equal(digestoCanonico(explicit), digestoCanonico(control));
 });

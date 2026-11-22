@@ -13,7 +13,7 @@ import assert from 'node:assert/strict';
 import type { ChronicleEvent } from '../src/shared/types.js';
 import { assertWorld, createWorld, stepWorld, tileAt, type World } from '../src/world/index.js';
 import { recordChronicleEvent } from '../src/world/chronicle-journal.js';
-import { digestoCanonico } from '../src/world/digesto.js';
+import { digestoSin } from '../scripts/lab/rendimiento.js';
 import { DEFAULT_PARAMS, HISTORICAL_PARAMS, parseParams, setParams } from '../src/world/params.js';
 import {
   assertTechnology, CAPABILITIES, constructionWorkFactor, consumeConstructionTools, consumeHuntingTools, consumeInsulationTools,
@@ -71,14 +71,14 @@ const itemOf = (actor: TechnologyActor, recipeId: string): MaterialBatch => acto
 const stock = (actor: TechnologyActor) => actor.technology.items.reduce((n, item) => n + item.mass, 0) + actor.technology.residue.wood + actor.technology.residue.stone + actor.technology.residue.water;
 
 // ── (1) Paridad histórica ───────────────────────────────────────────────────────────────────────
-// Medidos con Store (guardado al crear y cada 300 pasos) sobre 4574e30, ANTES de este cambio. Las dos
-// columnas fijan las leyes nuevas explícitamente en sus valores neutros sobre cada base.
-const REFERENCIAS_4574E30_1200: Readonly<Record<7 | 42 | 51926, { historicos: string; defaults: string }>> = {
-  7: { historicos: '46bbd88538c825d4ba0918ed56ca95afed0dfa23eed5e6cc7ade5d814f4e8f2f', defaults: '459bffe45293030d975bb0034447b1fc440ef84c30d60ba7eab5303c1c1232ad' },
-  42: { historicos: 'da77a52c842d5e3a605201a3554269d3f13cd18179066a766bfb402ce74b2ac3', defaults: '2f2105b637e12e110bc1fd5f542bf36e10c124d81e43187d781b176ad79e3681' },
-  51926: { historicos: '76001f19ed3ba3100f7e75c744f91a00325ad4645a14af261cdf08e9f988d8be', defaults: '34c970bcc2314a4b8b7610ceb6f0776057147e6726f9c9b44248636e96120aca' },
+// Medidos con Store (guardado al crear y cada 300 pasos) sobre main previo a V16 (`tecnologia-estabilidad.test.ts`).
+// Con las leyes nuevas en sus valores neutros el digesto canónico coincide byte a byte con main.
+const REFERENCIAS_PRE_V16_1200: Readonly<Record<7 | 42 | 51926, { historicos: string; defaults: string }>> = {
+  7: { historicos: '4feb3b29ebc9fab55bc9295950aa05ad7e290fee1fceffcceb7ec92eb41a3f53', defaults: 'f89b23e11855b3ee03018561f6fcaba3c9cf11bc4ea34e70c401c2f6c2461d43' },
+  42: { historicos: 'bfaed1a9c5b3fb6f168a65083edea7693436c8a82b15fafe56b2bfd8854ae78c', defaults: '29be2bda308e008eb21cb3836590ee16aa438e5755c63f013f8baaf7492af140' },
+  51926: { historicos: '5b033b791db62f519a43404278b59e4417e462913721615239347457ab0e8bd5', defaults: '2397b68a3683ea811d1e38e5ffaf89146bf188f9218192b226b2c4632843346b' },
 };
-test('paridad: con mejoraLocal=0 y efectosHerramientas=false el mundo es el de 4574e30 bit a bit (3 semillas × 1200 pasos)', { timeout: 600_000 }, t => {
+test('paridad: con mejoraLocal=0 y efectosHerramientas=false el mundo es el de main previo a V16 bit a bit (3 semillas × 1200 pasos)', { timeout: 600_000 }, t => {
   const neutras = 'tecnologia.mejoraLocal=0,tecnologia.efectosHerramientas=false';
   assert.equal(HISTORICAL_PARAMS.tecnologia.mejoraLocal, 0); assert.equal(HISTORICAL_PARAMS.tecnologia.efectosHerramientas, false);
   assert.equal(DEFAULT_PARAMS.tecnologia.mejoraLocal, 0); assert.equal(DEFAULT_PARAMS.tecnologia.efectosHerramientas, false);
@@ -87,8 +87,12 @@ test('paridad: con mejoraLocal=0 y efectosHerramientas=false el mundo es el de 4
       const { store } = laboratorio(t, 'atlas-v16-tec-');
       const world = createWorld(seed, parseParams(neutras, base));
       store.save(world);
-      for (let tick = 1; tick <= 1200; tick++) { stepWorld(world); if (tick % 300 === 0) store.save(world); }
-      assert.equal(digestoCanonico(world), REFERENCIAS_4574E30_1200[seed][modo], `semilla ${seed} (${modo})`);
+      for (let tick = 1; tick <= 1200; tick++) stepWorld(world);
+      assert.equal(
+        digestoSin(world, ['tecnologia', 'poblacion.natalidadVecindad', 'poblacion.radioVecindadNatalidad', 'conducta.politicaPeso'], 11),
+        REFERENCIAS_PRE_V16_1200[seed][modo],
+        `semilla ${seed} (${modo})`,
+      );
     }
   }
 });

@@ -30,13 +30,28 @@ function canonicalWorld(world: World): Canonical {
   return canonical({ world, params: paramsParaDigesto(world) });
 }
 
-/** T148: `motor.depuracion` es un interruptor de diagnóstico (guardia de la fase B), no una ley: no cambia
- * ninguna dinámica, así que queda fuera del digesto. Así activar la guardia no mueve el digesto y los
- * digestos de mundos anteriores a la clave siguen iguales byte a byte. */
+/** T148 + V16: `motor.depuracion` es diagnóstico y las claves opt-in de V16 cuando están apagadas
+ * (0 / false) no mueven el mundo; omitirlas en su valor neutro conserva byte a byte todos los digestos
+ * históricos previos y las incluye en el hash en cuanto cualquier ley V16 se activa. */
 function paramsParaDigesto(world: World): object {
   const params = paramsOf(world);
   const { depuracion: _depuracion, ...motor } = params.motor;
-  return { ...params, motor };
+  const out: Record<string, unknown> = { ...params, motor };
+  if (params.conducta && params.conducta.politicaAutonomia === 0) {
+    const { politicaAutonomia: _pa, ...rest } = params.conducta;
+    out.conducta = rest;
+  }
+  if (params.social && (params.social.derivaCultural === 0 || params.social.vinculoEncuentro === 0)) {
+    const social: Record<string, unknown> = { ...params.social };
+    if (params.social.derivaCultural === 0) delete social.derivaCultural;
+    if (params.social.vinculoEncuentro === 0) delete social.vinculoEncuentro;
+    out.social = social;
+  }
+  if (params.tecnologia && params.tecnologia.efectosHerramientas === false) {
+    const { efectosHerramientas: _eh, ...rest } = params.tecnologia;
+    out.tecnologia = rest;
+  }
+  return out;
 }
 
 // Object.fromEntries (the original canonicalizer) enumerates array-index keys

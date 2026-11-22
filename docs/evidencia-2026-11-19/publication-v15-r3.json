@@ -1,0 +1,39 @@
+{
+  "capturedAt": "2026-11-21T20:34:14-05:00",
+  "status": "published",
+  "kind": "in-place upgrade of open-world V15 (publico-v15 → publico-v15-r3; world mundos/v15-20261121 preserved intact)",
+  "reason": "Resolver los 6 cuellos de rendimiento y estabilidad medidos en vivo (dos caídas OOM por heap V8 por defecto de 4 GiB, bloqueo de gpuAutoprueba al arrancar por contención con stepWorld y presupuesto de 200 ms, frames WebSocket de 3,56 MiB con technology.items globales, O(N²) en observeTechnologyOrganization, Store.save 1,6–3,2 s con thrashing de caché de recetas y assertUniqueKeys/collect OOM, y acumulación de 1,27M recibos en technology_executions) y levantar los últimos 5 topes ficticios de software/runtime (512 estructuras, 2 048 lugares, 64 planos, ventana 8 192/1 024 de fauna y 5 092 chunks).",
+  "codeRevision": "a928287",
+  "previousCodeRevision": "179b44d",
+  "whatChanged": {
+    "code": "main 179b44d→a928287 (6f383f1 + a928287): (1) openWorldCaps(world) levanta MAX_STRUCTURES=512, places<=2048, MAX_BLUEPRINTS=64, MAX_ACTIVE_ANIMALS=8192 y MAX_ANIMAL_DECISIONS_PER_TICK=1024 solo en modo abierto V15, conservando bit a bit DEFAULT_PARAMS/HISTORICAL_PARAMS; (2) createApp({ manual: true }) + app.start() ejecuta gpuAutoprueba antes de arrancar el bucle de ticks y acepta budgetMs=5000 en main.ts (ambas GPU pasan en 9,66 ms y 6,26 ms en mundo cargado de 2 554 hab.); (3) projectWorld recorta technology.items al viewport (3,27 MiB → 15,8 KiB, payload total 3,56 MiB → 380 KiB, 9,4× menor) conservando dynamics.products global; (4) observeTechnologyOrganization elimina el O(N²) de envelopes.some/inventories.find y memoiza lecturas frías de recetas; (5) stringifyExact usa JSON.stringify nativo cuando no hay -0/toJSON, assertUniqueKeys reutiliza Sets sin JSON.parse en claves ASCII y SnapshotParts.collect transmite slot a slot; (6) Store.withTechnologyReads eleva su límite de 256 a 65 536 reutilizando archivedRecipes del mismo epoch, TECHNOLOGY_PRUNE_ROWS_PER_SAVE sube a 16 384; (7) topologia.ts:tiles() elimina 156k Reflect.getOwnPropertyDescriptor por retiro (-34 % maintainRegions) y fauna-motor/terreno añaden lectura directa SAB entre cambios de topología.",
+    "deployment": "NODE_OPTIONS=--max-old-space-size=65536 (64 GiB heap V8), CARTA_PARAMS=gobernador.presupuestoMs=5000,persistencia.ventanaEventosTicks=2400,limites.chunks=65536,limites.teselasActivas=16777216,limites.comunidades=16777216,limites.fauna=100663296.",
+    "evidence": {
+      "liveWorldCopyBenchmark": "Copia aislada de world-20261121-1900 (1 851 hab., 156 160 teselas): technology.items 3 268,9 KiB → 15,8 KiB (207×), WorldView 3,56 MiB → 380 KiB (9,4×), Store.save 3 173 / 1 680 / 1 591 ms → 2 352 / 1 052 / 1 231 ms (-37 %), maintainRegions 11,88 → 7,84 ms (-34 %).",
+      "tests": "typecheck + build verdes; 145/145 suites núcleo + 8/8 CUDA gpu-autoprueba + 49/49 server/v15-open-caps + 8/8 halo-radios verdes; deploy-check.sh a928287 → salida 0."
+    }
+  },
+  "operation": {
+    "deployCheck": "bash scripts/deploy-check.sh a9282878d8a8e2693e0075e0a335b5962c65b5dc → salida 0",
+    "preUpgradeBackup": {
+      "path": "/mnt/Data2/respaldos-atlas-v15/world-20261121-2027.sqlite.gz",
+      "size": "404 MiB",
+      "sha256": "f8cc44917736254d9ed771ef9922afec4e01fc03aff213476cec06194c483640",
+      "gzipTest": "OK"
+    },
+    "towerCode": "worktree detached AtlasParaIsa-anexo/worktrees/publico-v15-r3 en a928287 con node_modules propio y build allí (62 ms); publico-v15 y publico-v14-r3 conservados intactos para rollback",
+    "worldPreserved": {
+      "dir": "/datos/workspaces/personal/AtlasParaIsa-anexo/mundos/v15-20261121",
+      "worldInstanceId": "b92f1888-a923-441a-bf69-45432b845130",
+      "reset": false
+    },
+    "start": "arranque 2026-11-21 20:32:56 -05 (PID 1871175, carta-isa, NODE_OPTIONS=--max-old-space-size=65536, gpuAutoprueba PASS en GPU 0 RTX 5070 Ti [9,66 ms] y GPU 1 RTX 2060 [6,26 ms]; compute-policy-gpu.py [PID 1876420] y compute-ecology-gpu-resident.py [PID 1877198] activos en VRAM de ambas GPU)"
+  },
+  "liveChecks": {
+    "domainHealth": "https://atlas.humanizar.tech/health → 200 {\"status\":\"ok\"}",
+    "unauthenticatedWorldStatus": 401,
+    "servedAssetEqualsCompiled": "assets/index-Dnpsuc3u.js servido en https://atlas.humanizar.tech = compilado en publico-v15-r3 (cmp -s: OK)",
+    "durableWorldConfirmed": "tick 85 000 (día 35,42), 2 554 hab., 198 comunidades, 526 estructuras, 641 lugares, 5 966 animales, 812 chunks (207 872 teselas); limites.chunks=65 536 y ventanaEventosTicks=2 400 persistidos en vivo; technology_executions podando activamente (1 272 221 → 1 208 529 filas, through=540 225)",
+    "dualGpuActive": "RTX 5070 Ti (35 % util, 5 735 MiB) y RTX 2060 (16 % util, 338 MiB) activas"
+  }
+}

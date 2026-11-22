@@ -61,7 +61,10 @@ try {
       : process.env.CARTA_FULL_HARDWARE === '1'
         ? hostFullHardwareParams()
         : hostParams();
-    app = createApp({ store, password: process.env.CARTA_PASSWORD, credentialPath: resolve(dataPath, 'access.scrypt'), origin, secure, params: () => deploymentParams(baseHostParams()) });
+    // `manual: true` mantiene el bucle parado mientras terminan `setParams`, `tileOwnership` y la
+    // autoprueba CUDA: con un mundo grande, arrancar `stepWorld` antes de `gpuParitySession.initialize`
+    // bloqueaba el hilo principal 4–5 s y hacía caducar el presupuesto de autoprueba en RTX 5070 Ti.
+    app = createApp({ store, manual: true, password: process.env.CARTA_PASSWORD, credentialPath: resolve(dataPath, 'access.scrypt'), origin, secure, params: () => deploymentParams(baseHostParams()) });
     // Precedencia: un mundo cargado trae los params de su instantánea y esta línea aplica
     // ENCIMA la configuración explícita del despliegue, solo en las claves que nombra.
     // Los límites del host NO vuelven a resolverse aquí: los del mundo cargado son los suyos.
@@ -83,6 +86,7 @@ try {
   if (abortado || !app) await shutdown(abortado ? undefined : 1);
   else {
     const escuchando = app;
+    escuchando.start();
     escuchando.server.on('error', () => { console.error('No se pudo abrir el servicio. Revisa dirección y puerto.'); void shutdown(1); });
     escuchando.server.listen(port, host, () => console.log(`Carta disponible en ${origin}; acceso privado requerido.`));
   }

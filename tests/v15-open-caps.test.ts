@@ -23,6 +23,7 @@ import {
   DEFAULT_PARAMS, limitsOf, OPEN_WORLD_MAX_BLUEPRINTS, openWorldCaps, paramsOf, parseParams, setParams,
 } from '../src/world/params.js';
 import { deploymentParams } from '../src/server/deployment-params.js';
+import { createApp } from '../src/server/app.js';
 import { Store } from '../src/server/store.js';
 
 const OPEN_PARAMS = parseParams(
@@ -344,5 +345,23 @@ test('GPUParitySession respects custom budgetMs so loaded restarts do not disabl
   const expired = await session.initialize(0, { nvrtc: 'fake', budgetMs: 30, createBackend: async () => slowBackend });
   assert.equal(expired.enabled, false);
   assert.match(expired.reason ?? '', /30 ms/);
+});
+
+test('createApp({ manual: true }) stays idle until start() so startup GPU self-test is never starved by stepWorld', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'atlas-v15-boot-'));
+  const store = new Store(join(dir, 'world.sqlite'));
+  const app = createApp({ store, manual: true, tickMs: 20, origin: 'http://127.0.0.1:0', password: 'test-password-123' });
+  try {
+    const initialTick = app.world.tick;
+    await new Promise(r => setTimeout(r, 80));
+    assert.equal(app.world.tick, initialTick, 'must not advance ticks before start()');
+    app.start();
+    await new Promise(r => setTimeout(r, 120));
+    assert.ok(app.world.tick > initialTick, 'must advance ticks after start()');
+  } finally {
+    await app.close();
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 

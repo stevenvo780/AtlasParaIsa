@@ -11,6 +11,10 @@ interface ObservedTile {
   observer?: ResidentMutationObserver;
   maintenance: number;
   opaque: Set<PropertyKey>;
+  /** Escrituras lógicas observadas de ESTA tesela; monotónica y nunca drenada (v18). A diferencia de
+   * `changedTiles`/`drainChangedTiles` —un canal con un solo consumidor que vacía al leer—, esta revisión
+   * la pueden cotejar varios consumidores sin robarse eventos: cada uno recuerda la última que confirmó. */
+  revision: number;
 }
 interface ObservedArray {
   owner: ResidentTopologyOwner;
@@ -59,7 +63,7 @@ export class ResidentTopologyOwner {
   private readonly changedTiles = new Set<Tile>();
 
   tile(source: Tile): Tile {
-    const target = { ...source }, state: ObservedTile = { owner: this, maintenance: 0, opaque: new Set() };
+    const target = { ...source }, state: ObservedTile = { owner: this, maintenance: 0, opaque: new Set(), revision: 0 };
     const owner = this;
     // Los traps no pueden ejecutarse durante `new Proxy`; después siempre registran la identidad pública.
     let tile!: Tile;
@@ -75,6 +79,7 @@ export class ResidentTopologyOwner {
         if (isOpaque !== wasOpaque) this.opaqueTiles += isOpaque ? 1 : -1;
       }
       owner.changedTiles.add(tile);
+      state.revision++;
       state.observer?.after(key, descriptorChanged);
     };
     const before = (): void => { if (!state.maintenance) state.observer?.before(); };
@@ -110,14 +115,14 @@ export class ResidentTopologyOwner {
         const previous = Reflect.getPrototypeOf(object);
         before(); const accepted = Reflect.setPrototypeOf(object, prototype);
         if (accepted && previous !== Reflect.getPrototypeOf(object)) {
-          owner.invalidate(); owner.changedTiles.add(tile); state.observer?.after('x', true);
+          owner.invalidate(); owner.changedTiles.add(tile); state.revision++; state.observer?.after('x', true);
         }
         return accepted;
       },
       preventExtensions(object) {
         const previous = Reflect.isExtensible(object);
         before(); const accepted = Reflect.preventExtensions(object);
-        if (accepted && previous && !Reflect.isExtensible(object)) owner.changedTiles.add(tile);
+        if (accepted && previous && !Reflect.isExtensible(object)) { owner.changedTiles.add(tile); state.revision++; }
         return accepted;
       },
     });
@@ -228,6 +233,15 @@ export function residentInPlaceRevision(tiles: Tile[]): object | undefined {
 /** Asociación emitida por registry; el contexto del mundo puede preceder a un reemplazo del array. */
 export function residentTopologyOwner(tiles: Tile[]): ResidentTopologyOwner | undefined {
   return observedArrays.get(tiles)?.owner;
+}
+/** Revisión monotónica de escrituras lógicas de una tesela observada (`undefined` si ningún owner la emitió).
+ * Solo certifica «sin escrituras desde la revisión recordada» junto a un `ResidentTopologyToken` vigente del
+ * array: sin token puede haber teselas opacas (getters ajenos) cuyos valores cambian sin escritura alguna.
+ * No drena nada: `drainChangedTiles` conserva su único consumidor. Las operaciones de mantenimiento del SoA
+ * residente (`maintainResidentTile`: ligar/desligar accesores materializando el MISMO valor) no la mueven;
+ * el alta de una clave ausente al confirmar un paso paralelo la cubre el sello paralelo de `TileStore`. */
+export function residentTileRevision(tile: Tile): number | undefined {
+  return observedTiles.get(tile)?.revision;
 }
 export const sameResidentTopology = (a: ResidentTopologyToken | undefined, b: ResidentTopologyToken | undefined): boolean =>
   a !== undefined && b !== undefined && a.array === b.array && a.coordinates === b.coordinates;

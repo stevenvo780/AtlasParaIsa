@@ -8,6 +8,8 @@ import type { WorldLimits, WorldParams } from '../world/params.js';
 import { decodeSnapshotValue, decodeSnapshotTileRows, encodeSnapshot, encodeSnapshotTileRows,
   assertSnapshotCounts, finishDecodedRecord, parseSnapshotJSON, readSnapshotLimits, snapshotRecord,
   SNAPSHOT_TILE_ENCODING, SnapshotPhysicalError, SnapshotSemanticError } from './snapshot.js';
+import { residentTileRevision, residentTopologyToken } from '../world/soa/topologia.js';
+import { residentSnapshotGate, type ResidentSnapshotGate } from '../world/soa/terreno.js';
 
 // Transport bounds, independent of world laws and available host hardware.
 export const SNAPSHOT_INLINE_TILE_LIMIT = 32768;
@@ -35,6 +37,22 @@ interface Manifest { snapshotEncoding: typeof ENCODING; world: Record<string, un
 export interface PreparedSnapshot { inline?: string; metadata?: string; tiles: readonly Tile[]; }
 /** `digest` is sha256(body); `pages` are the digests write() proved inside the caller's transaction. */
 export interface WrittenSnapshot { body: string; digest: string; bytes: number; pages: readonly string[]; }
+/**
+ * Vale de reutilización de páginas limpias (v18) que emite `Store.save` SOLO cuando el sello completo de la
+ * base al empezar el guardado (`data_version`, `total_changes`, cookies de esquema) coincide con el tomado
+ * tras su último COMMIT, no hay triggers SQL y no toca validación profunda. `total_changes` ya lo cotejó el
+ * Store antes de la transacción (dentro, sus propias escrituras lo mueven); `write` recoteja dentro de la
+ * transacción los tres campos que una conexión AJENA puede mover. Sin vale, el camino histórico completo.
+ */
+export interface SnapshotReuseTicket { dataVersion: number; schemaCookie: number; tempSchemaCookie: number; }
+/** Directorio confirmado de una página: digesto y tamaño ya durables + la prueba de identidad para reusarla
+ * (mismos objetos `Tile` en el mismo orden y la revisión lógica de cada uno al codificarla). Sin cuerpos. */
+interface CachedPage { offset: number; count: number; digest: string; bytes: number; tiles: readonly Tile[]; revisions: Int32Array; }
+interface PageCache {
+  pages: readonly CachedPage[];
+  /** Puerta paralela al codificar: `null` certifica que ninguna tesela estaba ligada a un `TileStore`. */
+  parallel: { identity: object; epoch: number; serial: number } | null;
+}
 
 /** JSON.parse accepts duplicate keys. A manifest must not hide an earlier encoding
  * or tile source through last-key-wins semantics, including inside its metadata. */
@@ -94,7 +112,28 @@ export class SnapshotParts {
   // Only reference lists keyed by complete body hashes; no tile/page body cache.
   // collect() trims this to the three durable slots after every save.
   private readonly references = new Map<string, readonly string[]>();
+  /** Páginas del último COMMIT de este proceso (solo digestos/tamaños e identidad, nunca cuerpos) y las de
+   * la transacción en curso: `unconfirmedPages` solo se promueve con `confirmPendingPages()` tras COMMIT;
+   * un ROLLBACK lo descarta y el directorio confirmado sigue describiendo lo durable. */
+  private confirmedPages: PageCache | null = null;
+  private unconfirmedPages: PageCache | null | undefined = undefined;
+  private pagesReused = 0;
+  private pagesEncoded = 0;
   constructor(private readonly db: DatabaseSync, private readonly schemaVersion: number) {}
+
+  /** Contadores acumulados de diagnóstico: páginas servidas desde el directorio confirmado frente a
+   * codificadas (serializar + sha256 + cotejo SQL) por el camino completo. */
+  get pageStats(): { reused: number; encoded: number } {
+    return { reused: this.pagesReused, encoded: this.pagesEncoded };
+  }
+  /** Solo tras el COMMIT de la transacción en la que `write` construyó el directorio pendiente. */
+  confirmPendingPages(): void {
+    if (this.unconfirmedPages !== undefined) { this.confirmedPages = this.unconfirmedPages; this.unconfirmedPages = undefined; }
+  }
+  /** La transacción que construyó el directorio pendiente no confirmó: se descarta entero. */
+  discardPendingPages(): void { this.unconfirmedPages = undefined; }
+  /** Olvida también lo confirmado (p. ej. si el sello post-COMMIT no se pudo tomar): todo se recodifica. */
+  invalidatePageCache(): void { this.confirmedPages = null; this.unconfirmedPages = undefined; }
 
   static install(db: DatabaseSync): void {
     db.exec('CREATE TABLE main.snapshot_parts (digest TEXT PRIMARY KEY NOT NULL, body TEXT NOT NULL)');
@@ -113,39 +152,129 @@ export class SnapshotParts {
     return { metadata, tiles: world.tiles };
   }
 
-  /** Only one page's tuples and JSON string exist at once. The caller owns the
-   * same transaction as journal writes and checkpoint rotation. */
-  write(prepared: PreparedSnapshot): WrittenSnapshot {
+  /** Los tres campos del vale que una conexión ajena puede mover, recotejados DENTRO de la transacción:
+   * entre el sello previo del Store y este punto nadie más pudo confirmar cambios ni tocar el esquema. */
+  private reuseStampIntact(ticket: SnapshotReuseTicket): boolean {
+    return Number(this.db.prepare('PRAGMA data_version').get()!.data_version) === ticket.dataVersion
+      && Number(this.db.prepare('PRAGMA schema_version').get()!.schema_version) === ticket.schemaCookie
+      && Number(this.db.prepare('PRAGMA temp.schema_version').get()!.schema_version) === ticket.tempSchemaCookie;
+  }
+
+  /** Entrada de directorio para una página recién codificada: identidad y revisión lógica de cada tesela
+   * en el instante de codificarla (el guardado es síncrono: nada muta entre codificar y COMMIT). */
+  private cachedPage(tiles: readonly Tile[], offset: number, count: number, digest: string, bytes: number): CachedPage {
+    const refs = new Array<Tile>(count), revisions = new Int32Array(count);
+    for (let i = 0; i < count; i++) {
+      const tile = tiles[offset + i]!;
+      refs[i] = tile;
+      // `-1` nunca coincide con una revisión real (≥ 0): una tesela sin owner ensucia su página siempre.
+      revisions[i] = residentTileRevision(tile) ?? -1;
+    }
+    return { offset, count, digest, bytes, tiles: refs, revisions };
+  }
+
+  /** Páginas reutilizables del directorio confirmado, o `null` si la reutilización está vetada en bloque.
+   * Una página solo es candidata si el token residente certifica observación total, cada tesela es el MISMO
+   * objeto con la MISMA revisión lógica que al confirmarse, ninguna escritura paralela/SAB selló su ranura
+   * después, y su digesto sigue presente en la tabla (una sola consulta por lote dentro de la transacción;
+   * si falta, esa página se recodifica y se reinserta: recomputar exacto, nunca servir un digesto huérfano). */
+  private reusablePages(tiles: Tile[], ticket: SnapshotReuseTicket | undefined,
+    gate: ResidentSnapshotGate | undefined): (CachedPage | null)[] | null {
+    const cache = this.confirmedPages;
+    if (!ticket || !cache || residentTopologyToken(tiles) === undefined) return null;
+    // La puerta paralela de hoy debe ser la de la confirmación: apareció, desapareció o cambió de época un
+    // TileStore ⇒ ninguna reutilización este guardado (el directorio se reconstruye codificando).
+    const parallelOk = cache.parallel === null
+      ? gate === undefined
+      : gate !== undefined && gate.identity === cache.parallel.identity && gate.epoch === cache.parallel.epoch;
+    if (!parallelOk || !this.reuseStampIntact(ticket)) return null;
+    const confirmedSerial = cache.parallel?.serial ?? 0;
+    const candidates: (CachedPage | null)[] = [], digests: string[] = [];
+    for (let index = 0, offset = 0; offset < tiles.length; index++, offset += SNAPSHOT_PAGE_TILES) {
+      const count = Math.min(SNAPSHOT_PAGE_TILES, tiles.length - offset), entry = cache.pages[index];
+      let clean = entry !== undefined && entry.offset === offset && entry.count === count;
+      if (clean) for (let i = 0; i < count; i++) {
+        const tile = tiles[offset + i]!;
+        if (tile !== entry!.tiles[i] || residentTileRevision(tile) !== entry!.revisions[i]
+          || gate !== undefined && gate.stampOfTile(tile) > confirmedSerial) { clean = false; break; }
+      }
+      candidates.push(clean ? entry! : null);
+      if (clean) digests.push(entry!.digest);
+    }
+    if (digests.length) {
+      const present = new Set((this.db.prepare(
+        'SELECT digest FROM main.snapshot_parts WHERE digest IN (SELECT value FROM json_each(?))')
+        .all(JSON.stringify(digests)) as { digest: string }[]).map(row => row.digest));
+      for (let i = 0; i < candidates.length; i++) {
+        const entry = candidates[i];
+        if (entry && !present.has(entry.digest)) candidates[i] = null;
+      }
+    }
+    return candidates;
+  }
+
+  /** Only one page's tuples and JSON string exist at once (certified clean pages materialize neither).
+   * The caller owns the same transaction as journal writes and checkpoint rotation. With a reuse ticket
+   * from Store (intact DB stamp vs its last COMMIT, no SQL triggers, no deep validation), pages proved
+   * untouched since that COMMIT keep their confirmed digest/bytes without re-encode, re-hash or SQL body
+   * comparison; every other page —and every page without a ticket— takes the full historical path, and
+   * the returned body/digest/bytes are byte-identical either way. */
+  write(prepared: PreparedSnapshot, reuse?: SnapshotReuseTicket): WrittenSnapshot {
     this.requireTransaction();
     assertSnapshotPartsSchema(this.db);
+    // Un directorio pendiente de una transacción que nunca confirmó no deja residuo reutilizable.
+    this.unconfirmedPages = undefined;
     if (prepared.inline !== undefined) {
       const digest = checksum(prepared.inline);
       if (this.db.prepare('SELECT 1 FROM main.snapshot_parts LIMIT 1').get()) this.references.set(digest, []);
       else this.references.clear();
+      this.unconfirmedPages = null;
       return { body: prepared.inline, digest, bytes: Buffer.byteLength(prepared.inline), pages: [] };
     }
     if (prepared.metadata === undefined) failure('metadata missing');
-    const pages: Page[] = [], insert = this.db.prepare('INSERT INTO main.snapshot_parts(digest,body) VALUES (?,?)');
+    const tiles = prepared.tiles as Tile[];
+    // Sin token residente no hay certificación posible (teselas planas u opacas): se codifica todo y el
+    // directorio confirmado queda vacío tras COMMIT. Con token, el directorio se (re)construye en CADA
+    // guardado —también en los de validación profunda, que codifican todo— para el siguiente.
+    const certified = residentTopologyToken(tiles) !== undefined;
+    const gate = certified ? residentSnapshotGate(tiles) : undefined;
+    const candidates = certified ? this.reusablePages(tiles, reuse, gate) : null;
+    const pages: Page[] = [], pending: CachedPage[] = [], insert = this.db.prepare('INSERT INTO main.snapshot_parts(digest,body) VALUES (?,?)');
     // SQLite compares the stored bytes itself: an unchanged multi-megabyte page is not copied into JS
     // just to prove its identity. BINARY ignores any collation a damaged schema could declare.
     const same = this.db.prepare('SELECT body = ? COLLATE BINARY AS same FROM main.snapshot_parts WHERE digest=?');
     let bytes = 0;
-    for (let offset = 0; offset < prepared.tiles.length; offset += SNAPSHOT_PAGE_TILES) {
-      const rows = encodeSnapshotTileRows(prepared.tiles.slice(offset, offset + SNAPSHOT_PAGE_TILES));
+    for (let offset = 0; offset < tiles.length; offset += SNAPSHOT_PAGE_TILES) {
+      const index = pages.length, reused = candidates?.[index] ?? null;
+      if (reused) {
+        // Identidad, revisiones, sello paralelo, sello de base y presencia durable ya probados arriba:
+        // el descriptor es el confirmado, sin re-serializar ni re-hashear los ~4 096 tuplas de la página.
+        pages.push({ index, digest: reused.digest, count: reused.count, bytes: reused.bytes });
+        pending.push(reused);
+        bytes += reused.bytes;
+        this.pagesReused++;
+        continue;
+      }
+      const rows = encodeSnapshotTileRows(tiles.slice(offset, offset + SNAPSHOT_PAGE_TILES));
       const body = JSON.stringify(rows), digest = checksum(body), size = Buffer.byteLength(body);
       if (size > PAGE_BYTES) failure('page exceeds transport size');
       const existing = same.get(body, digest) as { same: number } | undefined;
       if (existing && existing.same !== 1) failure('existing page disagrees with its digest');
       if (!existing) insert.run(digest, body);
-      pages.push({ index: pages.length, digest, count: rows.length, bytes: size });
+      pages.push({ index, digest, count: rows.length, bytes: size });
       bytes += size;
+      this.pagesEncoded++;
+      if (certified) pending.push(this.cachedPage(tiles, offset, rows.length, digest, size));
     }
     // Byte for byte `stringifyExact(manifest)`: the page descriptors hold only strings and non-negative integers.
-    const tiles: Manifest['tiles'] = { count: prepared.tiles.length, pages };
-    const body = `{"snapshotEncoding":${JSON.stringify(ENCODING)},"world":${prepared.metadata},"tiles":${JSON.stringify(tiles)}}`;
+    const manifestTiles: Manifest['tiles'] = { count: tiles.length, pages };
+    const body = `{"snapshotEncoding":${JSON.stringify(ENCODING)},"world":${prepared.metadata},"tiles":${JSON.stringify(manifestTiles)}}`;
     const size = Buffer.byteLength(body), digest = checksum(body), digests = pages.map(page => page.digest);
     if (size > SNAPSHOT_METADATA_BYTES) failure('manifest exceeds transport size');
     this.references.set(digest, digests);
+    this.unconfirmedPages = certified
+      ? { pages: pending, parallel: gate ? { identity: gate.identity, epoch: gate.epoch, serial: gate.serial } : null }
+      : null;
     return { body, digest, bytes: bytes + size, pages: digests };
   }
 

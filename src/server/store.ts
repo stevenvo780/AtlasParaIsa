@@ -10,7 +10,7 @@ import { assertEcosystemTile, assertChunkLife } from '../world/validation.js';
 import { takeSnapshotParams, SnapshotPhysicalError, SnapshotSemanticError, encodeArchivedChunk, decodeArchivedChunk,
   parseSnapshotJSON, readSnapshotReplay, assertReplayPath, type SnapshotReplay, type SnapshotReplayChange } from './snapshot.js';
 import { digestoCanonico } from '../world/digesto.js';
-import { SnapshotParts, assertSnapshotPartsSchema, SNAPSHOT_INLINE_TILE_LIMIT, type WrittenSnapshot } from './snapshot-parts.js';
+import { SnapshotParts, assertSnapshotPartsSchema, SNAPSHOT_INLINE_TILE_LIMIT, type SnapshotReuseTicket, type WrittenSnapshot } from './snapshot-parts.js';
 import type { LegacyRecord } from '../shared/demography.js';
 import { assertLegacyRecord } from '../world/lineage.js';
 import { TechnologyArchive, TECHNOLOGY_CHAIN_EMPTY, TECHNOLOGY_EXECUTION_KINDS, emptyTechnologyExecutionCounts,
@@ -286,6 +286,11 @@ export class Store {
   private technologyReads: { limit: number; recipes: Map<string, TechnologyRecipe>; warmMemo: ArchivedRecipeMemo | null } | null = null;
   private replayCache: { digest: string; world: World; stamp: ChronicleStamp } | null = null;
   private readonly replayFloors = new Map<string, number>();
+  /** Sello de base tomado tras el último COMMIT exitoso de `save()` en ESTE proceso: es la mitad durable
+   * del vale de reutilización de páginas limpias (v18). Solo avanza tras COMMIT (o tras una escritura de
+   * sesiones probada como propia en `sessionWrite`); cualquier escritura ajena, DDL o escritura propia no
+   * contabilizada lo desajusta y el guardado siguiente recodifica todas las páginas. */
+  private snapshotPagesStamp: ChronicleStamp | null = null;
   constructor(readonly path: string, options: StoreOptions = {}) {
     validateStoreOptions(options);
     this.readOnly = options.readOnly ?? false;
@@ -378,6 +383,8 @@ export class Store {
       this.snapshotParts = new SnapshotParts(this.db, schemaVersion);
     } catch (error) { this.db.close(); throw error; }
   }
+  /** Diagnóstico v18: páginas de instantánea reutilizadas del directorio confirmado frente a recodificadas. */
+  get snapshotPageStats(): { reused: number; encoded: number } { return this.snapshotParts.pageStats; }
   get context(): WorldContext {
     return { loadChunk: (key, atTick) => this.loadChunk(key, atTick),
       loadLegacy: (id, atTick) => this.loadLegacy(id, atTick),
@@ -1523,6 +1530,14 @@ export class Store {
     const deepValidation = deepValidationDue(this.saves, this.verifiedByLoad);
     if (deepValidation) assertWorld(world, world.version, this.context);
     else bindWorldContext(world, this.context);
+    // Vale v18 de páginas limpias: solo si el sello COMPLETO (incluido `total_changes` de esta conexión)
+    // sigue siendo el del último COMMIT de este Store y no toca la revisión completa. Los triggers se
+    // descartan dentro de la transacción, antes de escribir; `snapshot-parts` recoteja allí los campos
+    // que una conexión ajena puede mover. Cualquier desajuste ⇒ codificación completa de siempre.
+    const pageReuseTicket: SnapshotReuseTicket | undefined = !deepValidation && this.snapshotPagesStamp !== null
+      && sameChronicleStamp(this.snapshotPagesStamp, chronicleStamp)
+      ? { dataVersion: chronicleStamp.dataVersion, schemaCookie: chronicleStamp.schemaCookie, tempSchemaCookie: chronicleStamp.tempSchemaCookie }
+      : undefined;
     const replayEnabled = paramsOf(world).persistencia.paginasSucias;
     // A replay reads archives at the checkpoint's horizon, not merely at its
     // head. Bound pruning by every retained anchor, even after flag rollback.
@@ -1616,7 +1631,7 @@ export class Store {
         this.db.exec('INSERT OR REPLACE INTO snapshots SELECT 1,body,digest,saved_at FROM snapshots WHERE slot=0');
         if (deep) this.db.exec('INSERT OR REPLACE INTO snapshots SELECT 2,body,digest,saved_at FROM snapshots WHERE slot=0');
       }
-      written = prepared ? this.snapshotParts.write(prepared) : undefined;
+      written = prepared ? this.snapshotParts.write(prepared, chronicleTriggers ? undefined : pageReuseTicket) : undefined;
       if (replay) {
         if (replay.node.kind === 'checkpoint') replay.node.body = written!.body;
         body = stringifyExact(replay.node);
@@ -1668,6 +1683,9 @@ export class Store {
       this.technologyArchive.invalidateVerification();
       this.verifiedChronicle = null;
       this.archivedRecipes = null;
+      // El directorio de páginas construido en esta transacción jamás se confirma: lo durable sigue siendo
+      // el del COMMIT anterior (y el sello v18 no avanza, así que el reintento recoteja contra él).
+      this.snapshotParts.discardPendingPages();
       throw error;
     }
     // A discarded transaction must leave the caller's pending archive queue intact for a retry.
@@ -1712,6 +1730,16 @@ export class Store {
     catch {
       this.verifiedTechnology = null; this.verifiedCatalogue = null; this.verifiedRecipes.clear();
       this.technologyArchive.invalidateVerification();
+    }
+    // v18: solo ahora —COMMIT hecho y pasada la limpieza post-confirmación (vacuum incremental incluido)—
+    // el directorio de páginas pasa a confirmado y el sello queda tomado sobre el estado durable. Si el
+    // sello no se puede leer, se olvida todo el directorio: perder la caché nunca invalida el guardado.
+    try {
+      this.snapshotParts.confirmPendingPages();
+      this.snapshotPagesStamp = this.chronicleStamp();
+    } catch {
+      this.snapshotPagesStamp = null;
+      this.snapshotParts.invalidatePageCache();
     }
   }
   result(gesture: Gesture): GestureResult | null {
@@ -1760,6 +1788,9 @@ export class Store {
       && technology.schemaCookie === before.schemaCookie) technology.totalChanges = after.totalChanges;
     const chronicle = this.verifiedChronicle;
     if (own && chronicle && sameChronicleStamp(chronicle.stamp, before)) chronicle.stamp = after;
+    // La escritura solo tocó `sessions` (probado arriba, sin triggers): el sello v18 avanza con ella igual
+    // que las pruebas de crónica/tecnología, en vez de condenar el siguiente guardado a recodificar todo.
+    if (own && this.snapshotPagesStamp && sameChronicleStamp(this.snapshotPagesStamp, before)) this.snapshotPagesStamp = after;
     if (own && this.archivedRecipes && beforeMemoEpoch && this.archivedRecipes.epoch === beforeMemoEpoch) {
       const afterEpoch = this.technologyArchive.readEpoch();
       if (afterEpoch !== null) this.archivedRecipes.epoch = afterEpoch;

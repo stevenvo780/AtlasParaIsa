@@ -218,6 +218,31 @@ export function residentFastAccess(tiles: readonly Tile[]): ResidentFastAccess |
   return owner ? residentStoreByOwner.get(owner)?.fastAccessIfResident(tiles) : undefined;
 }
 
+/** Puerta v18 para la persistencia: prueba qué teselas pudo escribir el camino paralelo/SAB sin setter JS.
+ * `stampOfTile` devuelve la última serie paralela de la ranura SoA (256 teselas; 16 ranuras = 1 página de
+ * instantánea de 4 096): 0 sin ligadura, `Infinity` si la ligó otro `TileStore`. Nunca da por limpia una
+ * tesela cuyo valor puede venir de un SAB ajeno a esta puerta. */
+export interface ResidentSnapshotGate {
+  readonly identity: object;
+  readonly epoch: number;
+  readonly serial: number;
+  stampOfTile(tile: Tile): number;
+}
+/** La puerta del `TileStore` que tiene ligadas estas teselas, o `undefined` si ninguna lo está. Se busca
+ * por array, por owner y por la primera tesela ligada (el array puede haberse re-envuelto al retirar chunks). */
+export function residentSnapshotGate(tiles: Tile[]): ResidentSnapshotGate | undefined {
+  let store = residentStoreByTiles.get(tiles);
+  if (!store) {
+    const owner = residentTopologyOwner(tiles);
+    if (owner) store = residentStoreByOwner.get(owner);
+  }
+  if (!store) for (const tile of tiles) {
+    const binding = bindings.get(tile);
+    if (binding) { store = binding.store; break; }
+  }
+  return store?.snapshotGate();
+}
+
 export interface SharedTerrain {
   regions: readonly StaticRegion[];
   buffers: Record<string, SharedArrayBuffer>;
@@ -260,6 +285,11 @@ export class TileStore {
   private residentBusy = false;
   private residentRegionSide: 256 | 512 = 256;
   private residentEpoch = 0;
+  /** Sello v18 de escrituras en SAB que ningún setter JS vio: serie monotónica y, por ranura, la última serie
+   * que pudo escribirla. Es propio (no el buffer `dirty` compartido): el puente GPU captura `dirty` y lo pone
+   * a cero ANTES de `commitParallel`, así que en la confirmación ya no distingue GPU de «nada sucio». */
+  private parallelWriteSerial = 0;
+  private snapshotStamps!: Int32Array;
   private residentRevision: object = {};
   private residentTopology: ResidentTopologyToken | undefined;
   private residentOwner: ResidentTopologyOwner | undefined;
@@ -560,6 +590,34 @@ export class TileStore {
     return this.dirtyPages().map(slot => ({ pageX: this.pageX[slot]!, pageY: this.pageY[slot]! }));
   }
 
+  /** Serie siguiente del sello paralelo; al borde del `Int32` reinicia sellos y época (invalida toda caché). */
+  private nextParallelSerial(): number {
+    if (this.parallelWriteSerial >= 0x3fffffff) {
+      this.refresh(); this.snapshotStamps.fill(0); this.parallelWriteSerial = 0; this.residentEpoch++;
+    }
+    return ++this.parallelWriteSerial;
+  }
+  /** Una escritura residente que no pasó por la revisión del Proxy sella su ranura SoA (256 teselas). */
+  private markSnapshotParallel(cell: number): void {
+    this.refresh();
+    this.snapshotStamps[cell >>> 8] = this.nextParallelSerial();
+  }
+  /** Última serie paralela que pudo escribir la ranura de `tile`: 0 si no está ligada, `Infinity` si la ligó
+   * OTRO `TileStore` (esa página jamás se da por limpia desde esta puerta). */
+  snapshotStampOfTile(tile: Tile): number {
+    const binding = bindings.get(tile);
+    if (!binding) return 0;
+    if (binding.store !== this) return Number.POSITIVE_INFINITY;
+    this.refresh();
+    return this.snapshotStamps[binding.cell >>> 8]!;
+  }
+  /** Puerta de solo lectura para la persistencia: identidad de este store, su época residente y la serie
+   * paralela vigente. Una caché confirmada con otra identidad/época no se reutiliza (fail-closed). */
+  snapshotGate(): ResidentSnapshotGate {
+    return { identity: this, epoch: this.residentEpoch, serial: this.parallelWriteSerial,
+      stampOfTile: tile => this.snapshotStampOfTile(tile) };
+  }
+
   beginParallel(): void {
     if (this.residentBusy || this.taken) throw new Error(TWO_WRITERS);
     this.residentBusy = true;
@@ -591,6 +649,12 @@ export class TileStore {
         seen.add(page); addedPages.push(page);
       }
     }
+    // v18: el fondo que los workers/GPU escribieron pasa al frente sin que ningún setter lo viera. El
+    // buffer `dirty` compartido no sirve aquí como prueba por página (la GPU lo limpia antes de este
+    // punto), así que se sellan TODAS las ranuras en uso: superconjunto fail-closed de las tocadas.
+    this.refresh();
+    const parallelSerial = this.nextParallelSerial();
+    for (let slot = 0; slot < this.arena.slots; slot++) if (this.inUse[slot]) this.snapshotStamps[slot] = parallelSerial;
     this.parity ^= 1; this.syncResidentCur(); this.residentBusy = false;
     // Ausentes al cargar: mismo orden de asignación que el kernel de objetos, sólo tras éxito.
     if (phase === 'kernel') {
@@ -632,7 +696,7 @@ export class TileStore {
   residentWrite(key: ResidentKey, cell: number, value: unknown): void {
     if (this.residentBusy) throw new Error(TWO_WRITERS);
     if (this.residentGeneration !== this.arena.generation) this.refreshResident();
-    this.writeResidentValue(key, cell, value); this.dirty[cell >>> 8] = 1;
+    this.writeResidentValue(key, cell, value); this.dirty[cell >>> 8] = 1; this.markSnapshotParallel(cell);
   }
   residentWriteNumber(idx: number, key: ResidentKey, cell: number, value: unknown): void {
     if (this.residentBusy) throw new Error(TWO_WRITERS);
@@ -642,7 +706,7 @@ export class TileStore {
     else if (typeof value !== 'number' || Number.isNaN(value)) throw new RangeError(`Tesela no representable en el SoA: ${key}=${String(value)}.`);
     else encoded = value;
     (this.residentCur[idx] as Float64Array)[cell] = encoded;
-    this.dirty[cell >>> 8] = 1;
+    this.dirty[cell >>> 8] = 1; this.markSnapshotParallel(cell);
   }
   residentWriteEnum(idx: number, key: ResidentKey, cell: number, value: unknown, values: readonly string[]): void {
     if (this.residentBusy) throw new Error(TWO_WRITERS);
@@ -655,7 +719,7 @@ export class TileStore {
       encoded = code;
     }
     (this.residentCur[idx] as Uint8Array)[cell] = encoded;
-    this.dirty[cell >>> 8] = 1;
+    this.dirty[cell >>> 8] = 1; this.markSnapshotParallel(cell);
   }
   private canReadResident(tiles: readonly Tile[]): boolean {
     if (this.residentTiles !== tiles || this.residentBusy || this.residentModified.size > 0
@@ -950,6 +1014,7 @@ export class TileStore {
     this.pageY = this.arena.field('pageY', Int32Array, 1);
     this.authority = this.arena.field('pageAuthority', Uint8Array, 1);
     this.dirty = this.arena.field('pageDirty', Uint8Array, 1);
+    this.snapshotStamps = this.arena.field('snapshotParallelStamp', Int32Array, 1);
     this.around = this.arena.field('pageAround', Int32Array, 9, -1);
     this.lives = [this.arena.field('life0', Float64Array, PAGE_CELLS), this.lives[1] ? this.arena.field('life1', Float64Array, PAGE_CELLS) : null];
     if (this.fields.length) this.fields = LAYOUT.map(slot => slot.kind === 'enum' ? this.arena.field(slot.key, Uint8Array, PAGE_CELLS)

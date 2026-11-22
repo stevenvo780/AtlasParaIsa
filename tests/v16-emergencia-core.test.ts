@@ -102,27 +102,26 @@ test('V16 core: validation rejects corrupted partnerMemory', () => {
   assert.ok(tile);
 });
 
-test('V16 core: desperate explorer commits to search leg and turns out of visited dead-ends at energy=0, fatigue=1', () => {
+test('V16 core: desperate explorer bounces off water shoreline and holds search leg at energy=0, fatigue=1', () => {
   const world = createWorld(7, parseParams('social.vinculoEncuentro=1', DEFAULT_PARAMS));
   const s = world.people.find(p => p.role === 'S')!;
-  // Drain local water around S so seekingWater=true and mark nearby tiles visited to trigger coastal/visited turn.
+  // Drain local water around S and place a water barrier straight north of S, then point S north (-PI/2).
   for (const t of world.tiles) {
     if (Math.hypot(t.x - s.x, t.y - s.y) <= 8) {
       t.drinkingWater = 0;
       t.food = 0;
-      s.visited.push(`${t.x},${t.y}`);
+      if (t.y < s.y) t.terrain = 'water';
     }
   }
-  s.visited = s.visited.slice(-192);
+  s.heading = -Math.PI / 2;
   s.energy = 0; s.fatigue = 1; s.hunger = 1; s.thirst = 1; s.inventory = 0;
   s.action = 'explore'; s.target = { x: s.x, y: s.y }; s.decisionAt = world.tick;
   const headingBefore = s.heading;
   stepWorld(world);
   assert.equal(s.action, 'explore');
-  assert.notEqual(s.heading, headingBefore, 'exhausted searcher with all nearby tiles visited must turn heading');
+  assert.notEqual(s.heading, headingBefore, 'exhausted searcher facing a shoreline must bounce heading into open land');
   const chosenTarget = { ...s.target };
   assert.ok(Math.hypot(chosenTarget.x - s.x, chosenTarget.y - s.y) >= 3, 'search leg must pick a distant waypoint');
-  // Must keep committed to chosenTarget across subsequent ticks instead of oscillating on every tick.
   stepWorld(world);
   assert.deepEqual(s.target, chosenTarget, 'desperate searcher must hold its search waypoint even at energy=0, fatigue=1');
   assert.doesNotThrow(() => assertWorld(world));

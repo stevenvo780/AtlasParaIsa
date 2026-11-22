@@ -1055,10 +1055,17 @@ function choose(world: World, person: Person, policyScores?: Map<string, Float64
     const urgentSearch = seekingWater || (vinculoEncuentro > 0 && seekingFood);
     const continuingSearch = urgentSearch && person.action === 'explore' && remaining !== undefined
       && remaining > 0 && (desperateSubsistence || planAffordable(remaining, 0));
-    if (vinculoEncuentro > 0 && urgentSearch && !continuingSearch && person.action === 'explore'
-      && (remaining === 0 || remaining === undefined)
-      && !reachableTiles.some(t => distance(person, t) >= 3 && distance(person, t) <= 6 && !person.visited.includes(`${t.x},${t.y}`))) {
-      person.heading += 1.3;
+    if (vinculoEncuentro > 0 && urgentSearch && !continuingSearch) {
+      for (let tries = 0; tries < 4; tries++) {
+        const hx = Math.cos(person.heading), hy = Math.sin(person.heading);
+        const canAdvance = reachableTiles.some(t => {
+          const ox = t.x - person.x, oy = t.y - person.y;
+          const d2 = ox * ox + oy * oy;
+          return d2 >= 9 && d2 <= 36 && ox * hx + oy * hy >= 2.5;
+        });
+        if (canAdvance) break;
+        person.heading += 1.3;
+      }
     }
     selected.target = continuingSearch ? person.target : explorationTarget(world, person, reachableTiles);
   }
@@ -1097,8 +1104,9 @@ function explorationTarget(world: World, person: Person, tiles: Tile[]): Point {
   const options = tiles.filter(t => distance(person, t) >= 3 && distance(person, t) <= 6);
   const heading = { x: Math.cos(person.heading), y: Math.sin(person.heading) };
   const companions = world.cooperationEnabled ? vecinos(world, person, 8, p => p.id !== person.id && distance(person, p) <= 7 && (person.bonds[p.id] ?? 0) > 0.3, 'explorationTarget') : [];
-  const score = (t: Tile) => ((t.x - person.x) * heading.x + (t.y - person.y) * heading.y) * 0.2 + (world.noveltyEnabled && !person.visited.includes(`${t.x},${t.y}`) ? 2 : 0)
-    + (t.traffic ?? 0) * 0.1 + (companions.length ? (distance(person, companions[0]!) - distance(t, companions[0]!)) * person.sociability * (1 - person.curiosity) * 0.18 : 0);
+  const desperate = paramsOf(world).social.vinculoEncuentro > 0 && (person.thirst > 0.85 || person.hunger > 0.85);
+  const score = (t: Tile) => ((t.x - person.x) * heading.x + (t.y - person.y) * heading.y) * (desperate ? 0.65 : 0.2) + (world.noveltyEnabled && !person.visited.includes(`${t.x},${t.y}`) ? 2 : 0)
+    + (t.traffic ?? 0) * 0.1 + (!desperate && companions.length ? (distance(person, companions[0]!) - distance(t, companions[0]!)) * person.sociability * (1 - person.curiosity) * 0.18 : 0);
   return primero(options, (a, b) => score(b) - score(a) || a.x - b.x || a.y - b.y) ?? person;
 }
 function valueKey(person: Person, action: Action): string { return `${person.thirst > 0.5 ? 'thirsty' : person.hunger > 0.5 ? 'hungry' : person.fatigue > 0.5 ? 'tired' : 'ready'}:${action}`; }

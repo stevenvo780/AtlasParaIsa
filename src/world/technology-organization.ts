@@ -15,27 +15,55 @@ const stock = (values: readonly ResourceMass[]): Stock => {
   return result;
 };
 const add = (target: Stock, values: Stock, sign = 1): void => { for (const [id, amount] of values) target.set(id, (target.get(id) ?? 0) + amount * sign); };
-const quantities = (values: Stock): OrganizationQuantity[] => [...values].filter(([, amount]) => amount > 0).sort(([a], [b]) => a.localeCompare(b)).map(([resourceId, amount]) => ({ resourceId, amount }));
-const equals = (a: Stock, b: Stock): boolean => sorted([...a.keys(), ...b.keys()]).every(id => (a.get(id) ?? 0) === (b.get(id) ?? 0));
-const actorStock = (actor: { technology: { items: readonly { recipeId: string | null; mass: number }[]; residue: Composition } }): Stock => {
+const quantities = (values: Stock): OrganizationQuantity[] => {
+  const result: OrganizationQuantity[] = [];
+  for (const [resourceId, amount] of values) if (amount > 0) result.push({ resourceId, amount });
+  return result.length > 1 ? result.sort((a, b) => a.resourceId.localeCompare(b.resourceId)) : result;
+};
+const anyPositive = (values: Stock): boolean => { for (const amount of values.values()) if (amount > 0) return true; return false; };
+/** Igualdad de existencias con la ausencia como 0: recorre cada mapa una vez, sin claves combinadas. */
+const equals = (a: Stock, b: Stock): boolean => {
+  for (const [id, amount] of a) if ((b.get(id) ?? 0) !== amount) return false;
+  for (const [id, amount] of b) if (!a.has(id) && amount !== 0) return false;
+  return true;
+};
+const physicalStock = (items: readonly { recipeId: string | null; mass: number }[], residue: Composition): Stock => {
   const result: Stock = new Map();
-  for (const item of actor.technology.items) {
+  for (const item of items) {
     const id = item.recipeId ? `recipe:${item.recipeId}` : 'unclassified';
     result.set(id, (result.get(id) ?? 0) + item.mass);
   }
-  for (const material of ['wood', 'stone', 'water'] as const) if (actor.technology.residue[material]) result.set(`residue:${material}`, actor.technology.residue[material]);
+  if (residue.wood) result.set('residue:wood', residue.wood);
+  if (residue.stone) result.set('residue:stone', residue.stone);
+  if (residue.water) result.set('residue:water', residue.water);
   return result;
 };
+const actorStock = (actor: { technology: { items: readonly { recipeId: string | null; mass: number }[]; residue: Composition } }): Stock =>
+  physicalStock(actor.technology.items, actor.technology.residue);
+/** Misma comprobación que antes, sin `Map` ni arreglos temporales cuando el inventario es pequeño. */
+const SMALL_INVENTORY = 4;
 const samePhysicalStock = (opening: TechnologyCheckpoint['inventories'][number], actor: TechnologyOrganizationActor): boolean => {
-  const items = new Map(actor.technology.items.map(item => [item.id, item]));
-  return actor.technology.items.length === opening.items.length && items.size === opening.items.length && ['wood', 'stone', 'water'].every(material =>
-    opening.residue[material as keyof Composition] === actor.technology.residue[material as keyof Composition]) &&
-    opening.items.every(item => {
-      const current = items.get(item.id);
-      return current?.recipeId === item.recipeId && current.mass === item.mass &&
-        (['wood', 'stone', 'water'] as const).every(material => current.composition[material] === item.composition[material]);
-    });
+  const current = actor.technology.items, expected = opening.items;
+  if (current.length !== expected.length) return false;
+  if (current.length > SMALL_INVENTORY) {
+    const items = new Map(current.map(item => [item.id, item]));
+    return items.size === expected.length && sameResidue(opening.residue, actor.technology.residue) &&
+      expected.every(item => sameItem(items.get(item.id), item));
+  }
+  // Un `id` repetido en el inventario actual invalida la comparación (equivale a `items.size !== length`).
+  for (let i = 1; i < current.length; i++) for (let j = 0; j < i; j++) if (current[i]!.id === current[j]!.id) return false;
+  if (!sameResidue(opening.residue, actor.technology.residue)) return false;
+  for (const item of expected) {
+    let found: (typeof current)[number] | undefined;
+    for (const candidate of current) if (candidate.id === item.id) { found = candidate; break; }
+    if (!sameItem(found, item)) return false;
+  }
+  return true;
 };
+const sameResidue = (a: Composition, b: Composition): boolean => a.wood === b.wood && a.stone === b.stone && a.water === b.water;
+const sameItem = (current: TechnologyOrganizationActor['technology']['items'][number] | undefined, item: TechnologyCheckpoint['inventories'][number]['items'][number]): boolean =>
+  current?.recipeId === item.recipeId && current.mass === item.mass &&
+  current.composition.wood === item.composition.wood && current.composition.stone === item.composition.stone && current.composition.water === item.composition.water;
 const hash = (value: string): string => {
   let result = 2166136261;
   for (let index = 0; index < value.length; index++) result = Math.imul(result ^ value.charCodeAt(index), 16777619);
@@ -56,7 +84,8 @@ export function observeTechnologyOrganization(state: TechnologyState, actors: re
   try { assertTechnologyCheckpoint(state, tick); } catch { diagnostics.push('invalid-opening-checkpoint'); checkpoint = undefined; }
   if (!checkpoint) diagnostics.push('missing-opening-checkpoint');
   if (technologyHistoryGap(state)) diagnostics.push('execution-ledger-gap');
-  const allEvents = new Map(history.map(event => [event.id, event]));
+  const allEvents = new Map<string, FlowRecord>();
+  for (const event of history) allEvents.set(event.id, event);
   const parentByChild = new Map<string, string>();
   for (const parent of history) for (const childId of parent.nestedExecutionIds ?? []) {
     if (parentByChild.has(childId)) diagnostics.push(`multiple-transaction-parents:${childId}`);
@@ -70,13 +99,15 @@ export function observeTechnologyOrganization(state: TechnologyState, actors: re
   for (const event of selected) if (event.tick < startTick || event.tick > tick) diagnostics.push(`execution-outside-epoch:${event.id}`);
   const selectedIds = new Set(selected.map(event => event.id));
   const envelopes = selected.filter(event => !parentByChild.has(event.id));
-  const currentActors = new Map(actors.map(actor => [actor.id, actor]));
+  const currentActors = new Map<string, TechnologyOrganizationActor>();
+  for (const actor of actors) currentActors.set(actor.id, actor);
   if (currentActors.size !== actors.length) diagnostics.push('duplicate-current-actor');
   const openingByActor = new Map<string, Stock>(), closingByActor = new Map<string, Stock>();
   const initialInventoryByActor = new Map<string, TechnologyCheckpoint['inventories'][number]>();
   for (const inventory of checkpoint?.inventories ?? []) {
-    const opening = actorStock({ technology: inventory });
-    openingByActor.set(inventory.actorId, opening); closingByActor.set(inventory.actorId, new Map(opening));
+    // Ninguna existencia del mapa de cierre se muta in situ: solo se sustituye entera, así que comparte el de apertura.
+    const opening = physicalStock(inventory.items, inventory.residue);
+    openingByActor.set(inventory.actorId, opening); closingByActor.set(inventory.actorId, opening);
     initialInventoryByActor.set(inventory.actorId, inventory);
   }
   if (checkpoint && (currentActors.size !== checkpoint.inventories.length || checkpoint.inventories.some(inventory => !currentActors.has(inventory.actorId)))) diagnostics.push('checkpoint-roster-change');
@@ -105,16 +136,16 @@ export function observeTechnologyOrganization(state: TechnologyState, actors: re
     add(imported, stock(event.balance.externalInputs)); add(exported, stock(event.balance.externalLoss));
     const expected = new Map(before);
     add(expected, stock(event.balance.externalInputs)); add(expected, stock(event.balance.externalLoss), -1);
-    const externalMovement = ['estate', 'transfer'].includes(event.kind as string);
+    const externalMovement = (event.kind as string) === 'estate' || (event.kind as string) === 'transfer';
     if (!externalMovement) { add(expected, stock(event.inputs), -1); add(expected, stock(event.outputs)); }
     for (const childId of event.nestedExecutionIds ?? []) {
       const child = allEvents.get(childId);
       if (!child || !selectedIds.has(childId)) diagnostics.push(`missing-nested-execution:${childId}`);
-      else if (child.actorId !== event.actorId || child.tick !== event.tick || !['use', 'recycle'].includes(child.kind)) diagnostics.push(`invalid-nested-execution:${childId}`);
+      else if (child.actorId !== event.actorId || child.tick !== event.tick || (child.kind !== 'use' && child.kind !== 'recycle')) diagnostics.push(`invalid-nested-execution:${childId}`);
       else { add(expected, stock(child.inputs), -1); add(expected, stock(child.outputs)); }
     }
     if (!equals(expected, after)) diagnostics.push(`transaction-resource-mismatch:${event.id}`);
-    if (event.success && ['research', 'craft'].includes(event.kind)) {
+    if (event.success && (event.kind === 'research' || event.kind === 'craft')) {
       const recipe = event.recipeId ? resolveColdRecipe(event.recipeId) : undefined;
       if (!recipe || recipe.tick > event.tick || recipe.signature !== event.programSignature) diagnostics.push(`unverified-recipe:${event.id}`);
       else if (recipe.program.steps.filter(step => step.requiredCatalyst).length !== event.catalysts.filter(catalyst => catalyst.required).length) diagnostics.push(`missing-required-catalyst:${event.id}`);
@@ -126,7 +157,7 @@ export function observeTechnologyOrganization(state: TechnologyState, actors: re
   const transfers = new Map<string, FlowRecord[]>();
   for (const event of envelopes) if ((event.kind as string) === 'transfer') {
     if (!event.transferId) diagnostics.push(`missing-transfer-id:${event.id}`);
-    else transfers.set(event.transferId, [...transfers.get(event.transferId) ?? [], event]);
+    else { const pair = transfers.get(event.transferId); if (pair) pair.push(event); else transfers.set(event.transferId, [event]); }
   }
   for (const [id, pair] of transfers) {
     const [a, b] = pair;
@@ -152,7 +183,8 @@ export function observeTechnologyOrganization(state: TechnologyState, actors: re
   for (const [actorId, last] of closingByActor) if (!currentActors.has(actorId)) {
     // An explicit estate or completed transfer can close a departed actor's stock.
     // Disappearance alone cannot explain where remaining material went.
-    if (!['estate', 'transfer'].includes(lastKind.get(actorId) ?? '') || [...last.values()].some(amount => amount > 0)) {
+    const kind = lastKind.get(actorId);
+    if ((kind !== 'estate' && kind !== 'transfer') || anyPositive(last)) {
       diagnostics.push(`missing-current-actor:${actorId}`);
       for (const id of last.keys()) unknownClosing.add(id);
     }
@@ -161,9 +193,8 @@ export function observeTechnologyOrganization(state: TechnologyState, actors: re
   const canonicalProcesses = new Map<string, OrganizationProcess>(), signaturesById = new Map<string, string>();
   const recipeProcesses = new Map<string, string>(), lineage = new Map<string, string[]>();
   const convert = (event: FlowRecord, input: Stock, output: Stock, catalysts: OrganizationExecution['catalysts'], required: string[]) => {
-    const hasMaterial = [...input.values(), ...output.values()].some(amount => amount > 0);
-    const productive = event.success && hasMaterial && [...input.values()].some(amount => amount > 0) && [...output.values()].some(amount => amount > 0) &&
-      (event.kind !== 'use' || event.benefit > 0);
+    // Un insumo y un producto positivos ya implican material: no hace falta una tercera pasada.
+    const productive = event.success && anyPositive(input) && anyPositive(output) && (event.kind !== 'use' || event.benefit > 0);
     let processId = `failed:${event.programSignature || event.kind}`, units = 1;
     if (productive) {
       // Keep the actual batch size: these physical laws have minimum useful masses
@@ -186,7 +217,7 @@ export function observeTechnologyOrganization(state: TechnologyState, actors: re
       inputs: quantities(input), outputs: quantities(output), catalysts, success: productive });
   };
   for (const event of envelopes) {
-    if (['estate', 'transfer'].includes(event.kind as string)) continue;
+    if ((event.kind as string) === 'estate' || (event.kind as string) === 'transfer') continue;
     const input = stock(event.inputs), output = stock(event.outputs), wear: Stock = new Map(), required: string[] = [];
     const usedChildren = new Set<string>();
     for (const catalyst of event.catalysts) {
@@ -214,8 +245,17 @@ export function observeTechnologyOrganization(state: TechnologyState, actors: re
   const opening: Stock = new Map(), closing: Stock = new Map();
   for (const value of openingByActor.values()) add(opening, value);
   for (const value of closingByActor.values()) add(closing, value);
-  const resources = sorted([...raw, ...opening.keys(), ...closing.keys(), ...imported.keys(), ...exported.keys(),
-    ...executions.flatMap(event => [...event.inputs.map(item => item.resourceId), ...event.outputs.map(item => item.resourceId), ...event.catalysts.map(item => item.resourceId)])]);
+  const resourceIds = new Set<string>(raw);
+  for (const id of opening.keys()) resourceIds.add(id);
+  for (const id of closing.keys()) resourceIds.add(id);
+  for (const id of imported.keys()) resourceIds.add(id);
+  for (const id of exported.keys()) resourceIds.add(id);
+  for (const event of executions) {
+    for (const item of event.inputs) resourceIds.add(item.resourceId);
+    for (const item of event.outputs) resourceIds.add(item.resourceId);
+    for (const item of event.catalysts) resourceIds.add(item.resourceId);
+  }
+  const resources = sorted(resourceIds);
   const observation: OrganizationObservation = {
     window: { startTick: Math.min(startTick, tick), endTick: tick, complete: diagnostics.length === 0 }, food: [...raw], processes, executions,
     resources: resources.map(resourceId => ({ resourceId,

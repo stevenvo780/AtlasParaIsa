@@ -42,33 +42,47 @@ function hashString(value: string): number {
  * ligado al tamaño del catálogo de recetas (que crece con la simulación). */
 const squash = (x: number): number => x / (1 + Math.abs(x));
 
-/** Escala `group` a norma L2 1 y lo añade a `vector` (ronda de arreglo: sin esto,
+/** Escala `out[from, to)` a norma L2 1 in situ (ronda de arreglo: sin esto,
  * el peso de cada grupo en la distancia coseno final depende de escalas accidentales
  * —p. ej. tecnología con 5 dims casi saturadas pesaba 54,5 % y "tipos de alimento"
  * 0,4 %—, no del diseño). Un grupo en blanco (norma 0, p. ej. tecnología de alguien
- * que no ha fabricado nada) se añade como ceros: no aporta ni resta peso. */
-function pushNormalized(vector: number[], group: readonly number[]): void {
-  const norm = Math.sqrt(group.reduce((sum, x) => sum + x * x, 0));
-  for (const x of group) vector.push(norm > 0 ? x / norm : 0);
+ * que no ha fabricado nada) queda en ceros: no aporta ni resta peso. La norma se suma
+ * en el orden del grupo, de modo que el resultado es idéntico bit a bit a la versión con arreglos temporales. */
+function normalizeGroup(out: Float64Array, from: number, to: number): void {
+  let sum = 0;
+  for (let i = from; i < to; i++) { const x = out[i]!; sum += x * x; }
+  const norm = Math.sqrt(sum);
+  for (let i = from; i < to; i++) out[i] = norm > 0 ? out[i]! / norm : 0;
 }
 
-/** Acción con mayor conteo acumulado en `person.activity` (mismo criterio que el
- * oficio mostrado al cliente); `null` si la persona aún no ha actuado. Empates se
- * resuelven por el orden fijo de `ACTIONS`, así el resultado es determinista. */
-function dominantAction(person: Person): Action | null {
-  let best: Action | null = null;
-  for (const action of ACTIONS) {
-    const count = person.activity[action] ?? 0;
-    if (count > 0 && count > (best ? person.activity[best] ?? 0 : 0)) best = action;
+/** Conteos por acción de la persona en curso (reutilizados: el cálculo es síncrono y no reentrante). */
+const scratchActivity = new Float64Array(ACTIONS.length);
+const scratchPlaces = new Float64Array(PLACE_BUCKETS);
+
+/** Índice de la acción con mayor conteo acumulado en `scratchActivity` (mismo criterio que el
+ * oficio mostrado al cliente); `-1` si la persona aún no ha actuado. Empates se resuelven por el
+ * orden fijo de `ACTIONS`, así el resultado es determinista. */
+function dominantIndex(): number {
+  let best = -1;
+  for (let i = 0; i < ACTIONS.length; i++) {
+    const count = scratchActivity[i]!;
+    if (count > 0 && count > (best >= 0 ? scratchActivity[best]! : 0)) best = i;
   }
   return best;
+}
+
+/** Carga `scratchActivity` con `person.activity` (ausente = 0) y devuelve su suma en orden de `ACTIONS`. */
+function loadActivity(person: Person): number {
+  let total = 0;
+  for (let i = 0; i < ACTIONS.length; i++) { const count = person.activity[ACTIONS[i]!] ?? 0; scratchActivity[i] = count; total += count; }
+  return total;
 }
 
 /**
  * Vector normalizado L2 de conducta de una persona; dimensión fija `CONDUCTA_DIMENSIONS`.
  * Grupos, en este orden:
  * 1. Acciones recientes (`ACTIONS.length` dims): fracción de `activity` sobre el total.
- * 2. Oficio dominante (`ACTIONS.length` dims): un-hot sobre `dominantAction`.
+ * 2. Oficio dominante (`ACTIONS.length` dims): un-hot sobre el oficio dominante (`dominantIndex`).
  * 3. Competencias y objetos de `person.technology` (5 dims): recetas conocidas, tasa de
  *    éxito y beneficio medios de `competence`, número de objetos y masa total de `items`.
  * 4. Tipos de alimento (`FOOD_ACTIONS.length` dims): `skills` en las acciones de comida.
@@ -84,23 +98,63 @@ function dominantAction(person: Person): Action | null {
  * (T013); hoy toda la entrada sale de `person`, que ya registra lo necesario.
  */
 export function vectorConducta(person: Person, _world: World): number[] {
-  const vector: number[] = [];
-  const totalActivity = ACTIONS.reduce((sum, action) => sum + (person.activity[action] ?? 0), 0);
-  pushNormalized(vector, ACTIONS.map(action => totalActivity > 0 ? (person.activity[action] ?? 0) / totalActivity : 0));
-  const dominant = dominantAction(person);
-  pushNormalized(vector, ACTIONS.map(action => action === dominant ? 1 : 0));
-  const competence = Object.values(person.technology.competence);
-  const meanSuccessRate = competence.length ? competence.reduce((sum, c) => sum + c.successes / Math.max(1, c.attempts), 0) / competence.length : 0;
-  const meanBenefit = competence.length ? competence.reduce((sum, c) => sum + c.benefit, 0) / competence.length : 0;
-  const itemsMass = person.technology.items.reduce((sum, item) => sum + item.mass, 0);
-  pushNormalized(vector, [squash(person.technology.knownRecipes.length), meanSuccessRate, squash(meanBenefit), squash(person.technology.items.length), squash(itemsMass)]);
-  pushNormalized(vector, FOOD_ACTIONS.map(action => person.skills[action] ?? 0));
-  const buckets = new Array(PLACE_BUCKETS).fill(0) as number[];
-  const withPlace = person.experiences.filter(experience => experience.placeId !== '');
-  for (const experience of withPlace) buckets[hashString(experience.placeId) % PLACE_BUCKETS] += 1;
-  pushNormalized(vector, buckets.map(count => withPlace.length > 0 ? count / withPlace.length : 0));
-  const norm = Math.sqrt(vector.reduce((sum, x) => sum + x * x, 0));
-  return norm > 0 ? vector.map(x => x / norm) : vector;
+  const out = new Float64Array(CONDUCTA_DIMENSIONS);
+  fillConducta(person, out, 0);
+  return Array.from(out);
+}
+
+/**
+ * Escribe el vector de conducta de `person` en `out[offset, offset + CONDUCTA_DIMENSIONS)` (que debe
+ * estar a cero) sin arreglos temporales y con el mismo orden de sumas FP64 que la definición original.
+ * Devuelve el oficio dominante (índice en `ACTIONS`, o -1) para que `indiceDiversidad` no lo recalcule.
+ */
+function fillConducta(person: Person, out: Float64Array, offset: number): number {
+  const actions = ACTIONS.length;
+  // 1. Acciones recientes.
+  const totalActivity = loadActivity(person);
+  let end = offset + actions;
+  for (let i = 0; i < actions; i++) out[offset + i] = totalActivity > 0 ? scratchActivity[i]! / totalActivity : 0;
+  normalizeGroup(out, offset, end);
+  // 2. Oficio dominante: un-hot (norma 1, ya normalizado).
+  const dominant = dominantIndex();
+  if (dominant >= 0) out[end + dominant] = 1;
+  let start = end + actions;
+  // 3. Competencias y objetos de la tecnología.
+  const technology = person.technology;
+  let competences = 0, successSum = 0, benefitSum = 0;
+  for (const key in technology.competence) {
+    const c = technology.competence[key]!;
+    competences++; successSum += c.successes / Math.max(1, c.attempts); benefitSum += c.benefit;
+  }
+  const meanSuccessRate = competences ? successSum / competences : 0;
+  const meanBenefit = competences ? benefitSum / competences : 0;
+  let itemsMass = 0;
+  for (const item of technology.items) itemsMass += item.mass;
+  out[start] = squash(technology.knownRecipes.length); out[start + 1] = meanSuccessRate; out[start + 2] = squash(meanBenefit);
+  out[start + 3] = squash(technology.items.length); out[start + 4] = squash(itemsMass);
+  end = start + 5;
+  normalizeGroup(out, start, end);
+  // 4. Tipos de alimento.
+  start = end; end = start + FOOD_ACTIONS.length;
+  for (let i = 0; i < FOOD_ACTIONS.length; i++) out[start + i] = person.skills[FOOD_ACTIONS[i]!] ?? 0;
+  normalizeGroup(out, start, end);
+  // 5. Lugares en memorias recientes.
+  start = end; end = start + PLACE_BUCKETS;
+  scratchPlaces.fill(0);
+  let withPlace = 0;
+  for (const experience of person.experiences) {
+    if (experience.placeId === '') continue;
+    withPlace++; scratchPlaces[hashString(experience.placeId) % PLACE_BUCKETS]! += 1;
+  }
+  for (let i = 0; i < PLACE_BUCKETS; i++) out[start + i] = withPlace > 0 ? scratchPlaces[i]! / withPlace : 0;
+  normalizeGroup(out, start, end);
+  // Vector completo: norma L2 final (sin tocarlo si su norma no es positiva).
+  const last = offset + CONDUCTA_DIMENSIONS;
+  let sum = 0;
+  for (let i = offset; i < last; i++) { const x = out[i]!; sum += x * x; }
+  const norm = Math.sqrt(sum);
+  if (norm > 0) for (let i = offset; i < last; i++) out[i] = out[i]! / norm;
+  return dominant;
 }
 
 /**
@@ -110,22 +164,20 @@ export function vectorConducta(person: Person, _world: World): number[] {
  * pares cero–no-cero aportan 1 (Z·M). Elimina el pico cuadrático O(P²) de `worldStatistics`
  * detectado en T144 (712 ms → < 3 ms en P = 2 000) conservando la definición exacta.
  */
-function meanCosineDistance(vectors: readonly (readonly number[])[]): number {
-  const n = vectors.length;
+function meanCosineDistance(vectors: Float64Array, n: number, dim: number): number {
   if (n < 2) return 0;
-  const dim = vectors[0]!.length;
   const sumVec = new Float64Array(dim);
   let nonZero = 0, zero = 0, sumNormSq = 0;
   for (let i = 0; i < n; i++) {
-    const v = vectors[i]!;
+    const base = i * dim;
     let normSq = 0;
-    for (let k = 0; k < dim; k++) { const x = v[k]!; normSq += x * x; }
+    for (let k = 0; k < dim; k++) { const x = vectors[base + k]!; normSq += x * x; }
     if (normSq === 0) { zero++; continue; }
     nonZero++;
     const invNorm = 1 / Math.sqrt(normSq);
     let unitNormSq = 0;
     for (let k = 0; k < dim; k++) {
-      const u = v[k]! * invNorm;
+      const u = vectors[base + k]! * invNorm;
       sumVec[k]! += u;
       unitNormSq += u * u;
     }
@@ -141,29 +193,32 @@ function meanCosineDistance(vectors: readonly (readonly number[])[]): number {
 /**
  * FR-007/SC-003: `conducta` = distancia coseno media de `vectorConducta` entre cada
  * par de habitantes vivos (`world.people`, que ya excluye a los difuntos: T019 no
- * filtra nada); `oficios` = entropía de Shannon de `dominantAction` sobre la
+ * filtra nada); `oficios` = entropía de Shannon del oficio dominante (`dominantIndex`) sobre la
  * población, normalizada por `Math.log(OFICIOS_CATEGORIAS)` — las categorías
  * POSIBLES (las 18 de `Action`), no las observadas (ronda de arreglo: normalizar
  * por observadas dejaba que un mundo con solo 2 oficios de 18 puntuara entropía
  * máxima, incapaz de detectar el colapso de riqueza de oficios que SC-003 debe
- * poder refutar); recortada a 1 por si el rótulo "sin oficio aún" (`dominantAction`
- * `null`) añadiera una categoría más de las 18 contempladas. `total` = media de
+ * poder refutar); recortada a 1 por si el rótulo "sin oficio aún" (`dominantIndex`
+ * = -1) añadiera una categoría más de las 18 contempladas. `total` = media de
  * ambas. Calculada en O(P · d) mediante identidad exacta de norma L2 (ver
  * `meanCosineDistance`). 0 ó 1 habitante → {0,0,0}, sin excepción.
  */
 export function indiceDiversidad(world: World): { conducta: number; oficios: number; total: number } {
   const people = world.people;
   if (people.length < 2) return { conducta: 0, oficios: 0, total: 0 };
-  const vectors = people.map(person => vectorConducta(person, world));
-  const conducta = meanCosineDistance(vectors);
-  const counts = new Map<string, number>();
-  for (const person of people) {
-    const label = dominantAction(person) ?? '';
-    counts.set(label, (counts.get(label) ?? 0) + 1);
+  // Matriz plana P × d: un solo bloque en vez de un arreglo por habitante; el oficio dominante sale del mismo recorrido.
+  const vectors = new Float64Array(people.length * CONDUCTA_DIMENSIONS);
+  // `counts[ACTIONS.length]` = «sin oficio aún»; `order` conserva el orden de primera aparición (fija el orden de la suma de la entropía).
+  const counts = new Int32Array(ACTIONS.length + 1), order: number[] = [];
+  for (let p = 0; p < people.length; p++) {
+    const dominant = fillConducta(people[p]!, vectors, p * CONDUCTA_DIMENSIONS);
+    const label = dominant >= 0 ? dominant : ACTIONS.length;
+    if (counts[label]!++ === 0) order.push(label);
   }
+  const conducta = meanCosineDistance(vectors, people.length, CONDUCTA_DIMENSIONS);
   let entropy = 0;
-  if (counts.size > 1) {
-    for (const count of counts.values()) { const share = count / people.length; entropy -= share * Math.log(share); }
+  if (order.length > 1) {
+    for (const label of order) { const share = counts[label]! / people.length; entropy -= share * Math.log(share); }
     entropy = Math.min(1, entropy / Math.log(OFICIOS_CATEGORIAS));
   }
   return { conducta, oficios: entropy, total: (conducta + entropy) / 2 };

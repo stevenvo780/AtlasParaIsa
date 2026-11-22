@@ -39,11 +39,11 @@ export function updateCulturalNormsOnOutcome(world: World, person: Person, actio
   if ((!useful && wild) || (useful && action === 'farm')) person.culture.stewardship = clamp(person.culture.stewardship + rate * 1.1);
   else if (useful && wild && person.hunger > 0.35) person.culture.stewardship = clamp(person.culture.stewardship - rate * 0.65);
   const need = Math.max(person.hunger, person.thirst);
-  if (useful && ['cooperate','share'].includes(action) && need < 0.6) person.culture.sharing = clamp(person.culture.sharing + rate * 0.9);
-  else if (need > 0.68) person.culture.sharing = clamp(person.culture.sharing - rate * 1.1);
-  else if (useful && ['eat','forage','hunt'].includes(action) && (!person.communityId || person.hunger > 0.55)) person.culture.sharing = clamp(person.culture.sharing - rate * 0.45);
-  if (useful && ['farm','build'].includes(action) && person.communityId) person.culture.openness = clamp(person.culture.openness - rate * 0.2);
-  else if (useful && action === 'explore') person.culture.openness = clamp(person.culture.openness + rate * 0.3);
+  if (useful && ['cooperate','share'].includes(action) && need < 0.6) person.culture.sharing = clamp(person.culture.sharing + rate * 0.9 * (0.95 - person.culture.sharing));
+  else if (need > 0.72) person.culture.sharing = clamp(person.culture.sharing - rate * 1.1 * Math.max(0.1, person.culture.sharing - 0.08));
+  else if (useful && ['forage','hunt'].includes(action) && (!person.communityId || person.hunger > 0.55)) person.culture.sharing = clamp(person.culture.sharing - rate * 0.45 * Math.max(0.1, person.culture.sharing - 0.1));
+  if (useful && ['farm','build'].includes(action) && person.communityId) person.culture.openness = clamp(person.culture.openness - rate * 0.3 * Math.max(0.1, person.culture.openness - 0.15));
+  else if (useful && action === 'explore' && person.culture.openness < 0.85) person.culture.openness = clamp(person.culture.openness + rate * 0.25 * (0.85 - person.culture.openness));
 }
 /** Herencia cultural vertical. Con `derivaCultural <= 0`, la media exacta de siempre; con
  * > 0, la media más una variación determinista por cría acotada a [0,05, 0,98], para que la

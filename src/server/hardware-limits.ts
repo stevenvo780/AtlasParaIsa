@@ -231,16 +231,16 @@ export function hostOpenWorldParams(base: WorldParams = DEFAULT_PARAMS, probe?: 
   return parseParams({
     recursos: {
       ...full.recursos,
-      capacidadBosque: 0.65,
-      capacidadPastizal: 0.45,
-      capacidadOtros: 0.22,
-      velocidadRegeneracion: 0.55,
-      decaimientoFertilidad: 0.0025,
+      capacidadBosque: 0.8,
+      capacidadPastizal: 0.58,
+      capacidadOtros: 0.28,
+      velocidadRegeneracion: 0.72,
+      decaimientoFertilidad: 0.0018,
     },
-    agua: { ...full.agua, cuencas: 0.3, memoria: 0.65 },
+    agua: { ...full.agua, cuencas: 0.36, memoria: 1 },
     poblacion: { ...full.poblacion, natalidadVecindad: true, radioVecindadNatalidad: 16 },
     social: { ...full.social, radioConvivencia: 12, disolucion: 1, maxComunidades: 0, derivaCultural: 1, vinculoEncuentro: 1 },
-    conducta: { ...full.conducta, aptitud: 0.35, politicaPeso: 1.15, politicaAutonomia: 0.65 },
+    conducta: { ...full.conducta, aptitud: 0.35, politicaPeso: 0.65, politicaAutonomia: 0.55 },
     tecnologia: { ...full.tecnologia, evitarNoOp: true, dosisCuanto: 100, mejoraLocal: 0.08, enfriamiento: 240, efectosHerramientas: true },
   }, full);
 }

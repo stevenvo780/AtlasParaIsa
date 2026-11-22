@@ -703,6 +703,7 @@ function choose(world: World, person: Person, policyScores?: Map<string, Float64
   // y recuerda un vínculo mutuo con otra persona fértil no emparentada, fuera de `radioPareja` pero dentro
   // de `radioCortejo`, puede ir hacia ella. Cuesta el mismo movimiento que cualquier desplazamiento, no
   // crea recursos ni garantiza un nacimiento; hambre, sed y descanso siguen ganando cuando urgen.
+  let cortejoCandidate: Candidate | undefined;
   const leyPoblacion = paramsOf(world).poblacion;
   if (leyPoblacion.cortejo > 0 && !family && world.reproductionEnabled && person.role === 'neighbor' && reproductiveReadiness(world, person)) {
     let cortejado: Person | undefined, vinculo = 0;
@@ -716,8 +717,11 @@ function choose(world: World, person: Person, policyScores?: Map<string, Float64
         cortejado = other; vinculo = (strength + (other.bonds[person.id] ?? 0)) / 2;
       }
     }
-    if (cortejado) candidates.push({ action: 'approach', target: { x: cortejado.x, y: cortejado.y }, score: leyPoblacion.cortejo * (0.5 + vinculo * 0.5),
-      reason: `Recuerda el vínculo con ${cortejado.name} y lo busca; ambos están en edad de criar y la cercanía hace posible una familia.` });
+    if (cortejado) {
+      cortejoCandidate = { action: 'approach', target: { x: cortejado.x, y: cortejado.y }, score: leyPoblacion.cortejo * (0.5 + vinculo * 0.5),
+        reason: `Recuerda el vínculo con ${cortejado.name} y lo busca; ambos están en edad de criar y la cercanía hace posible una familia.` };
+      candidates.push(cortejoCandidate);
+    }
   }
   const water = primeroConFiltroCaro(reachableTiles, disputada
     ? (a, b) => (distance(person, a) + recelo(a)) - (distance(person, b) + recelo(b))
@@ -837,6 +841,7 @@ function choose(world: World, person: Person, policyScores?: Map<string, Float64
   if(damaged) candidates.push({action:'repair',target:damaged,score:0.5+(1-damaged.condition)*0.35+workBias*0.12,reason:'Reparar una instalación que percibe recupera una función útil; exige material y trabajo.'});
   const farmland = primero(nearbyTiles, (a, b) => distance(person, a) - distance(person, b), t => t.terrain !== 'shelter' && t.moisture > 0.25 && t.vegetation < 0.8);
   if (farmland && person.materials.wood >= 1) candidates.push({ action: 'farm', target: farmland, score: 0.12 + workBias * 0.3 + person.culture.stewardship * 0.12 + (food && food.food < 0.2 ? 0.2 : 0), reason: 'Puede preparar tierra húmeda; el alimento llegará después con agua y luz.' });
+  let reunionCandidate: Candidate | undefined;
   if (partner) {
     if (vinculoEncuentro > 0) person.partnerMemory = { x: partner.x, y: partner.y, tick: world.tick };
     if (person.socialLoad > 0.7 || partner.socialLoad > 0.8) {
@@ -849,12 +854,14 @@ function choose(world: World, person: Person, policyScores?: Map<string, Float64
   } else if (vinculoEncuentro > 0 && person.role !== 'neighbor' && person.partnerMemory
     && distance(person, person.partnerMemory) >= 2 && person.hunger < 0.65 && person.thirst < 0.65
     && person.fatigue < 0.72 && person.socialLoad < 0.65 && person.closeness > 0.42) {
-    candidates.push({
+    const reunionUrgency = world.tick - person.lastMeeting > TICKS_PER_DAY ? 0.35 : 0;
+    reunionCandidate = {
       action: 'approach',
       target: { x: person.partnerMemory.x, y: person.partnerMemory.y },
-      score: vinculoEncuentro * (0.45 + person.closeness * 0.55),
+      score: vinculoEncuentro * (0.48 + person.closeness * 0.55 + reunionUrgency),
       reason: 'Recuerda el último lugar compartido y emprende el camino de regreso para reencontrarse; conserva sus necesidades.',
-    });
+    };
+    candidates.push(reunionCandidate);
   }
   for (const invitation of world.invitations) {
     if (distance(person, invitation) <= RADIUS && person.hunger < 0.65 && person.fatigue < 0.7 && person.socialLoad < 0.7) candidates.push({ action: 'approach', target: invitation, score: 0.67 + person.sociability * 0.15, reason: 'Percibe una invitación y sus necesidades le permiten acercarse.' });
@@ -1007,7 +1014,9 @@ function choose(world: World, person: Person, policyScores?: Map<string, Float64
     const heuristicScale = softenHeuristics ? 1 - politicaAutonomia * 0.55 : 1;
     let bestPre = -Infinity;
     for (const candidate of candidates) {
-      const strategic = candidate === homeCandidate || (!candidate.memory && candidate !== familyForage
+      const protectedBond = candidate === cortejoCandidate || candidate === reunionCandidate || candidate === familyForage || !!candidate.memory;
+      const essentialShelter = candidate.action === 'build' && !shelter;
+      const strategic = candidate === homeCandidate || (!protectedBond && !essentialShelter
         && (candidate.action === 'explore' || candidate.action === 'gather' || candidate.action === 'farm'
           || candidate.action === 'hunt' || candidate.action === 'build' || candidate.action === 'cooperate'
           || candidate.action === 'research' || candidate.action === 'craft' || candidate.action === 'share'
@@ -1015,7 +1024,7 @@ function choose(world: World, person: Person, policyScores?: Map<string, Float64
       if (softenHeuristics && strategic) candidate.score *= heuristicScale;
       candidate.prePolicyScore = candidate.score;
       if (candidate.score > bestPre) { bestPre = candidate.score; heuristicWinnerAction = candidate.action; }
-      if (candidate === candidates[0] && emergencyExplore) continue;
+      if ((candidate === candidates[0] && emergencyExplore) || (politicaAutonomia > 0 && protectedBond)) continue;
       const delta = policyActionBias(scores, candidate.action, politicaPeso);
       candidate.score += delta;
       candidate.policyDelta = delta;
@@ -1403,9 +1412,10 @@ function encounters(world: World): void {
         const mid = { x: Math.round((s.x + i.x) / 2), y: Math.round((s.y + i.y) / 2), tick: world.tick };
         s.partnerMemory = { ...mid }; i.partnerMemory = { ...mid };
       } else {
+        // Si se alejaron más allá del radio social, ambos convergen al claro compartido para reencontrarse.
         const origin = placeById(world, 'claro') ?? { x: 0, y: 0 };
-        if (!s.partnerMemory) s.partnerMemory = { x: origin.x, y: origin.y, tick: world.tick };
-        if (!i.partnerMemory) i.partnerMemory = { x: origin.x, y: origin.y, tick: world.tick };
+        s.partnerMemory = { x: origin.x, y: origin.y, tick: world.tick };
+        i.partnerMemory = { x: origin.x, y: origin.y, tick: world.tick };
       }
     }
   }

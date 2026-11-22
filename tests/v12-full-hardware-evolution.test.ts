@@ -62,11 +62,11 @@ test('V12: hostOpenWorldParams activa todos los chips y todas las leyes de evolu
   assert.equal(params.motor.clonPorPaso, true);
   assert.equal(params.gobernador.politica, 'techo');
   assert.equal(params.gobernador.presupuestoMs, 100);
-  assert.equal(params.recursos.capacidadBosque, 0.65);
-  assert.equal(params.recursos.capacidadPastizal, 0.45);
-  assert.equal(params.recursos.velocidadRegeneracion, 0.55);
-  assert.equal(params.agua.cuencas, 0.3);
-  assert.equal(params.agua.memoria, 0.65);
+  assert.equal(params.recursos.capacidadBosque, 0.8);
+  assert.equal(params.recursos.capacidadPastizal, 0.58);
+  assert.equal(params.recursos.velocidadRegeneracion, 0.72);
+  assert.equal(params.agua.cuencas, 0.36);
+  assert.equal(params.agua.memoria, 1);
   assert.equal(params.poblacion.natalidadVecindad, true);
   assert.equal(params.poblacion.radioVecindadNatalidad, 16);
   assert.equal(params.social.radioConvivencia, 12);
@@ -75,8 +75,8 @@ test('V12: hostOpenWorldParams activa todos los chips y todas las leyes de evolu
   assert.equal(params.social.derivaCultural, 1);
   assert.equal(params.social.vinculoEncuentro, 1);
   assert.equal(params.conducta.aptitud, 0.35);
-  assert.equal(params.conducta.politicaPeso, 1.15);
-  assert.equal(params.conducta.politicaAutonomia, 0.65);
+  assert.equal(params.conducta.politicaPeso, 0.65);
+  assert.equal(params.conducta.politicaAutonomia, 0.55);
   assert.equal(params.tecnologia.evitarNoOp, true);
   assert.equal(params.tecnologia.dosisCuanto, 100);
   assert.equal(params.tecnologia.mejoraLocal, 0.08);

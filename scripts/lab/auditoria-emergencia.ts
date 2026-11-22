@@ -86,9 +86,7 @@ function summarize(world: World, seed: number, days: number, popPeak: number, di
     if (bias) { let s = 0; for (const x of bias) s += x * x; l2 += Math.sqrt(s); l2n++; }
     for (const item of p.technology.items) {
       const caps = materialCapacities(item);
-      let best: keyof Tools = 'cutting';
-      for (const cap of CAPABILITIES) if (caps[cap] > caps[best]) best = cap;
-      tools[best]++;
+      for (const cap of CAPABILITIES) if (caps[cap] >= 0.15) tools[cap]++;
     }
   }
   const n = people.length;

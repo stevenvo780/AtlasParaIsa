@@ -1,6 +1,7 @@
 import type { Tile } from '../shared/types.js';
 import type { Person, World } from './index.js';
 import { extractLocalObservation } from './politica.js';
+import type { ResidentFastAccess } from './soa/terreno.js';
 
 /**
  * Empaqueta una celda entera en un entero seguro. El sesgo de 2^25 cubre el intervalo
@@ -62,23 +63,45 @@ export function computeLocalPolicyObservation(
   person: Person,
   tileIn: (x: number, y: number) => Tile | undefined,
   nearbyPeople: readonly { id: string }[],
+  fast?: ResidentFastAccess,
 ): Float64Array {
   void world;
   let land = 0, foodSum = 0, waterTiles = 0, shelterTiles = 0, materialSum = 0, unvisited = 0;
   const visited = person.visited;
   const ints = visited.length > 0 ? visitedIntegerSet(visited) : null;
+  const exact = fast?.exact;
+  const WATER = fast?.TERRAIN_WATER ?? -1, SHELTER = fast?.TERRAIN_SHELTER ?? -1;
+  const terrainArr = fast?.terrainArr, foodArr = fast?.foodArr, dwArr = fast?.drinkingWaterArr, woodArr = fast?.woodArr;
   for (let dy = -4; dy <= 4; dy++) for (let dx = -4; dx <= 4; dx++) {
     if (dx * dx + dy * dy > 16) continue;
-    const tile = tileIn(person.x + dx, person.y + dy);
-    if (!tile || tile.terrain === 'water') continue;
+    const x = person.x + dx, y = person.y + dy;
+    let cell = -1;
+    if (exact) {
+      cell = exact.cellAt(x, y);
+      if (cell < 0 || terrainArr![cell] === WATER) continue;
+    }
+    const tile = tileIn(x, y);
+    if (!exact) {
+      if (!tile) continue;
+      cell = fast ? fast.cellOf(tile) : -1;
+      if (cell >= 0 ? terrainArr![cell] === WATER : tile.terrain === 'water') continue;
+    }
     land++;
-    foodSum += tile.food;
-    if ((tile.drinkingWater ?? 0) > 0.005) waterTiles++;
-    if (tile.terrain === 'shelter') shelterTiles++;
-    materialSum += (tile.wood ?? 0) + (tile.stone ?? 0);
-    const key = cellIntKey(tile.x, tile.y);
+    if (cell >= 0) {
+      const f = foodArr![cell]!, dw = dwArr![cell]!, w = woodArr![cell]!;
+      foodSum += f === f ? f : 0;
+      if (dw === dw && dw > 0.005) waterTiles++;
+      if (terrainArr![cell] === SHELTER) shelterTiles++;
+      materialSum += (w === w ? w : 0) + (tile?.stone ?? 0);
+    } else {
+      foodSum += tile!.food;
+      if ((tile!.drinkingWater ?? 0) > 0.005) waterTiles++;
+      if (tile!.terrain === 'shelter') shelterTiles++;
+      materialSum += (tile!.wood ?? 0) + (tile!.stone ?? 0);
+    }
+    const key = cellIntKey(x, y);
     if (key === undefined) {
-      if (visited.length === 0 || !visited.includes(`${tile.x},${tile.y}`)) unvisited++;
+      if (visited.length === 0 || !visited.includes(`${x},${y}`)) unvisited++;
     } else if (!ints || !ints.has(key)) unvisited++;
   }
   let trustSum = 0;

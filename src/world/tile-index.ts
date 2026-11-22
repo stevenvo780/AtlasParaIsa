@@ -47,8 +47,10 @@ interface Grid {
 }
 /** Disposición por chunks: bloque → posición de su primera tesela, en orden creciente de posición.
  * Cada bloque está una sola vez y sus 256 teselas tienen exactamente las coordenadas de su casilla,
- * así que no hay repetidas ni coordenadas fuera de la rejilla. */
-interface Blocks { bases: Map<number, number>; lastKey: number; lastBase: number; }
+ * así que no hay repetidas ni coordenadas fuera de la rejilla. `blockIds` identifica cada bloque de
+ * 256 teselas validadas para reutilización incremental en motores paralelos. */
+interface Blocks { bases: Map<number, number>; blockIds: Map<number, number>; lastKey: number; lastBase: number; }
+let nextBlockId = 1;
 interface TileIndex {
   length: number;
   /** Modo aritmético (T113); si es `null`, rejilla o cadena. */
@@ -106,7 +108,11 @@ function readBlocks(tiles: readonly Cell[], from: number, known: Map<number, num
 function build(tiles: readonly Cell[]): TileIndex {
   fullBuilds++;
   const bases = new Map<number, number>();
-  if (readBlocks(tiles, 0, new Map(), bases)) return { length: tiles.length, chunks: { bases, lastKey: -1, lastBase: -1 }, grid: null, strings: null, duplicates: false };
+  if (readBlocks(tiles, 0, new Map(), bases)) {
+    const blockIds = new Map<number, number>();
+    for (const key of bases.keys()) blockIds.set(key, nextBlockId++);
+    return { length: tiles.length, chunks: { bases, blockIds, lastKey: -1, lastBase: -1 }, grid: null, strings: null, duplicates: false };
+  }
   const grid: Grid = { blocks: new Map(), others: new Map(), lastKey: -1, lastBlock: undefined };
   let duplicates = false, numeric = true;
   // `forEach` salta los huecos igual que el `tiles.map` del índice original; gana la última tesela.
@@ -146,7 +152,10 @@ export function tileIndexAppended(tiles: readonly Cell[], from: number): void {
   if (!index || index.length !== from) return;
   const added = new Map<number, number>();
   if (!index.chunks || !readBlocks(tiles, from, index.chunks.bases, added)) { indexes.delete(tiles); return; }
-  for (const [key, base] of added) index.chunks.bases.set(key, base);
+  for (const [key, base] of added) {
+    index.chunks.bases.set(key, base);
+    index.chunks.blockIds.set(key, nextBlockId++);
+  }
   index.chunks.lastKey = -1;
   index.length = tiles.length;
   stringIndexes.delete(index);
@@ -155,15 +164,21 @@ export function tileIndexAppended(tiles: readonly Cell[], from: number): void {
 /** `copy` acaba de salir de `source.map(t => ({ ...t }))`: mismas coordenadas en las mismas posiciones.
  * Hereda la disposición de `source` sin volver a leer cada tesela (sólo el origen de cada bloque, como
  * resguardo); sin disposición vigente en `source`, no hace nada y la primera consulta construye. Es el
- * gancho que `cloneWorld` y `puntoDeRestauracion` necesitan para no pagar un recorrido por paso. */
-export function tileIndexCopied(copy: readonly Cell[], source: readonly Cell[]): void {
+ * gancho que `cloneWorld` y `puntoDeRestauracion` necesitan para no pagar un recorrido por paso.
+ * `sameObjects = true` (p. ej. envolver el mismo bloque en un `Proxy` de `tileOwnership`) conserva los
+ * `blockIds` de identidad de bloque; una copia con teselas nuevas (`cloneWorld`) recibe ids nuevos. */
+export function tileIndexCopied(copy: readonly Cell[], source: readonly Cell[], sameObjects = false): void {
   const index = indexes.get(source);
   if (!index?.chunks || index.length !== source.length || copy.length !== source.length) return;
   for (const [key, base] of index.chunks.bases) {
     const first = copy[base];
     if (first == null || !inGrid(first.x) || !inGrid(first.y) || (first.x & 15) !== 0 || (first.y & 15) !== 0 || blockKey(first.x, first.y) !== key) return;
+    if (sameObjects && first !== source[base]) return;
   }
-  indexes.set(copy, { length: copy.length, chunks: { bases: new Map(index.chunks.bases), lastKey: -1, lastBase: -1 }, grid: null, strings: null, duplicates: false });
+  const blockIds = sameObjects
+    ? new Map(index.chunks.blockIds)
+    : new Map([...index.chunks.bases.keys()].map(key => [key, nextBlockId++] as const));
+  indexes.set(copy, { length: copy.length, chunks: { bases: new Map(index.chunks.bases), blockIds, lastKey: -1, lastBase: -1 }, grid: null, strings: null, duplicates: false });
 }
 
 /** Reparto de `maintainRegions` por bloques: cada chunk va entero a `destination(primera tesela)` o se
@@ -172,15 +187,24 @@ export function tileIndexCopied(copy: readonly Cell[], source: readonly Cell[]):
 export function splitTileBlocks<T extends Cell>(tiles: readonly T[], destination: (first: T) => T[] | undefined): T[] | null {
   const chunks = indexOf(tiles).chunks;
   if (!chunks) return null;
-  const kept: T[] = [], bases = new Map<number, number>();
+  const kept: T[] = [], bases = new Map<number, number>(), blockIds = new Map<number, number>();
   for (const [key, base] of chunks.bases) {
     const target = destination(tiles[base]!);
-    if (!target) bases.set(key, kept.length);
+    if (!target) {
+      bases.set(key, kept.length);
+      blockIds.set(key, chunks.blockIds.get(key)!);
+    }
     const to = target ?? kept;
     for (let i = base; i < base + BLOCK; i++) to.push(tiles[i]!);
   }
-  indexes.set(kept, { length: kept.length, chunks: { bases, lastKey: -1, lastBase: -1 }, grid: null, strings: null, duplicates: false });
+  indexes.set(kept, { length: kept.length, chunks: { bases, blockIds, lastKey: -1, lastBase: -1 }, grid: null, strings: null, duplicates: false });
   return kept;
+}
+
+/** Disposición verificada por chunks de 16 × 16 (solo lectura), o `null` si el arreglo no está alineado por bloques. */
+export function verifiedChunkBlocks(tiles: readonly Cell[]): { bases: ReadonlyMap<number, number>; blockIds: ReadonlyMap<number, number> } | null {
+  const chunks = indexOf(tiles).chunks;
+  return chunks ? { bases: chunks.bases, blockIds: chunks.blockIds } : null;
 }
 
 /** Misma respuesta que `new Map(tiles.map(t => [`${t.x},${t.y}`, t])).get(`${x},${y}`)`. */

@@ -56,11 +56,15 @@ const NO_AUTHORITY = 'SoA de terreno: escritura sin autoridad; la página perten
 
 const RESIDENT_NUMBERS = ['moisture', 'vegetation', 'food', 'wood', 'growth', 'fertility', 'cultivation', 'traffic', 'drinkingWater'] as const;
 type ResidentKey = typeof RESIDENT_NUMBERS[number] | 'terrain' | 'biome' | 'feature' | 'life';
-interface ResidentBinding { store: TileStore; tile: Tile; cell: number; x: number; y: number; mask: number; }
+/** `seen`: pasada incremental de `prepareParallel` que la conservó (contador global, nunca se repite). */
+interface ResidentBinding { store: TileStore; tile: Tile; cell: number; x: number; y: number; mask: number; seen: number; }
 const bindings = new WeakMap<Tile, ResidentBinding>();
+let residentPasses = 0;
 const residentStoreByTiles = new WeakMap<Tile[], TileStore>();
 const residentKeys: readonly ResidentKey[] = [...RESIDENT_NUMBERS, 'terrain', 'biome', 'feature', 'life'];
 const residentKeySet = new Set<PropertyKey>(residentKeys);
+/** Claves que el kernel asigna aunque falten al cargar: se dan de alta al confirmar el paso. */
+const PENDING_KEYS = ['life', 'fertility', 'growth', 'traffic', 'cultivation', 'drinkingWater'] as const;
 const enumValues: Partial<Record<ResidentKey, readonly string[]>> = { terrain: TERRAINS, biome: BIOMES, feature: FEATURES };
 const TERRAIN_IDX = residentKeys.indexOf('terrain');
 const BIOME_IDX = residentKeys.indexOf('biome');
@@ -370,76 +374,38 @@ export class TileStore {
           this.refreshModifiedBinding(binding);
         }
         this.residentModified.clear();
+        // V17: lo ya ligado aquí con sus coordenadas conserva celda, ranura y accesores; sólo se ubican,
+        // validan y ligan las teselas nuevas. El certificado de coordenadas evita releer x/y de las 278 k.
+        const pass = ++residentPasses, sameCoordinates = token!.coordinates === this.residentTopology!.coordinates;
+        const nextBindings = new Array<ResidentBinding>(tiles.length);
         // Validación previa fail-closed antes de desligar o mutar nada.
         for (let i = 0; i < tiles.length; i++) {
-          const tile = tiles[i]!;
+          const tile = tiles[i]!, prior = bindings.get(tile);
+          if (prior?.store === this && (sameCoordinates || Object.is(tile.x, prior.x) && Object.is(tile.y, prior.y))) {
+            prior.seen = pass; nextBindings[i] = prior; continue;
+          }
           if (!admissibleCoordinate(tile.x) || !admissibleCoordinate(tile.y))
             throw new RangeError('Coordenada fuera del dominio entero del SoA paralelo.');
-          const prior = bindings.get(tile);
           if (prior?.store.residentBusy) throw new Error(TWO_WRITERS);
-          if (!(prior && prior.store === this && Object.is(tile.x, prior.x) && Object.is(tile.y, prior.y))) {
-            for (const key of residentKeys) this.encodeResident(key, tile[key as keyof Tile]);
-          }
+          for (const key of residentKeys) this.encodeResident(key, tile[key as keyof Tile]);
         }
-        const nextSet = new Set<Tile>(tiles);
-        const kept = new Set<ResidentBinding>();
-        const priorBindings = this.residentBindings;
-        const priorPending = this.residentPending;
-        const priorAbsent = this.residentAbsent;
-        const priorWoodHoles = [...this.residentWoodHoles.entries()];
-        for (let i = 0; i < priorBindings.length; i++) {
-          const binding = priorBindings[i]!;
-          if (nextSet.has(binding.tile) && Object.is(binding.tile.x, binding.x) && Object.is(binding.tile.y, binding.y)) {
-            kept.add(binding);
-          } else {
-            this.detachBinding(binding);
-          }
-        }
-        this.residentBindings = [...kept];
-        if (!this.map(tiles, false)) throw new RangeError('Coordenada fuera del dominio entero del SoA paralelo.');
+        const kept = (binding: ResidentBinding) => binding.seen === pass;
+        for (const binding of this.residentBindings) if (!kept(binding)) this.detachBinding(binding);
+        try { this.remap(tiles, nextBindings); } catch (error) { this.dropResidentCertificate(); throw error; }
         this.back(); this.refreshResident();
-        this.residentPending = priorPending.filter(b => kept.has(b));
-        this.residentAbsent = priorAbsent.filter(entry => kept.has(entry.binding));
-        this.residentWoodHoles.clear();
-        for (const [page, holes] of priorWoodHoles) {
-          const alive = holes.filter(b => kept.has(b));
-          if (alive.length) this.residentWoodHoles.set(page, alive);
+        this.residentPending = this.residentPending.filter(kept);
+        this.residentAbsent = this.residentAbsent.filter(entry => kept(entry.binding));
+        for (const [page, holes] of this.residentWoodHoles) {
+          const alive = holes.filter(kept);
+          if (alive.length) this.residentWoodHoles.set(page, alive); else this.residentWoodHoles.delete(page);
         }
         this.residentTiles = tiles;
         residentStoreByTiles.set(tiles, this);
-        const nextBindings = new Array<ResidentBinding>(tiles.length);
-        for (let i = 0; i < tiles.length; i++) {
-          const tile = tiles[i]!, cell = this.cellsOf[i]!;
-          const existing = bindings.get(tile);
-          if (existing && kept.has(existing) && existing.cell === cell) {
-            nextBindings[i] = existing;
-            continue;
-          }
-          if (existing) existing.store.detachBinding(existing);
-          const binding: ResidentBinding = { store: this, tile, cell, x: tile.x, y: tile.y, mask: 0 };
-          for (const key of residentKeys) this.writeResidentValue(key, cell, tile[key as keyof Tile]);
-          this.dirty[cell >>> 8] = 1;
-          bindings.set(tile, binding);
-          for (const key of residentKeys) if (Object.hasOwn(tile, key)) this.attachResidentAccessor(binding, key);
-          observeResidentTile(tile, { before: () => { if (this.residentBusy) throw new Error(TWO_WRITERS); },
-            after: (key, descriptorChanged) => { if (descriptorChanged !== false && residentKeySet.has(key)) this.residentModified.add(binding); } });
-          for (const key of ['wood', 'feature'] as const) if (!Object.hasOwn(tile, key)) this.residentAbsent.push({ key, binding });
-          if (['life', 'fertility', 'growth', 'traffic', 'cultivation', 'drinkingWater'].some(key => !Object.hasOwn(tile, key))) this.residentPending.push(binding);
-          if (!Object.hasOwn(tile, 'wood')) {
-            const page = cell >>> 8, holes = this.residentWoodHoles.get(page) ?? [];
-            holes.push(binding); this.residentWoodHoles.set(page, holes);
-          }
-          nextBindings[i] = binding;
-        }
+        for (let i = 0; i < tiles.length; i++) if (!nextBindings[i]) nextBindings[i] = this.bindResident(tiles[i]!, this.cellsOf[i]!);
         this.residentBindings = nextBindings;
         this.residentOwner = owner;
         this.refreshResident();
         this.residentRevision = {};
-        if (this.residentWoodAdded.length !== this.arena.capacity) {
-          this.residentWoodAdded = new Uint8Array(new SharedArrayBuffer(this.arena.capacity));
-        } else {
-          this.residentWoodAdded.fill(0);
-        }
       } else {
         this.residentEpoch++;
         this.detachResident();
@@ -454,29 +420,9 @@ export class TileStore {
         this.residentTiles = tiles;
         residentStoreByTiles.set(tiles, this);
         this.residentOwner = owner;
-        this.residentBindings = tiles.map((tile, i) => {
-          // Otra arena puede retener el mismo Tile (clon/reintento/restauración). Desligar antes de
-          // reutilizar páginas: una tesela dormida nunca debe leer la ranura de otra región.
-          const prior = bindings.get(tile);
-          if (prior) prior.store.detachBinding(prior);
-          const binding: ResidentBinding = { store: this, tile, cell: this.cellsOf[i]!, x: tile.x, y: tile.y, mask: 0 };
-          for (const key of residentKeys) this.writeResidentValue(key, binding.cell, tile[key as keyof Tile]);
-          this.dirty[binding.cell >>> 8] = 1;
-          bindings.set(tile, binding);
-          for (const key of residentKeys) if (Object.hasOwn(tile, key)) this.attachResidentAccessor(binding, key);
-          observeResidentTile(tile, { before: () => { if (this.residentBusy) throw new Error(TWO_WRITERS); },
-            after: (key, descriptorChanged) => { if (descriptorChanged !== false && residentKeySet.has(key)) this.residentModified.add(binding); } });
-          for (const key of ['wood', 'feature'] as const) if (!Object.hasOwn(tile, key)) this.residentAbsent.push({ key, binding });
-          if (['life', 'fertility', 'growth', 'traffic', 'cultivation', 'drinkingWater'].some(key => !Object.hasOwn(tile, key))) this.residentPending.push(binding);
-          if (!Object.hasOwn(tile, 'wood')) {
-            const page = binding.cell >>> 8, holes = this.residentWoodHoles.get(page) ?? [];
-            holes.push(binding); this.residentWoodHoles.set(page, holes);
-          }
-          return binding;
-        });
+        this.residentBindings = tiles.map((tile, i) => this.bindResident(tile, this.cellsOf[i]!));
         this.refreshResident();
         this.residentRevision = {};
-        this.residentWoodAdded = new Uint8Array(new SharedArrayBuffer(this.arena.capacity));
       }
     }
     if (!same || regionSide !== this.residentRegionSide) {
@@ -487,19 +433,18 @@ export class TileStore {
         const key = `${x},${y}`, group = grouped.get(key) ?? { x, y, slots: [] };
         group.slots.push(slot); grouped.set(key, group);
       }
-      const ordered: number[] = []; this.residentRegions = [];
+      // Cada tesela cargada sella una celda distinta: hay exactamente `loaded` celdas presentes.
+      const ordered = new Int32Array(new SharedArrayBuffer(this.loaded * 4)); this.residentRegions = [];
       const stamps = this.presence.stamps, version = this.version;
+      let end = 0;
       for (const region of [...grouped.values()].sort((a, b) => a.y - b.y || a.x - b.x)) {
-        const begin = ordered.length;
+        const begin = end;
         for (const slot of region.slots.sort((a, b) => this.pageY[a]! - this.pageY[b]! || this.pageX[a]! - this.pageX[b]!)) {
-          for (let offset = 0; offset < PAGE_CELLS; offset++) {
-            const cell = slot * PAGE_CELLS + offset;
-            if (stamps[cell] === version) ordered.push(cell);
-          }
+          for (let cell = slot * PAGE_CELLS, last = cell + PAGE_CELLS; cell < last; cell++) if (stamps[cell] === version) ordered[end++] = cell;
         }
-        this.residentRegions.push({ id: this.residentRegions.length, begin, end: ordered.length });
+        this.residentRegions.push({ id: this.residentRegions.length, begin, end });
       }
-      this.residentCells = new Int32Array(new SharedArrayBuffer(ordered.length * 4)); this.residentCells.set(ordered);
+      this.residentCells = ordered;
       this.residentWoodAdded = new Uint8Array(new SharedArrayBuffer(this.arena.capacity));
       this.residentWoodAddedQueue = new Int32Array(new SharedArrayBuffer((this.arena.capacity + 2) * 4));
       observeResidentArray(tiles, () => { if (this.residentBusy) throw new Error(TWO_WRITERS); });
@@ -578,7 +523,7 @@ export class TileStore {
     this.parity ^= 1; this.syncResidentCur(); this.residentBusy = false;
     // Ausentes al cargar: mismo orden de asignación que el kernel de objetos, sólo tras éxito.
     if (phase === 'kernel') {
-      for (const binding of this.residentPending) for (const key of ['life', 'fertility', 'growth', 'traffic', 'cultivation', 'drinkingWater'] as const) {
+      for (const binding of this.residentPending) for (const key of PENDING_KEYS) {
         if (!Object.hasOwn(binding.tile, key)) this.attachResidentAccessor(binding, key);
       }
       this.residentPending = [];
@@ -750,6 +695,32 @@ export class TileStore {
     maintainResidentTile(binding.tile, () => Object.defineProperty(binding.tile, key, residentAccessors[key]));
     binding.mask |= 1 << residentKeys.indexOf(key);
   }
+  /** Liga `tile` a `cell`: sus valores pasan al SAB y sus claves residentes propias, a accesores. */
+  private bindResident(tile: Tile, cell: number): ResidentBinding {
+    // Otra arena puede retener el mismo Tile (clon/reintento/restauración). Desligar antes de
+    // reutilizar páginas: una tesela dormida nunca debe leer la ranura de otra región.
+    const prior = bindings.get(tile);
+    if (prior) prior.store.detachBinding(prior);
+    const binding: ResidentBinding = { store: this, tile, cell, x: tile.x, y: tile.y, mask: 0, seen: 0 };
+    for (const key of residentKeys) this.writeResidentValue(key, cell, tile[key as keyof Tile]);
+    this.dirty[cell >>> 8] = 1;
+    bindings.set(tile, binding);
+    maintainResidentTile(tile, () => {
+      for (let k = 0; k < residentKeys.length; k++) {
+        const key = residentKeys[k]!;
+        if (Object.hasOwn(tile, key)) { Object.defineProperty(tile, key, residentAccessors[key]); binding.mask |= 1 << k; }
+      }
+    });
+    observeResidentTile(tile, { before: () => { if (this.residentBusy) throw new Error(TWO_WRITERS); },
+      after: (key, descriptorChanged) => { if (descriptorChanged !== false && residentKeySet.has(key)) this.residentModified.add(binding); } });
+    for (const key of ['wood', 'feature'] as const) if (!Object.hasOwn(tile, key)) this.residentAbsent.push({ key, binding });
+    if (PENDING_KEYS.some(key => !Object.hasOwn(tile, key))) this.residentPending.push(binding);
+    if (!Object.hasOwn(tile, 'wood')) {
+      const page = cell >>> 8, holes = this.residentWoodHoles.get(page) ?? [];
+      holes.push(binding); this.residentWoodHoles.set(page, holes);
+    }
+    return binding;
+  }
   private refreshModifiedBinding(binding: ResidentBinding): void {
     // Validar TODOS los campos alterados antes de escribir ninguno: un NaN no se convierte en ausencia.
     const changes: { key: ResidentKey; value: unknown; own: boolean; index: number }[] = [];
@@ -763,7 +734,7 @@ export class TileStore {
       this.writeResidentValue(key, binding.cell, value);
       if (own) this.attachResidentAccessor(binding, key); else binding.mask &= ~(1 << index);
     }
-    if (['life', 'fertility', 'growth', 'traffic', 'cultivation', 'drinkingWater'].some(key => !Object.hasOwn(binding.tile, key)))
+    if (PENDING_KEYS.some(key => !Object.hasOwn(binding.tile, key)))
       this.residentPending.push(binding);
   }
   private detachBinding(binding: ResidentBinding): void {
@@ -776,6 +747,10 @@ export class TileStore {
     observeResidentTile(binding.tile, undefined);
     bindings.delete(binding.tile);
     // Cambiar la autoridad desde otra arena obliga a refrescar antes de volver a usar ésta.
+    this.dropResidentCertificate();
+  }
+  /** La próxima preparación no puede reutilizar la foto residente: recarga limpia (`else` de `prepareParallel`). */
+  private dropResidentCertificate(): void {
     if (this.residentTiles) {
       observeResidentArray(this.residentTiles, undefined);
       residentStoreByTiles.delete(this.residentTiles);
@@ -919,6 +894,38 @@ export class TileStore {
     if (reserved || stamped !== this.presentPages || this.sweepPending) this.sweep();
     this.presentPages = stamped; this.loaded = tiles.length;
     return true;
+  }
+
+  /** `map(tiles, false)` del despacho incremental: `kept[i]` (ligada aquí, mismas coordenadas) conserva su
+   * celda sin leer la tesela; las demás se ubican como en `map`. Mismas ranuras, sellos, errores y barrido. */
+  private remap(tiles: readonly Tile[], kept: readonly (ResidentBinding | undefined)[]): void {
+    if (this.taken) throw new Error(TWO_WRITERS);
+    this.loaded = 0; this.mode = 'none';
+    const presence = this.presence, version = presence.next();
+    if (this.cellsOf.length < tiles.length) this.cellsOf = new Int32Array(Math.max(tiles.length, Math.ceil(this.cellsOf.length * 1.25)));
+    const cells = this.cellsOf;
+    this.refresh();
+    let stamps = presence.stamps, lastSlot = -1, reserved = 0, stamped = 0;
+    for (let i = 0; i < tiles.length; i++) {
+      let cell = kept[i]?.cell ?? -1;
+      if (cell < 0) {
+        const tile = tiles[i]!, x = tile.x, y = tile.y, px = x >> 4, py = y >> 4;
+        let slot = this.regions.slot(px, py);
+        if (slot < 0) {
+          slot = this.arena.reserve(); reserved++;
+          this.refresh(); stamps = presence.stamps;
+          this.regions.assign(px, py, slot);
+          this.inUse[slot] = 1; this.pageX[slot] = px; this.pageY[slot] = py; this.authority[slot] = OBJECT;
+        }
+        cell = (slot << 8) | ((y & 15) << 4) | (x & 15);
+      }
+      const slot = cell >>> 8;
+      if (slot !== lastSlot) { if (presence.markPage(slot)) stamped++; lastSlot = slot; }
+      if (stamps[cell] === version) { this.sweepPending = true; throw new Error(DUPLICATE); }
+      stamps[cell] = version; cells[i] = cell;
+    }
+    if (reserved || stamped !== this.presentPages || this.sweepPending) this.sweep();
+    this.presentPages = stamped; this.loaded = tiles.length;
   }
 
   /** Libera las páginas que la carga no selló y recalcula la vecindad de páginas: O(páginas). */

@@ -3,7 +3,7 @@ import { readFileSync, statSync } from 'node:fs';
 import { resolve, extname, sep } from 'node:path';
 import { isIP, type Socket } from 'node:net';
 import type { Duplex } from 'node:stream';
-import { gzip } from 'node:zlib';
+import { gzip, gzipSync } from 'node:zlib';
 import { promisify } from 'node:util';
 import { WebSocketServer, WebSocket, type RawData } from 'ws';
 import { createWorld, stepWorld, projectWorld, normalizeViewport, cloneWorld, puntoDeRestauracion, fraccionSerial, worldContext, closeFaunaParallelPools, closePersonasParallelPools, closePolicyGpuBatchers, type PuntoDeRestauracion, type World, type FaseMedicion } from '../world/index.js';
@@ -91,6 +91,8 @@ export const TROZO_WS = 64 * 1024;
  * cada una espera un paso entero. Menos trozos y más grandes: 256 Ki unidades comprimen a ~35 KiB,
  * que a 0,1 Mbit/s siguen llegando en ~3 s, lejos de los 8 s de silencio del cliente. */
 export const TROZO_WS_COMPRIMIDO = 256 * 1024;
+/** Un delta de menos unidades que esto viaja en claro aunque el enlace sea lento: deflate no compensa. */
+const DELTA_MIN_COMPRIMIDO = 2048;
 /** Sin nada que mandar durante este tiempo (y sin `state` en vuelo), el servidor manda un latido.
  * Holgado frente a los 8 s de silencio que tolera `src/client/connection.ts`. */
 export const LATIDO_WS_MS = 3000;
@@ -152,6 +154,28 @@ function aceptaGzip(req: IncomingMessage): boolean {
   const header = req.headers['accept-encoding'];
   if (typeof header !== 'string') return false;
   return header.split(',').some(part => { const [token, ...rest] = part.trim().split(';'); return token!.trim().toLowerCase() === 'gzip' && !rest.some(p => /^\s*q\s*=\s*0(\.0*)?\s*$/.test(p)); });
+}
+/** Estáticos: caché en memoria por ruta, validada contra `(mtimeMs, size)`, con gzip precalculado para
+ * los tipos de texto. Acotada: al llenarse se descarta la entrada más antigua. */
+export const ESTATICOS_MAX = 64;
+const COMPRESIBLES = new Set(['.html', '.js', '.css', '.svg']);
+type Estatico = { mtimeMs: number; size: number; raw: Buffer; gzip: Buffer | null };
+const estaticos = new Map<string, Estatico>();
+/** Entradas vivas de la caché de estáticos (pruebas). */
+export const estaticosEnCache = (): number => estaticos.size;
+function estatico(path: string, ext: string): Estatico {
+  const stat = statSync(path);
+  if (!stat.isFile()) throw new Error('no es un fichero');
+  const hit = estaticos.get(path);
+  if (hit && hit.mtimeMs === stat.mtimeMs && hit.size === stat.size) return hit;
+  const raw = readFileSync(path);
+  let comprimido: Buffer | null = null;
+  if (COMPRESIBLES.has(ext) && raw.length > 512) { const g = gzipSync(raw, { level: 6 }); if (g.length < raw.length) comprimido = g; }
+  const entry: Estatico = { mtimeMs: stat.mtimeMs, size: stat.size, raw, gzip: comprimido };
+  estaticos.delete(path);
+  if (estaticos.size >= ESTATICOS_MAX) estaticos.delete(estaticos.keys().next().value!);
+  estaticos.set(path, entry);
+  return entry;
 }
 type Pending = { gesture: Gesture; hash: string; resolve: (r: GestureResult) => void; reject: (e: Error) => void; promise: Promise<GestureResult> };
 export function parseGesture(value: unknown): Gesture {
@@ -573,9 +597,19 @@ export function createApp(options: AppOptions) {
       const delta = computeStateDelta(deltaState.prev, projected);
       const text = JSON.stringify(delta);
       if (client.flujo) {
-        emitir(socket, text, false);
-        client.flujo.enVuelo = { sequence: delta.sequence, sentAt: relojReal(), bytes: Buffer.byteLength(text) };
-        client.flujo.pendiente = false; client.flujo.enviados++;
+        // Misma política adaptativa que `sendState`: un delta pequeño (< 2 KiB) nunca paga deflate, y uno
+        // grande (tick ecológico, ciudad densa) se comprime si el enlace es lento y se trocea si hace falta.
+        const flujo = client.flujo;
+        const compress = compresion !== 'nunca' && flujo.comprimir && deflateNegociado(socket) && text.length > DELTA_MIN_COMPRIMIDO;
+        const trozo = compress ? TROZO_WS_COMPRIMIDO : TROZO_WS;
+        if (text.length <= trozo) emitir(socket, text, compress);
+        else {
+          const partes = trocear(text, trozo);
+          emitir(socket, JSON.stringify({ type: 'trozos', partes: partes.length } satisfies ServerMessage), false);
+          for (const parte of partes) emitir(socket, parte, compress);
+        }
+        flujo.enVuelo = { sequence: delta.sequence, sentAt: relojReal(), bytes: Buffer.byteLength(text) };
+        flujo.pendiente = false; flujo.enviados++;
       } else {
         if (socket.bufferedAmount > 256 * 1024) return;
         emitir(socket, text, false);
@@ -829,10 +863,16 @@ export function createApp(options: AppOptions) {
       const path = resolve(staticDir, '.' + decodeURIComponent(url.pathname === '/' ? '/index.html' : url.pathname));
       const mimes: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.woff2': 'font/woff2' };
       if (!path.startsWith(staticDir + sep) || !mimes[extname(path)]) throw new HttpError(404, 'Ruta no encontrada.');
-      let content: Buffer;
-      try { if (!statSync(path).isFile()) throw new Error(); content = readFileSync(path); }
+      let content: Estatico;
+      try { content = estatico(path, extname(path)); }
       catch { throw new HttpError(404, 'La interfaz aún no está compilada. Ejecuta npm run build.'); }
-      res.writeHead(200, { 'Content-Type': mimes[extname(path)] }); res.end(req.method === 'HEAD' ? undefined : content);
+      if (content.gzip && aceptaGzip(req)) {
+        res.writeHead(200, { 'Content-Type': mimes[extname(path)]!, 'Content-Encoding': 'gzip', Vary: 'Accept-Encoding', 'Content-Length': content.gzip.length });
+        res.end(req.method === 'HEAD' ? undefined : content.gzip);
+      } else {
+        res.writeHead(200, { 'Content-Type': mimes[extname(path)]!, ...(content.gzip ? { Vary: 'Accept-Encoding' } : {}) });
+        res.end(req.method === 'HEAD' ? undefined : content.raw);
+      }
     } catch (error) {
       if (!res.headersSent) json(res, error instanceof HttpError ? error.status : 503, { error: error instanceof HttpError ? error.message : 'El servicio no pudo completar la solicitud.' });
       else res.end();
